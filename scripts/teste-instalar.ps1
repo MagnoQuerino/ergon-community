@@ -84,6 +84,7 @@ Check ($rm -notmatch 'outro_dados') 'volume de outro projeto não é tocado'
 Check (-not (Test-Path "$T\home\.ergon\secrets") -and -not (Test-Path $Backups) -and -not (Test-Path $Local)) 'segredos, backups e registros apagados'
 
 Remove-Item Env:\ERGON_CONFIRMAR
+Remove-Item -Recurse -Force $T -ErrorAction SilentlyContinue   # o teste não deixa nada no disco
 Write-Host ''
 Write-Host "$ok ok, $($falhas.Count) falha(s)"
 if ($falhas.Count) { exit 1 }
