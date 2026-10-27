@@ -1,0 +1,254 @@
+/**
+ * As skins oficiais que vêm com o Ergon (pacotes `ergon.oficial.skin-*`, gerados por scripts/catalogo/gerar-oficiais.mjs).
+ * Só dados sobre o vocabulário de shared/skin.ts: para ampliar uma skin, acrescente roupas, pesos, decoração ou troque as
+ * cores-semente; para uma skin nova, copie uma destas. Nomes, personagens e bios são originais (nada de marcas, obras
+ * ou personagens de terceiros). Os personagens vestem os agentes pelo charKey; a função de cada um não muda.
+ */
+import type { SkinData, SkinLook } from './skin.ts';
+
+const L = (outfit: string, o: Partial<SkinLook> & { hair: string; hairStyle: SkinLook['hairStyle'] }): SkinLook => ({
+  species: 'human', skin: 1, beard: 'none', headwear: 'none', face: 'none', item: 'none', outfit, ...o,
+});
+
+// ---------------------------------------------------------------- corporativa
+const PLATINA: SkinData = {
+  id: 'distrito-platina', name: 'Distrito Platina', tagline: 'Torres de vidro, praças de concreto e a equipe de terno no centro financeiro.',
+  palette: {
+    dia: { seeds: { ground: '#b9bec4', ground2: '#a9b4a0', grass: '#7d9b6a', road: '#5a5f66', plaza: '#d7d9dc', wall: '#e6e9ec', wallAlt: '#9fb3c4', stone: '#cfd3d8', marble: '#f2f4f6', roof: '#4c5560', wood: '#8a6a50', accent: '#3fa7c9', accent2: '#2d4a6b', metal: '#aab4bf', foliage: '#6f9a5c', foliage2: '#4f7c4a', sky: '#a8cde6', water: '#6fb7d6', window: '#5f8fb3', windowDark: '#3d5a73', cloth: '#eef0f2', flame: '#ffe39a', outline: '#1f262e', shadow: '#20262c', flowers: ['#e9eef2', '#d8a1b8'] } },
+    noite: { seeds: { ground: '#2f343b', ground2: '#2a3830', grass: '#33463a', road: '#24282d', plaza: '#3a4048', wall: '#3b434d', wallAlt: '#2c3e52', stone: '#4b525b', marble: '#6b737d', roof: '#1f242a', wood: '#5a4636', accent: '#5fd0f0', accent2: '#26405f', metal: '#8f9aa6', foliage: '#3d5a40', foliage2: '#2e4733', sky: '#1d2b45', water: '#2f5d7a', window: '#f2d38a', windowDark: '#1f2833', cloth: '#c9ced4', flame: '#ffd77e', outline: '#0f1318', shadow: '#000000', flowers: [] } },
+  },
+  arch: { roof: 'parapet', columns: 'pillar', frieze: false, trim: 'glass', windows: { extra: 2, glow: false }, rooftop: [['nada', 4], ['antenna', 2], ['tank', 2], ['solar', 2], ['sign', 1]] },
+  figures: {
+    species: [['human', 1]], speciesSkins: {},
+    hairStyles: [['short', 5], ['cropped', 4], ['bun', 3], ['ponytail', 3], ['long', 2], ['curly', 2], ['bald', 1]],
+    beards: [['none', 8], ['short', 2]], headwear: [['none', 20], ['headphones', 1]], faces: [['none', 6], ['glasses', 3], ['sunglasses', 1]],
+    outfits: [
+      { id: 'terno', weight: 5, kit: { top: 'suit', bottom: 'pants', sleeves: 'long', shoes: 'shoes', detail: 'tie', colors: { top: '#2f3a48', bottom: '#2a333f', accent: 'agente' } } },
+      { id: 'tailleur', weight: 3, kit: { top: 'suit', bottom: 'skirt', sleeves: 'long', shoes: 'shoes', detail: 'trim', colors: { top: 'agente', bottom: '#2f3a48', accent: '#e8e6e1' } } },
+      { id: 'camisa-polo', weight: 3, kit: { top: 'tee', bottom: 'pants', sleeves: 'short', shoes: 'shoes', detail: 'none', colors: { top: 'agente', bottom: '#4a5566', accent: '#ffffff' } } },
+      { id: 'blazer', weight: 2, kit: { top: 'jacket', bottom: 'pants', sleeves: 'long', shoes: 'sneakers', detail: 'none', colors: { top: 'agente', bottom: '#e2ddd3', accent: '#ffffff' } } },
+    ],
+    items: [['briefcase', 4], ['laptop', 4], ['coffee', 3], ['tablet', 2], ['clipboard', 2], ['none', 3]],
+    extraHairs: ['#2a1e19', '#4b3022', '#6f4a2c', '#8a6a3c', '#c9a26b', '#1c1c1c'],
+  },
+  decor: { border: [['tower', 6], ['olive', 2], ['lamppost', 2], ['bush', 2]], lot: [['nada', 16], ['lamppost', 2], ['bush', 2], ['olive', 1]], junction: 'lamppost', swap: { herm: 'lamppost', brazier: 'lamppost', cypress: 'olive', amphora: 'bush' } },
+  ground: { water: 0, roadLine: true },
+  pets: { chance: 0.05, species: [['cao', 1]] },
+  characters: [
+    { charKey: 'aristoteles', name: 'Helena Vasconcelos', bio: 'Diretora-geral do Distrito Platina. Fecha a pauta antes de o café esfriar, divide o trabalho entre as torres e cobra entrega com um sorriso que ninguém contraria.', look: L('tailleur', { skin: 1, hair: '#2a1e19', hairStyle: 'bun', item: 'tablet' }) },
+    { charKey: 'hipatia', name: 'Rafael Okuma', bio: 'Analista de inteligência de mercado. Lê relatório como quem lê romance e sempre chega com a fonte grampeada na resposta.', look: L('blazer', { skin: 0, hair: '#1c1c1c', hairStyle: 'short', face: 'glasses', item: 'laptop' }) },
+    { charKey: 'arquimedes', name: 'Beatriz Lemos', bio: 'Controladora financeira. Planilha aberta, três monitores e uma calculadora de mesa que ela jura que é mais rápida que qualquer fórmula.', look: L('terno', { skin: 2, hair: '#4b3022', hairStyle: 'ponytail', face: 'glasses', item: 'clipboard' }) },
+    { charKey: 'fidias', name: 'Caio Ferraz', bio: 'Diretor de arte da agência do 14º andar. Transforma qualquer número em gráfico bonito e qualquer reunião em apresentação de dez slides.', look: L('camisa-polo', { skin: 1, hair: '#6f4a2c', hairStyle: 'curly', beard: 'short', item: 'tablet' }) },
+    { charKey: 'herodoto', name: 'Marina Duarte', bio: 'Redatora corporativa. Escreve o comunicado, o e-mail para a diretoria e o discurso do aniversário da empresa, tudo antes do almoço.', look: L('blazer', { skin: 2, hair: '#2a1e19', hairStyle: 'long', item: 'laptop' }) },
+    { charKey: 'socrates', name: 'Otávio Brandt', bio: 'Auditor interno. Não acusa ninguém: só pergunta "e se der errado?" até o plano ficar à prova de surpresa.', look: L('terno', { skin: 1, hair: '#9b938a', hairStyle: 'bald', beard: 'short', face: 'glasses', item: 'briefcase' }) },
+    { charKey: 'euclides', name: 'Lívia Sato', bio: 'Gerente de qualidade. Confere cada entrega contra o checklist e só assina quando os números fecham até a última casa.', look: L('tailleur', { skin: 0, hair: '#1c1c1c', hairStyle: 'cropped', face: 'glasses', item: 'clipboard' }) },
+    { charKey: 'hipodamo', name: 'Bruno Tavares', bio: 'Gerente de projetos. Tem cronograma para o cronograma e um quadro de tarefas que cobre uma parede inteira da sala de reunião.', look: L('terno', { skin: 3, hair: '#1c1c1c', hairStyle: 'short', item: 'laptop' }) },
+    { charKey: 'aspasia', name: 'Júlia Amaral', bio: 'Head de comunicação. Responde cliente, imprensa e grupo da diretoria ao mesmo tempo, sem nunca perder o tom.', look: L('tailleur', { skin: 2, hair: '#4b3022', hairStyle: 'long', item: 'coffee' }) },
+    { charKey: 'diogenes', name: 'Diego Paiva', bio: 'Analista de operações. Resolve o que ninguém quer resolver: reserva sala, destrava acesso, manda o arquivo e ainda volta com café para todo mundo.', look: L('camisa-polo', { skin: 1, hair: '#2a1e19', hairStyle: 'cropped', item: 'coffee' }) },
+  ],
+  npc: null,
+};
+
+// ---------------------------------------------------------------- fantasia medieval
+const BRUMAVERDE: SkinData = {
+  id: 'reino-de-brumaverde', name: 'Reino de Brumaverde', tagline: 'Vilarejo de enxaimel no meio da névoa, com elfos, duendes, orcs e chamas azuis à noite.',
+  palette: {
+    dia: { seeds: { ground: '#8fb06a', ground2: '#a7b77a', grass: '#5f8a45', road: '#b8a58a', plaza: '#b3ab9a', wall: '#e7dcc4', wallAlt: '#c9b896', stone: '#a9a291', marble: '#d9d4c4', roof: '#7a5a9a', wood: '#7a5233', accent: '#5fb3c9', accent2: '#7a3b5f', metal: '#c9a94f', foliage: '#4f8a3f', foliage2: '#2f6a3a', sky: '#b8dce8', water: '#5fb0c4', window: '#3e4f60', windowDark: '#2f3c49', cloth: '#efe3c6', flame: '#ffe39a', outline: '#2a2230', shadow: '#2f2a20', flowers: ['#f2e6a1', '#d98ab0', '#9fd0f0', '#ffffff'] } },
+    noite: { seeds: { ground: '#2c3b2e', ground2: '#344230', grass: '#3c5a3a', road: '#4a4238', plaza: '#45403b', wall: '#5a5266', wallAlt: '#4a4358', stone: '#55504a', marble: '#7a7570', roof: '#3e2f55', wood: '#4a3424', accent: '#7fe0f0', accent2: '#5a2a48', metal: '#d8b866', foliage: '#2f5a30', foliage2: '#203f28', sky: '#1f2a4a', water: '#2d5a6e', window: '#f0c060', windowDark: '#2a2438', cloth: '#cfc4a8', flame: '#9fe8ff', outline: '#120f18', shadow: '#000000', flowers: ['#7fe0f0'] } },
+  },
+  arch: { roof: 'steep', columns: 'post', frieze: false, trim: 'timber', windows: { extra: 0, glow: false }, rooftop: [['nada', 4], ['chimney', 3], ['flag', 2]] },
+  figures: {
+    species: [['human', 4], ['elf', 3], ['gnome', 2], ['orc', 2]],
+    speciesSkins: {
+      elf: [['#f3dcc8', '#d6b9a0'], ['#e9cfb8', '#c9ad94'], ['#d9c2a8', '#b9a088'], ['#c8b8d8', '#a898b8']],
+      orc: [['#8fae6a', '#6f8e4c'], ['#7a9a5a', '#5c7a40'], ['#a0b878', '#7f9858'], ['#6f8a5a', '#526c40']],
+      gnome: [['#f0c8a8', '#d0a080'], ['#e0b090', '#c08a6a'], ['#c8956c', '#a6744e'], ['#9a6a48', '#7a4e32']],
+    },
+    hairStyles: [['long', 5], ['short', 3], ['bun', 2], ['curly', 2], ['ponytail', 2], ['bald', 1], ['mohawk', 1]],
+    beards: [['none', 5], ['full', 3], ['short', 2]], headwear: [['none', 8], ['hood', 3], ['wizard', 2], ['circlet', 2], ['crown', 1], ['helmet', 1]], faces: [['none', 12], ['goggles', 1]],
+    outfits: [
+      { id: 'manto-arcano', weight: 3, kit: { top: 'robe', bottom: 'robe', sleeves: 'long', shoes: 'boots', detail: 'trim', colors: { top: 'agente', bottom: 'agente', accent: '#d8b866' } } },
+      { id: 'gibao', weight: 4, kit: { top: 'tunic', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'belt', colors: { top: 'agente', bottom: '#5a4632', accent: '#c9a94f' } } },
+      { id: 'armadura', weight: 2, kit: { top: 'plate', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'cape', colors: { top: '#b8bec6', bottom: '#6a6f78', accent: 'agente' } } },
+      { id: 'capa-de-viagem', weight: 2, kit: { top: 'coat', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'belt', colors: { top: '#4f6a3f', bottom: '#6a5236', accent: 'agente' } } },
+      { id: 'vestido-da-corte', weight: 2, kit: { top: 'robe', bottom: 'robe', sleeves: 'long', shoes: 'shoes', detail: 'trim', colors: { top: 'agente', bottom: 'agente', accent: '#f0e6c8' } } },
+    ],
+    items: [['staff', 3], ['book', 3], ['sword', 2], ['shield', 1], ['potion', 2], ['scroll', 2], ['lamp', 1], ['none', 2]],
+    extraHairs: ['#f0e6c8', '#2a1e19', '#6a3a22', '#c98a3a', '#7a8ab0', '#3a2a1c', '#d8d0c0'],
+  },
+  decor: { border: [['pine', 4], ['bigtree', 3], ['mushroom', 2], ['menhir', 1], ['crystal', 1], ['rock', 1]], lot: [['nada', 14], ['mushroom', 2], ['crystal', 1], ['menhir', 1], ['bush', 2]], junction: 'brazier', swap: { herm: 'menhir', olive: 'bigtree', cypress: 'pine', amphora: 'mushroom' } },
+  ground: { water: 0.12, roadLine: false },
+  pets: { chance: 0.15, species: [['coruja', 3], ['gato', 1]] },
+  characters: [
+    { charKey: 'aristoteles', name: 'Aelira Folhaprata', bio: 'Regente élfica de Brumaverde. Ouve o conselho inteiro, decide em uma frase e distribui as missões do dia antes de a névoa baixar.', look: { species: 'elf', skin: 0, hair: '#f0e6c8', hairStyle: 'long', beard: 'none', headwear: 'circlet', face: 'none', outfit: 'vestido-da-corte', item: 'staff' } },
+    { charKey: 'hipatia', name: 'Mestre Orvalho', bio: 'Duende arquivista da torre de pergaminhos. Sabe onde está cada tomo do reino e nunca responde sem citar a página.', look: { species: 'gnome', skin: 1, hair: '#d8d0c0', hairStyle: 'short', beard: 'full', headwear: 'wizard', face: 'none', outfit: 'manto-arcano', item: 'book' } },
+    { charKey: 'arquimedes', name: 'Grunda Pesa-Ouro', bio: 'Tesoureira orc da guilda dos mercadores. Conta moedas de olhos fechados e desconfia de qualquer soma que não bata na balança.', look: { species: 'orc', skin: 1, hair: '#2a1e19', hairStyle: 'ponytail', beard: 'none', headwear: 'none', face: 'none', outfit: 'gibao', item: 'scroll' } },
+    { charKey: 'fidias', name: 'Lyssa Vitralis', bio: 'Artesã élfica dos vitrais. Desenha brasões, mapas e cartazes de festa com a mesma paciência de quem monta uma janela de mil vidros.', look: { species: 'elf', skin: 3, hair: '#7a8ab0', hairStyle: 'bun', beard: 'none', headwear: 'none', face: 'none', outfit: 'gibao', item: 'potion' } },
+    { charKey: 'herodoto', name: 'Bardo Teodrin', bio: 'Cronista e cantador da taverna. Transforma qualquer reunião do conselho numa balada de três estrofes, e a ata sai em prosa caprichada.', look: L('capa-de-viagem', { skin: 2, hair: '#6a3a22', hairStyle: 'curly', beard: 'short', item: 'scroll' }) },
+    { charKey: 'socrates', name: 'Krag Duas-Dúvidas', bio: 'Orc filósofo que larga o machado para perguntar "por quê?". Sempre acha o ponto fraco do plano antes do inimigo.', look: { species: 'orc', skin: 3, hair: '#3a2a1c', hairStyle: 'mohawk', beard: 'short', headwear: 'none', face: 'none', outfit: 'armadura', item: 'none' } },
+    { charKey: 'euclides', name: 'Tilda Engrenagem', bio: 'Duende engenheira das pontes levadiças. Testa cada roldana duas vezes e só libera a passagem quando tudo range na nota certa.', look: { species: 'gnome', skin: 2, hair: '#c98a3a', hairStyle: 'ponytail', beard: 'none', headwear: 'none', face: 'goggles', outfit: 'gibao', item: 'compass' } },
+    { charKey: 'hipodamo', name: 'Morvane, o Cartógrafo', bio: 'Mago que desenha castelos antes de existirem. Planeja estradas, muralhas e mutirões com mapas que se dobram sozinhos.', look: L('manto-arcano', { skin: 1, hair: '#d8d0c0', hairStyle: 'long', beard: 'full', headwear: 'wizard', item: 'staff' }) },
+    { charKey: 'aspasia', name: 'Pip Mensageiro', bio: 'Duende correio do reino. Entrega cartas, recados e boatos mais rápido que corvo, e sempre volta com a resposta.', look: { species: 'gnome', skin: 0, hair: '#6a3a22', hairStyle: 'curly', beard: 'none', headwear: 'hood', face: 'none', outfit: 'capa-de-viagem', item: 'satchel' } },
+    { charKey: 'diogenes', name: 'Brakka Mão-Firme', bio: 'Guerreira orc que cuida das tarefas que ninguém quer: buscar lenha, consertar a cerca, espantar o troll da ponte. Tudo antes do almoço.', look: { species: 'orc', skin: 0, hair: '#2a1e19', hairStyle: 'short', beard: 'none', headwear: 'helmet', face: 'none', outfit: 'armadura', item: 'sword' } },
+  ],
+  npc: null,
+};
+
+// ---------------------------------------------------------------- militar
+const SIROCO: SkinData = {
+  id: 'base-siroco', name: 'Base Siroco', tagline: 'Quartel-general no deserto: barracas, sacos de areia, antenas e a equipe de farda.',
+  palette: {
+    dia: { seeds: { ground: '#d9bf8a', ground2: '#cbb07a', grass: '#9a9a5a', road: '#b8a074', plaza: '#c8b48c', wall: '#c8b88f', wallAlt: '#8a8a5a', stone: '#b9a57e', marble: '#d8ccb0', roof: '#6f7448', wood: '#8a6a44', accent: '#d8a03a', accent2: '#4a5a3a', metal: '#8a8f88', foliage: '#7a8a4a', foliage2: '#5a6a3a', sky: '#e8d4a8', water: '#6fb0b8', window: '#4a5560', windowDark: '#323a40', cloth: '#d8cfb4', flame: '#ffd27a', outline: '#2a2418', shadow: '#3a2e1a', flowers: [] } },
+    noite: { seeds: { ground: '#4a4030', ground2: '#423a2c', grass: '#4a4a32', road: '#3c3428', plaza: '#4a4236', wall: '#4f4a3c', wallAlt: '#3a3c2c', stone: '#5a5040', marble: '#6f6656', roof: '#2f3222', wood: '#4a3a28', accent: '#e8b04a', accent2: '#2f3a26', metal: '#7a807a', foliage: '#3a4428', foliage2: '#2a3420', sky: '#1f2438', water: '#2a4a52', window: '#e8d07a', windowDark: '#22261c', cloth: '#a89c80', flame: '#ffc860', outline: '#14110b', shadow: '#000000', flowers: [] } },
+  },
+  arch: { roof: 'flat', columns: 'pillar', frieze: false, trim: 'camo', windows: { extra: 0, glow: false }, rooftop: [['nada', 3], ['antenna', 3], ['satellite', 2], ['flag', 2], ['tank', 1]] },
+  figures: {
+    species: [['human', 1]], speciesSkins: {},
+    hairStyles: [['cropped', 6], ['short', 4], ['bun', 2], ['ponytail', 2], ['bald', 2]],
+    beards: [['none', 6], ['short', 3]], headwear: [['helmet', 5], ['cap', 4], ['beret', 3], ['none', 2], ['bandana', 1]], faces: [['none', 6], ['sunglasses', 2]],
+    outfits: [
+      { id: 'farda-deserto', weight: 5, kit: { top: 'uniform', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'camo', colors: { top: '#b8a274', bottom: '#a8926a', accent: '#8a7a52' } } },
+      { id: 'farda-verde', weight: 3, kit: { top: 'uniform', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'camo', colors: { top: '#6f7a4a', bottom: '#5f6a40', accent: '#4a5232' } } },
+      { id: 'camiseta-de-treino', weight: 2, kit: { top: 'tee', bottom: 'pants', sleeves: 'short', shoes: 'boots', detail: 'belt', colors: { top: 'agente', bottom: '#8a7a52', accent: '#4a3a24' } } },
+      { id: 'jaqueta-de-oficial', weight: 2, kit: { top: 'jacket', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'trim', colors: { top: '#5a6440', bottom: '#5a6440', accent: 'agente' } } },
+    ],
+    items: [['radio', 3], ['binoculars', 3], ['clipboard', 3], ['tablet', 2], ['coffee', 1], ['none', 3]],
+    extraHairs: ['#2a1e19', '#4b3022', '#6f4a2c', '#8a6a3c', '#1c1c1c'],
+  },
+  decor: { border: [['tent', 3], ['sandbags', 3], ['crates', 2], ['cactus', 2], ['watchtower', 1], ['rock', 2]], lot: [['nada', 12], ['crates', 2], ['sandbags', 2], ['cactus', 1], ['tent', 1]], junction: 'crates', swap: { herm: 'sandbags', brazier: 'crates', olive: 'cactus', cypress: 'cactus', amphora: 'crates', plant: 'cactus' } },
+  ground: { water: 0.05, roadLine: false },
+  pets: { chance: 0.06, species: [['cao', 1]] },
+  characters: [
+    { charKey: 'aristoteles', name: 'Comandante Iara Montenegro', bio: 'Comandante da Base Siroco. Briefing às seis, missão distribuída às seis e cinco, e ninguém sai do refeitório sem saber o próprio papel.', look: L('jaqueta-de-oficial', { skin: 2, hair: '#2a1e19', hairStyle: 'bun', headwear: 'beret', item: 'clipboard' }) },
+    { charKey: 'hipatia', name: 'Tenente Rui Faria', bio: 'Oficial de inteligência. Passa o dia com o binóculo e o arquivo de mapas; sabe a origem de cada informação que entra na base.', look: L('farda-deserto', { skin: 1, hair: '#4b3022', hairStyle: 'cropped', headwear: 'cap', item: 'binoculars' }) },
+    { charKey: 'arquimedes', name: 'Sargento Dora Calibre', bio: 'Chefe de logística. Conta cada caixa, cada galão e cada ração; se o número não bate, ninguém dorme até achar a diferença.', look: L('farda-verde', { skin: 0, hair: '#6f4a2c', hairStyle: 'ponytail', headwear: 'cap', item: 'clipboard' }) },
+    { charKey: 'fidias', name: 'Cabo Nico Areal', bio: 'Desenhista de mapas e de camuflagem. Faz o croqui da operação e o pôster do torneio de vôlei da base com o mesmo capricho.', look: L('camiseta-de-treino', { skin: 1, hair: '#1c1c1c', hairStyle: 'short', headwear: 'bandana', item: 'tablet' }) },
+    { charKey: 'herodoto', name: 'Tenente Selma Andrade', bio: 'Redatora dos relatórios de missão. Transforma rádio chiado e anotação no joelho em texto claro para o comando ler em dois minutos.', look: L('farda-deserto', { skin: 2, hair: '#2a1e19', hairStyle: 'bun', headwear: 'helmet', item: 'tablet' }) },
+    { charKey: 'socrates', name: 'Major Augusto Revés', bio: 'Veterano que revisa todo plano com uma pergunta só: "e se o vento mudar?". Já salvou mais operações duvidando do que atirando.', look: L('jaqueta-de-oficial', { skin: 1, hair: '#9b938a', hairStyle: 'bald', beard: 'short', headwear: 'beret', face: 'sunglasses', item: 'coffee' }) },
+    { charKey: 'euclides', name: 'Sargento Pietra Lacerda', bio: 'Inspetora de equipamentos. Nada sai do paiol sem passar pela lista dela, item por item, com a lanterna na mão.', look: L('farda-verde', { skin: 0, hair: '#8a6a3c', hairStyle: 'cropped', headwear: 'helmet', item: 'clipboard' }) },
+    { charKey: 'hipodamo', name: 'Capitão Hugo Barreto', bio: 'Planejador de operações. Monta o cronograma na mesa de areia e sempre deixa uma rota B riscada no canto do mapa.', look: L('farda-deserto', { skin: 3, hair: '#1c1c1c', hairStyle: 'short', headwear: 'cap', item: 'binoculars' }) },
+    { charKey: 'aspasia', name: 'Cabo Tina Sinal', bio: 'Operadora de rádio. Fala com três frentes ao mesmo tempo, traduz o jargão de todo mundo e nunca deixa uma mensagem sem resposta.', look: L('farda-verde', { skin: 2, hair: '#2a1e19', hairStyle: 'ponytail', headwear: 'cap', item: 'radio' }) },
+    { charKey: 'diogenes', name: 'Soldado Beto Pronto', bio: 'O nome já diz. Carrega caixa, conserta a barraca, busca água e ainda volta perguntando qual é a próxima.', look: L('camiseta-de-treino', { skin: 1, hair: '#4b3022', hairStyle: 'cropped', headwear: 'helmet', item: 'radio' }) },
+  ],
+  npc: null,
+};
+
+// ---------------------------------------------------------------- praia
+const CORAL: SkinData = {
+  id: 'enseada-coral', name: 'Enseada Coral', tagline: 'Vila de praia com mar azul, coqueiros, quiosques de palha e a equipe de chinelo.',
+  palette: {
+    dia: { seeds: { ground: '#ecd9a8', ground2: '#e2cc96', grass: '#8fb06a', road: '#c9a978', plaza: '#f0e2c0', wall: '#f6efe0', wallAlt: '#8fd0d6', stone: '#e8dcc0', marble: '#fbf6ea', roof: '#d8b46a', wood: '#b98a5a', accent: '#ff7a6a', accent2: '#2fa3b8', metal: '#e0c070', foliage: '#5fae5a', foliage2: '#3f8a4a', sky: '#9fe0f4', water: '#3fbcd0', window: '#3e6f80', windowDark: '#2c4f5c', cloth: '#fff6e6', flame: '#ffe39a', outline: '#2a3238', shadow: '#3a3a2a', flowers: ['#ff9a8a', '#fff0a0', '#ffffff'] } },
+    noite: { seeds: { ground: '#5a5240', ground2: '#524a3a', grass: '#3a4a34', road: '#4a4232', plaza: '#5a5444', wall: '#5a5a6a', wallAlt: '#2f5a64', stone: '#5a5446', marble: '#7a7466', roof: '#6a5a3a', wood: '#5a4430', accent: '#ff8a7a', accent2: '#1f6a7a', metal: '#c8a860', foliage: '#2f5a34', foliage2: '#224a2c', sky: '#1a2a4a', water: '#1f4a6a', window: '#ffc878', windowDark: '#2a2f3a', cloth: '#d8d0c0', flame: '#ffd080', outline: '#101418', shadow: '#000000', flowers: ['#ff9a8a'] } },
+  },
+  arch: { roof: 'thatch', columns: 'post', frieze: false, trim: 'stripes', windows: { extra: 0, glow: false }, rooftop: [['nada', 5], ['flag', 2], ['lights', 2]] },
+  figures: {
+    species: [['human', 1]], speciesSkins: {},
+    hairStyles: [['long', 4], ['curly', 3], ['short', 3], ['ponytail', 2], ['afro', 2], ['bun', 1]],
+    beards: [['none', 7], ['short', 2]], headwear: [['none', 6], ['sunhat', 3], ['cap', 2], ['bandana', 1]], faces: [['none', 4], ['sunglasses', 4]],
+    outfits: [
+      { id: 'bermuda-e-regata', weight: 4, kit: { top: 'tank', bottom: 'shorts', sleeves: 'none', shoes: 'sandals', detail: 'none', colors: { top: 'agente', bottom: '#3fa0c8', accent: '#ffffff' } } },
+      { id: 'camisa-florida', weight: 3, kit: { top: 'shirt', bottom: 'shorts', sleeves: 'short', shoes: 'sandals', detail: 'dots', colors: { top: 'agente', bottom: '#e8dcc0', accent: '#fff3c8' } } },
+      { id: 'maio', weight: 3, kit: { top: 'swim', bottom: 'trunks', sleeves: 'none', shoes: 'bare', detail: 'stripes', colors: { top: 'agente', bottom: 'agente', accent: '#ffffff' } } },
+      { id: 'salva-vidas', weight: 1, kit: { top: 'tank', bottom: 'trunks', sleeves: 'none', shoes: 'bare', detail: 'none', colors: { top: '#e83a3a', bottom: '#e83a3a', accent: '#ffffff' } } },
+      { id: 'saida-de-praia', weight: 2, kit: { top: 'robe', bottom: 'robe', sleeves: 'none', shoes: 'sandals', detail: 'dots', colors: { top: 'agente', bottom: 'agente', accent: '#ffffff' } } },
+    ],
+    items: [['surfboard', 3], ['icecream', 2], ['coconut', 3], ['book', 1], ['none', 4]],
+    extraHairs: ['#2a1e19', '#6f4a2c', '#c98a3a', '#e8c070', '#1c1c1c', '#8a5a2a'],
+  },
+  decor: { border: [['palm', 6], ['parasol', 3], ['rock', 2], ['bush', 1]], lot: [['nada', 12], ['palm', 2], ['parasol', 2]], junction: 'palm', swap: { herm: 'parasol', brazier: 'palm', olive: 'palm', cypress: 'palm', amphora: 'parasol', plant: 'bush' } },
+  ground: { water: 0.45, roadLine: false },
+  pets: { chance: 0.08, species: [['cao', 2], ['tartaruga', 1]] },
+  characters: [
+    { charKey: 'aristoteles', name: 'Mariana Maré', bio: 'Chefe da guarda-vidas e coordenadora da enseada. Do alto da torre ela vê tudo, distribui as tarefas pelo apito e ainda avisa quando a maré vai virar.', look: L('salva-vidas', { skin: 2, hair: '#2a1e19', hairStyle: 'ponytail', face: 'sunglasses', headwear: 'cap', item: 'none' }) },
+    { charKey: 'hipatia', name: 'Tito Concha', bio: 'Oceanógrafo que coleciona conchas e dados. Pesquisa de tudo, de corrente marítima a cardápio de quiosque, sempre com fonte.', look: L('camisa-florida', { skin: 1, hair: '#6f4a2c', hairStyle: 'curly', beard: 'short', face: 'glasses', item: 'book' }) },
+    { charKey: 'arquimedes', name: 'Lúcia Coqueiro', bio: 'Dona do quiosque mais organizado da orla. Conta coco, conta troco e conta os dias de sol do mês sem errar uma vírgula.', look: L('saida-de-praia', { skin: 3, hair: '#1c1c1c', hairStyle: 'afro', headwear: 'sunhat', item: 'coconut' }) },
+    { charKey: 'fidias', name: 'Kai Prancha', bio: 'Shaper de pranchas e designer de cartazes do campeonato. Tudo que ele desenha tem onda, cor e um coqueiro escondido.', look: L('bermuda-e-regata', { skin: 2, hair: '#e8c070', hairStyle: 'long', item: 'surfboard' }) },
+    { charKey: 'herodoto', name: 'Rosa Brisa', bio: 'Cronista da enseada. Escreve o jornalzinho da vila, as legendas das fotos e as cartas de amor que pedem para ela revisar.', look: L('maio', { skin: 1, hair: '#8a5a2a', hairStyle: 'long', headwear: 'sunhat', item: 'book' }) },
+    { charKey: 'socrates', name: 'Seu Horácio Guarda-Sol', bio: 'Pescador aposentado que passa o dia debaixo do guarda-sol perguntando "tem certeza?". Quase sempre a pergunta salva a pescaria.', look: L('camisa-florida', { skin: 2, hair: '#9b938a', hairStyle: 'bald', beard: 'full', headwear: 'sunhat', item: 'none' }) },
+    { charKey: 'euclides', name: 'Nina Salva-Vidas', bio: 'Confere tudo duas vezes, como quem confere a bandeira da praia: boia no lugar, cadeira firme, conta fechada.', look: L('salva-vidas', { skin: 0, hair: '#c98a3a', hairStyle: 'ponytail', face: 'sunglasses', item: 'none' }) },
+    { charKey: 'hipodamo', name: 'Duda Castelo', bio: 'Arquiteta de castelos de areia em escala profissional. Planeja os projetos da vila com fosso, ponte levadiça e prazo de maré baixa.', look: L('bermuda-e-regata', { skin: 1, hair: '#2a1e19', hairStyle: 'bun', headwear: 'cap', item: 'none' }) },
+    { charKey: 'aspasia', name: 'Leo Megafone', bio: 'Locutor da rádio da orla. Dá recado, avisa sobre criança perdida, anuncia o pôr do sol e responde mensagem de todo mundo.', look: L('camisa-florida', { skin: 3, hair: '#1c1c1c', hairStyle: 'short', face: 'sunglasses', item: 'icecream' }) },
+    { charKey: 'diogenes', name: 'Zeca Picolé', bio: 'Vendedor de picolé que resolve qualquer coisa no caminho: leva recado, busca guarda-sol, conserta chinelo e ainda vende o último de limão.', look: L('bermuda-e-regata', { skin: 2, hair: '#6f4a2c', hairStyle: 'curly', headwear: 'bandana', item: 'icecream' }) },
+  ],
+  npc: null,
+};
+
+// ---------------------------------------------------------------- lofi
+const RONROM: SkinData = {
+  id: 'vila-ronrom', name: 'Vila Ronrom', tagline: 'Bairro tranquilo de casinhas, postes acesos, chá quente e gatos em toda parte.',
+  palette: {
+    dia: { seeds: { ground: '#b8c49a', ground2: '#c8c7a0', grass: '#8aa06a', road: '#d8c6a8', plaza: '#e2d6c0', wall: '#f2e6d8', wallAlt: '#e8c8c0', stone: '#d6cbb8', marble: '#f4ece0', roof: '#b06a5a', wood: '#9a7458', accent: '#e8a0a8', accent2: '#7a8ab8', metal: '#d8b878', foliage: '#8aae7a', foliage2: '#5f8a6a', sky: '#f2c8b0', water: '#9fc8d8', window: '#6a7a9a', windowDark: '#4a5470', cloth: '#f6efe4', flame: '#ffd890', outline: '#3a2e3e', shadow: '#4a3a40', flowers: ['#f6c8d0', '#fff0b0', '#c8d8f8'] } },
+    noite: { seeds: { ground: '#3a3a52', ground2: '#36405a', grass: '#4a5a6a', road: '#4a4660', plaza: '#4e4a66', wall: '#5a5070', wallAlt: '#6a4a62', stone: '#5a5672', marble: '#7a7490', roof: '#3a2e4a', wood: '#5a4450', accent: '#f0a0b8', accent2: '#5a6aa8', metal: '#e8c890', foliage: '#3a5a5a', foliage2: '#2a4448', sky: '#2a2a5a', water: '#3a5a7a', window: '#ffcf80', windowDark: '#3a3450', cloth: '#d8d0e0', flame: '#ffd890', outline: '#16121e', shadow: '#000000', flowers: ['#f0a0b8'] } },
+  },
+  arch: { roof: 'gable', columns: 'post', frieze: false, trim: 'none', windows: { extra: 0, glow: false }, rooftop: [['nada', 3], ['chimney', 4], ['lights', 3], ['solar', 1]] },
+  figures: {
+    species: [['human', 1]], speciesSkins: {},
+    hairStyles: [['short', 3], ['bun', 3], ['long', 3], ['curly', 2], ['ponytail', 2], ['afro', 1]],
+    beards: [['none', 7], ['short', 2], ['full', 1]], headwear: [['none', 5], ['beanie', 4], ['headphones', 4]], faces: [['none', 4], ['glasses', 4]],
+    outfits: [
+      { id: 'moletom', weight: 4, kit: { top: 'hoodie', bottom: 'pants', sleeves: 'long', shoes: 'sneakers', detail: 'none', colors: { top: 'agente', bottom: '#5a6478', accent: '#f6efe4' } } },
+      { id: 'sueter-listrado', weight: 3, kit: { top: 'sweater', bottom: 'pants', sleeves: 'long', shoes: 'sneakers', detail: 'stripes', colors: { top: 'agente', bottom: '#7a6a5a', accent: '#f2e6d8' } } },
+      { id: 'jardineira', weight: 2, kit: { top: 'tee', bottom: 'pants', sleeves: 'short', shoes: 'sneakers', detail: 'apron', colors: { top: '#f2e6d8', bottom: 'agente', accent: 'agente' } } },
+      { id: 'casaco-quentinho', weight: 2, kit: { top: 'coat', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'none', colors: { top: 'agente', bottom: '#4a4458', accent: '#e8c890' } } },
+    ],
+    items: [['coffee', 4], ['book', 3], ['cat', 3], ['laptop', 2], ['none', 2]],
+    extraHairs: ['#2a1e19', '#4b3022', '#8a5a3a', '#c98a5a', '#3a2a4a', '#e8d0b0'],
+  },
+  decor: { border: [['cottage', 4], ['cherry', 3], ['lamppost', 2], ['pine', 2], ['bush', 2]], lot: [['nada', 12], ['cherry', 2], ['lamppost', 1], ['bush', 2], ['cottage', 1]], junction: 'lamppost', swap: { herm: 'lamppost', brazier: 'lamppost', olive: 'cherry', cypress: 'pine', amphora: 'bush' } },
+  ground: { water: 0.08, roadLine: false },
+  pets: { chance: 0.75, species: [['gato', 1]] },
+  characters: [
+    { charKey: 'aristoteles', name: 'Dona Maia Chaleira', bio: 'Coordena a vila entre um chá e outro. Ninguém tem pressa perto dela, e mesmo assim tudo fica pronto no horário.', look: L('casaco-quentinho', { skin: 1, hair: '#e8d0b0', hairStyle: 'bun', face: 'glasses', item: 'coffee' }) },
+    { charKey: 'hipatia', name: 'Theo Sebo', bio: 'Dono do sebo da esquina. Acha qualquer livro, qualquer recibo e qualquer resposta, desde que você espere o gato sair de cima da pilha.', look: L('sueter-listrado', { skin: 0, hair: '#4b3022', hairStyle: 'curly', face: 'glasses', item: 'book' }) },
+    { charKey: 'arquimedes', name: 'Lu Contagotas', bio: 'Faz as contas da vila devagarinho e certinho, com caderno quadriculado, lápis apontado e uma xícara que nunca esfria.', look: L('moletom', { skin: 2, hair: '#2a1e19', hairStyle: 'short', headwear: 'headphones', item: 'laptop' }) },
+    { charKey: 'fidias', name: 'Ana Aquarela', bio: 'Pinta as placas das lojinhas, os convites da festa junina e o retrato de cada gato da rua. Tudo em tons pastel.', look: L('jardineira', { skin: 1, hair: '#c98a5a', hairStyle: 'ponytail', headwear: 'beanie', item: 'cat' }) },
+    { charKey: 'herodoto', name: 'Bento Caderninho', bio: 'Escreve tudo à mão primeiro. O texto final sai limpo, mas o caderno dele tem desenhos de nuvem em todas as margens.', look: L('moletom', { skin: 3, hair: '#1c1c1c', hairStyle: 'afro', headwear: 'headphones', item: 'book' }) },
+    { charKey: 'socrates', name: 'Professor Bigode', bio: 'Professor aposentado de filosofia, com um bigode do tamanho da paciência. Responde pergunta com pergunta até a ideia ficar redonda.', look: L('casaco-quentinho', { skin: 1, hair: '#9b938a', hairStyle: 'short', beard: 'full', face: 'glasses', item: 'coffee' }) },
+    { charKey: 'euclides', name: 'Íris Lupa', bio: 'Revisa tudo com lupa e uma lista de conferência desenhada à mão. Só diz "pronto" quando até o gato aprovaria.', look: L('sueter-listrado', { skin: 2, hair: '#3a2a4a', hairStyle: 'bun', face: 'glasses', item: 'none' }) },
+    { charKey: 'hipodamo', name: 'Caio Maquete', bio: 'Planeja a horta comunitária, a reforma da praça e a fila do pão em maquetes de papelão que ocupam a garagem inteira.', look: L('jardineira', { skin: 0, hair: '#8a5a3a', hairStyle: 'short', headwear: 'beanie', item: 'none' }) },
+    { charKey: 'aspasia', name: 'Mel Cartinha', bio: 'Responde todo mundo com carinho e às vezes com carta de verdade. Sabe o recado de cada vizinho e o horário de cada gato.', look: L('moletom', { skin: 1, hair: '#2a1e19', hairStyle: 'long', headwear: 'beanie', item: 'cat' }) },
+    { charKey: 'diogenes', name: 'Juca Bicicleta', bio: 'Leva encomenda, busca remédio, troca lâmpada e devolve o gato fujão, tudo de bicicleta e sem perder o bom humor.', look: L('casaco-quentinho', { skin: 2, hair: '#4b3022', hairStyle: 'curly', headwear: 'headphones', item: 'none' }) },
+  ],
+  npc: null,
+};
+
+// ---------------------------------------------------------------- cyberpunk
+const CROMO9: SkinData = {
+  id: 'cromo-9', name: 'Cromo-9', tagline: 'Distrito futurista de torres escuras, letreiros de néon e a equipe com implantes e jaquetas iluminadas.',
+  palette: {
+    dia: { seeds: { ground: '#5a6068', ground2: '#4f5860', grass: null, road: '#3a3f46', plaza: '#6a7078', wall: '#4a5260', wallAlt: '#3a4250', stone: '#6a707a', marble: '#8a909a', roof: '#2a2f38', wood: '#5a4a44', accent: '#2fe0d8', accent2: '#d83ab0', metal: '#9aa4b0', foliage: '#3a7a6a', foliage2: '#2a5a50', sky: '#9ab0b8', water: '#3a8a9a', window: '#7ad8e0', windowDark: '#2a3440', cloth: '#b8c0c8', flame: '#ff6ad0', outline: '#0e1218', shadow: '#000000', flowers: [] } },
+    noite: { seeds: { ground: '#15171f', ground2: '#1a1d28', grass: null, road: '#0f1118', plaza: '#1f2230', wall: '#1c2030', wallAlt: '#241c34', stone: '#2a2e3c', marble: '#3a3e50', roof: '#0c0e14', wood: '#2a2028', accent: '#2ff0e8', accent2: '#ff3ac8', metal: '#6a7488', foliage: '#1a4a44', foliage2: '#123a36', sky: '#140c2a', water: '#0f3a4a', window: '#ff4ad0', windowDark: '#151826', cloth: '#7a8090', flame: '#2ff0e8', outline: '#05060a', shadow: '#000000', flowers: [] } },
+  },
+  arch: { roof: 'parapet', columns: 'pillar', frieze: false, trim: 'neon', windows: { extra: 1, glow: true }, rooftop: [['nada', 2], ['antenna', 3], ['sign', 3], ['satellite', 2], ['tank', 1]] },
+  figures: {
+    species: [['human', 1]], speciesSkins: {},
+    hairStyles: [['mohawk', 3], ['spiky', 3], ['cropped', 2], ['long', 2], ['ponytail', 2], ['bun', 1]],
+    beards: [['none', 8], ['short', 2]], headwear: [['none', 6], ['visor', 3], ['headphones', 2], ['hood', 2]], faces: [['none', 4], ['implant', 3], ['mask', 2], ['goggles', 1]],
+    outfits: [
+      { id: 'jaqueta-neon', weight: 5, kit: { top: 'leather', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'neon', colors: { top: '#1f2230', bottom: '#262a38', accent: 'agente' } } },
+      { id: 'capuz-tech', weight: 3, kit: { top: 'hoodie', bottom: 'pants', sleeves: 'long', shoes: 'sneakers', detail: 'neon', colors: { top: '#2a2e3e', bottom: '#1c1f2a', accent: 'agente' } } },
+      { id: 'sobretudo', weight: 2, kit: { top: 'coat', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'trim', colors: { top: '#3a3048', bottom: '#1c1f2a', accent: 'agente' } } },
+      { id: 'macacao', weight: 1, kit: { top: 'uniform', bottom: 'pants', sleeves: 'long', shoes: 'boots', detail: 'stripes', colors: { top: 'agente', bottom: 'agente', accent: '#0e1218' } } },
+    ],
+    items: [['datapad', 5], ['laptop', 2], ['coffee', 1], ['none', 3]],
+    extraHairs: ['#ff3ac8', '#2ff0e8', '#e8e8f0', '#1c1c1c', '#8a5aff', '#ffd23a'],
+  },
+  decor: { border: [['tower', 6], ['neon', 3], ['lamppost', 2], ['crates', 1]], lot: [['nada', 12], ['neon', 2], ['crates', 1], ['lamppost', 1]], junction: 'neon', swap: { herm: 'neon', brazier: 'lamppost', olive: 'lamppost', cypress: 'neon', amphora: 'crates', plant: 'neon' } },
+  ground: { water: 0, roadLine: true },
+  pets: { chance: 0.05, species: [['gato', 1]] },
+  characters: [
+    { charKey: 'aristoteles', name: 'Nyx Valença', bio: 'Coordena o coletivo de Cromo-9 de um terraço cheio de antenas. Divide os trabalhos em segundos e ninguém sabe se ela dorme.', look: L('sobretudo', { skin: 1, hair: '#ff3ac8', hairStyle: 'cropped', headwear: 'visor', face: 'implant', item: 'datapad' }) },
+    { charKey: 'hipatia', name: 'Eco Moraes', bio: 'Pesquisador de dados abertos. Vasculha arquivos antigos, fóruns esquecidos e bancos públicos, e volta sempre com a fonte de cada linha.', look: L('capuz-tech', { skin: 2, hair: '#1c1c1c', hairStyle: 'spiky', headwear: 'hood', face: 'goggles', item: 'laptop' }) },
+    { charKey: 'arquimedes', name: 'Juno Cifra', bio: 'Contadora do distrito. Planilhas em três telas holográficas e uma regra só: nenhum crédito some sem deixar rastro.', look: L('jaqueta-neon', { skin: 0, hair: '#2ff0e8', hairStyle: 'ponytail', face: 'implant', item: 'datapad' }) },
+    { charKey: 'fidias', name: 'Lumi Rocha', bio: 'Designer de letreiros de néon e de apresentações que brilham no escuro. Faz o mesmo slide parecer anúncio de festa.', look: L('jaqueta-neon', { skin: 1, hair: '#8a5aff', hairStyle: 'mohawk', headwear: 'headphones', item: 'datapad' }) },
+    { charKey: 'herodoto', name: 'Dante Verbo', bio: 'Roteirista e redator de manifestos do coletivo. Escreve rápido, corta palavra sobrando e entrega antes do próximo apagão.', look: L('sobretudo', { skin: 3, hair: '#e8e8f0', hairStyle: 'long', face: 'mask', item: 'laptop' }) },
+    { charKey: 'socrates', name: 'Ozias Firewall', bio: 'Veterano de segurança que desconfia de tudo, inclusive desta bio. Revisa cada plano procurando a porta que ficou aberta.', look: L('capuz-tech', { skin: 1, hair: '#9b938a', hairStyle: 'cropped', beard: 'short', face: 'implant', item: 'coffee' }) },
+    { charKey: 'euclides', name: 'Tess Debug', bio: 'Testa tudo até quebrar e depois testa de novo. Só libera a entrega quando o registro de erros está tão limpo quanto o chão do laboratório.', look: L('macacao', { skin: 2, hair: '#ffd23a', hairStyle: 'bun', face: 'goggles', item: 'datapad' }) },
+    { charKey: 'hipodamo', name: 'Rook Navarro', bio: 'Arquiteto de sistemas e de rotas pela cidade. Planeja projetos como quem planeja um mapa de metrô: tudo conecta, nada cruza.', look: L('sobretudo', { skin: 0, hair: '#1c1c1c', hairStyle: 'short', headwear: 'visor', item: 'datapad' }) },
+    { charKey: 'aspasia', name: 'Vox Teles', bio: 'Voz da rádio pirata do distrito. Responde canal, grupo e transmissão ao vivo com o mesmo charme e nenhuma mensagem fica sem retorno.', look: L('jaqueta-neon', { skin: 2, hair: '#ff3ac8', hairStyle: 'long', headwear: 'headphones', item: 'none' }) },
+    { charKey: 'diogenes', name: 'Gael Turbo', bio: 'Entregador de moto elétrica. Leva peça, busca arquivo, troca bateria e resolve o problema antes de você terminar de explicar.', look: L('capuz-tech', { skin: 3, hair: '#2ff0e8', hairStyle: 'spiky', face: 'mask', item: 'none' }) },
+  ],
+  npc: null,
+};
+
+export const OFFICIAL_SKINS: SkinData[] = [PLATINA, BRUMAVERDE, SIROCO, CORAL, RONROM, CROMO9];

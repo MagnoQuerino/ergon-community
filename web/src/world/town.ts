@@ -24,7 +24,7 @@ export interface BuildingInst {
 export interface AreaInst { id: string; kind: string; name: string; def: AreaDef; ox: number; oz: number; lot: Box; i: number; j: number }
 export interface Loc { b: string | null; level: number }
 /** k: tamanho; v: variante (forma da pedra, inclinação do pinheiro) */
-export interface DecorProp { kind: 'brazier' | DecorKind; x: number; z: number; k: number; v?: number }
+export interface DecorProp { kind: DecorKind; x: number; z: number; k: number; v?: number }
 /** Trecho de rua entre dois cruzamentos da grade, com o traçado sinuoso já calculado (pontos no mundo) e a largura. */
 export interface Road { a: [number, number]; b: [number, number]; pts: Vec2[]; w: number }
 /** Cruzamento ou ponta de rua: um largo redondo que junta os trechos sem quina. */
@@ -223,12 +223,13 @@ export class Town {
   private makeDecor(): void {
     const e = this.extent; const pack = this.pack.decor;
     // braseiros: nos largos onde três ou mais ruas se encontram, num canto de fora da rua
+    const jkind = pack.junction ?? 'brazier';
     for (const jn of this.junctions) {
-      if (jn.degree < 3) continue;
+      if (jn.degree < 3 || jkind === 'nada') continue;
       const r = rnd(seedOf(jn.x, jn.z, 31));
       if (r() < 0.35) continue;
       const q = Math.floor(r() * 4); const sx = q & 1 ? 1 : -1; const sz = q & 2 ? 1 : -1;
-      this.decor.push({ kind: 'brazier', x: jn.x + sx * 1.25, z: jn.z + sz * 1.25, k: 1 });
+      this.decor.push({ kind: jkind, x: jn.x + sx * 1.25, z: jn.z + sz * 1.25, k: 1, v: Math.floor(r() * 3) });
     }
     // borda: a cada passo sorteado, um elemento do pacote; às vezes um par de ciprestes
     const x0 = e.i0 * CELL - 3.4; const x1 = e.i1 * CELL + 3.4; const z0 = e.j0 * CELL - 3.4; const z1 = e.j1 * CELL + 3.4;

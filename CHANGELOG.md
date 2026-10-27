@@ -11,6 +11,8 @@ Primeira versão pública do Ergon Community.
 - Treinar: competências ensinadas a um agente, com revisão e aprovação antes do uso.
 - Conexões com apps de tarefas, Microsoft 365 e Google (leitura) e WhatsApp experimental (somente leitura, com
   informações e riscos antes de conectar).
+- Seis skins da cidade: Distrito Platina, Reino de Brumaverde, Base Siroco, Enseada Coral, Vila Ronrom e Cromo-9, com
+  prédios, roupas, paisagem e personagens próprios.
 - Loja de pacotes: oficiais assinados que vêm junto e funcionam sem internet; modelos da comunidade sob demanda.
 - Dados cifrados com a sua senha, frase de recuperação, 2º fator opcional, backup conferido e restauração com desfazer.
 - Instalação em Docker (Windows, macOS e Linux) e aplicativo desktop (Windows e Linux) na mesma versão.

@@ -1,7 +1,22 @@
 # Loja de pacotes e modelos da comunidade
 
-Pacotes `.ergon` mudam a aparência e o ponto de partida do Ergon sem mexer em código: temas da cidade, efeitos em volta
-dos personagens, pets e equipes prontas por área. O formato está em [FORMATOS_ERGON.md](FORMATOS_ERGON.md).
+Pacotes `.ergon` mudam a aparência e o ponto de partida do Ergon sem mexer em código: skins da cidade, temas de cores,
+efeitos em volta dos personagens, pets e equipes prontas por área.
+
+## Skins oficiais
+
+| Skin | Clima |
+| --- | --- |
+| Distrito Platina | centro financeiro: torres de vidro, asfalto e a equipe de terno |
+| Reino de Brumaverde | fantasia medieval: enxaimel, elfos, duendes, orcs, cogumelos e lagos |
+| Base Siroco | quartel no deserto: barracas, sacos de areia, antenas e fardas |
+| Enseada Coral | praia: mar, coqueiros, palha, guarda-sóis e roupa de banho |
+| Vila Ronrom | tranquilidade: casinhas, cerejeiras, postes acesos e gatos |
+| Cromo-9 | futuro de néon: torres escuras, letreiros, implantes e jaquetas iluminadas |
+
+Cada skin muda a cidade de dia e de noite, os prédios, as roupas e a paisagem que nasce quando a cidade cresce, e veste
+até 10 agentes com personagens próprios (nome e bio). A função de cada agente não muda. Uma skin por vez; desfazer
+devolve os nomes e a cidade de antes. O formato está em [FORMATOS_ERGON.md](FORMATOS_ERGON.md).
 
 ## Na loja (Configurações › Pacotes)
 
@@ -26,6 +41,6 @@ Também dá para instalar um `.ergon` recebido de alguém (botão "Escolher arqu
    `catalogo/index.json` (tamanho e SHA-256).
 4. Abra um pull request com uma frase sobre o modelo e uma captura de tela da cidade com ele aplicado.
 
-Entram pela loja os tipos `city-theme`, `fx`, `pet`, `character-look` e `team-blueprint`. Pacotes com permissões
+Entram pela loja os tipos `skin`, `city-theme`, `fx`, `pet`, `character-look` e `team-blueprint`. Pacotes com permissões
 (skill, plugin) não entram no catálogo. O pacote precisa ter licença compatível com a distribuição livre (por
 exemplo Apache-2.0, MIT ou CC-BY-4.0) e não pode usar marcas, nomes ou imagens de terceiros sem permissão.

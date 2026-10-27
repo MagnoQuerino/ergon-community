@@ -17,6 +17,12 @@ ok "latest.json" "versão $V"
 if curl -fsSL -o ergon.zip "$URL" && echo "$SHA  ergon.zip" | sha256sum -c - >/dev/null 2>&1; then ok "pacote baixado e conferido" "SHA-256 igual ao do latest.json"; else falha "pacote" "download ou SHA-256"; exit 1; fi
 mkdir ergon && cd ergon && unzip -q ../ergon.zip
 ok "conteúdo do pacote" "$(ls | tr '\n' ' ')"
+DONO="$(echo "${REPO%%/*}" | tr 'A-Z' 'a-z')"
+for img in ergon-community ergon-community-hermes; do
+  if docker manifest inspect "ghcr.io/$DONO/$img:$V" >/dev/null 2>&1; then ok "imagem pública" "ghcr.io/$DONO/$img:$V baixa sem login"
+  else falha "imagem pública" "ghcr.io/$DONO/$img:$V não baixa sem login: em github.com/$REPO › Packages › $img › Package settings › Change visibility › Public"; fi
+done
+[[ $R == 0 ]] || exit 1
 
 if ./ergon.sh instalar > "$W/instalar.log" 2>&1; then ok "ergon.sh instalar" "$(tail -1 "$W/instalar.log")"; else falha "ergon.sh instalar" "$(tail -5 "$W/instalar.log" | tr '\n' ' ')"; fi
 for _ in $(seq 1 120); do curl -fsS "$B/api/health" >/dev/null 2>&1 && break; sleep 2; done

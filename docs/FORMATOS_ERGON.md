@@ -21,6 +21,7 @@ e `signature` opcional (Ed25519 sobre o manifesto canônico sem a assinatura).
 
 | kind | data/package.json | instala nesta versão |
 | --- | --- | --- |
+| `skin` | `skin` (shared/skin.ts): cores-semente de dia e de noite, arquitetura, roupas por peças, espécies, acessórios, decoração, água, pets e até 10 personagens (nome, bio e aparência) | sim (uma por vez; trocar devolve os nomes da anterior; desfazer volta tudo) |
 | `city-theme` | `theme: { base: dia|noite, colors: { chave: #rrggbb } }` | sim (um por vez; desfazer devolve o anterior) |
 | `fx` | `effects: [{ target, effect: aura|fire_circle|celestial_glow|fire_trail, color, intensity 0..1 }]` | sim |
 | `pet` | `pets: [{ target, species: gato|coruja|cao|tartaruga, color }]` | sim |
@@ -30,6 +31,14 @@ e `signature` opcional (Ed25519 sobre o manifesto canônico sem a assinatura).
 | `skill`, `plugin` | permissões declaradas | **não** (exigem revisão, isolamento e consentimento próprios) |
 
 `target`: `{ all: true }`, `{ agentName }` ou `{ charKey }`.
+
+## Skins
+
+Uma skin é só aparência: muda as cores, os prédios (telhado, colunas, acabamento, o que fica no telhado), as roupas
+e os bonecos que o gerador sorteia, a paisagem que nasce conforme a cidade cresce e veste até 10 agentes com um
+personagem (nome e bio; função, regras e ferramentas não mudam). Tudo é parâmetro sobre um vocabulário fechado
+(`shared/skin.ts`): pesos e partes. Uma skin nova é só dado; uma peça nova do vocabulário ganha o desenho em
+`web/src/iso/figureParts.ts`, `buildingArt.ts` ou `decorArt.ts`. As seis oficiais estão em `shared/skins-oficiais.ts`.
 
 ## Segurança
 

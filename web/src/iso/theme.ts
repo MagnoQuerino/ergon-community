@@ -4,6 +4,7 @@
  * ameixa/azul escuro, pedra/marfim/papiro, bronze discreto e teal suave.
  */
 import type { Tone } from './raster.ts';
+import type { SkinData } from '../../../shared/skin.ts';
 
 export interface Theme {
   id: string;
@@ -44,6 +45,11 @@ export interface Theme {
   hairs: string[];
   marks: { attention: string; working: string; waiting: string; select: string };
   cards: string[];
+  /** estilo da skin ativa (shared/skin.ts): arquitetura, água fora da cidade, faixa nas ruas e trocas de objetos */
+  skin?: SkinStyle;
+}
+export interface SkinStyle {
+  id: string; arch: SkinData['arch']; water: number; roadLine: boolean; swap: SkinData['decor']['swap']; night: boolean;
 }
 
 export const ALEXANDRIA_NOITE: Theme = {

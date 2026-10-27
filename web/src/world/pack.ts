@@ -6,12 +6,15 @@
  *
  * TypeScript puro e determinístico: a mesma semente dá sempre o mesmo boneco (servidor guarda só a semente).
  */
-export type HairStyle = 'short' | 'long' | 'bun' | 'curly' | 'bald' | 'ponytail' | 'cropped';
+import type { SkinDecor, SkinHair, SkinHeadwear, SkinItem } from '../../../shared/skin.ts';
+
+export type HairStyle = SkinHair;
 export type Beard = 'none' | 'full' | 'short';
-export type Headwear = 'none' | 'wreath' | 'fillet' | 'petasos';
+export type Headwear = SkinHeadwear;
 export type Outfit = 'chiton' | 'exomis' | 'peplos';
-export type Item = 'scroll' | 'tablet' | 'abacus' | 'compass' | 'satchel' | 'staff' | 'spear' | 'lamp' | 'none';
-export type DecorKind = 'cypress' | 'olive' | 'pine' | 'bush' | 'rock' | 'brazier';
+export type Item = SkinItem;
+/** o vocabulário da paisagem é o das skins (shared/skin.ts): a Grécia usa só uma parte dele */
+export type DecorKind = SkinDecor;
 
 /** Escolha ponderada: [valor, peso]. */
 export type Weighted<T> = Array<[T, number]>;
@@ -31,7 +34,7 @@ export interface GraphicPack {
     extraHairs: string[];
   };
   /** paisagem que nasce sozinha conforme o mapa cresce (borda da cidade e lotes livres) */
-  decor: { border: Weighted<DecorKind>; lot: Weighted<DecorKind | 'nada'> };
+  decor: { border: Weighted<DecorKind>; lot: Weighted<DecorKind | 'nada'>; junction?: DecorKind | 'nada' };
 }
 
 export const GRECIA_CLASSICA: GraphicPack = {

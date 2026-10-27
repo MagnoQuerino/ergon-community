@@ -40,7 +40,7 @@ export interface OpenArt {
 }
 
 // ---------------------------------------------------------------- estilos
-type RoofKind = 'flat' | 'parapet' | 'hip' | 'gable';
+type RoofKind = 'flat' | 'parapet' | 'hip' | 'gable' | 'thatch' | 'steep';
 interface StyleLook {
   wall: Tone; base: Tone; trim: string; roofKind: RoofKind; roof: Tone;
   inner: { wall: string; side: string; dado: string; trim: string };
@@ -49,6 +49,17 @@ interface StyleLook {
   extras: Array<'awning' | 'awnings' | 'balcony' | 'asclepius' | 'tools' | 'owl' | 'band' | 'arcade' | 'banners' | 'shopwin' | 'planters' | 'acroteria'>;
 }
 function lookOf(style: string, t: Theme): StyleLook {
+  const L = greekLook(style, t);
+  const sk = t.skin?.arch;
+  if (!sk) return L;
+  // skin: telhado, janelas e enfeites próprios; os enfeites gregos saem quando a skin não usa colunas clássicas
+  if (sk.roof !== 'keep') L.roofKind = sk.roof;
+  if (sk.columns !== 'classic') { L.win.arched = false; L.extras = L.extras.filter((x) => x !== 'owl' && x !== 'acroteria' && x !== 'asclepius'); }
+  L.win.front = Math.min(6, L.win.front + sk.windows.extra);
+  L.win.side = Math.min(4, L.win.side + Math.ceil(sk.windows.extra / 2));
+  return L;
+}
+function greekLook(style: string, t: Theme): StyleLook {
   const S = t.stone; const H = t.houseWall; const wb = t.wallBack;
   const tone = (c: string, k = 0.12): Tone => [mix(c, '#ffffff', 0.18), c, mix(c, t.outline, k + 0.12)];
   const ochre = mix(H[1], t.terracotta[0], 0.38);
@@ -149,6 +160,7 @@ function drawWindow(g: CanvasRenderingContext2D, P: Proj, t: Theme, look: StyleL
   const hw = w / 2;
   quad(-hw - 0.07, hw + 0.07, -0.06, h + 0.08, t.outline);
   const glass = t.window;
+  if (t.skin?.arch.windows.glow && t.skin.night) quad(-hw - 0.12, hw + 0.12, -0.1, h + 0.12, t.teal[0]);
   quad(-hw, hw, 0, h, glass);
   if (look.win.arched) { quad(-hw, hw, h - 0.14, h, mix(glass, t.outline, 0.3)); }
   line(g, Q(0, 0.02), Q(0, h - 0.02), mix(glass, look.wall[1], 0.45));
@@ -203,6 +215,7 @@ function drawFloorShell(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, 
   for (const u of windowSlots(G.x0, G.x1, frontN, avoid)) drawWindow(g, P, t, look, 'front', G.z1, u, wy, isClassic ? 0.8 : 0.62, wh, wins, l);
   const sideAvoid: Array<[number, number]> = s.sideDoor && l === 0 ? [[s.sideDoor.z, s.sideDoor.w]] : [];
   for (const u of windowSlots(G.z0, G.z1, look.win.side, sideAvoid)) drawWindow(g, P, t, look, 'right', G.x1, u, wy, 0.6, wh, wins, l);
+  skinTrim(g, P, G, t, y0, wallTop, l);
   // vitrine da botica e símbolo de Asclépio; ferramentas da oficina
   if (l === 0 && look.extras.includes('shopwin') && door) {
     const u = door.x + door.w / 2 + 0.9;
@@ -271,8 +284,15 @@ function drawPorch(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look:
   if (l > 0 && isClassic) { // piso da varanda
     flatQuad(g, P, y0, G.x0, G.z1, G.x1, G.zf, t.stone[0]);
   }
-  const col = roundColumnSprite(t, order, colH, cut ? CUT_H : 0);
-  for (const x of porchColumns(G, look)) blit(g, col, P, x, y0, zc);
+  const sc = t.skin?.arch.columns;
+  if (sc && sc !== 'classic') {
+    // pilar quadrado (concreto, aço) ou poste de madeira
+    const r = sc === 'post' ? 0.13 : 0.2; const tone = sc === 'post' ? t.wood : t.stone; const h = cut ? CUT_H : colH;
+    for (const x of porchColumns(G, look)) isoBox(g, P, x - r, y0, zc - r, x + r, y0 + h, zc + r, tone, t.outline);
+  } else {
+    const col = roundColumnSprite(t, order, colH, cut ? CUT_H : 0);
+    for (const x of porchColumns(G, look)) blit(g, col, P, x, y0, zc);
+  }
   if (l > 0 && isClassic) { // balaustrada entre as colunas: base, balaústres e corrimão (na altura do corte, se cortada)
     const xs = [G.x0, ...porchColumns(G, look).flatMap((c) => [c - 0.36, c + 0.36]), G.x1];
     const top = cut ? CUT_H : 0.82; const za = G.zf - 0.2; const zb = G.zf - 0.06;
@@ -286,7 +306,7 @@ function drawPorch(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look:
   if (!cut && !isClassic) { // viga sobre as colunas do pórtico
     const yb = y0 + colH;
     isoBox(g, P, G.x0, yb, G.z1, G.x1, y0 + FLOOR_H, G.zf, t.stone, t.outline);
-    entablature(g, P, t, order, yb, y0 + FLOOR_H, 'front', [G.x0, G.x1], G.zf);
+    if (!t.skin || t.skin.arch.frieze) entablature(g, P, t, order, yb, y0 + FLOOR_H, 'front', [G.x0, G.x1], G.zf);
   }
 }
 
@@ -294,6 +314,7 @@ function drawPorch(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look:
 function drawSlab(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, l: number): void {
   const y1 = floorY(G, l) + FLOOR_H; const order = orderFor(l);
   isoBox(g, P, G.x0, y1 - SLAB, G.z0, G.x1, y1, G.zf, t.stone, t.outline);
+  if (t.skin && !t.skin.arch.frieze) { line(g, P(G.x0, y1 - 0.06, G.zf), P(G.x1, y1 - 0.06, G.zf), t.stone[2]); return; }
   entablature(g, P, t, order, y1 - SLAB, y1, 'front', [G.x0, G.x1], G.zf);
   entablature(g, P, t, order, y1 - SLAB, y1, 'right', [G.z0, G.zf], G.x1);
 }
@@ -303,6 +324,11 @@ function drawRoof(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look: 
   const outlinePoly = (pts: P2[]) => { for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) fillPoly(g, pts.map(([a, b]) => [a + ox, b + oy] as P2), t.outline); };
   switch (look.roofKind) {
     case 'flat': {
+      if (t.skin) { // laje lisa com beiral fino
+        flatQuad(g, P, y, G.x0, G.z0, G.x1, G.zf, R[1]);
+        isoBox(g, P, G.x0 - 0.06, y, G.z0 - 0.06, G.x1 + 0.06, y + 0.12, G.zf + 0.06, R, t.outline);
+        return y + 0.12;
+      }
       antefixes(g, P, t, y, 'front', [G.x0, G.x1], G.zf); antefixes(g, P, t, y, 'right', [G.z0, G.zf], G.x1);
       return y + 0.15;
     }
@@ -317,6 +343,7 @@ function drawRoof(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look: 
       if (look.extras.includes('planters')) for (const x of [G.x0 + 0.7, G.x1 - 0.8]) blit(g, plantSprite(t), P, x, y, G.zf - 0.55);
       return y + h;
     }
+    case 'thatch':
     case 'hip': {
       const ex0 = G.x0 - e; const ex1 = G.x1 + e; const ez0 = G.z0 - e; const ez1 = G.zf + e;
       const r = (ez1 - ez0) / 2; const zc = (ez0 + ez1) / 2; const yR = y + Math.min(1.5, r * 0.62);
@@ -333,19 +360,33 @@ function drawRoof(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look: 
       }
       line(g, P(ex0 + r, yR, zc), P(ex1 - r, yR, zc), R[0]);
       line(g, P(ex0, y, ez1), P(ex1, y, ez1), mix(R[1], t.outline, 0.4));
-      if (classic(G.s.style)) { antefixes(g, P, t, y, 'front', [ex0, ex1], ez1); antefixes(g, P, t, y, 'right', [ez0, ez1], ex1); }
+      if (look.roofKind === 'thatch') { // palha: fiapos descendo e franja na beirada
+        for (let k = 0; k <= 24; k++) { const u = ex0 + ((ex1 - ex0) * k) / 24; line(g, P(u, y + 0.05, ez1), P(u + (k % 2 ? 0.1 : -0.1), y + 0.32, ez1 - 0.32), mix(R[1], t.outline, 0.25)); }
+        for (let k = 0; k < 16; k++) { const u = ex0 + ((ex1 - ex0) * (k + 0.5)) / 16; fillPoly(g, [P(u - 0.14, y, ez1), P(u + 0.14, y, ez1), P(u, y - 0.16, ez1)], R[2]); }
+      }
+      if (classic(G.s.style) && !t.skin) { antefixes(g, P, t, y, 'front', [ex0, ex1], ez1); antefixes(g, P, t, y, 'right', [ez0, ez1], ex1); }
       return yR;
     }
+    case 'steep':
     case 'gable': {
       const ex0 = G.x0 - e; const ex1 = G.x1 + e; const ez0 = G.z0 - e; const ez1 = G.zf + e;
-      const yR = y + (G.x1 - G.x0) * 0.2; const xm = 0;
+      const yR = y + (G.x1 - G.x0) * (look.roofKind === 'steep' ? 0.36 : 0.2); const xm = 0;
       const left: P2[] = [P(ex0, y, ez0), P(ex0, y, ez1), P(xm, yR, ez1), P(xm, yR, ez0)];
       const right: P2[] = [P(xm, yR, ez0), P(xm, yR, ez1), P(ex1, y, ez1), P(ex1, y, ez0)];
       outlinePoly(left); outlinePoly(right);
       fillPoly(g, left, R[0]); fillPoly(g, right, R[2]);
       for (let k = 1; k < 6; k++) { const f = k / 6; line(g, P(xm + (ex1 - xm) * f, yR - (yR - y) * f, ez0), P(xm + (ex1 - xm) * f, yR - (yR - y) * f, ez1), mix(R[2], t.outline, 0.25)); }
-      // frontão: tímpano de pedra e cornija inclinada
       const zt = G.zf + 0.02;
+      if (t.skin && t.skin.arch.columns !== 'classic') {
+        // empena de casa: parede no triângulo e, no enxaimel, as vigas aparentes
+        const tri: P2[] = [P(G.x0, y, zt), P(G.x1, y, zt), P(xm, yR - 0.12, zt)];
+        outlinePoly(tri); fillPoly(g, tri, look.wall[1]);
+        if (t.skin.arch.trim === 'timber') { line(g, P(xm, y, zt), P(xm, yR - 0.2, zt), t.woodDark[1]); line(g, P(G.x0 + 0.4, y + 0.05, zt), P(xm, yR - 0.4, zt), t.woodDark[1]); line(g, P(G.x1 - 0.4, y + 0.05, zt), P(xm, yR - 0.4, zt), t.woodDark[1]); }
+        const [wx, wy] = P(xm, y + (yR - y) * 0.35, zt); g.fillStyle = t.outline; g.fillRect(wx - 3 * RES, wy - 3 * RES, 6 * RES, 5 * RES); g.fillStyle = t.window; g.fillRect(wx - 2 * RES, wy - 2 * RES, 4 * RES, 3 * RES);
+        line(g, P(ex0, y, ez1), P(xm, yR, ez1), R[0]); line(g, P(xm, yR, ez1), P(ex1, y, ez1), R[0]);
+        return yR;
+      }
+      // frontão: tímpano de pedra e cornija inclinada
       const tri: P2[] = [P(G.x0, y, zt), P(G.x1, y, zt), P(xm, yR - 0.12, zt)];
       outlinePoly(tri); fillPoly(g, tri, t.stone[1]);
       fillPoly(g, [P(G.x0 + 0.5, y + 0.12, zt), P(G.x1 - 0.5, y + 0.12, zt), P(xm, yR - 0.4, zt)], mix(t.stone[1], t.outline, 0.12));
@@ -385,6 +426,7 @@ export function closedArt(b: BuildingInst, t: Theme): ClosedArt {
       if (classic(b.spec.style)) drawSlab(g, P, G, t, l);
     }
     top = drawRoof(g, P, G, t, look);
+    rooftop(g, P, G, t, look, top);
   });
   // janelas em pixels do mundo
   const W = (q: WinQuad): WinQuad => ({ level: q.level, poly: q.poly.map(([x, y]) => [x + rect.x0, y + rect.y0] as P2) });
@@ -677,4 +719,100 @@ export function bandHighlight(faces: P2[][], t: Theme, key: string): Layer {
 /** Caixa no mundo de um prédio inteiro (para a ordenação com quem anda lá fora). */
 export function buildingBox(b: BuildingInst, top: number): AABB {
   return { x0: b.foot.x0, y0: 0, z0: b.foot.z0, x1: b.foot.x1, y1: top, z1: b.foot.z1 };
+}
+
+// ---------------------------------------------------------------- skin: acabamento das paredes e telhados
+/** Acabamento da parede de um andar conforme a skin: enxaimel, néon, camuflagem, listras de praia ou pele de vidro. */
+function skinTrim(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, y0: number, y1: number, l: number): void {
+  const trim = t.skin?.arch.trim;
+  if (!trim || trim === 'none') return;
+  const F = G.z1; const Rx = G.x1;
+  switch (trim) {
+    case 'timber': {
+      const W = t.woodDark[1];
+      line(g, P(G.x0, y0 + 0.24, F), P(G.x1, y0 + 0.24, F), W); line(g, P(G.x0, y1 - 0.08, F), P(G.x1, y1 - 0.08, F), W);
+      line(g, P(Rx, y0 + 0.24, G.z0), P(Rx, y0 + 0.24, F), W); line(g, P(Rx, y1 - 0.08, G.z0), P(Rx, y1 - 0.08, F), W);
+      for (let x = G.x0 + 0.05; x <= G.x1; x += 1.6) line(g, P(x, y0 + 0.24, F), P(x, y1 - 0.08, F), W);
+      for (let x = G.x0 + 0.05; x + 1.6 <= G.x1; x += 3.2) line(g, P(x, y0 + 0.24, F), P(x + 0.8, y0 + 0.9, F), W);
+      for (let z = G.z0 + 0.05; z <= F; z += 1.6) line(g, P(Rx, y0 + 0.24, z), P(Rx, y1 - 0.08, z), mix(W, t.outline, 0.2));
+      break;
+    }
+    case 'neon': {
+      const A = t.teal[0]; const B = t.banner[0];
+      line(g, P(G.x0, y1 - 0.1, F), P(G.x1, y1 - 0.1, F), l % 2 ? B : A); line(g, P(Rx, y1 - 0.1, G.z0), P(Rx, y1 - 0.1, F), l % 2 ? B : A);
+      line(g, P(G.x1, y0, F), P(G.x1, y1, F), A);
+      break;
+    }
+    case 'camo': {
+      const C = [mix(t.olive[1], t.wallBack, 0.3), mix(t.earth, t.outline, 0.15), mix(t.sand[1], t.olive[0], 0.35)];
+      for (let k = 0; k < 9; k++) {
+        const u = G.x0 + 0.4 + ((k * 2.3 + l * 1.1) % (G.x1 - G.x0 - 0.8)); const h0 = y0 + 0.4 + ((k * 0.37 + l) % 1.6);
+        backQuad(g, P, F, u, Math.min(G.x1 - 0.1, u + 0.7), h0, Math.min(y1 - 0.1, h0 + 0.35), C[k % 3]);
+      }
+      for (let k = 0; k < 4; k++) { const z = G.z0 + 0.3 + ((k * 1.9 + l) % Math.max(0.5, F - G.z0 - 0.8)); const h0 = y0 + 0.5 + ((k * 0.53) % 1.4); sideQuad(g, P, Rx, z, Math.min(F - 0.1, z + 0.6), h0, Math.min(y1 - 0.1, h0 + 0.3), C[(k + 1) % 3]); }
+      break;
+    }
+    case 'stripes': {
+      if (l > 0) break;
+      for (let u = G.x0, k = 0; u < G.x1 - 0.01; u += 0.4, k++) backQuad(g, P, F, u, Math.min(G.x1, u + 0.4), y0 + 0.22, y0 + 0.85, k % 2 ? t.papyrus[0] : t.teal[0]);
+      for (let z = G.z0, k = 0; z < F - 0.01; z += 0.4, k++) sideQuad(g, P, Rx, z, Math.min(F, z + 0.4), y0 + 0.22, y0 + 0.85, k % 2 ? mix(t.papyrus[0], t.outline, 0.1) : mix(t.teal[0], t.outline, 0.15));
+      break;
+    }
+    case 'glass': {
+      const M = mix(t.window, t.outline, 0.35);
+      for (let x = G.x0 + 0.5; x < G.x1; x += 0.5) line(g, P(x, y0 + 0.24, F), P(x, y1 - 0.06, F), M);
+      for (let z = G.z0 + 0.5; z < F; z += 0.5) line(g, P(Rx, y0 + 0.24, z), P(Rx, y1 - 0.06, z), M);
+      line(g, P(G.x0, y1 - 0.04, F), P(G.x1, y1 - 0.04, F), t.trim);
+      break;
+    }
+  }
+}
+
+/** O que a skin põe nos telhados (sorteado por prédio, estável): antena, parabólica, chaminé, bandeira e afins. */
+function rooftop(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look: StyleLook, top: number): void {
+  const list = t.skin?.arch.rooftop;
+  if (!list) return;
+  let h = 2166136261; for (const c of G.b.id) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+  let x = (h >>> 0) / 4294967296 * list.reduce((a, [, w]) => a + w, 0); let kind = list[0][0];
+  for (const [v, w] of list) { if ((x -= w) < 0) { kind = v; break; } }
+  if (kind === 'nada') return;
+  const flat = look.roofKind === 'flat' || look.roofKind === 'parapet';
+  const y = flat ? top : G.yTop; const zc = (G.z0 + G.zf) / 2;
+  const cx = flat ? G.x1 - 1.4 : G.x1 - 1.2;
+  switch (kind) {
+    case 'antenna':
+      line(g, P(cx, y, zc), P(cx, y + 1.6, zc), t.outline); line(g, P(cx - 0.3, y + 1.2, zc), P(cx + 0.3, y + 1.2, zc), t.outline); line(g, P(cx - 0.2, y + 1.45, zc), P(cx + 0.2, y + 1.45, zc), t.outline);
+      { const [ax, ay] = P(cx, y + 1.6, zc); g.fillStyle = t.terracotta[0]; g.fillRect(ax - 1, ay - 2, 3, 3); }
+      break;
+    case 'satellite': {
+      line(g, P(cx, y, zc), P(cx, y + 0.5, zc), t.outline);
+      const [dx, dy] = P(cx, y + 0.75, zc); blob(g, dx, dy, 6 * RES, 4 * RES, t.outline); blob(g, dx, dy, 5 * RES, 3 * RES, t.marble[0]); g.fillStyle = t.outline; g.fillRect(dx, dy - RES, RES, RES);
+      break;
+    }
+    case 'chimney': {
+      const yb = flat ? y : G.yTop + 0.3; isoBox(g, P, cx - 0.22, yb, zc - 0.22, cx + 0.22, (flat ? y : top) + 0.5, zc + 0.22, t.terracotta, t.outline);
+      const [sx, sy] = P(cx, (flat ? y : top) + 0.75, zc); g.globalAlpha = 0.5; blob(g, sx + 2, sy, 3 * RES, 2 * RES, t.marble[0]); blob(g, sx + 6, sy - 6, 2 * RES, 2 * RES, t.marble[0]); g.globalAlpha = 1;
+      break;
+    }
+    case 'flag': {
+      const yb = flat ? y : top; line(g, P(cx, yb, zc), P(cx, yb + 1.5, zc), t.woodDark[1]);
+      fillPoly(g, [P(cx, yb + 1.5, zc), P(cx + 0.8, yb + 1.35, zc), P(cx, yb + 1.1, zc)], t.banner[0]);
+      break;
+    }
+    case 'solar': if (flat) for (const dz of [-0.8, 0.2]) { const z0 = zc + dz; isoBox(g, P, G.x0 + 0.8, y, z0, G.x0 + 2.4, y + 0.12, z0 + 0.7, ['#3a5a8a', '#2a4a7a', '#1f3a5a'], t.outline); } break;
+    case 'tank': if (flat) { isoBox(g, P, cx - 0.4, y, zc - 0.4, cx + 0.4, y + 0.4, zc + 0.4, t.stone, t.outline); isoBox(g, P, cx - 0.5, y + 0.4, zc - 0.5, cx + 0.5, y + 1.1, zc + 0.5, [t.marble[0], t.marble[1], t.marble[2]], t.outline); } break;
+    case 'sign': {
+      const yb = flat ? y : top; const a = G.x0 + 1; const b2 = Math.min(G.x1 - 1, a + 3.2);
+      isoBox(g, P, a, yb + 0.3, G.zf - 0.15, b2, yb + 1.2, G.zf - 0.05, [t.outline, t.outline, t.outline]);
+      backQuad(g, P, G.zf - 0.04, a + 0.08, b2 - 0.08, yb + 0.38, yb + 1.12, t.banner[1]);
+      for (let k = 0; k < 6; k++) { const u = a + 0.3 + k * ((b2 - a - 0.6) / 6); backQuad(g, P, G.zf - 0.03, u, u + 0.28, yb + 0.6, yb + 0.9, k % 2 ? t.teal[0] : t.banner[0]); }
+      line(g, P(a, yb, G.zf - 0.1), P(a, yb + 0.3, G.zf - 0.1), t.outline); line(g, P(b2, yb, G.zf - 0.1), P(b2, yb + 0.3, G.zf - 0.1), t.outline);
+      break;
+    }
+    case 'lights': {
+      const z = G.zf + 0.05; const yl = G.yTop - 0.05;
+      for (let k = 0; k <= 14; k++) { const u = G.x0 + ((G.x1 - G.x0) * k) / 14; const sag = Math.sin((k % 7) / 7 * Math.PI) * 0.18; const [lx, ly] = P(u, yl - sag, z); g.fillStyle = k % 2 ? t.flame[0] : t.teal[0]; g.fillRect(lx - 1, ly - 1, 2 * RES, 2 * RES); }
+      break;
+    }
+  }
 }

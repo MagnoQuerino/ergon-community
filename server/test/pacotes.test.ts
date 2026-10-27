@@ -136,7 +136,8 @@ describe('loja: oficiais embutidos e modelos da comunidade', () => {
       const of = (await req(h, 'GET', '/api/packages/catalog/official', s)).json as Array<{ id: string; kind: string; verified: boolean; installed: boolean }>;
       assert.ok(of.length >= 10, `oficiais: ${of.length}`);
       assert.ok(of.every((x) => x.verified && !x.installed && x.id.startsWith('ergon.oficial.')));
-      assert.deepEqual([...new Set(of.map((x) => x.kind))].sort(), ['city-theme', 'fx', 'pet', 'team-blueprint']);
+      assert.deepEqual([...new Set(of.map((x) => x.kind))].sort(), ['city-theme', 'fx', 'pet', 'skin', 'team-blueprint']);
+      assert.equal(of.filter((x) => x.kind === 'skin').length, 6, 'as seis skins oficiais');
       const r = await req(h, 'POST', '/api/packages/catalog/official/install', s, { id: 'ergon.oficial.aura-dourada' });
       assert.equal(r.status, 200, JSON.stringify(r.json));
       assert.equal(((await req(h, 'GET', '/api/packages/catalog/official', s)).json as Array<{ id: string; installed: boolean }>).find((x) => x.id === 'ergon.oficial.aura-dourada')!.installed, true);
@@ -179,5 +180,67 @@ describe('loja: oficiais embutidos e modelos da comunidade', () => {
       assert.equal(off.status, 503); assert.match(off.json.message, /já instalou continua/);
       assert.equal(((await req(h, 'GET', '/api/packages', s)).json as Array<{ active: boolean }>).filter((x) => x.active).length, 1, 'sem internet, o instalado continua');
     } finally { await h.close(); srv.close(); }
+  });
+});
+
+import { OFFICIAL_SKINS } from '../../shared/skins-oficiais.ts';
+import { SKIN_MAX_CHARACTERS, validateSkin } from '../../shared/skin.ts';
+
+describe('skins da cidade', () => {
+  test('as seis skins oficiais validam, com nomes originais e até 10 personagens', () => {
+    assert.equal(OFFICIAL_SKINS.length, 6);
+    for (const sk of OFFICIAL_SKINS) {
+      const v = validateSkin(JSON.parse(JSON.stringify(sk)));
+      assert.ok(v.ok, `${sk.name}: ${v.ok ? '' : v.errors.join('; ')}`);
+      assert.ok(sk.characters.length + (sk.npc ? 1 : 0) <= SKIN_MAX_CHARACTERS);
+    }
+    const nomes = OFFICIAL_SKINS.flatMap((sk) => sk.characters.map((c) => c.name));
+    assert.equal(new Set(nomes).size, nomes.length, 'nenhum personagem repetido entre as skins');
+  });
+
+  test('recusa skin com 11 personagens, roupa que não existe, peça fora do vocabulário ou texto ativo', () => {
+    const base = JSON.parse(JSON.stringify(OFFICIAL_SKINS[0]));
+    const onze = { ...base, characters: [...base.characters, { ...base.characters[0], charKey: 'hesiodo', name: 'Outro Nome' }] };
+    assert.equal(validateSkin(onze).ok, false);
+    const roupa = JSON.parse(JSON.stringify(base)); roupa.characters[0].look.outfit = 'nao-existe';
+    assert.match((validateSkin(roupa) as { errors: string[] }).errors.join(' '), /roupa que não existe/);
+    const peca = JSON.parse(JSON.stringify(base)); peca.figures.outfits[0].kit.top = 'armadura-de-ferro';
+    assert.equal(validateSkin(peca).ok, false);
+    const ativo = JSON.parse(JSON.stringify(base)); ativo.characters[0].bio = '<img src=x onerror=alert(1)>';
+    assert.match((validateSkin(ativo) as { errors: string[] }).errors.join(' '), /conteúdo ativo/);
+    const extra = JSON.parse(JSON.stringify(base)); extra.ferramentas = ['terminal'];
+    assert.match((validateSkin(extra) as { errors: string[] }).errors.join(' '), /campo ferramentas não permitido/);
+  });
+
+  test('instalar veste os personagens (nome e bio), trocar de skin devolve os nomes, desfazer volta tudo', async () => {
+    const h = await harness();
+    try {
+      const s = await setupOwner(h);
+      const agents = () => h.db.all<{ id: string; char_key: string; name: string; bio: string | null; role: string }>("SELECT id, char_key, name, bio, role FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY char_key", s.workspaceId);
+      const antes = agents();
+      const byKey = (k: string) => agents().find((a) => a.char_key === k)!;
+      const platina = await req(h, 'POST', '/api/packages/catalog/official/install', s, { id: 'ergon.oficial.skin-distrito-platina' });
+      assert.equal(platina.status, 200, JSON.stringify(platina.json));
+      assert.equal(byKey('aristoteles').name, 'Helena Vasconcelos');
+      assert.match(byKey('aristoteles').bio ?? '', /Diretora-geral/);
+      assert.equal(byKey('aristoteles').role, antes.find((a) => a.char_key === 'aristoteles')!.role, 'a função não muda');
+      assert.equal(byKey('hesiodo').name, antes.find((a) => a.char_key === 'hesiodo')!.name, 'quem não tem personagem fica como está');
+      const cos = (await req(h, 'GET', '/api/packages/cosmetics', s)).json as { skin: { data: { id: string }; characters: Array<{ agentId: string; index: number }> } };
+      assert.equal(cos.skin.data.id, 'distrito-platina');
+      assert.equal(cos.skin.characters.length, 10);
+      // trocar: a anterior sai devolvendo os nomes, a nova veste
+      const cromo = await req(h, 'POST', '/api/packages/catalog/official/install', s, { id: 'ergon.oficial.skin-cromo-9' });
+      assert.equal(cromo.status, 200);
+      assert.equal(byKey('aristoteles').name, 'Nyx Valença');
+      assert.equal(((await req(h, 'GET', '/api/packages/cosmetics', s)).json as { skin: { data: { id: string } } }).skin.data.id, 'cromo-9');
+      // desfazer a nova: volta a anterior com os personagens dela
+      await req(h, 'DELETE', `/api/packages/${cromo.json.id}`, s);
+      assert.equal(byKey('aristoteles').name, 'Helena Vasconcelos');
+      assert.equal(((await req(h, 'GET', '/api/packages/cosmetics', s)).json as { skin: { data: { id: string } } }).skin.data.id, 'distrito-platina');
+      // desfazer a primeira: a equipe volta exatamente como era
+      await req(h, 'DELETE', `/api/packages/${platina.json.id}`, s);
+      assert.deepEqual(agents().map((a) => [a.char_key, a.name, a.bio]), antes.map((a) => [a.char_key, a.name, a.bio]));
+      assert.equal(((await req(h, 'GET', '/api/packages/cosmetics', s)).json as { skin: unknown }).skin, null);
+    } finally { await h.close(); }
   });
 });

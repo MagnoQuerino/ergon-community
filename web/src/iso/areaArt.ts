@@ -11,6 +11,7 @@ import { KX, KY, KZ, RES, project, unproject, type P2, type Rect } from './proje
 import { backQuad, fillPoly, flatQuad, isoBox, line, projector, sideQuad, type Proj } from './raster.ts';
 import { amphoraSprite, benchSprite, blob, brazierSprite, bushSprite, cypressSprite, fitSprite, houseSprite, pineSprite, plantSprite, rockSprite, type Sprite } from './props.ts';
 import { mix, type Theme } from './theme.ts';
+import { skinDecor } from './decorArt.ts';
 
 /** Bloco do chão em pixels do canvas; com zoom aberto, cada bloco cobre mais mundo em resolução menor. */
 export const CHUNK = 512;
@@ -82,6 +83,11 @@ function drawRoads(g: CanvasRenderingContext2D, P: Proj, town: Town, t: Theme, r
   for (const j of joins) fillPoly(g, discPoly(P, j.x, j.z, j.r + 0.14), t.road.edge);
   for (const rd of roads) band(g, P, rd.pts, rd.w / 2, t.road.fill);
   for (const j of joins) fillPoly(g, discPoly(P, j.x, j.z, j.r), t.road.fill);
+  if (t.skin?.roadLine) {
+    const C = mix(t.road.fill, '#f2f0e6', 0.6);
+    for (const rd of roads) for (let i = 0; i < rd.pts.length - 1; i++) { const [ax, az] = rd.pts[i]; const [bx, bz] = rd.pts[i + 1]; line(g, P(ax, 0, az), P(bx, 0, bz), C, 3); }
+    return;
+  }
   for (const rd of roads) {
     // marcas das rodas: duas trilhas paralelas, interrompidas (terra batida, não asfalto)
     for (const side of [-0.3, 0.3]) for (let i = 0; i < rd.pts.length - 1; i++) {
@@ -174,6 +180,23 @@ function drawGym(g: CanvasRenderingContext2D, P: Proj, t: Theme, a: AreaInst): v
   const [wx, wy] = P(gy.ring[0], 0, gy.ring[1]); blob(g, wx, wy, 11 * RES, 5 * RES + 1, mix(t.sand[0], t.terracotta[1], 0.3)); blob(g, wx, wy, 10 * RES, 5 * RES, t.sand[0]);
 }
 
+/**
+ * Água fora da cidade (skins com mar ou lagoas): começa longe da borda (a paisagem da borda fica em terra) e cresce
+ * com a distância. Devolve a profundidade (0 = terra) para o tom: espuma, raso, fundo.
+ */
+function waterAt(town: Town, t: Theme, x: number, z: number): number {
+  const w = t.skin?.water ?? 0;
+  if (w <= 0) return 0;
+  const B = town.bounds;
+  const d = Math.max(B.x0 - x, x - B.x1, B.z0 - z, z - B.z1);
+  // a costa começa a uma distância irregular (3 a 10 unidades), e a água cresce aos poucos: praia e lagos com forma
+  const edge = 3 + groundAt(x * 0.19 + 53, z * 0.19 - 41) * 7;
+  if (d < edge) return 0;
+  const n = groundAt(x * 0.45 + 131, z * 0.45 - 77);
+  const level = w * Math.min(1, (d - edge) / 5) + Math.min(0.25, (d - edge) * 0.02) * Math.min(1, w / 0.3);
+  return Math.max(0, level - n * 0.6);
+}
+
 /** Desenha o chão de um bloco (rect em pixels do mundo) num canvas de CHUNK × CHUNK, na escala `s` (1, 1/2 ou 1/4). */
 export function drawGroundChunk(g: CanvasRenderingContext2D, town: Town, t: Theme, r: Rect, ci: number, cj: number, s = 1): void {
   g.setTransform(s, 0, 0, s, 0, 0);
@@ -189,6 +212,8 @@ export function drawGroundChunk(g: CanvasRenderingContext2D, town: Town, t: Them
     const [px, py] = project(x + TILE / 2, 0, z + TILE / 2);
     if (px < r.x0 - KX || px > r.x1 + KX || py < r.y0 - KY || py > r.y1 + KY) continue;
     const n = groundAt(x + TILE / 2, z + TILE / 2);
+    const wet = waterAt(town, t, x + TILE / 2, z + TILE / 2);
+    if (wet > 0) { flatQuad(g, P, 0, x - 0.03, z - 0.03, x + TILE + 0.03, z + TILE + 0.03, wet > 0.14 ? mix(t.water[1], t.water[2], 0.45) : wet > 0.04 ? t.water[1] : t.water[0]); continue; }
     if (n < 0.37) flatQuad(g, P, 0, x, z, x + TILE, z + TILE, t.ground[0]);
     else if (n > 0.65) flatQuad(g, P, 0, x, z, x + TILE, z + TILE, t.ground[1]);
   }
@@ -219,7 +244,7 @@ export function drawGroundChunk(g: CanvasRenderingContext2D, town: Town, t: Them
   // sombra das árvores no chão (o sol vem da esquerda)
   g.globalAlpha = 0.16; g.fillStyle = t.shadow;
   const trees: Array<{ x: number; z: number; k: number; big: number }> = [];
-  for (const d of town.decor) if (d.kind === 'cypress' || d.kind === 'olive' || d.kind === 'pine') trees.push({ x: d.x, z: d.z, k: d.k, big: d.kind === 'pine' ? 1.6 : d.kind === 'olive' ? 1.2 : 0.7 });
+  for (const d of town.decor) if (['cypress', 'olive', 'pine', 'palm', 'bigtree', 'cherry'].includes(d.kind)) trees.push({ x: d.x, z: d.z, k: d.k, big: d.kind === 'pine' || d.kind === 'bigtree' ? 1.6 : d.kind === 'cypress' ? 0.7 : 1.2 });
   for (const a of town.areas.values()) for (const p of a.def.props) if (p.kind === 'olive' || p.kind === 'cypress') trees.push({ x: p.x + a.ox, z: p.z + a.oz, k: p.k ?? 1, big: p.kind === 'olive' ? 1.2 : 0.7 });
   for (const tr of trees) {
     const [sx, sy] = P(tr.x + 0.35 * tr.k, 0, tr.z + 0.1);
@@ -305,9 +330,13 @@ export function cityItems(town: Town, t: Theme): CityItem[] {
     out.push({ sprite, px, py, box: { x0: box.x0, y0: 0, z0: box.z0, x1: box.x1, y1: h, z1: box.z1 }, id, area });
   };
   const sq = (x: number, z: number, r: number): Box => ({ x0: x - r, z0: z - r, x1: x + r, z1: z + r });
+  const swap = t.skin?.swap as Record<string, string> | undefined;
   for (const a of town.areas.values()) {
     a.def.props.forEach((p, i) => {
       const x = p.x + a.ox; const z = p.z + a.oz; const id = `${a.id}:${i}`;
+      const to = swap?.[p.kind];
+      if (to === 'nada') return;
+      if (to) { const sd = skinDecor(to, t, p.k ?? 1, i % 3) ?? baseDecor(to, t, p.k ?? 1, i % 3); if (sd) { put(sd.sprite, x, z, sq(x, z, sd.r), sd.h, id, a.id); return; } }
       switch (p.kind) {
         case 'olive': put(oliveTreeSprite(t, p.k ?? 1), x, z, sq(x, z, 0.25), tall('olive', p.k ?? 1), id, a.id); break;
         case 'cypress': put(cypressSprite(t, p.k ?? 1), x, z, sq(x, z, 0.25), tall('cypress', p.k ?? 1), id, a.id); break;
@@ -329,6 +358,8 @@ export function cityItems(town: Town, t: Theme): CityItem[] {
   }
   town.decor.forEach((d: DecorProp, i) => {
     const id = `decor:${i}`;
+    const sd = skinDecor(d.kind, t, d.k, d.v ?? 0);
+    if (sd) { put(sd.sprite, d.x, d.z, sq(d.x, d.z, sd.r), sd.h, id); return; }
     if (d.kind === 'brazier') put(brazierSprite(t), d.x, d.z, sq(d.x, d.z, 0.28), 1.5, id);
     else if (d.kind === 'cypress') put(cypressSprite(t, d.k), d.x, d.z, sq(d.x, d.z, 0.25), tall('cypress', d.k), id);
     else if (d.kind === 'olive') put(oliveTreeSprite(t, Math.round(d.k * 4) / 4), d.x, d.z, sq(d.x, d.z, 0.25), tall('olive', d.k), id);
@@ -337,6 +368,19 @@ export function cityItems(town: Town, t: Theme): CityItem[] {
     else put(bushSprite(t), d.x, d.z, sq(d.x, d.z, 0.3), 0.6, id);
   });
   return out;
+}
+
+/** Objetos gregos usados como troca pelas skins (árvores, pedras, braseiro). */
+function baseDecor(kind: string, t: Theme, k: number, v: number): { sprite: Sprite; r: number; h: number } | null {
+  switch (kind) {
+    case 'olive': return { sprite: oliveTreeSprite(t, Math.round(k * 4) / 4), r: 0.25, h: tall('olive', k) };
+    case 'cypress': return { sprite: cypressSprite(t, k), r: 0.25, h: tall('cypress', k) };
+    case 'pine': return { sprite: pineSprite(t, Math.round(k * 4) / 4, v), r: 0.25, h: tall('pine', k) };
+    case 'rock': return { sprite: rockSprite(t, k, v), r: 0.4 * k, h: tall('rock', k) };
+    case 'bush': return { sprite: bushSprite(t), r: 0.3, h: 0.6 };
+    case 'brazier': return { sprite: brazierSprite(t), r: 0.28, h: 1.5 };
+    default: return null;
+  }
 }
 
 /** Áreas clicáveis da cidade (objetos pequenos antes das áreas grandes) e os lotes livres (loja). */

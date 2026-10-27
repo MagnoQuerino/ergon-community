@@ -7,6 +7,8 @@
  */
 import { mix, shade, harmonize, type Theme } from './theme.ts';
 import { GRECIA_CLASSICA, rollFigure, type GraphicPack, type HairStyle, type Headwear, type Item } from '../world/pack.ts';
+import type { SkinFace, Species } from '../../../shared/skin.ts';
+import { hairBack, hairFront, headwear as skinHeadwear, item as skinItem, kitBottom, kitCape, kitLegs, kitSleeves, kitTop, speciesAndFace, type Kit, type Pen } from './figureParts.ts';
 
 export type { HairStyle, Item } from '../world/pack.ts';
 export type Facing = 'front' | 'back'; // frente = 3/4 virado para o observador; costas = afastando-se
@@ -30,6 +32,8 @@ export interface Look {
   headwear?: Headwear;
   /** barra da roupa com meandro na cor do agente */
   hem?: boolean;
+  /** skin (figureParts.ts): roupa por peças, espécie, acessório de rosto e cor do chapéu */
+  kit?: Kit; species?: Species; face?: SkinFace; hat?: [string, string] | null;
 }
 
 export const FIG_W = 30;
@@ -59,9 +63,13 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
   const E = '#2b2028'; const M = '#6e3b33';
   const late: Array<() => void> = []; // partes que ficam à frente da cabeça (mão na cabeça, mão no queixo)
   const armor = look.outfit === 'armor';
-  const holding = gesture === 'none' && !back && !seated && !perch && (look.item === 'scroll' || look.item === 'abacus' || look.item === 'tablet');
+  const holding = gesture === 'none' && !back && !seated && !perch && ['scroll', 'abacus', 'tablet', 'laptop', 'book', 'binoculars', 'clipboard', 'cat', 'datapad'].includes(look.item);
   const exomis = look.outfit === 'exomis'; const peplos = look.outfit === 'peplos';
+  const kit = look.kit ?? null;
+  const pen: Pen = { put, rect, span };
+  const accent = kit?.A ?? t.teal[0];
 
+  if (kit && !seated) kitCape(pen, kit, dy, perch);
   if (armor && !seated) { rect(3, 22 + dy, 3, perch ? 13 : 18, D); rect(3, 22 + dy, 1, perch ? 13 : 18, d); rect(20, 22 + dy, 2, perch ? 10 : 14, d); } // capa (clâmide) por trás
   // cabelo comprido cai por trás dos ombros (desenhado antes do corpo)
   if (look.hairStyle === 'long' && !back) { rect(3, 9 + hy, 3, 17, H); rect(3, 9 + hy, 1, 17, h); rect(20, 10 + hy, 2, 11, h); }
@@ -71,7 +79,11 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
   // pernas curtas e firmes, sandálias
   if (perch) {
     // sentado num banco ou degrau: joelhos à frente (colo largo), canelas curtas, sandálias no chão
-    for (const L of [7, 16]) { rect(L, 41, 3, 2, S); rect(L + 2, 41, 1, 2, s); rect(L - 1, 43, 5, 2, t.sandal); }
+    const knee = kit && (kit.bottom === 'pants' || kit.bottom === 'robe') ? kit.B : null;
+    const shoe = kit ? (kit.shoes === 'sneakers' ? '#f2f2ee' : kit.shoes === 'shoes' ? '#2b2b33' : kit.shoes === 'boots' ? '#4a3a28' : kit.shoes === 'bare' ? S : t.sandal) : t.sandal;
+    for (const L of [7, 16]) { rect(L, 41, 3, 2, knee ? knee[0] : S); rect(L + 2, 41, 1, 2, knee ? knee[1] : s); rect(L - 1, 43, 5, 2, shoe); }
+  } else if (kit && !seated) {
+    kitLegs(pen, kit, S, s, pose === 'walk' && frame === 1);
   } else if (!seated) {
     const step = pose === 'walk' && frame === 1;
     const L = step ? 7 : 8; const R = step ? 16 : 15; const up = step ? 1 : 0;
@@ -85,7 +97,8 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
     rect(R - 1, 43, 5, 2, t.sandal); put(R + 1, 42, t.sandal);
   }
   // saia do quíton (pregas)
-  if (seated) rect(5, 31 + dy, 16, 3, T);
+  if (kit) kitBottom(pen, kit, back, seated, perch, dy);
+  else if (seated) rect(5, 31 + dy, 16, 3, T);
   else if (perch) { rect(5, 31 + dy, 16, 2, T); rect(4, 33 + dy, 18, 3, T); span(35 + dy, 4, 21, tt); for (const x of [8, 17]) put(x, 34 + dy, tt); put(12, 34 + dy, tt); put(13, 34 + dy, tt); }
   else if (armor) {
     // saiote de tiras (ptéruges): couro e linho alternados
@@ -109,12 +122,13 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
     span(38, 5, 20, shade(T, -0.1));
   }
   // barra decorada: meandro simples na cor do agente (na exômide, no tom claro)
-  if (look.hem && !seated && !armor) {
+  if (look.hem && !seated && !armor && !kit) {
     const row = perch ? 35 + dy : exomis ? 35 : peplos ? 41 : 38;
     for (let x = 5; x <= 20; x++) put(x, row, x % 3 === 0 ? (exomis ? D : T) : exomis ? T : D);
   }
   // tronco largo, ombros arredondados, cinto simples
-  if (armor) {
+  if (kit) kitTop(pen, kit, S, s, back, seated, perch, dy, hashOf(kit.T[0] + kit.A));
+  else if (armor) {
     // couraça anatômica de bronze: luz à esquerda, peitorais e abdômen marcados, cinto de couro
     const [B0, B1, B2] = t.bronze;
     span(22 + dy, 7, 18, B1); rect(6, 23 + dy, 14, 7, B1); rect(6, 23 + dy, 4, 7, B0); rect(back ? 6 : 18, 23 + dy, 2, 7, B2);
@@ -142,17 +156,26 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
       put(x0, 22 + dy + i, D); put(x0 + 1, 22 + dy + i, D); put(back ? x0 : x0 + 2, 22 + dy + i, d);
     }
   }
-  if (!seated && !perch && !armor && !exomis && !peplos) {
+  if (!seated && !perch && !armor && !exomis && !peplos && !kit) {
     const fx = back ? 5 : 18;
     rect(fx, 31, 3, 7, D); rect(back ? fx : fx + 2, 31, 1, 7, d); rect(back ? 4 : 21, 34, 1, 4, d);
   }
   // braços: manga + antebraço + mão (exômide: braço direito nu; peplo: mangas claras)
-  const leftSleeve = armor ? t.bronze[0] : peplos ? T : exomis ? D : back ? T : D;
-  const rightSleeve = armor ? D : peplos ? T : exomis ? (back ? D : S) : back ? D : T; // general: capa presa no ombro direito
+  const ks = kit ? kitSleeves(kit, S, back) : null;
+  const leftSleeve = ks ? ks.left : armor ? t.bronze[0] : peplos ? T : exomis ? D : back ? T : D;
+  const rightSleeve = ks ? ks.right : armor ? D : peplos ? T : exomis ? (back ? D : S) : back ? D : T; // general: capa presa no ombro direito
+  const longSleeve = !!ks?.long;
   const arm = (x: number, sleeve: string, off: number, len: number) => {
     rect(x, 22 + dy, 3, 4, sleeve);
-    rect(x, 26 + dy + off, 3, len, S);
-    rect(x < 13 ? x + 2 : x, 26 + dy + off, 1, len, s);
+    if (longSleeve && len > 1) {
+      // manga comprida até o punho; a mão continua de fora
+      rect(x, 26 + dy + off, 3, len - 1, sleeve);
+      rect(x < 13 ? x + 2 : x, 26 + dy + off, 1, len - 1, shade(sleeve, -0.2));
+      rect(x, 26 + dy + off + len - 1, 3, 1, S);
+    } else {
+      rect(x, 26 + dy + off, 3, len, S);
+      rect(x < 13 ? x + 2 : x, 26 + dy + off, 1, len, s);
+    }
     span(26 + dy + off + len, x, x + 2, s);
   };
   // braço erguido: manga no ombro, antebraço subindo por fora do corpo, mão (3×3) no alto
@@ -247,7 +270,7 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
         for (let y = 22; y <= 30; y++) put(17, y, t.woodDark[0]);
         rect(17, 31, 6, 5, t.wood[1]); span(31, 17, 22, t.woodDark[1]);
         break;
-      default: break;
+      default: skinItem(pen, look.item, accent, t.bronze[0]); break;
     }
   }
   if (look.item === 'staff' && !seated && !perch) { const x = back ? 2 : 23; for (let y = 3; y <= 44; y++) put(x, y, t.woodDark[0]); rect(x - 1, 1, 3, 2, t.bronze[0]); }
@@ -277,6 +300,7 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
     if (look.hairStyle === 'bun') { span(1 + hy, 11, 14, H); rect(10, 2 + hy, 6, 2, H); }
     if (look.hairStyle === 'curly') { rect(4, 7 + hy, 1, 11, H); rect(21, 7 + hy, 1, 11, h); for (let x = 6; x <= 19; x += 3) put(x, 3 + hy, H); }
     if (look.hairStyle === 'ponytail') { rect(11, 19 + hy, 3, 6, H); rect(13, 19 + hy, 1, 6, h); span(19 + hy, 11, 13, t.bronze[1]); }
+    hairBack(pen, look.hairStyle, H, h, hy);
   } else {
     // rosto em 3/4 (virado para a direita), traços simples e sóbrios
     rect(18, 10 + hy, 2, 9, s); span(20 + hy, 9, 16, s); // sombra da face e do queixo
@@ -290,7 +314,8 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
     else { rect(10, 13 + hy, 1, 2, E); rect(15, 13 + hy, 1, 2, E); }
     put(13, 16 + hy, s); // nariz
     // cabelo de frente
-    if (look.hairStyle === 'bald') {
+    if (hairFront(pen, look.hairStyle, H, h, hl, S, hy)) { /* cabelo das skins */ }
+    else if (look.hairStyle === 'bald') {
       rect(5, 12 + hy, 2, 4, H); rect(19, 12 + hy, 2, 3, H); span(8 + hy, 9, 13, shade(S, 0.12));
     } else if (look.hairStyle === 'cropped') {
       // rente: só a calota, sem mechas caindo nas têmporas
@@ -325,7 +350,9 @@ export function figureGrid(look: Look, facing: Facing, pose: Pose, frame: number
     else span(18 + hy, 12, 13, M);
   }
   for (const draw of late) draw();
+  if (look.species || look.face) speciesAndFace(pen, { species: look.species ?? 'human', face: look.face ?? 'none', hat: look.hat ?? null, kit }, S, s, back, hy, accent);
   const hw = look.headwear ?? (look.wreath ? 'wreath' : 'none');
+  if (look.hat && !['none', 'wreath', 'fillet', 'petasos'].includes(hw)) skinHeadwear(pen, hw, look.hat, back, hy, accent);
   if (look.wreath || hw === 'wreath') { for (let x = 5; x <= 20; x++) put(x, 8 + hy, x % 2 ? t.gold : t.bronze[0]); for (const [x, y] of [[4, 7], [21, 7], [4, 9], [21, 9]]) put(x, y + hy, t.gold); }
   if (hw === 'fillet' && look.hairStyle !== 'bald') {
     // faixa de tecido na cor do agente, com as pontas soltas atrás

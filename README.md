@@ -15,7 +15,10 @@ do projeto. A interface e os seus dados funcionam sem internet; a IA dos agentes
 - **Conexões.** Trello, Jira, Asana, monday.com, ClickUp, Notion, Pipefy, Todoist, Linear e GitHub Projects;
   Microsoft 365 e Google em leitura, com um app registrado por você ([Microsoft](docs/MICROSOFT.md),
   [Google](docs/GOOGLE.md)); WhatsApp experimental, somente leitura.
-- **Loja de pacotes.** Temas da cidade, efeitos, pets e equipes prontas por área: os oficiais vêm junto e funcionam
+- **Seis skins da cidade.** Distrito Platina (corporativa), Reino de Brumaverde (fantasia), Base Siroco (militar),
+  Enseada Coral (praia), Vila Ronrom (tranquila, com gatos) e Cromo-9 (néon): prédios, roupas, paisagem e até 10
+  personagens com nome e bio. Só aparência.
+- **Loja de pacotes.** Skins, temas, efeitos, pets e equipes prontas por área: os oficiais vêm junto e funcionam
   sem internet; os **modelos da comunidade** aparecem quando você pede.
 - **Privado por padrão.** Banco e arquivos cifrados com a sua senha, frase de recuperação de 24 palavras, 2º fator
   opcional (TOTP e passkeys), backup conferido e restauração com desfazer.

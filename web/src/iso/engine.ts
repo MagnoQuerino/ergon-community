@@ -23,6 +23,8 @@ import { RES, insidePoly, project, unproject, type P2 } from './projection.ts';
 import { figureSprite, hashOf, lookFor, npcLook, type Expr, type Facing, type Gesture, type Look, type Pose, type Sprite } from './figures.ts';
 import { bandHighlight, buildingBox, closedArt, openArt, type ArtItem, type Layer, type OpenArt } from './buildingArt.ts';
 import { CHUNK, areaHits, boxPoly, cityItems, drawGroundChunk, type AreaHit, type CityItem } from './areaArt.ts';
+import { agentSkinLook, lookFromSkin, skinPack, skinPet, skinTheme, type ActiveSkin } from './skin.ts';
+import type { SkinData } from '../../../shared/skin.ts';
 import { sortItems, type Sortable } from './sort.ts';
 import { THEMES, mix, type Theme, type ThemeId } from './theme.ts';
 import { paintFx, paintPet } from './cosmetics.ts';
@@ -200,7 +202,8 @@ export class IsoEngine {
     if (key === this.townKey) return;
     const old = this.town;
     this.townKey = key;
-    this.town = new Town(structs);
+    this.lastStructs = structs;
+    this.town = new Town(structs, this.skin ? skinPack(this.skin.data) : undefined);
     this.items = cityItems(this.town, this.theme);
     this.hitsArea = areaHits(this.town);
     this.chunks.clear();
@@ -233,25 +236,51 @@ export class IsoEngine {
     this.invalidate();
   }
 
-  // pacotes .ergon instalados (só dados): cores por cima do tema, efeitos e pets por agente
+  // pacotes .ergon instalados (só dados): skin, cores por cima do tema, efeitos e pets por agente
+  private skin: ActiveSkin | null = null;
+  private skinKey = '';
+  private lastStructs: StructureIn[] = [];
   private themeId: ThemeId = 'dia';
   private themeOverride: { base: ThemeId; colors: Record<string, string> } | null = null;
   private fxOf = new Map<string, Array<{ effect: string; color: string; intensity: number }>>();
   private petOf = new Map<string, { species: string; color: string }>();
 
-  setCosmetics(c: { theme: { base: ThemeId; colors: Record<string, string> } | null; effects: Array<{ agentId: string; effect: string; color: string; intensity: number }>; pets: Array<{ agentId: string; species: string; color: string }> }): void {
+  setCosmetics(c: { skin?: { data: SkinData; characters: Array<{ agentId: string; index: number }> } | null; theme: { base: ThemeId; colors: Record<string, string> } | null; effects: Array<{ agentId: string; effect: string; color: string; intensity: number }>; pets: Array<{ agentId: string; species: string; color: string }> }): void {
     this.fxOf = new Map(); for (const e of c.effects) this.fxOf.set(e.agentId, [...(this.fxOf.get(e.agentId) ?? []), e]);
+    const skinKey = c.skin ? JSON.stringify([c.skin.data.id, c.skin.data, c.skin.characters]) : '';
+    const skinChanged = skinKey !== this.skinKey;
+    if (skinChanged) {
+      this.skinKey = skinKey;
+      this.skin = c.skin ? { data: c.skin.data, characters: new Map(c.skin.characters.map((x) => [x.agentId, x.index])) } : null;
+      this.skinPets.clear();
+    }
     this.petOf = new Map(c.pets.map((x) => [x.agentId, x]));
     const before = JSON.stringify(this.themeOverride);
     this.themeOverride = c.theme;
-    if (JSON.stringify(c.theme) !== before) { const id = this.themeId; this.themeId = '' as ThemeId; this.setTheme(id); }
+    if (skinChanged || JSON.stringify(c.theme) !== before) {
+      if (skinChanged && this.lastStructs.length) { this.townKey = ''; this.setTown(this.lastStructs); }
+      const id = this.themeId; this.themeId = '' as ThemeId; this.setTheme(id);
+    }
     this.invalidate();
   }
+
+  /** Aparência do agente: a da skin ativa (personagem ou sorteada) ou a de sempre. */
+  private lookOf(a: SceneAgent, th: Theme): Look { return this.skin ? agentSkinLook(a, this.skin, th) : lookFor(a, th); }
+  /** Pet da skin (sorteado uma vez por agente; o pet de um pacote tem prioridade). */
+  private skinPets = new Map<string, { species: string; color: string } | null>();
+  private skinPetOf(id: string): { species: string; color: string } | null {
+    if (!this.skin) return null;
+    if (!this.skinPets.has(id)) this.skinPets.set(id, skinPet(id, this.skin.data));
+    return this.skinPets.get(id) ?? null;
+  }
+  /** Com uma skin sem personagem na praça, o anfitrião grego não aparece. */
+  private npcVisible(): boolean { return !this.skin || !!this.skin.data.npc; }
 
   /** Cores do pacote só onde o tema já tem uma cor simples (nada de estrutura nova). */
   private themed(id: ThemeId): Theme {
     const o = this.themeOverride;
-    const base = THEMES[o?.base ?? id] ?? THEMES.dia;
+    const mode: ThemeId = (o?.base ?? id) === 'noite' ? 'noite' : 'dia';
+    const base = this.skin ? skinTheme(THEMES[mode], this.skin.data, mode) : THEMES[mode] ?? THEMES.dia;
     if (!o) return base;
     const out: Record<string, unknown> = { ...base };
     for (const [k, v] of Object.entries(o.colors)) if (typeof out[k] === 'string' && /^#[0-9a-f]{6}$/i.test(v)) out[k] = v;
@@ -263,8 +292,8 @@ export class IsoEngine {
     this.themeId = id;
     const th = this.themed(id);
     if (th === this.theme) return;
-    this.theme = th; this.npc = npcLook(th);
-    for (const rt of this.rts.values()) rt.look = lookFor(rt.a, th);
+    this.theme = th; this.npc = this.skin?.data.npc ? lookFromSkin(this.skin.data.npc.look, this.skin.data, '#9b2d30', th) : npcLook(th);
+    for (const rt of this.rts.values()) rt.look = this.lookOf(rt.a, th);
     this.items = cityItems(this.town, th);
     this.chunks.clear();
     this.invalidate();
@@ -298,7 +327,7 @@ export class IsoEngine {
       const rt = this.rts.get(a.id);
       if (!rt) {
         this.rts.set(a.id, {
-          a, look: lookFor(a, this.theme), pos: [spot.p[0], spot.y, spot.p[1]], loc: spot.loc, mover: null, seated: target === 'seat', visual, spotKey: key,
+          a, look: this.lookOf(a, this.theme), pos: [spot.p[0], spot.y, spot.p[1]], loc: spot.loc, mover: null, seated: target === 'seat', visual, spotKey: key,
           facing: 'front', mirror: false, idleMirror: (hashOf(a.name) & 1) === 1, walked: 0,
           life: { mode: 'home', until: now + between(this.rand, [800, 7000]), plan: null, next: null, since: now, toured: false },
           react: null, afterReact: false, outcome: a.outcome, house: houseOfId.get(a.id) ?? 0,
@@ -306,7 +335,7 @@ export class IsoEngine {
         continue;
       }
       rt.house = houseOfId.get(a.id) ?? rt.house;
-      if (rt.a.name !== a.name || rt.a.color !== a.color || rt.a.role !== a.role || rt.a.key !== a.key || rt.a.seed !== a.seed) rt.look = lookFor(a, this.theme);
+      if (rt.a.name !== a.name || rt.a.color !== a.color || rt.a.role !== a.role || rt.a.key !== a.key || rt.a.seed !== a.seed) rt.look = this.lookOf(a, this.theme);
       const outcomeChanged = !!a.outcome && a.outcome !== rt.outcome;
       rt.outcome = a.outcome;
       const moved = rt.a.building !== a.building || rt.a.level !== a.level || rt.a.slot !== a.slot;
@@ -926,7 +955,8 @@ export class IsoEngine {
         this.chunks.set(key, c);
         if (this.chunks.size > 90) this.chunks.delete(this.chunks.keys().next().value!);
       }
-      g.drawImage(c, ci * span, cj * span, span, span);
+      // 1 pixel de tela a mais em cada bloco: sem emenda entre blocos quando o zoom não é inteiro (aparece no mar)
+      const o = 1 / k; g.drawImage(c, ci * span, cj * span, span + o, span + o);
     }
     for (const h of this.hitsArea) this.drawn.push({ kind: 'area', hit: h });
     this.drawGroundOverlays(now);
@@ -949,7 +979,7 @@ export class IsoEngine {
       if (rt.loc.b || this.hidden(rt)) continue;
       items.push({ kind: 'a', box: this.agentBox(rt.pos), rect: this.agentRect(rt.pos), draw: () => this.drawAgent(rt, now) });
     }
-    if (this.town.areaOf('agora')) items.push({ kind: 'n', box: this.agentBox(this.npcSt.pos), rect: this.agentRect(this.npcSt.pos), draw: () => this.drawNpc(now) });
+    if (this.town.areaOf('agora') && this.npcVisible()) items.push({ kind: 'n', box: this.agentBox(this.npcSt.pos), rect: this.agentRect(this.npcSt.pos), draw: () => this.drawNpc(now) });
     if (this.drag) this.drawDragGhost();
     for (const it of sortItems(items)) it.draw();
 
@@ -1316,7 +1346,7 @@ export class IsoEngine {
 
   /** Pet decorativo (cosmetics.ts): não mexe em nada do agente (nem decisão, nem processo); fica ao lado e pula de leve. */
   private drawPet(rt: Rt, fx: number, fy: number, now: number): void {
-    const p = this.petOf.get(rt.a.id);
+    const p = this.petOf.get(rt.a.id) ?? this.skinPetOf(rt.a.id);
     if (p) paintPet(this.g, p, fx, fy, this.reduced ? 0 : (Math.floor(now / 400) % 2) * RES);
   }
 
@@ -1337,7 +1367,7 @@ export class IsoEngine {
     this.shadow(fx, fy);
     this.g.drawImage(s.canvas, fx - s.ax, fy - s.ay);
     this.drawn.push({ kind: 'agent', id: NPC_ID, x: fx - s.ax, y: fy - s.ay, s });
-    this.agentsDrawn.push({ id: NPC_ID, fx, fy: fy + RES, name: 'Alexandre Magno', sel: false });
+    this.agentsDrawn.push({ id: NPC_ID, fx, fy: fy + RES, name: this.skin?.data.npc?.name ?? 'Alexandre Magno', sel: false });
     if (gesture === 'think' && Math.floor(now / 1700) % 2 === 0) this.drawIcon(BUBBLE_ROWS.think, { o: this.theme.outline, w: '#fbf7ee', d: this.theme.outline }, fx + 5 * RES, fy - STAND_HEAD - 8 * RES);
   }
 

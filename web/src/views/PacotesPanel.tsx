@@ -10,7 +10,7 @@ import { THEMES } from '../iso/theme.ts';
 interface Installed { id: string; packageId: string; version: string; kind: string; title: string; verified: boolean; active: boolean; installedAt: string }
 interface Preview { packageId: string; version: string; kind: string; title: string; summary: string; verified: boolean; installable: boolean; reason: string | null; changes: string[] }
 
-const KIND: Record<string, string> = { 'city-theme': 'Tema da cidade', fx: 'Efeito', pet: 'Pet', 'character-look': 'Aparência', 'team-blueprint': 'Equipe', skill: 'Skill', plugin: 'Plugin' };
+const KIND: Record<string, string> = { skin: 'Skin da cidade', 'city-theme': 'Tema da cidade', fx: 'Efeito', pet: 'Pet', 'character-look': 'Aparência', 'team-blueprint': 'Equipe', skill: 'Skill', plugin: 'Plugin' };
 
 /**
  * Configurações › Pacotes: instalar um .ergon (tema, efeitos, pets, aparências, equipe) com prévia e desfazer.

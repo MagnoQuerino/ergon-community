@@ -23,8 +23,18 @@ globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
 export const ORIGIN = 'http://localhost:8787';
 export const FIXTURES = path.resolve(import.meta.dirname, '..', '..', 'fixtures');
 
+// pastas temporárias dos testes: apagadas quando o processo do arquivo de teste termina (alguns testes reabrem a mesma
+// pasta para simular reinício, então não dá para apagar no close); sem isto, cada rodada deixava centenas no disco
+const tmpDirs: string[] = [];
+const openDbs = new Set<{ close(): void }>();
+process.on('exit', () => {
+  for (const db of openDbs) { try { db.close(); } catch { /* já fechado */ } }
+  for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 2 }); } catch { /* arquivo preso: o sistema limpa */ } } });
+
 export function tmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'ergon-test-'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ergon-test-'));
+  tmpDirs.push(d);
+  return d;
 }
 
 export function testConfig(dataDir: string, over: Partial<Config> = {}): Config {
@@ -48,11 +58,12 @@ export async function harness(over: Partial<Config> = {}, opts: { dir?: string; 
   vaults.set(dir, vault);
   // como o index.ts: protegido e aberto → banco cifrado com a chave; sem proteção → em claro (o 1º uso protege)
   const db = new Db(cfg.dbPath, vault.state() === 'open' ? { key: vault.dbKey() } : {});
+  openDbs.add(db);
   db.migrate();
   const built = await buildApp({ cfg, db, vault, hermes: opts.hermes === undefined ? null : opts.hermes, control: opts.control ?? null, motorClients: opts.motorClients, motorFetch: opts.motorFetch });
   return {
     ...built, cfg, dir,
-    async close() { built.executor.stop(); await built.stopBackground(); await built.app.close(); db.close(); },
+    async close() { built.executor.stop(); await built.stopBackground(); await built.app.close(); db.close(); openDbs.delete(db); },
   };
 }
 

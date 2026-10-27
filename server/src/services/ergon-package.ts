@@ -11,13 +11,14 @@
  */
 import crypto from 'node:crypto';
 import { validateBlueprint, type Blueprint } from '../../../shared/blueprint.ts';
+import { validateSkin, type SkinData } from '../../../shared/skin.ts';
 import { readZip } from '../lib/zip.ts';
 
-export const PACKAGE_KINDS = ['city-theme', 'building-pack', 'character-look', 'clothing', 'accessory', 'fx', 'pet', 'team-blueprint', 'routine-blueprint', 'skill', 'plugin'] as const;
+export const PACKAGE_KINDS = ['city-theme', 'skin', 'building-pack', 'character-look', 'clothing', 'accessory', 'fx', 'pet', 'team-blueprint', 'routine-blueprint', 'skill', 'plugin'] as const;
 export type PackageKind = typeof PACKAGE_KINDS[number];
 const EXEC_KINDS = new Set<PackageKind>(['skill', 'plugin']);
 /** tipos que esta versão instala (o resto valida, mas fica para versões seguintes) */
-export const INSTALLABLE = new Set<PackageKind>(['city-theme', 'character-look', 'fx', 'pet', 'team-blueprint']);
+export const INSTALLABLE = new Set<PackageKind>(['city-theme', 'skin', 'character-look', 'fx', 'pet', 'team-blueprint']);
 
 const LIMITS = { bytes: 20 * 1024 * 1024, entries: 200, total: 40 * 1024 * 1024, ratio: 100, imagePx: 1024, depth: 4 };
 const EXT = /\.(json|png|webp)$/;
@@ -42,6 +43,8 @@ export interface PackageData {
   pets?: Array<{ target: Target; species: 'gato' | 'coruja' | 'cao' | 'tartaruga'; color: string }>;
   looks?: Array<{ target: Target; seed: number }>;
   blueprint?: Blueprint;
+  /** skin da cidade (shared/skin.ts): paleta, arquitetura, roupas, decoração e até 10 personagens */
+  skin?: SkinData;
 }
 export interface ValidatedPackage { manifest: Manifest; data: PackageData; assets: Record<string, Buffer>; verified: boolean; keyId: string | null; sha256: string; installable: boolean }
 
@@ -93,6 +96,10 @@ function checkData(kind: PackageKind, d: Record<string, unknown>, e: string[]) {
     only(['looks']);
     if (!Array.isArray(d.looks) || !d.looks.length || d.looks.length > 200) return void e.push('aparências: 1 a 200');
     d.looks.forEach((x: Record<string, unknown>, i) => { checkTarget(x.target, `aparência ${i}`, e); if (!Number.isInteger(x.seed) || (x.seed as number) < 0 || (x.seed as number) > 2 ** 31 - 1) e.push(`aparência ${i}: semente`); });
+  } else if (kind === 'skin') {
+    only(['skin']);
+    const v = validateSkin(d.skin);
+    if (!v.ok) e.push(...v.errors.slice(0, 12));
   } else if (kind === 'team-blueprint') {
     only(['blueprint']);
     const v = validateBlueprint(d.blueprint);
