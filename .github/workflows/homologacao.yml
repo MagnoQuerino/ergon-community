@@ -1,0 +1,82 @@
+# Homologação dos pacotes PUBLICADOS, em máquinas limpas e sem login no registro de imagens: baixa a versão da página de
+# versões como uma pessoa baixaria e instala. Roda depois de cada lançamento e quando pedido.
+name: Homologação
+on:
+  workflow_run:
+    workflows: [Lançamento]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-linux:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sem login no registro (as imagens precisam ser públicas)
+        run: docker logout ghcr.io || true
+      - name: Pacote Docker publicado, instalado com o lançador
+        run: REPO=${{ github.repository }} bash scripts/homologar-pacote.sh
+
+  desktop-linux:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - imagem: ubuntu:22.04
+            modo: deb
+          - imagem: ubuntu:24.04
+            modo: deb
+          - imagem: debian:12
+            modo: deb
+          - imagem: ubuntu:24.04
+            modo: appimage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pacote do desktop da versão publicada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p pkg out
+          gh release download --repo ${{ github.repository }} --dir pkg --pattern '*.${{ matrix.modo == 'deb' && 'deb' || 'AppImage' }}'
+          ls -l pkg
+      - name: Instalação num ${{ matrix.imagem }} limpo (${{ matrix.modo }})
+        run: docker run --rm -v "$PWD/pkg:/pkg:ro" -v "$PWD/out:/out" -v "$PWD/desktop/linux:/t:ro" ${{ matrix.imagem }} bash /t/testar-limpo.sh ${{ matrix.modo }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: homologacao-${{ matrix.modo }}-${{ strategy.job-index }}
+          path: out
+
+  desktop-windows:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalador da versão publicada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p pkg
+          gh release download --repo ${{ github.repository }} --dir pkg --pattern '*-setup.exe'
+          ls -l pkg
+      - name: Instalar como uma pessoa (páginas do instalador), abrir e fechar
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem pkg -Filter *-setup.exe | Select-Object -First 1).FullName
+          powershell -NoProfile -ExecutionPolicy Bypass -File desktop\testes\instalador-windows.ps1 -Instalador $exe -Saida out\instalar
+      - name: Desinstalar
+        if: always()
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File desktop\testes\instalador-windows.ps1 -Desinstalar -Saida out\desinstalar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: homologacao-windows
+          path: out
