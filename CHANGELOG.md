@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.0.1
+
+- `ergon instalar` instala o Ergon numa pasta sua e põe o comando `ergon` no PATH: depois disso, `ergon` funciona
+  de qualquer terminal e a pasta do zip pode ser apagada.
+- `ergon remover` tira o Ergon do computador e guarda os dados (instalar de novo volta de onde parou);
+  `ergon remover --tudo` apaga tudo, com confirmação.
+
 ## 1.0.0
 
 Primeira versão pública do Ergon Community.

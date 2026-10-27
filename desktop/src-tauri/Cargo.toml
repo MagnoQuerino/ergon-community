@@ -1,6 +1,6 @@
 [package]
 name = "ergon-desktop"
-version = "1.0.0"
+version = "1.0.1"
 description = "Ergon Desktop: o mesmo Ergon, numa janela própria"
 authors = ["Os autores do Ergon"]
 license = "UNLICENSED"

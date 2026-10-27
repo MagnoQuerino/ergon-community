@@ -1,7 +1,12 @@
 ﻿<#
-  Ergon — lançador local (Windows). Use pelo atalho:  .\ergon.cmd <comando>
+  Ergon — lançador local (Windows). Depois de instalar, use de qualquer terminal:  ergon <comando>
 
-    instalar                     prepara os segredos, sobe o Ergon e abre o navegador
+    instalar                     instala o Ergon numa pasta sua (%LOCALAPPDATA%\Programs\Ergon), põe o comando
+                                 "ergon" no PATH, prepara os segredos, sobe o Ergon e abre o navegador; a pasta do
+                                 zip pode ser apagada depois
+    remover                      tira o Ergon do computador e GUARDA os dados (conversas, tarefas, arquivos,
+                                 conexões, segredos e backups): instalar de novo volta de onde parou
+    remover --tudo               tira o Ergon e APAGA os dados, os segredos e os backups (pede confirmação)
     iniciar | parar | status     liga, desliga, mostra o estado
     subir                        só liga (abre o Docker Desktop se preciso e sobe os serviços), sem instalar nada no
                                  início do Windows: é o que o aplicativo Ergon Desktop usa
@@ -22,8 +27,8 @@
                                  (para computadores que travam assim); remover volta ao início do Docker
 
   Nunca exibe segredos. Não altera nada fora da pasta do Ergon, de %USERPROFILE%\.ergon, de %LOCALAPPDATA%\Ergon,
-  dos atalhos do Ergon na pasta Inicializar e, com "docker instalar", da entrada do Docker no início do Windows e das
-  pastas de sockets do Docker (que ele recria sozinho).
+  de %LOCALAPPDATA%\Programs\Ergon e do PATH do usuário, dos atalhos do Ergon na pasta Inicializar e, com "docker
+  instalar", da entrada do Docker no início do Windows e das pastas de sockets do Docker (que ele recria sozinho).
 #>
 param([Parameter(Position = 0)][string]$Comando = 'ajuda', [Parameter(Position = 1)][string]$Opcao = '')
 # "Continue": no Windows PowerShell 5.1, "Stop" transforma qualquer linha de stderr do docker/git em erro fatal.
@@ -38,6 +43,9 @@ $Manifesto = 'https://github.com/MagnoQuerino/ergon-community/releases/latest/do
 $Inicializar = Join-Path ([Environment]::GetFolderPath('Startup')) 'Ergon - ajudante.vbs'
 $Antigo = Join-Path ([Environment]::GetFolderPath('Startup')) 'Ergon - destravar.cmd'
 $Guardada = Join-Path $Local 'destravar.json'
+# onde o pacote fica instalado (o comando "ergon" aponta para cá); ERGON_PROGRAM_DIR: testes isolados
+$Programa = if ($env:ERGON_PROGRAM_DIR) { $env:ERGON_PROGRAM_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\Ergon' }
+$ArquivosDoPacote = @('ergon.ps1', 'ergon.cmd', 'ergon.sh', 'docker-compose.yml', 'LEIA-ME.md', 'VERSAO')
 
 function Say([string]$m) { Write-Host "[ergon] $m" }
 function Fail([string]$m) { Write-Host "[ergon] $m" -ForegroundColor Red; exit 1 }
@@ -95,6 +103,74 @@ function Register-Install {
     $json = [ordered]@{ raiz = $Raiz; porta = [int]$Porta; atualizado = (Get-Date).ToString('s') } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText($f, $json, (New-Object Text.UTF8Encoding $false))
   } catch { }
+}
+
+# ---------------------------------------------------------------- instalação fixa e "ergon" em qualquer terminal
+# PATH do usuário (ERGON_PATH_FILE: testes guardam num arquivo em vez do registro)
+function Get-UserPathRaw { if ($env:ERGON_PATH_FILE) { if (Test-Path $env:ERGON_PATH_FILE) { return (Get-Content $env:ERGON_PATH_FILE -Raw).Trim() }; return '' }; return [Environment]::GetEnvironmentVariable('Path', 'User') }
+function Set-UserPathRaw([string]$v) { if ($env:ERGON_PATH_FILE) { Set-Content -Path $env:ERGON_PATH_FILE -Value $v; return }; [Environment]::SetEnvironmentVariable('Path', $v, 'User') }
+function Get-UserPath { return @(((Get-UserPathRaw) -split ';') | Where-Object { $_ }) }
+function Add-UserPath([string]$d) {
+  $p = Get-UserPath
+  if ($p | Where-Object { $_.TrimEnd('\') -ieq $d.TrimEnd('\') }) { return }
+  Set-UserPathRaw (($p + $d) -join ';')
+  Say "Comando ergon disponível em qualquer terminal novo (a pasta $d entrou no PATH do usuário)."
+}
+function Remove-UserPath([string]$d) {
+  $p = Get-UserPath; $q = @($p | Where-Object { $_.TrimEnd('\') -ine $d.TrimEnd('\') })
+  if ($q.Count -ne $p.Count) { Set-UserPathRaw ($q -join ';'); Say "A pasta $d saiu do PATH do usuário." }
+}
+function Same-Dir([string]$a, [string]$b) { return ([IO.Path]::GetFullPath($a).TrimEnd('\') -ieq [IO.Path]::GetFullPath($b).TrimEnd('\')) }
+# Pacote de versão: copia o lançador e o compose para a pasta do programa e devolve essa pasta. Cópia do código
+# (desenvolvimento): fica onde está, e o "ergon" passa a apontar para ela.
+function Install-Program {
+  if ($Fonte) { Add-UserPath $Raiz; Say "Cópia do código: o comando ergon usa esta pasta ($Raiz). Não a apague."; return $Raiz }
+  if (Same-Dir $Raiz $Programa) { Add-UserPath $Programa; return $Programa }
+  New-Item -ItemType Directory -Force -Path $Programa | Out-Null
+  foreach ($a in $ArquivosDoPacote) { $o = Join-Path $Raiz $a; if (Test-Path $o) { Copy-Item -LiteralPath $o -Destination (Join-Path $Programa $a) -Force } }
+  # o .env de uma instalação anterior (porta, opções) fica; o do zip só entra se não houver nenhum
+  if ((Test-Path (Join-Path $Raiz '.env')) -and -not (Test-Path (Join-Path $Programa '.env'))) { Copy-Item (Join-Path $Raiz '.env') (Join-Path $Programa '.env') }
+  Add-UserPath $Programa
+  Say "Ergon instalado em $Programa."
+  return $Programa
+}
+
+# Tira o Ergon do computador. Sem -Tudo, os dados ficam (volumes do Docker, segredos e backups em ~/.ergon).
+function Remove-Ergon([switch]$Tudo) {
+  if ($Tudo) {
+    Say 'Isto APAGA tudo o que o Ergon guardou neste computador: conversas, tarefas, agentes, conexões, arquivos, a memória do motor, os segredos e os backups. Não tem volta.'
+    $r = if ($env:ERGON_CONFIRMAR) { $env:ERGON_CONFIRMAR } else { Read-Host 'Para confirmar, digite APAGAR' }
+    if ($r -cne 'APAGAR') { Fail 'Nada foi apagado.' }
+  }
+  if (Test-DockerUp) {
+    # motores por pessoa (criados pelo gerente): os contêineres saem; os cofres deles são dados
+    $motores = @(& $DockerCli ps -aq --filter 'label=ergon.motor' 2>$null)
+    $cofres = @($motores | ForEach-Object { & $DockerCli inspect --format '{{ index .Config.Labels "ergon.motor.volume" }}' $_ 2>$null } | Where-Object { $_ })
+    if ($motores.Count) { & $DockerCli rm -f @motores 2>$null | Out-Null }
+    $down = @('down', '--remove-orphans', '--rmi', 'all'); if ($Tudo) { $down += '-v' }
+    Push-Location $Raiz; try { & $DockerCli compose --profile hermes @down 2>$null | Out-Null } finally { Pop-Location }
+    if ($Tudo) {
+      $vols = @(& $DockerCli volume ls -q 2>$null | Where-Object { $_ -like "$($Projeto)_*" -or $cofres -contains $_ })
+      if ($vols.Count) { & $DockerCli volume rm -f @vols 2>$null | Out-Null }
+      Say 'Contêineres, imagens e volumes do Ergon apagados.'
+    } else { Say "Contêineres e imagens do Ergon removidos. Os dados ficaram guardados no Docker (volumes $($Projeto)_*)." }
+  } else { Say 'O Docker não está rodando: contêineres, imagens e volumes ficam até você abrir o Docker e rodar "ergon remover" de novo.' }
+  Remove-Helper
+  if (Test-Path $DockerAtalho) { Remove-DockerStart }
+  $reg = if ($env:ERGON_INSTALACAO) { $env:ERGON_INSTALACAO } else { Join-Path $env:USERPROFILE '.ergon\instalacao.json' }
+  Remove-Item -Force -ErrorAction SilentlyContinue $reg
+  if ($Tudo) {
+    foreach ($d in @($Segredos, $Backups, $Local, (Join-Path $env:USERPROFILE '.ergon'))) { if ($d -and (Test-Path $d)) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue } }
+    Say 'Segredos, backups e registros do Ergon apagados.'
+  } else { Say "Segredos e backups guardados em $(Split-Path $Segredos)." }
+  Remove-UserPath $Programa; if (-not (Same-Dir $Raiz $Programa)) { Remove-UserPath $Raiz }
+  if (-not $Fonte -and (Same-Dir $Raiz $Programa)) {
+    # o próprio lançador está nesta pasta: ela sai alguns segundos depois de este comando terminar
+    Start-Process -FilePath 'cmd.exe' -ArgumentList "/c ping -n 4 127.0.0.1 >nul & rd /s /q `"$Programa`"" -WindowStyle Hidden
+    Say "A pasta $Programa sai em alguns segundos."
+  }
+  if ($Tudo) { Say 'Pronto: o Ergon saiu deste computador, com os dados.' }
+  else { Say 'Pronto: o Ergon saiu deste computador. Para voltar com os mesmos dados: baixe o pacote e rode "ergon instalar".' }
 }
 
 function Initialize-Secrets {
@@ -539,7 +615,18 @@ function Remove-DockerStart {
 }
 
 switch ($Comando) {
-  'instalar' { Test-Docker; Initialize-Secrets; Register-Install; Up | Out-Null; Install-Helper; Start-Process $Url }
+  'instalar' {
+    $destino = Install-Program
+    if (-not (Same-Dir $destino $Raiz)) {
+      # continua pela cópia instalada: o registro, o ajudante e o Docker passam a usar a pasta do programa
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $destino 'ergon.ps1') instalar
+      if ($LASTEXITCODE -eq 0) { Say "Pode apagar a pasta do zip ($Raiz). Abra um terminal novo e use: ergon status" }
+      exit $LASTEXITCODE
+    }
+    Test-Docker; Initialize-Secrets; Register-Install; Up | Out-Null; Install-Helper
+    if (-not $env:ERGON_SEM_NAVEGADOR) { Start-Process $Url }
+  }
+  'remover' { Remove-Ergon -Tudo:($Opcao -eq '--tudo') }
   'iniciar' { Test-Docker; Register-Install; Compose @('up', '-d'); Install-Helper; $h = Wait-Health 240; if ($h) { Say "No ar em $Url$(if ($h.sealed) { ' (trancado: digite a senha)' })" } else { Fail 'Não respondeu.' } }
   'subir' {
     if (-not (Test-DockerUp)) { Say 'Abrindo o Docker Desktop…'; Start-DockerSafe }
@@ -559,5 +646,5 @@ switch ($Comando) {
   'atualizar' { Test-Docker; Update }
   'ajudante' { if ($Opcao -eq 'remover') { Remove-Helper } elseif ($Opcao -eq 'instalar') { Install-Helper } else { Run-Helper } }
   'docker' { if ($Opcao -eq 'remover') { Remove-DockerStart } elseif ($Opcao -eq 'instalar') { Install-DockerStart } else { Start-DockerSafe } }
-  default { Get-Content $PSCommandPath -TotalCount 25 | Select-Object -Skip 1 | ForEach-Object { $_ -replace '^#>?\s?', '' } }
+  default { Get-Content $PSCommandPath -TotalCount 31 | Select-Object -Skip 1 | ForEach-Object { $_ -replace '^#>?\s?', '' } }
 }

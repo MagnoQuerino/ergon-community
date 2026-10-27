@@ -21,7 +21,9 @@ Windows:       .\ergon.cmd instalar
 macOS/Linux:   ./ergon.sh instalar
 ```
 
-O lançador gera os segredos internos em `~/.ergon/secrets` (fora desta pasta; nunca no OneDrive), sobe os
+O lançador instala o Ergon numa pasta sua (Windows: `%LOCALAPPDATA%ProgramsErgon`; macOS/Linux:
+`~/.local/share/ergon`) e põe o comando `ergon` no PATH: depois disso, use `ergon` de qualquer terminal novo e
+apague a pasta do zip se quiser. Ele também gera os segredos internos em `~/.ergon/secrets` (nunca no OneDrive), sobe os
 contêineres, deixa o ajudante do computador pronto (ele começa sozinho ao entrar no computador) e abre o
 navegador. No primeiro acesso:
 
@@ -44,6 +46,8 @@ Quer uma janela própria em vez do navegador? Instale também o [Ergon Desktop](
 | `ergon restaurar <pasta>` | volta a um backup (veja abaixo) |
 | `ergon atualizar` | backup + versão nova (o Ergon avisa quando sai uma); a atual fica guardada e, se a nova não responder, volta sozinho para ela |
 | `ergon logs` | últimas linhas, para diagnóstico |
+| `ergon remover` | tira o Ergon do computador e **guarda os dados** (conversas, tarefas, arquivos, conexões, segredos e backups): instalar de novo volta de onde parou |
+| `ergon remover --tudo` | tira o Ergon e **apaga** os dados, os segredos e os backups (pede para digitar APAGAR) |
 
 ## Backup e restauração
 

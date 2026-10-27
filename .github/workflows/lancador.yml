@@ -1,0 +1,58 @@
+# Lançador antes do lançamento: monta o pacote local com o lançador DESTE commit e as imagens já publicadas, e faz o
+# ciclo completo numa máquina limpa (instalar, apagar o zip, usar "ergon" de outra pasta, remover guardando os dados,
+# instalar de novo, remover --tudo). No Windows, o PATH e a pasta do programa de verdade (sem Docker Linux no runner).
+name: Lançador
+on:
+  push:
+    branches: [main]
+    paths: ['ergon.sh', 'ergon.ps1', 'ergon.cmd', 'deploy/local/**', 'scripts/homologar-pacote.sh', '.github/workflows/lancador.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pacote com o lançador deste commit e as imagens publicadas
+        run: |
+          V=$(curl -fsSL "https://github.com/${{ github.repository }}/releases/latest/download/latest.json" | jq -r .version)
+          DONO=$(echo '${{ github.repository_owner }}' | tr 'A-Z' 'a-z')
+          mkdir -p pacote
+          sed -e "s/__VERSAO__/$V/g" -e "s/__DONO__/$DONO/g" -e "s#__REPO__#${{ github.repository }}#g" deploy/local/docker-compose.yml > pacote/docker-compose.yml
+          cp ergon.ps1 ergon.cmd ergon.sh pacote/ && chmod +x pacote/ergon.sh
+          cp docs/INSTALAR.md pacote/LEIA-ME.md
+          echo "$V" > pacote/VERSAO
+      - name: Sem login no registro
+        run: docker logout ghcr.io || true
+      - name: Ciclo completo com Docker de verdade
+        run: REPO=${{ github.repository }} PACOTE_DIR=pacote bash scripts/homologar-pacote.sh
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar põe o "ergon" no PATH e numa pasta fixa; remover tira os dois
+        shell: pwsh
+        run: |
+          $z = Join-Path $env:RUNNER_TEMP 'zip'; New-Item -ItemType Directory -Force $z | Out-Null
+          Copy-Item ergon.ps1, ergon.cmd, ergon.sh $z; Copy-Item deploy/local/docker-compose.yml "$z\docker-compose.yml"; Set-Content "$z\VERSAO" '0.0.0'
+          $prog = Join-Path $env:LOCALAPPDATA 'Programs\Ergon'
+          # sem Docker Linux no runner o "instalar" para no Docker, depois de pôr o programa no lugar
+          & cmd /c "`"$z\ergon.cmd`" instalar"
+          if (-not (Test-Path "$prog\ergon.cmd")) { throw 'o programa não foi para a pasta fixa' }
+          $p = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($p -notlike "*$prog*") { throw "a pasta do programa não entrou no PATH: $p" }
+          Remove-Item -Recurse -Force $z
+          # um terminal novo acha o "ergon" pelo PATH do usuário
+          $env:Path = "$p;$env:Path"
+          $ajuda = & cmd /c "cd /d %TEMP% && ergon" 2>&1 | Out-String
+          if ($ajuda -notmatch 'remover --tudo') { throw "o comando ergon não respondeu de outra pasta: $ajuda" }
+          Write-Host 'ok    instalado numa pasta fixa, no PATH, e "ergon" responde de outra pasta'
+          & cmd /c "cd /d %TEMP% && ergon remover"
+          Start-Sleep -Seconds 8
+          if (Test-Path $prog) { throw 'a pasta do programa ficou' }
+          if ([Environment]::GetEnvironmentVariable('Path', 'User') -like "*$prog*") { throw 'o PATH ficou com a pasta do programa' }
+          Write-Host 'ok    ergon remover tirou a pasta do programa e o PATH'

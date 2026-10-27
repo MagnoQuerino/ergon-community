@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Ergon — lançador local (macOS e Linux). Uso: ./ergon.sh <comando>
+# Ergon — lançador local (macOS e Linux). Depois de instalar, use de qualquer terminal: ergon <comando>
 #
-#   instalar                     prepara os segredos, sobe o Ergon e abre o navegador
+#   instalar                     instala o Ergon numa pasta sua (~/.local/share/ergon), põe o comando "ergon" em
+#                                ~/.local/bin, prepara os segredos, sobe o Ergon e abre o navegador; a pasta do zip
+#                                pode ser apagada depois
+#   remover                      tira o Ergon do computador e GUARDA os dados (conversas, tarefas, arquivos,
+#                                conexões, segredos e backups): instalar de novo volta de onde parou
+#   remover --tudo               tira o Ergon e APAGA os dados, os segredos e os backups (pede confirmação)
 #   iniciar | parar | status     liga, desliga, mostra o estado
 #   subir                        só liga os serviços (sem instalar nada no início da sessão): é o que o
 #                                aplicativo Ergon Desktop usa
@@ -17,7 +22,9 @@
 #                                destranca o Ergon depois de reiniciar
 #   ajudante remover             tira o ajudante do início da sessão e apaga a chave guardada
 #
-# Nunca exibe segredos. Não altera nada fora da pasta do Ergon, de ~/.ergon e do início automático do ajudante.
+# Nunca exibe segredos. Não altera nada fora da pasta do Ergon, de ~/.ergon, de ~/.local/share/ergon, do comando
+# ~/.local/bin/ergon (e de uma linha marcada no ~/.profile, se ~/.local/bin não estiver no PATH) e do início
+# automático do ajudante.
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -312,8 +319,83 @@ remover_ajudante() {
   say 'Ajudante removido e chave apagada deste computador. O destrancar sozinho fica desligado.'
 }
 
+# ---------------------------------------------------------------- instalação fixa e "ergon" em qualquer terminal
+PROGRAMA="${ERGON_PROGRAM_DIR:-$HOME/.local/share/ergon}"
+BIN="${ERGON_BIN_DIR:-$HOME/.local/bin}"
+MARCA='# ergon: comando no PATH'
+mesma() { [[ -d "$1" && -d "$2" && "$(cd "$1" && pwd -P)" == "$(cd "$2" && pwd -P)" ]]; }
+perfis() { if [[ "$SO" == Darwin ]]; then echo "$HOME/.zprofile $HOME/.profile"; else echo "$HOME/.profile"; fi; }
+# o comando "ergon": um atalho pequeno em ~/.local/bin que chama o lançador instalado
+ligar_comando() {
+  mkdir -p "$BIN"
+  printf '#!/bin/sh\nexec /bin/bash "%s/ergon.sh" "$@"\n' "$1" > "$BIN/ergon"; chmod 755 "$BIN/ergon"
+  case ":$PATH:" in
+    *":$BIN:"*) say "Comando ergon disponível em qualquer terminal ($BIN/ergon)." ;;
+    *) local p; for p in $(perfis); do grep -qF "$MARCA" "$p" 2>/dev/null || printf '\nexport PATH="%s:$PATH" %s\n' "$BIN" "$MARCA" >> "$p"; done
+       say "Comando ergon instalado em $BIN/ergon. Abra um terminal novo para usar: ergon status" ;;
+  esac
+}
+desligar_comando() {
+  rm -f "$BIN/ergon"
+  local p; for p in $(perfis); do [[ -f "$p" ]] && grep -qF "$MARCA" "$p" && { grep -vF "$MARCA" "$p" > "$p.ergon-tmp" && mv "$p.ergon-tmp" "$p"; }; done
+  return 0
+}
+# Pacote de versão: copia o lançador e o compose para a pasta do programa (DESTINO). Cópia do código
+# (desenvolvimento): fica onde está, e o "ergon" passa a apontar para ela.
+instalar_programa() {
+  if (( FONTE )); then DESTINO="$RAIZ"; ligar_comando "$RAIZ"; say "Cópia do código: o comando ergon usa esta pasta ($RAIZ). Não a apague."; return; fi
+  DESTINO="$PROGRAMA"; mkdir -p "$PROGRAMA"
+  if ! mesma "$RAIZ" "$PROGRAMA"; then
+    local a; for a in ergon.sh ergon.ps1 ergon.cmd docker-compose.yml LEIA-ME.md VERSAO; do [[ -f "$RAIZ/$a" ]] && cp -f "$RAIZ/$a" "$PROGRAMA/$a"; done
+    # o .env de uma instalação anterior (porta, opções) fica; o do zip só entra se não houver nenhum
+    [[ -f "$RAIZ/.env" && ! -f "$PROGRAMA/.env" ]] && cp "$RAIZ/.env" "$PROGRAMA/.env"
+    chmod 755 "$PROGRAMA/ergon.sh"; say "Ergon instalado em $PROGRAMA."
+  fi
+  ligar_comando "$PROGRAMA"
+}
+
+# Tira o Ergon do computador. Sem --tudo, os dados ficam (volumes do Docker, segredos e backups em ~/.ergon).
+remover() {
+  local tudo=0; [[ "${1:-}" == --tudo ]] && tudo=1
+  if (( tudo )); then
+    say 'Isto APAGA tudo o que o Ergon guardou neste computador: conversas, tarefas, agentes, conexões, arquivos, a memória do motor, os segredos e os backups. Não tem volta.'
+    local r="${ERGON_CONFIRMAR:-}"; [[ -n "$r" ]] || read -r -p 'Para confirmar, digite APAGAR: ' r
+    [[ "$r" == APAGAR ]] || fail 'Nada foi apagado.'
+  fi
+  if docker info >/dev/null 2>&1; then
+    # motores por pessoa (criados pelo gerente): os contêineres saem; os cofres deles são dados
+    local motores cofres='' m vols
+    motores="$(docker ps -aq --filter label=ergon.motor 2>/dev/null || true)"
+    for m in $motores; do cofres="$cofres $(docker inspect --format '{{ index .Config.Labels "ergon.motor.volume" }}' "$m" 2>/dev/null || true)"; done
+    [[ -n "$motores" ]] && { docker rm -f $motores >/dev/null 2>&1 || true; }
+    if (( tudo )); then
+      compose down --remove-orphans --rmi all -v >/dev/null 2>&1 || true
+      vols="$(docker volume ls -q 2>/dev/null | grep -E "^${PROJETO}_" || true) $cofres"; vols="$(echo $vols)"
+      [[ -n "$vols" ]] && { docker volume rm -f $vols >/dev/null 2>&1 || true; }
+      say 'Contêineres, imagens e volumes do Ergon apagados.'
+    else
+      compose down --remove-orphans --rmi all >/dev/null 2>&1 || true
+      say "Contêineres e imagens do Ergon removidos. Os dados ficaram guardados no Docker (volumes ${PROJETO}_*)."
+    fi
+  else say 'O Docker não está rodando: contêineres, imagens e volumes ficam até você abrir o Docker e rodar "ergon remover" de novo.'; fi
+  remover_ajudante || true
+  rm -f "${ERGON_INSTALACAO:-$HOME/.ergon/instalacao.json}"
+  if (( tudo )); then rm -rf "$SEGREDOS" "$BACKUPS" "$LOCAL" "$HOME/.ergon"; say 'Segredos, backups e registros do Ergon apagados.'
+  else say "Segredos e backups guardados em $(dirname "$SEGREDOS")."; fi
+  desligar_comando
+  if (( ! FONTE )) && mesma "$RAIZ" "$PROGRAMA"; then rm -rf "$PROGRAMA"; fi
+  if (( tudo )); then say 'Pronto: o Ergon saiu deste computador, com os dados.'
+  else say 'Pronto: o Ergon saiu deste computador. Para voltar com os mesmos dados: baixe o pacote e rode "./ergon.sh instalar".'; fi
+}
+
 case "${1:-ajuda}" in
-  instalar) need_docker; init_secrets; registrar; up; instalar_ajudante; abrir ;;
+  instalar) instalar_programa
+    if ! mesma "$DESTINO" "$RAIZ"; then
+      # continua pela cópia instalada: o registro, o ajudante e o Docker passam a usar a pasta do programa
+      /bin/bash "$DESTINO/ergon.sh" instalar; say "Pode apagar a pasta do zip ($RAIZ). Em um terminal novo: ergon status"; exit 0
+    fi
+    need_docker; init_secrets; registrar; up; instalar_ajudante; [[ -n "${ERGON_SEM_NAVEGADOR:-}" ]] || abrir ;;
+  remover) remover "${2:-}" ;;
   iniciar) need_docker; registrar; compose up -d; instalar_ajudante; wait_health 240 >/dev/null && say "No ar em $URL" || fail 'Não respondeu.' ;;
   subir) need_docker; registrar; say 'Ligando os serviços do Ergon e o motor de IA…'; compose up -d
     h="$(wait_health 240)" || fail 'O Ergon não respondeu. Veja: ./ergon.sh logs'; say "No ar em $URL" ;;
@@ -326,5 +408,5 @@ case "${1:-ajuda}" in
   desfazer-restauracao) desfazer_restauracao "${2:-}" ;;
   atualizar) need_docker; atualizar ;;
   ajudante) case "${2:-}" in remover) remover_ajudante ;; instalar) instalar_ajudante ;; *) ajudante ;; esac ;;
-  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac

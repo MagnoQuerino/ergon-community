@@ -36,8 +36,11 @@ Você precisa do **Docker Desktop** (Windows e macOS) ou do **Docker Engine** (L
    macOS/Linux:   ./ergon.sh instalar
    ```
 
-3. O navegador abre em `http://localhost:8787`. Crie a conta, anote a frase de recuperação e conecte uma conta de IA
+3. O Ergon fica instalado numa pasta sua e o comando `ergon` passa a valer em qualquer terminal novo (a pasta do zip
+   pode ser apagada). O navegador abre em `http://localhost:8787`. Crie a conta, anote a frase de recuperação e conecte uma conta de IA
    em **Configurações › IA da equipe**.
+
+Para tirar o Ergon do computador: `ergon remover` (os dados ficam guardados) ou `ergon remover --tudo` (apaga tudo).
 
 Detalhes, backup, atualização e o que fazer se esquecer a senha: [docs/INSTALAR.md](docs/INSTALAR.md).
 

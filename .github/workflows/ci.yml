@@ -54,6 +54,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\teste-docker.ps1
       - name: Atualizar com caminho de volta (Docker, rede e backup simulados)
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\teste-atualizar.ps1
+      - name: Instalar numa pasta fixa e remover (guarda os dados; --tudo apaga) com Docker e PATH simulados
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\teste-instalar.ps1
 
   catalogo:
     runs-on: ubuntu-24.04
