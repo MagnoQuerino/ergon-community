@@ -15,6 +15,7 @@ ok() { echo "ok    $1 — $2"; }
 falha() { echo "FALHA $1 — $2"; R=1; }
 no_ar() { for _ in $(seq 1 150); do curl -fsS "$B/api/health" >/dev/null 2>&1 && return 0; sleep 2; done; return 1; }
 
+[[ -n "${PACOTE_DIR:-}" ]] && PACOTE_DIR="$(cd "$PACOTE_DIR" && pwd)"
 W="$(mktemp -d)"; cd "$W"
 if [[ -n "${PACOTE_DIR:-}" ]]; then
   cp -r "$PACOTE_DIR" "$W/pacote"; V="$(cat "$W/pacote/VERSAO")"; ok "pacote do repositório" "versão $V (imagens publicadas)"
