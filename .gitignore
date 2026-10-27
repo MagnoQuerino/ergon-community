@@ -1,0 +1,10 @@
+node_modules/
+web/dist/
+.data/
+secrets/*
+!secrets/README.md
+.env
+*.sqlite
+*.sqlite-*
+docs/screenshots/*.tmp
+connectors/teams/build/

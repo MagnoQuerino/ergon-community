@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ergon",
+  "mainBinaryName": "ergon-desktop",
+  "version": "../../package.json",
+  "identifier": "io.github.magnoquerino.ergon",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src ipc: http://ipc.localhost",
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "deb", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "Ergon Community",
+    "copyright": "© Os autores do Ergon",
+    "homepage": "https://github.com/MagnoQuerino/ergon-community",
+    "category": "Productivity",
+    "shortDescription": "Sua equipe de agentes de IA, numa janela própria",
+    "longDescription": "O Ergon Desktop abre o Ergon instalado neste computador numa janela própria: confere os serviços locais (Docker), liga o que estiver parado quando você pede e mostra a mesma interface do navegador. Os dados continuam nos serviços do Ergon; remover o aplicativo não apaga nada.",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "sidebarImage": "icons/instalador-lateral.bmp",
+        "languages": ["PortugueseBR"],
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "utils",
+        "recommends": ["libayatana-appindicator3-1"]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  }
+}

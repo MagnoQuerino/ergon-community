@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ergon</title>
+  <link rel="stylesheet" href="abertura.css">
+</head>
+<body>
+  <main class="abertura" aria-labelledby="titulo">
+    <img class="abertura__logo" id="logo" src="ergon-horizontal.svg" alt="Ergon" width="220" height="56">
+    <img class="abertura__carregando" id="carregando" src="ergon-carregando.svg" alt="" width="120" height="120">
+    <p class="abertura__fase" id="fase">Iniciando Ergon</p>
+    <h1 class="abertura__titulo" id="titulo" tabindex="-1">Verificando serviços…</h1>
+    <p class="abertura__texto" id="texto" role="status" aria-live="polite"></p>
+    <ul class="abertura__avisos" id="avisos" hidden></ul>
+    <p class="abertura__linha" id="linha" aria-live="off"></p>
+    <div class="abertura__acoes" id="acoes"></div>
+    <section class="abertura__diagnostico" id="diagnostico" hidden aria-label="Diagnóstico">
+      <h2>Diagnóstico</h2>
+      <ul id="detalhes"></ul>
+      <button type="button" class="botao botao--leve" id="registros">Abrir a pasta de registros</button>
+    </section>
+  </main>
+  <script src="abertura.js"></script>
+</body>
+</html>

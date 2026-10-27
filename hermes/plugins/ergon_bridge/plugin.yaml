@@ -1,0 +1,9 @@
+name: ergon_bridge
+version: "0.2.0"
+description: "Ergon: registra no Ergon cada mensagem admitida de Teams/WhatsApp (post_gateway_admission); barra ferramentas que o agente do Ergon não tem (pre_tool_call); ponte de controle interna com rotas fechadas (contas, modelo padrão, catálogo). Sem chamadas de modelo."
+author: Ergon (MVP local)
+kind: standalone
+provides_tools: []
+provides_hooks:
+  - post_gateway_admission
+  - pre_tool_call

@@ -1,0 +1,118 @@
+# Ergon — cópia do código (desenvolvimento): constrói as imagens aqui. Use o lançador (.\ergon.cmd ou
+# ./ergon.sh): instalar, iniciar, atualizar (git pull + build), backup...  →  http://localhost:8787
+# (abra por "localhost": as passkeys do navegador só valem nesse nome)
+# Motor de IA no perfil "hermes" (o lançador já liga). Pacote de versão (imagens publicadas): deploy/local/.
+name: ergon
+
+services:
+  ergon:
+    build:
+      context: .
+      target: runtime
+    image: ergon:dev
+    ports:
+      - "127.0.0.1:${ERGON_PORT:-8787}:8787"   # só localhost; nunca na LAN
+    env_file:
+      - path: ${ERGON_SECRETS_DIR:-./secrets}/ergon.env   # segredos fora do Git (gerados por npm run secrets:init)
+        required: false
+    environment:
+      ERGON_EXECUTOR: ${ERGON_EXECUTOR:-simulated}
+      ERGON_HERMES_URL: http://hermes:8642
+      ERGON_HERMES_CONTROL_URL: http://hermes:8643   # ponte de controle do plugin (rede interna, token da ponte)
+      ERGON_MAX_CONCURRENT_RUNS: ${ERGON_MAX_CONCURRENT_RUNS:-}   # vazio = sem teto: vale Configurações › Trabalhos ao mesmo tempo
+      ERGON_DAILY_RUN_LIMIT: ${ERGON_DAILY_RUN_LIMIT:-100}
+      ERGON_RUN_TIMEOUT_SECONDS: ${ERGON_RUN_TIMEOUT_SECONDS:-180}
+      ERGON_LONG_RUN_TIMEOUT_SECONDS: ${ERGON_LONG_RUN_TIMEOUT_SECONDS:-600}   # quem pesquisa na web ou executa código
+      ERGON_SLOTS_PER_FLOOR: ${ERGON_SLOTS_PER_FLOOR:-6}
+      ERGON_REVIEW_MAX_ROUNDS: ${ERGON_REVIEW_MAX_ROUNDS:-2}
+      ERGON_ALLOWED_ORIGINS: http://localhost:${ERGON_PORT:-8787},http://127.0.0.1:${ERGON_PORT:-8787}
+      ERGON_TEAMS_ENABLED: ${ERGON_TEAMS_ENABLED:-false}
+      ERGON_TEAMS_TENANT_ID: ${ERGON_TEAMS_TENANT_ID:-}
+      ERGON_TEAMS_ALLOWED_USERS: ${ERGON_TEAMS_ALLOWED_USERS:-}
+      ERGON_WHATSAPP_ENABLED: ${ERGON_WHATSAPP_ENABLED:-false}
+      ERGON_WHATSAPP_OWNER_IDS: ${ERGON_WHATSAPP_OWNER_IDS:-}
+      ERGON_WHATSAPP_MONITORED_CHATS: ${ERGON_WHATSAPP_MONITORED_CHATS:-}
+      ERGON_WHATSAPP_SEND_ENABLED: ${ERGON_WHATSAPP_SEND_ENABLED:-false}
+      ERGON_FIXTURES_ENABLED: ${ERGON_FIXTURES_ENABLED:-false}   # simulações de canal: só para testes
+      ERGON_MS_CLIENT_ID: ${ERGON_MS_CLIENT_ID:-}   # app público do Ergon no Microsoft Entra (login com a conta Microsoft)
+      ERGON_GOOGLE_CLIENT_ID: ${ERGON_GOOGLE_CLIENT_ID:-}   # cliente OAuth do Ergon no Google Cloud; o segredo fica em ergon.env (secrets)
+      ERGON_OAUTH_REDIRECT_BASE: ${ERGON_OAUTH_REDIRECT_BASE:-}   # só se o Ergon for aberto por outro endereço que não localhost
+      ERGON_MODE: local
+      ERGON_PUBLIC_URL: http://localhost:${ERGON_PORT:-8787}
+      ERGON_HERMES_VAULT_URL: http://hermes:8644   # um motor só (sem gerente): o Ergon entrega a chave do cofre dele
+      ERGON_MOTOR_MANAGER_URL: http://motores:8645   # um motor de IA por pessoa
+      ERGON_UPDATE_URL: ${ERGON_UPDATE_URL:-}   # aviso de versão nova (vazio aqui: a cópia do código atualiza com git pull)
+    volumes:
+      - ergon-data:/data          # SQLite, arquivos e backups (volume Docker, fora do OneDrive)
+    networks: [ergon-net, ergon-gerente]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: ${ERGON_MEM_LIMIT:-768m}   # valor de teste, não capacidade medida
+    cpus: ${ERGON_CPUS:-1.0}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  hermes:
+    # Imagem do motor de IA: oficial fixada por digest (v0.22.2) + cofre gocryptfs + plugin do Ergon (hermes/Dockerfile).
+    # Daqui não sai contêiner nenhum: cada pessoa tem o próprio motor, criado pelo gerente de motores ("motores")
+    # com esta mesma imagem e configuração, cofre e conta de IA dela. Subir este serviço remove o
+    # motor de antes (um só para todos, com o token da instalação); o cofre dele fica para a primeira conta.
+    profiles: ["hermes"]
+    build: ./hermes
+    image: ergon-hermes:dev
+    deploy:
+      replicas: 0
+
+  motores:
+    # Gerente de motores: o ÚNICO contêiner com o socket do Docker. Cria, liga, desliga e remove o motor de cada
+    # pessoa — sempre a imagem e a configuração acima (cofre, sem privilégio além do de montar o cofre, sem portas,
+    # sem pastas deste computador); os tokens de cada motor são derivados do da instalação, que nenhum motor recebe.
+    # Só o Ergon fala com ele (rede própria, sem internet, token da instalação). Código: server/src/gerente-motores.ts.
+    profiles: ["hermes"]
+    image: ergon:dev
+    pull_policy: never          # a mesma imagem do Ergon, construída aqui
+    command: ["node", "server/src/gerente-motores.ts"]
+    user: root                  # o socket do Docker é de root
+    env_file:
+      - path: ${ERGON_SECRETS_DIR:-./secrets}/hermes.env   # ERGON_BRIDGE_TOKEN (o da instalação)
+        required: false
+    environment:
+      ERGON_MOTOR_IMAGE: ergon-hermes:dev
+      ERGON_MOTOR_NETWORK: ergon-net
+      ERGON_MOTOR_LEGACY_VOLUME: ergon_hermes-vault     # o cofre do motor de antes, herdado pela primeira conta
+      ERGON_MOTOR_VOLUME_PREFIX: ergon_motor-
+      HERMES_MEM_LIMIT: ${HERMES_MEM_LIMIT:-2g}
+      HERMES_CPUS: ${HERMES_CPUS:-2.0}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [ergon-gerente]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8645/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  ergon-data:
+  hermes-vault:
+  hermes-data:   # antigo, em texto aberto: apague só depois de conferir o motor no cofre
+
+networks:
+  ergon-net:
+    name: ergon-net
+  ergon-gerente:            # só o Ergon e o gerente de motores; sem saída para a internet
+    name: ergon-gerente
+    internal: true

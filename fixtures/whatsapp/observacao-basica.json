@@ -1,0 +1,24 @@
+{
+  "fixture": true,
+  "description": "FIXTURE LOCAL — mensagens no formato Baileys, números e grupos fictícios. Não é WhatsApp conectado; nada é enviado.",
+  "identities": [
+    { "id": "5500000000000", "name": "Proprietário (fixture)", "canCommand": true }
+  ],
+  "events": [
+    { "key": { "remoteJid": "fixture-grupo-projeto@g.us", "fromMe": false, "id": "FXWA0001", "participant": "5500000000101@s.whatsapp.net" },
+      "pushName": "Contato A (fixture)", "messageTimestamp": 1792746000, "message": { "conversation": "Bom dia pessoal" } },
+    { "key": { "remoteJid": "fixture-grupo-projeto@g.us", "fromMe": false, "id": "FXWA0002", "participant": "5500000000102@s.whatsapp.net" },
+      "pushName": "Contato B (fixture)", "messageTimestamp": 1792746060, "message": { "conversation": "Precisamos enviar a proposta revisada até quinta" } },
+    { "key": { "remoteJid": "5500000000000@s.whatsapp.net", "fromMe": false, "id": "FXWA0003" },
+      "pushName": "Proprietário (fixture)", "messageTimestamp": 1792746120, "message": { "conversation": "/tarefa Ligar para o fornecedor de mesas" } },
+    { "key": { "remoteJid": "5500000000999@s.whatsapp.net", "fromMe": false, "id": "FXWA0004" },
+      "pushName": "Pessoa fora da seleção (fixture)", "messageTimestamp": 1792746180, "message": { "conversation": "Oi, tudo bem? Me liga quando puder." } },
+    { "key": { "remoteJid": "fixture-grupo-projeto@g.us", "fromMe": true, "id": "FXWA0005" },
+      "messageTimestamp": 1792746240, "message": { "conversation": "Mensagem enviada pelo próprio número" } },
+    { "key": { "remoteJid": "fixture-grupo-projeto@g.us", "fromMe": false, "id": "FXWA0002", "participant": "5500000000102@s.whatsapp.net" },
+      "pushName": "Contato B (fixture)", "messageTimestamp": 1792746300, "editVersion": "edit-1",
+      "message": { "editedMessage": { "message": { "conversation": "Precisamos enviar a proposta revisada até sexta" } } } },
+    { "key": { "remoteJid": "fixture-grupo-projeto@g.us", "fromMe": false, "id": "FXWA0007", "participant": "5500000000000@s.whatsapp.net" },
+      "pushName": "Proprietário (fixture)", "messageTimestamp": 1792746360, "message": { "conversation": "/tarefa Comando enviado dentro do grupo" } }
+  ]
+}

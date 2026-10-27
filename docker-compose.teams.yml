@@ -1,0 +1,12 @@
+# PREPARADO, NÃO ATIVADO. Uso somente após o checklist em connectors/teams/CHECKLIST.md:
+#   docker compose --profile hermes -f docker-compose.yml -f docker-compose.teams.yml up -d
+# Publica APENAS a porta do webhook do adapter Teams do Hermes (3978) em 127.0.0.1, para um túnel
+# HTTPS iniciado manualmente pelo proprietário (devtunnel/cloudflared/ngrok) apontar para ela.
+# Nunca aponte o túnel para 8787 (painel/API do Ergon) nem para 8642 (API do Hermes).
+services:
+  hermes:
+    environment:
+      TEAMS_PORT: "3978"
+      TEAMS_REQUIRE_MENTION: "true"
+    ports:
+      - "127.0.0.1:3978:3978"

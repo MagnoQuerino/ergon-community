@@ -1,0 +1,103 @@
+# Ergon __VERSAO__ — pacote para instalar neste computador (imagens publicadas; nada é compilado aqui).
+# Use o lançador:  Windows: .\ergon.cmd instalar     macOS/Linux: ./ergon.sh instalar
+# Abra por http://localhost:8787 (as passkeys do navegador só valem nesse nome).
+# Este arquivo é gerado pela esteira de lançamento a partir de deploy/local/docker-compose.yml.
+name: ergon
+
+services:
+  ergon:
+    image: ghcr.io/__DONO__/ergon-community:__VERSAO__
+    ports:
+      - "127.0.0.1:${ERGON_PORT:-8787}:8787"   # só este computador; nunca na rede
+    env_file:
+      - path: ${ERGON_SECRETS_DIR:-./secrets}/ergon.env   # segredos fora desta pasta (gerados pelo lançador)
+        required: false
+    environment:
+      ERGON_MODE: local
+      ERGON_PUBLIC_URL: http://localhost:${ERGON_PORT:-8787}
+      ERGON_EXECUTOR: ${ERGON_EXECUTOR:-hermes}
+      ERGON_HERMES_URL: http://hermes:8642
+      ERGON_HERMES_CONTROL_URL: http://hermes:8643
+      ERGON_HERMES_VAULT_URL: http://hermes:8644
+      ERGON_MOTOR_MANAGER_URL: http://motores:8645   # um motor de IA por pessoa
+      ERGON_UPDATE_URL: ${ERGON_UPDATE_URL:-https://github.com/__REPO__/releases/latest/download/latest.json}
+      ERGON_MAX_CONCURRENT_RUNS: ${ERGON_MAX_CONCURRENT_RUNS:-}
+      ERGON_DAILY_RUN_LIMIT: ${ERGON_DAILY_RUN_LIMIT:-100}
+      ERGON_RUN_TIMEOUT_SECONDS: ${ERGON_RUN_TIMEOUT_SECONDS:-180}
+      ERGON_LONG_RUN_TIMEOUT_SECONDS: ${ERGON_LONG_RUN_TIMEOUT_SECONDS:-600}   # quem pesquisa na web ou executa código
+      ERGON_ALLOWED_ORIGINS: http://localhost:${ERGON_PORT:-8787},http://127.0.0.1:${ERGON_PORT:-8787}
+      ERGON_FIXTURES_ENABLED: "false"
+      ERGON_TEAMS_ENABLED: ${ERGON_TEAMS_ENABLED:-false}
+      ERGON_TEAMS_TENANT_ID: ${ERGON_TEAMS_TENANT_ID:-}
+      ERGON_TEAMS_ALLOWED_USERS: ${ERGON_TEAMS_ALLOWED_USERS:-}
+      ERGON_WHATSAPP_ENABLED: ${ERGON_WHATSAPP_ENABLED:-false}
+      ERGON_WHATSAPP_OWNER_IDS: ${ERGON_WHATSAPP_OWNER_IDS:-}
+      ERGON_WHATSAPP_MONITORED_CHATS: ${ERGON_WHATSAPP_MONITORED_CHATS:-}
+      ERGON_WHATSAPP_SEND_ENABLED: ${ERGON_WHATSAPP_SEND_ENABLED:-false}
+      ERGON_MS_CLIENT_ID: ${ERGON_MS_CLIENT_ID:-}
+      ERGON_GOOGLE_CLIENT_ID: ${ERGON_GOOGLE_CLIENT_ID:-}
+    volumes:
+      - ergon-data:/data
+    networks: [ergon-net, ergon-gerente]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: ${ERGON_MEM_LIMIT:-768m}
+    cpus: ${ERGON_CPUS:-1.0}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  hermes:
+    # Imagem do motor de IA (oficial fixada + cofre gocryptfs + plugin do Ergon). Daqui não sai contêiner: cada pessoa
+    # tem o próprio motor, criado pelo gerente de motores com esta imagem, o cofre e a conta de IA dela.
+    # O serviço fica só para "docker compose pull" trazer a imagem.
+    image: ghcr.io/__DONO__/ergon-community-hermes:__VERSAO__
+    deploy:
+      replicas: 0
+
+  motores:
+    # Gerente de motores: o único contêiner com o socket do Docker; só o Ergon fala com ele (rede própria, sem internet).
+    image: ghcr.io/__DONO__/ergon-community:__VERSAO__
+    command: ["node", "server/src/gerente-motores.ts"]
+    user: root
+    env_file:
+      - path: ${ERGON_SECRETS_DIR:-./secrets}/hermes.env
+        required: false
+    environment:
+      ERGON_MOTOR_IMAGE: ghcr.io/__DONO__/ergon-community-hermes:__VERSAO__
+      ERGON_MOTOR_NETWORK: ergon-net
+      ERGON_MOTOR_LEGACY_VOLUME: ergon_hermes-vault
+      ERGON_MOTOR_VOLUME_PREFIX: ergon_motor-
+      HERMES_MEM_LIMIT: ${HERMES_MEM_LIMIT:-2g}
+      HERMES_CPUS: ${HERMES_CPUS:-2.0}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [ergon-gerente]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8645/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  ergon-data:
+  hermes-vault:
+
+networks:
+  ergon-net:
+    name: ergon-net
+  ergon-gerente:
+    name: ergon-gerente
+    internal: true

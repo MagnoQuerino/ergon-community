@@ -1,0 +1,6 @@
+{
+  "fixture": true,
+  "description": "FIXTURE LOCAL — permissão revogada no aplicativo externo. Deve marcar erro, sem esvaziar nem excluir nada.",
+  "error": "forbidden",
+  "plans": []
+}

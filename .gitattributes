@@ -1,0 +1,9 @@
+# Fins de linha LF em todo o projeto (o app roda em contêiner Linux), mesmo com checkout no Windows
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.bmp binary
+*.ico binary
+*.icns binary
+*.cmd text eol=crlf
+*.ergon binary

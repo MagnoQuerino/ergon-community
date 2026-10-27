@@ -1,0 +1,31 @@
+/* Tela de abertura do Ergon Desktop: as cores e a tipografia da marca (web/src/brand). */
+:root {
+  --navy: #1D184B; --navy-2: #140C34; --gold: #B88B5B; --gold-ink: #5E4426; --stone: #FDFCF8; --panel: #FFFFFF;
+  --ink: #1d1b2e; --muted: #5d5a6e; --line: #e4dccd; --warn: #8a5a00; --warn-bg: #fbefd2; --err: #a2321d;
+  --font: system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--stone); color: var(--ink); font: 15px/1.5 var(--font); display: grid; place-items: center; padding: 24px 16px; overflow: auto; }
+.abertura { width: min(560px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+.abertura__logo { width: 200px; height: auto; margin-bottom: 8px; }
+.abertura__carregando { width: 104px; height: 104px; }
+.abertura__carregando[hidden], .abertura__logo[hidden] { display: none; }
+.abertura__fase { margin: 6px 0 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--gold-ink); font-weight: 700; }
+.abertura__fase.is-atencao { color: var(--warn); }
+.abertura__titulo { margin: 0; font-size: 22px; line-height: 1.3; color: var(--navy); outline: none; }
+.abertura__texto { margin: 0; color: var(--muted); max-width: 48ch; }
+.abertura__avisos { margin: 4px 0 0; padding: 10px 14px; list-style: none; background: var(--warn-bg); border: 1px solid #ecd59b; border-radius: 10px; color: var(--warn); text-align: left; }
+.abertura__linha { margin: 0; min-height: 1.5em; font: 12px/1.5 ui-monospace, "Cascadia Mono", "DejaVu Sans Mono", monospace; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.abertura__acoes { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.botao { font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--navy); cursor: pointer; min-height: 40px; }
+.botao:hover { border-color: var(--gold); }
+.botao:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.botao--principal { background: var(--navy); color: #fff; border-color: var(--navy); }
+.botao--principal:hover { background: var(--navy-2); }
+.botao--leve { font-weight: 500; font-size: 13px; padding: 6px 12px; min-height: 32px; }
+.botao[disabled] { opacity: .6; cursor: progress; }
+.abertura__diagnostico { width: 100%; margin-top: 12px; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; text-align: left; }
+.abertura__diagnostico h2 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.abertura__diagnostico ul { margin: 0 0 10px; padding-left: 18px; font-size: 13px; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .abertura__carregando { animation: none; } }

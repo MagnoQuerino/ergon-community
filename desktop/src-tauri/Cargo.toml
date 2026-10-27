@@ -1,0 +1,30 @@
+[package]
+name = "ergon-desktop"
+version = "1.0.0"
+description = "Ergon Desktop: o mesmo Ergon, numa janela própria"
+authors = ["Os autores do Ergon"]
+license = "UNLICENSED"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+# Versões fixadas (o Cargo.lock vai junto): a CI e a compilação local usam exatamente as mesmas.
+[dependencies]
+tauri = { version = "=2.12.5", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "=2.7.2"
+tauri-plugin-window-state = "=2.5.0"
+tauri-plugin-single-instance = "=2.5.4"
+tauri-plugin-dialog = "=2.8.3"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+log = "=0.4.34"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

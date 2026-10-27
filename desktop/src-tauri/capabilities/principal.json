@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "principal",
+  "description": "Tela de abertura do Ergon Desktop (conteúdo empacotado no aplicativo). Sem 'remote': a interface do Ergon, carregada de http://localhost, não recebe nenhuma permissão nativa.",
+  "windows": ["principal"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-diagnosticar",
+    "allow-subir-servicos",
+    "allow-abrir-ergon",
+    "allow-abrir-no-navegador",
+    "allow-abrir-ajuda",
+    "allow-abrir-registros"
+  ]
+}

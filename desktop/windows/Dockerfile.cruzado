@@ -1,0 +1,8 @@
+# Compilação cruzada do Ergon Desktop para Windows (alvo x86_64-pc-windows-gnu, MinGW), a partir do contêiner Linux.
+# Só para testes locais rápidos, sem instalar Rust nem Visual Studio no Windows. O instalador oficial (MSVC + NSIS)
+# sai da CI, no runner Windows.
+#   docker build -t ergon-desktop-cruzado -f desktop/windows/Dockerfile.cruzado desktop/windows
+FROM ergon-desktop-linux
+RUN apt-get update && apt-get install -y --no-install-recommends mingw-w64 nsis \
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup target add x86_64-pc-windows-gnu

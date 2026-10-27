@@ -1,0 +1,25 @@
+{
+  "fixture": true,
+  "description": "FIXTURE LOCAL em formato inspirado no Planner (planos, buckets, percentComplete, etag). NÃO é Planner conectado.",
+  "plans": [
+    {
+      "id": "plan-fixture-1", "title": "Projeto Exemplo (fixture)", "@odata.etag": "W/\"plan1-v1\"",
+      "buckets": [ { "id": "bkt-1", "name": "A fazer" }, { "id": "bkt-2", "name": "Fazendo" }, { "id": "bkt-3", "name": "Concluído" } ],
+      "tasks": [
+        { "id": "ptask-1", "bucketId": "bkt-1", "title": "Definir escopo", "description": "Primeira versão do escopo.", "percentComplete": 0,
+          "@odata.etag": "W/\"t1-v1\"", "priority": 5, "appliedCategories": { "category2": true }, "checklist": { "c1": { "title": "Rascunho", "isChecked": false } } },
+        { "id": "ptask-2", "bucketId": "bkt-2", "title": "Levantar fornecedores", "description": "", "percentComplete": 50,
+          "@odata.etag": "W/\"t2-v1\"", "priority": 3, "dueDateTime": "2026-11-05T00:00:00Z" },
+        { "id": "ptask-3", "bucketId": "bkt-1", "title": "Reservar sala", "description": "", "percentComplete": 0, "@odata.etag": "W/\"t3-v1\"" },
+        { "id": "ptask-4", "bucketId": "bkt-3", "title": "Reunião de kickoff", "description": "", "percentComplete": 100, "@odata.etag": "W/\"t4-v1\"" }
+      ]
+    },
+    {
+      "id": "plan-fixture-2", "title": "Pessoal (fixture)", "@odata.etag": "W/\"plan2-v1\"",
+      "buckets": [ { "id": "bkt-p1", "name": "Pendentes" } ],
+      "tasks": [
+        { "id": "ptask-p1", "bucketId": "bkt-p1", "title": "Renovar documento", "description": "", "percentComplete": 0, "@odata.etag": "W/\"p1-v1\"" }
+      ]
+    }
+  ]
+}

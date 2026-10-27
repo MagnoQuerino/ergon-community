@@ -1,0 +1,23 @@
+{
+  "name": "ergon-community",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "description": "Ergon Community: uma equipe de agentes de IA que trabalha no seu computador.",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "test": "npm test -w server && npm test -w web",
+    "build": "npm run build -w web",
+    "start": "node server/src/index.ts",
+    "teams:manifest": "node scripts/teams-manifest.mjs",
+    "secrets:init": "node scripts/init-secrets.mjs"
+  }
+}

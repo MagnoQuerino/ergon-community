@@ -1,0 +1,31 @@
+Ergon Community
+Copyright 2026 Os autores do Ergon
+
+Este produto é distribuído sob a Licença Apache, versão 2.0 (arquivo LICENSE).
+
+Componentes de terceiros
+------------------------
+
+O Ergon usa bibliotecas de código aberto, cada uma sob a própria licença. As listas completas, com versões e
+licenças, estão em package-lock.json (servidor e interface) e em desktop/src-tauri/Cargo.lock (aplicativo desktop).
+Destaques:
+
+- Hermes Agent (Nous Research), licença MIT: o motor dos agentes, usado como imagem base em hermes/Dockerfile.
+  https://github.com/NousResearch/hermes-agent
+
+- Baileys (WhiskeySockets), licença MIT: cliente do WhatsApp usado pelo recurso experimental de leitura por QR code.
+  Não é oficial nem aprovado pelo WhatsApp ou pela Meta. https://github.com/WhiskeySockets/Baileys
+
+- libsignal-node (WhiskeySockets), licença GPL-3.0: dependência do Baileys, distribuída junto com o recurso
+  experimental do WhatsApp na imagem do Ergon. O código-fonte está em https://github.com/WhiskeySockets/libsignal-node
+  e o texto da licença acompanha o pacote (node_modules/libsignal). Quem não quiser esse componente pode montar a
+  imagem sem a dependência do WhatsApp; o recurso então informa que o componente não está instalado.
+
+- sharp (Lovell Fuller), licença Apache-2.0, com libvips sob LGPL-3.0-or-later (binários pré-compilados,
+  carregados dinamicamente). https://github.com/lovell/sharp e https://github.com/libvips/libvips
+
+- Tauri (The Tauri Programme within The Commons Conservancy), licenças MIT ou Apache-2.0: base do aplicativo
+  desktop. https://tauri.app
+
+Marcas citadas (WhatsApp, Microsoft, Google, Trello, Jira, Asana, monday.com, ClickUp, Notion, Todoist, GitHub,
+Docker e outras) pertencem aos respectivos donos e aparecem apenas para identificar as integrações.

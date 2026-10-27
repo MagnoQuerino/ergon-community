@@ -1,0 +1,23 @@
+{
+  "name": "@ergon/web",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test src/world/*.test.ts src/iso/*.test.ts src/brand/*.test.ts src/lib/*.test.ts"
+  },
+  "devDependencies": {
+    "@simplewebauthn/browser": "14.0.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

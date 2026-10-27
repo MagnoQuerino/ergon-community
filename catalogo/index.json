@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "id": "comunidade.exemplos.cao-de-socrates",
+      "version": "1.0.0",
+      "title": "Cão de Sócrates",
+      "summary": "Um cão fiel acompanhando Sócrates nas perguntas: um exemplo de pet enviado pela comunidade.",
+      "kind": "pet",
+      "author": "exemplos",
+      "path": "pacotes/exemplos/cao-de-socrates.ergon",
+      "sha256": "0135e3026e10661ebe4e69e67036ec7d1aa16c74ff74cabe9354e00d6b83764e",
+      "size": 651
+    },
+    {
+      "id": "comunidade.exemplos.tema-mar-egeu",
+      "version": "1.0.0",
+      "title": "Mar Egeu",
+      "summary": "Mármore claro, céu e janelas em tons de mar: um exemplo de tema enviado pela comunidade.",
+      "kind": "city-theme",
+      "author": "exemplos",
+      "path": "pacotes/exemplos/tema-mar-egeu.ergon",
+      "sha256": "e4e43baf708a01aa07b8072ccbdd45db7893cb724d61a74b15e8907b4a0d66f9",
+      "size": 679
+    }
+  ]
+}

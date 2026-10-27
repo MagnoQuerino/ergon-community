@@ -1,0 +1,10 @@
+# Ergon Desktop — testes de interface no Linux: o pacote .deb instalado de verdade, rodando sob Xvfb e dirigido pelo
+# WebDriver do WebKitGTK (via tauri-driver), como um usuário faria.
+#   docker build -t ergon-desktop-teste -f desktop/linux/Dockerfile.teste desktop/linux
+FROM ergon-desktop-linux
+RUN apt-get update && apt-get install -y --no-install-recommends webkit2gtk-driver at-spi2-core openbox docker.io docker-compose-v2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install tauri-driver --version 2.1.0 --locked \
+    && useradd -m -s /bin/bash pessoa
+# cliques de mouse reais do X (o clique do WebDriver não equivale a um clique de pessoa em todos os casos)
+RUN apt-get update && apt-get install -y --no-install-recommends xdotool && rm -rf /var/lib/apt/lists/*

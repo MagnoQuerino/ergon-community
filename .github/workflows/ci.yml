@@ -1,0 +1,66 @@
+# Testes a cada envio: a suíte inteira roda no Linux, dentro da mesma imagem que vai para produção; a auditoria
+# confere dependências, segredos e a marca; o lançador do Windows é testado com Docker e rede simulados.
+name: Testes
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Servidor e interface (typecheck + testes, alvo "test" do Dockerfile)
+        run: docker build --target test .
+      - name: Imagem do motor (cofre + plugin)
+        run: docker build -t ergon-hermes:ci ./hermes
+      - name: Trava de ferramentas por agente (plugin, com o catálogo de ferramentas do motor de verdade)
+        run: >-
+          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python -e HERMES_HOME=/tmp/h
+          -v "$PWD/hermes/plugins:/p:ro" -v "$PWD/hermes/tests:/t:ro" ergon-hermes:ci /t/test_ergon_bridge_gate.py
+      - name: Treinar no motor (competência em espera, aplicada privada, trava por agente e por treinamento)
+        run: >-
+          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python -e HERMES_HOME=/tmp/h
+          -v "$PWD/hermes/plugins:/p:ro" -v "$PWD/hermes/tests:/t:ro" ergon-hermes:ci /t/test_ergon_bridge_treinar.py
+      - name: Cofre do motor sob gravação em paralelo (cofre antigo aberto pela imagem nova, sem erros, isolado)
+        run: bash hermes/tests/cofre-paralelo.sh ergon-hermes:ci
+
+  auditoria:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.1
+      - name: Vulnerabilidades conhecidas nas dependências de produção (alta ou crítica bloqueia)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Segredos nos arquivos versionados
+        run: node scripts/scan-segredos.mjs
+      # o teste da marca é pulado dentro da imagem (ela não leva scripts/ nem docs/): roda aqui
+      - name: Arquivos da marca em dia com a geometria
+        run: node scripts/brand-assets.mjs --check
+      - name: Lançador do Linux e do macOS (sintaxe)
+        run: bash -n ergon.sh
+
+  lancador-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker com diagnóstico primeiro (Docker, pastas e registro simulados)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\teste-docker.ps1
+      - name: Atualizar com caminho de volta (Docker, rede e backup simulados)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\teste-atualizar.ps1
+
+  catalogo:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.1
+      - name: Modelos da comunidade (mesma validação da instalação) e índice em dia
+        run: node catalogo/conferir.mjs
