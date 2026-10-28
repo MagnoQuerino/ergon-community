@@ -1108,12 +1108,15 @@ body:has(.cdock) .tip { right: 100px; }
 .ws-pop { left: -8px; right: auto; width: min(420px, calc(100vw - 24px)); }
 .ws-pop::before { left: 28px; right: auto; }
 .ws-list { list-style: none; margin: 8px 0 10px; padding: 0; display: grid; gap: 8px; }
-.ws-item { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); }
+.ws-item { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); transition: border-color .15s ease, background .15s ease; }
+.ws-item:hover:not(:disabled) { border-color: var(--navy, #1b2a4a); background: var(--panel); }
+.ws-item:focus-visible { outline: 2px solid var(--gold, #c9a227); outline-offset: 2px; }
+.ws-item:disabled { cursor: progress; opacity: .7; }
 .ws-item.is-current { border-color: var(--gold, #c9a227); }
 .ws-item__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ws-item__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-item__grow { flex: 1; }
-.ws-item__nums { margin-top: 4px; }
+.ws-item__nums { display: block; margin-top: 4px; }
 .ws-item__on { color: var(--green, #2e7d4f); }
 .ws-item__edit { display: flex; gap: 6px; align-items: center; }
 .ws-item__edit .input { flex: 1; min-width: 0; }
@@ -1121,3 +1124,56 @@ body:has(.cdock) .tip { right: 100px; }
 .ws-new__form { display: grid; gap: 6px; }
 @media (max-width: 900px) { .ws-pop { left: 8px; } .topbar__wswrap { max-width: 140px; } }
 @media (max-width: 560px) { .topbar__ws-txt { display: none; } }
+
+/* confirmação em popup */
+.cpop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(16, 24, 32, .42); animation: dropin .16s ease; }
+.cpop__card { width: min(440px, 100%); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(16, 24, 32, .3); }
+.cpop__card h3 { margin: 0 0 8px; }
+.cpop__body { margin: 0 0 16px; }
+.cpop__acts { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* conta: avatar no canto da barra e o balão Minha conta / Alternar conta / Sair */
+.topbar__acctwrap { position: relative; flex: none; }
+.topbar__acct { display: grid; place-items: center; padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; }
+.topbar__acct:focus-visible { outline: 2px solid var(--gold, #c9a227); outline-offset: 2px; }
+.topbar__acct .avatar { background: #c9a227; color: #1b2a4a; }
+.avatar--foto { border-radius: 50%; object-fit: cover; flex: none; display: inline-block; }
+.acct-pop { width: min(260px, calc(100vw - 24px)); padding: 10px; }
+.acct-pop::before { right: 14px; }
+.acct-pop__who { display: flex; align-items: center; gap: 10px; padding: 4px 4px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line); min-width: 0; }
+.acct-pop__who b { overflow-wrap: anywhere; }
+.acct-pop__item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.acct-pop__item:hover, .acct-pop__item:focus-visible { background: var(--panel-2); }
+/* Minha conta (Configurações) */
+.conta__foto { display: flex; align-items: center; gap: 16px; margin: 8px 0 16px; flex-wrap: wrap; }
+.conta__foto-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.conta__foto-acts p { flex-basis: 100%; margin: 0; }
+.conta__nome { display: grid; gap: 6px; }
+@media (max-width: 900px) { .acct-pop { right: 8px; } }
+
+/* barra de cima padronizada: altura 34 px, um tom translúcido, um só destaque (Pedir); à direita, só ícones */
+.topbar { gap: 8px; }
+.topbar__grow { display: flex; justify-content: center; padding: 0 8px; }
+.tb-search { display: flex; align-items: center; gap: 8px; width: 100%; max-width: 380px; height: 34px; padding: 0 10px; border-radius: 9px; cursor: text;
+  border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06); color: #b9c6d2; font: inherit; font-size: 13px; text-align: left; }
+.tb-search:hover { background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .22); }
+.tb-search:focus-visible { outline: 2px solid var(--gold, #c9a227); outline-offset: 2px; }
+.tb-search__txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-search__kbd { flex: none; font: 600 11px/1 inherit; padding: 4px 6px; border-radius: 5px; background: rgba(255, 255, 255, .1); color: #d6dee6; }
+.topbar__icons { display: flex; align-items: center; gap: 4px; flex: none; }
+.tb-icon { position: relative; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 9px; background: none; color: #dfe7ee; cursor: pointer; }
+.tb-icon:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.tb-icon.is-on { background: rgba(255, 255, 255, .16); color: #fff; }
+.tb-icon:focus-visible { outline: 2px solid var(--gold, #c9a227); outline-offset: 2px; }
+.tb-badge { position: absolute; top: 2px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; display: grid; place-items: center;
+  font: 700 10px/1 inherit; background: #e0a400; color: #1b1300; box-shadow: 0 0 0 2px var(--navy); }
+.tb-badge--warn { background: #f6d77c; color: #3d2c00; }
+.tb-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--navy); }
+.tb-dot--green { background: #3ecf7a; animation: pulse 1.6s ease-in-out infinite; }
+.tb-dot--amber { background: #e0a400; }
+.topbar__sep { width: 1px; height: 22px; margin: 0 6px; background: rgba(255, 255, 255, .16); }
+/* seletor de workspace no mesmo tom da busca */
+.topbar__ws { height: 34px; border-radius: 9px; background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .14); }
+.topbar__ws:hover { background: rgba(255, 255, 255, .1); }
+.topbar__ask { height: 34px; border-radius: 9px; }
+@media (max-width: 1180px) { .tb-search__txt, .tb-search__kbd { display: none; } .tb-search { width: 34px; padding: 0; justify-content: center; border-color: transparent; background: none; color: #dfe7ee; cursor: pointer; } .topbar__grow { justify-content: flex-end; padding: 0; } }

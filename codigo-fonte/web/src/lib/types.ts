@@ -44,7 +44,7 @@ export interface AppState {
   serverTime: string;
 }
 export interface Me {
-  user: { id: string; username: string; displayName: string }; workspaceId: string; role: string; csrf: string; workspaces: Array<{ id: string; name: string; role: string }>;
+  user: { id: string; username: string; displayName: string; avatar?: string | null }; workspaceId: string; role: string; csrf: string; workspaces: Array<{ id: string; name: string; role: string }>;
   /** tela trancada por inatividade; instalação já protegida (cifrada); minutos até trancar; 2º fatores da pessoa */
   locked: boolean; protected: boolean; idleMinutes: number; factors: { totp: boolean; passkeys: number }; mode: 'local' | 'cloud'; rpId: string; recovery: boolean;
   /** primeiro acesso: perguntar se liga o destrancar sozinho (ajudante presente, ainda sem escolha) */
@@ -125,6 +125,8 @@ export interface ModelEntry { id: string; label: string; vendor: string; input: 
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
   executor: 'real' | 'simulated'; available: boolean;
+  /** motor de IA da pessoa: conta nova fica "ligando" por até ~1 min */
+  motor?: { state: 'desligado' | 'ligando' | 'aberto' | 'erro'; error: string | null };
   accounts: Array<{ id: string; name: string; billing: Billing; about: string; site: string; connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
 }

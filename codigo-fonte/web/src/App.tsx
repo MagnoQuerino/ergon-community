@@ -31,6 +31,7 @@ import { CommandPalette, type CardHit, type PaletteItem } from './components/Com
 import { ConversationDock, ConversationsDialog } from './components/ConversationDock.tsx';
 import { TaskDetail } from './components/TaskDetail.tsx';
 import { WorkspaceSwitcher } from './components/Workspaces.tsx';
+import { AccountMenu } from './components/AccountMenu.tsx';
 import { onOpenCard, onOpenConversation } from './lib/open.ts';
 import { clearRecents, pushRecent, type Recent } from './lib/recents.ts';
 
@@ -250,41 +251,37 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
             <Icon name="chat" size={16} /><span className="topbar__ask-long">Pedir a {coordinator.name}</span><span className="topbar__ask-short">Pedir</span>
           </button>
         )}
-        <button className="icon-btn topbar__search" data-keep-surface onClick={() => setPalette((v) => !v)} aria-label="Buscar (Ctrl+K)" title="Buscar cards, agentes, rotinas e áreas (Ctrl+K)" aria-expanded={palette}>
-          <Icon name="search" size={18} />
-        </button>
-        <span className="topbar__grow" />
-        <span className="topbar__statuswrap">
-          <button className="chip chip--btn topbar__status" data-keep-surface onClick={() => setStatusOpen((v) => !v)} aria-expanded={statusOpen}
-            aria-label={`Estado: ${running} em execução${queued ? `, ${queued} na fila` : ''}`} title="Estado do Ergon: execuções, consumo, capacidade e avisos">
-            <span className={`dot ${running ? 'dot--green dot--pulse' : queued ? 'dot--amber' : ''}`} />
-            <span className="topbar__status-txt">{running ? `${running} em execução` : queued ? `${queued} na fila` : 'Estado'}</span>
+        {/* busca no meio, com cara de campo; à direita, só ícones do mesmo tamanho (Estado, Aguardando você, Modo foco) e a conta */}
+        <span className="topbar__grow">
+          <button className="tb-search" data-keep-surface onClick={() => setPalette((v) => !v)} aria-label="Buscar (Ctrl+K)" title="Buscar cards, agentes, rotinas e áreas (Ctrl+K)" aria-expanded={palette}>
+            <Icon name="search" size={16} /><span className="tb-search__txt">Buscar cards, agentes, rotinas…</span><kbd className="tb-search__kbd">Ctrl K</kbd>
           </button>
-          {/* o Estado é um balão abaixo do botão (antes, uma gaveta lateral que cobria a tela) */}
-          {statusOpen && (
-            <StatusPanel onClose={() => setStatusOpen(false)} live={live.status} runs={s.runs} capacity={s.capacity} usage={usage.data} alerts={alerts}
-              onAct={(a) => { setStatusOpen(false); a.act(); }} />
-          )}
         </span>
-        <button data-tour="decisions" data-keep-surface className={`chip chip--btn topbar__dec ${pending ? 'chip--attn' : ''}`} onClick={() => setDecisions((v) => !v)} aria-expanded={decisions}
-          aria-label={`${pending} aguardando você`} title="Sugestões de rotina, propostas da equipe, agentes esperando resposta, vínculos e regras">
-          <Icon name="bell" size={14} /> <b>{pending}</b><span className="topbar__dec-txt"> aguardando você</span>
-        </button>
-        <div className="topbar__alerts">
-          {alerts.map((a) => <button key={a.id} className={`chip chip--${a.tone}`} onClick={a.act} title={a.title}>{a.label}</button>)}
-        </div>
-        {alerts.length > 0 && (
-          <button className="chip chip--warn topbar__alerts-min" data-keep-surface onClick={() => setStatusOpen(true)} aria-label={`${alerts.length} aviso(s): ${alerts.map((a) => a.label).join(', ')}`} title={alerts.map((a) => a.label).join(' · ')}>
-            <Icon name="alert" size={14} /> {alerts.length}
+        <span className="topbar__icons">
+          <span className="topbar__statuswrap">
+            <button className={`tb-icon ${statusOpen ? 'is-on' : ''}`} data-keep-surface onClick={() => setStatusOpen((v) => !v)} aria-expanded={statusOpen}
+              aria-label={`Estado: ${running} em execução${queued ? `, ${queued} na fila` : ''}${alerts.length ? `; ${alerts.length} aviso(s): ${alerts.map((a) => a.label).join(', ')}` : ''}`}
+              title={[running ? `${running} em execução` : queued ? `${queued} na fila` : 'Nada em execução', ...alerts.map((a) => a.label)].join(' · ')}>
+              <Icon name="activity" size={18} />
+              {alerts.length > 0 ? <span className="tb-badge tb-badge--warn">!</span>
+                : (running > 0 || queued > 0) && <span className={`tb-dot ${running ? 'tb-dot--green' : 'tb-dot--amber'}`} />}
+            </button>
+            {/* o Estado é um balão abaixo do botão; os avisos (simulação, atualização) aparecem lá */}
+            {statusOpen && (
+              <StatusPanel onClose={() => setStatusOpen(false)} live={live.status} runs={s.runs} capacity={s.capacity} usage={usage.data} alerts={alerts}
+                onAct={(a) => { setStatusOpen(false); a.act(); }} />
+            )}
+          </span>
+          <button data-tour="decisions" data-keep-surface className={`tb-icon ${decisions ? 'is-on' : ''}`} onClick={() => setDecisions((v) => !v)} aria-expanded={decisions}
+            aria-label={`${pending} aguardando você`} title={pending ? `${pending} aguardando você` : 'Nada aguardando você'}>
+            <Icon name="bell" size={18} />{pending > 0 && <span className="tb-badge">{pending > 99 ? '99+' : pending}</span>}
           </button>
-        )}
-        <button className={`btn ${focus ? 'btn--gold' : 'btn--dark'} topbar__focus`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} aria-label="Modo foco" title="Modo foco: o trabalho sem a cidade (Esc volta)">
-          <Icon name="focus" size={16} /><span className="topbar__focus-txt">Modo foco</span>
-        </button>
-        <div className="user">
-          <span className="avatar avatar--sm" title={me.user.displayName}>{me.user.displayName[0]?.toUpperCase()}</span>
-          <button className="icon-btn" onClick={logout} aria-label="Sair" title="Sair"><Icon name="logout" /></button>
-        </div>
+          <button className={`tb-icon ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} aria-label="Modo foco" title="Modo foco: o trabalho sem a cidade (Esc volta)">
+            <Icon name="focus" size={18} />
+          </button>
+          <span className="topbar__sep" aria-hidden="true" />
+          <AccountMenu me={me} onLogout={logout} onAccount={() => goHash('#configuracao?conta')} />
+        </span>
       </header>
 
       {!focus && (
@@ -337,7 +334,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       {win && winAgent && <AgentWindow key={`${win.id}-${win.conversationId ?? ''}`} agent={winAgent} state={s} initialTab={win.tab} draft={win.draft} conversationId={win.conversationId} onClose={() => setWin(null)} reload={st.reload} />}
       {!focus && !onb && !tour && <ViewTip view={view} coord={coordLabel} other={tipOther} onTour={startTour} />}
       {onb && (
-        <Onboarding displayName={me.user.displayName} redo={onb === 'redo'} onCancel={() => setOnb(null)}
+        <Onboarding displayName={me.user.displayName} workspaceName={s.workspace.name} redo={onb === 'redo'} onCancel={() => setOnb(null)}
           onFinish={({ tour: t, goal: g }) => { setOnb(null); setGoal(g); onMeChanged(); st.reload(); if (t) startTour(); }} />
       )}
       {tour && (

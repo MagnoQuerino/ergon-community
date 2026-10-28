@@ -44,8 +44,10 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Step = 'use' | 'niche' | 'more' | 'ia' | 'building' | 'ready';
 const STEP_AT: Record<Step, number> = { use: 2, niche: 2, more: 2, ia: 3, building: 4, ready: 4 };
 
-export function Onboarding({ displayName, redo, onFinish, onCancel }: {
+export function Onboarding({ displayName, workspaceName, redo, onFinish, onCancel }: {
   displayName: string;
+  /** nome já dado ao workspace (criado pelo seletor): vem preenchido no nome da empresa/casa, editável */
+  workspaceName?: string;
   /** refazer pela Ajuda: troca funções e setores; não volta às tarefas de demonstração */
   redo?: boolean;
   onFinish: (r: { tour: boolean; result: OnboardingResult | null; goal: string }) => void;
@@ -54,7 +56,7 @@ export function Onboarding({ displayName, redo, onFinish, onCancel }: {
   const [opts, setOpts] = useState<OnboardingOptions | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('use');
-  const [f, setF] = useState({ use: '', niche: '', nicheOther: '', company: '', goal: '' });
+  const [f, setF] = useState({ use: '', niche: '', nicheOther: '', company: workspaceName && workspaceName !== 'Ergon Local' ? workspaceName : '', goal: '' });
   const [result, setResult] = useState<OnboardingResult | null>(null);
   const [ai, setAi] = useState<AiStatus | null>(null);
   const loadAi = () => { api.get<AiStatus>('/api/ai/status').then(setAi).catch(() => setAi(null)); };
@@ -150,7 +152,7 @@ export function Onboarding({ displayName, redo, onFinish, onCancel }: {
         ) : step === 'ia' ? (
           <section>
             <h2 id="onb-title" className="onb__title">Conecte a inteligência da equipe</h2>
-            <p className="muted">Os agentes pensam com a sua conta de IA. Recomendamos a <b>assinatura Nous</b>: é com ela que a equipe tem a melhor experiência, pelo custo e pela versatilidade. O login acontece na página da própria conta; o Ergon não vê a sua senha.</p>
+            <p className="muted">Os agentes pensam com a sua conta de IA. Recomendamos a <b>assinatura Nous</b>: é com ela que a equipe tem a melhor experiência, pelo custo e pela versatilidade. O login acontece na página da própria conta: a sua senha não passa pelo sistema.</p>
             <AiAccounts pitch onChanged={loadAi} />
             {!aiConnected && <p className="hint">Sem conta conectada, as respostas ficam simuladas. Dá para conectar depois, em Conexões.</p>}
             {err && <p className="error" role="alert">{err}</p>}

@@ -39,7 +39,8 @@
         "uninstallerIcon": "icons/icon.ico",
         "sidebarImage": "icons/instalador-lateral.bmp",
         "languages": ["PortugueseBR"],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "template": "nsis/installer.nsi"
       }
     },
     "linux": {

@@ -29,7 +29,6 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
   const [list, setList] = useState<Workspace[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [novo, setNovo] = useState<string | null>(null);
-  const [editando, setEditando] = useState<{ id: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const load = () => api.get<Workspace[]>('/api/workspaces').then(setList, (e) => setErr(errMsg(e)));
   useEffect(() => { void load(); }, []);
@@ -38,12 +37,8 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
     setBusy(true); setErr(null);
     try { await fn(); depois(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   };
-  const entrar = (id: string) => act(() => api.post('/api/session/workspace', { workspaceId: id }), recarregar);
+  const entrar = (w: Workspace) => (w.current ? onClose() : act(() => api.post('/api/session/workspace', { workspaceId: w.id }), recarregar));
   const criar = () => novo?.trim() && act(() => api.post('/api/workspaces', { name: novo }), recarregar);
-  const renomear = () => editando?.name.trim() && act(() => api.patch(`/api/workspaces/${editando.id}`, { name: editando.name }), () => {
-    const atual = list?.find((w) => w.id === editando.id)?.current;
-    if (atual) recarregar(); else { setEditando(null); void load(); }
-  });
 
   return (
     <aside ref={ref} className="status-pop ws-pop" role="dialog" aria-labelledby="ws-title">
@@ -53,30 +48,21 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
       {!list ? <p className="muted small">Carregando…</p> : (
         <ul className="ws-list">
           {list.map((w) => (
-            <li key={w.id} className={`ws-item ${w.current ? 'is-current' : ''}`}>
-              {editando?.id === w.id ? (
-                <form className="ws-item__edit" onSubmit={(e) => { e.preventDefault(); void renomear(); }}>
-                  <input className="input" value={editando.name} maxLength={60} autoFocus aria-label="Novo nome do workspace"
-                    onChange={(e) => setEditando({ id: w.id, name: e.target.value })} />
-                  <button className="btn btn--sm" disabled={busy || !editando.name.trim()}>Salvar</button>
-                  <button type="button" className="btn btn--sm btn--ghost" onClick={() => setEditando(null)}>Cancelar</button>
-                </form>
-              ) : (
-                <div className="ws-item__head">
+            <li key={w.id}>
+              <button className={`ws-item ${w.current ? 'is-current' : ''}`} disabled={busy} onClick={() => void entrar(w)}
+                aria-current={w.current ? 'true' : undefined} title={w.current ? 'Workspace atual' : `Entrar em ${w.name}`}>
+                <span className="ws-item__head">
                   <b className="ws-item__name">{w.name}</b>
                   {w.current && <span className="chip chip--stat">atual</span>}
                   <span className="ws-item__grow" />
-                  {w.role === 'owner' && (
-                    <button className="icon-btn" onClick={() => setEditando({ id: w.id, name: w.name })} aria-label={`Renomear ${w.name}`} title="Renomear"><Icon name="edit" size={14} /></button>
-                  )}
-                  {!w.current && <button className="btn btn--sm" disabled={busy} onClick={() => void entrar(w.id)}>Entrar</button>}
-                </div>
-              )}
-              <div className="ws-item__nums muted small">
-                {n(w.agents, 'agente', 'agentes')} · {n(w.openTasks, 'tarefa aberta', 'tarefas abertas')}
-                {w.working > 0 && <> · <span className="ws-item__on">{w.working} trabalhando</span></>}
-                {w.waiting > 0 && <> · <b>{w.waiting} aguardando você</b></>}
-              </div>
+                  {!w.current && <Icon name="chevron-right" size={14} />}
+                </span>
+                <span className="ws-item__nums muted small">
+                  {n(w.agents, 'agente', 'agentes')} · {n(w.openTasks, 'tarefa aberta', 'tarefas abertas')}
+                  {w.working > 0 && <> · <span className="ws-item__on">{w.working} trabalhando</span></>}
+                  {w.waiting > 0 && <> · <b>{w.waiting} aguardando você</b></>}
+                </span>
+              </button>
             </li>
           ))}
         </ul>

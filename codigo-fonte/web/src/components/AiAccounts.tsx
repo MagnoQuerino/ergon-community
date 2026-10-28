@@ -56,6 +56,12 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
     const t = window.setTimeout(poll, login.pollSeconds * 1000);
     return () => { stop = true; clearTimeout(t); };
   }, [login]); // eslint-disable-line react-hooks/exhaustive-deps
+  // motor da pessoa ainda ligando (conta nova leva até ~1 min): confere de novo até responder
+  useEffect(() => {
+    if (!s || s.available || s.motor?.state === 'erro') return;
+    const t = window.setTimeout(() => status.reload(), 5000);
+    return () => clearTimeout(t);
+  }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
   const disconnect = async (provider: string) => {
     try { await api.del(`/api/ai/accounts/${provider}`); status.reload(); onChanged?.(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
@@ -68,7 +74,13 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
     <>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       {s.executor === 'simulated' && <p className="hint warn">Esta instalação está em modo de simulação: as respostas dos agentes não usam IA de verdade, mesmo com uma conta conectada.</p>}
-      {!s.available && <p className="hint">A conexão de contas de IA não está disponível nesta instalação (o motor de IA não está ligado).</p>}
+      {!s.available && (s.motor?.state === 'erro' ? (
+        <p className="hint warn">O motor de IA da sua conta não ligou: {s.motor.error ?? 'erro sem detalhe'}. <button className="link" onClick={() => status.reload()}>Tentar de novo</button></p>
+      ) : s.motor && s.motor.state !== 'aberto' ? (
+        <p className="hint" role="status"><span className="dot dot--amber dot--pulse" /> O motor de IA da sua conta está ligando (na primeira vez leva até 1 minuto). Os botões se liberam sozinhos.</p>
+      ) : (
+        <p className="hint">A conexão de contas de IA não está disponível nesta instalação (o motor de IA não está ligado).</p>
+      ))}
       {nous && (
         <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''}`} aria-label="Nous Portal, a melhor escolha">
           <span className="ai-best__ribbon"><Icon name="check" size={12} /> Melhor escolha</span>

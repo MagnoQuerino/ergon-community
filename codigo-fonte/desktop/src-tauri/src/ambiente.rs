@@ -248,6 +248,7 @@ pub fn instalar(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
     }
 
     ev(Evento::Etapa("wsl"));
+    sem_boas_vindas_do_wsl();
     if !wsl_pronto() {
         if p.reinicio_pedido {
             return Err("O WSL ainda não responde depois do reinício. Reinicie o Windows mais uma vez; se continuar, rode a instalação de novo.".into());
@@ -281,6 +282,7 @@ pub fn instalar(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
     concluir(&mut p, "baixar")?;
 
     ev(Evento::Etapa("importar"));
+    sem_boas_vindas_do_wsl(); // de novo: o WSL pode ter acabado de ser ativado
     if registrado() {
         ev(Evento::Linha(format!("O ambiente \"{}\" já existe neste computador: aproveitado.", nome())));
     } else {
@@ -449,6 +451,19 @@ fn agendar_continuacao() -> Result<(), String> {
 fn desagendar_continuacao() {
     let mut c = comando(reg_exe());
     c.args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce", "/v", "ErgonInstalacao", "/f"]);
+    let _ = rodar(c, Duration::from_secs(30));
+}
+/// Na primeira vez que o WSL é usado, o Windows abre a janela "Boas-vindas ao WSL" (outro programa, no meio da nossa
+/// instalação). Marca como já vista (HKCU\...\Lxss\OOBEComplete, sem administrador), só se ainda não houver o valor.
+fn sem_boas_vindas_do_wsl() {
+    let chave = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss";
+    let mut c = comando(reg_exe());
+    c.args(["query", chave, "/v", "OOBEComplete"]);
+    if rodar(c, Duration::from_secs(30)).map(|o| o.status.success()).unwrap_or(true) {
+        return;
+    }
+    let mut c = comando(reg_exe());
+    c.args(["add", chave, "/v", "OOBEComplete", "/t", "REG_DWORD", "/d", "1", "/f"]);
     let _ = rodar(c, Duration::from_secs(30));
 }
 fn reg_exe() -> PathBuf {

@@ -136,6 +136,22 @@ jobs:
           Write-Host 'ok    ambiente WSL próprio "Ergon" registrado'
           if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'ErgonAmbiente'))) { throw 'pasta do ambiente fora do lugar' }
           Write-Host 'ok    ambiente em %LOCALAPPDATA%\ErgonAmbiente, separado da pasta do aplicativo'
+      - name: Desinstalar com "apagar também a conta e os dados" (o ambiente sai junto)
+        shell: pwsh
+        run: |
+          $reg = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Ergon' } | Select-Object -First 1
+          $pasta = if ($reg.InstallLocation) { $reg.InstallLocation.Trim('"') } else { Join-Path $env:LOCALAPPDATA 'Ergon' }
+          # _?= roda o desinstalador no lugar (sem se copiar para a pasta temporária), para esperar o fim de verdade
+          $p = Start-Process (Join-Path $pasta 'uninstall.exe') -ArgumentList '/S', '/APAGARDADOS', "_?=$pasta" -PassThru
+          if (-not $p.WaitForExit(10 * 60 * 1000)) { throw 'o desinstalador passou de 10 minutos' }
+          Write-Host "desinstalador: saída $($p.ExitCode)"
+          $d = (wsl.exe -l -q 2>$null | Out-String) -replace "`0", ''
+          if ($d -match '(?m)^Ergon\s*$') { throw "o ambiente Ergon ficou registrado no WSL: $d" }
+          Write-Host 'ok    ambiente WSL "Ergon" removido'
+          if (Test-Path (Join-Path $env:LOCALAPPDATA 'ErgonAmbiente')) { throw 'a pasta ErgonAmbiente ficou' }
+          Write-Host 'ok    pasta %LOCALAPPDATA%\ErgonAmbiente removida'
+          if (Test-Path (Join-Path $pasta 'ergon-desktop.exe')) { throw 'o aplicativo ficou instalado' }
+          Write-Host 'ok    aplicativo removido'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

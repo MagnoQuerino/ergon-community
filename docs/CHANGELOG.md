@@ -1,5 +1,17 @@
 # Novidades
 
+## 1.1.0-rc.4 (pré-versão de teste)
+
+- **Conta de IA:** numa conta nova, a tela avisa que o motor de IA está ligando (até 1 minuto) e libera os botões
+  sozinha; se o motor falhar, mostra o motivo e "Tentar de novo".
+- **Minha conta:** foto de perfil e nome de exibição em Configurações. O avatar no canto abre Minha conta,
+  Alternar conta e Sair.
+- **Workspaces:** clicar no item da lista já entra nele; renomear fica em Configurações › Workspace, com
+  confirmação; o nome dado ao criar já vem nas boas-vindas.
+- **Barra de cima** mais limpa: busca no centro, ícones do mesmo tamanho à direita, avisos no Estado.
+- **Desinstalar:** "Apagar também a conta e os dados do Ergon" remove tudo (inclusive o ambiente no WSL);
+  desinstalar não volta mais para a instalação. Nenhuma janela de outro programa abre durante a instalação.
+
 ## 1.1.0-rc.3 (pré-versão de teste)
 
 - **Workspaces:** o botão com o nome do workspace, na barra de cima, abre a visão geral de todos os seus (agentes,

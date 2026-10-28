@@ -1,3 +1,4 @@
+import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -21,13 +22,21 @@ import { AiAccounts } from '../components/AiAccounts.tsx';
  *  o Ergon neste computador, as pessoas e a saúde da instalação. */
 export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: AppState; me: Me; onMeChanged: () => void; reload: () => void }) {
   const admin = me.admin;
-  const [tab, setTab] = useState<'ia' | 'seguranca' | 'saude' | 'pessoas' | 'pacotes' | 'world'>(() => (location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world' : location.hash.includes('pacotes') ? 'pacotes'
+  const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'seguranca' | 'saude' | 'pessoas' | 'pacotes' | 'world'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world' : location.hash.includes('pacotes') ? 'pacotes'
     : location.hash.includes('saude') && admin ? 'saude' : location.hash.includes('pessoas') && admin ? 'pessoas' : 'ia'));
+  // o menu da conta abre Configurações › Minha conta (ou Workspace) mesmo com Configurações já aberta
+  useEffect(() => {
+    const ver = () => { if (location.hash.includes('?conta')) setTab('conta'); else if (location.hash.includes('?workspace')) setTab('workspace'); };
+    window.addEventListener('hashchange', ver);
+    return () => window.removeEventListener('hashchange', ver);
+  }, []);
   return (
     <div className="page">
       <header className="page__head">
         <h2>Configurações</h2>
         <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>Minha conta</button>
+          <button role="tab" aria-selected={tab === 'workspace'} className={`tab ${tab === 'workspace' ? 'tab--on' : ''}`} onClick={() => setTab('workspace')}>Workspace</button>
           <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>IA da equipe</button>
           <button role="tab" aria-selected={tab === 'seguranca'} className={`tab ${tab === 'seguranca' ? 'tab--on' : ''}`} onClick={() => setTab('seguranca')}>Segurança</button>
           {admin && me.mode === 'local' && <button role="tab" aria-selected={tab === 'pessoas'} className={`tab ${tab === 'pessoas' ? 'tab--on' : ''}`} onClick={() => setTab('pessoas')}>Pessoas</button>}
@@ -36,7 +45,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>Saúde</button>}
         </div>
       </header>
-      {tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agents={state.agents} /> : tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaPanel me={me} onChanged={onMeChanged} />}
+      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agents={state.agents} /> : tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaPanel me={me} onChanged={onMeChanged} />}
       <VersionCard />
     </div>
   );

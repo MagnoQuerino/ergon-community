@@ -493,13 +493,37 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.get('/api/me', async (req) => {
     const a = auth(req);
     const workspaces = db.all('SELECT w.id, w.name, m.role FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? ORDER BY w.created_at', a.userId);
-    return { user: { id: a.userId, username: a.username, displayName: a.displayName }, workspaceId: a.workspaceId, role: a.role, csrf: a.csrf, workspaces, locked: a.locked, protected: vault.state() !== 'unprotected', idleMinutes: idleMinutes(db),
+    const avatar = db.get<{ avatar: string | null }>('SELECT avatar FROM users WHERE id = ?', a.userId)?.avatar ?? null;
+    return { user: { id: a.userId, username: a.username, displayName: a.displayName, avatar }, workspaceId: a.workspaceId, role: a.role, csrf: a.csrf, workspaces, locked: a.locked, protected: vault.state() !== 'unprotected', idleMinutes: idleMinutes(db),
       factors: userFactors(db, a.userId), mode: cfg.mode, rpId: rpConfig(cfg).rpID,
       // frase de recuperação da pessoa (várias pessoas: cada uma tem a sua)
       recovery: personKeys() ? vault.personHasRecovery(a.userId) : vault.info().recovery,
       admin: cfg.mode === 'local' ? isAdmin(db, a.userId) : a.role === 'owner', personSealed: personSealed(a), people: vault.peopleInfo().length,
       autoUnlockPrompt: isAdmin(db, a.userId) && secApi.autoUnlockPrompt(),
       onboarding: onboardingState(db, a.workspaceId), prefs: readPrefs(db, a.workspaceId, a.userId) };
+  });
+
+  // Minha conta: nome de exibição e foto de perfil (imagem pequena, só PNG/JPEG/WebP)
+  app.patch('/api/me', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['displayName'], properties: { displayName: S.str(60, 1) } } },
+  }, async (req) => {
+    const a = auth(req);
+    const nome = (req.body as { displayName: string }).displayName.trim().replace(/\s+/g, ' ');
+    if (!nome) throw new HttpError(400, 'displayName', 'o nome não pode ficar vazio');
+    db.run('UPDATE users SET display_name = ? WHERE id = ?', nome, a.userId);
+    return { displayName: nome };
+  });
+  app.put('/api/me/avatar', {
+    bodyLimit: 400_000,
+    schema: { body: { type: 'object', additionalProperties: false, required: ['image'], properties: {
+      image: { type: 'string', maxLength: 300_000, pattern: '^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$' } } } },
+  }, async (req) => {
+    db.run('UPDATE users SET avatar = ? WHERE id = ?', (req.body as { image: string }).image, auth(req).userId);
+    return { ok: true };
+  });
+  app.delete('/api/me/avatar', async (req) => {
+    db.run('UPDATE users SET avatar = NULL WHERE id = ?', auth(req).userId);
+    return { ok: true };
   });
 
   // Preferências da pessoa: dicas (ligar, dispensar, trazer de volta) e tour inicial
@@ -705,7 +729,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
 
   // Configuração de IA (contas, modelo padrão, modelos, skills, ferramentas) -----------------------------------
-  app.get('/api/ai/status', async (req) => aiOf(auth(req).workspaceId).status());
+  app.get('/api/ai/status', async (req) => {
+    const a = auth(req);
+    const st = await aiOf(a.workspaceId).status();
+    // o motor da pessoa (conta nova: ligando por até ~1 min): a tela diz o que está acontecendo e confere de novo
+    const dono = owners.of(a.workspaceId);
+    const motor = dono ? motors.state(dono) : { state: 'aberto' as const, error: null };
+    if (!st.available) motors.ready(a.workspaceId);
+    return { ...st, motor };
+  });
   app.get('/api/ai/models', {
     schema: { querystring: { type: 'object', additionalProperties: false, properties: { refresh: { enum: ['1', '0'] } } } },
   }, async (req) => aiOf(auth(req).workspaceId).catalog((req.query as { refresh?: string }).refresh === '1'));
