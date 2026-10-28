@@ -121,7 +121,9 @@ jobs:
           $app = Get-ChildItem $pasta -Filter 'ergon-desktop.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $app) { Get-ChildItem $pasta -ErrorAction SilentlyContinue; throw "aplicativo não encontrado em $pasta" }
           $t0 = Get-Date
-          $p = Start-Process $app.FullName -ArgumentList '--instalar-sem-janela' -PassThru -Wait -RedirectStandardOutput out\assistente.log -RedirectStandardError out\assistente.err
+          # espera só o aplicativo (WaitForExit): "-Wait" esperaria também o processo do WSL que mantém o ambiente ligado
+          $p = Start-Process $app.FullName -ArgumentList '--instalar-sem-janela' -PassThru -RedirectStandardOutput out\assistente.log -RedirectStandardError out\assistente.err
+          if (-not $p.WaitForExit(60 * 60 * 1000)) { Get-Content out\assistente.log -Tail 40; Stop-Process -Id $p.Id -Force; throw 'o assistente passou de 60 minutos' }
           $min = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
           Get-Content out\assistente.log -Tail 80
           if ($p.ExitCode -ne 0) { Get-Content out\assistente.err -Tail 40; throw "o assistente saiu com $($p.ExitCode) depois de $min min" }
