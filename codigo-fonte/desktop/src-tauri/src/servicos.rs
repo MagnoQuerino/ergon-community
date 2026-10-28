@@ -29,6 +29,9 @@ fn raiz_atual(estado: &Estado) -> Option<PathBuf> {
 /// Ergon. Usa "subir", que não instala nada no início do sistema. A saída chega à tela de abertura linha a linha.
 #[tauri::command]
 pub fn subir_servicos(app: AppHandle, estado: State<'_, Estado>) -> Result<(), String> {
+    if crate::ambiente::ativo() {
+        return em_segundo_plano(app, &estado, |app| crate::ambiente::subir(&mut |e| emitir(app, e)));
+    }
     let raiz = raiz_atual(&estado).ok_or("A pasta da instalação do Ergon não foi encontrada.")?;
     if !instalacao::valida(&raiz) {
         return Err("A pasta registrada não tem mais o lançador do Ergon.".into());
@@ -50,8 +53,58 @@ pub fn subir_servicos(app: AppHandle, estado: State<'_, Estado>) -> Result<(), S
 
 /// Para os serviços do Ergon (só pela bandeja, depois de você confirmar). O Docker continua aberto.
 pub fn parar_servicos(app: &AppHandle) -> Result<(), String> {
+    if crate::ambiente::ativo() {
+        return crate::ambiente::parar(&mut |e| emitir(app, e));
+    }
     let raiz = raiz_atual(&app.state::<Estado>()).ok_or("A pasta da instalação do Ergon não foi encontrada.")?;
     rodar_lancador(app, &raiz, "parar")
+}
+
+/// Instala o Ergon pelo ambiente próprio (Windows): baixa e confere os componentes da versão, cria o ambiente e liga
+/// os serviços. Retoma de onde parou. As etapas chegam à tela ("instalacao:etapa"), e as linhas como as do "subir".
+#[tauri::command]
+pub fn instalar_ergon(app: AppHandle, estado: State<'_, Estado>) -> Result<(), String> {
+    em_segundo_plano(app, &estado, |app| match crate::ambiente::instalar(&mut |e| emitir(app, e))? {
+        crate::ambiente::Fim::Pronto { .. } => Ok(()),
+        crate::ambiente::Fim::Reiniciar => {
+            let _ = app.emit_to(janela::PRINCIPAL, "instalacao:reiniciar", ());
+            Err("REINICIAR".into())
+        }
+    })
+}
+
+/// Evento da instalação ou do ambiente → tela de abertura.
+pub fn emitir(app: &AppHandle, e: crate::ambiente::Evento) {
+    use crate::ambiente::Evento;
+    match e {
+        Evento::Etapa(id) => {
+            log::info!("instalação: {id}");
+            let _ = app.emit_to(janela::PRINCIPAL, "instalacao:etapa", id);
+        }
+        Evento::Linha(l) => {
+            log::info!("instalação: {l}");
+            let _ = app.emit_to(janela::PRINCIPAL, "servicos:linha", l);
+        }
+        Evento::Progresso { componente, feitos, total } => {
+            let _ = app.emit_to(janela::PRINCIPAL, "instalacao:progresso", (componente, feitos, total));
+        }
+    }
+}
+
+/// Uma operação longa por vez, numa thread; o fim chega como "servicos:fim".
+fn em_segundo_plano(app: AppHandle, estado: &Estado, f: impl FnOnce(&AppHandle) -> Result<(), String> + Send + 'static) -> Result<(), String> {
+    if estado.subindo.swap(true, Ordering::SeqCst) {
+        return Err("O Ergon já está iniciando.".into());
+    }
+    std::thread::spawn(move || {
+        let r = f(&app);
+        app.state::<Estado>().subindo.store(false, Ordering::SeqCst);
+        if let Err(e) = &r {
+            log::warn!("{e}");
+        }
+        let _ = app.emit_to(janela::PRINCIPAL, "servicos:fim", Fim { ok: r.is_ok(), mensagem: r.err().unwrap_or_default() });
+    });
+    Ok(())
 }
 
 /// Roda o lançador desta plataforma (ergon.ps1 no Windows, ergon.sh no Linux) com um comando fixo.

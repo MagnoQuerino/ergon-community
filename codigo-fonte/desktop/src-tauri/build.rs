@@ -9,6 +9,7 @@ fn main() {
             "abrir_no_navegador",
             "abrir_ajuda",
             "abrir_registros",
+            "instalar_ergon",
         ]),
     ))
     .expect("falha ao preparar o Tauri");

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-abrir-no-navegador"
+description = "Enables the abrir_no_navegador command without any pre-configured scope."
+commands.allow = ["abrir_no_navegador"]
+
+[[permission]]
+identifier = "deny-abrir-no-navegador"
+description = "Denies the abrir_no_navegador command without any pre-configured scope."
+commands.deny = ["abrir_no_navegador"]

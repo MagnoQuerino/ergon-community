@@ -19,8 +19,13 @@ pub enum Docker {
     Falha(String),
 }
 
+/// O programa docker: o de dentro do ambiente do Ergon (Windows, instalação própria) ou o do sistema.
+fn cli() -> std::process::Command {
+    if crate::ambiente::ativo() { crate::ambiente::dentro(&["docker"]) } else { comando("docker") }
+}
+
 pub fn situacao() -> Docker {
-    let mut c = comando("docker");
+    let mut c = cli();
     c.args(["version", "--format", "{{.Server.Version}}"]);
     match rodar(c, Duration::from_secs(20)) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Docker::Ausente,
@@ -61,7 +66,7 @@ pub struct Conteiner {
 
 /// Contêineres do projeto (parados também), com o serviço, o estado, as portas e a pasta do Compose.
 pub fn conteineres(projeto: &str) -> Vec<Conteiner> {
-    let mut c = comando("docker");
+    let mut c = cli();
     c.args([
         "ps",
         "-a",

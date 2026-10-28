@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subir-servicos"
+description = "Enables the subir_servicos command without any pre-configured scope."
+commands.allow = ["subir_servicos"]
+
+[[permission]]
+identifier = "deny-subir-servicos"
+description = "Denies the subir_servicos command without any pre-configured scope."
+commands.deny = ["subir_servicos"]

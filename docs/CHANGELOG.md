@@ -1,5 +1,14 @@
 # Novidades
 
+## 1.1.0-rc.1 (pré-versão de teste)
+
+- **Windows sem Docker:** o Ergon Desktop instala o Ergon inteiro sozinho. Ele cria um ambiente próprio no WSL do
+  Windows (com o Docker dentro, sem Docker Desktop), baixa os componentes conferindo a assinatura de cada um,
+  retoma downloads interrompidos e continua sozinho depois de um reinício. O Ergon só aparece para este computador.
+- Pré-versão: não aparece para quem usa `ergon atualizar` nem como "versão mais recente". Para testar, baixe o
+  instalador `.exe` desta página.
+- Repositório organizado: na raiz ficam os instaladores e os guias; o código foi para `codigo-fonte/`.
+
 ## 1.0.1
 
 - `ergon instalar` instala o Ergon numa pasta sua e põe o comando `ergon` no PATH: depois disso, `ergon` funciona

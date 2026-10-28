@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-abrir-ergon"
+description = "Enables the abrir_ergon command without any pre-configured scope."
+commands.allow = ["abrir_ergon"]
+
+[[permission]]
+identifier = "deny-abrir-ergon"
+description = "Denies the abrir_ergon command without any pre-configured scope."
+commands.deny = ["abrir_ergon"]

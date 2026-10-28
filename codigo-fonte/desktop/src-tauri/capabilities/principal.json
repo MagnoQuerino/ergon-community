@@ -11,6 +11,7 @@
     "allow-abrir-ergon",
     "allow-abrir-no-navegador",
     "allow-abrir-ajuda",
-    "allow-abrir-registros"
+    "allow-abrir-registros",
+    "allow-instalar-ergon"
   ]
 }

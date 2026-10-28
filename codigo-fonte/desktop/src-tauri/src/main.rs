@@ -3,7 +3,10 @@
 // duplicado aqui; esta camada só conhece a saúde do Ergon, o Docker e os lançadores (ergon.ps1 / ergon.sh).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ambiente;
+mod baixar;
 mod bandeja;
+mod confianca;
 mod diag;
 mod docker;
 mod http;
@@ -29,6 +32,11 @@ pub struct Estado {
 
 fn main() {
     registro::iniciar();
+    // sem janela: a mesma instalação, com as etapas no terminal (testes e suporte). Código de saída: 0 pronto,
+    // 3 precisa reiniciar o Windows, 1 erro.
+    if std::env::args().any(|a| a == "--instalar-sem-janela") {
+        std::process::exit(instalar_sem_janela());
+    }
     let estado = Estado { ultimo: Mutex::new(None), porta: AtomicU16::new(instalacao::localizar().porta), subindo: AtomicBool::new(false) };
     tauri::Builder::default()
         // abrir de novo (menu, atalho) traz a janela que já está aberta, em vez de uma segunda cópia
@@ -52,6 +60,7 @@ fn main() {
             servicos::abrir_no_navegador,
             servicos::abrir_ajuda,
             servicos::abrir_registros,
+            servicos::instalar_ergon,
         ])
         .setup(|app| {
             if let Ok(pasta) = app.path().app_log_dir() {
@@ -67,4 +76,30 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("falha ao iniciar o Ergon Desktop");
+}
+
+fn instalar_sem_janela() -> i32 {
+    let mut ev = |e: ambiente::Evento| match e {
+        ambiente::Evento::Etapa(id) => println!("ETAPA {id}"),
+        ambiente::Evento::Linha(l) => println!("      {l}"),
+        ambiente::Evento::Progresso { componente, feitos, total } => {
+            if feitos == total || feitos % (16 << 20) < (1 << 16) {
+                println!("BAIXANDO {componente} {feitos}/{total}");
+            }
+        }
+    };
+    match ambiente::instalar(&mut ev) {
+        Ok(ambiente::Fim::Pronto { versao }) => {
+            println!("PRONTO {versao}");
+            0
+        }
+        Ok(ambiente::Fim::Reiniciar) => {
+            println!("REINICIAR");
+            3
+        }
+        Err(e) => {
+            println!("ERRO {e}");
+            1
+        }
+    }
 }

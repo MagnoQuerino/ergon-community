@@ -1,0 +1,16 @@
+#!/bin/sh
+# Serviço do ambiente do Ergon (chamado pelo aplicativo, com argumentos fixos):
+#   servico   liga o Docker Engine e fica em primeiro plano (o aplicativo mantém este processo vivo)
+#   pronto    sai com 0 quando o Docker responde
+#   versao    versão deste ambiente
+set -u
+case "${1:-}" in
+  servico)
+    mkdir -p /var/log/ergon
+    # um só: se já está rodando (outra janela abriu antes), só espera ele
+    if pgrep -x dockerd >/dev/null; then while pgrep -x dockerd >/dev/null; do sleep 5; done; exit 0; fi
+    exec dockerd >>/var/log/ergon/dockerd.log 2>&1 ;;
+  pronto) docker info >/dev/null 2>&1 ;;
+  versao) cat /etc/ergon-ambiente 2>/dev/null || echo desconhecida ;;
+  *) echo "uso: ergon-ambiente servico|pronto|versao" >&2; exit 2 ;;
+esac

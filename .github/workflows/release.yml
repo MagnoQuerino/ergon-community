@@ -27,6 +27,8 @@ jobs:
           echo "VERSAO=$V" >> "$GITHUB_ENV"
           echo "DONO=$(echo '${{ github.repository_owner }}' | tr 'A-Z' 'a-z')" >> "$GITHUB_ENV"
           echo "BUILD=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          # build repetível: datas dos arquivos presas à do commit (camada reaproveitada do cache fica idêntica)
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
 
       - name: Testes (Linux, no contêiner)
         run: docker build --target test .
@@ -46,20 +48,25 @@ jobs:
           target: runtime
           platforms: linux/amd64,linux/arm64
           build-args: ERGON_BUILD=${{ env.BUILD }}
-          push: true
+          # cache entre versões: camada que não mudou sai com o MESMO digest e quem atualiza não baixa de novo
+          cache-from: type=gha,scope=ergon
+          cache-to: type=gha,scope=ergon,mode=max
+          outputs: type=image,push=true,rewrite-timestamp=true
           tags: |
             ghcr.io/${{ env.DONO }}/ergon-community:${{ env.VERSAO }}
-            ghcr.io/${{ env.DONO }}/ergon-community:latest
+            ${{ !contains(github.ref_name, '-') && format('ghcr.io/{0}/ergon-community:latest', env.DONO) || '' }}
 
       - name: Imagem do motor (amd64 + arm64)
         uses: docker/build-push-action@v6
         with:
           context: codigo-fonte/hermes
           platforms: linux/amd64,linux/arm64
-          push: true
+          cache-from: type=gha,scope=ergon-hermes
+          cache-to: type=gha,scope=ergon-hermes,mode=max
+          outputs: type=image,push=true,rewrite-timestamp=true
           tags: |
             ghcr.io/${{ env.DONO }}/ergon-community-hermes:${{ env.VERSAO }}
-            ghcr.io/${{ env.DONO }}/ergon-community-hermes:latest
+            ${{ !contains(github.ref_name, '-') && format('ghcr.io/{0}/ergon-community-hermes:latest', env.DONO) || '' }}
 
       - name: Pacote local + manifesto da versão
         run: |
@@ -87,6 +94,7 @@ jobs:
       - name: Publicar a versão
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}   # vX.Y.Z-rc.N = canal de teste
           body_path: codigo-fonte/novidades.md
           files: |
             codigo-fonte/ergon-local-${{ env.VERSAO }}.zip
@@ -123,6 +131,9 @@ jobs:
       - name: Testes e pacotes
         shell: bash
         working-directory: codigo-fonte/desktop
+        env:
+          # pré-versão (vX.Y.Z-rc.N): o aplicativo segue o canal de teste (manifesto na pré-versão fixa canal-teste)
+          ERGON_CANAL: ${{ contains(github.ref_name, '-') && 'teste' || 'estavel' }}
         run: |
           (cd src-tauri && cargo test --locked --release)
           npm ci --no-audit --no-fund
@@ -135,16 +146,80 @@ jobs:
       - name: Anexar à versão
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             codigo-fonte/desktop/src-tauri/target/release/bundle/nsis/*.exe
             codigo-fonte/desktop/src-tauri/target/release/bundle/deb/*.deb
             codigo-fonte/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
             codigo-fonte/desktop/pacotes/*
 
+  # Ambiente do Ergon no Windows sem Docker Desktop: a distribuição WSL própria (Alpine + Docker Engine) que o Ergon
+  # Desktop importa. Componente do manifesto, baixado uma vez, com a mesma versão da etiqueta.
+  ambiente:
+    needs: lancamento
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ambiente WSL (rootfs) desta versão
+        run: |
+          V=$(node -p "require('./package.json').version")
+          docker build -q --build-arg VERSAO="$V" -t ergon-ambiente desktop/ambiente
+          id=$(docker create ergon-ambiente)
+          docker export "$id" | gzip -n -9 > ergon-ambiente-wsl.tar.gz
+          docker rm "$id" >/dev/null
+          echo "ambiente: $(du -m ergon-ambiente-wsl.tar.gz | cut -f1) MB comprimido"; sha256sum ergon-ambiente-wsl.tar.gz
+      - name: Anexar à versão
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            codigo-fonte/ergon-ambiente-wsl.tar.gz
+
+  # Manifesto do canal: só depois de TODAS as partes publicadas. Um cliente limpo (sem login) resolve e confere cada
+  # artefato; só então o manifesto assinado é anexado. Sem a chave (segredo ERGON_MANIFESTO_CHAVE), nada é promovido
+  # e a versão segue como antes (latest.json). Estável: releases/latest/download/manifesto-estavel.json; teste: a
+  # pré-versão fixa "canal-teste".
+  manifesto:
+    needs: [lancamento, desktop, ambiente]
+    runs-on: ubuntu-24.04
+    env:
+      ERGON_MANIFESTO_CHAVE: ${{ secrets.ERGON_MANIFESTO_CHAVE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.1
+      - name: Gerar, assinar e conferir como cliente limpo
+        if: env.ERGON_MANIFESTO_CHAVE != ''
+        run: |
+          CANAL=$([[ "$GITHUB_REF_NAME" == *-* ]] && echo teste || echo estavel)
+          echo "CANAL=$CANAL" >> "$GITHUB_ENV"
+          node scripts/distribuicao/cli.mjs gerar --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" --canal "$CANAL" --saida "manifesto-$CANAL.json"
+          node scripts/distribuicao/cli.mjs assinar --chave ambiente "manifesto-$CANAL.json"
+          node scripts/distribuicao/cli.mjs resolver "manifesto-$CANAL.json" --canal "$CANAL" --edicao "$(jq -r .edicao "manifesto-$CANAL.json")"
+      - name: Promover no canal estável (anexa à versão)
+        if: env.ERGON_MANIFESTO_CHAVE != '' && env.CANAL == 'estavel'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            codigo-fonte/manifesto-estavel.json
+            codigo-fonte/manifesto-estavel.json.sig
+      - name: Promover no canal de teste (pré-versão fixa canal-teste)
+        if: env.ERGON_MANIFESTO_CHAVE != '' && env.CANAL == 'teste'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view canal-teste >/dev/null 2>&1 || gh release create canal-teste --prerelease --title "Canal de teste" --notes "Ponteiro do canal de teste: manifesto assinado da pré-versão mais recente."
+          gh release upload canal-teste manifesto-teste.json manifesto-teste.json.sig --clobber
+      - name: Sem chave, sem manifesto
+        if: env.ERGON_MANIFESTO_CHAVE == ''
+        run: echo "::warning::ERGON_MANIFESTO_CHAVE não configurado; manifesto do canal não promovido (a versão segue só com latest.json)"
+
   # Os instaladores também na raiz do repositório, como em qualquer programa: quem baixa o zip do repositório já os
   # encontra. Um commit no main depois que a versão está publicada (sem disparar outros workflows).
   instaladores-na-raiz:
     needs: desktop
+    if: ${{ !contains(github.ref_name, '-') }}   # pré-versão não vai para a raiz
     runs-on: ubuntu-24.04
     defaults:
       run:

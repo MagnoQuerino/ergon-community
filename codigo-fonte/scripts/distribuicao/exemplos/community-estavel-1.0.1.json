@@ -1,0 +1,71 @@
+{
+  "formato": 1,
+  "produto": "ergon",
+  "edicao": "community",
+  "canal": "estavel",
+  "versao": "1.0.1",
+  "sequencia": 1793128967,
+  "emitidoEm": "2026-10-27T19:22:47.180Z",
+  "validoAte": "2027-01-25T19:22:47.180Z",
+  "notas": "https://github.com/MagnoQuerino/ergon-community/releases/tag/v1.0.1",
+  "requisitos": {
+    "windows": {
+      "buildMinimo": 19041,
+      "wsl": 2
+    },
+    "arquiteturas": [
+      "amd64",
+      "arm64"
+    ]
+  },
+  "componentes": {
+    "core": {
+      "tipo": "oci",
+      "imagem": "ghcr.io/magnoquerino/ergon-community",
+      "versao": "1.0.1",
+      "digest": "sha256:a10fd36c9e7c68c854cd87736b9f6b4020f8042fcae050a6ec5a7828752219ac",
+      "plataformas": {
+        "amd64": "sha256:97df4556cbbc4f87a597ae359d41a443b588b5b699684131c9ad211ba9723844",
+        "arm64": "sha256:5a20f7c329712075a51166388005b293858954f197fc97bb8f602e786eb33fdc"
+      }
+    },
+    "motor": {
+      "tipo": "oci",
+      "imagem": "ghcr.io/magnoquerino/ergon-community-hermes",
+      "versao": "1.0.1",
+      "digest": "sha256:68b75487bfe95f168681b45deba52f20ecc6a54ddddfd649370518c0a6961be0",
+      "plataformas": {
+        "amd64": "sha256:8e0dd1b11b70fe36cde057376cbcf439d181ebdf6a8838a829f7172ba08226a4",
+        "arm64": "sha256:d7939b3311e43e1e05ca34beea0ed4d2bc0da59ae03a228b8080487d75bf3e17"
+      }
+    },
+    "pacote-local": {
+      "tipo": "arquivo",
+      "nome": "ergon-local-1.0.1.zip",
+      "url": "https://github.com/MagnoQuerino/ergon-community/releases/download/v1.0.1/ergon-local-1.0.1.zip",
+      "sha256": "1aa22343cb0553f357cb0e407e463732efd5615bf3b82619c95210a0d09171e6",
+      "tamanho": 28675
+    },
+    "desktop-appimage": {
+      "tipo": "arquivo",
+      "nome": "Ergon_1.0.1_amd64.AppImage",
+      "url": "https://github.com/MagnoQuerino/ergon-community/releases/download/v1.0.1/Ergon_1.0.1_amd64.AppImage",
+      "sha256": "eb0279e3b38b6269803bd617a64d6dd7b84a6c27ad365f4fd5645ecf9d71420a",
+      "tamanho": 80955896
+    },
+    "desktop-deb": {
+      "tipo": "arquivo",
+      "nome": "Ergon_1.0.1_amd64.deb",
+      "url": "https://github.com/MagnoQuerino/ergon-community/releases/download/v1.0.1/Ergon_1.0.1_amd64.deb",
+      "sha256": "859a4138f8d1de368ff0c53be7d562ae889d8e31284537277bee2a3532b069d4",
+      "tamanho": 2213038
+    },
+    "desktop-windows": {
+      "tipo": "arquivo",
+      "nome": "Ergon_1.0.1_x64-setup.exe",
+      "url": "https://github.com/MagnoQuerino/ergon-community/releases/download/v1.0.1/Ergon_1.0.1_x64-setup.exe",
+      "sha256": "c978c4d12aa3efe9116eac221eba997ea5d7f770e2412b1b878c652a90e05b91",
+      "tamanho": 1390434
+    }
+  }
+}

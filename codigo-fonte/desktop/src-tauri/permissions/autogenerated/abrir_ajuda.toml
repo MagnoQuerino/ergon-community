@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-abrir-ajuda"
+description = "Enables the abrir_ajuda command without any pre-configured scope."
+commands.allow = ["abrir_ajuda"]
+
+[[permission]]
+identifier = "deny-abrir-ajuda"
+description = "Denies the abrir_ajuda command without any pre-configured scope."
+commands.deny = ["abrir_ajuda"]

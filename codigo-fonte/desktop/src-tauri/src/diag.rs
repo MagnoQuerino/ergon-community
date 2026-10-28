@@ -33,6 +33,8 @@ pub struct Diagnostico {
     pub teste: bool,
     pub windows: bool,
     pub detalhes: Vec<String>,
+    /// uma instalação pelo ambiente próprio começou e não terminou (depois de reiniciar, continua sozinha)
+    pub continuar: bool,
     #[serde(skip)]
     pub raiz: Option<std::path::PathBuf>,
 }
@@ -91,6 +93,8 @@ pub struct Entrada {
     pub docker: Docker,
     pub conteineres: Vec<Conteiner>,
     pub windows: bool,
+    /// instalado pelo ambiente próprio do Ergon (WSL dedicado, sem Docker Desktop)
+    pub ambiente: bool,
 }
 
 fn marcar(d: &mut Diagnostico, estado: &'static str, titulo: &str, explicacao: String, acoes: &[&str]) {
@@ -152,6 +156,7 @@ pub fn decidir(e: Entrada) -> Diagnostico {
         teste: e.inst.teste,
         windows: e.windows,
         detalhes,
+        continuar: false,
         raiz: raiz.clone(),
     };
 
@@ -213,7 +218,20 @@ pub fn decidir(e: Entrada) -> Diagnostico {
         marcar(&mut d, "parado", "A instância de teste não responde", format!("Nada responde em http://localhost:{porta}."), &["tentar", "diagnostico"]);
         return d;
     }
+    if e.ambiente && !matches!(e.docker, Docker::Pronto(_)) {
+        marcar(&mut d, "parado", "O Ergon está desligado", "O ambiente do Ergon está instalado, mas desligado. Clique em \"Iniciar Ergon\" para ligar.".into(), &["iniciar", "tentar", "diagnostico"]);
+        return d;
+    }
+    // Windows sem nenhuma instalação do Ergon: o ambiente próprio (WSL) não depende do Docker Desktop, esteja ele
+    // ausente, fechado ou aberto (e não mexe nele)
+    let instalar_proprio = |d: &mut Diagnostico, com_docker: bool| {
+        let extra = if com_docker { " O Docker Desktop deste computador não é usado nem alterado." } else { "" };
+        marcar(d, "nao_instalado", "Vamos instalar o Ergon",
+            format!("O Ergon roda num ambiente próprio, dentro do Windows (WSL), sem precisar do Docker Desktop. A instalação baixa e confere cada parte; se o Windows pedir para reiniciar, ela continua sozinha depois.{extra}"),
+            &["instalar", "tentar"]);
+    };
     match &e.docker {
+        Docker::Ausente if e.windows => instalar_proprio(&mut d, false),
         Docker::Ausente => marcar(&mut d, "docker_ausente", "O Docker não está instalado",
             "A versão local do Ergon roda no Docker, que guarda os serviços e os dados. Instale o Docker pelo site oficial e volte aqui: nada é instalado sem você pedir.".into(),
             &["ajuda:docker", "tentar"]),
@@ -226,8 +244,7 @@ pub fn decidir(e: Entrada) -> Diagnostico {
                     "O Ergon roda dentro do Docker. Clique em \"Iniciar Ergon\": o Docker Desktop abre e os serviços sobem (leva alguns minutos na primeira vez do dia).".into(),
                     &["iniciar", "tentar", "diagnostico"]);
             } else if e.windows {
-                marcar(&mut d, "docker_parado", "O Docker está fechado",
-                    "Abra o Docker Desktop e tente de novo.".into(), &["tentar", "diagnostico"]);
+                instalar_proprio(&mut d, true);
             } else {
                 marcar(&mut d, "docker_parado", "O serviço do Docker está parado",
                     "Inicie o Docker (o Docker Engine sobe como serviço do sistema: \"sudo systemctl start docker\", ou ative para subir sozinho com \"sudo systemctl enable docker\") e tente de novo.".into(),
@@ -237,12 +254,14 @@ pub fn decidir(e: Entrada) -> Diagnostico {
         Docker::Pronto(_) => {
             if ergon.map(|c| c.estado == "running").unwrap_or(false) {
                 marcar(&mut d, "iniciando", "O Ergon está iniciando", "Os serviços estão ligados, mas o Ergon ainda não responde. Esperando…".into(), &["tentar", "diagnostico"]);
-            } else if ergon.is_some() || raiz.is_some() {
-                if raiz.is_some() {
+            } else if ergon.is_some() || raiz.is_some() || e.ambiente {
+                if raiz.is_some() || e.ambiente {
                     marcar(&mut d, "parado", "O Ergon está desligado", "Os serviços do Ergon estão instalados, mas parados. Clique em \"Iniciar Ergon\" para ligar.".into(), &["iniciar", "tentar", "diagnostico"]);
                 } else {
                     marcar(&mut d, "parado", "O Ergon está desligado", "Os serviços estão parados e a pasta da instalação não foi encontrada: ligue pelo lançador (ergon iniciar) uma vez, para ela ficar registrada.".into(), &["tentar", "diagnostico", "ajuda:instalar_ergon"]);
                 }
+            } else if e.windows {
+                instalar_proprio(&mut d, true);
             } else {
                 marcar(&mut d, "nao_instalado", "O Ergon ainda não está instalado neste computador",
                     "Este aplicativo abre o Ergon local, que roda no Docker. Instale os serviços do Ergon (pacote local) e abra o aplicativo de novo.".into(),
@@ -263,7 +282,13 @@ pub fn coletar() -> Diagnostico {
         let c = if matches!(d, Docker::Pronto(_)) { docker::conteineres(&instalacao::projeto(inst.raiz.as_deref())) } else { vec![] };
         (d, c)
     };
-    decidir(Entrada { inst, saude, docker, conteineres, windows: cfg!(windows) })
+    let p = crate::ambiente::ler_progresso();
+    let mut d = decidir(Entrada { inst, saude, docker, conteineres, windows: cfg!(windows), ambiente: crate::ambiente::ativo() });
+    d.continuar = cfg!(windows) && !p.concluida.is_empty() && p.concluida != "pronto" && d.estado == "nao_instalado";
+    if d.continuar {
+        d.titulo = "Continuando a instalação do Ergon".into();
+    }
+    d
 }
 
 #[tauri::command]
@@ -284,7 +309,7 @@ mod testes {
         Conteiner { servico: servico.into(), estado: estado.into(), portas: portas.into(), pasta: String::new() }
     }
     fn entrada(saude: Resposta, docker: Docker, conteineres: Vec<Conteiner>) -> Entrada {
-        Entrada { inst: Instalacao { raiz: None, porta: 8787, teste: false }, saude, docker, conteineres, windows: true }
+        Entrada { inst: Instalacao { raiz: None, porta: 8787, teste: false }, saude, docker, conteineres, windows: true, ambiente: false }
     }
     fn ok() -> Resposta {
         Resposta::Ergon(Saude { versao: "0.2.0".into(), trancado: false })
@@ -326,10 +351,27 @@ mod testes {
 
     #[test]
     fn motivos_de_nao_responder() {
-        assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::Ausente, vec![])).estado, "docker_ausente");
-        assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::Parado("x".into()), vec![])).estado, "docker_parado");
+        // Windows sem Docker: o Ergon oferece instalar o ambiente próprio; Linux sem Docker: explica o que falta
+        let d = decidir(entrada(Resposta::Nada("x".into()), Docker::Ausente, vec![]));
+        assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"));
+        assert_eq!(decidir(Entrada { windows: false, ..entrada(Resposta::Nada("x".into()), Docker::Ausente, vec![]) }).estado, "docker_ausente");
+        // ambiente próprio instalado e desligado: "Iniciar Ergon" liga
+        let d = decidir(Entrada { ambiente: true, ..entrada(Resposta::Nada("x".into()), Docker::Parado("x".into()), vec![]) });
+        assert_eq!((d.estado, d.acoes[0].as_str()), ("parado", "iniciar"));
+        // Windows com Docker Desktop (fechado ou aberto) e sem Ergon: também oferece o ambiente próprio
+        let d = decidir(entrada(Resposta::Nada("x".into()), Docker::Parado("x".into()), vec![]));
+        assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"));
+        let d = decidir(entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), vec![]));
+        assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"));
+        // instalação antiga pelo Docker Desktop registrada: segue por ele
+        let antiga = |docker| Entrada { inst: Instalacao { raiz: Some("C:\\Ergon".into()), porta: 8787, teste: false }, ..entrada(Resposta::Nada("x".into()), docker, vec![]) };
+        assert_eq!((decidir(antiga(Docker::Parado("x".into()))).acoes[0].as_str()), "iniciar");
+        // Linux: o Docker do sistema
+        let linux = |docker| Entrada { windows: false, ..entrada(Resposta::Nada("x".into()), docker, vec![]) };
+        assert_eq!(decidir(linux(Docker::Parado("x".into()))).estado, "docker_parado");
+        let d = decidir(linux(Docker::Pronto("27".into())));
+        assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "ajuda:instalar_ergon"));
         assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::SemPermissao("x".into()), vec![])).estado, "docker_sem_permissao");
-        assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), vec![])).estado, "nao_instalado");
         assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), vec![c("ergon", "exited", "")])).estado, "parado");
         assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")])).estado, "iniciando");
     }

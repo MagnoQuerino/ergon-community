@@ -6,11 +6,16 @@ const { listen } = window.__TAURI__.event;
 const $ = (id) => document.getElementById(id);
 
 const ROTULOS = {
-  abrir: 'Abrir o Ergon', iniciar: 'Iniciar Ergon', tentar: 'Tentar novamente', navegador: 'Abrir no navegador',
+  abrir: 'Abrir o Ergon', iniciar: 'Iniciar Ergon', instalar: 'Instalar o Ergon', tentar: 'Tentar novamente', navegador: 'Abrir no navegador',
   diagnostico: 'Ver diagnóstico', 'ajuda:docker': 'Como instalar o Docker', 'ajuda:docker_rootless': 'Docker sem root (recomendado)',
   'ajuda:docker_pos_instalacao': 'Outras formas de acesso', 'ajuda:instalar_ergon': 'Como instalar o Ergon',
 };
-const PRINCIPAIS = new Set(['abrir', 'iniciar']);
+const PRINCIPAIS = new Set(['abrir', 'iniciar', 'instalar']);
+const ETAPAS = {
+  diagnostico: 'Conferindo este computador', wsl: 'Preparando o Windows (WSL)', baixar: 'Baixando os componentes',
+  importar: 'Criando o ambiente do Ergon', configurar: 'Configurando', ligar: 'Ligando os serviços', conferir: 'Conferindo a instalação',
+};
+let instalando = false;
 let ultimo = null;
 let esperando = null;
 
@@ -67,6 +72,8 @@ async function verificar() {
   } else if (d.estado === 'iniciando') {
     esperando = setTimeout(verificar, 3000);
   }
+  // depois de reiniciar o Windows, a instalação continua sozinha
+  if (d.continuar && d.acoes.includes('instalar')) agir('instalar');
   if (location.hash === '#iniciar') {
     history.replaceState(null, '', location.pathname);
     if (d.acoes.includes('iniciar')) agir('iniciar');
@@ -80,6 +87,15 @@ async function agir(a, botao) {
     else if (a === 'navegador') await invoke('abrir_no_navegador');
     else if (a === 'diagnostico') { const s = $('diagnostico'); s.hidden = !s.hidden; }
     else if (a.startsWith('ajuda:')) await invoke('abrir_ajuda', { tema: a.slice(6) });
+    else if (a === 'instalar') {
+      if (botao) botao.disabled = true;
+      instalando = true;
+      carregando(true); fase('Instalando o Ergon');
+      $('titulo').textContent = 'Instalando o Ergon…';
+      $('texto').textContent = 'Cada parte é baixada e conferida antes de ser usada. Pode levar alguns minutos; se a internet cair, a instalação continua de onde parou.';
+      botoes([]);
+      await invoke('instalar_ergon');
+    }
     else if (a === 'iniciar') {
       if (botao) botao.disabled = true;
       carregando(true); fase('Preparando ambiente');
@@ -96,9 +112,20 @@ async function agir(a, botao) {
 }
 
 // o lançador fala linha a linha: a fase acompanha o que ele está fazendo
+listen('instalacao:etapa', ({ payload }) => { fase(ETAPAS[payload] || 'Instalando o Ergon'); });
+listen('instalacao:progresso', ({ payload: [c, feitos, total] }) => {
+  linha(`${c === 'ambiente-wsl' ? 'Ambiente' : c === 'pacote-local' ? 'Pacote da versão' : c}: ${(feitos / 1e6).toFixed(1)} de ${(total / 1e6).toFixed(1)} MB`);
+});
+listen('instalacao:reiniciar', () => {
+  instalando = false; carregando(false); fase('Reinicie o Windows', true);
+  $('titulo').textContent = 'O Windows precisa reiniciar';
+  $('texto').textContent = 'O WSL foi ativado. Salve o que estiver aberto e reinicie o computador: o Ergon abre sozinho depois e continua a instalação de onde parou.';
+  botoes([]);
+});
 listen('servicos:linha', ({ payload }) => {
   const t = String(payload);
   linha(t);
+  if (instalando) return;
   const l = t.toLowerCase();
   if (l.includes('docker')) fase('Preparando ambiente');
   else if (l.includes('hermes') || l.includes('motor')) fase('Iniciando motor de IA');
@@ -106,11 +133,13 @@ listen('servicos:linha', ({ payload }) => {
 });
 listen('servicos:fim', ({ payload }) => {
   linha('');
+  if (payload.mensagem === 'REINICIAR') return;
+  const eraInstalacao = instalando; instalando = false;
   if (payload.ok) { verificar(); return; }
   carregando(false); fase('Necessita atenção', true);
-  $('titulo').textContent = 'O Ergon não iniciou';
+  $('titulo').textContent = eraInstalacao ? 'A instalação parou' : 'O Ergon não iniciou';
   $('texto').textContent = payload.mensagem || 'O lançador terminou com erro.';
-  botoes(['tentar', 'diagnostico', 'navegador']);
+  botoes(eraInstalacao ? ['instalar', 'diagnostico'] : ['tentar', 'diagnostico', 'navegador']);
 });
 
 $('registros').addEventListener('click', () => invoke('abrir_registros').catch(() => {}));

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-diagnosticar"
+description = "Enables the diagnosticar command without any pre-configured scope."
+commands.allow = ["diagnosticar"]
+
+[[permission]]
+identifier = "deny-diagnosticar"
+description = "Denies the diagnosticar command without any pre-configured scope."
+commands.deny = ["diagnosticar"]

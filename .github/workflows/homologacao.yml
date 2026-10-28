@@ -6,6 +6,11 @@ on:
     workflows: [Lançamento]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Pré-versão para o teste do assistente no Windows (ex.: v1.1.0-rc.1); vazio = só a versão estável'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -84,3 +89,59 @@ jobs:
         with:
           name: homologacao-windows
           path: codigo-fonte/out
+
+  # Pré-versão (vX.Y.Z-rc.N): o instalador .exe PUBLICADO, numa máquina Windows sem Docker Desktop, instala o
+  # Ergon inteiro sozinho pelo canal de teste (WSL próprio, manifesto assinado, imagens por digest), como a pessoa faria
+  # com dois cliques. O assistente roda pelo mesmo caminho da janela, sem a janela (--instalar-sem-janela).
+  assistente-windows:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.tag != '') ||
+      (github.event.workflow_run.conclusion == 'success' && contains(github.event.workflow_run.head_branch, '-'))
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalador da pré-versão publicada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p pkg out
+          gh release download "$TAG" --repo ${{ github.repository }} --dir pkg --pattern '*-setup.exe'
+          ls -l pkg
+      - name: Instalar o aplicativo e, por ele, o Ergon (sem Docker Desktop)
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem pkg -Filter *-setup.exe | Select-Object -First 1).FullName
+          $p = Start-Process $exe -ArgumentList '/S' -PassThru -Wait; Write-Host "instalador do aplicativo: saída $($p.ExitCode)"
+          $reg = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Ergon' } | Select-Object -First 1
+          $pasta = if ($reg.InstallLocation) { $reg.InstallLocation.Trim('"') } else { Join-Path $env:LOCALAPPDATA 'Ergon' }
+          $app = Get-ChildItem $pasta -Filter 'ergon-desktop.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $app) { Get-ChildItem $pasta -ErrorAction SilentlyContinue; throw "aplicativo não encontrado em $pasta" }
+          $t0 = Get-Date
+          $p = Start-Process $app.FullName -ArgumentList '--instalar-sem-janela' -PassThru -Wait -RedirectStandardOutput out\assistente.log -RedirectStandardError out\assistente.err
+          $min = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
+          Get-Content out\assistente.log -Tail 80
+          if ($p.ExitCode -ne 0) { Get-Content out\assistente.err -Tail 40; throw "o assistente saiu com $($p.ExitCode) depois de $min min" }
+          $v = $env:TAG.TrimStart('v')
+          $h = Invoke-RestMethod http://localhost:8787/api/health -TimeoutSec 20
+          if ($h.version -ne $v) { throw "Ergon $($h.version) no ar; esperado $v" }
+          Write-Host "ok    Ergon $($h.version) em http://localhost:8787, instalado pelo .exe publicado em $min min, sem Docker Desktop"
+          $d = (wsl.exe -l -q | Out-String) -replace "`0", ''
+          if ($d -notmatch '(?m)^Ergon\s*$') { throw "ambiente Ergon não registrado no WSL: $d" }
+          Write-Host 'ok    ambiente WSL próprio "Ergon" registrado'
+          if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'ErgonAmbiente'))) { throw 'pasta do ambiente fora do lugar' }
+          Write-Host 'ok    ambiente em %LOCALAPPDATA%\ErgonAmbiente, separado da pasta do aplicativo'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: homologacao-assistente-windows
+          path: codigo-fonte/out
+      - name: Limpar
+        if: always()
+        shell: pwsh
+        run: |
+          wsl.exe --unregister Ergon 2>&1 | Out-Null
+          exit 0
