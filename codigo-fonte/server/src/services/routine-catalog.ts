@@ -40,8 +40,8 @@ export const SOURCES = {
   'prazos.pessoais': 'Suas tarefas com prazo nos próximos dias (To Do, Planner, Google Tasks)',
   // pedido e documentos da execução (rotinas sob demanda)
   'entrada': 'O pedido que você escreve ao executar (objetivo, assunto, problema, ata colada)',
-  'documentos': 'Os documentos anexados ou escolhidos (Word, Excel, PowerPoint, PDF, CSV, texto), lidos pelo Ergon',
-  'planilhas': 'Análise das planilhas anexadas ou escolhidas, feita pelo Ergon (totais, meses, categorias, fora da curva)',
+  'documentos': 'Os documentos anexados ou escolhidos (Word, Excel, PowerPoint, PDF, CSV, texto), lidos pelo sistema',
+  'planilhas': 'Análise das planilhas anexadas ou escolhidas, feita pelo sistema (totais, meses, categorias, fora da curva)',
   'contexto': 'Histórico do assunto no Ergon (tarefas, conversas, arquivos e rotinas que o citam)',
   'equipe.funcoes': 'A equipe: quem faz o quê e quanto trabalho cada um tem',
   'semana': 'A semana em números: entregas, atrasos e cumprimento de prazo por responsável',
@@ -238,7 +238,7 @@ export const CATALOG: RoutineTemplate[] = [
   // B. Gestão e produtividade ------------------------------------------------------------------------------
   T({ key: 'briefing-diario', name: 'Briefing Diário', category: 'gestao', phase: 1, available: true,
     benefit: 'Começa o dia sabendo o que espera você, o que está andando e o que priorizar.',
-    produces: 'Um briefing curto na conversa da rotina e em arquivo (.md), com o painel contado pelo Ergon e a conferência.',
+    produces: 'Um briefing curto na conversa da rotina e em arquivo (.md), com o painel contado pelo sistema e a conferência.',
     examines: 'Sua agenda de hoje, e-mails importantes e suas tarefas com prazo (Microsoft e Google, se conectados), decisões pendentes, tarefas da equipe, trabalho dos agentes e mensagens recebidas.',
     needs: ['ia'], agents: ['aristoteles'], modes: ['schedule', 'manual', 'condition'], privateData: false,
     approvals: 'Só lê e resume; não responde e-mail, não aceita convite, não muda nada.',
@@ -339,7 +339,7 @@ export const CATALOG: RoutineTemplate[] = [
   // C. Produção e análise ---------------------------------------------------------------------------------
   T({ key: 'analista-planilhas', name: 'Analista de Planilhas', category: 'producao', phase: 3, available: true,
     benefit: 'Tendências, inconsistências e indicadores sem abrir a planilha.',
-    produces: 'Análise com os achados e os números que importam, e a planilha de indicadores contados pelo Ergon.',
+    produces: 'Análise com os achados e os números que importam, e a planilha de indicadores contados pelo sistema.',
     examines: 'As planilhas que você anexar ou escolher (.xlsx, .csv; também do OneDrive e do Google Drive).',
     needs: ['ia', 'planilhas'], agents: ['arquimedes', 'euclides'], modes: ['manual', 'schedule'], privateData: false, checks: ['numeros'], outputs: ['csv-indicadores'],
     input: { text: { label: 'O que você quer saber?', placeholder: 'Ex.: por que as vendas caíram em setembro?' }, files: { label: 'Planilhas (.xlsx ou .csv)', required: true, max: 5, accept: '.xlsx,.csv' } },
@@ -349,7 +349,7 @@ export const CATALOG: RoutineTemplate[] = [
     defaults: { trigger: { kind: 'manual' }, config: {
       agent: 'arquimedes', support: ['euclides'], condition: 'sempre', deliver: ['conversa', 'arquivo'], windowHours: 24, staleDays: 3, maxPerDay: 10,
       sources: ['entrada', 'planilhas'],
-      instruction: "Analise as planilhas a partir da análise do Ergon nos dados: 1) O que a planilha mostra (uma linha). 2) Os números que importam (totais, médias, o último mês e a variação), exatamente como nos dados. 3) Tendências (por mês) e concentrações (por categoria). 4) Inconsistências: valores fora da curva (com a linha), vazios, linhas repetidas. 5) A resposta ao pedido do usuário, se houver. 6) Recomendações (até 3).\nNão faça contas que o Ergon não fez: se precisar de outro número, diga qual. Texto simples, no máximo 25 linhas.",
+      instruction: "Analise as planilhas a partir da análise do sistema nos dados: 1) O que a planilha mostra (uma linha). 2) Os números que importam (totais, médias, o último mês e a variação), exatamente como nos dados. 3) Tendências (por mês) e concentrações (por categoria). 4) Inconsistências: valores fora da curva (com a linha), vazios, linhas repetidas. 5) A resposta ao pedido do usuário, se houver. 6) Recomendações (até 3).\nNão faça contas que o Ergon não fez: se precisar de outro número, diga qual. Texto simples, no máximo 25 linhas.",
     } } }),
   T({ key: 'apresentacao-resultados', name: 'Apresentação de Resultados', category: 'producao', phase: 3, available: true,
     benefit: 'Dados e relatórios viram slides editáveis com conclusões.',
@@ -464,7 +464,7 @@ export const CATALOG: RoutineTemplate[] = [
   // E. Administração e finanças --------------------------------------------------------------------------
   T({ key: 'financeiro-documentos', name: 'Financeiro por Documentos', category: 'administracao', phase: 5, available: true,
     benefit: 'Comprovantes e dados avulsos viram lançamentos prontos para aprovar.',
-    produces: 'Lançamentos lidos pelo Ergon (valores e datas) com a classificação sugerida, a planilha e o registro depois da sua aprovação.',
+    produces: 'Lançamentos lidos pelo sistema (valores e datas) com a classificação sugerida, a planilha e o registro depois da sua aprovação.',
     examines: 'Os documentos que você anexar: XML da NF-e ou NFS-e, extrato OFX, planilha; PDF (DANFE, boleto, recibo) com conferência.',
     needs: ['ia', 'arquivos'], agents: ['arquimedes'], modes: ['manual'], privateData: true, humanReview: true, proposes: 'lancamentos', checks: ['numeros'], outputs: ['csv-lancamentos'],
     input: { text: { label: 'Categorias que você usa', placeholder: 'Ex.: Fornecedores; Folha; Impostos; Aluguel; Vendas' }, files: { label: 'Comprovantes e documentos', required: true, max: 12, accept: '.xml,.ofx,.csv,.xlsx,.pdf' } },
@@ -504,7 +504,7 @@ export const CATALOG: RoutineTemplate[] = [
   T({ key: 'conferencia-financeira', name: 'Conferência Financeira', category: 'administracao', phase: 5, available: true,
     benefit: 'Registros de fontes diferentes conferidos; divergências sinalizadas.',
     produces: 'Lista de divergências (só numa fonte, valor diferente, repetidos) com a explicação provável, e a planilha da conferência.',
-    examines: 'Duas fontes que você escolher (ex.: extrato OFX do banco e a planilha de controle), conferidas pelo Ergon por valor e data.',
+    examines: 'Duas fontes que você escolher (ex.: extrato OFX do banco e a planilha de controle), conferidas pelo sistema por valor e data.',
     needs: ['ia', 'planilhas'], agents: ['arquimedes', 'euclides'], modes: ['schedule', 'manual'], privateData: true, humanReview: true, checks: ['numeros'], outputs: ['csv-conferencia'],
     input: { files: { label: 'As duas fontes (primeiro A, depois B)', max: 2, accept: '.ofx,.csv,.xlsx,.xml' } },
     params: [{ key: 'fonteA', label: 'Fonte A (ex.: extrato do banco)', kind: 'arquivos', required: true, max: 3 },

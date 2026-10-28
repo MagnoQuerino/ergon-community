@@ -42,11 +42,14 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
     let stop = false;
     const poll = async () => {
       try {
-        const r = await api.get<{ status: string; error: string | null; email: string | null }>(`/api/ai/logins/${login.sessionId}`);
+        const r = await api.get<{ status: string; error: string | null; email: string | null; starterModel?: string | null }>(`/api/ai/logins/${login.sessionId}`);
         if (stop) return;
         if (r.status === 'pending') { window.setTimeout(poll, login.pollSeconds * 1000); return; }
         setLogin(null);
-        if (r.status === 'approved') { setMsg({ kind: 'ok', text: `Conta conectada${r.email ? ` (${r.email})` : ''}. ${pitch ? 'A equipe já pode trabalhar de verdade.' : 'Os modelos dela já aparecem em Configurações.'}` }); status.reload(); onChanged?.(); }
+        if (r.status === 'approved') {
+          const modelo = r.starterModel ? ` Modelo para começar: ${r.starterModel} (troque quando quiser em Configurações › IA da equipe ou no perfil de cada agente).` : '';
+          setMsg({ kind: 'ok', text: `Conta conectada${r.email ? ` (${r.email})` : ''}. ${pitch ? 'A equipe já pode trabalhar de verdade.' : 'Os modelos dela já aparecem em Configurações.'}${modelo}` }); status.reload(); onChanged?.();
+        }
         else setMsg({ kind: 'error', text: r.error ?? `Login não concluído (${r.status}).` });
       } catch (e) { if (!stop) { setLogin(null); setMsg({ kind: 'error', text: errMsg(e) }); } }
     };

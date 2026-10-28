@@ -296,7 +296,7 @@ export class RunExecutor {
           { filename: `imagem-${fold(agent)}-${now().slice(0, 10)}-${i + 1}.${ext}`, mime: img.mime, data: img.data, taskId: r.task_id });
         ref = `[imagem: ${art.id}]`;
       } catch {
-        ref = '(imagem gerada pelo motor de IA, mas o Ergon não conseguiu trazê-la; peça de novo)';
+        ref = '(imagem gerada pelo motor de IA, mas o sistema não conseguiu trazê-la; peça de novo)';
       }
       out = out.split(`MEDIA:${path}`).join(ref);
     }
@@ -520,7 +520,7 @@ export const PROPOSAL_HELP = [
 
 export const PERMISSION_HOW = 'Se o pedido exigir executar código ou comandos e você não tiver a ferramenta (Executar código ou Terminal), não finja que executou nem invente resultado: diga em uma frase o que precisa executar e por quê, e escreva uma linha assim: [[pedir-permissao ferramenta="calculo" motivo="o que vai executar"]] (use ferramenta="terminal" para comandos). O usuário autoriza com a senha ali mesmo na conversa e você continua sozinho.';
 /** Para quem tem a Análise de dados: o Ergon calcula; o agente pede e comenta (nunca estima números). */
-export const PROCESS_HOW = 'Planilhas anexadas ao card são analisadas pelo Ergon, não por você: quando o card já trouxer o resultado da análise, use exatamente aqueles números; se não trouxer, peça numa linha assim: [[processar operacao="analise-desempenho" arquivo="nome-do-arquivo.csv" referencia="AAAA-MM-DD"]]. Nunca calcule de cabeça nem estime um número que pode ser contado no arquivo.';
+export const PROCESS_HOW = 'Planilhas anexadas ao card são analisadas pelo sistema, não por você: quando o card já trouxer o resultado da análise, use exatamente aqueles números; se não trouxer, peça numa linha assim: [[processar operacao="analise-desempenho" arquivo="nome-do-arquivo.csv" referencia="AAAA-MM-DD"]]. Nunca calcule de cabeça nem estime um número que pode ser contado no arquivo.';
 /**
  * O que existe nos Arquivos do Ergon, para quem tem a ferramenta Arquivos (só nome, tipo, tamanho, data e card; o
  * conteúdo, só dos anexados ao card). Sem isto, pedida a "localizar nos arquivos a versão mais recente

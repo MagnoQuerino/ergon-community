@@ -98,7 +98,7 @@ function RecommendCard({ coordName }: { coordName: string }) {
         )}
       </header>
       <p className="muted">Uma vez por semana, {coordName} olha como a equipe trabalha — tarefas que voltam, pedidos parecidos aos agentes, o que chega pelos canais — e sugere rotinas para o que hoje é feito na mão ou de improviso. As sugestões chegam para você decidir; recusadas não voltam sozinhas, mas dá para pedir de novo.</p>
-      <p className="hint">Para isso, o Ergon lê os pedidos e as tarefas do workspace e usa o modelo de IA uma vez por semana (consome créditos da conta conectada). Nada sai deste computador além da chamada ao modelo. Vem ligada, como todas as automações do Ergon: desligue no botão se preferir.</p>
+      <p className="hint">Para isso, {coordName} lê os pedidos e as tarefas do workspace com o modelo de IA, uma vez por semana (consome créditos da conta conectada). Nada sai deste computador além da chamada ao modelo. Vem ligada, como todas as automações: desligue no botão se preferir.</p>
       {s?.enabled && (
         <div className="row row--wrap">
           <button className="btn btn--sm" onClick={analyze} disabled={busy || s.needsAi} title={s.needsAi ? 'Precisa de uma conta de IA conectada (Conexões)' : undefined}><Icon name="auto" size={14} /> Analisar agora</button>
@@ -375,7 +375,7 @@ function RunDialog({ r, spec, onClose, onDone }: { r: Routine; spec: InputSpec; 
       {spec.oneOf && <p className="hint">Basta um dos dois: o texto colado ou o arquivo.</p>}
       {err && <p className="error" role="alert">{err}</p>}
       <div className="row"><button className="btn btn--primary" disabled={busy || !can} onClick={() => void go()}>{busy ? 'Enviando…' : 'Executar'}</button><button className="btn btn--ghost" onClick={close}>Cancelar</button></div>
-      <p className="hint">Documentos, e-mails e notícias são lidos pelo Ergon como dados: o que estiver escrito neles nunca vira ordem para a equipe.</p>
+      <p className="hint">Documentos, e-mails e notícias são lidos como dados: o que estiver escrito neles nunca vira ordem para a equipe.</p>
     </aside>
   );
 }
@@ -555,9 +555,9 @@ const VERDICT: Record<'validado' | 'parcial' | 'reprovado', { label: string; cls
 /** Cada nível do que a conferência prova, em palavras (a análise em si nunca é provada por código). */
 const LEVEL: Array<[keyof EvidenceLevels, string, Record<string, [string, boolean]>]> = [
   ['coleta', 'Fontes', { completa: ['lidas por inteiro', true], parcial: ['lidas em parte', false], sem_fontes: ['não usa contas nem documentos', true] }],
-  ['citacoes', 'O que o texto cita', { conferidas: ['existe nos dados', true], com_erro: ['tem item que não está nos dados', false], sem_modelo: ['montado pelo Ergon', true] }],
+  ['citacoes', 'O que o texto cita', { conferidas: ['existe nos dados', true], com_erro: ['tem item que não está nos dados', false], sem_modelo: ['montado pelo sistema', true] }],
   ['numeros', 'Números', { conferidos: ['estão nos dados (a conta do agente não é refeita)', true], com_erro: ['há número que não está nos dados', false], nao_conferidos: ['não conferidos nesta rotina', true] }],
-  ['cobertura', 'Cobertura', { completa: ['tudo avisado', true], completada_pelo_ergon: ['o Ergon completou o que faltou', false], nao_se_aplica: ['não se aplica', true] }],
+  ['cobertura', 'Cobertura', { completa: ['tudo avisado', true], completada_pelo_ergon: ['o sistema completou o que faltou', false], nao_se_aplica: ['não se aplica', true] }],
   ['analise', 'A análise', { nao_verificada: ['não é verificada por código: leia com olho crítico', true] }],
   ['humano', 'Revisão humana', { revisao_necessaria: ['necessária antes de agir (extração por regras)', false], opcional: ['opcional', true] }],
 ];
@@ -598,7 +598,7 @@ function RunDetail({ id, onOpenAgent, agentId }: { id: string; onOpenAgent: Open
       {x.params && <RunInputLine raw={x.params} />}
       {x.facts && (
         <details className="rt-evidence">
-          <summary>Dados coletados pelo Ergon (evidência)</summary>
+          <summary>Dados coletados pelo sistema (evidência)</summary>
           <pre>{x.facts}</pre>
         </details>
       )}
@@ -688,7 +688,7 @@ function RoutineSetup({ id, fresh, state, onBack, onGo }: { id: string; fresh: b
               </div>
             )}
             <ol className="rt-steps">
-              {step(true, false, 'Ler o que o Ergon já sabe do seu trabalho')}
+              {step(true, false, 'Ler o que já está registrado sobre o seu trabalho')}
               {step(!!s && s.status !== 'studying' && minDone, !!s && s.status === 'studying', 'Entender com o que você trabalha e como se comunica')}
               {step(!!ready, !!s && (s.status === 'asking' || s.status === 'adapting'), 'Ajustar horário, foco e formato da rotina')}
               {waitsUser ? step(!!ready && !r.missing.length, false, r.missing.length ? 'Dizer o que acompanhar' : 'Pronta para o seu primeiro pedido')

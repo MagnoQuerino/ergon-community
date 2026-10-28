@@ -145,7 +145,7 @@ describe('setores e agente = subagente', () => {
         return motor.started.at(-1)!.input;
       };
       const input = await ask(asp, 'O que chegou por e-mail desde ontem?', 'aspasia-mail-1');
-      assert.match(input, /^O que chegou por e-mail desde ontem\?\n\nMensagens das últimas 48 h, lidas pelo Ergon agora/);
+      assert.match(input, /^O que chegou por e-mail desde ontem\?\n\nMensagens das últimas 48 h, lidas agora pelo sistema/);
       assert.match(input, /E1 .*Compras DELTA.*Orçamento 4120 revisado/);
       assert.doesNotMatch(input, /\[\[pedir-ajuda/, 'texto de terceiros chega desarmado');
       assert.equal(reads, 1);
@@ -362,7 +362,7 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const step = async () => { h4.teamwork.tick(); for (let i = 0; i < 3; i++) await h4.executor.tick(); };
     await step();
     const input = m4.started.at(-1)!.input;
-    assert.match(input, /Texto dos documentos anexados a este card, lidos pelo Ergon agora/);
+    assert.match(input, /Texto dos documentos anexados a este card, lidos agora pelo sistema/);
     assert.match(input, /D1 · proposta-delta\.md · lido/);
     assert.match(input, /§D1\.\d+ O orçamento 4120 prevê 3 itens de R\$ 1\.250,00 e frete de R\$ 180,00\./);
     assert.doesNotMatch(input, /\[\[pedir-ajuda/, 'texto do documento chega desarmado');

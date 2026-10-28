@@ -179,14 +179,14 @@ export class Results {
       const op = this.db.get<OperationRow>('SELECT * FROM operations WHERE workspace_id = ? AND task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1', ws, task.id);
       ev.operationId = op?.id ?? null; ev.agentComment = simulated ? 'simulado (sem modelo de IA): não entra no resultado' : clip(text, 600);
       if (!op) {
-        c.push({ id: 'operacao', label: 'Análise calculada pelo Ergon a partir do arquivo', ok: false, detail: 'nenhuma análise foi executada' });
-        return this.record(ws, task.id, r.id, kind, 'reprovado', c, ev, 'A tarefa pede números calculados do arquivo, mas nenhuma análise do Ergon foi executada — texto do agente não substitui o cálculo.', 'ergon');
+        c.push({ id: 'operacao', label: 'Análise calculada pelo sistema a partir do arquivo', ok: false, detail: 'nenhuma análise foi executada' });
+        return this.record(ws, task.id, r.id, kind, 'reprovado', c, ev, 'A tarefa pede números calculados do arquivo, mas nenhuma análise do sistema foi executada — texto do agente não substitui o cálculo.', 'ergon');
       }
       if (op.status === 'erro') {
-        c.push({ id: 'operacao', label: 'Análise calculada pelo Ergon a partir do arquivo', ok: false, detail: op.error ?? 'erro' });
+        c.push({ id: 'operacao', label: 'Análise calculada pelo sistema a partir do arquivo', ok: false, detail: op.error ?? 'erro' });
         return this.record(ws, task.id, r.id, kind, 'aguardando_info', c, ev, `O arquivo não pôde ser analisado: ${op.error}. Corrija a planilha, anexe de novo e ponha para trabalhar.`, 'ergon');
       }
-      c.push({ id: 'operacao', label: 'Análise calculada pelo Ergon a partir do arquivo', ok: true, detail: (() => { try { const p = JSON.parse(op.params) as { referencia: string; versao: string }; return `${OPERATION_LABEL} · referência ${p.referencia.split('-').reverse().join('/')} · ${p.versao}`; } catch { return OPERATION_LABEL; } })() });
+      c.push({ id: 'operacao', label: 'Análise calculada pelo sistema a partir do arquivo', ok: true, detail: (() => { try { const p = JSON.parse(op.params) as { referencia: string; versao: string }; return `${OPERATION_LABEL} · referência ${p.referencia.split('-').reverse().join('/')} · ${p.versao}`; } catch { return OPERATION_LABEL; } })() });
       this.setWorkState(ws, task.id, 'resultado', `${(JSON.parse(op.outputs) as string[]).length} entregáveis gerados`);
       this.setWorkState(ws, task.id, 'validacao');
       c.push(...this.ops.verify(ws, op));
@@ -206,7 +206,7 @@ export class Results {
         this.setWorkState(ws, task.id, 'validacao');
       }
       if (kind === 'externo') {
-        c.push({ id: 'confirmacao', label: 'Confirmação da fonte externa', ok: false, detail: 'o Ergon não executa nem confirma ações fora dele; isso fica com você' });
+        c.push({ id: 'confirmacao', label: 'Confirmação da fonte externa', ok: false, detail: 'o sistema não executa nem confirma ações externas; isso fica com você' });
         if (base) {
           const art = this.saveDeliverable(ws, task.id, task.number, r.id, text, output ?? '', 'preparo');
           if (art) ev.deliverables = [art.id];

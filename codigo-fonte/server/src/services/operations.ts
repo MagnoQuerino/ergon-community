@@ -18,7 +18,7 @@ import { workspaceTz } from './routine-proposals.ts';
 export const OPERATIONS = {
   'analise-desempenho': {
     id: 'analise-desempenho', label: 'Análise de desempenho por responsável', tool: 'dados', input: 'CSV de tarefas',
-    description: 'Lê uma planilha de tarefas (id, responsável, prazo original, prazo vigente, data de conclusão, situação) e calcula, pelo Ergon, total, concluídas, abertas, em atraso, alterações de prazo e cumprimento dos prazos, no geral e por responsável. Entrega um relatório (Markdown) e um CSV de indicadores.',
+    description: 'Lê uma planilha de tarefas (id, responsável, prazo original, prazo vigente, data de conclusão, situação) e calcula, pelo sistema, total, concluídas, abertas, em atraso, alterações de prazo e cumprimento dos prazos, no geral e por responsável. Entrega um relatório (Markdown) e um CSV de indicadores.',
   },
 } as const;
 export type OperationId = keyof typeof OPERATIONS;

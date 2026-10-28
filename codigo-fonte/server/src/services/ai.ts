@@ -208,14 +208,37 @@ export class AiService {
     return s;
   }
 
-  async pollLogin(workspaceId: string, sessionId: string): Promise<LoginPoll> {
+  async pollLogin(workspaceId: string, sessionId: string): Promise<LoginPoll & { starterModel?: string | null }> {
     const s = this.session(workspaceId, sessionId);
     const r = await this.need().pollLogin(s.provider, sessionId);
     if (r.status !== 'pending') {
       this.logins.delete(sessionId);
-      if (r.status === 'approved') { this.models = null; this.def = null; this.skillsCache = null; }
+      if (r.status === 'approved') {
+        this.models = null; this.def = null; this.skillsCache = null;
+        return { ...r, starterModel: await this.starterModel(s.provider).catch(() => null) };
+      }
     }
     return r;
+  }
+
+  /**
+   * Modelo para começar: logo depois de conectar uma conta, se ainda não há modelo padrão, escolhe um dessa conta para
+   * a equipe não ficar "sem modelo". No plano gratuito, um modelo grátis; senão, na ordem: intermediário, econômico,
+   * grátis, sem preço publicado (assinatura). Nunca um "de ponta" (pede confirmação de custo). Troca em Configurações.
+   */
+  private async starterModel(provider: string): Promise<string | null> {
+    if ((await this.defaultModel(true)).model) return null;
+    const p = (await this.catalog(true)).providers.find((x) => x.id === provider);
+    if (!p?.models.length) return null;
+    const gratuito = (await this.need().accounts().catch(() => [])).find((a) => a.id === provider)?.freeTier === true;
+    const ordem: Array<ModelEntry['tier']> = gratuito ? ['grátis'] : ['intermediário', 'econômico', 'grátis', null];
+    const m = ordem.map((t) => p.models.find((x) => x.tier === t)).find(Boolean);
+    if (!m) return null;
+    const r = await this.need().setDefaultModel(provider, m.id, false);
+    if (!r.ok) return null;
+    this.def = null; this.models = null;
+    await this.defaultModel(true);
+    return m.label;
   }
 
   async cancelLogin(workspaceId: string, sessionId: string): Promise<void> {

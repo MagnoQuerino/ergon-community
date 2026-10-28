@@ -130,13 +130,13 @@ describe('Guardião dos Prazos', () => {
     const d = await run('guardiao-2');
     assert.equal(d.checks.verdict, 'parcial');
     const crit = Object.fromEntries(d.checks.criteria.map((c: { id: string; ok: boolean; detail?: string }) => [c.id, c]));
-    assert.equal(crit.cobertura.ok, false); assert.match(crit.cobertura.detail, new RegExp(`faltaram 2 de 3: T1, #${n.hoje} \\(o Ergon acrescentou todas\\)`));
+    assert.equal(crit.cobertura.ok, false); assert.match(crit.cobertura.detail, new RegExp(`faltaram 2 de 3: T1, #${n.hoje} \\(o sistema acrescentou todas\\)`));
     const msgs = (await req(h, 'GET', `/api/conversations/${d.deliverables[0].id}/messages`, s)).json;
-    const note = msgs.find((m: { content: string }) => /O Ergon acrescenta o que o texto não avisou/.test(m.content));
+    const note = msgs.find((m: { content: string }) => /O sistema acrescenta o que o texto não avisou/.test(m.content));
     assert.ok(note, 'aviso do que faltou na conversa');
     assert.match(note.content, new RegExp(`#${n.hoje} "Revisar contrato Acme" · Heródoto · vence HOJE`));
     const file = d.deliverables.find((x: { type: string }) => x.type === 'arquivo');
-    assert.match((await req(h, 'GET', `/api/artifacts/${file.id}/download`, s)).res.body, new RegExp(`O Ergon acrescenta[\\s\\S]*#${n.hoje}`));
+    assert.match((await req(h, 'GET', `/api/artifacts/${file.id}/download`, s)).res.body, new RegExp(`O sistema acrescenta[\\s\\S]*#${n.hoje}`));
   });
 
   test('data que não está nos dados: não conferido', async () => {

@@ -204,7 +204,7 @@ describe('rotinas das fases 1 a 5', () => {
     assert.match((await open(reg.filename)).body, /L2;22\/10\/2026;TED CLIENTE BETA;3400;Vendas/);
   });
 
-  test('Conferência Financeira: duas fontes escolhidas, conferidas pelo Ergon; divergências em CSV', async () => {
+  test('Conferência Financeira: duas fontes escolhidas, conferidas pelo sistema; divergências em CSV', async () => {
     const A = await upload('extrato.ofx', '<OFX><STMTTRN><DTPOSTED>20261021<TRNAMT>-1250.00<MEMO>PAG FORNECEDOR\n</STMTTRN><STMTTRN><DTPOSTED>20261023<TRNAMT>-35.90<MEMO>TARIFA\n</STMTTRN></OFX>');
     const B = await upload('controle.csv', 'Data;Histórico;Valor\n20/10/2026;Fornecedor;-1.250,00\n25/10/2026;Aluguel;-2.000,00\n', 'text/csv');
     const r = await install('conferencia-financeira', { fonteA: [A], fonteB: [B] });
@@ -231,7 +231,7 @@ describe('rotinas das fases 1 a 5', () => {
     assert.equal(d.checks.verdict, 'parcial');
     assert.ok(fileNames(d).some((x: string) => x.includes('calendario')));
     const note = h.db.all<{ content: string }>("SELECT content FROM messages WHERE workspace_id = ? AND role = 'system' ORDER BY created_at DESC, rowid DESC LIMIT 3", s.workspaceId).map((m) => m.content).join('\n');
-    assert.match(note, /O Ergon acrescenta o que o texto não avisou \(1\):\n- C1\.\d+ · contrato-acme\.txt · prazo do aviso prévio/);
+    assert.match(note, /O sistema acrescenta o que o texto não avisou \(1\):\n- C1\.\d+ · contrato-acme\.txt · prazo do aviso prévio/);
   });
 
   test('Caçador de Pendências: e-mails sem resposta sua e seus sem resposta; cobertura de cada pendência', async () => {
@@ -254,7 +254,7 @@ describe('rotinas das fases 1 a 5', () => {
       return '1. P1 · Fulano pediu o cronograma há 5 dias: responder hoje.';
     };
     const d = await run(r.id);
-    assert.equal(crit(d, 'cobertura')!.detail, 'faltaram 1 de 2: P2 (o Ergon acrescentou todas)');
+    assert.equal(crit(d, 'cobertura')!.detail, 'faltaram 1 de 2: P2 (o sistema acrescentou todas)');
     assert.ok(crit(d, 'fontes')!.ok);
     assert.equal(d.checks.verdict, 'parcial');
   });

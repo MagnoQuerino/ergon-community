@@ -65,7 +65,7 @@ const ARTICLES: Article[] = [
       <ul>
         <li><b>Ativar</b> não pede configuração: {c.coord} estuda o seu jeito de trabalhar, adapta horário, foco e formato e já roda a primeira vez. Se tiver dúvida, pergunta com opções.</li>
         <li><b>Minhas rotinas</b>: pausar, executar agora, mudar o horário ou pedir ajustes à coordenação.</li>
-        <li><b>Histórico</b>: cada execução com o resultado e os dados que o Ergon coletou.</li>
+        <li><b>Histórico</b>: cada execução com o resultado e os dados coletados.</li>
         <li><b>Criar rotina com {c.coord}</b>: descreva o que você quer que aconteça sozinho; a prévia aparece para você aprovar.</li>
         <li>Com a <b>recomendação inteligente</b> ligada, sugestões chegam em “aguardando você”; recusar ensina o que não sugerir.</li>
       </ul>
@@ -90,7 +90,7 @@ const ARTICLES: Article[] = [
     body: (c) => <>
       <ul>
         <li><b>Contas de IA</b>: a <b>assinatura Nous é a melhor escolha</b> — os principais modelos do mercado numa assinatura só (há plano grátis com modelos gratuitos) e cada agente com o modelo certo, do mais forte ao mais econômico. Quem já paga o ChatGPT pode conectar também: a equipe aproveita a assinatura, sem custo por token, e cada agente usa o modelo que você escolher entre as duas contas.</li>
-        <li><b>WhatsApp, Microsoft 365 e Google</b>: o Ergon lê o que chega e prepara rascunhos. Nada é enviado sem a sua aprovação.</li>
+        <li><b>WhatsApp, Microsoft 365 e Google</b>: a equipe lê o que chega e prepara rascunhos. Nada é enviado sem a sua aprovação.</li>
         <li><b>Tarefas e quadros</b>: espelhe quadros de outros aplicativos (somente leitura).</li>
       </ul>
       <p>Tudo em <Go c={c} v="conexoes">Conexões</Go>. Conteúdo de mensagens e documentos é tratado como dado, nunca como instrução.</p>

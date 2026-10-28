@@ -339,7 +339,7 @@ export function AutoUnlockPrompt({ onDone }: { onDone: () => void }) {
     <div className="lock lock--dialog" role="dialog" aria-modal="true" aria-labelledby="au-title">
       <div className="auth__card prompt">
         <h2 className="auth__title" id="au-title"><Icon name="key" size={18} /> Destrancar sozinho ao ligar o computador?</h2>
-        <p>O Ergon foi feito para trabalhar por você o tempo todo. Com isto <b>ligado</b>, quando o computador reinicia o Ergon destranca sozinho e os agentes voltam ao trabalho sem esperar você.</p>
+        <p>Os agentes do Ergon foram feitos para trabalhar por você o tempo todo. Com isto <b>ligado</b>, quando o computador reinicia o Ergon destranca sozinho e os agentes voltam ao trabalho sem esperar você.</p>
         <p>Com isto <b>desligado</b>, depois de reiniciar os dados ficam trancados até você digitar a senha — e os agentes ficam parados até lá.</p>
         <p className="hint warn">Ligado, quem entrar na sua conta deste computador abre o Ergon sem a senha. Recomendamos ligar se o computador é só seu e tem senha, PIN ou biometria.</p>
         {err && <p className="error" role="alert">{err}</p>}

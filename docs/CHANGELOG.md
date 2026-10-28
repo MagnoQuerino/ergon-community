@@ -1,5 +1,11 @@
 # Novidades
 
+## 1.1.0-rc.2 (pré-versão de teste)
+
+- Ao conectar a conta de IA, a equipe já ganha um modelo para começar (no plano gratuito, um modelo grátis; nunca
+  um modelo "de ponta", que pede confirmação de custo). A tela diz qual foi e onde trocar.
+- Textos da interface: quem faz é o agente, a equipe ou "o sistema", não "o Ergon".
+
 ## 1.1.0-rc.1 (pré-versão de teste)
 
 - **Windows sem Docker:** o Ergon Desktop instala o Ergon inteiro sozinho. Ele cria um ambiente próprio no WSL do

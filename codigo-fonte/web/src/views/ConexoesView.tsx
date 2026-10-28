@@ -47,7 +47,7 @@ export function ConexoesView() {
     <div className="page">
       <header className="page__head">
         <h2>Conexões</h2>
-        <p className="muted">A conta de IA que move os agentes e os aplicativos e canais que o Ergon lê para você. Credenciais ficam só neste computador, cifradas; nunca no navegador.</p>
+        <p className="muted">A conta de IA que move os agentes e os aplicativos e canais que a equipe lê para você. Credenciais ficam só neste computador, cifradas; nunca no navegador.</p>
       </header>
       {notice && <p className="ok" role="status">{notice}</p>}
       {list.error && <p className="error">{list.error}</p>}
@@ -77,7 +77,7 @@ export function ConexoesView() {
 
       <section className="conn-group">
         <h3>Tarefas e quadros</h3>
-        <p className="muted small">Depois de conectar, escolha a lista ou o quadro em Tarefas: o Ergon espelha título, descrição, situação e responsável, só leitura.</p>
+        <p className="muted small">Depois de conectar, escolha a lista ou o quadro em Tarefas: o espelho traz título, descrição, situação e responsável, só leitura.</p>
         <div className="row row--wrap conn-tools">
           <label className="conn-search"><Icon name="focus" size={14} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar (ex.: Trello, Jira, Notion)" aria-label="Procurar aplicativo" /></label>
           <button className={`chip ${!onlyOn ? 'chip--on' : ''}`} aria-pressed={!onlyOn} onClick={() => setOnlyOn(false)}>Todos ({ready})</button>
@@ -180,12 +180,12 @@ function TokenConnect({ i, reload }: { i: Integration; reload: () => void }) {
 const SSO_TEXT: Record<string, { button: string; what: string; connected: string }> = {
   microsoft: {
     button: 'Entrar com a Microsoft',
-    what: 'Você entra na página da Microsoft e autoriza o Ergon a ler suas tarefas (Planner e To Do), conversas do Teams, e-mail, agenda e arquivos, para as rotinas. Só leitura: nada é enviado, apagado ou alterado em seu nome.',
+    what: 'Você entra na página da Microsoft e autoriza o aplicativo Ergon a ler suas tarefas (Planner e To Do), conversas do Teams, e-mail, agenda e arquivos, para as rotinas. Só leitura: nada é enviado, apagado ou alterado em seu nome.',
     connected: 'Tarefas: escolha um plano do Planner ou uma lista do To Do em Tarefas. Teams: as conversas chegam quando o app do Ergon estiver instalado no seu Teams (pela loja de apps do Teams).',
   },
   google: {
     button: 'Entrar com o Google',
-    what: 'Você entra na página do Google e autoriza o Ergon a ler suas listas do Google Tasks, agenda, Gmail e Drive, para as rotinas. Só leitura: nada é enviado, apagado ou alterado em seu nome.',
+    what: 'Você entra na página do Google e autoriza o aplicativo Ergon a ler suas listas do Google Tasks, agenda, Gmail e Drive, para as rotinas. Só leitura: nada é enviado, apagado ou alterado em seu nome.',
     connected: 'Tarefas: escolha uma lista do Google Tasks em Tarefas; o espelho atualiza sozinho.',
   },
 };

@@ -60,7 +60,7 @@ export function extractDoc(name: string, mime: string, data: Buffer): DocText {
     if (e === 'pptx' || mime.includes('presentationml')) return pptx(name, data);
     if (e === 'pdf' || mime === 'application/pdf') return pdf(name, data);
     if (['doc', 'xls', 'ppt'].includes(e)) return base('outro', 'nao_suportado', '', { detail: `formato antigo do Office (.${e}): salve como .${e}x e envie de novo` });
-    if (mime.startsWith('image/')) return base('imagem', 'nao_suportado', '', { detail: 'imagem: o Ergon ainda não lê texto de imagens (envie o PDF original ou o texto)' });
+    if (mime.startsWith('image/')) return base('imagem', 'nao_suportado', '', { detail: 'imagem: texto de imagens ainda não é lido (envie o PDF original ou o texto)' });
     const text = decodeText(data);
     if (e === 'csv' || mime === 'text/csv') {
       try {

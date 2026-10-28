@@ -86,7 +86,7 @@ describe('rotinas sem modelo de IA (simulação)', () => {
     const dl = await req(h, 'GET', `/api/artifacts/${file.id}/download`, s);
     assert.match(dl.res.body, /^# Briefing Diário — /);
     const msgs = (await req(h, 'GET', `/api/conversations/${rt.conversationId ?? d.deliverables[0].id}/messages`, s)).json;
-    assert.ok(msgs.some((m: { content: string }) => /Briefing Diário — .*\nMontado pelo Ergon sem modelo/.test(m.content)));
+    assert.ok(msgs.some((m: { content: string }) => /Briefing Diário — .*\nMontado pelo sistema, sem modelo/.test(m.content)));
     // a conversa da rotina não é a conversa principal com o agente
     const convs = (await req(h, 'GET', `/api/conversations?agentId=${(await req(h, 'GET', `/api/routines/${rt.id}`, s)).json.agentId}`, s)).json;
     assert.ok(convs.some((c: { purpose: string | null }) => c.purpose === `routine:${rt.id}`));

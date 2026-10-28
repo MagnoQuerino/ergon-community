@@ -148,7 +148,7 @@ export function routineContextFor(db: Db, workspaceId: string): string {
     "SELECT id, summary, decided_at FROM agent_proposals WHERE workspace_id = ? AND kind = 'routine' AND status = 'rejected' ORDER BY decided_at DESC LIMIT 6", workspaceId);
   const ready = CATALOG.filter((t) => t.available);
   return [
-    'Rotinas: trabalhos recorrentes que o Ergon executa sozinho (coleta os dados por código e chama um agente só para o que pede análise).',
+    'Rotinas: trabalhos recorrentes que o sistema executa sozinho (coleta os dados por código e chama um agente só para o que pede análise).',
     mine.length ? `Rotinas deste workspace: ${mine.map((r) => `${r.name} (${scheduleText(JSON.parse(r.trigger) as Trigger)}${r.status === 'paused' ? ', pausada' : ''})`).join('; ')}.` : 'Ainda não há rotinas ativas.',
     'Quando o usuário pedir uma rotina (ou mudar uma), mostre antes uma prévia curta: o que faz, quando, o que olha, quem executa e o que entrega. Depois escreva UMA linha de controle; nada vale até o usuário aplicar:',
     '[[propor-rotina nome="Nome curto" quando="seg a sex 08:00" agente="Nome do agente" fontes="id,id" condicao="sempre|novidades|sinal" entrega="conversa,arquivo" instrucao="o trabalho, em 2 a 5 frases"]]',

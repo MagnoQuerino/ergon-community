@@ -765,7 +765,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         idempotencyKey: `perm-${pid}`,
       });
       db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, run_id, created_at) VALUES (?, ?, ?, 'system', ?, 'local', ?, ?)`,
-        newId('msg'), a.workspaceId, g.conversationId, db.seal(a.workspaceId, `Ergon — você autorizou: ${g.result}. O agente continua o pedido.`), run.id, now());
+        newId('msg'), a.workspaceId, g.conversationId, db.seal(a.workspaceId, `Sistema — você autorizou: ${g.result}. O agente continua o pedido.`), run.id, now());
       bus.publish(a.workspaceId, 'messages.changed', { conversationId: g.conversationId });
     }
     return { status: g.status, result: g.result };

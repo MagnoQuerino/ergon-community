@@ -26,7 +26,7 @@ export const GUARDED_RISK = 'O agente passa a executar programas e comandos no a
 
 /** Catálogo de ferramentas do Ergon, com o estado padrão de cada uma ("planejado" nunca aparece como disponível). */
 export const TOOLS: Record<string, ToolDef> = {
-  quadro: { id: 'quadro', label: 'Quadro da equipe', kind: 'ergon', status: 'disponível', note: 'cria e move cards conforme o setor; o Ergon aplica as permissões' },
+  quadro: { id: 'quadro', label: 'Quadro da equipe', kind: 'ergon', status: 'disponível', note: 'cria e move cards conforme o setor; o sistema aplica as permissões' },
   encaminhar: { id: 'encaminhar', label: 'Encaminhamento de demandas', kind: 'ergon', status: 'disponível', note: 'novas demandas vão para o especialista certo' },
   delegar: { id: 'delegar', label: 'Pedir a colegas', kind: 'ergon', status: 'disponível', note: 'passa partes do trabalho a outros agentes pelo quadro' },
   revisao: { id: 'revisao', label: 'Revisão socrática', kind: 'ergon', status: 'disponível', note: 'rodadas limitadas de perguntas ao autor, até um veredito' },
@@ -35,7 +35,7 @@ export const TOOLS: Record<string, ToolDef> = {
   // não pode dizer "fica na Saída" para um e-mail redigido na conversa: não fica)
   saida: { id: 'saida', label: 'Rascunhos de resposta', kind: 'ergon', status: 'disponível', note: 'respostas a mensagens que chegam pelos canais (WhatsApp, Teams) ficam na Saída até a sua aprovação; numa conversa, o rascunho vai na própria resposta; nada é enviado' },
   arquivos: { id: 'arquivos', label: 'Arquivos', kind: 'ergon', status: 'parcial', note: 'vê a lista dos Arquivos do Ergon (nome, tipo, data), lê o texto dos documentos anexados ao card (PDF, Word, PowerPoint, Excel, Markdown) e entrega documentos no card; planilhas CSV são calculadas pela Análise de dados' },
-  dados: { id: 'dados', label: 'Análise de dados', kind: 'ergon', status: 'disponível', note: 'o Ergon calcula indicadores a partir da planilha (CSV) anexada ao card e entrega relatório e indicadores; nenhum número estimado' },
+  dados: { id: 'dados', label: 'Análise de dados', kind: 'ergon', status: 'disponível', note: 'o sistema calcula indicadores a partir da planilha (CSV) anexada ao card e entrega relatório e indicadores; nenhum número estimado' },
   conexoes: { id: 'conexoes', label: 'Mensagens dos canais', kind: 'ergon', status: 'preparado', note: 'quando você pergunta, lê o que chegou nas últimas 48 h: e-mails da caixa Prioritária (com o começo do texto) e mensagens dos canais conectados (WhatsApp, Teams); não envia' },
   passos: { id: 'passos', label: 'Lista de passos', kind: 'ia', toolset: 'todo', status: 'desligada', note: 'organiza o trabalho em passos durante a execução', safe: true },
   web: { id: 'web', label: 'Pesquisa na web', kind: 'ia', toolset: 'web', status: 'desligada', note: 'pesquisa e lê páginas públicas', safe: true },

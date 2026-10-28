@@ -275,7 +275,7 @@ describe('executor Hermes (cliente falso que segue o contrato documentado)', () 
     const msg = (await req(h, 'GET', `/api/conversations/${c}/messages`, s)).json.find((m: { role: string }) => m.role === 'agent').content as string;
     const id = msg.match(/\[imagem: (art_[a-f0-9]{32})\]/)?.[1];
     assert.ok(id, msg);
-    assert.match(msg, /imagem gerada pelo motor de IA, mas o Ergon não conseguiu trazê-la/, 'a que falhou é dita, não some');
+    assert.match(msg, /imagem gerada pelo motor de IA, mas o sistema não conseguiu trazê-la/, 'a que falhou é dita, não some');
     assert.match(msg, /MEDIA:\/opt\/data\/auth\.json/, 'o que não é imagem gerada não é buscado');
     const art = h.db.get<{ filename: string; mime: string }>('SELECT filename, mime FROM artifacts WHERE id = ?', id)!;
     assert.match(art.filename, /^imagem-fidias-\d{4}-\d{2}-\d{2}-1\.png$/); assert.equal(art.mime, 'image/png');

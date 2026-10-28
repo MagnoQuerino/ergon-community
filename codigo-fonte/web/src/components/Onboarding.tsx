@@ -150,7 +150,7 @@ export function Onboarding({ displayName, redo, onFinish, onCancel }: {
         ) : step === 'ia' ? (
           <section>
             <h2 id="onb-title" className="onb__title">Conecte a inteligência da equipe</h2>
-            <p className="muted">Os agentes pensam com a sua conta de IA. Recomendamos a <b>assinatura Nous</b>: é com ela que o Ergon dá a melhor experiência, pelo custo e pela versatilidade. O login acontece na página da própria conta; o Ergon não vê a sua senha.</p>
+            <p className="muted">Os agentes pensam com a sua conta de IA. Recomendamos a <b>assinatura Nous</b>: é com ela que a equipe tem a melhor experiência, pelo custo e pela versatilidade. O login acontece na página da própria conta; o Ergon não vê a sua senha.</p>
             <AiAccounts pitch onChanged={loadAi} />
             {!aiConnected && <p className="hint">Sem conta conectada, as respostas ficam simuladas. Dá para conectar depois, em Conexões.</p>}
             {err && <p className="error" role="alert">{err}</p>}

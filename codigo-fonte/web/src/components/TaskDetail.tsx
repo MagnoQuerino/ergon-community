@@ -248,7 +248,7 @@ export function TaskDetail({ taskId, columns: askedColumns, agents, mode: asked,
               {origin.conversationId && <> · <button type="button" className="linkish" onClick={() => openConversation(origin.agentId, origin.conversationId)}>abrir a conversa</button></>}
             </p>
           )}
-          {mode === 'mirror' && <p className="hint">Espelho: título, descrição, situação e responsável vêm de {SOURCE_LABEL[source ?? ''] ?? 'lá'}. Mude no aplicativo de origem; o Ergon atualiza sozinho.</p>}
+          {mode === 'mirror' && <p className="hint">Espelho: título, descrição, situação e responsável vêm de {SOURCE_LABEL[source ?? ''] ?? 'lá'}. Mude no aplicativo de origem; o espelho se atualiza sozinho.</p>}
 
           {mode === 'team' && need === 'info' && (
             <form className="ask-box" onSubmit={(e) => { e.preventDefault(); if (answer.trim()) void respond('answer', answer.trim()); }}>

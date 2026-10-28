@@ -68,7 +68,7 @@ const MAX_ATTEMPTS = 2;
 /** O pedido fala de um arquivo que não veio junto: perguntar antes de gastar uma chamada de modelo. */
 const MENTIONS_FILE = /(^|[^a-z])(planilh|csv|anexad|em anexo|esta tabela|este arquivo|neste arquivo|nesse arquivo|desse arquivo|deste arquivo)/;
 const CLOSING: Record<string, string> = {
-  dados: 'Os números acima foram calculados pelo Ergon a partir do arquivo e já estão nos entregáveis do card. Escreva um comentário curto (até 150 palavras) para quem pediu: o que se destaca e o que merece atenção. Não recalcule, não estime e não invente números.',
+  dados: 'Os números acima foram calculados pelo sistema a partir do arquivo e já estão nos entregáveis do card. Escreva um comentário curto (até 150 palavras) para quem pediu: o que se destaca e o que merece atenção. Não recalcule, não estime e não invente números.',
   documental: 'Entregue o documento completo, pronto para usar, em Markdown: ele será salvo como entregável do card. Não diga apenas que terminou — o documento é a entrega.',
   externo: 'Você não executa ações fora do Ergon (enviar, pagar, publicar, agendar). Prepare tudo o que for preciso (rascunho, dados, passos) e diga exatamente o que a pessoa precisa fazer para concluir.',
   informativo: 'Responda com o resultado completo da tarefa, pronto para usar.',
@@ -400,13 +400,13 @@ export class Teamwork {
           evidence: { from: agent.name, to: holder.name, reason: 'dados' }, result: `${holder.name} assume: tem a ferramenta Análise de dados` });
         agentId = holder.id;
       }
-      this.results.setWorkState(workspaceId, taskId, 'processamento', 'o Ergon está analisando o arquivo');
+      this.results.setWorkState(workspaceId, taskId, 'processamento', 'o sistema está analisando o arquivo');
       const op = this.ops.run(workspaceId, { taskId, agentId, op: 'analise-desempenho', referencia: referenceFrom(text) });
       if (op.status === 'erro') {
         this.results.needInput(workspaceId, taskId, kind, `O arquivo não pôde ser analisado: ${op.error} Corrija a planilha, anexe de novo e ponha para trabalhar.`, 'aguardando_info', op.id, actor.id);
         return null;
       }
-      opNote = `\nResultado da análise feita pelo Ergon (números já calculados):\n${summaryText(op.result ? JSON.parse(op.result) as Record<string, unknown> : null)}\nEntregáveis já gerados e ligados ao card: relatório (Markdown) e indicadores (CSV).`;
+      opNote = `\nResultado da análise feita pelo sistema (números já calculados):\n${summaryText(op.result ? JSON.parse(op.result) as Record<string, unknown> : null)}\nEntregáveis já gerados e ligados ao card: relatório (Markdown) e indicadores (CSV).`;
     }
     return this.enqueue(workspaceId, { id: task.id, number: Number(task.number), title: task.title, description: task.description }, agentId, kind, opNote, actor);
   }

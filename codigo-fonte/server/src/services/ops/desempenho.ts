@@ -200,7 +200,7 @@ export function performanceReport(p: Performance, meta: { pedido: string; tarefa
   L.push('- **Alteração de prazo:** prazo vigente diferente do original (prazo vigente vazio = original).');
   L.push('- **Cumprimento do prazo (original e vigente):** concluídas com data de conclusão até o prazo, inclusive. Denominador: concluídas **com** data de conclusão.');
   L.push('- Datas sem hora, como estão no arquivo (AAAA-MM-DD ou DD/MM/AAAA; formato mês/dia não é adivinhado). Responsáveis agrupados sem diferença de maiúsculas e acentos.');
-  L.push(`- Todos os números foram contados pelo Ergon a partir do arquivo (operação ${OP_VERSION}); nenhum foi estimado por IA. Os mesmos valores estão em ${md(meta.indicadoresArquivo)}.`, '');
+  L.push(`- Todos os números foram contados pelo sistema a partir do arquivo (operação ${OP_VERSION}); nenhum foi estimado por IA. Os mesmos valores estão em ${md(meta.indicadoresArquivo)}.`, '');
   L.push('## Qualidade dos dados', '');
   if (p.problemas.length) {
     L.push('| Linha | ID | Situação | Efeito |', '|---:|---|---|---|');
@@ -211,6 +211,6 @@ export function performanceReport(p: Performance, meta: { pedido: string; tarefa
   L.push('- Cumprimento de prazo é binário (no prazo ou não); a quantidade de dias de atraso das concluídas não entra nos percentuais.');
   if (g.concluidasComData < g.concluidas) L.push(`- ${g.concluidas - g.concluidasComData} concluída(s) sem data de conclusão ficaram fora do cumprimento de prazo.`);
   if (p.porResponsavel.some((r) => r.total < 3)) L.push('- Responsáveis com poucas tarefas (menos de 3) têm percentuais sensíveis a uma única entrega.');
-  L.push('', '---', `Gerado pelo Ergon (${OP_VERSION}) para a tarefa #${meta.tarefa}, a pedido de ${md(meta.agente)}. Nenhum número estimado por IA.`, '');
+  L.push('', '---', `Gerado pelo sistema Ergon (${OP_VERSION}) para a tarefa #${meta.tarefa}, a pedido de ${md(meta.agente)}. Nenhum número estimado por IA.`, '');
   return L.join('\n');
 }

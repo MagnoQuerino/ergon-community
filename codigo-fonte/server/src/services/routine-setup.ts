@@ -156,7 +156,7 @@ export function setupChannel(t: RoutineTemplate, routineName: string, hint: stri
   const d = t.defaults!;
   const sched = d.trigger.kind === 'schedule' ? scheduleText({ ...d.trigger, tz: 'UTC' }) : 'quando o usuário pedir';
   return [
-    `Canal: preparo da rotina "${routineName}" para este usuário, logo depois de ele ativar. Você estuda em silêncio o que o Ergon já sabe dele e adapta a rotina ao caso dele, para ela funcionar bem de primeira sem ele configurar nada.`,
+    `Canal: preparo da rotina "${routineName}" para este usuário, logo depois de ele ativar. Você estuda em silêncio o que já está registrado sobre ele e adapta a rotina ao caso dele, para ela funcionar bem de primeira sem ele configurar nada.`,
     `A rotina (modelo da biblioteca): ${t.benefit} Entrega: ${t.produces}`,
     `Trabalho padrão de quem executa:\n${d.config.instruction}`,
     `Fontes que ela olha: ${d.config.sources.map((s) => SOURCES[s].split(' (')[0].toLowerCase()).join('; ')}. Horário padrão: ${sched}.`,

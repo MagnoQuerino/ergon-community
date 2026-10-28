@@ -478,7 +478,7 @@ export class AccountReader {
     const meta = await get(`https://www.googleapis.com/drive/v3/files/${id}?fields=name,mimeType,size`);
     const exp = GOOGLE_EXPORT[String(meta.mimeType)];
     if (exp) return { name: `${String(meta.name ?? 'arquivo')}.${exp.ext}`, mime: exp.mime, data: await raw(`https://www.googleapis.com/drive/v3/files/${id}/export?mimeType=${encodeURIComponent(exp.mime)}`) };
-    if (String(meta.mimeType).startsWith('application/vnd.google-apps.')) throw new ProviderError('unavailable', 'tipo de arquivo do Google que o Ergon não lê');
+    if (String(meta.mimeType).startsWith('application/vnd.google-apps.')) throw new ProviderError('unavailable', 'tipo de arquivo do Google que o sistema não lê');
     if (Number(meta.size ?? 0) > MAX_FILE) throw new ProviderError('unavailable', 'arquivo grande demais (mais de 15 MB)');
     return { name: String(meta.name ?? 'arquivo'), mime: String(meta.mimeType ?? ''), data: await raw(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`) };
   }

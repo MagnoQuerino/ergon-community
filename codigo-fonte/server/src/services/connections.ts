@@ -42,7 +42,7 @@ export async function connectionStatuses(db: Db, cfg: Config, workspaceId: strin
       if (!t.tenantId || t.allowedUsers.length === 0 || !cfg.bridgeToken) return { ...base, state: 'configurado' as const, detail: 'Faltam tenant, usuários autorizados ou token da ponte.' };
       if (r.last_error) return { ...base, state: 'falha' as const, detail: r.last_error };
       if (!r.last_real_event_at) return { ...base, state: 'nao_validado' as const, detail: 'Configurado, nenhum evento recebido pela ponte ainda.' };
-      if (!r.validated_at) return { ...pending, state: 'nao_validado' as const, detail: 'Eventos chegam pela ponte. Confirme após um teste real no Teams (o Ergon não distingue sozinho um disparo de teste).' };
+      if (!r.validated_at) return { ...pending, state: 'nao_validado' as const, detail: 'Eventos chegam pela ponte. Confirme após um teste real no Teams (o sistema não distingue sozinho um disparo de teste).' };
       return { ...base, state: 'conectado' as const, detail: 'Teste real confirmado pelo proprietário; eventos chegam pela ponte do motor.' };
     }
     if (r.kind === 'whatsapp') {

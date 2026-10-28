@@ -50,7 +50,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
   { kind: 'google', name: 'Google', auth: 'oauth', group: 'contas', tasks: true, site: 'google.com',
     about: 'Entre com a sua conta Google (Gmail ou Workspace). Tarefas: listas do Google Tasks. Agenda, Gmail e Drive: só leitura, para as rotinas. Nada é enviado em seu nome.' },
   { kind: 'whatsapp', name: 'WhatsApp', auth: 'qr', group: 'conversas', tasks: false, site: 'whatsapp.com',
-    about: 'Leia o QR code com o WhatsApp do celular (Aparelhos conectados). Somente leitura: o Ergon lê as conversas que você permitir e nunca envia mensagens.' },
+    about: 'Leia o QR code com o WhatsApp do celular (Aparelhos conectados). Somente leitura: só as conversas que você permitir são lidas, e nenhuma mensagem é enviada.' },
   { kind: 'trello', name: 'Trello', auth: 'token', group: 'tarefas', tasks: true, site: 'trello.com',
     about: 'Quadros do Trello: listas viram colunas; cartões, tarefas.',
     fields: [
