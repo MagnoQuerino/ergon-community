@@ -30,6 +30,7 @@ import { coordinatorOf } from './lib/team.ts';
 import { CommandPalette, type CardHit, type PaletteItem } from './components/CommandPalette.tsx';
 import { ConversationDock, ConversationsDialog } from './components/ConversationDock.tsx';
 import { TaskDetail } from './components/TaskDetail.tsx';
+import { WorkspaceSwitcher } from './components/Workspaces.tsx';
 import { onOpenCard, onOpenConversation } from './lib/open.ts';
 import { clearRecents, pushRecent, type Recent } from './lib/recents.ts';
 
@@ -243,6 +244,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <ErgonLogo kind="horizontal" onDark height={28} />
           <span className={`dot ${live.status === 'ao_vivo' ? 'dot--green' : 'dot--amber dot--pulse'}`} role="img" aria-label={live.status === 'ao_vivo' ? 'conectado' : 'reconectando'} />
         </div>
+        <WorkspaceSwitcher current={s.workspace.name} />
         {coordinator && (
           <button className="btn btn--gold topbar__ask" onClick={() => openAgent(coordinator.id, 'conversa')} aria-label={`Pedir a ${coordinator.name}`} title={`Peça qualquer coisa: ${coordinator.name} encaminha a quem faz`}>
             <Icon name="chat" size={16} /><span className="topbar__ask-long">Pedir a {coordinator.name}</span><span className="topbar__ask-short">Pedir</span>

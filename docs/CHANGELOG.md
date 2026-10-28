@@ -1,5 +1,11 @@
 # Novidades
 
+## 1.1.0-rc.3 (pré-versão de teste)
+
+- **Workspaces:** o botão com o nome do workspace, na barra de cima, abre a visão geral de todos os seus (agentes,
+  tarefas abertas, quem está trabalhando e o que aguarda você). Dali você entra em outro, renomeia ou cria um novo
+  (uma empresa, um projeto, a vida pessoal), que nasce com a equipe e a cidade. A conta de IA vale para todos.
+
 ## 1.1.0-rc.2 (pré-versão de teste)
 
 - Ao conectar a conta de IA, a equipe já ganha um modelo para começar (no plano gratuito, um modelo grátis; nunca

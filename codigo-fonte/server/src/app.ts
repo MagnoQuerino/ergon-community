@@ -41,6 +41,7 @@ import { workspaceTz } from './services/routine-proposals.ts';
 import { cardDocuments, inboxForChat } from './services/routine-sources.ts';
 import { TRAINING_KEY, Trainings } from './services/trainings.ts';
 import { NICHES, PRESETS, USES, applyOnboarding, onboardingChoice, onboardingOptions, onboardingState, skipOnboarding } from './services/team-presets.ts';
+import { createOwnWorkspace, listWorkspaces, renameWorkspace } from './services/workspaces.ts';
 import { readPrefs, writePrefs } from './services/prefs.ts';
 import { isSource } from './services/routine-catalog.ts';
 import { Teamwork } from './services/teamwork.ts';
@@ -540,6 +541,29 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   }, async (req) => {
     switchWorkspace(db, auth(req), (req.body as { workspaceId: string }).workspaceId);
     return { ok: true };
+  });
+  // Workspaces da pessoa: visão geral, criar (já entra nele) e renomear
+  app.get('/api/workspaces', async (req) => { const a = auth(req); return listWorkspaces(db, a.userId, a.workspaceId); });
+  app.post('/api/workspaces', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: S.str(60) } } },
+  }, async (req, reply) => {
+    const a = auth(req);
+    const ws = createOwnWorkspace(db, personKeys(), a.userId, (req.body as { name: string }).name, cfg.slotsPerFloor);
+    owners.forget();
+    upkeep(ws);
+    switchWorkspace(db, a, ws);
+    audit(db, bus, { workspaceId: ws, actorType: 'user', actorId: a.userId, action: 'workspace.create', result: 'workspace criado' });
+    return reply.code(201).send({ workspaceId: ws });
+  });
+  app.patch('/api/workspaces/:id', {
+    schema: { params: { type: 'object', required: ['id'], properties: { id: S.id('ws') } },
+      body: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: S.str(60) } } },
+  }, async (req) => {
+    const a = auth(req);
+    const id = (req.params as { id: string }).id;
+    const name = renameWorkspace(db, a.userId, id, (req.body as { name: string }).name);
+    audit(db, bus, { workspaceId: id, actorType: 'user', actorId: a.userId, action: 'workspace.rename', result: 'nome do workspace alterado' });
+    return { name };
   });
 
   // Estado geral (snapshot para a interface) -----------------------------------------------------
