@@ -12,16 +12,18 @@ O Ergon roda em dois contêineres Docker (o Ergon e o motor de IA) e só aparece
 
 ## Instalar
 
-1. Baixe `ergon-local-<versão>.zip` na [página de versões](https://github.com/MagnoQuerino/ergon-community/releases/latest)
-   e descompacte numa pasta sua, fora de pastas sincronizadas (OneDrive, Dropbox, Google Drive).
-2. Na pasta do Ergon:
+1. Baixe o Ergon e descompacte numa pasta sua, fora de pastas sincronizadas (OneDrive, Dropbox, Google Drive). Vale
+   qualquer um dos dois:
+   - o zip do repositório (botão verde **Code › Download ZIP** na [página do projeto](https://github.com/MagnoQuerino/ergon-community));
+   - ou `ergon-local-<versão>.zip`, na [página de versões](https://github.com/MagnoQuerino/ergon-community/releases/latest).
+2. Instale:
 
-```
-Windows:       .\ergon.cmd instalar
-macOS/Linux:   ./ergon.sh instalar
-```
+| | Zip do repositório | `ergon-local-<versão>.zip` |
+|---|---|---|
+| Windows | dois cliques em `Instalar Ergon no Windows.cmd` | `.\ergon.cmd instalar` |
+| macOS e Linux | `bash "Instalar Ergon no Linux e macOS.sh"` | `./ergon.sh instalar` |
 
-O lançador instala o Ergon numa pasta sua (Windows: `%LOCALAPPDATA%ProgramsErgon`; macOS/Linux:
+O lançador instala o Ergon numa pasta sua (Windows: `%LOCALAPPDATA%\Programs\Ergon`; macOS/Linux:
 `~/.local/share/ergon`) e põe o comando `ergon` no PATH: depois disso, use `ergon` de qualquer terminal novo e
 apague a pasta do zip se quiser. Ele também gera os segredos internos em `~/.ergon/secrets` (nunca no OneDrive), sobe os
 contêineres, deixa o ajudante do computador pronto (ele começa sozinho ao entrar no computador) e abre o

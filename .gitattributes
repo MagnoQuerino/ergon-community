@@ -7,3 +7,5 @@
 *.icns binary
 *.cmd text eol=crlf
 *.ergon binary
+*.exe binary
+*.deb binary

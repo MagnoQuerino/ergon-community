@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    working-directory: codigo-fonte
+
 jobs:
   docker-linux:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
@@ -51,7 +55,7 @@ jobs:
         if: always()
         with:
           name: homologacao-${{ matrix.modo }}-${{ strategy.job-index }}
-          path: out
+          path: codigo-fonte/out
 
   desktop-windows:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
@@ -79,4 +83,4 @@ jobs:
         if: always()
         with:
           name: homologacao-windows
-          path: out
+          path: codigo-fonte/out

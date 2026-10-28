@@ -10,8 +10,8 @@ import path from 'node:path';
 const raiz = path.resolve(import.meta.dirname, '..');
 const pasta = path.join(raiz, 'catalogo', 'pacotes');
 const arqIndice = path.join(raiz, 'catalogo', 'index.json');
-const { validatePackage, INSTALLABLE } = await import('../server/src/services/ergon-package.ts');
-const { OFFICIAL_KEYS } = await import('../server/src/services/catalog.ts');
+const { validatePackage, INSTALLABLE } = await import('../codigo-fonte/server/src/services/ergon-package.ts');
+const { OFFICIAL_KEYS } = await import('../codigo-fonte/server/src/services/catalog.ts');
 
 const ID = /^comunidade\.[a-z0-9][a-z0-9-]{1,30}\.[a-z0-9][a-z0-9-]{1,40}$/;
 const MAX = 5 * 1024 * 1024;

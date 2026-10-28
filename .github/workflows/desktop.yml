@@ -5,9 +5,9 @@ name: Ergon Desktop
 on:
   push:
     branches: [main, 'desktop/**']
-    paths: ['desktop/**', 'ergon.ps1', 'ergon.sh', 'package.json', 'scripts/brand-assets.mjs', '.github/workflows/desktop.yml']
+    paths: ['codigo-fonte/desktop/**', 'codigo-fonte/ergon.ps1', 'codigo-fonte/ergon.sh', 'codigo-fonte/package.json', 'codigo-fonte/scripts/brand-assets.mjs', '.github/workflows/desktop.yml']
   pull_request:
-    paths: ['desktop/**', 'ergon.ps1', 'ergon.sh', 'package.json', 'scripts/brand-assets.mjs', '.github/workflows/desktop.yml']
+    paths: ['codigo-fonte/desktop/**', 'codigo-fonte/ergon.ps1', 'codigo-fonte/ergon.sh', 'codigo-fonte/package.json', 'codigo-fonte/scripts/brand-assets.mjs', '.github/workflows/desktop.yml']
   workflow_dispatch:
 
 permissions:
@@ -16,6 +16,10 @@ permissions:
 env:
   RUST_VERSAO: '1.98.0'
   NODE_VERSAO: '24.18.1'
+
+defaults:
+  run:
+    working-directory: codigo-fonte
 
 jobs:
   linux:
@@ -37,17 +41,17 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            desktop/src-tauri/target
-          key: desktop-linux-${{ env.RUST_VERSAO }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+            codigo-fonte/desktop/src-tauri/target
+          key: desktop-linux-${{ env.RUST_VERSAO }}-${{ hashFiles('codigo-fonte/desktop/src-tauri/Cargo.lock') }}
       - name: Arquivos da marca em dia (ícone do aplicativo incluído)
         run: node scripts/brand-assets.mjs --check
       - name: Testes do aplicativo
-        working-directory: desktop/src-tauri
+        working-directory: codigo-fonte/desktop/src-tauri
         run: cargo test --locked --release
       - name: Lançador do Linux (sintaxe)
         run: bash -n ergon.sh
       - name: Pacotes .deb e AppImage
-        working-directory: desktop
+        working-directory: codigo-fonte/desktop
         run: |
           npm ci --no-audit --no-fund
           npx tauri build --bundles deb,appimage
@@ -57,9 +61,9 @@ jobs:
         with:
           name: ergon-desktop-linux
           path: |
-            desktop/src-tauri/target/release/bundle/deb/*.deb
-            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-            desktop/pacotes/*
+            codigo-fonte/desktop/src-tauri/target/release/bundle/deb/*.deb
+            codigo-fonte/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            codigo-fonte/desktop/pacotes/*
           if-no-files-found: error
 
   windows:
@@ -75,10 +79,10 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            desktop/src-tauri/target
-          key: desktop-windows-${{ env.RUST_VERSAO }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+            codigo-fonte/desktop/src-tauri/target
+          key: desktop-windows-${{ env.RUST_VERSAO }}-${{ hashFiles('codigo-fonte/desktop/src-tauri/Cargo.lock') }}
       - name: Testes do aplicativo
-        working-directory: desktop/src-tauri
+        working-directory: codigo-fonte/desktop/src-tauri
         run: cargo test --locked --release
       - name: Lançador do Windows (sintaxe)
         shell: pwsh
@@ -86,7 +90,7 @@ jobs:
           $e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path ergon.ps1), [ref]$null, [ref]$e)
           if ($e.Count) { $e | ForEach-Object { $_.Message }; exit 1 }
       - name: Instalador NSIS
-        working-directory: desktop
+        working-directory: codigo-fonte/desktop
         run: |
           npm ci --no-audit --no-fund
           npx tauri build --bundles nsis
@@ -97,6 +101,6 @@ jobs:
         with:
           name: ergon-desktop-windows
           path: |
-            desktop/src-tauri/target/release/bundle/nsis/*.exe
-            desktop/pacotes/*
+            codigo-fonte/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            codigo-fonte/desktop/pacotes/*
           if-no-files-found: error

@@ -10,6 +10,10 @@ permissions:
   contents: write   # criar a versão e anexar o pacote
   packages: write   # publicar as imagens no registro do GitHub
 
+defaults:
+  run:
+    working-directory: codigo-fonte
+
 jobs:
   lancamento:
     runs-on: ubuntu-24.04
@@ -38,7 +42,7 @@ jobs:
       - name: Imagem do Ergon (amd64 + arm64)
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: codigo-fonte
           target: runtime
           platforms: linux/amd64,linux/arm64
           build-args: ERGON_BUILD=${{ env.BUILD }}
@@ -50,7 +54,7 @@ jobs:
       - name: Imagem do motor (amd64 + arm64)
         uses: docker/build-push-action@v6
         with:
-          context: ./hermes
+          context: codigo-fonte/hermes
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -63,11 +67,11 @@ jobs:
           sed -e "s/__VERSAO__/$VERSAO/g" -e "s/__DONO__/$DONO/g" -e "s#__REPO__#${{ github.repository }}#g" \
             deploy/local/docker-compose.yml > pacote/docker-compose.yml
           cp ergon.ps1 ergon.cmd ergon.sh pacote/ && chmod +x pacote/ergon.sh
-          cp docs/INSTALAR.md pacote/LEIA-ME.md
+          cp ../docs/INSTALAR.md pacote/LEIA-ME.md
           echo "$VERSAO" > pacote/VERSAO
           (cd pacote && zip -qr "../ergon-local-$VERSAO.zip" .)
           # novidades desta versão: a seção dela no CHANGELOG.md
-          awk -v v="## $VERSAO" '$0 ~ "^## " { on = index($0, v) == 1 } on' CHANGELOG.md > novidades.md
+          awk -v v="## $VERSAO" '$0 ~ "^## " { on = index($0, v) == 1 } on' ../docs/CHANGELOG.md > novidades.md
           node -e '
             const fs = require("fs");
             const v = process.env.VERSAO, repo = process.env.GITHUB_REPOSITORY, tag = process.env.GITHUB_REF_NAME;
@@ -83,10 +87,10 @@ jobs:
       - name: Publicar a versão
         uses: softprops/action-gh-release@v2
         with:
-          body_path: novidades.md
+          body_path: codigo-fonte/novidades.md
           files: |
-            ergon-local-${{ env.VERSAO }}.zip
-            latest.json
+            codigo-fonte/ergon-local-${{ env.VERSAO }}.zip
+            codigo-fonte/latest.json
 
   # Ergon Desktop: os instaladores entram na MESMA versão (mesma etiqueta), depois das imagens e do pacote local.
   # Sem chave de assinatura configurada, o atualizador automático do aplicativo fica desligado (docs/DESKTOP.md).
@@ -118,7 +122,7 @@ jobs:
         run: rustup toolchain install 1.98.0 --profile minimal && rustup default 1.98.0
       - name: Testes e pacotes
         shell: bash
-        working-directory: desktop
+        working-directory: codigo-fonte/desktop
         run: |
           (cd src-tauri && cargo test --locked --release)
           npm ci --no-audit --no-fund
@@ -132,7 +136,32 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            desktop/src-tauri/target/release/bundle/nsis/*.exe
-            desktop/src-tauri/target/release/bundle/deb/*.deb
-            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-            desktop/pacotes/*
+            codigo-fonte/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            codigo-fonte/desktop/src-tauri/target/release/bundle/deb/*.deb
+            codigo-fonte/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            codigo-fonte/desktop/pacotes/*
+
+  # Os instaladores também na raiz do repositório, como em qualquer programa: quem baixa o zip do repositório já os
+  # encontra. Um commit no main depois que a versão está publicada (sem disparar outros workflows).
+  instaladores-na-raiz:
+    needs: desktop
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Copiar da versão publicada para a raiz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/v"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/v" --pattern '*-setup.exe' --pattern '*.deb'
+          cp "$RUNNER_TEMP"/v/*-setup.exe "Ergon Desktop para Windows.exe"
+          cp "$RUNNER_TEMP"/v/*.deb "Ergon Desktop para Linux.deb"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Ergon Desktop para Windows.exe" "Ergon Desktop para Linux.deb"
+          git diff --cached --quiet || { git commit -m "Instaladores da $GITHUB_REF_NAME na raiz"; git push origin HEAD:main; }

@@ -5,11 +5,15 @@ name: Lançador
 on:
   push:
     branches: [main]
-    paths: ['ergon.sh', 'ergon.ps1', 'ergon.cmd', 'deploy/local/**', 'scripts/homologar-pacote.sh', '.github/workflows/lancador.yml']
+    paths: ['codigo-fonte/ergon.sh', 'codigo-fonte/ergon.ps1', 'codigo-fonte/ergon.cmd', 'codigo-fonte/instalador/**', 'codigo-fonte/deploy/local/**', 'codigo-fonte/scripts/homologar-pacote.sh', 'Instalar Ergon no *', '.github/workflows/lancador.yml']
   workflow_dispatch:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: codigo-fonte
 
 jobs:
   linux:
@@ -23,7 +27,7 @@ jobs:
           mkdir -p pacote
           sed -e "s/__VERSAO__/$V/g" -e "s/__DONO__/$DONO/g" -e "s#__REPO__#${{ github.repository }}#g" deploy/local/docker-compose.yml > pacote/docker-compose.yml
           cp ergon.ps1 ergon.cmd ergon.sh pacote/ && chmod +x pacote/ergon.sh
-          cp docs/INSTALAR.md pacote/LEIA-ME.md
+          cp ../docs/INSTALAR.md pacote/LEIA-ME.md
           echo "$V" > pacote/VERSAO
       - name: Sem login no registro
         run: docker logout ghcr.io || true
@@ -34,14 +38,16 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - name: Instalar põe o "ergon" no PATH e numa pasta fixa; remover tira os dois
+      - name: O instalador de dois cliques da raiz põe o "ergon" no PATH e numa pasta fixa; remover tira os dois
         shell: pwsh
         run: |
-          $z = Join-Path $env:RUNNER_TEMP 'zip'; New-Item -ItemType Directory -Force $z | Out-Null
-          Copy-Item ergon.ps1, ergon.cmd, ergon.sh $z; Copy-Item deploy/local/docker-compose.yml "$z\docker-compose.yml"; Set-Content "$z\VERSAO" '0.0.0'
+          # o zip do repositório como uma pessoa baixaria: o instalador da raiz e a pasta que ele usa
+          $z = Join-Path $env:RUNNER_TEMP 'ergon-community-main'; New-Item -ItemType Directory -Force "$z\codigo-fonte" | Out-Null
+          Copy-Item '..\Instalar Ergon no Windows.cmd' $z; Copy-Item -Recurse instalador "$z\codigo-fonte\instalador"
           $prog = Join-Path $env:LOCALAPPDATA 'Programs\Ergon'
           # sem Docker Linux no runner o "instalar" para no Docker, depois de pôr o programa no lugar
-          & cmd /c "`"$z\ergon.cmd`" instalar"
+          $env:ERGON_SEM_PAUSA = '1'
+          & cmd /c "`"$z\Instalar Ergon no Windows.cmd`""
           if (-not (Test-Path "$prog\ergon.cmd")) { throw 'o programa não foi para a pasta fixa' }
           $p = [Environment]::GetEnvironmentVariable('Path', 'User')
           if ($p -notlike "*$prog*") { throw "a pasta do programa não entrou no PATH: $p" }
