@@ -70,11 +70,8 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
   useEffect(() => { if (ai && (ai.available || !ai.motor)) setAiPronta(true); }, [ai]);
   const aiAcordando = !aiPronta;
   const acordandoDesde = useRef(Date.now());
-  // sem motor de IA nesta instalação, não há conta para conectar: aí, e só aí, segue sem
-  const semIa = !!ai && !ai.available && !ai.motor;
-  // conectou a conta na etapa da IA: monta a equipe e entra (pulou as perguntas: equipe geral)
-  const [pular, setPular] = useState(false);
-  useEffect(() => { if (step === 'ia' && aiConnected) void (pular ? skip() : build()); }, [step, aiConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+  // conectou a conta na etapa da IA: monta a equipe e entra. Conectar continua sendo escolha: "Conectar depois" segue.
+  useEffect(() => { if (step === 'ia' && aiConnected) void build(); }, [step, aiConnected]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!aiAcordando) return;
     const t = window.setTimeout(loadAi, 3000);
@@ -97,7 +94,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
     } catch (e) { setErr(errMsg(e)); setStep(redo && aiConnected ? 'more' : 'ia'); }
   };
   const skip = async () => {
-    setErr(null); setStep('building');
+    setErr(null);
     try { await api.post('/api/onboarding/skip'); onFinish({ tour: false, result: null, goal: '' }); } catch (e) { setErr(errMsg(e)); }
   };
 
@@ -133,7 +130,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
               ))}
             </div>
             {err && <p className="error" role="alert">{err}</p>}
-            {!redo && <button className="link onb__skip" onClick={() => { setPular(true); setStep('ia'); }}>Pular e começar com a equipe geral</button>}
+            {!redo && <button className="link onb__skip" onClick={skip}>Pular e começar com a equipe geral</button>}
           </section>
         ) : step === 'niche' ? (
           <section>
@@ -176,10 +173,11 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
             <h2 id="onb-title" className="onb__title">Conecte a inteligência da equipe</h2>
             <p className="muted">Os agentes pensam com a sua conta de IA. Recomendamos a <b>assinatura Nous</b>: é com ela que a equipe tem a melhor experiência, pelo custo e pela versatilidade. O login acontece na página da própria conta: a sua senha não passa pelo sistema.</p>
             <AiAccounts pitch onChanged={loadAi} />
+            {!aiConnected && <p className="hint">Sem conta conectada, as respostas ficam simuladas. Dá para conectar depois, em Conexões.</p>}
             {err && <p className="error" role="alert">{err}</p>}
             <div className="onb__nav">
-              <button className="btn" onClick={() => { setPular(false); setStep(pular ? 'use' : 'more'); }}>Voltar</button>
-              {semIa && <button className="btn btn--primary" onClick={() => void (pular ? skip() : build())}>Continuar</button>}
+              <button className="btn" onClick={() => setStep('more')}>Voltar</button>
+              {!aiConnected && <button className="btn btn--ghost" onClick={build}>Conectar depois</button>}
             </div>
           </section>
         ) : step === 'building' ? (

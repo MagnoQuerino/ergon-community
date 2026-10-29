@@ -1,5 +1,10 @@
 # Novidades
 
+## 1.1.0-rc.8 (pré-versão de teste)
+
+- **Boas-vindas:** "Conectar depois" e "Pular as perguntas" de volta; a tela da conta de IA continua aparecendo só
+  com os botões prontos.
+
 ## 1.1.0-rc.7 (pré-versão de teste)
 
 - **Boas-vindas:** depois das palavras de recuperação, um carregamento curto (só se preciso); então as perguntas e
