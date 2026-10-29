@@ -31,7 +31,20 @@ export function ConversationDock({ agents, hidden }: { agents: Agent[]; hidden?:
   const list = useMemo(() => (recent.data ?? []).filter((c) => agents.some((a) => a.id === c.agent_id && a.status === 'active')), [recent.data, agents]);
   // um círculo por contato (a conversa mais recente de cada um): o último e até 3 atrás
   const people = useMemo(() => contactsOf(list).slice(0, 4).map((x) => x.latest), [list]);
-  if (hidden || !people.length) return null;
+  if (hidden) return null;
+  // ainda sem conversa: o atalho já está lá, e abre as Conversas com o Coordenador, pronto para escrever
+  if (!people.length) {
+    const coord = agents.find((a) => a.coordinator && a.status === 'active') ?? agents.find((a) => a.status === 'active');
+    if (!coord) return null;
+    return (
+      <div className="cdock" role="navigation" aria-label="Conversas">
+        <button type="button" className="cdock__bubble cdock__bubble--main cdock__bubble--vazio" onClick={() => openConversation(coord.id, null)}
+          aria-label={`Conversas: começar com ${coord.name}`} title={`Conversas: comece falando com ${coord.name}`}>
+          <Icon name="chat" size={26} />
+        </button>
+      </div>
+    );
+  }
   const agentOf = (id: string) => agents.find((a) => a.id === id)!;
   const [first, ...back] = people;
   return (
