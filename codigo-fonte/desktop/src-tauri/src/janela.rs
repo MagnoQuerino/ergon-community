@@ -61,7 +61,15 @@ fn abrir_fora(url: &Url) {
 }
 
 fn navegar(app: &AppHandle, url: &Url) -> bool {
-    match destino(url, porta(app)) {
+    let d = destino(url, porta(app));
+    // a página do Ergon pede a tela de atualizações do aplicativo (botão "Verificar atualizações"): ela não ganha
+    // nenhuma permissão; quem confere, mostra e atualiza é a tela de abertura, que vem de dentro do aplicativo
+    if d == Destino::Ergon && url.path() == PEDIDO_ATUALIZACOES {
+        let a = app.clone();
+        std::thread::spawn(move || abrir_atualizacoes(&a));
+        return false;
+    }
+    match d {
         Destino::Interno | Destino::Ergon => true,
         Destino::Externo => {
             abrir_fora(url);
@@ -203,9 +211,22 @@ pub fn mostrar(app: &AppHandle) {
     }
 }
 
+/// Endereço que a página do Ergon usa para pedir a tela de atualizações (nunca chega ao servidor).
+pub const PEDIDO_ATUALIZACOES: &str = "/__desktop/atualizacoes";
+
 pub fn abrir_ergon(app: &AppHandle, porta: u16) -> tauri::Result<()> {
     let w = app.get_webview_window(PRINCIPAL).ok_or(tauri::Error::WindowNotFound)?;
-    w.navigate(Url::parse(&format!("http://localhost:{porta}/")).expect("endereço fixo"))
+    // "app=desktop": a página sabe que está no aplicativo (o botão de atualizações leva à tela dele)
+    w.navigate(Url::parse(&format!("http://localhost:{porta}/?app=desktop")).expect("endereço fixo"))
+}
+
+/// Tela de atualizações do aplicativo (a de abertura, em "#atualizacoes"): verifica e, se a pessoa pedir, atualiza.
+pub fn abrir_atualizacoes(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(PRINCIPAL) {
+        let base = if cfg!(windows) { "http://tauri.localhost/index.html" } else { "tauri://localhost/index.html" };
+        let _ = w.navigate(Url::parse(&format!("{base}#atualizacoes")).expect("endereço fixo"));
+        mostrar(app);
+    }
 }
 
 /// Volta para a tela de abertura (que confere tudo de novo); "#iniciar" já liga os serviços.

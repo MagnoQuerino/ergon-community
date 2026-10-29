@@ -45,6 +45,7 @@ import { createOwnWorkspace, deleteWorkspace, listWorkspaces, renameWorkspace } 
 import { readPrefs, writePrefs } from './services/prefs.ts';
 import { isSource } from './services/routine-catalog.ts';
 import { Teamwork } from './services/teamwork.ts';
+import { CATEGORIES as AMBIENT_CATEGORIES, readAmbient, type Category as AmbientCategory } from './services/ambient.ts';
 import { MAX_CHOICE, PROCESS_SQL, SETTING as PROCESS_SETTING } from './services/concurrency.ts';
 import { AccountReader } from './services/account-reader.ts';
 import { Operations, taskFiles, linkFile } from './services/operations.ts';
@@ -508,8 +509,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // Versão: a mesma no local e na nuvem; avisa quando sai uma nova (atualizar é decisão da pessoa)
   const updates = new UpdateCheck(cfg.updateUrl);
-  app.get('/api/version', async () => {
-    const latest = await updates.latest();
+  app.get('/api/version', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { verificar: { enum: ['1'] } } } } }, async (req) => {
+    const latest = await updates.latest((req.query as { verificar?: string }).verificar === '1');
     return { version: VERSION, build: BUILD, mode: cfg.mode, latest, updateAvailable: !!latest && newer(latest.version, VERSION) };
   });
 
@@ -659,6 +660,18 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       themed: themedCharacters(db, a.workspaceId).length + themedSectors(db, a.workspaceId).length,
       serverTime: now(),
     };
+  });
+
+  // Ambiente operacional: leitura do trabalho da equipe para a cidade (services/ambient.ts). Só lê; as ações seguem
+  // pelas rotas de sempre (card, fila, resposta, parar/cancelar).
+  app.get('/api/ambient/operations', {
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+      category: { enum: [...AMBIENT_CATEGORIES] }, offset: { type: 'string', pattern: '^[0-9]{1,6}$' }, limit: { type: 'string', pattern: '^([1-9][0-9]?|1[0-9]{2}|200)$' } } } },
+  }, async (req) => {
+    const a = auth(req);
+    const q = req.query as { category?: AmbientCategory; offset?: string; limit?: string };
+    return readAmbient(db, { workspaceId: a.workspaceId, viewer: a.userId, limit: executor.processLimit(a.workspaceId), autorun: teamwork.autorun(a.workspaceId),
+      mode: executor.mode === 'real' ? 'real' : 'simulated', ...(q.category ? { page: { category: q.category, offset: Number(q.offset ?? 0), limit: Number(q.limit ?? 50) } } : {}) });
   });
 
   // Agentes e capacidade -------------------------------------------------------------------------

@@ -18,7 +18,7 @@ import { RESIDENTS_PER_HOUSE, type House } from '../world/areas.ts';
 import { Town, type AreaInst, type BuildingInst, type Loc, type StructureIn } from '../world/town.ts';
 import type { AABB, P3, Vec2 } from '../world/geom.ts';
 import { startMove, stepMove, targetFor, visualFor, type Mover, type Visual } from '../scene/agentState.ts';
-import type { SceneAgent, SceneFocus, SceneObject } from '../scene/types.ts';
+import type { SceneAgent, SceneFocus, SceneObject, SceneOps, SceneOpsTarget } from '../scene/types.ts';
 import { RES, insidePoly, project, unproject, type P2 } from './projection.ts';
 import { figureSprite, hashOf, lookFor, npcLook, type Expr, type Facing, type Gesture, type Look, type Pose, type Sprite } from './figures.ts';
 import { bandHighlight, buildingBox, closedArt, openArt, type ArtItem, type Layer, type OpenArt } from './buildingArt.ts';
@@ -71,6 +71,25 @@ type Drawn =
   | { kind: 'area'; hit: AreaHit };
 
 const NPC_ID = '__npc';
+/** Posto da nuvem coberto: mesa sob uma lona branca amarrada (pixels-base; o = contorno, w/s/f = lona, l = pés). */
+const TARP_ROWS = [
+  '..........oooooo..........',
+  '.......ooowwwwwwooo.......',
+  '....ooowwwwwwwwwwwwooo....',
+  '..oowwwwwwwfwwwwwwwwwwoo..',
+  '.owwwwwwwwwwfwwwwwwfwwwwo.',
+  'owwwwwwwwwwwwfwwwwwwfwwwwo',
+  'orwwwwwwwwwwwwwwwwwwwwwwro',
+  'osrwwwwwwwwwwwwwwwwwwwwrso',
+  'ossrwwwwwwwwwwwwwwwwwwrsso',
+  'osssswwwwwwwwwwwwwwwwsssso',
+  'osssssswwwwwwwwwwwwsssssso',
+  '.ossssssfsssssssssfssssso.',
+  '..oooooooooooooooooooooo..',
+  '...l..................l...',
+  '...l..................l...',
+  '...l..................l...',
+];
 const WRITE_MS = 380;
 const AG = 0.15; const AG_H = 1.8;
 const STAND_HEAD = 42; const SIT_HEAD = 39;
@@ -357,6 +376,15 @@ export class IsoEngine {
     }
     this.invalidate();
   }
+
+  /** Placas do trabalho da equipe (números do servidor; nada é contado aqui). */
+  setOps(o: SceneOps | null): void {
+    if (JSON.stringify(o) === JSON.stringify(this.ops)) return;
+    this.ops = o; this.invalidate();
+  }
+  private ops: SceneOps | null = null;
+  /** onde as placas ficaram na tela no último quadro (alvo de clique e de cursor) */
+  private plaques: Array<{ kind: SceneOpsTarget; x: number; y: number; w: number; h: number }> = [];
 
   setSelected(id: string | null): void {
     if (id === this.selected) return;
@@ -980,6 +1008,8 @@ export class IsoEngine {
       items.push({ kind: 'a', box: this.agentBox(rt.pos), rect: this.agentRect(rt.pos), draw: () => this.drawAgent(rt, now) });
     }
     if (this.town.areaOf('agora') && this.npcVisible()) items.push({ kind: 'n', box: this.agentBox(this.npcSt.pos), rect: this.agentRect(this.npcSt.pos), draw: () => this.drawNpc(now) });
+    const lona = this.tarpSpot();
+    if (lona) items.push({ kind: 'p', box: lona.box, rect: lona.rect, draw: () => this.drawTarp(lona.px, lona.py) });
     if (this.drag) this.drawDragGhost();
     for (const it of sortItems(items)) it.draw();
 
@@ -993,6 +1023,7 @@ export class IsoEngine {
     // nomes sob os pés (texto nítido no tamanho do dispositivo)
     g.setTransform(1, 0, 0, 1, 0, 0);
     this.drawNames();
+    this.drawPlaques();
     const s = this.stats; s.frames++; s.lastFrameMs = performance.now() - t0;
   }
 
@@ -1394,6 +1425,117 @@ export class IsoEngine {
     g.globalAlpha = 1;
   }
 
+  /**
+   * Prédio da Central de Trabalho: a Stoa (o prédio de trabalho de partida) ou, sem ela, o primeiro prédio de trabalho.
+   * Não muda a planta nem as mesas: a placa só se apoia no prédio.
+   */
+  private centralBuilding(): BuildingInst | null {
+    let first: BuildingInst | null = null;
+    for (const b of this.town.buildings.values()) {
+      if (b.kind === 'stoa') return b;
+      if (!first && typeOf(b.kind)?.category === 'trabalho') first = b;
+    }
+    return first;
+  }
+
+  /**
+   * Placas operacionais, em pixels de tela (texto nítido, como os nomes), apoiadas na Central e na ágora. Forma e
+   * texto dizem tudo (nunca só a cor); poucas linhas, nenhuma por tarefa. Fora do editor e com a cidade perto o
+   * bastante para ler.
+   */
+  private drawPlaques(): void {
+    this.plaques = [];
+    const o = this.ops;
+    if (!o || this.editing) return;
+    const g = this.g; const dpr = this.dpr; const th = this.theme;
+    const size = Math.round(11 * dpr); const pad = 6 * dpr; const lh = size + 6 * dpr;
+    g.font = `600 ${size}px "Segoe UI", system-ui, sans-serif`; g.textBaseline = 'middle'; g.textAlign = 'left';
+    const ink = th.outline; const paper = th.papyrus[0]; const edge = mix(th.papyrus[1], th.outline, 0.35);
+    type Row = { kind: SceneOpsTarget; text: string; pips?: { on: number; total: number } };
+    const panel = (rows: Row[], cx: number, bottom: number) => {
+      const pipW = 7 * dpr; const pipGap = 3 * dpr;
+      const widths = rows.map((row) => g.measureText(row.text).width + (row.pips ? 8 * dpr + row.pips.total * (pipW + pipGap) : 0));
+      const w = Math.ceil(Math.max(...widths) + pad * 2); const h = Math.ceil(rows.length * lh + pad);
+      const x = Math.round(Math.min(Math.max(cx - w / 2, 4 * dpr), this.W - w - 4 * dpr)); const y = Math.round(Math.max(bottom - h, 56 * dpr)); // abaixo das ferramentas do palco
+      g.globalAlpha = 0.96; g.fillStyle = paper; g.beginPath(); g.roundRect(x, y, w, h, 5 * dpr); g.fill();
+      g.globalAlpha = 1; g.strokeStyle = edge; g.lineWidth = Math.max(1, dpr); g.stroke();
+      // pé da placa: aponta para o prédio
+      g.fillStyle = edge; g.fillRect(Math.round(cx - dpr), y + h, Math.max(2, 2 * dpr), 5 * dpr);
+      rows.forEach((row, i) => {
+        const ry = y + pad / 2 + i * lh; const my = ry + lh / 2;
+        if (i > 0) { g.globalAlpha = 0.35; g.fillStyle = edge; g.fillRect(x + pad, ry, w - pad * 2, Math.max(1, dpr)); g.globalAlpha = 1; }
+        g.fillStyle = ink; g.fillText(row.text, x + pad, my);
+        if (row.pips) {
+          let px = x + pad + g.measureText(row.text).width + 8 * dpr;
+          for (let p = 0; p < row.pips.total; p++) {
+            const on = p < row.pips.on;
+            g.fillStyle = on ? th.gold : paper; g.fillRect(Math.round(px), Math.round(my - pipW / 2), pipW, pipW);
+            g.strokeStyle = ink; g.lineWidth = Math.max(1, dpr); g.strokeRect(Math.round(px) + 0.5, Math.round(my - pipW / 2) + 0.5, pipW - 1, pipW - 1);
+            px += pipW + pipGap;
+          }
+        }
+        this.plaques.push({ kind: row.kind, x, y: ry, w, h: lh });
+      });
+    };
+    const b = this.centralBuilding();
+    if (b) {
+      const art = closedArt(b, th);
+      // sobre o centro da planta, acima do telhado (paredes + telhado) e do sinal de estado do prédio, em qualquer zoom
+      const [sx, roofY] = this.toScreen(...project((b.foot.x0 + b.foot.x1) / 2, art.top + 3.4, (b.foot.z0 + b.foot.z1) / 2));
+      const [, badgeY] = this.toScreen(...project(b.ox, art.top + 0.6, b.oz + b.spec.D / 2));
+      const sy = Math.min(roofY, badgeY - 12 * RES * this.k);
+      const pips = o.limit !== null && o.limit <= 8 ? { on: Math.min(o.busy, o.limit), total: o.limit } : undefined;
+      const rows: Row[] = [{ kind: 'central', text: o.limit === null ? `Trabalho · ${o.busy} em andamento` : `Trabalho · ${o.busy}/${o.limit}`, pips }];
+      if (o.ready || o.blocked) rows.push({ kind: 'espera', text: [o.ready ? `${o.ready} na espera` : '', o.blocked ? `${o.blocked} parado${o.blocked === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') });
+      if (o.deliveries) rows.push({ kind: 'entregas', text: `${o.deliveries} entrega${o.deliveries === 1 ? '' : 's'} recente${o.deliveries === 1 ? '' : 's'}` });
+      panel(rows, sx, sy - 6 * this.dpr);
+    }
+    const ag = this.town.areaOf('agora');
+    if (ag && o.decisions > 0) {
+      const [sx, sy] = this.toScreen(...project((ag.lot.x0 + ag.lot.x1) / 2, 2.2, (ag.lot.z0 + ag.lot.z1) / 2));
+      panel([{ kind: 'decisoes', text: `${o.decisions} ${o.decisions === 1 ? 'decisão espera' : 'decisões esperam'} você` }], sx, sy);
+    }
+  }
+
+  /**
+   * Posto de trabalho reservado à nuvem, coberto com lona branca: aparece ao lado da Central enquanto o trabalho na
+   * nuvem não existe nesta instalação. É só cenário (não é vaga, não muda a planta nem os lotes).
+   */
+  private tarpSpot(): { px: number; py: number; box: AABB; rect: [number, number, number, number] } | null {
+    if (!this.ops || this.ops.cloud || this.editing) return null;
+    const b = this.centralBuilding();
+    if (!b) return null;
+    // ao longo da lateral do prédio, o primeiro lugar sem outro objeto (banco, planta, braseiro) por perto
+    const caixa = (x: number, z: number): AABB => ({ x0: x - 0.6, y0: 0, z0: z - 0.45, x1: x + 0.6, y1: 1.1, z1: z + 0.45 });
+    const livre = (c: AABB) => !this.items.some((it) => it.box.x1 > c.x0 - 0.3 && it.box.x0 < c.x1 + 0.3 && it.box.z1 > c.z0 - 0.3 && it.box.z0 < c.z1 + 0.3);
+    const chave = `${b.id}|${b.foot.x1}|${b.foot.z1}|${this.items.length}`;
+    let spot: [number, number] | null = this.tarpCache?.chave === chave ? this.tarpCache.spot : null;
+    if (this.tarpCache?.chave !== chave) {
+      for (let z = b.foot.z1 - 2.2; z >= b.foot.z0 + 0.6 && !spot; z -= 0.5) if (livre(caixa(b.foot.x1 + 1.5, z))) spot = [b.foot.x1 + 1.5, z];
+      this.tarpCache = { chave, spot };
+    }
+    if (!spot) return null; // nenhum lugar limpo: melhor não desenhar do que sobrepor
+    const [x, z] = spot;
+    const [px, py] = project(x, 0, z);
+    const w = TARP_ROWS[0].length * RES; const h = TARP_ROWS.length * RES;
+    this.tarpRect = [px - w / 2, py - h, px + w / 2, py];
+    return { px, py, box: caixa(x, z), rect: this.tarpRect };
+  }
+  private tarpRect: [number, number, number, number] | null = null;
+  private tarpCache: { chave: string; spot: [number, number] | null } | null = null;
+  private drawTarp(px: number, py: number): void {
+    const th = this.theme;
+    this.drawIcon(TARP_ROWS, { o: th.outline, w: '#f4f1ea', s: '#d5cfc2', f: '#bfb8a9', r: '#8a6a50', l: mix(th.outline, '#8a6a50', 0.5) }, px, py - TARP_ROWS.length * RES);
+  }
+
+  /** Placa sob o ponteiro (pixels de tela). */
+  private plaqueAt(e: { clientX: number; clientY: number }): SceneOpsTarget | null {
+    if (!this.plaques.length) return null;
+    const rc = this.canvas.getBoundingClientRect();
+    const sx = ((e.clientX - rc.left) / rc.width) * this.W; const sy = ((e.clientY - rc.top) / rc.height) * this.H;
+    return this.plaques.find((p) => sx >= p.x && sx <= p.x + p.w && sy >= p.y && sy <= p.y + p.h)?.kind ?? null;
+  }
+
   // ================================================================ o que está acontecendo (para o clique nas áreas)
   private statusOf(rt: Rt): string {
     if (rt.visual === 'working') return 'trabalhando';
@@ -1488,6 +1630,7 @@ export class IsoEngine {
     else if (hit?.kind === 'area' && hit.hit.kind === 'lote' && hit.hit.lot) hover = { kind: 'lot', i: hit.hit.lot[0], j: hit.hit.lot[1] };
     const same = JSON.stringify(hover) === JSON.stringify(this.hover);
     this.hover = hover;
+    if (!this.editing && this.plaqueAt(e)) { this.canvas.style.cursor = 'pointer'; if (!same) this.invalidate(); return; }
     this.canvas.style.cursor = this.editing ? (hover ? 'grab' : 'default') : hit && (hit.kind !== 'area' || hit.hit.kind !== 'agora') && hit.kind !== 'floor' ? 'pointer' : 'grab';
     if (!same) this.invalidate();
   };
@@ -1505,7 +1648,14 @@ export class IsoEngine {
       return;
     }
     if (!d || d.moved) { this.canvas.style.cursor = this.editing ? 'default' : 'grab'; return; }
+    const plaque = this.editing ? null : this.plaqueAt(e);
+    if (plaque) { this.cb.onObject(plaque); return; }
     const [wx, wy] = this.toWorld(e);
+    const tr = this.tarpRect;
+    if (!this.editing && this.ops && !this.ops.cloud && tr && wx >= tr[0] && wx <= tr[2] && wy >= tr[1] && wy <= tr[3]) {
+      this.cb.onObject('info', 'Posto reservado para trabalhos na nuvem: coberto com lona, ainda sem uso nesta versão.');
+      return;
+    }
     const hit = this.hitAt(wx, wy);
     if (this.editing) { const s = this.structOf(hit); this.cb.onStructure(s); return; }
     if (hit?.kind === 'agent') { if (hit.id === NPC_ID) this.cb.onObject('npc'); else this.cb.onSelectAgent(hit.id); return; }

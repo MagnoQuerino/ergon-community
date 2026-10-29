@@ -1,5 +1,15 @@
 # Novidades
 
+## 1.1.0-rc.11 (pré-versão de teste)
+
+- **Atualizações no app:** Configurações › "Verificar atualizações" mostra se há versão nova e atualiza com um clique,
+  com cópia dos seus dados antes; se algo der errado, a versão de antes volta sozinha. Nada se atualiza sem você pedir,
+  exceto quando a versão traz revisões de segurança: aí o Ergon avisa e fica bloqueado até atualizar.
+- **Central de Trabalho na cidade:** placas na Stoa (vagas, espera, entregas) e na ágora (decisões que esperam você);
+  a Central mostra o que está em andamento, o que espera e por quê, o que precisa de você e o que ficou pronto, e
+  cada linha abre o card de sempre (priorizar, responder, parar, cancelar).
+- **Posto da nuvem coberto:** o lugar reservado para trabalhos na nuvem aparece coberto com lona, sem uso nesta versão.
+
 ## 1.1.0-rc.10 (pré-versão de teste)
 
 - **Telas prontas:** trocar de menu e abrir janelas mostra o que já está montado, sem itens aparecendo e mudando de

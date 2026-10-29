@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { assinar, verificarManifesto, conferirArquivo, baixar, manifestoOci, camadaAcessivel, validarForma, sha256, FORMATO } from './manifesto.mjs';
+import { assinar, verificarManifesto, conferirArquivo, baixar, manifestoOci, camadaAcessivel, validarForma, seguranca, sha256, FORMATO } from './manifesto.mjs';
 
 // recusa vira uma linha clara, sem pilha (o código da recusa vem na frente: ASSINATURA, HASH, EXPIRADO...)
 const falhou = (e) => { console.error(`RECUSADO ${e?.message ?? e}`); process.exit(1); };
@@ -79,6 +79,10 @@ switch (cmd) {
       componentes,
     };
     if (!m.clienteMinimo) delete m.clienteMinimo;
+    // atualização de segurança: a linha "Segurança (obrigatória): motivo" nas novidades da versão (o corpo da página de
+    // lançamento, que sai do CHANGELOG) entra assinada no manifesto; o aplicativo bloqueia o uso até atualizar
+    const seg = seguranca(rel.body ?? '');
+    if (seg) m.seguranca = seg;
     validarForma(m);
     fs.writeFileSync(opc('saida', 'manifesto.json'), JSON.stringify(m, null, 2) + '\n');
     console.log(`manifesto ${edicao}/${canal} ${versao} · sequência ${m.sequencia} · ${Object.keys(componentes).join(', ')}`);

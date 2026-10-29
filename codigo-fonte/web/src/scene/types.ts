@@ -17,7 +17,18 @@ export interface SceneAgent {
   outcome: string | null;
 }
 
-export type SceneObject = 'board' | 'shelf' | 'npc' | 'conexoes' | 'atividade' | 'info';
+export type SceneObject = 'board' | 'shelf' | 'npc' | 'conexoes' | 'atividade' | 'info' | SceneOpsTarget;
+/** Placas operacionais: Central de Trabalho (vagas), espera, entregas e decisões. */
+export type SceneOpsTarget = 'central' | 'espera' | 'entregas' | 'decisoes';
+/**
+ * Trabalho da equipe para as placas da cidade: só números já classificados pelo servidor (/api/ambient/operations).
+ * A cena não busca nem classifica nada; sem leitura (null), as placas não aparecem.
+ */
+export interface SceneOps {
+  busy: number; limit: number | null; ready: number; blocked: number; attention: number; decisions: number; deliveries: number;
+  /** trabalho na nuvem ligado nesta instalação; sem ele, o posto da nuvem fica coberto com lona (sem uso) */
+  cloud: boolean;
+}
 export interface SceneFocus { building: string; level: number }
 
 /** Comandos que a interface dá ao palco (câmera e prédio aberto). */
@@ -39,6 +50,8 @@ export interface SceneProps {
   rightInset: number;
   /** false = outra área do Ergon na tela: a cena fica oculta, mas a vida dos agentes continua */
   active: boolean;
+  /** placas do trabalho da equipe (null = sem leitura: nada desenhado) */
+  ops: SceneOps | null;
   onSelectAgent(id: string): void;
   /** Clique num objeto: quadro, arquivo, anfitrião, mural (Conexões), teatro/conselho (Atividade) ou uma área (texto). */
   onObject(kind: SceneObject, text?: string): void;

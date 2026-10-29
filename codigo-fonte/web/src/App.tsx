@@ -32,7 +32,7 @@ import { ConversationDock, ConversationsDialog } from './components/Conversation
 import { TaskDetail } from './components/TaskDetail.tsx';
 import { WorkspaceSwitcher } from './components/Workspaces.tsx';
 import { AccountMenu } from './components/AccountMenu.tsx';
-import { onOpenCard, onOpenConversation } from './lib/open.ts';
+import { onOpenCard, onOpenConversation, onOpenDecisions } from './lib/open.ts';
 import { clearRecents, pushRecent, type Recent } from './lib/recents.ts';
 
 type Auth = { state: 'loading' } | { state: 'out'; st: AuthState } | { state: 'in'; me: Me };
@@ -166,6 +166,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const [convs, setConvs] = useState<{ agentId: string | null; conversationId: string | null } | null>(null);
   useEffect(() => onOpenCard((id) => { setDecisions(false); setCard(id); }), []);
   useEffect(() => onOpenConversation((agentId, conversationId) => { setDecisions(false); setWin(null); setConvs({ agentId, conversationId }); }), []);
+  useEffect(() => onOpenDecisions(() => { setCard(null); setDecisions(true); }), []);
   // primeiro acesso (perguntas de boas-vindas) ou refazer pela Ajuda; tour inicial; objetivo contado nas perguntas
   const [onb, setOnb] = useState<'first' | 'redo' | null>(() => (me.onboarding === 'pending' && me.role === 'owner' ? 'first' : null));
   const [tour, setTour] = useState(false);

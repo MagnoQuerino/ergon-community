@@ -62,6 +62,10 @@ caso('formato futuro', base({ formato: 2 }), 'FORMATO');
 caso('sem componentes', base({ componentes: {} }), 'FORMATO');
 caso('tamanho zero', com((m) => { m.componentes['pacote-local'].tamanho = 0; }), 'FORMATO');
 caso('não é JSON', null, 'FORMATO', { bytes: Buffer.from('não é json') });
+caso('atualização de segurança aceita', base({ seguranca: { obrigatoria: true, motivo: 'fecha uma falha no acesso ao cofre do motor.' } }), 'ok');
+caso('segurança sem motivo', base({ seguranca: { obrigatoria: true } }), 'FORMATO');
+caso('segurança não obrigatória', base({ seguranca: { obrigatoria: false, motivo: 'motivo longo o bastante' } }), 'FORMATO');
+caso('segurança com motivo longo demais', base({ seguranca: { obrigatoria: true, motivo: 'x'.repeat(401) } }), 'FORMATO');
 
 // o próprio verificador de referência tem de concordar com cada caso
 for (const c of casos) {

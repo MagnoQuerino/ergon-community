@@ -64,7 +64,23 @@ const STEP_MIN_WORDS = 10;
 const COLS = { todo: 'A fazer', doing: 'Em andamento', done: 'Concluído' };
 /** Ordem da fila em "A fazer": a posição que você deu (arrastando ou com Prioridade) ou a de chegada (número do card). */
 export const QUEUE_ORDER = 'COALESCE(t.queue_pos, t.number), t.number';
-const MAX_ATTEMPTS = 2;
+export const MAX_ATTEMPTS = 2;
+/**
+ * Quem a fila automática pode pegar agora, sobre `tasks t` (com `columns c` e `agents a` ligados): em "A fazer",
+ * aberto, com responsável ativo, criado na equipe (espelhado de outro aplicativo não entra), sem ajuda aberta, sem
+ * execução ativa, com tentativas disponíveis desde a última devolução e no estado de quem ainda vai trabalhar.
+ * O mesmo trecho decide o próximo card (next) e o que o Ambiente mostra como "pronto": a leitura não inventa fila.
+ * Parâmetros: o quadro da equipe, o nome da coluna "A fazer" e o limite de tentativas.
+ */
+export const ELIGIBLE_SQL = `t.board_id = ? AND t.completed = 0 AND t.archived = 0 AND a.status = 'active'
+          AND c.name = ? AND t.sync_origin IS NULL
+          AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.parent_task_id = t.id AND k.completed = 0 AND k.archived = 0)
+          AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user'))
+          AND (SELECT COUNT(*) FROM runs r WHERE r.task_id = t.id AND r.idempotency_key LIKE 'queue-%'
+                 AND r.created_at > COALESCE((SELECT MAX(x.decided_at) FROM task_results x WHERE x.task_id = t.id AND x.state = 'devolvido'), '')) < ?
+          AND COALESCE(t.work_state, 'solicitada') IN ('solicitada', 'processamento')`;
+/** nome da coluna da fila (o mesmo que o agendador usa) */
+export const TODO_COLUMN = 'A fazer';
 /** O pedido fala de um arquivo que não veio junto: perguntar antes de gastar uma chamada de modelo. */
 const MENTIONS_FILE = /(^|[^a-z])(planilh|csv|anexad|em anexo|esta tabela|este arquivo|neste arquivo|nesse arquivo|desse arquivo|deste arquivo)/;
 const CLOSING: Record<string, string> = {
@@ -344,13 +360,7 @@ export class Teamwork {
       `SELECT t.id, t.number, t.title, t.description, t.agent_id,
               (SELECT COUNT(*) FROM runs r WHERE r.task_id = t.id AND r.idempotency_key LIKE 'queue-%') AS attempts
          FROM tasks t JOIN columns c ON c.id = t.column_id JOIN agents a ON a.id = t.agent_id
-        WHERE t.workspace_id = ? AND t.board_id = ? AND t.completed = 0 AND t.archived = 0 AND a.status = 'active'
-          AND c.name = ? AND t.sync_origin IS NULL
-          AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.parent_task_id = t.id AND k.completed = 0 AND k.archived = 0)
-          AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user'))
-          AND (SELECT COUNT(*) FROM runs r WHERE r.task_id = t.id AND r.idempotency_key LIKE 'queue-%'
-                 AND r.created_at > COALESCE((SELECT MAX(x.decided_at) FROM task_results x WHERE x.task_id = t.id AND x.state = 'devolvido'), '')) < ?
-          AND COALESCE(t.work_state, 'solicitada') IN ('solicitada', 'processamento')
+        WHERE t.workspace_id = ? AND ${ELIGIBLE_SQL}
         ORDER BY ${QUEUE_ORDER} LIMIT 1`,
       workspaceId, board, COLS.todo, MAX_ATTEMPTS);
     if (!t) return null;

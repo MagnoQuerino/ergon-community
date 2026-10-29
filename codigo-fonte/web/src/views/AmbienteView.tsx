@@ -6,7 +6,11 @@ import { ErgonLoader } from '../brand/Brand.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { StructureCard } from '../components/StructureCard.tsx';
-import type { SceneAgent, SceneApi, SceneFocus, SceneObject, StructureIn } from '../scene/types.ts';
+import { CentralTrabalho, type CentralSection } from '../components/CentralTrabalho.tsx';
+import { useResource } from '../lib/live.ts';
+import { OPS_EVENTS, OPS_URL, cloudOn, summaryOf, type AmbientOps, type Distribution } from '../lib/ambient.ts';
+import { openDecisions } from '../lib/open.ts';
+import type { SceneAgent, SceneApi, SceneFocus, SceneObject, SceneOps, StructureIn } from '../scene/types.ts';
 import { THEMES, type ThemeId } from '../iso/theme.ts';
 import { isDarkHour } from '../iso/life.ts';
 import { typeOf } from '../../../shared/city.ts';
@@ -51,6 +55,16 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
   const [card, setCard] = useState<string | null>(null);
   const [focus, setFocus] = useState<SceneFocus | null>(null);
   const sceneApi = useRef<SceneApi | null>(null);
+  // trabalho da equipe: lido só com a cidade na tela (fora dela, nada de recarga operacional); o mesmo SSE de sempre
+  const opsRes = useResource<AmbientOps>(active ? OPS_URL : null, OPS_EVENTS);
+  const ops = opsRes.data;
+  const dist = useResource<Distribution>('/api/distribution', []);
+  const cloud = cloudOn(dist.data);
+  const sceneOps: SceneOps | null = useMemo(() => (ops ? summaryOf(ops, cloud) : null), [ops, cloud]);
+  // Central de Trabalho: a gaveta da direita (a mesma da conversa; uma de cada vez)
+  const [central, setCentral] = useState<CentralSection | null>(null);
+  const [section, setSection] = useState<CentralSection>('trabalho');
+  const openCentral = useCallback((s: CentralSection) => { setSection(s); setCentral(s); onSelect(null); setCard(null); }, [onSelect]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 5000); return () => clearTimeout(t); }, [toast]);
 
   // painel de conversa: entra deslizando da direita e sai do mesmo jeito (fica montado durante a saída)
@@ -64,6 +78,8 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
     return () => clearTimeout(t);
   }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (selected) setChatAgent(selected); }, [selected]);
+  // escolher um agente na cidade troca a gaveta para a conversa dele
+  useEffect(() => { if (selectedId) setCentral(null); }, [selectedId]);
 
   const structures: StructureIn[] = useMemo(() => state.structures.map((s) => ({ id: s.id, kind: s.kind, name: s.name, i: s.i, j: s.j, floors: s.floors.map((f) => ({ id: f.id, level: f.level, slots: f.slots })) })), [state.structures]);
   const sceneAgents: SceneAgent[] = useMemo(() => {
@@ -75,13 +91,15 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
   }, [state.agents]);
 
   const onObject = useCallback((k: SceneObject, text?: string) => {
-    if (k === 'board') onNavigate('equipe');
-    else if (k === 'shelf') { history.replaceState(null, '', '#atividade?arquivos'); onNavigate('atividade'); } // a estante abre os arquivos (em Atividade)
+    if (k === 'board' || k === 'central') openCentral('trabalho'); // o quadro da Stoa é a bancada da Central
+    else if (k === 'espera') openCentral('espera');
+    else if (k === 'shelf' || k === 'entregas') openCentral('entregas'); // a estante mostra as entregas (com atalho para todos os arquivos)
+    else if (k === 'decisoes') openDecisions();
     else if (k === 'conexoes') onNavigate('conexoes');
     else if (k === 'atividade') onNavigate('atividade');
     else if (k === 'info') setToast(text ?? null);
     else { setToast(null); setBio(true); }
-  }, [onNavigate]);
+  }, [onNavigate, openCentral]);
 
   const onMove = useCallback(async (id: string, i: number, j: number) => {
     try { await api.patch(`/api/structures/${id}`, { i, j }); reload(); }
@@ -103,20 +121,42 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
 
   return (
     <div className="ambiente">
-      <div className="stage" style={{ background: THEMES[themeId].bg }}>
+      <div className="stage" style={{ background: THEMES[themeId].bg, ['--drawer' as string]: `${chatOpen || central ? CHAT_W : 0}px` }}>
         {!lost ? (
           <Suspense fallback={<div className="stage__loading"><ErgonLoader onDark label="Carregando a cidade…" /></div>}>
-            <Scene structures={structures} agents={sceneAgents} selectedId={selectedId} themeId={themeId} editing={editing} rightInset={chatOpen ? CHAT_W : 0} active={active}
+            <Scene structures={structures} agents={sceneAgents} selectedId={selectedId} themeId={themeId} editing={editing} rightInset={chatOpen || central ? CHAT_W : 0} active={active} ops={sceneOps}
               onSelectAgent={(id) => onSelect(id)} onObject={onObject} onLot={(i, j) => { setEditing(false); setStore({ i, j }); }}
               onStructure={(id) => setCard(id)} onFocus={setFocus} onMove={onMove} onContextLost={() => setLost(true)}
               onReady={(a) => { sceneApi.current = a; }} />
           </Suspense>
         ) : (
-          <HtmlPlan state={state} onSelect={onSelect} selectedId={selectedId} />
+          <div className="htmlplan-wrap">
+            <CentralTrabalho embedded ops={ops} error={opsRes.error} agents={state.agents} section={section} onSection={setSection}
+              onBoard={() => onNavigate('equipe')} onFiles={() => { history.replaceState(null, '', '#atividade?arquivos'); onNavigate('atividade'); }} />
+            <HtmlPlan state={state} onSelect={onSelect} selectedId={selectedId} />
+          </div>
         )}
 
         <div className="stage__tools stage__tools--left">
           <StructurePicker structures={state.structures} value={card} onPick={pick} />
+          {ops && !editing && (
+            <div className="ops-sum" role="group" aria-label="Trabalho da equipe">
+              <button className={`ops-sum__part ${central === 'trabalho' ? 'is-on' : ''}`} onClick={() => (central === 'trabalho' ? setCentral(null) : openCentral('trabalho'))} aria-pressed={central === 'trabalho'}
+                title="Central de Trabalho: o que está em andamento, o que espera e por quê">
+                <Icon name="layers" size={14} /> {ops.local.busy} em andamento{ops.local.limit !== null ? ` de ${ops.local.limit}` : ''}
+              </button>
+              {ops.decisions.total > 0 && (
+                <button className="ops-sum__part ops-sum__part--att" onClick={openDecisions} title="Aguardando você: responder, aprovar ou devolver">
+                  <Icon name="bell" size={14} /> {ops.decisions.total} precisa{ops.decisions.total === 1 ? '' : 'm'} de você
+                </button>
+              )}
+              {ops.deliveries.total > 0 && (
+                <button className={`ops-sum__part ${central === 'entregas' ? 'is-on' : ''}`} onClick={() => (central === 'entregas' ? setCentral(null) : openCentral('entregas'))} aria-pressed={central === 'entregas'} title="Entregas recentes">
+                  <Icon name="check" size={14} /> {ops.deliveries.total} entrega{ops.deliveries.total === 1 ? '' : 's'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className="stage__tools stage__tools--right">
           <button className={`tool ${editing ? 'tool--on' : ''}`} onClick={() => { setEditing((v) => !v); setCard(null); }} aria-pressed={editing} title="Editor do mapa: arraste prédios e áreas para outros lotes">
@@ -152,6 +192,12 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
           <Suspense fallback={null}>
             <StoreDialog lot={store} structures={state.structures} themeId={themeId} onBuild={build} onClose={() => setStore(null)} />
           </Suspense>
+        )}
+        {central && !selectedId && (
+          <div className="chat-drawer chat-drawer--open central-drawer" style={{ width: CHAT_W }}>
+            <CentralTrabalho ops={ops} error={opsRes.error} agents={state.agents} section={section} onSection={(x) => { setSection(x); setCentral(x); }} onClose={() => setCentral(null)}
+              onBoard={() => onNavigate('equipe')} onFiles={() => { history.replaceState(null, '', '#atividade?arquivos'); onNavigate('atividade'); }} />
+          </div>
         )}
         {chatAgent && (
           <div className={`chat-drawer ${chatOpen ? 'chat-drawer--open' : ''}`} style={{ width: CHAT_W }}>

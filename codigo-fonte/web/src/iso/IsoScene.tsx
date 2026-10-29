@@ -44,6 +44,7 @@ export default function IsoScene(p: SceneProps) {
   useEffect(() => { eng.current?.setEditing(p.editing); }, [p.editing]);
   useEffect(() => { eng.current?.setInsets(p.rightInset); }, [p.rightInset]);
   useEffect(() => { eng.current?.setActive(p.active); }, [p.active]);
+  useEffect(() => { eng.current?.setOps(p.ops); }, [p.ops]);
 
   return (
     <div ref={wrap} className="iso">

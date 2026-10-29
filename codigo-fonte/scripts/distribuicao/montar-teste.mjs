@@ -2,6 +2,7 @@
 // 127.0.0.1, assinado com uma chave de teste. Nunca publicado.
 //   node scripts/distribuicao/montar-teste.mjs --base <manifesto publicado> --pasta <arquivos> --url http://127.0.0.1:18999
 //        --chave <chave de teste> --saida <pasta>/manifesto-estavel.json [--adulterar ambiente-wsl]
+//        [--canal estavel] (o canal do aplicativo de teste) [--seguranca "motivo"] (atualização obrigatória)
 import fs from 'node:fs';
 import path from 'node:path';
 import { assinar, sha256 } from './manifesto.mjs';
@@ -12,7 +13,7 @@ const pasta = opc('pasta'), url = opc('url'), saida = opc('saida');
 const chave = JSON.parse(fs.readFileSync(opc('chave'), 'utf8'));
 const arquivos = { 'ambiente-wsl': 'ergon-ambiente-wsl.tar.gz', 'pacote-local': `ergon-local-${base.versao}.zip` };
 const agora = new Date();
-const m = { ...base, sequencia: Math.floor(agora.getTime() / 1000), emitidoEm: agora.toISOString(), validoAte: new Date(agora.getTime() + 864e5).toISOString(), componentes: { core: base.componentes.core, motor: base.componentes.motor } };
+const m = { ...base, ...(opc('canal') ? { canal: opc('canal') } : {}), ...(opc('seguranca') ? { seguranca: { obrigatoria: true, motivo: opc('seguranca') } } : {}), sequencia: Math.floor(agora.getTime() / 1000), emitidoEm: agora.toISOString(), validoAte: new Date(agora.getTime() + 864e5).toISOString(), componentes: { core: base.componentes.core, motor: base.componentes.motor } };
 for (const [id, nome] of Object.entries(arquivos)) {
   const b = fs.readFileSync(path.join(pasta, nome));
   m.componentes[id] = { tipo: 'arquivo', nome, url: `${url}/${nome}`, sha256: sha256(b), tamanho: b.length };

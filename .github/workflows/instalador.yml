@@ -1,0 +1,213 @@
+# Instalação pelo assistente (plano do instalador, D3), numa máquina Windows do GitHub: o ambiente próprio do Ergon
+# (WSL2, sem Docker Desktop) gerado aqui, o pacote e as imagens da versão publicada, e o aplicativo instalando sem
+# terminal pelo mesmo caminho da janela (--instalar-sem-janela). A rede cai no meio do download, o processo é morto
+# no meio da instalação e componentes adulterados são oferecidos: tudo tem de ser recusado ou retomado.
+name: Instalador
+on:
+  push:
+    branches: ['distribuicao/**']
+    paths: ['codigo-fonte/desktop/**', 'codigo-fonte/scripts/distribuicao/**', '.github/workflows/instalador.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSAO: '1.98.0'
+  VERSAO_PUBLICADA: '1.0.1'
+
+defaults:
+  run:
+    working-directory: codigo-fonte
+
+jobs:
+  ambiente:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ambiente WSL do Ergon (rootfs)
+        run: |
+          docker build -q --build-arg VERSAO="d3-${GITHUB_SHA::7}" -t ergon-ambiente desktop/ambiente
+          id=$(docker create ergon-ambiente)
+          docker export "$id" | gzip -n -9 > ergon-ambiente-wsl.tar.gz
+          docker rm "$id" >/dev/null
+          echo "RESULTADO: ambiente $(du -m ergon-ambiente-wsl.tar.gz | cut -f1) MB comprimido · $(docker image inspect ergon-ambiente --format '{{.Size}}' | awk '{printf "%.0f", $1/1048576}') MB expandido"
+          sha256sum ergon-ambiente-wsl.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ambiente-wsl
+          path: codigo-fonte/ergon-ambiente-wsl.tar.gz
+
+  instalacao-windows:
+    needs: ambiente
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: ambiente-wsl
+          path: C:\servir
+      - name: Rust ${{ env.RUST_VERSAO }}
+        run: rustup toolchain install $env:RUST_VERSAO --profile minimal; rustup default $env:RUST_VERSAO
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            codigo-fonte/desktop/src-tauri/target
+          key: instalador-windows-${{ env.RUST_VERSAO }}-${{ hashFiles('codigo-fonte/desktop/src-tauri/Cargo.lock') }}
+      - name: Testes do aplicativo (com o verificador do manifesto)
+        working-directory: codigo-fonte/desktop/src-tauri
+        run: cargo test --locked --features origens-de-teste
+      - name: Aplicativo de teste (aceita origem 127.0.0.1 e chaveiro de teste)
+        working-directory: codigo-fonte/desktop/src-tauri
+        run: cargo build --locked --features origens-de-teste
+      - name: Manifesto de teste assinado (imagens da versão publicada; ambiente e pacote servidos aqui)
+        shell: bash
+        run: |
+          curl -fsSL -o /c/servir/ergon-local-$VERSAO_PUBLICADA.zip "https://github.com/MagnoQuerino/ergon-community/releases/download/v$VERSAO_PUBLICADA/ergon-local-$VERSAO_PUBLICADA.zip"
+          node scripts/distribuicao/cli.mjs chave-nova --saida "$RUNNER_TEMP/chave-teste.json" --id teste-instalador > "$RUNNER_TEMP/pub.json"
+          node -e 'const p=require(process.argv[1]);require("fs").writeFileSync(process.argv[2],JSON.stringify({[p.keyId]:{publica:p.publica}}))' "$RUNNER_TEMP/pub.json" "$RUNNER_TEMP/chaveiro.json"
+          B=scripts/distribuicao/exemplos/community-estavel-$VERSAO_PUBLICADA.json
+          for d in certo adulterado; do mkdir -p /c/servir/$d; cp /c/servir/*.tar.gz /c/servir/*.zip /c/servir/$d/; done
+          node scripts/distribuicao/montar-teste.mjs --base $B --pasta /c/servir/certo --url http://127.0.0.1:18999/certo --chave "$RUNNER_TEMP/chave-teste.json" --saida /c/servir/certo/manifesto-estavel.json
+          node scripts/distribuicao/montar-teste.mjs --base $B --pasta /c/servir/adulterado --url http://127.0.0.1:18999/adulterado --chave "$RUNNER_TEMP/chave-teste.json" --saida /c/servir/adulterado/manifesto-estavel.json --adulterar ambiente-wsl
+          # assinatura de outra chave (fora do chaveiro)
+          mkdir -p /c/servir/outra-chave && cp /c/servir/certo/* /c/servir/outra-chave/
+          node scripts/distribuicao/cli.mjs chave-nova --saida "$RUNNER_TEMP/intrusa.json" --id intrusa >/dev/null
+          # (direto pela biblioteca: o "assinar" da linha de comando recusa a origem 127.0.0.1, como deve)
+          node --input-type=module -e 'import fs from "node:fs"; import { assinar } from "./scripts/distribuicao/manifesto.mjs"; const [k, m] = process.argv.slice(1); fs.writeFileSync(m + ".sig", assinar(fs.readFileSync(m), JSON.parse(fs.readFileSync(k, "utf8"))))' "$RUNNER_TEMP/intrusa.json" /c/servir/outra-chave/manifesto-estavel.json
+          echo "CHAVEIRO=$RUNNER_TEMP\\chaveiro.json" >> "$GITHUB_ENV"
+          # versão NOVA para a atualização: a pré-versão publicada mais recente (imagens e pacote reais), servida aqui
+          # como se fosse do canal estável do aplicativo de teste e marcada como atualização de segurança
+          curl -fsSL -o "$RUNNER_TEMP/base-nova.json" https://github.com/MagnoQuerino/ergon-community/releases/download/canal-teste/manifesto-teste.json
+          NOVA=$(node -p 'require(process.argv[1]).versao' "$RUNNER_TEMP/base-nova.json")
+          mkdir -p /c/servir/novo && cp /c/servir/*.tar.gz /c/servir/novo/
+          curl -fsSL -o /c/servir/novo/ergon-local-$NOVA.zip "https://github.com/MagnoQuerino/ergon-community/releases/download/v$NOVA/ergon-local-$NOVA.zip"
+          node scripts/distribuicao/montar-teste.mjs --base "$RUNNER_TEMP/base-nova.json" --pasta /c/servir/novo --url http://127.0.0.1:18999/novo --chave "$RUNNER_TEMP/chave-teste.json" --saida /c/servir/novo/manifesto-estavel.json --canal estavel --seguranca "Teste da bateria: revisão de segurança que precisa ser aplicada."
+          echo "VERSAO_NOVA=$NOVA" >> "$GITHUB_ENV"
+      - name: Bateria da instalação
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path desktop\src-tauri\target\debug\ergon-desktop.exe).Path
+          $srv = Start-Process node -ArgumentList 'scripts\distribuicao\servidor-teste.mjs', 'C:\servir', '--cortar', 'certo/ergon-ambiente-wsl.tar.gz:20000000' -PassThru -RedirectStandardOutput C:\servir\servidor.log -NoNewWindow
+          Start-Sleep 2
+          $env:ERGON_CHAVEIRO = $env:CHAVEIRO
+          $env:ERGON_PROIBIR_ATIVAR_WSL = "1"
+          foreach ($a in '--version', '--status', '-l') { $null = wsl.exe $a 2>&1; Write-Host "wsl $a → saída $LASTEXITCODE" }
+          $falhas = 0
+          function Ok($c, $m) { if ($c) { Write-Host "ok    $m" } else { Write-Host "FALHA $m"; $script:falhas++ } }
+          function Instalar($fonte, $nome, $saida, [int]$matarEm = 0) {
+            $env:ERGON_MANIFESTO_URL = "http://127.0.0.1:18999/$fonte/manifesto-estavel.json"
+            $env:ERGON_AMBIENTE_NOME = $nome; $env:ERGON_AMBIENTE_DIR = "C:\ergon-$nome"
+            $p = Start-Process $exe -ArgumentList '--instalar-sem-janela' -PassThru -NoNewWindow -RedirectStandardOutput $saida -RedirectStandardError "$saida.err"
+            if ($matarEm) {
+              # mata o processo no meio da etapa "ligar" (imagens baixando), como um desligamento
+              $t0 = Get-Date
+              while (-not $p.HasExited -and -not (Select-String -Path $saida -Pattern 'ETAPA ligar' -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 1; if (((Get-Date) - $t0).TotalMinutes -gt 30) { break } }
+              Start-Sleep $matarEm
+              # como faltar energia: o aplicativo morre e o ambiente desliga junto (só o do Ergon)
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              wsl.exe --terminate $nome | Out-Null
+              Write-Host "      (processo morto e ambiente desligado no meio da etapa ligar)"
+              return -9
+            }
+            if (-not $p.WaitForExit(30 * 60 * 1000)) { Stop-Process -Id $p.Id -Force; Write-Host "      (passou de 30 minutos: encerrado)"; Get-Content $saida | Select-Object -Last 20 | Write-Host; return 124 }
+            return $p.ExitCode
+          }
+          function Dist { (wsl.exe -l -q | Out-String) -replace "`0", '' }
+
+          Write-Host '1) componente adulterado: recusado, nada importado'
+          $r = Instalar 'adulterado' 'ErgonAdulterado' C:\servir\adulterado.log
+          $t = Get-Content C:\servir\adulterado.log -Raw; Write-Host $t
+          Ok ($r -eq 1 -and $t -match 'HASH') 'SHA-256 diferente do manifesto: recusado'
+          Ok (-not ((Dist) -match 'ErgonAdulterado')) 'nenhum ambiente criado com o componente adulterado'
+          Ok (-not (Get-ChildItem C:\ergon-ErgonAdulterado\cache\componentes -ErrorAction SilentlyContinue | Where-Object Length -gt 10000000)) 'o arquivo adulterado não ficou no cache'
+
+          Write-Host '2) manifesto assinado por chave fora do chaveiro: recusado antes de baixar'
+          $r = Instalar 'outra-chave' 'ErgonIntrusa' C:\servir\intrusa.log
+          $t = Get-Content C:\servir\intrusa.log -Raw; Write-Host $t
+          Ok ($r -eq 1 -and $t -match 'CHAVE_DESCONHECIDA') 'chave desconhecida: recusado'
+          Ok (-not (Test-Path C:\ergon-ErgonIntrusa\cache\componentes) -or -not (Get-ChildItem C:\ergon-ErgonIntrusa\cache\componentes)) 'nada baixado'
+
+          Write-Host '3) instalação com a rede caindo no meio do download e o processo morto no meio'
+          $null = Instalar 'certo' 'Ergon' C:\servir\inst-1.log -matarEm 20
+          $t = Get-Content C:\servir\inst-1.log -Raw; Write-Host $t
+          Ok ($t -match 'ambiente-wsl: download retomado') 'a conexão caiu e o download foi retomado de onde parou'
+          Write-Host (Get-Content C:\servir\servidor.log -Raw)
+
+          Write-Host '4) de novo, depois da interrupção: continua sem importar de novo nem baixar de novo'
+          $r = Instalar 'certo' 'Ergon' C:\servir\inst-2.log
+          $t = Get-Content C:\servir\inst-2.log -Raw; Write-Host $t
+          Ok ($r -eq 0 -and $t -match "PRONTO $env:VERSAO_PUBLICADA") 'instalação concluída'
+          Ok ($t -match 'já existe neste computador: aproveitado') 'o ambiente não foi importado de novo'
+          Ok ($t -match 'ambiente-wsl: já estava aqui, conferido' -and $t -match 'pacote-local: já estava aqui, conferido') 'nenhum componente baixado de novo'
+          Ok (((Dist) -split "`r?`n" | Where-Object { $_ -match '^Ergon$' }).Count -eq 1) 'um ambiente só, sem duplicar'
+
+          Write-Host '5) o Ergon no ar, do Windows, só em localhost'
+          $h = Invoke-RestMethod http://localhost:8787/api/health -TimeoutSec 15
+          Ok ($h.service -eq 'ergon' -and $h.version -eq $env:VERSAO_PUBLICADA) "Ergon $($h.version) em http://localhost:8787"
+          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254*' -and $_.InterfaceAlias -notmatch 'WSL|vEthernet' } | Select-Object -First 1).IPAddress
+          Ok (-not (Test-NetConnection $ip -Port 8787 -WarningAction SilentlyContinue).TcpTestSucceeded) "porta 8787 fechada no IP da rede ($ip)"
+          # a referência configurada de cada contêiner (o "docker ps" mostra só o nome de uma imagem baixada por digest)
+          $img = wsl.exe -d Ergon -u root --exec sh -c 'docker inspect --format "{{.Name}} {{.Config.Image}}" $(docker ps -q)' | Out-String
+          Write-Host $img
+          Ok ($img -match 'ergon-community@sha256:' -and $img -notmatch 'ergon-community:') 'serviços rodando pelas imagens presas aos digests do manifesto'
+          $isol = wsl.exe -d Ergon -u root --exec sh -c 'test -e /mnt/c/Windows && echo com-disco || echo sem-disco; command -v cmd.exe || echo sem-interop' | Out-String
+          Write-Host $isol
+          Ok ($isol -match 'sem-disco' -and $isol -match 'sem-interop') 'o ambiente não enxerga os discos do Windows nem roda programas do Windows'
+          $env:ERGON_AMBIENTE_NOME = 'Ergon'
+          Write-Host '6) recolocar: tempo de reparo (tudo já presente)'
+          $s = Get-Date; $r = Instalar 'certo' 'Ergon' C:\servir\inst-3.log; $seg = [int]((Get-Date) - $s).TotalSeconds
+          Ok ($r -eq 0) "reparo/reinstalação com tudo presente em $seg s"
+
+          Write-Host "7) atualização: $env:VERSAO_PUBLICADA → $env:VERSAO_NOVA (marcada como de segurança), com os dados preservados"
+          function Rodar($argumento, $saida) {
+            $p = Start-Process $exe -ArgumentList $argumento -PassThru -NoNewWindow -RedirectStandardOutput $saida -RedirectStandardError "$saida.err"
+            if (-not $p.WaitForExit(40 * 60 * 1000)) { Stop-Process -Id $p.Id -Force; return 124 }
+            return $p.ExitCode
+          }
+          # um dado de antes: a conta criada na versão antiga tem de estar lá depois
+          $o = @{ Origin = 'http://localhost:8787' }
+          $null = Invoke-RestMethod -Method Post http://localhost:8787/api/auth/setup -Headers $o -ContentType 'application/json' -Body '{"username":"bateria","password":"senha-da-bateria-123","displayName":"Bateria"}' -TimeoutSec 30
+          Ok (-not (Invoke-RestMethod http://localhost:8787/api/auth/state -TimeoutSec 15).needsSetup) 'conta criada na versão antiga'
+          $env:ERGON_MANIFESTO_URL = 'http://127.0.0.1:18999/certo/manifesto-estavel.json'
+          $null = Rodar '--verificar-atualizacao' C:\servir\verificar-0.log
+          $v0 = Get-Content C:\servir\verificar-0.log -Raw | ConvertFrom-Json; Write-Host ($v0 | ConvertTo-Json -Compress)
+          Ok (-not $v0.nova -and -not $v0.obrigatoria) 'sem versão nova publicada: em dia, nada bloqueia'
+          $env:ERGON_MANIFESTO_URL = 'http://127.0.0.1:18999/novo/manifesto-estavel.json'
+          $null = Rodar '--verificar-atualizacao' C:\servir\verificar-1.log
+          $v1 = Get-Content C:\servir\verificar-1.log -Raw | ConvertFrom-Json; Write-Host ($v1 | ConvertTo-Json -Compress)
+          Ok ($v1.nova -eq $env:VERSAO_NOVA -and $v1.obrigatoria -and $v1.motivo -and $v1.podeAtualizar) "versão nova $env:VERSAO_NOVA vista como atualização de segurança obrigatória"
+          Ok ((Invoke-RestMethod http://localhost:8787/api/health -TimeoutSec 15).version -eq $env:VERSAO_PUBLICADA) 'verificar não mudou nada (a antiga segue no ar)'
+          $s = Get-Date; $r = Rodar '--atualizar-sem-janela' C:\servir\atualizar.log; $seg = [int]((Get-Date) - $s).TotalSeconds
+          $t = Get-Content C:\servir\atualizar.log -Raw; Write-Host $t
+          Ok ($r -eq 0 -and $t -match "ATUALIZADO $env:VERSAO_NOVA") "atualizado em $seg s"
+          Ok ($t -match 'ETAPA backup' -and $t -match 'ETAPA conferir') 'passou pelo backup e pela conferência'
+          $h = Invoke-RestMethod http://localhost:8787/api/health -TimeoutSec 15
+          Ok ($h.version -eq $env:VERSAO_NOVA) "Ergon $($h.version) no ar depois de atualizar"
+          Ok (-not (Invoke-RestMethod http://localhost:8787/api/auth/state -TimeoutSec 15).needsSetup) 'a conta de antes continua lá (dados preservados)'
+          $img = wsl.exe -d Ergon -u root --exec sh -c 'docker inspect --format "{{.Config.Image}}" $(docker ps -q)' | Out-String
+          Ok ($img -match '@sha256:' -and $img -notmatch 'ergon-community:') 'serviços da versão nova presos aos digests do manifesto'
+          $null = Rodar '--verificar-atualizacao' C:\servir\verificar-2.log
+          $v2 = Get-Content C:\servir\verificar-2.log -Raw | ConvertFrom-Json
+          Ok (-not $v2.obrigatoria -and $v2.atual -eq $env:VERSAO_NOVA) 'depois de atualizar: nada mais bloqueia'
+          Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
+          if ($falhas) { Write-Host "$falhas falha(s)"; exit 1 } else { Write-Host 'resultado: tudo ok' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: registros-instalacao
+          path: |
+            C:\servir\*.log
+            C:\servir\*.err
+      - name: Limpar
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($n in 'Ergon', 'ErgonAdulterado', 'ErgonIntrusa') { wsl.exe --unregister $n 2>&1 | Out-Null }
+          exit 0

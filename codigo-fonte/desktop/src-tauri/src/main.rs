@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ambiente;
+mod atualizacao;
 mod baixar;
 mod bandeja;
 mod confianca;
@@ -37,6 +38,15 @@ fn main() {
     if std::env::args().any(|a| a == "--instalar-sem-janela") {
         std::process::exit(instalar_sem_janela());
     }
+    // atualizações sem janela (testes e suporte): verificar imprime a situação em JSON; atualizar mostra as etapas e
+    // não troca o aplicativo (imprime onde ficou o instalador novo, se houver). Saída: 0 ok, 1 erro.
+    if std::env::args().any(|a| a == "--verificar-atualizacao") {
+        println!("{}", serde_json::to_string(&atualizacao::verificar()).unwrap_or_default());
+        std::process::exit(0);
+    }
+    if std::env::args().any(|a| a == "--atualizar-sem-janela") {
+        std::process::exit(atualizar_sem_janela());
+    }
     let estado = Estado { ultimo: Mutex::new(None), porta: AtomicU16::new(instalacao::localizar().porta), subindo: AtomicBool::new(false) };
     tauri::Builder::default()
         // abrir de novo (menu, atalho) traz a janela que já está aberta, em vez de uma segunda cópia
@@ -61,6 +71,8 @@ fn main() {
             servicos::abrir_ajuda,
             servicos::abrir_registros,
             servicos::instalar_ergon,
+            servicos::verificar_atualizacao,
+            servicos::atualizar_ergon,
         ])
         .setup(|app| {
             if let Ok(pasta) = app.path().app_log_dir() {
@@ -72,6 +84,15 @@ fn main() {
                 log::warn!("bandeja do sistema indisponível: {e}");
             }
             log::info!("Ergon Desktop {} iniciado", env!("CARGO_PKG_VERSION"));
+            // com o aplicativo aberto, uma atualização de segurança publicada depois leva à tela de atualização (a cada 6 h)
+            let h = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
+                if atualizacao::verificar().obrigatoria {
+                    log::warn!("atualização de segurança publicada: abrindo a tela de atualização");
+                    janela::abrir_atualizacoes(&h);
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -96,6 +117,27 @@ fn instalar_sem_janela() -> i32 {
         Ok(ambiente::Fim::Reiniciar) => {
             println!("REINICIAR");
             3
+        }
+        Err(e) => {
+            println!("ERRO {e}");
+            1
+        }
+    }
+}
+
+fn atualizar_sem_janela() -> i32 {
+    let mut ev = |e: ambiente::Evento| match e {
+        ambiente::Evento::Etapa(id) => println!("ETAPA {id}"),
+        ambiente::Evento::Linha(l) => println!("      {l}"),
+        ambiente::Evento::Progresso { .. } => {}
+    };
+    match atualizacao::atualizar(&mut ev) {
+        Ok(f) => {
+            if let Some(p) = f.instalador {
+                println!("APLICATIVO {}", p.display());
+            }
+            println!("ATUALIZADO {}", f.versao);
+            0
         }
         Err(e) => {
             println!("ERRO {e}");

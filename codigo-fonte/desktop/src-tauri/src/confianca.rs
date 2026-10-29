@@ -187,6 +187,12 @@ pub fn validar_forma(m: &Value) -> Result<(), Recusa> {
     if let Some(c) = m.get("clienteMinimo") {
         partes(c.as_str().unwrap_or(""))?;
     }
+    // atualização de segurança (obrigatória): só "obrigatoria: true" com um motivo de 10 a 400 caracteres
+    if let Some(s) = m.get("seguranca") {
+        f(s["obrigatoria"].as_bool() == Some(true), "seguranca: só \"obrigatoria: true\" com o motivo")?;
+        let motivo = s["motivo"].as_str().unwrap_or("");
+        f(motivo.trim().chars().count() >= 10 && motivo.chars().count() <= 400, "seguranca: motivo de 10 a 400 caracteres")?;
+    }
     let comps = m["componentes"].as_object().filter(|o| !o.is_empty());
     f(comps.is_some(), "sem componentes")?;
     for (id, c) in comps.unwrap() {

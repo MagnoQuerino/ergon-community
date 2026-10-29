@@ -25,3 +25,12 @@ export function onOpenConversation(fn: (agentId: string | null, conversationId: 
   window.addEventListener(CONVERSA, h);
   return () => window.removeEventListener(CONVERSA, h);
 }
+
+const DECISOES = 'ergon:abrir-decisoes';
+/** Abre "Aguardando você" (o mesmo painel do sino), de qualquer lugar: a praça da cidade, a Central de Trabalho. */
+export function openDecisions(): void { window.dispatchEvent(new CustomEvent(DECISOES)); }
+export function onOpenDecisions(fn: () => void): () => void {
+  const h = () => fn();
+  window.addEventListener(DECISOES, h);
+  return () => window.removeEventListener(DECISOES, h);
+}

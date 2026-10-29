@@ -161,7 +161,7 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
           </form>
         ) : (
           <>
-            <p className="muted">Opcional neste computador; obrigatório na versão em nuvem.</p>
+            <p className="muted">Opcional: um código do aplicativo autenticador, além da senha, para entrar.</p>
             <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('totp-start', async () => { const r = await api.post<{ secret: string; qr: string }>('/api/security/totp/start'); setTotp({ secret: r.secret, qr: r.qr, code: '' }); })}>Configurar</button>
           </>
         )}

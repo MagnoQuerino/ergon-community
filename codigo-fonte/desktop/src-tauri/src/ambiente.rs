@@ -92,7 +92,7 @@ pub fn nome() -> String {
 fn arq_progresso() -> PathBuf {
     pasta().join("instalacao.json")
 }
-fn arq_aceito() -> PathBuf {
+pub(crate) fn arq_aceito() -> PathBuf {
     pasta().join("manifesto-aceito.json")
 }
 
@@ -148,7 +148,7 @@ pub fn texto_wsl(b: &[u8]) -> String {
     }
 }
 
-fn rodar_wsl(c: Command, prazo: Duration) -> Result<String, String> {
+pub(crate) fn rodar_wsl(c: Command, prazo: Duration) -> Result<String, String> {
     let o = rodar(c, prazo).map_err(|e| e.to_string())?;
     let t = format!("{}{}", texto_wsl(&o.stdout), texto_wsl(&o.stderr));
     if o.status.success() { Ok(t) } else { Err(t.trim().chars().take(400).collect()) }
@@ -186,7 +186,7 @@ pub fn explicar_erro_wsl(e: &str) -> String {
 }
 
 // ------------------------------------------------------------------------------------------------- manifesto
-fn chaveiro() -> Chaveiro {
+pub(crate) fn chaveiro() -> Chaveiro {
     if cfg!(feature = "origens-de-teste") {
         if let Some(t) = std::env::var_os("ERGON_CHAVEIRO").and_then(|p| fs::read_to_string(p).ok()) {
             return confianca::chaveiro_de(&t).expect("chaveiro de teste");
@@ -194,7 +194,7 @@ fn chaveiro() -> Chaveiro {
     }
     confianca::chaveiro_embutido()
 }
-fn manifesto_url() -> String {
+pub(crate) fn manifesto_url() -> String {
     if cfg!(feature = "origens-de-teste") {
         if let Ok(u) = std::env::var("ERGON_MANIFESTO_URL") {
             return u;
@@ -202,14 +202,14 @@ fn manifesto_url() -> String {
     }
     MANIFESTO_URL.into()
 }
-fn aceito() -> EstadoAceito {
+pub(crate) fn aceito() -> EstadoAceito {
     let v: Value = fs::read_to_string(arq_aceito()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     EstadoAceito { ultima_sequencia: v["ultimaSequencia"].as_u64(), versao_instalada: v["versaoInstalada"].as_str().map(String::from) }
 }
 
 /// Lê e confere o manifesto do canal. Na retomada da mesma instalação, o manifesto já aceito (guardado) vale de novo:
 /// a proteção contra repetição é para versões novas, não para continuar a mesma.
-fn manifesto_conferido() -> Result<Value, String> {
+pub(crate) fn manifesto_conferido() -> Result<Value, String> {
     let url = manifesto_url();
     let guardado = pasta().join("manifesto.json");
     let b = baixar::baixar_para_memoria(&url, LIMITE_MANIFESTO).map_err(|e| format!("Não deu para ler a versão publicada ({e})."))?;
@@ -225,7 +225,7 @@ fn manifesto_conferido() -> Result<Value, String> {
     Ok(m)
 }
 
-fn componente<'a>(m: &'a Value, id: &str) -> Result<&'a Value, String> {
+pub(crate) fn componente<'a>(m: &'a Value, id: &str) -> Result<&'a Value, String> {
     m["componentes"].get(id).ok_or_else(|| format!("A versão {} não traz o componente \"{id}\" para este aplicativo.", m["versao"].as_str().unwrap_or("?")))
 }
 
@@ -305,19 +305,7 @@ pub fn instalar(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
 
     ev(Evento::Etapa("configurar"));
     entregar_pacote(&caminhos["pacote-local"])?;
-    for id in ["core", "motor"] {
-        let c = componente(&m, id)?;
-        let (img, ver, dig) = (c["imagem"].as_str().unwrap(), c["versao"].as_str().unwrap_or(&versao), c["digest"].as_str().unwrap());
-        // imagem presa ao digest do manifesto: o Docker confere o conteúdo baixado contra ele
-        // (também a imagem dos motores de cada pessoa, criados pelo gerente de motores)
-        let (e1, e2) = (format!("s#image: {img}:{ver}$#image: {img}@{dig}#"), format!("s#ERGON_MOTOR_IMAGE: {img}:{ver}$#ERGON_MOTOR_IMAGE: {img}@{dig}#"));
-        rodar_wsl(dentro(&["sed", "-i", "-e", &e1, "-e", &e2, "/opt/ergon-pacote/docker-compose.yml"]), Duration::from_secs(30))?;
-        let usa = rodar_wsl(dentro(&["grep", "-c", &format!("{img}@{dig}"), "/opt/ergon-pacote/docker-compose.yml"]), Duration::from_secs(30)).unwrap_or_default();
-        let sobrou = rodar_wsl(dentro(&["grep", "-cF", &format!("{img}:{ver}"), "/opt/ergon-pacote/docker-compose.yml"]), Duration::from_secs(30)).unwrap_or_default();
-        if usa.trim().parse::<u32>().unwrap_or(0) == 0 || sobrou.trim().parse::<u32>().unwrap_or(0) > 0 {
-            return Err(format!("O pacote da versão não usa a imagem {img}:{ver} do manifesto do jeito esperado."));
-        }
-    }
+    fixar_imagens(&m, &versao)?;
     ev(Evento::Linha("Imagens presas aos digests do manifesto.".into()));
     concluir(&mut p, "configurar")?;
 
@@ -347,8 +335,25 @@ pub fn instalar(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
     Ok(Fim::Pronto { versao })
 }
 
+/// Prende as imagens do pacote entregue aos digests do manifesto: o Docker confere o conteúdo baixado contra eles (também a
+/// imagem dos motores de cada pessoa, criados pelo gerente de motores).
+pub(crate) fn fixar_imagens(m: &Value, versao: &str) -> Result<(), String> {
+    for id in ["core", "motor"] {
+        let c = componente(m, id)?;
+        let (img, ver, dig) = (c["imagem"].as_str().unwrap(), c["versao"].as_str().unwrap_or(versao), c["digest"].as_str().unwrap());
+        let (e1, e2) = (format!("s#image: {img}:{ver}$#image: {img}@{dig}#"), format!("s#ERGON_MOTOR_IMAGE: {img}:{ver}$#ERGON_MOTOR_IMAGE: {img}@{dig}#"));
+        rodar_wsl(dentro(&["sed", "-i", "-e", &e1, "-e", &e2, "/opt/ergon-pacote/docker-compose.yml"]), Duration::from_secs(30))?;
+        let usa = rodar_wsl(dentro(&["grep", "-c", &format!("{img}@{dig}"), "/opt/ergon-pacote/docker-compose.yml"]), Duration::from_secs(30)).unwrap_or_default();
+        let sobrou = rodar_wsl(dentro(&["grep", "-cF", &format!("{img}:{ver}"), "/opt/ergon-pacote/docker-compose.yml"]), Duration::from_secs(30)).unwrap_or_default();
+        if usa.trim().parse::<u32>().unwrap_or(0) == 0 || sobrou.trim().parse::<u32>().unwrap_or(0) > 0 {
+            return Err(format!("O pacote da versão não usa a imagem {img}:{ver} do manifesto do jeito esperado."));
+        }
+    }
+    Ok(())
+}
+
 /// O pacote da versão (lançador + compose) entra pela entrada padrão: o ambiente não enxerga os discos do Windows.
-fn entregar_pacote(zip: &Path) -> Result<(), String> {
+pub(crate) fn entregar_pacote(zip: &Path) -> Result<(), String> {
     let mut c = dentro(&["sh", "-c", "rm -rf /opt/ergon-pacote /opt/ergon-pacote.zip && mkdir -p /opt/ergon-pacote && cat > /opt/ergon-pacote.zip && unzip -qo /opt/ergon-pacote.zip -d /opt/ergon-pacote && rm -f /opt/ergon-pacote.zip && chmod +x /opt/ergon-pacote/ergon.sh"]);
     c.stdin(fs::File::open(zip).map_err(|e| e.to_string())?).stdout(Stdio::piped()).stderr(Stdio::piped());
     let o = c.output().map_err(|e| e.to_string())?;
@@ -394,7 +399,7 @@ pub fn parar(ev: &mut dyn FnMut(Evento)) -> Result<(), String> {
     rodar_wsl(t, Duration::from_secs(60)).map(|_| ())
 }
 
-fn transmitir(c: &mut Command, prazo: Duration, ev: &mut dyn FnMut(Evento)) -> Result<(), String> {
+pub(crate) fn transmitir(c: &mut Command, prazo: Duration, ev: &mut dyn FnMut(Evento)) -> Result<(), String> {
     c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut f = c.spawn().map_err(|e| e.to_string())?;
     let err = f.stderr.take().unwrap();

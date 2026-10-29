@@ -12,6 +12,8 @@
     "allow-abrir-no-navegador",
     "allow-abrir-ajuda",
     "allow-abrir-registros",
-    "allow-instalar-ergon"
+    "allow-instalar-ergon",
+    "allow-verificar-atualizacao",
+    "allow-atualizar-ergon"
   ]
 }

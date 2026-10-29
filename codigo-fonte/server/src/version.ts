@@ -23,15 +23,16 @@ export function newer(a: string, b: string): boolean {
 
 /**
  * Aviso de versão nova: lê o manifesto publicado (ERGON_UPDATE_URL, ex.: latest.json da página de versões) no
- * máximo a cada 6 h. Só avisa — atualizar é decisão da pessoa (no computador: "ergon atualizar").
+ * máximo a cada 6 h (ou na hora, quando a pessoa pede "Verificar atualizações", no máximo uma vez por minuto). Só
+ * avisa — atualizar é decisão da pessoa.
  */
 export class UpdateCheck {
   private cache: { at: number; latest: Release | null } | null = null;
   private url: string | null;
   constructor(url: string | null) { this.url = url; }
-  async latest(): Promise<Release | null> {
+  async latest(force = false): Promise<Release | null> {
     if (!this.url) return null;
-    if (this.cache && Date.now() - this.cache.at < 6 * 3600_000) return this.cache.latest;
+    if (this.cache && Date.now() - this.cache.at < (force ? 60_000 : 6 * 3600_000)) return this.cache.latest;
     let latest: Release | null = null;
     try {
       const r = await fetch(this.url, { signal: AbortSignal.timeout(5000), headers: { accept: 'application/json' } });

@@ -216,3 +216,26 @@ mod testes {
         assert!(pagina_de_ajuda("").is_none());
     }
 }
+
+/// Confere se há versão nova no canal (só lê; nada muda). Roda fora da linha principal: a rede pode demorar.
+#[tauri::command(async)]
+pub fn verificar_atualizacao() -> crate::atualizacao::Situacao {
+    crate::atualizacao::verificar()
+}
+
+/// Atualiza o Ergon (ambiente e, se preciso, o aplicativo). As etapas chegam à tela como as da instalação; no fim, com
+/// um aplicativo novo, o instalador roda em modo de atualização e este aplicativo fecha para ele trocar os arquivos.
+#[tauri::command]
+pub fn atualizar_ergon(app: AppHandle, estado: State<'_, Estado>) -> Result<(), String> {
+    em_segundo_plano(app, &estado, |app| {
+        let feito = crate::atualizacao::atualizar(&mut |e| emitir(app, e))?;
+        log::info!("atualizado para {}", feito.versao);
+        if let Some(inst) = feito.instalador {
+            let _ = app.emit_to(janela::PRINCIPAL, "atualizacao:aplicativo", feito.versao.clone());
+            crate::atualizacao::aplicar_instalador(&inst)?;
+            std::thread::sleep(Duration::from_millis(800));
+            app.exit(0);
+        }
+        Ok(())
+    })
+}

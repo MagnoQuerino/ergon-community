@@ -10,6 +10,8 @@ fn main() {
             "abrir_ajuda",
             "abrir_registros",
             "instalar_ergon",
+            "verificar_atualizacao",
+            "atualizar_ergon",
         ]),
     ))
     .expect("falha ao preparar o Tauri");

@@ -61,7 +61,7 @@ export default function StoreDialog({ lot, structures, themeId, onBuild, onClose
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
         </header>
-        <p className="store__note"><span className="badge badge--ok">versão local</span> grátis e sem limite de quantidade — o limite é o que o seu computador aguenta. <span className="muted">Na nuvem (planejado), as estruturas serão compradas na loja e cada uma traz vagas para mais agentes.</span></p>
+        <p className="store__note"><span className="badge badge--ok">versão local</span> grátis e sem limite de quantidade — o limite é o que o seu computador aguenta.</p>
         <div className="store__grid">
           {items.map((t) => {
             const at = fitAt(placed, t.id, lot.i, lot.j);

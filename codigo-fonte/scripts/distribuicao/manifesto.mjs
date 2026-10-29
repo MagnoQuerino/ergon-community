@@ -40,6 +40,17 @@ export function compararVersoes(a, b) {
   return 0;
 }
 
+/**
+ * Atualização de segurança nas novidades da versão: uma linha "Segurança (obrigatória): motivo" (com ou sem marcador e
+ * negrito, como no CHANGELOG). Sem a linha: atualização comum (nada é obrigatório).
+ */
+export function seguranca(texto) {
+  const l = String(texto).split(/\r?\n/).map((x) => x.replace(/^[\s>*-]+/, '').replace(/\*\*/g, '').trim()).find((x) => /^Segurança \(obrigatória\):/i.test(x));
+  if (!l) return null;
+  const motivo = l.replace(/^Segurança \(obrigatória\):/i, '').trim().slice(0, 400);
+  return motivo.length >= 10 ? { obrigatoria: true, motivo } : null;
+}
+
 // --------------------------------------------------------------------------------------------------- origens
 export function origemPermitida(url) {
   let u; try { u = new URL(url); } catch { return false; }
@@ -61,6 +72,10 @@ export function validarForma(m) {
   f(!Number.isNaN(Date.parse(m.emitidoEm)) && !Number.isNaN(Date.parse(m.validoAte)), 'datas inválidas');
   f(Date.parse(m.validoAte) > Date.parse(m.emitidoEm), 'validade antes da emissão');
   if (m.clienteMinimo !== undefined) compararVersoes(m.clienteMinimo, m.clienteMinimo);
+  if (m.seguranca !== undefined) {
+    f(m.seguranca && typeof m.seguranca === 'object' && m.seguranca.obrigatoria === true, 'seguranca: só "obrigatoria: true" com o motivo');
+    f(typeof m.seguranca.motivo === 'string' && m.seguranca.motivo.trim().length >= 10 && m.seguranca.motivo.length <= 400, 'seguranca: motivo de 10 a 400 caracteres');
+  }
   f(m.componentes && typeof m.componentes === 'object' && Object.keys(m.componentes).length > 0, 'sem componentes');
   for (const [id, c] of Object.entries(m.componentes)) {
     f(/^[a-z0-9-]{2,40}$/.test(id), `componente com nome inválido: ${id}`);

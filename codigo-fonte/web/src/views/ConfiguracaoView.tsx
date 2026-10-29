@@ -2,6 +2,7 @@ import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
+import { inDesktopApp } from '../lib/desktop.ts';
 import type { AgentTool, AiStatus, AppState, ProcessLimit, Usage } from '../lib/types.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -80,16 +81,35 @@ function SegurancaGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Versão instalada e aviso de atualização (a mesma versão vale para o Ergon local e o da nuvem). */
+/**
+ * Versão instalada e "Verificar atualizações". No Ergon Desktop, o botão leva à tela de atualizações do aplicativo
+ * (que confere a versão publicada assinada, atualiza com backup e volta sozinha se algo der errado); fora dele, mostra
+ * a versão publicada e onde baixar. Nada se atualiza sem a pessoa pedir.
+ */
 function VersionCard() {
   const v = useResource<VersionInfo>('/api/version', []);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   if (!v.data) return null;
   const d = v.data;
+  const verificar = async () => {
+    if (inDesktopApp()) { location.href = '/__desktop/atualizacoes'; return; }
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.get<VersionInfo>('/api/version?verificar=1');
+      setMsg(r.updateAvailable && r.latest ? null : r.latest ? 'Você está na versão mais recente.' : 'Não deu para consultar a versão publicada agora.');
+      v.reload();
+    } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
+  };
   return (
-    <p className="hint version">
-      Ergon {d.version}{d.build !== 'dev' ? ` (${d.build})` : ''} · {d.mode === 'cloud' ? 'nuvem' : 'neste computador'}
-      {d.updateAvailable && d.latest ? <> · <b>versão {d.latest.version} disponível</b>{d.mode === 'local' ? <> — para atualizar, rode no computador: <code>ergon atualizar</code> (faz backup antes)</> : null}{d.latest.url ? <> · <a href={d.latest.url} target="_blank" rel="noreferrer noopener">novidades</a></> : null}</> : null}
-    </p>
+    <div className="hint version version--row">
+      <span>
+        Ergon {d.version}{d.build !== 'dev' ? ` (${d.build})` : ''} · {d.mode === 'cloud' ? 'nuvem' : 'neste computador'}
+        {d.updateAvailable && d.latest && !inDesktopApp() ? <> · <b>versão {d.latest.version} disponível</b>{d.latest.url ? <> — <a href={d.latest.url} target="_blank" rel="noreferrer noopener">baixar e ver as novidades</a></> : null}</> : null}
+        {msg ? <> · {msg}</> : null}
+      </span>
+      {d.mode === 'local' && <button className="btn btn--sm" disabled={busy} onClick={() => void verificar()}>{busy ? 'Verificando…' : 'Verificar atualizações'}</button>}
+    </div>
   );
 }
 

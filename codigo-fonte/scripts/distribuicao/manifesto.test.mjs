@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { assinar, verificarManifesto, conferirArquivo, compararVersoes, origemPermitida, sha256, Recusa } from './manifesto.mjs';
+import { assinar, verificarManifesto, conferirArquivo, compararVersoes, origemPermitida, seguranca, sha256, Recusa } from './manifesto.mjs';
 
 const novaChave = (keyId) => {
   const k = crypto.generateKeyPairSync('ed25519');
@@ -128,4 +128,17 @@ test('ordem das versões, inclusive pré-versões', () => {
   const ordem = ['1.0.0', '1.0.1-rc.1', '1.0.1-rc.2', '1.0.1-rc.10', '1.0.1', '1.0.10', '1.1.0', '2.0.0'];
   for (let i = 1; i < ordem.length; i++) assert.equal(compararVersoes(ordem[i - 1], ordem[i]), -1, `${ordem[i - 1]} < ${ordem[i]}`);
   assert.equal(compararVersoes('1.0.1', '1.0.1'), 0);
+});
+
+test('atualização de segurança: lida das novidades, assinada no manifesto; forma errada recusada', () => {
+  assert.deepEqual(seguranca('## 1.0.3\n- **Segurança (obrigatória):** fecha uma falha no acesso ao cofre do motor.\n- Outras melhorias.'),
+    { obrigatoria: true, motivo: 'fecha uma falha no acesso ao cofre do motor.' });
+  assert.equal(seguranca('## 1.0.3\n- Melhorias na Central.'), null, 'sem a linha: atualização comum');
+  assert.equal(seguranca('- Segurança (obrigatória): curto'), null, 'motivo curto demais não vale');
+  const { bytes, sig } = empacotar(base({ seguranca: { obrigatoria: true, motivo: 'fecha uma falha no acesso ao cofre do motor.' } }));
+  assert.equal(verificarManifesto(bytes, sig, opts()).seguranca.obrigatoria, true);
+  for (const s of [{ obrigatoria: false, motivo: 'motivo longo o bastante' }, { obrigatoria: true }, { obrigatoria: true, motivo: 'x'.repeat(401) }, 'sim']) {
+    const e = empacotar(base({ seguranca: s }));
+    recusa(() => verificarManifesto(e.bytes, e.sig, opts()), 'FORMATO');
+  }
 });
