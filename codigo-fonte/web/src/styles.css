@@ -1180,10 +1180,9 @@ body:has(.cdock) .tip { right: 100px; }
 .topbar__ask { height: 34px; border-radius: 9px; }
 @media (max-width: 1180px) { .tb-search__txt, .tb-search__kbd { display: none; } .tb-search { width: 34px; padding: 0; justify-content: center; border-color: transparent; background: none; color: #dfe7ee; cursor: pointer; } .topbar__grow { justify-content: flex-end; padding: 0; } }
 
-/* espera do motor de IA (frases que se escrevem) e chave própria */
-.ai-wait { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin: 0 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
-.ai-wait .dot { margin-top: 7px; flex: none; }
-.ai-wait p { margin: 4px 0 0; }
+/* IA da conta acordando (carregamento com uma frase) e chave própria */
+.ai-acordando { display: grid; justify-items: center; gap: 10px; padding: 28px 12px; text-align: center; }
+.ai-acordando p { margin: 0; max-width: 46ch; }
 .typewriter { font-style: italic; color: var(--ink); }
 .typewriter__cursor { display: inline-block; width: 1px; height: 1em; margin-left: 2px; vertical-align: -2px; background: currentColor; animation: pulse 1s steps(1) infinite; }
 .ai-byok { margin-top: 12px; }

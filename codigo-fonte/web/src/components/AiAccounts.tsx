@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { AiStatus } from '../lib/types.ts';
-import { Loading } from '../brand/Brand.tsx';
+import { ErgonLogo, Loading } from '../brand/Brand.tsx';
 import { BrandLogo } from './BrandLogo.tsx';
 import { Icon } from './Icon.tsx';
 import { Typewriter } from './Typewriter.tsx';
@@ -22,16 +22,34 @@ const NOUS_WHY = [
   'Cada agente com o modelo certo: o mais forte para quem pensa, o mais econômico para quem organiza',
   'Melhor resultado pelo menor custo: você não paga modelo de ponta para tarefa simples',
 ];
-/** Enquanto o motor de IA da pessoa liga (conta nova: até alguns minutos): a espera dentro do universo do Ergon. */
-const LIGANDO = [
+/** Enquanto a IA da conta acorda, os cartões não aparecem (nada de botão esperando): um carregamento com uma frase
+ *  só, sorteada destas; quando ela responde, os cartões chegam prontos para conectar. */
+export const ACORDANDO_IA = [
   'Acendendo a chama do templo da sabedoria…',
   'Aristóteles está reunindo a equipe na ágora…',
   'Tentando tirar Sócrates de um diálogo interminável na feira de Atenas…',
   'Hipátia afina os instrumentos do observatório…',
   'Abrindo as portas da biblioteca de Alexandria…',
+  'Arquimedes confere as alavancas uma última vez…',
+  'Heródoto termina de anotar a viagem…',
+  'Fídias tira o pó das estátuas da ágora…',
 ];
-/** depois disso sem resposta, a tela avisa que está demorando (e continua conferindo) */
-const PACIENCIA_MS = 6 * 60_000;
+/** depois disso sem resposta, o carregamento diz que está demorando (e continua conferindo) */
+const PACIENCIA_MS = 5 * 60_000;
+export const sortear = (lista: string[]) => lista[Math.floor(Math.random() * lista.length)];
+
+/** A IA da conta ainda acordando: logo e uma frase (sem botões); avisa só se passar muito do normal. */
+export function AcordandoIa({ desde, erro, onRetry }: { desde: number; erro?: string | null; onRetry: () => void }) {
+  const [frase] = useState(() => sortear(ACORDANDO_IA));
+  const demorando = Date.now() - desde > PACIENCIA_MS;
+  return (
+    <div className="ai-acordando" role="status">
+      <ErgonLogo height={44} animated />
+      <Typewriter phrases={[frase]} />
+      {demorando && <p className="muted small">Está levando mais que o normal{erro ? ` (${erro})` : ''}. Continuamos tentando. <button className="link" onClick={onRetry}>Tentar de novo</button></p>}
+    </div>
+  );
+}
 
 /**
  * Contas de IA (a conta que paga os modelos dos agentes): login por código, no navegador da pessoa. A Nous aparece
@@ -83,10 +101,10 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
   };
 
   if (!s) return <Loading error={status.error} />;
+  if (!s.available && s.motor) return <AcordandoIa desde={desde.current} erro={s.motor.error} onRetry={() => { desde.current = Date.now(); status.reload(); }} />;
   const nous = s.accounts.find((a) => a.id === RECOMMENDED);
   const others = s.accounts.filter((a) => a.id !== RECOMMENDED);
   const otherOn = others.some((a) => a.connected) || (s.byok ?? []).some((b) => b.connected);
-  const demorando = Date.now() - desde.current > PACIENCIA_MS;
   const codigo = (provider: string) => login?.provider === provider && (
     <div className="device" role="status">
       <p>1. Abra <a href={login.verificationUrl ?? '#'} target="_blank" rel="noreferrer noopener">a página de login</a> e entre na sua conta.</p>
@@ -99,19 +117,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
     <>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       {s.executor === 'simulated' && <p className="hint warn">Esta instalação está em modo de simulação: as respostas dos agentes não usam IA de verdade, mesmo com uma conta conectada.</p>}
-      {!s.available && (s.motor ? (
-        <div className="ai-wait" role="status">
-          <span className="dot dot--amber dot--pulse" />
-          <div>
-            <Typewriter phrases={LIGANDO} />
-            <p className="muted small">{demorando
-              ? <>Está levando mais que o normal. Continuamos tentando{s.motor.error ? ` (${s.motor.error})` : ''}. <button className="link" onClick={() => { desde.current = Date.now(); status.reload(); }}>Tentar de novo</button></>
-              : 'Na primeira vez leva alguns instantes. Os botões se liberam sozinhos.'}</p>
-          </div>
-        </div>
-      ) : (
-        <p className="hint">A conexão de contas de IA não está disponível nesta instalação.</p>
-      ))}
+      {!s.available && <p className="hint">A conexão de contas de IA não está disponível nesta instalação.</p>}
       {nous && (
         <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''}`} aria-label="Nous Portal, a melhor escolha">
           <span className="ai-best__ribbon"><Icon name="check" size={12} /> Melhor escolha</span>

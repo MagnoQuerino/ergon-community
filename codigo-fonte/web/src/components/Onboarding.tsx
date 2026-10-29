@@ -3,7 +3,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
 import type { AiStatus, OnboardingOptions, OnboardingResult } from '../lib/types.ts';
 import { ErgonLogo, Loading, PhraseLoader } from '../brand/Brand.tsx';
-import { AiAccounts } from './AiAccounts.tsx';
+import { AcordandoIa, AiAccounts, sortear } from './AiAccounts.tsx';
 import { Icon } from './Icon.tsx';
 
 /**
@@ -62,6 +62,17 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
   const loadAi = () => { api.get<AiStatus>('/api/ai/status').then(setAi).catch(() => setAi(null)); };
   useEffect(() => { api.get<OnboardingOptions>('/api/onboarding').then(setOpts).catch((e) => setErr(errMsg(e))); loadAi(); }, []);
   const aiConnected = !!ai?.accounts.some((a) => a.connected);
+  // a etapa da IA só aparece com os botões prontos: enquanto a IA da conta acorda, fica o carregamento (sem botões)
+  const aiAcordando = step === 'ia' && (!ai || (!ai.available && !!ai.motor));
+  const acordandoDesde = useRef(Date.now());
+  useEffect(() => { if (step === 'ia') { acordandoDesde.current = Date.now(); loadAi(); } }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!aiAcordando) return;
+    const t = window.setTimeout(loadAi, 3000);
+    return () => clearTimeout(t);
+  }, [aiAcordando, ai]); // eslint-disable-line react-hooks/exhaustive-deps
+  // uma frase por etapa, sorteada (nada de frases em roda)
+  const [fraseEquipe] = useState(() => sortear(BUILDING));
   // Esc só ao refazer (no primeiro acesso, as perguntas valem a pena) e nunca no meio da montagem da equipe
   const root = useRef<HTMLDivElement>(null);
   useSurface(root, { onClose: () => onCancel?.(), modal: true, escape: !!redo && step !== 'building', autoFocus: false });
@@ -149,6 +160,8 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
                 : <button className="btn btn--primary" onClick={() => { setErr(null); setStep('ia'); }}>Continuar</button>}
             </div>
           </section>
+        ) : aiAcordando ? (
+          <section className="onb__building"><AcordandoIa desde={acordandoDesde.current} erro={ai?.motor?.error} onRetry={() => { acordandoDesde.current = Date.now(); loadAi(); }} /></section>
         ) : step === 'ia' ? (
           <section>
             <h2 id="onb-title" className="onb__title">Conecte a inteligência da equipe</h2>
@@ -164,7 +177,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
             </div>
           </section>
         ) : step === 'building' ? (
-          <section className="onb__building"><PhraseLoader phrases={BUILDING} every={1600} /></section>
+          <section className="onb__building"><PhraseLoader phrases={[fraseEquipe]} every={60_000} /></section>
         ) : result && (
           <section>
             <h2 id="onb-title" className="onb__title">Sua equipe está pronta</h2>

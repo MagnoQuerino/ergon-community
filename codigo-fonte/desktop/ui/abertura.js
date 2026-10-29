@@ -15,16 +15,17 @@ const ROTULOS = {
 const PRINCIPAIS = new Set(['abrir', 'iniciar', 'instalar']);
 // etapa técnica → frases da cidade (a ordem das etapas dá o avanço da barra)
 const ORDEM = ['diagnostico', 'wsl', 'baixar', 'importar', 'configurar', 'ligar', 'conferir'];
+// uma frase por etapa (sorteada destas): quem instala vê uma frase nova a cada passo real, sem roda de frases
 const FRASES = {
-  diagnostico: ['Consultando o oráculo de Delfos sobre este computador…', 'Medindo o terreno onde a cidade vai nascer…'],
-  wsl: ['Abrindo os portões da cidade…', 'Pedindo licença aos deuses do Olimpo (se o Windows perguntar, pode aceitar)…'],
-  baixar: ['Reunindo os pergaminhos que sobraram de Alexandria…', 'Trazendo mármore das pedreiras do Pentélico…', 'Enchendo as ânforas para a viagem…', 'Conferindo cada pergaminho, um por um, para nada chegar rasgado…'],
-  importar: ['Levantando as colunas da Stoa…', 'Traçando as ruas da nova cidade…'],
-  configurar: ['Gravando as leis da cidade em tábuas de bronze…', 'Guardando as chaves do tesouro no templo…'],
-  ligar: ['Acendendo o farol de Alexandria…', 'Tentando tirar Sócrates de um diálogo interminável na feira de Atenas…', 'Aristóteles organiza as anotações do Liceu…', 'Os filósofos estão chegando à ágora…'],
-  conferir: ['Hipátia confere os cálculos uma última vez…', 'Abrindo as portas da ágora…'],
+  diagnostico: ['Consultando o oráculo de Delfos sobre este computador…', 'Medindo o terreno onde a cidade vai nascer…', 'Os agrimensores fincam as primeiras estacas…', 'Pítia interpreta os sinais deste computador…'],
+  wsl: ['Abrindo os portões da cidade…', 'Pedindo licença aos deuses do Olimpo (se o Windows perguntar, pode aceitar)…', 'Os guardiões preparam a muralha…'],
+  baixar: ['Reunindo os pergaminhos que sobraram de Alexandria…', 'Trazendo mármore das pedreiras do Pentélico…', 'Enchendo as ânforas para a viagem…', 'Os navios chegam ao porto de Pireu, carregados…', 'Conferindo cada pergaminho, um por um, para nada chegar rasgado…', 'Uma caravana atravessa o Egeu com tudo de que a cidade precisa…'],
+  importar: ['Levantando as colunas da Stoa…', 'Traçando as ruas da nova cidade…', 'Assentando a primeira pedra da ágora…', 'Erguendo os muros da biblioteca…'],
+  configurar: ['Gravando as leis da cidade em tábuas de bronze…', 'Guardando as chaves do tesouro no templo…', 'Sólon revisa as leis antes de publicá-las…', 'Selando os cofres com cera e anel…'],
+  ligar: ['Acendendo o farol de Alexandria…', 'Tentando tirar Sócrates de um diálogo interminável na feira de Atenas…', 'Aristóteles organiza as anotações do Liceu…', 'Os filósofos estão chegando à ágora…', 'Acendendo as lamparinas da Stoa…'],
+  conferir: ['Hipátia confere os cálculos uma última vez…', 'Abrindo as portas da ágora…', 'Arquimedes testa as alavancas da cidade…', 'Os arautos anunciam: a cidade está de pé…'],
 };
-const ACORDANDO = ['Acordando a cidade…', 'Os filósofos estão chegando à ágora…', 'Acendendo as lamparinas da Stoa…', 'Sócrates já começou a fazer perguntas…'];
+const ACORDANDO = ['Acordando a cidade…', 'Os filósofos estão chegando à ágora…', 'Acendendo as lamparinas da Stoa…', 'Sócrates já começou a fazer perguntas…', 'Abrindo as janelas da biblioteca…'];
 
 let instalando = false;
 let ultimo = null;
@@ -39,20 +40,18 @@ function fase(texto, atencao = false) {
 function carregando(sim) { $('carregando').hidden = !sim; $('logo').hidden = sim; }
 function anotar(t) { if (t) { registro.push(t); if (registro.length > 400) registro.shift(); } }
 
-// frases que se escrevem letra a letra e se revezam; com "menos movimento" no sistema, aparecem inteiras
+// uma frase sorteada da lista, escrita letra a letra uma vez e parada até a próxima etapa; com "menos movimento" no
+// sistema, aparece inteira
 const calmo = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let roda = null;
 function frases(lista) {
   clearTimeout(roda);
   const el = $('frase');
   if (!lista || !lista.length) { el.textContent = ''; return; }
-  let i = 0; let n = 0;
-  const passo = () => {
-    const f = lista[i % lista.length];
-    if (calmo) { el.textContent = f; i++; roda = setTimeout(passo, 4200); return; }
-    if (n <= f.length) { el.textContent = f.slice(0, n); n++; roda = setTimeout(passo, 28); return; }
-    i++; n = 0; roda = setTimeout(passo, 2600);
-  };
+  const f = lista[Math.floor(Math.random() * lista.length)];
+  if (calmo) { el.textContent = f; return; }
+  let n = 0;
+  const passo = () => { el.textContent = f.slice(0, n); if (n++ < f.length) roda = setTimeout(passo, 28); };
   passo();
 }
 // barra: etapas concluídas + a fração do download na etapa "baixar" (sem percentual escrito)

@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.6 (pré-versão de teste)
+
+- **Conta de IA:** a tela de conectar só aparece com os botões prontos. Se a IA da sua conta ainda estiver
+  acordando, um carregamento curto vem antes.
+- **Instalação:** uma frase nova a cada etapa, sem repetir em roda.
+- **Criar conta:** o cursor começa no nome de exibição.
+
 ## 1.1.0-rc.5 (pré-versão de teste)
 
 - **Conta de IA na conta nova:** a tela espera a IA da sua conta ficar pronta e libera os botões sozinha, sem

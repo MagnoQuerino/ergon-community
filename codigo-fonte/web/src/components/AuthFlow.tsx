@@ -167,8 +167,8 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
         : mode === 'unseal' ? 'O Ergon foi reiniciado e os dados estão cifrados. Digite a senha para abrir: os agentes voltam ao trabalho logo em seguida.'
           : st.signup ? 'Entre com a sua conta deste computador (a mesma do navegador).' : 'Entre com a sua conta.'}>
       <form onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-        {mode === 'setup' && <label className="field">Nome de exibição<input value={f.displayName} onChange={(e) => setF({ ...f, displayName: e.target.value })} maxLength={60} /></label>}
-        <label className="field">Usuário<input required autoFocus autoComplete="username" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.toLowerCase() })} maxLength={32} /></label>
+        {mode === 'setup' && <label className="field">Nome de exibição<input autoFocus value={f.displayName} onChange={(e) => setF({ ...f, displayName: e.target.value })} maxLength={60} /></label>}
+        <label className="field">Usuário<input required autoFocus={mode !== 'setup'} autoComplete="username" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.toLowerCase() })} maxLength={32} /></label>
         {mode === 'setup'
           ? <NewPassword value={f.password} confirm={f.confirm} onChange={(password, confirm) => setF({ ...f, password, confirm })} />
           : <label className="field">Senha<input required type="password" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>}
