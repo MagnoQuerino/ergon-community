@@ -1,5 +1,10 @@
 # Instalar o Ergon neste computador
 
+> **Windows 10 e 11:** use o **`Ergon Desktop para Windows.exe`** da raiz do repositório (ou o `*-setup.exe` da
+> [página de versões](https://github.com/MagnoQuerino/ergon-community/releases)). Ele instala tudo num ambiente próprio
+> do Ergon, **sem Docker Desktop**. Este guia descreve o caminho com contêineres, usado no Linux e no macOS (e, no
+> Windows, só por quem já usa Docker e prefere o lançador `ergon`).
+
 O Ergon roda em dois contêineres Docker (o Ergon e o motor de IA) e só aparece para este computador
 (`http://localhost:8787`). Tudo o que ele guarda fica cifrado com a sua senha.
 
@@ -20,7 +25,7 @@ O Ergon roda em dois contêineres Docker (o Ergon e o motor de IA) e só aparece
 
 | | Zip do repositório | `ergon-local-<versão>.zip` |
 |---|---|---|
-| Windows | dois cliques em `Instalar Ergon no Windows.cmd` | `.\ergon.cmd instalar` |
+| Windows (caminho avançado) | `codigo-fonte\instalador\ergon.cmd instalar` | `.\ergon.cmd instalar` |
 | macOS e Linux | `bash "Instalar Ergon no Linux e macOS.sh"` | `./ergon.sh instalar` |
 
 O lançador instala o Ergon numa pasta sua (Windows: `%LOCALAPPDATA%\Programs\Ergon`; macOS/Linux:

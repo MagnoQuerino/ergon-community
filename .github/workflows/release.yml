@@ -219,7 +219,6 @@ jobs:
   # encontra. Um commit no main depois que a versão está publicada (sem disparar outros workflows).
   instaladores-na-raiz:
     needs: desktop
-    if: ${{ !contains(github.ref_name, '-') }}   # pré-versão não vai para a raiz
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -234,8 +233,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/v"
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/v" --pattern '*-setup.exe' --pattern '*.deb'
+          # Windows: o instalador do desktop é o caminho principal (sem Docker) e segue a versão mais recente, de teste
+          # inclusive; o .deb da raiz só muda nas estáveis
           cp "$RUNNER_TEMP"/v/*-setup.exe "Ergon Desktop para Windows.exe"
-          cp "$RUNNER_TEMP"/v/*.deb "Ergon Desktop para Linux.deb"
+          case "$GITHUB_REF_NAME" in *-*) ;; *) cp "$RUNNER_TEMP"/v/*.deb "Ergon Desktop para Linux.deb" ;; esac
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "Ergon Desktop para Windows.exe" "Ergon Desktop para Linux.deb"

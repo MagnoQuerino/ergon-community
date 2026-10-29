@@ -38,16 +38,16 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - name: O instalador de dois cliques da raiz põe o "ergon" no PATH e numa pasta fixa; remover tira os dois
+      - name: O lançador (caminho avançado no Windows) põe o "ergon" no PATH e numa pasta fixa; remover tira os dois
         shell: pwsh
         run: |
-          # o zip do repositório como uma pessoa baixaria: o instalador da raiz e a pasta que ele usa
+          # o zip do repositório como uma pessoa baixaria: a pasta do lançador
           $z = Join-Path $env:RUNNER_TEMP 'ergon-community-main'; New-Item -ItemType Directory -Force "$z\codigo-fonte" | Out-Null
-          Copy-Item '..\Instalar Ergon no Windows.cmd' $z; Copy-Item -Recurse instalador "$z\codigo-fonte\instalador"
+          Copy-Item -Recurse instalador "$z\codigo-fonte\instalador"
           $prog = Join-Path $env:LOCALAPPDATA 'Programs\Ergon'
           # sem Docker Linux no runner o "instalar" para no Docker, depois de pôr o programa no lugar
           $env:ERGON_SEM_PAUSA = '1'
-          & cmd /c "`"$z\Instalar Ergon no Windows.cmd`""
+          & cmd /c "`"$z\codigo-fonte\instalador\ergon.cmd`" instalar"
           if (-not (Test-Path "$prog\ergon.cmd")) { throw 'o programa não foi para a pasta fixa' }
           $p = [Environment]::GetEnvironmentVariable('Path', 'User')
           if ($p -notlike "*$prog*") { throw "a pasta do programa não entrou no PATH: $p" }

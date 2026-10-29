@@ -1,5 +1,11 @@
 # Novidades
 
+## 1.1.0-rc.12 (pré-versão de teste)
+
+- **Windows sem Docker:** o `Ergon Desktop para Windows.exe` é o instalador principal e monta tudo num ambiente
+  próprio do Ergon. Não precisa instalar o Docker Desktop; uma instalação antiga por ele fica como está, sem uso.
+- O instalador do Windows na raiz do repositório acompanha a versão mais recente.
+
 ## 1.1.0-rc.11 (pré-versão de teste)
 
 - **Atualizações no app:** Configurações › "Verificar atualizações" mostra se há versão nova e atualiza com um clique,

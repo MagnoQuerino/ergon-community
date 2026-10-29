@@ -64,7 +64,7 @@ fn confirmar_parar(app: AppHandle) {
     std::thread::spawn(move || {
         let sim = app
             .dialog()
-            .message("Os agentes e as rotinas param até você iniciar o Ergon de novo. Os dados ficam como estão, e o Docker continua aberto.")
+            .message(if crate::ambiente::ativo() { "Os agentes e as rotinas param até você iniciar o Ergon de novo. Os dados ficam como estão." } else { "Os agentes e as rotinas param até você iniciar o Ergon de novo. Os dados ficam como estão, e o Docker continua aberto." })
             .title("Parar os serviços do Ergon?")
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom("Parar o Ergon".into(), "Cancelar".into()))

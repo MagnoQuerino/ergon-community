@@ -9,26 +9,26 @@ agentes usa a conta de IA que você conectar.
 
 ## Instalar
 
-**Antes:** instale o [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows e macOS) ou o
-Docker Engine (Linux) e deixe-o aberto.
+### Windows 10 e 11
+
+Baixe e abra **[`Ergon Desktop para Windows.exe`](Ergon%20Desktop%20para%20Windows.exe)** (aqui na raiz). Ele instala
+tudo sozinho num ambiente próprio do Ergon, separado do resto do computador: **não precisa instalar Docker** nem outro
+programa. Se o Windows ainda não tiver o recurso de ambientes Linux ligado, o instalador liga e pede um reinício; depois
+continua de onde parou. No fim o Ergon abre numa janela: crie a conta, anote a frase de recuperação e conecte uma
+conta de IA. Atualizações aparecem em **Configurações › Verificar atualizações**.
+
+### Linux e macOS
+
+Por enquanto o caminho é o pacote com contêineres:
 
 1. Baixe esta pasta: botão verde **Code › Download ZIP**, no topo desta página. Descompacte numa pasta sua, fora
    do OneDrive, Dropbox ou Google Drive.
-2. Instale:
-   - **Windows:** dois cliques em **`Instalar Ergon no Windows.cmd`**.
-   - **macOS e Linux:** num terminal, dentro da pasta: `bash "Instalar Ergon no Linux e macOS.sh"`.
+2. Num terminal, dentro da pasta: `bash "Instalar Ergon no Linux e macOS.sh"`.
 3. No fim, o navegador abre o Ergon. Crie a conta, anote a frase de recuperação e conecte uma conta de IA em
    **Configurações › IA da equipe**.
 
-Pronto: a pasta baixada pode ser apagada. Para ligar, desligar, fazer backup ou atualizar, use o comando `ergon` em
-qualquer terminal (`ergon status`, `ergon backup`, `ergon atualizar`). Passo a passo completo e o que fazer se
-esquecer a senha: [docs/INSTALAR.md](docs/INSTALAR.md).
-
-### Janela própria (opcional)
-
-O **Ergon Desktop** abre o mesmo Ergon numa janela, com ícone no menu e na bandeja, em vez do navegador. Instale o
-Ergon primeiro (acima) e depois rode **`Ergon Desktop para Windows.exe`** ou **`Ergon Desktop para Linux.deb`**,
-também aqui na raiz. Veja [docs/DESKTOP.md](docs/DESKTOP.md).
+Passo a passo completo e o que fazer se esquecer a senha: [docs/INSTALAR.md](docs/INSTALAR.md). No Linux, o
+**`Ergon Desktop para Linux.deb`** abre o mesmo Ergon numa janela ([docs/DESKTOP.md](docs/DESKTOP.md)).
 
 Todas as versões, com as somas SHA-256 para conferir os arquivos, ficam na
 [página de versões](https://github.com/MagnoQuerino/ergon-community/releases/latest).
@@ -54,8 +54,8 @@ Todas as versões, com as somas SHA-256 para conferir os arquivos, ficam na
 
 | | |
 |---|---|
-| `Instalar Ergon no Windows.cmd`, `Instalar Ergon no Linux e macOS.sh` | instalam o Ergon |
-| `Ergon Desktop para Windows.exe`, `Ergon Desktop para Linux.deb` | janela própria, opcional |
+| `Ergon Desktop para Windows.exe` | instala o Ergon no Windows (sem Docker) |
+| `Instalar Ergon no Linux e macOS.sh`, `Ergon Desktop para Linux.deb` | instalam o Ergon no Linux e macOS |
 | `docs/` | guias: instalar, desktop, loja, rotinas, conexões, novidades ([CHANGELOG](docs/CHANGELOG.md)) |
 | `catalogo/` | modelos da comunidade que a loja lista |
 | `codigo-fonte/` | o código do Ergon, para quem quer estudar ou contribuir ([como](.github/CONTRIBUTING.md)) |

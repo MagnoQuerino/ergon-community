@@ -1,7 +1,8 @@
 # Ergon Desktop
 
 O Ergon Desktop é o mesmo Ergon numa janela própria. A interface é a do Ergon local (`http://localhost:8787`),
-servida pelos mesmos serviços em Docker. O aplicativo acrescenta:
+servida pelos mesmos serviços. No Windows o aplicativo também instala o Ergon, num ambiente próprio (sem Docker
+Desktop). O aplicativo acrescenta:
 
 - uma janela com o nome e o ícone do Ergon;
 - uma tela de abertura que confere o ambiente e, quando você pede, liga os serviços;
@@ -11,8 +12,8 @@ O navegador continua sendo uma alternativa: tudo o que a janela mostra também a
 
 ## Antes
 
-O aplicativo abre o Ergon instalado neste computador. Instale o Ergon primeiro ([INSTALAR.md](INSTALAR.md)). Sem
-ele, a tela de abertura explica o que falta e mostra onde ver como instalar.
+No Windows, nada antes: o aplicativo instala o Ergon. No Linux, ele abre o Ergon instalado neste computador:
+instale o Ergon primeiro ([INSTALAR.md](INSTALAR.md)); sem ele, a tela de abertura explica o que falta.
 
 ## Windows 10 e 11
 
@@ -22,12 +23,12 @@ ele, a tela de abertura explica o que falta e mostra onde ver como instalar.
    - O instalador não tem certificado de assinatura de código: o SmartScreen avisa na primeira vez. Clique em
      "Mais informações" › "Executar assim mesmo".
    - Sem o WebView2 no computador (raro no Windows 11), o instalador baixa o oficial da Microsoft.
-3. Abra "Ergon" pelo menu Iniciar. A tela de abertura confere o Docker e o Ergon. Se estiver desligado, "Iniciar
-   Ergon" abre o Docker Desktop (se preciso) e liga os serviços.
-4. Entre com a conta do Ergon deste computador, a mesma do navegador.
+3. Abra "Ergon" pelo menu Iniciar. Na primeira vez ele instala o ambiente próprio do Ergon (se o Windows pedir,
+   reinicie: a instalação continua sozinha). Não precisa instalar Docker.
+4. Crie a conta, anote a frase de recuperação e conecte uma conta de IA.
 
-Atualizar: rode o instalador da versão nova por cima, sem desinstalar. Remover: Configurações › Aplicativos ›
-Ergon › Desinstalar. Os dados ficam no Docker, intactos.
+Atualizar: Configurações › Verificar atualizações (seus dados ganham uma cópia antes). Remover: Configurações ›
+Aplicativos › Ergon › Desinstalar; o desinstalador pergunta se apaga também os dados.
 
 ## Linux (Ubuntu 22.04 ou mais novo, Debian 12)
 

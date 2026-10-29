@@ -230,6 +230,15 @@ pub fn decidir(e: Entrada) -> Diagnostico {
             "Uma equipe dos maiores pensadores da Grécia antiga está pronta para trabalhar com você. Vamos erguer a cidade deles aqui mesmo, no seu computador.".into(),
             &["instalar"]);
     };
+    // No Windows o Ergon não depende mais do Docker Desktop: sem o ambiente próprio, o caminho é sempre instalá-lo (uma
+    // instalação antiga pelo Docker Desktop fica como está, sem ser usada nem alterada)
+    if e.windows && !e.ambiente {
+        if raiz.is_some() || ergon.is_some() {
+            d.detalhes.push("instalação antiga pelo Docker Desktop encontrada: não é mais usada (o Ergon passa a rodar no ambiente próprio)".into());
+        }
+        instalar_proprio(&mut d, !matches!(e.docker, Docker::Ausente));
+        return d;
+    }
     match &e.docker {
         Docker::Ausente if e.windows => instalar_proprio(&mut d, false),
         Docker::Ausente => marcar(&mut d, "docker_ausente", "O Docker não está instalado",
@@ -363,17 +372,25 @@ mod testes {
         assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"));
         let d = decidir(entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), vec![]));
         assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"));
-        // instalação antiga pelo Docker Desktop registrada: segue por ele
+        // instalação antiga pelo Docker Desktop registrada: não é mais usada; o caminho é o ambiente próprio
         let antiga = |docker| Entrada { inst: Instalacao { raiz: Some("C:\\Ergon".into()), porta: 8787, teste: false }, ..entrada(Resposta::Nada("x".into()), docker, vec![]) };
-        assert_eq!((decidir(antiga(Docker::Parado("x".into()))).acoes[0].as_str()), "iniciar");
+        for dk in [Docker::Parado("x".into()), Docker::Pronto("27".into()), Docker::SemPermissao("x".into())] {
+            let d = decidir(antiga(dk));
+            assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"), "Windows nunca pede o Docker");
+        }
         // Linux: o Docker do sistema
         let linux = |docker| Entrada { windows: false, ..entrada(Resposta::Nada("x".into()), docker, vec![]) };
         assert_eq!(decidir(linux(Docker::Parado("x".into()))).estado, "docker_parado");
         let d = decidir(linux(Docker::Pronto("27".into())));
         assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "ajuda:instalar_ergon"));
-        assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::SemPermissao("x".into()), vec![])).estado, "docker_sem_permissao");
-        assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), vec![c("ergon", "exited", "")])).estado, "parado");
-        assert_eq!(decidir(entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")])).estado, "iniciando");
+        assert_eq!(decidir(linux(Docker::SemPermissao("x".into()))).estado, "docker_sem_permissao");
+        let linux_c = |cs| Entrada { windows: false, ..entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), cs) };
+        assert_eq!(decidir(linux_c(vec![c("ergon", "exited", "")])).estado, "parado");
+        assert_eq!(decidir(linux_c(vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")])).estado, "iniciando");
+        // ambiente próprio instalado, contêiner parado ou subindo (o Docker dele, por dentro do WSL)
+        let amb = |cs| Entrada { ambiente: true, ..entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), cs) };
+        assert_eq!(decidir(amb(vec![c("ergon", "exited", "")])).estado, "parado");
+        assert_eq!(decidir(amb(vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")])).estado, "iniciando");
     }
 
     #[test]
