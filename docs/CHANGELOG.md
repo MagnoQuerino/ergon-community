@@ -1,5 +1,10 @@
 # Novidades
 
+## 1.1.0-rc.7 (pré-versão de teste)
+
+- **Boas-vindas:** depois das palavras de recuperação, um carregamento curto (só se preciso); então as perguntas e
+  a conexão da conta de IA, com os botões prontos. A interface abre com a conta já conectada.
+
 ## 1.1.0-rc.6 (pré-versão de teste)
 
 - **Conta de IA:** a tela de conectar só aparece com os botões prontos. Se a IA da sua conta ainda estiver
