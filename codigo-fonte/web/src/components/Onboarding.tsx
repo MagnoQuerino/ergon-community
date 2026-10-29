@@ -138,15 +138,16 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
             <p className="muted">{personal ? 'Ajuda a coordenação a falar a sua língua. A equipe pessoal é a mesma para todos; o foco muda.' : 'Cada área tem uma equipe de partida com setores e funções próprios.'}</p>
             <div className="onb__chips" role="radiogroup" aria-label="Área">
               {opts.niches.map((n) => (
-                <button key={n.key} role="radio" aria-checked={f.niche === n.key} className={`onb__chip ${f.niche === n.key ? 'is-on' : ''}`} onClick={() => setF({ ...f, niche: n.key })}>{n.label}</button>
+                <button key={n.key} role="radio" aria-checked={f.niche === n.key} className={`onb__chip ${f.niche === n.key ? 'is-on' : ''}`} onClick={() => { setF({ ...f, niche: n.key }); setErr(null); }}>{n.label}</button>
               ))}
             </div>
             {f.niche === 'outro' && (
               <label className="field">Qual? (opcional)<input autoFocus maxLength={60} value={f.nicheOther} onChange={(e) => setF({ ...f, nicheOther: e.target.value })} placeholder="Ex.: arquitetura, eventos, agronegócio" /></label>
             )}
+            {err && <p className="error" role="alert">{err}</p>}
             <div className="onb__nav">
               <button className="btn" onClick={() => setStep('use')}>Voltar</button>
-              <button className="btn btn--primary" disabled={!f.niche} onClick={() => setStep('more')}>Continuar</button>
+              <button className="btn btn--primary" onClick={() => { if (!f.niche) { setErr('Escolha uma das áreas acima (ou Outra área).'); return; } setErr(null); setStep('more'); }}>Continuar</button>
             </div>
           </section>
         ) : step === 'more' ? (

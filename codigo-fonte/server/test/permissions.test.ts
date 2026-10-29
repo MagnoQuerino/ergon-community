@@ -109,3 +109,75 @@ describe('pedido de permissão com senha, na conversa', () => {
     assert.equal((await req(h, 'PUT', '/api/ai/tools', s, { enabled: ['passos', 'calculo', 'terminal'] })).status, 200);
   });
 });
+
+describe('ligar código ou terminal conversando: o pedido vai para a coordenação', () => {
+  let h: Harness; let s: Session; let motor: Motor; let control: Control; let hipatia: string; let hesiodo: string; let conv: string;
+  before(async () => {
+    throttle.reset();
+    motor = new Motor(); control = new Control();
+    h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123', bridgeToken: 'token-da-ponte-de-teste-0123456789' }, { hermes: motor, control });
+    s = await setupOwner(h, 'alexandre', PASS);
+    await h.ai.refreshToolsets();
+    const st = (await req(h, 'GET', '/api/state', s)).json;
+    hipatia = st.agents.find((a: { char_key: string }) => a.char_key === 'hipatia').id;
+    hesiodo = st.agents.find((a: { char_key: string }) => a.char_key === 'hesiodo').id;
+    conv = (await req(h, 'POST', '/api/conversations', s, { agentId: hipatia })).json.id;
+  });
+  after(async () => { await h.close(); });
+
+  test('outro agente passa o pedido; a senha é pedida na conversa com a coordenação; autorizado, quem pediu continua', async () => {
+    motor.reply = () => 'Vou passar o pedido para a coordenação.\n[[liberar-ferramenta ferramenta="terminal" agente="Hipátia" motivo="rodar os scripts do projeto"]]';
+    await req(h, 'POST', `/api/conversations/${conv}/messages`, s, { text: 'Liga o terminal para você', clientRequestId: 'lib-0001' });
+    for (let i = 0; i < 4; i++) await h.executor.tick();
+    assert.match(motor.started[0].instructions ?? '', /liberar-ferramenta/, 'as instruções ensinam a passar o pedido');
+    const aqui = (await req(h, 'GET', `/api/proposals?conversationId=${conv}`, s)).json as Array<{ kind: string; status: string; payload: string | null }>;
+    const aviso = aqui.find((p) => p.kind === 'handoff')!;
+    assert.ok(aviso, 'aviso com o caminho na conversa de origem');
+    assert.equal(aviso.status, 'applied', 'o aviso não espera decisão');
+    assert.ok(!aqui.some((p) => p.kind === 'permission'), 'a senha não é pedida aqui');
+    const d = JSON.parse(aviso.payload!) as { conversationId: string; coordinatorId: string };
+    const coordConv = (await req(h, 'GET', `/api/proposals?conversationId=${d.conversationId}`, s)).json as Array<{ id: string; kind: string; summary: string }>;
+    const perm = coordConv.find((p) => p.kind === 'permission')!;
+    assert.ok(perm, 'pedido com senha na conversa com a coordenação'); assert.match(perm.summary, /Terminal/);
+    const st = (await req(h, 'GET', '/api/state', s)).json;
+    assert.ok(Number(st.agents.find((a: { id: string }) => a.id === d.coordinatorId).coordinator) === 1, 'é a coordenação');
+    motor.reply = () => 'Rodei os scripts.';
+    const ok = await req(h, 'POST', `/api/proposals/${perm.id}/authorize`, s, { password: PASS });
+    assert.equal(ok.json.status, 'applied', JSON.stringify(ok.json));
+    assert.ok(control.sets.at(-1)!.includes('terminal'), 'ligado no motor');
+    for (let i = 0; i < 4; i++) await h.executor.tick();
+    const cont = motor.started.at(-1)!;
+    assert.match(cont.input, /autorizou agora a ferramenta Terminal/);
+    const msgs = (await req(h, 'GET', `/api/conversations/${conv}/messages`, s)).json as Array<{ role: string; content: string }>;
+    assert.ok(msgs.some((m) => m.role === 'agent' && m.content === 'Rodei os scripts.'), 'Hipátia continua na conversa dela');
+    const coordMsgs = (await req(h, 'GET', `/api/conversations/${d.conversationId}/messages`, s)).json as Array<{ role: string; content: string }>;
+    assert.ok(coordMsgs.some((m) => m.role === 'system' && /você autorizou/.test(m.content)), 'a coordenação registra a autorização');
+  });
+
+  test('para a equipe (sem agente): só liga no motor', async () => {
+    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const coord = st.agents.find((a: { coordinator: boolean }) => a.coordinator);
+    const cc = (await req(h, 'POST', '/api/conversations', s, { agentId: coord.id })).json.id;
+    motor.reply = () => 'Peço a sua senha abaixo.\n[[liberar-ferramenta ferramenta="calculo" agente="equipe" motivo="planilhas da equipe"]]';
+    await req(h, 'POST', `/api/conversations/${cc}/messages`, s, { text: 'Liga o executar código para a equipe', clientRequestId: 'lib-0002' });
+    for (let i = 0; i < 4; i++) await h.executor.tick();
+    const perm = ((await req(h, 'GET', `/api/proposals?conversationId=${cc}`, s)).json as Array<{ id: string; kind: string; summary: string }>).find((p) => p.kind === 'permission')!;
+    assert.match(perm.summary, /para a equipe/);
+    const ok = await req(h, 'POST', `/api/proposals/${perm.id}/authorize`, s, { password: PASS });
+    assert.equal(ok.json.status, 'applied'); assert.match(ok.json.result, /ligada para a equipe/);
+    assert.ok(control.sets.at(-1)!.includes('code_execution'));
+  });
+
+  test('lembrete com data: quem tem a ferramenta propõe; aprovado, vira tarefa sua com prazo', async () => {
+    const c2 = (await req(h, 'POST', '/api/conversations', s, { agentId: hesiodo })).json.id;
+    motor.reply = () => 'Anoto para você.\n[[propor-tarefa titulo="Lembrete: renovar o alvará" responsavel="você" prazo="2030-03-10"]]';
+    await req(h, 'POST', `/api/conversations/${c2}/messages`, s, { text: 'Me lembra de renovar o alvará em 10/03/2030', clientRequestId: 'lem-0001' });
+    for (let i = 0; i < 4; i++) await h.executor.tick();
+    const p = ((await req(h, 'GET', `/api/proposals?conversationId=${c2}`, s)).json as Array<{ id: string; kind: string; summary: string }>).find((x) => x.kind === 'task')!;
+    assert.ok(p, 'proposta de lembrete'); assert.match(p.summary, /na conversa com Hesíodo/);
+    const r = await req(h, 'POST', `/api/proposals/${p.id}`, s, { decision: 'apply' });
+    assert.equal(r.json.status, 'applied', JSON.stringify(r.json));
+    const tools = (await req(h, 'GET', '/api/ai/tools', s)).json as Array<{ id: string; status: string }>;
+    assert.equal(tools.find((t) => t.id === 'agenda')!.status, 'disponível', 'lembretes com data não ficam mais bloqueados');
+  });
+});

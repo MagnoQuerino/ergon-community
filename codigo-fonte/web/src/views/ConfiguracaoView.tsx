@@ -58,20 +58,25 @@ function SegurancaGate({ children }: { children: React.ReactNode }) {
   const [err, setErr] = useState<string | null>(null);
   if (ok) return <>{children}</>;
   const entrar = async () => {
+    if (!senha) { setErr('Digite a sua senha atual.'); return; }
     setBusy(true); setErr(null);
     try { await api.post('/api/session/unlock', { password: senha }); setSenha(''); setOk(true); }
     catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   };
+  // as opções ficam à vista (em desfoque e sem clique): dá para saber o que se pode mudar aqui antes de abrir
   return (
-    <section className="card seg-gate">
-      <h3><Icon name="lock" size={16} /> Confirme que é você</h3>
-      <p className="muted small">A segurança (senha, frase de recuperação, verificação em duas etapas, trancamento) fica protegida: digite a sua senha atual para abrir.</p>
-      <form className="ws-item__edit" onSubmit={(e) => { e.preventDefault(); void entrar(); }}>
-        <input className="input" type="password" autoComplete="current-password" autoFocus aria-label="Senha atual" placeholder="Senha atual" value={senha} onChange={(e) => setSenha(e.target.value)} />
-        <button className="btn btn--primary" disabled={busy || !senha}>{busy ? 'Conferindo…' : 'Abrir'}</button>
-      </form>
-      {err && <p className="error" role="alert">{err}</p>}
-    </section>
+    <div className="seg-gate">
+      <div className="seg-gate__fundo" aria-hidden="true" inert>{children}</div>
+      <div className="seg-gate__dialogo" role="dialog" aria-modal="false" aria-labelledby="seg-gate-titulo">
+        <h3 id="seg-gate-titulo"><Icon name="lock" size={16} /> Desbloquear opções de segurança</h3>
+        <p className="muted small">Senha, frase de recuperação, verificação em duas etapas e trancamento ficam protegidos. Digite a sua senha atual para mexer neles.</p>
+        <form className="seg-gate__form" onSubmit={(e) => { e.preventDefault(); void entrar(); }}>
+          <input className="input" type="password" autoComplete="current-password" autoFocus aria-label="Senha atual" placeholder="Senha atual" value={senha} onChange={(e) => { setSenha(e.target.value); setErr(null); }} />
+          <button className="btn btn--primary" disabled={busy}>{busy ? 'Conferindo…' : 'Desbloquear'}</button>
+        </form>
+        {err && <p className="error" role="alert">{err}</p>}
+      </div>
+    </div>
   );
 }
 
@@ -89,7 +94,7 @@ function VersionCard() {
 }
 
 function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
-  const status = useResource<AiStatus>('/api/ai/status', []);
+  const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const tools = useResource<AgentTool[]>('/api/ai/tools', ['agents.changed']);
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed']);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -109,9 +114,17 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
       <section className="card">
         <h3>Ferramentas da equipe</h3>
         <p className="muted small">O que fica ligado para os agentes. Cada agente usa só as que tem no perfil; quem não tem pede ajuda a um colega (a coordenação controla essas travas).</p>
-        <p className="hint"><Icon name="lock" size={12} /> As que executam código ficam protegidas: ligar pede a sua senha. Se um agente precisar delas numa conversa, aparece um pedido de permissão ali mesmo, e você autoriza com a senha.</p>
+        <p className="hint"><Icon name="lock" size={12} /> As que executam código ficam protegidas: ligar pede a sua senha. Também dá para pedir conversando com qualquer agente (“liga o Terminal para a Hipátia”): o pedido vai para a coordenação, e você confirma com a senha na conversa com ela.</p>
         <div className="tools-grid">
-          {(tools.data ?? []).filter((t) => t.kind === 'ia').map((t) => (
+          {(tools.data ?? []).filter((t) => t.kind === 'ia' || t.id === 'agenda').map((t) => t.kind === 'ergon' ? (
+            // do próprio Ergon: sempre ligada (vale para quem a tem no perfil)
+            <label key={t.id} className="tool-opt tool-opt--on">
+              <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title="Ferramenta do próprio Ergon: sempre ligada" />
+              <span className="tool-opt__txt"><b>{t.label}</b><small>{t.note}</small></span>
+              <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[t.status]}`}>ligada</span>
+                <span className="muted small">{state.agents.filter((a) => a.status === 'active' && a.tools.some((x) => x.id === t.id)).map((a) => a.name).join(', ') || 'ninguém'}</span></span>
+            </label>
+          ) : (
             <label key={t.id} className={`tool-opt ${t.platform ? 'tool-opt--on' : ''} ${!t.safe && !t.guarded ? 'tool-opt--off' : ''}`}>
               <input type="checkbox" checked={!!t.platform} disabled={(!t.safe && !t.guarded) || !s?.available || t.id === 'passos'} onChange={(e) => void toggleTool(t.id, e.target.checked)} />
               <span className="tool-opt__txt"><b>{t.guarded && <Icon name="lock" size={12} />} {t.label}</b><small>{t.note.replace(/ — (desligada|bloqueada):.*$/, '')}{t.guarded && !t.platform ? ' · ligar pede a sua senha' : ''}</small></span>
@@ -155,11 +168,11 @@ function ProcessLimitField({ limit, onSaved, onError }: { limit: ProcessLimit; o
       <label htmlFor="proc-limit">Trabalhos ao mesmo tempo</label>
       <select id="proc-limit" value={String(limit.choice)} disabled={busy} onChange={(e) => void save(e.target.value)} aria-describedby="proc-limit-hint">
         <option value="auto">Automático ({limit.machine} nesta máquina)</option>
-        {numbers.map((n) => <option key={n} value={n}>{n} ao mesmo tempo</option>)}
+        {numbers.map((n) => <option key={n} value={n}>{n} ao mesmo tempo{n === 5 ? ' (padrão)' : ''}</option>)}
         <option value="ilimitado">Sem limite</option>
       </select>
       <small id="proc-limit-hint" className="muted">
-        O automático usa um a cada 4 GB de memória do Ergon (aqui: {limit.memoryGb.toLocaleString('pt-BR')} GB, {limit.cpus} núcleos), até 6. Sem limite, tudo anda junto: só num computador forte.
+        O padrão é 5. O automático usa um a cada 4 GB de memória do Ergon (aqui: {limit.memoryGb.toLocaleString('pt-BR')} GB, {limit.cpus} núcleos), até 6. Sem limite, tudo anda junto: só num computador forte.
         {limit.cap !== null ? ` O seu plano permite até ${limit.cap}.` : ''}
       </small>
     </div>

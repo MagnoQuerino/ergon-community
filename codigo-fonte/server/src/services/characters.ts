@@ -44,7 +44,9 @@ export const TOOLS: Record<string, ToolDef> = {
   habilidades: { id: 'habilidades', label: 'Skills da biblioteca', kind: 'ia', toolset: 'skills', status: 'desligada', note: 'consulta as skills atribuídas (sem criar nem editar skills)', safe: true },
   calculo: { id: 'calculo', label: 'Executar código', kind: 'ia', toolset: 'code_execution', status: 'bloqueada', note: 'roda programas em Python: cálculos, planilhas, gráficos e análise de dados', guarded: true },
   terminal: { id: 'terminal', label: 'Terminal', kind: 'ia', toolset: 'terminal', status: 'bloqueada', note: 'executa comandos (scripts, pacotes, arquivos) no ambiente isolado do motor de IA', guarded: true },
-  agenda: { id: 'agenda', label: 'Lembretes com data', kind: 'ia', toolset: 'cronjob', status: 'bloqueada', note: 'agendamentos são feitos pelas Rotinas do Ergon, com a sua aprovação' },
+  // do próprio Ergon (antes, o agendador do motor: o lembrete disparava fora da vista, então ficava bloqueado): o agente
+  // propõe na conversa, você aprova e o lembrete entra em Suas tarefas com o prazo
+  agenda: { id: 'agenda', label: 'Lembretes com data', kind: 'ergon', status: 'disponível', note: 'anota lembretes e prazos: o agente propõe na conversa, você aprova e ele aparece em Suas tarefas com a data' },
 };
 
 /**

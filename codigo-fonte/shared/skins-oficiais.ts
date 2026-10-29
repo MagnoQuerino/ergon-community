@@ -13,6 +13,21 @@ const L = (outfit: string, o: Partial<SkinLook> & { hair: string; hairStyle: Ski
 // ---------------------------------------------------------------- corporativa
 const PLATINA: SkinData = {
   id: 'distrito-platina', name: 'Distrito Platina', tagline: 'Torres de vidro, praças de concreto e a equipe de terno no centro financeiro.',
+  structures: {
+    stoa: { name: 'Torre Corporativa', common: 'prédio de escritórios' },
+    oikos: { name: 'Loft', common: 'apartamento' },
+    ergasterion: { name: 'Estúdio Criativo', common: 'oficina / ateliê' },
+    pharmakopoleion: { name: 'Drogaria 24h', common: 'farmácia' },
+    didaskaleion: { name: 'Centro de Treinamento', common: 'escola' },
+    oikia: { name: 'Cobertura', common: 'casa grande' },
+    emporion: { name: 'Shopping Platina', common: 'prédio comercial' },
+    bouleuterion: { name: 'Sede do Conselho', common: 'câmara / sede' },
+    agora: { name: 'Praça Financeira', common: 'praça central' },
+    teatro: { name: 'Auditório', common: 'anfiteatro' },
+    termas: { name: 'Clube Aquático', common: 'piscina' },
+    ginasio: { name: 'Academia', common: 'centro esportivo' },
+    bairro: { name: 'Condomínio', common: 'moradias' },
+  },
   palette: {
     dia: { seeds: { ground: '#b9bec4', ground2: '#a9b4a0', grass: '#7d9b6a', road: '#5a5f66', plaza: '#d7d9dc', wall: '#e6e9ec', wallAlt: '#9fb3c4', stone: '#cfd3d8', marble: '#f2f4f6', roof: '#4c5560', wood: '#8a6a50', accent: '#3fa7c9', accent2: '#2d4a6b', metal: '#aab4bf', foliage: '#6f9a5c', foliage2: '#4f7c4a', sky: '#a8cde6', water: '#6fb7d6', window: '#5f8fb3', windowDark: '#3d5a73', cloth: '#eef0f2', flame: '#ffe39a', outline: '#1f262e', shadow: '#20262c', flowers: ['#e9eef2', '#d8a1b8'] } },
     noite: { seeds: { ground: '#2f343b', ground2: '#2a3830', grass: '#33463a', road: '#24282d', plaza: '#3a4048', wall: '#3b434d', wallAlt: '#2c3e52', stone: '#4b525b', marble: '#6b737d', roof: '#1f242a', wood: '#5a4636', accent: '#5fd0f0', accent2: '#26405f', metal: '#8f9aa6', foliage: '#3d5a40', foliage2: '#2e4733', sky: '#1d2b45', water: '#2f5d7a', window: '#f2d38a', windowDark: '#1f2833', cloth: '#c9ced4', flame: '#ffd77e', outline: '#0f1318', shadow: '#000000', flowers: [] } },
@@ -52,6 +67,21 @@ const PLATINA: SkinData = {
 // ---------------------------------------------------------------- fantasia medieval
 const BRUMAVERDE: SkinData = {
   id: 'reino-de-brumaverde', name: 'Reino de Brumaverde', tagline: 'Vilarejo de enxaimel no meio da névoa, com elfos, duendes, orcs e chamas azuis à noite.',
+  structures: {
+    stoa: { name: 'Salão da Guilda', common: 'prédio de escritórios' },
+    oikos: { name: 'Choupana', common: 'casa' },
+    ergasterion: { name: 'Forja do Artífice', common: 'oficina / ateliê' },
+    pharmakopoleion: { name: 'Botica das Ervas', common: 'farmácia / botica' },
+    didaskaleion: { name: 'Torre dos Magos', common: 'escola' },
+    oikia: { name: 'Solar do Bosque', common: 'casa grande' },
+    emporion: { name: 'Mercado da Névoa', common: 'prédio comercial' },
+    bouleuterion: { name: 'Castelo do Conselho', common: 'câmara / sede' },
+    agora: { name: 'Praça da Fonte', common: 'praça central' },
+    teatro: { name: 'Arena dos Bardos', common: 'anfiteatro' },
+    termas: { name: 'Lago Encantado', common: 'piscina' },
+    ginasio: { name: 'Campo de Justas', common: 'centro esportivo' },
+    bairro: { name: 'Aldeia', common: 'moradias' },
+  },
   palette: {
     dia: { seeds: { ground: '#8fb06a', ground2: '#a7b77a', grass: '#5f8a45', road: '#b8a58a', plaza: '#b3ab9a', wall: '#e7dcc4', wallAlt: '#c9b896', stone: '#a9a291', marble: '#d9d4c4', roof: '#7a5a9a', wood: '#7a5233', accent: '#5fb3c9', accent2: '#7a3b5f', metal: '#c9a94f', foliage: '#4f8a3f', foliage2: '#2f6a3a', sky: '#b8dce8', water: '#5fb0c4', window: '#3e4f60', windowDark: '#2f3c49', cloth: '#efe3c6', flame: '#ffe39a', outline: '#2a2230', shadow: '#2f2a20', flowers: ['#f2e6a1', '#d98ab0', '#9fd0f0', '#ffffff'] } },
     noite: { seeds: { ground: '#2c3b2e', ground2: '#344230', grass: '#3c5a3a', road: '#4a4238', plaza: '#45403b', wall: '#5a5266', wallAlt: '#4a4358', stone: '#55504a', marble: '#7a7570', roof: '#3e2f55', wood: '#4a3424', accent: '#7fe0f0', accent2: '#5a2a48', metal: '#d8b866', foliage: '#2f5a30', foliage2: '#203f28', sky: '#1f2a4a', water: '#2d5a6e', window: '#f0c060', windowDark: '#2a2438', cloth: '#cfc4a8', flame: '#9fe8ff', outline: '#120f18', shadow: '#000000', flowers: ['#7fe0f0'] } },
@@ -97,6 +127,21 @@ const BRUMAVERDE: SkinData = {
 // ---------------------------------------------------------------- militar
 const SIROCO: SkinData = {
   id: 'base-siroco', name: 'Base Siroco', tagline: 'Quartel-general no deserto: barracas, sacos de areia, antenas e a equipe de farda.',
+  structures: {
+    stoa: { name: 'Posto de Comando', common: 'prédio de escritórios' },
+    oikos: { name: 'Barraca', common: 'casa' },
+    ergasterion: { name: 'Oficina Mecânica', common: 'oficina / ateliê' },
+    pharmakopoleion: { name: 'Enfermaria', common: 'farmácia' },
+    didaskaleion: { name: 'Escola de Instrução', common: 'escola' },
+    oikia: { name: 'Alojamento', common: 'casa grande' },
+    emporion: { name: 'Cantina e Suprimentos', common: 'prédio comercial' },
+    bouleuterion: { name: 'Quartel-General', common: 'câmara / sede' },
+    agora: { name: 'Pátio de Formatura', common: 'praça central' },
+    teatro: { name: 'Sala de Briefing', common: 'anfiteatro' },
+    termas: { name: 'Reservatório', common: 'piscina' },
+    ginasio: { name: 'Pista de Obstáculos', common: 'centro esportivo' },
+    bairro: { name: 'Acampamento', common: 'moradias' },
+  },
   palette: {
     dia: { seeds: { ground: '#d9bf8a', ground2: '#cbb07a', grass: '#9a9a5a', road: '#b8a074', plaza: '#c8b48c', wall: '#c8b88f', wallAlt: '#8a8a5a', stone: '#b9a57e', marble: '#d8ccb0', roof: '#6f7448', wood: '#8a6a44', accent: '#d8a03a', accent2: '#4a5a3a', metal: '#8a8f88', foliage: '#7a8a4a', foliage2: '#5a6a3a', sky: '#e8d4a8', water: '#6fb0b8', window: '#4a5560', windowDark: '#323a40', cloth: '#d8cfb4', flame: '#ffd27a', outline: '#2a2418', shadow: '#3a2e1a', flowers: [] } },
     noite: { seeds: { ground: '#4a4030', ground2: '#423a2c', grass: '#4a4a32', road: '#3c3428', plaza: '#4a4236', wall: '#4f4a3c', wallAlt: '#3a3c2c', stone: '#5a5040', marble: '#6f6656', roof: '#2f3222', wood: '#4a3a28', accent: '#e8b04a', accent2: '#2f3a26', metal: '#7a807a', foliage: '#3a4428', foliage2: '#2a3420', sky: '#1f2438', water: '#2a4a52', window: '#e8d07a', windowDark: '#22261c', cloth: '#a89c80', flame: '#ffc860', outline: '#14110b', shadow: '#000000', flowers: [] } },
@@ -136,6 +181,21 @@ const SIROCO: SkinData = {
 // ---------------------------------------------------------------- praia
 const CORAL: SkinData = {
   id: 'enseada-coral', name: 'Enseada Coral', tagline: 'Vila de praia com mar azul, coqueiros, quiosques de palha e a equipe de chinelo.',
+  structures: {
+    stoa: { name: 'Escritório da Orla', common: 'prédio de escritórios' },
+    oikos: { name: 'Casa de Praia', common: 'casa' },
+    ergasterion: { name: 'Ateliê de Pranchas', common: 'oficina / ateliê' },
+    pharmakopoleion: { name: 'Farmácia da Vila', common: 'farmácia' },
+    didaskaleion: { name: 'Escola de Surf', common: 'escola' },
+    oikia: { name: 'Pousada', common: 'casa grande' },
+    emporion: { name: 'Quiosques do Calçadão', common: 'prédio comercial' },
+    bouleuterion: { name: 'Colônia de Pescadores', common: 'câmara / sede' },
+    agora: { name: 'Calçadão', common: 'praça central' },
+    teatro: { name: 'Palco da Areia', common: 'anfiteatro' },
+    termas: { name: 'Piscina Natural', common: 'piscina' },
+    ginasio: { name: 'Quadra de Vôlei', common: 'centro esportivo' },
+    bairro: { name: 'Vila dos Pescadores', common: 'moradias' },
+  },
   palette: {
     dia: { seeds: { ground: '#ecd9a8', ground2: '#e2cc96', grass: '#8fb06a', road: '#c9a978', plaza: '#f0e2c0', wall: '#f6efe0', wallAlt: '#8fd0d6', stone: '#e8dcc0', marble: '#fbf6ea', roof: '#d8b46a', wood: '#b98a5a', accent: '#ff7a6a', accent2: '#2fa3b8', metal: '#e0c070', foliage: '#5fae5a', foliage2: '#3f8a4a', sky: '#9fe0f4', water: '#3fbcd0', window: '#3e6f80', windowDark: '#2c4f5c', cloth: '#fff6e6', flame: '#ffe39a', outline: '#2a3238', shadow: '#3a3a2a', flowers: ['#ff9a8a', '#fff0a0', '#ffffff'] } },
     noite: { seeds: { ground: '#5a5240', ground2: '#524a3a', grass: '#3a4a34', road: '#4a4232', plaza: '#5a5444', wall: '#5a5a6a', wallAlt: '#2f5a64', stone: '#5a5446', marble: '#7a7466', roof: '#6a5a3a', wood: '#5a4430', accent: '#ff8a7a', accent2: '#1f6a7a', metal: '#c8a860', foliage: '#2f5a34', foliage2: '#224a2c', sky: '#1a2a4a', water: '#1f4a6a', window: '#ffc878', windowDark: '#2a2f3a', cloth: '#d8d0c0', flame: '#ffd080', outline: '#101418', shadow: '#000000', flowers: ['#ff9a8a'] } },
@@ -176,6 +236,21 @@ const CORAL: SkinData = {
 // ---------------------------------------------------------------- lofi
 const RONROM: SkinData = {
   id: 'vila-ronrom', name: 'Vila Ronrom', tagline: 'Bairro tranquilo de casinhas, postes acesos, chá quente e gatos em toda parte.',
+  structures: {
+    stoa: { name: 'Casa do Trabalho', common: 'prédio de escritórios' },
+    oikos: { name: 'Casinha', common: 'casa' },
+    ergasterion: { name: 'Oficina de Costura', common: 'oficina / ateliê' },
+    pharmakopoleion: { name: 'Farmacinha', common: 'farmácia' },
+    didaskaleion: { name: 'Escolinha', common: 'escola' },
+    oikia: { name: 'Casarão', common: 'casa grande' },
+    emporion: { name: 'Armazém e Padaria', common: 'prédio comercial' },
+    bouleuterion: { name: 'Prefeitura da Vila', common: 'câmara / sede' },
+    agora: { name: 'Pracinha do Coreto', common: 'praça central' },
+    teatro: { name: 'Cineminha', common: 'anfiteatro' },
+    termas: { name: 'Lago dos Patos', common: 'piscina' },
+    ginasio: { name: 'Campinho', common: 'centro esportivo' },
+    bairro: { name: 'Rua das Casinhas', common: 'moradias' },
+  },
   palette: {
     dia: { seeds: { ground: '#b8c49a', ground2: '#c8c7a0', grass: '#8aa06a', road: '#d8c6a8', plaza: '#e2d6c0', wall: '#f2e6d8', wallAlt: '#e8c8c0', stone: '#d6cbb8', marble: '#f4ece0', roof: '#b06a5a', wood: '#9a7458', accent: '#e8a0a8', accent2: '#7a8ab8', metal: '#d8b878', foliage: '#8aae7a', foliage2: '#5f8a6a', sky: '#f2c8b0', water: '#9fc8d8', window: '#6a7a9a', windowDark: '#4a5470', cloth: '#f6efe4', flame: '#ffd890', outline: '#3a2e3e', shadow: '#4a3a40', flowers: ['#f6c8d0', '#fff0b0', '#c8d8f8'] } },
     noite: { seeds: { ground: '#3a3a52', ground2: '#36405a', grass: '#4a5a6a', road: '#4a4660', plaza: '#4e4a66', wall: '#5a5070', wallAlt: '#6a4a62', stone: '#5a5672', marble: '#7a7490', roof: '#3a2e4a', wood: '#5a4450', accent: '#f0a0b8', accent2: '#5a6aa8', metal: '#e8c890', foliage: '#3a5a5a', foliage2: '#2a4448', sky: '#2a2a5a', water: '#3a5a7a', window: '#ffcf80', windowDark: '#3a3450', cloth: '#d8d0e0', flame: '#ffd890', outline: '#16121e', shadow: '#000000', flowers: ['#f0a0b8'] } },
@@ -215,6 +290,21 @@ const RONROM: SkinData = {
 // ---------------------------------------------------------------- cyberpunk
 const CROMO9: SkinData = {
   id: 'cromo-9', name: 'Cromo-9', tagline: 'Distrito futurista de torres escuras, letreiros de néon e a equipe com implantes e jaquetas iluminadas.',
+  structures: {
+    stoa: { name: 'Torre de Dados', common: 'prédio de escritórios' },
+    oikos: { name: 'Cápsula', common: 'casa' },
+    ergasterion: { name: 'Laboratório de Hardware', common: 'oficina / ateliê' },
+    pharmakopoleion: { name: 'Clínica de Implantes', common: 'farmácia' },
+    didaskaleion: { name: 'Academia Neural', common: 'escola' },
+    oikia: { name: 'Arranha-céu Residencial', common: 'casa grande' },
+    emporion: { name: 'Mercado Neon', common: 'prédio comercial' },
+    bouleuterion: { name: 'Núcleo Central', common: 'câmara / sede' },
+    agora: { name: 'Praça dos Hologramas', common: 'praça central' },
+    teatro: { name: 'Arena de Projeção', common: 'anfiteatro' },
+    termas: { name: 'Piscina de Luz', common: 'piscina' },
+    ginasio: { name: 'Ringue Virtual', common: 'centro esportivo' },
+    bairro: { name: 'Blocos Habitacionais', common: 'moradias' },
+  },
   palette: {
     dia: { seeds: { ground: '#5a6068', ground2: '#4f5860', grass: null, road: '#3a3f46', plaza: '#6a7078', wall: '#4a5260', wallAlt: '#3a4250', stone: '#6a707a', marble: '#8a909a', roof: '#2a2f38', wood: '#5a4a44', accent: '#2fe0d8', accent2: '#d83ab0', metal: '#9aa4b0', foliage: '#3a7a6a', foliage2: '#2a5a50', sky: '#9ab0b8', water: '#3a8a9a', window: '#7ad8e0', windowDark: '#2a3440', cloth: '#b8c0c8', flame: '#ff6ad0', outline: '#0e1218', shadow: '#000000', flowers: [] } },
     noite: { seeds: { ground: '#15171f', ground2: '#1a1d28', grass: null, road: '#0f1118', plaza: '#1f2230', wall: '#1c2030', wallAlt: '#241c34', stone: '#2a2e3c', marble: '#3a3e50', roof: '#0c0e14', wood: '#2a2028', accent: '#2ff0e8', accent2: '#ff3ac8', metal: '#6a7488', foliage: '#1a4a44', foliage2: '#123a36', sky: '#140c2a', water: '#0f3a4a', window: '#ff4ad0', windowDark: '#151826', cloth: '#7a8090', flame: '#2ff0e8', outline: '#05060a', shadow: '#000000', flowers: [] } },

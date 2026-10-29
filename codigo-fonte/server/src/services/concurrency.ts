@@ -18,6 +18,8 @@ export const PROCESS_SQL = `NOT (${CONVERSATION_KEYS.map((p) => `idempotency_key
 export const SETTING = 'runs.max_processes';
 /** teto do que a tela aceita como número (acima disso, "sem limite") */
 export const MAX_CHOICE = 32;
+/** sem escolha guardada: cinco ao mesmo tempo (decisão do produto; o automático pela memória segue como opção) */
+export const DEFAULT_CHOICE = 5;
 
 /**
  * Padrão desta máquina: um processo a cada 4 GB de memória, sem passar do número de núcleos nem de 6. Dentro do Docker,
@@ -29,6 +31,7 @@ export function machineDefault(memBytes = os.totalmem(), cpus = os.availablePara
 
 export type Choice = 'auto' | 'ilimitado' | number;
 export const parseChoice = (v: string | null): Choice => {
+  if (v === null) return DEFAULT_CHOICE;
   if (v === 'ilimitado') return 'ilimitado';
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 && n <= MAX_CHOICE ? n : 'auto';

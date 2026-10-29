@@ -519,6 +519,14 @@ export const PROPOSAL_HELP = [
 ].join('\n');
 
 export const PERMISSION_HOW = 'Se o pedido exigir executar código ou comandos e você não tiver a ferramenta (Executar código ou Terminal), não finja que executou nem invente resultado: diga em uma frase o que precisa executar e por quê, e escreva uma linha assim: [[pedir-permissao ferramenta="calculo" motivo="o que vai executar"]] (use ferramenta="terminal" para comandos). O usuário autoriza com a senha ali mesmo na conversa e você continua sozinho.';
+/** Lembretes com data (ferramenta do Ergon): viram tarefa sua com prazo, aprovada na conversa. */
+export const REMINDER_HOW = 'Quando o usuário pedir um lembrete ou for preciso lembrar algo numa data, escreva uma linha assim: [[propor-tarefa titulo="Lembrete: o que lembrar" responsavel="você" prazo="AAAA-MM-DD" detalhe="contexto"]] (calcule a data a partir de hoje). O usuário aprova ali na conversa e o lembrete entra em Suas tarefas com o prazo. Diga isso em uma frase, sem prometer aviso em hora marcada.';
+/**
+ * Ligar Executar código ou Terminal conversando: quem não é a coordenação passa o pedido a ela (a senha é pedida na
+ * conversa com o Coordenador); a coordenação pede direto.
+ */
+export const RELEASE_HOW = 'Se o usuário pedir para ligar ou liberar Executar código ou Terminal (para você, para um colega ou para a equipe), não diga que ligou: escreva uma linha assim: [[liberar-ferramenta ferramenta="terminal" agente="Nome de quem vai usar" motivo="para que"]] (ferramenta="calculo" para Executar código; agente="equipe" se não for para alguém em particular). O pedido vai para a coordenação, e o usuário confirma com a senha na conversa com ela. Diga isso em uma frase.';
+export const RELEASE_HOW_COORD = 'Se o usuário pedir para ligar ou liberar Executar código ou Terminal, escreva [[liberar-ferramenta ferramenta="terminal" agente="Nome de quem vai usar" motivo="para que"]] (ferramenta="calculo" para Executar código; agente="equipe" para só ligar para a equipe). Aparece para ele aqui mesmo um pedido com a senha; até ele confirmar, nada muda.';
 /** Para quem tem a Análise de dados: o Ergon calcula; o agente pede e comenta (nunca estima números). */
 export const PROCESS_HOW = 'Planilhas anexadas ao card são analisadas pelo sistema, não por você: quando o card já trouxer o resultado da análise, use exatamente aqueles números; se não trouxer, peça numa linha assim: [[processar operacao="analise-desempenho" arquivo="nome-do-arquivo.csv" referencia="AAAA-MM-DD"]]. Nunca calcule de cabeça nem estime um número que pode ser contado no arquivo.';
 /**
@@ -598,6 +606,8 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     askable.length ? HELP_HOW : '',
     opts.requests && !coord ? CELL_HOW : '',
     mine.has('dados') ? PROCESS_HOW : '',
+    mine.has('agenda') ? REMINDER_HOW : '',
+    coord ? RELEASE_HOW_COORD : RELEASE_HOW,
     mine.has('arquivos') ? filesCatalog(db, workspaceId) : '',
     Object.values(TOOLS).some((t) => t.guarded && !mine.has(t.id)) ? PERMISSION_HOW : '',
     coord ? teamSummaryFor(db, workspaceId) : '',

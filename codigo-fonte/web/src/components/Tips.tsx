@@ -15,7 +15,7 @@ const TIPS: Partial<Record<View, (coord: string, other: string) => ReactNode>> =
   tarefas: () => <>As suas tarefas são só suas. Quando quiser ajuda, envie uma delas para a equipe: vira card no quadro da equipe com responsável.</>,
   atividade: () => <>Tudo o que a equipe faz fica registrado aqui, com evidência. Os arquivos que os agentes entregam ficam na aba Arquivos.</>,
   conexoes: () => <>Sem uma conta de IA conectada, as respostas são simuladas. A melhor escolha é a <b>assinatura Nous</b>: os principais modelos numa conta só, inclusive gratuitos, e um modelo para cada agente.</>,
-  configuracao: () => <>Segurança (frase de recuperação, trava por inatividade, verificação em duas etapas), modelo padrão e consumo ficam aqui.</>,
+  configuracao: () => <>Ferramentas da equipe, andamento, segurança, pacotes e consumo ficam aqui. A conta de IA e o modelo padrão ficam em Conexões.</>,
 };
 
 export function ViewTip({ view, coord, other, onTour }: { view: View; coord: string; other: string; onTour?: () => void }) {

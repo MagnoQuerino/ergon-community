@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
+import { useResource } from '../lib/live.ts';
 import { useSurface } from '../lib/surface.ts';
 import { Icon } from './Icon.tsx';
 
@@ -26,12 +27,11 @@ export function WorkspaceSwitcher({ current }: { current: string }) {
 function WorkspacesPanel({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, outside: true });
-  const [list, setList] = useState<Workspace[] | null>(null);
+  const res = useResource<Workspace[]>('/api/workspaces', ['tasks.changed', 'runs.changed', 'agents.changed']);
+  const list = res.data;
   const [err, setErr] = useState<string | null>(null);
   const [novo, setNovo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = () => api.get<Workspace[]>('/api/workspaces').then(setList, (e) => setErr(errMsg(e)));
-  useEffect(() => { void load(); }, []);
 
   const act = async (fn: () => Promise<unknown>, depois: () => void) => {
     setBusy(true); setErr(null);

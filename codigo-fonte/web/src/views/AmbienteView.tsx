@@ -13,7 +13,10 @@ import { typeOf } from '../../../shared/city.ts';
 
 // palco e loja carregados à parte, para não pesar o primeiro acesso
 const Scene = lazy(() => import('../iso/IsoScene.tsx'));
-const StoreDialog = lazy(() => import('../iso/StoreDialog.tsx'));
+const loadStore = () => import('../iso/StoreDialog.tsx');
+const StoreDialog = lazy(loadStore);
+// a loja já vem carregada quando a pessoa clica num lote (abrir só mostra, sem esperar)
+if (typeof window !== 'undefined') window.setTimeout(() => { void loadStore().catch(() => undefined); }, 3000);
 
 /** Alexandre Magno passeia pela ágora: não é agente e não conversa — o clique mostra a bio. */
 const FOUNDER_BIO = {

@@ -1,5 +1,21 @@
 # Novidades
 
+## 1.1.0-rc.10 (pré-versão de teste)
+
+- **Telas prontas:** trocar de menu e abrir janelas mostra o que já está montado, sem itens aparecendo e mudando de
+  lugar; o app desktop abre direto, sem uma tela com botão que some em seguida.
+- **Desinstalar:** não trava mais quando o Windows demora a responder; o que faltar é apagado no próximo login.
+- **Ferramentas pela conversa:** peça a qualquer agente para ligar Executar código ou Terminal; a coordenação pede a
+  sua senha na conversa com ela. Lembretes com data liberados (viram tarefas suas com prazo).
+- **Andamento:** 5 trabalhos ao mesmo tempo por padrão.
+- **Segurança:** as opções aparecem por trás do pedido de senha ("Desbloquear opções de segurança").
+- **Conexões:** o modelo padrão aparece assim que a conta de IA conecta.
+- **Rotinas:** o detalhe das rotinas longas não fica mais em branco ao rolar.
+- **Skins:** os retratos dos agentes vestem os personagens da skin; a janela de construção mostra os prédios e os
+  nomes da skin.
+- **Loja:** prévias com a cidade (skins e temas) e com os setores (equipes); explicação de cada categoria; guia técnico
+  e SKILL.md para criar pacotes (à mão ou com uma IA).
+
 ## 1.1.0-rc.9 (pré-versão de teste)
 
 - **Loja em galeria:** busca, categorias, paginação, cartões com prévia e página de detalhe para cada pacote.

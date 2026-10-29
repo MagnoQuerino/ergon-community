@@ -9,7 +9,7 @@ import { ModelSelect } from './AgentProfile.tsx';
  * pessoa mais mexe. Vale para os agentes sem modelo próprio; cada agente pode ter o seu, no perfil dele.
  */
 export function ModeloPadrao({ onChanged }: { onChanged?: () => void }) {
-  const catalog = useResource<ModelCatalog>('/api/ai/models', []);
+  const catalog = useResource<ModelCatalog>('/api/ai/models', ['ai.changed']);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [def, setDef] = useState<{ model: string | null; provider: string | null }>({ model: null, provider: null });
   const [confirm, setConfirm] = useState<string | null>(null);

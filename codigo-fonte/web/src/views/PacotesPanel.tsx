@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { api, errMsg, postForBlob } from '../lib/api.ts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { paintFx, paintPet, type FxSpec, type PetSpec } from '../iso/cosmetics.ts';
 import { figureSprite, lookFor } from '../iso/figures.ts';
 import { RES } from '../iso/projection.ts';
-import { THEMES } from '../iso/theme.ts';
+import { THEMES, type Theme } from '../iso/theme.ts';
+import { drawCityThumb, defaultLooks } from '../iso/cityThumb.ts';
+import { agentSkinLook, skinTheme } from '../iso/skin.ts';
+import { AgentAvatar } from '../components/AgentAvatar.tsx';
+import type { SkinData } from '../../../shared/skin.ts';
 import { useSurface } from '../lib/surface.ts';
+import { Icon } from '../components/Icon.tsx';
 
 interface Installed { id: string; packageId: string; version: string; kind: string; title: string; verified: boolean; active: boolean; installedAt: string }
 interface Preview { packageId: string; version: string; kind: string; title: string; summary: string; verified: boolean; installable: boolean; reason: string | null; changes: string[] }
@@ -17,7 +22,6 @@ const KIND: Record<string, string> = { skin: 'Skin da cidade', 'city-theme': 'Te
  * Configurações › Pacotes: instalar um .ergon (tema, efeitos, pets, aparências, equipe) com prévia e desfazer.
  * Pacote é só dado: não executa nada, não dá ferramenta nem acesso. Sem assinatura da loja aparece "não verificado".
  */
-/** Editor simples: monta um efeito, um pet ou um tema da cidade; ver na cidade (aplica com desfazer) ou baixar o .ergon. */
 type PreviewAgent = { name: string; color: string; role?: string; char_key?: string | null; look_seed?: number | null };
 const PW = 44; const PH = 34; // prévia em unidades da pixel art (× RES no canvas), mostrada 4× para ver o detalhe
 
@@ -46,51 +50,12 @@ function Preview({ agent, fx, pet }: { agent: PreviewAgent | null; fx: FxSpec | 
   return <canvas ref={ref} width={PW * RES} height={PH * RES} role="img" aria-label={`Prévia em ${agent?.name ?? 'um agente'}`} style={{ width: PW * 4, height: PH * 4, imageRendering: 'pixelated', borderRadius: 8 }} />;
 }
 
-function Editor({ agents, busy, onBuilt, onError }: { agents: PreviewAgent[]; busy: boolean; onBuilt: (b: Blob, title: string, how: 'ver' | 'baixar') => Promise<void>; onError: (t: string) => void }) {
-  const [kind, setKind] = useState<'fx' | 'pet' | 'city-theme'>('fx');
-  const [title, setTitle] = useState('Minha aura');
-  const [target, setTarget] = useState('all');
-  const [effect, setEffect] = useState('aura');
-  const [color, setColor] = useState('#66ccff');
-  const [intensity, setIntensity] = useState(0.7);
-  const [species, setSpecies] = useState('gato');
-  const [base, setBase] = useState<'dia' | 'noite'>('dia');
-  const [bg, setBg] = useState('#d8c8a0');
-  const [gold, setGold] = useState('#e0b040');
-  const tgt = target === 'all' ? { all: true } : { agentName: target };
-  const data = kind === 'fx' ? { effects: [{ target: tgt, effect, color, intensity }] } : kind === 'pet' ? { pets: [{ target: tgt, species, color }] } : { theme: { base, colors: { bg, gold } } };
-  const go = async (how: 'ver' | 'baixar') => { try { await onBuilt(await postForBlob('/api/packages/build', { kind, title, data }), title, how); } catch (e) { onError(errMsg(e)); } };
-  return (
-    <section className="card">
-      <h3>Criar</h3>
-      <p className="muted">Monte um efeito, um pet ou as cores da cidade, veja aplicado e baixe o .ergon para guardar ou compartilhar.</p>
-      <div className="row row--wrap">
-        <label className="field">Tipo<select value={kind} onChange={(e) => setKind(e.target.value as 'fx')}><option value="fx">Efeito</option><option value="pet">Pet</option><option value="city-theme">Cores da cidade</option></select></label>
-        <label className="field">Nome<input value={title} maxLength={60} onChange={(e) => setTitle(e.target.value)} /></label>
-        {kind !== 'city-theme' && <label className="field">Em quem<select value={target} onChange={(e) => setTarget(e.target.value)}><option value="all">Todos</option>{agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}</select></label>}
-        {kind === 'fx' && <label className="field">Efeito<select value={effect} onChange={(e) => setEffect(e.target.value)}><option value="aura">Aura</option><option value="fire_circle">Círculo de fogo</option><option value="celestial_glow">Brilho celeste</option><option value="fire_trail">Rastro de fogo</option></select></label>}
-        {kind === 'pet' && <label className="field">Pet<select value={species} onChange={(e) => setSpecies(e.target.value)}><option value="gato">Gato</option><option value="coruja">Coruja</option><option value="cao">Cão</option><option value="tartaruga">Tartaruga</option></select></label>}
-        {kind !== 'city-theme' && <label className="field">Cor<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>}
-        {kind === 'fx' && <label className="field">Intensidade<input type="range" min={0} max={1} step={0.1} value={intensity} onChange={(e) => setIntensity(Number(e.target.value))} /></label>}
-        {kind === 'city-theme' && <>
-          <label className="field">Base<select value={base} onChange={(e) => setBase(e.target.value as 'dia')}><option value="dia">Dia</option><option value="noite">Noite</option></select></label>
-          <label className="field">Chão<input type="color" value={bg} onChange={(e) => setBg(e.target.value)} /></label>
-          <label className="field">Dourado<input type="color" value={gold} onChange={(e) => setGold(e.target.value)} /></label>
-        </>}
-      </div>
-      {kind !== 'city-theme' && <Preview agent={agents.find((a) => a.name === target) ?? agents[0] ?? null} fx={kind === 'fx' ? { effect, color, intensity } : null} pet={kind === 'pet' ? { species, color } : null} />}
-      <div className="row row--wrap">
-        <button className="btn btn--primary" disabled={busy || title.trim().length < 2} onClick={() => void go('ver')}>Ver na cidade</button>
-        <button className="btn" disabled={busy || title.trim().length < 2} onClick={() => void go('baixar')}>Baixar .ergon</button>
-      </div>
-    </section>
-  );
-}
-
 interface CatalogPreview {
   swatches: string[]; names: string[]; tagline?: string;
   fx?: { effect: string; color: string; intensity: number }; pet?: { species: string; color: string };
   images: number; tags: string[];
+  skin?: SkinData; theme?: { base: 'dia' | 'noite'; colors: Record<string, string> };
+  agents?: Array<{ name: string; role: string; color: string; charKey: string | null; coordinator: boolean }>; sectors?: string[];
 }
 interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
 
@@ -102,10 +67,62 @@ const CATEGORIAS: Array<{ k: string; l: string }> = [
 const PRINCIPAIS = new Set(['skin', 'city-theme', 'fx', 'pet', 'team-blueprint']);
 const POR_PAGINA = 9;
 
-/** Prévia de um pacote na galeria: a imagem dele; senão, efeito e pet desenhados num agente; senão, as cores e os nomes. */
+/** "Foto" da cidade com a skin ou o tema do pacote: os mesmos prédios, chão e moradores da cidade. */
+function CidadePrevia({ theme, looks, label }: { theme: Theme; looks: ReturnType<typeof defaultLooks>; label: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const c = ref.current; const b = box.current; if (!c || !b) return;
+    const paint = () => { const w = Math.max(160, b.clientWidth); const h = Math.max(110, b.clientHeight); c.style.width = `${w}px`; c.style.height = `${h}px`; drawCityThumb(c, theme, looks, w, h); };
+    paint();
+    const ro = new ResizeObserver(paint); ro.observe(b);
+    return () => ro.disconnect();
+  }, [theme, looks]);
+  return <span ref={box} className="loja-previa__cidade"><canvas ref={ref} role="img" aria-label={label} /></span>;
+}
+
+/** Tema do pacote (cores sobre o dia ou a noite), como a cidade aplica. */
+function temaDoPacote(t: { base: 'dia' | 'noite'; colors: Record<string, string> }): Theme {
+  const base = THEMES[t.base] ?? THEMES.dia;
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(t.colors)) if (typeof out[k] === 'string' && /^#[0-9a-f]{6}$/i.test(v)) out[k] = v;
+  return out as unknown as Theme;
+}
+
+/** Equipe do pacote: os setores (o que muda de uma área para outra) e quem vem nela. */
+function EquipePrevia({ p }: { p: CatalogPreview }) {
+  const ag = p.agents ?? [];
+  const setores = p.sectors ?? [];
+  return (
+    <span className="loja-previa__equipe">
+      <span className="loja-previa__setores">
+        {setores.slice(0, 4).map((x) => <span key={x} className="loja-previa__setor">{x}</span>)}
+        {setores.length > 4 && <span className="loja-previa__setor">+{setores.length - 4}</span>}
+      </span>
+      <span className="loja-previa__rostos">
+        {ag.slice(0, 6).map((a, i) => <AgentAvatar key={i} agent={{ name: a.name, color: a.color, role: a.role, char_key: a.charKey, look_seed: null }} size={24} />)}
+        <span className="loja-previa__conta">{ag.length} agentes</span>
+      </span>
+    </span>
+  );
+}
+
+/** Prévia de um pacote: a imagem dele; senão, a cidade com a skin/tema, a equipe, ou o efeito/pet num agente. */
 function PreviaPacote({ item, agents }: { item: CatalogItem; agents: PreviewAgent[] }) {
   const p = item.preview;
+  const cena = useMemo(() => {
+    if (p?.skin) {
+      const th = skinTheme(THEMES.dia, p.skin, 'dia');
+      const chars = new Map(p.skin.characters.map((_, i) => [`c${i}`, i]));
+      const looks = p.skin.characters.slice(0, 3).map((c, i) => agentSkinLook({ id: `c${i}`, name: c.name, color: '#3a6ea5' }, { data: p.skin!, characters: chars }, th));
+      return { th, looks: looks.length ? looks : defaultLooks(th) };
+    }
+    if (p?.theme) { const th = temaDoPacote(p.theme); return { th, looks: defaultLooks(th) }; }
+    return null;
+  }, [p]);
   if (p?.images) return <img className="loja-previa__img" src={`/api/packages/catalog/official/${encodeURIComponent(item.id)}/preview/0`} alt="" loading="lazy" />;
+  if (cena) return <CidadePrevia theme={cena.th} looks={cena.looks} label={`Prévia da cidade: ${item.title}`} />;
+  if (p?.agents?.length) return <EquipePrevia p={p} />;
   if (p?.fx || p?.pet) {
     return (
       <span className="loja-previa__vivo">
@@ -113,13 +130,17 @@ function PreviaPacote({ item, agents }: { item: CatalogItem; agents: PreviewAgen
       </span>
     );
   }
-  const cores = p?.swatches.length ? p.swatches : ['#d8c8a0', '#b88b5b', '#1d184b'];
-  return (
-    <span className="loja-previa__cores" style={{ background: `linear-gradient(135deg, ${cores.map((c, i) => `${c} ${Math.round((i / cores.length) * 100)}% ${Math.round(((i + 1) / cores.length) * 100)}%`).join(', ')})` }}>
-      {p?.names.length ? <span className="loja-previa__nomes">{p.names.slice(0, 4).join(' · ')}{p.names.length > 4 ? ` +${p.names.length - 4}` : ''}</span> : <span className="loja-previa__tipo">{KIND[item.kind] ?? item.kind}</span>}
-    </span>
-  );
+  return <span className="loja-previa__cores"><span className="loja-previa__tipo">{KIND[item.kind] ?? item.kind}</span></span>;
 }
+
+/** O que cada categoria é, em uma frase (as Equipes, principalmente, não são óbvias). */
+const SOBRE: Record<string, string> = {
+  skin: 'A cidade inteira com outra cara: cores, prédios, roupas, nomes das construções e os personagens que vestem a sua equipe. Só aparência.',
+  'city-theme': 'Só as cores da cidade (chão, céu, detalhes), de dia ou de noite.',
+  fx: 'Efeitos visuais em agentes: aura, brilho, círculo ou rastro de fogo.',
+  pet: 'Um bichinho que acompanha o agente pela cidade.',
+  'team-blueprint': 'Uma equipe pronta para uma área: setores, funções e o jeito de trabalhar de cada agente. Instalar acrescenta esses agentes e setores ao seu workspace (sem ferramentas novas, rotinas pausadas); nada do que você já tem é apagado, e desfazer tira tudo o que entrou.',
+};
 
 /**
  * Loja em galeria, sem conta e sem pagamento: os oficiais vêm com o Ergon (assinados, funcionam sem internet) e os
@@ -183,6 +204,7 @@ function Loja({ busy, agents, onInstall }: { busy: boolean; agents: PreviewAgent
         })}
         <label className="loja__novos small"><input type="checkbox" checked={soNovos} onChange={(e) => setSoNovos(e.target.checked)} /> Só os que não tenho</label>
       </div>
+      {SOBRE[cat] && <p className="hint loja__sobre">{SOBRE[cat]}</p>}
       {origem === 'comunidade' && aviso && <p className="muted" role="status">{aviso} <button className="link" disabled={lendo} onClick={() => void carregar(true)}>Tentar de novo</button></p>}
       {((origem === 'comunidade' && lendo) || (origem === 'oficiais' && !of.data)) && <Loading error={origem === 'oficiais' ? of.error : null} />}
       {!lendo && lista.length > 0 && !filtrada.length && <p className="muted">Nada com esses filtros.</p>}
@@ -234,6 +256,8 @@ function DetalhePacote({ item, agents, acao, onClose }: { item: CatalogItem; age
         <p className="muted small">{KIND[item.kind] ?? item.kind} · versão {item.version}{item.author ? ` · por ${item.author}` : ''} · {item.verified ? 'verificado' : 'não verificado'}</p>
         {p?.tagline && p.tagline !== item.summary && <p><i>{p.tagline}</i></p>}
         <p>{item.summary}</p>
+        {SOBRE[item.kind] && <p className="hint">{SOBRE[item.kind]}</p>}
+        {item.kind === 'team-blueprint' && p?.sectors?.length ? <p className="small"><b>Setores:</b> {p.sectors.join(', ')}</p> : null}
         {p?.names.length ? <p className="small"><b>{item.kind === 'team-blueprint' ? 'Na equipe' : 'Personagens'}:</b> {p.names.join(', ')}</p> : null}
         {p?.swatches.length ? <div className="loja-detalhe__cores" aria-label="Cores">{p.swatches.map((c) => <span key={c} style={{ background: c }} title={c} />)}</div> : null}
         {p?.tags.length ? <p className="small muted">{p.tags.map((t) => `#${t}`).join(' ')}</p> : null}
@@ -281,12 +305,15 @@ export function PacotesPanel({ agents = [] }: { agents?: PreviewAgent[] }) {
         try { await api.post(url, { id: item.id }); setMsg({ kind: 'ok', text: `"${item.title}" aplicado. Dá para desfazer em Instalados.` }); res.reload(); window.dispatchEvent(new Event('ergon:packages')); return true; }
         catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); return false; } finally { setBusy(false); }
       }} />
-      <Editor agents={agents} busy={busy} onBuilt={async (blob, title, how) => {
-        if (how === 'baixar') { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${title}.ergon`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); return; }
-        setBusy(true);
-        try { await api.post('/api/packages/install', blob); setMsg({ kind: 'ok', text: `"${title}" aplicado: veja na cidade. Dá para desfazer abaixo.` }); res.reload(); window.dispatchEvent(new Event('ergon:packages')); }
-        catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); }
-      }} onError={(t) => setMsg({ kind: 'error', text: t })} />
+      <section className="card">
+        <h3>Criar o seu pacote</h3>
+        <p className="muted">Um pacote .ergon é um arquivo só de dados (cores, prédios, roupas, personagens ou uma equipe). Dá para montar à mão, por quem programa, ou pedir a uma IA.</p>
+        <div className="row row--wrap">
+          <a className="btn" href="/guias/criar-pacotes-ergon.md" download="criar-pacotes-ergon.md"><Icon name="download" size={14} /> Guia técnico (.md)</a>
+          <a className="btn" href="/guias/SKILL.md" download="SKILL.md"><Icon name="download" size={14} /> SKILL.md para criar com IA</a>
+        </div>
+        <p className="hint">O guia explica o formato, cada tipo e como montar o arquivo. O SKILL.md é para colocar numa IA (Claude, ChatGPT, Gemini…): ela passa a saber criar e conferir o pacote para você. Depois, é só instalar aqui embaixo.</p>
+      </section>
       <section className="card">
         <h3>Instalar um pacote .ergon</h3>
         <p className="muted">Temas da cidade, efeitos (aura, círculo de fogo, brilho, rastro), pets, aparências e equipes. Um pacote só traz aparência e textos: nunca ferramentas, contas ou acesso aos seus dados.</p>

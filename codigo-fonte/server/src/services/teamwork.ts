@@ -56,7 +56,7 @@ export function parseProcessRequests(text: string | null): ProcessRequest[] {
 }
 
 /** Tira as linhas de controle ([[...]]) do texto mostrado ao usuário. */
-export const stripControl = (s: string): string => s.replace(/\[\[\s*(processar|pedir-ajuda|pedir-permissao|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b[^\]]*\]\]\s*/gi, '').trim();
+export const stripControl = (s: string): string => s.replace(/\[\[\s*(processar|pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b[^\]]*\]\]\s*/gi, '').trim();
 const words = (s: string) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 /** etapa intermediária com menos que isto não passa adiante (vai para a conferência, com o motivo) */
 const STEP_MIN_WORDS = 10;

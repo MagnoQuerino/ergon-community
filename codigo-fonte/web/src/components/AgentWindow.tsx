@@ -66,7 +66,7 @@ export function AgentWindow({ agent, state, initialTab = 'conversa', draft, conv
 }
 
 function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agent; state: AppState; reload: () => void; onClose: () => void; onDirty: (dirty: boolean) => void }) {
-  const catalog = useResource<ModelCatalog>('/api/ai/models', []);
+  const catalog = useResource<ModelCatalog>('/api/ai/models', ['ai.changed']);
   const tools = useResource<AgentTool[]>('/api/ai/tools', ['agents.changed']);
   const skills = useResource<Skill[]>('/api/ai/skills', []);
   const init = () => ({

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
-import { useResource } from '../lib/live.ts';
+import { emitLocal, useResource } from '../lib/live.ts';
 import type { AiStatus } from '../lib/types.ts';
 import { ErgonLogo, Loading } from '../brand/Brand.tsx';
 import { BrandLogo } from './BrandLogo.tsx';
@@ -58,7 +58,7 @@ export function AcordandoIa({ desde, erro, onRetry }: { desde: number; erro?: st
  * Configurações.
  */
 export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch?: boolean }) {
-  const status = useResource<AiStatus>('/api/ai/status', []);
+  const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const [login, setLogin] = useState<Login | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const desde = useRef(Date.now());
@@ -71,7 +71,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
   const conectado = (quem: string | null | undefined, modelo: string | null | undefined) => {
     const m = modelo ? ` Modelo para começar: ${modelo} (troque quando quiser em Configurações › IA da equipe ou no perfil de cada agente).` : '';
     setMsg({ kind: 'ok', text: `Conta conectada${quem ? ` (${quem})` : ''}. ${pitch ? 'A equipe já pode trabalhar de verdade.' : 'Os modelos dela já aparecem em Configurações.'}${m}` });
-    status.reload(); onChanged?.();
+    status.reload(); emitLocal('ai.changed'); onChanged?.();
   };
   useEffect(() => {
     if (!login) return;
@@ -97,7 +97,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
     return () => clearTimeout(t);
   }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
   const disconnect = async (provider: string) => {
-    try { await api.del(`/api/ai/accounts/${provider}`); status.reload(); onChanged?.(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
+    try { await api.del(`/api/ai/accounts/${provider}`); status.reload(); emitLocal('ai.changed'); onChanged?.(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
 
   if (!s) return <Loading error={status.error} />;
@@ -160,7 +160,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
           ))}
         </div>
       )}
-      {!pitch && s.available && <ChavePropria byok={s.byok ?? []} custom={s.byokCustom ?? []} onDone={(m) => conectado(null, m)} onRemoved={() => { status.reload(); onChanged?.(); }} />}
+      {!pitch && s.available && <ChavePropria byok={s.byok ?? []} custom={s.byokCustom ?? []} onDone={(m) => conectado(null, m)} onRemoved={() => { status.reload(); emitLocal('ai.changed'); onChanged?.(); }} />}
       {(!pitch || s.accounts.some((a) => a.connected)) && <p className="hint">{BILLING[s.default.billing]}</p>}
     </>
   );

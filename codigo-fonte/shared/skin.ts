@@ -75,6 +75,8 @@ export interface PaletteSpec { seeds: PaletteSeeds; colors?: Record<string, unkn
 
 export interface SkinData {
   id: string; name: string; tagline: string;
+  /** nome (e o tipo, em palavras comuns) de cada estrutura na loja de construção, pelo id do catálogo (shared/city.ts); só aparência */
+  structures?: Record<string, { name: string; common?: string }>;
   palette: { dia: PaletteSpec; noite: PaletteSpec };
   arch: {
     roof: typeof SKIN_ROOFS[number]; columns: typeof SKIN_COLUMNS[number]; frieze: boolean; trim: typeof SKIN_TRIMS[number];
@@ -203,7 +205,18 @@ export function validateSkin(input: unknown): { ok: true; skin: SkinData } | { o
   try { size = new TextEncoder().encode(JSON.stringify(input) ?? '').length; } catch { return { ok: false, errors: ['skin ilegível'] }; }
   if (size > 200_000) return { ok: false, errors: ['skin grande demais'] };
   const d = input as Record<string, unknown>;
-  if (!only(d, ['id', 'name', 'tagline', 'palette', 'arch', 'figures', 'decor', 'ground', 'pets', 'characters', 'npc'], 'skin', e)) return { ok: false, errors: e };
+  if (!only(d, ['id', 'name', 'tagline', 'structures', 'palette', 'arch', 'figures', 'decor', 'ground', 'pets', 'characters', 'npc'], 'skin', e)) return { ok: false, errors: e };
+  if (d.structures !== undefined) {
+    const st = d.structures as Record<string, unknown>;
+    if (!st || typeof st !== 'object' || Array.isArray(st) || Object.keys(st).length > 40) e.push('skin.structures: até 40 estruturas');
+    else for (const [k, v] of Object.entries(st)) {
+      if (!SLUG.test(k)) { e.push(`skin.structures.${k}: id do catálogo`); continue; }
+      if (!only(v, ['name', 'common'], `skin.structures.${k}`, e)) continue;
+      const o = v as Record<string, unknown>;
+      text(o.name, 40, `skin.structures.${k}.name`, e);
+      if (o.common !== undefined) text(o.common, 40, `skin.structures.${k}.common`, e);
+    }
+  }
   if (typeof d.id !== 'string' || !SLUG.test(d.id)) e.push('skin.id: minúsculas, números e hífen');
   text(d.name, 60, 'skin.name', e); text(d.tagline, 200, 'skin.tagline', e);
   if (only(d.palette, ['dia', 'noite'], 'skin.palette', e)) { palette(d.palette.dia, 'skin.palette.dia', e); palette(d.palette.noite, 'skin.palette.noite', e); }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, errMsg, requestId } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import { openCard } from '../lib/open.ts';
+import { openCard, openConversation } from '../lib/open.ts';
 import { PROPOSAL_KIND, stripControl, type Agent, type AiStatus, type Conversation, type Message, type Proposal, type RequestPayload } from '../lib/types.ts';
 import { ConfirmPopup } from './ConfirmPopup.tsx';
 import { Icon } from './Icon.tsx';
@@ -112,6 +112,20 @@ function PermissionCard({ p, onDone, onReject }: { p: Proposal; onDone: () => vo
   );
 }
 
+/** Pedido de ligar uma ferramenta protegida passado à coordenação: o caminho até a conversa onde a senha é pedida. */
+function HandoffCard({ p }: { p: Proposal }) {
+  const d = (() => { try { return JSON.parse(p.payload ?? '{}') as { coordinatorId?: string; coordinator?: string; conversationId?: string }; } catch { return {}; } })();
+  return (
+    <div className="perm-card perm-card--handoff">
+      <div className="perm-card__head"><Icon name="lock" size={16} /> <b>Pedido passado {d.coordinator ? `a ${d.coordinator}` : 'à coordenação'}</b></div>
+      <p className="perm-card__what">{p.summary}</p>
+      {d.coordinatorId && d.conversationId && (
+        <div className="row"><button className="btn btn--sm btn--primary" onClick={() => openConversation(d.coordinatorId, d.conversationId)}><Icon name="chat" size={14} /> Abrir a conversa e confirmar</button></div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Pergunta com opções que o agente faz (ex.: no preparo de uma rotina): um clique responde; "outra resposta" deixa
  * escrever. Respondidas todas as da rodada, elas vão juntas para o agente continuar.
@@ -199,7 +213,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   useEffect(() => { const t = window.setTimeout(() => input.current?.focus({ preventScroll: true }), 60); return () => window.clearTimeout(t); }, [convId, agent.id]);
   const [hint, setHint] = useState<string | null>(null);
   // sem nenhum provedor de IA conectado, os agentes não conversam: em toda tentativa, o aviso com "Conectar agora"
-  const ai = useResource<AiStatus>('/api/ai/status', []);
+  const ai = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const semIa = !!ai.data && ai.data.executor === 'real' && !ai.data.accounts.some((x) => x.connected) && !(ai.data.byok ?? []).some((x) => x.connected) && !ai.data.default.model;
   const [avisoIa, setAvisoIa] = useState(false);
 
@@ -286,6 +300,8 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           <RequestCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} />
         ) : p.kind === 'question' ? (
           <QuestionCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} />
+        ) : p.kind === 'handoff' ? (
+          <HandoffCard key={p.id} p={p} />
         ) : p.kind === 'permission' && p.status === 'proposed' ? (
           <PermissionCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} onReject={() => decide(p.id, 'reject')} />
         ) : (

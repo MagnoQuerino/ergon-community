@@ -20,8 +20,8 @@ describe('limite de processos: padrão da máquina, escolha e teto do plano', ()
     assert.equal(machineDefault(128 * GB, 32), 6, 'não passa de 6 no automático');
   });
 
-  test('escolha guardada: automático, número (1 a 32) ou sem limite; o resto vale automático', () => {
-    assert.equal(parseChoice(null), 'auto');
+  test('escolha guardada: automático, número (1 a 32) ou sem limite; sem escolha, 5; o resto vale automático', () => {
+    assert.equal(parseChoice(null), 5, 'sem escolha guardada: cinco ao mesmo tempo');
     assert.equal(parseChoice('ilimitado'), 'ilimitado');
     assert.equal(parseChoice('3'), 3);
     assert.equal(parseChoice('0'), 'auto');

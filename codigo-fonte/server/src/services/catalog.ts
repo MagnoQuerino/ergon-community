@@ -29,6 +29,10 @@ export interface CatalogPreview {
   swatches: string[]; names: string[]; tagline?: string;
   fx?: { effect: string; color: string; intensity: number }; pet?: { species: string; color: string };
   images: number; tags: string[];
+  /** para desenhar a prévia da cidade: a skin inteira (até 200 KB, já validada) ou as cores do tema */
+  skin?: unknown; theme?: { base: 'dia' | 'noite'; colors: Record<string, string> };
+  /** para a prévia da equipe: quem vem nela, por setor */
+  agents?: Array<{ name: string; role: string; color: string; charKey: string | null; coordinator: boolean }>; sectors?: string[];
 }
 export interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
 
@@ -54,6 +58,9 @@ export function previewOf(v: ValidatedPackage): CatalogPreview {
     swatches: [...new Set(swatches)].slice(0, 6), names: names.slice(0, 10), ...(tagline ? { tagline } : {}),
     ...(fx ? { fx: { effect: fx.effect, color: fx.color, intensity: fx.intensity } } : {}),
     ...(pet ? { pet: { species: pet.species, color: pet.color } } : {}),
+    ...(d.skin ? { skin: d.skin } : {}),
+    ...(d.theme ? { theme: d.theme } : {}),
+    ...(d.blueprint ? { agents: d.blueprint.agents.slice(0, 24).map((a) => ({ name: a.name, role: a.role, color: a.color, charKey: a.charKey, coordinator: a.coordinator })), sectors: d.blueprint.sectors.map((x) => x.name).slice(0, 12) } : {}),
     images: (v.manifest.preview ?? []).filter((p) => v.assets[p]).length, tags: (v.manifest.tags ?? []).slice(0, 8),
   };
 }

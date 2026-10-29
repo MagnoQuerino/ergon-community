@@ -54,11 +54,22 @@ consciente, só dados).
 Cada instalação guarda o que mudou (tema anterior, sementes anteriores, coordenação anterior, agentes e rotinas
 criados). Desfazer devolve isso; conversas, tarefas e rotinas da pessoa não são tocadas.
 
-## Editor simples
+## Criar um pacote
 
-Configurações › Pacotes › Criar monta um efeito, um pet ou as cores da cidade sem sair do aplicativo, com uma prévia
-animada num agente de verdade (o mesmo desenho da cidade, `web/src/iso/cosmetics.ts`, a qualquer hora do dia). O servidor
-(`POST /api/packages/build`, só com sessão) gera o `.ergon` com `package_id` `comunidade.local.<nome>`, valida com as
-mesmas regras da instalação e devolve o arquivo. "Ver na cidade" instala (com desfazer); "Baixar .ergon" salva para
-guardar ou compartilhar. Sai sem assinatura da loja ("não verificado"). O editor só monta tipos visuais: aparência,
-equipe, skill e plugin ficam de fora.
+Configurações › Pacotes › Criar o seu pacote oferece dois arquivos para baixar (em `web/public/guias/`): o guia técnico
+(`criar-pacotes-ergon.md`, para quem programa: formato, cada tipo, vocabulário da skin e como montar o ZIP) e um
+`SKILL.md` para colocar numa IA, que passa a saber criar e conferir o pacote. O editor de efeitos que existia na tela
+saiu; `POST /api/packages/build` continua para os testes e para exportar.
+
+## Prévias na loja
+
+Skins e temas aparecem como uma "foto" da cidade (`web/src/iso/cityThumb.ts`: chão, rua, três prédios e três
+moradores desenhados pelo mesmo código da cidade com a paleta e a arquitetura do pacote); equipes, com os setores e os
+retratos; efeitos e pets, num agente animado. O catálogo manda os dados para isso em `preview` (`skin`, `theme`,
+`agents`, `sectors`).
+
+## Nomes das estruturas na skin
+
+`skin.structures` (opcional) dá nome e tipo a cada estrutura na janela "Construir neste lote", pelo id do catálogo
+(`shared/city.ts`); a miniatura usa a arquitetura e as cores da skin. Só aparência. As skins oficiais instaladas antes
+desse campo pegam os nomes da versão atual pelo id.

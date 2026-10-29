@@ -117,10 +117,10 @@ export interface RecentConversation { id: string; agent_id: string; title: strin
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
 export const PROPOSAL_KIND: Record<string, string> = {
   question: 'pergunta', routine: 'rotina', routine_edit: 'ajuste de rotina', sector: 'setor', create_agent: 'novo agente', tools: 'ferramenta',
-  permission: 'permissão', edit_agent: 'agente', deactivate_agent: 'desativar', reactivate_agent: 'reativar', sector_edit: 'setor', sector_new: 'novo setor',
+  permission: 'permissão', handoff: 'passado à coordenação', edit_agent: 'agente', deactivate_agent: 'desativar', reactivate_agent: 'reativar', sector_edit: 'setor', sector_new: 'novo setor',
   task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card',
 };
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
@@ -159,7 +159,7 @@ export const SOURCE_LABEL: Record<string, string> = {
 };
 
 /** Remove as linhas de controle ([[...]]) que os agentes escrevem para o Ergon aplicar. */
-export const stripControl = (s: string): string => s.replace(/\[\[\s*(pedir-ajuda|pedir-permissao|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b[^\]]*\]\]\s*/gi, '').trim();
+export const stripControl = (s: string): string => s.replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b[^\]]*\]\]\s*/gi, '').trim();
 
 // Rotinas -------------------------------------------------------------------------------------------------
 export type RoutineTrigger = { kind: 'manual' } | { kind: 'schedule'; days: number[]; time: string; tz?: string };

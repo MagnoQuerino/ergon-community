@@ -382,7 +382,7 @@ button.chip--stat { font: inherit; font-size: 13px; }
 .store__note { font-size: 13px; margin: 10px 0 12px; }
 .store__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 12px; }
 .store__item { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--panel-2);
-  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; animation: dropin .3s ease both; }
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
 .store__item:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(29, 42, 51, .12); border-color: #c9bca4; }
 .store__item--off { opacity: .55; }
 .store__thumb { border-radius: 8px; flex: none; image-rendering: pixelated; align-self: center; }
@@ -1234,3 +1234,23 @@ body:has(.cdock) .tip { right: 100px; }
 .loja-detalhe__cores { display: flex; gap: 6px; margin: 4px 0 10px; }
 .loja-detalhe__cores span { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); }
 @media (max-width: 600px) { .loja__busca { max-width: none; margin-left: 0; } .loja__novos { margin-left: 0; } }
+
+/* Segurança trancada: as opções à vista, em desfoque, atrás do diálogo da senha */
+.seg-gate { position: relative; }
+.seg-gate__fundo { filter: blur(3px); opacity: .7; pointer-events: none; user-select: none; max-height: 70vh; overflow: hidden; }
+.seg-gate__dialogo { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 24px)); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(16, 24, 32, .22); padding: 16px 18px; }
+.seg-gate__dialogo h3 { margin: 0 0 6px; display: flex; align-items: center; gap: 6px; }
+.seg-gate__form { display: flex; gap: 8px; margin-top: 10px; }
+.seg-gate__form .input { flex: 1; min-width: 0; }
+
+/* prévias da loja: a cidade com a skin/tema e a equipe em retratos */
+.loja-previa { position: relative; }
+.loja-previa__cidade { position: absolute; inset: 0; display: block; overflow: hidden; }
+.loja-previa__cidade canvas { display: block; image-rendering: pixelated; }
+.loja-previa__equipe { display: grid; place-items: center; align-content: center; gap: 6px; width: 100%; height: 100%; padding: 10px; background: linear-gradient(160deg, #efe6d2, #e2d5b8); }
+.loja-previa__rostos { display: flex; align-items: center; justify-content: center; gap: 3px; }
+.loja-previa__conta { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.loja-previa__setores { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-width: 260px; }
+.loja-previa__setor { font-size: 11.5px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: rgba(255, 255, 255, .75); border: 1px solid rgba(16, 24, 32, .12); color: var(--ink); white-space: nowrap; }
+.loja-previa__mais { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: rgba(16, 24, 32, .55); color: #fff; font-size: 12px; font-weight: 600; }
+.loja__sobre { margin: -4px 0 10px; }

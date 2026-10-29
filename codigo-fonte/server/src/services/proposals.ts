@@ -20,7 +20,9 @@ export type Proposal =
   | { kind: 'create_agent'; name: string; role: string; sector: string }
   | { kind: 'tools'; agent: string; tool: string; action: 'dar' | 'tirar' }
   /** um agente precisa de uma ferramenta que executa código: só vale com a senha do usuário */
-  | { kind: 'permission'; agent: string; tool: string; reason: string }
+  | { kind: 'permission'; agent: string; tool: string; reason: string; origin?: string }
+  /** pedido de ligar uma ferramenta protegida feito a outro agente: passou à coordenação (a senha é pedida lá) */
+  | { kind: 'handoff'; coordinatorId: string; coordinator: string; conversationId: string; agent: string; tool: string }
   /** criar ou ajustar uma rotina (pela conversa com a coordenação ou pela recomendação semanal) */
   | RoutineProposal
   /** pergunta com opções que o agente faz na conversa; a resposta volta como mensagem do usuário */
@@ -40,6 +42,8 @@ export type Proposal =
 
 export interface LedgerItem { n: number; data: string; descricao: string; valor: number; documento: string; categoria: string; centro: string; confianca: string }
 
+/** De onde veio a tarefa proposta: uma rotina ou uma conversa (lembrete com data pedido a um agente). */
+const byWho = (src: string) => (src.startsWith('conversa com ') ? `na ${src}` : `pela rotina ${src}`);
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * [[propor-tarefa titulo="..." responsavel="Nome ou você" prazo="AAAA-MM-DD" detalhe="..." origem="E3"]] na resposta de
@@ -80,6 +84,18 @@ export function parsePermissionRequests(text: string | null, agent: string): Pro
     return [{ kind: 'permission', agent, tool, reason: reason || 'executar o seu pedido' }];
   }
   return [];
+}
+
+/** [[liberar-ferramenta ferramenta="terminal" agente="Nome" motivo="..."]] (um por resposta); agente vazio = a equipe. */
+export function parseToolRelease(text: string | null): { tool: string; agent: string; reason: string } | null {
+  for (const m of (text ?? '').matchAll(/\[\[\s*liberar-ferramenta\b([^\]]{0,600})\]\]/gi)) {
+    const tool = toolId(attr(m[1], 'ferramenta') ?? '');
+    if (!tool || !TOOLS[tool]?.guarded) continue;
+    const who = (attr(m[1], 'agente') ?? '').trim();
+    const reason = (m[1].match(/motivo\s*=\s*["“]([^"”]{3,400})["”]/i)?.[1] ?? '').trim();
+    return { tool, agent: /^(a\s+)?equipe$|^todos$|^-$/i.test(who) ? '' : clip(who, 60), reason: reason || 'pedido seu na conversa' };
+  }
+  return null;
 }
 
 const attr = (s: string, k: string): string | null => {
@@ -199,7 +215,7 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   }
   if (p.kind === 'task') {
     const who = p.assignee ? findAgent(db, workspaceId, p.assignee)?.name ?? p.assignee : null;
-    return `Criar a tarefa "${p.title}"${who ? ` para ${who}` : ' (sua)'}${p.due ? `, prazo ${p.due.slice(8, 10)}/${p.due.slice(5, 7)}` : ''} — proposta pela rotina ${p.routine}${p.origin ? ` (de ${p.origin})` : ''}${p.detail ? `\n${clip(p.detail, 300)}` : ''}`;
+    return `Criar a tarefa "${p.title}"${who ? ` para ${who}` : ' (sua)'}${p.due ? `, prazo ${p.due.slice(8, 10)}/${p.due.slice(5, 7)}` : ''} — proposta ${byWho(p.routine)}${p.origin ? ` (de ${p.origin})` : ''}${p.detail ? `\n${clip(p.detail, 300)}` : ''}`;
   }
   if (p.kind === 'ledger') {
     const ent = p.items.filter((i) => i.valor > 0).reduce((x, i) => x + i.valor, 0); const sai = p.items.filter((i) => i.valor < 0).reduce((x, i) => x + i.valor, 0);
@@ -211,7 +227,8 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
     return `Mover ${findAgent(db, workspaceId, p.agent)?.name ?? p.agent} para o setor ${s?.name ?? p.sector}`;
   }
   if (p.kind === 'tools') return `${p.action === 'dar' ? 'Liberar' : 'Tirar'} ${TOOLS[p.tool]?.label ?? p.tool} ${p.action === 'dar' ? 'para' : 'de'} ${findAgent(db, workspaceId, p.agent)?.name ?? p.agent}`;
-  if (p.kind === 'permission') return `${p.agent} pede permissão para usar ${TOOLS[p.tool]?.label ?? p.tool}: ${p.reason}`;
+  if (p.kind === 'permission') return p.agent ? `${p.agent} pede permissão para usar ${TOOLS[p.tool]?.label ?? p.tool}: ${p.reason}` : `Ligar ${TOOLS[p.tool]?.label ?? p.tool} para a equipe: ${p.reason}`;
+  if (p.kind === 'handoff') return `Pedido passado a ${p.coordinator}: ligar ${TOOLS[p.tool]?.label ?? p.tool}${p.agent ? ` para ${p.agent}` : ' para a equipe'}. A senha é pedida na conversa com ${p.coordinator}.`;
   return `Criar o agente ${p.name} — ${p.role} (setor: ${/^autom/i.test(fold(p.sector)) ? 'automático' : sectorByName(db, workspaceId, p.sector)?.name ?? p.sector})`;
 }
 
@@ -220,9 +237,11 @@ export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { co
   db.tx(() => {
     for (const p of items) {
       db.run(`INSERT INTO agent_proposals (id, workspace_id, conversation_id, run_id, kind, payload, summary, status, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', ?)`,
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id('apr'), workspaceId, ctx.conversationId, ctx.runId, p.kind, db.seal(workspaceId, JSON.stringify(p)),
-        db.seal(workspaceId, clip(describe(db, workspaceId, p), ['routine', 'routine_edit', 'edit_agent'].includes(p.kind) ? 1200 : 300)), now());
+        db.seal(workspaceId, clip(describe(db, workspaceId, p), ['routine', 'routine_edit', 'edit_agent'].includes(p.kind) ? 1200 : 300)),
+        // o aviso de pedido passado à coordenação não espera decisão (a senha é pedida lá)
+        p.kind === 'handoff' ? 'applied' : 'proposed', now());
     }
   });
   bus.publish(workspaceId, 'proposals.changed', { conversationId: ctx.conversationId });
@@ -326,7 +345,7 @@ export function answerQuestion(db: Db, bus: Bus, workspaceId: string, userId: st
 
 export function listProposals(db: Db, workspaceId: string, conversationId?: string | null) {
   return db.all(
-    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request') THEN payload END AS payload FROM agent_proposals
+    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff') THEN payload END AS payload FROM agent_proposals
       WHERE workspace_id = ? ${conversationId ? 'AND conversation_id = ?' : ''} ORDER BY created_at DESC LIMIT 50`,
     ...(conversationId ? [workspaceId, conversationId] : [workspaceId]));
 }
@@ -336,26 +355,29 @@ export function listProposals(db: Db, workspaceId: string, conversationId?: stri
  * pediu e liga o conjunto no motor. Devolve o que o chamador precisa para o agente continuar a conversa.
  */
 export async function grantPermission(db: Db, bus: Bus, workspaceId: string, userId: string, proposalId: string, enable: (toolId: string) => Promise<void>):
-  Promise<{ status: 'applied' | 'failed'; result: string; conversationId: string | null; agentId: string | null; tool: string }> {
+  Promise<{ status: 'applied' | 'failed'; result: string; conversationId: string | null; agentId: string | null; tool: string; origin: string | null }> {
   const row = db.get<{ kind: string; payload: string; status: string; conversation_id: string | null }>(
     'SELECT kind, payload, status, conversation_id FROM agent_proposals WHERE id = ? AND workspace_id = ?', proposalId, workspaceId);
   if (!row || row.kind !== 'permission') throw notFound('pedido de permissão');
   if (row.status !== 'proposed') throw new HttpError(409, 'decided', 'este pedido já foi decidido');
   const p = JSON.parse(row.payload) as Extract<Proposal, { kind: 'permission' }>;
-  const a = findAgent(db, workspaceId, p.agent);
+  // sem agente: só liga para a equipe (cada um usa se tiver no perfil)
+  const a = p.agent ? findAgent(db, workspaceId, p.agent) : undefined;
   let status: 'applied' | 'failed' = 'applied';
   let result: string;
   try {
-    if (!a) throw new HttpError(404, 'agent', `não encontrei o agente "${p.agent}"`);
+    if (p.agent && !a) throw new HttpError(404, 'agent', `não encontrei o agente "${p.agent}"`);
     await enable(p.tool);
-    const cur = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', a.id)?.tools ?? '[]') as string[];
-    if (!cur.includes(p.tool)) updateAgent(db, bus, workspaceId, userId, a.id, { tools: [...cur, p.tool] });
-    result = `${TOOLS[p.tool]?.label ?? p.tool} liberada para ${a.name}`;
+    if (a) {
+      const cur = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', a.id)?.tools ?? '[]') as string[];
+      if (!cur.includes(p.tool)) updateAgent(db, bus, workspaceId, userId, a.id, { tools: [...cur, p.tool] });
+      result = `${TOOLS[p.tool]?.label ?? p.tool} liberada para ${a.name}`;
+    } else result = `${TOOLS[p.tool]?.label ?? p.tool} ligada para a equipe`;
   } catch (err) { status = 'failed'; result = err instanceof Error ? err.message : 'falha'; }
   db.run('UPDATE agent_proposals SET status = ?, result = ?, decided_at = ? WHERE id = ?', status, db.seal(workspaceId, clip(result, 300)), now(), proposalId);
   audit(db, bus, { workspaceId, actorType: 'user', actorId: userId, action: `permission.${status}`, targetType: 'proposal', targetId: proposalId, evidence: { agent: p.agent, tool: p.tool, reason: p.reason }, result });
   bus.publish(workspaceId, 'proposals.changed', { conversationId: row.conversation_id });
-  return { status, result, conversationId: row.conversation_id, agentId: a?.id ?? null, tool: p.tool };
+  return { status, result, conversationId: row.conversation_id, agentId: a?.id ?? null, tool: p.tool, origin: p.origin ?? null };
 }
 
 /** Quem aplica as propostas de rotina (o serviço de rotinas, ligado pelo app). */
@@ -418,7 +440,7 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         // com responsável da equipe vai para o quadro da equipe (vira trabalho dele); sem, fica nas suas tarefas
         const a = p.assignee ? findAgent(db, workspaceId, p.assignee) : undefined;
         const t = createTask(db, bus, workspaceId, { type: 'user', id: userId }, {
-          title: p.title, description: [p.detail, `Proposta pela rotina ${p.routine}${p.origin ? ` (origem: ${p.origin})` : ''} e aprovada por você.`].filter(Boolean).join('\n\n'),
+          title: p.title, description: [p.detail, `Proposta ${byWho(p.routine)}${p.origin ? ` (origem: ${p.origin})` : ''} e aprovada por você.`].filter(Boolean).join('\n\n'),
           boardId: a ? defaultBoard(db, workspaceId).id : userBoard(db, workspaceId).id, agentId: a?.id ?? null, origin: 'chat', dueOn: p.due,
         });
         result = `tarefa #${t.number} criada${a ? ` para ${a.name}` : ' nas suas tarefas'}${p.assignee && !a ? ` (não achei "${p.assignee}" na equipe)` : ''}`;
@@ -444,6 +466,8 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         if (!s) throw new HttpError(404, 'sector', `não encontrei o setor "${p.sector}"`);
         const r = moveToSector(db, bus, workspaceId, { type: 'user', id: userId }, a.id, s.key);
         result = `${r.name} agora está no setor ${r.sector}`;
+      } else if (p.kind === 'handoff') {
+        throw new HttpError(409, 'decided', 'aviso: a autorização é feita na conversa com a coordenação');
       } else {
         const auto = /^autom/i.test(fold(p.sector));
         const s = auto ? null : sectorByName(db, workspaceId, p.sector);

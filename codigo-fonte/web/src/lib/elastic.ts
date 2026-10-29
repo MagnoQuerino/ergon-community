@@ -56,7 +56,9 @@ export function installElastic(): () => void {
   const onWheel = (e: WheelEvent) => {
     if (reduce.matches || e.defaultPrevented || e.ctrlKey) return;
     const start = e.target instanceof Element ? e.target : null;
-    if (!start || start.closest('canvas, [data-no-elastic], select, textarea')) return;
+    // painéis laterais e janelas ficam de fora: mover o conteúdo inteiro de uma camada fixa fazia o painel ficar em
+    // branco por um instante no fim da rolagem (detalhe das rotinas longas)
+    if (!start || start.closest('canvas, [data-no-elastic], select, textarea, .drawer, [role="dialog"]')) return;
     const ax: 'y' | 'x' = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey ? 'x' : 'y';
     const delta = ax === 'x' ? (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) : e.deltaY;
     if (!delta) return;

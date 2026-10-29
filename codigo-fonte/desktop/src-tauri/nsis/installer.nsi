@@ -1,5 +1,5 @@
-; Modelo do instalador do Ergon: cópia do installer.nsi do Tauri (@tauri-apps/cli 2.12.4), com quatro ajustes
-; marcados "Ergon:". Ao subir a versão do @tauri-apps/cli, copie o modelo novo e reaplique os quatro.
+; Modelo do instalador do Ergon: cópia do installer.nsi do Tauri (@tauri-apps/cli 2.12.4), com cinco ajustes
+; marcados "Ergon:". Ao subir a versão do @tauri-apps/cli, copie o modelo novo e reaplique os cinco.
 Unicode true
 ManifestDPIAware true
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
@@ -693,6 +693,9 @@ SectionEnd
 Section Install
   SetOutPath $INSTDIR
 
+  ; Ergon: instalando de novo, cancela um apagar do ambiente que ficou para o próximo login (desinstalação anterior)
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\RunOnce" "ErgonApagarAmbiente"
+
   !ifmacrodef NSIS_HOOK_PREINSTALL
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
@@ -943,19 +946,31 @@ Section Uninstall
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
 
-    ; Ergon: o ambiente próprio (WSL "Ergon", com a conta e os dados) e a pasta dele. O desinstalador é de 32 bits:
-    ; o wsl.exe de 64 bits fica em Sysnative.
+    ; Ergon: o ambiente próprio (WSL "Ergon", com a conta e os dados) e a pasta dele. O serviço do WSL às vezes
+    ; trava e o wsl.exe nunca volta: desliga a distro (20 s) e apaga (2 min) com prazo, pelo PowerShell de 64 bits
+    ; (acha o wsl.exe nativo). O comando vai codificado; o texto dele:
+    ;   $w="$env:windir\System32\wsl.exe";if(!(Test-Path $w)){exit 0};function P($a,$t){$p=Start-Process $w $a
+    ;   -WindowStyle Hidden -PassThru;if($p.WaitForExit($t)){1}else{try{$p.Kill()}catch{};0}};
+    ;   $x=P "--terminate Ergon" 20000;if(!(P "--unregister Ergon" 120000)){exit 9}
+    ; Estourou o prazo (9): o apagar fica para o próximo login e a desinstalação termina.
     DetailPrint "Apagando o ambiente do Ergon (conta e dados)..."
-    ${If} ${FileExists} "$WINDIR\Sysnative\wsl.exe"
-      StrCpy $1 "$WINDIR\Sysnative\wsl.exe"
+    ${If} ${FileExists} "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+      StrCpy $1 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
     ${Else}
-      StrCpy $1 "$WINDIR\System32\wsl.exe"
+      StrCpy $1 "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
     ${EndIf}
+    StrCpy $0 0
     ${If} ${FileExists} "$1"
-      nsExec::ExecToLog '"$1" --unregister Ergon'
+      nsExec::ExecToLog '"$1" -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand JAB3AD0AIgAkAGUAbgB2ADoAdwBpAG4AZABpAHIAXABTAHkAcwB0AGUAbQAzADIAXAB3AHMAbAAuAGUAeABlACIAOwBpAGYAKAAhACgAVABlAHMAdAAtAFAAYQB0AGgAIAAkAHcAKQApAHsAZQB4AGkAdAAgADAAfQA7AGYAdQBuAGMAdABpAG8AbgAgAFAAKAAkAGEALAAkAHQAKQB7ACQAcAA9AFMAdABhAHIAdAAtAFAAcgBvAGMAZQBzAHMAIAAkAHcAIAAkAGEAIAAtAFcAaQBuAGQAbwB3AFMAdAB5AGwAZQAgAEgAaQBkAGQAZQBuACAALQBQAGEAcwBzAFQAaAByAHUAOwBpAGYAKAAkAHAALgBXAGEAaQB0AEYAbwByAEUAeABpAHQAKAAkAHQAKQApAHsAMQB9AGUAbABzAGUAewB0AHIAeQB7ACQAcAAuAEsAaQBsAGwAKAApAH0AYwBhAHQAYwBoAHsAfQA7ADAAfQB9ADsAJAB4AD0AUAAgACIALQAtAHQAZQByAG0AaQBuAGEAdABlACAARQByAGcAbwBuACIAIAAyADAAMAAwADAAOwBpAGYAKAAhACgAUAAgACIALQAtAHUAbgByAGUAZwBpAHMAdABlAHIAIABFAHIAZwBvAG4AIgAgADEAMgAwADAAMAAwACkAKQB7AGUAeABpAHQAIAA5AH0A'
       Pop $0
     ${EndIf}
     RmDir /r "$LOCALAPPDATA\ErgonAmbiente"
+    ${If} $0 == 9
+      WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\RunOnce" "ErgonApagarAmbiente" '"$WINDIR\System32\cmd.exe" /c "$WINDIR\System32\wsl.exe --unregister Ergon & rmdir /s /q "$LOCALAPPDATA\ErgonAmbiente""'
+      DetailPrint "O Windows não respondeu a tempo: o ambiente termina de ser apagado no próximo login."
+      IfSilent +2
+      MessageBox MB_ICONINFORMATION|MB_OK "O Windows demorou para responder ao apagar o ambiente do Ergon.$\r$\n$\r$\nA desinstalação terminou. A conta e os dados são apagados sozinhos na próxima vez que você entrar no Windows."
+    ${EndIf}
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\RunOnce" "ErgonInstalacao"
   ${EndIf}
 

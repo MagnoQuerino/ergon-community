@@ -30,6 +30,7 @@ const ACORDANDO = ['Acordando a cidade…', 'Os filósofos estão chegando à á
 let instalando = false;
 let ultimo = null;
 let esperando = null;
+let verificado = false;
 const registro = [];
 
 function fase(texto, atencao = false) {
@@ -104,15 +105,23 @@ async function verificar() {
     $('titulo').textContent = 'Não foi possível verificar o Ergon'; $('texto').textContent = String(e);
     botoes(['tentar']); return;
   }
-  mostrar(d);
+  const primeira = !verificado; verificado = true; ultimo = d;
   if (d.estado === 'pronto' && d.confirmado && !d.avisos.length) {
-    // pronto e confirmado: abre sozinho (o "Abrir" continua lá se algo segurar)
-    setTimeout(() => agir('abrir'), 350);
-  } else if (d.estado === 'iniciando') {
+    // pronto e confirmado: abre direto, sem mostrar uma tela com botão que some em seguida. O "Abrir" só aparece
+    // se a janela não trocar em alguns segundos.
+    carregando(true); fase('Pronto'); frases(['A cidade está pronta. Bem-vindo à ágora!']);
+    agir('abrir');
+    esperando = setTimeout(() => mostrar(d), 6000);
+    return;
+  }
+  // ao abrir o app com o ambiente desligado: liga direto (abrir o Ergon é querer o Ergon ligado)
+  if (primeira && d.estado === 'parado' && d.acoes.includes('iniciar') && !d.avisos.length) { agir('iniciar'); return; }
+  // depois de reiniciar o Windows, a instalação continua sozinha (direto, sem mostrar o convite antes)
+  if (d.continuar && d.acoes.includes('instalar')) { agir('instalar'); return; }
+  mostrar(d);
+  if (d.estado === 'iniciando') {
     esperando = setTimeout(verificar, 3000);
   }
-  // depois de reiniciar o Windows, a instalação continua sozinha
-  if (d.continuar && d.acoes.includes('instalar')) agir('instalar');
   if (location.hash === '#iniciar') {
     history.replaceState(null, '', location.pathname);
     if (d.acoes.includes('iniciar')) agir('iniciar');

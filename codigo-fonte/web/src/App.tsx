@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { api, setCsrf, setGuard } from './lib/api.ts';
 import { startActivity } from './lib/activity.ts';
-import { startLive, useLiveStatus, useResource } from './lib/live.ts';
+import { clearResourceCache, prefetchResources, startLive, useLiveStatus, useResource } from './lib/live.ts';
 import type { AppState, AuthState, Me, Usage, VersionInfo, View } from './lib/types.ts';
 import { AuthFlow, AutoUnlockPrompt, LockOverlay, PersonOpenScreen, ProtectScreen, ReauthDialog } from './components/AuthFlow.tsx';
 import { ErgonLogo, Splash } from './brand/Brand.tsx';
@@ -53,7 +53,7 @@ export function App() {
   const check = async () => {
     try {
       const s = await api.get<AuthState>('/api/auth/state');
-      if (s.sealed || s.needsSetup || !s.authenticated) { release(lockWaiters, false); release(reauthWaiters, false); setLocked(false); return setAuth({ state: 'out', st: s }); }
+      if (s.sealed || s.needsSetup || !s.authenticated) { clearResourceCache(); release(lockWaiters, false); release(reauthWaiters, false); setLocked(false); return setAuth({ state: 'out', st: s }); }
       const me = await api.get<Me>('/api/me');
       setCsrf(me.csrf);
       initPrefs(me.prefs);
@@ -73,8 +73,11 @@ export function App() {
     return () => setGuard(null);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // tela trancada não guarda os dados das telas na memória da interface
+  useEffect(() => { if (locked) clearResourceCache(); }, [locked]);
   const logout = async () => {
     await api.post('/api/auth/logout').catch(() => {});
+    clearResourceCache();
     release(lockWaiters, false); release(reauthWaiters, false); setLocked(false); setReauth(false);
     void check();
   };
@@ -124,6 +127,13 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed', 'agents.changed']);
   // versão do servidor (relida ao reconectar): servidor atualizado com esta aba aberta pede recarregar
   const ver = useResource<VersionInfo>('/api/version', []);
+  // as outras telas já buscadas por baixo: trocar de menu só mostra o que está pronto
+  useEffect(() => {
+    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations',
+      '/api/conversations/recent', '/api/artifacts', '/api/routines', '/api/routines/library', '/api/routines/recommend', '/api/people', '/api/packages',
+      '/api/packages/catalog/official', '/api/decisions', '/api/saude', '/api/workspaces', '/api/packages/cosmetics']), 400);
+    return () => clearTimeout(t);
+  }, []);
   const [view, setView] = useState<View>(() => (location.hash.slice(1).split('?')[0] as View) || 'ambiente');
   // janela do agente (conversas, perfil, atividade), aberta de qualquer tela
   const [win, setWin] = useState<{ id: string; tab: 'conversa' | 'perfil' | 'atividade'; draft: string | null; conversationId: string | null } | null>(null);

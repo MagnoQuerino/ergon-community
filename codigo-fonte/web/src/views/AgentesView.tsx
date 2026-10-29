@@ -120,7 +120,7 @@ export function AgentesView({ state, reload, onOpen }: { state: AppState; reload
               {work.map((s) => { const o = occ(s.floors); return <option key={s.id} value={s.id} disabled={o.active >= o.slots}>{s.name} ({o.slots - o.active} vaga{o.slots - o.active === 1 ? '' : 's'})</option>; })}
             </select>
           </label>
-          <button className="btn btn--primary" type="submit" disabled={busy || !form.name.trim() || !form.role.trim()}>Criar</button>
+          <button className="btn btn--primary" type="submit" disabled={busy}>Criar</button>
         </form>
         <p className="hint">Começa com as instruções, métodos e ferramentas recomendados do setor e o modelo padrão da conta. Depois você ajusta no perfil, ou pede à coordenação que escreva. Também dá para pedir na conversa com {coordName(state.agents)}: "crie um agente chamado X para Y".</p>
         {cap.free === 0 && <p className="hint warn">Sem vagas: adicione um andar a uma construção (acima) ou desative um agente.</p>}

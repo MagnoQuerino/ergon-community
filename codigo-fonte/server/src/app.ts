@@ -32,7 +32,7 @@ import type { AiService } from './services/ai.ts';
 import { Motors } from './services/motors.ts';
 import { Integrations, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
-import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, pendingCount, pendingDecisions, reconsiderProposal, recordProposals } from './services/proposals.ts';
+import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
 import { Routines, upgradeBriefingSources } from './services/routines.ts';
 import { activeTeam, coordinatorOf } from './services/team.ts';
@@ -231,7 +231,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // propostas da coordenação escritas na resposta (mudar setor, criar agente, ferramentas): você aplica ou recusa
   executor.onFinish((r, status, output) => {
     if (status !== 'succeeded' || r.kind !== 'chat' || !r.conversation_id) return;
-    const ag = db.get<{ name: string; coordinator: number }>('SELECT a.name, a.coordinator FROM agents a WHERE a.id = ?', r.agent_id);
+    const ag = db.get<{ name: string; coordinator: number; tools: string | null }>('SELECT a.name, a.coordinator, a.tools FROM agents a WHERE a.id = ?', r.agent_id);
     const purpose = db.get<{ purpose: string | null }>('SELECT purpose FROM conversations WHERE id = ?', r.conversation_id)?.purpose ?? null;
     if (ag && isCoordinator(ag)) {
       recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseProposals(output));
@@ -240,6 +240,29 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     }
     // qualquer agente pode pedir uma ferramenta que executa código: vira cartão na conversa, autorizado com a senha
     if (ag) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parsePermissionRequests(output, ag.name));
+    // lembretes com data: quem tem a ferramenta propõe a tarefa sua com prazo; entra aprovada por você
+    if (ag && (JSON.parse(ag.tools ?? '[]') as string[]).includes('agenda')) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseTaskProposals(output, `conversa com ${ag.name}`));
+    // "liga o Terminal" pedido conversando: a coordenação pede a senha ali mesmo; outro agente passa o pedido à
+    // coordenação, numa conversa com ela, e avisa aqui com o caminho
+    const release = ag ? parseToolRelease(output) : null;
+    if (ag && release) {
+      const perm = (origin?: string): Proposal => ({ kind: 'permission', agent: release.agent, tool: release.tool, reason: release.reason, ...(origin ? { origin } : {}) });
+      if (isCoordinator(ag)) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, [perm()]);
+      else {
+        const coord = db.get<{ id: string; name: string }>("SELECT id, name FROM agents WHERE workspace_id = ? AND coordinator = 1 AND status = 'active'", r.workspace_id);
+        const owner = db.get<{ owner_user_id: string }>('SELECT owner_user_id FROM conversations WHERE id = ?', r.conversation_id)?.owner_user_id;
+        if (coord && owner) {
+          const label = TOOLS[release.tool]?.label ?? release.tool;
+          const conv = createConversation(db, r.workspace_id, owner, coord.id, `Ligar ${label}`);
+          db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at) VALUES (?, ?, ?, 'system', ?, 'local', ?)`,
+            newId('msg'), r.workspace_id, conv.id, db.seal(r.workspace_id, `Sistema — ${ag.name} passou o seu pedido: ligar ${label}${release.agent ? ` para ${release.agent}` : ' para a equipe'}. Confirme com a sua senha abaixo.`), now());
+          recordProposals(db, bus, r.workspace_id, { conversationId: conv.id, runId: null }, [perm(r.conversation_id)]);
+          recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id },
+            [{ kind: 'handoff', coordinatorId: coord.id, coordinator: coord.name, conversationId: conv.id, agent: release.agent, tool: release.tool }]);
+          bus.publish(r.workspace_id, 'messages.changed', { conversationId: conv.id });
+        }
+      }
+    }
   });
   // conversa livre de novo: primeiro a entrega de um pedido que ficou pronto, depois a próxima mensagem da fila (Ctrl+Enter)
   teamwork.onIdle = (ws, conversationId) => {
@@ -860,17 +883,27 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       const cur = Object.values(TOOLS).filter((t) => t.kind === 'ia' && platformToolsets(motorScope(a.workspaceId)).enabled.includes(t.toolset ?? '')).map((t) => t.id);
       await aiOf(a.workspaceId).setPlatformTools([...new Set([...cur, toolId])]);
     });
-    if (g.status === 'applied' && g.conversationId && g.agentId) {
+    if (g.status === 'applied') {
       const label = TOOLS[g.tool]?.label ?? g.tool;
-      const run = executor.enqueue({
-        workspaceId: a.workspaceId, agentId: g.agentId, conversationId: g.conversationId, kind: 'chat',
+      const note = (conv: string, text: string, runId: string | null) => {
+        db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, run_id, created_at) VALUES (?, ?, ?, 'system', ?, 'local', ?, ?)`,
+          newId('msg'), a.workspaceId, conv, db.seal(a.workspaceId, text), runId, now());
+        bus.publish(a.workspaceId, 'messages.changed', { conversationId: conv });
+      };
+      const agentOf = (conv: string) => db.get<{ agent_id: string }>('SELECT agent_id FROM conversations WHERE id = ? AND workspace_id = ?', conv, a.workspaceId)?.agent_id ?? null;
+      // o agente continua de onde parou, na conversa dele: a do pedido (permissão pedida por ele) ou a de onde o
+      // pedido veio (passado à coordenação, que só registra a autorização)
+      const cont = g.agentId && g.conversationId && agentOf(g.conversationId) === g.agentId ? g.conversationId
+        : g.agentId && g.origin && agentOf(g.origin) === g.agentId ? g.origin : null;
+      const run = cont && g.agentId ? executor.enqueue({
+        workspaceId: a.workspaceId, agentId: g.agentId, conversationId: cont, kind: 'chat',
         input: `O usuário autorizou agora a ferramenta ${label}. Continue o pedido anterior de onde parou, usando-a.`,
         instructions: instructionsFor(db, a.workspaceId, g.agentId, 'Canal: chat do Ergon. Quem escreve é o proprietário autenticado. Responda em texto curto.'),
         idempotencyKey: `perm-${pid}`,
-      });
-      db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, run_id, created_at) VALUES (?, ?, ?, 'system', ?, 'local', ?, ?)`,
-        newId('msg'), a.workspaceId, g.conversationId, db.seal(a.workspaceId, `Sistema — você autorizou: ${g.result}. O agente continua o pedido.`), run.id, now());
-      bus.publish(a.workspaceId, 'messages.changed', { conversationId: g.conversationId });
+      }) : null;
+      if (g.conversationId && g.conversationId !== cont) note(g.conversationId, `Sistema — você autorizou: ${g.result}.`, null);
+      if (cont) note(cont, `Sistema — você autorizou: ${g.result}. O agente continua o pedido.`, run?.id ?? null);
+      else if (g.origin && g.origin !== g.conversationId) note(g.origin, `Sistema — você autorizou: ${g.result}.`, null);
     }
     return { status: g.status, result: g.result };
   });
