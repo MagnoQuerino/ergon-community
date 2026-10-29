@@ -28,7 +28,7 @@ import { createConversation, listConversations, listMessages, recentConversation
 import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
-import { BYOK, type AiService } from './services/ai.ts';
+import type { AiService } from './services/ai.ts';
 import { Motors } from './services/motors.ts';
 import { Integrations, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
@@ -41,7 +41,7 @@ import { workspaceTz } from './services/routine-proposals.ts';
 import { cardDocuments, inboxForChat } from './services/routine-sources.ts';
 import { TRAINING_KEY, Trainings } from './services/trainings.ts';
 import { NICHES, PRESETS, USES, applyOnboarding, onboardingChoice, onboardingOptions, onboardingState, skipOnboarding } from './services/team-presets.ts';
-import { createOwnWorkspace, listWorkspaces, renameWorkspace } from './services/workspaces.ts';
+import { createOwnWorkspace, deleteWorkspace, listWorkspaces, renameWorkspace } from './services/workspaces.ts';
 import { readPrefs, writePrefs } from './services/prefs.ts';
 import { isSource } from './services/routine-catalog.ts';
 import { Teamwork } from './services/teamwork.ts';
@@ -589,6 +589,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     audit(db, bus, { workspaceId: id, actorType: 'user', actorId: a.userId, action: 'workspace.rename', result: 'nome do workspace alterado' });
     return { name };
   });
+  app.delete('/api/workspaces/:id', {
+    schema: { params: { type: 'object', required: ['id'], properties: { id: S.id('ws') } },
+      body: { type: 'object', additionalProperties: false, required: ['confirmName'], properties: { confirmName: S.str(60, 1) } } },
+  }, async (req) => {
+    const a = auth(req);
+    const r = deleteWorkspace(db, cfg, a.userId, (req.params as { id: string }).id, (req.body as { confirmName: string }).confirmName);
+    owners.forget();
+    audit(db, bus, { workspaceId: r.next, actorType: 'user', actorId: a.userId, action: 'workspace.delete', evidence: { name: r.name }, result: 'workspace excluído (dados, arquivos e chave)' });
+    return { ok: true, workspaceId: r.next };
+  });
 
   // Estado geral (snapshot para a interface) -----------------------------------------------------
   app.get('/api/state', async (req) => {
@@ -781,7 +791,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { ok: true };
   });
   // Chave própria (BYOK): a chave vai direto para o motor (que confere no provedor); não fica no banco nem no registro
-  const byokParams = { type: 'object', required: ['provider'], properties: { provider: { enum: BYOK.map((b) => b.id) } } };
+  const byokParams = { type: 'object', required: ['provider'], properties: { provider: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{1,40}$' } } };
   app.put('/api/ai/byok/:provider', {
     schema: { params: byokParams, body: { type: 'object', additionalProperties: false, required: ['key'], properties: { key: { type: 'string', minLength: 20, maxLength: 300, pattern: '^\\s*[A-Za-z0-9_.-]+\\s*$' } } } },
   }, async (req) => {
@@ -790,6 +800,25 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const r = await aiOf(a.workspaceId).setByok(p, (req.body as { key: string }).key);
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok', evidence: { provider: p, verified: r.verified }, result: 'chave própria conectada' });
     return r;
+  });
+  // endpoint próprio: "outro" (https na internet), LM Studio ou Ollama (rede local); o motor confere e lista os modelos
+  app.post('/api/ai/byok-custom', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['kind', 'baseUrl'], properties: {
+      kind: { enum: ['outro', 'lmstudio', 'ollama'] }, name: S.str(40), baseUrl: { type: 'string', minLength: 8, maxLength: 300, pattern: '^https?://\\S+$' },
+      key: { type: 'string', maxLength: 400, pattern: '^[A-Za-z0-9_.:+/=-]*$' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const b = req.body as { kind: 'outro' | 'lmstudio' | 'ollama'; name?: string; baseUrl: string; key?: string };
+    const r = await aiOf(a.workspaceId).addByokCustom({ kind: b.kind, name: b.name ?? '', baseUrl: b.baseUrl, ...(b.key ? { key: b.key } : {}) });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_custom', evidence: { kind: b.kind, id: r.id, models: r.models }, result: 'endpoint próprio conectado' });
+    return r;
+  });
+  app.delete('/api/ai/byok-custom/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^byok-[a-z0-9-]{1,40}$' } } } } }, async (req) => {
+    const a = owner(req);
+    const id = (req.params as { id: string }).id;
+    await aiOf(a.workspaceId).removeByokCustom(id);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_custom_remove', evidence: { id }, result: 'endpoint próprio removido' });
+    return { ok: true };
   });
   app.delete('/api/ai/byok/:provider', { schema: { params: byokParams } }, async (req) => {
     const a = owner(req);
@@ -1637,6 +1666,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // loja: oficiais embutidos (sem internet) e modelos da comunidade (índice público, só quando a pessoa pede)
   const catalog = new Catalog({ db, packages, keys: officialKeys, dir: cfg.catalogDir, indexUrl: cfg.communityCatalogUrl, fetchImpl: cfg.catalogFetch });
   app.get('/api/packages/catalog/official', async (req) => catalog.official(auth(req).workspaceId));
+  app.get('/api/packages/catalog/official/:id/preview/:n', {
+    schema: { params: { type: 'object', required: ['id', 'n'], properties: { id: { type: 'string', pattern: '^[a-z0-9][a-z0-9.-]{2,100}$' }, n: { type: 'string', pattern: '^[0-9]$' } } } },
+  }, async (req, reply) => {
+    auth(req);
+    const p = req.params as { id: string; n: string };
+    const x = catalog.officialPreview(p.id, Number(p.n));
+    return reply.header('content-type', x.type).header('cache-control', 'private, max-age=3600').header('content-security-policy', "default-src 'none'").send(x.bytes);
+  });
   app.post('/api/packages/catalog/official/install', { schema: { body: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: S.str(110, 5) } } } },
     async (req) => { const a = owner(req); return catalog.installOfficial(a.workspaceId, a.userId, (req.body as { id: string }).id); });
   app.get('/api/packages/catalog/community', async (req) => catalog.community(auth(req).workspaceId, (req.query as { atualizar?: string }).atualizar === '1'));

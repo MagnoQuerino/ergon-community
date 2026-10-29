@@ -2,8 +2,8 @@ import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import type { AgentTool, AiStatus, AppState, ModelCatalog, ProcessLimit, Usage } from '../lib/types.ts';
-import { ModelSelect, TOOL_BADGE } from '../components/AgentProfile.tsx';
+import type { AgentTool, AiStatus, AppState, ProcessLimit, Usage } from '../lib/types.ts';
+import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
 import type { Me, VersionInfo } from '../lib/types.ts';
 import { SaudePanel } from './SaudePanel.tsx';
@@ -15,10 +15,9 @@ import { lazy, Suspense, type ComponentType } from 'react';
 // módulo opcional (views/world): a Community não traz essa pasta
 const worldMod = Object.values(import.meta.glob<{ default: ComponentType }>('./world/WorldPanel.tsx'))[0];
 const WorldPanel = worldMod ? lazy(worldMod) : null;
-import { AiAccounts } from '../components/AiAccounts.tsx';
 
 
-/** Configuração: a IA da equipe (conta, modelo, ferramentas, andamento), a segurança da conta e, para quem administra
+/** Configuração: as ferramentas da equipe (andamento, consumo), a conta, o workspace, a segurança e, para quem administra
  *  o Ergon neste computador, as pessoas e a saúde da instalação. */
 export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: AppState; me: Me; onMeChanged: () => void; reload: () => void }) {
   const admin = me.admin;
@@ -35,9 +34,9 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
       <header className="page__head">
         <h2>Configurações</h2>
         <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>Ferramentas da equipe</button>
           <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>Minha conta</button>
           <button role="tab" aria-selected={tab === 'workspace'} className={`tab ${tab === 'workspace' ? 'tab--on' : ''}`} onClick={() => setTab('workspace')}>Workspace</button>
-          <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>IA da equipe</button>
           <button role="tab" aria-selected={tab === 'seguranca'} className={`tab ${tab === 'seguranca' ? 'tab--on' : ''}`} onClick={() => setTab('seguranca')}>Segurança</button>
           {admin && me.mode === 'local' && <button role="tab" aria-selected={tab === 'pessoas'} className={`tab ${tab === 'pessoas' ? 'tab--on' : ''}`} onClick={() => setTab('pessoas')}>Pessoas</button>}
           <button role="tab" aria-selected={tab === 'pacotes'} className={`tab ${tab === 'pacotes' ? 'tab--on' : ''}`} onClick={() => setTab('pacotes')}>Pacotes</button>
@@ -45,9 +44,34 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>Saúde</button>}
         </div>
       </header>
-      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agents={state.agents} /> : tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaPanel me={me} onChanged={onMeChanged} />}
+      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agents={state.agents} /> : tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
       <VersionCard />
     </div>
+  );
+}
+
+/** Segurança só com a senha atual: pedida toda vez que a aba abre (vale enquanto ela estiver aberta). */
+function SegurancaGate({ children }: { children: React.ReactNode }) {
+  const [ok, setOk] = useState(false);
+  const [senha, setSenha] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (ok) return <>{children}</>;
+  const entrar = async () => {
+    setBusy(true); setErr(null);
+    try { await api.post('/api/session/unlock', { password: senha }); setSenha(''); setOk(true); }
+    catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card seg-gate">
+      <h3><Icon name="lock" size={16} /> Confirme que é você</h3>
+      <p className="muted small">A segurança (senha, frase de recuperação, verificação em duas etapas, trancamento) fica protegida: digite a sua senha atual para abrir.</p>
+      <form className="ws-item__edit" onSubmit={(e) => { e.preventDefault(); void entrar(); }}>
+        <input className="input" type="password" autoComplete="current-password" autoFocus aria-label="Senha atual" placeholder="Senha atual" value={senha} onChange={(e) => setSenha(e.target.value)} />
+        <button className="btn btn--primary" disabled={busy || !senha}>{busy ? 'Conferindo…' : 'Abrir'}</button>
+      </form>
+      {err && <p className="error" role="alert">{err}</p>}
+    </section>
   );
 }
 
@@ -66,24 +90,11 @@ function VersionCard() {
 
 function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
   const status = useResource<AiStatus>('/api/ai/status', []);
-  const catalog = useResource<ModelCatalog>('/api/ai/models', []);
   const tools = useResource<AgentTool[]>('/api/ai/tools', ['agents.changed']);
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed']);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const [def, setDef] = useState<{ model: string | null; provider: string | null }>({ model: null, provider: null });
-  const [confirm, setConfirm] = useState<string | null>(null);
-  useEffect(() => { if (catalog.data) setDef({ model: catalog.data.default.model, provider: catalog.data.default.provider }); }, [catalog.data]);
 
 
-  const saveDefault = async (force = false) => {
-    if (!def.model || !def.provider) return;
-    setMsg(null);
-    try {
-      const r = await api.post<{ ok: boolean; confirmMessage: string | null }>('/api/ai/default-model', { provider: def.provider, model: def.model, confirm: force });
-      if (!r.ok && r.confirmMessage) { setConfirm(r.confirmMessage); return; }
-      setConfirm(null); setMsg({ kind: 'ok', text: 'Modelo padrão da conta alterado. Vale para os agentes sem modelo próprio, a partir da próxima conversa.' }); catalog.reload(); status.reload();
-    } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
-  };
   const toggleTool = async (id: string, on: boolean) => {
     const enabled = (tools.data ?? []).filter((t) => t.kind === 'ia' && t.platform && t.id !== id).map((t) => t.id);
     try { await api.put('/api/ai/tools', { enabled: on ? [...enabled, id] : enabled }); tools.reload(); reload(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
@@ -92,27 +103,8 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
 
   return (
     <>
-      <p className="muted">A conta que paga os modelos, o modelo padrão e as ferramentas que os agentes podem usar.</p>
+      <p className="muted">As ferramentas que os agentes podem usar, o andamento e o consumo da equipe. A conta de IA e o modelo padrão ficam em <a href="#conexoes">Conexões</a>.</p>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
-
-      <section className="card">
-        <h3>Conta de IA</h3>
-        {/* o aviso do modo de simulação vem do próprio AiAccounts (o mesmo em Conexões e nas boas-vindas) */}
-        <AiAccounts onChanged={reload} />
-      </section>
-
-      <section className="card">
-        <h3>Modelo padrão</h3>
-        <p className="muted small">Usado por todos os agentes que não têm modelo próprio (cada agente pode ter o seu, no perfil dele).</p>
-        {catalog.error ? <p className="hint">Conecte uma conta de IA para escolher.</p> : (
-          <div className="row row--wrap">
-            <ModelSelect catalog={catalog.data} value={def.model} provider={def.provider} allowDefault={false} onChange={(model, provider) => { setDef({ model, provider }); setConfirm(null); }} />
-            <button className="btn btn--primary" disabled={!def.model || (def.model === catalog.data?.default.model && def.provider === catalog.data?.default.provider)} onClick={() => saveDefault()}>Salvar</button>
-          </div>
-        )}
-        {confirm && <div className="confirm">{confirm} <button className="btn btn--sm btn--primary" onClick={() => saveDefault(true)}>Usar mesmo assim</button><button className="btn btn--sm btn--ghost" onClick={() => setConfirm(null)}>Cancelar</button></div>}
-        <p className="hint">Preço: o publicado pela conta, em dólares por milhão de tokens (entrada / saída). Faixas: econômico até US$ 0,50, intermediário até US$ 3, ponta acima disso.</p>
-      </section>
 
       <section className="card">
         <h3>Ferramentas da equipe</h3>

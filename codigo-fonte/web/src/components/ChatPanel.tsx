@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, errMsg, requestId } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { openCard } from '../lib/open.ts';
-import { PROPOSAL_KIND, stripControl, type Agent, type Conversation, type Message, type Proposal, type RequestPayload } from '../lib/types.ts';
+import { PROPOSAL_KIND, stripControl, type Agent, type AiStatus, type Conversation, type Message, type Proposal, type RequestPayload } from '../lib/types.ts';
+import { ConfirmPopup } from './ConfirmPopup.tsx';
 import { Icon } from './Icon.tsx';
 import { AgentProfile } from './AgentProfile.tsx';
 
@@ -197,6 +198,10 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { const t = window.setTimeout(() => input.current?.focus({ preventScroll: true }), 60); return () => window.clearTimeout(t); }, [convId, agent.id]);
   const [hint, setHint] = useState<string | null>(null);
+  // sem nenhum provedor de IA conectado, os agentes não conversam: em toda tentativa, o aviso com "Conectar agora"
+  const ai = useResource<AiStatus>('/api/ai/status', []);
+  const semIa = !!ai.data && ai.data.executor === 'real' && !ai.data.accounts.some((x) => x.connected) && !(ai.data.byok ?? []).some((x) => x.connected) && !ai.data.default.model;
+  const [avisoIa, setAvisoIa] = useState(false);
 
   const lastRun = [...(msgs.data ?? [])].reverse().find((m) => m.run_id);
   const busy = !!lastRun && ['queued', 'running', 'waiting_user'].includes(lastRun.run_status ?? '');
@@ -216,6 +221,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     const t = text.trim();
     // a anterior ainda indo: Ctrl+Enter já põe esta na fila (o servidor confere a conversa ocupada de uma vez só)
     if (!t || (sending && !queue)) return;
+    if (semIa) { setAvisoIa(true); ai.reload(); return; }
     if (busy && !queue) { setHint(`${agent.name} ainda está respondendo: Ctrl+Enter põe a sua mensagem na fila.`); return; }
     setErr(null); setHint(null); setSending(true);
     // o campo limpa na hora: dá para escrever a próxima enquanto esta vai (antes, limpava depois e apagava o que você
@@ -312,6 +318,12 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       {err && <p className="error" role="alert">{err}</p>}
       {(hint || (busy && text.trim()) || queuedCount > 0) && (
         <p className="chat__hint" role="status">{hint ?? (queuedCount > 0 ? `${queuedCount} mensagem(ns) na fila: vão para ${agent.name} quando ele terminar.` : 'Ctrl+Enter põe a mensagem na fila da conversa.')}</p>
+      )}
+      {avisoIa && (
+        <ConfirmPopup title="Conecte um provedor de IA" confirmLabel="Conectar agora"
+          onConfirm={() => { setAvisoIa(false); location.hash = '#conexoes'; }} onCancel={() => setAvisoIa(false)}>
+          <p>Você ainda não conectou um provedor de IA ao Ergon, então não é possível conversar com os agentes ainda. Leva um minuto: a sua mensagem fica guardada aqui.</p>
+        </ConfirmPopup>
       )}
       <form className="chat__input" onSubmit={(e) => { e.preventDefault(); void send(busy); }}>
         <textarea ref={input} data-autofocus value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} maxLength={4000} rows={2} placeholder={`Peça algo a ${agent.name}…`}

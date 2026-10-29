@@ -70,6 +70,15 @@ export function WorkspaceConfigPanel({ state, me }: { state: AppState; me: Me })
     catch (e) { setErr(errMsg(e)); setBusy(false); setConfirmar(false); }
   };
   const novo = nome.trim().replace(/\s+/g, ' ');
+  // excluir: de vez, digitando o nome; nunca o último
+  const [excluir, setExcluir] = useState(false);
+  const [digitado, setDigitado] = useState('');
+  const unico = me.workspaces.length < 2;
+  const apagar = async () => {
+    setBusy(true); setErr(null);
+    try { await api.del(`/api/workspaces/${atual.id}`, { confirmName: digitado }); window.location.reload(); }
+    catch (e) { setErr(errMsg(e)); setBusy(false); setExcluir(false); }
+  };
   return (
     <section className="card">
       <h3>Workspace</h3>
@@ -83,6 +92,19 @@ export function WorkspaceConfigPanel({ state, me }: { state: AppState; me: Me })
         </div>
         {!dona && <p className="muted small">Só quem é dona do workspace muda o nome.</p>}
       </form>
+      {dona && (
+        <div className="ws-perigo">
+          <div><b>Excluir este workspace</b><p className="muted small">{unico ? 'É o seu único workspace: crie outro antes de excluir este.' : 'Apaga de vez a equipe, a cidade, as tarefas, as conversas, as rotinas e os arquivos dele. A conta de IA continua sua.'}</p></div>
+          <button className="btn btn--danger" disabled={unico} onClick={() => { setDigitado(''); setExcluir(true); }}>Excluir…</button>
+        </div>
+      )}
+      {excluir && (
+        <ConfirmPopup title={`Excluir "${atual.name}"?`} confirmLabel="Excluir de vez" busy={busy} canConfirm={digitado.trim() === atual.name} onConfirm={() => void apagar()} onCancel={() => setExcluir(false)}>
+          <p>Isso apaga de vez a equipe, a cidade, as tarefas, as conversas, as rotinas e os arquivos deste workspace. <b>Não tem volta.</b></p>
+          <label className="small" htmlFor="ws-excluir">Para confirmar, digite o nome do workspace: <b>{atual.name}</b></label>
+          <input id="ws-excluir" className="input" value={digitado} autoComplete="off" onChange={(e) => setDigitado(e.target.value)} />
+        </ConfirmPopup>
+      )}
       {confirmar && (
         <ConfirmPopup title="Renomear o workspace?" confirmLabel="Renomear" busy={busy} onConfirm={() => void salvar()} onCancel={() => setConfirmar(false)}>
           <p>O workspace <b>{atual.name}</b> passa a se chamar <b>{novo}</b>. Nada mais muda: equipe, tarefas e conversas continuam como estão.</p>

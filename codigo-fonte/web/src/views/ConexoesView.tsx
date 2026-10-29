@@ -3,6 +3,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { Integration } from '../lib/types.ts';
 import { AiAccounts } from '../components/AiAccounts.tsx';
+import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
 import { Icon } from '../components/Icon.tsx';
 
@@ -55,6 +56,7 @@ export function ConexoesView() {
       <section className="conn-group conn-group--feature">
         <h3>Contas de IA</h3>
         <p className="muted small">A conta que paga os modelos que os agentes usam.</p>
+        <ModeloPadrao />
         <AiAccounts />
       </section>
 

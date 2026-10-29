@@ -160,61 +160,124 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
           ))}
         </div>
       )}
-      {!pitch && s.byok && s.byok.length > 0 && <ChavePropria byok={s.byok} available={s.available} onDone={(m) => conectado(null, m)} onRemoved={() => { status.reload(); onChanged?.(); }} />}
+      {!pitch && s.available && <ChavePropria byok={s.byok ?? []} custom={s.byokCustom ?? []} onDone={(m) => conectado(null, m)} onRemoved={() => { status.reload(); onChanged?.(); }} />}
       {(!pitch || s.accounts.some((a) => a.connected)) && <p className="hint">{BILLING[s.default.billing]}</p>}
     </>
   );
 }
 
-/** Chave própria (BYOK): a chave de API do provedor que a pessoa já usa. Vai direto para o motor, que confere no
- *  provedor antes de gravar; aqui ela nunca volta a aparecer. */
-function ChavePropria({ byok, available, onDone, onRemoved }: {
-  byok: NonNullable<AiStatus['byok']>; available: boolean; onDone: (starterModel: string | null) => void; onRemoved: () => void;
+
+type Escolha = { tipo: 'chave'; id: string } | { tipo: 'outro' | 'lmstudio' | 'ollama' };
+const LOCAIS = {
+  lmstudio: { nome: 'LM Studio', porta: 1234, dica: 'No LM Studio, ligue o servidor e a opção "Serve on Local Network".' },
+  ollama: { nome: 'Ollama', porta: 11434, dica: 'No Ollama, deixe o servidor aceitar conexões da rede (OLLAMA_HOST=0.0.0.0).' },
+} as const;
+
+/**
+ * Chave própria (BYOK): a lista é a dos provedores que o motor de IA já suporta (com busca), mais "Outro (compatível
+ * com OpenAI)" e os modelos locais (LM Studio, Ollama). A chave vai direto para o motor, que confere no provedor antes
+ * de gravar; aqui ela nunca volta a aparecer.
+ */
+function ChavePropria({ byok, custom, onDone, onRemoved }: {
+  byok: NonNullable<AiStatus['byok']>; custom: NonNullable<AiStatus['byokCustom']>;
+  onDone: (starterModel: string | null) => void; onRemoved: () => void;
 }) {
-  const [aberto, setAberto] = useState<string | null>(null);
+  const [busca, setBusca] = useState('');
+  const [escolha, setEscolha] = useState<Escolha | null>(null);
   const [chave, setChave] = useState('');
+  const [url, setUrl] = useState('');
+  const [nome, setNome] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const salvar = async (id: string) => {
+  const ligados = byok.filter((b) => b.connected);
+  const q = busca.trim().toLowerCase();
+  const opcoes = byok.filter((b) => !b.connected && (!q || b.name.toLowerCase().includes(q) || b.id.includes(q)));
+  const escolher = (e: Escolha | null) => {
+    setEscolha(e); setChave(''); setErr(null); setNome('');
+    setUrl(e && e.tipo !== 'chave' && e.tipo !== 'outro' ? `http://192.168.0.10:${LOCAIS[e.tipo].porta}/v1` : '');
+  };
+  const prov = escolha?.tipo === 'chave' ? byok.find((b) => b.id === escolha.id) : null;
+  const salvar = async () => {
+    if (!escolha) return;
     setBusy(true); setErr(null);
     try {
-      const r = await api.put<{ verified: boolean; starterModel: string | null }>(`/api/ai/byok/${id}`, { key: chave });
-      setAberto(null); setChave(''); onDone(r.starterModel);
+      const r = escolha.tipo === 'chave'
+        ? await api.put<{ starterModel: string | null }>(`/api/ai/byok/${escolha.id}`, { key: chave })
+        : await api.post<{ starterModel: string | null }>('/api/ai/byok-custom', { kind: escolha.tipo, baseUrl: url.trim(), ...(nome.trim() ? { name: nome.trim() } : {}), ...(chave.trim() ? { key: chave.trim() } : {}) });
+      escolher(null); setBusca(''); onDone(r.starterModel);
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   };
-  const remover = async (id: string) => {
+  const remover = async (caminho: string) => {
     setBusy(true); setErr(null);
-    try { await api.del(`/api/ai/byok/${id}`); onRemoved(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+    try { await api.del(caminho); onRemoved(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   };
+  const pronto = escolha?.tipo === 'chave' ? chave.trim().length >= 8 : url.trim().startsWith('http');
+  const conectados = [
+    ...ligados.map((b) => ({ k: b.id, nome: b.name, det: 'chave de API', del: `/api/ai/byok/${b.id}` })),
+    ...custom.map((c) => ({ k: c.id, nome: c.name, det: `${c.baseUrl}${c.model ? ` · ${c.model}` : ''}`, del: `/api/ai/byok-custom/${c.id}` })),
+  ];
   return (
     <div className="ai-alt ai-byok">
       <span className="ai-alt__label">Chave própria (BYOK)</span>
-      <p className="muted small">Já tem uma chave de API? Conecte e os modelos desse provedor ficam disponíveis para a equipe. O custo é por uso, na sua conta do provedor.</p>
-      {byok.map((b) => (
-        <div key={b.id} className={`ai-alt__row ${b.connected ? 'ai-alt__row--on' : ''} ${aberto === b.id ? 'ai-alt__row--open' : ''}`}>
+      <p className="muted small">Já usa outro provedor? Conecte a sua chave de API (o custo é por uso, na sua conta do provedor), um serviço compatível com a OpenAI ou um modelo rodando na sua rede (LM Studio, Ollama).</p>
+      {conectados.map((x) => (
+        <div key={x.k} className="ai-alt__row ai-alt__row--on">
           <div className="ai-alt__main">
-            <BrandLogo kind={b.id} name={b.name} size={26} />
-            <div className="ai-alt__txt"><b>{b.name}</b><small>{b.about}</small></div>
-            {b.connected && <span className="badge badge--ok">conectada</span>}
-            {b.connected
-              ? <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void remover(b.id)}>Desconectar</button>
-              : aberto !== b.id && <button className="btn btn--sm" disabled={!available || busy} onClick={() => { setAberto(b.id); setChave(''); setErr(null); }}>Conectar</button>}
+            <BrandLogo kind={x.k} name={x.nome} size={26} />
+            <div className="ai-alt__txt"><b>{x.nome}</b><small>{x.det}</small></div>
+            <span className="badge badge--ok">conectada</span>
+            <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void remover(x.del)}>Desconectar</button>
           </div>
-          {aberto === b.id && (
-            <form className="device ai-byok__form" onSubmit={(e) => { e.preventDefault(); void salvar(b.id); }}>
-              <label htmlFor={`byok-${b.id}`}>Chave de API da {b.name} <a href={b.site} target="_blank" rel="noreferrer noopener">(criar uma)</a></label>
-              <input id={`byok-${b.id}`} className="input" type="password" autoComplete="off" spellCheck={false} placeholder={b.keyHint} value={chave} autoFocus onChange={(e) => setChave(e.target.value)} />
-              {err && <p className="error" role="alert">{err}</p>}
-              <div className="row">
-                <button className="btn btn--sm btn--primary" disabled={busy || chave.trim().length < 20}>{busy ? 'Conferindo a chave…' : 'Conectar'}</button>
-                <button type="button" className="btn btn--sm btn--ghost" onClick={() => { setAberto(null); setChave(''); setErr(null); }}>Cancelar</button>
-              </div>
-              <p className="muted small">A chave é conferida no provedor e guardada no motor de IA desta conta, cifrada. Ela não aparece de novo aqui.</p>
-            </form>
-          )}
         </div>
       ))}
-      {err && !aberto && <p className="error" role="alert">{err}</p>}
+      {!escolha ? (
+        <div className="ai-byok__pick">
+          <input className="input" type="search" placeholder={`Buscar entre ${byok.length} provedores…`} value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar provedor" />
+          <ul className="ai-byok__list" aria-label="Provedores">
+            {opcoes.slice(0, 60).map((b) => (
+              <li key={b.id}><button className="ai-byok__opt" onClick={() => escolher({ tipo: 'chave', id: b.id })}><BrandLogo kind={b.id} name={b.name} size={22} /> {b.name}</button></li>
+            ))}
+            {!opcoes.length && <li className="muted small">Nenhum provedor com esse nome. Se ele for compatível com a OpenAI, use "Outro".</li>}
+          </ul>
+          <div className="ai-byok__extras">
+            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'outro' })}>Outro (compatível com OpenAI)</button>
+            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'lmstudio' })}>Modelo local: LM Studio</button>
+            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'ollama' })}>Modelo local: Ollama</button>
+          </div>
+        </div>
+      ) : (
+        <form className="device ai-byok__form" onSubmit={(e) => { e.preventDefault(); void salvar(); }}>
+          {escolha.tipo === 'chave' ? (
+            <>
+              <label htmlFor="byok-chave">Chave de API — {prov?.name}{prov?.url && <> <a href={prov.url} target="_blank" rel="noreferrer noopener">(criar uma)</a></>}</label>
+              <input id="byok-chave" className="input" type="password" autoComplete="off" spellCheck={false} value={chave} autoFocus onChange={(e) => setChave(e.target.value)} />
+            </>
+          ) : (
+            <>
+              {escolha.tipo === 'outro' && (
+                <>
+                  <label htmlFor="byok-nome">Nome (como vai aparecer na lista de modelos)</label>
+                  <input id="byok-nome" className="input" maxLength={40} placeholder="Ex.: Meu provedor" value={nome} autoFocus onChange={(e) => setNome(e.target.value)} />
+                </>
+              )}
+              <label htmlFor="byok-url">{escolha.tipo === 'outro' ? 'Endereço da API (https; na maioria termina em /v1)' : `Endereço do ${LOCAIS[escolha.tipo].nome} na sua rede`}</label>
+              <input id="byok-url" className="input" type="url" spellCheck={false} placeholder={escolha.tipo === 'outro' ? 'https://api.exemplo.com/v1' : ''} value={url} autoFocus={escolha.tipo !== 'outro'} onChange={(e) => setUrl(e.target.value)} />
+              {escolha.tipo !== 'outro' && <p className="muted small">Use o endereço do computador onde o modelo roda, na rede local (ex.: 192.168.0.10). {LOCAIS[escolha.tipo].dica}</p>}
+              <label htmlFor="byok-chave">Chave de API (se o serviço pedir)</label>
+              <input id="byok-chave" className="input" type="password" autoComplete="off" spellCheck={false} value={chave} onChange={(e) => setChave(e.target.value)} />
+            </>
+          )}
+          {err && <p className="error" role="alert">{err}</p>}
+          <div className="row">
+            <button className="btn btn--sm btn--primary" disabled={busy || !pronto}>{busy ? 'Conferindo…' : 'Conectar'}</button>
+            <button type="button" className="btn btn--sm btn--ghost" onClick={() => escolher(null)}>Cancelar</button>
+          </div>
+          <p className="muted small">{escolha.tipo === 'chave'
+            ? 'A chave é conferida no provedor e guardada no motor de IA desta conta, cifrada. Ela não aparece de novo aqui.'
+            : 'O endereço é conferido antes de gravar, e os modelos que ele oferece passam a aparecer na escolha de modelos.'}</p>
+        </form>
+      )}
+      {err && !escolha && <p className="error" role="alert">{err}</p>}
     </div>
   );
 }

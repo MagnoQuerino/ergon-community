@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from '../db/db.ts';
 import { HttpError } from '../lib/util.ts';
-import { PACKAGE_KINDS, PackageError, validatePackage } from './ergon-package.ts';
+import { PACKAGE_KINDS, PackageError, validatePackage, type ValidatedPackage } from './ergon-package.ts';
 import type { Packages } from './packages.ts';
 
 /** Chave pública oficial dos pacotes do Ergon (Ed25519, SPKI em base64), por key_id. Outras entram por ERGON_PACKAGE_KEYS. */
@@ -23,7 +23,40 @@ export const OFFICIAL_KEYS: Record<string, string> = {
 };
 export const COMMUNITY_INDEX_URL = 'https://raw.githubusercontent.com/MagnoQuerino/ergon-community/main/catalogo/index.json';
 
-export interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string }
+/** Prévia de um pacote para a galeria: tiradas dos dados dele (cores, personagens, membros, o efeito ou o pet), sem
+ *  executar nada; e quantas imagens de prévia ele traz (servidas por /api/packages/catalog/official/:id/preview/:n). */
+export interface CatalogPreview {
+  swatches: string[]; names: string[]; tagline?: string;
+  fx?: { effect: string; color: string; intensity: number }; pet?: { species: string; color: string };
+  images: number; tags: string[];
+}
+export interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
+
+const COR = /^#[0-9a-f]{3,8}$/i;
+const cor = (x: unknown): string | null => (typeof x === 'string' && COR.test(x) ? x : null);
+const nada = (x: string | null): x is string => !!x;
+export function previewOf(v: ValidatedPackage): CatalogPreview {
+  const d = v.data;
+  let swatches: string[] = []; let names: string[] = []; let tagline: string | undefined;
+  if (d.skin) {
+    const sd = d.skin.palette.dia.seeds;
+    swatches = [sd.sky, sd.ground, sd.wall, sd.roof, sd.accent, sd.foliage].map(cor).filter(nada);
+    names = d.skin.characters.map((c) => c.name);
+    tagline = d.skin.tagline;
+  } else if (d.theme) {
+    swatches = Object.values(d.theme.colors).map(cor).filter(nada).slice(0, 6);
+  }
+  if (d.blueprint) { names = d.blueprint.agents.map((a) => a.name); swatches = d.blueprint.agents.map((a) => cor(a.color)).filter(nada); }
+  const fx = d.effects?.[0]; const pet = d.pets?.[0];
+  if (fx) swatches.push(...d.effects!.map((e) => cor(e.color)).filter(nada));
+  if (pet) swatches.push(...d.pets!.map((p) => cor(p.color)).filter(nada));
+  return {
+    swatches: [...new Set(swatches)].slice(0, 6), names: names.slice(0, 10), ...(tagline ? { tagline } : {}),
+    ...(fx ? { fx: { effect: fx.effect, color: fx.color, intensity: fx.intensity } } : {}),
+    ...(pet ? { pet: { species: pet.species, color: pet.color } } : {}),
+    images: (v.manifest.preview ?? []).filter((p) => v.assets[p]).length, tags: (v.manifest.tags ?? []).slice(0, 8),
+  };
+}
 interface IndexEntry { id: string; version: string; title: string; summary: string; kind: string; author: string; path: string; sha256: string; size: number }
 
 const MAX_INDEX = 512 * 1024;
@@ -60,8 +93,18 @@ export class Catalog {
     const inst = this.installed(ws);
     return this.officialFiles().map(({ buf }) => {
       const v = validatePackage(buf, this.keys);
-      return { id: v.manifest.package_id, version: v.manifest.version, title: v.manifest.title, summary: v.manifest.summary, kind: v.manifest.kind, verified: v.verified, installed: inst.has(v.manifest.package_id) };
+      return { id: v.manifest.package_id, version: v.manifest.version, title: v.manifest.title, summary: v.manifest.summary, kind: v.manifest.kind, verified: v.verified, installed: inst.has(v.manifest.package_id), preview: previewOf(v) };
     });
+  }
+
+  /** Imagem de prévia n de um pacote oficial (só PNG/WebP de dentro do pacote validado). */
+  officialPreview(id: string, n: number): { bytes: Buffer; type: string } {
+    const f = this.officialFiles().find((x) => x.id === id);
+    if (!f) throw new HttpError(404, 'not_found', 'pacote oficial não encontrado nesta versão');
+    const v = validatePackage(f.buf, this.keys);
+    const p = (v.manifest.preview ?? []).filter((x) => v.assets[x])[n];
+    if (!p) throw new HttpError(404, 'not_found', 'sem essa imagem de prévia');
+    return { bytes: v.assets[p], type: p.endsWith('.webp') ? 'image/webp' : 'image/png' };
   }
 
   installOfficial(ws: string, userId: string, id: string) {

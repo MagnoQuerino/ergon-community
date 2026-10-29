@@ -38,8 +38,15 @@ class Controle implements HermesControlClient {
   async apiToolsets() { return { enabled: [], safe: [] }; }
   async setApiToolsets(e: string[]) { return e; }
   chaves: Record<string, string> = {};
-  async byok() { return Object.fromEntries(Object.keys(this.chaves).map((k) => [k, true])); }
-  async setByok(provider: string, key: string) { this.chaves[provider] = key; return { verified: true }; }
+  async byok() {
+    const cat = [['openrouter', 'OpenRouter'], ['anthropic', 'Anthropic'], ['gemini', 'Google Gemini']];
+    return { providers: cat.map(([id, name]) => ({ id, name, url: null, connected: id in this.chaves })), custom: [] };
+  }
+  async setByok(provider: string, key: string) {
+    // como a ponte do motor: só o catálogo do motor
+    if (!['openrouter', 'anthropic', 'gemini'].includes(provider)) throw Object.assign(new Error('provedor de chave própria desconhecido'), { status: 400 });
+    this.chaves[provider] = key; return { verified: true };
+  }
   async removeByok(provider: string) { delete this.chaves[provider]; }
 }
 

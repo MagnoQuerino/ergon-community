@@ -1192,3 +1192,45 @@ body:has(.cdock) .tip { right: 100px; }
 /* atalho de conversas antes da primeira conversa: um botão com o ícone, no mesmo lugar e tamanho */
 .cdock__bubble--vazio { display: grid; place-items: center; background: var(--navy); color: #fff; }
 .cdock__bubble--vazio:hover { background: var(--gold, #b88b5b); color: #1b2a4a; }
+/* modelo padrão: primeiro item das Contas de IA (Conexões) */
+.modelo-padrao { display: grid; gap: 8px; padding: 12px 14px; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.modelo-padrao__head { display: grid; gap: 2px; }
+.modelo-padrao .hint { margin: 0; }
+
+/* zona de perigo do workspace (excluir) */
+.ws-perigo { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 18px; padding: 12px 14px; border: 1px solid #e3b4a8; border-radius: 12px; background: #fdf3f0; }
+.ws-perigo p { margin: 2px 0 0; }
+.cpop__body .input { width: 100%; margin-top: 6px; }
+
+/* chave própria: busca entre os provedores do motor, outros e locais */
+.ai-byok__pick { display: grid; gap: 8px; }
+.ai-byok__list { list-style: none; margin: 0; padding: 4px; max-height: 220px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.ai-byok__opt { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ai-byok__opt:hover, .ai-byok__opt:focus-visible { background: var(--panel-2); }
+.ai-byok__extras { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* loja de pacotes em galeria: busca, categorias, cartões com prévia, paginação e detalhe */
+.loja__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.loja__topo h3 { margin: 0; }
+.loja__origem { display: flex; gap: 6px; }
+.loja__busca { flex: 1; min-width: 180px; max-width: 320px; margin-left: auto; }
+.loja__cats { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; }
+.loja__cats .chip.is-on, .loja__origem .chip.is-on, .loja__paginas .chip.is-on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.loja__cats .chip.is-on .muted { color: #c9d3dd; }
+.loja__novos { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.loja__grade { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.loja-card { display: grid; grid-template-rows: auto 1fr auto; height: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.loja-card:hover, .loja-card:focus-visible { border-color: var(--gold, #b88b5b); box-shadow: 0 8px 22px rgba(16, 24, 32, .1); transform: translateY(-1px); outline: none; }
+.loja-previa { display: grid; place-items: center; height: 150px; background: var(--panel-2); overflow: hidden; }
+.loja-previa__img { width: 100%; height: 100%; object-fit: cover; }
+.loja-previa__vivo { display: grid; place-items: center; transform: scale(.95); }
+.loja-previa__cores { display: grid; place-items: end start; width: 100%; height: 100%; padding: 10px; }
+.loja-previa__nomes, .loja-previa__tipo { font-size: 12px; font-weight: 600; color: #fff; background: rgba(16, 24, 32, .55); padding: 3px 8px; border-radius: 999px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loja-card__txt { display: grid; gap: 2px; padding: 10px 12px 4px; }
+.loja-card__pe { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px 12px; }
+.loja__paginas { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; margin-top: 14px; }
+.loja-detalhe { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+.loja-detalhe__previa { height: 220px; border-radius: 10px; margin: 0 0 12px; }
+.loja-detalhe__cores { display: flex; gap: 6px; margin: 4px 0 10px; }
+.loja-detalhe__cores span { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); }
+@media (max-width: 600px) { .loja__busca { max-width: none; margin-left: 0; } .loja__novos { margin-left: 0; } }

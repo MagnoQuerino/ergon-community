@@ -128,7 +128,9 @@ export interface AiStatus {
   /** motor de IA da pessoa: conta nova fica "ligando" por até ~1 min */
   motor?: { state: 'desligado' | 'ligando' | 'aberto' | 'erro'; error: string | null } | null;
   /** chave própria (BYOK): provedores que aceitam a chave de API da pessoa; o valor nunca volta */
-  byok?: Array<{ id: string; name: string; site: string; keyHint: string; about: string; connected: boolean }>;
+  byok?: Array<{ id: string; name: string; url: string | null; connected: boolean }>;
+  /** endpoints próprios (OpenAI-compatível, LM Studio, Ollama) ligados */
+  byokCustom?: Array<{ id: string; name: string; baseUrl: string; model: string }>;
   accounts: Array<{ id: string; name: string; billing: Billing; about: string; site: string; connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
 }

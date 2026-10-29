@@ -165,7 +165,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   useEffect(() => startLive(), []);
   useEffect(() => startActivity(me.idleMinutes, onIdle), [me.idleMinutes]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const onHash = () => { const h = location.hash.slice(1).split('?')[0] as View; if ([...NAV, HELP_NAV].some((n) => n.id === h)) setView(h); };
+    // ir para uma área (pelo endereço) fecha a conversa ou a janela de agente aberta por cima
+    const onHash = () => { const h = location.hash.slice(1).split('?')[0] as View; if ([...NAV, HELP_NAV].some((n) => n.id === h)) { setView(h); setWin(null); setConvs(null); } };
     addEventListener('hashchange', onHash);
     return () => removeEventListener('hashchange', onHash);
   }, []);

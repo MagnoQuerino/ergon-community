@@ -2,8 +2,10 @@ import { useRef, type ReactNode } from 'react';
 import { useSurface } from '../lib/surface.ts';
 
 /** Confirmação em popup (sobre a tela, Esc ou clique fora cancela). */
-export function ConfirmPopup({ title, children, confirmLabel, busy, onConfirm, onCancel }: {
-  title: string; children: ReactNode; confirmLabel: string; busy?: boolean; onConfirm: () => void; onCancel: () => void;
+export function ConfirmPopup({ title, children, confirmLabel, busy, canConfirm = true, onConfirm, onCancel }: {
+  title: string; children: ReactNode; confirmLabel: string; busy?: boolean;
+  /** false: confirmar fica desabilitado (ex.: falta digitar o nome); cancelar continua livre */
+  canConfirm?: boolean; onConfirm: () => void; onCancel: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useSurface(ref, { onClose: onCancel, modal: true, outside: true });
@@ -14,7 +16,7 @@ export function ConfirmPopup({ title, children, confirmLabel, busy, onConfirm, o
         <div className="cpop__body">{children}</div>
         <div className="cpop__acts">
           <button className="btn btn--ghost" onClick={onCancel} disabled={busy}>Cancelar</button>
-          <button className="btn btn--primary" onClick={onConfirm} disabled={busy} autoFocus>{confirmLabel}</button>
+          <button className="btn btn--primary" onClick={onConfirm} disabled={busy || !canConfirm} autoFocus={canConfirm}>{confirmLabel}</button>
         </div>
       </div>
     </div>

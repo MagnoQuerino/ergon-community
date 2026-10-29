@@ -607,23 +607,65 @@ def _sanitize_ergon_ai(body: dict[str, Any]) -> dict[str, Any]:
             "api_mode": "chat_completions", "discover_models": False, "make_default": bool(body.get("make_default"))}
 
 
-# Chave própria (BYOK): só estes provedores, só a variável deles, e a chave no formato de cada um. O valor nunca volta:
-# a consulta diz apenas se está ligada.
-_BYOK = {
-    "openrouter": ("OPENROUTER_API_KEY", re.compile(r"sk-or-[A-Za-z0-9_-]{20,200}")),
-    "anthropic": ("ANTHROPIC_API_KEY", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,200}")),
-    "gemini": ("GEMINI_API_KEY", re.compile(r"[A-Za-z0-9_.-]{30,200}")),
-}
+# Chave própria (BYOK): a lista é a do próprio Hermes (o catálogo de provedores do /api/env: só as credenciais
+# principais de provedor, nunca outras variáveis). Nous e ChatGPT entram por login, não por chave. O valor nunca
+# volta: a consulta diz apenas se está ligada.
+_BYOK_LOGIN = {"nous", "openai-codex"}
+_BYOK_KEY = re.compile(r"[A-Za-z0-9_.:+/=-]{8,400}")
+# endpoints próprios (OpenAI-compatível): "outro" (na internet, https) e os locais (LM Studio, Ollama: rede local)
+_BYOK_CUSTOM = {"outro": "https", "lmstudio": "local", "ollama": "local"}
+_BYOK_CUSTOM_ID = re.compile(r"byok-[a-z0-9-]{1,40}")
+
+
+def _byok_catalog() -> dict[str, dict[str, Any]]:
+    status, data = _dash_call("GET", "/api/env", "", None)
+    if status != 200:
+        raise RuntimeError(f"painel do motor respondeu {status}")
+    env = json.loads(data or b"{}")
+    out: dict[str, dict[str, Any]] = {}
+    for var, row in env.items():
+        prov = str((row or {}).get("provider") or "")
+        if not prov or prov in _BYOK_LOGIN or not row.get("is_password") or not row.get("provider_primary") or row.get("channel_managed"):
+            continue
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,60}", var) or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{1,40}", prov):
+            continue
+        url = row.get("url") if isinstance(row.get("url"), str) and str(row.get("url")).startswith("https://") else None
+        out.setdefault(prov, {"var": var, "name": str(row.get("provider_label") or prov)[:60], "url": url, "set": bool(row.get("is_set"))})
+    return out
 
 
 def _sanitize_byok(body: dict[str, Any]) -> tuple[str, str]:
     provider, key = str(body.get("provider") or "").strip(), str(body.get("key") or "").strip()
-    if provider not in _BYOK:
+    cat = _byok_catalog()
+    if provider not in cat:
         raise ValueError("provedor de chave própria desconhecido")
-    env, fmt = _BYOK[provider]
-    if not fmt.fullmatch(key):
-        raise ValueError("a chave não tem o formato desse provedor")
-    return env, key
+    if not _BYOK_KEY.fullmatch(key):
+        raise ValueError("a chave não tem o formato de uma chave de API")
+    return cat[provider]["var"], key
+
+
+def _byok_url(kind: str, raw: str) -> str:
+    """Endereço de um endpoint próprio: "outro" só https na internet; LM Studio e Ollama só na rede local. Nunca o
+    próprio contêiner (127.*, localhost, ::1: ali estão a ponte e o painel do motor) nem endereços de metadados."""
+    import ipaddress
+    import socket
+    u = urllib.parse.urlsplit(raw.strip())
+    if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment:
+        raise ValueError("endereço inválido")
+    if _BYOK_CUSTOM[kind] == "https" and u.scheme != "https":
+        raise ValueError("use um endereço https")
+    try:
+        ips = {ipaddress.ip_address(a[4][0]) for a in socket.getaddrinfo(u.hostname, u.port or (443 if u.scheme == "https" else 80))}
+    except (OSError, ValueError):
+        raise ValueError("não encontrei esse endereço")
+    for ip in ips:
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+            raise ValueError("esse endereço não é permitido")
+        if _BYOK_CUSTOM[kind] == "https" and ip.is_private:
+            raise ValueError("para a rede local, use LM Studio ou Ollama")
+        if _BYOK_CUSTOM[kind] == "local" and not ip.is_private:
+            raise ValueError("modelos locais: use o endereço do computador na rede local")
+    return raw.strip().rstrip("/")
 
 
 def _sanitize_model_set(body: dict[str, Any]) -> dict[str, Any]:
@@ -725,30 +767,65 @@ class _ControlHandler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
 
     def _byok(self, method: str, path: str, body: dict[str, Any]) -> None:
-        """Chave própria: GET (quais estão ligadas), PUT (confere no provedor e grava), DELETE /<provedor> (apaga)."""
-        if method == "GET" and path == "/ergon/v1/byok":
-            status, data = _dash_call("GET", "/api/env", "", None)
-            if status != 200:
-                return self._send(status, data)
-            env = json.loads(data or b"{}")
-            return self._json(200, {"providers": {p: bool((env.get(v) or {}).get("is_set")) for p, (v, _) in _BYOK.items()}})
-        if method == "PUT" and path == "/ergon/v1/byok":
-            try:
+        """Chave própria: GET (catálogo do Hermes e o que está ligado), PUT (confere no provedor e grava), DELETE
+        /<provedor>; endpoints próprios: POST /custom (confere o endereço, lista os modelos e cadastra) e DELETE
+        /custom/<id>."""
+        try:
+            if method == "GET" and path == "/ergon/v1/byok":
+                cat = _byok_catalog()
+                status, data = _dash_call("GET", "/api/providers/custom-endpoints", "", None)
+                eps = (json.loads(data or b"{}").get("endpoints") or []) if status == 200 else []
+                return self._json(200, {
+                    "providers": [{"id": p, "name": c["name"], "url": c["url"], "connected": c["set"]} for p, c in sorted(cat.items(), key=lambda x: x[1]["name"].lower())],
+                    "custom": [{"id": str(e.get("id")), "name": str(e.get("name") or e.get("id")), "baseUrl": str(e.get("base_url") or ""), "model": str(e.get("model") or "")}
+                               for e in eps if _BYOK_CUSTOM_ID.fullmatch(str(e.get("id") or ""))],
+                })
+            if method == "PUT" and path == "/ergon/v1/byok":
                 var, key = _sanitize_byok(body)
-            except ValueError as exc:
-                return self._json(400, {"error": str(exc)})
-            status, data = _dash_call("POST", "/api/providers/validate", "", {"key": var, "value": key})
-            check = json.loads(data or b"{}") if status == 200 else {}
-            if check.get("reachable") and not check.get("ok"):
-                return self._json(400, {"error": "o provedor recusou essa chave; confira e tente de novo"})
-            status, data = _dash_call("PUT", "/api/env", "", {"key": var, "value": key, "provider_setup": True})
-            if status != 200:
-                return self._send(status, data)
-            return self._json(200, {"ok": True, "verified": bool(check.get("reachable"))})
-        m = re.fullmatch(r"/ergon/v1/byok/([a-z]+)", path)
-        if method == "DELETE" and m and m.group(1) in _BYOK:
-            status, data = _dash_call("DELETE", "/api/env", "", {"key": _BYOK[m.group(1)][0]})
-            return self._json(200, {"ok": True}) if status in (200, 404) else self._send(status, data)
+                status, data = _dash_call("POST", "/api/providers/validate", "", {"key": var, "value": key})
+                check = json.loads(data or b"{}") if status == 200 else {}
+                if check.get("reachable") and not check.get("ok"):
+                    return self._json(400, {"error": "o provedor recusou essa chave; confira e tente de novo"})
+                status, data = _dash_call("PUT", "/api/env", "", {"key": var, "value": key, "provider_setup": True})
+                if status != 200:
+                    return self._send(status, data)
+                return self._json(200, {"ok": True, "verified": bool(check.get("reachable"))})
+            if method == "POST" and path == "/ergon/v1/byok/custom":
+                kind = str(body.get("kind") or "")
+                if kind not in _BYOK_CUSTOM:
+                    raise ValueError("tipo de endpoint desconhecido")
+                name = re.sub(r"\s+", " ", str(body.get("name") or "")).strip()[:40] or {"outro": "Outro", "lmstudio": "LM Studio", "ollama": "Ollama"}[kind]
+                base = _byok_url(kind, str(body.get("baseUrl") or ""))
+                key = str(body.get("key") or "").strip()
+                if key and not _BYOK_KEY.fullmatch(key):
+                    raise ValueError("a chave não tem o formato de uma chave de API")
+                status, data = _dash_call("POST", "/api/providers/validate", "", {"key": "OPENAI_BASE_URL", "value": base, "api_key": key})
+                check = json.loads(data or b"{}") if status == 200 else {}
+                models = [m for m in (check.get("models") or []) if isinstance(m, str) and re.fullmatch(r"[\w./:@+-]{1,160}", m)][:100]
+                if not check.get("ok") or not models:
+                    return self._json(400, {"error": "o endereço não respondeu com modelos (" + str(check.get("message") or "sem resposta") + ")"})
+                slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30] or kind
+                ep = {"id": f"byok-{slug}", "name": name, "base_url": str(check.get("resolved_base_url") or base), "model": models[0], "models": models,
+                      "api_mode": "chat_completions", "discover_models": True, "make_default": False, **({"api_key": key} if key else {})}
+                status, data = _dash_call("POST", "/api/providers/custom-endpoints", "", ep)
+                if status != 200:
+                    return self._send(status, data)
+                return self._json(200, {"ok": True, "id": ep["id"], "models": len(models)})
+            m = re.fullmatch(r"/ergon/v1/byok/custom/(byok-[a-z0-9-]{1,40})", path)
+            if method == "DELETE" and m:
+                status, data = _dash_call("DELETE", f"/api/providers/custom-endpoints/{m.group(1)}", "", None)
+                return self._json(200, {"ok": True}) if status in (200, 404) else self._send(status, data)
+            m = re.fullmatch(r"/ergon/v1/byok/([a-z0-9][a-z0-9_.-]{1,40})", path)
+            if method == "DELETE" and m:
+                cat = _byok_catalog()
+                if m.group(1) not in cat:
+                    return self._json(404, {"error": "provedor desconhecido"})
+                status, data = _dash_call("DELETE", "/api/env", "", {"key": cat[m.group(1)]["var"]})
+                return self._json(200, {"ok": True}) if status in (200, 404) else self._send(status, data)
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)})
+        except RuntimeError as exc:
+            return self._json(503, {"error": str(exc)})
         return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
 
     def _training(self, method: str, path: str, body: dict[str, Any]) -> None:

@@ -1,5 +1,15 @@
 # Novidades
 
+## 1.1.0-rc.9 (pré-versão de teste)
+
+- **Loja em galeria:** busca, categorias, paginação, cartões com prévia e página de detalhe para cada pacote.
+- **Chave própria:** todos os provedores que o motor de IA suporta, com busca; "Outro (compatível com OpenAI)" e
+  modelos locais (LM Studio, Ollama).
+- **Conexões:** o modelo padrão é o primeiro item das Contas de IA; Configurações abre em Ferramentas da equipe.
+- **Workspaces:** excluir um workspace (digitando o nome para confirmar).
+- **Segurança:** a aba pede a sua senha atual.
+- **Conversas:** atalho no canto desde o início; sem provedor de IA conectado, um aviso leva direto a Conexões.
+
 ## 1.1.0-rc.8 (pré-versão de teste)
 
 - **Boas-vindas:** "Conectar depois" e "Pular as perguntas" de volta; a tela da conta de IA continua aparecendo só
