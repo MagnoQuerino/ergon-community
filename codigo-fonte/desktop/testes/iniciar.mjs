@@ -13,7 +13,7 @@ const ERGON = new URL(args.ergon);
 const pref = args.prefixo ?? '';
 fs.mkdirSync(args.saida, { recursive: true });
 const m = args.driver === 'cdp' ? await cdp({ base: args.cdp, saida: args.saida }) : await webdriver({ base: args.webdriver, app: args.app, saida: args.saida });
-const tela = () => m.eval(`({ origem: location.origin, fase: document.getElementById('fase')?.textContent ?? null, titulo: document.getElementById('titulo')?.textContent ?? null, linha: document.getElementById('linha')?.textContent ?? null, botoes: [...document.querySelectorAll('#acoes button')].map((b) => b.textContent) })`).catch(() => null);
+const tela = () => m.eval(`({ origem: location.origin, fase: document.getElementById('fase')?.textContent ?? null, titulo: document.getElementById('titulo')?.textContent ?? null, linha: document.getElementById('frase')?.textContent ?? null, botoes: [...document.querySelectorAll('#acoes button')].map((b) => b.textContent) })`).catch(() => null);
 const fim = async (codigo, texto) => { console.log(texto); await m.fim(); process.exit(codigo); };
 
 // 1. o estado da tela de abertura (ou a janela já no Ergon)

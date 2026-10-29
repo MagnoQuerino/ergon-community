@@ -28,7 +28,7 @@ import { createConversation, listConversations, listMessages, recentConversation
 import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
-import type { AiService } from './services/ai.ts';
+import { BYOK, type AiService } from './services/ai.ts';
 import { Motors } from './services/motors.ts';
 import { Integrations, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
@@ -734,8 +734,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const st = await aiOf(a.workspaceId).status();
     // o motor da pessoa (conta nova: ligando por até ~1 min): a tela diz o que está acontecendo e confere de novo
     const dono = owners.of(a.workspaceId);
-    const motor = dono ? motors.state(dono) : { state: 'aberto' as const, error: null };
-    if (!st.available) motors.ready(a.workspaceId);
+    // só com motor por pessoa (instalação local com gerente): sem ele, "indisponível" é definitivo, não "ligando"
+    const motor = motors.perPerson && dono ? motors.state(dono) : null;
+    if (!st.available && motor) motors.ready(a.workspaceId);
     return { ...st, motor };
   });
   app.get('/api/ai/models', {
@@ -777,6 +778,24 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const p = (req.params as { provider: string }).provider;
     await aiOf(a.workspaceId).disconnect(p);
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.disconnect', evidence: { provider: p }, result: 'conta de IA desconectada' });
+    return { ok: true };
+  });
+  // Chave própria (BYOK): a chave vai direto para o motor (que confere no provedor); não fica no banco nem no registro
+  const byokParams = { type: 'object', required: ['provider'], properties: { provider: { enum: BYOK.map((b) => b.id) } } };
+  app.put('/api/ai/byok/:provider', {
+    schema: { params: byokParams, body: { type: 'object', additionalProperties: false, required: ['key'], properties: { key: { type: 'string', minLength: 20, maxLength: 300, pattern: '^\\s*[A-Za-z0-9_.-]+\\s*$' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const p = (req.params as { provider: string }).provider;
+    const r = await aiOf(a.workspaceId).setByok(p, (req.body as { key: string }).key);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok', evidence: { provider: p, verified: r.verified }, result: 'chave própria conectada' });
+    return r;
+  });
+  app.delete('/api/ai/byok/:provider', { schema: { params: byokParams } }, async (req) => {
+    const a = owner(req);
+    const p = (req.params as { provider: string }).provider;
+    await aiOf(a.workspaceId).removeByok(p);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_remove', evidence: { provider: p }, result: 'chave própria removida' });
     return { ok: true };
   });
   app.get('/api/ai/tools', async (req) => { const a = auth(req); return aiOf(a.workspaceId).tools({ channels: integrations.connectedChannels(a.workspaceId) }); });

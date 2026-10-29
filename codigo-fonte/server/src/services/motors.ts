@@ -119,6 +119,9 @@ export class Motors {
     if (u === '_') return false;
     this.touch(workspaceId);
     if (this.state(u).state === 'aberto') return true;
+    // depois de um erro (ex.: a primeira criação passou do tempo), tenta de novo a cada 15 s, não a cada consulta
+    const s = this.states.get(u);
+    if (s?.state === 'erro' && Date.now() - s.at < 15_000) return false;
     void this.ensure(u).catch(() => undefined);
     return false;
   }
@@ -170,12 +173,12 @@ export class Motors {
       throw e;
     }
   }
-  /** O receptor do cofre sobe junto com o contêiner: espera ele responder (até ~2 min) e entrega a chave. */
+  /** O receptor do cofre sobe junto com o contêiner: espera ele responder (até ~4 min: na primeira vez o cofre é criado) e entrega a chave. */
   private async unlockVault(userId: string, previous?: string): Promise<void> {
     const base = `http://${motorName(userId)}:8644`;
     const h = { 'X-Ergon-Bridge-Token': motorSecret(this.master, 'bridge', userId), 'Content-Type': 'application/json' };
     let last = 'o cofre do motor não respondeu';
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 120; i++) {
       try {
         const st = await this.call(`${base}/status`, { headers: h, timeoutMs: 3000 }).then((r) => r.json() as Promise<{ sealed?: boolean }>);
         if (!st.sealed) return;

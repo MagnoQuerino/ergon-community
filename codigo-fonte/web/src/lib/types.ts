@@ -126,7 +126,9 @@ export interface ModelCatalog { default: { provider: string | null; model: strin
 export interface AiStatus {
   executor: 'real' | 'simulated'; available: boolean;
   /** motor de IA da pessoa: conta nova fica "ligando" por até ~1 min */
-  motor?: { state: 'desligado' | 'ligando' | 'aberto' | 'erro'; error: string | null };
+  motor?: { state: 'desligado' | 'ligando' | 'aberto' | 'erro'; error: string | null } | null;
+  /** chave própria (BYOK): provedores que aceitam a chave de API da pessoa; o valor nunca volta */
+  byok?: Array<{ id: string; name: string; site: string; keyHint: string; about: string; connected: boolean }>;
   accounts: Array<{ id: string; name: string; billing: Billing; about: string; site: string; connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
 }

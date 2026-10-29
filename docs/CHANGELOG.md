@@ -1,5 +1,14 @@
 # Novidades
 
+## 1.1.0-rc.5 (pré-versão de teste)
+
+- **Conta de IA na conta nova:** a tela espera a IA da sua conta ficar pronta e libera os botões sozinha, sem
+  precisar fechar e abrir o app.
+- **Conectar:** o código de login aparece dentro do cartão da opção que você escolheu.
+- **Chave própria (BYOK):** em Configurações › IA da equipe, conecte a sua chave de API da OpenRouter, da
+  Anthropic (Claude) ou do Google Gemini. A chave é conferida no provedor e não aparece de novo.
+- **Boas-vindas:** a instalação conta a sua própria história, da Grécia antiga, enquanto prepara tudo.
+
 ## 1.1.0-rc.4 (pré-versão de teste)
 
 - **Conta de IA:** numa conta nova, a tela avisa que o motor de IA está ligando (até 1 minuto) e libera os botões

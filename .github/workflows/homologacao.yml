@@ -136,6 +136,32 @@ jobs:
           Write-Host 'ok    ambiente WSL próprio "Ergon" registrado'
           if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'ErgonAmbiente'))) { throw 'pasta do ambiente fora do lugar' }
           Write-Host 'ok    ambiente em %LOCALAPPDATA%\ErgonAmbiente, separado da pasta do aplicativo'
+      - name: Conta nova e a IA dela disponível (o motor da pessoa liga sozinho)
+        shell: pwsh
+        run: |
+          $B = 'http://localhost:8787'
+          $ws = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+          $corpo = @{ username = 'homologa'; password = 'cidade azul de vidro claro'; displayName = 'Homologação' } | ConvertTo-Json
+          $r = Invoke-WebRequest "$B/api/auth/setup" -Method Post -Body $corpo -ContentType 'application/json' -Headers @{ Origin = $B } -WebSession $ws -SkipHttpErrorCheck
+          if ($r.StatusCode -ne 200) { throw "criar a conta: $($r.StatusCode) $($r.Content)" }
+          Write-Host 'ok    conta criada'
+          $t0 = Get-Date; $estados = [System.Collections.Generic.List[string]]::new(); $ok = $false
+          while (((Get-Date) - $t0).TotalMinutes -lt 10) {
+            $st = Invoke-RestMethod "$B/api/ai/status" -WebSession $ws -TimeoutSec 30 -ErrorAction SilentlyContinue
+            $e = if ($st) { "$($st.motor.state)$(if ($st.motor.error) { ": $($st.motor.error)" })$(if ($st.available) { ' (disponível)' })" } else { 'sem resposta' }
+            if ($estados.Count -eq 0 -or $estados[-1] -ne $e) { $estados.Add($e); Write-Host ("  {0,5:N0} s  {1}" -f ((Get-Date) - $t0).TotalSeconds, $e) }
+            if ($st.available) { $ok = $true; break }
+            Start-Sleep 3
+          }
+          $seg = [int]((Get-Date) - $t0).TotalSeconds
+          if (-not $ok) { throw "a IA da conta nova não ficou disponível em 10 min: $($estados -join ' → ')" }
+          Write-Host "ok    IA da conta nova disponível em $seg s (botões de conectar liberados)"
+          if (@($st.byok).Count -ne 3) { throw "chave própria: esperava 3 provedores, veio $(@($st.byok).Count)" }
+          Write-Host 'ok    chave própria (OpenRouter, Anthropic, Gemini) oferecida pelo motor'
+          $bk = Invoke-RestMethod "$B/api/me" -WebSession $ws
+          $r = Invoke-WebRequest "$B/api/ai/byok/openrouter" -Method Put -Body (@{ key = 'sk-or-v1-' + ('0' * 64) } | ConvertTo-Json) -ContentType 'application/json' -Headers @{ Origin = $B; 'x-csrf-token' = $bk.csrf } -WebSession $ws -SkipHttpErrorCheck
+          if ($r.StatusCode -ne 400) { throw "chave inventada deveria ser recusada pelo provedor; veio $($r.StatusCode) $($r.Content)" }
+          Write-Host "ok    chave inventada recusada pelo provedor (nada gravado): $((($r.Content | ConvertFrom-Json).message))"
       - name: Desinstalar com "apagar também a conta e os dados" (o ambiente sai junto)
         shell: pwsh
         run: |

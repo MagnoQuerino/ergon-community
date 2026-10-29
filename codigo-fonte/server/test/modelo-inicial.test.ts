@@ -37,6 +37,10 @@ class Controle implements HermesControlClient {
   async skills() { return []; }
   async apiToolsets() { return { enabled: [], safe: [] }; }
   async setApiToolsets(e: string[]) { return e; }
+  chaves: Record<string, string> = {};
+  async byok() { return Object.fromEntries(Object.keys(this.chaves).map((k) => [k, true])); }
+  async setByok(provider: string, key: string) { this.chaves[provider] = key; return { verified: true }; }
+  async removeByok(provider: string) { delete this.chaves[provider]; }
 }
 
 async function conectar(gratuito: boolean, padrao: { provider: string; model: string } | null = null) {
@@ -47,7 +51,7 @@ async function conectar(gratuito: boolean, padrao: { provider: string; model: st
   assert.equal((await req(h, 'POST', '/api/ai/accounts/nous/login', s)).status, 200);
   const r = await req(h, 'GET', '/api/ai/logins/sess_abc123', s);
   const st = (await req(h, 'GET', '/api/ai/status', s)).json;
-  return { h, r: r.json, st, controle };
+  return { h, s, r: r.json, st, controle };
 }
 
 describe('modelo para começar ao conectar a conta de IA', () => {
@@ -71,5 +75,23 @@ describe('modelo para começar ao conectar a conta de IA', () => {
     const { h, r, controle } = await conectar(false, { provider: 'nous', model: 'deepseek/deepseek-v4.1-flash-1017' }); abertos.push(h);
     assert.deepEqual(controle.escolhidos, []);
     assert.equal(r.starterModel, null);
+  });
+
+  test('chave própria (BYOK): só os provedores da lista; a chave vai ao motor e não volta; desconectar apaga', async () => {
+    const { h, s, controle } = await conectar(false); abertos.push(h);
+    const st0 = (await req(h, 'GET', '/api/ai/status', s)).json;
+    assert.deepEqual(st0.byok.map((b: { id: string }) => b.id), ['openrouter', 'anthropic', 'gemini']);
+    assert.ok(st0.byok.every((b: { connected: boolean }) => !b.connected));
+    const chave = 'sk-ant-api03-' + 'x'.repeat(40);
+    const r = await req(h, 'PUT', '/api/ai/byok/anthropic', s, { key: `  ${chave} ` });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(controle.chaves.anthropic, chave, 'chave limpa entregue ao motor');
+    const st1 = (await req(h, 'GET', '/api/ai/status', s)).json;
+    assert.equal(st1.byok.find((b: { id: string }) => b.id === 'anthropic').connected, true);
+    assert.ok(!JSON.stringify(st1).includes(chave), 'a chave nunca volta para a tela');
+    assert.equal((await req(h, 'PUT', '/api/ai/byok/openai', s, { key: 'sk-' + 'z'.repeat(40) })).status, 400);
+    assert.equal((await req(h, 'PUT', '/api/ai/byok/gemini', s, { key: 'A'.repeat(30) + '\nOUTRA=1' })).status, 400);
+    assert.equal((await req(h, 'DELETE', '/api/ai/byok/anthropic', s)).status, 200);
+    assert.equal(controle.chaves.anthropic, undefined);
   });
 });

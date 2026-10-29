@@ -8,6 +8,9 @@ import { SIMPLE_ICONS } from './simple-icons.ts';
 const MONOGRAM: Record<string, { hex: string; letter: string }> = {
   nous: { hex: '#16202a', letter: 'N' },
   'openai-codex': { hex: '#10A37F', letter: 'C' },
+  openrouter: { hex: '#6467F2', letter: 'O' },
+  anthropic: { hex: '#C96442', letter: 'A' },
+  gemini: { hex: '#1A73E8', letter: 'G' },
   monday: { hex: '#6161FF', letter: 'm' },
   smartsheet: { hex: '#0073EC', letter: 'S' },
   pipefy: { hex: '#3B5BFD', letter: 'P' },

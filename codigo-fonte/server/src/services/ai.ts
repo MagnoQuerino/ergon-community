@@ -19,6 +19,17 @@ export const ACCOUNTS: AccountDef[] = [
   { id: 'openai-codex', name: 'ChatGPT (assinatura)', billing: 'subscription', site: 'https://chatgpt.com',
     about: 'Usa a assinatura do ChatGPT que você já paga (Plus, Pro ou Business): sem custo por token, valem a mensalidade e os limites do plano.' },
 ];
+/** Chave própria (BYOK): provedores que o motor já suporta nativamente; a chave é do usuário e o custo é por uso, na
+ *  conta dele no provedor. Para somar outro, basta a linha aqui e a variável dele na ponte do motor (_BYOK). */
+export const BYOK: Array<{ id: string; name: string; site: string; keyHint: string; about: string }> = [
+  { id: 'openrouter', name: 'OpenRouter', site: 'https://openrouter.ai/keys', keyHint: 'sk-or-v1-…',
+    about: 'Uma chave só para centenas de modelos (Claude, GPT, Gemini, Llama, DeepSeek…).' },
+  { id: 'anthropic', name: 'Anthropic (Claude)', site: 'https://console.anthropic.com/settings/keys', keyHint: 'sk-ant-…',
+    about: 'Os modelos Claude direto da Anthropic.' },
+  { id: 'gemini', name: 'Google Gemini', site: 'https://aistudio.google.com/apikey', keyHint: 'AIza…',
+    about: 'Os modelos Gemini do Google AI Studio.' },
+];
+
 const billingOf = (provider: string | null | undefined): Billing =>
   !provider ? 'none' : ACCOUNTS.find((a) => a.id === provider)?.billing ?? 'api';
 
@@ -61,6 +72,8 @@ export interface AiStatus {
   available: boolean;
   accounts: Array<AccountDef & { connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
+  /** chave própria: quais provedores estão ligados (o valor da chave nunca sai do motor) */
+  byok: Array<(typeof BYOK)[number] & { connected: boolean }>;
 }
 
 export class AiService {
@@ -121,7 +134,9 @@ export class AiService {
       } catch { /* mantém "não conectada" */ }
     }
     const d = await this.defaultModel(true);
-    return { executor, available, accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) } };
+    const on = available && this.control?.byok ? await this.control.byok().catch(() => ({} as Record<string, boolean>)) : {};
+    return { executor, available, accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) },
+      byok: BYOK.map((b) => ({ ...b, connected: on[b.id] === true })) };
   }
 
   private async modelOptions(refresh = false): Promise<ModelOptions> {
@@ -245,6 +260,27 @@ export class AiService {
     this.session(workspaceId, sessionId);
     this.logins.delete(sessionId);
     await this.need().cancelLogin(sessionId).catch(() => {});
+  }
+
+  /** Chave própria: o motor confere a chave no provedor e grava; sem modelo padrão, já escolhe um para começar. */
+  async setByok(provider: string, key: string): Promise<{ verified: boolean; starterModel: string | null }> {
+    if (!BYOK.some((b) => b.id === provider)) throw new HttpError(400, 'provider', 'provedor de chave própria desconhecido');
+    const c = this.need();
+    if (!c.setByok) throw new HttpError(503, 'ai_unavailable', 'o motor desta instalação não aceita chave própria');
+    const r = await c.setByok(provider, key.trim()).catch((e: unknown) => {
+      // recusa do motor/provedor (chave errada, formato): vira mensagem para a pessoa, não "erro interno"
+      const st = (e as { status?: number }).status;
+      throw st && st < 500 ? new HttpError(400, 'byok', (e as Error).message) : e;
+    });
+    this.models = null; this.def = null;
+    return { ...r, starterModel: await this.starterModel(provider).catch(() => null) };
+  }
+  async removeByok(provider: string): Promise<void> {
+    if (!BYOK.some((b) => b.id === provider)) throw new HttpError(400, 'provider', 'provedor de chave própria desconhecido');
+    const c = this.need();
+    if (!c.removeByok) throw new HttpError(503, 'ai_unavailable', 'o motor desta instalação não aceita chave própria');
+    await c.removeByok(provider);
+    this.models = null; this.def = null;
   }
 
   async disconnect(provider: string): Promise<void> {

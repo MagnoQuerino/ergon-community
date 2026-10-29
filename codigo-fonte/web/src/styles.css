@@ -780,11 +780,13 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 .ok-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-size: 13px; }
 .ai-alt { margin: 6px 0 4px; display: grid; gap: 6px; }
 .ai-alt__label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-.ai-alt__row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.ai-alt__row { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); transition: border-color .15s ease, box-shadow .15s ease; }
+.ai-alt__main { display: flex; align-items: center; gap: 10px; }
+.ai-alt__row--open { border-color: var(--gold, #b88b5b); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold, #b88b5b) 18%, transparent); }
 .ai-alt__row--on { border-color: #b9dcc5; background: #f3faf6; }
 .ai-alt__txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; font-size: 13px; }
 .ai-alt__txt small { color: var(--muted); }
-@media (max-width: 600px) { .ai-alt__row { flex-wrap: wrap; } .ai-best__head { flex-wrap: wrap; } }
+@media (max-width: 600px) { .ai-alt__main { flex-wrap: wrap; } .ai-best__head { flex-wrap: wrap; } }
 
 /* a cidade montada o tempo todo (viva em segundo plano); oculta quando outra área está na tela */
 .keep { height: 100%; }
@@ -1177,3 +1179,14 @@ body:has(.cdock) .tip { right: 100px; }
 .topbar__ws:hover { background: rgba(255, 255, 255, .1); }
 .topbar__ask { height: 34px; border-radius: 9px; }
 @media (max-width: 1180px) { .tb-search__txt, .tb-search__kbd { display: none; } .tb-search { width: 34px; padding: 0; justify-content: center; border-color: transparent; background: none; color: #dfe7ee; cursor: pointer; } .topbar__grow { justify-content: flex-end; padding: 0; } }
+
+/* espera do motor de IA (frases que se escrevem) e chave própria */
+.ai-wait { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin: 0 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.ai-wait .dot { margin-top: 7px; flex: none; }
+.ai-wait p { margin: 4px 0 0; }
+.typewriter { font-style: italic; color: var(--ink); }
+.typewriter__cursor { display: inline-block; width: 1px; height: 1em; margin-left: 2px; vertical-align: -2px; background: currentColor; animation: pulse 1s steps(1) infinite; }
+.ai-byok { margin-top: 12px; }
+.ai-byok > p { margin: 0 0 6px; }
+.ai-byok__form { display: grid; gap: 6px; }
+.ai-byok__form .row { display: flex; gap: 8px; align-items: center; }

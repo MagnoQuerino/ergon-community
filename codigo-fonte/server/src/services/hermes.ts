@@ -205,6 +205,11 @@ export interface HermesControlClient {
   /** Endpoint próprio "ergon-ai" do motor (módulo opcional; sem uso na Community) */
   ergonAi?(c: { baseUrl: string; apiKey: string; models: string[]; makeDefault: boolean }): Promise<void>;
   removeErgonAi?(): Promise<void>;
+  /** Chave própria (BYOK) nos provedores que o motor já suporta: quais estão ligadas (nunca o valor), gravar (o motor
+   *  confere a chave no provedor antes) e apagar. Ausente = motor sem suporte. */
+  byok?(): Promise<Record<string, boolean>>;
+  setByok?(provider: string, key: string): Promise<{ verified: boolean }>;
+  removeByok?(provider: string): Promise<void>;
 }
 
 /** Uma escrita de competência em espera no motor (trava de aprovação nativa: skills.write_approval). */
@@ -290,6 +295,10 @@ export class HttpHermesControl implements HermesControlClient {
 
   async cancelLogin(sessionId: string) { await this.call('DELETE', `/api/providers/oauth/sessions/${encodeURIComponent(sessionId)}`); }
   async disconnect(provider: string) { await this.call('DELETE', `/api/providers/oauth/${encodeURIComponent(provider)}`); }
+
+  async byok() { const j = await this.call('GET', '/ergon/v1/byok'); return (j.providers && typeof j.providers === 'object' ? j.providers : {}) as Record<string, boolean>; }
+  async setByok(provider: string, key: string) { const j = await this.call('PUT', '/ergon/v1/byok', { provider, key }); return { verified: j.verified === true }; }
+  async removeByok(provider: string) { await this.call('DELETE', `/ergon/v1/byok/${encodeURIComponent(provider)}`); }
 
   async modelInfo() { const j = await this.call('GET', '/api/model/info'); return { model: pick(j, 'model'), provider: pick(j, 'provider') }; }
 

@@ -162,8 +162,8 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
     <Card
       busy={!!busy}
       steps={mode === 'setup' ? 0 : undefined}
-      title={mode === 'setup' ? 'Crie a sua conta' : mode === 'unseal' ? 'Ergon trancado' : undefined}
-      sub={mode === 'setup' ? 'Tudo fica cifrado neste computador, com a sua senha. Leva uns dois minutos até a equipe estar pronta.'
+      title={mode === 'setup' ? 'Bem-vindo à ágora' : mode === 'unseal' ? 'Ergon trancado' : undefined}
+      sub={mode === 'setup' ? 'Aristóteles, Hipátia, Arquimedes e o resto da equipe já estão à sua espera. Crie a sua conta: o que é seu fica guardado aqui, cifrado com a sua senha.'
         : mode === 'unseal' ? 'O Ergon foi reiniciado e os dados estão cifrados. Digite a senha para abrir: os agentes voltam ao trabalho logo em seguida.'
           : st.signup ? 'Entre com a sua conta deste computador (a mesma do navegador).' : 'Entre com a sua conta.'}>
       <form onSubmit={(e) => { e.preventDefault(); void submit(); }}>

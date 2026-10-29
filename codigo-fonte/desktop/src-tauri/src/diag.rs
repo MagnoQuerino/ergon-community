@@ -223,12 +223,12 @@ pub fn decidir(e: Entrada) -> Diagnostico {
         return d;
     }
     // Windows sem nenhuma instalação do Ergon: o ambiente próprio (WSL) não depende do Docker Desktop, esteja ele
-    // ausente, fechado ou aberto (e não mexe nele)
+    // ausente, fechado ou aberto (e não mexe nele). A tela é um convite; o técnico fica no diagnóstico.
     let instalar_proprio = |d: &mut Diagnostico, com_docker: bool| {
-        let extra = if com_docker { " O Docker Desktop deste computador não é usado nem alterado." } else { "" };
-        marcar(d, "nao_instalado", "Vamos instalar o Ergon",
-            format!("O Ergon roda num ambiente próprio, dentro do Windows (WSL), sem precisar do Docker Desktop. A instalação baixa e confere cada parte; se o Windows pedir para reiniciar, ela continua sozinha depois.{extra}"),
-            &["instalar", "tentar"]);
+        d.detalhes.push(format!("instalação: ambiente próprio do Ergon (WSL), sem Docker Desktop{}", if com_docker { "; o Docker Desktop deste computador não é usado nem alterado" } else { "" }));
+        marcar(d, "nao_instalado", "Bem-vindo ao Ergon",
+            "Uma equipe dos maiores pensadores da Grécia antiga está pronta para trabalhar com você. Vamos erguer a cidade deles aqui mesmo, no seu computador.".into(),
+            &["instalar"]);
     };
     match &e.docker {
         Docker::Ausente if e.windows => instalar_proprio(&mut d, false),

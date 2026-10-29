@@ -61,5 +61,44 @@ check("link simbólico para fora: não", b._media_file(link) is None)
 check("outro tipo de arquivo: não", b._media_file(os.path.join(gen, "nota.txt")) is None)
 check("imagem vazia: não", b._media_file(os.path.join(gen, "vazia.png")) is None)
 check("caminho vazio ou com byte nulo: não", b._media_file("") is None and b._media_file(png + "\x00") is None)
+
+# Chave própria (BYOK): só os três provedores, chave no formato deles, validada antes de gravar; o valor nunca volta
+import json  # noqa: E402
+
+chamadas = []
+painel = {"valida": {"ok": True, "reachable": True}}
+def fake_dash(method, path, query, body):
+    chamadas.append((method, path, body))
+    if path == "/api/env" and method == "GET":
+        return 200, json.dumps({"OPENROUTER_API_KEY": {"is_set": True, "redacted_value": "sk-or-…abcd"}, "OPENAI_API_KEY": {"is_set": True}}).encode()
+    if path == "/api/providers/validate":
+        return 200, json.dumps(painel["valida"]).encode()
+    return 200, b"{}"
+b._dash_call = fake_dash
+class Resp:
+    def __init__(self): self.out = None
+    def _json(self, status, obj): self.out = (status, obj)
+    def _send(self, status, data): self.out = (status, json.loads(data or b"{}"))
+def byok(method, path, body=None):
+    r = Resp(); b._ControlHandler._byok(r, method, path, body or {}); return r.out
+st = byok("GET", "/ergon/v1/byok")
+check("consulta: só os três provedores, sem o valor da chave", st[0] == 200 and st[1]["providers"] == {"openrouter": True, "anthropic": False, "gemini": False} and "sk-or" not in json.dumps(st[1]), str(st))
+chamadas.clear()
+st = byok("PUT", "/ergon/v1/byok", {"provider": "anthropic", "key": "sk-ant-api03-" + "x" * 40})
+check("gravar: confere no provedor e grava só a variável dele", st == (200, {"ok": True, "verified": True})
+      and [c[1] for c in chamadas] == ["/api/providers/validate", "/api/env"] and chamadas[1][2]["key"] == "ANTHROPIC_API_KEY", str((st, chamadas)))
+painel["valida"] = {"ok": False, "reachable": True}
+chamadas.clear()
+st = byok("PUT", "/ergon/v1/byok", {"provider": "openrouter", "key": "sk-or-v1-" + "y" * 40})
+check("chave recusada pelo provedor: nada é gravado", st[0] == 400 and all(c[1] != "/api/env" for c in chamadas), str((st, chamadas)))
+painel["valida"] = {"ok": True, "reachable": True}
+check("provedor fora da lista: recusado", byok("PUT", "/ergon/v1/byok", {"provider": "openai", "key": "sk-" + "z" * 40})[0] == 400)
+check("chave no formato errado: recusada", byok("PUT", "/ergon/v1/byok", {"provider": "anthropic", "key": "sk-or-v1-" + "y" * 40})[0] == 400)
+check("quebra de linha na chave (outra variável): recusada", byok("PUT", "/ergon/v1/byok", {"provider": "gemini", "key": "A" * 40 + "\nOPENAI_API_KEY=x"})[0] == 400)
+chamadas.clear()
+st = byok("DELETE", "/ergon/v1/byok/gemini")
+check("apagar: só a variável do provedor", st[0] == 200 and chamadas == [("DELETE", "/api/env", {"key": "GEMINI_API_KEY"})], str((st, chamadas)))
+check("apagar outra variável: não", byok("DELETE", "/ergon/v1/byok/OPENAI_API_KEY")[0] == 404)
+
 print("TUDO OK" if ok else "HOUVE FALHA")
 sys.exit(0 if ok else 1)

@@ -13,12 +13,17 @@
     <p class="abertura__fase" id="fase">Iniciando Ergon</p>
     <h1 class="abertura__titulo" id="titulo" tabindex="-1">Verificando serviços…</h1>
     <p class="abertura__texto" id="texto" role="status" aria-live="polite"></p>
+    <p class="abertura__frase" id="frase" aria-live="polite"></p>
+    <div class="abertura__barra" id="barra" hidden role="progressbar" aria-label="Preparando a cidade" aria-valuemin="0" aria-valuemax="100"><span id="barra-cheia"></span></div>
     <ul class="abertura__avisos" id="avisos" hidden></ul>
-    <p class="abertura__linha" id="linha" aria-live="off"></p>
     <div class="abertura__acoes" id="acoes"></div>
     <section class="abertura__diagnostico" id="diagnostico" hidden aria-label="Diagnóstico">
       <h2>Diagnóstico</h2>
       <ul id="detalhes"></ul>
+      <details id="registro-box" hidden>
+        <summary>Registro técnico desta tentativa</summary>
+        <pre id="registro"></pre>
+      </details>
       <button type="button" class="botao botao--leve" id="registros">Abrir a pasta de registros</button>
     </section>
   </main>

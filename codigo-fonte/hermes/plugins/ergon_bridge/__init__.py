@@ -607,6 +607,25 @@ def _sanitize_ergon_ai(body: dict[str, Any]) -> dict[str, Any]:
             "api_mode": "chat_completions", "discover_models": False, "make_default": bool(body.get("make_default"))}
 
 
+# Chave própria (BYOK): só estes provedores, só a variável deles, e a chave no formato de cada um. O valor nunca volta:
+# a consulta diz apenas se está ligada.
+_BYOK = {
+    "openrouter": ("OPENROUTER_API_KEY", re.compile(r"sk-or-[A-Za-z0-9_-]{20,200}")),
+    "anthropic": ("ANTHROPIC_API_KEY", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,200}")),
+    "gemini": ("GEMINI_API_KEY", re.compile(r"[A-Za-z0-9_.-]{30,200}")),
+}
+
+
+def _sanitize_byok(body: dict[str, Any]) -> tuple[str, str]:
+    provider, key = str(body.get("provider") or "").strip(), str(body.get("key") or "").strip()
+    if provider not in _BYOK:
+        raise ValueError("provedor de chave própria desconhecido")
+    env, fmt = _BYOK[provider]
+    if not fmt.fullmatch(key):
+        raise ValueError("a chave não tem o formato desse provedor")
+    return env, key
+
+
 def _sanitize_model_set(body: dict[str, Any]) -> dict[str, Any]:
     provider, model = str(body.get("provider") or "").strip(), str(body.get("model") or "").strip()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,40}", provider) or not re.fullmatch(r"[\w./:@+-]{1,160}", model):
@@ -683,6 +702,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._api_toolsets_put(body or {})
         if path == "/ergon/v1/media" and method == "GET":
             return self._media_get(dict(urllib.parse.parse_qsl(parts.query)).get("path", ""))
+        if path == "/ergon/v1/byok" or path.startswith("/ergon/v1/byok/"):
+            return self._byok(method, path, body or {})
         for m, rx, allowed_q in _ROUTES:
             if m == method and rx.fullmatch(path):
                 q = urllib.parse.parse_qsl(parts.query)
@@ -701,6 +722,33 @@ class _ControlHandler(BaseHTTPRequestHandler):
                     body = {}
                 status, data = _dash_call(method, path, query, body if method in ("POST", "PUT") else None)
                 return self._send(status, data)
+        return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
+
+    def _byok(self, method: str, path: str, body: dict[str, Any]) -> None:
+        """Chave própria: GET (quais estão ligadas), PUT (confere no provedor e grava), DELETE /<provedor> (apaga)."""
+        if method == "GET" and path == "/ergon/v1/byok":
+            status, data = _dash_call("GET", "/api/env", "", None)
+            if status != 200:
+                return self._send(status, data)
+            env = json.loads(data or b"{}")
+            return self._json(200, {"providers": {p: bool((env.get(v) or {}).get("is_set")) for p, (v, _) in _BYOK.items()}})
+        if method == "PUT" and path == "/ergon/v1/byok":
+            try:
+                var, key = _sanitize_byok(body)
+            except ValueError as exc:
+                return self._json(400, {"error": str(exc)})
+            status, data = _dash_call("POST", "/api/providers/validate", "", {"key": var, "value": key})
+            check = json.loads(data or b"{}") if status == 200 else {}
+            if check.get("reachable") and not check.get("ok"):
+                return self._json(400, {"error": "o provedor recusou essa chave; confira e tente de novo"})
+            status, data = _dash_call("PUT", "/api/env", "", {"key": var, "value": key, "provider_setup": True})
+            if status != 200:
+                return self._send(status, data)
+            return self._json(200, {"ok": True, "verified": bool(check.get("reachable"))})
+        m = re.fullmatch(r"/ergon/v1/byok/([a-z]+)", path)
+        if method == "DELETE" and m and m.group(1) in _BYOK:
+            status, data = _dash_call("DELETE", "/api/env", "", {"key": _BYOK[m.group(1)][0]})
+            return self._json(200, {"ok": True}) if status in (200, 404) else self._send(status, data)
         return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
 
     def _training(self, method: str, path: str, body: dict[str, Any]) -> None:
