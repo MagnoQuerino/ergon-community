@@ -54,7 +54,7 @@ services:
     restart: unless-stopped
     logging:
       driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      options: { max-size: "10m" }
 
   hermes:
     # Imagem do motor de IA: oficial fixada por digest (v0.22.2) + cofre gocryptfs + plugin do Ergon (hermes/Dockerfile).
@@ -65,6 +65,7 @@ services:
     build: ./hermes
     image: ergon-hermes:dev
     deploy:
+      mode: replicated   # explícito: o podman-compose só respeita "replicas" com ele
       replicas: 0
 
   motores:
@@ -88,7 +89,7 @@ services:
       HERMES_MEM_LIMIT: ${HERMES_MEM_LIMIT:-2g}
       HERMES_CPUS: ${HERMES_CPUS:-2.0}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ERGON_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     networks: [ergon-gerente]
     read_only: true
     cap_drop: [ALL]
@@ -103,7 +104,7 @@ services:
     restart: unless-stopped
     logging:
       driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      options: { max-size: "10m" }
 
 volumes:
   ergon-data:

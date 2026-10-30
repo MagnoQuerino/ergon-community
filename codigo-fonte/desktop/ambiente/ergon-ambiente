@@ -1,16 +1,29 @@
 #!/bin/sh
 # Serviço do ambiente do Ergon (chamado pelo aplicativo, com argumentos fixos):
-#   servico   liga o Docker Engine e fica em primeiro plano (o aplicativo mantém este processo vivo)
-#   pronto    sai com 0 quando o Docker responde
+#   servico   liga a API do Podman (o gerente de motores cria o motor de cada pessoa por ela) e fica em primeiro
+#             plano (o aplicativo mantém este processo vivo)
+#   pronto    sai com 0 quando o Podman e a API respondem
 #   versao    versão deste ambiente
 set -u
+SOCKET=/run/podman/podman.sock
+# Os ambientes do WSL2 dividem a mesma rede. Um Docker em outro ambiente (o antigo do Ergon, o Docker Desktop) deixa o
+# repasse de pacotes bloqueado por padrão, e os contêineres daqui ficariam sem internet. Só acrescenta a liberação das
+# redes do Podman (10.88/10.89); não apaga nem muda regra de ninguém.
+liberar_rede() {
+  for ipt in iptables-legacy iptables; do
+    command -v "$ipt" >/dev/null 2>&1 || continue
+    "$ipt" -S FORWARD 2>/dev/null | grep -q '^-P FORWARD DROP' || continue
+    for d in -s -d; do "$ipt" -C FORWARD "$d" 10.88.0.0/15 -j ACCEPT 2>/dev/null || "$ipt" -I FORWARD "$d" 10.88.0.0/15 -j ACCEPT; done
+  done
+}
 case "${1:-}" in
   servico)
-    mkdir -p /var/log/ergon
+    mkdir -p /var/log/ergon /run/podman
+    liberar_rede >>/var/log/ergon/podman.log 2>&1 || true
     # um só: se já está rodando (outra janela abriu antes), só espera ele
-    if pgrep -x dockerd >/dev/null; then while pgrep -x dockerd >/dev/null; do sleep 5; done; exit 0; fi
-    exec dockerd >>/var/log/ergon/dockerd.log 2>&1 ;;
-  pronto) docker info >/dev/null 2>&1 ;;
+    if pgrep -f 'podman system service' >/dev/null; then while pgrep -f 'podman system service' >/dev/null; do sleep 5; done; exit 0; fi
+    exec podman system service --time=0 "unix://$SOCKET" >>/var/log/ergon/podman.log 2>&1 ;;
+  pronto) [ -S "$SOCKET" ] && podman info >/dev/null 2>&1 ;;
   versao) cat /etc/ergon-ambiente 2>/dev/null || echo desconhecida ;;
   *) echo "uso: ergon-ambiente servico|pronto|versao" >&2; exit 2 ;;
 esac

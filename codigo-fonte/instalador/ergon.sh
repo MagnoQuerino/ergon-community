@@ -43,8 +43,57 @@ URL="http://localhost:$PORTA"
 PROJETO="${COMPOSE_PROJECT_NAME:-$(dotenv COMPOSE_PROJECT_NAME)}"; PROJETO="${PROJETO:-ergon}"
 SEGREDOS="$(dotenv ERGON_SECRETS_DIR)"; SEGREDOS="${SEGREDOS:-${ERGON_SECRETS_DIR:-$HOME/.ergon/secrets}}"
 
-compose() { (cd "$RAIZ" && docker compose --profile hermes "$@"); }
-need_docker() { docker info >/dev/null 2>&1 || fail 'O Docker não está rodando. Abra o Docker e tente de novo.'; }
+# Motor de contêineres: o Podman. Uma instalação de antes dele, feita com o Docker, segue no Docker até migrar (a
+# escolha fica no .env, para não trocar sozinha e perder de vista os dados guardados no outro motor).
+MOTOR="${ERGON_MOTOR:-$(dotenv ERGON_MOTOR)}"
+if [[ -z "$MOTOR" ]]; then
+  if [[ -n "$(dotenv ERGON_SECRETS_DIR)" ]] && command -v docker >/dev/null 2>&1; then MOTOR=docker
+  elif command -v podman >/dev/null 2>&1; then MOTOR=podman; else MOTOR=docker; fi
+fi
+[[ "$MOTOR" == podman || "$MOTOR" == docker ]] || fail "ERGON_MOTOR desconhecido: $MOTOR (use podman)."
+# a API que o gerente de motores usa: a do Podman (do sistema, como root, ou da conta) ou o socket do Docker
+if [[ "$MOTOR" == podman ]]; then
+  if [[ "$(id -u)" == 0 ]]; then SOCKET=/run/podman/podman.sock; else SOCKET="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"; fi
+else SOCKET=/var/run/docker.sock; fi
+# podman-compose: o que vem com o Ergon Desktop no Linux (mesma versão em todas as distribuições) ou o do sistema
+PODMAN_COMPOSE=(podman-compose)
+[[ -f /usr/lib/ergon/podman-compose ]] && PODMAN_COMPOSE=(python3 /usr/lib/ergon/podman-compose)
+compose() {
+  if [[ "$MOTOR" == podman ]]; then (cd "$RAIZ" && ERGON_SOCKET="$SOCKET" "${PODMAN_COMPOSE[@]}" --profile hermes "$@")
+  else (cd "$RAIZ" && ERGON_SOCKET="$SOCKET" docker compose --profile hermes "$@"); fi
+}
+# contêiner de um serviço do projeto (ligado; com "todos", também parado), pelos rótulos que os dois motores põem
+cid() { "$MOTOR" ps ${2:+-a} -q --filter "label=com.docker.compose.project=$PROJETO" --filter "label=com.docker.compose.service=$1" | head -1; }
+# A API do Podman, que o gerente de motores usa. No ambiente do Windows quem liga é o próprio ambiente; na conta de uma
+# pessoa (Linux), o soquete do systemd da conta (podman.socket) ou, sem ele, o serviço do Podman em segundo plano.
+garantir_api() {
+  [[ "$MOTOR" == podman && ! -S "$SOCKET" ]] || return 0
+  if [[ "$(id -u)" != 0 ]] && command -v systemctl >/dev/null 2>&1; then systemctl --user enable --now podman.socket >/dev/null 2>&1 || true; fi
+  if [[ ! -S "$SOCKET" ]]; then
+    mkdir -p "$(dirname "$SOCKET")"
+    nohup podman system service --time=0 "unix://$SOCKET" >/dev/null 2>&1 &
+  fi
+  local i; for i in $(seq 1 30); do [[ -S "$SOCKET" ]] && return 0; sleep 1; done
+  fail 'A API do Podman não ligou (o gerente dos motores de IA precisa dela).'
+}
+need_motor() {
+  if "$MOTOR" info >/dev/null 2>&1; then garantir_api; return 0; fi
+  if [[ "$MOTOR" == podman ]]; then fail 'O Podman não está respondendo. Instale o Ergon Desktop (pacote .deb, que traz o Podman) ou o Podman e tente de novo.'
+  else fail 'O Docker não está rodando. Abra o Docker e tente de novo.'; fi
+}
+# imagem do motor de IA: o gerente cria os motores com ela, então precisa estar aqui antes (o serviço dela não tem
+# contêiner, e o "pull" do podman-compose só traz as imagens de serviços com contêiner)
+imagem_motor() { sed -nE 's/^ *ERGON_MOTOR_IMAGE: *//p' "$RAIZ/docker-compose.yml" | head -1 | tr -d '"'; }
+# Liga os serviços. Com o Podman, os contêineres do projeto saem antes e são criados de novo: o podman-compose não
+# reaproveita contêiner existente (o "up" tenta criar outro com o mesmo nome). Os volumes, com os dados, ficam; os
+# motores de cada pessoa (criados pelo gerente, sem os rótulos do projeto) também.
+ligar_servicos() {
+  if [[ "$MOTOR" == podman ]]; then
+    local ids; ids="$("$MOTOR" ps -aq --filter "label=com.docker.compose.project=$PROJETO")"
+    [[ -n "$ids" ]] && { "$MOTOR" rm -f $ids >/dev/null || fail 'Não consegui desligar os serviços de antes.'; }
+  fi
+  compose up -d "$@"
+}
 health() { curl -fsS --max-time 5 "$URL/api/health" 2>/dev/null || true; }
 # campo simples de um JSON de uma linha (texto ou true/false); sed -E funciona no macOS e no Linux
 field() { sed -nE "s/.*\"$1\":(\"([^\"]*)\"|(true|false)).*/\2\3/p"; }
@@ -75,6 +124,7 @@ init_secrets() {
   touch "$RAIZ/.env"
   grep -q '^ERGON_SECRETS_DIR=' "$RAIZ/.env" || echo "ERGON_SECRETS_DIR=$SEGREDOS" >> "$RAIZ/.env"
   grep -q '^ERGON_EXECUTOR=' "$RAIZ/.env" || echo 'ERGON_EXECUTOR=hermes' >> "$RAIZ/.env"
+  grep -q '^ERGON_MOTOR=' "$RAIZ/.env" || echo "ERGON_MOTOR=$MOTOR" >> "$RAIZ/.env"
 }
 
 # Onde esta instalação está (lido pelo Ergon Desktop para achar o lançador e a porta). Só caminho e porta.
@@ -86,7 +136,7 @@ registrar() {
 
 # up [semfalha]: com "semfalha", não responder devolve 1 em vez de encerrar (quem chama decide o que fazer)
 up() {
-  if (( FONTE )); then compose up -d --build; else compose pull; compose up -d; fi
+  if (( FONTE )); then ligar_servicos --build; else compose pull; [[ "$MOTOR" == podman ]] && { "$MOTOR" pull -q "$(imagem_motor)" >/dev/null || fail 'Não consegui baixar a imagem do motor de IA.'; }; ligar_servicos; fi
   local h; if ! h="$(wait_health 240)"; then [[ "${1:-}" == semfalha ]] && return 1; fail 'O Ergon não respondeu. Veja: ./ergon.sh logs'; fi
   if [[ "$(field sealed <<<"$h")" == true ]]; then say "Ergon no ar e TRANCADO: abra $URL e digite a senha."; else say "Ergon no ar em $URL"; fi
 }
@@ -98,8 +148,8 @@ backup() {
   [[ -z "$h" ]] && { say 'Ergon parado: sem backup agora.'; return 1; }
   [[ "$(field sealed <<<"$h")" == true ]] && { say 'Ergon trancado: destranque para fazer o backup.'; return 1; }
   local nome id; nome="$(compose exec -T ergon node server/src/backup-cli.ts)" || fail 'O backup falhou.'
-  id="$(compose ps -q ergon)"; mkdir -p "$BACKUPS"
-  docker cp "$id:/data/backups/$nome" "$BACKUPS/$nome" >/dev/null && [[ -f "$BACKUPS/$nome/manifest.json" ]] \
+  id="$(cid ergon)"; mkdir -p "$BACKUPS"
+  "$MOTOR" cp "$id:/data/backups/$nome" "$BACKUPS/$nome" >/dev/null && [[ -f "$BACKUPS/$nome/manifest.json" ]] \
     || fail "O backup ficou no volume (/data/backups/$nome), mas a cópia para $BACKUPS falhou."
   chmod -R go-rwx "$BACKUPS/$nome"
   say "Backup completo e conferido (banco, arquivos e conexões): $BACKUPS/$nome"
@@ -109,7 +159,7 @@ backup() {
 # com o Ergon parado. Imprime a linha JSON que ela devolve. Uso: restore_tool [opções do run --] <args>
 restore_tool() {
   local extra=(); while [[ $# -gt 0 && "$1" != -- ]]; do extra+=("$1"); shift; done; [[ "${1:-}" == -- ]] && shift
-  (cd "$RAIZ" && docker compose --profile hermes run --rm --no-deps -T ${extra[@]+"${extra[@]}"} ergon node server/src/restore-cli.ts "$@" 2>/dev/null) | grep '^{' | tail -1 || true
+  compose run --rm --no-deps -T ${extra[@]+"${extra[@]}"} ergon node server/src/restore-cli.ts "$@" 2>/dev/null | grep '^{' | tail -1 || true
 }
 # cofre do motor: arquivos do usuário do motor (10000), com dono e permissões que o gocryptfs usa. O serviço do
 # Ergon descarta todas as capacidades; este passo devolve só as de ler, copiar com dono e ajustar permissões.
@@ -129,16 +179,16 @@ restaurar() {
   [[ "$(basename "$origem")" == manifest.json ]] && origem="$(dirname "$origem")"
   if [[ -d "$origem" ]]; then [[ -f "$origem/manifest.json" ]] || fail 'Essa pasta não é um backup do Ergon (falta o manifest.json).'
   else [[ "$origem" == *.sqlite ]] || fail 'Indique a pasta do backup (ou um backup antigo .sqlite).'; fi
-  need_docker
-  local id; id="$(compose ps -aq ergon)"
+  need_motor
+  local id; id="$(cid ergon todos)"
   [[ -n "$id" ]] || fail 'O Ergon não está instalado aqui. Rode ./ergon.sh instalar e restaure antes de criar a conta.'
   local c; c="$(carimbo)"; local entrada="/data/backups/entrada-$c" alvo
   [[ "$(restore_tool -- preparar | field ok)" == true ]] || fail 'Não consegui preparar o volume do Ergon; nada foi alterado.'
   # o backup entra no volume como cópia (o original fica onde está)
-  if [[ -d "$origem" ]]; then alvo="$entrada"; docker cp "$origem" "$id:$entrada" >/dev/null || fail 'Não consegui copiar o backup para o volume do Ergon; nada foi alterado.'
+  if [[ -d "$origem" ]]; then alvo="$entrada"; "$MOTOR" cp "$origem" "$id:$entrada" >/dev/null || fail 'Não consegui copiar o backup para o volume do Ergon; nada foi alterado.'
   else
     local tmp; tmp="$(mktemp -d)"; cp "$origem" "$tmp/"; [[ -f "$origem.keyring.json" ]] && cp "$origem.keyring.json" "$tmp/"
-    docker cp "$tmp" "$id:$entrada" >/dev/null || { rm -rf "$tmp"; fail 'Não consegui copiar o backup para o volume do Ergon; nada foi alterado.'; }
+    "$MOTOR" cp "$tmp" "$id:$entrada" >/dev/null || { rm -rf "$tmp"; fail 'Não consegui copiar o backup para o volume do Ergon; nada foi alterado.'; }
     rm -rf "$tmp"; alvo="$entrada/$(basename "$origem")"
   fi
   local conf; conf="$(restore_tool -- conferir "$alvo")"
@@ -150,7 +200,7 @@ restaurar() {
   [[ -n "$chave" && "$chave" != sem ]] && say 'Depois, o Ergon pode pedir a senha (ou a frase de recuperação) da época do backup.'
   say "O que está no lugar agora vai para /data/backups/pre-restore-$c (nada é apagado)."
   confirmar 'Restaurar agora?' || { say 'Nada foi alterado.'; return 0; }
-  local motor; motor="$(compose ps -q hermes 2>/dev/null || true)"
+  local motor; motor="$(cid hermes 2>/dev/null || true)"
   compose stop ergon
   local r; r="$(restore_tool -- restaurar "$alvo" "$c")"
   [[ "$(field ok <<<"$r")" == true ]] || { compose start ergon; fail "A restauração não foi feita; os dados atuais continuam no lugar. $(field error <<<"$r")"; }
@@ -168,9 +218,9 @@ restaurar() {
 desfazer_restauracao() {
   local pre="${1:-}"
   [[ "$pre" =~ ^pre-restore-[A-Za-z0-9_-]+$ ]] || fail 'Diga qual: ./ergon.sh desfazer-restauracao pre-restore-<data>  (o nome aparece ao restaurar)'
-  need_docker
+  need_motor
   confirmar "Voltar ao que era antes da restauração $pre?" || { say 'Nada foi alterado.'; return 0; }
-  local motor; motor="$(compose ps -q hermes 2>/dev/null || true)"
+  local motor; motor="$(cid hermes 2>/dev/null || true)"
   compose stop ergon
   local r; r="$(restore_tool -- desfazer "/data/backups/$pre")"
   [[ "$(field ok <<<"$r")" == true ]] || { compose start ergon; fail "Não deu para desfazer: $(field error <<<"$r")"; }
@@ -362,22 +412,23 @@ remover() {
     local r="${ERGON_CONFIRMAR:-}"; [[ -n "$r" ]] || read -r -p 'Para confirmar, digite APAGAR: ' r
     [[ "$r" == APAGAR ]] || fail 'Nada foi apagado.'
   fi
-  if docker info >/dev/null 2>&1; then
+  if "$MOTOR" info >/dev/null 2>&1; then
     # motores por pessoa (criados pelo gerente): os contêineres saem; os cofres deles são dados
     local motores cofres='' m vols
-    motores="$(docker ps -aq --filter label=ergon.motor 2>/dev/null || true)"
-    for m in $motores; do cofres="$cofres $(docker inspect --format '{{ index .Config.Labels "ergon.motor.volume" }}' "$m" 2>/dev/null || true)"; done
-    [[ -n "$motores" ]] && { docker rm -f $motores >/dev/null 2>&1 || true; }
+    motores="$("$MOTOR" ps -aq --filter label=ergon.motor 2>/dev/null || true)"
+    for m in $motores; do cofres="$cofres $("$MOTOR" inspect --format '{{ index .Config.Labels "ergon.motor.volume" }}' "$m" 2>/dev/null || true)"; done
+    [[ -n "$motores" ]] && { "$MOTOR" rm -f $motores >/dev/null 2>&1 || true; }
     if (( tudo )); then
       compose down --remove-orphans --rmi all -v >/dev/null 2>&1 || true
-      vols="$(docker volume ls -q 2>/dev/null | grep -E "^${PROJETO}_" || true) $cofres"; vols="$(echo $vols)"
-      [[ -n "$vols" ]] && { docker volume rm -f $vols >/dev/null 2>&1 || true; }
+      [[ "$MOTOR" == podman ]] && { "$MOTOR" rmi -f "$(imagem_motor)" >/dev/null 2>&1 || true; }
+      vols="$("$MOTOR" volume ls -q 2>/dev/null | grep -E "^${PROJETO}_" || true) $cofres"; vols="$(echo $vols)"
+      [[ -n "$vols" ]] && { "$MOTOR" volume rm -f $vols >/dev/null 2>&1 || true; }
       say 'Contêineres, imagens e volumes do Ergon apagados.'
     else
       compose down --remove-orphans --rmi all >/dev/null 2>&1 || true
-      say "Contêineres e imagens do Ergon removidos. Os dados ficaram guardados no Docker (volumes ${PROJETO}_*)."
+      say "Contêineres e imagens do Ergon removidos. Os dados ficaram guardados nos volumes ${PROJETO}_* do $MOTOR."
     fi
-  else say 'O Docker não está rodando: contêineres, imagens e volumes ficam até você abrir o Docker e rodar "ergon remover" de novo.'; fi
+  else say "O $MOTOR não está respondendo: contêineres, imagens e volumes ficam até ele voltar e você rodar \"ergon remover\" de novo."; fi
   remover_ajudante || true
   rm -f "${ERGON_INSTALACAO:-$HOME/.ergon/instalacao.json}"
   if (( tudo )); then rm -rf "$SEGREDOS" "$BACKUPS" "$LOCAL" "$HOME/.ergon"; say 'Segredos, backups e registros do Ergon apagados.'
@@ -394,10 +445,10 @@ case "${1:-ajuda}" in
       # continua pela cópia instalada: o registro, o ajudante e o Docker passam a usar a pasta do programa
       /bin/bash "$DESTINO/ergon.sh" instalar; say "Pode apagar a pasta do zip ($RAIZ). Em um terminal novo: ergon status"; exit 0
     fi
-    need_docker; init_secrets; registrar; up; instalar_ajudante; [[ -n "${ERGON_SEM_NAVEGADOR:-}" ]] || abrir ;;
+    need_motor; init_secrets; registrar; up; instalar_ajudante; [[ -n "${ERGON_SEM_NAVEGADOR:-}" ]] || abrir ;;
   remover) remover "${2:-}" ;;
-  iniciar) need_docker; registrar; compose up -d; instalar_ajudante; wait_health 240 >/dev/null && say "No ar em $URL" || fail 'Não respondeu.' ;;
-  subir) need_docker; registrar; say 'Ligando os serviços do Ergon e o motor de IA…'; compose up -d
+  iniciar) need_motor; registrar; ligar_servicos; instalar_ajudante; wait_health 240 >/dev/null && say "No ar em $URL" || fail 'Não respondeu.' ;;
+  subir) need_motor; registrar; say 'Ligando os serviços do Ergon e o motor de IA…'; ligar_servicos
     h="$(wait_health 240)" || fail 'O Ergon não respondeu. Veja: ./ergon.sh logs'; say "No ar em $URL" ;;
   parar) compose stop ;;
   status) compose ps; h="$(health)"; [[ -n "$h" ]] && say "Ergon $(field version <<<"$h") · $([[ "$(field sealed <<<"$h")" == true ]] && echo trancado || echo aberto) · $URL" || say 'Ergon não responde.' ;;
@@ -406,7 +457,7 @@ case "${1:-ajuda}" in
   backup) backup ;;
   restaurar) restaurar "${2:-}" ;;
   desfazer-restauracao) desfazer_restauracao "${2:-}" ;;
-  atualizar) need_docker; atualizar ;;
+  atualizar) need_motor; atualizar ;;
   ajudante) case "${2:-}" in remover) remover_ajudante ;; instalar) instalar_ajudante ;; *) ajudante ;; esac ;;
   *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac

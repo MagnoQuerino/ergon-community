@@ -48,18 +48,20 @@ services:
     restart: unless-stopped
     logging:
       driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      options: { max-size: "10m" }
 
   hermes:
     # Imagem do motor de IA (oficial fixada + cofre gocryptfs + plugin do Ergon). Daqui não sai contêiner: cada pessoa
     # tem o próprio motor, criado pelo gerente de motores com esta imagem, o cofre e a conta de IA dela.
-    # O serviço fica só para "docker compose pull" trazer a imagem.
+    # O serviço fica só para o "pull" trazer a imagem (com o Podman, o lançador baixa ela à parte).
     image: ghcr.io/__DONO__/ergon-community-hermes:__VERSAO__
     deploy:
+      mode: replicated   # explícito: o podman-compose só respeita "replicas" com ele
       replicas: 0
 
   motores:
-    # Gerente de motores: o único contêiner com o socket do Docker; só o Ergon fala com ele (rede própria, sem internet).
+    # Gerente de motores: o único contêiner com a API do motor de contêineres (a do Podman; numa instalação antiga, o
+    # socket do Docker); só o Ergon fala com ele (rede própria, sem internet). O lançador diz qual é em ERGON_SOCKET.
     image: ghcr.io/__DONO__/ergon-community:__VERSAO__
     command: ["node", "server/src/gerente-motores.ts"]
     user: root
@@ -74,7 +76,7 @@ services:
       HERMES_MEM_LIMIT: ${HERMES_MEM_LIMIT:-2g}
       HERMES_CPUS: ${HERMES_CPUS:-2.0}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ERGON_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     networks: [ergon-gerente]
     read_only: true
     cap_drop: [ALL]
@@ -89,7 +91,7 @@ services:
     restart: unless-stopped
     logging:
       driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      options: { max-size: "10m" }
 
 volumes:
   ergon-data:

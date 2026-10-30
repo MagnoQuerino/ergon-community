@@ -1,5 +1,7 @@
-//! Leitura do Docker com argumentos fixos: a versão do servidor e os contêineres do projeto "ergon". Nada aqui
-//! liga, para ou apaga contêineres (isso é do lançador, quando você pede), e nada toca em outros projetos.
+//! Leitura do motor de contêineres com argumentos fixos: a versão e os contêineres do projeto "ergon". No ambiente
+//! próprio do Ergon é o Podman (o de uma instalação antiga, ainda não migrada, é o Docker de dentro dele); fora dele, o
+//! Docker do sistema. Nada aqui liga, para ou apaga contêineres (isso é do lançador, quando você pede), e nada toca em
+//! outros projetos.
 
 use crate::processo::{comando, linhas, rodar};
 use std::time::Duration;
@@ -19,20 +21,57 @@ pub enum Docker {
     Falha(String),
 }
 
-/// O programa docker: o de dentro do ambiente do Ergon (Windows, instalação própria) ou o do sistema.
-fn cli() -> std::process::Command {
-    if crate::ambiente::ativo() { crate::ambiente::dentro(&["docker"]) } else { comando("docker") }
+/// Dentro do ambiente próprio: o Podman, se ele estiver lá (ambiente novo ou já migrado). Uma vez visto, fica.
+fn ambiente_com_podman() -> bool {
+    static VISTO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if VISTO.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    let tem = rodar(crate::ambiente::dentro(&["sh", "-c", "command -v podman"]), Duration::from_secs(20)).map(|o| o.status.success()).unwrap_or(false);
+    if tem {
+        VISTO.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    tem
+}
+
+/// Linux: o Podman da conta, a não ser numa instalação de antes dele, feita com o Docker (o lançador grava a escolha no
+/// .env da instalação; sem ela, a instalação registrada com o docker no computador é dessas).
+pub fn linux_usa_podman() -> bool {
+    let Some(raiz) = crate::instalacao::localizar().raiz else { return true };
+    let env = std::fs::read_to_string(raiz.join(".env")).unwrap_or_default();
+    match env.lines().rev().find_map(|l| l.strip_prefix("ERGON_MOTOR=")).map(|v| v.trim().trim_matches('"')) {
+        Some(m) => m != "docker",
+        None => {
+            let mut d = comando("docker");
+            d.arg("--version");
+            !(env.lines().any(|l| l.starts_with("ERGON_SECRETS_DIR=")) && rodar(d, Duration::from_secs(10)).is_ok_and(|o| o.status.success()))
+        }
+    }
+}
+
+/// O programa: o de dentro do ambiente do Ergon (Windows, instalação própria), o do Linux (Podman, ou o Docker de uma
+/// instalação antiga) ou o docker do sistema (Windows com uma instalação antiga pelo Docker Desktop); e se é o Podman.
+fn cli() -> (std::process::Command, bool) {
+    if crate::ambiente::ativo() {
+        let podman = ambiente_com_podman();
+        (crate::ambiente::dentro(&[if podman { "podman" } else { "docker" }]), podman)
+    } else if !cfg!(windows) && linux_usa_podman() {
+        (comando("podman"), true)
+    } else {
+        (comando("docker"), false)
+    }
 }
 
 pub fn situacao() -> Docker {
-    let mut c = cli();
-    c.args(["version", "--format", "{{.Server.Version}}"]);
+    let (mut c, podman) = cli();
+    // o Podman não tem serviço residente: a versão dele responde sempre que o ambiente está de pé
+    if podman { c.args(["info", "--format", "{{.Version.Version}}"]) } else { c.args(["version", "--format", "{{.Server.Version}}"]) };
     match rodar(c, Duration::from_secs(20)) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Docker::Ausente,
         Err(e) => Docker::Falha(e.to_string()),
         Ok(o) if o.status.success() => {
             let v = linhas(&o.stdout).into_iter().next().unwrap_or_default();
-            if v.is_empty() { Docker::Parado("o Docker não informou a versão do serviço".into()) } else { Docker::Pronto(v) }
+            if v.is_empty() { Docker::Parado("o motor de contêineres não informou a versão".into()) } else { Docker::Pronto(v) }
         }
         Ok(o) => classificar(&linhas(&o.stderr).join(" ")),
     }
@@ -66,15 +105,14 @@ pub struct Conteiner {
 
 /// Contêineres do projeto (parados também), com o serviço, o estado, as portas e a pasta do Compose.
 pub fn conteineres(projeto: &str) -> Vec<Conteiner> {
-    let mut c = cli();
-    c.args([
-        "ps",
-        "-a",
-        "--filter",
-        &format!("label=com.docker.compose.project={projeto}"),
-        "--format",
-        "{{.Label \"com.docker.compose.service\"}}\t{{.State}}\t{{.Ports}}\t{{.Label \"com.docker.compose.project.working_dir\"}}",
-    ]);
+    let (mut c, podman) = cli();
+    // os rótulos do Compose são os mesmos nos dois (o podman-compose também os põe); o modelo de leitura muda
+    let formato = if podman {
+        "{{index .Labels \"com.docker.compose.service\"}}\t{{.State}}\t{{.Ports}}\t{{index .Labels \"com.docker.compose.project.working_dir\"}}"
+    } else {
+        "{{.Label \"com.docker.compose.service\"}}\t{{.State}}\t{{.Ports}}\t{{.Label \"com.docker.compose.project.working_dir\"}}"
+    };
+    c.args(["ps", "-a", "--filter", &format!("label=com.docker.compose.project={projeto}"), "--format", formato]);
     match rodar(c, Duration::from_secs(20)) {
         Ok(o) if o.status.success() => ler_conteineres(&String::from_utf8_lossy(&o.stdout)),
         _ => Vec::new(),

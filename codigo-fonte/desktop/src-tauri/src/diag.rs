@@ -95,6 +95,8 @@ pub struct Entrada {
     pub windows: bool,
     /// instalado pelo ambiente próprio do Ergon (WSL dedicado, sem Docker Desktop)
     pub ambiente: bool,
+    /// Linux: o motor de contêineres é o Podman da conta (não o Docker de uma instalação antiga)
+    pub podman: bool,
 }
 
 fn marcar(d: &mut Diagnostico, estado: &'static str, titulo: &str, explicacao: String, acoes: &[&str]) {
@@ -122,11 +124,11 @@ pub fn decidir(e: Entrada) -> Diagnostico {
             Resposta::Nada(m) => format!("Ergon: não respondeu ({m})"),
         },
         match &e.docker {
-            Docker::Pronto(v) => format!("Docker: {v}"),
-            Docker::Ausente => "Docker: não instalado".into(),
-            Docker::Parado(m) => format!("Docker: parado ({m})"),
-            Docker::SemPermissao(m) => format!("Docker: sem permissão ({m})"),
-            Docker::Falha(m) => format!("Docker: erro ({m})"),
+            Docker::Pronto(v) => format!("Motor de contêineres: {v}"),
+            Docker::Ausente => "Motor de contêineres: não instalado".into(),
+            Docker::Parado(m) => format!("Motor de contêineres: parado ({m})"),
+            Docker::SemPermissao(m) => format!("Motor de contêineres: sem permissão ({m})"),
+            Docker::Falha(m) => format!("Motor de contêineres: erro ({m})"),
         },
     ];
     if !e.conteineres.is_empty() {
@@ -239,6 +241,22 @@ pub fn decidir(e: Entrada) -> Diagnostico {
         instalar_proprio(&mut d, !matches!(e.docker, Docker::Ausente));
         return d;
     }
+    // Linux com o Podman da conta: sem instalação, o aplicativo instala (o pacote .deb traz o Podman); sem o Podman,
+    // diz o que falta
+    if !e.windows && e.podman && raiz.is_none() && ergon.is_none() {
+        match &e.docker {
+            Docker::Pronto(_) => marcar(&mut d, "nao_instalado", "Bem-vindo ao Ergon",
+                "Uma equipe dos maiores pensadores da Grécia antiga está pronta para trabalhar com você. Vamos erguer a cidade deles aqui mesmo, no seu computador.".into(),
+                &["instalar"]),
+            Docker::Ausente => marcar(&mut d, "podman_ausente", "Falta o Podman neste computador",
+                "O Ergon roda no Podman, que guarda os serviços e os dados na sua conta. Instale o Ergon pelo pacote .deb (ele traz o Podman) ou instale o Podman pelo gerenciador de aplicativos e volte aqui.".into(),
+                &["tentar"]),
+            _ => marcar(&mut d, "podman_falha", "O Podman não respondeu",
+                "O Podman está instalado, mas não respondeu na sua conta. Veja o diagnóstico e tente de novo.".into(),
+                &["tentar", "diagnostico"]),
+        }
+        return d;
+    }
     match &e.docker {
         Docker::Ausente if e.windows => instalar_proprio(&mut d, false),
         Docker::Ausente => marcar(&mut d, "docker_ausente", "O Docker não está instalado",
@@ -292,7 +310,7 @@ pub fn coletar() -> Diagnostico {
         (d, c)
     };
     let p = crate::ambiente::ler_progresso();
-    let mut d = decidir(Entrada { inst, saude, docker, conteineres, windows: cfg!(windows), ambiente: crate::ambiente::ativo() });
+    let mut d = decidir(Entrada { inst, saude, docker, conteineres, windows: cfg!(windows), ambiente: crate::ambiente::ativo(), podman: !cfg!(windows) && docker::linux_usa_podman() });
     d.continuar = cfg!(windows) && !p.concluida.is_empty() && p.concluida != "pronto" && d.estado == "nao_instalado";
     if d.continuar {
         d.titulo = "Continuando a instalação do Ergon".into();
@@ -318,7 +336,7 @@ mod testes {
         Conteiner { servico: servico.into(), estado: estado.into(), portas: portas.into(), pasta: String::new() }
     }
     fn entrada(saude: Resposta, docker: Docker, conteineres: Vec<Conteiner>) -> Entrada {
-        Entrada { inst: Instalacao { raiz: None, porta: 8787, teste: false }, saude, docker, conteineres, windows: true, ambiente: false }
+        Entrada { inst: Instalacao { raiz: None, porta: 8787, teste: false }, saude, docker, conteineres, windows: true, ambiente: false, podman: false }
     }
     fn ok() -> Resposta {
         Resposta::Ergon(Saude { versao: "0.2.0".into(), trancado: false })
@@ -391,6 +409,19 @@ mod testes {
         let amb = |cs| Entrada { ambiente: true, ..entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), cs) };
         assert_eq!(decidir(amb(vec![c("ergon", "exited", "")])).estado, "parado");
         assert_eq!(decidir(amb(vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")])).estado, "iniciando");
+    }
+
+    #[test]
+    fn linux_com_podman() {
+        let pod = |docker, cs| Entrada { windows: false, podman: true, ..entrada(Resposta::Nada("x".into()), docker, cs) };
+        // sem instalação: o aplicativo instala; sem o Podman, diz o que falta (nunca pede o Docker)
+        let d = decidir(pod(Docker::Pronto("4.9.3".into()), vec![]));
+        assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"));
+        assert_eq!(decidir(pod(Docker::Ausente, vec![])).estado, "podman_ausente");
+        assert_eq!(decidir(pod(Docker::Falha("x".into()), vec![])).estado, "podman_falha");
+        // instalado com o Podman: parado e iniciando como sempre
+        assert_eq!(decidir(pod(Docker::Pronto("4.9.3".into()), vec![c("ergon", "exited", "")])).estado, "parado");
+        assert_eq!(decidir(pod(Docker::Pronto("4.9.3".into()), vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")])).estado, "iniciando");
     }
 
     #[test]

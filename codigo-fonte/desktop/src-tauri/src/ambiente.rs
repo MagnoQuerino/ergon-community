@@ -1,5 +1,5 @@
-//! Ambiente do Ergon no Windows: uma distribuição WSL2 própria ("Ergon", em %LOCALAPPDATA%\ErgonAmbiente\wsl) com o Docker
-//! Engine dentro — sem Docker Desktop. A instalação é uma sequência de etapas com ponto de retomada gravado em disco:
+//! Ambiente do Ergon no Windows: uma distribuição WSL2 própria ("Ergon", em %LOCALAPPDATA%\ErgonAmbiente\wsl) com o Podman
+//! dentro — sem Docker. A instalação é uma sequência de etapas com ponto de retomada gravado em disco:
 //! cair a rede, fechar o aplicativo ou reiniciar o Windows no meio continua de onde parou, sem importar de novo nem
 //! duplicar nada. Só o ambiente do Ergon é tocado: nenhuma outra distribuição, nem o .wslconfig, nem o Docker Desktop.
 
@@ -87,7 +87,30 @@ pub fn pasta() -> PathBuf {
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("ErgonAmbiente")
 }
 pub fn nome() -> String {
-    std::env::var("ERGON_AMBIENTE_NOME").ok().filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_else(|| "Ergon".into())
+    if let Some(n) = NOME_EM_USO.lock().ok().and_then(|g| g.clone()) {
+        return n;
+    }
+    let simples = |n: &String| !n.is_empty() && n.len() < 64 && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    std::env::var("ERGON_AMBIENTE_NOME").ok().filter(simples)
+        // depois de uma migração em que o Windows não deixou o ambiente novo assumir o nome de antes
+        .or_else(|| fs::read_to_string(crate::migracao::arq_nome()).ok().map(|t| t.trim().to_string()).filter(simples))
+        .unwrap_or_else(|| "Ergon".into())
+}
+/// Durante a migração de um ambiente antigo, os comandos "dentro" vão para o ambiente novo (ver migracao.rs).
+static NOME_EM_USO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+pub(crate) fn usar_nome(n: Option<String>) {
+    if let Ok(mut g) = NOME_EM_USO.lock() {
+        *g = n;
+    }
+}
+/// Programa dentro de um ambiente com nome dado (a migração fala com o antigo e com o novo ao mesmo tempo).
+pub(crate) fn dentro_de(nome: &str, args: &[&str]) -> Command {
+    let mut c = wsl();
+    c.args(["-d", nome, "-u", "root", "--exec"]).args(args);
+    c
+}
+pub(crate) fn wsl_cmd() -> Command {
+    wsl()
 }
 fn arq_progresso() -> PathBuf {
     pasta().join("instalacao.json")
@@ -116,7 +139,7 @@ fn passou(p: &Progresso, etapa: &str) -> bool {
     matches!((i(&p.concluida), i(etapa)), (Some(a), Some(b)) if a >= b) || p.concluida == "pronto"
 }
 
-/// A instalação pelo ambiente próprio terminou neste computador (o aplicativo usa o Docker de dentro dele).
+/// A instalação pelo ambiente próprio terminou neste computador (o aplicativo usa o motor de contêineres de dentro dele).
 pub fn ativo() -> bool {
     cfg!(windows) && ler_progresso().concluida == "pronto"
 }
@@ -233,7 +256,7 @@ pub(crate) fn componente<'a>(m: &'a Value, id: &str) -> Result<&'a Value, String
 /// Instala (ou continua a instalação). Cada etapa confere se já foi feita antes de fazer.
 pub fn instalar(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
     if !cfg!(windows) {
-        return Err("O ambiente próprio do Ergon é para Windows; no Linux, o Ergon usa o Docker Engine do sistema.".into());
+        return instalar_linux(ev);
     }
     let mut p = ler_progresso();
 
@@ -335,7 +358,7 @@ pub fn instalar(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
     Ok(Fim::Pronto { versao })
 }
 
-/// Prende as imagens do pacote entregue aos digests do manifesto: o Docker confere o conteúdo baixado contra eles (também a
+/// Prende as imagens do pacote entregue aos digests do manifesto: o motor de contêineres confere o conteúdo baixado contra eles (também a
 /// imagem dos motores de cada pessoa, criados pelo gerente de motores).
 pub(crate) fn fixar_imagens(m: &Value, versao: &str) -> Result<(), String> {
     for id in ["core", "motor"] {
@@ -352,6 +375,89 @@ pub(crate) fn fixar_imagens(m: &Value, versao: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// O mesmo de `fixar_imagens`, num texto de compose (Linux: o pacote fica numa pasta da própria conta).
+pub(crate) fn fixar_no_texto(texto: &str, m: &Value, versao: &str) -> Result<String, String> {
+    let mut t: Vec<String> = texto.lines().map(String::from).collect();
+    for id in ["core", "motor"] {
+        let c = componente(m, id)?;
+        let (img, ver, dig) = (c["imagem"].as_str().unwrap_or_default(), c["versao"].as_str().unwrap_or(versao), c["digest"].as_str().unwrap_or_default());
+        for chave in ["image: ", "ERGON_MOTOR_IMAGE: "] {
+            let (de, para) = (format!("{chave}{img}:{ver}"), format!("{chave}{img}@{dig}"));
+            for l in t.iter_mut() {
+                if let Some(inicio) = l.trim_end().strip_suffix(de.as_str()) {
+                    *l = format!("{inicio}{para}");
+                }
+            }
+        }
+        let junto = t.join("\n");
+        if img.is_empty() || dig.is_empty() || !junto.contains(&format!("{img}@{dig}")) || junto.contains(&format!("{img}:{ver}")) {
+            return Err(format!("O pacote da versão não usa a imagem {img}:{ver} do manifesto do jeito esperado."));
+        }
+    }
+    Ok(t.join("\n") + "\n")
+}
+
+/// Linux: o Ergon na conta da pessoa, com o Podman do sistema (o pacote .deb o traz), sem administrador. O pacote da
+/// versão, conferido pelo manifesto, entra numa pasta da conta; as imagens são presas aos digests; o lançador instala
+/// (pasta fixa ~/.local/share/ergon, segredos em ~/.ergon) e liga os serviços.
+fn instalar_linux(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
+    ev(Evento::Etapa("diagnostico"));
+    let mut v = comando("podman");
+    v.args(["info", "--format", "{{.Version.Version}}"]);
+    let o = rodar(v, Duration::from_secs(90)).map_err(|_| "O Podman não está instalado neste computador. Instale o Ergon pelo pacote .deb (ele traz o Podman) e abra de novo.".to_string())?;
+    if !o.status.success() {
+        return Err(format!("O Podman não respondeu na sua conta: {}", String::from_utf8_lossy(&o.stderr).trim().chars().take(300).collect::<String>()));
+    }
+    ev(Evento::Linha(format!("Podman {} na sua conta (sem administrador).", String::from_utf8_lossy(&o.stdout).trim())));
+    let casa = crate::instalacao::pasta_pessoal().ok_or("A pasta pessoal desta conta não foi encontrada.")?;
+    let base = casa.join(".local/share/ergon-instalador");
+
+    ev(Evento::Etapa("baixar"));
+    let m = manifesto_conferido()?;
+    let versao = m["versao"].as_str().unwrap_or("?").to_string();
+    ev(Evento::Linha(format!("Versão {versao} conferida (assinatura, edição, canal e validade)")));
+    let c = componente(&m, "pacote-local")?;
+    let (url, sha, tam) = (c["url"].as_str().unwrap_or_default(), c["sha256"].as_str().unwrap_or_default(), c["tamanho"].as_u64().unwrap_or(0));
+    let r = baixar::componente(url, sha, tam, &base.join("cache"), &mut |f, t| ev(Evento::Progresso { componente: "pacote-local".into(), feitos: f, total: t }))
+        .map_err(|e| format!("pacote-local: {e}"))?;
+
+    ev(Evento::Etapa("configurar"));
+    let pac = base.join("pacote");
+    let _ = fs::remove_dir_all(&pac);
+    fs::create_dir_all(&pac).map_err(|e| e.to_string())?;
+    // o zip pelo Python do sistema (o podman-compose já depende dele): nada de programa a mais
+    let mut z = comando("python3");
+    z.args(["-m", "zipfile", "-e"]).arg(&r.caminho).arg(&pac);
+    let o = rodar(z, Duration::from_secs(120)).map_err(|e| format!("Não deu para abrir o pacote da versão ({e})."))?;
+    if !o.status.success() {
+        return Err(format!("Não deu para abrir o pacote da versão: {}", String::from_utf8_lossy(&o.stderr).trim().chars().take(300).collect::<String>()));
+    }
+    let compose = pac.join("docker-compose.yml");
+    let texto = fs::read_to_string(&compose).map_err(|e| format!("O pacote da versão não tem o compose ({e})."))?;
+    fs::write(&compose, fixar_no_texto(&texto, &m, &versao)?).map_err(|e| e.to_string())?;
+    ev(Evento::Linha("Imagens presas aos digests do manifesto.".into()));
+
+    ev(Evento::Etapa("ligar"));
+    let mut c = comando("/bin/bash");
+    c.arg(pac.join("ergon.sh")).arg("instalar").env("ERGON_SEM_NAVEGADOR", "1").env("ERGON_MOTOR", "podman").current_dir(&pac);
+    transmitir(&mut c, Duration::from_secs(40 * 60), ev).map_err(|e| format!("A instalação dos serviços parou: {e}"))?;
+
+    ev(Evento::Etapa("conferir"));
+    let fim = Instant::now() + Duration::from_secs(300);
+    loop {
+        match crate::diag::ler_saude(PORTA) {
+            crate::diag::Resposta::Ergon(s) if s.versao == versao => {
+                ev(Evento::Linha(format!("Ergon {versao} respondendo em http://localhost:{PORTA}")));
+                break;
+            }
+            r if Instant::now() > fim => return Err(format!("O Ergon não respondeu depois de ligar ({r:?}).")),
+            _ => std::thread::sleep(Duration::from_secs(3)),
+        }
+    }
+    let _ = fs::remove_dir_all(&pac);
+    Ok(Fim::Pronto { versao })
+}
+
 /// O pacote da versão (lançador + compose) entra pela entrada padrão: o ambiente não enxerga os discos do Windows.
 pub(crate) fn entregar_pacote(zip: &Path) -> Result<(), String> {
     let mut c = dentro(&["sh", "-c", "rm -rf /opt/ergon-pacote /opt/ergon-pacote.zip && mkdir -p /opt/ergon-pacote && cat > /opt/ergon-pacote.zip && unzip -qo /opt/ergon-pacote.zip -d /opt/ergon-pacote && rm -f /opt/ergon-pacote.zip && chmod +x /opt/ergon-pacote/ergon.sh"]);
@@ -363,7 +469,7 @@ pub(crate) fn entregar_pacote(zip: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Liga o Docker Engine dentro do ambiente e mantém o processo vivo em segundo plano (fechar a janela não para os
+/// Liga o motor de contêineres dentro do ambiente (a API do Podman) e mantém o processo vivo em segundo plano (fechar a janela não para os
 /// serviços; "Parar serviços" na bandeja para).
 pub fn ligar_motor_de_conteineres(ev: &mut dyn FnMut(Evento)) -> Result<(), String> {
     if rodar_wsl(dentro(&["/usr/local/bin/ergon-ambiente", "pronto"]), Duration::from_secs(60)).is_ok() {
@@ -460,7 +566,7 @@ fn desagendar_continuacao() {
 }
 /// Na primeira vez que o WSL é usado, o Windows abre a janela "Boas-vindas ao WSL" (outro programa, no meio da nossa
 /// instalação). Marca como já vista (HKCU\...\Lxss\OOBEComplete, sem administrador), só se ainda não houver o valor.
-fn sem_boas_vindas_do_wsl() {
+pub(crate) fn sem_boas_vindas_do_wsl() {
     let chave = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss";
     let mut c = comando(reg_exe());
     c.args(["query", chave, "/v", "OOBEComplete"]);
@@ -471,7 +577,7 @@ fn sem_boas_vindas_do_wsl() {
     c.args(["add", chave, "/v", "OOBEComplete", "/t", "REG_DWORD", "/d", "1", "/f"]);
     let _ = rodar(c, Duration::from_secs(30));
 }
-fn reg_exe() -> PathBuf {
+pub(crate) fn reg_exe() -> PathBuf {
     std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join(r"System32\reg.exe")
 }
 
@@ -498,6 +604,20 @@ fn espaco_livre(_: &Path) -> Option<u64> {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn imagens_presas_aos_digests_no_texto() {
+        let d = format!("sha256:{}", "a".repeat(64));
+        let m = serde_json::json!({ "versao": "1.2.3", "componentes": {
+            "core": { "imagem": "ghcr.io/x/ergon", "versao": "1.2.3", "digest": d },
+            "motor": { "imagem": "ghcr.io/x/ergon-hermes", "versao": "1.2.3", "digest": d } } });
+        let texto = "services:\n  ergon:\n    image: ghcr.io/x/ergon:1.2.3\n  hermes:\n    image: ghcr.io/x/ergon-hermes:1.2.3\n  motores:\n    image: ghcr.io/x/ergon:1.2.3\n    environment:\n      ERGON_MOTOR_IMAGE: ghcr.io/x/ergon-hermes:1.2.3\n";
+        let t = fixar_no_texto(texto, &m, "1.2.3").unwrap();
+        assert!(!t.contains(":1.2.3"), "nenhuma referência por versão sobra: {t}");
+        assert_eq!(t.matches(&format!("@{d}")).count(), 4);
+        // pacote de outra versão: recusado
+        assert!(fixar_no_texto(&texto.replace("1.2.3", "9.9.9"), &m, "1.2.3").is_err());
+    }
 
     #[test]
     fn saida_do_wsl_em_utf16_ou_utf8() {

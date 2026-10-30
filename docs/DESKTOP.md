@@ -30,27 +30,21 @@ instale o Ergon primeiro ([INSTALAR.md](INSTALAR.md)); sem ele, a tela de abertu
 Atualizar: Configurações › Verificar atualizações (seus dados ganham uma cópia antes). Remover: Configurações ›
 Aplicativos › Ergon › Desinstalar; o desinstalador pergunta se apaga também os dados.
 
-## Linux (Ubuntu 22.04 ou mais novo, Debian 12)
+## Linux (Ubuntu 24.04 ou mais novo, Debian 12)
 
-**Pacote .deb (recomendado).** Baixe `Ergon_X.Y.Z_amd64.deb`, confira a soma em `SHA256SUMS-linux.txt` e abra o
-arquivo com o instalador de aplicativos do sistema, ou:
+**Pacote .deb (recomendado).** Baixe `Ergon_X.Y.Z_amd64.deb` (ou o `Ergon Desktop para Linux.deb` da raiz do
+repositório), confira a soma em `SHA256SUMS-linux.txt` se quiser e abra o arquivo com o instalador de aplicativos do
+sistema. O pacote traz o que o Ergon precisa: o Podman (motor de contêineres de código aberto, sem serviço de
+administrador) e as peças de rede dele; **não instala Docker**. Na primeira vez, a tela de abertura instala o Ergon na
+sua conta (`~/.local/share/ergon`, segredos em `~/.ergon`), sem pedir administrador, e abre a janela.
 
-```bash
-sudo apt install ./Ergon_X.Y.Z_amd64.deb
-```
-
-O apt instala as bibliotecas do WebKitGTK que faltarem e recomenda o suporte à bandeja
-(`libayatana-appindicator3-1`). O Docker não é instalado pelo pacote: sem ele, a tela de abertura diz isso e mostra
-onde instalar.
-
-**Acesso ao Docker.** Se o seu usuário não tiver acesso ao Docker, a tela de abertura mostra dois caminhos: o Docker
-sem root (rootless), recomendado, ou entrar no grupo `docker`, que dá a esse usuário poder de administrador sobre o
-computador. A escolha é sua; o aplicativo não muda grupos nem permissões.
+Uma instalação antiga feita com o Docker continua funcionando com ele, sem ser alterada.
 
 **AppImage (alternativa).** `Ergon_X.Y.Z_amd64.AppImage` roda sem instalar: marque como executável e abra. Precisa do
-FUSE 2 (`libfuse2`, ou `libfuse2t64` no Ubuntu 24.04). Não entra no menu sozinho e não se atualiza.
+FUSE 2 (`libfuse2`, ou `libfuse2t64` no Ubuntu 24.04) e do Podman e do podman-compose do sistema. Não entra no menu
+sozinho e não se atualiza.
 
-Remover: pelo instalador de aplicativos, ou `sudo apt remove ergon`. Os dados ficam no Docker.
+Remover: pelo instalador de aplicativos. Os dados ficam nos volumes do Podman da sua conta.
 
 ## Registros
 

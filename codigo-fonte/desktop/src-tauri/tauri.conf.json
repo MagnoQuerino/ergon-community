@@ -46,7 +46,12 @@
     "linux": {
       "deb": {
         "section": "utils",
-        "recommends": ["libayatana-appindicator3-1"]
+        "depends": ["podman", "netavark", "aardvark-dns", "uidmap", "slirp4netns", "python3", "python3-yaml", "python3-dotenv"],
+        "recommends": ["libayatana-appindicator3-1"],
+        "files": {
+          "/usr/lib/ergon/podman-compose": "recursos/podman-compose",
+          "/usr/share/doc/ergon/podman-compose.LICENSE": "recursos/podman-compose.LICENSE"
+        }
       },
       "appimage": {
         "bundleMediaFramework": false

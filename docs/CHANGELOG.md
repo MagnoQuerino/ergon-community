@@ -1,5 +1,15 @@
 # Novidades
 
+## 1.1.0-rc.14 (pré-versão de teste)
+
+- **Sem Docker em lugar nenhum:** o Ergon passa a rodar no Podman, motor de contêineres de código aberto.
+  - **Windows:** o ambiente próprio do Ergon traz o Podman. Uma instalação feita com uma versão anterior passa para o
+    ambiente novo na primeira atualização pelo aplicativo, com uma cópia dos dados antes; se algo der errado, a de antes
+    volta como estava.
+  - **Linux (Ubuntu 24.04 ou mais novo, Debian 12):** o `Ergon Desktop para Linux.deb` traz o Podman e instala o Ergon
+    na sua conta, sem pedir administrador.
+- O instalador do Linux na raiz do repositório também acompanha a versão mais recente.
+
 ## 1.1.0-rc.13 (pré-versão de teste)
 
 - **Rotinas:** ativar uma rotina deixava a tela em branco; agora a tela de preparo abre e mostra o andamento e o

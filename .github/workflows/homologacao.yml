@@ -20,14 +20,18 @@ defaults:
     working-directory: codigo-fonte
 
 jobs:
-  docker-linux:
+  pacote-linux:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Podman da conta, com o podman-compose que vai no pacote .deb
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq podman netavark aardvark-dns uidmap slirp4netns python3-yaml python3-dotenv
+          sudo install -D -m 0644 desktop/src-tauri/recursos/podman-compose /usr/lib/ergon/podman-compose
       - name: Sem login no registro (as imagens precisam ser públicas)
-        run: docker logout ghcr.io || true
-      - name: Pacote Docker publicado, instalado com o lançador
+        run: podman logout ghcr.io || true; docker logout ghcr.io || true
+      - name: Pacote publicado, instalado com o lançador (Podman; uma versão antiga do lançador usa o Docker)
         run: REPO=${{ github.repository }} bash scripts/homologar-pacote.sh
 
   desktop-linux:
@@ -36,8 +40,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - imagem: ubuntu:22.04
-            modo: deb
           - imagem: ubuntu:24.04
             modo: deb
           - imagem: debian:12

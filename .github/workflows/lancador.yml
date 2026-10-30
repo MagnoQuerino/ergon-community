@@ -1,10 +1,10 @@
 # Lançador antes do lançamento: monta o pacote local com o lançador DESTE commit e as imagens já publicadas, e faz o
 # ciclo completo numa máquina limpa (instalar, apagar o zip, usar "ergon" de outra pasta, remover guardando os dados,
-# instalar de novo, remover --tudo). No Windows, o PATH e a pasta do programa de verdade (sem Docker Linux no runner).
+# instalar de novo, remover --tudo). No Linux, com o Podman da conta; no Windows, o PATH e a pasta do programa de verdade.
 name: Lançador
 on:
   push:
-    branches: [main]
+    branches: [main, 'distribuicao/**']
     paths: ['codigo-fonte/ergon.sh', 'codigo-fonte/ergon.ps1', 'codigo-fonte/ergon.cmd', 'codigo-fonte/instalador/**', 'codigo-fonte/deploy/local/**', 'codigo-fonte/scripts/homologar-pacote.sh', 'Instalar Ergon no *', '.github/workflows/lancador.yml']
   workflow_dispatch:
 
@@ -29,9 +29,13 @@ jobs:
           cp ergon.ps1 ergon.cmd ergon.sh pacote/ && chmod +x pacote/ergon.sh
           cp ../docs/INSTALAR.md pacote/LEIA-ME.md
           echo "$V" > pacote/VERSAO
+      - name: Podman da conta, com o podman-compose que vai no pacote .deb (sem Docker)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq podman netavark aardvark-dns uidmap slirp4netns python3-yaml python3-dotenv
+          sudo install -D -m 0644 desktop/src-tauri/recursos/podman-compose /usr/lib/ergon/podman-compose
       - name: Sem login no registro
-        run: docker logout ghcr.io || true
-      - name: Ciclo completo com Docker de verdade
+        run: podman logout ghcr.io || true
+      - name: Ciclo completo com o Podman de verdade
         run: REPO=${{ github.repository }} PACOTE_DIR=pacote bash scripts/homologar-pacote.sh
 
   windows:

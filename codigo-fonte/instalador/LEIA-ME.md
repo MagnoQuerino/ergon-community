@@ -1,16 +1,17 @@
 # Instalar o Ergon neste computador
 
-> **Windows 10 e 11:** use o **`Ergon Desktop para Windows.exe`** da raiz do repositório (ou o `*-setup.exe` da
-> [página de versões](https://github.com/MagnoQuerino/ergon-community/releases)). Ele instala tudo num ambiente próprio
-> do Ergon, **sem Docker Desktop**. Este guia descreve o caminho com contêineres, usado no Linux e no macOS (e, no
-> Windows, só por quem já usa Docker e prefere o lançador `ergon`).
+> **Windows 10 e 11** e **Linux (Ubuntu 24.04+, Debian 12):** use o **`Ergon Desktop para Windows.exe`** ou o
+> **`Ergon Desktop para Linux.deb`** da raiz do repositório (ou da
+> [página de versões](https://github.com/MagnoQuerino/ergon-community/releases)). Eles instalam tudo sozinhos, **sem
+> Docker**. Este guia descreve o caminho pelo lançador `ergon`, usado no macOS e por quem prefere o terminal.
 
-O Ergon roda em dois contêineres Docker (o Ergon e o motor de IA) e só aparece para este computador
-(`http://localhost:8787`). Tudo o que ele guarda fica cifrado com a sua senha.
+O Ergon roda em contêineres (o Ergon, o gerente dos motores e um motor de IA por pessoa), no Podman, e só aparece para
+este computador (`http://localhost:8787`). Tudo o que ele guarda fica cifrado com a sua senha.
 
 ## Antes
 
-- **Docker Desktop** (Windows e macOS) ou **Docker Engine** (Linux), ligado.
+- **Podman** e **podman-compose** instalados ([podman.io](https://podman.io)); no macOS, com a máquina do Podman ligada.
+  Uma instalação antiga feita com o Docker continua nele.
 - Linux: o motor usa FUSE para o volume cifrado (`/dev/fuse`, presente nas distribuições comuns).
 - Recomendado: criptografia do disco do sistema (BitLocker, FileVault ou LUKS). Não é obrigatória — os dados do
   Ergon já são cifrados por ele —, mas protege o resto do computador.

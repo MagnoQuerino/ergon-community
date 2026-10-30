@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Instalação num sistema LIMPO: contêiner novo da distribuição (ubuntu:22.04, ubuntu:24.04, debian:12), sem nada do
 # Ergon nem do WebKitGTK antes. Modo "deb": o apt instala o pacote como uma pessoa faria (sudo apt install ./Ergon.deb,
-# com as recomendações, que é o padrão do apt), o aplicativo abre e diz o que falta, a remoção leva os arquivos dele.
+# com as recomendações, que é o padrão do apt; o Podman vem como dependência), o aplicativo abre e oferece instalar o
+# Ergon (sem pedir o Docker), a remoção leva os arquivos dele.
 # Modo "appimage": o AppImage roda sem instalar nada (extraído na hora: o contêiner não tem FUSE).
 # Entradas: /pkg (pacotes da CI); saída: /out/<distro>-<modo>.   Uso: bash testar-limpo.sh deb|appimage
 set -uo pipefail
@@ -24,6 +25,7 @@ if [[ "$MODO" == deb ]]; then
     docker_veio="$(echo "$novos" | grep -E '^(docker\.io|docker-ce|containerd|runc)$' | tr '\n' ' ')"
     [[ -z "$docker_veio" ]] && ok "o Docker não vem junto" "nenhum pacote do Docker instalado" \
       || falha "o Docker não vem junto" "o apt instalou: $docker_veio"
+    echo "$novos" | grep -qx podman && ok "o Podman vem junto" "dependência do pacote" || falha "o Podman vem junto" "o apt não instalou o podman"
   else
     falha ".deb instalado pelo apt" "$(tail -3 "$O/apt-install.log")"; exit 1
   fi
@@ -66,7 +68,7 @@ import -window root "$O/janela.png" 2> /dev/null
 REG="$HOME/.local/share/io.github.magnoquerino.ergon/logs/ergon-desktop.log"
 if pgrep -f 'ergon-desktop' > /dev/null; then
   diag="$(grep -o 'diagnóstico: .*' "$REG" 2> /dev/null | tail -1)"
-  [[ "$diag" == *docker_ausente* ]] && ok "abre e diz o que falta" "$diag" || falha "abre e diz o que falta" "${diag:-sem diagnóstico no registro} (app.log: $(tail -2 "$O/app.log" | tr '\n' ' '))"
+  [[ "$diag" == *nao_instalado* || "$diag" == *podman_* ]] && [[ "$diag" != *docker* ]] && ok "abre e oferece instalar (sem pedir o Docker)" "$diag" || falha "abre e diz o que falta" "${diag:-sem diagnóstico no registro} (app.log: $(tail -2 "$O/app.log" | tr '\n' ' '))"
 else
   falha "abre e diz o que falta" "o aplicativo não ficou aberto: $(tail -5 "$O/app.log" | tr '\n' ' ')"
 fi

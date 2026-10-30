@@ -1,0 +1,17 @@
+# Ambiente do Ergon no Windows: uma distribuição Linux mínima, importada no WSL2 com nome e pasta próprios
+# ("Ergon"), com o Podman dentro (motor de contêineres sem serviço residente, Apache-2.0). Componente do manifesto da
+# versão, baixado uma vez por instalação — nada é baixado de repositório de pacotes no computador da pessoa. Gerado na
+# esteira:
+#   podman build -t ergon-ambiente desktop/ambiente && podman export $(podman create ergon-ambiente) | gzip -n > ...
+FROM docker.io/library/alpine:3.22.7@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
+# podman + podman-compose (o lançador do pacote, ergon.sh, roda aqui dentro); crun, netavark e aardvark-dns: execução,
+# redes e nomes entre os contêineres; bash, curl, jq, unzip e coreutils: o lançador
+RUN apk add --no-cache podman podman-compose crun netavark aardvark-dns nftables iptables iptables-legacy tar \
+      bash curl jq unzip coreutils findutils procps ca-certificates \
+ && rm -rf /var/cache/apk/* /tmp/*
+COPY wsl.conf /etc/wsl.conf
+COPY containers.conf /etc/containers/containers.conf
+COPY ergon-ambiente /usr/local/bin/ergon-ambiente
+ARG VERSAO=dev
+RUN echo "$VERSAO" > /etc/ergon-ambiente
+RUN chmod 0755 /usr/local/bin/ergon-ambiente && chmod 0644 /etc/wsl.conf /etc/containers/containers.conf

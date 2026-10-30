@@ -153,7 +153,7 @@ jobs:
             codigo-fonte/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
             codigo-fonte/desktop/pacotes/*
 
-  # Ambiente do Ergon no Windows sem Docker Desktop: a distribuição WSL própria (Alpine + Docker Engine) que o Ergon
+  # Ambiente do Ergon no Windows sem Docker: a distribuição WSL própria (Alpine + Podman) que o Ergon
   # Desktop importa. Componente do manifesto, baixado uma vez, com a mesma versão da etiqueta.
   ambiente:
     needs: lancamento
@@ -163,10 +163,10 @@ jobs:
       - name: Ambiente WSL (rootfs) desta versão
         run: |
           V=$(node -p "require('./package.json').version")
-          docker build -q --build-arg VERSAO="$V" -t ergon-ambiente desktop/ambiente
-          id=$(docker create ergon-ambiente)
-          docker export "$id" | gzip -n -9 > ergon-ambiente-wsl.tar.gz
-          docker rm "$id" >/dev/null
+          podman build -q --build-arg VERSAO="$V" -t ergon-ambiente -f desktop/ambiente/Containerfile desktop/ambiente
+          id=$(podman create ergon-ambiente)
+          podman export "$id" | gzip -n -9 > ergon-ambiente-wsl.tar.gz
+          podman rm "$id" >/dev/null
           echo "ambiente: $(du -m ergon-ambiente-wsl.tar.gz | cut -f1) MB comprimido"; sha256sum ergon-ambiente-wsl.tar.gz
       - name: Anexar à versão
         uses: softprops/action-gh-release@v2
@@ -233,10 +233,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/v"
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/v" --pattern '*-setup.exe' --pattern '*.deb'
-          # Windows: o instalador do desktop é o caminho principal (sem Docker) e segue a versão mais recente, de teste
-          # inclusive; o .deb da raiz só muda nas estáveis
+          # os instaladores do desktop são o caminho principal (sem Docker) e seguem a versão mais recente, de teste
+          # inclusive
           cp "$RUNNER_TEMP"/v/*-setup.exe "Ergon Desktop para Windows.exe"
-          case "$GITHUB_REF_NAME" in *-*) ;; *) cp "$RUNNER_TEMP"/v/*.deb "Ergon Desktop para Linux.deb" ;; esac
+          cp "$RUNNER_TEMP"/v/*.deb "Ergon Desktop para Linux.deb"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "Ergon Desktop para Windows.exe" "Ergon Desktop para Linux.deb"

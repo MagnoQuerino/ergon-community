@@ -13,6 +13,7 @@ mod docker;
 mod http;
 mod instalacao;
 mod janela;
+mod migracao;
 mod processo;
 mod registro;
 mod servicos;

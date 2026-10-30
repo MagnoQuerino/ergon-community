@@ -44,13 +44,14 @@ export function motorSpec(c: ManagerConfig, uid: string, volume: string): Record
     Labels: { 'ergon.motor': uid, 'ergon.motor.volume': volume },
     HostConfig: {
       Mounts: [{ Type: 'volume', Source: volume, Target: '/vault' }], // só o lado cifrado vai para o disco
-      Tmpfs: { '/opt/data': 'mode=0700,uid=10000,gid=10000' }, // a vista decifrada fica só na memória
+      // a vista decifrada fica só na memória; o cofre do motor entrega a pasta ao usuário dele (uid/gid aqui o Podman recusa)
+      Tmpfs: { '/opt/data': 'mode=0700' },
       Devices: [{ PathOnHost: '/dev/fuse', PathInContainer: '/dev/fuse', CgroupPermissions: 'rwm' }],
       CapAdd: ['SYS_ADMIN'], CapDrop: ['NET_RAW', 'MKNOD', 'AUDIT_WRITE', 'SETFCAP'],
       SecurityOpt: ['apparmor:unconfined', 'no-new-privileges:true'],
       Memory: c.memBytes, NanoCpus: c.nanoCpus,
       RestartPolicy: { Name: 'unless-stopped' },
-      LogConfig: { Type: 'json-file', Config: { 'max-size': '10m', 'max-file': '3' } },
+      LogConfig: { Type: 'json-file', Config: { 'max-size': '10m' } }, // só o que o Docker e o Podman aceitam
       NetworkMode: c.network,
       // sem portas publicadas, sem pastas do computador, sem o socket do Docker
     },

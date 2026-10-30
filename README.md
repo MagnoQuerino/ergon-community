@@ -17,18 +17,18 @@ programa. Se o Windows ainda não tiver o recurso de ambientes Linux ligado, o i
 continua de onde parou. No fim o Ergon abre numa janela: crie a conta, anote a frase de recuperação e conecte uma
 conta de IA. Atualizações aparecem em **Configurações › Verificar atualizações**.
 
-### Linux e macOS
+### Linux (Ubuntu 24.04 ou mais novo, Debian 12)
 
-Por enquanto o caminho é o pacote com contêineres:
+Baixe e abra **[`Ergon Desktop para Linux.deb`](Ergon%20Desktop%20para%20Linux.deb)** com o instalador de aplicativos
+do sistema. O pacote traz o que o Ergon precisa (o Podman, motor de contêineres de código aberto) e **não instala
+Docker**. Abra o Ergon pelo menu: ele se instala na sua conta, sem pedir administrador, e abre numa janela. Crie a
+conta, anote a frase de recuperação e conecte uma conta de IA. Mais detalhes: [docs/DESKTOP.md](docs/DESKTOP.md).
 
-1. Baixe esta pasta: botão verde **Code › Download ZIP**, no topo desta página. Descompacte numa pasta sua, fora
-   do OneDrive, Dropbox ou Google Drive.
-2. Num terminal, dentro da pasta: `bash "Instalar Ergon no Linux e macOS.sh"`.
-3. No fim, o navegador abre o Ergon. Crie a conta, anote a frase de recuperação e conecte uma conta de IA em
-   **Configurações › IA da equipe**.
+### macOS
 
-Passo a passo completo e o que fazer se esquecer a senha: [docs/INSTALAR.md](docs/INSTALAR.md). No Linux, o
-**`Ergon Desktop para Linux.deb`** abre o mesmo Ergon numa janela ([docs/DESKTOP.md](docs/DESKTOP.md)).
+Por enquanto pelo pacote com contêineres, com o [Podman](https://podman.io) instalado e ligado: baixe esta pasta (botão
+verde **Code › Download ZIP**), descompacte e, num terminal, dentro da pasta: `bash "Instalar Ergon no Linux e macOS.sh"`.
+Passo a passo e o que fazer se esquecer a senha: [docs/INSTALAR.md](docs/INSTALAR.md).
 
 Todas as versões, com as somas SHA-256 para conferir os arquivos, ficam na
 [página de versões](https://github.com/MagnoQuerino/ergon-community/releases/latest).
@@ -55,7 +55,8 @@ Todas as versões, com as somas SHA-256 para conferir os arquivos, ficam na
 | | |
 |---|---|
 | `Ergon Desktop para Windows.exe` | instala o Ergon no Windows (sem Docker) |
-| `Instalar Ergon no Linux e macOS.sh`, `Ergon Desktop para Linux.deb` | instalam o Ergon no Linux e macOS |
+| `Ergon Desktop para Linux.deb` | instala o Ergon no Linux (sem Docker) |
+| `Instalar Ergon no Linux e macOS.sh` | instala o Ergon no macOS (pacote com contêineres) |
 | `docs/` | guias: instalar, desktop, loja, rotinas, conexões, novidades ([CHANGELOG](docs/CHANGELOG.md)) |
 | `catalogo/` | modelos da comunidade que a loja lista |
 | `codigo-fonte/` | o código do Ergon, para quem quer estudar ou contribuir ([como](.github/CONTRIBUTING.md)) |

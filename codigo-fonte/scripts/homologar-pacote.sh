@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Homologação do pacote Docker numa máquina limpa e SEM login no registro de imagens, como uma pessoa faria:
+# Homologação do pacote com contêineres (Podman; o de uma versão antiga, Docker) numa máquina limpa e SEM login no registro de imagens, como uma pessoa faria:
 # baixa o pacote publicado (ou usa PACOTE_DIR, montado do repositório), instala, apaga a pasta do zip, usa o comando
 # "ergon" de outra pasta, testa conta, loja, modelos da comunidade, WhatsApp experimental, backup e "atualizar";
 # depois "ergon remover" (os dados ficam), instala de novo (a conta volta) e "ergon remover --tudo" (nada fica).
@@ -29,7 +29,7 @@ fi
 ok "conteúdo do pacote" "$(ls "$W/pacote" | tr '\n' ' ')"
 DONO="$(echo "${REPO%%/*}" | tr 'A-Z' 'a-z')"
 for img in ergon-community ergon-community-hermes; do
-  if docker manifest inspect "ghcr.io/$DONO/$img:$V" >/dev/null 2>&1; then ok "imagem pública" "ghcr.io/$DONO/$img:$V baixa sem login"
+  if skopeo inspect --raw "docker://ghcr.io/$DONO/$img:$V" >/dev/null 2>&1; then ok "imagem pública" "ghcr.io/$DONO/$img:$V baixa sem login"
   else falha "imagem pública" "ghcr.io/$DONO/$img:$V não baixa sem login"; fi
 done
 [[ $R == 0 ]] || exit 1
@@ -38,9 +38,12 @@ done
 cp -r "$W/pacote" "$W/zip"; cd "$W/zip"
 if ./ergon.sh instalar > "$W/instalar.log" 2>&1; then ok "ergon.sh instalar" "$(grep -v '^\s*$' "$W/instalar.log" | tail -1)"; else falha "ergon.sh instalar" "$(tail -5 "$W/instalar.log" | tr '\n' ' ')"; fi
 [[ -x "$E" && -f "$PROG/ergon.sh" && -f "$PROG/docker-compose.yml" ]] && ok "instalado numa pasta fixa" "$PROG, comando $E" || falha "instalado numa pasta fixa" "$(ls -la "$PROG" "$E" 2>&1 | head -3 | tr '\n' ' ')"
+# o motor de contêineres que o lançador escolheu (gravado no .env; o lançador de uma versão antiga usa o Docker)
+MC="$(sed -n 's/^ERGON_MOTOR=//p' "$PROG/.env" 2>/dev/null | tail -1)"; MC="${MC:-docker}"
+ok "motor de contêineres" "$MC"
 cd /; rm -rf "$W/zip"; cd "$(mktemp -d)"
 ok "pasta do zip apagada" "o resto roda pelo comando ergon, de outra pasta ($(pwd))"
-no_ar && H="$(curl -fsS "$B/api/health")" && ok "no ar" "$H" || { falha "no ar" "sem resposta"; (cd "$PROG" && docker compose logs --tail 50); exit 1; }
+no_ar && H="$(curl -fsS "$B/api/health")" && ok "no ar" "$H" || { falha "no ar" "sem resposta"; "$E" logs; exit 1; }
 grep -q "\"version\":\"$V\"" <<<"$H" && ok "versão no ar" "$V" || falha "versão no ar" "$H"
 grep -q "\"raiz\":\"$PROG\"" "$HOME/.ergon/instalacao.json" && ok "registro da instalação" "aponta para a pasta fixa" || falha "registro da instalação" "$(cat "$HOME/.ergon/instalacao.json" 2>&1)"
 
@@ -70,9 +73,9 @@ T=$(c -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -d '{"t
 
 # ---------------------------------------------------------------- remover: o Ergon sai, os dados ficam
 "$E" remover > "$W/remover.log" 2>&1 && ok "ergon remover" "$(tail -1 "$W/remover.log")" || falha "ergon remover" "$(tail -3 "$W/remover.log" | tr '\n' ' ')"
-[[ -z "$(docker ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$(docker ps -aq --filter label=ergon.motor)" ]] && ok "contêineres" "nenhum do Ergon" || falha "contêineres" "$(docker ps -a --format '{{.Names}}' | tr '\n' ' ')"
-[[ -z "$(docker images -q "ghcr.io/$DONO/ergon-community")" ]] && ok "imagens" "removidas" || falha "imagens" "ficaram"
-docker volume ls -q | grep -q '^ergon_ergon-data$' && ok "dados guardados" "volume ergon_ergon-data continua" || falha "dados guardados" "o volume sumiu"
+[[ -z "$("$MC" ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$("$MC" ps -aq --filter label=ergon.motor)" ]] && ok "contêineres" "nenhum do Ergon" || falha "contêineres" "$("$MC" ps -a --format '{{.Names}}' | tr '\n' ' ')"
+[[ -z "$("$MC" images -q "ghcr.io/$DONO/ergon-community")" ]] && ok "imagens" "removidas" || falha "imagens" "ficaram"
+"$MC" volume ls -q | grep -q '^ergon_ergon-data$' && ok "dados guardados" "volume ergon_ergon-data continua" || falha "dados guardados" "o volume sumiu"
 [[ ! -e "$E" && ! -d "$PROG" && -f "$HOME/.ergon/secrets/ergon.env" && -n "$(ls "$HOME/.ergon/backups" 2>/dev/null)" ]] && ok "comando e pasta do programa" "removidos; segredos e backups guardados" || falha "comando e pasta do programa" "$(ls -d "$E" "$PROG" "$HOME/.ergon"/* 2>&1 | tr '\n' ' ')"
 
 # ---------------------------------------------------------------- instalar de novo: a conta volta
@@ -83,10 +86,10 @@ L=$(curl -sS -o /dev/null -w '%{http_code}' -H 'content-type: application/json' 
 [[ "$L" == 200 ]] && ok "dados de volta" "a mesma conta entra com a mesma senha" || falha "dados de volta" "login $L"
 
 # ---------------------------------------------------------------- remover --tudo: nada fica
-ERGON_CONFIRMAR=errado "$E" remover --tudo > "$W/nao.log" 2>&1; docker volume ls -q | grep -q '^ergon_ergon-data$' && ok "remover --tudo sem confirmar" "nada apagado" || falha "remover --tudo sem confirmar" "apagou"
+ERGON_CONFIRMAR=errado "$E" remover --tudo > "$W/nao.log" 2>&1; "$MC" volume ls -q | grep -q '^ergon_ergon-data$' && ok "remover --tudo sem confirmar" "nada apagado" || falha "remover --tudo sem confirmar" "apagou"
 ERGON_CONFIRMAR=APAGAR "$E" remover --tudo > "$W/tudo.log" 2>&1 && ok "ergon remover --tudo" "$(tail -1 "$W/tudo.log")" || falha "ergon remover --tudo" "$(tail -3 "$W/tudo.log" | tr '\n' ' ')"
-[[ -z "$(docker volume ls -q | grep -E '^ergon_')" ]] && ok "volumes" "nenhum do Ergon" || falha "volumes" "$(docker volume ls -q | grep -E '^ergon_' | tr '\n' ' ')"
-[[ -z "$(docker ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$(docker images -q "ghcr.io/$DONO/ergon-community")" ]] && ok "contêineres e imagens" "nenhum" || falha "contêineres e imagens" "ficaram"
+[[ -z "$("$MC" volume ls -q | grep -E '^ergon_')" ]] && ok "volumes" "nenhum do Ergon" || falha "volumes" "$("$MC" volume ls -q | grep -E '^ergon_' | tr '\n' ' ')"
+[[ -z "$("$MC" ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$("$MC" images -q "ghcr.io/$DONO/ergon-community")" ]] && ok "contêineres e imagens" "nenhum" || falha "contêineres e imagens" "ficaram"
 [[ ! -e "$HOME/.ergon" && ! -e "$E" && ! -d "$PROG" ]] && ok "vestígios" "sem ~/.ergon, sem comando, sem pasta do programa" || falha "vestígios" "$(ls -d "$HOME/.ergon" "$E" "$PROG" 2>&1 | tr '\n' ' ')"
 
 echo "resultado: $([[ $R == 0 ]] && echo 'tudo ok' || echo 'com falhas')"

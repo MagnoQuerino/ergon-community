@@ -1,12 +1,12 @@
 # Instalação pelo assistente (plano do instalador, D3), numa máquina Windows do GitHub: o ambiente próprio do Ergon
-# (WSL2, sem Docker Desktop) gerado aqui, o pacote e as imagens da versão publicada, e o aplicativo instalando sem
+# (WSL2 com Podman, sem Docker) gerado aqui, o pacote (lançador deste código) e as imagens da versão publicada, e o aplicativo instalando sem
 # terminal pelo mesmo caminho da janela (--instalar-sem-janela). A rede cai no meio do download, o processo é morto
 # no meio da instalação e componentes adulterados são oferecidos: tudo tem de ser recusado ou retomado.
 name: Instalador
 on:
   push:
     branches: ['distribuicao/**']
-    paths: ['codigo-fonte/desktop/**', 'codigo-fonte/scripts/distribuicao/**', '.github/workflows/instalador.yml']
+    paths: ['codigo-fonte/desktop/**', 'codigo-fonte/scripts/distribuicao/**', '.github/workflows/instalador.yml', 'codigo-fonte/ergon.sh', 'codigo-fonte/deploy/local/**']
   workflow_dispatch:
 
 permissions:
@@ -15,6 +15,8 @@ permissions:
 env:
   RUST_VERSAO: '1.98.0'
   VERSAO_PUBLICADA: '1.0.1'
+  # última versão publicada com o Docker dentro do ambiente: a migração para o Podman parte dela
+  AMBIENTE_ANTIGO: '1.1.0-rc.13'
 
 defaults:
   run:
@@ -25,23 +27,103 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Ambiente WSL do Ergon (rootfs)
+      - name: Ambiente WSL do Ergon (rootfs, gerado com o Podman)
         run: |
-          docker build -q --build-arg VERSAO="d3-${GITHUB_SHA::7}" -t ergon-ambiente desktop/ambiente
-          id=$(docker create ergon-ambiente)
-          docker export "$id" | gzip -n -9 > ergon-ambiente-wsl.tar.gz
-          docker rm "$id" >/dev/null
-          echo "RESULTADO: ambiente $(du -m ergon-ambiente-wsl.tar.gz | cut -f1) MB comprimido · $(docker image inspect ergon-ambiente --format '{{.Size}}' | awk '{printf "%.0f", $1/1048576}') MB expandido"
+          podman build -q --build-arg VERSAO="d3-${GITHUB_SHA::7}" -t ergon-ambiente -f desktop/ambiente/Containerfile desktop/ambiente
+          id=$(podman create ergon-ambiente)
+          podman export "$id" | gzip -n -9 > ergon-ambiente-wsl.tar.gz
+          podman rm "$id" >/dev/null
+          echo "RESULTADO: ambiente $(du -m ergon-ambiente-wsl.tar.gz | cut -f1) MB comprimido · $(podman image inspect ergon-ambiente --format '{{.Size}}' | awk '{printf "%.0f", $1/1048576}') MB expandido"
           sha256sum ergon-ambiente-wsl.tar.gz
+      - name: Pacotes locais com o lançador deste código (imagens da versão publicada e da mais nova do canal de teste)
+        run: |
+          DONO=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          bash scripts/distribuicao/pacote-local.sh "$VERSAO_PUBLICADA" "$DONO" "$GITHUB_REPOSITORY" "$PWD/ergon-local-$VERSAO_PUBLICADA.zip"
+          NOVA=$(curl -fsSL https://github.com/MagnoQuerino/ergon-community/releases/download/canal-teste/manifesto-teste.json | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).versao')
+          bash scripts/distribuicao/pacote-local.sh "$NOVA" "$DONO" "$GITHUB_REPOSITORY" "$PWD/ergon-local-$NOVA.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: ambiente-wsl
-          path: codigo-fonte/ergon-ambiente-wsl.tar.gz
+          path: |
+            codigo-fonte/ergon-ambiente-wsl.tar.gz
+            codigo-fonte/ergon-local-*.zip
+
+  # Linux: o aplicativo instala o Ergon na conta da pessoa, com o Podman do sistema (as dependências do .deb), sem
+  # administrador e sem Docker. Máquina Ubuntu 24.04 do GitHub, manifesto de teste assinado, pacote deste código.
+  instalacao-linux:
+    needs: ambiente
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: ambiente-wsl
+          path: /tmp/servir
+      - name: Dependências (compilar o aplicativo; e as do pacote .deb, como o apt instalaria)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y -qq podman netavark aardvark-dns uidmap slirp4netns python3 python3-yaml python3-dotenv
+          sudo install -D -m 0644 desktop/src-tauri/recursos/podman-compose /usr/lib/ergon/podman-compose
+          podman --version; python3 /usr/lib/ergon/podman-compose --version
+      - name: Rust ${{ env.RUST_VERSAO }}
+        run: rustup toolchain install "$RUST_VERSAO" --profile minimal && rustup default "$RUST_VERSAO"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            codigo-fonte/desktop/src-tauri/target
+          key: instalador-linux-${{ env.RUST_VERSAO }}-${{ hashFiles('codigo-fonte/desktop/src-tauri/Cargo.lock') }}
+      - name: Testes do aplicativo
+        working-directory: codigo-fonte/desktop/src-tauri
+        run: cargo test --locked --features origens-de-teste
+      - name: Aplicativo de teste
+        working-directory: codigo-fonte/desktop/src-tauri
+        run: cargo build --locked --features origens-de-teste
+      - name: Instalação pelo aplicativo, sem janela, com o Podman da conta
+        run: |
+          set -u
+          falhas=0; ok() { echo "ok    $1"; }; falha() { echo "FALHA $1"; falhas=$((falhas+1)); }
+          node scripts/distribuicao/cli.mjs chave-nova --saida /tmp/chave.json --id teste-linux > /tmp/pub.json
+          node -e 'const p=require("/tmp/pub.json");require("fs").writeFileSync("/tmp/chaveiro.json",JSON.stringify({[p.keyId]:{publica:p.publica}}))'
+          mkdir -p /tmp/servir/certo && cp /tmp/servir/ergon-ambiente-wsl.tar.gz "/tmp/servir/ergon-local-$VERSAO_PUBLICADA.zip" /tmp/servir/certo/
+          node scripts/distribuicao/montar-teste.mjs --base "scripts/distribuicao/exemplos/community-estavel-$VERSAO_PUBLICADA.json" --pasta /tmp/servir/certo --url http://127.0.0.1:18999/certo --chave /tmp/chave.json --saida /tmp/servir/certo/manifesto-estavel.json
+          node scripts/distribuicao/servidor-teste.mjs /tmp/servir > /tmp/servidor.log 2>&1 &
+          sleep 2
+          export ERGON_CHAVEIRO=/tmp/chaveiro.json ERGON_MANIFESTO_URL=http://127.0.0.1:18999/certo/manifesto-estavel.json
+          s=$(date +%s)
+          if desktop/src-tauri/target/debug/ergon-desktop --instalar-sem-janela > /tmp/inst.log 2>&1; then r=0; else r=$?; fi
+          cat /tmp/inst.log
+          grep -q "PRONTO $VERSAO_PUBLICADA" /tmp/inst.log && [ "$r" = 0 ] && ok "instalado pelo aplicativo em $(( $(date +%s) - s )) s" || falha "instalação pelo aplicativo (saída $r)"
+          v=$(curl -fsS http://localhost:8787/api/health | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).version' 2>/dev/null || true)
+          [ "$v" = "$VERSAO_PUBLICADA" ] && ok "Ergon $v em http://localhost:8787" || falha "Ergon não responde ($v)"
+          podman ps --format '{{.Names}} {{.State}} {{.Ports}}'
+          [ -n "$(podman ps -q --filter label=com.docker.compose.project=ergon)" ] && ok "serviços no Podman da conta (sem administrador)" || falha "nenhum serviço no Podman da conta"
+          [ -z "$(sudo docker ps -q 2>/dev/null)" ] && ok "nenhum contêiner no Docker da máquina" || falha "algo subiu no Docker"
+          grep -q '^ERGON_MOTOR=podman' ~/.local/share/ergon/.env && ok "instalação marcada como Podman" || falha "ERGON_MOTOR=podman ausente do .env"
+          curl -fsS -X POST http://localhost:8787/api/auth/setup -H 'Origin: http://localhost:8787' -H 'Content-Type: application/json' -d '{"username":"linux","password":"senha-do-linux-123","displayName":"Linux"}' > /dev/null && ok "conta criada" || falha "conta não criada"
+          curl -fsS -X POST http://localhost:8787/api/auth/login -H 'Origin: http://localhost:8787' -H 'Content-Type: application/json' -d '{"username":"linux","password":"senha-do-linux-123"}' > /dev/null && ok "entrou na conta" || falha "login"
+          IMG_MOTOR="$(sed -nE 's/^ *ERGON_MOTOR_IMAGE: *//p' ~/.local/share/ergon/docker-compose.yml | head -1)"
+          for i in $(seq 1 18); do m=$(podman ps -a --filter label=ergon.motor --format '{{.Names}} {{.State}}'); echo "$m" | grep -q running && break; sleep 5; done
+          echo "$m"
+          # as imagens publicadas até a rc.13 pedem ao tmpfs do motor uma opção (uid=) que o Podman recusa: o motor só liga
+          # com as imagens desta versão em diante. O que vale aqui é o cofre com a especificação desta versão (abaixo).
+          echo "$m" | grep -q running && ok "o motor de IA da conta ligou pela API do Podman" || { echo "aviso o motor pela imagem publicada $VERSAO_PUBLICADA não ligou (especificação anterior à correção do tmpfs)"; bash scripts/distribuicao/diagnostico-motor.sh "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock" "$IMG_MOTOR" ergon-net; }
+          cofre=$(bash scripts/distribuicao/testar-cofre.sh "$IMG_MOTOR" 2>&1); echo "$cofre"
+          echo "$cofre" | grep -q conteudo-do-cofre && echo "$cofre" | grep -q volume-so-cifrado && ok "cofre do motor cria, monta e grava cifrado no Podman da conta (especificação desta versão)" || falha "cofre do motor no Podman"
+          rede=$(podman exec ergon_ergon_1 node -e 'fetch("https://api.github.com").then(r=>console.log("internet",r.status)).catch(e=>console.log("sem-internet",e.message))' 2>&1)
+          echo "$rede"; echo "$rede" | grep -q 'internet [0-9]' && ok "os serviços alcançam a internet" || falha "serviços sem internet"
+          bash ~/.local/share/ergon/ergon.sh parar > /dev/null 2>&1; bash ~/.local/share/ergon/ergon.sh subir > /tmp/subir.log 2>&1 && ok "parar e ligar de novo pelo lançador" || { falha "religar"; cat /tmp/subir.log; }
+          [ "$falhas" = 0 ] && echo 'resultado: tudo ok' || { echo "$falhas falha(s)"; exit 1; }
 
   instalacao-windows:
     needs: ambiente
     runs-on: windows-2025
-    timeout-minutes: 75
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,11 +150,10 @@ jobs:
       - name: Manifesto de teste assinado (imagens da versão publicada; ambiente e pacote servidos aqui)
         shell: bash
         run: |
-          curl -fsSL -o /c/servir/ergon-local-$VERSAO_PUBLICADA.zip "https://github.com/MagnoQuerino/ergon-community/releases/download/v$VERSAO_PUBLICADA/ergon-local-$VERSAO_PUBLICADA.zip"
           node scripts/distribuicao/cli.mjs chave-nova --saida "$RUNNER_TEMP/chave-teste.json" --id teste-instalador > "$RUNNER_TEMP/pub.json"
           node -e 'const p=require(process.argv[1]);require("fs").writeFileSync(process.argv[2],JSON.stringify({[p.keyId]:{publica:p.publica}}))' "$RUNNER_TEMP/pub.json" "$RUNNER_TEMP/chaveiro.json"
           B=scripts/distribuicao/exemplos/community-estavel-$VERSAO_PUBLICADA.json
-          for d in certo adulterado; do mkdir -p /c/servir/$d; cp /c/servir/*.tar.gz /c/servir/*.zip /c/servir/$d/; done
+          for d in certo adulterado; do mkdir -p /c/servir/$d; cp /c/servir/*.tar.gz /c/servir/ergon-local-$VERSAO_PUBLICADA.zip /c/servir/$d/; done
           node scripts/distribuicao/montar-teste.mjs --base $B --pasta /c/servir/certo --url http://127.0.0.1:18999/certo --chave "$RUNNER_TEMP/chave-teste.json" --saida /c/servir/certo/manifesto-estavel.json
           node scripts/distribuicao/montar-teste.mjs --base $B --pasta /c/servir/adulterado --url http://127.0.0.1:18999/adulterado --chave "$RUNNER_TEMP/chave-teste.json" --saida /c/servir/adulterado/manifesto-estavel.json --adulterar ambiente-wsl
           # assinatura de outra chave (fora do chaveiro)
@@ -81,12 +162,18 @@ jobs:
           # (direto pela biblioteca: o "assinar" da linha de comando recusa a origem 127.0.0.1, como deve)
           node --input-type=module -e 'import fs from "node:fs"; import { assinar } from "./scripts/distribuicao/manifesto.mjs"; const [k, m] = process.argv.slice(1); fs.writeFileSync(m + ".sig", assinar(fs.readFileSync(m), JSON.parse(fs.readFileSync(k, "utf8"))))' "$RUNNER_TEMP/intrusa.json" /c/servir/outra-chave/manifesto-estavel.json
           echo "CHAVEIRO=$RUNNER_TEMP\\chaveiro.json" >> "$GITHUB_ENV"
+          # (antes da NOVA: o manifesto dela precisa ser o mais recente) instalação ANTIGA (ambiente com Docker por dentro, publicado, + pacote publicado da versão de partida): a
+          # atualização para a nova tem de migrar os dados para o ambiente com Podman
+          mkdir -p /c/servir/antigo
+          curl -fsSL -o /c/servir/antigo/ergon-ambiente-wsl.tar.gz "https://github.com/MagnoQuerino/ergon-community/releases/download/v$AMBIENTE_ANTIGO/ergon-ambiente-wsl.tar.gz"
+          curl -fsSL -o /c/servir/antigo/ergon-local-$VERSAO_PUBLICADA.zip "https://github.com/MagnoQuerino/ergon-community/releases/download/v$VERSAO_PUBLICADA/ergon-local-$VERSAO_PUBLICADA.zip"
+          node scripts/distribuicao/montar-teste.mjs --base $B --pasta /c/servir/antigo --url http://127.0.0.1:18999/antigo --chave "$RUNNER_TEMP/chave-teste.json" --saida /c/servir/antigo/manifesto-estavel.json
+          sleep 2   # a sequência do manifesto é em segundos: a nova tem de ser maior que a antiga
           # versão NOVA para a atualização: a pré-versão publicada mais recente (imagens e pacote reais), servida aqui
           # como se fosse do canal estável do aplicativo de teste e marcada como atualização de segurança
           curl -fsSL -o "$RUNNER_TEMP/base-nova.json" https://github.com/MagnoQuerino/ergon-community/releases/download/canal-teste/manifesto-teste.json
           NOVA=$(node -p 'require(process.argv[1]).versao' "$RUNNER_TEMP/base-nova.json")
-          mkdir -p /c/servir/novo && cp /c/servir/*.tar.gz /c/servir/novo/
-          curl -fsSL -o /c/servir/novo/ergon-local-$NOVA.zip "https://github.com/MagnoQuerino/ergon-community/releases/download/v$NOVA/ergon-local-$NOVA.zip"
+          mkdir -p /c/servir/novo && cp /c/servir/*.tar.gz /c/servir/ergon-local-$NOVA.zip /c/servir/novo/
           node scripts/distribuicao/montar-teste.mjs --base "$RUNNER_TEMP/base-nova.json" --pasta /c/servir/novo --url http://127.0.0.1:18999/novo --chave "$RUNNER_TEMP/chave-teste.json" --saida /c/servir/novo/manifesto-estavel.json --canal estavel --seguranca "Teste da bateria: revisão de segurança que precisa ser aplicada."
           echo "VERSAO_NOVA=$NOVA" >> "$GITHUB_ENV"
       - name: Bateria da instalação
@@ -153,13 +240,21 @@ jobs:
           Ok ($h.service -eq 'ergon' -and $h.version -eq $env:VERSAO_PUBLICADA) "Ergon $($h.version) em http://localhost:8787"
           $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254*' -and $_.InterfaceAlias -notmatch 'WSL|vEthernet' } | Select-Object -First 1).IPAddress
           Ok (-not (Test-NetConnection $ip -Port 8787 -WarningAction SilentlyContinue).TcpTestSucceeded) "porta 8787 fechada no IP da rede ($ip)"
-          # a referência configurada de cada contêiner (o "docker ps" mostra só o nome de uma imagem baixada por digest)
-          $img = wsl.exe -d Ergon -u root --exec sh -c 'docker inspect --format "{{.Name}} {{.Config.Image}}" $(docker ps -q)' | Out-String
+          # a referência configurada de cada contêiner (o "ps" mostra só o nome de uma imagem baixada por digest)
+          $img = wsl.exe -d Ergon -u root --exec sh -c 'podman inspect --format "{{.Name}} {{.ImageName}}" $(podman ps -q)' | Out-String
           Write-Host $img
           Ok ($img -match 'ergon-community@sha256:' -and $img -notmatch 'ergon-community:') 'serviços rodando pelas imagens presas aos digests do manifesto'
           $isol = wsl.exe -d Ergon -u root --exec sh -c 'test -e /mnt/c/Windows && echo com-disco || echo sem-disco; command -v cmd.exe || echo sem-interop' | Out-String
           Write-Host $isol
           Ok ($isol -match 'sem-disco' -and $isol -match 'sem-interop') 'o ambiente não enxerga os discos do Windows nem roda programas do Windows'
+          $semdocker = wsl.exe -d Ergon -u root --exec sh -c 'command -v docker dockerd || echo sem-docker; command -v podman' | Out-String
+          Write-Host $semdocker
+          Ok ($semdocker -match 'sem-docker' -and $semdocker -match 'podman') 'o ambiente roda com o Podman, sem nenhum programa do Docker'
+          $rede = wsl.exe -d Ergon -u root --exec sh -c 'podman exec ergon_ergon_1 node -e "fetch(\"https://api.github.com\").then(r=>console.log(\"internet\",r.status)).catch(e=>console.log(\"sem-internet\",e.message))"' 2>&1 | Out-String
+          Write-Host $rede
+          Ok ($rede -match 'internet \d') 'os serviços alcançam a internet (a conta de IA fica lá)'
+          $motores = wsl.exe -d Ergon -u root --exec sh -c 'podman ps --format "{{.Names}} {{.State}}"' | Out-String
+          Write-Host $motores
           $env:ERGON_AMBIENTE_NOME = 'Ergon'
           Write-Host '6) recolocar: tempo de reparo (tudo já presente)'
           $s = Get-Date; $r = Instalar 'certo' 'Ergon' C:\servir\inst-3.log; $seg = [int]((Get-Date) - $s).TotalSeconds
@@ -175,6 +270,19 @@ jobs:
           $o = @{ Origin = 'http://localhost:8787' }
           $null = Invoke-RestMethod -Method Post http://localhost:8787/api/auth/setup -Headers $o -ContentType 'application/json' -Body '{"username":"bateria","password":"senha-da-bateria-123","displayName":"Bateria"}' -TimeoutSec 30
           Ok (-not (Invoke-RestMethod http://localhost:8787/api/auth/state -TimeoutSec 15).needsSetup) 'conta criada na versão antiga'
+          # a pessoa entra (abre a parte dela) e o motor de IA dela liga: o gerente o cria pela API do Podman, com o cofre
+          # cifrado (FUSE)
+          $null = Invoke-RestMethod -Method Post http://localhost:8787/api/auth/login -Headers $o -ContentType 'application/json' -Body '{"username":"bateria","password":"senha-da-bateria-123"}' -TimeoutSec 60
+          $fim = (Get-Date).AddSeconds(90)
+          do { $mot = wsl.exe -d Ergon -u root --exec sh -c 'podman ps -a --filter label=ergon.motor --format "{{.Names}} {{.State}}"' | Out-String; if ($mot -match 'running') { break }; Start-Sleep 5 } while ((Get-Date) -lt $fim)
+          Write-Host $mot
+          # as imagens publicadas até a rc.13 pedem ao tmpfs do motor uma opção (uid=) que o Podman recusa: o motor só liga
+          # com as imagens desta versão em diante. O que vale aqui é o cofre com a especificação desta versão.
+          if ($mot -match 'running') { Ok $true 'o motor de IA da conta ligou pela API do Podman' } else { Write-Host "aviso o motor pela imagem publicada $env:VERSAO_PUBLICADA não ligou (especificação anterior à correção do tmpfs)" }
+          $imgm = (wsl.exe -d Ergon -u root --exec sh -c "sed -nE 's/^ *ERGON_MOTOR_IMAGE: *//p' /root/.local/share/ergon/docker-compose.yml | head -1" | Out-String).Trim()
+          $cofre = ((Get-Content -Raw scripts\distribuicao\testar-cofre.sh) -replace "`r", "") | wsl.exe -d Ergon -u root --exec bash -s -- $imgm 2>&1 | Out-String
+          Write-Host $cofre
+          Ok ($cofre -match 'conteudo-do-cofre' -and $cofre -match 'volume-so-cifrado') 'cofre do motor cria, monta e grava cifrado no Podman do ambiente (especificação desta versão)'
           $env:ERGON_MANIFESTO_URL = 'http://127.0.0.1:18999/certo/manifesto-estavel.json'
           $null = Rodar '--verificar-atualizacao' C:\servir\verificar-0.log
           $v0 = Get-Content C:\servir\verificar-0.log -Raw | ConvertFrom-Json; Write-Host ($v0 | ConvertTo-Json -Compress)
@@ -191,11 +299,48 @@ jobs:
           $h = Invoke-RestMethod http://localhost:8787/api/health -TimeoutSec 15
           Ok ($h.version -eq $env:VERSAO_NOVA) "Ergon $($h.version) no ar depois de atualizar"
           Ok (-not (Invoke-RestMethod http://localhost:8787/api/auth/state -TimeoutSec 15).needsSetup) 'a conta de antes continua lá (dados preservados)'
-          $img = wsl.exe -d Ergon -u root --exec sh -c 'docker inspect --format "{{.Config.Image}}" $(docker ps -q)' | Out-String
+          $img = wsl.exe -d Ergon -u root --exec sh -c 'podman inspect --format "{{.ImageName}}" $(podman ps -q)' | Out-String
           Ok ($img -match '@sha256:' -and $img -notmatch 'ergon-community:') 'serviços da versão nova presos aos digests do manifesto'
           $null = Rodar '--verificar-atualizacao' C:\servir\verificar-2.log
           $v2 = Get-Content C:\servir\verificar-2.log -Raw | ConvertFrom-Json
           Ok (-not $v2.obrigatoria -and $v2.atual -eq $env:VERSAO_NOVA) 'depois de atualizar: nada mais bloqueia'
+
+          Write-Host "8) migração: instalação antiga (Docker dentro do ambiente, $env:VERSAO_PUBLICADA) → $env:VERSAO_NOVA com o Podman, pela atualização do aplicativo"
+          wsl.exe --terminate Ergon | Out-Null; wsl.exe --unregister Ergon | Out-Null
+          Remove-Item -Recurse -Force C:\ergon-Ergon -ErrorAction SilentlyContinue
+          # como um computador que só teve a instalação antiga: os ambientes do WSL2 dividem a mesma máquina virtual e a
+          # mesma rede, e o Podman dos passos anteriores deixaria regras de rede que o Docker antigo não espera
+          wsl.exe --shutdown | Out-Null
+          function Estado($tit) {
+            Write-Host "----- $tit"
+            wsl.exe -d Ergon -u root --exec sh -c 'for m in docker podman; do command -v $m >/dev/null || continue; echo "[$m]"; $m ps -a; for c in $($m ps -aq); do echo "== $c"; $m logs --tail 25 $c 2>&1; done; done; ip -br addr; (iptables -S 2>/dev/null; nft list ruleset 2>/dev/null) | head -60; tail -20 /var/log/ergon/*.log 2>/dev/null' 2>&1 | Out-String | Write-Host
+          }
+          $r = Instalar 'antigo' 'Ergon' C:\servir\antigo.log
+          $t = Get-Content C:\servir\antigo.log -Raw; Write-Host $t
+          Ok ($r -eq 0 -and $t -match "PRONTO $env:VERSAO_PUBLICADA") 'instalação antiga (com Docker) no ar'
+          if ($r -ne 0) { Estado 'instalação antiga' }
+          $tem = wsl.exe -d Ergon -u root --exec sh -c 'command -v dockerd; command -v podman || echo sem-podman' | Out-String
+          Ok ($tem -match 'dockerd' -and $tem -match 'sem-podman') 'o ambiente antigo é o de Docker'
+          $null = Invoke-RestMethod -Method Post http://localhost:8787/api/auth/setup -Headers $o -ContentType 'application/json' -Body '{"username":"antiga","password":"senha-da-antiga-123","displayName":"Antiga"}' -TimeoutSec 30
+          Ok (-not (Invoke-RestMethod http://localhost:8787/api/auth/state -TimeoutSec 15).needsSetup) 'conta criada na instalação antiga'
+          $env:ERGON_MANIFESTO_URL = 'http://127.0.0.1:18999/novo/manifesto-estavel.json'
+          $s = Get-Date; $r = Rodar '--atualizar-sem-janela' C:\servir\migrar.log; $seg = [int]((Get-Date) - $s).TotalSeconds
+          $t = Get-Content C:\servir\migrar.log -Raw; Write-Host $t
+          Ok ($r -eq 0 -and $t -match "ATUALIZADO $env:VERSAO_NOVA") "migrado e atualizado em $seg s"
+          if ($r -ne 0) { Estado 'depois da migração'; wsl.exe -l -v | Out-String | Write-Host }
+          Ok ($t -match 'Volume ergon_ergon-data copiado e conferido') 'os dados do Ergon passaram, conferidos'
+          $h = Invoke-RestMethod http://localhost:8787/api/health -TimeoutSec 15
+          Ok ($h.version -eq $env:VERSAO_NOVA) "Ergon $($h.version) no ar depois de migrar"
+          Ok (-not (Invoke-RestMethod http://localhost:8787/api/auth/state -TimeoutSec 15).needsSetup) 'a conta da instalação antiga continua lá'
+          $tem = wsl.exe -d Ergon -u root --exec sh -c 'command -v docker dockerd || echo sem-docker; command -v podman' | Out-String
+          Write-Host $tem
+          Ok ($tem -match 'sem-docker' -and $tem -match 'podman') 'o ambiente depois da migração roda com o Podman, sem Docker'
+          # a conta de IA fica na internet: o contêiner do Ergon tem de alcançá-la (rede do WSL2 dividida com o antigo)
+          $rede = wsl.exe -d Ergon -u root --exec sh -c 'podman exec ergon_ergon_1 node -e "fetch(\"https://api.github.com\").then(r=>console.log(\"internet\",r.status)).catch(e=>console.log(\"sem-internet\",e.message))"' 2>&1 | Out-String
+          Write-Host $rede
+          Ok ($rede -match 'internet \d') 'os serviços alcançam a internet depois da migração'
+          $d = Dist; Write-Host $d
+          Ok (($d -match '(?m)^Ergon\s*$') -and -not ($d -match 'Ergon-novo')) 'um ambiente só, com o nome de antes'
           Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
           if ($falhas) { Write-Host "$falhas falha(s)"; exit 1 } else { Write-Host 'resultado: tudo ok' }
       - uses: actions/upload-artifact@v4

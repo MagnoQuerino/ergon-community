@@ -27,5 +27,12 @@ Destaques:
 - Tauri (The Tauri Programme within The Commons Conservancy), licenças MIT ou Apache-2.0: base do aplicativo
   desktop. https://tauri.app
 
+- Podman (Containers), licença Apache-2.0: o motor de contêineres onde os serviços do Ergon rodam (no ambiente próprio
+  do Windows e no Linux, pelo pacote do sistema). https://github.com/containers/podman
+
+- podman-compose (Containers), licença GPL-2.0: sobe os serviços do compose no Podman. Vai sem alterações no ambiente
+  do Windows (pacote do Alpine) e no pacote .deb do Linux (/usr/lib/ergon/podman-compose, com a licença em
+  /usr/share/doc/ergon); o código-fonte está em https://github.com/containers/podman-compose (versão 1.4.1).
+
 Marcas citadas (WhatsApp, Microsoft, Google, Trello, Jira, Asana, monday.com, ClickUp, Notion, Todoist, GitHub,
 Docker e outras) pertencem aos respectivos donos e aparecem apenas para identificar as integrações.

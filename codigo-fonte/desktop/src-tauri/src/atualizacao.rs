@@ -116,32 +116,37 @@ pub fn atualizar(ev: &mut dyn FnMut(Evento)) -> Result<Feito, String> {
         let (url, sha, tam) = (c["url"].as_str().unwrap(), c["sha256"].as_str().unwrap(), c["tamanho"].as_u64().unwrap());
         let r = baixar::componente(url, sha, tam, &ambiente::pasta().join("cache"), &mut |f, t| ev(Evento::Progresso { componente: "pacote-local".into(), feitos: f, total: t }))
             .map_err(|e| format!("pacote-local: {e}"))?;
-        // 3. o pacote anterior guardado; o novo entregue e preso aos digests
-        ev(Evento::Etapa("configurar"));
-        rodar(&["sh", "-c", &format!("rm -rf {ANTERIOR} && cp -a /opt/ergon-pacote {ANTERIOR}")], 120)?;
-        ambiente::entregar_pacote(&r.caminho)?;
-        ambiente::fixar_imagens(&m, &versao)?;
-        ev(Evento::Linha("Pacote novo entregue; imagens presas aos digests do manifesto.".into()));
-        // 4. religa pelo lançador novo (segredos e dados ficam; o .env da instalação também)
-        ev(Evento::Etapa("ligar"));
-        ambiente::ligar_motor_de_conteineres(ev)?;
-        let instalar = |ev: &mut dyn FnMut(Evento)| {
-            let mut c = ambiente::dentro(&["env", "ERGON_SEM_NAVEGADOR=1", "/bin/bash", "/opt/ergon-pacote/ergon.sh", "instalar"]);
-            ambiente::transmitir(&mut c, Duration::from_secs(40 * 60), ev)
-        };
-        let ligou = instalar(&mut *ev);
-        // 5. confere a versão nova no ar; senão, volta para a anterior
-        ev(Evento::Etapa("conferir"));
-        if ligou.is_err() || !responde(&versao, 300) {
-            ev(Evento::Linha(format!("A versão {versao} não respondeu: voltando para a anterior.")));
-            rodar(&["sh", "-c", &format!("test -d {ANTERIOR} && rm -rf /opt/ergon-pacote && mv {ANTERIOR} /opt/ergon-pacote")], 120)?;
-            let volta = instalar(&mut *ev);
-            let anterior = instalada.clone().unwrap_or_else(|| "anterior".into());
-            return Err(if volta.is_ok() && instalada.as_deref().is_some_and(|v| responde(v, 300)) {
-                format!("A versão {versao} não respondeu; o Ergon voltou para a {anterior} e está no ar. Nada se perdeu.")
-            } else {
-                format!("A versão {versao} não respondeu e a {anterior} também não voltou sozinha. Os dados estão guardados; veja o diagnóstico.")
-            });
+        if crate::migracao::precisa() {
+            // ambiente antigo (Docker por dentro): os dados passam para um ambiente novo, com o Podman (migracao.rs)
+            crate::migracao::migrar(&m, &versao, &r.caminho, ev)?;
+        } else {
+            // 3. o pacote anterior guardado; o novo entregue e preso aos digests
+            ev(Evento::Etapa("configurar"));
+            rodar(&["sh", "-c", &format!("rm -rf {ANTERIOR} && cp -a /opt/ergon-pacote {ANTERIOR}")], 120)?;
+            ambiente::entregar_pacote(&r.caminho)?;
+            ambiente::fixar_imagens(&m, &versao)?;
+            ev(Evento::Linha("Pacote novo entregue; imagens presas aos digests do manifesto.".into()));
+            // 4. religa pelo lançador novo (segredos e dados ficam; o .env da instalação também)
+            ev(Evento::Etapa("ligar"));
+            ambiente::ligar_motor_de_conteineres(ev)?;
+            let instalar = |ev: &mut dyn FnMut(Evento)| {
+                let mut c = ambiente::dentro(&["env", "ERGON_SEM_NAVEGADOR=1", "/bin/bash", "/opt/ergon-pacote/ergon.sh", "instalar"]);
+                ambiente::transmitir(&mut c, Duration::from_secs(40 * 60), ev)
+            };
+            let ligou = instalar(&mut *ev);
+            // 5. confere a versão nova no ar; senão, volta para a anterior
+            ev(Evento::Etapa("conferir"));
+            if ligou.is_err() || !responde(&versao, 300) {
+                ev(Evento::Linha(format!("A versão {versao} não respondeu: voltando para a anterior.")));
+                rodar(&["sh", "-c", &format!("test -d {ANTERIOR} && rm -rf /opt/ergon-pacote && mv {ANTERIOR} /opt/ergon-pacote")], 120)?;
+                let volta = instalar(&mut *ev);
+                let anterior = instalada.clone().unwrap_or_else(|| "anterior".into());
+                return Err(if volta.is_ok() && instalada.as_deref().is_some_and(|v| responde(v, 300)) {
+                    format!("A versão {versao} não respondeu; o Ergon voltou para a {anterior} e está no ar. Nada se perdeu.")
+                } else {
+                    format!("A versão {versao} não respondeu e a {anterior} também não voltou sozinha. Os dados estão guardados; veja o diagnóstico.")
+                });
+            }
         }
         let seq = m["sequencia"].as_u64().unwrap_or(0);
         std::fs::write(ambiente::arq_aceito(), serde_json::to_vec_pretty(&serde_json::json!({ "ultimaSequencia": seq, "versaoInstalada": versao })).unwrap()).map_err(|e| e.to_string())?;
