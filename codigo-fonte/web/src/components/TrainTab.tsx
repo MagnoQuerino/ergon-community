@@ -5,8 +5,6 @@ import type { Agent, AgentSkill, ArtifactRow, Training, TrainingList, TrainingSo
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
 
-const MAX_FILES = 6;
-const MAX_LINKS = 5;
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 const TRAINING_STATUS: Record<Training['status'], { label: string; cls: string }> = {
   executando: { label: 'aprendendo…', cls: 'badge--warn' }, em_revisao: { label: 'aguarda sua revisão', cls: 'badge--warn' },
@@ -80,7 +78,7 @@ function TrainForm({ agent, skills, target, setTarget, onStarted }: { agent: Age
     const v = link.trim();
     if (!v) return;
     if (!/^https?:\/\/[^\s]+$/i.test(v)) { setMsg({ ok: false, text: 'Use um endereço completo, começando com https://' }); return; }
-    if (!links.includes(v) && links.length < MAX_LINKS) setLinks([...links, v]);
+    if (!links.includes(v)) setLinks([...links, v]);
     setLink(''); setMsg(null);
   };
   const train = async () => {
@@ -110,23 +108,21 @@ function TrainForm({ agent, skills, target, setTarget, onStarted }: { agent: Age
         )}
       </div>
       <label className="field">O que deseja ensinar?
-        <textarea rows={4} maxLength={8000} value={request} onChange={(e) => setRequest(e.target.value)}
+        <textarea rows={4} value={request} onChange={(e) => setRequest(e.target.value)}
           placeholder="ex.: Aprenda a montar a capa das nossas propostas: logo à esquerda, título em azul-carvão, data no rodapé. Use o modelo anexo." />
       </label>
       <div className="editor__grid">
-        <div className="field">Arquivos <span className="muted small">({files.length}/{MAX_FILES})</span>
+        <div className="field">Arquivos <span className="muted small">({files.length})</span>
           <FilePick value={files} onChange={setFiles} />
         </div>
-        <div className="field">Links <span className="muted small">({links.length}/{MAX_LINKS})</span>
+        <div className="field">Links <span className="muted small">({links.length})</span>
           {links.length > 0 && <ul className="rt-files__sel">{links.map((l) => <li key={l}><Icon name="compass" size={12} /> <span className="train__url">{l}</span>
             <button className="icon-btn" aria-label={`Tirar ${l}`} onClick={() => setLinks(links.filter((x) => x !== l))}><Icon name="x" size={12} /></button></li>)}</ul>}
-          {links.length < MAX_LINKS && (
-            <div className="row">
+          <div className="row">
               <input className="rt-files__q" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" aria-label="Novo link"
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLink(); } }} />
               <button type="button" className="btn btn--sm" onClick={addLink} disabled={!link.trim()}>Adicionar</button>
-            </div>
-          )}
+          </div>
           <span className="hint">Só estas páginas são abertas — nada de busca na web nem outros sites.</span>
         </div>
       </div>
@@ -145,7 +141,7 @@ function FilePick({ value, onChange }: { value: Array<{ id: string; name: string
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const add = (f: { id: string; name: string }) => { if (!value.some((v) => v.id === f.id) && value.length < MAX_FILES) onChange([...value, f]); };
+  const add = (f: { id: string; name: string }) => { if (!value.some((v) => v.id === f.id)) onChange([...value, f]); };
   const local = (mine.data ?? []).filter((a) => !value.some((v) => v.id === a.id) && (!q.trim() || a.filename.toLowerCase().includes(q.trim().toLowerCase()))).slice(0, 6);
   const send = async (file: File | undefined) => {
     if (!file) return;
@@ -157,16 +153,14 @@ function FilePick({ value, onChange }: { value: Array<{ id: string; name: string
     <div className="rt-files">
       {value.length > 0 && <ul className="rt-files__sel">{value.map((f) => <li key={f.id}><Icon name="folder" size={12} /> {f.name}
         <button className="icon-btn" aria-label={`Tirar ${f.name}`} onClick={() => onChange(value.filter((v) => v.id !== f.id))}><Icon name="x" size={12} /></button></li>)}</ul>}
-      {value.length < MAX_FILES && (
-        <>
+      <>
           <div className="row">
             <input className="rt-files__q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar nos arquivos do Ergon" aria-label="Procurar arquivo" />
             <label className="btn btn--sm">{busy ? 'Enviando…' : 'Enviar arquivo'}<input type="file" hidden disabled={busy} onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ''; }} /></label>
           </div>
           {local.length > 0 && <ul className="rt-files__list">{local.map((a) => <li key={a.id}><button type="button" className="linkish" onClick={() => add({ id: a.id, name: a.filename })}>+ {a.filename}</button> <span className="muted small">{when(a.created_at)}</span></li>)}</ul>}
           <span className="hint">Word, PDF com texto, Excel, PowerPoint, CSV e texto. O que não der para ler aparece na revisão.</span>
-        </>
-      )}
+      </>
       {msg && <p className="hint warn">{msg}</p>}
     </div>
   );

@@ -46,7 +46,7 @@ function RequestCard({ p, onDone }: { p: Proposal; onDone: () => void }) {
       {r.excerpt && <details className="req-card__excerpt"><summary>O que veio no card #{r.number}</summary><p className="pre">{r.excerpt}</p></details>}
       {r.need === 'info' || back ? (
         <form className="req-card__form" onSubmit={(e) => { e.preventDefault(); const t = text.trim(); if (t) void send(back ? 'return' : 'answer', t); }}>
-          <textarea autoFocus value={text} rows={2} maxLength={1500} onChange={(e) => setText(e.target.value)}
+          <textarea autoFocus value={text} rows={2} onChange={(e) => setText(e.target.value)}
             placeholder={back ? 'O que precisa mudar (vai para o agente)' : `Sua resposta para ${r.agent}`} aria-label={back ? 'Instrução' : 'Sua resposta'}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const t = text.trim(); if (t) void send(back ? 'return' : 'answer', t); } }} />
           <div className="row row--wrap">
@@ -342,7 +342,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         </ConfirmPopup>
       )}
       <form className="chat__input" onSubmit={(e) => { e.preventDefault(); void send(busy); }}>
-        <textarea ref={input} data-autofocus value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} maxLength={4000} rows={2} placeholder={`Peça algo a ${agent.name}…`}
+        <textarea ref={input} data-autofocus value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} rows={2} placeholder={`Peça algo a ${agent.name}…`}
           // Enter envia · Shift+Enter quebra a linha · Ctrl+Enter põe na fila da conversa (vai quando o agente terminar)
           onKeyDown={(e) => {
             if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;

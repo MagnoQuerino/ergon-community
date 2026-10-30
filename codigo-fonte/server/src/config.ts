@@ -165,9 +165,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     longRunTimeoutSeconds: int(env.ERGON_LONG_RUN_TIMEOUT_SECONDS, 600, 5, 3600),
     maxRunAttempts: int(env.ERGON_MAX_RUN_ATTEMPTS, 2, 1, 5),
     dailyRunLimit: int(env.ERGON_DAILY_RUN_LIMIT, 100, 1, 100000),
-    maxInputChars: int(env.ERGON_MAX_INPUT_CHARS, 4000, 100, 50000),
-    maxContextChars: int(env.ERGON_MAX_CONTEXT_CHARS, 16000, 1000, 100000),
-    maxDocumentChars: int(env.ERGON_MAX_DOCUMENT_CHARS, 60000, 4000, 200000),
+    maxInputChars: int(env.ERGON_MAX_INPUT_CHARS, 200_000, 100, 4_000_000),
+    maxContextChars: int(env.ERGON_MAX_CONTEXT_CHARS, 200_000, 1000, 4_000_000),
+    maxDocumentChars: int(env.ERGON_MAX_DOCUMENT_CHARS, 400_000, 4000, 8_000_000),
     maxConversationMessages: int(env.ERGON_MAX_CONVERSATION_MESSAGES, 400, 10, 100000),
     slotsPerFloor: int(env.ERGON_SLOTS_PER_FLOOR, 6, 1, 50), // 6 = as mesas de cada planta da Stoa
     reviewMaxRounds: int(env.ERGON_REVIEW_MAX_ROUNDS, 2, 1, 5),

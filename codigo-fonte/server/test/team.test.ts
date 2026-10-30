@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { usageSummary } from '../src/services/usage.ts';
-import { autoSector } from '../src/services/sectors.ts';
+import { autoSector, setSetting } from '../src/services/sectors.ts';
 import { parseChatCommand, parseProposals } from '../src/services/proposals.ts';
-import { parseHelpRequests, stripControl } from '../src/services/teamwork.ts';
+import { PERSIST_ROUNDS, parseHelpRequests, stripControl } from '../src/services/teamwork.ts';
 import { modelLabel, tierOf } from '../src/services/ai.ts';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
 import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
@@ -267,7 +267,9 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     assert.ok(agentBy((await req(h, 'GET', '/api/state', s)).json, 'platao').tools.some((t: { id: string }) => t.id === 'web'));
   });
 
-  test('fila automática: um de cada vez; pedido de ajuda vira card do colega e o resultado volta', async () => {
+  test('fila automática: um de cada vez; pedido de ajuda vira etapa do mesmo card e o resultado volta', async () => {
+    // aqui vale o caminho até você (devolver com instrução); o ciclo de persistência tem os testes dele (equipe-autonoma)
+    setSetting(h.db, s.workspaceId, 'team.persist', '0');
     const st = (await req(h, 'GET', '/api/state', s)).json;
     const her = agentBy(st, 'herodoto');
     const t = (await req(h, 'POST', '/api/tasks', s, { title: 'Relatório sobre o mercado de eventos', agentId: her.id })).json;
@@ -282,19 +284,19 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
       + 'entrevista com dois organizadores sobre tendência de patrocínio (inferência, não generalizar) e série histórica de ocupação dos centros de convenções (dado).';
     const relatorio = `# Mercado de eventos — relatório\n\n${'O mercado de eventos corporativos cresceu com a volta das feiras presenciais e a maior procura por patrocínio de marca. '.repeat(8)}\n\nFontes de Hipátia usadas: relatório setorial e pesquisa de público.`;
     let finalReply = 'Relatório pronto, com as fontes de Hipátia.';
-    motor.reply = (p) => p.input.includes('Ajuda a Heródoto') ? fontes
-      : p.input.includes('Ajuda que você recebeu') ? finalReply : 'Começo pelo esqueleto. [[pedir-ajuda agente="Hipátia" pedido="Fontes sobre o mercado de eventos"]]';
+    // a etapa de quem pediu vem antes: o plano dela também lista a etapa de ajuda ("Ajuda a Heródoto")
+    motor.reply = (p) => p.input.includes('O que as etapas anteriores entregaram') ? finalReply
+      : p.input.includes('Ajuda a Heródoto') ? fontes : 'Começo pelo esqueleto. [[pedir-ajuda agente="Hipátia" pedido="Fontes sobre o mercado de eventos"]]';
     const step = async () => { h.teamwork.tick(); for (let i = 0; i < 3; i++) await h.executor.tick(); };
     const col = (id: string) => h.db.get<{ n: string }>('SELECT c.name AS n FROM tasks t JOIN columns c ON c.id = t.column_id WHERE t.id = ?', id)!.n;
     await step();
-    const help = h.db.get<{ id: string; agent_id: string; number: number }>('SELECT id, agent_id, number FROM tasks WHERE parent_task_id = ?', t.id)!;
-    assert.equal(help.agent_id, agentBy(st, 'hipatia').id, 'card de ajuda para quem tem a ferramenta');
-    assert.equal(col(t.id), 'Em andamento', 'quem pediu espera');
-    await step(); // Hipátia responde
-    assert.equal(h.db.get<{ completed: number }>('SELECT completed FROM tasks WHERE id = ?', help.id)!.completed, 1, 'resposta com conteúdo: card de ajuda concluído com evidência');
-    assert.equal(col(t.id), 'A fazer', 'a ajuda chegou: volta à fila');
-    await step(); // Heródoto diz que terminou, sem entregar o documento
-    assert.match(motor.started.at(-1)!.input, /Hipátia: Fontes/);
+    assert.equal(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id = ?', t.id)!.n, 0, 'uma entrega, um card: a ajuda não vira outro card');
+    const steps = (await req(h, 'GET', `/api/tasks/${t.id}`, s)).json.steps as Array<{ agentId: string; title: string }>;
+    assert.deepEqual(steps.map((x) => x.agentId), [agentBy(st, 'hipatia').id, agentBy(st, 'herodoto').id], 'a ajuda é uma etapa antes da de quem pediu');
+    assert.match(steps[0].title, /^Ajuda a Heródoto: Fontes sobre o mercado de eventos/);
+    await step(); // Hipátia entrega a etapa dela; Heródoto continua (diz que terminou, sem entregar o documento)
+    await step();
+    assert.match(motor.started.at(-1)!.input, /\[1\. Hipátia\]\nFontes/, 'quem pediu recebe o que a colega entregou');
     let card = (await req(h, 'GET', `/api/tasks/${t.id}`, s)).json;
     assert.equal(card.task.completed, 0, '"Relatório pronto" sem o relatório não conclui');
     assert.equal(card.work.state, 'revisao');
@@ -313,9 +315,10 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     assert.equal(card.work.result.state, 'validado');
     assert.equal(card.files.deliverables.length, 1, 'o documento ficou no card');
     assert.match(card.files.deliverables[0].filename, /^resultado-T\d+-.*\.md$/);
-    assert.ok(card.log.some((e: { action: string }) => e.action === 'task.help_result'));
+    assert.ok(card.log.some((e: { action: string }) => e.action === 'task.help_step'), 'o pedido de ajuda fica no histórico do card');
     assert.ok(card.log.some((e: { action: string; result: string }) => e.action === 'task.result' && /Concluída com evidência/.test(e.result)), 'o histórico explica a conclusão');
     assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runs WHERE idempotency_key LIKE 'queue-%'")!.n, 4, 'execuções uma de cada vez');
+    setSetting(h.db, s.workspaceId, 'team.persist', '1');
   });
 
   test('ajuda que prepara uma ação externa: a resposta volta a quem pediu, com o que falta (antes, ficava só no card)', async () => {
@@ -325,7 +328,7 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     for (const x of h2.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ? AND completed = 0', s2.workspaceId)) h2.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
     const st = (await req(h2, 'GET', '/api/state', s2)).json;
     const conv = (await req(h2, 'POST', '/api/conversations', s2, { agentId: agentBy(st, 'aristoteles').id })).json;
-    m2.reply = (p) => p.input.includes('Ajuda a Aristóteles')
+    m2.reply = (p) => p.input.includes('Sua etapa (1 de 1)')
       ? 'Rascunho do e-mail para a DELTA: Prezados, solicitamos a revisão do orçamento 4120 com prazo de resposta até sexta-feira. Atenciosamente, Vértice. Para concluir: copie, revise e envie pelo seu e-mail.'
       : 'Rascunho é com o Diógenes. [[pedir-ajuda agente="Diógenes" pedido="Envie à DELTA o pedido do orçamento 4120 revisado"]]';
     await req(h2, 'POST', `/api/conversations/${conv.id}/messages`, s2, { text: 'Peça à DELTA o orçamento 4120 revisado', clientRequestId: 'ajuda-externa-1' });
@@ -347,6 +350,7 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const m4 = new FakeMotor();
     const h4 = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: m4, control: new FakeControl() });
     const s4 = await setupOwner(h4);
+    setSetting(h4.db, s4.workspaceId, 'team.persist', '0');
     for (const x of h4.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ? AND completed = 0', s4.workspaceId)) h4.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
     const st = (await req(h4, 'GET', '/api/state', s4)).json;
     const card = async (title: string, agentKey: string, doc: string) => {
@@ -375,41 +379,13 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     await h4.close();
   });
 
-  test('card de ajuda aprovado por você: o card de quem pediu volta à fila com a resposta (antes, ficava em andamento para sempre)', async () => {
-    const m3 = new FakeMotor();
-    const h3 = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: m3, control: new FakeControl() });
-    const s3 = await setupOwner(h3);
-    for (const x of h3.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ? AND completed = 0', s3.workspaceId)) h3.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
-    const st = (await req(h3, 'GET', '/api/state', s3)).json;
-    const t = (await req(h3, 'POST', '/api/tasks', s3, { title: 'Relatório para a DELTA sobre o orçamento 4120', agentId: agentBy(st, 'herodoto').id })).json;
-    h3.db.run('UPDATE tasks SET column_id = ? WHERE id = ?', h3.db.get<{ id: string }>("SELECT id FROM columns WHERE board_id = ? AND name = 'A fazer'", t.board_id)!.id, t.id);
-    m3.reply = (p) => p.input.includes('Ajuda a Heródoto')
-      ? 'Rascunho do e-mail para a DELTA: Prezados, solicitamos a revisão do orçamento 4120 com prazo de resposta até sexta-feira. Atenciosamente, Vértice. Para concluir: copie, revise e envie pelo seu e-mail.'
-      : 'Começo pelo texto. [[pedir-ajuda agente="Diógenes" pedido="Envie à DELTA o pedido do orçamento 4120 revisado"]]';
-    await req(h3, 'PUT', '/api/team/autorun', s3, { enabled: true });
-    const step = async () => { h3.teamwork.tick(); for (let i = 0; i < 3; i++) await h3.executor.tick(); };
-    const col = (id: string) => h3.db.get<{ n: string }>('SELECT c.name AS n FROM tasks t JOIN columns c ON c.id = t.column_id WHERE t.id = ?', id)!.n;
-    await step(); // Heródoto pede ajuda ao Diógenes
-    const child = h3.db.get<{ id: string }>('SELECT id FROM tasks WHERE parent_task_id = ?', t.id)!;
-    await step(); // Diógenes prepara a ação externa: espera a sua confirmação
-    assert.equal(col(t.id), 'Em andamento', 'quem pediu espera');
-    assert.equal((await req(h3, 'GET', `/api/tasks/${child.id}`, s3)).json.work.result.state, 'sem_confirmacao');
-    assert.equal((await req(h3, 'POST', `/api/tasks/${child.id}/decision`, s3, { decision: 'aprovar' })).status, 200);
-    assert.equal(col(t.id), 'A fazer', 'aprovada a ajuda, quem pediu volta à fila');
-    const ev = h3.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE action = 'task.help_result' AND target_id = ?", t.id);
-    assert.match(String(ev?.evidence), /Rascunho do e-mail para a DELTA/, 'com a resposta do colega');
-    await step(); // Heródoto continua com a ajuda
-    assert.match(m3.started.at(-1)!.input, /Diógenes: Rascunho do e-mail para a DELTA/);
-    await h3.close();
-  });
-
-  test('pedido de ajuda que falha: quem pediu fica sabendo na hora (antes, a conversa ficava parada)', async () => {
-    // Aristóteles pede à Hipátia o retrato de um site; as duas tentativas dela estouram o tempo
+  test('pedido de ajuda que falha: a equipe tenta as rodadas dela; depois, quem pediu fica sabendo, uma vez', async () => {
+    // Aristóteles pede à Hipátia o retrato de um site; todas as tentativas dela estouram o tempo
     const failing = new FakeMotor();
     const orig = failing.startRun.bind(failing);
     failing.startRun = async (p) => {
       const out = await orig(p);
-      if (p.input.includes('Ajuda a Aristóteles')) failing.runs.set(out.runId, { status: 'failed', output: null, error: 'tempo esgotado', sessionId: 'sess-x', usage: null, model: null });
+      if (p.input.includes('Sua etapa (1 de 1)')) failing.runs.set(out.runId, { status: 'failed', output: null, error: 'tempo esgotado', sessionId: 'sess-x', usage: null, model: null });
       return out;
     };
     const h2 = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: failing, control: new FakeControl() });
@@ -424,15 +400,17 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const all = async () => (await req(h2, 'GET', `/api/conversations/${conv.id}/messages`, s2)).json as Array<{ role: string; content: string }>;
     const msgs = async () => (await all()).map((m) => m.content);
     const step = async () => { h2.teamwork.tick(); for (let i = 0; i < 3; i++) await h2.executor.tick(); };
-    await step(); // a tentativa falha: o card fica em "falha" e o Aristóteles avisa na conversa, como mensagem dele
+    // cada falha volta para a equipe (2 rodadas com o Aristóteles, 2 com o reforço); só depois o Aristóteles avisa
+    for (let i = 0; i < 25; i++) await step();
+    assert.equal(h2.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'task.persist'")!.n, PERSIST_ROUNDS);
     const aviso = (await all()).find((m) => /não conseguiu terminar/.test(m.content));
     assert.ok(aviso, 'quem pediu fica sabendo');
     assert.equal(aviso!.role, 'agent', 'o aviso é do agente da conversa, não do usuário nem uma nota solta');
-    assert.match(aviso!.content, /Hipátia não conseguiu terminar o card #\d+ \(“Ajuda a Aristóteles.*tempo esgotado/s);
+    assert.match(aviso!.content, /Hipátia não conseguiu terminar o card #\d+ \(“verticelab\.com.*tempo esgotado/s);
     const retry = (await req(h2, 'GET', `/api/proposals?conversationId=${conv.id}`, s2)).json.find((p: { kind: string; status: string }) => p.kind === 'info_request' && p.status === 'proposed');
     assert.equal(JSON.parse(retry.payload).need, 'retry', 'com o cartão para tentar de novo ali mesmo');
     await step(); // nada mais acontece sozinho: o card espera você
-    assert.equal(h2.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runs WHERE idempotency_key LIKE 'queue-%'")!.n, 1);
+    assert.equal(h2.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runs WHERE idempotency_key LIKE 'queue-%'")!.n, PERSIST_ROUNDS + 1);
     assert.equal((await msgs()).filter((m) => /não conseguiu terminar/.test(m)).length, 1, 'um aviso só');
     await h2.close();
   });

@@ -70,7 +70,7 @@ const SIMULATED = '[Simulação — sem modelo de IA]';
 /** "Concluído.", "Feito!", "Tarefa realizada com sucesso" — alegação de conclusão sem o trabalho. */
 const CLAIM = /^(ok[.!]?\s*)?((a )?tarefa |o trabalho |tudo )?(foi )?(conclu[ií]d[ao]|feit[ao]|pront[ao]|realizad[ao]|finalizad[ao]|entregue|resolvid[ao]|done)( com sucesso)?[.!]*$/i;
 const words = (s: string) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
-const control = (s: string) => s.replace(/\[\[[^\]]*\]\]/g, ' ').replace(/\s+/g, ' ').trim();
+const control = (s: string) => s.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, ' ').replace(/\s+/g, ' ').trim();
 const MIN_WORDS: Record<ResultKind, number> = { informativo: 25, documental: 120, dados: 0, externo: 25 };
 
 /**
@@ -78,7 +78,7 @@ const MIN_WORDS: Record<ResultKind, number> = { informativo: 25, documental: 120
  * quando o título aparece logo no começo. Sem título perto do começo, o texto fica inteiro.
  */
 export function deliverableBody(raw: string): string {
-  const s = raw.replace(/\[\[[^\]]*\]\]\s*/g, '').trim();
+  const s = raw.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]\s*/g, '').trim();
   const lines = s.split(/\r?\n/);
   const h = lines.findIndex((l) => /^#{1,3}\s+\S/.test(l));
   if (h > 0 && h <= 3 && lines.slice(0, h).join(' ').trim().length <= 200) return lines.slice(h).join('\n').trim();
@@ -227,7 +227,7 @@ export class Results {
   }
 
   /** O texto do agente como documento entregue (Markdown), ligado ao card. Idempotente pela execução. */
-  private saveDeliverable(ws: string, taskId: string, number: number, runId: string, text: string, raw: string, prefix = 'resultado') {
+  saveDeliverable(ws: string, taskId: string, number: number, runId: string, text: string, raw: string, prefix = 'resultado') {
     const name = `${prefix}-T${number}-${runId.slice(4, 12)}.md`;
     const prev = taskFiles(this.db, ws, taskId).find((f) => f.filename === name);
     if (prev) return prev;
@@ -255,7 +255,7 @@ export class Results {
     if (decision === 'devolver' || decision === 'responder') {
       const answer = decision === 'responder';
       if (!note || note.trim().length < (answer ? 1 : 3)) throw new HttpError(400, 'note', answer ? 'Escreva a resposta (ela vai para o agente).' : 'Diga o que precisa mudar (a instrução vai para o agente).');
-      return this.record(workspaceId, taskId, null, kind, 'devolvido', [], { previous: prev?.id ?? null, instrucao: clip(note.trim(), 1500), ...(answer ? { resposta: true } : {}) },
+      return this.record(workspaceId, taskId, null, kind, 'devolvido', [], { previous: prev?.id ?? null, instrucao: clip(note.trim(), 200_000), ...(answer ? { resposta: true } : {}) },
         `${answer ? 'Respondida por você' : 'Devolvida com instrução'}: ${clip(note.trim(), 300)}`, actor.id!);
     }
     const crit: Criterion[] = [{ id: 'humano', label: 'Conferido e aprovado por você', ok: true }];
@@ -273,18 +273,35 @@ export class Results {
     return this.record(workspaceId, taskId, null, kind, state, crit, { operationId: opId }, justification, decidedBy.startsWith('usr_') ? decidedBy : 'ergon');
   }
 
+  /**
+   * A equipe respondeu ao que travou o card (ciclo de persistência, teamwork.ts): vale como a resposta a uma pergunta,
+   * mas vinda de quem decidiu na equipe; o card volta a andar sem esperar a pessoa.
+   */
+  teamAnswer(workspaceId: string, taskId: string, text: string, by: string): ResultRow {
+    const kind = this.kindOf(workspaceId, taskId);
+    const prev = this.latest(workspaceId, taskId);
+    return this.record(workspaceId, taskId, null, kind, 'devolvido', [], { previous: prev?.id ?? null, instrucao: clip(text.trim(), 200_000), resposta: true, equipe: by },
+      `Resolvido na equipe por ${by}: ${clip(text.trim(), 300)}`, 'ergon');
+  }
+
+  /** O card volta ao estado da última decisão (o ciclo de persistência não chegou a decidir nada). */
+  restoreWorkState(workspaceId: string, taskId: string): void {
+    const r = this.latest(workspaceId, taskId);
+    if (r) this.setWorkState(workspaceId, taskId, WORK_OF[r.state], r.justification);
+  }
+
   /** A instrução da última devolução ainda não atendida (vai para a próxima execução do agente). */
   pendingInstruction(workspaceId: string, taskId: string): string | null {
     return this.pendingReturn(workspaceId, taskId)?.text ?? null;
   }
 
   /** A devolução ainda não atendida, dizendo se era a resposta a uma pergunta do agente. */
-  pendingReturn(workspaceId: string, taskId: string): { text: string; answer: boolean } | null {
+  pendingReturn(workspaceId: string, taskId: string): { text: string; answer: boolean; team: string | null } | null {
     const r = this.latest(workspaceId, taskId);
     const text = r?.state === 'devolvido' ? String(r.evidenceData.instrucao ?? '') : '';
     // num plano, a devolução vale para a etapa em que foi feita: depois que ela passou adiante, a próxima não a recebe
     if (text && this.db.get('SELECT 1 AS x FROM task_steps WHERE task_id = ? AND done_at > ? LIMIT 1', taskId, r!.decided_at ?? r!.created_at)) return null;
-    return text ? { text, answer: r?.evidenceData.resposta === true } : null;
+    return text ? { text, answer: r?.evidenceData.resposta === true, team: typeof r?.evidenceData.equipe === 'string' ? r.evidenceData.equipe : null } : null;
   }
 
   /**

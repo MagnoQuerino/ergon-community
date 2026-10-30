@@ -76,24 +76,23 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
 
   test('A1: Aristóteles pede à Hipátia; quando ela responde, ele continua e entrega o que foi pedido, na conversa', async () => {
     const c = await conv('aristoteles');
-    motor.reply = (p) => p.input.includes('Ajuda a Aristóteles') ? LONG('Achei o site da Vértice')
+    motor.reply = (p) => p.input.includes('Sua etapa (1 de 1)') ? LONG('Achei o site da Vértice')
       : p.input.startsWith('A equipe terminou') ? 'A Vértice projeta laboratórios analíticos sob medida.\nInstala e valida os equipamentos.\nDá suporte técnico contínuo.'
       : 'Vou pedir à Hipátia. [[pedir-ajuda agente="Hipátia" pedido="Investigue o site verticelab.com e diga o que a empresa faz"]]';
     await say(c, 'Faça um resumo de 3 linhas sobre o site verticelab.com');
-    await run(4);
-    const help = h.db.get<{ id: string; agent_id: string; conversation_id: string; purpose: string }>("SELECT id, agent_id, conversation_id, purpose FROM tasks WHERE archived = 0 ORDER BY number DESC LIMIT 1")!;
+    await run(2);
+    // uma entrega, um card: o pedido de ajuda vira o card do pedido, com a Hipátia como etapa, e já começa
+    const help = h.db.get<{ id: string; agent_id: string; conversation_id: string; purpose: string; number: number }>("SELECT id, agent_id, conversation_id, purpose, number FROM tasks WHERE archived = 0 ORDER BY number DESC LIMIT 1")!;
     assert.equal(help.agent_id, agent(st, 'hipatia').id);
     assert.equal(help.conversation_id, c);
     assert.match(help.purpose, /resumo de 3 linhas sobre o site/, 'o pedido do usuário fica gravado no card (cifrado no banco)');
-    assert.ok((await msgs(c)).some((m) => m.role === 'system' && /Aristóteles pediu ajuda \(1\):\ncard #\d+ para Hipátia/.test(m.content)));
-    // a Hipátia trabalha (o botão, já que a fila está desligada) e o card conclui com evidência
-    assert.equal((await req(h, 'POST', `/api/tasks/${help.id}/work`, s)).status, 202);
+    assert.ok((await msgs(c)).some((m) => m.role === 'system' && new RegExp(`card #${help.number} com o plano em 1 etapa`).test(m.content)));
     await run(8);
     assert.equal(h.db.get<{ completed: number }>('SELECT completed FROM tasks WHERE id = ?', help.id)!.completed, 1);
     const delivery = motor.started.find((p) => p.idempotencyKey.startsWith('ergon-entrega-'));
     assert.ok(delivery, 'quem recebeu o pedido continua sozinho');
     assert.match(delivery!.input, /Pedido do usuário: “Faça um resumo de 3 linhas sobre o site verticelab.com”/);
-    assert.match(delivery!.input, /Hipátia respondeu:\nAchei o site da Vértice/);
+    assert.match(delivery!.input, /1\. Hipátia — Investigue o site verticelab\.com[^\n]*:\nAchei o site da Vértice/);
     const m = await msgs(c);
     const last = m[m.length - 1];
     assert.equal(last.role, 'agent', 'a entrega aparece como mensagem do Aristóteles');
@@ -142,6 +141,8 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     let answered = false;
     motor.reply = (p) => {
       if (p.input.startsWith('A equipe terminou')) return 'Número-base: 12 cards concluídos de 19 a 23/10.';
+      // a pergunta passa antes pela coordenação: qual semana é decisão do usuário, então ela encaminha
+      if (p.input.includes('Você coordena a equipe. Um card travou')) return '[[perguntar pergunta="Qual semana conta: de 19 a 23/10 ou de 26 a 30/10?"]]';
       if (p.input.includes('Sua etapa (1 de 1)')) {
         if (p.input.includes('A pessoa respondeu à sua pergunta: de 19 a 23/10')) { answered = true; return LONG('Contagem feita para 19 a 23/10: 12 concluídos'); }
         return 'Preciso de um dado. [[perguntar pergunta="Qual semana conta: de 19 a 23/10 ou de 26 a 30/10?"]]';
@@ -152,8 +153,10 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     await run(8);
     const t = h.db.get<{ id: string; number: number }>("SELECT id, number FROM tasks WHERE archived = 0 ORDER BY number DESC LIMIT 1")!;
     let m = await msgs(c);
-    const ask = m.find((x) => x.role === 'agent' && /Arquimedes precisa de uma informação sua/.test(x.content));
-    assert.ok(ask, 'o Aristóteles repassa o pedido, como mensagem dele (não do usuário)');
+    const ask = m.find((x) => x.role === 'agent' && /Preciso de uma informação sua para seguir com o card/.test(x.content));
+    assert.ok(ask, 'o Aristóteles, que conferiu que só o usuário decide, pergunta como mensagem dele (não do usuário)');
+    assert.equal(h.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_id = ? AND action = 'task.persist_decision'", t.id)
+      && JSON.parse(h.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_id = ? AND action = 'task.persist_decision'", t.id)!.evidence).decision, 'perguntar à pessoa');
     assert.match(ask!.content, /Qual semana conta/);
     const props = (await req(h, 'GET', `/api/proposals?conversationId=${c}`, s)).json as Array<{ id: string; kind: string; status: string; payload: string }>;
     const card = props.find((p) => p.kind === 'info_request' && p.status === 'proposed')!;

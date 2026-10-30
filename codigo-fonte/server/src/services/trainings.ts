@@ -36,10 +36,8 @@ interface TrainingRow {
 }
 interface SkillRow { id: string; workspace_id: string; agent_id: string; name: string; title: string; description: string; status: 'ativa' | 'desativada' | 'removida'; version: number; uses: number; last_used_at: string | null; created_at: string; updated_at: string }
 
-const MAX_FILES = 6;
-const MAX_LINKS = 5;
 /** texto dos documentos que vai para o treinamento (o resto fica de fora, dito nas limitações) */
-const DOC_BUDGET = 36_000;
+const DOC_BUDGET = 400_000;
 export const TRAINING_KEY = 'training-';
 
 const slug = (s: string, max: number) => {
@@ -117,10 +115,9 @@ export class Trainings {
     if (this.executor.mode !== 'real') throw new HttpError(409, 'simulated', 'Treinar precisa do modelo de IA real: no modo de simulação nada é aprendido.');
     const ctl = this.ctl(ws);
     const request = (input.request ?? '').trim();
-    const fileIds = [...new Set(input.fileIds ?? [])].slice(0, MAX_FILES + 1);
-    if (fileIds.length > MAX_FILES) throw new HttpError(400, 'files', `No máximo ${MAX_FILES} arquivos por treinamento.`);
+    // sem limite de arquivos nem de links: o que a pessoa der é material de estudo
+    const fileIds = [...new Set(input.fileIds ?? [])];
     const rawLinks = [...new Set((input.links ?? []).map((l) => l.trim()).filter(Boolean))];
-    if (rawLinks.length > MAX_LINKS) throw new HttpError(400, 'links', `No máximo ${MAX_LINKS} links por treinamento.`);
     const links = rawLinks.map((l) => ({ raw: l, url: cleanLink(l) }));
     const bad = links.filter((l) => !l.url).map((l) => l.raw);
     if (bad.length) throw new HttpError(400, 'links', `Link não aceito (só endereços públicos http/https): ${bad.join(', ')}`);

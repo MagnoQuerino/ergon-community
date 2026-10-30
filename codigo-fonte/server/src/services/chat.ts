@@ -156,7 +156,7 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
   // card pedido explicitamente na conversa ("/tarefa …"): quando terminar, o agente da conversa entrega aqui
   if (result.taskId && decision.kind === 'create_task') {
     db.run('UPDATE tasks SET conversation_id = ?, purpose = ?, deliver_agent_id = ?, origin_run_id = ? WHERE id = ?',
-      conversationId, db.seal(workspaceId, clip(content, 4000)), conv.agent_id, run.id, result.taskId);
+      conversationId, db.seal(workspaceId, clip(content, 200_000)), conv.agent_id, run.id, result.taskId);
   }
   return { messageId, runId: run.id, summary: acted ? result.summary : null, replayed: false, queued: false };
 }

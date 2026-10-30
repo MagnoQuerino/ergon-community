@@ -1,5 +1,19 @@
 # Novidades
 
+## 1.1.0-rc.15 (pré-versão de teste)
+
+- **A equipe trabalha até entregar.** Quando algo trava — um texto que chegou incompleto, uma entrega reprovada na
+  conferência, uma falha —, a equipe resolve sozinha: a coordenação decide como seguir e, se for preciso, chama o
+  agente com o modelo mais forte para uma nova estratégia. Você só é chamado para decidir o que você quer; dado que
+  falta fica marcado como [PREENCHER] na entrega.
+- **Uma entrega, um card.** Pedir ajuda a um colega não cria mais outro card: o colega entra como uma etapa do mesmo
+  card, e tudo fica no histórico dele.
+- **Sem textos cortados.** Cada etapa recebe por inteiro o que as anteriores entregaram, e a entrega final traz o
+  documento completo. Entregas longas ficam também como arquivo no card.
+- **Competências pela conversa.** Peça ao coordenador que a equipe aprenda algo: ele põe um agente para estudar, e você
+  aprova a competência no perfil dele (aba Treinar). O Treinar não tem mais limite de arquivos nem de links.
+- A dica da tela não fecha mais o card aberto ao clicar em "Entendi".
+
 ## 1.1.0-rc.14 (pré-versão de teste)
 
 - **Sem Docker em lugar nenhum:** o Ergon passa a rodar no Podman, motor de contêineres de código aberto.

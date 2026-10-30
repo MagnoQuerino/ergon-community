@@ -253,7 +253,7 @@ export function TaskDetail({ taskId, columns: askedColumns, agents, mode: asked,
           {mode === 'team' && need === 'info' && (
             <form className="ask-box" onSubmit={(e) => { e.preventDefault(); if (answer.trim()) void respond('answer', answer.trim()); }}>
               <p className="ask-box__q">{d.data.question ? <><b>{nameOf(t.agent_id) ?? 'O agente'} pergunta:</b> {d.data.question}</> : <><b>Falta algo seu:</b> {d.data.missing ?? 'uma informação.'}</>}</p>
-              <textarea data-autofocus value={answer} rows={2} maxLength={1500} onChange={(e) => setAnswer(e.target.value)} placeholder="Sua resposta (vai para o agente, e o card volta a andar)"
+              <textarea data-autofocus value={answer} rows={2} onChange={(e) => setAnswer(e.target.value)} placeholder="Sua resposta (vai para o agente, e o card volta a andar)"
                 aria-label="Sua resposta" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (answer.trim()) void respond('answer', answer.trim()); } }} />
               <div className="row"><button className="btn btn--sm btn--primary" disabled={busyAct || !answer.trim()}><Icon name="send" size={13} /> Responder</button></div>
             </form>
@@ -323,7 +323,7 @@ export function TaskDetail({ taskId, columns: askedColumns, agents, mode: asked,
           {back !== null && (
             <form className="ask-box" onSubmit={(e) => { e.preventDefault(); if (back.trim().length >= 3) void respond('return', back.trim()); }}>
               <label className="field">O que precisa mudar (vai para o agente; vale também para dizer que ele não precisa do que pediu)
-                <textarea data-autofocus rows={3} value={back} maxLength={1500} onChange={(e) => setBack(e.target.value)} placeholder="Ex.: siga sem essa informação, use os dados do quadro" />
+                <textarea data-autofocus rows={3} value={back} onChange={(e) => setBack(e.target.value)} placeholder="Ex.: siga sem essa informação, use os dados do quadro" />
               </label>
               <div className="row"><button className="btn btn--sm" disabled={busyAct || back.trim().length < 3}><Icon name="undo" size={13} /> Devolver</button></div>
             </form>

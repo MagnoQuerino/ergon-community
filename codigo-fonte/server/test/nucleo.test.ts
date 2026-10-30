@@ -10,6 +10,7 @@ import { referenceFrom } from '../src/services/operations.ts';
 import { classifyTask, deliverableBody } from '../src/services/results.ts';
 import { parseProcessRequests, stripControl } from '../src/services/teamwork.ts';
 import type { HermesClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
+import { setSetting } from '../src/services/sectors.ts';
 import { addPerson, drain, harness, loginAs, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
 
 /** A planilha da jornada: 6 tarefas, 4 concluídas, 2 abertas, 1 aberta em atraso, 2 alterações de prazo (referência 24/10/2026). */
@@ -169,6 +170,8 @@ describe('núcleo operacional: cenários integrados (Etapa 9)', () => {
     motor = new FakeMotor(); dir = tmpDir();
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: motor, dir });
     s = await setupOwner(h);
+    // aqui vale o contrato de conferência em si; o ciclo de persistência da equipe tem os testes dele (equipe-autonoma)
+    setSetting(h.db, s.workspaceId, 'team.persist', '0');
   });
   after(async () => { await h.close(); });
 

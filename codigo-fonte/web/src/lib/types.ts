@@ -159,7 +159,7 @@ export const SOURCE_LABEL: Record<string, string> = {
 };
 
 /** Remove as linhas de controle ([[...]]) que os agentes escrevem para o Ergon aplicar. */
-export const stripControl = (s: string): string => s.replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b[^\]]*\]\]\s*/gi, '').trim();
+export const stripControl = (s: string): string => s.replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '').trim();
 
 // Rotinas -------------------------------------------------------------------------------------------------
 export type RoutineTrigger = { kind: 'manual' } | { kind: 'schedule'; days: number[]; time: string; tz?: string };

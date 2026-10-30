@@ -367,7 +367,7 @@ export class RunExecutor {
         const content = status === 'succeeded' ? (output ?? '') : `Execução ${status === 'cancelled' ? 'cancelada' : 'falhou'}: ${error ?? ''}`;
         this.db.run(
           `INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          id('msg'), r.workspace_id, r.conversation_id, status === 'succeeded' ? 'agent' : 'system', this.db.seal(r.workspace_id, clip(content, 20000)),
+          id('msg'), r.workspace_id, r.conversation_id, status === 'succeeded' ? 'agent' : 'system', this.db.seal(r.workspace_id, clip(content, 400_000)),
           status === 'succeeded' ? r.mode : 'local', r.id, now());
       }
       if (r.kind === 'subtask' && r.task_id) {
@@ -545,7 +545,13 @@ export function filesCatalog(db: Db, workspaceId: string, max = 25): string {
   return `${head}:\n${rows.map((r) => `- "${neutral(r.filename, 120)}" (${r.mime.split('/').pop()}, ${Math.max(1, Math.round(r.size / 1024))} KB, ${day(r.created_at)}${r.number ? `, card #${r.number}` : ''})`).join('\n')}`;
 }
 
-export const HELP_HOW ='Para pedir ajuda a um colega, escreva uma linha assim: [[pedir-ajuda agente="Nome" pedido="o que você precisa, com o contexto necessário"]]. O pedido vira um card no quadro da equipe para esse colega; quando ele responder, a resposta volta para você e você continua até entregar o que foi pedido. Diga ao usuário, em uma frase, que pediu ajuda e a quem.';
+export const HELP_HOW ='Para pedir ajuda a um colega, escreva uma linha assim: [[pedir-ajuda agente="Nome" pedido="o que você precisa, com o contexto necessário"]]. Num card, o colega entra como uma etapa do mesmo card, antes da sua, e você continua depois, com o que ele entregou; na conversa, o pedido vira um card só, com os colegas como etapas, e você entrega aqui. Uma entrega, um card: não peça a mesma coisa a vários colegas nem devolva a ajuda a quem pediu. Diga ao usuário, em uma frase, que pediu ajuda e a quem.';
+/**
+ * Competências (skills) pela conversa: a coordenação põe um agente para estudar um tema (o Treinar, trainings.ts); a
+ * competência só passa a valer depois que o usuário aprova a proposta que o agente escreve.
+ */
+export const TRAIN_HOW_COORD = 'Quando o usuário pedir que a equipe aprenda algo (um jeito de fazer, um modelo de documento, as regras de um assunto) ou quando um tipo de trabalho voltar sempre, crie uma competência: escreva [[treinar agente="Nome" competencia="nome curto" pedido="o que ele deve aprender, com o material e o contexto" links="https://... https://..."]] (links opcionais). Escolha quem vai usar a competência; se for de uso geral, quem tem o modelo mais forte. O agente estuda e escreve a competência; ela só vale depois que o usuário aprova no perfil do agente (aba Treinar). Diga isso em uma frase.';
+
 /** Na conversa: quem recebe o pedido entrega (agentes como células). */
 export const CELL_HOW = 'Pedido da sua especialidade: faça você mesmo e entregue aqui, pronto para usar. Se precisar de um colega, peça ajuda (a resposta volta para você aqui e você entrega). Se precisar de várias pessoas, peça ao Coordenador, que planeja e devolve o resultado.';
 
@@ -613,6 +619,7 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     coord ? teamSummaryFor(db, workspaceId) : '',
     coord && matrix.length ? `Travas de ferramentas (quem tem cada uma):\n- ${matrix.join('\n- ')}` : '',
     coord ? PROPOSAL_HELP : '',
+    coord ? TRAIN_HOW_COORD : '',
     coord ? openCardsFor(db, workspaceId) : '',
     coord ? routineContextFor(db, workspaceId) : '',
     a.instructions,

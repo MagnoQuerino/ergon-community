@@ -13,19 +13,21 @@
  * etapa por etapa, cada uma com o seu agente, e no fim quem recebeu o pedido entrega na conversa.
  */
 import type { Db } from '../db/db.ts';
-import { HttpError, clip, fold, now } from '../lib/util.ts';
+import { HttpError, clip, fold, id as newId, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { getSetting } from './sectors.ts';
 import { instructionsFor, isCoordinator, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { createTask, defaultBoard, getTask, updateTask } from './tasks.ts';
-import { activeTeam, coordinatorOf } from './team.ts';
+import { activeTeam, coordinatorOf, type Member } from './team.ts';
 import { filesBrief, referenceFrom, summaryText, taskFiles, type Operations } from './operations.ts';
 import { classifyTask, type ResultRow, type Results } from './results.ts';
-import { DELIVERY_KEY, Purpose, currentStep, parsePlan, stepsOf, type StepRow } from './purpose.ts';
+import { DELIVERY_KEY, Purpose, currentStep, parsePlan, purposeOf, questionIn, stepsOf, type StepRow } from './purpose.ts';
 import { parseDue } from './due.ts';
 import { workspaceTz } from './routine-proposals.ts';
 
 export interface HelpRequest { agent: string; request: string }
+/** uma rodada do ciclo de persistência (task.persist) e a decisão dela (task.persist_decision) */
+interface PersistRound { round: number; kind: string; by: string; stuck: string; motivo: string; decision?: string; detail?: string }
 /** quantos pedidos de ajuda numa resposta: o coordenador aciona a equipe inteira, os outros pedem a poucos colegas */
 export const HELP_MAX = { agent: 3, coordinator: 12 };
 
@@ -56,7 +58,7 @@ export function parseProcessRequests(text: string | null): ProcessRequest[] {
 }
 
 /** Tira as linhas de controle ([[...]]) do texto mostrado ao usuário. */
-export const stripControl = (s: string): string => s.replace(/\[\[\s*(processar|pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b[^\]]*\]\]\s*/gi, '').trim();
+export const stripControl = (s: string): string => s.replace(/\[\[\s*(processar|pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|treinar|assumir)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '').trim();
 const words = (s: string) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 /** etapa intermediária com menos que isto não passa adiante (vai para a conferência, com o motivo) */
 const STEP_MIN_WORDS = 10;
@@ -91,6 +93,47 @@ const CLOSING: Record<string, string> = {
 };
 /** etapa do meio de um plano: a entrega é para a próxima etapa, não para o usuário */
 const STEP_CLOSING = 'Entregue o resultado completo da sua etapa, em texto, pronto para a próxima etapa usar. Não diga apenas que terminou.';
+/**
+ * Como a equipe trabalha (vai em toda etapa): até entregar, sem devolver à pessoa o problema da própria equipe. A pessoa
+ * é leiga: sabe o que quer, não como resolver.
+ */
+const AUTONOMY = 'Trabalhe até entregar. O que as etapas anteriores e os colegas entregaram está acima, completo. Se faltar uma ferramenta ou um conhecimento que um colega tem, peça ajuda (veja suas instruções): o colega entra como uma etapa deste mesmo card e você continua depois, com a entrega dele. Se algo chegou incompleto ou inconsistente, resolva com a equipe — nunca pergunte à pessoa como resolver um problema do trabalho. A pessoa é leiga: pergunte a ela, numa linha [[perguntar pergunta="..."]], só uma decisão sobre o que ela quer, que só ela pode dar e sem a qual não dá para entregar (em linguagem simples, de preferência com opções). Dado que falta e não é essencial fica como [PREENCHER] na entrega, com a lista do que falta no fim.';
+/** texto que cabe numa execução (o executor ainda limita pelo contexto configurado, config.ts) */
+const TEXTO_MAX = 400_000;
+/** do texto acima, quanto vai para o que as etapas anteriores entregaram */
+const PLAN_BUDGET = 240_000;
+/** a partir deste tamanho, a entrega de uma etapa também fica como arquivo do card */
+const STEP_FILE_CHARS = 1500;
+/** ciclo de persistência: rodadas por card em 24 h — 2 com a coordenação, 2 com o reforço; depois, a pessoa fica sabendo */
+export const PERSIST_ROUNDS = 4;
+export const PERSIST_KEY = 'triagem-';
+/** etapas de ajuda que um card pode ganhar; além disso, o ciclo de persistência decide outra saída */
+export const HELP_STEPS_MAX = 4;
+/** modelos que a equipe trata como os mais fortes (pelo nome escolhido para o agente) */
+const STRONG_MODEL = /opus|gpt-5(?![\w.-]*(mini|nano))|(^|[^a-z0-9])o3([^a-z0-9]|$)|gemini-[\d.]+-pro|grok-4|deepseek-r1|qwen3-max|405b|[^a-z]large/i;
+
+/**
+ * O reforço do ciclo de persistência: quem tem o modelo mais forte da equipe (pelo modelo escolhido para o agente);
+ * sem indicação, Platão; por fim, a coordenação. Nunca quem acabou de travar.
+ */
+export function strongestOf(db: Db, workspaceId: string, team: Member[], except: string[]): Member | undefined {
+  const pool = team.filter((m) => !except.includes(m.id));
+  const models = new Map(db.all<{ id: string; model: string | null }>('SELECT id, model FROM agents WHERE workspace_id = ?', workspaceId).map((a) => [a.id, a.model ?? '']));
+  return pool.find((m) => STRONG_MODEL.test(models.get(m.id) ?? '')) ?? pool.find((m) => m.char_key === 'platao' || fold(m.name) === 'platao')
+    ?? coordinatorOf(pool) ?? pool[0];
+}
+
+/** [[treinar agente="Platão" competencia="..." pedido="..." links="https://..."]] na resposta da coordenação. */
+export function parseTrainRequests(text: string | null): Array<{ agent: string; title: string; request: string; links: string[] }> {
+  const out: Array<{ agent: string; title: string; request: string; links: string[] }> = [];
+  for (const m of (text ?? '').matchAll(/\[\[\s*treinar\b([\s\S]{0,8000}?)\]\]/gi)) {
+    const attr = (k: string) => m[1].match(new RegExp(`${k}\\s*=\\s*["“]([^"”]*)["”]`, 'i'))?.[1]?.trim() ?? '';
+    const agent = attr('agente'); const request = attr('pedido'); const title = attr('competencia');
+    if (agent && (request || title)) out.push({ agent, title: clip(title, 120), request: request || title, links: attr('links').split(/[\s,;]+/).filter((l) => /^https?:\/\//i.test(l)) });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
 
 export class Teamwork {
   private readonly db: Db; private readonly bus: Bus; private readonly executor: RunExecutor;
@@ -158,17 +201,23 @@ export class Teamwork {
     if (r.idempotency_key.startsWith('training-')) return; // treinamento: quem cuida é o Treinar
     // card cancelado enquanto o agente trabalhava: nada continua (próxima etapa, pedido de ajuda, conferência, entrega)
     if (r.task_id && Number(this.db.get<{ archived: number }>('SELECT archived FROM tasks WHERE id = ?', r.task_id)?.archived)) return;
+    // o ciclo de persistência decidiu como o card segue (responder, pôr um colega numa etapa, assumir ou perguntar)
+    if (r.idempotency_key.startsWith(PERSIST_KEY)) { this.persisted(r, status, output); return; }
     const ws = r.workspace_id;
     const coord = isCoordinator(this.db.get<{ coordinator: number }>('SELECT coordinator FROM agents WHERE id = ?', r.agent_id) ?? { coordinator: 0 });
     const help = status === 'succeeded' ? parseHelpRequests(output, coord ? HELP_MAX.coordinator : HELP_MAX.agent) : [];
-    const cards = help.length ? this.createHelpCards(r, help) : [];
-    // o coordenador planejou na conversa: o card nasce com as etapas e a primeira já começa
-    if (status === 'succeeded' && coord && r.kind === 'chat' && r.conversation_id) {
-      const plan = parsePlan(output);
+    const queue = r.idempotency_key.startsWith('queue-') && !!r.task_id;
+    if (status === 'succeeded' && r.kind === 'chat' && r.conversation_id && !r.task_id) {
+      // uma entrega, um card: o plano do coordenador ou, sem plano, os colegas pedidos viram as etapas de um card só
+      // (antes, cada pedido de ajuda virava um card); quem recebeu o pedido entrega na conversa
+      const plan = coord ? parsePlan(output) : null;
       if (plan) this.startPlan(r, plan);
-    }
+      else if (help.length) {
+        this.startPlan(r, { objective: clip((purposeOf(this.db, r) || help[0].request).replace(/\s+/g, ' ').trim(), 90), steps: help.map((h) => ({ agent: h.agent, task: h.request })) });
+      }
+    } else if (help.length && !queue) this.createHelpCards(r, help); // outros canais (rotina): como sempre
     if (r.idempotency_key.startsWith(DELIVERY_KEY) && status === 'succeeded') this.bus.publish(ws, 'tasks.changed', {});
-    if (!r.idempotency_key.startsWith('queue-') || !r.task_id) return;
+    if (!queue || !r.task_id) return;
     // o agente pediu um processamento ao Ergon: executa (com as permissões conferidas) antes de avaliar
     if (status === 'succeeded') {
       for (const p of parseProcessRequests(output)) {
@@ -179,30 +228,232 @@ export class Teamwork {
         }
       }
     }
-    if (status === 'succeeded' && cards.length) { // espera os colegas: o card volta à fila quando a ajuda chegar
-      audit(this.db, null, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'task.waiting_help', targetType: 'task', targetId: r.task_id,
-        evidence: { runId: r.id, cards: cards.map((c) => c.number) }, result: `aguardando ajuda: ${cards.map((c) => `card #${c.number} (${c.to})`).join(', ')}` });
-      return;
+    if (status === 'succeeded' && help.length) {
+      // pedido de ajuda dentro de um card: o colega vira uma etapa deste mesmo card, antes de quem pediu
+      if (this.helpSteps(r, help)) return;
+      // não cabe mais etapa de ajuda (ou é a ajuda pedida de volta a quem pediu): a equipe decide outra saída
+      if (this.persist(r, { kind: 'ajuda', text: help.map((h) => `${h.agent}: ${h.request}`).join('\n') })) return;
     }
+    // pergunta à pessoa: antes, a equipe confere se é mesmo uma decisão dela ou um problema que ela mesma resolve
+    if (status === 'succeeded' && /\[\[\s*perguntar\b/i.test(output ?? '') && this.persist(r, { kind: 'pergunta', text: questionIn(output) ?? '' })) return;
+    this.settle(r, status, output);
+  }
+
+  /**
+   * O fim de uma execução de um card: a etapa do meio que entregou passa adiante; a última (ou a que parou) vai para a
+   * conferência do card. O que não passou (ou falhou) volta para a equipe pelo ciclo de persistência antes de chegar à
+   * pessoa.
+   */
+  private settle(r: RunRow, status: RunStatus, output: string | null): void {
+    const ws = r.workspace_id;
+    if (!r.task_id) return;
     const steps = stepsOf(this.db, r.task_id);
-    // plano: a etapa do meio que entregou passa adiante; a última (ou a que parou) vai para a conferência do card
     if (steps.length && this.advance(r, status, output, steps)) return;
     // fim de execução não é fim de trabalho: o contrato de resultado decide, com evidência
     const res = this.results.evaluate(r, status, output, steps.length ? { words: this.planWords(steps) } : null);
     if (!res) return;
     if (steps.length) this.closeStep(r, steps, res, output);
-    const ho = this.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.handoff' ORDER BY created_at LIMIT 1", r.task_id);
+    // não passou na conferência ou a execução falhou (não foi você que parou): a equipe tenta outra estratégia
+    if ((res.state === 'reprovado' || (res.state === 'falha' && status === 'failed')) && this.persist(r, { kind: res.state, text: res.justification })) return;
+    const ho =this.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.handoff' ORDER BY created_at LIMIT 1", r.task_id);
     const ev = ho ? JSON.parse(ho.evidence) as { from: string; to: string; conversationId: string | null; parentTaskId: string | null } : null;
     const me = this.db.get<{ number: number }>('SELECT number FROM tasks WHERE id = ?', r.task_id);
     if (ev?.parentTaskId) {
       // card de ajuda a outro card: o resultado (ou o motivo de não ter vindo) vai para o card de quem pediu
-      if (res.state === 'validado') this.helpToParent(ws, r.agent_id, ev as { from: string; to: string; parentTaskId: string }, me?.number ?? null, clip(stripControl(output ?? ''), 1500));
+      if (res.state === 'validado') this.helpToParent(ws, r.agent_id, ev as { from: string; to: string; parentTaskId: string }, me?.number ?? null, clip(stripControl(output ?? ''), PLAN_BUDGET));
       else audit(this.db, null, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'task.help_not_done', targetType: 'task', targetId: ev.parentTaskId,
         evidence: { from: ev.to, card: me?.number ?? null, state: res.state }, result: `${ev.to} não respondeu ao pedido de ${ev.from} (${res.state})` });
     }
     // card de uma conversa: concluído, quem recebeu o pedido entrega; parado, o agente da conversa repassa o pedido lá
     if (res.state === 'validado') this.purpose.cardDone(ws, r.task_id, ev);
     else this.purpose.relay(ws, r.task_id, res, output, r.agent_id, ev);
+  }
+
+  /**
+   * Pedido de ajuda dentro de um card (uma entrega, um card): cada colega pedido entra como uma etapa deste card, logo
+   * antes da etapa de quem pediu, que volta depois com o que eles entregaram. Card sem plano ganha as etapas agora.
+   * false: ninguém válido para ajudar, ajuda pedida de volta a quem pediu ou o card já tem etapas de ajuda demais (o
+   * ciclo de persistência decide outra saída).
+   */
+  private helpSteps(r: RunRow, requests: HelpRequest[], note?: { by: string; text: string }): boolean {
+    const ws = r.workspace_id; const taskId = r.task_id;
+    if (!taskId) return false;
+    const t = getTask(this.db, ws, taskId);
+    const team = activeTeam(this.db, ws);
+    const steps = stepsOf(this.db, taskId);
+    const cur = currentStep(steps);
+    const owner = cur?.agent_id ?? t.agent_id ?? r.agent_id;
+    const ownerName = team.find((m) => m.id === owner)?.name ?? 'o responsável';
+    // quem está esperando por esta etapa (a etapa seguinte): pedir ajuda de volta a ele é o pingue-pongue que trava
+    const waiting = cur ? steps.find((s) => s.position > cur.position && s.status !== 'feita')?.agent_id : undefined;
+    const used = Number(this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.help_step'", taskId)?.n ?? 0);
+    const room = Math.max(0, HELP_STEPS_MAX - used);
+    const helpers: Array<{ m: Member; request: string }> = [];
+    for (const h of requests) {
+      const n = fold(h.agent);
+      const m = team.find((a) => fold(a.name) === n) ?? team.find((a) => fold(a.name).startsWith(n));
+      if (!m || m.id === owner || m.id === waiting || helpers.some((x) => x.m.id === m.id)) continue;
+      helpers.push({ m, request: h.request });
+    }
+    if (!helpers.length || helpers.length > room) return false;
+    // a ajuda é para o responsável da etapa (também quando quem decidiu foi o ciclo de persistência)
+    const asker = r.idempotency_key.startsWith(PERSIST_KEY) ? ownerName : team.find((m) => m.id === r.agent_id)?.name ?? ownerName;
+    const at = cur?.position ?? 1;
+    const ts = now();
+    // a orientação de quem decidiu vai na etapa do responsável: ele a recebe quando voltar, depois dos colegas
+    const ownerTitle = `${cur?.title ?? t.title}${note ? `\nOrientação de ${note.by}: ${note.text}` : ''}`;
+    this.db.tx(() => {
+      if (!steps.length) {
+        // card sem plano: o trabalho do responsável vira a etapa que continua, depois dos colegas
+        this.db.run('INSERT INTO task_steps (id, workspace_id, task_id, position, agent_id, title, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          newId('stp'), ws, taskId, 1, owner, this.db.seal(ws, ownerTitle), 'pendente', ts);
+      } else if (cur && note) this.db.run('UPDATE task_steps SET title = ? WHERE id = ?', this.db.seal(ws, ownerTitle), cur.id);
+      // abre espaço antes da etapa da vez (em dois passos: a posição é única por card)
+      this.db.run('UPDATE task_steps SET position = position + 100000 WHERE task_id = ? AND position >= ?', taskId, at);
+      this.db.run('UPDATE task_steps SET position = position - 100000 + ? WHERE task_id = ? AND position >= ?', helpers.length, taskId, 100000 + at);
+      this.db.run("UPDATE task_steps SET status = 'pendente' WHERE task_id = ? AND position = ?", taskId, at + helpers.length);
+      helpers.forEach((x, i) => this.db.run(
+        'INSERT INTO task_steps (id, workspace_id, task_id, position, agent_id, title, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        newId('stp'), ws, taskId, at + i, x.m.id, this.db.seal(ws, `Ajuda a ${asker}: ${x.request}`), i === 0 ? 'em_andamento' : 'pendente', ts));
+    });
+    updateTask(this.db, null, ws, { type: 'system', id: 'ergon' }, taskId, { agentId: helpers[0].m.id });
+    for (const [i, x] of helpers.entries()) {
+      audit(this.db, null, { workspaceId: ws, actorType: 'agent', actorId: r.agent_id, action: 'task.help_step', targetType: 'task', targetId: taskId,
+        evidence: { runId: r.id, from: asker, to: x.m.name, step: at + i, request: clip(x.request, 4000) },
+        result: `${asker} pediu ajuda a ${x.m.name}: entra como etapa ${at + i} deste card${i === helpers.length - 1 ? `; depois ${ownerName} continua` : ''}` });
+    }
+    this.bus.publish(ws, 'tasks.changed', { id: taskId });
+    try { this.work(ws, taskId, null); } catch { this.results.setWorkState(ws, taskId, 'solicitada', `etapa de ajuda de ${helpers[0].m.name}: esperando a vez`); }
+    return true;
+  }
+
+  /** As rodadas do ciclo de persistência do card nas últimas 24 h, com a decisão de cada uma (quando já houve). */
+  private persistRounds(taskId: string): PersistRound[] {
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const rows = this.db.all<{ action: string; evidence: string }>(
+      "SELECT action, evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action IN ('task.persist', 'task.persist_decision') AND created_at > ? ORDER BY created_at", taskId, since);
+    const out: PersistRound[] = [];
+    for (const r of rows) {
+      let e: Record<string, unknown>; try { e = JSON.parse(r.evidence) as Record<string, unknown>; } catch { continue; }
+      if (r.action === 'task.persist') out.push({ round: Number(e.round), kind: String(e.kind ?? ''), by: String(e.by ?? ''), stuck: String(e.stuck ?? ''), motivo: String(e.motivo ?? '') });
+      else { const x = out.find((o) => o.round === Number(e.round)); if (x) { x.decision = String(e.decision ?? ''); x.detail = String(e.detail ?? ''); } }
+    }
+    return out;
+  }
+
+  /**
+   * Ciclo de persistência: o que travou um card (pergunta sobre o trabalho, entrega reprovada na conferência, falha,
+   * ajuda que não cabe mais) volta para a equipe resolver, em vez de virar problema da pessoa. Rodadas 1–2: a
+   * coordenação decide; 3–4: o reforço (o modelo mais forte) monta uma estratégia nova com o histórico. Depois disso, ou
+   * sem ninguém para decidir, false: segue o caminho de sempre e a pessoa fica sabendo.
+   */
+  private persist(r: RunRow, why: { kind: 'pergunta' | 'ajuda' | 'reprovado' | 'falha'; text: string }): boolean {
+    const ws = r.workspace_id; const taskId = r.task_id;
+    // sem modelo real (simulação), não há trabalho para a equipe refazer: segue o caminho de sempre
+    if (!taskId || this.executor.mode !== 'real') return false;
+    // ligado por padrão (as automações começam ligadas); só o desligado gravado por você para
+    if (getSetting(this.db, ws, 'team.persist') === '0') return false;
+    const rounds = this.persistRounds(taskId);
+    if (rounds.length >= PERSIST_ROUNDS) return false;
+    const team = activeTeam(this.db, ws);
+    const coord = coordinatorOf(team);
+    const reinforce = rounds.length >= 2 || coord?.id === r.agent_id;
+    const who = reinforce ? strongestOf(this.db, ws, team, [r.agent_id]) : coord;
+    if (!who || who.id === r.agent_id) return false;
+    const stuck = team.find((m) => m.id === r.agent_id)?.name ?? 'o agente';
+    const round = rounds.length + 1;
+    const input = this.persistBrief(ws, taskId, { who, coord, stuck, why, round, rounds, reinforce });
+    try {
+      this.executor.enqueue({
+        workspaceId: ws, agentId: who.id, taskId, kind: 'subtask', input: clip(input, TEXTO_MAX), maxInput: TEXTO_MAX,
+        instructions: instructionsFor(this.db, ws, who.id, 'Canal: ciclo de persistência da equipe. Você decide como o card segue até a entrega, sem devolver à pessoa o problema da equipe.'),
+        idempotencyKey: `${PERSIST_KEY}${r.id}`,
+      });
+    } catch { return false; } // limite diário, por exemplo: segue o caminho de sempre
+    const label = { pergunta: 'quis perguntar à pessoa', ajuda: 'pediu uma ajuda que não cabe mais no card', reprovado: 'teve a entrega reprovada na conferência', falha: 'não conseguiu terminar (falha)' }[why.kind];
+    this.results.setWorkState(ws, taskId, 'processamento', reinforce ? `${coord?.name ?? 'A coordenação'} chamou ${who.name} para uma nova estratégia` : `${who.name} está resolvendo com a equipe`);
+    audit(this.db, null, { workspaceId: ws, actorType: 'agent', actorId: who.id, action: 'task.persist', targetType: 'task', targetId: taskId,
+      evidence: { runId: r.id, round, kind: why.kind, by: who.name, stuck, motivo: clip(why.text, 4000) },
+      result: `Rodada ${round} de ${PERSIST_ROUNDS}: ${stuck} ${label}; ${reinforce ? `${who.name} entra como reforço para montar uma nova estratégia` : `${who.name} resolve com a equipe`}` });
+    this.bus.publish(ws, 'tasks.changed', { id: taskId });
+    return true;
+  }
+
+  /** O que quem decide recebe: o card inteiro, o que travou, as rodadas anteriores e as saídas possíveis. */
+  private persistBrief(ws: string, taskId: string, c: { who: Member; coord: Member | undefined; stuck: string; why: { kind: string; text: string }; round: number;
+    rounds: PersistRound[]; reinforce: boolean }): string {
+    const t = getTask(this.db, ws, taskId);
+    const purpose = this.db.get<{ purpose: string | null }>('SELECT purpose FROM tasks WHERE id = ?', taskId)?.purpose;
+    const names = new Map(activeTeam(this.db, ws).map((m) => [m.id, m.name]));
+    const steps = stepsOf(this.db, taskId);
+    const each = steps.length ? Math.floor(PLAN_BUDGET / steps.length) : 0;
+    const files = filesBrief(this.db, this.filesDir, ws, taskId);
+    const what = { pergunta: `quis perguntar à pessoa: “${c.why.text}”`, ajuda: `pediu ajuda e o pedido não cabe mais neste card (já tem etapas de ajuda demais ou é a ajuda pedida de volta a quem pediu):\n${c.why.text}`,
+      reprovado: `entregou, mas a conferência reprovou: ${c.why.text}`, falha: `não conseguiu terminar: ${c.why.text}` }[c.why.kind] ?? c.why.text;
+    return [
+      c.reinforce
+        ? `Você é ${c.who.name}. ${c.coord && c.coord.id !== c.who.id ? `${c.coord.name}, que coordena a equipe, chamou você` : 'A equipe chamou você'} como reforço para montar uma estratégia NOVA para este card (rodada ${c.round} de ${PERSIST_ROUNDS}): as tentativas anteriores não resolveram.`
+        : `Você coordena a equipe. Um card travou e você decide como ele segue até a entrega (rodada ${c.round} de ${PERSIST_ROUNDS}).`,
+      '',
+      `Card #${t.number}: ${t.title}`,
+      purpose ? `Pedido do usuário (o objetivo): “${clip(purpose, 4000)}”` : clip(t.description, 4000),
+      steps.length ? `\nEtapas do card:\n${steps.map((s) => `${s.position}. ${names.get(s.agent_id) ?? 'Agente'} — ${s.title} [${s.status}]${s.output ? `\n${clip(stripControl(s.output), each)}` : ''}`).join('\n\n')}` : '',
+      files ? `\n${files}` : '',
+      `\nO que travou: ${c.stuck} ${what}`,
+      c.rounds.length ? `\nRodadas anteriores (não repita o que não funcionou):\n${c.rounds.map((x) => `- Rodada ${x.round}: ${x.stuck} (${x.kind}) → ${x.by} decidiu ${x.decision ?? '—'}${x.detail ? `: ${clip(x.detail, 1200)}` : ''}`).join('\n')}` : '',
+      '',
+      'Regras: o usuário quer a entrega pronta, e rápido. Ele é leigo: sabe o que quer, não como resolver. A equipe resolve sozinha — nunca devolva a ele um problema do trabalho (texto cortado, formato, ferramenta, quem faz o quê, como resolver). Dado que falta e não é essencial: a entrega sai com [PREENCHER] e a lista do que falta.',
+      'Responda com UMA destas saídas:',
+      `a) A instrução para ${c.stuck} seguir agora, completa (se ela precisar de um texto que já está acima, copie o texto inteiro na instrução). Só texto, sem linha de controle.`,
+      `b) Uma linha [[pedir-ajuda agente="Nome" pedido="..."]] para pôr um colega (que não seja ${c.stuck}) a fazer o que falta antes de ${c.stuck} continuar — ele entra como uma etapa deste mesmo card —, seguida da instrução para ${c.stuck}.`,
+      `c) A linha [[assumir]] e, abaixo dela, a entrega completa da etapa de ${c.stuck}, feita por você — quando for mais rápido você mesmo fazer.`,
+      'd) Só se for indispensável — uma decisão sobre o que o usuário quer, que só ele pode dar e sem a qual não dá para entregar: [[perguntar pergunta="..."]], em linguagem simples, de preferência com opções.',
+    ].filter(Boolean).join('\n');
+  }
+
+  /** A decisão do ciclo de persistência chegou: o card segue por ela. */
+  private persisted(r: RunRow, status: RunStatus, output: string | null): void {
+    const ws = r.workspace_id; const taskId = r.task_id;
+    if (!taskId) return;
+    const orig = this.db.get<RunRow>('SELECT * FROM runs WHERE id = ?', r.idempotency_key.slice(PERSIST_KEY.length));
+    const round = this.persistRounds(taskId).at(-1)?.round ?? 0;
+    const who = this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', r.agent_id)?.name ?? 'A coordenação';
+    const text = output ?? '';
+    const decide = (decision: string, detail: string, result: string) => audit(this.db, null, { workspaceId: ws, actorType: 'agent', actorId: r.agent_id,
+      action: 'task.persist_decision', targetType: 'task', targetId: taskId, evidence: { runId: r.id, round, decision, detail: clip(detail, 4000) }, result });
+    if (status !== 'succeeded' || !text.trim()) {
+      decide('sem decisão', status, `${who} não chegou a uma decisão (${status}): o card segue como estava`);
+      // a decisão não veio: o que travou segue o caminho de sempre (a pessoa fica sabendo)
+      if (orig && /\[\[\s*perguntar\b/i.test(orig.output ?? '')) this.settle(orig, 'succeeded', orig.output);
+      else {
+        this.results.restoreWorkState(ws, taskId);
+        const res = this.results.latest(ws, taskId);
+        if (res) this.purpose.relay(ws, taskId, res, orig?.output ?? null, orig?.agent_id ?? r.agent_id, null);
+      }
+      return;
+    }
+    const question = /\[\[\s*perguntar\b/i.test(text) ? questionIn(text) : null;
+    if (question) {
+      decide('perguntar à pessoa', question, `${who} concluiu que só a pessoa decide: “${clip(question, 200)}”`);
+      this.settle(r, 'succeeded', `[[perguntar pergunta="${question.replace(/"/g, "'")}"]]`);
+      return;
+    }
+    if (/\[\[\s*assumir\s*\]\]/i.test(text)) {
+      const body = text.replace(/\[\[\s*assumir\s*\]\]/i, '').trim();
+      decide('assumir', body, `${who} assumiu e fez a etapa`);
+      this.settle(r, 'succeeded', body);
+      return;
+    }
+    const help = parseHelpRequests(text, HELP_MAX.agent);
+    const instruction = stripControl(text);
+    if (help.length && this.helpSteps(r, help, instruction ? { by: who, text: instruction } : undefined)) {
+      decide('pôr um colega numa etapa', `${help.map((h) => `${h.agent}: ${h.request}`).join('; ')}${instruction ? ` — ${instruction}` : ''}`, `${who} pôs ${help.map((h) => h.agent).join(', ')} numa etapa deste card`);
+      return;
+    }
+    if (!instruction) { decide('sem decisão', text, `${who} não deu uma instrução utilizável: o card segue como estava`); this.results.restoreWorkState(ws, taskId); return; }
+    decide('instruir', instruction, `${who} respondeu e o trabalho segue`);
+    this.results.teamAnswer(ws, taskId, instruction, who);
+    try { this.work(ws, taskId, null); } catch { this.results.setWorkState(ws, taskId, 'solicitada', `${who} respondeu: esperando a vez`); }
   }
 
   /** Começa o plano do coordenador: o card nasce com as etapas e a primeira já vai para o agente dela. */
@@ -235,10 +486,16 @@ export class Teamwork {
     if (!next) return false;
     const ws = r.workspace_id; const taskId = r.task_id!;
     this.db.tx(() => {
-      this.db.run("UPDATE task_steps SET status = 'feita', output = ?, run_id = ?, done_at = ? WHERE id = ?", this.db.seal(ws, clip(output ?? '', 20000)), r.id, now(), cur.id);
+      this.db.run("UPDATE task_steps SET status = 'feita', output = ?, run_id = ?, done_at = ? WHERE id = ?", this.db.seal(ws, clip(output ?? '', TEXTO_MAX)), r.id, now(), cur.id);
       this.db.run("UPDATE task_steps SET status = 'em_andamento' WHERE id = ?", next.id);
     });
     const name = (agentId: string) => this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', agentId)?.name ?? 'o agente';
+    // entrega longa (um documento, uma pesquisa): fica também como arquivo do card — aberta inteira, por você e pela equipe
+    const body = stripControl(output ?? '');
+    if (body.length >= STEP_FILE_CHARS) {
+      const n = Number(this.db.get<{ number: number }>('SELECT number FROM tasks WHERE id = ?', taskId)?.number ?? 0);
+      this.results.saveDeliverable(ws, taskId, n, r.id, body, output ?? '', `etapa${cur.position}-${fold(name(cur.agent_id)).replace(/[^a-z0-9]+/g, '-')}`);
+    }
     updateTask(this.db, null, ws, { type: 'system', id: 'ergon' }, taskId, { agentId: next.agent_id });
     audit(this.db, null, { workspaceId: ws, actorType: 'agent', actorId: r.agent_id, action: 'task.step_done', targetType: 'task', targetId: taskId,
       evidence: { runId: r.id, step: cur.position, of: steps.length, output: clip(stripControl(output ?? ''), 1500) },
@@ -255,7 +512,7 @@ export class Teamwork {
     const done = ['validado', 'aguardando_aprovacao', 'sem_confirmacao'].includes(res.state);
     const status = done ? 'feita' : res.state === 'falha' ? 'falhou' : 'em_andamento';
     this.db.run('UPDATE task_steps SET status = ?, output = COALESCE(?, output), run_id = ?, done_at = ? WHERE id = ?',
-      status, output ? this.db.seal(r.workspace_id, clip(output, 20000)) : null, r.id, done ? now() : null, cur.id);
+      status, output ? this.db.seal(r.workspace_id, clip(output, TEXTO_MAX)) : null, r.id, done ? now() : null, cur.id);
   }
 
   /** A resposta do colega vai para o card de quem pediu, que volta à fila quando não espera mais nenhuma ajuda. */
@@ -286,7 +543,7 @@ export class Teamwork {
       const last = this.db.get<{ agent_id: string; output: string | null }>("SELECT agent_id, output FROM runs WHERE task_id = ? AND status = 'succeeded' ORDER BY created_at DESC LIMIT 1", taskId);
       const me = this.db.get<{ number: number; agent_id: string }>('SELECT number, agent_id FROM tasks WHERE id = ?', taskId);
       this.helpToParent(ws, last?.agent_id ?? me?.agent_id ?? '', ev as { from: string; to: string; parentTaskId: string }, me?.number ?? null,
-        clip(stripControl(last?.output ?? '') || 'aprovado por você, sem texto do colega', 1500));
+        clip(stripControl(last?.output ?? '') || 'aprovado por você, sem texto do colega', PLAN_BUDGET));
     }
     this.purpose.cardDone(ws, taskId, ev);
   }
@@ -485,12 +742,13 @@ export class Teamwork {
       `Tarefa #${t.number}: ${t.title}`, plan ? plan.text : t.description,
       files ? `\n${files}` : '',
       results.length ? `\nAjuda que você recebeu dos colegas:\n${results.join('\n\n')}` : '',
-      back ? (back.answer ? `\nA pessoa respondeu à sua pergunta: ${back.text}` : `\nA pessoa devolveu o trabalho com esta instrução (atenda antes de entregar): ${back.text}`) : '',
+      back ? (back.team ? `\n${back.team}, da equipe, respondeu ao que travou — siga isto: ${back.text}`
+        : back.answer ? `\nA pessoa respondeu à sua pergunta: ${back.text}` : `\nA pessoa devolveu o trabalho com esta instrução (atenda antes de entregar): ${back.text}`) : '',
       opNote,
-      `\n${closing} Se faltar uma ferramenta ou um conhecimento que um colega tem, peça ajuda (veja suas instruções) em vez de improvisar. Se faltar uma informação essencial que só a pessoa tem, pergunte numa linha [[perguntar pergunta="..."]] em vez de supor.`,
+      `\n${closing} ${AUTONOMY}`,
     ].filter(Boolean).join('\n');
     const run = this.executor.enqueue({
-      workspaceId, agentId, taskId: t.id, kind: 'subtask', input: clip(input, plan ? 12000 : 6000),
+      workspaceId, agentId, taskId: t.id, kind: 'subtask', input: clip(input, TEXTO_MAX), maxInput: TEXTO_MAX,
       instructions: instructionsFor(this.db, workspaceId, agentId, 'Canal: quadro da equipe. Responda com o resultado da tarefa.'),
       idempotencyKey: `queue-${t.id}-${attempts + 1}`,
     });
@@ -513,10 +771,10 @@ export class Teamwork {
     const name = (id: string) => names.get(id) ?? this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', id)?.name ?? 'Agente';
     const purpose = this.db.get<{ purpose: string | null }>('SELECT purpose FROM tasks WHERE id = ?', taskId)?.purpose;
     const done = steps.filter((s) => s.status === 'feita' && s.output);
-    const each = done.length ? Math.floor(6000 / done.length) : 0;
+    const each = done.length ? Math.floor(PLAN_BUDGET / done.length) : 0;
     const last = cur.position === steps[steps.length - 1].position;
     const text = [
-      purpose ? `Pedido do usuário (o objetivo de todo o plano): “${clip(purpose, 1500)}”` : '',
+      purpose ? `Pedido do usuário (o objetivo de todo o plano): “${clip(purpose, 8000)}”` : '',
       `Plano deste card, em ${steps.length} etapa(s):`,
       ...steps.map((s) => `${s.position}. ${name(s.agent_id)} — ${s.title}${s.id === cur.id ? '   ← a sua etapa' : s.status === 'feita' ? ' (feita)' : ''}`),
       done.length ? `\nO que as etapas anteriores entregaram:\n${done.map((s) => `[${s.position}. ${name(s.agent_id)}]\n${clip(stripControl(s.output ?? ''), each)}`).join('\n\n')}` : '',

@@ -26,7 +26,7 @@ export const MAX_STEPS = 8;
 export const DELIVERY_KEY = 'entrega-';
 
 /** Texto sem as linhas de controle ([[...]]). */
-const plain = (s: string | null | undefined): string => (s ?? '').replace(/\[\[[^\]]*\]\]\s*/g, '').trim();
+const plain = (s: string | null | undefined): string => (s ?? '').replace(/\[\[(?:[^\]]|\](?!\]))*\]\]\s*/g, '').trim();
 
 /**
  * O plano do coordenador: [[plano objetivo="…"]] e uma linha [[etapa agente="…" faz="…"]] por etapa, em ordem
@@ -299,18 +299,18 @@ export class Purpose {
       const purpose = cards.find((c) => c.purpose)?.purpose ?? '';
       const parts = cards.map((c) => {
         const planned = !!this.db.get('SELECT 1 AS x FROM task_steps WHERE task_id = ? LIMIT 1', c.id);
-        return planned ? `Card #${c.number} (o seu plano), o que cada etapa entregou:\n${cardOutput(this.db, c.id, 4000)}`
-          : `Card #${c.number} — ${names.get(c.agent_id ?? '') ?? 'o colega'} respondeu:\n${cardOutput(this.db, c.id, 2500)}`;
+        return planned ? `Card #${c.number} (o seu plano), o que cada etapa entregou:\n${cardOutput(this.db, c.id, 240_000)}`
+          : `Card #${c.number} — ${names.get(c.agent_id ?? '') ?? 'o colega'} respondeu:\n${cardOutput(this.db, c.id, 240_000)}`;
       });
       const input = [
         'A equipe terminou o que você pediu para atender o usuário nesta conversa.',
-        purpose ? `Pedido do usuário: “${clip(purpose, 1500)}”` : '',
+        purpose ? `Pedido do usuário: “${clip(purpose, 8000)}”` : '',
         '', parts.join('\n\n'), '',
-        'Agora entregue ao usuário, aqui, exatamente o que ele pediu — no formato e no tamanho pedidos. Não descreva o processo, não repita os textos dos colegas por inteiro e não peça confirmação para entregar. Se faltar algo essencial, diga o que falta em uma frase.',
+        'Agora entregue ao usuário, aqui, exatamente o que ele pediu — no formato e no tamanho pedidos. Se ele pediu um documento (contrato, texto, relatório), entregue a versão final completa, inteira e pronta para usar, já com as correções das revisões. Não descreva o processo e não peça confirmação para entregar. Campos sem dado ficam como [PREENCHER]; se faltar algo, liste em uma frase no fim.',
       ].filter((x) => x !== '').join('\n');
       try {
         const run = this.executor.enqueue({
-          workspaceId, agentId: deliverer.id, conversationId, kind: 'chat', input: clip(input, 12000), maxInput: 12000,
+          workspaceId, agentId: deliverer.id, conversationId, kind: 'chat', input: clip(input, 400_000), maxInput: 400_000,
           instructions: instructionsFor(this.db, workspaceId, deliverer.id, 'Canal: chat do Ergon. Entrega de um pedido do usuário: responda com a entrega pronta, em texto.', { requests: true }),
           idempotencyKey: `${DELIVERY_KEY}${g.origin_run_id}`,
         });

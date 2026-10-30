@@ -44,7 +44,7 @@ import { NICHES, PRESETS, USES, applyOnboarding, onboardingChoice, onboardingOpt
 import { createOwnWorkspace, deleteWorkspace, listWorkspaces, renameWorkspace } from './services/workspaces.ts';
 import { readPrefs, writePrefs } from './services/prefs.ts';
 import { isSource } from './services/routine-catalog.ts';
-import { Teamwork } from './services/teamwork.ts';
+import { Teamwork, parseTrainRequests } from './services/teamwork.ts';
 import { CATEGORIES as AMBIENT_CATEGORIES, readAmbient, type Category as AmbientCategory } from './services/ambient.ts';
 import { MAX_CHOICE, PROCESS_SQL, SETTING as PROCESS_SETTING } from './services/concurrency.ts';
 import { AccountReader } from './services/account-reader.ts';
@@ -238,6 +238,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseProposals(output));
       // criar ou ajustar rotina conversando (a análise semanal grava as próprias sugestões)
       if (purpose !== 'routine-recommend' && !purpose?.startsWith('routine-setup:')) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, routines.proposalsFrom(r.workspace_id, output, 'chat'));
+      // competência pedida conversando: o agente estuda já (Treinar); ela só vale depois que você aprova a proposta dele
+      const owner = db.get<{ owner_user_id: string }>('SELECT owner_user_id FROM conversations WHERE id = ?', r.conversation_id)?.owner_user_id;
+      for (const t of owner ? parseTrainRequests(output) : []) {
+        const who = db.get<{ id: string; name: string }>("SELECT id, name FROM agents WHERE workspace_id = ? AND status = 'active' AND lower(name) = lower(?)", r.workspace_id, t.agent);
+        const conv = r.conversation_id;
+        if (!who) { teamwork.purpose.note(r.workspace_id, conv, `Sistema — não achei ${t.agent} na equipe para aprender “${t.title || t.request.slice(0, 80)}”.`); continue; }
+        void trainings.start(r.workspace_id, owner!, who.id, { request: t.request, title: t.title || undefined, links: t.links })
+          .then(() => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} começou a estudar “${t.title || t.request.slice(0, 80)}”. A competência aparece no perfil dele (aba Treinar) para você aprovar; até lá, nada muda.`))
+          .catch((e: unknown) => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} não pôde estudar agora: ${e instanceof Error ? e.message : 'erro'}`));
+      }
     }
     // qualquer agente pode pedir uma ferramenta que executa código: vira cartão na conversa, autorizado com a senha
     if (ag) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parsePermissionRequests(output, ag.name));
@@ -930,7 +940,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   // pedido de um card repassado na conversa (informação, aprovação, decisão, nova tentativa): a resposta vai para o card
   const respondSchema = { type: 'object', additionalProperties: false, required: ['action'], properties: {
-    action: { enum: ['answer', 'approve', 'return', 'retry', 'dismiss'] }, text: S.str(1500) } };
+    action: { enum: ['answer', 'approve', 'return', 'retry', 'dismiss'] }, text: S.str(cfg.maxInputChars) } };
   app.post('/api/proposals/:id/respond', { schema: { params: idParams('apr'), body: respondSchema } }, async (req) => {
     const a = owner(req);
     const p = db.get<{ kind: string; payload: string; status: string }>('SELECT kind, payload, status FROM agent_proposals WHERE id = ? AND workspace_id = ?', (req.params as { id: string }).id, a.workspaceId);
@@ -1226,7 +1236,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // sua decisão sobre o card da equipe: aprovar e concluir (ou confirmar a ação externa), ou devolver com instrução
   app.post('/api/tasks/:id/decision', {
     schema: { params: idParams('tsk'), body: { type: 'object', additionalProperties: false, required: ['decision'], properties: {
-      decision: { enum: ['aprovar', 'devolver'] }, note: S.str(1500) } } },
+      decision: { enum: ['aprovar', 'devolver'] }, note: S.str(cfg.maxInputChars) } } },
   }, async (req) => {
     const a = auth(req);
     const taskId = (req.params as { id: string }).id;
@@ -1269,7 +1279,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   app.post('/api/agents/:id/trainings', {
     schema: { params: idParams('agt'), body: { type: 'object', additionalProperties: false, properties: {
-      request: S.str(8000), title: S.str(120), fileIds: { type: 'array', maxItems: 10, items: S.id('art') }, links: { type: 'array', maxItems: 10, items: S.str(2000) },
+      request: S.str(cfg.maxInputChars), title: S.str(120), fileIds: { type: 'array', items: S.id('art') }, links: { type: 'array', items: S.str(2000) },
       skillId: S.id('skl') } } },
   }, async (req, reply) => {
     const a = owner(req);

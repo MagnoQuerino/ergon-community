@@ -24,7 +24,8 @@ export function ViewTip({ view, coord, other, onTour }: { view: View; coord: str
   const text = TIPS[view];
   if (!text || !prefs.tips || prefs.dismissed.includes(id)) return null;
   return (
-    <aside className="tip" role="note" aria-label="Dica">
+    // data-keep-surface: clicar na dica (Entendi, Desligar) não conta como clique fora do card ou da janela aberta
+    <aside className="tip" role="note" aria-label="Dica" data-keep-surface>
       <span className="tip__ico"><Icon name="bulb" size={18} /></span>
       <div className="tip__body">
         <p>{text(coord, other)}</p>
