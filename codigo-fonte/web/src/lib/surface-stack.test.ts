@@ -42,6 +42,15 @@ test('painel do card: clicar noutro card, menu ou link troca na hora; área vazi
   assert.equal(s.onOutsideClick(false, false, false, true)?.id, 2, 'gavetas comuns continuam fechando com o clique fora');
 });
 
+test('janela modal aberta em qualquer lugar da pilha: o que fica atrás (a dica) espera', () => {
+  const s = new SurfaceStack();
+  assert.equal(s.hasModal(), false);
+  s.push(e(1, { modal: true })); s.push(e(2));
+  assert.equal(s.hasModal(), true, 'um menu por cima da janela não muda nada');
+  s.remove(1);
+  assert.equal(s.hasModal(), false);
+});
+
 test('Tab preso só quando a de cima é modal; reabrir a mesma não duplica', () => {
   const s = new SurfaceStack();
   s.push(e(1)); assert.equal(s.trapsTab(), false);

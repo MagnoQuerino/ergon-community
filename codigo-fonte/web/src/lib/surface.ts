@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 import { SurfaceStack, type CloseWhy, type SurfaceEntry } from './surface-stack.ts';
 
 export type { CloseWhy } from './surface-stack.ts';
@@ -16,6 +16,9 @@ const stack = new SurfaceStack<Live>();
 let seq = 0;
 let installed = false;
 let downTop: { id: number; inside: boolean } | null = null;
+/** quem quer saber quando abre ou fecha uma janela (ex.: a dica da tela some com uma janela por cima) */
+const watchers = new Set<() => void>();
+const changed = () => watchers.forEach((f) => f());
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), summary';
 /** o que faz alguma coisa ao ser clicado: um card, um item do menu, um link, um botão, um campo */
@@ -88,6 +91,7 @@ export function useSurface(ref: RefObject<HTMLElement | null>, opts: SurfaceOpti
     const id = ++seq;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     stack.push({ id, modal, outside, escape, ignoreFromInputs: ignore, passThrough, el: () => ref.current, request: (why) => close.current(why) });
+    changed();
     if (autoFocus) {
       // depois de pintar: o conteúdo (e o que carrega) já está lá
       requestAnimationFrame(() => {
@@ -100,6 +104,7 @@ export function useSurface(ref: RefObject<HTMLElement | null>, opts: SurfaceOpti
     }
     return () => {
       stack.remove(id);
+      changed();
       const el = ref.current;
       // devolve o foco a quem abriu, se ele ainda existe e o foco estava dentro (ou se perdeu no body)
       const lost = !document.activeElement || document.activeElement === document.body || (el?.contains(document.activeElement) ?? false);
@@ -112,6 +117,11 @@ export function useSurface(ref: RefObject<HTMLElement | null>, opts: SurfaceOpti
  * Fechar com algo digitado e não salvo: pergunta (só aí; fechar sem pendência nunca pergunta). true = pode fechar.
  */
 export const keepTyped = (dirty: boolean, what: string): boolean => !dirty || window.confirm(`Descartar ${what}?`);
+
+/** Há uma janela modal aberta agora (a dica da tela fica atrás do fundo dela: some até a janela fechar). */
+export function useModalOpen(): boolean {
+  return useSyncExternalStore((f) => { watchers.add(f); return () => { watchers.delete(f); }; }, () => stack.hasModal());
+}
 
 /** Quantas superfícies estão abertas (testes e depuração). */
 export const openSurfaces = (): number => stack.size;

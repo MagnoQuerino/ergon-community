@@ -18,6 +18,7 @@
   conversa no topo, e o atalho do canto pisca quando chega algo.
 - **Documentos.** Menu novo, como um explorador: pastas, arrastar do computador, mover arrastando, renomear, prévia e
   lixeira com restauração. Dá para pedir ao coordenador: "cria a pasta Clientes e põe lá os contratos" — e desfazer.
+- A dica da tela espera a janela aberta fechar: clicar em "Entendi" não fecha mais a conversa ou o perfil por trás.
 
 ## 1.1.0-rc.15 (pré-versão de teste)
 

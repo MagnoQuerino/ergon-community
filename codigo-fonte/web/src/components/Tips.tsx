@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { savePrefs, usePrefs } from '../lib/prefs.ts';
+import { useModalOpen } from '../lib/surface.ts';
 import type { View } from '../lib/types.ts';
 import { Icon } from './Icon.tsx';
 
@@ -21,9 +22,12 @@ const TIPS: Partial<Record<View, (coord: string, other: string) => ReactNode>> =
 
 export function ViewTip({ view, coord, other, onTour }: { view: View; coord: string; other: string; onTour?: () => void }) {
   const prefs = usePrefs();
+  // com uma janela aberta (conversas, agente, card em diálogo) a dica ficava atrás do fundo dela: o "Entendi" aparecia,
+  // mas o clique caía no fundo — fechava a janela e a dica não saía. Ela espera a janela fechar.
+  const covered = useModalOpen();
   const id = `${view}.intro`;
   const text = TIPS[view];
-  if (!text || !prefs.tips || prefs.dismissed.includes(id)) return null;
+  if (!text || !prefs.tips || prefs.dismissed.includes(id) || covered) return null;
   return (
     // data-keep-surface: clicar na dica (Entendi, Desligar) não conta como clique fora do card ou da janela aberta
     <aside className="tip" role="note" aria-label="Dica" data-keep-surface>

@@ -53,4 +53,7 @@ export class SurfaceStack<E extends SurfaceEntry = SurfaceEntry> {
 
   /** O Tab fica dentro da de cima quando ela é modal. */
   trapsTab(): boolean { return !!this.top()?.modal; }
+
+  /** Há uma janela modal aberta (o que fica atrás dela, como a dica da tela, não recebe clique). */
+  hasModal(): boolean { return this.items.some((x) => x.modal); }
 }
