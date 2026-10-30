@@ -643,6 +643,8 @@ function RoutineSetup({ id, fresh, state, onBack, onGo }: { id: string; fresh: b
   useEffect(() => { if (fresh) { const t = window.setTimeout(() => setMinDone(true), 3800); return () => clearTimeout(t); } }, [fresh]);
   const [msg, setMsg] = useState<string | null>(null);
   const study = useMemo(() => studyPhrases(state.agents), [state.agents]);
+  const [dialog, setDialog] = useState(false);
+  // todos os hooks acima: abaixo daqui pode haver retorno antecipado
   if (!st.data) return <div className="page"><Loading error={st.error} /></div>;
   const { routine: r, template: t, setup: s, firstRun } = st.data;
   const agent = state.agents.find((a) => a.id === s?.agentId) ?? null;
@@ -653,7 +655,6 @@ function RoutineSetup({ id, fresh, state, onBack, onGo }: { id: string; fresh: b
   // rotina que pede o pedido (objetivo, ata, documento) ou que ainda não sabe o que acompanhar: não roda sozinha ao ativar
   const asks = !!r.input && !!(r.input.text?.required || r.input.files?.required || r.input.oneOf);
   const waitsUser = (asks || r.missing.length > 0) && !firstRun;
-  const [dialog, setDialog] = useState(false);
   const step = (done: boolean, now: boolean, label: string) => (
     <li className={`rt-step ${done ? 'rt-step--done' : now ? 'rt-step--now' : ''}`}><span className="rt-step__dot" aria-hidden="true">{done ? '✓' : ''}</span>{label}</li>
   );

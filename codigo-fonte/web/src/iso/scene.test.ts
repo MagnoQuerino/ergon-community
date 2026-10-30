@@ -5,7 +5,7 @@ import { compareBoxes, sortItems, type Sortable } from './sort.ts';
 import { figureGrid, gridExtent, lookFor, type Gesture } from './figures.ts';
 import { project } from './projection.ts';
 import { ALEXANDRIA_DIA, ALEXANDRIA_NOITE, THEMES } from './theme.ts';
-import { STOA_DESKS, benchSeat, handoffSpot, idleSpotOf, planFor, seatOf, specOf, stairBox, stairPath, visitSpot, FLOOR_H } from '../world/buildings.ts';
+import { STOA_DESKS, benchSeat, handoffSpot, idleSpotOf, planFor, seatOf, specOf, stairBox, stairPath, tarpBox, tarpPlace, visitSpot, FLOOR_H } from '../world/buildings.ts';
 import { areaDef } from '../world/areas.ts';
 import type { AABB } from '../world/geom.ts';
 
@@ -141,4 +141,23 @@ test('personagens: iconografia por chave; Alexandre Magno jovem, de armadura e s
   const g = figureGrid(alex, 'front', 'stand', 0, ALEXANDRIA_DIA, 'smile', 'none');
   const head = g.slice(2, 8).flatMap((row) => row.slice(6, 22));
   assert.ok(!head.some((c) => ALEXANDRIA_DIA.bronze.includes(c as string)), 'sem capacete');
+});
+
+test('posto coberto da nuvem: nunca sobre a escada nem a porta da lateral da Stoa, nem em cima de outro objeto', () => {
+  const s = specOf('stoa');
+  const oz = 20; const ox = 10;
+  const foot = { x0: ox - s.W / 2 - s.plinth, z0: oz - s.D / 2 - s.plinth, x1: ox + s.W / 2 + s.plinth, z1: oz + s.D / 2 + Math.max(s.plinth, s.porch) };
+  const longe = (z: number, [a, b]: [number, number]) => z + 0.45 <= oz + a - 1 || z - 0.45 >= oz + b + 1;
+  // cidade sem nada ao lado (o caso que cobria a escada)
+  const p = tarpPlace(s, oz, foot, []);
+  assert.ok(p, 'há lugar ao lado da Stoa');
+  assert.ok(longe(p[1], [s.sideSteps!.z0, s.sideSteps!.z1]), `longe da escada lateral (z=${p[1]})`);
+  assert.ok(longe(p[1], [s.sideDoor!.z - s.sideDoor!.w / 2, s.sideDoor!.z + s.sideDoor!.w / 2]), 'longe da porta lateral');
+  assert.ok(p[0] > foot.x1, 'fora do embasamento');
+  // com um banco no primeiro lugar livre, vai para outro
+  const banco = tarpBox(p[0], p[1]);
+  const q = tarpPlace(s, oz, foot, [banco]);
+  assert.ok(!q || Math.abs(q[1] - p[1]) >= 0.9 + 0.6, 'não fica em cima do banco');
+  // tudo ocupado: não desenha
+  assert.equal(tarpPlace(s, oz, foot, [{ x0: foot.x1, z0: foot.z0 - 5, x1: foot.x1 + 5, z1: foot.z1 + 5 }]), null);
 });

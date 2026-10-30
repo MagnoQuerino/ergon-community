@@ -79,6 +79,26 @@ export const interior = (s: BuildingSpec): Box => ({ x0: -s.W / 2 + WALL_T, z0: 
 /** Caixa ocupada no chão (paredes, embasamento e pórtico), sem os degraus. */
 export const footprintBox = (s: BuildingSpec): Box => ({ x0: -s.W / 2 - s.plinth, z0: -s.D / 2 - s.plinth, x1: s.W / 2 + s.plinth, z1: s.D / 2 + Math.max(s.plinth, s.porch) });
 
+/** Chão ocupado pelo posto coberto com lona (mundo), centrado em (x, z). */
+export const tarpBox = (x: number, z: number): Box => ({ x0: x - 0.6, z0: z - 0.45, x1: x + 0.6, z1: z + 0.45 });
+/**
+ * Lugar do posto coberto ao longo da lateral direita (+x) do prédio: o primeiro, da frente para o fundo, sem outro
+ * objeto por perto e fora da escada e da porta da lateral (com o caminho de quem chega até elas). Nenhum: null.
+ */
+export function tarpPlace(spec: BuildingSpec, oz: number, foot: Box, ocupado: Box[]): Vec2 | null {
+  const entradas: Array<[number, number]> = [];
+  if (spec.sideSteps) entradas.push([spec.sideSteps.z0, spec.sideSteps.z1]);
+  if (spec.sideDoor) entradas.push([spec.sideDoor.z - spec.sideDoor.w / 2, spec.sideDoor.z + spec.sideDoor.w / 2]);
+  const x = foot.x1 + 1.5;
+  for (let z = foot.z1 - 1; z >= foot.z0 + 0.6; z -= 0.5) {
+    const c = tarpBox(x, z);
+    if (entradas.some(([z0, z1]) => c.z1 > oz + z0 - 1 && c.z0 < oz + z1 + 1)) continue;
+    if (ocupado.some((o) => o.x1 > c.x0 - 0.3 && o.x0 < c.x1 + 0.3 && o.z1 > c.z0 - 0.3 && o.z0 < c.z1 + 0.3)) continue;
+    return [x, z];
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- especificações por tipo
 const SPECS: Record<string, BuildingSpec> = {
   stoa: {

@@ -1,5 +1,11 @@
 # Novidades
 
+## 1.1.0-rc.13 (pré-versão de teste)
+
+- **Rotinas:** ativar uma rotina deixava a tela em branco; agora a tela de preparo abre e mostra o andamento e o
+  primeiro resultado.
+- **Cidade:** o posto da nuvem coberto com lona não fica mais na frente da escada lateral da Stoa.
+
 ## 1.1.0-rc.12 (pré-versão de teste)
 
 - **Windows sem Docker:** o `Ergon Desktop para Windows.exe` é o instalador principal e monta tudo num ambiente

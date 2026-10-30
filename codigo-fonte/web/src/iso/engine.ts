@@ -13,7 +13,7 @@
  * Desenha sob demanda: parado, nenhum quadro; em movimento, 60 quadros/s (30 se o navegador não acompanhar).
  */
 import { CELL, placeError, typeOf } from '../../../shared/city.ts';
-import { FLOOR_H, handoffSpot, idleSpotOf, seatOf, stairBox, visitSpot, type Activity } from '../world/buildings.ts';
+import { FLOOR_H, handoffSpot, idleSpotOf, seatOf, stairBox, tarpBox, tarpPlace, visitSpot, type Activity } from '../world/buildings.ts';
 import { RESIDENTS_PER_HOUSE, type House } from '../world/areas.ts';
 import { Town, type AreaInst, type BuildingInst, type Loc, type StructureIn } from '../world/town.ts';
 import type { AABB, P3, Vec2 } from '../world/geom.ts';
@@ -1505,24 +1505,21 @@ export class IsoEngine {
     if (!this.ops || this.ops.cloud || this.editing) return null;
     const b = this.centralBuilding();
     if (!b) return null;
-    // ao longo da lateral do prédio, o primeiro lugar sem outro objeto (banco, planta, braseiro) por perto
-    const caixa = (x: number, z: number): AABB => ({ x0: x - 0.6, y0: 0, z0: z - 0.45, x1: x + 0.6, y1: 1.1, z1: z + 0.45 });
-    const livre = (c: AABB) => !this.items.some((it) => it.box.x1 > c.x0 - 0.3 && it.box.x0 < c.x1 + 0.3 && it.box.z1 > c.z0 - 0.3 && it.box.z0 < c.z1 + 0.3);
+    // ao longo da lateral do prédio, fora da escada e da porta dela e longe de outro objeto (banco, planta, braseiro)
     const chave = `${b.id}|${b.foot.x1}|${b.foot.z1}|${this.items.length}`;
-    let spot: [number, number] | null = this.tarpCache?.chave === chave ? this.tarpCache.spot : null;
-    if (this.tarpCache?.chave !== chave) {
-      for (let z = b.foot.z1 - 2.2; z >= b.foot.z0 + 0.6 && !spot; z -= 0.5) if (livre(caixa(b.foot.x1 + 1.5, z))) spot = [b.foot.x1 + 1.5, z];
-      this.tarpCache = { chave, spot };
-    }
+    if (this.tarpCache?.chave !== chave) this.tarpCache = { chave, spot: tarpPlace(b.spec, b.oz, b.foot, this.items.map((it) => it.box)) };
+    const spot = this.tarpCache.spot;
     if (!spot) return null; // nenhum lugar limpo: melhor não desenhar do que sobrepor
     const [x, z] = spot;
+    const c = tarpBox(x, z);
+    const caixa: AABB = { x0: c.x0, y0: 0, z0: c.z0, x1: c.x1, y1: 1.1, z1: c.z1 };
     const [px, py] = project(x, 0, z);
     const w = TARP_ROWS[0].length * RES; const h = TARP_ROWS.length * RES;
     this.tarpRect = [px - w / 2, py - h, px + w / 2, py];
-    return { px, py, box: caixa(x, z), rect: this.tarpRect };
+    return { px, py, box: caixa, rect: this.tarpRect };
   }
   private tarpRect: [number, number, number, number] | null = null;
-  private tarpCache: { chave: string; spot: [number, number] | null } | null = null;
+  private tarpCache: { chave: string; spot: Vec2 | null } | null = null;
   private drawTarp(px: number, py: number): void {
     const th = this.theme;
     this.drawIcon(TARP_ROWS, { o: th.outline, w: '#f4f1ea', s: '#d5cfc2', f: '#bfb8a9', r: '#8a6a50', l: mix(th.outline, '#8a6a50', 0.5) }, px, py - TARP_ROWS.length * RES);
