@@ -29,6 +29,8 @@ function install(): void {
   // captura na janela: roda antes dos ouvintes da página (a cidade também usa o Escape); quem fecha, para o evento
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !e.isComposing) {
+      // quem cuida do próprio Escape agora (ex.: o campo da conversa com o colega respondendo: Esc para a resposta)
+      if (e.target instanceof Element && e.target.closest('[data-esc-own]')) return;
       const t = stack.onEscape(isTextField(e.target));
       if (t) { e.preventDefault(); e.stopImmediatePropagation(); t.request('escape'); return; }
       if (stack.trapsTab()) e.stopImmediatePropagation(); // modal que não fecha com Esc: nada atrás dele responde

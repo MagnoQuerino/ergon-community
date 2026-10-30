@@ -9,7 +9,7 @@ const statusListeners = new Set<(s: LiveStatus, at: Date | null) => void>();
 let source: EventSource | null = null;
 let lastEventAt: Date | null = null;
 
-const TYPES = ['tasks.changed', 'runs.changed', 'messages.changed', 'agents.changed', 'events.changed', 'audit.created', 'rules.changed', 'artifacts.changed', 'city.changed', 'proposals.changed', 'integrations.changed', 'routines.changed', 'resync'];
+const TYPES = ['tasks.changed', 'runs.changed', 'messages.changed', 'agents.changed', 'events.changed', 'audit.created', 'rules.changed', 'artifacts.changed', 'city.changed', 'proposals.changed', 'integrations.changed', 'routines.changed', 'runs.live', 'conversations.changed', 'resync'];
 
 function emitStatus(s: LiveStatus) { statusListeners.forEach((l) => l(s, lastEventAt)); }
 
@@ -97,6 +97,17 @@ export function prefetchResources(urls: string[]): void {
       .then((d: unknown) => { if (d !== undefined && !cache.has(url)) cache.set(url, d); })
       .catch(() => { /* a tela busca de novo ao abrir */ });
   }
+}
+
+/** Ouve um tipo de evento com os dados dele (ex.: runs.live, com o id da execução que mudou). */
+export function useLiveEvent(type: string, fn: (data: Record<string, unknown>) => void): void {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    const h: Handler = (t, data) => { if (t === type) ref.current((data ?? {}) as Record<string, unknown>); };
+    handlers.add(h);
+    return () => { handlers.delete(h); };
+  }, [type]);
 }
 
 /** Avisa as telas abertas de uma mudança feita aqui mesmo (ex.: conta de IA conectada → o modelo padrão aparece). */

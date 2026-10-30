@@ -234,7 +234,8 @@ describe('núcleo operacional: cenários integrados (Etapa 9)', () => {
       assert.equal(d.work.state, 'aguardando_info'); assert.equal(d.task.completed, 0); assert.equal(d.files.deliverables.length, 0, 'falha não deixa entrega pela metade');
     }
     assert.equal((await upload(noFile.id, Buffer.alloc(0))).status, 400, 'arquivo vazio nem entra');
-    assert.equal((await upload(noFile.id, 'x', 'virus.exe', 'application/x-msdownload')).status, 415);
+    // programa também fica guardado (a pessoa decide o que guarda); nunca é lido nem aberto
+    assert.equal((await upload(noFile.id, 'x', 'programa.exe', 'application/x-msdownload')).status, 201);
     assert.equal(motor.started.length, calls, 'nenhuma chamada de modelo gasta com entrada inválida');
   });
 

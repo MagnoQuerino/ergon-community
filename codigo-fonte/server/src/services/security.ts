@@ -35,6 +35,7 @@ export const SEALED_COLUMNS: Array<{ table: string; cols: string[] }> = [
   { table: 'agent_proposals', cols: ['payload', 'summary', 'result'] },
   { table: 'agents', cols: ['charter'] },
   { table: 'integrations', cols: ['account_label'] },
+  { table: 'folders', cols: ['name'] },
 ];
 
 /** Cifra o que foi gravado antes da proteção (instalação antiga ou dados de demonstração do 1º uso). */

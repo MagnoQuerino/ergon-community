@@ -12,7 +12,7 @@ import { importBlueprint } from './blueprint.ts';
 import { PackageError, validatePackage, type PackageData, type Target, type ValidatedPackage } from './ergon-package.ts';
 import type { Routines } from './routines.ts';
 
-type Names = Record<string, { name: string; bio: string | null }>;
+type Names = Record<string, { name: string; bio: string | null; personality?: string | null }>;
 interface Row { id: string; package_id: string; version: string; kind: string; title: string; verified: number; sha256: string; data: string; assets: string | null; previous: string | null; status: string; installed_at: string }
 
 export class Packages {
@@ -34,14 +34,19 @@ export class Packages {
   private applyCharacters(ws: string, d: PackageData): Names {
     const before: Names = {};
     for (const c of d.skin?.characters ?? []) for (const a of this.agentsOf(ws, { charKey: c.charKey })) {
-      const cur = this.db.get<{ name: string; bio: string | null }>('SELECT name, bio FROM agents WHERE id = ? AND workspace_id = ?', a.id, ws)!;
+      const cur = this.db.get<{ name: string; bio: string | null; personality: string | null }>('SELECT name, bio, personality FROM agents WHERE id = ? AND workspace_id = ?', a.id, ws)!;
       if (!(a.id in before)) before[a.id] = cur;
       this.db.run('UPDATE agents SET name = ?, bio = ? WHERE id = ? AND workspace_id = ?', c.name, c.bio, a.id, ws);
+      // o jeito de falar do personagem (padrão do agente; a escolha de cada pessoa continua valendo por cima)
+      if (c.personality) this.db.run('UPDATE agents SET personality = ? WHERE id = ? AND workspace_id = ?', c.personality, a.id, ws);
     }
     return before;
   }
   private restoreNames(ws: string, names: Names | undefined): void {
-    for (const [aid, v] of Object.entries(names ?? {})) this.db.run('UPDATE agents SET name = ?, bio = ? WHERE id = ? AND workspace_id = ?', v.name, v.bio, aid, ws);
+    for (const [aid, v] of Object.entries(names ?? {})) {
+      this.db.run('UPDATE agents SET name = ?, bio = ? WHERE id = ? AND workspace_id = ?', v.name, v.bio, aid, ws);
+      if (v.personality !== undefined) this.db.run('UPDATE agents SET personality = ? WHERE id = ? AND workspace_id = ?', v.personality, aid, ws);
+    }
   }
   private activeSkin(ws: string): Row | undefined {
     return this.db.get<Row>("SELECT * FROM installed_packages WHERE workspace_id = ? AND kind = 'skin' AND status = 'active'", ws);

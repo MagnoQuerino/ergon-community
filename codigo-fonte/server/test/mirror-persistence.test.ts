@@ -155,8 +155,15 @@ describe('arquivos', () => {
     assert.equal(d.res.headers['content-type'], 'application/octet-stream');
   });
 
-  test('tipo não permitido e tamanho acima do limite são recusados', async () => {
-    assert.equal((await up(Buffer.from('<script>'), 'x.html', 'text/html')).status, 415);
+  test('qualquer tipo fica guardado, mas o que não é imagem comum ou PDF nunca abre na tela; acima do limite, recusado', async () => {
+    // decisão (30/10): o que a pessoa joga fica guardado; o perigo está em abrir, não em guardar
+    const r = await up(Buffer.from('<script>alert(1)</script>'), 'x.html', 'text/html');
+    assert.equal(r.status, 201);
+    for (const q of ['', '?inline=1']) {
+      const d = await req(h, 'GET', `/api/artifacts/${r.json.id}/download${q}`, s);
+      assert.equal(d.res.headers['content-type'], 'application/octet-stream', 'HTML nunca vai com o tipo dele');
+      assert.match(String(d.res.headers['content-disposition']), /^attachment/, 'nem com prévia pedida');
+    }
     assert.equal((await up(Buffer.alloc(4096, 1), 'grande.txt', 'text/plain')).status, 413);
   });
 

@@ -9,6 +9,7 @@ import { ChatPanel } from './ChatPanel.tsx';
 import { Icon } from './Icon.tsx';
 import { ModelSelect, TOOL_BADGE, modelName } from './AgentProfile.tsx';
 import { TrainTab } from './TrainTab.tsx';
+import { PersonalityPicker } from './PersonalityPicker.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { newSeed } from '../world/pack.ts';
 
@@ -165,6 +166,7 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
           </div>
         </div>
       </div>
+      <PersonalityPicker agent={agent} onChanged={reload} />
       <div className="editor__grid">
         <label className="field">Nome<input value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label className="field">Papel (função){fixed ? ' — fixo' : ''}<input value={f.role} maxLength={80} disabled={fixed} onChange={(e) => setF({ ...f, role: e.target.value })} /></label>

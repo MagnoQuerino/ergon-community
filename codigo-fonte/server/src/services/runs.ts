@@ -4,13 +4,15 @@ import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import { saveArtifact } from './artifacts.ts';
 import { log, scrub } from '../lib/log.ts';
 import { audit, type Bus } from './bus.ts';
-import { HermesError, friendly, mapRemoteStatus, type HermesClient } from './hermes.ts';
+import { HermesError, friendly, mapRemoteStatus, type HermesClient, type RunEvent } from './hermes.ts';
 import { interpretRules } from './interpret.ts';
 import { TOOLS, toolStatus } from './characters.ts';
 import { neutral } from './operations.ts';
 import { routineContextFor } from './routine-proposals.ts';
 import { COORDINATION_PROTOCOL, activeTeam, coordinatorFocus, coordinatorOf, routeTo } from './team.ts';
 import { requestsContext } from './purpose.ts';
+import { voiceInstructions } from './voices.ts';
+import { documentsBrief } from './documents.ts';
 import { PROCESS_SQL, isConversationKey, processLimit, runningProcesses, type ProcessLimit } from './concurrency.ts';
 
 export type RunStatus = 'queued' | 'running' | 'waiting_user' | 'succeeded' | 'failed' | 'cancelled';
@@ -19,6 +21,27 @@ const TERMINAL: RunStatus[] = ['succeeded', 'failed', 'cancelled'];
 const LONG_TOOLS = new Set(['web', 'calculo', 'terminal']);
 /** imagem gerada pelo motor na resposta (ver withMedia): só da pasta das geradas */
 const MEDIA_TAG = /MEDIA:(\/opt\/data\/cache\/generated\/[A-Za-z0-9._\/-]{1,300}\.(?:png|jpe?g|webp))/g;
+
+/**
+ * O que o colega está fazendo agora, pela ferramenta que o motor usa (evento tool.started): frase para a conversa,
+ * sem nome de ferramenta interna. A busca mostra o que ele procura (é o pedido da própria pessoa).
+ */
+const TOOL_PHRASE: Array<[RegExp, string]> = [
+  [/^web_search$/, 'pesquisando na internet'], [/^(web_extract|browser)/, 'lendo uma página'], [/^vision/, 'olhando a imagem'],
+  [/^image_generate/, 'desenhando a imagem'], [/^(terminal|execute_code|process)/, 'executando um programa'],
+  [/^(read_file|search_files)/, 'consultando arquivos'], [/^(write_file|patch)/, 'escrevendo um arquivo'],
+  [/^skill/, 'consultando uma competência'], [/^todo/, 'organizando os passos'], [/^memory/, 'anotando para não esquecer'],
+  [/^session_search/, 'lembrando conversas anteriores'], [/^(delegate|mixture)/, 'chamando reforço'], [/^text_to_speech/, 'gravando o áudio'],
+];
+export function toolPhrase(tool: string | undefined, preview?: string): string {
+  const t = (tool ?? '').toLowerCase();
+  const base = TOOL_PHRASE.find(([re]) => re.test(t))?.[1] ?? 'trabalhando nisso';
+  const q = t === 'web_search' && preview ? preview.replace(/\s+/g, ' ').trim() : '';
+  return q ? `${base}: “${clip(q, 60)}”` : base;
+}
+
+/** Resposta chegando (motor real): o texto até aqui e o que o colega faz agora. Só na memória, nunca no banco. */
+export interface LiveRun { text: string; activity: string | null }
 
 export interface RunRow {
   id: string; workspace_id: string; agent_id: string; conversation_id: string | null; task_id: string | null;
@@ -70,6 +93,11 @@ export class RunExecutor {
   media: ((path: string, workspaceId: string) => Promise<{ data: Buffer; mime: string }>) | null = null;
   /** dados que o Ergon lê na hora e manda junto do pedido (ex.: mensagens recebidas, para quem tem Mensagens dos canais) */
   contextFor: ((r: RunRow) => Promise<string | null>) | null = null;
+  /** imagens que a pessoa anexou à mensagem (o modelo vê): só nas conversas */
+  imagesFor: ((r: RunRow) => Promise<Array<{ mime: string; base64: string }>>) | null = null;
+  /** respostas chegando agora (texto ao vivo), por execução */
+  private live = new Map<string, LiveRun & { abort: AbortController; pub: number; timer: NodeJS.Timeout | null }>();
+  liveOf(runId: string): LiveRun | null { const l = this.live.get(runId); return l ? { text: l.text, activity: l.activity } : null; }
   onFinish(fn: (r: RunRow, status: RunStatus, output: string | null) => void): void { this.finishListeners.push(fn); }
 
   constructor(db: Db, bus: Bus, cfg: Config, hermes: HermesClient | null | ((workspaceId: string) => HermesClient | null)) {
@@ -115,7 +143,8 @@ export class RunExecutor {
     const r = this.get(workspaceId, runId);
     if (TERMINAL.includes(r.status)) return r;
     if (r.status === 'queued') {
-      this.finish(r, 'cancelled', null, 'cancelada antes de iniciar');
+      this.db.run('UPDATE runs SET cancel_requested = 1 WHERE id = ?', runId);
+      this.finish({ ...r, cancel_requested: 1 }, 'cancelled', null, 'cancelada antes de iniciar');
     } else {
       this.db.run('UPDATE runs SET cancel_requested = 1 WHERE id = ?', runId);
     }
@@ -225,10 +254,13 @@ export class RunExecutor {
       }
       try {
         // Mesma Idempotency-Key em toda tentativa: um reinício nunca cria segunda execução remota.
+        let images: Array<{ mime: string; base64: string }> = [];
+        if (this.imagesFor && r.kind === 'chat') { try { images = await this.imagesFor(r); } catch { /* sem as imagens: segue com o texto */ } }
         const started = await hermes.startRun({
           input, instructions: r.instructions ?? '', sessionKey: sessionKeyFor(r), idempotencyKey: `ergon-${r.idempotency_key}`,
-          model: agent?.model ?? null, provider: agent?.provider ?? null,
+          model: agent?.model ?? null, provider: agent?.provider ?? null, ...(images.length ? { images } : {}),
         });
+        if (r.kind === 'chat') this.follow(r, started.runId, hermes);
         this.db.run('UPDATE runs SET hermes_run_id = ?, hermes_status = ?, error = NULL, model = COALESCE(?, model) WHERE id = ?', started.runId, 'started', agent?.model ?? this.defaultModel(r.workspace_id), r.id);
       } catch (err) {
         const he = err instanceof HermesError ? err : null;
@@ -241,6 +273,8 @@ export class RunExecutor {
       return;
     }
     if (r.cancel_requested) await this.sendStop(r);
+    // depois de um reinício, volta a acompanhar ao vivo (o motor repete os eventos desde o começo)
+    if (r.kind === 'chat' && !this.live.has(r.id)) this.follow(r, r.hermes_run_id, hermes);
     let remote;
     try {
       remote = await hermes.getRun(r.hermes_run_id);
@@ -359,12 +393,15 @@ export class RunExecutor {
 
   private finish(r: RunRow, status: RunStatus, output: string | null, error: string | null): void {
     const done = this.db.tx(() => {
-      const cur = this.db.get<{ status: RunStatus }>('SELECT status FROM runs WHERE id = ?', r.id);
+      const cur = this.db.get<{ status: RunStatus; cancel_requested: number }>('SELECT status, cancel_requested FROM runs WHERE id = ?', r.id);
       if (!cur || TERMINAL.includes(cur.status)) return false;
       this.db.run('UPDATE runs SET status = ?, output = ?, error = ?, finished_at = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?',
         status, this.db.seal(r.workspace_id, output), error, now(), r.id);
       if (r.kind === 'chat' && r.conversation_id) {
-        const content = status === 'succeeded' ? (output ?? '') : `Execução ${status === 'cancelled' ? 'cancelada' : 'falhou'}: ${error ?? ''}`;
+        // parada pela pessoa: nota curta; falha: o motivo em linguagem simples (a tela oferece tentar de novo)
+        const content = status === 'succeeded' ? (output ?? '')
+          : status === 'cancelled' ? (cur.cancel_requested ? 'Você interrompeu.' : `Parou: ${error ?? 'sem motivo informado'}`)
+          : `Não deu certo desta vez: ${error ?? 'o motivo não foi informado'}`;
         this.db.run(
           `INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           id('msg'), r.workspace_id, r.conversation_id, status === 'succeeded' ? 'agent' : 'system', this.db.seal(r.workspace_id, clip(content, 400_000)),
@@ -379,6 +416,7 @@ export class RunExecutor {
       return true;
     });
     if (!done) return;
+    this.unfollow(r.id);
     log.info({ runId: r.id, agentId: r.agent_id, kind: r.kind, mode: r.mode, status, attempts: r.attempts, ms: Date.now() - Date.parse(r.started_at ?? r.created_at), ...(error ? { erro: scrub(error) } : {}) }, 'execução terminou');
     this.stopSent.delete(r.id);
     for (const fn of this.finishListeners) {
@@ -389,6 +427,37 @@ export class RunExecutor {
     this.bus.publish(r.workspace_id, 'runs.changed', { id: r.id, agentId: r.agent_id, status });
     if (r.conversation_id) this.bus.publish(r.workspace_id, 'messages.changed', { conversationId: r.conversation_id });
     if (r.task_id) this.bus.publish(r.workspace_id, 'tasks.changed', { id: r.task_id });
+  }
+
+  /** Acompanha a resposta chegando: texto e atividade na memória; a tela é avisada (sem o conteúdo) e busca. */
+  private follow(r: RunRow, hermesRunId: string, hermes: HermesClient): void {
+    if (!hermes.events || this.live.has(r.id)) return;
+    const l = { text: '', activity: null as string | null, abort: new AbortController(), pub: 0, timer: null as NodeJS.Timeout | null };
+    this.live.set(r.id, l);
+    const announce = () => {
+      l.timer = null;
+      if (this.live.get(r.id) !== l) return;
+      l.pub = Date.now();
+      this.bus.publish(r.workspace_id, 'runs.live', { id: r.id, conversationId: r.conversation_id });
+    };
+    const on = (e: RunEvent) => {
+      if (e.event === 'message.delta' && e.delta) { l.text = clip(l.text + e.delta, 400_000); l.activity = null; }
+      else if (e.event === 'tool.started') l.activity = toolPhrase(e.tool, e.preview);
+      else if (e.event === 'subagent.start') l.activity = 'chamando reforço';
+      else return;
+      if (l.timer) return;
+      l.timer = setTimeout(announce, Math.max(0, 250 - (Date.now() - l.pub)));
+      l.timer.unref?.();
+    };
+    void hermes.events(hermesRunId, on, l.abort.signal).catch(() => undefined);
+  }
+
+  private unfollow(runId: string): void {
+    const l = this.live.get(runId);
+    if (!l) return;
+    if (l.timer) clearTimeout(l.timer);
+    l.abort.abort();
+    this.live.delete(runId);
   }
 
   private simulatedOutput(r: RunRow): string {
@@ -572,7 +641,11 @@ export function toolHolders(db: Db, workspaceId: string): Map<string, string[]> 
 }
 
 /** requests: na conversa, o agente recebe os pedidos do usuário em andamento (de todas as conversas). */
-export function instructionsFor(db: Db, workspaceId: string, agentId: string, channelNote: string, opts: { requests?: boolean } = {}): string {
+/**
+ * `userId`: conversa com uma pessoa — entra a voz de colega (guia comum + personalidade que ela escolheu + o nome dela).
+ * Sem pessoa (card, revisão, rotina), o agente trabalha no tom profissional de sempre.
+ */
+export function instructionsFor(db: Db, workspaceId: string, agentId: string, channelNote: string, opts: { requests?: boolean; userId?: string | null } = {}): string {
   const a = db.get<{ name: string; role: string; instructions: string; sname: string; skey: string; char_key: string | null; charter: string | null; skills: string | null; tools: string | null; hermes_skills: string | null; coordinator: number }>(
     `SELECT a.name, a.role, p.instructions, p.name AS sname, p.key AS skey, a.char_key, a.charter, a.skills, a.tools, a.hermes_skills, a.coordinator
        FROM agents a JOIN profiles p ON p.id = a.profile_id WHERE a.id = ? AND a.workspace_id = ?`, agentId, workspaceId);
@@ -620,6 +693,7 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     coord && matrix.length ? `Travas de ferramentas (quem tem cada uma):\n- ${matrix.join('\n- ')}` : '',
     coord ? PROPOSAL_HELP : '',
     coord ? TRAIN_HOW_COORD : '',
+    coord && opts.userId ? documentsBrief(db, workspaceId) : '',
     coord ? openCardsFor(db, workspaceId) : '',
     coord ? routineContextFor(db, workspaceId) : '',
     a.instructions,
@@ -628,6 +702,7 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     'Para o usuário, você é um agente do Ergon: não cite nomes de sistemas, motores ou ferramentas internas.',
     rules.length ? `Regras ativas do workspace:\n- ${rules.map((r) => r.text).join('\n- ')}` : '',
     opts.requests ? requestsContext(db, workspaceId) : '',
+    opts.userId ? voiceInstructions(db, workspaceId, agentId, opts.userId) : '',
     channelNote,
   ].filter(Boolean).join('\n');
 }

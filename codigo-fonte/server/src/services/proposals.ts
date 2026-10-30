@@ -346,8 +346,8 @@ export function answerQuestion(db: Db, bus: Bus, workspaceId: string, userId: st
 export function listProposals(db: Db, workspaceId: string, conversationId?: string | null) {
   return db.all(
     `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff') THEN payload END AS payload FROM agent_proposals
-      WHERE workspace_id = ? ${conversationId ? 'AND conversation_id = ?' : ''} ORDER BY created_at DESC LIMIT 50`,
-    ...(conversationId ? [workspaceId, conversationId] : [workspaceId]));
+      WHERE workspace_id = ? ${conversationId ? 'AND (conversation_id = ? OR id IN (SELECT proposal_id FROM proposal_links WHERE conversation_id = ?))' : ''} ORDER BY created_at DESC LIMIT 50`,
+    ...(conversationId ? [workspaceId, conversationId, conversationId] : [workspaceId]));
 }
 
 /**

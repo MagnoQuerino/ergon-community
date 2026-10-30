@@ -1,5 +1,24 @@
 # Novidades
 
+## 1.1.0-rc.16 (pré-versão de teste)
+
+- **Uma equipe de colegas, não de robôs.** Cada agente fala com você como um colega de trabalho, pelo seu nome, e tem
+  personalidade: cordial, conciso, didático, formal, entusiasmado, bem-humorado, irônico, ácido — e, para quem quiser
+  rir, os extremos "Estúpido" e "Desgraçado" (só depois de um aviso). Cada um já vem com a sua; troque no perfil do
+  agente. Documentos e mensagens para outras pessoas saem sempre no tom profissional.
+- **A equipe puxa conversa.** Quando você chega, o coordenador dá as boas-vindas e conta como estão as coisas; quem
+  precisa de você chama direto ("opa, tá online?"). Se você responder, ele explica o que precisa, com o cartão para
+  resolver ali mesmo. Desliga em Configurações.
+- **Conversa fluida.** A resposta aparece sendo escrita, com o que o colega está fazendo agora ("pesquisando na
+  internet…"). Botão Parar (ou Esc). Escrever enquanto ele responde põe a mensagem na fila, e dá para editar ou tirar
+  da fila. Texto formatado (listas, tabelas, negrito), copiar e baixar como documento do Word. Falhou? "Tentar de novo".
+- **Arraste qualquer arquivo para a conversa** (ou cole um print, ou use o clipe). O colega lê documentos, planilhas e
+  zips, olha as imagens e avisa com honestidade quando não abre um tipo (áudio, vídeo, programa) — e guarda tudo.
+- **Lista de conversas viva.** Ponto de não lida, marca de urgente ou "precisa de você" (o colega marca), fixar
+  conversa no topo, e o atalho do canto pisca quando chega algo.
+- **Documentos.** Menu novo, como um explorador: pastas, arrastar do computador, mover arrastando, renomear, prévia e
+  lixeira com restauração. Dá para pedir ao coordenador: "cria a pasta Clientes e põe lá os contratos" — e desfazer.
+
 ## 1.1.0-rc.15 (pré-versão de teste)
 
 - **A equipe trabalha até entregar.** Quando algo trava — um texto que chegou incompleto, uma entrega reprovada na

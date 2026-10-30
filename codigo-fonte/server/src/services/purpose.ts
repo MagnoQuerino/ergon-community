@@ -136,6 +136,10 @@ export class Purpose {
     if (!r.conversation_id) return;
     this.db.run('UPDATE tasks SET conversation_id = ?, purpose = ?, deliver_agent_id = ?, origin_run_id = ? WHERE id = ? AND workspace_id = ?',
       r.conversation_id, this.db.seal(workspaceId, clip(purposeOf(this.db, r), 4000)) || null, r.agent_id, r.id, taskId, workspaceId);
+    // os arquivos que a pessoa mandou junto do pedido entram no card (cada etapa lê)
+    for (const f of this.db.all<{ artifact_id: string }>('SELECT ma.artifact_id FROM messages m JOIN message_attachments ma ON ma.message_id = m.id WHERE m.run_id = ? AND m.workspace_id = ?', r.id, workspaceId)) {
+      this.db.run("INSERT OR IGNORE INTO task_artifacts (workspace_id, task_id, artifact_id, role, created_at) VALUES (?, ?, ?, 'entrada', ?)", workspaceId, taskId, f.artifact_id, now());
+    }
   }
 
   /**
@@ -311,7 +315,7 @@ export class Purpose {
       try {
         const run = this.executor.enqueue({
           workspaceId, agentId: deliverer.id, conversationId, kind: 'chat', input: clip(input, 400_000), maxInput: 400_000,
-          instructions: instructionsFor(this.db, workspaceId, deliverer.id, 'Canal: chat do Ergon. Entrega de um pedido do usuário: responda com a entrega pronta, em texto.', { requests: true }),
+          instructions: instructionsFor(this.db, workspaceId, deliverer.id, 'Canal: conversa no Ergon. Entrega de um pedido da pessoa: responda com a entrega pronta, em texto, com uma frase sua antes, no seu jeito (o documento em si sai profissional).', { requests: true, userId: this.db.get<{ u: string }>('SELECT owner_user_id AS u FROM conversations WHERE id = ?', conversationId)?.u ?? null }),
           idempotencyKey: `${DELIVERY_KEY}${g.origin_run_id}`,
         });
         for (const c of cards) {

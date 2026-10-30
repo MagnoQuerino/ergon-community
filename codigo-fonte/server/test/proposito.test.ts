@@ -242,14 +242,16 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     assert.ok(m.every((x) => !x.queued));
   });
 
-  test('D17: conversas recentes pela última mensagem do usuário (o que o agente escreve sozinho não conta)', async () => {
+  test('D17: conversas recentes pela última atividade (decisão de 30/10: com o ponto de não lida, a mensagem do agente também sobe)', async () => {
     const a = await conv('platao'); const b = await conv('herodoto');
     await say(a, 'Primeiro assunto com Platão'); await run(3);
     await say(b, 'Assunto com Heródoto'); await run(3);
     const ws = s.workspaceId;
-    // o Platão escreve sozinho depois (uma entrega, por exemplo): não sobe na lista
+    // o Platão escreve sozinho depois (uma entrega, por exemplo): sobe na lista e fica como não lida
+    await req(h, 'POST', `/api/conversations/${a}/read`, s);
     h.db.run("INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at) VALUES ('msg_teste_agente', ?, ?, 'agent', 'entrega', 'local', ?)", ws, a, new Date(Date.now() + 60_000).toISOString());
-    const list = (await req(h, 'GET', '/api/conversations/recent', s)).json as Array<{ id: string }>;
-    assert.ok(list.findIndex((x) => x.id === b) < list.findIndex((x) => x.id === a));
+    const list = (await req(h, 'GET', '/api/conversations/recent', s)).json as Array<{ id: string; unread: number }>;
+    assert.ok(list.findIndex((x) => x.id === a) < list.findIndex((x) => x.id === b));
+    assert.equal(list.find((x) => x.id === a)!.unread, 1);
   });
 });

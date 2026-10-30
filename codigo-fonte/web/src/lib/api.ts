@@ -47,6 +47,36 @@ export const api = {
   }),
 };
 
+/**
+ * Envia um arquivo com o andamento (0–1): a conversa e Documentos mostram a barra enquanto sobe. `where`: a conversa
+ * (vai para a pasta do colega), a pasta escolhida ou o card.
+ */
+export function uploadFile<T>(file: File, where: { conversationId?: string; folderId?: string; taskId?: string }, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', '/api/artifacts');
+    x.withCredentials = true;
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.setRequestHeader('X-CSRF-Token', csrf);
+    x.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+    x.setRequestHeader('X-File-Type', file.type || 'application/octet-stream');
+    if (where.conversationId) x.setRequestHeader('X-Conversation-Id', where.conversationId);
+    if (where.folderId) x.setRequestHeader('X-Folder-Id', where.folderId);
+    if (where.taskId) x.setRequestHeader('X-Task-Id', where.taskId);
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    x.onload = () => {
+      let j: { error?: string; message?: string } & Record<string, unknown> = {};
+      try { j = JSON.parse(x.responseText || '{}'); } catch { /* sem corpo */ }
+      if (x.status >= 200 && x.status < 300) resolve(j as T);
+      else reject(new ApiError(x.status, j.error ?? 'erro', j.message ?? `HTTP ${x.status}`));
+    };
+    x.onerror = () => reject(new ApiError(0, 'network', 'a conexão caiu no meio do envio'));
+    x.onabort = () => reject(new ApiError(0, 'aborted', 'envio cancelado'));
+    signal?.addEventListener('abort', () => x.abort(), { once: true });
+    x.send(file);
+  });
+}
+
 /** POST que devolve arquivo (ex.: o .ergon montado pelo editor). */
 export async function postForBlob(url: string, body: unknown): Promise<Blob> {
   const res = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body) });

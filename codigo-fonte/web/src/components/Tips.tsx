@@ -13,7 +13,8 @@ const TIPS: Partial<Record<View, (coord: string, other: string) => ReactNode>> =
   rotinas: (c) => <>Comece pelo <b>Briefing Diário</b>: ao ativar, {c} estuda o seu jeito de trabalhar e adapta a rotina antes da primeira execução.</>,
   equipe: () => <>Este é o quadro onde os agentes trabalham: eles movem os cards conforme avançam. Abra um card para ver o histórico ou pedir uma revisão crítica.</>,
   tarefas: () => <>As suas tarefas são só suas. Quando quiser ajuda, envie uma delas para a equipe: vira card no quadro da equipe com responsável.</>,
-  atividade: () => <>Tudo o que a equipe faz fica registrado aqui, com evidência. Os arquivos que os agentes entregam ficam na aba Arquivos.</>,
+  atividade: () => <>Tudo o que a equipe faz fica registrado aqui, com evidência. Os arquivos que a equipe entrega ficam em Documentos.</>,
+  documentos: (c) => <>Os arquivos do workspace, em pastas. Arraste do computador para cá, mova arrastando, ou peça a <b>{c}</b>: “organiza os documentos de outubro por cliente”.</>,
   conexoes: () => <>Sem uma conta de IA conectada, as respostas são simuladas. A melhor escolha é a <b>assinatura Nous</b>: os principais modelos numa conta só, inclusive gratuitos, e um modelo para cada agente.</>,
   configuracao: () => <>Ferramentas da equipe, andamento, segurança, pacotes e consumo ficam aqui. A conta de IA e o modelo padrão ficam em Conexões.</>,
 };

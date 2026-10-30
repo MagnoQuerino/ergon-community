@@ -7,12 +7,18 @@ import { audit, type Bus } from './bus.ts';
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-/** o que as rotinas leem (Office, NF-e em XML, extrato OFX, transcrições) e produzem (apresentação) */
+/**
+ * Tipos conhecidos (o que as rotinas leem e produzem). Qualquer outro também é guardado (a pessoa decide o que joga
+ * na conversa ou em Documentos), mas nunca é aberto na tela: o download vai sempre como anexo e só imagem comum e PDF
+ * têm prévia (INLINE_MIME).
+ */
 const ALLOWED_MIME = new Set(['text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf', 'image/png', 'image/jpeg', 'image/webp',
   DOCX, XLSX, PPTX, 'application/xml', 'text/xml', 'application/x-ofx', 'text/vtt']);
 /** Tipo pela extensão quando o navegador manda um tipo genérico (o Windows envia CSV como "application/vnd.ms-excel"). */
 const BY_EXT: Record<string, string> = { csv: 'text/csv', md: 'text/markdown', txt: 'text/plain', json: 'application/json', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
   docx: DOCX, xlsx: XLSX, pptx: PPTX, xml: 'application/xml', ofx: 'application/x-ofx', vtt: 'text/vtt', srt: 'text/plain' };
+/** prévia na tela (imagem comum e PDF); todo o resto só baixa */
+export const INLINE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf']);
 const GENERIC = new Set(['', 'application/octet-stream', 'application/vnd.ms-excel', 'text/comma-separated-values', 'application/csv', 'text/x-csv', 'text/x-markdown', 'application/zip', 'application/x-zip-compressed', 'application/x-subrip']);
 
 /** Nome exibido: sem separadores de caminho, controles ou nomes reservados. Nunca usado como caminho. */
@@ -37,11 +43,12 @@ const mb = (n: number) => `${Math.round((n / 1024 / 1024) * 10) / 10} MB`;
  * conforme o plano; 0 = sem limite — no local o total é o disco do usuário).
  */
 export function saveArtifact(db: Db, bus: Bus, filesDir: string, maxBytes: number, workspaceId: string, userId: string,
-  input: { filename: string; mime: string; data: Buffer; taskId?: string | null; source?: { kind: 'routine' | 'operation'; id: string } }, quotaBytes = 0) {
+  input: { filename: string; mime: string; data: Buffer; taskId?: string | null; folderId?: string | null; source?: { kind: 'routine' | 'operation'; id: string } }, quotaBytes = 0) {
   const declared = input.mime.split(';')[0].trim().toLowerCase();
   const ext = input.filename.toLowerCase().match(/.([a-z0-9]{1,5})$/)?.[1] ?? '';
-  const mime = !ALLOWED_MIME.has(declared) && GENERIC.has(declared) && BY_EXT[ext] ? BY_EXT[ext] : declared;
-  if (!ALLOWED_MIME.has(mime)) throw new HttpError(415, 'mime', 'tipo de arquivo não permitido no MVP');
+  const guessed = !ALLOWED_MIME.has(declared) && GENERIC.has(declared) && BY_EXT[ext] ? BY_EXT[ext] : declared;
+  // tipo desconhecido também fica guardado; só o rótulo precisa ser um tipo bem formado
+  const mime = /^[a-z0-9][a-z0-9.+-]{0,60}\/[a-z0-9][a-z0-9.+-]{0,100}$/.test(guessed) ? guessed : 'application/octet-stream';
   if (input.data.length === 0) throw new HttpError(400, 'empty', 'O arquivo está vazio.');
   if (input.data.length > maxBytes) throw new HttpError(413, 'size', `O arquivo tem ${mb(input.data.length)}; o limite é ${mb(maxBytes)} por arquivo.`);
   if (quotaBytes > 0) {
@@ -52,6 +59,7 @@ export function saveArtifact(db: Db, bus: Bus, filesDir: string, maxBytes: numbe
     const t = db.get('SELECT 1 AS x FROM tasks WHERE id = ? AND workspace_id = ?', input.taskId, workspaceId);
     if (!t) throw notFound('tarefa');
   }
+  if (input.folderId && !db.get('SELECT 1 AS x FROM folders WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL', input.folderId, workspaceId)) throw notFound('pasta');
   const artId = id('art');
   const file = storagePath(filesDir, workspaceId, artId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -60,9 +68,9 @@ export function saveArtifact(db: Db, bus: Bus, filesDir: string, maxBytes: numbe
   const filename = safeFilename(input.filename);
   try {
     db.run(
-      `INSERT INTO artifacts (id, workspace_id, owner_user_id, task_id, filename, mime, size, sha256, storage_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      artId, workspaceId, userId, input.taskId ?? null, filename, mime, input.data.length, sha256(input.data), artId, now());
+      `INSERT INTO artifacts (id, workspace_id, owner_user_id, task_id, filename, mime, size, sha256, storage_key, created_at, folder_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      artId, workspaceId, userId, input.taskId ?? null, filename, mime, input.data.length, sha256(input.data), artId, now(), input.folderId ?? null);
     // anexado a um card: é entrada dele (o que os agentes podem processar)
     if (input.taskId) db.run("INSERT OR IGNORE INTO task_artifacts (workspace_id, task_id, artifact_id, role, created_at) VALUES (?, ?, ?, 'entrada', ?)", workspaceId, input.taskId, artId, now());
   } catch (err) {
@@ -78,7 +86,7 @@ export function saveArtifact(db: Db, bus: Bus, filesDir: string, maxBytes: numbe
 }
 
 export function listArtifacts(db: Db, workspaceId: string) {
-  return db.all('SELECT id, filename, mime, size, task_id, owner_user_id, created_at FROM artifacts WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 200', workspaceId);
+  return db.all('SELECT id, filename, mime, size, task_id, owner_user_id, created_at, folder_id FROM artifacts WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 200', workspaceId);
 }
 
 export function openArtifact(db: Db, filesDir: string, workspaceId: string, artifactId: string) {
@@ -97,6 +105,7 @@ export function removeArtifact(db: Db, filesDir: string, workspaceId: string, ar
   const art = db.get<{ storage_key: string }>('SELECT storage_key FROM artifacts WHERE id = ? AND workspace_id = ?', artifactId, workspaceId);
   if (!art) return;
   db.run('DELETE FROM task_artifacts WHERE artifact_id = ? AND workspace_id = ?', artifactId, workspaceId);
+  db.run('DELETE FROM message_attachments WHERE artifact_id = ? AND workspace_id = ?', artifactId, workspaceId);
   db.run('DELETE FROM artifacts WHERE id = ? AND workspace_id = ?', artifactId, workspaceId);
   fs.rmSync(storagePath(filesDir, workspaceId, art.storage_key), { force: true });
 }

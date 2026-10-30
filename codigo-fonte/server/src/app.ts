@@ -7,7 +7,7 @@ import type { Config } from './config.ts';
 import { normalizeBridge, normalizeTeamsActivity, normalizeWhatsAppMessage, type BridgePayload } from './connectors/normalize.ts';
 import type { Db } from './db/db.ts';
 import { HttpError, fold, id as newId, notFound, now, redactUrl, safeEqual } from './lib/util.ts';
-import { listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
+import { INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
 import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
 import { log, setLog } from './lib/log.ts';
@@ -24,7 +24,11 @@ import { BUILD, UpdateCheck, VERSION, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
 import { Bus, audit } from './services/bus.ts';
 import { addSimulatedFloor, archiveAgent, capacityInfo, createAgent, ensureCoordinator, limitsFor, reactivateAgent, removeFloor, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
-import { createConversation, listConversations, listMessages, recentConversations, sendMessage, sendQueued } from './services/chat.ts';
+import { activeCardsOf, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
+import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
+import { Initiative } from './services/initiative.ts';
+import { applyDocCommands, createFolder, emptyTrash, folderForConversation, folderForTask, listFolder, parseDocCommands, preview, restore, searchFiles, trash, tree, undo, updateFile, updateFolder } from './services/documents.ts';
+import { personalityOf, setPersonality } from './services/voices.ts';
 import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
@@ -96,6 +100,7 @@ export interface ErgonApp {
   ai: AiService;
   integrations: Integrations;
   whatsapp: WhatsAppReader;
+  initiative: Initiative;
   bus: Bus;
   db: Db;
   vault: Vault;
@@ -151,6 +156,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const operations = new Operations(db, bus, opsCfg);
   const results = new Results(db, bus, operations, opsCfg);
   const teamwork = new Teamwork(db, bus, executor, results, operations, cfg.filesDir);
+  // a equipe puxa conversa quando a pessoa chega; o colega que puxou recebe o que precisa explicar quando ela responde
+  const initiative = new Initiative(db, bus, executor);
+  chatHooks.replyContext = (ws, userId, agentId, convId) => initiative.replyContext(ws, userId, agentId, convId);
+  // imagens anexadas na conversa vão para a visão do modelo
+  executor.imagesFor = async (r) => (await attachmentContext(db, cfg, r.workspace_id, attachmentsOfRun(db, r.workspace_id, r.id).filter((f) => f.mime.startsWith('image/')), 0)).images;
   const routines = new Routines(db, bus, executor, cfg);
   // Treinar: o /learn do motor escreve a competência em espera; o Ergon mostra, a pessoa aprova (ver trainings.ts)
   const trainings = new Trainings(db, bus, executor, cfg);
@@ -185,8 +195,27 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!Array.isArray(tools)) return null;
     const tz = workspaceTz(db, r.workspace_id);
     const parts: string[] = [];
-    if (r.kind === 'subtask' && r.task_id && tools.includes('arquivos')) {
-      const files = taskFiles(db, r.workspace_id, r.task_id).filter((f) => f.role === 'entrada');
+    // anexos da mensagem: a pessoa entregou o arquivo, o colega lê (não depende da ferramenta Arquivos); e o documento
+    // de Documentos que ela citou pelo nome ("usa a proposta da ACME")
+    if (r.kind === 'chat') {
+      const files = attachmentsOfRun(db, r.workspace_id, r.id);
+      const said = fold(r.input);
+      // só no que a pessoa escreveu (rotina e boas-vindas não puxam documentos pelo nome)
+      if (said.length >= 6 && db.get("SELECT 1 AS x FROM messages WHERE run_id = ? AND role = 'user' LIMIT 1", r.id)) {
+        const named = db.all<{ id: string; filename: string; mime: string; size: number }>('SELECT id, filename, mime, size FROM artifacts WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1500', r.workspace_id)
+          .filter((a) => { const base = fold(a.filename.replace(/\.[^.]+$/, '')); return base.length >= 5 && said.includes(base) && !files.some((x) => x.id === a.id); }).slice(0, 3);
+        files.push(...named);
+      }
+      if (files.length) {
+        const got = await attachmentContext(db, cfg, r.workspace_id, files, Math.max(4000, cfg.maxDocumentChars - 8000));
+        parts.push(got.text);
+        audit(db, null, { workspaceId: r.workspace_id, actorType: 'system', actorId: 'ergon', action: 'agent.context.anexos', targetType: 'run', targetId: r.id,
+          evidence: { reads: got.reads }, result: 'anexos da mensagem lidos para o agente' });
+      }
+    }
+    if (r.kind === 'subtask' && r.task_id) {
+      const fromPerson = (artId: string) => !!db.get('SELECT 1 AS x FROM message_attachments WHERE artifact_id = ? LIMIT 1', artId);
+      const files = taskFiles(db, r.workspace_id, r.task_id).filter((f) => f.role === 'entrada' && (tools.includes('arquivos') || fromPerson(f.id)));
       const docs = await cardDocuments(db, cfg.filesDir, r.workspace_id, files, Math.max(2000, cfg.maxContextChars - 4000), tz);
       if (docs) {
         parts.push(docs.text);
@@ -247,6 +276,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         void trainings.start(r.workspace_id, owner!, who.id, { request: t.request, title: t.title || undefined, links: t.links })
           .then(() => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} começou a estudar “${t.title || t.request.slice(0, 80)}”. A competência aparece no perfil dele (aba Treinar) para você aprovar; até lá, nada muda.`))
           .catch((e: unknown) => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} não pôde estudar agora: ${e instanceof Error ? e.message : 'erro'}`));
+      }
+    }
+    if (ag && isCoordinator(ag)) {
+      const cmds = parseDocCommands(output);
+      if (cmds.length) {
+        const done = applyDocCommands(db, bus, r.workspace_id, r.agent_id, cmds);
+        for (const d of done) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Documentos — ${d.text}${d.undo ? ` {{desfazer:${d.undo}}}` : ''}`);
       }
     }
     // qualquer agente pode pedir uma ferramenta que executa código: vira cartão na conversa, autorizado com a senha
@@ -349,6 +385,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // um motor por pessoa: quem não usa há algum tempo tem o motor desligado (volta quando precisar)
     if (motors.perPerson) timers.push(setInterval(() => void motors.stopIdle(), 10 * 60_000));
     timers.push(setInterval(() => void syncMirrors(), 5 * 60_000)); // espelho automático das listas escolhidas
+    const sweepTrash = () => {
+      for (const w of db.all<{ id: string }>('SELECT DISTINCT workspace_id AS id FROM artifacts WHERE deleted_at IS NOT NULL')) {
+        if (!db.workspaceOpen(w.id)) continue;
+        try { emptyTrash(db, bus, cfg, w.id, null, 30); } catch { /* tenta na próxima volta */ }
+      }
+    };
+    timers.push(setInterval(sweepTrash, 6 * 3600_000));
     for (const t of timers) t.unref?.();
     teamwork.start();
     routines.start(); // horários das rotinas ativas e a recomendação semanal (se ligada)
@@ -653,6 +696,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const channels = integrations.connectedChannels(a.workspaceId);
     const parse = (v: unknown): string[] => { try { const x = JSON.parse(String(v ?? '[]')); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
     for (const ag of agents as Array<Record<string, unknown>>) {
+      // a voz do colega para esta pessoa (a escolha dela ou o padrão do agente)
+      ag.personality = personalityOf(db, a.workspaceId, String(ag.id), a.userId);
       ag.skills = parse(ag.skills);
       ag.hermes_skills = parse(ag.hermes_skills);
       ag.tools = parse(ag.tools).map((t) => TOOLS[t]).filter(Boolean).map((t) => toolStatus(t, { channels, workspaceId: a.workspaceId }));
@@ -667,6 +712,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       executor: { mode: executor.mode, label: executor.mode === 'real' ? 'modelo de IA real' : 'SIMULAÇÃO — sem modelo de IA' },
       sectors: listSectors(db, a.workspaceId).map(({ instructions: _i, ...s }) => s),
       teamAutorun: teamwork.autorun(a.workspaceId),
+      teamInitiative: initiative.enabled(a.workspaceId),
       themed: themedCharacters(db, a.workspaceId).length + themedSectors(db, a.workspaceId).length,
       serverTime: now(),
     };
@@ -921,7 +967,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       const run = cont && g.agentId ? executor.enqueue({
         workspaceId: a.workspaceId, agentId: g.agentId, conversationId: cont, kind: 'chat',
         input: `O usuário autorizou agora a ferramenta ${label}. Continue o pedido anterior de onde parou, usando-a.`,
-        instructions: instructionsFor(db, a.workspaceId, g.agentId, 'Canal: chat do Ergon. Quem escreve é o proprietário autenticado. Responda em texto curto.'),
+        instructions: instructionsFor(db, a.workspaceId, g.agentId, 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do workspace, autenticada.', { userId: a.userId }),
         idempotencyKey: `perm-${pid}`,
       }) : null;
       if (g.conversationId && g.conversationId !== cont) note(g.conversationId, `Sistema — você autorizou: ${g.result}.`, null);
@@ -1046,6 +1092,34 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'team.autorun', evidence: { enabled: on }, result: on ? 'andamento automático ligado' : 'andamento automático desligado' });
     bus.publish(a.workspaceId, 'agents.changed', {});
     return { enabled: on };
+  });
+
+  // A equipe puxa conversa quando você chega (ligado por padrão; você pode desligar) ---------------------------------
+  app.put('/api/team/initiative', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const on = (req.body as { enabled: boolean }).enabled;
+    setSetting(db, a.workspaceId, 'team.initiative', on ? '1' : '0');
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'team.initiative', evidence: { enabled: on }, result: on ? 'iniciativa da equipe ligada' : 'iniciativa da equipe desligada' });
+    bus.publish(a.workspaceId, 'agents.changed', {});
+    return { enabled: on };
+  });
+
+  // Personalidade de um colega (para você; quem é dono pode pôr como padrão da equipe). Os extremos pedem o aceite.
+  app.put('/api/agents/:id/personality', {
+    schema: { params: idParams('agt'), body: { type: 'object', additionalProperties: false, required: ['personality'], properties: {
+      personality: S.str(40, 1), accepted: { type: 'boolean' }, asDefault: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = auth(req);
+    const b = req.body as { personality: string; accepted?: boolean; asDefault?: boolean };
+    return { personality: setPersonality(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, b.personality, { accepted: b.accepted, asDefault: b.asDefault }) };
+  });
+
+  // Presença: a tela avisa que você está aqui (ao abrir e quando mexe); chegar depois de um tempo fora acorda a equipe
+  app.post('/api/presence', async (req) => {
+    const a = auth(req);
+    return { arrived: initiative.touch(a.workspaceId, a.userId) };
   });
 
   // Trabalhos ao mesmo tempo: automático (pela memória da máquina), um número ou sem limite; conversas não entram
@@ -1401,16 +1475,51 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   app.post('/api/conversations/:id/messages', {
     schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['text', 'clientRequestId'], properties: {
-      text: S.str(cfg.maxInputChars, 1), clientRequestId: S.str(64, 8), queue: { type: 'boolean' } } } },
+      text: S.str(cfg.maxInputChars), clientRequestId: S.str(64, 8), queue: { type: 'boolean' },
+      attachments: { type: 'array', maxItems: 20, items: S.id('art') } } } },
   }, async (req, reply) => {
     const a = auth(req);
-    const b = req.body as { text: string; clientRequestId: string; queue?: boolean };
+    const b = req.body as { text: string; clientRequestId: string; queue?: boolean; attachments?: string[] };
     // na conversa de preparo de uma rotina, a coordenação recebe o contexto do preparo (e a mensagem não vira tarefa)
     const convId = (req.params as { id: string }).id;
     const note = routines.channelFor(convId);
     // queue: com o agente ainda respondendo, a mensagem espera na fila da conversa (Ctrl+Enter) em vez de ser recusada
-    const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue });
+    const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, attachments: b.attachments ?? [] });
     return reply.status(r.replayed ? 200 : 201).send(r);
+  });
+
+  app.post('/api/conversations/:id/read', { schema: { params: idParams('cnv') } }, async (req) => {
+    const a = auth(req);
+    markRead(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id);
+    return { ok: true };
+  });
+  app.patch('/api/conversations/:id', {
+    schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['pinned'], properties: { pinned: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = auth(req);
+    setPinned(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { pinned: boolean }).pinned);
+    return { ok: true };
+  });
+  app.post('/api/conversations/:id/retry', { schema: { params: idParams('cnv') } }, async (req) => {
+    const a = auth(req);
+    return retryLast(db, bus, executor, a.workspaceId, a.userId, (req.params as { id: string }).id);
+  });
+  app.get('/api/conversations/:id/cards', { schema: { params: idParams('cnv') } }, async (req) => {
+    const a = auth(req);
+    return activeCardsOf(db, a.workspaceId, a.userId, (req.params as { id: string }).id);
+  });
+  // mensagem que ainda espera na fila: editar ou tirar (depois que foi ao agente, não muda mais)
+  app.patch('/api/messages/:id', {
+    schema: { params: idParams('msg'), body: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: S.str(cfg.maxInputChars, 1) } } },
+  }, async (req) => {
+    const a = auth(req);
+    editQueued(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { text: string }).text, cfg.maxInputChars);
+    return { ok: true };
+  });
+  app.delete('/api/messages/:id', { schema: { params: idParams('msg') } }, async (req) => {
+    const a = auth(req);
+    removeQueued(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id);
+    return { ok: true };
   });
 
   // Execuções -------------------------------------------------------------------------------------
@@ -1423,6 +1532,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const r = executor.get(auth(req).workspaceId, (req.params as { id: string }).id);
     const { instructions: _i, lease_owner: _l, ...rest } = r;
     return rest;
+  });
+
+  // resposta chegando (texto ao vivo e o que o colega faz agora): só para quem é dono da conversa
+  app.get('/api/runs/:id/live', { schema: { params: idParams('run') } }, async (req) => {
+    const a = auth(req);
+    const r = executor.get(a.workspaceId, (req.params as { id: string }).id);
+    if (!r.conversation_id) return { text: '', activity: null, status: r.status };
+    getConversation(db, a.workspaceId, a.userId, r.conversation_id);
+    const l = executor.liveOf(r.id);
+    return { text: l?.text ?? '', activity: l?.activity ?? null, status: r.status };
   });
 
   app.post('/api/runs/:id/cancel', { schema: { params: idParams('run') } }, async (req) => {
@@ -1539,8 +1658,55 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const mime = String(req.headers['x-file-type'] ?? 'application/octet-stream');
     const taskId = req.headers['x-task-id'] ? String(req.headers['x-task-id']) : null;
     if (taskId && !/^tsk_[a-f0-9]{32}$/.test(taskId)) throw new HttpError(400, 'task', 'tarefa inválida');
-    return reply.status(201).send(saveArtifact(db, bus, cfg.filesDir, cfg.maxUploadBytes, a.workspaceId, a.userId, { filename, mime, data: req.body, taskId }, storageQuota));
+    const convId = req.headers['x-conversation-id'] ? String(req.headers['x-conversation-id']) : null;
+    if (convId && !/^cnv_[a-f0-9]{32}$/.test(convId)) throw new HttpError(400, 'conversation', 'conversa inválida');
+    const folderHdr = req.headers['x-folder-id'] ? String(req.headers['x-folder-id']) : null;
+    if (folderHdr && !/^fld_[a-f0-9]{32}$/.test(folderHdr)) throw new HttpError(400, 'folder', 'pasta inválida');
+    if (convId) getConversation(db, a.workspaceId, a.userId, convId);
+    const folderId = folderHdr ?? (convId ? folderForConversation(db, a.workspaceId, convId) : taskId ? folderForTask(db, a.workspaceId, taskId) : null);
+    return reply.status(201).send(saveArtifact(db, bus, cfg.filesDir, cfg.maxUploadBytes, a.workspaceId, a.userId, { filename, mime, data: req.body, taskId, folderId }, storageQuota));
   });
+  // Documentos: pastas, mover, renomear, lixeira, prévia, busca e desfazer ------------------------------------------
+  const user = (req: FastifyRequest) => { const a = auth(req); return { a, actor: { type: 'user' as const, id: a.userId } }; };
+  const folderParam = { type: 'string', pattern: '^(root|trash|fld_[a-f0-9]{32})$' };
+  app.get('/api/documents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { folder: folderParam } } } }, async (req) =>
+    listFolder(db, auth(req).workspaceId, (req.query as { folder?: string }).folder ?? 'root'));
+  app.get('/api/documents/tree', async (req) => tree(db, auth(req).workspaceId));
+  app.get('/api/documents/search', { schema: { querystring: { type: 'object', additionalProperties: false, required: ['q'], properties: { q: S.str(200) } } } }, async (req) =>
+    searchFiles(db, auth(req).workspaceId, (req.query as { q: string }).q));
+  app.post('/api/documents/folders', { schema: { body: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: S.str(80, 1), parentId: { anyOf: [folderParam, { type: 'null' }] } } } } }, async (req, reply) => {
+    const { a, actor } = user(req); const b = req.body as { name: string; parentId?: string | null };
+    return reply.status(201).send(createFolder(db, bus, a.workspaceId, actor, b.name, b.parentId ?? null));
+  });
+  app.patch('/api/documents/folders/:id', { schema: { params: idParams('fld'), body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { name: S.str(80, 1), parentId: { anyOf: [folderParam, { type: 'null' }] } } } } }, async (req) => {
+    const { a, actor } = user(req);
+    return updateFolder(db, bus, a.workspaceId, actor, (req.params as { id: string }).id, req.body as { name?: string; parentId?: string | null });
+  });
+  app.patch('/api/artifacts/:id', { schema: { params: idParams('art'), body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { filename: S.str(120, 1), folderId: { anyOf: [folderParam, { type: 'null' }] } } } } }, async (req) => {
+    const { a, actor } = user(req);
+    return updateFile(db, bus, a.workspaceId, actor, (req.params as { id: string }).id, req.body as { filename?: string; folderId?: string | null });
+  });
+  app.post('/api/documents/trash', { schema: { body: { type: 'object', additionalProperties: false, properties: { artifactId: S.id('art'), folderId: S.id('fld') } } } }, async (req) => {
+    const { a, actor } = user(req); const b = req.body as { artifactId?: string; folderId?: string };
+    if (!b.artifactId === !b.folderId) throw new HttpError(400, 'target', 'diga o arquivo ou a pasta');
+    return trash(db, bus, a.workspaceId, actor, b);
+  });
+  app.post('/api/documents/restore', { schema: { body: { type: 'object', additionalProperties: false, properties: { artifactId: S.id('art'), folderId: S.id('fld') } } } }, async (req) => {
+    const { a, actor } = user(req); const b = req.body as { artifactId?: string; folderId?: string };
+    if (!b.artifactId === !b.folderId) throw new HttpError(400, 'target', 'diga o arquivo ou a pasta');
+    return restore(db, bus, a.workspaceId, actor, b);
+  });
+  // esvaziar a lixeira apaga de vez: só quem é dono, e a tela confirma antes
+  app.post('/api/documents/trash/empty', async (req) => {
+    const a = owner(req);
+    return { removed: emptyTrash(db, bus, cfg, a.workspaceId, a.userId) };
+  });
+  app.post('/api/documents/undo/:id', { schema: { params: idParams('aud') } }, async (req) => {
+    const { a, actor } = user(req);
+    return undo(db, bus, a.workspaceId, actor, (req.params as { id: string }).id);
+  });
+  app.get('/api/artifacts/:id/preview', { schema: { params: idParams('art') } }, async (req) => preview(db, cfg, auth(req).workspaceId, (req.params as { id: string }).id));
+
   // limites para a interface dizer antes de enviar (local: total sem limite, só por arquivo)
   app.get('/api/limits', async (req) => {
     const a = auth(req);
@@ -1551,8 +1717,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.get('/api/artifacts/:id/download', { schema: { params: idParams('art') } }, async (req, reply) => {
     const a = auth(req);
     const f = openArtifact(db, cfg.filesDir, a.workspaceId, (req.params as { id: string }).id);
-    reply.header('Content-Type', f.mime === 'application/pdf' || f.mime.startsWith('image/') ? f.mime : 'application/octet-stream');
-    reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.filename)}`);
+    // prévia só de imagem comum e PDF (?inline=1), num documento isolado; todo o resto sempre baixa como anexo
+    const inline = (req.query as { inline?: string }).inline === '1' && INLINE_MIME.has(f.mime);
+    reply.header('Content-Type', INLINE_MIME.has(f.mime) ? f.mime : 'application/octet-stream');
+    reply.header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.filename)}`);
+    if (inline && f.mime.startsWith('image/')) reply.header('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'");
     reply.header('Cache-Control', 'private, no-store');
     return reply.send(f.data); // decifrado na memória (até o limite de upload), nunca gravado aberto
   });
@@ -1625,6 +1794,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       else missed.forEach(send);
     }
     const unsub = bus.subscribe(a.workspaceId, send);
+    try { initiative.touch(a.workspaceId, a.userId); } catch { /* presença nunca derruba a conexão */ }
     const hb = setInterval(() => res.write(': hb\n\n'), 15000);
     req.raw.on('close', () => { clearInterval(hb); unsub(); });
   });
@@ -1783,7 +1953,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, executor, reviews, teamwork, operations, results, routines, trainings, ai, integrations, whatsapp, bus, db, vault, hermesVault, motors, startBackground, stopBackground };
+  return { app, executor, reviews, teamwork, operations, results, routines, trainings, ai, integrations, whatsapp, initiative, bus, db, vault, hermesVault, motors, startBackground, stopBackground };
 }
 
 class Limiter {

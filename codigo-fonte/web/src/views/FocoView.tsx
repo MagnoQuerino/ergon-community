@@ -3,7 +3,9 @@ import { useResource } from '../lib/live.ts';
 import { useMinWidth } from '../lib/media.ts';
 import { useSurface } from '../lib/surface.ts';
 import { coordinatorOf } from '../lib/team.ts';
-import type { AppState, BoardSummary, BoardView, View } from '../lib/types.ts';
+import type { AppState, BoardSummary, BoardView, RecentConversation, View } from '../lib/types.ts';
+import { contactsOf } from '../lib/conversations.ts';
+import { Marks } from '../components/ConversationDock.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { DecisionsPanel } from '../components/DecisionsPanel.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -35,6 +37,9 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
   const shown = active.filter((a) => !term || fold(`${a.name} ${a.role} ${a.sector_name}`).includes(term));
   const groups = state.sectors.map((s) => ({ s, list: shown.filter((a) => a.profile === s.key && a.id !== coord?.id) })).filter((g) => g.list.length);
   const boards = useResource<BoardSummary[]>('/api/boards', ['tasks.changed']);
+  // ponto de não lida e marca de prioridade de cada colega (as mesmas da lista de Conversas)
+  const recent = useResource<RecentConversation[]>('/api/conversations/recent', ['messages.changed', 'conversations.changed', 'proposals.changed']);
+  const marks = useMemo(() => new Map(contactsOf(recent.data ?? []).map((c) => [c.agentId, c])), [recent.data]);
   const teamBoard = boards.data?.find((b) => b.audience === 'team');
   const board = useResource<BoardView>(teamBoard ? `/api/boards/${teamBoard.id}` : null, ['tasks.changed', 'runs.changed']);
   const columns = useMemo(() => (board.data?.columns ?? []).map((c) => ({ c, tasks: (board.data?.tasks ?? []).filter((t) => t.column_id === c.id && !t.completed) })), [board.data]);
@@ -64,6 +69,7 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
     <button key={a.id} className={`foco-agent ${agent?.id === a.id ? 'is-on' : ''}`} onClick={() => { onSelect(a.id); if (size === 'narrow') setPane('conversa'); }} aria-current={agent?.id === a.id ? 'true' : undefined}>
       <AgentAvatar agent={a} size={28} />
       <span className="foco-agent__txt"><b>{a.name}{fixed && <Icon name="lock" size={11} />}</b><small>{a.role}</small></span>
+      {marks.get(a.id) && <Marks unread={a.id === agent?.id ? 0 : marks.get(a.id)!.unread} priority={marks.get(a.id)!.priority ?? (marks.get(a.id)!.waiting ? 'alta' : null)} reason={marks.get(a.id)!.priorityReason ?? (marks.get(a.id)!.waiting ? `${marks.get(a.id)!.waiting} pedido(s) esperando você` : null)} />}
       {a.run_status && <span className={`dot ${RUN[a.run_status]?.cls ?? ''}`} title={RUN[a.run_status]?.label} />}
     </button>
   );

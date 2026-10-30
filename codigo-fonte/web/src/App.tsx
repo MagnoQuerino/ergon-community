@@ -11,6 +11,7 @@ import { AgentWindow } from './components/AgentWindow.tsx';
 import { AgentesView } from './views/AgentesView.tsx';
 import { AmbienteView } from './views/AmbienteView.tsx';
 import { AtividadeView } from './views/OtherViews.tsx';
+import { DocumentosView } from './views/DocumentosView.tsx';
 import { RotinasView } from './views/RotinasView.tsx';
 import { ConexoesView } from './views/ConexoesView.tsx';
 import { ConfiguracaoView } from './views/ConfiguracaoView.tsx';
@@ -103,6 +104,7 @@ const NAV: Array<{ id: View; label: string; icon: string }> = [
   { id: 'rotinas', label: 'Rotinas', icon: 'repeat' },
   { id: 'equipe', label: 'Fluxos da equipe', icon: 'layers' },
   { id: 'tarefas', label: 'Tarefas', icon: 'tasks' },
+  { id: 'documentos', label: 'Documentos', icon: 'folder' },
   { id: 'atividade', label: 'Atividade', icon: 'activity' },
   { id: 'conexoes', label: 'Conexões', icon: 'plug' },
   { id: 'configuracao', label: 'Configurações', icon: 'gear' },
@@ -333,6 +335,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <TarefasView agents={s.agents} onGo={setView} />
         ) : view === 'rotinas' ? (
           <RotinasView state={s} onOpenAgent={openAgent} onGo={setView} />
+        ) : view === 'documentos' ? (
+          <DocumentosView coord={coordLabel} />
         ) : view === 'conexoes' ? (
           <ConexoesView />
         ) : view === 'ajuda' ? (

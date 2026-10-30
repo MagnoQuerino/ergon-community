@@ -159,6 +159,8 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
         <h3>Andamento da equipe</h3>
         <label className="check"><input type="checkbox" checked={state.teamAutorun} onChange={async (e) => { try { await api.put('/api/team/autorun', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
           A equipe pega sozinha as tarefas de “A fazer”, de cima para baixo</label>
+        <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
+          A equipe puxa conversa quando você chega (boas-vindas com o resumo e quem precisa de você)</label>
         <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <p className="hint">Conversas não entram no limite: você fala com qualquer agente a qualquer hora, mesmo com a equipe ocupada. Cards, rotinas e revisões acima do limite esperam a vez — os cards em “A fazer”, onde você pode marcar Prioridade ou arrastar para o topo. Cada tarefa usa o modelo de IA e conta no consumo.</p>
       </section>

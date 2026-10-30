@@ -27,6 +27,8 @@ export interface Agent {
   look_seed?: number | null;
   /** Último desfecho encerrado: "succeeded|<finished_at>", "failed|…" ou "cancelled|…" (reações da cena). */
   last_outcome: string | null;
+  /** o jeito de falar dele com você (shared/personalities.ts) */
+  personality?: string;
 }
 export interface AppState {
   workspace: { id: string; name: string; demo_data: number };
@@ -35,6 +37,8 @@ export interface AppState {
   structures: Structure[];
   sectors: Sector[];
   teamAutorun: boolean;
+  /** a equipe puxa conversa quando você chega (ligado por padrão) */
+  teamInitiative?: boolean;
   /** personagens da equipe de partida com nome ou história de outro tema (0 = tema padrão) */
   themed: number;
   /** processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele */
@@ -109,11 +113,19 @@ export interface TaskCard {
 }
 export interface BoardView { board: BoardSummary; columns: Column[]; tasks: TaskCard[] }
 /** queued: 1 = na fila da conversa (Ctrl+Enter); vai para o agente quando ele terminar */
-export interface Message { id: string; role: 'user' | 'agent' | 'system'; content: string; mode: 'real' | 'simulated' | 'local'; run_id: string | null; created_at: string; run_status: string | null; queued?: number }
+export interface Attachment { id: string; filename: string; mime: string; size: number }
+export interface Message { id: string; role: 'user' | 'agent' | 'system'; content: string; mode: 'real' | 'simulated' | 'local'; run_id: string | null; created_at: string; run_status: string | null; queued?: number; attachments?: Attachment[] }
 /** purpose: conversa aberta por uma rotina ("routine:<id>", "routine-recommend"); null = conversa comum com o agente */
 export interface Conversation { id: string; agent_id: string; title: string; created_at: string; last_at: string | null; purpose?: string | null }
-/** atalho de conversas: last_user_at = a última vez que VOCÊ escreveu nela (o que os agentes escrevem sozinhos não conta) */
-export interface RecentConversation { id: string; agent_id: string; title: string; created_at: string; last_user_at: string; last_at: string | null }
+/**
+ * Conversa na lista: last_at = a última atividade (de qualquer um); unread = mensagens do colega que você ainda não
+ * viu; waiting = pedidos esperando você; priority = a marca do agente (urgente ou "precisa de você").
+ */
+export interface RecentConversation {
+  id: string; agent_id: string; title: string; created_at: string; last_user_at: string | null; last_at: string | null;
+  pinned_at?: string | null; priority?: 'urgente' | 'alta' | null; priority_reason?: string | null; unread?: number; waiting?: number;
+  last_text?: string | null; last_role?: string | null;
+}
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
 export const PROPOSAL_KIND: Record<string, string> = {
   question: 'pergunta', routine: 'rotina', routine_edit: 'ajuste de rotina', sector: 'setor', create_agent: 'novo agente', tools: 'ferramenta',
@@ -148,7 +160,7 @@ export interface Integration {
   setup: { needs: string; doc: string; place: string } | null;
   live: { status: string; qr: string | null; me: string | null; error: string | null; read: number; seen: number } | null;
 }
-export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
+export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
 
 export const ORIGIN_LABEL: Record<string, string> = {
   manual: 'manual', chat: 'conversa', teams: 'Teams', whatsapp: 'WhatsApp', mirror: 'espelho', demo: 'demonstração',
@@ -159,7 +171,7 @@ export const SOURCE_LABEL: Record<string, string> = {
 };
 
 /** Remove as linhas de controle ([[...]]) que os agentes escrevem para o Ergon aplicar. */
-export const stripControl = (s: string): string => s.replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '').trim();
+export const stripControl = (s: string): string => s.replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|prioridade|pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|treinar|assumir)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '').trim();
 
 // Rotinas -------------------------------------------------------------------------------------------------
 export type RoutineTrigger = { kind: 'manual' } | { kind: 'schedule'; days: number[]; time: string; tz?: string };

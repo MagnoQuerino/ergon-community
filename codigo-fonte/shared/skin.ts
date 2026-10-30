@@ -10,6 +10,7 @@
  *
  * TypeScript puro: o servidor valida com isto, o gerador dos pacotes oficiais monta com isto e a cidade desenha com isto.
  */
+import { PERSONALITY, isPersonality } from './personalities.ts';
 
 export const SKIN_FORMAT_VERSION = 1;
 export const SKIN_MAX_CHARACTERS = 10;
@@ -59,8 +60,12 @@ export interface SkinLook {
   /** id de uma roupa da skin */
   outfit: string; item: SkinItem;
 }
-/** Personagem da skin: veste um agente da equipe (pelo charKey) com nome, bio e aparência. Função e regras não mudam. */
-export interface SkinCharacter { charKey: string; name: string; bio: string; look: SkinLook }
+/**
+ * Personagem da skin: veste um agente da equipe (pelo charKey) com nome, bio e aparência. Função e regras não mudam.
+ * `personality` (opcional): o jeito de falar de fábrica do personagem (shared/personalities.ts); os extremos não valem
+ * em skin — só a pessoa escolhe um extremo, com o aviso.
+ */
+export interface SkinCharacter { charKey: string; name: string; bio: string; look: SkinLook; personality?: string }
 export interface SkinNpc { name: string; title: string; text: string; note: string; look: SkinLook }
 
 /** Cores-semente: a paleta inteira da cidade é derivada delas (deriveThemeColors); `colors` acerta o que precisar. */
@@ -279,7 +284,8 @@ export function validateSkin(input: unknown): { ok: true; skin: SkinData } | { o
   const keys = new Set<string>(); const names = new Set<string>();
   chars?.forEach((c, i) => {
     const p = `skin.characters[${i}]`;
-    if (!only(c, ['charKey', 'name', 'bio', 'look'], p, e)) return;
+    if (!only(c, ['charKey', 'name', 'bio', 'look', 'personality'], p, e)) return;
+    if (c.personality !== undefined && (!isPersonality(c.personality) || PERSONALITY[c.personality].extreme)) e.push(`${p}.personality`);
     if (typeof c.charKey !== 'string' || !/^[a-z0-9_-]{1,40}$/.test(c.charKey)) e.push(`${p}.charKey`); else if (keys.has(c.charKey)) e.push(`${p}.charKey repetido`); else keys.add(c.charKey);
     text(c.name, 40, `${p}.name`, e); text(c.bio, 300, `${p}.bio`, e);
     if (typeof c.name === 'string') { const n = c.name.trim().toLowerCase(); if (names.has(n)) e.push(`${p}.name repetido`); names.add(n); }

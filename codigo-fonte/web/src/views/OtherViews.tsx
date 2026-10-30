@@ -85,7 +85,7 @@ export function AtividadeView() {
           {!rules.data?.length && <tr><td colSpan={4} className="muted">Nenhuma regra. Frases como “a partir de agora…” no chat geram propostas.</td></tr>}</tbody></table></div>}
       {tab === 'saida' && <div className="table-wrap"><table className="table"><thead><tr><th>Criada</th><th>Canal</th><th>Estado</th><th>Texto</th></tr></thead>
         <tbody>{outbox.data?.map((o) => <tr key={o.id}><td>{t(o.created_at)}</td><td>{o.platform} ({o.mode})</td><td>{o.status}</td><td className="pre">{o.body}</td></tr>)}</tbody></table></div>}
-      {tab === 'arquivos' && <ArquivosView embedded />}
+      {tab === 'arquivos' && <><p className="hint">Os arquivos agora ficam organizados em pastas em <a href="#documentos">Documentos</a>. Aqui fica a lista corrida, do mais novo ao mais antigo.</p><ArquivosView embedded /></>}
     </div>
   );
 }

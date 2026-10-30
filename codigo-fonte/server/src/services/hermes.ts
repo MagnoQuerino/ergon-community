@@ -27,13 +27,24 @@ export interface StartRun {
   input: string; instructions: string; sessionKey: string; idempotencyKey: string;
   /** modelo do agente; vazio = modelo padrão da conta */
   model?: string | null; provider?: string | null;
+  /** imagens anexadas pela pessoa (visão do modelo): vão como partes da mensagem, em data URL */
+  images?: Array<{ mime: string; base64: string }>;
 }
+
+/**
+ * Evento da execução, ao vivo (GET /v1/runs/{id}/events, SSE, conferido no Hermes v0.22.2): message.delta (texto
+ * chegando), message.interim (comentário no meio), tool.started / tool.completed (ferramenta), subagent.start, e os
+ * terminais run.completed / run.failed / run.cancelled. O estado final continua vindo de GET /v1/runs/{id}.
+ */
+export interface RunEvent { event: string; delta?: string; text?: string; tool?: string; preview?: string }
 
 export interface HermesClient {
   health(): Promise<{ ok: boolean; detail: string }>;
   startRun(p: StartRun): Promise<{ runId: string; replayed: boolean }>;
   getRun(runId: string): Promise<RemoteRun>;
   stop(runId: string): Promise<{ accepted: boolean; detail: string }>;
+  /** acompanha a execução ao vivo até o fim (ou até `signal`); sem suporte = sem efeito */
+  events?(runId: string, onEvent: (e: RunEvent) => void, signal: AbortSignal): Promise<void>;
   toolsets?(): Promise<Toolset[]>;
   modelOptions?(refresh?: boolean): Promise<ModelOptions>;
 }
@@ -99,6 +110,11 @@ export class HttpHermesClient implements HermesClient {
 
   async startRun(p: StartRun) {
     const body: Record<string, unknown> = { input: p.input, instructions: p.instructions };
+    // com imagem: a mensagem vai em partes (texto + image_url), o formato de visão que o motor entende
+    if (p.images?.length) {
+      body.input = [{ role: 'user', content: [{ type: 'text', text: p.input },
+        ...p.images.map((i) => ({ type: 'image_url', image_url: { url: `data:${i.mime};base64,${i.base64}` } }))] }];
+    }
     if (p.model) body.model = p.model;
     if (p.model && p.provider) body.provider = p.provider;
     const r = await this.call('POST', '/v1/runs', body, {
@@ -108,6 +124,39 @@ export class HttpHermesClient implements HermesClient {
     const runId = r.json.run_id;
     if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new HermesError(502, 'o motor de IA não devolveu uma execução válida');
     return { runId, replayed: r.headers.get('idempotency-replayed') === 'true' || r.json.replayed === true };
+  }
+
+  async events(runId: string, onEvent: (e: RunEvent) => void, signal: AbortSignal): Promise<void> {
+    if (!RUN_ID.test(runId) || !this.key) return;
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/v1/runs/${runId}/events`, { headers: { Authorization: `Bearer ${this.key}`, Accept: 'text/event-stream' }, signal });
+    } catch { return; }
+    if (!res.ok || !res.body) return;
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let cut: number;
+        while ((cut = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, cut);
+          buf = buf.slice(cut + 2);
+          const data = frame.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+          if (!data) continue;
+          let e: Record<string, unknown>;
+          try { e = JSON.parse(data) as Record<string, unknown>; } catch { continue; }
+          if (typeof e.event !== 'string') continue;
+          const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+          onEvent({ event: e.event, delta: str(e.delta), text: str(e.text), tool: str(e.tool), preview: str(e.preview) });
+          if (/^run\.(completed|failed|cancelled)$/.test(e.event)) return;
+        }
+      }
+    } catch { /* conexão caiu ou parada pedida: o estado final vem da consulta normal */ }
+    finally { try { await reader.cancel(); } catch { /* já fechado */ } }
   }
 
   async getRun(runId: string): Promise<RemoteRun> {
