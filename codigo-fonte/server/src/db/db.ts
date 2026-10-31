@@ -9,6 +9,9 @@ export type Row = Record<string, SqlValue>;
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, 'migrations');
 
+/** Texto sem acento e em minúsculas (o mesmo que a tela usa para ordenar a equipe: web/src/lib/teamData.ts). */
+export const foldText = (v: string): string => v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
 /**
  * Uma conexão por processo: SQLite tem um escritor por vez, e o servidor é o único escritor.
  * Transações curtas, nunca com chamada de rede ou modelo dentro.
@@ -38,6 +41,8 @@ export class Db {
     this.raw.exec('PRAGMA busy_timeout = 5000');
     this.raw.exec('PRAGMA synchronous = NORMAL');
     this.raw.function('ws_open', { deterministic: false }, (ws: unknown) => (this.workspaceOpen(typeof ws === 'string' ? ws : null) ? 1 : 0));
+    // busca e ordem por nome sem acento e sem caixa (a galeria da equipe ordena e pesquisa no banco, por partes)
+    this.raw.function('fold', { deterministic: true }, (v: unknown) => (typeof v === 'string' ? foldText(v) : v));
   }
 
   private static applyKey(raw: Database.Database, key: Buffer): void {

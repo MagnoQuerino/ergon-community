@@ -11,6 +11,8 @@ import type { Bus } from './bus.ts';
 import { importBlueprint } from './blueprint.ts';
 import { PackageError, validatePackage, type PackageData, type Target, type ValidatedPackage } from './ergon-package.ts';
 import type { Routines } from './routines.ts';
+import { applyAgentFx, releasePackageFx } from './agent-fx.ts';
+import { audit } from './bus.ts';
 
 type Names = Record<string, { name: string; bio: string | null; personality?: string | null }>;
 interface Row { id: string; package_id: string; version: string; kind: string; title: string; verified: number; sha256: string; data: string; assets: string | null; previous: string | null; status: string; installed_at: string }
@@ -138,6 +140,9 @@ export class Packages {
     for (const a of prev.agents ?? []) { try { archiveAgent(this.db, this.bus, ws, userId, a); } catch { /* já arquivado */ } }
     for (const rt of prev.routines ?? []) this.db.run("UPDATE routines SET status = 'archived', updated_at = ? WHERE id = ? AND workspace_id = ?", now(), rt, ws);
     this.db.run("UPDATE installed_packages SET status = 'removed', removed_at = ? WHERE id = ?", now(), packageId);
+    // quem tinha um efeito deste pacote volta ao padrão da cidade (explícito; o agente fica como está)
+    const released = releasePackageFx(this.db, ws, packageId);
+    if (released) { audit(this.db, null, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'agent.fx.release', targetType: 'package', targetId: packageId, evidence: { agents: released }, result: `${released} agente(s) voltaram ao efeito padrão da cidade (pacote removido)` }); this.bus.publish(ws, 'agents.changed', {}); }
     this.bus.publish(ws, 'packages.changed');
     if (r.kind === 'skin') { this.bus.publish(ws, 'agents.changed', {}); this.bus.publish(ws, 'city.changed', {}); }
   }
@@ -165,7 +170,8 @@ export class Packages {
       for (const e of d.effects ?? []) for (const a of this.agentsOf(ws, e.target)) effects.push({ agentId: a.id, effect: e.effect, color: e.color, intensity: e.intensity });
       for (const p of d.pets ?? []) for (const a of this.agentsOf(ws, p.target)) pets.push({ agentId: a.id, species: p.species, color: p.color });
     }
-    return { skin, theme, effects, pets };
+    // escolhas pessoais (perfil/criação) por cima dos alvos dos pacotes: pessoal > alvos, sem aplicar duas vezes
+    return { skin, theme, effects: applyAgentFx(this.db, ws, effects), pets };
   }
 
   asset(ws: string, packageId: string, path: string): { bytes: Buffer; type: string } {

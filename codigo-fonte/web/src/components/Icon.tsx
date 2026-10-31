@@ -9,6 +9,7 @@ const PATHS: Record<string, string> = {
   flag: 'M5 21V4M5 4h11l-2 4 2 4H5',
   sidebar: 'M4 4h16v16H4zM9 4v16',
   pulse: 'M3 12h4l3-8 4 16 3-8h4',
+  shuffle: 'M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5',
   temple: 'M3 21h18M5 18h14M6 18V10M10 18V10M14 18V10M18 18V10M4 10h16L12 4 4 10z',
   users: 'M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM21 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8',
   tasks: 'M9 11l2 2 4-4M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z',

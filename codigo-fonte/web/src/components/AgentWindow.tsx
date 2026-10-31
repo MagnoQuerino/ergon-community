@@ -11,6 +11,9 @@ import { ModelSelect, TOOL_BADGE, modelName } from './AgentProfile.tsx';
 import { TrainTab } from './TrainTab.tsx';
 import { PersonalityPicker } from './PersonalityPicker.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
+import { AgentPreview } from './AgentPreview.tsx';
+import { EffectPicker, effectsFor, useFxOptions, type FxChoice } from './EffectPicker.tsx';
+import { MoveTray, type Pick } from './MoveTray.tsx';
 import { newSeed } from '../world/pack.ts';
 
 type Tab = 'conversa' | 'perfil' | 'treinar' | 'atividade';
@@ -80,6 +83,22 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newMethod, setNewMethod] = useState('');
   const [skillQ, setSkillQ] = useState('');
+  // efeito pessoal (Pacotes instalados): vale na hora, sem esperar o Salvar
+  const fxOptions = useFxOptions();
+  const fxNow = useResource<{ mode: FxChoice['mode']; option: string | null }>(`/api/agents/${agent.id}/fx`, ['agents.changed']);
+  const fxChoice: FxChoice = fxNow.data?.mode === 'custom' && fxNow.data.option ? { mode: 'custom', option: fxNow.data.option } : { mode: fxNow.data?.mode === 'off' ? 'off' : 'inherit' };
+  const setFx = async (c: FxChoice) => {
+    try { await api.put(`/api/agents/${agent.id}/fx`, c); fxNow.reload(); setMsg({ kind: 'ok', text: c.mode === 'inherit' ? 'Efeito: o padrão da cidade.' : c.mode === 'off' ? 'Sem efeito neste agente.' : 'Efeito aplicado (na cidade também).' }); }
+    catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
+  };
+  // mover: a mesma operação da Equipe (setor OU construção, com conferência no servidor)
+  const [tray, setTray] = useState<'sector' | 'structure' | null>(null);
+  const moveTo = async (p: Pick) => {
+    setTray(null);
+    const body = p.kind === 'sector' ? { sectorKey: p.key, expect: { sectorKey: agent.profile } } : { structureId: p.id, expect: { structureId: agent.building_id }, ...(p.addFloor ? { addFloor: true } : {}) };
+    try { await api.post(`/api/agents/${agent.id}/move`, body); setMsg({ kind: 'ok', text: p.kind === 'sector' ? `Agora no setor ${p.name}. Papel, instruções e ferramentas continuam.` : `Agora mora em ${p.name}. Setor e trabalhos continuam.` }); reload(); }
+    catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
+  };
   const [drafting, setDrafting] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
   const [offResult, setOffResult] = useState<{ redistributed: Array<{ number: number; title: string; to: string; reason: string }>; tools: Array<{ label: string; to: string }> } | null>(null);
@@ -155,7 +174,7 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
       {fixed && <p className="fixed-note"><Icon name="lock" size={13} /> <span><b>Cargo fixo.</b> O Coordenador está sempre na equipe e a função dele não muda: ele recebe os pedidos e encaminha. Nome, aparência, história, foco, modelo e ferramentas extras são seus.</span></p>}
       {/* aparência: o boneco da cidade, sorteado do pacote gráfico (Grécia Clássica) a cada "Redefinir" */}
       <div className="look-row">
-        <AgentAvatar agent={{ ...agent, look_seed: f.lookSeed }} size={66} round={false} className="look-row__img" />
+        <div className="look-row__stage"><AgentPreview agent={{ ...agent, look_seed: f.lookSeed }} fx={effectsFor(fxChoice, fxOptions, agent)} size={3} label={`Aparência de ${agent.name}`} /></div>
         <div className="look-row__txt">
           <b>Aparência</b>
           <span className="hint">O boneco da cidade e o retrato das conversas. "Redefinir" sorteia outro, combinando cabelo, barba, roupa e objetos da Grécia Clássica; a cor da roupa continua a do agente.</span>
@@ -164,8 +183,18 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
             {agent.char_key && f.lookSeed !== null && <button type="button" className="btn btn--sm btn--ghost" onClick={() => setF((x) => ({ ...x, lookSeed: null }))}>Voltar ao original</button>}
             {f.lookSeed !== (agent.look_seed ?? null) && <span className="hint">Clique em Salvar para manter.</span>}
           </div>
+          <b className="look-row__sub">Efeitos dos seus Pacotes</b>
+          <EffectPicker value={fxChoice} onChange={(c) => void setFx(c)} options={fxOptions} />
+          {active && (
+            <div className="row row--wrap look-row__move">
+              <span className="hint"><Icon name="pin" size={12} /> {state.structures.find((s) => s.id === agent.building_id)?.name ?? '—'} · setor {state.sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name}</span>
+              <button type="button" className="btn btn--sm btn--ghost" onClick={() => setTray('structure')}><Icon name="temple" size={13} /> Mover para…</button>
+            </div>
+          )}
         </div>
       </div>
+      {tray && <MoveTray agent={{ id: agent.id, name: agent.name, role: agent.role, color: agent.color, status: agent.status, demo: !!agent.demo, coordinator: !!agent.coordinator, char_key: agent.char_key, look_seed: agent.look_seed ?? null, deactivation_note: agent.deactivation_note, sector_key: agent.profile, sector_name: agent.sector_name, building_id: agent.building_id, building_name: null, floor_name: null, run_status: agent.run_status }}
+        initial={tray} title={`Mover ${agent.name} para…`} onPick={(p) => void moveTo(p)} onClose={() => setTray(null)} />}
       <PersonalityPicker agent={agent} onChanged={reload} />
       <div className="editor__grid">
         <label className="field">Nome<input value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>

@@ -23,7 +23,10 @@ import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
 import { Bus, audit } from './services/bus.ts';
-import { addSimulatedFloor, archiveAgent, capacityInfo, createAgent, ensureCoordinator, limitsFor, reactivateAgent, removeFloor, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
+import { addSimulatedFloor, archiveAgent, capacityInfo, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, removeFloor, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
+import { listTeamAgents, listTeamSectors, listTeamStructures, teamAgent, teamSummary } from './services/team-query.ts';
+import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
+import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
 import { activeCardsOf, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
 import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
 import { Initiative } from './services/initiative.ts';
@@ -683,9 +686,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
 
   // Estado geral (snapshot para a interface) -----------------------------------------------------
-  app.get('/api/state', async (req) => {
-    const a = auth(req);
-    const ws = db.get<{ id: string; name: string; demo_data: number }>('SELECT id, name, demo_data FROM workspaces WHERE id = ?', a.workspaceId);
+  // agentes completos (perfil: instruções, ferramentas, modelo, voz). O /api/state ainda traz todos (consumidores antigos:
+  // cidade, conversas, quadro — docs/EQUIPE_VISUAL.md); a Equipe usa as consultas por partes e o perfil pelo id.
+  const fullAgents = (workspaceId: string, userId: string, agentId?: string): Array<Record<string, unknown>> => {
     const agents = db.all(
       `SELECT a.id, a.name, a.role, a.color, a.status, a.demo, a.floor_id, f.level AS floor_level, f.building_id, p.key AS profile, p.name AS sector_name,
               a.char_key, a.bio, a.skills, a.tools, a.model_hint, a.model, a.provider, a.hermes_skills, a.charter, a.deactivation_note, a.coordinator, a.look_seed,
@@ -693,20 +696,27 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
               (SELECT r.status || '|' || r.finished_at FROM runs r WHERE r.agent_id = a.id AND r.status IN ('succeeded', 'failed', 'cancelled')
                  AND r.finished_at IS NOT NULL ORDER BY r.finished_at DESC LIMIT 1) AS last_outcome
          FROM agents a JOIN floors f ON f.id = a.floor_id JOIN profiles p ON p.id = a.profile_id
-        WHERE a.workspace_id = ? ORDER BY a.status, f.building_id, f.level, a.created_at, a.rowid`, a.workspaceId);
+        WHERE a.workspace_id = ? ${agentId ? 'AND a.id = ?' : ''} ORDER BY a.status, f.building_id, f.level, a.created_at, a.rowid`, ...(agentId ? [workspaceId, agentId] : [workspaceId]));
+    const channels = integrations.connectedChannels(workspaceId);
+    const parse = (v: unknown): string[] => { try { const x = JSON.parse(String(v ?? '[]')); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
+    for (const ag of agents as Array<Record<string, unknown>>) {
+      // a voz do colega para esta pessoa (a escolha dela ou o padrão do agente)
+      ag.personality = personalityOf(db, workspaceId, String(ag.id), userId);
+      ag.skills = parse(ag.skills);
+      ag.hermes_skills = parse(ag.hermes_skills);
+      ag.tools = parse(ag.tools).map((t) => TOOLS[t]).filter(Boolean).map((t) => toolStatus(t, { channels, workspaceId }));
+    }
+    return agents as Array<Record<string, unknown>>;
+  };
+
+  app.get('/api/state', async (req) => {
+    const a = auth(req);
+    const ws = db.get<{ id: string; name: string; demo_data: number }>('SELECT id, name, demo_data FROM workspaces WHERE id = ?', a.workspaceId);
+    const agents = fullAgents(a.workspaceId, a.userId);
     const counts = db.get<{ running: number; queued: number; waiting: number; processes: number }>(
       `SELECT SUM(status = 'running') AS running, SUM(status = 'queued') AS queued, SUM(status = 'waiting_user') AS waiting,
               SUM(status = 'running' AND ${PROCESS_SQL}) AS processes
          FROM runs WHERE workspace_id = ?`, a.workspaceId);
-    const channels = integrations.connectedChannels(a.workspaceId);
-    const parse = (v: unknown): string[] => { try { const x = JSON.parse(String(v ?? '[]')); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
-    for (const ag of agents as Array<Record<string, unknown>>) {
-      // a voz do colega para esta pessoa (a escolha dela ou o padrão do agente)
-      ag.personality = personalityOf(db, a.workspaceId, String(ag.id), a.userId);
-      ag.skills = parse(ag.skills);
-      ag.hermes_skills = parse(ag.hermes_skills);
-      ag.tools = parse(ag.tools).map((t) => TOOLS[t]).filter(Boolean).map((t) => toolStatus(t, { channels, workspaceId: a.workspaceId }));
-    }
     return {
       workspace: ws, capacity: capacityInfo(db, a.workspaceId, cfg.maxFloors), agents, structures: listStructures(db, a.workspaceId),
       // processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele
@@ -744,14 +754,83 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   app.get('/api/sectors', async (req) => listSectors(db, auth(req).workspaceId));
 
+  // Equipe por partes: totais no banco, páginas leves com cursor, perfil completo só ao abrir (services/team-query.ts)
+  const cursorQ = { type: 'string', pattern: '^[A-Za-z0-9_-]{1,400}$' };
+  const limitQ = { type: 'string', pattern: '^[0-9]{1,3}$' };
+  const searchQ = { type: 'string', maxLength: 80 };
+  app.get('/api/team/summary', async (req) => {
+    const a = auth(req);
+    return { ...teamSummary(db, a.workspaceId), themed: themedCharacters(db, a.workspaceId).length + themedSectors(db, a.workspaceId).length, autoGrow: limits.autoGrow };
+  });
+  app.get('/api/team/agents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+    q: searchQ, sector: sectorKey, structure: S.id('bld'), status: { enum: ['active', 'archived', 'all'] }, cursor: cursorQ, limit: limitQ } } } }, async (req) => {
+    const q = req.query as { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all'; cursor?: string; limit?: string };
+    return listTeamAgents(db, auth(req).workspaceId, { ...q, limit: q.limit ? Number(q.limit) : undefined });
+  });
+  app.get('/api/team/agents/:id', { schema: { params: idParams('agt') } }, async (req) => {
+    const r = teamAgent(db, auth(req).workspaceId, (req.params as { id: string }).id);
+    if (!r) throw notFound('agente');
+    return r;
+  });
+  app.get('/api/team/sectors', { schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+    q: searchQ, cursor: cursorQ, limit: limitQ, sample: { enum: ['0', '1'] } } } } }, async (req) => {
+    const q = req.query as { q?: string; cursor?: string; limit?: string; sample?: string };
+    return listTeamSectors(db, auth(req).workspaceId, { q: q.q, cursor: q.cursor, limit: q.limit ? Number(q.limit) : undefined, sample: q.sample !== '0' });
+  });
+  app.get('/api/team/structures', { schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+    q: searchQ, cursor: cursorQ, limit: limitQ, free: { enum: ['0', '1'] }, sample: { enum: ['0', '1'] } } } } }, async (req) => {
+    const q = req.query as { q?: string; cursor?: string; limit?: string; free?: string; sample?: string };
+    return listTeamStructures(db, auth(req).workspaceId, cfg.maxFloors, { q: q.q, cursor: q.cursor, limit: q.limit ? Number(q.limit) : undefined, free: q.free === '1', sample: q.sample !== '0' });
+  });
+  // organização assistida: sugestão por regra local (sem IA), aplicada só pela pessoa, numa transação só
+  app.get('/api/team/distribution', async (req) => suggestDistribution(db, auth(req).workspaceId));
+  app.post('/api/team/distribution/apply', { schema: { body: { type: 'object', additionalProperties: false, required: ['planId'], properties: { planId: { type: 'string', pattern: '^[a-f0-9]{32}$' } } } } }, async (req) => {
+    const a = owner(req);
+    return applyDistribution(db, bus, a.workspaceId, a.userId, (req.body as { planId: string }).planId);
+  });
+  app.post('/api/team/distribution/undo/:id', { schema: { params: idParams('aud') } }, async (req) => {
+    const a = owner(req);
+    return undoDistribution(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id);
+  });
+  // perfil completo pelo id (instruções, ferramentas, modelo, voz e o efeito escolhido)
+  app.get('/api/agents/:id', { schema: { params: idParams('agt') } }, async (req) => {
+    const a = auth(req); const agentId = (req.params as { id: string }).id;
+    const r = fullAgents(a.workspaceId, a.userId, agentId)[0];
+    if (!r) throw notFound('agente');
+    return { ...r, fx: agentFxChoice(db, a.workspaceId, agentId) };
+  });
+  // mover: arrastar, "Mover para…" e Desfazer usam esta operação (o servidor confere capacidade, permissão e conflito)
+  const placeQ = { type: 'object', additionalProperties: false, properties: { sectorKey, structureId: S.id('bld') } };
+  app.post('/api/agents/:id/move', { schema: { params: idParams('agt'), body: { type: 'object', additionalProperties: false, properties: {
+    sectorKey, structureId: S.id('bld'), addFloor: { type: 'boolean' }, expect: placeQ } } } }, async (req) => {
+    const a = owner(req);
+    return moveAgent(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, req.body as Parameters<typeof moveAgent>[5], cfg.maxFloors);
+  });
+  const fxChoiceSchema = { type: 'object', additionalProperties: false, required: ['mode'], properties: {
+    mode: { enum: ['inherit', 'off', 'custom'] }, option: { type: 'string', pattern: '^pkg_[a-f0-9]{32}:[0-9]{1,2}$' } } };
+  app.get('/api/agents/:id/fx', { schema: { params: idParams('agt') } }, async (req) => agentFxChoice(db, auth(req).workspaceId, (req.params as { id: string }).id));
+  app.put('/api/agents/:id/fx', { schema: { params: idParams('agt'), body: fxChoiceSchema } }, async (req) => {
+    const a = owner(req); const agentId = (req.params as { id: string }).id; const b = req.body as { mode: 'inherit' | 'off' | 'custom'; option?: string };
+    if (b.mode === 'custom' && !b.option) throw new HttpError(400, 'option', 'escolha um efeito');
+    db.tx(() => {
+      setAgentFx(db, a.workspaceId, agentId, (b.mode === 'custom' ? { mode: 'custom', option: b.option! } : { mode: b.mode }) as FxChoice);
+      audit(db, null, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'agent.fx', targetType: 'agent', targetId: agentId, evidence: b, result: b.mode === 'inherit' ? 'efeito: padrão da cidade' : b.mode === 'off' ? 'efeito: nenhum' : 'efeito pessoal escolhido' });
+    });
+    bus.publish(a.workspaceId, 'agents.changed', { id: agentId });
+    bus.publish(a.workspaceId, 'city.changed', {});
+    return agentFxChoice(db, a.workspaceId, agentId);
+  });
+
   app.post('/api/agents', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['name', 'role'], properties: {
       name: S.str(40, 1), role: S.str(80, 1), sectorKey: { anyOf: [{ const: 'auto' }, sectorKey] }, profileKey: sectorKey,
       structureId: S.id('bld'), floorId: S.id('flr'), color: S.str(7), charter: S.str(4000), skills: strList(12, 80), tools: strList(20, 30),
-      hermesSkills: strList(20, 80), model: modelId, provider: providerId } } },
+      hermesSkills: strList(20, 80), model: modelId, provider: providerId,
+      lookSeed: { type: 'integer', minimum: 1, maximum: 2147483647 }, fx: fxChoiceSchema } } },
   }, async (req, reply) => {
     const a = owner(req);
     const b = req.body as Parameters<typeof createAgent>[4];
+    if (b.fx?.mode === 'custom' && !(b.fx as { option?: string }).option) throw new HttpError(400, 'option', 'escolha um efeito');
     if (b.model && b.provider) await aiOf(a.workspaceId).assertModel(b.provider, b.model);
     return reply.status(201).send(createAgent(db, bus, a.workspaceId, a.userId, b, limits));
   });
@@ -1961,6 +2040,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.addContentTypeParser('application/x-ergon', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
   app.get('/api/packages', async (req) => packages.list(auth(req).workspaceId));
   app.get('/api/packages/cosmetics', async (req) => packages.cosmetics(auth(req).workspaceId));
+  // efeitos que dá para escolher por agente: só os dos pacotes instalados e ativos (comprar ou instalar é na loja)
+  app.get('/api/packages/fx-options', async (req) => fxOptions(db, auth(req).workspaceId));
   app.post('/api/packages/preview', ergonBody, async (req) => packages.preview(owner(req).workspaceId, req.body as Buffer));
   app.post('/api/packages/install', ergonBody, async (req) => { const a = owner(req); return packages.install(a.workspaceId, a.userId, req.body as Buffer); });
   app.delete('/api/packages/:id', { schema: { params: idParams('pkg') } }, async (req) => { const a = owner(req); packages.uninstall(a.workspaceId, a.userId, (req.params as { id: string }).id); return { ok: true }; });

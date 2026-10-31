@@ -9,6 +9,7 @@ import { COORDINATOR_ONLY, COORDINATOR_ROLE, COORDINATOR_SECTOR, COORDINATOR_TOO
 import { SECTORS, autoSector, listSectors, sectorByKey } from './sectors.ts';
 import { onboardingChoice, presetByKey } from './team-presets.ts';
 import { addStructureFloor, growForAgent } from './structures.ts';
+import { setAgentFx, type FxChoice } from './agent-fx.ts';
 
 /**
  * Limites de agentes. Local: quantos quiser — sem vaga, a cidade cresce sozinha. Nuvem: conforme o plano
@@ -90,6 +91,10 @@ export interface AgentInput {
   structureId?: string | null; floorId?: string | null; color?: string | null;
   charter?: string | null; skills?: string[]; tools?: string[]; hermesSkills?: string[];
   model?: string | null; provider?: string | null;
+  /** a aparência da prévia ("Sortear outro"): a mesma semente e cor ficam gravadas, para o boneco salvo ser o que se viu */
+  lookSeed?: number | null;
+  /** efeito dos Pacotes instalados escolhido na criação (sem = herda o padrão da cidade) */
+  fx?: FxChoice;
 }
 
 /** Instruções iniciais de um agente novo (o usuário edita depois, ou pede à coordenação que escreva). */
@@ -130,8 +135,10 @@ export function createAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
          VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
         agentId, workspaceId, floorId, sector.id, name, role, color, now(), db.seal(workspaceId, charter), JSON.stringify(skills), JSON.stringify(tools),
         JSON.stringify(cleanList(input.hermesSkills, 20, 80)), input.model ?? null, input.model ? input.provider ?? null : null,
-        // agente novo nasce com um boneco sorteado do pacote gráfico (a equipe pode crescer sem bonecos repetidos)
-        randomInt(1, 2147483647));
+        // agente novo nasce com o boneco da prévia (semente enviada) ou um sorteado do pacote gráfico
+        input.lookSeed && Number.isInteger(input.lookSeed) && input.lookSeed > 0 && input.lookSeed <= 2147483647 ? input.lookSeed : randomInt(1, 2147483647));
+      // efeito escolhido na criação: na mesma transação (cancelou ou falhou, nada fica pela metade)
+      if (input.fx && input.fx.mode !== 'inherit') setAgentFx(db, workspaceId, agentId, input.fx);
       audit(db, null, { workspaceId, actorType: 'user', actorId: actorUserId, action: 'agent.create', targetType: 'agent', targetId: agentId,
         evidence: { name, role, sector: sector.key, auto: auto?.reason ?? null }, result: 'ok' });
       return { id: agentId, sector: sector.name, sectorReason: auto?.reason ?? null };
@@ -199,6 +206,81 @@ export function updateAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
     mapCapacityError(err);
   }
   bus.publish(workspaceId, 'agents.changed', { id: agentId });
+}
+
+/** Onde o agente está: o setor (vínculo funcional) e a construção (endereço). */
+export interface Placement { sectorKey: string; sectorName: string; structureId: string | null; structureName: string | null }
+export interface MoveInput {
+  sectorKey?: string; structureId?: string;
+  /** construção cheia: adiciona um andar e muda, na mesma transação (só quando a pessoa escolhe) */
+  addFloor?: boolean;
+  /** onde a tela achava que ele estava: se mudou depois (outra aba, outra pessoa), nada é sobrescrito */
+  expect?: { sectorKey?: string; structureId?: string };
+}
+
+function placementOf(db: Db, workspaceId: string, agentId: string): Placement & { status: string; coordinator: number; name: string; floor_id: string } {
+  const r = db.get<{ status: string; coordinator: number; name: string; floor_id: string; sk: string; sn: string; bid: string | null; bn: string | null }>(
+    `SELECT a.status, a.coordinator, a.name, a.floor_id, p.key AS sk, p.name AS sn, f.building_id AS bid, b.name AS bn
+       FROM agents a JOIN profiles p ON p.id = a.profile_id JOIN floors f ON f.id = a.floor_id LEFT JOIN buildings b ON b.id = f.building_id
+      WHERE a.id = ? AND a.workspace_id = ?`, agentId, workspaceId);
+  if (!r) throw notFound('agente');
+  return { status: r.status, coordinator: Number(r.coordinator), name: r.name, floor_id: r.floor_id, sectorKey: r.sk, sectorName: r.sn, structureId: r.bid, structureName: r.bn };
+}
+
+/**
+ * Mover um agente (arrastar, "Mover para…" e Desfazer usam esta mesma operação): OU de setor (só o vínculo funcional;
+ * papel, instruções, ferramentas, métodos e modelo ficam) OU de construção (só o endereço; setor, histórico e trabalhos
+ * ficam). O Coordenador não troca de setor, mas pode mudar de construção. Construção cheia: erro claro, a menos que a
+ * pessoa tenha escolhido "Adicionar andar e mover" (feito numa transação só). O servidor é a autoridade: capacidade,
+ * permissão e workspace são conferidos aqui, e `expect` impede sobrescrever uma mudança feita depois.
+ */
+export function moveAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: string, agentId: string, m: MoveInput, maxFloors: number):
+  { from: Placement; to: Placement; changed: boolean; grew: boolean } {
+  if ((m.sectorKey === undefined) === (m.structureId === undefined)) throw new HttpError(400, 'move', 'informe o setor OU a construção de destino');
+  let grew = false;
+  try {
+    const out = db.tx(() => {
+      const cur = placementOf(db, workspaceId, agentId);
+      const from: Placement = { sectorKey: cur.sectorKey, sectorName: cur.sectorName, structureId: cur.structureId, structureName: cur.structureName };
+      const e = m.expect;
+      if (e && ((e.sectorKey !== undefined && e.sectorKey !== cur.sectorKey) || (e.structureId !== undefined && e.structureId !== cur.structureId))) {
+        const where = e.sectorKey !== undefined ? `no setor ${cur.sectorName}` : `em ${cur.structureName ?? 'outra construção'}`;
+        throw new HttpError(409, 'moved_since', `${cur.name} mudou de lugar depois (agora está ${where}): nada foi alterado.`);
+      }
+      if (m.sectorKey !== undefined) {
+        if (m.sectorKey === cur.sectorKey) return { from, to: from, changed: false };
+        if (cur.coordinator === 1) throw new HttpError(409, 'fixed_sector', FIXED_MSG.sector);
+        const s = sectorByKey(db, workspaceId, m.sectorKey);
+        db.run('UPDATE agents SET profile_id = ? WHERE id = ? AND workspace_id = ?', s.id, agentId, workspaceId);
+        audit(db, null, { workspaceId, actorType: 'user', actorId: actorUserId, action: 'agent.move', targetType: 'agent', targetId: agentId,
+          evidence: { kind: 'setor', from: cur.sectorKey, to: s.key }, result: `${cur.name}: setor ${cur.sectorName} → ${s.name} (papel, instruções e ferramentas mantidos)` });
+        return { from, to: { ...from, sectorKey: s.key, sectorName: s.name }, changed: true };
+      }
+      const sid = m.structureId!;
+      if (sid === cur.structureId) return { from, to: from, changed: false };
+      if (cur.status !== 'active') throw new HttpError(409, 'inactive', `${cur.name} está desativado: reative antes de mudar de endereço.`);
+      const b = db.get<{ name: string; kind: string }>('SELECT name, kind FROM buildings WHERE id = ? AND workspace_id = ? AND removed_at IS NULL', sid, workspaceId);
+      if (!b) throw new HttpError(404, 'not_found', 'Esta construção não existe mais: escolha outra.');
+      if (typeOf(b.kind)?.category !== 'trabalho') throw new HttpError(409, 'not_building', `${b.name} não recebe agentes.`);
+      let floor: string;
+      try { floor = pickFloor(db, workspaceId, null, sid); }
+      catch (err) {
+        if (!(err instanceof HttpError) || err.code !== 'structure_full' || !m.addFloor) throw err;
+        floor = addStructureFloor(db, bus, workspaceId, actorUserId, sid, maxFloors);
+        grew = true;
+      }
+      db.run('UPDATE agents SET floor_id = ? WHERE id = ? AND workspace_id = ?', floor, agentId, workspaceId);
+      audit(db, null, { workspaceId, actorType: 'user', actorId: actorUserId, action: 'agent.move', targetType: 'agent', targetId: agentId,
+        evidence: { kind: 'construção', from: cur.structureId, to: sid, grew }, result: `${cur.name}: ${cur.structureName ?? '—'} → ${b.name}${grew ? ' (com um andar novo)' : ''} (setor e trabalhos mantidos)` });
+      return { from, to: { ...from, structureId: sid, structureName: b.name }, changed: true };
+    });
+    if (out.changed) bus.publish(workspaceId, 'agents.changed', { id: agentId, move: { from: out.from, to: out.to } });
+    if (grew) bus.publish(workspaceId, 'city.changed', { id: m.structureId });
+    return { ...out, grew };
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    mapCapacityError(err);
+  }
 }
 
 const ACTIVE_RUN = "('queued', 'running', 'waiting_user')";

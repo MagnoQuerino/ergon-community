@@ -101,7 +101,7 @@ export function App() {
 
 const NAV: Array<{ id: View; label: string; icon: string }> = [
   { id: 'ambiente', label: 'Cidade', icon: 'temple' },
-  { id: 'agentes', label: 'Agentes', icon: 'users' },
+  { id: 'agentes', label: 'Equipe', icon: 'users' },
   { id: 'rotinas', label: 'Rotinas', icon: 'repeat' },
   { id: 'equipe', label: 'Fluxos da equipe', icon: 'layers' },
   { id: 'tarefas', label: 'Tarefas', icon: 'tasks' },
@@ -116,7 +116,7 @@ const HELP_NAV = { id: 'ajuda' as View, label: 'Ajuda', icon: 'help' };
 /** Tour inicial: um passo por área (os textos usam o nome de quem coordena hoje). */
 const tourSteps = (coord: string): TourStep[] => [
   { target: 'nav-ambiente', title: 'Cidade', text: `A cidade da sua equipe. Cada pessoa nas construções é um agente; clique em alguém para conversar.` },
-  { target: 'nav-agentes', title: 'Agentes', text: `Veja e edite cada agente: nome, função, setor, instruções, ferramentas e história. Ou peça a ${coord}.` },
+  { target: 'nav-agentes', title: 'Equipe', text: `Os personagens da equipe, por setor ou por construção: arraste para reorganizar, clique para abrir o perfil, crie agentes com prévia. Ou peça a ${coord}.` },
   { target: 'nav-rotinas', title: 'Rotinas', text: 'Trabalhos que se repetem sozinhos, como o Briefing Diário. Ao ativar, a rotina se adapta ao seu jeito.' },
   { target: 'nav-equipe', title: 'Fluxos da equipe', text: 'O quadro onde os agentes trabalham: cada card tem responsável e o histórico do que foi feito.' },
   { target: 'nav-tarefas', title: 'Tarefas', text: 'As suas tarefas. Quando quiser ajuda, envie qualquer uma para a equipe.' },

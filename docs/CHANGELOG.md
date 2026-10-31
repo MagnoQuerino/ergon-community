@@ -1,5 +1,21 @@
 # Novidades
 
+## 1.1.0-rc.18 (pré-versão de teste)
+
+Inclui também as novidades da rc.17 (abaixo), que não saiu sozinha.
+
+- **Agentes agora é Equipe**, com os personagens da cidade de corpo inteiro. Veja **por setor** (o que cada um faz)
+  ou **por estrutura** (onde cada um mora). Clique no nome para abrir o perfil.
+- **Reorganize arrastando pelo boneco**: para outro setor (o papel, as instruções e as ferramentas continuam) ou
+  para outra construção (o setor e os trabalhos continuam). Sem arrastar: "Mover para…", com busca. Cada mudança
+  tem **Desfazer**. Construção cheia? Escolha "Adicionar andar e mover" ou outra construção — nada muda sozinho.
+- **Novo agente com prévia**: o boneco que você vê é o que vai para a cidade. "Sortear outro" troca só a aparência.
+  Dá para escolher um efeito dos seus Pacotes na hora, ou depois no perfil.
+- **Sugerir distribuição**: junta colegas do mesmo setor na mesma construção, usando só lugares livres. Você vê
+  antes e depois e decide se aplica; dá para desfazer.
+- **Equipes grandes**: a página Equipe carrega aos poucos e só desenha o que está na tela — testada com 10.000
+  agentes. (A Cidade com equipes desse tamanho ainda está em trabalho.)
+
 ## 1.1.0-rc.17 (pré-versão de teste)
 
 - **Entregue nem sempre é concluído.** Textos, documentos, pesquisas e análises chegam para a sua aprovação, na coluna
