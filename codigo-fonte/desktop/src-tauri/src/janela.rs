@@ -195,6 +195,9 @@ pub fn criar_principal(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .min_inner_size(380.0, 520.0)
         .center()
         .visible(false)
+        // arquivo arrastado do computador vai para a tela (conversa, Documentos): sem isto, no Windows o WebView
+        // entrega o arquivo ao aplicativo e o "soltar" da página nunca acontece
+        .disable_drag_drop_handler()
         .build()?;
     // tamanho, posição e "maximizada" da última vez (o plugin descarta posição de monitor que não existe mais)
     let _ = w.restore_state(StateFlags::all() & !StateFlags::VISIBLE);

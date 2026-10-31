@@ -108,7 +108,12 @@ export class Initiative {
     const tz = workspaceTz(this.db, workspaceId);
     const coord = this.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND coordinator = 1 AND status = 'active'", workspaceId)?.id;
     const by = new Map<string, typeof cards>();
-    for (const c of cards) if (c.agent_id && c.agent_id !== coord) by.set(c.agent_id, [...(by.get(c.agent_id) ?? []), c]);
+    for (const c of cards) {
+      // entrega esperando a sua aprovação: quem entregou cobra (quem fez a última etapa não fala por ele)
+      const t = this.db.get<{ deliver_agent_id: string | null; delivered_at: string | null }>('SELECT deliver_agent_id, delivered_at FROM tasks WHERE id = ?', c.id);
+      const who = c.need === 'approval' && t?.delivered_at && t.deliver_agent_id ? t.deliver_agent_id : c.agent_id;
+      if (who && who !== coord) by.set(who, [...(by.get(who) ?? []), c]);
+    }
     const name = firstName(this.db, userId);
     const today = local(tz).day;
     for (const [agentId, list] of [...by].slice(0, 6)) {
@@ -157,7 +162,8 @@ export class Initiative {
     for (const p of open) this.link(workspaceId, p.id, conv);
     const name = firstName(this.db, userId);
     const line = (c: { number: number; title: string; agent: string | null }) => `- card #${c.number} “${clip(c.title, 90)}”${c.agent ? ` (${c.agent})` : ''}`;
-    const need = (c: (typeof waiting)[number]) => `- ${c.agent_name ?? 'alguém da equipe'} precisa de você no card #${c.number} “${clip(c.title, 90)}”: ${c.need === 'info' ? `uma informação${c.question ? ` (${clip(c.question, 160)})` : ''}` : c.need === 'review' ? 'uma decisão sobre a revisão' : 'uma aprovação'}`;
+    const unseen = (taskId: string) => !!this.db.get("SELECT 1 AS x FROM tasks t JOIN conversations c ON c.id = t.conversation_id WHERE t.id = ? AND t.delivered_at IS NOT NULL AND COALESCE(c.read_at, '') < t.delivered_at", taskId);
+    const need = (c: (typeof waiting)[number]) => `- ${c.agent_name ?? 'alguém da equipe'} precisa de você no card #${c.number} “${clip(c.title, 90)}”: ${c.need === 'info' ? `uma informação${c.question ? ` (${clip(c.question, 160)})` : ''}` : c.need === 'review' ? 'uma decisão sobre a revisão' : `aprovar a entrega${unseen(c.id) ? ' (entregue, e ela ainda nem abriu)' : ''}`}`;
     const facts = [
       done.length ? `Entregue enquanto ${name || 'a pessoa'} estava fora:\n${done.map(line).join('\n')}` : '',
       going.length ? `Andando agora:\n${going.map(line).join('\n')}` : '',
@@ -216,7 +222,7 @@ export class Initiative {
         this.bus.publish(workspaceId, 'proposals.changed', { conversationId });
       }
     }
-    const what = cards.map((c) => `- card #${c.number} “${clip(c.title, 90)}”: ${c.need === 'info' ? `precisa de uma informação${c.question ? `: ${clip(c.question, 300)}` : ''}` : c.need === 'review' ? 'a revisão não passou; precisa da decisão dela (aprovar assim mesmo ou devolver com instrução)' : 'está pronto e precisa da aprovação dela'}`).join('\n');
+    const what = cards.map((c) => `- card #${c.number} “${clip(c.title, 90)}”: ${c.need === 'info' ? `precisa de uma informação${c.question ? `: ${clip(c.question, 300)}` : ''}` : c.need === 'review' ? 'a revisão não passou; precisa da decisão dela (aprovar assim mesmo ou devolver com instrução)' : 'foi entregue e espera a aprovação dela (Aprovar conclui; Pedir ajustes faz outra versão no mesmo card): pergunte se ela conseguiu ler'}`).join('\n');
     return [
       'Você puxou conversa com a pessoa porque precisa dela nisto (fatos do sistema):', what,
       'Agora explique em poucas palavras, no seu jeito, o que precisa e por quê; o cartão para ela responder aparece logo abaixo da sua mensagem (não peça para ela abrir o card). Se ela trouxe outro assunto, atenda primeiro e lembre da sua pendência em uma frase no fim.',

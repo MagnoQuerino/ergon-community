@@ -40,8 +40,10 @@ export const KIND_LABEL: Record<ResultKind, string> = {
 /** Coluna do quadro de cada estado: revisão, espera e falha ficam em andamento (o estado real aparece no card). */
 const COLUMN: Record<WorkState, string> = {
   solicitada: 'A fazer', processamento: 'Em andamento', resultado: 'Em andamento', validacao: 'Em andamento', concluida: 'Concluído',
-  aguardando_info: 'Em andamento', falha: 'Em andamento', revisao: 'Em andamento', aguardando_aprovacao: 'Em andamento',
+  aguardando_info: 'Em andamento', falha: 'Em andamento', revisao: 'Em andamento', aguardando_aprovacao: 'Com você',
 };
+/** coluna de quem está esperando você (aprovação); quadro antigo sem ela: fica em andamento */
+export const WITH_YOU = 'Com você';
 const WORK_OF: Record<ResultState, WorkState> = {
   validado: 'concluida', confirmado_humano: 'concluida', aguardando_aprovacao: 'aguardando_aprovacao', sem_confirmacao: 'aguardando_aprovacao',
   aguardando_info: 'aguardando_info', reprovado: 'revisao', falha: 'falha', devolvido: 'solicitada',
@@ -115,7 +117,8 @@ export class Results {
       audit(this.db, null, { workspaceId, actorType: 'system', actorId: 'ergon', action: 'task.work_state', targetType: 'task', targetId: taskId,
         evidence: { de: t.work_state, para: state }, result: note ? `${WORK_LABEL[state]} — ${note}` : WORK_LABEL[state] });
     }
-    const colId = this.db.get<{ id: string }>('SELECT id FROM columns WHERE board_id = ? AND name = ? ORDER BY position LIMIT 1', t.board_id, COLUMN[state])?.id;
+    const colId = this.db.get<{ id: string }>('SELECT id FROM columns WHERE board_id = ? AND name = ? ORDER BY position LIMIT 1', t.board_id, COLUMN[state])?.id
+      ?? (COLUMN[state] === WITH_YOU ? this.db.get<{ id: string }>("SELECT id FROM columns WHERE board_id = ? AND name = 'Em andamento' ORDER BY position LIMIT 1", t.board_id)?.id : undefined);
     const patch: { columnId?: string; completed?: boolean } = {};
     if (colId && colId !== t.column_id) patch.columnId = colId;
     if (state === 'concluida' && !Number(t.completed)) patch.completed = true;
@@ -154,8 +157,8 @@ export class Results {
     const ws = r.workspace_id;
     const done = this.db.get<ResultRow>('SELECT * FROM task_results WHERE run_id = ?', r.id);
     if (done) return done;
-    const task = this.db.get<{ id: string; number: number; title: string; description: string; completed: number; completed_by: string | null; requires_approval: number; archived: number }>(
-      'SELECT id, number, title, description, completed, completed_by, requires_approval, archived FROM tasks WHERE id = ? AND workspace_id = ?', r.task_id, ws);
+    const task = this.db.get<{ id: string; number: number; title: string; description: string; completed: number; completed_by: string | null; requires_approval: number; archived: number; review: string | null; conversation_id: string | null; review_round: number }>(
+      'SELECT id, number, title, description, completed, completed_by, requires_approval, archived, review, conversation_id, review_round FROM tasks WHERE id = ? AND workspace_id = ?', r.task_id, ws);
     // card cancelado: o que a execução ainda devolver não vira entrega nem pedido na conversa
     if (!task || Number(task.archived) || (Number(task.completed) && task.completed_by === 'human')) return null;
     const kind = this.kindOf(ws, task.id);
@@ -218,6 +221,14 @@ export class Results {
     if (failed.length) {
       if (asked) return this.record(ws, task.id, r.id, kind, 'aguardando_info', c, ev, 'O agente precisa de uma informação sua antes de entregar. Responda e ponha para trabalhar de novo.', 'ergon');
       return this.record(ws, task.id, r.id, kind, 'reprovado', c, ev, `Não concluída: ${failed.map((x) => x.label.toLowerCase() + (x.detail ? ` (${x.detail})` : '')).join('; ')}.`, 'ergon');
+    }
+    // entrega que depende do seu julgamento (texto, documento, pesquisa): vai para você aprovar ou pedir ajustes no
+    // mesmo card. Ação objetiva (revisão "nao"), números calculados e card criado fora de uma conversa: entregar conclui
+    const forYou = kind !== 'dados' && (task.review ? task.review !== 'nao' : !!task.conversation_id && (kind === 'documental' || kind === 'informativo'));
+    if (forYou && !Number(task.requires_approval) && !pendingReview) {
+      this.db.run('UPDATE tasks SET delivered_at = ? WHERE id = ?', now(), task.id);
+      return this.record(ws, task.id, r.id, kind, 'aguardando_aprovacao', c, ev,
+        `Entregue a você${Number(task.review_round) > 1 ? ` (versão ${task.review_round})` : ''}: Aprovar conclui; Pedir ajustes faz uma nova versão no mesmo card.`, 'ergon');
     }
     if (Number(task.requires_approval) || pendingReview) {
       return this.record(ws, task.id, r.id, kind, 'aguardando_aprovacao', c, ev,

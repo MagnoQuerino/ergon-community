@@ -582,7 +582,7 @@ export const PROPOSAL_HELP = [
   'Tudo na equipe pode mudar quando o usuário pedir: nome, função, setor, jeito de trabalhar e apresentação. A exceção é você: o Coordenador é o único cargo fixo — a sua função, o seu setor e as ferramentas de coordenação não mudam e você não sai da equipe; o seu nome, a sua apresentação e o seu foco podem mudar. Uma linha por agente, só com o que muda:',
   '[[editar-agente agente="Nome atual" nome="Novo nome" papel="Nova função" setor="Nome do setor" instrucoes="como ele trabalha, na segunda pessoa (Você…)" metodos="método 1; método 2; método 3" bio="uma ou duas frases de apresentação"]]',
   '[[desativar-agente agente="Nome" motivo="..."]]  ·  [[reativar-agente agente="Nome"]]',
-  'Para cancelar um card (o usuário desistiu ou pediu para parar, card duplicado ou sem sentido), da equipe ou do próprio usuário: [[cancelar-card numero="37" motivo="por que sai do quadro"]]. O trabalho dele para e ele sai do quadro (o histórico fica). Quando o usuário citar o card pelo assunto, ache o número na lista de cards abertos; se houver dúvida entre dois, pergunte antes. Só vale com a aprovação do usuário, que aparece para ele na conversa; até lá, nada muda — diga isso em uma frase, sem prometer que já cancelou.',
+  'Para cancelar um card (o usuário desistiu ou pediu para parar, card duplicado ou sem sentido), da equipe ou do próprio usuário: [[cancelar-card numero="37" motivo="por que sai do quadro"]]. O trabalho dele para e ele sai do quadro (o histórico fica). Quando o usuário citar o card pelo assunto, ache o número na lista de cards abertos; se houver dúvida entre dois, pergunte antes. Só cite números que estão nessa lista: card que não está nela não existe (nunca invente número). Só vale com a aprovação do usuário, que aparece para ele na conversa; até lá, nada muda — diga isso em uma frase, sem prometer que já cancelou.',
   '[[editar-setor setor="Nome atual" nome="Novo nome" descricao="o que o setor faz" instrucoes="regras do setor"]]  ·  [[novo-setor nome="Nome" descricao="o que faz"]]',
   'Para trocar tudo de uma vez (um tema, como outra época ou um livro), escreva uma linha por agente e por setor; para você mesmo, só nome, bio e instruções (o seu foco). Encaminhar demandas é só seu: não dê essa ferramenta a ninguém. Antes das linhas, mostre ao usuário em poucas linhas como a equipe vai ficar.',
 ].join('\n');
@@ -693,7 +693,7 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     coord && matrix.length ? `Travas de ferramentas (quem tem cada uma):\n- ${matrix.join('\n- ')}` : '',
     coord ? PROPOSAL_HELP : '',
     coord ? TRAIN_HOW_COORD : '',
-    coord && opts.userId ? documentsBrief(db, workspaceId) : '',
+    opts.userId ? documentsBrief(db, workspaceId) : '',
     coord ? openCardsFor(db, workspaceId) : '',
     coord ? routineContextFor(db, workspaceId) : '',
     a.instructions,

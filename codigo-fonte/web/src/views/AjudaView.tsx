@@ -97,11 +97,11 @@ const ARTICLES: Article[] = [
     </> },
   { id: 'cidade', title: 'A cidade (Ambiente)', icon: 'temple', keywords: 'cidade ambiente construção prédio andar vaga loja mover',
     body: (c) => <>
-      <p>Em <Go c={c} v="ambiente">Ambiente</Go> você vê a equipe trabalhando. Cada construção tem andares e vagas; quem está executando algo aparece em movimento.</p>
+      <p>Na <Go c={c} v="ambiente">Cidade</Go> você vê a equipe trabalhando. Cada construção tem andares e vagas; quem está executando algo aparece em movimento.</p>
       <ul>
         <li>Clique num agente para conversar; clique numa construção para ver quem está lá.</li>
         <li>Novas construções e andares aumentam a capacidade da equipe.</li>
-        <li>A estante abre os arquivos entregues (em Atividade › Arquivos).</li>
+        <li>A estante abre os arquivos entregues (em Documentos › Entregas).</li>
       </ul>
     </> },
   { id: 'seguranca', title: 'Segurança e privacidade', icon: 'shield', keywords: 'senha frase recuperação trava inatividade autenticador passkey cifrado backup',

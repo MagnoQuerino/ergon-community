@@ -46,10 +46,10 @@ export function RequestCard({ p, onDone }: { p: Proposal; onDone: () => void }) 
       {r.need === 'info' || back ? (
         <form className="req-card__form" onSubmit={(e) => { e.preventDefault(); const t = text.trim(); if (t) void send(back ? 'return' : 'answer', t); }}>
           <textarea autoFocus value={text} rows={2} onChange={(e) => setText(e.target.value)}
-            placeholder={back ? 'O que precisa mudar (vai para o agente)' : `Sua resposta para ${r.agent}`} aria-label={back ? 'Instrução' : 'Sua resposta'}
+            placeholder={back ? (r.review ? 'O que ajustar (vai para quem fez; volta uma versão nova no mesmo card)' : 'O que precisa mudar (vai para o agente)') : `Sua resposta para ${r.agent}`} aria-label={back ? 'Instrução' : 'Sua resposta'}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const t = text.trim(); if (t) void send(back ? 'return' : 'answer', t); } }} />
           <div className="row row--wrap">
-            <button className="btn btn--sm btn--primary" disabled={busy || !text.trim()}>{back ? 'Devolver' : 'Responder'}</button>
+            <button className="btn btn--sm btn--primary" disabled={busy || !text.trim()}>{back ? (r.review ? 'Pedir ajustes' : 'Devolver') : 'Responder'}</button>
             {r.need === 'info' && !back && <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void send('return', 'Siga sem essa informação, com o que você já tem.')}>Seguir sem isso</button>}
             {back && <button type="button" className="btn btn--sm btn--ghost" onClick={() => setBack(false)}>Cancelar</button>}
             <span className="grow" />{open}
@@ -57,9 +57,10 @@ export function RequestCard({ p, onDone }: { p: Proposal; onDone: () => void }) 
         </form>
       ) : (
         <div className="row row--wrap">
+          {r.review && <span className="req-card__what"><b>Entrega do card #{r.number}{(r.round ?? 1) > 1 ? ` · versão ${r.round}` : ''}</b> — aprovar fecha o card; ajustes fazem uma versão nova nele.</span>}
           {(r.need === 'approval' || r.need === 'review') && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void send('approve')}>{r.need === 'review' ? 'Aprovar assim mesmo' : 'Aprovar'}</button>}
           {r.need === 'retry' && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void send('retry')}>Tentar de novo</button>}
-          {r.need !== 'retry' && <button className="btn btn--sm" disabled={busy} onClick={() => setBack(true)}>Devolver com instrução</button>}
+          {r.need !== 'retry' && <button className="btn btn--sm" disabled={busy} onClick={() => setBack(true)}>{r.review ? 'Pedir ajustes' : 'Devolver com instrução'}</button>}
           {r.need === 'retry' && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void send('dismiss')}>Deixar como está</button>}
           <span className="grow" />{open}
         </div>

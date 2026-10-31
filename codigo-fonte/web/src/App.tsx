@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { api, setCsrf, setGuard } from './lib/api.ts';
 import { startActivity } from './lib/activity.ts';
+import { THEME_ICON, THEME_LABEL, THEME_NEXT, setThemeMode, useTheme } from './lib/theme.ts';
 import { clearResourceCache, prefetchResources, startLive, useLiveStatus, useResource } from './lib/live.ts';
 import type { AppState, AuthState, Me, Usage, VersionInfo, View } from './lib/types.ts';
 import { AuthFlow, AutoUnlockPrompt, LockOverlay, PersonOpenScreen, ProtectScreen, ReauthDialog } from './components/AuthFlow.tsx';
@@ -99,7 +100,7 @@ export function App() {
 }
 
 const NAV: Array<{ id: View; label: string; icon: string }> = [
-  { id: 'ambiente', label: 'Ambiente', icon: 'temple' },
+  { id: 'ambiente', label: 'Cidade', icon: 'temple' },
   { id: 'agentes', label: 'Agentes', icon: 'users' },
   { id: 'rotinas', label: 'Rotinas', icon: 'repeat' },
   { id: 'equipe', label: 'Fluxos da equipe', icon: 'layers' },
@@ -114,7 +115,7 @@ const HELP_NAV = { id: 'ajuda' as View, label: 'Ajuda', icon: 'help' };
 
 /** Tour inicial: um passo por área (os textos usam o nome de quem coordena hoje). */
 const tourSteps = (coord: string): TourStep[] => [
-  { target: 'nav-ambiente', title: 'Ambiente', text: `A cidade da sua equipe. Cada pessoa nas construções é um agente; clique em alguém para conversar.` },
+  { target: 'nav-ambiente', title: 'Cidade', text: `A cidade da sua equipe. Cada pessoa nas construções é um agente; clique em alguém para conversar.` },
   { target: 'nav-agentes', title: 'Agentes', text: `Veja e edite cada agente: nome, função, setor, instruções, ferramentas e história. Ou peça a ${coord}.` },
   { target: 'nav-rotinas', title: 'Rotinas', text: 'Trabalhos que se repetem sozinhos, como o Briefing Diário. Ao ativar, a rotina se adapta ao seu jeito.' },
   { target: 'nav-equipe', title: 'Fluxos da equipe', text: 'O quadro onde os agentes trabalham: cada card tem responsável e o histórico do que foi feito.' },
@@ -176,6 +177,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   useEffect(() => onOverlay(!!onb || tour), [onb, tour]); // eslint-disable-line react-hooks/exhaustive-deps
   const live = useLiveStatus();
   useEffect(() => startLive(), []);
+  const theme = useTheme();
   useEffect(() => startActivity(me.idleMinutes, onIdle), [me.idleMinutes]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // ir para uma área (pelo endereço) fecha a conversa ou a janela de agente aberta por cima
@@ -256,7 +258,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <Icon name="menu" size={22} />
         </button>
         <div className="brand" title={live.status === 'ao_vivo' ? `Conectado ao servidor local · atualizado às ${(live.at ?? new Date(s.serverTime)).toLocaleTimeString('pt-BR', { timeStyle: 'short' })}` : live.status === 'conectando' ? 'Conectando ao servidor local…' : 'Reconectando ao servidor local…'}>
-          <ErgonLogo kind="horizontal" onDark height={28} />
+          {/* o logo leva de volta à Cidade, de qualquer tela */}
+          <button type="button" className="brand__home" onClick={() => go('ambiente')} aria-label="Ir para a Cidade" title="Cidade"><ErgonLogo kind="horizontal" onDark height={28} /></button>
           <span className={`dot ${live.status === 'ao_vivo' ? 'dot--green' : 'dot--amber dot--pulse'}`} role="img" aria-label={live.status === 'ao_vivo' ? 'conectado' : 'reconectando'} />
         </div>
         <WorkspaceSwitcher current={s.workspace.name} />
@@ -289,6 +292,9 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <button data-tour="decisions" data-keep-surface className={`tb-icon ${decisions ? 'is-on' : ''}`} onClick={() => setDecisions((v) => !v)} aria-expanded={decisions}
             aria-label={`${pending} aguardando você`} title={pending ? `${pending} aguardando você` : 'Nada aguardando você'}>
             <Icon name="bell" size={18} />{pending > 0 && <span className="tb-badge">{pending > 99 ? '99+' : pending}</span>}
+          </button>
+          <button className="tb-icon" onClick={() => setThemeMode(THEME_NEXT[theme.mode])} aria-label={THEME_LABEL[theme.mode]} title={THEME_LABEL[theme.mode]}>
+            <Icon name={THEME_ICON[theme.mode]} size={18} />
           </button>
           <button className={`tb-icon ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} aria-label="Modo foco" title="Modo foco: o trabalho sem a cidade (Esc volta)">
             <Icon name="focus" size={18} />
@@ -347,6 +353,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <AtividadeView />
         )}
       </main>
+      {/* conversas por baixo; o perfil aberto dali vem por cima e, ao fechar, volta para a conversa */}
+      {convs && <ConversationsDialog agents={s.agents} initial={convs} onClose={() => setConvs(null)} onOpenAgent={(id, tab) => openAgent(id, tab)} />}
       {win && winAgent && <AgentWindow key={`${win.id}-${win.conversationId ?? ''}`} agent={winAgent} state={s} initialTab={win.tab} draft={win.draft} conversationId={win.conversationId} onClose={() => setWin(null)} reload={st.reload} />}
       {!focus && !onb && !tour && <ViewTip view={view} coord={coordLabel} other={tipOther} onTour={startTour} />}
       {onb && (
@@ -371,7 +379,6 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       )}
       {decisions && <DecisionsPanel onClose={() => setDecisions(false)} onOpenAgent={(...a) => { setDecisions(false); openAgent(...a); }} onGo={(v) => { setDecisions(false); setView(v); }} />}
       {card && <TaskDetail key={card} taskId={card} agents={s.agents} mode="auto" over onClose={() => setCard(null)} onAskCoordinator={(t) => { setCard(null); setConvs(null); askCoordinator(t); }} />}
-      {convs && <ConversationsDialog agents={s.agents} initial={convs} onClose={() => setConvs(null)} onOpenAgent={(id, tab) => { setConvs(null); openAgent(id, tab); }} />}
       <ConversationDock agents={s.agents} hidden={!!convs || !!win || focus || tour || !!onb} />
 
     </div>

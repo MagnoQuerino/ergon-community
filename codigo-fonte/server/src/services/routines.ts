@@ -1087,7 +1087,7 @@ export class Routines {
     return [];
   }
 
-  /** Lançamentos aprovados: viram o registro (arquivo CSV em Atividade › Arquivos), com auditoria. */
+  /** Lançamentos aprovados: viram o registro (arquivo CSV em Documentos › Rotinas), com auditoria. */
   registerLedger(workspaceId: string, userId: string, p: Extract<Proposal, { kind: 'ledger' }>): string {
     const brd = (iso: string) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
     const rows: Array<Array<string | number | null>> = [['Nº', 'Data', 'Descrição', 'Valor', 'Categoria', 'Centro de custo', 'Documento', 'Confiança', 'Aprovado em'],
@@ -1097,7 +1097,7 @@ export class Routines {
       { filename: `lancamentos-aprovados-${stamp}.csv`, mime: 'text/csv', data: Buffer.from(toCsv(rows.map((x) => x.map(csvNum))), 'utf8'), source: { kind: 'routine', id: 'financeiro' } }, this.deps.storageQuota);
     audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'ledger.approve', targetType: 'artifact', targetId: a.id,
       evidence: { routine: p.routine, items: p.items.length, total: Math.round(p.items.reduce((x, i) => x + i.valor, 0) * 100) / 100 }, result: `${p.items.length} lançamento(s) registrados` });
-    return `${p.items.length} lançamento(s) registrados em ${a.filename} (Atividade › Arquivos)`;
+    return `${p.items.length} lançamento(s) registrados em ${a.filename} (Documentos › Rotinas)`;
   }
 
   // --- agenda ------------------------------------------------------------------------------------------------------

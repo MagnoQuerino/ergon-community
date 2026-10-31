@@ -1,5 +1,26 @@
 # Novidades
 
+## 1.1.0-rc.17 (pré-versão de teste)
+
+- **Entregue nem sempre é concluído.** Textos, documentos, pesquisas e análises chegam para a sua aprovação, na coluna
+  "Com você": "Aprovar" conclui; "Pedir ajustes" faz uma versão nova no mesmo card, sem abrir outro. Card concluído
+  ganha "Revisar", para pedir um ajuste depois. Ações objetivas (mover arquivo, criar pasta) continuam concluindo
+  sozinhas. Quem entregou lembra você da aprovação.
+- **Vários cards de uma vez.** Peça "10 pesquisas" e o coordenador abre um card para cada, numa ordem recomendada, e
+  o que depende de outro espera. Mais de 8 cards: você vê a lista e confirma com "Abrir todos".
+- **Conversas como nos aplicativos de mensagem.** Uma lista só com os colegas e os assuntos de cada um; renomear,
+  fixar, marcar como não lida e arquivar. Busca que acha contatos, assuntos, mensagens, arquivos e links, com filtros,
+  e leva direto à mensagem. Na conversa: buscar, mensagens marcadas, arquivos e links, responder citando, "Novas
+  mensagens", rascunho guardado por assunto, copiar e abrir um assunto novo a partir de uma mensagem.
+- **Documentos pela conversa com qualquer colega:** criar pasta, mover, copiar, renomear, salvar a resposta como
+  documento do Word e mandar para a lixeira. Apagar de vez só acontece depois do seu clique. A pasta dos cards agora
+  se chama "Entregas" (e aceita outro nome).
+- **Personalidades mais marcadas**, em toda resposta — inclusive num simples "oi".
+- **Tema claro e escuro**, automático pelo relógio da cidade (dia claro, noite escuro) ou fixo; textos maiores e
+  contraste conferido nos dois temas.
+- "Ambiente" agora é **Cidade**, e o logo do Ergon leva até ela. Abrir o perfil de um colega pela conversa volta para
+  a conversa ao fechar. No app de desktop, arrastar arquivos para a conversa volta a funcionar.
+
 ## 1.1.0-rc.16 (pré-versão de teste)
 
 - **Uma equipe de colegas, não de robôs.** Cada agente fala com você como um colega de trabalho, pelo seu nome, e tem

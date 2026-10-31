@@ -21,7 +21,8 @@ import { createTask, defaultBoard, getTask, updateTask } from './tasks.ts';
 import { activeTeam, coordinatorOf, type Member } from './team.ts';
 import { filesBrief, referenceFrom, summaryText, taskFiles, type Operations } from './operations.ts';
 import { classifyTask, type ResultRow, type Results } from './results.ts';
-import { DELIVERY_KEY, Purpose, currentStep, parsePlan, purposeOf, questionIn, stepsOf, type StepRow } from './purpose.ts';
+import { BATCH_CONFIRM, DELIVERY_KEY, DELIVERY_KEY_SQL, READY_SQL, Purpose, currentStep, parsePlans, purposeOf, questionIn, stepsOf, type Plan, type StepRow } from './purpose.ts';
+import { recordProposals } from './proposals.ts';
 import { parseDue } from './due.ts';
 import { workspaceTz } from './routine-proposals.ts';
 
@@ -80,7 +81,8 @@ export const ELIGIBLE_SQL = `t.board_id = ? AND t.completed = 0 AND t.archived =
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user'))
           AND (SELECT COUNT(*) FROM runs r WHERE r.task_id = t.id AND r.idempotency_key LIKE 'queue-%'
                  AND r.created_at > COALESCE((SELECT MAX(x.decided_at) FROM task_results x WHERE x.task_id = t.id AND x.state = 'devolvido'), '')) < ?
-          AND COALESCE(t.work_state, 'solicitada') IN ('solicitada', 'processamento')`;
+          AND COALESCE(t.work_state, 'solicitada') IN ('solicitada', 'processamento')
+          AND NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks p ON p.id = d.after_id WHERE d.task_id = t.id AND p.completed = 0 AND p.archived = 0)`;
 /** nome da coluna da fila (o mesmo que o agendador usa) */
 export const TODO_COLUMN = 'A fazer';
 /** O pedido fala de um arquivo que não veio junto: perguntar antes de gastar uma chamada de modelo. */
@@ -210,13 +212,19 @@ export class Teamwork {
     if (status === 'succeeded' && r.kind === 'chat' && r.conversation_id && !r.task_id) {
       // uma entrega, um card: o plano do coordenador ou, sem plano, os colegas pedidos viram as etapas de um card só
       // (antes, cada pedido de ajuda virava um card); quem recebeu o pedido entrega na conversa
-      const plan = coord ? parsePlan(output) : null;
-      if (plan) this.startPlan(r, plan);
+      const plans = coord ? parsePlans(output) : [];
+      // lote grande: a lista espera a sua confirmação ("Abrir todos"); até o limite, os cards abrem direto
+      if (plans.length > BATCH_CONFIRM) recordProposals(this.db, this.bus, ws, { conversationId: r.conversation_id, runId: r.id }, [{ kind: 'batch', runId: r.id, plans }]);
+      else if (plans.length) this.startPlans(r, plans);
       else if (help.length) {
         this.startPlan(r, { objective: clip((purposeOf(this.db, r) || help[0].request).replace(/\s+/g, ' ').trim(), 90), steps: help.map((h) => ({ agent: h.agent, task: h.request })) });
       }
     } else if (help.length && !queue) this.createHelpCards(r, help); // outros canais (rotina): como sempre
-    if (r.idempotency_key.startsWith(DELIVERY_KEY) && status === 'succeeded') this.bus.publish(ws, 'tasks.changed', {});
+    if (r.idempotency_key.startsWith(DELIVERY_KEY) && status === 'succeeded') {
+      // entrega que espera a sua aprovação: o cartão com Aprovar e Pedir ajustes vem logo depois dela
+      this.purpose.afterDelivery(r);
+      this.bus.publish(ws, 'tasks.changed', {});
+    }
     if (!queue || !r.task_id) return;
     // o agente pediu um processamento ao Ergon: executa (com as permissões conferidas) antes de avaliar
     if (status === 'succeeded') {
@@ -457,16 +465,60 @@ export class Teamwork {
   }
 
   /** Começa o plano do coordenador: o card nasce com as etapas e a primeira já vai para o agente dela. */
-  private startPlan(r: RunRow, plan: NonNullable<ReturnType<typeof parsePlan>>): void {
+  private startPlan(r: RunRow, plan: Plan): void { this.startPlans(r, [plan]); }
+
+  /**
+   * Abre os cards de uma resposta da coordenação: um por entrega, na ordem recomendada (a da fila em "A fazer"), com
+   * "depois de" quando um usa o outro. Cada card do lote entrega quando fica pronto; os livres já começam.
+   */
+  startPlans(r: RunRow, plans: Plan[]): Array<{ taskId: string; number: number }> {
     const ws = r.workspace_id;
     const board = defaultBoard(this.db, ws).id;
-    const made = this.purpose.createPlan(r, plan, (x) => createTask(this.db, null, ws, { type: 'agent', id: r.agent_id }, {
-      title: x.title, description: x.description, boardId: board, columnId: this.column(board, COLS.todo) ?? undefined, agentId: x.agentId, origin: 'chat',
-      dueOn: parseDue(x.purpose || x.title, workspaceTz(this.db, ws)), // "até sexta" no pedido: o card já nasce com o prazo
-    }));
-    if (!made) return;
-    this.bus.publish(ws, 'tasks.changed', { id: made.taskId });
-    try { this.work(ws, made.taskId, null); } catch { /* fica em "A fazer": a fila pega quando puder */ }
+    const sorted = plans.map((p, i) => ({ p, i })).sort((a, b) => (a.p.order ?? 999 + a.i) - (b.p.order ?? 999 + b.i));
+    const many = sorted.length > 1;
+    const made: Array<{ taskId: string; number: number; plan: Plan; i: number; after: number[] }> = [];
+    const tz = workspaceTz(this.db, ws);
+    for (const { p, i } of sorted) {
+      const m = this.purpose.createPlan(r, p, (x) => createTask(this.db, null, ws, { type: 'agent', id: r.agent_id }, {
+        title: x.title, description: x.description, boardId: board, columnId: this.column(board, COLS.todo) ?? undefined, agentId: x.agentId, origin: 'chat',
+        dueOn: parseDue(p.due || (many ? x.title : x.purpose || x.title), tz), // "até sexta" no pedido: o card já nasce com o prazo
+      }), { group: many ? String(i + 1) : undefined, quiet: many });
+      if (m) made.push({ taskId: m.taskId, number: m.number, plan: p, i, after: p.after ?? [] });
+    }
+    if (!made.length) return [];
+    // ordem da fila: a recomendada; "depois de": pela ordem (ou posição) dos planos desta resposta
+    const base = Number(this.db.get<{ n: number }>('SELECT COALESCE(MAX(COALESCE(queue_pos, number)), 0) AS n FROM tasks WHERE workspace_id = ? AND board_id = ?', ws, board)?.n ?? 0);
+    made.forEach((m, k) => {
+      this.db.run('UPDATE tasks SET queue_pos = ? WHERE id = ?', base + k + 1, m.taskId);
+      for (const ref of m.after) {
+        const dep = made.find((x) => (x.plan.order ?? x.i + 1) === ref && x.taskId !== m.taskId);
+        if (dep) this.db.run('INSERT OR IGNORE INTO task_deps (task_id, after_id, workspace_id) VALUES (?, ?, ?)', m.taskId, dep.taskId, ws);
+      }
+    });
+    if (many && r.conversation_id) {
+      const name = (n: number) => made.find((x) => x.number === n);
+      const lines = made.map((m) => {
+        const deps = this.db.all<{ number: number }>('SELECT p.number FROM task_deps d JOIN tasks p ON p.id = d.after_id WHERE d.task_id = ?', m.taskId).map((d) => `#${d.number}`);
+        return `#${m.number} ${clip(m.plan.objective, 90)}${deps.length ? ` (depois do ${deps.join(', ')})` : ''}`;
+      });
+      void name;
+      this.purpose.note(ws, r.conversation_id, `Sistema — ${made.length} cards abertos, nesta ordem na fila:\n${lines.join('\n')}\nCada um entrega aqui quando ficar pronto.`);
+    }
+    this.bus.publish(ws, 'tasks.changed', {});
+    // os livres começam (até o limite de trabalhos ao mesmo tempo); o resto espera a vez em "A fazer"
+    for (const m of made) {
+      if (this.db.get('SELECT 1 AS x FROM task_deps WHERE task_id = ?', m.taskId)) continue;
+      try { this.work(ws, m.taskId, null); } catch { break; }
+    }
+    return made.map((m) => ({ taskId: m.taskId, number: m.number }));
+  }
+
+  /** "Abrir todos" no lote que esperava a sua confirmação. */
+  openBatch(workspaceId: string, runId: string, plans: Plan[]): string {
+    const r = this.db.get<RunRow>('SELECT * FROM runs WHERE id = ? AND workspace_id = ?', runId, workspaceId);
+    if (!r) throw new HttpError(404, 'run', 'a conversa de origem do lote não existe mais');
+    const made = this.startPlans(r, plans);
+    return `${made.length} cards abertos: ${made.map((m) => `#${m.number}`).join(', ')}`;
   }
 
   /** Palavras que as etapas já feitas entregaram (a conferência do card soma o plano inteiro). */
@@ -568,12 +620,51 @@ export class Teamwork {
       runId = this.work(ws, taskId, userId);
       result = runId ? 'Posto para trabalhar de novo.' : this.results.latest(ws, taskId)?.justification ?? 'Não deu para pôr para trabalhar agora.';
     } else {
+      if (action === 'return') this.newRound(ws, taskId);
       result = this.results.decide(ws, user, taskId, action === 'answer' ? 'responder' : 'devolver', text).justification;
       try { runId = this.work(ws, taskId, userId); } catch { /* ocupado ou esperando ajuda: a fila retoma */ }
     }
     this.purpose.closeRequests(ws, taskId, result);
     const conv = this.db.get<{ conversation_id: string | null }>('SELECT conversation_id FROM tasks WHERE id = ?', t.id)?.conversation_id;
     if (conv && text && (action === 'answer' || action === 'return')) this.purpose.userSaid(ws, conv, userId, text.trim());
+    return { result, runId };
+  }
+
+  /**
+   * Nova rodada no mesmo card (você pediu ajustes na entrega, ou "Revisar" num card concluído): a próxima entrega é a
+   * versão seguinte; quem fez a última etapa refaz com o seu ajuste e com tudo o que veio antes.
+   */
+  private newRound(ws: string, taskId: string): void {
+    const t = this.db.get<{ delivered_at: string | null; completed: number; review_round: number }>('SELECT delivered_at, completed, review_round FROM tasks WHERE id = ? AND workspace_id = ?', taskId, ws);
+    if (!t || (!t.delivered_at && !Number(t.completed))) return; // ajuste antes da entrega: segue a mesma rodada
+    this.db.run('UPDATE tasks SET review_round = review_round + 1, delivered_at = NULL WHERE id = ?', taskId);
+    const steps = stepsOf(this.db, taskId);
+    const last = steps[steps.length - 1];
+    if (last) {
+      this.db.run("UPDATE task_steps SET status = 'em_andamento', done_at = NULL WHERE id = ?", last.id);
+      updateTask(this.db, null, ws, { type: 'system', id: 'ergon' }, taskId, { agentId: last.agent_id });
+    }
+    audit(this.db, null, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'task.review_round', targetType: 'task', targetId: taskId,
+      evidence: { round: Number(t.review_round) + 1 }, result: `rodada ${Number(t.review_round) + 1}: ajustes pedidos por você, no mesmo card` });
+  }
+
+  /** "Revisar" numa entrega já concluída: o card reabre numa nova rodada, com o que você quer mudar. */
+  revise(ws: string, userId: string, taskId: string, text: string): { result: string; runId: string | null } {
+    const t = getTask(this.db, ws, taskId);
+    if (Number(t.archived)) throw new HttpError(409, 'archived', 'este card saiu do quadro');
+    if (this.db.get("SELECT 1 AS x FROM runs WHERE task_id = ? AND status IN ('queued', 'running', 'waiting_user')", taskId)) throw new HttpError(409, 'busy', 'a equipe ainda está trabalhando neste card');
+    const user = { type: 'user' as const, id: userId };
+    if (Number(t.completed)) {
+      this.newRound(ws, taskId);
+      updateTask(this.db, null, ws, user, taskId, { completed: false });
+    } else if (this.db.get('SELECT 1 AS x FROM tasks WHERE id = ? AND delivered_at IS NOT NULL', taskId)) this.newRound(ws, taskId);
+    const result = this.results.decide(ws, user, taskId, 'devolver', text).justification;
+    this.purpose.closeRequests(ws, taskId, result);
+    let runId: string | null = null;
+    try { runId = this.work(ws, taskId, userId); } catch { /* fila cheia: retoma na vez */ }
+    const conv = this.db.get<{ conversation_id: string | null }>('SELECT conversation_id FROM tasks WHERE id = ?', taskId)?.conversation_id;
+    if (conv) this.purpose.userSaid(ws, conv, userId, `Revisar o card #${t.number}: ${text.trim()}`);
+    this.bus.publish(ws, 'tasks.changed', { id: taskId });
     return { result, runId };
   }
 
@@ -601,8 +692,8 @@ export class Teamwork {
     const convs = this.db.all<{ ws: string; c: string }>(
       `SELECT DISTINCT m.workspace_id AS ws, m.conversation_id AS c FROM messages m WHERE m.queued = 1 AND ws_open(m.workspace_id)
        UNION SELECT DISTINCT t.workspace_id, t.conversation_id FROM tasks t
-        WHERE t.conversation_id IS NOT NULL AND t.origin_run_id IS NOT NULL AND t.completed = 1 AND t.archived = 0 AND ws_open(t.workspace_id)
-          AND NOT EXISTS (SELECT 1 FROM runs x WHERE x.idempotency_key = '${DELIVERY_KEY}' || t.origin_run_id) LIMIT 50`);
+        WHERE t.conversation_id IS NOT NULL AND t.origin_run_id IS NOT NULL AND ${READY_SQL()} AND t.archived = 0 AND ws_open(t.workspace_id)
+          AND NOT EXISTS (SELECT 1 FROM runs x WHERE x.idempotency_key = ${DELIVERY_KEY_SQL()}) LIMIT 50`);
     for (const x of convs) {
       if (this.purpose.busy(x.c)) continue;
       try { this.onIdle(x.ws, x.c); } catch { /* tenta no próximo passo */ }

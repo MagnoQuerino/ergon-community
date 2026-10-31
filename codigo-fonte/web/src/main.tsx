@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { startTheme } from './lib/theme.ts';
 import { App } from './App.tsx';
 import './styles.css';
 import { installElastic } from './lib/elastic.ts';
@@ -18,4 +19,6 @@ addEventListener('vite:preloadError', (ev) => {
 
 rememberDesktopApp();
 installElastic();
+// tema claro ou escuro antes de desenhar (também no login), com o relógio do automático
+startTheme();
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

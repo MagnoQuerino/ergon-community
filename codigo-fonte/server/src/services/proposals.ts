@@ -14,6 +14,7 @@ import { TOOLS } from './characters.ts';
 import { attrs, describeRoutineProposal, type RoutineProposal } from './routine-proposals.ts';
 import { createSector, moveToSector, sectorByName, updateSector } from './sectors.ts';
 import { createTask, defaultBoard, userBoard } from './tasks.ts';
+import type { Plan } from './purpose.ts';
 
 export type Proposal =
   | { kind: 'sector'; agent: string; sector: string }
@@ -38,7 +39,11 @@ export type Proposal =
   /** lançamentos lidos dos documentos pelo Ergon e classificados pelo agente: só ficam registrados aprovados */
   | { kind: 'ledger'; routine: string; items: LedgerItem[] }
   /** tirar um card do quadro da equipe: o coordenador propõe (ou você pede na conversa); só sai com a sua aprovação */
-  | { kind: 'delete_task'; number: number; reason: string };
+  | { kind: 'delete_task'; number: number; reason: string }
+  /** lote grande de cards (mais de 8 numa resposta): abre só com o seu "Abrir todos" */
+  | { kind: 'batch'; runId: string; plans: Plan[] }
+  /** apagar de vez (arquivos ou a lixeira): só com o seu clique; a equipe nunca apaga sozinha */
+  | { kind: 'purge'; agent: string; artifactIds: string[]; names: string[]; emptyTrash?: boolean };
 
 export interface LedgerItem { n: number; data: string; descricao: string; valor: number; documento: string; categoria: string; centro: string; confianca: string }
 
@@ -209,6 +214,11 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   if (p.kind === 'sector_new') return `Criar o setor ${p.name}${p.description ? `: ${p.description}` : ''}`;
   if (p.kind === 'routine' || p.kind === 'routine_edit') return describeRoutineProposal(db, workspaceId, p);
   if (p.kind === 'question') return p.question;
+  if (p.kind === 'batch') {
+    const lines = [...p.plans].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)).map((x, i) => `${i + 1}. ${clip(x.objective, 90)} — ${x.steps.map((s) => s.agent).join(' → ')}${x.after?.length ? ` (depois do ${x.after.join(', ')})` : ''}`);
+    return `Abrir ${p.plans.length} cards, nesta ordem na fila:\n${lines.join('\n')}`;
+  }
+  if (p.kind === 'purge') return p.emptyTrash ? `${p.agent} quer esvaziar a lixeira (apaga de vez o que está lá)` : `${p.agent} quer apagar de vez: ${p.names.slice(0, 12).join(', ')}${p.names.length > 12 ? `… (${p.names.length})` : ''}`;
   if (p.kind === 'delete_task') {
     const t = db.get<{ title: string }>('SELECT title FROM tasks WHERE workspace_id = ? AND number = ?', workspaceId, p.number);
     return `Cancelar o card #${p.number}${t ? ` “${clip(t.title, 90)}”` : ''}${p.reason ? `: ${p.reason}` : ''} (o trabalho para e o card sai do quadro; o histórico fica)`;
@@ -232,14 +242,27 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   return `Criar o agente ${p.name} — ${p.role} (setor: ${/^autom/i.test(fold(p.sector)) ? 'automático' : sectorByName(db, workspaceId, p.sector)?.name ?? p.sector})`;
 }
 
-export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { conversationId: string | null; runId: string | null }, items: Proposal[]): number {
+export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { conversationId: string | null; runId: string | null }, all: Proposal[]): number {
+  // cancelar um card que não está no quadro (inventado, ou já cancelado) não vira cartão para você aplicar e ver falhar
+  const missing: number[] = [];
+  const items = all.filter((p) => {
+    if (p.kind !== 'delete_task') return true;
+    const ok = !!db.get('SELECT 1 AS x FROM tasks WHERE workspace_id = ? AND number = ? AND archived = 0', workspaceId, p.number);
+    if (!ok) missing.push(p.number);
+    return ok;
+  });
+  if (missing.length && ctx.conversationId) {
+    db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at) VALUES (?, ?, ?, 'system', ?, 'local', ?)`,
+      id('msg'), workspaceId, ctx.conversationId, db.seal(workspaceId, `Sistema — ${missing.length === 1 ? `o card #${missing[0]} não está no quadro` : `os cards ${missing.map((n) => `#${n}`).join(', ')} não estão no quadro`} (não existem ou já saíram): nada a cancelar.`), now());
+    bus.publish(workspaceId, 'messages.changed', { conversationId: ctx.conversationId });
+  }
   if (!items.length) return 0;
   db.tx(() => {
     for (const p of items) {
       db.run(`INSERT INTO agent_proposals (id, workspace_id, conversation_id, run_id, kind, payload, summary, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id('apr'), workspaceId, ctx.conversationId, ctx.runId, p.kind, db.seal(workspaceId, JSON.stringify(p)),
-        db.seal(workspaceId, clip(describe(db, workspaceId, p), ['routine', 'routine_edit', 'edit_agent'].includes(p.kind) ? 1200 : 300)),
+        db.seal(workspaceId, clip(describe(db, workspaceId, p), ['routine', 'routine_edit', 'edit_agent', 'batch', 'purge'].includes(p.kind) ? 3000 : 300)),
         // o aviso de pedido passado à coordenação não espera decisão (a senha é pedida lá)
         p.kind === 'handoff' ? 'applied' : 'proposed', now());
     }
@@ -385,6 +408,10 @@ export interface ProposalHooks {
   routine?: (p: RoutineProposal) => string; ledger?: (p: Extract<Proposal, { kind: 'ledger' }>, userId: string) => string; limits?: AgentLimits;
   /** cancelar um card (para o trabalho dele, fecha os pedidos abertos e tira do quadro); devolve o resultado em texto */
   deleteTask?: (number: number, reason: string) => string;
+  /** lote de cards confirmado ("Abrir todos") */
+  batch?: (p: Extract<Proposal, { kind: 'batch' }>) => string;
+  /** apagar de vez, confirmado por você */
+  purge?: (p: Extract<Proposal, { kind: 'purge' }>) => string;
 }
 
 export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: string, proposalId: string, decision: 'apply' | 'reject', hooks: ProposalHooks = {}): { status: string; result: string } {
@@ -447,6 +474,12 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
       } else if (p.kind === 'ledger') {
         if (!hooks.ledger) throw new HttpError(503, 'routines', 'rotinas indisponíveis');
         result = hooks.ledger(p, userId);
+      } else if (p.kind === 'batch') {
+        if (!hooks.batch) throw new HttpError(503, 'tasks', 'quadro indisponível');
+        result = hooks.batch(p);
+      } else if (p.kind === 'purge') {
+        if (!hooks.purge) throw new HttpError(503, 'documents', 'Documentos indisponível');
+        result = hooks.purge(p);
       } else if (p.kind === 'delete_task') {
         if (!hooks.deleteTask) throw new HttpError(503, 'tasks', 'quadro indisponível');
         result = hooks.deleteTask(p.number, p.reason);

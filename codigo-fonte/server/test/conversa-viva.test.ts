@@ -311,7 +311,7 @@ describe('conversa com a equipe: colegas, ao vivo, arquivos, iniciativa e Docume
     motor.reply = () => 'Organizei para você. [[pasta caminho="Fornecedores/2026"]] [[mover-arquivo arquivo="contrato-acme.txt" para="Fornecedores/2026"]]';
     await say(c, 'cria a pasta Fornecedores/2026 e põe lá o contrato da ACME'); await drain(h, 3);
     motor.reply = () => 'Feito.';
-    assert.match(motor.started.at(-1)!.instructions, /Documentos do workspace \(você organiza conversando/);
+    assert.match(motor.started.at(-1)!.instructions, /Documentos do workspace \(você gere pela conversa/);
     const notes = (await msgs(c)).filter((m) => m.role === 'system' && m.content.startsWith('Documentos — '));
     assert.equal(notes.length, 2);
     const moved = notes.find((m) => /movido para “Fornecedores\/2026”/.test(m.content));

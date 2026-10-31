@@ -9,6 +9,9 @@ import { PERSIST_ROUNDS, parseTrainRequests, stripControl, strongestOf } from '.
 import { activeTeam } from '../src/services/team.ts';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
 import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+/** entregue: concluído, ou entregue à pessoa e esperando a aprovação dela (decisão de 30/10: texto, documento e pesquisa vão para a aprovação) */
+const entregue = (t: { completed: number; work_state?: string | null }) => Number(t.completed) === 1 || t.work_state === 'aguardando_aprovacao';
+
 
 class FakeMotor implements HermesClient {
   started: StartRun[] = [];
@@ -77,7 +80,7 @@ describe('equipe autônoma: resolve sozinha até entregar, um card por entrega',
       : 'Para redigir preciso do CNPJ das duas empresas. [[perguntar pergunta="Qual é o CNPJ da aurora.example e da vertice.example?"]]';
     await run();
     const d = await detail(t.id);
-    assert.equal(d.task.completed, 1, 'entregue sem a pessoa');
+    assert.ok(entregue(d.task), 'entregue sem a pessoa');
     assert.equal(d.work.result.state, 'validado');
     const rounds = audits(t.id, 'task.persist');
     assert.equal(rounds.length, 1);
@@ -109,7 +112,7 @@ describe('equipe autônoma: resolve sozinha até entregar, um card por entrega',
     assert.equal(audits(t.id, 'task.persist_decision')[0].decision, 'assumir');
     const last = motor.started.filter((x) => x.input.includes('O que as etapas anteriores entregaram')).at(-1)!;
     assert.match(last.input, /Tom formal e direto/, 'quem pediu continua com o que a coordenação fez');
-    assert.equal(d.task.completed, 1);
+    assert.ok(entregue(d.task));
   });
 
   test('reforço e limite: rodadas 3–4 com o modelo mais forte; depois, a pessoa fica sabendo (uma vez)', async () => {
@@ -142,7 +145,7 @@ describe('equipe autônoma: resolve sozinha até entregar, um card por entrega',
     await run(40);
     const t = h.db.get<{ id: string }>('SELECT id FROM tasks WHERE conversation_id = ? ORDER BY number DESC LIMIT 1', conv)!;
     const d = await detail(t.id);
-    assert.equal(d.task.completed, 1);
+    assert.ok(entregue(d.task));
     assert.ok(d.files.deliverables.some((f: { filename: string }) => /^etapa1-herodoto-T\d+/.test(f.filename)), 'a entrega da etapa 1 ficou como arquivo do card');
     const msgs = (await req(h, 'GET', `/api/conversations/${conv}/messages`, s)).json as Array<{ role: string; content: string }>;
     const last = msgs[msgs.length - 1];

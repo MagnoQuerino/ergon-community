@@ -114,9 +114,12 @@ export interface TaskCard {
 export interface BoardView { board: BoardSummary; columns: Column[]; tasks: TaskCard[] }
 /** queued: 1 = na fila da conversa (Ctrl+Enter); vai para o agente quando ele terminar */
 export interface Attachment { id: string; filename: string; mime: string; size: number }
-export interface Message { id: string; role: 'user' | 'agent' | 'system'; content: string; mode: 'real' | 'simulated' | 'local'; run_id: string | null; created_at: string; run_status: string | null; queued?: number; attachments?: Attachment[] }
+export interface Message { id: string; role: 'user' | 'agent' | 'system'; content: string; mode: 'real' | 'simulated' | 'local'; run_id: string | null; created_at: string; run_status: string | null; queued?: number; attachments?: Attachment[];
+  /** responde citando esta mensagem */ reply_to?: string | null;
+  /** entrega de cards: os cards dela (estado e rodada), para Revisar ali mesmo */ cards?: Array<{ id: string; number: number; title: string; completed: number; work_state: string | null; review_round: number }>;
+  /** marcada por você */ marked?: number }
 /** purpose: conversa aberta por uma rotina ("routine:<id>", "routine-recommend"); null = conversa comum com o agente */
-export interface Conversation { id: string; agent_id: string; title: string; created_at: string; last_at: string | null; purpose?: string | null }
+export interface Conversation { id: string; agent_id: string; title: string; created_at: string; last_at: string | null; purpose?: string | null; read_at?: string | null; archived_at?: string | null; pinned_at?: string | null }
 /**
  * Conversa na lista: last_at = a última atividade (de qualquer um); unread = mensagens do colega que você ainda não
  * viu; waiting = pedidos esperando você; priority = a marca do agente (urgente ou "precisa de você").
@@ -130,9 +133,9 @@ export interface RecentConversation {
 export const PROPOSAL_KIND: Record<string, string> = {
   question: 'pergunta', routine: 'rotina', routine_edit: 'ajuste de rotina', sector: 'setor', create_agent: 'novo agente', tools: 'ferramenta',
   permission: 'permissão', handoff: 'passado à coordenação', edit_agent: 'agente', deactivate_agent: 'desativar', reactivate_agent: 'reativar', sector_edit: 'setor', sector_new: 'novo setor',
-  task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card',
+  task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card', batch: 'cards', purge: 'apagar de vez',
 };
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
@@ -170,12 +173,18 @@ export const SOURCE_LABEL: Record<string, string> = {
   notion: 'Notion', linear: 'Linear', airtable: 'Airtable', smartsheet: 'Smartsheet', pipefy: 'Pipefy', github: 'GitHub Projects',
 };
 
-/** Remove as linhas de controle ([[...]]) que os agentes escrevem para o Ergon aplicar. */
-export const stripControl = (s: string): string => s.replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|prioridade|pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|treinar|assumir)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '').trim();
+/**
+ * Remove as linhas de controle ([[...]]) que os agentes escrevem para o Ergon aplicar — as conhecidas e qualquer outra
+ * no mesmo formato (nome e atributos="…"): uma linha que o modelo inventou nunca aparece crua na conversa.
+ */
+export const stripControl = (s: string): string => s
+  .replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|prioridade|pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|treinar|assumir|copiar-arquivo|salvar-documento|apagar|esvaziar-lixeira|card|tarefa)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '')
+  .replace(/\[\[\s*[a-zà-ú][\wà-ú-]*(?:\s+[\wà-ú-]+\s*=\s*"[^"]*")+\s*\]\]\s*/gi, '')
+  .trim();
 
 // Rotinas -------------------------------------------------------------------------------------------------
 export type RoutineTrigger = { kind: 'manual' } | { kind: 'schedule'; days: number[]; time: string; tz?: string };
-/** arquivo escolhido para uma rotina: do Ergon (Atividade › Arquivos) ou do OneDrive/Google Drive */
+/** arquivo escolhido para uma rotina: de Documentos ou do OneDrive/Google Drive */
 export interface FileRef { kind: 'ergon' | 'microsoft' | 'google'; id: string; name: string }
 export type ParamValues = Record<string, Array<string | FileRef>>;
 /** o que a rotina acompanha (configurado uma vez) */
@@ -235,7 +244,7 @@ export interface RecommendState { enabled: boolean; next: string | null; last: s
 /** O que um card que espera você pede: informação, aprovação (ou confirmação), uma decisão ou nova tentativa. */
 export type Need = 'info' | 'approval' | 'review' | 'retry';
 /** Pedido de um card repassado na conversa pelo agente dela (cartão para responder ali mesmo). */
-export interface RequestPayload { taskId: string; number: number; title: string; need: Need; agent: string; question: string | null; excerpt: string | null }
+export interface RequestPayload { taskId: string; number: number; title: string; need: Need; agent: string; question: string | null; excerpt: string | null; review?: boolean; round?: number }
 export interface Decisions {
   proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null }>;
   waiting: Array<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>;

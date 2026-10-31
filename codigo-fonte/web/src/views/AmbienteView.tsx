@@ -11,8 +11,8 @@ import { useResource } from '../lib/live.ts';
 import { OPS_EVENTS, OPS_URL, cloudOn, summaryOf, type AmbientOps, type Distribution } from '../lib/ambient.ts';
 import { openDecisions } from '../lib/open.ts';
 import type { SceneAgent, SceneApi, SceneFocus, SceneObject, SceneOps, StructureIn } from '../scene/types.ts';
-import { THEMES, type ThemeId } from '../iso/theme.ts';
-import { isDarkHour } from '../iso/life.ts';
+import { THEMES } from '../iso/theme.ts';
+import { THEME_LABEL, THEME_NEXT, setThemeMode, useTheme } from '../lib/theme.ts';
 import { typeOf } from '../../../shared/city.ts';
 
 // palco e loja carregados à parte, para não pesar o primeiro acesso
@@ -30,10 +30,7 @@ const FOUNDER_BIO = {
   note: 'Não atende pedidos: está de folga desde 323 a.C.',
 };
 
-type ThemeMode = 'auto' | ThemeId;
-const prefTheme = (): ThemeMode => { try { const v = localStorage.getItem('ergon.themeMode'); return v === 'dia' || v === 'noite' ? v : 'auto'; } catch { return 'auto'; } };
-const THEME_NEXT: Record<ThemeMode, ThemeMode> = { auto: 'dia', dia: 'noite', noite: 'auto' };
-const THEME_LABEL: Record<ThemeMode, string> = { auto: 'Dia e noite automáticos (seguem o relógio deste computador)', dia: 'Sempre dia', noite: 'Sempre noite' };
+// dia e noite da cidade = tema da plataforma (lib/theme.ts): trocar aqui troca o app inteiro
 const CHAT_W = 380;
 
 /**
@@ -43,10 +40,7 @@ const CHAT_W = 380;
 export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, active = true }: {
   state: AppState; onNavigate: (v: View) => void; selectedId: string | null; onSelect: (id: string | null) => void; reload: () => void; active?: boolean;
 }) {
-  const [themeMode, setThemeMode] = useState<ThemeMode>(prefTheme);
-  const [hour, setHour] = useState(() => new Date().getHours());
-  useEffect(() => { const t = setInterval(() => setHour(new Date().getHours()), 60_000); return () => clearInterval(t); }, []);
-  const themeId: ThemeId = themeMode === 'auto' ? (isDarkHour(hour) ? 'noite' : 'dia') : themeMode;
+  const { mode: themeMode, theme: themeId } = useTheme();
   const [editing, setEditing] = useState(false);
   const [lost, setLost] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -132,7 +126,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
         ) : (
           <div className="htmlplan-wrap">
             <CentralTrabalho embedded ops={ops} error={opsRes.error} agents={state.agents} section={section} onSection={setSection}
-              onBoard={() => onNavigate('equipe')} onFiles={() => { history.replaceState(null, '', '#atividade?arquivos'); onNavigate('atividade'); }} />
+              onBoard={() => onNavigate('equipe')} onFiles={() => { location.hash = '#documentos?pasta=entregas'; }} />
             <HtmlPlan state={state} onSelect={onSelect} selectedId={selectedId} />
           </div>
         )}
@@ -162,7 +156,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
           <button className={`tool ${editing ? 'tool--on' : ''}`} onClick={() => { setEditing((v) => !v); setCard(null); }} aria-pressed={editing} title="Editor do mapa: arraste prédios e áreas para outros lotes">
             <Icon name="edit" size={16} /> <span>Editar mapa</span>
           </button>
-          <button className="tool tool--icon" onClick={() => { const n = THEME_NEXT[themeMode]; setThemeMode(n); try { localStorage.setItem('ergon.themeMode', n); } catch { /* sem armazenamento */ } }}
+          <button className="tool tool--icon" onClick={() => setThemeMode(THEME_NEXT[themeMode])}
             title={THEME_LABEL[themeMode]} aria-label={THEME_LABEL[themeMode]}>
             <Icon name={themeMode === 'auto' ? 'auto' : themeMode === 'dia' ? 'sun' : 'moon'} size={17} />
           </button>
@@ -196,7 +190,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
         {central && !selectedId && (
           <div className="chat-drawer chat-drawer--open central-drawer" style={{ width: CHAT_W }}>
             <CentralTrabalho ops={ops} error={opsRes.error} agents={state.agents} section={section} onSection={(x) => { setSection(x); setCentral(x); }} onClose={() => setCentral(null)}
-              onBoard={() => onNavigate('equipe')} onFiles={() => { history.replaceState(null, '', '#atividade?arquivos'); onNavigate('atividade'); }} />
+              onBoard={() => onNavigate('equipe')} onFiles={() => { location.hash = '#documentos?pasta=entregas'; }} />
           </div>
         )}
         {chatAgent && (

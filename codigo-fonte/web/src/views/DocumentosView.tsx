@@ -113,7 +113,7 @@ function PreviewPane({ f, onClose, onRename, onMove, onTrash, folders }: {
  */
 export function DocumentosView({ coord }: { coord: string }) {
   const [hashFolder, setHashFolder] = useHashParam('pasta');
-  const at = hashFolder && /^(trash|fld_[a-f0-9]{32})$/.test(hashFolder) ? hashFolder : 'root';
+  const at = hashFolder && /^(trash|entregas|fld_[a-f0-9]{32})$/.test(hashFolder) ? hashFolder : 'root';
   const go = (id: string) => { setHashFolder(id === 'root' ? null : id); setSel(new Set()); setOpenFile(null); };
   const tree = useResource<Folder[]>('/api/documents/tree', ['artifacts.changed']);
   const listing = useResource<Listing>(`/api/documents?folder=${at}`, ['artifacts.changed']);
@@ -266,9 +266,9 @@ export function DocumentosView({ coord }: { coord: string }) {
                   </form>
                 )}
                 {trash ? <button type="button" className="btn btn--sm" onClick={() => restore(f.id)}>Restaurar</button>
-                  : !fixedHere(f) && <span className="ditem__acts">
-                    <button type="button" className="icon-btn" onClick={() => setRenaming({ id: f.id, name: f.name })} aria-label={`Renomear ${f.name}`} title="Renomear"><Icon name="pen" size={13} /></button>
-                    <button type="button" className="icon-btn" onClick={() => toTrash([f.id])} aria-label={`Mandar ${f.name} para a lixeira`} title="Lixeira"><Icon name="trash" size={13} /></button>
+                  : <span className="ditem__acts">
+                    <button type="button" className="icon-btn" onClick={() => setRenaming({ id: f.id, name: f.name })} aria-label={`Renomear ${f.name}`} title={fixedHere(f) ? 'Renomear (a pasta continua recebendo o que chega)' : 'Renomear'}><Icon name="pen" size={13} /></button>
+                    {!fixedHere(f) && <button type="button" className="icon-btn" onClick={() => toTrash([f.id])} aria-label={`Mandar ${f.name} para a lixeira`} title="Lixeira"><Icon name="trash" size={13} /></button>}
                   </span>}
               </li>
             ))}

@@ -27,6 +27,9 @@ class FakeMotor implements HermesClient {
 const LONG = (what: string) => `${what}: ${'a Vértice Laboratórios monta e adapta laboratórios analíticos sob medida, com projeto, instalação e suporte. '.repeat(9)}`;
 const agent = (st: any, key: string) => st.agents.find((a: { char_key: string }) => a.char_key === key);
 
+/** entregue: concluído, ou entregue à pessoa e esperando a aprovação dela (decisão de 30/10: texto, documento e pesquisa vão para a aprovação) */
+const entregue = (t: { completed: number; work_state?: string | null }) => Number(t.completed) === 1 || t.work_state === 'aguardando_aprovacao';
+
 describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
   let h: Harness; let s: Session; let motor: FakeMotor; let st: any;
   before(async () => {
@@ -47,7 +50,7 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
 
   test('leitura do plano, da pergunta, do apagar card e do limite de pedidos de ajuda', () => {
     const p = parsePlan('Vou organizar.\n[[plano objetivo="Resumo de 3 linhas sobre a Vértice"]]\n[[etapa agente="Hipátia" faz="Pesquisar empresas chamadas Vértice"]]\n[[etapa agente="Sócrates" faz="Resumir em 3 linhas"]]');
-    assert.deepEqual(p, { objective: 'Resumo de 3 linhas sobre a Vértice', steps: [{ agent: 'Hipátia', task: 'Pesquisar empresas chamadas Vértice' }, { agent: 'Sócrates', task: 'Resumir em 3 linhas' }] });
+    assert.deepEqual({ objective: p?.objective, steps: p?.steps }, { objective: 'Resumo de 3 linhas sobre a Vértice', steps: [{ agent: 'Hipátia', task: 'Pesquisar empresas chamadas Vértice' }, { agent: 'Sócrates', task: 'Resumir em 3 linhas' }] });
     assert.equal(parsePlan('[[plano objetivo="Sem etapas"]]'), null, 'plano sem etapa não é plano');
     assert.equal(questionIn('Preciso saber. [[perguntar pergunta="Qual período?"]]'), 'Qual período?');
     assert.deepEqual(parseProposals('Ok. [[apagar-card numero="37" motivo="duplicado"]]'), [{ kind: 'delete_task', number: 37, reason: 'duplicado' }]);
@@ -88,7 +91,7 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     assert.match(help.purpose, /resumo de 3 linhas sobre o site/, 'o pedido do usuário fica gravado no card (cifrado no banco)');
     assert.ok((await msgs(c)).some((m) => m.role === 'system' && new RegExp(`card #${help.number} com o plano em 1 etapa`).test(m.content)));
     await run(8);
-    assert.equal(h.db.get<{ completed: number }>('SELECT completed FROM tasks WHERE id = ?', help.id)!.completed, 1);
+    assert.ok(entregue(h.db.get<{ completed: number; work_state: string }>('SELECT completed, work_state FROM tasks WHERE id = ?', help.id)!));
     const delivery = motor.started.find((p) => p.idempotencyKey.startsWith('ergon-entrega-'));
     assert.ok(delivery, 'quem recebeu o pedido continua sozinho');
     assert.match(delivery!.input, /Pedido do usuário: “Faça um resumo de 3 linhas sobre o site verticelab.com”/);
@@ -127,7 +130,7 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     assert.match(inputs[1], /O que as etapas anteriores entregaram:\n\[1\. Hipátia\]\nLista: Vértice Laboratórios/, 'a etapa 2 recebe o que a 1 entregou');
     assert.match(inputs[2], /\[2\. Euclides\]\nA mais provável/);
     card = (await req(h, 'GET', `/api/tasks/${t.id}`, s)).json;
-    assert.equal(card.task.completed, 1, 'resumo curto no fim passa: o conteúdo conta o plano inteiro');
+    assert.ok(entregue(card.task), 'resumo curto no fim passa: o conteúdo conta o plano inteiro');
     assert.ok(card.steps.every((x: { status: string }) => x.status === 'feita'));
     const m = await msgs(c);
     assert.equal(m[m.length - 1].role, 'agent');
@@ -174,10 +177,11 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     assert.ok(m.some((x) => x.role === 'user' && x.content === 'de 19 a 23/10'), 'a resposta aparece como do usuário');
     await run(10);
     assert.ok(answered, 'o agente recebeu a resposta');
-    assert.equal(h.db.get<{ completed: number }>('SELECT completed FROM tasks WHERE id = ?', t.id)!.completed, 1);
+    assert.ok(entregue(h.db.get<{ completed: number; work_state: string }>('SELECT completed, work_state FROM tasks WHERE id = ?', t.id)!));
     m = await msgs(c);
     assert.match(m[m.length - 1].content, /^Número-base: 12 cards/);
-    assert.equal((await req(h, 'GET', `/api/proposals?conversationId=${c}`, s)).json.filter((p: { kind: string; status: string }) => p.kind === 'info_request' && p.status === 'proposed').length, 0);
+    // o pedido da etapa foi respondido; o que sobra é a aprovação da entrega (texto vai para a aprovação da pessoa)
+    assert.equal((await req(h, 'GET', `/api/proposals?conversationId=${c}`, s)).json.filter((p: { kind: string; status: string; payload: string }) => p.kind === 'info_request' && p.status === 'proposed' && !JSON.parse(p.payload).review).length, 0);
   });
 
   test('aprovação pedida na conversa: aprovar ali conclui o card e quem recebeu o pedido entrega', async () => {
@@ -197,7 +201,7 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     assert.equal(JSON.parse(p.payload).need, 'approval');
     assert.equal((await req(h, 'POST', `/api/proposals/${p.id}/respond`, s, { action: 'approve' })).status, 200);
     await run(4);
-    assert.equal(h.db.get<{ completed: number }>('SELECT completed FROM tasks WHERE id = ?', t.id)!.completed, 1);
+    assert.ok(entregue(h.db.get<{ completed: number; work_state: string }>('SELECT completed, work_state FROM tasks WHERE id = ?', t.id)!));
     const after = await msgs(c);
     assert.equal(after[after.length - 1].content, 'Aqui está o comunicado aprovado.');
   });
@@ -207,7 +211,7 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     const r = await say(c, 'Pedi ao Aristóteles o resumo da Vértice: como está?');
     const ins = h.db.get<{ instructions: string }>('SELECT instructions FROM runs WHERE id = ?', r.json.runId)!.instructions;
     assert.match(ins, /Pedidos do usuário à equipe, de todas as conversas/);
-    assert.match(ins, /“Resumo de 3 linhas sobre o que a Vértice faz” \(pedido a Aristóteles: “Quero um resumo de 3 linhas[^”]*”\): concluído\. Resultado: 1\. Hipátia/);
+    assert.match(ins, /“Resumo de 3 linhas sobre o que a Vértice faz” \(pedido a Aristóteles: “Quero um resumo de 3 linhas[^”]*”\): (?:concluído|entregue, esperando a aprovação do usuário[^.]*)\. Resultado: 1\. Hipátia/);
     await run(4);
   });
 

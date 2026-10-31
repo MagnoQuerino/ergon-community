@@ -96,7 +96,7 @@ export interface RoutineConfig {
   params?: ParamValues;
 }
 
-/** Arquivo escolhido para uma rotina: do Ergon (Atividade › Arquivos) ou do OneDrive/Google Drive (lido a cada execução). */
+/** Arquivo escolhido para uma rotina: de Documentos ou do OneDrive/Google Drive (lido a cada execução). */
 export interface FileRef { kind: 'ergon' | 'microsoft' | 'google'; id: string; name: string }
 export type ParamValues = Record<string, string[] | FileRef[]>;
 /** O que a rotina acompanha, configurado uma vez (termos de busca, endereços de feed, arquivos). */

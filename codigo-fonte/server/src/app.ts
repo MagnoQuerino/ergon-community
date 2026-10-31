@@ -27,7 +27,8 @@ import { addSimulatedFloor, archiveAgent, capacityInfo, createAgent, ensureCoord
 import { activeCardsOf, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
 import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
 import { Initiative } from './services/initiative.ts';
-import { applyDocCommands, createFolder, emptyTrash, folderForConversation, folderForTask, listFolder, parseDocCommands, preview, restore, searchFiles, trash, tree, undo, updateFile, updateFolder } from './services/documents.ts';
+import { forkFrom, marksOf, mediaOf, searchAll, setMark, updateConversation, type SearchKind } from './services/conversation-tools.ts';
+import { applyDocCommands, createFolder, emptyTrash, purgeFiles, purgeRequest, folderForConversation, folderForTask, listFolder, parseDocCommands, preview, restore, searchFiles, trash, tree, undo, updateFile, updateFolder } from './services/documents.ts';
 import { personalityOf, setPersonality } from './services/voices.ts';
 import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
@@ -278,10 +279,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
           .catch((e: unknown) => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} não pôde estudar agora: ${e instanceof Error ? e.message : 'erro'}`));
       }
     }
-    if (ag && isCoordinator(ag)) {
+    if (ag) {
+      // qualquer colega gere Documentos pela conversa (apagar de vez espera o seu clique)
       const cmds = parseDocCommands(output);
       if (cmds.length) {
-        const done = applyDocCommands(db, bus, r.workspace_id, r.agent_id, cmds);
+        const ownerId = db.get<{ u: string }>('SELECT owner_user_id AS u FROM conversations WHERE id = ?', r.conversation_id)?.u ?? null;
+        const done = applyDocCommands(db, bus, r.workspace_id, r.agent_id, cmds, { output, userId: ownerId, filesDir: cfg.filesDir, maxBytes: cfg.maxUploadBytes });
+        const purge = purgeRequest(db, r.workspace_id, cmds, ag.name);
+        if (purge) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, [purge]);
         for (const d of done) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Documentos — ${d.text}${d.undo ? ` {{desfazer:${d.undo}}}` : ''}`);
       }
     }
@@ -982,7 +987,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = owner(req);
     return decideProposal(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { decision: 'apply' | 'reject' }).decision,
       { routine: (p) => routines.applyProposal(a.workspaceId, a.userId, p), ledger: (p, userId) => routines.registerLedger(a.workspaceId, userId, p), limits,
-        deleteTask: (n, reason) => cancelCardNumber(a.workspaceId, a.userId, n, reason) });
+        deleteTask: (n, reason) => cancelCardNumber(a.workspaceId, a.userId, n, reason),
+        batch: (p) => teamwork.openBatch(a.workspaceId, p.runId, p.plans),
+        purge: (p) => purgeFiles(db, bus, cfg, a.workspaceId, a.userId, p) });
   });
   // pedido de um card repassado na conversa (informação, aprovação, decisão, nova tentativa): a resposta vai para o card
   const respondSchema = { type: 'object', additionalProperties: false, required: ['action'], properties: {
@@ -1476,16 +1483,24 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.post('/api/conversations/:id/messages', {
     schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['text', 'clientRequestId'], properties: {
       text: S.str(cfg.maxInputChars), clientRequestId: S.str(64, 8), queue: { type: 'boolean' },
-      attachments: { type: 'array', maxItems: 20, items: S.id('art') } } } },
+      attachments: { type: 'array', maxItems: 20, items: S.id('art') }, replyTo: S.id('msg') } } },
   }, async (req, reply) => {
     const a = auth(req);
-    const b = req.body as { text: string; clientRequestId: string; queue?: boolean; attachments?: string[] };
+    const b = req.body as { text: string; clientRequestId: string; queue?: boolean; attachments?: string[]; replyTo?: string };
     // na conversa de preparo de uma rotina, a coordenação recebe o contexto do preparo (e a mensagem não vira tarefa)
     const convId = (req.params as { id: string }).id;
     const note = routines.channelFor(convId);
     // queue: com o agente ainda respondendo, a mensagem espera na fila da conversa (Ctrl+Enter) em vez de ser recusada
-    const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, attachments: b.attachments ?? [] });
+    const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, attachments: b.attachments ?? [], replyTo: b.replyTo ?? null });
     return reply.status(r.replayed ? 200 : 201).send(r);
+  });
+
+  // "Revisar": a entrega (concluída ou esperando você) volta para a equipe numa nova rodada, no mesmo card
+  app.post('/api/tasks/:id/revise', {
+    schema: { params: idParams('tsk'), body: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: S.str(cfg.maxInputChars, 3) } } },
+  }, async (req) => {
+    const a = owner(req);
+    return teamwork.revise(a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { text: string }).text);
   });
 
   app.post('/api/conversations/:id/read', { schema: { params: idParams('cnv') } }, async (req) => {
@@ -1493,12 +1508,43 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     markRead(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id);
     return { ok: true };
   });
+  // fixar, renomear, arquivar ou marcar como não lida um assunto
   app.patch('/api/conversations/:id', {
-    schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['pinned'], properties: { pinned: { type: 'boolean' } } } },
+    schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, minProperties: 1, properties: {
+      pinned: { type: 'boolean' }, title: S.str(80, 1), archived: { type: 'boolean' }, unread: { type: 'boolean' } } } },
   }, async (req) => {
     const a = auth(req);
-    setPinned(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { pinned: boolean }).pinned);
+    const b = req.body as { pinned?: boolean; title?: string; archived?: boolean; unread?: boolean };
+    const cid = (req.params as { id: string }).id;
+    if (b.pinned !== undefined) setPinned(db, bus, a.workspaceId, a.userId, cid, b.pinned);
+    if (b.title !== undefined || b.archived !== undefined || b.unread) updateConversation(db, bus, a.workspaceId, a.userId, cid, b);
     return { ok: true };
+  });
+  app.get('/api/conversations/:id/marks', { schema: { params: idParams('cnv') } }, async (req) => {
+    const a = auth(req);
+    return marksOf(db, a.workspaceId, a.userId, (req.params as { id: string }).id);
+  });
+  app.get('/api/conversations/:id/media', { schema: { params: idParams('cnv') } }, async (req) => {
+    const a = auth(req);
+    return mediaOf(db, a.workspaceId, a.userId, (req.params as { id: string }).id);
+  });
+  // marcar (ou desmarcar) uma mensagem; bifurcar: novo assunto a partir dela
+  app.put('/api/messages/:id/mark', { schema: { params: idParams('msg'), body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
+    const a = auth(req);
+    setMark(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { on: boolean }).on);
+    return { ok: true };
+  });
+  app.post('/api/messages/:id/fork', { schema: { params: idParams('msg') } }, async (req, reply) => {
+    const a = auth(req);
+    return reply.status(201).send(forkFrom(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id));
+  });
+  // a busca da lista de conversas: contatos, assuntos, mensagens, arquivos e links
+  app.get('/api/search/conversations', {
+    schema: { querystring: { type: 'object', additionalProperties: false, required: ['q'], properties: { q: S.str(200), kind: { enum: ['tudo', 'contatos', 'assuntos', 'mensagens', 'arquivos', 'links'] } } } },
+  }, async (req) => {
+    const a = auth(req);
+    const q = req.query as { q: string; kind?: SearchKind };
+    return searchAll(db, a.workspaceId, a.userId, q.q, q.kind ?? 'tudo');
   });
   app.post('/api/conversations/:id/retry', { schema: { params: idParams('cnv') } }, async (req) => {
     const a = auth(req);
@@ -1668,9 +1714,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   // Documentos: pastas, mover, renomear, lixeira, prévia, busca e desfazer ------------------------------------------
   const user = (req: FastifyRequest) => { const a = auth(req); return { a, actor: { type: 'user' as const, id: a.userId } }; };
-  const folderParam = { type: 'string', pattern: '^(root|trash|fld_[a-f0-9]{32})$' };
-  app.get('/api/documents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { folder: folderParam } } } }, async (req) =>
-    listFolder(db, auth(req).workspaceId, (req.query as { folder?: string }).folder ?? 'root'));
+  const folderParam = { type: 'string', pattern: '^(root|trash|entregas|fld_[a-f0-9]{32})$' };
+  app.get('/api/documents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { folder: folderParam } } } }, async (req) => {
+    const { workspaceId } = auth(req); const folder = (req.query as { folder?: string }).folder ?? 'root';
+    // o atalho das Entregas cria a pasta na primeira visita: a árvore aparece com ela
+    const fresh = folder === 'entregas' && !db.get("SELECT 1 FROM folders WHERE workspace_id = ? AND system_key = 'cards' AND deleted_at IS NULL", workspaceId);
+    const out = listFolder(db, workspaceId, folder);
+    if (fresh) bus.publish(workspaceId, 'artifacts.changed', {});
+    return out;
+  });
   app.get('/api/documents/tree', async (req) => tree(db, auth(req).workspaceId));
   app.get('/api/documents/search', { schema: { querystring: { type: 'object', additionalProperties: false, required: ['q'], properties: { q: S.str(200) } } } }, async (req) =>
     searchFiles(db, auth(req).workspaceId, (req.query as { q: string }).q));

@@ -66,6 +66,15 @@ export function ensureBoards(db: Db, bus: Bus | null, workspaceId: string, userC
       userColumns.forEach((c, i) => db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', id('col'), workspaceId, bid, c, i));
       changed = true;
     }
+    // quadro da equipe: "Com você" (o que espera a sua aprovação), entre Em andamento e Concluído
+    for (const b of db.all<{ id: string }>("SELECT id FROM boards WHERE workspace_id = ? AND origin = 'native' AND audience = 'team'", workspaceId)) {
+      if (db.get("SELECT 1 AS x FROM columns WHERE board_id = ? AND name = 'Com você'", b.id)) continue;
+      const done = db.get<{ position: number }>("SELECT position FROM columns WHERE board_id = ? AND name = 'Concluído'", b.id);
+      if (!done) continue;
+      db.run('UPDATE columns SET position = position + 1 WHERE board_id = ? AND position >= ?', b.id, done.position);
+      db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', id('col'), workspaceId, b.id, 'Com você', done.position);
+      changed = true;
+    }
     if (!getSetting(db, workspaceId, 'fixtures.retired')) {
       const sims = db.all<{ id: string; number: number }>('SELECT id, number FROM tasks WHERE workspace_id = ? AND is_fixture = 1 AND archived = 0', workspaceId);
       for (const t of sims) db.run('UPDATE tasks SET archived = 1, revision = revision + 1, updated_at = ? WHERE id = ?', now(), t.id);

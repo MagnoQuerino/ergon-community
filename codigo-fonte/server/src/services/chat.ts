@@ -6,6 +6,7 @@ import { decide, interpretRules } from './interpret.ts';
 import { instructionsFor, isCoordinator, type RunExecutor } from './runs.ts';
 import { parseChatCommand, recordProposals } from './proposals.ts';
 import { attachToMessage, attachmentLine, attachmentsOf, type AttachmentInfo } from './attachments.ts';
+import { forkContext } from './conversation-tools.ts';
 
 export interface ConversationRow {
   id: string; workspace_id: string; agent_id: string; owner_user_id: string; title: string; hermes_session_key: string; created_at: string;
@@ -20,7 +21,7 @@ export function getConversation(db: Db, workspaceId: string, userId: string, con
 
 export function listConversations(db: Db, workspaceId: string, userId: string, agentId?: string) {
   return db.all(
-    `SELECT c.id, c.agent_id, c.title, c.created_at, c.purpose,
+    `SELECT c.id, c.agent_id, c.title, c.created_at, c.purpose, c.read_at, c.archived_at, c.pinned_at,
             (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_at
        FROM conversations c WHERE c.workspace_id = ? AND c.owner_user_id = ? ${agentId ? 'AND c.agent_id = ?' : ''}
       ORDER BY COALESCE(last_at, c.created_at) DESC LIMIT 100`,
@@ -67,11 +68,21 @@ function hasDefaultTitle(db: Db, conv: ConversationRow): boolean {
 export function listMessages(db: Db, workspaceId: string, userId: string, conversationId: string) {
   getConversation(db, workspaceId, userId, conversationId);
   const rows = db.all<{ id: string } & Record<string, unknown>>(
-    `SELECT m.id, m.role, m.content, m.mode, m.run_id, m.created_at, m.queued, r.status AS run_status
+    `SELECT m.id, m.role, m.content, m.mode, m.run_id, m.created_at, m.queued, m.reply_to, r.status AS run_status
        FROM messages m LEFT JOIN runs r ON r.id = m.run_id
       WHERE m.conversation_id = ? AND m.workspace_id = ? ORDER BY m.created_at, m.id LIMIT 500`, conversationId, workspaceId);
   const files = attachmentsOf(db, workspaceId, rows.map((r) => r.id));
-  return rows.map((r) => (files.has(r.id) ? { ...r, attachments: files.get(r.id) } : r));
+  // entrega de cards: a mensagem leva os cards dela (estado e rodada), para "Revisar" ali mesmo
+  const delivered = new Map<string, Array<{ id: string; number: number; title: string; completed: number; work_state: string | null; review_round: number }>>();
+  for (const r of rows) {
+    if (r.role !== 'agent' || !r.run_id) continue;
+    const key = db.get<{ k: string }>('SELECT idempotency_key AS k FROM runs WHERE id = ?', r.run_id as string)?.k ?? '';
+    if (!key.startsWith('entrega-')) continue;
+    const origin = key.slice('entrega-'.length).replace(/#r\d+$/, '');
+    delivered.set(r.id, db.all('SELECT id, number, title, completed, work_state, review_round FROM tasks WHERE origin_run_id = ? AND workspace_id = ? AND archived = 0 ORDER BY number', origin, workspaceId));
+  }
+  const marks = new Set(db.all<{ message_id: string }>('SELECT message_id FROM message_marks WHERE user_id = ? AND workspace_id = ?', userId, workspaceId).map((m) => m.message_id));
+  return rows.map((r) => ({ ...r, ...(files.has(r.id) ? { attachments: files.get(r.id) } : {}), ...(delivered.get(r.id)?.length ? { cards: delivered.get(r.id) } : {}), ...(marks.has(r.id) ? { marked: 1 } : {}) }));
 }
 
 /**
@@ -99,7 +110,7 @@ const CHANNEL_NOTE = 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do
  * nem regra); `queue`: com uma resposta em andamento, a mensagem entra na fila da conversa (Ctrl+Enter) e vai para o
  * agente quando ele terminar, em vez de ser recusada.
  */
-export interface SendOptions { note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[] }
+export interface SendOptions { note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null }
 
 export function sendMessage(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, userId: string, conversationId: string,
   text: string, clientRequestId: string, maxMessages: number, maxChars: number, opts: SendOptions = {}) {
@@ -137,6 +148,7 @@ export function sendMessage(db: Db, bus: Bus, executor: RunExecutor, workspaceId
       `INSERT INTO messages (id, workspace_id, conversation_id, role, author_user_id, content, mode, client_request_id, created_at)
        VALUES (?, ?, ?, 'user', ?, ?, 'local', ?, ?)`, messageId, workspaceId, conversationId, userId, db.seal(workspaceId, content), clientRequestId, now());
     const files = opts.attachments?.length ? attachToMessage(db, workspaceId, userId, messageId, opts.attachments) : [];
+    if (opts.replyTo && db.get('SELECT 1 AS x FROM messages WHERE id = ? AND conversation_id = ?', opts.replyTo, conversationId)) db.run('UPDATE messages SET reply_to = ? WHERE id = ?', opts.replyTo, messageId);
     onUserMessage(db, workspaceId, conv);
     if (naming) nameAfterFirstMessage(db, workspaceId, conv, content || files.map((x) => x.filename).join(', '));
     return handOver(db, bus, executor, workspaceId, userId, conv, messageId, content, opts);
@@ -168,6 +180,10 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
   if (command) recordProposals(db, bus, workspaceId, { conversationId, runId: null }, [command]);
   const acted = !!command || (decision.kind !== 'none' && decision.kind !== 'clarify');
   const reply = opts.plain ? null : chatHooks.replyContext?.(workspaceId, userId, conv.agent_id, conversationId) ?? null;
+  const fork = forkContext(db, conversationId);
+  // respondendo a uma mensagem: o colega sabe a qual
+  const quoted = db.get<{ content: string; role: string }>('SELECT q.content, q.role FROM messages m JOIN messages q ON q.id = m.reply_to WHERE m.id = ?', messageId);
+  const quote = quoted ? `A pessoa está respondendo a esta mensagem ${quoted.role === 'user' ? 'dela' : 'sua'}: “${clip(quoted.content.replace(/\s+/g, ' '), 2000)}”` : null;
   if (!opts.plain && acted) {
     db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at) VALUES (?, ?, ?, 'system', ?, 'local', ?)`,
       id('msg'), workspaceId, conversationId, db.seal(workspaceId, `Sistema — ${result.summary}`), now());
@@ -176,7 +192,7 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
     workspaceId, agentId: conv.agent_id, conversationId, kind: 'chat', input: [content, attachmentLine(files)].filter(Boolean).join('\n'),
     // o agente precisa saber o que o sistema já aplicou, para não "propor" de novo um card já criado
     instructions: instructionsFor(db, workspaceId, conv.agent_id,
-      [CHANNEL_NOTE, opts.note ?? '', reply ?? '', files.length && !content ? FILE_ONLY_NOTE : '', !opts.plain && acted ? `Ação já aplicada pelo sistema para esta mensagem (fato, não repita como proposta): ${result.summary}` : ''].filter(Boolean).join('\n'),
+      [CHANNEL_NOTE, opts.note ?? '', reply ?? '', fork ?? '', quote ?? '', files.length && !content ? FILE_ONLY_NOTE : '', !opts.plain && acted ? `Ação já aplicada pelo sistema para esta mensagem (fato, não repita como proposta): ${result.summary}` : ''].filter(Boolean).join('\n'),
       { requests: !opts.plain, userId }),
     idempotencyKey: `chat-${messageId}`,
   });
@@ -221,7 +237,7 @@ export function recentConversations(db: Db, workspaceId: string, userId: string,
             (SELECT m.role FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_role,
             (SELECT COUNT(*) FROM message_attachments ma WHERE ma.message_id = (SELECT m.id FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1)) AS last_files
        FROM conversations c JOIN agents a ON a.id = c.agent_id
-      WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND a.status = 'active'
+      WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND a.status = 'active' AND c.archived_at IS NULL
         AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'agent'))
       ORDER BY COALESCE(last_at, c.created_at) DESC LIMIT ?`, workspaceId, userId, max);
   // a última fala, curta e sem as linhas de controle dos agentes

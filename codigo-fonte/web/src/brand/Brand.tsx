@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { EMBLEM_VIEWBOX, emblemMarkup, logoSvg, palette, splashHtml, type LockupKind } from './logo.ts';
+import { useTheme } from '../lib/theme.ts';
 
 // Desenho e animação vêm de logo.ts e brand.css (embutido no index.html); aqui só os invólucros para o React.
 // O conteúdo vem de geometria fixa (nenhum texto de usuário), por isso o innerHTML.
@@ -11,7 +12,10 @@ const amp = (size: number) => (size >= 64 ? 26 : Math.min(70, Math.round((26 * 6
 export function ErgonMark({ size = 24, onDark, mono, animated, loopOnly, title, className }: {
   size?: number; onDark?: boolean; mono?: string; animated?: boolean; loopOnly?: boolean; title?: string; className?: string;
 }) {
-  const html = useMemo(() => emblemMarkup(palette({ onDark, mono })), [onDark, mono]);
+  // sem indicação: a versão do tema da tela (o logo claro no escuro, o escuro no claro)
+  const theme = useTheme().theme; // sempre chamado (ordem dos hooks)
+  const dark = onDark ?? theme === 'noite';
+  const html = useMemo(() => emblemMarkup(palette({ onDark: dark, mono })), [dark, mono]);
   const cls = ['eg-mark', animated && 'eg-anim', animated && loopOnly && 'eg-anim--loop', className].filter(Boolean).join(' ');
   return (
     <svg className={cls} viewBox={EMBLEM_VIEWBOX} width={size} height={size} style={{ '--amp': amp(size) } as CSSProperties}
@@ -23,7 +27,9 @@ export function ErgonMark({ size = 24, onDark, mono, animated, loopOnly, title, 
 export function ErgonLogo({ kind = 'horizontal', height = 28, onDark, mono, animated, className }: {
   kind?: LockupKind; height?: number; onDark?: boolean; mono?: string; animated?: boolean; className?: string;
 }) {
-  const html = useMemo(() => logoSvg({ kind, onDark, mono, className: animated ? 'eg-anim eg-anim--loop' : undefined }), [kind, onDark, mono, animated]);
+  const theme = useTheme().theme; // sempre chamado (ordem dos hooks)
+  const dark = onDark ?? theme === 'noite';
+  const html = useMemo(() => logoSvg({ kind, onDark: dark, mono, className: animated ? 'eg-anim eg-anim--loop' : undefined }), [kind, dark, mono, animated]);
   return <span className={`brand-logo ${className ?? ''}`} style={{ height }} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 

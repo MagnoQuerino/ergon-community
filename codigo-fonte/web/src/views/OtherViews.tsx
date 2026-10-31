@@ -1,52 +1,16 @@
-import { useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 
-// Arquivos -----------------------------------------------------------------------------------------
-const fmtMb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB` : `${(n / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} KB`);
-export function ArquivosView({ embedded }: { embedded?: boolean } = {}) {
-  const list = useResource<Array<{ id: string; filename: string; mime: string; size: number; created_at: string }>>('/api/artifacts', ['artifacts.changed']);
-  const limits = useResource<{ uploadBytes: number; storageBytes: number | null; storageUsed: number }>('/api/limits', ['artifacts.changed']);
-  const input = useRef<HTMLInputElement>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const max = limits.data?.uploadBytes ?? 50 * 1024 * 1024;
-  const upload = async () => {
-    const f = input.current?.files?.[0];
-    if (!f) return;
-    setMsg(null);
-    if (f.size > max) return setMsg(`${f.name} tem ${fmtMb(f.size)}; o limite é ${fmtMb(max)} por arquivo.`);
-    try { await api.upload(f); setMsg(`Enviado: ${f.name}`); list.reload(); if (input.current) input.current.value = ''; } catch (e) { setMsg(errMsg(e)); }
-  };
-  return (
-    <div className={embedded ? '' : 'page'}>
-      {embedded ? <p className="muted">Arquivos que você enviou e os entregues pelas rotinas. Ficam cifrados no volume local do Ergon; download só para este workspace, sempre como anexo.</p>
-        : <header className="page__head"><h2>Arquivos</h2><p className="muted">Armazenados no volume local do Ergon. Download só para o workspace dono; sempre como anexo.</p></header>}
-      <section className="card row">
-        <input ref={input} type="file" accept=".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp" aria-label="Arquivo" />
-        <button className="btn btn--primary" onClick={upload}>Enviar</button>
-        <span className="muted">Até {fmtMb(max)} por arquivo · txt, md, csv, json, pdf, png, jpg, webp{limits.data?.storageBytes ? ` · ${fmtMb(limits.data.storageUsed)} de ${fmtMb(limits.data.storageBytes)} usados` : ' · espaço total: o disco deste computador'}</span>
-      </section>
-      {msg && <p className="ok" role="status">{msg}</p>}
-      <div className="table-wrap"><table className="table">
-        <thead><tr><th>Arquivo</th><th>Tipo</th><th>Tamanho</th><th>Enviado</th><th /></tr></thead>
-        <tbody>
-          {list.data?.map((a) => (
-            <tr key={a.id}><td>{a.filename}</td><td>{a.mime}</td><td>{fmtMb(a.size)}</td>
-              <td>{new Date(a.created_at).toLocaleString('pt-BR')}</td><td><a className="btn btn--sm" href={`/api/artifacts/${a.id}/download`}>Baixar</a></td></tr>
-          ))}
-          {!list.data?.length && <tr><td colSpan={5} className="muted">Nenhum arquivo.</td></tr>}
-        </tbody>
-      </table></div>
-    </div>
-  );
-}
-
 // Atividade ----------------------------------------------------------------------------------------
-type Tab = 'log' | 'eventos' | 'execucoes' | 'regras' | 'saida' | 'arquivos';
-const TABS: Tab[] = ['log', 'eventos', 'execucoes', 'regras', 'saida', 'arquivos'];
+type Tab = 'log' | 'eventos' | 'execucoes' | 'regras' | 'saida';
+const TABS: Tab[] = ['log', 'eventos', 'execucoes', 'regras', 'saida'];
 export function AtividadeView() {
   // "#atividade?regras" abre direto na aba (vindo de "Aguardando você")
   const [tab, setTab] = useState<Tab>(() => TABS.find((t) => location.hash.includes(`?${t}`)) ?? 'log');
+  // os arquivos saíram daqui: o endereço antigo ("#atividade?arquivos") abre Documentos › Entregas — depois do ciclo,
+  // senão o App (que acerta o endereço da área depois dos filhos) desfaz a troca
+  useEffect(() => { if (!location.hash.includes('?arquivos')) return; const t = setTimeout(() => { location.hash = '#documentos?pasta=entregas'; }); return () => clearTimeout(t); }, []);
   const log = useResource<Array<{ id: string; actor_type: string; action: string; target_type: string | null; evidence: string | null; result: string; created_at: string }>>(tab === 'log' ? '/api/activity' : null, ['audit.created']);
   const events = useResource<Array<{ id: string; platform: string; mode: string; external_id: string; event_type: string; actor_display: string | null; received_at: string; is_fixture: number; text_excerpt: string | null; interpretation: string | null; status: string; task_id: string | null }>>(tab === 'eventos' ? '/api/source-events' : null, ['events.changed']);
   const runs = useResource<Array<{ id: string; agent_name: string; kind: string; status: string; mode: string; error: string | null; created_at: string; finished_at: string | null; tokens_in: number | null; tokens_out: number | null; cost_usd: number | null }>>(tab === 'execucoes' ? '/api/runs' : null, ['runs.changed']);
@@ -64,7 +28,7 @@ export function AtividadeView() {
       <div className="tabs" role="tablist">
         {TABS.map((k) => (
           <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'tab--on' : ''}`} onClick={() => setTab(k)}>
-            {{ log: 'Log', eventos: 'Eventos de origem', execucoes: 'Execuções', regras: 'Regras propostas', saida: 'Saída', arquivos: 'Arquivos' }[k]}
+            {{ log: 'Log', eventos: 'Eventos de origem', execucoes: 'Execuções', regras: 'Regras propostas', saida: 'Saída' }[k]}
           </button>
         ))}
       </div>
@@ -85,7 +49,6 @@ export function AtividadeView() {
           {!rules.data?.length && <tr><td colSpan={4} className="muted">Nenhuma regra. Frases como “a partir de agora…” no chat geram propostas.</td></tr>}</tbody></table></div>}
       {tab === 'saida' && <div className="table-wrap"><table className="table"><thead><tr><th>Criada</th><th>Canal</th><th>Estado</th><th>Texto</th></tr></thead>
         <tbody>{outbox.data?.map((o) => <tr key={o.id}><td>{t(o.created_at)}</td><td>{o.platform} ({o.mode})</td><td>{o.status}</td><td className="pre">{o.body}</td></tr>)}</tbody></table></div>}
-      {tab === 'arquivos' && <><p className="hint">Os arquivos agora ficam organizados em pastas em <a href="#documentos">Documentos</a>. Aqui fica a lista corrida, do mais novo ao mais antigo.</p><ArquivosView embedded /></>}
     </div>
   );
 }

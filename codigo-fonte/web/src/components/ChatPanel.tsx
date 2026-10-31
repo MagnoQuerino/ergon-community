@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
 import { dragHasFiles, inlinePreview, isImage, kindOf, size } from '../lib/files.ts';
 import { useLiveEvent, useResource } from '../lib/live.ts';
@@ -30,6 +30,11 @@ const SUGGEST: Record<string, string[]> = {
   hipodamo: ['Planeja o projeto de ', 'Monta um cronograma para ', 'Quais são as etapas para '],
 };
 const suggestionsFor = (a: Agent) => SUGGEST[a.char_key ?? ''] ?? ['Me ajuda com ', 'Resume este arquivo', 'O que você faz de melhor?'];
+
+/** Corta um texto em uma linha (citação, marcadas). */
+const clip1 = (t: string, n: number) => { const x = t.replace(/\s+/g, ' ').trim(); return x.length > n ? `${x.slice(0, n - 1)}…` : x; };
+
+const CARD_STATE = (c: { completed: number; work_state: string | null }) => (Number(c.completed) ? 'concluído' : c.work_state === 'aguardando_aprovacao' ? 'com você' : 'em andamento');
 
 /** Arquivo subindo ou pronto para ir junto da mensagem. */
 interface Pending { key: string; file: File; progress: number; art: Attachment | null; error: string | null; abort: AbortController }
@@ -83,18 +88,25 @@ function Typing({ who, activity, status }: { who: string; activity: string | nul
   );
 }
 
-export function ChatPanel({ agent, onClose, compact, draft, embedded, conversationId, hidePicker }: {
+export function ChatPanel({ agent, onClose, compact, draft, embedded, conversationId, hidePicker, focusMessage, onOpenConversation }: {
   agent: Agent; onClose?: () => void; compact?: boolean; draft?: string | null; embedded?: boolean; conversationId?: string | null;
   /** a lista de conversas ao lado já mostra os assuntos: sem o seletor de cima */
   hidePicker?: boolean;
+  /** abre já nesta mensagem (busca, marcadas): rola até ela e destaca */
+  focusMessage?: string | null;
+  /** outro assunto aberto daqui (bifurcar) */
+  onOpenConversation?: (agentId: string, conversationId: string) => void;
 }) {
   const convs = useResource<Conversation[]>(`/api/conversations?agentId=${agent.id}`, ['messages.changed']);
   const [convId, setConvId] = useState<string | null>(conversationId ?? null);
   // rascunho por agente, na memória desta aba: fechar a janela ou trocar de agente não apaga o que você digitou
-  const [text, setTextRaw] = useState(() => draft ?? DRAFTS.get(agent.id) ?? '');
-  const setText = (v: string) => { setTextRaw(v); if (v) DRAFTS.set(agent.id, v); else DRAFTS.delete(agent.id); };
+  // rascunho por assunto (cada conversa guarda o que você começou a escrever nela)
+  const draftKey = `${agent.id}:${conversationId ?? 'nova'}`;
+  const [text, setTextRaw] = useState(() => draft ?? DRAFTS.get(draftKey) ?? '');
+  const keyRef = useRef(draftKey);
+  const setText = (v: string) => { setTextRaw(v); if (v) DRAFTS.set(keyRef.current, v); else DRAFTS.delete(keyRef.current); };
   useEffect(() => { if (draft) setText(draft); }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setTextRaw(draft ?? DRAFTS.get(agent.id) ?? ''); }, [agent.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setTextRaw(draft ?? DRAFTS.get(draftKey) ?? ''); }, [agent.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [err, setErr] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const msgs = useResource<Message[]>(convId ? `/api/conversations/${convId}/messages` : null, ['messages.changed', 'runs.changed']);
@@ -252,12 +264,13 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     setOptimistic((cur) => [...cur, { key, text: t, files: ready, serverId: null, queued: queue }]);
     // o campo limpa na hora: dá para escrever a próxima enquanto esta vai; se não for, o texto volta
     setText(''); setFiles([]);
-    const restore = () => setTextRaw((cur) => { const v = cur ? cur : t; DRAFTS.set(agent.id, v); return v; });
+    const restore = () => setTextRaw((cur) => { const v = cur ? cur : t; DRAFTS.set(keyRef.current, v); return v; });
     try {
       const id = await ensureConv();
       // mesmo identificador ao reenviar após falha de rede: o servidor não duplica
       if (!pending.current || pending.current.text !== t) pending.current = { id: requestId(), text: t };
-      const body = { text: t, clientRequestId: pending.current.id, ...(ready.length ? { attachments: ready.map((f) => f.id) } : {}) };
+      const body = { text: t, clientRequestId: pending.current.id, ...(ready.length ? { attachments: ready.map((f) => f.id) } : {}), ...(replying ? { replyTo: replying.id } : {}) };
+      setReplying(null);
       const post = (q: boolean) => api.post<{ messageId: string }>(`/api/conversations/${id}/messages`, { ...body, ...(q ? { queue: true } : {}) });
       // a tela ainda não sabia que ele começou a responder: a mensagem vai para a fila em vez de voltar
       const r = await post(queue).catch((e) => { if (e instanceof ApiError && e.code === 'busy' && !queue) return post(true); throw e; });
@@ -314,6 +327,58 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const title = convs.data?.find((c) => c.id === convId)?.title ?? `Conversa com ${agent.name}`;
   const saveDoc = (m: Message) => download(`${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60).trim() || 'entrega'}.doc`, 'application/msword', toWordHtml(stripControl(m.content), title));
 
+  // o assunto atual e a última leitura dele (o divisor "Novas mensagens" fica onde você parou)
+  const conv = convs.data?.find((c) => c.id === convId) ?? null;
+  useEffect(() => { keyRef.current = `${agent.id}:${convId ?? 'nova'}`; }, [agent.id, convId]);
+  const [newMark, setNewMark] = useState<{ conv: string | null; at: string | null }>({ conv: null, at: null });
+  useEffect(() => { if (conv && newMark.conv !== conv.id) setNewMark({ conv: conv.id, at: conv.read_at ?? null }); }, [conv?.id, conv?.read_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const firstNew = newMark.at ? list.find((m) => m.role === 'agent' && m.created_at > newMark.at!)?.id ?? null : null;
+
+  // responder citando, marcar, bifurcar, revisar uma entrega
+  const [replying, setReplying] = useState<Message | null>(null);
+  const byId = useMemo(() => new Map(list.map((m) => [m.id, m])), [list]);
+  const quoteOf = (m: Message) => clip1(m.role === 'agent' ? plainText(stripControl(m.content)) : m.content, 160);
+  const toggleMark = async (m: Message) => { try { await api.put(`/api/messages/${m.id}/mark`, { on: !m.marked }); msgs.reload(); marks.reload(); } catch (e) { setErr(errMsg(e)); } };
+  const fork = async (m: Message) => {
+    try { const r = await api.post<{ id: string; agentId: string }>(`/api/messages/${m.id}/fork`); convs.reload(); if (onOpenConversation) onOpenConversation(r.agentId, r.id); else setConvId(r.id); }
+    catch (e) { setErr(errMsg(e)); }
+  };
+  const [revising, setRevising] = useState<{ taskId: string; number: number; text: string } | null>(null);
+  const sendRevise = async () => {
+    if (!revising || revising.text.trim().length < 3) return;
+    try { await api.post(`/api/tasks/${revising.taskId}/revise`, { text: revising.text.trim() }); setRevising(null); msgs.reload(); props.reload(); setHint(`O card #${revising.number} voltou para a equipe com o que você quer mudar.`); }
+    catch (e) { setErr(errMsg(e)); }
+  };
+  const copyMine = async (m: Message) => { try { await navigator.clipboard.writeText(m.content); setCopied(m.id); window.setTimeout(() => setCopied(null), 1600); } catch { setErr('Não deu para copiar aqui; selecione o texto e use Ctrl+C.'); } };
+
+  // ir até uma mensagem (busca, marcadas, citação): rola e destaca
+  const [flash, setFlash] = useState<string | null>(null);
+  const goTo = (id: string) => {
+    const el = box.current?.querySelector<HTMLElement>(`[data-mid="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setFlash(id); window.setTimeout(() => setFlash((x) => (x === id ? null : x)), 1800);
+  };
+  const focused = useRef<string | null>(null);
+  useEffect(() => { if (focusMessage && list.some((m) => m.id === focusMessage) && focused.current !== focusMessage) { focused.current = focusMessage; window.setTimeout(() => goTo(focusMessage), 120); } }, [focusMessage, list.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // busca dentro da conversa (Ctrl+F), marcadas e "Arquivos e links"
+  const [panel, setPanel] = useState<'busca' | 'marcadas' | 'midia' | null>(null);
+  const [q, setQ] = useState('');
+  const [hitAt, setHitAt] = useState(0);
+  const folded = (x: string) => x.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const hits = useMemo(() => { const t = folded(q.trim()); return t.length < 2 ? [] : list.filter((m) => m.role !== 'system' && folded(m.content).includes(t)).map((m) => m.id); }, [q, list]);
+  useEffect(() => { setHitAt(hits.length ? hits.length - 1 : 0); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (panel === 'busca' && hits[hitAt]) goTo(hits[hitAt]); }, [hitAt, hits.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const marks = useResource<Array<{ id: string; role: string; content: string; created_at: string }>>(panel === 'marcadas' && convId ? `/api/conversations/${convId}/marks` : null, ['messages.changed']);
+  const media = useResource<{ files: Attachment[]; links: Array<{ url: string; message_id: string; created_at: string }> }>(panel === 'midia' && convId ? `/api/conversations/${convId}/media` : null, ['messages.changed', 'artifacts.changed']);
+  const searchInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const on = (e: globalThis.KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && box.current?.isConnected && box.current.closest('.chat')?.contains(document.activeElement ?? null)) { e.preventDefault(); setPanel('busca'); window.setTimeout(() => searchInput.current?.focus(), 30); } };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+
   const timeline = useMemo(() => [...list.map((m) => ({ at: m.created_at, m, p: null as Proposal | null })), ...(props.data ?? []).map((p) => ({ at: p.created_at, m: null as Message | null, p }))]
     .sort((a, b) => a.at.localeCompare(b.at)), [list, props.data]);
   const lastMsg = list[list.length - 1];
@@ -352,6 +417,37 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         </select>
         <button className="btn btn--ghost" onClick={async () => { setErr(null); try { const c = await api.post<Conversation>('/api/conversations', { agentId: agent.id }); setConvId(c.id); picked.current = true; convs.reload(); } catch (e) { setErr(errMsg(e)); } }}><Icon name="plus" size={14} /> Nova</button>
       </div>}
+      {convId && (
+        <div className="chat__tools">
+          {panel === 'busca' ? (
+            <div className="chat__find" role="search">
+              <Icon name="search" size={14} />
+              <input ref={searchInput} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nesta conversa" aria-label="Buscar nesta conversa"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (hits.length) setHitAt((i) => (e.shiftKey ? (i + 1) % hits.length : (i - 1 + hits.length) % hits.length)); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPanel(null); setQ(''); } }} />
+              <span className="muted small">{q.trim().length < 2 ? '' : hits.length ? `${hits.length - hitAt} de ${hits.length}` : 'nada'}</span>
+              <button type="button" className="icon-btn" disabled={!hits.length} onClick={() => setHitAt((i) => (i - 1 + hits.length) % hits.length)} aria-label="Anterior (Enter)" title="Anterior (Enter)"><Icon name="chevron-up" size={14} /></button>
+              <button type="button" className="icon-btn" disabled={!hits.length} onClick={() => setHitAt((i) => (i + 1) % hits.length)} aria-label="Próxima (Shift+Enter)" title="Próxima (Shift+Enter)"><Icon name="chevron" size={14} /></button>
+              <button type="button" className="icon-btn" onClick={() => { setPanel(null); setQ(''); }} aria-label="Fechar a busca"><Icon name="x" size={14} /></button>
+            </div>
+          ) : <span className="grow" />}
+          {panel !== 'busca' && <button type="button" className="icon-btn" onClick={() => { setPanel('busca'); window.setTimeout(() => searchInput.current?.focus(), 30); }} title="Buscar nesta conversa (Ctrl+F)" aria-label="Buscar nesta conversa"><Icon name="search" size={15} /></button>}
+          <button type="button" className={`icon-btn ${panel === 'marcadas' ? 'is-on' : ''}`} onClick={() => setPanel(panel === 'marcadas' ? null : 'marcadas')} title="Mensagens marcadas" aria-label="Mensagens marcadas"><Icon name="pin" size={15} /></button>
+          <button type="button" className={`icon-btn ${panel === 'midia' ? 'is-on' : ''}`} onClick={() => setPanel(panel === 'midia' ? null : 'midia')} title="Arquivos e links desta conversa" aria-label="Arquivos e links desta conversa"><Icon name="clip" size={15} /></button>
+        </div>
+      )}
+      {panel === 'marcadas' && (
+        <div className="chat__panel" aria-label="Mensagens marcadas">
+          {!marks.data?.length ? <p className="muted small">Nenhuma mensagem marcada. Use “Marcar” numa mensagem para achar depois.</p>
+            : marks.data.map((m) => <button key={m.id} type="button" className="chat__panel-item" onClick={() => goTo(m.id)}><b>{m.role === 'user' ? 'Você' : agent.name}</b><span>{m.content}</span><time className="muted small">{new Date(m.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</time></button>)}
+        </div>
+      )}
+      {panel === 'midia' && (
+        <div className="chat__panel" aria-label="Arquivos e links">
+          {!media.data?.files.length && !media.data?.links.length && <p className="muted small">Ainda não há arquivos nem links nesta conversa.</p>}
+          {!!media.data?.files.length && <div className="msg__files">{media.data.files.map((x) => <FileChip key={x.id} f={x} />)}</div>}
+          {media.data?.links.map((l) => <a key={`${l.message_id}-${l.url}`} className="chat__panel-item" href={l.url} target="_blank" rel="noreferrer noopener"><Icon name="compass" size={13} /><span>{l.url}</span></a>)}
+        </div>
+      )}
       <div className="chat__msgs" role="log" aria-live="polite" ref={box} onScroll={onScroll}>
         {!list.length && !shownOptimistic.length && (
           <div className="chat__empty">
@@ -387,8 +483,12 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
               );
             }
             const body = m.role === 'agent' ? stripControl(m.content) : m.content;
+            const quoted = m.reply_to ? byId.get(m.reply_to) : null;
             return (
-              <div key={m.id} className={`msg msg--${m.role} ${m.queued ? 'msg--queued' : ''} ${cont ? 'msg--cont' : ''} ${anim}`}>
+              <Fragment key={m.id}>
+              {m.id === firstNew && <div className="chat__new" role="separator"><span>Novas mensagens</span></div>}
+              <div data-mid={m.id} className={`msg msg--${m.role} ${m.queued ? 'msg--queued' : ''} ${cont ? 'msg--cont' : ''} ${anim} ${flash === m.id ? 'msg--flash' : ''} ${panel === 'busca' && hits.includes(m.id) ? (hits[hitAt] === m.id ? 'msg--hit msg--hit-on' : 'msg--hit') : ''} ${m.marked ? 'msg--marked' : ''}`}>
+                {quoted && <button type="button" className="msg__quote" onClick={() => goTo(quoted.id)}><b>{quoted.role === 'user' ? 'Você' : agent.name}</b>{quoteOf(quoted)}</button>}
                 {m.role === 'agent' && m.mode === 'simulated' && <span className="badge badge--warn">SIMULADO</span>}
                 {body && <div className="msg__body">{m.role === 'agent' ? <Markdown text={body} /> : body}</div>}
                 {!!m.attachments?.length && <div className="msg__files">{m.attachments.map((f) => <FileChip key={f.id} f={f} />)}</div>}
@@ -399,14 +499,35 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
                       <button type="button" className="linkish" onClick={() => setEditing({ id: m.id, text: m.content })}><Icon name="edit" size={12} /> Editar</button>
                       <button type="button" className="linkish" onClick={() => void dropQueued(m.id)}><Icon name="x" size={12} /> Tirar</button>
                     </span>
-                  ) : m.role === 'agent' && body ? (
+                  ) : body || m.attachments?.length ? (
                     <span className="msg__acts">
-                      <button type="button" className="linkish" onClick={() => void copy(m)} title="Copiar o texto"><Icon name={copied === m.id ? 'check' : 'copy'} size={12} /> {copied === m.id ? 'Copiado' : 'Copiar'}</button>
-                      {body.length > 1200 && <button type="button" className="linkish" onClick={() => saveDoc(m)} title="Baixar como documento (abre no Word)"><Icon name="download" size={12} /> Documento</button>}
+                      <button type="button" className="linkish" onClick={() => void (m.role === 'agent' ? copy(m) : copyMine(m))} title="Copiar o texto"><Icon name={copied === m.id ? 'check' : 'copy'} size={12} /> {copied === m.id ? 'Copiado' : 'Copiar'}</button>
+                      <button type="button" className="linkish" onClick={() => { setReplying(m); input.current?.focus(); }} title="Responder citando esta mensagem"><Icon name="undo" size={12} /> Responder</button>
+                      <button type="button" className={`linkish ${m.marked ? 'is-on' : ''}`} onClick={() => void toggleMark(m)} title={m.marked ? 'Tirar a marca' : 'Marcar para achar depois'}><Icon name="pin" size={12} /> {m.marked ? 'Marcada' : 'Marcar'}</button>
+                      <button type="button" className="linkish" onClick={() => void fork(m)} title="Novo assunto a partir desta mensagem"><Icon name="plus" size={12} /> Novo assunto</button>
+                      {m.role === 'agent' && body.length > 1200 && <button type="button" className="linkish" onClick={() => saveDoc(m)} title="Baixar como documento (abre no Word)"><Icon name="download" size={12} /> Documento</button>}
                     </span>
                   ) : null}
                 </div>
+                {!!m.cards?.length && (
+                  <div className="msg__cards">
+                    {m.cards.map((c) => (
+                      <div key={c.id} className="msg__card">
+                        <button type="button" className="linkish" onClick={() => openCard(c.id)}>#{c.number}</button>
+                        <span className={`msg__card-state msg__card-state--${CARD_STATE(c).replace(' ', '-')}`}>{CARD_STATE(c)}{c.review_round > 1 ? ` · versão ${c.review_round}` : ''}</span>
+                        {revising?.taskId === c.id ? (
+                          <form className="msg__revise" onSubmit={(e) => { e.preventDefault(); void sendRevise(); }}>
+                            <input autoFocus value={revising.text} onChange={(e) => setRevising({ ...revising, text: e.target.value })} placeholder="O que ajustar? (volta uma versão nova no mesmo card)" aria-label="O que revisar"
+                              onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRevising(null); } }} />
+                            <button className="btn btn--sm btn--primary">Revisar</button>
+                          </form>
+                        ) : Number(c.completed) ? <button type="button" className="btn btn--sm btn--ghost" onClick={() => setRevising({ taskId: c.id, number: c.number, text: '' })}><Icon name="repeat" size={12} /> Revisar</button> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+              </Fragment>
             );
           }
           if (!p) return null;
@@ -420,7 +541,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
                 <span className="proposal-card__txt">{p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
                 {p.status === 'proposed' ? (
                   <span className="row">
-                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'routine' ? 'Ativar rotina' : 'Aplicar'}</button>
+                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'routine' ? 'Ativar rotina' : p.kind === 'batch' ? 'Abrir todos' : p.kind === 'purge' ? 'Apagar de vez' : 'Aplicar'}</button>
                     <button className="btn btn--sm btn--ghost" onClick={() => decide(p.id, 'reject')}>Recusar</button>
                   </span>
                 ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? 'autorizada' : 'aplicada') : p.status === 'failed' ? 'falhou' : 'recusada'}</span>}
@@ -474,6 +595,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       )}
       {drag && <div className="chat__drop" aria-hidden="true"><Icon name="clip" size={28} /><b>Solte para enviar a {agent.name}</b><small>qualquer tipo de arquivo</small></div>}
       <form className="chat__input" onSubmit={(e) => { e.preventDefault(); void send(); }}>
+        {replying && <div className="chat__replying"><Icon name="undo" size={13} /><span><b>{replying.role === 'user' ? 'Você' : agent.name}</b> {quoteOf(replying)}</span><button type="button" className="icon-btn" onClick={() => setReplying(null)} aria-label="Não responder citando"><Icon name="x" size={13} /></button></div>}
         {files.length > 0 && <div className="chat__files">{files.map((f) => <FileChip key={f.key} f={f.art ?? { filename: f.file.name, mime: f.file.type || 'application/octet-stream', size: f.file.size }} progress={f.progress} error={f.error} onRemove={() => removeFile(f.key)} />)}</div>}
         <div className="chat__row">
           <button type="button" className="icon-btn chat__clip" onClick={() => picker.current?.click()} aria-label="Anexar arquivos" title="Anexar arquivos (ou arraste para a conversa)"><Icon name="clip" /></button>
