@@ -4,7 +4,7 @@ import type { HermesClient, ModelOptions, RemoteRun, StartRun } from '../src/ser
 import { parsePlan, questionIn } from '../src/services/purpose.ts';
 import { parseChatCommand, parseProposals } from '../src/services/proposals.ts';
 import { HELP_MAX, parseHelpRequests } from '../src/services/teamwork.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 /** Motor falso: devolve o que o teste mandar, pelo texto do pedido. */
 class FakeMotor implements HermesClient {
@@ -36,7 +36,7 @@ describe('o fio do pedido: o que o usuário pediu chega até a entrega', () => {
     motor = new FakeMotor();
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: motor });
     s = await setupOwner(h);
-    st = (await req(h, 'GET', '/api/state', s)).json;
+    st = { agents: await allAgents(h, s) };
     // só os cards deste teste no quadro
     for (const x of h.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ?', s.workspaceId)) h.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
     await req(h, 'PUT', '/api/team/autorun', s, { enabled: false }); // nada anda pela fila: o fio anda sozinho

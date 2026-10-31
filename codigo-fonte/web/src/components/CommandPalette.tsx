@@ -3,20 +3,23 @@ import { api } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
 import { getRecents, type Recent } from '../lib/recents.ts';
 import { rank } from '../lib/search.ts';
+import type { AgentLite } from '../lib/types.ts';
 import { Icon } from './Icon.tsx';
 
 /** Um resultado da busca: o que aparece e o que acontece ao escolher. */
 export interface PaletteItem { key: string; label: string; sub?: string; icon: string; keywords?: string; run: () => void }
 export interface CardHit { id: string; number: number; title: string; completed: number; board_id: string; audience: string; origin: string; column_name: string }
-interface Found { tasks: CardHit[]; routines: Array<{ id: string; name: string; status: string }> }
+/** agents: os melhores para o termo (todas as palavras no nome, no papel ou no setor), já ordenados pelo servidor */
+interface Found { tasks: CardHit[]; routines: Array<{ id: string; name: string; status: string }>; agents?: AgentLite[] }
 
 /**
  * Busca rápida (Ctrl+K, ou a lupa do cabeçalho): áreas, ações, agentes, cards de todos os quadros (pelo número ou
- * pelo título) e rotinas. Sem nada digitado, mostra os recentes. Setas escolhem, Enter abre, Esc fecha.
+ * pelo título) e rotinas. Sem nada digitado, mostra os recentes. Setas escolhem, Enter abre, Esc fecha. Agentes,
+ * cards e rotinas vêm do servidor (a equipe pode ter milhares: a busca não carrega ninguém antes de você digitar).
  */
-export function CommandPalette({ base, agents, onCard, onRoutine, onRecent, onClose }: {
+export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onClose }: {
   base: { acoes: PaletteItem[]; areas: PaletteItem[] };
-  agents: PaletteItem[];
+  onAgent: (a: AgentLite) => void;
   onCard: (t: CardHit) => void; onRoutine: (id: string, name: string) => void; onRecent: (r: Recent) => void;
   onClose: () => void;
 }) {
@@ -62,8 +65,9 @@ export function CommandPalette({ base, agents, onCard, onRoutine, onRecent, onCl
     const rotinas: PaletteItem[] = (found?.routines ?? []).map((r) => ({
       key: `rot-${r.id}`, label: r.name, sub: r.status === 'active' ? 'Rotina ligada' : 'Rotina pausada', icon: 'repeat', run: () => onRoutine(r.id, r.name),
     }));
-    return [['Cards', cards], ['Agentes', pick(agents, 6)], ['Rotinas', rotinas], ['Ações', pick(base.acoes, 5)], ['Ir para', pick(base.areas, 6)]] as Array<[string, PaletteItem[]]>;
-  }, [q, found, recents, base, agents]); // eslint-disable-line react-hooks/exhaustive-deps
+    const agentes: PaletteItem[] = (found?.agents ?? []).map((a) => ({ key: `ag-${a.id}`, label: a.name, sub: a.role, icon: 'users', run: () => onAgent(a) }));
+    return [['Cards', cards], ['Agentes', agentes], ['Rotinas', rotinas], ['Ações', pick(base.acoes, 5)], ['Ir para', pick(base.areas, 6)]] as Array<[string, PaletteItem[]]>;
+  }, [q, found, recents, base]); // eslint-disable-line react-hooks/exhaustive-deps
   const flat = groups.flatMap(([, items]) => items);
   useEffect(() => { setActive(0); }, [q, found]);
   // a opção escolhida fica à vista ao andar com as setas

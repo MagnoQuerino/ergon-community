@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { titleFrom } from '../src/services/chat.ts';
-import { drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 describe('título da conversa: a 1ª mensagem dá nome à conversa', () => {
   let h: Harness;
@@ -10,7 +10,7 @@ describe('título da conversa: a 1ª mensagem dá nome à conversa', () => {
   before(async () => {
     h = await harness();
     s = await setupOwner(h);
-    agent = (await req(h, 'GET', '/api/state', s)).json.agents.find((a: { name: string }) => a.name === 'Hipátia');
+    agent = (await allAgents(h, s)).find((a: { name: string }) => a.name === 'Hipátia');
   });
   after(async () => { await h.close(); });
 

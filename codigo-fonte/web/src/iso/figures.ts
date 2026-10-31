@@ -6,6 +6,7 @@
  * A grade é TypeScript puro (testável); o canvas só nasce no cache.
  */
 import { mix, shade, harmonize, type Theme } from './theme.ts';
+import { Lru } from './lru.ts';
 import { GRECIA_CLASSICA, rollFigure, type GraphicPack, type HairStyle, type Headwear, type Item } from '../world/pack.ts';
 import type { SkinFace, Species } from '../../../shared/skin.ts';
 import { hairBack, hairFront, headwear as skinHeadwear, item as skinItem, kitBottom, kitCape, kitLegs, kitSleeves, kitTop, speciesAndFace, type Kit, type Pen } from './figureParts.ts';
@@ -466,7 +467,13 @@ export interface Sprite {
   box?: [number, number, number, number]; // retângulo ocupado (x0, y0, x1, y1) — área de clique
 }
 
-const cache = new Map<string, Sprite>();
+// cache com descarte do menos usado: passear pela cidade grande carrega e descarrega milhares de agentes, e cada um
+// tem dezenas de poses; sem limite, a memória só crescia. A capacidade acompanha quantos bonecos estão na tela.
+const cache = new Lru<Sprite>(2000);
+/** Espaço para pelo menos `n` sprites de bonecos (os da tela, com folga para poses e quadros). */
+export function reserveFigures(n: number): void { cache.reserve(n); }
+/** Quantos sprites de bonecos estão guardados (medição). */
+export function figureCacheSize(): number { return cache.size; }
 
 /** Retângulo ocupado por pixels — área de clique generosa para figuras pequenas. */
 export function gridBox(grid: Grid): [number, number, number, number] {

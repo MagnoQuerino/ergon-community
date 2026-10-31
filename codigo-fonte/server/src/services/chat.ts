@@ -226,8 +226,10 @@ export function sendQueued(db: Db, bus: Bus, executor: RunExecutor, workspaceId:
  */
 export function recentConversations(db: Db, workspaceId: string, userId: string, max = 60) {
   const rows = db.all<{ id: string; agent_id: string; title: string; created_at: string; last_user_at: string | null; last_at: string | null;
-    pinned_at: string | null; priority: 'urgente' | 'alta' | null; priority_reason: string | null; unread: number; waiting: number; last_text: string | null; last_role: string | null; last_files: number }>(
+    pinned_at: string | null; priority: 'urgente' | 'alta' | null; priority_reason: string | null; unread: number; waiting: number; last_text: string | null; last_role: string | null; last_files: number;
+    ag_name: string; ag_role: string; ag_color: string; ag_char_key: string | null; ag_look_seed: number | null; ag_sector_name: string }>(
     `SELECT c.id, c.agent_id, c.title, c.created_at, c.pinned_at, c.priority, c.priority_reason,
+            a.name AS ag_name, a.role AS ag_role, a.color AS ag_color, a.char_key AS ag_char_key, a.look_seed AS ag_look_seed, p.name AS ag_sector_name,
             (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.role = 'user') AS last_user_at,
             (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_at,
             (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role = 'agent' AND m.created_at > COALESCE(c.read_at, '')) AS unread,
@@ -236,15 +238,16 @@ export function recentConversations(db: Db, workspaceId: string, userId: string,
             (SELECT m.content FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_text,
             (SELECT m.role FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_role,
             (SELECT COUNT(*) FROM message_attachments ma WHERE ma.message_id = (SELECT m.id FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1)) AS last_files
-       FROM conversations c JOIN agents a ON a.id = c.agent_id
+       FROM conversations c JOIN agents a ON a.id = c.agent_id JOIN profiles p ON p.id = a.profile_id
       WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND a.status = 'active' AND c.archived_at IS NULL
         AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'agent'))
       ORDER BY COALESCE(last_at, c.created_at) DESC LIMIT ?`, workspaceId, userId, max);
-  // a última fala, curta e sem as linhas de controle dos agentes
-  return rows.map(({ last_files, ...r }) => {
+  // a última fala, curta e sem as linhas de controle dos agentes; o colega leve (retrato e nome, sem a lista da equipe)
+  return rows.map(({ last_files, ag_name, ag_role, ag_color, ag_char_key, ag_look_seed, ag_sector_name, ...r }) => {
     const said = r.last_text ? clip(r.last_text.replace(/\[\[[^\]]*(?:\][^\]]+)*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, '🖼').replace(/[*#_`>|]/g, '').replace(/\s+/g, ' ').trim(), 90) : '';
     const files = Number(last_files) ? `📎 ${Number(last_files) === 1 ? '1 arquivo' : `${last_files} arquivos`}` : '';
-    return { ...r, unread: Number(r.unread), waiting: Number(r.waiting), last_text: said || files || null };
+    const agent = { id: r.agent_id, name: ag_name, role: ag_role, color: ag_color, char_key: ag_char_key, look_seed: ag_look_seed === null ? null : Number(ag_look_seed), sector_name: ag_sector_name };
+    return { ...r, unread: Number(r.unread), waiting: Number(r.waiting), last_text: said || files || null, agent };
   });
 }
 

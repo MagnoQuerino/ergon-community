@@ -1,5 +1,19 @@
 # Novidades
 
+## 1.1.0-rc.20 (pré-versão de teste)
+
+Traz também tudo da rc.19, que não foi publicada sozinha.
+
+- **O app inteiro fica leve com equipes enormes.** Antes, cada mudança na equipe fazia o app baixar a equipe inteira de
+  novo (19 MB com 10.000 agentes). Agora cada tela pede só o que mostra: o app abre em menos de meio segundo, usa um
+  terço da memória e as conversas abrem na hora, sem montar milhares de botões.
+- **A Cidade carrega por região:** os moradores dos andares que estão na tela, e o mapa com as contagens de todo o
+  resto. A sua equipe pequena continua exatamente como era: cada pessoa na mesma mesa e na mesma casa.
+- **A janela de um agente abre na hora** com nome, retrato e conversa, e o perfil completo chega logo em seguida.
+- **"Pedir revisão crítica a…"** agora mostra sempre quem de fato vai revisar.
+- **Configurações → ferramentas** mostra quem tem cada uma ("Hipátia, Sócrates e mais 3.208").
+- **Fluxos da equipe:** o filtro "Agente" lista quem tem card no quadro.
+
 ## 1.1.0-rc.19 (pré-versão de teste)
 
 - **A Cidade aguenta equipes enormes.** Com 10.000 agentes ela ia a menos de um quadro por segundo; agora roda lisa.

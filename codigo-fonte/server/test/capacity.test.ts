@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { id, now } from '../src/lib/util.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 // a capacidade continua garantida no servidor e no banco (vale para os planos da nuvem e para quem desliga o
 // crescimento automático); no local, por padrão, a cidade cresce sozinha (teste no fim do arquivo)
@@ -34,7 +34,7 @@ describe('capacidade de habitantes (validada no servidor)', () => {
   });
 
   test('arquivar libera vaga; reativar com capacidade cheia é bloqueado', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const victim = st.agents.find((a: { coordinator: number }) => !a.coordinator).id;
     assert.equal((await req(h, 'POST', `/api/agents/${victim}/archive`, s)).status, 200);
     const created = await req(h, 'POST', '/api/agents', s, { name: 'Nova', role: 'Ocupa a vaga', profileKey: 'brainstorm' });
@@ -45,7 +45,7 @@ describe('capacidade de habitantes (validada no servidor)', () => {
   });
 
   test('agente com execução ativa não pode ser arquivado', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const agent = st.agents.find((a: { status: string; coordinator: number }) => a.status === 'active' && !a.coordinator);
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agent.id })).json;
     await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: 'olá', clientRequestId: 'req-busy-00001' });
@@ -96,7 +96,7 @@ describe('corrida concorrente de criação (conexões separadas, mesmo arquivo)'
 
   test('8 criações simultâneas com 2 vagas livres → exatamente 2 sucessos', async () => {
     // abre 2 vagas: arquiva 2 agentes
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     for (const a of st.agents.filter((x: { coordinator: number }) => !x.coordinator).slice(0, 2)) assert.equal((await req(h, 'POST', `/api/agents/${a.id}/archive`, s)).status, 200);
     const barrier = new SharedArrayBuffer(8);
     const flag = new Int32Array(barrier);
@@ -150,7 +150,7 @@ describe('versão local: quantos agentes quiser', () => {
     const grew = h.db.all<{ result: string }>("SELECT result FROM audit_events WHERE workspace_id = ? AND action = 'city.grow'", s.workspaceId).map((x) => x.result);
     assert.ok(grew.some((x) => /andar novo/.test(x)) && grew.some((x) => /nova/.test(x)), grew.join(' | '));
     // reativar também cabe sempre
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const one = st.agents.find((a: { coordinator: number; status: string }) => !a.coordinator && a.status === 'active');
     assert.equal((await req(h, 'POST', `/api/agents/${one.id}/archive`, s)).status, 200);
     await req(h, 'POST', '/api/agents', s, { name: 'Ocupa a vaga', role: 'Teste', profileKey: 'central' });

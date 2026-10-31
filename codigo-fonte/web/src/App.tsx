@@ -8,7 +8,7 @@ import { AuthFlow, AutoUnlockPrompt, LockOverlay, PersonOpenScreen, ProtectScree
 import { ErgonLogo, Splash } from './brand/Brand.tsx';
 import { DecisionsPanel } from './components/DecisionsPanel.tsx';
 import { Icon } from './components/Icon.tsx';
-import { AgentWindow } from './components/AgentWindow.tsx';
+import { AgentWindow, type AgentHead } from './components/AgentWindow.tsx';
 import { AgentesView } from './views/AgentesView.tsx';
 import { AmbienteView } from './views/AmbienteView.tsx';
 import { AtividadeView } from './views/OtherViews.tsx';
@@ -28,14 +28,13 @@ import { initPrefs, savePrefs } from './lib/prefs.ts';
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
 import { useSurface } from './lib/surface.ts';
-import { coordinatorOf } from './lib/team.ts';
 import { CommandPalette, type CardHit, type PaletteItem } from './components/CommandPalette.tsx';
 import { ConversationDock, ConversationsDialog } from './components/ConversationDock.tsx';
 import { TaskDetail } from './components/TaskDetail.tsx';
 import { WorkspaceSwitcher } from './components/Workspaces.tsx';
 import { AccountMenu } from './components/AccountMenu.tsx';
 import { onOpenCard, onOpenConversation, onOpenDecisions } from './lib/open.ts';
-import { clearRecents, pushRecent, type Recent } from './lib/recents.ts';
+import { clearRecents, pushRecent, removeRecent, type Recent } from './lib/recents.ts';
 
 type Auth = { state: 'loading' } | { state: 'out'; st: AuthState } | { state: 'in'; me: Me };
 type Waiter = (ok: boolean) => void;
@@ -139,7 +138,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   }, []);
   const [view, setView] = useState<View>(() => (location.hash.slice(1).split('?')[0] as View) || 'ambiente');
   // janela do agente (conversas, perfil, atividade), aberta de qualquer tela
-  const [win, setWin] = useState<{ id: string; tab: 'conversa' | 'perfil' | 'atividade'; draft: string | null; conversationId: string | null } | null>(null);
+  const [win, setWin] = useState<{ id: string; tab: 'conversa' | 'perfil' | 'atividade'; draft: string | null; conversationId: string | null; lite: AgentHead | null } | null>(null);
   const [decisions, setDecisions] = useState(false);
   const [focus, setFocus] = useState(false);
   // navegação: gaveta com o menu inteiro na janela estreita; menu lateral recolhível (só ícones) na larga
@@ -186,22 +185,25 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
     return () => removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => { if (location.hash.slice(1).split('?')[0] !== view) history.replaceState(null, '', `#${view}`); }, [view]);
+  // a janela mais aberta (a do Coordenador: "Pedir a…") já com o perfil buscado por baixo
+  const coordId = st.data?.team.coordinator?.id ?? null;
+  useEffect(() => { if (coordId) prefetchResources([`/api/agents/${coordId}`, `/api/team/agents/${coordId}`]); }, [coordId]);
   const s = st.data;
   if (!s) return <Splash label={st.error ?? undefined} />;
 
-  const openAgent = (id: string, tab: 'conversa' | 'perfil' | 'atividade' = 'conversa', draft: string | null = null, conversationId: string | null = null) => {
-    const a = s.agents.find((x) => x.id === id);
-    if (a) pushRecent({ kind: 'agente', id, label: a.name, where: a.role });
-    setWin({ id, tab, draft, conversationId });
+  // a equipe sem a lista inteira: o Coordenador e uns nomes para as dicas (o resto vem por partes, em cada tela)
+  const coordinator = s.team.coordinator;
+  const coordLabel = coordinator?.name ?? 'a coordenação';
+  // a janela abre pelo id, já com a linha leve de quem abriu (o perfil completo chega por baixo); o recente é
+  // gravado pela própria janela quando o perfil chega
+  const openAgent = (id: string, tab: 'conversa' | 'perfil' | 'atividade' = 'conversa', draft: string | null = null, conversationId: string | null = null, lite: AgentHead | null = null) => {
+    setWin({ id, tab, draft, conversationId, lite: lite ?? (coordinator?.id === id ? coordinator : null) });
   };
   const logout = () => { clearRecents(); onLogout(); };
-  const coordinator = coordinatorOf(s.agents);
-  const coordLabel = coordinator?.name ?? 'a coordenação';
   const askCoordinator = (text: string) => { if (coordinator) openAgent(coordinator.id, 'conversa', text); };
   const startTour = () => { setFocus(false); setWin(null); setDecisions(false); setTour(true); };
   const endTour = () => { setTour(false); savePrefs({ tourDone: true }); };
-  const tipOther = s.agents.find((a) => a.status === 'active' && a.id !== coordinator?.id)?.name ?? 'um agente';
-  const winAgent = win ? s.agents.find((a) => a.id === win.id) ?? null : null;
+  const tipOther = s.team.others[0]?.name ?? 'um agente';
   const sim = s.executor.mode === 'simulated';
 
   // avisos que pedem ação: nunca somem por falta de espaço (na janela estreita viram um contador que abre o Estado)
@@ -221,7 +223,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   };
   const openRoutine = (id: string, name: string) => { const href = `#rotinas?rotina=${id}`; pushRecent({ kind: 'rotina', id, label: name, href }); goHash(href); };
   const openRecent = (r: Recent) => {
-    if (r.kind === 'agente') { if (s.agents.some((a) => a.id === r.id)) openAgent(r.id); return; }
+    // agente que não existe mais (outro workspace, apagado): a janela fecha sozinha e o recente sai da lista
+    if (r.kind === 'agente') { openAgent(r.id); return; }
     if (r.href && /^#(equipe|tarefas|rotinas)\?[a-z]+=[A-Za-z0-9_]+(&[a-z]+=[A-Za-z0-9_]+)?$/.test(r.href)) goHash(r.href);
   };
   const paletteBase: { acoes: PaletteItem[]; areas: PaletteItem[] } = {
@@ -236,7 +239,6 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
     ],
     areas: [...NAV, HELP_NAV].map((n) => ({ key: `v-${n.id}`, label: n.label, icon: n.icon, run: () => go(n.id) })),
   };
-  const paletteAgents: PaletteItem[] = s.agents.filter((a) => a.status === 'active').map((a) => ({ key: `ag-${a.id}`, label: a.name, sub: a.role, icon: 'users', keywords: a.sector_name, run: () => openAgent(a.id) }));
   const navItems = (inDrawer: boolean) => (
     <>
       {[...NAV, HELP_NAV].map((n) => (
@@ -334,13 +336,13 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <FocoView state={s} selectedId={selected} onSelect={setSelected} onOpenAgent={openAgent} onAskCoordinator={askCoordinator}
             onExit={() => setFocus(false)} onGo={(v) => { setFocus(false); setView(v); }} />
         ) : view === 'ambiente' ? null : view === 'agentes' ? (
-          <AgentesView state={s} reload={st.reload} onOpen={openAgent} />
+          <AgentesView state={s} onOpen={(id, tab, lite) => openAgent(id, tab, null, null, lite ?? null)} />
         ) : view === 'equipe' ? (
           <EquipeView state={s} onAskCoordinator={askCoordinator} reload={st.reload} />
         ) : view === 'tarefas' ? (
-          <TarefasView agents={s.agents} onGo={setView} />
+          <TarefasView onGo={setView} />
         ) : view === 'rotinas' ? (
-          <RotinasView state={s} onOpenAgent={openAgent} onGo={setView} />
+          <RotinasView coord={coordinator} onOpenAgent={openAgent} onGo={setView} />
         ) : view === 'documentos' ? (
           <DocumentosView coord={coordLabel} />
         ) : view === 'conexoes' ? (
@@ -354,8 +356,9 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         )}
       </main>
       {/* conversas por baixo; o perfil aberto dali vem por cima e, ao fechar, volta para a conversa */}
-      {convs && <ConversationsDialog agents={s.agents} initial={convs} onClose={() => setConvs(null)} onOpenAgent={(id, tab) => openAgent(id, tab)} />}
-      {win && winAgent && <AgentWindow key={`${win.id}-${win.conversationId ?? ''}`} agent={winAgent} state={s} initialTab={win.tab} draft={win.draft} conversationId={win.conversationId} onClose={() => setWin(null)} reload={st.reload} />}
+      {convs && <ConversationsDialog coordinator={coordinator} scope={s.workspace.id} initial={convs} onClose={() => setConvs(null)} onOpenAgent={(id, tab, lite) => openAgent(id, tab, null, null, lite ?? null)} />}
+      {win && <AgentWindow key={`${win.id}-${win.conversationId ?? ''}`} agentId={win.id} initial={win.lite} coordName={coordLabel} sectors={s.sectors} initialTab={win.tab} draft={win.draft} conversationId={win.conversationId}
+        onClose={() => setWin(null)} onGone={() => { removeRecent('agente', win.id); setWin(null); }} />}
       {!focus && !onb && !tour && <ViewTip view={view} coord={coordLabel} other={tipOther} onTour={startTour} />}
       {onb && (
         <Onboarding displayName={me.user.displayName} workspaceName={s.workspace.name} redo={onb === 'redo'} onCancel={() => setOnb(null)}
@@ -375,11 +378,11 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         )} />
       )}
       {palette && (
-        <CommandPalette base={paletteBase} agents={paletteAgents} onCard={openCard} onRoutine={openRoutine} onRecent={openRecent} onClose={() => setPalette(false)} />
+        <CommandPalette base={paletteBase} onAgent={(a) => openAgent(a.id, 'conversa', null, null, a)} onCard={openCard} onRoutine={openRoutine} onRecent={openRecent} onClose={() => setPalette(false)} />
       )}
       {decisions && <DecisionsPanel onClose={() => setDecisions(false)} onOpenAgent={(...a) => { setDecisions(false); openAgent(...a); }} onGo={(v) => { setDecisions(false); setView(v); }} />}
-      {card && <TaskDetail key={card} taskId={card} agents={s.agents} mode="auto" over onClose={() => setCard(null)} onAskCoordinator={(t) => { setCard(null); setConvs(null); askCoordinator(t); }} />}
-      <ConversationDock agents={s.agents} hidden={!!convs || !!win || focus || tour || !!onb} />
+      {card && <TaskDetail key={card} taskId={card} mode="auto" over onClose={() => setCard(null)} onAskCoordinator={(t) => { setCard(null); setConvs(null); askCoordinator(t); }} />}
+      <ConversationDock coordinator={coordinator} hidden={!!convs || !!win || focus || tour || !!onb} />
 
     </div>
   );

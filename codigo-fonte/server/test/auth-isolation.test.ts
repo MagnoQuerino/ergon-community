@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { now } from '../src/lib/util.ts';
-import { addPerson, drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { addPerson, allAgents, drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 describe('autenticação, CSRF e origem', () => {
   let h: Harness;
@@ -68,7 +68,7 @@ describe('isolamento entre workspaces e conversas', () => {
     const boards = (await req(h, 'GET', '/api/boards', a)).json;
     const art = (await req(h, 'POST', '/api/artifacts', a, Buffer.from('conteúdo A'), {
       'content-type': 'application/octet-stream', 'x-filename': 'a.txt', 'x-file-type': 'text/plain' })).json;
-    const state = (await req(h, 'GET', '/api/state', a)).json;
+    const state = { agents: await allAgents(h, a) };
     const conv = (await req(h, 'POST', '/api/conversations', a, { agentId: state.agents[0].id })).json;
     await req(h, 'POST', `/api/conversations/${conv.id}/messages`, a, { text: 'mensagem privada', clientRequestId: 'req-isol-0001' });
     await drain(h);
@@ -102,8 +102,7 @@ describe('isolamento entre workspaces e conversas', () => {
   });
 
   test('duas conversas com o mesmo agente não compartilham histórico nem sessão Hermes', async () => {
-    const state = (await req(h, 'GET', '/api/state', a)).json;
-    const agentId = state.agents[1].id;
+    const agentId = (await allAgents(h, a))[1].id;
     const c1 = (await req(h, 'POST', '/api/conversations', a, { agentId })).json;
     const c2 = (await req(h, 'POST', '/api/conversations', a, { agentId })).json;
     assert.notEqual(c1.hermes_session_key, c2.hermes_session_key);

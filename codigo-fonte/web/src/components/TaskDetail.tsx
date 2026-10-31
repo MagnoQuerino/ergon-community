@@ -3,12 +3,11 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { openConversation } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
-import { ORIGIN_LABEL, SOURCE_LABEL, stripControl, type Agent, type Column, type Need } from '../lib/types.ts';
+import { ORIGIN_LABEL, SOURCE_LABEL, stripControl, type Column, type Need } from '../lib/types.ts';
 import { DISPLAY_BADGE, DISPLAY_LABEL, displayOf } from '../lib/work.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
 import { DueChip } from './Board.tsx';
-import { reviewerOf } from '../lib/team.ts';
 import { ActionBar, IconAction, TaskFiles, TechDetails, type TaskFile, type WorkInfo } from './TaskWork.tsx';
 
 interface Step { position: number; agentId: string; title: string; status: 'pendente' | 'em_andamento' | 'feita' | 'falhou'; doneAt: string | null }
@@ -35,6 +34,10 @@ interface Detail {
   origin: { conversationId: string | null; agentId: string; deliverAgentId: string; purpose: string | null; delivered: boolean } | null;
   /** cards que nasceram deste (ajuda pedida, o card enviado à equipe): cancelar este leva junto */
   children: Array<{ number: number; title: string }>;
+  /** nome e cor de todo agente citado no card (responsável, etapas, origem, execuções, histórico), desativados incluídos */
+  agents?: Record<string, { name: string; color: string }>;
+  /** quem faria a revisão crítica deste card: a mesma escolha do servidor que começa a revisão (nunca o próprio autor) */
+  reviewer?: { id: string; name: string } | null;
 }
 
 const REVIEW_STATUS: Record<string, string> = {
@@ -67,8 +70,8 @@ const SHOW_RESULT = ['task.queue', 'task.route', 'task.reassign', 'task.handoff'
  * na hora (o painel não engole o clique).
  */
 /** over: aberto por cima de qualquer tela (de uma conversa, de "aguardando você"): fica acima das janelas */
-export function TaskDetail({ taskId, columns: askedColumns, agents, mode: asked, source: askedSource, onClose, onAskCoordinator, over }: {
-  taskId: string; columns?: Column[]; agents: Agent[]; mode: 'team' | 'user' | 'mirror' | 'auto'; source?: string | null;
+export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source: askedSource, onClose, onAskCoordinator, over }: {
+  taskId: string; columns?: Column[]; mode: 'team' | 'user' | 'mirror' | 'auto'; source?: string | null;
   onClose: () => void; onAskCoordinator?: (text: string) => void; over?: boolean;
 }) {
   const d = useResource<Detail>(`/api/tasks/${taskId}`, ['tasks.changed', 'runs.changed']);
@@ -131,7 +134,9 @@ export function TaskDetail({ taskId, columns: askedColumns, agents, mode: asked,
   if (!d.data) return <aside ref={ref} className={`drawer ${over ? 'drawer--over' : ''}`} role="dialog" aria-label="Carregando a tarefa"><Loading error={d.error} /></aside>;
   const t = d.data.task;
   const editable = mode === 'user';
-  const nameOf = (id: string | null) => agents.find((a) => a.id === id)?.name ?? null;
+  // os nomes vêm com o card (só os citados nele), não da equipe inteira
+  const names = d.data.agents ?? {};
+  const nameOf = (id: string | null) => (id ? names[id]?.name ?? null : null);
   const patch = async (body: Record<string, unknown>) => {
     setErr(null);
     try { const r = await api.patch<{ revision: number }>(`/api/tasks/${t.id}`, { ...body, expectedRevision: rev.current || t.revision }); rev.current = r.revision; d.reload(); }
@@ -150,8 +155,9 @@ export function TaskDetail({ taskId, columns: askedColumns, agents, mode: asked,
     const r = await api.post<{ number: number; routed: string | null }>(`/api/tasks/${t.id}/send-to-team`);
     return `Enviada: card #${r.number} no Fluxos da equipe. ${r.routed ?? ''}`;
   });
-  // revisão crítica: de quem tem a ferramenta de revisão hoje (qualquer nome), nunca do próprio autor
-  const reviewer = reviewerOf(agents, t.agent_id);
+  // revisão crítica: de quem tem a ferramenta de revisão hoje (qualquer nome), nunca do próprio autor — o nome é o de
+  // quem o servidor de fato chama ao começar a revisão
+  const reviewer = d.data.reviewer ?? null;
   const askReview = () => act(async () => {
     await api.post(`/api/tasks/${t.id}/review`);
     return `${reviewer?.name ?? 'A revisão'} vai examinar o material e perguntar a ${nameOf(t.agent_id) ?? 'quem fez'}.`;

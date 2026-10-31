@@ -10,7 +10,10 @@ export type OpsCategory = 'ativo' | 'pronto' | 'bloqueado' | 'precisa_de_voce' |
 export type OpsAction = 'abrir' | 'priorizar' | 'responder' | 'parar' | 'cancelar' | 'conversa';
 export interface OpsItem {
   key: string; source: 'task' | 'run'; taskId: string | null; number: number | null; runId: string | null; title: string;
-  agentId: string | null; agentName: string | null; category: OpsCategory; reason: string; reasonCode: string;
+  agentId: string | null; agentName: string | null;
+  /** o agente do item (retrato), sem a lista da equipe */
+  agent: import('./types.ts').AgentLite | null;
+  category: OpsCategory; reason: string; reasonCode: string;
   position: number | null; slot: boolean; since: string | null; priority: boolean; simulated: boolean;
   dependsOn: Array<{ taskId: string; number: number; agentName: string | null }>; actions: OpsAction[];
 }

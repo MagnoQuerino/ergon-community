@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const BRIDGE_TOKEN = 'token-de-teste-da-ponte-0123456789';
 
@@ -82,7 +82,7 @@ describe('Teams — fixture → evento → tarefa → resposta simulada', () => 
     // o quadro da equipe é automático: a pessoa não edita o card, mas pode dizer na conversa que concluiu
     assert.equal((await req(h, 'PATCH', `/api/tasks/${taskId}`, s, { completed: true })).status, 409);
     const n = (await req(h, 'GET', `/api/tasks/${taskId}`, s)).json.task.number;
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const coord = st.agents.find((a: { char_key: string }) => a.char_key === 'aristoteles');
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: coord.id })).json;
     await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: `Concluí a #${n}`, clientRequestId: 'conclui-0001' });

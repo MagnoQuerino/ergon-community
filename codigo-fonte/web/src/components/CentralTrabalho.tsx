@@ -4,7 +4,6 @@ import { cloudOn, elapsed, OPS_URL, type AmbientOps, type Distribution, type Ops
 import { useResource } from '../lib/live.ts';
 import { openCard, openConversation, openDecisions } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
-import type { Agent } from '../lib/types.ts';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { Icon } from './Icon.tsx';
 
@@ -21,13 +20,12 @@ const SECTION_TITLE: Record<CentralSection, string> = { trabalho: 'Trabalho em a
  * pronto — a mesma leitura das placas da cidade, em lista (teclado e leitor de tela). Cada linha abre o card de
  * sempre, onde estão priorizar, responder, parar e cancelar. Nada aqui executa trabalho por conta própria.
  */
-export function CentralTrabalho({ ops, error, agents, section, onSection, onClose, onBoard, onFiles, embedded }: {
-  ops: AmbientOps | null; error: string | null; agents: Agent[]; section: CentralSection; onSection: (s: CentralSection) => void;
+export function CentralTrabalho({ ops, error, section, onSection, onClose, onBoard, onFiles, embedded }: {
+  ops: AmbientOps | null; error: string | null; section: CentralSection; onSection: (s: CentralSection) => void;
   onClose?: () => void; onBoard: () => void; onFiles: () => void; embedded?: boolean;
 }) {
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose: () => onClose?.(), active: !embedded && !!onClose, autoFocus: !embedded });
-  const agentOf = (id: string | null) => agents.find((a) => a.id === id) ?? null;
 
   return (
     <aside ref={ref} className={`central ${embedded ? 'central--embedded' : ''}`} aria-labelledby="central-titulo">
@@ -46,9 +44,9 @@ export function CentralTrabalho({ ops, error, agents, section, onSection, onClos
         {!ops ? (error ? <p className="error" role="alert">Não deu para ler o trabalho agora: {error}. A cidade e o quadro seguem funcionando.</p>
           : <p className="muted">Lendo o trabalho da equipe…</p>) : <>
           {error && <p className="hint warn" role="status">Sem atualização no momento ({error}). Mostrando a última leitura, de {new Date(ops.at).toLocaleTimeString('pt-BR', { timeStyle: 'short' })}.</p>}
-          {section === 'trabalho' && <Trabalho ops={ops} agentOf={agentOf} onBoard={onBoard} />}
-          {section === 'espera' && <Espera ops={ops} agentOf={agentOf} />}
-          {section === 'voce' && <Voce ops={ops} agentOf={agentOf} />}
+          {section === 'trabalho' && <Trabalho ops={ops} onBoard={onBoard} />}
+          {section === 'espera' && <Espera ops={ops} />}
+          {section === 'voce' && <Voce ops={ops} />}
           {section === 'entregas' && <Entregas ops={ops} onFiles={onFiles} />}
         </>}
       </div>
@@ -81,8 +79,9 @@ function Postos({ busy, limit }: { busy: number; limit: number | null }) {
   );
 }
 
-function Linha({ it, agentOf }: { it: OpsItem; agentOf: (id: string | null) => Agent | null }) {
-  const ag = agentOf(it.agentId);
+/** Uma linha: o retrato vem no próprio item (o agente leve do servidor), sem a lista da equipe. */
+function Linha({ it }: { it: OpsItem }) {
+  const ag = it.agent;
   const go = () => { if (it.taskId) openCard(it.taskId); else if (it.actions.includes('conversa') && it.agentId) openConversation(it.agentId, null); };
   const clickable = !!it.taskId || it.actions.includes('conversa');
   const body = (
@@ -106,7 +105,7 @@ function Linha({ it, agentOf }: { it: OpsItem; agentOf: (id: string | null) => A
 }
 
 /** Lista de uma categoria, com "ver mais" (pede a página seguinte ao servidor; os totais não mudam). */
-function Lista({ ops, cat, agentOf, empty }: { ops: AmbientOps; cat: OpsCategory; agentOf: (id: string | null) => Agent | null; empty?: string }) {
+function Lista({ ops, cat, empty }: { ops: AmbientOps; cat: OpsCategory; empty?: string }) {
   const [extra, setExtra] = useState<OpsItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -120,21 +119,21 @@ function Lista({ ops, cat, agentOf, empty }: { ops: AmbientOps; cat: OpsCategory
   if (!ops.totals[cat]) return empty ? <p className="muted small">{empty}</p> : null;
   return (
     <>
-      <ul className="op-list">{items.map((it) => <Linha key={it.key} it={it} agentOf={agentOf} />)}</ul>
+      <ul className="op-list">{items.map((it) => <Linha key={it.key} it={it} />)}</ul>
       {left > 0 && <button className="link" disabled={busy} onClick={() => void more()}>{busy ? 'Carregando…' : `Ver mais ${left}`}</button>}
       {err && <p className="error small" role="alert">{err}</p>}
     </>
   );
 }
 
-function Trabalho({ ops, agentOf, onBoard }: { ops: AmbientOps; agentOf: (id: string | null) => Agent | null; onBoard: () => void }) {
+function Trabalho({ ops, onBoard }: { ops: AmbientOps; onBoard: () => void }) {
   return (
     <>
       <Postos busy={ops.local.busy} limit={ops.local.limit} />
       {ops.local.mode === 'simulated' && <p className="hint">Sem conta de IA: os trabalhos rodam em simulação, identificados assim.</p>}
       {ops.local.conversations > 0 && <p className="muted small">Também {ops.local.conversations === 1 ? 'há 1 conversa' : `há ${ops.local.conversations} conversas`} acontecendo agora: conversa não ocupa vaga.</p>}
       <h3 className="central__sub">Em andamento</h3>
-      <Lista ops={ops} cat="ativo" agentOf={agentOf} empty="Nenhum trabalho em execução agora. Peça algo à coordenação ou ponha um card para trabalhar no quadro." />
+      <Lista ops={ops} cat="ativo" empty="Nenhum trabalho em execução agora. Peça algo à coordenação ou ponha um card para trabalhar no quadro." />
       <Nuvem />
       <p className="central__foot"><button className="link" onClick={onBoard}>Abrir o quadro da equipe</button><br />Quantos trabalhos andam ao mesmo tempo: Configurações › Andamento da equipe.</p>
     </>
@@ -157,7 +156,7 @@ function Nuvem() {
   );
 }
 
-function Espera({ ops, agentOf }: { ops: AmbientOps; agentOf: (id: string | null) => Agent | null }) {
+function Espera({ ops }: { ops: AmbientOps }) {
   const nada = !ops.totals.pronto && !ops.totals.bloqueado && !ops.totals.impedido && !ops.totals.falhou;
   return (
     <>
@@ -165,16 +164,16 @@ function Espera({ ops, agentOf }: { ops: AmbientOps; agentOf: (id: string | null
       {ops.totals.pronto > 0 && <>
         <h3 className="central__sub">Prontos, na vez <span className="muted">{ops.totals.pronto}</span></h3>
         <p className="muted small">A equipe pega de cima para baixo quando abre uma vaga. Para passar um à frente, abra o card e use “Prioridade”: vale na próxima vaga, sem tirar ninguém do que está fazendo.</p>
-        <Lista ops={ops} cat="pronto" agentOf={agentOf} />
+        <Lista ops={ops} cat="pronto" />
       </>}
-      {ops.totals.bloqueado > 0 && <><h3 className="central__sub">Esperando outro trabalho <span className="muted">{ops.totals.bloqueado}</span></h3><Lista ops={ops} cat="bloqueado" agentOf={agentOf} /></>}
-      {ops.totals.impedido > 0 && <><h3 className="central__sub">Parados por um motivo <span className="muted">{ops.totals.impedido}</span></h3><Lista ops={ops} cat="impedido" agentOf={agentOf} /></>}
-      {ops.totals.falhou > 0 && <><h3 className="central__sub">Falharam <span className="muted">{ops.totals.falhou}</span></h3><Lista ops={ops} cat="falhou" agentOf={agentOf} /></>}
+      {ops.totals.bloqueado > 0 && <><h3 className="central__sub">Esperando outro trabalho <span className="muted">{ops.totals.bloqueado}</span></h3><Lista ops={ops} cat="bloqueado" /></>}
+      {ops.totals.impedido > 0 && <><h3 className="central__sub">Parados por um motivo <span className="muted">{ops.totals.impedido}</span></h3><Lista ops={ops} cat="impedido" /></>}
+      {ops.totals.falhou > 0 && <><h3 className="central__sub">Falharam <span className="muted">{ops.totals.falhou}</span></h3><Lista ops={ops} cat="falhou" /></>}
     </>
   );
 }
 
-function Voce({ ops, agentOf }: { ops: AmbientOps; agentOf: (id: string | null) => Agent | null }) {
+function Voce({ ops }: { ops: AmbientOps }) {
   return (
     <>
       <div className="central__cta">
@@ -183,7 +182,7 @@ function Voce({ ops, agentOf }: { ops: AmbientOps; agentOf: (id: string | null) 
       </div>
       {ops.totals.precisa_de_voce > 0 && <>
         <h3 className="central__sub">Trabalhos parados esperando você <span className="muted">{ops.totals.precisa_de_voce}</span></h3>
-        <Lista ops={ops} cat="precisa_de_voce" agentOf={agentOf} />
+        <Lista ops={ops} cat="precisa_de_voce" />
       </>}
       {!ops.decisions.total && !ops.totals.precisa_de_voce && <p className="muted small">Nada esperando a sua decisão.</p>}
     </>

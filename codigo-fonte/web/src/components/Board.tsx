@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import type { Agent, Column, TaskCard } from '../lib/types.ts';
+import type { Column, TaskCard } from '../lib/types.ts';
 import { Icon } from './Icon.tsx';
 import { DISPLAY_BADGE, DISPLAY_LABEL, WORK_LABEL, displayOf, type WorkState } from '../lib/work.ts';
 
@@ -50,8 +50,8 @@ type SortKey = 'numero' | 'prazo' | 'responsavel' | 'atualizada';
  * lista). Só muda o que é seu e local. No quadro da equipe, a coluna da fila (queueColumn) se reordena arrastando:
  * os agentes pegam de cima para baixo.
  */
-export function Board({ columns, tasks, agents, view, editable, openId, onOpen, onMove, onToggle, team, queueColumn, onReorder }: {
-  columns: Column[]; tasks: TaskCard[]; agents: Agent[]; view: 'kanban' | 'lista'; editable: boolean; openId: string | null; team?: boolean;
+export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, onToggle, team, queueColumn, onReorder }: {
+  columns: Column[]; tasks: TaskCard[]; view: 'kanban' | 'lista'; editable: boolean; openId: string | null; team?: boolean;
   onOpen: (id: string) => void; onMove?: (taskId: string, columnId: string) => void; onToggle?: (t: TaskCard, done: boolean) => void;
   queueColumn?: string; onReorder?: (taskId: string, beforeId: string | null) => void;
 }) {
@@ -70,11 +70,12 @@ export function Board({ columns, tasks, agents, view, editable, openId, onOpen, 
     endDrag();
   };
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'numero', dir: 1 });
-  const agentOf = (id: string | null) => agents.find((a) => a.id === id);
+  // nome e cor do responsável (e de quem recebeu o card enviado à equipe) vêm no próprio card, desativados incluídos
+  const agentOf = (id: string | null, name: string | null | undefined, color: string | null | undefined) => (id && name ? { name, color: color ?? undefined } : null);
 
   /** O andamento real do card (o mesmo no kanban e na lista). */
   const badges = (t: TaskCard) => {
-    const teamAg = agentOf(t.team_agent_id);
+    const teamAg = agentOf(t.team_agent_id, t.team_agent_name, t.team_agent_color);
     const help = team && (t.is_help || (t.parent_task_id && t.parent_audience !== 'user'));
     return (
       <>
@@ -94,13 +95,13 @@ export function Board({ columns, tasks, agents, view, editable, openId, onOpen, 
       </>
     );
   };
-  const chipOf = (ag: Agent, title?: string) => <span className="who" title={title}><span className="avatar avatar--xs" style={{ background: ag.color }}>{ag.name[0]}</span>{ag.name}</span>;
+  const chipOf = (ag: { name: string; color?: string }, title?: string) => <span className="who" title={title}><span className="avatar avatar--xs" style={{ background: ag.color }}>{ag.name[0]}</span>{ag.name}</span>;
   /** Com quem está: o agente (equipe), quem o aplicativo diz (espelho), o agente que recebeu (enviada à equipe) ou você. */
   const who = (t: TaskCard, inList = false) => {
-    const ag = agentOf(t.agent_id);
+    const ag = agentOf(t.agent_id, t.agent_name, t.agent_color);
     if (team) return ag ? chipOf(ag) : <span className="badge">triagem</span>;
     if (t.external_assignee) return <span className="who" title="Atribuída no aplicativo de origem">{t.external_assignee}</span>;
-    const teamAg = agentOf(t.team_agent_id);
+    const teamAg = agentOf(t.team_agent_id, t.team_agent_name, t.team_agent_color);
     if (inList && teamAg) return chipOf(teamAg, `Enviada à equipe: card #${t.team_number}`);
     return inList ? <span className="muted">você</span> : null;
   };
@@ -143,7 +144,7 @@ export function Board({ columns, tasks, agents, view, editable, openId, onOpen, 
     const cmp = (a: TaskCard, b: TaskCard): number => {
       const k = sort.key;
       const v = k === 'prazo' ? (a.due_on ?? '9999').localeCompare(b.due_on ?? '9999')
-        : k === 'responsavel' ? (agentOf(a.agent_id)?.name ?? a.external_assignee ?? '~').localeCompare(agentOf(b.agent_id)?.name ?? b.external_assignee ?? '~', 'pt-BR')
+        : k === 'responsavel' ? ((a.agent_id && a.agent_name) || a.external_assignee || '~').localeCompare((b.agent_id && b.agent_name) || b.external_assignee || '~', 'pt-BR')
           : k === 'atualizada' ? b.updated_at.localeCompare(a.updated_at)
             : a.number - b.number;
       return (v || a.number - b.number) * sort.dir;

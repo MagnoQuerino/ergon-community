@@ -16,6 +16,7 @@ import { saveArtifact } from './artifacts.ts';
 import { audit, type Bus } from './bus.ts';
 import { characterByKey } from './characters.ts';
 import { activeTeam, coordinatorOf } from './team.ts';
+import { teamAgent } from './team-query.ts';
 import { ACCOUNT_SOURCES, CATALOG, CATEGORIES, NEED_LABEL, SOURCES, templateByKey, type ExtraCheck, type FileRef, type Need, type ParamValues, type RoutineConfig, type RoutineTemplate, type SourceId, type Trigger } from './routine-catalog.ts';
 import type { AccountFacts, AccountReader, ReadKind, SourceRead } from './account-reader.ts';
 import { parseNumber, toCsv } from './csv.ts';
@@ -30,6 +31,9 @@ import { cleanTrigger, fmtLocal, localParts, nextOccurrence, scheduleText, valid
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { stripControl } from './teamwork.ts';
+
+/** Os personagens de estudo das frases de espera do preparo, na ordem da tela (RotinasView.tsx, STUDY_CHAR). */
+const STUDY_CAST = ['aristoteles', 'hipatia', 'socrates', 'arquimedes', 'diogenes', 'euclides', 'herodoto'];
 
 export interface RoutineRow {
   id: string; workspace_id: string; template_key: string | null; name: string; category: string; config: string; trigger: string;
@@ -1294,15 +1298,29 @@ export class Routines {
     const t = routine.template ? templateByKey(routine.template) : undefined;
     const first = s?.first_run_id ? this.runDetail(workspaceId, s.first_run_id) : null;
     const questions = s ? Number(this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_proposals WHERE conversation_id = ? AND kind = 'question' AND status = 'proposed'", s.conversation_id)?.n ?? 0) : 0;
+    const agentId = s ? this.db.get<{ agent_id: string }>('SELECT agent_id FROM conversations WHERE id = ?', s.conversation_id)?.agent_id ?? null : null;
     return {
       routine,
       template: t ? { name: t.name, benefit: t.benefit, produces: t.produces, approvals: t.approvals, sample: t.sample ?? null, sources: t.defaults?.config.sources.map((x) => SOURCES[x]) ?? [] } : null,
       setup: s ? {
-        status: s.status, conversationId: s.conversation_id, agentId: this.db.get<{ agent_id: string }>('SELECT agent_id FROM conversations WHERE id = ?', s.conversation_id)?.agent_id ?? null,
+        // quem conduz o preparo (leve: nome e retrato; desativado também, a conversa continua dele)
+        status: s.status, conversationId: s.conversation_id, agentId, agent: agentId ? teamAgent(this.db, workspaceId, agentId) : null,
         adapted: parseJson<{ source: string; summary: string; noted: string; changes: string[]; schedule: string } | null>(s.adapted, null), pendingQuestions: questions, error: s.error,
       } : null,
       firstRun: first ? { id: first.id, status: first.status, mode: first.mode, summary: first.summary, output: first.output, error: first.error, deliverables: first.deliverables } : null,
+      cast: this.studyCast(workspaceId),
     };
+  }
+
+  /**
+   * Quem aparece nas frases de espera do preparo (web/src/views/RotinasView.tsx, STUDY_CHAR): os personagens de
+   * estudo que estão ativos e com o nome original — com outro nome (um tema aplicado), a piada não entra.
+   */
+  private studyCast(workspaceId: string): string[] {
+    const on = new Set(this.db.all<{ char_key: string; name: string }>(
+      `SELECT char_key, name FROM agents WHERE workspace_id = ? AND status = 'active' AND char_key IN (${STUDY_CAST.map(() => '?').join(', ')})`, workspaceId, ...STUDY_CAST)
+      .filter((a) => characterByKey(a.char_key)?.name === a.name).map((a) => a.char_key));
+    return STUDY_CAST.filter((k) => on.has(k));
   }
 
   // --- recomendação inteligente ---------------------------------------------------------------------------------

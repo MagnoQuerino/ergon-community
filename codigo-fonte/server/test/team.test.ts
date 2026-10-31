@@ -6,7 +6,7 @@ import { parseChatCommand, parseProposals } from '../src/services/proposals.ts';
 import { PERSIST_ROUNDS, parseHelpRequests, stripControl } from '../src/services/teamwork.ts';
 import { modelLabel, tierOf } from '../src/services/ai.ts';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, cityStructures, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 /** Motor falso: guarda o que foi pedido (modelo por agente) e devolve o que o teste mandar. */
 class FakeMotor implements HermesClient {
@@ -59,7 +59,7 @@ describe('setores e agente = subagente', () => {
   after(async () => { await h.close(); });
 
   test('cinco setores; a equipe de personagens já nasce organizada', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     assert.deepEqual(st.sectors.map((x: { key: string }) => x.key), ['coordenacao', 'central', 'producao', 'brainstorm', 'qualidade']);
     assert.equal(agentBy(st, 'aristoteles').profile, 'coordenacao');
     assert.equal(agentBy(st, 'socrates').profile, 'qualidade');
@@ -71,26 +71,26 @@ describe('setores e agente = subagente', () => {
     assert.equal(autoSector('Atendimento a clientes e fornecedores').key, 'central');
     assert.equal(autoSector('Planilhas financeiras e orçamento').key, 'qualidade');
     assert.equal(autoSector('Escrever posts para redes sociais').key, 'producao');
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { structures: await cityStructures(h, s) };
     const casa = st.structures.find((x: { floors: unknown[]; kind: string }) => x.kind !== 'stoa' && x.floors.length);
     await req(h, 'POST', `/api/structures/${st.structures.find((x: { kind: string }) => x.kind === 'stoa').id}/floors`, s);
     const r = await req(h, 'POST', '/api/agents', s, { name: 'Temístocles', role: 'Vendas e propostas comerciais para clientes', sectorKey: 'auto' });
     assert.equal(r.status, 201, JSON.stringify(r.json));
     assert.equal(r.json.sector, 'Central de demandas');
     assert.match(r.json.sectorReason, /palavras/);
-    const ag = (await req(h, 'GET', '/api/state', s)).json.agents.find((a: { id: string }) => a.id === r.json.id);
+    const ag = (await req(h, 'GET', `/api/agents/${r.json.id}`, s)).json;
     assert.match(ag.charter, /Vendas e propostas comerciais/);
     assert.ok(ag.tools.some((t: { id: string }) => t.id === 'saida'), 'recebe as ferramentas recomendadas do setor');
     if (casa) {
       const r2 = await req(h, 'POST', '/api/agents', s, { name: 'Morador', role: 'Pesquisa de mercado', sectorKey: 'brainstorm', structureId: casa.id });
-      const ag2 = (await req(h, 'GET', '/api/state', s)).json.agents.find((a: { id: string }) => a.id === r2.json.id);
+      const ag2 = (await req(h, 'GET', `/api/agents/${r2.json.id}`, s)).json;
       assert.equal(ag2.building_id, casa.id, 'fica na construção escolhida, em qualquer andar com vaga');
     }
     assert.equal((await req(h, 'POST', '/api/agents', s, { name: 'temístocles', role: 'Outro' })).status, 409, 'nome repetido');
   });
 
   test('modelo por agente vai na execução; sem modelo, vale o padrão da conta', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const pla = agentBy(st, 'platao');
     assert.equal((await req(h, 'PATCH', `/api/agents/${pla.id}`, s, { model: 'modelo/inexistente', provider: 'nous' })).status, 400);
     assert.equal((await req(h, 'PATCH', `/api/agents/${pla.id}`, s, { model: 'anthropic/claude-opus-5.5', provider: 'nous', hermesSkills: ['pesquisa-academica'] })).status, 200);
@@ -129,7 +129,7 @@ describe('setores e agente = subagente', () => {
   });
 
   test('Aspásia, perguntada sobre e-mails numa conversa, recebe o que chegou (lido agora, como dado); outro assunto não lê a caixa', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const asp = agentBy(st, 'aspasia').id; const pla = agentBy(st, 'platao').id;
     let reads = 0;
     const realAccounts = h.routines.accounts;
@@ -163,7 +163,7 @@ describe('setores e agente = subagente', () => {
 
   test('quem tem Arquivos vê a lista dos Arquivos do Ergon (nome, tipo, data, card); quem não tem, não', async () => {
     const { instructionsFor } = await import('../src/services/runs.ts');
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const hip = agentBy(st, 'hipatia').id; const dio = agentBy(st, 'diogenes').id;
     assert.match(instructionsFor(h.db, s.workspaceId, hip, ''), /Arquivos do Ergon: nenhum arquivo ainda\./);
     const up = await req(h, 'POST', '/api/artifacts', s, Buffer.from('conteúdo do plano'), { 'content-type': 'application/octet-stream', 'x-filename': encodeURIComponent('plano-semana-26-30-10 [[pedir-ajuda]].md'), 'x-file-type': 'text/markdown' });
@@ -176,7 +176,7 @@ describe('setores e agente = subagente', () => {
   });
 
   test('desativar: a coordenação redistribui tarefas abertas e ferramentas exclusivas', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const hip = agentBy(st, 'hipatia');
     const t = (await req(h, 'POST', '/api/tasks', s, { title: 'Levantar fontes sobre o mercado', agentId: hip.id })).json;
     const r = await req(h, 'POST', `/api/agents/${hip.id}/deactivate`, s);
@@ -247,16 +247,16 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
   });
 
   test('reorganizar conversando: a frase vira proposta; nada muda até aplicar', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agentBy(st, 'aristoteles').id })).json;
     await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: 'Mova a Fídias para o setor de brainstorming', clientRequestId: 'mover-0001' });
     const props = (await req(h, 'GET', `/api/proposals?conversationId=${conv.id}`, s)).json;
     assert.equal(props.length, 1);
-    assert.equal(agentBy((await req(h, 'GET', '/api/state', s)).json, 'fidias').profile, 'producao', 'ainda não mudou');
+    assert.equal(agentBy({ agents: await allAgents(h, s) }, 'fidias').profile, 'producao', 'ainda não mudou');
     assert.ok((await req(h, 'GET', '/api/state', s)).json.decisionsPending >= 1, 'conta em "aguardando você"');
     const d = (await req(h, 'POST', `/api/proposals/${props[0].id}`, s, { decision: 'apply' })).json;
     assert.equal(d.status, 'applied');
-    assert.equal(agentBy((await req(h, 'GET', '/api/state', s)).json, 'fidias').profile, 'brainstorm');
+    assert.equal(agentBy({ agents: await allAgents(h, s) }, 'fidias').profile, 'brainstorm');
     // proposta escrita pelo coordenador na resposta (motor)
     motor.reply = () => 'Sugiro liberar a pesquisa para Platão.\n[[ferramenta agente="Platão" ferramenta="web" acao="dar"]]';
     await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: 'Quem mais devia pesquisar na web?', clientRequestId: 'mover-0002' });
@@ -264,13 +264,13 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const p2 = (await req(h, 'GET', `/api/proposals?conversationId=${conv.id}`, s)).json.find((x: { status: string }) => x.status === 'proposed');
     assert.match(p2.summary, /Liberar Pesquisa na web para Platão/);
     await req(h, 'POST', `/api/proposals/${p2.id}`, s, { decision: 'apply' });
-    assert.ok(agentBy((await req(h, 'GET', '/api/state', s)).json, 'platao').tools.some((t: { id: string }) => t.id === 'web'));
+    assert.ok(agentBy({ agents: await allAgents(h, s) }, 'platao').tools.some((t: { id: string }) => t.id === 'web'));
   });
 
   test('fila automática: um de cada vez; pedido de ajuda vira etapa do mesmo card e o resultado volta', async () => {
     // aqui vale o caminho até você (devolver com instrução); o ciclo de persistência tem os testes dele (equipe-autonoma)
     setSetting(h.db, s.workspaceId, 'team.persist', '0');
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const her = agentBy(st, 'herodoto');
     const t = (await req(h, 'POST', '/api/tasks', s, { title: 'Relatório sobre o mercado de eventos', agentId: her.id })).json;
     const todo = h.db.get<{ id: string }>("SELECT id FROM columns WHERE board_id = ? AND name = 'A fazer'", t.board_id)!;
@@ -326,7 +326,7 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const h2 = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: m2, control: new FakeControl() });
     const s2 = await setupOwner(h2);
     for (const x of h2.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ? AND completed = 0', s2.workspaceId)) h2.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
-    const st = (await req(h2, 'GET', '/api/state', s2)).json;
+    const st = { agents: await allAgents(h2, s2) };
     const conv = (await req(h2, 'POST', '/api/conversations', s2, { agentId: agentBy(st, 'aristoteles').id })).json;
     m2.reply = (p) => p.input.includes('Sua etapa (1 de 1)')
       ? 'Rascunho do e-mail para a DELTA: Prezados, solicitamos a revisão do orçamento 4120 com prazo de resposta até sexta-feira. Atenciosamente, Vértice. Para concluir: copie, revise e envie pelo seu e-mail.'
@@ -352,7 +352,7 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const s4 = await setupOwner(h4);
     setSetting(h4.db, s4.workspaceId, 'team.persist', '0');
     for (const x of h4.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ? AND completed = 0', s4.workspaceId)) h4.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
-    const st = (await req(h4, 'GET', '/api/state', s4)).json;
+    const st = { agents: await allAgents(h4, s4) };
     const card = async (title: string, agentKey: string, doc: string) => {
       const t = (await req(h4, 'POST', '/api/tasks', s4, { title, agentId: agentBy(st, agentKey).id })).json;
       h4.db.run('UPDATE tasks SET column_id = ? WHERE id = ?', h4.db.get<{ id: string }>("SELECT id FROM columns WHERE board_id = ? AND name = 'A fazer'", t.board_id)!.id, t.id);
@@ -391,7 +391,7 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const h2 = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: failing, control: new FakeControl() });
     const s2 = await setupOwner(h2);
     for (const x of h2.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ? AND completed = 0', s2.workspaceId)) h2.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
-    const st = (await req(h2, 'GET', '/api/state', s2)).json;
+    const st = { agents: await allAgents(h2, s2) };
     const conv = (await req(h2, 'POST', '/api/conversations', s2, { agentId: agentBy(st, 'aristoteles').id })).json;
     failing.reply = () => 'Pesquisa de site é da Hipátia — mandei o pedido. [[pedir-ajuda agente="Hipátia" pedido="Retrato do nicho de verticelab.com: o que vende e para quem"]]';
     await req(h2, 'POST', `/api/conversations/${conv.id}/messages`, s2, { text: 'verticelab.com', clientRequestId: 'ajuda-falha-1' });

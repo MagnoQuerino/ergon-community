@@ -9,7 +9,7 @@ import { after, before, describe, test } from 'node:test';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, RunEvent, StartRun } from '../src/services/hermes.ts';
 import { parsePriority } from '../src/services/initiative.ts';
 import { openerFor } from '../../shared/personalities.ts';
-import { drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 class Motor implements HermesClient {
   started: Array<StartRun & { runId: string }> = [];
@@ -72,7 +72,7 @@ describe('conversa com a equipe: colegas, ao vivo, arquivos, iniciativa e Docume
     motor = new Motor();
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: motor, control: new Control() });
     s = await setupOwner(h);
-    st = (await req(h, 'GET', '/api/state', s)).json;
+    st = { agents: await allAgents(h, s) };
   });
   after(async () => { await h.close(); });
 
@@ -97,14 +97,14 @@ describe('conversa com a equipe: colegas, ao vivo, arquivos, iniciativa e Docume
     assert.equal((await req(h, 'PUT', `/api/agents/${dio.id}/personality`, s, { personality: 'inventada' })).status, 400);
     r = await req(h, 'PUT', `/api/agents/${dio.id}/personality`, s, { personality: 'desgracado', accepted: true });
     assert.equal(r.status, 200);
-    st = (await req(h, 'GET', '/api/state', s)).json;
+    st = { agents: await allAgents(h, s) };
     assert.equal(agent('diogenes').personality, 'desgracado');
     const c = await conv('diogenes');
     await say(c, 'e aí, o que falta?'); await drain(h, 3);
     assert.match(motor.started.at(-1)!.instructions, /Desgraçado/);
     assert.match(motor.started.at(-1)!.instructions, /saem sempre profissionais/, 'a trava das entregas vale até no extremo');
     await req(h, 'PUT', `/api/agents/${dio.id}/personality`, s, { personality: 'acido' });
-    st = (await req(h, 'GET', '/api/state', s)).json;
+    st = { agents: await allAgents(h, s) };
   });
 
   test('abertura pronta: primeiro nome, saudação da hora, no jeito da personalidade', () => {

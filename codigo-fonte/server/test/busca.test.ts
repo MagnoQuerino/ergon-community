@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 describe('busca rápida', () => {
   let h: Harness;
@@ -15,7 +15,7 @@ describe('busca rápida', () => {
   test('acha card pelo título (sem acento) e pelo número, em qualquer quadro; arquivado não aparece', async () => {
     const boards = (await req(h, 'GET', '/api/boards', s)).json as Array<{ id: string; audience: string }>;
     const mine = boards.find((b) => b.audience === 'user')!;
-    const agent = (await req(h, 'GET', '/api/state', s)).json.agents[1];
+    const agent = (await allAgents(h, s))[1];
     const team = (await req(h, 'POST', '/api/tasks', s, { title: 'Cotação de nitrogênio líquido', agentId: agent.id })).json;
     const own = (await req(h, 'POST', '/api/tasks', s, { title: 'Ligar para o fornecedor de nitrogenio', boardId: mine.id })).json;
     const gone = (await req(h, 'POST', '/api/tasks', s, { title: 'Nitrogênio antigo', agentId: agent.id })).json;

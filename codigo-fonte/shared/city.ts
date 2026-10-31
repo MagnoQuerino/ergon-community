@@ -14,6 +14,8 @@ export const CELL = 8;
 export const STREET = 2;
 /** A partir desta ocupação, a cidade abre mais um anel de lotes livres. */
 export const GROW_AT = 0.8;
+/** Moradores por casa do bairro: a casa de cada agente sai da posição dele na cidade (docs/CIDADE_REGIOES.md). */
+export const RESIDENTS_PER_HOUSE = 2;
 
 export type Category = 'trabalho' | 'praca' | 'lazer' | 'moradia';
 export type Size = 'pequena' | 'media' | 'grande';

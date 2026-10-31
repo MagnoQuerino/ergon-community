@@ -108,7 +108,7 @@ function EquipePrevia({ p }: { p: CatalogPreview }) {
 }
 
 /** Prévia de um pacote: a imagem dele; senão, a cidade com a skin/tema, a equipe, ou o efeito/pet num agente. */
-function PreviaPacote({ item, agents }: { item: CatalogItem; agents: PreviewAgent[] }) {
+function PreviaPacote({ item, agent }: { item: CatalogItem; agent: PreviewAgent | null }) {
   const p = item.preview;
   const cena = useMemo(() => {
     if (p?.skin) {
@@ -126,7 +126,7 @@ function PreviaPacote({ item, agents }: { item: CatalogItem; agents: PreviewAgen
   if (p?.fx || p?.pet) {
     return (
       <span className="loja-previa__vivo">
-        <Preview agent={agents[0] ?? null} fx={p.fx ? { effect: p.fx.effect, color: p.fx.color, intensity: p.fx.intensity } as FxSpec : null} pet={p.pet ? { species: p.pet.species, color: p.pet.color } as PetSpec : null} />
+        <Preview agent={agent} fx={p.fx ? { effect: p.fx.effect, color: p.fx.color, intensity: p.fx.intensity } as FxSpec : null} pet={p.pet ? { species: p.pet.species, color: p.pet.color } as PetSpec : null} />
       </span>
     );
   }
@@ -147,7 +147,7 @@ const SOBRE: Record<string, string> = {
  * modelos da comunidade vêm de um catálogo público, lido só quando a pessoa escolhe "Comunidade". Busca, categorias,
  * paginação e uma página de detalhe por pacote; instalar é o mesmo caminho de qualquer pacote (desfazer em Instalados).
  */
-function Loja({ busy, agents, onInstall }: { busy: boolean; agents: PreviewAgent[]; onInstall: (url: string, item: CatalogItem) => Promise<boolean> }) {
+function Loja({ busy, agent, onInstall }: { busy: boolean; agent: PreviewAgent | null; onInstall: (url: string, item: CatalogItem) => Promise<boolean> }) {
   const of = useResource<CatalogItem[]>('/api/packages/catalog/official', []);
   const [origem, setOrigem] = useState<'oficiais' | 'comunidade'>('oficiais');
   const [com, setCom] = useState<CatalogItem[] | null>(null);
@@ -214,7 +214,7 @@ function Loja({ busy, agents, onInstall }: { busy: boolean; agents: PreviewAgent
           {vista.map((x) => (
             <li key={x.id}>
               <article className="loja-card" tabIndex={0} role="button" aria-label={`${x.title}: ver detalhes`} onClick={() => setAberto(x)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAberto(x); } }}>
-                <div className="loja-previa"><PreviaPacote item={x} agents={agents} /></div>
+                <div className="loja-previa"><PreviaPacote item={x} agent={agent} /></div>
                 <div className="loja-card__txt">
                   <b>{x.title}</b>
                   <span className="muted small">{KIND[x.kind] ?? x.kind}{x.author ? ` · por ${x.author}` : ''}</span>
@@ -238,20 +238,20 @@ function Loja({ busy, agents, onInstall }: { busy: boolean; agents: PreviewAgent
         </nav>
       )}
       {origem === 'comunidade' && com && <button className="link" disabled={lendo} onClick={() => void carregar(true)}>Atualizar a lista</button>}
-      {aberto && <DetalhePacote item={aberto} agents={agents} acao={botao(aberto, true)} onClose={() => setAberto(null)} />}
+      {aberto && <DetalhePacote item={aberto} agent={agent} acao={botao(aberto, true)} onClose={() => setAberto(null)} />}
     </section>
   );
 }
 
 /** Página de detalhe de um pacote: prévia grande, descrição, o que ele traz e instalar. */
-function DetalhePacote({ item, agents, acao, onClose }: { item: CatalogItem; agents: PreviewAgent[]; acao: React.ReactNode; onClose: () => void }) {
+function DetalhePacote({ item, agent, acao, onClose }: { item: CatalogItem; agent: PreviewAgent | null; acao: React.ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useSurface(ref, { onClose, modal: true, outside: true });
   const p = item.preview;
   return (
     <div className="cpop" role="presentation">
       <div ref={ref} className="cpop__card loja-detalhe" role="dialog" aria-modal="true" aria-labelledby="loja-det-titulo">
-        <div className="loja-detalhe__previa loja-previa"><PreviaPacote item={item} agents={agents} /></div>
+        <div className="loja-detalhe__previa loja-previa"><PreviaPacote item={item} agent={agent} /></div>
         <h3 id="loja-det-titulo">{item.title}</h3>
         <p className="muted small">{KIND[item.kind] ?? item.kind} · versão {item.version}{item.author ? ` · por ${item.author}` : ''} · {item.verified ? 'verificado' : 'não verificado'}</p>
         {p?.tagline && p.tagline !== item.summary && <p><i>{p.tagline}</i></p>}
@@ -271,7 +271,8 @@ function DetalhePacote({ item, agents, acao, onClose }: { item: CatalogItem; age
   );
 }
 
-export function PacotesPanel({ agents = [] }: { agents?: PreviewAgent[] }) {
+/** agent: quem aparece na prévia viva de efeitos e pets (o Coordenador; sem ele, um boneco padrão) */
+export function PacotesPanel({ agent = null }: { agent?: PreviewAgent | null }) {
   const res = useResource<Installed[]>('/api/packages', []);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -300,7 +301,7 @@ export function PacotesPanel({ agents = [] }: { agents?: PreviewAgent[] }) {
   return (
     <>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
-      <Loja busy={busy} agents={agents} onInstall={async (url, item) => {
+      <Loja busy={busy} agent={agent} onInstall={async (url, item) => {
         setMsg(null); setBusy(true);
         try { await api.post(url, { id: item.id }); setMsg({ kind: 'ok', text: `"${item.title}" aplicado. Dá para desfazer em Instalados.` }); res.reload(); window.dispatchEvent(new Event('ergon:packages')); return true; }
         catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); return false; } finally { setBusy(false); }

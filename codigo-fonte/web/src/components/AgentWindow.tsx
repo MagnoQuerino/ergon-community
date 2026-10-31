@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg, requestId } from '../lib/api.ts';
-import { useResource } from '../lib/live.ts';
+import { cachedResource, useLiveEvent, useResource } from '../lib/live.ts';
+import { pushRecent } from '../lib/recents.ts';
 import { keepTyped, useSurface } from '../lib/surface.ts';
-import { COORDINATOR_ONLY, COORDINATOR_TOOLS, coordName } from '../lib/team.ts';
-import type { Agent, AgentTool, AppState, ModelCatalog, Skill } from '../lib/types.ts';
+import { COORDINATOR_ONLY, COORDINATOR_TOOLS } from '../lib/team.ts';
+import type { TeamAgent } from '../lib/teamData.ts';
+import type { Agent, AgentLite, AgentTool, ModelCatalog, RecentConversation, Sector, Skill } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { ChatPanel } from './ChatPanel.tsx';
 import { Icon } from './Icon.tsx';
@@ -13,7 +15,7 @@ import { PersonalityPicker } from './PersonalityPicker.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { AgentPreview } from './AgentPreview.tsx';
 import { EffectPicker, effectsFor, useFxOptions, type FxChoice } from './EffectPicker.tsx';
-import { MoveTray, type Pick } from './MoveTray.tsx';
+import { MoveTray, type Pick as MovePick } from './MoveTray.tsx';
 import { newSeed } from '../world/pack.ts';
 
 type Tab = 'conversa' | 'perfil' | 'treinar' | 'atividade';
@@ -25,57 +27,112 @@ interface Activity {
 const RUN_STATUS: Record<string, string> = { queued: 'na fila', running: 'trabalhando', waiting_user: 'aguarda você', succeeded: 'concluída', failed: 'falhou', cancelled: 'cancelada' };
 const fmtN = (n: number | null | undefined) => (n ?? 0).toLocaleString('pt-BR');
 
-/** Janela do agente: conversas, perfil do subagente (o que vai para a IA a cada execução) e atividade. */
-export function AgentWindow({ agent, state, initialTab = 'conversa', draft, conversationId, onClose, reload }: {
-  agent: Agent; state: AppState; initialTab?: Tab; draft?: string | null; conversationId?: string | null; onClose: () => void; reload: () => void;
+/** O que quem abre já sabe do agente (a linha leve da lista, da conversa, da busca): o cabeçalho e a conversa aparecem na hora. */
+export type AgentHead = AgentLite & Partial<Pick<TeamAgent, 'status' | 'run_status' | 'building_name'>>;
+/** GET /api/agents/:id: o perfil completo, com o efeito pessoal escolhido. */
+type FullAgent = Agent & { fx?: { mode: FxChoice['mode']; option: string | null } };
+
+/** Sem a linha de quem abriu: o que as telas já buscaram (a lista de conversas traz o colega embutido). */
+function cachedHead(id: string): AgentHead | null {
+  return cachedResource<RecentConversation[]>('/api/conversations/recent')?.find((c) => c.agent_id === id && c.agent)?.agent ?? null;
+}
+
+/**
+ * Janela do agente: conversas, perfil do subagente (o que vai para a IA a cada execução) e atividade. Abre pelo id: o
+ * cabeçalho e a conversa já com o que quem abriu sabe dele (`initial`, ou o que está em cache), e o perfil completo
+ * chega por baixo. Agente que não existe (outro workspace, recente antigo): a janela fecha sozinha (`onGone`).
+ */
+export function AgentWindow({ agentId, initial, coordName, sectors, initialTab = 'conversa', draft, conversationId, onClose, onGone }: {
+  agentId: string; initial?: AgentHead | null; coordName: string; sectors: Sector[]; initialTab?: Tab; draft?: string | null; conversationId?: string | null;
+  onClose: () => void; onGone: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>(agent.status === 'active' ? initialTab : 'perfil');
+  const full = useResource<FullAgent>(`/api/agents/${agentId}`, ['agents.changed']);
+  // a linha leve: endereço e andamento, relida também quando muda uma execução DESTE agente (o perfil não muda com ela)
+  const row = useResource<TeamAgent>(`/api/team/agents/${agentId}`, ['agents.changed', 'city.changed']);
+  const runTimer = useRef<number | null>(null);
+  useLiveEvent('runs.changed', (d) => { if (d.agentId === agentId && runTimer.current === null) runTimer.current = window.setTimeout(() => { runTimer.current = null; row.reload(); }, 150); });
+  useEffect(() => () => { if (runTimer.current !== null) clearTimeout(runTimer.current); }, []);
+  const [seed] = useState<AgentHead | null>(() => initial ?? cachedHead(agentId));
+  const a = full.data?.id === agentId ? full.data : null;
+  const r = row.data?.id === agentId ? row.data : null;
+  const head: AgentHead | null = r ?? (a ? { ...a, look_seed: a.look_seed ?? null } : seed);
+  const status = r?.status ?? a?.status ?? seed?.status ?? 'active';
+  const run = r ? r.run_status : a ? a.run_status : seed?.run_status ?? null;
+  const place = r?.building_name ?? seed?.building_name ?? null;
+  // o perfil chegou: entra nos recentes da busca (Ctrl+K) com o nome e o papel de agora
+  useEffect(() => { if (a) pushRecent({ kind: 'agente', id: a.id, label: a.name, where: a.role }); }, [a?.id, a?.name, a?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+  // não veio: confere se o agente não existe mais (404) ou se foi só a conexão (o próximo recarregar acerta)
+  const failed = full.error ?? row.error;
+  useEffect(() => {
+    if (!failed) return;
+    let stop = false;
+    api.get(`/api/team/agents/${agentId}`).catch((e: unknown) => { const st = (e as { status?: number }).status; if (!stop && (st === 404 || st === 400)) onGone(); });
+    return () => { stop = true; };
+  }, [failed, agentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [tab, setTab] = useState<Tab>(status === 'active' ? initialTab : 'perfil');
+  // desativado (soube-se depois de abrir): conversa e treino ficam fechados, como se tivesse aberto assim
+  useEffect(() => { if (status !== 'active' && (tab === 'conversa' || tab === 'treinar')) setTab('perfil'); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
   // perfil alterado e não salvo: fechar (X, Esc, clique no fundo) pergunta antes, em vez de perder em silêncio
   const dirty = useRef(false);
   const ref = useRef<HTMLElement>(null);
-  const requestClose = () => { if (keepTyped(dirty.current, `as alterações no perfil de ${agent.name}`)) onClose(); };
+  const requestClose = () => { if (keepTyped(dirty.current, `as alterações no perfil de ${head?.name ?? 'este agente'}`)) onClose(); };
   useSurface(ref, { onClose: requestClose, modal: true, outside: true });
-  const sector = state.sectors.find((s) => s.key === agent.profile);
-  const building = state.structures.find((s) => s.id === agent.building_id);
+  const reload = () => { full.reload(); row.reload(); };
   return (
     <div className="awin-back">
-      <section ref={ref} className="awin" role="dialog" aria-modal="true" aria-labelledby={`awin-${agent.id}`}>
-        <header className="awin__head">
-          <AgentAvatar agent={agent} size={38} />
-          <div className="awin__who">
-            <strong id={`awin-${agent.id}`}>{agent.name}</strong>
-            <span className="muted">{agent.role} · {sector?.name ?? agent.sector_name}{building ? ` · ${building.name}` : ''}</span>
-          </div>
-          <span className="chip" title="Modelo de IA deste agente">{modelName(agent.model)}</span>
-          {agent.status !== 'active' && <span className="badge badge--warn">desativado</span>}
-          {agent.run_status && <span className="badge badge--warn">{RUN_STATUS[agent.run_status]}</span>}
-          <button className="icon-btn" onClick={requestClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
-        </header>
-        <div className="tabs" role="tablist">
-          {(['conversa', 'perfil', 'treinar', 'atividade'] as Tab[]).map((k) => (
-            <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'tab--on' : ''}`} disabled={(k === 'conversa' || k === 'treinar') && agent.status !== 'active'} onClick={() => setTab(k)}>
-              {{ conversa: 'Conversas', perfil: 'Perfil e ferramentas', treinar: 'Treinar', atividade: 'Atividade' }[k]}
-            </button>
-          ))}
-        </div>
-        <div className="awin__body">
-          {tab === 'conversa' && <div className="awin__chat"><ChatPanel agent={agent} embedded draft={draft} conversationId={conversationId} /></div>}
-          {tab === 'perfil' && <ProfileEditor agent={agent} state={state} reload={reload} onClose={onClose} onDirty={(v) => { dirty.current = v; }} />}
-          {tab === 'treinar' && <TrainTab agent={agent} />}
-          {tab === 'atividade' && <ActivityTab agent={agent} />}
-        </div>
+      <section ref={ref} className="awin" role="dialog" aria-modal="true" aria-labelledby={`awin-${agentId}`} aria-busy={!head}>
+        {head ? (
+          <>
+            <header className="awin__head">
+              <AgentAvatar agent={head} size={38} />
+              <div className="awin__who">
+                <strong id={`awin-${agentId}`}>{head.name}</strong>
+                <span className="muted">{head.role} · {head.sector_name}{place ? ` · ${place}` : ''}</span>
+              </div>
+              {a && <span className="chip" title="Modelo de IA deste agente">{modelName(a.model)}</span>}
+              {status !== 'active' && <span className="badge badge--warn">desativado</span>}
+              {run && <span className="badge badge--warn">{RUN_STATUS[run]}</span>}
+              <button className="icon-btn" onClick={requestClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
+            </header>
+            <div className="tabs" role="tablist">
+              {(['conversa', 'perfil', 'treinar', 'atividade'] as Tab[]).map((k) => (
+                <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'tab--on' : ''}`} disabled={(k === 'conversa' || k === 'treinar') && status !== 'active'} onClick={() => setTab(k)}>
+                  {{ conversa: 'Conversas', perfil: 'Perfil e ferramentas', treinar: 'Treinar', atividade: 'Atividade' }[k]}
+                </button>
+              ))}
+            </div>
+            <div className="awin__body">
+              {tab === 'conversa' && <div className="awin__chat"><ChatPanel agent={{ ...head, id: agentId }} embedded draft={draft} conversationId={conversationId} /></div>}
+              {tab === 'perfil' && (a ? <ProfileEditor agent={a} row={r} sectors={sectors} coordName={coordName} reload={reload} onClose={onClose} onDirty={(v) => { dirty.current = v; }} /> : <Loading error={full.error} />)}
+              {tab === 'treinar' && <TrainTab agent={{ id: agentId, name: head.name }} />}
+              {tab === 'atividade' && <ActivityTab agentId={agentId} />}
+            </div>
+          </>
+        ) : (
+          <>
+            <header className="awin__head">
+              <span className="grow" />
+              <button className="icon-btn" onClick={onClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
+            </header>
+            <div className="awin__body"><Loading error={failed} /></div>
+          </>
+        )}
       </section>
     </div>
   );
 }
 
-function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agent; state: AppState; reload: () => void; onClose: () => void; onDirty: (dirty: boolean) => void }) {
+function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirty }: {
+  agent: FullAgent; row: TeamAgent | null; sectors: Sector[]; coordName: string; reload: () => void; onClose: () => void; onDirty: (dirty: boolean) => void;
+}) {
   const catalog = useResource<ModelCatalog>('/api/ai/models', ['ai.changed']);
   const tools = useResource<AgentTool[]>('/api/ai/tools', ['agents.changed']);
   const skills = useResource<Skill[]>('/api/ai/skills', []);
+  // a construção muda pelo "Mover para…" (a mesma operação da Equipe, com conferência no servidor), não pelo Salvar
   const init = () => ({
     name: agent.name, role: agent.role, sectorKey: agent.profile, model: agent.model, provider: agent.provider, charter: agent.charter ?? '', bio: agent.bio ?? '',
-    skills: agent.skills, hermesSkills: agent.hermes_skills, tools: agent.tools.map((t) => t.id), structureId: agent.building_id,
+    skills: agent.skills, hermesSkills: agent.hermes_skills, tools: agent.tools.map((t) => t.id),
     lookSeed: agent.look_seed ?? null,
   });
   const [f, setF] = useState(init);
@@ -83,17 +140,16 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newMethod, setNewMethod] = useState('');
   const [skillQ, setSkillQ] = useState('');
-  // efeito pessoal (Pacotes instalados): vale na hora, sem esperar o Salvar
+  // efeito pessoal (Pacotes instalados): vale na hora, sem esperar o Salvar; a escolha de agora vem com o perfil
   const fxOptions = useFxOptions();
-  const fxNow = useResource<{ mode: FxChoice['mode']; option: string | null }>(`/api/agents/${agent.id}/fx`, ['agents.changed']);
-  const fxChoice: FxChoice = fxNow.data?.mode === 'custom' && fxNow.data.option ? { mode: 'custom', option: fxNow.data.option } : { mode: fxNow.data?.mode === 'off' ? 'off' : 'inherit' };
+  const fxChoice: FxChoice = agent.fx?.mode === 'custom' && agent.fx.option ? { mode: 'custom', option: agent.fx.option } : { mode: agent.fx?.mode === 'off' ? 'off' : 'inherit' };
   const setFx = async (c: FxChoice) => {
-    try { await api.put(`/api/agents/${agent.id}/fx`, c); fxNow.reload(); setMsg({ kind: 'ok', text: c.mode === 'inherit' ? 'Efeito: o padrão da cidade.' : c.mode === 'off' ? 'Sem efeito neste agente.' : 'Efeito aplicado (na cidade também).' }); }
+    try { await api.put(`/api/agents/${agent.id}/fx`, c); reload(); setMsg({ kind: 'ok', text: c.mode === 'inherit' ? 'Efeito: o padrão da cidade.' : c.mode === 'off' ? 'Sem efeito neste agente.' : 'Efeito aplicado (na cidade também).' }); }
     catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
   // mover: a mesma operação da Equipe (setor OU construção, com conferência no servidor)
   const [tray, setTray] = useState<'sector' | 'structure' | null>(null);
-  const moveTo = async (p: Pick) => {
+  const moveTo = async (p: MovePick) => {
     setTray(null);
     const body = p.kind === 'sector' ? { sectorKey: p.key, expect: { sectorKey: agent.profile } } : { structureId: p.id, expect: { structureId: agent.building_id }, ...(p.addFloor ? { addFloor: true } : {}) };
     try { await api.post(`/api/agents/${agent.id}/move`, body); setMsg({ kind: 'ok', text: p.kind === 'sector' ? `Agora no setor ${p.name}. Papel, instruções e ferramentas continuam.` : `Agora mora em ${p.name}. Setor e trabalhos continuam.` }); reload(); }
@@ -102,8 +158,8 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
   const [drafting, setDrafting] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
   const [offResult, setOffResult] = useState<{ redistributed: Array<{ number: number; title: string; to: string; reason: string }>; tools: Array<{ label: string; to: string }> } | null>(null);
-  const sector = state.sectors.find((s) => s.key === f.sectorKey);
-  const work = state.structures.filter((s) => s.floors.length);
+  const sector = sectors.find((s) => s.key === f.sectorKey);
+  const place = row?.building_name ?? null;
   const dirty = JSON.stringify(f) !== JSON.stringify(init());
   useEffect(() => { onDirty(dirty); return () => onDirty(false); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = agent.status === 'active';
@@ -114,7 +170,6 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
     const base = init();
     for (const k of Object.keys(f) as Array<keyof typeof f>) if (JSON.stringify(f[k]) !== JSON.stringify(base[k])) body[k] = f[k];
     if ('model' in body || 'provider' in body) { body.model = f.model; if (f.model) body.provider = f.provider; else delete body.provider; }
-    if (body.structureId === agent.building_id) delete body.structureId;
     try { await api.patch(`/api/agents/${agent.id}`, body); setMsg({ kind: 'ok', text: 'Salvo. Vale a partir da próxima conversa ou tarefa.' }); reload(); }
     catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
@@ -187,13 +242,13 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
           <EffectPicker value={fxChoice} onChange={(c) => void setFx(c)} options={fxOptions} />
           {active && (
             <div className="row row--wrap look-row__move">
-              <span className="hint"><Icon name="pin" size={12} /> {state.structures.find((s) => s.id === agent.building_id)?.name ?? '—'} · setor {state.sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name}</span>
+              <span className="hint"><Icon name="pin" size={12} /> {place ?? '—'} · setor {sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name}</span>
               <button type="button" className="btn btn--sm btn--ghost" onClick={() => setTray('structure')}><Icon name="temple" size={13} /> Mover para…</button>
             </div>
           )}
         </div>
       </div>
-      {tray && <MoveTray agent={{ id: agent.id, name: agent.name, role: agent.role, color: agent.color, status: agent.status, demo: !!agent.demo, coordinator: !!agent.coordinator, char_key: agent.char_key, look_seed: agent.look_seed ?? null, deactivation_note: agent.deactivation_note, sector_key: agent.profile, sector_name: agent.sector_name, building_id: agent.building_id, building_name: null, floor_name: null, run_status: agent.run_status }}
+      {tray && <MoveTray agent={row ?? { id: agent.id, name: agent.name, role: agent.role, color: agent.color, status: agent.status, demo: !!agent.demo, coordinator: !!agent.coordinator, char_key: agent.char_key, look_seed: agent.look_seed ?? null, deactivation_note: agent.deactivation_note, sector_key: agent.profile, sector_name: agent.sector_name, building_id: agent.building_id, building_name: null, floor_name: null, floor_id: agent.floor_id, floor_level: agent.floor_level, run_status: agent.run_status }}
         initial={tray} title={`Mover ${agent.name} para…`} onPick={(p) => void moveTo(p)} onClose={() => setTray(null)} />}
       <PersonalityPicker agent={agent} onChanged={reload} />
       <div className="editor__grid">
@@ -201,15 +256,16 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
         <label className="field">Papel (função){fixed ? ' — fixo' : ''}<input value={f.role} maxLength={80} disabled={fixed} onChange={(e) => setF({ ...f, role: e.target.value })} /></label>
         <label className="field">Setor
           <select value={f.sectorKey} disabled={fixed} onChange={(e) => setF({ ...f, sectorKey: e.target.value })}>
-            {state.sectors.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
+            {sectors.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
           </select>
           {sector?.description && <span className="hint">{sector.description} {sector.creates_tasks === 'demands' ? 'Cria cards para demandas claras.' : 'Só cria card quando você pede.'}</span>}
         </label>
-        <label className="field">Construção
-          <select value={f.structureId} onChange={(e) => setF({ ...f, structureId: e.target.value })} disabled={!active}>
-            {work.map((s) => { const free = s.floors.reduce((n, fl) => n + fl.slots - fl.active, 0); return <option key={s.id} value={s.id} disabled={s.id !== agent.building_id && free <= 0}>{s.name} ({free} vaga{free === 1 ? '' : 's'})</option>; })}
-          </select>
-        </label>
+        {/* a cidade pode ter milhares de construções: escolher é pelo "Mover para…" (com busca e por partes), não num select */}
+        <div className="field">Construção
+          <button type="button" className="btn btn--ghost" onClick={() => setTray('structure')} disabled={!active} title={active ? 'Escolher outra construção (vale na hora)' : undefined}>
+            <Icon name="temple" size={13} /> {place ?? '—'}{active ? ' · Mover para…' : ''}
+          </button>
+        </div>
         <label className="field editor__wide">Modelo de IA
           {catalog.error ? <span className="hint">Sem conta de IA conectada: usa o modelo padrão. Conecte uma conta em Conexões para escolher.</span>
             : <ModelSelect catalog={catalog.data} value={f.model} provider={f.provider} onChange={(model, provider) => setF({ ...f, model, provider })} />}
@@ -226,7 +282,7 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
       </label>
       {!fixed && <div className="row">
         <button className="btn btn--sm" onClick={draft} disabled={!!drafting || !f.role.trim()}><Icon name="edit" size={13} /> {drafting ? 'A coordenação está escrevendo…' : 'Escrever com a coordenação'}</button>
-        <span className="hint">{coordName(state.agents)} redige instruções, métodos e ferramentas a partir do papel e do setor; você revisa antes de salvar.</span>
+        <span className="hint">{coordName} redige instruções, métodos e ferramentas a partir do papel e do setor; você revisa antes de salvar.</span>
       </div>}
 
       <div className="block">
@@ -309,8 +365,8 @@ function ProfileEditor({ agent, state, reload, onClose, onDirty }: { agent: Agen
   );
 }
 
-function ActivityTab({ agent }: { agent: Agent }) {
-  const d = useResource<Activity>(`/api/agents/${agent.id}/activity`, ['runs.changed', 'tasks.changed']);
+function ActivityTab({ agentId }: { agentId: string }) {
+  const d = useResource<Activity>(`/api/agents/${agentId}/activity`, ['runs.changed', 'tasks.changed']);
   if (!d.data) return <Loading error={d.error} />;
   const t = d.data.totals;
   return (

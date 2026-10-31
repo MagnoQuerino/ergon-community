@@ -18,7 +18,7 @@ const SKILL_STATUS: Record<AgentSkill['status'], { label: string; cls: string }>
  * Treinar: a pessoa ensina uma competência ao agente (texto, arquivos, links); o agente estuda só esse material e
  * escreve uma proposta; nada vale até a pessoa revisar e aprovar. Aprovada, é só deste agente, com versões.
  */
-export function TrainTab({ agent }: { agent: Agent }) {
+export function TrainTab({ agent }: { agent: Pick<Agent, 'id' | 'name'> }) {
   const d = useResource<TrainingList>(`/api/agents/${agent.id}/trainings`, ['agents.changed']);
   const running = d.data?.trainings.some((t) => t.status === 'executando') ?? false;
   useEffect(() => { // os avisos ao vivo já atualizam; a consulta periódica é a rede de segurança enquanto aprende
@@ -59,7 +59,7 @@ export function TrainTab({ agent }: { agent: Agent }) {
   );
 }
 
-function TrainForm({ agent, skills, target, setTarget, onStarted }: { agent: Agent; skills: AgentSkill[]; target: string; setTarget: (id: string) => void; onStarted: () => void }) {
+function TrainForm({ agent, skills, target, setTarget, onStarted }: { agent: Pick<Agent, 'id' | 'name'>; skills: AgentSkill[]; target: string; setTarget: (id: string) => void; onStarted: () => void }) {
   const [request, setRequest] = useState('');
   const [title, setTitle] = useState('');
   const [files, setFiles] = useState<Array<{ id: string; name: string }>>([]);

@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { keepTyped, useSurface } from '../lib/surface.ts';
-import type { AppState, ArtifactRow, CloudFile, EvidenceLevels, FileRef, InputSpec, ParamSpec, ParamValues, RecommendState, Routine, RoutineLibrary, RoutineRun, RoutineRunDetail, RoutineRunStatus, RoutineSetupState, RoutineTemplate, RoutineTrigger, View } from '../lib/types.ts';
+import type { ArtifactRow, CloudFile, EvidenceLevels, FileRef, InputSpec, ParamSpec, ParamValues, RecommendState, Routine, RoutineLibrary, RoutineRun, RoutineRunDetail, RoutineRunStatus, RoutineSetupState, RoutineTemplate, RoutineTrigger, View } from '../lib/types.ts';
+import type { TeamAgent } from '../lib/teamData.ts';
 import { Loading, PhraseLoader } from '../brand/Brand.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { Icon } from '../components/Icon.tsx';
-import { coordinatorOf } from '../lib/team.ts';
 import { useHashParam } from '../lib/route.ts';
 import { pushRecent } from '../lib/recents.ts';
 
@@ -31,19 +31,19 @@ const MODES: Record<string, string> = { manual: 'Sob demanda', schedule: 'Agenda
 const phaseLabel = (n: number) => (n === 1 ? 'Em breve' : `Fase ${n}`);
 const CONDITION: Record<string, string> = { sempre: 'Sempre analisa', novidades: 'Usa o modelo só se algo mudou', sinal: 'Usa o modelo só quando acha algo que pede atenção' };
 
-export function RotinasView({ state, onOpenAgent, onGo }: { state: AppState; onOpenAgent: OpenAgent; onGo: (v: View) => void }) {
+/** coord: quem coordena hoje (vem pronto no /api/state), para "Criar rotina com…" e os ajustes */
+export function RotinasView({ coord, onOpenAgent, onGo }: { coord: { id: string; name: string } | null; onOpenAgent: OpenAgent; onGo: (v: View) => void }) {
   const lib = useResource<RoutineLibrary>('/api/routines/library', ['routines.changed', 'integrations.changed']);
   const mine = useResource<Routine[]>('/api/routines', ['routines.changed', 'runs.changed']);
   const [tab, setTab] = useState<Tab | null>(null);
   // rotina vinda da busca (#rotinas?rotina=…): abre "Minhas rotinas" e destaca o card dela
   const [focusId] = useHashParam('rotina');
   const shown: Tab = tab ?? (focusId || mine.data?.length ? 'minhas' : 'biblioteca');
-  const coord = coordinatorOf(state.agents);
   const createWithCoord = () => coord && onOpenAgent(coord.id, 'conversa', 'Quero criar uma rotina: ');
   const [setup, setSetup] = useState<{ id: string; fresh: boolean } | null>(() => { const m = location.hash.match(/preparo=(rtn_[a-f0-9]{32})/); return m ? { id: m[1], fresh: false } : null; });
   const openSetup = (id: string, fresh = false) => { history.replaceState(null, '', `#rotinas?preparo=${id}`); setSetup({ id, fresh }); };
   const closeSetup = () => { history.replaceState(null, '', '#rotinas'); setSetup(null); setTab('minhas'); mine.reload(); };
-  if (setup) return <RoutineSetup key={setup.id} id={setup.id} fresh={setup.fresh} state={state} onBack={closeSetup} onGo={onGo} />;
+  if (setup) return <RoutineSetup key={setup.id} id={setup.id} fresh={setup.fresh} onBack={closeSetup} onGo={onGo} />;
 
   return (
     <div className="page rt-page">
@@ -627,8 +627,13 @@ const STUDY_CHAR: Array<[key: string, name: string, text: string]> = [
   ['diogenes', 'Diógenes', 'Diógenes procurando, com a lanterna, um dado que faça sentido…'], ['euclides', 'Euclides', 'Euclides calculando a menor distância até o resultado…'],
   ['herodoto', 'Heródoto', 'Heródoto lendo as entrelinhas…'],
 ];
-const studyPhrases = (agents: AppState['agents']) => [...STUDY_BASE,
-  ...STUDY_CHAR.filter(([k, n]) => agents.some((a) => a.status === 'active' && a.char_key === k && a.name === n)).map(([, , t]) => t)];
+/** cast: os personagens ativos com o nome original (o servidor confere o nome; aqui só a chave) */
+const studyPhrases = (cast: string[]) => [...STUDY_BASE, ...STUDY_CHAR.filter(([k]) => cast.includes(k)).map(([, , t]) => t)];
+/** O preparo com quem conversa (a linha leve, desativado incluído) e o elenco das piadas. */
+type SetupView = Omit<RoutineSetupState, 'setup'> & {
+  setup: (NonNullable<RoutineSetupState['setup']> & { agent?: TeamAgent | null }) | null;
+  cast?: string[];
+};
 const FIRST = ['Rodando a primeira vez para você ver…', 'Colhendo os dados de hoje…', 'Passando a limpo no papiro…', 'Selando o pergaminho com cera…'];
 
 /**
@@ -636,18 +641,19 @@ const FIRST = ['Rodando a primeira vez para você ver…', 'Colhendo os dados de
  * ajustado ao seu caso e o primeiro resultado — e, ao lado, a conversa com a coordenação, onde chegam as perguntas
  * (se houver) e onde dá para pedir qualquer mudança.
  */
-function RoutineSetup({ id, fresh, state, onBack, onGo }: { id: string; fresh: boolean; state: AppState; onBack: () => void; onGo: (v: View) => void }) {
-  const st = useResource<RoutineSetupState>(`/api/routines/${id}/setup`, ['routines.changed', 'proposals.changed', 'runs.changed']);
+function RoutineSetup({ id, fresh, onBack, onGo }: { id: string; fresh: boolean; onBack: () => void; onGo: (v: View) => void }) {
+  const st = useResource<SetupView>(`/api/routines/${id}/setup`, ['routines.changed', 'proposals.changed', 'runs.changed', 'agents.changed']);
   // logo depois de ativar, a espera aparece por alguns segundos mesmo quando o ajuste é instantâneo (sem conta de IA)
   const [minDone, setMinDone] = useState(!fresh);
   useEffect(() => { if (fresh) { const t = window.setTimeout(() => setMinDone(true), 3800); return () => clearTimeout(t); } }, [fresh]);
   const [msg, setMsg] = useState<string | null>(null);
-  const study = useMemo(() => studyPhrases(state.agents), [state.agents]);
+  const castKey = (st.data?.cast ?? []).join('|');
+  const study = useMemo(() => studyPhrases(castKey ? castKey.split('|') : []), [castKey]);
   const [dialog, setDialog] = useState(false);
   // todos os hooks acima: abaixo daqui pode haver retorno antecipado
   if (!st.data) return <div className="page"><Loading error={st.error} /></div>;
   const { routine: r, template: t, setup: s, firstRun } = st.data;
-  const agent = state.agents.find((a) => a.id === s?.agentId) ?? null;
+  const agent = s?.agent ?? null;
   const preparing = !s || s.status === 'studying' || s.status === 'adapting' || !minDone;
   const asking = s?.status === 'asking' && minDone;
   const ready = s?.status === 'ready' && minDone;

@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { machineDefault, parseChoice, processLimit } from '../src/services/concurrency.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const GB = 1024 ** 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -37,7 +37,7 @@ describe('trabalhos ao mesmo tempo: conversas livres, processos no limite, fila 
   before(async () => {
     h = await harness({ maxConcurrentRuns: 0, simulatedDelayMs: 600 });
     s = await setupOwner(h);
-    agents = (await req(h, 'GET', '/api/state', s)).json.agents;
+    agents = await allAgents(h, s);
     // o quadro da equipe começa vazio neste teste (a equipe de partida pode trazer cards)
     h.db.run('UPDATE tasks SET archived = 1 WHERE workspace_id = ?', s.workspaceId);
   });

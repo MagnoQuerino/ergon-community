@@ -9,7 +9,7 @@ import { performance } from 'node:perf_hooks';
 import { buildPackage, type PackageData } from '../src/services/ergon-package.ts';
 import { foldText } from '../src/db/db.ts';
 import { fitAt, freeCells } from '../../shared/city.ts';
-import { ORIGIN, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { ORIGIN, cityStructures, harness, oldPlaces, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 type Agent = { id: string; name: string; role: string; coordinator: boolean; sector_key: string; building_id: string | null; status: string };
 /** id sintético no formato real (prefixo + 32 hex) */
@@ -71,7 +71,7 @@ describe('Equipe por partes, mover e criar', () => {
     const late = await req(h, 'POST', `/api/agents/${a.id}/move`, s, { sectorKey: a.sector_key, expect: { sectorKey: 'producao' } });
     assert.equal(late.status, 409); assert.equal(late.json.error, 'moved_since', 'desfazer atrasado não sobrescreve');
     // construção: setor e trabalhos ficam (uma segunda construção, num lote livre)
-    const lot = (await req(h, 'GET', '/api/state', s)).json.structures as Array<{ id: string; kind: string; i: number; j: number }>;
+    const lot = await cityStructures(h, s) as Array<{ id: string; kind: string; i: number; j: number }>;
     let at: [number, number] | null = null;
     for (const [ci, cj] of freeCells(lot)) { at = fitAt(lot, 'emporion', ci, cj); if (at) break; }
     assert.equal((await req(h, 'POST', '/api/structures', s, { kind: 'emporion', i: at![0], j: at![1] })).status, 201);
@@ -96,7 +96,7 @@ describe('Equipe por partes, mover e criar', () => {
   test('construção cheia: erro claro; "Adicionar andar e mover" numa transação; não recebe agente nem fora do mapa', async () => {
     const a = (await all('/api/team/agents')).filter((x) => !x.coordinator).at(-1)!;
     // uma casa (1 andar pequeno) cheia de propósito, num lote livre de verdade
-    const lot = (await req(h, 'GET', '/api/state', s)).json.structures as Array<{ id: string; kind: string; i: number; j: number }>;
+    const lot = await cityStructures(h, s) as Array<{ id: string; kind: string; i: number; j: number }>;
     let at: [number, number] | null = null;
     for (const [ci, cj] of freeCells(lot)) { at = fitAt(lot, 'oikos', ci, cj); if (at) break; }
     const made = await req(h, 'POST', '/api/structures', s, { kind: 'oikos', i: at![0], j: at![1] });
@@ -177,8 +177,8 @@ describe('organização assistida: sugerir, aplicar numa transação, desfazer',
 
   test('sugere juntar o setor onde ele já é maioria, só com lugares livres; aplica tudo ou nada; desfaz honesto', async () => {
     // duas construções novas: metade da Produção vai morar longe da colega
-    const lot = (await req(h, 'GET', '/api/state', s)).json.structures as Array<{ id: string; kind: string; i: number; j: number }>;
-    const place = async (kind: string) => { let at: [number, number] | null = null; const cur = (await req(h, 'GET', '/api/state', s)).json.structures; for (const [ci, cj] of freeCells(cur)) { at = fitAt(cur, kind, ci, cj); if (at) break; } return (await req(h, 'POST', '/api/structures', s, { kind, i: at![0], j: at![1], name: kind === 'emporion' ? 'Empório' : 'Ateliê' })).json.id as string; };
+    const lot = await cityStructures(h, s) as Array<{ id: string; kind: string; i: number; j: number }>;
+    const place = async (kind: string) => { let at: [number, number] | null = null; const cur = await cityStructures(h, s); for (const [ci, cj] of freeCells(cur)) { at = fitAt(cur, kind, ci, cj); if (at) break; } return (await req(h, 'POST', '/api/structures', s, { kind, i: at![0], j: at![1], name: kind === 'emporion' ? 'Empório' : 'Ateliê' })).json.id as string; };
     void lot;
     const emporio = await place('emporion');
     const prod = ((await req(h, 'GET', '/api/team/agents?sector=producao', s)).json.items as Agent[]);
@@ -314,5 +314,59 @@ describe('ensaio de escala (dados sintéticos, nenhum agente executa)', () => {
     assert.ok(d.r.json.moves.length <= 200); assert.ok(d.r.json.total >= d.r.json.moves.length);
     report.push(`sugestão de distribuição ${d.ms.toFixed(0)} ms/${(d.bytes / 1024).toFixed(1)} KB (${d.r.json.total} mudariam)`);
     assert.ok(d.ms < 5000, `${d.ms} ms`);
+  });
+
+  test('cidade por região com 10.000: /api/state pequeno, a cidade sem agentes, moradores por partes e vaga/casa como antes', async () => {
+    const ws = s.workspaceId;
+    const active = Number(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND status = 'active'", ws)!.n);
+    const st = await time('/api/state');
+    assert.equal(st.r.status, 200); assert.equal(st.r.json.agents, undefined); assert.equal(st.r.json.structures, undefined);
+    assert.equal(st.r.json.team.active, active); assert.ok(st.r.json.team.coordinator);
+    const ov = await time('/api/city/overview');
+    assert.equal(ov.r.json.total, active); assert.ok(ov.r.json.structures.length >= N_STRUCT);
+    type F = { id: string; active: number }; type B = { id: string; floors: F[] };
+    const structs = ov.r.json.structures as B[];
+    assert.equal(structs.flatMap((x) => x.floors).reduce((n, f) => n + f.active, 0), active, 'as contagens somam todos');
+    // o que a tela pede de uma vez: 100 andares; 64 construções com as 3 primeiras vagas; a construção concentrada inteira; 200 pelo id
+    const floors = structs.slice(1).flatMap((x) => x.floors.filter((f) => f.active).map((f) => f.id)).filter((_, i) => i % 7 === 0).slice(0, 100);
+    const bf = await time(`/api/city/agents?f=${floors.join(',')}`);
+    const blds = structs.filter((x) => x.floors.some((f) => f.active)).slice(0, 64).map((x) => x.id);
+    const bb = await time(`/api/city/agents?b=${blds.join(',')}&per=3`);
+    const big = await time(`/api/city/agents?b=${sid('bld', 0)}`);
+    const some = Array.from({ length: 200 }, (_, i) => sid('agt', (i * 97) % N_AGENTS));
+    const bi = await time(`/api/city/agents?ids=${some.join(',')}`);
+    assert.equal(big.r.json.total, big.r.json.agents.length); assert.ok(big.r.json.total >= CONCENTRATED - 1);
+    assert.ok(bb.r.json.agents.length <= 64 * 100 * 3 && bb.r.json.total >= bb.r.json.agents.length, 'per corta o que vem, não o total');
+    // todos, por páginas de 2.000: vaga e casa iguais às do cálculo de antes (a lista inteira na ordem do /api/state de antes)
+    const old = oldPlaces(h.db.all<{ id: string; status: string; building_id: string; floor_level: number }>(
+      `SELECT a.id, a.status, f.building_id, f.level AS floor_level FROM agents a JOIN floors f ON f.id = a.floor_id JOIN profiles p ON p.id = a.profile_id
+        WHERE a.workspace_id = ? ORDER BY a.status, f.building_id, f.level, a.created_at, a.rowid`, ws));
+    const same = (list: Array<{ id: string; building_id: string; level: number; slot: number; house: number }>, mode: string) => {
+      for (const a of list) { const w = old.get(a.id)!; assert.ok(w, `${mode}: ${a.id}`); assert.deepEqual([a.building_id, a.level, a.slot, a.house], [w.building, w.level, w.slot, w.house], `${mode}: ${a.id}`); }
+    };
+    let cursor: string | null = null; let pages = 0; let worst = 0; let heaviest = 0; const seen = new Set<string>();
+    do {
+      const p = await time(`/api/city/agents?all=1${cursor ? `&cursor=${cursor}` : ''}`);
+      assert.equal(p.r.status, 200); assert.ok(p.r.json.agents.length <= 2000); assert.equal(p.r.json.total, active);
+      worst = Math.max(worst, p.ms); heaviest = Math.max(heaviest, p.bytes);
+      same(p.r.json.agents, 'all');
+      for (const a of p.r.json.agents) { assert.ok(!seen.has(a.id), 'sem repetir entre páginas'); seen.add(a.id); }
+      cursor = p.r.json.next; pages++;
+    } while (cursor && pages < 20);
+    assert.equal(seen.size, active); assert.ok(pages >= 5);
+    same(bf.r.json.agents, 'f'); same(bb.r.json.agents, 'b'); same(big.r.json.agents, 'b inteira'); same(bi.r.json.agents, 'ids');
+    const search = await time('/api/search?q=agente%2000');
+    assert.equal(search.r.json.agents.length, 6);
+    const tools = await time('/api/ai/tools');
+    const prof = await time('/api/agents?limit=100');
+    assert.equal(prof.r.json.items.length, 100); assert.ok(prof.r.json.total >= active); assert.ok(prof.r.json.next);
+    for (const [k, v, maxKb] of [['state', st, 100], ['overview', ov, 2048], ['andares(100)', bf, 512], ['construcoes(64,per3)', bb, 512], ['concentrada(5000)', big, 3072],
+      ['ids(200)', bi, 256], ['paleta', search, 16], ['ferramentas', tools, 64], ['perfis(100)', prof, 512]] as const) {
+      report.push(`${k} ${v.ms.toFixed(0)} ms/${(v.bytes / 1024).toFixed(1)} KB`);
+      assert.ok(v.ms < (k === 'state' ? 500 : 2000), `${k}: ${v.ms.toFixed(0)} ms`);
+      assert.ok(v.bytes < maxKb * 1024, `${k}: ${v.bytes} bytes`);
+    }
+    report.push(`todos em ${pages} páginas (pior ${worst.toFixed(0)} ms/${(heaviest / 1024).toFixed(0)} KB)`);
+    assert.ok(worst < 2000 && heaviest < 1536 * 1024);
   });
 });

@@ -14,14 +14,14 @@
  */
 import { CELL, placeError, typeOf } from '../../../shared/city.ts';
 import { FLOOR_H, handoffSpot, idleSpotOf, seatOf, stairBox, tarpBox, tarpPlace, visitSpot, type Activity } from '../world/buildings.ts';
-import { RESIDENTS_PER_HOUSE, type House } from '../world/areas.ts';
+import type { House } from '../world/areas.ts';
 import { Town, type AreaInst, type BuildingInst, type Loc, type StructureIn } from '../world/town.ts';
 import type { AABB, P3, Vec2 } from '../world/geom.ts';
 import { startMove, stepMove, targetFor, visualFor, type Mover, type Visual } from '../scene/agentState.ts';
-import type { SceneAgent, SceneFocus, SceneObject, SceneOps, SceneOpsTarget } from '../scene/types.ts';
+import type { SceneAgent, SceneCounts, SceneFocus, SceneObject, SceneOps, SceneOpsTarget, SceneWindow } from '../scene/types.ts';
 import { KY, RES, insidePoly, project, unproject, type P2 } from './projection.ts';
-import { regionSize, regionsOf, type Occ } from '../world/regions.ts';
-import { figureSprite, hashOf, lookFor, npcLook, type Expr, type Facing, type Gesture, type Look, type Pose, type Sprite } from './figures.ts';
+import { occOfFloors, regionSize, regionsOf, residentsOf, type Occ } from '../world/regions.ts';
+import { figureCacheSize, figureSprite, hashOf, lookFor, npcLook, reserveFigures, type Expr, type Facing, type Gesture, type Look, type Pose, type Sprite } from './figures.ts';
 import { bandHighlight, buildingBox, closedArt, closedRect, closedSmall, hasClosed, hasSmall, openArt, reserveClosed, reserveSmall, type ArtItem, type Layer, type OpenArt } from './buildingArt.ts';
 import { Lru } from './lru.ts';
 import { CHUNK, areaHits, boxPoly, cityItems, drawGroundChunk, type AreaHit, type CityItem } from './areaArt.ts';
@@ -42,6 +42,8 @@ export interface EngineCallbacks {
   onFocus(f: SceneFocus | null): void;
   onMove(id: string, i: number, j: number): void;
   onLost(): void;
+  /** o que está perto da tela mudou (carregador da cidade por região) */
+  onWindow?(w: SceneWindow): void;
 }
 
 type GroupKind = 'chat' | 'debate' | 'visit' | 'handoff' | 'meeting' | 'assembly' | 'wrestle';
@@ -130,6 +132,11 @@ const basePlan = (p: Partial<Plan> & Pick<Plan, 'kind' | 'loc' | 'spot'>): Plan 
 const OUT: Loc = { b: null, level: 0 };
 /** Quem está em cada prédio (por andar) e quem dorme em casa, contado uma vez por quadro. */
 interface Occupancy { by: Map<string, { levels: Map<number, { n: number; working: number; waiting: number }>; badge: 'working' | 'waiting' | 'attention' | null }>; asleep: Set<number> }
+/** Contagens do servidor de um andar (agentes ativos pelo status de trabalho). */
+interface FloorCount { active: number; working: number; waiting: number; queued: number }
+/** Nomes no texto de uma casa do bairro (o resto vira "e mais X", pelo total da cidade). */
+const HOUSE_NAMES = 6;
+const fmtN = (n: number) => n.toLocaleString('pt-BR');
 
 /** Máscara de pixels opacos de um sprite (clique só onde há desenho), calculada uma vez. */
 const masks = new WeakMap<Sprite, Uint8Array>();
@@ -160,8 +167,19 @@ export class IsoEngine {
   // áreas de clique com o retângulo na tela (recorte por quadro) e lotes livres por posição
   private hitRects: Array<[number, number, number, number]> = [];
   private lotAt = new Map<string, Town['lots'][number]>();
-  // casas por agente (prédio, andar, vaga): refeitas só quando esse conjunto muda
-  private houseSig = ''; private houseOfId = new Map<string, number>();
+  // cidade por região (docs/CIDADE_REGIOES.md): a lista de agentes é só o que está carregado; quem sai dela fica
+  // marcado e só vai embora parado e fora da tela. Andares carregados (prédio|andar) usam quem está lá; os outros, as
+  // contagens do servidor (janelas, selo e o mapa inteiro).
+  private partial = false;
+  private leaving = new Set<string>();
+  private loadedFloors = new Set<string>();
+  private counts = new Map<string, Map<number, FloorCount>>();
+  private countOcc = new Map<string, Occ>();
+  private countTotal: number | null = null;
+  // aviso de janela para o carregador: só quando algo muda (câmera, prédio aberto, escolhido, cidade)
+  private winSig = ''; private townVer = 0;
+  // escolhido ainda não carregado: ao chegar, abre o andar e centraliza; `selAt` = o andar pedido por focusAgentAt
+  private selWait = false; private selAt: SceneFocus | null = null;
   // arte de prédio ainda por desenhar (orçamento por quadro): pede outro quadro
   private artPending = false;
   private chunkPending = false;
@@ -239,7 +257,7 @@ export class IsoEngine {
     const key = JSON.stringify(structs.map((s) => [s.id, s.kind, s.i, s.j, s.floors.map((f) => [f.level, f.slots])]));
     if (key === this.townKey) return;
     const old = this.town;
-    this.townKey = key;
+    this.townKey = key; this.townVer++;
     this.lastStructs = structs;
     this.town = new Town(structs, this.skin ? skinPack(this.skin.data) : undefined);
     this.items = cityItems(this.town, this.theme);
@@ -362,16 +380,14 @@ export class IsoEngine {
     this.invalidate();
   }
 
-  setAgents(agents: SceneAgent[]): void {
+  /**
+   * Agentes na ordem do servidor (prédio, andar, vaga), com a casa já calculada lá. Cidade inteira: quem não vem
+   * na lista sai na hora (como sempre). Por região (`partial`): a lista é só o que está carregado, e quem saiu dela
+   * fica até estar parado — sem andar, sem reagir, sem grupo, fora da tela, não escolhido e fora do prédio aberto.
+   */
+  setAgents(agents: SceneAgent[], opts: { partial?: boolean } = {}): void {
     const now = performance.now();
-    // casa de cada agente: ordem estável (prédio, andar, vaga), dois por casa
-    const sig = agents.map((a) => `${a.id}|${a.building}|${a.level}|${a.slot}`).join(';');
-    if (sig !== this.houseSig) {
-      const order = [...agents].sort((a, b) => a.building.localeCompare(b.building) || a.level - b.level || a.slot - b.slot);
-      this.houseOfId = new Map(order.map((a, i) => [a.id, Math.floor(i / RESIDENTS_PER_HOUSE)]));
-      this.houseSig = sig;
-    }
-    const houseOfId = this.houseOfId;
+    this.partial = !!opts.partial;
     for (const a of agents) {
       const visual = visualFor(a.run);
       const target = targetFor(visual);
@@ -383,11 +399,12 @@ export class IsoEngine {
           a, look: this.lookOf(a, this.theme), pos: [spot.p[0], spot.y, spot.p[1]], loc: spot.loc, mover: null, seated: target === 'seat', visual, spotKey: key,
           facing: 'front', mirror: false, idleMirror: (hashOf(a.name) & 1) === 1, walked: 0,
           life: { mode: 'home', until: now + between(this.rand, [800, 7000]), plan: null, next: null, since: now, toured: false },
-          react: null, afterReact: false, outcome: a.outcome, house: houseOfId.get(a.id) ?? 0,
+          react: null, afterReact: false, outcome: a.outcome, house: a.house,
         });
         continue;
       }
-      rt.house = houseOfId.get(a.id) ?? rt.house;
+      if (this.leaving.size) this.leaving.delete(a.id);
+      rt.house = a.house;
       if (rt.a.name !== a.name || rt.a.color !== a.color || rt.a.role !== a.role || rt.a.key !== a.key || rt.a.seed !== a.seed) rt.look = this.lookOf(a, this.theme);
       const outcomeChanged = !!a.outcome && a.outcome !== rt.outcome;
       rt.outcome = a.outcome;
@@ -405,11 +422,65 @@ export class IsoEngine {
       this.go(rt, spot.p, spot.loc);
     }
     const ids = new Set(agents.map((a) => a.id));
+    this.loadedFloors = new Set(agents.map((a) => `${a.building}|${a.level}`));
     for (const id of [...this.rts.keys()]) {
       if (ids.has(id)) continue;
+      if (this.partial) { this.leaving.add(id); continue; }
       const rt = this.rts.get(id)!; this.endLife(rt, now); this.rts.delete(id);
     }
+    if (!this.partial) this.leaving.clear();
+    else if (this.leaving.size) this.sweepLeaving();
+    // escolhido que acabou de chegar (Localizar, outra tela): abre o andar dele e centraliza
+    if (this.selWait && this.selected && this.rts.has(this.selected)) this.applySelection();
     this.invalidate();
+  }
+
+  /** Quem saiu da lista e já está parado longe dos olhos vai embora; true se alguém saiu. */
+  private sweepLeaving(): boolean {
+    const vr = !this.cssW || this.mapMode ? NOWHERE : this.viewWorld(0);
+    let gone = false;
+    for (const id of [...this.leaving]) {
+      const rt = this.rts.get(id);
+      if (rt && !this.parked(rt, vr)) continue;
+      // parado não está em grupo nem a caminho: sai sem desfazer nada (e sem sortear, a vida dos outros não muda)
+      this.rts.delete(id); this.leaving.delete(id); gone = true;
+    }
+    return gone;
+  }
+
+  /** Parado: sem andar, sem reagir, sem grupo, fora da tela, não escolhido e fora do prédio aberto. */
+  private parked(rt: Rt, vr: { x0: number; y0: number; x1: number; y1: number }): boolean {
+    const L = rt.life;
+    if (rt.mover || rt.react || rt.afterReact || L.plan?.group || L.next?.group || L.mode === 'going' || L.mode === 'waiting') return false;
+    if (rt.a.id === this.selected) return false;
+    const f = this.focus; if (f && (rt.loc.b === f.building || rt.a.building === f.building)) return false;
+    return !this.onScreen(rt.pos, vr);
+  }
+
+  /**
+   * Contagens do servidor por andar (overview): janelas e selo dos andares que não estão carregados e o mapa
+   * inteiro. Na cidade inteira todos os andares com gente estão carregados, então nada muda.
+   */
+  setCounts(c: SceneCounts | null): void {
+    this.counts = new Map(); this.countTotal = c ? c.total : null;
+    this.countOcc = c ? occOfFloors(c.structures) : new Map();
+    if (c) for (const s of c.structures) {
+      let lv: Map<number, FloorCount> | null = null;
+      for (const f of s.floors) {
+        if (!f.active) continue;
+        lv ??= new Map();
+        const o = lv.get(f.level); // dois andares no mesmo nível (um removido e outro recriado) contam juntos, como a vaga
+        lv.set(f.level, o ? { active: o.active + f.active, working: o.working + f.working, waiting: o.waiting + f.waiting, queued: o.queued + f.queued } : { active: f.active, working: f.working, waiting: f.waiting, queued: f.queued });
+      }
+      if (lv) this.counts.set(s.id, lv);
+    }
+    this.invalidate();
+  }
+
+  /** Contagem do servidor de um andar sem ninguém carregado (null se está carregado ou vazio). */
+  private countAt(bid: string, level: number): FloorCount | null {
+    const c = this.counts.get(bid)?.get(level);
+    return c && !this.loadedFloors.has(`${bid}|${level}`) ? c : null;
   }
 
   /** Placas do trabalho da equipe (números do servidor; nada é contado aqui). */
@@ -424,17 +495,43 @@ export class IsoEngine {
   /** Leva a câmera até o agente (abre o andar dele), mesmo que ele já esteja selecionado. */
   focusAgent(id: string): void { this.selected = null; this.setSelected(id); }
 
+  /**
+   * Leva a câmera até o andar do agente mesmo que ele ainda não esteja carregado (cidade por região): abre o andar
+   * agora (o carregador o busca primeiro) e, quando ele chegar, centraliza nele.
+   */
+  focusAgentAt(id: string, building: string, level: number): void {
+    if (this.rts.has(id)) { this.focusAgent(id); return; }
+    this.selected = id; this.selWait = true; this.selAt = { building, level };
+    if (this.frameStructure(building)) this.setFocus({ building, level });
+    this.invalidate();
+  }
+
   setSelected(id: string | null): void {
     if (id === this.selected) return;
-    this.selected = id;
-    const rt = id ? this.rts.get(id) : undefined;
-    if (rt) {
-      // quem está num prédio: abre o prédio no andar dele
-      const loc = this.town.locate(rt.pos[0], rt.pos[1], rt.pos[2]);
-      if (loc.b && (!this.focus || this.focus.building !== loc.b || this.focus.level !== loc.level)) this.setFocus({ building: loc.b, level: loc.level });
-      this.centerOnSelected(true);
-    }
+    this.selected = id; this.selAt = null;
+    // ainda não carregado: fica esperando (setAgents abre o andar e centraliza quando ele chegar)
+    this.selWait = !!id && !this.rts.has(id);
+    if (id && !this.selWait) this.applySelection();
     this.invalidate();
+  }
+
+  /** O escolhido já está na cena: abre o prédio no andar onde ele está e centraliza. */
+  private applySelection(): void {
+    this.selWait = false;
+    const rt = this.selected ? this.rts.get(this.selected) : undefined;
+    if (!rt) return;
+    // quem está num prédio: abre o prédio no andar dele
+    const loc = this.town.locate(rt.pos[0], rt.pos[1], rt.pos[2]);
+    if (loc.b && (!this.focus || this.focus.building !== loc.b || this.focus.level !== loc.level)) this.setFocus({ building: loc.b, level: loc.level });
+    this.centerOnSelected(true);
+  }
+
+  /** O escolhido e o andar dele, para o carregador: o da cena ou, enquanto não chega, o pedido. */
+  private selectedAt(): SceneWindow['selected'] {
+    const id = this.selected; if (!id) return null;
+    const rt = this.rts.get(id);
+    if (rt) return { id, building: rt.a.building, level: rt.a.level };
+    return this.selAt ? { id, building: this.selAt.building, level: this.selAt.level } : null;
   }
 
   resize(cssW: number, cssH: number): void {
@@ -470,9 +567,14 @@ export class IsoEngine {
   /** Câmera até uma estrutura (ou a cidade inteira). Não abre o prédio: ele aparece fechado. */
   flyTo(target: string): void {
     if (target === 'cidade') { this.frameCity(false); return; }
+    if (this.frameStructure(target)) this.cb.onStructure(target);
+  }
+
+  /** Só a câmera até a estrutura (sem cartão); false se ela não existe na cidade. */
+  private frameStructure(target: string): boolean {
     const b = this.town.buildings.get(target); const a = this.town.areas.get(target);
     const box = b ? b.foot : a ? a.lot : null;
-    if (!box) return;
+    if (!box) return false;
     const top = b ? b.base + b.floors.length * FLOOR_H + 1.2 : 1.5;
     const pts = [project(box.x0, 0, box.z1), project(box.x1, 0, box.z0), project(box.x1, 0, box.z1), project(box.x0, top, box.z0)];
     const x0 = Math.min(...pts.map((p) => p[0])); const x1 = Math.max(...pts.map((p) => p[0]));
@@ -483,8 +585,8 @@ export class IsoEngine {
     this.tcx = (x0 + x1) / 2 + (this.rightInset * this.dpr) / 2 / this.tk; this.tcy = (y0 + y1) / 2;
     this.anchor = null; this.userCam = true;
     this.jumpIfFar();
-    this.cb.onStructure(target);
     this.invalidate();
+    return true;
   }
 
   // ================================================================ casa, mesa e rotas
@@ -578,6 +680,7 @@ export class IsoEngine {
     for (const o of this.rts.values()) {
       if (o === except || o.visual !== 'idle' || o.react || o.mover || o.afterReact) continue;
       if (loc && !(o.a.building === loc.b && o.a.level === loc.level)) continue;
+      if (this.leaving.size && this.leaving.has(o.a.id)) continue; // de saída (descarregado): não entra em nada novo
       const L = o.life;
       if (L.mode === 'home' && now - L.since > 2000) c.push(o);
       else if (fromDesk && L.mode === 'doing' && L.plan?.kind === 'desk' && !L.plan.group && now - L.since > 6000) c.push(o);
@@ -777,6 +880,7 @@ export class IsoEngine {
       if (L.mode === 'home') {
         if (now < L.until || rt.mover || walking >= maxWalking) continue;
         if (this.focusRect && !this.onScreen(rt.pos, this.focusRect)) { L.until = now + 4000; continue; }
+        if (this.leaving.size && this.leaving.has(rt.a.id)) { L.until = now + 4000; continue; } // de saída: fica onde está
         const busy = this.busy();
         const ok = night ? this.startHome(rt, now, true) : (this.startChoice(rt, pickChoice(this.rand), now, busy) || this.startDesk(rt, now));
         if (ok) { walking++; changed = true; } else L.until = now + 4000;
@@ -928,6 +1032,7 @@ export class IsoEngine {
     const { moving, visMoving, animating, changed } = this.update(dt, t);
     const anim = this.anims.size > 0;
     if (visMoving || animating || changed || cam || anim || this.dirty || this.hover) this.draw(t);
+    this.emitWindow();
     // arte de prédio que ficou para depois (orçamento do quadro): o próximo quadro termina
     this.dirty = this.artPending;
     clearTimeout(this.timer); this.timer = 0;
@@ -961,6 +1066,8 @@ export class IsoEngine {
     }
     for (const g of this.groups.values()) take(g.started ? g.until : g.created + g.timeout);
     if (this.lifeOn() && !this.npcSt.mover) take(this.npcSt.until);
+    // alguém de saída ainda não estava parado: confere de novo daqui a pouco
+    if (this.leaving.size) take(performance.now() + 1500);
     return best;
   }
 
@@ -973,6 +1080,34 @@ export class IsoEngine {
     if (r.x1 < r.x0) return false; // NOWHERE (modo mapa)
     const [px, py] = project(p[0], p[1], p[2]);
     return px > r.x0 - 24 && px < r.x1 + 24 && py > r.y0 - 4 && py < r.y1 + 64;
+  }
+
+  /**
+   * Aviso de janela para o carregador da cidade (lib/cityData.ts), só quando muda: as construções que cruzam a tela +
+   * uma tela inteira (o que se mantém), marcadas as que cruzam a tela + meia tela (o que se quer, a mesma região em
+   * foco da vida ambiente), da mais perto do centro visível (sem o painel da direita) para a mais longe; o modo mapa;
+   * o prédio aberto; o escolhido e o andar dele. Pelo retângulo da geometria (closedRect), sem desenhar nada.
+   */
+  private emitWindow(): void {
+    if (!this.cb.onWindow || !this.cssW) return;
+    const f = this.focus; const sel = this.selectedAt();
+    const sig = `${Math.round(this.cx)},${Math.round(this.cy)},${this.k.toFixed(4)},${this.W}x${this.H},${Math.round(this.rightInset)},${this.mapMode ? 1 : 0},`
+      + `${f ? `${f.building}|${f.level}` : ''},${sel ? `${sel.id}|${sel.building}|${sel.level}` : ''},${this.townVer}`;
+    if (sig === this.winSig) return;
+    this.winSig = sig;
+    const buildings: SceneWindow['buildings'] = [];
+    if (!this.mapMode) {
+      const near = this.viewWorld(0.5); const keep = this.viewWorld(1);
+      const k = this.k || 1; const ccx = this.cx - (this.rightInset * this.dpr) / 2 / k; const ccy = this.cy;
+      const cross = (r: { x0: number; y0: number; x1: number; y1: number }, v: { x0: number; y0: number; x1: number; y1: number }) => r.x1 > v.x0 && r.x0 < v.x1 && r.y1 > v.y0 && r.y0 < v.y1;
+      for (const b of this.town.buildings.values()) {
+        const r = closedRect(b);
+        if (!cross(r, keep)) continue;
+        buildings.push({ id: b.id, dist: Math.hypot((r.x0 + r.x1) / 2 - ccx, (r.y0 + r.y1) / 2 - ccy), near: cross(r, near) });
+      }
+      buildings.sort((a, b) => a.dist - b.dist);
+    }
+    this.cb.onWindow({ buildings, map: this.mapMode, open: f ? { building: f.building, level: f.level } : null, selected: sel });
   }
 
   private update(dt: number, now: number): { moving: boolean; visMoving: boolean; animating: boolean; changed: boolean } {
@@ -1010,6 +1145,8 @@ export class IsoEngine {
       if (!still) { n.mover = null; n.until = now + between(this.rand, [7000, 15000]); changed = true; }
     }
     if (this.tickLife(now)) changed = true;
+    // de saída e já parado fora da tela: vai embora (não muda nada visível)
+    if (this.leaving.size) this.sweepLeaving();
     // o que anda ou anima fora da tela não pede quadro (só a simulação segue, num passo mais lento)
     const vr = this.mapMode ? NOWHERE : this.viewWorld(0);
     const npcVis = !this.mapMode && this.onScreen(n.pos, vr);
@@ -1129,6 +1266,8 @@ export class IsoEngine {
     g.setTransform(1, 0, 0, 1, 0, 0);
     this.drawNames();
     this.drawPlaques();
+    // sprites dos bonecos: lugar para os da tela em todas as poses e quadros que alternam (o resto sai pelo desuso)
+    reserveFigures(this.agentsDrawn.length * 6);
     const s = this.stats; s.frames++; s.lastFrameMs = performance.now() - t0;
   }
 
@@ -1146,12 +1285,16 @@ export class IsoEngine {
     for (const r of this.town.roads) { const p0 = project(r.pts[0][0], 0, r.pts[0][1]); g.moveTo(p0[0], p0[1]); for (let i = 1; i < r.pts.length; i++) { const p = project(r.pts[i][0], 0, r.pts[i][1]); g.lineTo(p[0], p[1]); } }
     g.stroke(); g.restore();
     for (const a of this.town.areas.values()) poly(boxPoly(a.lot), th.plaza[0]);
-    // quem é de cada construção (pelo endereço do servidor, não por onde o boneco está agora)
-    const occ = new Map<string, Occ>();
-    for (const rt of this.rts.values()) {
-      const o = occ.get(rt.a.building) ?? { agents: 0, working: 0, waiting: 0 };
-      o.agents++; if (rt.visual === 'working') o.working++; if (rt.visual === 'waiting') o.waiting++;
-      occ.set(rt.a.building, o);
+    // quem é de cada construção (pelo endereço do servidor, não por onde o boneco está agora): as contagens do
+    // servidor, a cidade inteira sem carregar ninguém; sem elas ainda, quem está carregado
+    let occ = this.countOcc;
+    if (this.countTotal === null) {
+      occ = new Map<string, Occ>();
+      for (const rt of this.rts.values()) {
+        const o = occ.get(rt.a.building) ?? { agents: 0, working: 0, waiting: 0 };
+        o.agents++; if (rt.visual === 'working') o.working++; if (rt.visual === 'waiting') o.waiting++;
+        occ.set(rt.a.building, o);
+      }
     }
     const inView = (r: { x0: number; y0: number; x1: number; y1: number }) => r.x1 > view.x0 && r.x0 < view.x1 && r.y1 > view.y0 && r.y0 < view.y1;
     for (const bb of this.town.buildings.values()) {
@@ -1395,12 +1538,36 @@ export class IsoEngine {
     g.clip('nonzero'); this.drawAgent(rt, now, register); g.restore();
   }
 
+  /**
+   * Quem está num andar para as janelas: os bonecos de lá e, num andar sem ninguém carregado (cidade por região), as
+   * contagens do servidor. Na cidade inteira os andares com gente estão todos carregados: só os bonecos, como sempre.
+   */
+  private floorState(bid: string, level: number, occ: Occupancy): { n: number; working: number; waiting: number } | undefined {
+    const s = occ.by.get(bid)?.levels.get(level);
+    const c = this.counts.size ? this.countAt(bid, level) : null;
+    if (!c) return s;
+    return { n: (s?.n ?? 0) + c.active, working: (s?.working ?? 0) + c.working, waiting: (s?.waiting ?? 0) + c.waiting };
+  }
+
+  /** Selo do prédio: o dos bonecos, e o dos andares não carregados pelas contagens (esperando > trabalhando > fila). */
+  private badgeOf(bid: string, occ: Occupancy): 'working' | 'waiting' | 'attention' | null {
+    let v = occ.by.get(bid)?.badge ?? null;
+    const lv = this.counts.get(bid);
+    if (!lv || v === 'waiting') return v;
+    for (const [level, c] of lv) {
+      if (this.loadedFloors.has(`${bid}|${level}`)) continue;
+      if (c.waiting) return 'waiting';
+      if (c.working) v = 'working'; else if (c.queued && !v) v = 'attention';
+    }
+    return v;
+  }
+
   /** Janelas acesas por andar ocupado; telas tremulando onde alguém trabalha de verdade. */
   private drawWindows(b: BuildingInst, wins: Array<{ level: number; poly: P2[] }>, now: number, occ: Occupancy): void {
     const g = this.g; const th = this.theme; const night = th.id.includes('noite');
-    const byLevel = occ.by.get(b.id)?.levels; if (!byLevel) return;
+    if (!occ.by.has(b.id) && !this.counts.has(b.id)) return;
     wins.forEach((w, i) => {
-      const s = byLevel.get(w.level); if (!s) return;
+      const s = this.floorState(b.id, w.level, occ); if (!s) return;
       g.save();
       if (s.working) { g.globalAlpha = 0.55 + 0.3 * Math.sin(now / 160 + i * 1.7); fillPoly(g, w.poly, th.teal[0]); }
       else if (s.waiting) { g.globalAlpha = 0.45 + 0.35 * Math.sin(now / 300 + i); fillPoly(g, w.poly, th.marks.waiting); }
@@ -1411,7 +1578,7 @@ export class IsoEngine {
 
   /** Selo sobre o prédio fechado: há alguém trabalhando, na fila ou esperando você lá dentro. */
   private drawBadge(b: BuildingInst, top: number, now: number, occ: Occupancy): void {
-    const visual = occ.by.get(b.id)?.badge ?? null;
+    const visual = this.badgeOf(b.id, occ);
     if (!visual) return;
     const th = this.theme; const [px, py] = project(b.ox, top + 0.6, b.oz + b.spec.D / 2);
     const bob = Math.round(Math.sin(now / 300) * RES);
@@ -1730,9 +1897,16 @@ export class IsoEngine {
     const who = (rts: Rt[]) => (rts.length ? rts.map((rt) => `${rt.a.name} ${this.statusOf(rt)}`).join(' · ') : 'ninguém agora');
     switch (hit.kind) {
       case 'casa': {
+        // até 6 nomes de quem está carregado; o resto pelo total da cidade (as casas se repetem: com milhares de
+        // agentes, mais de mil moram em cada uma)
         const a = this.town.areaOf('bairro'); const houses = a?.def.houses ?? []; const id = hit.ref ?? 0;
         const res = [...this.rts.values()].filter((rt) => houses.length && rt.house % houses.length === id);
-        return res.length ? `Casa ${id + 1} · ${res.map((rt) => `${rt.a.name} ${this.hidden(rt) ? 'dormindo' : this.statusOf(rt)}`).join(' · ')}` : `Casa ${id + 1} · vazia, pronta para novos agentes`;
+        const total = Math.max(res.length, residentsOf(id, houses.length, this.countTotal ?? this.rts.size));
+        if (!total) return `Casa ${id + 1} · vazia, pronta para novos agentes`;
+        const shown = res.slice(0, HOUSE_NAMES).map((rt) => `${rt.a.name} ${this.hidden(rt) ? 'dormindo' : this.statusOf(rt)}`);
+        if (!shown.length) return `Casa ${id + 1} · ${fmtN(total)} ${total === 1 ? 'morador' : 'moradores'}`;
+        const more = total - shown.length;
+        return `Casa ${id + 1} · ${shown.join(' · ')}${more > 0 ? ` · e mais ${fmtN(more)}` : ''}`;
       }
       case 'termas': return `Termas · ${who(list('termas'))}`;
       case 'ginasio': return `Ginásio · ${who(list('ginasio'))}`;
@@ -1910,7 +2084,9 @@ export class IsoEngine {
     }
     const s = [...this.frameTimes].sort((a, b) => a - b);
     return {
+      // agents = carregados na cena (na cidade por região, não é o total); total = ativos da cidade (servidor)
       k: this.k, cam: [Math.round(this.cx), Math.round(this.cy)], W: this.W, H: this.H, agents: this.rts.size, drawn: this.drawn.length, life,
+      loaded: this.rts.size, leaving: this.leaving.size, total: this.countTotal, mode: this.partial ? 'regiao' : 'cidade', figures: figureCacheSize(),
       groups: [...this.groups.values()].map((g) => `${g.kind}${g.started ? '' : '(indo)'}`), focus: this.focus, economy: this.economy,
       frameMsMedian: s.length ? s[Math.floor(s.length / 2)] : null, lastFrameMs: this.stats.lastFrameMs, sprites: this.stats.sprites, frames: this.stats.frames,
       lots: this.town.lots.length, extent: this.town.extent,

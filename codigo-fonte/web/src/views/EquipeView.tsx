@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { useHashParam } from '../lib/route.ts';
 import { pushRecent } from '../lib/recents.ts';
+import { agentOptions } from '../lib/team.ts';
 import type { AppState, BoardSummary, BoardView } from '../lib/types.ts';
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
@@ -28,8 +29,11 @@ export function EquipeView({ state, compact, onAskCoordinator, reload }: { state
   useEffect(() => {
     if (opened) pushRecent({ kind: 'card', id: opened.id, label: `#${opened.number} ${opened.title}`, where: 'Fluxos da equipe', href: `#equipe?card=${opened.id}` });
   }, [opened?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const agents = state.agents;
-  const tasks = (view.data?.tasks ?? []).filter((t) => !who || t.agent_id === who || (who === '-' && !t.agent_id));
+  // o filtro "Agente": quem tem card neste quadro (o nome vem no card), não a equipe inteira
+  const options = useMemo(() => agentOptions(view.data?.tasks ?? []), [view.data?.tasks]);
+  // escolhido sem card agora (o último foi concluído e saiu, por exemplo): volta a mostrar todos
+  const pick = !who || who === '-' || !view.data || options.some((o) => o.id === who) ? who : '';
+  const tasks = (view.data?.tasks ?? []).filter((t) => !pick || t.agent_id === pick || (pick === '-' && !t.agent_id));
   const auto = state.teamAutorun;
   const setAuto = async (enabled: boolean) => {
     setErr(null);
@@ -54,10 +58,10 @@ export function EquipeView({ state, compact, onAskCoordinator, reload }: { state
       )}
       <div className="toolbar">
         <ViewToggle view={mode} onChange={setMode} />
-        <select value={who} onChange={(e) => setWho(e.target.value)} aria-label="Agente">
+        <select value={pick} onChange={(e) => setWho(e.target.value)} aria-label="Agente">
           <option value="">Todos os agentes</option>
           <option value="-">Na triagem</option>
-          {agents.filter((a) => a.status === 'active').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          {options.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <span className="grow" />
         {!compact && (
@@ -75,10 +79,10 @@ export function EquipeView({ state, compact, onAskCoordinator, reload }: { state
         </p>
       )}
       {err && <p className="error" role="alert">{err}</p>}
-      {view.data && <Board columns={view.data.columns} tasks={tasks} agents={agents} view={mode} editable={false} openId={openTask} onOpen={setOpenTask} team
-        queueColumn={todo} onReorder={who ? undefined : (id, before) => void reorder(id, before)} />}
+      {view.data && <Board columns={view.data.columns} tasks={tasks} view={mode} editable={false} openId={openTask} onOpen={setOpenTask} team
+        queueColumn={todo} onReorder={pick ? undefined : (id, before) => void reorder(id, before)} />}
       {openTask && view.data && (
-        <TaskDetail taskId={openTask} columns={view.data.columns} agents={agents} mode="team" onClose={() => setOpenTask(null)} onAskCoordinator={onAskCoordinator} />
+        <TaskDetail taskId={openTask} columns={view.data.columns} mode="team" onClose={() => setOpenTask(null)} onAskCoordinator={onAskCoordinator} />
       )}
     </div>
   );

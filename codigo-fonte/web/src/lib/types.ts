@@ -1,13 +1,37 @@
+import type { TeamAgent } from './teamData.ts';
+
 export interface Floor { id: string; building_id: string; level: number; name: string; slots: number; active: number; origin: 'base' | 'simulated' | 'entitlement' }
+/** Andar com as contagens do servidor (agentes ativos por status de trabalho): janelas, selo e mapa sem carregar ninguém. */
+export interface StructureFloor extends Omit<Floor, 'building_id'> { working: number; waiting: number; queued: number }
 /** Estrutura da cidade (prédio, praça, área de lazer ou bairro) no lote (i, j) do mapa. */
-export interface Structure { id: string; kind: string; name: string; i: number; j: number; origin: 'base' | 'local'; floors: Array<Omit<Floor, 'building_id'>> }
+export interface Structure { id: string; kind: string; name: string; i: number; j: number; origin: 'base' | 'local'; floors: StructureFloor[] }
+/** GET /api/city/overview: a cidade inteira sem nenhum agente (total = agentes ativos). */
+export interface CityOverview { total: number; structures: Structure[] }
+/** Agente leve embutido nas respostas (conversas, cards, itens, busca): o bastante para o retrato e o nome. */
+export interface AgentLite { id: string; name: string; role: string; color: string; char_key: string | null; look_seed: number | null; sector_name: string }
+/** GET /api/city/agents: morador para a cena, com vaga e casa calculadas no servidor (iguais às de antes). */
+export interface CityAgent extends AgentLite {
+  building_id: string; floor_id: string; level: number; slot: number; house: number;
+  run_status: 'queued' | 'running' | 'waiting_user' | null; last_outcome: string | null;
+}
+export interface CityAgentsPage { total: number; agents: CityAgent[]; next?: string | null }
+/** O que as telas precisam saber da equipe sem a lista inteira (vem no /api/state). */
+export interface TeamInfo {
+  active: number; archived: number;
+  coordinator: TeamAgent | null;
+  /** quem revisa por padrão (a mesma regra do servidor que começa a revisão) */
+  reviewer: { id: string; name: string } | null;
+  /** os primeiros agentes ativos que não coordenam (dicas e exemplos da Ajuda) */
+  others: Array<{ id: string; name: string }>;
+}
 export interface UsagePeriod { from: string; runs: number; runsWithTokens: number; tokensIn: number; tokensOut: number; runsWithCost: number; costUsd: number | null }
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 export interface Usage {
   month: UsagePeriod; year: UsagePeriod; subscription: null | { provider: string; windows: Array<{ label: string; usedPercent: number; resetsAt: string | null }> };
   billing: Billing; costVisible: boolean; note: string; executor: 'real' | 'simulated';
 }
-export interface Capacity { slots: number; active: number; free: number; floors: Floor[]; maxFloors: number; note: string }
+/** floors só no GET /api/capacity (o /api/state traz só os totais) */
+export interface Capacity { slots: number; active: number; free: number; floors?: Floor[]; maxFloors: number; note: string }
 export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado';
 /** Ferramenta do catálogo do Ergon com o estado real ("planejado" nunca aparece como disponível). */
 /** guarded: executa código — bloqueada por padrão, liberada só com a senha */
@@ -33,8 +57,8 @@ export interface Agent {
 export interface AppState {
   workspace: { id: string; name: string; demo_data: number };
   capacity: Capacity;
-  agents: Agent[];
-  structures: Structure[];
+  /** a equipe sem a lista inteira: listas por partes em /api/team/*, a cidade em /api/city/*, o perfil em /api/agents/:id */
+  team: TeamInfo;
   sectors: Sector[];
   teamAutorun: boolean;
   /** a equipe puxa conversa quando você chega (ligado por padrão) */
@@ -110,6 +134,8 @@ export interface TaskCard {
   work_state: string | null; requires_approval: number; inputs: number; deliverables: number;
   /** fila da equipe: marcado como prioridade (vai ao topo) */
   priority?: number;
+  /** responsável e agente do card enviado à equipe (nome e cor vindos do servidor; desativados incluídos) */
+  agent_name?: string | null; agent_color?: string | null; team_agent_name?: string | null; team_agent_color?: string | null;
 }
 export interface BoardView { board: BoardSummary; columns: Column[]; tasks: TaskCard[] }
 /** queued: 1 = na fila da conversa (Ctrl+Enter); vai para o agente quando ele terminar */
@@ -128,6 +154,8 @@ export interface RecentConversation {
   id: string; agent_id: string; title: string; created_at: string; last_user_at: string | null; last_at: string | null;
   pinned_at?: string | null; priority?: 'urgente' | 'alta' | null; priority_reason?: string | null; unread?: number; waiting?: number;
   last_text?: string | null; last_role?: string | null;
+  /** o colega da conversa (retrato e nome sem a lista da equipe) */
+  agent?: AgentLite;
 }
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
 export const PROPOSAL_KIND: Record<string, string> = {

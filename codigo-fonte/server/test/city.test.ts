@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test';
 import { CATALOG, GROW_AT, cityExtent, fitAt, freeCells, occupancy, placeError, type Placed } from '../../shared/city.ts';
 import { id, now } from '../src/lib/util.ts';
 import { periodStarts, usageSummary } from '../src/services/usage.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, cityStructures, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 describe('grade da cidade (shared/city.ts)', () => {
   const start: Placed[] = [
@@ -74,14 +74,15 @@ describe('estruturas pela API (loja e editor do mapa, versão local)', () => {
   before(async () => { h = await harness(); s = await setupOwner(h); });
   after(async () => { await h.close(); });
 
-  test('o estado traz a cidade inicial: a Stoa com 2 andares e as cinco áreas, cada uma no seu lote', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+  test('a cidade inicial: a Stoa com 2 andares e as cinco áreas, cada uma no seu lote', async () => {
+    const st = { structures: await cityStructures(h, s), agents: await allAgents(h, s) };
     const kinds = st.structures.map((x: { kind: string }) => x.kind).sort();
     assert.deepEqual(kinds, ['agora', 'bairro', 'ginasio', 'stoa', 'teatro', 'termas']);
     const stoa = st.structures.find((x: { kind: string }) => x.kind === 'stoa');
     assert.deepEqual([stoa.i, stoa.j], [2, 1]);
     assert.equal(stoa.floors.length, 2);
     assert.ok(st.agents.every((a: { building_id: string }) => a.building_id === stoa.id));
+    assert.deepEqual((await req(h, 'GET', '/api/structures', s)).json, st.structures, '/api/structures: o mesmo construtor');
   });
 
   test('loja: cria uma casa num lote livre (grátis), recusa lote ocupado e dá vagas novas', async () => {
@@ -98,26 +99,23 @@ describe('estruturas pela API (loja e editor do mapa, versão local)', () => {
     assert.equal(after1, before + 2);
     const ag = await req(h, 'POST', '/api/agents', s, { name: 'Morador', role: 'Ocupa a casa nova', profileKey: 'central' });
     assert.equal(ag.status, 201);
-    const st = (await req(h, 'GET', '/api/state', s)).json;
-    const who = st.agents.find((a: { id: string }) => a.id === ag.json.id);
+    const who = (await allAgents(h, s)).find((a: { id: string }) => a.id === ag.json.id);
     assert.equal(who.building_id, r.json.id, 'o primeiro andar com vaga é o da casa nova');
     const log = (await req(h, 'GET', '/api/activity', s)).json as Array<{ action: string; evidence: string }>;
     assert.match(log.find((e) => e.action === 'structure.create')!.evidence, /nenhum \(versão local\)/);
   });
 
   test('editor: move a estrutura para um lote livre; recusa sobreposição', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
-    const termas = st.structures.find((x: { kind: string }) => x.kind === 'termas');
+    const termas = (await cityStructures(h, s)).find((x: { kind: string }) => x.kind === 'termas');
     assert.equal((await req(h, 'PATCH', `/api/structures/${termas.id}`, s, { i: 3, j: 1 })).status, 409);
     assert.equal((await req(h, 'PATCH', `/api/structures/${termas.id}`, s, { i: 2, j: 5 })).status, 200);
-    const st2 = (await req(h, 'GET', '/api/state', s)).json;
-    const moved = st2.structures.find((x: { id: string }) => x.id === termas.id);
+    const moved = (await cityStructures(h, s)).find((x: { id: string }) => x.id === termas.id);
     assert.deepEqual([moved.i, moved.j], [2, 5]);
     assert.equal((await req(h, 'PATCH', `/api/structures/${termas.id}`, s, { name: 'Termas de Ergon' })).status, 200);
   });
 
   test('andares por estrutura até o máximo do tipo; remover só vazia e só criada na loja', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { structures: await cityStructures(h, s) };
     const casa = st.structures.find((x: { kind: string }) => x.kind === 'oikos');
     assert.equal((await req(h, 'POST', `/api/structures/${casa.id}/floors`, s)).status, 201);
     const full = await req(h, 'POST', `/api/structures/${casa.id}/floors`, s);
@@ -130,8 +128,7 @@ describe('estruturas pela API (loja e editor do mapa, versão local)', () => {
     assert.equal((await req(h, 'DELETE', `/api/structures/${stoa.id}`, s)).json.error, 'base_structure');
     const free = await req(h, 'POST', '/api/structures', s, { kind: 'pharmakopoleion', i: 1, j: 0 });
     assert.equal((await req(h, 'DELETE', `/api/structures/${free.json.id}`, s)).status, 200);
-    const st2 = (await req(h, 'GET', '/api/state', s)).json;
-    assert.ok(!st2.structures.some((x: { id: string }) => x.id === free.json.id));
+    assert.ok(!(await cityStructures(h, s)).some((x: { id: string }) => x.id === free.json.id));
   });
 
   test('versão anterior (Stoa sem lote) ganha lote e as áreas na inicialização, uma vez só', async () => {

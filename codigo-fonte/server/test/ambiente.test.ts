@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { runningProcesses } from '../src/services/concurrency.ts';
 import { pendingCount } from '../src/services/proposals.ts';
-import { addPerson, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { addPerson, allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 type Item = { key: string; taskId: string | null; runId: string | null; number: number | null; category: string; reasonCode: string; reason: string; position: number | null; slot: boolean; agentId: string | null; title: string; dependsOn: Array<{ taskId: string }>; actions: string[] };
 type Ops = {
@@ -19,7 +19,7 @@ describe('Ambiente operacional: leitura do trabalho da equipe', () => {
   before(async () => {
     h = await harness({ maxConcurrentRuns: 0, simulatedDelayMs: 300 });
     s = await setupOwner(h);
-    agents = (await req(h, 'GET', '/api/state', s)).json.agents;
+    agents = await allAgents(h, s);
     h.db.run('UPDATE tasks SET archived = 1 WHERE workspace_id = ?', s.workspaceId); // começa sem os cards de partida
   });
   after(async () => { await h.close(); });

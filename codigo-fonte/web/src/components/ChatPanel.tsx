@@ -8,7 +8,7 @@ import { PROPOSAL_KIND, stripControl, type Agent, type AiStatus, type Attachment
 import { ConfirmPopup } from './ConfirmPopup.tsx';
 import { HandoffCard, PermissionCard, QuestionCard, RequestCard, SystemNote } from './ChatCards.tsx';
 import { Icon } from './Icon.tsx';
-import { AgentProfile } from './AgentProfile.tsx';
+import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
 
 /** Rascunhos das conversas (por agente), só na memória da aba: nada de conteúdo da conversa em disco ou na URL. */
@@ -29,7 +29,13 @@ const SUGGEST: Record<string, string[]> = {
   euclides: ['Confere este documento', 'Tem erro nesta planilha?', 'Este contrato está completo?'],
   hipodamo: ['Planeja o projeto de ', 'Monta um cronograma para ', 'Quais são as etapas para '],
 };
-const suggestionsFor = (a: Agent) => SUGGEST[a.char_key ?? ''] ?? ['Me ajuda com ', 'Resume este arquivo', 'O que você faz de melhor?'];
+const suggestionsFor = (a: { char_key: string | null }) => SUGGEST[a.char_key ?? ''] ?? ['Me ajuda com ', 'Resume este arquivo', 'O que você faz de melhor?'];
+
+/**
+ * O colega da conversa: a linha leve que quem abriu já tem (nome, papel, setor, cor) basta para conversar; com o
+ * perfil completo (GET /api/agents/:id), o cabeçalho fora das janelas mostra também a história e o perfil.
+ */
+export type ChatAgent = Pick<Agent, 'id' | 'name' | 'role' | 'color' | 'sector_name' | 'char_key'> & Partial<ProfileFields>;
 
 /** Corta um texto em uma linha (citação, marcadas). */
 const clip1 = (t: string, n: number) => { const x = t.replace(/\s+/g, ' ').trim(); return x.length > n ? `${x.slice(0, n - 1)}…` : x; };
@@ -89,7 +95,7 @@ function Typing({ who, activity, status }: { who: string; activity: string | nul
 }
 
 export function ChatPanel({ agent, onClose, compact, draft, embedded, conversationId, hidePicker, focusMessage, onOpenConversation }: {
-  agent: Agent; onClose?: () => void; compact?: boolean; draft?: string | null; embedded?: boolean; conversationId?: string | null;
+  agent: ChatAgent; onClose?: () => void; compact?: boolean; draft?: string | null; embedded?: boolean; conversationId?: string | null;
   /** a lista de conversas ao lado já mostra os assuntos: sem o seletor de cima */
   hidePicker?: boolean;
   /** abre já nesta mensagem (busca, marcadas): rola até ela e destaca */
@@ -404,10 +410,10 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         </div>
         {onClose && <button className="icon-btn" onClick={onClose} aria-label="Fechar conversa"><Icon name="x" /></button>}
       </header>}
-      {agent.char_key && !embedded && (
+      {agent.char_key && !embedded && agent.skills && agent.tools && (
         <details className="chat__profile">
           <summary>{agent.bio ? agent.bio.split(/(?<=[.!?])\s/)[0] : 'Perfil'} <span className="muted">perfil</span></summary>
-          <AgentProfile agent={agent} />
+          <AgentProfile agent={{ bio: agent.bio ?? null, skills: agent.skills, tools: agent.tools, model: agent.model ?? null, model_hint: agent.model_hint ?? null }} />
         </details>
       )}
       {!hidePicker && <div className="chat__convs">

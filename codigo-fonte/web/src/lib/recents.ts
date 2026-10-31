@@ -28,6 +28,16 @@ export function pushRecent(item: Omit<Recent, 'at'>): void {
   try { localStorage.setItem(KEY, JSON.stringify(addRecent(getRecents(), item))); } catch { /* sem armazenamento: sem recentes */ }
 }
 
+/** Sem aquele item (o resto na mesma ordem). */
+export function withoutRecent(list: Recent[], kind: RecentKind, id: string): Recent[] {
+  return list.filter((r) => !(r.kind === kind && r.id === id));
+}
+
+/** Tira um recente que não abre mais (o agente não existe neste workspace): a busca não oferece de novo. */
+export function removeRecent(kind: RecentKind, id: string): void {
+  try { localStorage.setItem(KEY, JSON.stringify(withoutRecent(getRecents(), kind, id))); } catch { /* sem armazenamento */ }
+}
+
 export function clearRecents(): void {
   try { localStorage.removeItem(KEY); } catch { /* sem armazenamento */ }
 }

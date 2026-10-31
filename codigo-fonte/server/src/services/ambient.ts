@@ -18,6 +18,7 @@ import { PROCESS_SQL, isConversationKey, runningProcesses, type ProcessLimit } f
 import { pendingCount } from './proposals.ts';
 import { defaultBoard } from './tasks.ts';
 import { ELIGIBLE_SQL, MAX_ATTEMPTS, QUEUE_ORDER, TODO_COLUMN } from './teamwork.ts';
+import { agentsLite, type AgentLite } from './team-query.ts';
 
 export const AMBIENT_VERSION = 1;
 export const CATEGORIES = ['ativo', 'pronto', 'bloqueado', 'precisa_de_voce', 'impedido', 'falhou'] as const;
@@ -32,6 +33,8 @@ export interface OpsItem {
   taskId: string | null; number: number | null; runId: string | null;
   title: string;
   agentId: string | null; agentName: string | null;
+  /** o agente do item (retrato), sem a lista da equipe na tela; só nos itens da página */
+  agent: AgentLite | null;
   category: Category;
   /** motivo em linguagem do Ergon, com código para teste e para a cena */
   reason: string; reasonCode: string;
@@ -133,7 +136,7 @@ export function readAmbient(db: Db, input: {
   const all: OpsItem[] = [];
   const base = (t: TaskRow): Omit<OpsItem, 'category' | 'reason' | 'reasonCode' | 'actions' | 'slot' | 'since' | 'position'> => ({
     key: `task:${t.id}`, source: 'task', taskId: t.id, number: Number(t.number), runId: t.run_id, title: t.title,
-    agentId: t.agent_id, agentName: t.agent_name, priority: Number(t.priority) === 1, simulated: t.run_mode === 'simulated',
+    agentId: t.agent_id, agentName: t.agent_name, agent: null, priority: Number(t.priority) === 1, simulated: t.run_mode === 'simulated',
     dependsOn: deps.get(t.id) ?? [],
   });
   for (const t of tasks) {
@@ -188,7 +191,7 @@ export function readAmbient(db: Db, input: {
     const title = !mine ? 'Trabalho de outra pessoa do workspace' : r.routine_name ? `${kind}: ${r.routine_name}` : kind;
     const category: Category = r.status === 'running' ? 'ativo' : r.status === 'queued' ? 'pronto' : 'precisa_de_voce';
     all.push({
-      key: `run:${r.id}`, source: 'run', taskId: null, number: null, runId: r.id, title, agentId: r.agent_id, agentName: r.agent_name,
+      key: `run:${r.id}`, source: 'run', taskId: null, number: null, runId: r.id, title, agentId: r.agent_id, agentName: r.agent_name, agent: null,
       category, reasonCode: r.status === 'running' ? 'trabalhando' : r.status === 'queued' ? 'executor' : 'resposta',
       reason: r.status === 'running' ? `${r.agent_name} está trabalhando` : r.status === 'queued' ? 'Já na vez: começa assim que abrir uma vaga' : 'Espera a sua resposta',
       position: null, slot: r.status === 'running', since: r.started_at ?? r.created_at, priority: false, simulated: r.mode === 'simulated', dependsOn: [],
@@ -208,6 +211,9 @@ export function readAmbient(db: Db, input: {
     items[c] = list.slice(pg.offset, pg.offset + pg.limit);
     more[c] = Math.max(0, list.length - pg.offset - items[c].length);
   }
+  // o retrato de quem aparece na página (uma consulta só; desativado também tem nome e cor)
+  const lite = agentsLite(db, ws, CATEGORIES.flatMap((c) => items[c].map((it) => it.agentId)));
+  for (const c of CATEGORIES) for (const it of items[c]) it.agent = (it.agentId && lite.get(it.agentId)) || null;
 
   const since = new Date(Date.now() - DELIVERY_DAYS * 86_400_000).toISOString();
   const deliveries = db.all<{ id: string; number: number; title: string; agent_name: string | null; completed_at: string; completed_by: string | null; state: string | null; kind: string | null; deliverables: number; mode: string | null }>(

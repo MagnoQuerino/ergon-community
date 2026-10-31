@@ -163,7 +163,7 @@ function ginasio(): AreaDef {
 const HOUSE_X: Array<[number, number]> = [[-6.4, -4.0], [-1.2, 1.2], [4.0, 6.4]];
 const HOUSE_ROWS = [{ z0: -6.6, z1: -4.4, lane: -3.3 }, { z0: -2.2, z1: 0.0, lane: 1.1 }, { z0: 2.2, z1: 4.4, lane: 5.6 }];
 const HEIGHTS = [1.8, 2.1, 1.9, 2.0, 1.7, 2.2, 1.9, 2.0, 1.8];
-export const RESIDENTS_PER_HOUSE = 2;
+export { RESIDENTS_PER_HOUSE } from '../../../shared/city.ts';
 function bairro(): AreaDef {
   const houses: House[] = HOUSE_ROWS.flatMap((row, ri) => HOUSE_X.map(([x0, x1], ci) => {
     const id = ri * 3 + ci; const dx = x0 + (x1 - x0) * 0.65 + 0.14;

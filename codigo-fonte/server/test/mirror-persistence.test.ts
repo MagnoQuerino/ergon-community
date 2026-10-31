@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { Db } from '../src/db/db.ts';
-import { drain, harness, loginAs, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
+import { allAgents, drain, harness, loginAs, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
 
 describe('espelho de quadro (fixture em formato inspirado no Planner)', () => {
   let h: Harness;
@@ -88,7 +88,7 @@ describe('persistência após reinício e backup', () => {
     await req(h1, 'POST', '/api/floors', s1);
     const task = (await req(h1, 'POST', '/api/tasks', s1, { title: 'Sobrevive ao reinício' })).json;
     await req(h1, 'PATCH', `/api/tasks/${task.id}`, s1, { completed: true });
-    const st = (await req(h1, 'GET', '/api/state', s1)).json;
+    const st = { agents: await allAgents(h1, s1) };
     const conv = (await req(h1, 'POST', '/api/conversations', s1, { agentId: st.agents[0].id })).json;
     await req(h1, 'POST', `/api/conversations/${conv.id}/messages`, s1, { text: 'mensagem persistente', clientRequestId: 'req-persist-01' });
     await drain(h1, 3);

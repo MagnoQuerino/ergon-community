@@ -19,13 +19,17 @@ export default function IsoScene(p: SceneProps) {
       onFocus: (f) => latest.current.onFocus(f),
       onMove: (id, i, j) => latest.current.onMove(id, i, j),
       onLost: () => latest.current.onContextLost(),
+      onWindow: (w) => latest.current.onWindow(w),
     }, latest.current.themeId);
     eng.current = e;
     e.setTown(latest.current.structures);
     const ro = new ResizeObserver(([entry]) => e.resize(entry.contentRect.width, entry.contentRect.height));
     ro.observe(wrap.current!);
     (window as unknown as { __ergonIso?: IsoEngine }).__ergonIso = e; // inspeção em testes visuais e medição de desempenho
-    latest.current.onReady({ flyTo: (t) => e.flyTo(t), focusAgent: (id) => e.focusAgent(id), open: (b, l) => e.open(b, l), close: () => e.close() });
+    latest.current.onReady({
+      flyTo: (t) => e.flyTo(t), focusAgent: (id) => e.focusAgent(id), focusAgentAt: (id, b, l) => e.focusAgentAt(id, b, l),
+      open: (b, l) => e.open(b, l), close: () => e.close(),
+    });
     return () => { ro.disconnect(); e.dispose(); eng.current = null; latest.current.onReady(null); };
   }, []);
 
@@ -39,7 +43,9 @@ export default function IsoScene(p: SceneProps) {
   }, []);
   useEffect(() => { eng.current?.setTown(p.structures); }, [p.structures]);
   useEffect(() => { eng.current?.setTheme(p.themeId); }, [p.themeId]);
-  useEffect(() => { eng.current?.setAgents(p.agents); }, [p.agents]);
+  // contagens do servidor: janelas e selo de quem não está carregado, e o mapa inteiro
+  useEffect(() => { eng.current?.setCounts(p.counts); }, [p.counts]);
+  useEffect(() => { eng.current?.setAgents(p.agents, { partial: p.partial }); }, [p.agents, p.partial]);
   useEffect(() => { eng.current?.setSelected(p.selectedId); }, [p.selectedId]);
   useEffect(() => { eng.current?.setEditing(p.editing); }, [p.editing]);
   useEffect(() => { eng.current?.setInsets(p.rightInset); }, [p.rightInset]);

@@ -7,7 +7,7 @@ import { nextOccurrence, parseWhen, scheduleText } from '../src/services/routine
 import { routineProposalsFrom } from '../src/services/routine-proposals.ts';
 import { stripControl } from '../src/services/teamwork.ts';
 import { throttle } from '../src/security/factors.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const SP = 'America/Sao_Paulo';
 
@@ -163,8 +163,7 @@ describe('rotinas com o modelo de IA', () => {
     motor = new Motor();
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: motor });
     s = await setupOwner(h, 'alexandre', 'senha-local-123');
-    const st = (await req(h, 'GET', '/api/state', s)).json;
-    coord = st.agents.find((a: { char_key: string }) => a.char_key === 'aristoteles').id;
+    coord = (await allAgents(h, s)).find((a: { char_key: string }) => a.char_key === 'aristoteles').id;
     conv = (await req(h, 'POST', '/api/conversations', s, { agentId: coord })).json.id;
     motor.reply = (p) => {
       if (/^Rotina "Briefing Diário"/.test(p.input)) return 'Bom dia! Briefing de hoje.\nEsperando você: nada.\nPrioridades: destravar a #1.';

@@ -9,10 +9,13 @@ import { CATALOG, DEFAULT_LOTS, cityExtent, fitAt, freeCells, placeError, typeOf
 import type { Db } from '../db/db.ts';
 import { HttpError, id, notFound, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
+import { runStatusOf } from './team-query.ts';
 
+/** Andar com os agentes ativos e quantos deles estão trabalhando, esperando você ou na fila (janelas, selo e mapa). */
+export interface StructureFloor { id: string; level: number; name: string; slots: number; active: number; origin: string; working: number; waiting: number; queued: number }
 export interface StructureInfo {
   id: string; kind: string; name: string; i: number; j: number; origin: string;
-  floors: Array<{ id: string; level: number; name: string; slots: number; active: number; origin: string }>;
+  floors: StructureFloor[];
 }
 
 interface Row { id: string; kind: string; name: string; lot_x: number | null; lot_z: number | null; origin: string }
@@ -61,14 +64,28 @@ export function ensureCity(db: Db, bus: Bus | null, workspaceId: string): string
   return changed;
 }
 
+/**
+ * A cidade inteira sem nenhum agente (GET /api/city/overview e /api/structures): construções na ordem de criação,
+ * andares por nível, e por andar os agentes ativos contados pelo status de trabalho de cada um (o mesmo do perfil e
+ * da cena: services/team-query.ts runStatusOf). Numa passada: as contagens agrupadas no banco e os andares
+ * repartidos por construção num Map (antes, um filtro por construção sobre todos os andares).
+ */
 export function listStructures(db: Db, workspaceId: string): StructureInfo[] {
-  const floors = db.all<{ id: string; building_id: string; level: number; name: string; slots: number; origin: string; active: number }>(
-    `SELECT f.id, f.building_id, f.level, f.name, f.slots, f.origin,
-            (SELECT COUNT(*) FROM agents a WHERE a.floor_id = f.id AND a.status = 'active') AS active
-       FROM floors f WHERE f.workspace_id = ? AND f.removed_at IS NULL ORDER BY f.level`, workspaceId);
+  const counts = new Map(db.all<{ floor_id: string; active: number; working: number; waiting: number; queued: number }>(
+    `SELECT x.floor_id, COUNT(*) AS active, SUM(x.rs IS 'running') AS working, SUM(x.rs IS 'waiting_user') AS waiting, SUM(x.rs IS 'queued') AS queued
+       FROM (SELECT a.floor_id, ${runStatusOf('a.id')} AS rs FROM agents a WHERE a.workspace_id = ? AND a.status = 'active') x
+      GROUP BY x.floor_id`, workspaceId).map((c) => [c.floor_id, c]));
+  const byBuilding = new Map<string, StructureFloor[]>();
+  for (const f of db.all<{ id: string; building_id: string; level: number; name: string; slots: number; origin: string }>(
+    'SELECT f.id, f.building_id, f.level, f.name, f.slots, f.origin FROM floors f WHERE f.workspace_id = ? AND f.removed_at IS NULL ORDER BY f.level', workspaceId)) {
+    const c = counts.get(f.id);
+    const list = byBuilding.get(f.building_id) ?? [];
+    if (!list.length) byBuilding.set(f.building_id, list);
+    list.push({ id: f.id, level: Number(f.level), name: f.name, slots: Number(f.slots), active: Number(c?.active ?? 0), origin: f.origin,
+      working: Number(c?.working ?? 0), waiting: Number(c?.waiting ?? 0), queued: Number(c?.queued ?? 0) });
+  }
   return rows(db, workspaceId).filter((r) => r.lot_x !== null).map((r) => ({
-    id: r.id, kind: r.kind, name: r.name, i: Number(r.lot_x), j: Number(r.lot_z), origin: r.origin,
-    floors: floors.filter((f) => f.building_id === r.id).map(({ building_id: _b, ...f }) => ({ ...f, level: Number(f.level), slots: Number(f.slots), active: Number(f.active) })),
+    id: r.id, kind: r.kind, name: r.name, i: Number(r.lot_x), j: Number(r.lot_z), origin: r.origin, floors: byBuilding.get(r.id) ?? [],
   }));
 }
 

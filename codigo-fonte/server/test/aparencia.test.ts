@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 describe('aparência sorteada do agente (semente do boneco)', () => {
   let h: Harness; let s: Session;
   before(async () => { h = await harness(); s = await setupOwner(h); });
   after(async () => { await h.close(); });
-  const state = async () => (await req(h, 'GET', '/api/state', s)).json as { agents: Array<{ id: string; name: string; char_key: string | null; look_seed: number | null }> };
+  const state = async () => ({ agents: await allAgents(h, s) as Array<{ id: string; name: string; char_key: string | null; look_seed: number | null }> });
 
   test('a equipe de personagens nasce com a iconografia própria (sem semente); agente novo nasce sorteado', async () => {
     const st = await state();

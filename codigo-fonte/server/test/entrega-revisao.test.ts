@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
 import { parsePlans } from '../src/services/purpose.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 class Motor implements HermesClient {
   started: StartRun[] = [];
@@ -60,7 +60,7 @@ describe('entrega e revisão, lote de cards, conversa e Documentos', () => {
     motor = new Motor();
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: motor, control: new Control() });
     s = await setupOwner(h);
-    st = (await req(h, 'GET', '/api/state', s)).json;
+    st = { agents: await allAgents(h, s) };
     h.db.run("INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, 'team.persist', '0', ?)", s.workspaceId, new Date().toISOString());
   });
   after(async () => { await h.close(); });

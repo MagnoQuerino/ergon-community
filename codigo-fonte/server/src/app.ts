@@ -23,8 +23,12 @@ import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
 import { Bus, audit } from './services/bus.ts';
-import { addSimulatedFloor, archiveAgent, capacityInfo, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, removeFloor, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
-import { listTeamAgents, listTeamSectors, listTeamStructures, teamAgent, teamSummary } from './services/team-query.ts';
+import { addSimulatedFloor, archiveAgent, capacityInfo, capacityTotals, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, removeFloor, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
+import {
+  agentsLite, coordinatorFor, decodeCursor, encodeCursor, lastOutcomeOf, listTeamAgents, listTeamSectors, listTeamStructures, pageLimit, reviewerFor, runStatusOf, searchAgents,
+  teamAgent, teamInfo, teamSummary, toolHolders,
+} from './services/team-query.ts';
+import { CITY_LIMITS, cityAgents, cityOverview, idList } from './services/city.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
 import { activeCardsOf, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
@@ -43,7 +47,6 @@ import { WhatsAppReader } from './services/whatsapp.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
 import { Routines, upgradeBriefingSources } from './services/routines.ts';
-import { activeTeam, coordinatorOf } from './services/team.ts';
 import { parseDue } from './services/due.ts';
 import { workspaceTz } from './services/routine-proposals.ts';
 import { cardDocuments, inboxForChat } from './services/routine-sources.ts';
@@ -120,8 +123,10 @@ const PUBLIC_API = new Set(['/api/health', '/api/distribution', '/api/auth/state
   '/api/auth/login/totp', '/api/auth/passkey/options', '/api/auth/passkey', '/api/auth/recover', '/api/agent/hello', '/api/agent/auto-unlock/claim', '/api/agent/open']);
 // com a tela trancada por inatividade, só isto responde (o resto devolve 423 até destrancar)
 const LOCKED_OK = new Set(['/api/me', '/api/session/unlock', '/api/session/reauth/options', '/api/session/activity', '/api/auth/logout', '/api/events']);
-// nuvem: quem ainda não tem 2º fator só cadastra autenticador ou passkey (428 enroll_2fa)
-const ENROLL_OK = new Set([...LOCKED_OK, '/api/security/status', '/api/security/totp/start', '/api/security/totp/confirm', '/api/security/passkeys/options', '/api/security/passkeys', '/api/state']);
+// nuvem: quem ainda não tem 2º fator só cadastra autenticador ou passkey (428 enroll_2fa). A interface abre por trás
+// (a Cidade é a tela inicial): ela vinha toda do /api/state e agora vem do /api/city/* (docs/CIDADE_REGIOES.md)
+const ENROLL_OK = new Set([...LOCKED_OK, '/api/security/status', '/api/security/totp/start', '/api/security/totp/confirm', '/api/security/passkeys/options', '/api/security/passkeys', '/api/state',
+  '/api/city/overview', '/api/city/agents']);
 // instalação antiga ainda sem criptografia: depois do login, só a proteção e o básico respondem (428)
 const UNPROTECTED_OK = new Set([...LOCKED_OK, '/api/security/protect', '/api/security/status', '/api/security/recovery/confirm', '/api/state']);
 
@@ -686,17 +691,20 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
 
   // Estado geral (snapshot para a interface) -----------------------------------------------------
-  // agentes completos (perfil: instruções, ferramentas, modelo, voz). O /api/state ainda traz todos (consumidores antigos:
-  // cidade, conversas, quadro — docs/EQUIPE_VISUAL.md); a Equipe usa as consultas por partes e o perfil pelo id.
-  const fullAgents = (workspaceId: string, userId: string, agentId?: string): Array<Record<string, unknown>> => {
+  // perfil completo (instruções, ferramentas, modelo, voz): só pelo id (GET /api/agents/:id) ou por páginas (GET
+  // /api/agents). O /api/state não traz a equipe: a cidade vem de /api/city/*, as listas de /api/team/* e cada tela
+  // recebe os nomes que cita dentro da própria resposta (docs/CIDADE_REGIOES.md).
+  type AgentAfter = [status: string, building: string, level: number, createdAt: string, rowid: number];
+  const fullAgents = (workspaceId: string, userId: string, o: { agentId?: string; after?: AgentAfter | null; limit?: number } = {}): Array<Record<string, unknown>> => {
+    const where = ['a.workspace_id = ?']; const args: Array<string | number> = [workspaceId];
+    if (o.agentId) { where.push('a.id = ?'); args.push(o.agentId); }
+    if (o.after) { where.push('(a.status, f.building_id, f.level, a.created_at, a.rowid) > (?, ?, ?, ?, ?)'); args.push(...o.after); }
     const agents = db.all(
       `SELECT a.id, a.name, a.role, a.color, a.status, a.demo, a.floor_id, f.level AS floor_level, f.building_id, p.key AS profile, p.name AS sector_name,
               a.char_key, a.bio, a.skills, a.tools, a.model_hint, a.model, a.provider, a.hermes_skills, a.charter, a.deactivation_note, a.coordinator, a.look_seed,
-              (SELECT r.status FROM runs r WHERE r.agent_id = a.id AND r.status IN ('queued', 'running', 'waiting_user') ORDER BY r.created_at LIMIT 1) AS run_status,
-              (SELECT r.status || '|' || r.finished_at FROM runs r WHERE r.agent_id = a.id AND r.status IN ('succeeded', 'failed', 'cancelled')
-                 AND r.finished_at IS NOT NULL ORDER BY r.finished_at DESC LIMIT 1) AS last_outcome
+              ${runStatusOf('a.id')} AS run_status, ${lastOutcomeOf('a.id')} AS last_outcome, a.created_at AS _created, a.rowid AS _rid
          FROM agents a JOIN floors f ON f.id = a.floor_id JOIN profiles p ON p.id = a.profile_id
-        WHERE a.workspace_id = ? ${agentId ? 'AND a.id = ?' : ''} ORDER BY a.status, f.building_id, f.level, a.created_at, a.rowid`, ...(agentId ? [workspaceId, agentId] : [workspaceId]));
+        WHERE ${where.join(' AND ')} ORDER BY a.status, f.building_id, f.level, a.created_at, a.rowid ${o.limit ? 'LIMIT ?' : ''}`, ...args, ...(o.limit ? [o.limit] : []));
     const channels = integrations.connectedChannels(workspaceId);
     const parse = (v: unknown): string[] => { try { const x = JSON.parse(String(v ?? '[]')); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
     for (const ag of agents as Array<Record<string, unknown>>) {
@@ -708,17 +716,20 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     }
     return agents as Array<Record<string, unknown>>;
   };
+  /** a posição de um perfil na ordem de antes (cursor de GET /api/agents), tirada da resposta */
+  const afterOf = (ag: Record<string, unknown>): AgentAfter => [String(ag.status), String(ag.building_id), Number(ag.floor_level), String(ag._created), Number(ag._rid)];
+  const profileOut = ({ _created: _c, _rid: _r, ...ag }: Record<string, unknown>) => ag;
 
   app.get('/api/state', async (req) => {
     const a = auth(req);
     const ws = db.get<{ id: string; name: string; demo_data: number }>('SELECT id, name, demo_data FROM workspaces WHERE id = ?', a.workspaceId);
-    const agents = fullAgents(a.workspaceId, a.userId);
     const counts = db.get<{ running: number; queued: number; waiting: number; processes: number }>(
       `SELECT SUM(status = 'running') AS running, SUM(status = 'queued') AS queued, SUM(status = 'waiting_user') AS waiting,
               SUM(status = 'running' AND ${PROCESS_SQL}) AS processes
          FROM runs WHERE workspace_id = ?`, a.workspaceId);
     return {
-      workspace: ws, capacity: capacityInfo(db, a.workspaceId, cfg.maxFloors), agents, structures: listStructures(db, a.workspaceId),
+      // a equipe sem a lista: totais, o Coordenador, quem revisa e os primeiros nomes (dicas e exemplos da Ajuda)
+      workspace: ws, capacity: capacityTotals(db, a.workspaceId, cfg.maxFloors), team: teamInfo(db, a.workspaceId),
       // processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele
       runs: { running: Number(counts?.running ?? 0), queued: Number(counts?.queued ?? 0), waiting: Number(counts?.waiting ?? 0),
         processes: Number(counts?.processes ?? 0), limit: executor.processLimit(a.workspaceId), cardsWaiting: teamwork.queue(a.workspaceId).length },
@@ -743,6 +754,23 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const q = req.query as { category?: AmbientCategory; offset?: string; limit?: string };
     return readAmbient(db, { workspaceId: a.workspaceId, viewer: a.userId, limit: executor.processLimit(a.workspaceId), autorun: teamwork.autorun(a.workspaceId),
       mode: executor.mode === 'real' ? 'real' : 'simulated', ...(q.category ? { page: { category: q.category, offset: Number(q.offset ?? 0), limit: Number(q.limit ?? 50) } } : {}) });
+  });
+
+  // Cidade por região (services/city.ts): a cidade inteira sem agentes e os moradores por partes, com vaga e casa
+  const cityList = (n: number, prefix: string) => ({ type: 'string', pattern: `^${prefix}_[a-f0-9]{32}(,${prefix}_[a-f0-9]{32}){0,${n - 1}}$` });
+  app.get('/api/city/overview', async (req) => cityOverview(db, auth(req).workspaceId));
+  app.get('/api/city/agents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+    all: { enum: ['1'] }, cursor: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,400}$' },
+    f: cityList(CITY_LIMITS.floors, 'flr'), b: cityList(CITY_LIMITS.buildings, 'bld'), per: { type: 'string', pattern: '^([1-9]|[1-4][0-9]|50)$' },
+    ids: cityList(CITY_LIMITS.ids, 'agt') } } } }, async (req) => {
+    const a = auth(req);
+    const q = req.query as { all?: '1'; cursor?: string; f?: string; b?: string; per?: string; ids?: string };
+    const modes = [q.all, q.f, q.b, q.ids].filter((x) => x !== undefined).length;
+    if (modes !== 1) throw new HttpError(400, 'mode', 'escolha um modo: all=1, f (andares), b (construções) ou ids (agentes)');
+    if (q.cursor && !q.all) throw new HttpError(400, 'cursor', 'cursor só com all=1');
+    if (q.per && !q.b) throw new HttpError(400, 'per', 'per só com b (construções)');
+    return cityAgents(db, a.workspaceId, q.f ? { mode: 'floors', floors: idList(q.f) } : q.b ? { mode: 'buildings', buildings: idList(q.b), ...(q.per ? { per: Number(q.per) } : {}) }
+      : q.ids ? { mode: 'ids', ids: idList(q.ids) } : { mode: 'all', cursor: q.cursor });
   });
 
   // Agentes e capacidade -------------------------------------------------------------------------
@@ -795,9 +823,22 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // perfil completo pelo id (instruções, ferramentas, modelo, voz e o efeito escolhido)
   app.get('/api/agents/:id', { schema: { params: idParams('agt') } }, async (req) => {
     const a = auth(req); const agentId = (req.params as { id: string }).id;
-    const r = fullAgents(a.workspaceId, a.userId, agentId)[0];
+    const r = fullAgents(a.workspaceId, a.userId, { agentId })[0];
     if (!r) throw notFound('agente');
-    return { ...r, fx: agentFxChoice(db, a.workspaceId, agentId) };
+    return { ...profileOut(r), fx: agentFxChoice(db, a.workspaceId, agentId) };
+  });
+  // perfis completos por páginas (até 100), na ordem de antes (ativos e desativados): compatibilidade e testes
+  app.get('/api/agents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { cursor: cursorQ, limit: limitQ } } } }, async (req) => {
+    const a = auth(req); const q = req.query as { cursor?: string; limit?: string };
+    const after = decodeCursor(q.cursor, 5);
+    if (after && (typeof after[0] !== 'string' || typeof after[1] !== 'string' || !Number.isInteger(after[2]) || typeof after[3] !== 'string' || !Number.isInteger(after[4]))) {
+      throw new HttpError(400, 'cursor', 'cursor inválido: recomece a lista');
+    }
+    const limit = pageLimit(q.limit ? Number(q.limit) : undefined);
+    const rows = fullAgents(a.workspaceId, a.userId, { after: after as AgentAfter | null, limit: limit + 1 });
+    const more = rows.length > limit; const items = rows.slice(0, limit); const last = items.at(-1);
+    const total = Number(db.get<{ n: number }>('SELECT COUNT(*) AS n FROM agents a JOIN floors f ON f.id = a.floor_id JOIN profiles p ON p.id = a.profile_id WHERE a.workspace_id = ?', a.workspaceId)?.n ?? 0);
+    return { items: items.map(profileOut), total, next: more && last ? encodeCursor(afterOf(last)) : null };
   });
   // mover: arrastar, "Mover para…" e Desfazer usam esta operação (o servidor confere capacidade, permissão e conflito)
   const placeQ = { type: 'object', additionalProperties: false, properties: { sectorKey, structureId: S.id('bld') } };
@@ -882,14 +923,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   }, async (req, reply) => {
     const a = owner(req);
     const b = req.body as { name: string; role: string; sectorKey?: string; requestId: string };
-    const coord = coordinatorOf(activeTeam(db, a.workspaceId));
-    if (!coord) throw new HttpError(409, 'no_coordinator', 'nenhum agente ativo para escrever as instruções');
+    // quem coordena, no banco (sem carregar a equipe ativa inteira)
+    const coordId = coordinatorFor(db, a.workspaceId);
+    if (!coordId) throw new HttpError(409, 'no_coordinator', 'nenhum agente ativo para escrever as instruções');
     const key = !b.sectorKey || b.sectorKey === 'auto' ? autoSector(b.role).key : b.sectorKey;
     const s = sectorByKey(db, a.workspaceId, key);
     const run = executor.enqueue({
-      workspaceId: a.workspaceId, agentId: coord.id, kind: 'subtask',
+      workspaceId: a.workspaceId, agentId: coordId, kind: 'subtask',
       input: draftPrompt({ name: b.name, role: b.role, sector: s.name, sectorDescription: s.description ?? '', tools: Object.values(TOOLS).map((t) => ({ id: t.id, label: t.label })), methods: s.skills }),
-      instructions: instructionsFor(db, a.workspaceId, coord.id, 'Canal: configuração da equipe. Responda só com o JSON pedido.'),
+      instructions: instructionsFor(db, a.workspaceId, coordId, 'Canal: configuração da equipe. Responda só com o JSON pedido.'),
       idempotencyKey: `draft-${b.requestId}`,
     });
     return reply.status(202).send({ runId: run.id, sectorKey: s.key, mode: run.mode });
@@ -1003,7 +1045,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_remove', evidence: { provider: p }, result: 'chave própria removida' });
     return { ok: true };
   });
-  app.get('/api/ai/tools', async (req) => { const a = auth(req); return aiOf(a.workspaceId).tools({ channels: integrations.connectedChannels(a.workspaceId) }); });
+  // catálogo com o estado real e quem tem cada ferramenta (quantos e até 3 nomes: sem varrer a equipe na tela)
+  app.get('/api/ai/tools', async (req) => {
+    const a = auth(req);
+    const holders = toolHolders(db, a.workspaceId);
+    return aiOf(a.workspaceId).tools({ channels: integrations.connectedChannels(a.workspaceId) }).map((t) => ({ ...t, holders: holders.get(t.id) ?? { count: 0, sample: [] } }));
+  });
   app.put('/api/ai/tools', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: strList(20, 30) } } },
   }, async (req) => {
@@ -1231,6 +1278,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // Cidade: estruturas nos lotes (loja, editor do mapa) ------------------------------------------------------
   const lot = { type: 'integer', minimum: -1000, maximum: 1000 };
+  // compatibilidade: o mesmo construtor do /api/city/overview (com as contagens por andar)
   app.get('/api/structures', async (req) => listStructures(db, auth(req).workspaceId));
 
   app.post('/api/structures', {
@@ -1307,7 +1355,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         WHERE t.workspace_id = ? AND t.archived = 0 ORDER BY t.completed, t.updated_at DESC LIMIT 3000`, a.workspaceId)
       .filter((t) => (num !== undefined && String(t.number) === num) || hit(t.title)).slice(0, 12);
     const found = routines.list(a.workspaceId).filter((r) => hit(r.name)).slice(0, 6).map((r) => ({ id: r.id, name: r.name, status: r.status }));
-    return { tasks, routines: found };
+    // agentes: o mesmo critério da busca rápida (todas as palavras em nome, papel e setor), ordenados antes de cortar
+    return { tasks, routines: found, agents: searchAgents(db, a.workspaceId, (req.query as { q: string }).q) };
   });
 
   app.post('/api/tasks', {
@@ -1363,7 +1412,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // a pergunta que o agente fez; sem pergunta (o sistema parou o card: arquivo faltando…), o que falta
     const question = result?.state === 'aguardando_info' && typeof result.evidenceData.pergunta === 'string' ? result.evidenceData.pergunta : null;
     const missing = result?.state === 'aguardando_info' && !question ? result.justification : null;
-    return { task, log: taskLog(db, a.workspaceId, taskId), link: link ?? null, proposals, source, runs, review: reviews.latest(a.workspaceId, taskId),
+    const log = taskLog(db, a.workspaceId, taskId) as Array<{ actor_type: string; actor_id: string | null }>;
+    const review = reviews.latest(a.workspaceId, taskId);
+    // nome e cor de todos os agentes citados no card (desativados também), sem a equipe inteira na tela
+    const cited = agentsLite(db, a.workspaceId, [task.agent_id, ...steps.map((x) => x.agentId), conv?.agent_id, origin?.deliver_agent_id, ...(runs as Array<{ agent_id: string }>).map((r) => r.agent_id),
+      ...log.filter((e) => e.actor_type === 'agent').map((e) => e.actor_id), review?.reviewer_id, review?.producer_id]);
+    const agents = Object.fromEntries([...cited].map(([id, x]) => [id, { name: x.name, color: x.color }]));
+    return { task, log, link: link ?? null, proposals, source, runs, review,
+      agents, reviewer: reviewerFor(db, a.workspaceId, task.agent_id),
       files: { inputs: files.filter((x) => x.role === 'entrada'), deliverables: files.filter((x) => x.role === 'entregavel') }, operations: ops, work,
       queue: team ? teamwork.queueInfo(a.workspaceId, taskId) : null,
       column: db.get<{ name: string }>('SELECT name FROM columns WHERE id = ?', task.column_id)?.name ?? null,

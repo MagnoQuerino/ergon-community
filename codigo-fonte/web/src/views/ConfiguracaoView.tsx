@@ -6,7 +6,11 @@ import { inDesktopApp } from '../lib/desktop.ts';
 import type { AgentTool, AiStatus, AppState, ProcessLimit, Usage } from '../lib/types.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
+import { holdersText } from '../lib/team.ts';
 import type { Me, VersionInfo } from '../lib/types.ts';
+
+/** GET /api/ai/tools: cada ferramenta com quem a tem (contagem e até 3 nomes, o Coordenador primeiro). */
+type ToolWithHolders = AgentTool & { holders?: { count: number; sample: string[] } };
 import { SaudePanel } from './SaudePanel.tsx';
 import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
@@ -45,7 +49,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>Saúde</button>}
         </div>
       </header>
-      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agents={state.agents} /> : tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
       <VersionCard />
     </div>
   );
@@ -115,14 +119,15 @@ function VersionCard() {
 
 function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
   const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
-  const tools = useResource<AgentTool[]>('/api/ai/tools', ['agents.changed']);
+  const tools = useResource<ToolWithHolders[]>('/api/ai/tools', ['agents.changed']);
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed']);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
 
+  // quem tem cada ferramenta vem na própria lista (holders): basta relê-la
   const toggleTool = async (id: string, on: boolean) => {
     const enabled = (tools.data ?? []).filter((t) => t.kind === 'ia' && t.platform && t.id !== id).map((t) => t.id);
-    try { await api.put('/api/ai/tools', { enabled: on ? [...enabled, id] : enabled }); tools.reload(); reload(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
+    try { await api.put('/api/ai/tools', { enabled: on ? [...enabled, id] : enabled }); tools.reload(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
   const s = status.data;
 
@@ -142,14 +147,14 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
               <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title="Ferramenta do próprio Ergon: sempre ligada" />
               <span className="tool-opt__txt"><b>{t.label}</b><small>{t.note}</small></span>
               <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[t.status]}`}>ligada</span>
-                <span className="muted small">{state.agents.filter((a) => a.status === 'active' && a.tools.some((x) => x.id === t.id)).map((a) => a.name).join(', ') || 'ninguém'}</span></span>
+                <span className="muted small">{holdersText(t.holders)}</span></span>
             </label>
           ) : (
             <label key={t.id} className={`tool-opt ${t.platform ? 'tool-opt--on' : ''} ${!t.safe && !t.guarded ? 'tool-opt--off' : ''}`}>
               <input type="checkbox" checked={!!t.platform} disabled={(!t.safe && !t.guarded) || !s?.available || t.id === 'passos'} onChange={(e) => void toggleTool(t.id, e.target.checked)} />
               <span className="tool-opt__txt"><b>{t.guarded && <Icon name="lock" size={12} />} {t.label}</b><small>{t.note.replace(/ — (desligada|bloqueada):.*$/, '')}{t.guarded && !t.platform ? ' · ligar pede a sua senha' : ''}</small></span>
               <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[t.status]}`}>{t.safe || t.guarded ? (t.platform ? 'ligada' : t.guarded ? 'protegida' : 'desligada') : 'bloqueada'}</span>
-                <span className="muted small">{state.agents.filter((a) => a.status === 'active' && a.tools.some((x) => x.id === t.id)).map((a) => a.name).join(', ') || 'ninguém'}</span></span>
+                <span className="muted small">{holdersText(t.holders)}</span></span>
             </label>
           ))}
         </div>

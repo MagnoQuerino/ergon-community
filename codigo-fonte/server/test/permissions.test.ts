@@ -6,7 +6,7 @@ import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartR
 import { parsePermissionRequests } from '../src/services/proposals.ts';
 import { stripControl } from '../src/services/teamwork.ts';
 import { throttle } from '../src/security/factors.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 class Motor implements HermesClient {
   started: StartRun[] = [];
@@ -49,7 +49,7 @@ describe('pedido de permissão com senha, na conversa', () => {
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123', bridgeToken: 'token-da-ponte-de-teste-0123456789' }, { hermes: motor, control: control as Control });
     s = await setupOwner(h, 'alexandre', PASS);
     await h.ai.refreshToolsets();
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     agentId = st.agents.find((a: { char_key: string }) => a.char_key === 'hipatia').id;
     conv = (await req(h, 'POST', '/api/conversations', s, { agentId })).json.id;
   });
@@ -86,7 +86,7 @@ describe('pedido de permissão com senha, na conversa', () => {
     const ok = await req(h, 'POST', `/api/proposals/${p.id}/authorize`, s, { password: PASS });
     assert.equal(ok.status, 200, JSON.stringify(ok.json)); assert.equal(ok.json.status, 'applied');
     assert.ok((control as Control).sets.at(-1)!.includes('code_execution'), 'conjunto ligado no motor');
-    const ag = (await req(h, 'GET', '/api/state', s)).json.agents.find((a: { id: string }) => a.id === agentId);
+    const ag = (await req(h, 'GET', `/api/agents/${agentId}`, s)).json;
     assert.ok(ag.tools.some((t: { id: string; status: string }) => t.id === 'calculo' && t.status === 'disponível'), 'ferramenta liberada para quem pediu');
     for (let i = 0; i < 4; i++) await h.executor.tick();
     const cont = motor.started.at(-1)!;
@@ -101,7 +101,7 @@ describe('pedido de permissão com senha, na conversa', () => {
     h.db.run('UPDATE sessions SET auth_at = ?', new Date(Date.now() - 10 * 60_000).toISOString());
     const r = await req(h, 'PUT', '/api/ai/tools', s, { enabled: ['passos', 'calculo', 'terminal'] });
     assert.equal(r.status, 401); assert.equal(r.json.error, 'reauth');
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const other = st.agents.find((a: { char_key: string }) => a.char_key === 'platao');
     const p = await req(h, 'PATCH', `/api/agents/${other.id}`, s, { tools: [...other.tools.map((t: { id: string }) => t.id), 'terminal'] });
     assert.equal(p.status, 401); assert.equal(p.json.error, 'reauth');
@@ -118,7 +118,7 @@ describe('ligar código ou terminal conversando: o pedido vai para a coordenaç�
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123', bridgeToken: 'token-da-ponte-de-teste-0123456789' }, { hermes: motor, control });
     s = await setupOwner(h, 'alexandre', PASS);
     await h.ai.refreshToolsets();
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     hipatia = st.agents.find((a: { char_key: string }) => a.char_key === 'hipatia').id;
     hesiodo = st.agents.find((a: { char_key: string }) => a.char_key === 'hesiodo').id;
     conv = (await req(h, 'POST', '/api/conversations', s, { agentId: hipatia })).json.id;
@@ -139,7 +139,7 @@ describe('ligar código ou terminal conversando: o pedido vai para a coordenaç�
     const coordConv = (await req(h, 'GET', `/api/proposals?conversationId=${d.conversationId}`, s)).json as Array<{ id: string; kind: string; summary: string }>;
     const perm = coordConv.find((p) => p.kind === 'permission')!;
     assert.ok(perm, 'pedido com senha na conversa com a coordenação'); assert.match(perm.summary, /Terminal/);
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     assert.ok(Number(st.agents.find((a: { id: string }) => a.id === d.coordinatorId).coordinator) === 1, 'é a coordenação');
     motor.reply = () => 'Rodei os scripts.';
     const ok = await req(h, 'POST', `/api/proposals/${perm.id}/authorize`, s, { password: PASS });
@@ -155,7 +155,7 @@ describe('ligar código ou terminal conversando: o pedido vai para a coordenaç�
   });
 
   test('para a equipe (sem agente): só liga no motor', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const coord = st.agents.find((a: { coordinator: boolean }) => a.coordinator);
     const cc = (await req(h, 'POST', '/api/conversations', s, { agentId: coord.id })).json.id;
     motor.reply = () => 'Peço a sua senha abaixo.\n[[liberar-ferramenta ferramenta="calculo" agente="equipe" motivo="planilhas da equipe"]]';

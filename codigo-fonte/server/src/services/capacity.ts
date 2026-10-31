@@ -34,6 +34,7 @@ export interface CapacityInfo {
   maxFloors: number;
   note: string;
 }
+const CAPACITY_NOTE = 'Capacidade = vagas dos andares das estruturas. Não aumenta execuções concorrentes, tokens nem processos.';
 
 export function capacityInfo(db: Db, workspaceId: string, maxFloors: number): CapacityInfo {
   const floors = db.all<{ id: string; building_id: string; level: number; name: string; slots: number; origin: string; active: number }>(
@@ -43,10 +44,16 @@ export function capacityInfo(db: Db, workspaceId: string, maxFloors: number): Ca
       WHERE f.workspace_id = ? AND f.removed_at IS NULL ORDER BY b.created_at, b.rowid, f.level`, workspaceId);
   const slots = floors.reduce((s, f) => s + Number(f.slots), 0);
   const active = floors.reduce((s, f) => s + Number(f.active), 0);
-  return {
-    slots, active, free: Math.max(0, slots - active), floors, maxFloors,
-    note: 'Capacidade = vagas dos andares das estruturas. Não aumenta execuções concorrentes, tokens nem processos.',
-  };
+  return { slots, active, free: Math.max(0, slots - active), floors, maxFloors, note: CAPACITY_NOTE };
+}
+
+/** Só os totais (o /api/state): as mesmas contas de capacityInfo, somadas no banco, sem a lista de andares. */
+export function capacityTotals(db: Db, workspaceId: string, maxFloors: number): Omit<CapacityInfo, 'floors'> {
+  const r = db.get<{ slots: number; active: number }>(
+    `SELECT COALESCE(SUM(f.slots), 0) AS slots, COALESCE(SUM((SELECT COUNT(*) FROM agents a WHERE a.floor_id = f.id AND a.status = 'active')), 0) AS active
+       FROM floors f JOIN buildings b ON b.id = f.building_id WHERE f.workspace_id = ? AND f.removed_at IS NULL`, workspaceId);
+  const slots = Number(r?.slots ?? 0); const active = Number(r?.active ?? 0);
+  return { slots, active, free: Math.max(0, slots - active), maxFloors, note: CAPACITY_NOTE };
 }
 
 /** Traduz erros dos gatilhos de capacidade em respostas HTTP claras. */

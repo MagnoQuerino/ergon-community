@@ -91,9 +91,10 @@ export interface SectorRow {
 const list = (json: unknown): string[] => { try { const v = JSON.parse(String(json ?? '[]')); return Array.isArray(v) ? v.map(String) : []; } catch { return []; } };
 
 export function listSectors(db: Db, workspaceId: string): SectorRow[] {
+  // membros pelo índice (workspace, setor, status): sem o workspace na conta, cada setor varria a equipe inteira
   const rows = db.all<Omit<SectorRow, 'tools' | 'skills'> & { tools: string | null; skills: string | null }>(
     `SELECT p.id, p.key, p.name, p.description, p.creates_tasks, p.instructions, p.tools, p.skills, p.position, p.custom,
-            (SELECT COUNT(*) FROM agents a WHERE a.profile_id = p.id AND a.status = 'active') AS members
+            (SELECT COUNT(*) FROM agents a WHERE a.workspace_id = p.workspace_id AND a.profile_id = p.id AND a.status = 'active') AS members
        FROM profiles p WHERE p.workspace_id = ? ORDER BY p.position, p.rowid`, workspaceId);
   return rows.map((r) => ({ ...r, members: Number(r.members), position: Number(r.position), custom: Number(r.custom), tools: list(r.tools), skills: list(r.skills) }));
 }

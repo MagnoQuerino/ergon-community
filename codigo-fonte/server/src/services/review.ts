@@ -8,7 +8,7 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
-import { activeTeam, reviewerOf } from './team.ts';
+import { reviewerFor } from './team-query.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { getTask } from './tasks.ts';
 
@@ -49,7 +49,8 @@ export class ReviewService {
 
   start(workspaceId: string, taskId: string, userId: string): { reviewId: string; runId: string } {
     const task = getTask(this.db, workspaceId, taskId);
-    const reviewer = reviewerOf(activeTeam(this.db, workspaceId), task.agent_id);
+    // a mesma escolha que as telas mostram (card aberto, Ajuda), feita no banco
+    const reviewer = reviewerFor(this.db, workspaceId, task.agent_id);
     if (!reviewer) throw new HttpError(409, 'no_reviewer', 'Ninguém da equipe faz revisão crítica agora: dê a ferramenta "Revisão socrática" a um agente (no perfil dele ou pedindo à coordenação).');
     if (!task.agent_id) throw new HttpError(409, 'no_producer', 'Defina o responsável pela tarefa (quem produziu o material) antes de pedir a revisão.');
     if (task.agent_id === reviewer.id) throw new HttpError(409, 'self_review', `${reviewer.name} não revisa o próprio trabalho: defina outro responsável.`);

@@ -11,6 +11,8 @@ export interface TeamAgent {
   id: string; name: string; role: string; color: string; status: 'active' | 'archived'; demo: boolean; coordinator: boolean;
   char_key: string | null; look_seed: number | null; deactivation_note: string | null;
   sector_key: string; sector_name: string; building_id: string | null; building_name: string | null; floor_name: string | null;
+  /** andar da mesa (Localizar na cidade abre esse andar) */
+  floor_id: string | null; floor_level: number | null;
   run_status: 'queued' | 'running' | 'waiting_user' | null;
 }
 export interface TeamSector { key: string; name: string; description: string | null; custom: boolean; count: number; sample: TeamAgent[] }
@@ -75,15 +77,18 @@ export const teamUrl = {
   structures: (o: { q?: string; free?: boolean }, cursor?: string | null, limit = 24) => `/api/team/structures?${qs({ q: o.q?.trim(), free: o.free ? 1 : false, cursor, limit })}`,
 };
 
-/** Busca de um agente só (a projeção leve), com a resposta mais nova ganhando. */
+/**
+ * Busca de um agente só (a projeção leve), com a resposta mais nova ganhando. `seqs`: a contagem de quem pede (cada
+ * lista tem a sua), para duas listas abertas que buscam o mesmo agente ao mesmo tempo não descartarem uma à outra.
+ */
 const agentSeq = new Map<string, number>();
-export async function fetchTeamAgent(id: string): Promise<TeamAgent | null | 'stale'> {
-  const my = (agentSeq.get(id) ?? 0) + 1; agentSeq.set(id, my);
+export async function fetchTeamAgent(id: string, seqs: Map<string, number> = agentSeq): Promise<TeamAgent | null | 'stale'> {
+  const my = (seqs.get(id) ?? 0) + 1; seqs.set(id, my);
   try {
     const a = await api.get<TeamAgent>(`/api/team/agents/${id}`);
-    return agentSeq.get(id) === my ? a : 'stale';
+    return seqs.get(id) === my ? a : 'stale';
   } catch (e) {
-    if ((e as { status?: number }).status === 404) return agentSeq.get(id) === my ? null : 'stale';
+    if ((e as { status?: number }).status === 404) return seqs.get(id) === my ? null : 'stale';
     throw e;
   }
 }
@@ -120,15 +125,21 @@ export function useAgentList(f: AgentFilter | null, scope: string, pageSize = 48
 
   // mudanças: rajadas agrupadas; com id, só aquele agente
   const pending = useRef<Set<string> | 'all'>(new Set()); const timer = useRef<number | null>(null);
+  // o andamento (bolinha de trabalhando, na fila) muda por runs.changed, que diz o agente: só os já carregados, e
+  // nunca recomeça a lista (uma equipe ocupada não faz a rolagem voltar ao topo)
+  const runPending = useRef<Set<string>>(new Set());
+  const seqs = useRef(new Map<string, number>());
   const flush = useCallback(async () => {
     timer.current = null;
     const ids = pending.current; pending.current = new Set();
+    const runIds = runPending.current; runPending.current = new Set();
     const filter = fref.current; if (!filter) return;
     if (ids === 'all' || ids.size > 20) { load(true); return; }
+    for (const id of runIds) ids.add(id);
     const my = epoch.current;
     for (const id of ids) {
       try {
-        const fresh = await fetchTeamAgent(id);
+        const fresh = await fetchTeamAgent(id, seqs.current);
         if (fresh === 'stale' || my !== epoch.current) continue;
         setS((x) => ({ ...x, ...patchList(x, id, fresh, filter) }));
       } catch { /* a próxima mudança ou a rolagem acerta */ }
@@ -141,12 +152,53 @@ export function useAgentList(f: AgentFilter | null, scope: string, pageSize = 48
     if (timer.current === null) timer.current = window.setTimeout(() => { void flush(); }, 200);
   }, [flush]);
   useLiveEvent('agents.changed', onChange);
+  useLiveEvent('runs.changed', (data) => {
+    const id = typeof data.agentId === 'string' ? data.agentId : null;
+    if (!fref.current || !id || !stateRef.current.items.some((x) => x.id === id)) return;
+    runPending.current.add(id);
+    if (timer.current === null) timer.current = window.setTimeout(() => { void flush(); }, 200);
+  });
   useLiveEvent('resync', useCallback(() => { pending.current = 'all'; if (timer.current === null) timer.current = window.setTimeout(() => { void flush(); }, 200); }, [flush]));
   useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
 
   /** Ajuste local imediato (ex.: o movimento que a pessoa acabou de fazer), confirmado depois pelo evento. */
   const patch = useCallback((id: string, fresh: TeamAgent | null) => { const filter = fref.current; if (filter) setS((x) => ({ ...x, ...patchList(x, id, fresh, filter) })); }, []);
   return { ...s, more: () => load(false), reload: () => load(true), patch };
+}
+
+/**
+ * Andamento ao vivo de agentes mostrados fora de uma lista por partes (amostras de setor, contatos das conversas):
+ * um runs.changed de um deles busca só ele de novo, em rajadas agrupadas. Devolve o mais novo que se soube de cada
+ * um desde que entrou na tela (quem sai da tela sai do mapa: ao voltar, vale de novo o que veio com ele).
+ */
+export function useRunStatus(ids: string[]): Map<string, TeamAgent['run_status']> {
+  const [known, setKnown] = useState<Map<string, TeamAgent['run_status']>>(() => new Map());
+  const watch = useRef(new Set<string>()); watch.current = new Set(ids);
+  const key = ids.join('|');
+  useEffect(() => {
+    setKnown((m) => { if (![...m.keys()].some((id) => !watch.current.has(id))) return m; const n = new Map(m); for (const id of m.keys()) if (!watch.current.has(id)) n.delete(id); return n; });
+  }, [key]);
+  const pending = useRef(new Set<string>()); const timer = useRef<number | null>(null);
+  const seqs = useRef(new Map<string, number>());
+  const flush = useCallback(async () => {
+    timer.current = null;
+    const list = [...pending.current]; pending.current = new Set();
+    for (const id of list) {
+      try {
+        const a = await fetchTeamAgent(id, seqs.current);
+        if (a === 'stale' || !watch.current.has(id)) continue;
+        setKnown((m) => new Map(m).set(id, a?.run_status ?? null));
+      } catch { /* o próximo evento acerta */ }
+    }
+  }, []);
+  useLiveEvent('runs.changed', (data) => {
+    const id = typeof data.agentId === 'string' ? data.agentId : null;
+    if (!id || !watch.current.has(id)) return;
+    pending.current.add(id);
+    if (timer.current === null) timer.current = window.setTimeout(() => { void flush(); }, 200);
+  });
+  useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
+  return known;
 }
 
 /** Uma página de grupos (setores ou construções) com cursor; recarrega a página atual quando a equipe muda. */

@@ -28,7 +28,10 @@ const readMode = (): Mode => { try { return localStorage.getItem(MODE_KEY) === '
  * do servidor (docs/EQUIPE_VISUAL.md): grupos recolhidos mostram uma amostra e a contagem; abrir um grupo, ou buscar,
  * carrega os membros conforme a rolagem, e só os visíveis viram elementos na página.
  */
-export function AgentesView({ state, reload, onOpen }: { state: AppState; reload: () => void; onOpen: (id: string, tab?: 'conversa' | 'perfil') => void }) {
+/** onOpen leva a linha leve de quem foi clicado: a janela abre já com o cabeçalho, e o perfil completo chega por baixo */
+type OpenAgent = (id: string, tab?: 'conversa' | 'perfil', lite?: TeamAgent) => void;
+// as mudanças (reativar, voltar ao tema, criar) chegam pelo aviso agents.changed: listas, contagens e o /api/state se acertam sozinhos
+export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAgent }) {
   const scope = state.workspace.id;
   const summary = useResource<TeamSummary>('/api/team/summary', ['agents.changed', 'city.changed']).data;
   const [mode, setMode] = useState<Mode>(readMode);
@@ -88,10 +91,11 @@ export function AgentesView({ state, reload, onOpen }: { state: AppState; reload
   };
   const card = (a: TeamAgent, extra?: ReactNode) => <AgentCard key={a.id} a={a} pending={pending.has(a.id)} onOpen={onOpen} onDrag={drag} onMove={(x, tab) => setTray({ agent: x, tab })} extra={extra} />;
   const reactivate = async (a: TeamAgent) => {
-    try { await api.post(`/api/agents/${a.id}/reactivate`); setToast({ text: `${a.name} voltou à equipe.` }); reload(); } catch (err) { setToast({ text: errMsg(err), tone: 'error' }); }
+    try { await api.post(`/api/agents/${a.id}/reactivate`); setToast({ text: `${a.name} voltou à equipe.` }); } catch (err) { setToast({ text: errMsg(err), tone: 'error' }); }
   };
 
-  const total = summary?.agents.active ?? state.agents.filter((a) => a.status === 'active').length;
+  // a contagem do /api/state já está na tela desde o início; a da Equipe chega por baixo
+  const total = summary?.agents.active ?? state.team.active;
   return (
     <div className="page equipe">
       <header className="equipe__head">
@@ -107,7 +111,6 @@ export function AgentesView({ state, reload, onOpen }: { state: AppState; reload
                 try {
                   const r = await api.post<{ restored: string[]; skipped: string[] }>('/api/team/restore-theme');
                   setToast({ text: r.skipped.length ? `Voltaram: ${r.restored.join(', ') || 'nenhum'}. Ficaram como estão: ${r.skipped.join('; ')}.` : 'Nomes e histórias gregos de volta. Funções e instruções continuam como estavam.' });
-                  reload();
                 } catch (e) { setToast({ text: errMsg(e), tone: 'error' }); }
               }} />}
           </div>
@@ -165,7 +168,6 @@ export function AgentesView({ state, reload, onOpen }: { state: AppState; reload
       {creating && <NewAgentDialog onClose={() => setCreating(false)} onCreated={(r) => {
         setCreating(false);
         setToast({ text: `${r.name} entrou na equipe, no setor ${r.sector}${r.sectorReason ? ` (${r.sectorReason})` : ''}. A aparência escolhida foi mantida.`, actions: [{ label: 'Abrir perfil', run: () => { setToast(null); onOpen(r.id, 'perfil'); } }] });
-        reload();
       }} />}
       {tray && <MoveTray agent={tray.agent} initial={tray.tab} title={`Mover ${tray.agent.name} para…`} onPick={pickFromTray} onClose={() => setTray(null)} />}
       {distrib && <DistributionDialog onClose={() => setDistrib(false)} onApplied={(r) => {
@@ -278,11 +280,11 @@ function StructureGroups({ scope, card, onOpenGroup, onToast }: { scope: string;
 
 /** Card de um agente: o boneco (alça de arraste), nome (abre o perfil), papel e endereço; menu com "Mover para…". */
 function AgentCard({ a, pending, onOpen, onDrag, onMove, extra }: {
-  a: TeamAgent; pending: boolean; onOpen: (id: string, tab?: 'conversa' | 'perfil') => void;
+  a: TeamAgent; pending: boolean; onOpen: OpenAgent;
   onDrag: (e: React.PointerEvent<HTMLElement>, a: TeamAgent) => void; onMove: (a: TeamAgent, tab: 'sector' | 'structure') => void; extra?: ReactNode;
 }) {
   const [menu, setMenu] = useState(false);
-  const open = () => onOpen(a.id, 'perfil');
+  const open = () => onOpen(a.id, 'perfil', a);
   return (
     <article className={`tcard ${a.status !== 'active' ? 'tcard--off' : ''} ${pending ? 'is-pending' : ''}`} aria-busy={pending} onClick={(e) => { if (!(e.target as HTMLElement).closest('button, [role="menu"]')) open(); }}>
       <span className="tcard__fig" onPointerDown={(e) => onDrag(e, a)} title={pending ? 'Movendo…' : 'Arraste para mudar de setor ou de construção'}><AgentFigure agent={a} /></span>

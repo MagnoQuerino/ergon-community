@@ -3,10 +3,40 @@
  * agentes, quantos trabalhando e quantos esperando você. Puro (testado): as somas batem com os totais, e a chave de
  * uma região só depende dos lotes, então fica estável quando a cidade cresce.
  */
-import { CELL } from '../../../shared/city.ts';
+import { CELL, RESIDENTS_PER_HOUSE } from '../../../shared/city.ts';
 
 export interface RegionInput { id: string; i: number; j: number; w: number; d: number }
 export interface Occ { agents: number; working: number; waiting: number }
+
+/**
+ * Quem é de cada construção pelas contagens do servidor (por andar, pelo endereço: a mesma semântica do mapa de
+ * antes, que contava os agentes pelo prédio da mesa): o mapa inteiro sem carregar nenhum agente.
+ */
+export function occOfFloors(structures: Array<{ id: string; floors: Array<{ active: number; working: number; waiting: number }> }>): Map<string, Occ> {
+  const out = new Map<string, Occ>();
+  for (const s of structures) {
+    let o: Occ | null = null;
+    for (const f of s.floors) {
+      if (!f.active) continue;
+      o ??= { agents: 0, working: 0, waiting: 0 };
+      o.agents += f.active; o.working += f.working; o.waiting += f.waiting;
+    }
+    if (o) out.set(s.id, o);
+  }
+  return out;
+}
+
+/**
+ * Moradores da casa física `h` do bairro com `total` agentes ativos: a casa de cada um é a posição dele na cidade
+ * dividida por `per` (casa lógica), e as casas lógicas se repetem pelas `houses` físicas (casa lógica % houses).
+ * Só o total basta: o texto da casa diz quantos moram lá sem carregar todos.
+ */
+export function residentsOf(h: number, houses: number, total: number, per = RESIDENTS_PER_HOUSE): number {
+  if (houses <= 0 || total <= 0 || h < 0 || h >= houses) return 0;
+  let n = 0;
+  for (let k = h; k * per < total; k += houses) n += Math.min(per, total - k * per);
+  return n;
+}
 export interface Region { key: string; ri: number; rj: number; structures: number; agents: number; working: number; waiting: number; x: number; z: number }
 
 /** Lado da região em lotes para o zoom: grande o bastante para os rótulos não se encavalarem. */

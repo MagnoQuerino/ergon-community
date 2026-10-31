@@ -16,8 +16,11 @@ export function modelName(id: string | null, catalog?: ModelCatalog | null): str
     .map((w) => (/^gpt$/i.test(w) ? 'GPT' : w[0].toUpperCase() + w.slice(1))).join(' ');
 }
 
+/** O que o perfil mostra: só existe no perfil completo (GET /api/agents/:id), não nas linhas leves das listas. */
+export type ProfileFields = Pick<Agent, 'bio' | 'skills' | 'tools' | 'model' | 'model_hint'>;
+
 /** Perfil do agente: bio, métodos, ferramentas (com o estado real) e o modelo que ele usa. */
-export function AgentProfile({ agent, compact }: { agent: Agent; compact?: boolean }) {
+export function AgentProfile({ agent, compact }: { agent: ProfileFields; compact?: boolean }) {
   if (!agent.bio && !agent.skills.length && !agent.tools.length) return null;
   return (
     <div className={`profile ${compact ? 'profile--compact' : ''}`}>

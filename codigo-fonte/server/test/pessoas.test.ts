@@ -7,7 +7,7 @@ import { KDF_TEST } from '../src/security/crypto.ts';
 import { throttle } from '../src/security/factors.ts';
 import { PersonKeySource, PersonSealedError, Vault } from '../src/security/keys.ts';
 import { CLOSED_VALUE } from '../src/security/fields.ts';
-import { addPerson, answersFor, confirmPhrase, drain, harness, req, setupOwner, type Harness, type Recovery, type Session } from './helpers.ts';
+import { addPerson, allAgents, answersFor, confirmPhrase, drain, harness, req, setupOwner, type Harness, type Recovery, type Session } from './helpers.ts';
 
 const A = { user: 'alexandre', pass: 'senha-local-123' };
 const B = { user: 'bruna', pass: 'senha-bruna-123' };
@@ -116,7 +116,7 @@ describe('várias pessoas: isolamento também na criptografia', () => {
 
   test('depois de reiniciar: quem já tem sessão vê "digite a senha"; o trabalho de quem não entrou espera', async () => {
     const { h, a, b } = await twoPeople();
-    const st = (await req(h, 'GET', '/api/state', b)).json;
+    const st = { agents: await allAgents(h, b) };
     const conv = (await req(h, 'POST', '/api/conversations', b, { agentId: st.agents[0].id })).json;
     await h.close();
     // o servidor sobe de novo (sem trancamento): ninguém abriu a própria parte ainda
@@ -129,7 +129,8 @@ describe('várias pessoas: isolamento também na criptografia', () => {
     // o Alexandre digita a senha: a parte dele abre; a da Bruna continua fechada
     assert.equal((await req(h2, 'POST', '/api/session/unlock', a, { password: A.pass })).status, 200);
     assert.equal((await req(h2, 'GET', '/api/state', a)).status, 200);
-    assert.ok((await req(h2, 'GET', '/api/state', a)).json.agents.length > 0);
+    assert.ok((await req(h2, 'GET', '/api/state', a)).json.team.active > 0);
+    assert.ok((await allAgents(h2, a)).length > 0);
     assert.equal(h2.vault.personOpen(b.userId), false);
     // trabalho que já estava na fila da Bruna não anda até ela entrar
     h2.db.run("INSERT INTO runs (id, workspace_id, agent_id, kind, status, mode, input, idempotency_key, max_attempts, created_at) VALUES ('run_00000000000000000000000000000077', ?, ?, 'chat', 'queued', 'simulated', 'x', 'multi-espera', 2, ?)",

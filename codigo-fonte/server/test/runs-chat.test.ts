@@ -4,11 +4,11 @@ import { Db } from '../src/db/db.ts';
 import { Bus } from '../src/services/bus.ts';
 import { HermesError, type HermesClient, type RemoteRun } from '../src/services/hermes.ts';
 import { RunExecutor } from '../src/services/runs.ts';
-import { drain, harness, req, setupOwner, testConfig, type Harness, type Session } from './helpers.ts';
+import { allAgents, drain, harness, req, setupOwner, testConfig, type Harness, type Session } from './helpers.ts';
 
 async function newConv(h: Harness, s: Session, agentIndex = 0): Promise<string> {
-  const st = (await req(h, 'GET', '/api/state', s)).json;
-  return (await req(h, 'POST', '/api/conversations', s, { agentId: st.agents[agentIndex].id })).json.id;
+  const agents = await allAgents(h, s);
+  return (await req(h, 'POST', '/api/conversations', s, { agentId: agents[agentIndex].id })).json.id;
 }
 
 describe('fila de execuções com concorrência limitada', () => {
@@ -40,12 +40,18 @@ describe('fila de execuções com concorrência limitada', () => {
     assert.equal(r.status, 'cancelled');
   });
 
-  test('estado traz o último desfecho de cada agente (usado nas reações da cena)', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+  test('o perfil e a cidade trazem o último desfecho de cada agente (usado nas reações da cena)', async () => {
+    const st = { agents: await allAgents(h, s) };
     const byIndex = (i: number) => st.agents.find((a: { id: string }) => a.id === st.agents[i].id);
     assert.match(String(byIndex(0).last_outcome), /^succeeded\|\d{4}-/, 'concluída com sucesso, com horário');
     assert.match(String(byIndex(7).last_outcome), /^cancelled\|/, 'a cancelada aparece como cancelada');
     assert.equal(byIndex(8).last_outcome, null, 'sem execução encerrada = null');
+    // a cena recebe o mesmo valor (uma definição só)
+    const city = (await req(h, 'GET', '/api/city/agents?all=1', s)).json.agents as Array<{ id: string; last_outcome: string | null; run_status: string | null }>;
+    for (const a of st.agents.filter((x: { status: string }) => x.status === 'active')) {
+      const c = city.find((x) => x.id === a.id)!;
+      assert.equal(c.last_outcome, a.last_outcome, a.name); assert.equal(c.run_status, a.run_status, a.name);
+    }
   });
 
   test('limite diário de execuções', async () => {
@@ -68,7 +74,7 @@ describe('chat: interpretação e política por perfil', () => {
   before(async () => {
     h = await harness();
     s = await setupOwner(h);
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const helena = st.agents.find((a: { name: string }) => a.name === 'Aristóteles');
     const nikos = st.agents.find((a: { name: string }) => a.name === 'Hipátia');
     central = (await req(h, 'POST', '/api/conversations', s, { agentId: helena.id })).json.id;
@@ -140,7 +146,7 @@ describe('chat: interpretação e política por perfil', () => {
 
   test('delegar tarefa a agente usa a mesma fila e registra resultado no log da tarefa', async () => {
     await drain(h, 3);
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const t = h.db.get<{ id: string }>('SELECT id FROM tasks ORDER BY number LIMIT 1')!;
     const r = await req(h, 'POST', `/api/tasks/${t.id}/delegate`, s, { agentId: st.agents[2].id, instruction: 'sugira próximo passo', requestId: 'req-deleg-0001' });
     assert.equal(r.status, 202);

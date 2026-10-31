@@ -56,8 +56,7 @@ describe('prazo das tarefas', () => {
     });
 
     test('um pedido com prazo no chat vira o plano da coordenação, e o card nasce com o prazo', async () => {
-      const st = (await req(h, 'GET', '/api/state', s)).json;
-      const coord = st.agents.find((a: { coordinator: number }) => a.coordinator);
+      const coord = (await req(h, 'GET', '/api/state', s)).json.team.coordinator;
       const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: coord.id })).json;
       await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: 'Preciso que alguém revise o contrato até amanhã', clientRequestId: 'prazo-00001' });
       for (let i = 0; i < 4; i++) await h.executor.tick(); // a coordenação responde com o plano

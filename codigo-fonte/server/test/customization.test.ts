@@ -8,7 +8,7 @@ import { createAgent, ensureCoordinator } from '../src/services/capacity.ts';
 import { instructionsFor } from '../src/services/runs.ts';
 import { CHARACTERS } from '../src/services/characters.ts';
 import type { HermesClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
-import { drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 /** Motor falso: devolve o que o teste mandar. */
 class FakeMotor implements HermesClient {
@@ -207,8 +207,9 @@ describe('boas-vindas: a escolha define a equipe de partida', () => {
     assert.equal(st.workspace.name, 'Agência Lume');
     assert.ok(st.sectors.some((x: { name: string }) => x.name === 'Criação'));
     assert.equal(byChar(h, s.workspaceId, 'fidias').role, 'Direção de arte e peças');
-    const coord = st.agents.find((a: { char_key: string }) => a.char_key === 'aristoteles');
+    const coord = (await allAgents(h, s)).find((a: { char_key: string }) => a.char_key === 'aristoteles');
     assert.match(coord.charter, /campanhas e clientes/);
+    assert.equal(st.team.coordinator.id, coord.id, 'o /api/state diz quem coordena');
     assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tasks WHERE workspace_id = ? AND origin = 'demo' AND archived = 0", s.workspaceId)!.n, 0, 'demonstração arquivada');
     const steps = h.db.all<{ title: string }>("SELECT t.title FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.workspace_id = ? AND b.audience = 'user' AND t.origin = 'manual' AND t.archived = 0", s.workspaceId);
     assert.equal(steps.length, 4);

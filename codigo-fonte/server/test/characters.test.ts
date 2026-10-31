@@ -5,7 +5,7 @@ import { CHARACTERS, TOOLS, routeDemand, upgradeDemoTeam } from '../src/services
 import { parseVerdict } from '../src/services/review.ts';
 import { instructionsFor } from '../src/services/runs.ts';
 import { createWorkspace } from '../src/services/seed.ts';
-import { drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 describe('equipe de personagens', () => {
   let h: Harness;
@@ -14,7 +14,7 @@ describe('equipe de personagens', () => {
   after(async () => { await h.close(); });
 
   test('a equipe nova tem 12 personagens, 6 por andar, cada um com bio, instruções, métodos e ferramentas', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     assert.equal(st.agents.length, 12);
     const byLevel = [0, 1].map((l) => st.agents.filter((a: { floor_level: number }) => a.floor_level === l).length);
     assert.deepEqual(byLevel, [6, 6]);
@@ -54,7 +54,7 @@ describe('equipe de personagens', () => {
     assert.equal(routeDemand('Organizar a pauta da reunião de sexta')?.key, 'hesiodo');
     assert.equal(routeDemand('Preparar os slides da apresentação')?.key, 'fidias');
     assert.equal(routeDemand('olá, tudo bem?'), null);
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const agent = (k: string) => st.agents.find((a: { char_key: string }) => a.char_key === k);
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agent('aristoteles').id })).json.id;
     const r = await req(h, 'POST', `/api/conversations/${conv}/messages`, s, { text: 'Preciso que alguém monte a planilha de custos do trimestre', clientRequestId: 'req-route-0001' });
@@ -79,7 +79,7 @@ describe('equipe de personagens', () => {
   });
 
   test('revisão socrática: Sócrates pergunta ao autor, o autor responde, Sócrates dá o veredito (limitado)', async () => {
-    const st = (await req(h, 'GET', '/api/state', s)).json;
+    const st = { agents: await allAgents(h, s) };
     const her = st.agents.find((a: { char_key: string }) => a.char_key === 'herodoto');
     const t = (await req(h, 'POST', '/api/tasks', s, { title: 'Relatório anual', description: 'Rascunho do relatório anual: receita cresceu bastante.', agentId: her.id })).json;
     const r = await req(h, 'POST', `/api/tasks/${t.id}/review`, s, {});
@@ -101,7 +101,7 @@ describe('equipe de personagens', () => {
   test('revisão com limite de 1 rodada termina em "limite" sem nova execução; sem responsável é recusada', async () => {
     const h1 = await harness({ reviewMaxRounds: 1 });
     const s1 = await setupOwner(h1);
-    const st = (await req(h1, 'GET', '/api/state', s1)).json;
+    const st = { agents: await allAgents(h1, s1) };
     const fid = st.agents.find((a: { char_key: string }) => a.char_key === 'fidias');
     const t = (await req(h1, 'POST', '/api/tasks', s1, { title: 'Slides do lançamento', description: 'Roteiro de 8 slides.', agentId: fid.id })).json;
     assert.equal((await req(h1, 'POST', `/api/tasks/${t.id}/review`, s1, {})).status, 202);

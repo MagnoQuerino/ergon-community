@@ -226,10 +226,14 @@ export function boardView(db: Db, workspaceId: string, boardId: string) {
             (SELECT COUNT(*) FROM audit_events e WHERE e.target_type = 'task' AND e.target_id = t.id AND e.action IN ('task.route', 'task.reassign', 'task.delegate', 'task.handoff')) AS handoffs,
             EXISTS (SELECT 1 FROM audit_events e WHERE e.target_type = 'task' AND e.target_id = t.id AND e.action = 'task.handoff') AS is_help,
             -- o card enviado à equipe que ainda está no quadro (cancelado, a etiqueta "equipe #N" some e dá para enviar de novo)
-            (SELECT c.number FROM tasks c WHERE c.parent_task_id = t.id AND c.archived = 0 ORDER BY c.created_at LIMIT 1) AS team_number,
-            (SELECT c.agent_id FROM tasks c WHERE c.parent_task_id = t.id AND c.archived = 0 ORDER BY c.created_at LIMIT 1) AS team_agent_id,
-            (SELECT pb.audience FROM tasks p JOIN boards pb ON pb.id = p.board_id WHERE p.id = t.parent_task_id) AS parent_audience
-       FROM tasks t LEFT JOIN task_links l ON l.task_id = t.id
+            (SELECT c.number FROM tasks c WHERE c.parent_task_id = t.id AND c.archived = 0 ORDER BY c.created_at, c.rowid LIMIT 1) AS team_number,
+            (SELECT c.agent_id FROM tasks c WHERE c.parent_task_id = t.id AND c.archived = 0 ORDER BY c.created_at, c.rowid LIMIT 1) AS team_agent_id,
+            (SELECT pb.audience FROM tasks p JOIN boards pb ON pb.id = p.board_id WHERE p.id = t.parent_task_id) AS parent_audience,
+            -- nome e cor do responsável e de quem recebeu o card enviado à equipe (desativados também: o card não perde o nome)
+            ag.name AS agent_name, ag.color AS agent_color,
+            (SELECT x.name FROM tasks c LEFT JOIN agents x ON x.id = c.agent_id WHERE c.parent_task_id = t.id AND c.archived = 0 ORDER BY c.created_at, c.rowid LIMIT 1) AS team_agent_name,
+            (SELECT x.color FROM tasks c LEFT JOIN agents x ON x.id = c.agent_id WHERE c.parent_task_id = t.id AND c.archived = 0 ORDER BY c.created_at, c.rowid LIMIT 1) AS team_agent_color
+       FROM tasks t LEFT JOIN task_links l ON l.task_id = t.id LEFT JOIN agents ag ON ag.id = t.agent_id
       WHERE t.board_id = ? AND t.workspace_id = ? AND t.archived = 0 ORDER BY COALESCE(t.queue_pos, t.number), t.number`, boardId, workspaceId);
   return { board, columns, tasks };
 }

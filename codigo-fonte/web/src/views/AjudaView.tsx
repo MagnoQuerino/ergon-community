@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { savePrefs, usePrefs } from '../lib/prefs.ts';
-import { coordinatorOf, reviewerOf } from '../lib/team.ts';
+import { coordLabel, examplesOf } from '../lib/team.ts';
 import type { AppState, View } from '../lib/types.ts';
 import { Icon } from '../components/Icon.tsx';
 
@@ -148,23 +148,17 @@ const PROBLEMS: Array<{ q: string; a: (c: Ctx) => ReactNode; keywords: string }>
     a: () => <>Use <b>Refazer a equipe de partida</b>, no alto desta página. As funções e os setores mudam; os nomes que você deu e os agentes que você criou ficam.</> },
 ];
 
-function examples(state: AppState): [string, string, string] {
-  const coord = coordinatorOf(state.agents);
-  const names = state.agents.filter((a) => a.status === 'active' && a.id !== coord?.id).map((a) => a.name);
-  const pick = (i: number, fallback: string) => names[i] ?? names[0] ?? fallback;
-  return [pick(0, 'um agente'), pick(1, 'um agente'), pick(2, 'um agente')];
-}
-
 /** onRedo só para quem pode refazer a equipe (o proprietário do workspace) */
 export function AjudaView({ state, onGo, onTour, onRedo }: { state: AppState; onGo: (v: View) => void; onTour: () => void; onRedo?: () => void }) {
   const prefs = usePrefs();
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string>(() => location.hash.match(/ajuda\?(\w+)/)?.[1] ?? 'inicio');
   const [confirmRedo, setConfirmRedo] = useState(false);
+  // quem coordena, quem revisa e uns colegas para os exemplos vêm prontos do servidor (sem a equipe inteira)
   const ctx: Ctx = {
-    coord: coordinatorOf(state.agents)?.name ?? 'a coordenação',
-    reviewer: reviewerOf(state.agents)?.name ?? 'ninguém por enquanto',
-    ex: examples(state),
+    coord: coordLabel(state.team.coordinator),
+    reviewer: state.team.reviewer?.name ?? 'ninguém por enquanto',
+    ex: examplesOf(state.team.others),
     go: (v, hash) => { if (hash) history.replaceState(null, '', `#${hash}`); onGo(v); },
   };
   const term = q.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');

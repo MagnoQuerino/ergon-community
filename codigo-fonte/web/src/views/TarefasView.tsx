@@ -3,7 +3,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { useHashParam } from '../lib/route.ts';
 import { pushRecent } from '../lib/recents.ts';
-import { SOURCE_LABEL, type Agent, type BoardSummary, type BoardView, type Integration, type TaskCard } from '../lib/types.ts';
+import { SOURCE_LABEL, type BoardSummary, type BoardView, type Integration, type TaskCard } from '../lib/types.ts';
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
 
@@ -15,7 +15,7 @@ const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } cat
  * To Do, Asana, Todoist). Escolheu, espelhou: o Ergon atualiza sozinho. O espelho traz título, descrição,
  * situação e responsável; mudanças se fazem no aplicativo de origem.
  */
-export function TarefasView({ agents, onGo }: { agents: Agent[]; onGo: (v: 'conexoes') => void }) {
+export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   const boards = useResource<BoardSummary[]>('/api/boards', ['tasks.changed']);
   const ints = useResource<Integration[]>('/api/integrations', ['integrations.changed']);
   const mine = (boards.data ?? []).filter((b) => b.audience === 'user');
@@ -118,11 +118,11 @@ export function TarefasView({ agents, onGo }: { agents: Agent[]; onGo: (v: 'cone
       )}
       {err && <p className="error" role="alert">{err}</p>}
       {view.data && (
-        <Board columns={view.data.columns} tasks={view.data.tasks} agents={agents} view={mode} editable={!mirror} openId={openTask}
+        <Board columns={view.data.columns} tasks={view.data.tasks} view={mode} editable={!mirror} openId={openTask}
           onOpen={setOpenTask} onMove={move} onToggle={mirror ? undefined : toggle} />
       )}
       {openTask && view.data && (
-        <TaskDetail taskId={openTask} columns={view.data.columns} agents={agents} mode={mirror ? 'mirror' : 'user'} source={current?.source} onClose={() => setOpenTask(null)} />
+        <TaskDetail taskId={openTask} columns={view.data.columns} mode={mirror ? 'mirror' : 'user'} source={current?.source} onClose={() => setOpenTask(null)} />
       )}
     </div>
   );

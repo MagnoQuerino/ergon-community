@@ -8,7 +8,7 @@ import { after, before, describe, test } from 'node:test';
 import { PERSIST_ROUNDS, parseTrainRequests, stripControl, strongestOf } from '../src/services/teamwork.ts';
 import { activeTeam } from '../src/services/team.ts';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 /** entregue: concluído, ou entregue à pessoa e esperando a aprovação dela (decisão de 30/10: texto, documento e pesquisa vão para a aprovação) */
 const entregue = (t: { completed: number; work_state?: string | null }) => Number(t.completed) === 1 || t.work_state === 'aguardando_aprovacao';
 
@@ -69,7 +69,7 @@ describe('equipe autônoma: resolve sozinha até entregar, um card por entrega',
     motor = new FakeMotor();
     h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: motor, control: new FakeControl() });
     s = await setupOwner(h);
-    st = (await req(h, 'GET', '/api/state', s)).json;
+    st = { agents: await allAgents(h, s) };
   });
   after(async () => { await h.close(); });
 
@@ -179,8 +179,7 @@ describe('equipe autônoma: no modo simulado não há ciclo (nada de trabalho a 
   test('entrega reprovada no simulado fica como está, sem rodadas', async () => {
     const h = await harness();
     const s = await setupOwner(h);
-    const st = (await req(h, 'GET', '/api/state', s)).json;
-    const her = st.agents.find((a: { char_key: string }) => a.char_key === 'herodoto');
+    const her = (await allAgents(h, s)).find((a: { char_key: string }) => a.char_key === 'herodoto');
     const t = (await req(h, 'POST', '/api/tasks', s, { title: 'Redigir o comunicado de férias', agentId: her.id })).json;
     await req(h, 'POST', `/api/tasks/${t.id}/work`, s);
     for (let i = 0; i < 10; i++) await h.executor.tick();

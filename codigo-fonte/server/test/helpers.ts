@@ -136,3 +136,38 @@ export async function loginAs(h: ErgonApp, username: string, password: string): 
 export async function drain(h: ErgonApp, ticks = 10): Promise<void> {
   for (let i = 0; i < ticks; i++) await h.executor.tick();
 }
+
+/**
+ * A equipe inteira com o perfil completo (ativos e desativados), na ordem de antes do /api/state: o /api/state não
+ * traz mais a lista (docs/CIDADE_REGIOES.md); GET /api/agents a entrega por páginas.
+ */
+export async function allAgents(h: ErgonApp, s: Session, pageSize = 100): Promise<any[]> {
+  const out: any[] = []; let cursor: string | null = null;
+  do {
+    const r = await req(h, 'GET', `/api/agents?limit=${pageSize}${cursor ? `&cursor=${cursor}` : ''}`, s);
+    if (r.status !== 200) throw new Error(`GET /api/agents: ${r.status} ${JSON.stringify(r.json)}`);
+    out.push(...r.json.items); cursor = r.json.next;
+  } while (cursor);
+  return out;
+}
+
+/**
+ * A vaga e a casa como eram calculadas antes, no navegador: a lista inteira na ordem do /api/state de antes, só os
+ * ativos, a vaga contada por construção|nível (AmbienteView) e a casa pela posição na ordem (construção, nível, vaga),
+ * dois por casa (motor da cena). Os testes comparam o servidor com isto.
+ */
+export function oldPlaces(full: Array<{ id: string; status: string; building_id: string; floor_level: number }>): Map<string, { id: string; building: string; level: number; slot: number; house: number }> {
+  const count = new Map<string, number>();
+  const scene = full.filter((a) => a.status === 'active').map((a) => {
+    const k = `${a.building_id}|${a.floor_level}`; const n = count.get(k) ?? 0; count.set(k, n + 1);
+    return { id: a.id, building: a.building_id, level: Number(a.floor_level), slot: n };
+  });
+  const order = [...scene].sort((a, b) => a.building.localeCompare(b.building) || a.level - b.level || a.slot - b.slot);
+  const house = new Map(order.map((a, i) => [a.id, Math.floor(i / 2)]));
+  return new Map(scene.map((a) => [a.id, { ...a, house: house.get(a.id)! }]));
+}
+
+/** As construções da cidade com os andares e as contagens (GET /api/city/overview). */
+export async function cityStructures(h: ErgonApp, s: Session): Promise<any[]> {
+  return (await req(h, 'GET', '/api/city/overview', s)).json.structures;
+}

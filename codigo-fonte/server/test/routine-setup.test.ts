@@ -7,7 +7,7 @@ import { earlyTime, heuristicAdaptation, parseSetupReply } from '../src/services
 import { templateByKey } from '../src/services/routine-catalog.ts';
 import { id } from '../src/lib/util.ts';
 import { throttle } from '../src/security/factors.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const SP = 'America/Sao_Paulo';
 
@@ -38,7 +38,7 @@ describe('preparo sem conta de IA', () => {
 
   test('ativar: o Ergon ajusta pelo ritmo do usuário, liga e já roda a primeira', async () => {
     // o usuário costuma começar por volta das 9h30 (horário de São Paulo)
-    const agent = (await req(h, 'GET', '/api/state', s)).json.agents.find((a: { char_key: string }) => a.char_key === 'hesiodo').id;
+    const agent = (await allAgents(h, s)).find((a: { char_key: string }) => a.char_key === 'hesiodo').id;
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agent })).json.id;
     for (let d = 1; d <= 5; d++) {
       const at = new Date(Date.UTC(2026, 9, 19 + d, 12, 30)).toISOString(); // 09:30 em São Paulo

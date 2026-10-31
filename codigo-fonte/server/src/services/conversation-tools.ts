@@ -8,6 +8,7 @@ import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import type { Bus } from './bus.ts';
 import { getConversation, titleFrom } from './chat.ts';
+import { LITE_COLS, agentsLite, liteOut, type AgentLite } from './team-query.ts';
 
 /** Renomear, arquivar ou marcar como não lida (o que vier). */
 export function updateConversation(db: Db, bus: Bus, workspaceId: string, userId: string, conversationId: string,
@@ -119,8 +120,12 @@ export function searchAll(db: Db, workspaceId: string, userId: string, q: string
     `SELECT c.id, c.agent_id, c.title, c.archived_at, a.name AS agent FROM conversations c JOIN agents a ON a.id = c.agent_id
       WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL`, workspaceId, userId);
   const byConv = new Map(convs.map((c) => [c.id, c]));
-  const contatos = want('contatos') ? db.all<{ id: string; name: string; role: string }>("SELECT id, name, role FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId)
-    .filter((a) => has(a.name) || has(a.role)).slice(0, 20) : [];
+  // contatos: procurados no banco (sem carregar a equipe), já com o retrato (agente leve)
+  const pat = `%${term.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+  const contatos = want('contatos') ? db.all<AgentLite>(
+    `SELECT ${LITE_COLS} FROM agents a JOIN profiles p ON p.id = a.profile_id
+      WHERE a.workspace_id = ? AND a.status = 'active' AND (fold(a.name) LIKE ? ESCAPE '\\' OR fold(a.role) LIKE ? ESCAPE '\\')
+      ORDER BY a.coordinator DESC, fold(a.name), a.id LIMIT 20`, workspaceId, pat, pat).map(liteOut) : [];
   const assuntos = want('assuntos') ? convs.filter((c) => has(c.title)).slice(0, 40).map((c) => ({ id: c.id, agentId: c.agent_id, agent: c.agent, title: c.title, archived: !!c.archived_at })) : [];
   const mensagens: Array<{ id: string; conversationId: string; agentId: string; agent: string; title: string; role: string; created_at: string; text: string; hit: [number, number] }> = [];
   const links: Array<{ url: string; conversationId: string; agentId: string; agent: string; messageId: string; created_at: string }> = [];
@@ -146,5 +151,7 @@ export function searchAll(db: Db, workspaceId: string, userId: string, q: string
        LEFT JOIN message_attachments ma ON ma.artifact_id = a.id LEFT JOIN messages m ON m.id = ma.message_id
       WHERE a.workspace_id = ? AND a.deleted_at IS NULL ORDER BY a.created_at DESC LIMIT 3000`, workspaceId)
     .filter((f) => has(f.filename)).slice(0, 40).map((f) => ({ ...f, agentId: f.conversation_id ? byConv.get(f.conversation_id)?.agent_id ?? null : null })) : [];
-  return { contatos, assuntos, mensagens, arquivos, links };
+  // "na conversa com X": o colega de cada arquivo vem junto (desativado também tem nome)
+  const lite = agentsLite(db, workspaceId, arquivos.map((f) => f.agentId));
+  return { contatos, assuntos, mensagens, arquivos: arquivos.map((f) => ({ ...f, agent: (f.agentId && lite.get(f.agentId)) || null })), links };
 }

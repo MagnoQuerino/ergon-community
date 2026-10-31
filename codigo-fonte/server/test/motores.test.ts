@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import { throttle } from '../src/security/factors.ts';
 import type { HermesClient, HermesControlClient, RemoteRun, StartRun } from '../src/services/hermes.ts';
 import { motorName, motorSecret } from '../src/services/motors.ts';
-import { addPerson, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { addPerson, allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const MASTER = 'token-da-instalacao-'.padEnd(40, 'x');
 const MANAGER = 'http://gerente.test:8645';
@@ -84,7 +84,7 @@ async function setup(): Promise<{ h: Harness; a: Session; b: Session; infra: Ret
   return { h, a, b, infra };
 }
 const chat = async (h: Harness, s: Session, text: string, id: string) => {
-  const st = (await req(h, 'GET', '/api/state', s)).json;
+  const st = { agents: await allAgents(h, s) };
   const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: st.agents[0].id })).json;
   return (await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text, clientRequestId: id })).json as { runId: string };
 };

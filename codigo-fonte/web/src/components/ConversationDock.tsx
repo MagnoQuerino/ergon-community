@@ -1,13 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { SECTION_LABEL, contactsOf, unreadTotal, type Contact, type Section } from '../lib/conversations.ts';
-import { useResource } from '../lib/live.ts';
+import { cachedResource, useResource } from '../lib/live.ts';
 import { openConversation } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
-import type { Agent, RecentConversation } from '../lib/types.ts';
+import { restOf } from '../lib/team.ts';
+import { useAgentList, type TeamAgent } from '../lib/teamData.ts';
+import type { AgentLite, RecentConversation } from '../lib/types.ts';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { ChatPanel } from './ChatPanel.tsx';
 import { Icon } from './Icon.tsx';
+import { VirtualGrid } from './VirtualGrid.tsx';
+
+type WithAgent = RecentConversation & { agent: AgentLite };
+/** As conversas com o colega embutido pelo servidor (sem ele não há retrato nem nome para mostrar). */
+const withAgent = (list: RecentConversation[] | null): WithAgent[] => (list ?? []).filter((c): c is WithAgent => !!c.agent);
+/** O colega de cada contato, pelo id. */
+const litesOf = (list: WithAgent[]) => new Map(list.map((c) => [c.agent_id, c.agent]));
 
 /** Quando: "agora", "há 5 min", "ontem 14:20", "12/10". */
 export const when = (iso: string) => {
@@ -36,17 +45,19 @@ export function Marks({ unread, priority, reason }: { unread: number; priority: 
 /**
  * Atalho fixo para retomar conversas, no canto inferior direito: o retrato de quem falou por último e, atrás dele, até
  * 3 conversas. Passar o mouse abre o leque; clicar abre a conversa já com o cursor no campo. Chegou algo que você não
- * leu: o retrato ganha o anel pulsando e o número (na cor da prioridade, quando o colega marcou).
+ * leu: o retrato ganha o anel pulsando e o número (na cor da prioridade, quando o colega marcou). Os rostos vêm
+ * embutidos nas conversas (o servidor já manda só as de colegas ativos); sem nenhuma, o atalho abre o Coordenador.
  */
-export function ConversationDock({ agents, hidden }: { agents: Agent[]; hidden?: boolean }) {
+export function ConversationDock({ coordinator, hidden }: { coordinator: AgentLite | null; hidden?: boolean }) {
   const recent = useResource<RecentConversation[]>('/api/conversations/recent', ['messages.changed', 'agents.changed', 'conversations.changed', 'proposals.changed']);
-  const list = useMemo(() => (recent.data ?? []).filter((c) => agents.some((a) => a.id === c.agent_id && a.status === 'active')), [recent.data, agents]);
+  const list = useMemo(() => withAgent(recent.data), [recent.data]);
+  const lites = useMemo(() => litesOf(list), [list]);
   const people = useMemo(() => contactsOf(list).slice(0, 4), [list]);
   const total = unreadTotal(list);
   if (hidden) return null;
   // ainda sem conversa: o atalho já está lá, e abre as Conversas com o Coordenador, pronto para escrever
   if (!people.length) {
-    const coord = agents.find((a) => a.coordinator && a.status === 'active') ?? agents.find((a) => a.status === 'active');
+    const coord = coordinator;
     if (!coord) return null;
     return (
       <div className="cdock" role="navigation" aria-label="Conversas">
@@ -57,7 +68,7 @@ export function ConversationDock({ agents, hidden }: { agents: Agent[]; hidden?:
       </div>
     );
   }
-  const agentOf = (id: string) => agents.find((a) => a.id === id)!;
+  const agentOf = (id: string) => lites.get(id) as AgentLite; // todo contato saiu de uma conversa com o colega embutido
   // quem tem algo não lido vem para a frente
   const ordered = [...people].sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0));
   const [first, ...back] = ordered;
@@ -88,16 +99,18 @@ export function ConversationDock({ agents, hidden }: { agents: Agent[]; hidden?:
 
 /** Resultado da busca da lista de conversas (contatos, assuntos, mensagens, arquivos e links). */
 interface SearchResult {
-  contatos: Array<{ id: string; name: string; role: string }>;
+  contatos: AgentLite[];
   assuntos: Array<{ id: string; agentId: string; agent: string; title: string; archived: boolean }>;
   mensagens: Array<{ id: string; conversationId: string; agentId: string; agent: string; title: string; role: string; created_at: string; text: string; hit: [number, number] }>;
-  arquivos: Array<{ id: string; filename: string; mime: string; size: number; created_at: string; conversation_id: string | null; message_id: string | null; agentId: string | null }>;
+  arquivos: Array<{ id: string; filename: string; mime: string; size: number; created_at: string; conversation_id: string | null; message_id: string | null; agentId: string | null; agent?: AgentLite | null }>;
   links: Array<{ url: string; conversationId: string; agentId: string; agent: string; messageId: string; created_at: string }>;
 }
 type Filter = 'tudo' | 'contatos' | 'assuntos' | 'mensagens' | 'arquivos' | 'links';
 const FILTERS: Array<[Filter, string]> = [['tudo', 'Tudo'], ['contatos', 'Contatos'], ['assuntos', 'Assuntos'], ['mensagens', 'Mensagens'], ['arquivos', 'Arquivos'], ['links', 'Links']];
 /** assuntos visíveis por colega antes do "ver todos" */
 const TOPICS_SHOWN = 5;
+/** altura de uma linha da seção Equipe (retrato de 34 + respiro), para a lista virtualizada */
+const ROW_H = 46;
 
 /** Menu de um assunto: renomear, fixar, marcar como não lida, arquivar. */
 function TopicMenu({ t, onRename, onDone }: { t: RecentConversation; onRename: () => void; onDone: (patch: Record<string, unknown>) => void }) {
@@ -129,25 +142,60 @@ function TopicMenu({ t, onRename, onDone }: { t: RecentConversation; onRename: (
 const Hit = ({ text, hit }: { text: string; hit: [number, number] }) => <>{text.slice(0, hit[0])}<mark>{text.slice(hit[0], hit[1])}</mark>{text.slice(hit[1])}</>;
 
 /**
+ * Quem ainda não tem conversa, no fim da lista: a equipe por partes (a próxima página chega ao rolar) e só as linhas
+ * à vista viram botões — com 10 mil agentes, continuam umas poucas dezenas. Quem já está nas seções acima não repete.
+ */
+function TeamRest({ scope, shown, currentId, onOpen }: { scope: string; shown: ReadonlySet<string>; currentId: string | null; onOpen: (a: TeamAgent) => void }) {
+  const list = useAgentList({ status: 'active' }, scope);
+  const items = useMemo(() => restOf(list.items, shown), [list.items, shown]);
+  if (!list.ready || (!items.length && !list.next)) return null;
+  return (
+    <div className="convs__section">
+      <span className="convs__section-name">Equipe</span>
+      {/* flex: none — dentro da lista (flex) a grade guarda a altura de todas as linhas, e a lista rola */}
+      <div style={{ flex: 'none' }}>
+        <VirtualGrid items={items} hasMore={!!list.next} onNeedMore={list.more} rowHeight={ROW_H} gap={2} minColWidth={10_000} keyOf={(a) => a.id} label="Equipe"
+          render={(a) => (
+            <button className={`convs__item ${a.id === currentId ? 'is-on' : ''}`} onClick={() => onOpen(a)}>
+              <AgentAvatar agent={a} size={34} />
+              <span className="convs__txt"><b>{a.name}</b><small>{a.role}</small></span>
+            </button>
+          )} />
+      </div>
+    </div>
+  );
+}
+
+/**
  * Conversas, como num aplicativo de mensagens: todos os colegas numa lista só — Fixadas, Precisa de você, Recentes e,
  * no fim, quem ainda não tem conversa —, com o ponto de não lida, a marca de prioridade e a última fala. Os assuntos
  * do colega aberto aparecem embaixo dele (os 5 primeiros e "ver todos"), com renomear, fixar, não lida e arquivar.
  * A busca do topo acha tudo: contatos, assuntos, mensagens, arquivos e links — e leva direto à mensagem.
  */
-export function ConversationsDialog({ agents, initial, onClose, onOpenAgent }: {
-  agents: Agent[]; initial: { agentId: string | null; conversationId: string | null }; onClose: () => void;
-  onOpenAgent: (id: string, tab?: 'conversa' | 'perfil' | 'atividade') => void;
+export function ConversationsDialog({ coordinator, scope, initial, onClose, onOpenAgent }: {
+  coordinator: TeamAgent | null; scope: string; initial: { agentId: string | null; conversationId: string | null }; onClose: () => void;
+  onOpenAgent: (id: string, tab?: 'conversa' | 'perfil' | 'atividade', lite?: AgentLite | null) => void;
 }) {
-  const recent = useResource<RecentConversation[]>('/api/conversations/recent', ['messages.changed', 'conversations.changed', 'proposals.changed']);
-  const active = agents.filter((a) => a.status === 'active');
-  const [sel, setSel] = useState<{ agentId: string | null; conversationId: string | null; messageId?: string | null }>(initial);
+  // agents.changed: nome e rosto novos de um colega aparecem na lista sem fechar e abrir de novo
+  const recent = useResource<RecentConversation[]>('/api/conversations/recent', ['messages.changed', 'conversations.changed', 'proposals.changed', 'agents.changed']);
+  const list = useMemo(() => withAgent(recent.data), [recent.data]);
+  const lites = useMemo(() => litesOf(list), [list]);
+  // a linha leve de quem foi escolhido sem conversa (seção Equipe, busca): o cabeçalho aparece na hora
+  const [sel, setSel] = useState<{ agentId: string | null; conversationId: string | null; messageId?: string | null; lite?: AgentLite | null }>(initial);
   useEffect(() => setSel(initial), [initial.agentId, initial.conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const list = (recent.data ?? []).filter((c) => active.some((a) => a.id === c.agent_id));
-  const contacts = contactsOf(list);
-  // sem escolha: quem tem algo para você, ou a última conversa
+  const contacts = useMemo(() => contactsOf(list), [list]);
+  // sem escolha: quem tem algo para você, ou a última conversa; sem nenhuma, o Coordenador (como o atalho do canto)
   const first = contacts.find((c) => c.unread || c.priority) ?? contacts[0];
-  const current = sel.agentId ? sel : first ? { agentId: first.agentId, conversationId: first.latest.id } : { agentId: active[0]?.id ?? null, conversationId: null };
-  const agent = active.find((a) => a.id === current.agentId) ?? null;
+  const current = sel.agentId ? sel : first ? { agentId: first.agentId, conversationId: first.latest.id } : { agentId: coordinator?.id ?? null, conversationId: null };
+  const cid = current.agentId;
+  // colega sem conversa recente: a linha leve dele confere se continua ativo (desativado cai em "Nenhum agente ativo")
+  const isCoord = !!cid && cid === coordinator?.id;
+  const needRow = !!cid && !lites.has(cid) && !isCoord;
+  const row = useResource<TeamAgent>(needRow ? `/api/team/agents/${cid}` : null, ['agents.changed']);
+  const seen = row.data?.id === cid ? row.data : null;
+  const early = needRow && !seen && !row.error ? (sel.agentId === cid ? sel.lite ?? null : null) ?? cachedResource<TeamAgent>(`/api/team/agents/${cid}`) ?? null : null;
+  const agent: AgentLite | null = !cid ? null : lites.get(cid) ?? (isCoord ? coordinator : seen ? (seen.status === 'active' ? seen : null) : early);
+  const waiting = needRow && !seen && !row.error && !early; // chegando (milissegundos): nem "nenhum agente", nem conversa de outro
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, modal: true, outside: true });
   const [q, setQ] = useState('');
@@ -171,10 +219,9 @@ export function ConversationsDialog({ agents, initial, onClose, onOpenAgent }: {
     setErr(null);
     try { const c = await api.post<{ id: string }>('/api/conversations', { agentId }); setSel({ agentId, conversationId: c.id }); recent.reload(); } catch (e) { setErr(errMsg(e)); }
   };
-  const open = (agentId: string, conversationId: string | null, messageId?: string | null) => { setSel({ agentId, conversationId, messageId: messageId ?? null }); setQ(''); };
+  const open = (agentId: string, conversationId: string | null, messageId?: string | null, lite?: AgentLite | null) => { setSel({ agentId, conversationId, messageId: messageId ?? null, lite: lite ?? null }); setQ(''); };
   const sections = (['fixadas', 'precisa', 'recentes'] as Section[]).map((s) => ({ s, items: contacts.filter((c) => c.section === s) })).filter((x) => x.items.length);
-  const others = active.filter((a) => !list.some((c) => c.agent_id === a.id));
-  const nameOf = (id: string | null) => active.find((a) => a.id === id)?.name ?? 'Colega';
+  const inSections = useMemo(() => new Set(lites.keys()), [lites]);
   return (
     <div className="awin-back">
       <section ref={ref} className="awin convs" role="dialog" aria-modal="true" aria-label="Conversas">
@@ -195,14 +242,14 @@ export function ConversationsDialog({ agents, initial, onClose, onOpenAgent }: {
             <div className="convs__results">
               {!found.data && <p className="muted small">Procurando…</p>}
               {!!found.data?.contatos.length && <div className="convs__section"><span className="convs__section-name">Contatos</span>
-                {found.data.contatos.map((a) => { const ag = active.find((x) => x.id === a.id); const c = contacts.find((x) => x.agentId === a.id); return ag ? (
-                  <button key={a.id} type="button" className="convs__item" onClick={() => open(a.id, c?.latest.id ?? null)}><AgentAvatar agent={ag} size={30} /><span className="convs__txt"><b>{a.name}</b><small>{a.role}</small></span></button>) : null; })}</div>}
+                {found.data.contatos.map((a) => { const c = contacts.find((x) => x.agentId === a.id); return (
+                  <button key={a.id} type="button" className="convs__item" onClick={() => open(a.id, c?.latest.id ?? null, null, a)}><AgentAvatar agent={a} size={30} /><span className="convs__txt"><b>{a.name}</b><small>{a.role}</small></span></button>); })}</div>}
               {!!found.data?.assuntos.length && <div className="convs__section"><span className="convs__section-name">Assuntos</span>
                 {found.data.assuntos.map((t) => <button key={t.id} type="button" className="convs__result" onClick={() => open(t.agentId, t.id)}><b>{t.title}</b><small>{t.agent}{t.archived ? ' · arquivado' : ''}</small></button>)}</div>}
               {!!found.data?.mensagens.length && <div className="convs__section"><span className="convs__section-name">Mensagens</span>
                 {found.data.mensagens.map((m) => <button key={m.id} type="button" className="convs__result" onClick={() => open(m.agentId, m.conversationId, m.id)}><small>{m.role === 'user' ? 'Você' : m.agent} · {m.title} · {when(m.created_at)}</small><span><Hit text={m.text} hit={m.hit} /></span></button>)}</div>}
               {!!found.data?.arquivos.length && <div className="convs__section"><span className="convs__section-name">Arquivos</span>
-                {found.data.arquivos.map((f) => <button key={f.id} type="button" className="convs__result" onClick={() => (f.agentId && f.conversation_id ? open(f.agentId, f.conversation_id, f.message_id) : window.open(`/api/artifacts/${f.id}/download`, '_blank'))}><b><Icon name="file" size={12} /> {f.filename}</b><small>{f.agentId ? `na conversa com ${nameOf(f.agentId)}` : 'em Documentos'} · {when(f.created_at)}</small></button>)}</div>}
+                {found.data.arquivos.map((f) => <button key={f.id} type="button" className="convs__result" onClick={() => (f.agentId && f.conversation_id ? open(f.agentId, f.conversation_id, f.message_id, f.agent ?? null) : window.open(`/api/artifacts/${f.id}/download`, '_blank'))}><b><Icon name="file" size={12} /> {f.filename}</b><small>{f.agentId ? `na conversa com ${f.agent?.name ?? 'Colega'}` : 'em Documentos'} · {when(f.created_at)}</small></button>)}</div>}
               {!!found.data?.links.length && <div className="convs__section"><span className="convs__section-name">Links</span>
                 {found.data.links.map((l) => <button key={`${l.messageId}-${l.url}`} type="button" className="convs__result" onClick={() => open(l.agentId, l.conversationId, l.messageId)}><b>{l.url}</b><small>{l.agent} · {when(l.created_at)}</small></button>)}</div>}
               {found.data && !found.data.contatos.length && !found.data.assuntos.length && !found.data.mensagens.length && !found.data.arquivos.length && !found.data.links.length && <p className="muted small">Nada encontrado.</p>}
@@ -214,7 +261,7 @@ export function ConversationsDialog({ agents, initial, onClose, onOpenAgent }: {
                   <span className="convs__section-name">{SECTION_LABEL[s]}</span>
                   <ul>
                     {items.map((c) => {
-                      const a = active.find((x) => x.id === c.agentId)!;
+                      const a = lites.get(c.agentId) as AgentLite;
                       const on = c.agentId === current.agentId;
                       const preview = c.latest.last_text ? `${c.latest.last_role === 'user' ? 'Você: ' : ''}${c.latest.last_text}` : a.role;
                       const all = expanded.has(c.agentId);
@@ -259,21 +306,7 @@ export function ConversationsDialog({ agents, initial, onClose, onOpenAgent }: {
                   </ul>
                 </div>
               ))}
-              {others.length > 0 && (
-                <div className="convs__section">
-                  <span className="convs__section-name">Equipe</span>
-                  <ul>
-                    {others.map((a) => (
-                      <li key={a.id}>
-                        <button className={`convs__item ${a.id === current.agentId ? 'is-on' : ''}`} onClick={() => open(a.id, null)}>
-                          <AgentAvatar agent={a} size={34} />
-                          <span className="convs__txt"><b>{a.name}</b><small>{a.role}</small></span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <TeamRest scope={scope} shown={inSections} currentId={current.agentId} onOpen={(a) => open(a.id, null, null, a)} />
             </>
           )}
         </aside>
@@ -283,12 +316,12 @@ export function ConversationsDialog({ agents, initial, onClose, onOpenAgent }: {
               <header className="foco__chat-head">
                 <AgentAvatar agent={agent} size={36} />
                 <div className="foco__chat-who"><b>{agent.name}</b><small>{agent.role} · {agent.sector_name}</small></div>
-                <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil')}><Icon name="edit" size={13} /> Perfil</button>
+                <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', agent)}><Icon name="edit" size={13} /> Perfil</button>
               </header>
               <ChatPanel key={`${agent.id}-${current.conversationId ?? 'nova'}`} agent={agent} embedded hidePicker conversationId={current.conversationId}
                 focusMessage={sel.messageId ?? null} onOpenConversation={(agentId, conversationId) => { setSel({ agentId, conversationId }); recent.reload(); }} />
             </>
-          ) : <p className="muted center">Nenhum agente ativo.</p>}
+          ) : waiting ? null : <p className="muted center">Nenhum agente ativo.</p>}
         </div>
       </section>
     </div>

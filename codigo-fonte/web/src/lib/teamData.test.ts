@@ -6,7 +6,14 @@ import { Lru } from '../iso/portrait.ts';
 
 const ag = (id: string, name: string, o: Partial<TeamAgent> = {}): TeamAgent => ({
   id, name, role: 'Pesquisa', color: '#2f6f8f', status: 'active', demo: false, coordinator: false, char_key: null, look_seed: 1, deactivation_note: null,
-  sector_key: 'producao', sector_name: 'Produção', building_id: 'bld_a', building_name: 'Stoa', floor_name: 'Térreo', run_status: null, ...o,
+  sector_key: 'producao', sector_name: 'Produção', building_id: 'bld_a', building_name: 'Stoa', floor_name: 'Térreo', floor_id: 'flr_a', floor_level: 0, run_status: null, ...o,
+});
+
+test('andamento novo (runs.changed busca o agente de novo): a bolinha muda, a posição e o total não', () => {
+  const s = { items: [ag('1', 'Ana'), ag('2', 'Bia'), ag('3', 'Caio')], total: 3, next: null };
+  const r = patchList(s, '2', ag('2', 'Bia', { run_status: 'running' }), { status: 'active' });
+  assert.deepEqual(r.items.map((a) => `${a.name}:${a.run_status ?? '-'}`), ['Ana:-', 'Bia:running', 'Caio:-']);
+  assert.equal(r.total, 3);
 });
 
 test('mesma ordem do servidor: Coordenador primeiro, nome sem acento, depois o id (nomes repetidos)', () => {
