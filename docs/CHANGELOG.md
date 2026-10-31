@@ -1,5 +1,15 @@
 # Novidades
 
+## 1.1.0-rc.19 (pré-versão de teste)
+
+- **A Cidade aguenta equipes enormes.** Com 10.000 agentes ela ia a menos de um quadro por segundo; agora roda lisa.
+  A cidade desenha só o que está na tela, e a sua equipe pequena continua exatamente como era.
+- **Zoom bem afastado vira mapa:** construções como blocos, ruas e, por região, quantos agentes e construções há e
+  quem está esperando você. Clique no mapa para aproximar. (Se a cidade cabe na tela, nada muda.)
+- **Localizar:** o seletor da Cidade agora busca agentes e construções pelo nome. Escolha um agente e a câmera vai
+  até ele, abre o andar e a conversa — mesmo do outro lado da cidade.
+- As ruas ficam numa rede só, mesmo com centenas de construções espalhadas.
+
 ## 1.1.0-rc.18 (pré-versão de teste)
 
 Inclui também as novidades da rc.17 (abaixo), que não saiu sozinha.

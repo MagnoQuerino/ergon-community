@@ -19,9 +19,11 @@ import { Town, type AreaInst, type BuildingInst, type Loc, type StructureIn } fr
 import type { AABB, P3, Vec2 } from '../world/geom.ts';
 import { startMove, stepMove, targetFor, visualFor, type Mover, type Visual } from '../scene/agentState.ts';
 import type { SceneAgent, SceneFocus, SceneObject, SceneOps, SceneOpsTarget } from '../scene/types.ts';
-import { RES, insidePoly, project, unproject, type P2 } from './projection.ts';
+import { KY, RES, insidePoly, project, unproject, type P2 } from './projection.ts';
+import { regionSize, regionsOf, type Occ } from '../world/regions.ts';
 import { figureSprite, hashOf, lookFor, npcLook, type Expr, type Facing, type Gesture, type Look, type Pose, type Sprite } from './figures.ts';
-import { bandHighlight, buildingBox, closedArt, openArt, type ArtItem, type Layer, type OpenArt } from './buildingArt.ts';
+import { bandHighlight, buildingBox, closedArt, closedRect, closedSmall, hasClosed, hasSmall, openArt, reserveClosed, reserveSmall, type ArtItem, type Layer, type OpenArt } from './buildingArt.ts';
+import { Lru } from './lru.ts';
 import { CHUNK, areaHits, boxPoly, cityItems, drawGroundChunk, type AreaHit, type CityItem } from './areaArt.ts';
 import { agentSkinLook, lookFromSkin, skinPack, skinPet, skinTheme, type ActiveSkin } from './skin.ts';
 import type { SkinData } from '../../../shared/skin.ts';
@@ -93,7 +95,10 @@ const TARP_ROWS = [
 const WRITE_MS = 380;
 const AG = 0.15; const AG_H = 1.8;
 const STAND_HEAD = 42; const SIT_HEAD = 39;
-const ZOOMS = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.75, 1, 2, 3, 4];
+// abaixo de 0,2: modo mapa (regiões e contagens), para a cidade grande caber inteira na tela
+const ZOOMS = [0.015, 0.025, 0.04, 0.06, 0.09, 0.13, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.75, 1, 2, 3, 4];
+const MAP_IN = 0.17; const MAP_OUT = 0.19; // entra e sai com folga (sem piscar no limite)
+const NOWHERE = { x0: 1, y0: 1, x1: 0, y1: 0 };
 const GROUP_DUR: Record<GroupKind, [number, number]> = {
   chat: [9000, 16000], debate: [8000, 13000], visit: [8000, 14000], handoff: [6000, 9000], meeting: [12000, 20000], assembly: [15000, 24000], wrestle: [8000, 12000],
 };
@@ -123,6 +128,8 @@ const basePlan = (p: Partial<Plan> & Pick<Plan, 'kind' | 'loc' | 'spot'>): Plan 
   group: null, dur: [0, 0], key: null, label: null, area: null, tour: null, fast: false, hide: false, ...p,
 });
 const OUT: Loc = { b: null, level: 0 };
+/** Quem está em cada prédio (por andar) e quem dorme em casa, contado uma vez por quadro. */
+interface Occupancy { by: Map<string, { levels: Map<number, { n: number; working: number; waiting: number }>; badge: 'working' | 'waiting' | 'attention' | null }>; asleep: Set<number> }
 
 /** Máscara de pixels opacos de um sprite (clique só onde há desenho), calculada uma vez. */
 const masks = new WeakMap<Sprite, Uint8Array>();
@@ -149,7 +156,19 @@ export class IsoEngine {
   private firstTown = true;
   private items: CityItem[] = [];
   private hitsArea: AreaHit[] = [];
-  private chunks = new Map<string, HTMLCanvasElement>();
+  private chunks = new Lru<HTMLCanvasElement>(90);
+  // áreas de clique com o retângulo na tela (recorte por quadro) e lotes livres por posição
+  private hitRects: Array<[number, number, number, number]> = [];
+  private lotAt = new Map<string, Town['lots'][number]>();
+  // casas por agente (prédio, andar, vaga): refeitas só quando esse conjunto muda
+  private houseSig = ''; private houseOfId = new Map<string, number>();
+  // arte de prédio ainda por desenhar (orçamento por quadro): pede outro quadro
+  private artPending = false;
+  private chunkPending = false;
+  // região em foco (tela + margem) da última atualização; null antes de a tela ter tamanho
+  private focusRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** zoom distante: a cidade vira mapa (blocos, ruas e contagens por região), sem arte nem bonecos */
+  private mapMode = false;
   private rts = new Map<string, Rt>();
   private groups = new Map<string, Group>();
   private gid = 0;
@@ -225,6 +244,8 @@ export class IsoEngine {
     this.town = new Town(structs, this.skin ? skinPack(this.skin.data) : undefined);
     this.items = cityItems(this.town, this.theme);
     this.hitsArea = areaHits(this.town);
+    this.hitRects = this.hitsArea.map((h) => { let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity; for (const [x, y] of h.poly) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return [x0, y0, x1, y1]; });
+    this.lotAt = new Map(this.town.lots.map((l) => [`${l.i},${l.j}`, l]));
     this.chunks.clear();
     this.pendingMove.clear();
     const now = performance.now();
@@ -247,7 +268,15 @@ export class IsoEngine {
     this.structIds = new Set(structs.map((s) => s.id));
     if (this.focus && !this.town.buildings.get(this.focus.building)) this.setFocus(null);
     // a vida ambiente recomeça a partir da cidade nova (rotas, pontos e casas mudaram)
-    for (const rt of this.rts.values()) { this.endLife(rt, now); this.goHome(rt, now, true); }
+    // quem já está na própria mesa fica (sem calcular rota): com milhares de agentes, refazer todas as rotas a cada
+    // andar novo travava a tela por segundos
+    for (const rt of this.rts.values()) {
+      this.endLife(rt, now);
+      const spot = this.deskSpot(rt.a, rt.seated ? 'seat' : 'idle');
+      const atDesk = !rt.mover && rt.loc.b === spot.loc.b && rt.loc.level === spot.loc.level && Math.abs(rt.pos[0] - spot.p[0]) < 1e-6 && Math.abs(rt.pos[2] - spot.p[1]) < 1e-6 && Math.abs(rt.pos[1] - spot.y) < 1e-6;
+      if (atDesk) { rt.spotKey = `${spot.loc.b}|${spot.loc.level}|${spot.p.join(',')}`; continue; }
+      this.goHome(rt, now, true);
+    }
     const ag = this.town.areaOf('agora');
     if (ag) { const s = ag.def.npcSpots[0] ?? [0, 0]; this.npcSt.pos = [s[0] + ag.ox, 0, s[1] + ag.oz]; this.npcSt.mover = null; this.npcSt.spot = 0; }
     if (this.firstTown || !this.userCam) this.frameCity(this.firstTown);
@@ -336,8 +365,13 @@ export class IsoEngine {
   setAgents(agents: SceneAgent[]): void {
     const now = performance.now();
     // casa de cada agente: ordem estável (prédio, andar, vaga), dois por casa
-    const order = [...agents].sort((a, b) => a.building.localeCompare(b.building) || a.level - b.level || a.slot - b.slot);
-    const houseOfId = new Map(order.map((a, i) => [a.id, Math.floor(i / RESIDENTS_PER_HOUSE)]));
+    const sig = agents.map((a) => `${a.id}|${a.building}|${a.level}|${a.slot}`).join(';');
+    if (sig !== this.houseSig) {
+      const order = [...agents].sort((a, b) => a.building.localeCompare(b.building) || a.level - b.level || a.slot - b.slot);
+      this.houseOfId = new Map(order.map((a, i) => [a.id, Math.floor(i / RESIDENTS_PER_HOUSE)]));
+      this.houseSig = sig;
+    }
+    const houseOfId = this.houseOfId;
     for (const a of agents) {
       const visual = visualFor(a.run);
       const target = targetFor(visual);
@@ -370,8 +404,9 @@ export class IsoEngine {
       if (rt.react) { rt.mover = null; rt.afterReact = true; continue; } // reage primeiro, depois sai
       this.go(rt, spot.p, spot.loc);
     }
+    const ids = new Set(agents.map((a) => a.id));
     for (const id of [...this.rts.keys()]) {
-      if (agents.some((a) => a.id === id)) continue;
+      if (ids.has(id)) continue;
       const rt = this.rts.get(id)!; this.endLife(rt, now); this.rts.delete(id);
     }
     this.invalidate();
@@ -385,6 +420,9 @@ export class IsoEngine {
   private ops: SceneOps | null = null;
   /** onde as placas ficaram na tela no último quadro (alvo de clique e de cursor) */
   private plaques: Array<{ kind: SceneOpsTarget; x: number; y: number; w: number; h: number }> = [];
+
+  /** Leva a câmera até o agente (abre o andar dele), mesmo que ele já esteja selecionado. */
+  focusAgent(id: string): void { this.selected = null; this.setSelected(id); }
 
   setSelected(id: string | null): void {
     if (id === this.selected) return;
@@ -444,6 +482,7 @@ export class IsoEngine {
     this.tk = Math.min(2, this.snapZoom(fit, true)); // perto o bastante para ver o prédio, sem pixels gigantes
     this.tcx = (x0 + x1) / 2 + (this.rightInset * this.dpr) / 2 / this.tk; this.tcy = (y0 + y1) / 2;
     this.anchor = null; this.userCam = true;
+    this.jumpIfFar();
     this.cb.onStructure(target);
     this.invalidate();
   }
@@ -737,6 +776,7 @@ export class IsoEngine {
       if (!on) { if (L.mode !== 'home' && L.mode !== 'returning') { this.endLife(rt, now); this.sendHome(rt, now); changed = true; } continue; }
       if (L.mode === 'home') {
         if (now < L.until || rt.mover || walking >= maxWalking) continue;
+        if (this.focusRect && !this.onScreen(rt.pos, this.focusRect)) { L.until = now + 4000; continue; }
         const busy = this.busy();
         const ok = night ? this.startHome(rt, now, true) : (this.startChoice(rt, pickChoice(this.rand), now, busy) || this.startDesk(rt, now));
         if (ok) { walking++; changed = true; } else L.until = now + 4000;
@@ -784,13 +824,19 @@ export class IsoEngine {
     for (const z of ZOOMS) if (roundDown ? z <= k + 1e-6 : Math.abs(z - k) < Math.abs(best - k)) best = z;
     return Math.max(ZOOMS[0], Math.min(ZOOMS[ZOOMS.length - 1], best));
   }
+  /** Zoom que mostra a cidade inteira (quase tudo) na área livre da tela. */
+  private cityFit(): number {
+    const r = this.cityRect(); const availW = this.W - this.rightInset * this.dpr;
+    return Math.min((availW * 1.05) / (r.x1 - r.x0), (this.H * 1.1) / (r.y1 - r.y0));
+  }
+  /** Menor zoom permitido: a cidade que cabe em 0,2 para em 0,2 (como sempre); a maior afasta até caber inteira. */
+  private minZoom(): number { return Math.min(0.2, this.snapZoom(Math.max(this.cityFit(), ZOOMS[0]), true)); }
   /** Enquadra a cidade: a Stoa e as áreas no centro, a maior aproximação que mostra quase tudo. */
   private frameCity(instant: boolean): void {
     if (!this.cssW) return;
     const r = this.cityRect();
-    const availW = this.W - this.rightInset * this.dpr;
-    const fit = Math.min((availW * 1.05) / (r.x1 - r.x0), (this.H * 1.1) / (r.y1 - r.y0));
-    this.tk = this.snapZoom(Math.max(fit, ZOOMS[0]), true);
+    const fit = this.cityFit();
+    this.tk = fit < 0.13 ? this.snapZoom(Math.max(fit, ZOOMS[0]), true) : Math.max(0.2, this.snapZoom(fit, true));
     this.tcx = (r.x0 + r.x1) / 2 + (this.rightInset * this.dpr) / 2 / this.tk; this.tcy = (r.y0 + r.y1) / 2;
     this.anchor = null; this.userCam = false;
     if (instant) { this.k = this.tk; this.cx = this.tcx; this.cy = this.tcy; }
@@ -805,8 +851,14 @@ export class IsoEngine {
     const visW = this.W - this.rightInset * this.dpr; const m = 60 * this.dpr;
     if (!always && sx > m && sx < visW - m && sy > m && sy < this.H - m) return;
     this.tk = kk; this.tcx = px + offX; this.tcy = py; this.anchor = null; this.userCam = true;
+    this.jumpIfFar();
     this.invalidate();
   }
+  /** Alvo longe (mais de duas telas e meia): a câmera vai direto, sem atravessar o mapa. */
+  private jumpIfFar(): void {
+    if (this.mapMode || Math.hypot(this.tcx - this.cx, this.tcy - this.cy) * this.k > 2.5 * Math.max(this.W, this.H)) { this.k = this.tk; this.cx = this.tcx; this.cy = this.tcy; }
+  }
+
   /** Avança a câmera em direção ao alvo (suave); true enquanto se move. */
   private stepCamera(dt: number): boolean {
     const f = 1 - Math.exp(-dt * 11);
@@ -873,18 +925,20 @@ export class IsoEngine {
     if (this.last) { this.frameTimes.push(t - this.last); if (this.frameTimes.length > 90) this.frameTimes.shift(); }
     this.last = t;
     const cam = this.stepCamera(dt || 1 / 60);
-    const { moving, animating, changed } = this.update(dt, t);
+    const { moving, visMoving, animating, changed } = this.update(dt, t);
     const anim = this.anims.size > 0;
-    if (moving || animating || changed || cam || anim || this.dirty || this.hover) this.draw(t);
-    this.dirty = false;
+    if (visMoving || animating || changed || cam || anim || this.dirty || this.hover) this.draw(t);
+    // arte de prédio que ficou para depois (orçamento do quadro): o próximo quadro termina
+    this.dirty = this.artPending;
     clearTimeout(this.timer); this.timer = 0;
     if (document.visibilityState !== 'visible') { this.last = 0; return; }
-    if (moving || cam || anim) {
+    if (visMoving || cam || anim || this.artPending) {
       this.autoEconomy();
       if (this.economy && !cam && !anim) this.timer = window.setTimeout(() => this.wake(), 33);
       else this.wake();
       return;
     }
+    if (moving) { this.frameTimes = []; this.timer = window.setTimeout(() => this.wake(), 100); return; }
     this.last = 0; this.frameTimes = [];
     if (animating || this.hover?.kind === 'band') { this.timer = window.setTimeout(() => this.wake(), this.hover ? 80 : 200); return; }
     const next = this.nextWake();
@@ -910,8 +964,22 @@ export class IsoEngine {
     return best;
   }
 
-  private update(dt: number, now: number): { moving: boolean; animating: boolean; changed: boolean } {
+  /** Retângulo da tela em pixels do mundo, com uma margem (`m` em frações da tela). */
+  private viewWorld(m = 0): { x0: number; y0: number; x1: number; y1: number } {
+    const k = this.k || 1; const hw = this.W / 2 / k; const hh = this.H / 2 / k;
+    return { x0: this.cx - hw * (1 + 2 * m), y0: this.cy - hh * (1 + 2 * m), x1: this.cx + hw * (1 + 2 * m), y1: this.cy + hh * (1 + 2 * m) };
+  }
+  private onScreen(p: P3, r: { x0: number; y0: number; x1: number; y1: number }): boolean {
+    if (r.x1 < r.x0) return false; // NOWHERE (modo mapa)
+    const [px, py] = project(p[0], p[1], p[2]);
+    return px > r.x0 - 24 && px < r.x1 + 24 && py > r.y0 - 4 && py < r.y1 + 64;
+  }
+
+  private update(dt: number, now: number): { moving: boolean; visMoving: boolean; animating: boolean; changed: boolean } {
     let changed = false;
+    // a região em foco é a tela e meia tela em volta: só ali a vida ambiente começa coisas novas (fora, cada um fica
+    // no seu lugar; o estado real de trabalho vem do servidor e continua valendo em toda a cidade)
+    this.focusRect = !this.cssW ? null : this.mapMode ? NOWHERE : this.viewWorld(0.5);
     for (const [id, a] of this.anims) if (now - a.t0 >= a.dur) { this.anims.delete(id); changed = true; }
     for (const rt of this.rts.values()) {
       if (rt.react && now >= rt.react.until) {
@@ -942,15 +1010,21 @@ export class IsoEngine {
       if (!still) { n.mover = null; n.until = now + between(this.rand, [7000, 15000]); changed = true; }
     }
     if (this.tickLife(now)) changed = true;
-    let moving = !!n.mover; let animating = false;
+    // o que anda ou anima fora da tela não pede quadro (só a simulação segue, num passo mais lento)
+    const vr = this.mapMode ? NOWHERE : this.viewWorld(0);
+    const npcVis = !this.mapMode && this.onScreen(n.pos, vr);
+    let moving = !!n.mover; let visMoving = !!n.mover && npcVis; let animating = false;
     for (const rt of this.rts.values()) {
+      const anim = !!rt.react || (rt.life.mode === 'doing' && !this.hidden(rt)) || (rt.seated && !rt.mover && rt.visual !== 'idle' && !this.reduced);
+      if (!rt.mover && !anim) continue;
       if (rt.mover) moving = true;
-      if (rt.react || (rt.life.mode === 'doing' && !this.hidden(rt))) animating = true;
-      if (rt.seated && !rt.mover && rt.visual !== 'idle' && !this.reduced) animating = true;
+      if (!this.onScreen(rt.pos, vr)) continue;
+      if (rt.mover) visMoving = true;
+      if (anim) animating = true;
     }
-    if (n.think && this.lifeOn()) animating = true;
+    if (n.think && this.lifeOn() && npcVis) animating = true;
     if (this.selected && this.rts.get(this.selected)?.mover) this.centerOnSelected(false);
-    return { moving, animating, changed };
+    return { moving, visMoving, animating, changed };
   }
 
   private inWater(x: number, z: number): boolean {
@@ -971,32 +1045,62 @@ export class IsoEngine {
     g.imageSmoothingEnabled = k < 1;
     this.drawn = []; this.agentsDrawn = []; this.stats.sprites = 0;
     const view = { x0: this.cx - this.W / 2 / k, y0: this.cy - this.H / 2 / k, x1: this.cx + this.W / 2 / k, y1: this.cy + this.H / 2 / k };
+    const wasMap = this.mapMode;
+    this.mapMode = this.mapMode ? k < MAP_OUT : k < MAP_IN;
+    this.chunkPending = false;
+    if (this.mapMode) {
+      this.artPending = false;
+      if (!wasMap) { this.hover = null; this.plaques = []; }
+      this.drawMap(view); const st = this.stats; st.frames++; st.lastFrameMs = performance.now() - t0; return;
+    }
+    // orçamento por quadro só na cidade grande (a pequena sai pronta no primeiro quadro, como sempre), e sempre ao
+    // menos um bloco de chão e um prédio novos por quadro (progresso garantido mesmo em máquina lenta)
+    const big = this.town.buildings.size + this.town.areas.size > 60; let newChunks = 0;
 
     // chão em blocos: perto, resolução cheia; longe, blocos maiores em resolução menor (memória e desenho estáveis)
     const lod = k >= 0.5 ? 1 : k >= 0.25 ? 0.5 : 0.25; const span = CHUNK / lod;
     const c0 = Math.floor(view.x0 / span); const c1 = Math.floor(view.x1 / span); const r0 = Math.floor(view.y0 / span); const r1 = Math.floor(view.y1 / span);
+    this.chunks.reserve((c1 - c0 + 1) * (r1 - r0 + 1) * 1.5);
     for (let cj = r0; cj <= r1; cj++) for (let ci = c0; ci <= c1; ci++) {
       const key = `${lod}|${ci},${cj}`; let c = this.chunks.get(key);
+      if (!c && big && newChunks > 0 && performance.now() - t0 > 10) { this.chunkPending = true; continue; }
       if (!c) {
+        newChunks++;
         c = document.createElement('canvas'); c.width = CHUNK; c.height = CHUNK;
         drawGroundChunk(c.getContext('2d')!, this.town, th, { x0: ci * span, y0: cj * span, x1: (ci + 1) * span, y1: (cj + 1) * span }, ci, cj, lod);
         this.chunks.set(key, c);
-        if (this.chunks.size > 90) this.chunks.delete(this.chunks.keys().next().value!);
       }
       // 1 pixel de tela a mais em cada bloco: sem emenda entre blocos quando o zoom não é inteiro (aparece no mar)
       const o = 1 / k; g.drawImage(c, ci * span, cj * span, span + o, span + o);
     }
-    for (const h of this.hitsArea) this.drawn.push({ kind: 'area', hit: h });
-    this.drawGroundOverlays(now);
+    const inViewR = (r: [number, number, number, number]) => r[2] > view.x0 - 40 && r[0] < view.x1 + 40 && r[3] > view.y0 - 40 && r[1] < view.y1 + 40;
+    this.hitsArea.forEach((h, i) => { if (inViewR(this.hitRects[i])) this.drawn.push({ kind: 'area', hit: h }); });
+    this.drawGroundOverlays(now, inViewR);
 
     // objetos ordenáveis: prédios inteiros, objetos das áreas, quem está ao ar livre
     const items: Array<Sortable & { kind: string }> = [];
     const inView = (r: [number, number, number, number]) => r[2] > view.x0 - 40 && r[0] < view.x1 + 40 && r[3] > view.y0 - 40 && r[1] < view.y1 + 40;
+    // quem está em cada prédio e andar: uma passada por quadro (antes, cada prédio visível varria todos os agentes)
+    const occ = this.occupancy();
+    const artS = this.artScale(k);
+    const vis: Array<{ b: BuildingInst; rect: [number, number, number, number] }> = [];
     for (const b of this.town.buildings.values()) {
-      const art = closedArt(b, th);
-      const L = art.layer; const rect: [number, number, number, number] = [L.x0, L.y0, L.x0 + L.canvas.width, L.y0 + L.canvas.height];
-      if (!inView(rect)) continue;
-      items.push({ kind: 'b', box: buildingBox(b, art.top), rect, draw: () => this.drawBuilding(b, now) });
+      const r = closedRect(b); const rect: [number, number, number, number] = [r.x0, r.y0, r.x1, r.y1];
+      if (inView(rect)) vis.push({ b, rect });
+    }
+    reserveClosed(artS === 1 ? vis.length * 1.3 + 8 : 80); reserveSmall(artS < 1 ? vis.length * 1.3 + 8 : 0);
+    const budget = t0 + 14; this.artPending = this.chunkPending; let newArt = 0;
+    for (const { b, rect } of vis) {
+      const special = this.focus?.building === b.id || this.anims.has(b.id) || this.pendingMove.has(b.id);
+      const ready = special || (artS === 1 ? hasClosed(b, th) : hasSmall(b, th, artS));
+      if (!ready) newArt++;
+      if (!ready && big && newArt > 1 && performance.now() > budget) { // arte ainda por desenhar: silhueta simples, o resto no próximo quadro
+        this.artPending = true;
+        items.push({ kind: 'b', box: buildingBox(b, this.scanTop(b) - 3), rect, draw: () => this.drawPlaceholder(b) });
+        continue;
+      }
+      const top = special || artS === 1 ? closedArt(b, th).top : closedSmall(b, th, artS).top;
+      items.push({ kind: 'b', box: buildingBox(b, top), rect, draw: () => this.drawBuilding(b, now, artS, occ) });
     }
     for (const it of this.items) {
       const rect: [number, number, number, number] = [it.px - it.sprite.ax, it.py - it.sprite.ay, it.px - it.sprite.ax + it.sprite.w, it.py - it.sprite.ay + it.sprite.h];
@@ -1005,7 +1109,8 @@ export class IsoEngine {
     }
     for (const rt of this.rts.values()) {
       if (rt.loc.b || this.hidden(rt)) continue;
-      items.push({ kind: 'a', box: this.agentBox(rt.pos), rect: this.agentRect(rt.pos), draw: () => this.drawAgent(rt, now) });
+      const ar = this.agentRect(rt.pos); if (!inView(ar)) continue;
+      items.push({ kind: 'a', box: this.agentBox(rt.pos), rect: ar, draw: () => this.drawAgent(rt, now) });
     }
     if (this.town.areaOf('agora') && this.npcVisible()) items.push({ kind: 'n', box: this.agentBox(this.npcSt.pos), rect: this.agentRect(this.npcSt.pos), draw: () => this.drawNpc(now) });
     const lona = this.tarpSpot();
@@ -1016,7 +1121,7 @@ export class IsoEngine {
     // casas com alguém dormindo
     const bairro = this.town.areaOf('bairro');
     if (bairro) {
-      const asleep = new Set([...this.rts.values()].filter((rt) => this.hidden(rt) && rt.life.plan?.kind === 'home').map((rt) => rt.house % Math.max(1, bairro.def.houses.length)));
+      const asleep = new Set([...occ.asleep].map((h) => h % Math.max(1, bairro.def.houses.length)));
       for (const hi of asleep) { const h = bairro.def.houses[hi]; if (!h) continue; const [px, py] = project(bairro.ox + h.x0 + (h.x1 - h.x0) * 0.3, h.h + 0.9, bairro.oz + h.z1); this.drawIcon(ZZZ_ROWS, { o: th.outline, w: '#fbf7ee' }, px, py); }
     }
     this.drawHoverOverlay(now);
@@ -1027,14 +1132,65 @@ export class IsoEngine {
     const s = this.stats; s.frames++; s.lastFrameMs = performance.now() - t0;
   }
 
+  /**
+   * Modo mapa (zoom distante): chão da cidade, ruas como linhas, cada construção como um bloco simples (cor pelo
+   * estado: trabalhando, esperando você) e, por região, um rótulo com construções e agentes. Nada de arte detalhada,
+   * bonecos ou ordenação: o custo acompanha o número de construções na tela, não o de agentes.
+   */
+  private drawMap(view: { x0: number; y0: number; x1: number; y1: number }): void {
+    const g = this.g; const th = this.theme; const k = this.k;
+    const poly = (pts: P2[], color: string) => { g.fillStyle = color; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); g.closePath(); g.fill(); };
+    const b = this.town.bounds;
+    poly([project(b.x0, 0, b.z0), project(b.x1, 0, b.z0), project(b.x1, 0, b.z1), project(b.x0, 0, b.z1)], th.ground[1]);
+    g.save(); g.strokeStyle = th.road.fill; g.lineWidth = 2.8 * KY; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath();
+    for (const r of this.town.roads) { const p0 = project(r.pts[0][0], 0, r.pts[0][1]); g.moveTo(p0[0], p0[1]); for (let i = 1; i < r.pts.length; i++) { const p = project(r.pts[i][0], 0, r.pts[i][1]); g.lineTo(p[0], p[1]); } }
+    g.stroke(); g.restore();
+    for (const a of this.town.areas.values()) poly(boxPoly(a.lot), th.plaza[0]);
+    // quem é de cada construção (pelo endereço do servidor, não por onde o boneco está agora)
+    const occ = new Map<string, Occ>();
+    for (const rt of this.rts.values()) {
+      const o = occ.get(rt.a.building) ?? { agents: 0, working: 0, waiting: 0 };
+      o.agents++; if (rt.visual === 'working') o.working++; if (rt.visual === 'waiting') o.waiting++;
+      occ.set(rt.a.building, o);
+    }
+    const inView = (r: { x0: number; y0: number; x1: number; y1: number }) => r.x1 > view.x0 && r.x0 < view.x1 && r.y1 > view.y0 && r.y0 < view.y1;
+    for (const bb of this.town.buildings.values()) {
+      if (!inView(closedRect(bb))) continue;
+      const f = bb.foot; const h = bb.base + bb.floors.length * FLOOR_H;
+      const o = occ.get(bb.id);
+      poly([project(f.x0, h, f.z1), project(f.x1, h, f.z1), project(f.x1, 0, f.z1), project(f.x0, 0, f.z1)], th.houseWall[1]);
+      poly([project(f.x1, h, f.z0), project(f.x1, h, f.z1), project(f.x1, 0, f.z1), project(f.x1, 0, f.z0)], th.houseWall[2]);
+      poly([project(f.x0, h, f.z0), project(f.x1, h, f.z0), project(f.x1, h, f.z1), project(f.x0, h, f.z1)], o?.waiting ? th.marks.waiting : o?.working ? th.teal[0] : th.roof[0]);
+    }
+    // rótulos por região, em pixels da tela (nítidos)
+    const items = [...this.town.buildings.values()].map((x) => ({ id: x.id, i: x.i, j: x.j, w: typeOf(x.kind)?.footprint[0] ?? 1, d: typeOf(x.kind)?.footprint[1] ?? 1 }));
+    const regions = regionsOf(items, occ, regionSize(k * (1 / this.dpr)));
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    const dpr = this.dpr; const fs = Math.round(12 * dpr);
+    g.font = `600 ${fs}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (const r of regions) {
+      const [wx, wy] = project(r.x, 0, r.z); const [sx, sy] = this.toScreen(wx, wy);
+      if (sx < -100 * dpr || sx > this.W + 100 * dpr || sy < -40 * dpr || sy > this.H + 40 * dpr) continue;
+      const l1 = `${r.agents} agente${r.agents === 1 ? '' : 's'} · ${r.structures} ${r.structures === 1 ? 'construção' : 'construções'}`;
+      const l2 = r.waiting ? `${r.waiting} esperando você` : r.working ? `${r.working} trabalhando` : '';
+      const w = Math.max(g.measureText(l1).width, l2 ? g.measureText(l2).width : 0) + 16 * dpr; const hh = (l2 ? 38 : 22) * dpr;
+      g.save(); g.globalAlpha = 0.94; g.fillStyle = '#fffdf8'; g.strokeStyle = th.outline; g.lineWidth = dpr;
+      g.beginPath(); g.roundRect(sx - w / 2, sy - hh / 2, w, hh, 8 * dpr); g.fill(); g.stroke(); g.restore();
+      g.fillStyle = '#1d2a33'; g.fillText(l1, sx, l2 ? sy - 8 * dpr : sy);
+      if (l2) { g.fillStyle = r.waiting ? '#744c00' : '#1f5f5a'; g.fillText(l2, sx, sy + 9 * dpr); }
+    }
+  }
+
   private agentBox(p: P3): AABB { return { x0: p[0] - AG, y0: p[1], z0: p[2] - AG, x1: p[0] + AG, y1: p[1] + AG_H, z1: p[2] + AG }; }
   private agentRect(p: P3): [number, number, number, number] { const [px, py] = project(p[0], p[1], p[2]); return [px - 16, py - 56, px + 16, py + 4]; }
 
   /** Estado visual de um prédio agora: fechado, aberto num andar ou em animação. */
-  private drawBuilding(b: BuildingInst, now: number): void {
+  private drawBuilding(b: BuildingInst, now: number, s = 1, occ: Occupancy = this.occupancy()): void {
     const g = this.g; const th = this.theme;
     const anim = this.anims.get(b.id);
     const lvl = this.focus?.building === b.id ? this.focus.level : null;
+    // estado estável e fechado em zoom afastado: a cópia reduzida (mesma imagem, menos memória)
+    if (s < 1 && !anim && lvl === null && !this.pendingMove.has(b.id)) { this.drawClosed(b, closedSmall(b, th, s), now, true, occ); return; }
     const closed = closedArt(b, th);
     const pend = this.pendingMove.get(b.id);
     if (pend) { // movido no editor: aguardando o servidor, já no lugar novo
@@ -1051,19 +1207,57 @@ export class IsoEngine {
       const top = this.scanTop(b);
       const cut = (l: number) => b.base + l * FLOOR_H + 1;
       const at = (h0: number, h1: number) => h0 + (h1 - h0) * p;
-      const up = (from: number | null) => { this.drawBuildingState(b, from, now, false); }; // por baixo, sem clique
+      const up = (from: number | null) => { this.drawBuildingState(b, from, now, false, occ); }; // por baixo, sem clique
       let h: number; let under: number | null; let over: number | null;
       if (anim.kind === 'open') { under = anim.to; over = null; h = at(top, cut(anim.to!)); up(under); this.registerState(b, under); }
       else if (anim.kind === 'close') { under = anim.from; over = null; h = at(cut(anim.from!), top); up(under); this.registerState(b, null); }
       else if (anim.to! > anim.from!) { under = anim.from; over = anim.to; h = at(cut(anim.from!), top); up(under); this.registerState(b, anim.to); }
       else { under = anim.to; over = anim.from; h = at(top, cut(anim.to!)); up(under); this.registerState(b, under); }
       const v = this.scanV(b, h);
-      this.clipPlane(r, v, 'below', () => this.drawBuildingState(b, over, now, false));
+      this.clipPlane(r, v, 'below', () => this.drawBuildingState(b, over, now, false, occ));
       this.scanLine(b, v, h, Math.min(1, p / 0.12, (1 - p) / 0.12));
       void lvl;
       return;
     }
-    this.drawBuildingState(b, lvl, now, true);
+    this.drawBuildingState(b, lvl, now, true, occ);
+  }
+
+  /** Prédio fechado (arte cheia ou reduzida): imagem, janelas acesas, faixas de clique e selo. */
+  private drawClosed(b: BuildingInst, art: { layer: Layer; windows: Array<{ level: number; poly: P2[] }>; bands: Array<{ level: number; faces: P2[][] }>; top: number }, now: number, register: boolean, occ: Occupancy): void {
+    const L = art.layer; const s = L.s ?? 1;
+    if (s === 1) this.g.drawImage(L.canvas, L.x0, L.y0); else this.g.drawImage(L.canvas, L.x0, L.y0, L.canvas.width / s, L.canvas.height / s);
+    this.stats.sprites++;
+    this.drawWindows(b, art.windows, now, occ);
+    if (register) for (const band of art.bands) this.drawn.push({ kind: 'band', building: b.id, level: band.level, faces: band.faces });
+    this.drawBadge(b, art.top, now, occ);
+  }
+
+  /** Silhueta enquanto a arte do prédio não fica pronta (zoom afastado com muitos prédios novos na tela). */
+  private drawPlaceholder(b: BuildingInst): void {
+    const g = this.g; const th = this.theme; const f = b.foot; const h = Math.max(1, this.scanTop(b) - 3);
+    const sil = [project(f.x0, h, f.z0), project(f.x1, h, f.z0), project(f.x1, 0, f.z0), project(f.x1, 0, f.z1), project(f.x0, 0, f.z1), project(f.x0, h, f.z1)];
+    g.save(); g.globalAlpha = 0.85; g.fillStyle = th.stone[1]; g.beginPath(); g.moveTo(sil[0][0], sil[0][1]); for (const [x, y] of sil.slice(1)) g.lineTo(x, y); g.closePath(); g.fill(); g.restore();
+  }
+
+  /** Escala da arte dos prédios para o zoom: perto, resolução cheia; longe, cópias reduzidas. */
+  private artScale(k: number): number { return k >= 0.6 ? 1 : k >= 0.3 ? 0.5 : 0.25; }
+
+  /** Uma passada por quadro: quem está em cada prédio e andar (janelas e selo) e quem dorme em casa. */
+  private occupancy(): Occupancy {
+    const by = new Map<string, { levels: Map<number, { n: number; working: number; waiting: number }>; badge: 'working' | 'waiting' | 'attention' | null }>();
+    const asleep = new Set<number>();
+    for (const rt of this.rts.values()) {
+      const hidden = this.hidden(rt);
+      if (hidden && rt.life.plan?.kind === 'home') asleep.add(rt.house);
+      const bid = rt.loc.b; if (!bid) continue;
+      let e = by.get(bid); if (!e) { e = { levels: new Map(), badge: null }; by.set(bid, e); }
+      if (rt.visual === 'waiting') e.badge = 'waiting'; else if (rt.visual === 'working' && e.badge !== 'waiting') e.badge = 'working'; else if (rt.visual === 'attention' && !e.badge) e.badge = 'attention';
+      if (hidden) continue;
+      const s = e.levels.get(rt.loc.level) ?? { n: 0, working: 0, waiting: 0 };
+      s.n++; if (rt.visual === 'working') s.working++; if (rt.visual === 'waiting') s.waiting++;
+      e.levels.set(rt.loc.level, s);
+    }
+    return { by, asleep };
   }
 
   private ease(p: number): number { const x = Math.max(0, Math.min(1, p)); return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
@@ -1150,16 +1344,9 @@ export class IsoEngine {
   }
 
   /** Estado estável: fechado (lvl null) ou aberto no andar lvl. `register` = entra no teste de clique. */
-  private drawBuildingState(b: BuildingInst, lvl: number | null, now: number, register: boolean): void {
+  private drawBuildingState(b: BuildingInst, lvl: number | null, now: number, register: boolean, occ: Occupancy = this.occupancy()): void {
     const g = this.g; const th = this.theme;
-    if (lvl === null) {
-      const art = closedArt(b, th);
-      g.drawImage(art.layer.canvas, art.layer.x0, art.layer.y0); this.stats.sprites++;
-      this.drawWindows(b, art.windows, now);
-      if (register) for (const band of art.bands) this.drawn.push({ kind: 'band', building: b.id, level: band.level, faces: band.faces });
-      this.drawBadge(b, art.top, now);
-      return;
-    }
+    if (lvl === null) { this.drawClosed(b, closedArt(b, th), now, register, occ); return; }
     const art = openArt(b, lvl, th);
     g.drawImage(art.lower.canvas, art.lower.x0, art.lower.y0);
     g.drawImage(art.back.canvas, art.back.x0, art.back.y0);
@@ -1209,15 +1396,9 @@ export class IsoEngine {
   }
 
   /** Janelas acesas por andar ocupado; telas tremulando onde alguém trabalha de verdade. */
-  private drawWindows(b: BuildingInst, wins: Array<{ level: number; poly: P2[] }>, now: number): void {
+  private drawWindows(b: BuildingInst, wins: Array<{ level: number; poly: P2[] }>, now: number, occ: Occupancy): void {
     const g = this.g; const th = this.theme; const night = th.id.includes('noite');
-    const byLevel = new Map<number, { n: number; working: number; waiting: number }>();
-    for (const rt of this.rts.values()) {
-      if (rt.loc.b !== b.id || this.hidden(rt)) continue;
-      const s = byLevel.get(rt.loc.level) ?? { n: 0, working: 0, waiting: 0 };
-      s.n++; if (rt.visual === 'working') s.working++; if (rt.visual === 'waiting') s.waiting++;
-      byLevel.set(rt.loc.level, s);
-    }
+    const byLevel = occ.by.get(b.id)?.levels; if (!byLevel) return;
     wins.forEach((w, i) => {
       const s = byLevel.get(w.level); if (!s) return;
       g.save();
@@ -1229,28 +1410,28 @@ export class IsoEngine {
   }
 
   /** Selo sobre o prédio fechado: há alguém trabalhando, na fila ou esperando você lá dentro. */
-  private drawBadge(b: BuildingInst, top: number, now: number): void {
-    let visual: 'working' | 'waiting' | 'attention' | null = null;
-    for (const rt of this.rts.values()) {
-      if (rt.loc.b !== b.id) continue;
-      if (rt.visual === 'waiting') visual = 'waiting'; else if (rt.visual === 'working' && visual !== 'waiting') visual = 'working'; else if (rt.visual === 'attention' && !visual) visual = 'attention';
-    }
+  private drawBadge(b: BuildingInst, top: number, now: number, occ: Occupancy): void {
+    const visual = occ.by.get(b.id)?.badge ?? null;
     if (!visual) return;
     const th = this.theme; const [px, py] = project(b.ox, top + 0.6, b.oz + b.spec.D / 2);
     const bob = Math.round(Math.sin(now / 300) * RES);
     this.drawIcon(MARK_ROWS[visual], { o: th.outline, c: th.marks[visual], g: th.outline }, px, py - 10 * RES + bob);
   }
 
-  private drawGroundOverlays(now: number): void {
+  private drawGroundOverlays(now: number, inViewR: (r: [number, number, number, number]) => boolean): void {
     const g = this.g; const th = this.theme;
-    if (this.editing) { // grade de lotes livres
+    if (this.editing) { // grade de lotes livres (só os que estão na tela)
       g.save(); g.globalAlpha = 0.5;
-      for (const l of this.town.lots) { const p = boxPoly(l.box); for (let i = 0; i < 4; i++) this.dashed(p[i], p[(i + 1) % 4], th.teal[1]); }
+      for (const l of this.town.lots) {
+        const p = boxPoly(l.box);
+        if (!inViewR([Math.min(...p.map((q) => q[0])), Math.min(...p.map((q) => q[1])), Math.max(...p.map((q) => q[0])), Math.max(...p.map((q) => q[1]))])) continue;
+        for (let i = 0; i < 4; i++) this.dashed(p[i], p[(i + 1) % 4], th.teal[1]);
+      }
       g.restore();
     }
     const h = this.hover;
     if (h?.kind === 'lot') {
-      const l = this.town.lots.find((x) => x.i === h.i && x.j === h.j);
+      const l = this.lotAt.get(`${h.i},${h.j}`);
       if (l) { g.save(); g.globalAlpha = 0.22 + 0.08 * Math.sin(now / 260); fillPoly(g, boxPoly(l.box), th.teal[0]); g.restore(); const p = boxPoly(l.box); g.save(); g.globalAlpha = 0.9; for (let i = 0; i < 4; i++) this.dashed(p[i], p[(i + 1) % 4], mix(th.teal[0], '#ffffff', 0.4)); g.restore(); }
     }
     if (h?.kind === 'struct' && this.editing && !this.drag) {
@@ -1645,6 +1826,7 @@ export class IsoEngine {
       return;
     }
     if (!d || d.moved) { this.canvas.style.cursor = this.editing ? 'default' : 'grab'; return; }
+    if (this.mapMode) { const [mx, my] = this.toWorld(e); this.tk = 0.35; this.tcx = mx; this.tcy = my; this.anchor = null; this.userCam = true; this.invalidate(); return; }
     const plaque = this.editing ? null : this.plaqueAt(e);
     if (plaque) { this.cb.onObject(plaque); return; }
     const [wx, wy] = this.toWorld(e);
@@ -1688,6 +1870,7 @@ export class IsoEngine {
     if (idx < 0) idx = ZOOMS.findIndex((z) => z > this.tk) - (dir > 0 ? 1 : 0);
     const ni = Math.max(0, Math.min(ZOOMS.length - 1, idx + dir));
     if (ZOOMS[ni] === this.tk) return;
+    if (ZOOMS[ni] < this.minZoom() - 1e-6) return;
     const r = this.canvas.getBoundingClientRect();
     const sx = ((e.clientX - r.left) / r.width) * this.W; const sy = ((e.clientY - r.top) / r.height) * this.H;
     const [wx, wy] = [(sx - this.W / 2) / this.k + this.cx, (sy - this.H / 2) / this.k + this.cy];

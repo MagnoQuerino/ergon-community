@@ -25,7 +25,7 @@ export default function IsoScene(p: SceneProps) {
     const ro = new ResizeObserver(([entry]) => e.resize(entry.contentRect.width, entry.contentRect.height));
     ro.observe(wrap.current!);
     (window as unknown as { __ergonIso?: IsoEngine }).__ergonIso = e; // inspeção em testes visuais e medição de desempenho
-    latest.current.onReady({ flyTo: (t) => e.flyTo(t), open: (b, l) => e.open(b, l), close: () => e.close() });
+    latest.current.onReady({ flyTo: (t) => e.flyTo(t), focusAgent: (id) => e.focusAgent(id), open: (b, l) => e.open(b, l), close: () => e.close() });
     return () => { ro.disconnect(); e.dispose(); eng.current = null; latest.current.onReady(null); };
   }, []);
 

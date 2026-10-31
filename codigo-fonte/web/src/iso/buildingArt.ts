@@ -17,13 +17,15 @@ import { blob, plantSprite, type Sprite } from './props.ts';
 import { antefixes, entablature, meanderBand, orderFor, roundColumnSprite, wallMap, type Order } from './architecture.ts';
 import { halfWallSprite, objectSprite, stepSprite } from './furniture.ts';
 import { mix, type Theme } from './theme.ts';
+import { Lru } from './lru.ts';
 
 export const SLAB = 0.5; // entablamento/laje entre andares (só na Stoa e nos pórticos clássicos)
 export const CUT_H = 0.85; // altura única do corte das paredes, colunas e parapeitos do andar aberto
 const IN_H = FLOOR_H - 0.4; // altura das paredes internas do andar aberto
 export const CUT_STEPS = 4; // degraus visíveis da escada que sobe para um andar oculto
 
-export interface Layer { canvas: HTMLCanvasElement; x0: number; y0: number }
+/** `s`: pixels do canvas por pixel do mundo (1 = resolução cheia; menor = cópia reduzida para zoom afastado). */
+export interface Layer { canvas: HTMLCanvasElement; x0: number; y0: number; s?: number }
 export interface ArtItem { sprite: Sprite; px: number; py: number; box: AABB; hit?: 'board' | 'shelf' | 'conselho' }
 export interface HitPoly { kind: 'board' | 'shelf' | 'conselho'; poly: P2[] }
 /** Andar para hover e clique: as faces visíveis (frente e direita; o topo só no último andar). */
@@ -406,15 +408,45 @@ function drawRoof(g: CanvasRenderingContext2D, P: Proj, G: Geo, t: Theme, look: 
 }
 
 // ---------------------------------------------------------------- fechado
-const closedCache = new Map<string, ClosedArt>();
-const keyOf = (b: BuildingInst, t: Theme) => `${t.id}|${b.id}|${b.kind}|${b.ox}|${b.oz}|${b.floors.map((f) => `${f.level}:${f.slots}`).join(',')}`;
+// arte fechada em resolução cheia: cache com descarte do menos usado; a capacidade acompanha os prédios na tela
+const closedCache = new Lru<ClosedArt>(80);
+const geoKey = (b: BuildingInst) => `${b.id}|${b.kind}|${b.ox}|${b.oz}|${b.floors.map((f) => `${f.level}:${f.slots}`).join(',')}`;
+const keyOf = (b: BuildingInst, t: Theme) => `${t.id}|${geoKey(b)}`;
+const rectCache = new Lru<Rect>(4096);
+const closedBox = (b: BuildingInst, G: Geo) => rectOf(boxCorners(b.foot.x0 - 1, 0, b.foot.z0 - 1, b.foot.x1 + 1.2, G.yTop + 3, b.foot.z1 + 1.5), 4 * RES);
+
+/** Retângulo (pixels do mundo) da arte fechada, só pela geometria: dá para recortar pela tela sem desenhar nada. */
+export function closedRect(b: BuildingInst): Rect {
+  const k = geoKey(b); const hit = rectCache.get(k); if (hit) return hit;
+  const r = closedBox(b, geo(b)); rectCache.set(k, r); return r;
+}
+/** Espaço no cache para pelo menos `n` prédios (os visíveis e uma folga). */
+export function reserveClosed(n: number): void { closedCache.reserve(n); }
+/** Já está pronta (sem custo de desenho)? */
+export function hasClosed(b: BuildingInst, t: Theme): boolean { return closedCache.has(keyOf(b, t)); }
+
+export interface SmallArt { layer: Layer; windows: WinQuad[]; bands: Band[]; top: number }
+const smallCache = new Lru<SmallArt>(120);
+/** Cópia reduzida da arte fechada (zoom afastado): a mesma imagem com menos memória; janelas e faixas iguais. */
+export function closedSmall(b: BuildingInst, t: Theme, s: number): SmallArt {
+  const key = `${keyOf(b, t)}|${s}`; const hit = smallCache.get(key); if (hit) return hit;
+  const full = closedArt(b, t); const src = full.layer.canvas;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(src.width * s)); c.height = Math.max(1, Math.ceil(src.height * s));
+  const g = c.getContext('2d')!; g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+  g.drawImage(src, 0, 0, c.width, c.height);
+  const art: SmallArt = { layer: { canvas: c, x0: full.layer.x0, y0: full.layer.y0, s: c.width / src.width }, windows: full.windows, bands: full.bands, top: full.top };
+  smallCache.set(key, art); return art;
+}
+export function hasSmall(b: BuildingInst, t: Theme, s: number): boolean { return smallCache.has(`${keyOf(b, t)}|${s}`); }
+export function reserveSmall(n: number): void { smallCache.reserve(n); }
 
 export function closedArt(b: BuildingInst, t: Theme): ClosedArt {
   const key = keyOf(b, t);
   const hit = closedCache.get(key); if (hit) return hit;
   const G = geo(b); const look = lookOf(b.spec.style, t);
   const e = b.spec.plinth + 0.6;
-  const rect = rectOf(boxCorners(b.foot.x0 - 1, 0, b.foot.z0 - 1, b.foot.x1 + 1.2, G.yTop + 3, b.foot.z1 + 1.5), 4 * RES);
+  const rect = closedBox(b, G);
   const wins: WinQuad[] = [];
   let top = G.yTop;
   const layer = makeLayer(rect, (g, P0) => {
@@ -439,7 +471,6 @@ export function closedArt(b: BuildingInst, t: Theme): ClosedArt {
   void e;
   const art: ClosedArt = { layer, bands, windows: wins.map(W), rect, top };
   closedCache.set(key, art);
-  if (closedCache.size > 80) closedCache.delete(closedCache.keys().next().value!);
   return art;
 }
 

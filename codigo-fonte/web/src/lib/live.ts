@@ -11,7 +11,14 @@ let lastEventAt: Date | null = null;
 
 const TYPES = ['tasks.changed', 'runs.changed', 'messages.changed', 'agents.changed', 'events.changed', 'audit.created', 'rules.changed', 'artifacts.changed', 'city.changed', 'proposals.changed', 'integrations.changed', 'routines.changed', 'runs.live', 'conversations.changed', 'resync'];
 
-function emitStatus(s: LiveStatus) { statusListeners.forEach((l) => l(s, lastEventAt)); }
+// o estado só vai para a tela quando muda (ou, ao vivo, no máximo a cada 5 s): uma rajada de eventos não redesenha o app
+let lastStatus: LiveStatus | null = null; let lastEmit = 0;
+function emitStatus(s: LiveStatus) {
+  const t = Date.now();
+  if (s === lastStatus && t - lastEmit < 5000) return;
+  lastStatus = s; lastEmit = t;
+  statusListeners.forEach((l) => l(s, lastEventAt));
+}
 
 export function startLive(): () => void {
   if (source) return () => {};
@@ -48,9 +55,10 @@ const cache = new Map<string, unknown>();
 export function clearResourceCache() { cache.clear(); inflight.clear(); }
 /** Busca em andamento por endereço: várias telas (ou vários avatares) pedindo o mesmo levam uma resposta só. */
 const inflight = new Map<string, Promise<unknown>>();
-function fetchShared<T>(url: string): Promise<T> {
+function fetchShared<T>(url: string, fresh = false): Promise<T> {
   const cur = inflight.get(url);
-  if (cur) return cur as Promise<T>;
+  // um evento que chega no meio de uma busca não pode ficar com o retrato de antes dele: busca de novo ao terminar
+  if (cur) return (fresh ? cur.then(() => fetchShared<T>(url), () => fetchShared<T>(url)) : cur) as Promise<T>;
   const p = api.get<T>(url).finally(() => { if (inflight.get(url) === p) inflight.delete(url); });
   inflight.set(url, p);
   return p;
@@ -64,12 +72,14 @@ export function useResource<T>(url: string | null, types: string[]): { data: T |
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const timer = useRef<number | null>(null);
-  const seq = useRef(0);
-  const load = useCallback(() => {
-    if (!url) return;
+  const seq = useRef(0); const shown = useRef(0); const curUrl = useRef(url); curUrl.current = url;
+  // fresh: pedido por um evento ou pela tela depois de uma ação (não reaproveita uma busca que começou antes)
+  const load = useCallback((fresh = false) => {
     const my = ++seq.current;
+    if (!url) { setLoading(false); return; }
     setLoading(true);
-    fetchShared<T>(url).then((d) => { cache.set(url, d); if (my === seq.current) { setData(d); setError(null); } })
+    // as buscas de um endereço terminam na ordem em que foram pedidas: mostra a mais nova que chegar
+    fetchShared<T>(url, fresh).then((d) => { cache.set(url, d); if (curUrl.current === url && my > shown.current) { shown.current = my; setData(d); setError(null); } })
       .catch((e: Error) => { if (my === seq.current) setError(e.message); })
       .finally(() => { if (my === seq.current) setLoading(false); });
   }, [url]);
@@ -79,12 +89,12 @@ export function useResource<T>(url: string | null, types: string[]): { data: T |
     const h: Handler = (t) => {
       if (t !== 'resync' && !types.includes(t)) return;
       if (timer.current !== null) return;
-      timer.current = window.setTimeout(() => { timer.current = null; load(); }, 150);
+      timer.current = window.setTimeout(() => { timer.current = null; load(true); }, 150);
     };
     handlers.add(h);
     return () => { handlers.delete(h); if (timer.current !== null) clearTimeout(timer.current); timer.current = null; };
   }, [key, load]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { data, error, reload: load, loading };
+  return { data, error, reload: useCallback(() => load(true), [load]), loading };
 }
 
 /** Busca em segundo plano o que as telas vão pedir, para abrirem já montadas. Sem pedir senha: o que estiver

@@ -132,7 +132,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
         )}
 
         <div className="stage__tools stage__tools--left">
-          <StructurePicker structures={state.structures} value={card} onPick={pick} />
+          <StructurePicker structures={state.structures} value={card} onPick={pick} onAgent={(id) => { setCard(null); onSelect(id); sceneApi.current?.focusAgent(id); }} />
           {ops && !editing && (
             <div className="ops-sum" role="group" aria-label="Trabalho da equipe">
               <button className={`ops-sum__part ${central === 'trabalho' ? 'is-on' : ''}`} onClick={() => (central === 'trabalho' ? setCentral(null) : openCentral('trabalho'))} aria-pressed={central === 'trabalho'}
@@ -203,37 +203,70 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
   );
 }
 
-/** Seletor singelo das estruturas: leva a câmera até ela (que aparece fechada). */
-function StructurePicker({ structures, value, onPick }: { structures: Structure[]; value: string | null; onPick: (id: string) => void }) {
+/**
+ * Localizar: busca agentes e construções (no servidor, por partes, inclusive o que está longe na cidade) e leva a
+ * câmera até lá; a lista só existe enquanto está aberta. Praças e áreas, que são poucas, vêm da própria cidade.
+ */
+function StructurePicker({ structures, value, onPick, onAgent }: { structures: Structure[]; value: string | null; onPick: (id: string) => void; onAgent: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useSurface(ref, { onClose: () => setOpen(false), outside: true, autoFocus: false, active: open });
+  useSurface(ref, { onClose: () => setOpen(false), outside: true, active: open });
   const cur = structures.find((s) => s.id === value);
-  const work = structures.filter((s) => typeOf(s.kind)?.category === 'trabalho');
-  const areas = structures.filter((s) => typeOf(s.kind)?.category !== 'trabalho');
-  const item = (s: Structure) => {
-    const t = typeOf(s.kind); const slots = s.floors.reduce((n, f) => n + f.slots, 0); const active = s.floors.reduce((n, f) => n + f.active, 0);
-    return (
-      <button key={s.id} role="option" aria-selected={s.id === value} className={`picker__item ${s.id === value ? 'picker__item--on' : ''}`} onClick={() => { onPick(s.id); setOpen(false); }}>
-        <span>{s.name}</span>
-        <span className="muted">{t?.common}{slots ? ` · ${active}/${slots}` : ''}</span>
-      </button>
-    );
-  };
   return (
     <div className="picker" ref={ref}>
       <button className="picker__btn" onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open}>
         <Icon name="map" size={15} /> {cur ? cur.name : 'Cidade'} <Icon name="chevron" size={14} />
       </button>
-      <div className={`picker__menu ${open ? 'picker__menu--open' : ''}`} role="listbox" aria-label="Estruturas">
-        <button role="option" aria-selected={!value} className={`picker__item ${!value ? 'picker__item--on' : ''}`} onClick={() => { onPick('cidade'); setOpen(false); }}>
-          <span>Cidade inteira</span><span className="muted">{structures.length} estruturas</span>
+      {open && <Finder structures={structures} value={value} onPick={(id) => { onPick(id); setOpen(false); }} onAgent={(id) => { onAgent(id); setOpen(false); }} />}
+    </div>
+  );
+}
+
+const foldName = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+function Finder({ structures, value, onPick, onAgent }: { structures: Structure[]; value: string | null; onPick: (id: string) => void; onAgent: (id: string) => void }) {
+  const [q, setQ] = useState(''); const [dq, setDq] = useState('');
+  useEffect(() => { const t = setTimeout(() => setDq(q.trim()), 200); return () => clearTimeout(t); }, [q]);
+  type Ag = { items: Array<{ id: string; name: string; role: string; building_name: string | null }>; total: number };
+  type Bu = { items: Array<{ id: string; name: string; kind_name: string; active: number; slots: number }>; total: number };
+  const agentsRes = useResource<Ag>(dq ? `/api/team/agents?q=${encodeURIComponent(dq)}&limit=6` : null, []);
+  const buildsRes = useResource<Bu>(dq ? `/api/team/structures?limit=8&sample=0&q=${encodeURIComponent(dq)}` : null, ['city.changed', 'agents.changed']);
+  // enquanto o termo novo carrega, a lista do termo anterior fica (sem piscar "nada encontrado")
+  const lastA = useRef<Ag | null>(null); const lastB = useRef<Bu | null>(null);
+  if (agentsRes.data) lastA.current = agentsRes.data; if (buildsRes.data) lastB.current = buildsRes.data;
+  const agents = { data: dq ? agentsRes.data ?? lastA.current : null }; const busy = !!dq && (agentsRes.loading || buildsRes.loading);
+  // sem termo: os prédios da própria cidade, como antes (até 60; a cidade grande busca pelo nome)
+  const LOCAL = 60;
+  const work = structures.filter((s) => typeOf(s.kind)?.category === 'trabalho');
+  const localB: Bu = { items: work.slice(0, LOCAL).map((s) => ({ id: s.id, name: s.name, kind_name: typeOf(s.kind)?.common ?? s.kind, active: s.floors.reduce((n, f) => n + f.active, 0), slots: s.floors.reduce((n, f) => n + f.slots, 0) })), total: work.length };
+  const builds = { data: dq ? buildsRes.data ?? lastB.current : localB };
+  const areas = structures.filter((s) => typeOf(s.kind)?.category !== 'trabalho' && (!dq || foldName(s.name).includes(foldName(dq))));
+  const none = dq && !busy && !agents.data?.items.length && !builds.data?.items.length && !areas.length;
+  return (
+    <div className="picker__menu picker__menu--open picker__menu--finder" role="listbox" aria-label="Localizar" aria-busy={busy}>
+      <label className="picker__search"><Icon name="search" size={14} />
+        <input data-autofocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Localizar agente ou construção" aria-label="Localizar agente ou construção" />
+      </label>
+      {!dq && <button role="option" aria-selected={!value} className={`picker__item ${!value ? 'picker__item--on' : ''}`} onClick={() => onPick('cidade')}><span>Cidade inteira</span><span className="muted">{structures.length} estruturas</span></button>}
+      {!!agents.data?.items.length && <div className="picker__group">Agentes{agents.data.total > agents.data.items.length ? ` · ${agents.data.total}` : ''}</div>}
+      {agents.data?.items.map((a) => (
+        <button key={a.id} role="option" aria-selected={false} className="picker__item" onClick={() => onAgent(a.id)}>
+          <span>{a.name}</span><span className="muted">{a.role}{a.building_name ? ` · ${a.building_name}` : ''}</span>
         </button>
-        {!!work.length && <div className="picker__group">Prédios</div>}
-        {work.map(item)}
-        {!!areas.length && <div className="picker__group">Praças, lazer e moradias</div>}
-        {areas.map(item)}
-      </div>
+      ))}
+      {!!builds.data?.items.length && <div className="picker__group">Prédios{builds.data.total > builds.data.items.length ? ` · ${builds.data.total} (busque pelo nome)` : ''}</div>}
+      {builds.data?.items.map((s) => (
+        <button key={s.id} role="option" aria-selected={s.id === value} className={`picker__item ${s.id === value ? 'picker__item--on' : ''}`} onClick={() => onPick(s.id)}>
+          <span>{s.name}</span><span className="muted">{s.kind_name}{s.slots ? ` · ${s.active}/${s.slots}` : ''}</span>
+        </button>
+      ))}
+      {!!areas.length && <div className="picker__group">Praças, lazer e moradias</div>}
+      {areas.map((s) => (
+        <button key={s.id} role="option" aria-selected={s.id === value} className={`picker__item ${s.id === value ? 'picker__item--on' : ''}`} onClick={() => onPick(s.id)}>
+          <span>{s.name}</span><span className="muted">{typeOf(s.kind)?.common}</span>
+        </button>
+      ))}
+      {none && <p className="hint picker__empty">Nada encontrado para “{dq}”.</p>}
     </div>
   );
 }

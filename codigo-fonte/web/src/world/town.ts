@@ -4,7 +4,7 @@
  * lotes livres e o roteador que leva alguém de qualquer ponto a qualquer outro — por corredores, escadas,
  * portas e ruas. TypeScript puro: testável sem navegador.
  */
-import { CELL, STREET, cityExtent, freeCells, lotBox, typeOf, type Extent, type Placed } from '../../../shared/city.ts';
+import { CELL, STREET, cityExtent, freeCells, lotBox, lotOwners, typeOf, type Extent, type Placed } from '../../../shared/city.ts';
 import { areaDef, type AreaDef } from './areas.ts';
 import { FLOOR_H, WALL_T, floorBlocks, footprintBox, interior, planFor, specOf, stairEnds, stairPath, type BuildingSpec, type FloorPlan } from './buildings.ts';
 import { grow, inBox, shiftBox, type Box, type P3, type Vec2 } from './geom.ts';
@@ -53,11 +53,14 @@ export class Town {
   readonly placed: Placed[];
   /** o pacote gráfico de onde sai a paisagem gerada (padrão: Grécia Clássica) */
   readonly pack: GraphicPack;
+  /** quem ocupa cada lote (`i,j` → id): "onde estou", ruas e lotes livres sem varrer todas as estruturas */
+  private readonly owners: Map<string, string>;
 
   constructor(structs: StructureIn[], pack: GraphicPack = GRECIA_CLASSICA) {
     this.pack = pack;
     this.placed = structs.filter((s) => typeOf(s.kind)).map((s) => ({ id: s.id, kind: s.kind, i: s.i, j: s.j }));
     const e = this.extent = cityExtent(this.placed);
+    this.owners = lotOwners(this.placed);
     this.bounds = { x0: e.i0 * CELL - STREET, z0: e.j0 * CELL - STREET, x1: e.i1 * CELL + STREET, z1: e.j1 * CELL + STREET };
     for (const s of structs) {
       const t = typeOf(s.kind); if (!t) continue;
@@ -65,7 +68,7 @@ export class Town {
       if (t.category === 'trabalho') this.buildings.set(s.id, this.makeBuilding(s, lot));
       else { const def = areaDef(s.kind); if (def) this.areas.set(s.id, { id: s.id, kind: s.kind, name: s.name, def, ox: (lot.x0 + lot.x1) / 2, oz: (lot.z0 + lot.z1) / 2, lot, i: s.i, j: s.j }); }
     }
-    for (const [i, j] of freeCells(this.placed)) this.lots.push({ i, j, box: lotBox(i, j, 1, 1) });
+    for (const [i, j] of freeCells(this.placed, this.owners)) this.lots.push({ i, j, box: lotBox(i, j, 1, 1) });
     this.makeStreets();
     this.makeRoads();
     this.makeDecor();
@@ -111,10 +114,7 @@ export class Town {
   areaOf(kind: string): AreaInst | null { for (const a of this.areas.values()) if (a.kind === kind) return a; return null; }
 
   // ---------------------------------------------------------------- ruas e decoração gerada
-  private ownerOf(i: number, j: number): string | null {
-    for (const p of this.placed) { const t = typeOf(p.kind)!; if (i >= p.i && i < p.i + t.footprint[0] && j >= p.j && j < p.j + t.footprint[1]) return p.id; }
-    return null;
-  }
+  private ownerOf(i: number, j: number): string | null { return this.owners.get(`${i},${j}`) ?? null; }
 
   private makeStreets(): void {
     const e = this.extent; const h = STREET / 2;
@@ -176,23 +176,26 @@ export class Town {
       }
       return out.sort((a, b) => b.length - a.length);
     };
-    for (let guard = 0; guard < 64; guard++) {
+    let rounds = 0; let left = 2;
+    for (; rounds < 64; rounds++) {
       const cs = comps();
+      left = cs.length;
       if (cs.length <= 1) break;
       const main = new Set(cs[0]); const others = new Set(cs.slice(1).flat());
       const prev = new Map<string, { from: string; edge: string }>(); const q = [...main]; const seen = new Set(q);
-      let hit: string | null = null;
-      while (q.length && !hit) {
-        const x = q.shift()!;
+      let hit: string | null = null; let head = 0;
+      while (head < q.length && !hit) {
+        const x = q[head++];
         for (const { to, edge } of adj.get(x) ?? []) {
           if (seen.has(to)) continue;
           seen.add(to); prev.set(to, { from: x, edge }); q.push(to);
           if (others.has(to)) { hit = to; break; }
         }
       }
-      if (!hit) break;
+      if (!hit) { left = 1; break; }
       for (let n: string = hit; prev.has(n); n = prev.get(n)!.from) keep.add(prev.get(n)!.edge);
     }
+    if (rounds >= 64 && left > 1) this.linkRest(comps(), adj, keep);
     const degree = new Map<string, number>();
     for (const k of keep) {
       const ed = valid.get(k)!;
@@ -212,6 +215,29 @@ export class Town {
     for (const [n, deg] of degree) {
       const [i, j] = n.split(',').map(Number);
       this.junctions.push({ x: i * CELL, z: j * CELL, r: deg >= 3 ? 1.05 : 0.78, degree: deg });
+    }
+  }
+
+  /**
+   * Cidade com muitas ilhas de rua (centenas de estruturas espaçadas): em vez de parar e deixar a rede partida,
+   * liga todas numa busca em largura só, que cresce a partir da rede principal — cada ilha alcançada entra como
+   * origem. Linear no tamanho da malha; determinística (mesma ordem de sempre).
+   */
+  private linkRest(cs: string[][], adj: Map<string, Array<{ to: string; edge: string }>>, keep: Set<string>): void {
+    const compOf = new Map<string, number>(); cs.forEach((c, k) => { for (const n of c) compOf.set(n, k); });
+    const joined = new Set<number>([0]);
+    const prev = new Map<string, { from: string; edge: string }>(); const q = [...cs[0]]; const seen = new Set(q);
+    for (let head = 0; head < q.length && joined.size < cs.length; head++) {
+      const x = q[head];
+      for (const { to, edge } of adj.get(x) ?? []) {
+        if (seen.has(to)) continue;
+        seen.add(to); prev.set(to, { from: x, edge }); q.push(to);
+        const k = compOf.get(to);
+        if (k === undefined || joined.has(k)) continue;
+        joined.add(k);
+        for (let n: string = to; prev.has(n); n = prev.get(n)!.from) keep.add(prev.get(n)!.edge);
+        for (const n of cs[k]) if (!seen.has(n)) { seen.add(n); q.push(n); }
+      }
     }
   }
 
@@ -267,7 +293,7 @@ export class Town {
       const d = a.def;
       for (const bx of d.blocks) g.block(shiftBox(bx, a.ox, a.oz), OUT_R);
       for (const c of d.circles) g.blockCircle(c.x + a.ox, c.z + a.oz, c.r + OUT_R);
-      if (d.blockTest) { const t = d.blockTest; const L = a.lot; g.blockWhere((x, z) => inBox(L, x, z) && t(x - a.ox, z - a.oz)); }
+      if (d.blockTest) { const t = d.blockTest; const L = a.lot; g.blockWhere((x, z) => inBox(L, x, z) && t(x - a.ox, z - a.oz), L); }
     }
     // braseiros, troncos e pedras não se atravessam (arbusto baixo, sim)
     for (const p of this.decor) if (p.kind !== 'bush') g.blockCircle(p.x, p.z, (p.kind === 'brazier' ? 0.25 : p.kind === 'rock' ? 0.3 * p.k : 0.18) + OUT_R);
@@ -277,7 +303,10 @@ export class Town {
   // ---------------------------------------------------------------- onde está, por onde ir
   /** Em qual prédio e andar está um ponto (ou na cidade). */
   locate(x: number, y: number, z: number): Loc {
-    for (const b of this.buildings.values()) {
+    const ci = Math.floor(x / CELL); const cj = Math.floor(z / CELL); const seen = new Set<string>();
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const id = this.owners.get(`${ci + di},${cj + dj}`); if (!id || seen.has(id)) continue; seen.add(id);
+      const b = this.buildings.get(id); if (!b) continue;
       if (!inBox(b.walls, x, z, 1e-6)) continue;
       const level = Math.max(0, Math.min(b.floors.length - 1, Math.floor((y - b.base) / FLOOR_H + 0.02)));
       return { b: b.id, level };

@@ -158,14 +158,18 @@ export function occupancy(placed: Placed[]): number {
   return placed.reduce((s, p) => s + area(cellsOf(p)), 0) / area(e);
 }
 
-/** Lotes livres (cada célula da área que nenhuma estrutura ocupa). */
-export function freeCells(placed: Placed[]): Array<[number, number]> {
+/** Qual estrutura ocupa cada lote (chave `i,j`): consulta O(1) para lotes livres, ruas e "onde estou". */
+export function lotOwners(placed: Placed[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const p of placed) { const c = cellsOf(p); for (let j = c.j0; j < c.j1; j++) for (let i = c.i0; i < c.i1; i++) if (!m.has(`${i},${j}`)) m.set(`${i},${j}`, p.id); }
+  return m;
+}
+
+/** Lotes livres (cada célula da área que nenhuma estrutura ocupa), em ordem de linha. */
+export function freeCells(placed: Placed[], owners: Map<string, string> = lotOwners(placed)): Array<[number, number]> {
   const e = cityExtent(placed);
   const out: Array<[number, number]> = [];
-  for (let j = e.j0; j < e.j1; j++) for (let i = e.i0; i < e.i1; i++) {
-    const c: Extent = { i0: i, j0: j, i1: i + 1, j1: j + 1 };
-    if (!placed.some((p) => overlaps(cellsOf(p), c))) out.push([i, j]);
-  }
+  for (let j = e.j0; j < e.j1; j++) for (let i = e.i0; i < e.i1; i++) if (!owners.has(`${i},${j}`)) out.push([i, j]);
   return out;
 }
 

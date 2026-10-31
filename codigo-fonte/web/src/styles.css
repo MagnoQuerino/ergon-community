@@ -1883,3 +1883,12 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .distrib__blocked { border-left: 3px solid var(--warn); padding: 4px 10px; }
 .distrib__blocked ul { margin: 0; padding-left: 18px; font-size: 13px; }
 @media (max-width: 720px) { .distrib__cols { grid-template-columns: 1fr; } }
+
+/* Localizar (seletor da Cidade): busca no topo da lista */
+.picker__search { display: flex; align-items: center; gap: 6px; margin: 2px 2px 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--muted); }
+.picker__search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 7px 2px; outline: none; color: var(--ink); }
+.picker__empty { padding: 6px 10px; }
+.picker__search:focus-within { border-color: var(--teal); color: var(--ink); }
+.picker__menu--finder { animation: pickerin .16s ease; }
+@keyframes pickerin { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
+@media (prefers-reduced-motion: reduce) { .picker__menu--finder { animation: none; } }

@@ -34,6 +34,8 @@ export interface SceneFocus { building: string; level: number }
 /** Comandos que a interface dá ao palco (câmera e prédio aberto). */
 export interface SceneApi {
   flyTo(target: string | 'cidade'): void;
+  /** câmera até o agente (abre o andar dele), mesmo já selecionado */
+  focusAgent(id: string): void;
   open(building: string, level: number): void;
   close(): void;
 }

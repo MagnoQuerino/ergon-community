@@ -6,6 +6,7 @@
 import { FIG_AX, HEAD_BOTTOM, figureGrid, gridBox, lookFor, type Grid, type Look } from './figures.ts';
 import { ALEXANDRIA_DIA, mix, type Theme } from './theme.ts';
 import { agentSkinLook, type ActiveSkin } from './skin.ts';
+import { Lru } from './lru.ts';
 
 /** 3 de largura por 4 de altura: 21 × 28 pixels da grade (cabeça inteira e o começo dos ombros). */
 export const PORTRAIT_W = 21;
@@ -32,19 +33,8 @@ export function portraitGrid(a: PortraitAgent, t: Theme = ALEXANDRIA_DIA, skin: 
 /** Fundo do retrato: a cor do agente bem clara (o boneco aparece inteiro, sem se perder). */
 export const portraitBackground = (color: string): string => mix(color, '#f6efe1', 0.78);
 
-/**
- * Cache com descarte (o menos usado sai primeiro): uma equipe grande rolando na galeria não faz a memória crescer para
- * sempre. A chave já inclui aparência, skin e escala, então trocar qualquer uma gera outra imagem.
- */
-export class Lru<V> {
-  private readonly m = new Map<string, V>();
-  readonly max: number;
-  constructor(max: number) { this.max = max; }
-  get(k: string): V | undefined { const v = this.m.get(k); if (v !== undefined) { this.m.delete(k); this.m.set(k, v); } return v; }
-  set(k: string, v: V): void { this.m.delete(k); this.m.set(k, v); while (this.m.size > this.max) this.m.delete(this.m.keys().next().value as string); }
-  get size(): number { return this.m.size; }
-  clear(): void { this.m.clear(); }
-}
+// cache com descarte compartilhado com a arte da cidade (iso/lru.ts)
+export { Lru } from './lru.ts';
 
 const cache = new Lru<string>(600);
 /** Identidade da skin para o cache: o id e quem veste cada personagem. */

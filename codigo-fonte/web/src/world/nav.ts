@@ -42,10 +42,15 @@ export class NavGrid {
       if (Math.hypot(cx - x, cz - z) <= r) this.blocked[j * this.w + i] = 1;
     }
   }
-  /** Bloqueia por função (formas que não são caixas: arquibancada, círculos). */
-  blockWhere(test: (x: number, z: number) => boolean): void {
-    for (let j = 0; j < this.h; j++) for (let i = 0; i < this.w; i++) { const [x, z] = this.center(i, j); if (test(x, z)) this.blocked[j * this.w + i] = 1; }
+  /** Bloqueia por função (formas que não são caixas: arquibancada, círculos); `within` limita a varredura a uma caixa. */
+  blockWhere(test: (x: number, z: number) => boolean, within?: Box): void {
+    const i0 = within ? Math.max(0, Math.floor((within.x0 - this.x0) / this.res) - 1) : 0; const i1 = within ? Math.min(this.w - 1, Math.ceil((within.x1 - this.x0) / this.res) + 1) : this.w - 1;
+    const j0 = within ? Math.max(0, Math.floor((within.z0 - this.z0) / this.res) - 1) : 0; const j1 = within ? Math.min(this.h - 1, Math.ceil((within.z1 - this.z0) / this.res) + 1) : this.h - 1;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const [x, z] = this.center(i, j); if (test(x, z)) this.blocked[j * this.w + i] = 1; }
   }
+
+  // memória da busca reaproveitada entre chamadas (antes: três arrays do tamanho da grade a cada busca, mesmo curta)
+  private buf: { gs: Float32Array; came: Int32Array; seen: Int32Array; done: Int32Array; stamp: number } | null = null;
 
   /** Célula livre mais próxima (busca em anéis), ou null. */
   nearestFree(x: number, z: number, maxR = 6): [number, number] | null {
@@ -87,15 +92,22 @@ export class NavGrid {
     if (!s || !g) return null;
     const W = this.w; const N = W * this.h;
     const si = s[1] * W + s[0]; const gi = g[1] * W + g[0];
-    const gs = new Float32Array(N).fill(Infinity); const came = new Int32Array(N).fill(-1); const closed = new Uint8Array(N);
+    // marca da busca atual: uma célula só vale se foi tocada nesta busca (sem preencher a grade inteira)
+    if (!this.buf) this.buf = { gs: new Float32Array(N), came: new Int32Array(N), seen: new Int32Array(N), done: new Int32Array(N), stamp: 0 };
+    const B = this.buf;
+    if (B.stamp >= 0x7ffffffe) { B.seen.fill(0); B.done.fill(0); B.stamp = 0; }
+    const st = ++B.stamp;
+    const G = (i: number) => (B.seen[i] === st ? B.gs[i] : Infinity);
+    const setG = (i: number, v: number, from: number) => { B.seen[i] = st; B.gs[i] = v; B.came[i] = from; };
+    const came = (i: number) => (B.seen[i] === st ? B.came[i] : -1);
     const heap = new MinHeap();
     const hx = (i: number) => { const di = Math.abs((i % W) - g[0]); const dj = Math.abs(Math.floor(i / W) - g[1]); return (Math.max(di, dj) - Math.min(di, dj)) + SQ2 * Math.min(di, dj); };
-    gs[si] = 0; heap.push(si, hx(si));
+    setG(si, 0, -1); heap.push(si, hx(si));
     let found = si === gi;
     while (!found && heap.size) {
       const cur = heap.pop();
-      if (closed[cur]) continue;
-      closed[cur] = 1;
+      if (B.done[cur] === st) continue;
+      B.done[cur] = st;
       if (cur === gi) { found = true; break; }
       const ci = cur % W; const cj = (cur - ci) / W;
       for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
@@ -103,14 +115,14 @@ export class NavGrid {
         const ni = ci + di; const nj = cj + dj;
         if (!this.isFreeCell(ni, nj)) continue;
         if (di && dj && (!this.isFreeCell(ci + di, cj) || !this.isFreeCell(ci, cj + dj))) continue; // sem cortar quina
-        const nidx = nj * W + ni; if (closed[nidx]) continue;
-        const ng = gs[cur] + (di && dj ? SQ2 : 1);
-        if (ng < gs[nidx]) { gs[nidx] = ng; came[nidx] = cur; heap.push(nidx, ng + hx(nidx)); }
+        const nidx = nj * W + ni; if (B.done[nidx] === st) continue;
+        const ng = G(cur) + (di && dj ? SQ2 : 1);
+        if (ng < G(nidx)) { setG(nidx, ng, cur); heap.push(nidx, ng + hx(nidx)); }
       }
     }
     if (!found) return null;
     const cells: Vec2[] = [];
-    for (let c = gi; c !== -1; c = came[c]) { cells.push(this.center(c % W, Math.floor(c / W))); if (c === si) break; }
+    for (let c = gi; c !== -1; c = came(c)) { cells.push(this.center(c % W, Math.floor(c / W))); if (c === si) break; }
     cells.reverse();
     // alisamento: de cada ponto, pula para o mais distante que se vê em linha reta
     const raw: Vec2[] = [from, ...cells, to];
