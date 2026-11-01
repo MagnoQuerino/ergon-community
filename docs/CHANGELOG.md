@@ -1,5 +1,17 @@
 # Novidades
 
+## 1.1.0-rc.21 (pré-versão de teste)
+
+- **Crie setores e construções direto na Equipe.** No alto da tela há "Novo setor" (vendo por setor) e "Nova
+  construção" (vendo por construção). A construção aparece sozinha na cidade, no lugar livre mais perto do centro.
+  Não há mais limite de 12 setores.
+- **Arraste pelo card inteiro**, não só pelo boneco. Um clique continua abrindo o perfil.
+- **Área maior para soltar:** ao arrastar, a faixa de baixo ocupa a largura da tela e, vendo por setor, mostra os
+  setores para soltar direto neles.
+- **Entrar com a Microsoft já vem pronto:** nada para registrar. Funciona com conta pessoal (Outlook, Hotmail) e de
+  empresa ou escola. Na conta de empresa ou escola, o Ergon pede logo em seguida também as conversas do Teams e as
+  tarefas compartilhadas; se você recusar, a conexão continua valendo.
+
 ## 1.1.0-rc.20 (pré-versão de teste)
 
 Traz também tudo da rc.19, que não foi publicada sozinha.

@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { KDF_STRONG, KDF_TEST, type KdfParams } from './security/crypto.ts';
 
+/** App público do Ergon no Microsoft Entra (todas as contas; docs/MICROSOFT.md). */
+export const ERGON_MS_APP = 'a5c42f25-1caa-45db-9220-79708764914e';
+
 export type ExecutorMode = 'simulated' | 'hermes';
 /**
  * Distribuição: 'proprietary' carrega o módulo opcional em server/src/world, se existir; a Community não traz esse
@@ -152,7 +155,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     hermesControlUrl: env.ERGON_HERMES_CONTROL_URL || null,
     motorManagerUrl: env.ERGON_MOTOR_MANAGER_URL && /^https?:\/\/[\w.-]+(:\d+)?$/.test(env.ERGON_MOTOR_MANAGER_URL) ? env.ERGON_MOTOR_MANAGER_URL : null,
     motorIdleMinutes: int(env.ERGON_MOTOR_IDLE_MINUTES, 120, 10, 7 * 24 * 60),
-    msClientId: env.ERGON_MS_CLIENT_ID && /^[0-9a-f-]{36}$/i.test(env.ERGON_MS_CLIENT_ID) ? env.ERGON_MS_CLIENT_ID : null,
+    // o app público do Ergon no Entra (qualquer conta Microsoft, pessoal ou de empresa) já vem embutido: identificador
+    // de app público não é segredo (PKCE, sem senha). Outro app: ERGON_MS_CLIENT_ID=<id>; desligar: ERGON_MS_CLIENT_ID=off
+    msClientId: env.ERGON_MS_CLIENT_ID === 'off' ? null : env.ERGON_MS_CLIENT_ID && /^[0-9a-f-]{36}$/i.test(env.ERGON_MS_CLIENT_ID) ? env.ERGON_MS_CLIENT_ID : ERGON_MS_APP,
     googleClientId: env.ERGON_GOOGLE_CLIENT_ID && /^[\w-]+\.apps\.googleusercontent\.com$/.test(env.ERGON_GOOGLE_CLIENT_ID) ? env.ERGON_GOOGLE_CLIENT_ID : null,
     googleClientSecret: secret(env.ERGON_GOOGLE_CLIENT_SECRET, 16, 'ERGON_GOOGLE_CLIENT_SECRET'),
     googleTesting: env.ERGON_GOOGLE_TESTING !== '0',

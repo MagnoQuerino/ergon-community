@@ -5,13 +5,17 @@ autoriza. Para esse botão funcionar, o aplicativo Ergon precisa existir uma vez
 dá ao Ergon um "identificador de aplicativo"). Isso é feito por quem instala o Ergon — numa versão em nuvem,
 pelo fornecedor, uma vez para todos os clientes.
 
+**O Ergon já vem com o app público registrado** (ID `a5c42f25-1caa-45db-9220-79708764914e`, qualquer conta Microsoft —
+pessoal, de empresa ou de escola): ninguém precisa registrar nada. Os passos abaixo só valem para quem quiser usar um
+app próprio (`ERGON_MS_CLIENT_ID=<id>`) ou desligar o botão (`ERGON_MS_CLIENT_ID=off`).
+
 ## Registrar o aplicativo (uma vez, ~5 minutos)
 
 1. Entre em <https://entra.microsoft.com> › **Aplicativos** › **Registros de aplicativo** › **Novo registro**.
 2. Nome: `Ergon`. Tipos de conta: **Contas em qualquer diretório organizacional e contas Microsoft pessoais**.
-3. URI de redirecionamento: plataforma **Cliente público/nativo (celular e desktop)** →
-   `http://localhost:8787/api/integrations/microsoft/callback`
-   (se o Ergon usar outra porta, troque `8787`).
+3. URI de redirecionamento: plataforma **Aplicativos móveis e da área de trabalho** (no registro novo aparece
+   como "Cliente público/nativo (celular e desktop)"; **não** use "Web") →
+   `http://localhost/api/integrations/microsoft/callback`, sem porta.
    `localhost` vale: quem volta para esse endereço depois do login é o seu navegador, no seu computador (a
    Microsoft nunca o acessa); para apps nativos a Microsoft também ignora a porta. Na nuvem, acrescente o
    endereço HTTPS do servidor ao mesmo app.
@@ -21,6 +25,9 @@ pelo fornecedor, uma vez para todos os clientes.
    `Mail.Read.Shared`, `Calendars.Read` e `Files.Read.All`. Nenhuma exige consentimento de administrador; cada
    pessoa autoriza a própria conta ao entrar. **Não** clique em "Conceder consentimento do administrador".
    (A lista no portal documenta o app; o que vale no login é o que o Ergon pede — `server/src/services/sso.ts`.)
+   O login tem duas etapas: primeiro o que existe para qualquer conta; se a conta for de empresa ou escola, logo em
+   seguida `Chat.Read`, `Tasks.Read.Shared` e `Mail.Read.Shared` (a Microsoft não tem Teams nem Planner para conta
+   pessoal, e pedir esses escopos a uma conta pessoal dá erro). Recusar a segunda etapa mantém a conexão.
 6. Copie o **ID do aplicativo (cliente)** e coloque no arquivo `.env` do projeto:
 
    ```

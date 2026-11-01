@@ -5,7 +5,7 @@
  * Versão local: criar estruturas e andares é grátis e sem limite de quantidade (só o máximo de andares
  * de cada tipo). Nada aqui cobra, debita ou simula pagamento.
  */
-import { CATALOG, DEFAULT_LOTS, cityExtent, fitAt, freeCells, placeError, typeOf, type Placed, type PlaceError } from '../../../shared/city.ts';
+import { CATALOG, DEFAULT_LOTS, cellsOf, cityExtent, fitAt, footprintOf, freeCells, placeError, typeOf, type Placed, type PlaceError } from '../../../shared/city.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, id, notFound, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
@@ -92,13 +92,14 @@ export function listStructures(db: Db, workspaceId: string): StructureInfo[] {
 const floorName = (level: number) => (level === 0 ? 'Térreo' : `${level}º andar`);
 
 /** Loja (versão local): cria a estrutura no lote, com os andares iniciais do tipo. Grátis, sem limite de quantidade. */
-export function createStructure(db: Db, bus: Bus, workspaceId: string, actorUserId: string, input: { kind: string; i: number; j: number; name?: string }): string {
+export function createStructure(db: Db, bus: Bus, workspaceId: string, actorUserId: string, input: { kind: string; i: number; j: number; name?: string }, opts: { edge?: boolean } = {}): string {
   const t = typeOf(input.kind);
   if (!t || !t.store) throw new HttpError(400, 'kind', 'tipo de estrutura indisponível na loja');
   const bid = db.tx(() => {
     const rs = rows(db, workspaceId);
     const err = placeError(placedOf(rs), t.id, input.i, input.j);
-    if (err) throw new HttpError(409, err, PLACE_MSG[err]);
+    // edge: lugar escolhido pelo sistema logo depois da borda (a área da cidade cresce para incluí-lo)
+    if (err && !(opts.edge && err === 'outside')) throw new HttpError(409, err, PLACE_MSG[err]);
     const same = rs.filter((r) => r.kind === t.id).length;
     const name = (input.name ?? '').trim() || (same ? `${t.name} ${same + 1}` : t.name);
     if (name.length > 60) throw new HttpError(400, 'name', 'nome: até 60 caracteres');
@@ -190,6 +191,41 @@ export function addStructureFloor(db: Db, bus: Bus, workspaceId: string, actorUs
  * mais antiga que ainda pode subir; se nenhuma puder, uma construção nova no lote livre mais perto do centro (a
  * maior que couber). Grátis e registrado no log. Devolve um andar com vaga.
  */
+/** O lote livre mais perto do centro da cidade onde cabe uma construção deste tipo (o mesmo do crescimento automático). */
+function autoLot(placed: Placed[], kind: string): [number, number] | null {
+  const e = cityExtent(placed);
+  const [cx, cj] = [(e.i0 + e.i1) / 2, (e.j0 + e.j1) / 2];
+  const cells = freeCells(placed).sort((a, b) => Math.hypot(a[0] - cx, a[1] - cj) - Math.hypot(b[0] - cx, b[1] - cj));
+  for (const [ci, cjj] of cells) { const at = fitAt(placed, kind, ci, cjj); if (at) return at; }
+  return null;
+}
+
+/** Sem lugar dentro da área (cidade pequena cheia, construção grande): logo depois da borda, o mais perto do centro. */
+function edgeLot(placed: Placed[], kind: string): [number, number] {
+  const e = cityExtent(placed); const [w, d] = footprintOf(kind);
+  const [cx, cj] = [(e.i0 + e.i1) / 2, (e.j0 + e.j1) / 2];
+  const free = (i: number, j: number) => !placed.some((p) => { const c = cellsOf(p); return i < c.i1 && c.i0 < i + w && j < c.j1 && c.j0 < j + d; });
+  let best: [number, number] = [e.i1, e.j0]; let bd = Infinity;
+  for (let j = e.j0 - d; j <= e.j1; j++) for (let i = e.i0 - w; i <= e.i1; i++) {
+    if (!free(i, j)) continue;
+    const dist = Math.hypot(i + w / 2 - cx, j + d / 2 - cj);
+    if (dist < bd) { bd = dist; best = [i, j]; }
+  }
+  return best;
+}
+
+/** Construção nova sem escolher lote (Equipe → "Nova construção"): vai para o lugar livre mais perto do centro. */
+export function createStructureAuto(db: Db, bus: Bus, workspaceId: string, actorUserId: string, input: { kind: string; name?: string }): string {
+  return db.tx(() => {
+    if (!typeOf(input.kind)) throw new HttpError(400, 'unknown_kind', PLACE_MSG.unknown_kind);
+    const placed = placedOf(rows(db, workspaceId));
+    const at = autoLot(placed, input.kind);
+    if (at) return createStructure(db, bus, workspaceId, actorUserId, { kind: input.kind, i: at[0], j: at[1], name: input.name });
+    const [i, j] = edgeLot(placed, input.kind);
+    return createStructure(db, bus, workspaceId, actorUserId, { kind: input.kind, i, j, name: input.name }, { edge: true });
+  });
+}
+
 export function growForAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: string, cap: number): string {
   return db.tx(() => {
     const rs = rows(db, workspaceId);
@@ -204,17 +240,12 @@ export function growForAgent(db: Db, bus: Bus, workspaceId: string, actorUserId:
       return fid;
     }
     const placed = placedOf(rs);
-    const e = cityExtent(placed);
-    const [cx, cj] = [(e.i0 + e.i1) / 2, (e.j0 + e.j1) / 2];
-    const cells = freeCells(placed).sort((a, b) => Math.hypot(a[0] - cx, a[1] - cj) - Math.hypot(b[0] - cx, b[1] - cj));
     for (const kind of ['stoa', 'emporion', 'didaskaleion', 'oikos']) {
-      for (const [ci, cjj] of cells) {
-        const at = fitAt(placed, kind, ci, cjj);
-        if (!at) continue;
-        const bid = createStructure(db, bus, workspaceId, actorUserId, { kind, i: at[0], j: at[1] });
-        note(`${typeOf(kind)!.name} nova`);
-        return db.get<{ id: string }>('SELECT id FROM floors WHERE building_id = ? AND removed_at IS NULL ORDER BY level LIMIT 1', bid)!.id;
-      }
+      const at = autoLot(placed, kind);
+      if (!at) continue;
+      const bid = createStructure(db, bus, workspaceId, actorUserId, { kind, i: at[0], j: at[1] });
+      note(`${typeOf(kind)!.name} nova`);
+      return db.get<{ id: string }>('SELECT id FROM floors WHERE building_id = ? AND removed_at IS NULL ORDER BY level LIMIT 1', bid)!.id;
     }
     throw new HttpError(409, 'capacity_exceeded', 'Não achei lugar na cidade para mais uma construção.');
   });

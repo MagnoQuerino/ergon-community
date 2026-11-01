@@ -21,6 +21,11 @@ export interface SsoProvider {
   authorizeUrl: string;
   tokenUrl: string;
   scopes: string;
+  /**
+   * Permissões que só existem em conta de trabalho ou escola (Microsoft: Teams, Planner compartilhado, caixas
+   * compartilhadas). Pedidas numa segunda etapa, só para essas contas: conta pessoal entra sem erro.
+   */
+  workScopes?: string;
   /** parâmetros extras do endereço de login (ex.: pedir refresh token no Google) */
   extra: Record<string, string>;
   /** a Microsoft quer `scope` também na troca do código; o Google não */
@@ -48,9 +53,11 @@ export const SSO: Record<SsoKind, SsoProvider> = {
     kind: 'microsoft', label: 'a Microsoft', place: 'na Microsoft (Entra)',
     authorizeUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
     tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-    // só leitura (nada é enviado ou alterado em seu nome): tarefas, conversas do Teams, e-mail, agenda e arquivos —
-    // o que as rotinas e o espelho de tarefas usam. Nenhum exige consentimento de administrador.
-    scopes: 'openid profile offline_access User.Read Tasks.Read Tasks.Read.Shared Chat.Read Mail.Read Mail.Read.Shared Calendars.Read Files.Read.All',
+    // só leitura (nada é enviado ou alterado em seu nome): tarefas, e-mail, agenda e arquivos — o que as rotinas e o
+    // espelho de tarefas usam; valem para conta pessoal e de trabalho. Nenhum exige consentimento de administrador.
+    scopes: 'openid profile offline_access User.Read Tasks.Read Mail.Read Calendars.Read Files.Read.All',
+    // só conta de trabalho/escola (a Microsoft não tem Teams, Planner nem caixa compartilhada para conta pessoal)
+    workScopes: 'Chat.Read Tasks.Read.Shared Mail.Read.Shared',
     extra: { response_mode: 'query', prompt: 'select_account' }, scopeOnToken: true,
     clientId: (c) => c.msClientId, clientSecret: () => null,
     needs: 'ERGON_MS_CLIENT_ID', doc: 'docs/MICROSOFT.md',
@@ -79,13 +86,19 @@ export const SSO: Record<SsoKind, SsoProvider> = {
 export const SSO_KINDS = Object.keys(SSO) as SsoKind[];
 export const isSso = (k: string): k is SsoKind => (SSO_KINDS as string[]).includes(k);
 
-interface Tokens { access_token: string; refresh_token: string; expires_at: number; account: string }
+interface Tokens { access_token: string; refresh_token: string; expires_at: number; account: string; /** permissões concedidas (a renovação pede as mesmas) */ scopes?: string }
+/** "Locatário" das contas pessoais da Microsoft (Outlook, Hotmail, Live): o resto é conta de trabalho ou escola. */
+const MSA_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
+/** Dados do id_token (já validado pelo canal TLS com o provedor; só para decidir a segunda etapa). */
+function idClaims(t: string | undefined): Record<string, unknown> {
+  try { return t ? JSON.parse(Buffer.from(t.split('.')[1] ?? '', 'base64url').toString('utf8')) as Record<string, unknown> : {}; } catch { return {}; }
+}
 const STATE_TTL = 10 * 60_000;
 
 export class SsoAuth {
   private readonly cfg: Config;
   private readonly secrets: SecretStore;
-  private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number }>();
+  private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number; stage: 'base' | 'work'; scopes: string }>();
   private readonly refreshing = new Map<string, Promise<string>>();
   constructor(cfg: Config, secrets: SecretStore) { this.cfg = cfg; this.secrets = secrets; }
 
@@ -100,38 +113,53 @@ export class SsoAuth {
     return `${base}/api/integrations/${kind}/callback`;
   }
 
-  start(kind: SsoKind, workspaceId: string, userId: string): string {
+  /** Etapa de um login em andamento (a segunda etapa recusada não desfaz a primeira). */
+  stageOf(state: string): 'base' | 'work' | null { return this.pending.get(state)?.stage ?? null; }
+
+  start(kind: SsoKind, workspaceId: string, userId: string, opts: { stage?: 'base' | 'work'; loginHint?: string } = {}): string {
     const p = SSO[kind];
     if (!this.configured(kind)) throw new HttpError(409, 'sso_not_configured', `Falta registrar o aplicativo Ergon ${p.place} (${p.needs}). Veja ${p.doc}.`);
     for (const [k, v] of this.pending) if (Date.now() - v.at > STATE_TTL) this.pending.delete(k);
     const state = crypto.randomBytes(24).toString('base64url');
     const verifier = crypto.randomBytes(48).toString('base64url');
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-    this.pending.set(state, { kind, workspaceId, userId, verifier, at: Date.now() });
+    const stage = opts.stage ?? 'base';
+    const scopes = stage === 'work' && p.workScopes ? `${p.scopes} ${p.workScopes}` : p.scopes;
+    this.pending.set(state, { kind, workspaceId, userId, verifier, at: Date.now(), stage, scopes });
+    // segunda etapa: a mesma conta (sem escolher de novo), só o consentimento do que falta
+    const extra = stage === 'work' ? { response_mode: 'query', ...(opts.loginHint ? { login_hint: opts.loginHint } : {}) } : p.extra;
     const q = new URLSearchParams({
-      client_id: p.clientId(this.cfg)!, response_type: 'code', redirect_uri: this.redirectUri(kind), scope: p.scopes,
-      state, code_challenge: challenge, code_challenge_method: 'S256', ...p.extra,
+      client_id: p.clientId(this.cfg)!, response_type: 'code', redirect_uri: this.redirectUri(kind), scope: scopes,
+      state, code_challenge: challenge, code_challenge_method: 'S256', ...extra,
     });
     return `${p.authorizeUrl}?${q}`;
   }
 
   /** Volta do login: o `state` (aleatório, uso único) é a prova de quem começou o fluxo — e de qual provedor. */
-  async finish(kind: SsoKind, state: string, code: string): Promise<{ workspaceId: string; userId: string; account: string }> {
+  async finish(kind: SsoKind, state: string, code: string): Promise<{ workspaceId: string; userId: string; account: string; next?: string }> {
     const s = this.pending.get(state);
     this.pending.delete(state);
     if (!s || s.kind !== kind || Date.now() - s.at > STATE_TTL) throw new HttpError(400, 'sso_state', 'login expirado ou inválido; comece de novo em Conexões');
-    const tok = await this.token(kind, { grant_type: 'authorization_code', code, redirect_uri: this.redirectUri(kind), code_verifier: s.verifier });
+    const tok = await this.token(kind, { grant_type: 'authorization_code', code, redirect_uri: this.redirectUri(kind), code_verifier: s.verifier }, s.scopes);
     const account = await SSO[kind].account(tok.access_token);
-    this.secrets.write(s.workspaceId, kind, { ...tok, account } satisfies Tokens);
+    const { id_token: idToken, ...keep } = tok;
+    this.secrets.write(s.workspaceId, kind, { ...keep, account, scopes: s.scopes } satisfies Tokens);
+    // conta de trabalho ou escola: já conectada; segue para pedir o que só existe nela (Teams, Planner compartilhado)
+    const claims = idClaims(idToken);
+    const tid = typeof claims.tid === 'string' ? claims.tid : null;
+    if (s.stage === 'base' && SSO[kind].workScopes && tid && tid !== MSA_TENANT) {
+      const hint = typeof claims.preferred_username === 'string' ? claims.preferred_username : undefined;
+      return { workspaceId: s.workspaceId, userId: s.userId, account, next: this.start(kind, s.workspaceId, s.userId, { stage: 'work', loginHint: hint }) };
+    }
     return { workspaceId: s.workspaceId, userId: s.userId, account };
   }
 
-  private async token(kind: SsoKind, params: Record<string, string>): Promise<Omit<Tokens, 'account'>> {
+  private async token(kind: SsoKind, params: Record<string, string>, scopes?: string): Promise<Omit<Tokens, 'account' | 'scopes'> & { id_token?: string }> {
     const p = SSO[kind];
     const body: Record<string, string> = { client_id: p.clientId(this.cfg) ?? '', ...params };
     const secret = p.clientSecret(this.cfg);
     if (secret) body.client_secret = secret;
-    if (p.scopeOnToken) body.scope = p.scopes;
+    if (p.scopeOnToken) body.scope = scopes ?? p.scopes;
     let res: Response;
     // renovar pode repetir (o refresh token continua valendo); trocar o código de login, não (ele só vale uma vez)
     const httpKind = params.grant_type === 'refresh_token' ? 'read' : 'write';
@@ -147,9 +175,10 @@ export class SsoAuth {
     throw new ProviderError('forbidden', `${p.label} recusou o acesso (${code})`, { reauth: true });
   }
 
-  private parse(j: Record<string, unknown>, params: Record<string, string>): Omit<Tokens, 'account'> {
+  private parse(j: Record<string, unknown>, params: Record<string, string>): Omit<Tokens, 'account' | 'scopes'> & { id_token?: string } {
     // na renovação o Google não manda outro refresh token: fica o anterior
-    return { access_token: String(j.access_token), refresh_token: String(j.refresh_token ?? params.refresh_token ?? ''), expires_at: Date.now() + Number(j.expires_in ?? 3600) * 1000 };
+    return { access_token: String(j.access_token), refresh_token: String(j.refresh_token ?? params.refresh_token ?? ''), expires_at: Date.now() + Number(j.expires_in ?? 3600) * 1000,
+      ...(typeof j.id_token === 'string' ? { id_token: j.id_token } : {}) };
   }
 
   /**
@@ -166,8 +195,8 @@ export class SsoAuth {
     const running = this.refreshing.get(key);
     if (running) return running;
     const p = (async () => {
-      const n = await this.token(kind, { grant_type: 'refresh_token', refresh_token: t.refresh_token });
-      this.secrets.write(workspaceId, kind, { ...n, account: t.account });
+      const { id_token: _i, ...n } = await this.token(kind, { grant_type: 'refresh_token', refresh_token: t.refresh_token }, t.scopes);
+      this.secrets.write(workspaceId, kind, { ...n, account: t.account, ...(t.scopes ? { scopes: t.scopes } : {}) });
       return n.access_token;
     })().finally(() => this.refreshing.delete(key));
     this.refreshing.set(key, p);

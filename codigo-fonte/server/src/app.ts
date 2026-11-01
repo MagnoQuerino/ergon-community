@@ -61,13 +61,13 @@ import { MAX_CHOICE, PROCESS_SQL, SETTING as PROCESS_SETTING } from './services/
 import { AccountReader } from './services/account-reader.ts';
 import { Operations, taskFiles, linkFile } from './services/operations.ts';
 import { KIND_LABEL, Results, WORK_LABEL, type WorkState } from './services/results.ts';
-import { autoSector, ensureSectors, listSectors, sectorByKey, setSetting } from './services/sectors.ts';
+import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setSetting } from './services/sectors.ts';
 import { findConnection, ingestEvent, syncConfiguredIdentities, upsertIdentity } from './services/ingest.ts';
 import { FixtureTaskProvider, importBoards } from './services/mirror.ts';
 import { RunExecutor, draftPrompt, instructionsFor, isCoordinator, parseDraft } from './services/runs.ts';
 import { ReviewService } from './services/review.ts';
 import { GUARDED_TOOLSETS, TOOLS, grantDataTool, motorScope, platformToolsets, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
-import { addStructureFloor, createStructure, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
+import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard, ensureBoards, getTask, taskLog, updateTask, userBoard } from './services/tasks.ts';
 import { USER_COLUMNS } from './services/seed.ts';
@@ -781,6 +781,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const providerId = { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{0,40}$' };
 
   app.get('/api/sectors', async (req) => listSectors(db, auth(req).workspaceId));
+  // setor novo direto na Equipe (as instruções e ferramentas de partida são as da Central; dá para ajustar depois)
+  app.post('/api/sectors', { schema: { body: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: S.str(60, 1), description: S.str(300) } } } }, async (req, reply) => {
+    const a = owner(req);
+    const s = createSector(db, bus, a.workspaceId, { type: 'user', id: a.userId }, req.body as { name: string; description?: string });
+    return reply.status(201).send({ key: s.key, name: s.name });
+  });
 
   // Equipe por partes: totais no banco, páginas leves com cursor, perfil completo só ao abrir (services/team-query.ts)
   const cursorQ = { type: 'string', pattern: '^[A-Za-z0-9_-]{1,400}$' };
@@ -1282,11 +1288,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.get('/api/structures', async (req) => listStructures(db, auth(req).workspaceId));
 
   app.post('/api/structures', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['kind', 'i', 'j'], properties: {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['kind'], properties: {
       kind: { type: 'string', pattern: '^[a-z][a-z0-9-]{1,30}$' }, i: lot, j: lot, name: S.str(60) } } },
   }, async (req, reply) => {
     const a = owner(req);
-    const sid = createStructure(db, bus, a.workspaceId, a.userId, req.body as { kind: string; i: number; j: number; name?: string });
+    // sem lote (Equipe → "Nova construção"): o lugar livre mais perto do centro
+    const b = req.body as { kind: string; i?: number; j?: number; name?: string };
+    if ((b.i === undefined) !== (b.j === undefined)) throw new HttpError(400, 'lot', 'informe i e j juntos');
+    const sid = b.i === undefined || b.j === undefined
+      ? createStructureAuto(db, bus, a.workspaceId, a.userId, { kind: b.kind, name: b.name })
+      : createStructure(db, bus, a.workspaceId, a.userId, { kind: b.kind, i: b.i, j: b.j, name: b.name });
     return reply.status(201).send({ id: sid, local: true, note: 'Versão local: estruturas grátis e sem limite de quantidade.' });
   });
 

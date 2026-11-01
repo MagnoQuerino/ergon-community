@@ -1817,7 +1817,13 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
 .drag-ghost .pxfigure { width: 30px; }
 .drag-ghost span { display: flex; flex-direction: column; font-size: 13px; }
 .drag-ghost small { color: var(--muted); font-size: 12px; }
-.drag-tray { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 55; display: flex; align-items: center; gap: 8px; background: var(--panel); color: var(--ink); border: 2px dashed var(--line); border-radius: 12px; padding: 12px 18px; font-size: 13px; box-shadow: var(--shadow); max-width: calc(100vw - 32px); }
+/* faixa larga para soltar (destino fora da tela) com os setores como alvos diretos */
+.drag-tray { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 55; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 132px; background: var(--panel); color: var(--ink); border: 2px dashed var(--line); border-radius: 14px; padding: 16px 18px; font-size: 14px; font-size: 13px; box-shadow: var(--shadow); }
+.drag-tray__hint { display: inline-flex; align-items: center; gap: 8px; }
+.drag-tray__chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-height: 30vh; overflow: auto; }
+.drag-tray__chip { border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; background: var(--paper, var(--panel)); font-weight: 600; }
+.tcard { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.tcard:active { cursor: grabbing; }
 .is-drop-over { border-color: var(--teal) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 35%, transparent) !important; background: color-mix(in srgb, var(--teal) 7%, var(--panel)) !important; }
 .is-drop-bad { border-color: var(--err) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 30%, transparent) !important; }
 
@@ -1869,7 +1875,7 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
   .newagent2__body { grid-template-columns: 1fr; }
   .newagent2__look { flex-direction: row; align-items: center; flex-wrap: wrap; }
   .newagent2__stage { min-height: 150px; flex: none; }
-  .drag-tray { bottom: 10px; font-size: 12px; }
+  .drag-tray { left: 10px; right: 10px; bottom: 10px; font-size: 12px; min-height: 84px; }
 }
 @media (prefers-reduced-motion: reduce) { .equipe__toast, .dlg, .dlg-back, .equipe__menu, .tcard__menulist { animation: none; } .tcard, .group, .building { transition: none; } }
 

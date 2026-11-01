@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon.tsx';
 import { MoveTray, type Pick } from '../components/MoveTray.tsx';
 import { NewAgentDialog } from '../components/NewAgentDialog.tsx';
 import { DistributionDialog } from '../components/DistributionDialog.tsx';
+import { NewGroupDialog } from '../components/NewGroupDialog.tsx';
 import { VirtualGrid } from '../components/VirtualGrid.tsx';
 
 const RUN_LABEL: Record<string, string> = { running: 'trabalhando', queued: 'na fila', waiting_user: 'aguarda você' };
@@ -39,6 +40,8 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
   useEffect(() => { const t = setTimeout(() => setDq(q.trim()), 220); return () => clearTimeout(t); }, [q]);
   const [open, setOpen] = useState<Open>(null);
   const [creating, setCreating] = useState(false);
+  // setor ou construção nova direto aqui (sem passar pela Cidade nem pedir à coordenação)
+  const [newGroup, setNewGroup] = useState<'sector' | 'structure' | null>(null);
   const [tray, setTray] = useState<{ agent: TeamAgent; tab: 'sector' | 'structure' } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [pending, setPending] = useState<Set<string>>(() => new Set());
@@ -114,6 +117,9 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
                 } catch (e) { setToast({ text: errMsg(e), tone: 'error' }); }
               }} />}
           </div>
+          <button className="btn" onClick={() => setNewGroup(mode === 'setor' ? 'sector' : 'structure')}>
+            <Icon name={mode === 'setor' ? 'layers' : 'temple'} size={15} /> {mode === 'setor' ? 'Novo setor' : 'Nova construção'}
+          </button>
           <button className="btn btn--primary" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> Novo agente</button>
         </div>
       </header>
@@ -157,7 +163,7 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
         <span>Clique no nome para abrir o perfil</span>
       </p>
 
-      <DragLayer />
+      <DragLayer sectors={mode === 'setor' ? state.sectors : []} />
       {toast && (
         <div className={`equipe__toast ${toast.tone === 'error' ? 'equipe__toast--error' : ''}`} role="status">
           <span>{toast.text}</span>
@@ -168,6 +174,11 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
       {creating && <NewAgentDialog onClose={() => setCreating(false)} onCreated={(r) => {
         setCreating(false);
         setToast({ text: `${r.name} entrou na equipe, no setor ${r.sector}${r.sectorReason ? ` (${r.sectorReason})` : ''}. A aparência escolhida foi mantida.`, actions: [{ label: 'Abrir perfil', run: () => { setToast(null); onOpen(r.id, 'perfil'); } }] });
+      }} />}
+      {newGroup && <NewGroupDialog kind={newGroup} onClose={() => setNewGroup(null)} onCreated={(g) => {
+        setNewGroup(null); setQ('');
+        setToast({ text: g.kind === 'sector' ? `Setor ${g.name} criado. Arraste colegas para ele ou use “Mover para…”.` : `${g.name} erguida na cidade. Arraste colegas para ela ou use “Mover para…”.`,
+          actions: [{ label: 'Abrir', run: () => { setToast(null); setOpen(g); } }] });
       }} />}
       {tray && <MoveTray agent={tray.agent} initial={tray.tab} title={`Mover ${tray.agent.name} para…`} onPick={pickFromTray} onClose={() => setTray(null)} />}
       {distrib && <DistributionDialog onClose={() => setDistrib(false)} onApplied={(r) => {
@@ -286,8 +297,12 @@ function AgentCard({ a, pending, onOpen, onDrag, onMove, extra }: {
   const [menu, setMenu] = useState(false);
   const open = () => onOpen(a.id, 'perfil', a);
   return (
-    <article className={`tcard ${a.status !== 'active' ? 'tcard--off' : ''} ${pending ? 'is-pending' : ''}`} aria-busy={pending} onClick={(e) => { if (!(e.target as HTMLElement).closest('button, [role="menu"]')) open(); }}>
-      <span className="tcard__fig" onPointerDown={(e) => onDrag(e, a)} title={pending ? 'Movendo…' : 'Arraste para mudar de setor ou de construção'}><AgentFigure agent={a} /></span>
+    // o card inteiro é a alça de arraste (menos o menu e os botões de ação); um clique continua abrindo o perfil
+    <article className={`tcard ${a.status !== 'active' ? 'tcard--off' : ''} ${pending ? 'is-pending' : ''}`} aria-busy={pending}
+      title={pending ? 'Movendo…' : 'Arraste para mudar de setor ou de construção · clique para abrir o perfil'}
+      onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('.tcard__menu, [role="menu"], button:not(.tcard__name)')) onDrag(e, a); }}
+      onClick={(e) => { if (!(e.target as HTMLElement).closest('button, [role="menu"]')) open(); }}>
+      <span className="tcard__fig"><AgentFigure agent={a} /></span>
       <div className="tcard__body">
         <button className="tcard__name" onClick={open} aria-label={`Abrir o perfil de ${a.name}`}>{a.name}</button>
         <span className="tcard__role">{a.role}</span>
@@ -328,7 +343,9 @@ function CardMenu({ items, onClose }: { items: Array<{ label: string; icon: stri
 }
 
 /** Fantasma do arraste e a bandeja "Mover para…" (soltar nela abre a escolha do destino, inclusive os não carregados). */
-function DragLayer() {
+/** Durante o arraste: o boneco seguindo o ponteiro e, embaixo, uma faixa larga para soltar — com os setores à mão (por
+ * setor) e "outro destino" para o que não está na tela. */
+function DragLayer({ sectors }: { sectors: Array<{ key: string; name: string }> }) {
   const a = useDragging();
   if (!a) return null;
   return (
@@ -338,7 +355,12 @@ function DragLayer() {
         <span><b>{a.name}</b><small id="drag-ghost-hint">Solte num setor ou numa construção</small></span>
       </div>
       <div className="drag-tray" data-drop-kind="tray" data-drop-id="" data-drop-name="Mover para…" role="note">
-        <Icon name="search" size={15} /> Solte aqui para escolher um destino que não está na tela · Esc cancela
+        <span className="drag-tray__hint"><Icon name="search" size={15} /> Solte aqui para escolher um destino que não está na tela · Esc cancela</span>
+        {sectors.length > 0 && (
+          <span className="drag-tray__chips">
+            {sectors.map((s) => <span key={s.key} className="drag-tray__chip" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name}>{s.name}</span>)}
+          </span>
+        )}
       </div>
     </>
   );

@@ -203,7 +203,6 @@ export function createSector(db: Db, bus: Bus, workspaceId: string, actor: { typ
   if (!name) throw new HttpError(400, 'name', 'nome do setor vazio');
   const all = listSectors(db, workspaceId);
   if (all.some((x) => fold(x.name) === fold(name))) throw new HttpError(409, 'name_taken', `Já existe um setor chamado ${name}.`);
-  if (all.length >= 12) throw new HttpError(409, 'too_many', 'No máximo 12 setores.');
   let key = fold(name).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'setor';
   if (!/^[a-z]/.test(key)) key = `s-${key}`;
   while (all.some((x) => x.key === key)) key = `${key.slice(0, 20)}-${Math.floor(Math.random() * 900 + 100)}`;

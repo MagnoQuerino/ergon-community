@@ -56,12 +56,14 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
     const kind = (req.params as { kind: SsoKind }).kind;
     const q = req.query as { state?: string; code?: string; error?: string };
     const back = (status: string) => reply.redirect(`/#conexoes?${kind}=${encodeURIComponent(status)}`);
-    if (q.error || !q.code || !q.state) return back(q.error === 'access_denied' ? 'recusado' : 'erro');
+    // segunda etapa (Microsoft, conta de trabalho/escola) recusada ou com erro: a conexão da primeira continua valendo
+    const stage = q.state ? integrations.sso.stageOf(String(q.state).slice(0, 200)) : null;
+    if (q.error || !q.code || !q.state) return back(stage === 'work' ? 'conectado' : q.error === 'access_denied' ? 'recusado' : 'erro');
     try {
       const r = await integrations.sso.finish(kind, String(q.state).slice(0, 200), String(q.code).slice(0, 4000));
       integrations.markSso(kind, r.workspaceId, r.userId, r.account);
-      return back('conectado');
-    } catch { return back('erro'); }
+      return r.next ? reply.redirect(r.next) : back('conectado');
+    } catch { return back(stage === 'work' ? 'conectado' : 'erro'); }
   });
 
   // Listas e quadros de um aplicativo conectado (para escolher no menu Tarefas)
