@@ -12,7 +12,9 @@ import { CentralTrabalho, type CentralSection } from '../components/CentralTraba
 import { useResource } from '../lib/live.ts';
 import { OPS_EVENTS, OPS_URL, cloudOn, summaryOf, type AmbientOps, type Distribution } from '../lib/ambient.ts';
 import { openDecisions } from '../lib/open.ts';
-import type { SceneApi, SceneFocus, SceneObject, SceneOps, StructureIn } from '../scene/types.ts';
+import type { SceneApi, SceneFocus, SceneObject, SceneOps, SceneTag, StructureIn } from '../scene/types.ts';
+import { savePrefs, usePrefs } from '../lib/prefs.ts';
+import { MusicButton } from '../components/MusicButton.tsx';
 import { THEMES } from '../iso/theme.ts';
 import { THEME_LABEL, THEME_NEXT, setThemeMode, useTheme } from '../lib/theme.ts';
 import { typeOf } from '../../../shared/city.ts';
@@ -38,6 +40,9 @@ const FOUNDER_BIO = {
 // dia e noite da cidade = tema da plataforma (lib/theme.ts): trocar aqui troca o app inteiro
 const CHAT_W = 380;
 const NO_STRUCTURES: Structure[] = [];
+const NO_TAGS: SceneTag[] = [];
+/** o que muda as etiquetas: execuções, tarefas e treinos (agents.changed) — o mesmo SSE de sempre */
+const ACTIVITY_EVENTS = ['runs.changed', 'tasks.changed', 'agents.changed'];
 
 /** O que a cena já sabe do agente, no formato do perfil (campos de perfil vazios até o completo chegar por baixo). */
 function agentOfRow(a: CityAgent): Agent {
@@ -84,6 +89,13 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
   const dist = useResource<Distribution>('/api/distribution', []);
   const cloud = cloudOn(dist.data);
   const sceneOps: SceneOps | null = useMemo(() => (ops ? summaryOf(ops, cloud) : null), [ops, cloud]);
+  // Cidade Viva: etiquetas do trabalho real (só com a cidade na tela), Alexandre (opção do workspace) e o modo calmo (da pessoa)
+  const actRes = useResource<{ tags: SceneTag[] }>(active ? '/api/city/activity' : null, ACTIVITY_EVENTS);
+  const tags = actRes.data?.tags ?? NO_TAGS;
+  const citySettings = useResource<{ npc: boolean }>('/api/city/settings', ['city.changed']);
+  const npcOn = citySettings.data?.npc !== false;
+  const prefs = usePrefs();
+  const calm = prefs.cityCalm;
   // Central de Trabalho: a gaveta da direita (a mesma da conversa; uma de cada vez)
   const [central, setCentral] = useState<CentralSection | null>(null);
   const [section, setSection] = useState<CentralSection>('trabalho');
@@ -135,6 +147,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
     else if (k === 'conexoes') onNavigate('conexoes');
     else if (k === 'atividade') onNavigate('atividade');
     else if (k === 'info') setToast(text ?? null);
+    else if (k === 'tag' && text) location.hash = text; // a etiqueta abre o card no quadro dele
     else { setToast(null); setBio(true); }
   }, [onNavigate, openCentral]);
 
@@ -180,7 +193,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
         {!lost ? (city.ready ? (
           <Suspense fallback={loading}>
             <Scene structures={structures} agents={city.scene} partial={city.partial} counts={city.overview} selectedId={selectedId} themeId={themeId} editing={editing}
-              rightInset={chatOpen || central ? CHAT_W : 0} active={active} ops={sceneOps}
+              rightInset={chatOpen || central ? CHAT_W : 0} active={active} ops={sceneOps} tags={tags} npc={npcOn} calm={calm}
               onSelectAgent={(id) => onSelect(id)} onObject={onObject} onLot={(i, j) => { setEditing(false); setStore({ i, j }); }}
               onStructure={(id) => setCard(id)} onFocus={setFocus} onMove={onMove} onContextLost={() => setLost(true)}
               onReady={(a) => { sceneApi.current = a; setSceneOn(!!a); }} onWindow={city.onWindow} />
@@ -217,6 +230,11 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
         <div className="stage__tools stage__tools--right">
           <button className={`tool ${editing ? 'tool--on' : ''}`} onClick={() => { setEditing((v) => !v); setCard(null); }} aria-pressed={editing} title="Editor do mapa: arraste prédios e áreas para outros lotes">
             <Icon name="edit" size={16} /> <span>Editar mapa</span>
+          </button>
+          <MusicButton />
+          <button className={`tool ${calm ? 'tool--on' : ''}`} onClick={() => savePrefs({ cityCalm: !calm })} aria-pressed={calm}
+            title={calm ? 'Modo calmo: sem passeios nem lazer; o trabalho real, as etiquetas e as decisões continuam. Clique para a cidade viva.' : 'Cidade viva: passeios e lazer. Clique para o modo calmo (menos movimento, o trabalho continua à vista).'}>
+            <Icon name="focus" size={16} /> <span>{calm ? 'Modo calmo' : 'Cidade viva'}</span>
           </button>
           <button className="tool tool--icon" onClick={() => setThemeMode(THEME_NEXT[themeMode])}
             title={THEME_LABEL[themeMode]} aria-label={THEME_LABEL[themeMode]}>

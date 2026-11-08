@@ -24,6 +24,7 @@ import { Onboarding } from './components/Onboarding.tsx';
 import { Tour, type TourStep } from './components/Tour.tsx';
 import { ViewTip } from './components/Tips.tsx';
 import { initPrefs, savePrefs, usePrefs } from './lib/prefs.ts';
+import { music } from './lib/music.ts';
 // só na distribuição proprietária (a Community não traz views/world): entrar com a Conta Ergon de qualquer tela
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
@@ -58,6 +59,8 @@ export function App() {
       const me = await api.get<Me>('/api/me');
       setCsrf(me.csrf);
       initPrefs(me.prefs);
+      // volume e aleatório da música são da pessoa; nada começa a tocar aqui
+      music.configure(me.prefs, (p) => savePrefs(p));
       setLocked(me.locked);
       setAuth({ state: 'in', me });
     } catch { setAuth({ state: 'loading' }); window.setTimeout(() => void check(), 2000); }

@@ -191,7 +191,7 @@ describe('boas-vindas: a escolha define a equipe de partida', () => {
   test('conta nova começa com as perguntas; workspace antigo não', async () => {
     const me = (await req(h, 'GET', '/api/me', s)).json;
     assert.equal(me.onboarding, 'pending');
-    assert.deepEqual(me.prefs, { tips: true, dismissed: [], tourDone: false, updateNotice: true });
+    assert.deepEqual(me.prefs, { tips: true, dismissed: [], tourDone: false, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false });
     const o = (await req(h, 'GET', '/api/onboarding', s)).json;
     assert.ok(o.uses.some((u: { key: string }) => u.key === 'empresario'));
     assert.ok(o.niches.some((n: { key: string }) => n.key === 'programacao'));
@@ -234,7 +234,7 @@ describe('boas-vindas: a escolha define a equipe de partida', () => {
   test('preferências: dicas dispensadas, desligar e trazer de volta; pular as perguntas', async () => {
     assert.deepEqual((await req(h, 'PUT', '/api/me/prefs', s, { dismiss: ['agentes.intro'] })).json.dismissed, ['agentes.intro']);
     const p = (await req(h, 'PUT', '/api/me/prefs', s, { tips: false, tourDone: true })).json;
-    assert.deepEqual(p, { tips: false, dismissed: ['agentes.intro'], tourDone: true, updateNotice: true });
+    assert.deepEqual(p, { tips: false, dismissed: ['agentes.intro'], tourDone: true, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false });
     assert.deepEqual((await req(h, 'PUT', '/api/me/prefs', s, { resetTips: true, tips: true })).json.dismissed, []);
     h.db.run("UPDATE workspace_settings SET value = 'pending' WHERE workspace_id = ? AND key = 'onboarding'", s.workspaceId);
     assert.equal((await req(h, 'POST', '/api/onboarding/skip', s)).status, 200);

@@ -6,8 +6,9 @@ import type { Db } from '../db/db.ts';
 import { getSetting, setSetting } from './sectors.ts';
 
 /** updateNotice: ao abrir o Ergon, procurar versão nova e mostrar "Atualização disponível" (ligado por padrão) */
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean }
-const DEFAULT: Prefs = { tips: true, dismissed: [], tourDone: false, updateNotice: true };
+/** cityCalm: cidade em modo calmo; musicVolume/musicShuffle: a música ambiente (nunca liga sozinha: não há "tocando" guardado) */
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean }
+const DEFAULT: Prefs = { tips: true, dismissed: [], tourDone: false, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false };
 const MAX_DISMISSED = 200;
 
 export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
@@ -18,6 +19,9 @@ export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
       dismissed: Array.isArray(v.dismissed) ? v.dismissed.map(String).slice(0, MAX_DISMISSED) : [],
       tourDone: v.tourDone === true,
       updateNotice: v.updateNotice !== false,
+      cityCalm: v.cityCalm === true,
+      musicVolume: typeof v.musicVolume === 'number' && v.musicVolume >= 0 && v.musicVolume <= 1 ? v.musicVolume : DEFAULT.musicVolume,
+      musicShuffle: v.musicShuffle === true,
     };
   } catch { return { ...DEFAULT, dismissed: [] }; }
 }
@@ -26,7 +30,8 @@ export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
 export function writePrefs(db: Db, workspaceId: string, userId: string, patch: Partial<Prefs> & { dismiss?: string[]; resetTips?: boolean }): Prefs {
   const cur = readPrefs(db, workspaceId, userId);
   const dismissed = patch.resetTips ? [] : [...new Set([...(patch.dismissed ?? cur.dismissed), ...(patch.dismiss ?? [])])].slice(-MAX_DISMISSED);
-  const next: Prefs = { tips: patch.tips ?? cur.tips, dismissed, tourDone: patch.tourDone ?? cur.tourDone, updateNotice: patch.updateNotice ?? cur.updateNotice };
+  const next: Prefs = { tips: patch.tips ?? cur.tips, dismissed, tourDone: patch.tourDone ?? cur.tourDone, updateNotice: patch.updateNotice ?? cur.updateNotice,
+    cityCalm: patch.cityCalm ?? cur.cityCalm, musicVolume: patch.musicVolume ?? cur.musicVolume, musicShuffle: patch.musicShuffle ?? cur.musicShuffle };
   setSetting(db, workspaceId, `prefs:${userId}`, JSON.stringify(next));
   return next;
 }

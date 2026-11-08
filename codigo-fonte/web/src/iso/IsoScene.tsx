@@ -51,6 +51,9 @@ export default function IsoScene(p: SceneProps) {
   useEffect(() => { eng.current?.setInsets(p.rightInset); }, [p.rightInset]);
   useEffect(() => { eng.current?.setActive(p.active); }, [p.active]);
   useEffect(() => { eng.current?.setOps(p.ops); }, [p.ops]);
+  useEffect(() => { eng.current?.setTags(p.tags); }, [p.tags]);
+  useEffect(() => { eng.current?.setNpc(p.npc); }, [p.npc]);
+  useEffect(() => { eng.current?.setCalm(p.calm); }, [p.calm]);
 
   return (
     <div ref={wrap} className="iso">

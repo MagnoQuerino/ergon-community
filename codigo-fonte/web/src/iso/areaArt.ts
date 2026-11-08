@@ -350,7 +350,7 @@ export function cityItems(town: Town, t: Theme): CityItem[] {
         case 'bush': put(bushSprite(t), x, z, sq(x, z, 0.3), 0.6, id, a.id); break;
         case 'house': {
           const w = p.w ?? 2.4; const d = p.d ?? 2.2; const h = p.h ?? 2;
-          put(houseSprite(t, w, h, d), x, z, { x0: x, z0: z - d, x1: x + w, z1: z }, h + 1.2, id, a.id);
+          put(houseSprite(t, w, h, d, p.variant ?? 0), x, z, { x0: x, z0: z - d, x1: x + w, z1: z }, h + 1.5, id, a.id);
           break;
         }
       }
@@ -390,7 +390,7 @@ export function areaHits(town: Town): AreaHit[] {
     const o = (b: Box): Box => ({ x0: b.x0 + a.ox, z0: b.z0 + a.oz, x1: b.x1 + a.ox, z1: b.z1 + a.oz });
     if (a.kind === 'agora' && a.def.mural) { const M = o(a.def.mural); hits.push({ kind: 'conexoes', areaId: a.id, poly: [project(M.x0, 1.85, M.z0), project(M.x1, 1.85, M.z0), project(M.x1, 0, M.z0), project(M.x1, 0, M.z1), project(M.x0, 0, M.z1), project(M.x0, 1.85, M.z1)] }); }
     if (a.kind === 'bairro') for (const h of a.def.houses) {
-      const B = o(h); const top = h.h + 1.1;
+      const B = o(h); const top = h.h + 1.4;
       hits.push({ kind: 'casa', ref: h.id, areaId: a.id, poly: [project(B.x0, top, B.z0), project(B.x1, top, B.z0), project(B.x1, 0, B.z0), project(B.x1, 0, B.z1), project(B.x0, 0, B.z1), project(B.x0, top, B.z1)] });
     }
     if (a.kind === 'teatro' && a.def.theater) {

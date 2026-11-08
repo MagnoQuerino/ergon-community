@@ -18,7 +18,7 @@ import type { House } from '../world/areas.ts';
 import { Town, type AreaInst, type BuildingInst, type Loc, type StructureIn } from '../world/town.ts';
 import type { AABB, P3, Vec2 } from '../world/geom.ts';
 import { startMove, stepMove, targetFor, visualFor, type Mover, type Visual } from '../scene/agentState.ts';
-import type { SceneAgent, SceneCounts, SceneFocus, SceneObject, SceneOps, SceneOpsTarget, SceneWindow } from '../scene/types.ts';
+import type { SceneAgent, SceneCounts, SceneFocus, SceneObject, SceneOps, SceneOpsTarget, SceneTag, SceneWindow } from '../scene/types.ts';
 import { KY, RES, insidePoly, project, unproject, type P2 } from './projection.ts';
 import { occOfFloors, regionSize, regionsOf, residentsOf, type Occ } from '../world/regions.ts';
 import { figureCacheSize, figureSprite, hashOf, lookFor, npcLook, reserveFigures, type Expr, type Facing, type Gesture, type Look, type Pose, type Sprite } from './figures.ts';
@@ -47,6 +47,10 @@ export interface EngineCallbacks {
 }
 
 type GroupKind = 'chat' | 'debate' | 'visit' | 'handoff' | 'meeting' | 'assembly' | 'wrestle';
+/** Posto do trabalho real (setTags): treino, revisor visitando o autor, autor sendo revisado, entrega no palco. */
+type Pin = { kind: 'gym' } | { kind: 'visit'; host: string } | { kind: 'host' } | { kind: 'stage'; i: number };
+/** Lugares no palco do Teatro (em volta do ponto de quem fala), para quem apresenta uma entrega. */
+const STAGE: Array<[number, number]> = [[0, 0], [0.95, 0.35], [-0.95, 0.35], [0, 0.9]];
 interface Plan {
   kind: 'solo' | 'desk' | 'fetch' | 'group' | 'home';
   loc: Loc; spot: Vec2; y: number | null;
@@ -290,7 +294,7 @@ export class IsoEngine {
     // andar novo travava a tela por segundos
     for (const rt of this.rts.values()) {
       this.endLife(rt, now);
-      const spot = this.deskSpot(rt.a, rt.seated ? 'seat' : 'idle');
+      const spot = this.homeOf(rt);
       const atDesk = !rt.mover && rt.loc.b === spot.loc.b && rt.loc.level === spot.loc.level && Math.abs(rt.pos[0] - spot.p[0]) < 1e-6 && Math.abs(rt.pos[2] - spot.p[1]) < 1e-6 && Math.abs(rt.pos[1] - spot.y) < 1e-6;
       if (atDesk) { rt.spotKey = `${spot.loc.b}|${spot.loc.level}|${spot.p.join(',')}`; continue; }
       this.goHome(rt, now, true);
@@ -340,7 +344,7 @@ export class IsoEngine {
     return this.skinPets.get(id) ?? null;
   }
   /** Com uma skin sem personagem na praça, o anfitrião grego não aparece. */
-  private npcVisible(): boolean { return !this.skin || !!this.skin.data.npc; }
+  private npcVisible(): boolean { return this.npcOn; }
 
   /** Cores do pacote só onde o tema já tem uma cor simples (nada de estrutura nova). */
   private themed(id: ThemeId): Theme {
@@ -388,10 +392,13 @@ export class IsoEngine {
   setAgents(agents: SceneAgent[], opts: { partial?: boolean } = {}): void {
     const now = performance.now();
     this.partial = !!opts.partial;
+    this.lastAgents = agents;
+    const byId = this.pins.size ? new Map(agents.map((x) => [x.id, x])) : null;
     for (const a of agents) {
       const visual = visualFor(a.run);
-      const target = targetFor(visual);
-      const spot = this.deskSpot(a, target === 'seat' ? 'seat' : 'idle');
+      const pin = this.pins.has(a.id) ? this.pinnedSpot(a, (id) => byId?.get(id) ?? this.rts.get(id)?.a) : null;
+      const target = pin ? (pin.seat ? 'seat' : 'idle') : targetFor(visual);
+      const spot = pin ?? this.deskSpot(a, target === 'seat' ? 'seat' : 'idle');
       const key = `${spot.loc.b}|${spot.loc.level}|${spot.p.join(',')}`;
       const rt = this.rts.get(a.id);
       if (!rt) {
@@ -410,8 +417,8 @@ export class IsoEngine {
       rt.outcome = a.outcome;
       const moved = rt.a.building !== a.building || rt.a.level !== a.level || rt.a.slot !== a.slot;
       rt.a = a; rt.visual = visual; rt.seated = target === 'seat';
-      // trabalho real tem prioridade: larga a vida ambiente (acorda, sai da piscina…) e volta para a mesa
-      const interrupted = visual !== 'idle' && rt.life.mode !== 'home';
+      // trabalho real tem prioridade: larga a vida ambiente (acorda, sai da piscina…) e volta para a mesa (ou o posto dele)
+      const interrupted = (visual !== 'idle' || !!pin) && rt.life.mode !== 'home';
       if (interrupted) this.endLife(rt, now);
       if (outcomeChanged) this.react(rt, a.outcome!, now);
       if (rt.spotKey === key && !interrupted && !moved) continue;
@@ -484,6 +491,82 @@ export class IsoEngine {
   }
 
   /** Placas do trabalho da equipe (números do servidor; nada é contado aqui). */
+  /**
+   * Etiquetas do trabalho real (uma por atividade, no agente que a lidera) e o posto que cada atividade dá: treino real
+   * no Ginásio; revisão aberta com o revisor na mesa do autor (o autor sentado); entrega esperando a sua aprovação no
+   * palco do Teatro (até 4 por vez; as demais ficam na mesa, com a etiqueta). Sem etiqueta, nada muda: nada é inventado.
+   */
+  setTags(list: SceneTag[]): void {
+    const key = JSON.stringify(list);
+    if (key === this.tagsKey) return;
+    this.tagsKey = key;
+    this.tags = new Map(list.map((t) => [t.lead, t]));
+    const pins = new Map<string, Pin>();
+    let stage = 0;
+    for (const t of list) {
+      if (t.kind === 'treinando') pins.set(t.lead, { kind: 'gym' });
+      else if (t.kind === 'revisando') {
+        const other = t.agents.find((x) => x !== t.lead);
+        if (other) { pins.set(other, { kind: 'visit', host: t.lead }); pins.set(t.lead, { kind: 'host' }); }
+      } else if (t.kind === 'aguardando_aprovacao' && stage < STAGE.length) pins.set(t.lead, { kind: 'stage', i: stage++ });
+    }
+    const pinKey = JSON.stringify([...pins]);
+    const changed = pinKey !== this.pinKey;
+    this.pins = pins; this.pinKey = pinKey;
+    if (changed && this.lastAgents) this.setAgents(this.lastAgents, { partial: this.partial });
+    this.invalidate();
+  }
+  private tags = new Map<string, SceneTag>();
+  private tagsKey = '';
+  /** posto de quem está numa atividade real que tem lugar próprio (fora da vida ambiente) */
+  private pins = new Map<string, Pin>();
+  private pinKey = '';
+  private lastAgents: SceneAgent[] | null = null;
+  /** onde as etiquetas ficaram na tela no último quadro (alvo de clique e de cursor) */
+  private tagRects: Array<{ tag: SceneTag | null; building: string | null; title: string; x: number; y: number; w: number; h: number }> = [];
+  /** onde ficou o selo de cada construção fechada neste quadro (as etiquetas de quem trabalha lá dentro vão em cima) */
+  private badgeAt = new Map<string, [number, number]>();
+
+  /** Alexandre Magno na cidade deste workspace (uma presença só; o tema não o tira). */
+  setNpc(on: boolean): void { if (this.npcOn === on) return; this.npcOn = on; this.invalidate(); }
+  private npcOn = true;
+
+  /** Modo calmo: a vida ambiente para (quem passeava volta para casa); trabalho, etiquetas e decisões continuam. */
+  setCalm(on: boolean): void {
+    if (this.calm === on) return;
+    this.calm = on;
+    if (on) { const now = performance.now(); for (const rt of this.rts.values()) if (rt.visual === 'idle' && rt.life.mode !== 'home') this.sendHome(rt, now); }
+    this.invalidate();
+  }
+  private calm = false;
+
+  /**
+   * Onde fica quem está num posto do trabalho real (null = o de sempre): um posto do Ginásio (sempre o mesmo para o
+   * mesmo agente), a ponta da mesa do autor que ele revisa, a própria mesa (sentado, sendo revisado) ou o palco do Teatro.
+   */
+  private pinnedSpot(a: SceneAgent, agent: (id: string) => SceneAgent | undefined): { loc: Loc; p: Vec2; y: number; seat: boolean } | null {
+    const pin = this.pins.get(a.id);
+    if (!pin) return null;
+    if (pin.kind === 'gym') {
+      const g = this.town.areaOf('ginasio'); const acts = g?.def.activities ?? [];
+      if (!g || !acts.length) return null;
+      return { loc: OUT, p: this.areaW(g)(acts[hashOf(a.id) % acts.length].spot), y: 0, seat: false };
+    }
+    if (pin.kind === 'stage') {
+      const t = this.town.areaOf('teatro'); const sp = t?.def.speaker;
+      if (!t || !sp) return null;
+      const [dx, dz] = STAGE[pin.i];
+      return { loc: OUT, p: this.areaW(t)([sp[0] + dx, sp[1] + dz]), y: 0, seat: false };
+    }
+    if (pin.kind === 'host') return { ...this.deskSpot(a, 'seat'), seat: true };
+    const host = agent(pin.host);
+    const b = host ? this.town.buildings.get(host.building) : undefined;
+    const f = b && host ? this.town.floorOf(b, host.level) ?? b.floors[0] : undefined;
+    if (!host || !b || !f) return null;
+    const local = visitSpot(f.plan, b.spec, host.slot);
+    return { loc: { b: b.id, level: f.level }, p: [local[0] + b.ox, local[1] + b.oz], y: f.y, seat: false };
+  }
+
   setOps(o: SceneOps | null): void {
     if (JSON.stringify(o) === JSON.stringify(this.ops)) return;
     this.ops = o; this.invalidate();
@@ -604,8 +687,13 @@ export class IsoEngine {
     rt.mover = startMove(rt.pos, path);
   }
 
+  /** Onde o agente fica quando não está passeando: o posto do trabalho real (treino, revisão, palco) ou a mesa. */
+  private homeOf(rt: Rt): { loc: Loc; p: Vec2; y: number } {
+    return this.pinnedSpot(rt.a, (id) => this.rts.get(id)?.a) ?? this.deskSpot(rt.a, rt.seated ? 'seat' : 'idle');
+  }
+
   private goHome(rt: Rt, now: number, instant = false): void {
-    const spot = this.deskSpot(rt.a, rt.seated ? 'seat' : 'idle');
+    const spot = this.homeOf(rt);
     rt.spotKey = `${spot.loc.b}|${spot.loc.level}|${spot.p.join(',')}`;
     if (!instant) rt.life = { mode: 'returning', until: now + 2000, plan: null, next: null, since: now, toured: false };
     this.go(rt, spot.p, spot.loc);
@@ -620,7 +708,7 @@ export class IsoEngine {
   }
 
   // ================================================================ vida ambiente
-  private lifeOn(): boolean { return !this.reduced; }
+  private lifeOn(): boolean { return !this.reduced && !this.calm; }
   private isNight(): boolean { return this.nightOverride ?? isNightHour(new Date().getHours()); }
   private hidden(rt: Rt): boolean { return rt.life.mode === 'doing' && !!rt.life.plan?.hide && !rt.mover; }
 
@@ -630,7 +718,7 @@ export class IsoEngine {
   }
 
   private sendHome(rt: Rt, now: number): void {
-    const home = this.deskSpot(rt.a, 'idle');
+    const home = this.pinnedSpot(rt.a, (id) => this.rts.get(id)?.a) ?? this.deskSpot(rt.a, 'idle');
     rt.life = { mode: 'returning', until: 0, plan: null, next: null, since: now, toured: false };
     if (Math.hypot(rt.pos[0] - home.p[0], rt.pos[2] - home.p[1]) > 0.05 || Math.abs(rt.pos[1] - home.y) > 0.05) this.go(rt, home.p, home.loc);
   }
@@ -678,7 +766,7 @@ export class IsoEngine {
   private available(loc: Loc | null, except: Rt, now: number, fromDesk: boolean): Rt[] {
     const c: Rt[] = [];
     for (const o of this.rts.values()) {
-      if (o === except || o.visual !== 'idle' || o.react || o.mover || o.afterReact) continue;
+      if (o === except || o.visual !== 'idle' || o.react || o.mover || o.afterReact || this.pins.has(o.a.id)) continue;
       if (loc && !(o.a.building === loc.b && o.a.level === loc.level)) continue;
       if (this.leaving.size && this.leaving.has(o.a.id)) continue; // de saída (descarregado): não entra em nada novo
       const L = o.life;
@@ -874,7 +962,7 @@ export class IsoEngine {
       } else if (now >= grp.until) { this.endGroup(grp.id, now); changed = true; }
     }
     for (const rt of this.rts.values()) {
-      if (rt.visual !== 'idle' || rt.react || rt.afterReact) continue;
+      if (rt.visual !== 'idle' || rt.react || rt.afterReact || this.pins.has(rt.a.id)) continue;
       const L = rt.life;
       if (!on) { if (L.mode !== 'home' && L.mode !== 'returning') { this.endLife(rt, now); this.sendHome(rt, now); changed = true; } continue; }
       if (L.mode === 'home') {
@@ -1119,7 +1207,7 @@ export class IsoEngine {
     for (const rt of this.rts.values()) {
       if (rt.react && now >= rt.react.until) {
         rt.react = null; changed = true;
-        if (rt.afterReact) { rt.afterReact = false; const s = this.deskSpot(rt.a, rt.seated ? 'seat' : 'idle'); this.go(rt, s.p, s.loc); }
+        if (rt.afterReact) { rt.afterReact = false; const s = this.homeOf(rt); this.go(rt, s.p, s.loc); }
       }
       if (!rt.mover) continue;
       const prev = rt.pos; const p0 = rt.life.plan;
@@ -1180,7 +1268,7 @@ export class IsoEngine {
     const tx = this.W / 2 - this.cx * k; const ty = this.H / 2 - this.cy * k;
     g.setTransform(k, 0, 0, k, crisp ? Math.round(tx) : tx, crisp ? Math.round(ty) : ty);
     g.imageSmoothingEnabled = k < 1;
-    this.drawn = []; this.agentsDrawn = []; this.stats.sprites = 0;
+    this.drawn = []; this.agentsDrawn = []; this.badgeAt.clear(); this.stats.sprites = 0;
     const view = { x0: this.cx - this.W / 2 / k, y0: this.cy - this.H / 2 / k, x1: this.cx + this.W / 2 / k, y1: this.cy + this.H / 2 / k };
     const wasMap = this.mapMode;
     this.mapMode = this.mapMode ? k < MAP_OUT : k < MAP_IN;
@@ -1265,6 +1353,7 @@ export class IsoEngine {
     // nomes sob os pés (texto nítido no tamanho do dispositivo)
     g.setTransform(1, 0, 0, 1, 0, 0);
     this.drawNames();
+    this.drawTags();
     this.drawPlaques();
     // sprites dos bonecos: lugar para os da tela em todas as poses e quadros que alternam (o resto sai pelo desuso)
     reserveFigures(this.agentsDrawn.length * 6);
@@ -1579,6 +1668,7 @@ export class IsoEngine {
   /** Selo sobre o prédio fechado: há alguém trabalhando, na fila ou esperando você lá dentro. */
   private drawBadge(b: BuildingInst, top: number, now: number, occ: Occupancy): void {
     const visual = this.badgeOf(b.id, occ);
+    this.badgeAt.set(b.id, project(b.ox, top + 0.6, b.oz + b.spec.D / 2));
     if (!visual) return;
     const th = this.theme; const [px, py] = project(b.ox, top + 0.6, b.oz + b.spec.D / 2);
     const bob = Math.round(Math.sin(now / 300) * RES);
@@ -1746,7 +1836,7 @@ export class IsoEngine {
     this.shadow(fx, fy);
     this.g.drawImage(s.canvas, fx - s.ax, fy - s.ay);
     this.drawn.push({ kind: 'agent', id: NPC_ID, x: fx - s.ax, y: fy - s.ay, s });
-    this.agentsDrawn.push({ id: NPC_ID, fx, fy: fy + RES, name: this.skin?.data.npc?.name ?? 'Alexandre Magno', sel: false });
+    this.agentsDrawn.push({ id: NPC_ID, fx, fy: fy + RES, name: 'Alexandre Magno', sel: false });
     if (gesture === 'think' && Math.floor(now / 1700) % 2 === 0) this.drawIcon(BUBBLE_ROWS.think, { o: this.theme.outline, w: '#fbf7ee', d: this.theme.outline }, fx + 5 * RES, fy - STAND_HEAD - 8 * RES);
   }
 
@@ -1771,6 +1861,63 @@ export class IsoEngine {
       g.globalAlpha = a.sel ? 1 : 0.9; g.fillStyle = '#f3ead6'; g.fillText(a.name, sx, y + 2 * dpr);
     }
     g.globalAlpha = 1;
+  }
+
+  /**
+   * Etiquetas do trabalho real, em pixels de tela, acima da cabeça de quem lidera a atividade: o número do card ("#92")
+   * ou "treino". Pequenas e discretas; a cor ajuda, mas o texto diz tudo. Só com a cidade perto o bastante para ler.
+   */
+  private drawTags(): void {
+    this.tagRects = [];
+    if (!this.tags.size || this.editing || this.mapMode) return;
+    const g = this.g; const dpr = this.dpr; const th = this.theme;
+    const size = Math.round(10 * dpr); const padX = 5 * dpr; const h = size + 5 * dpr;
+    g.font = `700 ${size}px "Segoe UI", system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const pill = (sx: number, sy: number, text: string, waiting: boolean, soft: boolean, hit: { tag: SceneTag | null; building: string | null; title: string }) => {
+      const w = Math.ceil(g.measureText(text).width + padX * 2); const x = Math.round(sx - w / 2); const y = Math.round(sy - h);
+      g.globalAlpha = 0.93;
+      g.fillStyle = waiting ? th.marks.waiting : soft ? th.papyrus[1] : th.papyrus[0];
+      g.beginPath(); g.roundRect(x, y, w, h, h / 2); g.fill();
+      g.globalAlpha = 1; g.strokeStyle = th.outline; g.lineWidth = Math.max(1, dpr); g.stroke();
+      g.fillStyle = th.outline; g.fillText(text, sx, y + h / 2 + 0.5);
+      this.tagRects.push({ ...hit, x, y, w, h });
+    };
+    const isWait = (t: SceneTag) => t.kind === 'aguardando_voce' || t.kind === 'aguardando_aprovacao' || t.kind === 'aguardando_info';
+    const shown = new Set<string>();
+    const out = (sx: number, sy: number) => sx < -40 || sx > this.W + 40 || sy < -20 || sy > this.H + 20;
+    // junto do agente só quando dá para ver o boneco; mais longe, a etiqueta vai para cima da construção
+    for (const a of this.k >= 0.45 ? this.agentsDrawn : []) {
+      const t = this.tags.get(a.id); if (!t) continue;
+      shown.add(a.id);
+      const [sx, sy] = this.toScreen(a.fx, a.fy - STAND_HEAD - 22);
+      if (out(sx, sy)) continue;
+      pill(sx, sy, t.kind === 'revisando' ? `${t.label} · 2` : t.label, isWait(t), t.kind === 'treinando', { tag: t, building: null, title: t.title });
+    }
+    // quem está dentro de uma construção fechada: as etiquetas vão em cima dela (até 3 números; o resto em "+N")
+    const byBuilding = new Map<string, SceneTag[]>();
+    for (const t of this.tags.values()) {
+      if (shown.has(t.lead)) continue;
+      const b = this.rts.get(t.lead)?.a.building;
+      if (b && this.badgeAt.has(b)) byBuilding.set(b, [...(byBuilding.get(b) ?? []), t]);
+    }
+    for (const [b, list] of byBuilding) {
+      const [wx, wy] = this.badgeAt.get(b)!;
+      const [sx, sy] = this.toScreen(wx, wy - 14 * RES);
+      if (out(sx, sy)) continue;
+      const nums = list.slice(0, 3).map((t) => t.label).join(' ');
+      const text = list.length > 3 ? `${nums} +${list.length - 3}` : nums;
+      const one = list.length === 1 ? list[0] : null;
+      pill(sx, sy, text, list.some(isWait), list.every((t) => t.kind === 'treinando'),
+        { tag: one, building: one ? null : b, title: one ? one.title : `${list.length} trabalhos aqui: ${list.map((t) => t.label).join(', ')} (abre a Central de Trabalho)` });
+    }
+  }
+
+  /** Etiqueta sob o ponteiro (pixels de tela). */
+  private tagAt(e: { clientX: number; clientY: number }): IsoEngine['tagRects'][number] | null {
+    if (!this.tagRects.length) return null;
+    const rc = this.canvas.getBoundingClientRect();
+    const sx = ((e.clientX - rc.left) / rc.width) * this.W; const sy = ((e.clientY - rc.top) / rc.height) * this.H;
+    return this.tagRects.find((r) => sx >= r.x - 3 && sx <= r.x + r.w + 3 && sy >= r.y - 3 && sy <= r.y + r.h + 3) ?? null;
   }
 
   /**
@@ -1982,6 +2129,9 @@ export class IsoEngine {
     else if (hit?.kind === 'area' && hit.hit.kind === 'lote' && hit.hit.lot) hover = { kind: 'lot', i: hit.hit.lot[0], j: hit.hit.lot[1] };
     const same = JSON.stringify(hover) === JSON.stringify(this.hover);
     this.hover = hover;
+    const tag = this.editing ? null : this.tagAt(e);
+    this.canvas.title = tag ? `${tag.title} · clique para abrir` : '';
+    if (tag) { this.canvas.style.cursor = 'pointer'; if (!same) this.invalidate(); return; }
     if (!this.editing && this.plaqueAt(e)) { this.canvas.style.cursor = 'pointer'; if (!same) this.invalidate(); return; }
     this.canvas.style.cursor = this.editing ? (hover ? 'grab' : 'default') : hit && (hit.kind !== 'area' || hit.hit.kind !== 'agora') && hit.kind !== 'floor' ? 'pointer' : 'grab';
     if (!same) this.invalidate();
@@ -2001,6 +2151,13 @@ export class IsoEngine {
     }
     if (!d || d.moved) { this.canvas.style.cursor = this.editing ? 'default' : 'grab'; return; }
     if (this.mapMode) { const [mx, my] = this.toWorld(e); this.tk = 0.35; this.tcx = mx; this.tcy = my; this.anchor = null; this.userCam = true; this.invalidate(); return; }
+    const tag = this.editing ? null : this.tagAt(e);
+    if (tag) {
+      if (tag.tag?.href) this.cb.onObject('tag', tag.tag.href);
+      else if (tag.tag) this.cb.onSelectAgent(tag.tag.lead);
+      else if (tag.building) this.cb.onObject('central'); // vários ali dentro: a Central de Trabalho, com cada um e o card dele
+      return;
+    }
     const plaque = this.editing ? null : this.plaqueAt(e);
     if (plaque) { this.cb.onObject(plaque); return; }
     const [wx, wy] = this.toWorld(e);

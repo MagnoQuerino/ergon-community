@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { Avatar } from '../components/AccountMenu.tsx';
 import { api, errMsg } from '../lib/api.ts';
+import { useResource } from '../lib/live.ts';
 import type { AppState, Me } from '../lib/types.ts';
 
 const LADO = 256;
@@ -57,6 +58,23 @@ export function MinhaContaPanel({ me, onChanged }: { me: Me; onChanged: () => vo
 }
 
 /** Workspace atual: o nome (com confirmação). */
+/** Alexandre Magno na cidade deste workspace: ligado por padrão; desligar só o esconde aqui (ele continua no Ergon). */
+function NpcToggle({ dona }: { dona: boolean }) {
+  const s = useResource<{ npc: boolean }>('/api/city/settings', ['city.changed']);
+  const [err, setErr] = useState<string | null>(null);
+  const on = s.data?.npc !== false;
+  const set = async (v: boolean) => { setErr(null); try { await api.put('/api/city/settings', { npc: v }); s.reload(); } catch (e) { setErr(errMsg(e)); } };
+  return (
+    <div className="row sec-toggle ws-npc">
+      <div><b>Exibir Alexandre Magno</b><p className="muted small">O fundador aposentado passeia pela cidade. Não é agente, não trabalha e não ocupa vaga. Desligar só o esconde neste workspace.</p></div>
+      <button role="switch" aria-checked={on} aria-label="Exibir Alexandre Magno na cidade" className={`switch ${on ? 'switch--on' : ''}`} disabled={!dona || !s.data} onClick={() => void set(!on)}>
+        <span className="switch__knob" /><span className="switch__txt">{on ? 'Ligado' : 'Desligado'}</span>
+      </button>
+      {err && <p className="error small" role="alert">{err}</p>}
+    </div>
+  );
+}
+
 export function WorkspaceConfigPanel({ state, me }: { state: AppState; me: Me }) {
   const atual = state.workspace;
   const dona = me.workspaces.find((w) => w.id === atual.id)?.role === 'owner';
@@ -92,6 +110,7 @@ export function WorkspaceConfigPanel({ state, me }: { state: AppState; me: Me })
         </div>
         {!dona && <p className="muted small">Só quem é dona do workspace muda o nome.</p>}
       </form>
+      <NpcToggle dona={dona} />
       {dona && (
         <div className="ws-perigo">
           <div><b>Excluir este workspace</b><p className="muted small">{unico ? 'É o seu único workspace: crie outro antes de excluir este.' : 'Apaga de vez a equipe, a cidade, as tarefas, as conversas, as rotinas e os arquivos dele. A conta de IA continua sua.'}</p></div>

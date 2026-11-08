@@ -1,5 +1,22 @@
 # Novidades
 
+## 1.1.0-rc.23 (pré-versão de teste)
+
+- **A cidade mostra o trabalho de verdade.** Uma etiqueta pequena com o número do card ("#92") aparece junto de quem
+  está trabalhando, revisando com um colega, esperando você ou esperando uma informação. De longe, ou com o agente dentro
+  do prédio, a etiqueta fica em cima da construção. Passe o mouse para ler o que é; clique para abrir o card. Quando o
+  trabalho termina, a etiqueta some. Nada é inventado: sem trabalho registrado, não há etiqueta.
+- **Cada trabalho no seu lugar:** quem treina de verdade (Treinar) vai ao Ginásio; numa revisão, o revisor vai até a
+  mesa do autor; a entrega que espera a sua aprovação é apresentada no palco do Teatro.
+- **Modo calmo:** no alto da cidade, troque entre "Cidade viva" (passeios e lazer) e "Modo calmo" (menos movimento; o
+  trabalho continua à vista).
+- **Música ambiente:** um botão de nota musical toca lo-fi instrumental, sem internet. Começa desligada e só toca quando
+  você clica. Volume e ordem aleatória ficam guardados, e todas as faixas tocam no mesmo nível. Créditos em Configurações.
+- **Alexandre Magno** passeia em qualquer tema. Para esconder num workspace: Configurações › Workspace.
+- **Construir na beirada amplia a cidade:** a construção pode passar da borda e a cidade cresce. Só não dá para pôr em
+  cima de outra construção.
+- **Bairro novo:** casas do tamanho e no estilo das outras construções.
+
 ## 1.1.0-rc.22 (pré-versão de teste)
 
 - **Os agentes agora agem nas suas contas, não só leem.** Pedem e fazem: deixar um e-mail em Rascunhos ou responder,

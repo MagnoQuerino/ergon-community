@@ -15,6 +15,7 @@ import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
 import { PacotesPanel } from './PacotesPanel.tsx';
 import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
+import { MusicCredits } from '../components/MusicButton.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
 
 // módulo opcional (views/world): a Community não traz essa pasta
@@ -52,6 +53,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
       </header>
       {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
       <VersionCard onOpen={() => setTab('atualizacoes')} />
+      <details className="hint music-credits"><summary>Créditos da música ambiente</summary><MusicCredits /></details>
     </div>
   );
 }

@@ -160,18 +160,19 @@ function ginasio(): AreaDef {
 }
 
 // ---------------------------------------------------------------- bairro (casas de quem trabalha)
-const HOUSE_X: Array<[number, number]> = [[-6.4, -4.0], [-1.2, 1.2], [4.0, 6.4]];
-const HOUSE_ROWS = [{ z0: -6.6, z1: -4.4, lane: -3.3 }, { z0: -2.2, z1: 0.0, lane: 1.1 }, { z0: 2.2, z1: 4.4, lane: 5.6 }];
-const HEIGHTS = [1.8, 2.1, 1.9, 2.0, 1.7, 2.2, 1.9, 2.0, 1.8];
+// casas na escala das construções de trabalho (porta de 1,8 e um andar de pé-direito como o da Oikos), três por fileira
+const HOUSE_X: Array<[number, number]> = [[-6.6, -3.3], [-1.65, 1.65], [3.3, 6.6]];
+const HOUSE_ROWS = [{ z0: -6.9, z1: -4.3, lane: -3.35 }, { z0: -2.45, z1: 0.15, lane: 1.1 }, { z0: 2.0, z1: 4.6, lane: 5.6 }];
+const HEIGHTS = [2.9, 3.2, 3.0, 3.1, 2.9, 3.2, 3.0, 3.1, 2.9];
 export { RESIDENTS_PER_HOUSE } from '../../../shared/city.ts';
 function bairro(): AreaDef {
   const houses: House[] = HOUSE_ROWS.flatMap((row, ri) => HOUSE_X.map(([x0, x1], ci) => {
-    const id = ri * 3 + ci; const dx = x0 + (x1 - x0) * 0.65 + 0.14;
+    const id = ri * 3 + ci; const dx = x0 + (x1 - x0) * 0.62 + 0.2;
     return { id, x0, z0: row.z0, x1, z1: row.z1, h: HEIGHTS[id], door: [dx, row.z1 + 0.35] as Vec2, street: [dx, row.lane] as Vec2 };
   }));
   return {
     kind: 'bairro', name: 'Bairro',
-    paved: [...HOUSE_ROWS.map((r) => ({ x0: -HALF, z0: r.lane - 0.6, x1: HALF, z1: r.lane + 0.6 })), { x0: -3.2, z0: -HALF, x1: -2.0, z1: HALF }, { x0: 2.0, z0: -HALF, x1: 3.2, z1: HALF }],
+    paved: [...HOUSE_ROWS.map((r) => ({ x0: -HALF, z0: r.lane - 0.6, x1: HALF, z1: r.lane + 0.6 })), { x0: -3.05, z0: -HALF, x1: -1.9, z1: HALF }, { x0: 1.9, z0: -HALF, x1: 3.05, z1: HALF }],
     blocks: houses.map((h) => ({ x0: h.x0, z0: h.z0, x1: h.x1, z1: h.z1 })),
     circles: [],
     props: [

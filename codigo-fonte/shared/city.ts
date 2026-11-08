@@ -177,6 +177,13 @@ export function freeCells(placed: Placed[], owners: Map<string, string> = lotOwn
 
 export type PlaceError = 'unknown_kind' | 'outside' | 'occupied' | 'unique';
 
+/**
+ * Construir na beirada amplia a cidade: a estrutura pode passar da borda atual até este tanto de lotes (a maior pegada
+ * é 3) e a área de lotes cresce para contê-la (cityExtent). Só colisão com outra estrutura impede; longe demais da
+ * cidade (lote solto no vazio) continua "fora".
+ */
+export const EDGE_GROW = 4;
+
 /** Pode pôr (ou mover, com `ignoreId`) uma estrutura deste tipo com o canto no lote (i, j)? */
 export function placeError(placed: Placed[], kind: string, i: number, j: number, ignoreId?: string): PlaceError | null {
   const t = typeOf(kind);
@@ -186,7 +193,7 @@ export function placeError(placed: Placed[], kind: string, i: number, j: number,
   if (t.unique && !ignoreId && others.some((p) => p.kind === kind)) return 'unique';
   const e = cityExtent(others);
   const c = cellsOf({ id: '', kind, i, j });
-  if (c.i0 < e.i0 || c.j0 < e.j0 || c.i1 > e.i1 || c.j1 > e.j1) return 'outside';
+  if (c.i0 < e.i0 - EDGE_GROW || c.j0 < e.j0 - EDGE_GROW || c.i1 > e.i1 + EDGE_GROW || c.j1 > e.j1 + EDGE_GROW) return 'outside';
   if (others.some((p) => overlaps(cellsOf(p), c))) return 'occupied';
   return null;
 }

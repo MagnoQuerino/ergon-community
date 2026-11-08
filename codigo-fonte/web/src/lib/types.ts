@@ -85,7 +85,7 @@ export interface Me {
 }
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
 /** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean }
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean }
 export interface OnboardingOptions {
   state: 'pending' | 'done'; choice: { use?: string; niche?: string; preset?: string; skipped?: boolean } | null;
   uses: Array<{ key: string; label: string; hint: string }>; niches: Array<{ key: string; label: string }>;

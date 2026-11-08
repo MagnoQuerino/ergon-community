@@ -33,6 +33,8 @@ import {
   teamAgent, teamInfo, teamSummary, toolHolders,
 } from './services/team-query.ts';
 import { CITY_LIMITS, cityAgents, cityOverview, idList } from './services/city.ts';
+import { cityActivity } from './services/city-activity.ts';
+import { getSetting } from './services/sectors.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
 import { activeCardsOf, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
@@ -132,7 +134,7 @@ const LOCKED_OK = new Set(['/api/me', '/api/session/unlock', '/api/session/reaut
 // nuvem: quem ainda não tem 2º fator só cadastra autenticador ou passkey (428 enroll_2fa). A interface abre por trás
 // (a Cidade é a tela inicial): ela vinha toda do /api/state e agora vem do /api/city/* (docs/CIDADE_REGIOES.md)
 const ENROLL_OK = new Set([...LOCKED_OK, '/api/security/status', '/api/security/totp/start', '/api/security/totp/confirm', '/api/security/passkeys/options', '/api/security/passkeys', '/api/state',
-  '/api/city/overview', '/api/city/agents']);
+  '/api/city/overview', '/api/city/agents', '/api/city/activity', '/api/city/settings']);
 // instalação antiga ainda sem criptografia: depois do login, só a proteção e o básico respondem (428)
 const UNPROTECTED_OK = new Set([...LOCKED_OK, '/api/security/protect', '/api/security/status', '/api/security/recovery/confirm', '/api/state']);
 
@@ -666,10 +668,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.put('/api/me/prefs', {
     schema: { body: { type: 'object', additionalProperties: false, properties: {
       tips: { type: 'boolean' }, tourDone: { type: 'boolean' }, resetTips: { type: 'boolean' }, updateNotice: { type: 'boolean' },
+      cityCalm: { type: 'boolean' }, musicVolume: { type: 'number', minimum: 0, maximum: 1 }, musicShuffle: { type: 'boolean' },
       dismiss: { type: 'array', maxItems: 20, items: S.str(60, 1) } } } },
   }, async (req) => {
     const a = auth(req);
-    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; updateNotice?: boolean; dismiss?: string[] });
+    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; updateNotice?: boolean; cityCalm?: boolean; musicVolume?: number; musicShuffle?: boolean; dismiss?: string[] });
   });
 
   // Boas-vindas: como a pessoa vai usar e em que área trabalha definem a equipe de partida (tudo editável depois)
@@ -807,6 +810,20 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Cidade por região (services/city.ts): a cidade inteira sem agentes e os moradores por partes, com vaga e casa
   const cityList = (n: number, prefix: string) => ({ type: 'string', pattern: `^${prefix}_[a-f0-9]{32}(,${prefix}_[a-f0-9]{32}){0,${n - 1}}$` });
   app.get('/api/city/overview', async (req) => cityOverview(db, auth(req).workspaceId));
+  // Cidade Viva: o que cada agente está fazendo de verdade (etiquetas "#92"), só do workspace da sessão
+  app.get('/api/city/activity', async (req) => ({ tags: cityActivity(db, auth(req).workspaceId) }));
+  // Alexandre Magno na cidade deste workspace (ligado por padrão; desligar só o esconde aqui)
+  app.get('/api/city/settings', async (req) => ({ npc: getSetting(db, auth(req).workspaceId, 'city.npc') !== '0' }));
+  app.put('/api/city/settings', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['npc'], properties: { npc: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const on = (req.body as { npc: boolean }).npc;
+    setSetting(db, a.workspaceId, 'city.npc', on ? '1' : '0');
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'city.npc', evidence: { npc: on }, result: on ? 'Alexandre Magno à mostra na cidade' : 'Alexandre Magno oculto na cidade' });
+    bus.publish(a.workspaceId, 'city.changed', {});
+    return { npc: on };
+  });
   app.get('/api/city/agents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: {
     all: { enum: ['1'] }, cursor: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,400}$' },
     f: cityList(CITY_LIMITS.floors, 'flr'), b: cityList(CITY_LIMITS.buildings, 'bld'), per: { type: 'string', pattern: '^([1-9]|[1-4][0-9]|50)$' },

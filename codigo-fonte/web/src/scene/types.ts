@@ -45,7 +45,18 @@ export interface SceneWindow {
   selected: { id: string; building: string; level: number } | null;
 }
 
-export type SceneObject = 'board' | 'shelf' | 'npc' | 'conexoes' | 'atividade' | 'info' | SceneOpsTarget;
+export type SceneObject = 'board' | 'shelf' | 'npc' | 'conexoes' | 'atividade' | 'info' | 'tag' | SceneOpsTarget;
+
+/**
+ * Etiqueta discreta junto de um agente (GET /api/city/activity): só o que está gravado — trabalhando, na fila, revisando
+ * junto, esperando você ou uma informação, treinando. Uma por atividade, no `lead`; some quando o estado muda.
+ */
+export interface SceneTag {
+  kind: 'executando' | 'na_fila' | 'aguardando_voce' | 'revisando' | 'aguardando_aprovacao' | 'aguardando_info' | 'treinando';
+  agents: string[]; lead: string; label: string; title: string;
+  /** o card no quadro dele (null: abre o agente) */
+  href: string | null;
+}
 /** Placas operacionais: Central de Trabalho (vagas), espera, entregas e decisões. */
 export type SceneOpsTarget = 'central' | 'espera' | 'entregas' | 'decisoes';
 /**
@@ -92,6 +103,12 @@ export interface SceneProps {
   active: boolean;
   /** placas do trabalho da equipe (null = sem leitura: nada desenhado) */
   ops: SceneOps | null;
+  /** etiquetas do trabalho real junto dos agentes */
+  tags: SceneTag[];
+  /** Alexandre Magno na cidade (opção do workspace; ligado por padrão) */
+  npc: boolean;
+  /** modo calmo: sem a vida ambiente (passeios, lazer); o trabalho real e as etiquetas continuam */
+  calm: boolean;
   onSelectAgent(id: string): void;
   /** Clique num objeto: quadro, arquivo, anfitrião, mural (Conexões), teatro/conselho (Atividade) ou uma área (texto). */
   onObject(kind: SceneObject, text?: string): void;

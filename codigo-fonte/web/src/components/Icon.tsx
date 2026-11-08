@@ -2,6 +2,7 @@
 const PATHS: Record<string, string> = {
   menu: 'M4 6h16M4 12h16M4 18h16',
   bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0',
+  music: 'M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
   alert: 'M12 3l10 18H2L12 3zM12 10v5M12 18h.01',
   'chevron-left': 'M15 6l-6 6 6 6',
   'chevron-right': 'M9 6l6 6-6 6',

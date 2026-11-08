@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { CATALOG, GROW_AT, cityExtent, fitAt, freeCells, occupancy, placeError, type Placed } from '../../shared/city.ts';
+import { CATALOG, EDGE_GROW, GROW_AT, cityExtent, fitAt, freeCells, occupancy, placeError, type Placed } from '../../shared/city.ts';
 import { id, now } from '../src/lib/util.ts';
 import { periodStarts, usageSummary } from '../src/services/usage.ts';
 import { allAgents, cityStructures, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
@@ -21,7 +21,8 @@ describe('grade da cidade (shared/city.ts)', () => {
 
   test('lote ocupado, fora da área e tipo único são recusados', () => {
     assert.equal(placeError(start, 'oikos', 3, 1), 'occupied');
-    assert.equal(placeError(start, 'oikos', 7, 0), 'outside');
+    assert.equal(placeError(start, 'oikos', 7, 0), null, 'logo depois da borda: a cidade cresce');
+    assert.equal(placeError(start, 'oikos', 7 + EDGE_GROW, 0), 'outside', 'longe demais da cidade');
     assert.equal(placeError(start, 'agora', 0, 0), 'unique');
     assert.equal(placeError(start, 'oikos', 0, 0), null);
     assert.equal(placeError(start, 'oikos', 6, 3), null);
@@ -30,8 +31,9 @@ describe('grade da cidade (shared/city.ts)', () => {
 
   test('fitAt encaixa a pegada em volta do lote clicado (ou diz que não cabe)', () => {
     assert.deepEqual(fitAt(start, 'oikos', 1, 0), [1, 0]);
-    const emp = fitAt(start, 'emporion', 1, 0); // 2×2: no topo só cabe 2×1… não cabe
-    assert.equal(emp, null);
+    const emp = fitAt(start, 'emporion', 1, 0)!; // 2×2 no topo: passa da borda e a cidade cresce (não recusa mais)
+    assert.ok(emp, 'cabe, ampliando a cidade');
+    assert.equal(placeError(start, 'emporion', emp[0], emp[1]), null);
     const esc = fitAt(start, 'didaskaleion', 1, 0)!; // 2×1: cobre o lote clicado e um vizinho
     assert.ok(esc[1] === 0 && (esc[0] === 0 || esc[0] === 1));
     assert.equal(placeError(start, 'didaskaleion', esc[0], esc[1]), null);

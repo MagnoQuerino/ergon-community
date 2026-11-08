@@ -209,14 +209,59 @@ export function brazierSprite(t: Theme): Sprite {
   }));
 }
 
-/** Casa da cidade: paredes claras, telhado de quatro águas em terracota com fiadas de telha, janela acesa. */
-export function houseSprite(t: Theme, w: number, h: number, d: number): Sprite {
+/**
+ * Casa do Bairro, no vocabulário das construções de trabalho (Oikos): embasamento de pedra, paredes caiadas em tons
+ * vizinhos, janelas com peitoril, verga e venezianas, porta de madeira com batente de pedra, cornija e telhado de quatro
+ * águas em telha com cumeeira. A variante muda o tom da parede, a cor das venezianas e a floreira (sem mudar a planta).
+ */
+export function houseSprite(t: Theme, w: number, h: number, d: number, variant = 0): Sprite {
   // caixa local: x ∈ [0, w], z ∈ [-d, 0]; a âncora é o canto (0, 0, 0)
-  return cached(`${t.id}|house|${w}|${h}|${d}`, () => fitSprite(-0.2, 0, -d - 0.2, w + 0.2, h + 1.3, 0.2, (g, P) => {
+  return cached(`${t.id}|house2|${w}|${h}|${d}|${variant % 6}`, () => fitSprite(-0.3, 0, -d - 0.3, w + 0.3, h + 1.6, 0.35, (g, P) => {
     const x0 = 0; const x1 = w; const z0 = -d; const z1 = 0;
-    isoBox(g, P, x0, 0, z0, x1, h, z1, t.houseWall, t.outline);
-    for (const yy of [h * 0.33, h * 0.66]) { line(g, P(x0, yy, z1), P(x1, yy, z1), t.houseWall[2]); line(g, P(x1, yy, z1), P(x1, yy, z0), t.outline); } // fiadas de pedra
-    const r = d / 2; const yr = h + Math.min(1.1, d * 0.45); const zc = (z0 + z1) / 2; const e = 0.12;
+    const H = t.houseWall; const S = t.stone;
+    const tone = (c: string): [string, string, string] => [mix(c, '#ffffff', 0.18), c, mix(c, t.outline, 0.24)];
+    const walls: Array<[string, string, string]> = [H, tone(mix(H[1], t.terracotta[0], 0.32)), tone(mix(H[1], S[1], 0.45)), tone(mix(H[1], t.sand[0], 0.4))];
+    const wall = walls[variant % walls.length];
+    const shutter = [t.teal[1], t.olive[1], t.woodDark[1]][variant % 3];
+    // embasamento de pedra (como o das construções: mais largo que a parede) e a parede
+    const pb = 0.16; const ep = 0.1;
+    isoBox(g, P, x0 - ep, 0, z0 - ep, x1 + ep, pb, z1 + ep, S, t.outline);
+    isoBox(g, P, x0, pb, z0, x1, h, z1, wall, t.outline);
+    // cornija: faixa clara sob o beiral
+    fillPoly(g, [P(x0, h - 0.16, z1), P(x1, h - 0.16, z1), P(x1, h, z1), P(x0, h, z1)], wall[0]);
+    fillPoly(g, [P(x1, h - 0.16, z1), P(x1, h - 0.16, z0), P(x1, h, z0), P(x1, h, z1)], mix(wall[0], wall[1], 0.5));
+    line(g, P(x0, h - 0.16, z1), P(x1, h - 0.16, z1), wall[2]); line(g, P(x1, h - 0.16, z1), P(x1, h - 0.16, z0), wall[2]);
+    // janela na frente e na lateral: peitoril, vidro aceso, verga e venezianas
+    const win = (face: 'front' | 'right', u: number, y: number, ww: number, hh: number) => {
+      const Q = (du: number, dh: number) => (face === 'front' ? P(u + du, y + dh, z1) : P(x1, y + dh, u - du));
+      const quad = (a: number, b: number, h0: number, h1: number, c: string) => fillPoly(g, [Q(a, h1), Q(b, h1), Q(b, h0), Q(a, h0)], c);
+      const hw = ww / 2;
+      quad(-hw - 0.06, hw + 0.06, -0.05, hh + 0.06, t.outline);
+      quad(-hw, hw, 0, hh, t.window);
+      line(g, Q(0, 0.02), Q(0, hh - 0.02), mix(t.window, wall[1], 0.45));
+      quad(-hw - 0.09, hw + 0.09, -0.09, -0.02, S[0]);
+      quad(-hw - 0.07, hw + 0.07, hh + 0.02, hh + 0.09, S[2]);
+      quad(-hw - 0.2, -hw - 0.05, 0, hh, shutter); quad(hw + 0.05, hw + 0.2, 0, hh, shutter);
+    };
+    const winY = pb + 0.95; const winH = Math.min(0.85, h - winY - 0.45);
+    win('front', x0 + w * 0.28, winY, 0.5, winH);
+    win('right', z0 + d * 0.5, winY, 0.42, winH);
+    // porta: batente de pedra, folhas de madeira, verga
+    const dx = x0 + w * 0.62; const dw = 0.36; const dh = Math.min(1.8, h - pb - 0.55);
+    const D = (du: number, dh2: number) => P(dx + du, pb + dh2, z1);
+    const dq = (a: number, b: number, h0: number, h1: number, c: string) => fillPoly(g, [D(a, h1), D(b, h1), D(b, h0), D(a, h0)], c);
+    dq(-dw - 0.1, dw + 0.1, 0, dh + 0.12, S[1]);
+    dq(-dw, dw, 0, dh, t.woodDark[1]);
+    dq(-dw, -0.02, 0.05, dh - 0.05, t.woodDark[0]);
+    line(g, D(0, 0.04), D(0, dh - 0.04), t.outline);
+    dq(-dw - 0.14, dw + 0.14, dh + 0.12, dh + 0.2, S[2]);
+    // floreira sob a janela (metade das casas)
+    if (variant % 2 === 0) {
+      const fx = x0 + w * 0.28;
+      isoBox(g, P, fx - 0.36, winY - 0.22, z1, fx + 0.36, winY - 0.08, z1 + 0.16, t.terracotta, t.outline);
+      for (const k of [-0.24, 0, 0.24]) { const [px, py] = P(fx + k, winY - 0.04, z1 + 0.08); g.fillStyle = k === 0 ? t.olive[0] : t.olive[1]; g.fillRect(px - RES, py - 2 * RES, 2 * RES, 2 * RES); }
+    }
+    const r = d / 2; const yr = h + Math.min(1.25, d * 0.48); const zc = (z0 + z1) / 2; const e = 0.16;
     // telhado: face +z (trapézio) e face +x (triângulo), com beiral
     const faceZ = [P(x0 - e, h, z1 + e), P(x1 + e, h, z1 + e), P(x1 - r, yr, zc), P(x0 + r, yr, zc)];
     const faceX = [P(x1 + e, h, z1 + e), P(x1 + e, h, z0 - e), P(x1 - r, yr, zc)];
@@ -230,17 +275,11 @@ export function houseSprite(t: Theme, w: number, h: number, d: number): Sprite {
       line(g, P(x0 - e + r * f, h + (yr - h) * f, z1 + e - (z1 + e - zc) * f), P(x1 + e - r * f, h + (yr - h) * f, z1 + e - (z1 + e - zc) * f), t.roof[2]);
     }
     line(g, P(x0 + r, yr, zc), P(x1 - r, yr, zc), t.roof[0]);
-    // janela acesa e porta
-    const wx = x0 + w * 0.3;
-    for (let k = 0; k < 3; k++) line(g, P(wx, h * 0.42 + k * 0.08, z1), P(wx + 0.35, h * 0.42 + k * 0.08, z1), t.window);
-    const [px, py] = P(x1, h * 0.5, z0 + d * 0.5); g.fillStyle = t.window; g.fillRect(px, py, RES, 2 * RES);
-    const dx = x0 + w * 0.65; flatDoor(g, P, dx, z1, h * 0.5, t.woodDark[1]);
+    // beiral: linha escura sob o telhado, como nas construções
+    line(g, P(x0 - e, h, z1 + e), P(x1 + e, h, z1 + e), t.outline); line(g, P(x1 + e, h, z1 + e), P(x1 + e, h, z0 - e), t.outline);
   }));
 }
 
-function flatDoor(g: CanvasRenderingContext2D, P: Proj, x: number, z: number, hh: number, color: string): void {
-  fillPoly(g, [P(x, hh, z), P(x + 0.28, hh, z), P(x + 0.28, 0.02, z), P(x, 0.02, z)], color);
-}
 
 /** Mesa de estratégia com mapa sobre o tampo e castiçal (ponto de encontro dos agentes). */
 export function mapTableSprite(t: Theme): Sprite {
