@@ -27,7 +27,7 @@ que entregar. Se quem executa sai da equipe, a coordenação assume e o fluxo co
 
 ### Contas conectadas: agenda, e-mail e suas tarefas
 
-Com Microsoft 365 e/ou Google conectados (Conexões), as rotinas podem ler, **só leitura e só o mínimo**:
+Com Microsoft 365 e/ou Google conectados (Conexões), as rotinas leem **só o mínimo** (o que o agente pode fazer além disso segue a regra de [CONEXOES.md](CONEXOES.md); o que parte de uma rotina pede confirmação, a menos que você ligue "Liberar tudo" em Conexões):
 
 | Fonte | O que entra | O que nunca entra |
 |---|---|---|
@@ -289,8 +289,9 @@ calendário), dizendo que foi sem modelo.
 
 ## O que ainda não faz
 
-- **Não envia nada**: respostas e cobranças são rascunhos para copiar. Gravar o rascunho na sua caixa (Outlook/Gmail)
-  pede a permissão de escrita de e-mail (Mail.ReadWrite / gmail.compose), que não foi concedida — decisão sua.
+- **As rotinas não enviam sozinhas**: respostas e cobranças saem como rascunhos para revisar, e o que uma rotina propõe
+  enviar pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões. Um pedido seu na conversa segue a
+  regra de [CONEXOES.md](CONEXOES.md).
 - Imagem e PDF digitalizado não são lidos (sem OCR). Fórmulas do Excel valem pelo último valor salvo.
 - O gatilho "por evento" (reagir na hora a um e-mail ou a uma tarefa) ainda não existe: as rotinas rodam sob demanda,
   em dias e horário, ou por condição em cada horário.

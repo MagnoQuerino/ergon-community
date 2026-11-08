@@ -1,8 +1,9 @@
 /**
  * WhatsApp por QR code (Baileys, código aberto e NÃO oficial; separado da Cloud API). O usuário lê o QR com o
- * celular (Aparelhos conectados) e o Ergon passa a LER as conversas que os filtros permitem. Somente leitura:
- * este módulo não tem caminho de envio (nenhuma chamada a sendMessage), não marca como lido e não fica
- * "online". A sessão fica em /data/secrets (volume de dados), nunca no Git, no OneDrive ou no navegador.
+ * celular (Aparelhos conectados) e o Ergon passa a LER as conversas que os filtros permitem. A leitura não marca
+ * como lido e não fica "online". O envio existe só em `enviar`, quando alguém pede (conexoes/acoes/whatsapp.ts, sob
+ * conexoes/regra.ts): nunca é automático, e mensagem recebida não dispara resposta.
+ * A sessão fica em /data/secrets (volume de dados), nunca no Git, no OneDrive ou no navegador.
  * As mensagens entram pelo mesmo caminho dos outros canais (ingest.ts: deduplicação → interpretação → card).
  */
 import fs from 'node:fs';
@@ -11,6 +12,7 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/db.ts';
 import { clip, fold, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
+import { ErroAcao } from './conexoes/tipos.ts';
 import { findConnection, ingestEvent, type InboundEvent } from './ingest.ts';
 import { integrationRow, setIntegration, settingsOf, type Integrations } from './integrations.ts';
 import { FieldCipher } from '../security/fields.ts';
@@ -30,7 +32,9 @@ export interface WaFilters {
 export const DEFAULT_FILTERS: WaFilters = { direct: true, groups: false, labels: [], exceptions: [], cards: true };
 
 /** Versão do texto de informações e riscos (web/src/views/ConexoesView.tsx): mudou o texto, pede o aceite de novo. */
-export const WA_RISKS_VERSION = 1;
+/** 2: o aceite passou a dizer que os agentes podem enviar; quem aceitou o texto de "somente leitura" aceita de novo antes de enviar. */
+/** 3: o texto deixou de prometer "nunca sozinhos": com "Liberar tudo" ligado, o envio sai sem cartão. Quem aceitou antes aceita de novo. */
+export const WA_RISKS_VERSION = 3;
 export const risksAccepted = (raw: Record<string, unknown>): boolean => (raw.riscos as { versao?: unknown } | undefined)?.versao === WA_RISKS_VERSION;
 
 export function filtersOf(raw: Record<string, unknown>): WaFilters {
@@ -44,17 +48,31 @@ export function filtersOf(raw: Record<string, unknown>): WaFilters {
 type Status = 'off' | 'starting' | 'qr' | 'connected' | 'error';
 interface Live {
   status: Status; qr: string | null; qrCount: number; me: string | null; error: string | null;
-  sock: any; labels: Map<string, string>; chatLabels: Map<string, Set<string>>; names: Map<string, string>;
+  sock: any; labels: Map<string, string>; chatLabels: Map<string, Set<string>>; names: Map<string, string>; salvos: Set<string>;
+  /** os dois endereços da mesma conversa, nos dois sentidos: número ⇄ LID */
+  alts: Map<string, string>;
   seen: number; read: number; stopping: boolean; retries: number;
 }
 
 const MAX_QR = 6; // ~2 minutos de QR sem leitura: para (nada fica tentando sozinho)
+const MAX_ALTS = 4000;
 
-/** Decide se uma mensagem passa pelos filtros (função pura, testada à parte). */
-export function passes(f: WaFilters, m: { chatId: string; isGroup: boolean; chatName: string | null; labels: string[] }): boolean {
+/** O número de um jid, sem aparelho nem servidor ("5511...:12@s.whatsapp.net" → "5511..."). */
+const numeroDoJid = (jid: string): string => jid.split('@')[0].split(':')[0];
+/** Exceção escrita como número, do jeito que o WhatsApp mostra: "+55 (11) 98888-0000". */
+const ehNumero = (s: string): boolean => /^\+?[\d\s().-]{8,}$/.test(s.trim());
+/** Brasil: o mesmo celular existe com e sem o nono dígito (conta antiga ficou sem ele no jid). */
+const comNono = (n: string): string[] => (/^55\d{2}9\d{8}$/.test(n) ? [n, `${n.slice(0, 4)}${n.slice(5)}`] : /^55\d{10}$/.test(n) ? [n, `${n.slice(0, 4)}9${n.slice(4)}`] : [n]);
+
+/** Decide se uma mensagem passa pelos filtros (função pura, testada à parte). `chatAlt`: o outro endereço da conversa, o número de quem chega por LID. */
+export function passes(f: WaFilters, m: { chatId: string; isGroup: boolean; chatName: string | null; labels: string[]; chatAlt?: string | null }): boolean {
   if (m.isGroup ? !f.groups : !f.direct) return false;
-  const ids = [m.chatId, m.chatId.split('@')[0], m.chatName ?? ''].map((s) => fold(s));
-  if (f.exceptions.some((e) => ids.includes(fold(e)) || (fold(e).length > 3 && ids.some((i) => i.includes(fold(e)))))) return false;
+  const jids = m.chatAlt ? [m.chatId, m.chatAlt] : [m.chatId];
+  const ids = [...jids, ...jids.map(numeroDoJid), m.chatName ?? ''].map((s) => fold(s));
+  // o número do LID não é telefone: só entra o de verdade
+  const telefones = jids.filter((j) => !j.endsWith('@lid')).flatMap((j) => comNono(numeroDoJid(j)));
+  const bateNumero = (e: string) => ehNumero(e) && comNono(e.replace(/\D/g, '')).some((x) => telefones.some((t) => t.includes(x)));
+  if (f.exceptions.some((e) => ids.includes(fold(e)) || (fold(e).length > 3 && ids.some((i) => i.includes(fold(e)))) || bateNumero(e))) return false;
   if (f.labels.length && !m.labels.some((l) => f.labels.some((x) => fold(x) === fold(l)))) return false;
   return true;
 }
@@ -67,6 +85,24 @@ export function textOf(msg: any): string | null {
   const t = inner.conversation ?? inner.extendedTextMessage?.text ?? inner.imageMessage?.caption ?? inner.videoMessage?.caption ?? inner.documentMessage?.caption ?? null;
   return typeof t === 'string' && t.trim() ? t : null;
 }
+
+/**
+ * Conversa ao alcance dos agentes: pessoa (número ou LID) e grupo, sem aparelho no meio (formatos em WABinary/jid-utils
+ * do Baileys). Fora: `status@broadcast` publicaria no status da conta; listas de transmissão e canais também.
+ */
+export const jidDeConversa = (jid: string): boolean => /^(\d{5,32}@(s\.whatsapp\.net|lid)|\d{5,32}(-\d{5,32})?@g\.us)$/.test(jid);
+
+/** Só as exceções de `passes`: valem mesmo com os outros filtros desligados. */
+const emExcecao = (f: WaFilters, jid: string, nome: string | null, alt: string | null = null): boolean =>
+  !passes({ ...f, direct: true, groups: true, labels: [] }, { chatId: jid, isGroup: jid.endsWith('@g.us'), chatName: nome, labels: [], chatAlt: alt });
+
+const ligarJids = (l: Live, a: string, b: string): void => { if (l.alts.size < MAX_ALTS) { l.alts.set(a, b); l.alts.set(b, a); } };
+
+/** Mensagens guardadas pelo caminho dos canais (ingest.ts): texto cortado em 500 caracteres; só as recebidas. */
+const GUARDADAS = `FROM source_events e JOIN connections c ON c.id = e.connection_id
+  WHERE e.workspace_id = ? AND c.kind = 'whatsapp' AND e.is_fixture = 0 AND e.status = 'accepted' AND e.text_excerpt IS NOT NULL AND e.channel IS NOT NULL`;
+
+export interface MensagemGuardada { autor: string | null; texto: string; em: string }
 
 export class WhatsAppReader {
   private readonly db: Db; private readonly bus: Bus; private readonly cfg: Config; private readonly ints: Integrations;
@@ -94,13 +130,114 @@ export class WhatsAppReader {
 
   labelNames(workspaceId: string): string[] { return [...(this.live.get(workspaceId)?.labels.values() ?? [])]; }
 
+  private filtros(workspaceId: string): WaFilters { return filtersOf(settingsOf(integrationRow(this.db, workspaceId, 'whatsapp'))); }
+
+  /**
+   * Conversas ao alcance dos agentes, com nome e jid: as que apareceram nesta sessão e as que têm mensagem guardada.
+   * Exceção não aparece, nem grupo cujo nome não dá para conferir contra as exceções. Sem o teto de `chats()`, que é da
+   * tela: um nome precisa ser comparado com todos para saber se é único.
+   */
+  conversas(workspaceId: string): Array<{ jid: string; nome: string; salvo: boolean }> {
+    const f = this.filtros(workspaceId);
+    const alts = this.live.get(workspaceId)?.alts;
+    const porNumero = f.exceptions.some(ehNumero);
+    const nomes = new Map<string, string>();
+    const fora = new Set<string>();
+    const poe = (jid: string, nome: string | null) => {
+      if (emExcecao(f, jid, nome, alts?.get(jid) ?? null)) fora.add(jid);
+      if (nome || !nomes.has(jid)) nomes.set(jid, nome ?? '');
+    };
+    // em grupo, actor_display é quem escreveu, não o nome do grupo
+    for (const r of this.db.all<{ jid: string; nome: string | null }>(`SELECT e.channel AS jid, e.actor_display AS nome, MAX(e.received_at) AS em ${GUARDADAS} GROUP BY e.channel LIMIT 2000`, workspaceId)) poe(r.jid, r.jid.endsWith('@g.us') ? null : r.nome);
+    for (const [jid, nome] of this.live.get(workspaceId)?.names ?? []) poe(jid, nome);
+    return [...nomes]
+      .filter(([jid, nome]) => jidDeConversa(jid) && !fora.has(jid) && (nome || !jid.endsWith('@g.us') || !f.exceptions.length) && !(porNumero && jid.endsWith('@lid') && !alts?.has(jid)))
+      .map(([jid, nome]) => ({ jid, nome: nome || jid, salvo: !!this.live.get(workspaceId)?.salvos.has(jid) || jid.endsWith('@g.us') }));
+  }
+
+  /**
+   * O outro endereço da mesma conversa. O Baileys 7 entrega conversa individual por LID, com o número em `remoteJidAlt`
+   * (lib/Utils/decode-wa-message.js), e `jid` sozinho não diz qual é o telefone. Depois de reiniciar, quem sabe é o mapa
+   * guardado pelo próprio Baileys (lib/Signal/lid-mapping.js, sem rede).
+   */
+  private async outroJid(workspaceId: string, jid: string): Promise<string | null> {
+    const l = this.live.get(workspaceId);
+    if (!l || jid.endsWith('@g.us')) return null;
+    const sabido = l.alts.get(jid);
+    if (sabido || !jid.endsWith('@lid')) return sabido ?? null;
+    try {
+      const pn = await l.sock?.signalRepository?.lidMapping?.getPNForLID?.(jid);
+      if (pn) { const numero = `${numeroDoJid(String(pn))}@s.whatsapp.net`; ligarJids(l, jid, numero); return numero; }
+    } catch { /* sem o mapa: quem chama decide */ }
+    return null;
+  }
+
+  /** Nome atual da conversa. Grupo ainda sem nome nesta sessão (reiniciou, grupo quieto): pergunta ao WhatsApp, como onMessage. */
+  private async nomeVivo(workspaceId: string, jid: string): Promise<string | null> {
+    const l = this.live.get(workspaceId);
+    const nome = l?.names.get(jid) ?? null;
+    if (nome || !jid.endsWith('@g.us') || !l?.sock || l.status !== 'connected') return nome;
+    try {
+      const g = await l.sock.groupMetadata(jid);
+      if (g?.subject) { l.names.set(jid, clip(String(g.subject), 80)); return l.names.get(jid)!; }
+    } catch { /* sem nome */ }
+    return null;
+  }
+
+  /** Conversa nas exceções fica fora do alcance dos agentes; sem saber o nome do grupo não dá para conferir, então também barra. */
+  private async barrarExcecao(workspaceId: string, jid: string): Promise<void> {
+    const f = this.filtros(workspaceId);
+    if (!f.exceptions.length) return;
+    const grupo = jid.endsWith('@g.us');
+    const vivo = await this.nomeVivo(workspaceId, jid);
+    if (grupo && !vivo) throw new ErroAcao('não deu para saber o nome deste grupo agora, então as exceções dos filtros do WhatsApp não puderam ser conferidas. Confira se o WhatsApp está conectado e se a conta participa do grupo');
+    const alt = await this.outroJid(workspaceId, jid);
+    if (jid.endsWith('@lid') && !alt && f.exceptions.some(ehNumero)) throw new ErroAcao('não deu para saber o número desta conversa agora, então as exceções dos filtros do WhatsApp não puderam ser conferidas. Passe o número (DDI, DDD e número, seguidos de @s.whatsapp.net), ou a pessoa troca a exceção pelo nome em Conexões › WhatsApp');
+    // conversa individual: o contato pode ter mudado de nome depois de entrar na lista; a mesma pessoa pode estar guardada pelo número e pelo LID
+    const canais = grupo ? [] : alt ? [jid, alt] : [jid];
+    const guardados = canais.flatMap((c) => this.db.all<{ nome: string | null }>(`SELECT e.actor_display AS nome ${GUARDADAS} AND e.channel = ? ORDER BY e.received_at DESC LIMIT 200`, workspaceId, c).map((r) => r.nome));
+    const doOutro = alt ? this.live.get(workspaceId)?.names.get(alt) ?? null : null;
+    if ([vivo, doOutro, ...guardados].some((n) => emExcecao(f, jid, n, alt))) throw new ErroAcao('esta conversa está nas exceções dos filtros do WhatsApp e fica fora do alcance dos agentes. Só a pessoa pode tirá-la de lá, em Conexões › WhatsApp');
+  }
+
+  /** O que está guardado de uma conversa, da mensagem mais nova para a mais antiga, com os filtros de agora (podem ter mudado depois de guardar). */
+  async mensagens(workspaceId: string, jid: string, limite: number): Promise<MensagemGuardada[]> {
+    if (!jidDeConversa(jid)) throw new ErroAcao(`"${clip(jid, 80)}" não é uma conversa do WhatsApp`);
+    await this.barrarExcecao(workspaceId, jid);
+    const l = this.live.get(workspaceId);
+    const labels = [...(l?.chatLabels.get(jid) ?? [])].map((id) => l!.labels.get(id) ?? id);
+    if (!passes(this.filtros(workspaceId), { chatId: jid, isGroup: jid.endsWith('@g.us'), chatName: l?.names.get(jid) ?? null, labels })) throw new ErroAcao('os filtros do WhatsApp não permitem ler esta conversa. A pessoa pode mudar em Conexões › WhatsApp');
+    return this.db.all<{ autor: string | null; texto: string; ts: string | null; recebida: string }>(
+      `SELECT e.actor_display AS autor, e.text_excerpt AS texto, e.provider_ts AS ts, e.received_at AS recebida ${GUARDADAS} AND e.channel = ? ORDER BY e.received_at DESC, e.rowid DESC LIMIT ?`, workspaceId, jid, limite,
+    ).map((r) => ({ autor: r.autor || null, texto: r.texto, em: r.ts ?? r.recebida }));
+  }
+
+  /**
+   * Envia um texto a pedido de quem chama e devolve o id da mensagem. Nada neste módulo chama isto sozinho. `sendMessage`
+   * termina quando a mensagem sai pelo socket (lib/Socket/messages-send.js: relayMessage → sendNode), sem esperar
+   * confirmação de entrega. Não repete: falhou, a pessoa confere no celular. `linkPreview: null`: sem isso o Baileys
+   * tentaria abrir o primeiro endereço do texto daqui do servidor para montar a prévia, e o endereço pode vir do modelo.
+   */
+  async enviar(workspaceId: string, jid: string, texto: string): Promise<string> {
+    if (!jidDeConversa(jid)) throw new ErroAcao(`"${clip(jid, 80)}" não é uma conversa do WhatsApp: só dá para enviar a uma pessoa ou a um grupo (status, listas de transmissão e canais ficam de fora)`);
+    const l = this.live.get(workspaceId);
+    if (!l?.sock || l.status !== 'connected') throw new ErroAcao('o WhatsApp não está conectado agora. A pessoa pode conectar em Conexões › WhatsApp');
+    if (!risksAccepted(settingsOf(integrationRow(this.db, workspaceId, 'whatsapp')))) throw new ErroAcao('antes do primeiro envio, a pessoa precisa aceitar os riscos em Conexões › WhatsApp: nada foi enviado');
+    await this.barrarExcecao(workspaceId, jid);
+    let enviada: any;
+    try { enviada = await l.sock.sendMessage(jid, { text: texto, linkPreview: null }); } catch (e) {
+      throw new ErroAcao(`o WhatsApp não aceitou a mensagem (${clip(e instanceof Error ? e.message : String(e), 200)}). Confira no celular se ela saiu antes de tentar de novo`);
+    }
+    return String(enviada?.key?.id ?? '');
+  }
+
   private emit(workspaceId: string) { this.bus.publish(workspaceId, 'integrations.changed', { kind: 'whatsapp' }); }
 
   /** Liga o leitor: mostra QR (primeira vez) ou retoma a sessão já pareada pelo usuário. */
   async start(workspaceId: string, userId: string | null): Promise<void> {
     const cur = this.live.get(workspaceId);
     if (cur && !cur.stopping && cur.status !== 'off' && cur.status !== 'error') return;
-    const l: Live = { status: 'starting', qr: null, qrCount: 0, me: null, error: null, sock: null, labels: new Map(), chatLabels: new Map(), names: new Map(), seen: 0, read: 0, stopping: false, retries: cur?.retries ?? 0 };
+    const l: Live = { status: 'starting', qr: null, qrCount: 0, me: null, error: null, sock: null, salvos: new Set(), labels: new Map(), chatLabels: new Map(), names: new Map(), alts: new Map(), seen: 0, read: 0, stopping: false, retries: cur?.retries ?? 0 };
     this.live.set(workspaceId, l);
     this.emit(workspaceId);
     if (userId) setIntegration(this.db, workspaceId, 'whatsapp', { state: 'pending', last_error: null });
@@ -136,7 +273,7 @@ export class WhatsAppReader {
         const row = integrationRow(this.db, workspaceId, 'whatsapp');
         if (row.state !== 'connected') {
           setIntegration(this.db, workspaceId, 'whatsapp', { state: 'connected', account_label: l.me, connected_at: now(), last_error: null });
-          audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.connect', targetType: 'integration', targetId: 'whatsapp', evidence: { account: l.me }, result: 'conectado por QR (somente leitura)' });
+          audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.connect', targetType: 'integration', targetId: 'whatsapp', evidence: { account: l.me }, result: 'conectado por QR' });
         }
         this.emit(workspaceId);
       }
@@ -164,7 +301,8 @@ export class WhatsAppReader {
     });
     const remember = (jid: string, name: unknown) => { if (jid && typeof name === 'string' && name.trim() && l.names.size < 2000) l.names.set(jid, clip(name.trim(), 80)); };
     sock.ev.on('chats.upsert', (cs: any[]) => { for (const c of cs ?? []) remember(c.id, c.name); });
-    sock.ev.on('contacts.upsert', (cs: any[]) => { for (const c of cs ?? []) remember(c.id, c.name ?? c.notify); });
+    // c.name é o nome salvo na agenda da pessoa; notify e pushName, o que o próprio remetente escolheu
+    sock.ev.on('contacts.upsert', (cs: any[]) => { for (const c of cs ?? []) { remember(c.id, c.name ?? c.notify); if (c.id && c.name) l.salvos.add(c.id); } });
     sock.ev.on('groups.upsert', (gs: any[]) => { for (const g of gs ?? []) remember(g.id, g.subject); });
     sock.ev.on('messages.upsert', async (up: any) => {
       if (up?.type !== 'notify') return; // só mensagens novas (nada de histórico)
@@ -182,14 +320,18 @@ export class WhatsAppReader {
     if (!text) return;
     l.seen++;
     const isGroup = chatId.endsWith('@g.us');
-    if (!isGroup) l.names.set(chatId, clip(String(msg.pushName ?? chatId.split('@')[0]), 80));
+    if (!isGroup && !l.salvos.has(chatId)) l.names.set(chatId, clip(String(msg.pushName ?? chatId.split('@')[0]), 80));
+    if (!isGroup && key.remoteJidAlt) ligarJids(l, chatId, String(key.remoteJidAlt));
     if (isGroup && !l.names.has(chatId)) {
       try { const g = await l.sock.groupMetadata(chatId); if (g?.subject) l.names.set(chatId, clip(String(g.subject), 80)); } catch { /* sem nome */ }
     }
     const row = integrationRow(this.db, workspaceId, 'whatsapp');
     const f = filtersOf(settingsOf(row));
     const labels = [...(l.chatLabels.get(chatId) ?? [])].map((id) => l.labels.get(id) ?? id);
-    if (!passes(f, { chatId, isGroup, chatName: l.names.get(chatId) ?? null, labels })) return;
+    const alt = await this.outroJid(workspaceId, chatId);
+    // conversa por LID sem o número: com exceção por número não dá para conferir, e "nunca ler" vale mais do que ler
+    if (chatId.endsWith('@lid') && !alt && f.exceptions.some(ehNumero)) return;
+    if (!passes(f, { chatId, isGroup, chatName: l.names.get(chatId) ?? null, labels, chatAlt: alt })) return;
     const e: InboundEvent = {
       platform: 'whatsapp', externalId: String(key.id ?? `${chatId}-${Date.now()}`).replace(/[^\w:.@+=/-]/g, '').slice(0, 200), eventType: 'message', version: '1',
       actorId: String(key.participant ?? chatId).slice(0, 200), actorName: msg.pushName ? clip(String(msg.pushName), 80) : null,

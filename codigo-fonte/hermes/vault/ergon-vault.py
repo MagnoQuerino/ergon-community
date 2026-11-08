@@ -41,10 +41,10 @@ CONFIG_VERSION = "1"
 CONFIG_MARKER = ".ergon-config"
 CONFIG_STEPS = [
     ["plugins", "enable", "ergon_bridge"],
-    ["config", "set", "platform_toolsets.api_server", '["todo","web","vision","image_gen","skills"]'],
+    ["config", "set", "platform_toolsets.api_server", '["todo","web","vision","image_gen","skills","ergon_conexoes"]'],
     ["config", "set", "platform_toolsets.teams", '["todo"]'],
     ["config", "set", "platform_toolsets.whatsapp", '["todo"]'],
-    ["config", "set", "agent.max_turns", "10"],
+    ["config", "set", "agent.max_turns", "20"],
     ["config", "set", "agent.reasoning_effort", "low"],
     ["config", "set", "unauthorized_dm_behavior", "ignore"],
 ]
@@ -52,6 +52,10 @@ CONFIG_STEPS = [
 # pessoa, como as ferramentas ligadas). Treinar: toda escrita de skill fica em espera até a aprovação no Ergon.
 ENFORCED_STEPS = [
     ["config", "set", "skills.write_approval", "true"],
+    # Conexões: buscar, ler e agir no mesmo pedido leva mais voltas; e a ferramenta precisa estar à vista do modelo, sem passar
+    # pela busca de ferramentas (modelo mais simples não a chama)
+    ["config", "set", "agent.max_turns", "20"],
+    ["config", "set", "tools.tool_search.enabled", "off"],
 ]
 ENTRY = ["/opt/hermes/docker/entrypoint-dispatch.sh", *sys.argv[1:]]
 PR_CAPBSET_DROP = 24  # prctl(2)

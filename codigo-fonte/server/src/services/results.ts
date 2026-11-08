@@ -172,6 +172,12 @@ export class Results {
       c[0].detail = err ?? status;
       return this.record(ws, task.id, r.id, kind, 'falha', c, ev, `A execução ${status === 'cancelled' ? 'foi cancelada' : 'falhou'}${err ? `: ${clip(err, 160)}` : ''}. Nada foi entregue; o card continua aberto.`, 'ergon');
     }
+    // pediu uma ação numa conta que espera o clique da pessoa: ainda não há o que conferir. O card espera com ela, e a
+    // decisão no cartão volta ao card e o põe para andar (conexoes/servico.ts, decidirProposta)
+    if (this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE task_id = ? AND status = 'pendente'", task.id)) {
+      this.setWorkState(ws, task.id, 'aguardando_aprovacao', 'esperando a sua confirmação num cartão (ação numa conta)');
+      return null;
+    }
     const asked = /\[\[\s*perguntar\b/i.test(output ?? '');
     if (asked) ev.pergunta = questionIn(output);
     const help = !!this.db.get('SELECT 1 AS x FROM tasks WHERE parent_task_id = ? AND completed = 0 AND archived = 0', task.id);

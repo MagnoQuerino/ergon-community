@@ -21,29 +21,73 @@ export function newer(a: string, b: string): boolean {
   return x.pre.localeCompare(y.pre, 'en', { numeric: true }) > 0;
 }
 
+/** Uma versão publicada, para a lista de Configurações › Atualizações (voltar para uma anterior). */
+export interface ReleaseItem { version: string; url: string | null; publishedAt: string | null; prerelease: boolean }
+export interface UpdateState { latest: Release | null; releases: ReleaseItem[]; checkedAt: string | null }
+
+const VERSION_TAG = /^v?\d+\.\d+\.\d+(-[\w.]+)?$/;
+
 /**
- * Aviso de versão nova: lê o manifesto publicado (ERGON_UPDATE_URL, ex.: latest.json da página de versões) no
- * máximo a cada 6 h (ou na hora, quando a pessoa pede "Verificar atualizações", no máximo uma vez por minuto). Só
- * avisa — atualizar é decisão da pessoa.
+ * Aviso de versão nova: consulta a página de versões publicada (ERGON_UPDATE_URL, ex.: latest.json da página de
+ * versões do GitHub) só quando a interface pede — ao abrir o Ergon, se a pessoa não desligou o aviso, ou no botão
+ * "Verificar agora" —, no máximo uma vez por minuto. Pela API de versões do GitHub vêm também as pré-versões (quem
+ * está numa pré-versão segue o canal de teste; o latest.json de releases/latest só enxerga as finais) e as versões
+ * anteriores. Sem a API, o latest.json. Só avisa: atualizar é decisão da pessoa.
  */
 export class UpdateCheck {
-  private cache: { at: number; latest: Release | null } | null = null;
+  private cache: (UpdateState & { at: number }) | null = null;
   private url: string | null;
-  constructor(url: string | null) { this.url = url; }
-  async latest(force = false): Promise<Release | null> {
-    if (!this.url) return null;
-    if (this.cache && Date.now() - this.cache.at < (force ? 60_000 : 6 * 3600_000)) return this.cache.latest;
-    let latest: Release | null = null;
-    try {
-      const r = await fetch(this.url, { signal: AbortSignal.timeout(5000), headers: { accept: 'application/json' } });
-      if (r.ok) {
-        const j = (await r.json()) as Partial<Release> & { published_at?: string };
-        if (typeof j.version === 'string' && /^v?\d+\.\d+\.\d+(-[\w.]+)?$/.test(j.version)) {
-          latest = { version: j.version.replace(/^v/, ''), notes: typeof j.notes === 'string' ? j.notes.slice(0, 2000) : null, url: typeof j.url === 'string' && j.url.startsWith('https://') ? j.url : null, publishedAt: j.publishedAt ?? j.published_at ?? null };
-        }
-      }
-    } catch { /* sem rede: tenta de novo depois */ }
-    this.cache = { at: Date.now(), latest };
-    return latest;
+  private current: string;
+  constructor(url: string | null, current: string = VERSION) { this.url = url; this.current = current; }
+
+  /** O que já foi consultado (sem ir à rede). */
+  cached(): UpdateState { return this.cache ? { latest: this.cache.latest, releases: this.cache.releases, checkedAt: this.cache.checkedAt } : { latest: null, releases: [], checkedAt: null }; }
+
+  async check(): Promise<UpdateState> {
+    if (!this.url) return this.cached();
+    if (this.cache && Date.now() - this.cache.at < 60_000) return this.cached();
+    let st: UpdateState | null = await this.fromApi().catch(() => null);
+    if (!st) st = { latest: await this.fromManifest().catch(() => null), releases: [], checkedAt: null };
+    // sem rede: guarda a tentativa (tenta de novo depois) e mantém a lista que já tinha
+    const ok = !!st.latest || st.releases.length > 0;
+    this.cache = { at: Date.now(), latest: ok ? st.latest : this.cache?.latest ?? null, releases: st.releases.length ? st.releases : this.cache?.releases ?? [], checkedAt: ok ? new Date().toISOString() : this.cache?.checkedAt ?? null };
+    return this.cached();
+  }
+
+  /** compatível com o uso antigo: a versão publicada mais nova do canal */
+  async latest(): Promise<Release | null> { return (await this.check()).latest; }
+
+  private api(): string | null {
+    const m = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/releases\//.exec(this.url ?? '');
+    return m ? `https://api.github.com/repos/${m[1]}/${m[2]}/releases?per_page=40` : null;
+  }
+
+  private async fromApi(): Promise<UpdateState | null> {
+    const u = this.api();
+    if (!u) return null;
+    const r = await fetch(u, { signal: AbortSignal.timeout(6000), headers: { accept: 'application/vnd.github+json' } });
+    if (!r.ok) return null;
+    const list = (await r.json()) as Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean; html_url?: string; body?: string | null; published_at?: string | null }>;
+    if (!Array.isArray(list)) return null;
+    // pré-versão instalada = canal de teste (vê as pré-versões); versão final = só as finais
+    const teste = this.current.includes('-');
+    const items = list
+      .filter((x) => !x.draft && typeof x.tag_name === 'string' && VERSION_TAG.test(x.tag_name) && (teste || !x.prerelease))
+      .map((x) => ({ version: x.tag_name!.replace(/^v/, ''), url: typeof x.html_url === 'string' && x.html_url.startsWith('https://') ? x.html_url : null, publishedAt: x.published_at ?? null, prerelease: !!x.prerelease, notes: typeof x.body === 'string' ? x.body.slice(0, 2000) : null }))
+      .sort((a, b) => (newer(a.version, b.version) ? -1 : newer(b.version, a.version) ? 1 : 0));
+    const top = items[0];
+    return {
+      latest: top ? { version: top.version, notes: top.notes, url: top.url, publishedAt: top.publishedAt } : null,
+      releases: items.map(({ notes: _n, ...x }) => x),
+      checkedAt: null,
+    };
+  }
+
+  private async fromManifest(): Promise<Release | null> {
+    const r = await fetch(this.url!, { signal: AbortSignal.timeout(5000), headers: { accept: 'application/json' } });
+    if (!r.ok) return null;
+    const j = (await r.json()) as Partial<Release> & { published_at?: string };
+    if (typeof j.version !== 'string' || !VERSION_TAG.test(j.version)) return null;
+    return { version: j.version.replace(/^v/, ''), notes: typeof j.notes === 'string' ? j.notes.slice(0, 2000) : null, url: typeof j.url === 'string' && j.url.startsWith('https://') ? j.url : null, publishedAt: j.publishedAt ?? j.published_at ?? null };
   }
 }

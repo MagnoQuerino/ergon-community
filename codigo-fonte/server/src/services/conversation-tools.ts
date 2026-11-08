@@ -8,6 +8,8 @@ import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import type { Bus } from './bus.ts';
 import { getConversation, titleFrom } from './chat.ts';
+import { lidoEm, marcarEm } from './conexoes/marca.ts';
+import { sessionKeyFor } from './runs.ts';
 import { LITE_COLS, agentsLite, liteOut, type AgentLite } from './team-query.ts';
 
 /** Renomear, arquivar ou marcar como não lida (o que vier). */
@@ -67,6 +69,9 @@ export function forkFrom(db: Db, bus: Bus, workspaceId: string, userId: string, 
     cid, workspaceId, c.agent_id, userId, db.seal(workspaceId, `↳ ${title}`), `ergon:${workspaceId}:user:${userId}:agent:${c.agent_id}:conv:${cid}`, now(), m.id, now());
   db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at) VALUES (?, ?, ?, 'system', ?, 'local', ?)`,
     id('msg'), workspaceId, cid, db.seal(workspaceId, `Sistema — novo assunto a partir de: “${clip(plainOf(m.content), 600)}”`), now());
+  // a mensagem vai junto para o colega (forkContext): o conteúdo de fora que a conversa de origem leu vem com ela
+  const lido = lidoEm(db, [`conv:${c.id}`, sessionKeyFor({ workspace_id: workspaceId, agent_id: c.agent_id, conversation_id: c.id, task_id: null })]);
+  if (lido.deFora) marcarEm(db, workspaceId, [`conv:${cid}`], { privado: lido.privado, motivo: 'assunto aberto de outra conversa' });
   bus.publish(workspaceId, 'conversations.changed', { id: cid });
   bus.publish(workspaceId, 'messages.changed', { conversationId: cid });
   return { id: cid, agentId: c.agent_id };

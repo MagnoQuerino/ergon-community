@@ -10,6 +10,8 @@ import { TOOLS, toolStatus } from './characters.ts';
 import { neutral } from './operations.ts';
 import { routineContextFor } from './routine-proposals.ts';
 import { COORDINATION_PROTOCOL, activeTeam, coordinatorFocus, coordinatorOf, routeTo } from './team.ts';
+import { promptConexoes } from './conexoes/catalogo.ts';
+import { leEndereco } from './conexoes/regra.ts';
 import { requestsContext } from './purpose.ts';
 import { voiceInstructions } from './voices.ts';
 import { documentsBrief } from './documents.ts';
@@ -18,7 +20,7 @@ import { PROCESS_SQL, isConversationKey, processLimit, runningProcesses, type Pr
 export type RunStatus = 'queued' | 'running' | 'waiting_user' | 'succeeded' | 'failed' | 'cancelled';
 const TERMINAL: RunStatus[] = ['succeeded', 'failed', 'cancelled'];
 /** ferramentas cujo trabalho leva minutos (ver timeoutSeconds) */
-const LONG_TOOLS = new Set(['web', 'calculo', 'terminal']);
+const LONG_TOOLS = new Set(['web', 'calculo', 'terminal', 'contas']);
 /** imagem gerada pelo motor na resposta (ver withMedia): só da pasta das geradas */
 const MEDIA_TAG = /MEDIA:(\/opt\/data\/cache\/generated\/[A-Za-z0-9._\/-]{1,300}\.(?:png|jpe?g|webp))/g;
 
@@ -31,7 +33,7 @@ const TOOL_PHRASE: Array<[RegExp, string]> = [
   [/^image_generate/, 'desenhando a imagem'], [/^(terminal|execute_code|process)/, 'executando um programa'],
   [/^(read_file|search_files)/, 'consultando arquivos'], [/^(write_file|patch)/, 'escrevendo um arquivo'],
   [/^skill/, 'consultando uma competência'], [/^todo/, 'organizando os passos'], [/^memory/, 'anotando para não esquecer'],
-  [/^session_search/, 'lembrando conversas anteriores'], [/^(delegate|mixture)/, 'chamando reforço'], [/^text_to_speech/, 'gravando o áudio'],
+  [/^conexoes_/, 'usando uma conta conectada'], [/^session_search/, 'lembrando conversas anteriores'], [/^(delegate|mixture)/, 'chamando reforço'], [/^text_to_speech/, 'gravando o áudio'],
 ];
 export function toolPhrase(tool: string | undefined, preview?: string): string {
   const t = (tool ?? '').toLowerCase();
@@ -52,6 +54,8 @@ export interface RunRow {
   review_id: string | null; review_step: 'questions' | 'answers' | null;
   hermes_session_id: string | null; model: string | null;
 }
+/** A execução de uma sessão do motor. juntas: outras ativas na mesma sessão (não se sabe qual delas chamou a ponte). */
+export type RunDaSessao = RunRow & { juntas?: RunRow[] };
 
 export interface EnqueueInput {
   workspaceId: string; agentId: string; conversationId?: string | null; taskId?: string | null;
@@ -70,6 +74,8 @@ export function sessionKeyFor(r: Pick<RunRow, 'workspace_id' | 'agent_id' | 'con
 
 export class RunExecutor {
   readonly owner = id('wrk');
+  /** a execução abriu uma página da internet */
+  aoLerInternet: ((r: RunRow) => void) | null = null;
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
   private stopSent = new Set<string>();
@@ -260,7 +266,7 @@ export class RunExecutor {
           input, instructions: r.instructions ?? '', sessionKey: sessionKeyFor(r), idempotencyKey: `ergon-${r.idempotency_key}`,
           model: agent?.model ?? null, provider: agent?.provider ?? null, ...(images.length ? { images } : {}),
         });
-        if (r.kind === 'chat') this.follow(r, started.runId, hermes);
+        this.follow(r, started.runId, hermes);
         this.db.run('UPDATE runs SET hermes_run_id = ?, hermes_status = ?, error = NULL, model = COALESCE(?, model) WHERE id = ?', started.runId, 'started', agent?.model ?? this.defaultModel(r.workspace_id), r.id);
       } catch (err) {
         const he = err instanceof HermesError ? err : null;
@@ -274,7 +280,7 @@ export class RunExecutor {
     }
     if (r.cancel_requested) await this.sendStop(r);
     // depois de um reinício, volta a acompanhar ao vivo (o motor repete os eventos desde o começo)
-    if (r.kind === 'chat' && !this.live.has(r.id)) this.follow(r, r.hermes_run_id, hermes);
+    if (!this.live.has(r.id)) this.follow(r, r.hermes_run_id, hermes);
     let remote;
     try {
       remote = await hermes.getRun(r.hermes_run_id);
@@ -346,7 +352,9 @@ export class RunExecutor {
     let tools: unknown = [];
     try { tools = JSON.parse(raw ?? '[]'); } catch { /* lista ilegível: limite normal */ }
     // treinamento lê os links e escreve a competência em várias etapas: limite longo
-    const long = r.idempotency_key.startsWith('training-') || (Array.isArray(tools) && tools.some((t) => LONG_TOOLS.has(String(t))));
+    // Conexões: buscar, ler e agir numa conta leva voltas; o limite longo só vale se houver alguma conta ligada
+    const contas = () => !!this.db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND state = 'connected' LIMIT 1", r.workspace_id);
+    const long = r.idempotency_key.startsWith('training-') || (Array.isArray(tools) && tools.some((t) => LONG_TOOLS.has(String(t)) && (t !== 'contas' || contas())));
     return long ? Math.max(this.cfg.runTimeoutSeconds, this.cfg.longRunTimeoutSeconds) : this.cfg.runTimeoutSeconds;
   }
 
@@ -358,15 +366,21 @@ export class RunExecutor {
     return (await this.runForSession(sessionId, taskId))?.agent_id ?? null;
   }
 
-  /** A execução por trás de uma sessão do motor (a mais recente da sessão); null = não é do Ergon. */
-  async runForSession(sessionId: string, taskId: string): Promise<RunRow | null> {
+  /**
+   * A execução por trás de uma sessão do motor; null = não é do Ergon. A mesma conversa reusa a sessão: entre as
+   * execuções dela vale a que está em andamento (a mais recente só quando nenhuma está), para a chamada de uma
+   * execução nova não sair com a origem de uma antiga que já terminou. Duas ou mais em andamento na mesma sessão (a
+   * mensagem dela e uma rotina na mesma conversa): vale a mais recente, com as outras em `juntas`, e a chamada não conta
+   * como da pessoa (conexoes/servico.ts, origem).
+   */
+  async runForSession(sessionId: string, taskId: string): Promise<RunDaSessao | null> {
     const ids = [sessionId, taskId].filter((x) => x && x.length <= 200);
     if (!ids.length) return null;
-    const find = () => this.db.get<RunRow>(
-      `SELECT * FROM runs WHERE hermes_session_id IN (${ids.map(() => '?').join(', ')}) ORDER BY created_at DESC LIMIT 1`, ...ids) ?? null;
-    const hit = find();
-    if (hit) return hit;
-    const active = this.db.all<RunRow>("SELECT * FROM runs WHERE status IN ('running', 'waiting_user') AND mode = 'real' AND hermes_run_id IS NOT NULL ORDER BY created_at DESC LIMIT 8");
+    const naSessao = `hermes_session_id IN (${ids.map(() => '?').join(', ')})`;
+    const hit = this.db.get<{ x: number }>(`SELECT 1 AS x FROM runs WHERE ${naSessao} LIMIT 1`, ...ids);
+    // confere as que começaram e ainda não têm a sessão gravada (sessão desconhecida: todas as em andamento), também com
+    // uma em andamento já achada: a outra pode ser da mesma sessão
+    const active = this.db.all<RunRow>(`SELECT * FROM runs WHERE status IN ('running', 'waiting_user') AND mode = 'real' AND hermes_run_id IS NOT NULL${hit ? ' AND hermes_session_id IS NULL' : ''} ORDER BY created_at DESC LIMIT 8`);
     for (const run of active) {
       const h = this.hermesOf(run.workspace_id);
       if (!h) continue;
@@ -375,7 +389,9 @@ export class RunExecutor {
         if (rem.sessionId) this.db.run('UPDATE runs SET hermes_session_id = ? WHERE id = ?', rem.sessionId, run.id);
       } catch { /* segue: fica desconhecida (só o básico) */ }
     }
-    return find();
+    const ativas = this.db.all<RunRow>(`SELECT * FROM runs WHERE ${naSessao} AND status IN ('running', 'waiting_user') ORDER BY created_at DESC, rowid DESC`, ...ids);
+    if (ativas.length) return ativas.length > 1 ? { ...ativas[0], juntas: ativas.slice(1) } : ativas[0];
+    return this.db.get<RunRow>(`SELECT * FROM runs WHERE ${naSessao} ORDER BY created_at DESC LIMIT 1`, ...ids) ?? null;
   }
 
   private async sendStop(r: RunRow): Promise<void> {
@@ -440,7 +456,10 @@ export class RunExecutor {
       l.pub = Date.now();
       this.bus.publish(r.workspace_id, 'runs.live', { id: r.id, conversationId: r.conversation_id });
     };
+    let seq = 0;
     const on = (e: RunEvent) => {
+      this.recordTool(r, e, () => seq++);
+      if (r.kind !== 'chat') return; // card: só o registro das ferramentas (a tela não acompanha o texto chegando)
       if (e.event === 'message.delta' && e.delta) { l.text = clip(l.text + e.delta, 400_000); l.activity = null; }
       else if (e.event === 'tool.started') l.activity = toolPhrase(e.tool, e.preview);
       else if (e.event === 'subagent.start') l.activity = 'chamando reforço';
@@ -450,6 +469,23 @@ export class RunExecutor {
       l.timer.unref?.();
     };
     void hermes.events(hermesRunId, on, l.abort.signal).catch(() => undefined);
+  }
+
+  /** Registro das ferramentas de cada execução (para a auditoria): uma falha aqui nunca atrapalha a execução. */
+  private recordTool(r: RunRow, e: RunEvent, next: () => number): void {
+    if (!e.tool) return;
+    try {
+      if (e.event === 'tool.started') {
+        if (leEndereco(e.tool, e.preview)) this.aoLerInternet?.(r); // página ou imagem da internet é conteúdo de fora (conexoes/regra.ts)
+        this.db.run('INSERT OR REPLACE INTO run_tools (workspace_id, run_id, seq, tool, preview, started_at) VALUES (?, ?, ?, ?, ?, ?)',
+          r.workspace_id, r.id, next(), clip(e.tool, 80), e.preview ? this.db.seal(r.workspace_id, clip(e.preview, 300)) : null, new Date().toISOString());
+      } else if (e.event === 'tool.completed' || e.event === 'tool.failed') {
+        this.db.run(`UPDATE run_tools SET finished_at = ?, ms = ?, ok = ?, preview = COALESCE(?, preview)
+          WHERE run_id = ? AND seq = (SELECT MIN(seq) FROM run_tools WHERE run_id = ? AND tool = ? AND ok IS NULL)`,
+          new Date().toISOString(), e.duration === undefined ? null : Math.round(e.duration * 1000), e.error || e.event === 'tool.failed' ? 0 : 1,
+          e.preview ? this.db.seal(r.workspace_id, clip(e.preview, 300)) : null, r.id, r.id, clip(e.tool, 80));
+      }
+    } catch { /* registro de apoio */ }
   }
 
   private unfollow(runId: string): void {
@@ -684,6 +720,7 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     askable.length ? `Quando precisar de uma ferramenta que você não tem, não improvise nem diga que fez: peça a quem tem. ${askable.join('; ')}.` : '',
     askable.length ? HELP_HOW : '',
     opts.requests && !coord ? CELL_HOW : '',
+    mine.has('contas') ? promptConexoes(db, workspaceId) : '',
     mine.has('dados') ? PROCESS_HOW : '',
     mine.has('agenda') ? REMINDER_HOW : '',
     coord ? RELEASE_HOW_COORD : RELEASE_HOW,

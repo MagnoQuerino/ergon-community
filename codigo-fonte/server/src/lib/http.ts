@@ -7,8 +7,8 @@
  *
  * Leitura (GET, ou consulta enviada por POST — GraphQL, Notion): repetir é seguro. **Escrita**: só repete quando a
  * requisição com certeza não saiu daqui (conexão recusada, nome não resolvido, conexão não aberta); tempo esgotado,
- * conexão caída no meio ou 5xx numa escrita = resultado desconhecido, e repetir poderia fazer duas vezes. Hoje o
- * Ergon só lê dos serviços externos; qualquer escrita nova precisa declarar `kind: 'write'`.
+ * conexão caída no meio ou 5xx numa escrita = resultado desconhecido, e repetir poderia fazer duas vezes. As ações
+ * das conexões e o envio dos quadros escrevem nos serviços: toda escrita declara `kind: 'write'`.
  */
 export type HttpKind = 'read' | 'write';
 export interface RetryPolicy {

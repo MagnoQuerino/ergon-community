@@ -85,29 +85,33 @@ describe('rotinas das fases 1 a 5', () => {
     const r = await install('planejador-projetos');
     const none = await run(r.id);
     assert.equal(none.status, 400); assert.equal(none.error.error, 'input_required');
+    // prazo daqui a 10 dias: uma data que não está nos dados (nem hoje, nem o 15/12 do pedido)
+    let prazo = isoDay(Date.now() + 10 * DAY);
+    if (prazo.slice(5) === '12-15') prazo = isoDay(Date.now() + 11 * DAY);
+    const dm = br(prazo).slice(0, 5);
     motor.reply = (p) => {
       assert.match(p.input, /\[Pedido do usuário: 1\]\n- Lançar o curso de cromatografia/);
       assert.match(p.input, /\[A equipe[^\]]*: \d+\][\s\S]*Fídias/);
       assert.match(p.instructions, /\[\[propor-tarefa titulo=/);
-      return ['Plano em 3 etapas: roteiro (até 07/11), gravação, divulgação.',
-        '[[propor-tarefa titulo="Escrever o roteiro das aulas" responsavel="Hipátia" prazo="2026-11-07" detalhe="5 aulas" origem="pedido"]]',
-        '[[propor-tarefa titulo="Reservar o estúdio" responsavel="você" prazo="2026-11-03" origem="pedido"]]'].join('\n');
+      return [`Plano em 3 etapas: roteiro (até ${dm}), gravação, divulgação.`,
+        `[[propor-tarefa titulo="Escrever o roteiro das aulas" responsavel="Hipátia" prazo="${prazo}" detalhe="5 aulas" origem="pedido"]]`,
+        `[[propor-tarefa titulo="Reservar o estúdio" responsavel="você" prazo="${isoDay(Date.now() + 6 * DAY)}" origem="pedido"]]`].join('\n');
     };
     const d = await run(r.id, { text: 'Lançar o curso de cromatografia até 15/12' });
     assert.equal(d.status, 'succeeded', JSON.stringify(d));
     assert.equal(d.checks.verdict, 'validado', JSON.stringify(d.checks.criteria));
     assert.match(crit(d, 'propostas')!.detail!, /2 proposta/);
-    assert.match(crit(d, 'datas')!.detail!, /07\/11/, 'datas do plano ditas como sugestões');
+    assert.ok(crit(d, 'datas')!.detail!.includes(dm), `datas do plano ditas como sugestões: ${crit(d, 'datas')!.detail}`);
     assert.ok(!d.output.includes('[[propor-tarefa'), 'a linha de controle não aparece no texto');
     const ps = proposals('task');
-    assert.equal(ps.length, 2); assert.match(ps[0].summary, /Escrever o roteiro das aulas" para Hipátia, prazo 07\/11/);
+    assert.equal(ps.length, 2); assert.ok(ps[0].summary.includes(`Escrever o roteiro das aulas" para Hipátia, prazo ${dm}`), ps[0].summary);
     const before = h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM tasks WHERE workspace_id = ?', s.workspaceId)!.n;
     assert.equal(before, h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM tasks WHERE workspace_id = ?', s.workspaceId)!.n, 'nada entra sem aprovar');
     const ok = await req(h, 'POST', `/api/proposals/${ps[0].id}`, s, { decision: 'apply' });
     assert.equal(ok.json.status, 'applied', JSON.stringify(ok.json));
     const t = h.db.get<{ title: string; due_on: string; agent: string; audience: string }>(
       "SELECT t.title, t.due_on, a.name AS agent, b.audience FROM tasks t JOIN boards b ON b.id = t.board_id LEFT JOIN agents a ON a.id = t.agent_id WHERE t.workspace_id = ? ORDER BY t.number DESC LIMIT 1", s.workspaceId)!;
-    assert.deepEqual([t.title, t.due_on, t.agent, t.audience], ['Escrever o roteiro das aulas', '2026-11-07', 'Hipátia', 'team']);
+    assert.deepEqual([t.title, t.due_on, t.agent, t.audience], ['Escrever o roteiro das aulas', prazo, 'Hipátia', 'team']);
     const mine = await req(h, 'POST', `/api/proposals/${ps[1].id}`, s, { decision: 'apply' });
     assert.match(mine.json.result, /nas suas tarefas/);
   });

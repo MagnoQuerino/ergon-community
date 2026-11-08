@@ -10,6 +10,10 @@ import { HttpError, fold, id as newId, notFound, now, redactUrl, safeEqual } fro
 import { INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
 import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
+import { activityReport, reportPeriod } from './services/activity-report.ts';
+import { Conexoes } from './services/conexoes/servico.ts';
+import type { Permissoes } from './services/conexoes/catalogo.ts';
+import { EspelhoEscrita } from './services/conexoes/espelho.ts';
 import { log, setLog } from './lib/log.ts';
 import { S, idParams, strList } from './lib/schemas.ts';
 import { registerIntegrationRoutes } from './routes/integracoes.ts';
@@ -42,7 +46,7 @@ import { routeTeamTask } from './services/actions.ts';
 import { HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
 import type { AiService } from './services/ai.ts';
 import { Motors } from './services/motors.ts';
-import { Integrations, setIntegration, type IntegrationKind } from './services/integrations.ts';
+import { Integrations, integrationRow, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
@@ -66,7 +70,7 @@ import { findConnection, ingestEvent, syncConfiguredIdentities, upsertIdentity }
 import { FixtureTaskProvider, importBoards } from './services/mirror.ts';
 import { RunExecutor, draftPrompt, instructionsFor, isCoordinator, parseDraft } from './services/runs.ts';
 import { ReviewService } from './services/review.ts';
-import { GUARDED_TOOLSETS, TOOLS, grantDataTool, motorScope, platformToolsets, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
+import { GUARDED_TOOLSETS, TOOLS, grantConnectionsTool, grantDataTool, motorScope, platformToolsets, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard, ensureBoards, getTask, taskLog, updateTask, userBoard } from './services/tasks.ts';
@@ -106,6 +110,8 @@ export interface ErgonApp {
   trainings: Trainings;
   ai: AiService;
   integrations: Integrations;
+  conexoes: Conexoes;
+  espelhoEscrita: EspelhoEscrita;
   whatsapp: WhatsAppReader;
   initiative: Initiative;
   bus: Bus;
@@ -218,6 +224,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       if (files.length) {
         const got = await attachmentContext(db, cfg, r.workspace_id, files, Math.max(4000, cfg.maxDocumentChars - 8000));
         parts.push(got.text);
+        conexoes.marcar(r, { privado: true, motivo: 'anexos' });
         audit(db, null, { workspaceId: r.workspace_id, actorType: 'system', actorId: 'ergon', action: 'agent.context.anexos', targetType: 'run', targetId: r.id,
           evidence: { reads: got.reads }, result: 'anexos da mensagem lidos para o agente' });
       }
@@ -228,14 +235,18 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       const docs = await cardDocuments(db, cfg.filesDir, r.workspace_id, files, Math.max(2000, cfg.maxContextChars - 4000), tz);
       if (docs) {
         parts.push(docs.text);
+        conexoes.marcar(r, { privado: true, motivo: 'documentos do card' });
         audit(db, null, { workspaceId: r.workspace_id, actorType: 'system', actorId: 'ergon', action: 'agent.context.documentos', targetType: 'run', targetId: r.id,
           evidence: { reads: docs.reads.map((x) => `${x.name}/${x.status}/${x.chars}`) }, result: 'documentos do card lidos para o agente' });
       }
     }
-    if (tools.includes('conexoes')) {
+    // quem usa as Conexões consulta quando precisa, do período que precisa: esta pré-leitura (48 h, só por palavras no
+    // pedido) fica para quem tem apenas Mensagens dos canais. Rotina já leu as fontes dela
+    if (tools.includes('conexoes') && !tools.includes('contas') && !r.idempotency_key.startsWith('routine-')) {
       const got = await inboxForChat(db, cfg.filesDir, routines.accounts, r.workspace_id, r.input, tz);
       if (got) {
         parts.push(got.text);
+        conexoes.marcar(r, { privado: true, motivo: 'mensagens recebidas' });
         audit(db, null, { workspaceId: r.workspace_id, actorType: 'system', actorId: 'ergon', action: 'agent.context.mensagens', targetType: 'run', targetId: r.id,
           evidence: { reads: got.reads.map((x) => `${x.account}/${x.what}/${x.status}/${x.count}`) }, result: 'mensagens recebidas lidas para a conversa' });
       }
@@ -244,6 +255,27 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   };
   db.run("UPDATE runs SET model = NULL WHERE model IS NOT NULL AND model NOT LIKE '%/%'"); // nome do motor, não do modelo
   const whatsapp = new WhatsAppReader(db, bus, cfg, integrations);
+  const conexoes = new Conexoes({ db, bus, integrations, whatsapp,
+    // ainda sem a leitura das ferramentas do motor (o servidor acabou de ligar): conta como ligado até ler (a ponte lê antes de agir)
+    codigoLigado: (ws) => { const p = platformToolsets(motorScope(ws)); return p.enabled.some((t) => t === 'terminal' || t === 'code_execution') || (!p.at && executor.mode === 'real'); },
+    // confirmou no cartão: o agente recebe o resultado e continua o pedido na mesma conversa
+    continuar: (x) => { executor.enqueue({
+      workspaceId: x.workspaceId, agentId: x.agentId, conversationId: x.conversationId, kind: 'chat', input: x.texto, maxInput: cfg.maxDocumentChars,
+      instructions: instructionsFor(db, x.workspaceId, x.agentId, 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do workspace, autenticada.', { userId: x.userId }),
+      idempotencyKey: x.chave }); },
+    // card da equipe: a decisão fica no histórico e vai na próxima execução dele (teamwork.ts); parado, o card volta a andar
+    devolverAoCard: (x) => {
+      audit(db, bus, { workspaceId: x.workspaceId, actorType: 'user', actorId: x.userId, action: 'task.conexao', targetType: 'task', targetId: x.taskId, evidence: { paraAgente: x.texto }, result: x.resumo });
+      bus.publish(x.workspaceId, 'tasks.changed', { id: x.taskId });
+      const t = db.get<{ completed: number; archived: number; audience: string }>('SELECT t.completed, t.archived, b.audience FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.id = ?', x.taskId);
+      if (!t || t.audience !== 'team' || Number(t.completed) || Number(t.archived)) return;
+      // a execução do card ainda roda: quando ela terminar, o card volta a andar com a decisão (teamwork.ts, settle)
+      if (db.get("SELECT 1 AS x FROM runs WHERE task_id = ? AND status IN ('queued', 'running', 'waiting_user')", x.taskId)) return;
+      results.setWorkState(x.workspaceId, x.taskId, 'solicitada', 'você decidiu no cartão de confirmação');
+      try { teamwork.work(x.workspaceId, x.taskId, null); } catch { /* esperando um colega, limite do dia: a fila retoma */ }
+    } });
+  executor.aoLerInternet = (r) => conexoes.marcar(r, { privado: false, motivo: 'internet' });
+  const espelhoEscrita = new EspelhoEscrita(db, bus, conexoes.escritor);
   // workspaces antigos: setores, quadros (equipe × seus) e a equipe de personagens (uma vez; preserva conversas e tarefas)
   const limits = limitsFor(cfg);
   const storageQuota = cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0;
@@ -257,6 +289,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // o cargo fixo: sempre um Coordenador ativo (uma falha aqui não impede o Ergon de abrir)
     try { ensureCoordinator(db, bus, ws, limits); } catch (err) { bootIssues.push({ workspace: ws, error: (err as Error).message }); }
     grantDataTool(db, bus, ws); // instalações antigas: quem cuida de números recebe a Análise de dados (uma vez)
+    grantConnectionsTool(db, bus, ws); // instalações antigas: a equipe passa a usar as Conexões (uma vez)
     upgradeBriefingSources(db, bus, ws); // Briefing já instalado passa a ler as contas conectadas (uma vez)
   };
   for (const w of db.all<{ id: string }>('SELECT id FROM workspaces')) upkeep(w.id);
@@ -282,6 +315,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         const who = db.get<{ id: string; name: string }>("SELECT id, name FROM agents WHERE workspace_id = ? AND status = 'active' AND lower(name) = lower(?)", r.workspace_id, t.agent);
         const conv = r.conversation_id;
         if (!who) { teamwork.purpose.note(r.workspace_id, conv, `Sistema — não achei ${t.agent} na equipe para aprender “${t.title || t.request.slice(0, 80)}”.`); continue; }
+        // estudar um link abre o endereço sem clique: só quando a pessoa pediu na conversa e nada de fora chegou antes
+        // (o endereço podia ter vindo de um e-mail, de uma rotina ou de uma iniciativa do agente)
+        const deVoce = conexoes.origem(r) === 'pessoa';
+        if (t.links?.length && !conexoes.liberarTudo(r.workspace_id) && (!deVoce || conexoes.leu(r).deFora)) { teamwork.purpose.note(r.workspace_id, conv, `Sistema — por segurança, ${who.name} não estudou os links: ${deVoce ? 'esta conversa leu conteúdo de fora' : 'o pedido não partiu de você'}. Se os links são seus, peça numa conversa nova.`); continue; }
         void trainings.start(r.workspace_id, owner!, who.id, { request: t.request, title: t.title || undefined, links: t.links })
           .then(() => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} começou a estudar “${t.title || t.request.slice(0, 80)}”. A competência aparece no perfil dele (aba Treinar) para você aprovar; até lá, nada muda.`))
           .catch((e: unknown) => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} não pôde estudar agora: ${e instanceof Error ? e.message : 'erro'}`));
@@ -344,7 +381,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       'SELECT id, number, board_id, archived, completed FROM tasks WHERE workspace_id = ? AND id = ?', ws, taskId);
     if (!t || Number(t.archived)) throw new HttpError(404, 'task', 'não encontrei esse card no quadro');
     if (db.get("SELECT 1 AS x FROM boards WHERE id = ? AND origin = 'mirror'", t.board_id)) {
-      throw new HttpError(409, 'mirror', 'Este card é espelho de um aplicativo: apague lá, e o Ergon acompanha sozinho.');
+      // a leitura seguinte não apaga daqui: marca como ausente (mirror.ts)
+      throw new HttpError(409, 'mirror', 'Esta tarefa vem de um aplicativo: apague lá. Na próxima leitura, ela aparece aqui como ausente.');
     }
     const also: number[] = [];
     const drop = (id: string, number: number, completed: boolean, depth: number) => {
@@ -392,6 +430,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   };
   const startBackground = () => {
     if (timers.length) return;
+    espelhoEscrita.start();
     const refreshAi = () => { for (const x of motors.openAis()) { void x.refreshToolsets(); void x.defaultModel().catch(() => null); } };
     refreshAi();
     timers.push(setInterval(refreshAi, 60_000));
@@ -414,7 +453,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     else for (const p of vault.peopleInfo().filter((x) => x.open)) void motors.ensure(p.userId).catch(() => undefined);
     whatsapp.resumeAll(); // só sessões que o usuário já pareou; nunca gera QR sozinho
   };
-  const stopBackground = async () => { for (const t of timers.splice(0)) clearInterval(t); teamwork.stop(); routines.stop(); hermesVault.stop(); await whatsapp.stopAll(); };
+  // a passada do espelho em andamento termina antes de desligar (o que saiu para o aplicativo fica gravado), com um teto
+  const pararEspelho = () => new Promise<void>((ok) => { const t = setTimeout(ok, 10_000); espelhoEscrita.stop().catch(() => undefined).finally(() => { clearTimeout(t); ok(); }); });
+  const stopBackground = async () => { for (const t of timers.splice(0)) clearInterval(t); await pararEspelho(); teamwork.stop(); routines.stop(); hermesVault.stop(); await whatsapp.stopAll(); };
   // nome do cookie inclui a porta: cookies não separam por porta, e instâncias locais (real/teste) não podem colidir
   const COOKIE = `${SESSION_COOKIE}_${cfg.port}`;
   const bridgeLimiter = new Limiter(120, 60_000);
@@ -575,9 +616,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // Versão: a mesma no local e na nuvem; avisa quando sai uma nova (atualizar é decisão da pessoa)
   const updates = new UpdateCheck(cfg.updateUrl);
+  // sem ?verificar=1 só devolve o que já foi consultado: quem vai à rede é a interface (ao abrir, se o aviso estiver
+  // ligado, ou em "Verificar agora")
   app.get('/api/version', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { verificar: { enum: ['1'] } } } } }, async (req) => {
-    const latest = await updates.latest((req.query as { verificar?: string }).verificar === '1');
-    return { version: VERSION, build: BUILD, mode: cfg.mode, latest, updateAvailable: !!latest && newer(latest.version, VERSION) };
+    const st = (req.query as { verificar?: string }).verificar === '1' ? await updates.check() : updates.cached();
+    const latest = st.latest;
+    return { version: VERSION, build: BUILD, mode: cfg.mode, latest, updateAvailable: !!latest && newer(latest.version, VERSION), checkedAt: st.checkedAt, configured: !!cfg.updateUrl,
+      // versões anteriores à instalada, para voltar (a mais nova primeiro)
+      previous: st.releases.filter((x) => newer(VERSION, x.version)).slice(0, 12) };
   });
 
   app.get('/api/me', async (req) => {
@@ -619,11 +665,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Preferências da pessoa: dicas (ligar, dispensar, trazer de volta) e tour inicial
   app.put('/api/me/prefs', {
     schema: { body: { type: 'object', additionalProperties: false, properties: {
-      tips: { type: 'boolean' }, tourDone: { type: 'boolean' }, resetTips: { type: 'boolean' },
+      tips: { type: 'boolean' }, tourDone: { type: 'boolean' }, resetTips: { type: 'boolean' }, updateNotice: { type: 'boolean' },
       dismiss: { type: 'array', maxItems: 20, items: S.str(60, 1) } } } },
   }, async (req) => {
     const a = auth(req);
-    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; dismiss?: string[] });
+    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; updateNotice?: boolean; dismiss?: string[] });
   });
 
   // Boas-vindas: como a pessoa vai usar e em que área trabalha definem a equipe de partida (tudo editável depois)
@@ -684,7 +730,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       body: { type: 'object', additionalProperties: false, required: ['confirmName'], properties: { confirmName: S.str(60, 1) } } },
   }, async (req) => {
     const a = auth(req);
-    const r = deleteWorkspace(db, cfg, a.userId, (req.params as { id: string }).id, (req.body as { confirmName: string }).confirmName);
+    const wsId = (req.params as { id: string }).id;
+    // conta que outro workspace usa emprestada fica com ele: só depois das conferências da exclusão, logo antes de este sumir
+    const r = deleteWorkspace(db, cfg, a.userId, wsId, (req.body as { confirmName: string }).confirmName, () => integrations.promoverTudo(wsId));
     owners.forget();
     audit(db, bus, { workspaceId: r.next, actorType: 'user', actorId: a.userId, action: 'workspace.delete', evidence: { name: r.name }, result: 'workspace excluído (dados, arquivos e chave)' });
     return { ok: true, workspaceId: r.next };
@@ -1117,6 +1165,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     schema: { params: idParams('apr'), body: { type: 'object', additionalProperties: false, required: ['decision'], properties: { decision: { enum: ['apply', 'reject'] } } } },
   }, async (req) => {
     const a = owner(req);
+    const pid = (req.params as { id: string }).id;
+    if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, a.workspaceId)) {
+      return conexoes.decidirProposta(a.workspaceId, a.userId, pid, (req.body as { decision: 'apply' | 'reject' }).decision);
+    }
     return decideProposal(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { decision: 'apply' | 'reject' }).decision,
       { routine: (p) => routines.applyProposal(a.workspaceId, a.userId, p), ledger: (p, userId) => routines.registerLedger(a.workspaceId, userId, p), limits,
         deleteTask: (n, reason) => cancelCardNumber(a.workspaceId, a.userId, n, reason),
@@ -1391,6 +1443,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = auth(req);
     const taskId = (req.params as { id: string }).id;
     const task = getTask(db, a.workspaceId, taskId);
+    // o último envio ao aplicativo que falhou: card novo ainda não tem vínculo para guardar o motivo
+    const envio = db.get<{ last_error: string | null }>("SELECT last_error FROM mirror_outbox WHERE task_id = ? AND workspace_id = ? AND status = 'falhou' ORDER BY created_at DESC LIMIT 1", taskId, a.workspaceId)?.last_error ?? null;
     const link = db.get('SELECT external_id, external_version, external_extra, sync_state, conflict, last_seen_at FROM task_links WHERE task_id = ? AND workspace_id = ?', taskId, a.workspaceId);
     const proposals = db.all(
       `SELECT p.id, p.related_task_id, t.number AS related_number, t.title AS related_title, p.reason, p.score, p.status
@@ -1429,7 +1483,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const cited = agentsLite(db, a.workspaceId, [task.agent_id, ...steps.map((x) => x.agentId), conv?.agent_id, origin?.deliver_agent_id, ...(runs as Array<{ agent_id: string }>).map((r) => r.agent_id),
       ...log.filter((e) => e.actor_type === 'agent').map((e) => e.actor_id), review?.reviewer_id, review?.producer_id]);
     const agents = Object.fromEntries([...cited].map(([id, x]) => [id, { name: x.name, color: x.color }]));
-    return { task, log, link: link ?? null, proposals, source, runs, review,
+    return { task, log, envio, link: link ?? null, proposals, source, runs, review,
       agents, reviewer: reviewerFor(db, a.workspaceId, task.agent_id),
       files: { inputs: files.filter((x) => x.role === 'entrada'), deliverables: files.filter((x) => x.role === 'entregavel') }, operations: ops, work,
       queue: team ? teamwork.queueInfo(a.workspaceId, taskId) : null,
@@ -1439,6 +1493,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       steps, question, missing,
       // cards que nasceram deste (ajuda pedida, o card enviado à equipe): cancelar este leva junto, e a tela avisa antes
       children: db.all<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE parent_task_id = ? AND archived = 0 ORDER BY number', taskId),
+      // ações numa conta pedidas neste card, esperando o seu clique (o mesmo cartão da conversa e de "aguardando você")
+      conexoes: db.all<{ id: string; summary: string; created_at: string }>(`SELECT p.id, p.summary, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
+        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind = 'conexao' AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
       origin: conv ? { conversationId: conv.owner_user_id === a.userId ? conv.id : null, agentId: conv.agent_id, deliverAgentId: origin?.deliver_agent_id ?? conv.agent_id, purpose: origin?.purpose ?? null, delivered } : null };
   });
 
@@ -1747,6 +1804,82 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     'SELECT id, actor_type, actor_id, action, target_type, target_id, evidence, result, created_at FROM audit_events WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT 200',
     auth(req).workspaceId));
 
+  // Conexões: o que falta autorizar, a escolha de liberar tudo, testar com a conta real e a ação da própria pessoa
+  app.get('/api/conexoes', async (req) => {
+    const a = auth(req);
+    return { liberarTudo: conexoes.liberarTudo(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind) })) };
+  });
+  app.put('/api/conexoes/liberar-tudo', { schema: { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req);
+    conexoes.setLiberarTudo(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
+    bus.publish(a.workspaceId, 'integrations.changed', {});
+    return { liberarTudo: conexoes.liberarTudo(a.workspaceId) };
+  });
+  const conexaoParam = { type: 'object', required: ['kind'], properties: { kind: S.str(20, 3) } };
+  // o que cada conexão pode fazer: por tipo (ler, organizar, enviar, apagar) e por ação
+  app.put('/api/conexoes/:kind/permissoes', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['permissoes'], properties: { permissoes: { type: 'object', additionalProperties: false, properties: {
+    tipos: { type: 'object', maxProperties: 4, additionalProperties: S.str(12) }, acoes: { type: 'object', maxProperties: 200, additionalProperties: S.str(12) } } } } } } }, async (req) => {
+    const a = owner(req);
+    const kind = (req.params as { kind: IntegrationKind }).kind;
+    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
+    return { permissoes: conexoes.setPermissoes(a.workspaceId, a.userId, kind, (req.body as { permissoes: Permissoes }).permissoes) };
+  });
+  // a mesma conta em mais de um workspace seu: usar a de outro, sem conectar de novo
+  app.get('/api/conexoes/:kind/reutilizaveis', { schema: { params: conexaoParam } }, async (req) => {
+    const a = owner(req);
+    return { contas: integrations.reutilizaveis(a.workspaceId, a.userId, (req.params as { kind: IntegrationKind }).kind) };
+  });
+  app.post('/api/conexoes/:kind/usar-de', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['workspaceId'], properties: { workspaceId: S.str(60, 3) } } } }, async (req) => {
+    const a = owner(req);
+    return { conta: integrations.usarDe(a.workspaceId, a.userId, (req.params as { kind: IntegrationKind }).kind, (req.body as { workspaceId: string }).workspaceId) };
+  });
+  app.post('/api/conexoes/:kind/testar', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, properties: { escrita: { type: 'boolean' }, quadro: S.str(300) } } } }, async (req) => {
+    const a = owner(req);
+    const kind = (req.params as { kind: IntegrationKind }).kind;
+    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
+    return { itens: await conexoes.testar(a.workspaceId, a.userId, kind, (req.body ?? {}) as { escrita?: boolean; quadro?: string }) };
+  });
+  app.post('/api/conexoes/:kind/acao', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['acao'], properties: { acao: S.str(80, 3), parametros: { type: 'object' } } } } }, async (req) => {
+    const a = owner(req);
+    const b = req.body as { acao: string; parametros?: Record<string, unknown> };
+    return conexoes.daPessoa(a.workspaceId, a.userId, (req.params as { kind: string }).kind, b.acao, b.parametros ?? {});
+  });
+  // envio ao aplicativo que falhou: a pessoa pede de novo
+  app.post('/api/tasks/:id/reenviar', { schema: { params: idParams('tsk') } }, async (req) => {
+    const a = auth(req);
+    const tid = (req.params as { id: string }).id;
+    getTask(db, a.workspaceId, tid);
+    // o que falhou volta à fila (o que um envio mais novo já superou, não), e o que espera a vez sai agora, sem esperar horas
+    db.run("UPDATE mirror_outbox SET status = 'pendente', attempts = 0, next_at = ?, last_error = NULL WHERE task_id = ? AND workspace_id = ? AND status = 'falhou'", now(), tid, a.workspaceId);
+    db.run("UPDATE mirror_outbox SET attempts = 0, next_at = ? WHERE task_id = ? AND workspace_id = ? AND status = 'pendente'", now(), tid, a.workspaceId);
+    db.run("UPDATE task_links SET sync_state = 'ok', conflict = NULL WHERE task_id = ? AND sync_state = 'escrita_falhou'", tid);
+    espelhoEscrita.tick().catch(() => undefined); // cada linha guarda o próprio motivo; aqui não há o que mostrar
+    bus.publish(a.workspaceId, 'tasks.changed', { id: tid });
+    return { ok: true };
+  });
+
+  // Relatório de uso em Markdown (Atividade › Exportar): conversas só as de quem pede; estado da instalação só para quem administra
+  app.get('/api/activity/report', async (req, reply) => {
+    const a = auth(req);
+    const q = req.query as { de?: string; ate?: string; conteudo?: string };
+    const tz = workspaceTz(db, a.workspaceId);
+    reportPeriod(tz, q.de, q.ate); // período inválido: recusado antes de montar o resto
+    const conteudo = q.conteudo === '1'; // o texto das conversas só entra se a pessoa marcar
+    const canAdmin = cfg.mode === 'local' ? isAdmin(db, a.userId) : a.role === 'owner';
+    const scopes: Record<string, string | null> = {};
+    for (const k of ['microsoft', 'google']) scopes[k] = integrations.secrets.read<{ scopes?: string }>(a.workspaceId, k)?.scopes ?? null;
+    const r = activityReport(db, {
+      workspaceId: a.workspaceId, userId: a.userId, tz, de: q.de, ate: q.ate, conteudo,
+      saude: canAdmin ? await healthPanel(healthDepsFor(a)) : null, motorTools: platformToolsets(motorScope(a.workspaceId)).enabled, scopes,
+    });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'activity.export', evidence: { de: r.periodo.de, ate: r.periodo.ate, conteudo, bytes: r.stats.bytes, cortes: r.stats.cortes.length },
+      result: `relatório de ${r.periodo.de} a ${r.periodo.ate} exportado` });
+    reply.header('Content-Type', 'text/markdown; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="${r.filename}"`);
+    reply.header('Cache-Control', 'private, no-store');
+    return r.markdown;
+  });
+
   app.get('/api/source-events', async (req) => db.all(
     `SELECT e.id, c.kind AS platform, c.mode, e.external_id, e.event_type, e.version, e.actor_display, e.channel, e.received_at, e.is_fixture,
             e.text_excerpt, e.interpretation, e.status, e.task_id
@@ -2047,7 +2180,25 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const skills = [...new Set([...trainings.activeSkills(agentId!).map((x) => x.name), ...own])];
     const tr = run ? trainings.forRun(run) : null;
     const training = tr && tr.status === 'executando' && run!.status !== 'succeeded' ? trainings.policy(tr) : null;
-    return { known: true, agent: ag.name, toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), holders, guarded: GUARDED_TOOLSETS, skills, training };
+    return { known: true, agent: ag.name, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), holders, guarded: GUARDED_TOOLSETS, skills, training };
+  });
+
+  // Ferramentas de conexão no motor: o plugin só repassa; a regra, as credenciais e o registro ficam aqui
+  app.post('/internal/bridge/v1/conexoes', {
+    bodyLimit: 256 * 1024,
+    schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar'] }, session_id: S.str(200), task_id: S.str(200), conexao: S.str(40), acao: S.str(80), parametros: { type: 'object' }, leu_web: { type: 'boolean' } } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { op: 'listar' | 'executar'; session_id?: string; task_id?: string; conexao?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
+    if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
+    const tools = ((): string[] => { try { return JSON.parse(db.get<{ tools: string | null }>("SELECT tools FROM agents WHERE id = ? AND status = 'active'", run.agent_id)?.tools ?? '[]') as string[]; } catch { return []; } })();
+    if (!tools.includes('contas')) return { ok: false, status: 'falhou', texto: 'As Conexões não estão liberadas para este agente: peça a um colega que tenha, ou diga à pessoa.' };
+    if (b.op === 'listar') return { ok: true, status: 'feita', texto: conexoes.listar(run.workspace_id, b.conexao) };
+    if (!b.conexao || !b.acao) return { ok: false, status: 'falhou', texto: 'Diga a conexão e a ação (veja conexoes_listar).' };
+    if (!platformToolsets(motorScope(run.workspace_id)).at) await aiOf(run.workspace_id).refreshToolsets(); // codigoLigado precisa da leitura
+    return conexoes.executar(run, b.conexao, b.acao, b.parametros ?? {}, { leuWeb: b.leu_web });
   });
 
   app.post('/internal/bridge/v1/training-event', {
@@ -2060,7 +2211,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
     const run = found && motors.allows(motor, found.workspace_id) ? found : null;
     // uso de uma competência aprendida numa conversa ou tarefa (prova de uso; só conta a do próprio agente)
-    if (b.tool === 'skill_view') return { ok: !!run && !!b.skill && trainings.used(run, b.skill) };
+    if (b.tool === 'skill_view') {
+      const ok = !!run && !!b.skill && trainings.used(run, b.skill);
+      // estudada de links ou documentos: o que ela traz é conteúdo de fora para a sessão que a carregou
+      if (ok && trainings.estudadaDeFora(run!, b.skill!)) conexoes.marcar(run!, { privado: false, motivo: 'competência estudada de links ou documentos' });
+      return { ok };
+    }
     const tr = run ? trainings.forRun(run) : null;
     if (!tr) return { ok: false };
     trainings.event(tr, { tool: String(b.tool ?? ''), pending_id: b.pending_id, staged: b.staged, reads: b.reads });
@@ -2153,7 +2309,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, executor, reviews, teamwork, operations, results, routines, trainings, ai, integrations, whatsapp, initiative, bus, db, vault, hermesVault, motors, startBackground, stopBackground };
+  return { app, executor, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, whatsapp, initiative, bus, db, vault, hermesVault, motors, startBackground, stopBackground };
 }
 
 class Limiter {

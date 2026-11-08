@@ -255,6 +255,7 @@ export class Teamwork {
   private settle(r: RunRow, status: RunStatus, output: string | null): void {
     const ws = r.workspace_id;
     if (!r.task_id) return;
+    if (this.decidiuDuranteExecucao(r, status)) return;
     const steps = stepsOf(this.db, r.task_id);
     if (steps.length && this.advance(r, status, output, steps)) return;
     // fim de execução não é fim de trabalho: o contrato de resultado decide, com evidência
@@ -275,6 +276,24 @@ export class Teamwork {
     // card de uma conversa: concluído, quem recebeu o pedido entrega; parado, o agente da conversa repassa o pedido lá
     if (res.state === 'validado') this.purpose.cardDone(ws, r.task_id, ev);
     else this.purpose.relay(ws, r.task_id, res, output, r.agent_id, ev);
+  }
+
+  /**
+   * A pessoa decidiu num cartão de confirmação das Conexões enquanto esta execução do card ainda rodava (devolverAoCard,
+   * em app.ts, achou a execução ativa e esperou). A saída é de antes da decisão ("pedi a confirmação..."): não vai para a
+   * conferência, e o card volta a andar com o que ela decidiu. Com outro cartão ainda esperando, o clique dele faz isso.
+   */
+  private decidiuDuranteExecucao(r: RunRow, status: RunStatus): boolean {
+    const taskId = r.task_id;
+    if (status !== 'succeeded' || !taskId) return false;
+    if (this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE task_id = ? AND status = 'pendente'", taskId)) return false;
+    if (!this.db.get("SELECT 1 AS x FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.conexao' AND created_at > ?", taskId, r.created_at)) return false;
+    if (this.db.get('SELECT 1 AS x FROM runs WHERE task_id = ? AND id <> ? AND created_at >= ?', taskId, r.id, r.created_at)) return false; // já há uma execução depois desta
+    const t = this.db.get<{ completed: number; archived: number }>('SELECT completed, archived FROM tasks WHERE id = ?', taskId);
+    if (!t || Number(t.completed) || Number(t.archived)) return false;
+    this.results.setWorkState(r.workspace_id, taskId, 'solicitada', 'você decidiu no cartão de confirmação');
+    try { this.work(r.workspace_id, taskId, null); } catch { /* esperando um colega, limite do dia: a fila retoma */ }
+    return true;
   }
 
   /**
@@ -825,6 +844,9 @@ export class Teamwork {
     const attempts = Number(this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND idempotency_key LIKE 'queue-%'", t.id)?.n ?? 0);
     const results = this.db.all<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.help_result' ORDER BY created_at", t.id)
       .map((e) => { try { const v = JSON.parse(e.evidence) as { from: string; output: string }; return `${v.from}: ${v.output}`; } catch { return ''; } }).filter(Boolean);
+    // o que a pessoa decidiu nos cartões de confirmação das Conexões pedidos neste card (app.ts, devolverAoCard)
+    const decididas = this.db.all<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.conexao' ORDER BY created_at", t.id)
+      .map((e) => { try { return String((JSON.parse(e.evidence) as { paraAgente?: string }).paraAgente ?? ''); } catch { return ''; } }).filter(Boolean);
     const back = this.results.pendingReturn(workspaceId, t.id);
     const files = filesBrief(this.db, this.filesDir, workspaceId, t.id);
     const plan = this.planBrief(workspaceId, t.id);
@@ -833,6 +855,7 @@ export class Teamwork {
       `Tarefa #${t.number}: ${t.title}`, plan ? plan.text : t.description,
       files ? `\n${files}` : '',
       results.length ? `\nAjuda que você recebeu dos colegas:\n${results.join('\n\n')}` : '',
+      decididas.length ? `\nO que a pessoa decidiu nos cartões de confirmação das Conexões:\n${decididas.join('\n\n')}` : '',
       back ? (back.team ? `\n${back.team}, da equipe, respondeu ao que travou — siga isto: ${back.text}`
         : back.answer ? `\nA pessoa respondeu à sua pergunta: ${back.text}` : `\nA pessoa devolveu o trabalho com esta instrução (atenda antes de entregar): ${back.text}`) : '',
       opNote,

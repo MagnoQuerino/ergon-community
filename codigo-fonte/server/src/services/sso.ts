@@ -53,11 +53,11 @@ export const SSO: Record<SsoKind, SsoProvider> = {
     kind: 'microsoft', label: 'a Microsoft', place: 'na Microsoft (Entra)',
     authorizeUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
     tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-    // só leitura (nada é enviado ou alterado em seu nome): tarefas, e-mail, agenda e arquivos — o que as rotinas e o
-    // espelho de tarefas usam; valem para conta pessoal e de trabalho. Nenhum exige consentimento de administrador.
-    scopes: 'openid profile offline_access User.Read Tasks.Read Mail.Read Calendars.Read Files.Read.All',
-    // só conta de trabalho/escola (a Microsoft não tem Teams, Planner nem caixa compartilhada para conta pessoal)
-    workScopes: 'Chat.Read Tasks.Read.Shared Mail.Read.Shared',
+    // o que as ações de conexoes/acoes/microsoft.ts usam; valem para conta pessoal e de trabalho. Nenhum exige consentimento
+    // de administrador pela tabela da Microsoft, mas a política da empresa pode exigir. Lidos aqui, na hora, por causa da ordem de carga
+    get scopes() { return ['openid', 'profile', 'offline_access', ...ESCOPOS_MICROSOFT.base].join(' '); },
+    // só conta de trabalho/escola (a Microsoft não tem Teams para conta pessoal)
+    get workScopes() { return ESCOPOS_MICROSOFT.trabalho.join(' '); },
     extra: { response_mode: 'query', prompt: 'select_account' }, scopeOnToken: true,
     clientId: (c) => c.msClientId, clientSecret: () => null,
     needs: 'ERGON_MS_CLIENT_ID', doc: 'docs/MICROSOFT.md',
@@ -70,9 +70,9 @@ export const SSO: Record<SsoKind, SsoProvider> = {
     kind: 'google', label: 'o Google', place: 'no Google Cloud',
     authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
-    // só leitura: tarefas e agenda (sensíveis), Gmail e Drive (restritos: com o app em teste valem
-    // só para os usuários de teste e o acesso vence em 7 dias; para outras pessoas o Google exige auditoria de segurança)
-    scopes: 'openid email profile https://www.googleapis.com/auth/tasks.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly',
+    // o que as ações de conexoes/acoes/google.ts usam: tarefas e agenda (sensíveis), Gmail e Drive (restritos: com o app em teste
+    // valem só para os usuários de teste e o acesso vence em 7 dias; para outras pessoas o Google exige auditoria de segurança)
+    get scopes() { return ['openid', 'email', 'profile', ...ESCOPOS_GOOGLE].join(' '); },
     // offline + consent: o Google só devolve refresh token assim (sem ele, o acesso cai em 1 hora)
     extra: { access_type: 'offline', prompt: 'consent select_account', include_granted_scopes: 'true' }, scopeOnToken: false,
     clientId: (c) => c.googleClientId, clientSecret: (c) => c.googleClientSecret,
@@ -86,7 +86,10 @@ export const SSO: Record<SsoKind, SsoProvider> = {
 export const SSO_KINDS = Object.keys(SSO) as SsoKind[];
 export const isSso = (k: string): k is SsoKind => (SSO_KINDS as string[]).includes(k);
 
-interface Tokens { access_token: string; refresh_token: string; expires_at: number; account: string; /** permissões concedidas (a renovação pede as mesmas) */ scopes?: string }
+import { ESCOPOS_GOOGLE } from './conexoes/acoes/google.ts';
+import { ESCOPOS_MICROSOFT } from './conexoes/acoes/microsoft.ts';
+
+interface Tokens { /** conta pessoal da Microsoft (sem Teams) */ pessoal?: boolean; access_token: string; refresh_token: string; expires_at: number; account: string; /** permissões pedidas (a renovação pede as mesmas) */ scopes?: string; /** as que o serviço disse ter dado (a pessoa pode ter dado só parte) */ granted?: string }
 /** "Locatário" das contas pessoais da Microsoft (Outlook, Hotmail, Live): o resto é conta de trabalho ou escola. */
 const MSA_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
 /** Dados do id_token (já validado pelo canal TLS com o provedor; só para decidir a segunda etapa). */
@@ -100,7 +103,9 @@ export class SsoAuth {
   private readonly secrets: SecretStore;
   private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number; stage: 'base' | 'work'; scopes: string }>();
   private readonly refreshing = new Map<string, Promise<string>>();
-  constructor(cfg: Config, secrets: SecretStore) { this.cfg = cfg; this.secrets = secrets; }
+  /** login com outra conta neste workspace: quem usava a antiga em outros workspaces fica com ela */
+  private readonly aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string) => void;
+  constructor(cfg: Config, secrets: SecretStore, aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string) => void = () => undefined) { this.aoTrocarConta = aoTrocarConta; this.cfg = cfg; this.secrets = secrets; }
 
   /** O botão só funciona com o app registrado no provedor (identificador e, no Google, o segredo). */
   configured(kind: SsoKind): boolean {
@@ -143,7 +148,15 @@ export class SsoAuth {
     const tok = await this.token(kind, { grant_type: 'authorization_code', code, redirect_uri: this.redirectUri(kind), code_verifier: s.verifier }, s.scopes);
     const account = await SSO[kind].account(tok.access_token);
     const { id_token: idToken, ...keep } = tok;
-    this.secrets.write(s.workspaceId, kind, { ...keep, account, scopes: s.scopes } satisfies Tokens);
+    // autorizar de novo sem vir renovação nova não pode derrubar a conexão: fica a anterior
+    // (só a credencial deste workspace: a de outro, emprestada, é de outra conta e não se mistura)
+    const antes = this.secrets.readOwn<Tokens>(s.workspaceId, kind);
+    if (antes && antes.account !== account) this.aoTrocarConta(s.workspaceId, kind, antes.account, account);
+    const tidLogin = idClaims(idToken).tid;
+    // uma renovação da credencial anterior ainda andando não serve mais a ninguém (ela é descartada ao terminar)
+    this.refreshing.delete(`${s.workspaceId}:${kind}`);
+    this.secrets.writeOwn(s.workspaceId, kind, { ...keep, refresh_token: keep.refresh_token || (antes?.account === account ? antes?.refresh_token : '') || '', account, scopes: s.scopes,
+      ...(kind === 'microsoft' && typeof tidLogin === 'string' ? { pessoal: tidLogin === MSA_TENANT } : {}) } satisfies Tokens);
     // conta de trabalho ou escola: já conectada; segue para pedir o que só existe nela (Teams, Planner compartilhado)
     const claims = idClaims(idToken);
     const tid = typeof claims.tid === 'string' ? claims.tid : null;
@@ -178,27 +191,35 @@ export class SsoAuth {
   private parse(j: Record<string, unknown>, params: Record<string, string>): Omit<Tokens, 'account' | 'scopes'> & { id_token?: string } {
     // na renovação o Google não manda outro refresh token: fica o anterior
     return { access_token: String(j.access_token), refresh_token: String(j.refresh_token ?? params.refresh_token ?? ''), expires_at: Date.now() + Number(j.expires_in ?? 3600) * 1000,
-      ...(typeof j.id_token === 'string' ? { id_token: j.id_token } : {}) };
+      ...(typeof j.scope === 'string' ? { granted: j.scope } : {}), ...(typeof j.id_token === 'string' ? { id_token: j.id_token } : {}) };
   }
 
   /**
    * Acesso válido para chamar o provedor; renova sozinho com o refresh token quando está para vencer. `force`: o
    * serviço disse 401 com um acesso que ainda não venceu (senha trocada, sessão revogada) — renova agora.
    */
+  /** De quem é o login em andamento (para registrar o motivo quando ele não termina). */
+  workspaceOf(state: string): string | null { return this.pending.get(state)?.workspaceId ?? null; }
+
   async accessToken(workspaceId: string, kind: SsoKind, opts: { force?: boolean } = {}): Promise<string> {
     const t = this.secrets.read<Tokens>(workspaceId, kind);
     if (!t) throw new ProviderError('forbidden', `conta ${kind === 'google' ? 'Google' : 'Microsoft'} não conectada`);
     if (!opts.force && t.expires_at - Date.now() > 120_000) return t.access_token;
     if (!t.refresh_token) throw new ProviderError('forbidden', 'o acesso venceu e não há renovação: conecte de novo em Conexões', { reauth: true });
     // uma renovação por conta de cada vez: leituras em paralelo esperam a mesma (sem gastar o refresh token duas vezes)
-    const key = `${workspaceId}:${kind}`;
+    // workspaces que usam a mesma conta esperam a mesma renovação
+    const key = `${this.secrets.origem(workspaceId, kind)}:${kind}`;
     const running = this.refreshing.get(key);
     if (running) return running;
-    const p = (async () => {
+    const p: Promise<string> = (async () => {
       const { id_token: _i, ...n } = await this.token(kind, { grant_type: 'refresh_token', refresh_token: t.refresh_token }, t.scopes);
-      this.secrets.write(workspaceId, kind, { ...n, account: t.account, ...(t.scopes ? { scopes: t.scopes } : {}) });
+      // desconectou ou entrou com outra conta enquanto a renovação andava: gravar agora desfaria isso (e a conta antiga
+      // voltaria com o nome da nova)
+      const atual = this.secrets.read<Tokens>(workspaceId, kind);
+      if (!atual || atual.refresh_token !== t.refresh_token) throw new ProviderError('unavailable', 'a conta mudou durante a renovação do acesso; tente de novo');
+      this.secrets.write(workspaceId, kind, { ...n, granted: n.granted ?? t.granted, account: t.account, ...(t.scopes ? { scopes: t.scopes } : {}), ...(t.pessoal !== undefined ? { pessoal: t.pessoal } : {}) });
       return n.access_token;
-    })().finally(() => this.refreshing.delete(key));
+    })().finally(() => { if (this.refreshing.get(key) === p) this.refreshing.delete(key); });
     this.refreshing.set(key, p);
     return p;
   }

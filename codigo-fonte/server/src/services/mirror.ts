@@ -3,12 +3,14 @@ import path from 'node:path';
 import type { Db } from '../db/db.ts';
 import { HttpError, id, notFound, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
+import { escritaPendente } from './conexoes/espelho.ts';
 
 /**
  * Contrato comum para espelhar listas e quadros de aplicativos de tarefas (Planner, To Do, Asana, Todoist)
- * no quadro do usuário. Somente leitura dos campos combinados: título, descrição, situação (concluída ou
- * não) e responsável; colunas quando o aplicativo tem (buckets, seções). Os provedores reais ficam em
- * integrations.ts; a fixture "planner-like" existe só para testes.
+ * no quadro do usuário. Esta é a leitura dos campos combinados: título, descrição, situação (concluída ou
+ * não) e responsável; colunas quando o aplicativo tem (buckets, seções). O sentido contrário (o que a pessoa faz
+ * no Ergon vai para o aplicativo) fica em conexoes/espelho.ts. Os provedores reais ficam em integrations.ts;
+ * a fixture "planner-like" existe só para testes.
  */
 export interface ExternalBoard { externalId: string; name: string; version: string }
 export interface ExternalColumn { externalId: string; name: string; order: number }
@@ -34,7 +36,8 @@ export class ProviderError extends Error {
 export interface TaskProvider {
   readonly name: string;
   readonly isFixture: boolean;
-  readonly supports: { title: true; description: boolean; completion: boolean; columns: boolean; writeBack: false };
+  /** writeBack: o sentido contrário existe (conexoes/espelho.ts) */
+  readonly supports: { title: true; description: boolean; completion: boolean; columns: boolean; writeBack: boolean };
   listBoards(): Promise<Array<ExternalBoard & { taskCount: number }>>;
   getBoard(externalId: string): Promise<BoardSnapshot>;
 }
@@ -92,6 +95,8 @@ export async function importBoards(db: Db, bus: Bus, workspaceId: string, connec
   const report: ImportReport = { boards: [] };
   for (const extId of externalIds.slice(0, 20)) {
     let snap: BoardSnapshot;
+    // a foto do aplicativo é deste instante: o que a pessoa enviar enquanto a leitura anda é mais novo que ela
+    const inicio = now();
     try {
       snap = await provider.getBoard(extId);
     } catch (err) {
@@ -105,13 +110,17 @@ export async function importBoards(db: Db, bus: Bus, workspaceId: string, connec
       report.boards.push({ externalId: extId, boardId: b?.id ?? null, state: 'error', error: msg, created: 0, updated: 0, unchanged: 0, missing: 0, conflicts: 0 });
       continue;
     }
-    report.boards.push(db.tx(() => applySnapshot(db, workspaceId, connectionId, userId, snap, provider.isFixture)));
+    report.boards.push(db.tx(() => applySnapshot(db, workspaceId, connectionId, userId, snap, provider.isFixture, inicio)));
   }
   bus.publish(workspaceId, 'tasks.changed', {});
   return report;
 }
 
-function applySnapshot(db: Db, workspaceId: string, connectionId: string, userId: string, snap: BoardSnapshot, isFixture: boolean): ImportReport['boards'][number] {
+/** O card guarda até este tanto da descrição; acima disso o vínculo marca o corte (editar aqui apagaria o resto lá). */
+const MAX_DESCRICAO = 8000;
+const extraDe = (t: ExternalTask): Record<string, unknown> => (t.description.length > MAX_DESCRICAO ? { ...t.extra, descricao_cortada: true } : t.extra);
+
+function applySnapshot(db: Db, workspaceId: string, connectionId: string, userId: string, snap: BoardSnapshot, isFixture: boolean, inicio: string): ImportReport['boards'][number] {
   const ts = now();
   const r = { externalId: snap.board.externalId, boardId: '' as string | null, state: 'ok' as const, created: 0, updated: 0, unchanged: 0, missing: 0, conflicts: 0 };
   let board = db.get<{ id: string; name: string }>('SELECT id, name FROM boards WHERE connection_id = ? AND external_id = ? AND workspace_id = ?', connectionId, snap.board.externalId, workspaceId);
@@ -152,20 +161,23 @@ function applySnapshot(db: Db, workspaceId: string, connectionId: string, userId
       db.run(
         `INSERT INTO tasks (id, number, workspace_id, board_id, column_id, title, description, completed, completed_at, completed_by, origin, is_fixture, external_assignee, created_at, updated_at, due_on)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'mirror', ?, ?, ?, ?, ?)`,
-        taskId, Number(n?.n ?? 1), workspaceId, board.id, columnId, db.seal(workspaceId, t.title.slice(0, 200)), db.seal(workspaceId, t.description.slice(0, 8000)),
+        taskId, Number(n?.n ?? 1), workspaceId, board.id, columnId, db.seal(workspaceId, t.title.slice(0, 200)), db.seal(workspaceId, t.description.slice(0, MAX_DESCRICAO)),
         t.completed ? 1 : 0, t.completed ? ts : null, t.completed ? 'external' : null, isFixture ? 1 : 0, t.assignee ?? null, ts, ts, t.due ?? null);
       db.run(
         `INSERT INTO task_links (id, workspace_id, task_id, connection_id, external_id, external_version, external_extra, sync_state, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', ?)`, id('tln'), workspaceId, taskId, connectionId, t.externalId, t.version, JSON.stringify(t.extra), ts);
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', ?)`, id('tln'), workspaceId, taskId, connectionId, t.externalId, t.version, JSON.stringify(extraDe(t)), ts);
       audit(db, null, { workspaceId, actorType: 'connector', actorId: connectionId, action: 'mirror.task.import', targetType: 'task', targetId: taskId, evidence: { externalId: t.externalId }, result: 'criada' });
       r.created++;
       continue;
     }
+    // o que a pessoa acabou de fazer ainda está a caminho do aplicativo, ou chegou lá depois da foto: esta leitura é mais velha
+    if (escritaPendente(db, link.task_id, inicio)) { r.unchanged++; continue; }
     // versão igual no aplicativo só pula se o prazo calculado também for igual: uma correção na leitura do prazo
     // chega às tarefas já espelhadas na próxima sincronização, e fica registrada como mudança de prazo
     const dueNow = link.external_version === t.version && t.version ? db.get<{ due: string | null }>('SELECT due_on AS due FROM tasks WHERE id = ?', link.task_id)?.due ?? null : null;
-    if (link.external_version === t.version && t.version && (t.due ?? null) === dueNow) {
-      db.run("UPDATE task_links SET last_seen_at = ?, sync_state = CASE WHEN sync_state = 'missing' THEN 'ok' ELSE sync_state END WHERE id = ?", ts, link.id);
+    // a marca do corte vai em toda leitura: o vínculo de antes dela, ou a descrição que cresceu lá sem mudar o que o card guarda
+    if (link.external_version === t.version && t.version && (t.due === undefined || (t.due ?? null) === dueNow)) {
+      db.run("UPDATE task_links SET last_seen_at = ?, external_extra = ?, sync_state = CASE WHEN sync_state = 'missing' THEN 'ok' ELSE sync_state END WHERE id = ?", ts, JSON.stringify(extraDe(t)), link.id);
       r.unchanged++;
       continue;
     }
@@ -183,15 +195,21 @@ function applySnapshot(db: Db, workspaceId: string, connectionId: string, userId
         r.conflicts++;
       } else { completed = 0; completedBy = null; changes.concluida = false; }
     }
-    if (cur.title !== t.title) changes.titulo = { de: cur.title, para: t.title };
+    // compara com o que o card guarda (o corte), senão uma descrição longa pareceria mudada a cada leitura
+    if (cur.title !== t.title.slice(0, 200)) changes.titulo = { de: cur.title, para: t.title };
     if (cur.column_id !== columnId) changes.coluna = true;
-    if (cur.description !== t.description) changes.descricao = true;
+    if (cur.description !== t.description.slice(0, MAX_DESCRICAO)) changes.descricao = true;
     const now2 = db.get<{ a: string | null; due: string | null }>('SELECT external_assignee AS a, due_on AS due FROM tasks WHERE id = ?', link.task_id);
     const assigneeNow = now2?.a ?? null;
     if ((t.assignee ?? null) !== assigneeNow) changes.responsavel = { de: assigneeNow, para: t.assignee ?? null };
-    if ((t.due ?? null) !== (now2?.due ?? null)) changes.prazo = { de: now2?.due ?? null, para: t.due ?? null };
+    // aplicativo que não lê prazo (due ausente) não apaga o prazo que a pessoa pôs no card
+    const dueNovo = t.due === undefined ? now2?.due ?? null : t.due;
+    if (dueNovo !== (now2?.due ?? null)) changes.prazo = { de: now2?.due ?? null, para: dueNovo };
+    // envio que falhou continua com o aviso (e o "Tentar de novo"); fora isso, aqui e lá estão iguais e o aviso antigo sai
+    const falhou = "sync_state = 'escrita_falhou'";
     if (!Object.keys(changes).length && !conflict) {
-      db.run("UPDATE task_links SET external_version = ?, last_seen_at = ?, sync_state = 'ok' WHERE id = ?", t.version, ts, link.id);
+      db.run(`UPDATE task_links SET external_version = ?, external_extra = ?, last_seen_at = ?, conflict = CASE WHEN ${falhou} THEN conflict END,
+              sync_state = CASE WHEN ${falhou} THEN sync_state ELSE 'ok' END WHERE id = ?`, t.version, JSON.stringify(extraDe(t)), ts, link.id);
       r.unchanged++;
       continue;
     }
@@ -199,9 +217,10 @@ function applySnapshot(db: Db, workspaceId: string, connectionId: string, userId
       `UPDATE tasks SET title = ?, description = ?, column_id = ?, completed = ?, completed_by = ?, external_assignee = ?, due_on = ?,
               completed_at = CASE WHEN ? = 1 AND completed = 0 THEN ? WHEN ? = 0 THEN NULL ELSE completed_at END,
               revision = revision + 1, updated_at = ? WHERE id = ?`,
-      db.seal(workspaceId, t.title.slice(0, 200)), db.seal(workspaceId, t.description.slice(0, 8000)), columnId, completed, completedBy, t.assignee ?? null, t.due ?? null, completed, ts, completed, ts, link.task_id);
-    db.run("UPDATE task_links SET external_version = ?, external_extra = ?, sync_state = 'ok', conflict = ?, last_seen_at = ? WHERE id = ?",
-      t.version, JSON.stringify(t.extra), conflict, ts, link.id);
+      db.seal(workspaceId, t.title.slice(0, 200)), db.seal(workspaceId, t.description.slice(0, MAX_DESCRICAO)), columnId, completed, completedBy, t.assignee ?? null, dueNovo, completed, ts, completed, ts, link.task_id);
+    db.run(`UPDATE task_links SET external_version = ?, external_extra = ?, conflict = CASE WHEN ${falhou} THEN conflict ELSE ? END,
+            sync_state = CASE WHEN ${falhou} THEN sync_state ELSE 'ok' END, last_seen_at = ? WHERE id = ?`,
+      t.version, JSON.stringify(extraDe(t)), conflict, ts, link.id);
     audit(db, null, { workspaceId, actorType: 'connector', actorId: connectionId, action: 'mirror.task.update', targetType: 'task', targetId: link.task_id, evidence: { externalId: t.externalId, changes, conflict }, result: 'atualizada' });
     r.updated++;
   }
@@ -212,7 +231,8 @@ function applySnapshot(db: Db, workspaceId: string, connectionId: string, userId
       `SELECT l.id, l.task_id, l.external_id, l.sync_state FROM task_links l JOIN tasks t ON t.id = l.task_id
         WHERE l.connection_id = ? AND t.board_id = ?`, connectionId, board.id);
     for (const l of links) {
-      if (seen.has(l.external_id) || l.sync_state === 'missing') continue;
+      // criado (ou mexido) lá enquanto a foto era tirada: não estar nela não diz nada
+      if (seen.has(l.external_id) || l.sync_state === 'missing' || escritaPendente(db, l.task_id, inicio)) continue;
       db.run("UPDATE task_links SET sync_state = 'missing' WHERE id = ?", l.id);
       audit(db, null, { workspaceId, actorType: 'connector', actorId: connectionId, action: 'mirror.task.missing', targetType: 'task', targetId: l.task_id, evidence: { externalId: l.external_id }, result: 'ausente na última leitura; preservada' });
       r.missing++;

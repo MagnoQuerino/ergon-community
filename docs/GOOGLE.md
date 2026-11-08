@@ -14,9 +14,10 @@ para todos os clientes. O mecanismo é o mesmo da Microsoft (SSO parametrizado, 
    - **Público:** *Interno* se for uma conta Google Workspace da sua empresa (só gente da empresa entra, sem
      revisão do Google); senão *Externo*. Em *Externo* com o app **Em teste**, adicione seu e-mail em
      **Usuários de teste** (até 100 pessoas).
-   - **Acesso a dados (escopos), só leitura:** `openid`, `email`, `profile`, `tasks.readonly` e `calendar.readonly`
-     (sensíveis) e, para as rotinas, `gmail.readonly` e `drive.readonly` (restritos). Ative também as APIs de
-     Agenda, Gmail e Drive em **Biblioteca**. Escopos restritos com o app **Em teste** valem só para os usuários de
+   - **Acesso a dados (escopos):** `openid`, `email`, `profile`, `tasks`, `calendar.readonly`, `calendar.events`,
+     `drive.file`, `contacts.readonly`, `contacts.other.readonly`, `directory.readonly` e os restritos `gmail.readonly`,
+     `gmail.modify` e `drive.readonly` (a lista exata está em `server/src/services/conexoes/acoes/google.ts`). Ative também as
+     APIs de Agenda, Gmail, Drive e People em **Biblioteca**. Escopos restritos com o app **Em teste** valem só para os usuários de
      teste e o acesso vence a cada 7 dias; para outras pessoas o Google exige uma auditoria de segurança paga.
 4. **Clientes › Criar cliente** (credenciais OAuth): tipo **Aplicativo da Web**.
    **URI de redirecionamento autorizado:** `http://localhost:8787/api/integrations/google/callback`
@@ -43,9 +44,9 @@ para todos os clientes. O mecanismo é o mesmo da Microsoft (SSO parametrizado, 
 - **Login que vence em 7 dias:** com o público *Externo* e o app *Em teste*, o Google invalida a renovação do
   acesso depois de 7 dias e é preciso entrar de novo em Conexões. Para não vencer: público *Interno* (conta
   Workspace) ou publicar o app (*Em produção*), o que para escopos sensíveis exige a verificação do Google.
-- **O que o Ergon faz com a conta:** lê as listas do Google Tasks quando você escolhe uma em Tarefas (título,
-  descrição, situação; o Google Tasks não tem responsável). Agenda, Gmail e Drive: só leitura, para as rotinas.
-  Nada é enviado, apagado ou alterado em seu nome. Google Chat não está incluído.
+- **O que o Ergon faz com a conta:** os agentes consultam e agem, com a regra de confirmação de [CONEXOES.md](CONEXOES.md). Listas do
+  Google Tasks ficam ligadas nos dois sentidos quando você escolhe uma em Tarefas. Gmail: buscar, ler, deixar rascunho, enviar,
+  responder, mover e mandar para a lixeira. Agenda: listar, criar, editar, cancelar. Drive: procurar, ler e criar. Google Chat não está incluído.
 - **Segredo do cliente:** o Google mostra a chave só na criação. Baixe o JSON e guarde fora do Git e do OneDrive
   (`~/.ergon/secrets/`); a chave vai para `ergon.env` e o ID (público) para o `.env` do projeto.
 - **Onde ficam os tokens:** em `/data/secrets` (volume de dados do Ergon, legível só pelo servidor); nunca no

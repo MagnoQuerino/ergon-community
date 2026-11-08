@@ -2,7 +2,6 @@ import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import { inDesktopApp } from '../lib/desktop.ts';
 import type { AgentTool, AiStatus, AppState, ProcessLimit, Usage } from '../lib/types.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -15,6 +14,7 @@ import { SaudePanel } from './SaudePanel.tsx';
 import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
 import { PacotesPanel } from './PacotesPanel.tsx';
+import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
 
 // módulo opcional (views/world): a Community não traz essa pasta
@@ -26,11 +26,11 @@ const WorldPanel = worldMod ? lazy(worldMod) : null;
  *  o Ergon neste computador, as pessoas e a saúde da instalação. */
 export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: AppState; me: Me; onMeChanged: () => void; reload: () => void }) {
   const admin = me.admin;
-  const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'seguranca' | 'saude' | 'pessoas' | 'pacotes' | 'world'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world' : location.hash.includes('pacotes') ? 'pacotes'
+  const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'seguranca' | 'saude' | 'pessoas' | 'pacotes' | 'world' | 'atualizacoes'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('atualizacoes') ? 'atualizacoes' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world' : location.hash.includes('pacotes') ? 'pacotes'
     : location.hash.includes('saude') && admin ? 'saude' : location.hash.includes('pessoas') && admin ? 'pessoas' : 'ia'));
   // o menu da conta abre Configurações › Minha conta (ou Workspace) mesmo com Configurações já aberta
   useEffect(() => {
-    const ver = () => { if (location.hash.includes('?conta')) setTab('conta'); else if (location.hash.includes('?workspace')) setTab('workspace'); };
+    const ver = () => { if (location.hash.includes('?conta')) setTab('conta'); else if (location.hash.includes('?workspace')) setTab('workspace'); else if (location.hash.includes('?atualizacoes')) setTab('atualizacoes'); };
     window.addEventListener('hashchange', ver);
     return () => window.removeEventListener('hashchange', ver);
   }, []);
@@ -46,11 +46,12 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           {admin && me.mode === 'local' && <button role="tab" aria-selected={tab === 'pessoas'} className={`tab ${tab === 'pessoas' ? 'tab--on' : ''}`} onClick={() => setTab('pessoas')}>Pessoas</button>}
           <button role="tab" aria-selected={tab === 'pacotes'} className={`tab ${tab === 'pacotes' ? 'tab--on' : ''}`} onClick={() => setTab('pacotes')}>Pacotes</button>
           {WorldPanel && <button role="tab" aria-selected={tab === 'world'} className={`tab ${tab === 'world' ? 'tab--on' : ''}`} onClick={() => setTab('world')}>Conta Ergon</button>}
+          {me.mode === 'local' && <button role="tab" aria-selected={tab === 'atualizacoes'} className={`tab ${tab === 'atualizacoes' ? 'tab--on' : ''}`} onClick={() => setTab('atualizacoes')}>Atualizações</button>}
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>Saúde</button>}
         </div>
       </header>
-      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
-      <VersionCard />
+      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+      <VersionCard onOpen={() => setTab('atualizacoes')} />
     </div>
   );
 }
@@ -85,34 +86,18 @@ function SegurancaGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Versão instalada e "Verificar atualizações". No Ergon Desktop, o botão leva à tela de atualizações do aplicativo
- * (que confere a versão publicada assinada, atualiza com backup e volta sozinha se algo der errado); fora dele, mostra
- * a versão publicada e onde baixar. Nada se atualiza sem a pessoa pedir.
- */
-function VersionCard() {
+/** Rodapé com a versão instalada; o botão leva a Configurações › Atualizações (verificar, atualizar, voltar, aviso). */
+function VersionCard({ onOpen }: { onOpen: () => void }) {
   const v = useResource<VersionInfo>('/api/version', []);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
   if (!v.data) return null;
   const d = v.data;
-  const verificar = async () => {
-    if (inDesktopApp()) { location.href = '/__desktop/atualizacoes'; return; }
-    setBusy(true); setMsg(null);
-    try {
-      const r = await api.get<VersionInfo>('/api/version?verificar=1');
-      setMsg(r.updateAvailable && r.latest ? null : r.latest ? 'Você está na versão mais recente.' : 'Não deu para consultar a versão publicada agora.');
-      v.reload();
-    } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
-  };
   return (
     <div className="hint version version--row">
       <span>
         Ergon {d.version}{d.build !== 'dev' ? ` (${d.build})` : ''} · {d.mode === 'cloud' ? 'nuvem' : 'neste computador'}
-        {d.updateAvailable && d.latest && !inDesktopApp() ? <> · <b>versão {d.latest.version} disponível</b>{d.latest.url ? <> — <a href={d.latest.url} target="_blank" rel="noreferrer noopener">baixar e ver as novidades</a></> : null}</> : null}
-        {msg ? <> · {msg}</> : null}
+        {d.updateAvailable && d.latest ? <> · <b>versão {d.latest.version} disponível</b></> : null}
       </span>
-      {d.mode === 'local' && <button className="btn btn--sm" disabled={busy} onClick={() => void verificar()}>{busy ? 'Verificando…' : 'Verificar atualizações'}</button>}
+      {d.mode === 'local' && <button className="btn btn--sm" onClick={onOpen}>Atualizações</button>}
     </div>
   );
 }

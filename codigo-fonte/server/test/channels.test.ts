@@ -26,7 +26,7 @@ function fakeBaileys() {
 const msg = (chat: string, text: string, id: string, extra: Record<string, unknown> = {}) =>
   ({ type: 'notify', messages: [{ key: { remoteJid: chat, id, fromMe: false, ...extra }, pushName: 'Cliente A', message: { conversation: text }, messageTimestamp: 1761300000 }] });
 
-describe('WhatsApp por QR: somente leitura, com filtros', () => {
+describe('WhatsApp por QR: leitura com filtros; nada sai sozinho', () => {
   let h: Harness; let s: Session; let fake: ReturnType<typeof fakeBaileys>;
   before(async () => {
     h = await harness();
@@ -48,7 +48,7 @@ describe('WhatsApp por QR: somente leitura, com filtros', () => {
     assert.equal(textOf({ message: { audioMessage: {} } }), null);
   });
 
-  test('QR → conectado; mensagens filtradas entram pelo caminho dos canais; nada é enviado', async () => {
+  test('QR → conectado; mensagens filtradas entram pelo caminho dos canais; mensagem recebida não dispara envio', async () => {
     // experimental: sem o aceite das informações e dos riscos, não conecta
     const semAceite = await req(h, 'POST', '/api/integrations/whatsapp/start', s);
     assert.equal(semAceite.status, 409); assert.equal(semAceite.json.error, 'risks_not_accepted');
@@ -85,13 +85,14 @@ describe('WhatsApp por QR: somente leitura, com filtros', () => {
     assert.equal((await req(h, 'GET', '/api/integrations/whatsapp', s)).json.riscosAceitos, true, 'mudar os filtros não apaga o aceite');
 
     const src = fs.readFileSync(path.resolve(import.meta.dirname, '../src/services/whatsapp.ts'), 'utf8');
-    assert.ok(!/\.sendMessage\(|readMessages\(|sendPresenceUpdate\(/.test(src), 'o leitor não tem caminho de envio');
+    assert.equal(src.match(/\.sendMessage\(/g)?.length, 1, 'um ponto de envio só: enviar(), a pedido (conexoes/acoes/whatsapp.ts, sob conexoes/regra.ts)');
+    assert.ok(!/readMessages\(|sendPresenceUpdate\(/.test(src), 'a leitura não marca como lido nem mexe na presença');
     assert.equal((await req(h, 'DELETE', '/api/integrations/whatsapp', s)).status, 200);
     assert.equal(((await req(h, 'GET', '/api/integrations', s)).json as Array<{ kind: string; state: string }>).find((i) => i.kind === 'whatsapp')!.state, 'off');
   });
 });
 
-describe('Todoist e Microsoft: conectado só depois de conferir; espelho só de leitura', () => {
+describe('Todoist e Microsoft: conectado só depois de conferir; o que a pessoa muda no espelho vai pela fila', () => {
   let h: Harness; let s: Session;
   const realFetch = globalThis.fetch;
   const TOKEN = 'tok_0123456789abcdefTODOIST';
@@ -138,7 +139,8 @@ describe('Todoist e Microsoft: conectado só depois de conferir; espelho só de 
     assert.deepEqual(view.columns.map((c: { name: string }) => c.name), ['Sem seção', 'Hoje']);
     const t1 = view.tasks.find((t: { title: string }) => t.title === 'Comprar material');
     assert.equal(t1.external_assignee, 'Maria'); assert.equal(t1.description, 'papel A4');
-    assert.equal((await req(h, 'PATCH', `/api/tasks/${t1.id}`, s, { title: 'Outro' })).status, 409, 'título vem do aplicativo de origem');
+    assert.equal((await req(h, 'PATCH', `/api/tasks/${t1.id}`, s, { title: 'Outro' })).status, 200, 'a pessoa edita no espelho');
+    assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM mirror_outbox WHERE task_id = ? AND status = 'pendente'", t1.id)?.n, 1, 'e a mudança vai para a fila de escrita');
     const again = await req(h, 'POST', `/api/boards/${board.id}/sync`, s);
     assert.equal(again.json.created, 0, 'sincronizar de novo não duplica');
   });

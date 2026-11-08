@@ -74,7 +74,7 @@ const ARTICLES: Article[] = [
     body: (c) => <>
       <ul>
         <li><Go c={c} v="tarefas">Tarefas</Go> são as suas. Abra uma e use <b>Enviar à equipe</b> quando quiser ajuda (o prazo vai junto).</li>
-        <li><b>Prazo</b>: escolha no card ou escreva no pedido (“até sexta”, “até amanhã”, “até 30/10”) — o card já nasce com ele. Atrasadas ficam em vermelho; as de hoje, em dourado. Nos quadros espelhados, o prazo vem do aplicativo.</li>
+        <li><b>Prazo</b>: escolha no card ou escreva no pedido (“até sexta”, “até amanhã”, “até 30/10”) — o card já nasce com ele. Atrasadas ficam em vermelho; as de hoje, em dourado. Nas listas ligadas a um aplicativo, o prazo vai e volta: mudar aqui muda lá, e o que mudar lá chega aqui.</li>
         <li><b>Quadro ou Lista</b>: a mesma coisa em dois formatos. A lista é uma tabela agrupada pelas mesmas colunas, com situação, responsável, prazo e andamento; clique no cabeçalho para ordenar (por prazo, por exemplo).</li>
         <li><Go c={c} v="equipe">Fluxos da equipe</Go> é o quadro dos agentes: cada card tem responsável e histórico do que foi feito.</li>
         <li>Num card da equipe, peça <b>revisão crítica</b>: {c.reviewer} faz perguntas ao autor, em poucas rodadas, até um veredito.</li>
@@ -90,8 +90,8 @@ const ARTICLES: Article[] = [
     body: (c) => <>
       <ul>
         <li><b>Contas de IA</b>: a <b>assinatura Nous é a melhor escolha</b> — os principais modelos do mercado numa assinatura só (há plano grátis com modelos gratuitos) e cada agente com o modelo certo, do mais forte ao mais econômico. Quem já paga o ChatGPT pode conectar também: a equipe aproveita a assinatura, sem custo por token, e cada agente usa o modelo que você escolher entre as duas contas.</li>
-        <li><b>WhatsApp, Microsoft 365 e Google</b>: a equipe lê o que chega e prepara rascunhos. Nada é enviado sem a sua aprovação.</li>
-        <li><b>Tarefas e quadros</b>: espelhe quadros de outros aplicativos (somente leitura).</li>
+        <li><b>WhatsApp, Microsoft 365 e Google</b>: a equipe consulta e-mails, agenda e arquivos de qualquer período, deixa rascunhos e responde quando você pede. O que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.</li>
+        <li><b>Tarefas e quadros</b>: ligue quadros de outros aplicativos nos dois sentidos: dar check ou mover aqui reflete lá. Os agentes também criam e movem tarefas neles.</li>
       </ul>
       <p>Tudo em <Go c={c} v="conexoes">Conexões</Go>. Conteúdo de mensagens e documentos é tratado como dado, nunca como instrução.</p>
     </> },

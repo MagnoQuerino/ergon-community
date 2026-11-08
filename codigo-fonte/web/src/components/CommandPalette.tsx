@@ -60,7 +60,7 @@ export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onC
     }
     const cards: PaletteItem[] = (found?.tasks ?? []).map((t) => ({
       key: `card-${t.id}`, label: `#${t.number} ${t.title}`, icon: 'tasks', run: () => onCard(t),
-      sub: `${t.audience === 'team' ? 'Fluxos da equipe' : t.origin === 'mirror' ? 'Tarefas (espelho)' : 'Tarefas'} · ${t.completed ? 'concluída' : t.column_name}`,
+      sub: `${t.audience === 'team' ? 'Fluxos da equipe' : t.origin === 'mirror' ? 'Tarefas (ligada a um aplicativo)' : 'Tarefas'} · ${t.completed ? 'concluída' : t.column_name}`,
     }));
     const rotinas: PaletteItem[] = (found?.routines ?? []).map((r) => ({
       key: `rot-${r.id}`, label: r.name, sub: r.status === 'active' ? 'Rotina ligada' : 'Rotina pausada', icon: 'repeat', run: () => onRoutine(r.id, r.name),

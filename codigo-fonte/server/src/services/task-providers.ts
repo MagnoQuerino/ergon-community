@@ -1,5 +1,5 @@
 /**
- * Aplicativos de tarefas e quadros por token pessoal (somente leitura), no mesmo contrato do espelho
+ * Aplicativos de tarefas e quadros por token pessoal (leitura; a escrita fica em conexoes/escrita), no mesmo contrato do espelho
  * (mirror.ts): quadros → colunas → tarefas com título, descrição, situação e responsável.
  * Trello, Jira, ClickUp, monday.com, Notion, Linear, Airtable, Smartsheet, Pipefy e GitHub Projects.
  * Cada um confere a credencial com uma chamada real (whoami) antes de o Ergon dizer "conectado".
@@ -13,30 +13,84 @@ import { NetworkFailure, fetchWithPolicy, retryHint, type HttpKind } from '../li
 export const MAX_TASKS = 500;
 type Json = any; // respostas externas: lidas campo a campo, com String()/Number() na saída
 
+/** Recusa por causa do pedido: repetir não muda a resposta, e quem corrige é a pessoa ou o agente. */
+const RECUSA = new Set([400, 413, 414, 422]);
+export const recusado = (e: unknown): e is ProviderError => e instanceof ProviderError && RECUSA.has(e.status ?? 0);
+
+/**
+ * Os segredos de um cabeçalho de autorização, inclusive os embutidos: "Basic" leva e-mail:token em base64 e "OAuth" leva chave
+ * e token. E os do endereço: parâmetro de consulta com nome de credencial (Trello, RD Station) e trecho longo do caminho
+ * (Telegram: /bot<token>/), que o serviço pode repetir no erro.
+ */
+function segredos(headers: Record<string, string> = {}, url?: string, outros: string[] = []): string[] {
+  const out = new Set<string>(outros);
+  for (const [nome, valor] of Object.entries(headers)) {
+    if (!/auth|token|key|secret/i.test(nome)) continue;
+    for (const p of String(valor).split(/[\s,"=]+/)) if (!/^(bearer|basic|oauth|token|oauth_\w+)$/i.test(p)) out.add(p);
+    const basic = /^basic\s+(\S+)/i.exec(String(valor));
+    if (basic) for (const p of Buffer.from(basic[1], 'base64').toString('utf8').split(':')) out.add(p);
+  }
+  let u: URL | null = null;
+  try { u = url ? new URL(url) : null; } catch { /* sem endereço completo: só os cabeçalhos */ }
+  if (u) {
+    for (const [nome, valor] of u.searchParams) if (/auth|token|key|secret|senha|pass/i.test(nome)) { out.add(valor); out.add(encodeURIComponent(valor)); }
+    for (const p of u.pathname.split('/')) if (p.length >= 24) { out.add(p); try { out.add(decodeURIComponent(p)); } catch { /* trecho mal codificado: fica o original */ } }
+  }
+  // o mais longo primeiro: um segredo pode conter outro
+  return [...out].filter((s) => s.length >= 3).sort((a, b) => b.length - a.length);
+}
+const semSegredo = (texto: string, headers?: Record<string, string>, url?: string, outros?: string[]) => segredos(headers, url, outros).reduce((r, s) => r.split(s).join('***'), texto);
+
+/** O que o serviço disse, nos formatos que eles usam: Jira (errorMessages e errors como objeto), ClickUp (err e ECODE), `error` ou `errors[0]`, ou a mensagem solta. */
+function motivoDe(e: Json): string {
+  if (typeof e === 'string') return e;
+  if (!e || typeof e !== 'object') return '';
+  const doJira = [
+    ...(Array.isArray(e.errorMessages) ? e.errorMessages : []),
+    ...(e.errors && typeof e.errors === 'object' && !Array.isArray(e.errors) ? Object.entries(e.errors).map(([k, v]) => (typeof v === 'string' ? `${k}: ${v}` : null)) : []),
+  ].filter((v) => typeof v === 'string');
+  if (doJira.length) return doJira.join('; ');
+  if (typeof e.err === 'string') return [e.ECODE, e.err].filter((v) => typeof v === 'string').join(': ');
+  // Omie (faultstring), Telegram (description) e Kommo (detail, title)
+  for (const v of [e.faultstring, e.description, e.detail, typeof e.message === 'string' ? null : e.title]) if (typeof v === 'string' && v.trim()) return v;
+  const x = e.error ?? e.errors?.[0] ?? e;
+  if (typeof x === 'string') return typeof e.message === 'string' ? `${x}: ${e.message}` : x;
+  return [x?.code ?? x?.extensions?.code ?? x?.type ?? x?.errorCode ?? x?.error_code ?? x?.status, x?.message ?? x?.error_message ?? e?.message].filter((v) => typeof v === 'string' || typeof v === 'number').join(': ');
+}
+
+/** O motivo da recusa, para a mensagem: em uma linha, cortado e sem a credencial (tirada antes do corte: pela metade, não seria reconhecida). */
+async function motivo(res: Response, headers?: Record<string, string>, url?: string, outros?: string[]): Promise<string> {
+  let bruto = '';
+  try { bruto = await res.text(); } catch { return ''; }
+  let texto: string;
+  // sem JSON é texto puro (Trello, Todoist); uma página HTML de proxy não diz nada
+  try { texto = motivoDe(JSON.parse(bruto)); } catch { texto = bruto.trimStart().startsWith('<') ? '' : bruto; }
+  const why = semSegredo(texto, headers, url, outros).replace(/\s+/g, ' ').trim().slice(0, 160);
+  return why ? ` (${why})` : '';
+}
+
 /**
  * Chamada HTTP com a credencial do usuário; erros viram ProviderError (sem nunca repetir a credencial). Falhas
- * passageiras (sem resposta, 429, 5xx) têm nova tentativa pela política de lib/http.ts. `kind`: toda chamada de
- * hoje é leitura (inclusive as consultas por POST); uma escrita precisa dizer `'write'` (não repete às cegas).
+ * passageiras (sem resposta, 429, 5xx) têm nova tentativa pela política de lib/http.ts. `kind`: leitura é o padrão
+ * (inclusive as consultas por POST); uma escrita precisa dizer `'write'` (não repete às cegas). A mensagem traz o
+ * código de erro do serviço, para o agente, a tela e o relatório dizerem o motivo real. `segredos`: outros valores que o erro
+ * nunca repete (a credencial que vai no corpo, como na Omie).
  */
-export async function request(url: string, init: { method?: string; headers?: Record<string, string>; body?: unknown; kind?: HttpKind } = {}): Promise<Json> {
+export async function request(url: string, init: { method?: string; headers?: Record<string, string>; body?: unknown; kind?: HttpKind; redirect?: 'error' | 'follow' | 'manual'; segredos?: string[] } = {}): Promise<Json> {
   let res: Response;
   try {
     res = await fetchWithPolicy(() => fetch(url, {
       method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
       headers: { Accept: 'application/json', ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...init.headers },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body), signal: AbortSignal.timeout(20000),
+      body: init.body === undefined ? undefined : JSON.stringify(init.body), signal: AbortSignal.timeout(20000), ...(init.redirect ? { redirect: init.redirect } : {}),
     }), { kind: init.kind ?? 'read' });
   } catch (e) {
     throw new ProviderError('unavailable', e instanceof NetworkFailure && e.unknownOutcome ? 'o serviço não confirmou (pode ter feito ou não): confira lá antes de repetir' : 'o serviço não respondeu');
   }
-  if (res.status === 401 || res.status === 403) throw new ProviderError('forbidden', 'acesso recusado pelo serviço (credencial inválida, expirada ou sem permissão)', { status: res.status });
-  if (res.status === 404) throw new ProviderError('not_found', 'não encontrado (ou sem acesso)', { status: 404 });
+  if (res.status === 401 || res.status === 403) throw new ProviderError('forbidden', `acesso recusado pelo serviço (credencial inválida, expirada ou sem permissão)${await motivo(res, init.headers, url, init.segredos)}`, { status: res.status });
+  if (res.status === 404) throw new ProviderError('not_found', `não encontrado (ou sem acesso)${await motivo(res, init.headers, url, init.segredos)}`, { status: 404 });
   if (res.status === 429) throw new ProviderError('unavailable', `limite de uso do serviço atingido; ${retryHint(res)}`);
-  if (!res.ok) {
-    let why = '';
-    try { const e = JSON.parse(await res.text()); const x = e?.error ?? e; why = [x?.code ?? x?.status, x?.message].filter((v) => typeof v === 'string' || typeof v === 'number').join(': '); } catch { /* sem detalhe */ }
-    throw new ProviderError('unavailable', `o serviço respondeu ${res.status}${why ? ` (${String(why).replace(/\s+/g, ' ').slice(0, 160)})` : ''}`);
-  }
+  if (!res.ok) throw new ProviderError('unavailable', `o serviço respondeu ${res.status}${await motivo(res, init.headers, url, init.segredos)}`, { status: res.status });
   const t = await res.text();
   try { return t ? JSON.parse(t) : {}; } catch { throw new ProviderError('unavailable', 'resposta inesperada do serviço'); }
 }
@@ -45,7 +99,7 @@ export async function request(url: string, init: { method?: string; headers?: Re
 async function graphql(url: string, headers: Record<string, string>, query: string, variables: Record<string, unknown> = {}): Promise<Json> {
   const j = await request(url, { headers, body: { query, variables } });
   if (j.errors?.length && !j.data) {
-    const msg = String(j.errors[0]?.message ?? 'erro na consulta').slice(0, 200);
+    const msg = semSegredo(String(j.errors[0]?.message ?? 'erro na consulta'), headers).slice(0, 200);
     throw new ProviderError(/auth|token|unauthori|forbidden|permission|not authenticated|credential/i.test(msg) ? 'forbidden' : 'unavailable', msg);
   }
   return j.data ?? {};
@@ -55,13 +109,28 @@ const str = (v: unknown, max = 200) => String(v ?? '').slice(0, max);
 const desc = (v: unknown) => String(v ?? '').slice(0, 4000);
 /** nomes de coluna/situação que significam "feito" (pt e en) */
 export const DONE = /^(done|feito|feita|conclu[ií]d[oa]s?|completed?|closed|fechad[oa]|finalizad[oa]|entregue|resolved|resolvid[oa])$/i;
+/**
+ * Nome de data que significa prazo: a leitura e o escritor de cada aplicativo usam a mesma regra e o mesmo campo, senão a
+ * leitura não veria o que foi escrito. Aplicativo sem campo assim não lê prazo: `due` fica ausente (undefined), e não null,
+ * que quer dizer "o aplicativo diz que não tem prazo". PRAZO é a do monday.com e do Notion; PRAZO_AMPLO, a do Airtable, do
+ * Smartsheet e do GitHub.
+ */
+export const PRAZO = /prazo|due|vencimento|deadline|entrega/i;
+export const PRAZO_AMPLO = /prazo|venc|\bdue\b|deadline|entrega|\btarget\b|limite|t[eé]rmino|\bfim\b|\bend\b/i;
 const hash = (v: unknown) => crypto.createHash('sha1').update(JSON.stringify(v)).digest('hex').slice(0, 16);
 const SUPPORTS = { title: true, description: true, completion: true, columns: true, writeBack: false } as const;
 type Boards = Array<ExternalBoard & { taskCount: number }>;
 const board = (externalId: string, name: string, version = ''): ExternalBoard & { taskCount: number } => ({ externalId, name: str(name), version: str(version, 80), taskCount: -1 });
 const ONE_COLUMN = [{ externalId: '__tarefas__', name: 'Tarefas', order: 0 }];
 
-export interface AccountProvider extends TaskProvider { whoami(): Promise<string> }
+/**
+ * De quem é a credencial: o nome que a tela mostra e, quando o serviço tem, o id da conta lá (usuário, bot, portal), que
+ * não muda com o token. Duas contas podem ter o mesmo nome: só o id diz que é a mesma (ver Integrations.connectToken).
+ */
+export interface ContaConferida { nome: string; id: string | null }
+export const contaConferida = (nome: unknown, idConta: unknown): ContaConferida =>
+  ({ nome: str(nome, 120), id: idConta === undefined || idConta === null || idConta === '' ? null : str(idConta, 200) });
+export interface AccountProvider extends TaskProvider { whoami(): Promise<ContaConferida> }
 
 // ---------------------------------------------------------------- Trello (chave da API + token do usuário)
 export class TrelloProvider implements AccountProvider {
@@ -69,7 +138,7 @@ export class TrelloProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(key: string, token: string) { this.h = { Authorization: `OAuth oauth_consumer_key="${key}", oauth_token="${token}"` }; }
   private g(p: string) { return request(`https://api.trello.com/1${p}`, { headers: this.h }); }
-  async whoami() { const j = await this.g('/members/me?fields=fullName,username'); return str(j.fullName || j.username || 'conta Trello', 120); }
+  async whoami() { const j = await this.g('/members/me?fields=id,fullName,username'); return contaConferida(j.fullName || j.username || 'conta Trello', j.id); }
   async listBoards(): Promise<Boards> {
     return ((await this.g('/members/me/boards?filter=open&fields=name,dateLastActivity')) as Json[]).map((b) => board(String(b.id), b.name, b.dateLastActivity));
   }
@@ -77,7 +146,7 @@ export class TrelloProvider implements AccountProvider {
     if (!/^[a-zA-Z0-9]{8,32}$/.test(externalId)) throw new ProviderError('not_found', 'quadro inválido');
     const b = await this.g(`/boards/${externalId}?fields=name,dateLastActivity`);
     const lists = ((await this.g(`/boards/${externalId}/lists?filter=open&fields=name,pos`)) as Json[]).sort((a, c) => Number(a.pos) - Number(c.pos));
-    const cards = (await this.g(`/boards/${externalId}/cards?filter=open&fields=name,desc,idList,dueComplete,dateLastActivity&members=true&member_fields=fullName,username`)) as Json[];
+    const cards = (await this.g(`/boards/${externalId}/cards?filter=open&fields=name,desc,idList,due,dueComplete,dateLastActivity&members=true&member_fields=fullName,username`)) as Json[];
     const listName = new Map(lists.map((l) => [String(l.id), String(l.name)]));
     return {
       board: { externalId, name: str(b.name), version: str(b.dateLastActivity, 80) },
@@ -116,7 +185,7 @@ export class JiraProvider implements AccountProvider {
     this.h = { Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}` };
   }
   private g(p: string, body?: unknown) { return request(`${this.base}${p}`, { headers: this.h, body }); }
-  async whoami() { const j = await this.g('/myself'); return str(j.displayName || j.emailAddress || 'conta Jira', 120); }
+  async whoami() { const j = await this.g('/myself'); return contaConferida(j.displayName || j.emailAddress || 'conta Jira', j.accountId); }
   async listBoards(): Promise<Boards> {
     const out: Boards = []; let start = 0;
     for (let i = 0; i < 5; i++) {
@@ -164,7 +233,7 @@ export class ClickUpProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(token: string) { this.h = { Authorization: token }; }
   private g(p: string) { return request(`https://api.clickup.com/api/v2${p}`, { headers: this.h }); }
-  async whoami() { const j = await this.g('/user'); return str(j.user?.username || j.user?.email || 'conta ClickUp', 120); }
+  async whoami() { const j = await this.g('/user'); return contaConferida(j.user?.username || j.user?.email || 'conta ClickUp', j.user?.id); }
   async listBoards(): Promise<Boards> {
     const out: Boards = [];
     for (const team of ((await this.g('/team')).teams ?? []).slice(0, 3)) {
@@ -210,14 +279,14 @@ export class MondayProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(token: string) { this.h = { Authorization: token }; }
   private q(query: string, v: Record<string, unknown> = {}) { return graphql('https://api.monday.com/v2', this.h, query, v); }
-  async whoami() { const d = await this.q('{ me { name email } }'); return str(d.me?.name || d.me?.email || 'conta monday.com', 120); }
+  async whoami() { const d = await this.q('{ me { id name email } }'); return contaConferida(d.me?.name || d.me?.email || 'conta monday.com', d.me?.id); }
   async listBoards(): Promise<Boards> {
     const d = await this.q('{ boards(limit: 200, state: active, order_by: used_at) { id name updated_at type } }');
     return ((d.boards ?? []) as Json[]).filter((b) => !b.type || b.type === 'board').map((b) => board(String(b.id), b.name, b.updated_at));
   }
   async getBoard(externalId: string): Promise<BoardSnapshot> {
     if (!/^\d{1,20}$/.test(externalId)) throw new ProviderError('not_found', 'quadro inválido');
-    const d = await this.q(`query ($ids: [ID!]) { boards(ids: $ids) { id name updated_at groups { id title position } items_page(limit: 100) { ${MONDAY_ITEMS} } } }`, { ids: [externalId] });
+    const d = await this.q(`query ($ids: [ID!]) { boards(ids: $ids) { id name updated_at columns { id title type } groups { id title position } items_page(limit: 100) { ${MONDAY_ITEMS} } } }`, { ids: [externalId] });
     const b = d.boards?.[0];
     if (!b) throw new ProviderError('not_found', 'quadro não encontrado (ou sem acesso)');
     const items: Json[] = [...(b.items_page?.items ?? [])]; let cursor: string | null = b.items_page?.cursor ?? null;
@@ -227,6 +296,7 @@ export class MondayProvider implements AccountProvider {
     }
     const groups = ((b.groups ?? []) as Json[]).sort((a, c) => Number(a.position) - Number(c.position));
     const col = (it: Json, type: string) => ((it.column_values ?? []) as Json[]).find((c) => c.type === type && c.text)?.text as string | undefined;
+    const prazo = ((b.columns ?? []) as Json[]).find((c) => c.type === 'date' && PRAZO.test(String(c.title)));
     return {
       board: { externalId, name: str(b.name), version: str(b.updated_at, 80) },
       columns: groups.length ? groups.map((g, i) => ({ externalId: String(g.id), name: str(g.title), order: i })) : ONE_COLUMN,
@@ -237,6 +307,7 @@ export class MondayProvider implements AccountProvider {
           externalId: String(it.id), columnExternalId: it.group?.id ? String(it.group.id) : (groups[0] ? String(groups[0].id) : '__tarefas__'),
           title: str(it.name), description: desc(col(it, 'long_text') ?? ''), completed: DONE.test(status.trim()), version: str(it.updated_at, 80),
           assignee: people ? str(people.split(',')[0].trim(), 120) : null, extra: {},
+          ...(prazo ? { due: dueOf(((it.column_values ?? []) as Json[]).find((c) => String(c.id) === String(prazo.id))?.text) } : {}),
         };
       }),
       complete: !cursor,
@@ -252,7 +323,7 @@ export class NotionProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(token: string) { this.h = { Authorization: `Bearer ${token}`, 'Notion-Version': NOTION_VERSION }; }
   private g(p: string, body?: unknown) { return request(`https://api.notion.com/v1${p}`, { headers: this.h, body }); }
-  async whoami() { const j = await this.g('/users/me'); return str(j.bot?.workspace_name || j.name || 'Notion', 120); }
+  async whoami() { const j = await this.g('/users/me'); return contaConferida(j.bot?.workspace_name || j.name || 'Notion', j.id); }
   async listBoards(): Promise<Boards> {
     const out: Boards = []; let cursor: string | null = null;
     for (let i = 0; i < 3; i++) {
@@ -273,6 +344,7 @@ export class NotionProvider implements AccountProvider {
     const checkKey = props.find(([n, p]) => p.type === 'checkbox' && /done|feit|conclu|complet/i.test(n))?.[0];
     const peopleKey = props.find(([, p]) => p.type === 'people')?.[0];
     const descKey = props.find(([n, p]) => p.type === 'rich_text' && /descri|nota|notes|detalhe/i.test(n))?.[0];
+    const prazoKey = props.find(([n, p]) => p.type === 'date' && PRAZO.test(n))?.[0];
     const sp = statusEntry?.[1];
     const options: Json[] = sp ? (sp[sp.type]?.options ?? []) : [];
     // grupos do Notion: "Complete"/"Concluído" marcam as opções que significam feito
@@ -296,6 +368,7 @@ export class NotionProvider implements AccountProvider {
           title: str(titleKey ? plain(pr[titleKey]?.title) : '') || 'Sem título', description: desc(descKey ? plain(pr[descKey]?.rich_text) : ''),
           completed: (checkKey ? pr[checkKey]?.checkbox === true : false) || (st?.id ? doneIds.has(String(st.id)) : false) || DONE.test(String(st?.name ?? '')),
           version: str(pg.last_edited_time, 80), assignee: peopleKey && pr[peopleKey]?.people?.[0]?.name ? str(pr[peopleKey].people[0].name, 120) : null, extra: {},
+          ...(prazoKey ? { due: dueOf(pr[prazoKey]?.date?.start) } : {}),
         };
       }),
       complete: !more && pages.length <= MAX_TASKS,
@@ -309,7 +382,7 @@ export class LinearProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(key: string) { this.h = { Authorization: key }; }
   private q(query: string, v: Record<string, unknown> = {}) { return graphql('https://api.linear.app/graphql', this.h, query, v); }
-  async whoami() { const d = await this.q('{ viewer { name email } }'); return str(d.viewer?.name || d.viewer?.email || 'conta Linear', 120); }
+  async whoami() { const d = await this.q('{ viewer { id name email } }'); return contaConferida(d.viewer?.name || d.viewer?.email || 'conta Linear', d.viewer?.id); }
   async listBoards(): Promise<Boards> {
     const d = await this.q('{ teams(first: 100) { nodes { id name key updatedAt } } }');
     return ((d.teams?.nodes ?? []) as Json[]).map((t) => board(String(t.id), `${t.name} (${t.key})`, t.updatedAt));
@@ -346,7 +419,7 @@ export class AirtableProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(token: string) { this.h = { Authorization: `Bearer ${token}` }; }
   private g(p: string) { return request(`https://api.airtable.com/v0${p}`, { headers: this.h }); }
-  async whoami() { const j = await this.g('/meta/whoami'); return str(j.email || 'conta Airtable', 120); }
+  async whoami() { const j = await this.g('/meta/whoami'); return contaConferida(j.email || 'conta Airtable', j.id); }
   private async tables(baseId: string): Promise<Json[]> { return (await this.g(`/meta/bases/${baseId}/tables`)).tables ?? []; }
   async listBoards(): Promise<Boards> {
     const out: Boards = [];
@@ -365,6 +438,7 @@ export class AirtableProvider implements AccountProvider {
     const check = fields.find((f) => f.type === 'checkbox' && /done|feit|conclu|complet/i.test(f.name));
     const who = fields.find((f) => f.type === 'singleCollaborator' || f.type === 'multipleCollaborators');
     const notes = fields.find((f) => (f.type === 'multilineText' || f.type === 'richText') && /descri|nota|notes|detalhe/i.test(f.name));
+    const prazo = fields.find((f) => (f.type === 'date' || f.type === 'dateTime') && PRAZO_AMPLO.test(f.name));
     const choices = (status?.options?.choices ?? []) as Json[];
     const records: Json[] = []; let offset: string | null = null; let more = true;
     for (let i = 0; i < 6 && more; i++) {
@@ -386,6 +460,7 @@ export class AirtableProvider implements AccountProvider {
           title: str(f[t.primaryFieldId] ?? '') || 'Sem título', description: desc(notes ? f[notes.id] : ''),
           completed: (check ? f[check.id] === true : false) || DONE.test(String(st ?? '')), version: hash(f),
           assignee: person ? str(person.name || person.email, 120) : null, extra: {},
+          ...(prazo ? { due: dueOf(f[prazo.id]) } : {}),
         };
       }),
       complete: !more && records.length <= MAX_TASKS,
@@ -399,7 +474,7 @@ export class SmartsheetProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(token: string) { this.h = { Authorization: `Bearer ${token}` }; }
   private g(p: string) { return request(`https://api.smartsheet.com/2.0${p}`, { headers: this.h }); }
-  async whoami() { const j = await this.g('/users/me'); return str(`${j.firstName ?? ''} ${j.lastName ?? ''}`.trim() || j.email || 'conta Smartsheet', 120); }
+  async whoami() { const j = await this.g('/users/me'); return contaConferida(`${j.firstName ?? ''} ${j.lastName ?? ''}`.trim() || j.email || 'conta Smartsheet', j.id); }
   async listBoards(): Promise<Boards> {
     return ((await this.g('/sheets?includeAll=true')).data ?? []).map((s: Json) => board(String(s.id), s.name, s.modifiedAt));
   }
@@ -412,6 +487,7 @@ export class SmartsheetProvider implements AccountProvider {
     const check = cols.find((c) => c.type === 'CHECKBOX' && /done|feit|conclu|complet/i.test(c.title));
     const who = cols.find((c) => c.type === 'CONTACT_LIST' || c.type === 'MULTI_CONTACT_LIST');
     const notes = cols.find((c) => c.type === 'TEXT_NUMBER' && /descri|nota|notes|detalhe/i.test(c.title));
+    const prazo = cols.find((c) => c.type === 'DATE' && PRAZO_AMPLO.test(c.title));
     const options = (status?.options ?? []) as string[];
     const rows = (s.rows ?? []) as Json[];
     const cell = (r: Json, c: Json | undefined) => (c ? ((r.cells ?? []) as Json[]).find((x) => String(x.columnId) === String(c.id)) : undefined);
@@ -426,6 +502,7 @@ export class SmartsheetProvider implements AccountProvider {
           title: str(cell(r, primary)?.displayValue ?? cell(r, primary)?.value), description: desc(cell(r, notes)?.value ?? ''),
           completed: cell(r, check)?.value === true || DONE.test(String(st ?? '')), version: str(r.modifiedAt, 80),
           assignee: cell(r, who)?.displayValue ? str(String(cell(r, who)!.displayValue).split(',')[0].trim(), 120) : null, extra: {},
+          ...(prazo ? { due: dueOf(cell(r, prazo)?.value) } : {}),
         };
       }),
       complete: rows.length <= MAX_TASKS,
@@ -434,26 +511,32 @@ export class SmartsheetProvider implements AccountProvider {
 }
 
 // ---------------------------------------------------------------- Pipefy (token pessoal, GraphQL; cada pipe é um quadro)
+/** O card do Pipefy não tem descrição própria: ela fica neste campo de texto do pipe. A leitura e o escritor usam a mesma escolha. */
+export function campoDescricaoPipefy(pipe: Json): { id: string; label: string; type: string } | undefined {
+  const textos = [...(pipe?.start_form_fields ?? []), ...((pipe?.phases ?? []) as Json[]).flatMap((f) => f.fields ?? [])].filter((c: Json) => /descri|nota|notes|detalhe/i.test(String(c.label)));
+  return textos.find((c: Json) => c.type === 'long_text') ?? textos.find((c: Json) => c.type === 'short_text');
+}
 export class PipefyProvider implements AccountProvider {
   readonly name = 'pipefy'; readonly isFixture = false; readonly supports = SUPPORTS;
   private readonly h: Record<string, string>;
   constructor(token: string) { this.h = { Authorization: `Bearer ${token}` }; }
   private q(query: string, v: Record<string, unknown> = {}) { return graphql('https://api.pipefy.com/graphql', this.h, query, v); }
-  async whoami() { const d = await this.q('{ me { name email } }'); return str(d.me?.name || d.me?.email || 'conta Pipefy', 120); }
+  async whoami() { const d = await this.q('{ me { id name email } }'); return contaConferida(d.me?.name || d.me?.email || 'conta Pipefy', d.me?.id); }
   async listBoards(): Promise<Boards> {
     const orgs = ((await this.q('{ organizations { id name pipes { id name } } }')).organizations ?? []) as Json[];
     return orgs.flatMap((o) => ((o.pipes ?? []) as Json[]).map((p) => board(String(p.id), orgs.length > 1 ? `${o.name} › ${p.name}` : String(p.name))));
   }
   async getBoard(externalId: string): Promise<BoardSnapshot> {
     if (!/^\d{1,20}$/.test(externalId)) throw new ProviderError('not_found', 'pipe inválido');
-    const pipe = (await this.q('query ($id: ID!) { pipe(id: $id) { name phases { id name done } } }', { id: externalId })).pipe;
+    const pipe = (await this.q('query ($id: ID!) { pipe(id: $id) { name phases { id name done fields { id label type } } start_form_fields { id label type } } }', { id: externalId })).pipe;
     if (!pipe) throw new ProviderError('not_found', 'pipe não encontrado (ou sem acesso)');
     const phases = (pipe.phases ?? []) as Json[];
     const donePhase = new Set(phases.filter((p) => p.done === true).map((p) => String(p.id)));
+    const notas = campoDescricaoPipefy(pipe);
     const cards: Json[] = []; let after: string | null = null; let more = true;
     for (let i = 0; i < 10 && more; i++) {
       const c: Json = (await this.q(`query ($id: ID!, $after: String) { cards(pipe_id: $id, first: 50, after: $after) {
-        pageInfo { hasNextPage endCursor } edges { node { id title done updated_at current_phase { id } assignees { name } } } } }`, { id: externalId, after })).cards;
+        pageInfo { hasNextPage endCursor } edges { node { id title done updated_at due_date current_phase { id } assignees { name } fields { value field { id } } } } } }`, { id: externalId, after })).cards;
       cards.push(...((c?.edges ?? []) as Json[]).map((e) => e.node));
       more = c?.pageInfo?.hasNextPage === true; after = c?.pageInfo?.endCursor ?? null;
       if (cards.length >= MAX_TASKS) break;
@@ -463,8 +546,9 @@ export class PipefyProvider implements AccountProvider {
       columns: phases.length ? phases.map((p, i) => ({ externalId: String(p.id), name: str(p.name), order: i })) : ONE_COLUMN,
       tasks: cards.slice(0, MAX_TASKS).map((c): ExternalTask => ({
         externalId: String(c.id), columnExternalId: c.current_phase?.id ? String(c.current_phase.id) : (phases[0] ? String(phases[0].id) : '__tarefas__'),
-        title: str(c.title), description: '', completed: c.done === true || donePhase.has(String(c.current_phase?.id ?? '')),
-        version: str(c.updated_at, 80), assignee: c.assignees?.[0]?.name ? str(c.assignees[0].name, 120) : null, extra: {},
+        title: str(c.title), description: desc(notas ? ((c.fields ?? []) as Json[]).find((x) => String(x.field?.id) === String(notas.id))?.value : ''),
+        completed: c.done === true || donePhase.has(String(c.current_phase?.id ?? '')),
+        version: str(c.updated_at, 80), assignee: c.assignees?.[0]?.name ? str(c.assignees[0].name, 120) : null, due: dueOf(c.due_date), extra: {},
       })),
       complete: !more && cards.length <= MAX_TASKS,
     };
@@ -478,7 +562,7 @@ export class GitHubProjectsProvider implements AccountProvider {
   private readonly h: Record<string, string>;
   constructor(token: string) { this.h = { Authorization: `Bearer ${token}`, 'User-Agent': 'Ergon' }; }
   private q(query: string, v: Record<string, unknown> = {}) { return graphql('https://api.github.com/graphql', this.h, query, v); }
-  async whoami() { const d = await this.q('{ viewer { login name } }'); return str(d.viewer?.name || d.viewer?.login || 'conta GitHub', 120); }
+  async whoami() { const d = await this.q('{ viewer { id login name } }'); return contaConferida(d.viewer?.name || d.viewer?.login || 'conta GitHub', d.viewer?.id); }
   async listBoards(): Promise<Boards> {
     const d = await this.q(`{ viewer { login projectsV2(first: 50) { ${GH_PROJECT} } organizations(first: 20) { nodes { login projectsV2(first: 50) { ${GH_PROJECT} } } } } }`);
     const out: Boards = [];
@@ -491,8 +575,10 @@ export class GitHubProjectsProvider implements AccountProvider {
     if (!/^PVT_[A-Za-z0-9_-]{4,60}$/.test(externalId)) throw new ProviderError('not_found', 'projeto inválido');
     const Q = `query ($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 { title updatedAt
       field(name: "Status") { ... on ProjectV2SingleSelectField { options { id name } } }
+      fields(first: 50) { nodes { ... on ProjectV2Field { id name dataType } } }
       items(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id updatedAt isArchived
         fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
+        fieldValues(first: 50) { nodes { ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2Field { id } } } } }
         content { __typename ... on Issue { title body state assignees(first: 1) { nodes { login name } } }
           ... on PullRequest { title body state assignees(first: 1) { nodes { login name } } }
           ... on DraftIssue { title body assignees(first: 1) { nodes { login name } } } } } } } } }`;
@@ -505,6 +591,7 @@ export class GitHubProjectsProvider implements AccountProvider {
       if (items.length >= MAX_TASKS) break;
     }
     const options = (p.field?.options ?? []) as Json[];
+    const prazo = ((p.fields?.nodes ?? []) as Json[]).find((f) => f?.dataType === 'DATE' && PRAZO_AMPLO.test(String(f.name)));
     const NONE = '__sem_status__';
     return {
       board: { externalId, name: str(p.title), version: str(p.updatedAt, 80) },
@@ -516,6 +603,7 @@ export class GitHubProjectsProvider implements AccountProvider {
           title: str(n.content.title), description: desc(n.content.body),
           completed: n.content.state === 'CLOSED' || n.content.state === 'MERGED' || DONE.test(String(n.fieldValueByName?.name ?? '')),
           version: str(n.updatedAt, 80), assignee: who ? str(who.name || who.login, 120) : null, extra: {},
+          ...(prazo ? { due: dueOf(((n.fieldValues?.nodes ?? []) as Json[]).find((v) => v?.field?.id && String(v.field.id) === String(prazo.id))?.date) } : {}),
         };
       }),
       complete: !more && items.length <= MAX_TASKS,

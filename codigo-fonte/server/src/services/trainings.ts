@@ -269,6 +269,14 @@ export class Trainings {
     return true;
   }
 
+  /** A competência ativa foi estudada de links ou documentos: o que ela traz veio de fora (conexoes/regra.ts). */
+  estudadaDeFora(r: Pick<RunRow, 'agent_id' | 'workspace_id'>, name: string): boolean {
+    const v = this.db.get<{ sources: string }>(`SELECT v.sources FROM agent_skills s JOIN agent_skill_versions v ON v.skill_id = s.id AND v.version = s.version
+      WHERE s.name = ? AND s.agent_id = ? AND s.workspace_id = ? AND s.status = 'ativa'`, name, r.agent_id, r.workspace_id);
+    const src = parse<Partial<TrainingSources>>(v?.sources ?? null, {}); // o padrão da coluna é '[]'
+    return (src.files?.length ?? 0) + (src.links?.length ?? 0) > 0;
+  }
+
   /** Fim da execução de treinamento: monta a proposta para revisão, ou diz por que falhou. Nunca "concluído" sem competência. */
   async finished(r: RunRow, status: RunStatus, output: string | null): Promise<void> {
     const t = this.forRun(r);

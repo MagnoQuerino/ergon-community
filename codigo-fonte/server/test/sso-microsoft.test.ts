@@ -61,7 +61,8 @@ describe('Microsoft: o app público vem pronto e o login serve para conta pessoa
     const g = ((await req(h, 'GET', '/api/integrations', s)).json as Array<{ kind: string; state: string }>).find((i) => i.kind === 'microsoft')!;
     assert.equal(g.state, 'connected', 'a primeira etapa já conectou');
     const no = await h.app.inject({ method: 'GET', url: `/api/integrations/microsoft/callback?state=${next.searchParams.get('state')}&error=access_denied` });
-    assert.match(String(no.headers.location), /microsoft=conectado/, 'recusar o extra não desfaz a conexão');
+    assert.match(String(no.headers.location), /microsoft=parcial/, 'recusar o extra não desfaz a conexão, e a tela diz o que ficou de fora');
+    assert.equal(((await req(h, 'GET', '/api/integrations', s)).json as Array<{ kind: string; state: string }>).find((i) => i.kind === 'microsoft')!.state, 'connected');
     // aceitando: a renovação pede as mesmas permissões concedidas
     const u2 = await begin();
     const r2 = await h.app.inject({ method: 'GET', url: `/api/integrations/microsoft/callback?state=${u2.searchParams.get('state')}&code=c3` });

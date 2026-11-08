@@ -229,13 +229,16 @@ def _policy(session_id: str, task_id: str) -> dict[str, Any]:
         if hit and hit[0] > time.time():
             return hit[1]
     toolsets: list[str] = _BASE_TOOLSETS
-    pol: dict[str, Any] = {"who": "", "holders": {}, "guarded": {}, "skills": frozenset(), "training": None}
+    pol: dict[str, Any] = {"who": "", "holders": {}, "guarded": {}, "skills": frozenset(), "training": None, "denied": frozenset()}
     try:
         data = _post_to(_url_for("/internal/bridge/v1/tool-policy"), {"session_id": session_id, "task_id": task_id}, timeout=3)
         if data.get("known") is True:
             raw = data.get("toolsets")
             toolsets = [str(x) for x in raw] if isinstance(raw, list) else []
             pol["who"] = str(data.get("agent") or "")[:60]
+            bl = data.get("bloqueadas")
+            if isinstance(bl, list):
+                pol["denied"] = frozenset(str(x)[:60] for x in bl[:100])
             h = data.get("holders")
             if isinstance(h, dict):
                 pol["holders"] = {str(k): [str(n)[:60] for n in v][:6] for k, v in h.items() if isinstance(v, list)}
@@ -321,7 +324,15 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
     try:
         if tool_name in _CATALOG_TOOLS:
             return None
+        if _le_endereco(tool_name, args):
+            _lembrar_web(str(session_id or ""), str(task_id or ""))
         pol = _policy(str(session_id or ""), str(task_id or ""))
+        # depois de ler conteúdo privado das contas, nada que alcance endereços arbitrários (ver conexoes/regra.ts no Ergon)
+        if tool_name in pol.get("denied", ()):
+            return {"action": "block", "message": (
+                f"Por segurança, a ferramenta '{tool_name}' não funciona nesta conversa: ela já leu conteúdo privado das contas conectadas, "
+                "e um texto lido poderia usar isso para mandar os dados a outro endereço. Continue sem ela (a busca na web segue valendo). "
+                "Se precisar mesmo, diga à pessoa para abrir uma conversa nova.")}
         allowed, who, holders, guarded = pol["allowed"], pol["who"], pol["holders"], pol["guarded"]
         gate = _skills_gate(tool_name, args if isinstance(args, dict) else {}, pol)
         if gate is True:
@@ -346,6 +357,71 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
         return {"action": "block", "message": f"A ferramenta '{tool_name}' não está liberada para {quem} no Ergon e ninguém da equipe a tem. Continue sem ela e diga ao usuário o que ficou faltando."}
     except Exception:  # noqa: BLE001
         return {"action": "block", "message": "A verificação de ferramentas do Ergon falhou; ferramenta bloqueada."}
+
+
+# ---------------------------------------------------------------- conexões: as contas e os aplicativos conectados
+# O plugin só repassa: credenciais, regra de confirmação e registro ficam no Ergon. O motor nunca vê token de conta.
+_CONEXOES_TIMEOUT = float(os.environ.get("ERGON_CONEXOES_TIMEOUT", "90"))
+_web_lida: dict[str, float] = {}
+# As ferramentas que trazem o conteúdo de um endereço (a mesma lista de LEEM_ENDERECO em conexoes/regra.ts no Ergon):
+# usar uma delas é ler conteúdo de fora. Imagem em data: não vem de endereço nenhum (já está na conversa).
+_LEEM_ENDERECO_PREFIXOS = ("web_", "browser")
+_LEEM_ENDERECO_NOMES = frozenset({"vision_analyze"})
+
+
+def _le_endereco(tool_name: str, args: Any) -> bool:
+    if tool_name.startswith(_LEEM_ENDERECO_PREFIXOS):
+        return True
+    if tool_name not in _LEEM_ENDERECO_NOMES:
+        return False
+    alvo = str(args.get("image_url") or "") if isinstance(args, dict) else ""
+    return not alvo.strip().lower().startswith("data:")
+
+
+def _lembrar_web(session_id: str, task_id: str) -> None:
+    with _policy_lock:
+        if len(_web_lida) > 2000:
+            _web_lida.clear()
+        _web_lida[f"{session_id}|{task_id}"] = time.time()
+
+
+def _conexoes(payload: dict[str, Any], session_id: str, task_id: str) -> str:
+    key = f"{session_id}|{task_id}"
+    try:
+        data = _post_to(_url_for("/internal/bridge/v1/conexoes"), {**payload, "session_id": session_id[:200], "task_id": task_id[:200], "leu_web": key in _web_lida}, timeout=_CONEXOES_TIMEOUT)
+    except Exception:  # noqa: BLE001 - a resposta ao modelo diz o que houve; ele não pode fingir que fez
+        # sem o nome da exceção: o modelo tende a repetir a frase à pessoa
+        return json.dumps({"ok": False, "status": "falhou", "texto": "O sistema não respondeu. Não sei se a ação foi feita: diga isso à pessoa."}, ensure_ascii=False)
+    # esta sessão pode ter acabado de ler conteúdo privado: a próxima ferramenta confere a política de novo
+    with _policy_lock:
+        _policy_cache.pop(key, None)
+    return json.dumps(data, ensure_ascii=False)
+
+
+def tool_conexoes_listar(args: dict[str, Any], task_id: str = "", session_id: str = "", **_: Any) -> str:
+    return _conexoes({"op": "listar", "conexao": str((args or {}).get("conexao") or "")[:40]}, str(session_id or ""), str(task_id or ""))
+
+
+def tool_conexoes_executar(args: dict[str, Any], task_id: str = "", session_id: str = "", **_: Any) -> str:
+    a = args or {}
+    params = a.get("parametros")
+    return _conexoes({"op": "executar", "conexao": str(a.get("conexao") or "")[:40], "acao": str(a.get("acao") or "")[:80], "parametros": params if isinstance(params, dict) else {}}, str(session_id or ""), str(task_id or ""))
+
+
+_CONEXOES_LISTAR = {
+    "name": "conexoes_listar",
+    "description": "Lista as ações disponíveis nas contas e aplicativos conectados no Ergon (Microsoft 365, Google, Asana, Trello, WhatsApp e outros), com os parâmetros de cada uma.",
+    "parameters": {"type": "object", "properties": {"conexao": {"type": "string", "description": "uma conexão só, como asana ou microsoft; vazio = só a lista das ligadas (chame de novo com conexao para ver as ações e os parâmetros)"}}},
+}
+_CONEXOES_EXECUTAR = {
+    "name": "conexoes_executar",
+    "description": "Executa uma ação numa conta ou aplicativo conectado: buscar e ler e-mails de qualquer período, deixar rascunhos, enviar, consultar a agenda, ler arquivos, criar, concluir e mover tarefas, responder no Teams ou no WhatsApp. O sistema cuida do acesso e, quando for o caso, pede a confirmação da pessoa.",
+    "parameters": {"type": "object", "required": ["conexao", "acao"], "properties": {
+        "conexao": {"type": "string", "description": "por exemplo microsoft, google, asana, trello, whatsapp"},
+        "acao": {"type": "string", "description": "por exemplo tarefa.criar, email.buscar, email.rascunho, teams.enviar"},
+        "parametros": {"type": "object", "description": "os parâmetros da ação, como vêm em conexoes_listar"},
+    }},
+}
 
 
 def on_post_tool_call(tool_name: str = "", args: Any = None, result: Any = None, task_id: str = "", session_id: str = "", **_: Any) -> None:
@@ -561,7 +637,7 @@ _ROUTES: list[tuple[str, re.Pattern[str], tuple[str, ...]]] = [
 # Conjuntos que o Ergon pode ligar na plataforma da API. Os que executam código (terminal, Python) só depois
 # que o usuário autoriza com a senha no Ergon — o Ergon confere a senha; aqui chega só o pedido com o token da
 # ponte. Arquivos, navegador, agendamentos, delegação e mensagens ficam desligados nesta versão local.
-_SAFE_TOOLSETS = frozenset(_csv("ERGON_SAFE_TOOLSETS", "todo,web,vision,image_gen,skills"))
+_SAFE_TOOLSETS = frozenset(_csv("ERGON_SAFE_TOOLSETS", "todo,web,vision,image_gen,skills,ergon_conexoes"))
 _GUARDED_TOOLSETS = frozenset(_csv("ERGON_GUARDED_TOOLSETS", "code_execution,terminal"))
 _MAX_BODY = 16 * 1024
 _control_started = False
@@ -931,6 +1007,8 @@ def register(ctx) -> None:
     ctx.register_hook("post_gateway_admission", on_admission)
     ctx.register_hook("pre_tool_call", on_pre_tool_call)
     ctx.register_hook("post_tool_call", on_post_tool_call)
+    ctx.register_tool(name="conexoes_listar", toolset="ergon_conexoes", schema=_CONEXOES_LISTAR, handler=tool_conexoes_listar)
+    ctx.register_tool(name="conexoes_executar", toolset="ergon_conexoes", schema=_CONEXOES_EXECUTAR, handler=tool_conexoes_executar)
     try:
         _start_control()
     except Exception:  # noqa: BLE001 - a ponte de controle nunca derruba o Hermes

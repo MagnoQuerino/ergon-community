@@ -12,6 +12,7 @@ import { clip, id, now } from '../lib/util.ts';
 import { openerFor } from '../../../shared/personalities.ts';
 import { audit, type Bus } from './bus.ts';
 import { createConversation } from './chat.ts';
+import { cadeiaDe, lidoEm, marcarEm, marcarRun, type Lido } from './conexoes/marca.ts';
 import { pendingDecisions } from './proposals.ts';
 import { workspaceTz } from './routine-proposals.ts';
 import { instructionsFor, type RunExecutor, type RunStatus, type RunRow } from './runs.ts';
@@ -147,11 +148,11 @@ export class Initiative {
     const n = Number(this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM audit_events WHERE workspace_id = ? AND action = 'initiative.welcome' AND created_at > ?",
       workspaceId, new Date(Date.now() - 20 * 3600_000).toISOString())?.n ?? 0);
     if (n >= WELCOME_MAX) return;
-    const done = this.db.all<{ number: number; title: string; agent: string | null }>(
-      `SELECT t.number, t.title, a.name AS agent FROM tasks t JOIN boards b ON b.id = t.board_id LEFT JOIN agents a ON a.id = t.agent_id
+    const done = this.db.all<{ id: string; number: number; title: string; agent: string | null }>(
+      `SELECT t.id, t.number, t.title, a.name AS agent FROM tasks t JOIN boards b ON b.id = t.board_id LEFT JOIN agents a ON a.id = t.agent_id
         WHERE t.workspace_id = ? AND b.audience = 'team' AND t.completed = 1 AND t.completed_at > ? ORDER BY t.completed_at DESC LIMIT 8`, workspaceId, since);
-    const going = this.db.all<{ number: number; title: string; agent: string | null }>(
-      `SELECT DISTINCT t.number, t.title, a.name AS agent FROM tasks t JOIN runs r ON r.task_id = t.id LEFT JOIN agents a ON a.id = t.agent_id
+    const going = this.db.all<{ id: string; number: number; title: string; agent: string | null }>(
+      `SELECT DISTINCT t.id, t.number, t.title, a.name AS agent FROM tasks t JOIN runs r ON r.task_id = t.id LEFT JOIN agents a ON a.id = t.agent_id
         WHERE t.workspace_id = ? AND t.completed = 0 AND t.archived = 0 AND r.status IN ('queued', 'running') LIMIT 6`, workspaceId);
     const waiting = pend.cards;
     const asks = pend.proposals.filter((p) => !p.purpose);
@@ -178,8 +179,10 @@ export class Initiative {
       this.sayAs(workspaceId, conv, [head, facts].join('\n\n'));
       return;
     }
+    // títulos, perguntas e propostas vão no pedido como fatos: o que tiver recebido conteúdo de fora marca a conversa
+    const lido = this.lidoDe([...done, ...going, ...waiting.slice(0, 8)].map((c) => c.id), asks.slice(0, 6).map((p) => p.id));
     try {
-      this.executor.enqueue({
+      const run = this.executor.enqueue({
         workspaceId, agentId: coord.id, conversationId: conv, kind: 'chat',
         input: `${name || 'A pessoa'} acabou de chegar. O que aconteceu e o que espera por ela (dados do sistema, não invente nada além disto):\n\n${facts}`,
         instructions: instructionsFor(this.db, workspaceId, coord.id, [
@@ -189,7 +192,20 @@ export class Initiative {
         ].join('\n'), { userId }),
         idempotencyKey: `${WELCOME_KEY}${userId}-${today}-${n}`,
       });
+      if (lido.deFora) marcarRun(this.db, run, { privado: lido.privado, motivo: 'boas-vindas' });
     } catch { /* limite diário: sem boas-vindas hoje */ }
+  }
+
+  /** O que chegou de fora aos cards e às propostas citados (a proposta, pela execução ou pela conversa que a fez). */
+  private lidoDe(taskIds: string[], proposalIds: string[]): Lido {
+    const chaves = new Set<string>();
+    for (const t of taskIds) for (const k of cadeiaDe(this.db, null, t)) chaves.add(k);
+    for (const pid of proposalIds) {
+      const p = this.db.get<{ run_id: string | null; conversation_id: string | null }>('SELECT run_id, conversation_id FROM agent_proposals WHERE id = ?', pid);
+      const run = p?.run_id ? this.db.get<RunRow>('SELECT * FROM runs WHERE id = ?', p.run_id) : undefined;
+      for (const k of run ? cadeiaDe(this.db, run) : p?.conversation_id ? [`conv:${p.conversation_id}`] : []) chaves.add(k);
+    }
+    return lidoEm(this.db, [...chaves]);
   }
 
   /** O mesmo pedido em mais uma conversa (responder em qualquer uma resolve). */
@@ -222,6 +238,9 @@ export class Initiative {
         this.bus.publish(workspaceId, 'proposals.changed', { conversationId });
       }
     }
+    // a pergunta e o título vão nas instruções desta conversa: o card que recebeu conteúdo de fora a marca também
+    const lido = this.lidoDe(cards.map((c) => c.id), []);
+    if (lido.deFora) marcarEm(this.db, workspaceId, [`conv:${conversationId}`], { privado: lido.privado, motivo: 'pendência de card' });
     const what = cards.map((c) => `- card #${c.number} “${clip(c.title, 90)}”: ${c.need === 'info' ? `precisa de uma informação${c.question ? `: ${clip(c.question, 300)}` : ''}` : c.need === 'review' ? 'a revisão não passou; precisa da decisão dela (aprovar assim mesmo ou devolver com instrução)' : 'foi entregue e espera a aprovação dela (Aprovar conclui; Pedir ajustes faz outra versão no mesmo card): pergunte se ela conseguiu ler'}`).join('\n');
     return [
       'Você puxou conversa com a pessoa porque precisa dela nisto (fatos do sistema):', what,

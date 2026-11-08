@@ -15,6 +15,7 @@ import { log, scrub } from '../lib/log.ts';
 import { saveArtifact } from './artifacts.ts';
 import { audit, type Bus } from './bus.ts';
 import { characterByKey } from './characters.ts';
+import { marcarRun } from './conexoes/marca.ts';
 import { activeTeam, coordinatorOf } from './team.ts';
 import { teamAgent } from './team-query.ts';
 import { ACCOUNT_SOURCES, CATALOG, CATEGORIES, NEED_LABEL, SOURCES, templateByKey, type ExtraCheck, type FileRef, type Need, type ParamValues, type RoutineConfig, type RoutineTemplate, type SourceId, type Trigger } from './routine-catalog.ts';
@@ -932,6 +933,9 @@ export class Routines {
         workspaceId: r.workspace_id, agentId: agent.id, conversationId: conv, kind: 'chat', input: runInput,
         instructions: instructionsFor(this.db, r.workspace_id, agent.id, channel), idempotencyKey: `routine-${rr.id}`, maxInput: budget,
       });
+      // o pedido leva e-mails, tarefas e trechos de terceiros: a sessão e a conversa da rotina ficam marcadas (conexoes/regra.ts);
+      // privado pelo modelo da rotina, e sempre que ela lê as contas conectadas
+      marcarRun(this.db, run, { privado: !tpl || tpl.privateData || wanted.length > 0, motivo: 'rotina' });
       this.note(r.workspace_id, conv, `${r.name} — ${when}. ${panel}${warnings.length ? `\nAtenção: ${warnings.join(' ')}` : ''}`, run.id);
       this.db.run("UPDATE routine_runs SET status = 'running', run_id = ?, mode = ? WHERE id = ?", run.id, run.mode, rr.id);
       this.bus.publish(r.workspace_id, 'routines.changed', { id: r.id, run: rr.id });
@@ -1197,6 +1201,7 @@ export class Routines {
         input: `${header}\n${fit(p.facts, this.deps.maxContextChars - header.length - 5)}`,
         instructions: instructionsFor(this.db, r.workspace_id, coord, setupChannel(t, r.name, s.hint)), idempotencyKey: `setup-${s.id}`,
       });
+      marcarRun(this.db, run, { privado: true, motivo: 'preparo de rotina' }); // títulos de tarefas e mensagens de terceiros vão no pedido
       this.note(r.workspace_id, s.conversation_id, `Preparando a rotina ${r.name}: estudando o seu jeito de trabalhar para ela já sair do seu jeito.`, run.id);
       this.db.run("UPDATE routine_setups SET status = 'studying', run_id = ?, updated_at = ? WHERE id = ?", run.id, now(), s.id);
       this.bus.publish(r.workspace_id, 'routines.changed', { id: r.id });
@@ -1402,6 +1407,7 @@ export class Routines {
       workspaceId, agentId: coord.id, conversationId: conv, kind: 'chat', input: `${header}\n${fit(facts, this.deps.maxContextChars - header.length - 5)}`,
       instructions: instructionsFor(this.db, workspaceId, coord.id, channel), idempotencyKey: `recommend-${workspaceId}-${key}`,
     });
+    marcarRun(this.db, run, { privado: true, motivo: 'análise de rotinas' }); // títulos de tarefas vindas de canais e aplicativos vão no pedido
     this.note(workspaceId, conv, `Análise de rotinas — ${fmtLocal(now(), workspaceTz(this.db, workspaceId))}. ${userId ? 'Pedida agora.' : 'Semanal.'}`, run.id);
     setSetting(this.db, workspaceId, 'routines.recommend.last', now());
     if (userId) audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'routines.recommend.run', targetType: 'run', targetId: run.id, result: 'análise de rotinas pedida' });

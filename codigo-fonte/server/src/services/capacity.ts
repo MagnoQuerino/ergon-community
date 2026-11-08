@@ -133,7 +133,7 @@ export function createAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
       const agentId = id('agt');
       // ferramentas que executam código nunca vêm de graça: só por autorização com a senha (permissão na conversa ou perfil);
       // encaminhar as demandas é só do Coordenador
-      const tools = (input.tools?.length ? cleanList(input.tools, 20, 30).filter((t) => TOOLS[t]) : sector.tools)
+      const tools = [...new Set([...(input.tools?.length ? cleanList(input.tools, 20, 30).filter((t) => TOOLS[t]) : sector.tools), 'contas'])]
         .filter((t) => !TOOLS[t]?.guarded && !COORDINATOR_ONLY.includes(t));
       const skills = input.skills?.length ? cleanList(input.skills, 12, 80) : sector.skills.slice(0, 3);
       const charter = input.charter?.trim() ? input.charter.trim().slice(0, 4000) : defaultCharter(role, sector.name, sector.description);

@@ -20,10 +20,14 @@ export function offsetMinutes(tz: string, ts: number): number {
   return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0)) : 0;
 }
 
+/** um formatador por fuso: criar um a cada data custa mais que formatar (o relatório formata milhares) */
+const partsFmt = new Map<string, Intl.DateTimeFormat>();
+
 /** Data local (ano, mês, dia, dia da semana 0 = domingo) de um instante, no fuso. */
 export function localParts(tz: string, ts: number): { y: number; m: number; d: number; wd: number; hh: number; mm: number } {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
-    .formatToParts(ts).map((x) => [x.type, x.value]));
+  let f = partsFmt.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }); partsFmt.set(tz, f); }
+  const p = Object.fromEntries(f.formatToParts(ts).map((x) => [x.type, x.value]));
   const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
   return { y: Number(p.year), m: Number(p.month), d: Number(p.day), wd, hh: Number(p.hour), mm: Number(p.minute) };
 }
@@ -34,6 +38,19 @@ export function zonedToUtc(tz: string, y: number, m: number, d: number, hh: numb
   const at = guess - offsetMinutes(tz, guess) * 60_000;
   const fix = offsetMinutes(tz, at); // perto da troca de horário, o deslocamento certo é o do próprio instante
   return guess - fix * 60_000;
+}
+
+/**
+ * Primeiro instante (ms) do dia local no fuso. Onde o horário muda à meia-noite, ela pode não existir (o dia começa à
+ * 01:00) ou se repetir (vale a primeira): procura o primeiro instante cuja data local é o dia pedido.
+ */
+export function inicioDoDia(tz: string, y: number, m: number, d: number): number {
+  const alvo = y * 10_000 + m * 100 + d;
+  const dia = (ts: number) => { const p = localParts(tz, ts); return p.y * 10_000 + p.m * 100 + p.d; };
+  // os fusos vão de -12 h a +14 h: 15 h antes da meia-noite UTC ainda é o dia anterior em todos; 15 h depois, já é o dia
+  let antes = Date.UTC(y, m - 1, d) - 15 * 3_600_000; let ja = Date.UTC(y, m - 1, d) + 15 * 3_600_000;
+  while (ja - antes > 1) { const meio = Math.floor((antes + ja) / 2); if (dia(meio) >= alvo) ja = meio; else antes = meio; }
+  return ja;
 }
 
 /** Próximo horário depois de `from` (ISO), ou null se a rotina é só manual. */

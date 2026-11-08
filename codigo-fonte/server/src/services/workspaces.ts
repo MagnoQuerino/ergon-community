@@ -65,7 +65,8 @@ export function renameWorkspace(db: Db, userId: string, workspaceId: string, nam
  * conteúdo fica ilegível na hora), as linhas, os arquivos e os segredos. As sessões que estavam nele passam para outro
  * workspace da pessoa (ou saem, se for de alguém sem outro).
  */
-export function deleteWorkspace(db: Db, cfg: Pick<Config, 'filesDir' | 'dataDir'>, userId: string, workspaceId: string, confirmName: string): { name: string; next: string } {
+/** `antesDeApagar`: roda depois das conferências e antes de apagar (um pedido recusado não muda nada). */
+export function deleteWorkspace(db: Db, cfg: Pick<Config, 'filesDir' | 'dataDir'>, userId: string, workspaceId: string, confirmName: string, antesDeApagar?: () => void): { name: string; next: string } {
   const m = db.get<{ role: string; name: string }>('SELECT m.role, w.name FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.workspace_id = ? AND m.user_id = ?', workspaceId, userId);
   if (!m) throw new HttpError(404, 'not_found', 'workspace não encontrado');
   if (m.role !== 'owner') throw new HttpError(403, 'forbidden', 'só quem é dona do workspace pode excluir');
@@ -73,6 +74,7 @@ export function deleteWorkspace(db: Db, cfg: Pick<Config, 'filesDir' | 'dataDir'
   const outros = db.all<{ workspace_id: string }>('SELECT workspace_id FROM memberships WHERE user_id = ? AND workspace_id <> ? ORDER BY created_at', userId, workspaceId);
   if (!outros.length) throw new HttpError(409, 'last', 'este é o seu único workspace: crie outro antes de excluir este');
   const next = outros[0].workspace_id;
+  antesDeApagar?.();
   const tables = (db.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>).map((t) => t.name);
   const cols = (t: string) => (db.raw.prepare(`PRAGMA table_info(${JSON.stringify(t)})`).all() as Array<{ name: string }>).map((c) => c.name);
   // sessões abertas nele: para outro workspace de quem está nela (ou saem)

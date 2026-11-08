@@ -529,7 +529,7 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 .proposal-card { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; align-self: stretch; border: 1px solid var(--fx-b-ecd59b); background: var(--warn-bg); border-radius: 10px; padding: 8px 10px; font-size: 13px; }
 .proposal-card--applied { border-color: var(--fx-b-b9dcc5); background: var(--ok-bg); }
 .proposal-card--rejected, .proposal-card--failed { background: var(--panel-2); border-color: var(--line); }
-.proposal-card__txt { flex: 1; min-width: 160px; }
+.proposal-card__txt { flex: 1; min-width: 160px; white-space: pre-wrap; word-break: break-word; }
 .proposal-card .row { margin: 0; }
 
 /* quadros */
@@ -1232,6 +1232,14 @@ body:has(.cdock) .tip { right: 100px; }
 .tb-search__txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tb-search__kbd { flex: none; font: 600 11px/1 inherit; padding: 4px 6px; border-radius: 5px; background: rgba(255, 255, 255, .1); color: #d6dee6; }
 .topbar__icons { display: flex; align-items: center; gap: 4px; flex: none; }
+/* aviso discreto de versão nova (Configurações › Atualizações desliga) */
+.tb-upd { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; margin-right: 6px; border: 1px solid rgba(223, 231, 238, .35); border-radius: 999px; background: none; color: #dfe7ee; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.tb-upd:hover { background: rgba(223, 231, 238, .12); }
+@media (max-width: 720px) { .tb-upd__txt { display: none; } .tb-upd { padding: 0 8px; } }
+.upd-new { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
+.upd-notes { white-space: pre-wrap; font: inherit; font-size: 13px; max-height: 260px; overflow: auto; margin: 6px 0 0; }
+.upd-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.upd-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .tb-icon { position: relative; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 9px; background: none; color: #dfe7ee; cursor: pointer; }
 .tb-icon:hover { background: rgba(255, 255, 255, .1); color: #fff; }
 .tb-icon.is-on { background: rgba(255, 255, 255, .16); color: #fff; }
@@ -1898,3 +1906,23 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .picker__menu--finder { animation: pickerin .16s ease; }
 @keyframes pickerin { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
 @media (prefers-reduced-motion: reduce) { .picker__menu--finder { animation: none; } }
+
+/* Atividade: exportar relatório */
+.relatorio { border: 1px solid var(--line, rgba(127, 127, 127, 0.3)); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; }
+.relatorio__linha { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 8px 0; }
+.relatorio__linha label { display: inline-flex; gap: 6px; align-items: center; }
+.relatorio .btn[aria-pressed="true"] { font-weight: 600; text-decoration: underline; }
+
+/* Conexões: testar com a conta real */
+.conn-teste { margin-top: 8px; }
+.conn-teste__lista { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; }
+.conn-reautorizar { margin: 8px 0; }
+/* texto para colar noutro lugar, quando o navegador não deixa copiar sozinho */
+.conn-copiar { width: 100%; font: 12px/1.4 ui-monospace, monospace; }
+
+/* Conexões: ajuste do que os agentes podem fazer */
+.conn-acoes { margin-top: 8px; }
+.conn-acoes summary { cursor: pointer; }
+.conn-acoes__tipos { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0; }
+.conn-acoes__lista { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.conn-acoes__lista li { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }

@@ -42,6 +42,11 @@ export type Proposal =
   | { kind: 'delete_task'; number: number; reason: string }
   /** lote grande de cards (mais de 8 numa resposta): abre só com o seu "Abrir todos" */
   | { kind: 'batch'; runId: string; plans: Plan[] }
+  /**
+   * ação numa conta esperando o seu clique (conexoes/regra.ts); executa o que ficou guardado, com destino e texto à vista.
+   * conexao: o nome do aplicativo; conta: por onde sai; detalhe: o destino real lido antes; resumo: o que vai acontecer, com o texto inteiro
+   */
+  | { kind: 'conexao'; acaoId: string; conexao: string; conta: string | null; detalhe?: string; resumo: string; porque: string }
   /** apagar de vez (arquivos ou a lixeira): só com o seu clique; a equipe nunca apaga sozinha */
   | { kind: 'purge'; agent: string; artifactIds: string[]; names: string[]; emptyTrash?: boolean };
 
@@ -199,6 +204,8 @@ const findAny = (db: Db, workspaceId: string, name: string, status: 'active' | '
 };
 
 function describe(db: Db, workspaceId: string, p: Proposal): string {
+  // conta, destino e motivo antes do texto: o começo do cartão basta para decidir, e o texto segue inteiro
+  if (p.kind === 'conexao') return [`${p.conexao}${p.conta ? ` · pela conta ${p.conta}` : ''}`, p.detalhe, `(Pede confirmação porque ${p.porque}.)`, p.resumo].filter(Boolean).join('\n');
   if (p.kind === 'edit_agent') {
     const c = p.changes; const who = findAgent(db, workspaceId, p.agent)?.name ?? p.agent;
     const parts = [c.name && `nome → ${c.name}`, c.role && `função → ${c.role}`, c.sector && `setor → ${sectorByName(db, workspaceId, c.sector)?.name ?? c.sector}`,
@@ -242,6 +249,9 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   return `Criar o agente ${p.name} — ${p.role} (setor: ${/^autom/i.test(fold(p.sector)) ? 'automático' : sectorByName(db, workspaceId, p.sector)?.name ?? p.sector})`;
 }
 
+/** O cartão de uma ação numa conta guarda tudo o que pode sair: a ponte do motor aceita até 256 KB por pedido. */
+const MAX_CONEXAO = 300_000;
+
 export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { conversationId: string | null; runId: string | null }, all: Proposal[]): number {
   // cancelar um card que não está no quadro (inventado, ou já cancelado) não vira cartão para você aplicar e ver falhar
   const missing: number[] = [];
@@ -262,7 +272,7 @@ export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { co
       db.run(`INSERT INTO agent_proposals (id, workspace_id, conversation_id, run_id, kind, payload, summary, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id('apr'), workspaceId, ctx.conversationId, ctx.runId, p.kind, db.seal(workspaceId, JSON.stringify(p)),
-        db.seal(workspaceId, clip(describe(db, workspaceId, p), ['routine', 'routine_edit', 'edit_agent', 'batch', 'purge'].includes(p.kind) ? 3000 : 300)),
+        db.seal(workspaceId, clip(describe(db, workspaceId, p), p.kind === 'conexao' ? MAX_CONEXAO : ['routine', 'routine_edit', 'edit_agent', 'batch', 'purge'].includes(p.kind) ? 6000 : 300)),
         // o aviso de pedido passado à coordenação não espera decisão (a senha é pedida lá)
         p.kind === 'handoff' ? 'applied' : 'proposed', now());
     }
@@ -293,6 +303,8 @@ export function reconsiderProposal(db: Db, bus: Bus, workspaceId: string, userId
 
 /** Cards da equipe parados à espera do usuário: uma informação, uma aprovação (ou confirmação) ou uma decisão. */
 const WAITING_STATES = ['aguardando_info', 'aguardando_aprovacao', 'revisao'];
+/** card que espera o clique numa ação de conta já aparece pelo cartão dela (com #N e quem pediu): não conta duas vezes */
+const SEM_CONEXAO_PENDENTE = "NOT EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente')";
 
 /**
  * "Aguardando você": tudo o que espera o usuário dentro da plataforma, num lugar só — propostas da equipe (inclusive
@@ -301,9 +313,11 @@ const WAITING_STATES = ['aguardando_info', 'aguardando_aprovacao', 'revisao'];
  * usuário não entravam na conta, e vínculos e regras só levavam para outra tela.
  */
 export function pendingDecisions(db: Db, workspaceId: string) {
-  const proposals = db.all<{ id: string; kind: string; summary: string; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null }>(
-    `SELECT p.id, p.kind, p.summary, p.created_at, p.conversation_id, c.agent_id, a.name AS agent_name, c.purpose
+  // ação numa conta pedida num card da equipe: o card (#N, com link) e quem pediu vêm da execução
+  const proposals = db.all<{ id: string; kind: string; summary: string; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id: string | null; task_number: number | null }>(
+    `SELECT p.id, p.kind, p.summary, p.created_at, p.conversation_id, c.agent_id, COALESCE(a.name, ra.name) AS agent_name, c.purpose, t.id AS task_id, t.number AS task_number
        FROM agent_proposals p LEFT JOIN conversations c ON c.id = p.conversation_id LEFT JOIN agents a ON a.id = c.agent_id
+       LEFT JOIN runs r ON r.id = p.run_id AND p.kind = 'conexao' LEFT JOIN agents ra ON ra.id = r.agent_id LEFT JOIN tasks t ON t.id = r.task_id
       WHERE p.workspace_id = ? AND p.status = 'proposed' AND p.kind <> 'info_request' ORDER BY p.created_at DESC LIMIT 50`, workspaceId);
   const waiting = db.all<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>(
     `SELECT r.id, r.conversation_id, r.agent_id, a.name AS agent_name, r.created_at FROM runs r JOIN agents a ON a.id = r.agent_id
@@ -314,7 +328,7 @@ export function pendingDecisions(db: Db, workspaceId: string) {
        FROM tasks t JOIN boards b ON b.id = t.board_id LEFT JOIN agents a ON a.id = t.agent_id
        LEFT JOIN task_results x ON x.id = (SELECT y.id FROM task_results y WHERE y.task_id = t.id ORDER BY y.created_at DESC, y.rowid DESC LIMIT 1)
       WHERE t.workspace_id = ? AND b.audience = 'team' AND t.completed = 0 AND t.archived = 0 AND t.work_state IN (${WAITING_STATES.map(() => '?').join(', ')})
-        AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user'))
+        AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user')) AND ${SEM_CONEXAO_PENDENTE}
       ORDER BY t.updated_at DESC LIMIT 50`, workspaceId, ...WAITING_STATES)
     .map(({ evidence, ...c }) => {
       let ev: { pergunta?: string | null } = {};
@@ -339,7 +353,7 @@ export function pendingCount(db: Db, workspaceId: string): number {
   return n("SELECT COUNT(*) AS n FROM agent_proposals WHERE workspace_id = ? AND status = 'proposed' AND kind <> 'info_request'", workspaceId)
     + n("SELECT COUNT(*) AS n FROM runs WHERE workspace_id = ? AND status = 'waiting_user'", workspaceId)
     + n(`SELECT COUNT(*) AS n FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.workspace_id = ? AND b.audience = 'team' AND t.completed = 0 AND t.archived = 0
-          AND t.work_state IN (${WAITING_STATES.map(() => '?').join(', ')}) AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user'))`, workspaceId, ...WAITING_STATES)
+          AND t.work_state IN (${WAITING_STATES.map(() => '?').join(', ')}) AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user')) AND ${SEM_CONEXAO_PENDENTE}`, workspaceId, ...WAITING_STATES)
     + n("SELECT COUNT(*) AS n FROM link_proposals p JOIN tasks t ON t.id = p.task_id WHERE p.workspace_id = ? AND p.status = 'proposed' AND t.archived = 0", workspaceId)
     + n("SELECT COUNT(*) AS n FROM rules WHERE workspace_id = ? AND status = 'proposed'", workspaceId);
 }
@@ -422,6 +436,7 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
   const p = JSON.parse(row.payload) as Proposal;
   if (p.kind === 'permission' && decision === 'apply') throw new HttpError(400, 'needs_password', 'Para liberar, autorize com a sua senha no próprio cartão.');
   if (row.kind === 'info_request') throw new HttpError(400, 'respond', 'Responda pelo próprio cartão (responder, aprovar ou devolver).');
+  if (row.kind === 'conexao') throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
   let status: 'applied' | 'rejected' | 'failed' = 'rejected';
   let result = 'recusada';
   if (decision === 'apply') {
@@ -501,6 +516,8 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         result = `${r.name} agora está no setor ${r.sector}`;
       } else if (p.kind === 'handoff') {
         throw new HttpError(409, 'decided', 'aviso: a autorização é feita na conversa com a coordenação');
+      } else if (p.kind === 'conexao') {
+        throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
       } else {
         const auto = /^autom/i.test(fold(p.sector));
         const s = auto ? null : sectorByName(db, workspaceId, p.sector);

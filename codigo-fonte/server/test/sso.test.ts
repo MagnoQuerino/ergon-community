@@ -53,7 +53,7 @@ describe('SSO parametrizado: Google (conta + Google Tasks)', () => {
     assert.equal(u.searchParams.get('client_id'), GOOGLE_ID);
     assert.equal(u.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(u.searchParams.get('access_type'), 'offline', 'pede renovação (sem ela o acesso cai em 1 hora)');
-    assert.match(u.searchParams.get('scope') ?? '', /tasks\.readonly/);
+    assert.match(u.searchParams.get('scope') ?? '', /auth\/tasks\b/);
     assert.ok(!u.toString().includes(GOOGLE_SECRET), 'o segredo nunca vai para o navegador');
     assert.match(u.searchParams.get('redirect_uri') ?? '', /\/api\/integrations\/google\/callback$/);
     const state = u.searchParams.get('state')!;

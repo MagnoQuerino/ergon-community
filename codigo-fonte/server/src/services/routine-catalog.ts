@@ -176,7 +176,7 @@ export const CATALOG: RoutineTemplate[] = [
     produces: 'Lista de pendências com a evidência de cada uma e a cobrança pronta para copiar.',
     examines: 'Seus e-mails dos últimos 14 dias (recebidos sem resposta sua e enviados sem resposta) e as tarefas paradas.',
     needs: ['ia', 'email'], agents: ['hesiodo', 'aspasia'], modes: ['schedule', 'manual', 'condition'], privateData: true, freeDates: true,
-    approvals: 'Cobranças são sugestões para você copiar: nada é enviado.',
+    approvals: 'Cobranças são sugestões para você copiar; a rotina não age sozinha: o que propuser pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
     sample: ['Pendências — 3 pedem atenção.', '1. P1 · Fulano (Acme) pediu o cronograma há 6 dias e não teve resposta: responder hoje.', '2. P4 · você pediu a nota fiscal à Contabilidade há 5 dias: cobrar — "Oi, Maria! Conseguiu ver a nota de setembro? Preciso dela até quinta."', '3. #14 Proposta Acme parada há 4 dias com o Heródoto.'].join('\n'),
     defaults: { trigger: { kind: 'schedule', days: [1, 3, 5], time: '09:30' }, config: {
       agent: 'hesiodo', support: ['aspasia'], condition: 'sinal', deliver: ['conversa', 'arquivo'], windowHours: 72, staleDays: 4, maxPerDay: 4,
@@ -188,7 +188,7 @@ export const CATALOG: RoutineTemplate[] = [
     produces: 'Resumo priorizado: o que pede ação sua, o que é para saber e o que pode ignorar.',
     examines: 'E-mails prioritários desde a última vez (remetente, assunto e o começo do texto).',
     needs: ['ia', 'email'], agents: ['aspasia'], modes: ['schedule', 'manual'], privateData: true,
-    approvals: 'Só lê e resume; nada é respondido, movido ou apagado.',
+    approvals: 'Só lê e resume; não age sozinha: o que propuser pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
     sample: ['Caixa de entrada — 14 e-mails desde ontem.', 'Pedem ação sua (3): E2 Fulano (Acme) quer a data da reunião; E5 Financeiro pede aprovar o pagamento até hoje; E9 Laboratório pergunta pelo laudo.', 'Para saber (4): E1 cotação nova do fornecedor X; …', 'Pode ignorar: 7 (newsletters e avisos automáticos).'].join('\n'),
     defaults: { trigger: { kind: 'schedule', days: [1, 2, 3, 4, 5], time: '07:45' }, config: {
       agent: 'aspasia', support: [], condition: 'novidades', deliver: ['conversa', 'arquivo'], windowHours: 24, staleDays: 3, maxPerDay: 6,
@@ -201,7 +201,7 @@ export const CATALOG: RoutineTemplate[] = [
     examines: 'Os e-mails importantes esperando a sua resposta (o texto, sem o histórico citado), a conversa anterior e o histórico do assunto no Ergon.',
     needs: ['ia', 'email'], agents: ['aspasia', 'herodoto'], modes: ['manual', 'schedule'], privateData: true, freeDates: true,
     input: { text: { label: 'Qual e-mail?', placeholder: 'Remetente ou assunto (vazio = os importantes esperando você)' } },
-    approvals: 'Nenhuma resposta é enviada: você copia o rascunho.',
+    approvals: 'Você revisa e copia o rascunho; a rotina não age sozinha: o que propuser pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
     sample: ['R1 · Fulano (Acme) — "Cronograma da implantação"', 'Olá, Fulano! Obrigado pelo retorno. Conseguimos começar na semana de [data] e terminar em 4 semanas…'].join('\n'),
     defaults: { trigger: { kind: 'manual' }, config: {
       agent: 'aspasia', support: ['herodoto'], condition: 'sempre', deliver: ['conversa', 'arquivo'], windowHours: 168, staleDays: 3, maxPerDay: 10,
@@ -214,7 +214,7 @@ export const CATALOG: RoutineTemplate[] = [
     examines: 'Suas reuniões das próximas 36 horas (com participantes), os e-mails do assunto e o histórico no Ergon.',
     needs: ['ia', 'email'], agents: ['aristoteles', 'herodoto'], modes: ['schedule', 'manual'], privateData: true,
     input: { text: { label: 'Qual reunião?', placeholder: 'Parte do título (vazio = as próximas 36 horas)' } },
-    approvals: 'Só prepara material; não convida nem envia nada.',
+    approvals: 'Só prepara material; não age sozinha: o que propuser pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
     sample: ['Q1 · 10:00 Revisão do contrato Acme (Fulano, Carla)', 'Objetivo: fechar o escopo da fase 2. Pauta: 1. prazos 2. preço 3. suporte. Pendências: H2 Fulano pediu o cronograma; #14 proposta parada. Perguntas: o orçamento cobre o suporte?'].join('\n'),
     defaults: { trigger: { kind: 'schedule', days: [1, 2, 3, 4, 5], time: '07:30' }, config: {
       agent: 'aristoteles', support: ['herodoto'], condition: 'sinal', deliver: ['conversa', 'arquivo'], windowHours: 24, staleDays: 3, maxPerDay: 6,
@@ -241,7 +241,7 @@ export const CATALOG: RoutineTemplate[] = [
     produces: 'Um briefing curto na conversa da rotina e em arquivo (.md), com o painel contado pelo sistema e a conferência.',
     examines: 'Sua agenda de hoje, e-mails importantes e suas tarefas com prazo (Microsoft e Google, se conectados), decisões pendentes, tarefas da equipe, trabalho dos agentes e mensagens recebidas.',
     needs: ['ia'], agents: ['aristoteles'], modes: ['schedule', 'manual', 'condition'], privateData: false,
-    approvals: 'Só lê e resume; não responde e-mail, não aceita convite, não muda nada.',
+    approvals: 'Só lê e resume; não age sozinha: o que propuser pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
     sample: [
       'Bom dia! Briefing de terça, 25/10.',
       'Agenda (3): 09:00 Reunião com a Acme (online); 14:00 Revisão do orçamento; 16:30 1:1 com a Carla.',
@@ -267,7 +267,7 @@ export const CATALOG: RoutineTemplate[] = [
   T({ key: 'guardiao-prazos', name: 'Guardião dos Prazos', category: 'gestao', phase: 1, available: true,
     benefit: 'Avisa antes do atraso, não depois.',
     produces: 'Alertas de prazos em risco e de datas que mudaram, cada um com quem deve agir; nenhum atrasado fica sem aviso.',
-    examines: 'Prazos das tarefas (equipe, suas e espelhadas), mudanças de prazo e suas tarefas com prazo nas contas conectadas (Microsoft e Google).',
+    examines: 'Prazos das tarefas (da equipe, suas e as ligadas a aplicativos), mudanças de prazo e suas tarefas com prazo nas contas conectadas (Microsoft e Google).',
     needs: ['ia'], agents: ['hesiodo', 'euclides'], modes: ['schedule', 'condition'], privateData: false,
     approvals: 'Só alerta; mudar prazo ou responsável é com você.',
     sample: [
@@ -494,7 +494,7 @@ export const CATALOG: RoutineTemplate[] = [
     examines: 'O pedido do cliente, os documentos anexados (edital, requisitos) e o histórico do cliente no Ergon e nos e-mails.',
     needs: ['ia'], agents: ['herodoto', 'aristoteles'], modes: ['manual'], privateData: false, freeDates: true,
     input: { text: { label: 'O pedido do cliente', placeholder: 'Quem, o quê, prazo, orçamento', required: true }, files: { label: 'Pedido, edital ou requisitos', max: 5 } },
-    approvals: 'Nada é enviado ao cliente.',
+    approvals: 'Nada vai ao cliente sem a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
     sample: ['Entendimento: a Acme quer validar 3 métodos de HPLC até março.', 'Escopo: validação completa (ICH Q2), relatório e treinamento; fora: compra de padrões.', 'Condições: [valor] em 3 parcelas; validade 15 dias.', 'Perguntas: quantas matrizes? há método de referência?'].join('\n'),
     defaults: { trigger: { kind: 'manual' }, config: {
       agent: 'herodoto', support: ['aristoteles'], condition: 'sempre', deliver: ['conversa', 'arquivo'], windowHours: 24, staleDays: 3, maxPerDay: 10,

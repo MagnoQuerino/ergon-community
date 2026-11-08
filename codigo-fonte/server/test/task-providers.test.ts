@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import {
   AirtableProvider, ClickUpProvider, GitHubProjectsProvider, JiraProvider, LinearProvider, MondayProvider, NotionProvider, PipefyProvider,
-  SmartsheetProvider, TrelloProvider, jiraHost,
+  SmartsheetProvider, TrelloProvider, jiraHost, request,
 } from '../src/services/task-providers.ts';
 import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
@@ -35,7 +35,7 @@ describe('Trello', () => {
   before(() => routes.set('api.trello.com', (u, i) => {
     const a = (i.headers as Record<string, string>).Authorization;
     if (a !== `OAuth oauth_consumer_key="${KEY}", oauth_token="${TOK}"`) return status(401);
-    if (u.pathname === '/1/members/me') return { fullName: 'Ana Lima', username: 'alima' };
+    if (u.pathname === '/1/members/me') return { id: '5f1a2b3c4d5e6f7a8b9c0d1e', fullName: 'Ana Lima', username: 'alima' };
     if (u.pathname === '/1/members/me/boards') return [{ id: 'b0000001', name: 'Produto', dateLastActivity: '2026-10-20' }];
     if (u.pathname === '/1/boards/b0000001') return { name: 'Produto', dateLastActivity: '2026-10-20' };
     if (u.pathname === '/1/boards/b0000001/lists') return [{ id: 'l2', name: 'Feito', pos: 2 }, { id: 'l1', name: 'A fazer', pos: 1 }];
@@ -47,7 +47,7 @@ describe('Trello', () => {
   }));
   test('chave e token no cabeçalho (nunca na URL); listas em ordem; lista "Feito" conta como concluída', async () => {
     const p = new TrelloProvider(KEY, TOK);
-    assert.equal(await p.whoami(), 'Ana Lima');
+    assert.deepEqual(await p.whoami(), { nome: 'Ana Lima', id: '5f1a2b3c4d5e6f7a8b9c0d1e' });
     assert.deepEqual((await p.listBoards()).map((b) => b.name), ['Produto']);
     const s = await p.getBoard('b0000001');
     assert.deepEqual(s.columns.map((c) => c.name), ['A fazer', 'Feito']);
@@ -60,7 +60,7 @@ describe('Trello', () => {
 describe('Jira Cloud', () => {
   before(() => routes.set('empresa.atlassian.net', (u, i, body) => {
     if ((i.headers as Record<string, string>).Authorization !== `Basic ${Buffer.from('eu@empresa.com:tok-jira-0123456789').toString('base64')}`) return status(401);
-    if (u.pathname === '/rest/api/3/myself') return { displayName: 'Alexandre' };
+    if (u.pathname === '/rest/api/3/myself') return { accountId: '5b10ac8d82e05b22cc7d4ef5', displayName: 'Alexandre' };
     if (u.pathname === '/rest/api/3/project/search') return { values: [{ id: '1', key: 'OPS', name: 'Operações' }], isLast: true };
     if (u.pathname === '/rest/api/3/project/OPS') return { name: 'Operações' };
     if (u.pathname === '/rest/api/3/project/OPS/statuses') return [{ statuses: [
@@ -79,7 +79,7 @@ describe('Jira Cloud', () => {
     assert.equal(jiraHost('https://empresa.atlassian.net/jira/'), 'empresa.atlassian.net');
     assert.equal(jiraHost('intranet.local'), null, 'nenhum outro endereço (o servidor não chama qualquer host)');
     const p = new JiraProvider('empresa.atlassian.net', 'eu@empresa.com', 'tok-jira-0123456789');
-    assert.equal(await p.whoami(), 'Alexandre');
+    assert.deepEqual(await p.whoami(), { nome: 'Alexandre', id: '5b10ac8d82e05b22cc7d4ef5' });
     assert.deepEqual((await p.listBoards()).map((b) => [b.externalId, b.name]), [['OPS', 'Operações (OPS)']]);
     const s = await p.getBoard('OPS');
     assert.deepEqual(s.columns.map((c) => c.name), ['A fazer', 'Em andamento', 'Concluído']);
@@ -92,7 +92,7 @@ describe('ClickUp', () => {
   before(() => routes.set('api.clickup.com', (u, i) => {
     if ((i.headers as Record<string, string>).Authorization !== 'pk_123_ABCDEFGHIJKLMNOP') return status(401);
     const p = u.pathname.replace('/api/v2', '');
-    if (p === '/user') return { user: { username: 'alima' } };
+    if (p === '/user') return { user: { id: 183, username: 'alima' } };
     if (p === '/team') return { teams: [{ id: 't1' }] };
     if (p === '/team/t1/space') return { spaces: [{ id: 's1', name: 'Empresa' }] };
     if (p === '/space/s1/folder') return { folders: [{ name: 'Clientes', lists: [{ id: 'L1', name: 'Pedidos' }] }] };
@@ -103,7 +103,7 @@ describe('ClickUp', () => {
   }));
   test('caminho espaço › pasta › lista; situação "closed" = concluída', async () => {
     const p = new ClickUpProvider('pk_123_ABCDEFGHIJKLMNOP');
-    assert.equal(await p.whoami(), 'alima');
+    assert.deepEqual(await p.whoami(), { nome: 'alima', id: '183' });
     assert.deepEqual((await p.listBoards()).map((b) => b.name), ['Empresa › Clientes › Pedidos']);
     const s = await p.getBoard('L1');
     assert.deepEqual(s.columns.map((c) => c.name), ['to do', 'complete']);
@@ -116,7 +116,7 @@ describe('monday.com', () => {
   before(() => routes.set('api.monday.com', (_u, i, body) => {
     if ((i.headers as Record<string, string>).Authorization !== 'eyJmonday-token-123456') return { errors: [{ message: 'Not Authenticated' }] };
     const q = String(body.query);
-    if (q.includes('me {')) return { data: { me: { name: 'Alexandre' } } };
+    if (q.includes('me {')) return { data: { me: { id: '7001', name: 'Alexandre' } } };
     if (q.includes('boards(limit')) return { data: { boards: [{ id: '42', name: 'Comercial', type: 'board' }, { id: '43', name: 'Subitens', type: 'sub_items_board' }] } };
     if (q.includes('items_page') && !q.includes('next_items_page')) return { data: { boards: [{ id: '42', name: 'Comercial', groups: [{ id: 'g2', title: 'Fechado', position: '2' }, { id: 'g1', title: 'Em negociação', position: '1' }],
       items_page: { cursor: 'c1', items: [{ id: '1', name: 'Cliente A', updated_at: 'v', group: { id: 'g1' }, column_values: [{ id: 's', type: 'status', text: 'Working on it' }, { id: 'p', type: 'people', text: 'Bia, Caio' }] }] } }] } };
@@ -125,7 +125,7 @@ describe('monday.com', () => {
   }));
   test('token sem "Bearer"; grupos em ordem; páginas seguintes; status "Done" = concluída', async () => {
     const p = new MondayProvider('eyJmonday-token-123456');
-    assert.equal(await p.whoami(), 'Alexandre');
+    assert.deepEqual(await p.whoami(), { nome: 'Alexandre', id: '7001' });
     assert.deepEqual((await p.listBoards()).map((b) => b.name), ['Comercial'], 'quadro de subitens fica de fora');
     const s = await p.getBoard('42');
     assert.deepEqual(s.columns.map((c) => c.name), ['Em negociação', 'Fechado']);
@@ -139,7 +139,7 @@ describe('Notion (fontes de dados, versão 2025-09-03)', () => {
   before(() => routes.set('api.notion.com', (u, i, body) => {
     const h = i.headers as Record<string, string>;
     if (h.Authorization !== 'Bearer ntn_segredo_0123456789' || h['Notion-Version'] !== '2025-09-03') return status(401);
-    if (u.pathname === '/v1/users/me') return { name: 'Ergon', bot: { workspace_name: 'Casa' } };
+    if (u.pathname === '/v1/users/me') return { id: '9a8b7c6d-0000-4000-8000-000000000001', name: 'Ergon', bot: { workspace_name: 'Casa' } };
     if (u.pathname === '/v1/search') { assert.equal(body.filter.value, 'data_source'); return { results: [{ id: DS, title: [{ plain_text: 'Tarefas' }] }], has_more: false }; }
     if (u.pathname === `/v1/data_sources/${DS}`) return { title: [{ plain_text: 'Tarefas' }], properties: {
       Nome: { type: 'title' }, Responsável: { type: 'people' },
@@ -152,7 +152,7 @@ describe('Notion (fontes de dados, versão 2025-09-03)', () => {
   }));
   test('opções do status viram colunas; grupo "Complete" marca concluída', async () => {
     const p = new NotionProvider('ntn_segredo_0123456789');
-    assert.equal(await p.whoami(), 'Casa');
+    assert.deepEqual(await p.whoami(), { nome: 'Casa', id: '9a8b7c6d-0000-4000-8000-000000000001' });
     assert.deepEqual((await p.listBoards()).map((b) => b.name), ['Tarefas']);
     const s = await p.getBoard(DS);
     assert.deepEqual(s.columns.map((c) => c.name), ['Sem status', 'Não iniciado', 'Em andamento', 'Pronto']);
@@ -165,14 +165,14 @@ describe('Linear', () => {
   before(() => routes.set('api.linear.app', (_u, i, body) => {
     if ((i.headers as Record<string, string>).Authorization !== 'lin_api_0123456789abcdef') return status(401);
     const q = String(body.query);
-    if (q.includes('viewer')) return { data: { viewer: { name: 'Alexandre' } } };
+    if (q.includes('viewer')) return { data: { viewer: { id: 'u-linear-1', name: 'Alexandre' } } };
     if (q.includes('teams(')) return { data: { teams: { nodes: [{ id: TEAM, name: 'Produto', key: 'PRD' }] } } };
     return { data: { team: { name: 'Produto', states: { nodes: [{ id: 's2', name: 'Done', type: 'completed', position: 3 }, { id: 's1', name: 'Todo', type: 'unstarted', position: 1 }] },
       issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: 'i1', identifier: 'PRD-7', title: 'Login', description: 'passkeys', updatedAt: 'v', state: { id: 's2', type: 'completed' }, assignee: { name: 'Leo' } }] } } } };
   }));
   test('chave sem "Bearer"; estados em ordem; "completed" = concluída', async () => {
     const p = new LinearProvider('lin_api_0123456789abcdef');
-    assert.equal(await p.whoami(), 'Alexandre');
+    assert.deepEqual(await p.whoami(), { nome: 'Alexandre', id: 'u-linear-1' });
     assert.deepEqual((await p.listBoards()).map((b) => b.name), ['Produto (PRD)']);
     const s = await p.getBoard(TEAM);
     assert.deepEqual(s.columns.map((c) => c.name), ['Todo', 'Done']);
@@ -193,7 +193,7 @@ describe('Airtable, Smartsheet, Pipefy e GitHub Projects', () => {
     });
     routes.set('api.smartsheet.com', (u, i) => {
       if ((i.headers as Record<string, string>).Authorization !== 'Bearer smartsheet-0123456789') return status(401);
-      if (u.pathname === '/2.0/users/me') return { firstName: 'Ana', lastName: 'Lima' };
+      if (u.pathname === '/2.0/users/me') return { id: 4583173393803140, firstName: 'Ana', lastName: 'Lima' };
       if (u.pathname === '/2.0/sheets') return { data: [{ id: 77, name: 'Obras' }] };
       if (u.pathname === '/2.0/sheets/77') return { name: 'Obras', columns: [{ id: 1, title: 'Tarefa', primary: true, type: 'TEXT_NUMBER' }, { id: 2, title: 'Status', type: 'PICKLIST', options: ['Aberto', 'Concluído'] }, { id: 3, title: 'Atribuído a', type: 'CONTACT_LIST' }],
         rows: [{ id: 9, modifiedAt: 'v', cells: [{ columnId: 1, value: 'Pintura', displayValue: 'Pintura' }, { columnId: 2, value: 'Concluído' }, { columnId: 3, value: 'x@y', displayValue: 'Jorge' }] }, { id: 10, cells: [{ columnId: 1 }] }] };
@@ -211,7 +211,7 @@ describe('Airtable, Smartsheet, Pipefy e GitHub Projects', () => {
       const h = i.headers as Record<string, string>;
       if (h.Authorization !== 'Bearer ghp_0123456789abcdef' || !h['User-Agent']) return status(401);
       const q = String(body.query);
-      if (q.includes('viewer { login name }')) return { data: { viewer: { login: 'alima', name: null } } };
+      if (q.includes('viewer { id login name }')) return { data: { viewer: { id: 'MDQ6VXNlcjE=', login: 'alima', name: null } } };
       if (q.includes('organizations')) return { data: { viewer: { login: 'alima', projectsV2: { nodes: [{ id: 'PVT_aaaa1', title: 'Roadmap', closed: false }, { id: 'PVT_old01', title: 'Antigo', closed: true }] }, organizations: { nodes: [] } } } };
       return { data: { node: { title: 'Roadmap', field: { options: [{ id: 'op1', name: 'Todo' }, { id: 'op2', name: 'Done' }] },
         items: { pageInfo: { hasNextPage: false }, nodes: [
@@ -222,7 +222,7 @@ describe('Airtable, Smartsheet, Pipefy e GitHub Projects', () => {
   });
   test('Airtable: tabela com status de seleção; coluna principal é o título', async () => {
     const p = new AirtableProvider('patAIRTABLE0123456789');
-    assert.equal(await p.whoami(), 'eu@casa.com');
+    assert.deepEqual(await p.whoami(), { nome: 'eu@casa.com', id: 'usr1' });
     assert.deepEqual((await p.listBoards()).map((b) => [b.externalId, b.name]), [['appBASE00000001/tblTAREFAS000001', 'Casa › Tarefas']]);
     const s = await p.getBoard('appBASE00000001/tblTAREFAS000001');
     assert.deepEqual(s.columns.map((c) => c.name), ['Sem status', 'A fazer', 'Feito']);
@@ -230,7 +230,7 @@ describe('Airtable, Smartsheet, Pipefy e GitHub Projects', () => {
   });
   test('Smartsheet: linhas vazias ficam de fora; lista "Status" vira colunas', async () => {
     const p = new SmartsheetProvider('smartsheet-0123456789');
-    assert.equal(await p.whoami(), 'Ana Lima');
+    assert.deepEqual(await p.whoami(), { nome: 'Ana Lima', id: '4583173393803140' });
     const s = await p.getBoard('77');
     assert.deepEqual(s.columns.map((c) => c.name), ['Sem status', 'Aberto', 'Concluído']);
     assert.deepEqual(s.tasks.map((t) => [t.title, t.completed, t.assignee]), [['Pintura', true, 'Jorge']]);
@@ -243,11 +243,86 @@ describe('Airtable, Smartsheet, Pipefy e GitHub Projects', () => {
   });
   test('GitHub Projects: projetos fechados e itens arquivados ficam de fora; issue fechada = concluída', async () => {
     const p = new GitHubProjectsProvider('ghp_0123456789abcdef');
-    assert.equal(await p.whoami(), 'alima');
+    assert.deepEqual(await p.whoami(), { nome: 'alima', id: 'MDQ6VXNlcjE=' });
     assert.deepEqual((await p.listBoards()).map((b) => b.name), ['alima › Roadmap']);
     const s = await p.getBoard('PVT_aaaa1');
     assert.deepEqual(s.columns.map((c) => c.name), ['Sem status', 'Todo', 'Done']);
     assert.deepEqual(s.tasks.map((t) => [t.title, t.columnExternalId, t.completed, t.assignee]), [['Bug no login', 'op1', true, 'leo'], ['Ideia', '__sem_status__', false, null]]);
+  });
+});
+
+describe('motivo do erro: o que o serviço disse, em qualquer formato', () => {
+  let corpo = ''; let codigo = 400;
+  before(() => routes.set('erro.exemplo', () => new Response(corpo, { status: codigo })));
+  const motivo = async (c: unknown, o: { status?: number; headers?: Record<string, string> } = {}): Promise<string> => {
+    corpo = typeof c === 'string' ? c : JSON.stringify(c); codigo = o.status ?? 400;
+    try { await request('https://erro.exemplo/x', { headers: o.headers }); } catch (e) { return (e as Error).message; }
+    return assert.fail('esperava erro');
+  };
+  test('Jira: errorMessages e errors como objeto, juntos', async () => {
+    assert.match(await motivo({ errorMessages: ['Sem permissão'], errors: { summary: 'Campo obrigatório', duedate: 'Fora da tela' } }), /\(Sem permissão; summary: Campo obrigatório; duedate: Fora da tela\)/);
+    assert.match(await motivo({ errorMessages: [], errors: { summary: 'Campo obrigatório' } }), /\(summary: Campo obrigatório\)/);
+    assert.match(await motivo({ errorMessages: ['Issue não existe'], errors: {} }, { status: 404 }), /não encontrado.*\(Issue não existe\)/);
+    assert.doesNotMatch(await motivo({ errorMessages: [], errors: {} }), /\(/);
+    assert.doesNotMatch(await motivo({ errors: { campo: { aninhado: 'x' } } }), /object Object/);
+  });
+  test('ClickUp: err e ECODE', async () => {
+    assert.match(await motivo({ err: 'Token invalid', ECODE: 'OAUTH_025' }, { status: 401 }), /recusado.*\(OAUTH_025: Token invalid\)/);
+    assert.match(await motivo({ err: 'Sem código' }), /\(Sem código\)/);
+  });
+  test('texto puro de Trello e Todoist; página HTML de proxy não vira motivo', async () => {
+    assert.match(await motivo('invalid id'), /respondeu 400 \(invalid id\)/);
+    assert.match(await motivo('Task not found\n', { status: 404 }), /\(Task not found\)/);
+    assert.doesNotMatch(await motivo('<html><body>Bad gateway</body></html>'), /html|\(/);
+    assert.doesNotMatch(await motivo('', { status: 422 }), /\(/);
+  });
+  test('os formatos que já valiam continuam: Graph, Notion, Airtable, Smartsheet, Asana, GraphQL, Trello em JSON', async () => {
+    assert.match(await motivo({ error: { code: 'BadRequest', message: 'data ruim' } }), /\(BadRequest: data ruim\)/);
+    assert.match(await motivo({ object: 'error', status: 400, code: 'validation_error', message: 'x' }), /\(validation_error: x\)/);
+    assert.match(await motivo({ error: { type: 'INVALID_VALUE_FOR_COLUMN', message: 'opção ruim' } }, { status: 422 }), /\(INVALID_VALUE_FOR_COLUMN: opção ruim\)/);
+    assert.match(await motivo({ error: 'NOT_FOUND' }, { status: 404 }), /\(NOT_FOUND\)/);
+    assert.match(await motivo({ errorCode: 1042, message: 'não conforme', refId: 'r' }), /\(1042: não conforme\)/);
+    assert.match(await motivo({ errors: [{ message: 'Campo errado', help: 'h' }] }), /\(Campo errado\)/);
+    assert.match(await motivo({ errors: [{ message: 'Argumento', extensions: { code: 'INPUT_ERROR' } }] }), /\(INPUT_ERROR: Argumento\)/);
+    assert.match(await motivo({ message: 'invalid token', error: 'ERROR' }), /\(ERROR: invalid token\)/);
+    assert.match(await motivo({ error_code: 'ColumnValueException', error_message: 'etiqueta ruim', status_code: 400 }), /\(ColumnValueException: etiqueta ruim\)/);
+  });
+  test('corta o texto, em uma linha', async () => {
+    const m = await motivo(`linha 1\n\nlinha 2 ${'x'.repeat(500)}`);
+    assert.match(m, /\(linha 1 linha 2 x+\)$/);
+    assert.ok(m.length < 220, String(m.length));
+    assert.ok(/x{100}\)$/.test(await motivo({ errorMessages: ['x'.repeat(500)] })));
+    assert.ok((await motivo({ errorMessages: ['x'.repeat(500)] })).length < 220);
+  });
+  test('não repete a credencial, em nenhum formato de cabeçalho, nem cortada ao meio', async () => {
+    const eco = (segredo: string) => `a credencial ${segredo} não vale`;
+    const basico = Buffer.from('eu@empresa.com:tok-jira-0123456789').toString('base64');
+    const casos: Array<[Record<string, string>, string[]]> = [
+      [{ Authorization: 'Bearer ntn_segredo_0123456789' }, ['ntn_segredo_0123456789']],
+      [{ Authorization: 'pk_123_ABCDEFGHIJKLMNOP' }, ['pk_123_ABCDEFGHIJKLMNOP']],
+      [{ Authorization: 'OAuth oauth_consumer_key="chave1234", oauth_token="token5678"' }, ['chave1234', 'token5678']],
+      [{ Authorization: `Basic ${basico}` }, ['tok-jira-0123456789', 'eu@empresa.com', basico]],
+    ];
+    for (const [headers, segredos] of casos) {
+      for (const s of segredos) {
+        for (const c of [eco(s), { err: eco(s) }, { errorMessages: [eco(s)] }, { errors: { campo: eco(s) } }, { error: { message: eco(s) } }]) {
+          for (const status of [400, 403, 404]) {
+            const m = await motivo(c, { status, headers });
+            assert.ok(!m.includes(s), m);
+            assert.match(m, /não vale/, 'o resto do motivo continua');
+          }
+        }
+      }
+    }
+    // no limite do corte: nem um pedaço do segredo sobra
+    const m = await motivo(`${'x'.repeat(150)} ntn_segredo_0123456789`, { headers: casos[0][0] });
+    assert.ok(!m.includes('ntn_'), m);
+  });
+  test('erro de GraphQL na leitura também não repete a credencial', async () => {
+    const antes = routes.get('api.linear.app')!;
+    routes.set('api.linear.app', () => ({ errors: [{ message: 'a chave lin_api_segredo123 não vale' }] }));
+    try { await assert.rejects(new LinearProvider('lin_api_segredo123').whoami(), (e: Error) => !e.message.includes('lin_api_segredo123') && /não vale/.test(e.message)); }
+    finally { routes.set('api.linear.app', antes); }
   });
 });
 

@@ -103,10 +103,10 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
   c.push({ id: 'contas', nome: 'Contas e apps conectados', estado: bad.length ? 'atencao' : soon.length ? 'limitado' : 'operacional',
     detalhe: !ints.length ? 'nenhuma conectada' : [plural(ints.length - bad.length, 'conectada', 'conectadas'), bad.length ? `com erro: ${bad.join(', ')} (entre de novo em Conexões)` : '', soon.length ? 'Google vence em menos de 2 dias (modo de teste)' : ''].filter(Boolean).join(' · ') });
 
-  // espelhos de tarefas
+  // listas ligadas a aplicativos de tarefas (nos dois sentidos)
   const mirrors = db.all<{ e: string | null }>("SELECT last_error AS e FROM boards WHERE origin = 'mirror'");
   const mErr = mirrors.filter((m) => m.e).length;
-  if (mirrors.length) c.push({ id: 'espelhos', nome: 'Listas espelhadas', estado: mErr ? 'limitado' : 'operacional', detalhe: `${mirrors.length} lista(s)${mErr ? ` · ${mErr} com erro na última leitura` : ''}` });
+  if (mirrors.length) c.push({ id: 'espelhos', nome: 'Listas ligadas a aplicativos', estado: mErr ? 'limitado' : 'operacional', detalhe: `${mirrors.length} lista(s)${mErr ? ` · ${mErr} com erro na última leitura` : ''}` });
 
   // backup
   const b = lastBackup(cfg);

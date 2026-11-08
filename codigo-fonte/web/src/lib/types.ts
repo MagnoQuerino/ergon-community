@@ -84,7 +84,8 @@ export interface Me {
   prefs: Prefs;
 }
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean }
+/** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean }
 export interface OnboardingOptions {
   state: 'pending' | 'done'; choice: { use?: string; niche?: string; preset?: string; skipped?: boolean } | null;
   uses: Array<{ key: string; label: string; hint: string }>; niches: Array<{ key: string; label: string }>;
@@ -94,7 +95,11 @@ export interface OnboardingResult {
   preset: { key: string; title: string; summary: string }; coordinator: string;
   team: Array<{ id: string; name: string; role: string; sector: string; sectorName: string; charKey: string | null }>;
 }
-export interface VersionInfo { version: string; build: string; mode: 'local' | 'cloud'; latest: { version: string; notes: string | null; url: string | null } | null; updateAvailable: boolean }
+export interface VersionInfo { version: string; build: string; mode: 'local' | 'cloud'; latest: { version: string; notes: string | null; url: string | null } | null; updateAvailable: boolean;
+  /** última consulta que deu certo; configured: esta instalação consulta versões novas */
+  checkedAt?: string | null; configured?: boolean;
+  /** versões publicadas anteriores à instalada (a mais nova primeiro) */
+  previous?: Array<{ version: string; url: string | null; publishedAt: string | null; prerelease: boolean }> }
 /** Estado público da entrada (antes do login). sealed: reiniciado e trancado, só senha ou frase abrem os dados. */
 export interface AuthState { needsSetup: boolean; authenticated: boolean; locked: boolean; sealed: boolean; protected: boolean; mode: 'local' | 'cloud'; rpId: string; publicUrl: string; setupTokenRequired: boolean;
   /** conta nova neste computador: qualquer pessoa ('aberto'), só com convite ('convite'), ou não se aplica (null) */
@@ -161,9 +166,9 @@ export interface RecentConversation {
 export const PROPOSAL_KIND: Record<string, string> = {
   question: 'pergunta', routine: 'rotina', routine_edit: 'ajuste de rotina', sector: 'setor', create_agent: 'novo agente', tools: 'ferramenta',
   permission: 'permissão', handoff: 'passado à coordenação', edit_agent: 'agente', deactivate_agent: 'desativar', reactivate_agent: 'reativar', sector_edit: 'setor', sector_new: 'novo setor',
-  task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card', batch: 'cards', purge: 'apagar de vez',
+  task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card', batch: 'cards', purge: 'apagar de vez', conexao: 'ação numa conta',
 };
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
@@ -179,10 +184,16 @@ export interface AiStatus {
 }
 export interface Skill { name: string; description: string; category: string; enabled: boolean }
 export interface Integration {
-  kind: string; name: string;
+  kind: string; name: string; /** nome do workspace de onde vem a conta, quando emprestada */ sharedFrom?: string | null;
+  /** os outros workspaces que usam a conta que mora aqui (desconectar aqui não corta o acesso deles) */
+  usadaEm?: string[];
+  /** a mesma conta já conectada noutro workspace seu, para usar aqui sem conectar de novo (só o dono vê) */
+  reutilizaveis?: Array<{ workspaceId: string; workspace: string; conta: string | null }>;
   /** oauth: login com a conta · qr: WhatsApp · token: credencial colada · soon: ainda não (motivo em "soon") */
-  auth: 'oauth' | 'qr' | 'token' | 'soon'; group: 'contas' | 'tarefas' | 'conversas'; about: string; tasks: boolean; site: string; soon: string | null;
-  help: { url: string; steps: string } | null; fields: Array<{ name: string; label: string; secret: boolean; placeholder: string }>;
+  auth: 'oauth' | 'qr' | 'token' | 'soon'; group: 'contas' | 'tarefas' | 'conversas' | 'vendas' | 'suporte' | 'documentos' | 'financeiro'; about: string; tasks: boolean; site: string; soon: string | null;
+  /** extras: links com rótulo e textos com botão de copiar, fora dos passos */
+  help: { url: string; steps: string; extras?: Array<{ rotulo: string; url: string } | { rotulo: string; copiar: string }> } | null;
+  fields: Array<{ name: string; label: string; secret: boolean; placeholder: string; opcional?: boolean }>;
   state: 'off' | 'pending' | 'connected' | 'error'; account: string | null;
   connectedAt: string | null; lastSyncAt: string | null; error: string | null; ready: boolean;
   /** Google com o app em modo de teste: até quando a autorização vale (depois, entrar de novo) */
@@ -194,7 +205,7 @@ export interface Integration {
 export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
 
 export const ORIGIN_LABEL: Record<string, string> = {
-  manual: 'manual', chat: 'conversa', teams: 'Teams', whatsapp: 'WhatsApp', mirror: 'espelho', demo: 'demonstração',
+  manual: 'manual', chat: 'conversa', teams: 'Teams', whatsapp: 'WhatsApp', mirror: 'ligada', demo: 'demonstração',
 };
 export const SOURCE_LABEL: Record<string, string> = {
   microsoft: 'Microsoft', google: 'Google Tasks', asana: 'Asana', todoist: 'Todoist', trello: 'Trello', jira: 'Jira', clickup: 'ClickUp', monday: 'monday.com',
@@ -274,7 +285,8 @@ export type Need = 'info' | 'approval' | 'review' | 'retry';
 /** Pedido de um card repassado na conversa pelo agente dela (cartão para responder ali mesmo). */
 export interface RequestPayload { taskId: string; number: number; title: string; need: Need; agent: string; question: string | null; excerpt: string | null; review?: boolean; round?: number }
 export interface Decisions {
-  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null }>;
+  /** task_id e task_number: ação numa conta pedida num card da equipe (o item leva ao card) */
+  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
   waiting: Array<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>;
   /** cards da equipe parados à espera de você */
   cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null }>;

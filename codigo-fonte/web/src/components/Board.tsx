@@ -91,6 +91,7 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
         {team && t.handoffs > 0 && <span className="badge" title="Repasses entre agentes">{t.handoffs} repasse{t.handoffs === 1 ? '' : 's'}</span>}
         {t.team_number && <span className="badge badge--ok" title="Enviada à equipe">equipe #{t.team_number}{teamAg ? ` · ${teamAg.name}` : ''}</span>}
         {t.link_state === 'missing' && <span className="badge badge--err" title="Não apareceu na última leitura do aplicativo (não foi excluída)">ausente</span>}
+        {t.link_state === 'escrita_falhou' && <span className="badge badge--err" title={`${t.link_conflict ?? 'Não foi enviado ao aplicativo.'}\nAbra o card para tentar de novo.`}>não foi ao aplicativo</span>}
         {t.proposals > 0 && <span className="badge" title="Possível duplicata: vínculo para confirmar">vínculo?</span>}
       </>
     );

@@ -36,7 +36,7 @@ export interface StartRun {
  * chegando), message.interim (comentário no meio), tool.started / tool.completed (ferramenta), subagent.start, e os
  * terminais run.completed / run.failed / run.cancelled. O estado final continua vindo de GET /v1/runs/{id}.
  */
-export interface RunEvent { event: string; delta?: string; text?: string; tool?: string; preview?: string }
+export interface RunEvent { event: string; delta?: string; text?: string; tool?: string; preview?: string; duration?: number; error?: boolean }
 
 export interface HermesClient {
   health(): Promise<{ ok: boolean; detail: string }>;
@@ -151,7 +151,7 @@ export class HttpHermesClient implements HermesClient {
           try { e = JSON.parse(data) as Record<string, unknown>; } catch { continue; }
           if (typeof e.event !== 'string') continue;
           const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
-          onEvent({ event: e.event, delta: str(e.delta), text: str(e.text), tool: str(e.tool), preview: str(e.preview) });
+          onEvent({ event: e.event, delta: str(e.delta), text: str(e.text), tool: str(e.tool), preview: str(e.preview), duration: typeof e.duration === 'number' ? e.duration : undefined, error: e.error === true || (typeof e.error === 'string' && !!e.error) });
           if (/^run\.(completed|failed|cancelled)$/.test(e.event)) return;
         }
       }

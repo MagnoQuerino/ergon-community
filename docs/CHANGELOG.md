@@ -1,5 +1,24 @@
 # Novidades
 
+## 1.1.0-rc.22 (pré-versão de teste)
+
+- **Os agentes agora agem nas suas contas, não só leem.** Pedem e fazem: deixar um e-mail em Rascunhos ou responder,
+  mandar mensagem no Teams, no Slack ou no WhatsApp, criar e mover tarefas no Planner, no To Do, no Asana, no Trello e
+  em outros aplicativos. Consultam qualquer período, sem o limite de 48 horas.
+- **Quadros nos dois sentidos:** dar check numa tarefa no Ergon conclui lá no Planner; mover de coluna muda o bucket;
+  editar ou criar num quadro ligado aparece no aplicativo.
+- **Novos aplicativos:** Slack, Discord, Telegram, Mattermost, Rocket.Chat, HubSpot, RD Station CRM, Pipedrive, Kommo,
+  Zendesk, Freshdesk, Intercom, Confluence, GitLab e Calendly; Omie e Asaas para consulta; mais ações no GitHub e no
+  Notion.
+- **Você no controle:** o que você pede vai direto. Pede sua confirmação o que não partiu de você (uma rotina, uma
+  mensagem recebida), um envio depois de o agente ler conteúdo de fora, e apagar qualquer coisa. Em cada conexão e em
+  cada ação dá para escolher: seguir essa regra, sempre pedir confirmação ou desligar.
+- **Use uma conta em vários workspaces:** conecte uma conta nova aqui ou aproveite a que já está em outro workspace seu.
+- **Conexões:** botões Testar conexão, Testar escrita e Autorizar de novo. Quem já tinha conectado precisa autorizar de
+  novo para liberar as ações novas.
+- **WhatsApp:** responde quando você pede; o aceite de riscos mudou e é pedido de novo antes do primeiro envio.
+- **Atividade:** exporte um relatório do que a equipe fez, por período.
+
 ## 1.1.0-rc.21 (pré-versão de teste)
 
 - **Crie setores e construções direto na Equipe.** No alto da tela há "Novo setor" (vendo por setor) e "Nova

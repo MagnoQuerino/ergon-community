@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errMsg } from '../lib/api.ts';
+import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { openConversation } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
@@ -8,12 +8,15 @@ import { DISPLAY_BADGE, DISPLAY_LABEL, displayOf } from '../lib/work.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
 import { DueChip } from './Board.tsx';
+import { TextoLongo } from './TextoLongo.tsx';
 import { ActionBar, IconAction, TaskFiles, TechDetails, type TaskFile, type WorkInfo } from './TaskWork.tsx';
 
 interface Step { position: number; agentId: string; title: string; status: 'pendente' | 'em_andamento' | 'feita' | 'falhou'; doneAt: string | null }
 interface Detail {
   task: { id: string; number: number; title: string; description: string; completed: number; completed_by: string | null; completed_at: string | null; column_id: string; agent_id: string | null; origin: string; is_fixture: number; revision: number; board_id: string; external_assignee: string | null; parent_task_id: string | null; due_on: string | null; priority?: number };
   log: Array<{ id: string; actor_type: string; actor_id: string | null; action: string; evidence: string | null; result: string; created_at: string }>;
+  /** motivo do último envio ao aplicativo que falhou */
+  envio?: string | null;
   link: { external_id: string; external_version: string; external_extra: string; sync_state: string; conflict: string | null; last_seen_at: string } | null;
   proposals: Array<{ id: string; related_number: number; related_title: string; reason: string; score: number; status: string }>;
   source: { platform: string; is_fixture: number; received_at: string; status: string; text_excerpt: string | null } | null;
@@ -38,6 +41,8 @@ interface Detail {
   agents?: Record<string, { name: string; color: string }>;
   /** quem faria a revisão crítica deste card: a mesma escolha do servidor que começa a revisão (nunca o próprio autor) */
   reviewer?: { id: string; name: string } | null;
+  /** ações numa conta pedidas neste card, esperando o seu clique */
+  conexoes?: Array<{ id: string; summary: string; created_at: string }>;
 }
 
 const REVIEW_STATUS: Record<string, string> = {
@@ -49,7 +54,7 @@ const STEP_ICON: Record<Step['status'], string> = { feita: 'check', em_andamento
 const ACTION_LABEL: Record<string, string> = {
   'task.create': 'Card criado', 'task.update': 'Card alterado', 'task.delegate': 'Pedido a um agente', 'task.completion_reported': 'Conclusão informada (aguarda confirmação)',
   'source.edited': 'Mensagem de origem editada', 'mirror.task.import': 'Veio do aplicativo de origem', 'mirror.task.update': 'Atualizado pelo aplicativo de origem',
-  'mirror.task.missing': 'Não apareceu na última leitura', 'link.confirmed': 'Vínculo confirmado', 'link.rejected': 'Vínculo rejeitado', 'link.revert': 'Vínculo revertido',
+  'mirror.task.missing': 'Não apareceu na última leitura', 'mirror.push': 'Enviado ao aplicativo', 'mirror.push.error': 'Não foi ao aplicativo', 'link.confirmed': 'Vínculo confirmado', 'link.rejected': 'Vínculo rejeitado', 'link.revert': 'Vínculo revertido',
   'agent.result.succeeded': 'Resultado do agente', 'agent.result.failed': 'O agente não conseguiu', 'agent.result.cancelled': 'Execução cancelada',
   'task.route': 'Encaminhado pela coordenação', 'task.reassign': 'Redistribuído pela coordenação', 'task.handoff': 'Pedido de ajuda',
   'task.help_result': 'Ajuda recebida', 'task.queue_start': 'Começou a trabalhar', 'review.start': 'Revisão crítica pedida',
@@ -57,14 +62,17 @@ const ACTION_LABEL: Record<string, string> = {
   'task.result': 'Conferência do resultado', 'task.work_state': 'Estado do trabalho', 'operation.run': 'Análise feita pelo sistema', 'operation.refused': 'Processamento recusado',
   'task.waiting_help': 'Aguardando colegas', 'task.queue': 'Ordem da fila', 'task.requires_approval': 'Aprovação', 'agent.tools': 'Ferramentas do agente',
   'task.plan': 'Plano da coordenação', 'task.step_done': 'Etapa entregue', 'task.delivery': 'Entrega na conversa', 'task.deleted': 'Card apagado', 'task.cancelled': 'Card cancelado', 'task.help_not_done': 'Ajuda não veio',
+  'task.conexao': 'Ação numa conta',
 };
+/** a leitura marcou no vínculo que a descrição do aplicativo passa do que o card guarda (ver server/src/services/mirror.ts) */
+const marcaDeCorte = (extra: string | undefined): boolean => !!extra && (JSON.parse(extra) as { descricao_cortada?: boolean }).descricao_cortada === true;
 /** ações cujo resultado (texto) explica o que aconteceu: aparecem no histórico */
 const SHOW_RESULT = ['task.queue', 'task.route', 'task.reassign', 'task.handoff', 'task.help_result', 'task.result', 'task.work_state', 'operation.run', 'operation.refused', 'task.waiting_help',
-  'task.queue_start', 'task.requires_approval', 'task.plan', 'task.step_done', 'task.delivery', 'task.deleted', 'task.cancelled', 'task.help_not_done'];
+  'task.queue_start', 'task.requires_approval', 'task.plan', 'task.step_done', 'task.delivery', 'task.deleted', 'task.cancelled', 'task.help_not_done', 'mirror.push.error', 'task.conexao'];
 
 /**
  * Detalhe do card. 'team': quadro da equipe — você acompanha e decide (responder, aprovar, devolver), sem editar o
- * card. 'user': suas tarefas locais — edita e envia à equipe. 'mirror': espelho de um aplicativo — só leitura.
+ * card. 'user': suas tarefas locais — edita e envia à equipe. 'mirror': ligada a um aplicativo — o que muda aqui reflete lá.
  * Fica o essencial (número, conversa, título, descrição, situação, com quem está, prazo, estado); a conferência e o
  * histórico ficam recolhidos no fim, em "Detalhes técnicos" e "Histórico". Clicar noutro card, menu ou link troca
  * na hora (o painel não engole o clique).
@@ -74,7 +82,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   taskId: string; columns?: Column[]; mode: 'team' | 'user' | 'mirror' | 'auto'; source?: string | null;
   onClose: () => void; onAskCoordinator?: (text: string) => void; over?: boolean;
 }) {
-  const d = useResource<Detail>(`/api/tasks/${taskId}`, ['tasks.changed', 'runs.changed']);
+  const d = useResource<Detail>(`/api/tasks/${taskId}`, ['tasks.changed', 'runs.changed', 'proposals.changed']);
   // 'auto': aberto de fora do quadro ("aguardando você", uma conversa) — o modo vem do quadro do card
   const b = d.data?.board;
   const mode: 'team' | 'user' | 'mirror' = asked !== 'auto' ? asked : b?.origin === 'mirror' ? 'mirror' : b?.audience === 'user' ? 'user' : 'team';
@@ -82,6 +90,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   // suas tarefas abertas de fora do quadro: as colunas vêm do quadro delas
   const own = useResource<{ columns: Column[] }>(asked === 'auto' && mode === 'user' && d.data ? `/api/boards/${d.data.task.board_id}` : null, []);
   const columns = askedColumns ?? own.data?.columns;
+  // descrição maior do que o card guarda: o resto está no aplicativo, e editar aqui o apagaria lá. Fica só para ler
+  const cortada = mode === 'mirror' && !!d.data && (d.data.task.description.length >= 8000 || marcaDeCorte(d.data.link?.external_extra));
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [err, setErr] = useState<string | null>(null);
@@ -91,6 +101,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   const [answer, setAnswer] = useState('');
   const [busyAct, setBusyAct] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false); // "Cancelar a tarefa" pede confirmação ali mesmo
+  const [decidindo, setDecidindo] = useState<{ id: string; decision: 'apply' | 'reject' } | null>(null); // cartão de conta: o clique em andamento
   useEffect(() => { if (!savedNow) return; const t = window.setTimeout(() => setSavedNow(false), 2500); return () => window.clearTimeout(t); }, [savedNow]);
   const ref = useRef<HTMLElement>(null);
   // edição: o que já está no servidor e a revisão conhecida; gravações em fila (sair do campo e fechar não brigam)
@@ -109,16 +120,23 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   /** Grava título e descrição se mudaram (em fila). false = não gravou: o erro fica à vista e o card, aberto. */
   const saveText = (): Promise<boolean> => {
     const id = taskId; const want = { title, desc };
-    const run = async () => {
+    const run = async (): Promise<boolean> => {
       const body: Record<string, unknown> = {};
       if (want.title !== saved.current.title && want.title.trim()) body.title = want.title;
-      if (want.desc !== saved.current.desc) body.description = want.desc;
-      if (!Object.keys(body).length || mode !== 'user') return true;
+      if (want.desc !== saved.current.desc && !cortada) body.description = want.desc;
+      if (!Object.keys(body).length || (mode !== 'user' && mode !== 'mirror')) return true;
       setErr(null);
       try {
         const r = await api.patch<{ revision: number }>(`/api/tasks/${id}`, { ...body, expectedRevision: rev.current });
         rev.current = r.revision; saved.current = { title: want.title, desc: want.desc }; d.reload(); if (idRef.current === id) setSavedNow(true); return true;
-      } catch (e) { setErr(`Não gravei a alteração: ${errMsg(e)}`); d.reload(); return false; }
+      } catch (e) {
+        // a leitura achou a descrição maior do que cabe aqui depois que o card abriu: fica a de antes, e o título grava sozinho
+        if (e instanceof ApiError && e.code === 'descricao_longa') {
+          want.desc = saved.current.desc; if (idRef.current === id) setDesc(saved.current.desc);
+          const foi = await run(); d.reload(); return foi;
+        }
+        setErr(`Não gravei a alteração: ${errMsg(e)}`); d.reload(); return false;
+      }
     };
     queue.current = queue.current.then(run, run);
     return queue.current;
@@ -133,7 +151,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
 
   if (!d.data) return <aside ref={ref} className={`drawer ${over ? 'drawer--over' : ''}`} role="dialog" aria-label="Carregando a tarefa"><Loading error={d.error} /></aside>;
   const t = d.data.task;
-  const editable = mode === 'user';
+  // ligada a um aplicativo: o que você muda aqui vai para lá
+  const editable = mode === 'user' || mode === 'mirror';
   // os nomes vêm com o card (só os citados nele), não da equipe inteira
   const names = d.data.agents ?? {};
   const nameOf = (id: string | null) => (id ? names[id]?.name ?? null : null);
@@ -146,6 +165,18 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
     setErr(null); setOk(null); setBusyAct(true);
     try { const m = await fn(); if (m) setOk(m); d.reload(); } catch (e) { setErr(errMsg(e)); d.reload(); } finally { setBusyAct(false); }
   };
+  // cartão de ação numa conta: o botão diz o que está indo; já decidido noutro lugar (a conversa, "Aguardando você"): só relê
+  const decidir = (id: string, decision: 'apply' | 'reject') => act(async () => {
+    setDecidindo({ id, decision });
+    try {
+      const r = await api.post<{ status: string; result: string }>(`/api/proposals/${id}`, { decision });
+      if (decision === 'apply' && r.status === 'failed') throw new Error(r.result);
+      return decision === 'apply' ? r.result : 'Recusada: o card fica sabendo.';
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409 && e.code === 'decided') return null;
+      throw e;
+    } finally { setDecidindo(null); }
+  });
   const respond = (action: 'answer' | 'approve' | 'return' | 'retry', text: string | null = null) => act(async () => {
     const r = await api.post<{ result: string; runId: string | null }>(`/api/tasks/${t.id}/respond`, text !== null ? { action, text } : { action });
     setBack(null); setAnswer('');
@@ -177,7 +208,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   });
   const work = d.data.work;
   const disp = work ? displayOf(work.state) : null;
-  const need: Need | null = !work || t.completed || active ? null
+  // esperando o clique numa ação de conta: a decisão é o cartão dela (abaixo), não aprovar o card
+  const need: Need | null = !work || t.completed || active || d.data.conexoes?.length ? null
     : work.state === 'aguardando_info' ? 'info' : work.state === 'aguardando_aprovacao' ? 'approval' : work.state === 'revisao' ? 'review' : work.state === 'falha' ? 'retry' : null;
   const external = work?.result?.state === 'sem_confirmacao';
   const origin = d.data.origin;
@@ -205,14 +237,19 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
     <aside ref={ref} className={`drawer task-panel ${over ? 'drawer--over' : ''}`} role="dialog" aria-labelledby={`task-title-${t.id}`}>
       <header className="drawer__head">
         <span className="muted" id={`task-title-${t.id}`}>Tarefa #{t.number}</span>
-        <span className="badge">{mode === 'mirror' ? (SOURCE_LABEL[source ?? ''] ?? 'espelho') : ORIGIN_LABEL[t.origin] ?? t.origin}</span>
+        <span className="badge">{mode === 'mirror' ? (SOURCE_LABEL[source ?? ''] ?? 'ligada') : ORIGIN_LABEL[t.origin] ?? t.origin}</span>
         <span className="drawer__saved" role="status">{savedNow ? <><Icon name="check" size={12} /> Salvo</> : ''}</span>
         <button className="icon-btn" onClick={() => void requestClose()} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
       </header>
       {editable ? (
         <>
           <label className="field">Título<input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => void saveText()} maxLength={200} /></label>
-          <label className="field">Descrição<textarea value={desc} rows={4} onChange={(e) => setDesc(e.target.value)} onBlur={() => void saveText()} /></label>
+          {cortada ? (
+            <div className="field">Descrição
+              <p className="pre drawer__desc">{t.description}</p>
+              <p className="hint">Esta descrição é maior do que cabe aqui: edite no aplicativo.</p>
+            </div>
+          ) : <label className="field">Descrição<textarea value={desc} rows={4} onChange={(e) => setDesc(e.target.value)} onBlur={() => void saveText()} /></label>}
           <div className="row">
             <label className="check"><input type="checkbox" checked={!!t.completed} onChange={(e) => patch({ completed: e.target.checked })} /> Concluída</label>
             <label className="field field--inline">Coluna
@@ -223,17 +260,26 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
               {t.due_on && <button type="button" className="linkish" onClick={() => patch({ dueOn: null })}>tirar</button>}
             </label>
           </div>
-          <TaskFiles taskId={t.id} inputs={d.data.files.inputs} deliverables={d.data.files.deliverables} canAttach onChanged={d.reload}
-            hint="Uma planilha (CSV) anexada aqui vai junto quando você envia à equipe: quem cuida de dados analisa e entrega relatório e indicadores." />
-          <section className="block">
-            <h4>Pedir à equipe</h4>
-            <p className="hint">Vira um card no Fluxos da equipe; a coordenação encaminha a quem faz. Esta tarefa continua sua.</p>
-            <button className="btn" onClick={() => void sendToTeam()}><Icon name="users" size={14} /> Enviar à equipe</button>
-          </section>
-          <ActionBar>
-            <IconAction icon="trash" danger label="Apagar a tarefa (sai do quadro; o histórico fica)" pressed={confirmCancel} disabled={busyAct} onClick={() => setConfirmCancel((v) => !v)} />
-          </ActionBar>
-          {confirmBox}
+          {mode === 'mirror' ? (
+            <>
+              <div className="kv"><span>Atribuída a</span><b>{t.external_assignee ?? '—'}</b></div>
+              <p className="hint">Ligada a {SOURCE_LABEL[source ?? ''] ?? 'um aplicativo'}: concluir, mudar de coluna ou editar aqui reflete lá, e o que mudar lá chega aqui. Para apagar, apague no aplicativo.</p>
+            </>
+          ) : (
+            <>
+              <TaskFiles taskId={t.id} inputs={d.data.files.inputs} deliverables={d.data.files.deliverables} canAttach onChanged={d.reload}
+                hint="Uma planilha (CSV) anexada aqui vai junto quando você envia à equipe: quem cuida de dados analisa e entrega relatório e indicadores." />
+              <section className="block">
+                <h4>Pedir à equipe</h4>
+                <p className="hint">Vira um card no Fluxos da equipe; a coordenação encaminha a quem faz. Esta tarefa continua sua.</p>
+                <button className="btn" onClick={() => void sendToTeam()}><Icon name="users" size={14} /> Enviar à equipe</button>
+              </section>
+              <ActionBar>
+                <IconAction icon="trash" danger label="Apagar a tarefa (sai do quadro; o histórico fica)" pressed={confirmCancel} disabled={busyAct} onClick={() => setConfirmCancel((v) => !v)} />
+              </ActionBar>
+              {confirmBox}
+            </>
+          )}
         </>
       ) : (
         <>
@@ -243,7 +289,6 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
           <div className="kv">
             <span>Situação</span><b>{t.completed ? `concluída${t.completed_by === 'agent' ? ' pelo agente' : t.completed_by === 'external' ? ' no aplicativo' : ''}` : d.data.queue ? `na fila (${d.data.queue.position}º de ${d.data.queue.total})` : column ?? '—'}</b>
             {mode === 'team' && <><span>Com quem está</span><b>{nameOf(t.agent_id) ?? 'na triagem da coordenação'}{active ? ` · ${RUN_STATUS[active.status]}` : ''}</b></>}
-            {mode === 'mirror' && <><span>Atribuída a</span><b>{t.external_assignee ?? '—'}</b></>}
             <span>Prazo</span><b>{t.due_on ? <DueChip due={t.due_on} done={!!t.completed} /> : '—'}</b>
             {disp && <><span>Estado</span><b><span className={`badge ${DISPLAY_BADGE[disp]}`}>{DISPLAY_LABEL[disp]}</span></b></>}
           </div>
@@ -254,7 +299,6 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
               {origin.conversationId && <> · <button type="button" className="linkish" onClick={() => openConversation(origin.agentId, origin.conversationId)}>abrir a conversa</button></>}
             </p>
           )}
-          {mode === 'mirror' && <p className="hint">Espelho: título, descrição, situação e responsável vêm de {SOURCE_LABEL[source ?? ''] ?? 'lá'}. Mude no aplicativo de origem; o espelho se atualiza sozinho.</p>}
 
           {mode === 'team' && need === 'info' && (
             <form className="ask-box" onSubmit={(e) => { e.preventDefault(); if (answer.trim()) void respond('answer', answer.trim()); }}>
@@ -270,6 +314,19 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
                 : `Não passou na conferência: ${work?.result?.justification ?? ''} Aprove assim mesmo ou devolva com uma instrução.`}
             </p>
           )}
+          {/* ação numa conta pedida neste card: o mesmo cartão da conversa e de "aguardando você"; a decisão volta ao card */}
+          {(d.data.conexoes ?? []).map((c) => (
+            <div key={c.id} className="ask-box" role="group" aria-label="Esperando a sua confirmação">
+              <p className="ask-box__q"><b>{nameOf(t.agent_id) ?? 'O agente'} quer fazer isto numa conta e espera a sua confirmação:</b></p>
+              <p className="pre">
+                <TextoLongo texto={c.summary} />
+              </p>
+              <div className="row">
+                <button className="btn btn--sm btn--primary" disabled={busyAct} onClick={() => void decidir(c.id, 'apply')}>{decidindo?.id === c.id && decidindo.decision === 'apply' ? 'Enviando…' : 'Confirmar'}</button>
+                <button className="btn btn--sm" disabled={busyAct} onClick={() => void decidir(c.id, 'reject')}>{decidindo?.id === c.id && decidindo.decision === 'reject' ? 'Recusando…' : 'Recusar'}</button>
+              </div>
+            </div>
+          ))}
 
           {d.data.steps.length > 0 && (
             <section className="block steps" aria-label="Etapas do plano">
@@ -327,11 +384,11 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
           )}
           {mode === 'team' && confirmBox}
           {back !== null && (
-            <form className="ask-box" onSubmit={(e) => { e.preventDefault(); if (back.trim().length >= 3) void respond('return', back.trim()); }}>
+            <form className="ask-box" onSubmit={(e) => { e.preventDefault(); if (back.trim().length >= 3) void respond('return', back.trim()); else setErr('Escreva o que precisa mudar (pelo menos 3 letras).'); }}>
               <label className="field">O que precisa mudar (vai para o agente; vale também para dizer que ele não precisa do que pediu)
                 <textarea data-autofocus rows={3} value={back} onChange={(e) => setBack(e.target.value)} placeholder="Ex.: siga sem essa informação, use os dados do quadro" />
               </label>
-              <div className="row"><button className="btn btn--sm" disabled={busyAct || back.trim().length < 3}><Icon name="undo" size={13} /> Devolver</button></div>
+              <div className="row"><button className="btn btn--sm" disabled={busyAct}><Icon name="undo" size={13} /> Devolver</button></div>
             </form>
           )}
           {mode === 'team' && (
@@ -341,7 +398,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
       )}
       {err && <p className="error" role="alert">{err}</p>}
       {ok && <p className="ok" role="status">{ok}</p>}
-      {d.data.link?.conflict && <p className="warn">{d.data.link.conflict}</p>}
+      {!d.data.link?.conflict && d.data.envio && <p className="warn">Não foi enviado ao aplicativo: {d.data.envio} <button type="button" className="linkish" onClick={async () => { try { await api.post(`/api/tasks/${t.id}/reenviar`); d.reload(); } catch (e) { setErr(errMsg(e)); } }}>Tentar de novo</button></p>}
+      {d.data.link?.conflict && <p className="warn">{d.data.link.conflict}{d.data.link.sync_state === 'escrita_falhou' && <> <button type="button" className="linkish" onClick={async () => { try { await api.post(`/api/tasks/${t.id}/reenviar`); d.reload(); } catch (e) { setErr(errMsg(e)); } }}>Tentar de novo</button></>}</p>}
 
       {mode === 'team' && (
         <TechDetails work={work} queue={d.data.queue} extra={<>

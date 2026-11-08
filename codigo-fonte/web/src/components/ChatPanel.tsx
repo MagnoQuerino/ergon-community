@@ -8,6 +8,7 @@ import { PROPOSAL_KIND, stripControl, type Agent, type AiStatus, type Attachment
 import { ConfirmPopup } from './ConfirmPopup.tsx';
 import { HandoffCard, PermissionCard, QuestionCard, RequestCard, SystemNote } from './ChatCards.tsx';
 import { Icon } from './Icon.tsx';
+import { TextoLongo } from './TextoLongo.tsx';
 import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
 
@@ -118,12 +119,19 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const msgs = useResource<Message[]>(convId ? `/api/conversations/${convId}/messages` : null, ['messages.changed', 'runs.changed']);
   // propostas da coordenação (mudar setor, criar agente, ferramentas): nada muda até você aplicar
   const props = useResource<Proposal[]>(convId ? `/api/proposals?conversationId=${convId}` : null, ['proposals.changed']);
+  // o cartão diz que está indo enquanto a ação roda (enviar pode levar alguns segundos) e não aceita o segundo clique;
+  // já decidida noutro lugar (o painel "Aguardando você", outra aba): só relê, sem erro
+  // (guarda qual foi a decisão: quem recusou não lê "Enviando…")
+  const [deciding, setDeciding] = useState<Record<string, 'apply' | 'reject'>>({});
   const decide = async (id: string, decision: 'apply' | 'reject') => {
-    setErr(null);
-    try { await api.post(`/api/proposals/${id}`, { decision }); props.reload(); } catch (e) { setErr(errMsg(e)); }
+    if (deciding[id]) return;
+    setErr(null); setDeciding((x) => ({ ...x, [id]: decision }));
+    try { await api.post(`/api/proposals/${id}`, { decision }); }
+    catch (e) { if (!(e instanceof ApiError && e.status === 409 && e.code === 'decided')) setErr(errMsg(e)); }
+    finally { setDeciding((x) => { const y = { ...x }; delete y[id]; return y; }); props.reload(); }
   };
   // várias propostas de uma vez (um tema inteiro, por exemplo): aplicar ou recusar todas, na ordem em que vieram
-  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff'].includes(p.kind));
+  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff', 'conexao'].includes(p.kind));
   const [batchBusy, setBatchBusy] = useState(false);
   const decideAll = async (decision: 'apply' | 'reject') => {
     setBatchBusy(true); setErr(null);
@@ -544,13 +552,14 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             : (
               <div key={p.id} className={`proposal-card proposal-card--${p.status}`}>
                 <span className="badge">{PROPOSAL_KIND[p.kind] ?? p.kind}</span>
-                <span className="proposal-card__txt">{p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
-                {p.status === 'proposed' ? (
+                <span className="proposal-card__txt">{p.kind === 'conexao' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
+                {p.status === 'proposed' && deciding[p.id] ? <span className="badge" role="status">{deciding[p.id] === 'reject' ? 'Recusando…' : p.kind === 'conexao' ? 'Enviando…' : p.kind === 'purge' ? 'Apagando…' : 'Aplicando…'}</span>
+                : p.status === 'proposed' ? (
                   <span className="row">
-                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'routine' ? 'Ativar rotina' : p.kind === 'batch' ? 'Abrir todos' : p.kind === 'purge' ? 'Apagar de vez' : 'Aplicar'}</button>
+                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'conexao' ? 'Confirmar' : p.kind === 'routine' ? 'Ativar rotina' : p.kind === 'batch' ? 'Abrir todos' : p.kind === 'purge' ? 'Apagar de vez' : 'Aplicar'}</button>
                     <button className="btn btn--sm btn--ghost" onClick={() => decide(p.id, 'reject')}>Recusar</button>
                   </span>
-                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? 'autorizada' : 'aplicada') : p.status === 'failed' ? 'falhou' : 'recusada'}</span>}
+                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? 'autorizada' : p.kind === 'conexao' ? 'feita' : 'aplicada') : p.status === 'failed' ? 'falhou' : 'recusada'}</span>}
               </div>
             );
         })}

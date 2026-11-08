@@ -11,9 +11,9 @@ const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ??
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } };
 
 /**
- * Suas tarefas: a lista local do Ergon ou o espelho de uma lista/quadro de um aplicativo conectado (Planner,
- * To Do, Asana, Todoist). Escolheu, espelhou: o Ergon atualiza sozinho. O espelho traz título, descrição,
- * situação e responsável; mudanças se fazem no aplicativo de origem.
+ * Suas tarefas: a lista local do Ergon ou uma lista/quadro de um aplicativo conectado (Planner, To Do, Asana, Todoist e
+ * outros), ligada nos dois sentidos: título, descrição, situação, prazo e responsável chegam de lá, e dar check, mover
+ * ou editar aqui muda lá (conexoes/espelho.ts).
  */
 export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   const boards = useResource<BoardSummary[]>('/api/boards', ['tasks.changed']);
@@ -40,10 +40,15 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   const [syncing, setSyncing] = useState(false);
   const current = mine.find((b) => b.id === boardId);
   const mirror = current?.origin === 'mirror';
-  const connected = (ints.data ?? []).filter((i) => i.tasks && i.state === 'connected');
+  const deTarefas = (ints.data ?? []).filter((i) => i.tasks);
+  const connected = deTarefas.filter((i) => i.state === 'connected');
+  // a conexão caiu (autorização vencida, desconectada): os quadros ligados a ela continuam na lista, com o aviso
+  const grupos = deTarefas.filter((i) => i.state === 'connected' || mine.some((b) => b.origin === 'mirror' && b.source === i.kind));
+  const caiu = mirror ? deTarefas.find((i) => i.kind === current?.source && i.state !== 'connected') : undefined;
 
   const create = async () => {
-    if (!newTitle.trim() || !boardId) return;
+    if (!boardId) return;
+    if (!newTitle.trim()) { setErr('Escreva o título da tarefa.'); return; }
     setErr(null);
     try { await api.post('/api/tasks', { title: newTitle.trim(), boardId, ...(newDue ? { dueOn: newDue } : {}) }); setNewTitle(''); setNewDue(''); view.reload(); } catch (e) { setErr(errMsg(e)); }
   };
@@ -80,34 +85,37 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
       <div className="toolbar">
         <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v.startsWith('+')) void pick(v.slice(1)); else { setBoardId(v); setOpenTask(null); } }} aria-label="Lista">
           <optgroup label="Ergon">{mine.filter((b) => b.origin === 'native').map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>
-          {connected.map((i) => (
-            <optgroup key={i.kind} label={i.name}>
+          {grupos.map((i) => (
+            <optgroup key={i.kind} label={i.state === 'connected' ? i.name : `${i.name} (precisa reconectar)`}>
               {mine.filter((b) => b.source === i.kind).map((b) => <option key={b.id} value={b.id}>{b.name.replace(/^(Planner|To Do) › /, '$1 › ')}</option>)}
-              <option value={`+${i.kind}`}>+ Espelhar outra lista do {SOURCE_LABEL[i.kind] ?? i.name}…</option>
+              {i.state === 'connected' && <option value={`+${i.kind}`}>+ Ligar outra lista do {SOURCE_LABEL[i.kind] ?? i.name}…</option>}
             </optgroup>
           ))}
         </select>
         <ViewToggle view={mode} onChange={(v) => { setMode(v); save('ergon.tarefas.view', v); }} />
         {mirror && current && (
           <span className={`badge ${current.sync_state === 'error' ? 'badge--err' : ''}`}>
-            {current.sync_state === 'error' ? `falha ao ler: ${current.last_error}` : `espelho de ${SOURCE_LABEL[current.source ?? ''] ?? 'aplicativo'} · lido às ${current.last_synced_at ? new Date(current.last_synced_at).toLocaleTimeString('pt-BR', { timeStyle: 'short' }) : '—'}`}
+            {current.sync_state === 'error' ? `falha ao ler: ${current.last_error}` : `ligada a ${SOURCE_LABEL[current.source ?? ''] ?? 'aplicativo'} · lido às ${current.last_synced_at ? new Date(current.last_synced_at).toLocaleTimeString('pt-BR', { timeStyle: 'short' }) : '—'}`}
           </span>
         )}
         {mirror && <button className="btn btn--sm" onClick={sync} disabled={syncing}>{syncing ? 'Atualizando…' : 'Atualizar agora'}</button>}
-        {!mirror && (
+        {(
           <form className="row grow" onSubmit={(e) => { e.preventDefault(); void create(); }}>
             <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Nova tarefa… (dá para escrever o prazo: “até sexta”)" maxLength={200} aria-label="Título da nova tarefa" />
             <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} aria-label="Prazo (opcional)" title="Prazo (opcional)" className="new-due" />
-            <button className="btn btn--primary" type="submit" disabled={!newTitle.trim()}>Adicionar</button>
+            <button className="btn btn--primary" type="submit">Adicionar</button>
           </form>
         )}
       </div>
+      {caiu && (
+        <p className="warn">A conexão com {caiu.name} precisa ser refeita: até lá, esta lista não troca mudanças com o aplicativo. <button className="linkish" onClick={() => onGo('conexoes')}>Reconectar em Conexões</button></p>
+      )}
       {!connected.length && (
-        <p className="hint">Usa Trello, Jira, Asana, monday.com, ClickUp, Notion, Planner, To Do, Todoist ou outro app de tarefas? <button className="linkish" onClick={() => onGo('conexoes')}>Conecte em Conexões</button> e escolha a lista aqui: o espelho é automático (título, descrição, situação e responsável).</p>
+        <p className="hint">Usa Trello, Jira, Asana, monday.com, ClickUp, Notion, Planner, To Do, Todoist ou outro app de tarefas? <button className="linkish" onClick={() => onGo('conexoes')}>Conecte em Conexões</button> e escolha a lista aqui: ela fica ligada nos dois sentidos (dar check, mover ou editar aqui muda lá, e o que mudar lá chega aqui).</p>
       )}
       {picking && (
         <section className="card picklist">
-          <div className="row"><strong>Qual lista do {SOURCE_LABEL[picking.kind] ?? picking.kind} espelhar?</strong><span className="grow" /><button className="btn btn--sm btn--ghost" onClick={() => setPicking(null)}>Fechar</button></div>
+          <div className="row"><strong>Qual lista do {SOURCE_LABEL[picking.kind] ?? picking.kind} ligar?</strong><span className="grow" /><button className="btn btn--sm btn--ghost" onClick={() => setPicking(null)}>Fechar</button></div>
           {picking.error && <p className="error">{picking.error}</p>}
           {!picking.lists && <p className="muted">Lendo as listas da sua conta…</p>}
           <div className="row row--wrap">
@@ -118,8 +126,8 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
       )}
       {err && <p className="error" role="alert">{err}</p>}
       {view.data && (
-        <Board columns={view.data.columns} tasks={view.data.tasks} view={mode} editable={!mirror} openId={openTask}
-          onOpen={setOpenTask} onMove={move} onToggle={mirror ? undefined : toggle} />
+        <Board columns={view.data.columns} tasks={view.data.tasks} view={mode} editable openId={openTask}
+          onOpen={setOpenTask} onMove={move} onToggle={toggle} />
       )}
       {openTask && view.data && (
         <TaskDetail taskId={openTask} columns={view.data.columns} mode={mirror ? 'mirror' : 'user'} source={current?.source} onClose={() => setOpenTask(null)} />

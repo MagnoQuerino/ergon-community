@@ -131,6 +131,9 @@ describe('setores e agente = subagente', () => {
   test('Aspásia, perguntada sobre e-mails numa conversa, recebe o que chegou (lido agora, como dado); outro assunto não lê a caixa', async () => {
     const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const asp = agentBy(st, 'aspasia').id; const pla = agentBy(st, 'platao').id;
+    // quem tem as Conexões consulta quando precisa; este resumo pronto é de quem tem só Mensagens dos canais
+    h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(['conexoes', 'saida', 'quadro']), asp);
+    h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(['quadro']), pla);
     let reads = 0;
     const realAccounts = h.routines.accounts;
     h.routines.accounts = { mail: async () => { reads++; return {

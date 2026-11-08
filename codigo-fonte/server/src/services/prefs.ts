@@ -5,8 +5,9 @@
 import type { Db } from '../db/db.ts';
 import { getSetting, setSetting } from './sectors.ts';
 
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean }
-const DEFAULT: Prefs = { tips: true, dismissed: [], tourDone: false };
+/** updateNotice: ao abrir o Ergon, procurar versão nova e mostrar "Atualização disponível" (ligado por padrão) */
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean }
+const DEFAULT: Prefs = { tips: true, dismissed: [], tourDone: false, updateNotice: true };
 const MAX_DISMISSED = 200;
 
 export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
@@ -16,6 +17,7 @@ export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
       tips: typeof v.tips === 'boolean' ? v.tips : DEFAULT.tips,
       dismissed: Array.isArray(v.dismissed) ? v.dismissed.map(String).slice(0, MAX_DISMISSED) : [],
       tourDone: v.tourDone === true,
+      updateNotice: v.updateNotice !== false,
     };
   } catch { return { ...DEFAULT, dismissed: [] }; }
 }
@@ -24,7 +26,7 @@ export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
 export function writePrefs(db: Db, workspaceId: string, userId: string, patch: Partial<Prefs> & { dismiss?: string[]; resetTips?: boolean }): Prefs {
   const cur = readPrefs(db, workspaceId, userId);
   const dismissed = patch.resetTips ? [] : [...new Set([...(patch.dismissed ?? cur.dismissed), ...(patch.dismiss ?? [])])].slice(-MAX_DISMISSED);
-  const next: Prefs = { tips: patch.tips ?? cur.tips, dismissed, tourDone: patch.tourDone ?? cur.tourDone };
+  const next: Prefs = { tips: patch.tips ?? cur.tips, dismissed, tourDone: patch.tourDone ?? cur.tourDone, updateNotice: patch.updateNotice ?? cur.updateNotice };
   setSetting(db, workspaceId, `prefs:${userId}`, JSON.stringify(next));
   return next;
 }

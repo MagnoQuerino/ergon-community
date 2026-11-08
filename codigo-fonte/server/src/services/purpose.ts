@@ -14,6 +14,7 @@
 import type { Db } from '../db/db.ts';
 import { clip, fold, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
+import { cardLeu } from './conexoes/marca.ts';
 import { attrs } from './routine-proposals.ts';
 import { instructionsFor, type RunExecutor, type RunRow } from './runs.ts';
 import type { ResultRow } from './results.ts';
@@ -144,8 +145,10 @@ export function cardOutput(db: Db, taskId: string, max = 2500): string {
  */
 export function requestsContext(db: Db, workspaceId: string, max = 8): string {
   const since = new Date(Date.now() - 7 * 86400_000).toISOString();
-  const rows = db.all<{ id: string; number: number; title: string; purpose: string | null; completed: number; work_state: string | null; agent: string | null; asked: string | null }>(
-    `SELECT t.id, t.number, t.title, t.purpose, t.completed, t.work_state, a.name AS agent, ca.name AS asked
+  // cartao: espera o clique da pessoa numa ação de conta (Conexões); não foi entregue, e a saída é só o aviso de que pediu
+  const rows = db.all<{ id: string; number: number; title: string; purpose: string | null; completed: number; work_state: string | null; agent: string | null; asked: string | null; cartao: number }>(
+    `SELECT t.id, t.number, t.title, t.purpose, t.completed, t.work_state, a.name AS agent, ca.name AS asked,
+            EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente') AS cartao
        FROM tasks t LEFT JOIN agents a ON a.id = t.agent_id LEFT JOIN conversations c ON c.id = t.conversation_id LEFT JOIN agents ca ON ca.id = c.agent_id
       WHERE t.workspace_id = ? AND t.conversation_id IS NOT NULL AND t.archived = 0 AND (t.completed = 0 OR t.updated_at > ?)
       ORDER BY t.completed, t.updated_at DESC LIMIT ?`, workspaceId, since, max);
@@ -157,9 +160,13 @@ export function requestsContext(db: Db, workspaceId: string, max = 8): string {
   const lines = rows.map((r) => {
     const steps = stepsOf(db, r.id);
     const cur = currentStep(steps);
-    const where = r.completed ? 'concluído' : `${STATE[r.work_state ?? 'solicitada'] ?? r.work_state}${r.agent ? `, com ${r.agent}` : ''}${steps.length && cur ? `, etapa ${cur.position} de ${steps.length}` : ''}`;
+    const state = !r.completed && Number(r.cartao) ? 'esperando a confirmação do usuário num cartão (uma ação numa conta)' : STATE[r.work_state ?? 'solicitada'] ?? r.work_state;
+    const where = r.completed ? 'concluído' : `${state}${r.agent ? `, com ${r.agent}` : ''}${steps.length && cur ? `, etapa ${cur.position} de ${steps.length}` : ''}`;
+    // card que recebeu conteúdo de fora (ele, a conversa dele ou a cadeia que o abriu): só o número e o estado — título,
+    // pedido e resultado entrariam nas instruções de outras conversas como voz do sistema
+    if (cardLeu(db, r.id).deFora) return `- Card #${r.number}: ${where} (detalhes no próprio card)`;
     // entregue (concluído ou esperando a aprovação): o agente pode repassar o resultado
-    const result = r.completed || r.work_state === 'aguardando_aprovacao' ? cardOutput(db, r.id, 500) : '';
+    const result = r.completed || (r.work_state === 'aguardando_aprovacao' && !Number(r.cartao)) ? cardOutput(db, r.id, 500) : '';
     return `- Card #${r.number} “${clip(r.title, 90)}”${r.asked ? ` (pedido a ${r.asked}${r.purpose ? `: “${clip(r.purpose, 160)}”` : ''})` : ''}: ${where}${result ? `. Resultado: ${result.replace(/\s+/g, ' ')}` : ''}`;
   });
   return `Pedidos do usuário à equipe, de todas as conversas (use para responder "como está o que pedi a fulano?"; se já estiver pronto, entregue o resultado):\n${lines.join('\n')}`;

@@ -23,7 +23,7 @@ import { AjudaView } from './views/AjudaView.tsx';
 import { Onboarding } from './components/Onboarding.tsx';
 import { Tour, type TourStep } from './components/Tour.tsx';
 import { ViewTip } from './components/Tips.tsx';
-import { initPrefs, savePrefs } from './lib/prefs.ts';
+import { initPrefs, savePrefs, usePrefs } from './lib/prefs.ts';
 // só na distribuição proprietária (a Community não traz views/world): entrar com a Conta Ergon de qualquer tela
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
@@ -129,9 +129,26 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed', 'agents.changed']);
   // versão do servidor (relida ao reconectar): servidor atualizado com esta aba aberta pede recarregar
   const ver = useResource<VersionInfo>('/api/version', []);
+  // ao abrir: procura versão nova (só se o aviso estiver ligado em Configurações › Atualizações) e mostra o aviso discreto
+  const prefs = usePrefs();
+  const [upd, setUpd] = useState<string | null>(null);
+  useEffect(() => {
+    if (me.mode !== 'local' || !prefs.updateNotice) { setUpd(null); return; }
+    let vivo = true;
+    const t = window.setTimeout(() => {
+      api.get<VersionInfo>('/api/version?verificar=1').then((r) => { if (vivo) setUpd(r.updateAvailable && r.latest ? r.latest.version : null); }).catch(() => {});
+    }, 1500);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [me.mode, prefs.updateNotice]);
+  const openUpdates = () => {
+    setFocus(false); setCard(null);
+    history.replaceState(null, '', '#configuracao?atualizacoes');
+    setView('configuracao');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  };
   // as outras telas já buscadas por baixo: trocar de menu só mostra o que está pronto
   useEffect(() => {
-    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations',
+    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations', '/api/conexoes',
       '/api/conversations/recent', '/api/artifacts', '/api/routines', '/api/routines/library', '/api/routines/recommend', '/api/people', '/api/packages',
       '/api/packages/catalog/official', '/api/decisions', '/api/saude', '/api/workspaces', '/api/packages/cosmetics']), 400);
     return () => clearTimeout(t);
@@ -210,7 +227,6 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const alerts: Alert[] = [
     ...(sim ? [{ id: 'sim', label: 'SIMULAÇÃO', tone: 'warn' as const, title: 'As respostas dos agentes são simuladas até uma conta de IA ser conectada — a melhor escolha é a assinatura Nous. Veja Configurações.', act: () => setView('configuracao') }] : []),
     ...(ver.data && ver.data.version !== __ERGON_VERSION__ ? [{ id: 'reload', label: 'NOVA VERSÃO · RECARREGAR', tone: 'warn' as const, title: `O Ergon foi atualizado para a versão ${ver.data.version}. Esta aba ainda está com a ${__ERGON_VERSION__}.`, act: () => location.reload() }] : []),
-    ...(ver.data?.updateAvailable && ver.data.version === __ERGON_VERSION__ ? [{ id: 'update', label: `ATUALIZAÇÃO ${ver.data.latest?.version ?? ''}`, tone: 'attn' as const, title: `Versão ${ver.data.latest?.version} disponível. Veja Configurações.`, act: () => setView('configuracao') }] : []),
   ];
   // trocar de área limpa o endereço antes (o card aberto numa área não reabre na outra: o painel não fecha mais antes do clique)
   const go = (v: View) => { setFocus(false); setCard(null); if (location.hash.slice(1) !== v) history.replaceState(null, '', `#${v}`); setView(v); };
@@ -276,6 +292,11 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
             <Icon name="search" size={16} /><span className="tb-search__txt">Buscar cards, agentes, rotinas…</span><kbd className="tb-search__kbd">Ctrl K</kbd>
           </button>
         </span>
+        {upd && (
+          <button className="tb-upd" onClick={openUpdates} title={`Versão ${upd} disponível. Ver em Configurações › Atualizações`}>
+            <Icon name="download" size={14} /><span className="tb-upd__txt">Atualização disponível</span>
+          </button>
+        )}
         <span className="topbar__icons">
           <span className="topbar__statuswrap">
             <button className={`tb-icon ${statusOpen ? 'is-on' : ''}`} data-keep-surface onClick={() => setStatusOpen((v) => !v)} aria-expanded={statusOpen}

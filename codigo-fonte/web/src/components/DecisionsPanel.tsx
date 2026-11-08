@@ -1,11 +1,12 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { api, errMsg } from '../lib/api.ts';
+import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { openCard, openConversation } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
 import { PROPOSAL_KIND, type Decisions, type View } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
+import { TextoLongo } from './TextoLongo.tsx';
 
 type OpenAgent = (id: string, tab?: 'conversa' | 'perfil' | 'atividade', draft?: string | null, conversationId?: string | null) => void;
 
@@ -51,11 +52,14 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
   const act = async (id: string, fn: () => Promise<{ result?: string; status?: string } | unknown>) => {
     setBusy(id); setErr(null); setDone(null);
     try { const r = (await fn()) as { result?: string; status?: string } | undefined; if (r?.result) setDone(r.status === 'failed' ? null : r.result); if (r?.status === 'failed') setErr(r.result ?? 'falhou'); d.reload(); }
-    catch (e) { setErr(errMsg(e)); } finally { setBusy(null); }
+    // já decidida noutro lugar (o cartão da conversa, outra aba): só relê, sem erro
+    catch (e) { if (e instanceof ApiError && e.status === 409 && e.code === 'decided') d.reload(); else setErr(errMsg(e)); } finally { setBusy(null); }
   };
   const respond = (taskId: string, action: 'answer' | 'approve' | 'return', note?: string) =>
     act(taskId, async () => { const r = await api.post<{ result: string }>(`/api/tasks/${taskId}/respond`, note ? { action, text: note } : { action }); setText((x) => ({ ...x, [taskId]: '' })); setReturning(null); return r; });
-  const proposal = (id: string, decision: 'apply' | 'reject') => act(id, () => api.post(`/api/proposals/${id}`, { decision }));
+  // qual foi a decisão em andamento: quem recusou lê "Recusando…", não "Enviando…"
+  const [decisao, setDecisao] = useState<'apply' | 'reject'>('apply');
+  const proposal = (id: string, decision: 'apply' | 'reject') => { setDecisao(decision); return act(id, () => api.post(`/api/proposals/${id}`, { decision })); };
   const x = d.data;
   const routines = x?.proposals.filter((p) => p.kind === 'routine' || p.kind === 'routine_edit') ?? [];
   const team = x?.proposals.filter((p) => p.kind !== 'routine' && p.kind !== 'routine_edit') ?? [];
@@ -115,7 +119,22 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
           ))}
 
           {team.length > 0 && <h4 className="rt-sub">Propostas e pedidos da equipe</h4>}
-          {team.map((p) => (
+          {team.map((p) => p.kind === 'conexao' ? (
+            // ação numa conta: o texto inteiro (recolhido quando longo) e de onde veio — o card (#N · quem pediu) ou a conversa
+            <article key={p.id} className="dec-card">
+              <div className="dec-card__top">
+                <span className="badge">{KIND.conexao}</span>
+                {p.task_id ? <button type="button" className="linkish" onClick={() => openCard(p.task_id!)} title={`Abrir o card #${p.task_number}`}>#{p.task_number}{p.agent_name ? ` · ${p.agent_name}` : ''}</button>
+                  : conv(p) ? <button type="button" className="linkish" onClick={conv(p)} title="Abrir a conversa">{p.agent_name ?? 'a conversa'}</button>
+                  : p.agent_name && <span className="muted small">{p.agent_name}</span>}
+              </div>
+              <div className="dec-card__txt"><TextoLongo texto={p.summary} /></div>
+              <div className="row row--wrap dec-card__acts">
+                <button className="btn btn--sm btn--primary" disabled={!!busy} onClick={() => void proposal(p.id, 'apply')}>{busy === p.id && decisao === 'apply' ? 'Enviando…' : 'Confirmar'}</button>
+                <button className="btn btn--sm" disabled={!!busy} onClick={() => void proposal(p.id, 'reject')}>{busy === p.id && decisao === 'reject' ? 'Recusando…' : 'Recusar'}</button>
+              </div>
+            </article>
+          ) : (
             <Item key={p.id} badge={`${KIND[p.kind] ?? p.kind}${p.agent_name ? ` · ${p.agent_name}` : ''}`} onOpen={conv(p)} openLabel="Abrir a conversa"
               actions={p.kind === 'question'
                 ? conv(p) && <button className="btn btn--sm btn--primary" onClick={conv(p)}><Icon name="chat" size={13} /> Responder</button>

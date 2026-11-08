@@ -3,6 +3,40 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 
 // Atividade ----------------------------------------------------------------------------------------
+const diaIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const diasAtras = (n: number) => diaIso(new Date(Date.now() - n * 86_400_000));
+/** Baixa o relatório do período em Markdown: guardar, ou entregar a quem vai investigar um problema. */
+function ExportarRelatorio() {
+  const [aberto, setAberto] = useState(false);
+  const [de, setDe] = useState(() => diasAtras(6));
+  const [ate, setAte] = useState(() => diaIso(new Date()));
+  // o texto das conversas só vai se a pessoa marcar (o arquivo costuma ser entregue a outra pessoa)
+  const [conteudo, setConteudo] = useState(false);
+  if (!aberto) return <p><button className="btn btn--ghost" onClick={() => setAberto(true)}>Exportar relatório (.md)</button></p>;
+  // datas trocadas: vale o período que a pessoa quis dizer
+  const [a, b] = de <= ate ? [de, ate] : [ate, de];
+  const url = `/api/activity/report?de=${a}&ate=${b}&conteudo=${conteudo ? 1 : 0}`;
+  const longo = (Date.parse(b) - Date.parse(a)) / 86_400_000 + 1 > 90;
+  const preset = (n: number, label: string) => <button className="btn btn--sm btn--ghost" aria-pressed={de === diasAtras(n) && ate === diaIso(new Date())} onClick={() => { setDe(diasAtras(n)); setAte(diaIso(new Date())); }}>{label}</button>;
+  return (
+    <div className="relatorio">
+      <p><b>Exportar relatório</b></p>
+      <p className="muted small">{conteudo
+        ? 'Execuções, ferramentas usadas, erros, conexões, ações registradas e o texto das suas conversas e dos cards do período, num arquivo Markdown. As senhas e os acessos guardados das contas nunca entram.'
+        : 'Execuções, ferramentas usadas, erros, conexões e ações registradas do período, num arquivo Markdown: quem fez, quando e como terminou, sem o texto das conversas, dos cards e das ações nas contas. As senhas e os acessos guardados das contas nunca entram.'}</p>
+      <div className="relatorio__linha">
+        {preset(0, 'Hoje')} {preset(6, '7 dias')} {preset(29, '30 dias')}
+        <label>De <input type="date" value={de} max={diaIso(new Date())} onChange={(e) => e.target.value && setDe(e.target.value)} /></label>
+        <label>Até <input type="date" value={ate} max={diaIso(new Date())} onChange={(e) => e.target.value && setAte(e.target.value)} /></label>
+      </div>
+      <p><label><input type="checkbox" checked={conteudo} onChange={(e) => setConteudo(e.target.checked)} /> Incluir o texto das conversas e dos cards</label></p>
+      {conteudo && <p className="hint">O arquivo pode trazer e-mails, nomes e assuntos que apareceram nas conversas, e uma senha ou chave que você tenha colado numa delas. Revise o arquivo e veja com quem vai compartilhá-lo.</p>}
+      {longo && <p className="hint">O relatório cobre até 90 dias: vão os 90 dias que terminam em {b.split('-').reverse().join('/')}.</p>}
+      <p><a className="btn" href={url} download>Baixar relatório</a> <button className="btn btn--ghost" onClick={() => setAberto(false)}>Fechar</button></p>
+    </div>
+  );
+}
+
 type Tab = 'log' | 'eventos' | 'execucoes' | 'regras' | 'saida';
 const TABS: Tab[] = ['log', 'eventos', 'execucoes', 'regras', 'saida'];
 export function AtividadeView() {
@@ -25,6 +59,7 @@ export function AtividadeView() {
   return (
     <div className="page">
       <header className="page__head"><h2>Atividade</h2><p className="muted">Registro de ações, evidência mínima e resultado. Não contém raciocínio interno de modelos.</p></header>
+      <ExportarRelatorio />
       <div className="tabs" role="tablist">
         {TABS.map((k) => (
           <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'tab--on' : ''}`} onClick={() => setTab(k)}>

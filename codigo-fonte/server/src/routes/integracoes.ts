@@ -22,12 +22,13 @@ export interface IntegrationRoutesDeps {
 export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRoutesDeps): void {
   const { db, bus, integrations, whatsapp, auth, owner } = d;
   const kindParam = { type: 'object', required: ['kind'], properties: { kind: { enum: INTEGRATIONS.filter((i) => i.auth !== 'soon').map((i) => i.kind) } } };
-  app.get('/api/integrations', async (req) => integrations.list(auth(req).workspaceId));
+  app.get('/api/integrations', async (req) => { const a = auth(req); return integrations.list(a.workspaceId, a.role === 'owner' ? a.userId : null); });
 
-  // credencial colada: { token } ou { credentials: { token, key, site, email } } conforme o app
+  // credencial colada: { token } ou { credentials: { token, key, site, email } } conforme o app. Campo em branco conta como
+  // não preenchido (connectToken pula o opcional e pede o obrigatório pelo nome), não como erro de formato
   app.post('/api/integrations/:kind/token', {
     schema: { params: { type: 'object', required: ['kind'], properties: { kind: { enum: TOKEN_KINDS } } },
-      body: { type: 'object', additionalProperties: false, properties: { token: S.str(2000, 1), credentials: { type: 'object', maxProperties: 5, additionalProperties: S.str(2000, 1) } } } },
+      body: { type: 'object', additionalProperties: false, properties: { token: S.str(2000, 1), credentials: { type: 'object', maxProperties: 5, additionalProperties: S.str(2000) } } } },
   }, async (req) => {
     const a = owner(req);
     const b = req.body as { token?: string; credentials?: Record<string, string> };
@@ -49,21 +50,36 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
     const a = owner(req);
     const kind = (req.params as { kind: SsoKind }).kind;
     const url = integrations.sso.start(kind, a.workspaceId, a.userId);
-    setIntegration(db, a.workspaceId, kind, { state: 'pending', last_error: null });
+    // autorizar de novo com a conta já ligada: ela continua funcionando enquanto a pessoa decide
+    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') setIntegration(db, a.workspaceId, kind, { state: 'pending', last_error: null });
     return { url };
   });
   app.get('/api/integrations/:kind/callback', { schema: { params: ssoParam } }, async (req, reply) => {
     const kind = (req.params as { kind: SsoKind }).kind;
-    const q = req.query as { state?: string; code?: string; error?: string };
+    const q = req.query as { state?: string; code?: string; error?: string; error_description?: string };
     const back = (status: string) => reply.redirect(`/#conexoes?${kind}=${encodeURIComponent(status)}`);
+    /** Não concluiu: quem cancelou não fica preso em "conectando", e o motivo da Microsoft ou do Google fica registrado. */
+    const naoConcluiu = (ws: string | null, motivo: string) => {
+      if (!ws) return;
+      const r = integrationRow(db, ws, kind);
+      if (r.state === 'pending') setIntegration(db, ws, kind, { state: integrations.secrets.read(ws, kind) ? 'connected' : 'off', last_error: motivo.slice(0, 300) });
+      audit(db, bus, { workspaceId: ws, actorType: 'connector', action: 'integration.connect.error', targetType: 'integration', targetId: kind, evidence: { error: q.error ?? null, description: (q.error_description ?? '').slice(0, 300) }, result: motivo.slice(0, 200) });
+    };
+    const quem = q.state ? integrations.sso.workspaceOf(String(q.state).slice(0, 200)) : null;
     // segunda etapa (Microsoft, conta de trabalho/escola) recusada ou com erro: a conexão da primeira continua valendo
     const stage = q.state ? integrations.sso.stageOf(String(q.state).slice(0, 200)) : null;
-    if (q.error || !q.code || !q.state) return back(stage === 'work' ? 'conectado' : q.error === 'access_denied' ? 'recusado' : 'erro');
+    if (q.error || !q.code || !q.state) {
+      naoConcluiu(quem, q.error === 'access_denied' ? 'A autorização foi recusada na página da conta.' : `A conta não concluiu o login: ${q.error ?? 'sem resposta'}${q.error_description ? ` (${q.error_description.split('\n')[0]})` : ''}`);
+      return back(stage === 'work' ? 'parcial' : q.error === 'access_denied' ? 'recusado' : 'erro');
+    }
     try {
       const r = await integrations.sso.finish(kind, String(q.state).slice(0, 200), String(q.code).slice(0, 4000));
       integrations.markSso(kind, r.workspaceId, r.userId, r.account);
       return r.next ? reply.redirect(r.next) : back('conectado');
-    } catch { return back(stage === 'work' ? 'conectado' : 'erro'); }
+    } catch (e) {
+      naoConcluiu(quem, `O login não terminou: ${e instanceof Error ? e.message : 'erro'}`);
+      return back(stage === 'work' ? 'parcial' : 'erro');
+    }
   });
 
   // Listas e quadros de um aplicativo conectado (para escolher no menu Tarefas)
@@ -95,12 +111,12 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
     const b = db.get<{ connection_id: string; external_id: string; kind: IntegrationKind }>(
       "SELECT b.connection_id, b.external_id, i.kind FROM boards b JOIN integrations i ON i.id = b.connection_id WHERE b.id = ? AND b.workspace_id = ? AND b.origin = 'mirror'",
       (req.params as { id: string }).id, a.workspaceId);
-    if (!b) throw notFound('quadro espelhado');
+    if (!b) throw notFound('quadro ligado');
     const rep = await importBoards(db, bus, a.workspaceId, b.connection_id, a.userId, integrations.provider(a.workspaceId, b.kind), [b.external_id]);
     return rep.boards[0];
   });
 
-  // WhatsApp por QR (somente leitura, com filtros). Experimental: conectar pela primeira vez pede o aceite das
+  // WhatsApp por QR (com filtros; envio só quando pedido). Experimental: conectar pela primeira vez pede o aceite das
   // informações e dos riscos (cliente não oficial); o aceite fica gravado no workspace e na auditoria.
   app.post('/api/integrations/whatsapp/start', async (req) => {
     const a = owner(req);
@@ -114,6 +130,15 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
     }
     await whatsapp.start(a.workspaceId, a.userId);
     return whatsapp.state(a.workspaceId);
+  });
+  // aceite novo com a conexão já ligada (o texto dos riscos mudou): só grava, sem reconectar
+  app.post('/api/integrations/whatsapp/aceitar-riscos', async (req) => {
+    const a = owner(req);
+    const row = integrationRow(db, a.workspaceId, 'whatsapp');
+    setIntegration(db, a.workspaceId, 'whatsapp', { settings: { ...settingsOf(row), riscos: { versao: WA_RISKS_VERSION, aceitoEm: now(), por: a.userId } } });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'integration.whatsapp.risks_accepted', evidence: { versao: WA_RISKS_VERSION }, result: 'informações e riscos aceitos' });
+    bus.publish(a.workspaceId, 'integrations.changed', { kind: 'whatsapp' });
+    return { ok: true };
   });
   app.post('/api/integrations/whatsapp/stop', async (req) => {
     const a = owner(req);

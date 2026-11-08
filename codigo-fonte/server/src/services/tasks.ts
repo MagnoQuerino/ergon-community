@@ -1,6 +1,7 @@
 import type { Db } from '../db/db.ts';
 import { HttpError, fold, id, notFound, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
+import { enfileirarEspelho, type OpEspelho } from './conexoes/espelho.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { validDue } from './due.ts';
 
@@ -101,6 +102,16 @@ export interface CreateTaskInput {
   dueOn?: string | null;
 }
 
+/** Quadro espelhado de uma conexão de verdade (a fixture de teste continua só leitura). */
+const mirrorWritable = (db: Db, boardId: string): boolean =>
+  !!db.get("SELECT 1 AS x FROM boards b JOIN integrations i ON i.id = b.connection_id WHERE b.id = ? AND i.state = 'connected'", boardId);
+
+/** A descrição no aplicativo passa do que o card guarda (ver mirror.ts): mandar a daqui apagaria o resto lá. */
+const descricaoCortada = (db: Db, taskId: string): boolean => {
+  const x = db.get<{ x: string }>('SELECT external_extra AS x FROM task_links WHERE task_id = ?', taskId)?.x;
+  return !!x && (JSON.parse(x) as { descricao_cortada?: boolean }).descricao_cortada === true;
+};
+
 export function createTask(db: Db, bus: Bus | null, workspaceId: string, actor: Actor, input: CreateTaskInput): TaskRow {
   const title = input.title.trim().replace(/\s+/g, ' ');
   if (!title || title.length > 200) throw new HttpError(400, 'title', 'título: 1–200 caracteres');
@@ -109,7 +120,8 @@ export function createTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
     const boardId = input.boardId ?? defaultBoard(db, workspaceId).id;
     const board = db.get<{ origin: string; audience: string }>('SELECT origin, audience FROM boards WHERE id = ? AND workspace_id = ?', boardId, workspaceId);
     if (!board) throw notFound('quadro');
-    if (board.origin === 'mirror' && input.origin !== 'mirror') throw new HttpError(409, 'mirror_readonly', 'Quadro espelhado é somente leitura nesta etapa.');
+    const envia = board.origin === 'mirror' && input.origin !== 'mirror';
+    if (envia && !(actor.type === 'user' && mirrorWritable(db, boardId))) throw new HttpError(409, 'mirror_readonly', 'Este quadro só recebe alterações feitas por você numa conexão ligada.');
     const columnId = input.columnId ?? firstColumn(db, workspaceId, boardId);
     const col = db.get('SELECT 1 AS x FROM columns WHERE id = ? AND board_id = ? AND workspace_id = ?', columnId, boardId, workspaceId);
     if (!col) throw notFound('coluna');
@@ -126,6 +138,10 @@ export function createTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
       taskId, Number(n?.n ?? 1), workspaceId, boardId, columnId, input.agentId ?? null, db.seal(workspaceId, title), db.seal(workspaceId, description), input.origin,
       input.sourceEventId ?? null, input.isFixture ? 1 : 0, ts, ts, validDue(input.dueOn) ? input.dueOn : null,
       board.audience === 'team' && board.origin === 'native' ? 'solicitada' : null);
+    if (envia) {
+      const ext = db.get<{ e: string | null }>('SELECT external_id AS e FROM columns WHERE id = ?', columnId)?.e ?? undefined;
+      enfileirarEspelho(db, workspaceId, taskId, { tipo: 'criar', tarefa: { titulo: title, descricao: description || undefined, coluna: ext, prazo: validDue(input.dueOn) ? input.dueOn ?? undefined : undefined } });
+    }
     audit(db, null, {
       workspaceId, actorType: actor.type, actorId: actor.id, action: 'task.create', targetType: 'task', targetId: taskId,
       evidence: { origin: input.origin, sourceEventId: input.sourceEventId ?? null, fixture: !!input.isFixture }, result: 'ok',
@@ -155,29 +171,38 @@ export function updateTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
     }
     const board = db.get<{ origin: string }>('SELECT origin FROM boards WHERE id = ?', t.board_id);
     const isMirror = board?.origin === 'mirror';
+    // só o que a própria pessoa faz vai para o aplicativo; mensagem de canal e agente não escrevem por aqui (ver conexoes/regra.ts)
+    const envia = isMirror && actor.type === 'user' && mirrorWritable(db, t.board_id);
+    const ops: OpEspelho[] = [];
     const changes: Record<string, unknown> = {};
     const sets: string[] = [];
     const vals: Array<string | number | null> = [];
     const set = (col: string, v: string | number | null, label: string, before: unknown) => {
       sets.push(`${col} = ?`); vals.push(v); changes[label] = { de: before, para: v };
     };
-    if (isMirror && (input.title !== undefined || input.description !== undefined || input.columnId !== undefined || input.dueOn !== undefined)) {
-      throw new HttpError(409, 'mirror_readonly', 'Título, descrição, coluna e prazo do espelho vêm do aplicativo externo nesta etapa.');
+    if (isMirror && !envia && (input.title !== undefined || input.description !== undefined || input.columnId !== undefined || input.dueOn !== undefined)) {
+      throw new HttpError(409, 'mirror_readonly', 'Este quadro só recebe alterações feitas por você numa conexão ligada.');
     }
     if (input.dueOn !== undefined && (input.dueOn ?? null) !== (t.due_on ?? null)) {
       if (input.dueOn !== null && !validDue(input.dueOn)) throw new HttpError(400, 'due', 'prazo: uma data válida (AAAA-MM-DD)');
       set('due_on', input.dueOn, 'prazo', t.due_on ?? null);
+      if (envia) ops.push({ tipo: 'editar', mudanca: { prazo: input.dueOn } });
     }
     if (input.title !== undefined) {
       const title = input.title.trim().replace(/\s+/g, ' ');
       if (!title || title.length > 200) throw new HttpError(400, 'title', 'título: 1–200 caracteres');
-      if (title !== t.title) { set('title', db.seal(workspaceId, title), 'titulo', t.title); changes.titulo = { de: t.title, para: title }; }
+      if (title !== t.title) { set('title', db.seal(workspaceId, title), 'titulo', t.title); changes.titulo = { de: t.title, para: title }; if (envia) ops.push({ tipo: 'editar', mudanca: { titulo: title } }); }
     }
-    if (input.description !== undefined && input.description !== t.description) { set('description', db.seal(workspaceId, input.description.slice(0, 8000)), 'descricao', '(anterior)'); changes.descricao = { de: '(anterior)', para: '(nova)' }; }
+    // o card não guarda mais que 8.000: com isso tudo, lá pode haver mais (vínculo de antes da marca, ou descrição que cresceu lá)
+    if (envia && input.description !== undefined && input.description !== t.description && (descricaoCortada(db, taskId) || t.description.length >= 8000)) {
+      throw new HttpError(409, 'descricao_longa', 'Esta descrição é maior do que cabe aqui, e o resto se perderia no aplicativo: edite a descrição lá.');
+    }
+    if (input.description !== undefined && input.description !== t.description) { set('description', db.seal(workspaceId, input.description.slice(0, 8000)), 'descricao', '(anterior)'); if (envia) ops.push({ tipo: 'editar', mudanca: { descricao: input.description!.slice(0, 8000) } }); changes.descricao = { de: '(anterior)', para: '(nova)' }; }
     if (input.columnId !== undefined && input.columnId !== t.column_id) {
-      const col = db.get('SELECT 1 AS x FROM columns WHERE id = ? AND board_id = ? AND workspace_id = ?', input.columnId, t.board_id, workspaceId);
+      const col = db.get<{ external_id: string | null }>('SELECT external_id FROM columns WHERE id = ? AND board_id = ? AND workspace_id = ?', input.columnId, t.board_id, workspaceId);
       if (!col) throw notFound('coluna');
       set('column_id', input.columnId, 'coluna', t.column_id);
+      if (envia && col.external_id) ops.push({ tipo: 'mover', coluna: col.external_id });
     }
     if (input.agentId !== undefined && input.agentId !== t.agent_id) {
       if (input.agentId) {
@@ -192,10 +217,12 @@ export function updateTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
         set('completed', 1, 'concluida', false);
         sets.push('completed_at = ?', 'completed_by = ?', 'completed_by_user_id = ?');
         vals.push(now(), by, actor.type === 'user' ? actor.id : null);
+        if (envia) ops.push({ tipo: 'concluir', feita: true });
       } else {
         if (actor.type !== 'user') throw new HttpError(409, 'human_completion', 'Somente uma pessoa reabre tarefa concluída.');
         set('completed', 0, 'concluida', true);
         sets.push('completed_at = NULL', 'completed_by = NULL', 'completed_by_user_id = NULL');
+        if (envia) ops.push({ tipo: 'concluir', feita: false });
       }
     }
     if (input.archived !== undefined && (input.archived ? 1 : 0) !== Number(t.archived)) set('archived', input.archived ? 1 : 0, 'arquivada', !!t.archived);
@@ -204,6 +231,7 @@ export function updateTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
     vals.push(now());
     db.run(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ? AND workspace_id = ?`, ...vals, taskId, workspaceId);
     audit(db, null, { workspaceId, actorType: actor.type, actorId: actor.id, action: 'task.update', targetType: 'task', targetId: taskId, evidence: changes, result: 'ok' });
+    for (const op of ops) enfileirarEspelho(db, workspaceId, taskId, op);
     return getTask(db, workspaceId, taskId);
   });
   bus?.publish(workspaceId, 'tasks.changed', { id: task.id });
@@ -220,7 +248,9 @@ export function boardView(db: Db, workspaceId: string, boardId: string) {
             t.is_fixture, t.revision, t.updated_at, t.created_at, t.parent_task_id, t.external_assignee, t.due_on, t.work_state, t.requires_approval, t.priority,
             (SELECT COUNT(*) FROM task_artifacts ta WHERE ta.task_id = t.id AND ta.role = 'entrada') AS inputs,
             (SELECT COUNT(*) FROM task_artifacts ta WHERE ta.task_id = t.id AND ta.role = 'entregavel') AS deliverables,
-            l.sync_state AS link_state, l.conflict AS link_conflict,
+            -- card novo cuja criação no aplicativo falhou ainda não tem vínculo: o motivo vem da fila de escrita
+            COALESCE(l.sync_state, (SELECT 'escrita_falhou' FROM mirror_outbox o WHERE o.task_id = t.id AND o.status = 'falhou' LIMIT 1)) AS link_state,
+            COALESCE(l.conflict, (SELECT 'Não foi enviado ao aplicativo: ' || o.last_error FROM mirror_outbox o WHERE o.task_id = t.id AND o.status = 'falhou' ORDER BY o.created_at DESC, o.rowid DESC LIMIT 1)) AS link_conflict,
             (SELECT COUNT(*) FROM link_proposals p WHERE p.task_id = t.id AND p.status = 'proposed') AS proposals,
             (SELECT r.status FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user') ORDER BY r.created_at LIMIT 1) AS run_status,
             (SELECT COUNT(*) FROM audit_events e WHERE e.target_type = 'task' AND e.target_id = t.id AND e.action IN ('task.route', 'task.reassign', 'task.delegate', 'task.handoff')) AS handoffs,

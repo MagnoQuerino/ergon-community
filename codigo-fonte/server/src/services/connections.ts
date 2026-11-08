@@ -49,9 +49,9 @@ export async function connectionStatuses(db: Db, cfg: Config, workspaceId: strin
       const w = cfg.whatsapp;
       if (!w.enabled) return { ...base, state: 'nao_configurado' as const, detail: 'Experimental (Baileys, não oficial). Pareamento por QR é passo humano. Envio desligado por padrão.' };
       if (w.ownerIds.length === 0 || !cfg.bridgeToken) return { ...base, state: 'configurado' as const, detail: 'Faltam identidade do proprietário ou token da ponte.' };
-      if (!r.last_real_event_at) return { ...base, state: 'nao_validado' as const, detail: `Configurado; envio ${w.sendEnabled ? 'HABILITADO' : 'desligado'}; nenhum evento recebido pela ponte.` };
-      if (!r.validated_at) return { ...pending, state: 'nao_validado' as const, detail: `Eventos chegam pela ponte; envio ${w.sendEnabled ? 'HABILITADO' : 'desligado'}. Confirme após teste real com o número pareado.` };
-      return { ...base, state: 'conectado' as const, detail: `Teste real confirmado pelo proprietário; envio ${w.sendEnabled ? 'HABILITADO' : 'desligado'}.` };
+      if (!r.last_real_event_at) return { ...base, state: 'nao_validado' as const, detail: `Configurado; resposta automática pela ponte ${w.sendEnabled ? 'HABILITADO' : 'desligado'}; nenhum evento recebido pela ponte.` };
+      if (!r.validated_at) return { ...pending, state: 'nao_validado' as const, detail: `Eventos chegam pela ponte; resposta automática pela ponte ${w.sendEnabled ? 'HABILITADO' : 'desligado'}. Confirme após teste real com o número pareado.` };
+      return { ...base, state: 'conectado' as const, detail: `Teste real confirmado pelo proprietário; resposta automática pela ponte ${w.sendEnabled ? 'HABILITADO' : 'desligado'}.` };
     }
     return { ...base, state: 'nao_configurado' as const, detail: '' };
   });
