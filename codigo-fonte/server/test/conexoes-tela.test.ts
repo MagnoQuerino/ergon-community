@@ -30,6 +30,8 @@ const ler = (rel: string) => {
   if (rel.startsWith('community/publico/')) return fs.readFileSync(path.join(RAIZ, '..', rel.slice('community/publico/'.length)), 'utf8');
   return fs.readFileSync(fs.existsSync(path.join(RAIZ, rel)) ? path.join(RAIZ, rel) : path.join(RAIZ, '..', rel), 'utf8');
 };
+/** os guias (docs/ e o README público) não vão para a imagem de teste do Docker: lá os testes de texto pulam */
+const COM_GUIAS = (() => { try { ler('docs/CONEXOES.md'); ler('community/publico/README.md'); return true; } catch { return false; } })();
 /** o que é para o agente: parâmetro, id, nome de outra ação, prefixo de token, linguagem de consulta */
 const JARGAO = /\b(ids?|jid|token|xoxp|xoxb|cql|jql|oauth|cursor)\b|\b[a-z]+\.[a-z_]+\b|=|_|https?:/i;
 
@@ -233,7 +235,7 @@ describe('o que vem junto da lista de conexões', () => {
   });
 });
 
-describe('textos de tela que prometiam o que o sistema não faz', () => {
+describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_GUIAS && 'os guias não vêm nesta cópia (imagem de teste)' }, () => {
   test('WhatsApp: "nunca sozinhos" saiu, e quem aceitou aquele texto aceita de novo', () => {
     assert.ok(WA_RISKS_VERSION >= 3);
     assert.equal(risksAccepted({ riscos: { versao: 2 } }), false);

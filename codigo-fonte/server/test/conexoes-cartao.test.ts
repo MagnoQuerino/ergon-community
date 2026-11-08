@@ -396,7 +396,7 @@ describe('o que o agente recebe confere com o que existe', () => {
   });
 });
 
-describe('o plugin descreve a listagem como ela é', () => {
+describe('o plugin descreve a listagem como ela é', { skip: !fs.existsSync(path.resolve(import.meta.dirname, '..', '..', 'hermes', 'plugins', 'ergon_bridge', '__init__.py')) && 'o plugin do motor não vem nesta cópia (imagem de teste)' }, () => {
   test('conexoes_listar sem conexão: só a lista das ligadas, e o modelo sabe chamar de novo', () => {
     const fonte = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'hermes', 'plugins', 'ergon_bridge', '__init__.py'), 'utf8');
     assert.match(fonte, /vazio = só a lista das ligadas \(chame de novo com conexao para ver as ações e os parâmetros\)/);

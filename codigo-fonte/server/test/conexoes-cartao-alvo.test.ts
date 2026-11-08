@@ -303,7 +303,7 @@ describe('Aspásia e Diógenes enviam quando a pessoa pede', () => {
   });
 });
 
-describe('o plugin não trata o sistema como pessoa', () => {
+describe('o plugin não trata o sistema como pessoa', { skip: !fs.existsSync(path.resolve(import.meta.dirname, '..', '..', 'hermes', 'plugins', 'ergon_bridge', '__init__.py')) && 'o plugin do motor não vem nesta cópia (imagem de teste)' }, () => {
   test('falha da ponte: "o sistema", sem o nome da exceção', () => {
     const fonte = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'hermes', 'plugins', 'ergon_bridge', '__init__.py'), 'utf8');
     assert.match(fonte, /"texto": "O sistema não respondeu\. Não sei se a ação foi feita: diga isso à pessoa\."/);
