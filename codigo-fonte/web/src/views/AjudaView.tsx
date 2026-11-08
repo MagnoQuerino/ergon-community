@@ -89,7 +89,7 @@ const ARTICLES: Article[] = [
   { id: 'conexoes', title: 'Conexões', icon: 'plug', keywords: 'conectar conta ia chatgpt whatsapp microsoft google teams email quadros',
     body: (c) => <>
       <ul>
-        <li><b>Contas de IA</b>: a <b>assinatura Nous é a melhor escolha</b> — os principais modelos do mercado numa assinatura só (há plano grátis com modelos gratuitos) e cada agente com o modelo certo, do mais forte ao mais econômico. Quem já paga o ChatGPT pode conectar também: a equipe aproveita a assinatura, sem custo por token, e cada agente usa o modelo que você escolher entre as duas contas.</li>
+        <li><b>Contas de IA</b>: a <b>assinatura Nous é a melhor escolha</b> — os principais modelos do mercado numa assinatura só (há plano grátis com modelos gratuitos) e cada agente com o modelo certo, do mais forte ao mais econômico. Quem já paga o ChatGPT pode conectar também: a equipe aproveita a assinatura, sem pagar por uso, e cada agente usa o modelo que você escolher entre as duas contas.</li>
         <li><b>WhatsApp, Microsoft 365 e Google</b>: a equipe consulta e-mails, agenda e arquivos de qualquer período, deixa rascunhos e responde quando você pede. O que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.</li>
         <li><b>Tarefas e quadros</b>: ligue quadros de outros aplicativos nos dois sentidos: dar check ou mover aqui reflete lá. Os agentes também criam e movem tarefas neles.</li>
       </ul>

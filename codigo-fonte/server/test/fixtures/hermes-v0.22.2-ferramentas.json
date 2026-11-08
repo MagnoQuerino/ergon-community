@@ -1,0 +1,205 @@
+{
+  "hermes": "0.22.2",
+  "imagem": "nousresearch/hermes-agent:v0.22.2@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919",
+  "origem": "toolsets.py do Hermes: resolve_toolset(nome, include_registry=False) de cada conjunto de TOOLSETS, menos os pacotes de plataforma (hermes-*). Conferido dentro da imagem por hermes/tests/test_ergon_bridge_conformidade.py.",
+  "toolsets": {
+    "bot_room": [],
+    "browser": [
+      "browser_back",
+      "browser_cdp",
+      "browser_click",
+      "browser_console",
+      "browser_dialog",
+      "browser_exec",
+      "browser_get_images",
+      "browser_navigate",
+      "browser_press",
+      "browser_scroll",
+      "browser_snapshot",
+      "browser_type",
+      "browser_vault",
+      "browser_vision"
+    ],
+    "catalog": [
+      "manage_catalog"
+    ],
+    "clarify": [
+      "clarify"
+    ],
+    "code_execution": [
+      "execute_code"
+    ],
+    "coding": [
+      "browser_back",
+      "browser_cdp",
+      "browser_click",
+      "browser_console",
+      "browser_dialog",
+      "browser_exec",
+      "browser_get_images",
+      "browser_navigate",
+      "browser_press",
+      "browser_scroll",
+      "browser_snapshot",
+      "browser_type",
+      "browser_vault",
+      "browser_vision",
+      "clarify",
+      "delegate_task",
+      "execute_code",
+      "manage_connections",
+      "memory",
+      "patch",
+      "process_manage",
+      "read_file",
+      "search_files",
+      "session_search",
+      "skill_manage",
+      "skill_view",
+      "skills_list",
+      "terminal",
+      "todo_list",
+      "vision_analyze",
+      "web_extract",
+      "web_search",
+      "write_file"
+    ],
+    "computer_use": [
+      "computer_use"
+    ],
+    "connections": [
+      "manage_connections"
+    ],
+    "context_engine": [],
+    "cronjob": [
+      "cronjob_manage"
+    ],
+    "debugging": [
+      "patch",
+      "process_manage",
+      "read_file",
+      "search_files",
+      "terminal",
+      "web_extract",
+      "web_search",
+      "write_file"
+    ],
+    "delegation": [
+      "delegate_task"
+    ],
+    "desktop_ui": [
+      "annotate_preview",
+      "close_terminal",
+      "desktop_preview",
+      "drive_preview",
+      "focus_pane",
+      "gui_tour",
+      "react_to_message",
+      "read_terminal",
+      "read_window_below",
+      "set_theme",
+      "show_tip"
+    ],
+    "discord": [
+      "discord"
+    ],
+    "discord_admin": [
+      "discord_admin"
+    ],
+    "feishu_doc": [
+      "feishu_doc_read"
+    ],
+    "feishu_drive": [
+      "feishu_drive_add_comment",
+      "feishu_drive_list_comment_replies",
+      "feishu_drive_list_comments",
+      "feishu_drive_reply_comment"
+    ],
+    "file": [
+      "patch",
+      "read_file",
+      "search_files",
+      "write_file"
+    ],
+    "image_gen": [
+      "image_generate"
+    ],
+    "kanban": [
+      "kanban_attach",
+      "kanban_attach_url",
+      "kanban_attachments",
+      "kanban_block",
+      "kanban_comment",
+      "kanban_complete",
+      "kanban_create",
+      "kanban_heartbeat",
+      "kanban_link",
+      "kanban_list",
+      "kanban_request_changes",
+      "kanban_request_review",
+      "kanban_show",
+      "kanban_unblock"
+    ],
+    "memory": [
+      "memory"
+    ],
+    "onboarding": [
+      "setup_beat"
+    ],
+    "project": [
+      "desktop_project"
+    ],
+    "safe": [
+      "image_generate",
+      "vision_analyze",
+      "web_extract",
+      "web_search"
+    ],
+    "search": [
+      "web_search"
+    ],
+    "session_search": [
+      "session_search"
+    ],
+    "skills": [
+      "skill_manage",
+      "skill_view",
+      "skills_list"
+    ],
+    "terminal": [
+      "process_manage",
+      "terminal"
+    ],
+    "todo": [
+      "todo_list"
+    ],
+    "tts": [
+      "text_to_speech"
+    ],
+    "video": [
+      "video_analyze"
+    ],
+    "video_gen": [
+      "video_generate",
+      "xai_video_edit",
+      "xai_video_extend"
+    ],
+    "vision": [
+      "vision_analyze"
+    ],
+    "web": [
+      "web_extract",
+      "web_search"
+    ],
+    "x_search": [
+      "x_search"
+    ],
+    "yuanbao": [
+      "yb_query_group_info",
+      "yb_query_group_members",
+      "yb_search_sticker",
+      "yb_send_dm",
+      "yb_send_sticker"
+    ]
+  }
+}

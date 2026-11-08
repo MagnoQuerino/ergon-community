@@ -5,12 +5,14 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { scrub } from '../src/lib/log.ts';
-import { healthPanel } from '../src/services/health.ts';
+import { diagnostics, healthPanel } from '../src/services/health.ts';
 import type { HermesClient } from '../src/services/hermes.ts';
 import { setIntegration } from '../src/services/integrations.ts';
 import { addPerson, harness, req, setupOwner } from './helpers.ts';
 
 const state = (p: { componentes: Array<{ id: string; estado: string }> }, id: string) => p.componentes.find((c) => c.id === id)?.estado;
+/** o que a Saúde nunca mostra: as peças por dentro do Ergon e o erro cru de rede */
+const JARGAO = /\bmotor(es)?\b|\bgerente\b|ponte de controle|cont[eê]iner|\bimagem\b|\bpodman\b|\bdocker\b|respondeu \d{3}|ECONNREFUSED|\bdele\b/i;
 
 describe('painel de saúde', () => {
   test('instalação nova: banco e proteção em dia; sem backup "necessita atenção"; depois do backup, só a simulação limita', async () => {
@@ -48,22 +50,78 @@ describe('painel de saúde', () => {
     const deps = { db: h.db, cfg: h.cfg, vault: h.vault, hermes, executorMode: () => 'real' as const, motorVault: () => mv, inContainer: () => false };
     const motor = async () => (await healthPanel(deps)).componentes.find((c) => c.id === 'motor')!;
     // depois de reiniciar só o Ergon: o receptor do cofre já não responde, o guardião fica "desligado", o motor responde
-    assert.deepEqual(await motor(), { id: 'motor', nome: 'Motor de IA', estado: 'operacional', detalhe: 'no ar · cofre dele aberto' });
+    assert.deepEqual(await motor(), { id: 'motor', nome: 'Equipe de IA', estado: 'operacional', detalhe: 'no ar · cofre aberto' });
     ok = false; mv = { state: 'aguardando', lastError: null };
-    assert.equal((await motor()).estado, 'indisponivel'); assert.match((await motor()).detalhe, /abrindo o cofre dele/);
+    assert.equal((await motor()).estado, 'indisponivel'); assert.match((await motor()).detalhe, /^abrindo o cofre da equipe \(a primeira vez pode levar minutos\)$/);
     mv = { state: 'erro', lastError: 'chave recusada' };
-    assert.match((await motor()).detalhe, /o cofre dele não abriu: chave recusada/);
+    assert.equal((await motor()).detalhe, 'o cofre da equipe não abriu: chave recusada');
+    // o erro técnico do cofre (rede, gerente) não vai para a tela
+    mv = { state: 'erro', lastError: 'gerente de motores respondeu 502' };
+    assert.equal((await motor()).detalhe, 'o cofre da equipe não abriu');
     mv = { state: 'desligado', lastError: null };
-    assert.match((await motor()).detalhe, /não responde \(connect ECONNREFUSED\)/);
+    // o erro de rede cru (inglês, código do sistema) fica no registro: a tela diz só que está fora do ar
+    assert.equal((await motor()).detalhe, 'fora do ar agora');
+    for (const m of [mv, { state: 'aguardando', lastError: null }, { state: 'erro', lastError: 'connect ECONNREFUSED 10.89.0.3:8644' }]) {
+      mv = m;
+      const c = await motor();
+      assert.doesNotMatch(`${c.nome} ${c.detalhe}`, JARGAO, c.detalhe);
+    }
     await h.close();
   });
 
-  test('disco: dentro do Docker diz que a medida é a do disco virtual (pode dizer mais do que o computador tem)', async () => {
+  test('disco: dentro do ambiente do Ergon diz que a medida é a dele (pode dizer mais do que o computador tem), com vírgula decimal', async () => {
     const h = await harness(); await setupOwner(h);
     const deps = { db: h.db, cfg: h.cfg, vault: h.vault, hermes: null, executorMode: () => 'simulated' as const, motorVault: () => ({ state: 'desligado', lastError: null }) };
-    const disco = async (inContainer: boolean) => (await healthPanel({ ...deps, inContainer: () => inContainer })).componentes.find((c) => c.id === 'disco')!.detalhe;
-    assert.match(await disco(true), /^\d+\.\d GB livres no disco virtual do Docker; o disco do computador pode ter menos/);
-    assert.match(await disco(false), /^\d+\.\d GB livres$/);
+    const painel = async (inContainer: boolean) => (await healthPanel({ ...deps, inContainer: () => inContainer })).componentes;
+    const disco = async (inContainer: boolean) => (await painel(inContainer)).find((c) => c.id === 'disco')!.detalhe;
+    assert.match(await disco(true), /^\d+,\d GB livres no ambiente do Ergon; o disco do computador pode ter menos \(confira no Windows\)$/);
+    assert.match(await disco(false), /^\d+,\d GB livres$/);
+    assert.doesNotMatch(await disco(true), JARGAO);
+    // o tamanho do banco também com vírgula (0,9 MB, não 0.9 MB)
+    assert.match((await painel(false)).find((c) => c.id === 'banco')!.detalhe, /^íntegro · \d+,\d MB$/);
+    await h.close();
+  });
+
+  test('motor renovando, sem as Conexões ou com a renovação que voltou atrás: a tela diz a verdade', async () => {
+    const h = await harness(); await setupOwner(h);
+    const hermes = { health: async () => ({ ok: true, detail: 'ok' }) } as unknown as HermesClient;
+    const base = { db: h.db, cfg: h.cfg, vault: h.vault, hermes, executorMode: () => 'real' as const, motorVault: () => ({ state: 'aberto', lastError: null }), inContainer: () => false };
+    const ms = { estado: 'aberto' as const, erro: null, semConexoes: false, falha: null as string | null, adiada: null as string | null, versao: '9.9.9-rc.1' };
+    const motor = async (x: Partial<typeof ms>, semConexoes = false) => (await healthPanel({ ...base, motor: () => ({ ...ms, ...x }), semConexoes: () => semConexoes })).componentes.find((c) => c.id === 'motor')!;
+    assert.deepEqual(await motor({ estado: 'renovando' as never }), { id: 'motor', nome: 'Equipe de IA', estado: 'limitado', detalhe: 'Atualizando a equipe para a versão 9.9.9-rc.1: os pedidos novos esperam e seguem sozinhos quando terminar' });
+    const sem = await motor({ semConexoes: true });
+    const SEM_CONEXOES = 'no ar · as Conexões não estão nesta versão da equipe: os agentes ainda não conseguem usar as contas conectadas';
+    assert.equal(sem.estado, 'limitado'); assert.equal(sem.detalhe, SEM_CONEXOES);
+    assert.equal((await motor({}, true)).detalhe, SEM_CONEXOES, 'um motor só: pelo cache das ferramentas');
+    assert.equal((await motor({})).estado, 'operacional');
+    const f = await motor({ falha: 'a versão nova da equipe veio sem as Conexões' });
+    assert.equal(f.estado, 'atencao'); assert.match(f.detalhe, /para a versão 9\.9\.9-rc\.1 não deu certo \(a versão nova da equipe veio sem as Conexões\); a equipe segue na versão anterior/);
+    // depois de voltar atrás, nada tenta de novo nesta versão: a tela não promete "a próxima tentativa"
+    assert.match(f.detalhe, /até a próxima versão do Ergon/); assert.doesNotMatch(f.detalhe, /próxima tentativa/);
+    // um motivo gravado com peça interna (registro de antes) não vai cru para a tela
+    const cru = await motor({ falha: 'a ponte de controle do motor não respondeu' });
+    assert.match(cru.detalhe, /não deu certo \(a versão nova não passou na conferência\)/);
+    // a versão nova ainda não chegou: o de antes funciona, e o sistema tenta de novo sozinho
+    const a = await motor({ adiada: 'a versão nova da equipe ainda não chegou a este computador (sem internet, ou o download não terminou)' });
+    assert.equal(a.estado, 'limitado'); assert.match(a.detalhe, /atualização da equipe para a versão 9\.9\.9-rc\.1 pendente: a versão nova da equipe ainda não chegou.*o sistema tenta de novo sozinho/);
+    for (const c of [sem, f, cru, a]) assert.doesNotMatch(`${c.nome} ${c.detalhe}`, JARGAO, c.detalhe);
+    await h.close();
+  });
+
+  test('cofre de conta removida: aviso com o nome que dá para mostrar; no diagnóstico, só a contagem', async () => {
+    const h = await harness(); await setupOwner(h);
+    const nome = `ergon_motor-${'f'.repeat(32)}`;
+    const espaco = { liberavel: null, ultima: { at: new Date().toISOString(), liberado: 5e8, removidas: 2 }, volumes: [{ nome, conta: 'conta removida em 07/11/2026' }] };
+    const deps = { db: h.db, cfg: h.cfg, vault: h.vault, hermes: null, executorMode: () => 'simulated' as const, motorVault: () => ({ state: 'desligado', lastError: null }), inContainer: () => false, espaco: () => espaco };
+    const p = await healthPanel(deps);
+    const c = p.componentes.find((x) => x.id === 'cofres')!;
+    assert.equal(c.estado, 'limitado'); assert.match(c.detalhe, /1 cofre guardado \(conta removida em 07\/11\/2026\): ocupam espaço neste computador; dá para apagar, sem volta/);
+    assert.equal(p.espaco?.volumes[0].nome, nome, 'a tela recebe o nome para pedir a confirmação');
+    const d = JSON.stringify(await diagnostics(deps));
+    assert.ok(!d.includes('f'.repeat(32)), 'o identificador da conta não vai no diagnóstico');
+    assert.match(d, /"cofresSemDono":1/);
+    // sem gerente (um motor só): nada de espaço na tela
+    assert.equal((await healthPanel({ ...deps, espaco: () => null })).espaco, null);
     await h.close();
   });
 

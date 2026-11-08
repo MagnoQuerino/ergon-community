@@ -35,7 +35,7 @@ function detectDelimiter(text: string): ',' | ';' | '\t' {
 /** Lê o CSV inteiro (bytes ou texto). `lines`: número da linha física (1 = cabeçalho) onde cada registro começa. */
 export function parseCsv(input: Buffer | string, limits: CsvLimits = CSV_LIMITS): CsvTable {
   const size = typeof input === 'string' ? Buffer.byteLength(input) : input.length;
-  if (size > limits.maxBytes) throw new CsvError('grande_demais', `O arquivo tem ${(size / 1024 / 1024).toFixed(1)} MB; o limite para análise é ${Math.round(limits.maxBytes / 1024 / 1024)} MB.`);
+  if (size > limits.maxBytes) throw new CsvError('grande_demais', `O arquivo tem ${(size / 1024 / 1024).toFixed(1).replace('.', ',')} MB; o limite para análise é ${Math.round(limits.maxBytes / 1024 / 1024)} MB.`);
   let text: string;
   if (typeof input === 'string') text = input;
   else {

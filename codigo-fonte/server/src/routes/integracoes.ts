@@ -1,6 +1,6 @@
 /**
  * Rotas de Conexões: contas (Microsoft, Google), apps de tarefas por credencial, espelho de listas, WhatsApp por QR
- * e a confirmação de canal real. Saíram de app.ts sem mudar nada do comportamento.
+ * e a confirmação de canal real. A Microsoft entra em etapas (sso.ts), e o "conectando…" vence em 10 minutos (Integrations.list).
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Db } from '../db/db.ts';
@@ -8,9 +8,10 @@ import { S, idParams, strList } from '../lib/schemas.ts';
 import { HttpError, notFound, now } from '../lib/util.ts';
 import type { AuthContext } from '../services/auth.ts';
 import { audit, type Bus } from '../services/bus.ts';
-import { INTEGRATIONS, TASK_KINDS, TOKEN_KINDS, integrationRow, setIntegration, settingsOf, type IntegrationKind, type Integrations } from '../services/integrations.ts';
-import { importBoards } from '../services/mirror.ts';
-import { SSO_KINDS, type SsoKind } from '../services/sso.ts';
+import { INTEGRATIONS, PRECISA_ADMINISTRADOR, TASK_KINDS, TOKEN_KINDS, integrationRow, limparEtapas, marcarBaseBloqueada, marcarConectando, marcarEtapa, motivoDoProvedor, setIntegration, settingsOf, voltaDoConectando, workspaceDoEstadoAdmin, type IntegrationKind, type Integrations } from '../services/integrations.ts';
+import { paraTela } from '../lib/texto-tela.ts';
+import { ProviderError, importBoards } from '../services/mirror.ts';
+import { SSO_KINDS, isEtapa, type Etapa, type SsoKind } from '../services/sso.ts';
 import { filtersOf, risksAccepted, WA_RISKS_VERSION, type WhatsAppReader } from '../services/whatsapp.ts';
 
 export interface IntegrationRoutesDeps {
@@ -45,40 +46,89 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
   });
 
   // Login com a conta (SSO parametrizado: Microsoft, Google). A volta vem por redirecionamento do navegador.
+  // Microsoft em etapas (sso.ts): { etapa } pede só uma delas ("Liberar leitura", "Já aprovaram? Conectar de novo")
   const ssoParam = { type: 'object', required: ['kind'], properties: { kind: { enum: SSO_KINDS } } };
   app.post('/api/integrations/:kind/start', { schema: { params: ssoParam } }, async (req) => {
     const a = owner(req);
     const kind = (req.params as { kind: SsoKind }).kind;
-    const url = integrations.sso.start(kind, a.workspaceId, a.userId);
+    const pedida = (req.body as { etapa?: unknown } | undefined)?.etapa;
+    if (pedida !== undefined && (kind !== 'microsoft' || !isEtapa(pedida))) throw new HttpError(400, 'etapa', 'etapa inválida');
+    const etapa: Etapa = isEtapa(pedida) ? pedida : 'base';
+    const conectada = integrationRow(db, a.workspaceId, kind).state === 'connected';
+    if (etapa !== 'base' && !conectada) throw new HttpError(409, 'not_connected', 'Conecte a conta Microsoft primeiro: clique em "Entrar com a Microsoft".');
+    const url = integrations.sso.start(kind, a.workspaceId, a.userId, { etapa });
     // autorizar de novo com a conta já ligada: ela continua funcionando enquanto a pessoa decide
-    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') setIntegration(db, a.workspaceId, kind, { state: 'pending', last_error: null });
+    if (!conectada) marcarConectando(db, a.workspaceId, kind);
+    if (etapa !== 'base') marcarEtapa(db, a.workspaceId, etapa, { estado: 'pedido' });
     return { url };
   });
   app.get('/api/integrations/:kind/callback', { schema: { params: ssoParam } }, async (req, reply) => {
     const kind = (req.params as { kind: SsoKind }).kind;
-    const q = req.query as { state?: string; code?: string; error?: string; error_description?: string };
+    const q = req.query as { state?: string; code?: string; error?: string; error_description?: string; admin_consent?: string };
     const back = (status: string) => reply.redirect(`/#conexoes?${kind}=${encodeURIComponent(status)}`);
+    // o que a tela mostra (marcas das etapas, last_error) é o motivo em português; o erro cru vai só para a evidência da auditoria
+    const motivoDe = () => motivoDoProvedor(kind, q.error, q.error_description);
+    // volta do pedido ao administrador (v2-admin-consent): só um atalho, para quando quem aprova é a própria pessoa, neste
+    // computador. A conexão não depende dela: na tela, "Já aprovaram? Conectar de novo" faz o login da etapa
+    if (kind === 'microsoft' && q.admin_consent !== undefined) {
+      const [base, etapa] = String(q.state ?? '').slice(0, 120).split('.');
+      const ws = workspaceDoEstadoAdmin(db, base ?? '');
+      if (ws && (etapa === 'leitura' || etapa === 'canais')) {
+        marcarEtapa(db, ws, etapa, q.error ? { estado: 'bloqueado', erro: 'O administrador não aprovou o pedido.' } : { estado: 'aprovado' });
+        audit(db, bus, { workspaceId: ws, actorType: 'connector', action: 'integration.admin_consent', targetType: 'integration', targetId: kind, evidence: { etapa, error: q.error ?? null, description: (q.error_description ?? '').slice(0, 300) }, result: q.error ? 'o administrador não aprovou' : 'o administrador aprovou' });
+        bus.publish(ws, 'integrations.changed', { kind });
+        // sem conta conectada (o pedido do primeiro acesso, no cartão desconectado): o botão que existe é "Já aprovaram? Entrar de novo"
+        return back(q.error ? 'admin-recusou' : integrations.secrets.read(ws, kind) ? 'admin-aprovou' : 'admin-aprovou-base');
+      }
+      // o pedido não é de nenhum Ergon deste computador (por exemplo, quem aprovou também usa o Ergon): aviso neutro
+      return back(q.error ? 'admin-recusou-outro' : 'admin-aprovou-outro');
+    }
     /** Não concluiu: quem cancelou não fica preso em "conectando", e o motivo da Microsoft ou do Google fica registrado. */
-    const naoConcluiu = (ws: string | null, motivo: string) => {
+    const naoConcluiu = (ws: string | null, motivo: string, etapa: Etapa | null, semErro = false) => {
       if (!ws) return;
       const r = integrationRow(db, ws, kind);
-      if (r.state === 'pending') setIntegration(db, ws, kind, { state: integrations.secrets.read(ws, kind) ? 'connected' : 'off', last_error: motivo.slice(0, 300) });
-      audit(db, bus, { workspaceId: ws, actorType: 'connector', action: 'integration.connect.error', targetType: 'integration', targetId: kind, evidence: { error: q.error ?? null, description: (q.error_description ?? '').slice(0, 300) }, result: motivo.slice(0, 200) });
+      // volta ao estado de antes: uma conexão caída que tentou reconectar e desistiu continua caída (não vira "conectada").
+      // semErro: um passo esperado (o pedido ao administrador, que o cartão explica), nada em vermelho
+      if (r.state === 'pending') {
+        const volta = voltaDoConectando(r, !!integrations.secrets.read(ws, kind), motivo.slice(0, 300));
+        setIntegration(db, ws, kind, semErro ? { ...volta, last_error: null } : volta);
+      }
+      // etapa depois da base que voltou sem ser dada: na leitura e nos canais, a tela mostra o pedido ao administrador (recusar ou não
+      // poder autorizar dá no mesmo para a pessoa); no Teams, "Tentar de novo"
+      if (kind === 'microsoft' && etapa && etapa !== 'base') marcarEtapa(db, ws, etapa, { estado: 'bloqueado', erro: motivo.slice(0, 300) });
+      audit(db, bus, { workspaceId: ws, actorType: 'connector', action: 'integration.connect.error', targetType: 'integration', targetId: kind, evidence: { etapa, error: q.error ?? null, description: (q.error_description ?? '').slice(0, 300) }, result: motivo.slice(0, 200) });
+      bus.publish(ws, 'integrations.changed', { kind });
     };
     const quem = q.state ? integrations.sso.workspaceOf(String(q.state).slice(0, 200)) : null;
-    // segunda etapa (Microsoft, conta de trabalho/escola) recusada ou com erro: a conexão da primeira continua valendo
-    const stage = q.state ? integrations.sso.stageOf(String(q.state).slice(0, 200)) : null;
+    // etapa depois da primeira recusada ou com erro: a conexão das anteriores continua valendo
+    const etapa = q.state ? integrations.sso.stageOf(String(q.state).slice(0, 200)) : null;
+    const parcial = (e: Etapa | null) => (e === 'leitura' ? 'sem-leitura' : e === 'canais' ? 'sem-canais' : e === 'trabalho' ? 'parcial' : null);
     if (q.error || !q.code || !q.state) {
-      naoConcluiu(quem, q.error === 'access_denied' ? 'A autorização foi recusada na página da conta.' : `A conta não concluiu o login: ${q.error ?? 'sem resposta'}${q.error_description ? ` (${q.error_description.split('\n')[0]})` : ''}`);
-      return back(stage === 'work' ? 'parcial' : q.error === 'access_denied' ? 'recusado' : 'erro');
+      // a empresa não deixa a pessoa autorizar sozinha nem o primeiro passo: o cartão desconectado já mostra o pedido ao administrador
+      const precisaAdmin = kind === 'microsoft' && (!etapa || etapa === 'base') && (q.error === 'consent_required' || PRECISA_ADMINISTRADOR.test(q.error_description ?? ''));
+      if (precisaAdmin && quem && !integrations.secrets.read(quem, kind)) {
+        naoConcluiu(quem, 'A sua empresa exige que o administrador aprove o Ergon antes do primeiro acesso.', null, true);
+        marcarBaseBloqueada(db, quem, motivoDe());
+        return back('admin-base');
+      }
+      naoConcluiu(quem, motivoDe(), etapa);
+      return back(parcial(etapa) ?? (q.error === 'access_denied' ? 'recusado' : 'erro'));
     }
     try {
+      // a conta de antes deste workspace: se entrar outra, as marcas das etapas dela (aprovado, bloqueado…) não valem mais
+      const contaAntes = quem && kind === 'microsoft' ? integrations.secrets.read<{ account?: string }>(quem, kind)?.account ?? null : null;
       const r = await integrations.sso.finish(kind, String(q.state).slice(0, 200), String(q.code).slice(0, 4000));
+      if (kind === 'microsoft' && contaAntes && contaAntes !== r.account) limparEtapas(db, r.workspaceId);
+      if (kind === 'microsoft') marcarBaseBloqueada(db, r.workspaceId, null);
       integrations.markSso(kind, r.workspaceId, r.userId, r.account);
-      return r.next ? reply.redirect(r.next) : back('conectado');
+      if (kind === 'microsoft' && r.etapa !== 'base') marcarEtapa(db, r.workspaceId, r.etapa, null);
+      if (r.next && r.proxima) { marcarEtapa(db, r.workspaceId, r.proxima, { estado: 'pedido' }); return reply.redirect(r.next); }
+      return back('conectado');
     } catch (e) {
-      naoConcluiu(quem, `O login não terminou: ${e instanceof Error ? e.message : 'erro'}`);
-      return back(stage === 'work' ? 'parcial' : 'erro');
+      // o erro da troca do código (rede, código do provedor) só passa se já for para a pessoa
+      const m = paraTela(e instanceof Error ? e.message : null);
+      naoConcluiu(quem, m ? `O login não terminou: ${m}` : 'O login não terminou. Tente de novo.', etapa);
+      return back(parcial(etapa) ?? 'erro');
     }
   });
 
@@ -88,8 +138,16 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
     const kind = (req.params as { kind: IntegrationKind }).kind;
     try { return { lists: await integrations.provider(a.workspaceId, kind).listBoards() }; } catch (err) {
       if (err instanceof HttpError) throw err;
-      setIntegration(db, a.workspaceId, kind, { last_error: err instanceof Error ? err.message : 'falha' });
-      throw new HttpError(502, 'provider', err instanceof Error ? err.message : 'o serviço não respondeu');
+      // o cartão mostra o last_error: o motivo do serviço só passa sem código cru (o técnico vai para o registro)
+      // a reserva segue o tipo da falha: acesso recusado pede conectar de novo (não "tente de novo")
+      const tipo = err instanceof ProviderError ? err.kind : null;
+      const reserva = tipo === 'forbidden' ? 'o serviço recusou o acesso: conecte a conta de novo em Conexões'
+        : tipo === 'not_found' ? 'o serviço não encontrou as listas (ou a conta não tem acesso a elas)'
+        : 'o serviço não deixou ler as listas agora; tente de novo daqui a pouco';
+      const motivo = paraTela(err instanceof Error ? err.message : null, reserva);
+      if (err instanceof Error && motivo !== err.message) req.log.warn({ erro: err.message.slice(0, 300) }, 'listas do aplicativo: erro técnico');
+      setIntegration(db, a.workspaceId, kind, { last_error: motivo });
+      throw new HttpError(502, 'provider', motivo);
     }
   });
 

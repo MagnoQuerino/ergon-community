@@ -22,6 +22,13 @@ import { readDocument } from './doc-isolated.ts';
 import type { PendingSkillWrite, SkillControl } from './hermes.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { stripControl } from './teamwork.ts';
+import { paraTela } from '../lib/texto-tela.ts';
+
+/** O motivo de uma falha da equipe de IA para a tela (": …"), só se ele já for para a pessoa; com peça interna, nada. */
+const porque = (err: unknown): string => {
+  const m = paraTela(err instanceof Error ? err.message : String(err ?? ''));
+  return m ? `: ${m}` : '';
+};
 
 export type TrainingStatus = 'executando' | 'em_revisao' | 'falhou' | 'aprovado' | 'descartado';
 export interface TrainingInput { request: string; title?: string; fileIds?: string[]; links?: string[]; skillId?: string | null }
@@ -91,7 +98,7 @@ export class Trainings {
 
   private ctl(ws: string): SkillControl {
     const c = this.control(ws);
-    if (!c) throw new HttpError(503, 'no_training', 'O motor de IA não oferece o treinamento agora (ponte de controle indisponível).');
+    if (!c) throw new HttpError(503, 'no_training', 'A equipe de IA não oferece o treinamento agora. Tente de novo daqui a pouco.');
     return c;
   }
   private row(ws: string, trainingId: string): TrainingRow {
@@ -125,7 +132,7 @@ export class Trainings {
     // sem o conjunto de competências ligado no motor o agente nem tem como escrever: avisa antes, em vez de falhar no fim
     const platform = platformToolsets(motorScope(ws));
     if (platform.at && !platform.enabled.includes('skills')) {
-      throw new HttpError(409, 'skills_off', 'Para treinar, ligue "Skills da biblioteca" em Configurações › Ferramentas: é por ela que o agente escreve e consulta as competências (cada agente só as suas).');
+      throw new HttpError(409, 'skills_off', 'Para treinar, ligue "Competências da biblioteca" em Configurações › Ferramentas: é por ela que o agente escreve e consulta as competências (cada agente só as suas).');
     }
     if (platform.at && links.length && !platform.enabled.includes('web')) {
       throw new HttpError(409, 'web_off', 'Para estudar links, ligue "Pesquisa na web" em Configurações › Ferramentas (no treino, só os links que você der são abertos).');
@@ -182,8 +189,8 @@ export class Trainings {
       files.some((f) => f.status !== 'lido') ? `\nNão foi possível ler: ${files.filter((f) => f.status !== 'lido').map((f) => `${f.name} (${f.detail ?? f.status})`).join('; ')}. Diga isso nas limitações.` : '',
     ].filter(Boolean).join('\n');
     let prompt: string;
-    try { prompt = await ctl.learnPrompt(req); } catch (err) { throw new HttpError(503, 'no_training', `O motor de IA não montou o treinamento: ${err instanceof Error ? err.message : String(err)}`); }
-    if (!prompt.trim()) throw new HttpError(503, 'no_training', 'O motor de IA não montou o treinamento.');
+    try { prompt = await ctl.learnPrompt(req); } catch (err) { throw new HttpError(503, 'no_training', `A equipe de IA não montou o treinamento${porque(err)}. Tente de novo daqui a pouco.`); }
+    if (!prompt.trim()) throw new HttpError(503, 'no_training', 'A equipe de IA não montou o treinamento.');
     const ergonRules = [
       '',
       'Regras do Ergon para este treinamento (valem acima do resto):',
@@ -297,7 +304,7 @@ export class Trainings {
       this.bus.publish(ws, 'agents.changed', {});
     };
     if (status !== 'succeeded') return fail(`A execução ${status === 'cancelled' ? 'foi cancelada' : 'falhou'}: ${r.error ?? this.db.get<{ error: string | null }>('SELECT error FROM runs WHERE id = ?', r.id)?.error ?? status}. Nada foi aprendido.`);
-    if (readErr) return fail(`Não consegui ler a proposta no motor de IA: ${readErr}`);
+    if (readErr) return fail(`O sistema não conseguiu ler a proposta que o agente escreveu${porque(new Error(readErr))}. Nada foi aprendido.`);
     if (!pending.length) return fail('O agente terminou sem escrever a competência. Nada foi aprendido — tente de novo ou reformule o pedido.');
     const src = parse<TrainingSources>(t.sources, { files: [], links: [] });
     const asked = src.files.length + src.links.length;
@@ -306,7 +313,7 @@ export class Trainings {
       return fail('Nenhuma das fontes pôde ser lida (documentos ou links) e o pedido sozinho não basta: a competência seria inventada. Nada foi aprendido.');
     }
     const draft = draftFrom(t.skill_id ? this.latestFiles(t.skill_id) : {}, writes);
-    if (!draft['SKILL.md']?.trim()) return fail('A proposta não tem o arquivo principal da competência (SKILL.md). Nada foi aprendido.');
+    if (!draft['SKILL.md']?.trim()) return fail('A proposta não tem o arquivo principal da competência. Nada foi aprendido.');
     const problems = [
       ...src.files.filter((f) => f.status !== 'lido').map((f) => `Documento não lido: ${f.name} (${f.detail ?? f.status})`),
       ...src.files.filter((f) => f.detail === 'cortado para caber').map((f) => `Documento lido em parte: ${f.name} (cortado para caber)`),
@@ -334,7 +341,7 @@ export class Trainings {
     }
     let files: Record<string, string>;
     try { files = await this.ctl(ws).apply(pending, t.skill_name); }
-    catch (err) { throw new HttpError(502, 'apply_failed', `O motor de IA não gravou a competência: ${err instanceof Error ? err.message : String(err)}. Nada mudou; tente aprovar de novo.`); }
+    catch (err) { throw new HttpError(502, 'apply_failed', `A equipe de IA não gravou a competência${porque(err)}. Nada mudou; tente aprovar de novo.`); }
     const meta = skillMeta(files['SKILL.md'] ?? '');
     const src = this.db.seal(ws, t.sources); // a leitura devolve decifrado: cifra de novo para a versão
     this.db.tx(() => {
@@ -365,12 +372,12 @@ export class Trainings {
       if (s.status === 'removida') throw new HttpError(409, 'removed', 'Competência removida: restaure uma versão para usá-la de novo.');
       this.db.run('UPDATE agent_skills SET status = ?, updated_at = ? WHERE id = ?', action === 'ativar' ? 'ativa' : 'desativada', now(), s.id);
     } else if (action === 'remover') {
-      await this.ctl(ws).remove(s.name).catch((err) => { throw new HttpError(502, 'remove_failed', `O motor de IA não removeu a competência: ${err instanceof Error ? err.message : String(err)}`); });
+      await this.ctl(ws).remove(s.name).catch((err) => { throw new HttpError(502, 'remove_failed', `A equipe de IA não removeu a competência${porque(err)}. Tente de novo.`); });
       this.db.run("UPDATE agent_skills SET status = 'removida', updated_at = ? WHERE id = ?", now(), s.id);
     } else {
       const v = this.db.get<{ files: string; sources: string; version: number }>('SELECT files, sources, version FROM agent_skill_versions WHERE skill_id = ? AND version = ?', s.id, Number(version ?? 0));
       if (!v) throw notFound('versão');
-      const files = await this.ctl(ws).restore(s.name, parse(v.files, {})).catch((err) => { throw new HttpError(502, 'restore_failed', `O motor de IA não restaurou a competência: ${err instanceof Error ? err.message : String(err)}`); });
+      const files = await this.ctl(ws).restore(s.name, parse(v.files, {})).catch((err) => { throw new HttpError(502, 'restore_failed', `A equipe de IA não restaurou a competência${porque(err)}. Tente de novo.`); });
       const next = Number(this.db.get<{ v: number }>('SELECT MAX(version) AS v FROM agent_skill_versions WHERE skill_id = ?', s.id)?.v ?? 0) + 1;
       const meta = skillMeta(files['SKILL.md'] ?? '');
       this.db.run('INSERT INTO agent_skill_versions (id, workspace_id, skill_id, version, files, sources, training_id, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',

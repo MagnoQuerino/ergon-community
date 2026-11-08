@@ -66,7 +66,7 @@ function NpcToggle({ dona }: { dona: boolean }) {
   const set = async (v: boolean) => { setErr(null); try { await api.put('/api/city/settings', { npc: v }); s.reload(); } catch (e) { setErr(errMsg(e)); } };
   return (
     <div className="row sec-toggle ws-npc">
-      <div><b>Exibir Alexandre Magno</b><p className="muted small">O fundador aposentado passeia pela cidade. Não é agente, não trabalha e não ocupa vaga. Desligar só o esconde neste workspace.</p></div>
+      <div><b>Exibir Alexandre Magno</b><p className="muted small">Alexandre Magno passeia pela cidade, já aposentado das conquistas. Não é agente, não trabalha e não ocupa vaga. Desligar só o esconde neste workspace.</p></div>
       <button role="switch" aria-checked={on} aria-label="Exibir Alexandre Magno na cidade" className={`switch ${on ? 'switch--on' : ''}`} disabled={!dona || !s.data} onClick={() => void set(!on)}>
         <span className="switch__knob" /><span className="switch__txt">{on ? 'Ligado' : 'Desligado'}</span>
       </button>

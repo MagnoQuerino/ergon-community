@@ -7,6 +7,7 @@
  * As listas ligadas trazem título, descrição, situação (concluída ou não), prazo e responsável, e o que muda aqui volta ao
  * aplicativo (conexoes/espelho.ts).
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from '../config.ts';
@@ -14,7 +15,7 @@ import type { Db } from '../db/db.ts';
 import { HttpError, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { ProviderError, type BoardSnapshot, type ExternalBoard, type TaskProvider } from './mirror.ts';
-import { SSO, SsoAuth, isSso, type SsoKind } from './sso.ts';
+import { SSO, STATE_TTL, SsoAuth, isSso, type Etapa, type SsoKind } from './sso.ts';
 import { FieldCipher } from '../security/fields.ts';
 import { dueAt, dueOf } from './due.ts';
 import { CONECTORES, conferir } from './conexoes/conectores/index.ts';
@@ -187,6 +188,94 @@ export function setIntegration(db: Db, workspaceId: string, kind: IntegrationKin
 }
 
 export const settingsOf = (r: IntegrationRow): Record<string, unknown> => { try { return JSON.parse(r.settings) as Record<string, unknown>; } catch { return {}; } };
+
+// ---------------------------------------------------------------- Microsoft em etapas e o "conectando…"
+/**
+ * O que se sabe de cada etapa do consentimento da Microsoft além do que a conta deu (que mora na credencial): o login dela está
+ * em andamento ("pedido", vale 10 minutos), voltou sem dar (ou não voltou: "bloqueado"), ou o administrador aprovou ("aprovado",
+ * falta só a pessoa entrar de novo). Fica nas configurações da conexão, junto do `state` estável do link do administrador.
+ */
+export type EstadoEtapa = 'pedido' | 'bloqueado' | 'aprovado';
+export interface MarcaEtapa { estado: EstadoEtapa; em: string; erro?: string | null }
+/** baseBloqueada: o primeiro login voltou dizendo que a empresa exige o administrador (antes de haver conta conectada) */
+export interface Consentimento { etapas?: Partial<Record<Etapa, MarcaEtapa>>; estadoAdmin?: string; baseBloqueada?: { em: string; erro: string | null } | null }
+/** Códigos da Microsoft para "precisa do administrador" (reference-error-codes: 65001 DelegationDoesNotExist, 90094 AdminConsentRequired, 90095 AdminConsentRequiredRequestAccess). */
+export const PRECISA_ADMINISTRADOR = /AADSTS(65001|90094|90095)\b/;
+/**
+ * O motivo de um login que não terminou, em português, para gravar nas marcas das etapas e no last_error (a tela mostra):
+ * nunca o erro cru da Microsoft ou do Google (inglês e código). Um código que não diz nada à pessoa fica só como
+ * referência para o suporte; o erro cru inteiro vai para a evidência da auditoria.
+ */
+export function motivoDoProvedor(kind: 'microsoft' | 'google', error: string | null | undefined, descricao?: string | null): string {
+  const tudo = `${error ?? ''} ${descricao ?? ''}`;
+  const quem = kind === 'google' ? 'O Google' : 'A Microsoft';
+  if (PRECISA_ADMINISTRADOR.test(tudo) || /\b(consent_required|admin_policy_enforced)\b/.test(tudo)) return 'A empresa exige a aprovação do administrador.';
+  if (/AADSTS65004\b/.test(tudo) || error === 'access_denied') return 'A autorização foi recusada na página da conta.';
+  if (!error && !descricao) return `${quem} não mandou resposta ao login. Tente de novo.`;
+  const codigo = /\b(AADSTS\d+)\b/.exec(tudo)?.[1] ?? (error && /^[a-z][a-z_]{2,40}$/.test(error) ? error : null);
+  return codigo ? `${quem} não concluiu a autorização (código ${codigo}, para o suporte).` : `${quem} não concluiu a autorização.`;
+}
+/** erro null: o login deu certo (a marca sai). */
+export function marcarBaseBloqueada(db: Db, workspaceId: string, erro: string | null): void {
+  const r = integrationRow(db, workspaceId, 'microsoft');
+  const c = consentimentoDe(r);
+  if (erro === null && !c.baseBloqueada) return;
+  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, baseBloqueada: erro === null ? null : { em: now(), erro } } } });
+}
+export const consentimentoDe = (r: IntegrationRow): Consentimento => {
+  const c = settingsOf(r).consentimento;
+  return c && typeof c === 'object' ? c as Consentimento : {};
+};
+export function marcarEtapa(db: Db, workspaceId: string, etapa: Etapa, marca: Omit<MarcaEtapa, 'em'> | null): void {
+  const r = integrationRow(db, workspaceId, 'microsoft');
+  const c = consentimentoDe(r);
+  const etapas = { ...(c.etapas ?? {}) };
+  if (marca) etapas[etapa] = { ...marca, em: now() }; else delete etapas[etapa];
+  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, etapas } } });
+}
+/** O `state` do link do administrador: um por workspace, guardado (o link pronto na tela não muda a cada leitura). */
+export function estadoAdmin(db: Db, workspaceId: string): string {
+  const r = integrationRow(db, workspaceId, 'microsoft');
+  const c = consentimentoDe(r);
+  if (c.estadoAdmin && /^[A-Za-z0-9_-]{20,64}$/.test(c.estadoAdmin)) return c.estadoAdmin;
+  const novo = crypto.randomBytes(18).toString('base64url');
+  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, estadoAdmin: novo } } });
+  return novo;
+}
+/** De quem é um `state` de link do administrador (a volta da Microsoft não traz a sessão de ninguém). */
+export function workspaceDoEstadoAdmin(db: Db, estado: string): string | null {
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(estado)) return null;
+  for (const r of db.all<IntegrationRow>("SELECT * FROM integrations WHERE kind = 'microsoft'")) if (consentimentoDe(r).estadoAdmin === estado) return r.workspace_id;
+  return null;
+}
+/**
+ * "Conectando…": o login começou agora (o "conectando…" vence junto com o `state`, em 10 minutos). O estado de antes fica
+ * guardado: um login abandonado volta a ele (uma conexão caída continua caída, com o motivo, e não vira "conectada").
+ */
+export function marcarConectando(db: Db, workspaceId: string, kind: IntegrationKind): void {
+  const r = integrationRow(db, workspaceId, kind);
+  const antes = r.state === 'pending' ? settingsOf(r).antesDeConectar : { state: r.state, last_error: r.last_error ?? null };
+  setIntegration(db, workspaceId, kind, { state: 'pending', last_error: null, settings: { ...settingsOf(r), pendenteDesde: now(), antesDeConectar: antes ?? null } });
+}
+/**
+ * Para onde volta um login que não terminou: sem credencial, desligada; com ela, o estado de antes (caída continua caída,
+ * com o motivo de antes junto do de agora); conectada, continua conectada. As marcas do login saem das configurações.
+ */
+export function voltaDoConectando(r: IntegrationRow, temCredencial: boolean, motivo: string): { state: 'off' | 'connected' | 'error'; last_error: string; settings: Record<string, unknown> } {
+  const { pendenteDesde: _p, antesDeConectar, ...settings } = settingsOf(r);
+  const antes = (antesDeConectar && typeof antesDeConectar === 'object' ? antesDeConectar : {}) as { state?: string; last_error?: string | null };
+  if (!temCredencial) return { state: 'off', last_error: motivo, settings };
+  if (antes.state === 'error') return { state: 'error', last_error: clipTxt(`${motivo} A conexão de antes continua parada${antes.last_error ? `: ${antes.last_error}` : '.'}`, 600), settings };
+  return { state: 'connected', last_error: motivo, settings };
+}
+const clipTxt = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+/** Outra conta entrou neste workspace: as marcas das etapas da conta de antes (aprovado, pedido, bloqueado) não valem para ela. */
+export function limparEtapas(db: Db, workspaceId: string): void {
+  const r = integrationRow(db, workspaceId, 'microsoft');
+  const c = consentimentoDe(r);
+  if (!c.etapas || !Object.keys(c.etapas).length) return;
+  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, etapas: {} } } });
+}
 
 // ---------------------------------------------------------------- HTTP com token do usuário
 const call = (url: string, token: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<any> =>
@@ -450,10 +539,28 @@ export class Integrations {
     this.sso = new SsoAuth(cfg, this.secrets, (ws, kind, antes, conta) => { if (antes !== conta) this.promover(ws, kind); });  this.googleTesting = cfg.googleTesting; }
 
   /** userId: o dono do workspace, que pode usar aqui uma conta dos outros workspaces dele (só ele vê as opções). */
+  /**
+   * Login com a conta que não voltou em 10 minutos (o `state` já venceu): sai do "conectando…" e diz por quê. Com a credencial de
+   * antes, a conexão continua como estava; sem ela, fica desligada. Sem a hora de início (versão anterior), também venceu.
+   */
+  vencerConectando(workspaceId: string, kind: IntegrationKind): IntegrationRow {
+    const r = integrationRow(this.db, workspaceId, kind);
+    if (!isSso(kind) || r.state !== 'pending') return r;
+    const desde = Date.parse(String(settingsOf(r).pendenteDesde ?? ''));
+    if (Number.isFinite(desde) && Date.now() - desde <= STATE_TTL) return r;
+    const tem = !!this.secrets.read(workspaceId, kind);
+    const quem = kind === 'google' ? 'do Google' : 'da Microsoft';
+    const caida = (settingsOf(r).antesDeConectar as { state?: string } | undefined)?.state === 'error';
+    setIntegration(this.db, workspaceId, kind, voltaDoConectando(r, tem, tem && !caida
+      ? `A nova autorização ${quem} não terminou em 10 minutos; a conexão de antes continua valendo.`
+      : `O login ${quem} não terminou em 10 minutos. Para tentar de novo, clique em "Entrar com ${kind === 'google' ? 'o Google' : 'a Microsoft'}".`));
+    return integrationRow(this.db, workspaceId, kind);
+  }
+
   list(workspaceId: string, userId: string | null = null) {
     return INTEGRATIONS.map((d) => {
       // "em breve": nada no banco, só o cartão honesto
-      const r = d.auth === 'soon' ? null : integrationRow(this.db, workspaceId, d.kind);
+      const r = d.auth === 'soon' ? null : isSso(d.kind) ? this.vencerConectando(workspaceId, d.kind) : integrationRow(this.db, workspaceId, d.kind);
       const s = r ? settingsOf(r) : {};
       return {
         kind: d.kind, name: d.name, auth: d.auth, group: d.group, about: d.about, tasks: d.tasks, site: d.site, soon: d.soon ?? null, help: d.help ?? null,
@@ -473,8 +580,19 @@ export class Integrations {
         // Google com o app em teste: a autorização vale 7 dias (depois, entrar de novo); a tela avisa antes. Conta emprestada
         // vence junto com a do workspace onde ela mora (o connected_at daqui é a hora do empréstimo)
         renewBy: d.kind === 'google' && this.googleTesting && r?.state === 'connected' ? this.renovarAte(r) : null,
+        // empresa que não deixa ninguém autorizar sozinho: o primeiro login volta sem a conta, e o pedido ao administrador
+        // aparece já no cartão desconectado (o link da leitura inclui o que o primeiro login pediria)
+        adminBase: d.kind === 'microsoft' && r && r.state !== 'connected' ? this.adminBase(workspaceId, r) : null,
       };
     });
+  }
+
+  /** O pedido ao administrador antes da primeira conexão: só depois que o login da Microsoft voltou dizendo que precisa dele. */
+  private adminBase(workspaceId: string, r: IntegrationRow): { link: string; erro: string | null } | null {
+    const b = consentimentoDe(r).baseBloqueada;
+    if (!b || this.secrets.read(workspaceId, 'microsoft')) return null;
+    const link = this.sso.linkAdministrador(workspaceId, 'leitura', `${estadoAdmin(this.db, workspaceId)}.leitura`);
+    return link ? { link, erro: b.erro ?? null } : null;
   }
 
   private renovarAte(r: IntegrationRow): string | null {

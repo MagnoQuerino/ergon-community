@@ -1,5 +1,26 @@
 # Novidades
 
+## 1.1.0-rc.24 (pré-versão de teste)
+
+- **A equipe passa a receber as melhorias de cada versão.** Antes, a atualização trocava o Ergon mas deixava a equipe
+  na versão antiga, e por isso enviar e-mail e ler o Teams não funcionavam. Agora, ao atualizar, a equipe é renovada
+  sozinha, com tudo o que é seu guardado: logins, memória, conversas e competências. Se a versão nova não chegar (sem
+  internet, por exemplo), a equipe segue trabalhando com a de antes e tenta de novo mais tarde.
+- **Mais espaço no computador:** as versões antigas que não servem mais são retiradas depois da atualização. Os seus
+  dados nunca entram nessa limpeza. Em Configurações › Saúde você vê quanto dá para liberar. A versão anterior do
+  Ergon também sai depois de atualizar.
+- **Backups:** ficam os 7 mais recentes; os mais antigos são apagados sozinhos. A Saúde mostra essa regra.
+- **Geração de imagens liberada:** ela não é mais bloqueada depois que um colega lê conteúdo das suas contas.
+- **Entrega de verdade:** quando um colega não consegue fazer algo na sua conta, o card diz o motivo e oferece "Tentar
+  de novo". Nada aparece como concluído sem ter sido feito. Pedir um rascunho continua sendo só um rascunho.
+- **Microsoft 365 em etapas:** você mesmo autoriza enviar e-mail, mandar mensagem no Teams e criar arquivos. Se a sua
+  empresa exigir a aprovação do administrador para ler o e-mail e o Teams, o Ergon prepara o pedido para você mandar
+  a ele; depois da aprovação, é só clicar em "Já aprovaram? Conectar de novo".
+- **Rotina nova "Teams + e-mail → tarefas":** uma vez por dia, a equipe lê o que chegou e cria as tarefas no seu quadro.
+- **Terminal e Executar código por colega:** ligar essas ferramentas para um colega não faz os outros pedirem
+  confirmação para ler e organizar.
+- Conversar com o Aristóteles pelo Teams: em breve.
+
 ## 1.1.0-rc.23 (pré-versão de teste)
 
 - **A cidade mostra o trabalho de verdade.** Uma etiqueta pequena com o número do card ("#92") aparece junto de quem

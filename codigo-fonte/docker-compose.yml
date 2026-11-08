@@ -96,11 +96,10 @@ services:
     security_opt: ["no-new-privileges:true"]
     mem_limit: 128m
     cpus: 0.5
+    # sem verificação periódica (o mesmo do pacote, deploy/local): com o Podman sem systemd ela nunca roda, e a da
+    # imagem é a do Ergon (porta 8787). Para saber se o gerente está de pé: GET /health na porta 8645, direto.
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8645/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      disable: true
     restart: unless-stopped
     logging:
       driver: json-file

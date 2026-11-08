@@ -76,7 +76,7 @@ export function AtividadeView() {
       {tab === 'execucoes' && <div className="table-wrap"><table className="table"><thead><tr><th>Criada</th><th>Agente</th><th>Tipo</th><th>Modo</th><th>Estado</th><th>Tokens (in/out)</th><th>Custo</th><th>Erro</th><th /></tr></thead>
         <tbody>{runs.data?.map((r) => <tr key={r.id}><td>{t(r.created_at)}</td><td>{r.agent_name}</td><td>{r.kind}</td>
           <td><span className={`badge ${r.mode === 'simulated' ? 'badge--warn' : 'badge--ok'}`}>{r.mode === 'simulated' ? 'simulado' : 'real'}</span></td><td>{r.status}</td>
-          <td>{num(r.tokens_in)} / {num(r.tokens_out)}</td><td>{r.cost_usd === null ? 'não informado' : `US$ ${r.cost_usd.toFixed(4)}`}</td><td className="small">{r.error ?? ''}</td>
+          <td>{num(r.tokens_in)} / {num(r.tokens_out)}</td><td>{r.cost_usd === null ? 'não informado' : `US$ ${r.cost_usd.toFixed(4).replace('.', ',')}`}</td><td className="small">{r.error ?? ''}</td>
           <td>{['queued', 'running', 'waiting_user'].includes(r.status) && <button className="btn btn--sm btn--ghost" onClick={() => cancel(r.id)}>Cancelar</button>}</td></tr>)}</tbody></table></div>}
       {tab === 'regras' && <div className="table-wrap"><table className="table"><thead><tr><th>Proposta em</th><th>Regra</th><th>Estado</th><th /></tr></thead>
         <tbody>{rules.data?.map((r) => <tr key={r.id}><td>{t(r.created_at)}</td><td>{r.text}</td><td>{r.status}</td>

@@ -19,6 +19,9 @@ export const ACCOUNTS: AccountDef[] = [
   { id: 'openai-codex', name: 'ChatGPT (assinatura)', billing: 'subscription', site: 'https://chatgpt.com',
     about: 'Usa a assinatura do ChatGPT que você já paga (Plus, Pro ou Business): sem custo por token, valem a mensalidade e os limites do plano.' },
 ];
+/** conjunto do motor que leva as Conexões (o plugin do Ergon) */
+export const CONEXOES = 'ergon_conexoes';
+
 const billingOf = (provider: string | null | undefined): Billing =>
   !provider ? 'none' : ACCOUNTS.find((a) => a.id === provider)?.billing ?? 'api';
 
@@ -84,14 +87,40 @@ export class AiService {
   }
 
   private need(): HermesControlClient {
-    if (!this.control) throw new HttpError(503, 'ai_unavailable', 'Configuração de IA indisponível: o motor de IA não está ligado nesta instalação.');
+    if (!this.control) throw new HttpError(503, 'ai_unavailable', 'Configuração de IA indisponível: a equipe de IA não está ligada nesta instalação.');
     return this.control;
   }
 
-  /** Lê, em segundo plano, quais ferramentas de IA estão ligadas para os agentes. */
+  /** Lê, em segundo plano, quais ferramentas de IA estão ligadas para os agentes (e quais o motor tem, ligadas ou não). */
   async refreshToolsets(): Promise<void> {
     if (!this.hermes?.toolsets) return;
-    try { setPlatformToolsets((await this.hermes.toolsets()).filter((t) => t.enabled).map((t) => t.name), this.scope); } catch { /* fica o último estado lido */ }
+    try {
+      const all = await this.hermes.toolsets();
+      setPlatformToolsets(all.filter((t) => t.enabled).map((t) => t.name), this.scope, all.map((t) => t.name));
+    } catch { /* fica o último estado lido */ }
+  }
+
+  /**
+   * Conexões ligadas por padrão (ausente = ligado): ao abrir o motor, se o conjunto das Conexões é um dos seguros mas não
+   * está ligado, liga — a menos que a pessoa tenha desligado (`desligadoPelaPessoa`, gravado quando ela tira em
+   * Configurações › Ferramentas). Rede de segurança para motores que vieram de uma versão sem as Conexões. E o contrário:
+   * a pessoa desligou (a escolha só passou a ser gravada na rc.24: as versões de antes não gravavam nada) e o motor voltou
+   * com as Conexões ligadas (renovado, ou a migração do cofre pôs o conjunto na lista): a escolha dela vale de novo ao
+   * abrir. Devolve o que mudou ('ligou', 'desligou') ou null.
+   */
+  async ensureConexoes(desligadoPelaPessoa: boolean): Promise<'ligou' | 'desligou' | null> {
+    if (!this.control) return null;
+    const cur = await this.control.apiToolsets();
+    if (desligadoPelaPessoa) {
+      if (!cur.enabled.includes(CONEXOES)) return null;
+      const enabled = await this.control.setApiToolsets(cur.enabled.filter((t) => t !== CONEXOES));
+      setPlatformToolsets(enabled, this.scope);
+      return enabled.includes(CONEXOES) ? null : 'desligou';
+    }
+    if (!cur.safe.includes(CONEXOES) || cur.enabled.includes(CONEXOES)) return null;
+    const enabled = await this.control.setApiToolsets([...new Set([...cur.enabled, CONEXOES])]);
+    setPlatformToolsets(enabled, this.scope);
+    return enabled.includes(CONEXOES) ? 'ligou' : null;
   }
 
   /** Modelo padrão da conta (cache de 60 s; usado também para saber se há custo por uso). */
@@ -132,7 +161,7 @@ export class AiService {
 
   private async modelOptions(refresh = false): Promise<ModelOptions> {
     if (!refresh && this.models && Date.now() - this.models.at < 5 * 60_000) return this.models.data;
-    if (!this.hermes?.modelOptions) throw new HttpError(503, 'ai_unavailable', 'Catálogo de modelos indisponível: o motor de IA não está ligado.');
+    if (!this.hermes?.modelOptions) throw new HttpError(503, 'ai_unavailable', 'Catálogo de modelos indisponível: a equipe de IA não está ligada.');
     try {
       const data = await this.hermes.modelOptions(refresh);
       this.models = { at: Date.now(), data };
@@ -256,7 +285,7 @@ export class AiService {
   /** Chave própria: o motor confere a chave no provedor e grava; sem modelo padrão, já escolhe um para começar. */
   async setByok(provider: string, key: string): Promise<{ verified: boolean; starterModel: string | null }> {
     const c = this.need();
-    if (!c.setByok) throw new HttpError(503, 'ai_unavailable', 'o motor desta instalação não aceita chave própria');
+    if (!c.setByok) throw new HttpError(503, 'ai_unavailable', 'esta versão da equipe de IA não aceita chave própria');
     const r = await c.setByok(provider, key.trim()).catch((e: unknown) => {
       // recusa do motor/provedor (chave errada, formato): vira mensagem para a pessoa, não "erro interno"
       const st = (e as { status?: number }).status;
@@ -267,7 +296,7 @@ export class AiService {
   }
   async removeByok(provider: string): Promise<void> {
     const c = this.need();
-    if (!c.removeByok) throw new HttpError(503, 'ai_unavailable', 'o motor desta instalação não aceita chave própria');
+    if (!c.removeByok) throw new HttpError(503, 'ai_unavailable', 'esta versão da equipe de IA não aceita chave própria');
     await c.removeByok(provider);
     this.models = null; this.def = null;
   }
@@ -275,7 +304,7 @@ export class AiService {
   /** Endpoint próprio (OpenAI-compatível): o motor confere o endereço, lista os modelos e cadastra. */
   async addByokCustom(c0: ByokCustomInput): Promise<{ id: string; models: number; starterModel: string | null }> {
     const c = this.need();
-    if (!c.addByokCustom) throw new HttpError(503, 'ai_unavailable', 'o motor desta instalação não aceita endpoint próprio');
+    if (!c.addByokCustom) throw new HttpError(503, 'ai_unavailable', 'esta versão da equipe de IA não aceita endereço próprio');
     const r = await c.addByokCustom(c0).catch((e: unknown) => {
       const st = (e as { status?: number }).status;
       throw st && st < 500 ? new HttpError(400, 'byok', (e as Error).message) : e;
@@ -285,7 +314,7 @@ export class AiService {
   }
   async removeByokCustom(id: string): Promise<void> {
     const c = this.need();
-    if (!c.removeByokCustom) throw new HttpError(503, 'ai_unavailable', 'o motor desta instalação não aceita endpoint próprio');
+    if (!c.removeByokCustom) throw new HttpError(503, 'ai_unavailable', 'esta versão da equipe de IA não aceita endereço próprio');
     await c.removeByokCustom(id);
     this.models = null; this.def = null;
   }

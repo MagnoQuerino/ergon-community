@@ -245,7 +245,7 @@ texto do agente; os gráficos de barras (por mês, por categoria) são desenhado
 | Tarefas propostas | Planejador, Secretário | — (sem proposta, **em parte**) |
 | Datas sugeridas | rotinas que planejam ou rascunham | — (datas novas são ditas como sugestões, não reprovam) |
 
-## As 24 rotinas
+## As 25 rotinas
 
 | Rotina | Quando (padrão) | Quem | Pede ou acompanha | Entrega |
 |---|---|---|---|---|
@@ -258,6 +258,7 @@ texto do agente; os gráficos de barras (por mês, por categoria) são desenhado
 | Caçador de Pendências | seg, qua e sex 09:30 (sinal) | Hesíodo | — (e-mail) | pendências + cobranças para copiar |
 | Caixa de Entrada Inteligente | seg–sex 07:45 (novidades) | Aspásia | — (e-mail) | resumo priorizado |
 | Assistente de Respostas | quando pedir | Aspásia | qual e-mail (opcional) | rascunhos de resposta |
+| Teams + e-mail → tarefas | seg–sex 17:45 (uma rodada por dia) | Aspásia | — (Teams e e-mail pelas Conexões) | tarefas criadas no aplicativo, cada uma com a sua confirmação, a menos que você ligue "Liberar tudo" |
 | Preparador de Reuniões | seg–sex 07:30 (sinal) | Aristóteles | qual reunião (opcional) | pauta, pendências, perguntas |
 | Secretário de Reuniões | quando pedir | Aristóteles | ata colada ou arquivo | decisões + tarefas propostas |
 | Relatório Semanal | sex 16:00 | Arquimedes | — | relatório + planilha da semana |

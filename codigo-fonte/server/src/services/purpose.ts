@@ -335,12 +335,21 @@ export class Purpose {
       need = 'info';
       question = questionIn(output) ?? clip(res.justification, 400);
       text = me ? `Preciso de uma informação sua para seguir com o ${card}: ${question}` : `${who} precisa de uma informação sua para seguir com o ${card}: ${question}`;
+    } else if (res.state === 'descartado') {
+      // você recusou no cartão: o card fica aberto, e a conversa pergunta o que mudar (ou você cancela o card)
+      need = 'info';
+      let ev: { pergunta?: unknown } = {};
+      try { ev = JSON.parse(res.evidence) as { pergunta?: unknown }; } catch { /* sem a pergunta: vai a justificativa */ }
+      question = typeof ev.pergunta === 'string' && ev.pergunta ? ev.pergunta : clip(res.justification, 400);
+      text = `Nada foi feito no ${card}: ${question}`;
     } else if (res.state === 'aguardando_aprovacao' && this.db.get('SELECT 1 AS x FROM tasks WHERE id = ? AND delivered_at IS NOT NULL', taskId)) {
       // entregue a você: quem recebeu o pedido entrega o trabalho aqui; Aprovar e Pedir ajustes vêm logo depois
       this.closeRequests(workspaceId, taskId, 'entregue para a sua aprovação', 'rejected');
       this.dispatch(workspaceId, link.conversationId);
       return;
     } else if (res.state === 'aguardando_aprovacao' || res.state === 'sem_confirmacao') {
+      // "confirme quando estiver feito" só para o que nenhuma conta conectada faz (results.ts): o resto vale pelo
+      // registro do serviço, e o que não foi feito é falha, sem Aprovar
       need = 'approval';
       text = res.state === 'sem_confirmacao'
         ? `O ${card} está preparado, mas é algo a fazer fora do Ergon: confirme aqui quando estiver feito.`
@@ -349,8 +358,9 @@ export class Purpose {
       need = 'review';
       text = `${me ? 'A minha resposta' : `A resposta de ${who}`} para o ${card} não passou na conferência: ${clip(res.justification, 300)} Você pode aprovar assim mesmo ou devolver com uma instrução.`;
     } else if (res.state === 'falha') {
+      // falha nunca vira aprovação: o cartão oferece tentar de novo (e o card pode ser descartado)
       need = 'retry';
-      text = `${me ? 'Não consegui' : `${who} não conseguiu`} terminar o ${card}: ${clip(res.justification, 300)}`;
+      text = `${me ? 'Não consegui' : `${who} não conseguiu`} terminar o ${card}. ${clip(res.justification, 400)}`;
     } else return;
     this.closeRequests(workspaceId, taskId, 'substituído por um pedido mais novo', 'rejected');
     this.say(workspaceId, link.conversationId, text);

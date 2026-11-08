@@ -30,7 +30,7 @@ export function PessoasPanel({ me }: { me: Me }) {
 
       <section className="card">
         <h3>Pessoas neste computador</h3>
-        <p className="muted">Cada pessoa tem a própria conta, a própria equipe e o próprio motor de IA. Os dados de cada uma ficam cifrados com a chave dela: você administra o Ergon, mas não vê nada do que é dos outros{d.isolated ? '' : ' (o isolamento começa quando a segunda pessoa criar a conta)'}.</p>
+        <p className="muted">Cada pessoa tem a própria conta e a própria equipe de IA. Os dados de cada uma ficam cifrados com a chave dela: você administra o Ergon, mas não vê nada do que é dos outros{d.isolated ? '' : ' (o isolamento começa quando a segunda pessoa criar a conta)'}.</p>
         <ul className="sec-rows">
           {d.people.map((p) => (
             <li key={p.id}>
@@ -44,9 +44,9 @@ export function PessoasPanel({ me }: { me: Me }) {
         {removing && (
           <form className="lock-warn" role="alertdialog" aria-label="Remover conta" onSubmit={(e) => {
             e.preventDefault();
-            void act('remove', async () => { await api.del(`/api/people/${removing.id}`, { confirm: removing.typed }); setRemoving(null); }, 'Conta removida: a chave dela saiu primeiro, depois os dados, os arquivos e o motor dela.');
+            void act('remove', async () => { await api.del(`/api/people/${removing.id}`, { confirm: removing.typed }); setRemoving(null); }, 'Conta removida: a chave dela saiu primeiro, depois os dados, os arquivos e a equipe de IA dela.');
           }}>
-            <p><b>Remover a conta de {removing.username}?</b> A equipe, as conversas, as tarefas, os arquivos, as conexões e o motor de IA dessa pessoa são apagados de vez — nem você nem ela conseguem recuperar. Se ela quiser guardar algo, peça para baixar antes; e faça um backup (Configurações › Saúde) se tiver dúvida.</p>
+            <p><b>Remover a conta de {removing.username}?</b> A equipe de IA, as conversas, as tarefas, os arquivos e as conexões dessa pessoa são apagados de vez — nem você nem ela conseguem recuperar. Se ela quiser guardar algo, peça para baixar antes; e faça um backup (Configurações › Saúde) se tiver dúvida.</p>
             <label className="field">Digite o usuário dela para confirmar<input required autoFocus value={removing.typed} onChange={(e) => setRemoving({ ...removing, typed: e.target.value })} /></label>
             <div className="row">
               <button className="btn btn--danger btn--sm" disabled={busy === 'remove' || removing.typed !== removing.username}>{busy === 'remove' ? 'Removendo…' : 'Remover de vez'}</button>

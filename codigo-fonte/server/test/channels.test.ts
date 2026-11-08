@@ -96,6 +96,8 @@ describe('Todoist e Microsoft: conectado só depois de conferir; o que a pessoa 
   let h: Harness; let s: Session;
   const realFetch = globalThis.fetch;
   const TOKEN = 'tok_0123456789abcdefTODOIST';
+  /** o Todoist passa a recusar a leitura das listas (credencial revogada lá) */
+  let recusarListas = false;
   before(async () => {
     h = await harness({ msClientId: null });
     s = await setupOwner(h);
@@ -105,6 +107,7 @@ describe('Todoist e Microsoft: conectado só depois de conferir; o que a pessoa 
       const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } });
       if (!url.startsWith('https://api.todoist.com/')) return realFetch(input, init);
       if (auth !== `Bearer ${TOKEN}`) return json({ error: 'unauthorized' }, 401);
+      if (recusarListas && url.endsWith('/projects')) return json({ error: 'Invalid token' }, 401);
       if (url.endsWith('/user')) return json({ full_name: 'Alexandre' });
       if (url.includes('/projects/p1/collaborators')) return json({ results: [{ id: 'u1', name: 'Maria' }], next_cursor: null });
       if (url.endsWith('/projects')) return json({ results: [{ id: 'p1', name: 'Pessoal', updated_at: '2026-10-01' }], next_cursor: null });
@@ -145,9 +148,24 @@ describe('Todoist e Microsoft: conectado só depois de conferir; o que a pessoa 
     assert.equal(again.json.created, 0, 'sincronizar de novo não duplica');
   });
 
+  test('listas recusadas pelo serviço: o cartão pede conectar de novo, sem o erro cru em inglês', async () => {
+    recusarListas = true;
+    try {
+      const r = await req(h, 'GET', '/api/integrations/todoist/lists', s);
+      assert.equal(r.status, 502);
+      assert.equal(r.json.message, 'o serviço recusou o acesso: conecte a conta de novo em Conexões');
+      const erro = h.db.get<{ last_error: string }>("SELECT last_error FROM integrations WHERE kind = 'todoist'")!.last_error;
+      assert.equal(erro, r.json.message, 'o cartão mostra o mesmo texto');
+      assert.doesNotMatch(erro, /\btoken\b|Invalid|401/i);
+    } finally { recusarListas = false; }
+  });
+
   test('Microsoft sem o app registrado: diz o que falta, sem fingir conexão', async () => {
     const r = await req(h, 'POST', '/api/integrations/microsoft/start', s);
-    assert.equal(r.status, 409); assert.match(r.json.message, /ERGON_MS_CLIENT_ID/);
+    // a tela diz o que falta em português (o nome da variável fica em setup.needs, para quem instala)
+    assert.equal(r.status, 409);
+    assert.equal(r.json.message, 'Falta registrar o aplicativo Ergon na Microsoft (Entra): é um passo único de quem instala o Ergon (veja o guia de instalação).');
+    assert.doesNotMatch(r.json.message, /ERGON_|docs\/|\.md\b/);
     const cb = await h.app.inject({ method: 'GET', url: '/api/integrations/microsoft/callback?state=falso&code=x' });
     assert.equal(cb.statusCode, 302); assert.match(String(cb.headers.location), /microsoft=erro/);
   });
@@ -162,7 +180,10 @@ describe('Microsoft com o app registrado: login PKCE', () => {
     const u = new URL(r.json.url);
     assert.equal(u.host, 'login.microsoftonline.com');
     assert.equal(u.searchParams.get('code_challenge_method'), 'S256');
-    assert.match(u.searchParams.get('scope') ?? '', /Tasks\.Read/);
+    // o primeiro login pede só o que a política padrão da Microsoft deixa a própria pessoa autorizar (etapa base, sso.ts);
+    // tarefas (Tasks.ReadWrite) estão na lista de exceções e vêm na etapa de leitura
+    assert.match(u.searchParams.get('scope') ?? '', /Mail\.Send/);
+    assert.doesNotMatch(u.searchParams.get('scope') ?? '', /Tasks\./);
     assert.match(u.searchParams.get('redirect_uri') ?? '', /\/api\/integrations\/microsoft\/callback$/);
     await h.close();
   });

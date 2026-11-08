@@ -20,7 +20,17 @@
  *     api/channel-post-messages, api/chatmessage-post, api/resources/chatmessage, api/chat-get, api/chat-list-members, api/team-get, api/channel-get
  *   cartão de confirmação: api/resources/message (replyTo), api/message-createreply e api/message-createreplyall (replyTo fica a cargo de quem responde),
  *     api/resources/mailfolder (parentFolderId, msgfolderroot), api/resources/event (type, isOrganizer); paginação: paging
+ * Conferido em 08/11/2026:
+ *   api/chat-list (Chat.ReadBasic basta para listar; $top até 50; $orderby só lastMessagePreview/createdDateTime desc; $expand=members para em 25),
+ *   api/chat-get e api/chat-list-members (Chat.ReadBasic), api/chat-list-messages (Chat.Read; não existe para conta pessoal),
+ *   api/channel-list-messages (ChannelMessage.Read.All, que sempre exige administrador; $top até 50), api/chat-post (pessoa de outra
+ *   organização só entra pelo id e pelo tenantId dela, nunca pelo e-mail), best-practices-concept (client-request-id; 503 com espera),
+ *   resources/teams-api-overview ("Polling requirements": consultar o mesmo recurso em laço viola os termos de uso; tudo aqui é sob
+ *   demanda, num pedido da pessoa ou numa rotina, nunca numa vigia), e
+ *   https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/manage-app-consent-policies (o que o usuário comum autoriza
+ *   sozinho na política padrão "Let Microsoft manage your consent settings": ver ESCOPOS_MICROSOFT, no fim do arquivo)
  */
+import crypto from 'node:crypto';
 import { fold } from '../../../lib/util.ts';
 import { NetworkFailure, fetchWithPolicy } from '../../../lib/http.ts';
 import { readDocument } from '../../doc-isolated.ts';
@@ -46,6 +56,15 @@ const SEL_PASTA = 'id,displayName,parentFolderId,childFolderCount,totalItemCount
 const SEL_ARQUIVO = 'id,name,size,file,folder,webUrl,lastModifiedDateTime,parentReference,remoteItem';
 
 const enc = encodeURIComponent;
+/**
+ * O serviço (servico.ts) diz, quando sabe, se a conta deu uma permissão: com ela, a ação escolhe o pedido que a conta alcança
+ * (a lista de conversas do Teams sem a prévia, por exemplo). Sem a informação, a ação tenta e se ajusta à recusa.
+ */
+export type CtxMicrosoft = CtxAcao & { temEscopo?: (escopo: string) => boolean };
+const tem = (c: CtxAcao, escopo: string): boolean | undefined => (c as CtxMicrosoft).temEscopo?.(escopo);
+/** Espera entre tentativas (os testes trocam: nada de esperar de verdade). */
+let esperar = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+export function setEsperaMicrosoft(fn: ((ms: number) => Promise<void>) | null): void { esperar = fn ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))); }
 /** Parâmetros percent-codificados (query-parameters: "RFC 3986"); os nomes `$...` ficam como na documentação. */
 const qs = (p: Record<string, string | number | undefined>): string =>
   Object.entries(p).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `${k}=${enc(String(v))}`).join('&');
@@ -807,6 +826,31 @@ async function subir(uploadUrl: string, bytes: Buffer): Promise<any> {
   if (res.status !== 200 && res.status !== 201) throw falhaArquivo(res.status);
   return res.json().catch(() => ({}));
 }
+/**
+ * A busca no OneDrive às vezes responde 500 por um instante (visto no Testar). Além das repetições rápidas de cada chamada
+ * (lib/http.ts), a busca inteira tenta até 3 vezes, com espera crescente e teto, cada vez com o próprio client-request-id
+ * (best-practices-concept: é o que o suporte da Microsoft procura). O registro leva o código e os ids, nunca o que foi procurado.
+ */
+const TENTATIVAS_BUSCA = 3;
+const ESPERAS_BUSCA = [1000, 3000];
+const TETO_ESPERA_BUSCA = 8000;
+async function buscaComTentativas(c: CtxAcao, url: string): Promise<any> {
+  const ids: string[] = [];
+  for (let i = 1; ; i++) {
+    const id = crypto.randomUUID();
+    ids.push(id);
+    try { return await c.http(url, { headers: { 'client-request-id': id } }); } catch (e) {
+      const status = e instanceof ProviderError ? e.status : null;
+      if (status === null || status < 500) throw e;
+      if (i >= TENTATIVAS_BUSCA) {
+        console.warn(`[conexoes] arquivos.buscar: o OneDrive respondeu ${status} nas ${i} tentativas (client-request-id: ${ids.join(', ')})`);
+        throw new ProviderError('unavailable', `o OneDrive respondeu ${status} nas ${i} tentativas; tente de novo daqui a pouco (código para o suporte da Microsoft: ${id})`, { status });
+      }
+      await esperar(Math.min(ESPERAS_BUSCA[i - 1] ?? TETO_ESPERA_BUSCA, TETO_ESPERA_BUSCA));
+    }
+  }
+}
+
 const EXT_TEXTO = /\.(txt|md|csv|tsv|json|xml|html?|log)$/i;
 /** Caminho dentro do OneDrive: sem subir pasta e sem os caracteres que o OneDrive recusa. */
 function caminhoSeguro(valor: string): string[] {
@@ -825,7 +869,7 @@ const ACOES_ARQUIVOS: Acao[] = [
     async run(c, a) {
       const cur = await abreCursor(c, a, 'arquivos');
       const url = cur ? cur.u : `${GRAPH}/me/drive/search(q='${enc(odata(precisa(a, 'texto', 200)))}')?${qs({ $select: SEL_ARQUIVO, $top: num(a, 'limite', 25, 100) })}`;
-      const j = await c.http(url);
+      const j = await buscaComTentativas(c, url);
       const linhas = ((j.value ?? []) as any[]).map((x) => {
         // compartilhado: o item que vale é o de remoteItem, no drive de quem compartilhou (api/driveitem-search)
         const r = x.remoteItem ?? null;
@@ -901,16 +945,41 @@ const ACOES_PESSOAS: Acao[] = [
 // ------------------------------------------------------------------------------------------------- Teams
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const rotuloChat = (ch: any): string => (ch.topic ? d(ch.topic, 120) : ((ch.members ?? []) as any[]).map((m) => d(m.displayName ?? m.email, 80)).filter(Boolean).join(', ') || 'conversa');
-/** Id da conversa, ou o nome exato (tópico, ou a outra pessoa de uma conversa 1:1). Com dúvida, devolve as opções. */
+/** Até 5 páginas de 50 conversas (chat-list: $top até 50), das mais recentes para as antigas: quem procura pelo nome quase sempre fala de uma recente. */
+const PAGINAS_DE_CONVERSAS = 5;
+/** "Ana e Bia", "Ana, Bia", "Ana & Bia": as pessoas de um grupo sem nome. */
+const pessoasDe = (v: string): string[] => v.split(/\s*(?:,|;|&|\s+e\s+|\s+and\s+)\s*/i).map((x) => fold(x.trim())).filter(Boolean);
+const eDela = (m: any, nome: string): boolean => fold(String(m.displayName ?? '')) === nome || fold(String(m.email ?? '')) === nome;
+/**
+ * Id da conversa, ou o nome exato: o tópico, a outra pessoa de uma conversa 1:1, ou as pessoas de um grupo sem nome ("Ana e Bia":
+ * o grupo com exatamente elas e a própria conta). Com dúvida, devolve as opções. Chat.ReadBasic basta (chat-list).
+ */
 async function chatDe(c: CtxAcao, valor: string): Promise<string> {
   const v = valor.trim();
   if (/^19:/.test(v)) return v;
-  const j = await c.http(`${GRAPH}/me/chats?${qs({ $expand: 'members', $top: 50 })}`);
-  const chats = (j.value ?? []) as any[];
+  const url = (ordem: boolean) => `${GRAPH}/me/chats?${qs({ $expand: 'members', $orderby: ordem ? 'lastMessagePreview/createdDateTime desc' : undefined, $top: 50 })}`;
+  // a ordem pela última mensagem pode depender da leitura do Teams: recusada, vale a ordem do serviço
+  let chats: any[];
+  try { chats = await paginas(c, url(true), PAGINAS_DE_CONVERSAS); } catch (e) {
+    if (!recusou(e)) throw e;
+    chats = await paginas(c, url(false), PAGINAS_DE_CONVERSAS);
+  }
   const f = fold(v);
-  const certo = chats.filter((ch) => fold(String(ch.topic ?? '')) === f || (ch.chatType === 'oneOnOne' && ((ch.members ?? []) as any[]).some((m) => fold(String(m.displayName ?? '')) === f || fold(String(m.email ?? '')) === f)));
+  const nomes = pessoasDe(v);
+  const membros = (ch: any): any[] => (ch.members ?? []) as any[];
+  // grupo: cada pessoa dita é um participante diferente, e só sobra a própria conta (o $expand traz até 25 participantes)
+  const doGrupo = (ch: any): boolean => {
+    const ms = membros(ch);
+    if (ch.chatType !== 'group' || ms.length !== nomes.length + 1) return false;
+    const usados = new Set<number>();
+    return nomes.every((n) => { const k = ms.findIndex((m, i) => !usados.has(i) && eDela(m, n)); if (k < 0) return false; usados.add(k); return true; });
+  };
+  const certo = chats.filter((ch) => fold(String(ch.topic ?? '')) === f || (ch.chatType === 'oneOnOne' && membros(ch).some((m) => eDela(m, f))) || (!ch.topic && doGrupo(ch)));
   if (certo.length === 1) return String(certo[0].id);
-  throw new ErroAcao(certo.length ? `mais de uma conversa com "${d(v, 60)}"` : `não achei a conversa "${d(v, 60)}": use o id de teams.conversas, ou teams.nova_conversa`, (certo.length ? certo : chats).slice(0, 30).map((ch) => `${rotuloChat(ch)} (${d(ch.id, 200)})`));
+  // sem acerto exato: as conversas em que aparece alguém dito ajudam mais que a lista inteira
+  const comAlguem = chats.filter((ch) => nomes.some((n) => membros(ch).some((m) => eDela(m, n))));
+  const opcoes = certo.length ? certo : comAlguem.length ? comAlguem : chats;
+  throw new ErroAcao(certo.length ? `mais de uma conversa com "${d(v, 60)}"` : `não achei a conversa "${d(v, 60)}": use o id de teams.conversas, ou teams.nova_conversa`, opcoes.slice(0, 30).map((ch) => `${rotuloChat(ch)} (${d(ch.id, 200)})`));
 }
 async function timeDe(c: CtxAcao, valor: string): Promise<string> {
   const v = valor.trim();
@@ -946,15 +1015,39 @@ const P_CHAT: Param = { tipo: 'texto', obrigatorio: true, descricao: 'id da conv
 const P_TEXTO_TEAMS: Param = { tipo: 'texto', obrigatorio: true, descricao: 'mensagem, sem formatação' };
 const P_TIME: Param = { tipo: 'texto', obrigatorio: true, descricao: 'nome exato ou id do time (de teams.times)' };
 const remetente = (m: any): string => d(m.from?.user?.displayName ?? m.from?.application?.displayName ?? 'sistema', 80);
+/** Para o agente: o conteúdo das conversas depende da etapa de leitura, que na empresa costuma pedir o administrador. */
+const SEM_PREVIA = '\n(Sem a prévia da última mensagem: ler o conteúdo das conversas do Teams ainda não foi liberado nesta conta. Na empresa, isso costuma precisar da aprovação do administrador; a pessoa pede em Conexões › Microsoft 365.)';
+const urlConversas = (limite: number, previa: boolean, ordem = true) => `${GRAPH}/me/chats?${qs({ $expand: previa ? 'members,lastMessagePreview' : 'members', $orderby: ordem ? 'lastMessagePreview/createdDateTime desc' : undefined, $top: limite })}`;
+const FORA_DE_ORDEM = '\n(Esta lista não vem das mais recentes para as mais antigas: essa ordem depende da leitura do Teams, ainda não liberada nesta conta.)';
+const recusou = (e: unknown) => e instanceof ProviderError && e.kind === 'forbidden' && e.status === 403;
 
 const ACOES_TEAMS: Acao[] = [
   {
-    id: 'teams.conversas', risco: 'ler', escopos: ['Chat.Read'], trabalho: true, descricao: 'lista as conversas do Teams, das mais recentes para as mais antigas',
+    // Chat.ReadBasic lista as conversas e quem está nelas (chat-list); a prévia da última mensagem é conteúdo, e vem com Chat.Read
+    id: 'teams.conversas', risco: 'ler', escopos: ['Chat.ReadBasic'], trabalho: true, descricao: 'lista as conversas do Teams, das mais recentes para as mais antigas (com a prévia da última mensagem quando a leitura do Teams está liberada)',
+    rotulo: 'lista as conversas do Teams, das mais recentes para as mais antigas',
     params: { limite: { tipo: 'numero', descricao: 'quantas por página (padrão 25, até 50)' }, cursor: { tipo: 'texto', descricao: 'continuação devolvida pela chamada anterior' } },
     resumo: () => 'Listar as conversas do Teams',
     async run(c, a) {
       const cur = await abreCursor(c, a, 'teams.conversas');
-      const j = await c.http(cur ? cur.u : `${GRAPH}/me/chats?${qs({ $expand: 'members,lastMessagePreview', $orderby: 'lastMessagePreview/createdDateTime desc', $top: num(a, 'limite', 25, 50) })}`);
+      // a continuação repete o pedido da primeira página: a prévia vem nela só se veio na primeira
+      const daConta = tem(c, 'Chat.Read');
+      let previa = cur ? /lastMessagePreview/.test(new URL(cur.u).searchParams.get('$expand') ?? '') : daConta !== false;
+      let ordem = true;
+      const limite = num(a, 'limite', 25, 50);
+      const pedir = () => c.http(urlConversas(limite, previa, ordem));
+      let j: any;
+      if (cur) j = await c.http(cur.u);
+      else {
+        try { j = await pedir(); } catch (e) {
+          // a conta que deu a leitura e mesmo assim foi recusada: a recusa é de verdade
+          if (!recusou(e) || (previa && daConta === true)) throw e;
+          // sem saber o que a conta deu, a recusa pode ser só da prévia: a lista vem sem ela
+          if (previa) { previa = false; try { j = await pedir(); } catch (e2) { if (!recusou(e2)) throw e2; } }
+          // sem a leitura, a ordem pela última mensagem também pode ser recusada: a lista vem na ordem do serviço
+          if (!j) { ordem = false; j = await pedir(); }
+        }
+      }
       const linhas = ((j.value ?? []) as any[]).map((ch) => {
         const u = ch.lastMessagePreview;
         return [`- chat=${d(ch.id, 300)}`, ch.chatType === 'oneOnOne' ? '1:1' : ch.chatType === 'group' ? 'grupo' : ch.chatType === 'meeting' ? 'reunião' : d(ch.chatType, 20), rotuloChat(ch),
@@ -962,16 +1055,26 @@ const ACOES_TEAMS: Acao[] = [
       });
       const cursor = proximo(j, 'teams.conversas');
       const v = caber(linhas);
-      return lido(`${v.linhas.length ? `${v.linhas.length} conversa(s):\n${v.linhas.join('\n')}` : 'Nenhuma conversa encontrada.'}${v.nota}${rodape(cursor)}`);
+      return lido(`${v.linhas.length ? `${v.linhas.length} conversa(s):\n${v.linhas.join('\n')}` : 'Nenhuma conversa encontrada.'}${v.nota}${previa ? '' : SEM_PREVIA}${ordem ? '' : FORA_DE_ORDEM}${rodape(cursor)}`);
     },
   },
   {
     id: 'teams.ler', risco: 'ler', escopos: ['Chat.Read'], trabalho: true, descricao: 'lê as últimas mensagens de uma conversa do Teams, em texto',
-    params: { chat: P_CHAT, limite: { tipo: 'numero', descricao: 'quantas (padrão 20, até 50)' }, cursor: { tipo: 'texto', descricao: 'mensagens mais antigas: continuação devolvida pela chamada anterior' } },
-    resumo: (a) => `Ler a conversa do Teams ${s(a, 'chat')}`,
+    params: {
+      chat: P_CHAT, limite: { tipo: 'numero', descricao: 'quantas (padrão 20, até 50)' },
+      desde: { tipo: 'texto', descricao: 'só o que chegou ou mudou desde esta data (AAAA-MM-DD, ou data e hora): use sempre que o pedido tiver um período, como "Dados desde" nas rotinas' },
+      cursor: { tipo: 'texto', descricao: 'mensagens mais antigas: continuação devolvida pela chamada anterior' },
+    },
+    resumo: (a) => `Ler a conversa do Teams ${s(a, 'chat')}${s(a, 'desde') ? ` desde ${s(a, 'desde')}` : ''}`,
     async run(c, a) {
       const cur = await abreCursor(c, a, 'teams.ler');
-      const j = await c.http(cur ? cur.u : `${GRAPH}/me/chats/${seg(await chatDe(c, precisa(a, 'chat', 400)))}/messages?${qs({ $top: num(a, 'limite', 20, 50), $orderby: 'createdDateTime desc' })}`);
+      // com período, o intervalo de datas vai na própria consulta (a Microsoft pede isso de quem procura mensagens novas).
+      // O filtro só vale com a ordem pela mesma data (chat-list-messages: lastModifiedDateTime aceita gt e lt)
+      const desde = cur ? undefined : instante(a, 'desde', c.tz, false);
+      const q = desde !== undefined
+        ? { $top: num(a, 'limite', 20, 50), $orderby: 'lastModifiedDateTime desc', $filter: `lastModifiedDateTime gt ${iso(desde)}` }
+        : { $top: num(a, 'limite', 20, 50), $orderby: 'createdDateTime desc' };
+      const j = await c.http(cur ? cur.u : `${GRAPH}/me/chats/${seg(await chatDe(c, precisa(a, 'chat', 400)))}/messages?${qs(q)}`);
       // vêm da mais nova para a mais antiga: se não couber, ficam as novas; o agente lê em ordem de conversa
       const v = caber(((j.value ?? []) as any[]).filter((m) => m.messageType === 'message' && !m.deletedDateTime).map((m) => {
         const anexos = ((m.attachments ?? []) as any[]).map((x) => d(x.name, 120)).filter(Boolean);
@@ -982,7 +1085,8 @@ const ACOES_TEAMS: Acao[] = [
     },
   },
   {
-    id: 'teams.enviar', risco: 'enviar', escopos: ['ChatMessage.Send', 'Chat.Read'], trabalho: true, descricao: 'manda uma mensagem numa conversa do Teams que já existe', params: { chat: P_CHAT, texto: P_TEXTO_TEAMS },
+    // achar a conversa e os participantes dela pede só Chat.ReadBasic (chat-list, chat-get, chat-list-members)
+    id: 'teams.enviar', risco: 'enviar', escopos: ['ChatMessage.Send', 'Chat.ReadBasic'], trabalho: true, descricao: 'manda uma mensagem numa conversa do Teams que já existe', params: { chat: P_CHAT, texto: P_TEXTO_TEAMS },
     resumo: (a) => `Enviar no Teams, na conversa ${s(a, 'chat')}, a mensagem: "${s(a, 'texto')}"`,
     async preparar(c, a) {
       inteiro(a, 'texto', MAX_TEAMS);
@@ -1007,10 +1111,17 @@ const ACOES_TEAMS: Acao[] = [
       const destino = destinatarios(a, 'para');
       if (destino.length !== 1) throw new ErroAcao('"para" precisa ser um único e-mail');
       const texto = inteiro(a, 'texto', MAX_TEAMS);
-      const eu = await c.http(`${GRAPH}/me?${qs({ $select: 'id' })}`);
+      const eu = await c.http(`${GRAPH}/me?${qs({ $select: 'id,mail,userPrincipalName' })}`);
       const membro = (usuario: string) => ({ '@odata.type': '#microsoft.graph.aadUserConversationMember', roles: ['owner'], 'user@odata.bind': `${GRAPH}/users('${odata(usuario)}')` });
       let chat: any;
       try { chat = await c.http(`${GRAPH}/chats`, { method: 'POST', kind: 'write', body: { chatType: 'oneOnOne', members: [membro(String(eu.id)), membro(destino[0])] } }); } catch (e) {
+        // outra organização: o Graph só aceita essa pessoa pelo id e pelo tenantId dela (chat-post), nunca pelo e-mail; empresa com
+        // mais de um domínio cai aqui só se o serviço recusar, por isso a conferência vem depois da recusa, não antes
+        const dominio = (x: unknown) => String(x ?? '').split('@')[1]?.toLowerCase() ?? '';
+        const meus = new Set([dominio(eu?.mail), dominio(eu?.userPrincipalName)].filter(Boolean));
+        if (e instanceof ProviderError && [400, 403, 404].includes(e.status ?? 0) && meus.size && !meus.has(dominio(destino[0]))) {
+          throw new ErroAcao(`"${destino[0]}" parece ser de outra organização: daqui, o Teams só abre conversa nova com pessoas da mesma empresa da conta. Se já existe uma conversa com essa pessoa, use teams.enviar com o nome dela; se não, mande um e-mail (email.enviar). Nada foi enviado`);
+        }
         if (e instanceof ProviderError && (e.status === 400 || e.status === 404)) throw new ErroAcao(`o Teams não abriu conversa com "${destino[0]}": precisa ser o e-mail de login da pessoa (${e.message})`);
         throw e;
       }
@@ -1032,6 +1143,24 @@ const ACOES_TEAMS: Acao[] = [
     async run(c, a) {
       const todos = await paginas(c, urlCanais(await timeDe(c, precisa(a, 'time', 300))));
       return lido(todos.length ? todos.map((x) => `- ${d(x.displayName, 120)} | canal=${d(x.id, 200)}${x.description ? ` | ${d(x.description, 200)}` : ''}`).join('\n') : 'Nenhum canal encontrado.');
+    },
+  },
+  {
+    // ChannelMessage.Read.All sempre exige o administrador (permissions-reference): etapa opcional, pedida à parte
+    id: 'teams.ler_canal', risco: 'ler', escopos: ['ChannelMessage.Read.All', 'Team.ReadBasic.All', 'Channel.ReadBasic.All'], trabalho: true,
+    descricao: 'lê as mensagens mais recentes de um canal de um time do Teams, em texto (sem as respostas)', rotulo: 'lê as mensagens de um canal do Teams',
+    params: { time: P_TIME, canal: { tipo: 'texto', obrigatorio: true, descricao: 'nome exato ou id do canal (de teams.canais)' }, limite: { tipo: 'numero', descricao: 'quantas (padrão 20, até 50)' } },
+    resumo: (a) => `Ler o canal ${s(a, 'canal')} do time ${s(a, 'time')} no Teams`,
+    async run(c, a) {
+      const time = await timeDe(c, precisa(a, 'time', 300));
+      const canal = await canalDe(c, time, precisa(a, 'canal', 300));
+      // channel-list-messages: $top até 50; a ordem é a da última mudança de cada assunto (mensagem e respostas)
+      const j = await c.http(`${GRAPH}/teams/${seg(time)}/channels/${seg(canal)}/messages?${qs({ $top: num(a, 'limite', 20, 50) })}`);
+      const v = caber(((j.value ?? []) as any[]).filter((m) => m.messageType === 'message' && !m.deletedDateTime).map((m) => {
+        const assunto = m.subject ? ` [${d(m.subject, 120)}]` : '';
+        return `- ${dataHora(c.tz, Date.parse(m.createdDateTime))} ${remetente(m)}${assunto}: ${d(corpoDe(m.body), 2000)}`;
+      }));
+      return lido(v.linhas.length ? `${v.linhas.join('\n')}${v.nota}` : 'Nenhuma mensagem de pessoas neste canal.');
     },
   },
   {
@@ -1060,14 +1189,37 @@ const ACOES_TEAMS: Acao[] = [
 export const ACOES_MICROSOFT: Acao[] = [...ACOES_EMAIL, ...ACOES_AGENDA, ...ACOES_ARQUIVOS, ...ACOES_PESSOAS, ...ACOES_TEAMS];
 
 /**
- * Permissões delegadas que cobrem as ações e o espelho de tarefas (Tasks.ReadWrite, escrita/microsoft.ts). As de leitura ficam ao
- * lado das de escrita porque cada ação diz a que precisa, e o serviço confere pelo nome: quem conectou só para ler segue lendo e
- * só precisa autorizar de novo para escrever. Nenhuma exige
- * consentimento de administrador na tabela oficial (permissions-reference, "AdminConsentRequired" da coluna Delegated = No), mas a
- * organização pode bloquear o consentimento do usuário.
- * A leitura de mensagens de canal (ChannelMessage.Read.All) exige administrador: por isso não há ação que leia canal.
+ * Permissões delegadas que cobrem as ações e o espelho de tarefas (Tasks.ReadWrite, escrita/microsoft.ts), pedidas em etapas
+ * (sso.ts), porque "não exige administrador" na tabela oficial (permissions-reference) não quer dizer que o usuário comum consiga
+ * autorizar: a política padrão dos tenants novos, "Let Microsoft manage your consent settings", deixa o usuário autorizar quase
+ * tudo, MENOS a lista de FORA_DO_CONSENTIMENTO_DO_USUARIO (manage-app-consent-policies, conferido em 08/11/2026). Pedir tudo de
+ * uma vez fazia a conexão de uma empresa típica nem completar sem o administrador.
+ *   A (base e trabalho): o que a política padrão deixa o próprio usuário autorizar. Enviar e-mail, criar arquivo no OneDrive e,
+ *     em conta de trabalho, ver e mandar mensagens no Teams.
+ *   B (leitura, e Chat.Read em conta de trabalho): ler e organizar. Está na lista de exceções: na empresa, costuma precisar do
+ *     administrador, que aprova pelo link que a tela de Conexões monta (sso.ts, linkAdministrador). Conta pessoal autoriza sozinha.
+ *   C (canais, opcional): ler mensagens de canal. ChannelMessage.Read.All sempre exige o administrador.
+ * Cada ação diz a que precisa, e o serviço confere pelo nome: o que a conta já deu continua valendo, e a falta de uma etapa só
+ * tira as ações dela.
  */
-export const ESCOPOS_MICROSOFT: { base: string[]; trabalho: string[] } = {
-  base: ['User.Read', 'Tasks.ReadWrite', 'Mail.Read', 'Mail.ReadWrite', 'Mail.Send', 'Calendars.Read', 'Calendars.ReadWrite', 'Files.ReadWrite', 'Files.Read.All', 'People.Read'],
-  trabalho: ['Chat.Read', 'Chat.Create', 'ChatMessage.Send', 'Team.ReadBasic.All', 'Channel.ReadBasic.All', 'ChannelMessage.Send'],
+export const ESCOPOS_MICROSOFT: { base: string[]; trabalho: string[]; leitura: string[]; leituraTrabalho: string[]; canais: string[] } = {
+  base: ['User.Read', 'Mail.Send', 'Files.ReadWrite'],
+  trabalho: ['Chat.ReadBasic', 'Chat.Create', 'ChatMessage.Send', 'Team.ReadBasic.All', 'Channel.ReadBasic.All', 'ChannelMessage.Send'],
+  leitura: ['Mail.Read', 'Mail.ReadWrite', 'Calendars.Read', 'Calendars.ReadWrite', 'Files.Read.All', 'Tasks.ReadWrite', 'People.Read'],
+  leituraTrabalho: ['Chat.Read'],
+  canais: ['ChannelMessage.Read.All'],
 };
+
+/**
+ * Permissões do Microsoft Graph que a política padrão gerenciada pela Microsoft NÃO deixa o usuário comum autorizar
+ * (https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/manage-app-consent-policies, "Microsoft recommended user
+ * consent policy", conferido em 08/11/2026). A Microsoft atualiza essa lista sozinha: o teste confere que a etapa A não pede
+ * nenhuma delas.
+ */
+export const FORA_DO_CONSENTIMENTO_DO_USUARIO = [
+  'Files.Read.All', 'Files.ReadWrite.All', 'Sites.Read.All', 'Sites.ReadWrite.All', 'Mail.Read', 'Mail.ReadWrite', 'Mail.ReadBasic', 'Mail.Read.Shared',
+  'Mail.ReadBasic.Shared', 'Mail.ReadWrite.Shared', 'MailboxItem.Read', 'Calendars.Read', 'Calendars.ReadBasic', 'Calendars.ReadWrite', 'Calendars.Read.Shared',
+  'Calendars.ReadWrite.Shared', 'Chat.Read', 'Chat.ReadWrite', 'OnlineMeetings.Read', 'OnlineMeetings.ReadWrite', 'MailBoxFolder.Read', 'MailBoxFolder.ReadWrite',
+  'MailBoxSettings.Read', 'MailBoxSettings.ReadWrite', 'Contacts.ReadWrite', 'Contacts.Read.Shared', 'Contacts.ReadWrite.Shared', 'Tasks.Read', 'Tasks.Read.Shared',
+  'Tasks.ReadWrite', 'Tasks.ReadWrite.Shared', 'People.Read',
+];

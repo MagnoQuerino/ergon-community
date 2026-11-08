@@ -18,7 +18,8 @@ import { characterByKey } from './characters.ts';
 import { marcarRun } from './conexoes/marca.ts';
 import { activeTeam, coordinatorOf } from './team.ts';
 import { teamAgent } from './team-query.ts';
-import { ACCOUNT_SOURCES, CATALOG, CATEGORIES, NEED_LABEL, SOURCES, templateByKey, type ExtraCheck, type FileRef, type Need, type ParamValues, type RoutineConfig, type RoutineTemplate, type SourceId, type Trigger } from './routine-catalog.ts';
+import { acoesRegistradas } from './results.ts';
+import { ACCOUNT_SOURCES, CATALOG, CATEGORIES, NEED_LABEL, SOURCES, TEAMS_POR_DIA, conferirConexoes, leTeams, templateByKey, type ExtraCheck, type FileRef, type Need, type ParamValues, type RoutineConfig, type RoutineTemplate, type SourceId, type Trigger } from './routine-catalog.ts';
 import type { AccountFacts, AccountReader, ReadKind, SourceRead } from './account-reader.ts';
 import { parseNumber, toCsv } from './csv.ts';
 import { buildPptx, slidesFromMarkdown, type Slide } from './pptx.ts';
@@ -810,7 +811,10 @@ export class Routines {
     if (dup) return this.runDetail(workspaceId, dup.id);
     if (busy) throw new HttpError(409, 'busy', 'Esta rotina já está executando: espere terminar.');
     const today = this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = ? AND created_at >= ? AND status != 'missed'", r.id, new Date(Date.now() - 86_400_000).toISOString());
-    if (Number(today?.n ?? 0) >= (c.maxPerDay ?? 6)) throw new HttpError(429, 'routine_limit', `Limite de ${c.maxPerDay ?? 6} execuções desta rotina em 24 h.`);
+    if (Number(today?.n ?? 0) >= (c.maxPerDay ?? 6)) {
+      throw new HttpError(429, 'routine_limit', (c.maxPerDay ?? 6) === 1 ? 'Esta rotina já rodou nas últimas 24 horas (uma rodada por dia).' : `Limite de ${c.maxPerDay ?? 6} execuções desta rotina em 24 horas.`);
+    }
+    if (this.teamsLidoHoje(r)) throw new HttpError(429, 'routine_limit', 'O Teams já foi lido nas últimas 24 horas por outra rotina (uma leitura por dia). Tente de novo amanhã.');
     const input = this.cleanInput(workspaceId, tpl, rawInput, c);
     const lacking = missingParams(tpl, c.params).filter(() => !input.files?.length);
     if (lacking.length) throw new HttpError(409, 'params_required', `Configure antes: ${lacking.join(', ')} (Editar rotina).`);
@@ -820,11 +824,33 @@ export class Routines {
     return this.runDetail(workspaceId, rr.id);
   }
 
+  /**
+   * O Teams já foi lido nas últimas 24 horas por uma rotina deste workspace (qualquer uma que leia o Teams): a Microsoft
+   * permite consultar o mesmo recurso no máximo uma vez por dia (TEAMS_POR_DIA). Rodada perdida ou pulada não leu.
+   */
+  private teamsLidoHoje(r: RoutineRow): boolean {
+    const t = r.template_key ? templateByKey(r.template_key) : undefined;
+    if (!t || !leTeams(t)) return false;
+    const chaves = CATALOG.filter(leTeams).map((x) => x.key);
+    const n = this.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM routine_runs rr JOIN routines x ON x.id = rr.routine_id
+       WHERE rr.workspace_id = ? AND x.template_key IN (${chaves.map(() => '?').join(', ')}) AND rr.created_at >= ? AND rr.status NOT IN ('missed', 'skipped')`,
+      r.workspace_id, ...chaves, new Date(Date.now() - 86_400_000).toISOString())?.n ?? 0;
+    return Number(n) >= TEAMS_POR_DIA;
+  }
+
+  /**
+   * Toda rodada nasce aqui (o botão, o horário, a primeira rodada do preparo): a que leria o Teams de novo no mesmo dia
+   * nasce pulada, com o aviso, e não chega ao agente.
+   */
   private createRun(r: RoutineRow, trigger: 'manual' | 'schedule' | 'chat', key: string, slot: string | null, userId: string | null, status: RoutineRunStatus = 'queued', summary: string | null = null, input: RunInput | null = null): RoutineRunRow | null {
+    if (status === 'queued' && this.teamsLidoHoje(r)) {
+      status = 'skipped';
+      summary = `O Teams já foi lido nas últimas 24 horas (uma leitura por dia): ${trigger === 'schedule' ? 'este horário ficou de fora' : 'esta rodada ficou de fora'}.`;
+    }
     const rid = id('rrn');
     const ins = this.db.run(`INSERT OR IGNORE INTO routine_runs (id, workspace_id, routine_id, version, trigger, slot, idempotency_key, status, summary, requested_by, created_at, finished_at, params)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      rid, r.workspace_id, r.id, r.version, trigger, slot, key, status, summary, userId, now(), status === 'missed' ? now() : null, input ? this.db.seal(r.workspace_id, JSON.stringify(input)) : null);
+      rid, r.workspace_id, r.id, r.version, trigger, slot, key, status, summary, userId, now(), status === 'missed' || status === 'skipped' ? now() : null, input ? this.db.seal(r.workspace_id, JSON.stringify(input)) : null);
     if (!ins.changes) return null;
     this.bus.publish(r.workspace_id, 'routines.changed', { id: r.id, run: rid });
     return this.db.get<RoutineRunRow>('SELECT * FROM routine_runs WHERE id = ?', rid) ?? null;
@@ -1059,7 +1085,15 @@ export class Routines {
     const common = { facts: rr.facts ?? '', when, mode: run.mode, reads: base.reads, warnings: base.warnings, panel: base.panel, required: base.required, requiredLabel: base.requiredLabel,
       extra: tpl?.checks ?? [], docReads: base.docReads, feedReads: base.feedReads, known: `${input.text ?? ''}\n${base.fullFacts ?? ''}`, proposals: proposals.length, freeDates: tpl?.freeDates, humanReview: tpl?.humanReview };
     // a conferência vem antes do arquivo: o arquivo leva o painel, o texto e o resultado da conferência
-    const pre = checkRun({ ...common, text, delivered: !!text, fileWanted: false, fileOk: true });
+    // rotina que usa as Conexões (Teams + e-mail → tarefas): o que ela diz que leu e criou vale pelo registro do serviço
+    const cx = tpl ? conferirConexoes(tpl, acoesRegistradas(this.db, r.workspace_id, { runId: run.id })) : null;
+    const comConexoes = (k: RunChecks): RunChecks => {
+      if (!cx) return k;
+      const at = k.criteria.findIndex((x) => x.id === 'entrega');
+      const criteria = at >= 0 ? [...k.criteria.slice(0, at), cx, ...k.criteria.slice(at)] : [...k.criteria, cx];
+      return { ...k, criteria, verdict: !cx.ok && k.verdict === 'validado' ? 'parcial' : k.verdict };
+    };
+    const pre = comConexoes(checkRun({ ...common, text, delivered: !!text, fileWanted: false, fileOk: true }));
     // o que o agente deixou de avisar, o Ergon acrescenta: no arquivo, a lista inteira; na conversa, as primeiras 40
     const extra = addendum(base.requiredLines ?? {}, rr.facts ?? '', pre.missing);
     const extraShort = addendum(base.requiredLines ?? {}, rr.facts ?? '', pre.missing, 40);
@@ -1067,7 +1101,7 @@ export class Routines {
       ...this.file(r, rr, [base.panel, '', text, '', ...(extra ? [extra, ''] : []), checksText({ ...pre, criteria: pre.criteria.filter((k) => k.id !== 'entrega') })].join('\n'), when),
       ...this.outputs(r, rr, tpl, base.data ?? null, text, parseCategories(output)),
     ] : [];
-    const checks = checkRun({ ...common, text, delivered: !!text, fileWanted, fileOk: files.length > 0 });
+    const checks = comConexoes(checkRun({ ...common, text, delivered: !!text, fileWanted, fileOk: files.length > 0 }));
     if (proposals.length) {
       // uma proposta que não grava não pode prender a execução: a entrega fecha do mesmo jeito, com o aviso
       try { recordProposals(this.db, this.bus, r.workspace_id, { conversationId: run.conversation_id, runId: run.id }, proposals); } catch (err) {
@@ -1125,8 +1159,13 @@ export class Routines {
           this.createRun(r, 'schedule', key, slot, null, 'missed', `Não rodou ${fmtLocal(slot, workspaceTz(this.db, r.workspace_id))}: o Ergon estava desligado ou trancado`);
           continue;
         }
+        // uma de cada vez, como no "Executar agora": com a rodada anterior ainda aberta, este horário fica de fora
+        if (this.db.get("SELECT 1 AS x FROM routine_runs WHERE routine_id = ? AND status IN ('queued', 'gathering', 'running')", r.id)) {
+          this.createRun(r, 'schedule', key, slot, null, 'skipped', 'A rodada anterior ainda estava em andamento: este horário ficou de fora.');
+          continue;
+        }
         const rr = this.createRun(r, 'schedule', key, slot, null);
-        if (rr) await this.execute(rr.id);
+        if (rr?.status === 'queued') await this.execute(rr.id);
       }
       // 2. retoma o que um reinício interrompeu antes de chegar ao agente
       for (const rr of this.db.all<{ id: string }>("SELECT id FROM routine_runs WHERE status IN ('queued', 'gathering') AND created_at < ?", new Date(Date.now() - 60_000).toISOString())) {
@@ -1228,16 +1267,18 @@ export class Routines {
     const adapted = { source, summary: a.summary || (source === 'ia' ? 'ajustada ao seu jeito de trabalhar' : 'começa no padrão e se ajusta conforme o uso'), noted: a.noted, changes, schedule: v.schedule };
     this.db.run("UPDATE routine_setups SET status = 'ready', adapted = ?, first_run_id = COALESCE(first_run_id, ?), updated_at = ? WHERE id = ?",
       this.db.seal(r.workspace_id, JSON.stringify(adapted)), rr?.id ?? null, now(), s.id);
+    // a primeira rodada leria o Teams de novo no mesmo dia (outra rotina já leu): nasceu pulada, e a nota diz isso
+    const pulou = rr?.status === 'skipped' ? `${v.name} está ativa (${v.schedule.toLowerCase()}). O Teams já foi lido nas últimas 24 horas (uma leitura por dia), então a primeira rodada fica para o próximo horário.` : null;
     if (source === 'ergon') {
       this.note(r.workspace_id, s.conversation_id, [
         `${a.noted || 'Pelo que já está registrado sobre o seu trabalho'}: ${adapted.summary}.`,
-        rr ? `${v.name} está ativa (${v.schedule.toLowerCase()}). Já rodei a primeira vez para você ver como fica.` : `${v.name} está pronta: use "Executar agora" e escreva o pedido (e anexe os arquivos) quando precisar.`,
+        pulou ?? (rr ? `${v.name} está ativa (${v.schedule.toLowerCase()}). Já rodei a primeira vez para você ver como fica.` : `${v.name} está pronta: use "Executar agora" e escreva o pedido (e anexe os arquivos) quando precisar.`),
         this.deps.mode() !== 'real' ? 'Com uma conta de IA conectada (Conexões), eu estudo o seu jeito de trabalhar e ajusto o foco e o formato também.' : '',
       ].filter(Boolean).join('\n'));
     } else {
-      this.note(r.workspace_id, s.conversation_id, rr ? `Pronto: ${v.name} está ativa (${v.schedule.toLowerCase()}). Já rodei a primeira vez para você ver como fica. Quer mudar algo? É só me dizer aqui.` : `Pronto: ${v.name} está ajustada ao seu jeito. Quando precisar, use "Executar agora" e escreva o pedido. Quer mudar algo? É só me dizer aqui.`);
+      this.note(r.workspace_id, s.conversation_id, pulou ? `Pronto: ${pulou} Quer mudar algo? É só me dizer aqui.` : rr ? `Pronto: ${v.name} está ativa (${v.schedule.toLowerCase()}). Já rodei a primeira vez para você ver como fica. Quer mudar algo? É só me dizer aqui.` : `Pronto: ${v.name} está ajustada ao seu jeito. Quando precisar, use "Executar agora" e escreva o pedido. Quer mudar algo? É só me dizer aqui.`);
     }
-    if (rr) void this.execute(rr.id);
+    if (rr?.status === 'queued') void this.execute(rr.id);
     this.bus.publish(r.workspace_id, 'routines.changed', { id: r.id });
   }
 

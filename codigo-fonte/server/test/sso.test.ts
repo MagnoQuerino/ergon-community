@@ -98,8 +98,14 @@ describe('SSO parametrizado: Google (conta + Google Tasks)', () => {
     const h2 = await harness({ googleClientId: GOOGLE_ID, googleClientSecret: null });
     const s2 = await setupOwner(h2);
     const r = await req(h2, 'POST', '/api/integrations/google/start', s2);
-    assert.equal(r.status, 409); assert.match(r.json.message, /ERGON_GOOGLE_CLIENT_SECRET/); assert.match(r.json.message, /docs\/GOOGLE\.md/);
-    assert.equal(((await req(h2, 'GET', '/api/integrations', s2)).json as Array<{ kind: string; ready: boolean }>).find((i) => i.kind === 'google')!.ready, false);
+    // na tela, português simples e "o guia de instalação" (nada de caminho de arquivo nem nome de variável)
+    assert.equal(r.status, 409);
+    assert.equal(r.json.message, 'Falta registrar o aplicativo Ergon no Google Cloud: é um passo único de quem instala o Ergon (veja o guia de instalação).');
+    assert.doesNotMatch(r.json.message, /ERGON_|docs\/|\.md\b/);
+    const g = ((await req(h2, 'GET', '/api/integrations', s2)).json as Array<{ kind: string; ready: boolean; setup: { needs: string; doc: string } }>).find((i) => i.kind === 'google')!;
+    assert.equal(g.ready, false);
+    // o que falta exatamente continua no dado (para quem instala), e o guia é o texto que a tela mostra
+    assert.match(g.setup.needs, /ERGON_GOOGLE_CLIENT_SECRET/); assert.equal(g.setup.doc, 'o guia de instalação');
     await h2.close();
   });
 });

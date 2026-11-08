@@ -73,7 +73,8 @@ export class HttpHermesClient implements HermesClient {
   }
 
   private async call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; json: Record<string, unknown>; headers: Headers }> {
-    if (!this.key) throw new HermesError(503, 'motor de IA sem chave configurada (ERGON_HERMES_API_KEY)');
+    // as mensagens destes erros vão para o pedido (a tela): "a equipe de IA", nunca as peças por dentro
+    if (!this.key) throw new HermesError(503, 'a equipe de IA está sem a chave de acesso nesta instalação');
     let res: Response;
     try {
       res = await fetch(this.baseUrl + path, {
@@ -83,7 +84,7 @@ export class HttpHermesClient implements HermesClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {
-      throw new HermesError(503, 'o motor de IA não respondeu');
+      throw new HermesError(503, 'a equipe de IA não respondeu');
     }
     let json: Record<string, unknown> = {};
     try {
@@ -92,7 +93,7 @@ export class HttpHermesClient implements HermesClient {
     } catch { json = {}; }
     if (!res.ok) {
       const err = json.error as Record<string, unknown> | string | undefined;
-      const msg = (typeof err === 'object' && err ? String(err.message ?? '') : String(err ?? '')) || `Hermes respondeu ${res.status}`;
+      const msg = (typeof err === 'object' && err ? String(err.message ?? '') : String(err ?? '')) || (res.status >= 500 ? 'a equipe de IA teve um problema agora; tente de novo' : 'a equipe de IA recusou o pedido');
       throw new HermesError(res.status, friendly(msg).slice(0, 300));
     }
     return { status: res.status, json, headers: res.headers };
@@ -101,10 +102,11 @@ export class HttpHermesClient implements HermesClient {
   async health(): Promise<{ ok: boolean; detail: string }> {
     try {
       const res = await fetch(this.baseUrl + '/health', { signal: AbortSignal.timeout(4000) });
-      if (!res.ok) return { ok: false, detail: `respondeu ${res.status}` };
-      return { ok: true, detail: 'motor de IA respondeu' };
+      // o detalhe vai para a Saúde ("fora do ar agora (…)"): sem código nem erro de rede
+      if (!res.ok) return { ok: false, detail: res.status >= 500 ? 'com um problema' : 'recusou a conferência' };
+      return { ok: true, detail: 'a equipe de IA respondeu' };
     } catch {
-      return { ok: false, detail: 'motor de IA inacessível' };
+      return { ok: false, detail: 'sem resposta' };
     }
   }
 
@@ -122,7 +124,7 @@ export class HttpHermesClient implements HermesClient {
       'X-Hermes-Session-Key': p.sessionKey,
     });
     const runId = r.json.run_id;
-    if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new HermesError(502, 'o motor de IA não devolveu uma execução válida');
+    if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new HermesError(502, 'a equipe de IA não começou o pedido direito; tente de novo');
     return { runId, replayed: r.headers.get('idempotency-replayed') === 'true' || r.json.replayed === true };
   }
 
@@ -211,9 +213,9 @@ export function parseModelOptions(json: Record<string, unknown>): ModelOptions {
   };
 }
 
-/** Mensagens de erro do motor, sem o nome dele (o usuário não precisa saber o que roda por baixo). */
+/** Mensagens de erro do motor, sem o nome dele (o usuário não precisa saber o que roda por baixo): "a equipe de IA". */
 export function friendly(msg: string): string {
-  return msg.replace(/run `hermes [^`]+`/gi, 'conecte a conta em Conexões').replace(/\bHermes( Agent)?\b/gi, 'motor de IA');
+  return msg.replace(/run `hermes [^`]+`/gi, 'conecte a conta em Conexões').replace(/\bHermes( Agent)?\b/gi, 'a equipe de IA');
 }
 
 /** Estados remotos → estados Ergon. 'unknown' (dono reiniciado) exige reconciliação, não repetição. */
@@ -235,8 +237,23 @@ export interface LoginStart { sessionId: string; userCode: string | null; verifi
 export interface LoginPoll { status: string; error: string | null; email: string | null; model: string | null }
 export interface SkillInfo { name: string; description: string; category: string; enabled: boolean }
 
+/**
+ * O que o plugin do Ergon no motor diz de si (GET /ergon/v1/health): versão do plugin, versão da configuração do cofre e
+ * as capacidades. Plugin antigo responde só {ok, dashboard}: capacidades = null (não se sabe).
+ */
+export interface MotorInfo { ok: boolean; pluginVersion: string | null; vaultConfig: number | null; capacidades: string[] | null }
+/** capacidade que diz que o motor tem as ferramentas das Conexões */
+export const CAPACIDADE_CONEXOES = 'conexoes';
+export function parseMotorInfo(j: Record<string, unknown>): MotorInfo {
+  const caps = Array.isArray(j.capacidades) ? j.capacidades.filter((x): x is string => typeof x === 'string').slice(0, 50) : null;
+  const vc = typeof j.vault_config === 'number' ? j.vault_config : typeof j.vault_config === 'string' && /^\d+$/.test(j.vault_config) ? Number(j.vault_config) : null;
+  return { ok: j.ok === true && j.dashboard === true, pluginVersion: typeof j.plugin_version === 'string' ? j.plugin_version.slice(0, 40) : null, vaultConfig: vc, capacidades: caps };
+}
+
 export interface HermesControlClient {
   health(): Promise<boolean>;
+  /** versão e capacidades do plugin (ausente = cliente antigo, não se sabe) */
+  info?(): Promise<MotorInfo>;
   accounts(): Promise<AccountStatus[]>;
   startLogin(provider: string): Promise<LoginStart>;
   pollLogin(provider: string, sessionId: string): Promise<LoginPoll>;
@@ -305,25 +322,29 @@ export class HttpHermesControl implements HermesControlClient {
   constructor(baseUrl: string, token: string | null) { this.baseUrl = baseUrl.replace(/\/+$/, ''); this.token = token; }
 
   private async call(method: string, path: string, body?: unknown, timeoutMs = 25000): Promise<any> {
-    if (!this.token) throw new HermesError(503, 'ponte de controle sem token (ERGON_BRIDGE_TOKEN)');
+    // a mensagem vai para a tela (Contas de IA, Treinar): sem as peças por dentro
+    if (!this.token) throw new HermesError(503, 'a configuração da equipe de IA não está disponível nesta instalação');
     let res: Response;
     try {
       res = await fetch(this.baseUrl + path, {
         method, headers: { 'Content-Type': 'application/json', 'X-Ergon-Bridge-Token': this.token },
         body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch { throw new HermesError(503, 'o motor de IA não respondeu (configuração)'); }
+    } catch { throw new HermesError(503, 'a equipe de IA não respondeu agora'); }
     const text = await res.text();
     let json: any = {};
     try { json = text ? JSON.parse(text) : {}; } catch { json = {}; }
     if (!res.ok) {
-      const d = json?.detail ?? json?.error ?? `erro ${res.status}`;
+      const d = json?.detail ?? json?.error ?? (res.status >= 500 ? 'a equipe de IA teve um problema agora; tente de novo' : 'a equipe de IA recusou o pedido');
       throw new HermesError(res.status, friendly(typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 300));
     }
     return json;
   }
 
-  async health() { try { const j = await this.call('GET', '/ergon/v1/health', undefined, 5000); return j.ok === true && j.dashboard === true; } catch { return false; } }
+  async health() { return (await this.info()).ok; }
+  async info(): Promise<MotorInfo> {
+    try { return parseMotorInfo(await this.call('GET', '/ergon/v1/health', undefined, 5000)); } catch { return { ok: false, pluginVersion: null, vaultConfig: null, capacidades: null }; }
+  }
 
   async accounts(): Promise<AccountStatus[]> {
     const j = await this.call('GET', '/api/providers/oauth');
@@ -390,13 +411,13 @@ export class HttpHermesControl implements HermesControlClient {
   };
 
   async media(path: string): Promise<{ data: Buffer; mime: string }> {
-    if (!this.token) throw new HermesError(503, 'ponte de controle sem token (ERGON_BRIDGE_TOKEN)');
+    if (!this.token) throw new HermesError(503, 'a configuração da equipe de IA não está disponível nesta instalação');
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/ergon/v1/media?path=${encodeURIComponent(path)}`, { headers: { 'X-Ergon-Bridge-Token': this.token }, signal: AbortSignal.timeout(20000) });
-    } catch { throw new HermesError(503, 'o motor de IA não respondeu (imagem)'); }
+    } catch { throw new HermesError(503, 'a equipe de IA não entregou a imagem a tempo'); }
     const mime = (res.headers.get('content-type') ?? '').split(';')[0].trim();
-    if (!res.ok || !/^image\/(png|jpeg|webp)$/.test(mime)) throw new HermesError(res.ok ? 502 : res.status, 'imagem não encontrada no motor de IA');
+    if (!res.ok || !/^image\/(png|jpeg|webp)$/.test(mime)) throw new HermesError(res.ok ? 502 : res.status, 'a equipe de IA não encontrou a imagem gerada');
     return { data: Buffer.from(await res.arrayBuffer()), mime };
   }
 }

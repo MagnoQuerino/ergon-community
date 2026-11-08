@@ -105,11 +105,33 @@ export function createBackup(db: Db, p: DataPaths, meta: { version: string; dbKe
     const v = verifyBackup(part);
     if (!v.ok) throw new Error(`o backup gravado não confere: ${v.problems.slice(0, 3).join('; ')}`);
     fs.renameSync(part, dir);
+    girarBackups(p.backupsDir, name);
     return { name, dir, manifest };
   } catch (e) {
     fs.rmSync(part, { recursive: true, force: true }); // só a cópia incompleta deste backup
     throw e;
   }
+}
+
+/** Quantos backups ficam guardados (os mais recentes); o lançador usa a mesma regra na pasta do computador. */
+export const BACKUPS_MANTER = 7;
+const BACKUP_NOME = /^ergon-\d{4}-\d{2}-\d{2}T[\dA-Za-z-]+Z(\.sqlite)?$/;
+
+/**
+ * Deixa só os 7 backups mais recentes (decisão de 08/11: apagar os mais antigos sem perguntar, avisando na
+ * Saúde). O recém-feito fica sempre, mesmo com o relógio atrasado. Só pastas e arquivos com o nome de backup do Ergon
+ * saem; as cópias de segurança da restauração (pre-restore-, desfeito-) e qualquer outro arquivo ficam.
+ */
+export function girarBackups(backupsDir: string, feito?: string, manter = Number(process.env.ERGON_BACKUPS_MANTER ?? BACKUPS_MANTER)): string[] {
+  if (!Number.isInteger(manter) || manter <= 0) return [];
+  let nomes: string[];
+  try { nomes = fs.readdirSync(backupsDir).filter((n) => BACKUP_NOME.test(n)); } catch { return []; }
+  const ordem = [...(feito && nomes.includes(feito) ? [feito] : []), ...nomes.filter((n) => n !== feito).sort().reverse()];
+  const sairam = ordem.slice(manter);
+  for (const n of sairam) {
+    try { fs.rmSync(path.join(backupsDir, n), { recursive: true, force: true }); fs.rmSync(path.join(backupsDir, `${n}.keyring.json`), { force: true }); } catch { /* fica para a próxima */ }
+  }
+  return sairam;
 }
 
 /** Confere uma pasta de backup: manifesto, caminhos permitidos, tamanho e SHA-256 de cada arquivo. */

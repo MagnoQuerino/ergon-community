@@ -84,17 +84,24 @@ export function escritorPara(kind: IntegrationKind, c: Record<string, string>, h
 const acoesDaConta = new WeakMap<Db, (workspaceId: string, kind: IntegrationKind) => Acao[]>();
 export function registrarAcoesDaConta(db: Db, f: (workspaceId: string, kind: IntegrationKind) => Acao[]): void { acoesDaConta.set(db, f); }
 
+/**
+ * As ações que cada conta conectada oferece agora aos agentes (o que a pessoa desligou nem aparece). É a mesma lista das
+ * instruções deles (promptConexoes) e da conferência de entrega (results.ts), que a usa direto, sem ler o texto de volta.
+ */
+export function acoesLigadas(db: Db, workspaceId: string): Array<{ kind: IntegrationKind; ids: string[] }> {
+  const ligadas = db.all<{ kind: IntegrationKind }>("SELECT kind FROM integrations WHERE workspace_id = ? AND state = 'connected' ORDER BY kind", workspaceId).map((r) => r.kind).filter((k) => integrationDef(k));
+  const daConta = acoesDaConta.get(db) ?? ((_ws: string, k: IntegrationKind) => acoesDe(k));
+  return ligadas.map((k) => {
+    const settings = settingsOf(integrationRow(db, workspaceId, k));
+    return { kind: k, ids: daConta(workspaceId, k).filter((a) => ajusteDe(settings, a.id, typeof a.risco === 'function' ? a.risco({}) : a.risco) !== 'desligado').map((a) => a.id) };
+  });
+}
+
 /** Trecho das instruções do agente: as conexões ligadas agora, o que cada uma faz e como agir. */
 export function promptConexoes(db: Db, workspaceId: string): string {
-  const ligadas = db.all<{ kind: IntegrationKind }>("SELECT kind FROM integrations WHERE workspace_id = ? AND state = 'connected' ORDER BY kind", workspaceId).map((r) => r.kind).filter((k) => integrationDef(k));
-  if (!ligadas.length) return 'Conexões: nenhuma conta ou aplicativo está conectado agora. Se pedirem algo em outro aplicativo, diga que falta conectar em Conexões; nunca finja que fez.';
-  const daConta = acoesDaConta.get(db) ?? ((_ws: string, k: IntegrationKind) => acoesDe(k));
-  const linhas = ligadas.map((k) => {
-    const settings = settingsOf(integrationRow(db, workspaceId, k));
-    // o que a pessoa desligou nem aparece
-    const ids = daConta(workspaceId, k).filter((a) => ajusteDe(settings, a.id, typeof a.risco === 'function' ? a.risco({}) : a.risco) !== 'desligado').map((a) => a.id);
-    return `- ${integrationDef(k)!.name} (conexao="${k}"): ${ids.join(', ') || 'nada liberado agora'}`;
-  });
+  const contas = acoesLigadas(db, workspaceId);
+  if (!contas.length) return 'Conexões: nenhuma conta ou aplicativo está conectado agora. Se pedirem algo em outro aplicativo, diga que falta conectar em Conexões; nunca finja que fez.';
+  const linhas = contas.map(({ kind: k, ids }) => `- ${integrationDef(k)!.name} (conexao="${k}"): ${ids.join(', ') || 'nada liberado agora'}`);
   return [
     'Conexões: você usa de verdade as contas e aplicativos abaixo, com a ferramenta conexoes_executar (conexao, acao, parametros). Os parâmetros de cada ação vêm em conexoes_listar com conexao="...": use só os nomes de parâmetro que vierem lá. O sistema cuida do acesso: você nunca vê nem pede senha ou token.',
     ...linhas,

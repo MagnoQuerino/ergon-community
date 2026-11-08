@@ -32,7 +32,7 @@ if (typeof window !== 'undefined') window.setTimeout(() => { void loadStore().ca
 /** Alexandre Magno passeia pela ágora: não é agente e não conversa — o clique mostra a bio. */
 const FOUNDER_BIO = {
   name: 'Alexandre Magno',
-  title: 'fundador do Ergon · aposentado',
+  title: 'criador do Ergon · aposentado',
   text: 'Antes dos 30 já tinha um império e uma dúzia de cidades com o próprio nome. Fundou o Ergon, entregou a coordenação a Aristóteles — o antigo professor, que não perde a chance de lembrar quem ensinou quem — e se aposentou para passear pela ágora fazendo perguntas a quem trabalha.',
   note: 'Não atende pedidos: está de folga desde 323 a.C.',
 };

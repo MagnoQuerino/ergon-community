@@ -86,7 +86,12 @@ describe('o que a pessoa lê sobre cada ação', () => {
 describe('Testar conexão', () => {
   test('credencial sem permissão: o teste aponta o botão, sem o nome técnico, e o problema fica à vista na tela', async () => {
     ligar(s.workspaceId, 'slack', { token: SLACK }, 'App no Slack de Time');
-    const itens = (await req(h, 'POST', '/api/conexoes/slack/testar', s, {})).json.itens as Array<{ nome: string; ok: boolean; detalhe: string }>;
+    const todos = (await req(h, 'POST', '/api/conexoes/slack/testar', s, {})).json.itens as Array<{ nome: string; ok: boolean; detalhe: string }>;
+    // a última linha não é uma ação: diz se a equipe consegue usar a conexão (o teste roda no servidor, a equipe usa pelo motor)
+    const equipe = todos.at(-1)!;
+    assert.equal(equipe.nome, 'a equipe usar esta conexão');
+    assert.equal(equipe.ok, false); assert.match(equipe.detalhe, /a equipe ainda não consegue usar: a ferramenta Conexões está desligada/);
+    const itens = todos.slice(0, -1);
     assert.ok(itens.length > 0);
     for (const x of itens) {
       assert.equal(x.ok, false);
@@ -254,6 +259,29 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.match(ler('community/publico/README.md'), /CRM e atendimento; financeiro só leitura/);
   });
 
+  test('Microsoft: a conta e o "Teams como canal" separados; cada etapa com o próximo passo, sem botão apagado esperando', () => {
+    const tela = ler('web/src/views/ConexoesView.tsx');
+    assert.match(tela, /Microsoft 365: a equipe age na sua conta\./);
+    assert.match(tela, /Conversar com o Aristóteles pelo Teams: em breve\./);
+    for (const t of ['Liberar leitura', 'Pedir ao administrador', 'Já aprovaram? Conectar de novo', 'Autorizar agora', 'é esperado']) assert.ok(tela.includes(t), t);
+    const etapas = tela.slice(tela.indexOf('function EtapasMicrosoft'), tela.indexOf('interface WaState'));
+    assert.ok(etapas.length > 1000);
+    assert.doesNotMatch(etapas, /disabled/);
+    assert.doesNotMatch(tela, /Hermes/);
+    assert.doesNotMatch(etapas, /o Ergon (envia|manda|lê|sabe)/, 'o Ergon não é uma pessoa');
+  });
+
+  test('docs da Microsoft: etapas, pedido ao administrador e conexão × bot; nada de comando nem de "nenhuma exige administrador"', { skip: !COM_GUIAS }, () => {
+    const ms = ler('docs/MICROSOFT.md');
+    assert.doesNotMatch(ms, /docker compose/);
+    assert.doesNotMatch(ms, /nenhuma exige administrador/i);
+    for (const t of [/Pedir ao administrador/, /Já aprovaram\? Conectar de novo/, /etapa/i, /bot/i, /ChannelMessage\.Read\.All/]) assert.match(ms, t);
+    // nomes privados montados por partes (o texto deles não pode aparecer no repositório público)
+    assert.doesNotMatch(ms, new RegExp(['M' + 'G3', 'am' + 'agno', 'fun' + 'dador'].join('|'), 'i'));
+    const cx = ler('docs/CONEXOES.md');
+    assert.match(cx, /MICROSOFT\.md/); assert.doesNotMatch(cx, /docker compose/);
+  });
+
   test('listas ligadas nos dois sentidos: sem "espelho" na tela', () => {
     // o nome do arquivo (conexoes/espelho.ts) pode aparecer nos comentários; a palavra, não
     for (const f of ['web/src/views/TarefasView.tsx', 'web/src/views/AjudaView.tsx', 'web/src/components/CommandPalette.tsx']) assert.doesNotMatch(ler(f), /espelh(?!o\.ts)/i, f);
@@ -273,7 +301,8 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
   test('rotinas e Aspásia: "pede a sua confirmação" diz que "Liberar tudo" tira a confirmação', () => {
     const semRessalva = CATALOG.filter((t) => /confirmação/.test(t.approvals) && !/a menos que você ligue "Liberar tudo"/.test(t.approvals)).map((t) => t.name);
     assert.deepEqual(semRessalva, []);
-    assert.equal(CATALOG.filter((t) => /Liberar tudo/.test(t.approvals)).length, 6);
+    // as rotinas que pedem confirmação dizem todas a ressalva (acima); o número cresce com a biblioteca (a do Teams + e-mail entrou na rc.24)
+    assert.ok(CATALOG.filter((t) => /Liberar tudo/.test(t.approvals)).length >= 6);
     assert.match(ler('docs/ROTINAS.md'), /o que uma rotina propõe\s+enviar pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões/);
     assert.match(ler('docs/ROTINAS.md'), /o que parte de uma rotina pede confirmação, a menos que você ligue "Liberar tudo" em Conexões/);
     // nenhum texto que chega à pessoa promete a confirmação sem dizer que "Liberar tudo" a tira

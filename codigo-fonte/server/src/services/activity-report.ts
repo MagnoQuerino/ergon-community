@@ -268,7 +268,7 @@ export function activityReport(db: Db, o: ReportOpts): { markdown: string; filen
       for (const c of o.saude.componentes ?? []) out.push(`- ${cell(c.nome)}: ${cell(c.estado)}${c.detalhe ? ` · ${cell(c.detalhe)}` : ''}`);
       out.push('');
     }
-    if (o.motorTools) out.push(`**Ferramentas ligadas no motor:** ${o.motorTools.join(', ') || 'nenhuma lida ainda'}`, '');
+    if (o.motorTools) out.push(`**Ferramentas ligadas na equipe de IA:** ${o.motorTools.join(', ') || 'nenhuma lida ainda'}`, '');
     const ints = db.all<{ kind: string; state: string; account_label: string | null; connected_at: string | null; last_sync_at: string | null; last_error: string | null }>(
       "SELECT kind, state, account_label, connected_at, last_sync_at, last_error FROM integrations WHERE workspace_id = ? AND state != 'off' ORDER BY kind", ws);
     out.push('**Conexões**', '');

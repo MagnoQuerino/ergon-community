@@ -586,7 +586,7 @@ const TIPOS_DE_TEXTO: Record<string, string> = { txt: 'text/plain', md: 'text/ma
 const metaArquivo = (ctx: CtxAcao, id: string) => ctx.http(`${DRIVE}/files/${seg(id)}?fields=${CAMPOS_ARQUIVO}&supportsAllDrives=true`);
 const tamanho = (b: unknown): string => {
   const n = Number(b ?? 0);
-  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 };
 
 // ------------------------------------------------------------------------------------------------------- pessoas

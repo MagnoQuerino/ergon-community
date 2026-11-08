@@ -12,10 +12,11 @@
                                  início do Windows: é o que o aplicativo Ergon Desktop usa
     abrir                        abre http://localhost:8787
     backup                       backup completo e conferido (banco cifrado, keyring, arquivos e conexões) numa
-                                 pasta em %USERPROFILE%\.ergon\backups
+                                 pasta em %USERPROFILE%\.ergon\backups (ficam os 7 mais recentes)
     restaurar <pasta>            confere o backup, guarda o que está no lugar (nada é apagado) e restaura
     desfazer-restauracao <pre-restore-…>   volta ao que era antes de uma restauração
     atualizar                    backup + versão nova (cópia do código: git pull; pacote: baixa a versão publicada)
+    limpar                       tira as imagens antigas do Ergon que nada usa (roda sozinho depois de atualizar)
     logs                         últimas linhas do Ergon e do motor
     ajudante                     (roda sozinho ao entrar no Windows) guarda a chave do "destrancar sozinho" no
                                  cofre do Windows quando você liga o botão em Configuração › Segurança, e
@@ -149,6 +150,8 @@ function Remove-Ergon([switch]$Tudo) {
     if ($motores.Count) { & $DockerCli rm -f @motores 2>$null | Out-Null }
     $down = @('down', '--remove-orphans', '--rmi', 'all'); if ($Tudo) { $down += '-v' }
     Push-Location $Raiz; try { & $DockerCli compose --profile hermes @down 2>$null | Out-Null } finally { Pop-Location }
+    # as imagens dos dois repositórios do Ergon (o do serviço e o do motor de IA), de todas as versões, sem forçar
+    Clear-Images -Tudo
     if ($Tudo) {
       $vols = @(& $DockerCli volume ls -q 2>$null | Where-Object { $_ -like "$($Projeto)_*" -or $cofres -contains $_ })
       if ($vols.Count) { & $DockerCli volume rm -f @vols 2>$null | Out-Null }
@@ -229,10 +232,12 @@ function Backup {
     # servidor de uma versão anterior: backup antigo (só o banco e o keyring) — vale, mas não leva arquivos e conexões
     & docker cp "${id}:/data/backups/$nome.keyring.json" (Join-Path $Backups "$nome.keyring.json") 2>$null | Out-Null
     Say "Backup (formato antigo: só o banco e o keyring; atualize o Ergon para o backup completo): $dest"
+    Limit-Backups $nome
     return $true
   }
   if (-not (Test-Path -LiteralPath (Join-Path $dest 'manifest.json'))) { Fail "O backup ficou no volume (/data/backups/$nome), mas a cópia para $Backups saiu incompleta." }
   Say "Backup completo e conferido (banco, arquivos e conexões): $dest"
+  Limit-Backups $nome
   return $true
 }
 
@@ -343,7 +348,7 @@ function Update {
       $antes = (& git rev-parse --short HEAD 2>$null)
       & git pull --ff-only; if ($LASTEXITCODE -ne 0) { Fail 'git pull falhou (há mudanças locais, ou a branch não acompanha uma remota). Nada foi alterado.' }
     } finally { Pop-Location }
-    if (Up -NoFail) { return }
+    if (Up -NoFail) { Clear-Images; return }
     Fail "A versão nova não respondeu. Para voltar: git checkout $antes e .\ergon.cmd iniciar; se ainda assim não subir, $voltar"
   }
   $url = if ($env:ERGON_UPDATE_URL) { $env:ERGON_UPDATE_URL } else { $Manifesto }
@@ -364,11 +369,93 @@ function Update {
   Get-ChildItem $Raiz | Where-Object { $_.Name -ne '.env' } | Copy-Item -Destination $guardada -Recurse -Force -ErrorAction Stop
   Get-ChildItem (Join-Path $tmp 'x') | Where-Object { $_.Name -ne '.env' } | Copy-Item -Destination $Raiz -Recurse -Force -ErrorAction Stop
   Say "Pacote $($m.version) aplicado (a $atual ficou guardada em $guardada)."
-  if (Up -NoFail) { return }
+  # no ar: as imagens antigas sem uso saem; das versões guardadas, fica só esta (a anterior)
+  if (Up -NoFail) { Clear-Images; Clear-Versions $guardada; return }
   Say "A versão $($m.version) não respondeu: voltando para a $atual."
   Get-ChildItem $guardada | Copy-Item -Destination $Raiz -Recurse -Force -ErrorAction Stop
   if (Up -NoFail) { Say "Voltou para a $atual e está no ar. A $($m.version) fica para depois (veja .\ergon.cmd logs)."; return }
   Fail "Nem a versão $atual respondeu (a nova pode ter mudado o banco): $voltar"
+}
+
+# ---------------------------------------------------------------- limpeza: imagens, backups e versões guardadas
+# Imagens: só as dos repositórios do Ergon (o do serviço e o do motor de IA, lidos do docker-compose.yml desta pasta),
+# sem forçar (rmi sem -f: imagem em uso por um contêiner, parado também, nunca sai) e nunca volume. Ficam a imagem de
+# qualquer contêiner, a atual de cada repositório e a anterior anotada no motor (rótulo ergon.motor.prev-image: enquanto
+# a troca não é confirmada ela fica no disco; depois de confirmar, o gerente já a apagou e o rótulo só fica de registro). Nada de "prune": ele apagaria justamente a imagem atual que ainda não tem contêiner.
+# -Tudo (no remover, com os contêineres já fora): também as atuais.
+function Get-ErgonRefs {
+  $f = Join-Path $Raiz 'docker-compose.yml'
+  if (-not (Test-Path -LiteralPath $f)) { return @() }
+  return @(Get-Content -LiteralPath $f | ForEach-Object { if ($_ -match '^\s*(image|ERGON_MOTOR_IMAGE):\s*"?([^"\s#$]+)') { $Matches[2] } } | Sort-Object -Unique)
+}
+# repositório de uma referência: sem o digest (@…) e sem a etiqueta (o ":" depois da última "/")
+function Get-RepoOf([string]$ref) { $r = ($ref -split '@')[0]; if ((($r -split '/')[-1]) -match ':') { $r = $r.Substring(0, $r.LastIndexOf(':')) }; return $r }
+# ID completo sem o "sha256:" (o Docker põe, o Podman não); nada, se não for um ID
+function Get-PureId([string]$i) { $i = "$i".Trim() -replace '^sha256:', ''; if ($i -match '^[0-9a-f]{64}$') { return $i }; return $null }
+function Clear-Images([switch]$Tudo) {
+  $repos = @(Get-ErgonRefs | ForEach-Object { Get-RepoOf $_ } | Sort-Object -Unique)
+  if (-not $repos.Count) { return }
+  # em uso: a imagem de cada contêiner (parado também, de qualquer projeto) e a anterior de um motor ainda não confirmada
+  $guardar = @{}
+  $cs = @(& $DockerCli ps -aq 2>$null | Where-Object { $_ })
+  if ($cs.Count) {
+    foreach ($l in @(& $DockerCli inspect --format '{{.Image}} {{ index .Config.Labels "ergon.motor.prev-image" }}' @cs 2>$null)) {
+      foreach ($w in ("$l" -split '\s+')) { $i = Get-PureId $w; if ($i) { $guardar[$i] = $true } }
+    }
+  }
+  # as atuais (a do serviço e a do motor de IA) ficam, a não ser no remover
+  if (-not $Tudo) { foreach ($ref in Get-ErgonRefs) { $i = Get-PureId "$(& $DockerCli image inspect --format '{{.Id}}' $ref 2>$null | Select-Object -First 1)"; if ($i) { $guardar[$i] = $true } } }
+  # candidatas: as dos repositórios do Ergon que não ficam (o Podman chama "localhost/x" a imagem x construída aqui)
+  $filas = @(); $cand = [ordered]@{}
+  foreach ($l in @(& $DockerCli images --no-trunc --digests --format '{{.ID}} {{.Repository}} {{.Tag}} {{.Digest}}' 2>$null)) {
+    $p = @("$l".Trim() -split '\s+'); if ($p.Count -lt 2) { continue }
+    $i = Get-PureId $p[0]; if (-not $i) { continue }
+    if (-not (($repos -contains $p[1]) -or ($repos -contains ($p[1] -replace '^localhost/', '')))) { continue }
+    if ($guardar.ContainsKey($i)) { continue }
+    $filas += , @($i, $p[1], $(if ($p.Count -gt 2) { $p[2] } else { '' }), $(if ($p.Count -gt 3) { $p[3] } else { '' }))
+    $cand[$i] = $true
+  }
+  $n = 0; $bytes = [long]0; $ficaram = 0
+  foreach ($i in @($cand.Keys)) {
+    $t = [long]0; [void][long]::TryParse("$(& $DockerCli image inspect --format '{{.Size}}' $i 2>$null | Select-Object -First 1)", [ref]$t)
+    & $DockerCli rmi $i 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      # com mais de um nome, o ID sozinho não sai sem forçar: tira os nomes do Ergon, um a um (os de fora ficam)
+      foreach ($f in $filas) {
+        if ($f[0] -ne $i) { continue }
+        if ($f[2] -and $f[2] -ne '<none>') { & $DockerCli rmi "$($f[1]):$($f[2])" 2>$null | Out-Null }
+        elseif ($f[3] -like 'sha256:*') { & $DockerCli rmi "$($f[1])@$($f[3])" 2>$null | Out-Null }
+      }
+    }
+    & $DockerCli image inspect $i 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $ficaram++ } else { $n++; $bytes += $t }
+  }
+  if ($n) { Say "Limpeza: $n imagem(ns) antiga(s) do Ergon removida(s), $([math]::Floor($bytes / 1MB)) MB liberados." }
+  if ($ficaram) { Say "$ficaram imagem(ns) antiga(s) do Ergon ficaram (em uso, ou com um nome de fora do Ergon)." }
+}
+# Backups: ficam os 7 mais recentes (ERGON_BACKUPS_MANTER muda o número; 0 guarda todos). Só os do próprio Ergon, pelo
+# nome (a pasta ergon-<data>, ou o antigo ergon-<data>.sqlite com o .keyring.json dele): a data no nome dá a ordem. O
+# que acabou de ser feito conta como o mais novo e nunca sai. Outros arquivos da pasta não são tocados.
+function Limit-Backups([string]$Feito) {
+  $manter = 7; if ("$env:ERGON_BACKUPS_MANTER" -match '^\d+$') { $manter = [int]$env:ERGON_BACKUPS_MANTER }
+  if ($manter -le 0 -or -not (Test-Path -LiteralPath $Backups)) { return }
+  [string[]]$nomes = @(Get-ChildItem -LiteralPath $Backups -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^ergon-\d{4}-\d{2}-\d{2}T[0-9A-Za-z-]+(\.sqlite)?$' -and $_.Name -ne $Feito } | ForEach-Object { $_.Name })
+  [Array]::Sort($nomes, [StringComparer]::Ordinal); [Array]::Reverse($nomes)
+  if ($Feito -and (Test-Path -LiteralPath (Join-Path $Backups $Feito))) { $nomes = @($Feito) + $nomes }
+  $sairam = 0
+  for ($k = $manter; $k -lt $nomes.Count; $k++) {
+    Remove-Item -LiteralPath (Join-Path $Backups $nomes[$k]) -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $Backups "$($nomes[$k]).keyring.json") -Force -ErrorAction SilentlyContinue
+    $sairam++
+  }
+  if ($sairam) { Say "Backups: ficaram os $manter mais recentes ($sairam antigo(s) apagado(s) em $Backups)." }
+}
+# Versões guardadas pelo atualizar (%LOCALAPPDATA%\Ergon\versoes): fica só a anterior, a que ele usa para voltar.
+function Clear-Versions([string]$Guardada) {
+  $d = Join-Path $Local 'versoes'
+  if (-not (Test-Path -LiteralPath $d)) { return }
+  Get-ChildItem -LiteralPath $d -Directory -ErrorAction SilentlyContinue | Where-Object { -not (Same-Dir $_.FullName $Guardada) } |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # ---------------------------------------------------------------- ajudante (destrancar sozinho)
@@ -644,7 +731,8 @@ switch ($Comando) {
   'restaurar' { Restore $Opcao }
   'desfazer-restauracao' { Undo-Restore $Opcao }
   'atualizar' { Test-Docker; Update }
+  'limpar' { Test-Docker; Clear-Images }
   'ajudante' { if ($Opcao -eq 'remover') { Remove-Helper } elseif ($Opcao -eq 'instalar') { Install-Helper } else { Run-Helper } }
   'docker' { if ($Opcao -eq 'remover') { Remove-DockerStart } elseif ($Opcao -eq 'instalar') { Install-DockerStart } else { Start-DockerSafe } }
-  default { Get-Content $PSCommandPath -TotalCount 31 | Select-Object -Skip 1 | ForEach-Object { $_ -replace '^#>?\s?', '' } }
+  default { Get-Content $PSCommandPath -TotalCount 32 | Select-Object -Skip 1 | ForEach-Object { $_ -replace '^#>?\s?', '' } }
 }

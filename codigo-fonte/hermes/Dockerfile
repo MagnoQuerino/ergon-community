@@ -4,6 +4,10 @@
 ARG HERMES_IMAGE=nousresearch/hermes-agent:v0.22.2@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
 FROM ${HERMES_IMAGE}
 
+# versão do plugin do Ergon nesta imagem: a mesma do plugin.yaml e de PLUGIN_VERSION (um teste confere); o gerente e o
+# diagnóstico leem sem abrir o motor
+LABEL ergon.plugin.version="0.3.0"
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gocryptfs fuse3 \
  && rm -rf /var/lib/apt/lists/*

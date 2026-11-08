@@ -6,6 +6,7 @@ import { ErgonLogo, Loading } from '../brand/Brand.tsx';
 import { BrandLogo } from './BrandLogo.tsx';
 import { Icon } from './Icon.tsx';
 import { Typewriter } from './Typewriter.tsx';
+import { FRASE_RENOVANDO, semJargao } from '../lib/textos-tela.ts';
 
 interface Login { provider: string; sessionId: string; userCode: string | null; verificationUrl: string | null; expiresAt: string | null; pollSeconds: number }
 const BILLING: Record<string, string> = {
@@ -38,15 +39,20 @@ export const ACORDANDO_IA = [
 const PACIENCIA_MS = 5 * 60_000;
 export const sortear = (lista: string[]) => lista[Math.floor(Math.random() * lista.length)];
 
-/** A IA da conta ainda acordando: logo e uma frase (sem botões); avisa só se passar muito do normal. */
-export function AcordandoIa({ desde, erro, onRetry }: { desde: number; erro?: string | null; onRetry: () => void }) {
+/**
+ * A IA da conta ainda acordando: logo e uma frase (sem botões); avisa só se passar muito do normal. renovando: a equipe está
+ * sendo atualizada para a versão nova (a frase diz isso, em vez de uma sorteada). O motivo da demora só aparece se for dito
+ * para a pessoa: com peça interna (motor, gerente, endereço…), fica no registro.
+ */
+export function AcordandoIa({ desde, erro, onRetry, renovando }: { desde: number; erro?: string | null; onRetry: () => void; renovando?: boolean }) {
   const [frase] = useState(() => sortear(ACORDANDO_IA));
   const demorando = Date.now() - desde > PACIENCIA_MS;
+  const motivo = semJargao(erro);
   return (
     <div className="ai-acordando" role="status">
       <ErgonLogo height={44} animated />
-      <Typewriter phrases={[frase]} />
-      {demorando && <p className="muted small">Está levando mais que o normal{erro ? ` (${erro})` : ''}. Continuamos tentando. <button className="link" onClick={onRetry}>Tentar de novo</button></p>}
+      <Typewriter key={renovando ? 'renovando' : 'acordando'} phrases={[renovando ? FRASE_RENOVANDO : frase]} />
+      {demorando && <p className="muted small">Está levando mais que o normal{motivo ? ` (${motivo})` : ''}. Continuamos tentando. <button className="link" onClick={onRetry}>Tentar de novo</button></p>}
     </div>
   );
 }
@@ -101,7 +107,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
   };
 
   if (!s) return <Loading error={status.error} />;
-  if (!s.available && s.motor) return <AcordandoIa desde={desde.current} erro={s.motor.error} onRetry={() => { desde.current = Date.now(); status.reload(); }} />;
+  if (!s.available && s.motor) return <AcordandoIa desde={desde.current} erro={s.motor.error} renovando={s.motor.state === 'renovando'} onRetry={() => { desde.current = Date.now(); status.reload(); }} />;
   const nous = s.accounts.find((a) => a.id === RECOMMENDED);
   const others = s.accounts.filter((a) => a.id !== RECOMMENDED);
   const otherOn = others.some((a) => a.connected) || (s.byok ?? []).some((b) => b.connected);
@@ -147,7 +153,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
                 <div className="ai-alt__txt">
                   <b>{a.name}</b>
                   <small>{a.id === 'openai-codex'
-                    ? 'Já paga o ChatGPT? Conecte também e a equipe aproveita a assinatura que você já tem, sem custo por token. Dá para ter as duas contas ligadas e escolher, por agente, o modelo de cada uma.'
+                    ? 'Já paga o ChatGPT? Conecte também e a equipe aproveita a assinatura que você já tem, sem pagar por uso. Dá para ter as duas contas ligadas e escolher, por agente, o modelo de cada uma.'
                     : a.about}</small>
                 </div>
                 <span className={`badge ${a.connected ? 'badge--ok' : ''}`}>{a.connected ? 'conectada' : a.detail}</span>
@@ -273,7 +279,7 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
             <button type="button" className="btn btn--sm btn--ghost" onClick={() => escolher(null)}>Cancelar</button>
           </div>
           <p className="muted small">{escolha.tipo === 'chave'
-            ? 'A chave é conferida no provedor e guardada no motor de IA desta conta, cifrada. Ela não aparece de novo aqui.'
+            ? 'A chave é conferida no provedor e guardada no cofre da equipe de IA desta conta, cifrada. Ela não aparece de novo aqui.'
             : 'O endereço é conferido antes de gravar, e os modelos que ele oferece passam a aparecer na escolha de modelos.'}</p>
         </form>
       )}

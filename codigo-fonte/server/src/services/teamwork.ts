@@ -90,7 +90,8 @@ const MENTIONS_FILE = /(^|[^a-z])(planilh|csv|anexad|em anexo|esta tabela|este a
 const CLOSING: Record<string, string> = {
   dados: 'Os números acima foram calculados pelo sistema a partir do arquivo e já estão nos entregáveis do card. Escreva um comentário curto (até 150 palavras) para quem pediu: o que se destaca e o que merece atenção. Não recalcule, não estime e não invente números.',
   documental: 'Entregue o documento completo, pronto para usar, em Markdown: ele será salvo como entregável do card. Não diga apenas que terminou — o documento é a entrega.',
-  externo: 'Você não executa ações fora do Ergon (enviar, pagar, publicar, agendar). Prepare tudo o que for preciso (rascunho, dados, passos) e diga exatamente o que a pessoa precisa fazer para concluir.',
+  // antes dizia "você não executa ações fora do Ergon": quem tinha as Conexões preparava e dizia que estava feito
+  externo: 'Se uma conta conectada faz isso (veja as Conexões nas suas instruções), faça agora pelas Conexões e diga o que o serviço confirmou; nunca diga que fez o que a ferramenta não confirmou, e se não deu, diga com as palavras do resultado. Se nenhuma conexão faz isso (pagar, assinar, ligar), prepare tudo o que for preciso (rascunho, dados, passos) e diga exatamente o que a pessoa precisa fazer para concluir.',
   informativo: 'Responda com o resultado completo da tarefa, pronto para usar.',
 };
 /** etapa do meio de um plano: a entrega é para a próxima etapa, não para o usuário */
@@ -262,8 +263,15 @@ export class Teamwork {
     const res = this.results.evaluate(r, status, output, steps.length ? { words: this.planWords(steps) } : null);
     if (!res) return;
     if (steps.length) this.closeStep(r, steps, res, output);
-    // não passou na conferência ou a execução falhou (não foi você que parou): a equipe tenta outra estratégia
-    if ((res.state === 'reprovado' || (res.state === 'falha' && status === 'failed')) && this.persist(r, { kind: res.state, text: res.justification })) return;
+    // você recusou no cartão o que era o trabalho do card: sem nova tentativa da equipe; o card fica aberto e a conversa
+    // pergunta o que mudar (relay, abaixo). Nada sai do quadro sem você pedir.
+    // não passou na conferência, a execução falhou (não foi você que parou) ou o agente disse que não fez: a equipe
+    // tenta outra estratégia. O serviço recusar (permissão, conta), faltar a ferramenta, ou o agente não ter usado a
+    // conexão que as palavras do pedido indicam vai para a pessoa ("Tentar de novo"): uma nova tentativa por iniciativa
+    // da equipe poderia mandar pela conta o que a pessoa só queria preparar
+    const honesta = (() => { try { return String((JSON.parse(res.evidence) as { honesta?: string }).honesta ?? ''); } catch { return ''; } })();
+    const tentarDeNovo = res.state === 'reprovado' || (res.state === 'falha' && (status === 'failed' || honesta === 'declarou'));
+    if (tentarDeNovo && this.persist(r, { kind: res.state === 'reprovado' ? 'reprovado' : 'falha', text: res.justification })) return;
     const ho =this.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.handoff' ORDER BY created_at LIMIT 1", r.task_id);
     const ev = ho ? JSON.parse(ho.evidence) as { from: string; to: string; conversationId: string | null; parentTaskId: string | null } : null;
     const me = this.db.get<{ number: number }>('SELECT number FROM tasks WHERE id = ?', r.task_id);
@@ -580,8 +588,11 @@ export class Teamwork {
   private closeStep(r: RunRow, steps: StepRow[], res: ResultRow, output: string | null): void {
     const cur = currentStep(steps);
     if (!cur) return;
-    const done = ['validado', 'aguardando_aprovacao', 'sem_confirmacao'].includes(res.state);
-    const status = done ? 'feita' : res.state === 'falha' ? 'falhou' : 'em_andamento';
+    // "sem confirmação" (algo que nenhuma conexão faz) só conta como etapa feita se nenhuma ferramenta falhou no caminho
+    const ferramentaFalhou = res.state === 'sem_confirmacao' && (!!this.db.get('SELECT 1 AS x FROM run_tools WHERE run_id = ? AND ok = 0 LIMIT 1', r.id)
+      || !!this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE run_id = ? AND status = 'falhou' LIMIT 1", r.id));
+    const done = ['validado', 'aguardando_aprovacao'].includes(res.state) || (res.state === 'sem_confirmacao' && !ferramentaFalhou);
+    const status = done ? 'feita' : res.state === 'falha' || res.state === 'descartado' || ferramentaFalhou ? 'falhou' : 'em_andamento';
     this.db.run('UPDATE task_steps SET status = ?, output = COALESCE(?, output), run_id = ?, done_at = ? WHERE id = ?',
       status, output ? this.db.seal(r.workspace_id, clip(output, TEXTO_MAX)) : null, r.id, done ? now() : null, cur.id);
   }
@@ -847,6 +858,13 @@ export class Teamwork {
     // o que a pessoa decidiu nos cartões de confirmação das Conexões pedidos neste card (app.ts, devolverAoCard)
     const decididas = this.db.all<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.conexao' ORDER BY created_at", t.id)
       .map((e) => { try { return String((JSON.parse(e.evidence) as { paraAgente?: string }).paraAgente ?? ''); } catch { return ''; } }).filter(Boolean);
+    // o que já saiu pelas contas neste card: uma nova tentativa não repete o e-mail ou a tarefa que o serviço já registrou.
+    // Vale o trabalho atual do card (o mesmo período da conferência, results.episodio): depois de um pedido novo da
+    // pessoa (devolver, revisar), vale o que ela pediu; a resposta a uma pergunta não recomeça
+    const pedidoNovo = this.results.episodio(workspaceId, t.id);
+    const feitas = this.db.all<{ conexao: string; acao: string; resumo: string | null }>(
+      "SELECT conexao, acao, resumo FROM conexao_acoes WHERE task_id = ? AND status = 'feita' AND risco <> 'ler' AND created_at > ? ORDER BY created_at LIMIT 30", t.id, pedidoNovo)
+      .map((x) => `- ${x.conexao} · ${x.acao}: ${clip((x.resumo ?? '').replace(/\s+/g, ' '), 300)}`);
     const back = this.results.pendingReturn(workspaceId, t.id);
     const files = filesBrief(this.db, this.filesDir, workspaceId, t.id);
     const plan = this.planBrief(workspaceId, t.id);
@@ -856,6 +874,7 @@ export class Teamwork {
       files ? `\n${files}` : '',
       results.length ? `\nAjuda que você recebeu dos colegas:\n${results.join('\n\n')}` : '',
       decididas.length ? `\nO que a pessoa decidiu nos cartões de confirmação das Conexões:\n${decididas.join('\n\n')}` : '',
+      feitas.length ? `\nJá feito nas contas neste card, com o registro do serviço (não repita):\n${feitas.join('\n')}` : '',
       back ? (back.team ? `\n${back.team}, da equipe, respondeu ao que travou — siga isto: ${back.text}`
         : back.answer ? `\nA pessoa respondeu à sua pergunta: ${back.text}` : `\nA pessoa devolveu o trabalho com esta instrução (atenda antes de entregar): ${back.text}`) : '',
       opNote,

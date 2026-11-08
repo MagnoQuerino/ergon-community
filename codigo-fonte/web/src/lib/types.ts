@@ -32,7 +32,8 @@ export interface Usage {
 }
 /** floors só no GET /api/capacity (o /api/state traz só os totais) */
 export interface Capacity { slots: number; active: number; free: number; floors?: Floor[]; maxFloors: number; note: string }
-export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado';
+/** atualizando: o motor deste computador ainda não tem o conjunto da ferramenta (a atualização da equipe traz) */
+export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado' | 'atualizando';
 /** Ferramenta do catálogo do Ergon com o estado real ("planejado" nunca aparece como disponível). */
 /** guarded: executa código — bloqueada por padrão, liberada só com a senha */
 export interface AgentTool { id: string; label: string; kind: 'ergon' | 'ia'; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; platform?: boolean }
@@ -174,7 +175,7 @@ export interface ModelCatalog { default: { provider: string | null; model: strin
 export interface AiStatus {
   executor: 'real' | 'simulated'; available: boolean;
   /** motor de IA da pessoa: conta nova fica "ligando" por até ~1 min */
-  motor?: { state: 'desligado' | 'ligando' | 'aberto' | 'erro'; error: string | null } | null;
+  motor?: { state: 'desligado' | 'ligando' | 'renovando' | 'aberto' | 'erro'; error: string | null } | null;
   /** chave própria (BYOK): provedores que aceitam a chave de API da pessoa; o valor nunca volta */
   byok?: Array<{ id: string; name: string; url: string | null; connected: boolean }>;
   /** endpoints próprios (OpenAI-compatível, LM Studio, Ollama) ligados */
@@ -201,6 +202,18 @@ export interface Integration {
   /** login com a conta: o que falta registrar e onde está o guia */
   setup: { needs: string; doc: string; place: string } | null;
   live: { status: string; qr: string | null; me: string | null; error: string | null; read: number; seen: number } | null;
+  /** Microsoft sem conta conectada: o primeiro login voltou dizendo que a empresa exige o administrador (o pedido pronto) */
+  adminBase?: { link: string; erro: string | null } | null;
+}
+/**
+ * Uma etapa do consentimento da Microsoft (GET /api/conexoes): base (enviar e-mail e criar arquivos), trabalho (Teams), leitura
+ * (na empresa, costuma pedir o administrador) e canais (opcional, sempre o administrador). `link`: o pedido ao administrador,
+ * pronto para a pessoa copiar e enviar.
+ */
+export interface EtapaConsentimento {
+  id: 'base' | 'trabalho' | 'leitura' | 'canais';
+  estado: 'ok' | 'falta' | 'pedido' | 'bloqueado' | 'aprovado';
+  opcional: boolean; administrador: boolean; link: string | null; erro: string | null;
 }
 export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
 

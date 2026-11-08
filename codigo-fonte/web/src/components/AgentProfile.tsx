@@ -2,6 +2,7 @@ import type { Agent, AgentTool, ModelCatalog } from '../lib/types.ts';
 
 export const TOOL_BADGE: Record<AgentTool['status'], string> = {
   'disponível': 'badge--ok', 'parcial': 'badge--warn', 'desligada': 'badge--plan', 'bloqueada': 'badge--plan', 'preparado': 'badge--sim', 'planejado': 'badge--plan',
+  'atualizando': 'badge--warn',
 };
 const HINT_LABEL: Record<NonNullable<Agent['model_hint']>, string> = {
   ponta: 'modelo de ponta', intermediário: 'modelo intermediário', econômico: 'modelo econômico',

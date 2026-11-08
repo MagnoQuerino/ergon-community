@@ -6,7 +6,7 @@ name: Instalador
 on:
   push:
     branches: ['distribuicao/**']
-    paths: ['codigo-fonte/desktop/**', 'codigo-fonte/scripts/distribuicao/**', '.github/workflows/instalador.yml', 'codigo-fonte/ergon.sh', 'codigo-fonte/deploy/local/**']
+    paths: ['codigo-fonte/desktop/**', 'codigo-fonte/scripts/distribuicao/**', '.github/workflows/instalador.yml', 'codigo-fonte/ergon.sh', 'codigo-fonte/deploy/local/**', 'codigo-fonte/hermes/**', 'codigo-fonte/server/**', 'codigo-fonte/Dockerfile', 'codigo-fonte/scripts/homologar-pacote.sh']
   workflow_dispatch:
 
 permissions:
@@ -119,6 +119,64 @@ jobs:
           echo "$rede"; echo "$rede" | grep -q 'internet [0-9]' && ok "os serviços alcançam a internet" || falha "serviços sem internet"
           bash ~/.local/share/ergon/ergon.sh parar > /dev/null 2>&1; bash ~/.local/share/ergon/ergon.sh subir > /tmp/subir.log 2>&1 && ok "parar e ligar de novo pelo lançador" || { falha "religar"; cat /tmp/subir.log; }
           [ "$falhas" = 0 ] && echo 'resultado: tudo ok' || { echo "$falhas falha(s)"; exit 1; }
+
+  # Atualização de verdade, com troca do motor: parte do pacote PUBLICADO da versão de partida (conta criada, motor da
+  # pessoa LIGADO na imagem dela) e atualiza pelo lançador, com um manifesto servido aqui, para as imagens do núcleo e
+  # do motor construídas DESTE commit (num registro que só existe nesta máquina). Confere que o motor mudou de verdade:
+  # a imagem exata do motor novo, as Conexões no plugin dentro do cofre, a marca da configuração do cofre, os mesmos
+  # volumes e a mesma conta. Contra um código que só religa o motor antigo (o da rc.22), falha na imagem do motor.
+  atualizacao-motor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      VERSAO_PARTIDA: '1.1.0-rc.22'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Espaço em disco (as imagens do motor de duas versões, mais o registro local)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Podman da conta, com o podman-compose que vai no pacote .deb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman netavark aardvark-dns uidmap slirp4netns python3-yaml python3-dotenv jq zip unzip skopeo
+          sudo install -D -m 0644 desktop/src-tauri/recursos/podman-compose /usr/lib/ergon/podman-compose
+          podman --version; python3 /usr/lib/ergon/podman-compose --version
+      - name: Imagens do núcleo e do motor deste commit, num registro desta máquina, e o pacote novo apontando para elas
+        run: |
+          set -euo pipefail
+          V=$(node -p "require('./package.json').version")
+          NOVA="$V-ci.$GITHUB_RUN_NUMBER"
+          [ "$(printf '%s\n%s\n' "$NOVA" "$VERSAO_PARTIDA" | sort -V | tail -1)" = "$NOVA" ] || { echo "::error::$NOVA não é mais nova que $VERSAO_PARTIDA"; exit 1; }
+          # a versão de teste vale no servidor e na tela (package.json); o lançador só atualiza para uma mais nova
+          node -e 'const fs=require("fs"),p=JSON.parse(fs.readFileSync("package.json","utf8"));p.version=process.argv[1];fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' "$NOVA"
+          DONO=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          bash scripts/distribuicao/pacote-local.sh "$NOVA" "$DONO" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/novo.zip"
+          mkdir -p "$RUNNER_TEMP/pacote-novo" && (cd "$RUNNER_TEMP/pacote-novo" && unzip -q "$RUNNER_TEMP/novo.zip")
+          sed -i 's#ghcr.io/#localhost:5000/#g' "$RUNNER_TEMP/pacote-novo/docker-compose.yml"
+          CORE=$(sed -nE 's/^ *image: *//p' "$RUNNER_TEMP/pacote-novo/docker-compose.yml" | head -1)
+          MOTOR=$(sed -nE 's/^ *ERGON_MOTOR_IMAGE: *//p' "$RUNNER_TEMP/pacote-novo/docker-compose.yml" | head -1)
+          echo "núcleo: $CORE"; echo "motor: $MOTOR"
+          docker run -d --name registro -p 127.0.0.1:5000:5000 docker.io/library/registry:2
+          docker build -q --target runtime --build-arg ERGON_BUILD="${GITHUB_SHA::7}" -t "$CORE" .
+          docker build -q -t "$MOTOR" ./hermes
+          n=$(docker run --rm --entrypoint grep "$MOTOR" -c conexoes_executar /opt/ergon/plugins/ergon_bridge/__init__.py || true)
+          [ "${n:-0}" -ge 1 ] || { echo "::error::a imagem do motor deste commit não tem as Conexões (conexoes_executar: ${n:-0})"; exit 1; }
+          docker push -q "$CORE"; docker push -q "$MOTOR"
+          # o Docker só construiu: a cópia fica no registro, e o espaço volta para as imagens do Podman
+          docker image rm "$CORE" "$MOTOR" >/dev/null; docker builder prune -af >/dev/null; docker image prune -af >/dev/null
+          # o Podman da conta baixa deste registro sem TLS (ele só existe nesta máquina)
+          mkdir -p ~/.config/containers/registries.conf.d
+          printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' > ~/.config/containers/registries.conf.d/50-ergon-teste.conf
+          skopeo inspect --raw "docker://$MOTOR" >/dev/null && echo "o Podman alcança o registro local"
+          df -h /
+      - name: Sem login no registro do GitHub (a versão de partida baixa como baixaria para uma pessoa)
+        run: podman logout ghcr.io || true; docker logout ghcr.io || true
+      - name: Da versão publicada de partida para a deste commit, pelo lançador, com o motor da pessoa ligado
+        run: |
+          D=$([ -d server/src/world ] && echo proprietary || echo community)
+          REPO=MagnoQuerino/ergon-community PACOTE_DIR="$RUNNER_TEMP/pacote-novo" PACOTE_ANTIGO="$VERSAO_PARTIDA" DISTRIBUICAO="$D" \
+            bash scripts/homologar-pacote.sh
 
   instalacao-windows:
     needs: ambiente

@@ -3,10 +3,11 @@ import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import { saveArtifact } from './artifacts.ts';
 import { log, scrub } from '../lib/log.ts';
+import { paraTela } from '../lib/texto-tela.ts';
 import { audit, type Bus } from './bus.ts';
 import { HermesError, friendly, mapRemoteStatus, type HermesClient, type RunEvent } from './hermes.ts';
 import { interpretRules } from './interpret.ts';
-import { TOOLS, toolStatus } from './characters.ts';
+import { CONEXOES_FORA_ATE_A_PROXIMA, TOOLS, toolStatus, type ToolDef } from './characters.ts';
 import { neutral } from './operations.ts';
 import { routineContextFor } from './routine-proposals.ts';
 import { COORDINATION_PROTOCOL, activeTeam, coordinatorFocus, coordinatorOf, routeTo } from './team.ts';
@@ -89,6 +90,15 @@ export class RunExecutor {
    * trabalho tenta de novo no próximo passo — a fila das outras pessoas não para. null = um motor só, sempre pronto.
    */
   motorReady: ((workspaceId: string) => boolean) | null = null;
+  /**
+   * O motor do workspace recebe trabalho novo agora? Sem efeito colateral. Enquanto não recebe (ligando, renovando), o
+   * pedido fica na fila, sem começar a contar o tempo limite. null = um motor só, sempre recebe.
+   */
+  motorAccepting: ((workspaceId: string) => boolean) | null = null;
+  /** por que o pedido espera o motor (texto do pedido na fila) */
+  motorWaitText: (workspaceId: string) => string = () => 'aguardando a equipe (ligando)';
+  /** a API do motor falhou ao começar um pedido: o dono confere se ele reiniciou com o cofre fechado */
+  motorTrouble: ((workspaceId: string) => void) | null = null;
   /** observação para testes: maior número de processos trabalhando ao mesmo tempo (conversas não contam) */
   maxObservedProcesses = 0;
   /** chamados depois que uma execução termina (fora da transação): revisão socrática, propostas da coordenação… */
@@ -193,11 +203,23 @@ export class RunExecutor {
         this.owner, lease, nowIso);
       // 2. admissão: conversa com você entra na hora (nunca espera um processo); processo entra se o workspace dele
       // tem vaga (limite de processos ao mesmo tempo); o resto espera a vez, na ordem de chegada
+      const waiting: Array<{ workspaceId: string; ids: string[] }> = [];
       this.db.tx(() => {
-        const queued = this.db.all<Pick<RunRow, 'id' | 'workspace_id' | 'agent_id' | 'idempotency_key'>>(
-          "SELECT id, workspace_id, agent_id, idempotency_key FROM runs WHERE status = 'queued' AND ws_open(workspace_id) ORDER BY created_at, id LIMIT 500");
+        const queued = this.db.all<Pick<RunRow, 'id' | 'workspace_id' | 'agent_id' | 'idempotency_key' | 'mode'>>(
+          "SELECT id, workspace_id, agent_id, idempotency_key, mode FROM runs WHERE status = 'queued' AND ws_open(workspace_id) ORDER BY created_at, id LIMIT 500");
         const room = new Map<string, number>();
+        // motor da pessoa ligando ou renovando: o pedido espera na fila (sem started_at, sem relógio do tempo limite)
+        const accepting = new Map<string, boolean>();
         for (const next of queued) {
+          if (next.mode === 'real' && this.motorAccepting) {
+            let ok = accepting.get(next.workspace_id);
+            if (ok === undefined) {
+              ok = this.motorAccepting(next.workspace_id);
+              accepting.set(next.workspace_id, ok);
+              if (!ok) waiting.push({ workspaceId: next.workspace_id, ids: [] });
+            }
+            if (!ok) { waiting.find((w) => w.workspaceId === next.workspace_id)!.ids.push(next.id); continue; }
+          }
           if (!isConversationKey(next.idempotency_key)) {
             let left = room.get(next.workspace_id);
             if (left === undefined) {
@@ -215,6 +237,12 @@ export class RunExecutor {
         const busy = Number(this.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM runs WHERE status = 'running' AND ${PROCESS_SQL}`)?.n ?? 0);
         this.maxObservedProcesses = Math.max(this.maxObservedProcesses, busy);
       });
+      // fora da transação: diz por que espera (só quando muda) e manda ligar o motor (ready dispara; sem esperar aqui)
+      for (const w of waiting) {
+        const text = this.motorWaitText(w.workspaceId);
+        for (const runId of w.ids) this.db.run('UPDATE runs SET error = ? WHERE id = ? AND status = \'queued\' AND (error IS NULL OR error <> ?)', text, runId, text);
+        this.motorReady?.(w.workspaceId);
+      }
       // 3. avançar execuções deste worker
       const mine = this.db.all<RunRow>("SELECT * FROM runs WHERE status IN ('running', 'waiting_user') AND lease_owner = ?", this.owner);
       for (const r of mine) {
@@ -240,17 +268,20 @@ export class RunExecutor {
     }
     // modo real: motor de IA (Hermes), cada agente como subagente com o seu modelo
     const hermes = this.hermesOf(r.workspace_id);
-    if (!hermes) return this.finish(r, 'failed', null, 'motor de IA não configurado');
+    if (!hermes) return this.finish(r, 'failed', null, 'a equipe de IA não está ligada nesta instalação');
     const limit = this.timeoutSeconds(r);
     if (elapsed > limit * 1000 && !r.cancel_requested) {
       if (r.hermes_run_id) await this.sendStop(r);
-      return this.finish(r, 'failed', null, `tempo limite de ${limit}s; parada solicitada ao motor de IA (efeitos já realizados permanecem)`);
+      return this.finish(r, 'failed', null, `tempo limite de ${limit}s; parada pedida à equipe de IA (efeitos já realizados permanecem)`);
     }
     if (!r.hermes_run_id) {
       if (r.cancel_requested) return this.finish(r, 'cancelled', null, 'cancelada antes de começar');
       if (this.motorReady && !this.motorReady(r.workspace_id)) {
-        this.db.run('UPDATE runs SET error = ? WHERE id = ?', 'aguardando o motor de IA (ligando)', r.id);
-        return; // tenta de novo no próximo passo, até o tempo limite
+        // ainda não foi ao motor e ele deixou de receber (renovando, reiniciou): volta para a fila, sem relógio
+        this.db.run(`UPDATE runs SET status = 'queued', started_at = NULL, attempts = MAX(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, error = ?
+          WHERE id = ? AND status = 'running' AND hermes_run_id IS NULL`, this.motorWaitText(r.workspace_id), r.id);
+        this.bus.publish(r.workspace_id, 'runs.changed', { id: r.id, agentId: r.agent_id, status: 'queued' });
+        return;
       }
       const agent = this.db.get<{ model: string | null; provider: string | null }>('SELECT model, provider FROM agents WHERE id = ?', r.agent_id);
       let input = r.input;
@@ -271,10 +302,11 @@ export class RunExecutor {
       } catch (err) {
         const he = err instanceof HermesError ? err : null;
         if (he && (he.status === 503 || he.status === 429)) {
-          this.db.run('UPDATE runs SET error = ? WHERE id = ?', `aguardando o motor de IA: ${he.message}`, r.id);
+          if (he.status === 503) this.motorTrouble?.(r.workspace_id); // reiniciou com o cofre fechado? o dono confere
+          this.db.run('UPDATE runs SET error = ? WHERE id = ?', `aguardando a equipe (${paraTela(he.message, 'ela ainda não respondeu')}; o pedido segue sozinho)`, r.id);
           return; // tenta de novo no próximo passo, até o tempo limite
         }
-        return this.finish(r, 'failed', null, he ? he.message : 'falha ao iniciar no motor de IA');
+        return this.finish(r, 'failed', null, he ? he.message : 'a equipe de IA não começou o pedido');
       }
       return;
     }
@@ -287,7 +319,7 @@ export class RunExecutor {
     } catch (err) {
       if (err instanceof HermesError && err.status === 404) {
         // resultado desconhecido: não repetir ação externa sem reconciliação
-        return this.finish(r, 'failed', null, 'execução não encontrada no motor de IA (reinício?). Resultado desconhecido; não repetida automaticamente.');
+        return this.finish(r, 'failed', null, 'a equipe de IA não encontrou esta execução (reiniciou?). Resultado desconhecido; não repetida automaticamente.');
       }
       throw err;
     }
@@ -300,10 +332,10 @@ export class RunExecutor {
         remote.usage.inputTokens, remote.usage.outputTokens, remote.usage.costUsd, r.id);
     }
     if (mapped === 'succeeded') return this.finish(r, 'succeeded', await this.withMedia(r, remote.output ?? ''), null);
-    if (mapped === 'failed') return this.finish(r, 'failed', null, friendly(remote.error ?? `motor de IA: ${remote.status}`));
+    if (mapped === 'failed') return this.finish(r, 'failed', null, friendly(remote.error ?? `a equipe de IA informou: ${remote.status}`));
     if (mapped === 'cancelled') return this.finish(r, 'cancelled', null, 'parada confirmada; efeitos já realizados permanecem');
     if (mapped === 'unknown') {
-      return this.finish(r, 'failed', null, 'o motor de IA informa resultado desconhecido (reiniciou). Confira antes de repetir.');
+      return this.finish(r, 'failed', null, 'a equipe de IA informa resultado desconhecido (reiniciou). Confira antes de repetir.');
     }
     if (mapped === 'waiting_user' && r.status !== 'waiting_user') {
       this.db.run("UPDATE runs SET status = 'waiting_user' WHERE id = ?", r.id);
@@ -336,7 +368,7 @@ export class RunExecutor {
           { filename: `imagem-${fold(agent)}-${now().slice(0, 10)}-${i + 1}.${ext}`, mime: img.mime, data: img.data, taskId: r.task_id });
         ref = `[imagem: ${art.id}]`;
       } catch {
-        ref = '(imagem gerada pelo motor de IA, mas o sistema não conseguiu trazê-la; peça de novo)';
+        ref = '(imagem gerada pela equipe, mas o sistema não conseguiu trazê-la; peça de novo)';
       }
       out = out.split(`MEDIA:${path}`).join(ref);
     }
@@ -403,7 +435,8 @@ export class RunExecutor {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // sem suporte/erro: bloqueia novos passos localmente, sem alegar desfazer ação remota
-      this.finish(r, 'cancelled', null, `parada local; o motor de IA não confirmou (${clip(msg, 120)}). Efeitos já realizados permanecem.`);
+      const det = paraTela(clip(msg, 120));
+      this.finish(r, 'cancelled', null, `parada local; a equipe de IA não confirmou${det ? ` (${det})` : ''}. Efeitos já realizados permanecem.`);
     }
   }
 
@@ -676,6 +709,22 @@ export function toolHolders(db: Db, workspaceId: string): Map<string, string[]> 
   return out;
 }
 
+/**
+ * As Conexões do agente ainda não chegaram ao motor deste computador (a renovação do motor traz): ele não procura outro
+ * caminho para as contas e diz à pessoa que o pedido segue. Vale para qualquer agente com Conexões, em qualquer
+ * instalação (as instruções gravadas de cada agente não mudam).
+ */
+export const CONEXOES_UPDATING = 'As Conexões (as contas e os aplicativos que a pessoa conectou) estão sendo atualizadas neste computador e voltam sozinhas quando a atualização da equipe terminar. Até lá, não use outro caminho para as contas: nada de skills de e-mail (como himalaya), terminal ou programas, e não diga que enviou ou leu. Diga à pessoa, em uma frase, que a parte do pedido que precisa das contas segue quando a atualização terminar, e faça agora o resto.';
+
+/** O motivo verdadeiro de uma ferramenta que o agente tem, mas ainda não pode usar. */
+function whyMissing(t: ToolDef): string {
+  if (t.status === 'bloqueada') return t.guarded ? 'executa programas: precisa da autorização da pessoa, com a senha' : t.id === 'contas' ? CONEXOES_FORA_ATE_A_PROXIMA : 'bloqueada neste computador';
+  if (t.status === 'desligada') return 'desligada para a equipe: a pessoa liga em Configurações › Ferramentas';
+  if (t.status === 'preparado') return t.id === 'conexoes' ? 'nenhum canal de mensagens conectado em Conexões' : 'falta conectar a conta em Conexões';
+  if (t.status === 'planejado') return 'ainda não existe no Ergon';
+  return t.status;
+}
+
 /** requests: na conversa, o agente recebe os pedidos do usuário em andamento (de todas as conversas). */
 /**
  * `userId`: conversa com uma pessoa — entra a voz de colega (guia comum + personalidade que ela escolheu + o nome dela).
@@ -690,7 +739,10 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
   const tools = parseList(a.tools).map((t) => TOOLS[t]).filter(Boolean).map((t) => toolStatus(t, { channels, workspaceId }));
   const ok = (s: string) => s === 'disponível' || s === 'parcial';
   const usable = tools.filter((t) => ok(t.status)).map((t) => `${t.label} (${t.note})`);
-  const missing = tools.filter((t) => !ok(t.status)).map((t) => t.label);
+  // o que falta vai com o motivo verdadeiro: sem ele, o agente inventava causas ("não habilitadas no workspace") e
+  // tentava outro caminho; as Conexões que estão chegando com a renovação do motor têm frase própria
+  const updating = tools.filter((t) => t.status === 'atualizando');
+  const missing = tools.filter((t) => !ok(t.status) && t.status !== 'atualizando').map((t) => `${t.label} (${whyMissing(t)})`);
   const skills = parseList(a.hermes_skills);
   // competências ensinadas pelo Treinar (ativas): só deste agente
   const learned = db.all<{ name: string; title: string; description: string }>("SELECT name, title, description FROM agent_skills WHERE agent_id = ? AND workspace_id = ? AND status = 'ativa' ORDER BY title", agentId, workspaceId);
@@ -712,10 +764,11 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     coord && coordinatorFocus(a.charter) ? `Foco desta coordenação, definido pelo usuário: ${coordinatorFocus(a.charter)}` : '',
     parseList(a.skills).length ? `Seus métodos: ${parseList(a.skills).join('; ')}.` : '',
     usable.length ? `Ferramentas que você tem: ${usable.join('; ')}.` : 'Você trabalha só com texto nesta conversa.',
-    missing.length ? `Ainda não disponíveis para você (não prometa usá-las): ${missing.join(', ')}.` : '',
+    missing.length ? `Ferramentas que você ainda não pode usar, e por quê: ${missing.join('; ')}. Não diga que usou nenhuma delas e não dê outro motivo.` : '',
+    updating.some((t) => t.id === 'contas') ? CONEXOES_UPDATING : '',
     skills.length ? (canSkills
-      ? `Skills da biblioteca para usar quando fizer sentido (carregue com skill_view antes de seguir): ${skills.join(', ')}.`
-      : `Skills indicadas para o seu trabalho (siga o espírito delas): ${skills.join(', ')}.`) : '',
+      ? `Competências da biblioteca para usar quando fizer sentido (carregue com skill_view antes de seguir): ${skills.join(', ')}.`
+      : `Competências indicadas para o seu trabalho (siga o espírito delas): ${skills.join(', ')}.`) : '',
     learned.length ? `Competências que você aprendeu no Ergon (só suas): quando o pedido tocar no tema, carregue antes com skill_view e siga — ${learned.map((s) => `${s.name}${s.title ? ` (${s.title}${s.description ? `: ${s.description}` : ''})` : ''}`).join('; ')}.` : '',
     askable.length ? `Quando precisar de uma ferramenta que você não tem, não improvise nem diga que fez: peça a quem tem. ${askable.join('; ')}.` : '',
     askable.length ? HELP_HOW : '',

@@ -31,4 +31,5 @@ export const WORK_LABEL: Record<WorkState, string> = {
 export const RESULT_LABEL: Record<string, string> = {
   validado: 'validado', reprovado: 'não passou', aguardando_aprovacao: 'aguarda sua aprovação', aguardando_info: 'aguarda informação',
   sem_confirmacao: 'sem confirmação externa', falha: 'falhou', confirmado_humano: 'aprovado por você', devolvido: 'devolvido por você',
+  descartado: 'recusado por você',
 };

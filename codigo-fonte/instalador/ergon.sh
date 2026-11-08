@@ -12,10 +12,11 @@
 #                                aplicativo Ergon Desktop usa
 #   abrir                        abre http://localhost:8787
 #   backup                       backup completo e conferido (banco cifrado, keyring, arquivos e conexões) numa
-#                                pasta em ~/.ergon/backups
+#                                pasta em ~/.ergon/backups (ficam os 7 mais recentes)
 #   restaurar <pasta>            confere o backup, guarda o que está no lugar (nada é apagado) e restaura
 #   desfazer-restauracao <pre-restore-…>   volta ao que era antes de uma restauração
 #   atualizar                    backup + versão nova (cópia do código: git pull; pacote: baixa a versão publicada)
+#   limpar                       tira as imagens antigas do Ergon que nada usa (roda sozinho depois de atualizar)
 #   logs                         últimas linhas do Ergon e do motor
 #   ajudante                     (roda sozinho ao entrar no computador) guarda a chave do "destrancar sozinho"
 #                                no cofre do sistema quando você liga o botão em Configuração › Segurança, e
@@ -153,6 +154,7 @@ backup() {
     || fail "O backup ficou no volume (/data/backups/$nome), mas a cópia para $BACKUPS falhou."
   chmod -R go-rwx "$BACKUPS/$nome"
   say "Backup completo e conferido (banco, arquivos e conexões): $BACKUPS/$nome"
+  girar_backups "$nome"
 }
 
 # Ferramenta de restauração (server/src/restore-cli.ts) num contêiner de uso único com o volume de dados: funciona
@@ -244,7 +246,7 @@ atualizar() {
   if (( FONTE )); then
     local rev; rev="$(cd "$RAIZ" && git rev-parse --short HEAD 2>/dev/null || true)"
     (cd "$RAIZ" && git pull --ff-only) || fail 'git pull falhou (há mudanças locais, ou a branch não acompanha uma remota). Nada foi alterado.'
-    up semfalha && return
+    if up semfalha; then limpar || true; return; fi
     fail "A versão nova não respondeu. Para voltar: git checkout $rev e ./ergon.sh iniciar; se ainda assim não subir, $voltar"
   fi
   local m ver bundle sha atual tmp
@@ -263,11 +265,94 @@ atualizar() {
   (cd "$RAIZ" && tar --exclude=.env -cf - .) | (cd "$guardada" && tar -xf -)
   (cd "$tmp/x" && tar --exclude=.env -cf - .) | (cd "$RAIZ" && tar -xf -)
   say "Pacote $ver aplicado (a $atual ficou guardada em $guardada)."
-  up semfalha && return
+  # no ar: as imagens antigas sem uso saem; das versões guardadas, fica só esta (a anterior)
+  if up semfalha; then limpar || true; limpar_versoes "$guardada"; return; fi
   say "A versão $ver não respondeu: voltando para a $atual."
   (cd "$guardada" && tar -cf - .) | (cd "$RAIZ" && tar -xf -)
   up semfalha && { say "Voltou para a $atual e está no ar. A $ver fica para depois (veja ./ergon.sh logs)."; return; }
   fail "Nem a versão $atual respondeu (a nova pode ter mudado o banco): $voltar"
+}
+
+# ---------------------------------------------------------------- limpeza: imagens, backups e versões guardadas
+# Imagens: só as dos repositórios do Ergon (o do serviço e o do motor de IA, lidos do docker-compose.yml desta pasta),
+# sem forçar (rmi sem -f: imagem em uso por um contêiner, parado também, nunca sai) e nunca volume. Ficam a imagem de
+# qualquer contêiner, a atual de cada repositório e a anterior anotada no motor (rótulo ergon.motor.prev-image: enquanto
+# a troca não é confirmada ela fica no disco; depois de confirmar, o gerente já a apagou e o rótulo só fica de registro). Nada de "prune": ele apagaria justamente a imagem atual que ainda não tem contêiner.
+#   limpar        depois de atualizar (o gerente de motores faz a mesma limpeza pela API, com as mesmas regras)
+#   limpar tudo   no remover, com os contêineres já fora: também as atuais
+refs_ergon() {
+  [[ -f "$RAIZ/docker-compose.yml" ]] || return 0
+  sed -nE 's/^[[:space:]]*(image|ERGON_MOTOR_IMAGE):[[:space:]]*"?([^"[:space:]#$]+)"?.*$/\2/p' "$RAIZ/docker-compose.yml" | sort -u
+}
+# repositório de uma referência: sem o digest (@…) e sem a etiqueta (o ":" depois da última "/")
+repo_de() { local r="${1%%@*}"; [[ "${r##*/}" == *:* ]] && r="${r%:*}"; printf '%s\n' "$r"; }
+# ID completo sem o "sha256:" (o Docker põe, o Podman não); nada, se não for um ID
+id_puro() { local i="${1#sha256:}"; [[ "$i" =~ ^[0-9a-f]{64}$ ]] && printf '%s\n' "$i"; return 0; }
+limpar() {
+  local tudo=0; [[ "${1:-}" == tudo ]] && tudo=1
+  local repos ref c cs id repo tag dig i t lista filas='' cand=' ' guardar=' ' n=0 bytes=0 ficaram=0
+  repos=" $(refs_ergon | while read -r ref; do repo_de "$ref"; done | sort -u | tr '\n' ' ')"
+  [[ -n "${repos// /}" ]] || return 0
+  # em uso: a imagem de cada contêiner (parado também, de qualquer projeto) e a anterior de um motor ainda não confirmada
+  cs="$("$MOTOR" ps -aq 2>/dev/null || true)"
+  if [[ -n "$cs" ]]; then
+    for c in $("$MOTOR" inspect --format '{{.Image}} {{ index .Config.Labels "ergon.motor.prev-image" }}' $cs 2>/dev/null || true); do
+      id="$(id_puro "$c")"; [[ -n "$id" ]] && guardar="$guardar$id "
+    done
+  fi
+  # as atuais (a do serviço e a do motor de IA) ficam, a não ser no remover
+  if (( ! tudo )); then
+    for ref in $(refs_ergon); do
+      id="$(id_puro "$("$MOTOR" image inspect --format '{{.Id}}' "$ref" 2>/dev/null || true)")"; [[ -n "$id" ]] && guardar="$guardar$id "
+    done
+  fi
+  # candidatas: as dos repositórios do Ergon que não ficam (o Podman chama "localhost/x" a imagem x construída aqui)
+  # o ID inteiro: no Podman é {{.Id}} ({{.ID}} sai curto); no Docker, {{.ID}} com --no-trunc
+  local fid='{{.ID}}'; [[ "$MOTOR" == podman ]] && fid='{{.Id}}'
+  lista="$("$MOTOR" images --no-trunc --digests --format "$fid {{.Repository}} {{.Tag}} {{.Digest}}" 2>/dev/null || true)"
+  while read -r id repo tag dig; do
+    id="$(id_puro "${id:-}")"; [[ -n "$id" ]] || continue
+    [[ "$repos" == *" $repo "* || "$repos" == *" ${repo#localhost/} "* ]] || continue
+    [[ "$guardar" == *" $id "* ]] && continue
+    filas="$filas$id $repo $tag $dig"$'\n'
+    [[ "$cand" == *" $id "* ]] || cand="$cand$id "
+  done <<<"$lista"
+  for id in $cand; do
+    t="$("$MOTOR" image inspect --format '{{.Size}}' "$id" 2>/dev/null || true)"; [[ "$t" =~ ^[0-9]+$ ]] || t=0
+    if ! "$MOTOR" rmi "$id" >/dev/null 2>&1; then
+      # com mais de um nome, o ID sozinho não sai sem forçar: tira os nomes do Ergon, um a um (os de fora ficam)
+      while read -r i repo tag dig; do
+        [[ "${i:-}" == "$id" ]] || continue
+        if [[ -n "$tag" && "$tag" != '<none>' ]]; then "$MOTOR" rmi "$repo:$tag" >/dev/null 2>&1 || true
+        elif [[ "$dig" == sha256:* ]]; then "$MOTOR" rmi "$repo@$dig" >/dev/null 2>&1 || true; fi
+      done <<<"$filas"
+    fi
+    if "$MOTOR" image inspect "$id" >/dev/null 2>&1; then ficaram=$((ficaram + 1)); else n=$((n + 1)); bytes=$((bytes + t)); fi
+  done
+  if (( n )); then say "Limpeza: $n imagem(ns) antiga(s) do Ergon removida(s), $((bytes / 1048576)) MB liberados."; fi
+  if (( ficaram )); then say "$ficaram imagem(ns) antiga(s) do Ergon ficaram (em uso, ou com um nome de fora do Ergon)."; fi
+  return 0
+}
+# Backups: ficam os 7 mais recentes (ERGON_BACKUPS_MANTER muda o número; 0 guarda todos). Só os do próprio Ergon, pelo
+# nome (a pasta ergon-<data>, ou o antigo ergon-<data>.sqlite com o .keyring.json dele): a data no nome dá a ordem. O
+# que acabou de ser feito ($1) conta como o mais novo e nunca sai. Outros arquivos da pasta não são tocados.
+girar_backups() {
+  local manter="${ERGON_BACKUPS_MANTER:-7}" feito="${1:-}" todos e i=0 sairam=0
+  [[ "$manter" =~ ^[0-9]+$ && "$manter" -gt 0 && -d "$BACKUPS" ]] || return 0
+  todos="$( { if [[ -n "$feito" && -e "$BACKUPS/$feito" ]]; then printf '%s\n' "$feito"; fi
+              ls -1 "$BACKUPS" 2>/dev/null | grep -E '^ergon-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9A-Za-z-]+(\.sqlite)?$' | grep -vxF -- "$feito" | sort -r; } || true)"
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    i=$((i + 1)); (( i > manter )) || continue
+    rm -rf -- "${BACKUPS:?}/$e"; rm -f -- "$BACKUPS/$e.keyring.json"; sairam=$((sairam + 1))
+  done <<<"$todos"
+  if (( sairam )); then say "Backups: ficaram os $manter mais recentes ($sairam antigo(s) apagado(s) em $BACKUPS)."; fi
+  return 0
+}
+# Versões guardadas pelo atualizar (~/.ergon/versoes): fica só a anterior ($1), a que ele usa para voltar.
+limpar_versoes() {
+  local d; for d in "$HOME/.ergon/versoes"/*; do [[ -d "$d" && "$d" != "$1" ]] && rm -rf -- "$d"; done
+  return 0
 }
 
 # ---------------------------------------------------------------- ajudante (destrancar sozinho)
@@ -420,12 +505,14 @@ remover() {
     [[ -n "$motores" ]] && { "$MOTOR" rm -f $motores >/dev/null 2>&1 || true; }
     if (( tudo )); then
       compose down --remove-orphans --rmi all -v >/dev/null 2>&1 || true
-      [[ "$MOTOR" == podman ]] && { "$MOTOR" rmi -f "$(imagem_motor)" >/dev/null 2>&1 || true; }
+      # as imagens dos dois repositórios do Ergon (o do serviço e o do motor de IA), de todas as versões, sem forçar
+      limpar tudo || true
       vols="$("$MOTOR" volume ls -q 2>/dev/null | grep -E "^${PROJETO}_" || true) $cofres"; vols="$(echo $vols)"
       [[ -n "$vols" ]] && { "$MOTOR" volume rm -f $vols >/dev/null 2>&1 || true; }
       say 'Contêineres, imagens e volumes do Ergon apagados.'
     else
       compose down --remove-orphans --rmi all >/dev/null 2>&1 || true
+      limpar tudo || true
       say "Contêineres e imagens do Ergon removidos. Os dados ficaram guardados nos volumes ${PROJETO}_* do $MOTOR."
     fi
   else say "O $MOTOR não está respondendo: contêineres, imagens e volumes ficam até ele voltar e você rodar \"ergon remover\" de novo."; fi
@@ -438,6 +525,9 @@ remover() {
   if (( tudo )); then say 'Pronto: o Ergon saiu deste computador, com os dados.'
   else say 'Pronto: o Ergon saiu deste computador. Para voltar com os mesmos dados: baixe o pacote e rode "./ergon.sh instalar".'; fi
 }
+
+# carregado por outro script (os testes do lançador): só as funções
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
 case "${1:-ajuda}" in
   instalar) instalar_programa
@@ -458,6 +548,7 @@ case "${1:-ajuda}" in
   restaurar) restaurar "${2:-}" ;;
   desfazer-restauracao) desfazer_restauracao "${2:-}" ;;
   atualizar) need_motor; atualizar ;;
+  limpar) "$MOTOR" info >/dev/null 2>&1 || fail "O $MOTOR não está respondendo: nada foi limpo."; limpar ;;
   ajudante) case "${2:-}" in remover) remover_ajudante ;; instalar) instalar_ajudante ;; *) ajudante ;; esac ;;
-  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac

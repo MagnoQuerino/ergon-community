@@ -152,6 +152,100 @@ bridge.on_pre_tool_call("vision_analyze", {"image_url": "data:image/png;base64,i
 model_tools.handle_function_call("conexoes_executar", {"conexao": "asana", "acao": "tarefa.criar", "parametros": {}}, task_id="tarefa-2", session_id="sessao-8")
 check("imagem em data: (já na conversa) não conta", [s for s in seen if s["path"].endswith("/conexoes")][-1]["body"].get("leu_web") is False)
 
+# ---------- a lista do Ergon com prefixo: "browser_" barra o navegador inteiro, pelo hook de verdade
+policy["bloqueadas"] = ["web_extract", "process_manage", "browser_"]
+for t in ("browser_console", "browser_cdp", "browser_navigate", "process_manage"):
+    r = call(t, "sessao-10")
+    check(f"depois de ler conteúdo privado: {t} barrada", isinstance(r, dict) and "conteúdo privado" in r.get("message", ""), str(r))
+check("depois de ler conteúdo privado: a busca segue valendo com o prefixo na lista", call("web_search", "sessao-10") is None)
+policy["bloqueadas"] = []
+
+# ---------- ferramentas da plataforma da API pela ponte de controle: desligar as Conexões vale de verdade
+# O painel do motor é simulado com o mesmo que o PUT /api/config do Hermes faz: lê o disco, funde por cima e salva.
+from pathlib import Path  # noqa: E402
+
+from hermes_cli import config as hc  # noqa: E402
+
+
+def gravar(cfg):
+    hc.save_config(cfg)
+    hc._LOAD_CONFIG_CACHE.clear()
+
+
+def painel(method, path, query, body):
+    if method == "PUT" and path == "/api/config":
+        gravar(hc._deep_merge(hc.require_readable_config_before_write(), body["config"]))
+        return 200, b'{"ok": true}'
+    if path == "/api/model/info":
+        return 200, b"{}"
+    return 404, b"{}"
+
+
+class Resp:
+    def __init__(self):
+        self.out = None
+
+    def _json(self, status, obj):
+        self.out = (status, obj)
+
+    def _send(self, status, data):
+        self.out = (status, json.loads(data or b"{}"))
+
+
+def ponte(metodo, corpo=None):
+    resp = Resp()
+    if metodo == "GET":
+        bridge._ControlHandler._api_toolsets_get(resp)
+    else:
+        bridge._ControlHandler._api_toolsets_put(resp, corpo or {})
+    return resp.out
+
+
+def api_ligadas():
+    return _get_platform_tools(load_config(), "api_server", include_default_mcp_servers=False)
+
+
+bridge._dash_call = painel
+# o que o Hermes já marcou como conhecido (recurso que saiu do núcleo) tem de continuar
+disco = hc.read_user_config_raw(Path(HOME) / "config.yaml")
+disco["known_plugin_toolsets"] = {"api_server": ["homeassistant"], "teams": ["homeassistant"]}
+gravar(disco)
+st = ponte("GET")
+check("consulta: Conexões ligadas e o que o Hermes conhece", st[0] == 200 and "ergon_conexoes" in st[1]["enabled"] and st[1].get("known") == ["homeassistant"], str(st))
+st = ponte("PUT", {"enabled": ["todo", "web"]})
+check("desligar: a ponte grava também o conjunto como conhecido (unido ao que estava)",
+      st == (200, {"ok": True, "enabled": ["todo", "web"], "known": ["ergon_conexoes", "homeassistant"]}), str(st))
+check("desligar: o Hermes deixa de ligar as Conexões na API", "ergon_conexoes" not in api_ligadas(), str(api_ligadas()))
+kn = hc.read_user_config_raw(Path(HOME) / "config.yaml").get("known_plugin_toolsets")
+check("desligar: o que o Hermes conhecia continua (API e Teams)", kn == {"api_server": ["ergon_conexoes", "homeassistant"], "teams": ["homeassistant"]}, str(kn))
+st = ponte("PUT", {"enabled": ["todo", "web", "ergon_conexoes", "browser", "file"]})
+check("religar: Conexões de volta; o que não é do conjunto seguro não entra", st[0] == 200 and st[1]["enabled"] == ["ergon_conexoes", "todo", "web"]
+      and "ergon_conexoes" in api_ligadas(), str((st, api_ligadas())))
+check("consulta depois: conhecido sem repetir", ponte("GET")[1].get("known") == ["ergon_conexoes", "homeassistant"])
+
+
+# a saúde diz a versão do plugin, a configuração do cofre e o que este motor sabe fazer
+def saude():
+    resp = Resp()
+    getattr(bridge._ControlHandler, "_health", lambda r: r._json(200, {}))(resp)  # plugin de antes: sem a rota nova
+    return resp.out
+
+
+marca = Path(HOME) / ".ergon-config"
+marca.write_text('{"versao": 2}', encoding="utf-8")
+st = saude()
+check("saúde: versão do plugin, migração do cofre e capacidades", st[0] == 200 and st[1].get("plugin_version") == bridge.PLUGIN_VERSION
+      and st[1].get("vault_config") == 2 and {"conexoes", "bloqueio_prefixo", "known_plugin_toolsets"} <= set(st[1].get("capacidades") or [])
+      and st[1].get("ok") is True and st[1].get("dashboard") is True, str(st))
+marca.write_text("1", encoding="utf-8")
+check("saúde: marca antiga vale 1", saude()[1].get("vault_config") == 1)
+# a marca das migrações (.ergon-migracoes) vale antes da antiga, que fica "1" para as imagens de antes
+(Path(HOME) / ".ergon-migracoes").write_text('{"versao": 2}', encoding="utf-8")
+check("saúde: a marca das migrações primeiro", saude()[1].get("vault_config") == 2)
+(Path(HOME) / ".ergon-migracoes").unlink()
+marca.unlink()
+check("saúde: sem marca, 0", saude()[1].get("vault_config") == 0)
+
 # ---------- Ergon fora: o hook barra antes (sem política, só o básico), e a ferramenta, se chamada, diz que não sabe
 srv.shutdown()
 srv.server_close()

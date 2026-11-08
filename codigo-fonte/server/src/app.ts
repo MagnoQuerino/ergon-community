@@ -1,6 +1,7 @@
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from './config.ts';
@@ -14,7 +15,8 @@ import { activityReport, reportPeriod } from './services/activity-report.ts';
 import { Conexoes } from './services/conexoes/servico.ts';
 import type { Permissoes } from './services/conexoes/catalogo.ts';
 import { EspelhoEscrita } from './services/conexoes/espelho.ts';
-import { log, setLog } from './lib/log.ts';
+import { log, scrub, setLog } from './lib/log.ts';
+import { paraTela } from './lib/texto-tela.ts';
 import { S, idParams, strList } from './lib/schemas.ts';
 import { registerIntegrationRoutes } from './routes/integracoes.ts';
 import {
@@ -46,7 +48,7 @@ import { personalityOf, setPersonality } from './services/voices.ts';
 import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
-import type { AiService } from './services/ai.ts';
+import { CONEXOES, type AiService } from './services/ai.ts';
 import { Motors } from './services/motors.ts';
 import { Integrations, integrationRow, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
@@ -70,9 +72,9 @@ import { KIND_LABEL, Results, WORK_LABEL, type WorkState } from './services/resu
 import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setSetting } from './services/sectors.ts';
 import { findConnection, ingestEvent, syncConfiguredIdentities, upsertIdentity } from './services/ingest.ts';
 import { FixtureTaskProvider, importBoards } from './services/mirror.ts';
-import { RunExecutor, draftPrompt, instructionsFor, isCoordinator, parseDraft } from './services/runs.ts';
+import { RunExecutor, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
 import { ReviewService } from './services/review.ts';
-import { GUARDED_TOOLSETS, TOOLS, grantConnectionsTool, grantDataTool, motorScope, platformToolsets, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
+import { GUARDED_TOOLSETS, TOOLS, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard, ensureBoards, getTask, taskLog, updateTask, userBoard } from './services/tasks.ts';
@@ -166,7 +168,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // um motor de IA por pessoa (com o gerente de motores) ou um motor só para todos
   const motors = new Motors({ cfg, db, vault, owners, legacy: { hermes, control }, clients: deps.motorClients, fetch: deps.motorFetch });
   const executor = new RunExecutor(db, bus, cfg, motors.perPerson ? (ws) => motors.hermes(ws) : hermes);
-  if (motors.perPerson) executor.motorReady = (ws) => motors.ready(ws);
+  if (motors.perPerson) {
+    executor.motorReady = (ws) => motors.ready(ws);
+    // motor ligando ou renovando: o pedido novo espera na fila sem contar tempo (motors.accepting não liga nada)
+    executor.motorAccepting = (ws) => motors.accepting(ws);
+    executor.motorWaitText = (ws) => motors.waitText(ws);
+    executor.motorTrouble = (ws) => motors.trouble(ws);
+  }
+  // as Conexões de um agente ficam "atualizando" (não "desligadas") quando há conta ligada e o motor ainda não as tem
+  setContasConectadas((ws) => !!db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND state = 'connected' LIMIT 1", ws));
   const reviews = new ReviewService(db, bus, executor, cfg);
   // núcleo operacional: análise determinística de arquivos e conclusão de cards só com evidência
   const opsCfg = { filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes, storageQuota: cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0 };
@@ -257,9 +267,44 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   };
   db.run("UPDATE runs SET model = NULL WHERE model IS NOT NULL AND model NOT LIKE '%/%'"); // nome do motor, não do modelo
   const whatsapp = new WhatsAppReader(db, bus, cfg, integrations);
-  const conexoes = new Conexoes({ db, bus, integrations, whatsapp,
+  /**
+   * Execução de código vale pelo AGENTE, não pelo motor inteiro: o pedido da pessoa a um agente sem Terminal nem Executar
+   * código lê e organiza direto. Quem roda programas no motor alcança a ponte com o token dele e poderia se passar por outra
+   * sessão; por isso também confirma quando, no mesmo motor, outro trabalho em andamento é de um agente que executa
+   * programas, ou quando já rodou programa neste motor desde que ele ligou (processo em segundo plano sobrevive à execução).
+   */
+  const CODIGO = new Set(['terminal', 'code_execution']);
+  const FERRAMENTAS_DE_CODIGO = ['terminal', 'execute_code', 'process', 'process_manage'];
+  const runAtual = new AsyncLocalStorage<Pick<RunRow, 'id' | 'agent_id' | 'workspace_id'>>();
+  const workspacesDoMotor = (ws: string): string[] => {
+    const u = motors.scope(ws);
+    return u === '_' ? db.all<{ id: string }>('SELECT id FROM workspaces').map((w) => w.id) : owners.owned(u);
+  };
+  const agenteExecutaCodigo = (ws: string, agentId: string): boolean => {
+    let list: string[] = [];
+    try { const x = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', agentId)?.tools ?? '[]'); if (Array.isArray(x)) list = x.map(String); } catch { /* sem ferramentas legíveis */ }
+    const on = platformToolsets(motorScope(ws)).enabled;
+    return toolsetsFor(list, { workspaceId: ws }).some((t) => CODIGO.has(t) && on.includes(t));
+  };
+  const codigoLigado = (ws: string, run?: Pick<RunRow, 'id' | 'agent_id' | 'workspace_id'>): boolean => {
+    const p = platformToolsets(motorScope(ws));
     // ainda sem a leitura das ferramentas do motor (o servidor acabou de ligar): conta como ligado até ler (a ponte lê antes de agir)
-    codigoLigado: (ws) => { const p = platformToolsets(motorScope(ws)); return p.enabled.some((t) => t === 'terminal' || t === 'code_execution') || (!p.at && executor.mode === 'real'); },
+    if (!p.at && executor.mode === 'real') return true;
+    if (!p.enabled.some((t) => CODIGO.has(t))) return false;
+    const r = run ?? runAtual.getStore();
+    if (!r) return true; // sem saber de qual agente: o motor inteiro, como antes
+    if (agenteExecutaCodigo(ws, r.agent_id)) return true;
+    const wss = workspacesDoMotor(ws);
+    if (!wss.length) return true;
+    const marks = wss.map(() => '?').join(', ');
+    const outros = db.all<{ agent_id: string; workspace_id: string }>(
+      `SELECT DISTINCT agent_id, workspace_id FROM runs WHERE status IN ('running', 'waiting_user') AND mode = 'real' AND id <> ? AND workspace_id IN (${marks})`, r.id, ...wss);
+    if (outros.some((o) => agenteExecutaCodigo(o.workspace_id, o.agent_id))) return true;
+    const desde = new Date(motors.codigoDesde(ws)).toISOString();
+    return !!db.get(`SELECT 1 AS x FROM run_tools WHERE workspace_id IN (${marks}) AND tool IN (${FERRAMENTAS_DE_CODIGO.map(() => '?').join(', ')}) AND started_at >= ? LIMIT 1`,
+      ...wss, ...FERRAMENTAS_DE_CODIGO, desde);
+  };
+  const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado,
     // confirmou no cartão: o agente recebe o resultado e continua o pedido na mesma conversa
     continuar: (x) => { executor.enqueue({
       workspaceId: x.workspaceId, agentId: x.agentId, conversationId: x.conversationId, kind: 'chat', input: x.texto, maxInput: cfg.maxDocumentChars,
@@ -430,14 +475,29 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       } catch { /* fica o erro no quadro */ }
     }
   };
+  // um motor só: as Conexões ligam por padrão uma vez por execução do servidor (ausente = ligado), salvo se desligadas
+  let conexoesPadrao = false;
+  const conexoesNoMotorUnico = async () => {
+    if (motors.perPerson || conexoesPadrao || !control) return;
+    const desligado = !!db.get("SELECT 1 AS x FROM workspace_settings WHERE key = 'ferramentas.contas' AND value = 'desligado' LIMIT 1");
+    const mudou = await ai.ensureConexoes(desligado);
+    conexoesPadrao = true;
+    if (mudou) await ai.refreshToolsets();
+  };
   const startBackground = () => {
     if (timers.length) return;
     espelhoEscrita.start();
-    const refreshAi = () => { for (const x of motors.openAis()) { void x.refreshToolsets(); void x.defaultModel().catch(() => null); } };
+    const refreshAi = () => {
+      for (const x of motors.openAis()) { void x.refreshToolsets(); void x.defaultModel().catch(() => null); }
+      void conexoesNoMotorUnico().catch(() => undefined);
+    };
     refreshAi();
     timers.push(setInterval(refreshAi, 60_000));
     // um motor por pessoa: quem não usa há algum tempo tem o motor desligado (volta quando precisar)
     if (motors.perPerson) timers.push(setInterval(() => void motors.stopIdle(), 10 * 60_000));
+    // a cada minuto: quem está "renovando" e ficou livre é renovado; motor reiniciado por fora recebe a chave de novo; e,
+    // com todos os abertos na versão nova, a limpeza das imagens antigas (uma vez por versão)
+    if (motors.perPerson) timers.push(setInterval(() => void motors.tick().then(() => motors.limparSePronto()).catch(() => undefined), 60_000));
     timers.push(setInterval(() => void syncMirrors(), 5 * 60_000)); // espelho automático das listas escolhidas
     const sweepTrash = () => {
       for (const w of db.all<{ id: string }>('SELECT DISTINCT workspace_id AS id FROM artifacts WHERE deleted_at IS NOT NULL')) {
@@ -452,8 +512,17 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // um motor só: destranca o volume cifrado dele (e de novo se ele reiniciar). Um por pessoa: cada um abre quando a
     // pessoa abre a parte dela (motors.ensure)
     if (!motors.perPerson) hermesVault.start();
-    else for (const p of vault.peopleInfo().filter((x) => x.open)) void motors.ensure(p.userId).catch(() => undefined);
+    else {
+      for (const p of vault.peopleInfo().filter((x) => x.open)) void motors.ensure(p.userId).catch(() => undefined);
+      // parte fechada e sem trabalho: o motor desatualizado é recriado sem ligar e sem chave (abre quando a pessoa entrar)
+      void motors.renewClosed().catch(() => undefined);
+    }
     whatsapp.resumeAll(); // só sessões que o usuário já pareou; nunca gera QR sozinho
+  };
+  // a tela da pessoa (Saúde, Conexões) acompanha o motor dela; e cada motor que abre pode liberar a limpeza da versão
+  motors.onChange = (userId, state) => {
+    for (const ws of owners.owned(userId)) bus.publish(ws, 'motor.changed', { state });
+    if (state === 'aberto') void motors.limparSePronto().catch(() => undefined);
   };
   // a passada do espelho em andamento termina antes de desligar (o que saiu para o aplicativo fica gravado), com um teto
   const pararEspelho = () => new Promise<void>((ok) => { const t = setTimeout(ok, 10_000); espelhoEscrita.stop().catch(() => undefined).finally(() => { clearTimeout(t); ok(); }); });
@@ -521,7 +590,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!auth) throw new HttpError(401, 'unauthenticated', 'faça login');
     if (isWrite(req.method)) {
       const token = req.headers['x-csrf-token'];
-      if (typeof token !== 'string' || !safeEqual(token, auth.csrf)) throw new HttpError(403, 'csrf', 'token CSRF inválido');
+      if (typeof token !== 'string' || !safeEqual(token, auth.csrf)) throw new HttpError(403, 'csrf', 'A página ficou desatualizada: recarregue e tente de novo.');
     }
     if (auth.locked && !LOCKED_OK.has(url)) throw new HttpError(423, 'locked', 'Tela trancada por inatividade: digite a senha para continuar.');
     if (personSealed(auth) && !LOCKED_OK.has(url)) throw new HttpError(423, 'person_sealed', 'Digite a sua senha para abrir os seus dados.');
@@ -562,7 +631,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Público -------------------------------------------------------------------------------------
   app.get('/api/health', { logLevel: 'warn' }, async () => {
     db.get('SELECT 1 AS ok');
-    return { ok: true, service: 'ergon', version: VERSION, build: BUILD, executor: cfg.executor };
+    // equipe: algum motor está sendo trocado pela versão nova (o aplicativo do computador mostra a etapa "Atualizando a
+    // equipe"); não diz de quem nem quantos
+    return { ok: true, service: 'ergon', version: VERSION, build: BUILD, executor: cfg.executor, equipe: motors.states_().some((x) => x.state === 'renovando') ? 'renovando' : 'pronta' };
   });
 
   app.get('/api/auth/state', async (req) => {
@@ -1099,14 +1170,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = owner(req);
     const b = req.body as { kind: 'outro' | 'lmstudio' | 'ollama'; name?: string; baseUrl: string; key?: string };
     const r = await aiOf(a.workspaceId).addByokCustom({ kind: b.kind, name: b.name ?? '', baseUrl: b.baseUrl, ...(b.key ? { key: b.key } : {}) });
-    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_custom', evidence: { kind: b.kind, id: r.id, models: r.models }, result: 'endpoint próprio conectado' });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_custom', evidence: { kind: b.kind, id: r.id, models: r.models }, result: 'endereço próprio de IA conectado' });
     return r;
   });
   app.delete('/api/ai/byok-custom/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^byok-[a-z0-9-]{1,40}$' } } } } }, async (req) => {
     const a = owner(req);
     const id = (req.params as { id: string }).id;
     await aiOf(a.workspaceId).removeByokCustom(id);
-    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_custom_remove', evidence: { id }, result: 'endpoint próprio removido' });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_custom_remove', evidence: { id }, result: 'endereço próprio de IA removido' });
     return { ok: true };
   });
   app.delete('/api/ai/byok/:provider', { schema: { params: byokParams } }, async (req) => {
@@ -1131,6 +1202,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const on = new Set(platformToolsets(motorScope(a.workspaceId)).enabled);
     if (wanted.some((t) => TOOLS[t]?.guarded && !on.has(TOOLS[t].toolset ?? ''))) requireRecentAuth(a);
     const enabled = await aiOf(a.workspaceId).setPlatformTools(wanted);
+    // a escolha da pessoa sobre as Conexões fica gravada: desligadas por ela, o motor não liga de novo sozinho (ausente = ligado)
+    if (on.has(CONEXOES) && !wanted.includes('contas')) setSetting(db, a.workspaceId, 'ferramentas.contas', 'desligado');
+    else if (wanted.includes('contas')) setSetting(db, a.workspaceId, 'ferramentas.contas', 'ligado');
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.tools', evidence: { enabled }, result: 'ferramentas da equipe atualizadas' });
     bus.publish(a.workspaceId, 'agents.changed', {});
     return { enabled };
@@ -2103,10 +2177,52 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // Saúde e diagnóstico (só o dono; tudo local, nada sai do computador) -----------------------------------------
   // um motor por pessoa: o painel de quem administra mostra o motor dela (cada pessoa vê o seu em Conexões › IA)
-  const MOTOR_STATE: Record<string, string> = { aberto: 'aberto', ligando: 'aguardando', desligado: 'desligado', erro: 'erro' };
+  const MOTOR_STATE: Record<string, string> = { aberto: 'aberto', ligando: 'aguardando', renovando: 'aguardando', desligado: 'desligado', erro: 'erro' };
   const healthDepsFor = (a: AuthContext) => ({ db, cfg, vault, hermes: motors.perPerson ? motors.hermes(a.workspaceId) : hermes, executorMode: () => executor.mode,
-    motorVault: () => (motors.perPerson ? { state: MOTOR_STATE[motors.state(a.userId).state], lastError: motors.state(a.userId).error } : { state: hermesVault.state, lastError: hermesVault.lastError }) });
+    motorVault: () => (motors.perPerson ? { state: MOTOR_STATE[motors.state(a.userId).state], lastError: motors.state(a.userId).error } : { state: hermesVault.state, lastError: hermesVault.lastError }),
+    motor: () => (motors.perPerson ? motors.saude(a.userId) : null),
+    // do cache das ferramentas: o motor foi lido e não traz o conjunto das Conexões (vale também com um motor só)
+    semConexoes: () => motorSemConjunto(CONEXOES, motorScope(a.workspaceId)),
+    espaco: () => motors.espaco() });
   app.get('/api/saude', async (req) => healthPanel(healthDepsFor(admin(req))));
+  /** Erro do gerente de motores em linguagem simples (a tela mostra; nada de código de erro do Docker). */
+  const gerenteErro = (e: unknown): HttpError => {
+    const st = Number((e as { status?: number }).status);
+    const tecnico = scrub((e as Error)?.message, 300);
+    // 409: o motivo do Ergon ("este cofre não está na lista…") passa; o do gerente, com peça interna, vira texto simples
+    if (st === 409) return new HttpError(409, 'volume', paraTela(tecnico, 'Este cofre ainda está em uso ou não pode ser apagado agora: nada foi apagado.'));
+    if (st === 404 || st === 405) return new HttpError(409, 'manager_old', 'Esta instalação ainda não faz esta limpeza: ela chega com a próxima atualização do Ergon.');
+    log.warn({ erro: tecnico }, 'gerente de motores: a limpeza falhou');
+    return new HttpError(502, 'manager', 'A limpeza não respondeu agora. Tente de novo em instantes.');
+  };
+  // Liberar espaço: as versões antigas do motor que nenhum motor usa (nunca dados). Apagar sempre confirma: a tela pede
+  // a confirmação e ela vem no corpo
+  app.post('/api/saude/liberar-espaco', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['confirmar'], properties: { confirmar: { const: true } } } },
+  }, async (req) => {
+    const a = admin(req);
+    if (!motors.perPerson) throw new HttpError(409, 'single_motor', 'Nesta instalação não há versões antigas da equipe para liberar por aqui.');
+    const r = await motors.limpar().catch((e: unknown) => { throw gerenteErro(e); });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'admin.liberar_espaco', evidence: { liberado: r.liberado, removidas: r.removidas },
+      result: r.removidas ? `${r.removidas} versão(ões) antiga(s) da equipe apagada(s)` : 'nada para liberar' });
+    bus.publish(a.workspaceId, 'motor.changed', {});
+    return r;
+  });
+  // Cofre de uma conta que já não existe: só os que o servidor confere (pessoa fora do banco); confirmação com o nome do
+  // cofre no corpo e a identidade confirmada há pouco (não tem volta)
+  app.delete('/api/saude/volumes/:nome', {
+    schema: { params: { type: 'object', required: ['nome'], properties: { nome: { type: 'string', pattern: '^ergon_motor-[a-f0-9]{32}$' } } },
+      body: { type: 'object', additionalProperties: false, required: ['confirmar'], properties: { confirmar: S.str(64, 1) } } },
+  }, async (req) => {
+    const a = admin(req);
+    const nome = (req.params as { nome: string }).nome;
+    if ((req.body as { confirmar: string }).confirmar !== nome) throw new HttpError(400, 'confirm', 'Confirme o cofre que vai ser apagado.');
+    requireRecentAuth(a);
+    const r = await motors.apagarVolume(nome).catch((e: unknown) => { throw gerenteErro(e); });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'admin.apagar_cofre', evidence: { conta: r.conta }, result: `cofre apagado (${r.conta})` });
+    bus.publish(a.workspaceId, 'motor.changed', {});
+    return { ok: true };
+  });
   app.get('/api/saude/diagnostico', async (req, reply) => {
     const a = admin(req);
     const d = await diagnostics(healthDepsFor(a));
@@ -2215,7 +2331,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (b.op === 'listar') return { ok: true, status: 'feita', texto: conexoes.listar(run.workspace_id, b.conexao) };
     if (!b.conexao || !b.acao) return { ok: false, status: 'falhou', texto: 'Diga a conexão e a ação (veja conexoes_listar).' };
     if (!platformToolsets(motorScope(run.workspace_id)).at) await aiOf(run.workspace_id).refreshToolsets(); // codigoLigado precisa da leitura
-    return conexoes.executar(run, b.conexao, b.acao, b.parametros ?? {}, { leuWeb: b.leu_web });
+    // a regra de execução de código olha o agente desta execução (codigoLigado lê daqui)
+    const conexao = b.conexao; const acao = b.acao;
+    return runAtual.run(run, () => conexoes.executar(run, conexao, acao, b.parametros ?? {}, { leuWeb: b.leu_web }));
   });
 
   app.post('/internal/bridge/v1/training-event', {

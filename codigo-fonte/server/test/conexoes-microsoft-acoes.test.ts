@@ -1,7 +1,7 @@
 // Ações da Microsoft no formato documentado do Graph (sem rede): método, endereço exato, cabeçalhos e corpo de cada chamada.
 import assert from 'node:assert/strict';
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
-import { ACOES_MICROSOFT, ESCOPOS_MICROSOFT } from '../src/services/conexoes/acoes/microsoft.ts';
+import { ACOES_MICROSOFT, ESCOPOS_MICROSOFT, setEsperaMicrosoft, type CtxMicrosoft } from '../src/services/conexoes/acoes/microsoft.ts';
 import { escritorMicrosoft } from '../src/services/conexoes/escrita/microsoft.ts';
 import { htmlParaTexto, semControle } from '../src/services/conexoes/texto.ts';
 import { ErroAcao, type Args, type CtxAcao, type Http } from '../src/services/conexoes/tipos.ts';
@@ -62,7 +62,7 @@ describe('catálogo', () => {
       'email.buscar': 'ler', 'email.ler': 'ler', 'email.pastas': 'ler', 'email.rascunho': 'organizar', 'email.rascunho_resposta': 'organizar', 'email.enviar': 'enviar', 'email.responder': 'enviar',
       'email.enviar_rascunho': 'enviar', 'email.mover': 'organizar', 'email.apagar': 'apagar', 'agenda.calendarios': 'ler', 'agenda.listar': 'ler', 'agenda.cancelar': 'apagar',
       'arquivos.buscar': 'ler', 'arquivos.ler': 'ler', 'arquivos.criar': 'organizar', 'pessoas.buscar': 'ler', 'teams.conversas': 'ler', 'teams.ler': 'ler', 'teams.enviar': 'enviar',
-      'teams.nova_conversa': 'enviar', 'teams.times': 'ler', 'teams.canais': 'ler', 'teams.enviar_canal': 'enviar',
+      'teams.nova_conversa': 'enviar', 'teams.times': 'ler', 'teams.canais': 'ler', 'teams.enviar_canal': 'enviar', 'teams.ler_canal': 'ler',
     };
     for (const [id, r] of Object.entries(esperado)) assert.equal(riscoDe(id), r, id);
     assert.deepEqual(ACOES_MICROSOFT.map((a) => a.id).sort(), [...Object.keys(esperado), 'agenda.criar', 'agenda.editar'].sort());
@@ -75,19 +75,28 @@ describe('catálogo', () => {
     assert.equal(riscoDe('agenda.editar', { avisar_participantes: true }), 'enviar');
     assert.equal(riscoDe('agenda.editar', { titulo: 'x' }), 'organizar');
   });
-  test('permissões: as mínimas, todas usadas, Teams só em conta de trabalho', () => {
-    const declaradas = new Set([...ESCOPOS_MICROSOFT.base, ...ESCOPOS_MICROSOFT.trabalho]);
+  test('permissões: as mínimas, todas usadas, em etapas; Teams e canais só em conta de trabalho', () => {
+    const E = ESCOPOS_MICROSOFT;
+    const pessoal = [...E.base, ...E.leitura];
+    const trabalho = [...E.trabalho, ...E.leituraTrabalho, ...E.canais];
+    const declaradas = new Set([...pessoal, ...trabalho]);
+    assert.equal(declaradas.size, pessoal.length + trabalho.length, 'cada permissão numa etapa só');
     // o espelho de tarefas também escreve: sem a permissão dele, concluir e mover no Planner e no To Do davam "acesso recusado"
     const usadas = new Set([...ACOES_MICROSOFT.flatMap((a) => a.escopos ?? []), ...(escritorMicrosoft(http).escopos ?? [])]);
-    assert.ok(ESCOPOS_MICROSOFT.base.includes('Tasks.ReadWrite'), 'To Do existe em conta pessoal');
+    assert.ok(E.leitura.includes('Tasks.ReadWrite'), 'To Do existe em conta pessoal; é da leitura, que a política padrão não deixa o usuário dar');
     assert.deepEqual([...usadas].sort(), [...declaradas].sort());
     assert.ok(ACOES_MICROSOFT.every((a) => a.escopos?.length), 'toda ação diz o que precisa');
-    for (const fora of ['Mail.Read.Shared', 'Chat.ReadWrite', 'ChannelMessage.Read.All', 'Files.ReadWrite.All', 'Group.ReadWrite.All']) assert.ok(!declaradas.has(fora), fora);
+    for (const fora of ['Mail.Read.Shared', 'Chat.ReadWrite', 'Files.ReadWrite.All', 'Group.ReadWrite.All']) assert.ok(!declaradas.has(fora), fora);
+    assert.deepEqual(E.canais, ['ChannelMessage.Read.All'], 'a leitura de canais é a etapa opcional, à parte');
     for (const a of ACOES_MICROSOFT) {
       assert.equal(!!a.trabalho, a.id.startsWith('teams.'), a.id);
-      if (!a.trabalho) assert.ok(a.escopos!.every((e) => ESCOPOS_MICROSOFT.base.includes(e)), `${a.id} não pode depender de permissão de conta de trabalho`);
+      if (!a.trabalho) assert.ok(a.escopos!.every((e) => pessoal.includes(e)), `${a.id} não pode depender de permissão de conta de trabalho`);
     }
-    assert.ok(ESCOPOS_MICROSOFT.trabalho.every((e) => !ESCOPOS_MICROSOFT.base.includes(e)));
+    // a lista de conversas e o envio só pedem Chat.ReadBasic (etapa A); ler o conteúdo pede Chat.Read (leitura)
+    assert.deepEqual(acao('teams.conversas').escopos, ['Chat.ReadBasic']);
+    assert.ok(acao('teams.enviar').escopos!.includes('Chat.ReadBasic') && !acao('teams.enviar').escopos!.includes('Chat.Read'));
+    assert.deepEqual(acao('teams.ler').escopos, ['Chat.Read']);
+    assert.ok(acao('teams.ler_canal').escopos!.includes('ChannelMessage.Read.All'));
   });
   test('com cursor, só o texto da busca de arquivos e a conversa do Teams são obrigatórios: o serviço barra o que faltar antes de rodar', () => {
     const obrigatorios = Object.fromEntries(ACOES_MICROSOFT.filter((x) => x.params.cursor).map((a) => [a.id, Object.entries(a.params).filter(([, p]) => p.obrigatorio).map(([n]) => n)]));
@@ -724,6 +733,14 @@ describe('Teams', () => {
     assert.doesNotMatch(r.texto, /<|x\(\)|apagada|systemEvent/); assert.deepEqual([r.deFora, r.privado], [true, true]);
     assert.equal(linhas.length, 2);
   });
+  test('ler com período (rotina diária): o intervalo de datas vai na consulta, com a ordem pela mesma data', async () => {
+    rotas = [[/./, { value: [] }]];
+    await run('teams.ler', { chat: '19:aaa@unq.gbl.spaces', desde: '2026-11-03' });
+    // meia-noite de São Paulo = 03:00 UTC; o filtro só vale com $orderby na mesma propriedade (chat-list-messages)
+    assert.equal(ultima().url.searchParams.get('$orderby'), 'lastModifiedDateTime desc');
+    assert.equal(ultima().url.searchParams.get('$filter'), 'lastModifiedDateTime gt 2026-11-03T03:00:00Z');
+    await recusa(run('teams.ler', { chat: '19:aaa@unq.gbl.spaces', desde: 'ontem' }), /desde/);
+  });
   test('enviar: POST /chats/{id}/messages; texto escapado, com as quebras de linha', async () => {
     rotas = [[/./, json({ id: '1', webUrl: 'https://teams.microsoft.com/l/message/1' }, 201)]];
     const r = await run('teams.enviar', { chat: '19:bbb@thread.v2', texto: 'Olá <script>a</script> & cia\nlinha 2' });
@@ -748,7 +765,7 @@ describe('Teams', () => {
   test('nova_conversa: acha ou cria o chat 1:1 com os dois membros e manda a mensagem', async () => {
     rotas = [[/\/me\?/, { id: 'meu-id' }], [/\/chats\/19/, json({ id: '1', webUrl: 'https://teams.microsoft.com/m' }, 201)], [/\/chats$/, json({ id: '19:novo@unq.gbl.spaces' }, 201)]];
     const r = await run('teams.nova_conversa', { para: "o'neil@x.com", texto: 'oi\ntudo' });
-    assert.deepEqual(calls.map((c) => `${c.method} ${c.raw}`), [`GET ${G}/me?$select=id`, `POST ${G}/chats`, `POST ${G}/chats/19%3Anovo%40unq.gbl.spaces/messages`]);
+    assert.deepEqual(calls.map((c) => `${c.method} ${c.raw}`), [`GET ${G}/me?$select=id%2Cmail%2CuserPrincipalName`, `POST ${G}/chats`, `POST ${G}/chats/19%3Anovo%40unq.gbl.spaces/messages`]);
     assert.deepEqual(calls[1].body, { chatType: 'oneOnOne', members: [
       { '@odata.type': '#microsoft.graph.aadUserConversationMember', roles: ['owner'], 'user@odata.bind': `${G}/users('meu-id')` },
       { '@odata.type': '#microsoft.graph.aadUserConversationMember', roles: ['owner'], 'user@odata.bind': `${G}/users('o''neil@x.com')` },
@@ -804,7 +821,7 @@ describe('leitura: permissão real', () => {
     // o que a conta autorizava antes das ações de escrita
     const antiga = new Set(['User.Read', 'Tasks.Read', 'Mail.Read', 'Calendars.Read', 'Files.Read.All']);
     for (const a of ACOES_MICROSOFT.filter((x) => riscoDe(x.id) === 'ler' && /^(email|agenda|arquivos)\./.test(x.id))) assert.ok(a.escopos!.every((e) => antiga.has(e)), a.id);
-    for (const e of ['Mail.Read', 'Calendars.Read']) assert.ok(ESCOPOS_MICROSOFT.base.includes(e), e);
+    for (const e of ['Mail.Read', 'Calendars.Read']) assert.ok(ESCOPOS_MICROSOFT.leitura.includes(e), e);
   });
 });
 
@@ -1110,5 +1127,107 @@ describe('cartão de confirmação (preparar): mostra o que vai acontecer e fixa
   test('toda ação de envio, apagar e mover tem cartão; as de leitura, não', () => {
     for (const id of ['email.responder', 'email.rascunho_resposta', 'email.apagar', 'email.mover', 'email.enviar_rascunho', 'agenda.cancelar', 'agenda.editar', 'agenda.criar', 'teams.enviar', 'teams.enviar_canal']) assert.equal(typeof acao(id).preparar, 'function', id);
     for (const a of ACOES_MICROSOFT.filter((x) => riscoDe(x.id) === 'ler')) assert.equal(a.preparar, undefined, a.id);
+  });
+});
+
+describe('rc.24: Teams sob demanda e sem becos', () => {
+  const comLeitura = (tem: boolean): CtxMicrosoft => ({ ...ctx, temEscopo: (e) => (e === 'Chat.Read' ? tem : true) });
+  const conversa = { id: '19:aaa@unq.gbl.spaces', topic: null, chatType: 'oneOnOne', members: [{ displayName: 'Eu Mesmo' }, { displayName: 'Ana Souza' }] };
+  test('conversas sem Chat.Read: pede só os participantes, sem a prévia, e diz ao agente por quê', async () => {
+    rotas = [[/./, { value: [conversa] }]];
+    const r = await acao('teams.conversas').run(comLeitura(false), {});
+    assert.equal(ultima().raw, `${G}/me/chats?$expand=members&$orderby=lastMessagePreview%2FcreatedDateTime%20desc&$top=25`);
+    assert.equal(calls.length, 1);
+    assert.match(r.texto, /chat=19:aaa@unq\.gbl\.spaces \| 1:1 \| Eu Mesmo, Ana Souza/); assert.match(r.texto, /Sem a prévia/); assert.match(r.texto, /administrador/);
+    // com a leitura: a prévia vem, sem o aviso
+    const c = await acao('teams.conversas').run(comLeitura(true), {});
+    assert.match(ultima().raw, /\$expand=members%2ClastMessagePreview/); assert.doesNotMatch(c.texto, /Sem a prévia/);
+  });
+  test('conversas sem saber o que a conta deu: a recusa da prévia não impede a lista', async () => {
+    rotas = [[/lastMessagePreview&/, () => json({ error: { code: 'Forbidden', message: 'Missing scope permissions' } }, 403)], [/./, { value: [conversa] }]];
+    const r = await run('teams.conversas');
+    assert.deepEqual(calls.map((x) => x.url.searchParams.get('$expand')), ['members,lastMessagePreview', 'members']);
+    assert.match(r.texto, /Ana Souza/); assert.match(r.texto, /Sem a prévia/);
+    // sabendo que a conta deu a leitura, a recusa é de verdade e sobe
+    calls.length = 0;
+    await assert.rejects(acao('teams.conversas').run(comLeitura(true), {}), (e: unknown) => e instanceof ProviderError && e.kind === 'forbidden');
+    assert.equal(calls.length, 1);
+  });
+  test('sem a leitura, a ordem pela última mensagem recusada não impede a lista (nem achar a conversa pelo nome)', async () => {
+    rotas = [[/orderby/, () => json({ error: { code: 'Forbidden' } }, 403)], [/POST/, json({ id: '1' }, 201)], [/./, { value: [conversa] }]];
+    const r = await acao('teams.conversas').run(comLeitura(false), {});
+    assert.deepEqual(calls.map((x) => x.url.searchParams.has('$orderby')), [true, false]);
+    assert.match(r.texto, /Ana Souza/); assert.match(r.texto, /não vem das mais recentes/);
+    calls.length = 0;
+    await run('teams.enviar', { chat: 'Ana Souza', texto: 'oi' });
+    assert.deepEqual(calls.map((x) => `${x.method} ${x.url.searchParams.has('$orderby')}`), ['GET true', 'GET false', 'POST false']);
+    // sem nenhuma permissão de conversa, a recusa sobe
+    rotas = [[/./, () => json({ error: { code: 'Forbidden' } }, 403)]];
+    await assert.rejects(acao('teams.conversas').run(comLeitura(false), {}), (e: unknown) => e instanceof ProviderError && e.kind === 'forbidden');
+  });
+  test('conversa pelo nome: as mais recentes primeiro, até 5 páginas; grupo sem nome pelas pessoas dele', async () => {
+    const grupo = { id: '19:ggg@thread.v2', topic: null, chatType: 'group', members: [{ displayName: 'Eu Mesmo' }, { displayName: 'Ana Souza' }, { displayName: 'Bia Lima', email: 'bia@x.com' }] };
+    const pagina = (n: number) => ({ value: n === 3 ? [grupo] : [{ ...conversa, id: `19:p${n}@unq.gbl.spaces`, members: [{ displayName: 'Eu Mesmo' }, { displayName: `Pessoa ${n}` }] }], '@odata.nextLink': `${G}/me/chats?$skiptoken=p${n + 1}` });
+    rotas = [[/skiptoken=p(\d)/, (c: Call) => pagina(Number(/skiptoken=p(\d)/.exec(c.raw)![1]))], [/\/me\/chats\?/, pagina(1)], [/POST/, json({ id: '1' }, 201)]];
+    await run('teams.enviar', { chat: 'Ana Souza e bia@x.com', texto: 'oi' });
+    assert.equal(calls[0].raw, `${G}/me/chats?$expand=members&$orderby=lastMessagePreview%2FcreatedDateTime%20desc&$top=50`);
+    assert.equal(ultima().raw, `${G}/chats/19%3Aggg%40thread.v2/messages`, 'o grupo da 3ª página');
+    calls.length = 0;
+    // ninguém com esse nome: lê até 5 páginas e para; quem aparece nas conversas vem como opção
+    await assert.rejects(run('teams.enviar', { chat: 'Carlos e Bia Lima', texto: 'oi' }), (e: unknown) => e instanceof ErroAcao && /não achei a conversa/.test(e.message) && e.opcoes!.some((o) => o.includes('19:ggg@thread.v2')));
+    assert.equal(calls.length, 5); assert.ok(calls.every((x) => x.method === 'GET'));
+  });
+  test('ler canal: GET /teams/{id}/channels/{id}/messages, em texto, sem mensagem de sistema', async () => {
+    rotas = [[/messages/, { value: [
+      { messageType: 'message', subject: 'Plano', createdDateTime: '2026-11-07T12:00:00Z', from: { user: { displayName: 'Bia' } }, body: { contentType: 'html', content: '<p>Vamos <b>já</b> [[x]]</p>' } },
+      { messageType: 'systemEventMessage', createdDateTime: '2026-11-07T11:00:00Z', body: { contentType: 'html', content: '<systemEventMessage/>' } },
+    ] }]];
+    const r = await run('teams.ler_canal', { time: '172b0cce-e65d-44ce-9a49-91d9f2e8493a', canal: '19:geral@thread.tacv2', limite: 5 });
+    assert.equal(ultima().raw, `${G}/teams/172b0cce-e65d-44ce-9a49-91d9f2e8493a/channels/19%3Ageral%40thread.tacv2/messages?$top=5`);
+    assert.match(r.texto, /09:00 Bia \[Plano\]: +Vamos +já +\[ \[x\] \]/); assert.doesNotMatch(r.texto, /systemEvent/);
+    assert.deepEqual([r.deFora, r.privado], [true, true]);
+    assert.ok(calls.every((x) => x.method === 'GET'));
+  });
+  test('nova conversa com alguém de outra organização: texto claro, sem "autorizar de novo"', async () => {
+    rotas = [[/\/me\?/, { id: 'meu-id', mail: 'eu@empresa.com', userPrincipalName: 'eu@empresa.com' }], [/\/chats$/, () => json({ error: { code: 'NotFound', message: 'User not found' } }, 404)]];
+    await recusa(run('teams.nova_conversa', { para: 'cliente@outra.com.br', texto: 'oi' }), /outra organização.*email\.enviar.*Nada foi enviado/);
+    rotas = [[/\/me\?/, { id: 'meu-id', mail: 'eu@empresa.com' }], [/\/chats$/, () => json({ error: { code: 'Forbidden' } }, 403)]];
+    await recusa(run('teams.nova_conversa', { para: 'cliente@outra.com.br', texto: 'oi' }), /outra organização/);
+    // mesma empresa: continua o erro de antes
+    rotas = [[/\/me\?/, { id: 'meu-id', mail: 'eu@empresa.com' }], [/\/chats$/, () => json({ error: { code: 'NotFound', message: 'x' } }, 404)]];
+    await recusa(run('teams.nova_conversa', { para: 'ninguem@empresa.com', texto: 't' }), /e-mail de login/);
+  });
+});
+
+describe('rc.24: a busca no OneDrive com o serviço instável', () => {
+  const esperas: number[] = [];
+  before(() => setEsperaMicrosoft(async (ms) => { esperas.push(ms); }));
+  after(() => setEsperaMicrosoft(null));
+  beforeEach(() => { esperas.length = 0; });
+  const ids = () => [...new Set(calls.map((c) => c.headers['client-request-id']))];
+  test('500 de vez: 3 tentativas com espera crescente e teto, cada uma com o próprio client-request-id; o registro não leva o que foi procurado', async () => {
+    rotas = [[/./, () => json({ error: { code: 'generalException', message: 'x' } }, 500)]];
+    const avisos: string[] = [];
+    const antes = console.warn;
+    console.warn = (m: unknown) => { avisos.push(String(m)); };
+    try {
+      await assert.rejects(run('arquivos.buscar', { texto: 'contrato sigiloso' }), (e: unknown) => e instanceof ProviderError && e.kind === 'unavailable' && /nas 3 tentativas/.test(e.message) && /código para o suporte da Microsoft: [0-9a-f-]{36}/.test(e.message));
+    } finally { console.warn = antes; }
+    assert.equal(ids().length, 3, 'um id por tentativa da busca');
+    assert.ok(ids().every((x) => /^[0-9a-f-]{36}$/.test(String(x))));
+    assert.deepEqual(esperas, [1000, 3000]); assert.ok(esperas.every((ms) => ms <= 8000), 'teto');
+    assert.equal(avisos.length, 1); assert.match(avisos[0], /arquivos\.buscar: o OneDrive respondeu 500/);
+    for (const id of ids()) assert.ok(avisos[0].includes(String(id)));
+    assert.doesNotMatch(avisos[0], /contrato|sigiloso/);
+  });
+  test('500 passageiro: a segunda tentativa resolve; 404 não repete', async () => {
+    let n = 0;
+    rotas = [[/./, () => (++n <= 3 ? json({ error: { code: 'generalException' } }, 503) : json({ value: [{ id: 'f1', name: 'a.txt', size: 10, file: {} }] }))]];
+    const r = await run('arquivos.buscar', { texto: 'a' });
+    assert.match(r.texto, /a\.txt/); assert.equal(ids().length, 2); assert.deepEqual(esperas, [1000]);
+    calls.length = 0; esperas.length = 0;
+    rotas = [[/./, () => json({ error: { code: 'itemNotFound' } }, 404)]];
+    await assert.rejects(run('arquivos.buscar', { texto: 'a' }), (e: unknown) => e instanceof ProviderError && e.kind === 'not_found');
+    assert.equal(calls.length, 1); assert.deepEqual(esperas, []);
   });
 });

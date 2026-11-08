@@ -9,7 +9,8 @@ import type { Db } from '../db/db.ts';
 import { id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 
-export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado';
+/** atualizando: a ferramenta existe, mas o motor deste computador ainda não tem o conjunto dela (renovação a caminho) */
+export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado' | 'atualizando';
 /**
  * Ferramenta do catálogo do Ergon. kind 'ergon': o Ergon aplica (quadro, encaminhamento, revisão…).
  * kind 'ia': ferramenta do motor de IA (toolset do Hermes, nunca citado na interface); o estado real vem da
@@ -22,7 +23,7 @@ export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' |
 export interface ToolDef { id: string; label: string; kind: 'ergon' | 'ia'; toolset?: string; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean }
 
 /** O que o usuário precisa saber antes de liberar uma ferramenta que executa código. */
-export const GUARDED_RISK = 'O agente passa a executar programas e comandos no ambiente isolado do motor de IA: pode criar e apagar arquivos ali, instalar pacotes e acessar a internet. Enquanto estiver ligado, toda ação nas suas contas conectadas pede a sua confirmação, inclusive leitura. Libere só para pedidos seus.';
+export const GUARDED_RISK = 'O agente passa a executar programas e comandos no ambiente isolado da equipe: pode criar e apagar arquivos ali, instalar pacotes e acessar a internet. Enquanto ele tiver a ferramenta, toda ação dele nas suas contas conectadas pede a sua confirmação, inclusive leitura; e, depois que um programa rodou ali, as dos colegas também, até a equipe reiniciar. Libere só para pedidos seus.';
 
 /** Catálogo de ferramentas do Ergon, com o estado padrão de cada uma ("planejado" nunca aparece como disponível). */
 export const TOOLS: Record<string, ToolDef> = {
@@ -42,9 +43,9 @@ export const TOOLS: Record<string, ToolDef> = {
   web: { id: 'web', label: 'Pesquisa na web', kind: 'ia', toolset: 'web', status: 'desligada', note: 'pesquisa e lê páginas públicas', safe: true },
   imagens: { id: 'imagens', label: 'Criar imagens', kind: 'ia', toolset: 'image_gen', status: 'desligada', note: 'gera imagens a partir de uma descrição (pode consumir créditos da conta)', safe: true },
   visao: { id: 'visao', label: 'Ler imagens', kind: 'ia', toolset: 'vision', status: 'desligada', note: 'analisa imagens enviadas na conversa', safe: true },
-  habilidades: { id: 'habilidades', label: 'Skills da biblioteca', kind: 'ia', toolset: 'skills', status: 'desligada', note: 'consulta as skills atribuídas (sem criar nem editar skills)', safe: true },
+  habilidades: { id: 'habilidades', label: 'Competências da biblioteca', kind: 'ia', toolset: 'skills', status: 'desligada', note: 'consulta as competências atribuídas ao agente (sem criar nem editar competências)', safe: true },
   calculo: { id: 'calculo', label: 'Executar código', kind: 'ia', toolset: 'code_execution', status: 'bloqueada', note: 'roda programas em Python: cálculos, planilhas, gráficos e análise de dados', guarded: true },
-  terminal: { id: 'terminal', label: 'Terminal', kind: 'ia', toolset: 'terminal', status: 'bloqueada', note: 'executa comandos (scripts, pacotes, arquivos) no ambiente isolado do motor de IA', guarded: true },
+  terminal: { id: 'terminal', label: 'Terminal', kind: 'ia', toolset: 'terminal', status: 'bloqueada', note: 'executa comandos (scripts, pacotes, arquivos) no ambiente isolado da equipe', guarded: true },
   // do próprio Ergon (antes, o agendador do motor: o lembrete disparava fora da vista, então ficava bloqueado): o agente
   // propõe na conversa, você aprova e o lembrete entra em Suas tarefas com o prazo
   agenda: { id: 'agenda', label: 'Lembretes com data', kind: 'ergon', status: 'disponível', note: 'anota lembretes e prazos: o agente propõe na conversa, você aprova e ele aparece em Suas tarefas com a data' },
@@ -55,16 +56,34 @@ export const TOOLS: Record<string, ToolDef> = {
  * pessoas no computador: um motor por pessoa; o escopo é a pessoa). Atualizado em segundo plano (app.ts); vazio = ainda
  * não lido (ou modo simulado). Com um motor só, o escopo é sempre "_".
  */
-const platformState = new Map<string, { enabled: Set<string>; at: number }>();
+/**
+ * known: todos os conjuntos que o motor lista (ligados ou não). Um conjunto fora dela não existe naquele motor — o motor
+ * está numa versão que ainda não o traz (o caso das Conexões num motor que não foi renovado). Vazio = não se sabe.
+ */
+const platformState = new Map<string, { enabled: Set<string>; known: Set<string>; at: number }>();
 let scopeOf: (workspaceId: string | null | undefined) => string = () => '_';
 /** De qual motor é cada workspace (o app troca a regra quando há um motor por pessoa). */
 export function setMotorScope(fn: (workspaceId: string | null | undefined) => string): void { scopeOf = fn; }
 export const motorScope = (workspaceId: string | null | undefined): string => scopeOf(workspaceId);
-const stateOf = (scope: string) => platformState.get(scope) ?? { enabled: new Set<string>(), at: 0 };
-export function setPlatformToolsets(enabled: string[], scope = '_'): void { platformState.set(scope, { enabled: new Set(enabled), at: Date.now() }); }
-export function platformToolsets(scope = '_'): { enabled: string[]; at: number } { const s = stateOf(scope); return { enabled: [...s.enabled], at: s.at }; }
-type ToolCtx = { channels?: boolean; workspaceId?: string | null; scope?: string };
-const enabledFor = (ctx: ToolCtx) => stateOf(ctx.scope ?? scopeOf(ctx.workspaceId)).enabled;
+/** O workspace tem alguma conta ou aplicativo conectado? (o app registra a consulta ao banco) */
+let contasOf: (workspaceId: string) => boolean = () => false;
+export function setContasConectadas(fn: (workspaceId: string) => boolean): void { contasOf = fn; }
+/** A renovação do motor deste escopo voltou atrás nesta versão (motors.ts): o que falta nele só volta com a próxima versão. */
+let renovacaoFalhou: (scope: string) => boolean = () => false;
+export function setRenovacaoFalhou(fn: (scope: string) => boolean): void { renovacaoFalhou = fn; }
+/** O motivo das Conexões fora depois de uma atualização que voltou atrás (o mesmo texto na tela e nas instruções). */
+export const CONEXOES_FORA_ATE_A_PROXIMA = 'a atualização da equipe não deu certo neste computador: as Conexões voltam com a próxima versão do Ergon';
+const stateOf = (scope: string) => platformState.get(scope) ?? { enabled: new Set<string>(), known: new Set<string>(), at: 0 };
+export function setPlatformToolsets(enabled: string[], scope = '_', known?: string[]): void {
+  const prev = platformState.get(scope)?.known;
+  platformState.set(scope, { enabled: new Set(enabled), known: new Set(known ?? [...(prev ?? []), ...enabled]), at: Date.now() });
+}
+export function platformToolsets(scope = '_'): { enabled: string[]; known: string[]; at: number } { const s = stateOf(scope); return { enabled: [...s.enabled], known: [...s.known], at: s.at }; }
+/** O motor já foi lido e não tem este conjunto (nem desligado): está numa versão sem ele. */
+export function motorSemConjunto(toolset: string, scope = '_'): boolean { const s = stateOf(scope); return s.at > 0 && s.known.size > 0 && !s.known.has(toolset); }
+type ToolCtx = { channels?: boolean; workspaceId?: string | null; scope?: string; contas?: boolean };
+const scopeFor = (ctx: ToolCtx) => ctx.scope ?? scopeOf(ctx.workspaceId);
+const enabledFor = (ctx: ToolCtx) => stateOf(scopeFor(ctx)).enabled;
 
 /** Estado atual de uma ferramenta (ferramentas de IA dependem do que está ligado na plataforma). */
 export function toolStatus(t: ToolDef, ctx: ToolCtx = {}): ToolDef {
@@ -76,9 +95,15 @@ export function toolStatus(t: ToolDef, ctx: ToolCtx = {}): ToolDef {
         : { ...t, status: 'bloqueada', note: `${t.note} — bloqueada: precisa da sua autorização (senha)` };
     }
     if (!t.safe) return { ...t, status: 'bloqueada' };
-    return on.has(t.toolset ?? '')
-      ? { ...t, status: 'disponível' }
-      : { ...t, status: 'desligada', note: `${t.note} — desligada: ligue em Configurações › Ferramentas` };
+    if (on.has(t.toolset ?? '')) return { ...t, status: 'disponível' };
+    // Conexões com conta ligada, num motor que ainda não tem o conjunto: a renovação do motor traz (nada a ligar)
+    const contas = ctx.contas ?? (ctx.workspaceId ? contasOf(ctx.workspaceId) : false);
+    if (t.id === 'contas' && contas && motorSemConjunto(t.toolset ?? '', scopeFor(ctx))) {
+      // a renovação voltou atrás: nada tenta de novo até a próxima versão, então não se promete "voltam sozinhas"
+      if (renovacaoFalhou(scopeFor(ctx))) return { ...t, status: 'bloqueada', note: `${t.note} — ${CONEXOES_FORA_ATE_A_PROXIMA}` };
+      return { ...t, status: 'atualizando', note: `${t.note} — sendo atualizadas neste computador: voltam sozinhas quando a atualização da equipe terminar` };
+    }
+    return { ...t, status: 'desligada', note: `${t.note} — desligada: ligue em Configurações › Ferramentas` };
   }
   if (t.id === 'conexoes' && ctx.channels) return { ...t, status: 'parcial' };
   return t;

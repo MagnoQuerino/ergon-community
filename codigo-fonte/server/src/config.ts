@@ -49,6 +49,11 @@ export interface Config {
   motorManagerUrl: string | null;
   /** motor de uma pessoa sem uso por este tempo desliga sozinho (volta quando ela precisar) */
   motorIdleMinutes: number;
+  /**
+   * Renovação do motor (versão nova): depois de recriado, o cofre, a saúde e as capacidades têm este tempo para
+   * responder; passou disso, o gerente volta o motor para a versão anterior (o motor de antes, com o mesmo cofre).
+   */
+  motorRenewMinutes: number;
   /** login com a conta (SSO parametrizado, sso.ts). Microsoft: app público no Entra (PKCE, sem segredo). */
   msClientId: string | null;
   /** Google: cliente OAuth "Aplicativo da Web" no Google Cloud (PKCE + segredo, que fica em ergon.env) */
@@ -155,6 +160,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     hermesControlUrl: env.ERGON_HERMES_CONTROL_URL || null,
     motorManagerUrl: env.ERGON_MOTOR_MANAGER_URL && /^https?:\/\/[\w.-]+(:\d+)?$/.test(env.ERGON_MOTOR_MANAGER_URL) ? env.ERGON_MOTOR_MANAGER_URL : null,
     motorIdleMinutes: int(env.ERGON_MOTOR_IDLE_MINUTES, 120, 10, 7 * 24 * 60),
+    motorRenewMinutes: int(env.ERGON_MOTOR_RENEW_MINUTES, 10, 2, 60),
     // o app público do Ergon no Entra (qualquer conta Microsoft, pessoal ou de empresa) já vem embutido: identificador
     // de app público não é segredo (PKCE, sem senha). Outro app: ERGON_MS_CLIENT_ID=<id>; desligar: ERGON_MS_CLIENT_ID=off
     msClientId: env.ERGON_MS_CLIENT_ID === 'off' ? null : env.ERGON_MS_CLIENT_ID && /^[0-9a-f-]{36}$/i.test(env.ERGON_MS_CLIENT_ID) ? env.ERGON_MS_CLIENT_ID : ERGON_MS_APP,

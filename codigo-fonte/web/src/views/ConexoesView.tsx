@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import type { Integration } from '../lib/types.ts';
+import type { EtapaConsentimento, Integration } from '../lib/types.ts';
+import { erroDaConexao, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, textoDaVolta } from '../lib/textos-tela.ts';
 import { AiAccounts } from '../components/AiAccounts.tsx';
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
@@ -13,7 +14,7 @@ const STATE: Record<Integration['state'], [string, string]> = {
 
 /** Os aplicativos conectados por token ou chave, por tipo. */
 const SECOES: Array<{ titulo: string; texto: string; grupos: string[] }> = [
-  { titulo: 'Tarefas e quadros', grupos: ['tarefas'], texto: 'Depois de conectar, escolha a lista ou o quadro em Tarefas: fica ligado nos dois sentidos, e os agentes também criam e movem tarefas lá. O token precisa ter permissão de escrita.' },
+  { titulo: 'Tarefas e quadros', grupos: ['tarefas'], texto: 'Depois de conectar, escolha a lista ou o quadro em Tarefas: fica ligado nos dois sentidos, e os agentes também criam e movem tarefas lá. A conta precisa ter permissão para alterar as tarefas.' },
   { titulo: 'Conversas e equipes', grupos: ['conversas'], texto: 'Os agentes leem o que a conta ou o bot conectado alcança (cada aplicativo diz qual é o alcance) e respondem quando você pede.' },
   { titulo: 'Vendas e atendimento', grupos: ['vendas', 'suporte'], texto: 'Os agentes consultam clientes, negócios e chamados, registram o que combinarem com você e respondem quando você pede.' },
   { titulo: 'Documentos, código e agenda', grupos: ['documentos'], texto: 'Os agentes procuram, leem e escrevem nas páginas, repositórios e compromissos que a credencial alcança.' },
@@ -24,7 +25,8 @@ const badgeOf = (i: Integration): [string, string] => (i.auth === 'soon' ? ['em 
 
 /** O que os agentes fazem em cada conexão ligada, o ajuste da pessoa e a escolha de liberar tudo (GET /api/conexoes). */
 interface Permissoes { tipos: Record<string, string>; acoes: Record<string, string> }
-interface EstadoConexao { kind: string; faltam: string[]; comErro: string | null; permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: string }> }
+/** etapas: só na Microsoft (o que a conta já liberou, etapa por etapa) */
+interface EstadoConexao { kind: string; faltam: string[]; comErro: string | null; permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: string }>; etapas?: EtapaConsentimento[] }
 interface EstadoConexoes { liberarTudo: boolean; ligadas: EstadoConexao[] }
 /** O estado de uma conexão; pronto = a resposta já chegou (antes disso, as seções guardam o lugar). */
 interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => void }
@@ -38,16 +40,16 @@ export function ConexoesView() {
   const list = useResource<Integration[]>('/api/integrations', ['integrations.changed']);
   // já buscado por baixo ao abrir o app (App.tsx): as seções que dependem dele abrem prontas
   const cx = useResource<EstadoConexoes>('/api/conexoes', ['integrations.changed']);
-  const [notice, setNotice] = useState<string | null>(null);
+  // a volta do login: o aviso depende de a conta já estar conectada (o botão que ele cita é outro), por isso sai na hora de mostrar
+  const [volta, setVolta] = useState<{ kind: 'microsoft' | 'google'; status: string } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [onlyOn, setOnlyOn] = useState(false);
   const [risks, setRisks] = useState(false);
   useEffect(() => {
-    const m = location.hash.match(/(microsoft|google)=([a-z]+)/);
+    const m = location.hash.match(/(microsoft|google)=([a-z-]+)/);
     if (m) {
-      const who = m[1] === 'google' ? 'Google' : 'Microsoft';
-      setNotice(m[2] === 'conectado' ? `Conta ${who} conectada.` : m[2] === 'parcial' ? `Conta ${who} conectada, mas a segunda autorização (Teams) não terminou: e-mail, agenda, arquivos e tarefas funcionam. Se a empresa exige aprovação do administrador, peça a ele.` : m[2] === 'recusado' ? `Login ${m[1] === 'google' ? 'do' : 'da'} ${who} cancelado.` : `Não deu para concluir o login ${m[1] === 'google' ? 'do' : 'da'} ${who}. Tente de novo.`);
+      setVolta({ kind: m[1] === 'google' ? 'google' : 'microsoft', status: m[2] });
       setOpen(m[1]);
       history.replaceState(null, '', '#conexoes');
     }
@@ -75,7 +77,7 @@ export function ConexoesView() {
         <h2>Conexões</h2>
         <p className="muted">A conta de IA que move os agentes e os aplicativos e canais que a equipe usa por você. Credenciais ficam só neste computador, cifradas; nunca no navegador.</p>
       </header>
-      {notice && <p className="ok" role="status">{notice}</p>}
+      {volta && list.data && <p className="ok" role="status">{textoDaVolta(volta.kind, volta.status, all.find((i) => i.kind === volta.kind)?.state === 'connected')}</p>}
       {list.error && <p className="error">{list.error}</p>}
 
       <section className="conn-group conn-group--feature">
@@ -98,6 +100,11 @@ export function ConexoesView() {
         <section className="conn-group conn-group--feature">
           <h3>Microsoft 365 e Google</h3>
           <p className="muted small">Entre com a conta, sem digitar senha no Ergon. Microsoft: Planner, To Do, Teams, e-mail, agenda e arquivos. Google: Tasks, Agenda, Gmail e Drive. Os agentes consultam e agem por você, com a regra de confirmação abaixo.</p>
+          {/* duas coisas diferentes que o nome "Teams" junta: a conta (agora) e conversar com o coordenador por lá (depois) */}
+          <ul className="conn-explica small">
+            <li><b>Microsoft 365: a equipe age na sua conta.</b> Com o seu login, os agentes leem e respondem por você no e-mail, na agenda, nos arquivos, nas tarefas e no Teams, quando você pede ou numa rotina. Ninguém fica olhando a conta o tempo todo.</li>
+            <li><b>Conversar com o Aristóteles pelo Teams: em breve.</b> É outra coisa: mandar pedidos ao Aristóteles de dentro do Teams, como se ele fosse um colega lá. Pede um aplicativo próprio no Teams da empresa e ainda não está disponível.</li>
+          </ul>
           <div className="feature-grid">{accounts.map((i) => <Detail key={i.kind} i={i} reload={list.reload} estado={estadoDe(i.kind)} feature />)}</div>
         </section>
       )}
@@ -150,12 +157,21 @@ function RenewBy({ at }: { at: string }) {
   return <p className="hint">Autorização válida até {date} (app do Google em modo de teste: renove a cada 7 dias; o Briefing avisa antes).</p>;
 }
 
+/** O texto com a palavra "Tarefas" virando o link para a tela de Tarefas. */
+function ComLinkTarefas({ texto }: { texto: string }) {
+  const [antes, ...depois] = texto.split('Tarefas');
+  return <>{antes}{depois.length > 0 && <><a href="#tarefas">Tarefas</a>{depois.join('Tarefas')}</>}</>;
+}
+
 function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reload: () => void; estado: EstadoDe; onClose?: () => void; feature?: boolean }) {
   const [label, cls] = badgeOf(i);
   // o teste apontou permissão que falta ("use o botão Autorizar de novo, acima"): o botão aparece, mesmo sem problema gravado
   const [faltouNoTeste, setFaltouNoTeste] = useState(false);
   // conectou de novo (outra credencial ou outro login): vale o próximo teste
   useEffect(() => { setFaltouNoTeste(false); }, [i.connectedAt]);
+  const erro = erroDaConexao(i);
+  // na Microsoft, escolher a lista depende da leitura: o passo só depois de saber o que a conta liberou (sem trocar de texto na tela)
+  const passo = i.state === 'connected' && i.tasks && (i.kind !== 'microsoft' || estado.pronto) ? proximoPassoTarefas(i.kind, estado.eu?.etapas ?? []) : null;
   return (
     <article id={`conn-${i.kind}`} className={`card conn ${feature ? 'feature' : 'conn-detail'} ${feature && i.state === 'connected' ? 'feature--on' : ''}`}>
       <header className="row">
@@ -167,14 +183,15 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
       {i.state === 'connected' && i.sharedFrom && <p className="hint">Esta conta vem do workspace <b>{i.sharedFrom}</b>. As permissões e os quadros abaixo são só deste workspace.</p>}
       {i.state !== 'connected' && i.auth !== 'soon' && <UsarDeOutroWorkspace i={i} reload={reload} />}
       {i.state === 'connected' && i.account && <p>Conta: <strong>{i.account}</strong>{i.lastSyncAt ? <span className="muted small"> · última leitura {new Date(i.lastSyncAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span> : null}</p>}
-      {/* conectada também: o último problema (ex.: a credencial sem permissão de escrita) fica à vista até a próxima ação dar certo */}
-      {i.error && <p className="error">{i.error}</p>}
+      {/* conectada também: o último problema (ex.: a credencial sem permissão de escrita) fica à vista até a próxima ação dar
+          certo; o pedido ao administrador no primeiro acesso não é falha (o cartão explica), e o erro cru do login não aparece */}
+      {erro && <p className="error">{erro}</p>}
       {i.state === 'connected' && i.renewBy && <RenewBy at={i.renewBy} />}
       {i.auth === 'soon' ? <p className="hint">{i.soon ?? 'Em preparo.'}</p>
         : i.kind === 'whatsapp' ? <WhatsApp i={i} reload={reload} />
         : i.auth === 'token' ? <TokenConnect i={i} reload={reload} autorizar={faltouNoTeste} />
-        : <Sso i={i} reload={reload} faltam={estado.eu?.faltam ?? []} autorizar={faltouNoTeste} />}
-      {i.state === 'connected' && i.tasks && <p className="hint">Próximo passo: em <a href="#tarefas">Tarefas</a>, escolha a lista ou o quadro. Dar check ou mover por lá reflete aqui e vice-versa.</p>}
+        : <Sso i={i} reload={reload} faltam={estado.eu?.faltam ?? []} etapas={estado.eu?.etapas ?? []} recarregar={estado.reload} autorizar={faltouNoTeste} />}
+      {passo && <p className="hint">{passo.link ? <ComLinkTarefas texto={passo.texto} /> : passo.texto}</p>}
       {i.state === 'connected' && <AcoesDaConexao i={i} estado={estado} />}
       {i.state === 'connected' && <TestarConexao i={i} reload={reload} onFaltou={setFaltouNoTeste} />}
     </article>
@@ -391,8 +408,8 @@ function CopiarTexto({ rotulo, texto }: { rotulo: string; texto: string }) {
 const SSO_TEXT: Record<string, { button: string; what: string; connected: string }> = {
   microsoft: {
     button: 'Entrar com a Microsoft',
-    what: 'Você entra na página da Microsoft e autoriza o aplicativo Ergon a usar, em seu nome: tarefas (Planner e To Do), e-mail, agenda, arquivos e, em conta de trabalho, o Teams. Os agentes consultam e agem quando você pede; o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões. Em empresas, o administrador pode precisar aprovar o aplicativo.',
-    connected: 'Tarefas: escolha um plano do Planner ou uma lista do To Do em Tarefas. Em conta de trabalho, os agentes também leem e respondem conversas do Teams.',
+    what: 'Você entra na página da Microsoft e autoriza o aplicativo Ergon a usar, em seu nome: tarefas (Planner e To Do), e-mail, agenda, arquivos e, em conta de trabalho, o Teams. Os agentes consultam e agem quando você pede; o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões. A autorização vem em partes: primeiro enviar e-mail, criar arquivos e o Teams, que qualquer conta autoriza; depois a leitura (e-mail, agenda, arquivos, tarefas), que numa empresa costuma precisar da aprovação do administrador. Se precisar, a tela mostra o pedido pronto para você enviar a ele.',
+    connected: 'Tarefas: escolha um plano do Planner ou uma lista do To Do em Tarefas (depois de liberada a leitura). Em conta de trabalho, os agentes também mandam mensagens no Teams e, com a leitura liberada, leem as conversas.',
   },
   google: {
     button: 'Entrar com o Google',
@@ -401,13 +418,14 @@ const SSO_TEXT: Record<string, { button: string; what: string; connected: string
   },
 };
 
-function Sso({ i, reload, faltam, autorizar }: { i: Integration; reload: () => void; faltam: string[]; autorizar: boolean }) {
+function Sso({ i, reload, faltam, etapas, recarregar, autorizar }: { i: Integration; reload: () => void; faltam: string[]; etapas: EtapaConsentimento[]; recarregar: () => void; autorizar: boolean }) {
   const [err, setErr] = useState<string | null>(null);
   const t = SSO_TEXT[i.kind] ?? { button: `Entrar com ${i.name}`, what: '', connected: '' };
   const entrar = async () => { setErr(null); try { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`); location.href = r.url; } catch (e) { setErr(errMsg(e)); } };
   if (i.state === 'connected') return (
     <>
       {t.connected && <p className="hint">{t.connected}</p>}
+      {i.kind === 'microsoft' && etapas.length > 0 && <EtapasMicrosoft etapas={etapas} recarregar={recarregar} />}
       <p><button className="btn btn--sm btn--ghost" onClick={() => void entrar()}>Conectar outra conta neste workspace</button></p>
       {/* faltou permissão (conta antiga, ou o serviço recusou uma ação): o botão que o agente e o teste apontam */}
       {(faltam.length > 0 || !!i.error || autorizar) && (
@@ -421,12 +439,108 @@ function Sso({ i, reload, faltam, autorizar }: { i: Integration; reload: () => v
     </>
   );
   if (!i.ready) return <p className="hint">Para entrar com a conta, o aplicativo Ergon precisa estar registrado {i.setup?.place ?? 'no provedor'} (passo único de quem instala o Ergon; veja {i.setup?.doc ?? 'a documentação'}). Depois, é só clicar em "{t.button}".</p>;
+  const comecar = async () => { setErr(null); try { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`); location.href = r.url; } catch (e) { setErr(errMsg(e)); reload(); } };
+  // a empresa exige o administrador já no primeiro login: o pedido vem pronto aqui, antes de haver conta conectada
+  if (i.adminBase) return (
+    <>
+      <div className="conn-etapas conn-reautorizar">
+        <h4>A sua empresa precisa aprovar o Ergon</h4>
+        <p className="small">A conta Microsoft da sua empresa não deixa ninguém autorizar o Ergon sozinho: quem administra a conta aprova uma vez, e depois você entra normalmente.</p>
+        {/* o primeiro acesso pede tudo de uma vez: a mensagem ao administrador diz tudo o que o link pede */}
+        <PedirAoAdministrador link={i.adminBase.link} etapa="base" depois="Já aprovaram? Entrar de novo" />
+        <p className="row row--wrap"><button className="btn btn--primary" onClick={() => void comecar()}>Já aprovaram? Entrar de novo</button></p>
+      </div>
+      {err && <p className="error">{err}</p>}
+    </>
+  );
   return (
     <>
-      <button className="btn btn--primary" onClick={async () => { setErr(null); try { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`); location.href = r.url; } catch (e) { setErr(errMsg(e)); reload(); } }}>{t.button}</button>
+      <button className="btn btn--primary" onClick={() => void comecar()}>{t.button}</button>
       {t.what && <p className="hint">{t.what}</p>}
       {err && <p className="error">{err}</p>}
     </>
+  );
+}
+
+/** O que cada etapa da Microsoft libera, dito para a pessoa (sso.ts tem as permissões de cada uma). */
+const ETAPA_TEXTO: Record<EtapaConsentimento['id'], { titulo: string; oQue: string }> = {
+  base: { titulo: 'Enviar e-mail e criar arquivos', oQue: 'enviar e-mail em seu nome e criar arquivos no OneDrive' },
+  trabalho: { titulo: 'Teams: conversas e mensagens', oQue: 'ver as suas conversas e times e mandar mensagens no Teams' },
+  leitura: { titulo: 'Ler e organizar', oQue: 'ler e-mail, agenda, arquivos, tarefas (Planner e To Do), contatos e o conteúdo das conversas do Teams' },
+  canais: { titulo: 'Ler os canais do Teams (opcional)', oQue: 'ler as mensagens dos canais dos times' },
+};
+
+/**
+ * O que a conta Microsoft já liberou, etapa por etapa, e o próximo passo de cada uma: liberar (a própria pessoa), pedir ao
+ * administrador (o link pronto, que ela mesma copia e envia) ou entrar de novo depois que ele aprovou.
+ */
+function EtapasMicrosoft({ etapas, recarregar }: { etapas: EtapaConsentimento[]; recarregar: () => void }) {
+  const [err, setErr] = useState<string | null>(null);
+  const pedir = async (etapa: EtapaConsentimento['id']) => {
+    setErr(null);
+    // a etapa base é o login inteiro (escolhe a conta e segue sozinho pelas outras)
+    try { const r = await api.post<{ url: string }>('/api/integrations/microsoft/start', etapa === 'base' ? {} : { etapa }); location.href = r.url; } catch (e) { setErr(errMsg(e)); recarregar(); }
+  };
+  return (
+    <div className="conn-etapas conn-reautorizar">
+      <h4>O que esta conta já liberou</h4>
+      <ul className="conn-teste__lista conn-etapas__lista">{etapas.map((e) => <EtapaLinha key={e.id} e={e} pedir={() => void pedir(e.id)} />)}</ul>
+      {err && <p className="error">{err}</p>}
+    </div>
+  );
+}
+
+function EtapaLinha({ e, pedir }: { e: EtapaConsentimento; pedir: () => void }) {
+  const t = ETAPA_TEXTO[e.id];
+  // o motivo gravado na etapa, em português (o erro da Microsoft fica só no registro)
+  const motivo = motivoDoLogin(e.erro);
+  const titulo = <><b>{t.titulo}</b> <span className="muted small">({t.oQue})</span></>;
+  if (e.estado === 'ok') return <li><span className="badge badge--ok">liberado</span> {titulo}</li>;
+  if (e.estado === 'aprovado') return (
+    <li><span className="badge badge--ok">aprovado pelo administrador</span> {titulo}
+      <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>Autorizar agora</button><span className="muted small">Falta só você entrar de novo para a aprovação valer aqui.</span></p>
+    </li>
+  );
+  if (e.estado === 'pedido') return (
+    <li><span className="badge badge--warn">esperando a Microsoft</span> {titulo}
+      <p className="row row--wrap"><span className="muted small">A página da Microsoft está aberta. Se você a fechou, abra de novo.</span><button className="btn btn--sm btn--ghost" onClick={pedir}>Abrir de novo</button></p>
+    </li>
+  );
+  // na empresa, leitura e canais costumam ser do administrador: o pedido vem pronto, e quem envia é a pessoa
+  if (e.administrador && e.link && (e.estado === 'bloqueado' || e.opcional)) return (
+    <li><span className={`badge ${e.estado === 'bloqueado' ? 'badge--err' : ''}`}>precisa do administrador</span> {titulo}
+      <p className="small">{e.opcional ? 'Opcional. Ler os canais sempre precisa da aprovação do administrador da empresa.' : 'Precisa da aprovação do administrador da empresa.'}{motivo ? <span className="muted"> {motivo}</span> : null}</p>
+      <PedirAoAdministrador link={e.link} etapa={e.id} />
+      <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>Já aprovaram? Conectar de novo</button></p>
+    </li>
+  );
+  return (
+    <li><span className="badge">{e.estado === 'bloqueado' ? 'não liberado' : 'falta liberar'}</span> {titulo}
+      {motivo && <p className="muted small">{motivo}</p>}
+      <p className="row row--wrap">
+        <button className="btn btn--sm btn--primary" onClick={pedir}>{e.estado === 'bloqueado' ? 'Tentar de novo' : e.id === 'leitura' ? 'Liberar leitura' : e.id === 'base' ? 'Autorizar de novo' : 'Liberar'}</button>
+        {e.administrador && <span className="muted small">Numa empresa, isto costuma precisar da aprovação do administrador.</span>}
+      </p>
+      {/* quem já sabe que a empresa exige o administrador vai direto ao pedido, sem passar pela página da Microsoft */}
+      {e.administrador && e.link && <details><summary className="small">Pedir ao administrador</summary><PedirAoAdministrador link={e.link} etapa={e.id} /></details>}
+    </li>
+  );
+}
+
+/**
+ * O pedido ao administrador: o link (escopos explícitos, para ele ver exatamente o que aprova) e uma mensagem pronta. A pessoa
+ * copia e envia ela mesma; nada sai daqui sozinho. Quem aprova abre noutro computador, e a página final tenta voltar para este:
+ * lá ela pode mostrar um erro, e isso é esperado.
+ */
+function PedirAoAdministrador({ link, etapa, depois = 'Já aprovaram? Conectar de novo' }: { link: string; etapa: EtapaConsentimento['id']; depois?: string }) {
+  const oQue = oQuePedirAoAdministrador(etapa);
+  const mensagem = `Olá! Uso o Ergon com a minha conta Microsoft da empresa e preciso que você aprove o aplicativo Ergon para ${oQue} em meu nome. É só abrir este link com a sua conta de administrador e aceitar: ${link}\nNo fim, a página pode mostrar um erro de conexão: é esperado, porque ela tenta voltar para o meu computador. Obrigado!`;
+  return (
+    <div className="conn-admin conn-reautorizar">
+      <p className="small"><b>Pedir ao administrador</b></p>
+      <p className="hint">Copie o link e envie você mesmo a quem administra a conta Microsoft da sua empresa: nada sai daqui sozinho. A pessoa abre o link, entra com a conta de administrador e aprova. No fim, a página pode mostrar um erro de "não foi possível acessar": é esperado, porque ela tenta voltar para este computador. Depois que aprovarem, clique em "{depois}".</p>
+      <p className="row row--wrap"><CopiarTexto rotulo="Copiar o link do pedido" texto={link} /><CopiarTexto rotulo="Copiar uma mensagem pronta" texto={mensagem} /></p>
+    </div>
   );
 }
 

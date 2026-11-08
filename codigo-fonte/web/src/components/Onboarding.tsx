@@ -115,7 +115,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
         {!redo && <SetupSteps at={STEP_AT[step]} />}
 
         {!opts ? <Loading error={err} /> : aiAcordando ? (
-          <section className="onb__building"><AcordandoIa desde={acordandoDesde.current} erro={ai?.motor?.error} onRetry={() => { acordandoDesde.current = Date.now(); loadAi(); }} /></section>
+          <section className="onb__building"><AcordandoIa desde={acordandoDesde.current} erro={ai?.motor?.error} renovando={ai?.motor?.state === 'renovando'} onRetry={() => { acordandoDesde.current = Date.now(); loadAi(); }} /></section>
         ) : step === 'use' ? (
           <section>
             <h2 id="onb-title" className="onb__title">{redo ? 'Refazer a equipe de partida' : `Boas-vindas, ${displayName}!`}</h2>

@@ -99,8 +99,8 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
           <li><span className="badge badge--ok">cifrado</span> Conversas, tarefas, instruções, arquivos e chaves das conexões (AES-256-GCM, chave própria por workspace)</li>
           {isolated && <li><span className="badge badge--ok">só seu</span> {s.people!.count} pessoas neste computador: a chave dos seus dados é sua (abre com a sua senha ou frase); quem administra o Ergon não lê nada do que é seu</li>}
           {s.motorVault
-            ? <li><span className="badge badge--ok">cifrado</span> Dados do motor de IA: contas conectadas, histórico e memória (volume cifrado)</li>
-            : <li><span className="badge">sem motor</span> Motor de IA desligado nesta instalação (nada a cifrar)</li>}
+            ? <li><span className="badge badge--ok">cifrado</span> Dados da equipe de IA: contas conectadas, histórico e memória (cofre cifrado)</li>
+            : <li><span className="badge">sem equipe de IA</span> Equipe de IA desligada nesta instalação (nada a cifrar)</li>}
         </ul>
         <p className="hint">{s.lock.enabled
           ? 'A chave mestra só existe na memória enquanto o Ergon está aberto. Ao reiniciar, é preciso a senha (ou a frase, ou o destrancar sozinho) para abrir.'
@@ -206,7 +206,7 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
       {!admin && s.mode === 'local' && (
         <section className="card">
           <h3>Excluir a minha conta</h3>
-          <p className="muted">Apaga de vez a sua equipe, as conversas, as tarefas, os arquivos, as conexões e o seu motor de IA neste computador. Primeiro sai a sua chave: daí em diante, nada disso abre mais, nem por backup.</p>
+          <p className="muted">Apaga de vez a sua equipe de IA, as conversas, as tarefas, os arquivos e as conexões neste computador. Primeiro sai a sua chave: daí em diante, nada disso abre mais, nem por backup.</p>
           {leaving === null
             ? <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setLeaving('')}>Excluir a minha conta…</button>
             : (

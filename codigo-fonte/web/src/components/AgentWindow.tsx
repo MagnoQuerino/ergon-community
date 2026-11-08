@@ -303,7 +303,8 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
         <div className="tools-grid">
           {(tools.data ?? []).filter((t) => fixed || !COORDINATOR_ONLY.includes(t.id)).map((t) => {
             const on = f.tools.includes(t.id);
-            const blocked = t.status === 'bloqueada' && !on;
+            // só o que executa código espera a autorização com a senha; o resto se escolhe sempre (o estado aparece ao lado)
+            const blocked = t.status === 'bloqueada' && !!t.guarded && !on;
             const locked = fixed && COORDINATOR_TOOLS.includes(t.id);
             return (
               <label key={t.id} className={`tool-opt ${on ? 'tool-opt--on' : ''} ${blocked ? 'tool-opt--off' : ''}`} title={t.note}>
@@ -321,13 +322,13 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
       </div>
 
       <div className="block">
-        <h4>Skills da biblioteca <span className="muted small">— instruções prontas que o agente consulta quando tem a ferramenta "Skills da biblioteca"</span></h4>
+        <h4>Competências da biblioteca <span className="muted small">— instruções prontas que o agente consulta quando tem a ferramenta "Competências da biblioteca"</span></h4>
         {f.hermesSkills.length > 0 && <div className="row row--wrap">{f.hermesSkills.map((s) => <span key={s} className="skill">{s} <button className="x" onClick={() => toggleSkill(s)} aria-label={`Tirar ${s}`}>×</button></span>)}</div>}
-        {f.hermesSkills.length > 0 && !f.tools.includes('habilidades') && <p className="hint warn">Sem a ferramenta "Skills da biblioteca", o agente só recebe o nome das skills como orientação.</p>}
+        {f.hermesSkills.length > 0 && !f.tools.includes('habilidades') && <p className="hint warn">Sem a ferramenta "Competências da biblioteca", o agente só recebe o nome das competências como orientação.</p>}
         {(skills.data?.length ?? 0) > 0 ? (
           <details>
             <summary className="muted">Escolher na biblioteca ({skills.data!.length})</summary>
-            <input value={skillQ} onChange={(e) => setSkillQ(e.target.value)} placeholder="buscar (ex.: pesquisa, planilha, apresentação)" aria-label="Buscar skill" className="skill-search" />
+            <input value={skillQ} onChange={(e) => setSkillQ(e.target.value)} placeholder="buscar (ex.: pesquisa, planilha, apresentação)" aria-label="Buscar competência" className="skill-search" />
             <div className="skill-list">
               {shownSkills.map((s) => (
                 <button key={s.name} className={`skill-item ${f.hermesSkills.includes(s.name) ? 'skill-item--on' : ''}`} onClick={() => toggleSkill(s.name)}>
@@ -336,7 +337,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
               ))}
             </div>
           </details>
-        ) : <p className="hint">Biblioteca de skills indisponível (sem conta de IA conectada).</p>}
+        ) : <p className="hint">Biblioteca de competências indisponível (sem conta de IA conectada).</p>}
       </div>
 
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}

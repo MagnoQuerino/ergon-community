@@ -8,22 +8,25 @@ const A = `usr_${'a'.repeat(32)}`; const B = `usr_${'b'.repeat(32)}`;
 const cfg: ManagerConfig = { master: MASTER, image: 'ergon-hermes:dev', network: 'ergon-net', legacyVolume: 'ergon_hermes-vault', volumePrefix: 'ergon_motor-',
   bridgeUrl: 'http://ergon:8787/internal/bridge/v1/events', memBytes: memBytes('2g'), nanoCpus: 2e9 };
 
-/** Docker falso: contêineres e volumes em memória; registra cada chamada. */
+/** Docker falso: contêineres e volumes em memória; registra cada chamada. (A renovação tem o seu, mais completo, em gerente-motores-renovacao.test.ts.) */
 function fakeDocker(opts: { legacy?: boolean; legacyUsedBy?: string } = {}) {
   const containers = new Map<string, { spec: any; running: boolean }>();
   const volumes = new Set<string>(opts.legacy ? ['ergon_hermes-vault'] : []);
   const calls: string[] = [];
+  const IMAGE_ID = `sha256:${'d'.repeat(64)}`; // a imagem do motor, já neste computador
   const docker: DockerCall = async (method, path, body) => {
     calls.push(`${method} ${path}`);
     let m;
     if ((m = /^\/containers\/([\w-]+)\/json$/.exec(path))) {
       const c = containers.get(m[1]);
-      return c ? { status: 200, json: { State: { Running: c.running }, Config: { Labels: c.spec.Labels } } } : { status: 404, json: { message: 'no such container' } };
+      return c ? { status: 200, json: { Image: IMAGE_ID, State: { Running: c.running }, Config: { Labels: c.spec.Labels }, Mounts: [{ Type: 'volume', Name: c.spec.HostConfig.Mounts[0].Source, Destination: '/vault' }] } } : { status: 404, json: { message: 'no such container' } };
     }
+    if (/^\/images\/.+\/json$/.test(path) && method === 'GET') return { status: 200, json: { Id: IMAGE_ID } };
     if ((m = /^\/containers\/create\?name=([\w-]+)$/.exec(path))) { containers.set(m[1], { spec: body, running: false }); volumes.add((body as any).HostConfig.Mounts[0].Source); return { status: 201, json: {} }; }
     if ((m = /^\/containers\/([\w-]+)\/start$/.exec(path))) { containers.get(m[1])!.running = true; return { status: 204, json: null }; }
     if ((m = /^\/containers\/([\w-]+)\/stop/.exec(path))) { const c = containers.get(m[1]); if (!c) return { status: 404, json: null }; c.running = false; return { status: 204, json: null }; }
     if ((m = /^\/containers\/([\w-]+)\?force=true$/.exec(path)) && method === 'DELETE') { containers.delete(m[1]); return { status: 204, json: null }; }
+    if (path === '/volumes/create' && method === 'POST') { volumes.add((body as any).Name); return { status: 201, json: { Name: (body as any).Name } }; }
     if ((m = /^\/volumes\/([\w-]+)$/.exec(path))) {
       if (method === 'DELETE') return volumes.delete(m[1]) ? { status: 204, json: null } : { status: 404, json: null };
       return volumes.has(m[1]) ? { status: 200, json: {} } : { status: 404, json: null };

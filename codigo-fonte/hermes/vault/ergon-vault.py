@@ -6,15 +6,17 @@ cifrado. A chave vem do Ergon (derivada da chave mestra, que só existe depois q
 pela rede interna, com o token da ponte. Sem chave, o Hermes não sobe.
 
 Primeira vez: cria o cofre e copia para dentro os dados de antes (volume antigo montado em /legacy, só
-leitura — ele não é apagado; a pessoa decide quando remover). Depois monta, copia o plugin do Ergon, aplica a
-configuração do Ergon (uma vez por versão dela) e passa a vez ao ponto de entrada original do Hermes (s6),
-mantendo o processo 1. Assim a instalação não precisa de nenhum passo manual no motor.
+leitura — ele não é apagado; a pessoa decide quando remover). Depois monta, copia o plugin do Ergon, aplica as
+migrações de configuração do Ergon que ainda faltam (MIGRACOES) e passa a vez ao ponto de entrada original do Hermes
+(s6), mantendo o processo 1. Assim a instalação não precisa de nenhum passo manual no motor.
 
-Sem ERGON_VAULT=1, só passa a vez (comportamento original).
+Sem ERGON_VAULT=1, só passa a vez (comportamento original). Com o argumento --ergon-configurar (motor único, sem
+cofre: scripts/hermes-init.mjs), só aplica a configuração, com as mesmas migrações, e sai.
 """
 
 from __future__ import annotations
 
+import ast
 import ctypes
 import hmac
 import json
@@ -33,22 +35,49 @@ MARKER = ".ergon-vault"
 HERMES_UID = 10000
 HERMES_CLI = "/opt/hermes/.venv/bin/hermes"
 
-# Configuração do motor pelo Ergon (o mesmo que scripts/hermes-init.mjs): plugin ligado; na API (agentes do
-# Ergon) só o conjunto seguro de ferramentas — o plugin barra, a cada chamada, o que o agente não tem; Teams e
-# WhatsApp diretos só com "todo"; limites econômicos; mensagens de desconhecidos ignoradas.
-# Mudou a lista? Suba CONFIG_VERSION: aplica de novo na próxima abertura do cofre.
-CONFIG_VERSION = "1"
+# Configuração do motor pelo Ergon, em migrações numeradas (o modo de motor único, scripts/hermes-init.mjs, usa
+# estas mesmas). Cada cofre guarda em MIGRACOES_MARKER a última que recebeu ({"versao": N}) e, a cada abertura, recebe
+# em ordem só as que faltam, gravando a marca a cada uma. CONFIG_MARKER fica sempre com o texto "1", o único que as
+# imagens até a rc.22 entendem: numa volta automática para a imagem anterior, o cofre dela vê "1" e não reaplica a
+# configuração inteira por cima das escolhas da pessoa (Terminal e Executar código ligados). Vale a maior versão
+# legível das duas: sem MIGRACOES_MARKER (cofre de antes) ou com ela ilegível, o CONFIG_MARKER "1" = migração 1.
+# REGRA: migração publicada não muda nunca (o teste hermes/tests/test_ergon_vault_config.py prende o conteúdo). Mudou
+# a configuração do motor? Crie a migração N+1, aditiva e idempotente: ela vale para cofres novos e antigos sem
+# desfazer o que a pessoa escolheu depois (ferramentas ligadas, modelo, logins).
+# Só chaves do config.yaml, pelo próprio Hermes ("hermes config set", como o usuário do motor). Nunca logins, .env de
+# provedores, memória, sessões ou skills.
 CONFIG_MARKER = ".ergon-config"
-CONFIG_STEPS = [
-    ["plugins", "enable", "ergon_bridge"],
-    ["config", "set", "platform_toolsets.api_server", '["todo","web","vision","image_gen","skills","ergon_conexoes"]'],
-    ["config", "set", "platform_toolsets.teams", '["todo"]'],
-    ["config", "set", "platform_toolsets.whatsapp", '["todo"]'],
-    ["config", "set", "agent.max_turns", "20"],
-    ["config", "set", "agent.reasoning_effort", "low"],
-    ["config", "set", "unauthorized_dm_behavior", "ignore"],
-]
-# Travas de segurança: valem em TODA abertura, sem reaplicar o resto (subir CONFIG_VERSION desfaria escolhas da
+MIGRACOES_MARKER = ".ergon-migracoes"
+# Conjuntos de ferramentas que o plugin do Ergon registra (o mesmo de _ERGON_PLUGIN_TOOLSETS no plugin)
+ERGON_PLUGIN_TOOLSETS = ("ergon_conexoes",)
+API_TOOLSETS_PADRAO = ["todo", "web", "vision", "image_gen", "skills", "ergon_conexoes"]
+MIGRACOES: tuple[tuple[int, str, dict], ...] = (
+    # 1: plugin ligado; na API (agentes do Ergon) só o conjunto seguro de ferramentas — o plugin barra, a cada chamada,
+    # o que o agente não tem; Teams e WhatsApp diretos só com "todo"; limites econômicos; desconhecidos ignorados.
+    (1, "primeira configuração", {"passos": [
+        ["plugins", "enable", "ergon_bridge"],
+        ["config", "set", "platform_toolsets.api_server", '["todo","web","vision","image_gen","skills","ergon_conexoes"]'],
+        ["config", "set", "platform_toolsets.teams", '["todo"]'],
+        ["config", "set", "platform_toolsets.whatsapp", '["todo"]'],
+        ["config", "set", "agent.max_turns", "20"],
+        ["config", "set", "agent.reasoning_effort", "low"],
+        ["config", "set", "unauthorized_dm_behavior", "ignore"],
+    ]}),
+    # 2: Conexões nos cofres de antes. Acrescenta ergon_conexoes ao que a plataforma da API já tem (Terminal e Executar
+    # código que a pessoa ligou continuam) e marca os conjuntos do plugin como conhecidos nas três plataformas: no
+    # Hermes, conjunto de plugin conhecido e fora da lista quer dizer desligado (hermes_cli/tools_config.py,
+    # _enabled_plugin_toolsets). Assim o "desligar" da tela vale e Teams/WhatsApp diretos não ganham as Conexões sem
+    # pedido. known_plugin_toolsets também é do Hermes (hermes_cli/left_core_migration.py): sempre a UNIÃO com o que já
+    # está lá. A lista da plataforma vai antes da marca de conhecido: se só a marca entrasse, as Conexões desligariam.
+    (2, "conexões", {"unir": [
+        ["platform_toolsets.api_server", ["ergon_conexoes"], API_TOOLSETS_PADRAO],
+        ["known_plugin_toolsets.api_server", ["ergon_conexoes"], []],
+        ["known_plugin_toolsets.teams", ["ergon_conexoes"], []],
+        ["known_plugin_toolsets.whatsapp", ["ergon_conexoes"], []],
+    ]}),
+)
+CONFIG_VERSION = MIGRACOES[-1][0]
+# Travas de segurança: valem em TODA abertura, além das migrações (reaplicar uma migração desfaria escolhas da
 # pessoa, como as ferramentas ligadas). Treinar: toda escrita de skill fica em espera até a aprovação no Ergon.
 ENFORCED_STEPS = [
     ["config", "set", "skills.write_approval", "true"],
@@ -158,13 +187,19 @@ def open_vault(key: str, previous: str | None = None) -> None:
             for n in [root, *[os.path.join(root, x) for x in dirs + files]]:
                 os.chown(n, HERMES_UID, HERMES_UID)
     ensure_api_key()
-    configure_once()
-    enforce_safety()
+    # Montado, o motor abre: um erro na configuração ou nas travas só fica no log e a próxima abertura tenta de novo
+    # (se a abertura caísse aqui, o servidor voltaria à imagem anterior a cada renovação, e o motor ficaria nela).
+    for etapa in (configure, enforce_safety):
+        try:
+            etapa()
+        except Exception as exc:  # noqa: BLE001
+            log(f"{etapa.__name__} com erro ({type(exc).__name__}: {str(exc)[:200]}); nova tentativa na próxima abertura")
 
 
 def as_hermes(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run([HERMES_CLI, *args], user=HERMES_UID, group=HERMES_UID, extra_groups=[],
-                          env={**os.environ, "HOME": PLAIN}, capture_output=True, timeout=120)
+    # já como o usuário do motor (motor único: docker compose exec -u 10000), não há troca a fazer
+    who = {} if os.getuid() == HERMES_UID else {"user": HERMES_UID, "group": HERMES_UID, "extra_groups": []}
+    return subprocess.run([HERMES_CLI, *args], **who, env={**os.environ, "HOME": PLAIN}, capture_output=True, timeout=120)
 
 
 def ensure_api_key() -> None:
@@ -183,32 +218,198 @@ def ensure_api_key() -> None:
     os.chmod(path, 0o600)
 
 
-def enforce_safety() -> None:
+def enforce_safety() -> bool:
     failed = [" ".join(step[:3]) for step in ENFORCED_STEPS if as_hermes(step).returncode != 0]
     if failed:
         # sem a trava, o Treinar não grava nada (o Ergon só aplica escrita em espera); avisa e segue
         log(f"trava de segurança não aplicada ({', '.join(failed)}); nova tentativa na próxima abertura")
-    else:
-        log("travas de segurança conferidas")
+        return False
+    log("travas de segurança conferidas")
+    return True
 
 
-def configure_once() -> None:
-    marker = os.path.join(PLAIN, CONFIG_MARKER)
-    if os.path.exists(marker) and open(marker, encoding="utf-8").read().strip() == CONFIG_VERSION:
-        return
-    failed = []
-    for step in CONFIG_STEPS:
-        r = as_hermes(step)
-        if r.returncode != 0:
-            failed.append(" ".join(step[:3]))
-    if failed:
-        # o motor sobe mesmo assim; tenta de novo na próxima abertura
-        log(f"configuração do motor incompleta ({', '.join(failed)}); nova tentativa na próxima abertura")
-        return
-    with open(marker, "w", encoding="utf-8") as f:
-        f.write(CONFIG_VERSION)
-    os.chown(marker, HERMES_UID, HERMES_UID)
-    log("motor configurado pelo Ergon")
+def _versao_legivel(raw: str) -> int | None:
+    """A versão gravada na marca, ou None se a marca não é legível (vazia, cortada, outra coisa)."""
+    raw = raw.strip()
+    if raw.isdigit():
+        return min(int(raw), 1)
+    try:
+        v = json.loads(raw).get("versao") if raw.startswith("{") else None
+    except (ValueError, AttributeError):
+        v = None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
+def versao_da_marca(raw: str) -> int:
+    """A versão gravada na marca: {"versao": N} (MIGRACOES_MARKER) ou o texto puro das versões antigas (CONFIG_MARKER).
+    O texto puro vale no máximo 1: quando a marca era texto, "2" queria dizer "configuração inteira, versão 2" (um
+    teste de 26/10, nunca publicado), e não "migração 2" — contar como 2 pularia a migração das Conexões.
+    Qualquer outra coisa vale 0: aplica desde a primeira, como antes (as migrações são idempotentes)."""
+    v = _versao_legivel(raw)
+    return 0 if v is None else v
+
+
+def ler_marca() -> int:
+    """A maior versão legível entre MIGRACOES_MARKER e a marca das versões antigas (CONFIG_MARKER: "1" = migração 1).
+    As duas só crescem (CONFIG_MARKER só recebe "1" depois da migração 1), então a maior é a certa. Uma marca ilegível
+    (vazia ou cortada por uma queda logo depois de criada, bytes estranhos) não conta: vale a outra. Sem nenhuma: 0.
+    Erro de leitura que não seja "não existe" sobe (configure não aplica nada e tenta de novo na próxima abertura)."""
+    versoes = []
+    for nome in (MIGRACOES_MARKER, CONFIG_MARKER):
+        try:
+            with open(os.path.join(PLAIN, nome), "rb") as f:
+                v = _versao_legivel(f.read(200).decode("utf-8", errors="replace"))
+        except FileNotFoundError:
+            continue
+        if v is None:
+            log(f"marca {nome} ilegível: não conta (vale a outra, se houver)")
+        else:
+            versoes.append(v)
+    return max(versoes, default=0)
+
+
+def _gravar(nome: str, texto: str) -> None:
+    """Grava até o disco antes de trocar o nome (uma queda logo depois não deixa a marca vazia); falhou: some o
+    temporário e o erro sobe."""
+    caminho = os.path.join(PLAIN, nome)
+    tmp = caminho + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(texto)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chown(tmp, HERMES_UID, HERMES_UID)
+        os.replace(tmp, caminho)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def gravar_marca(n: int) -> None:
+    """Grava a migração N em MIGRACOES_MARKER e deixa CONFIG_MARKER = "1" (o que as imagens antigas entendem)."""
+    _gravar(MIGRACOES_MARKER, json.dumps({"versao": n}))
+    try:
+        with open(os.path.join(PLAIN, CONFIG_MARKER), "rb") as f:
+            antiga = f.read(200).strip()
+    except FileNotFoundError:
+        antiga = None
+    if antiga != b"1":
+        _gravar(CONFIG_MARKER, "1")
+
+
+def ler_config() -> dict:
+    """O config.yaml do motor como está no disco (sem os padrões do Hermes). Ilegível: erro (nada é gravado)."""
+    try:
+        import hermes_yaml as yaml  # o mesmo leitor do Hermes (YAML 1.1): vem pelo ambiente do próprio Hermes
+    except ImportError as exc:  # a imagem não traz o PyYAML: sem o leitor do Hermes, nada é gravado
+        raise RuntimeError("não achei o leitor de YAML do Hermes (hermes_yaml) neste Python") from exc
+    path = os.path.join(PLAIN, "config.yaml")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("config.yaml não é um mapa")
+    return data
+
+
+def _pegar(cfg: dict, chave: str):
+    cur = cfg
+    for parte in chave.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(parte)
+    return cur
+
+
+def _lista(valor) -> list[str] | None:
+    """Uma lista salva no config.yaml. Versões antigas do "config set" gravavam '["a", "b"]' como texto: o Hermes lê
+    as duas formas (hermes_cli/toolset_validation.py), e aqui também. Outra coisa: None (ausente)."""
+    if isinstance(valor, list):
+        return [str(x) for x in valor]
+    if isinstance(valor, str) and valor.strip().startswith("["):
+        try:
+            v = ast.literal_eval(valor.strip())
+        except (ValueError, SyntaxError):
+            return None
+        return [str(x) for x in v] if isinstance(v, list) else None
+    return None
+
+
+def _unir(entradas: list) -> bool:
+    """Cada [chave, acrescentar, base]: grava a união do que está na chave (ou da base, se ausente) com "acrescentar".
+    Já tem tudo: não chama nada. Para na primeira falha (a ordem importa: ver a migração 2)."""
+    cfg = ler_config()
+    for chave, acrescentar, base in entradas:
+        bruto = _pegar(cfg, chave)
+        atual = _lista(bruto)
+        if isinstance(bruto, list) and set(acrescentar) <= set(atual or []):
+            continue
+        novo = sorted(set(atual if atual is not None else base) | set(acrescentar))
+        if as_hermes(["config", "set", chave, json.dumps(novo)]).returncode != 0:
+            log(f"não consegui gravar {chave}")
+            return False
+    return True
+
+
+def aplicar(conteudo: dict) -> bool:
+    if "passos" in conteudo:
+        failed = [" ".join(step[:3]) for step in conteudo["passos"] if as_hermes(step).returncode != 0]
+        if failed:
+            log(f"passos que falharam: {', '.join(failed)}")
+        return not failed
+    if "unir" in conteudo:
+        return _unir(conteudo["unir"])
+    raise ValueError("migração sem passos conhecidos")
+
+
+def configure() -> bool:
+    """Aplica, em ordem, as migrações acima da marca do cofre, gravando a marca a cada uma. Uma que falha para tudo: o
+    motor sobe mesmo assim e a próxima abertura tenta de novo a partir dela."""
+    try:
+        atual = ler_marca()
+    except Exception as exc:  # noqa: BLE001 - o motor sobe mesmo assim
+        log(f"não consegui ler a marca da configuração ({type(exc).__name__}); nova tentativa na próxima abertura")
+        return False
+    if atual > CONFIG_VERSION:
+        log(f"configuração do motor na versão {atual}, mais nova que a desta imagem ({CONFIG_VERSION}): nada a aplicar")
+        return True
+    aplicadas = []
+    for n, nome, conteudo in MIGRACOES:
+        if n <= atual:
+            continue
+        try:
+            ok = aplicar(conteudo)
+        except Exception as exc:  # noqa: BLE001 - o motor sobe mesmo assim
+            log(f"migração {n} ({nome}) com erro: {type(exc).__name__}: {str(exc)[:200]}")
+            ok = False
+        if not ok:
+            log(f"configuração do motor parou na migração {n} ({nome}); nova tentativa na próxima abertura")
+            return False
+        try:
+            gravar_marca(n)
+        except Exception as exc:  # noqa: BLE001 - o motor sobe mesmo assim; a migração é idempotente e roda de novo
+            log(f"migração {n} ({nome}) aplicada, mas a marca não foi gravada ({type(exc).__name__}: {str(exc)[:120]}); "
+                "nova tentativa na próxima abertura")
+            return False
+        aplicadas.append(f"{n} ({nome})")
+        log(f"configuração do motor: migração {n} aplicada ({nome})")
+    if aplicadas:
+        log(f"motor configurado pelo Ergon: versão {atual} → {CONFIG_VERSION}")
+    return True
+
+
+def configurar_agora() -> int:
+    """Motor único, sem cofre (scripts/hermes-init.mjs): chave da API no .env do perfil, migrações e travas."""
+    ensure_api_key()
+    ok = configure()
+    ok = enforce_safety() and ok
+    return 0 if ok else 1
 
 
 class Receiver(BaseHTTPRequestHandler):
@@ -278,6 +479,8 @@ def drop_mount_privilege() -> None:
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["--ergon-configurar"]:
+        sys.exit(configurar_agora())
     if os.environ.get("ERGON_VAULT") != "1":
         os.execv(ENTRY[0], ENTRY)
     port = int(os.environ.get("ERGON_VAULT_PORT", "8644"))

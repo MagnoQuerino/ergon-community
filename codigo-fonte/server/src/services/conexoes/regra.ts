@@ -5,8 +5,11 @@
  *   o pedido não partiu da pessoa (rotina, mensagem recebida, iniciativa do agente, colega): confirma.
  *   a pessoa pediu no chat: organizar as ferramentas dela vai direto; enviar a outra pessoa vai direto,
  *   a menos que a sessão tenha lido conteúdo de fora antes (um e-mail malicioso poderia ter escolhido destino e texto).
- * Com execução de código ligada no motor, tudo confirma, inclusive leitura: quem roda comandos ali alcança a ponte com o
- * token dela e poderia se passar por outra sessão (o terminal enxerga o que o plugin enxerga).
+ * Execução de código (codigoLigado): tudo confirma, inclusive leitura, quando o agente da execução tem Terminal ou
+ * Executar código, quando outra execução ativa no mesmo motor é de um agente com eles, ou quando um programa já rodou
+ * naquele motor desde que ele abriu (app.ts, codigoLigado): quem roda comandos ali alcança a ponte com o token dela e
+ * poderia se passar por outra sessão (o terminal enxerga o que o plugin enxerga). Sem execução conhecida, vale o motor
+ * inteiro.
  * "Liberar tudo" é escolha consciente da pessoa, desligada por padrão.
  * Origem e leitura são marcadas pelo sistema. Nada que o modelo diga, ou que venha num e-mail, muda este resultado.
  */
@@ -41,8 +44,16 @@ export const leEndereco = (tool: string, alvo?: string | null): boolean =>
  * Depois de ler conteúdo privado da conta, a sessão não usa o que alcança endereços arbitrários: um e-mail malicioso
  * poderia mandar o agente abrir `https://atacante/?dados=...`. A busca na web segue valendo (a consulta vai ao buscador,
  * e o agente recebe só resultados). Também caem com "Liberar tudo".
+ * Nomes reais do Hermes v0.22.2 (toolsets.py; test/conexoes-regra-nomes.test.ts confere com o fixture tirado da imagem).
+ * Entrada terminada em "_" vale como prefixo no plugin do motor (ergon_bridge 0.3.0+): "browser_" cobre o navegador
+ * inteiro, inclusive o que uma versão nova do motor acrescentar. Os nomes do navegador continuam também por extenso para
+ * o plugin de antes (só nome exato), enquanto o motor de alguém ainda não foi renovado.
  */
 export const BLOQUEADAS_DEPOIS_DE_LER: ReadonlySet<string> = new Set([
-  'web_extract', 'web_crawl', 'vision_analyze', 'terminal', 'process', 'execute_code',
-  'browser_navigate', 'browser_click', 'browser_type', 'browser_snapshot', 'browser_scroll', 'browser_vision', 'browser_back', 'browser_press',
+  'web_extract', 'vision_analyze', 'terminal', 'process_manage', 'execute_code',
+  // a geração de imagem fica livre (decisão de 08/11): ela pode buscar uma imagem de referência por endereço, mas o uso
+  // de imagens não trava depois de ler conteúdo privado
+  'browser_',
+  'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_scroll', 'browser_back', 'browser_press',
+  'browser_get_images', 'browser_vision', 'browser_console', 'browser_cdp', 'browser_dialog', 'browser_vault', 'browser_exec',
 ]);

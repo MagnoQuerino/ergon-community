@@ -38,6 +38,18 @@ from typing import Any
 
 logger = logging.getLogger("ergon_bridge")
 
+# Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
+# imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
+# para saber se o motor precisa ser renovado).
+PLUGIN_VERSION = "0.3.0"
+CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets")
+_TS_CONEXOES = "ergon_conexoes"
+# Conjuntos de ferramentas que este plugin registra (o mesmo de ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
+_ERGON_PLUGIN_TOOLSETS = (_TS_CONEXOES,)
+# as marcas gravadas por hermes/vault/ergon-vault.py: a das migrações ({"versao": N}) e a das imagens antigas ("1")
+_MIGRACOES_MARKER = ".ergon-migracoes"
+_CONFIG_MARKER = ".ergon-config"
+
 _PLATFORMS = ("teams", "whatsapp")
 _SOURCE_KEYS = ("chat_id", "chat_name", "chat_type", "user_id", "user_name", "thread_id", "is_bot", "scope_id", "guild_id", "message_id")
 _TIMEOUT = float(os.environ.get("ERGON_BRIDGE_TIMEOUT", "4"))
@@ -310,6 +322,12 @@ def _skills_gate(tool_name: str, args: dict[str, Any], pol: dict[str, Any]) -> d
     return None
 
 
+def _negada(tool_name: str, denied: Any) -> bool:
+    """Barrada pela lista do Ergon: o nome exato, ou um prefixo (entrada terminada em "_", como "browser_": vale para
+    toda ferramenta do grupo, inclusive as que uma versão nova do motor acrescentar)."""
+    return any(tool_name == d or (d.endswith("_") and len(d) > 1 and tool_name.startswith(d)) for d in denied)
+
+
 def _who_has(tool_name: str, holders: dict[str, list[str]]) -> list[str]:
     names: list[str] = []
     for ts, people in holders.items():
@@ -328,7 +346,7 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
             _lembrar_web(str(session_id or ""), str(task_id or ""))
         pol = _policy(str(session_id or ""), str(task_id or ""))
         # depois de ler conteúdo privado das contas, nada que alcance endereços arbitrários (ver conexoes/regra.ts no Ergon)
-        if tool_name in pol.get("denied", ()):
+        if _negada(tool_name, pol.get("denied", ())):
             return {"action": "block", "message": (
                 f"Por segurança, a ferramenta '{tool_name}' não funciona nesta conversa: ela já leu conteúdo privado das contas conectadas, "
                 "e um texto lido poderia usar isso para mandar os dados a outro endereço. Continue sem ela (a busca na web segue valendo). "
@@ -647,6 +665,37 @@ _MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"
 _MEDIA_MAX = 10 * 1024 * 1024
 
 
+def _known(cfg: Any, platform: str) -> list[str]:
+    """known_plugin_toolsets[plataforma] como o Hermes lê (lista; outra coisa vale vazio)."""
+    known = cfg.get("known_plugin_toolsets") if isinstance(cfg, dict) else None
+    lst = known.get(platform) if isinstance(known, dict) else None
+    return sorted({str(x) for x in lst}) if isinstance(lst, list) else []
+
+
+def _vault_config() -> int:
+    """A última migração de configuração que o cofre recebeu (marcas gravadas por hermes/vault/ergon-vault.py, lidas
+    como lá): a maior versão legível entre .ergon-migracoes = {"versao": N} e o .ergon-config das versões antigas (texto
+    puro vale no máximo 1). Marca ilegível (vazia, cortada, bytes estranhos) não conta: vale a outra. Nenhuma: 0."""
+    home = os.environ.get("HERMES_HOME", "/opt/data")
+    versoes = []
+    for nome in (_MIGRACOES_MARKER, _CONFIG_MARKER):
+        try:
+            with open(os.path.join(home, nome), "rb") as f:
+                raw = f.read(200).decode("utf-8", errors="replace").strip()
+        except Exception:  # noqa: BLE001
+            continue
+        if raw.isdigit():
+            versoes.append(min(int(raw), 1))
+            continue
+        try:
+            v = json.loads(raw).get("versao") if raw.startswith("{") else None
+        except Exception:  # noqa: BLE001
+            v = None
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+            versoes.append(v)
+    return max(versoes, default=0)
+
+
 def _media_dir() -> str:
     return os.path.realpath(os.path.join(os.environ.get("HERMES_HOME", "/opt/data"), "cache", "generated"))
 
@@ -812,8 +861,7 @@ class _ControlHandler(BaseHTTPRequestHandler):
         if path.startswith("/ergon/v1/learn-prompt") or path.startswith("/ergon/v1/skills/"):
             return self._training(method, path, body or {})
         if path == "/ergon/v1/health" and method == "GET":
-            status, _ = _dash_call("GET", "/api/model/info", "", None)
-            return self._json(200, {"ok": True, "dashboard": status == 200})
+            return self._health()
         if path == "/ergon/v1/api-toolsets" and method == "GET":
             return self._api_toolsets_get()
         if path == "/ergon/v1/api-toolsets" and method == "PUT":
@@ -955,24 +1003,42 @@ class _ControlHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _health(self) -> None:
+        """Contrato com o servidor: versão do plugin, migração de configuração do cofre e o que este motor sabe fazer."""
+        status, _ = _dash_call("GET", "/api/model/info", "", None)
+        return self._json(200, {"ok": True, "dashboard": status == 200, "plugin_version": PLUGIN_VERSION,
+                                "vault_config": _vault_config(), "capacidades": list(CAPACIDADES)})
+
     def _api_toolsets_get(self) -> None:
         try:
             from hermes_cli.config import load_config  # módulo do Hermes
             from hermes_cli.tools_config import _get_platform_tools
-            enabled = sorted(_get_platform_tools(load_config(), "api_server", include_default_mcp_servers=False))
+            cfg = load_config()
+            enabled = sorted(_get_platform_tools(cfg, "api_server", include_default_mcp_servers=False))
         except Exception as exc:  # noqa: BLE001
             return self._json(503, {"error": f"não consegui ler a configuração ({type(exc).__name__})"})
-        return self._json(200, {"enabled": enabled, "safe": sorted(_SAFE_TOOLSETS), "guarded": sorted(_GUARDED_TOOLSETS)})
+        return self._json(200, {"enabled": enabled, "safe": sorted(_SAFE_TOOLSETS), "guarded": sorted(_GUARDED_TOOLSETS),
+                                "known": _known(cfg, "api_server")})
 
     def _api_toolsets_put(self, body: dict[str, Any]) -> None:
         raw = body.get("enabled")
         if not isinstance(raw, list):
             return self._json(400, {"error": "envie enabled: [...]"})
         wanted = sorted({str(x) for x in raw} & (_SAFE_TOOLSETS | _GUARDED_TOOLSETS) | {"todo"})
-        status, data = _dash_call("PUT", "/api/config", "", {"config": {"platform_toolsets": {"api_server": wanted}}})
+        # Conjunto de plugin fora da lista só fica desligado se o Hermes o "conhece" nesta plataforma
+        # (hermes_cli/tools_config.py, _enabled_plugin_toolsets); o seletor do próprio Hermes grava isso a cada salvamento.
+        # A lista também é do Hermes (hermes_cli/left_core_migration.py): grava a união com o que já está lá. Sem ler o
+        # que está lá, não grava nada (o PUT troca a lista inteira).
+        try:
+            from hermes_cli.config import load_config  # módulo do Hermes
+            known = sorted(set(_known(load_config(), "api_server")) | set(_ERGON_PLUGIN_TOOLSETS))
+        except Exception as exc:  # noqa: BLE001
+            return self._json(503, {"error": f"não consegui ler a configuração ({type(exc).__name__})"})
+        status, data = _dash_call("PUT", "/api/config", "", {"config": {
+            "platform_toolsets": {"api_server": wanted}, "known_plugin_toolsets": {"api_server": known}}})
         if status != 200:
             return self._send(status, data)
-        return self._json(200, {"ok": True, "enabled": wanted})
+        return self._json(200, {"ok": True, "enabled": wanted, "known": known})
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle("GET")
@@ -1007,8 +1073,8 @@ def register(ctx) -> None:
     ctx.register_hook("post_gateway_admission", on_admission)
     ctx.register_hook("pre_tool_call", on_pre_tool_call)
     ctx.register_hook("post_tool_call", on_post_tool_call)
-    ctx.register_tool(name="conexoes_listar", toolset="ergon_conexoes", schema=_CONEXOES_LISTAR, handler=tool_conexoes_listar)
-    ctx.register_tool(name="conexoes_executar", toolset="ergon_conexoes", schema=_CONEXOES_EXECUTAR, handler=tool_conexoes_executar)
+    ctx.register_tool(name="conexoes_listar", toolset=_TS_CONEXOES, schema=_CONEXOES_LISTAR, handler=tool_conexoes_listar)
+    ctx.register_tool(name="conexoes_executar", toolset=_TS_CONEXOES, schema=_CONEXOES_EXECUTAR, handler=tool_conexoes_executar)
     try:
         _start_control()
     except Exception:  # noqa: BLE001 - a ponte de controle nunca derruba o Hermes

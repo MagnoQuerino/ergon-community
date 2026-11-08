@@ -360,7 +360,8 @@ describe('Treinar: ensinar, revisar, aprovar e usar uma competência', () => {
     const before = motor.started.length;
     setPlatformToolsets(['todo', 'web']);
     const r1 = await start('herodoto', { request: 'Aprenda a escrever atas de reunião no padrão ACM, com decisões e responsáveis.' });
-    assert.equal(r1.status, 409); assert.match(r1.json.message, /ligue "Skills da biblioteca" em Configurações › Ferramentas/);
+    assert.equal(r1.status, 409); assert.match(r1.json.message, /ligue "Competências da biblioteca" em Configurações › Ferramentas/);
+    assert.doesNotMatch(r1.json.message, /\bSkills?\b|\bmotor\b/i, 'o mesmo nome que a tela da ferramenta mostra');
     setPlatformToolsets(['todo', 'skills']);
     const r2 = await start('herodoto', { request: 'Aprenda com este site.', links: ['https://exemplo.com/atas'] });
     assert.equal(r2.status, 409); assert.match(r2.json.message, /ligue "Pesquisa na web"/);

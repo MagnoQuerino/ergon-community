@@ -85,7 +85,7 @@ export function PermissionCard({ p, onDone, onReject }: { p: Proposal; onDone: (
     }}>
       <div className="perm-card__head"><Icon name="lock" size={16} /> <b>Pedido de permissão</b></div>
       <p className="perm-card__what">{p.summary}</p>
-      <p className="hint warn">Com isso, o agente executa programas e comandos no ambiente isolado do motor de IA: pode criar e apagar arquivos ali, instalar pacotes e acessar a internet. Autorize só se o pedido foi seu.</p>
+      <p className="hint warn">Com isso, o agente executa programas e comandos no ambiente isolado da equipe: pode criar e apagar arquivos ali, instalar pacotes e acessar a internet. Autorize só se o pedido foi seu.</p>
       <div className="row row--wrap">
         <input type="password" autoComplete="current-password" autoFocus required placeholder="Sua senha" aria-label="Sua senha" value={password} onChange={(e) => setPassword(e.target.value)} />
         <button className="btn btn--sm btn--primary" disabled={busy || !password}>{busy ? 'Conferindo…' : 'Autorizar'}</button>

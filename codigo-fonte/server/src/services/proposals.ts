@@ -305,6 +305,12 @@ export function reconsiderProposal(db: Db, bus: Bus, workspaceId: string, userId
 const WAITING_STATES = ['aguardando_info', 'aguardando_aprovacao', 'revisao'];
 /** card que espera o clique numa ação de conta já aparece pelo cartão dela (com #N e quem pediu): não conta duas vezes */
 const SEM_CONEXAO_PENDENTE = "NOT EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente')";
+/**
+ * o que não foi feito (falha) nunca aparece aqui com Aprovar: falha se resolve no card ("Tentar de novo" ou cancelar),
+ * e "aprovar" o que não aconteceu seria concluir sem evidência (results.ts recusa). O que você recusou no cartão
+ * (descartado) aparece como pergunta: o que mudar, ou cancelar o card.
+ */
+const SEM_FALHA = "COALESCE((SELECT y.state FROM task_results y WHERE y.task_id = t.id ORDER BY y.created_at DESC, y.rowid DESC LIMIT 1), '') <> 'falha'";
 
 /**
  * "Aguardando você": tudo o que espera o usuário dentro da plataforma, num lugar só — propostas da equipe (inclusive
@@ -328,7 +334,7 @@ export function pendingDecisions(db: Db, workspaceId: string) {
        FROM tasks t JOIN boards b ON b.id = t.board_id LEFT JOIN agents a ON a.id = t.agent_id
        LEFT JOIN task_results x ON x.id = (SELECT y.id FROM task_results y WHERE y.task_id = t.id ORDER BY y.created_at DESC, y.rowid DESC LIMIT 1)
       WHERE t.workspace_id = ? AND b.audience = 'team' AND t.completed = 0 AND t.archived = 0 AND t.work_state IN (${WAITING_STATES.map(() => '?').join(', ')})
-        AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user')) AND ${SEM_CONEXAO_PENDENTE}
+        AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user')) AND ${SEM_CONEXAO_PENDENTE} AND ${SEM_FALHA}
       ORDER BY t.updated_at DESC LIMIT 50`, workspaceId, ...WAITING_STATES)
     .map(({ evidence, ...c }) => {
       let ev: { pergunta?: string | null } = {};
@@ -353,7 +359,7 @@ export function pendingCount(db: Db, workspaceId: string): number {
   return n("SELECT COUNT(*) AS n FROM agent_proposals WHERE workspace_id = ? AND status = 'proposed' AND kind <> 'info_request'", workspaceId)
     + n("SELECT COUNT(*) AS n FROM runs WHERE workspace_id = ? AND status = 'waiting_user'", workspaceId)
     + n(`SELECT COUNT(*) AS n FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.workspace_id = ? AND b.audience = 'team' AND t.completed = 0 AND t.archived = 0
-          AND t.work_state IN (${WAITING_STATES.map(() => '?').join(', ')}) AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user')) AND ${SEM_CONEXAO_PENDENTE}`, workspaceId, ...WAITING_STATES)
+          AND t.work_state IN (${WAITING_STATES.map(() => '?').join(', ')}) AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user')) AND ${SEM_CONEXAO_PENDENTE} AND ${SEM_FALHA}`, workspaceId, ...WAITING_STATES)
     + n("SELECT COUNT(*) AS n FROM link_proposals p JOIN tasks t ON t.id = p.task_id WHERE p.workspace_id = ? AND p.status = 'proposed' AND t.archived = 0", workspaceId)
     + n("SELECT COUNT(*) AS n FROM rules WHERE workspace_id = ? AND status = 'proposed'", workspaceId);
 }

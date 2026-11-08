@@ -242,7 +242,7 @@ export function ProtectScreen({ onDone, onLogout }: { onDone: () => void; onLogo
   const [rec, setRec] = useState<Recovery | null>(null);
   if (rec) return <Card><RecoveryReveal r={rec} onDone={onDone} /></Card>;
   return (
-    <Card busy={busy} title="Proteger o Ergon" sub="Esta instalação foi criada antes da criptografia. Ao proteger, o banco, as conversas, as tarefas, os arquivos e os dados do motor de IA passam a ficar cifrados com a sua senha.">
+    <Card busy={busy} title="Proteger o Ergon" sub="Esta instalação foi criada antes da criptografia. Ao proteger, o banco, as conversas, as tarefas, os arquivos e os dados da equipe de IA passam a ficar cifrados com a sua senha.">
       <form onSubmit={async (e) => {
         e.preventDefault(); setErr(null);
         if (needNew && f.next !== f.confirm) return setErr('As senhas novas não são iguais.');

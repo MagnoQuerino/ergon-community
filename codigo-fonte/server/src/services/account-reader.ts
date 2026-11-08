@@ -131,7 +131,8 @@ export class AccountReader {
     // avisos que o usuário precisa ver (e o briefing repassa)
     for (const r of out.reads) {
       if (r.status === 'expirada') out.warnings.push(`${ACCOUNT_LABEL[r.account]}: a autorização venceu — entre de novo em Conexões › ${ACCOUNT_LABEL[r.account]}.`);
-      else if (r.status === 'sem_permissao') out.warnings.push(`${ACCOUNT_LABEL[r.account]}: sem permissão para ler ${r.what === 'email' ? 'e-mail' : r.what} (autorize em Conexões).`);
+      // na Microsoft, a leitura numa empresa costuma precisar do administrador (consentimento em etapas): "autorize de novo" ali não resolve
+      else if (r.status === 'sem_permissao') out.warnings.push(`${ACCOUNT_LABEL[r.account]}: sem permissão para ler ${r.what === 'email' ? 'e-mail' : r.what} (${r.account === 'microsoft' ? 'em Conexões › Microsoft 365: "Liberar leitura" ou, numa empresa, "Pedir ao administrador"' : 'autorize em Conexões'}).`);
       else if (r.status === 'erro') out.warnings.push(`${ACCOUNT_LABEL[r.account]}: não consegui ler ${r.what === 'email' ? 'o e-mail' : r.what === 'agenda' ? 'a agenda' : 'as tarefas'} agora (${clip(r.detail ?? 'erro', 80)}).`);
       else if (r.truncated) out.warnings.push(`${ACCOUNT_LABEL[r.account]}: ${r.what === 'email' ? 'e-mails' : r.what === 'agenda' ? 'agenda' : 'tarefas'} lidos em parte — havia mais do que o limite de leitura (${r.count} considerados).`);
     }

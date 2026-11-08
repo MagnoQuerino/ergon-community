@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { id, now } from '../src/lib/util.ts';
-import { CHARACTERS, TOOLS, routeDemand, upgradeDemoTeam } from '../src/services/characters.ts';
+import { CHARACTERS, TOOLS, routeDemand, setPlatformToolsets, setRenovacaoFalhou, toolStatus, upgradeDemoTeam } from '../src/services/characters.ts';
 import { parseVerdict } from '../src/services/review.ts';
 import { instructionsFor } from '../src/services/runs.ts';
 import { createWorkspace } from '../src/services/seed.ts';
@@ -155,5 +155,33 @@ describe('equipe de demonstração antiga vira a equipe de personagens', () => {
     assert.ok(h.db.get("SELECT 1 AS x FROM audit_events WHERE workspace_id = ? AND action = 'team.upgrade'", ws.workspaceId));
     const r2 = upgradeDemoTeam(h.db, null, ws.workspaceId, 6);
     assert.equal(r2.renamed.length + r2.added.length + r2.moved.length, 0, 'idempotente');
+  });
+});
+
+describe('estado das Conexões no motor', () => {
+  const contas = (scope: string, conectada: boolean) => toolStatus(TOOLS.contas, { scope, contas: conectada });
+  test('com conta conectada e um motor que ainda não tem o conjunto: "atualizando" (nada a ligar), não "desligada"', () => {
+    setPlatformToolsets(['todo'], 'motor-velho', ['todo', 'web']);
+    assert.equal(contas('motor-velho', true).status, 'atualizando');
+    assert.match(contas('motor-velho', true).note, /sendo atualizadas neste computador/);
+    assert.equal(contas('motor-velho', false).status, 'desligada', 'sem conta conectada: o estado de sempre');
+  });
+  test('o motor tem o conjunto: desligado pela pessoa é "desligada"; ligado é "disponível"; motor ainda não lido não vira "atualizando"', () => {
+    setPlatformToolsets(['todo'], 'motor-novo', ['todo', 'ergon_conexoes']);
+    assert.equal(contas('motor-novo', true).status, 'desligada');
+    setPlatformToolsets(['todo', 'ergon_conexoes'], 'motor-novo', ['todo', 'ergon_conexoes']);
+    assert.equal(contas('motor-novo', true).status, 'disponível');
+    assert.equal(contas('motor-nunca-lido', true).status, 'desligada');
+  });
+  test('a renovação voltou atrás: nada de "voltam sozinhas"; o motivo verdadeiro (até a próxima versão)', () => {
+    setPlatformToolsets(['todo'], 'motor-voltou', ['todo', 'web']);
+    setRenovacaoFalhou((s) => s === 'motor-voltou');
+    try {
+      const t = contas('motor-voltou', true);
+      assert.notEqual(t.status, 'atualizando');
+      assert.doesNotMatch(t.note, /voltam sozinhas/);
+      assert.match(t.note, /as Conexões voltam com a próxima versão do Ergon/);
+      assert.equal(contas('motor-velho', true).status, 'atualizando', 'outro motor, que ainda vai renovar, segue "atualizando"');
+    } finally { setRenovacaoFalhou(() => false); }
   });
 });

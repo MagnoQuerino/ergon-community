@@ -22,14 +22,29 @@ jobs:
         run: docker build --target test .
       - name: Imagem do motor (cofre + plugin)
         run: docker build -t ergon-hermes:ci ./hermes
-      - name: Trava de ferramentas por agente (plugin, com o catálogo de ferramentas do motor de verdade)
-        run: >-
-          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python -e HERMES_HOME=/tmp/h
-          -v "$PWD/hermes/plugins:/p:ro" -v "$PWD/hermes/tests:/t:ro" ergon-hermes:ci /t/test_ergon_bridge_gate.py
-      - name: Treinar no motor (competência em espera, aplicada privada, trava por agente e por treinamento)
-        run: >-
-          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python -e HERMES_HOME=/tmp/h
-          -v "$PWD/hermes/plugins:/p:ro" -v "$PWD/hermes/tests:/t:ro" ergon-hermes:ci /t/test_ergon_bridge_treinar.py
+      # todos os de hermes/tests, no Hermes de verdade da imagem: trava por agente, Treinar, Conexões (ferramentas e o
+      # modelo chamando), configuração do cofre e conformidade com os nomes do Hermes fixado. Convenção: /p é o plugin,
+      # /t os testes, /f os fixtures do servidor (server/test/fixtures, também em ERGON_FIXTURES) e /v o cofre
+      # (hermes/vault).
+      - name: Testes do motor dentro da imagem (com o plugin do código)
+        run: |
+          falhas=0
+          for t in hermes/tests/test_*.py; do
+            echo "::group::$t"
+            docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python -e HERMES_HOME=/tmp/h -e ERGON_FIXTURES=/f \
+              -v "$PWD/hermes/plugins:/p:ro" -v "$PWD/hermes/tests:/t:ro" -v "$PWD/server/test/fixtures:/f:ro" -v "$PWD/hermes/vault:/v:ro" \
+              ergon-hermes:ci "/t/${t##*/}" || { echo "::error::$t falhou"; falhas=$((falhas + 1)); }
+            echo "::endgroup::"
+          done
+          [ "$falhas" = 0 ]
+      - name: Conexões com o plugin de DENTRO da imagem (o que vai para as pessoas, não o do código)
+        run: |
+          id=$(docker create ergon-hermes:ci); docker cp "$id:/opt/ergon/plugins" "$RUNNER_TEMP/plugins-da-imagem"; docker rm "$id" >/dev/null
+          n=$(grep -c conexoes_executar "$RUNNER_TEMP/plugins-da-imagem/ergon_bridge/__init__.py" || true)
+          [ "${n:-0}" -ge 1 ] || { echo "::error::o plugin da imagem não tem as Conexões (conexoes_executar: ${n:-0})"; exit 1; }
+          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python -e HERMES_HOME=/tmp/h -e ERGON_FIXTURES=/f \
+            -v "$RUNNER_TEMP/plugins-da-imagem:/p:ro" -v "$PWD/hermes/tests:/t:ro" -v "$PWD/server/test/fixtures:/f:ro" -v "$PWD/hermes/vault:/v:ro" \
+            ergon-hermes:ci /t/test_ergon_bridge_conexoes_modelo.py
       - name: Cofre do motor sob gravação em paralelo (cofre antigo aberto pela imagem nova, sem erros, isolado)
         run: bash hermes/tests/cofre-paralelo.sh ergon-hermes:ci
 
@@ -48,7 +63,12 @@ jobs:
       - name: Arquivos da marca em dia com a geometria
         run: node scripts/brand-assets.mjs --check
       - name: Lançador do Linux e do macOS (sintaxe)
-        run: bash -n ergon.sh
+        run: |
+          bash -n ergon.sh
+          # a homologação mora em community/publico/scripts aqui e em scripts/ no repositório público
+          for s in scripts/teste-lancador.sh scripts/distribuicao/*.sh $(ls community/publico/scripts/*.sh scripts/homologar-pacote.sh 2>/dev/null); do bash -n "$s"; done
+      - name: Limpeza do lançador e diagnóstico do motor (Podman simulado)
+        run: bash scripts/teste-lancador.sh
 
   lancador-windows:
     runs-on: windows-2022

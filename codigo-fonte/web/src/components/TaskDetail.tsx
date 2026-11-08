@@ -5,6 +5,7 @@ import { openConversation } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
 import { ORIGIN_LABEL, SOURCE_LABEL, stripControl, type Column, type Need } from '../lib/types.ts';
 import { DISPLAY_BADGE, DISPLAY_LABEL, displayOf } from '../lib/work.ts';
+import { motivoDaFalha } from '../lib/textos-tela.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
 import { DueChip } from './Board.tsx';
@@ -313,6 +314,10 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
               {need === 'approval' ? (external ? 'Preparado: é algo a fazer fora do Ergon. Confirme quando estiver feito.' : 'Pronto do lado da equipe: falta a sua aprovação.')
                 : `Não passou na conferência: ${work?.result?.justification ?? ''} Aprove assim mesmo ou devolva com uma instrução.`}
             </p>
+          )}
+          {/* card em falha (a entrega honesta diz o que não foi feito): o motivo à vista, sem abrir os detalhes técnicos */}
+          {mode === 'team' && need === 'retry' && (
+            <p className="ask-box ask-box--line" role="status">{motivoDaFalha(work?.result?.justification)}</p>
           )}
           {/* ação numa conta pedida neste card: o mesmo cartão da conversa e de "aguardando você"; a decisão volta ao card */}
           {(d.data.conexoes ?? []).map((c) => (

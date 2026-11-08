@@ -84,6 +84,26 @@ da mesma pessoa (`integrations.origem_workspace_id`).
 **Para acrescentar um aplicativo:** escreva a definição por dados em `conexoes/conectores/` (exemplo: `discord.ts`) e ponha em
 `conectores/index.ts`. Ele aparece em Conexões, os agentes passam a usá-lo e o ajuste de cada ação vale sem mais nada.
 
+## Microsoft 365: etapas e administrador
+
+Detalhes em [MICROSOFT.md](MICROSOFT.md). Em resumo:
+
+- **A autorização vem em etapas** (`sso.ts`, `ESCOPOS_MICROSOFT`). Primeiro o que a política padrão da Microsoft deixa o próprio
+  usuário autorizar (enviar e-mail, criar arquivos e, em conta de trabalho, ver e mandar mensagens no Teams). Depois a leitura
+  (e-mail, agenda, arquivos, tarefas, contatos e o conteúdo das conversas), que numa empresa costuma precisar do administrador.
+  Por último, opcional, os canais do Teams, que sempre precisam dele. Ler pode precisar do administrador da empresa: a tela diz
+  isso antes, não depois.
+- **Falta de uma etapa só tira as ações dela.** A ação que precisa da leitura responde "precisa da aprovação do administrador da
+  empresa", com o link pronto do pedido, nunca "Autorizar de novo" (que não resolveria). Conta pessoal autoriza a leitura sozinha
+  e nunca vê o Teams.
+- **Pedir ao administrador:** a pessoa copia o link (escopos explícitos, o app, o endereço de volta registrado) e envia ela mesma.
+  A página final pode dar erro no computador de quem aprova: é esperado. Depois, "Já aprovaram? Conectar de novo".
+- **Conexão × conversar pelo Teams:** a conexão é o login da pessoa (a equipe age na conta dela, sob demanda, nunca vigiando o
+  Teams em laço). Conversar com o Aristóteles de dentro do Teams é outra coisa, que exige um bot no tenant da empresa, e ainda não
+  está disponível.
+- **Testar conexão** termina dizendo se a equipe consegue usar a conexão: o teste roda no servidor, e a equipe usa pelo motor
+  dela, que pode estar desligado para as Conexões ou sendo atualizado.
+
 ## Validar com uma conta real
 
 Nada disto rodou contra um serviço de verdade: as chamadas foram conferidas na documentação oficial e testadas com serviços

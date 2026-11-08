@@ -17,7 +17,13 @@ import type { Vault } from '../security/keys.ts';
 import { scrub } from '../lib/log.ts';
 import { BUILD, VERSION } from '../version.ts';
 import type { HermesClient } from './hermes.ts';
+import type { EspacoMotores, MotorSaude } from './motors.ts';
 import { machineDefault } from './concurrency.ts';
+import { BACKUPS_MANTER } from './backup.ts';
+import { decimal, paraTela } from '../lib/texto-tela.ts';
+
+/** O nome do componente da IA na Saúde (o id continua "motor": é dado, não aparece). */
+const EQUIPE = 'Equipe de IA';
 
 export type Saude = 'operacional' | 'limitado' | 'atencao' | 'indisponivel';
 export const SAUDE_LABEL: Record<Saude, string> = { operacional: 'Operacional', limitado: 'Operacional com limitações', atencao: 'Necessita atenção', indisponivel: 'Indisponível' };
@@ -25,12 +31,19 @@ const ORDER: Saude[] = ['operacional', 'limitado', 'atencao', 'indisponivel'];
 const worst = (a: Saude, b: Saude) => (ORDER.indexOf(a) >= ORDER.indexOf(b) ? a : b);
 
 export interface Componente { id: string; nome: string; estado: Saude; detalhe: string }
-export interface PainelSaude { estado: Saude; rotulo: string; resumo: string; componentes: Componente[]; geradoEm: string }
+/** espaco: um motor por pessoa (gerente de motores): o que a limpeza liberou e os cofres de contas que já não existem */
+export interface PainelSaude { estado: Saude; rotulo: string; resumo: string; componentes: Componente[]; geradoEm: string; espaco?: EspacoMotores | null }
 
 export interface HealthDeps {
   db: Db; cfg: Config; vault: Vault; hermes: HermesClient | null;
   executorMode: () => 'real' | 'simulated';
   motorVault: () => { state: string; lastError: string | null };
+  /** um motor por pessoa: o motor de quem olha (renovando, sem as Conexões, renovação que voltou atrás) */
+  motor?: () => MotorSaude | null;
+  /** o motor foi lido e não tem as Conexões (do cache das ferramentas; vale também com um motor só) */
+  semConexoes?: () => boolean;
+  /** espaço: só do cache (a tela nunca espera o gerente) */
+  espaco?: () => EspacoMotores | null;
   /** roda dentro de um contêiner? (padrão: procura /.dockerenv; os testes trocam) */
   inContainer?: () => boolean;
 }
@@ -58,7 +71,7 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
   try {
     const q = String(db.raw.pragma('quick_check', { simple: true }));
     const size = fs.existsSync(cfg.dbPath) ? fs.statSync(cfg.dbPath).size : 0;
-    c.push({ id: 'banco', nome: 'Banco de dados', estado: q === 'ok' ? 'operacional' : 'indisponivel', detalhe: q === 'ok' ? `íntegro · ${(size / 1024 / 1024).toFixed(1)} MB` : `a conferência acusou: ${scrub(q, 120)}` });
+    c.push({ id: 'banco', nome: 'Banco de dados', estado: q === 'ok' ? 'operacional' : 'indisponivel', detalhe: q === 'ok' ? `íntegro · ${decimal(size / 1024 / 1024)} MB` : `a conferência acusou: ${scrub(q, 120)}` });
   } catch (e) { c.push({ id: 'banco', nome: 'Banco de dados', estado: 'indisponivel', detalhe: scrub((e as Error).message) }); }
 
   // cofre: protegido e aberto
@@ -66,18 +79,34 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
   c.push({ id: 'cofre', nome: 'Proteção dos dados', estado: vs === 'open' ? 'operacional' : vs === 'unprotected' ? 'atencao' : 'indisponivel',
     detalhe: vs === 'open' ? (vault.openAccess() ? 'cifrado · abre sozinho ao reiniciar (sem trancamento)' : 'cifrado · pede a senha ao reiniciar') : vs === 'unprotected' ? 'ainda sem proteção: proteja em Configurações › Segurança' : 'trancado' });
 
-  // motor de IA
+  // motor de IA (na tela, "Equipe de IA": o id fica "motor", é dado)
   if (d.executorMode() === 'simulated' || !d.hermes) {
-    c.push({ id: 'motor', nome: 'Motor de IA', estado: 'limitado', detalhe: 'modo de simulação: os agentes não usam IA (as conferências e rotinas sem IA funcionam)' });
+    c.push({ id: 'motor', nome: EQUIPE, estado: 'limitado', detalhe: 'modo de simulação: os agentes não usam IA (as conferências e rotinas sem IA funcionam)' });
   } else {
-    const h = await d.hermes.health().catch((e: Error) => ({ ok: false, detail: e.message }));
-    const mv = d.motorVault();
-    // com o cofre do motor, o motor só sobe depois de o cofre abrir: se ele responde, o cofre está aberto. O estado do
-    // guardião do cofre só explica o motor fora do ar (depois de reiniciar só o Ergon, o receptor do cofre já não
-    // responde e o guardião fica em "desligado" — não é defeito)
-    const why = !cfg.hermesVaultUrl ? '' : mv.state === 'aguardando' ? 'abrindo o cofre dele (a primeira vez pode levar minutos)' : mv.state === 'erro' ? `o cofre dele não abriu${mv.lastError ? `: ${scrub(mv.lastError, 100)}` : ''}` : '';
-    c.push({ id: 'motor', nome: 'Motor de IA', estado: h.ok ? 'operacional' : 'indisponivel',
-      detalhe: h.ok ? (cfg.hermesVaultUrl ? 'no ar · cofre dele aberto' : 'no ar') : why || `não responde (${scrub(h.detail, 100)})` });
+    const ms = d.motor?.() ?? null;
+    if (ms?.estado === 'renovando') {
+      // versão nova do motor a caminho: o que já estava no motor termina, os pedidos novos esperam (sem contar tempo)
+      c.push({ id: 'motor', nome: EQUIPE, estado: 'limitado', detalhe: `Atualizando a equipe para a versão ${ms.versao}: os pedidos novos esperam e seguem sozinhos quando terminar` });
+    } else {
+      const h = await d.hermes.health().catch((e: Error) => ({ ok: false, detail: e.message }));
+      const mv = d.motorVault();
+      // com o cofre do motor, o motor só sobe depois de o cofre abrir: se ele responde, o cofre está aberto. O estado do
+      // guardião do cofre só explica o motor fora do ar (depois de reiniciar só o Ergon, o receptor do cofre já não
+      // responde e o guardião fica em "desligado" — não é defeito)
+      // o erro técnico (rede, gerente, cofre) fica no registro: na tela, só o que já é para a pessoa
+      const erroCofre = paraTela(scrub(mv.lastError, 100));
+      const why = !cfg.hermesVaultUrl ? '' : mv.state === 'aguardando' ? 'abrindo o cofre da equipe (a primeira vez pode levar minutos)' : mv.state === 'erro' ? `o cofre da equipe não abriu${erroCofre ? `: ${erroCofre}` : ''}` : '';
+      const semResposta = paraTela(scrub(h.detail, 100));
+      let estado: Saude = h.ok ? 'operacional' : 'indisponivel';
+      let detalhe = h.ok ? (cfg.hermesVaultUrl ? 'no ar · cofre aberto' : 'no ar') : why || `fora do ar agora${semResposta ? ` (${semResposta})` : ''}`;
+      // a tela nunca diz "operacional" quando a equipe não consegue usar as contas conectadas
+      if (h.ok && (ms?.semConexoes || d.semConexoes?.())) { estado = 'limitado'; detalhe += ' · as Conexões não estão nesta versão da equipe: os agentes ainda não conseguem usar as contas conectadas'; }
+      // depois de voltar atrás, nada tenta de novo nesta versão (o gerente trava a versão recusada): "até a próxima versão"
+      if (ms?.falha) { estado = worst(estado, 'atencao'); detalhe += ` · a atualização da equipe para a versão ${ms.versao} não deu certo (${paraTela(scrub(ms.falha, 120), 'a versão nova não passou na conferência')}); a equipe segue na versão anterior até a próxima versão do Ergon`; }
+      // a versão nova ainda não chegou (ou o motor não parou): o de antes funciona, e o sistema tenta de novo sozinho
+      else if (ms?.adiada) { estado = worst(estado, 'limitado'); detalhe += ` · atualização da equipe para a versão ${ms.versao} pendente: ${paraTela(scrub(ms.adiada, 160), 'a versão nova ainda não pôde entrar')}; a equipe segue na versão anterior, e o sistema tenta de novo sozinho`; }
+      c.push({ id: 'motor', nome: EQUIPE, estado, detalhe });
+    }
   }
 
   // execuções: presas e falhas do último dia
@@ -112,22 +141,30 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
   const b = lastBackup(cfg);
   const age = b ? Date.now() - b.at : Infinity;
   c.push({ id: 'backup', nome: 'Backup', estado: !b ? 'atencao' : age > 7 * DAY ? 'limitado' : 'operacional',
-    detalhe: !b ? 'nenhum backup ainda' : `último ${age < 3_600_000 ? 'há menos de 1 h' : age < DAY ? `há ${Math.round(age / 3_600_000)} h` : `há ${Math.round(age / DAY)} dia(s)`}${/\.sqlite$/.test(b.name) ? ' (formato antigo: só o banco)' : ''}` });
+    detalhe: !b ? 'nenhum backup ainda' : `último ${age < 3_600_000 ? 'há menos de 1 h' : age < DAY ? `há ${Math.round(age / 3_600_000)} h` : `há ${Math.round(age / DAY)} dia(s)`}${/\.sqlite$/.test(b.name) ? ' (formato antigo: só o banco)' : ''}; ficam os ${BACKUPS_MANTER} mais recentes e os mais antigos são apagados sozinhos` });
 
   // disco. Dentro do Docker a medida é a do disco virtual do Docker, que cresce sobre o disco do computador e pode
   // dizer muito mais do que ele tem livre (achado na instalação real: 933 GB "livres" com 23 GB no C:) — dito no texto
   try {
     const st = fs.statfsSync(cfg.dataDir);
     const free = Number(st.bavail) * Number(st.bsize);
-    const gb = `${(free / 1024 ** 3).toFixed(1)} GB livres`;
+    const gb = `${decimal(free / 1024 ** 3)} GB livres`;
     c.push({ id: 'disco', nome: 'Espaço em disco', estado: free < 1024 ** 3 ? 'atencao' : free < 5 * 1024 ** 3 ? 'limitado' : 'operacional',
-      detalhe: (d.inContainer ?? inDocker)() ? `${gb} no disco virtual do Docker; o disco do computador pode ter menos (confira no Windows)` : gb });
+      detalhe: (d.inContainer ?? inDocker)() ? `${gb} no ambiente do Ergon; o disco do computador pode ter menos (confira no Windows)` : gb });
   } catch { /* sem como medir aqui */ }
+
+  // cofres de contas que já não existem neste computador (o gerente viu sem dono): aviso, e a tela oferece apagar
+  const espaco = d.espaco?.() ?? null;
+  if (espaco?.volumes.length) {
+    const quem = [...new Set(espaco.volumes.map((v) => v.conta))].slice(0, 3).join('; ');
+    c.push({ id: 'cofres', nome: 'Cofres de contas removidas', estado: 'limitado',
+      detalhe: `${plural(espaco.volumes.length, 'cofre guardado', 'cofres guardados')} (${quem}): ocupam espaço neste computador; dá para apagar, sem volta` });
+  }
 
   let estado: Saude = 'operacional';
   for (const x of c) estado = worst(estado, x.id === 'motor' && x.estado === 'indisponivel' ? 'atencao' : x.estado);
   const problemas = c.filter((x) => x.estado !== 'operacional');
-  return { estado, rotulo: SAUDE_LABEL[estado], resumo: problemas.length ? problemas.map((x) => `${x.nome}: ${x.detalhe}`).join(' · ') : 'tudo funcionando', componentes: c, geradoEm: new Date().toISOString() };
+  return { estado, rotulo: SAUDE_LABEL[estado], resumo: problemas.length ? problemas.map((x) => `${x.nome}: ${x.detalhe}`).join(' · ') : 'tudo funcionando', componentes: c, geradoEm: new Date().toISOString(), espaco };
 }
 
 const pct = (xs: number[], p: number) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor((s.length - 1) * p))]; };
@@ -149,6 +186,8 @@ export async function diagnostics(d: HealthDeps): Promise<Record<string, unknown
     } catch { /* conferência antiga ou ilegível: fica de fora */ }
   }
   const mem = process.memoryUsage();
+  // o nome de cada cofre traz o identificador da conta: no pacote vai só a contagem
+  const { espaco, ...saude } = await healthPanel(d);
   return {
     formato: 1, geradoEm: new Date().toISOString(),
     aviso: 'Pacote de diagnóstico do Ergon: versões, contagens, tempos, estados e erros limpos. Sem títulos, mensagens, nomes, arquivos, contas nem segredos.',
@@ -160,7 +199,7 @@ export async function diagnostics(d: HealthDeps): Promise<Record<string, unknown
     },
     memoria: { rssMB: Math.round(mem.rss / 1024 / 1024), heapMB: Math.round(mem.heapUsed / 1024 / 1024) },
     banco: { migracoes: db.all<{ name: string }>('SELECT name FROM schema_migrations ORDER BY name').map((r) => r.name), cifrado: Db.isEncryptedFile(cfg.dbPath) },
-    saude: await healthPanel(d),
+    saude, espaco: espaco ? { cofresSemDono: espaco.volumes.length, ultimaLimpeza: espaco.ultima } : null,
     contagens: {
       usuarios: n('SELECT count(*) AS n FROM users'), agentes: n('SELECT count(*) AS n FROM agents'),
       tarefasAbertas: n('SELECT count(*) AS n FROM tasks WHERE completed = 0 AND archived = 0'), tarefasConcluidas: n('SELECT count(*) AS n FROM tasks WHERE completed = 1'),
