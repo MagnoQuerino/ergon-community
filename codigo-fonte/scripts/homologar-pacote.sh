@@ -180,7 +180,9 @@ if [[ -n "$VA" ]]; then
   n="$(no_cofre "$MOT" grep -c conexoes_executar /opt/data/plugins/ergon_bridge/__init__.py)"
   [[ "${n:-0}" -ge 1 ]] && ok "Conexões no plugin do cofre" "conexoes_executar ${n}x em /opt/data/plugins" || falha "Conexões no plugin do cofre" "conexoes_executar ${n:-0}x em /opt/data/plugins"
   read -r MARCA API <<<"$(no_cofre "$MOT" /opt/hermes/.venv/bin/python -c "$PY_MARCA")"
-  [[ "${MARCA:-0}" =~ ^[0-9]+$ && "$MARCA" -ge 2 ]] && ok "configuração do cofre migrada" "marca $MARCA" || falha "configuração do cofre migrada" "marca ${MARCA:-ausente} (esperado 2 ou mais)"
+  [[ "${MARCA:-0}" =~ ^[0-9]+$ && "$MARCA" -ge 2 ]] && ok "configuração do cofre migrada" "marca $MARCA" || { falha "configuração do cofre migrada" "marca ${MARCA:-ausente} (esperado 2 ou mais)"
+    no_cofre "$MOT" sh -c 'ls -la /opt/data/.ergon-config /opt/data/.ergon-migracoes 2>&1; cat /opt/data/.ergon-migracoes 2>/dev/null; echo' 2>&1 | sed 's/^/      /'
+    "$MC" logs "$MOT" 2>&1 | grep -iE "migra|configura|marca|travas|enforce|erro" | tail -20 | sed 's/^/      /'; }
   [[ ",${API:-}," == *,ergon_conexoes,* ]] && ok "Conexões ligadas na API do motor" "${API}" || falha "Conexões ligadas na API do motor" "ferramentas: ${API:-nenhuma}"
   VOL_V="$("$MC" volume ls -q | sort | tr '\n' ' ')"
   [[ "$VOL_V" == "$VOL_A" ]] && ok "volumes com os mesmos nomes" "$VOL_V" || falha "volumes com os mesmos nomes" "antes: $VOL_A; depois: $VOL_V"

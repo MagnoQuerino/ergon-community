@@ -39,7 +39,8 @@ jobs:
         run: REPO=${{ github.repository }} bash scripts/homologar-pacote.sh
 
   desktop-linux:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # .deb e AppImage só saem nas versões estáveis: numa pré-versão não há pacote novo do desktop Linux para conferir
+    if: (github.event_name == 'workflow_dispatch' && !contains(inputs.tag, '-rc')) || (github.event.workflow_run.conclusion == 'success' && !contains(github.event.workflow_run.head_branch, '-rc'))
     strategy:
       fail-fast: false
       matrix:
@@ -162,7 +163,9 @@ jobs:
           $seg = [int]((Get-Date) - $t0).TotalSeconds
           if (-not $ok) { throw "a IA da conta nova não ficou disponível em 10 min: $($estados -join ' → ')" }
           Write-Host "ok    IA da conta nova disponível em $seg s (botões de conectar liberados)"
-          if (@($st.byok).Count -ne 3) { throw "chave própria: esperava 3 provedores, veio $(@($st.byok).Count)" }
+          # o catálogo inteiro de provedores do motor; os três principais precisam estar nele
+          $ids = @($st.byok | ForEach-Object { $_.id })
+          foreach ($p in 'openrouter', 'anthropic', 'gemini') { if ($ids -notcontains $p) { throw "chave própria: falta $p no catálogo ($($ids -join ', '))" } }
           Write-Host 'ok    chave própria (OpenRouter, Anthropic, Gemini) oferecida pelo motor'
           $bk = Invoke-RestMethod "$B/api/me" -WebSession $ws
           $r = Invoke-WebRequest "$B/api/ai/byok/openrouter" -Method Put -Body (@{ key = 'sk-or-v1-' + ('0' * 64) } | ConvertTo-Json) -ContentType 'application/json' -Headers @{ Origin = $B; 'x-csrf-token' = $bk.csrf } -WebSession $ws -SkipHttpErrorCheck
