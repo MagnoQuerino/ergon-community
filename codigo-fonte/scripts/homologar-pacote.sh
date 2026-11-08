@@ -179,7 +179,12 @@ if [[ -n "$VA" ]]; then
   MOT="$(motor_id)"
   n="$(no_cofre "$MOT" grep -c conexoes_executar /opt/data/plugins/ergon_bridge/__init__.py)"
   [[ "${n:-0}" -ge 1 ]] && ok "Conexões no plugin do cofre" "conexoes_executar ${n}x em /opt/data/plugins" || falha "Conexões no plugin do cofre" "conexoes_executar ${n:-0}x em /opt/data/plugins"
-  read -r MARCA API <<<"$(no_cofre "$MOT" /opt/hermes/.venv/bin/python -c "$PY_MARCA")"
+  # a cópia do plugin vem antes das migrações (cada uma roda comandos do motor, alguns segundos): espera a configuração
+  # terminar, até 3 min, antes de conferir a marca
+  for _ in $(seq 1 60); do
+    read -r MARCA API <<<"$(no_cofre "$MOT" /opt/hermes/.venv/bin/python -c "$PY_MARCA")"
+    [[ "${MARCA:-0}" =~ ^[0-9]+$ && "$MARCA" -ge 2 ]] && break; sleep 3
+  done
   [[ "${MARCA:-0}" =~ ^[0-9]+$ && "$MARCA" -ge 2 ]] && ok "configuração do cofre migrada" "marca $MARCA" || { falha "configuração do cofre migrada" "marca ${MARCA:-ausente} (esperado 2 ou mais)"
     no_cofre "$MOT" sh -c 'ls -la /opt/data/.ergon-config /opt/data/.ergon-migracoes 2>&1; cat /opt/data/.ergon-migracoes 2>/dev/null; echo' 2>&1 | sed 's/^/      /'
     "$MC" logs "$MOT" 2>&1 | grep -iE "migra|configura|marca|travas|enforce|erro" | tail -20 | sed 's/^/      /'; }
