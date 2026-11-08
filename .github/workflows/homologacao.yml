@@ -32,6 +32,10 @@ jobs:
       - name: Sem login no registro (as imagens precisam ser públicas)
         run: podman logout ghcr.io || true; docker logout ghcr.io || true
       - name: Pacote publicado, instalado com o lançador (Podman; uma versão antiga do lançador usa o Docker)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # a versão que acabou de sair (etiqueta do lançamento, inclusive pré-versão) ou a pedida; a de partida é a anterior a ela
+          VERSAO_ALVO: ${{ github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v') && github.event.workflow_run.head_branch || inputs.tag }}
         run: REPO=${{ github.repository }} bash scripts/homologar-pacote.sh
 
   desktop-linux:

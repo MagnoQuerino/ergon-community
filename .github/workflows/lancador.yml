@@ -36,7 +36,9 @@ jobs:
       - name: Sem login no registro
         run: podman logout ghcr.io || true
       - name: Ciclo completo com o Podman de verdade
-        run: REPO=${{ github.repository }} PACOTE_DIR=pacote bash scripts/homologar-pacote.sh
+        # o lançador deste commit com as imagens da versão estável publicada; a subida entre versões (com a renovação da
+        # equipe) é conferida na Homologação, depois do lançamento, com as imagens da versão nova
+        run: REPO=${{ github.repository }} PACOTE_DIR=pacote PACOTE_ANTIGO=nenhum bash scripts/homologar-pacote.sh
 
   windows:
     runs-on: windows-2022

@@ -43,7 +43,9 @@ SRV=''; trap '[[ -n "$SRV" ]] && kill "$SRV" 2>/dev/null' EXIT
 if [[ -n "${PACOTE_DIR:-}" ]]; then
   cp -r "$PACOTE_DIR" "$W/pacote"; V="$(cat "$W/pacote/VERSAO")"; ok "pacote do repositório" "versão $V"
 else
-  M="$(curl -fsSL "https://github.com/$REPO/releases/latest/download/latest.json")" || { falha "latest.json" "não baixou"; exit 1; }
+  # VERSAO_ALVO (ex.: v1.1.0-rc.24): a versão daquele lançamento, inclusive pré-versão; vazio = a estável mais recente
+  if [[ -n "${VERSAO_ALVO:-}" ]]; then M="$(curl -fsSL "https://github.com/$REPO/releases/download/${VERSAO_ALVO}/latest.json")" || { falha "latest.json" "não baixou ($VERSAO_ALVO)"; exit 1; }
+  else M="$(curl -fsSL "https://github.com/$REPO/releases/latest/download/latest.json")" || { falha "latest.json" "não baixou"; exit 1; }; fi
   V="$(jq -r .version <<<"$M")"; URL="$(jq -r .bundle <<<"$M")"; SHA="$(jq -r .sha256 <<<"$M")"
   ok "latest.json" "versão $V"
   if curl -fsSL -o ergon.zip "$URL" && echo "$SHA  ergon.zip" | sha256sum -c - >/dev/null 2>&1; then ok "pacote baixado e conferido" "SHA-256 igual ao do latest.json"; else falha "pacote" "download ou SHA-256"; exit 1; fi
