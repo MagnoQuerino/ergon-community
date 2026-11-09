@@ -100,6 +100,16 @@ export function openArtifact(db: Db, filesDir: string, workspaceId: string, arti
   return { ...a, data: db.fieldCipher ? db.fieldCipher.openBytes(raw, a.storage_key) : raw };
 }
 
+/** O mesmo que openArtifact, lendo o disco sem travar o servidor (para quem lê muitos arquivos seguidos). */
+export async function openArtifactAsync(db: Db, filesDir: string, workspaceId: string, artifactId: string) {
+  const a = db.get<{ id: string; filename: string; mime: string; size: number; storage_key: string }>(
+    'SELECT id, filename, mime, size, storage_key FROM artifacts WHERE id = ? AND workspace_id = ?', artifactId, workspaceId);
+  if (!a) throw notFound('arquivo');
+  let raw: Buffer;
+  try { raw = await fs.promises.readFile(storagePath(filesDir, workspaceId, a.storage_key)); } catch { throw notFound('arquivo'); }
+  return { ...a, data: db.fieldCipher ? db.fieldCipher.openBytes(raw, a.storage_key) : raw };
+}
+
 /** Remove um arquivo que o próprio Ergon acabou de gravar e não chegou a entregar (operação que falhou no meio). */
 export function removeArtifact(db: Db, filesDir: string, workspaceId: string, artifactId: string): void {
   const art = db.get<{ storage_key: string }>('SELECT storage_key FROM artifacts WHERE id = ? AND workspace_id = ?', artifactId, workspaceId);

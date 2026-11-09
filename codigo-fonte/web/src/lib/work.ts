@@ -17,6 +17,16 @@ export const DISPLAY_LABEL: Record<Display, string> = {
   fila: 'Na fila', andamento: 'Em andamento', voce: 'Precisa de você', problema: 'Com problema', concluida: 'Concluída',
 };
 
+/**
+ * O selo do card no quadro, com as mesmas palavras da situação nos detalhes da tarefa (server/src/services/resumo-tarefa.ts):
+ * quem bate o olho no quadro e abre o card lê a mesma coisa. Os grupos acima (DISPLAY_LABEL) continuam nos filtros.
+ */
+export const SITUACAO_LABEL: Record<WorkState, string> = {
+  solicitada: 'Na fila', processamento: 'Trabalhando', resultado: 'Trabalhando', validacao: 'Trabalhando', concluida: 'Feito',
+  aguardando_info: 'Precisa de você', aguardando_aprovacao: 'Esperando sua aprovação', revisao: 'Precisa da sua decisão', falha: 'Não foi feito',
+};
+export const situacaoDe = (s: string | null | undefined): string => SITUACAO_LABEL[(s ?? 'solicitada') as WorkState] ?? 'Na fila';
+
 /** Cor do selo: o que pede você (aviso), o que deu errado (erro), o que está pronto (ok). */
 export const DISPLAY_BADGE: Record<Display, string> = { fila: '', andamento: 'badge--warn', voce: 'badge--rec', problema: 'badge--err', concluida: 'badge--ok' };
 

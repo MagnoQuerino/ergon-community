@@ -1,5 +1,5 @@
-// Asaas e Omie, sem rede e com credenciais de mentira: somente leitura, método, endereço, cabeçalho e corpo exatos, listas,
-// paginação, erros e a credencial nunca aparecendo em resumo nem em texto.
+// Asaas e Omie, sem rede e com credenciais de mentira: leitura e a escrita que não move dinheiro, método, endereço, cabeçalho
+// e corpo exatos, listas, paginação, erros e a credencial nunca aparecendo em resumo nem em texto.
 import assert from 'node:assert/strict';
 import { after, afterEach, before, describe, test } from 'node:test';
 import { ASAAS } from '../src/services/conexoes/conectores/asaas.ts';
@@ -43,15 +43,16 @@ describe('Asaas', () => {
     assert.ok(chave.length >= 16);
     assert.match(ASAAS.ajuda.passos, /Gerar chave de API/); assert.match(ASAAS.ajuda.passos, /não tem chave só de leitura/); assert.match(ASAAS.ajuda.passos, /controle total/);
   });
-  test('somente leitura: todas as ações são ler, GET, sem corpo e passam kind read', async () => {
-    assert.deepEqual(ASAAS.acoes.map((a) => a.id), ['asaas.cobrancas', 'asaas.cobranca', 'asaas.clientes', 'asaas.cliente', 'asaas.saldo']);
+  test('as leituras: risco ler, GET, sem corpo e passam kind read', async () => {
+    const leituras = ASAAS.acoes.filter((a) => a.risco === 'ler');
+    assert.deepEqual(leituras.map((a) => a.id), ['asaas.cobrancas', 'asaas.cobranca', 'asaas.clientes', 'asaas.cliente', 'asaas.saldo']);
     const kinds: unknown[] = [];
     const espiao: Http = (u, init) => { kinds.push(init?.kind); return ctx.http(u, init); };
-    for (const d of ASAAS.acoes) {
+    for (const d of leituras) {
       assert.equal(d.risco, 'ler', d.id); assert.equal(d.metodo, 'GET', d.id); assert.equal(d.corpo, undefined, d.id);
       await acaoDe(d).run({ ...ctx, http: espiao }, { id: 'x_1' });
     }
-    assert.deepEqual(kinds, ASAAS.acoes.map(() => 'read'));
+    assert.deepEqual(kinds, leituras.map(() => 'read'));
     assert.ok(calls.every((c) => c.method === 'GET' && c.body === null));
   });
   test('confere a chave com a chamada real, no cabeçalho access_token, e dá o nome da conta', async () => {
@@ -158,15 +159,16 @@ describe('Omie', () => {
     assert.ok(app_secret.length >= 16);
     assert.match(OMIE.ajuda.passos, /Gerar nova chave de acesso/); assert.match(OMIE.ajuda.passos, /administrador/);
   });
-  test('somente leitura: toda chamada é Listar, Pesquisar ou Consultar, risco ler, sem repetir sozinha', async () => {
+  test('as leituras: toda chamada é Listar, Pesquisar ou Consultar, risco ler, sem repetir sozinha', async () => {
     const kinds: unknown[] = [];
     const espiao: Http = (u, init) => { kinds.push(init?.kind); return ctx.http(u, init); };
-    for (const d of OMIE.acoes) {
-      assert.equal(d.risco, 'ler', d.id); assert.equal(d.metodo, 'POST', d.id);
+    const leituras = OMIE.acoes.filter((a) => a.risco === 'ler');
+    for (const d of leituras) {
+      assert.equal(d.metodo, 'POST', d.id);
       await acaoDe(d).run({ ...ctx, http: espiao }, { id: 1 });
     }
-    assert.deepEqual(kinds, OMIE.acoes.map(() => 'write'), 'só para não repetir: a Omie bloqueia depois de poucos pedidos errados; as ações continuam todas de leitura');
-    assert.deepEqual(calls.map((c) => c.body.call), ['ListarContasReceber', 'ConsultarContaReceber', 'ListarContasPagar', 'ConsultarContaPagar', 'PesquisarLancamentos', 'ListarClientes', 'ConsultarCliente']);
+    assert.deepEqual(kinds, leituras.map(() => 'write'), 'só para não repetir: a Omie bloqueia depois de poucos pedidos errados; as ações continuam de leitura');
+    assert.deepEqual(calls.map((c) => c.body.call), ['ListarContasReceber', 'ConsultarContaReceber', 'ListarContasPagar', 'ConsultarContaPagar', 'PesquisarLancamentos', 'ListarClientes', 'ConsultarCliente', 'ListarCategorias', 'ListarContasCorrentes']);
     assert.ok(calls.every((c) => /^(Listar|Pesquisar|Consultar)/.test(c.body.call) && c.url.origin === 'https://app.omie.com.br' && c.url.search === ''));
   });
   test('o corpo de quem sou: ListarEmpresas com a credencial, em empresas', async () => {

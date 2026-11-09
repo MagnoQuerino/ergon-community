@@ -9,6 +9,7 @@ import { ConfirmPopup } from './ConfirmPopup.tsx';
 import { HandoffCard, PermissionCard, QuestionCard, RequestCard, SystemNote } from './ChatCards.tsx';
 import { Icon } from './Icon.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
+import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
 
@@ -123,15 +124,16 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   // já decidida noutro lugar (o painel "Aguardando você", outra aba): só relê, sem erro
   // (guarda qual foi a decisão: quem recusou não lê "Enviando…")
   const [deciding, setDeciding] = useState<Record<string, 'apply' | 'reject'>>({});
-  const decide = async (id: string, decision: 'apply' | 'reject') => {
+  // extra: o alcance do cartão de regra ou o prazo do cartão de aprovação (o botão escolhido)
+  const decide = async (id: string, decision: 'apply' | 'reject', extra: { alcance?: string; prazo?: string } = {}) => {
     if (deciding[id]) return;
     setErr(null); setDeciding((x) => ({ ...x, [id]: decision }));
-    try { await api.post(`/api/proposals/${id}`, { decision }); }
+    try { await api.post(`/api/proposals/${id}`, { decision, ...extra }); }
     catch (e) { if (!(e instanceof ApiError && e.status === 409 && e.code === 'decided')) setErr(errMsg(e)); }
     finally { setDeciding((x) => { const y = { ...x }; delete y[id]; return y; }); props.reload(); }
   };
   // várias propostas de uma vez (um tema inteiro, por exemplo): aplicar ou recusar todas, na ordem em que vieram
-  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff', 'conexao'].includes(p.kind));
+  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff', 'conexao', 'depois_de_ler', 'regra'].includes(p.kind));
   const [batchBusy, setBatchBusy] = useState(false);
   const decideAll = async (decision: 'apply' | 'reject') => {
     setBatchBusy(true); setErr(null);
@@ -503,7 +505,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
               {m.id === firstNew && <div className="chat__new" role="separator"><span>Novas mensagens</span></div>}
               <div data-mid={m.id} className={`msg msg--${m.role} ${m.queued ? 'msg--queued' : ''} ${cont ? 'msg--cont' : ''} ${anim} ${flash === m.id ? 'msg--flash' : ''} ${panel === 'busca' && hits.includes(m.id) ? (hits[hitAt] === m.id ? 'msg--hit msg--hit-on' : 'msg--hit') : ''} ${m.marked ? 'msg--marked' : ''}`}>
                 {quoted && <button type="button" className="msg__quote" onClick={() => goTo(quoted.id)}><b>{quoted.role === 'user' ? 'Você' : agent.name}</b>{quoteOf(quoted)}</button>}
-                {m.role === 'agent' && m.mode === 'simulated' && <span className="badge badge--warn">SIMULADO</span>}
+                {m.role === 'agent' && m.mode === 'simulated' && <span className="badge badge--warn">sem conta de IA</span>}
                 {body && <div className="msg__body">{m.role === 'agent' ? <Markdown text={body} /> : body}</div>}
                 {!!m.attachments?.length && <div className="msg__files">{m.attachments.map((f) => <FileChip key={f.id} f={f} />)}</div>}
                 <div className="msg__foot">
@@ -552,14 +554,16 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             : (
               <div key={p.id} className={`proposal-card proposal-card--${p.status}`}>
                 <span className="badge">{PROPOSAL_KIND[p.kind] ?? p.kind}</span>
-                <span className="proposal-card__txt">{p.kind === 'conexao' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
-                {p.status === 'proposed' && deciding[p.id] ? <span className="badge" role="status">{deciding[p.id] === 'reject' ? 'Recusando…' : p.kind === 'conexao' ? 'Enviando…' : p.kind === 'purge' ? 'Apagando…' : 'Aplicando…'}</span>
+                <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
+                {p.status === 'proposed' && deciding[p.id] ? <span className="badge" role="status">{deciding[p.id] === 'reject' ? 'Recusando…' : p.kind === 'conexao' ? 'Enviando…' : p.kind === 'depois_de_ler' ? 'Aprovando…' : p.kind === 'purge' ? 'Apagando…' : 'Aplicando…'}</span>
+                : p.status === 'proposed' && p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} onEscolher={(alcance) => void decide(p.id, 'apply', { alcance })} onRecusar={() => void decide(p.id, 'reject')} />
+                : p.status === 'proposed' && p.kind === 'depois_de_ler' ? <BotoesPrazo onEscolher={(prazo) => void decide(p.id, 'apply', { prazo })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' ? (
                   <span className="row">
-                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'conexao' ? 'Confirmar' : p.kind === 'routine' ? 'Ativar rotina' : p.kind === 'batch' ? 'Abrir todos' : p.kind === 'purge' ? 'Apagar de vez' : 'Aplicar'}</button>
+                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'conexao' ? 'Confirmar' : p.kind === 'depois_de_ler' ? 'Aprovar' : p.kind === 'routine' ? 'Ativar rotina' : p.kind === 'batch' ? 'Abrir todos' : p.kind === 'purge' ? 'Apagar de vez' : 'Aplicar'}</button>
                     <button className="btn btn--sm btn--ghost" onClick={() => decide(p.id, 'reject')}>Recusar</button>
                   </span>
-                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? 'autorizada' : p.kind === 'conexao' ? 'feita' : 'aplicada') : p.status === 'failed' ? 'falhou' : 'recusada'}</span>}
+                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? 'autorizada' : p.kind === 'conexao' ? 'feita' : p.kind === 'depois_de_ler' ? 'aprovada' : 'aplicada') : p.status === 'failed' ? 'falhou' : 'recusada'}</span>}
               </div>
             );
         })}

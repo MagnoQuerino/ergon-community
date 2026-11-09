@@ -256,13 +256,24 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.doesNotMatch(tela, /canais que você liberar/, 'não há escolha de canais: o alcance é o da credencial');
     assert.doesNotMatch(tela, /disabled=\{busy \|\| !filled\}/, 'Conectar não fica apagado sem dizer o que falta');
     assert.match(tela, /Aqui o teste só lê; a escrita aparece no primeiro uso/);
-    assert.match(ler('community/publico/README.md'), /CRM e atendimento; financeiro só leitura/);
+    assert.match(ler('community/publico/README.md'), /CRM e atendimento; financeiro sem mover dinheiro/);
+    assert.doesNotMatch(tela, /Só leitura: os agentes consultam cobranças/, 'o financeiro também escreve; só leitura é o atalho da conexão');
+    assert.match(tela, /\/> Só leitura<\/label>/, 'o atalho é uma caixa de marcar, nunca um botão apagado');
+    assert.match(tela, /Reconectar do novo jeito/);
+    // o erro do atalho aparece junto da caixa, e não dentro da lista que vem fechada
+    const caixa = tela.indexOf('/> Só leitura</label>'); const lista = tela.indexOf('<details className="conn-acoes">', caixa);
+    const erroDoAtalho = tela.indexOf('{errSoLeitura && <p className="error"', caixa);
+    assert.ok(erroDoAtalho > caixa && erroDoAtalho < lista, 'o erro do "Só leitura" fica fora da lista fechada');
+    assert.match(tela, /api\.put\(`\/api\/conexoes\/\$\{i\.kind\}\/so-leitura`, \{ on \}\); estado\.reload\(\); \} catch \(e\) \{ setErrSoLeitura\(errMsg\(e\)\)/);
   });
 
   test('Microsoft: a conta e o "Teams como canal" separados; cada etapa com o próximo passo, sem botão apagado esperando', () => {
     const tela = ler('web/src/views/ConexoesView.tsx');
     assert.match(tela, /Microsoft 365: a equipe age na sua conta\./);
-    assert.match(tela, /Conversar com o Aristóteles pelo Teams: em breve\./);
+    // conversar pelo Teams deixou de ser "em breve" (rc.26: o app público, ligado por código), e segue separado da conta
+    assert.match(tela, /Conversar com a equipe pelo Teams: é outra coisa\./);
+    assert.doesNotMatch(tela, /pelo Teams: em breve/);
+    assert.ok(tela.includes('function TeamsConversa') && tela.includes('Em breve: conversar com a equipe pelo Teams'));
     for (const t of ['Liberar leitura', 'Pedir ao administrador', 'Já aprovaram? Conectar de novo', 'Autorizar agora', 'é esperado']) assert.ok(tela.includes(t), t);
     const etapas = tela.slice(tela.indexOf('function EtapasMicrosoft'), tela.indexOf('interface WaState'));
     assert.ok(etapas.length > 1000);
@@ -276,6 +287,16 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.doesNotMatch(ms, /docker compose/);
     assert.doesNotMatch(ms, /nenhuma exige administrador/i);
     for (const t of [/Pedir ao administrador/, /Já aprovaram\? Conectar de novo/, /etapa/i, /bot/i, /ChannelMessage\.Read\.All/]) assert.match(ms, t);
+    // o login de uma vez e o passo a passo do portal para o administrador (incluir Teams e canais e aprovar pela organização)
+    const portal = ms.slice(ms.indexOf('## O administrador da empresa'), ms.indexOf('## Registrar um aplicativo próprio'));
+    assert.ok(portal.length > 500, 'a seção do administrador vem antes do registro próprio');
+    for (const t of [/Chat\.ReadBasic/, /ChannelMessage\.Read\.All/, /Conceder consentimento do administrador para/, /Aplicativos empresariais/, /Permissões delegadas/]) assert.match(portal, t);
+    // 09/11: Chat.Read também; "Funções de diretório" ligado no token; os canais só para quem se sabe administrador
+    for (const t of [/`Chat\.Read`/, /Funções de diretório/, /só quem se sabe administrador/]) assert.match(portal, t);
+    assert.ok(portal.indexOf('Funções de diretório') < portal.indexOf('volte a **Permissões de API**, clique em **Conceder consentimento'), 'na ordem: funções de diretório, depois o consentimento');
+    assert.doesNotMatch(ms, /Opcional: em \*\*Configuração de token/, 'as funções de diretório deixaram de ser opcionais');
+    assert.match(ms, /de uma vez/);
+    assert.doesNotMatch(ms, /\*\*Não\*\* clique em "Conceder consentimento/, 'o administrador pode aprovar pela organização');
     // nomes privados montados por partes (o texto deles não pode aparecer no repositório público)
     assert.doesNotMatch(ms, new RegExp(['M' + 'G3', 'am' + 'agno', 'fun' + 'dador'].join('|'), 'i'));
     const cx = ler('docs/CONEXOES.md');
@@ -288,7 +309,8 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.doesNotMatch(ler('web/src/views/ConexoesView.tsx'), /espelho/);
     // (types.ts puxa código do navegador: lido como texto)
     assert.match(ler('web/src/lib/types.ts'), /mirror: 'ligada'/);
-    const detalhe = ler('web/src/components/TaskDetail.tsx');
+    // os rótulos do histórico do card ficam em lib/tarefa-tela.ts (as linhas curtas da tela de detalhes)
+    const detalhe = ler('web/src/lib/tarefa-tela.ts');
     assert.match(detalhe, /'mirror\.push': 'Enviado ao aplicativo'/);
     assert.match(detalhe, /'mirror\.push\.error': 'Não foi ao aplicativo'/);
   });
@@ -310,7 +332,7 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     for (const f of ['community/publico/README.md', 'web/src/views/AjudaView.tsx', 'web/src/views/ConexoesView.tsx']) assert.doesNotMatch(ler(f), promessa, f);
     assert.equal(ler('web/src/views/ConexoesView.tsx').match(/o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões/g)?.length, 2, 'Microsoft e Google');
     // e "Liberar tudo" não desfaz o que a pessoa desligou
-    assert.match(ler('docs/CONEXOES.md'), /"Liberar tudo, por minha conta": tira as confirmações da regra e o bloqueio que vem depois de ler conteúdo privado[\s\S]{0,80}o que você desligou continua desligado/);
+    assert.match(ler('docs/CONEXOES.md'), /"Liberar tudo, por minha conta": tira as confirmações da regra e a aprovação depois de ler conteúdo privado[\s\S]{0,140}o que você desligou continua desligado/);
     const aspasia = CHARACTERS.find((c) => c.key === 'aspasia')!.bio;
     assert.doesNotMatch(aspasia, /nenhuma mensagem sai sem/);
     assert.match(aspasia, /manda o que você pedir, e o resto passa pela sua confirmação, a menos que você ligue "Liberar tudo"/);
@@ -329,11 +351,16 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
 
   test('cartão de ação numa conta: quem recusa lê "Recusando…", e o já decidido noutro lugar só relê', () => {
     // "Enviando…" só no cartão que envia a uma conta; ativar rotina, abrir cards e apagar de vez dizem o que fazem
-    assert.match(ler('web/src/components/ChatPanel.tsx'), /deciding\[p\.id\] === 'reject' \? 'Recusando…' : p\.kind === 'conexao' \? 'Enviando…' : p\.kind === 'purge' \? 'Apagando…' : 'Aplicando…'/);
+    assert.match(ler('web/src/components/ChatPanel.tsx'), /deciding\[p\.id\] === 'reject' \? 'Recusando…' : p\.kind === 'conexao' \? 'Enviando…' : p\.kind === 'depois_de_ler' \? 'Aprovando…' : p\.kind === 'purge' \? 'Apagando…' : 'Aplicando…'/);
     assert.match(ler('web/src/components/DecisionsPanel.tsx'), /decisao === 'reject' \? 'Recusando…' : 'Recusar'/);
     const detalhe = ler('web/src/components/TaskDetail.tsx');
     assert.match(detalhe, /e instanceof ApiError && e\.status === 409 && e\.code === 'decided'\) return null/);
-    assert.match(detalhe, /decidindo\.decision === 'apply' \? 'Enviando…' : 'Confirmar'/);
+    // a faixa de decisão: "Aprovar" decide o que a frase diz (um cartão, ou todos de uma vez); cada botão diz o que está indo
+    assert.match(detalhe, /'Aprovando…' : n > 1 \? `Aprovar \(\$\{n\}\)` : 'Aprovar'/);
+    assert.match(detalhe, /'Recusando…' : 'Recusar'/);
+    assert.match(detalhe, /indo\(`reject:\$\{c\.id\}`, 'Recusar este', 'Recusando…'\)/);
+    // a aprovação depois de ler: os botões do prazo (1 h, 8 h, 72 h, sempre)
+    assert.match(detalhe, /<BotoesPrazo /);
   });
 });
 

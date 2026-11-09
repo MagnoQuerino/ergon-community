@@ -16,12 +16,18 @@ Três partes, todas sem chamar modelo e sem ler credenciais de provedor:
 3. Ponte de controle (rede interna do Docker, porta ERGON_CONTROL_PORT): o painel do Hermes roda só em
    127.0.0.1 dentro do contêiner; o Ergon chega a ele por aqui, com o token da ponte, e SÓ às rotas da
    lista abaixo (login de contas por código, modelo padrão, catálogo de modelos e skills, ferramentas da
-   plataforma da API). Variáveis de ambiente, arquivos, terminal, MCP e configuração bruta não passam.
+   plataforma da API, passos por pedido, resumo das conversas longas, medição do custo). Variáveis de ambiente,
+   arquivos, terminal, MCP e
+   configuração bruta não passam.
+
+Custo (``pre_api_request`` / ``post_api_request``, observadores): o tamanho de cada parte de cada chamada ao modelo
+(instruções, ferramentas, memória, conversa) e o total que o provedor informou, sem guardar conteúdo.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
@@ -41,8 +47,11 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.3.0"
-CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets")
+PLUGIN_VERSION = "0.4.0"
+# medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
+# escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
+# compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
+CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao")
 _TS_CONEXOES = "ergon_conexoes"
 # Conjuntos de ferramentas que este plugin registra (o mesmo de ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
 _ERGON_PLUGIN_TOOLSETS = (_TS_CONEXOES,)
@@ -328,6 +337,56 @@ def _negada(tool_name: str, denied: Any) -> bool:
     return any(tool_name == d or (d.endswith("_") and len(d) > 1 and tool_name.startswith(d)) for d in denied)
 
 
+_BLOQUEIO_PADRAO = ("Por segurança, a ferramenta '{t}' não funciona agora nesta conversa: ela já leu conteúdo privado das contas conectadas, "
+                    "e a pessoa pediu para aprovar antes de abrir sites ou rodar programas. Continue sem ela (a busca na web segue valendo) "
+                    "e diga à pessoa o que ficou faltando.")
+
+
+_ALVO_MAX = 3500
+
+
+def _alvo(args: Any) -> str:
+    """O que a pessoa precisa ver no cartão, e o que a aprovação dela prende no Ergon (conexoes/regra.ts,
+    chavesDeAprovacao): o endereço (todos, numa lista), a imagem ou o programa; nas outras ferramentas, o pedido inteiro.
+    Longo demais: o começo e a conferência do texto inteiro, para um pedido diferente nunca valer pela mesma aprovação."""
+    if not isinstance(args, dict):
+        return ""
+    texto = ""
+    for k in ("urls", "url", "image_url", "command", "code", "expression"):
+        v = args.get(k)
+        if isinstance(v, list):
+            v = "\n".join(str(x) for x in v)
+        if isinstance(v, str) and v.strip():
+            texto = v.strip()
+            break
+    if not texto and args:
+        texto = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+    if len(texto) > _ALVO_MAX:
+        conf = hashlib.sha256(texto.encode("utf-8", "replace")).hexdigest()[:24]
+        texto = f"{texto[:_ALVO_MAX - 120]}\n[… mais {len(texto) - (_ALVO_MAX - 120)} caracteres; conferência {conf}]"
+    return texto
+
+
+def _dispensa(tool_name: str, args: Any) -> bool:
+    """Imagem que já está na conversa (data:) não vem de endereço nenhum: não pede aprovação (o mesmo de _le_endereco)."""
+    return tool_name in _LEEM_ENDERECO_NOMES and not _le_endereco(tool_name, args)
+
+
+def _pedir_aprovacao(tool_name: str, args: Any, session_id: str, task_id: str) -> str | None:
+    """Pede ao Ergon o cartão de aprovação e devolve a mensagem da recusa ao agente. None = liberada: a pessoa já aprovou
+    este alvo ali (a aprovação vale para o que o cartão mostrou, então a lista de nomes não muda e o Ergon confere
+    chamada a chamada), ou a proteção acabou de ser desligada. Ergon fora: barra (fail-closed)."""
+    try:
+        data = _post_to(_url_for("/internal/bridge/v1/depois-de-ler"), {"session_id": session_id[:200], "task_id": task_id[:200],
+                        "ferramenta": tool_name[:60], "alvo": _alvo(args)}, timeout=5)
+    except Exception:  # noqa: BLE001
+        return _BLOQUEIO_PADRAO.format(t=tool_name)
+    if data.get("liberada") is True:
+        return None
+    texto = data.get("texto")
+    return texto[:1200] if isinstance(texto, str) and texto.strip() else _BLOQUEIO_PADRAO.format(t=tool_name)
+
+
 def _who_has(tool_name: str, holders: dict[str, list[str]]) -> list[str]:
     names: list[str] = []
     for ts, people in holders.items():
@@ -345,12 +404,13 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
         if _le_endereco(tool_name, args):
             _lembrar_web(str(session_id or ""), str(task_id or ""))
         pol = _policy(str(session_id or ""), str(task_id or ""))
-        # depois de ler conteúdo privado das contas, nada que alcance endereços arbitrários (ver conexoes/regra.ts no Ergon)
-        if _negada(tool_name, pol.get("denied", ())):
-            return {"action": "block", "message": (
-                f"Por segurança, a ferramenta '{tool_name}' não funciona nesta conversa: ela já leu conteúdo privado das contas conectadas, "
-                "e um texto lido poderia usar isso para mandar os dados a outro endereço. Continue sem ela (a busca na web segue valendo). "
-                "Se precisar mesmo, diga à pessoa para abrir uma conversa nova.")}
+        # proteção que a pessoa ligou no Ergon (desligada por padrão): depois de ler conteúdo privado das contas, abrir
+        # endereços ou rodar programas pede a aprovação dela num cartão (ver conexoes/regra.ts no Ergon). Já aprovado
+        # este alvo: segue para as outras travas. Imagem já na conversa (data:): não pede.
+        if _negada(tool_name, pol.get("denied", ())) and not _dispensa(tool_name, args):
+            aprovacao = _pedir_aprovacao(tool_name, args, str(session_id or ""), str(task_id or ""))
+            if aprovacao is not None:
+                return {"action": "block", "message": aprovacao}
         allowed, who, holders, guarded = pol["allowed"], pol["who"], pol["holders"], pol["guarded"]
         gate = _skills_gate(tool_name, args if isinstance(args, dict) else {}, pol)
         if gate is True:
@@ -628,6 +688,318 @@ def skills_restore(name: str, files: dict[str, str]) -> dict[str, str]:
     return _read_skill(name)
 
 
+# ---------------------------------------------------------------- custo: do que é feita cada chamada ao modelo
+# Medido no pedido que vai de verdade ao provedor (pre_api_request: o prompt de sistema e as mensagens, sem corte) e no
+# total que o provedor informa (post_api_request: tokens de entrada, os lidos do cache e os de saída). Só TAMANHOS, nunca
+# conteúdo, por sessão, num arquivo dentro do cofre (HERMES_HOME); o Ergon lê pela ponte de controle quando a execução
+# termina (/ergon/v1/medicao). Os dois ganchos são observadores: nunca lançam exceção e não mudam nada no pedido.
+# Os ganchos rodam numa thread de trabalho do Hermes (plugins_dispatch, com limite de tempo); arquivo, e não memória,
+# porque a ponte de controle pode estar no outro processo do motor (painel ou gateway: quem subiu primeiro).
+_MEDICAO_MAX = 200          # chamadas guardadas por sessão (as mais recentes)
+_MEDICAO_DIAS = 3           # sessões paradas há mais que isso saem
+_MEDICAO_PENDENTE_S = 900   # pedido sem resposta (tentativa que falhou) sai da memória depois disso
+_IMAGEM_CHARS = 3000        # imagem anexada: conta como ~750 tokens (o tamanho do base64 não é o custo)
+_FERRAMENTAS_TTL = 600
+# O texto do prompt de sistema do Hermes v0.22.2 (conferido em tools/memory_tool_store.py, agent/prompt_builder.py e
+# agent/system_prompt.py; o teste test_ergon_bridge_custo.py prende com o motor de verdade): os blocos da memória
+# começam com a linha de "═" e o cabeçalho; a lista de competências vai de "## Skills" até a frase depois de
+# </available_skills>; depois da memória vêm a linha do perfil, a data e o ambiente.
+_SEP_MEMORIA = "═" * 46
+_CABECALHOS_MEMORIA = ("MEMORY (your personal notes)", "USER PROFILE (who the user is)")
+_FIM_MEMORIA = ("\n\nActive Hermes profile:", "\n\nConversation started:", "\n\n# Hermes runtime environment")
+_pendentes: dict[str, dict[str, Any]] = {}
+_ferramentas_cache: dict[tuple[str, ...], tuple[float, int, int]] = {}
+_medicao_lock = threading.Lock()
+_ultima_limpeza = [0.0]
+# Turno: a marca de um pedido do motor (o turn_id do Hermes, um por run_conversation, igual em todas as chamadas dele), em
+# resumo, para o Ergon separar as chamadas de cada execução sem depender do relógio. Quando o motor resume uma conversa
+# longa no meio do pedido, ele troca de sessão (agent/conversation_compression.py): as chamadas do mesmo pedido passam a
+# ser gravadas também na sessão nova, e a nova recebe as anteriores dele, para a execução ser lida inteira por qualquer
+# uma das duas.
+_TURNO_TTL_S = 6 * 3600
+_TURNOS_MAX = 2000
+_sessoes_do_turno: dict[str, tuple[float, list[str]]] = {}
+
+
+def _texto(v: Any) -> str:
+    """O texto de um prompt de sistema ou de uma parte de mensagem (texto puro, blocos da Anthropic, partes)."""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        return "\n\n".join(t for t in (_texto(x) for x in v) if t)
+    if isinstance(v, dict):
+        return _texto(v.get("text") if "text" in v else v.get("content"))
+    return "" if v is None else str(v)
+
+
+def _trecho_memoria(sistema: str) -> int:
+    """Caracteres dos blocos de memória (notas e perfil da pessoa) dentro do prompt de sistema."""
+    total = 0
+    for cab in _CABECALHOS_MEMORIA:
+        i = sistema.find(f"{_SEP_MEMORIA}\n{cab}")
+        if i < 0:
+            continue
+        fins = [j for j in (sistema.find(m, i + 1) for m in (*_FIM_MEMORIA, f"\n\n{_SEP_MEMORIA}\n")) if j > i]
+        total += (min(fins) if fins else len(sistema)) - i
+    return total
+
+
+def _trecho_competencias(sistema: str) -> int:
+    """Caracteres da lista de competências (skills) que o motor põe no prompt de sistema."""
+    i = sistema.find("## Skills\n")
+    if i < 0:
+        return 0
+    tag = "</available_skills>"
+    j = sistema.find(tag, i)
+    if j < 0:
+        return 0
+    k = sistema.find("\n\n", j + len(tag) + 2)
+    return (k if k > 0 else len(sistema)) - i
+
+
+def _inteiro(v: Any) -> int:
+    return max(0, int(v)) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
+
+def _e_imagem(p: Any) -> bool:
+    return isinstance(p, dict) and str(p.get("type") or "") in ("image_url", "input_image", "image")
+
+
+def _tamanho_conversa(mensagens: Any) -> tuple[int, int]:
+    """(caracteres, imagens) das mensagens fora o prompt de sistema: a conversa, o pedido, o que as ferramentas devolveram."""
+    chars = imgs = 0
+    for m in mensagens if isinstance(mensagens, list) else []:
+        if not isinstance(m, dict) or m.get("role") in ("system", "developer"):
+            continue
+        c = m.get("content")
+        if isinstance(c, list):
+            imgs += sum(1 for p in c if _e_imagem(p))
+            m = {**m, "content": [p for p in c if not _e_imagem(p)]}
+        try:
+            chars += len(json.dumps(m, ensure_ascii=False, separators=(",", ":"), default=str))
+        except (TypeError, ValueError):
+            chars += len(str(m))
+    return chars, imgs
+
+
+def _tamanho_ferramentas(platform: str, tool_count: int) -> tuple[int, bool]:
+    """(caracteres das definições de ferramentas, exato?). As mesmas definições que o motor monta para a plataforma
+    (model_tools.get_tool_definitions + o arranjo da busca de ferramentas), guardadas por 10 min. Exato quando o número
+    bate com o que foi ao modelo; senão, proporcional ao número de ferramentas."""
+    from hermes_cli.config import load_config  # módulo do Hermes
+    from hermes_cli.tools_config import _get_platform_tools
+    import model_tools
+    sets = tuple(sorted(_get_platform_tools(load_config(), platform or "api_server", include_default_mcp_servers=False)))
+    hit = _ferramentas_cache.get(sets)
+    if hit is None or time.time() - hit[0] > _FERRAMENTAS_TTL:
+        defs = model_tools.get_tool_definitions(enabled_toolsets=list(sets), quiet_mode=True)
+        try:
+            from tools.tool_search import assemble_tool_defs
+            defs = assemble_tool_defs(defs).tool_defs
+        except Exception:  # noqa: BLE001 - sem a busca de ferramentas: as definições como vieram
+            pass
+        hit = (time.time(), len(defs), sum(len(json.dumps(d, ensure_ascii=False, separators=(",", ":"), default=str)) for d in defs))
+        _ferramentas_cache[sets] = hit
+    _, n, chars = hit
+    if not tool_count or n == tool_count:
+        return chars, bool(tool_count)
+    return round(chars * tool_count / max(n, 1)), False
+
+
+# O resumo da conversa (compactação): o Hermes troca a parte antiga da conversa por uma mensagem de resumo que começa com
+# um prefixo fixo (agent/context_compressor.py: SUMMARY_PREFIX "[CONTEXT COMPACTION — REFERENCE ONLY]…", o antigo
+# LEGACY_SUMMARY_PREFIX "[CONTEXT SUMMARY]:"; pode vir junto de outra mensagem, depois de um separador). Medimos só o
+# tamanho dele: quando muda de uma chamada para a seguinte, a conversa acabou de ser resumida (o Ergon mostra isso).
+_PREFIXOS_RESUMO = ("[CONTEXT COMPACTION", "[CONTEXT SUMMARY]:")
+_e_resumo_hermes: list[Any] = []
+
+
+def _e_resumo(m: Any) -> bool:
+    """A mensagem é o resumo da conversa? Pelo próprio Hermes (is_compaction_summary_message); sem ele, pelo prefixo."""
+    if not _e_resumo_hermes:
+        try:
+            from agent.context_compressor import is_compaction_summary_message  # módulo do Hermes
+            _e_resumo_hermes.append(is_compaction_summary_message)
+        except Exception:  # noqa: BLE001 - fora do motor (testes só com a biblioteca padrão)
+            _e_resumo_hermes.append(None)
+    fn = _e_resumo_hermes[0]
+    if fn is not None:
+        try:
+            return bool(fn(m))
+        except Exception:  # noqa: BLE001
+            pass
+    if not isinstance(m, dict):
+        return False
+    if m.get("_compressed_summary"):
+        return True
+    t = _texto(m.get("content"))
+    return any(p in t for p in _PREFIXOS_RESUMO)
+
+
+def _tamanho_resumo(mensagens: Any) -> int:
+    """Caracteres do resumo da conversa nas mensagens que vão ao modelo (0 = a conversa não foi resumida)."""
+    total = 0
+    for m in mensagens if isinstance(mensagens, list) else []:
+        if isinstance(m, dict) and m.get("role") not in ("system", "developer") and _e_resumo(m):
+            total += len(_texto(m.get("content")))
+    return total
+
+
+def _marca_turno(turn_id: Any) -> str:
+    """A marca do pedido: um resumo do turn_id (que traz a sessão), nunca o próprio id."""
+    return hashlib.sha256(str(turn_id).encode("utf-8")).hexdigest()[:16] if turn_id else ""
+
+
+def on_pre_api_request(session_id: str = "", api_request_id: str = "", system_prompt: Any = None, request_messages: Any = None,
+                       tool_count: int = 0, platform: str = "", model: str = "", api_call_count: int = 0, turn_id: Any = "",
+                       **_: Any) -> None:
+    """Antes de cada chamada ao modelo: o tamanho de cada parte do pedido (nada do conteúdo)."""
+    try:
+        if not session_id or not api_request_id:
+            return None
+        sistema = _texto(system_prompt)
+        conversa, imagens = _tamanho_conversa(request_messages)
+        try:
+            ferramentas, exato = _tamanho_ferramentas(str(platform or "api_server"), _inteiro(tool_count))
+        except Exception:  # noqa: BLE001 - sem o registro de ferramentas: fica sem essa parte (marcada como não exata)
+            ferramentas, exato = 0, False
+        rec = {"t": round(time.time(), 3), "n": _inteiro(api_call_count), "turno": _marca_turno(turn_id), "sistema": len(sistema), "memoria": _trecho_memoria(sistema),
+               "competencias": _trecho_competencias(sistema), "ferramentas": int(ferramentas), "ferramentas_exato": bool(exato),
+               "n_ferramentas": _inteiro(tool_count), "conversa": conversa + imagens * _IMAGEM_CHARS, "imagens": imagens,
+               "resumo": _tamanho_resumo(request_messages), "modelo": str(model or "")[:120]}
+        agora = time.time()
+        with _medicao_lock:
+            for k in [k for k, v in _pendentes.items() if agora - v["t"] > _MEDICAO_PENDENTE_S]:
+                _pendentes.pop(k, None)
+            _pendentes[str(api_request_id)] = {**rec, "sessao": str(session_id)}
+    except Exception:  # noqa: BLE001 - observador: nunca atrapalha a chamada
+        logger.debug("ergon_bridge: medição do pedido falhou", exc_info=False)
+    return None
+
+
+def _uso(usage: Any) -> dict[str, int] | None:
+    """O que o provedor informou (CanonicalUsage do Hermes): entrada total, a parte lida do cache e a saída."""
+    if not isinstance(usage, dict):
+        return None
+
+    def n(k: str) -> int:
+        v = usage.get(k)
+        return max(0, int(v)) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
+    entrada = n("prompt_tokens") or (n("input_tokens") + n("cache_read_tokens") + n("cache_write_tokens"))
+    if not entrada and not n("output_tokens"):
+        return None
+    return {"entrada": entrada, "cache_lido": n("cache_read_tokens"), "cache_gravado": n("cache_write_tokens"), "saida": n("output_tokens")}
+
+
+def on_post_api_request(session_id: str = "", api_request_id: str = "", usage: Any = None, **_: Any) -> None:
+    """Depois de cada chamada: junta o total informado pelo provedor à medição do pedido e grava."""
+    try:
+        with _medicao_lock:
+            rec = _pendentes.pop(str(api_request_id or ""), None)
+        if not rec:
+            return None
+        sessao = rec.pop("sessao", "") or str(session_id or "")
+        rec["uso"] = _uso(usage)
+        if sessao:
+            _gravar_do_turno(sessao, rec)
+    except Exception:  # noqa: BLE001 - observador
+        logger.debug("ergon_bridge: medição da resposta falhou", exc_info=False)
+    return None
+
+
+def _gravar_do_turno(sessao: str, rec: dict[str, Any]) -> None:
+    """Grava a chamada na sessão dela e em toda sessão por onde o mesmo pedido já passou; a sessão nova de um pedido (o
+    motor resumiu a conversa e trocou de sessão) recebe antes as chamadas que o pedido já tinha feito."""
+    turno = str(rec.get("turno") or "")
+    if not turno:
+        return _gravar_medicao(sessao, rec)
+    agora = time.time()
+    with _medicao_lock:
+        for k in [k for k, (t, _s) in _sessoes_do_turno.items() if agora - t > _TURNO_TTL_S]:
+            _sessoes_do_turno.pop(k, None)
+        while len(_sessoes_do_turno) >= _TURNOS_MAX:
+            _sessoes_do_turno.pop(next(iter(_sessoes_do_turno)))
+        _, sessoes = _sessoes_do_turno.get(turno, (agora, []))
+        nova = sessao not in sessoes
+        if nova:
+            sessoes = [*sessoes, sessao]
+        _sessoes_do_turno[turno] = (agora, sessoes)
+    if nova and len(sessoes) > 1:
+        for antes in medicao(sessoes[0]):
+            if antes.get("turno") == turno:
+                _gravar_medicao(sessao, antes)
+    for s in sessoes:
+        _gravar_medicao(s, rec)
+
+
+def _medicao_dir() -> Path:
+    return Path(os.environ.get("HERMES_HOME", "/opt/data")) / "ergon_bridge" / "medicao"
+
+
+def _medicao_path(sessao: str) -> Path:
+    # o nome do arquivo não diz nada da sessão (o id do Ergon tem o workspace e o agente)
+    return _medicao_dir() / (hashlib.sha256(sessao.encode("utf-8")).hexdigest()[:40] + ".jsonl")
+
+
+def _gravar_medicao(sessao: str, rec: dict[str, Any]) -> None:
+    p = _medicao_path(sessao)
+    linha = json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n"
+    with _medicao_lock:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(linha)
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+        if p.stat().st_size > 600 * _MEDICAO_MAX:  # guarda só as mais recentes
+            linhas = p.read_text(encoding="utf-8").splitlines()[-_MEDICAO_MAX:]
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+            os.replace(tmp, p)
+        if time.time() - _ultima_limpeza[0] > 3600:
+            _ultima_limpeza[0] = time.time()
+            limite = time.time() - _MEDICAO_DIAS * 86400
+            for velho in p.parent.glob("*.jsonl"):
+                try:
+                    if velho.stat().st_mtime < limite:
+                        velho.unlink()
+                except OSError:
+                    pass
+
+
+def medicao(sessao: str, desde: float = 0.0) -> list[dict[str, Any]]:
+    """As chamadas medidas de uma sessão, desde um instante (segundos desde 1970), as mais recentes por último."""
+    try:
+        linhas = _medicao_path(sessao).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in linhas:
+        try:
+            rec = json.loads(ln)
+        except ValueError:
+            continue  # linha cortada (queda no meio da gravação)
+        if isinstance(rec, dict) and float(rec.get("t") or 0) >= desde:
+            out.append(rec)
+    return out[-_MEDICAO_MAX:]
+
+
+# ---------------------------------------------------------------- passos por pedido
+# agent.max_turns: o Hermes relê do config.yaml a cada execução (gateway/run.py, _current_max_iterations), então vale a
+# partir do próximo pedido, sem reiniciar nada. A pessoa escolhe no Ergon; o padrão (20) vem da migração 1 do cofre.
+PASSOS_MIN, PASSOS_MAX = 5, 60
+
+# ---------------------------------------------------------------- resumir as conversas longas mais cedo
+# compression.threshold_tokens: o teto absoluto do Hermes para resumir a conversa (vale o menor entre ele e a fração da
+# janela do modelo). A migração 3 do cofre grava este número onde ninguém escolheu (o mesmo valor: um teste confere; a
+# escolha do número está explicada lá). Desligado = null: fica só o limite do próprio Hermes, perto do fim da janela — o
+# resumo nunca é desligado de todo (sem ele, uma conversa longa estouraria o limite do modelo). O Hermes cria um agente
+# novo a cada pedido da API e lê a seção compression nessa hora: vale a partir do próximo pedido, sem reiniciar.
+COMPACTAR_LIMITE = 150000
+
+
 # ---------------------------------------------------------------- 3. ponte de controle
 
 _DASH_PORT = os.environ.get("HERMES_DASHBOARD_PORT", "9119")
@@ -694,6 +1066,19 @@ def _vault_config() -> int:
         if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
             versoes.append(v)
     return max(versoes, default=0)
+
+
+def _dados_antigos() -> bool | None:
+    """O cofre recebeu a cópia dos dados de antes do cofre (o volume antigo em texto aberto, montado em /legacy na
+    primeira abertura)? Lido da marca que hermes/vault/ergon-vault.py grava ao criar o cofre ({"migrated_from_legacy":
+    true/false}). Sem marca, ou ilegível: None (não se sabe). O servidor só apaga o volume antigo com True."""
+    home = os.environ.get("HERMES_HOME", "/opt/data")
+    try:
+        with open(os.path.join(home, ".ergon-vault"), "rb") as f:
+            v = json.loads(f.read(500).decode("utf-8", errors="replace")).get("migrated_from_legacy")
+    except Exception:  # noqa: BLE001
+        return None
+    return v if isinstance(v, bool) else None
 
 
 def _media_dir() -> str:
@@ -866,6 +1251,16 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._api_toolsets_get()
         if path == "/ergon/v1/api-toolsets" and method == "PUT":
             return self._api_toolsets_put(body or {})
+        if path == "/ergon/v1/medicao" and method == "GET":
+            return self._medicao_get(dict(urllib.parse.parse_qsl(parts.query)))
+        if path == "/ergon/v1/passos" and method == "GET":
+            return self._passos_get()
+        if path == "/ergon/v1/passos" and method == "PUT":
+            return self._passos_put(body or {})
+        if path == "/ergon/v1/compactacao" and method == "GET":
+            return self._compactacao_get()
+        if path == "/ergon/v1/compactacao" and method == "PUT":
+            return self._compactacao_put(body or {})
         if path == "/ergon/v1/media" and method == "GET":
             return self._media_get(dict(urllib.parse.parse_qsl(parts.query)).get("path", ""))
         if path == "/ergon/v1/byok" or path.startswith("/ergon/v1/byok/"):
@@ -1007,7 +1402,63 @@ class _ControlHandler(BaseHTTPRequestHandler):
         """Contrato com o servidor: versão do plugin, migração de configuração do cofre e o que este motor sabe fazer."""
         status, _ = _dash_call("GET", "/api/model/info", "", None)
         return self._json(200, {"ok": True, "dashboard": status == 200, "plugin_version": PLUGIN_VERSION,
-                                "vault_config": _vault_config(), "capacidades": list(CAPACIDADES)})
+                                "vault_config": _vault_config(), "capacidades": list(CAPACIDADES),
+                                "dados_antigos": _dados_antigos()})
+
+    def _medicao_get(self, q: dict[str, str]) -> None:
+        """As chamadas medidas de uma sessão (só tamanhos e o total informado pelo provedor), desde um instante."""
+        sessao = q.get("sessao", "")
+        if not sessao or len(sessao) > 300 or any(ord(c) < 32 for c in sessao):
+            return self._json(400, {"error": "sessão inválida"})
+        try:
+            desde = max(0.0, float(q.get("desde") or 0))
+        except ValueError:
+            return self._json(400, {"error": "instante inválido"})
+        # "agora": o relógio do motor, para o Ergon compensar a diferença para o relógio do computador (custo.ts)
+        return self._json(200, {"chamadas": medicao(sessao, desde), "agora": round(time.time(), 3)})
+
+    def _passos_get(self) -> None:
+        try:
+            from hermes_cli.config import load_config  # módulo do Hermes
+            agent = load_config().get("agent")
+            v = agent.get("max_turns") if isinstance(agent, dict) else None
+        except Exception as exc:  # noqa: BLE001
+            return self._json(503, {"error": f"não consegui ler a configuração ({type(exc).__name__})"})
+        return self._json(200, {"max_turns": v if isinstance(v, int) and not isinstance(v, bool) else None})
+
+    def _passos_put(self, body: dict[str, Any]) -> None:
+        v = body.get("max_turns")
+        if not isinstance(v, int) or isinstance(v, bool) or not PASSOS_MIN <= v <= PASSOS_MAX:
+            return self._json(400, {"error": f"envie max_turns entre {PASSOS_MIN} e {PASSOS_MAX}"})
+        # o painel do Hermes grava por cima do que está no disco (mescla), com a trava de escrita dele
+        status, data = _dash_call("PUT", "/api/config", "", {"config": {"agent": {"max_turns": v}}})
+        if status != 200:
+            return self._send(status, data)
+        return self._json(200, {"ok": True, "max_turns": v})
+
+    def _compactacao_get(self) -> None:
+        """Ligada = o resumo da conversa está ligado no Hermes e com o teto mais cedo (qualquer número; o do Ergon é 150 mil)."""
+        try:
+            from hermes_cli.config import load_config  # módulo do Hermes
+            comp = load_config().get("compression")
+        except Exception as exc:  # noqa: BLE001
+            return self._json(503, {"error": f"não consegui ler a configuração ({type(exc).__name__})"})
+        comp = comp if isinstance(comp, dict) else {}
+        limite = comp.get("threshold_tokens")
+        limite = limite if isinstance(limite, int) and not isinstance(limite, bool) and limite > 0 else None
+        ligada = comp.get("enabled", True) not in (False, "false", "off", "no", 0) and limite is not None
+        return self._json(200, {"ligada": ligada, "limite": limite})
+
+    def _compactacao_put(self, body: dict[str, Any]) -> None:
+        v = body.get("ligada")
+        if not isinstance(v, bool):
+            return self._json(400, {"error": "envie ligada: true ou false"})
+        # ligada: o resumo ligado e o teto do Ergon; desligada: sem teto (null), só o limite do Hermes perto do fim da janela
+        comp = {"enabled": True, "threshold_tokens": COMPACTAR_LIMITE} if v else {"threshold_tokens": None}
+        status, data = _dash_call("PUT", "/api/config", "", {"config": {"compression": comp}})
+        if status != 200:
+            return self._send(status, data)
+        return self._json(200, {"ok": True, "ligada": v, "limite": COMPACTAR_LIMITE if v else None})
 
     def _api_toolsets_get(self) -> None:
         try:
@@ -1073,6 +1524,8 @@ def register(ctx) -> None:
     ctx.register_hook("post_gateway_admission", on_admission)
     ctx.register_hook("pre_tool_call", on_pre_tool_call)
     ctx.register_hook("post_tool_call", on_post_tool_call)
+    ctx.register_hook("pre_api_request", on_pre_api_request)
+    ctx.register_hook("post_api_request", on_post_api_request)
     ctx.register_tool(name="conexoes_listar", toolset=_TS_CONEXOES, schema=_CONEXOES_LISTAR, handler=tool_conexoes_listar)
     ctx.register_tool(name="conexoes_executar", toolset=_TS_CONEXOES, schema=_CONEXOES_EXECUTAR, handler=tool_conexoes_executar)
     try:

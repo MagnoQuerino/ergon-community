@@ -30,6 +30,10 @@ RUN npm run typecheck -w server && npm run build -w web
 # Alvo de testes: docker build --target test .
 FROM build AS test
 COPY fixtures fixtures
+# a tela de abertura do aplicativo do computador e as constantes que o servidor e a página combinam com ele (voltar de
+# versão): os testes conferem os dois lados. Só no alvo de testes; a imagem publicada não leva nada do aplicativo.
+COPY desktop/ui desktop/ui
+COPY desktop/src-tauri/src desktop/src-tauri/src
 RUN npm test -w server && npm test -w web
 
 FROM ${NODE_IMAGE} AS runtime

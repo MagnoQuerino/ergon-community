@@ -174,7 +174,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
             <h2 id="onb-title" className="onb__title">Conecte a inteligência da equipe</h2>
             <p className="muted">Os agentes pensam com a sua conta de IA. Recomendamos a <b>assinatura Nous</b>: é com ela que a equipe tem a melhor experiência, pelo custo e pela versatilidade. O login acontece na página da própria conta: a sua senha não passa pelo sistema.</p>
             <AiAccounts pitch onChanged={loadAi} />
-            {!aiConnected && <p className="hint">Sem conta conectada, as respostas ficam simuladas. Dá para conectar depois, em Conexões.</p>}
+            {!aiConnected && <p className="hint">Sem conta conectada, a equipe ainda não trabalha nos pedidos. Dá para conectar depois, em Conexões.</p>}
             {err && <p className="error" role="alert">{err}</p>}
             <div className="onb__nav">
               <button className="btn" onClick={() => setStep('more')}>Voltar</button>

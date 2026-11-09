@@ -193,6 +193,12 @@ pub fn validar_forma(m: &Value) -> Result<(), Recusa> {
         let motivo = s["motivo"].as_str().unwrap_or("");
         f(motivo.trim().chars().count() >= 10 && motivo.chars().count() <= 400, "seguranca: motivo de 10 a 400 caracteres")?;
     }
+    // piso de segurança carregado adiante: a versão de segurança obrigatória mais nova publicada até esta (não depois dela)
+    if let Some(p) = m.get("segurancaMinima") {
+        let p = p.as_str().unwrap_or("");
+        partes(p)?;
+        f(comparar_versoes(p, m["versao"].as_str().unwrap_or(""))? != Ordering::Greater, "segurancaMinima depois da própria versão")?;
+    }
     let comps = m["componentes"].as_object().filter(|o| !o.is_empty());
     f(comps.is_some(), "sem componentes")?;
     for (id, c) in comps.unwrap() {

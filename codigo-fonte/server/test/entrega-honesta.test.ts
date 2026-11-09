@@ -120,7 +120,7 @@ describe('entrega honesta: o card #16 e o card #17', () => {
     assert.equal(estado(c.task).completed, 0, 'continua aberto');
   });
 
-  test('#16 com a equipe ligada: a falha vai para a pessoa ("Tentar de novo"); a equipe não tenta mandar por conta própria', async () => {
+  test('#16 com a equipe ligada: a falha volta para a equipe, com o que a conferência mostrou; a pessoa não recebe o problema (decisão 19)', async () => {
     await h.close(); await preparar(true);
     conectarMicrosoft();
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agente })).json.id as string;
@@ -128,11 +128,15 @@ describe('entrega honesta: o card #16 e o card #17', () => {
     h.db.run('UPDATE tasks SET conversation_id = ? WHERE id = ?', conv, c.task);
     await terminar(c.run, 'Preparei o e-mail para a Delta pedindo o orçamento revisado, com o número do pedido, o prazo de resposta até sexta e a assinatura, pronto para você enviar quando quiser.');
     assert.equal(resultado(c.task)!.state, 'falha');
-    // uma nova tentativa por iniciativa da equipe poderia enviar o que a pessoa só queria preparar (as palavras do pedido enganam)
-    assert.equal(h.db.get("SELECT 1 AS x FROM audit_events WHERE action = 'task.persist' AND target_id = ?", c.task), undefined, 'sem ciclo da equipe');
+    // antes (até a rc.24) ia direto para a pessoa; agora a equipe tenta de novo, e o envio que pede confirmação continua pedindo
+    const rodada = h.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE action = 'task.persist' AND target_id = ?", c.task);
+    assert.ok(rodada, 'a equipe tenta de novo');
+    const ev = JSON.parse(rodada!.evidence) as { kind: string; refazer: string };
+    assert.equal(ev.kind, 'conexao');
+    assert.match(ev.refazer, /A conferência de entrega mostra que enviar o e-mail não foi feito: ninguém chamou a conexão com Microsoft 365.*conexoes_executar \(conexao="microsoft" acao="email\.enviar"/);
     const cartao = ((await req(h, 'GET', `/api/proposals?conversationId=${conv}`, s)).json as Array<{ kind: string; status: string; payload: string | null }>)
       .find((p) => p.kind === 'info_request' && p.status === 'proposed');
-    assert.equal(JSON.parse(cartao!.payload!).need, 'retry', 'a pessoa decide: Tentar de novo');
+    assert.equal(cartao, undefined, 'nada para a pessoa enquanto a equipe resolve');
   });
 
   test('#17: "não saiu do papel" nunca vira entrega para aprovar; o cartão da conversa oferece tentar de novo', async () => {
@@ -411,7 +415,7 @@ describe('entrega honesta: o que a revisão achou (falsos positivos, nova tentat
     assert.equal(b.state, 'validado', b.justification);
   });
 
-  test('ninguém no card tem a ferramenta Conexões: falha dizendo isso, nunca "confirme quando estiver feito"', async () => {
+  test('ninguém no card tem a ferramenta Conexões: falha dizendo isso, nunca "confirme quando estiver feito"; um colega que tem entra pela equipe', async () => {
     await h.close(); await preparar(true); conectarMicrosoft();
     const tools = (JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', agente)!.tools) as string[]).filter((x) => x !== 'contas');
     h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(tools), agente);
@@ -421,7 +425,8 @@ describe('entrega honesta: o que a revisão achou (falsos positivos, nova tentat
     assert.equal(r.state, 'falha', r.justification);
     assert.equal(JSON.parse(r.evidence).honesta, 'sem_ferramenta');
     assert.match(r.justification, /não tem a ferramenta Conexões.*Ligue as Conexões no perfil dele, em Equipe, ou passe o card a um colega que tenha/);
-    semCiclo(c.task);
+    // os colegas têm as Conexões: a equipe passa a quem tem (equipe-tenta-de-novo.test.ts cobre o resto)
+    assert.match(h.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE action = 'task.persist' AND target_id = ?", c.task)!.evidence, /Quem tem a ferramenta Conexões na equipe/);
   });
 
   test('rotina "Teams + e-mail → tarefas" com modelo: a conferência da rodada leva o registro do serviço (sem leitura registrada, nunca "validado")', async () => {

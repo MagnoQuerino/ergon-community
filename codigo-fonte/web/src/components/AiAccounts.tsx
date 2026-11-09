@@ -13,7 +13,7 @@ const BILLING: Record<string, string> = {
   subscription: 'Assinatura: sem custo por uso; valem a mensalidade e os limites do plano. O painel mostra só os tokens.',
   credits: 'Créditos: cada uso consome os créditos da conta (na Nous, os da sua assinatura). O custo aparece no painel quando a conta informa o valor cobrado; o saldo fica no portal da conta.',
   api: 'Chave de API: cobra por uso; o custo aparece quando o provedor informa o valor cobrado.',
-  none: 'Nenhuma conta conectada: os agentes respondem em modo de simulação.',
+  none: 'Nenhuma conta conectada: a equipe ainda não trabalha nos pedidos.',
 };
 /** A melhor escolha para o Ergon: uma assinatura, os principais modelos do mercado e um modelo por agente. */
 const RECOMMENDED = 'nous';
@@ -122,7 +122,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
   return (
     <>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
-      {s.executor === 'simulated' && <p className="hint warn">Esta instalação está em modo de simulação: as respostas dos agentes não usam IA de verdade, mesmo com uma conta conectada.</p>}
+      {s.executor === 'simulated' && <p className="hint warn">Esta instalação está configurada para não usar contas de IA: as respostas dos agentes não passam pela conta conectada.</p>}
       {!s.available && <p className="hint">A conexão de contas de IA não está disponível nesta instalação.</p>}
       {nous && (
         <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''}`} aria-label="Nous Portal, a melhor escolha">

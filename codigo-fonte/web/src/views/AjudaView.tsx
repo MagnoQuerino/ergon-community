@@ -20,7 +20,7 @@ const ARTICLES: Article[] = [
     body: (c) => <>
       <p>O Ergon é uma equipe de agentes de IA organizada como uma cidade: cada agente tem uma função, um setor, instruções e ferramentas. Você conversa, eles trabalham, e nada importante acontece sem a sua aprovação.</p>
       <ol>
-        <li><b>Conecte a assinatura Nous</b> em <Go c={c} v="conexoes">Conexões › Contas de IA</Go> — a melhor escolha: os principais modelos numa conta só, inclusive gratuitos, e um modelo para cada agente. Sem conta de IA, as respostas são simuladas (o chip <i>SIMULAÇÃO</i> aparece no topo).</li>
+        <li><b>Conecte a assinatura Nous</b> em <Go c={c} v="conexoes">Conexões › Contas de IA</Go> — a melhor escolha: os principais modelos numa conta só, inclusive gratuitos, e um modelo para cada agente. Sem conta de IA, a equipe não trabalha nos pedidos (o aviso <i>SEM CONTA DE IA</i> aparece no topo).</li>
         <li><b>Converse com {c.coord}</b>, que coordena: conte o que você precisa e o pedido vai para quem faz.</li>
         <li><b>Ative o Briefing Diário</b> em <Go c={c} v="rotinas">Rotinas</Go>: todo dia, um resumo do que importa.</li>
         <li><b>Ajuste a equipe</b> ao seu jeito (veja “Personalizar a equipe”).</li>
@@ -90,7 +90,7 @@ const ARTICLES: Article[] = [
     body: (c) => <>
       <ul>
         <li><b>Contas de IA</b>: a <b>assinatura Nous é a melhor escolha</b> — os principais modelos do mercado numa assinatura só (há plano grátis com modelos gratuitos) e cada agente com o modelo certo, do mais forte ao mais econômico. Quem já paga o ChatGPT pode conectar também: a equipe aproveita a assinatura, sem pagar por uso, e cada agente usa o modelo que você escolher entre as duas contas.</li>
-        <li><b>WhatsApp, Microsoft 365 e Google</b>: a equipe consulta e-mails, agenda e arquivos de qualquer período, deixa rascunhos e responde quando você pede. O que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.</li>
+        <li><b>WhatsApp, Microsoft 365 e Google</b>: a equipe consulta e-mails, agenda e arquivos de qualquer período, deixa rascunhos e responde quando você pede. O que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões. Para mais cuidado, ali você também pode pedir confirmação antes de organizar e aprovação antes de abrir sites ou rodar programas depois de ler as suas contas.</li>
         <li><b>Tarefas e quadros</b>: ligue quadros de outros aplicativos nos dois sentidos: dar check ou mover aqui reflete lá. Os agentes também criam e movem tarefas neles.</li>
       </ul>
       <p>Tudo em <Go c={c} v="conexoes">Conexões</Go>. Conteúdo de mensagens e documentos é tratado como dado, nunca como instrução.</p>
@@ -124,8 +124,8 @@ const ARTICLES: Article[] = [
 ];
 
 const PROBLEMS: Array<{ q: string; a: (c: Ctx) => ReactNode; keywords: string }> = [
-  { q: 'As respostas parecem genéricas ou aparece “SIMULAÇÃO”', keywords: 'simulação genérica conta ia',
-    a: (c) => <>Nenhuma conta de IA está conectada: as respostas são simuladas. Conecte a assinatura Nous (a melhor escolha) em <Go c={c} v="conexoes">Conexões › Contas de IA</Go>.</> },
+  { q: 'As respostas parecem genéricas ou aparece “SEM CONTA DE IA”', keywords: 'genérica sem conta ia resposta',
+    a: (c) => <>Nenhuma conta de IA está conectada: as respostas saem genéricas e nada conta como trabalho feito. Conecte a assinatura Nous (a melhor escolha) em <Go c={c} v="conexoes">Conexões › Contas de IA</Go>.</> },
   { q: 'Um agente ficou “executando” e não responde', keywords: 'travado executando fila parado cancelar',
     a: () => <>Há um limite de execuções ao mesmo tempo, e o resto espera na fila. Na conversa, use <b>Cancelar</b> e envie de novo. Se continuar, veja em Atividade o que aconteceu.</> },
   { q: 'A demanda foi para a pessoa errada', keywords: 'encaminhou errado responsável trocar',

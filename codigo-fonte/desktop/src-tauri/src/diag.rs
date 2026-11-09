@@ -43,6 +43,8 @@ pub struct Diagnostico {
 pub struct Saude {
     pub versao: String,
     pub trancado: bool,
+    /// a equipe (os agentes) está ligando ou sendo renovada para a versão do Ergon ("equipe": "ligando" ou "renovando")
+    pub renovando: bool,
 }
 
 /// O que respondeu na porta do Ergon.
@@ -78,6 +80,7 @@ pub fn interpretar_saude(status: u16, corpo: &str) -> Result<Saude, String> {
     Ok(Saude {
         versao: v.get("version").and_then(|s| s.as_str()).unwrap_or("?").to_string(),
         trancado: v.get("sealed").and_then(|s| s.as_bool()).unwrap_or(false),
+        renovando: matches!(v.get("equipe").and_then(|s| s.as_str()), Some("renovando" | "ligando")),
     })
 }
 
@@ -339,7 +342,7 @@ mod testes {
         Entrada { inst: Instalacao { raiz: None, porta: 8787, teste: false }, saude, docker, conteineres, windows: true, ambiente: false, podman: false }
     }
     fn ok() -> Resposta {
-        Resposta::Ergon(Saude { versao: "0.2.0".into(), trancado: false })
+        Resposta::Ergon(Saude { versao: "0.2.0".into(), trancado: false, renovando: false })
     }
 
     #[test]
@@ -366,12 +369,22 @@ mod testes {
     }
 
     #[test]
+    fn equipe_renovando_na_saude() {
+        let s = |corpo: &str| interpretar_saude(200, corpo).unwrap().renovando;
+        assert!(s("{\"service\":\"ergon\",\"version\":\"1.1.0-rc.25\",\"equipe\":\"renovando\"}"));
+        assert!(s("{\"service\":\"ergon\",\"version\":\"1.1.0-rc.25\",\"equipe\":\"ligando\"}"), "ligando (recriando na versão nova) também conta");
+        assert!(!s("{\"service\":\"ergon\",\"version\":\"1.1.0-rc.25\",\"equipe\":\"pronta\"}"));
+        // versão sem o campo (anterior à rc.24): passa direto
+        assert!(!s("{\"service\":\"ergon\",\"version\":\"1.1.0-rc.20\"}"));
+    }
+
+    #[test]
     fn versoes() {
         assert!(versao_ok("0.2.0", "0.2.0"));
         assert!(versao_ok("0.10.1", "0.2.0"));
         assert!(versao_ok("1.0.0-beta", "0.2.0"));
         assert!(!versao_ok("0.1.9", "0.2.0"));
-        let d = decidir(entrada(Resposta::Ergon(Saude { versao: "0.1.0".into(), trancado: false }), Docker::Pronto("27".into()), vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")]));
+        let d = decidir(entrada(Resposta::Ergon(Saude { versao: "0.1.0".into(), trancado: false, renovando: false }), Docker::Pronto("27".into()), vec![c("ergon", "running", "127.0.0.1:8787->8787/tcp")]));
         assert_eq!(d.estado, "incompativel");
         assert!(!d.confirmado);
     }

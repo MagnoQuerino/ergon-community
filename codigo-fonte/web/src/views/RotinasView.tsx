@@ -9,6 +9,7 @@ import { ChatPanel } from '../components/ChatPanel.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { useHashParam } from '../lib/route.ts';
 import { pushRecent } from '../lib/recents.ts';
+import { cardClick } from '../lib/cardClick.ts';
 
 /**
  * Rotinas: trabalhos que a equipe já sabe fazer. Biblioteca (o que dá para delegar), Minhas rotinas (o que está
@@ -270,6 +271,15 @@ function TemplateDrawer({ t, coordName, onClose, onGo, onInstalled }: { t: Routi
 
 function Mine({ list, focusId, coord, onOpenAgent, onSetup, reload, onLibrary }: { list: Routine[]; focusId?: string | null; coord: { id: string; name: string } | null; onOpenAgent: OpenAgent; onSetup: (id: string) => void; reload: () => void; onLibrary: () => void }) {
   const [edit, setEdit] = useState<Routine | null>(null);
+  // a gaveta aberta tem alteração não salva: abrir outra rotina (o Editar dela, mesmo depois do "Cancelar" no
+  // "Descartar as alterações?") não troca a gaveta no meio da edição
+  const dirtyEdit = useRef(false);
+  const openEdit = (r: Routine) => {
+    if (edit && edit.id !== r.id && dirtyEdit.current) return;
+    pushRecent({ kind: 'rotina', id: r.id, label: r.name, href: `#rotinas?rotina=${r.id}` });
+    setEdit(r);
+  };
+  const closeEdit = () => { dirtyEdit.current = false; setEdit(null); };
   useEffect(() => {
     if (!focusId) return;
     const el = document.getElementById(`rotina-${focusId}`);
@@ -287,8 +297,9 @@ function Mine({ list, focusId, coord, onOpenAgent, onSetup, reload, onLibrary }:
   );
   return (
     <>
-      <div className="rt-mine">{list.map((r) => <RoutineCard key={r.id} r={r} coord={coord} onOpenAgent={onOpenAgent} onSetup={() => onSetup(r.id)} onEdit={() => { pushRecent({ kind: 'rotina', id: r.id, label: r.name, href: `#rotinas?rotina=${r.id}` }); setEdit(r); }} reload={reload} />)}</div>
-      {edit && <EditDrawer r={list.find((x) => x.id === edit.id) ?? edit} coordName={coord?.name ?? 'a coordenação'} onClose={() => setEdit(null)} reload={reload} />}
+      <div className="rt-mine">{list.map((r) => <RoutineCard key={r.id} r={r} coord={coord} onOpenAgent={onOpenAgent} onSetup={() => onSetup(r.id)} onEdit={() => openEdit(r)} reload={reload} />)}</div>
+      {/* key: cada rotina monta a própria gaveta (os campos nunca levam o que foi digitado para outra) */}
+      {edit && <EditDrawer key={edit.id} r={list.find((x) => x.id === edit.id) ?? edit} coordName={coord?.name ?? 'a coordenação'} onClose={closeEdit} onDirty={(d) => { dirtyEdit.current = d; }} reload={reload} />}
     </>
   );
 }
@@ -301,10 +312,11 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
   const [ask, setAsk] = useState(false);
   const runNow = () => (r.input ? setAsk(true) : act(() => api.post(`/api/routines/${r.id}/run`, { clientRequestId: requestId() })));
   return (
-    <article id={`rotina-${r.id}`} className={`card rt-item ${r.status === 'paused' ? 'rt-item--paused' : ''}`}>
+    // o card inteiro abre a edição (os detalhes da rotina); os botões de baixo continuam fazendo só o deles
+    <article id={`rotina-${r.id}`} className={`card rt-item card-click ${r.status === 'paused' ? 'rt-item--paused' : ''}`} onClick={cardClick(onEdit)}>
       <header className="rt-item__head">
         <div>
-          <h3>{r.name}</h3>
+          <h3><button type="button" className="card-open" onClick={onEdit} aria-label={`${r.name}: ver os detalhes e editar`}>{r.name}</button></h3>
           <p className="muted">
             <Icon name="clock" size={12} /> {r.schedule}{r.status === 'active' && r.nextRunAt ? ` · próxima: ${when(r.nextRunAt)}` : ''}
             {' · '}executa: {r.agentName ?? '—'}{r.templateName ? '' : ' · criada na conversa'}
@@ -450,7 +462,7 @@ function FilePicker({ value, onChange, max, accept }: { value: FileRef[]; onChan
   );
 }
 
-function EditDrawer({ r, coordName, onClose, reload }: { r: Routine; coordName: string; onClose: () => void; reload: () => void }) {
+function EditDrawer({ r, coordName, onClose, onDirty, reload }: { r: Routine; coordName: string; onClose: () => void; onDirty?: (dirty: boolean) => void; reload: () => void }) {
   const [name, setName] = useState(r.name);
   const [trigger, setTrigger] = useState<RoutineTrigger>(r.trigger);
   const [extra, setExtra] = useState(r.config.extra ?? '');
@@ -462,6 +474,7 @@ function EditDrawer({ r, coordName, onClose, reload }: { r: Routine; coordName: 
   const usesStale = r.config.sources.includes('tarefas.paradas');
   const ref = useRef<HTMLElement>(null);
   const dirty = name !== r.name || JSON.stringify(trigger) !== JSON.stringify(r.trigger) || extra !== (r.config.extra ?? '') || stale !== (r.config.staleDays ?? 3) || JSON.stringify(params) !== JSON.stringify(r.config.params ?? {});
+  useEffect(() => { onDirty?.(dirty); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   const close = () => { if (keepTyped(dirty, 'as alterações desta rotina')) onClose(); };
   useSurface(ref, { onClose: close, outside: true });
   const save = async () => {

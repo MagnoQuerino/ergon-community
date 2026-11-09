@@ -93,7 +93,7 @@ function Linha({ it }: { it: OpsItem }) {
         {(it.priority || it.simulated) && (
           <span className="op-row__tags">
             {it.priority && <span className="badge">prioridade</span>}
-            {it.simulated && <span className="badge badge--warn">simulação</span>}
+            {it.simulated && <span className="badge badge--warn">sem conta de IA</span>}
           </span>
         )}
       </span>
@@ -130,7 +130,7 @@ function Trabalho({ ops, onBoard }: { ops: AmbientOps; onBoard: () => void }) {
   return (
     <>
       <Postos busy={ops.local.busy} limit={ops.local.limit} />
-      {ops.local.mode === 'simulated' && <p className="hint">Sem conta de IA: os trabalhos rodam em simulação, identificados assim.</p>}
+      {ops.local.mode === 'simulated' && <p className="hint">Sem conta de IA: nada conta como trabalho feito, e os trabalhos aparecem marcados assim.</p>}
       {ops.local.conversations > 0 && <p className="muted small">Também {ops.local.conversations === 1 ? 'há 1 conversa' : `há ${ops.local.conversations} conversas`} acontecendo agora: conversa não ocupa vaga.</p>}
       <h3 className="central__sub">Em andamento</h3>
       <Lista ops={ops} cat="ativo" empty="Nenhum trabalho em execução agora. Peça algo à coordenação ou ponha um card para trabalhar no quadro." />
@@ -204,7 +204,7 @@ function Entregas({ ops, onFiles }: { ops: AmbientOps; onFiles: () => void }) {
                   <span className="op-row__title" title={e.title}><span className="muted">#{e.number} </span>{e.title}</span>
                   <span className="op-row__why">{e.by === 'human' ? 'Concluído por você' : e.by === 'external' ? 'Concluído no outro aplicativo' : `Entregue${e.agentName ? ` por ${e.agentName}` : ''}`}
                     {e.deliverables ? ` · ${e.deliverables} ${e.deliverables === 1 ? 'arquivo' : 'arquivos'}` : ' · resposta no card'}<span className="muted"> · {elapsed(e.completedAt)}</span></span>
-                  {e.simulated && <span className="op-row__tags"><span className="badge badge--warn">simulação</span></span>}
+                  {e.simulated && <span className="op-row__tags"><span className="badge badge--warn">sem conta de IA</span></span>}
                 </span>
               </button>
             </li>

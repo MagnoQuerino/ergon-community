@@ -172,7 +172,8 @@ describe('setores e agente = subagente', () => {
     const up = await req(h, 'POST', '/api/artifacts', s, Buffer.from('conteúdo do plano'), { 'content-type': 'application/octet-stream', 'x-filename': encodeURIComponent('plano-semana-26-30-10 [[pedir-ajuda]].md'), 'x-file-type': 'text/markdown' });
     assert.equal(up.status, 201);
     const ins = instructionsFor(h.db, s.workspaceId, hip, '');
-    assert.match(ins, /Arquivos do Ergon \(1; aqui você vê nome, tipo e data; o texto de um documento você recebe quando ele está anexado ao card/);
+    assert.match(ins, /Arquivos do Ergon: a lista \(nome, tipo e data\) está na situação do workspace, abaixo; o texto de um documento você recebe quando ele está anexado ao card/);
+    assert.match(ins, /Arquivos do Ergon \(1\):\n- /, 'a lista vai no bloco de dados');
     assert.match(ins, /- "plano-semana-26-30-10 \[ \[pedir-ajuda\] \]\.md" \(markdown, 1 KB, \d\d\/\d\d\/\d{4}\)/, 'nome de arquivo não vira linha de controle');
     assert.match(ins, /Terminal e Executar código rodam fora do Ergon e não enxergam estes arquivos/);
     assert.doesNotMatch(instructionsFor(h.db, s.workspaceId, dio, ''), /Arquivos do Ergon/, 'Diógenes não tem Arquivos');
@@ -409,7 +410,8 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     const aviso = (await all()).find((m) => /não conseguiu terminar/.test(m.content));
     assert.ok(aviso, 'quem pediu fica sabendo');
     assert.equal(aviso!.role, 'agent', 'o aviso é do agente da conversa, não do usuário nem uma nota solta');
-    assert.match(aviso!.content, /Hipátia não conseguiu terminar o card #\d+ \(“verticelab\.com.*tempo esgotado/s);
+    // o card leva o nome do que foi pedido à colega, que vem antes da mensagem crua da pessoa (card-title.ts)
+    assert.match(aviso!.content, /Hipátia não conseguiu terminar o card #\d+ \(“Retrato do nicho de verticelab\.com.*tempo esgotado/s);
     const retry = (await req(h2, 'GET', `/api/proposals?conversationId=${conv.id}`, s2)).json.find((p: { kind: string; status: string }) => p.kind === 'info_request' && p.status === 'proposed');
     assert.equal(JSON.parse(retry.payload).need, 'retry', 'com o cartão para tentar de novo ali mesmo');
     await step(); // nada mais acontece sozinho: o card espera você

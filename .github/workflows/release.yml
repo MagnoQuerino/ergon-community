@@ -248,6 +248,9 @@ jobs:
         run: |
           gh release view canal-teste >/dev/null 2>&1 || gh release create canal-teste --prerelease --title "Canal de teste" --notes "Ponteiro do canal de teste: manifesto assinado da pré-versão mais recente."
           gh release upload canal-teste manifesto-teste.json manifesto-teste.json.sig --clobber
+          # o mesmo manifesto também fica na própria pré-versão: é por ele que o Ergon Desktop volta para esta versão
+          # depois ("Voltar para esta versão" em Configurações › Atualizações), como o manifesto-estavel.json de cada final
+          gh release upload "$GITHUB_REF_NAME" manifesto-teste.json manifesto-teste.json.sig --clobber
       - name: Sem chave, sem manifesto
         if: env.ERGON_MANIFESTO_CHAVE == ''
         run: echo "::warning::ERGON_MANIFESTO_CHAVE não configurado; manifesto do canal não promovido (a versão segue só com latest.json)"

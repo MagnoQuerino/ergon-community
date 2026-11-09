@@ -69,7 +69,7 @@ export class ReviewService {
         workspaceId, agentId: reviewer.id, taskId, kind: 'subtask', reviewId, reviewStep: 'questions',
         input: clip(`Revisão da tarefa #${task.number}: ${task.title}\nAutor: ${producer.name} (${producer.role})\n\nMaterial a revisar:\n${clip(material, 2400)}\n\n` +
           `Rodada 1 de ${this.cfg.reviewMaxRounds}. Faça suas perguntas ao autor e termine com a linha do VEREDITO.`, this.cfg.maxInputChars),
-        instructions: instructionsFor(this.db, workspaceId, reviewer.id, CHANNEL),
+        instructions: instructionsFor(this.db, workspaceId, reviewer.id, CHANNEL, { foco: { taskId } }),
         idempotencyKey: `review-${reviewId}-q1`,
       });
       audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'review.start', targetType: 'task', targetId: taskId, evidence: { reviewId, producer: producer.name, maxRounds: this.cfg.reviewMaxRounds }, result: 'revisão iniciada' });
@@ -110,7 +110,7 @@ export class ReviewService {
         workspaceId: v.workspace_id, agentId: v.producer_id, taskId: v.task_id, kind: 'subtask', reviewId: v.id, reviewStep: 'answers',
         input: clip(`${this.nameOf(v.reviewer_id)} revisou o seu material da tarefa #${task.number} (${task.title}), rodada ${v.round} de ${v.max_rounds}, e perguntou:\n\n${clip(output ?? '', 2000)}\n\n` +
           'Responda a cada pergunta de forma objetiva e, quando for preciso, apresente a correção do material.', this.cfg.maxInputChars),
-        instructions: instructionsFor(this.db, v.workspace_id, v.producer_id, CHANNEL),
+        instructions: instructionsFor(this.db, v.workspace_id, v.producer_id, CHANNEL, { foco: { taskId: v.task_id } }),
         idempotencyKey: `review-${v.id}-a${v.round}`,
       });
       return;
@@ -126,7 +126,7 @@ export class ReviewService {
         input: clip(`Revisão da tarefa #${task.number}: ${task.title} — rodada ${round} de ${v.max_rounds}.\n\nMaterial original (resumo):\n${clip(material, 1200)}\n\n` +
           `Suas perguntas anteriores:\n${clip(questions?.output ?? '', 1000)}\n\nRespostas do autor:\n${clip(output ?? '', 1400)}\n\n` +
           'Se as respostas resolvem o essencial, termine com VEREDITO: pronto. Se não, faça novas perguntas (no máximo cinco) e termine com VEREDITO: ajustar.', this.cfg.maxInputChars),
-        instructions: instructionsFor(this.db, v.workspace_id, v.reviewer_id, CHANNEL),
+        instructions: instructionsFor(this.db, v.workspace_id, v.reviewer_id, CHANNEL, { foco: { taskId: v.task_id } }),
         idempotencyKey: `review-${v.id}-q${round}`,
       });
     }

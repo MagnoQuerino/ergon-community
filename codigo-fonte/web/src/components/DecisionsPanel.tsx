@@ -3,10 +3,12 @@ import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { openCard, openConversation } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
+import { cardClick } from '../lib/cardClick.ts';
 import { PROPOSAL_KIND, type Decisions, type View } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
+import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 
 type OpenAgent = (id: string, tab?: 'conversa' | 'perfil' | 'atividade', draft?: string | null, conversationId?: string | null) => void;
 
@@ -22,13 +24,15 @@ const NEED_LABEL = { info: 'pede uma informação', approval: 'pede a sua aprova
 /** Um item: o que é (clicável: abre o card ou a conversa) e, ao lado, as decisões ali mesmo. */
 function Item({ badge, onOpen, openLabel, children, actions }: { badge: string; onOpen?: () => void; openLabel?: string; children: ReactNode; actions: ReactNode }) {
   return (
-    <article className="dec-card">
+    // o item inteiro abre o card ou a conversa (antes, só o texto e a setinha); Aprovar e Recusar fazem só o deles
+    <article className={`dec-card ${onOpen ? 'card-click' : ''}`} onClick={onOpen ? cardClick(onOpen) : undefined}>
       <div className="dec-card__top">
         <span className="badge">{badge}</span>
         {onOpen && <button type="button" className="dec-card__open" onClick={onOpen} title={openLabel} aria-label={openLabel}><Icon name="chevron-right" size={14} /></button>}
       </div>
       {onOpen ? <button type="button" className="dec-card__txt dec-card__link" onClick={onOpen}>{children}</button> : <div className="dec-card__txt">{children}</div>}
-      <div className="row row--wrap dec-card__acts">{actions}</div>
+      {/* errar o Aprovar ou o Recusar por pouco (o vão entre eles) não tira a pessoa do painel */}
+      <div className="row row--wrap dec-card__acts" data-card-skip>{actions}</div>
     </article>
   );
 }
@@ -59,7 +63,8 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
     act(taskId, async () => { const r = await api.post<{ result: string }>(`/api/tasks/${taskId}/respond`, note ? { action, text: note } : { action }); setText((x) => ({ ...x, [taskId]: '' })); setReturning(null); return r; });
   // qual foi a decisão em andamento: quem recusou lê "Recusando…", não "Enviando…"
   const [decisao, setDecisao] = useState<'apply' | 'reject'>('apply');
-  const proposal = (id: string, decision: 'apply' | 'reject') => { setDecisao(decision); return act(id, () => api.post(`/api/proposals/${id}`, { decision })); };
+  // extra: o alcance (cartão de regra) ou o prazo (aprovação depois de ler) do botão escolhido
+  const proposal = (id: string, decision: 'apply' | 'reject', extra: { alcance?: string; prazo?: string } = {}) => { setDecisao(decision); return act(id, () => api.post(`/api/proposals/${id}`, { decision, ...extra })); };
   const x = d.data;
   const routines = x?.proposals.filter((p) => p.kind === 'routine' || p.kind === 'routine_edit') ?? [];
   const team = x?.proposals.filter((p) => p.kind !== 'routine' && p.kind !== 'routine_edit') ?? [];
@@ -119,19 +124,26 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
           ))}
 
           {team.length > 0 && <h4 className="rt-sub">Propostas e pedidos da equipe</h4>}
-          {team.map((p) => p.kind === 'conexao' ? (
-            // ação numa conta: o texto inteiro (recolhido quando longo) e de onde veio — o card (#N · quem pediu) ou a conversa
+          {team.map((p) => p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' ? (
+            // ação numa conta: o texto inteiro (recolhido quando longo) e de onde veio — o card (#N · quem pediu) ou a conversa.
+            // Este cartão existe para ler antes de Confirmar um envio em nome da pessoa: ele NÃO abre inteiro (clicar no texto
+            // que se está lendo, ou errar Confirmar/Recusar por pouco, tirava o painel da frente); abre só pelo "#N · quem"
             <article key={p.id} className="dec-card">
               <div className="dec-card__top">
-                <span className="badge">{KIND.conexao}</span>
+                <span className="badge">{KIND[p.kind]}</span>
                 {p.task_id ? <button type="button" className="linkish" onClick={() => openCard(p.task_id!)} title={`Abrir o card #${p.task_number}`}>#{p.task_number}{p.agent_name ? ` · ${p.agent_name}` : ''}</button>
                   : conv(p) ? <button type="button" className="linkish" onClick={conv(p)} title="Abrir a conversa">{p.agent_name ?? 'a conversa'}</button>
                   : p.agent_name && <span className="muted small">{p.agent_name}</span>}
               </div>
               <div className="dec-card__txt"><TextoLongo texto={p.summary} /></div>
               <div className="row row--wrap dec-card__acts">
-                <button className="btn btn--sm btn--primary" disabled={!!busy} onClick={() => void proposal(p.id, 'apply')}>{busy === p.id && decisao === 'apply' ? 'Enviando…' : 'Confirmar'}</button>
-                <button className="btn btn--sm" disabled={!!busy} onClick={() => void proposal(p.id, 'reject')}>{busy === p.id && decisao === 'reject' ? 'Recusando…' : 'Recusar'}</button>
+                {busy === p.id && p.kind !== 'conexao' ? <span className="badge" role="status">{decisao === 'reject' ? 'Recusando…' : p.kind === 'regra' ? 'Aplicando…' : 'Aprovando…'}</span>
+                  : p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} ocupado={!!busy} onEscolher={(alcance) => void proposal(p.id, 'apply', { alcance })} onRecusar={() => void proposal(p.id, 'reject')} />
+                  : p.kind === 'depois_de_ler' ? <BotoesPrazo ocupado={!!busy} onEscolher={(prazo) => void proposal(p.id, 'apply', { prazo })} onRecusar={() => void proposal(p.id, 'reject')} />
+                  : <>
+                    <button className="btn btn--sm btn--primary" disabled={!!busy} onClick={() => void proposal(p.id, 'apply')}>{busy === p.id && decisao === 'apply' ? 'Enviando…' : 'Confirmar'}</button>
+                    <button className="btn btn--sm" disabled={!!busy} onClick={() => void proposal(p.id, 'reject')}>{busy === p.id && decisao === 'reject' ? 'Recusando…' : 'Recusar'}</button>
+                  </>}
               </div>
             </article>
           ) : (
@@ -167,7 +179,7 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
             </Item>
           ))}
           {x.ruleList.map((r) => (
-            <Item key={r.id} badge="regra"
+            <Item key={r.id} badge="regra" onOpen={() => { location.hash = '#conexoes?regras'; onClose?.(); }} openLabel="Ver em Conexões › Regras"
               actions={<>
                 <button className="btn btn--sm btn--primary" disabled={!!busy} onClick={() => void act(r.id, () => api.post(`/api/rules/${r.id}`, { decision: 'active' }))}>Aprovar</button>
                 <button className="btn btn--sm" disabled={!!busy} onClick={() => void act(r.id, () => api.post(`/api/rules/${r.id}`, { decision: 'rejected' }))}>Recusar</button>

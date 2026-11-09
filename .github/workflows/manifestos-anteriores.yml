@@ -1,0 +1,48 @@
+# Pacote assinado das versões já publicadas, para o "Voltar para esta versão" do Ergon Desktop: gera, assina, confere
+# como cliente limpo e anexa a cada versão escolhida o manifesto do canal dela (manifesto-teste.json numa pré-versão,
+# manifesto-estavel.json numa final). A partir da rc.25 a esteira de lançamento já anexa sozinha; isto é para as
+# anteriores (o aplicativo não volta para antes da 1.1.0-rc.24) e para renovar a validade (90 dias) de uma que vá
+# servir de volta. Decisão de 09/11: NÃO fazer o backfill das versões antigas (a volta pelo aplicativo vale daqui para
+# frente, e só para as duas versões publicadas logo antes da instalada). Só roda quando alguém pede (Actions › Executar)
+# e precisa da chave do manifesto. Não mexe no
+# ponteiro do canal (canal-teste e a versão mais recente): quem atualiza continua indo para a mais nova.
+name: Pacotes assinados das versões anteriores
+on:
+  workflow_dispatch:
+    inputs:
+      etiquetas:
+        description: 'Versões, separadas por espaço (ex.: v1.1.0-rc.23 v1.1.0-rc.24)'
+        required: true
+
+permissions:
+  contents: write   # anexar o manifesto à versão
+
+defaults:
+  run:
+    working-directory: codigo-fonte
+
+jobs:
+  anexar:
+    runs-on: ubuntu-24.04
+    env:
+      ERGON_MANIFESTO_CHAVE: ${{ secrets.ERGON_MANIFESTO_CHAVE }}
+      ETIQUETAS: ${{ inputs.etiquetas }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.1
+      - name: Gerar, assinar, conferir e anexar
+        run: |
+          [ -n "$ERGON_MANIFESTO_CHAVE" ] || { echo "::error::ERGON_MANIFESTO_CHAVE não configurado: nada foi anexado"; exit 1; }
+          for TAG in $ETIQUETAS; do
+            [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "::error::etiqueta inválida: $TAG"; exit 1; }
+            CANAL=$([[ "$TAG" == *-* ]] && echo teste || echo estavel)
+            D="$RUNNER_TEMP/$TAG"; mkdir -p "$D"
+            node scripts/distribuicao/cli.mjs gerar --repo "$GITHUB_REPOSITORY" --tag "$TAG" --canal "$CANAL" --saida "$D/manifesto-$CANAL.json"
+            node scripts/distribuicao/cli.mjs assinar --chave ambiente "$D/manifesto-$CANAL.json"
+            node scripts/distribuicao/cli.mjs resolver "$D/manifesto-$CANAL.json" --canal "$CANAL" --edicao "$(jq -r .edicao "$D/manifesto-$CANAL.json")"
+            gh release upload "$TAG" "$D/manifesto-$CANAL.json" "$D/manifesto-$CANAL.json.sig" --clobber
+            echo "$TAG: manifesto-$CANAL.json anexado"
+          done

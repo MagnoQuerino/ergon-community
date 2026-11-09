@@ -99,7 +99,10 @@ import { ESCOPOS_MICROSOFT } from './conexoes/acoes/microsoft.ts';
 // ------------------------------------------------------------------------------------------------- etapas da Microsoft
 /**
  * A: base (qualquer conta) e trabalho (Teams, conta de trabalho ou escola); B: leitura; C: canais (opcional, sempre o
- * administrador). A ordem do login encadeado é base → trabalho → leitura; os canais só com o botão.
+ * administrador). O login encadeado segue base → trabalho → leitura → canais de uma vez, sem a pessoa voltar para clicar de novo;
+ * os canais só entram no encadeamento quando se sabe que a conta é de quem aprova pela empresa (as funções de diretório no token);
+ * sem saber, sabendo que não, ou se eles já voltaram sem ser dados, a tela oferece o pedido ao administrador, sem mandar a pessoa
+ * a uma página da Microsoft sem saída.
  */
 export type Etapa = 'base' | 'trabalho' | 'leitura' | 'canais';
 export const ETAPAS: Etapa[] = ['base', 'trabalho', 'leitura', 'canais'];
@@ -150,6 +153,7 @@ export function contaPessoalMicrosoft(t: { pessoal?: boolean; account?: string }
 export interface Tokens {
   /** conta pessoal da Microsoft (sem Teams) */ pessoal?: boolean;
   /** locatário da conta (do id_token): o link do pedido ao administrador vai para ele */ tid?: string;
+  /** a conta no Entra (oid do id_token): confere se a conta do Teams que se liga ao Ergon é a mesma (services/teams-app) */ oid?: string;
   access_token: string; refresh_token: string; expires_at: number; account: string;
   /** permissões pedidas no último login */ scopes?: string;
   /** as que a conta deu (a pessoa pode ter dado só parte); na Microsoft, a soma das etapas: é o que a renovação pede */ granted?: string;
@@ -162,7 +166,33 @@ function idClaims(t: string | undefined): Record<string, unknown> {
   try { return t ? JSON.parse(Buffer.from(t.split('.')[1] ?? '', 'base64url').toString('utf8')) as Record<string, unknown> : {}; } catch { return {}; }
 }
 
-export interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; next?: string; proxima?: Etapa }
+/**
+ * Funções de diretório que podem dar o consentimento em nome da organização para permissões delegadas
+ * (https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent, "Prerequisites"; ids dos modelos em
+ * https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference): administrador global, de
+ * funções privilegiadas, de aplicativos de nuvem e de aplicativos.
+ */
+export const FUNCOES_QUE_APROVAM = new Set([
+  '62e90394-69f5-4237-9190-012177145e10', 'e8611ab8-c189-46e8-94e1-60213ab1f814', '158c047a-c907-4556-b7ef-446551a6b5f7', '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3',
+]);
+/**
+ * A conta pode aprovar pela empresa? Pela declaração `wids` (funções de diretório) do primeiro token que a trouxer: true, false,
+ * ou null quando nenhum a traz (a Microsoft só a manda com "Funções de diretório" ligado na configuração do token do app, e o
+ * formato do acesso ao Graph pode mudar). Só decide se os canais entram no encadeamento (só com true): nenhuma permissão depende disto.
+ */
+export function podeAprovarPelaEmpresa(...tokens: Array<string | undefined>): boolean | null {
+  for (const t of tokens) {
+    const w = idClaims(t).wids;
+    if (Array.isArray(w)) return w.some((x) => typeof x === 'string' && FUNCOES_QUE_APROVAM.has(x.toLowerCase()));
+  }
+  return null;
+}
+
+/**
+ * `semCanais`: o encadeamento terminou antes dos canais porque eles precisam do administrador e não se sabe que a conta é a de
+ * quem aprova pela empresa (ou eles já voltaram sem ser dados): a tela oferece o pedido.
+ */
+export interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; next?: string; proxima?: Etapa; semCanais?: boolean }
 
 export class SsoAuth {
   private readonly cfg: Config;
@@ -171,7 +201,10 @@ export class SsoAuth {
   private readonly refreshing = new Map<string, Promise<string>>();
   /** login com outra conta neste workspace: quem usava a antiga em outros workspaces fica com ela */
   private readonly aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string) => void;
-  constructor(cfg: Config, secrets: SecretStore, aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string) => void = () => undefined) { this.aoTrocarConta = aoTrocarConta; this.cfg = cfg; this.secrets = secrets; }
+  /** a etapa já foi pedida a esta mesma conta e voltou sem ser dada (ou não voltou): o encadeamento não insiste (integrations.ts) */
+  private readonly jaRecusada: (workspaceId: string, etapa: Etapa) => boolean;
+  constructor(cfg: Config, secrets: SecretStore, aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string) => void = () => undefined,
+    jaRecusada: (workspaceId: string, etapa: Etapa) => boolean = () => false) { this.aoTrocarConta = aoTrocarConta; this.jaRecusada = jaRecusada; this.cfg = cfg; this.secrets = secrets; }
 
   /** O botão só funciona com o app registrado no provedor (identificador e, no Google, o segredo). */
   configured(kind: SsoKind): boolean {
@@ -216,15 +249,19 @@ export class SsoAuth {
     return `${p.authorizeUrl}?${q}`;
   }
 
-  /** A próxima etapa do login encadeado: pula a que a conta já deu; leitura e canais terminam o encadeamento. */
-  private proximaEtapa(etapa: Etapa, trabalho: boolean, dadas: string[]): Etapa | null {
-    if (etapa === 'leitura' || etapa === 'canais') return null;
+  /**
+   * A próxima etapa do login encadeado: pula a que a conta já deu e segue até os canais (conta pessoal não tem Teams: para ela, a
+   * lista acaba na leitura). `canais` false: não se sabe que a conta aprova pela empresa; o encadeamento termina e diz isso
+   * (semCanais), em vez de mandar a pessoa a uma página da Microsoft sem saída.
+   */
+  private proximaEtapa(etapa: Etapa, trabalho: boolean, dadas: string[], canais: boolean): { proxima: Etapa | null; semCanais: boolean } {
     const tem = new Set(dadas.map((e) => e.toLowerCase()));
-    for (const e of ETAPAS.slice(ETAPAS.indexOf(etapa) + 1, ETAPAS.indexOf('leitura') + 1)) {
-      const falta = proprioDaEtapa(e, trabalho).filter((x) => !tem.has(x.toLowerCase()));
-      if (falta.length) return e;
+    for (const e of ETAPAS.slice(ETAPAS.indexOf(etapa) + 1)) {
+      if (!proprioDaEtapa(e, trabalho).some((x) => !tem.has(x.toLowerCase()))) continue;
+      if (e === 'canais' && !canais) return { proxima: null, semCanais: true };
+      return { proxima: e, semCanais: false };
     }
-    return null;
+    return { proxima: null, semCanais: false };
   }
 
   /** Volta do login: o `state` (aleatório, uso único) é a prova de quem começou o fluxo — e de qual provedor. */
@@ -244,6 +281,7 @@ export class SsoAuth {
     const mesma = conhecida?.account === account ? conhecida : null;
     const claims = idClaims(idToken);
     const tid = typeof claims.tid === 'string' ? claims.tid : mesma?.tid;
+    const oid = typeof claims.oid === 'string' && GUID.test(claims.oid) ? claims.oid.toLowerCase() : mesma?.oid;
     // uma renovação da credencial anterior ainda andando não serve mais a ninguém (ela é descartada ao terminar)
     this.refreshing.delete(`${s.workspaceId}:${kind}`);
     let granted = keep.granted;
@@ -257,15 +295,23 @@ export class SsoAuth {
     this.secrets.writeOwn(s.workspaceId, kind, {
       ...keep, ...(granted !== undefined ? { granted } : {}), refresh_token: keep.refresh_token || (antes?.account === account ? antes?.refresh_token : '') || '', account, scopes: s.scopes,
       ...(kind === 'microsoft' && pessoal !== undefined ? { pessoal } : {}), ...(kind === 'microsoft' && typeof tid === 'string' ? { tid } : {}),
+      ...(kind === 'microsoft' && typeof oid === 'string' ? { oid } : {}),
     } satisfies Tokens);
-    // conta de trabalho ou escola: já conectada; segue para o que falta (Teams; depois a leitura). Sem o locatário, não dá para saber
+    // já conectada; segue para o que falta (Teams, a leitura e, em conta de trabalho, os canais). Sem o locatário, não dá para saber
     if (kind === 'microsoft' && typeof claims.tid === 'string') {
       const trabalho = claims.tid !== MSA_TENANT;
-      const proxima = this.proximaEtapa(s.etapa, trabalho, listaDeEscopos(granted));
+      // os canais sempre pedem o administrador: entram no encadeamento SÓ quando se sabe que a conta aprova pela empresa (as
+      // funções de diretório, wids, vêm no token desde que o app pede "Funções de diretório"; decisão de 09/11). Quando ela não
+      // aprova, quando não se sabe, ou quando esta mesma conta já voltou sem eles, o encadeamento termina e a tela oferece o
+      // pedido ao administrador (sem mandar a pessoa a uma página da Microsoft sem saída)
+      const aprova = trabalho ? podeAprovarPelaEmpresa(idToken, keep.access_token) : null;
+      const canais = aprova === true && !(mesma && this.jaRecusada(s.workspaceId, 'canais'));
+      const { proxima, semCanais } = this.proximaEtapa(s.etapa, trabalho, listaDeEscopos(granted), canais);
       if (proxima) {
         const hint = typeof claims.preferred_username === 'string' ? claims.preferred_username : undefined;
         return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, proxima, next: this.start(kind, s.workspaceId, s.userId, { etapa: proxima, loginHint: hint, trabalho }) };
       }
+      if (semCanais) return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, semCanais: true };
     }
     return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa };
   }
@@ -335,10 +381,12 @@ export class SsoAuth {
       if (!atual || atual.refresh_token !== t.refresh_token) throw new ProviderError('unavailable', 'a conta mudou durante a renovação do acesso; tente de novo');
       // Microsoft: o `scope` da resposta é o que o acesso cobre agora; e o id_token traz o locatário a quem conectou antes de ele ser guardado
       const tid = kind === 'microsoft' ? (typeof idClaims(idToken).tid === 'string' ? String(idClaims(idToken).tid) : t.tid) : undefined;
+      const oidNovo = idClaims(idToken).oid;
+      const oid = kind === 'microsoft' ? (typeof oidNovo === 'string' && GUID.test(oidNovo) ? oidNovo.toLowerCase() : t.oid) : undefined;
       const granted = n.granted !== undefined ? (kind === 'microsoft' ? listaDeEscopos(n.granted).join(' ') : n.granted) : t.granted;
       const pessoal = t.pessoal ?? (tid ? tid === MSA_TENANT : undefined);
       this.secrets.write(workspaceId, kind, { ...n, ...(granted !== undefined ? { granted } : {}), account: t.account, ...(t.scopes ? { scopes: t.scopes } : {}),
-        ...(pessoal !== undefined ? { pessoal } : {}), ...(tid ? { tid } : {}) });
+        ...(pessoal !== undefined ? { pessoal } : {}), ...(tid ? { tid } : {}), ...(oid ? { oid } : {}) });
       return n.access_token;
     })().finally(() => { if (this.refreshing.get(key) === p) this.refreshing.delete(key); });
     this.refreshing.set(key, p);

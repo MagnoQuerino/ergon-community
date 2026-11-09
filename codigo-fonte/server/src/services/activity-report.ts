@@ -178,7 +178,7 @@ export function activityReport(db: Db, o: ReportOpts): { markdown: string; filen
     'task.plan', 'task.delivery', 'task.handoff', 'task.help_step', 'task.help_result', 'task.help_not_done', 'task.step_done', 'task.review_round',
     'task.persist', 'tasks.retire_fixtures',
     'integration.connect', 'integration.disconnect', 'integration.unlink', 'integration.whatsapp.risks_accepted', 'integration.whatsapp.filters',
-    'connection.validate', 'conexoes.liberar_tudo', 'conexao.permissoes', 'conexao.confirmacao', 'conexao.recusada', 'conexao.teste',
+    'connection.validate', 'conexoes.liberar_tudo', 'conexoes.aprovar_depois_de_ler', 'conexoes.confirmar_organizar', 'conexoes.depois_de_ler.aprovado', 'conexoes.depois_de_ler.recusado', 'conexao.permissoes', 'conexao.confirmacao', 'conexao.recusada', 'conexao.teste',
     'mirror.push', 'mirror.error', 'mirror.import', 'mirror.task.import', 'mirror.task.update', 'mirror.task.missing',
     'documents.trash.empty', 'documents.purge', 'source.edited', 'initiative.opener', 'initiative.welcome', 'proposal.reconsider', 'question.answer',
     'routines.recommend', 'routines.recommend.run', 'routine.upgrade', 'ledger.approve', 'review.start',

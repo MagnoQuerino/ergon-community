@@ -5,6 +5,8 @@ import { passkeyRegister, passkeysHere } from '../lib/passkey.ts';
 import type { Me, SecurityStatus } from '../lib/types.ts';
 import { RecoveryReveal } from '../components/AuthFlow.tsx';
 import { Loading } from '../brand/Brand.tsx';
+import { BaixarMeusDados } from '../components/BaixarMeusDados.tsx';
+import { TEXTO_ANTES_DE_EXCLUIR, TEXTO_EXCLUIR_CONTA } from '../lib/textos-tela.ts';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 /** "Chrome · Windows" a partir do user agent (só para reconhecer a sessão). */
@@ -206,7 +208,12 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
       {!admin && s.mode === 'local' && (
         <section className="card">
           <h3>Excluir a minha conta</h3>
-          <p className="muted">Apaga de vez a sua equipe de IA, as conversas, as tarefas, os arquivos e as conexões neste computador. Primeiro sai a sua chave: daí em diante, nada disso abre mais, nem por backup.</p>
+          <p className="muted">{TEXTO_EXCLUIR_CONTA}</p>
+          <div className="sec-passo">
+            <p><b>1. {TEXTO_ANTES_DE_EXCLUIR}</b></p>
+            <BaixarMeusDados />
+          </div>
+          <p><b>2. Excluir</b></p>
           {leaving === null
             ? <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setLeaving('')}>Excluir a minha conta…</button>
             : (

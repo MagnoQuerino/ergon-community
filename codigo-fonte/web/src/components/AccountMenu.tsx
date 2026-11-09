@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import type { Me } from '../lib/types.ts';
 import { useSurface } from '../lib/surface.ts';
+import { useBalao } from '../lib/balao.ts';
 import { Icon } from './Icon.tsx';
 
 /** Foto da pessoa (ou a inicial do nome, sem foto). */
@@ -13,7 +14,7 @@ export function Avatar({ me, size = 28 }: { me: Me; size?: number }) {
 
 /** Avatar no canto da barra: abre Minha conta, Alternar conta e Sair. */
 export function AccountMenu({ me, onAccount, onLogout }: { me: Me; onAccount: () => void; onLogout: () => void }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useBalao('conta');
   return (
     <span className="topbar__acctwrap">
       <button className="topbar__acct" data-keep-surface onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="menu"

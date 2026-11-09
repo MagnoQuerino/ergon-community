@@ -8,10 +8,10 @@ import { S, idParams, strList } from '../lib/schemas.ts';
 import { HttpError, notFound, now } from '../lib/util.ts';
 import type { AuthContext } from '../services/auth.ts';
 import { audit, type Bus } from '../services/bus.ts';
-import { INTEGRATIONS, PRECISA_ADMINISTRADOR, TASK_KINDS, TOKEN_KINDS, integrationRow, limparEtapas, marcarBaseBloqueada, marcarConectando, marcarEtapa, motivoDoProvedor, setIntegration, settingsOf, voltaDoConectando, workspaceDoEstadoAdmin, type IntegrationKind, type Integrations } from '../services/integrations.ts';
+import { INTEGRATIONS, PRECISA_ADMINISTRADOR, TASK_KINDS, consentimentoDe, exigeAdministrador, TOKEN_KINDS, integrationRow, limparEtapas, marcarBaseBloqueada, marcarConectando, marcarEtapa, motivoDoProvedor, setIntegration, settingsOf, voltaDoConectando, workspaceDoEstadoAdmin, type IntegrationKind, type Integrations } from '../services/integrations.ts';
 import { paraTela } from '../lib/texto-tela.ts';
 import { ProviderError, importBoards } from '../services/mirror.ts';
-import { SSO_KINDS, isEtapa, type Etapa, type SsoKind } from '../services/sso.ts';
+import { ETAPAS, SSO_KINDS, isEtapa, type Etapa, type SsoKind } from '../services/sso.ts';
 import { filtersOf, risksAccepted, WA_RISKS_VERSION, type WhatsAppReader } from '../services/whatsapp.ts';
 
 export interface IntegrationRoutesDeps {
@@ -75,6 +75,12 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
       const ws = workspaceDoEstadoAdmin(db, base ?? '');
       if (ws && (etapa === 'leitura' || etapa === 'canais')) {
         marcarEtapa(db, ws, etapa, q.error ? { estado: 'bloqueado', erro: 'O administrador não aprovou o pedido.' } : { estado: 'aprovado' });
+        // o link de uma etapa pede também as anteriores (sso.ts, escoposDaEtapa): aprovado, o Teams (e a leitura, no link dos
+        // canais) que esperavam o administrador também ficam aprovados, e a tela e o agente param de mandar pedir a ele
+        if (!q.error) {
+          const marcas = consentimentoDe(integrationRow(db, ws, 'microsoft')).etapas ?? {};
+          for (const e of ETAPAS.slice(1, ETAPAS.indexOf(etapa))) if (marcas[e] && marcas[e]!.estado !== 'aprovado') marcarEtapa(db, ws, e, { estado: 'aprovado' });
+        }
         audit(db, bus, { workspaceId: ws, actorType: 'connector', action: 'integration.admin_consent', targetType: 'integration', targetId: kind, evidence: { etapa, error: q.error ?? null, description: (q.error_description ?? '').slice(0, 300) }, result: q.error ? 'o administrador não aprovou' : 'o administrador aprovou' });
         bus.publish(ws, 'integrations.changed', { kind });
         // sem conta conectada (o pedido do primeiro acesso, no cartão desconectado): o botão que existe é "Já aprovaram? Entrar de novo"
@@ -94,15 +100,24 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
         setIntegration(db, ws, kind, semErro ? { ...volta, last_error: null } : volta);
       }
       // etapa depois da base que voltou sem ser dada: na leitura e nos canais, a tela mostra o pedido ao administrador (recusar ou não
-      // poder autorizar dá no mesmo para a pessoa); no Teams, "Tentar de novo"
-      if (kind === 'microsoft' && etapa && etapa !== 'base') marcarEtapa(db, ws, etapa, { estado: 'bloqueado', erro: motivo.slice(0, 300) });
+      // poder autorizar dá no mesmo para a pessoa); no Teams, "Tentar de novo", a não ser que a empresa exija o administrador.
+      // Cada etapa pede também as anteriores: a que exige o administrador leva junto as seguintes, que ficam com o pedido pronto
+      // (sem mandar a pessoa a outra página que daria no mesmo). O que já foi dado continua valendo
+      if (kind === 'microsoft' && etapa && etapa !== 'base') {
+        const admin = exigeAdministrador(q.error, q.error_description);
+        marcarEtapa(db, ws, etapa, { estado: 'bloqueado', erro: motivo.slice(0, 300), ...(admin ? { admin: true } : {}) });
+        // herdada: as seguintes não foram pedidas; o encadeamento ainda as tenta depois da aprovação (etapaJaRecusada)
+        if (admin) for (const e of ETAPAS.slice(ETAPAS.indexOf(etapa) + 1)) marcarEtapa(db, ws, e, { estado: 'bloqueado', erro: null, admin: true, herdada: true });
+      }
       audit(db, bus, { workspaceId: ws, actorType: 'connector', action: 'integration.connect.error', targetType: 'integration', targetId: kind, evidence: { etapa, error: q.error ?? null, description: (q.error_description ?? '').slice(0, 300) }, result: motivo.slice(0, 200) });
       bus.publish(ws, 'integrations.changed', { kind });
     };
     const quem = q.state ? integrations.sso.workspaceOf(String(q.state).slice(0, 200)) : null;
     // etapa depois da primeira recusada ou com erro: a conexão das anteriores continua valendo
     const etapa = q.state ? integrations.sso.stageOf(String(q.state).slice(0, 200)) : null;
-    const parcial = (e: Etapa | null) => (e === 'leitura' ? 'sem-leitura' : e === 'canais' ? 'sem-canais' : e === 'trabalho' ? 'parcial' : null);
+    // o Teams que a empresa só libera com o administrador: o aviso diz isso (e o cartão mostra o pedido), não "não terminou"
+    const parcial = (e: Etapa | null) => (e === 'leitura' ? 'sem-leitura' : e === 'canais' ? 'sem-canais'
+      : e === 'trabalho' ? (exigeAdministrador(q.error, q.error_description) ? 'precisa-admin' : 'parcial') : null);
     if (q.error || !q.code || !q.state) {
       // a empresa não deixa a pessoa autorizar sozinha nem o primeiro passo: o cartão desconectado já mostra o pedido ao administrador
       const precisaAdmin = kind === 'microsoft' && (!etapa || etapa === 'base') && (q.error === 'consent_required' || PRECISA_ADMINISTRADOR.test(q.error_description ?? ''));
@@ -123,7 +138,8 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
       integrations.markSso(kind, r.workspaceId, r.userId, r.account);
       if (kind === 'microsoft' && r.etapa !== 'base') marcarEtapa(db, r.workspaceId, r.etapa, null);
       if (r.next && r.proxima) { marcarEtapa(db, r.workspaceId, r.proxima, { estado: 'pedido' }); return reply.redirect(r.next); }
-      return back('conectado');
+      // tudo o que a pessoa pode dar já foi dado; os canais (opcionais) esperam o administrador, e a tela mostra o pedido pronto
+      return back(r.semCanais ? 'sem-canais' : 'conectado');
     } catch (e) {
       // o erro da troca do código (rede, código do provedor) só passa se já for para a pessoa
       const m = paraTela(e instanceof Error ? e.message : null);

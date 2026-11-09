@@ -2,7 +2,8 @@ import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import type { AgentTool, AiStatus, AppState, ProcessLimit, Usage } from '../lib/types.ts';
+import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, ProcessLimit, Usage } from '../lib/types.ts';
+import { COMPACTAR_AJUDA, COMPACTAR_ATUALIZACAO, COMPACTAR_DEPOIS, COMPACTAR_ROTULO, COMPOSICAO_ESTIMADA, COMPOSICAO_INTRO, COMPOSICAO_NOTA, COMPOSICAO_VAZIA, PASSOS_AJUDA, PASSOS_DEPOIS, PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, detalhe, fatias, passosCompartilhado, tamanhoMedio } from '../lib/custo.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { holdersText } from '../lib/team.ts';
@@ -15,7 +16,7 @@ import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
 import { PacotesPanel } from './PacotesPanel.tsx';
 import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
-import { MusicCredits } from '../components/MusicButton.tsx';
+import { MusicCreditsBlock } from '../components/MusicButton.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
 
 // módulo opcional (views/world): a Community não traz essa pasta
@@ -53,7 +54,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
       </header>
       {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
       <VersionCard onOpen={() => setTab('atualizacoes')} />
-      <details className="hint music-credits"><summary>Créditos da música ambiente</summary><MusicCredits /></details>
+      <MusicCreditsBlock />
     </div>
   );
 }
@@ -108,6 +109,7 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
   const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const tools = useResource<ToolWithHolders[]>('/api/ai/tools', ['agents.changed']);
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed']);
+  const composicao = useResource<ComposicaoResumo>('/api/usage/composicao?dias=30', ['usage.changed']);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
 
@@ -154,6 +156,8 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
         <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
           A equipe puxa conversa quando você chega (boas-vindas com o resumo e quem precisa de você)</label>
         <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+        <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+        <CompactacaoField ligada={state.teamCompactacao !== false} pendente={state.teamCompactacaoPendente === true} atualizacao={state.teamCompactacaoAtualizacao === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <p className="hint">Conversas não entram no limite: você fala com qualquer agente a qualquer hora, mesmo com a equipe ocupada. Cards, rotinas e revisões acima do limite esperam a vez — os cards em “A fazer”, onde você pode marcar Prioridade ou arrastar para o topo. Cada tarefa usa o modelo de IA e conta no consumo.</p>
       </section>
 
@@ -164,7 +168,104 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
           <p className="hint">{usage.data.note}</p>
         </section>
       )}
+
+      {composicao.data && <ComposicaoCard data={composicao.data} />}
     </>
+  );
+}
+
+/**
+ * Passos por pedido: quantas idas ao modelo um pedido pode dar (padrão 20). Grava na hora; vale no próximo pedido. O valor
+ * e o aviso de que ainda não chegou à equipe vêm do servidor (o que vale de fato no motor deste workspace, também depois
+ * de recarregar a tela); a resposta do salvar só antecipa o aviso até o estado chegar.
+ */
+function PassosField({ value, pendente, outros, onSaved, onError }: { value: number; pendente: boolean; outros: number; onSaved: () => void; onError: (text: string) => void }) {
+  const [escolha, setEscolha] = useState(value);
+  const [depois, setDepois] = useState(pendente);
+  useEffect(() => { setEscolha(value); }, [value]);
+  useEffect(() => { setDepois(pendente); }, [pendente]);
+  const save = async (n: number) => {
+    const antes = escolha;
+    setEscolha(n);
+    try { const r = await api.put<{ value: number; applied: boolean }>('/api/team/max-turns', { value: n }); setDepois(!r.applied); onSaved(); }
+    catch (x) { setEscolha(antes); onError(errMsg(x)); }
+  };
+  const opcoes = [...new Set([...PASSOS_OPCOES, escolha])].sort((a, b) => a - b);
+  return (
+    <div className="field field--limit">
+      <label htmlFor="passos-pedido">Passos por pedido</label>
+      <select id="passos-pedido" value={String(escolha)} onChange={(e) => void save(Number(e.target.value))} aria-describedby="passos-pedido-hint">
+        {opcoes.map((n) => <option key={n} value={n}>até {n} passos{n === PASSOS_PADRAO ? ' (padrão)' : ''}</option>)}
+      </select>
+      <small id="passos-pedido-hint" className="muted">{PASSOS_AJUDA}{outros ? ` ${passosCompartilhado(outros)}` : ''}{depois ? ` ${PASSOS_DEPOIS}` : ''}</small>
+    </div>
+  );
+}
+
+/**
+ * Resumir as conversas longas mais cedo (ligado por padrão): grava na hora e vale no próximo pedido. Uma caixa de marcar do
+ * mesmo jeito das outras da seção, com a ajuda embaixo e o aviso em linha própria. O valor e os avisos vêm do servidor
+ * (ainda não chegou à equipe; ou a equipe é de antes desta opção e ela chega com a próxima atualização — a escolha fica
+ * guardada); a resposta do salvar só antecipa o aviso até o estado chegar.
+ */
+function CompactacaoField({ ligada, pendente, atualizacao, outros, onSaved, onError }: { ligada: boolean; pendente: boolean; atualizacao: boolean; outros: number; onSaved: () => void; onError: (text: string) => void }) {
+  const [on, setOn] = useState(ligada);
+  const [depois, setDepois] = useState(pendente);
+  const [chega, setChega] = useState(atualizacao);
+  useEffect(() => { setOn(ligada); }, [ligada]);
+  useEffect(() => { setDepois(pendente); }, [pendente]);
+  useEffect(() => { setChega(atualizacao); }, [atualizacao]);
+  const save = async (v: boolean) => {
+    const antes = on;
+    setOn(v);
+    try {
+      const r = await api.put<{ enabled: boolean; applied: boolean; atualizacao?: boolean }>('/api/team/compactacao', { enabled: v });
+      setChega(r.atualizacao === true); setDepois(!r.applied && r.atualizacao !== true); onSaved();
+    } catch (x) { setOn(antes); onError(errMsg(x)); }
+  };
+  const aviso = chega ? COMPACTAR_ATUALIZACAO : depois ? COMPACTAR_DEPOIS : '';
+  return (
+    <div className="compactar">
+      <label className="check"><input type="checkbox" checked={on} onChange={(e) => void save(e.target.checked)} aria-describedby="compactar-hint" /> {COMPACTAR_ROTULO}</label>
+      <p id="compactar-hint" className="hint">{COMPACTAR_AJUDA}{outros ? ` ${passosCompartilhado(outros)}` : ''}</p>
+      {aviso && <p className="hint" role="status">{aviso}</p>}
+    </div>
+  );
+}
+
+/** Do que é feita cada chamada ao modelo: a equipe toda e os agentes que mais gastam (últimos 30 dias, medido). */
+function ComposicaoCard({ data }: { data: ComposicaoResumo }) {
+  const linhas = data.geral ? [data.geral, ...data.agentes.slice(0, 8)] : [];
+  return (
+    <section className="card">
+      <h3>Do que é feita cada chamada</h3>
+      <p className="muted small">{COMPOSICAO_INTRO}</p>
+      {!linhas.length ? <p className="hint">{COMPOSICAO_VAZIA}</p> : (
+        <div className="custo-lista">
+          {linhas.map((a, i) => <ComposicaoLinha key={a.agentId || 'geral'} a={a} geral={i === 0} />)}
+        </div>
+      )}
+      {!!linhas.length && <p className="hint">{COMPOSICAO_NOTA}{linhas.some((a) => a.estimado) ? ` ${COMPOSICAO_ESTIMADA}` : ''}</p>}
+    </section>
+  );
+}
+
+function ComposicaoLinha({ a, geral }: { a: ComposicaoAgente; geral: boolean }) {
+  const partes = fatias(a);
+  return (
+    <div className="custo-linha">
+      <div className="custo-linha__topo">
+        {geral ? <strong>{a.nome}</strong> : <b>{a.nome}</b>}
+        <span className="muted small">{chamadasTexto(a.chamadas)} · {tamanhoMedio(a.mediaPorChamada)}</span>
+      </div>
+      <div className="custo-barra" role="img" aria-label={partes.map((p) => `${p.rotulo} ${p.pct}`).join(', ')}>
+        {partes.filter((p) => p.fracao > 0).map((p) => <span key={p.id} className={`custo--${p.id}`} style={{ width: `${p.fracao * 100}%` }} />)}
+      </div>
+      <ul className="custo-legenda">
+        {partes.map((p) => <li key={p.id}><i className={`custo--${p.id}`} aria-hidden="true" />{p.rotulo} {p.pct}</li>)}
+      </ul>
+      <p className="hint small">{detalhe(a)}</p>
+    </div>
   );
 }
 

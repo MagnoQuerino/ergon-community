@@ -102,4 +102,17 @@ describe('regra de execução de código, por agente', () => {
     h.db.run("INSERT INTO run_tools (workspace_id, run_id, seq, tool, preview, started_at) VALUES (?, ?, 0, 'terminal', NULL, ?)", s.workspaceId, b.run, new Date().toISOString());
     assert.equal((await executar(a.sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'aguardando_confirmacao');
   });
+
+  test('a proteção depois de ler vem desligada, e a rede de segurança do Terminal continua de pé', async () => {
+    const { sessao, run } = await pedir(comCodigo, 'leia as tarefas do Asana e rode o script');
+    h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(['quadro', 'contas']), comCodigo);
+    assert.equal((await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'feita');
+    const pol = (await req(h, 'POST', '/internal/bridge/v1/tool-policy', null, { session_id: sessao }, { 'x-ergon-bridge-token': TOKEN })).json as { bloqueadas: string[] };
+    assert.deepEqual(pol.bloqueadas, [], 'depois de ler as contas, o Terminal não é barrado (proteção desligada por padrão)');
+    // um programa rodou: as ações nas contas confirmam, mesmo sem a proteção depois de ler
+    h.db.run("INSERT INTO run_tools (workspace_id, run_id, seq, tool, preview, started_at) VALUES (?, ?, 0, 'terminal', NULL, ?)", s.workspaceId, run, new Date().toISOString());
+    assert.equal((await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'aguardando_confirmacao');
+    assert.equal((await executar(sessao, 'tarefa.criar', { titulo: 'x', quadro: 'Vendas' })).status, 'aguardando_confirmacao');
+    assert.equal(escritas, 0);
+  });
 });

@@ -12,6 +12,8 @@ fn main() {
             "instalar_ergon",
             "verificar_atualizacao",
             "atualizar_ergon",
+            "avaliar_volta",
+            "voltar_versao",
         ]),
     ))
     .expect("falha ao preparar o Tauri");

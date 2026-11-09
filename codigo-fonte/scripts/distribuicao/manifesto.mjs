@@ -51,6 +51,44 @@ export function seguranca(texto) {
   return motivo.length >= 10 ? { obrigatoria: true, motivo } : null;
 }
 
+/**
+ * Piso de segurança carregado adiante ("segurancaMinima" no manifesto): a versão mais nova, até `versao` (inclusive),
+ * cujas novidades trazem a linha "Segurança (obrigatória)". Assim o aviso não se perde quando sai uma versão comum
+ * depois de uma de segurança, e o Ergon Desktop não volta para antes dela. `versoes`: as páginas de lançamento
+ * ({ tag_name, body, draft }); rascunhos e etiquetas fora do formato ficam de fora. Nenhuma: null.
+ */
+export function segurancaMinima(versoes, versao) {
+  let piso = null;
+  for (const r of versoes ?? []) {
+    if (!r || r.draft) continue;
+    const v = String(r.tag_name ?? '').replace(/^v/, '');
+    try { if (compararVersoes(v, versao) > 0) continue; } catch { continue; }
+    if (!seguranca(r.body ?? '')) continue;
+    if (!piso || compararVersoes(v, piso) > 0) piso = v;
+  }
+  return piso;
+}
+
+/** Quantas versões publicadas o manifesto carrega em "recentes" (bastam para achar as duas anteriores à instalada). */
+export const RECENTES = 12;
+/**
+ * As versões publicadas no canal até `versao` (inclusive), a mais nova primeiro, no máximo RECENTES ("recentes" no
+ * manifesto). O Ergon Desktop só volta para as DUAS anteriores à instalada nesta lista (decisão de 09/11; vale daqui
+ * para frente: manifesto sem a lista não limita). Canal de teste: pré-versões e finais; estável: só as finais.
+ * Rascunhos e etiquetas fora do formato (ex.: o ponteiro "canal-teste") ficam de fora.
+ */
+export function recentesDoCanal(versoes, versao, canal) {
+  const vistas = new Set();
+  for (const r of versoes ?? []) {
+    if (!r || r.draft || (canal === 'estavel' && r.prerelease)) continue;
+    const v = String(r.tag_name ?? '').replace(/^v/, '');
+    if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(v)) continue;
+    try { if (compararVersoes(v, versao) > 0) continue; } catch { continue; }
+    vistas.add(v);
+  }
+  return [...vistas].sort((a, b) => compararVersoes(b, a)).slice(0, RECENTES);
+}
+
 // --------------------------------------------------------------------------------------------------- origens
 export function origemPermitida(url) {
   let u; try { u = new URL(url); } catch { return false; }
@@ -75,6 +113,17 @@ export function validarForma(m) {
   if (m.seguranca !== undefined) {
     f(m.seguranca && typeof m.seguranca === 'object' && m.seguranca.obrigatoria === true, 'seguranca: só "obrigatoria: true" com o motivo');
     f(typeof m.seguranca.motivo === 'string' && m.seguranca.motivo.trim().length >= 10 && m.seguranca.motivo.length <= 400, 'seguranca: motivo de 10 a 400 caracteres');
+  }
+  // piso de segurança carregado adiante: a de segurança obrigatória mais nova publicada até esta (não depois dela)
+  if (m.segurancaMinima !== undefined) {
+    f(typeof m.segurancaMinima === 'string', 'segurancaMinima: versão em texto');
+    f(compararVersoes(m.segurancaMinima, m.versao) <= 0, 'segurancaMinima depois da própria versão');
+  }
+  // as versões publicadas no canal até esta (a mais nova primeiro): por elas o aplicativo acha as duas anteriores
+  if (m.recentes !== undefined) {
+    f(Array.isArray(m.recentes) && m.recentes.length > 0 && m.recentes.length <= RECENTES, 'recentes: lista de 1 a 12 versões');
+    for (const v of m.recentes) { f(typeof v === 'string', 'recentes: versão em texto'); f(compararVersoes(v, m.versao) <= 0, 'recentes: versão depois da própria'); }
+    for (let i = 1; i < m.recentes.length; i++) f(compararVersoes(m.recentes[i - 1], m.recentes[i]) > 0, 'recentes: fora de ordem ou repetida');
   }
   f(m.componentes && typeof m.componentes === 'object' && Object.keys(m.componentes).length > 0, 'sem componentes');
   for (const [id, c] of Object.entries(m.componentes)) {

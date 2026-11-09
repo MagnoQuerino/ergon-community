@@ -3,18 +3,39 @@
  * convites para quem administra, e remover conta (a pessoa, ou quem administra). Quem administra não lê os dados de
  * ninguém: vê só quem tem conta, quando entrou e se a frase pessoal já foi gerada.
  */
-import type { FastifyInstance } from 'fastify';
+import { Readable } from 'node:stream';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import { log, scrub } from '../lib/log.ts';
+import { tentarDeNovo, type Tentativas } from '../lib/tentar-de-novo.ts';
 import { HttpError, now } from '../lib/util.ts';
 import { throttle } from '../security/factors.ts';
-import { SESSION_COOKIE, createSession, requireRecentAuth } from '../services/auth.ts';
+import { SESSION_COOKIE, createSession, requireRecentAuth, type AuthContext } from '../services/auth.ts';
 import { audit } from '../services/bus.ts';
+import { exportarMeusDados } from '../services/meus-dados.ts';
 import { createInvite, isAdmin, listInvites, registerPerson, removePersonData, revokeInvite, signupPolicy } from '../services/people.ts';
+import type { Routines } from '../services/routines.ts';
 import { sessionDays, setInstanceSetting, type SecurityDeps } from '../services/security.ts';
 
 const str = (max: number, min = 0) => ({ type: 'string', minLength: min, maxLength: max });
 
-export function registerPeopleRoutes(app: FastifyInstance, d: SecurityDeps & { upkeep: (userId: string) => void; removeMotor: (userId: string) => Promise<void> }): void {
+/** arquivos de "Baixar meus dados" montando (ou descendo) ao mesmo tempo na instalação inteira */
+export const EXPORTAR_AO_MESMO_TEMPO = 2;
+
+export interface PeopleRouteDeps extends SecurityDeps {
+  upkeep: (userId: string) => void;
+  removeMotor: (userId: string) => Promise<void>;
+  routines: Routines;
+  /** esperas entre as tentativas de apagar o cofre da equipe de quem saiu (testes encurtam) */
+  esperasMotor?: number[];
+  /** quantos "Baixar meus dados" a instalação monta ao mesmo tempo (padrão: EXPORTAR_AO_MESMO_TEMPO) */
+  exportarAoMesmoTempo?: number;
+}
+
+export function registerPeopleRoutes(app: FastifyInstance, d: PeopleRouteDeps): void {
   const { db, vault, cfg } = d;
+  // limpezas em segundo plano (o cofre da equipe de quem saiu): param quando o servidor desliga
+  const limpezas = new Set<Tentativas>();
+  app.addHook('onClose', async () => { for (const t of limpezas) t.cancelar(); limpezas.clear(); });
 
   // Conta nova neste computador (tela de entrada). Devolve a frase da pessoa (mostrada uma vez; vale depois de confirmada).
   app.post('/api/auth/register', {
@@ -79,8 +100,14 @@ export function registerPeopleRoutes(app: FastifyInstance, d: SecurityDeps & { u
   const remove = (actor: { userId: string; workspaceId: string }, target: { id: string; username: string }) => {
     if (isAdmin(db, target.id)) throw new HttpError(409, 'admin_stays', 'A conta que administra o Ergon neste computador não pode ser removida.');
     const out = removePersonData(db, vault, d.people.owners, cfg, target.id);
-    // o motor dela (contêiner e cofre) sai pelo gerente; se ele não responder agora, o cofre já não abre (a chave saiu)
-    void d.removeMotor(target.id).catch(() => undefined);
+    // o motor dela (contêiner e cofre) sai pelo gerente; se ele não responder agora, o cofre já não abre (a chave saiu) e
+    // a limpeza tenta de novo sozinha, com espera crescente, sem segurar a remoção
+    const t = tentarDeNovo(() => d.removeMotor(target.id), {
+      esperas: d.esperasMotor,
+      aoFalhar: (e, tentativa, desiste) => log.warn({ userId: target.id, tentativa, desiste, erro: scrub(String((e as Error)?.message ?? e)) },
+        desiste ? 'cofre da equipe da conta removida: desistiu de apagar (aparece na Saúde)' : 'cofre da equipe da conta removida: tenta de novo mais tarde'),
+    });
+    limpezas.add(t); void t.feito.then(() => limpezas.delete(t));
     if (actor.userId !== target.id) {
       audit(db, d.bus, { workspaceId: actor.workspaceId, actorType: 'user', actorId: actor.userId, action: 'people.remove', evidence: { username: target.username, ...out, at: now() },
         result: 'conta removida: a chave saiu primeiro (conteúdo ilegível), depois os dados e os arquivos' });
@@ -101,5 +128,38 @@ export function registerPeopleRoutes(app: FastifyInstance, d: SecurityDeps & { u
     const out = remove(a, { id: a.userId, username: a.username });
     reply.clearCookie(`${SESSION_COOKIE}_${cfg.port}`, { path: '/' });
     return { ok: true, ...out };
+  });
+
+  // Baixar meus dados: só a própria pessoa, com a identidade confirmada há pouco (a mesma confirmação de excluir a
+  // conta). O arquivo sai legível (decifrado): por isso a confirmação, e nada de chave, senha ou credencial dentro.
+  // Um arquivo por pessoa e poucos na instalação inteira ao mesmo tempo (cada um segura memória até terminar de
+  // descer): quem chega depois recebe "espere um pouco" em vez de derrubar o servidor.
+  const montando = new Set<string>();
+  const aoMesmoTempo = Math.max(1, d.exportarAoMesmoTempo ?? EXPORTAR_AO_MESMO_TEMPO);
+  const exportar = async (a: AuthContext, reply: FastifyReply) => {
+    requireRecentAuth(a);
+    if (d.people.sealed(a)) throw new HttpError(423, 'person_sealed', 'Digite a sua senha para abrir os seus dados.');
+    if (montando.has(a.userId)) throw new HttpError(429, 'export_busy', 'O seu arquivo ainda está sendo montado. Espere ele terminar de baixar.');
+    if (montando.size >= aoMesmoTempo) throw new HttpError(429, 'export_queue', 'Outra pessoa está baixando os dados agora. Tente de novo em alguns minutos.');
+    montando.add(a.userId);
+    let liberado = false;
+    const liberar = () => { if (!liberado) { liberado = true; montando.delete(a.userId); } };
+    try {
+      const r = await exportarMeusDados({ db, cfg, routines: d.routines, owners: d.people.owners }, { id: a.userId, username: a.username, displayName: a.displayName });
+      audit(db, d.bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'people.export',
+        evidence: { arquivos: r.arquivos, bytes: r.bytes, deFora: r.deFora.length }, result: 'dados baixados (arquivo legível, sem cifra)' });
+      // o arquivo desce aos poucos, um pedaço por vez; a vaga só libera quando ele terminou de descer (ou a conexão caiu)
+      const corpo = Readable.from(r.partes(), { objectMode: false });
+      corpo.once('close', liberar); corpo.once('error', liberar); reply.raw.once('close', liberar);
+      return reply.header('content-type', 'application/zip').header('content-disposition', `attachment; filename="${r.nome}"`)
+        .header('content-length', String(r.bytes)).header('cache-control', 'no-store').header('x-ergon-de-fora', String(r.deFora.length)).send(corpo);
+    } catch (e) { liberar(); throw e; }
+  };
+  app.post('/api/me/export', async (req, reply) => exportar(d.auth(req), reply));
+  // pelo id: quem administra (ou qualquer outra pessoa) não baixa os dados de ninguém; só a própria pessoa
+  app.post('/api/people/:id/export', { schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^usr_[a-f0-9]{32}$' } } } } }, async (req, reply) => {
+    const a = d.auth(req);
+    if ((req.params as { id: string }).id !== a.userId) throw new HttpError(403, 'only_self', 'Só a própria pessoa baixa os dados dela. Peça para ela usar "Baixar meus dados" em Configurações › Minha conta.');
+    return exportar(a, reply);
   });
 }

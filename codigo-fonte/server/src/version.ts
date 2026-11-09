@@ -21,8 +21,57 @@ export function newer(a: string, b: string): boolean {
   return x.pre.localeCompare(y.pre, 'en', { numeric: true }) > 0;
 }
 
+/**
+ * A versão mais antiga para a qual o Ergon Desktop volta pelo próprio aplicativo: a 1.1.0-rc.24. Antes dela, o gerente
+ * de motores nunca recriava o motor de cada pessoa quando a versão mudava: numa volta para uma anterior, só o núcleo
+ * voltaria e a equipe seguiria na imagem de agora (e a 1.1.0-rc.14 já tinha trocado Docker por Podman dentro do
+ * ambiente do Windows). O aplicativo tem a mesma trava (desktop/src-tauri/src/atualizacao.rs, VOLTA_MINIMA; um teste
+ * confere que as duas andam juntas). Uma versão que mude os dados de um jeito que as anteriores não abram sobe este
+ * valor (e o do aplicativo) para ela mesma.
+ */
+export const VOLTA_MINIMA = '1.1.0-rc.24';
+
+/**
+ * Dá para voltar a esta versão pelo aplicativo? 'pode': ela tem, publicado, o pacote assinado do canal; 'antiga':
+ * anterior à VOLTA_MINIMA; 'sem-pacote': saiu sem o pacote assinado do canal (só pelo instalador da página dela).
+ * Quem decide de verdade é o aplicativo, que confere o pacote assinado antes de trocar.
+ */
+export type Rollback = 'pode' | 'antiga' | 'sem-pacote';
+
 /** Uma versão publicada, para a lista de Configurações › Atualizações (voltar para uma anterior). */
-export interface ReleaseItem { version: string; url: string | null; publishedAt: string | null; prerelease: boolean }
+export interface ReleaseItem { version: string; url: string | null; publishedAt: string | null; prerelease: boolean; rollback: Rollback }
+
+/** O que a lista diz sobre voltar a uma versão (função pura: testável). */
+export function rollbackOf(version: string, assets: string[], channel: 'teste' | 'estavel'): Rollback {
+  if (newer(VOLTA_MINIMA, version)) return 'antiga';
+  const m = `manifesto-${channel}.json`;
+  return assets.includes(m) && assets.includes(`${m}.sig`) ? 'pode' : 'sem-pacote';
+}
+/**
+ * No Ergon Desktop, "Voltar para esta versão" vale só para as DUAS versões publicadas logo antes da instalada (decisão de
+ * 09/11): a tela corta a lista nelas (web/src/lib/atualizacoes.ts, anteriores) e o aplicativo confere de novo pelo
+ * manifesto assinado do canal ("recentes", desktop/src-tauri/src/atualizacao.rs, fora_das_duas_anteriores). Fora do
+ * Desktop (servidor, Linux), a lista segue com até LISTA_ANTERIORES versões, cada uma com a página do instalador.
+ */
+export const VOLTA_ANTERIORES = 2;
+export const LISTA_ANTERIORES = 12;
+/** Quantas versões o manifesto do canal carrega em "recentes" (scripts/distribuicao/manifesto.mjs, RECENTES). */
+export const RECENTES_DO_CANAL = 12;
+/** O que a lista diz sobre voltar: o Rollback, ou 'instalada-fora' (a instalada já não está entre as publicadas recentemente). */
+export type RollbackNaLista = Rollback | 'instalada-fora';
+const maisNovaPrimeiro = (a: { version: string }, b: { version: string }) => (newer(a.version, b.version) ? -1 : newer(b.version, a.version) ? 1 : 0);
+/**
+ * As versões anteriores à instalada, a mais nova primeiro (função pura: testável). Se a instalada já não está entre as
+ * RECENTES_DO_CANAL mais novas publicadas (a página dela saiu, ou ficou para trás), o aplicativo recusaria sempre a
+ * volta: a lista não oferece o botão e diz por quê ('instalada-fora'); a página de cada versão segue com o instalador.
+ */
+export function anterioresParaVoltar<T extends { version: string; rollback?: Rollback }>(releases: T[], atual: string = VERSION): Array<Omit<T, 'rollback'> & { rollback?: RollbackNaLista }> {
+  const ordenadas = [...releases].sort(maisNovaPrimeiro);
+  const i = ordenadas.findIndex((x) => !newer(x.version, atual) && !newer(atual, x.version));
+  const fora = ordenadas.length > 0 && (i < 0 || i >= RECENTES_DO_CANAL);
+  return ordenadas.filter((x) => newer(atual, x.version)).slice(0, LISTA_ANTERIORES)
+    .map((x) => (fora && x.rollback === 'pode' ? { ...x, rollback: 'instalada-fora' as const } : x));
+}
 export interface UpdateState { latest: Release | null; releases: ReleaseItem[]; checkedAt: string | null }
 
 const VERSION_TAG = /^v?\d+\.\d+\.\d+(-[\w.]+)?$/;
@@ -67,13 +116,19 @@ export class UpdateCheck {
     if (!u) return null;
     const r = await fetch(u, { signal: AbortSignal.timeout(6000), headers: { accept: 'application/vnd.github+json' } });
     if (!r.ok) return null;
-    const list = (await r.json()) as Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean; html_url?: string; body?: string | null; published_at?: string | null }>;
+    const list = (await r.json()) as Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean; html_url?: string; body?: string | null; published_at?: string | null; assets?: Array<{ name?: unknown } | null> }>;
     if (!Array.isArray(list)) return null;
     // pré-versão instalada = canal de teste (vê as pré-versões); versão final = só as finais
     const teste = this.current.includes('-');
     const items = list
       .filter((x) => !x.draft && typeof x.tag_name === 'string' && VERSION_TAG.test(x.tag_name) && (teste || !x.prerelease))
-      .map((x) => ({ version: x.tag_name!.replace(/^v/, ''), url: typeof x.html_url === 'string' && x.html_url.startsWith('https://') ? x.html_url : null, publishedAt: x.published_at ?? null, prerelease: !!x.prerelease, notes: typeof x.body === 'string' ? x.body.slice(0, 2000) : null }))
+      .map((x) => {
+        const version = x.tag_name!.replace(/^v/, '');
+        // o pacote assinado de cada versão fica anexado a ela, com o nome do canal (o mesmo que esta instalação segue)
+        const assets = Array.isArray(x.assets) ? x.assets.map((a) => (typeof a?.name === 'string' ? a.name : '')) : [];
+        return { version, url: typeof x.html_url === 'string' && x.html_url.startsWith('https://') ? x.html_url : null, publishedAt: x.published_at ?? null, prerelease: !!x.prerelease,
+          rollback: rollbackOf(version, assets, teste ? 'teste' : 'estavel'), notes: typeof x.body === 'string' ? x.body.slice(0, 2000) : null };
+      })
       .sort((a, b) => (newer(a.version, b.version) ? -1 : newer(b.version, a.version) ? 1 : 0));
     const top = items[0];
     return {

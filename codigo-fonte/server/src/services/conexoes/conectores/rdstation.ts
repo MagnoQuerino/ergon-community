@@ -168,6 +168,18 @@ export const RDSTATION: ConectorDef = {
       params: { id: P_ID('do contato'), nome: { tipo: 'texto', descricao: 'novo nome' }, ...P_CONTATO }, resumo: (a) => `Atualizar um contato no RD Station CRM:\n${detalhes(a, R_CONTATO)}`,
       preparar: cartaoDe('id', '/contacts', 'Contato', exigeAlgum('nome', ...Object.keys(P_CONTATO))),
       metodo: 'PUT', caminho: '/contacts/{id}', antes: exigeAlgum('nome', ...Object.keys(P_CONTATO)), corpo: corpoContato, texto: 'Contato atualizado (id: {id}).' },
+    // developers.rdstation.com/reference/crm-v1-create-organization (conferida em 08/11/2026): corpo em "organization", resposta com _id
+    { id: 'rdstation.criar_empresa', descricao: 'cria uma empresa. Antes, veja em rdstation.empresas se ela já existe. Não manda nada a ela', rotulo: 'cria uma empresa', risco: riscoDeAtribuir,
+      params: {
+        nome: { tipo: 'texto', obrigatorio: true, descricao: 'nome da empresa', max: 200 }, site: { tipo: 'texto', descricao: 'site da empresa' },
+        resumo: { tipo: 'texto', descricao: 'resumo sobre a empresa', max: 2000 }, segmentos: { tipo: 'lista', descricao: 'nomes dos segmentos, separados por vírgula' },
+        responsavel: P_RESPONSAVEL,
+      },
+      resumo: (a) => `Criar uma empresa no RD Station CRM:\n${detalhes({ ...a, segmentos: Array.isArray(a.segmentos) ? a.segmentos.join(', ') : a.segmentos }, { nome: 'nome', site: 'site', resumo: 'resumo', segmentos: 'segmentos', responsavel: 'responsável' })}`,
+      metodo: 'POST', caminho: '/organizations',
+      antes: async (ctx, a) => ({ ...a, dono: a.responsavel ?? await euMesmo(ctx) }),
+      corpo: (a: Args) => ({ organization: { name: a.nome, url: a.site, resume: a.resumo, user_id: a.dono, ...(Array.isArray(a.segmentos) && a.segmentos.length ? { organization_segments: a.segmentos } : {}) } }),
+      texto: (j) => `Empresa criada (id: ${linhaDe('{_id}', j) || linhaDe('{id}', j)}).` },
     { id: 'rdstation.criar_negocio', descricao: 'cria uma negociação. Veja os ids das etapas em rdstation.funis', rotulo: 'cria uma negociação', risco: riscoDeAtribuir,
       params: { nome: { tipo: 'texto', obrigatorio: true, descricao: 'nome da negociação' }, etapa: { tipo: 'texto', descricao: 'id da etapa' }, previsao: P_PREVISAO, responsavel: P_RESPONSAVEL, empresa: { tipo: 'texto', descricao: 'id da empresa' } },
       resumo: (a) => `Criar uma negociação no RD Station CRM:\n${detalhes(a, R_NEGOCIO)}`, metodo: 'POST', caminho: '/deals',

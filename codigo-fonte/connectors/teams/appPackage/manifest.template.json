@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
   "manifestVersion": "1.19",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "id": "{{TEAMS_APP_ID}}",
   "developer": {
     "name": "{{DEVELOPER_NAME}}",
@@ -11,11 +11,11 @@
   },
   "name": {
     "short": "Ergon",
-    "full": "Ergon — central de demandas"
+    "full": "Ergon — converse com a sua equipe"
   },
   "description": {
-    "short": "Registre demandas e consulte pendências do Ergon pelo Teams.",
-    "full": "Bot do Ergon (local). Em conversa direta ou quando mencionado: '/tarefa título' cria uma tarefa no Kanban do Ergon e 'pendencias' lista as abertas. Não lê outros chats, e-mail, Planner ou arquivos do Microsoft 365: recebe somente mensagens enviadas ao próprio bot."
+    "short": "Converse com a sua equipe do Ergon direto pelo Teams.",
+    "full": "Converse com a sua equipe do Ergon direto pelo Teams. O app funciona só na conversa direta com ele: não entra em grupos nem em canais. Para usar, é preciso ter o Ergon instalado e ligar a sua conta do Teams a ele por um código: o app mostra o código nesta conversa e você o digita no Ergon, em Conexões › Teams. Depois disso, o que você escreve aqui vai para a sua própria equipe no Ergon, e as respostas, as confirmações (com Aprovar e Recusar) e os avisos do que precisa de você chegam nesta conversa. Com o Ergon fechado, o app responde na hora que recebeu e guarda o pedido, cifrado, por até 7 dias, até o Ergon abrir. O app não lê outros chats, e-mails nem arquivos do Microsoft 365: recebe somente as mensagens enviadas a ele. Para desligar a conta do Ergon, escreva \"desligar\"."
   },
   "icons": {
     "color": "color.png",
@@ -25,20 +25,20 @@
   "bots": [
     {
       "botId": "{{BOT_ID}}",
-      "scopes": ["personal", "team", "groupChat"],
+      "scopes": ["personal"],
       "isNotificationOnly": false,
       "supportsFiles": false,
       "commandLists": [
         {
-          "scopes": ["personal", "team", "groupChat"],
+          "scopes": ["personal"],
           "commands": [
-            { "title": "tarefa", "description": "Cria uma tarefa no Ergon: tarefa <título>" },
-            { "title": "pendencias", "description": "Lista as pendências abertas no Ergon" }
+            { "title": "ajuda", "description": "Mostra como usar" },
+            { "title": "desligar", "description": "Desliga esta conta do Teams do seu Ergon" }
           ]
         }
       ]
     }
   ],
-  "permissions": ["identity", "messageTeamMembers"],
+  "permissions": ["identity"],
   "validDomains": []
 }

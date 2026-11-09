@@ -191,7 +191,7 @@ describe('boas-vindas: a escolha define a equipe de partida', () => {
   test('conta nova começa com as perguntas; workspace antigo não', async () => {
     const me = (await req(h, 'GET', '/api/me', s)).json;
     assert.equal(me.onboarding, 'pending');
-    assert.deepEqual(me.prefs, { tips: true, dismissed: [], tourDone: false, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false });
+    assert.deepEqual(me.prefs, { tips: true, dismissed: [], tourDone: false, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false, cityBarCollapsed: false });
     const o = (await req(h, 'GET', '/api/onboarding', s)).json;
     assert.ok(o.uses.some((u: { key: string }) => u.key === 'empresario'));
     assert.ok(o.niches.some((n: { key: string }) => n.key === 'programacao'));
@@ -234,8 +234,13 @@ describe('boas-vindas: a escolha define a equipe de partida', () => {
   test('preferências: dicas dispensadas, desligar e trazer de volta; pular as perguntas', async () => {
     assert.deepEqual((await req(h, 'PUT', '/api/me/prefs', s, { dismiss: ['agentes.intro'] })).json.dismissed, ['agentes.intro']);
     const p = (await req(h, 'PUT', '/api/me/prefs', s, { tips: false, tourDone: true })).json;
-    assert.deepEqual(p, { tips: false, dismissed: ['agentes.intro'], tourDone: true, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false });
+    assert.deepEqual(p, { tips: false, dismissed: ['agentes.intro'], tourDone: true, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false, cityBarCollapsed: false });
     assert.deepEqual((await req(h, 'PUT', '/api/me/prefs', s, { resetTips: true, tips: true })).json.dismissed, []);
+    // barra da Cidade recolhida: escolha da pessoa, guardada com as outras preferências dela (não no navegador)
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { cityBarCollapsed: true })).json.cityBarCollapsed, true);
+    assert.equal((await req(h, 'GET', '/api/me', s)).json.prefs.cityBarCollapsed, true);
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { cityBarCollapsed: 'sim' })).status, 400);
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { cityBarCollapsed: false })).json.cityBarCollapsed, false);
     h.db.run("UPDATE workspace_settings SET value = 'pending' WHERE workspace_id = ? AND key = 'onboarding'", s.workspaceId);
     assert.equal((await req(h, 'POST', '/api/onboarding/skip', s)).status, 200);
     assert.equal((await req(h, 'GET', '/api/me', s)).json.onboarding, 'done');

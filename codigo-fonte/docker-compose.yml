@@ -108,7 +108,8 @@ services:
 volumes:
   ergon-data:
   hermes-vault:
-  hermes-data:   # antigo, em texto aberto: apague só depois de conferir o motor no cofre
+  # (o antigo "hermes-data", em texto aberto, de antes do cofre, saiu daqui: nenhum serviço o usa, e o sistema o apaga
+  # sozinho quando o cofre herdado já está em uso — ver server/src/services/motor-manager.ts, removeOldData)
 
 networks:
   ergon-net:

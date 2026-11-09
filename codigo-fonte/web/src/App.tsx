@@ -25,6 +25,8 @@ import { Tour, type TourStep } from './components/Tour.tsx';
 import { ViewTip } from './components/Tips.tsx';
 import { initPrefs, savePrefs, usePrefs } from './lib/prefs.ts';
 import { music } from './lib/music.ts';
+import { MusicButton } from './components/MusicButton.tsx';
+import { abrirBalao, useBalao } from './lib/balao.ts';
 // só na distribuição proprietária (a Community não traz views/world): entrar com a Conta Ergon de qualquer tela
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
@@ -123,7 +125,7 @@ const tourSteps = (coord: string): TourStep[] => [
   { target: 'nav-equipe', title: 'Fluxos da equipe', text: 'O quadro onde os agentes trabalham: cada card tem responsável e o histórico do que foi feito.' },
   { target: 'nav-tarefas', title: 'Tarefas', text: 'As suas tarefas. Quando quiser ajuda, envie qualquer uma para a equipe.' },
   { target: 'decisions', title: 'Aguardando você', text: 'Tudo que precisa da sua decisão: propostas da equipe, perguntas e sugestões. Nada importante muda sem o seu clique.' },
-  { target: 'nav-conexoes', title: 'Conexões', text: 'Conecte a sua conta de IA (sem ela, as respostas são simuladas), e-mail, WhatsApp e quadros de tarefas.' },
+  { target: 'nav-conexoes', title: 'Conexões', text: 'Conecte a sua conta de IA (é ela que põe a equipe para trabalhar), e-mail, WhatsApp e quadros de tarefas.' },
   { target: 'nav-ajuda', title: 'Ajuda', text: `Manuais, dicas e contornos para quando algo não sair como esperado. E ${coord} sempre pode ajudar na conversa.` },
 ];
 
@@ -151,7 +153,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   };
   // as outras telas já buscadas por baixo: trocar de menu só mostra o que está pronto
   useEffect(() => {
-    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations', '/api/conexoes',
+    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations', '/api/conexoes', '/api/conexoes/regras', '/api/teams-app',
       '/api/conversations/recent', '/api/artifacts', '/api/routines', '/api/routines/library', '/api/routines/recommend', '/api/people', '/api/packages',
       '/api/packages/catalog/official', '/api/decisions', '/api/saude', '/api/workspaces', '/api/packages/cosmetics']), 400);
     return () => clearTimeout(t);
@@ -159,7 +161,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const [view, setView] = useState<View>(() => (location.hash.slice(1).split('?')[0] as View) || 'ambiente');
   // janela do agente (conversas, perfil, atividade), aberta de qualquer tela
   const [win, setWin] = useState<{ id: string; tab: 'conversa' | 'perfil' | 'atividade'; draft: string | null; conversationId: string | null; lite: AgentHead | null } | null>(null);
-  const [decisions, setDecisions] = useState(false);
+  // os balões da barra (Estado, Aguardando você, Workspace, Música, Conta): um aberto por vez (lib/balao.ts)
+  const [decisions, setDecisions] = useBalao('decisoes');
   const [focus, setFocus] = useState(false);
   // navegação: gaveta com o menu inteiro na janela estreita; menu lateral recolhível (só ícones) na larga
   const [navOpen, setNavOpen] = useState(false);
@@ -172,7 +175,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
     mq.addEventListener('change', on);
     return () => mq.removeEventListener('change', on);
   }, []);
-  const [statusOpen, setStatusOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useBalao('estado');
   // busca rápida: Ctrl+K (Cmd+K no Mac) de qualquer lugar, ou a lupa do cabeçalho
   const [palette, setPalette] = useState(false);
   useEffect(() => {
@@ -228,7 +231,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
 
   // avisos que pedem ação: nunca somem por falta de espaço (na janela estreita viram um contador que abre o Estado)
   const alerts: Alert[] = [
-    ...(sim ? [{ id: 'sim', label: 'SIMULAÇÃO', tone: 'warn' as const, title: 'As respostas dos agentes são simuladas até uma conta de IA ser conectada — a melhor escolha é a assinatura Nous. Veja Configurações.', act: () => setView('configuracao') }] : []),
+    ...(sim ? [{ id: 'sim', label: 'SEM CONTA DE IA', tone: 'warn' as const, title: 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é a assinatura Nous. Veja Configurações.', act: () => setView('configuracao') }] : []),
     ...(ver.data && ver.data.version !== __ERGON_VERSION__ ? [{ id: 'reload', label: 'NOVA VERSÃO · RECARREGAR', tone: 'warn' as const, title: `O Ergon foi atualizado para a versão ${ver.data.version}. Esta aba ainda está com a ${__ERGON_VERSION__}.`, act: () => location.reload() }] : []),
   ];
   // trocar de área limpa o endereço antes (o card aberto numa área não reabre na outra: o painel não fecha mais antes do clique)
@@ -240,6 +243,11 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
     pushRecent({ kind: 'card', id: t.id, label: `#${t.number} ${t.title}`, where: t.audience === 'team' ? 'Fluxos da equipe' : 'Tarefas', href });
     goHash(href);
   };
+  // créditos da música: Configurações rolada até eles, com o bloco aberto (de novo, se já estiver lá)
+  const openCredits = () => {
+    if (location.hash === '#configuracao?creditos') { setFocus(false); window.dispatchEvent(new HashChangeEvent('hashchange')); }
+    else goHash('#configuracao?creditos');
+  };
   const openRoutine = (id: string, name: string) => { const href = `#rotinas?rotina=${id}`; pushRecent({ kind: 'rotina', id, label: name, href }); goHash(href); };
   const openRecent = (r: Recent) => {
     // agente que não existe mais (outro workspace, apagado): a janela fecha sozinha e o recente sai da lista
@@ -250,7 +258,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
     acoes: [
       ...(coordinator ? [{ key: 'a-pedir', label: `Pedir a ${coordinator.name}`, sub: 'Encaminha a quem faz', icon: 'chat', keywords: 'conversar perguntar', run: () => openAgent(coordinator.id, 'conversa') }] : []),
       { key: 'a-decisoes', label: 'Aguardando você', sub: `${s.decisionsPending} pendente(s)`, icon: 'bell', keywords: 'decisoes propostas aprovar', run: () => setDecisions(true) },
-      { key: 'a-foco', label: focus ? 'Sair do Modo foco' : 'Modo foco', sub: 'O trabalho sem a cidade', icon: 'focus', run: () => setFocus((f) => !f) },
+      { key: 'a-foco', label: focus ? 'Sair do Modo Foco' : 'Modo Foco', sub: 'O trabalho sem a cidade', icon: 'focus', run: () => setFocus((f) => !f) },
       { key: 'a-estado', label: 'Estado do Ergon', sub: 'Processos, consumo e avisos', icon: 'pulse', keywords: 'execucoes consumo', run: () => setStatusOpen(true) },
       { key: 'a-limite', label: 'Trabalhos ao mesmo tempo', sub: 'Configurações › Andamento da equipe', icon: 'gauge', keywords: 'limite concorrencia fila', run: () => go('configuracao') },
       { key: 'a-seguranca', label: 'Segurança', sub: 'Configurações › Segurança', icon: 'shield', keywords: 'senha frase recuperacao', run: () => goHash('#configuracao?seguranca') },
@@ -275,8 +283,10 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       {/* teclado: o primeiro Tab oferece pular o cabeçalho e o menu (WCAG 2.4.1) */}
       <button className="skip" onClick={() => document.querySelector<HTMLElement>('main.main')?.focus()}>Pular para o conteúdo</button>
       <header className="topbar">
-        <button className="icon-btn topbar__menu" data-keep-surface onClick={() => setNavOpen((v) => !v)} aria-label="Menu" title="Menu" aria-expanded={navOpen} aria-controls="nav-drawer">
-          <Icon name="menu" size={22} />
+        <button className="tb-icon topbar__menu" data-keep-surface onClick={() => setNavOpen((v) => !v)} aria-label={['Menu', alerts.length ? `${alerts.length} aviso(s) no Estado` : '', upd ? 'atualização disponível' : ''].filter(Boolean).join(' · ')} title="Menu" aria-expanded={navOpen} aria-controls="nav-drawer">
+          <Icon name="menu" size={20} />
+          {/* só na janela estreita (o Estado e o aviso de versão ficam na gaveta): o menu avisa que há algo lá */}
+          {(alerts.length > 0 || !!upd) && <span className="tb-badge tb-badge--warn topbar__menu-badge" aria-hidden="true">!</span>}
         </button>
         <div className="brand" title={live.status === 'ao_vivo' ? `Conectado ao servidor local · atualizado às ${(live.at ?? new Date(s.serverTime)).toLocaleTimeString('pt-BR', { timeStyle: 'short' })}` : live.status === 'conectando' ? 'Conectando ao servidor local…' : 'Reconectando ao servidor local…'}>
           {/* o logo leva de volta à Cidade, de qualquer tela */}
@@ -289,14 +299,15 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
             <Icon name="chat" size={16} /><span className="topbar__ask-long">Pedir a {coordinator.name}</span><span className="topbar__ask-short">Pedir</span>
           </button>
         )}
-        {/* busca no meio, com cara de campo; à direita, só ícones do mesmo tamanho (Estado, Aguardando você, Modo foco) e a conta */}
+        {/* busca no meio, com cara de campo; à direita, ícones do mesmo tamanho (Estado, Aguardando você, Música, Tema), o
+            Modo Foco com o nome (nunca some: na janela estreita quem sai para o menu são os outros) e a conta */}
         <span className="topbar__grow">
           <button className="tb-search" data-keep-surface onClick={() => setPalette((v) => !v)} aria-label="Buscar (Ctrl+K)" title="Buscar cards, agentes, rotinas e áreas (Ctrl+K)" aria-expanded={palette}>
             <Icon name="search" size={16} /><span className="tb-search__txt">Buscar cards, agentes, rotinas…</span><kbd className="tb-search__kbd">Ctrl K</kbd>
           </button>
         </span>
         {upd && (
-          <button className="tb-upd" onClick={openUpdates} title={`Versão ${upd} disponível. Ver em Configurações › Atualizações`}>
+          <button className="tb-upd" onClick={openUpdates} aria-label={`Atualização disponível: versão ${upd}`} title={`Versão ${upd} disponível. Ver em Configurações › Atualizações`}>
             <Icon name="download" size={14} /><span className="tb-upd__txt">Atualização disponível</span>
           </button>
         )}
@@ -319,11 +330,12 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
             aria-label={`${pending} aguardando você`} title={pending ? `${pending} aguardando você` : 'Nada aguardando você'}>
             <Icon name="bell" size={18} />{pending > 0 && <span className="tb-badge">{pending > 99 ? '99+' : pending}</span>}
           </button>
-          <button className="tb-icon" onClick={() => setThemeMode(THEME_NEXT[theme.mode])} aria-label={THEME_LABEL[theme.mode]} title={THEME_LABEL[theme.mode]}>
+          <MusicButton onCredits={openCredits} />
+          <button className="tb-icon topbar__theme" onClick={() => setThemeMode(THEME_NEXT[theme.mode])} aria-label={THEME_LABEL[theme.mode]} title={THEME_LABEL[theme.mode]}>
             <Icon name={THEME_ICON[theme.mode]} size={18} />
           </button>
-          <button className={`tb-icon ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} aria-label="Modo foco" title="Modo foco: o trabalho sem a cidade (Esc volta)">
-            <Icon name="focus" size={18} />
+          <button className={`tb-pill topbar__focus ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} title={focus ? 'Sair do Modo Foco (Esc)' : 'Modo Foco: o trabalho sem a cidade (Esc volta)'}>
+            <Icon name="focus" size={16} /><span className="topbar__focus-txt">Modo Foco</span>
           </button>
           <span className="topbar__sep" aria-hidden="true" />
           <AccountMenu me={me} onLogout={logout} onAccount={() => goHash('#configuracao?conta')} />
@@ -343,9 +355,12 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           {navItems(true)}
           {/* o que o cabeçalho não mostra nas janelas mais estreitas continua aqui */}
           <div className="navdrawer__foot">
-            <button className="nav" onClick={() => { setNavOpen(false); setFocus((f) => !f); }} aria-pressed={focus}><Icon name="focus" /> <span className="nav__label">{focus ? 'Sair do Modo foco' : 'Modo foco'}</span></button>
             <button className="nav" onClick={() => { setNavOpen(false); setPalette(true); }}><Icon name="search" /> <span className="nav__label">Buscar <span className="nav__hint">(Ctrl+K)</span></span></button>
-            <button className="nav" onClick={() => { setNavOpen(false); setStatusOpen(true); }}><Icon name="pulse" /> <span className="nav__label">Estado do Ergon{running ? ` · ${running} em execução` : ''}</span></button>
+            <button className="nav" onClick={() => { setNavOpen(false); setStatusOpen(true); }}><Icon name="pulse" /> <span className="nav__label">Estado do Ergon{running ? ` · ${running} em execução` : ''}{alerts.length ? ` · ${alerts.length} aviso(s)` : ''}</span></button>
+            {/* na janela mais estreita o seletor de workspace sai da barra: o balão dele abre daqui */}
+            <button className="nav" onClick={() => { setNavOpen(false); abrirBalao('workspace'); }}><Icon name="layers" /> <span className="nav__label">Workspace: {s.workspace.name}</span></button>
+            {upd && <button className="nav" onClick={() => { setNavOpen(false); openUpdates(); }}><Icon name="download" /> <span className="nav__label">Atualização disponível <span className="nav__hint">(versão {upd})</span></span></button>}
+            <button className="nav" onClick={() => setThemeMode(THEME_NEXT[theme.mode])}><Icon name={THEME_ICON[theme.mode]} /> <span className="nav__label">{THEME_LABEL[theme.mode].split(' (')[0].split(':')[0]}</span></button>
             <button className="nav" onClick={logout}><Icon name="logout" /> <span className="nav__label">Sair ({me.user.displayName})</span></button>
           </div>
         </NavDrawer>
@@ -376,7 +391,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         ) : view === 'configuracao' ? (
           <ConfiguracaoView state={s} me={me} onMeChanged={onMeChanged} reload={() => { st.reload(); usage.reload(); }} />
         ) : (
-          <AtividadeView />
+          <AtividadeView onOpenAgent={(id, tab) => openAgent(id, tab)} />
         )}
       </main>
       {/* conversas por baixo; o perfil aberto dali vem por cima e, ao fechar, volta para a conversa */}

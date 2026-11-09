@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { useSurface } from '../lib/surface.ts';
+import { useBalao } from '../lib/balao.ts';
 import { Icon } from './Icon.tsx';
 
 interface Workspace { id: string; name: string; role: string; current: boolean; agents: number; openTasks: number; working: number; waiting: number }
@@ -12,7 +13,8 @@ const recarregar = () => window.location.reload();
 
 /** Seletor de workspace na barra de cima: o atual e, ao abrir, a visão geral de todos os da pessoa. */
 export function WorkspaceSwitcher({ current }: { current: string }) {
-  const [open, setOpen] = useState(false);
+  // um balão da barra por vez; na janela mais estreita o botão sai e o balão abre pela gaveta do menu
+  const [open, setOpen] = useBalao('workspace');
   return (
     <span className="topbar__wswrap">
       <button className="chip chip--btn topbar__ws" data-keep-surface onClick={() => setOpen((v) => !v)} aria-expanded={open}

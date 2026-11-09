@@ -1,7 +1,7 @@
 name: ergon_bridge
 # a mesma de PLUGIN_VERSION (__init__.py) e do rótulo ergon.plugin.version (hermes/Dockerfile): um teste confere
-version: "0.3.0"
-description: "Ergon: registra no Ergon cada mensagem admitida de Teams/WhatsApp (post_gateway_admission); barra ferramentas que o agente do Ergon não tem (pre_tool_call); conta ao Ergon o que o Treinar gravou e leu (post_tool_call); ferramentas das Conexões, que só repassam ao Ergon; ponte de controle interna com rotas fechadas (contas, modelo padrão, catálogo). Sem chamadas de modelo."
+version: "0.4.0"
+description: "Ergon: registra no Ergon cada mensagem admitida de Teams/WhatsApp (post_gateway_admission); barra ferramentas que o agente do Ergon não tem (pre_tool_call); conta ao Ergon o que o Treinar gravou e leu (post_tool_call); mede o tamanho de cada parte de cada chamada ao modelo e o total informado pelo provedor, sem guardar conteúdo (pre_api_request, post_api_request); ferramentas das Conexões, que só repassam ao Ergon; pede a aprovação da pessoa depois de ler as contas quando ela liga essa proteção (pre_tool_call); ponte de controle interna com rotas fechadas (contas, modelo padrão, catálogo, passos por pedido, medição). Sem chamadas de modelo."
 author: Ergon (MVP local)
 kind: standalone
 provides_tools:
@@ -11,3 +11,5 @@ provides_hooks:
   - post_gateway_admission
   - pre_tool_call
   - post_tool_call
+  - pre_api_request
+  - post_api_request

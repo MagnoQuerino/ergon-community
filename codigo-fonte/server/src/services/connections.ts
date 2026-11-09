@@ -31,7 +31,7 @@ export async function connectionStatuses(db: Db, cfg: Config, workspaceId: strin
     if (r.kind === 'hermes') {
       if (cfg.executor !== 'hermes') {
         return { ...base, state: (h?.ok ? 'nao_validado' : 'nao_configurado') as ConnState,
-          detail: h?.ok ? 'O motor de IA responde, mas ERGON_EXECUTOR=simulated: respostas são SIMULADAS.' : 'ERGON_EXECUTOR=simulated: respostas dos agentes são SIMULADAS (sem modelo).' };
+          detail: h?.ok ? 'A conta de IA responde, mas esta instalação está configurada para não usá-la.' : 'Esta instalação está configurada para não usar contas de IA.' };
       }
       if (!h?.ok) return { ...base, state: 'falha' as const, detail: h?.detail ?? 'motor de IA inacessível' };
       return { ...base, state: 'configurado' as const, detail: 'O motor de IA responde. A validação real depende de uma conta de IA conectada (Conexões).' };

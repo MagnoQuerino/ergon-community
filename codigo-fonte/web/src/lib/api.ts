@@ -77,11 +77,37 @@ export function uploadFile<T>(file: File, where: { conversationId?: string; fold
   });
 }
 
-/** POST que devolve arquivo (ex.: o .ergon montado pelo editor). */
-export async function postForBlob(url: string, body: unknown): Promise<Blob> {
+/**
+ * POST que devolve arquivo (ex.: o .ergon montado pelo editor, o ZIP de "Baixar meus dados"). A mesma guarda da sessão:
+ * tela trancada ou confirmação de identidade pausam o pedido até a pessoa digitar a senha, e ele é refeito uma vez.
+ */
+export async function postForFile(url: string, body: unknown, retried = false): Promise<{ blob: Blob; headers: Headers }> {
   const res = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body) });
-  if (!res.ok) { const j = await res.json().catch(() => ({})) as { error?: string; message?: string }; throw new ApiError(res.status, j.error ?? 'erro', j.message ?? `HTTP ${res.status}`); }
-  return res.blob();
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({})) as { error?: string; message?: string };
+    const code = j.error ?? 'erro';
+    if (guard && !retried && ((res.status === 423 && code === 'locked') || (res.status === 401 && code === 'reauth'))) {
+      if (await guard(code)) return postForFile(url, body, true);
+    }
+    throw new ApiError(res.status, code, j.message ?? `HTTP ${res.status}`);
+  }
+  return { blob: await res.blob(), headers: res.headers };
+}
+export async function postForBlob(url: string, body: unknown): Promise<Blob> {
+  return (await postForFile(url, body)).blob;
+}
+
+/** Entrega um arquivo para a pessoa salvar. */
+export function salvarArquivo(blob: Blob, nome: string): void {
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = u; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(u), 60_000);
+}
+/** O nome do arquivo no cabeçalho do servidor (attachment; filename="..."), ou o padrão se vier algo estranho. */
+export function nomeDoAnexo(disposicao: string | null, padrao: string): string {
+  const m = /filename="([^"]{1,120})"/.exec(disposicao ?? '');
+  return m && /^[\w.() -]+$/.test(m[1]) ? m[1] : padrao;
 }
 
 export function requestId(): string {

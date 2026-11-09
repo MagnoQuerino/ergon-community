@@ -3,6 +3,7 @@ import { api, errMsg, uploadFile } from '../lib/api.ts';
 import { dragHasFiles, inlinePreview, isImage, kindOf, size } from '../lib/files.ts';
 import { useResource } from '../lib/live.ts';
 import { useHashParam } from '../lib/route.ts';
+import { cardClick } from '../lib/cardClick.ts';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { Icon } from '../components/Icon.tsx';
 
@@ -125,6 +126,8 @@ export function DocumentosView({ coord }: { coord: string }) {
   const [openFile, setOpenFile] = useState<FileItem | null>(null);
   const [newFolder, setNewFolder] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  // o clique que encerra a renomeação (o campo perde o foco já no pressionar) não entra na pasta: guardado no pointerdown
+  const leftRename = useRef<string | null>(null);
   const [toast, setToast] = useState<{ text: string; undo: string | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [emptyAsk, setEmptyAsk] = useState(false);
@@ -242,10 +245,13 @@ export function DocumentosView({ coord }: { coord: string }) {
         {search.data && q.trim().length >= 2 ? (
           <ul className="docs__list docs__list--lista">
             {search.data.map((f) => (
-              <li key={f.id} className="ditem" onClick={() => setOpenFile(f)}>
-                <span className="ditem__icon"><Icon name="file" size={18} /></span>
-                <span className="ditem__name"><b>{f.filename}</b><small className="muted">{f.path || 'Documentos'}</small></span>
-                <span className="ditem__meta">{kindOf(f.filename, f.mime)} · {size(f.size)}</span>
+              // antes só o mouse abria (a linha não recebia o foco): agora a linha é um botão, e o resto dela também abre
+              <li key={f.id} className={`ditem card-click ${openFile?.id === f.id ? 'is-open' : ''}`} onClick={cardClick(() => setOpenFile(f))}>
+                <button type="button" className="ditem__open" onClick={() => setOpenFile(f)} aria-label={`${f.filename}: abrir a prévia`}>
+                  <span className="ditem__icon"><Icon name="file" size={18} /></span>
+                  <span className="ditem__name"><b>{f.filename}</b><small className="muted">{f.path || 'Documentos'}</small></span>
+                  <span className="ditem__meta">{kindOf(f.filename, f.mime)} · {size(f.size)}</span>
+                </button>
               </li>
             ))}
             {!search.data.length && <li className="muted">Nada com esse nome.</li>}
@@ -253,8 +259,9 @@ export function DocumentosView({ coord }: { coord: string }) {
         ) : items && (
           <ul className={`docs__list docs__list--${mode}`}>
             {items.folders.map((f) => (
-              <li key={f.id} className={`ditem ditem--folder ${sel.has(f.id) ? 'is-sel' : ''}`} draggable={!trash && !fixedHere(f)} onDragStart={(e) => startDrag(e, f.id)}
-                onDoubleClick={() => !trash && go(f.id)} {...(!trash ? dropOnFolder(f.id) : {})}>
+              <li key={f.id} className={`ditem ditem--folder ${sel.has(f.id) ? 'is-sel' : ''} ${trash ? '' : 'card-click'}`} draggable={!trash && !fixedHere(f)} onDragStart={(e) => startDrag(e, f.id)}
+                onPointerDown={() => { leftRename.current = renaming?.id === f.id ? f.id : null; }}
+                onClick={trash ? undefined : (e) => { if (leftRename.current === f.id) { leftRename.current = null; return; } cardClick(() => go(f.id))(e); }} {...(!trash ? dropOnFolder(f.id) : {})}>
                 {!trash && !fixedHere(f) && <input type="checkbox" className="ditem__check" checked={sel.has(f.id)} onChange={(e) => toggle(f.id, e.target.checked)} aria-label={`Selecionar ${f.name}`} onClick={(e) => e.stopPropagation()} />}
                 <button type="button" className="ditem__open" onClick={() => (trash ? undefined : go(f.id))}>
                   <span className="ditem__icon ditem__icon--folder"><Icon name="folder" size={mode === 'grade' ? 34 : 18} /></span>
@@ -273,8 +280,9 @@ export function DocumentosView({ coord }: { coord: string }) {
               </li>
             ))}
             {items.files.map((f) => (
-              <li key={f.id} className={`ditem ${sel.has(f.id) ? 'is-sel' : ''} ${openFile?.id === f.id ? 'is-open' : ''}`} draggable={!trash} onDragStart={(e) => startDrag(e, f.id)}>
-                {!trash && <input type="checkbox" className="ditem__check" checked={sel.has(f.id)} onChange={(e) => toggle(f.id, e.target.checked)} aria-label={`Selecionar ${f.filename}`} />}
+              <li key={f.id} className={`ditem ${sel.has(f.id) ? 'is-sel' : ''} ${openFile?.id === f.id ? 'is-open' : ''} ${trash ? '' : 'card-click'}`} draggable={!trash} onDragStart={(e) => startDrag(e, f.id)}
+                onClick={trash ? undefined : cardClick(() => setOpenFile(f))}>
+                {!trash && <input type="checkbox" className="ditem__check" checked={sel.has(f.id)} onChange={(e) => toggle(f.id, e.target.checked)} aria-label={`Selecionar ${f.filename}`} onClick={(e) => e.stopPropagation()} />}
                 <button type="button" className="ditem__open" onClick={() => (trash ? undefined : setOpenFile(f))}>
                   <span className="ditem__icon">{isImage(f.mime) ? <img src={`/api/artifacts/${f.id}/download?inline=1`} alt="" loading="lazy" /> : <Icon name={f.mime.startsWith('image/') ? 'image' : 'file'} size={mode === 'grade' ? 32 : 18} />}</span>
                   <span className="ditem__name"><b title={f.filename}>{f.filename}</b><small className="muted">{kindOf(f.filename, f.mime)} · {size(f.size)} · {date(f.deleted_at ?? f.created_at)}</small></span>

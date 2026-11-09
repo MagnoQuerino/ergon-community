@@ -11,7 +11,7 @@ import * as mm from '../src/services/motor-manager.ts';
 import { HermesError } from '../src/services/hermes.ts';
 import { TOOLS, toolStatus } from '../src/services/characters.ts';
 import { VERSION } from '../src/version.ts';
-import { allAgents, harness, req, setupOwner, tmpDir } from './helpers.ts';
+import { addPerson, allAgents, harness, req, setupOwner, tmpDir } from './helpers.ts';
 import * as F from './docker-falso.ts';
 
 const MANAGER = 'http://gerente.test:8645';
@@ -22,6 +22,8 @@ function mundo(d: ReturnType<typeof F.fakeDocker>, image = F.B_REF) {
   const sealed = new Map<string, boolean>();
   const unlocks: Array<{ user: string; key: string }> = [];
   const caps = new Map<string, string[]>();
+  /** o que a marca do cofre diz da cópia dos dados de antes dele (o plugin conta na saúde); null = plugin de antes */
+  const cofre = { dadosAntigos: null as boolean | null };
   const docker = async (method: string, path: string, body?: unknown) => {
     const r = await d.docker(method, path, body);
     const m = /^\/containers\/(?:create\?name=)?(ergon-motor-[a-f0-9]{32})(?:\/(start|stop))?/.exec(path);
@@ -62,13 +64,13 @@ function mundo(d: ReturnType<typeof F.fakeDocker>, image = F.B_REF) {
     },
     control: {
       health: async () => live(user),
-      info: async () => ({ ok: live(user), pluginVersion: '0.3.0', vaultConfig: 2, capacidades: caps.get(ctr(user)?.image ?? '') ?? ['conexoes'] }),
+      info: async () => ({ ok: live(user), pluginVersion: '0.3.0', vaultConfig: 2, capacidades: caps.get(ctr(user)?.image ?? '') ?? ['conexoes'], dadosAntigos: cofre.dadosAntigos }),
       accounts: async () => [], startLogin: async () => ({}), pollLogin: async () => ({}), cancelLogin: async () => {}, disconnect: async () => {},
       modelInfo: async () => ({ model: null, provider: null }), setDefaultModel: async () => ({ ok: true, confirmMessage: null }), skills: async () => [],
       apiToolsets: async () => (temConexoes(user) ? { enabled: ['todo', 'ergon_conexoes'], safe: ['todo', 'ergon_conexoes'] } : { enabled: ['todo'], safe: ['todo'] }), setApiToolsets: async (e: string[]) => e,
     },
   });
-  return { get mgr() { return mgr; }, trocar, fetchFake, clients, sealed, unlocks, caps, ctr };
+  return { get mgr() { return mgr; }, trocar, fetchFake, clients, sealed, unlocks, caps, ctr, cofre };
 }
 
 /** A instalação do caso real: o motor da pessoa como a rc.22 criava (sem marca), parado na imagem de antes (A). */
@@ -294,4 +296,193 @@ test('a marca gravada de outra versão do Ergon não vale (e sai)', async () => 
   assert.equal(h2.motors.saude(a.userId).falha, null, 'a falha de outra versão não aparece');
   assert.equal(h2.db.get('SELECT 1 AS x FROM instance_settings WHERE key = ?', chave), undefined, 'e sai do banco');
   await h2.close();
+});
+
+test('a cópia antiga dos dados do motor (sem cifra) sai sozinha quando o cofre herdado abre com a chave da pessoa; nenhum outro volume sai', async () => {
+  const d = F.fakeDocker();
+  d.addImage({ id: F.A, digests: [F.A_REF], created: 4, size: 3.28e9, shared: 3.268e9 });
+  // a instalação que veio do motor único: o cofre dele (para onde a cópia antiga foi copiada) e a cópia antiga
+  for (const v of ['ergon_hermes-vault', 'ergon_hermes-data', 'ergon_ergon-data']) d.volumes.add(v);
+  d.volLabels.set('ergon_hermes-data', { 'com.docker.compose.project': 'ergon', 'com.docker.compose.volume': 'hermes-data' });
+  const w = mundo(d, F.A_REF);
+  w.cofre.dadosAntigos = true; // a marca do cofre: a cópia foi para dentro dele na primeira abertura com o cofre
+  const h = await harness(cfgServidor, { motorClients: w.clients as never, motorFetch: w.fetchFake });
+  const a = await setupOwner(h);
+  await h.motors.ensure(a.userId);
+  assert.equal(h.motors.state(a.userId).state, 'aberto');
+  assert.equal(w.ctr(a.userId)!.spec.HostConfig.Mounts[0].Source, 'ergon_hermes-vault', 'a primeira conta herdou o cofre de antes');
+  assert.ok(h.db.get("SELECT 1 AS x FROM instance_settings WHERE key = 'motor_legacy_rekeyed'"), 'abriu com a chave da pessoa');
+  // a equipe abriu: o pedido sai sozinho (sem esperar a tela)
+  for (let i = 0; i < 100 && d.volumes.has('ergon_hermes-data'); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(d.volumes.has('ergon_hermes-data'), false, 'a cópia antiga saiu');
+  assert.ok(d.volumes.has('ergon_hermes-vault') && d.volumes.has('ergon_ergon-data'), 'o cofre e os dados do Ergon ficam');
+  assert.deepEqual(d.calls.filter((x) => x.startsWith('DELETE /volumes')), ['DELETE /volumes/ergon_hermes-data']);
+  const ev = h.db.get<{ result: string; evidence: string }>("SELECT result, evidence FROM audit_events WHERE action = 'equipe.dados_antigos_apagados'");
+  assert.ok(ev, 'fica na Atividade');
+  for (const t of [ev!.result, ev!.evidence]) assert.doesNotMatch(t, /\bmotor|\bimagem\b|gerente|cont[eê]iner|\bvolume\b/i);
+  // feito: não pergunta mais (nem ao abrir de novo)
+  const n = d.calls.length;
+  assert.equal(await h.motors.apagarDadosAntigos(), false);
+  await h.motors.stop(a.userId); await h.motors.ensure(a.userId);
+  assert.equal(d.calls.slice(n).filter((x) => x.includes('hermes-data')).length, 0);
+  await h.close();
+});
+
+/** Espera a conferência que sai sozinha quando a equipe abre (onChange → apagarDadosAntigos, sem esperar a tela). */
+async function esperar(cond: () => boolean, msg: string) {
+  for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(cond(), msg);
+}
+const aviso = (h: Awaited<ReturnType<typeof harness>>) => {
+  const v = h.db.get<{ value: string }>("SELECT value FROM instance_settings WHERE key = 'motor_dados_antigos_decidir'")?.value;
+  return v ? JSON.parse(v) as { porque: string; desde: string } : null;
+};
+const CONFIRMAR = { confirmar: 'apagar sem volta' };
+
+test('ninguém herdou o cofre de antes (a cópia antiga nunca foi para um cofre): nunca sai sozinha; a Saúde avisa e quem administra decide, sem volta', async () => {
+  const d = F.fakeDocker();
+  d.addImage({ id: F.A, digests: [F.A_REF], created: 4, size: 3.28e9, shared: 3.268e9 });
+  d.volumes.add('ergon_hermes-data'); d.volumes.add('ergon_ergon-data'); // sem o cofre de antes: a primeira conta cria o dela
+  d.volLabels.set('ergon_hermes-data', { 'com.docker.compose.project': 'ergon', 'com.docker.compose.volume': 'hermes-data' });
+  const w = mundo(d, F.A_REF);
+  const h = await harness(cfgServidor, { motorClients: w.clients as never, motorFetch: w.fetchFake });
+  const a = await setupOwner(h);
+  await h.motors.ensure(a.userId);
+  assert.equal(h.motors.state(a.userId).state, 'aberto');
+  await esperar(() => aviso(h)?.porque === 'sem-cofre', 'a conferência sai sozinha quando a equipe abre');
+  assert.equal(await h.motors.apagarDadosAntigos(a.userId), false);
+  assert.ok(d.volumes.has('ergon_hermes-data'), 'nunca sai sozinha');
+  assert.equal(d.count(/^DELETE \/volumes/), 0);
+  // a Saúde mostra o aviso (do cache: a tela nunca espera)
+  const saude = (await req(h, 'GET', '/api/saude', a)).json;
+  const comp = saude.componentes.find((c: { id: string }) => c.id === 'dados-antigos');
+  assert.ok(comp, JSON.stringify(saude.componentes.map((c: { id: string }) => c.id)));
+  assert.equal(comp.estado, 'limitado');
+  assert.match(comp.detalhe, /sem cifra/); assert.match(comp.detalhe, /nunca foi para um cofre/); assert.match(comp.detalhe, /você decide/);
+  assert.doesNotMatch(`${comp.nome} ${comp.detalhe}`, /\bmotor|volume|cont[eê]iner|gerente|Hermes/i);
+  assert.equal(saude.espaco.dadosAntigos.porque, 'sem-cofre');
+  // sem a frase de que não tem volta: nada
+  assert.equal((await req(h, 'POST', '/api/saude/dados-antigos', a, {})).status, 400);
+  assert.equal((await req(h, 'POST', '/api/saude/dados-antigos', a, { confirmar: true })).status, 400);
+  // sem a identidade confirmada há pouco: nada
+  h.db.run('UPDATE sessions SET auth_at = ?', new Date(Date.now() - 60 * 60_000).toISOString());
+  const r0 = await req(h, 'POST', '/api/saude/dados-antigos', a, CONFIRMAR);
+  assert.equal(r0.status, 401); assert.equal(r0.json.error, 'reauth');
+  assert.ok(d.volumes.has('ergon_hermes-data'));
+  h.db.run('UPDATE sessions SET auth_at = ?', new Date().toISOString());
+  const r = await req(h, 'POST', '/api/saude/dados-antigos', a, CONFIRMAR);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.apagado, true);
+  assert.equal(d.volumes.has('ergon_hermes-data'), false, 'a cópia antiga saiu');
+  assert.ok(d.volumes.has('ergon_ergon-data') && d.volumes.has(F.vol(a.userId)), 'os dados do Ergon e o cofre da pessoa ficam');
+  assert.deepEqual(d.calls.filter((x) => x.startsWith('DELETE /volumes')), ['DELETE /volumes/ergon_hermes-data'], 'só ela, sem força');
+  const ev = h.db.get<{ result: string; evidence: string }>("SELECT result, evidence FROM audit_events WHERE action = 'admin.apagar_dados_antigos'");
+  assert.ok(ev, 'fica na Atividade'); assert.match(ev!.result, /decisão de quem administra/);
+  for (const t of [ev!.result, ev!.evidence]) assert.doesNotMatch(t, /\bmotor|\bimagem\b|gerente|cont[eê]iner|\bvolume\b/i);
+  // feito: o aviso sai, e não confere mais
+  assert.equal(aviso(h), null);
+  assert.equal((await req(h, 'GET', '/api/saude', a)).json.componentes.some((c: { id: string }) => c.id === 'dados-antigos'), false);
+  assert.equal((await req(h, 'POST', '/api/saude/dados-antigos', a, CONFIRMAR)).status, 409, 'sem aviso, nada a apagar');
+  const n = d.calls.length;
+  assert.equal(await h.motors.apagarDadosAntigos(a.userId), false);
+  assert.equal(d.calls.length, n);
+  await h.close();
+});
+
+test('manter a cópia antiga também é decisão: nada é apagado, a Saúde volta a "Operacional" e apagar segue à mão; o cofre de antes existindo, o aviso não diz que só existe ali', async () => {
+  const d = F.fakeDocker();
+  d.addImage({ id: F.A, digests: [F.A_REF], created: 4, size: 3.28e9, shared: 3.268e9 });
+  d.volumes.add('ergon_hermes-data'); d.volumes.add('ergon_ergon-data');
+  d.volLabels.set('ergon_hermes-data', { 'com.docker.compose.project': 'ergon', 'com.docker.compose.volume': 'hermes-data' });
+  const w = mundo(d, F.A_REF);
+  const h = await harness(cfgServidor, { motorClients: w.clients as never, motorFetch: w.fetchFake });
+  const a = await setupOwner(h);
+  await h.motors.ensure(a.userId);
+  await esperar(() => aviso(h)?.porque === 'sem-cofre', 'aviso');
+  const comp = async () => (await req(h, 'GET', '/api/saude', a)).json.componentes.find((c: { id: string }) => c.id === 'dados-antigos');
+  assert.equal((await comp()).estado, 'limitado');
+  // o cofre de antes existe (não pôde ser herdado): a conferência seguinte não afirma que a cópia só existe ali
+  d.volumes.add('ergon_hermes-vault');
+  await h.motors.apagarDadosAntigos(a.userId);
+  assert.equal(aviso(h)?.porque, 'sem-confirmacao');
+  assert.doesNotMatch((await comp()).detalhe, /só existe ali/);
+  assert.match((await comp()).detalhe, /não confirmou que recebeu/);
+  d.volumes.delete('ergon_hermes-vault');
+  // manter: só quem administra, e grava a decisão
+  const bia = await addPerson(h, 'bia', 'senha-local-456');
+  assert.equal((await req(h, 'POST', '/api/saude/dados-antigos/manter', bia, {})).status, 403, 'quem não administra não decide');
+  assert.equal((await req(h, 'POST', '/api/saude/dados-antigos', bia, CONFIRMAR)).status, 403);
+  assert.equal(h.db.get<{ value: string }>("SELECT value FROM instance_settings WHERE key = 'motor_dados_antigos_manter'")?.value ?? '', '', 'nada foi gravado');
+  const r = await req(h, 'POST', '/api/saude/dados-antigos/manter', a, {});
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.ok(d.volumes.has('ergon_hermes-data'), 'nada é apagado');
+  assert.equal(d.count(/^DELETE \/volumes/), 0);
+  const saude = (await req(h, 'GET', '/api/saude', a)).json;
+  const c = saude.componentes.find((x: { id: string }) => x.id === 'dados-antigos');
+  assert.equal(c.estado, 'operacional', 'fica como informação');
+  assert.match(c.detalhe, /Você decidiu manter; dá para apagar quando quiser, sem volta/);
+  assert.doesNotMatch(saude.resumo, /cópia antiga|sem cifra/, 'o resumo não repete o aviso');
+  assert.equal(saude.espaco.dadosAntigos.mantida, true);
+  const ev = h.db.get<{ result: string }>("SELECT result FROM audit_events WHERE action = 'admin.manter_dados_antigos'");
+  assert.ok(ev, 'fica na Atividade'); assert.doesNotMatch(ev!.result, /motor|gerente|cont[eê]iner|volume/i);
+  // a conferência a cada abertura refaz o aviso, e a decisão de manter segue valendo
+  await h.motors.apagarDadosAntigos(a.userId);
+  assert.equal((await comp()).estado, 'operacional');
+  // mudou de ideia: apagar segue à mão, com a confirmação de que não tem volta
+  const ap = await req(h, 'POST', '/api/saude/dados-antigos', a, CONFIRMAR);
+  assert.equal(ap.status, 200, JSON.stringify(ap.json));
+  assert.equal(d.volumes.has('ergon_hermes-data'), false);
+  assert.equal(await comp(), undefined);
+  assert.equal(h.db.get<{ value: string }>("SELECT value FROM instance_settings WHERE key = 'motor_dados_antigos_manter'")?.value ?? '', '', 'a decisão de manter sai junto');
+  assert.equal((await req(h, 'POST', '/api/saude/dados-antigos/manter', a, {})).status, 409, 'sem cópia, nada a manter');
+  await h.close();
+});
+
+test('a cópia antiga em uso (o motor único de antes, mesmo parado): nem aviso, nem botão', async () => {
+  const d = F.fakeDocker();
+  d.addImage({ id: F.A, digests: [F.A_REF], created: 4, size: 3.28e9, shared: 3.268e9 });
+  d.volumes.add('ergon_hermes-data');
+  d.addContainer('ergon_hermes_1', { Image: F.A_REF, Labels: { 'com.docker.compose.service': 'hermes' }, HostConfig: { Mounts: [{ Type: 'volume', Source: 'ergon_hermes-data', Target: '/opt/data' }] } }, F.A, false);
+  const w = mundo(d, F.A_REF);
+  const h = await harness(cfgServidor, { motorClients: w.clients as never, motorFetch: w.fetchFake });
+  const a = await setupOwner(h);
+  await h.motors.ensure(a.userId);
+  await esperar(() => d.calls.some((x) => x.includes('ergon_hermes-data')), 'conferiu');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(aviso(h), null);
+  assert.equal((await req(h, 'GET', '/api/saude', a)).json.componentes.some((c: { id: string }) => c.id === 'dados-antigos'), false);
+  assert.equal((await req(h, 'POST', '/api/saude/dados-antigos', a, CONFIRMAR)).status, 409);
+  assert.ok(d.volumes.has('ergon_hermes-data'));
+  assert.equal(d.count(/^DELETE \/volumes/), 0);
+  await h.close();
+});
+
+test('o cofre herdado abriu, mas a prova da cópia não veio ou diz que o cofre foi criado sem ela: nunca sai sozinha (vira aviso); a prova que chega depois apaga', async () => {
+  const d = F.fakeDocker();
+  d.addImage({ id: F.A, digests: [F.A_REF], created: 4, size: 3.28e9, shared: 3.268e9 });
+  for (const v of ['ergon_hermes-vault', 'ergon_hermes-data']) d.volumes.add(v);
+  const w = mundo(d, F.A_REF); // dadosAntigos: null (a marca do cofre não diz)
+  const h = await harness(cfgServidor, { motorClients: w.clients as never, motorFetch: w.fetchFake });
+  const a = await setupOwner(h);
+  await h.motors.ensure(a.userId);
+  assert.equal(w.ctr(a.userId)!.spec.HostConfig.Mounts[0].Source, 'ergon_hermes-vault');
+  await esperar(() => aviso(h)?.porque === 'sem-confirmacao', 'sem a prova: aviso');
+  assert.ok(d.volumes.has('ergon_hermes-data'), 'sem a prova: fica');
+  assert.equal(h.db.get("SELECT 1 AS x FROM instance_settings WHERE key = 'motor_dados_antigos_apagados'"), undefined, 'confere de novo quando a equipe abrir');
+  assert.match((await req(h, 'GET', '/api/saude', a)).json.componentes.find((c: { id: string }) => c.id === 'dados-antigos').detalhe, /não confirmou que recebeu/);
+  // o cofre foi criado vazio (o motor único nunca abriu com a cópia montada): ela não está em lugar nenhum além dali
+  w.cofre.dadosAntigos = false;
+  const desde = aviso(h)!.desde;
+  assert.equal(await h.motors.apagarDadosAntigos(a.userId), false);
+  assert.ok(d.volumes.has('ergon_hermes-data'), 'nunca sai sozinha');
+  assert.deepEqual([aviso(h)?.porque, aviso(h)?.desde], ['sem-copia', desde], 'o aviso segue, com a data de quando apareceu');
+  assert.match((await req(h, 'GET', '/api/saude', a)).json.componentes.find((c: { id: string }) => c.id === 'dados-antigos').detalhe, /criado sem ela/);
+  assert.equal(d.count(/^DELETE \/volumes/), 0);
+  // o registro de antes desta versão ("criado sem a cópia", sem apagar) não encerra: vira aviso
+  h.db.run("INSERT OR REPLACE INTO instance_settings (key, value, updated_at) VALUES ('motor_dados_antigos_apagados', ?, datetime('now'))", JSON.stringify({ at: 'x', apagado: false, motivo: 'o cofre foi criado sem a cópia antiga' }));
+  w.cofre.dadosAntigos = true;
+  assert.equal(await h.motors.apagarDadosAntigos(a.userId), true, 'a prova chegou: sai sozinha');
+  assert.equal(d.volumes.has('ergon_hermes-data'), false);
+  assert.equal(aviso(h), null, 'e o aviso sai');
+  await h.close();
 });

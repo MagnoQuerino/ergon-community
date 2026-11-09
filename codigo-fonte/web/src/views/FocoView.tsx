@@ -116,18 +116,18 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
     <div ref={root} className={`foco foco--${size}`}>
       {size !== 'wide' && (
         <div className="foco__switch">
-          <div className="foco__tabs" role="tablist" aria-label="Áreas do Modo foco">
+          <div className="foco__tabs" role="tablist" aria-label="Áreas do Modo Foco">
             {size === 'narrow' && tabBtn(pane === 'equipe', <><Icon name="users" size={14} /> Equipe</>, () => setPane('equipe'), 'eq')}
             {tabBtn(pane !== 'lado' && (size === 'mid' || pane === 'conversa'), <><Icon name="chat" size={14} /> {agent?.name ?? 'Conversa'}</>, () => setPane('conversa'), 'cv')}
             {tabBtn(pane === 'lado' && tab === 'decisoes', <><Icon name="bell" size={14} /> Aguardando{pending ? <span className="foco__count">{pending}</span> : null}</>, () => pickSide('decisoes'), 'dc')}
             {tabBtn(pane === 'lado' && tab === 'quadro', <><Icon name="layers" size={14} /> Quadro</>, () => pickSide('quadro'), 'qd')}
           </div>
-          <button className="btn btn--sm btn--ghost" onClick={onExit} title="Sair do Modo foco (Esc)"><Icon name="x" size={14} /> Sair</button>
+          <button className="btn btn--sm btn--ghost" onClick={onExit} title="Sair do Modo Foco (Esc)"><Icon name="x" size={14} /> Sair</button>
         </div>
       )}
       {show.team && <aside className="foco__team" aria-label="Equipe">
         <div className="foco__head">
-          <b>Modo foco</b>
+          <b>Modo Foco</b>
           {size === 'wide' && <button className="btn btn--sm btn--ghost" onClick={onExit} title="Voltar (Esc)"><Icon name="x" size={14} /> Sair</button>}
         </div>
         <label className="foco__search"><Icon name="search" size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar agente" aria-label="Buscar agente" /></label>

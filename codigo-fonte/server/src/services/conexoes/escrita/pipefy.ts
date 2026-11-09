@@ -15,7 +15,7 @@
  */
 import { ProviderError } from '../../mirror.ts';
 import { neutral } from '../../operations.ts';
-import { DONE, campoDescricaoPipefy, recusado, request } from '../../task-providers.ts';
+import { DONE, campoDescricaoPipefy, comAcessoPipefy, recusado, request, type CredPipefy } from '../../task-providers.ts';
 import { ErroAcao, type EscritorTarefas, type Escrita } from '../tipos.ts';
 
 type Json = any; // respostas externas: lidas campo a campo
@@ -59,11 +59,11 @@ function faseFinal(fases: Fase[]): Fase {
   throw new ErroAcao('este pipe tem mais de uma fase final: mova o card para a que vale neste caso', nomesFases(finais));
 }
 
-export function escritorPipefy(token: string): EscritorTarefas {
-  const auth = { Authorization: `Bearer ${token}` };
+/** `cred`: a conta de serviço (Client ID e Client Secret) ou, de quem conectou antes, o token pessoal (ver task-providers.ts). */
+export function escritorPipefy(cred: CredPipefy | string): EscritorTarefas {
   const chamar = async (query: string, variables: Record<string, unknown>, kind: 'read' | 'write'): Promise<Json> => {
     let j: Json;
-    try { j = await request(API, { headers: auth, body: { query, variables }, kind }); }
+    try { j = await comAcessoPipefy(cred, (headers) => request(API, { headers, body: { query, variables }, kind })); }
     catch (e) { if (recusado(e)) throw new ErroAcao(`o Pipefy recusou o pedido: ${neutral(e.message, 240)}`); throw e; }
     if (j.errors?.length) throw falha(j.errors[0], kind); // erro com dados parciais também é erro: numa escrita, não houve sucesso
     return j.data ?? {};

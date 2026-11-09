@@ -189,7 +189,7 @@ export class Initiative {
           'Canal: conversa no Ergon. A pessoa acabou de abrir o Ergon e ainda não escreveu nada.',
           'Dê as boas-vindas no seu jeito e preste contas em poucas linhas: o que foi entregue, o que está andando e quem precisa dela (diga o nome do colega e o assunto; os cartões para responder aparecem logo abaixo da sua mensagem, e o colega também vai falar com ela).',
           'Não peça nada além do que está na lista, não crie cards nem planos agora, e não use linhas de controle. Curto: é um resumo de chegada.',
-        ].join('\n'), { userId }),
+        ].join('\n'), { userId, foco: { conversationId: conv } }),
         idempotencyKey: `${WELCOME_KEY}${userId}-${today}-${n}`,
       });
       if (lido.deFora) marcarRun(this.db, run, { privado: lido.privado, motivo: 'boas-vindas' });

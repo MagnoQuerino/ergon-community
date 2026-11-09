@@ -422,7 +422,18 @@ export function applyDocCommands(db: Db, bus: Bus, workspaceId: string, agentId:
   return out;
 }
 
-/** O que a coordenação sabe de Documentos (para organizar conversando). */
+/**
+ * O que o agente da conversa sabe fazer em Documentos (para organizar conversando): a parte fixa (os comandos e a trava
+ * de apagar só com a confirmação) vai entre as instruções; as pastas e os arquivos de agora, em documentsBrief.
+ */
+export const DOCUMENTS_HOW = [
+  'Documentos do workspace (você gere pela conversa quando a pessoa pedir; aplica na hora e ela pode desfazer; as pastas e os arquivos de agora estão na situação do workspace, abaixo):',
+  `- criar pasta: [[pasta caminho="Clientes/ACME"]] · mover: [[mover-arquivo arquivo="contrato.pdf" para="Clientes/ACME"]] · copiar: [[copiar-arquivo arquivo="..." para="..."]] · renomear: [[renomear-arquivo arquivo="..." nome="..."]] ou [[renomear-pasta pasta="..." nome="..."]]`,
+  `- salvar o texto desta sua resposta como documento: [[salvar-documento nome="Contrato ACME" formato="docx" pasta="Clientes/ACME"]] (docx = Word; também md ou txt) — escreva o documento inteiro na resposta`,
+  `- lixeira (dá para restaurar): [[lixeira arquivo="..."]] ou [[lixeira pasta="..."]] · apagar de vez: [[apagar arquivo="..."]], [[apagar pasta="..."]] ou [[esvaziar-lixeira]] — só acontece depois que a pessoa confirma no cartão; diga isso.`,
+].join('\n');
+
+/** As pastas e os arquivos de Documentos agora: dado de agora (os comandos estão em DOCUMENTS_HOW). */
 export function documentsBrief(db: Db, workspaceId: string): string {
   adoptLoose(db, workspaceId);
   const all = folders(db, workspaceId);
@@ -431,11 +442,7 @@ export function documentsBrief(db: Db, workspaceId: string): string {
   const files = db.all<{ filename: string; folder_id: string | null }>('SELECT filename, folder_id FROM artifacts WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 40', workspaceId);
   const where = (fid: string | null) => { const f = all.find((x) => x.id === fid); return f ? pathOf(f) : '(raiz)'; };
   return [
-    'Documentos do workspace (você gere pela conversa quando a pessoa pedir; aplica na hora e ela pode desfazer):',
-    `- criar pasta: [[pasta caminho="Clientes/ACME"]] · mover: [[mover-arquivo arquivo="contrato.pdf" para="Clientes/ACME"]] · copiar: [[copiar-arquivo arquivo="..." para="..."]] · renomear: [[renomear-arquivo arquivo="..." nome="..."]] ou [[renomear-pasta pasta="..." nome="..."]]`,
-    `- salvar o texto desta sua resposta como documento: [[salvar-documento nome="Contrato ACME" formato="docx" pasta="Clientes/ACME"]] (docx = Word; também md ou txt) — escreva o documento inteiro na resposta`,
-    `- lixeira (dá para restaurar): [[lixeira arquivo="..."]] ou [[lixeira pasta="..."]] · apagar de vez: [[apagar arquivo="..."]], [[apagar pasta="..."]] ou [[esvaziar-lixeira]] — só acontece depois que a pessoa confirma no cartão; diga isso.`,
-    paths.length ? `Pastas: ${paths.join(' · ')}` : 'Ainda não há pastas criadas pela pessoa.',
-    files.length ? `Arquivos recentes: ${files.map((f) => `${clip(f.filename, 80)} (${where(f.folder_id)})`).join('; ')}` : '',
+    paths.length ? `Documentos, pastas: ${paths.join(' · ')}` : 'Documentos: ainda não há pastas criadas pela pessoa.',
+    files.length ? `Documentos, arquivos recentes: ${files.map((f) => `${clip(f.filename, 80)} (${where(f.folder_id)})`).join('; ')}` : '',
   ].filter(Boolean).join('\n');
 }

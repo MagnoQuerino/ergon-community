@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  FRASE_RENOVANDO, erroDaConexao, motivoDaFalha, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, rotuloDoCofre,
+  AVISO_APROVAR_SEM_CARTAO, FRASE_RENOVANDO, ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, erroDaConexao, motivoDaFalha, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, rotuloDoCofre,
   semJargao, textoConfirmarLiberar, textoDaVolta, textoDoLiberado, textoUltimaLimpeza,
 } from './textos-tela.ts';
 import type { EtapaConsentimento } from './types.ts';
@@ -57,7 +57,11 @@ test('T2: a volta da aprovação do administrador cita o botão que existe na te
   assert.equal(textoDaVolta('microsoft', 'conectado', true), 'Conta Microsoft conectada.');
   assert.equal(textoDaVolta('google', 'recusado', false), 'Login do Google cancelado.');
   assert.equal(textoDaVolta('microsoft', 'qualquer-outra', false), 'Não deu para concluir o login da Microsoft. Tente de novo.');
-  for (const s of ['conectado', 'parcial', 'sem-leitura', 'sem-canais', 'admin-aprovou', 'admin-recusou', 'admin-aprovou-outro', 'admin-recusou-outro', 'admin-base', 'admin-aprovou-base', 'erro']) {
+  // o login segue sozinho até os canais: quem volta sem eles (ou sem o Teams, que a empresa exigiu do administrador) continua
+  // conectado, e o aviso diz isso antes do que ficou de fora
+  assert.match(textoDaVolta('microsoft', 'sem-canais', true), /^Conta Microsoft conectada\. Só a leitura dos canais do Teams \(opcional\)/);
+  assert.match(textoDaVolta('microsoft', 'precisa-admin', true), /^Conta Microsoft conectada: enviar e-mail e criar arquivos já funcionam\. .*administrador/);
+  for (const s of ['conectado', 'parcial', 'precisa-admin', 'sem-leitura', 'sem-canais', 'admin-aprovou', 'admin-recusou', 'admin-aprovou-outro', 'admin-recusou-outro', 'admin-base', 'admin-aprovou-base', 'erro']) {
     for (const c of [true, false]) assert.doesNotMatch(textoDaVolta('microsoft', s, c), PROIBIDAS);
   }
 });
@@ -66,6 +70,9 @@ test('T7: a mensagem pronta ao administrador anuncia tudo o que o link da primei
   assert.equal(oQuePedirAoAdministrador('base'), 'enviar e ler e-mail, ver a agenda, criar e ler arquivos, organizar tarefas e mandar e ler mensagens no Teams');
   assert.equal(oQuePedirAoAdministrador('leitura'), 'ler e-mail, agenda, arquivos, tarefas e conversas do Teams');
   assert.equal(oQuePedirAoAdministrador('canais'), 'ler as mensagens dos canais do Teams');
+  // o Teams que a empresa só libera com o administrador: o link é o da leitura, que pede também o Teams
+  assert.match(oQuePedirAoAdministrador('trabalho'), /mandar mensagens no Teams/);
+  assert.match(oQuePedirAoAdministrador('trabalho'), /ler e-mail/);
 });
 
 test('T8: na Microsoft, o próximo passo de Tarefas só depois de liberada a leitura', () => {
@@ -191,4 +198,104 @@ test('as telas usam os textos acima (e não as cópias antigas)', () => {
   const sp = codigo('views/SaudePanel.tsx');
   tem(sp, /rotuloDoCofre\(v\.conta\)/, 'T6');
   tem(sp, /rotuloDoCofre\(cofre\.alvo\.conta\)/, 'T6');
+});
+
+test('decisão 19: o histórico do card diz em português o que a equipe fez ao tentar de novo (nunca o nome cru do registro)', () => {
+  // os rótulos do histórico saíram do componente para lib/tarefa-tela.ts (linhas curtas, com o "ver mais")
+  const td = codigo('lib/tarefa-tela.ts');
+  const rotulos = td.slice(td.indexOf('const ACTION_LABEL'), td.indexOf('};', td.indexOf('const ACTION_LABEL')));
+  const mostra = td.slice(td.indexOf('const SHOW_RESULT'), td.indexOf(']);', td.indexOf('const SHOW_RESULT')));
+  for (const acao of ['task.persist', 'task.persist_decision', 'task.persist_exhausted', 'task.help_step', 'conexao.pessoa']) {
+    assert.match(rotulos, new RegExp(`'${acao.replace('.', '\.')}': '[^']+'`), `${acao}: rótulo na tela`);
+    assert.ok(mostra.includes(`'${acao}'`), `${acao}: o histórico mostra o que houve`);
+  }
+  assert.match(rotulos, /'task\.persist': 'A equipe tentou de novo'/);
+  assert.match(rotulos, /'conexao\.pessoa': 'Só você resolve'/);
+});
+
+test('Conexões: as escolhas de cuidado (aprovar antes de abrir sites ou rodar programas, confirmar antes de organizar) aparecem claras', () => {
+  const jargao = /\bmotor\b|token|\bAPI\b|contêiner|ferramenta '|web_extract|terminal/i;
+  for (const r of [ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, AVISO_APROVAR_SEM_CARTAO]) { assert.doesNotMatch(r, jargao); assert.doesNotMatch(r, PROIBIDAS); }
+  assert.match(ROTULO_APROVAR_DEPOIS_DE_LER, /aprovação antes de abrir sites ou rodar programas/);
+  assert.match(ROTULO_CONFIRMAR_ORGANIZAR, /confirmação antes de organizar/);
+  const cx = codigo('views/ConexoesView.tsx');
+  tem(cx, /ROTULO_APROVAR_DEPOIS_DE_LER/, 'a opção está na tela de Conexões');
+  tem(cx, /\/api\/conexoes\/aprovar-depois-de-ler/, 'e liga e desliga de verdade');
+  // equipe ainda sem o pedido de aprovação: a tela avisa que, por enquanto, isso barra em vez de mostrar o cartão
+  tem(cx, /aprovarDepoisDeLerBarra && <p className="warn">\{AVISO_APROVAR_SEM_CARTAO\}/, 'o aviso da equipe sem o cartão');
+  tem(cx, /você escolhe por quanto tempo vale: 1 h, 8 h ou 72 h/, 'a pessoa escolhe o prazo da aprovação');
+  tem(cx, /ROTULO_CONFIRMAR_ORGANIZAR/, 'confirmar antes de organizar também');
+  tem(cx, /\/api\/conexoes\/confirmar-organizar/, 'e liga e desliga de verdade');
+  // o cartão de aprovação e o de regra são decididos um a um: nunca entram no "aplicar todas"
+  tem(codigo('components/ChatPanel.tsx'), /'conexao', 'depois_de_ler', 'regra'\]\.includes\(p\.kind\)/, 'fora do aplicar todas');
+});
+
+test('rc.26: as regras num lugar só (Conexões › Regras), com os botões do alcance e do prazo nos cartões', () => {
+  const cr = codigo('components/CartaoRegra.tsx');
+  for (const r of ['Só neste pedido', 'Por 24 h', 'Sempre', "'1 h'", "'8 h'", "'72 h'"]) tem(cr, new RegExp(r), `botão ${r}`);
+  for (const arq of ['components/ChatPanel.tsx', 'components/DecisionsPanel.tsx']) {
+    tem(codigo(arq), /<BotoesRegra /, `${arq}: o cartão de regra com o alcance`);
+    tem(codigo(arq), /<BotoesPrazo /, `${arq}: a aprovação com o prazo`);
+  }
+  tem(codigo('components/TaskDetail.tsx'), /<BotoesPrazo /, 'no card também');
+  const cx = codigo('views/ConexoesView.tsx');
+  tem(cx, /id="conn-regras"/, 'a seção Regras em Conexões');
+  tem(cx, /\/api\/conexoes\/regras\/\$\{x\.id\}\/desfazer/, 'Desfazer de verdade');
+  tem(cx, /decision: 'rejected' \}\), 'Desligada\.'/, 'as regras de texto se desligam ali');
+  const at = codigo('views/OtherViews.tsx');
+  naoTem(at, /Regras propostas/, 'a aba antiga saiu de Atividade');
+  tem(at, /'#conexoes\?regras'/, 'o endereço antigo leva a Conexões › Regras');
+  const td = codigo('lib/tarefa-tela.ts');
+  tem(td, /'task\.regra': 'Liberado pela sua regra'/, 'o histórico do card diz que foi pela regra');
+});
+
+test('a cópia antiga dos dados da equipe: a pergunta diz que não tem volta, sem jargão; a frase do pedido é a que o servidor exige', async () => {
+  const { CONFIRMAR_DADOS_ANTIGOS, TEXTO_CONFIRMAR_DADOS_ANTIGOS } = await import('./textos-tela.ts');
+  assert.equal(CONFIRMAR_DADOS_ANTIGOS, 'apagar sem volta');
+  assert.match(TEXTO_CONFIRMAR_DADOS_ANTIGOS, /Não tem volta\.$/);
+  assert.match(TEXTO_CONFIRMAR_DADOS_ANTIGOS, /não confirmou que a recebeu/);
+  assert.doesNotMatch(TEXTO_CONFIRMAR_DADOS_ANTIGOS, CRU);
+  assert.doesNotMatch(TEXTO_CONFIRMAR_DADOS_ANTIGOS, PROIBIDAS);
+  assert.doesNotMatch(TEXTO_CONFIRMAR_DADOS_ANTIGOS, /volume|cont[eê]iner|\btoken\b/i);
+  // a tela da Saúde manda exatamente esta frase
+  const tela = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'views', 'SaudePanel.tsx'), 'utf8');
+  assert.match(tela, /\/api\/saude\/dados-antigos', \{ confirmar: CONFIRMAR_DADOS_ANTIGOS \}/);
+  assert.match(tela, /c\.id === 'dados-antigos'/);
+  // manter também é decisão: o botão existe, chama a rota, e some depois de mantida (apagar segue)
+  assert.match(tela, /\/api\/saude\/dados-antigos\/manter'/);
+  assert.match(tela, /!esp\?\.dadosAntigos\?\.mantida && <button[^\n]*>Manter a cópia<\/button>/);
+  const { TEXTO_MANTIDOS_DADOS_ANTIGOS } = await import('./textos-tela.ts');
+  assert.doesNotMatch(TEXTO_MANTIDOS_DADOS_ANTIGOS, CRU);
+  assert.doesNotMatch(TEXTO_MANTIDOS_DADOS_ANTIGOS, PROIBIDAS);
+  assert.match(TEXTO_MANTIDOS_DADOS_ANTIGOS, /dá para apagar aqui mesmo/);
+});
+
+test('baixar meus dados e excluir a conta: o arquivo sai legível, os backups de antes são ditos como são, quem administra sabe que só a pessoa baixa', async () => {
+  const t = await import('./textos-tela.ts');
+  assert.match(t.TEXTO_BAIXAR_DADOS, /legível, sem a cifra/);
+  assert.match(t.TEXTO_BAIXAR_DADOS, /Guarde em lugar seguro/);
+  assert.match(t.TEXTO_ANTES_DE_EXCLUIR, /^Antes de excluir, baixe os seus dados/);
+  // o texto antigo dizia que nada mais abria "nem por backup": falso para os backups feitos antes
+  assert.doesNotMatch(t.TEXTO_EXCLUIR_CONTA, /nem por backup/);
+  assert.match(t.TEXTO_EXCLUIR_CONTA, /somem desta instalação/);
+  assert.match(t.TEXTO_EXCLUIR_CONTA, /backup da instalação feito antes pode trazer de volta a instalação inteira/);
+  const rem = t.textoRemoverPessoa('bruna');
+  assert.match(rem, /Só a própria pessoa pode baixar os dados dela/);
+  assert.match(rem, /Peça para ela baixar antes de remover/);
+  assert.doesNotMatch(rem, /nem você nem ela conseguem recuperar/);
+  assert.match(rem, /backup da instalação feito antes/);
+  assert.equal(t.textoBaixado(0), 'Arquivo baixado. Guarde em lugar seguro: ele não é cifrado.');
+  assert.equal(t.textoBaixado(3), 'Arquivo baixado. 3 arquivos ficaram de fora: a lista e o motivo estão no LEIA-ME, dentro do arquivo. Guarde em lugar seguro: ele não é cifrado.');
+  assert.match(t.textoBaixado(1), /1 arquivo ficou de fora: a lista e o motivo estão no LEIA-ME/);
+  for (const n of [1, 2]) { assert.doesNotMatch(t.textoBaixado(n), /pelo tamanho|documento/, 'o motivo pode ser outro: quem diz é o LEIA-ME'); assert.match(t.textoBaixado(n), /não é cifrado/, 'o aviso de que o arquivo é legível sempre vem'); }
+  for (const s of [t.TEXTO_BAIXAR_DADOS, t.TEXTO_ANTES_DE_EXCLUIR, t.TEXTO_EXCLUIR_CONTA, rem, t.textoBaixado(2)]) { assert.doesNotMatch(s, CRU); assert.doesNotMatch(s, PROIBIDAS); assert.doesNotMatch(s, /\bo Ergon (lê|sabe|guarda|acha)/); }
+  // as telas usam estes textos (e o texto errado de antes saiu delas)
+  const views = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../views');
+  const seg = fs.readFileSync(path.join(views, 'SegurancaPanel.tsx'), 'utf8');
+  const pes = fs.readFileSync(path.join(views, 'PessoasPanel.tsx'), 'utf8');
+  const conta = fs.readFileSync(path.join(views, 'ContaPanel.tsx'), 'utf8');
+  assert.ok(!seg.includes('nem por backup') && seg.includes('TEXTO_EXCLUIR_CONTA') && seg.includes('<BaixarMeusDados'), 'Segurança: baixar antes de excluir');
+  assert.ok(seg.indexOf('<BaixarMeusDados') < seg.indexOf('Excluir a minha conta…'), 'o passo de baixar vem antes do botão de excluir');
+  assert.ok(!pes.includes('nem você nem ela conseguem recuperar') && pes.includes('textoRemoverPessoa('), 'Pessoas: o aviso certo');
+  assert.ok(conta.includes('<BaixarMeusDados'), 'Minha conta: baixar a qualquer momento');
 });

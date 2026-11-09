@@ -185,6 +185,8 @@ export class Vault {
   dbKey(): Buffer { return hkdf(this.need(), 'ergon/db/v1'); }
   /** chave do volume cifrado do motor de IA (gocryptfs), em hexadecimal */
   hermesKey(): string { return hkdf(this.need(), 'ergon/hermes-vault/v1').toString('hex'); }
+  /** chave que guarda as credenciais da instalação no serviço do Teams (services/teams-app) */
+  teamsRelayKey(): Buffer { return hkdf(this.need(), 'ergon/teams-relay/v1'); }
   keySource(): WorkspaceKeySource { return new LocalKeySource(this.need()); }
 
   info(): { protected: boolean; recovery: boolean; auto: Array<{ id: string; label: string; createdAt: string }>; users: string[] } {

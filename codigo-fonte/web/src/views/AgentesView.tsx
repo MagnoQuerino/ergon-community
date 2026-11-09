@@ -12,6 +12,7 @@ import { NewAgentDialog } from '../components/NewAgentDialog.tsx';
 import { DistributionDialog } from '../components/DistributionDialog.tsx';
 import { NewGroupDialog } from '../components/NewGroupDialog.tsx';
 import { VirtualGrid } from '../components/VirtualGrid.tsx';
+import { cardClick } from '../lib/cardClick.ts';
 
 const RUN_LABEL: Record<string, string> = { running: 'trabalhando', queued: 'na fila', waiting_user: 'aguarda você' };
 const CARD_H = 132; const CARD_MIN = 280;
@@ -237,7 +238,10 @@ function SectorGroups({ scope, card, onOpenGroup }: { scope: string; card: (a: T
       <div className="groups">
         {g.data.items.map((s) => (
           <section key={s.key} className="group" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name} aria-label={`Setor ${s.name}`}>
-            <header className="group__head"><h3>{s.name}</h3><span className="muted">{s.count}</span></header>
+            {/* o cabeçalho do setor abre o setor inteiro (antes, só o "Ver todos" pequeno, e só quando não cabia todo mundo) */}
+            <header className="group__head card-click" onClick={cardClick(() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name }))}>
+              <h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })} aria-label={`Abrir o setor ${s.name}`}>{s.name}</button></h3><span className="muted">{s.count}</span>
+            </header>
             <div className="group__cards">
               {s.sample.map(card)}
               {!s.count && <p className="group__empty hint">Ninguém aqui ainda. Arraste alguém para cá.</p>}
@@ -268,9 +272,9 @@ function StructureGroups({ scope, card, onOpenGroup, onToast }: { scope: string;
       <div className="groups">
         {g.data.items.map((b) => (
           <section key={b.id} className={`building ${b.free === 0 ? 'building--full' : ''}`} data-drop-kind="structure" data-drop-id={b.id} data-drop-name={b.name} aria-label={`${b.name}: ${b.active} de ${b.slots} lugares`}>
-            <header className="building__head">
+            <header className="building__head card-click" onClick={cardClick(() => onOpenGroup({ kind: 'structure', id: b.id, name: b.name }))}>
               <span className="building__icon"><Icon name="temple" size={18} /></span>
-              <div><h3>{b.name}</h3><span className="muted small">{b.active} de {b.slots} lugares · {b.kind_name}</span></div>
+              <div><h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'structure', id: b.id, name: b.name })} aria-label={`Abrir ${b.name}`}>{b.name}</button></h3><span className="muted small">{b.active} de {b.slots} lugares · {b.kind_name}</span></div>
             </header>
             <div className="building__people">
               {b.sample.map(card)}
@@ -301,7 +305,7 @@ function AgentCard({ a, pending, onOpen, onDrag, onMove, extra }: {
     <article className={`tcard ${a.status !== 'active' ? 'tcard--off' : ''} ${pending ? 'is-pending' : ''}`} aria-busy={pending}
       title={pending ? 'Movendo…' : 'Arraste para mudar de setor ou de construção · clique para abrir o perfil'}
       onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('.tcard__menu, [role="menu"], button:not(.tcard__name)')) onDrag(e, a); }}
-      onClick={(e) => { if (!(e.target as HTMLElement).closest('button, [role="menu"]')) open(); }}>
+      onClick={cardClick(open)}>
       <span className="tcard__fig"><AgentFigure agent={a} /></span>
       <div className="tcard__body">
         <button className="tcard__name" onClick={open} aria-label={`Abrir o perfil de ${a.name}`}>{a.name}</button>

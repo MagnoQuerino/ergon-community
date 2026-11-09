@@ -55,7 +55,7 @@ const NOTE: Record<Billing, string> = {
   subscription: 'Assinatura do ChatGPT: sem custo por uso (vale a mensalidade). Os tokens mostram quanto a equipe trabalhou.',
   credits: 'Conta com créditos: o custo aparece quando o provedor informa o valor cobrado; o saldo fica no portal da conta.',
   api: 'Chave de API: o custo aparece quando o provedor informa o valor cobrado de cada execução.',
-  none: 'Sem conta de IA conectada: respostas simuladas, sem consumo.',
+  none: 'Sem conta de IA conectada: a equipe não trabalha nos pedidos, sem consumo.',
 };
 
 export function usageSummary(db: Db, workspaceId: string, tzOffsetMin: number, nowMs = Date.now(), billing: Billing = 'none'): UsageSummary {

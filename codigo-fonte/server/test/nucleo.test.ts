@@ -412,7 +412,7 @@ describe('modo simulado: honesto sobre o que não é trabalho', () => {
       assert.equal(d.task.completed, 1, 'os números são do Ergon, não do modelo');
       assert.equal(d.files.deliverables.length, 2);
       const row = h.db.get<{ evidence: string }>('SELECT evidence FROM task_results WHERE task_id = ?', data.id)!;
-      assert.match(row.evidence, /simulado \(sem modelo de IA\): não entra no resultado/);
+      assert.match(row.evidence, /sem conta de IA conectada: não entra no resultado/);
     } finally { await h.close(); }
   });
 });

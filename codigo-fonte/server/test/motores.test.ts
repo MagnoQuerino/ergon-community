@@ -56,6 +56,12 @@ class FakeControl implements HermesControlClient {
   async skills() { return []; }
   async apiToolsets() { const t = this.infra.toolsOf(this.user); return { enabled: [...t.enabled], safe: t.known.filter((n) => n !== 'terminal' && n !== 'code_execution') }; }
   async setApiToolsets(enabled: string[]) { this.sets.push(enabled); const t = this.infra.toolsOf(this.user); t.enabled = enabled.filter((n) => t.known.includes(n)); return [...t.enabled]; }
+  /** passos por pedido (agent.max_turns) no motor; `passosFora`: o painel interno ainda não responde */
+  passosNoMotor: number | null = 20;
+  passosGravados: number[] = [];
+  passosFora = false;
+  async passos() { if (this.passosFora || this.infra.sealed.get(this.user) !== false) throw new HermesError(503, 'ainda subindo'); return this.passosNoMotor; }
+  async setPassos(n: number) { if (this.passosFora || this.infra.sealed.get(this.user) !== false) throw new HermesError(503, 'ainda subindo'); this.passosGravados.push(n); this.passosNoMotor = n; return n; }
 }
 
 /**
@@ -72,7 +78,11 @@ function fakeInfra() {
   const held = new Map<string, string>();
   const tools = new Map<string, { enabled: string[]; known: string[] }>();
   const caps = new Map<string, string[] | null>(); const down = new Set<string>();
-  const st = { target: IMG_A, avisos: [] as string[], unlockFail: null as string | null, volumes: null as null | Array<{ nome: string; emUso?: boolean; herdado?: boolean; instalacao?: 'nossa' | 'sem-marca' | 'outra' }> };
+  const st = { target: IMG_A, avisos: [] as string[], unlockFail: null as string | null, volumes: null as null | Array<{ nome: string; emUso?: boolean; herdado?: boolean; instalacao?: 'nossa' | 'sem-marca' | 'outra' }>,
+    /** a imagem da versão nova não chegou a este computador: o gerente não renova (motivo 'sem-imagem') e liga o de antes */
+    semImagem: false,
+    /** quantas trocas seguidas a equipe "não para a tempo" (o gerente responde 'nao-parou' e liga a de antes) */
+    naoParou: 0 };
   let adoptedBy: string | null = null;
   const imageOf = (u: string) => images.get(u) ?? IMG_A;
   const capsOf = (img: string) => (caps.has(img) ? caps.get(img)! : ['conexoes', 'bloqueio_prefixo']);
@@ -88,6 +98,7 @@ function fakeInfra() {
       calls.push({ method, path: u.pathname, body, token: headers.get('x-ergon-manager-token') });
       if (u.pathname === '/v1/motors' && method === 'GET') return json({ motors: users().map((x) => ({ uid: x, state: running.get(x) ? 'running' : 'exited', stale: imageOf(x) !== st.target && held.get(x) !== st.target, image: imageOf(x), prevImage: prevs.get(x) ?? null })) });
       if (u.pathname === '/v1/volumes' && method === 'GET') return st.volumes ? json({ volumes: st.volumes }) : json({ error: 'rota' }, 404);
+      if (u.pathname === '/v1/maintenance/estimate') return json({ ok: true, liberavel: 7e8 });
       if (u.pathname === '/v1/maintenance/clean') return json({ ok: true, removidas: [{ id: 'sha256:velha', bytes: 5e8 }], liberado: 5e8, avisos: st.avisos.map((volume) => ({ volume, motivo: 'sem contêiner' })) });
       const vol = /^\/v1\/volumes\/([^/]+)$/.exec(u.pathname);
       if (vol && method === 'DELETE') return json({ ok: true });
@@ -100,6 +111,12 @@ function fakeInfra() {
         const cur = imageOf(uid);
         const stale = cur !== st.target && held.get(uid) !== st.target;
         if (stale && running.get(uid) && body?.idle !== true) return json({ ok: true, adopted: adopt, created: false, recreated: false, stale: true, image: cur, prevImage: prevs.get(uid) ?? null });
+        if (stale && (st.semImagem || st.naoParou > 0)) {
+          const motivo = st.semImagem ? 'sem-imagem' : 'nao-parou';
+          if (!st.semImagem) st.naoParou--;
+          if (body?.start !== false) { if (!running.get(uid)) sealed.set(uid, true); running.set(uid, true); }
+          return json({ ok: true, adopted: adopt, created: false, recreated: false, stale: true, motivo, image: cur, prevImage: prevs.get(uid) ?? null });
+        }
         if (stale) {
           prevs.set(uid, cur); images.set(uid, st.target); sealed.set(uid, true); running.set(uid, body?.start !== false);
           return json({ ok: true, adopted: adopt, created: false, recreated: true, stale: true, image: st.target, prevImage: cur });
@@ -428,6 +445,60 @@ describe('renovação do motor (versão nova)', () => {
     assert.ok(h.db.all<{ result: string | null }>("SELECT result FROM audit_events WHERE action = 'ai.tools'").some((x) => /^Conexões desligadas para a equipe/.test(x.result ?? '')), 'fica no registro');
     await h.close();
   });
+
+  test('equipe numa versão que, com a proteção depois de ler as contas ligada, barra sem cartão: a tela de Conexões sabe e avisa', async () => {
+    const { h, a, b, infra } = await setup();
+    // os dois motores abriram na imagem de antes (sem a capacidade de pedir aprovação)
+    assert.equal((await req(h, 'GET', '/api/conexoes', a)).json.aprovarDepoisDeLerBarra, true, 'versão de antes: barra em vez de pedir');
+    // o motor da Ana reabre numa versão com a capacidade; o da Bruna continua aberto como estava
+    infra.caps.set(IMG_A, ['conexoes', 'bloqueio_prefixo', 'known_plugin_toolsets', 'aprovar_depois_de_ler']);
+    await h.motors.stop(a.userId); await h.motors.ensure(a.userId);
+    assert.equal((await req(h, 'GET', '/api/conexoes', a)).json.aprovarDepoisDeLerBarra, false, 'versão nova: pede aprovação');
+    assert.equal((await req(h, 'GET', '/api/conexoes', b)).json.aprovarDepoisDeLerBarra, true, 'cada pessoa pela equipe dela');
+    await h.close();
+  });
+
+  test('passos por pedido: escolhidos com o motor desligado, chegam quando ele abre; falhou na abertura, o passo de fundo leva', async () => {
+    const { h, a, b, infra } = await setup();
+    const ca = infra.controlOf(a.userId); const cb = infra.controlOf(b.userId);
+    assert.deepEqual(ca.passosGravados, [], 'sem escolha e com 20 no motor: nada muda');
+    await h.motors.stop(a.userId);
+    const r = await req(h, 'PUT', '/api/team/max-turns', a, { value: 40 });
+    assert.deepEqual(r.json, { value: 40, applied: false, outros: 0 }, 'o motor do Alexandre está desligado');
+    assert.equal((await req(h, 'GET', '/api/state', a)).json.teamMaxTurnsPendente, true);
+    await h.motors.ensure(a.userId);
+    assert.deepEqual(ca.passosGravados, [40], 'ao abrir, o motor recebe a escolha');
+    assert.equal((await req(h, 'GET', '/api/state', a)).json.teamMaxTurnsPendente, false);
+    assert.deepEqual(cb.passosGravados, [], 'o motor da Bruna não é tocado');
+    assert.equal((await req(h, 'GET', '/api/state', b)).json.teamMaxTurns, 20, 'e a tela dela segue com o dela');
+    // a Bruna escolhe com o motor dela desligado; ao abrir, o painel interno ainda não responde: o passo de fundo leva depois
+    await h.motors.stop(b.userId);
+    await req(h, 'PUT', '/api/team/max-turns', b, { value: 10 });
+    cb.passosFora = true;
+    await h.motors.ensure(b.userId);
+    assert.equal(h.motors.state(b.userId).state, 'aberto');
+    assert.deepEqual(cb.passosGravados, []);
+    assert.equal((await req(h, 'GET', '/api/state', b)).json.teamMaxTurnsPendente, true, 'a tela diz que ainda não chegou');
+    cb.passosFora = false;
+    h.startBackground();
+    const fim = Date.now() + 2000;
+    while (cb.passosNoMotor !== 10 && Date.now() < fim) await new Promise((x) => setTimeout(x, 20));
+    assert.equal(cb.passosNoMotor, 10, 'o passo de fundo levou a escolha');
+    assert.equal(ca.passosNoMotor, 40);
+    await h.close();
+  });
+
+  test('passos por pedido: um valor fora de 5 a 60 no motor (sem escolha da pessoa) volta a 20 ao abrir', async () => {
+    const { h, a, infra } = await setup();
+    const ca = infra.controlOf(a.userId);
+    ca.passosNoMotor = 500; // um script ou um agente com Terminal gravou isto
+    await h.motors.stop(a.userId); await h.motors.ensure(a.userId);
+    assert.equal(ca.passosNoMotor, 20);
+    ca.passosNoMotor = null; // "unlimited": a ponte não devolve número
+    await h.motors.stop(a.userId); await h.motors.ensure(a.userId);
+    assert.equal(ca.passosNoMotor, 20);
+    await h.close();
+  });
 });
 
 describe('espaço: imagens antigas e cofres sem dono', () => {
@@ -511,6 +582,271 @@ describe('espaço: imagens antigas e cofres sem dono', () => {
     assert.deepEqual(filtrarOrfaos(h.db, nomes).map((v) => v.nome), [`ergon_motor-${sumido}`]);
     h.db.run("INSERT INTO instance_settings (key, value, updated_at) VALUES ('motor_legacy_owner', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", `usr_${sumido}`, new Date().toISOString());
     assert.deepEqual(filtrarOrfaos(h.db, nomes), [], 'nunca o da pessoa que herdou o cofre de antes');
+    await h.close();
+  });
+});
+
+/** o que os testes de prazo mexem por dentro (o relógio de cada coisa, para não esperar 30 minutos de verdade) */
+type Dentro = {
+  fora: Map<string, number>; states: Map<string, { state: string; error: string | null; at: number }>;
+  renovacao: Map<string, { alvo: string | null; desde: number; ocupado: boolean }>;
+  adiadas: Map<string, { motivo: string; at: number; vezes: number }>; ultimaEstimativa: number; ultimaAbertura: Map<string, number>;
+  pending: Map<string, Promise<void>>;
+};
+const dentro = (h: Harness) => h.motors as unknown as Dentro;
+const minutosAtras = (min: number) => Date.now() - min * 60_000;
+const envelhecer = (h: Harness, runId: string, min: number) => h.db.run('UPDATE runs SET created_at = ? WHERE id = ?', new Date(minutosAtras(min)).toISOString(), runId);
+const conversaDe = (h: Harness, runId: string) => h.db.get<{ c: string }>('SELECT conversation_id AS c FROM runs WHERE id = ?', runId)!.c;
+const ensures = (infra: Infra, u: string, desde: number) => infra.calls.slice(desde).filter((c) => c.path === `/v1/motors/${u}/ensure`).length;
+
+describe('prazos da equipe: 30 minutos sem responder, tentar de novo ao abrir, estimativa semanal', () => {
+  test('equipe em erro: o pedido espera até 30 minutos seguidos sem ela, depois desiste com "Tentar de novo"; ela volta e o pedido anda', async () => {
+    const { h, a, infra } = await setup();
+    assert.equal(h.cfg.motorWaitMinutes, 30, 'o padrão é 30 minutos');
+    await h.motors.stop(a.userId);
+    infra.st.unlockFail = 'falha ao montar: o disco não respondeu';
+    const r1 = await chat(h, a, 'um pedido', 'req-prazo-erro-001');
+    await ticks(h, 2); await h.motors.ensure(a.userId).catch(() => undefined);
+    assert.equal(h.motors.state(a.userId).state, 'erro');
+    await ticks(h, 1);
+    assert.equal(run(h, r1.runId).status, 'queued');
+    assert.match(run(h, r1.runId).error ?? '', /^aguardando a equipe \(não ligou/);
+    // 29 minutos seguidos sem a equipe: ainda espera
+    dentro(h).fora.set(a.userId, minutosAtras(29)); envelhecer(h, r1.runId, 29);
+    await ticks(h, 1);
+    assert.equal(run(h, r1.runId).status, 'queued');
+    // 31 minutos: desiste; o pedido que acabou de chegar tem o prazo inteiro
+    dentro(h).fora.set(a.userId, minutosAtras(31)); envelhecer(h, r1.runId, 31);
+    const r2 = await chat(h, a, 'outro pedido, de agora', 'req-prazo-erro-002');
+    await ticks(h, 1);
+    assert.equal(run(h, r1.runId).status, 'failed');
+    const motivo = run(h, r1.runId).error ?? '';
+    assert.match(motivo, /^a equipe não está respondendo há mais de 30 minutos\. O sistema continua tentando religar a equipe; use "Tentar de novo" quando quiser$/);
+    assert.doesNotMatch(motivo, JARGAO);
+    const c1 = conversaDe(h, r1.runId);
+    const falha = ((await req(h, 'GET', `/api/conversations/${c1}/messages`, a)).json as Array<{ role: string; content: string }>).at(-1)!;
+    assert.match(falha.content, /^Não deu certo desta vez: a equipe não está respondendo/, 'a conversa mostra (e oferece "Tentar de novo")');
+    assert.equal(run(h, r2.runId).status, 'queued', 'o pedido que chegou agora ainda espera');
+    // a equipe volta: o pedido que esperava anda; e "Tentar de novo" no primeiro também
+    infra.st.unlockFail = null;
+    dentro(h).states.get(a.userId)!.at = 0; // passa o intervalo de 15 s entre tentativas de religar
+    await ticks(h, 1); await h.motors.ensure(a.userId);
+    assert.equal(h.motors.state(a.userId).state, 'aberto');
+    assert.equal(dentro(h).fora.has(a.userId), false, 'aberta, o relógio zera');
+    await ticks(h, 3);
+    assert.equal(run(h, r2.runId).status, 'succeeded');
+    assert.equal((await req(h, 'POST', `/api/conversations/${c1}/retry`, a)).status, 200);
+    await ticks(h, 3);
+    assert.equal(h.db.get<{ status: string }>('SELECT status FROM runs WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', c1)!.status, 'succeeded');
+    await h.close();
+  });
+
+  test('renovação que espera o trabalho em andamento não conta como fora do ar; passou de 30 minutos, a troca fica para depois e a equipe de antes recebe os pedidos', async () => {
+    const { h, a, infra } = await setup();
+    const motor = infra.motorOf(a.userId);
+    motor.next = 'running';
+    const r1 = await chat(h, a, 'um pedido que não termina (espera a pessoa)', 'req-prazo-ocup-001');
+    await ticks(h, 2);
+    infra.st.target = IMG_B;
+    await h.motors.ensure(a.userId);
+    assert.equal(h.motors.state(a.userId).state, 'renovando');
+    assert.equal(h.motors.semRespostaDesde(a.workspaceId), null, 'a equipe de antes segue funcionando: não é "sem responder"');
+    const r2 = await chat(h, a, 'um pedido novo', 'req-prazo-ocup-002');
+    envelhecer(h, r2.runId, 45);
+    await ticks(h, 2);
+    assert.equal(run(h, r2.runId).status, 'queued', 'esperar a troca não faz o pedido desistir');
+    // 31 minutos esperando o trabalho em andamento: a troca fica para depois, e a equipe de antes volta a receber
+    dentro(h).renovacao.get(a.userId)!.desde = minutosAtras(31);
+    motor.next = 'completed';
+    await h.motors.tick(); await h.motors.ensure(a.userId);
+    assert.equal(h.motors.state(a.userId).state, 'aberto');
+    assert.equal(infra.imageOf(a.userId), IMG_A, 'a troca não aconteceu');
+    assert.match(String(h.motors.saude(a.userId).adiada), /ficou ocupada por mais de 30 minutos e a troca ficou para depois/);
+    await ticks(h, 3);
+    assert.equal(run(h, r2.runId).status, 'succeeded', 'o pedido que esperava foi para a equipe de antes');
+    // nada tenta de novo a cada volta do relógio: só quando a pessoa abrir o Ergon (e com a equipe livre)
+    const n = infra.calls.length;
+    for (let i = 0; i < 5; i++) await h.motors.tick();
+    assert.equal(ensures(infra, a.userId, n), 0);
+    motor.runs.get(run(h, r1.runId).hermes_run_id!)!.status = 'completed';
+    await ticks(h, 2);
+    assert.equal((await req(h, 'GET', '/api/me', a)).status, 200);
+    await h.motors.ensure(a.userId);
+    assert.equal(infra.imageOf(a.userId), IMG_B, 'abriu o Ergon com a equipe livre: a troca aconteceu');
+    assert.equal(h.motors.saude(a.userId).adiada, null);
+    await h.close();
+  });
+
+  test('troca que não termina (a resposta não volta): o pedido desiste depois de 30 minutos, como na equipe em erro', async () => {
+    const { h, a } = await setup();
+    const r = await chat(h, a, 'um pedido', 'req-prazo-trava-001');
+    // a versão nova está chegando e o gerente não respondeu a tempo: "renovando", fora do ar
+    dentro(h).renovacao.set(a.userId, { alvo: null, desde: minutosAtras(31), ocupado: false });
+    dentro(h).states.set(a.userId, { state: 'renovando', error: null, at: Date.now() });
+    dentro(h).fora.set(a.userId, minutosAtras(31)); envelhecer(h, r.runId, 31);
+    await ticks(h, 1);
+    assert.equal(run(h, r.runId).status, 'failed');
+    assert.match(run(h, r.runId).error ?? '', /^a equipe não está respondendo/);
+    await h.close();
+  });
+
+  test('versão nova que não chegou: não tenta a cada poucos minutos; tenta ao abrir o Ergon (não a cada recarga) e, com ele sempre aberto, uma vez por dia', async () => {
+    const { h, a, b, infra } = await setup();
+    infra.st.target = IMG_B; infra.st.semImagem = true;
+    await h.motors.ensure(a.userId);
+    assert.equal(h.motors.state(a.userId).state, 'aberto', 'a equipe de antes abre');
+    assert.match(String(h.motors.saude(a.userId).adiada), /ainda não chegou/);
+    const saude = (await req(h, 'GET', '/api/saude', a)).json;
+    assert.match(saude.componentes.find((c: { id: string }) => c.id === 'motor').detalhe, /tenta de novo sozinho quando o Ergon for aberto \(ou uma vez por dia, se ele ficar sempre aberto\)/);
+    // antes: 2, 4, 8… minutos. Agora, nem depois de 3 horas
+    dentro(h).adiadas.get(a.userId)!.at = minutosAtras(180);
+    let n = infra.calls.length;
+    for (let i = 0; i < 3; i++) await h.motors.tick();
+    assert.equal(ensures(infra, a.userId, n), 0, 'o relógio de 60 s não tenta de novo');
+    // a outra pessoa abrindo o Ergon não mexe na equipe desta
+    await req(h, 'GET', '/api/me', b);
+    assert.equal(ensures(infra, a.userId, n), 0);
+    // a pessoa abre o Ergon: tenta uma vez; recarregar logo em seguida não pergunta de novo
+    await req(h, 'GET', '/api/me', a); await h.motors.ensure(a.userId);
+    assert.equal(ensures(infra, a.userId, n), 1, 'abrir o Ergon tenta de novo');
+    await req(h, 'GET', '/api/me', a); await req(h, 'GET', '/api/me', a);
+    assert.equal(ensures(infra, a.userId, n), 1, 'recarregar a tela não pergunta de novo');
+    // um dia depois, com o Ergon aberto o tempo todo: tenta de novo, uma vez
+    dentro(h).adiadas.get(a.userId)!.at = minutosAtras(24 * 60 + 1);
+    n = infra.calls.length;
+    await h.motors.tick(); await h.motors.ensure(a.userId);
+    await h.motors.tick();
+    assert.equal(ensures(infra, a.userId, n), 1, 'uma vez por dia');
+    // a imagem chegou: na próxima abertura, troca
+    infra.st.semImagem = false;
+    dentro(h).ultimaAbertura.delete(a.userId);
+    await req(h, 'GET', '/api/me', a); await h.motors.ensure(a.userId);
+    assert.equal(infra.imageOf(a.userId), IMG_B);
+    assert.equal(h.motors.saude(a.userId).adiada, null);
+    await h.close();
+  });
+
+  test('a estimativa do "Liberar espaço" é refeita uma vez por semana (vale mesmo reiniciando) e logo depois de uma limpeza', async () => {
+    const { h, infra } = await setup();
+    const estimativas = () => infra.calls.filter((c) => c.path === '/v1/maintenance/estimate').length;
+    await h.motors.tick();
+    assert.equal(estimativas(), 1);
+    assert.equal(h.motors.espaco()!.liberavel, 7e8);
+    // 6 dias depois (e o servidor reiniciou: a memória da última tentativa zerou): não refaz
+    const cache = () => JSON.parse(h.db.get<{ value: string }>("SELECT value FROM instance_settings WHERE key = 'manutencao_espaco'")!.value) as Record<string, unknown>;
+    const gravar = (c: Record<string, unknown>) => h.db.run("UPDATE instance_settings SET value = ? WHERE key = 'manutencao_espaco'", JSON.stringify(c));
+    gravar({ ...cache(), estimadoEm: new Date(minutosAtras(6 * 24 * 60)).toISOString() });
+    dentro(h).ultimaEstimativa = 0;
+    await h.motors.tick();
+    assert.equal(estimativas(), 1, 'antes: a cada 6 horas');
+    gravar({ ...cache(), estimadoEm: new Date(minutosAtras(7 * 24 * 60 + 1)).toISOString() });
+    await h.motors.tick();
+    assert.equal(estimativas(), 2, 'uma semana depois: refaz');
+    await h.motors.tick();
+    assert.equal(estimativas(), 2);
+    await h.motors.limpar();
+    await h.motors.tick();
+    assert.equal(estimativas(), 3, 'depois de uma limpeza: refaz logo');
+    await h.close();
+  });
+});
+
+/** a operação que o relógio pôs para andar (sem começar outra: um ensure() do teste mascararia o que o relógio fez) */
+const terminar = async (h: Harness, u: string) => { await dentro(h).pending.get(u)?.catch(() => undefined); };
+
+describe('prazos da equipe: card, recuperação sem fila, troca que ficou livre, "não parou"', () => {
+  test('card na fila com a equipe em erro por 31 minutos: vai direto para a pessoa (falha, "Tentar de novo"), sem rodada da persistência', async () => {
+    const { h, a, infra } = await setup();
+    await h.motors.stop(a.userId);
+    infra.st.unlockFail = 'falha ao montar: o disco não respondeu';
+    const her = (await allAgents(h, a)).find((x: { char_key: string }) => x.char_key === 'herodoto');
+    const t = (await req(h, 'POST', '/api/tasks', a, { title: 'Redigir o comunicado de férias da equipe', agentId: her.id })).json as { id: string };
+    assert.equal((await req(h, 'POST', `/api/tasks/${t.id}/work`, a)).status, 202);
+    const rid = h.db.get<{ id: string }>("SELECT id FROM runs WHERE task_id = ? AND idempotency_key LIKE 'queue-%'", t.id)!.id;
+    await ticks(h, 2); await h.motors.ensure(a.userId).catch(() => undefined);
+    assert.equal(h.motors.state(a.userId).state, 'erro');
+    dentro(h).fora.set(a.userId, minutosAtras(31)); envelhecer(h, rid, 31);
+    await ticks(h, 1);
+    assert.equal(run(h, rid).status, 'failed');
+    assert.match(run(h, rid).error ?? '', /^a equipe não está respondendo/);
+    const n = (sql: string) => h.db.get<{ n: number }>(sql, t.id)!.n;
+    assert.equal(n("SELECT COUNT(*) AS n FROM audit_events WHERE target_id = ? AND action = 'task.persist'"), 0, 'nenhuma rodada da persistência gasta');
+    assert.equal(n("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND idempotency_key LIKE 'triagem-%'"), 0, 'nenhum pedido novo esperando a mesma equipe');
+    assert.notEqual(h.db.get<{ w: string }>('SELECT work_state AS w FROM tasks WHERE id = ?', t.id)!.w, 'processamento', 'o card não diz que a coordenação está resolvendo');
+    const res = h.db.get<{ result: string; evidence: string }>("SELECT result, evidence FROM audit_events WHERE target_id = ? AND action = 'task.result' ORDER BY created_at DESC LIMIT 1", t.id)!;
+    assert.equal(JSON.parse(res.evidence).state, 'falha', 'falha: o card oferece "Tentar de novo"');
+    assert.match(res.result, /a equipe não está respondendo/);
+    await h.close();
+  });
+
+  test('depois da desistência, sem pedido na fila e sem ninguém abrir o Ergon, a equipe em erro é religada sozinha', async () => {
+    const { h, a, infra } = await setup();
+    await h.motors.stop(a.userId);
+    infra.st.unlockFail = 'falha ao montar: o disco não respondeu';
+    const r1 = await chat(h, a, 'um pedido', 'req-prazo-religa-001');
+    await ticks(h, 2); await h.motors.ensure(a.userId).catch(() => undefined);
+    assert.equal(h.motors.state(a.userId).state, 'erro');
+    dentro(h).fora.set(a.userId, minutosAtras(31)); envelhecer(h, r1.runId, 31);
+    await ticks(h, 1);
+    assert.equal(run(h, r1.runId).status, 'failed');
+    assert.match(run(h, r1.runId).error ?? '', /O sistema continua tentando religar a equipe/);
+    assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runs WHERE workspace_id = ? AND status = 'queued'", a.workspaceId)!.n, 0, 'nada na fila');
+    // o problema passou; ninguém abriu o Ergon nem mandou pedido
+    infra.st.unlockFail = null;
+    let k = infra.calls.length;
+    await h.motors.tick();
+    assert.equal(ensures(infra, a.userId, k), 0, 'logo depois da última tentativa, não');
+    dentro(h).states.get(a.userId)!.at = minutosAtras(6);
+    k = infra.calls.length;
+    await h.motors.tick();
+    assert.equal(ensures(infra, a.userId, k), 1, 'o relógio religa a equipe em erro');
+    await terminar(h, a.userId);
+    assert.equal(h.motors.state(a.userId).state, 'aberto');
+    await h.close();
+  });
+
+  test('renovação esperando o trabalho em andamento passou de 30 minutos, mas o trabalho acabou: troca agora, sem adiar', async () => {
+    const { h, a, infra } = await setup();
+    const motor = infra.motorOf(a.userId);
+    motor.next = 'running';
+    const r1 = await chat(h, a, 'um pedido longo', 'req-prazo-livre-001');
+    await ticks(h, 2);
+    infra.st.target = IMG_B;
+    await h.motors.ensure(a.userId);
+    assert.equal(h.motors.state(a.userId).state, 'renovando');
+    // o trabalho terminou no último minuto antes do prazo; sem pedido novo na fila, só o relógio de 60 s confere
+    h.db.run("UPDATE runs SET status = 'succeeded' WHERE id = ?", r1.runId);
+    dentro(h).renovacao.get(a.userId)!.desde = minutosAtras(31);
+    await h.motors.tick(); await terminar(h, a.userId);
+    assert.equal(infra.imageOf(a.userId), IMG_B, 'trocou agora');
+    assert.equal(h.motors.state(a.userId).state, 'aberto');
+    assert.equal(h.motors.saude(a.userId).adiada, null, 'nada ficou para depois');
+    await h.close();
+  });
+
+  test('"a equipe não parou a tempo" na troca: uma nova tentativa poucos minutos depois; falhou de novo, fica para abrir o Ergon ou um dia', async () => {
+    const { h, a, infra } = await setup();
+    infra.st.target = IMG_B; infra.st.naoParou = 2;
+    await h.motors.ensure(a.userId);
+    assert.equal(h.motors.state(a.userId).state, 'aberto', 'a equipe de antes segue');
+    assert.match(String(h.motors.saude(a.userId).adiada), /não parou a tempo/);
+    let k = infra.calls.length;
+    await h.motors.tick();
+    assert.equal(ensures(infra, a.userId, k), 0, 'não na mesma hora');
+    dentro(h).adiadas.get(a.userId)!.at = minutosAtras(3);
+    k = infra.calls.length;
+    await h.motors.tick(); await terminar(h, a.userId);
+    assert.equal(ensures(infra, a.userId, k), 1, 'uma nova tentativa curta');
+    assert.equal(infra.imageOf(a.userId), IMG_A, 'não parou de novo');
+    // a segunda vez seguida: só ao abrir o Ergon, ou um dia depois
+    dentro(h).adiadas.get(a.userId)!.at = minutosAtras(3 * 60);
+    k = infra.calls.length;
+    for (let i = 0; i < 3; i++) await h.motors.tick();
+    assert.equal(ensures(infra, a.userId, k), 0, 'sem laço de tentativas');
+    dentro(h).adiadas.get(a.userId)!.at = minutosAtras(24 * 60 + 1);
+    await h.motors.tick(); await terminar(h, a.userId);
+    assert.equal(infra.imageOf(a.userId), IMG_B, 'um dia depois, trocou');
+    assert.equal(h.motors.saude(a.userId).adiada, null);
     await h.close();
   });
 });

@@ -171,8 +171,17 @@ describe('pedido ao administrador', () => {
     const u = await comecar({ etapa: 'leitura' });
     assert.match(u.searchParams.get('scope') ?? '', /Mail\.Read/); assert.equal(u.searchParams.get('login_hint'), 'ana@empresa.com');
     const fim = await voltar(`state=${u.searchParams.get('state')}&code=c9`);
-    assert.match(String(fim.headers.location), /microsoft=conectado/);
+    // depois da leitura, os canais não entram no encadeamento: não se sabe que esta conta aprova pela empresa (o token não traz
+    // as funções de diretório), e a tela oferece o pedido ao administrador
+    assert.match(String(fim.headers.location), /microsoft=sem-canais$/);
     assert.equal((await etapa('leitura')).estado, 'ok');
+    assert.notEqual((await etapa('canais')).estado, 'ok');
+    // pedidos de propósito (a pessoa clicou na linha dos canais): a Microsoft devolve sem eles (só o administrador aprova)
+    const canais = await comecar({ etapa: 'canais' });
+    assert.ok(escoposDoPedido(canais.searchParams.get('scope')).includes('ChannelMessage.Read.All'));
+    const semCanais = await voltar(`state=${canais.searchParams.get('state')}&error=access_denied&error_description=${encodeURIComponent('AADSTS90094: Admin consent is required.')}`);
+    assert.match(String(semCanais.headers.location), /microsoft=sem-canais$/);
+    assert.equal((await etapa('canais')).estado, 'bloqueado');
     // state desconhecido (não é de nenhum Ergon daqui): nada muda e o aviso é neutro, sem mandar clicar no que não existe
     assert.match(String((await voltar('admin_consent=True&state=outro-state-qualquer-123456.leitura')).headers.location), /admin-aprovou-outro$/);
     // neutro: sem citar o nome de um botão (no primeiro login bloqueado ele se chama "Já aprovaram? Entrar de novo")

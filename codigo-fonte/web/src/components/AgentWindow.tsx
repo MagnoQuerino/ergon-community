@@ -14,13 +14,16 @@ import { TrainTab } from './TrainTab.tsx';
 import { PersonalityPicker } from './PersonalityPicker.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { AgentPreview } from './AgentPreview.tsx';
+import { cardClick, cardKey } from '../lib/cardClick.ts';
+import { destinoDaExecucao, rotuloDaLinha, rotuloDoDestino } from '../lib/atividade.ts';
+import { openCard, openConversation } from '../lib/open.ts';
 import { EffectPicker, effectsFor, useFxOptions, type FxChoice } from './EffectPicker.tsx';
 import { MoveTray, type Pick as MovePick } from './MoveTray.tsx';
 import { newSeed } from '../world/pack.ts';
 
 type Tab = 'conversa' | 'perfil' | 'treinar' | 'atividade';
 interface Activity {
-  runs: Array<{ id: string; kind: string; status: string; mode: string; model: string | null; tokens_in: number | null; tokens_out: number | null; created_at: string; error: string | null }>;
+  runs: Array<{ id: string; kind: string; status: string; mode: string; model: string | null; tokens_in: number | null; tokens_out: number | null; created_at: string; error: string | null; task_id?: string | null; conversation_id?: string | null }>;
   tasks: Array<{ id: string; number: number; title: string; completed: number; column_name: string }>;
   totals: { runs: number; tokens_in: number | null; tokens_out: number | null };
 }
@@ -375,20 +378,27 @@ function ActivityTab({ agentId }: { agentId: string }) {
       <p className="muted">{fmtN(t.runs)} execuções reais · {fmtN((t.tokens_in ?? 0) + (t.tokens_out ?? 0))} tokens (entrada {fmtN(t.tokens_in)} · saída {fmtN(t.tokens_out)})</p>
       <h4>Com quem está o quê</h4>
       {d.data.tasks.length ? (
-        <ul className="plain">{d.data.tasks.map((x) => <li key={x.id}><span className="muted">#{x.number}</span> {x.title} <span className={`badge ${x.completed ? 'badge--ok' : ''}`}>{x.completed ? 'feito' : x.column_name}</span></li>)}</ul>
+        // cada tarefa abre o card dela (antes, a lista só mostrava)
+        <ul className="plain">{d.data.tasks.map((x) => <li key={x.id} className="card-click" onClick={cardClick(() => openCard(x.id))}><button type="button" className="card-open" onClick={() => openCard(x.id)} aria-label={`Abrir o card #${x.number}: ${x.title}`}><span className="muted">#{x.number}</span> {x.title}</button> <span className={`badge ${x.completed ? 'badge--ok' : ''}`}>{x.completed ? 'feito' : x.column_name}</span></li>)}</ul>
       ) : <p className="hint">Nenhuma tarefa no quadro da equipe.</p>}
       <h4>Últimas execuções</h4>
       <div className="table-wrap"><table className="table">
         <thead><tr><th>Quando</th><th>Tipo</th><th>Modelo</th><th>Tokens</th><th>Estado</th></tr></thead>
-        <tbody>{d.data.runs.map((r) => (
-          <tr key={r.id}>
-            <td>{new Date(r.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+        <tbody>{d.data.runs.map((r) => {
+          // a execução abre o card ou a conversa dela; sem nenhum dos dois, a linha fica só para ler
+          const dest = destinoDaExecucao({ task_id: r.task_id, conversation_id: r.conversation_id, agent_id: agentId });
+          const ir = dest?.tipo === 'card' ? () => openCard(dest.id) : dest?.tipo === 'conversa' ? () => openConversation(dest.agentId, dest.conversationId) : null;
+          const quando = new Date(r.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+          return (
+          <tr key={r.id} {...(ir && dest ? { className: 'row-click', tabIndex: 0, title: rotuloDoDestino(dest), 'aria-label': rotuloDaLinha(dest, `${r.kind === 'chat' ? 'conversa' : 'tarefa'}, ${quando}`), onClick: cardClick(ir), onKeyDown: cardKey(ir) } : {})}>
+            <td>{quando}{ir && <span className="act-open" aria-hidden="true"> ›</span>}</td>
             <td>{r.kind === 'chat' ? 'conversa' : 'tarefa'}</td>
-            <td>{r.mode === 'simulated' ? <span className="badge badge--warn">simulação</span> : modelName(r.model)}</td>
+            <td>{r.mode === 'simulated' ? <span className="badge badge--warn">sem conta de IA</span> : modelName(r.model)}</td>
             <td>{r.tokens_in === null ? '—' : fmtN((r.tokens_in ?? 0) + (r.tokens_out ?? 0))}</td>
             <td>{RUN_STATUS[r.status] ?? r.status}{r.error ? <span className="small error-inline"> {r.error}</span> : null}</td>
           </tr>
-        ))}
+          );
+        })}
         {!d.data.runs.length && <tr><td colSpan={5} className="muted">Ainda sem execuções.</td></tr>}</tbody>
       </table></div>
     </div>

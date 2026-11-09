@@ -1,5 +1,36 @@
 # Novidades
 
+## 1.1.0-rc.25 (pré-versão de teste)
+
+- **Detalhes da tarefa, para decidir de relance.** No topo, em destaque, o que a equipe pede a você: "Aguardando sua
+  aprovação para enviar 2 e-mails para Fulano e Cicrano, sobre…", com os botões Aprovar e Pedir ajuste. Quando não há
+  nada a aprovar, o mesmo lugar diz o que foi feito. As etapas cabem numa linha, os arquivos abrem ali mesmo com "Ver"
+  e o histórico mostra o essencial, com "ver mais" para quem quiser o texto inteiro.
+- **Cards com nomes que dizem o que são.** A coordenação dá ao card um nome curto e claro, e pode melhorar o nome
+  quando entender melhor o pedido. O nome que você der fica.
+- **Mais autonomia quando você quiser.** Diga ao Aristóteles "podem mandar os e-mails sem me pedir" e aparece um cartão:
+  só neste pedido, por 24 h ou sempre. Um clique e a equipe envia sozinha. Todas as regras ficam em Conexões › Regras,
+  com Desfazer. Apagar continua pedindo confirmação.
+- **Cidade arrumada em qualquer tamanho de janela.** Os botões de cima têm o mesmo formato e não se sobrepõem, de um
+  quarto de tela à tela cheia. O modo da cidade tem ícone próprio (Cidade viva / Modo calmo). O **Modo Foco** ganhou
+  destaque na barra de cima, e a **música** agora fica na barra de cima, em qualquer tela.
+- **Clique no card e ele abre.** Rotinas, Documentos, Conexões, Tarefas em lista, Atividade, Loja e Pessoas abrem com
+  um clique no card ou na linha.
+- **A equipe resolve sozinha os pequenos tropeços** (um envio que não saiu, um dado errado) e confere de novo, sem
+  repetir o que já foi feito. Só vem para você o que só você pode decidir.
+- **Conversas longas custam menos:** a equipe resume as conversas longas e você escolhe o máximo de passos por pedido
+  (Configurações › Equipe). A tela mostra do que é feito cada pedido.
+- **Em breve: conversar com a equipe pelo Teams** e por outros aplicativos de conversa. A base já está pronta: ligar a
+  conta com um código, falar com o Aristóteles no Teams e aprovar ali mesmo.
+- **Microsoft 365 de uma vez:** conectar pede tudo em sequência; o que a empresa exigir do administrador fica pronto
+  para você mandar a ele.
+- **Pipefy, Asaas, Omie e RD Station:** novos jeitos de agir nessas contas, com "Só leitura" num clique. Cobranças no
+  Asaas sempre pedem a sua confirmação.
+- **Baixar meus dados:** em Configurações › Minha conta (e como passo antes de excluir a conta), você baixa um arquivo
+  com as suas conversas, tarefas, documentos, rotinas, equipe e regras. Ele sai legível, sem a cifra do Ergon, para abrir
+  em qualquer computador: guarde em lugar seguro. Senhas e acessos às contas conectadas nunca vão.
+- **Ergon Desktop:** botão "Voltar para esta versão" para as duas versões anteriores, com backup antes.
+
 ## 1.1.0-rc.24 (pré-versão de teste)
 
 - **A equipe passa a receber as melhorias de cada versão.** Antes, a atualização trocava o Ergon mas deixava a equipe

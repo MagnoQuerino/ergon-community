@@ -239,3 +239,22 @@ pub fn atualizar_ergon(app: AppHandle, estado: State<'_, Estado>) -> Result<(), 
         Ok(())
     })
 }
+
+/// Dá para voltar para a `versao`? Confere o pacote assinado dela e as regras (só lê; nada muda). A resposta, em
+/// palavras simples, vai para a tela de abertura antes da confirmação.
+#[tauri::command(async)]
+pub fn avaliar_volta(versao: String) -> crate::atualizacao::Avaliacao {
+    crate::atualizacao::avaliar_volta(&versao)
+}
+
+/// Volta o Ergon para a `versao` (pedido da pessoa, depois de confirmar na tela de abertura): confere tudo de novo,
+/// faz o backup (sem ele, só com `sem_backup`, que a tela pede numa segunda confirmação), troca mantendo os dados. As
+/// etapas chegam à tela como as da atualização; o fim, como "servicos:fim".
+#[tauri::command]
+pub fn voltar_versao(app: AppHandle, estado: State<'_, Estado>, versao: String, sem_backup: bool) -> Result<(), String> {
+    em_segundo_plano(app, &estado, move |app| {
+        let v = crate::atualizacao::voltar(&versao, sem_backup, &mut |e| emitir(app, e))?;
+        log::info!("voltou para {v}");
+        Ok(())
+    })
+}

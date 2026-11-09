@@ -11,6 +11,7 @@ import { agentSkinLook, skinTheme } from '../iso/skin.ts';
 import { AgentAvatar } from '../components/AgentAvatar.tsx';
 import type { SkinData } from '../../../shared/skin.ts';
 import { useSurface } from '../lib/surface.ts';
+import { cardClick } from '../lib/cardClick.ts';
 import { Icon } from '../components/Icon.tsx';
 
 interface Installed { id: string; packageId: string; version: string; kind: string; title: string; verified: boolean; active: boolean; installedAt: string }
@@ -213,10 +214,12 @@ function Loja({ busy, agent, onInstall }: { busy: boolean; agent: PreviewAgent |
         <ul className="loja__grade">
           {vista.map((x) => (
             <li key={x.id}>
-              <article className="loja-card" tabIndex={0} role="button" aria-label={`${x.title}: ver detalhes`} onClick={() => setAberto(x)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAberto(x); } }}>
+              {/* o card inteiro abre a prévia; o título é o botão do teclado (antes o card era um botão com o Instalar
+                  dentro: o Enter no Instalar abria a prévia em vez de instalar, e o leitor de tela não achava o Instalar) */}
+              <article className="loja-card" onClick={cardClick(() => setAberto(x))}>
                 <div className="loja-previa"><PreviaPacote item={x} agent={agent} /></div>
                 <div className="loja-card__txt">
-                  <b>{x.title}</b>
+                  <b><button type="button" className="card-open" onClick={() => setAberto(x)} aria-label={`${x.title}: ver detalhes`}>{x.title}</button></b>
                   <span className="muted small">{KIND[x.kind] ?? x.kind}{x.author ? ` · por ${x.author}` : ''}</span>
                 </div>
                 <div className="loja-card__pe">

@@ -16,7 +16,7 @@ const TIPS: Partial<Record<View, (coord: string, other: string) => ReactNode>> =
   tarefas: () => <>As suas tarefas são só suas. Quando quiser ajuda, envie uma delas para a equipe: vira card no quadro da equipe com responsável.</>,
   atividade: () => <>Tudo o que a equipe faz fica registrado aqui, com evidência. Os arquivos que a equipe entrega ficam em Documentos.</>,
   documentos: (c) => <>Os arquivos do workspace, em pastas. Arraste do computador para cá, mova arrastando, ou peça a <b>{c}</b>: “organiza os documentos de outubro por cliente”.</>,
-  conexoes: () => <>Sem uma conta de IA conectada, as respostas são simuladas. A melhor escolha é a <b>assinatura Nous</b>: os principais modelos numa conta só, inclusive gratuitos, e um modelo para cada agente.</>,
+  conexoes: () => <>Sem uma conta de IA conectada, a equipe não trabalha nos pedidos. A melhor escolha é a <b>assinatura Nous</b>: os principais modelos numa conta só, inclusive gratuitos, e um modelo para cada agente.</>,
   configuracao: () => <>Ferramentas da equipe, andamento, segurança, pacotes e consumo ficam aqui. A conta de IA e o modelo padrão ficam em Conexões.</>,
 };
 

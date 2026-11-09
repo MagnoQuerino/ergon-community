@@ -4,7 +4,7 @@ import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { PainelSaude, Saude } from '../lib/types.ts';
-import { ondeLibera, rotuloDoCofre, tamanho, textoConfirmarLiberar, textoDoLiberado, textoUltimaLimpeza } from '../lib/textos-tela.ts';
+import { CONFIRMAR_DADOS_ANTIGOS, ondeLibera, rotuloDoCofre, tamanho, TEXTO_CONFIRMAR_DADOS_ANTIGOS, TEXTO_MANTIDOS_DADOS_ANTIGOS, textoConfirmarLiberar, textoDoLiberado, textoUltimaLimpeza } from '../lib/textos-tela.ts';
 
 const CLS: Record<Saude, string> = { operacional: 'badge--ok', limitado: 'badge--warn', atencao: 'badge--err', indisponivel: 'badge--err' };
 const LABEL: Record<Saude, string> = { operacional: 'Operacional', limitado: 'Com limitações', atencao: 'Necessita atenção', indisponivel: 'Indisponível' };
@@ -15,6 +15,8 @@ interface Espaco {
   /** liberado: null = não deu para medir */
   ultima: { at: string; liberado: number | null; removidas: number } | null;
   volumes: Array<{ nome: string; conta: string }>;
+  /** a cópia antiga dos dados da equipe que o cofre não confirmou ter recebido: só sai se a pessoa decidir */
+  dadosAntigos?: { desde: string; porque: string; mantida?: boolean } | null;
 }
 type Painel = PainelSaude & { espaco?: Espaco | null };
 interface Liberado { liberado: number | null; removidas: number; volumes: Espaco['volumes'] }
@@ -32,6 +34,7 @@ export function SaudePanel() {
   const [backup, setBackup] = useState<Acao>(PARADO);
   const [espaco, setEspaco] = useState<Acao & { perguntar: boolean }>({ ...PARADO, perguntar: false });
   const [cofre, setCofre] = useState<Acao & { alvo: Espaco['volumes'][number] | null }>({ ...PARADO, alvo: null });
+  const [antigos, setAntigos] = useState<Acao & { perguntar: boolean }>({ ...PARADO, perguntar: false });
   const doBackup = async () => {
     if (backup.fazendo) return;
     setBackup({ fazendo: true, msg: null, err: null });
@@ -57,6 +60,23 @@ export function SaudePanel() {
       reload();
     } catch (e) { setCofre({ fazendo: false, msg: null, err: errMsg(e), alvo: null }); }
   };
+  const apagarAntigos = async () => {
+    setAntigos({ fazendo: true, msg: null, err: null, perguntar: false });
+    try {
+      const r = await api.post<{ apagado: boolean }>('/api/saude/dados-antigos', { confirmar: CONFIRMAR_DADOS_ANTIGOS });
+      setAntigos({ fazendo: false, err: null, perguntar: false, msg: r.apagado ? `Cópia antiga apagada${onde}.` : 'A cópia antiga já não estava neste computador.' });
+      reload();
+    } catch (e) { setAntigos({ fazendo: false, msg: null, err: errMsg(e), perguntar: false }); }
+  };
+  // manter também é decisão: nada é apagado, e o aviso deixa de pesar na Saúde (o botão de apagar segue ali)
+  const manterAntigos = async () => {
+    setAntigos({ fazendo: true, msg: null, err: null, perguntar: false });
+    try {
+      await api.post('/api/saude/dados-antigos/manter', {});
+      setAntigos({ fazendo: false, err: null, perguntar: false, msg: TEXTO_MANTIDOS_DADOS_ANTIGOS });
+      reload();
+    } catch (e) { setAntigos({ fazendo: false, msg: null, err: errMsg(e), perguntar: false }); }
+  };
   if (error && !data) return <section className="card"><p className="error">{error}</p></section>;
   if (!data) return <Loading />;
   const esp = data.espaco ?? null;
@@ -79,6 +99,12 @@ export function SaudePanel() {
               {c.id === 'disco' && esp && (espaco.fazendo
                 ? <span className="muted" role="status"> Liberando espaço…</span>
                 : <button className="btn" onClick={() => setEspaco({ ...PARADO, perguntar: true })}>Liberar espaço{esp.liberavel ? ` (${tamanho(esp.liberavel)})` : ''}</button>)}
+              {c.id === 'dados-antigos' && (antigos.fazendo
+                ? <span className="muted" role="status"> Um momento…</span>
+                : <>
+                  {!esp?.dadosAntigos?.mantida && <button className="btn btn--sm" onClick={() => void manterAntigos()}>Manter a cópia</button>}
+                  <button className="btn btn--danger btn--sm" onClick={() => setAntigos({ ...PARADO, perguntar: true })}>Apagar a cópia antiga</button>
+                </>)}
             </li>
           ))}
         </ul>
@@ -98,6 +124,8 @@ export function SaudePanel() {
         {backup.err && <p className="error" role="alert">{backup.err}</p>}
         {espaco.msg && <p className="ok" role="status">{espaco.msg}</p>}
         {espaco.err && <p className="error" role="alert">{espaco.err}</p>}
+        {antigos.msg && <p className="ok" role="status">{antigos.msg}</p>}
+        {antigos.err && <p className="error" role="alert">{antigos.err}</p>}
         {cofre.msg && <p className="ok" role="status">{cofre.msg}</p>}
         {cofre.err && <p className="error" role="alert">{cofre.err}</p>}
         {esp?.ultima && !espaco.msg && <p className="muted">{textoUltimaLimpeza(esp.ultima, noWindows)}</p>}
@@ -111,6 +139,11 @@ export function SaudePanel() {
       {cofre.alvo && (
         <ConfirmPopup title="Apagar este cofre?" confirmLabel="Apagar de vez" onCancel={() => setCofre({ ...PARADO, alvo: null })} onConfirm={() => void apagarCofre(cofre.alvo!)}>
           <p>O cofre de {rotuloDoCofre(cofre.alvo.conta)} guarda a conta de IA, a memória e as competências daquela conta. Ele some de vez, sem volta.</p>
+        </ConfirmPopup>
+      )}
+      {antigos.perguntar && (
+        <ConfirmPopup title="Apagar a cópia antiga de vez?" confirmLabel="Apagar de vez" onCancel={() => setAntigos({ ...PARADO, perguntar: false })} onConfirm={() => void apagarAntigos()}>
+          <p>{TEXTO_CONFIRMAR_DADOS_ANTIGOS}</p>
         </ConfirmPopup>
       )}
       <section className="card">

@@ -1,7 +1,9 @@
 /**
- * Omie: contas a receber, contas a pagar e clientes. SOMENTE LEITURA, por decisão de segurança: só chamadas Listar,
- * Pesquisar e Consultar (o tipo Chamada abaixo não aceita outras), e todas têm risco 'ler'. Nada aqui lança, baixa, cancela
- * ou altera valores. A Omie usa POST também para ler; o risco 'ler' é o que faz o motor tratar a chamada como leitura.
+ * Omie: contas a receber, contas a pagar e clientes, e a escrita que uma pequena empresa usa no dia a dia: incluir um cliente e
+ * incluir uma conta a receber. NADA AQUI MOVE DINHEIRO: só chamadas Listar, Pesquisar, Consultar e Incluir (o tipo Chamada
+ * abaixo não aceita outras); nenhuma baixa, recebimento, pagamento, cancelamento, estorno, exclusão ou alteração de valor
+ * (test/conexoes-financeiro.test.ts confere). Incluir só organiza: a Omie não manda nada a ninguém (o boleto não é gerado).
+ * A Omie usa POST também para ler; o risco 'ler' é o que faz o motor tratar a chamada como leitura.
  *
  * A credencial vai no corpo de cada chamada (é o formato da Omie): nunca entra em resumo, parâmetro nem texto de resultado.
  *
@@ -14,15 +16,30 @@
  *   https://app.omie.com.br/api/v1/financas/contareceber/, https://app.omie.com.br/api/v1/financas/contapagar/,
  *   https://app.omie.com.br/api/v1/financas/pesquisartitulos/, https://app.omie.com.br/api/v1/geral/clientes/,
  *   https://app.omie.com.br/api/v1/geral/empresas/ (cada método, com parâmetros e resposta)
+ * Escrita e listas de apoio, conferidas em 08/11/2026:
+ *   https://app.omie.com.br/api/v1/geral/clientes/ (IncluirCliente: clientes_cadastro; volta clientes_status com codigo_cliente_omie)
+ *   https://app.omie.com.br/api/v1/financas/contareceber/ (IncluirContaReceber: codigo_lancamento_integracao, codigo_cliente_fornecedor,
+ *     data_vencimento, valor_documento, codigo_categoria, data_previsao, id_conta_corrente; volta codigo_lancamento_omie)
+ *   https://app.omie.com.br/api/v1/geral/categorias/ (ListarCategorias: categoria_cadastro) e
+ *   https://app.omie.com.br/api/v1/geral/contacorrente/ (ListarContasCorrentes: lista em ListarContasCorrentes, nCodCC)
+ * Código de integração (a Omie recusa um código repetido):
+ *  - cliente: sai dos dados e do dia (no fuso do workspace): repetir o mesmo cadastro no mesmo dia faz a Omie recusar a cópia;
+ *  - conta a receber: um código novo a cada inclusão (decisão de 09/11: lançamento idêntico no mesmo dia fica liberado — duas
+ *    vendas iguais no mesmo dia são comuns). Quem segura a repetição do MESMO envio numa nova tentativa é o sistema: a
+ *    conferência por trabalho (servico.ts, dedupe: o mesmo pedido já feito no card, ou na conversa nos últimos 15 minutos,
+ *    não sai de novo), a resposta que se perdeu ("pode ter feito ou não": o mesmo envio não sai de novo sozinho, no card até a
+ *    pessoa responder pedindo de novo e na conversa por 15 minutos, a menos que a mensagem nova dela peça de novo).
  *
  * ListarContasReceber e ListarContasPagar não filtram por vencimento: as datas delas são de inclusão, alteração, emissão e
  * registro. Por isso existe omie.pesquisar_contas, com PesquisarLancamentos, que filtra por vencimento e pagamento.
  * CPF, CNPJ e dados bancários servem de filtro ou ficam de fora: não saem nas respostas.
  */
+import crypto from 'node:crypto';
 import { linhaDe, type ConectorDef, type Credenciais } from './declarativo.ts';
 import { ErroAcao, type Args, type CtxAcao, type Param } from '../tipos.ts';
 
-type Chamada = 'ListarEmpresas' | 'ListarContasReceber' | 'ConsultarContaReceber' | 'ListarContasPagar' | 'ConsultarContaPagar' | 'PesquisarLancamentos' | 'ListarClientes' | 'ConsultarCliente';
+type Chamada = 'ListarEmpresas' | 'ListarContasReceber' | 'ConsultarContaReceber' | 'ListarContasPagar' | 'ConsultarContaPagar' | 'PesquisarLancamentos' | 'ListarClientes' | 'ConsultarCliente'
+  | 'ListarCategorias' | 'ListarContasCorrentes' | 'IncluirCliente' | 'IncluirContaReceber';
 type Campos = Array<[rotulo: string, campo: string]>;
 
 /** Corpo de toda chamada à Omie. Sem credencial, recusa aqui em vez de ir ao serviço (erro repetido lá gera bloqueio). */
@@ -86,9 +103,53 @@ const filtrosConta = (a: Args) => ({ ...paginaDe(a), filtrar_cliente: a.cliente,
 const fichaOuNada = (j: any, campos: Campos, chave: string): string => ficha(j?.[chave] ?? j, campos) || 'nada encontrado';
 const ligado = (v: unknown) => v === true || v === 'true' || v === 'sim';
 
+// ---------------------------------------------------------------------------------------------------------- escrita
+const vazio = (v: unknown) => v === undefined || v === null || v === '';
+/**
+ * O dia no fuso do workspace (AAAA-MM-DD). Em UTC, um pedido repetido às 21h01 em Brasília já cairia no dia seguinte e
+ * levaria outro código: a Omie lançaria duas vezes.
+ */
+export const diaNoFuso = (tz: string | undefined, agora = new Date()): string => {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(agora); } catch { return agora.toISOString().slice(0, 10); }
+};
+/** Código de integração do cliente: o mesmo cadastro no mesmo dia (do workspace) dá o mesmo código, e a Omie recusa a cópia. */
+const codigoIntegracao = (tipo: string, dados: unknown, dia?: unknown): string =>
+  `ergon-${tipo}-${crypto.createHash('sha256').update(JSON.stringify([typeof dia === 'string' && dia ? dia : diaNoFuso(undefined), dados])).digest('hex').slice(0, 32)}`;
+/** Código de integração da conta a receber: um novo a cada inclusão (mesmo formato do de cliente: "ergon-cr-" e 32 letras e números). */
+const codigoUnico = (tipo: string): string => `ergon-${tipo}-${crypto.randomBytes(16).toString('hex')}`;
+/** A Omie recusou o código de integração repetido: a inclusão já foi feita antes (talvez a resposta tenha se perdido). */
+const REPETIDA = (m: string) => /c[óo]digo de integra[çc][ãa]o/i.test(m) && /j[áa]\s+(?:foi\s+)?(?:cadastrad|existe|inclu[íi]d|lan[çc]ad)/i.test(m);
+const JA_INCLUIDO: Record<'cli' | 'cr', string> = {
+  cli: 'este cliente já foi incluído antes na Omie, com os mesmos dados, e não incluí de novo: procure o id dele em omie.clientes e siga com ele',
+  cr: 'a Omie diz que esta conta a receber já foi incluída antes, e não incluí de novo: confira em omie.contas_receber antes de pedir outra',
+};
+/** O erro de código repetido, em palavras que o agente entende: ele confere ou muda o pedido, em vez de insistir no mesmo. */
+const erroDaInclusao = (tipo: 'cli' | 'cr') => (e: unknown): Error | null => (e instanceof Error && REPETIDA(e.message) ? new ErroAcao(JA_INCLUIDO[tipo]) : null);
+const valorOk = (v: unknown): number => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) throw new ErroAcao('"valor" precisa ser maior que zero, em reais (ex.: 129.90)');
+  if (Math.abs(Math.round(n * 100) - n * 100) > 1e-6) throw new ErroAcao('"valor" tem mais de dois decimais: use reais e centavos (ex.: 129.90)');
+  return Math.round(n * 100) / 100;
+};
+const reais = (v: unknown) => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
+/** O que a pessoa lê no cartão: cada campo preenchido, por extenso e sem cortar. */
+const detalhes = (a: Args, rotulos: Record<string, string>): string =>
+  Object.entries(rotulos).flatMap(([k, r]) => (vazio(a[k]) ? [] : [`${r}: ${k === 'valor' ? reais(a[k]) : String(a[k])}`])).join('\n');
+/** A Omie diz codigo_status "0" quando incluiu; outro código é recusa, mesmo com 200. */
+const incluido = (j: any, oQue: string, campoId: string, tipo: 'cli' | 'cr'): string => {
+  const st = j?.codigo_status;
+  if (st !== undefined && String(st) !== '0') {
+    const motivo = linhaDe('{descricao_status}', j);
+    throw new ErroAcao(REPETIDA(motivo) ? JA_INCLUIDO[tipo] : `a Omie não incluiu ${oQue}: ${motivo || `código ${String(st)}`}`);
+  }
+  return `${oQue[0].toUpperCase()}${oQue.slice(1)} incluíd${oQue.startsWith('a ') ? 'a' : 'o'} na Omie (id: ${linhaDe(`{${campoId}}`, j) || 'sem id na resposta'}).`;
+};
+const R_CLIENTE = { razao_social: 'razão social', nome_fantasia: 'nome fantasia', cpf_cnpj: 'CPF ou CNPJ', email: 'e-mail', ddd: 'DDD', telefone: 'telefone', contato: 'contato', endereco: 'endereço', numero: 'número', bairro: 'bairro', cidade: 'cidade', estado: 'estado', cep: 'CEP', observacao: 'observação' };
+const R_CONTA = { cliente: 'cliente (id)', valor: 'valor', vencimento: 'vencimento', previsao: 'previsão de recebimento', categoria: 'categoria', conta_corrente: 'conta corrente (id)', documento: 'número do documento', observacao: 'observação' };
+
 export const OMIE: ConectorDef = {
   kind: 'omie', nome: 'Omie', site: 'omie.com.br', grupo: 'financeiro',
-  sobre: 'Seu sistema de gestão na Omie: os agentes consultam contas a receber, contas a pagar e clientes. Só leitura: por esta conexão nenhum agente lança, baixa, cancela ou altera valores.',
+  sobre: 'Seu sistema de gestão na Omie: os agentes consultam contas a receber, contas a pagar e clientes, e incluem clientes e contas a receber. Nenhum agente dá baixa, paga, cancela ou altera valores por esta conexão. Para só consultar, use "Só leitura".',
   // o App Key é o identificador do aplicativo, curto demais para a regra de campo secreto (a Omie mostra de exemplo 10 dígitos)
   campos: [
     { name: 'app_key', label: 'App Key', placeholder: 'Cole o App Key aqui' },
@@ -165,6 +226,66 @@ export const OMIE: ConectorDef = {
       resumo: 'Ler o cliente {id} da Omie', metodo: 'POST', caminho: '/geral/clientes/',
       corpo: (a: Args, c: Credenciais) => envelope('ConsultarCliente', c, { codigo_cliente_omie: exigir(a, 'id') }),
       texto: (j) => fichaOuNada(j, CLIENTE_INTEIRO, 'clientes_cadastro') },
+    { id: 'omie.categorias', descricao: 'lista as categorias (receitas e despesas), com o código que omie.incluir_conta_receber usa', rotulo: 'lista as categorias de receitas e despesas', risco: 'ler',
+      params: { limite: LIMITE }, resumo: 'Ler as categorias da Omie', metodo: 'POST', caminho: '/geral/categorias/', antes: paginaDoCursor,
+      corpo: (a: Args, c: Credenciais) => envelope('ListarCategorias', c, { pagina: a.pagina ?? 1, registros_por_pagina: a.limite }),
+      lista: 'categoria_cadastro',
+      linha: (x: any) => ficha({ ...x, tipo: x?.conta_receita === 'S' ? 'receita' : x?.conta_despesa === 'S' ? 'despesa' : '', inativa: x?.conta_inativa === 'S' ? 'sim' : '' }, [['Código', 'codigo'], ['Descrição', 'descricao'], ['Tipo', 'tipo'], ['Inativa', 'inativa']], ', '),
+      proximo: (j) => proximaPagina(j.pagina, j.total_de_paginas) },
+    { id: 'omie.contas_correntes', descricao: 'lista as contas correntes (bancos e caixa), com o id que omie.incluir_conta_receber usa', rotulo: 'lista as contas correntes', risco: 'ler',
+      params: { limite: LIMITE }, resumo: 'Ler as contas correntes da Omie', metodo: 'POST', caminho: '/geral/contacorrente/', antes: paginaDoCursor,
+      corpo: (a: Args, c: Credenciais) => envelope('ListarContasCorrentes', c, paginaDe(a)),
+      lista: 'ListarContasCorrentes', linha: (x) => ficha(x, [['Id', 'nCodCC'], ['Descrição', 'descricao'], ['Banco', 'codigo_banco'], ['Inativa', 'inativo']], ', '),
+      proximo: (j) => proximaPagina(j.pagina, j.total_de_paginas) },
+
+    { id: 'omie.incluir_cliente', descricao: 'inclui um cliente na Omie (razão social obrigatória). Não manda nada a ele. Antes, veja em omie.clientes se ele já existe', rotulo: 'inclui um cliente', risco: 'organizar',
+      params: {
+        razao_social: { tipo: 'texto', obrigatorio: true, descricao: 'razão social ou nome completo', max: 60 }, nome_fantasia: { tipo: 'texto', descricao: 'nome fantasia', max: 100 },
+        cpf_cnpj: { tipo: 'texto', descricao: 'CPF ou CNPJ' }, email: { tipo: 'texto', descricao: 'e-mail', max: 500 },
+        ddd: { tipo: 'texto', descricao: 'DDD do telefone' }, telefone: { tipo: 'texto', descricao: 'telefone, sem o DDD' }, contato: { tipo: 'texto', descricao: 'nome da pessoa de contato' },
+        endereco: { tipo: 'texto', descricao: 'rua' }, numero: { tipo: 'texto', descricao: 'número' }, bairro: { tipo: 'texto', descricao: 'bairro' },
+        cidade: { tipo: 'texto', descricao: 'cidade' }, estado: { tipo: 'texto', descricao: 'estado, com a sigla (MG)' }, cep: { tipo: 'texto', descricao: 'CEP' },
+        observacao: { tipo: 'texto', descricao: 'observação', max: 2000 },
+      },
+      resumo: (a) => `Incluir um cliente na Omie:\n${detalhes(a, R_CLIENTE)}`,
+      metodo: 'POST', caminho: '/geral/clientes/',
+      antes: async (ctx, a) => {
+        if (!vazio(a.cpf_cnpj) && ![11, 14].includes(String(a.cpf_cnpj).replace(/\D/g, '').length)) throw new ErroAcao('"cpf_cnpj" precisa ter 11 números (CPF) ou 14 (CNPJ)');
+        if (!vazio(a.estado) && !/^[A-Za-z]{2}$/.test(String(a.estado))) throw new ErroAcao('"estado" precisa ser a sigla, como MG');
+        return { ...a, diaDoPedido: diaNoFuso(ctx.tz) };
+      },
+      corpo: (a: Args, c: Credenciais) => {
+        const dados = Object.fromEntries(Object.entries({
+          razao_social: a.razao_social, nome_fantasia: a.nome_fantasia, cnpj_cpf: vazio(a.cpf_cnpj) ? undefined : String(a.cpf_cnpj).replace(/\D/g, ''), email: a.email,
+          telefone1_ddd: a.ddd, telefone1_numero: a.telefone, contato: a.contato, endereco: a.endereco, endereco_numero: a.numero, bairro: a.bairro,
+          cidade: a.cidade, estado: vazio(a.estado) ? undefined : String(a.estado).toUpperCase(), cep: a.cep, observacao: a.observacao,
+        }).filter(([, v]) => !vazio(v)));
+        return envelope('IncluirCliente', c, { codigo_cliente_integracao: codigoIntegracao('cli', dados, a.diaDoPedido), ...dados });
+      },
+      texto: (j) => incluido(j, 'o cliente', 'codigo_cliente_omie', 'cli'), erro: erroDaInclusao('cli') },
+    { id: 'omie.incluir_conta_receber', descricao: 'inclui uma conta a receber (um título) para um cliente já cadastrado. Veja o código da categoria em omie.categorias e o id da conta corrente em omie.contas_correntes. Só lança o título: não gera boleto, não manda nada ao cliente e não dá baixa', rotulo: 'inclui uma conta a receber', risco: 'organizar',
+      params: {
+        cliente: { tipo: 'numero', obrigatorio: true, descricao: 'id do cliente, que vem em omie.clientes' }, valor: { tipo: 'numero', obrigatorio: true, descricao: 'valor em reais, como 129.90' },
+        vencimento: { ...data('vencimento'), obrigatorio: true }, previsao: data('previsão de recebimento (padrão: o vencimento)'),
+        categoria: { tipo: 'texto', obrigatorio: true, descricao: 'código da categoria, como 1.01.02 (veja omie.categorias)' },
+        conta_corrente: { tipo: 'numero', obrigatorio: true, descricao: 'id da conta corrente (veja omie.contas_correntes)' },
+        documento: { tipo: 'texto', descricao: 'número do documento, como o da nota', max: 20 }, observacao: { tipo: 'texto', descricao: 'observação', max: 2000 },
+      },
+      resumo: (a) => `Incluir uma conta a receber na Omie (não gera boleto e não avisa o cliente):\n${detalhes(a, R_CONTA)}`,
+      metodo: 'POST', caminho: '/financas/contareceber/',
+      antes: async (_ctx, a) => {
+        // código novo a cada inclusão: lançamento idêntico no mesmo dia vai (a repetição do mesmo envio, o sistema segura antes)
+        return { ...a, codigoDaInclusao: codigoUnico('cr'), valor: valorOk(a.valor), vencimento: dataOmie(a.vencimento), previsao: dataOmie(vazio(a.previsao) ? a.vencimento : a.previsao) };
+      },
+      corpo: (a: Args, c: Credenciais) => {
+        const dados = Object.fromEntries(Object.entries({
+          codigo_cliente_fornecedor: a.cliente, data_vencimento: a.vencimento, data_previsao: a.previsao, valor_documento: a.valor,
+          codigo_categoria: a.categoria, id_conta_corrente: a.conta_corrente, numero_documento: a.documento, observacao: a.observacao,
+        }).filter(([, v]) => !vazio(v)));
+        const codigo = typeof a.codigoDaInclusao === 'string' && /^ergon-cr-[0-9a-f]{32}$/.test(a.codigoDaInclusao) ? a.codigoDaInclusao : codigoUnico('cr');
+        return envelope('IncluirContaReceber', c, { codigo_lancamento_integracao: codigo, ...dados });
+      },
+      texto: (j) => incluido(j, 'a conta a receber', 'codigo_lancamento_omie', 'cr'), erro: erroDaInclusao('cr') },
   ],
 };
 

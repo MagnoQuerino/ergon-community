@@ -81,7 +81,9 @@ describe('Microsoft: o app público vem pronto e o login serve para conta pessoa
     const u3 = await begin();
     const t3 = new URL(String((await voltar(u3.searchParams.get('state'), 'code=c5')).headers.location));
     const l3 = new URL(String((await voltar(t3.searchParams.get('state'), 'code=c6')).headers.location));
-    assert.match(String((await voltar(l3.searchParams.get('state'), 'code=c7')).headers.location), /microsoft=conectado/);
+    // e termina aí: sem saber se a conta aprova pela empresa, não leva aos canais (a tela oferece o pedido ao administrador)
+    assert.match(String((await voltar(l3.searchParams.get('state'), 'code=c7')).headers.location), /microsoft=sem-canais$/);
     assert.ok(tokenCalls.at(-1)!.scope.split(' ').includes('Chat.Read'));
+    assert.ok(!tokenCalls.some((b) => String(b.scope ?? '').split(' ').includes('ChannelMessage.Read.All')), 'nem pediu os canais');
   });
 });

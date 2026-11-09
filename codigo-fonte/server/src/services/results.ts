@@ -17,12 +17,15 @@ import { HttpError, clip, fold, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { saveArtifact } from './artifacts.ts';
 import { TOOLS, motorScope, platformToolsets, toolStatus } from './characters.ts';
-import { acoesLigadas } from './conexoes/catalogo.ts';
-import { integrationDef } from './integrations.ts';
+import { acoesDe, acoesLigadas, ajusteDe, RISCOS } from './conexoes/catalogo.ts';
+import type { Risco } from './conexoes/tipos.ts';
+import { MARCA_PESSOA, episodioDoCard, type MotivoPessoa } from './episodio.ts';
+import { integrationDef, integrationRow, settingsOf, type IntegrationKind } from './integrations.ts';
 import { linkFile, taskFiles, type Operations, type OperationRow } from './operations.ts';
 import type { RunRow, RunStatus } from './runs.ts';
 import { getTask, updateTask, type Actor } from './tasks.ts';
 import { questionIn } from './purpose.ts';
+import { semLinhaParaVoce } from './resumo-tarefa.ts';
 
 export type ResultKind = 'informativo' | 'documental' | 'dados' | 'externo';
 /** descartado: a pessoa recusou no cartão a ação que era o trabalho do card (não é falha nem entrega; o card fica aberto esperando ela) */
@@ -361,7 +364,12 @@ interface Conferencia {
   feitas: AcaoRegistrada[];
   /** ninguém que trabalhou no card tem a ferramenta Conexões (o pedido casa com uma conta conectada mesmo assim) */
   semFerramenta: boolean;
+  /** o começo do trabalho atual do card (episodio) */
+  desde: string;
 }
+/** conexao="microsoft" acao="email.enviar", para a instrução de quem tenta de novo */
+const comoChamar = (pares: string[]) => lista([...new Set(pares)].slice(0, 4).map((p) => { const [k, a] = p.split(':'); return `conexao="${k}" acao="${a}"`; }));
+const INCERTO = /pode ter feito ou n[aã]o/i;
 const nomeDe = (k: string) => integrationDef(k)?.name ?? k;
 
 /**
@@ -443,17 +451,51 @@ export class Results {
    * conclusão, ou o último pedido novo da pessoa (devolver com instrução). Falha, espera e a resposta a uma pergunta não
    * recomeçam: o que já saiu pela conta antes delas conta (uma nova tentativa não precisa repetir o e-mail enviado).
    */
-  episodio(ws: string, taskId: string): string {
-    const rows = this.db.all<{ state: string; evidence: string; decided_by: string; created_at: string }>(
-      "SELECT state, evidence, decided_by, created_at FROM task_results WHERE workspace_id = ? AND task_id = ? AND state IN ('validado', 'confirmado_humano', 'devolvido') ORDER BY created_at DESC, rowid DESC LIMIT 100", ws, taskId);
-    for (const x of rows) {
-      if (x.state !== 'devolvido') return x.created_at;
-      if (!x.decided_by.startsWith('usr_')) continue; // a equipe respondeu ao que travou: o mesmo trabalho
-      let ev: { resposta?: unknown } = {};
-      try { ev = JSON.parse(x.evidence) as { resposta?: unknown }; } catch { /* evidência ilegível: conta como pedido novo */ }
-      if (ev.resposta !== true) return x.created_at;
+  episodio(ws: string, taskId: string): string { return episodioDoCard(this.db, ws, taskId); }
+
+  /**
+   * O que só a pessoa resolve no trabalho atual do card, marcado pelo serviço das Conexões (MARCA_PESSOA): autorizar a
+   * conta de novo, ligar uma ação que ela desligou, conferir um envio que o serviço não confirmou. Vale a marca ainda à
+   * vista: a mesma ação feita depois dela, a conta conectada de novo, ou a ação ligada de novo, deixam a marca para trás.
+   * pares: só as ações que faltaram (conexao:acao) para autorizar; sem pares, qualquer marca do card. null: nada que só ela resolve.
+   */
+  daPessoa(ws: string, taskId: string, desde: string, pares?: string[]): string | null {
+    const marcas = this.db.all<{ evidence: string; created_at: string }>(
+      'SELECT evidence, created_at FROM audit_events WHERE workspace_id = ? AND target_type = ? AND target_id = ? AND action = ? AND created_at > ? ORDER BY created_at DESC LIMIT 20',
+      ws, 'task', taskId, MARCA_PESSOA, desde);
+    for (const m of marcas) {
+      let e: { conexao?: string; acao?: string; motivo?: MotivoPessoa; risco?: string; dedupe?: string } = {};
+      try { e = JSON.parse(m.evidence) as typeof e; } catch { continue; }
+      const k = String(e.conexao ?? ''); const a = String(e.acao ?? '');
+      if (!integrationDef(k as IntegrationKind)) continue;
+      // desligada e incerto valem para o card inteiro: uma nova tentativa do que falta poderia refazer o envio que talvez
+      // tenha saído, ou contornar o que ela desligou
+      if (pares && !pares.includes(`${k}:${a}`) && e.motivo === 'autorizar') continue;
+      // a mesma ação deu certo depois da marca: a conta voltou a aceitar (autorizar), ou o mesmo envio incerto saiu (o mesmo
+      // hash: um envio a outro destinatário não diz nada sobre este). Ação desligada não sai por aqui: feita depois com outros
+      // parâmetros (um evento sem os convidados) não liga o que ela desligou
+      if (e.motivo !== 'desligada') {
+        const mesma = e.motivo === 'incerto' && e.dedupe ? ' AND dedupe = ?' : '';
+        if (this.db.get(`SELECT 1 AS x FROM conexao_acoes WHERE workspace_id = ? AND task_id = ? AND conexao = ? AND acao = ? AND status = 'feita' AND COALESCE(decided_at, created_at) > ?${mesma}`,
+          ws, taskId, k, a, m.created_at, ...(mesma ? [String(e.dedupe)] : []))) continue;
+      }
+      const row = integrationRow(this.db, ws, k as IntegrationKind);
+      const nome = nomeDe(k);
+      if (e.motivo === 'autorizar') {
+        if (row.state === 'connected' && row.connected_at && row.connected_at > m.created_at) continue; // conectou de novo depois
+        return `falta você liberar o acesso em Conexões › ${nome} (a tela mostra o que fazer) e usar “Tentar de novo”`;
+      }
+      if (e.motivo === 'desligada') {
+        const acao = acoesDe(k as IntegrationKind).find((x) => x.id === a);
+        // o risco desta chamada, gravado na marca (o de algumas ações depende dos parâmetros: um evento com convidados é
+        // "enviar"); marca antiga, sem ele: o da ação sem parâmetros
+        const risco = (RISCOS as string[]).includes(e.risco ?? '') ? e.risco as Risco : acao ? (typeof acao.risco === 'function' ? acao.risco({}) : acao.risco) : null;
+        if (acao && risco && ajusteDe(settingsOf(row), a, risco) !== 'desligado') continue; // ligou de novo
+        return `esta ação está desligada em Conexões › ${nome}, e só você decide ligar`;
+      }
+      if (e.motivo === 'incerto') return `${nome} não confirmou se fez: confira lá antes de pedir de novo, para nada sair duas vezes`;
     }
-    return '';
+    return null;
   }
 
   /**
@@ -486,6 +528,7 @@ export class Results {
     const tentou = Number(this.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM run_tools t WHERE t.tool = 'conexoes_executar' AND t.started_at > ?
       AND (t.run_id = ? OR t.run_id IN (SELECT id FROM runs WHERE task_id = ?))`, desde, r.id, task.id)?.n ?? 0);
     return {
+      desde,
       semFerramenta: !comContas && !linhas.length && !tentou,
       tentou, feitas: linhas.filter((x) => x.status === 'feita'),
       intencoes: intencoes.map((i) => {
@@ -496,6 +539,17 @@ export class Results {
         return { ...i, desfecho, linhas: minhas, ...(novo ? { daResposta: true } : {}) };
       }),
     };
+  }
+
+  /**
+   * O card espera o clique da pessoa num cartão: uma ação numa conta (conexao_acoes) ou, com a proteção ligada em
+   * Conexões, abrir sites ou rodar programas depois de ler as contas. Nada dele avança nem é conferido antes disso
+   * (evaluate abaixo; teamwork.ts, advance e decidiuDuranteExecucao).
+   */
+  cartaoEsperando(taskId: string): 'conexao' | 'depois_de_ler' | null {
+    if (this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE task_id = ? AND status = 'pendente'", taskId)) return 'conexao';
+    if (this.db.get("SELECT 1 AS x FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.kind = 'depois_de_ler' AND p.status = 'proposed'", taskId)) return 'depois_de_ler';
+    return null;
   }
 
   /**
@@ -515,8 +569,11 @@ export class Results {
     if (!task || Number(task.archived) || (Number(task.completed) && task.completed_by === 'human')) return null;
     const kind = this.kindOf(ws, task.id);
     const text = control(output ?? '');
+    // a conferência conta o trabalho, não a linha para a pessoa ("Feito: …" no fim): "Pronto." seguido de uma linha
+    // longa continua sendo só uma declaração. A linha fica na conferência do que o agente diz que não fez (naoFeito)
+    const entrega = control(semLinhaParaVoce(output ?? ''));
     const simulated = r.mode === 'simulated' || text.startsWith(SIMULATED);
-    const ev: Record<string, unknown> = { runId: r.id, mode: r.mode, model: r.model, status, output: clip(text, 800), words: words(text) };
+    const ev: Record<string, unknown> = { runId: r.id, mode: r.mode, model: r.model, status, output: clip(text, 800), words: words(entrega) };
     const c: Criterion[] = [{ id: 'execucao', label: 'Execução terminou sem erro', ok: status === 'succeeded', detail: status === 'succeeded' ? undefined : (r.error ?? status) }];
     if (status !== 'succeeded') {
       // o motivo está na execução já encerrada (o registro recebido é de antes do fim)
@@ -526,8 +583,10 @@ export class Results {
     }
     // pediu uma ação numa conta que espera o clique da pessoa: ainda não há o que conferir. O card espera com ela, e a
     // decisão no cartão volta ao card e o põe para andar (conexoes/servico.ts, decidirProposta)
-    if (this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE task_id = ? AND status = 'pendente'", task.id)) {
-      this.setWorkState(ws, task.id, 'aguardando_aprovacao', 'esperando a sua confirmação num cartão (ação numa conta)');
+    // (ou pediu aprovação para abrir sites ou rodar programas depois de ler as contas, com a proteção ligada: o mesmo)
+    const esperando = this.cartaoEsperando(task.id);
+    if (esperando) {
+      this.setWorkState(ws, task.id, 'aguardando_aprovacao', esperando === 'conexao' ? 'esperando a sua confirmação num cartão (ação numa conta)' : 'esperando a sua aprovação num cartão (abrir sites ou rodar programas)');
       return null;
     }
     const asked = /\[\[\s*perguntar\b/i.test(output ?? '');
@@ -538,7 +597,7 @@ export class Results {
 
     if (kind === 'dados') {
       const op = this.db.get<OperationRow>('SELECT * FROM operations WHERE workspace_id = ? AND task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1', ws, task.id);
-      ev.operationId = op?.id ?? null; ev.agentComment = simulated ? 'simulado (sem modelo de IA): não entra no resultado' : clip(text, 600);
+      ev.operationId = op?.id ?? null; ev.agentComment = simulated ? 'sem conta de IA conectada: não entra no resultado' : clip(text, 600);
       if (!op) {
         c.push({ id: 'operacao', label: 'Análise calculada pelo sistema a partir do arquivo', ok: false, detail: 'nenhuma análise foi executada' });
         return this.record(ws, task.id, r.id, kind, 'reprovado', c, ev, 'A tarefa pede números calculados do arquivo, mas nenhuma análise do sistema foi executada — texto do agente não substitui o cálculo.', 'ergon');
@@ -558,10 +617,10 @@ export class Results {
       const coberta = !!cx && cx.intencoes.every((i) => i.desfecho === 'feita' || i.desfecho === 'recusada') && cx.intencoes.some((i) => i.desfecho === 'feita');
       // ação numa conta, feita e confirmada pelo serviço: a entrega é a ação, e o texto curto ("Enviado.") basta
       const pelaConta = coberta && kind === 'externo';
-      c.push({ id: 'modelo', label: 'Resposta de um modelo de IA (não simulada)', ok: !simulated, detail: simulated ? 'modo simulado: não conta como trabalho feito' : (r.model ?? undefined) });
-      const n = words(text) + (plan?.words ?? 0);
+      c.push({ id: 'modelo', label: 'Escrito pelo agente com a conta de IA', ok: !simulated, detail: simulated ? 'sem conta de IA conectada: não conta como trabalho feito' : (r.model ?? undefined) });
+      const n = words(entrega) + (plan?.words ?? 0);
       c.push({ id: 'conteudo', label: `Conteúdo com pelo menos ${MIN_WORDS[kind]} palavras`, ok: pelaConta || n >= MIN_WORDS[kind], detail: pelaConta ? 'a entrega é a ação na conta, confirmada pelo serviço' : plan ? `${n} palavras, somando as etapas` : `${n} palavras` });
-      c.push({ id: 'alegacao', label: 'Não é só uma declaração de "concluído"', ok: pelaConta || (!CLAIM.test(text) && n > 3) });
+      c.push({ id: 'alegacao', label: 'Não é só uma declaração de "concluído"', ok: pelaConta || (!CLAIM.test(entrega) && n > 3) });
       c.push({ id: 'pendencias', label: 'Sem pergunta ou pedido de ajuda pendente', ok: !asked && !help, detail: asked ? 'o agente fez uma pergunta' : help ? 'esperando um colega' : undefined });
       const quem = this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', r.agent_id)?.name ?? 'O agente';
       if (cx) {
@@ -572,12 +631,17 @@ export class Results {
         const faltas = cx.intencoes.filter((i) => i.desfecho === 'faltou');
         const contas = lista([...new Set(cx.intencoes.flatMap((i) => i.pares.map((p) => nomeDe(p.split(':')[0]))))]);
         const jaFeito = feitas.length ? ` Feito pela conexão: ${lista(feitas.map((i) => i.oQue))}.` : '';
+        // para quem tenta de novo (a equipe, teamwork.ts): o que já saiu pela conta no trabalho atual não sai de novo
+        const naoRepita = feitas.length ? ` Já feito pela conexão neste card, com o registro do serviço (não repita): ${lista(feitas.map((i) => i.oQue))}.` : '';
         const crit = (ok: boolean, detail: string) => c.push({ id: 'conexao', label: 'Feito na conta conectada, com o registro do serviço', ok, detail });
+        // o que só a pessoa resolve (autorizar a conta, ligar a ação que ela desligou): a equipe não tenta de novo sozinha
+        const soVoce = (pessoa: string | null) => { if (pessoa) ev.pessoa = pessoa; return pessoa ? ` Só você resolve isto: ${pessoa}.` : ''; };
         if (!asked && !help) {
           // o pedido é numa conta conectada, mas ninguém no card tem a ferramenta: não é "confirme quando estiver feito"
           if (cx.semFerramenta) {
             crit(false, `${quem} não tem a ferramenta Conexões`);
             ev.honesta = 'sem_ferramenta';
+            ev.refazer = `${quem} não tem a ferramenta Conexões, então não tinha como ${lista(cx.intencoes.map((i) => i.oQue))} pela conta ${contas}.${naoRepita}`;
             return this.record(ws, task.id, r.id, kind, 'falha', c, ev,
               `Não foi feito: ${quem} não tem a ferramenta Conexões, então não tinha como ${lista(cx.intencoes.map((i) => i.oQue))} pela conta ${contas}. Ligue as Conexões no perfil dele, em Equipe, ou passe o card a um colega que tenha, e use "Tentar de novo".`, 'ergon');
           }
@@ -592,35 +656,56 @@ export class Results {
           }
           if (falhas.length) {
             const motivo = falhas.flatMap((i) => i.linhas).filter((x) => x.status === 'falhou').at(-1);
+            const erro = clip(motivo?.erro ?? 'sem motivo', 300);
+            const nome = nomeDe(motivo?.conexao ?? '');
             crit(false, `o serviço não aceitou: ${clip(motivo?.erro ?? 'sem motivo', 200)}`);
             ev.honesta = 'servico_falhou';
+            // o serviço não confirmou se fez (pode ter saído): repetir poderia mandar duas vezes — só a pessoa confere
+            const pessoa = INCERTO.test(motivo?.erro ?? '') && motivo?.risco !== 'ler'
+              ? `${nome} não confirmou se fez: confira lá antes de pedir de novo, para nada sair duas vezes`
+              : this.daPessoa(ws, task.id, cx.desde, falhas.flatMap((i) => i.pares));
+            if (!pessoa) {
+              ev.refazer = `A conferência de entrega mostra que ${nome} não aceitou ${lista(falhas.map((i) => i.oQue))}: “${erro}”. Corrija o que o serviço apontou (os parâmetros de cada ação vêm em conexoes_listar), faça de novo com conexoes_executar (${comoChamar(falhas.flatMap((i) => i.pares))}) e confira o resultado que o serviço devolver antes de dizer que fez.${naoRepita}`;
+            }
             return this.record(ws, task.id, r.id, kind, 'falha', c, ev,
-              `Não foi feito: ${nomeDe(motivo?.conexao ?? '')} não aceitou ${lista(falhas.map((i) => i.oQue))} (${clip(motivo?.erro ?? 'sem motivo', 300)}).${jaFeito} O card fica aberto.`, 'ergon');
+              `Não foi feito: ${nome} não aceitou ${lista(falhas.map((i) => i.oQue))} (${erro}).${jaFeito} O card fica aberto.${soVoce(pessoa)}`, 'ergon');
           }
           if (faltas.length) {
             const nada = !cx.tentou && !cx.feitas.length;
             const oQue = lista(faltas.map((i) => i.oQue));
+            const pares = faltas.flatMap((i) => i.pares);
             // o envio novo pedido na sua resposta a uma pergunta não tem registro depois dela (o de antes não cobre)
             if (faltas.every((i) => i.daResposta)) {
               crit(false, `sem registro do serviço depois da sua resposta para: ${oQue}`);
               ev.honesta = 'sem_chamada';
+              const pessoa = this.daPessoa(ws, task.id, cx.desde, pares);
+              if (!pessoa) ev.refazer = `A conferência de entrega mostra que faltou ${oQue}, pedido pela pessoa na resposta dela: faça agora com conexoes_executar (${comoChamar(pares)}) e confira o resultado que o serviço devolver.${naoRepita}`;
               return this.record(ws, task.id, r.id, kind, 'falha', c, ev,
-                `Não foi feito por inteiro: faltou ${oQue} pedido na sua resposta, pela conexão com ${contas} (o serviço não tem registro disso depois dela).${jaFeito} O card fica aberto.`, 'ergon');
+                `Não foi feito por inteiro: faltou ${oQue} pedido na sua resposta, pela conexão com ${contas} (o serviço não tem registro disso depois dela).${jaFeito} O card fica aberto.${soVoce(pessoa)}`, 'ergon');
             }
             // o motor deste computador não tem as Conexões agora (atualizando, desligadas): não é o agente que deixou de usar
             const fora = nada ? conexoesForaDoAr(ws) : null;
             if (fora) {
               crit(false, fora.curto);
               ev.honesta = 'sem_ferramenta';
+              ev.fora = true; // não é a equipe que resolve: espera a atualização ou a pessoa ligar
               return this.record(ws, task.id, r.id, kind, 'falha', c, ev, `Não foi feito: ${fora.texto}, então ${quem} não tinha como ${oQue} pela conta ${contas}. ${fora.depois}`, 'ergon');
             }
             crit(false, nada ? 'nenhuma chamada à conexão' : `sem registro do serviço para: ${oQue}`);
             ev.honesta = 'sem_chamada';
-            return this.record(ws, task.id, r.id, kind, 'falha', c, ev, nada
+            const pessoa = this.daPessoa(ws, task.id, cx.desde, pares);
+            if (!pessoa) {
+              ev.refazer = nada
+                ? `A conferência de entrega mostra que ${oQue} não foi feito: ninguém chamou a conexão com ${contas}, e nada saiu pela conta. Faça agora com conexoes_executar (${comoChamar(pares)}) e confira o resultado que o serviço devolver antes de dizer que fez.${naoRepita}`
+                : !feitas.length
+                  ? `A conferência de entrega mostra que a conexão com ${contas} foi chamada para ${oQue}, mas o pedido não chegou ao serviço (parâmetro faltando ou com o nome errado, ou uma ação que não existe). Veja os parâmetros em conexoes_listar, chame conexoes_executar de novo (${comoChamar(pares)}) e confira o resultado.${naoRepita}`
+                  : `A conferência de entrega mostra que faltou ${oQue} pela conexão com ${contas} (o serviço não tem registro disso). Faça só o que falta com conexoes_executar (${comoChamar(pares)}) e confira o resultado.${naoRepita}`;
+            }
+            return this.record(ws, task.id, r.id, kind, 'falha', c, ev, (nada
               ? `Não foi feito: ${quem} não chegou a usar a conexão com ${contas} para ${oQue}. Nada saiu pela conta; o card fica aberto.`
               : !feitas.length
                 ? `Não foi feito: ${quem} tentou usar a conexão com ${contas} para ${oQue}, mas o pedido não chegou ao serviço. Nada saiu pela conta; o card fica aberto.`
-                : `Não foi feito por inteiro: faltou ${oQue} pela conexão com ${contas} (o serviço não tem registro disso).${jaFeito} O card fica aberto.`, 'ergon');
+                : `Não foi feito por inteiro: faltou ${oQue} pela conexão com ${contas} (o serviço não tem registro disso).${jaFeito} O card fica aberto.`) + soVoce(pessoa), 'ergon');
           }
         }
         if (coberta) {
@@ -636,7 +721,11 @@ export class Results {
       if (disse) {
         c.push({ id: 'declaracao', label: 'O agente não disse que deixou de fazer', ok: false, detail: disse });
         ev.honesta = 'declarou';
-        return this.record(ws, task.id, r.id, kind, 'falha', c, ev, `Não foi feito: ${quem} disse “${disse.replace(/[.!?;:\s]+$/, '')}”. Nada conta como entregue sem evidência; o card fica aberto.`, 'ergon');
+        // parou no que só a pessoa resolve (a conta pediu para autorizar de novo, uma ação desligada): vai para ela
+        const pessoa = this.daPessoa(ws, task.id, cx?.desde ?? this.episodio(ws, task.id));
+        if (pessoa) ev.pessoa = pessoa;
+        else ev.refazer = `${quem} disse que não fez: “${disse.replace(/[.!?;:\s]+$/, '')}”. Resolva com a equipe e faça${cx ? '; o que for numa conta conectada sai com conexoes_executar, e só vale o resultado que o serviço devolver' : ''}.`;
+        return this.record(ws, task.id, r.id, kind, 'falha', c, ev, `Não foi feito: ${quem} disse “${disse.replace(/[.!?;:\s]+$/, '')}”. Nada conta como entregue sem evidência; o card fica aberto.${pessoa ? ` Só você resolve isto: ${pessoa}.` : ''}`, 'ergon');
       }
       const base = c.every((x) => x.ok);
       if (kind === 'documental' && base) {
@@ -689,7 +778,8 @@ export class Results {
     if (prev) return prev;
     const owner = this.db.get<{ user_id: string }>("SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner' ORDER BY created_at LIMIT 1", ws)?.user_id;
     if (!owner) return null;
-    const body = deliverableBody(raw) || text;
+    // a linha para a pessoa ("Para você decidir: …") fica na tela do card, não no documento
+    const body = semLinhaParaVoce(deliverableBody(raw)) || text;
     try {
       const art = saveArtifact(this.db, this.bus, this.cfg.filesDir, this.cfg.maxUploadBytes, ws, owner,
         { filename: name, mime: 'text/markdown', data: Buffer.from(body, 'utf8'), source: { kind: 'operation', id: runId } }, this.cfg.storageQuota);

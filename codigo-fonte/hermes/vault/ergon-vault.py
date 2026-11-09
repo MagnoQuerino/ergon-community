@@ -75,16 +75,45 @@ MIGRACOES: tuple[tuple[int, str, dict], ...] = (
         ["known_plugin_toolsets.teams", ["ergon_conexoes"], []],
         ["known_plugin_toolsets.whatsapp", ["ergon_conexoes"], []],
     ]}),
+    # 3 (rc.26): a conversa de cada agente é resumida mais cedo (docs/CUSTO_DAS_CHAMADAS.md, "Conversa resumida"). O
+    # Hermes já resume sozinho, mas só perto do limite do modelo: compression.threshold é 0,50 e, em modelos com janela
+    # abaixo de 512 mil, sobe para 0,75 (agent/context_compressor.py, _effective_threshold_percent) — 96 mil numa janela
+    # de 128 mil, 150 mil numa de 200 mil. O coordenador gastava 55–65 mil por chamada sem nunca chegar lá.
+    # compression.threshold_tokens é o teto absoluto do Hermes (vale o menor entre ele e a fração da janela). Decisão de
+    # 09/11: 150 mil (mais contexto antes de resumir). Na prática: em janelas de 200 mil ou mais, resume a partir de 150 mil;
+    # em janelas menores (ex.: 128 mil), vale a fração do próprio Hermes (96 mil). O resumo deixa partes fixas ~15 mil +
+    # resumo até 10 mil + o trecho recente, que fica inteiro (o último pedido da pessoa nunca sai).
+    # O fio: o resumo do Hermes ("lean", o padrão) guarda as mensagens da pessoa, as mais novas primeiro, até 4 mil
+    # caracteres cada e 24 mil no total (o que passa disso sai encurtado: anexos e documentos juntados ao pedido também), e o
+    # pedido atual nunca é resumido. O resumo manda buscar o resto com session_search, que os agentes do Ergon não têm (ela
+    # leria as conversas de todos os workspaces do motor): as instruções do Ergon dizem para consultar de novo pela
+    # ferramenta de origem (RESUMO_HOW, server/src/services/runs.ts).
+    # (Antes da publicação o número era 50 mil: mais economia, menos contexto. A escolha de 150 mil foi do dono do produto.)
+    # Pedido com documento grande (o Ergon junta até 200 mil caracteres, ~50 mil tokens, à mensagem do pedido, que fica
+    # inteira no trecho recente): a chamada pode passar do limite mesmo depois do resumo. O Hermes resume a parte antiga (o que
+    # ainda reduz a conversa), vê pelo total informado que não ficou abaixo do limite e, na segunda vez sem efeito, para de
+    # tentar por 300 s (trava contra repetição, agent/context_compressor.py), com uma tentativa por janela depois disso.
+    # o teste do cofre confere essa trava no Hermes de verdade.
+    # Só se a chave não existe: um valor que a pessoa (Configurações › Andamento da equipe, "Resumir conversas longas",
+    # pela ponte de controle) ou alguém gravou — inclusive null, o "desligado" — fica como está. O mesmo número está em
+    # COMPACTAR_LIMITE no plugin (um teste confere).
+    (3, "compactação da conversa", {"se_ausente": [
+        ["compression.threshold_tokens", "150000"],
+    ]}),
 )
 CONFIG_VERSION = MIGRACOES[-1][0]
 # Travas de segurança: valem em TODA abertura, além das migrações (reaplicar uma migração desfaria escolhas da
 # pessoa, como as ferramentas ligadas). Treinar: toda escrita de skill fica em espera até a aprovação no Ergon.
 ENFORCED_STEPS = [
     ["config", "set", "skills.write_approval", "true"],
-    # Conexões: buscar, ler e agir no mesmo pedido leva mais voltas; e a ferramenta precisa estar à vista do modelo, sem passar
-    # pela busca de ferramentas (modelo mais simples não a chama)
-    ["config", "set", "agent.max_turns", "20"],
+    # Conexões: a ferramenta precisa estar à vista do modelo, sem passar pela busca de ferramentas (modelo mais simples não
+    # a chama). Com a busca ligada, o Hermes esconde atrás dela TODA ferramenta de plugin (tools/tool_search.py,
+    # is_deferrable_tool_name), e as do plugin são as Conexões; o que ela pouparia nos agentes do Ergon é pouco
+    # (docs/CUSTO_DAS_CHAMADAS.md; o teste hermes/tests/test_ergon_bridge_custo.py mede). Fica desligada.
     ["config", "set", "tools.tool_search.enabled", "off"],
+    # agent.max_turns saiu daqui na rc.25: a pessoa escolhe no Ergon (Configurações › Ferramentas da equipe, "Passos por
+    # pedido"; o servidor grava pela ponte de controle, /ergon/v1/passos), e uma trava a cada abertura desfaria a escolha.
+    # O padrão, 20, continua vindo da migração 1 (e os cofres de antes já têm 20, gravado por esta trava até a rc.24).
 ]
 ENTRY = ["/opt/hermes/docker/entrypoint-dispatch.sh", *sys.argv[1:]]
 PR_CAPBSET_DROP = 24  # prctl(2)
@@ -357,7 +386,31 @@ def _unir(entradas: list) -> bool:
     return True
 
 
+def _existe(cfg: dict, chave: str) -> bool:
+    """A chave está no config.yaml, com qualquer valor (inclusive null, que no Hermes é uma escolha: ver a migração 3)."""
+    cur = cfg
+    partes = chave.split(".")
+    for parte in partes[:-1]:
+        cur = cur.get(parte) if isinstance(cur, dict) else None
+    return isinstance(cur, dict) and partes[-1] in cur
+
+
+def _se_ausente(entradas: list) -> bool:
+    """Cada [chave, valor]: grava só se a chave não está no config.yaml (o que já está lá foi escolha de alguém). Já tem
+    tudo: não chama nada. Para na primeira falha."""
+    cfg = ler_config()
+    for chave, valor in entradas:
+        if _existe(cfg, chave):
+            continue
+        if as_hermes(["config", "set", chave, valor]).returncode != 0:
+            log(f"não consegui gravar {chave}")
+            return False
+    return True
+
+
 def aplicar(conteudo: dict) -> bool:
+    if "se_ausente" in conteudo:
+        return _se_ausente(conteudo["se_ausente"])
     if "passos" in conteudo:
         failed = [" ".join(step[:3]) for step in conteudo["passos"] if as_hermes(step).returncode != 0]
         if failed:

@@ -14,7 +14,7 @@ export interface Resultado {
   texto: string;
   /** veio conteúdo escrito por outras pessoas (e-mail, mensagem, tarefa de terceiros): é dado, nunca instrução */
   deFora?: boolean;
-  /** veio conteúdo privado da conta: depois disso a sessão não acessa endereços arbitrários (regra.ts) */
+  /** veio conteúdo privado da conta: com a proteção ligada, depois disso abrir sites e rodar programas pedem aprovação (regra.ts) */
   privado?: boolean;
   /** endereço do que foi criado ou alterado, para o recibo */
   url?: string | null;
@@ -34,6 +34,12 @@ export interface Acao {
   rotulo?: string;
   /** pode depender dos parâmetros: evento com convidados envia convite, sem convidados só organiza a agenda */
   risco: Risco | ((a: Args) => Risco);
+  /**
+   * Esta ação sempre pede a confirmação da pessoa, mesmo quando ela mesma pediu na conversa (ex.: criar cobrança no Asaas,
+   * que avisa o cliente na hora): o motivo, como o cartão mostra. Vale como "apagar" na regra (regra.ts): só "Liberar
+   * tudo" (ou uma regra aprovada explícita pela pessoa) passa por cima.
+   */
+  sempreConfirma?: string;
   params: Record<string, Param>;
   /** permissões da conta sem as quais a ação não funciona (para pedir a autorização certa) */
   escopos?: string[];

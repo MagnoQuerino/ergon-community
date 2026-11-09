@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { Avatar } from '../components/AccountMenu.tsx';
+import { BaixarMeusDados } from '../components/BaixarMeusDados.tsx';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { AppState, Me } from '../lib/types.ts';
@@ -53,6 +54,10 @@ export function MinhaContaPanel({ me, onChanged }: { me: Me; onChanged: () => vo
         </div>
         <p className="muted small">Usuário para entrar: <b>{me.user.username}</b></p>
       </form>
+      <div className="conta__dados">
+        <h4>Baixar meus dados</h4>
+        <BaixarMeusDados />
+      </div>
     </section>
   );
 }

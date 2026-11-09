@@ -13,6 +13,8 @@
  * recriado com o MESMO volume (o do rótulo, nunca recalculado) quando está parado ou quando o Ergon diz que está
  * livre; a imagem de antes fica guardada até o Ergon confirmar a troca (ou voltar para ela). A limpeza só apaga
  * imagens dos repositórios do Ergon que nada usa: nunca a atual, nunca com força, nunca com prune e nunca um volume.
+ * Volume só sai pela rota própria de cada caso: o cofre órfão (com confirmação da pessoa) e a cópia antiga dos dados do
+ * motor, sem cifra ("<projeto>_hermes-data", de antes do cofre), quando o cofre herdado já está em uso (removeOldData).
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -681,6 +683,60 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
     return { removido: true };
   }
 
+  /**
+   * A cópia antiga dos dados do motor: o volume "<projeto>_hermes-data" (em texto aberto, de antes do cofre cifrado; o
+   * motor com cofre o montava só para leitura em /legacy e copiava tudo para dentro do cofre na primeira abertura). O
+   * nome vem do cofre herdado ("<projeto>_hermes-vault" → "<projeto>_hermes-data"): nunca outro volume, nunca um nome
+   * vindo do pedido. Só apaga quando é seguro, conferindo aqui, com a operação da pessoa travada:
+   *  1. o Ergon diz que o cofre herdado abriu com a chave da pessoa que o herdou (cofreConfirmado + dono);
+   *  2. o cofre herdado existe e é o montado no motor dessa pessoa (desta instalação) agora;
+   *  3. a cópia antiga não é de outra instalação nem de outro projeto (rótulos), e nenhum contêiner — nem parado — a usa.
+   * Sem força: se o Docker disser que está em uso, fica. Devolve o motivo quando não apaga.
+   *
+   * Dois outros modos, para quando o cofre NÃO confirma que recebeu a cópia (aí ela nunca sai sozinha):
+   *  - "conferir": as conferências de 3., sem apagar nada; diz se dá para apagar agora (podeApagar);
+   *  - "decisao": quem administra decidiu apagar na Saúde, sabendo que não tem volta. Valem as conferências de 3.
+   *    (outra instalação, outro projeto, contêiner usando, sem força); as de 1. e 2. (a prova da cópia) não, porque a
+   *    decisão é justamente apagar sem essa prova. A resposta traz "decidido" (um gerente de antes não traz e não apaga).
+   */
+  const dadosAntigos = /_hermes-vault$/.test(c.legacyVolume) ? c.legacyVolume.replace(/_hermes-vault$/, '_hermes-data') : null;
+  type ModoDadosAntigos = 'auto' | 'conferir' | 'decisao';
+  interface DadosAntigosResp { apagado: boolean; existia: boolean; motivo?: string; conferido?: true; podeApagar?: boolean; decidido?: true; cofreDeAntes?: boolean }
+  function removeOldData(dono: string, cofreConfirmado: boolean, modo: ModoDadosAntigos = 'auto'): Promise<DadosAntigosResp> {
+    const marca = modo === 'conferir' ? { conferido: true as const } : modo === 'decisao' ? { decidido: true as const } : {};
+    return lock(dono, async (): Promise<DadosAntigosResp> => {
+      if (!dadosAntigos) return { apagado: false, existia: false, motivo: 'sem cópia antiga nesta instalação', ...marca };
+      const v = await docker('GET', `/volumes/${dadosAntigos}`);
+      if (v.status === 404) return { apagado: false, existia: false, ...marca };
+      ok(v, 'conferir a cópia antiga dos dados do motor');
+      const L = (v.json?.Labels ?? {}) as Labels;
+      const fica = (motivo: string): DadosAntigosResp => ({ apagado: false, existia: true, motivo, ...marca, ...(modo === 'conferir' ? { podeApagar: false } : {}) });
+      if (L[LABEL.install] && L[LABEL.install] !== inst) return fica('de outra instalação');
+      const projeto = dadosAntigos.slice(0, -'_hermes-data'.length);
+      if ((L['com.docker.compose.volume'] && L['com.docker.compose.volume'] !== 'hermes-data') || (L['com.docker.compose.project'] && L['com.docker.compose.project'] !== projeto)) {
+        return fica('os rótulos não são os da cópia antiga deste projeto');
+      }
+      if (modo === 'auto') {
+        if (!cofreConfirmado) return fica('o Ergon não confirmou o cofre herdado');
+        if ((await docker('GET', `/volumes/${c.legacyVolume}`)).status !== 200) return fica('sem o cofre herdado');
+        const cur = await inspect(motorName(dono));
+        if (!cur) return fica('a pessoa que herdou o cofre não tem motor');
+        mine(cur, dono);
+        if (mountedVault(cur) !== c.legacyVolume || volumeOf(cur) !== c.legacyVolume) return fica('o cofre herdado não é o montado no motor da pessoa');
+      }
+      const users = await docker('GET', `/containers/json?all=1&filters=${enc({ volume: [dadosAntigos] })}`);
+      ok(users, 'conferir quem usa a cópia antiga');
+      if ((users.json ?? []).length) return fica('ainda usada por um contêiner');
+      // conferir também diz se o cofre de antes existe: sem herdeiro, a cópia pode ter ido para ele (a Saúde não afirma que só existe ali)
+      if (modo === 'conferir') return { apagado: false, existia: true, conferido: true, podeApagar: true, cofreDeAntes: (await docker('GET', `/volumes/${c.legacyVolume}`)).status !== 404 };
+      const r = await docker('DELETE', `/volumes/${dadosAntigos}`); // sem força
+      if (r.status === 404) return { apagado: false, existia: false, ...marca };
+      if (r.status === 409) return fica('ainda usada por um contêiner');
+      ok(r, 'apagar a cópia antiga dos dados do motor');
+      return { apagado: true, existia: true, ...marca };
+    });
+  }
+
   /** Na partida: motores PARADOS e desatualizados desta instalação são recriados sem ligar. Os ligados ficam (quem decide é o Ergon). */
   async function reconcileOnStart(): Promise<string[]> {
     const done: string[] = [];
@@ -716,6 +772,14 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
         const r = await clean({ users: uids(b.users), pendentes: uids(b.pendentes), manterNucleoAnterior: b.manterNucleoAnterior === true, estimar: true });
         return { status: 200, json: { ok: true, liberavel: r.liberavel ?? null, repositorios: r.repositorios } };
       }
+      // a cópia antiga dos dados do motor (sem cifra): só ela, e só quando é seguro (ver removeOldData)
+      if (url === '/v1/maintenance/dados-antigos') {
+        if (method !== 'POST') throw new ManagerError(405, 'método não permitido');
+        if (typeof b.dono !== 'string' || !UID.test(b.dono)) throw new ManagerError(400, 'pessoa inválida');
+        // conferir vence: um pedido com os dois nunca apaga
+        const modo: ModoDadosAntigos = b.conferir === true ? 'conferir' : b.decisaoDaPessoa === true ? 'decisao' : 'auto';
+        return { status: 200, json: { ok: true, ...(await removeOldData(b.dono, b.cofreConfirmado === true, modo)) } };
+      }
       const v = /^\/v1\/volumes\/([^/]+)$/.exec(url);
       if (v) {
         if (method !== 'DELETE') throw new ManagerError(405, 'método não permitido');
@@ -737,7 +801,7 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
       return { status: e instanceof ManagerError ? e.status : 500, json: { error: (e as Error).message.slice(0, 300) } };
     }
   }
-  return { handle, ensure, stop, remove, list, confirm, rollback, clean, volumes, removeVolume, reconcileOnStart };
+  return { handle, ensure, stop, remove, list, confirm, rollback, clean, volumes, removeVolume, removeOldData, reconcileOnStart };
 }
 
 /** Docker Engine API pelo socket (ou por um endereço, nos testes). */

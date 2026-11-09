@@ -101,7 +101,7 @@ export function applyDecision(db: Db, bus: Bus, workspaceId: string, actor: Acto
         ruleId, workspaceId, db.seal(workspaceId, d.text), ctx.messageId ?? null, now());
       audit(db, bus, { workspaceId, actorType: actor.type, actorId: actor.id, action: 'rule.propose', targetType: 'rule', targetId: ruleId, evidence: { text: clip(d.text, 200) }, result: 'proposta' });
       bus.publish(workspaceId, 'rules.changed', { id: ruleId });
-      return { summary: 'Regra futura PROPOSTA (não altera cards existentes; precisa de confirmação em Atividade › Regras).', taskId: null, taskNumber: null, reply: 'Regra proposta; aguarda confirmação no Ergon.' };
+      return { summary: 'Regra futura PROPOSTA (não altera cards existentes; aprove ou recuse em Conexões › Regras).', taskId: null, taskNumber: null, reply: 'Regra proposta; aguarda confirmação no Ergon.' };
     }
     case 'clarify':
       return { summary: `Sem ação automática: ${d.reason}. Para registrar, use "/tarefa <título>".`, taskId: null, taskNumber: null, reply: null };

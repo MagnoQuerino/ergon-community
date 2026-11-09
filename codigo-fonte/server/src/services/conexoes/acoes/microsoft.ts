@@ -1146,7 +1146,7 @@ const ACOES_TEAMS: Acao[] = [
     },
   },
   {
-    // ChannelMessage.Read.All sempre exige o administrador (permissions-reference): etapa opcional, pedida à parte
+    // ChannelMessage.Read.All sempre exige o administrador (permissions-reference): etapa opcional, a última do login encadeado
     id: 'teams.ler_canal', risco: 'ler', escopos: ['ChannelMessage.Read.All', 'Team.ReadBasic.All', 'Channel.ReadBasic.All'], trabalho: true,
     descricao: 'lê as mensagens mais recentes de um canal de um time do Teams, em texto (sem as respostas)', rotulo: 'lê as mensagens de um canal do Teams',
     params: { time: P_TIME, canal: { tipo: 'texto', obrigatorio: true, descricao: 'nome exato ou id do canal (de teams.canais)' }, limite: { tipo: 'numero', descricao: 'quantas (padrão 20, até 50)' } },

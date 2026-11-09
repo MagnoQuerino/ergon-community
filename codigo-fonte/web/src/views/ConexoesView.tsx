@@ -1,12 +1,15 @@
-import { Fragment, useEffect, useState } from 'react';
-import { api, errMsg } from '../lib/api.ts';
+import { Fragment, useEffect, useState, type ChangeEvent } from 'react';
+import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
+import { ESCOLHA_CONSCIENTE, NOME_ESCOLHIDO, PROBLEMA_TEAMS, SO_O_SEU_CODIGO, linhaDoEstado, previaDaConta, type ContaDoTeams } from '../lib/teams-app.ts';
 import type { EtapaConsentimento, Integration } from '../lib/types.ts';
-import { erroDaConexao, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, textoDaVolta } from '../lib/textos-tela.ts';
+import { AVISO_APROVAR_SEM_CARTAO, ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, erroDaConexao, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, textoDaVolta } from '../lib/textos-tela.ts';
 import { AiAccounts } from '../components/AiAccounts.tsx';
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
 import { Icon } from '../components/Icon.tsx';
+import { TextoLongo } from '../components/TextoLongo.tsx';
+import { BotoesRegra, type Alcance } from '../components/CartaoRegra.tsx';
 
 const STATE: Record<Integration['state'], [string, string]> = {
   off: ['não conectado', ''], pending: ['conectando…', 'badge--warn'], connected: ['conectado', 'badge--ok'], error: ['com problema', 'badge--err'],
@@ -18,7 +21,7 @@ const SECOES: Array<{ titulo: string; texto: string; grupos: string[] }> = [
   { titulo: 'Conversas e equipes', grupos: ['conversas'], texto: 'Os agentes leem o que a conta ou o bot conectado alcança (cada aplicativo diz qual é o alcance) e respondem quando você pede.' },
   { titulo: 'Vendas e atendimento', grupos: ['vendas', 'suporte'], texto: 'Os agentes consultam clientes, negócios e chamados, registram o que combinarem com você e respondem quando você pede.' },
   { titulo: 'Documentos, código e agenda', grupos: ['documentos'], texto: 'Os agentes procuram, leem e escrevem nas páginas, repositórios e compromissos que a credencial alcança.' },
-  { titulo: 'Financeiro', grupos: ['financeiro'], texto: 'Só leitura: os agentes consultam cobranças e contas para os seus relatórios. Nada é pago, cobrado ou alterado.' },
+  { titulo: 'Financeiro', grupos: ['financeiro'], texto: 'Os agentes consultam cobranças e contas e, quando você pede, cadastram clientes e criam cobranças e contas a receber. Nada é pago, transferido, estornado ou cancelado por aqui. Para só consultar, marque "Só leitura" na conexão.' },
 ];
 
 const badgeOf = (i: Integration): [string, string] => (i.auth === 'soon' ? ['em breve', 'badge--soon'] : STATE[i.state]);
@@ -26,8 +29,9 @@ const badgeOf = (i: Integration): [string, string] => (i.auth === 'soon' ? ['em 
 /** O que os agentes fazem em cada conexão ligada, o ajuste da pessoa e a escolha de liberar tudo (GET /api/conexoes). */
 interface Permissoes { tipos: Record<string, string>; acoes: Record<string, string> }
 /** etapas: só na Microsoft (o que a conta já liberou, etapa por etapa) */
-interface EstadoConexao { kind: string; faltam: string[]; comErro: string | null; permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: string }>; etapas?: EtapaConsentimento[] }
-interface EstadoConexoes { liberarTudo: boolean; ligadas: EstadoConexao[] }
+/** soLeitura: tudo o que escreve está desligado; escreve: a conexão tem alguma ação que escreve (o atalho só aparece aí) */
+interface EstadoConexao { kind: string; faltam: string[]; comErro: string | null; permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: string }>; soLeitura?: boolean; escreve?: boolean; etapas?: EtapaConsentimento[] }
+interface EstadoConexoes { liberarTudo: boolean; aprovarDepoisDeLer?: boolean; aprovarDepoisDeLerBarra?: boolean; confirmarOrganizar?: boolean; ligadas: EstadoConexao[] }
 /** O estado de uma conexão; pronto = a resposta já chegou (antes disso, as seções guardam o lugar). */
 interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => void }
 
@@ -53,7 +57,23 @@ export function ConexoesView() {
       setOpen(m[1]);
       history.replaceState(null, '', '#conexoes');
     }
+    // "#conexoes?regras" (de "Aguardando você", do endereço antigo de Atividade): vai direto às Regras
+    let t = 0;
+    const irRegras = () => { if (/[?&]regras\b/.test(location.hash)) t = window.setTimeout(() => document.getElementById('conn-regras')?.scrollIntoView({ block: 'start' })); };
+    irRegras();
+    window.addEventListener('hashchange', irRegras);
+    return () => { window.clearTimeout(t); window.removeEventListener('hashchange', irRegras); };
   }, []);
+  // vinda da Atividade (#conexoes?app=trello): abre o bloco daquela conexão e rola até ele, quando a lista chega
+  const [alvo] = useState(() => { const k = new URLSearchParams(location.hash.split('?')[1] ?? '').get('app'); return k && /^[a-z0-9][a-z0-9_-]{0,40}$/.test(k) ? k : null; });
+  useEffect(() => {
+    if (!alvo || !list.data) return;
+    history.replaceState(null, '', '#conexoes');
+    if (!list.data.some((i) => i.kind === alvo)) return;
+    setOpen(alvo);
+    const t = window.setTimeout(() => document.getElementById(`conn-${alvo}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+    return () => window.clearTimeout(t);
+  }, [alvo, !!list.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const all = list.data ?? [];
   const term = q.trim().toLowerCase();
   const casa = (i: Integration) => (!onlyOn || i.state === 'connected') && (!term || `${i.name} ${i.about}`.toLowerCase().includes(term));
@@ -103,13 +123,19 @@ export function ConexoesView() {
           {/* duas coisas diferentes que o nome "Teams" junta: a conta (agora) e conversar com o coordenador por lá (depois) */}
           <ul className="conn-explica small">
             <li><b>Microsoft 365: a equipe age na sua conta.</b> Com o seu login, os agentes leem e respondem por você no e-mail, na agenda, nos arquivos, nas tarefas e no Teams, quando você pede ou numa rotina. Ninguém fica olhando a conta o tempo todo.</li>
-            <li><b>Conversar com o Aristóteles pelo Teams: em breve.</b> É outra coisa: mandar pedidos ao Aristóteles de dentro do Teams, como se ele fosse um colega lá. Pede um aplicativo próprio no Teams da empresa e ainda não está disponível.</li>
+            <li><b>Conversar com a equipe pelo Teams: é outra coisa.</b> Você manda pedidos à equipe de dentro do Teams, como se ela fosse um colega lá, e recebe as respostas ali. Fica logo abaixo, em Teams (em breve).</li>
           </ul>
           <div className="feature-grid">{accounts.map((i) => <Detail key={i.kind} i={i} reload={list.reload} estado={estadoDe(i.kind)} feature />)}</div>
         </section>
       )}
 
+      <section className="conn-group conn-group--feature" id="conn-teams-app">
+        <h3>Teams</h3>
+        <TeamsConversa />
+      </section>
+
       <LiberarTudo estado={cx} />
+      <Regras />
 
       <div className="row row--wrap conn-tools">
         <label className="conn-search"><Icon name="focus" size={14} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar (ex.: Slack, Trello, HubSpot)" aria-label="Procurar aplicativo" /></label>
@@ -251,12 +277,24 @@ const AJUSTE_ROTULO: Array<[string, string]> = [['regra', 'Seguir a regra'], ['c
 /** O que os agentes podem fazer nesta conexão: por tipo de ação e, abrindo a lista, ação por ação. */
 function AcoesDaConexao({ i, estado }: { i: Integration; estado: EstadoDe }) {
   const [err, setErr] = useState<string | null>(null);
+  // o erro do atalho fica junto da caixa: a lista abaixo vem fechada, e o erro lá dentro ninguém veria
+  const [errSoLeitura, setErrSoLeitura] = useState<string | null>(null);
   const eu = estado.eu;
   // ainda chegando: o título já ocupa o lugar, para nada abaixo pular quando a lista chegar
   if (!eu) return estado.pronto ? null : <details className="conn-acoes"><summary>O que os agentes podem fazer aqui</summary></details>;
   const salvar = async (p: Permissoes) => { setErr(null); try { await api.put(`/api/conexoes/${i.kind}/permissoes`, { permissoes: p }); estado.reload(); } catch (e) { setErr(errMsg(e)); } };
   const tipos = Object.keys(RISCO_ROTULO).filter((r) => eu.acoes.some((a) => a.risco === r));
+  const soLeitura = async (on: boolean) => { setErrSoLeitura(null); try { await api.put(`/api/conexoes/${i.kind}/so-leitura`, { on }); estado.reload(); } catch (e) { setErrSoLeitura(errMsg(e)); } };
   return (
+    <>
+    {/* um clique: tudo o que escreve nesta conexão fica desligado; desmarcar devolve o ajuste de escrita de antes */}
+    {eu.escreve && (
+      <div className="conn-so-leitura">
+        <label className="check"><input type="checkbox" checked={!!eu.soLeitura} onChange={(e) => void soLeitura(e.target.checked)} /> Só leitura</label>
+        <span className="muted small"> {eu.soLeitura ? 'Os agentes só consultam aqui: nada é criado, mudado, enviado ou apagado. Desmarcar devolve o ajuste de antes.' : 'Marque para os agentes só consultarem aqui, sem criar, mudar, enviar ou apagar nada.'}</span>
+        {errSoLeitura && <p className="error" role="alert">{errSoLeitura}</p>}
+      </div>
+    )}
     <details className="conn-acoes">
       <summary>O que os agentes podem fazer aqui ({eu.acoes.length})</summary>
       {/* o envio dos quadros ligados confere o mesmo ajuste: só o desligado o barra */}
@@ -278,6 +316,7 @@ function AcoesDaConexao({ i, estado }: { i: Integration; estado: EstadoDe }) {
       </ul>
       {err && <p className="error">{err}</p>}
     </details>
+    </>
   );
 }
 
@@ -298,22 +337,107 @@ function UsarDeOutroWorkspace({ i, reload }: { i: Integration; reload: () => voi
   );
 }
 
-/** A escolha consciente de tirar as confirmações (desligada por padrão). */
+/**
+ * As escolhas de cuidado, todas desligadas por padrão: pedir confirmação antes de organizar, pedir aprovação antes de abrir
+ * sites ou rodar programas depois de ler as contas, e (escolha consciente) tirar as confirmações.
+ */
+/** GET /api/conexoes/regras (server/src/services/conexoes/regras.ts, tela) */
+interface TelaRegras {
+  regras: Array<{ id: string; tipo: 'acao' | 'depois_de_ler'; texto: string; alcance: 'pedido' | '24h' | 'sempre'; alcanceTexto: string; criadaEm: string; apagar: boolean; usos: number }>;
+  texto: Array<{ id: string; text: string; created_at: string }>;
+  propostas: { texto: Array<{ id: string; text: string; created_at: string }>; cartoes: Array<{ id: string; summary: string; alcance: Alcance; agent_name: string | null; created_at: string }> };
+}
+const dia = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+/**
+ * Conexões › Regras, o lugar único das regras: o que você liberou para a equipe fazer sem pedir a sua confirmação (com
+ * desfazer), as regras de texto que valem nas conversas (com desligar) e o que foi proposto e espera você.
+ */
+function Regras() {
+  const r = useResource<TelaRegras>('/api/conexoes/regras', ['rules.changed', 'proposals.changed']);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const [indo, setIndo] = useState<string | null>(null);
+  const fazer = async (id: string, fn: () => Promise<unknown>, feito: string) => {
+    setErr(null); setOk(null); setIndo(id);
+    try { const x = await fn() as { result?: string } | undefined; setOk(x?.result ?? feito); } catch (e) { setErr(errMsg(e)); } finally { setIndo(null); r.reload(); }
+  };
+  const d = r.data;
+  const vazio = d && !d.regras.length && !d.texto.length && !d.propostas.texto.length && !d.propostas.cartoes.length;
+  return (
+    <section className="conn-group" id="conn-regras">
+      <h3>Regras</h3>
+      <p className="muted small">Para dar mais autonomia à equipe, peça na conversa, por exemplo: “podem mandar os e-mails sem me pedir aprovação”. Aparece um cartão para você escolher até quando vale: só naquele pedido, por 24 h ou sempre. Apagar só entra quando você fala em apagar. A segurança fica por sua conta: o que você libera aqui vale também quando a equipe trabalha sozinha e depois de ler mensagens de outras pessoas. Desfazer vale na hora.</p>
+      {err && <p className="error" role="alert">{err}</p>}
+      {ok && <p className="ok" role="status">{ok}</p>}
+      {!d && r.error && <p className="error">{r.error}</p>}
+      {vazio && <p className="muted">Nenhuma regra por enquanto: tudo segue o que está acima.</p>}
+
+      {!!d?.propostas.cartoes.length && <h4 className="rt-sub">Esperando você</h4>}
+      {d?.propostas.cartoes.map((c) => (
+        <article key={c.id} className="dec-card">
+          <div className="dec-card__top"><span className="badge">regra proposta{c.agent_name ? ` · ${c.agent_name}` : ''}</span></div>
+          <div className="dec-card__txt"><TextoLongo texto={c.summary} /></div>
+          <div className="row row--wrap dec-card__acts">
+            {indo === c.id ? <span className="badge" role="status">Aplicando…</span>
+              : <BotoesRegra sugerido={c.alcance} ocupado={!!indo} onEscolher={(alcance) => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'apply', alcance }), 'Regra aplicada.')}
+                onRecusar={() => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'reject' }), 'Recusada.')} />}
+          </div>
+        </article>
+      ))}
+      {d?.propostas.texto.map((t) => (
+        <article key={t.id} className="dec-card">
+          <div className="dec-card__top"><span className="badge">regra de conversa proposta</span></div>
+          <div className="dec-card__txt">{t.text}</div>
+          <div className="row row--wrap dec-card__acts">
+            <button className="btn btn--sm btn--primary" disabled={!!indo} onClick={() => void fazer(t.id, () => api.post(`/api/rules/${t.id}`, { decision: 'active' }), 'Regra ativada.')}>Ativar</button>
+            <button className="btn btn--sm btn--ghost" disabled={!!indo} onClick={() => void fazer(t.id, () => api.post(`/api/rules/${t.id}`, { decision: 'rejected' }), 'Recusada.')}>Recusar</button>
+          </div>
+        </article>
+      ))}
+
+      {!!d?.regras.length && <h4 className="rt-sub">Liberado sem pedir a sua confirmação</h4>}
+      {d?.regras.map((x) => (
+        <div key={x.id} className="regra-linha">
+          <span className="regra-linha__txt"><b>{x.texto.charAt(0).toUpperCase() + x.texto.slice(1)}</b>
+            <span className="muted small"> · {x.alcanceTexto} · desde {dia(x.criadaEm)}{x.tipo === 'acao' ? ` · ${!x.usos ? 'ainda não usada' : x.usos === 1 ? 'usada 1 vez' : `usada ${x.usos} vezes`}` : ''}</span></span>
+          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/conexoes/regras/${x.id}/desfazer`), 'Desfeita: volta a pedir a sua confirmação.')}>{indo === x.id ? 'Desfazendo…' : 'Desfazer'}</button>
+        </div>
+      ))}
+
+      {!!d?.texto.length && <h4 className="rt-sub">Combinado nas conversas</h4>}
+      {d?.texto.map((t) => (
+        <div key={t.id} className="regra-linha">
+          <span className="regra-linha__txt">{t.text}<span className="muted small"> · desde {dia(t.created_at)}</span></span>
+          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(t.id, () => api.post(`/api/rules/${t.id}`, { decision: 'rejected' }), 'Desligada.')}>{indo === t.id ? 'Desligando…' : 'Desligar'}</button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function LiberarTudo({ estado: st }: { estado: { data: EstadoConexoes | null; reload: () => void } }) {
   const [err, setErr] = useState<string | null>(null);
+  const trocar = (rota: string) => async (e: ChangeEvent<HTMLInputElement>) => { setErr(null); try { await api.put(rota, { on: e.target.checked }); st.reload(); } catch (x) { setErr(errMsg(x)); } };
   // a seção fica sempre no lugar; enquanto a escolha não chega (quase nunca: vem na pré-carga), a linha só guarda o espaço
+  const opcao = (ligada: boolean | undefined, rota: string, rotulo: string) => st.data
+    ? <label className="check"><input type="checkbox" checked={!!ligada} onChange={trocar(rota)} /> {rotulo}</label>
+    : <span className="check" aria-hidden="true" style={{ visibility: 'hidden' }}><input type="checkbox" tabIndex={-1} readOnly /> {rotulo}</span>;
   return (
     <section className="conn-group">
       <h3>O que pede a sua confirmação</h3>
-      <p className="muted small">O que você clica vai direto. O que você pede na conversa também, e o agente pergunta se não estiver claro. Pede confirmação: o que não partiu de você (rotina, mensagem recebida, iniciativa do agente), envio a outra pessoa depois de o agente ler conteúdo de fora, e apagar.</p>
-      {st.data
-        ? <label className="check"><input type="checkbox" checked={st.data.liberarTudo} onChange={async (e) => { setErr(null); try { await api.put('/api/conexoes/liberar-tudo', { on: e.target.checked }); st.reload(); } catch (x) { setErr(errMsg(x)); } }} /> Liberar tudo, por minha conta</label>
-        : <span className="check" aria-hidden="true" style={{ visibility: 'hidden' }}><input type="checkbox" tabIndex={-1} readOnly /> Liberar tudo, por minha conta</span>}
-      {st.data?.liberarTudo && <p className="warn">Sem confirmações: um e-mail ou mensagem malicioso que um agente leia pode levá-lo a enviar, apagar ou mandar dados seus para fora sem você ver antes.</p>}
+      <p className="muted small">O que você clica vai direto. O que você pede na conversa também, e o agente pergunta se não estiver claro. Pede confirmação: o que não partiu de você (rotina, mensagem recebida, iniciativa do agente), envio a outra pessoa depois de o agente ler conteúdo de fora, e apagar. Criar cobrança no Asaas também pede sempre, mesmo pedida por você e com "Liberar tudo" ligado, porque o cliente é avisado na hora.</p>
+      {opcao(st.data?.confirmarOrganizar, '/api/conexoes/confirmar-organizar', ROTULO_CONFIRMAR_ORGANIZAR)}
+      <p className="muted small">Organizar é criar, mudar e deixar rascunhos nas suas ferramentas. Sem esta opção, o que você pede na conversa vai direto, mesmo que o agente tenha lido e-mails antes.</p>
+      {opcao(st.data?.aprovarDepoisDeLer, '/api/conexoes/aprovar-depois-de-ler', ROTULO_APROVAR_DEPOIS_DE_LER)}
+      <p className="muted small">Os agentes tratam o que leem como informação, nunca como ordem. Com esta opção, depois de ler e-mails, mensagens ou arquivos das suas contas, abrir um site ou rodar um programa espera o seu clique num cartão. No cartão, você escolhe por quanto tempo vale: 1 h, 8 h ou 72 h naquela conversa ou card, ou sempre (em todas, até você desfazer em Regras, abaixo). Aprovar libera o grupo inteiro: qualquer site, ou qualquer programa. A busca na internet segue valendo.</p>
+      {st.data?.aprovarDepoisDeLerBarra && <p className="warn">{AVISO_APROVAR_SEM_CARTAO}</p>}
+      {opcao(st.data?.liberarTudo, '/api/conexoes/liberar-tudo', 'Liberar tudo, por minha conta')}
+      {st.data?.liberarTudo && <p className="warn">Sem confirmações: um e-mail ou mensagem malicioso que um agente leia pode levá-lo a enviar, apagar ou mandar dados seus para fora sem você ver antes. A aprovação para abrir sites e rodar programas também sai. O que você ajustou em cada conexão, "sempre pedir confirmação antes de organizar" e o cartão de criar cobrança no Asaas continuam valendo.</p>}
       {err && <p className="error">{err}</p>}
     </section>
   );
 }
+
 
 function Disconnect({ i, reload, label = 'Desconectar' }: { i: Integration; reload: () => void; label?: string }) {
   const [ask, setAsk] = useState(false);
@@ -344,6 +468,13 @@ function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => 
   if (i.state === 'connected' && !trocar) return (
     <>
       {ok && <p className="ok" role="status">{ok}</p>}
+      {/* conectada do jeito antigo (ex.: Pipefy com o código pessoal): funciona, e o botão leva ao jeito novo */}
+      {i.aviso && (
+        <div className="conn-reautorizar">
+          <p className="warn">{i.aviso}</p>
+          <button className="btn btn--primary" onClick={() => { setOk(null); setTrocar(true); }}>Reconectar do novo jeito</button>
+        </div>
+      )}
       {/* o agente ou o teste diz à pessoa "autorizar de novo": aqui isso é colar uma credencial com a permissão que faltou */}
       {(i.error || autorizar) && (
         <div className="conn-reautorizar">
@@ -372,6 +503,7 @@ function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => 
         setV({}); setTrocar(false); setOk(`Conectada: ${r.account}.`); reload();
       } catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
     }}>
+      {i.help?.antes && <p className="warn conn-antes" role="note">{i.help.antes}</p>}
       {i.help && <p className="hint">{i.help.steps} <a href={i.help.url} target="_blank" rel="noreferrer noopener">Abrir a página</a></p>}
       {!!i.help?.extras?.length && <p className="row row--wrap">{i.help.extras.map((x) => ('url' in x
         ? <a key={x.rotulo} className="btn btn--sm btn--ghost" href={x.url} target="_blank" rel="noreferrer noopener">{x.rotulo}</a>
@@ -506,9 +638,10 @@ function EtapaLinha({ e, pedir }: { e: EtapaConsentimento; pedir: () => void }) 
       <p className="row row--wrap"><span className="muted small">A página da Microsoft está aberta. Se você a fechou, abra de novo.</span><button className="btn btn--sm btn--ghost" onClick={pedir}>Abrir de novo</button></p>
     </li>
   );
-  // na empresa, leitura e canais costumam ser do administrador: o pedido vem pronto, e quem envia é a pessoa
+  // na empresa, leitura e canais costumam ser do administrador (e o Teams, quando a empresa exige): o pedido vem pronto, e quem
+  // envia é a pessoa. Os canais são opcionais e o login segue até eles sozinho: voltar sem eles é esperado, nada em vermelho
   if (e.administrador && e.link && (e.estado === 'bloqueado' || e.opcional)) return (
-    <li><span className={`badge ${e.estado === 'bloqueado' ? 'badge--err' : ''}`}>precisa do administrador</span> {titulo}
+    <li><span className={`badge ${e.estado === 'bloqueado' && !e.opcional ? 'badge--err' : ''}`}>precisa do administrador</span> {titulo}
       <p className="small">{e.opcional ? 'Opcional. Ler os canais sempre precisa da aprovação do administrador da empresa.' : 'Precisa da aprovação do administrador da empresa.'}{motivo ? <span className="muted"> {motivo}</span> : null}</p>
       <PedirAoAdministrador link={e.link} etapa={e.id} />
       <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>Já aprovaram? Conectar de novo</button></p>
@@ -666,5 +799,151 @@ function ListEditor({ label, values, suggestions, onChange, placeholder }: { lab
       </div>
       {sugg.length > 0 && v && <div className="row row--wrap">{sugg.map((s) => <button key={s} className="chip" onClick={() => add(s)}>+ {s}</button>)}</div>}
     </div>
+  );
+}
+
+/** GET /api/teams-app: conversar com a equipe pelo Teams (o app público, ligado por código). */
+interface TeamsVinculo { id: string; teamsName: string | null; linkedAt: string; notices: boolean; status: 'active' | 'paused' | 'revoked'; revokedBy?: string }
+interface EstadoTeams {
+  available: boolean; reason?: string; connection: 'connected' | 'connecting' | 'offline'; enabled: boolean; bindings: TeamsVinculo[];
+  teamsAppUrl?: string; problem?: string; relay?: { fromEnv: boolean; url: string | null };
+}
+interface PreviaTeams { claimId: string; teamsName: string; conta?: ContaDoTeams; organizacao?: string | null }
+const DESLIGADA_POR: Record<string, string> = {
+  teams: 'desligada pelo Teams', uninstall: 'o app foi removido do Teams', blocked: 'o Teams bloqueou as mensagens do app', relay: 'precisa ser ligada de novo',
+};
+const dataCurta = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+/**
+ * Conexões › Teams › "Conversar com a equipe pelo Teams": a pessoa fala com o app no Teams, o app mostra um código, ela
+ * digita aqui, vê de quem é a conta e confirma com a senha. Daí em diante, o que ela escreve lá vai para a equipe e a
+ * resposta volta lá; o que precisa dela também avisa lá (ligado por padrão).
+ */
+function TeamsConversa() {
+  const st = useResource<EstadoTeams>('/api/teams-app', ['teams.changed']);
+  const [codigo, setCodigo] = useState('');
+  const [previa, setPrevia] = useState<PreviaTeams | null>(null);
+  const [senha, setSenha] = useState('');
+  const [ciente, setCiente] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [pronto, setPronto] = useState<string | null>(null);
+  const [desligar, setDesligar] = useState<string | null>(null);
+  // o serviço ainda prepara esta instalação (acabou de se registrar): a tela tenta de novo sozinha, sem erro
+  const [preparando, setPreparando] = useState<number>(0);
+  const d = st.data;
+  const agir = async (fn: () => Promise<unknown>) => {
+    setErr(null); setBusy(true);
+    try { await fn(); st.reload(); } catch (x) { setErr(x instanceof ApiError && x.code === 'invalid_login' ? 'Senha incorreta.' : errMsg(x)); } finally { setBusy(false); }
+  };
+  const pedirPrevia = async (tentativa = 0): Promise<void> => {
+    setErr(null); setBusy(true); setPronto(null);
+    try {
+      setPrevia(await api.post<PreviaTeams>('/api/teams-app/claim', { code: codigo })); setCiente(false); setPreparando(0);
+    } catch (x) {
+      // até uns 3 minutos esperando o serviço ficar pronto; depois, o aviso normal
+      if (x instanceof ApiError && x.code === 'not_ready' && tentativa < 18) { setPreparando(tentativa + 1); setTimeout(() => void pedirPrevia(tentativa + 1), 10_000); return; }
+      setPreparando(0); setErr(errMsg(x));
+    } finally { setBusy(false); }
+  };
+  // enquanto a resposta não chega (quase nunca: vem na pré-carga), a seção só guarda o lugar
+  if (!d) return <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><strong>Conversar com a equipe pelo Teams</strong><p className="muted">…</p></article>;
+  const ligados = d.bindings.filter((b) => b.status !== 'revoked');
+  const caidos = d.bindings.filter((b) => b.status === 'revoked');
+  return (
+    <article className={`card conn feature ${ligados.length ? 'feature--on' : ''}`}>
+      <header className="row"><BrandLogo kind="teams" name="Teams" size={36} /><strong>Conversar com a equipe pelo Teams</strong>
+        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? 'conectado' : 'sem conexão'}</span> : <span className="badge badge--soon">em breve</span>}</header>
+      <p className="muted">Mande pedidos à sua equipe numa conversa com o app Ergon no Teams e receba as respostas ali mesmo. As confirmações chegam como cartões com Aprovar e Recusar, e o que precisa de você também avisa no Teams.</p>
+      {!d.available ? <p className="hint">Em breve: conversar com a equipe pelo Teams, pelo WhatsApp e por outros aplicativos de conversa.</p> : <>
+        {d.problem && PROBLEMA_TEAMS[d.problem] && <p className="warn">{PROBLEMA_TEAMS[d.problem]}</p>}
+        {linhaDoEstado(d.connection, d.problem) && <p className="small">{linhaDoEstado(d.connection, d.problem)}</p>}
+        {(ligados.length > 0 || caidos.length > 0) && (
+          <label className="check"><input type="checkbox" checked={d.enabled} disabled={busy} onChange={(e) => void agir(() => api.post('/api/teams-app/enabled', { enabled: e.target.checked }))} /> Conversar pelo Teams</label>
+        )}
+        {ligados.length > 0 && (
+          <ul className="conn-teams-lista">
+            {ligados.map((b) => (
+              <li key={b.id}>
+                <div><b>{b.teamsName ?? 'Conta do Teams'}</b> · ligado em {dataCurta(b.linkedAt)}{b.status === 'paused' ? <span className="muted small"> (conversa desligada)</span> : null}</div>
+                <label className="check"><input type="checkbox" checked={b.notices} disabled={busy} onChange={(e) => void agir(() => api.patch(`/api/teams-app/bindings/${b.id}`, { notices: e.target.checked }))} /> Avisar no Teams o que precisa de você</label>
+                {desligar === b.id
+                  ? <div className="confirm">Desligar esta conta do Teams? Os pedidos que ainda esperam no serviço são apagados, e o Teams avisa que a conta foi desligada.
+                      <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void agir(async () => { await api.del(`/api/teams-app/bindings/${b.id}`); setDesligar(null); })}>Desligar</button>
+                      <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(null)}>Cancelar</button></div>
+                  : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(b.id)}>Desligar</button>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {caidos.map((b) => (
+          <p key={b.id} className="warn">{b.teamsName ?? 'Conta do Teams'}: {DESLIGADA_POR[b.revokedBy ?? ''] ?? 'desligada'}. Para ligar de novo, mande uma mensagem ao app no Teams e digite o código abaixo.{' '}
+            <button className="link link--inline" disabled={busy} onClick={() => void agir(() => api.del(`/api/teams-app/bindings/${b.id}`))}>Tirar da lista</button></p>
+        ))}
+        {pronto && <p className="ok" role="status">{pronto}</p>}
+        {previa ? (() => {
+          // o nome não prova nada (é a própria conta do Teams que escolhe): a prévia diz de quem a conta é, conferida com a
+          // conta Microsoft ligada a este Ergon, e o que não é a dela pede a escolha consciente antes do Ligar
+          const pv = previaDaConta(previa.conta, previa.teamsName, previa.organizacao);
+          return (
+            <form className="confirm" onSubmit={(e) => {
+              e.preventDefault();
+              void agir(async () => {
+                await api.post('/api/teams-app/confirm', { claimId: previa.claimId, password: senha, ...(pv.exigeEscolha ? { ciente } : {}) });
+                setPronto(`Pronto: a conta do Teams "${previa.teamsName}" está ligada. Escreva no Teams, e o pedido vai para a sua equipe.`);
+                setPrevia(null); setSenha(''); setCodigo(''); setCiente(false);
+              });
+            }}>
+              <p><b>{pv.pergunta}</b></p>
+              <p className="hint">{NOME_ESCOLHIDO} {SO_O_SEU_CODIGO}</p>
+              {pv.aviso && <p className={pv.forte ? 'error' : 'warn'} role="alert">{pv.aviso}</p>}
+              {pv.exigeEscolha && <label className="check"><input type="checkbox" checked={ciente} disabled={busy} onChange={(e) => setCiente(e.target.checked)} /> {ESCOLHA_CONSCIENTE}</label>}
+              <p className="hint">Quem escreve por essa conta fala com a equipe como você. Confirme com a sua senha.</p>
+              <div className="row row--wrap">
+                <input type="password" autoComplete="current-password" required placeholder="Sua senha" aria-label="Sua senha" value={senha} onChange={(e) => setSenha(e.target.value)} />
+                <button className="btn btn--sm btn--primary" disabled={busy || !senha || (pv.exigeEscolha && !ciente)}>{busy ? 'Conferindo…' : 'Ligar'}</button>
+                <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => { const c = previa; setPrevia(null); setSenha(''); setCiente(false); void api.post('/api/teams-app/cancel', { claimId: c.claimId }).catch(() => undefined); }}>Cancelar</button>
+              </div>
+            </form>
+          );
+        })() : (
+          <form onSubmit={(e) => { e.preventDefault(); if (!preparando) void pedirPrevia(); }}>
+            <ol className="small conn-passos">
+              <li>No Teams, procure o app <b>Ergon</b> e abra uma conversa.{d.teamsAppUrl && <> <a href={d.teamsAppUrl} target="_blank" rel="noreferrer noopener">Abrir no Teams</a></>}</li>
+              <li>O app mostra um código.</li>
+              <li>Digite o código aqui.</li>
+            </ol>
+            <p className="hint">{SO_O_SEU_CODIGO}</p>
+            <div className="row row--wrap">
+              <label className="field">Código<input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="ABCD-EFGH" autoComplete="off" spellCheck={false} maxLength={20} /></label>
+              <button className="btn btn--sm btn--primary" disabled={busy || preparando > 0 || codigo.replace(/[\s-]/g, '').length < 8}>{busy || preparando ? 'Conferindo…' : 'Confirmar'}</button>
+            </div>
+            {preparando > 0 && <p className="small" role="status">Preparando a conexão com o Teams…</p>}
+          </form>
+        )}
+        <p className="hint">Só a conversa direta com o app funciona por enquanto (grupos, canais e arquivos ainda não). Com o Ergon fechado, o app responde na hora que recebeu e guarda o pedido, cifrado, por até 7 dias.</p>
+      </>}
+      {err && <p className="error" role="alert">{err}</p>}
+      {d.relay && !d.relay.fromEnv && <EnderecoTeams atual={d.relay.url} reload={st.reload} />}
+    </article>
+  );
+}
+
+/** Ajuste da instalação (quem administra o Ergon neste computador): o endereço do serviço do Teams. */
+function EnderecoTeams({ atual, reload }: { atual: string | null; reload: () => void }) {
+  const [url, setUrl] = useState(atual ?? '');
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <details className="small">
+      <summary>Ajuste da instalação</summary>
+      <form className="row row--wrap" onSubmit={async (e) => {
+        e.preventDefault(); setErr(null);
+        try { await api.put('/api/teams-app/relay-url', { url: url.trim() || null }); reload(); } catch (x) { setErr(errMsg(x)); }
+      }}>
+        <label className="field">Endereço do serviço do Teams<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" autoComplete="off" spellCheck={false} /></label>
+        <button className="btn btn--sm">Salvar</button>
+      </form>
+      {err && <p className="error">{err}</p>}
+    </details>
   );
 }

@@ -30,8 +30,30 @@ Mais `openid`, `profile` e `offline_access` em toda etapa. A lista de cada etapa
 (`ESCOPOS_MICROSOFT`, em `server/src/services/conexoes/acoes/microsoft.ts`) e um teste confere que a etapa A não pede nada da
 lista de exceções da política padrão.
 
-- **O login segue sozinho:** depois da base, a mesma conta (sem escolher de novo) passa pela etapa do Teams e pela leitura. A
-  etapa que a conta já deu é pulada. Recusar uma etapa, ou não poder autorizá-la, não desfaz as anteriores.
+- **O login segue sozinho, de uma vez:** ao clicar em "Entrar com a Microsoft", a mesma conta (sem escolher de novo) passa
+  em sequência pela base, pelo Teams (`Chat.ReadBasic` e o envio), pela leitura (com `Chat.Read`, o conteúdo das conversas) e,
+  em conta de trabalho ou escola de quem se sabe administrador, pelos canais (`ChannelMessage.Read.All`). Ninguém precisa voltar à tela e clicar de novo. A
+  etapa que a conta já deu é pulada. "Liberar leitura" e "Tentar de novo" também seguem até o fim.
+- **Uma etapa negada não trava a conexão:** o que já foi autorizado continua valendo. Quando a Microsoft volta dizendo que a
+  empresa exige o administrador (`AADSTS65001`, `AADSTS90094`, `AADSTS90095`, `consent_required`), a etapa e as seguintes
+  (cada uma pede também as anteriores, então dariam no mesmo) mostram **Pedir ao administrador** com o link pronto, e o login
+  para ali, sem levar a pessoa a outra página sem saída. Vale também para o Teams, numa empresa que o bloqueie: aí o pedido é o
+  da leitura, que inclui o Teams. Recusar uma etapa na página da Microsoft (sem exigência da empresa) também não desfaz as
+  anteriores; no Teams, a tela oferece "Tentar de novo".
+- **Os canais e quem é administrador (regra de 09/11):** ler canais sempre exige o administrador. O login só leva aos canais
+  **quem se sabe administrador**: a Microsoft informa, no login, que a conta tem uma função que aprova pela empresa
+  (administrador global, de funções privilegiadas, de aplicativos ou de aplicativos de nuvem, pela declaração `wids`, que só vem
+  com **Funções de diretório** ligado na configuração de token do app: passo 5 de "Quem registrou o aplicativo", abaixo). Aí a página da Microsoft oferece a ela
+  aprovar para a organização. Quando a Microsoft informa que não tem, ou quando não informa (o app sem as funções de diretório
+  no token), o login termina na leitura, a conta continua conectada, a tela diz "só a leitura dos canais ficou de fora" e a linha
+  dos canais já mostra o pedido ao administrador (a pessoa ainda pode pedir os canais de propósito, na linha deles). Os canais
+  que já voltaram sem ser dados não são pedidos de novo a cada login: depois da aprovação, "Já aprovaram? Conectar de novo". Os
+  canais que só ficaram com o pedido porque uma etapa anterior (o Teams ou a leitura) exigiu o administrador nunca foram pedidos:
+  o próximo login completo de quem se sabe administrador ainda os tenta.
+- **Depois da aprovação do administrador:** o link da leitura cobre também o Teams (cada etapa pede as anteriores), e o dos
+  canais cobre tudo. Quando a aprovação volta para este computador, as linhas cobertas pelo link passam a "aprovado pelo
+  administrador", com "Autorizar agora". Pedir de novo uma etapa que a empresa só libera com o administrador, antes da aprovação,
+  não apaga isso: se a página da Microsoft não voltar, a linha continua com o pedido ao administrador.
 - **Conta pessoal** (Outlook, Hotmail, Live): não tem Teams pelo Graph. Para ela, as etapas do Teams e dos canais nem aparecem, e
   a tela nunca oferece "Autorizar de novo" para algo que a conta não pode ter.
 - **O que foi dado fica somado** na credencial. A renovação do acesso pede só isso, porque ela não aceita permissão nova
@@ -49,8 +71,8 @@ no servidor; a equipe usa pelo motor dela).
 
 ## Pedir ao administrador
 
-Quando a leitura volta sem ser dada (ou a página da Microsoft não volta em 10 minutos), a etapa mostra **Pedir ao
-administrador**, com o link pronto e uma mensagem pronta para copiar. A pessoa envia ela mesma, pelo canal que quiser: nada sai
+Quando a leitura ou os canais voltam sem ser dados (ou a página da Microsoft não volta em 10 minutos), ou o Teams volta dizendo
+que a empresa exige o administrador, a etapa mostra **Pedir ao administrador**, com o link pronto e uma mensagem pronta para copiar. A pessoa envia ela mesma, pelo canal que quiser: nada sai
 do Ergon sozinho.
 
 O link é o do [consentimento do administrador v2](https://learn.microsoft.com/en-us/entra/identity-platform/v2-admin-consent):
@@ -98,6 +120,52 @@ Os agentes consultam e agem na conta, com a regra de confirmação de [CONEXOES.
 - Os tokens ficam em `/data/secrets` (volume de dados do Ergon, legível só pelo servidor, cifrados); nunca no navegador, no banco, no
   motor de IA ou no Git. **Desconectar** apaga os tokens deste workspace.
 
+## O administrador da empresa: incluir as permissões e aprovar para todos (portal Entra)
+
+Tudo no navegador, sem comandos. São duas situações.
+
+### Quem registrou o aplicativo (o dono do app, que administra o próprio tenant)
+
+A lista de permissões do registro é o que o administrador de qualquer empresa vê e aprova pelo portal (a seção seguinte). Ela
+precisa ter tudo o que o login pede, inclusive o Teams e os canais:
+
+1. Entre em <https://entra.microsoft.com> com a conta de administrador.
+2. **Identidade › Aplicativos › Registros de aplicativo › Todos os aplicativos** e abra o **Ergon**.
+3. **Permissões de API › Adicionar uma permissão › Microsoft Graph › Permissões delegadas** (nunca "Permissões de
+   aplicativo").
+4. Na busca, marque `Chat.ReadBasic`, `Chat.Read` e `ChannelMessage.Read.All`, e confira que as outras da tabela do início desta
+   página estão na lista (`User.Read`, `Mail.Send`, `Files.ReadWrite`, `Chat.Create`, `ChatMessage.Send`,
+   `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Send`, `Mail.Read`, `Mail.ReadWrite`, `Calendars.Read`,
+   `Calendars.ReadWrite`, `Files.Read.All`, `Tasks.ReadWrite`, `People.Read`). Clique em **Adicionar permissões**.
+5. Ainda no registro do **Ergon**: **Configuração de token › Adicionar declaração de grupos**, marque **Funções de diretório**
+   e clique em **Adicionar**. Com isso, o login informa se a pessoa é administradora (a declaração `wids`), e o Ergon leva à
+   página dos canais **só quem se sabe administrador**; para os outros, a linha dos canais já mostra o pedido pronto. Sem este
+   passo, ninguém é levado aos canais pelo login (a regra é "só quando se sabe").
+6. Para a sua própria organização: volte a **Permissões de API**, clique em **Conceder consentimento do administrador para
+   (nome da organização)** e confirme com **Sim**. A coluna "Status" fica verde ("Concedido para…") em todas as linhas,
+   inclusive `Chat.ReadBasic`, `Chat.Read` e `ChannelMessage.Read.All`: as pessoas da sua organização passam pelas etapas sem a
+   pergunta da Microsoft e sem pedir nada a ninguém. Permissão acrescentada depois de um consentimento já dado fica sem o verde
+   até você conceder de novo.
+
+Em resumo, na ordem: incluir `Chat.ReadBasic`, `Chat.Read` e `ChannelMessage.Read.All` (passo 4); ligar **Funções de
+diretório** na configuração de token (passo 5); conceder o consentimento do administrador para a organização (passo 6).
+
+### O administrador de outra empresa (o app é de outro tenant)
+
+O registro do app não aparece para ele, mas o aplicativo aparece na empresa dele depois da primeira tentativa de login de
+alguém de lá (ou depois de abrir o link de "Pedir ao administrador"):
+
+1. Entre em <https://entra.microsoft.com> com a conta de administrador da empresa (administrador global, de funções
+   privilegiadas, de aplicativos ou de aplicativos de nuvem).
+2. **Identidade › Aplicativos › Aplicativos empresariais › Todos os aplicativos** e abra o **Ergon**.
+3. **Segurança › Permissões › Conceder consentimento do administrador para (nome da organização)**. Uma janela da Microsoft
+   mostra a lista de permissões; confira e clique em **Aceitar**.
+4. Pronto: as pessoas da empresa entram em **Conexões › Microsoft 365** e o login passa por todas as etapas sem pedir nada. Quem
+   já estava conectado clica em **Já aprovaram? Conectar de novo** na etapa que faltava.
+
+O link pronto de **Pedir ao administrador**, na tela de Conexões, faz o mesmo para a etapa em questão: é o caminho mais curto
+quando quem administra prefere aprovar só o que a pessoa precisa.
+
 ## Registrar um aplicativo próprio (opcional, ~5 minutos)
 
 1. Entre em <https://entra.microsoft.com> › **Aplicativos** › **Registros de aplicativo** › **Novo registro**.
@@ -111,9 +179,10 @@ Os agentes consultam e agem na conta, com a regra de confirmação de [CONEXOES.
    do pedido ao administrador. Na nuvem, acrescente o endereço HTTPS do servidor ao mesmo app.
 4. Não crie segredo: o Ergon usa PKCE, sem senha de aplicativo.
 5. Em **Permissões de API › Microsoft Graph › Permissões delegadas** (nunca "de aplicativo"), adicione as da tabela acima,
-   inclusive `ChannelMessage.Read.All` se quiser a leitura de canais. **Não** clique em "Conceder consentimento do
-   administrador" no registro: ele vale só para o seu tenant e só para o que está nessa lista. (A lista no portal documenta o
-   app; o que vale no login é o que se pede em cada etapa.)
+   inclusive `Chat.ReadBasic`, `Chat.Read` e `ChannelMessage.Read.All` (veja a seção anterior), e ligue **Funções de diretório**
+   em **Configuração de token › Adicionar declaração de grupos** (sem isso, o login não leva ninguém aos canais). Se você
+   administra a sua organização, pode clicar em **Conceder consentimento do administrador para (sua organização)**: vale para
+   todas as pessoas da sua organização, e só para o que está na lista; quem é de outra empresa continua passando pelas etapas.
 6. Copie o **ID do aplicativo (cliente)** e coloque no arquivo `.env` do Ergon:
 
    ```

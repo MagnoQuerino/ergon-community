@@ -8,6 +8,8 @@ import type { Config } from '../config.ts';
 import { HttpError } from '../lib/util.ts';
 import { TOOLS, platformToolsets, setPlatformToolsets, toolStatus, type ToolDef } from './characters.ts';
 import type { ByokCatalog, ByokCustomInput, HermesClient, HermesControlClient, LoginPoll, LoginStart, ModelOptions, SkillInfo } from './hermes.ts';
+import type { Db } from '../db/db.ts';
+import { sincronizarCompactacao, sincronizarPassos } from './custo.ts';
 
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 export interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
@@ -121,6 +123,21 @@ export class AiService {
     const enabled = await this.control.setApiToolsets([...new Set([...cur.enabled, CONEXOES])]);
     setPlatformToolsets(enabled, this.scope);
     return enabled.includes(CONEXOES) ? 'ligou' : null;
+  }
+
+  /**
+   * Passos por pedido: deixa o motor com o que vale para os workspaces dele (a escolha mais recente; sem escolha, o que
+   * ele tem, salvo valor fora do intervalo, que volta a 20). Devolve o valor que o motor ficou, ou null se o motor não tem
+   * a ponte dos passos (versão anterior). Erro de rede sobe.
+   */
+  async sincronizarPassos(db: Db, workspaceIds: string[]): Promise<number | null> {
+    return sincronizarPassos(db, this.control, workspaceIds);
+  }
+
+  /** Resumir as conversas longas mais cedo: o motor fica com a escolha mais recente dos workspaces dele (sem escolha, com o
+   *  que tem). Devolve o que o motor ficou, ou null se ele não tem a ponte da compactação. Erro de rede sobe. */
+  async sincronizarCompactacao(db: Db, workspaceIds: string[]): Promise<boolean | null> {
+    return sincronizarCompactacao(db, this.control, workspaceIds);
   }
 
   /** Modelo padrão da conta (cache de 60 s; usado também para saber se há custo por uso). */

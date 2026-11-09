@@ -66,6 +66,9 @@ caso('atualização de segurança aceita', base({ seguranca: { obrigatoria: true
 caso('segurança sem motivo', base({ seguranca: { obrigatoria: true } }), 'FORMATO');
 caso('segurança não obrigatória', base({ seguranca: { obrigatoria: false, motivo: 'motivo longo o bastante' } }), 'FORMATO');
 caso('segurança com motivo longo demais', base({ seguranca: { obrigatoria: true, motivo: 'x'.repeat(401) } }), 'FORMATO');
+caso('piso de segurança aceito', base({ segurancaMinima: '1.0.1' }), 'ok');
+caso('piso de segurança mal formado', base({ segurancaMinima: '1.0' }), 'FORMATO');
+caso('piso de segurança depois da própria versão', base({ segurancaMinima: '1.0.3' }), 'FORMATO');
 
 // o próprio verificador de referência tem de concordar com cada caso
 for (const c of casos) {

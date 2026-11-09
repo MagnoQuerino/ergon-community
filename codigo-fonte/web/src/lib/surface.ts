@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
-import { SurfaceStack, type CloseWhy, type SurfaceEntry } from './surface-stack.ts';
+import { SurfaceStack, markDismissClick, type CloseWhy, type SurfaceEntry } from './surface-stack.ts';
 
 export type { CloseWhy } from './surface-stack.ts';
 
@@ -16,6 +16,8 @@ const stack = new SurfaceStack<Live>();
 let seq = 0;
 let installed = false;
 let downTop: { id: number; inside: boolean } | null = null;
+/** quantas vezes keepTyped perguntou se descarta: o clique fora que levou à pergunta não abre o card por baixo */
+let discardAsks = 0;
 /** quem quer saber quando abre ou fecha uma janela (ex.: a dica da tela some com uma janela por cima) */
 const watchers = new Set<() => void>();
 const changed = () => watchers.forEach((f) => f());
@@ -61,7 +63,12 @@ function install(): void {
     const keep = !!target?.closest?.('[data-keep-surface]');
     const interactive = !!target?.closest?.(INTERACTIVE);
     // clique dentro de outra superfície por cima (ex.: um menu do navegador) não chega aqui; dentro da de cima, fica
-    if (stack.onOutsideClick(d.inside, !!t.el()?.contains(target as Node), keep, interactive)) t.request('outside');
+    // o 2º clique de um duplo clique não fecha (e.detail): o 1º já abriu a gaveta pelo card, ou já fechou a de cima
+    // o card por baixo abre com o mesmo clique ("clico e vem"), menos quando fechar perguntou sobre o que foi digitado
+    // ou a superfície é modal (surface-stack.ts, swallowsDismissClick)
+    const r = stack.dismiss({ downInside: d.inside, upInside: !!t.el()?.contains(target as Node), keep, interactive, count: e.detail },
+      (top) => { const asked = discardAsks; top.request('outside'); return discardAsks !== asked; });
+    if (r.swallow) markDismissClick(e);
   }, true);
 }
 
@@ -116,7 +123,11 @@ export function useSurface(ref: RefObject<HTMLElement | null>, opts: SurfaceOpti
 /**
  * Fechar com algo digitado e não salvo: pergunta (só aí; fechar sem pendência nunca pergunta). true = pode fechar.
  */
-export const keepTyped = (dirty: boolean, what: string): boolean => !dirty || window.confirm(`Descartar ${what}?`);
+export const keepTyped = (dirty: boolean, what: string): boolean => {
+  if (!dirty) return true;
+  discardAsks++;
+  return window.confirm(`Descartar ${what}?`);
+};
 
 /** Há uma janela modal aberta agora (a dica da tela fica atrás do fundo dela: some até a janela fechar). */
 export function useModalOpen(): boolean {

@@ -7,11 +7,10 @@
  * que é só "{nome}" mantém o tipo, e sem o parâmetro a chave some). Nas linhas de resposta, "{a.b}" lê do item e passa por
  * neutral(): texto de terceiros nunca vira linha de controle.
  */
-import crypto from 'node:crypto';
 import { clip } from '../../../lib/util.ts';
 import { ProviderError } from '../../mirror.ts';
 import { neutral } from '../../operations.ts';
-import { contaConferida, request, type ContaConferida } from '../../task-providers.ts';
+import { acessoPorCliente, contaConferida, request, type ContaConferida } from '../../task-providers.ts';
 import { ErroAcao, seg, type Acao, type Args, type CtxAcao, type Http, type Param, type Resultado, type Risco } from '../tipos.ts';
 
 export interface CampoCredencial { name: string; label: string; secret?: boolean; placeholder?: string; pattern?: RegExp; patternHelp?: string; /** pode ficar em branco (ex.: endereço de instalação própria) */ opcional?: boolean }
@@ -36,6 +35,8 @@ export interface AcaoDecl {
   /** ver Acao.rotulo */
   rotulo?: string;
   risco: Risco | ((a: Args) => Risco);
+  /** ver Acao.sempreConfirma */
+  sempreConfirma?: string;
   params: Record<string, Param>;
   /** o que vai acontecer, por extenso, com destinatário e texto inteiro: é o que a pessoa lê no cartão de confirmação */
   resumo: string | ((a: Args) => string);
@@ -46,6 +47,13 @@ export interface AcaoDecl {
   cabecalhos?: Record<string, string>;
   /** troca nome por id, escolhe a opção certa, ou recusa com as opções: pode chamar o serviço */
   antes?: (ctx: CtxAcao, a: Args) => Promise<Args>;
+  /**
+   * Escrita: confere no serviço, logo antes de escrever, se o mesmo pedido já foi feito (uma resposta perdida no caminho e a
+   * equipe tentando de novo). Devolve o resultado do que já existe, e nada é escrito de novo; null segue para a escrita.
+   */
+  jaFeito?: (ctx: CtxAcao, a: Args) => Promise<Resultado | null>;
+  /** o erro do serviço dito de um jeito que o agente entende e corrige sozinho, em vez de insistir (null: o erro como veio) */
+  erro?: (e: unknown, a: Args) => Error | null;
   /** o que o cartão de confirmação precisa mostrar quando os parâmetros são só ids: ver Acao.preparar */
   preparar?: Acao['preparar'];
   /** leitura que não pode repetir em erro do serviço (a Omie bloqueia depois de poucos pedidos errados) */
@@ -91,24 +99,9 @@ const cabecalhosDe = (def: Pick<ConectorDef, 'auth'>, c: Credenciais): Record<st
   return {};
 };
 
-/** Acesso temporário de quem conecta com credencial de aplicativo: um por credencial, renovado perto de vencer. */
-const ACESSOS = new Map<string, { token: string; vence: number }>();
-async function acessoDe(a: Extract<Autenticacao, { tipo: 'cliente' }>, c: Credenciais, renovar = false): Promise<string> {
-  // o segredo entra na chave (resumido): sem ele, um segredo errado aproveitaria o acesso de quem conectou com o certo
-  const url = a.tokenUrl(c); const k = `${url}|${a.id(c)}|${crypto.createHash('sha256').update(a.segredo(c)).digest('hex')}`;
-  const hit = ACESSOS.get(k);
-  if (!renovar && hit && hit.vence - Date.now() > 60_000) return hit.token;
-  let j: any;
-  try { j = await request(url, { method: 'POST', body: { grant_type: 'client_credentials', client_id: a.id(c), client_secret: a.segredo(c), ...(a.escopo ? { scope: a.escopo } : {}) }, redirect: 'error' }); } catch (e) {
-    // credencial recusada na troca: não é o acesso vencido, e pedir de novo não adianta
-    if (e instanceof ProviderError && e.status === 401) throw new ProviderError('forbidden', 'o serviço recusou a credencial: confira o identificador e o segredo em Conexões', { status: 403 });
-    throw e;
-  }
-  if (typeof j.access_token !== 'string' || !j.access_token) throw new ProviderError('forbidden', 'o serviço não entregou o acesso: confira a credencial em Conexões', { status: 403 });
-  if (ACESSOS.size > 200) ACESSOS.clear();
-  ACESSOS.set(k, { token: j.access_token, vence: Date.now() + Number(j.expires_in ?? 1800) * 1000 });
-  return j.access_token;
-}
+/** Acesso temporário de quem conecta com credencial de aplicativo: um por credencial, renovado perto de vencer (task-providers.ts). */
+const acessoDe = (a: Extract<Autenticacao, { tipo: 'cliente' }>, c: Credenciais, renovar = false): Promise<string> =>
+  acessoPorCliente({ url: a.tokenUrl(c), id: a.id(c), segredo: a.segredo(c), ...(a.escopo ? { escopo: a.escopo } : {}) }, renovar);
 
 /**
  * Erro sem a credencial, onde quer que o serviço a tenha repetido: na consulta (RD Station), no endereço (Telegram) ou no
@@ -196,8 +189,11 @@ export function linhaDe(m: string, x: unknown, max = 400): string {
   return m.replace(/\{([\w.]+)\}/g, (_m, k: string) => { const v = pegar(x, k); return vazio(v) ? '' : neutral(clip(String(v).replace(/\s+/g, ' '), max), max + 2); }).replace(/\s+/g, ' ').trim();
 }
 
-/** Parâmetros conferidos e nos tipos certos, com padrão e teto. */
-function normalizar(params: Record<string, Param>, a: Args): Args {
+/**
+ * Parâmetros conferidos e nos tipos certos, com padrão e teto. Na leitura, o número acima do teto vira o teto (pedir 500 e
+ * trazer 100 não engana ninguém); na escrita (estrito), recusa: cortar em silêncio faria outra coisa do que o cartão mostrou.
+ */
+function normalizar(params: Record<string, Param>, a: Args, estrito = false): Args {
   const out: Args = {};
   for (const [k, p] of Object.entries(params)) {
     let v = a[k];
@@ -205,6 +201,7 @@ function normalizar(params: Record<string, Param>, a: Args): Args {
     if (p.tipo === 'numero') {
       const n = Number(v);
       if (!Number.isFinite(n)) throw new ErroAcao(`"${k}" precisa ser um número`);
+      if (estrito && p.max !== undefined && n > p.max) throw new ErroAcao(`"${k}" vai até ${p.max}, e veio ${n}: use no máximo ${p.max} (nada foi feito)`);
       v = p.max !== undefined ? Math.min(n, p.max) : n;
     } else if (p.tipo === 'booleano') v = v === true || v === 'true' || v === 'sim';
     else if (p.tipo === 'lista') v = Array.isArray(v) ? v.map(String) : String(v).split(/[,;]/).map((x) => x.trim()).filter(Boolean);
@@ -226,14 +223,21 @@ const P_CURSOR: Param = { tipo: 'texto', descricao: 'continua de onde parou: use
 
 /** A ação pronta, no contrato comum das conexões. */
 export function acaoDe(d: AcaoDecl): Acao {
+  const escrita = typeof d.risco === 'function' || d.risco !== 'ler';
+  // na escrita, o parâmetro fora do lugar para antes do cartão de confirmação, e não depois do clique
+  const preparar: Acao['preparar'] = escrita
+    ? async (ctx, bruto) => { const p = d.preparar ? await d.preparar(ctx, bruto) : {}; normalizar(d.params, p.args ?? bruto, true); return p; }
+    : d.preparar;
   return {
-    id: d.id, descricao: d.descricao, ...(d.rotulo ? { rotulo: d.rotulo } : {}), risco: d.risco,
+    id: d.id, descricao: d.descricao, ...(d.rotulo ? { rotulo: d.rotulo } : {}), risco: d.risco, ...(d.sempreConfirma ? { sempreConfirma: d.sempreConfirma } : {}),
     params: d.proximo ? { ...d.params, cursor: P_CURSOR } : d.params,
     resumo: (a) => (typeof d.resumo === 'function' ? d.resumo(a) : String(molde(d.resumo, a) ?? d.id)),
-    ...(d.preparar ? { preparar: d.preparar } : {}),
+    ...(preparar ? { preparar } : {}),
     async run(ctx, bruto): Promise<Resultado> {
-      let a = normalizar(d.params, bruto);
+      let a = normalizar(d.params, bruto, escrita);
       if (d.antes) a = await d.antes(ctx, a);
+      const ja = d.jaFeito ? await d.jaFeito(ctx, a) : null;
+      if (ja) return ja;
       const caminho = d.caminho.replace(/\{(\w+)\}/g, (_m, k: string) => {
         if (vazio(a[k])) throw new ErroAcao(`falta "${k}"`);
         return seg(a[k]);
@@ -246,7 +250,10 @@ export function acaoDe(d: AcaoDecl): Acao {
       const qs = consulta.toString();
       const risco = typeof d.risco === 'function' ? d.risco(a) : d.risco;
       const corpo = typeof d.corpo === 'function' ? (d.corpo as (x: Args, c: Credenciais) => unknown)(a, ctx.creds ?? {}) : d.corpo !== undefined ? molde(d.corpo, a) : undefined;
-      const j = await ctx.http(`${caminho}${qs ? `?${qs}` : ''}`, { method: d.metodo, kind: risco === 'ler' && !d.semRepetir ? 'read' : 'write', ...(corpo !== undefined ? { body: corpo } : {}), ...(d.cabecalhos ? { headers: d.cabecalhos } : {}) });
+      let j: any;
+      try { j = await ctx.http(`${caminho}${qs ? `?${qs}` : ''}`, { method: d.metodo, kind: risco === 'ler' && !d.semRepetir ? 'read' : 'write', ...(corpo !== undefined ? { body: corpo } : {}), ...(d.cabecalhos ? { headers: d.cabecalhos } : {}) }); } catch (e) {
+        throw d.erro?.(e, a) ?? e;
+      }
       const le = risco === 'ler';
       const prox = d.proximo?.(j, a);
       let texto: string;

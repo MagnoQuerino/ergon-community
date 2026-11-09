@@ -50,7 +50,9 @@ const RX = {
   pending: /^\s*\/?pendencias\s*$|^\s*\/pendencias\b|\b(?:quais\s+(?:sao\s+)?(?:as\s+)?pendencias|o\s+que\s+(?:esta|ta)\s+pendente|lista(?:r)?\s+(?:as\s+)?pendencias)/i,
   ruleMarker: /\b(?:a\s+partir\s+de\s+agora|daqui\s+(?:pra|para)\s+frente|sempre\s+que|nunca\s+mais|regra\s*:)/i,
   taskRef: /#(\d{1,6})\b/,
-  rename: /\b(?:renomei[ea]|corrij[ea]|altere|mude|troque)\b.*?#(\d{1,6}).*?\bpara\s+["“]?(.{3,}?)["”]?\s*$/is,
+  // só verbo de nome: "renomeie / corrija o #12…", "mude / troque / altere o nome (ou o título) do card 12…". "mude o #12
+  // para a Hipátia" ou "mova o card 12 para Em andamento" não é o nome: fica com o agente da conversa (ou a coordenação)
+  rename: /\b(?:renomei[ae]|renomear|corrij[ae]|corrigir|(?:mud[ae]|mudar|troque|troca|trocar|alter[ae]|alterar)\s+(?:o\s+|a\s+)?(?:nome|titulo)\b).*?(?:#\s*|\b(?:card|cartao|tarefa)\s+(?:n[o.º°]?\s*)?#?)(\d{1,6})\b.*?\bpara\s+["“]?(.{3,}?)["”]?\s*$/is,
   done: /\b(?:conclui|concluido|concluida|finalizei|finalizado|finalizada|terminei|esta\s+feito|ta\s+feito|feito|pronto)\b/i,
   demand: /\b(?:preciso|precisamos|precisa|pode(?:ria)?s?|consegue|favor|por\s+favor|solicito|gostaria\s+que|providenci\w*|envi(?:e|ar)|agend(?:e|ar)|revis(?:e|ar)|prepar(?:e|ar)|fa(?:ca|zer)|lembr(?:e|ar)\s+de|nao\s+esquec\w+|organiz(?:e|ar)|ajud(?:e|ar))\b/i,
   idea: /\b(?:e\s+se|ideia|poderiamos|talvez|que\s+tal|brainstorm|imagin\w+)\b/i,

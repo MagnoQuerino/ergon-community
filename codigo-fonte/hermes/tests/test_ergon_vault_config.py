@@ -5,7 +5,9 @@ antiga (.ergon-config) fica sempre "1", o que o cofre das imagens até a rc.22 e
 ele não reaplica nada por cima das escolhas da pessoa); só as migrações que faltam rodam, em ordem, gravando a marca a cada uma; a migração 2
 leva as Conexões a um cofre de antes sem desfazer o que a pessoa ligou (Terminal, Executar código) e marca os conjuntos
 do plugin como conhecidos (o "desligar" vale e Teams/WhatsApp diretos não ganham as Conexões); known_plugin_toolsets é
-sempre unido, nunca trocado; a segunda abertura não chama nada; e nenhuma migração já publicada muda de conteúdo.
+sempre unido, nunca trocado; a migração 3 liga a compactação da conversa mais cedo (compression.threshold_tokens) só onde
+ninguém escolheu nada (um valor gravado, inclusive null, fica); a segunda abertura não chama nada; e nenhuma migração já
+publicada muda de conteúdo.
 Parte com um "config set" simulado (rápido) e parte com o Hermes de verdade ("hermes config set" como o usuário do motor).
 
   podman run --rm --network none --entrypoint /opt/hermes/.venv/bin/python \
@@ -60,6 +62,7 @@ REAL_AS_HERMES = v.as_hermes
 PUBLICADAS = {
     1: "36853fe35c03de6f9c6d9112316708f2baf9410270b78cb46dd9dece430ec735",  # até a rc.22 (CONFIG_VERSION "1")
     2: "fe37a7964c0e3d1ad2dd7122e5893325e727dd568cc590671078ce9e308649e9",  # rc.24: Conexões e conjuntos conhecidos
+    3: "edba80be061bbfe9864ec3b095bc8ee738df11e6fb7a409e8769d68e8ace69a3",  # rc.25: compactação da conversa (teto de 150 mil)
 }
 
 
@@ -87,6 +90,12 @@ PUBLICADA_ATE_RC22 = [
     ["config", "set", "unauthorized_dm_behavior", "ignore"],
 ]
 check("migração 1 = a configuração de antes (marca \"1\")", v.MIGRACOES[0][2] == {"passos": PUBLICADA_ATE_RC22}, str(v.MIGRACOES[0][2]))
+# rc.25: os passos por pedido são escolha da pessoa (ponte de controle, /ergon/v1/passos); a trava de toda abertura não os
+# regrava mais (antes: 20 a cada abertura, por cima da escolha). A busca de ferramentas continua desligada a cada abertura.
+check("travas de toda abertura: não regravam os passos por pedido", not any("agent.max_turns" in passo for passo in v.ENFORCED_STEPS), str(v.ENFORCED_STEPS))
+check("travas de toda abertura: busca de ferramentas desligada e aprovação do Treinar",
+      ["config", "set", "tools.tool_search.enabled", "off"] in v.ENFORCED_STEPS and ["config", "set", "skills.write_approval", "true"] in v.ENFORCED_STEPS,
+      str(v.ENFORCED_STEPS))
 
 # o mesmo conjunto de plugin no cofre e no plugin
 sys.path.insert(0, "/p")
@@ -96,6 +105,10 @@ import ergon_bridge as plugin  # noqa: E402
 # tem de vir pelo ambiente dele (a imagem não traz o PyYAML, e o cofre não tem outro leitor)
 r = subprocess.run([sys.executable, "-I", "-c", "import hermes_yaml; print(hermes_yaml.__file__)"], capture_output=True, text=True, timeout=60)
 check("o leitor de YAML do Hermes carrega como no ponto de entrada (python -I)", r.returncode == 0, (r.stderr or r.stdout)[-300:])
+
+LIMITE = int(dict(v.MIGRACOES[2][2]["se_ausente"])["compression.threshold_tokens"])
+check("migração 3: o limite da compactação é o mesmo do plugin (COMPACTAR_LIMITE)", LIMITE == getattr(plugin, "COMPACTAR_LIMITE", None) == 150000,
+      f"{LIMITE} × {getattr(plugin, 'COMPACTAR_LIMITE', None)}")
 
 check("conjuntos do plugin iguais no cofre e no plugin", tuple(v.ERGON_PLUGIN_TOOLSETS) == tuple(plugin._ERGON_PLUGIN_TOOLSETS),
       f"{v.ERGON_PLUGIN_TOOLSETS} × {plugin._ERGON_PLUGIN_TOOLSETS}")
@@ -231,7 +244,7 @@ reset({"platform_toolsets": {"api_server": DELE, "teams": ["todo"], "whatsapp": 
 calls.clear()
 check("cofre de antes: configura sem erro", v.configure() is True, str(logs))
 c = cfg_now()
-check("vai para a versão 2", json.loads(marca_now()) == {"versao": 2}, str(marca_now()))
+check("vai para a versão 3", json.loads(marca_now()) == {"versao": 3}, str(marca_now()))
 check("a marca antiga continua '1'", marca_antiga() == "1", str(marca_antiga()))
 check("volta para a imagem de antes: o cofre da rc.22 não reaplica nada (Terminal e Executar código ficam)", rc22_pularia())
 check("as 7 de antes mais ergon_conexoes", c["platform_toolsets"]["api_server"] == sorted(DELE + ["ergon_conexoes"]), str(c["platform_toolsets"]))
@@ -242,8 +255,10 @@ check("a migração 1 não roda de novo (nada de plugins enable, max_turns...)",
       not any(x[:2] == ["plugins", "enable"] or "agent.max_turns" in x for x in calls), str(calls))
 chaves = [x[2] for x in calls]
 check("a lista da plataforma é gravada antes da marca de conhecido",
-      chaves == ["platform_toolsets.api_server", "known_plugin_toolsets.api_server", "known_plugin_toolsets.teams", "known_plugin_toolsets.whatsapp"], str(chaves))
-check("o log diz o que foi aplicado", any("migração 2 aplicada" in m for m in logs), str(logs))
+      chaves == ["platform_toolsets.api_server", "known_plugin_toolsets.api_server", "known_plugin_toolsets.teams", "known_plugin_toolsets.whatsapp",
+                "compression.threshold_tokens"], str(chaves))
+check("migração 3: compactação mais cedo no cofre de antes", c.get("compression", {}).get("threshold_tokens") == 150000, str(c.get("compression")))
+check("o log diz o que foi aplicado", any("migração 2 aplicada" in m for m in logs) and any("migração 3 aplicada" in m for m in logs), str(logs))
 calls.clear()
 check("segunda abertura: nada a fazer", v.configure() is True)
 check("segunda abertura: nenhum passo chamado", calls == [], str(calls))
@@ -252,11 +267,13 @@ check("segunda abertura: nenhum passo chamado", calls == [], str(calls))
 reset()
 calls.clear()
 check("cofre novo: configura", v.configure() is True, str(logs))
-check("cofre novo: versão 2", json.loads(marca_now()) == {"versao": 2})
+check("cofre novo: versão 3", json.loads(marca_now()) == {"versao": 3})
 check("cofre novo: a marca antiga '1' (a imagem de antes não reaplica nada)", marca_antiga() == "1" and rc22_pularia(), str(marca_antiga()))
-check("cofre novo: a migração 1 inteira, depois só as marcas de conhecido",
-      calls[:7] == PUBLICADA_ATE_RC22 and [x[2] for x in calls[7:]] == ["known_plugin_toolsets.api_server", "known_plugin_toolsets.teams", "known_plugin_toolsets.whatsapp"],
+check("cofre novo: a migração 1 inteira, depois só as marcas de conhecido e a compactação",
+      calls[:7] == PUBLICADA_ATE_RC22 and [x[2] for x in calls[7:]] == ["known_plugin_toolsets.api_server", "known_plugin_toolsets.teams", "known_plugin_toolsets.whatsapp",
+                                                                       "compression.threshold_tokens"],
       str(calls))
+check("cofre novo: compactação com o limite de 150 mil", cfg_now()["compression"]["threshold_tokens"] == 150000, str(cfg_now().get("compression")))
 
 # progresso parcial: a 2 falha no meio; a marca fica na 1 e a próxima abertura recomeça da 2 (sem repetir a 1)
 reset()
@@ -267,8 +284,26 @@ check("falha no meio: a marca fica na 1", json.loads(marca_now()) == {"versao": 
 check("falha no meio: o log diz onde parou", any("parou na migração 2" in m for m in logs), str(logs))
 falhar.clear()
 calls.clear()
-check("próxima abertura: termina", v.configure() is True and json.loads(marca_now()) == {"versao": 2})
-check("próxima abertura: só o que faltou da 2", [x[2] for x in calls] == ["known_plugin_toolsets.teams", "known_plugin_toolsets.whatsapp"], str(calls))
+check("próxima abertura: termina", v.configure() is True and json.loads(marca_now()) == {"versao": 3})
+check("próxima abertura: só o que faltou da 2, e a 3", [x[2] for x in calls] == ["known_plugin_toolsets.teams", "known_plugin_toolsets.whatsapp", "compression.threshold_tokens"], str(calls))
+
+# migração 3: só onde ninguém escolheu. Um limite gravado (por alguém ou pela tela) e o null (o "desligado" da tela: só o
+# limite do próprio Hermes, perto do fim da janela) ficam; o resto da seção também
+for rotulo, comp, depois in (("limite de 80 mil gravado", {"threshold_tokens": 80000}, 80000),
+                             ("desligado (null)", {"threshold_tokens": None}, None),
+                             ("seção sem o limite", {"enabled": False, "threshold": 0.6}, 150000)):
+    reset({"platform_toolsets": {"api_server": DELE}, "compression": comp}, migracoes='{"versao": 2}')
+    calls.clear()
+    res = v.configure()
+    c3 = cfg_now().get("compression") or {}
+    check(f"migração 3, {rotulo}: o limite fica {depois}", res is True and "threshold_tokens" in c3 and c3["threshold_tokens"] == depois
+          and json.loads(marca_now()) == {"versao": 3}, str((res, c3, calls)))
+    check(f"migração 3, {rotulo}: o resto da seção não muda", {k: c3.get(k) for k in comp if k != "threshold_tokens"} == {k: x for k, x in comp.items() if k != "threshold_tokens"}, str(c3))
+    check(f"migração 3, {rotulo}: só ela roda", [x[2] for x in calls] == ([] if "threshold_tokens" in comp else ["compression.threshold_tokens"]), str(calls))
+reset({}, migracoes='{"versao": 2}')
+falhar.add("compression.threshold_tokens")
+check("migração 3 falhou: a marca fica na 2 e tenta de novo depois", v.configure() is False and json.loads(marca_now()) == {"versao": 2}, str(marca_now()))
+falhar.clear()
 
 # a falha da lista da plataforma para tudo: a marca de conhecido sozinha desligaria as Conexões
 reset({"platform_toolsets": {"api_server": DELE}}, marca="1")
@@ -305,10 +340,10 @@ for rotulo, migr in (("vazia", b""), ("JSON cortado", b'{"vers'), ("versão em t
     except Exception as exc:  # noqa: BLE001
         lida, res = f"{type(exc).__name__}: {exc}", None
     check(f"marca das migrações {rotulo} e a antiga '1': vale 1", lida == 1, str(lida))
-    check(f"marca das migrações {rotulo}: só a migração 2 (Terminal e Executar código ficam)",
+    check(f"marca das migrações {rotulo}: só as migrações 2 e 3 (Terminal e Executar código ficam)",
           res is True and not any(x[:2] == ["plugins", "enable"] or "agent.max_turns" in x for x in calls)
           and cfg_now()["platform_toolsets"]["api_server"] == sorted(DELE + ["ergon_conexoes"])
-          and marca_json() == {"versao": 2},
+          and marca_json() == {"versao": 3},
           str((res, calls, cfg_now(), marca_now())))
 # só a marca antiga, com bytes estranhos: o configure não cai (aplica desde a primeira, como sem marca)
 reset({}, marca="1")
@@ -320,7 +355,7 @@ try:
     res = v.configure()
 except Exception as exc:  # noqa: BLE001
     res = f"{type(exc).__name__}: {exc}"
-check("marca antiga com bytes estranhos: configura sem cair", res is True and marca_json() == {"versao": 2}, str(res))
+check("marca antiga com bytes estranhos: configura sem cair", res is True and marca_json() == {"versao": 3}, str(res))
 
 # a marca é gravada até o disco (fsync) antes de trocar o nome
 reset({}, marca="1")
@@ -353,7 +388,7 @@ check("gravar a marca falhou: configure avisa sem cair", res is False, str(res))
 check("gravar a marca falhou: nada de temporário largado", not any(n.endswith(".tmp") for n in os.listdir(HOME)), str(os.listdir(HOME)))
 check("gravar a marca falhou: o log diz que tenta de novo", any("próxima abertura" in m for m in logs), str(logs))
 calls.clear()
-check("depois do disco cheio: a próxima abertura termina", v.configure() is True and marca_json() == {"versao": 2}, str(marca_now()))
+check("depois do disco cheio: a próxima abertura termina", v.configure() is True and marca_json() == {"versao": 3}, str(marca_now()))
 
 # a abertura do cofre não cai por causa da configuração: só um erro de montagem impede o motor de abrir
 cofre_teste = HOME + "-lado-cifrado"
@@ -430,10 +465,63 @@ def ferramentas(plataforma):
 
 preparar()
 check("Hermes de verdade, cofre novo: configura", v.configure() is True, str(logs))
-check("Hermes de verdade, cofre novo: versão 2", json.loads(marca_now()) == {"versao": 2}, str(marca_now()))
+check("Hermes de verdade, cofre novo: versão 3", json.loads(marca_now()) == {"versao": 3}, str(marca_now()))
+check("Hermes de verdade: o limite da compactação gravado como número", cfg_now().get("compression", {}).get("threshold_tokens") == 150000, str(cfg_now().get("compression")))
+
+
+def compactacao_no_motor():
+    """O que o motor usa ao criar um agente (agent/agent_init.py, _parse_compression_config) e onde a conversa é resumida
+    numa janela de 128 mil e numa de 200 mil, lido num processo novo como o usuário do motor."""
+    codigo = ("import sys, json, types; sys.path.insert(0, '/opt/hermes'); from hermes_cli.config import load_config; "
+              "from agent.agent_init import _parse_compression_config; from agent.context_compressor import ContextCompressor; "
+              "cs = _parse_compression_config(types.SimpleNamespace(model='modelo-falso', provider='custom', api_mode='chat_completions'), load_config()); "
+              "cc = ContextCompressor('modelo-falso', threshold_percent=cs.threshold, threshold_tokens_cap=cs.threshold_tokens, quiet_mode=True); "
+              "print(json.dumps([cs.enabled, cs.threshold_tokens, cc.preview_threshold_tokens('modelo-falso', 128000), cc.preview_threshold_tokens('modelo-falso', 200000)]))")
+    r = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, timeout=120,
+                       user=v.HERMES_UID, group=v.HERMES_UID, extra_groups=[], env={**os.environ, "HOME": HOME})
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:  # noqa: BLE001
+        print(f"      falhou ao ler a compactação: {r.stderr[-500:]}")
+        return None
+
+
+comp = compactacao_no_motor()
+# 150 mil é o teto: numa janela de 128 mil vale a fração do próprio Hermes (0,75 × 128 mil = 96 mil); numa de 200 mil, 150 mil
+check("Hermes de verdade: a conversa é resumida a partir de 150 mil (96 mil numa janela de 128 mil)",
+      comp == [True, 150000, 96000, 150000], str(comp))
+
+
+def documento_grande_no_motor():
+    """Pedido com documento grande (a mensagem do pedido, que fica inteira no trecho recente, já passa do limite): o
+    provedor informa, depois de cada resumo, um total ainda acima do limite. O Hermes tenta duas vezes e para (trava contra
+    repetição) — não resume de novo a cada chamada do pedido. Lido num processo novo como o usuário do motor."""
+    codigo = ("import sys, json, types; sys.path.insert(0, '/opt/hermes'); from hermes_cli.config import load_config; "
+              "from agent.agent_init import _parse_compression_config; from agent.context_compressor import ContextCompressor; "
+              "cs = _parse_compression_config(types.SimpleNamespace(model='modelo-falso', provider='custom', api_mode='chat_completions'), load_config()); "
+              "cc = ContextCompressor('modelo-falso', threshold_percent=cs.threshold, threshold_tokens_cap=cs.threshold_tokens, quiet_mode=True); "
+              "cc.context_length = 200000; out = [cc.threshold_tokens, cc.should_compress(162000)]; "
+              "cc.record_completed_compaction(); cc.update_from_response({'prompt_tokens': 158000, 'completion_tokens': 10}); out.append(cc.should_compress(158000)); "
+              "cc.record_completed_compaction(); cc.update_from_response({'prompt_tokens': 157000, 'completion_tokens': 10}); out.append(cc.should_compress(157000)); "
+              "out.append(cc.should_compress_info(157000)[1]); print(json.dumps(out))")
+    r = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, timeout=120,
+                       user=v.HERMES_UID, group=v.HERMES_UID, extra_groups=[], env={**os.environ, "HOME": HOME})
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:  # noqa: BLE001
+        print(f"      falhou ao simular o documento grande: {r.stderr[-500:]}")
+        return None
+
+
+doc = documento_grande_no_motor()
+check("Hermes de verdade: documento grande no pedido — resume, tenta mais uma vez e para (no máximo duas chamadas a mais)",
+      doc == [150000, True, True, False, "ineffective"], str(doc))
 check("Hermes de verdade: as travas de sempre também", v.enforce_safety() is True)
 api, teams, wa = ferramentas("api_server"), ferramentas("teams"), ferramentas("whatsapp")
 check("API: as Conexões ligadas", "ergon_conexoes" in api, str(api))
+# o resumo manda buscar o resto com session_search, mas ela leria as conversas de todos os workspaces do motor: fica fora
+# (as instruções do Ergon dizem para consultar de novo pela ferramenta de origem: RESUMO_HOW em server/src/services/runs.ts)
+check("API: sem a busca nas conversas (session_search)", "session_search" not in api, str(api))
 check("Teams direto: sem as Conexões", "ergon_conexoes" not in teams and "todo" in teams, str(teams))
 check("WhatsApp direto: sem as Conexões", "ergon_conexoes" not in wa and "todo" in wa, str(wa))
 
@@ -450,6 +538,7 @@ check("Hermes de verdade: known unido", c["known_plugin_toolsets"]["api_server"]
 api = ferramentas("api_server")
 check("Hermes de verdade: Conexões, Terminal e Executar código ligados na API", {"ergon_conexoes", "terminal", "code_execution"} <= api, str(api))
 check("Hermes de verdade: Teams sem as Conexões", "ergon_conexoes" not in ferramentas("teams"))
+check("Hermes de verdade, cofre de antes: compactação mais cedo", c.get("compression", {}).get("threshold_tokens") == 150000, str(c.get("compression")))
 real_calls.clear()
 check("Hermes de verdade, segunda abertura: nenhum passo chamado", v.configure() is True and real_calls == [], str(real_calls))
 

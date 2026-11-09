@@ -48,6 +48,24 @@ export function acoesDe(kind: IntegrationKind, wa: WaAcoes = WA_MUDO): Acao[] {
 /** O que a pessoa ajustou numa conexão: por tipo de ação e por ação. O que não está aqui segue a regra (ausente = ligado). */
 export interface Permissoes { tipos: Partial<Record<Risco, Ajuste>>; acoes: Record<string, Ajuste> }
 export const RISCOS: Risco[] = ['ler', 'organizar', 'enviar', 'apagar'];
+/** Os tipos que escrevem: o atalho "Só leitura" desliga os três. */
+export const ESCRITA: Risco[] = ['organizar', 'enviar', 'apagar'];
+/** A ação escreve (ou pode escrever, conforme os parâmetros: o risco que depende deles nunca conta como só leitura). */
+export const escreve = (a: Pick<Acao, 'risco'>): boolean => typeof a.risco === 'function' || a.risco !== 'ler';
+/**
+ * A conexão está em "Só leitura": nenhuma ação que escreve fica ligada, pelo ajuste dela ou, sem ele, pelo do tipo dela. Só
+ * contam os tipos que a conexão tem: sem ação de apagar (Asaas, Omie), o tipo apagar não precisa estar desligado. A ação cujo
+ * risco muda com os parâmetros (criar negociação com responsável vira envio) só conta como desligada pelo ajuste dela ou com
+ * os três tipos que escrevem desligados.
+ */
+export function soLeituraDe(p: Permissoes, acoes: Array<Pick<Acao, 'id' | 'risco'>>): boolean {
+  return acoes.filter(escreve).every((a) => {
+    const proprio = p.acoes[a.id];
+    // a exceção da ação vale acima do tipo ("seguir a regra" e "confirmar" deixam a ação ligada)
+    if (proprio !== undefined) return proprio === 'desligado';
+    return typeof a.risco === 'function' ? ESCRITA.every((r) => p.tipos[r] === 'desligado') : p.tipos[a.risco] === 'desligado';
+  });
+}
 export function permissoesDe(settings: Record<string, unknown>): Permissoes {
   const p = settings.permissoes as Partial<Permissoes> | undefined;
   return { tipos: { ...(p?.tipos ?? {}) }, acoes: { ...(p?.acoes ?? {}) } };
@@ -71,7 +89,7 @@ export function escritorPara(kind: IntegrationKind, c: Record<string, string>, h
     case 'linear': return escritorLinear(c.token);
     case 'airtable': return escritorAirtable(c.token);
     case 'smartsheet': return escritorSmartsheet(c.token);
-    case 'pipefy': return escritorPipefy(c.token);
+    case 'pipefy': return escritorPipefy(c);
     case 'github': return escritorGitHub(c.token);
     default: return null;
   }

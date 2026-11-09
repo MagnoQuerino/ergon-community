@@ -49,6 +49,7 @@ test('as frases das funções e rotas que vão para a tela não têm jargão nem
   const arquivos = [
     'services/motors.ts', 'services/health.ts', 'routes/integracoes.ts', 'services/results.ts', 'services/characters.ts',
     'services/trainings.ts', 'services/ai.ts', 'services/sso.ts', 'world/index.ts', 'lib/texto-tela.ts',
+    'services/teams-app/servico.ts', 'services/teams-app/rotas.ts', 'services/teams-app/cartoes.ts',
   ];
   const achados: string[] = [];
   for (const rel of arquivos) for (const f of frases(rel)) if (jargao(f.texto) || PROIBIDAS.test(f.texto)) achados.push(`${f.onde}: ${f.texto.slice(0, 120)}`);

@@ -14,9 +14,10 @@ import { OPS_EVENTS, OPS_URL, cloudOn, summaryOf, type AmbientOps, type Distribu
 import { openDecisions } from '../lib/open.ts';
 import type { SceneApi, SceneFocus, SceneObject, SceneOps, SceneTag, StructureIn } from '../scene/types.ts';
 import { savePrefs, usePrefs } from '../lib/prefs.ts';
-import { MusicButton } from '../components/MusicButton.tsx';
+import { CityBar } from '../components/CityBar.tsx';
+import { indicadores, type Indicador } from '../lib/barra.ts';
 import { THEMES } from '../iso/theme.ts';
-import { THEME_LABEL, THEME_NEXT, setThemeMode, useTheme } from '../lib/theme.ts';
+import { useTheme } from '../lib/theme.ts';
 import { typeOf } from '../../../shared/city.ts';
 
 // palco e loja carregados à parte, para não pesar o primeiro acesso; o palco já começa a vir junto com os dados da
@@ -41,6 +42,7 @@ const FOUNDER_BIO = {
 const CHAT_W = 380;
 const NO_STRUCTURES: Structure[] = [];
 const NO_TAGS: SceneTag[] = [];
+const NO_TRACK: Indicador[] = [];
 /** o que muda as etiquetas: execuções, tarefas e treinos (agents.changed) — o mesmo SSE de sempre */
 const ACTIVITY_EVENTS = ['runs.changed', 'tasks.changed', 'agents.changed'];
 
@@ -71,7 +73,7 @@ function agentOfTeam(a: TeamAgent): Agent {
 export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, active = true }: {
   state: AppState; onNavigate: (v: View) => void; selectedId: string | null; onSelect: (id: string | null) => void; reload: () => void; active?: boolean;
 }) {
-  const { mode: themeMode, theme: themeId } = useTheme();
+  const { theme: themeId } = useTheme();
   const [editing, setEditing] = useState(false);
   const [lost, setLost] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -206,41 +208,14 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
           </div>
         )}
 
-        <div className="stage__tools stage__tools--left">
-          <StructurePicker structures={structs} value={card} onPick={pick} onAgent={locate} />
-          {ops && !editing && (
-            <div className="ops-sum" role="group" aria-label="Trabalho da equipe">
-              <button className={`ops-sum__part ${central === 'trabalho' ? 'is-on' : ''}`} onClick={() => (central === 'trabalho' ? setCentral(null) : openCentral('trabalho'))} aria-pressed={central === 'trabalho'}
-                title="Central de Trabalho: o que está em andamento, o que espera e por quê">
-                <Icon name="layers" size={14} /> {ops.local.busy} em andamento{ops.local.limit !== null ? ` de ${ops.local.limit}` : ''}
-              </button>
-              {ops.decisions.total > 0 && (
-                <button className="ops-sum__part ops-sum__part--att" onClick={openDecisions} title="Aguardando você: responder, aprovar ou devolver">
-                  <Icon name="bell" size={14} /> {ops.decisions.total} precisa{ops.decisions.total === 1 ? '' : 'm'} de você
-                </button>
-              )}
-              {ops.deliveries.total > 0 && (
-                <button className={`ops-sum__part ${central === 'entregas' ? 'is-on' : ''}`} onClick={() => (central === 'entregas' ? setCentral(null) : openCentral('entregas'))} aria-pressed={central === 'entregas'} title="Entregas recentes">
-                  <Icon name="check" size={14} /> {ops.deliveries.total} entrega{ops.deliveries.total === 1 ? '' : 's'}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="stage__tools stage__tools--right">
-          <button className={`tool ${editing ? 'tool--on' : ''}`} onClick={() => { setEditing((v) => !v); setCard(null); }} aria-pressed={editing} title="Editor do mapa: arraste prédios e áreas para outros lotes">
-            <Icon name="edit" size={16} /> <span>Editar mapa</span>
-          </button>
-          <MusicButton />
-          <button className={`tool ${calm ? 'tool--on' : ''}`} onClick={() => savePrefs({ cityCalm: !calm })} aria-pressed={calm}
-            title={calm ? 'Modo calmo: sem passeios nem lazer; o trabalho real, as etiquetas e as decisões continuam. Clique para a cidade viva.' : 'Cidade viva: passeios e lazer. Clique para o modo calmo (menos movimento, o trabalho continua à vista).'}>
-            <Icon name="focus" size={16} /> <span>{calm ? 'Modo calmo' : 'Cidade viva'}</span>
-          </button>
-          <button className="tool tool--icon" onClick={() => setThemeMode(THEME_NEXT[themeMode])}
-            title={THEME_LABEL[themeMode]} aria-label={THEME_LABEL[themeMode]}>
-            <Icon name={themeMode === 'auto' ? 'auto' : themeMode === 'dia' ? 'sun' : 'moon'} size={17} />
-          </button>
-        </div>
+        <CityBar
+          picker={<StructurePicker structures={structs} value={card} onPick={pick} onAgent={locate} />}
+          pickKey={structs.find((x) => x.id === card)?.name ?? 'Cidade'}
+          track={ops && !editing ? indicadores({ busy: ops.local.busy, limit: ops.local.limit, decisoes: ops.decisions.total, entregas: ops.deliveries.total }) : NO_TRACK}
+          isOn={(k) => (k === 'trabalho' || k === 'entregas') && central === k}
+          onTrack={(k) => { if (k === 'voce') openDecisions(); else if (central === k) setCentral(null); else openCentral(k); }}
+          editing={editing} onEdit={() => { setEditing((v) => !v); setCard(null); }}
+          calm={calm} onCalm={() => savePrefs({ cityCalm: !calm })} />
         {editing && (
           <div className="editbar" role="status">
             <Icon name="map" size={16} /> Arraste um prédio ou área para outro lote livre (verde: cabe; vermelho: não cabe). Ruas, árvores e braseiros se refazem sozinhos. <kbd>Esc</kbd> cancela.
@@ -294,8 +269,8 @@ function StructurePicker({ structures, value, onPick, onAgent }: { structures: S
   const cur = structures.find((s) => s.id === value);
   return (
     <div className="picker" ref={ref}>
-      <button className="picker__btn" onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open}>
-        <Icon name="map" size={15} /> {cur ? cur.name : 'Cidade'} <Icon name="chevron" size={14} />
+      <button className={`cb-pill picker__btn ${open ? 'is-open' : ''}`} onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open} aria-label={`Localizar: ${cur ? cur.name : 'Cidade'}`} title="Localizar um agente ou uma construção">
+        <Icon name="map" size={16} /><span className="cb-pill__txt picker__name">{cur ? cur.name : 'Cidade'}</span><Icon name="chevron" size={16} />
       </button>
       {open && <Finder structures={structures} value={value} onPick={(id) => { onPick(id); setOpen(false); }} onAgent={(a) => { onAgent(a); setOpen(false); }} />}
     </div>

@@ -14,11 +14,13 @@
 import type { Db } from '../db/db.ts';
 import { clip, fold, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
+import { cardTitle, type TitleSource } from './card-title.ts';
 import { cardLeu } from './conexoes/marca.ts';
 import { attrs } from './routine-proposals.ts';
 import { instructionsFor, type RunExecutor, type RunRow } from './runs.ts';
 import type { ResultRow } from './results.ts';
 import { activeTeam, coordinatorOf, findMember, routeTo } from './team.ts';
+import { avisoSemCartao, separarLinhaParaVoce } from './resumo-tarefa.ts';
 
 export interface PlanStep { agent: string; task: string }
 /**
@@ -41,7 +43,10 @@ export const DELIVERY_KEY_SQL = (t = 't') => `'${DELIVERY_KEY}' || ${t}.origin_r
 /** card pronto para entregar: concluído, ou entregue a você e esperando a sua aprovação */
 export const READY_SQL = (t = 't') => `(${t}.completed = 1 OR (${t}.work_state = 'aguardando_aprovacao' AND ${t}.delivered_at IS NOT NULL))`;
 
-/** Texto sem as linhas de controle ([[...]]). */
+/**
+ * Texto sem as linhas de controle ([[...]]). A linha para a pessoa ("Para você decidir: …") fica: na conversa não há a
+ * faixa do card, e quem entrega ali precisa saber o que se aprova (o pedido de aprovação a põe em destaque, relay).
+ */
 const plain = (s: string | null | undefined): string => (s ?? '').replace(/\[\[(?:[^\]]|\](?!\]))*\]\]\s*/g, '').trim();
 
 /**
@@ -148,7 +153,8 @@ export function requestsContext(db: Db, workspaceId: string, max = 8): string {
   // cartao: espera o clique da pessoa numa ação de conta (Conexões); não foi entregue, e a saída é só o aviso de que pediu
   const rows = db.all<{ id: string; number: number; title: string; purpose: string | null; completed: number; work_state: string | null; agent: string | null; asked: string | null; cartao: number }>(
     `SELECT t.id, t.number, t.title, t.purpose, t.completed, t.work_state, a.name AS agent, ca.name AS asked,
-            EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente') AS cartao
+            (EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente')
+              OR EXISTS (SELECT 1 FROM agent_proposals ap JOIN runs ar ON ar.id = ap.run_id WHERE ar.task_id = t.id AND ap.kind = 'depois_de_ler' AND ap.status = 'proposed')) AS cartao
        FROM tasks t LEFT JOIN agents a ON a.id = t.agent_id LEFT JOIN conversations c ON c.id = t.conversation_id LEFT JOIN agents ca ON ca.id = c.agent_id
       WHERE t.workspace_id = ? AND t.conversation_id IS NOT NULL AND t.archived = 0 AND (t.completed = 0 OR t.updated_at > ?)
       ORDER BY t.completed, t.updated_at DESC LIMIT ?`, workspaceId, since, max);
@@ -169,8 +175,10 @@ export function requestsContext(db: Db, workspaceId: string, max = 8): string {
     const result = r.completed || (r.work_state === 'aguardando_aprovacao' && !Number(r.cartao)) ? cardOutput(db, r.id, 500) : '';
     return `- Card #${r.number} “${clip(r.title, 90)}”${r.asked ? ` (pedido a ${r.asked}${r.purpose ? `: “${clip(r.purpose, 160)}”` : ''})` : ''}: ${where}${result ? `. Resultado: ${result.replace(/\s+/g, ' ')}` : ''}`;
   });
-  return `Pedidos do usuário à equipe, de todas as conversas (use para responder "como está o que pedi a fulano?"; se já estiver pronto, entregue o resultado):\n${lines.join('\n')}`;
+  return `Pedidos do usuário à equipe, de todas as conversas:\n${lines.join('\n')}`;
 }
+/** Como usar a lista acima: fica entre as instruções (a lista, dado de agora, vai na situação do workspace). */
+export const REQUESTS_HOW = 'Os pedidos do usuário à equipe, de todas as conversas, quando houver, estão na situação do workspace, abaixo: use para responder "como está o que pedi a fulano?"; se já estiver pronto, entregue o resultado.';
 
 /** Card esperando o usuário: o que o cartão da conversa pede (informação, aprovação, decisão ou nova tentativa). */
 export type Need = 'info' | 'approval' | 'review' | 'retry';
@@ -220,9 +228,9 @@ export class Purpose {
    * O plano do coordenador vira um card com as etapas em ordem; a primeira já fica em andamento (quem chama põe para
    * trabalhar). Agente que não existe: a etapa vai a quem as palavras dela apontam, ou à coordenação.
    */
-  createPlan(r: RunRow, plan: Plan, create: (input: { title: string; description: string; agentId: string; purpose: string }) => { id: string; number: number },
+  createPlan(r: RunRow, plan: Plan, create: (input: { title: string; description: string; agentId: string; purpose: string; titleSource: TitleSource }) => { id: string; number: number },
     opts: { group?: string; quiet?: boolean } = {}):
-    { taskId: string; number: number; steps: Array<{ name: string; task: string }> } | null {
+    { taskId: string; number: number; title: string; steps: Array<{ name: string; task: string }> } | null {
     const ws = r.workspace_id;
     const team = activeTeam(this.db, ws);
     const coord = coordinatorOf(team);
@@ -240,7 +248,11 @@ export class Purpose {
       purpose ? `Pedido na conversa com ${deliverer}: “${clip(purpose, 600)}”` : `Pedido na conversa com ${deliverer}.`, '',
       'Plano:', ...steps.map((s, i) => `${i + 1}. ${s.member.name} — ${s.task}`), `${steps.length + 1}. ${deliverer} — entregar na conversa`,
     ].join('\n');
-    const t = create({ title: plan.objective, description, agentId: steps[0].member.id, purpose });
+    // o título: o objetivo do plano; vago ("?", "ok") ou sem plano (pedido de ajuda), o que foi pedido ao colega (antes
+    // da mensagem da pessoa, que pode ser "me ajuda") ou o provisório da conversa, que a
+    // coordenação troca ao entender melhor — nunca a mensagem crua que não diz nada (card-title.ts)
+    const named = cardTitle({ plan: plan.objective, candidates: [steps[0].task, purpose], agentName: deliverer });
+    const t = create({ title: named.title, description, agentId: steps[0].member.id, purpose, titleSource: named.source });
     this.attach(ws, t.id, r, opts.group);
     this.db.run('UPDATE tasks SET review = ? WHERE id = ?', plan.review ?? 'leve', t.id);
     const ts = now();
@@ -253,7 +265,7 @@ export class Purpose {
       evidence: { conversationId: r.conversation_id, runId: r.id, steps: steps.map((s) => `${s.member.name}: ${clip(s.task, 160)}`) },
       result: `${deliverer} planejou ${steps.length} etapa(s): ${steps.map((s) => s.member.name).join(' → ')} → entrega na conversa` });
     if (!opts.quiet) this.note(ws, r.conversation_id, `Sistema — card #${t.number} com o plano em ${steps.length} etapa(s):\n${steps.map((s, i) => `${i + 1}. ${s.member.name}: ${clip(s.task, 140)}`).join('\n')}\nQuando terminar, ${deliverer} entrega aqui.`);
-    return { taskId: t.id, number: Number(t.number), steps: steps.map((s) => ({ name: s.member.name, task: s.task })) };
+    return { taskId: t.id, number: Number(t.number), title: named.title, steps: steps.map((s) => ({ name: s.member.name, task: s.task })) };
   }
 
 /**
@@ -329,7 +341,7 @@ export class Purpose {
     const who = this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', workerId)?.name ?? 'O colega';
     const me = workerId === link.speaker;
     const card = `card #${t.number} (“${clip(t.title, 80)}”)`;
-    const excerpt = clip(plain(output), 1200) || null;
+    let excerpt = clip(plain(output), 1200) || null;
     let need: Need; let text: string; let question: string | null = null;
     if (res.state === 'aguardando_info') {
       need = 'info';
@@ -354,6 +366,14 @@ export class Purpose {
       text = res.state === 'sem_confirmacao'
         ? `O ${card} está preparado, mas é algo a fazer fora do Ergon: confirme aqui quando estiver feito.`
         : `O ${card} está pronto e precisa da sua aprovação.`;
+      // o que se aprova, na linha que o agente escreveu ("Para você decidir: …"), em destaque no pedido; o trecho segue
+      // sem ela (não aparece duas vezes). Fala em enviar ou pagar sem cartão: o aviso de que aprovar só conclui o card
+      const { corpo, linha } = separarLinhaParaVoce(plain(output));
+      if (linha) {
+        const aviso = res.state === 'sem_confirmacao' ? null : avisoSemCartao(linha);
+        text += ` ${linha.tipo === 'decidir' ? 'Para você decidir' : 'Feito'}: ${linha.texto}${aviso ? ` (${aviso})` : ''}`;
+        excerpt = clip(corpo, 1200) || null;
+      }
     } else if (res.state === 'reprovado') {
       need = 'review';
       text = `${me ? 'A minha resposta' : `A resposta de ${who}`} para o ${card} não passou na conferência: ${clip(res.justification, 300)} Você pode aprovar assim mesmo ou devolver com uma instrução.`;
@@ -428,7 +448,7 @@ export class Purpose {
       try {
         const run = this.executor.enqueue({
           workspaceId, agentId: deliverer.id, conversationId, kind: 'chat', input: clip(input, 400_000), maxInput: 400_000,
-          instructions: instructionsFor(this.db, workspaceId, deliverer.id, 'Canal: conversa no Ergon. Entrega de um pedido da pessoa: responda com a entrega pronta, em texto, com uma frase sua antes, no seu jeito (o documento em si sai profissional).', { requests: true, userId: this.db.get<{ u: string }>('SELECT owner_user_id AS u FROM conversations WHERE id = ?', conversationId)?.u ?? null }),
+          instructions: instructionsFor(this.db, workspaceId, deliverer.id, 'Canal: conversa no Ergon. Entrega de um pedido da pessoa: responda com a entrega pronta, em texto, com uma frase sua antes, no seu jeito (o documento em si sai profissional).', { requests: true, userId: this.db.get<{ u: string }>('SELECT owner_user_id AS u FROM conversations WHERE id = ?', conversationId)?.u ?? null, foco: { conversationId } }),
           idempotencyKey: deliveryKey(g.origin_run_id, round),
         });
         for (const c of cards) {

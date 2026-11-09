@@ -17,7 +17,7 @@ import type { Vault } from '../security/keys.ts';
 import { scrub } from '../lib/log.ts';
 import { BUILD, VERSION } from '../version.ts';
 import type { HermesClient } from './hermes.ts';
-import type { EspacoMotores, MotorSaude } from './motors.ts';
+import type { EspacoMotores, MotorSaude, PorqueDadosAntigos } from './motors.ts';
 import { machineDefault } from './concurrency.ts';
 import { BACKUPS_MANTER } from './backup.ts';
 import { decimal, paraTela } from '../lib/texto-tela.ts';
@@ -31,6 +31,15 @@ const ORDER: Saude[] = ['operacional', 'limitado', 'atencao', 'indisponivel'];
 const worst = (a: Saude, b: Saude) => (ORDER.indexOf(a) >= ORDER.indexOf(b) ? a : b);
 
 export interface Componente { id: string; nome: string; estado: Saude; detalhe: string }
+/** O aviso da cópia antiga (sem jargão): por que ela não saiu sozinha, e que quem decide é a pessoa. */
+export function textoDadosAntigos(porque: PorqueDadosAntigos, mantida = false): string {
+  const pq = porque === 'sem-copia' ? 'o cofre cifrado da equipe foi criado sem ela, então o que estiver nela só existe ali'
+    : porque === 'sem-cofre' ? 'ela nunca foi para um cofre cifrado da equipe, então o que estiver nela só existe ali'
+      : 'o cofre cifrado da equipe não confirmou que recebeu esta cópia';
+  return mantida ? `guardada sem cifra neste computador, de antes do cofre; ${pq}. Você decidiu manter; dá para apagar quando quiser, sem volta`
+    : `guardada sem cifra neste computador, de antes do cofre; ${pq}. Por isso ela não é apagada sozinha: você decide se mantém ou apaga`;
+}
+
 /** espaco: um motor por pessoa (gerente de motores): o que a limpeza liberou e os cofres de contas que já não existem */
 export interface PainelSaude { estado: Saude; rotulo: string; resumo: string; componentes: Componente[]; geradoEm: string; espaco?: EspacoMotores | null }
 
@@ -81,12 +90,13 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
 
   // motor de IA (na tela, "Equipe de IA": o id fica "motor", é dado)
   if (d.executorMode() === 'simulated' || !d.hermes) {
-    c.push({ id: 'motor', nome: EQUIPE, estado: 'limitado', detalhe: 'modo de simulação: os agentes não usam IA (as conferências e rotinas sem IA funcionam)' });
+    c.push({ id: 'motor', nome: EQUIPE, estado: 'limitado', detalhe: 'esta instalação está configurada para não usar contas de IA: os agentes não trabalham nos pedidos (as conferências e rotinas sem IA funcionam)' });
   } else {
     const ms = d.motor?.() ?? null;
     if (ms?.estado === 'renovando') {
-      // versão nova do motor a caminho: o que já estava no motor termina, os pedidos novos esperam (sem contar tempo)
-      c.push({ id: 'motor', nome: EQUIPE, estado: 'limitado', detalhe: `Atualizando a equipe para a versão ${ms.versao}: os pedidos novos esperam e seguem sozinhos quando terminar` });
+      // versão nova do motor a caminho: o que já estava no motor termina, os pedidos novos esperam (sem contar o tempo
+      // do pedido, mas com o prazo da troca: passou dele, o pedido desiste, ou a troca fica para depois)
+      c.push({ id: 'motor', nome: EQUIPE, estado: 'limitado', detalhe: `Atualizando a equipe para a versão ${ms.versao}: os pedidos novos esperam (até ${cfg.motorWaitMinutes} minutos) e seguem sozinhos quando terminar` });
     } else {
       const h = await d.hermes.health().catch((e: Error) => ({ ok: false, detail: e.message }));
       const mv = d.motorVault();
@@ -103,8 +113,9 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
       if (h.ok && (ms?.semConexoes || d.semConexoes?.())) { estado = 'limitado'; detalhe += ' · as Conexões não estão nesta versão da equipe: os agentes ainda não conseguem usar as contas conectadas'; }
       // depois de voltar atrás, nada tenta de novo nesta versão (o gerente trava a versão recusada): "até a próxima versão"
       if (ms?.falha) { estado = worst(estado, 'atencao'); detalhe += ` · a atualização da equipe para a versão ${ms.versao} não deu certo (${paraTela(scrub(ms.falha, 120), 'a versão nova não passou na conferência')}); a equipe segue na versão anterior até a próxima versão do Ergon`; }
-      // a versão nova ainda não chegou (ou o motor não parou): o de antes funciona, e o sistema tenta de novo sozinho
-      else if (ms?.adiada) { estado = worst(estado, 'limitado'); detalhe += ` · atualização da equipe para a versão ${ms.versao} pendente: ${paraTela(scrub(ms.adiada, 160), 'a versão nova ainda não pôde entrar')}; a equipe segue na versão anterior, e o sistema tenta de novo sozinho`; }
+      // a versão nova ainda não chegou (ou o motor não parou): o de antes funciona, e o sistema tenta de novo sozinho na
+      // próxima vez que o Ergon for aberto (com ele sempre aberto, uma vez por dia)
+      else if (ms?.adiada) { estado = worst(estado, 'limitado'); detalhe += ` · atualização da equipe para a versão ${ms.versao} pendente: ${paraTela(scrub(ms.adiada, 160), 'a versão nova ainda não pôde entrar')}; a equipe segue na versão anterior, e o sistema tenta de novo sozinho quando o Ergon for aberto (ou uma vez por dia, se ele ficar sempre aberto)`; }
       c.push({ id: 'motor', nome: EQUIPE, estado, detalhe });
     }
   }
@@ -159,6 +170,13 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
     const quem = [...new Set(espaco.volumes.map((v) => v.conta))].slice(0, 3).join('; ');
     c.push({ id: 'cofres', nome: 'Cofres de contas removidas', estado: 'limitado',
       detalhe: `${plural(espaco.volumes.length, 'cofre guardado', 'cofres guardados')} (${quem}): ocupam espaço neste computador; dá para apagar, sem volta` });
+  }
+
+  // a cópia antiga dos dados da equipe (sem cifra, de antes do cofre) que o cofre não confirmou ter recebido: nunca sai
+  // sozinha; a tela oferece manter ou apagar (com a confirmação de que não tem volta). Mantida, fica como informação
+  if (espaco?.dadosAntigos) {
+    const mantida = espaco.dadosAntigos.mantida === true;
+    c.push({ id: 'dados-antigos', nome: 'Cópia antiga dos dados da equipe', estado: mantida ? 'operacional' : 'limitado', detalhe: textoDadosAntigos(espaco.dadosAntigos.porque, mantida) });
   }
 
   let estado: Saude = 'operacional';

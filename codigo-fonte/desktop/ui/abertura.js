@@ -12,10 +12,16 @@ const ROTULOS = {
   diagnostico: 'Ver diagnóstico', 'ajuda:docker': 'Como instalar o Docker', 'ajuda:docker_rootless': 'Docker sem root (recomendado)',
   'ajuda:docker_pos_instalacao': 'Outras formas de acesso', 'ajuda:instalar_ergon': 'Como instalar o Ergon',
   atualizar: 'Atualizar agora', voltar: 'Voltar ao Ergon', verificar: 'Verificar de novo',
+  // voltar para uma versão anterior (o rótulo do confirmar ganha o número da versão)
+  confirmarVolta: 'Sim, voltar', semBackup: 'Voltar mesmo sem backup', cancelar: 'Cancelar',
 };
-const PRINCIPAIS = new Set(['abrir', 'iniciar', 'instalar', 'atualizar']);
+const PRINCIPAIS = new Set(['abrir', 'iniciar', 'instalar', 'atualizar', 'confirmarVolta']);
 // etapas de uma atualização (a barra acompanha estas; a instalação usa ORDEM)
-const ORDEM_ATUALIZAR = ['diagnostico', 'backup', 'baixar', 'configurar', 'ligar', 'conferir', 'aplicativo'];
+const ORDEM_ATUALIZAR = ['diagnostico', 'backup', 'baixar', 'configurar', 'ligar', 'conferir', 'equipe', 'aplicativo'];
+// etapas da volta para uma versão anterior (o aplicativo não é trocado)
+const ORDEM_VOLTAR = ['diagnostico', 'backup', 'baixar', 'configurar', 'ligar', 'conferir', 'equipe'];
+// começo da mensagem do aplicativo quando o backup antes de voltar não deu certo (atualizacao.rs, SEM_BACKUP)
+const SEM_BACKUP = 'SEM_BACKUP:';
 const SEGURANCA = 'Esta atualização traz revisões de segurança que precisam ser aplicadas para prevenir riscos ao ambiente do Ergon. Até atualizar, o Ergon fica bloqueado.';
 // etapa técnica → frases da cidade (a ordem das etapas dá o avanço da barra)
 const ORDEM = ['diagnostico', 'wsl', 'baixar', 'importar', 'configurar', 'ligar', 'conferir'];
@@ -29,6 +35,7 @@ const FRASES = {
   ligar: ['Acendendo o farol de Alexandria…', 'Tentando tirar Sócrates de um diálogo interminável na feira de Atenas…', 'Aristóteles organiza as anotações do Liceu…', 'Os filósofos estão chegando à ágora…', 'Acendendo as lamparinas da Stoa…'],
   backup: ['Copiando os pergaminhos para a biblioteca de reserva…', 'Guardando uma cópia de tudo no cofre do templo…'],
   aplicativo: ['Trocando as portas da cidade por portas novas…', 'O mestre de obras assina a reforma…'],
+  equipe: ['Aristóteles reúne a equipe e passa as novidades…', 'Os filósofos trocam de túnica para a nova estação…', 'Cada um confere o seu posto na ágora…'],
   conferir: ['Hipátia confere os cálculos uma última vez…', 'Abrindo as portas da ágora…', 'Arquimedes testa as alavancas da cidade…', 'Os arautos anunciam: a cidade está de pé…'],
 };
 const ACORDANDO = ['Acordando a cidade…', 'Os filósofos estão chegando à ágora…', 'Acendendo as lamparinas da Stoa…', 'Sócrates já começou a fazer perguntas…', 'Abrindo as janelas da biblioteca…'];
@@ -38,6 +45,9 @@ let ultimo = null;
 let esperando = null;
 let verificado = false;
 let atualizando = false;
+// voltar para uma versão anterior: a versão conferida (pronta para confirmar) e a que está sendo posta no lugar
+let alvoVolta = null;
+let voltando = null;
 let ordemAtual = ORDEM;
 const registro = [];
 
@@ -149,6 +159,22 @@ async function agir(a, botao) {
   try {
     if (a === 'abrir') { fase('Pronto'); frases(['A cidade está pronta. Bem-vindo à ágora!']); await invoke('abrir_ergon'); }
     else if (a === 'tentar' || a === 'voltar') await verificar();
+    else if (a === 'cancelar') { alvoVolta = null; history.replaceState(null, '', location.pathname); await verificar(); }
+    else if (a === 'confirmarVolta' || a === 'semBackup') {
+      if (!alvoVolta) return;
+      if (botao) botao.disabled = true;
+      const sem = a === 'semBackup';
+      voltando = alvoVolta; registro.length = 0; ordemAtual = ORDEM_VOLTAR; etapaAtual = 0;
+      carregando(true); fase('Voltando de versão');
+      $('titulo').textContent = `Voltando para a ${voltando}…`;
+      $('texto').textContent = sem
+        ? 'Sem backup, como você pediu. Leva alguns minutos; se a versão escolhida não ligar, a de agora volta sozinha.'
+        : 'Primeiro uma cópia dos seus dados, depois a versão escolhida. Leva alguns minutos; se ela não ligar, a de agora volta sozinha.';
+      $('avisos').hidden = true;
+      frases(FRASES.diagnostico); barra(0);
+      botoes([]);
+      await invoke('voltar_versao', { versao: voltando, semBackup: sem });
+    }
     else if (a === 'verificar') await telaAtualizacoes();
     else if (a === 'atualizar') {
       if (botao) botao.disabled = true;
@@ -185,9 +211,11 @@ async function agir(a, botao) {
       await invoke('subir_servicos');
     }
   } catch (e) {
+    const eraVolta = !!voltando;
+    if (eraVolta) { voltando = null; ordemAtual = ORDEM; }
     carregando(false); fase('Necessita atenção', true); frases(null); etapaAtual = -1; barra();
     $('texto').textContent = String(e);
-    botoes(ultimo ? ultimo.acoes : ['tentar']);
+    botoes(eraVolta ? ['cancelar', 'diagnostico'] : ultimo ? ultimo.acoes : ['tentar']);
   }
 }
 
@@ -196,6 +224,8 @@ listen('instalacao:etapa', ({ payload }) => {
   anotar(`ETAPA ${payload}`);
   const i = ordemAtual.indexOf(payload);
   if (i >= 0) { etapaAtual = i; barra(0); }
+  // depois de trocar a versão, os agentes também são renovados para ela (a saúde do Ergon avisa)
+  if (payload === 'equipe') fase('Atualizando a equipe');
   frases(FRASES[payload] || FRASES.ligar);
 });
 listen('instalacao:progresso', ({ payload: [c, feitos, total] }) => {
@@ -211,7 +241,8 @@ listen('instalacao:reiniciar', () => {
 listen('servicos:linha', ({ payload }) => {
   const t = String(payload);
   anotar(t);
-  if (instalando) return;
+  // instalando, atualizando ou voltando de versão, a fase acompanha as etapas (não as linhas)
+  if (instalando || atualizando || voltando) return;
   const l = t.toLowerCase();
   if (l.includes('docker')) fase('Preparando ambiente');
   else if (l.includes('hermes') || l.includes('motor')) fase('Iniciando motor de IA');
@@ -219,6 +250,21 @@ listen('servicos:linha', ({ payload }) => {
 });
 listen('servicos:fim', ({ payload }) => {
   if (payload.mensagem === 'REINICIAR') return;
+  if (voltando) {
+    const alvo = voltando; voltando = null; ordemAtual = ORDEM;
+    if (payload.ok) { alvoVolta = null; etapaAtual = ORDEM_VOLTAR.length - 1; barra(1); history.replaceState(null, '', location.pathname); verificar(); return; }
+    carregando(false); frases(null); etapaAtual = -1; barra();
+    const msg = String(payload.mensagem || '');
+    const semBackup = msg.startsWith(SEM_BACKUP);
+    fase(semBackup ? 'Backup não feito' : 'Volta não concluída', true);
+    $('titulo').textContent = semBackup ? 'O backup não deu certo' : `A volta para a ${alvo} parou`;
+    $('texto').textContent = (semBackup ? msg.slice(SEM_BACKUP.length) : msg) || 'A volta terminou com erro.';
+    mostrarRegistro();
+    // sem backup, nada foi mudado: dá para desistir ou seguir de propósito (outra confirmação)
+    if (semBackup) ROTULOS.confirmarVolta = 'Tentar o backup de novo';
+    botoes(semBackup ? ['cancelar', 'confirmarVolta', 'semBackup', 'diagnostico'] : ['cancelar', 'diagnostico']);
+    return;
+  }
   if (atualizando) {
     atualizando = false; ordemAtual = ORDEM;
     if (payload.ok) { etapaAtual = ORDEM_ATUALIZAR.length - 1; barra(1); if (!appTrocando) verificar(); return; }
@@ -286,6 +332,53 @@ async function telaAtualizacoes() {
   botoes(u.podeAtualizar ? ['atualizar', 'voltar'] : ['voltar']);
 }
 
+/**
+ * "Voltar para esta versão" (pedido pela página do Ergon, em Configurações › Atualizações): o aplicativo confere a
+ * versão escolhida (o pacote assinado dela e as regras) e, se dá, avisa em palavras simples e pede a confirmação.
+ * Se não dá (antiga demais, sem o pacote assinado, depois de uma revisão de segurança…), explica e não deixa.
+ */
+async function telaVoltar(versao) {
+  clearTimeout(esperando);
+  alvoVolta = null;
+  carregando(true); fase('Voltar para uma versão anterior'); frases(['Consultando os arquivos da biblioteca…']);
+  $('titulo').textContent = versao ? `Voltar para a ${versao}` : 'Voltar para uma versão anterior';
+  $('texto').textContent = ''; $('avisos').hidden = true; botoes([]);
+  let a = null;
+  if (versao) {
+    try { a = await Promise.race([invoke('avaliar_volta', { versao }), new Promise((ok) => setTimeout(() => ok(null), 45000))]); }
+    catch (e) { a = { pode: false, motivo: String(e) }; }
+  } else a = { pode: false, motivo: 'Essa versão não foi reconhecida. Nada foi mudado.' };
+  carregando(false); frases(null);
+  if (!a) { fase('Sem resposta', true); $('texto').textContent = 'Não deu para conferir essa versão agora. Nada foi mudado.'; botoes(['cancelar']); return; }
+  if (!a.pode) { fase('Não dá para voltar', true); $('texto').textContent = a.motivo || 'Não dá para voltar para essa versão.'; botoes(['cancelar']); return; }
+  alvoVolta = a.alvo;
+  fase('Confirme', true);
+  $('titulo').textContent = `Voltar para a ${a.alvo}?`;
+  $('texto').textContent = `Você está na ${a.atual}. Antes de trocar, o aplicativo faz um backup dos seus dados; depois põe a ${a.alvo} no lugar, mantendo os dados.`;
+  const av = $('avisos');
+  av.replaceChildren(...[
+    `O que foi criado ou mudado na ${a.atual} pode não abrir, ou abrir com defeito, na ${a.alvo}.`,
+    // o que o backup leva e o que não leva, sem prometer o que a pessoa não consegue fazer por aqui
+    'O backup guarda neste computador uma cópia das conversas, dos arquivos e das conexões de antes da troca. A memória dos agentes não entra nela, e trazer essa cópia de volta ainda não tem um botão no aplicativo.',
+    `Se a ${a.alvo} não ligar, a ${a.atual} volta sozinha.`,
+    'Leva alguns minutos. Para voltar depois à versão mais nova, use “Atualizar”.',
+  ].map((t) => Object.assign(document.createElement('li'), { textContent: t })));
+  av.hidden = false;
+  ROTULOS.confirmarVolta = `Sim, voltar para a ${a.alvo}`;
+  // "Cancelar" primeiro: o foco começa nele (confirmar é um clique de propósito)
+  botoes(['cancelar', 'confirmarVolta']);
+}
+
+/** "#voltar=<versão>" no endereço da tela de abertura (o aplicativo só põe ali uma versão bem formada). */
+function versaoDoEndereco() {
+  try { return decodeURIComponent(location.hash.slice('#voltar='.length)); } catch { return ''; }
+}
+
 $('registros').addEventListener('click', () => invoke('abrir_registros').catch(() => {}));
-addEventListener('hashchange', () => { if (location.hash === '#atualizacoes') telaAtualizacoes(); });
-if (location.hash === '#atualizacoes') telaAtualizacoes(); else verificar();
+addEventListener('hashchange', () => {
+  if (location.hash === '#atualizacoes') telaAtualizacoes();
+  else if (location.hash.startsWith('#voltar=') && !voltando) telaVoltar(versaoDoEndereco());
+});
+if (location.hash === '#atualizacoes') telaAtualizacoes();
+else if (location.hash.startsWith('#voltar=')) telaVoltar(versaoDoEndereco());
+else verificar();

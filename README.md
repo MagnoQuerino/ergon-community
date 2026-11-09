@@ -42,7 +42,7 @@ Todas as versões, com as somas SHA-256 para conferir os arquivos, ficam na
 - **Treinar.** Ensine uma competência a um agente com texto, documentos e links; você revisa e aprova antes do uso.
 - **Conexões que os agentes usam de verdade.** Microsoft 365 e Google ([Microsoft](docs/MICROSOFT.md), [Google](docs/GOOGLE.md));
   Trello, Jira, Asana, monday.com, ClickUp, Notion, Pipefy, Todoist, Linear e outros, ligados nos dois sentidos; Slack, Discord,
-  Telegram e WhatsApp experimental ([riscos](docs/WHATSAPP.md)); CRM e atendimento; financeiro só leitura. O que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.
+  Telegram e WhatsApp experimental ([riscos](docs/WHATSAPP.md)); CRM e atendimento; financeiro sem mover dinheiro (cadastra clientes e cria cobranças, nunca paga nem transfere), com "Só leitura" a um clique. O que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.
 - **Seis skins da cidade.** Distrito Platina, Reino de Brumaverde, Base Siroco, Enseada Coral, Vila Ronrom e
   Cromo-9: prédios, roupas, paisagem e até 10 personagens com nome e bio. Só aparência.
 - **Loja de pacotes.** Skins, temas, efeitos, pets e equipes prontas: os oficiais vêm junto e funcionam sem

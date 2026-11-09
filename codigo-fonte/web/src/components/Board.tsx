@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Column, TaskCard } from '../lib/types.ts';
 import { Icon } from './Icon.tsx';
-import { DISPLAY_BADGE, DISPLAY_LABEL, WORK_LABEL, displayOf, type WorkState } from '../lib/work.ts';
+import { cardClick, cardKey } from '../lib/cardClick.ts';
+import { DISPLAY_BADGE, WORK_LABEL, displayOf, situacaoDe, type WorkState } from '../lib/work.ts';
 
 const RUN_LABEL: Record<string, string> = { running: 'trabalhando', queued: 'na fila', waiting_user: 'aguarda você' };
 /** Coluna vazia no quadro da equipe: o que significa (nas suas listas, só "Nenhuma tarefa"). */
@@ -83,7 +84,7 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
         {team && !!t.priority && !t.completed && !t.run_status && (!t.work_state || t.work_state === 'solicitada') && <span className="badge badge--pri" title="Prioridade: no topo da fila"><Icon name="flag" size={11} /> prioridade</span>}
         {t.run_status && <span className="badge badge--warn">{RUN_LABEL[t.run_status] ?? t.run_status}</span>}
         {team && !t.run_status && t.work_state && !['solicitada', 'concluida'].includes(t.work_state) && (
-          <span className={`badge ${DISPLAY_BADGE[displayOf(t.work_state)]}`} title={`Estado do trabalho: ${WORK_LABEL[t.work_state as WorkState] ?? t.work_state}`}>{DISPLAY_LABEL[displayOf(t.work_state)]}</span>
+          <span className={`badge ${DISPLAY_BADGE[displayOf(t.work_state)]}`} title={`Estado do trabalho: ${WORK_LABEL[t.work_state as WorkState] ?? t.work_state}`}>{situacaoDe(t.work_state)}</span>
         )}
         {t.deliverables > 0 && <span className="badge badge--ok" title="Entregáveis no card (abra para baixar)"><Icon name="folder" size={11} /> {t.deliverables}</span>}
         {!team && t.inputs > 0 && <span className="badge" title="Arquivos anexados"><Icon name="folder" size={11} /> {t.inputs}</span>}
@@ -123,9 +124,9 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
           const before = e.clientY < r.top + r.height / 2 ? t.id : queued[pos]?.id ?? null; // metade de cima: antes deste; de baixo: antes do próximo
           if (dropAt?.before !== before) setDropAt({ before });
         } : undefined}
-        onClick={() => onOpen(t.id)}
+        onClick={cardClick(() => onOpen(t.id))}
         tabIndex={0} data-task={t.id} aria-label={`Tarefa #${t.number}: ${t.title}${pos ? `, ${pos}º na fila` : ''}`}
-        onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen(t.id); } }}>
+        onKeyDown={cardKey(() => onOpen(t.id))}>
         <div className="task__top">
           {editable && onToggle && <input type="checkbox" checked={!!t.completed} onClick={(e) => e.stopPropagation()} onChange={(e) => onToggle(t, e.target.checked)} aria-label={`Concluir #${t.number}`} />}
           <span className="task__title">{t.title}</span>
@@ -181,9 +182,12 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
                 onDrop={(e) => { e.preventDefault(); if (dragId && editable && onMove) onMove(dragId, c.id); setDragId(null); }}>
                 <tr className="tbl__grouphead"><th colSpan={cols + 1}>{c.name} <span className="muted">{rows.length}</span></th></tr>
                 {rows.map((t) => (
-                  <tr key={t.id} className={`tbl__row ${t.completed ? 'is-done' : ''} ${openId === t.id ? 'is-open' : ''}`} draggable={editable}
-                    onDragStart={() => setDragId(t.id)} onClick={() => onOpen(t.id)} tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter') onOpen(t.id); }}>
+                  // a linha inteira abre o card (como no quadro): Enter ou Espaço na linha também; a caixa de concluir e a
+                  // situação fazem só o delas (antes, Enter na situação abria o card), e selecionar o texto não abre
+                  <tr key={t.id} className={`tbl__row row-click ${t.completed ? 'is-done' : ''} ${openId === t.id ? 'is-open' : ''}`} draggable={editable}
+                    onDragStart={() => setDragId(t.id)} onClick={cardClick(() => onOpen(t.id))} tabIndex={0}
+                    aria-label={`Tarefa #${t.number}: ${t.title}, ${c.name}`} title="Abrir o card"
+                    onKeyDown={cardKey(() => onOpen(t.id))}>
                     {editable && onToggle && (
                       <td className="tbl__check"><input type="checkbox" checked={!!t.completed} onClick={(e) => e.stopPropagation()} onChange={(e) => onToggle(t, e.target.checked)} aria-label={`Concluir #${t.number}`} /></td>
                     )}

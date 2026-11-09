@@ -4,6 +4,7 @@ import { audit, type Bus } from './bus.ts';
 import { enfileirarEspelho, type OpEspelho } from './conexoes/espelho.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { validDue } from './due.ts';
+import type { TitleSource } from './card-title.ts';
 
 export type TaskOrigin = 'manual' | 'chat' | 'teams' | 'whatsapp' | 'mirror' | 'demo';
 
@@ -18,6 +19,8 @@ export interface TaskRow {
   due_on: string | null;
   /** estado real do trabalho (cards da equipe; ver results.ts) */
   work_state: string | null; requires_approval: number;
+  /** de onde veio o título: 'pessoa' não é trocado sozinho (card-title.ts) */
+  title_source?: TitleSource | null;
 }
 
 export interface Actor { type: 'user' | 'agent' | 'system' | 'connector'; id: string | null }
@@ -100,6 +103,8 @@ export interface CreateTaskInput {
   origin: TaskOrigin; sourceEventId?: string | null; isFixture?: boolean;
   /** prazo AAAA-MM-DD */
   dueOn?: string | null;
+  /** de onde veio o título (card-title.ts); sem dizer: a pessoa criou = 'pessoa', o resto fica sem marca */
+  titleSource?: TitleSource;
 }
 
 /** Quadro espelhado de uma conexão de verdade (a fixture de teste continua só leitura). */
@@ -133,11 +138,12 @@ export function createTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
     const taskId = id('tsk');
     const ts = now();
     db.run(
-      `INSERT INTO tasks (id, number, workspace_id, board_id, column_id, agent_id, title, description, origin, source_event_id, is_fixture, created_at, updated_at, due_on, work_state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, number, workspace_id, board_id, column_id, agent_id, title, description, origin, source_event_id, is_fixture, created_at, updated_at, due_on, work_state, title_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       taskId, Number(n?.n ?? 1), workspaceId, boardId, columnId, input.agentId ?? null, db.seal(workspaceId, title), db.seal(workspaceId, description), input.origin,
       input.sourceEventId ?? null, input.isFixture ? 1 : 0, ts, ts, validDue(input.dueOn) ? input.dueOn : null,
-      board.audience === 'team' && board.origin === 'native' ? 'solicitada' : null);
+      board.audience === 'team' && board.origin === 'native' ? 'solicitada' : null,
+      input.titleSource ?? (actor.type === 'user' ? 'pessoa' : null));
     if (envia) {
       const ext = db.get<{ e: string | null }>('SELECT external_id AS e FROM columns WHERE id = ?', columnId)?.e ?? undefined;
       enfileirarEspelho(db, workspaceId, taskId, { tipo: 'criar', tarefa: { titulo: title, descricao: description || undefined, coluna: ext, prazo: validDue(input.dueOn) ? input.dueOn ?? undefined : undefined } });
@@ -192,6 +198,8 @@ export function updateTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
       const title = input.title.trim().replace(/\s+/g, ' ');
       if (!title || title.length > 200) throw new HttpError(400, 'title', 'título: 1–200 caracteres');
       if (title !== t.title) { set('title', db.seal(workspaceId, title), 'titulo', t.title); changes.titulo = { de: t.title, para: title }; if (envia) ops.push({ tipo: 'editar', mudanca: { titulo: title } }); }
+      // o nome que a pessoa deu fica: a coordenação não troca sozinha depois (card-title.ts)
+      if (actor.type === 'user' && title !== t.title && t.title_source !== 'pessoa') sets.push("title_source = 'pessoa'");
     }
     // o card não guarda mais que 8.000: com isso tudo, lá pode haver mais (vínculo de antes da marca, ou descrição que cresceu lá)
     if (envia && input.description !== undefined && input.description !== t.description && (descricaoCortada(db, taskId) || t.description.length >= 8000)) {

@@ -241,13 +241,23 @@ export interface SkillInfo { name: string; description: string; category: string
  * O que o plugin do Ergon no motor diz de si (GET /ergon/v1/health): versão do plugin, versão da configuração do cofre e
  * as capacidades. Plugin antigo responde só {ok, dashboard}: capacidades = null (não se sabe).
  */
-export interface MotorInfo { ok: boolean; pluginVersion: string | null; vaultConfig: number | null; capacidades: string[] | null }
+export interface MotorInfo {
+  ok: boolean; pluginVersion: string | null; vaultConfig: number | null; capacidades: string[] | null;
+  /**
+   * o cofre recebeu a cópia dos dados de antes dele (o volume antigo, sem cifra)? true/false pela marca do cofre; null =
+   * não se sabe (plugin de antes, ou sem marca). Só com true o volume antigo pode sair.
+   */
+  dadosAntigos?: boolean | null;
+}
 /** capacidade que diz que o motor tem as ferramentas das Conexões */
 export const CAPACIDADE_CONEXOES = 'conexoes';
+/** capacidade que diz que, com a proteção ligada em Conexões, o plugin pede a aprovação da pessoa (sem ela, só barra) */
+export const CAPACIDADE_APROVAR_DEPOIS_DE_LER = 'aprovar_depois_de_ler';
 export function parseMotorInfo(j: Record<string, unknown>): MotorInfo {
   const caps = Array.isArray(j.capacidades) ? j.capacidades.filter((x): x is string => typeof x === 'string').slice(0, 50) : null;
   const vc = typeof j.vault_config === 'number' ? j.vault_config : typeof j.vault_config === 'string' && /^\d+$/.test(j.vault_config) ? Number(j.vault_config) : null;
-  return { ok: j.ok === true && j.dashboard === true, pluginVersion: typeof j.plugin_version === 'string' ? j.plugin_version.slice(0, 40) : null, vaultConfig: vc, capacidades: caps };
+  return { ok: j.ok === true && j.dashboard === true, pluginVersion: typeof j.plugin_version === 'string' ? j.plugin_version.slice(0, 40) : null, vaultConfig: vc, capacidades: caps,
+    dadosAntigos: typeof j.dados_antigos === 'boolean' ? j.dados_antigos : null };
 }
 
 export interface HermesControlClient {
@@ -266,6 +276,16 @@ export interface HermesControlClient {
   setApiToolsets(enabled: string[]): Promise<string[]>;
   /** imagem gerada pelo motor (só da pasta das geradas; a ponte confere) */
   media?(path: string): Promise<{ data: Buffer; mime: string }>;
+  /** Custo: as chamadas ao modelo de uma sessão do motor, desde um instante (ms desde 1970), com o tamanho de cada parte
+   *  e o total informado pelo provedor, e o relógio do motor na resposta (plugin 0.4.0+; ausente ou 404 = sem a medição) */
+  medicao?(sessao: string, desdeMs: number): Promise<MedicaoSessao>;
+  /** Passos por pedido (agent.max_turns) do motor; null = não se sabe (plugin 0.4.0+) */
+  passos?(): Promise<number | null>;
+  setPassos?(n: number): Promise<number>;
+  /** Resumir as conversas longas mais cedo (compression.threshold_tokens no motor): ligado ou não; null = não se sabe
+   *  (plugin com a capacidade compactacao, rc.26; o anterior responde 404) */
+  compactacao?(): Promise<boolean | null>;
+  setCompactacao?(ligada: boolean): Promise<boolean | null>;
   /** Treinar: as operações de competência (skill) que o Ergon faz pela ponte; ausente = motor sem suporte */
   skills_?: SkillControl;
   /** Endpoint próprio "ergon-ai" do motor (módulo opcional; sem uso na Community) */
@@ -279,6 +299,42 @@ export interface HermesControlClient {
   removeByok?(provider: string): Promise<void>;
   addByokCustom?(c: ByokCustomInput): Promise<{ id: string; models: number }>;
   removeByokCustom?(id: string): Promise<void>;
+}
+
+/**
+ * Uma chamada ao modelo, medida pelo plugin do motor (pre_api_request/post_api_request): tamanhos em caracteres do que foi
+ * de verdade ao provedor — o prompt de sistema inteiro (dentro dele, a memória e a lista de competências), as definições
+ * das ferramentas, a conversa — e o total que o provedor informou (null = não informou). Nada do conteúdo.
+ */
+export interface ChamadaMedida {
+  /** t: o relógio do motor (segundos); n: o número da chamada no pedido (recomeça a cada pedido); turno: a marca do pedido
+   *  no motor (as chamadas de um mesmo pedido têm a mesma; vazio = não informada) */
+  t: number; n: number; turno: string; sistema: number; memoria: number; competencias: number; ferramentas: number; ferramentasExato: boolean;
+  nFerramentas: number; conversa: number; imagens: number; modelo: string;
+  /** o tamanho (caracteres) do resumo da conversa que foi nessa chamada: o motor compactou a parte antiga da conversa
+   *  (rc.26); 0 = sem resumo; ausente = motor que não informa */
+  resumo?: number;
+  uso: { entrada: number; cacheLido: number; cacheGravado: number; saida: number } | null;
+}
+const inteiro = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
+export function parseChamadas(j: unknown): ChamadaMedida[] {
+  const arr = j && typeof j === 'object' && Array.isArray((j as { chamadas?: unknown }).chamadas) ? (j as { chamadas: unknown[] }).chamadas : [];
+  return arr.slice(-200).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object').map((x) => {
+    const u = x.uso && typeof x.uso === 'object' ? x.uso as Record<string, unknown> : null;
+    return {
+      t: typeof x.t === 'number' && Number.isFinite(x.t) ? x.t : 0, n: inteiro(x.n), turno: typeof x.turno === 'string' ? x.turno.slice(0, 64) : '', sistema: inteiro(x.sistema), memoria: inteiro(x.memoria),
+      competencias: inteiro(x.competencias), ferramentas: inteiro(x.ferramentas), ferramentasExato: x.ferramentas_exato === true,
+      nFerramentas: inteiro(x.n_ferramentas), conversa: inteiro(x.conversa), imagens: inteiro(x.imagens), modelo: typeof x.modelo === 'string' ? x.modelo.slice(0, 120) : '',
+      ...(typeof x.resumo === 'number' ? { resumo: inteiro(x.resumo) } : {}),
+      uso: u && inteiro(u.entrada) ? { entrada: inteiro(u.entrada), cacheLido: inteiro(u.cache_lido), cacheGravado: inteiro(u.cache_gravado), saida: inteiro(u.saida) } : null,
+    };
+  });
+}
+/** A resposta de /ergon/v1/medicao: as chamadas e o relógio do motor na hora da resposta (ms; null = não informou). */
+export interface MedicaoSessao { chamadas: ChamadaMedida[]; agoraMs: number | null }
+export function parseMedicao(j: unknown): MedicaoSessao {
+  const agora = j && typeof j === 'object' ? (j as { agora?: unknown }).agora : null;
+  return { chamadas: parseChamadas(j), agoraMs: typeof agora === 'number' && Number.isFinite(agora) && agora > 0 ? agora * 1000 : null };
 }
 
 export interface ByokCatalog {
@@ -409,6 +465,33 @@ export class HttpHermesControl implements HermesControlClient {
     restore: async (name, files) => ((await this.call('POST', '/ergon/v1/skills/restore', { name, files }, 120000)).files ?? {}) as Record<string, string>,
     remove: async (name) => { await this.call('POST', '/ergon/v1/skills/remove', { name }); },
   };
+
+  async medicao(sessao: string, desdeMs: number): Promise<MedicaoSessao> {
+    const q = new URLSearchParams({ sessao, desde: String(Math.max(0, desdeMs) / 1000) });
+    return parseMedicao(await this.call('GET', `/ergon/v1/medicao?${q}`, undefined, 10000));
+  }
+  async passos(): Promise<number | null> {
+    const j = await this.call('GET', '/ergon/v1/passos', undefined, 10000);
+    return Number.isInteger(j.max_turns) ? j.max_turns : null;
+  }
+  async setPassos(n: number): Promise<number> {
+    const j = await this.call('PUT', '/ergon/v1/passos', { max_turns: n }, 15000);
+    return Number.isInteger(j.max_turns) ? j.max_turns : n;
+  }
+  // motor com o plugin anterior (sem a capacidade compactacao): a rota não existe e ele responde 404 — isso é "não se
+  // sabe" (null), não erro: a tela diz que a escolha ainda não chegou e o passo de fundo não insiste como se fosse falha
+  async compactacao(): Promise<boolean | null> {
+    try {
+      const j = await this.call('GET', '/ergon/v1/compactacao', undefined, 10000);
+      return typeof j.ligada === 'boolean' ? j.ligada : null;
+    } catch (e) { if (e instanceof HermesError && e.status === 404) return null; throw e; }
+  }
+  async setCompactacao(ligada: boolean): Promise<boolean | null> {
+    try {
+      const j = await this.call('PUT', '/ergon/v1/compactacao', { ligada }, 15000);
+      return typeof j.ligada === 'boolean' ? j.ligada : ligada;
+    } catch (e) { if (e instanceof HermesError && e.status === 404) return null; throw e; }
+  }
 
   async media(path: string): Promise<{ data: Buffer; mime: string }> {
     if (!this.token) throw new HermesError(503, 'a configuração da equipe de IA não está disponível nesta instalação');

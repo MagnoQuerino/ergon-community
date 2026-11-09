@@ -25,7 +25,7 @@ import { ErroAcao } from './conexoes/tipos.ts';
 import { workspaceTz } from './routine-proposals.ts';
 import {
   AirtableProvider, ClickUpProvider, GitHubProjectsProvider, JiraProvider, LinearProvider, MondayProvider, NotionProvider, PipefyProvider,
-  SmartsheetProvider, TrelloProvider, contaConferida, jiraHost, request, type AccountProvider, type ContaConferida,
+  PIPEFY_TOKEN_URL, SmartsheetProvider, TrelloProvider, contaConferida, enderecoTokenPipefy, jiraHost, pipefyAntigo, request, type AccountProvider, type ContaConferida,
 } from './task-providers.ts';
 
 export type IntegrationKind =
@@ -41,7 +41,10 @@ export interface IntegrationDef {
   /** oauth: login com a conta · qr: WhatsApp · token: credencial colada · soon: ainda não (motivo em "soon") */
   auth: 'oauth' | 'qr' | 'token' | 'soon';
   group: 'contas' | 'tarefas' | 'conversas' | 'vendas' | 'suporte' | 'documentos' | 'financeiro'; about: string; tasks: boolean; site: string;
-  fields?: CredentialField[]; help?: { url: string; steps: string; extras?: AjudaExtra[] }; soon?: string;
+  /** antes: o que a pessoa precisa saber antes de começar, no alto da tela de conectar, à vista (ex.: quem pode criar a credencial) */
+  fields?: CredentialField[]; help?: { url: string; steps: string; antes?: string; extras?: AjudaExtra[] }; soon?: string;
+  /** conectou do jeito que o serviço deixou de recomendar: continua valendo, e a tela avisa para reconectar do novo jeito */
+  credencialAntiga?: { antiga: (c: Record<string, string>) => boolean; aviso: string };
 }
 
 const TOKEN: CredentialField[] = [{ name: 'token', label: 'Token', secret: true, placeholder: 'Cole o token aqui' }];
@@ -89,9 +92,22 @@ export const INTEGRATIONS: IntegrationDef[] = [
       { name: 'token', label: 'Token de API', secret: true, placeholder: 'Cole o token aqui' },
     ],
     help: { url: 'https://id.atlassian.com/manage-profile/security/api-tokens', steps: 'Na sua conta Atlassian: Segurança › "Criar token de API" (o botão sem escopos; token com escopos não funciona aqui). Copie e cole aqui, com o endereço do seu Jira e o e-mail da conta. O que dá para fazer segue as permissões da sua conta em cada projeto.' } },
-  { kind: 'pipefy', name: 'Pipefy', auth: 'token', group: 'tarefas', tasks: true, site: 'pipefy.com', fields: TOKEN,
+  // conta de serviço, o jeito que o Pipefy recomenda hoje (task-providers.ts, CredPipefy). Quem conectou com o token pessoal
+  // (obsoleto) continua funcionando, com o aviso de reconectar (credencialAntiga)
+  { kind: 'pipefy', name: 'Pipefy', auth: 'token', group: 'tarefas', tasks: true, site: 'pipefy.com',
+    fields: [
+      { name: 'client_id', label: 'Client ID', placeholder: 'Cole o Client ID da conta de serviço' },
+      { name: 'client_secret', label: 'Client Secret', secret: true, placeholder: 'Cole o Client Secret da conta de serviço' },
+      { name: 'token_url', label: 'Endereço do "Token endpoint" (só se o Pipefy mostrar outro)', placeholder: PIPEFY_TOKEN_URL, opcional: true },
+    ],
     about: 'Pipes do Pipefy: fases viram colunas; cards, tarefas.',
-    help: { url: 'https://app.pipefy.com/tokens', steps: 'No Pipefy: Conta › Tokens de acesso pessoal › "Gerar novo token". Copie e cole aqui.' } },
+    help: {
+      url: 'https://app.pipefy.com/',
+      antes: 'Antes de começar: a conta de serviço só pode ser criada pelo administrador principal da empresa no Pipefy (o Super Admin). Se não for você, peça a ele que crie e lhe passe o Client ID e o Client Secret.',
+      steps: 'O Pipefy pede uma conta de serviço (o código de acesso pessoal ficou obsoleto). Quem cria é o Super Admin: clique no nome da empresa ou na sua foto, no alto, abra "Membros e permissões" (Members and Permissions), vá até a aba "Contas de serviço" (Service Accounts) e clique em "Criar conta de serviço". Dê um nome, como Ergon, escolha um papel que possa editar os pipes e a validade do acesso (pode ser a maior, 30 dias: a renovação é automática). Depois clique na conta criada e copie Client ID e Client Secret para cá. A conta de serviço vê os pipes que o papel dela permite; se um pipe não aparecer, adicione-a como membro desse pipe.',
+      extras: [{ rotulo: 'Ajuda do Pipefy sobre contas de serviço', url: 'https://help.pipefy.com/en/articles/9027789-service-accounts' }],
+    },
+    credencialAntiga: { antiga: pipefyAntigo, aviso: 'Esta conexão usa o código de acesso pessoal, que o Pipefy marcou como obsoleto. Ela continua funcionando enquanto o Pipefy aceitar, mas reconecte do novo jeito, com uma conta de serviço, para não parar de repente.' } },
   { kind: 'todoist', name: 'Todoist', auth: 'token', group: 'tarefas', tasks: true, site: 'todoist.com', fields: TOKEN,
     about: 'Projetos do Todoist: seções viram colunas.',
     help: { url: 'https://app.todoist.com/app/settings/integrations/developer', steps: 'No Todoist: Configurações › Integrações › Desenvolvedor › "Token da API". Copie e cole aqui. Não use "Emitir novo token": isso desconecta a conta em todos os aparelhos.' } },
@@ -196,11 +212,20 @@ export const settingsOf = (r: IntegrationRow): Record<string, unknown> => { try 
  * falta só a pessoa entrar de novo). Fica nas configurações da conexão, junto do `state` estável do link do administrador.
  */
 export type EstadoEtapa = 'pedido' | 'bloqueado' | 'aprovado';
-export interface MarcaEtapa { estado: EstadoEtapa; em: string; erro?: string | null }
+/**
+ * admin: voltou dizendo que a empresa exige o administrador (no Teams também: a tela oferece o pedido, não "Tentar de novo").
+ * herdada: a marca veio junto da etapa anterior que exigiu o administrador, sem esta ter sido pedida (o encadeamento ainda a tenta).
+ */
+export interface MarcaEtapa { estado: EstadoEtapa; em: string; erro?: string | null; admin?: boolean; herdada?: boolean }
 /** baseBloqueada: o primeiro login voltou dizendo que a empresa exige o administrador (antes de haver conta conectada) */
 export interface Consentimento { etapas?: Partial<Record<Etapa, MarcaEtapa>>; estadoAdmin?: string; baseBloqueada?: { em: string; erro: string | null } | null }
 /** Códigos da Microsoft para "precisa do administrador" (reference-error-codes: 65001 DelegationDoesNotExist, 90094 AdminConsentRequired, 90095 AdminConsentRequiredRequestAccess). */
 export const PRECISA_ADMINISTRADOR = /AADSTS(65001|90094|90095)\b/;
+/** A volta do login diz que a empresa exige o administrador (e não que a pessoa recusou ou que algo falhou). */
+export function exigeAdministrador(error: string | null | undefined, descricao?: string | null): boolean {
+  const tudo = `${error ?? ''} ${descricao ?? ''}`;
+  return PRECISA_ADMINISTRADOR.test(tudo) || /\b(consent_required|admin_policy_enforced)\b/.test(tudo);
+}
 /**
  * O motivo de um login que não terminou, em português, para gravar nas marcas das etapas e no last_error (a tela mostra):
  * nunca o erro cru da Microsoft ou do Google (inglês e código). Um código que não diz nada à pessoa fica só como
@@ -209,7 +234,7 @@ export const PRECISA_ADMINISTRADOR = /AADSTS(65001|90094|90095)\b/;
 export function motivoDoProvedor(kind: 'microsoft' | 'google', error: string | null | undefined, descricao?: string | null): string {
   const tudo = `${error ?? ''} ${descricao ?? ''}`;
   const quem = kind === 'google' ? 'O Google' : 'A Microsoft';
-  if (PRECISA_ADMINISTRADOR.test(tudo) || /\b(consent_required|admin_policy_enforced)\b/.test(tudo)) return 'A empresa exige a aprovação do administrador.';
+  if (exigeAdministrador(error, descricao)) return 'A empresa exige a aprovação do administrador.';
   if (/AADSTS65004\b/.test(tudo) || error === 'access_denied') return 'A autorização foi recusada na página da conta.';
   if (!error && !descricao) return `${quem} não mandou resposta ao login. Tente de novo.`;
   const codigo = /\b(AADSTS\d+)\b/.exec(tudo)?.[1] ?? (error && /^[a-z][a-z_]{2,40}$/.test(error) ? error : null);
@@ -230,7 +255,10 @@ export function marcarEtapa(db: Db, workspaceId: string, etapa: Etapa, marca: Om
   const r = integrationRow(db, workspaceId, 'microsoft');
   const c = consentimentoDe(r);
   const etapas = { ...(c.etapas ?? {}) };
-  if (marca) etapas[etapa] = { ...marca, em: now() }; else delete etapas[etapa];
+  // pedir de novo uma etapa que a empresa só libera com o administrador não apaga isso: se a página da Microsoft não voltar, a
+  // tela continua com o pedido ao administrador (e não "Tentar de novo")
+  const admin = marca?.estado === 'pedido' && etapas[etapa]?.admin === true && marca.admin === undefined ? { admin: true } : {};
+  if (marca) etapas[etapa] = { ...marca, ...admin, em: now() }; else delete etapas[etapa];
   setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, etapas } } });
 }
 /** O `state` do link do administrador: um por workspace, guardado (o link pronto na tela não muda a cada leitura). */
@@ -241,6 +269,15 @@ export function estadoAdmin(db: Db, workspaceId: string): string {
   const novo = crypto.randomBytes(18).toString('base64url');
   setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, estadoAdmin: novo } } });
   return novo;
+}
+/**
+ * A etapa já foi pedida e voltou sem ser dada (ou a página da Microsoft não voltou em 10 minutos): o login encadeado não manda a
+ * pessoa de novo a ela (sso.ts). O "aprovado" pelo administrador conta como não recusada: aí ela passa. A marca herdada (veio
+ * junto de uma etapa anterior, sem esta ter sido pedida) também não conta.
+ */
+export function etapaJaRecusada(db: Db, workspaceId: string, etapa: Etapa): boolean {
+  const m = consentimentoDe(integrationRow(db, workspaceId, 'microsoft')).etapas?.[etapa];
+  return (m?.estado === 'bloqueado' && m.herdada !== true) || (m?.estado === 'pedido' && Date.now() - Date.parse(m.em) > STATE_TTL);
 }
 /** De quem é um `state` de link do administrador (a volta da Microsoft não traz a sessão de ninguém). */
 export function workspaceDoEstadoAdmin(db: Db, estado: string): string | null {
@@ -519,7 +556,7 @@ export function tokenProvider(kind: IntegrationKind, c: Record<string, string>):
     case 'linear': return new LinearProvider(c.token);
     case 'airtable': return new AirtableProvider(c.token);
     case 'smartsheet': return new SmartsheetProvider(c.token);
-    case 'pipefy': return new PipefyProvider(c.token);
+    case 'pipefy': return new PipefyProvider(c);
     case 'github': return new GitHubProjectsProvider(c.token);
     default: throw new HttpError(400, 'no_tasks', 'esta integração não tem tarefas');
   }
@@ -536,7 +573,7 @@ export class Integrations {
   private readonly googleTesting: boolean;
   constructor(db: Db, bus: Bus, cfg: Config) { this.db = db; this.bus = bus; this.secrets = new SecretStore(cfg.dataDir, () => db.fieldCipher);
     this.secrets.origem = (ws, kind) => db.get<{ o: string | null }>('SELECT origem_workspace_id AS o FROM integrations WHERE workspace_id = ? AND kind = ?', ws, kind)?.o ?? ws;
-    this.sso = new SsoAuth(cfg, this.secrets, (ws, kind, antes, conta) => { if (antes !== conta) this.promover(ws, kind); });  this.googleTesting = cfg.googleTesting; }
+    this.sso = new SsoAuth(cfg, this.secrets, (ws, kind, antes, conta) => { if (antes !== conta) this.promover(ws, kind); }, (ws, etapa) => etapaJaRecusada(db, ws, etapa));  this.googleTesting = cfg.googleTesting; }
 
   /** userId: o dono do workspace, que pode usar aqui uma conta dos outros workspaces dele (só ele vê as opções). */
   /**
@@ -565,6 +602,8 @@ export class Integrations {
       return {
         kind: d.kind, name: d.name, auth: d.auth, group: d.group, about: d.about, tasks: d.tasks, site: d.site, soon: d.soon ?? null, help: d.help ?? null,
         fields: (d.fields ?? []).map((f) => ({ name: f.name, label: f.label, secret: !!f.secret, placeholder: f.placeholder ?? '', opcional: !!f.opcional })),
+        // o jeito antigo de conectar ainda vale, mas a tela pede para reconectar do novo jeito
+        aviso: r?.state === 'connected' && d.credencialAntiga && d.credencialAntiga.antiga(this.secrets.read<Record<string, string>>(workspaceId, d.kind) ?? {}) ? d.credencialAntiga.aviso : null,
         state: r?.state ?? 'off', account: r?.account_label ?? null, connectedAt: r?.connected_at ?? null, lastSyncAt: r?.last_sync_at ?? null, error: r?.last_error ?? null,
         settings: d.kind === 'whatsapp' ? s : {}, ready: !isSso(d.kind) || this.sso.configured(d.kind),
         // conta emprestada de outro workspace seu
@@ -608,7 +647,8 @@ export class Integrations {
     if (kind === 'microsoft') return new MicrosoftTasksProvider(this.sso, workspaceId, workspaceTz(this.db, workspaceId));
     if (kind === 'google') return new GoogleTasksProvider(this.sso, workspaceId);
     const creds = this.secrets.read<Record<string, string>>(workspaceId, kind);
-    if (!creds?.token) throw new HttpError(409, 'not_connected', 'credencial ausente: conecte de novo');
+    // Pipefy: a conta de serviço não tem token (Client ID e Client Secret); quem conectou antes, sim
+    if (!creds?.token && !(kind === 'pipefy' && creds?.client_id)) throw new HttpError(409, 'not_connected', 'credencial ausente: conecte de novo');
     return tokenProvider(kind, creds);
   }
 
@@ -626,6 +666,8 @@ export class Integrations {
       creds[f.name] = v;
     }
     if (kind === 'jira' && !jiraHost(creds.site)) throw new HttpError(400, 'field', 'Endereço do Jira: use sua-empresa.atlassian.net (só Jira Cloud)');
+    // o segredo da conta de serviço só vai ao próprio Pipefy
+    if (kind === 'pipefy' && creds.token_url) { try { creds.token_url = enderecoTokenPipefy(creds.token_url); } catch (e) { throw new HttpError(400, 'field', e instanceof Error ? e.message : 'endereço inválido'); } }
     let conta: ContaConferida;
     try { conta = d.tasks ? await tokenProvider(kind, creds).whoami() : await conferir(kind, creds); } catch (err) {
       if (err instanceof ErroAcao) throw new HttpError(400, 'field', err.message);

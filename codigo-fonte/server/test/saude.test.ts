@@ -88,7 +88,7 @@ describe('painel de saúde', () => {
     const base = { db: h.db, cfg: h.cfg, vault: h.vault, hermes, executorMode: () => 'real' as const, motorVault: () => ({ state: 'aberto', lastError: null }), inContainer: () => false };
     const ms = { estado: 'aberto' as const, erro: null, semConexoes: false, falha: null as string | null, adiada: null as string | null, versao: '9.9.9-rc.1' };
     const motor = async (x: Partial<typeof ms>, semConexoes = false) => (await healthPanel({ ...base, motor: () => ({ ...ms, ...x }), semConexoes: () => semConexoes })).componentes.find((c) => c.id === 'motor')!;
-    assert.deepEqual(await motor({ estado: 'renovando' as never }), { id: 'motor', nome: 'Equipe de IA', estado: 'limitado', detalhe: 'Atualizando a equipe para a versão 9.9.9-rc.1: os pedidos novos esperam e seguem sozinhos quando terminar' });
+    assert.deepEqual(await motor({ estado: 'renovando' as never }), { id: 'motor', nome: 'Equipe de IA', estado: 'limitado', detalhe: 'Atualizando a equipe para a versão 9.9.9-rc.1: os pedidos novos esperam (até 30 minutos) e seguem sozinhos quando terminar' });
     const sem = await motor({ semConexoes: true });
     const SEM_CONEXOES = 'no ar · as Conexões não estão nesta versão da equipe: os agentes ainda não conseguem usar as contas conectadas';
     assert.equal(sem.estado, 'limitado'); assert.equal(sem.detalhe, SEM_CONEXOES);
@@ -101,9 +101,10 @@ describe('painel de saúde', () => {
     // um motivo gravado com peça interna (registro de antes) não vai cru para a tela
     const cru = await motor({ falha: 'a ponte de controle do motor não respondeu' });
     assert.match(cru.detalhe, /não deu certo \(a versão nova não passou na conferência\)/);
-    // a versão nova ainda não chegou: o de antes funciona, e o sistema tenta de novo sozinho
+    // a versão nova ainda não chegou: o de antes funciona, e o sistema tenta de novo sozinho ao abrir o Ergon (ou um dia)
     const a = await motor({ adiada: 'a versão nova da equipe ainda não chegou a este computador (sem internet, ou o download não terminou)' });
-    assert.equal(a.estado, 'limitado'); assert.match(a.detalhe, /atualização da equipe para a versão 9\.9\.9-rc\.1 pendente: a versão nova da equipe ainda não chegou.*o sistema tenta de novo sozinho/);
+    assert.equal(a.estado, 'limitado'); assert.match(a.detalhe, /atualização da equipe para a versão 9\.9\.9-rc\.1 pendente: a versão nova da equipe ainda não chegou.*o sistema tenta de novo sozinho quando o Ergon for aberto \(ou uma vez por dia/);
+    assert.doesNotMatch(a.detalhe, /minutos/, 'nada de "a cada poucos minutos"');
     for (const c of [sem, f, cru, a]) assert.doesNotMatch(`${c.nome} ${c.detalhe}`, JARGAO, c.detalhe);
     await h.close();
   });

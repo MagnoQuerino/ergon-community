@@ -187,6 +187,9 @@ describe('ponte do motor', () => {
     assert.deepEqual(h.conexoes.bloqueadas(row), []);
     await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' });
     assert.deepEqual(h.conexoes.leu(row), { deFora: true, privado: true }, 'a leitura marca a sessão');
+    // a proteção depois de ler é desligada por padrão (decisão de 08/11): só com ela ligada a lista vale
+    assert.deepEqual(h.conexoes.bloqueadas(row), [], 'sem a proteção ligada, nada é barrado');
+    h.conexoes.setAprovarDepoisDeLer(s.workspaceId, s.userId, true);
     assert.ok(h.conexoes.bloqueadas(row).includes('web_extract')); assert.ok(h.conexoes.bloqueadas(row).includes('terminal'));
     assert.ok(!h.conexoes.bloqueadas(row).includes('web_search'), 'a busca segue valendo');
     const p = (await req(h, 'POST', '/internal/bridge/v1/tool-policy', null, { session_id: sessao }, { 'x-ergon-bridge-token': TOKEN })).json;

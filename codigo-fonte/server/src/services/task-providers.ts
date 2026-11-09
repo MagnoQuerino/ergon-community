@@ -55,7 +55,7 @@ function motivoDe(e: Json): string {
   for (const v of [e.faultstring, e.description, e.detail, typeof e.message === 'string' ? null : e.title]) if (typeof v === 'string' && v.trim()) return v;
   const x = e.error ?? e.errors?.[0] ?? e;
   if (typeof x === 'string') return typeof e.message === 'string' ? `${x}: ${e.message}` : x;
-  return [x?.code ?? x?.extensions?.code ?? x?.type ?? x?.errorCode ?? x?.error_code ?? x?.status, x?.message ?? x?.error_message ?? e?.message].filter((v) => typeof v === 'string' || typeof v === 'number').join(': ');
+  return [x?.code ?? x?.extensions?.code ?? x?.type ?? x?.errorCode ?? x?.error_code ?? x?.status, x?.message ?? x?.error_message ?? x?.description ?? x?.detail ?? e?.message].filter((v) => typeof v === 'string' || typeof v === 'number').join(': ');
 }
 
 /** O motivo da recusa, para a mensagem: em uma linha, cortado e sem a credencial (tirada antes do corte: pela metade, não seria reconhecida). */
@@ -93,6 +93,31 @@ export async function request(url: string, init: { method?: string; headers?: Re
   if (!res.ok) throw new ProviderError('unavailable', `o serviço respondeu ${res.status}${await motivo(res, init.headers, url, init.segredos)}`, { status: res.status });
   const t = await res.text();
   try { return t ? JSON.parse(t) : {}; } catch { throw new ProviderError('unavailable', 'resposta inesperada do serviço'); }
+}
+
+/**
+ * Credencial de aplicativo (OAuth2 client credentials) trocada por um acesso temporário, guardado até perto de vencer: um por
+ * credencial. Usado pelos conectores por dados (Zendesk) e pelo Pipefy (conta de serviço). O segredo entra na chave (resumido):
+ * sem ele, um segredo errado aproveitaria o acesso de quem conectou com o certo.
+ */
+const ACESSOS = new Map<string, { token: string; vence: number }>();
+export async function acessoPorCliente(c: { url: string; id: string; segredo: string; escopo?: string }, renovar = false): Promise<string> {
+  const k = `${c.url}|${c.id}|${crypto.createHash('sha256').update(c.segredo).digest('hex')}`;
+  const hit = ACESSOS.get(k);
+  if (!renovar && hit && hit.vence - Date.now() > 60_000) return hit.token;
+  let j: Json;
+  try {
+    j = await request(c.url, { method: 'POST', body: { grant_type: 'client_credentials', client_id: c.id, client_secret: c.segredo, ...(c.escopo ? { scope: c.escopo } : {}) }, redirect: 'error', segredos: [c.segredo] });
+  } catch (e) {
+    // credencial recusada na troca: não é o acesso vencido, e pedir de novo não adianta
+    if (e instanceof ProviderError && e.status === 401) throw new ProviderError('forbidden', 'o serviço recusou a credencial: confira o identificador e o segredo em Conexões', { status: 403 });
+    throw e;
+  }
+  if (typeof j?.access_token !== 'string' || !j.access_token) throw new ProviderError('forbidden', 'o serviço não entregou o acesso: confira a credencial em Conexões', { status: 403 });
+  if (ACESSOS.size > 200) ACESSOS.clear();
+  const dura = Number(j.expires_in);
+  ACESSOS.set(k, { token: j.access_token, vence: Date.now() + (Number.isFinite(dura) && dura > 0 ? dura : 1800) * 1000 });
+  return j.access_token;
 }
 
 /** GraphQL: erro com dados parciais segue com os dados; sem dados, o erro sobe (credencial → "forbidden"). */
@@ -510,7 +535,51 @@ export class SmartsheetProvider implements AccountProvider {
   }
 }
 
-// ---------------------------------------------------------------- Pipefy (token pessoal, GraphQL; cada pipe é um quadro)
+// ------------------------------------------- Pipefy (conta de serviço ou token pessoal antigo, GraphQL; cada pipe é um quadro)
+/**
+ * Como o Ergon entra no Pipefy. O jeito atual é a conta de serviço (OAuth2 client credentials): Client ID e Client Secret
+ * trocados por um acesso que vence (de 5 minutos a 30 dias, escolhido ao criar a conta). O token de acesso pessoal foi marcado
+ * como obsoleto pelo Pipefy; quem conectou com ele continua funcionando enquanto o Pipefy aceitar, com aviso para reconectar.
+ * Referências oficiais (conferidas em 08/11/2026):
+ *   https://developers.pipefy.com/reference/authentication (contas de serviço recomendadas; token pessoal obsoleto; Bearer)
+ *   https://developers.pipefy.com/reference/service-accounts (client_credentials, POST no endereço do token, validade, mesmo acesso até vencer)
+ *   https://developers.pipefy.com/reference/unauthorized-error (token pessoal obsoleto como causa de "Unauthorized"; api.pipefy.com/graphql)
+ *   https://help.pipefy.com/en/articles/9027789-service-accounts (Membros e permissões › Contas de serviço; só Super Admin)
+ * O endereço do token aparece no Pipefy junto do Client ID e do Client Secret; o padrão é o de app.pipefy.com, e outro endereço
+ * só é aceito se for do próprio Pipefy (o segredo nunca vai a outro lugar).
+ */
+export interface CredPipefy { token?: string; client_id?: string; client_secret?: string; token_url?: string }
+export const PIPEFY_TOKEN_URL = 'https://app.pipefy.com/oauth/token';
+const PIPEFY_API = 'https://api.pipefy.com/graphql';
+/** O endereço do token, conferido: https e domínio do Pipefy. */
+export function enderecoTokenPipefy(v?: string | null): string {
+  const s = String(v ?? '').trim();
+  if (!s) return PIPEFY_TOKEN_URL;
+  let u: URL;
+  try { u = new URL(s); } catch { throw new ProviderError('forbidden', 'endereço de acesso inválido: copie o que o Pipefy mostra na conta de serviço, ou deixe em branco'); }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port || !/(^|\.)pipefy\.com$/i.test(u.hostname)) throw new ProviderError('forbidden', 'o endereço de acesso precisa ser do próprio Pipefy (pipefy.com)');
+  return `${u.origin}${u.pathname}`;
+}
+/** Conectou do jeito antigo (token pessoal) e ainda não reconectou com a conta de serviço. */
+export const pipefyAntigo = (c: CredPipefy | null | undefined): boolean => !!c?.token && !(c.client_id && c.client_secret);
+const credPipefy = (c: CredPipefy | string): CredPipefy => (typeof c === 'string' ? { token: c } : c);
+/** O cabeçalho de acesso ao Pipefy. `renovar`: pede um acesso novo da conta de serviço (o de agora foi recusado). */
+async function acessoPipefy(c: CredPipefy, renovar = false): Promise<Record<string, string>> {
+  if (c.client_id && c.client_secret) return { Authorization: `Bearer ${await acessoPorCliente({ url: enderecoTokenPipefy(c.token_url), id: c.client_id, segredo: c.client_secret }, renovar)}` };
+  if (c.token) return { Authorization: `Bearer ${c.token}` };
+  throw new ProviderError('forbidden', 'credencial do Pipefy ausente: conecte de novo em Conexões', { reauth: true });
+}
+/**
+ * Chamada ao Pipefy com o acesso certo. Acesso da conta de serviço recusado (401) antes da hora: pede outro e repete uma vez.
+ * Repetir é seguro: com 401, o Pipefy não fez nada.
+ */
+export async function comAcessoPipefy<T>(cred: CredPipefy | string, f: (h: Record<string, string>) => Promise<T>): Promise<T> {
+  const c = credPipefy(cred);
+  try { return await f(await acessoPipefy(c)); } catch (e) {
+    if (!(c.client_id && c.client_secret && e instanceof ProviderError && e.status === 401)) throw e;
+    return f(await acessoPipefy(c, true));
+  }
+}
 /** O card do Pipefy não tem descrição própria: ela fica neste campo de texto do pipe. A leitura e o escritor usam a mesma escolha. */
 export function campoDescricaoPipefy(pipe: Json): { id: string; label: string; type: string } | undefined {
   const textos = [...(pipe?.start_form_fields ?? []), ...((pipe?.phases ?? []) as Json[]).flatMap((f) => f.fields ?? [])].filter((c: Json) => /descri|nota|notes|detalhe/i.test(String(c.label)));
@@ -518,9 +587,9 @@ export function campoDescricaoPipefy(pipe: Json): { id: string; label: string; t
 }
 export class PipefyProvider implements AccountProvider {
   readonly name = 'pipefy'; readonly isFixture = false; readonly supports = SUPPORTS;
-  private readonly h: Record<string, string>;
-  constructor(token: string) { this.h = { Authorization: `Bearer ${token}` }; }
-  private q(query: string, v: Record<string, unknown> = {}) { return graphql('https://api.pipefy.com/graphql', this.h, query, v); }
+  private readonly c: CredPipefy;
+  constructor(cred: CredPipefy | string) { this.c = credPipefy(cred); }
+  private q(query: string, v: Record<string, unknown> = {}) { return comAcessoPipefy(this.c, (h) => graphql(PIPEFY_API, h, query, v)); }
   async whoami() { const d = await this.q('{ me { id name email } }'); return contaConferida(d.me?.name || d.me?.email || 'conta Pipefy', d.me?.id); }
   async listBoards(): Promise<Boards> {
     const orgs = ((await this.q('{ organizations { id name pipes { id name } } }')).organizations ?? []) as Json[];

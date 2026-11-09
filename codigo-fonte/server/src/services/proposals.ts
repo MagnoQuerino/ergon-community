@@ -15,6 +15,8 @@ import { attrs, describeRoutineProposal, type RoutineProposal } from './routine-
 import { createSector, moveToSector, sectorByName, updateSector } from './sectors.ts';
 import { createTask, defaultBoard, userBoard } from './tasks.ts';
 import type { Plan } from './purpose.ts';
+import { cardTitle } from './card-title.ts';
+import { mesmaRegra, parseRegras, resumoDaProposta, type PropostaRegra } from './conexoes/regras.ts';
 
 export type Proposal =
   | { kind: 'sector'; agent: string; sector: string }
@@ -47,6 +49,17 @@ export type Proposal =
    * conexao: o nome do aplicativo; conta: por onde sai; detalhe: o destino real lido antes; resumo: o que vai acontecer, com o texto inteiro
    */
   | { kind: 'conexao'; acaoId: string; conexao: string; conta: string | null; detalhe?: string; resumo: string; porque: string }
+  /**
+   * com a proteção ligada (Conexões), depois de ler conteúdo das contas: abrir sites ou rodar programas espera o seu clique
+   * (conexoes/servico.ts, pedirAprovacao). escopo: conv:<id> ou task:<id>, onde a aprovação vale por uma hora; chaves: o
+   * que ela libera (conexoes/regra.ts, chavesDeAprovacao: o site, a página aberta ou o programa exato), nada além
+   */
+  | { kind: 'depois_de_ler'; agente: string; grupo: 'sites' | 'programas'; escopo: string; chaves: string[]; ferramenta: string; alvo: string; resumo: string }
+  /**
+   * liberar sem confirmação um tipo de ação nas contas (conexoes/regras.ts): proposta pela coordenação ou pela sua frase;
+   * você escolhe o alcance no clique (só neste pedido, por 24 h, sempre)
+   */
+  | PropostaRegra
   /** apagar de vez (arquivos ou a lixeira): só com o seu clique; a equipe nunca apaga sozinha */
   | { kind: 'purge'; agent: string; artifactIds: string[]; names: string[]; emptyTrash?: boolean };
 
@@ -166,16 +179,20 @@ export function parseProposals(text: string | null): Proposal[] {
     }
     if (out.length >= 15) break;
   }
+  // liberar sem confirmação (a pessoa escolhe o alcance no cartão)
+  for (const r of parseRegras(text)) if (out.length < 15) out.push({ ...r, resumo: resumoDaProposta(r) });
   return out;
 }
 
 /** Frase do usuário para a coordenação, por regras: "mova a Fídias para o setor de comunicação". */
 export function parseChatCommand(text: string): Proposal | null {
   const t = text.trim();
+  // "renomeie o #12 para …", "mova o card 12 para …": é o card, não um agente (o sistema aplica pela regra do card)
+  const card = (s: string) => /#\d{1,6}\b|\b(?:card|cart[aã]o|tarefa)\b/i.test(s);
   const mv = t.match(/^(?:por favor,?\s*)?(?:mova|mover|mude|mudar|transfira|transferir|passe|passar|coloque|colocar)\s+(?:o\s+|a\s+)?(.{2,40}?)\s+(?:para|pro|pra)\s+(?:o\s+|a\s+)?(?:setor\s+(?:de\s+|da\s+|do\s+)?)?(.{3,60}?)[.!]?$/i);
-  if (mv) return { kind: 'sector', agent: mv[1].trim(), sector: mv[2].trim() };
+  if (mv && !card(mv[1])) return { kind: 'sector', agent: mv[1].trim(), sector: mv[2].trim() };
   const rn = t.match(/^(?:por favor,?\s*)?(?:renomeie|renomear|mude o nome d[oae]s?|troque o nome d[oae]s?)\s+(?:o\s+|a\s+)?(.{2,40}?)\s+(?:para|pra)\s+["“]?([^"”.!]{2,40})["”]?[.!]?$/i);
-  if (rn) return { kind: 'edit_agent', agent: rn[1].trim(), changes: { name: rn[2].trim() } };
+  if (rn && !card(rn[1])) return { kind: 'edit_agent', agent: rn[1].trim(), changes: { name: rn[2].trim() } };
   const nw = t.match(/^(?:por favor,?\s*)?(?:crie|criar|contrate|contratar|adicione|adicionar)\s+(?:um\s+|uma\s+)?(?:novo\s+|nova\s+)?agente\s+(?:chamad[oa]\s+)?["“]?([^"”,—–-]{2,40}?)["”]?\s*(?:,|—|–|-|para|como|que\s+cuide\s+de)\s*(.{3,80}?)[.!]?$/i);
   if (nw) return { kind: 'create_agent', name: nw[1].trim(), role: nw[2].trim(), sector: 'automático' };
   // "cancele / pare / apague o card 12" ("para o card 12…" fica de fora: começa muita frase que não é ordem)
@@ -206,6 +223,7 @@ const findAny = (db: Db, workspaceId: string, name: string, status: 'active' | '
 function describe(db: Db, workspaceId: string, p: Proposal): string {
   // conta, destino e motivo antes do texto: o começo do cartão basta para decidir, e o texto segue inteiro
   if (p.kind === 'conexao') return [`${p.conexao}${p.conta ? ` · pela conta ${p.conta}` : ''}`, p.detalhe, `(Pede confirmação porque ${p.porque}.)`, p.resumo].filter(Boolean).join('\n');
+  if (p.kind === 'depois_de_ler' || p.kind === 'regra') return p.resumo;
   if (p.kind === 'edit_agent') {
     const c = p.changes; const who = findAgent(db, workspaceId, p.agent)?.name ?? p.agent;
     const parts = [c.name && `nome → ${c.name}`, c.role && `função → ${c.role}`, c.sector && `setor → ${sectorByName(db, workspaceId, c.sector)?.name ?? c.sector}`,
@@ -222,7 +240,7 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   if (p.kind === 'routine' || p.kind === 'routine_edit') return describeRoutineProposal(db, workspaceId, p);
   if (p.kind === 'question') return p.question;
   if (p.kind === 'batch') {
-    const lines = [...p.plans].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)).map((x, i) => `${i + 1}. ${clip(x.objective, 90)} — ${x.steps.map((s) => s.agent).join(' → ')}${x.after?.length ? ` (depois do ${x.after.join(', ')})` : ''}`);
+    const lines = [...p.plans].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)).map((x, i) => `${i + 1}. ${clip(cardTitle({ plan: x.objective, candidates: [x.steps[0]?.task] }).title, 90)} —${x.steps.map((s) => s.agent).join(' → ')}${x.after?.length ? ` (depois do ${x.after.join(', ')})` : ''}`);
     return `Abrir ${p.plans.length} cards, nesta ordem na fila:\n${lines.join('\n')}`;
   }
   if (p.kind === 'purge') return p.emptyTrash ? `${p.agent} quer esvaziar a lixeira (apaga de vez o que está lá)` : `${p.agent} quer apagar de vez: ${p.names.slice(0, 12).join(', ')}${p.names.length > 12 ? `… (${p.names.length})` : ''}`;
@@ -232,7 +250,7 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   }
   if (p.kind === 'task') {
     const who = p.assignee ? findAgent(db, workspaceId, p.assignee)?.name ?? p.assignee : null;
-    return `Criar a tarefa "${p.title}"${who ? ` para ${who}` : ' (sua)'}${p.due ? `, prazo ${p.due.slice(8, 10)}/${p.due.slice(5, 7)}` : ''} — proposta ${byWho(p.routine)}${p.origin ? ` (de ${p.origin})` : ''}${p.detail ? `\n${clip(p.detail, 300)}` : ''}`;
+    return `Criar a tarefa "${p.assignee && findAgent(db, workspaceId, p.assignee) ? cardTitle({ plan: p.title, candidates: [p.detail] }).title : p.title}"${who ? ` para ${who}` : ' (sua)'}${p.due ? `, prazo ${p.due.slice(8, 10)}/${p.due.slice(5, 7)}` : ''} — proposta ${byWho(p.routine)}${p.origin ? ` (de ${p.origin})` : ''}${p.detail ? `\n${clip(p.detail, 300)}` : ''}`;
   }
   if (p.kind === 'ledger') {
     const ent = p.items.filter((i) => i.valor > 0).reduce((x, i) => x + i.valor, 0); const sai = p.items.filter((i) => i.valor < 0).reduce((x, i) => x + i.valor, 0);
@@ -255,7 +273,17 @@ const MAX_CONEXAO = 300_000;
 export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { conversationId: string | null; runId: string | null }, all: Proposal[]): number {
   // cancelar um card que não está no quadro (inventado, ou já cancelado) não vira cartão para você aplicar e ver falhar
   const missing: number[] = [];
+  // a mesma regra já esperando nesta conversa (a frase dela e o marcador da coordenação para a mesma mensagem): um cartão só
+  const regrasEsperando = ctx.conversationId && all.some((p) => p.kind === 'regra')
+    ? db.all<{ payload: string }>("SELECT payload FROM agent_proposals WHERE workspace_id = ? AND conversation_id = ? AND kind = 'regra' AND status = 'proposed'", workspaceId, ctx.conversationId)
+      .map((x) => JSON.parse(x.payload) as PropostaRegra)
+    : [];
   const items = all.filter((p) => {
+    if (p.kind === 'regra') {
+      if (regrasEsperando.some((x) => mesmaRegra(x, p))) return false;
+      regrasEsperando.push(p);
+      return true;
+    }
     if (p.kind !== 'delete_task') return true;
     const ok = !!db.get('SELECT 1 AS x FROM tasks WHERE workspace_id = ? AND number = ? AND archived = 0', workspaceId, p.number);
     if (!ok) missing.push(p.number);
@@ -272,7 +300,7 @@ export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { co
       db.run(`INSERT INTO agent_proposals (id, workspace_id, conversation_id, run_id, kind, payload, summary, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id('apr'), workspaceId, ctx.conversationId, ctx.runId, p.kind, db.seal(workspaceId, JSON.stringify(p)),
-        db.seal(workspaceId, clip(describe(db, workspaceId, p), p.kind === 'conexao' ? MAX_CONEXAO : ['routine', 'routine_edit', 'edit_agent', 'batch', 'purge'].includes(p.kind) ? 6000 : 300)),
+        db.seal(workspaceId, clip(describe(db, workspaceId, p), p.kind === 'conexao' ? MAX_CONEXAO : ['routine', 'routine_edit', 'edit_agent', 'batch', 'purge', 'depois_de_ler', 'regra'].includes(p.kind) ? 6000 : 300)),
         // o aviso de pedido passado à coordenação não espera decisão (a senha é pedida lá)
         p.kind === 'handoff' ? 'applied' : 'proposed', now());
     }
@@ -304,7 +332,8 @@ export function reconsiderProposal(db: Db, bus: Bus, workspaceId: string, userId
 /** Cards da equipe parados à espera do usuário: uma informação, uma aprovação (ou confirmação) ou uma decisão. */
 const WAITING_STATES = ['aguardando_info', 'aguardando_aprovacao', 'revisao'];
 /** card que espera o clique numa ação de conta já aparece pelo cartão dela (com #N e quem pediu): não conta duas vezes */
-const SEM_CONEXAO_PENDENTE = "NOT EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente')";
+const SEM_CONEXAO_PENDENTE = "NOT EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente')"
+  + " AND NOT EXISTS (SELECT 1 FROM agent_proposals ap JOIN runs ar ON ar.id = ap.run_id WHERE ar.task_id = t.id AND ap.kind = 'depois_de_ler' AND ap.status = 'proposed')";
 /**
  * o que não foi feito (falha) nunca aparece aqui com Aprovar: falha se resolve no card ("Tentar de novo" ou cancelar),
  * e "aprovar" o que não aconteceu seria concluir sem evidência (results.ts recusa). O que você recusou no cartão
@@ -320,10 +349,10 @@ const SEM_FALHA = "COALESCE((SELECT y.state FROM task_results y WHERE y.task_id 
  */
 export function pendingDecisions(db: Db, workspaceId: string) {
   // ação numa conta pedida num card da equipe: o card (#N, com link) e quem pediu vêm da execução
-  const proposals = db.all<{ id: string; kind: string; summary: string; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id: string | null; task_number: number | null }>(
-    `SELECT p.id, p.kind, p.summary, p.created_at, p.conversation_id, c.agent_id, COALESCE(a.name, ra.name) AS agent_name, c.purpose, t.id AS task_id, t.number AS task_number
+  const proposals = db.all<{ id: string; kind: string; summary: string; payload: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id: string | null; task_number: number | null }>(
+    `SELECT p.id, p.kind, p.summary, CASE WHEN p.kind = 'regra' THEN p.payload END AS payload, p.created_at, p.conversation_id, c.agent_id, COALESCE(a.name, ra.name) AS agent_name, c.purpose, t.id AS task_id, t.number AS task_number
        FROM agent_proposals p LEFT JOIN conversations c ON c.id = p.conversation_id LEFT JOIN agents a ON a.id = c.agent_id
-       LEFT JOIN runs r ON r.id = p.run_id AND p.kind = 'conexao' LEFT JOIN agents ra ON ra.id = r.agent_id LEFT JOIN tasks t ON t.id = r.task_id
+       LEFT JOIN runs r ON r.id = p.run_id AND p.kind IN ('conexao', 'depois_de_ler') LEFT JOIN agents ra ON ra.id = r.agent_id LEFT JOIN tasks t ON t.id = r.task_id
       WHERE p.workspace_id = ? AND p.status = 'proposed' AND p.kind <> 'info_request' ORDER BY p.created_at DESC LIMIT 50`, workspaceId);
   const waiting = db.all<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>(
     `SELECT r.id, r.conversation_id, r.agent_id, a.name AS agent_name, r.created_at FROM runs r JOIN agents a ON a.id = r.agent_id
@@ -388,7 +417,7 @@ export function answerQuestion(db: Db, bus: Bus, workspaceId: string, userId: st
 
 export function listProposals(db: Db, workspaceId: string, conversationId?: string | null) {
   return db.all(
-    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff') THEN payload END AS payload FROM agent_proposals
+    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff', 'regra') THEN payload END AS payload FROM agent_proposals
       WHERE workspace_id = ? ${conversationId ? 'AND (conversation_id = ? OR id IN (SELECT proposal_id FROM proposal_links WHERE conversation_id = ?))' : ''} ORDER BY created_at DESC LIMIT 50`,
     ...(conversationId ? [workspaceId, conversationId, conversationId] : [workspaceId]));
 }
@@ -442,7 +471,7 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
   const p = JSON.parse(row.payload) as Proposal;
   if (p.kind === 'permission' && decision === 'apply') throw new HttpError(400, 'needs_password', 'Para liberar, autorize com a sua senha no próprio cartão.');
   if (row.kind === 'info_request') throw new HttpError(400, 'respond', 'Responda pelo próprio cartão (responder, aprovar ou devolver).');
-  if (row.kind === 'conexao') throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
+  if (row.kind === 'conexao' || row.kind === 'depois_de_ler' || row.kind === 'regra') throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
   let status: 'applied' | 'rejected' | 'failed' = 'rejected';
   let result = 'recusada';
   if (decision === 'apply') {
@@ -487,9 +516,13 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
       } else if (p.kind === 'task') {
         // com responsável da equipe vai para o quadro da equipe (vira trabalho dele); sem, fica nas suas tarefas
         const a = p.assignee ? findAgent(db, workspaceId, p.assignee) : undefined;
+        // no quadro da equipe, o título é o que o agente propôs (aprovar não é escolher o nome): a coordenação pode
+        // melhorá-lo depois; vago ("Ver isso"), vai um tirado do detalhe ou o provisório (card-title.ts)
+        const named = a ? cardTitle({ plan: p.title, candidates: [p.detail] }) : null;
         const t = createTask(db, bus, workspaceId, { type: 'user', id: userId }, {
-          title: p.title, description: [p.detail, `Proposta ${byWho(p.routine)}${p.origin ? ` (origem: ${p.origin})` : ''} e aprovada por você.`].filter(Boolean).join('\n\n'),
+          title: named?.title ?? p.title, description: [p.detail, `Proposta ${byWho(p.routine)}${p.origin ? ` (origem: ${p.origin})` : ''} e aprovada por você.`].filter(Boolean).join('\n\n'),
           boardId: a ? defaultBoard(db, workspaceId).id : userBoard(db, workspaceId).id, agentId: a?.id ?? null, origin: 'chat', dueOn: p.due,
+          ...(named ? { titleSource: named.source } : {}),
         });
         result = `tarefa #${t.number} criada${a ? ` para ${a.name}` : ' nas suas tarefas'}${p.assignee && !a ? ` (não achei "${p.assignee}" na equipe)` : ''}`;
       } else if (p.kind === 'ledger') {
@@ -522,7 +555,7 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         result = `${r.name} agora está no setor ${r.sector}`;
       } else if (p.kind === 'handoff') {
         throw new HttpError(409, 'decided', 'aviso: a autorização é feita na conversa com a coordenação');
-      } else if (p.kind === 'conexao') {
+      } else if (p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra') {
         throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
       } else {
         const auto = /^autom/i.test(fold(p.sector));

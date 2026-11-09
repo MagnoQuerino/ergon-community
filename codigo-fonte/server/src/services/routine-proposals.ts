@@ -141,15 +141,16 @@ export function describeRoutineProposal(db: Db, workspaceId: string, p: RoutineP
   return lines.filter(Boolean).join('\n');
 }
 
-/** O que a coordenação precisa saber para criar, ajustar e reapresentar rotinas (vai nas instruções dela). */
-export function routineContextFor(db: Db, workspaceId: string): string {
-  const mine = db.all<{ name: string; trigger: string; status: string }>("SELECT name, trigger, status FROM routines WHERE workspace_id = ? AND status != 'archived' ORDER BY created_at LIMIT 20", workspaceId);
-  const refused = db.all<{ id: string; summary: string; decided_at: string }>(
-    "SELECT id, summary, decided_at FROM agent_proposals WHERE workspace_id = ? AND kind = 'routine' AND status = 'rejected' ORDER BY decided_at DESC LIMIT 6", workspaceId);
+/**
+ * O que a coordenação precisa saber para criar, ajustar e reapresentar rotinas. A parte fixa (o protocolo, a sintaxe e as
+ * travas de honestidade) vai entre as instruções; o que muda (as rotinas deste workspace e as sugestões recusadas) vai na
+ * situação do workspace (routineContextFor). Separado assim, o protocolo nunca fica sob "use como informação" e o começo
+ * das instruções se repete de um pedido para o outro (cache do provedor).
+ */
+export function routineHowFor(): string {
   const ready = CATALOG.filter((t) => t.available);
   return [
-    'Rotinas: trabalhos recorrentes que o sistema executa sozinho (coleta os dados por código e chama um agente só para o que pede análise).',
-    mine.length ? `Rotinas deste workspace: ${mine.map((r) => `${r.name} (${scheduleText(JSON.parse(r.trigger) as Trigger)}${r.status === 'paused' ? ', pausada' : ''})`).join('; ')}.` : 'Ainda não há rotinas ativas.',
+    'Rotinas: trabalhos recorrentes que o sistema executa sozinho (coleta os dados por código e chama um agente só para o que pede análise). As rotinas deste workspace estão na situação do workspace, abaixo.',
     'Quando o usuário pedir uma rotina (ou mudar uma), mostre antes uma prévia curta: o que faz, quando, o que olha, quem executa e o que entrega. Depois escreva UMA linha de controle; nada vale até o usuário aplicar:',
     '[[propor-rotina nome="Nome curto" quando="seg a sex 08:00" agente="Nome do agente" fontes="id,id" condicao="sempre|novidades|sinal" entrega="conversa,arquivo" instrucao="o trabalho, em 2 a 5 frases"]]',
     `Para partir de um modelo pronto, acrescente modelo="chave" (e use instrucao só para o ajuste): ${ready.map((t) => `${t.key} (${t.name})`).join(', ')}.`,
@@ -157,6 +158,17 @@ export function routineContextFor(db: Db, workspaceId: string): string {
     `Fontes permitidas (a coleta é do Ergon; você não cria operações novas nem executa código): ${Object.entries(SOURCES).map(([k, v]) => `${k} = ${v}`).join('; ')}.`,
     'condicao: sempre; novidades = só usa o modelo se algo mudou; sinal = só quando a coleta acha algo que pede atenção (economiza créditos).',
     'O que depende de e-mail, WhatsApp, documentos ou web ainda não pode virar rotina: diga que chega nas próximas fases.',
-    refused.length ? `Sugestões de rotina recusadas (não proponha de novo por conta própria; se o usuário pedir uma delas de volta, escreva [[reapresentar-rotina id="..."]]):\n${refused.map((r) => `- ${r.id}: ${clip(r.summary.replace(/\s+/g, ' '), 160)} (recusada em ${r.decided_at.slice(0, 10)})`).join('\n')}` : '',
+    'Sugestões de rotina recusadas (listadas na situação do workspace, abaixo): não proponha de novo por conta própria; se o usuário pedir uma delas de volta, escreva [[reapresentar-rotina id="..."]].',
+  ].join('\n');
+}
+
+/** As rotinas deste workspace e as sugestões recusadas: dado de agora (o protocolo está em routineHowFor). */
+export function routineContextFor(db: Db, workspaceId: string): string {
+  const mine = db.all<{ name: string; trigger: string; status: string }>("SELECT name, trigger, status FROM routines WHERE workspace_id = ? AND status != 'archived' ORDER BY created_at LIMIT 20", workspaceId);
+  const refused = db.all<{ id: string; summary: string; decided_at: string }>(
+    "SELECT id, summary, decided_at FROM agent_proposals WHERE workspace_id = ? AND kind = 'routine' AND status = 'rejected' ORDER BY decided_at DESC LIMIT 6", workspaceId);
+  return [
+    mine.length ? `Rotinas deste workspace: ${mine.map((r) => `${r.name} (${scheduleText(JSON.parse(r.trigger) as Trigger)}${r.status === 'paused' ? ', pausada' : ''})`).join('; ')}.` : 'Ainda não há rotinas ativas.',
+    refused.length ? `Sugestões de rotina recusadas:\n${refused.map((r) => `- ${r.id}: ${clip(r.summary.replace(/\s+/g, ' '), 160)} (recusada em ${r.decided_at.slice(0, 10)})`).join('\n')}` : '',
   ].filter(Boolean).join('\n');
 }

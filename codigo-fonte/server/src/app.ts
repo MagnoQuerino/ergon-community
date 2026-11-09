@@ -12,7 +12,8 @@ import { INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './servic
 import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
 import { activityReport, reportPeriod } from './services/activity-report.ts';
-import { Conexoes } from './services/conexoes/servico.ts';
+import { Conexoes, KIND_DEPOIS_DE_LER, KIND_REGRA } from './services/conexoes/servico.ts';
+import { ALCANCES, PRAZOS_DEPOIS_DE_LER, sugestaoDoAgente, type Alcance, type PrazoDepoisDeLer } from './services/conexoes/regras.ts';
 import type { Permissoes } from './services/conexoes/catalogo.ts';
 import { EspelhoEscrita } from './services/conexoes/espelho.ts';
 import { log, scrub, setLog } from './lib/log.ts';
@@ -26,7 +27,7 @@ import { PersonKeySource, Vault } from './security/keys.ts';
 import { WorkspaceOwners, isAdmin, openPersonWithPassword, signupPolicy } from './services/people.ts';
 import { registerPeopleRoutes } from './routes/pessoas.ts';
 import { throttle } from './security/factors.ts';
-import { BUILD, UpdateCheck, VERSION, newer } from './version.ts';
+import { BUILD, UpdateCheck, VERSION, anterioresParaVoltar, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
 import { Bus, audit } from './services/bus.ts';
 import { addSimulatedFloor, archiveAgent, capacityInfo, capacityTotals, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, removeFloor, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
@@ -39,7 +40,7 @@ import { cityActivity } from './services/city-activity.ts';
 import { getSetting } from './services/sectors.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
-import { activeCardsOf, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
+import { activeCardsOf, channelNoteFor, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
 import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
 import { Initiative } from './services/initiative.ts';
 import { forkFrom, marksOf, mediaOf, searchAll, setMark, updateConversation, type SearchKind } from './services/conversation-tools.ts';
@@ -49,11 +50,12 @@ import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
 import { CONEXOES, type AiService } from './services/ai.ts';
-import { Motors } from './services/motors.ts';
+import { equipeNaSaude, Motors } from './services/motors.ts';
 import { Integrations, integrationRow, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
+import { etapaCurta, resumoDaTarefa, semLinhaParaVoce } from './services/resumo-tarefa.ts';
 import { Routines, upgradeBriefingSources } from './services/routines.ts';
 import { parseDue } from './services/due.ts';
 import { workspaceTz } from './services/routine-proposals.ts';
@@ -77,6 +79,7 @@ import { ReviewService } from './services/review.ts';
 import { GUARDED_TOOLSETS, TOOLS, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
+import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PASSOS_SETTING, compactacaoDaEquipe, medirExecucao, passosDaEquipe, resumoComposicao } from './services/custo.ts';
 import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard, ensureBoards, getTask, taskLog, updateTask, userBoard } from './services/tasks.ts';
 import { USER_COLUMNS } from './services/seed.ts';
 import { loadWorld } from './world-hook.ts';
@@ -84,6 +87,8 @@ import { exportBlueprint, importBlueprint } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
 import { buildPackage, validatePackage } from './services/ergon-package.ts';
+import { TeamsApp, registerTeamsAppRoutes } from './services/teams-app/index.ts';
+import type { Tokens } from './services/sso.ts';
 
 declare module 'fastify' {
   interface FastifyRequest { auth: AuthContext | null }
@@ -123,6 +128,8 @@ export interface ErgonApp {
   vault: Vault;
   hermesVault: HermesVaultKeeper;
   motors: Motors;
+  /** conversar com a equipe pelo Teams (app público, pelo serviço do Teams) */
+  teamsApp: TeamsApp;
   /** liga os trabalhos em segundo plano (ferramentas, espelhos, fila da equipe, WhatsApp, cofre do motor) */
   startBackground(): void;
   stopBackground(): Promise<void>;
@@ -146,6 +153,11 @@ const fileRefSchema = { type: 'object', additionalProperties: false, required: [
 const paramsSchema = { type: 'object', maxProperties: 10, additionalProperties: { type: 'array', maxItems: 30, items: { anyOf: [{ type: 'string', maxLength: 400 }, fileRefSchema] } } };
 /** prazo da tarefa: AAAA-MM-DD ou null (tira o prazo) */
 const dueSchema = { anyOf: [{ type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, { type: 'null' }] };
+/**
+ * A conversa da execução `r`, só quando é de quem pergunta (o parâmetro): num workspace com mais pessoas, a execução
+ * da conversa de outra pessoa sai sem ela (a tela não oferece abrir o que getConversation não deixa abrir).
+ */
+const OWN_CONVERSATION = '(SELECT c.id FROM conversations c WHERE c.id = r.conversation_id AND c.owner_user_id = ?)';
 
 export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const { cfg, db } = deps;
@@ -174,6 +186,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     executor.motorAccepting = (ws) => motors.accepting(ws);
     executor.motorWaitText = (ws) => motors.waitText(ws);
     executor.motorTrouble = (ws) => motors.trouble(ws);
+    // equipe fora do ar (erro, ligando, troca travada) por mais de cfg.motorWaitMinutes: o pedido na fila desiste
+    executor.motorUnavailableSince = (ws) => motors.semRespostaDesde(ws);
+    executor.motorGiveUpText = () => motors.semRespostaTexto();
   }
   // as Conexões de um agente ficam "atualizando" (não "desligadas") quando há conta ligada e o motor ainda não as tem
   setContasConectadas((ws) => !!db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND state = 'connected' LIMIT 1", ws));
@@ -194,6 +209,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   trainings.control = (ws) => motors.control(ws)?.skills_ ?? null;
   executor.onFinish((r, status, output) => {
     if (r.idempotency_key.startsWith(TRAINING_KEY)) void trainings.finished(r, status, output).catch(() => undefined);
+  });
+  // custo: do que foi feita cada chamada ao modelo desta execução (medido no motor; a tela de Consumo mostra por agente)
+  executor.onFinish((r) => {
+    if (r.mode !== 'real') return;
+    void medirExecucao(db, motors.control(r.workspace_id), r.id)
+      .then((c) => { if (c) bus.publish(r.workspace_id, 'usage.changed', {}); })
+      .catch(() => undefined);
   });
   // sugestões da análise semanal viram decisões em "Aguardando você"
   routines.onRecommendations = (ws, conversationId, runId, items) => { recordProposals(db, bus, ws, { conversationId, runId }, items); };
@@ -276,10 +298,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const CODIGO = new Set(['terminal', 'code_execution']);
   const FERRAMENTAS_DE_CODIGO = ['terminal', 'execute_code', 'process', 'process_manage'];
   const runAtual = new AsyncLocalStorage<Pick<RunRow, 'id' | 'agent_id' | 'workspace_id'>>();
-  const workspacesDoMotor = (ws: string): string[] => {
-    const u = motors.scope(ws);
-    return u === '_' ? db.all<{ id: string }>('SELECT id FROM workspaces').map((w) => w.id) : owners.owned(u);
-  };
+  /** os workspaces de um motor: os da pessoa (um motor por pessoa) ou todos (um motor só, escopo "_") */
+  const workspacesDoEscopo = (u: string): string[] => (u === '_' ? db.all<{ id: string }>('SELECT id FROM workspaces').map((w) => w.id) : owners.owned(u));
+  const workspacesDoMotor = (ws: string): string[] => workspacesDoEscopo(motors.scope(ws));
   const agenteExecutaCodigo = (ws: string, agentId: string): boolean => {
     let list: string[] = [];
     try { const x = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', agentId)?.tools ?? '[]'); if (Array.isArray(x)) list = x.map(String); } catch { /* sem ferramentas legíveis */ }
@@ -308,21 +329,35 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // confirmou no cartão: o agente recebe o resultado e continua o pedido na mesma conversa
     continuar: (x) => { executor.enqueue({
       workspaceId: x.workspaceId, agentId: x.agentId, conversationId: x.conversationId, kind: 'chat', input: x.texto, maxInput: cfg.maxDocumentChars,
-      instructions: instructionsFor(db, x.workspaceId, x.agentId, 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do workspace, autenticada.', { userId: x.userId }),
+      instructions: instructionsFor(db, x.workspaceId, x.agentId, channelNoteFor(x.conversationId), { userId: x.userId, foco: { conversationId: x.conversationId } }),
       idempotencyKey: x.chave }); },
     // card da equipe: a decisão fica no histórico e vai na próxima execução dele (teamwork.ts); parado, o card volta a andar
     devolverAoCard: (x) => {
       audit(db, bus, { workspaceId: x.workspaceId, actorType: 'user', actorId: x.userId, action: 'task.conexao', targetType: 'task', targetId: x.taskId, evidence: { paraAgente: x.texto }, result: x.resumo });
       bus.publish(x.workspaceId, 'tasks.changed', { id: x.taskId });
-      const t = db.get<{ completed: number; archived: number; audience: string }>('SELECT t.completed, t.archived, b.audience FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.id = ?', x.taskId);
-      if (!t || t.audience !== 'team' || Number(t.completed) || Number(t.archived)) return;
-      // a execução do card ainda roda: quando ela terminar, o card volta a andar com a decisão (teamwork.ts, settle)
-      if (db.get("SELECT 1 AS x FROM runs WHERE task_id = ? AND status IN ('queued', 'running', 'waiting_user')", x.taskId)) return;
-      results.setWorkState(x.workspaceId, x.taskId, 'solicitada', 'você decidiu no cartão de confirmação');
-      try { teamwork.work(x.workspaceId, x.taskId, null); } catch { /* esperando um colega, limite do dia: a fila retoma */ }
+      // "Aprovar" de vários cartões do mesmo card de uma vez: o card volta a andar uma vez só, com todas as decisões
+      if (segurando.has(x.taskId)) return;
+      retomarCard(x.workspaceId, x.taskId);
     } });
+  /** O card volta a andar depois do clique num cartão (o de agora, ou o último de "Aprovar" vários de uma vez). */
+  function retomarCard(ws: string, taskId: string): void {
+    const t = db.get<{ completed: number; archived: number; audience: string }>('SELECT t.completed, t.archived, b.audience FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.id = ?', taskId);
+    if (!t || t.audience !== 'team' || Number(t.completed) || Number(t.archived)) return;
+    // a execução do card ainda roda: quando ela terminar, o card volta a andar com a decisão (teamwork.ts, settle)
+    if (db.get("SELECT 1 AS x FROM runs WHERE task_id = ? AND status IN ('queued', 'running', 'waiting_user')", taskId)) return;
+    results.setWorkState(ws, taskId, 'solicitada', 'você decidiu no cartão de confirmação');
+    try { teamwork.work(ws, taskId, null); } catch { /* esperando um colega, limite do dia: a fila retoma */ }
+  }
+  const segurando = new Set<string>();
   executor.aoLerInternet = (r) => conexoes.marcar(r, { privado: false, motivo: 'internet' });
   const espelhoEscrita = new EspelhoEscrita(db, bus, conexoes.escritor);
+  // conversar com a equipe pelo Teams: sem endereço do serviço, nada liga (e nada depende do módulo opcional da nuvem)
+  const teamsApp = new TeamsApp({ db, bus, cfg, vault, executor, owners, edition: cfg.distribution === 'community' ? 'community' : 'private', appVersion: VERSION,
+    // a conta Microsoft 365 ligada ao workspace: confere de quem é a conta do Teams na ligação por código (só locatário e conta)
+    contaMicrosoft: (ws) => { const t = integrations.secrets.read<Tokens>(ws, 'microsoft'); return t ? { tid: t.tid, oid: t.oid, account: t.account } : null; },
+    // o clique no cartão do Teams decide pela mesma função da tela (POST /api/proposals/:id)
+    decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao) });
+  chatHooks.channelNote = (conv, msg) => { try { return teamsApp.notaDoCanal(conv, msg); } catch { return null; } };
   // workspaces antigos: setores, quadros (equipe × seus) e a equipe de personagens (uma vez; preserva conversas e tarefas)
   const limits = limitsFor(cfg);
   const storageQuota = cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0;
@@ -344,6 +379,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const personOpened = (userId: string) => {
     for (const ws of owners.owned(userId)) upkeep(ws);
     void motors.ensure(userId).catch(() => undefined); // o motor dela liga e o cofre dele abre com a chave dela
+    teamsApp.personOpened(userId); // o que o serviço do Teams guardava para ela chega agora
   };
   // execução da fila que terminou sem decisão (o servidor caiu no meio): decide agora, uma única vez
   const reconciled = results.reconcile();
@@ -353,7 +389,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const ag = db.get<{ name: string; coordinator: number; tools: string | null }>('SELECT a.name, a.coordinator, a.tools FROM agents a WHERE a.id = ?', r.agent_id);
     const purpose = db.get<{ purpose: string | null }>('SELECT purpose FROM conversations WHERE id = ?', r.conversation_id)?.purpose ?? null;
     if (ag && isCoordinator(ag)) {
-      recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseProposals(output));
+      // [[regra ...]]: só quando o pedido partiu da pessoa e nada de fora foi lido; aí vira sugestão (o cartão diz quem sugeriu
+      // e "sempre" não fica em destaque). Lido algo de fora, só a frase dela propõe (chat.ts)
+      const sugere = conexoes.podeSugerirRegra(r);
+      recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id },
+        parseProposals(output).flatMap((p): Proposal[] => (p.kind !== 'regra' ? [p] : sugere ? [sugestaoDoAgente(p)] : [])));
       // criar ou ajustar rotina conversando (a análise semanal grava as próprias sugestões)
       if (purpose !== 'routine-recommend' && !purpose?.startsWith('routine-setup:')) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, routines.proposalsFrom(r.workspace_id, output, 'chat'));
       // competência pedida conversando: o agente estuda já (Treinar); ela só vale depois que você aprova a proposta dele
@@ -484,12 +524,40 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     conexoesPadrao = true;
     if (mudou) await ai.refreshToolsets();
   };
+  // passos por pedido (custo.ts): cada motor aberto fica com o que vale para os workspaces dele. Na primeira volta (e a
+  // cada abertura de um motor por pessoa, em Motors.aberto) confere tudo, inclusive o teto quando ninguém escolheu; depois,
+  // só enquanto a escolha não chegou ao motor (estava fora, o painel interno ainda subia, o envio falhou)
+  const passosConferidos = new Set<string>();
+  const passosNosMotores = () => {
+    for (const x of motors.openAis()) {
+      const ids = workspacesDoEscopo(x.scope);
+      if (passosConferidos.has(x.scope) && !passosDaEquipe(db, ids).pendente) continue;
+      void x.sincronizarPassos(db, ids).then((v) => { if (v !== null) passosConferidos.add(x.scope); }).catch(() => undefined);
+    }
+  };
+  // resumir as conversas longas mais cedo (custo.ts): o mesmo jeito — confere na primeira volta e, depois, só enquanto a
+  // escolha da pessoa não chegou ao motor. Motor de antes da compactação (sem a capacidade): conferido, e só de novo a cada
+  // COMPACTACAO_RECONFERE_MS (pela saúde, sem chamar a rota que ele não tem), para pegar um motor atualizado sem reiniciar
+  const compactacaoConferida = new Map<string, number>();
+  const compactacaoNosMotores = () => {
+    for (const x of motors.openAis()) {
+      const ids = workspacesDoEscopo(x.scope);
+      const quando = compactacaoConferida.get(x.scope);
+      const c = compactacaoDaEquipe(db, ids);
+      if (quando !== undefined && !c.pendente && !(c.atualizacao && Date.now() - quando >= COMPACTACAO_RECONFERE_MS)) continue;
+      // marca antes do envio: uma volta lenta não sobrepõe a seguinte (falhou? sai da marca e a próxima volta tenta de novo)
+      compactacaoConferida.set(x.scope, Date.now());
+      void x.sincronizarCompactacao(db, ids).catch(() => { compactacaoConferida.delete(x.scope); });
+    }
+  };
   const startBackground = () => {
     if (timers.length) return;
     espelhoEscrita.start();
     const refreshAi = () => {
       for (const x of motors.openAis()) { void x.refreshToolsets(); void x.defaultModel().catch(() => null); }
       void conexoesNoMotorUnico().catch(() => undefined);
+      passosNosMotores();
+      compactacaoNosMotores();
     };
     refreshAi();
     timers.push(setInterval(refreshAi, 60_000));
@@ -518,15 +586,20 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       void motors.renewClosed().catch(() => undefined);
     }
     whatsapp.resumeAll(); // só sessões que o usuário já pareou; nunca gera QR sozinho
+    void teamsApp.start(); // com endereço do serviço do Teams e o cofre aberto: a conexão de saída deste Ergon
   };
-  // a tela da pessoa (Saúde, Conexões) acompanha o motor dela; e cada motor que abre pode liberar a limpeza da versão
+  // a tela da pessoa (Saúde, Conexões) acompanha o motor dela; e cada motor que abre pode liberar a limpeza da versão e,
+  // com o cofre herdado aberto, a cópia antiga dos dados do motor (sem cifra) sai sozinha (uma vez)
   motors.onChange = (userId, state) => {
     for (const ws of owners.owned(userId)) bus.publish(ws, 'motor.changed', { state });
-    if (state === 'aberto') void motors.limparSePronto().catch(() => undefined);
+    if (state === 'aberto') {
+      void motors.limparSePronto().catch(() => undefined);
+      void motors.apagarDadosAntigos(userId).catch(() => undefined);
+    }
   };
   // a passada do espelho em andamento termina antes de desligar (o que saiu para o aplicativo fica gravado), com um teto
   const pararEspelho = () => new Promise<void>((ok) => { const t = setTimeout(ok, 10_000); espelhoEscrita.stop().catch(() => undefined).finally(() => { clearTimeout(t); ok(); }); });
-  const stopBackground = async () => { for (const t of timers.splice(0)) clearInterval(t); await pararEspelho(); teamwork.stop(); routines.stop(); hermesVault.stop(); await whatsapp.stopAll(); };
+  const stopBackground = async () => { for (const t of timers.splice(0)) clearInterval(t); await pararEspelho(); teamwork.stop(); routines.stop(); hermesVault.stop(); await whatsapp.stopAll(); await teamsApp.stop(); };
   // nome do cookie inclui a porta: cookies não separam por porta, e instâncias locais (real/teste) não podem colidir
   const COOKIE = `${SESSION_COOKIE}_${cfg.port}`;
   const bridgeLimiter = new Limiter(120, 60_000);
@@ -566,8 +639,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
-    reply.header('X-Frame-Options', 'DENY');
-    reply.header('Content-Security-Policy',
+    // a prévia de um arquivo (imagem, PDF) define a própria política, mais fechada (download, abaixo); o resto, a de sempre
+    if (!reply.hasHeader('X-Frame-Options')) reply.header('X-Frame-Options', 'DENY');
+    if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy',
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     return payload;
   });
@@ -631,9 +705,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Público -------------------------------------------------------------------------------------
   app.get('/api/health', { logLevel: 'warn' }, async () => {
     db.get('SELECT 1 AS ok');
-    // equipe: algum motor está sendo trocado pela versão nova (o aplicativo do computador mostra a etapa "Atualizando a
-    // equipe"); não diz de quem nem quantos
-    return { ok: true, service: 'ergon', version: VERSION, build: BUILD, executor: cfg.executor, equipe: motors.states_().some((x) => x.state === 'renovando') ? 'renovando' : 'pronta' };
+    // equipe: algum motor ligando ou sendo trocado pela versão nova (o aplicativo do computador mostra a etapa
+    // "Atualizando a equipe"); não diz de quem nem quantos
+    return { ok: true, service: 'ergon', version: VERSION, build: BUILD, executor: cfg.executor, equipe: equipeNaSaude(motors.states_()) };
   });
 
   app.get('/api/auth/state', async (req) => {
@@ -695,14 +769,17 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const st = (req.query as { verificar?: string }).verificar === '1' ? await updates.check() : updates.cached();
     const latest = st.latest;
     return { version: VERSION, build: BUILD, mode: cfg.mode, latest, updateAvailable: !!latest && newer(latest.version, VERSION), checkedAt: st.checkedAt, configured: !!cfg.updateUrl,
-      // versões anteriores à instalada, para voltar (a mais nova primeiro)
-      previous: st.releases.filter((x) => newer(VERSION, x.version)).slice(0, 12) };
+      // versões anteriores à instalada, para voltar (a mais nova primeiro): só as duas publicadas logo antes dela
+      previous: anterioresParaVoltar(st.releases) };
   });
 
   app.get('/api/me', async (req) => {
     const a = auth(req);
     const workspaces = db.all('SELECT w.id, w.name, m.role FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? ORDER BY w.created_at', a.userId);
     const avatar = db.get<{ avatar: string | null }>('SELECT avatar FROM users WHERE id = ?', a.userId)?.avatar ?? null;
+    // a tela carrega /api/me uma vez ao abrir o Ergon: é a hora de tentar de novo a versão nova da equipe que ficou
+    // pendente (sem esperar; nada é tentado a cada poucos minutos)
+    motors.aoAbrir(a.userId);
     return { user: { id: a.userId, username: a.username, displayName: a.displayName, avatar }, workspaceId: a.workspaceId, role: a.role, csrf: a.csrf, workspaces, locked: a.locked, protected: vault.state() !== 'unprotected', idleMinutes: idleMinutes(db),
       factors: userFactors(db, a.userId), mode: cfg.mode, rpId: rpConfig(cfg).rpID,
       // frase de recuperação da pessoa (várias pessoas: cada uma tem a sua)
@@ -739,11 +816,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.put('/api/me/prefs', {
     schema: { body: { type: 'object', additionalProperties: false, properties: {
       tips: { type: 'boolean' }, tourDone: { type: 'boolean' }, resetTips: { type: 'boolean' }, updateNotice: { type: 'boolean' },
-      cityCalm: { type: 'boolean' }, musicVolume: { type: 'number', minimum: 0, maximum: 1 }, musicShuffle: { type: 'boolean' },
+      cityCalm: { type: 'boolean' }, musicVolume: { type: 'number', minimum: 0, maximum: 1 }, musicShuffle: { type: 'boolean' }, cityBarCollapsed: { type: 'boolean' },
       dismiss: { type: 'array', maxItems: 20, items: S.str(60, 1) } } } },
   }, async (req) => {
     const a = auth(req);
-    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; updateNotice?: boolean; cityCalm?: boolean; musicVolume?: number; musicShuffle?: boolean; dismiss?: string[] });
+    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; updateNotice?: boolean; cityCalm?: boolean; musicVolume?: number; musicShuffle?: boolean; cityBarCollapsed?: boolean; dismiss?: string[] });
   });
 
   // Boas-vindas: como a pessoa vai usar e em que área trabalha definem a equipe de partida (tudo editável depois)
@@ -768,7 +845,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
   const secApi = registerSecurityRoutes(app, sec);
-  registerPeopleRoutes(app, { ...sec, upkeep: personOpened, removeMotor: (u) => motors.remove(u) });
+  registerTeamsAppRoutes(app, { teamsApp, owner, admin, verify: secApi.verify });
+  registerPeopleRoutes(app, { ...sec, upkeep: personOpened, routines, removeMotor: async (u) => { await teamsApp.pessoaRemovida(u).catch(() => undefined); await motors.remove(u); } });
 
   app.post('/api/session/workspace', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['workspaceId'], properties: { workspaceId: S.id('ws') } } },
@@ -861,6 +939,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       sectors: listSectors(db, a.workspaceId).map(({ instructions: _i, ...s }) => s),
       teamAutorun: teamwork.autorun(a.workspaceId),
       teamInitiative: initiative.enabled(a.workspaceId),
+      ...(() => {
+        // o que vale de fato no motor deste workspace (a escolha mais recente entre os workspaces dele) e se já chegou lá
+        const ids = workspacesDoMotor(a.workspaceId);
+        const p = passosDaEquipe(db, ids);
+        const c = compactacaoDaEquipe(db, ids);
+        return { teamMaxTurns: p.valor, teamMaxTurnsPendente: p.pendente, teamMaxTurnsOutros: ids.filter((w) => w !== a.workspaceId).length,
+          teamCompactacao: c.ligada, teamCompactacaoPendente: c.pendente, teamCompactacaoAtualizacao: c.atualizacao };
+      })(),
       themed: themedCharacters(db, a.workspaceId).length + themedSectors(db, a.workspaceId).length,
       serverTime: now(),
     };
@@ -1050,8 +1136,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = auth(req);
     const agentId = (req.params as { id: string }).id;
     if (!db.get('SELECT 1 AS x FROM agents WHERE id = ? AND workspace_id = ?', agentId, a.workspaceId)) throw notFound('agente');
-    const runs = db.all(`SELECT id, kind, status, mode, model, tokens_in, tokens_out, cost_usd, created_at, finished_at, error FROM runs
-      WHERE agent_id = ? AND workspace_id = ? ORDER BY created_at DESC LIMIT 20`, agentId, a.workspaceId);
+    // o card e a conversa de cada execução: a linha abre o que ela fez (a conversa, só a de quem pergunta)
+    const runs = db.all(`SELECT r.id, r.kind, r.status, r.mode, r.model, r.tokens_in, r.tokens_out, r.cost_usd, r.created_at, r.finished_at, r.error, r.task_id,
+        ${OWN_CONVERSATION} AS conversation_id FROM runs r
+      WHERE r.agent_id = ? AND r.workspace_id = ? ORDER BY r.created_at DESC LIMIT 20`, a.userId, agentId, a.workspaceId);
     const tasks = db.all(`SELECT t.id, t.number, t.title, t.completed, c.name AS column_name FROM tasks t JOIN columns c ON c.id = t.column_id
       JOIN boards b ON b.id = t.board_id WHERE t.agent_id = ? AND t.workspace_id = ? AND t.archived = 0 AND b.audience = 'team' ORDER BY t.completed, t.number DESC LIMIT 30`, agentId, a.workspaceId);
     const totals = db.get(`SELECT COUNT(*) AS runs, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out FROM runs WHERE agent_id = ? AND workspace_id = ? AND mode = 'real'`, agentId, a.workspaceId);
@@ -1212,6 +1300,21 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.get('/api/ai/skills', async (req) => aiOf(auth(req).workspaceId).skills());
 
   // Propostas da coordenação ----------------------------------------------------------------------------------
+  /**
+   * Aplicar ou recusar uma proposta: a tela (POST /api/proposals/:id) e o cartão do Teams chamam esta mesma função
+   * (as ações nas contas, a aprovação depois de ler e as demais, com os mesmos ganchos e o mesmo registro).
+   */
+  // a mesma decisão para o app e para o Teams (o cartão no Teams chama esta função; alcance e prazo só vêm da tela)
+  const decidirProposta = async (ws: string, userId: string, pid: string, decision: 'apply' | 'reject', o: { alcance?: Alcance; prazo?: PrazoDepoisDeLer } = {}): Promise<{ status: string; result: string }> => {
+    if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, ws)) return conexoes.decidirProposta(ws, userId, pid, decision);
+    if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_REGRA)) return conexoes.decidirRegra(ws, userId, pid, decision, o.alcance);
+    if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_DEPOIS_DE_LER)) return conexoes.decidirAprovacao(ws, userId, pid, decision, o.prazo);
+    return decideProposal(db, bus, ws, userId, pid, decision,
+      { routine: (p) => routines.applyProposal(ws, userId, p), ledger: (p, u) => routines.registerLedger(ws, u, p), limits,
+        deleteTask: (n, reason) => cancelCardNumber(ws, userId, n, reason),
+        batch: (p) => teamwork.openBatch(ws, p.runId, p.plans),
+        purge: (p) => purgeFiles(db, bus, cfg, ws, userId, p) });
+  };
   app.get('/api/proposals', {
     schema: { querystring: { type: 'object', additionalProperties: false, properties: { conversationId: S.id('cnv') } } },
   }, async (req) => listProposals(db, auth(req).workspaceId, (req.query as { conversationId?: string }).conversationId));
@@ -1243,7 +1346,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       const run = cont && g.agentId ? executor.enqueue({
         workspaceId: a.workspaceId, agentId: g.agentId, conversationId: cont, kind: 'chat',
         input: `O usuário autorizou agora a ferramenta ${label}. Continue o pedido anterior de onde parou, usando-a.`,
-        instructions: instructionsFor(db, a.workspaceId, g.agentId, 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do workspace, autenticada.', { userId: a.userId }),
+        // o canal da conversa onde o agente continua (a do Teams responde no Teams, com a nota dele)
+        instructions: instructionsFor(db, a.workspaceId, g.agentId, channelNoteFor(cont), { userId: a.userId, foco: { conversationId: cont } }),
         idempotencyKey: `perm-${pid}`,
       }) : null;
       if (g.conversationId && g.conversationId !== cont) note(g.conversationId, `Sistema — você autorizou: ${g.result}.`, null);
@@ -1253,18 +1357,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { status: g.status, result: g.result };
   });
   app.post('/api/proposals/:id', {
-    schema: { params: idParams('apr'), body: { type: 'object', additionalProperties: false, required: ['decision'], properties: { decision: { enum: ['apply', 'reject'] } } } },
+    // alcance: o cartão de regra (só neste pedido, por 24 h, sempre); prazo: o cartão de aprovação depois de ler as contas
+    schema: { params: idParams('apr'), body: { type: 'object', additionalProperties: false, required: ['decision'], properties: { decision: { enum: ['apply', 'reject'] },
+      alcance: { enum: [...ALCANCES] }, prazo: { enum: [...PRAZOS_DEPOIS_DE_LER] } } } },
   }, async (req) => {
     const a = owner(req);
     const pid = (req.params as { id: string }).id;
-    if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, a.workspaceId)) {
-      return conexoes.decidirProposta(a.workspaceId, a.userId, pid, (req.body as { decision: 'apply' | 'reject' }).decision);
-    }
-    return decideProposal(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { decision: 'apply' | 'reject' }).decision,
-      { routine: (p) => routines.applyProposal(a.workspaceId, a.userId, p), ledger: (p, userId) => routines.registerLedger(a.workspaceId, userId, p), limits,
-        deleteTask: (n, reason) => cancelCardNumber(a.workspaceId, a.userId, n, reason),
-        batch: (p) => teamwork.openBatch(a.workspaceId, p.runId, p.plans),
-        purge: (p) => purgeFiles(db, bus, cfg, a.workspaceId, a.userId, p) });
+    const b = req.body as { decision: 'apply' | 'reject'; alcance?: Alcance; prazo?: PrazoDepoisDeLer };
+    return decidirProposta(a.workspaceId, a.userId, pid, b.decision, { alcance: b.alcance, prazo: b.prazo });
   });
   // pedido de um card repassado na conversa (informação, aprovação, decisão, nova tentativa): a resposta vai para o card
   const respondSchema = { type: 'object', additionalProperties: false, required: ['action'], properties: {
@@ -1388,6 +1488,44 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { enabled: on };
   });
 
+  // Passos por pedido (padrão 20): quantas idas ao modelo um pedido pode dar antes de parar. Vai ao motor na hora (vale no
+  // próximo pedido); motor desligado ou renovando recebe ao abrir. Mais passos resolvem pedidos longos sozinhos e custam mais.
+  app.put('/api/team/max-turns', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['value'], properties: { value: { type: 'integer', minimum: PASSOS_MIN, maximum: PASSOS_MAX } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const value = (req.body as { value: number }).value;
+    setSetting(db, a.workspaceId, PASSOS_SETTING, String(value));
+    // o motor é um só para os workspaces de quem é dono (ou para a instalação): a escolha vale para todos eles
+    const ids = workspacesDoMotor(a.workspaceId);
+    let applied = false;
+    try { applied = (await aiOf(a.workspaceId).sincronizarPassos(db, ids)) === value; } catch { /* motor fora agora: o passo de 60 s e a abertura tentam de novo */ }
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'team.max_turns', evidence: { value, applied },
+      result: `até ${value} passos por pedido${applied ? '' : ' (a equipe recebe quando estiver ligada)'}` });
+    for (const ws of ids) bus.publish(ws, 'agents.changed', {});
+    return { value, applied, outros: ids.filter((w) => w !== a.workspaceId).length };
+  });
+
+  // Resumir as conversas longas mais cedo (padrão ligado; docs/CUSTO_DAS_CHAMADAS.md): a parte antiga da conversa de um
+  // agente vira um resumo quando ela fica longa, e cada chamada fica menor. Vai ao motor na hora (vale no próximo pedido);
+  // motor desligado ou renovando recebe ao abrir. Desligado, o motor só resume perto do limite do modelo.
+  app.put('/api/team/compactacao', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const enabled = (req.body as { enabled: boolean }).enabled;
+    setSetting(db, a.workspaceId, COMPACTAR_SETTING, enabled ? 'ligado' : 'desligado');
+    const ids = workspacesDoMotor(a.workspaceId);
+    let applied = false;
+    try { applied = (await aiOf(a.workspaceId).sincronizarCompactacao(db, ids)) === enabled; } catch { /* motor fora agora: o passo de 60 s e a abertura tentam de novo */ }
+    // motor de antes da compactação mais cedo: a escolha fica gravada e chega com a próxima atualização da equipe
+    const atualizacao = compactacaoDaEquipe(db, ids).atualizacao;
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'team.compactacao', evidence: { enabled, applied },
+      result: `${enabled ? 'conversas longas resumidas mais cedo' : 'conversas resumidas só perto do limite do modelo'}${applied ? '' : atualizacao ? ' (chega com a próxima atualização da equipe)' : ' (a equipe recebe quando estiver ligada)'}` });
+    for (const ws of ids) bus.publish(ws, 'agents.changed', {});
+    return { enabled, applied, atualizacao, outros: ids.filter((w) => w !== a.workspaceId).length };
+  });
+
   // Personalidade de um colega (para você; quem é dono pode pôr como padrão da equipe). Os extremos pedem o aceite.
   app.put('/api/agents/:id/personality', {
     schema: { params: idParams('agt'), body: { type: 'object', additionalProperties: false, required: ['personality'], properties: {
@@ -1479,6 +1617,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { ...usageSummary(db, ws, Math.max(-840, Math.min(840, tz)), Date.now(), billing), executor: executor.mode };
   });
 
+  // Do que é feita cada chamada ao modelo, por agente (medido nas execuções reais; ver services/custo.ts)
+  app.get('/api/usage/composicao', {
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: { dias: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|[1-3][0-9]{2})$' } } } },
+  }, async (req) => resumoComposicao(db, auth(req).workspaceId, Number((req.query as { dias?: string }).dias ?? 30)));
+
   app.delete('/api/floors/:id', { schema: { params: idParams('flr') } }, async (req) => {
     const a = owner(req);
     removeFloor(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id);
@@ -1561,23 +1704,33 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         decidedAt: result.decided_at, deliverables: Array.isArray(result.evidenceData.deliverables) ? result.evidenceData.deliverables : [], mode: result.evidenceData.mode ?? null } : null,
     } : null;
     // o fio do pedido: as etapas do plano, a conversa de onde veio (quem entrega) e a pergunta do agente, se houver
-    const steps = stepsOf(db, taskId).map((x) => ({ position: x.position, agentId: x.agent_id, title: x.title, status: x.status, doneAt: x.done_at }));
+    const steps = stepsOf(db, taskId).map((x) => ({ position: x.position, agentId: x.agent_id, title: x.title, short: etapaCurta(x.title), status: x.status, doneAt: x.done_at }));
     const origin = db.get<{ conversation_id: string | null; purpose: string | null; deliver_agent_id: string | null }>('SELECT conversation_id, purpose, deliver_agent_id FROM tasks WHERE id = ?', taskId);
     const conv = origin?.conversation_id ? db.get<{ id: string; agent_id: string; owner_user_id: string }>('SELECT id, agent_id, owner_user_id FROM conversations WHERE id = ?', origin.conversation_id) : null;
     const delivered = conv ? !!db.get("SELECT 1 AS x FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.delivery'", taskId) : false;
     // a pergunta que o agente fez; sem pergunta (o sistema parou o card: arquivo faltando…), o que falta
     const question = result?.state === 'aguardando_info' && typeof result.evidenceData.pergunta === 'string' ? result.evidenceData.pergunta : null;
     const missing = result?.state === 'aguardando_info' && !question ? result.justification : null;
-    const log = taskLog(db, a.workspaceId, taskId) as Array<{ actor_type: string; actor_id: string | null }>;
+    // a linha para a pessoa ("Para você decidir: …") vai na faixa de decisão: no histórico, a entrega aparece sem ela
+    const log = (taskLog(db, a.workspaceId, taskId) as Array<{ actor_type: string; actor_id: string | null; evidence: string | null }>).map((e) => {
+      if (!e.evidence || !/"output"/.test(e.evidence)) return e;
+      try {
+        const ev = JSON.parse(e.evidence) as { output?: unknown };
+        return typeof ev.output === 'string' ? { ...e, evidence: JSON.stringify({ ...ev, output: semLinhaParaVoce(ev.output) }) } : e;
+      } catch { return e; }
+    });
     const review = reviews.latest(a.workspaceId, taskId);
     // nome e cor de todos os agentes citados no card (desativados também), sem a equipe inteira na tela
     const cited = agentsLite(db, a.workspaceId, [task.agent_id, ...steps.map((x) => x.agentId), conv?.agent_id, origin?.deliver_agent_id, ...(runs as Array<{ agent_id: string }>).map((r) => r.agent_id),
       ...log.filter((e) => e.actor_type === 'agent').map((e) => e.actor_id), review?.reviewer_id, review?.producer_id]);
     const agents = Object.fromEntries([...cited].map(([id, x]) => [id, { name: x.name, color: x.color }]));
+    const queue = team ? teamwork.queueInfo(a.workspaceId, taskId) : null;
     return { task, log, envio, link: link ?? null, proposals, source, runs, review,
+      // o que a pessoa vê de cara: a situação e a frase exata do que decide (ou do que foi feito), pelos fatos registrados
+      resumo: team ? resumoDaTarefa(db, a.workspaceId, taskId, { queue }) : null,
       agents, reviewer: reviewerFor(db, a.workspaceId, task.agent_id),
       files: { inputs: files.filter((x) => x.role === 'entrada'), deliverables: files.filter((x) => x.role === 'entregavel') }, operations: ops, work,
-      queue: team ? teamwork.queueInfo(a.workspaceId, taskId) : null,
+      queue,
       column: db.get<{ name: string }>('SELECT name FROM columns WHERE id = ?', task.column_id)?.name ?? null,
       // aberto de fora do quadro ("aguardando você", uma conversa): a tela escolhe o modo pelo quadro do card
       board: db.get<{ audience: string; origin: string; source: string | null }>('SELECT b.audience, b.origin, i.kind AS source FROM boards b LEFT JOIN integrations i ON i.id = b.connection_id WHERE b.id = ?', task.board_id) ?? null,
@@ -1585,9 +1738,49 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       // cards que nasceram deste (ajuda pedida, o card enviado à equipe): cancelar este leva junto, e a tela avisa antes
       children: db.all<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE parent_task_id = ? AND archived = 0 ORDER BY number', taskId),
       // ações numa conta pedidas neste card, esperando o seu clique (o mesmo cartão da conversa e de "aguardando você")
-      conexoes: db.all<{ id: string; summary: string; created_at: string }>(`SELECT p.id, p.summary, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
-        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind = 'conexao' AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
+      conexoes: db.all<{ id: string; kind: string; summary: string; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
+        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
       origin: conv ? { conversationId: conv.owner_user_id === a.userId ? conv.id : null, agentId: conv.agent_id, deliverAgentId: origin?.deliver_agent_id ?? conv.agent_id, purpose: origin?.purpose ?? null, delivered } : null };
+  });
+
+  // "Aprovar" (ou "Recusar") de uma vez as ações numa conta que o card espera: só as que a tela mostrou (ids), cada uma
+  // pela mesma conferência do clique avulso (conexoes/servico.ts), e o card volta a andar uma vez só, depois da última.
+  // Chegou outra depois da leitura: nada é decidido (409 'mudou') e a tela relê — a pessoa vê destino e texto antes.
+  // A proteção "depois de ler" (abrir um site, rodar um programa) fica fora do lote: é decidida uma a uma
+  app.post('/api/tasks/:id/cartoes', {
+    schema: { params: idParams('tsk'), body: { type: 'object', additionalProperties: false, required: ['decision', 'ids'], properties: {
+      decision: { enum: ['apply', 'reject'] }, ids: { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 64 } } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const taskId = (req.params as { id: string }).id;
+    getTask(db, a.workspaceId, taskId);
+    const { decision, ids } = req.body as { decision: 'apply' | 'reject'; ids: string[] };
+    const cartoes = db.all<{ id: string }>(`SELECT p.id FROM agent_proposals p JOIN runs r ON r.id = p.run_id
+      WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind = 'conexao' AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId);
+    const vistos = new Set(ids);
+    if (cartoes.some((c) => !vistos.has(c.id))) {
+      throw new HttpError(409, 'mudou', 'Chegou outro pedido neste card depois que você abriu: confira o que vai acontecer e decida de novo.');
+    }
+    const alvo = cartoes.filter((c) => vistos.has(c.id));
+    if (!alvo.length) throw new HttpError(409, 'decided', 'Nada esperando a sua decisão neste card.');
+    const feitos: Array<{ id: string; status: string; result: string }> = [];
+    segurando.add(taskId);
+    try {
+      for (const c of alvo) {
+        try {
+          feitos.push({ id: c.id, ...(await conexoes.decidirProposta(a.workspaceId, a.userId, c.id, decision)) });
+        } catch (e) {
+          if (e instanceof HttpError && e.status === 409) continue; // já decidido noutro lugar (a conversa, "Aguardando você")
+          throw e;
+        }
+      }
+    } finally {
+      segurando.delete(taskId);
+      if (feitos.length) retomarCard(a.workspaceId, taskId);
+    }
+    // todos já tinham sido decididos noutro lugar: nada foi aprovado agora
+    if (!feitos.length) throw new HttpError(409, 'decided', 'Já decidido noutro lugar: nada mudou agora.');
+    return { results: feitos };
   });
 
   // "Pôr para trabalhar": o card da equipe vai para o agente agora (com ou sem o andamento automático)
@@ -1690,8 +1883,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   }, async (req) => {
     const a = auth(req);
     const taskId = (req.params as { id: string }).id;
-    // o quadro da equipe é dos agentes: você acompanha (e conversa), não edita
-    if (boardAudience(db, a.workspaceId, getTask(db, a.workspaceId, taskId).board_id) === 'team') {
+    // o quadro da equipe é dos agentes: você acompanha (e conversa), não edita — só o nome do card é seu, se quiser
+    // dar outro (e a coordenação não troca mais sozinha: card-title.ts)
+    const onlyTitle = Object.keys(req.body as object).every((k) => k === 'title' || k === 'expectedRevision') && (req.body as { title?: string }).title !== undefined;
+    if (!onlyTitle && boardAudience(db, a.workspaceId, getTask(db, a.workspaceId, taskId).board_id) === 'team') {
       throw new HttpError(409, 'team_board_readonly', 'O quadro da equipe é automático: para mudar algo, fale com a coordenação.');
     }
     return updateTask(db, bus, a.workspaceId, { type: 'user', id: a.userId }, taskId, req.body as object);
@@ -1732,7 +1927,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const run = executor.enqueue({
       workspaceId: a.workspaceId, agentId: b.agentId, taskId, kind: 'subtask',
       input: `Tarefa #${t.number}: ${t.title}\n${t.description}\n\nPedido: ${b.instruction}`,
-      instructions: instructionsFor(db, a.workspaceId, b.agentId, 'Canal: delegação de tarefa no Ergon. Responda com um resultado curto.'),
+      instructions: instructionsFor(db, a.workspaceId, b.agentId, 'Canal: delegação de tarefa no Ergon. Responda com um resultado curto.', { foco: { taskId } }),
       idempotencyKey: `delegate-${taskId}-${b.requestId}`,
     });
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'task.delegate', targetType: 'task', targetId: taskId, evidence: { runId: run.id, agentId: b.agentId }, result: 'enfileirada' });
@@ -1863,15 +2058,21 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
 
   // Execuções -------------------------------------------------------------------------------------
-  app.get('/api/runs', async (req) => db.all(
-    `SELECT r.id, r.agent_id, a.name AS agent_name, r.kind, r.status, r.mode, r.error, r.conversation_id, r.task_id, r.created_at, r.started_at, r.finished_at,
-            r.tokens_in, r.tokens_out, r.cost_usd, r.hermes_status
-       FROM runs r JOIN agents a ON a.id = r.agent_id WHERE r.workspace_id = ? ORDER BY r.created_at DESC LIMIT 50`, auth(req).workspaceId));
+  // a conversa de cada execução vai só para quem é dono dela (OWN_CONVERSATION)
+  app.get('/api/runs', async (req) => {
+    const a = auth(req);
+    return db.all(
+      `SELECT r.id, r.agent_id, a.name AS agent_name, r.kind, r.status, r.mode, r.error, ${OWN_CONVERSATION} AS conversation_id, r.task_id, r.created_at, r.started_at, r.finished_at,
+              r.tokens_in, r.tokens_out, r.cost_usd, r.hermes_status
+         FROM runs r JOIN agents a ON a.id = r.agent_id WHERE r.workspace_id = ? ORDER BY r.created_at DESC LIMIT 50`, a.userId, a.workspaceId);
+  });
 
   app.get('/api/runs/:id', { schema: { params: idParams('run') } }, async (req) => {
-    const r = executor.get(auth(req).workspaceId, (req.params as { id: string }).id);
+    const a = auth(req);
+    const r = executor.get(a.workspaceId, (req.params as { id: string }).id);
     const { instructions: _i, lease_owner: _l, ...rest } = r;
-    return rest;
+    const own = !!r.conversation_id && !!db.get('SELECT 1 AS x FROM conversations WHERE id = ? AND owner_user_id = ?', r.conversation_id, a.userId);
+    return { ...rest, conversation_id: own ? r.conversation_id : null };
   });
 
   // resposta chegando (texto ao vivo e o que o colega faz agora): só para quem é dono da conversa
@@ -1898,13 +2099,35 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Conexões: o que falta autorizar, a escolha de liberar tudo, testar com a conta real e a ação da própria pessoa
   app.get('/api/conexoes', async (req) => {
     const a = auth(req);
-    return { liberarTudo: conexoes.liberarTudo(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind) })) };
+    return { liberarTudo: conexoes.liberarTudo(a.workspaceId), aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId), aprovarDepoisDeLerBarra: motors.barraSemAprovar(a.workspaceId), confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind) })) };
   });
   app.put('/api/conexoes/liberar-tudo', { schema: { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
     const a = owner(req);
     conexoes.setLiberarTudo(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
     bus.publish(a.workspaceId, 'integrations.changed', {});
     return { liberarTudo: conexoes.liberarTudo(a.workspaceId) };
+  });
+  // Conexões › Regras: as regras aprovadas (as que liberam ações sem confirmação e as de texto ativas) e as propostas esperando
+  app.get('/api/conexoes/regras', async (req) => conexoes.regras.tela(auth(req).workspaceId));
+  app.post('/api/conexoes/regras/:id/desfazer', { schema: { params: idParams('rgc') } }, async (req) => {
+    const a = owner(req);
+    const r = conexoes.regras.desfazer(a.workspaceId, a.userId, (req.params as { id: string }).id);
+    return { id: r.id, status: r.status };
+  });
+  // as duas escolhas que pedem mais cuidado (desligadas por padrão): aprovar antes de abrir sites ou rodar programas depois
+  // de ler as contas, e confirmar antes de organizar
+  const ligaDesliga = { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } };
+  app.put('/api/conexoes/aprovar-depois-de-ler', { schema: ligaDesliga }, async (req) => {
+    const a = owner(req);
+    conexoes.setAprovarDepoisDeLer(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
+    bus.publish(a.workspaceId, 'integrations.changed', {});
+    return { aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId) };
+  });
+  app.put('/api/conexoes/confirmar-organizar', { schema: ligaDesliga }, async (req) => {
+    const a = owner(req);
+    conexoes.setConfirmarOrganizar(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
+    bus.publish(a.workspaceId, 'integrations.changed', {});
+    return { confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId) };
   });
   const conexaoParam = { type: 'object', required: ['kind'], properties: { kind: S.str(20, 3) } };
   // o que cada conexão pode fazer: por tipo (ler, organizar, enviar, apagar) e por ação
@@ -1914,6 +2137,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const kind = (req.params as { kind: IntegrationKind }).kind;
     if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
     return { permissoes: conexoes.setPermissoes(a.workspaceId, a.userId, kind, (req.body as { permissoes: Permissoes }).permissoes) };
+  });
+  // o atalho "Só leitura": um clique desliga tudo o que escreve nesta conexão (e outro volta a escrita para a regra)
+  app.put('/api/conexoes/:kind/so-leitura', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req);
+    const kind = (req.params as { kind: IntegrationKind }).kind;
+    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
+    const permissoes = conexoes.setSoLeitura(a.workspaceId, a.userId, kind, (req.body as { on: boolean }).on);
+    return { permissoes, soLeitura: conexoes.catalogoDe(a.workspaceId, kind).soLeitura };
   });
   // a mesma conta em mais de um workspace seu: usar a de outro, sem conectar de novo
   app.get('/api/conexoes/:kind/reutilizaveis', { schema: { params: conexaoParam } }, async (req) => {
@@ -2143,7 +2374,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const inline = (req.query as { inline?: string }).inline === '1' && INLINE_MIME.has(f.mime);
     reply.header('Content-Type', INLINE_MIME.has(f.mime) ? f.mime : 'application/octet-stream');
     reply.header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.filename)}`);
-    if (inline && f.mime.startsWith('image/')) reply.header('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'");
+    if (inline && f.mime.startsWith('image/')) reply.header('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'; frame-ancestors 'none'");
+    // PDF na prévia "Ver" do card: dentro da própria tela do Ergon (mesma origem), nunca numa página de outro endereço.
+    // Sem sandbox: o leitor de PDF do navegador não abre num documento isolado; o PDF não roda nada nesta origem
+    if (inline && f.mime === 'application/pdf') { reply.header('X-Frame-Options', 'SAMEORIGIN'); reply.header('Content-Security-Policy', "default-src 'none'; object-src 'self'; frame-ancestors 'self'"); }
     reply.header('Cache-Control', 'private, no-store');
     return reply.send(f.data); // decifrado na memória (até o limite de upload), nunca gravado aberto
   });
@@ -2220,6 +2454,32 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     requireRecentAuth(a);
     const r = await motors.apagarVolume(nome).catch((e: unknown) => { throw gerenteErro(e); });
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'admin.apagar_cofre', evidence: { conta: r.conta }, result: `cofre apagado (${r.conta})` });
+    bus.publish(a.workspaceId, 'motor.changed', {});
+    return { ok: true };
+  });
+  // A cópia antiga dos dados da equipe (sem cifra, de antes do cofre) que o cofre não confirmou ter recebido: nunca sai
+  // sozinha; só quem administra decide, com a confirmação de que não tem volta no corpo e a identidade confirmada há pouco
+  app.post('/api/saude/dados-antigos', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['confirmar'], properties: { confirmar: { const: 'apagar sem volta' } } } },
+  }, async (req) => {
+    const a = admin(req);
+    if (!motors.perPerson) throw new HttpError(409, 'single_motor', 'Nesta instalação não há cópia antiga dos dados da equipe para apagar por aqui.');
+    requireRecentAuth(a);
+    const r = await motors.decidirDadosAntigos(a.userId).catch((e: unknown) => { throw gerenteErro(e); });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'admin.apagar_dados_antigos', targetType: 'equipe', targetId: a.userId,
+      evidence: { copiaAntiga: r.apagado ? 'apagada' : 'já não existia', semConfirmacaoDoCofre: r.porque },
+      result: r.apagado ? 'cópia antiga dos dados da equipe (sem cifra, de antes do cofre) apagada por decisão de quem administra, sem a confirmação de que o cofre a recebeu' : 'a cópia antiga dos dados da equipe já não existia' });
+    bus.publish(a.workspaceId, 'motor.changed', {});
+    return { ok: true, apagado: r.apagado };
+  });
+  // quem administra decidiu manter a cópia antiga: nada é apagado; o aviso vira informação (sem pesar na Saúde)
+  app.post('/api/saude/dados-antigos/manter', async (req) => {
+    const a = admin(req);
+    if (!motors.perPerson) throw new HttpError(409, 'single_motor', 'Nesta instalação não há cópia antiga dos dados da equipe.');
+    let r: { porque: string };
+    try { r = motors.manterDadosAntigos(a.userId); } catch (e) { throw new HttpError(409, 'nothing', e instanceof Error ? e.message : 'Não há cópia antiga esperando a sua decisão.'); }
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'admin.manter_dados_antigos', targetType: 'equipe', targetId: a.userId,
+      evidence: { copiaAntiga: 'mantida', semConfirmacaoDoCofre: r.porque }, result: 'quem administra decidiu manter a cópia antiga dos dados da equipe (sem cifra, de antes do cofre)' });
     bus.publish(a.workspaceId, 'motor.changed', {});
     return { ok: true };
   });
@@ -2314,6 +2574,20 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const tr = run ? trainings.forRun(run) : null;
     const training = tr && tr.status === 'executando' && run!.status !== 'succeeded' ? trainings.policy(tr) : null;
     return { known: true, agent: ag.name, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), holders, guarded: GUARDED_TOOLSETS, skills, training };
+  });
+
+  // O plugin barrou uma ferramenta pela lista de bloqueadas (proteção ligada, depois de ler as contas): confere de novo e,
+  // se ainda vale, abre o cartão de aprovação. Liberada (a aprovação acabou de chegar), o plugin deixa passar.
+  app.post('/internal/bridge/v1/depois-de-ler', {
+    bodyLimit: 16 * 1024,
+    schema: { body: { type: 'object', required: ['ferramenta'], properties: { session_id: S.str(200), task_id: S.str(200), ferramenta: S.str(60, 1), alvo: S.str(8000) } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { session_id?: string; task_id?: string; ferramenta: string; alvo?: string };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
+    if (!run) return { liberada: false, texto: 'Esta ferramenta não funciona agora nesta conversa. Continue sem ela.' };
+    return conexoes.pedirAprovacao(run, b.ferramenta, b.alvo ?? '');
   });
 
   // Ferramentas de conexão no motor: o plugin só repassa; a regra, as credenciais e o registro ficam aqui
@@ -2444,7 +2718,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, executor, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, whatsapp, initiative, bus, db, vault, hermesVault, motors, startBackground, stopBackground };
+  return { app, executor, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, startBackground, stopBackground };
 }
 
 class Limiter {

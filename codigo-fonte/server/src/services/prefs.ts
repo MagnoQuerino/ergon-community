@@ -7,8 +7,9 @@ import { getSetting, setSetting } from './sectors.ts';
 
 /** updateNotice: ao abrir o Ergon, procurar versão nova e mostrar "Atualização disponível" (ligado por padrão) */
 /** cityCalm: cidade em modo calmo; musicVolume/musicShuffle: a música ambiente (nunca liga sozinha: não há "tocando" guardado) */
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean }
-const DEFAULT: Prefs = { tips: true, dismissed: [], tourDone: false, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false };
+/** cityBarCollapsed: a barra de cima da Cidade recolhida (escolha da pessoa, não do navegador: na multiconta não passa de uma para outra) */
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean; cityBarCollapsed: boolean }
+const DEFAULT: Prefs = { tips: true, dismissed: [], tourDone: false, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false, cityBarCollapsed: false };
 const MAX_DISMISSED = 200;
 
 export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
@@ -22,6 +23,7 @@ export function readPrefs(db: Db, workspaceId: string, userId: string): Prefs {
       cityCalm: v.cityCalm === true,
       musicVolume: typeof v.musicVolume === 'number' && v.musicVolume >= 0 && v.musicVolume <= 1 ? v.musicVolume : DEFAULT.musicVolume,
       musicShuffle: v.musicShuffle === true,
+      cityBarCollapsed: v.cityBarCollapsed === true,
     };
   } catch { return { ...DEFAULT, dismissed: [] }; }
 }
@@ -31,7 +33,8 @@ export function writePrefs(db: Db, workspaceId: string, userId: string, patch: P
   const cur = readPrefs(db, workspaceId, userId);
   const dismissed = patch.resetTips ? [] : [...new Set([...(patch.dismissed ?? cur.dismissed), ...(patch.dismiss ?? [])])].slice(-MAX_DISMISSED);
   const next: Prefs = { tips: patch.tips ?? cur.tips, dismissed, tourDone: patch.tourDone ?? cur.tourDone, updateNotice: patch.updateNotice ?? cur.updateNotice,
-    cityCalm: patch.cityCalm ?? cur.cityCalm, musicVolume: patch.musicVolume ?? cur.musicVolume, musicShuffle: patch.musicShuffle ?? cur.musicShuffle };
+    cityCalm: patch.cityCalm ?? cur.cityCalm, musicVolume: patch.musicVolume ?? cur.musicVolume, musicShuffle: patch.musicShuffle ?? cur.musicShuffle,
+    cityBarCollapsed: patch.cityBarCollapsed ?? cur.cityBarCollapsed };
   setSetting(db, workspaceId, `prefs:${userId}`, JSON.stringify(next));
   return next;
 }

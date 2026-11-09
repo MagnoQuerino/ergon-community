@@ -93,7 +93,7 @@ check("entrada '_' sozinha não barra tudo", not negada("web_search", ["_"]))
 # ---------------------------------------------------------------- a versão do plugin
 manifest = yaml.safe_load(open("/p/ergon_bridge/plugin.yaml", encoding="utf-8"))
 check("plugin.yaml e PLUGIN_VERSION iguais", str(manifest.get("version")) == getattr(b, "PLUGIN_VERSION", None), f"{manifest.get('version')} × {getattr(b, 'PLUGIN_VERSION', None)}")
-check("capacidades do contrato", set(getattr(b, "CAPACIDADES", ())) >= {"conexoes", "bloqueio_prefixo", "known_plugin_toolsets"}, str(getattr(b, "CAPACIDADES", None)))
+check("capacidades do contrato", set(getattr(b, "CAPACIDADES", ())) >= {"conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "aprovar_depois_de_ler"}, str(getattr(b, "CAPACIDADES", None)))
 os.makedirs(os.path.join(HOME, "plugins"), exist_ok=True)
 copia = os.path.join(HOME, "plugins", "ergon_bridge")
 shutil.copytree("/p/ergon_bridge", copia, dirs_exist_ok=True)

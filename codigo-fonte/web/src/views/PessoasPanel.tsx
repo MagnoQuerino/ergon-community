@@ -3,6 +3,8 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { Me, PeopleInfo } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
+import { cardClick } from '../lib/cardClick.ts';
+import { textoRemoverPessoa } from '../lib/textos-tela.ts';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
@@ -16,6 +18,8 @@ export function PessoasPanel({ me }: { me: Me }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(null);
   const [removing, setRemoving] = useState<{ id: string; username: string; typed: string } | null>(null);
+  // a linha inteira abre (e fecha) os detalhes da pessoa: só o que quem administra pode ver, nada do conteúdo dela
+  const [aberta, setAberta] = useState<string | null>(null);
   const d = res.data;
   const act = async (label: string, fn: () => Promise<unknown>, ok?: string) => {
     setMsg(null); setBusy(label);
@@ -32,21 +36,36 @@ export function PessoasPanel({ me }: { me: Me }) {
         <h3>Pessoas neste computador</h3>
         <p className="muted">Cada pessoa tem a própria conta e a própria equipe de IA. Os dados de cada uma ficam cifrados com a chave dela: você administra o Ergon, mas não vê nada do que é dos outros{d.isolated ? '' : ' (o isolamento começa quando a segunda pessoa criar a conta)'}.</p>
         <ul className="sec-rows">
-          {d.people.map((p) => (
-            <li key={p.id}>
-              <b>{p.displayName}</b>
-              <span className="muted small">{p.username}{p.admin ? ' · administra' : ''} · desde {when(p.createdAt)} · último uso {when(p.lastSeen)}</span>
-              {!p.phrase && <span className="badge badge--warn" title="Sem a frase pessoal confirmada, uma senha esquecida trava os dados dessa pessoa para sempre.">sem frase</span>}
-              {!p.admin && p.id !== me.user.id && <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setRemoving({ id: p.id, username: p.username, typed: '' })}>Remover</button>}
-            </li>
-          ))}
+          {d.people.map((p) => {
+            const abrir = () => setAberta((a) => (a === p.id ? null : p.id));
+            const eu = p.id === me.user.id;
+            return (
+              <li key={p.id} className="card-click" onClick={cardClick(abrir)}>
+                <b><button type="button" className="card-open" onClick={abrir} aria-expanded={aberta === p.id} aria-controls={`pessoa-${p.id}`}>{p.displayName}</button></b>
+                <span className="muted small">{p.username}{p.admin ? ' · administra' : ''} · desde {when(p.createdAt)} · último uso {when(p.lastSeen)}</span>
+                {!p.phrase && <span className="badge badge--warn" title="Sem a frase pessoal confirmada, uma senha esquecida trava os dados dessa pessoa para sempre.">sem frase</span>}
+                {!p.admin && p.id !== me.user.id && <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setRemoving({ id: p.id, username: p.username, typed: '' })}>Remover</button>}
+                {aberta === p.id && (
+                  // os detalhes abertos são para ler e copiar: clicar neles não fecha (só a linha de cima alterna)
+                  <dl id={`pessoa-${p.id}`} className="pessoa__det" data-card-skip>
+                    <dt>Usuário</dt><dd>{p.username}{eu ? ' (você)' : ''}</dd>
+                    <dt>Papel</dt><dd>{p.admin ? 'Administra o Ergon neste computador: pessoas, convites e conta nova. Não vê o conteúdo dos outros.' : 'Usa a própria conta e a própria equipe de IA.'}</dd>
+                    <dt>Conta criada</dt><dd>{when(p.createdAt)}</dd>
+                    <dt>Último uso</dt><dd>{p.lastSeen ? when(p.lastSeen) : 'Ainda não entrou.'}</dd>
+                    <dt>Frase pessoal</dt><dd>{p.phrase ? 'Confirmada: com ela, uma senha esquecida não trava os dados.' : eu ? 'Ainda não confirmada. Sem ela, uma senha esquecida trava os seus dados para sempre. Você gera em Configurações › Segurança.' : 'Ainda não confirmada. Sem ela, uma senha esquecida trava os dados dessa pessoa para sempre. Ela gera em Configurações › Segurança.'}</dd>
+                    {p.migrated && <><dt>Dados</dt><dd>{eu ? 'Cifrados com a sua chave: só você abre.' : 'Cifrados com a chave dela: só ela abre, ao entrar com a própria senha.'}</dd></>}
+                  </dl>
+                )}
+              </li>
+            );
+          })}
         </ul>
         {removing && (
           <form className="lock-warn" role="alertdialog" aria-label="Remover conta" onSubmit={(e) => {
             e.preventDefault();
             void act('remove', async () => { await api.del(`/api/people/${removing.id}`, { confirm: removing.typed }); setRemoving(null); }, 'Conta removida: a chave dela saiu primeiro, depois os dados, os arquivos e a equipe de IA dela.');
           }}>
-            <p><b>Remover a conta de {removing.username}?</b> A equipe de IA, as conversas, as tarefas, os arquivos e as conexões dessa pessoa são apagados de vez — nem você nem ela conseguem recuperar. Se ela quiser guardar algo, peça para baixar antes; e faça um backup (Configurações › Saúde) se tiver dúvida.</p>
+            <p><b>Remover a conta de {removing.username}?</b> {textoRemoverPessoa(removing.username)}</p>
             <label className="field">Digite o usuário dela para confirmar<input required autoFocus value={removing.typed} onChange={(e) => setRemoving({ ...removing, typed: e.target.value })} /></label>
             <div className="row">
               <button className="btn btn--danger btn--sm" disabled={busy === 'remove' || removing.typed !== removing.username}>{busy === 'remove' ? 'Removendo…' : 'Remover de vez'}</button>

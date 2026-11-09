@@ -30,6 +30,17 @@ export interface Usage {
   month: UsagePeriod; year: UsagePeriod; subscription: null | { provider: string; windows: Array<{ label: string; usedPercent: number; resetsAt: string | null }> };
   billing: Billing; costVisible: boolean; note: string; executor: 'real' | 'simulated';
 }
+/** GET /api/usage/composicao: do que é feita cada chamada ao modelo, por agente (frações de 0 a 1) */
+export interface ComposicaoAgente {
+  agentId: string; nome: string; execucoes: number; chamadas: number; mediaPorChamada: number;
+  /** anexos: o que o sistema junta ao pedido (arquivos anexados, documentos citados, dados das contas) */
+  partes: { instrucoes: number; ferramentas: number; memoria: number; anexos: number; conversa: number };
+  instrucoes: { agente: number; base: number; competencias: number };
+  cache: number | null; estimado: boolean;
+  /** em quantos pedidos a conversa foi resumida pelo caminho (a parte antiga virou um resumo); ausente = servidor de antes */
+  resumidas?: number;
+}
+export interface ComposicaoResumo { dias: number; agentes: ComposicaoAgente[]; geral: ComposicaoAgente | null }
 /** floors só no GET /api/capacity (o /api/state traz só os totais) */
 export interface Capacity { slots: number; active: number; free: number; floors?: Floor[]; maxFloors: number; note: string }
 /** atualizando: o motor deste computador ainda não tem o conjunto da ferramenta (a atualização da equipe traz) */
@@ -64,6 +75,18 @@ export interface AppState {
   teamAutorun: boolean;
   /** a equipe puxa conversa quando você chega (ligado por padrão) */
   teamInitiative?: boolean;
+  /** passos por pedido (idas ao modelo de IA antes de parar): 20 por padrão, a pessoa escolhe de 5 a 60 */
+  teamMaxTurns?: number;
+  /** a escolha ainda não chegou à equipe (estava desligada, ou o envio falhou: o sistema tenta de novo sozinho) */
+  teamMaxTurnsPendente?: boolean;
+  /** quantos outros workspaces usam a mesma equipe (a escolha vale para todos eles) */
+  teamMaxTurnsOutros?: number;
+  /** resumir as conversas longas mais cedo (ligado por padrão): a parte antiga da conversa vira um resumo */
+  teamCompactacao?: boolean;
+  /** a escolha ainda não chegou à equipe (o sistema tenta de novo sozinho) */
+  teamCompactacaoPendente?: boolean;
+  /** a equipe é de antes desta opção: a escolha fica guardada e chega com a próxima atualização da equipe */
+  teamCompactacaoAtualizacao?: boolean;
   /** personagens da equipe de partida com nome ou história de outro tema (0 = tema padrão) */
   themed: number;
   /** processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele */
@@ -86,7 +109,7 @@ export interface Me {
 }
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
 /** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean }
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean; cityBarCollapsed?: boolean }
 export interface OnboardingOptions {
   state: 'pending' | 'done'; choice: { use?: string; niche?: string; preset?: string; skipped?: boolean } | null;
   uses: Array<{ key: string; label: string; hint: string }>; niches: Array<{ key: string; label: string }>;
@@ -99,8 +122,8 @@ export interface OnboardingResult {
 export interface VersionInfo { version: string; build: string; mode: 'local' | 'cloud'; latest: { version: string; notes: string | null; url: string | null } | null; updateAvailable: boolean;
   /** última consulta que deu certo; configured: esta instalação consulta versões novas */
   checkedAt?: string | null; configured?: boolean;
-  /** versões publicadas anteriores à instalada (a mais nova primeiro) */
-  previous?: Array<{ version: string; url: string | null; publishedAt: string | null; prerelease: boolean }> }
+  /** versões publicadas anteriores à instalada (a mais nova primeiro); rollback: dá para voltar pelo Ergon Desktop */
+  previous?: Array<{ version: string; url: string | null; publishedAt: string | null; prerelease: boolean; rollback?: 'pode' | 'antiga' | 'sem-pacote' | 'instalada-fora' }> }
 /** Estado público da entrada (antes do login). sealed: reiniciado e trancado, só senha ou frase abrem os dados. */
 export interface AuthState { needsSetup: boolean; authenticated: boolean; locked: boolean; sealed: boolean; protected: boolean; mode: 'local' | 'cloud'; rpId: string; publicUrl: string; setupTokenRequired: boolean;
   /** conta nova neste computador: qualquer pessoa ('aberto'), só com convite ('convite'), ou não se aplica (null) */
@@ -167,9 +190,9 @@ export interface RecentConversation {
 export const PROPOSAL_KIND: Record<string, string> = {
   question: 'pergunta', routine: 'rotina', routine_edit: 'ajuste de rotina', sector: 'setor', create_agent: 'novo agente', tools: 'ferramenta',
   permission: 'permissão', handoff: 'passado à coordenação', edit_agent: 'agente', deactivate_agent: 'desativar', reactivate_agent: 'reativar', sector_edit: 'setor', sector_new: 'novo setor',
-  task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card', batch: 'cards', purge: 'apagar de vez', conexao: 'ação numa conta',
+  task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card', batch: 'cards', purge: 'apagar de vez', conexao: 'ação numa conta', depois_de_ler: 'pede aprovação', regra: 'regra',
 };
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'regra' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
@@ -193,10 +216,12 @@ export interface Integration {
   /** oauth: login com a conta · qr: WhatsApp · token: credencial colada · soon: ainda não (motivo em "soon") */
   auth: 'oauth' | 'qr' | 'token' | 'soon'; group: 'contas' | 'tarefas' | 'conversas' | 'vendas' | 'suporte' | 'documentos' | 'financeiro'; about: string; tasks: boolean; site: string; soon: string | null;
   /** extras: links com rótulo e textos com botão de copiar, fora dos passos */
-  help: { url: string; steps: string; extras?: Array<{ rotulo: string; url: string } | { rotulo: string; copiar: string }> } | null;
+  help: { url: string; steps: string; /** no alto da tela de conectar, à vista, antes dos passos */ antes?: string; extras?: Array<{ rotulo: string; url: string } | { rotulo: string; copiar: string }> } | null;
   fields: Array<{ name: string; label: string; secret: boolean; placeholder: string; opcional?: boolean }>;
   state: 'off' | 'pending' | 'connected' | 'error'; account: string | null;
   connectedAt: string | null; lastSyncAt: string | null; error: string | null; ready: boolean;
+  /** conectada do jeito que o serviço deixou de recomendar (ex.: token pessoal do Pipefy): funciona, e a tela pede para reconectar */
+  aviso?: string | null;
   /** Google com o app em modo de teste: até quando a autorização vale (depois, entrar de novo) */
   renewBy?: string | null;
   /** login com a conta: o que falta registrar e onde está o guia */
@@ -230,7 +255,7 @@ export const SOURCE_LABEL: Record<string, string> = {
  * no mesmo formato (nome e atributos="…"): uma linha que o modelo inventou nunca aparece crua na conversa.
  */
 export const stripControl = (s: string): string => s
-  .replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|prioridade|pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|treinar|assumir|copiar-arquivo|salvar-documento|apagar|esvaziar-lixeira|card|tarefa)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '')
+  .replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|prioridade|pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|treinar|assumir|copiar-arquivo|salvar-documento|apagar|esvaziar-lixeira|card|tarefa|titulo|título|renomear-card)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '')
   .replace(/\[\[\s*[a-zà-ú][\wà-ú-]*(?:\s+[\wà-ú-]+\s*=\s*"[^"]*")+\s*\]\]\s*/gi, '')
   .trim();
 
@@ -299,7 +324,7 @@ export type Need = 'info' | 'approval' | 'review' | 'retry';
 export interface RequestPayload { taskId: string; number: number; title: string; need: Need; agent: string; question: string | null; excerpt: string | null; review?: boolean; round?: number }
 export interface Decisions {
   /** task_id e task_number: ação numa conta pedida num card da equipe (o item leva ao card) */
-  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
+  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; payload?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
   waiting: Array<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>;
   /** cards da equipe parados à espera de você */
   cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null }>;

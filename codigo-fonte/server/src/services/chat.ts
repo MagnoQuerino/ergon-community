@@ -5,6 +5,7 @@ import type { Bus } from './bus.ts';
 import { decide, interpretRules } from './interpret.ts';
 import { instructionsFor, isCoordinator, type RunExecutor } from './runs.ts';
 import { parseChatCommand, recordProposals } from './proposals.ts';
+import { descreverRegra, regraDaFrase, resumoDaProposta, soLiberacao } from './conexoes/regras.ts';
 import { attachToMessage, attachmentLine, attachmentsOf, type AttachmentInfo } from './attachments.ts';
 import { forkContext } from './conversation-tools.ts';
 
@@ -98,7 +99,17 @@ function onUserMessage(db: Db, _workspaceId: string, conv: ConversationRow): voi
  * Ganchos de quem monta o servidor: a iniciativa da equipe (o colega que puxou conversa recebe, quando a pessoa
  * responde, o que precisa explicar). Ficam aqui para a conversa não depender da iniciativa.
  */
-export const chatHooks: { replyContext?: (workspaceId: string, userId: string, agentId: string, conversationId: string) => string | null } = {};
+export const chatHooks: {
+  replyContext?: (workspaceId: string, userId: string, agentId: string, conversationId: string) => string | null;
+  /**
+   * o canal da conversa, quando não é a tela do Ergon (ex.: a conversa "Teams", services/teams-app); `messageId`: a
+   * mensagem que vai ao agente (o canal pode dizer algo dela, como um pedido que chegou com atraso)
+   */
+  channelNote?: (conversationId: string, messageId?: string | null) => string | null;
+} = {};
+
+/** A instrução de canal desta conversa: a do canal dela (Teams) ou a da tela do Ergon. */
+export const channelNoteFor = (conversationId: string, messageId?: string | null): string => chatHooks.channelNote?.(conversationId, messageId) ?? CHANNEL_NOTE;
 
 /** Arquivo sem texto: o colega lê e já devolve algo útil, sem perguntar o que fazer. */
 const FILE_ONLY_NOTE = 'A pessoa mandou arquivo(s) sem escrever nada. Leia e já devolva algo útil: o que é, em uma frase, e o que chama atenção (ou faça o óbvio, se a conversa já pedia isso). Termine dizendo o que você pode fazer com ele, em uma frase, sem cardápio de opções.';
@@ -171,9 +182,15 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
   // reorganizar a equipe (ou apagar um card) conversando: com o Coordenador, a frase vira proposta (você aplica)
   const command = !opts.plain && profile && isCoordinator(profile) ? parseChatCommand(content) : null;
   const interp = interpretRules(content);
-  const decision = command ? { kind: 'none' as const, reason: 'pedido de mudança na equipe' }
+  // "podem mandar os e-mails sem me pedir aprovação" (conexoes/regras.ts): vira o cartão de regra, com o alcance para ela
+  // escolher; o pedido segue para o agente como sempre. Nada muda até o clique dela.
+  const regra = !opts.plain && !command ? regraDaFrase(content, db.all<{ kind: string }>("SELECT kind FROM integrations WHERE workspace_id = ? AND state = 'connected'", workspaceId).map((x) => x.kind)) : null;
+  const decided = command ? { kind: 'none' as const, reason: 'pedido de mudança na equipe' }
     : opts.plain ? { kind: 'none' as const, reason: 'conversa de preparo' }
     : decide(interp, { profileCreates: profile?.creates_tasks ?? 'explicit_only', canCommand: true, observeOnly: false, implicitDemands: false }, content);
+  // "a partir de agora, podem mandar sem aprovação": a regra que vale de verdade substitui a regra de texto — só quando a
+  // mensagem não diz mais nada; com outra coisa junto ("respondam sempre em inglês e podem mandar..."), as duas ficam
+  const decision = regra && decided.kind === 'propose_rule' && soLiberacao(content) ? { kind: 'none' as const, reason: 'regra de conexões proposta no cartão' } : decided;
   const result = command
     ? { summary: 'Proposta registrada: aplique ou recuse aqui na conversa.', taskId: null, taskNumber: null, reply: null }
     : applyDecision(db, bus, workspaceId, { type: 'user', id: userId }, decision, { origin: 'chat', messageId, agentId: conv.agent_id });
@@ -192,11 +209,13 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
     workspaceId, agentId: conv.agent_id, conversationId, kind: 'chat', input: [content, attachmentLine(files)].filter(Boolean).join('\n'),
     // o agente precisa saber o que o sistema já aplicou, para não "propor" de novo um card já criado
     instructions: instructionsFor(db, workspaceId, conv.agent_id,
-      [CHANNEL_NOTE, opts.note ?? '', reply ?? '', fork ?? '', quote ?? '', files.length && !content ? FILE_ONLY_NOTE : '', !opts.plain && acted ? `Ação já aplicada pelo sistema para esta mensagem (fato, não repita como proposta): ${result.summary}` : ''].filter(Boolean).join('\n'),
-      { requests: !opts.plain, userId }),
+      [channelNoteFor(conversationId, messageId), opts.note ?? '', reply ?? '', fork ?? '', quote ?? '', files.length && !content ? FILE_ONLY_NOTE : '', !opts.plain && acted ? `Ação já aplicada pelo sistema para esta mensagem (fato, não repita como proposta): ${result.summary}` : '',
+        regra ? `O sistema já mostrou à pessoa, nesta conversa, um cartão para liberar sem confirmação: ${descreverRegra(regra)}. Ela escolhe ali até quando vale (só neste pedido, por 24 h ou sempre). Não escreva [[regra ...]] para isto e não diga que já está liberado antes de ela escolher; se precisar agir antes, siga como sempre (o que pedir confirmação espera o cartão).` : ''].filter(Boolean).join('\n'),
+      { requests: !opts.plain, userId, foco: { conversationId, texto: content } }),
     idempotencyKey: `chat-${messageId}`,
   });
   db.run('UPDATE messages SET run_id = ?, queued = 0 WHERE id = ?', run.id, messageId);
+  if (regra) recordProposals(db, bus, workspaceId, { conversationId, runId: run.id }, [{ ...regra, resumo: resumoDaProposta(regra) }]);
   // card pedido explicitamente na conversa ("/tarefa …"): quando terminar, o agente da conversa entrega aqui
   if (result.taskId && decision.kind === 'create_task') {
     db.run('UPDATE tasks SET conversation_id = ?, purpose = ?, deliver_agent_id = ?, origin_run_id = ? WHERE id = ?',
@@ -304,7 +323,7 @@ export function retryLast(db: Db, bus: Bus, executor: RunExecutor, workspaceId: 
   const n = Number(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runs WHERE idempotency_key LIKE ?", `chat-${m.id}%`)?.n ?? 0);
   const run = executor.enqueue({
     workspaceId, agentId: conv.agent_id, conversationId, kind: 'chat', input: [m.content, attachmentLine(files)].filter(Boolean).join('\n'),
-    instructions: instructionsFor(db, workspaceId, conv.agent_id, [CHANNEL_NOTE, files.length && !m.content ? FILE_ONLY_NOTE : ''].filter(Boolean).join('\n'), { requests: true, userId }),
+    instructions: instructionsFor(db, workspaceId, conv.agent_id, [channelNoteFor(conversationId, m.id), files.length && !m.content ? FILE_ONLY_NOTE : ''].filter(Boolean).join('\n'), { requests: true, userId, foco: { conversationId, texto: m.content } }),
     idempotencyKey: `chat-${m.id}-de-novo-${n}`,
   });
   db.run('UPDATE messages SET run_id = ? WHERE id = ?', run.id, m.id);

@@ -69,6 +69,13 @@ fn navegar(app: &AppHandle, url: &Url) -> bool {
         std::thread::spawn(move || abrir_atualizacoes(&a));
         return false;
     }
+    // "Voltar para esta versão": a página só pede; quem confere, avisa, pede a confirmação e volta é a tela de abertura
+    if d == Destino::Ergon && url.path() == PEDIDO_VOLTAR {
+        let a = app.clone();
+        let versao = versao_pedida(url);
+        std::thread::spawn(move || abrir_volta(&a, versao.as_deref()));
+        return false;
+    }
     match d {
         Destino::Interno | Destino::Ergon => true,
         Destino::Externo => {
@@ -216,11 +223,38 @@ pub fn mostrar(app: &AppHandle) {
 
 /// Endereço que a página do Ergon usa para pedir a tela de atualizações (nunca chega ao servidor).
 pub const PEDIDO_ATUALIZACOES: &str = "/__desktop/atualizacoes";
+/// Endereço que a página do Ergon usa para pedir a volta a uma versão anterior ("?versao=X"; nunca chega ao servidor).
+pub const PEDIDO_VOLTAR: &str = "/__desktop/voltar";
+
+/// A versão pedida em "/__desktop/voltar?versao=X". Só passa uma versão bem formada (x.y.z[-pre], letras, números,
+/// ponto e hífen): ela vai para o endereço da tela de abertura e, depois da confirmação da pessoa, para o endereço do
+/// manifesto assinado dela.
+pub fn versao_pedida(url: &Url) -> Option<String> {
+    let v = url.query_pairs().find(|(k, _)| &**k == "versao").map(|(_, v)| v.into_owned())?;
+    (v.len() <= 40 && crate::confianca::comparar_versoes(&v, &v).is_ok()).then_some(v)
+}
+
+/// Tela de abertura em "#voltar=<versão>": confere a versão escolhida, avisa e só volta com a confirmação da pessoa.
+/// Versão mal formada: a tela diz que não reconheceu (nada muda).
+pub fn abrir_volta(app: &AppHandle, versao: Option<&str>) {
+    if let Some(w) = app.get_webview_window(PRINCIPAL) {
+        let base = if cfg!(windows) { "http://tauri.localhost/index.html" } else { "tauri://localhost/index.html" };
+        let _ = w.navigate(Url::parse(&format!("{base}#voltar={}", versao.unwrap_or(""))).expect("endereço fixo"));
+        mostrar(app);
+    }
+}
 
 pub fn abrir_ergon(app: &AppHandle, porta: u16) -> tauri::Result<()> {
     let w = app.get_webview_window(PRINCIPAL).ok_or(tauri::Error::WindowNotFound)?;
-    // "app=desktop": a página sabe que está no aplicativo (o botão de atualizações leva à tela dele)
-    w.navigate(Url::parse(&format!("http://localhost:{porta}/?app=desktop")).expect("endereço fixo"))
+    w.navigate(Url::parse(&endereco_do_ergon(porta, crate::ambiente::ativo())).expect("endereço fixo"))
+}
+
+/// Endereço da página do Ergon no aplicativo. "app=desktop": a página sabe que está no aplicativo (o botão de
+/// atualizações leva à tela dele). "volta=1": voltar de versão pelo aplicativo vale aqui (Windows com o ambiente
+/// próprio, como em atualizacao.rs); sem ele (Linux, ou Windows sem o ambiente), a página mostra só a página de cada
+/// versão.
+pub fn endereco_do_ergon(porta: u16, volta: bool) -> String {
+    format!("http://localhost:{porta}/?app=desktop{}", if volta { "&volta=1" } else { "" })
 }
 
 /// Tela de atualizações do aplicativo (a de abertura, em "#atualizacoes"): verifica e, se a pessoa pedir, atualiza.
@@ -272,6 +306,31 @@ mod testes {
         assert_eq!(d("javascript:alert(1)"), Destino::Negado);
         assert_eq!(d("data:text/html,oi"), Destino::Negado);
         assert_eq!(d("about:config"), Destino::Negado);
+    }
+
+    #[test]
+    fn pagina_do_ergon_sabe_se_a_volta_vale_aqui() {
+        assert_eq!(endereco_do_ergon(8787, true), "http://localhost:8787/?app=desktop&volta=1");
+        assert_eq!(endereco_do_ergon(8787, false), "http://localhost:8787/?app=desktop", "Linux ou sem o ambiente: sem o botão");
+        assert!(Url::parse(&endereco_do_ergon(18787, true)).is_ok());
+    }
+
+    #[test]
+    fn pedido_de_voltar_so_com_versao_bem_formada() {
+        let v = |u: &str| versao_pedida(&Url::parse(u).unwrap());
+        assert_eq!(d("http://localhost:8787/__desktop/voltar?versao=1.1.0-rc.20"), Destino::Ergon, "o pedido vem do Ergon");
+        assert_eq!(v("http://localhost:8787/__desktop/voltar?versao=1.1.0-rc.20").as_deref(), Some("1.1.0-rc.20"));
+        assert_eq!(v("http://localhost:8787/__desktop/voltar?outra=1&versao=1.1.0").as_deref(), Some("1.1.0"));
+        for u in [
+            "http://localhost:8787/__desktop/voltar",
+            "http://localhost:8787/__desktop/voltar?versao=",
+            "http://localhost:8787/__desktop/voltar?versao=1.1.0%23atualizacoes",
+            "http://localhost:8787/__desktop/voltar?versao=..%2F..%2Fx",
+            "http://localhost:8787/__desktop/voltar?versao=1.1.0-rc.20%2F..%2F..%2Fsegredo",
+            "http://localhost:8787/__desktop/voltar?versao=javascript:alert(1)",
+        ] {
+            assert_eq!(v(u), None, "{u}");
+        }
     }
 
     #[test]

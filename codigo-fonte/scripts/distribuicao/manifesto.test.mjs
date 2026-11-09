@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { assinar, verificarManifesto, conferirArquivo, compararVersoes, origemPermitida, seguranca, sha256, Recusa } from './manifesto.mjs';
+import { assinar, verificarManifesto, conferirArquivo, compararVersoes, origemPermitida, seguranca, segurancaMinima, recentesDoCanal, RECENTES, sha256, Recusa } from './manifesto.mjs';
 
 const novaChave = (keyId) => {
   const k = crypto.generateKeyPairSync('ed25519');
@@ -139,6 +139,51 @@ test('atualização de segurança: lida das novidades, assinada no manifesto; fo
   assert.equal(verificarManifesto(bytes, sig, opts()).seguranca.obrigatoria, true);
   for (const s of [{ obrigatoria: false, motivo: 'motivo longo o bastante' }, { obrigatoria: true }, { obrigatoria: true, motivo: 'x'.repeat(401) }, 'sim']) {
     const e = empacotar(base({ seguranca: s }));
+    recusa(() => verificarManifesto(e.bytes, e.sig, opts()), 'FORMATO');
+  }
+});
+
+test('piso de segurança carregado adiante: a de segurança mais nova até esta versão; forma errada recusada', () => {
+  const SEG = '- **Segurança (obrigatória):** fecha uma falha no acesso ao cofre do motor.';
+  const publicadas = [
+    { tag_name: 'v1.1.0-rc.27', body: '- Melhorias.' },
+    { tag_name: 'v1.1.0-rc.26', body: SEG },
+    { tag_name: 'v1.1.0-rc.25', body: '- Melhorias.' },
+    { tag_name: 'v1.1.0-rc.22', body: SEG },
+    { tag_name: 'v1.1.0-rc.28', body: SEG }, // depois da versão do manifesto: não conta
+    { tag_name: 'v1.1.0-rc.29', body: SEG, draft: true },
+    { tag_name: 'qualquer', body: SEG },
+  ];
+  assert.equal(segurancaMinima(publicadas, '1.1.0-rc.27'), '1.1.0-rc.26', 'a rc.27 comum carrega o piso da rc.26');
+  assert.equal(segurancaMinima(publicadas, '1.1.0-rc.26'), '1.1.0-rc.26', 'inclusive a própria');
+  assert.equal(segurancaMinima(publicadas, '1.1.0-rc.25'), '1.1.0-rc.22');
+  assert.equal(segurancaMinima(publicadas, '1.1.0-rc.21'), null);
+  assert.equal(segurancaMinima(publicadas, '1.1.0'), '1.1.0-rc.28', 'a final vem depois das pré-versões');
+  const ok = empacotar(base({ segurancaMinima: '1.0.1' }));
+  assert.equal(verificarManifesto(ok.bytes, ok.sig, opts()).segurancaMinima, '1.0.1');
+  for (const p of ['1.0', 1, '1.0.3']) {
+    const e = empacotar(base({ segurancaMinima: p }));
+    recusa(() => verificarManifesto(e.bytes, e.sig, opts()), 'FORMATO');
+  }
+});
+
+test('recentes: as versões publicadas no canal até esta, a mais nova primeiro (o Ergon Desktop volta só para as duas anteriores à instalada)', () => {
+  const publicadas = [
+    { tag_name: 'v1.1.0-rc.25', prerelease: true }, { tag_name: 'v1.1.0-rc.26', prerelease: true }, { tag_name: 'v1.1.0-rc.24', prerelease: true },
+    { tag_name: 'v1.1.0-rc.28', prerelease: true }, // depois da versão do manifesto: não entra
+    { tag_name: 'v1.1.0-rc.27', prerelease: true, draft: true }, // rascunho: não entra
+    { tag_name: 'canal-teste', prerelease: true }, { tag_name: 'v1.0.1' }, { tag_name: 'v1.1.0-rc.26', prerelease: true }, // repetida: uma vez só
+  ];
+  assert.deepEqual(recentesDoCanal(publicadas, '1.1.0-rc.27', 'teste'), ['1.1.0-rc.26', '1.1.0-rc.25', '1.1.0-rc.24', '1.0.1']);
+  assert.deepEqual(recentesDoCanal(publicadas, '1.1.0', 'estavel'), ['1.0.1'], 'o estável só vê as finais');
+  const muitas = Array.from({ length: 30 }, (_, i) => ({ tag_name: `v1.1.0-rc.${i + 1}`, prerelease: true }));
+  const r = recentesDoCanal(muitas, '1.1.0-rc.30', 'teste');
+  assert.equal(r.length, RECENTES); assert.equal(r[0], '1.1.0-rc.30'); assert.equal(r.at(-1), '1.1.0-rc.19', 'número, não texto');
+  // a forma conferida na verificação
+  const ok = empacotar(base({ recentes: ['1.0.1', '1.0.0'] }));
+  assert.deepEqual(verificarManifesto(ok.bytes, ok.sig, opts()).recentes, ['1.0.1', '1.0.0']);
+  for (const recentes of [[], 'sim', ['1.0.0', '1.0.1'], ['1.0.1', '1.0.1'], ['9.9.9'], ['1.0'], Array.from({ length: 13 }, (_, i) => `0.0.${i}`)]) {
+    const e = empacotar(base({ recentes }));
     recusa(() => verificarManifesto(e.bytes, e.sig, opts()), 'FORMATO');
   }
 });

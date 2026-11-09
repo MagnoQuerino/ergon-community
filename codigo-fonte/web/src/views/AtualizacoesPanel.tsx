@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import { inDesktopApp } from '../lib/desktop.ts';
+import { inDesktopApp, rollbackInDesktopApp } from '../lib/desktop.ts';
+import { anteriores, textoVersoesAnteriores, voltaNaLista } from '../lib/atualizacoes.ts';
 import { savePrefs, usePrefs } from '../lib/prefs.ts';
 import type { VersionInfo } from '../lib/types.ts';
 
@@ -10,12 +11,17 @@ const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-
 /**
  * Configurações › Atualizações: a versão instalada, "Verificar agora", atualizar (no Ergon Desktop, a tela do aplicativo
  * que atualiza com backup e volta sozinha se der errado; fora dele, a página da versão), o aviso ao abrir o Ergon
- * (ligado por padrão) e as versões anteriores, com o aviso de que voltar pode estragar dados criados na mais nova.
+ * (ligado por padrão) e as versões anteriores (no Ergon Desktop, só as duas publicadas logo antes da instalada), com o aviso de que voltar
+ * pode estragar dados criados na mais nova. No
+ * Ergon Desktop do Windows (com o ambiente próprio), para quem administra, cada versão anterior com o pacote assinado
+ * ganha "Voltar para esta versão" (a tela do aplicativo confere, avisa, pede a confirmação e faz o backup antes); nos
+ * outros casos, a página da versão.
  */
 export function AtualizacoesPanel({ admin }: { admin: boolean }) {
   const v = useResource<VersionInfo>('/api/version', []);
   const prefs = usePrefs();
   const desktop = inDesktopApp();
+  const voltaPeloApp = rollbackInDesktopApp();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [backup, setBackup] = useState<{ busy: boolean; text: string | null; err: boolean }>({ busy: false, text: null, err: false });
@@ -92,16 +98,21 @@ export function AtualizacoesPanel({ admin }: { admin: boolean }) {
           <div className="row"><button className="btn" onClick={() => { setVoltar(true); if (!d.previous?.length) void verificar(); }}>Ver versões anteriores</button></div>
         ) : d.previous && d.previous.length > 0 ? (
           <>
-            <p className="muted small">{desktop
-              ? 'No Ergon Desktop, a volta ainda não é feita pelo próprio aplicativo: na página de cada versão estão o instalador e o pacote dela. Faça o backup antes de qualquer troca.'
-              : 'Na página de cada versão estão os instaladores. Baixe o da versão escolhida e instale por cima desta.'}</p>
+            <p className="muted small">{textoVersoesAnteriores({ app: voltaPeloApp, admin })}</p>
             <ul className="upd-list">
-              {d.previous.map((r) => (
-                <li key={r.version}>
-                  <span><b>{r.version}</b>{r.prerelease ? ' · pré-versão' : ''}{r.publishedAt ? <span className="muted"> · {dia(r.publishedAt)}</span> : null}</span>
-                  {r.url && <a className="btn btn--sm" href={r.url} target="_blank" rel="noreferrer noopener">Página da versão</a>}
-                </li>
-              ))}
+              {anteriores(d.previous, voltaPeloApp).map((r) => {
+                const volta = voltaNaLista(r, { app: voltaPeloApp, admin });
+                return (
+                  <li key={r.version}>
+                    <span><b>{r.version}</b>{r.prerelease ? ' · pré-versão' : ''}{r.publishedAt ? <span className="muted"> · {dia(r.publishedAt)}</span> : null}
+                      {volta.nota && <span className="muted small upd-nota">{volta.nota}</span>}</span>
+                    <span className="row upd-acoes">
+                      {volta.voltar && <button className="btn btn--sm" onClick={() => { location.href = volta.voltar!; }}>Voltar para esta versão</button>}
+                      {r.url && <a className="btn btn--sm" href={r.url} target="_blank" rel="noreferrer noopener">Página da versão</a>}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </>
         ) : <p className="muted">{busy ? 'Consultando…' : 'A lista de versões ainda não veio. Clique em “Verificar agora”.'}</p>}

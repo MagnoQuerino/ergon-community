@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { assinar, verificarManifesto, conferirArquivo, baixar, manifestoOci, camadaAcessivel, validarForma, seguranca, sha256, FORMATO } from './manifesto.mjs';
+import { assinar, verificarManifesto, conferirArquivo, baixar, manifestoOci, camadaAcessivel, validarForma, seguranca, segurancaMinima, recentesDoCanal, sha256, FORMATO } from './manifesto.mjs';
 
 // recusa vira uma linha clara, sem pilha (o código da recusa vem na frente: ASSINATURA, HASH, EXPIRADO...)
 const falhou = (e) => { console.error(`RECUSADO ${e?.message ?? e}`); process.exit(1); };
@@ -83,6 +83,21 @@ switch (cmd) {
     // lançamento, que sai do CHANGELOG) entra assinada no manifesto; o aplicativo bloqueia o uso até atualizar
     const seg = seguranca(rel.body ?? '');
     if (seg) m.seguranca = seg;
+    // piso de segurança carregado adiante: a de segurança obrigatória mais nova publicada até esta versão (o Ergon
+    // Desktop não volta para antes dela, mesmo depois de saírem versões comuns). Sem a lista, nada de manifesto: um
+    // piso que some em silêncio deixaria voltar para uma versão que uma de segurança mandou corrigir
+    const publicadas = [];
+    for (let pagina = 1; pagina <= 10; pagina++) {
+      const lista = await (await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${pagina}`, { headers: h })).json();
+      if (!Array.isArray(lista)) sai(`não deu para listar as versões de ${repo}: ${lista?.message ?? ''}`);
+      publicadas.push(...lista);
+      if (lista.length < 100) break;
+    }
+    const piso = segurancaMinima([...publicadas.filter((x) => x?.tag_name !== rel.tag_name), { ...rel, draft: false }], versao);
+    if (piso) m.segurancaMinima = piso;
+    // as versões publicadas no canal até esta: o Ergon Desktop só volta para as duas anteriores à instalada
+    const recentes = recentesDoCanal([...publicadas.filter((x) => x?.tag_name !== rel.tag_name), { ...rel, draft: false }], versao, canal);
+    if (recentes.length) m.recentes = recentes;
     validarForma(m);
     fs.writeFileSync(opc('saida', 'manifesto.json'), JSON.stringify(m, null, 2) + '\n');
     console.log(`manifesto ${edicao}/${canal} ${versao} · sequência ${m.sequencia} · ${Object.keys(componentes).join(', ')}`);

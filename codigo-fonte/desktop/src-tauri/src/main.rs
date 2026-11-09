@@ -74,6 +74,8 @@ fn main() {
             servicos::instalar_ergon,
             servicos::verificar_atualizacao,
             servicos::atualizar_ergon,
+            servicos::avaliar_volta,
+            servicos::voltar_versao,
         ])
         .setup(|app| {
             if let Ok(pasta) = app.path().app_log_dir() {

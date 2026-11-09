@@ -2,7 +2,8 @@
 
 Confere: as ferramentas registradas pelo plugin chegam à plataforma da API e ao modelo sem passar pela busca de
 ferramentas; o despacho real entrega sessão e tarefa ao plugin; o plugin só repassa ao Ergon, com o token da ponte; a trava
-por agente vale para elas; depois de ler conteúdo privado, o que alcança endereços arbitrários é barrado e a busca não.
+por agente vale para elas; com a proteção ligada no Ergon, depois de ler conteúdo privado, o que alcança endereços
+arbitrários espera a aprovação da pessoa (o pedido vai ao Ergon com a ferramenta e o alvo) e a busca não.
 
   podman run --rm --network none --entrypoint /opt/hermes/.venv/bin/python -e HERMES_HOME=/tmp/h \
     -v "$PWD/hermes/plugins:/p:ro" -v "$PWD/hermes/tests:/t:ro" ergon-hermes:dev /t/test_ergon_bridge_conexoes.py
@@ -43,6 +44,7 @@ def check(name, cond, detail=""):
 # ---------- Ergon simulado
 seen = []
 policy = {"known": True, "agent": "Aspásia", "toolsets": ["todo", "web", "ergon_conexoes"], "holders": {}, "guarded": {}, "skills": [], "bloqueadas": []}
+aprovacao = {"liberada": False, "texto": "A ferramenta espera a aprovação da pessoa: esta conversa leu conteúdo privado das contas."}
 
 
 class Ergon(BaseHTTPRequestHandler):
@@ -53,7 +55,7 @@ class Ergon(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
         seen.append({"path": self.path, "token": self.headers.get("X-Ergon-Bridge-Token"), "body": body})
-        out = policy if self.path.endswith("/tool-policy") else {"ok": True, "status": "feita", "texto": f"recebi {body.get('op')}"}
+        out = policy if self.path.endswith("/tool-policy") else aprovacao if self.path.endswith("/depois-de-ler") else {"ok": True, "status": "feita", "texto": f"recebi {body.get('op')}"}
         data = json.dumps(out).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -124,7 +126,29 @@ policy["toolsets"] = ["todo", "web", "ergon_conexoes"]
 policy["holders"] = {}
 policy["bloqueadas"] = ["web_extract", "terminal", "execute_code", "vision_analyze"]
 r = call("web_extract", "sessao-4")
-check("depois de ler conteúdo privado: abrir endereço é barrado", isinstance(r, dict) and r.get("action") == "block" and "conteúdo privado" in r.get("message", ""), str(r))
+check("proteção ligada, depois de ler conteúdo privado: abrir endereço espera a aprovação", isinstance(r, dict) and r.get("action") == "block" and "conteúdo privado" in r.get("message", ""), str(r))
+pedido = [s for s in seen if s["path"].endswith("/depois-de-ler")]
+check("o pedido de aprovação vai ao Ergon com a ferramenta, a sessão e o token", bool(pedido) and pedido[-1]["body"].get("ferramenta") == "web_extract"
+      and pedido[-1]["body"].get("session_id") == "sessao-4" and pedido[-1]["token"] == TOKEN, str(pedido))
+r = bridge.on_pre_tool_call("web_extract", {"urls": ["https://site.exemplo/a"]}, "tarefa-2", "sessao-4")
+check("o cartão mostra o endereço pedido", [s for s in seen if s["path"].endswith("/depois-de-ler")][-1]["body"].get("alvo") == "https://site.exemplo/a")
+urls = [f"https://s{i}.exemplo/p" for i in range(12)]
+bridge.on_pre_tool_call("web_extract", {"urls": urls}, "tarefa-2", "sessao-4")
+check("a lista inteira de endereços vai ao Ergon (nenhum fica sem aprovação)", [s for s in seen if s["path"].endswith("/depois-de-ler")][-1]["body"].get("alvo") == "\n".join(urls))
+longo = "print('x')\n" * 600
+r = bridge._alvo({"code": longo})
+check("programa longo: o começo e a conferência do texto inteiro", len(r) <= 3500 and "conferência" in r and r != bridge._alvo({"code": longo + "print('y')"}), r[-80:])
+check("sem endereço nem programa: o pedido inteiro", bridge._alvo({"action": "write", "data": "segredo"}) == json.dumps({"action": "write", "data": "segredo"}, ensure_ascii=False, sort_keys=True))
+n_antes = len([s for s in seen if s["path"].endswith("/depois-de-ler")])
+policy["toolsets"] = ["todo", "web", "vision", "ergon_conexoes"]
+check("imagem já na conversa (data:): passa sem pedir", bridge.on_pre_tool_call("vision_analyze", {"image_url": "data:image/png;base64,AAAA"}, "tarefa-2", "sessao-4v") is None
+      and len([s for s in seen if s["path"].endswith("/depois-de-ler")]) == n_antes)
+r = bridge.on_pre_tool_call("vision_analyze", {"image_url": "https://imagens.exemplo/a.png"}, "tarefa-2", "sessao-4v")
+check("imagem por endereço: pede", isinstance(r, dict) and r.get("action") == "block" and len([s for s in seen if s["path"].endswith("/depois-de-ler")]) == n_antes + 1, str(r))
+policy["toolsets"] = ["todo", "web", "ergon_conexoes"]
+aprovacao = {"liberada": True, "texto": ""}
+check("o Ergon diz que este alvo já foi aprovado: a ferramenta passa", call("web_extract", "sessao-4") is None)
+aprovacao = {"liberada": False, "texto": "A ferramenta espera a aprovação da pessoa: esta conversa leu conteúdo privado das contas."}
 check("a busca na web segue valendo", call("web_search", "sessao-4") is None)
 check("e as conexões também", call("conexoes_executar", "sessao-4") is None)
 r = call("terminal", "sessao-4")
@@ -245,6 +269,16 @@ check("saúde: a marca das migrações primeiro", saude()[1].get("vault_config")
 (Path(HOME) / ".ergon-migracoes").unlink()
 marca.unlink()
 check("saúde: sem marca, 0", saude()[1].get("vault_config") == 0)
+# a cópia dos dados de antes do cofre: só True com a marca do cofre dizendo que ela foi feita (o servidor só apaga com True)
+cofre = Path(HOME) / ".ergon-vault"
+check("saúde: sem a marca do cofre, não se sabe da cópia antiga", saude()[1].get("dados_antigos") is None)
+cofre.write_text('{"migrated_from_legacy": true}', encoding="utf-8")
+check("saúde: cópia antiga feita", saude()[1].get("dados_antigos") is True)
+cofre.write_text('{"migrated_from_legacy": false}', encoding="utf-8")
+check("saúde: cofre criado sem a cópia antiga", saude()[1].get("dados_antigos") is False)
+cofre.write_text('{"migrated_from', encoding="utf-8")
+check("saúde: marca do cofre ilegível, não se sabe", saude()[1].get("dados_antigos") is None)
+cofre.unlink()
 
 # ---------- Ergon fora: o hook barra antes (sem política, só o básico), e a ferramenta, se chamada, diz que não sabe
 srv.shutdown()

@@ -16,19 +16,23 @@ import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id as newId, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { getSetting } from './sectors.ts';
-import { instructionsFor, isCoordinator, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
+import { instructionsFor, isCoordinator, motorGaveUp, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { createTask, defaultBoard, getTask, updateTask } from './tasks.ts';
 import { activeTeam, coordinatorOf, type Member } from './team.ts';
 import { filesBrief, referenceFrom, summaryText, taskFiles, type Operations } from './operations.ts';
 import { classifyTask, type ResultRow, type Results } from './results.ts';
-import { BATCH_CONFIRM, DELIVERY_KEY, DELIVERY_KEY_SQL, READY_SQL, Purpose, currentStep, parsePlans, purposeOf, questionIn, stepsOf, type Plan, type StepRow } from './purpose.ts';
+import { BATCH_CONFIRM, DELIVERY_KEY, DELIVERY_KEY_SQL, READY_SQL, Purpose, currentStep, parsePlans, questionIn, stepsOf, type Plan, type StepRow } from './purpose.ts';
 import { recordProposals } from './proposals.ts';
 import { parseDue } from './due.ts';
+import { parseRenames, renameCard } from './card-title.ts';
+import { cadeiaDe, lidoEm, marcarEm } from './conexoes/marca.ts';
 import { workspaceTz } from './routine-proposals.ts';
 
 export interface HelpRequest { agent: string; request: string }
 /** uma rodada do ciclo de persistência (task.persist) e a decisão dela (task.persist_decision) */
-interface PersistRound { round: number; kind: string; by: string; stuck: string; motivo: string; decision?: string; detail?: string }
+interface PersistRound { round: number; kind: string; by: string; stuck: string; motivo: string; refazer?: string; decision?: string; detail?: string }
+/** o que travou um card e volta para a equipe (conexao: a conferência de entrega mostra o que faltou fazer na conta) */
+type Travou = { kind: 'pergunta' | 'ajuda' | 'reprovado' | 'falha' | 'conexao'; text: string; refazer?: string };
 /** quantos pedidos de ajuda numa resposta: o coordenador aciona a equipe inteira, os outros pedem a poucos colegas */
 export const HELP_MAX = { agent: 3, coordinator: 12 };
 
@@ -59,7 +63,7 @@ export function parseProcessRequests(text: string | null): ProcessRequest[] {
 }
 
 /** Tira as linhas de controle ([[...]]) do texto mostrado ao usuário. */
-export const stripControl = (s: string): string => s.replace(/\[\[\s*(processar|pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|treinar|assumir)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '').trim();
+export const stripControl = (s: string): string => s.replace(/\[\[\s*(processar|pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|treinar|assumir|titulo|título|renomear-card)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '').trim();
 const words = (s: string) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 /** etapa intermediária com menos que isto não passa adiante (vai para a conferência, com o motivo) */
 const STEP_MIN_WORDS = 10;
@@ -94,6 +98,11 @@ const CLOSING: Record<string, string> = {
   externo: 'Se uma conta conectada faz isso (veja as Conexões nas suas instruções), faça agora pelas Conexões e diga o que o serviço confirmou; nunca diga que fez o que a ferramenta não confirmou, e se não deu, diga com as palavras do resultado. Se nenhuma conexão faz isso (pagar, assinar, ligar), prepare tudo o que for preciso (rascunho, dados, passos) e diga exatamente o que a pessoa precisa fazer para concluir.',
   informativo: 'Responda com o resultado completo da tarefa, pronto para usar.',
 };
+/**
+ * A última linha da entrega, para a pessoa (resumo-tarefa.ts): ela abre o card, lê só essa frase e decide. A linha sai do
+ * texto da entrega (não aparece duas vezes); sem ela, a tela usa só o que o sistema registrou.
+ */
+export const PARA_VOCE = 'Termine com UMA última linha para a pessoa, sozinha, sem marcador de lista, em linguagem simples, com os números, nomes e destinos de verdade: "Para você decidir: …" quando ela precisa aprovar ou escolher algo antes de seguir (diga exatamente o que ela decide), ou "Feito: …" quando nada depende dela (o que foi feito, onde e para quem). Aprovar o card não envia, não cria e não paga nada: o que sai por uma conta conectada pede o cartão de confirmação das Conexões; nunca escreva que aprovar fará isso. Exemplos: "Para você decidir: escolher entre o plano A (R$ 50 por mês) e o B (R$ 80 por mês)." · "Para você decidir: aprovar o texto do orçamento revisado para Ana e Bruno." · "Feito: criei no Planner as tarefas Revisar contrato, Pagar fornecedor e Agendar visita." Só essa linha; não repita a entrega nela.';
 /** etapa do meio de um plano: a entrega é para a próxima etapa, não para o usuário */
 const STEP_CLOSING = 'Entregue o resultado completo da sua etapa, em texto, pronto para a próxima etapa usar. Não diga apenas que terminou.';
 /**
@@ -163,6 +172,45 @@ export class Teamwork {
     return this.db.get<{ id: string }>('SELECT id FROM columns WHERE board_id = ? AND name = ? ORDER BY position LIMIT 1', boardId, name)?.id ?? null;
   }
 
+  /**
+   * [[titulo card="N" novo="…"]] na resposta da coordenação: o card ganha o título novo sozinho (decisão de 09/11), com
+   * o registro no histórico dele. Só a coordenação renomeia assim; título que a pessoa escolheu fica (card-title.ts).
+   */
+  private retitle(r: RunRow, output: string | null): void {
+    const renames = parseRenames(output);
+    if (!renames.length) return;
+    const a = this.db.get<{ name: string; coordinator: number }>('SELECT name, coordinator FROM agents WHERE id = ?', r.agent_id);
+    if (!a || !isCoordinator(a)) return;
+    // o aviso vai para a conversa de onde o card é (onde a pessoa acompanha e recebe a entrega); card sem conversa: a
+    // desta rodada. A troca fica sempre no histórico do card.
+    const notes = new Map<string, string[]>();
+    // proteção depois de ler (rc.25): a rodada que leu conteúdo de fora (e-mail, mensagem de terceiros) só renomeia
+    // card desta mesma conversa (ou da cadeia dela), e esse card passa a ser tratado como lido de fora (o título some
+    // das instruções das outras conversas). Card de outro lugar não muda: um texto lido não escreve no quadro inteiro.
+    const chain = cadeiaDe(this.db, r);
+    const lido = lidoEm(this.db, chain);
+    const refuse = (taskId: string, title: string, why: string) => audit(this.db, null, { workspaceId: r.workspace_id, actorType: 'agent', actorId: r.agent_id,
+      action: 'task.title_refused', targetType: 'task', targetId: taskId, evidence: { sugerido: title, por: a.name }, result: `${a.name} sugeriu o título “${clip(title, 120)}”; ${why}` });
+    for (const x of renames) {
+      if (lido.deFora) {
+        const t = this.db.get<{ id: string; conversation_id: string | null }>('SELECT id, conversation_id FROM tasks WHERE workspace_id = ? AND number = ?', r.workspace_id, x.number);
+        if (!t) continue;
+        const linked = chain.includes(`task:${t.id}`) || (!!t.conversation_id && t.conversation_id === r.conversation_id);
+        if (!linked) { refuse(t.id, x.title, 'não foi aplicado porque veio de uma conversa que leu conteúdo de fora'); continue; }
+      }
+      const res = renameCard(this.db, this.bus, r.workspace_id, { agentId: r.agent_id, name: a.name }, x.number, x.title);
+      if (res.result === 'renomeado' && res.taskId) {
+        if (lido.deFora) marcarEm(this.db, r.workspace_id, [`task:${res.taskId}`], { privado: lido.privado, motivo: 'título dado depois de ler conteúdo de fora' });
+        const where = this.db.get<{ c: string | null }>('SELECT conversation_id AS c FROM tasks WHERE id = ?', res.taskId)?.c ?? r.conversation_id;
+        if (where) notes.set(where, [...(notes.get(where) ?? []), `card #${x.number} agora se chama “${res.to}” (antes: “${res.from}”)`]);
+      } else if (res.result === 'pessoa' && res.taskId) {
+        audit(this.db, null, { workspaceId: r.workspace_id, actorType: 'agent', actorId: r.agent_id, action: 'task.title_kept', targetType: 'task', targetId: res.taskId,
+          evidence: { sugerido: x.title, por: a.name }, result: `${a.name} sugeriu outro título (“${clip(x.title, 120)}”); fica o que a pessoa escolheu` });
+      } else if (res.result === 'vago' && res.taskId) refuse(res.taskId, x.title, 'não diz do que se trata, e fica o título de agora');
+    }
+    for (const [conversationId, done] of notes) this.purpose.note(r.workspace_id, conversationId, `Sistema — ${done.join('; ')}.`);
+  }
+
   /** Cria os cards de ajuda pedidos por um agente (o repasse fica no log de cada card). */
   createHelpCards(r: RunRow, requests: HelpRequest[]): Array<{ number: number; to: string }> {
     const ws = r.workspace_id;
@@ -204,6 +252,8 @@ export class Teamwork {
     if (r.idempotency_key.startsWith('training-')) return; // treinamento: quem cuida é o Treinar
     // card cancelado enquanto o agente trabalhava: nada continua (próxima etapa, pedido de ajuda, conferência, entrega)
     if (r.task_id && Number(this.db.get<{ archived: number }>('SELECT archived FROM tasks WHERE id = ?', r.task_id)?.archived)) return;
+    // a coordenação entendeu melhor do que um card se trata: ele ganha um título novo (o que a pessoa escolheu fica)
+    if (status === 'succeeded') this.retitle(r, output);
     // o ciclo de persistência decidiu como o card segue (responder, pôr um colega numa etapa, assumir ou perguntar)
     if (r.idempotency_key.startsWith(PERSIST_KEY)) { this.persisted(r, status, output); return; }
     const ws = r.workspace_id;
@@ -218,7 +268,9 @@ export class Teamwork {
       if (plans.length > BATCH_CONFIRM) recordProposals(this.db, this.bus, ws, { conversationId: r.conversation_id, runId: r.id }, [{ kind: 'batch', runId: r.id, plans }]);
       else if (plans.length) this.startPlans(r, plans);
       else if (help.length) {
-        this.startPlan(r, { objective: clip((purposeOf(this.db, r) || help[0].request).replace(/\s+/g, ' ').trim(), 90), steps: help.map((h) => ({ agent: h.agent, task: h.request })) });
+        // sem plano, não há título da coordenação: o card nasce com um tirado do contexto (o que foi pedido ao colega; a
+        // mensagem da pessoa, se diz do que se trata; ou o provisório da conversa), que a coordenação pode trocar (card-title.ts)
+        this.startPlan(r, { objective: '', steps: help.map((h) => ({ agent: h.agent, task: h.request })) });
       }
     } else if (help.length && !queue) this.createHelpCards(r, help); // outros canais (rotina): como sempre
     if (r.idempotency_key.startsWith(DELIVERY_KEY) && status === 'succeeded') {
@@ -260,18 +312,39 @@ export class Teamwork {
     const steps = stepsOf(this.db, r.task_id);
     if (steps.length && this.advance(r, status, output, steps)) return;
     // fim de execução não é fim de trabalho: o contrato de resultado decide, com evidência
-    const res = this.results.evaluate(r, status, output, steps.length ? { words: this.planWords(steps) } : null);
+    let res = this.results.evaluate(r, status, output, steps.length ? { words: this.planWords(steps) } : null);
     if (!res) return;
     if (steps.length) this.closeStep(r, steps, res, output);
     // você recusou no cartão o que era o trabalho do card: sem nova tentativa da equipe; o card fica aberto e a conversa
     // pergunta o que mudar (relay, abaixo). Nada sai do quadro sem você pedir.
-    // não passou na conferência, a execução falhou (não foi você que parou) ou o agente disse que não fez: a equipe
-    // tenta outra estratégia. O serviço recusar (permissão, conta), faltar a ferramenta, ou o agente não ter usado a
-    // conexão que as palavras do pedido indicam vai para a pessoa ("Tentar de novo"): uma nova tentativa por iniciativa
-    // da equipe poderia mandar pela conta o que a pessoa só queria preparar
-    const honesta = (() => { try { return String((JSON.parse(res.evidence) as { honesta?: string }).honesta ?? ''); } catch { return ''; } })();
-    const tentarDeNovo = res.state === 'reprovado' || (res.state === 'falha' && (status === 'failed' || honesta === 'declarou'));
-    if (tentarDeNovo && this.persist(r, { kind: res.state === 'reprovado' ? 'reprovado' : 'falha', text: res.justification })) return;
+    // não passou na conferência, a execução falhou (não foi você que parou), o agente disse que não fez, ou a conferência
+    // de entrega mostra que faltou fazer na conta (não usou a conexão, o pedido não chegou ao serviço, o serviço recusou
+    // por um parâmetro ou uma instabilidade, fez só uma parte): a equipe tenta de novo, com o que faltou dito com clareza,
+    // e a conferência confere outra vez. O que já saiu pela conta no trabalho atual não sai de novo (o serviço não repete,
+    // e quem tenta de novo recebe a lista). Só vai para a pessoa o que só ela resolve (autorizar a conta, ligar a ação
+    // que ela desligou, conferir um envio que o serviço não confirmou, uma decisão dela) ou quando as rodadas acabam.
+    const conf = (() => { try { return JSON.parse(res.evidence) as { honesta?: string; pessoa?: string; refazer?: string; fora?: boolean }; } catch { return {}; } })();
+    const honesta = String(conf.honesta ?? '');
+    const colegas = honesta === 'sem_ferramenta' && !conf.fora ? activeTeam(this.db, ws).filter((m) => m.id !== r.agent_id && m.tools.includes('contas')) : [];
+    const naConta = ['sem_chamada', 'servico_falhou'].includes(honesta) || colegas.length > 0;
+    // o pedido desistiu de esperar a equipe fora do ar (o prazo da fila): não é falha do trabalho. Uma rodada da
+    // persistência esperaria a mesma equipe fora do ar: o card vai direto para a pessoa, com "a equipe não está
+    // respondendo" e "Tentar de novo"
+    const semEquipe = status === 'failed' && motorGaveUp(this.db.get<{ error: string | null }>('SELECT error FROM runs WHERE id = ?', r.id)?.error);
+    const tentarDeNovo = !semEquipe && !conf.pessoa && (res.state === 'reprovado' || (res.state === 'falha' && (status === 'failed' || honesta === 'declarou' || naConta)));
+    if (tentarDeNovo) {
+      const refazer = [conf.refazer, colegas.length ? `Quem tem a ferramenta Conexões na equipe: ${colegas.slice(0, 4).map((m) => m.name).join(', ')}. Ponha um deles numa etapa deste card ([[pedir-ajuda agente="Nome" pedido="..."]]) para fazer na conta o que falta.` : ''].filter(Boolean).join(' ');
+      const why = { kind: naConta ? 'conexao' as const : res.state === 'reprovado' ? 'reprovado' as const : 'falha' as const, text: res.justification, ...(refazer ? { refazer } : {}) };
+      if (this.persist(r, why)) return;
+      // as rodadas da equipe acabaram: a pessoa fica sabendo, com o motivo verdadeiro. A equipe desligada por você, o limite
+      // do dia ou ninguém para decidir não são "a equipe tentou": aí vale só o motivo da conferência
+      const feitas = this.persistRounds(r.task_id).length;
+      if (feitas >= PERSIST_ROUNDS) {
+        audit(this.db, null, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'task.persist_exhausted', targetType: 'task', targetId: r.task_id,
+          evidence: { runId: r.id, rounds: feitas }, result: `A equipe tentou resolver em ${feitas} ${feitas === 1 ? 'rodada' : 'rodadas'} e não conseguiu: o card vai para você, com o último motivo` });
+        res = { ...res, justification: `A equipe tentou resolver em ${feitas} ${feitas === 1 ? 'rodada' : 'rodadas'} e não conseguiu. Último motivo: ${res.justification}` };
+      }
+    }
     const ho =this.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.handoff' ORDER BY created_at LIMIT 1", r.task_id);
     const ev = ho ? JSON.parse(ho.evidence) as { from: string; to: string; conversationId: string | null; parentTaskId: string | null } : null;
     const me = this.db.get<{ number: number }>('SELECT number FROM tasks WHERE id = ?', r.task_id);
@@ -289,12 +362,13 @@ export class Teamwork {
   /**
    * A pessoa decidiu num cartão de confirmação das Conexões enquanto esta execução do card ainda rodava (devolverAoCard,
    * em app.ts, achou a execução ativa e esperou). A saída é de antes da decisão ("pedi a confirmação..."): não vai para a
-   * conferência, e o card volta a andar com o que ela decidiu. Com outro cartão ainda esperando, o clique dele faz isso.
+   * conferência, e o card volta a andar com o que ela decidiu. Com outro cartão ainda esperando (uma ação numa conta ou um
+   * pedido de aprovação para abrir sites ou rodar programas), o clique dele faz isso.
    */
   private decidiuDuranteExecucao(r: RunRow, status: RunStatus): boolean {
     const taskId = r.task_id;
     if (status !== 'succeeded' || !taskId) return false;
-    if (this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE task_id = ? AND status = 'pendente'", taskId)) return false;
+    if (this.results.cartaoEsperando(taskId)) return false;
     if (!this.db.get("SELECT 1 AS x FROM audit_events WHERE target_type = 'task' AND target_id = ? AND action = 'task.conexao' AND created_at > ?", taskId, r.created_at)) return false;
     if (this.db.get('SELECT 1 AS x FROM runs WHERE task_id = ? AND id <> ? AND created_at >= ?', taskId, r.id, r.created_at)) return false; // já há uma execução depois desta
     const t = this.db.get<{ completed: number; archived: number }>('SELECT completed, archived FROM tasks WHERE id = ?', taskId);
@@ -370,7 +444,7 @@ export class Teamwork {
     const out: PersistRound[] = [];
     for (const r of rows) {
       let e: Record<string, unknown>; try { e = JSON.parse(r.evidence) as Record<string, unknown>; } catch { continue; }
-      if (r.action === 'task.persist') out.push({ round: Number(e.round), kind: String(e.kind ?? ''), by: String(e.by ?? ''), stuck: String(e.stuck ?? ''), motivo: String(e.motivo ?? '') });
+      if (r.action === 'task.persist') out.push({ round: Number(e.round), kind: String(e.kind ?? ''), by: String(e.by ?? ''), stuck: String(e.stuck ?? ''), motivo: String(e.motivo ?? ''), ...(typeof e.refazer === 'string' && e.refazer ? { refazer: e.refazer } : {}) });
       else { const x = out.find((o) => o.round === Number(e.round)); if (x) { x.decision = String(e.decision ?? ''); x.detail = String(e.detail ?? ''); } }
     }
     return out;
@@ -380,9 +454,10 @@ export class Teamwork {
    * Ciclo de persistência: o que travou um card (pergunta sobre o trabalho, entrega reprovada na conferência, falha,
    * ajuda que não cabe mais) volta para a equipe resolver, em vez de virar problema da pessoa. Rodadas 1–2: a
    * coordenação decide; 3–4: o reforço (o modelo mais forte) monta uma estratégia nova com o histórico. Depois disso, ou
-   * sem ninguém para decidir, false: segue o caminho de sempre e a pessoa fica sabendo.
+   * sem ninguém para decidir, false: segue o caminho de sempre e a pessoa fica sabendo. O limite de rodadas é o freio do
+   * gasto: no pior caso, 4 decisões e 4 novas tentativas por card em 24 horas.
    */
-  private persist(r: RunRow, why: { kind: 'pergunta' | 'ajuda' | 'reprovado' | 'falha'; text: string }): boolean {
+  private persist(r: RunRow, why: Travou): boolean {
     const ws = r.workspace_id; const taskId = r.task_id;
     // sem modelo real (simulação), não há trabalho para a equipe refazer: segue o caminho de sempre
     if (!taskId || this.executor.mode !== 'real') return false;
@@ -401,21 +476,22 @@ export class Teamwork {
     try {
       this.executor.enqueue({
         workspaceId: ws, agentId: who.id, taskId, kind: 'subtask', input: clip(input, TEXTO_MAX), maxInput: TEXTO_MAX,
-        instructions: instructionsFor(this.db, ws, who.id, 'Canal: ciclo de persistência da equipe. Você decide como o card segue até a entrega, sem devolver à pessoa o problema da equipe.'),
+        instructions: instructionsFor(this.db, ws, who.id, 'Canal: ciclo de persistência da equipe. Você decide como o card segue até a entrega, sem devolver à pessoa o problema da equipe.', { foco: { taskId } }),
         idempotencyKey: `${PERSIST_KEY}${r.id}`,
       });
     } catch { return false; } // limite diário, por exemplo: segue o caminho de sempre
-    const label = { pergunta: 'quis perguntar à pessoa', ajuda: 'pediu uma ajuda que não cabe mais no card', reprovado: 'teve a entrega reprovada na conferência', falha: 'não conseguiu terminar (falha)' }[why.kind];
+    const label = { pergunta: 'quis perguntar à pessoa', ajuda: 'pediu uma ajuda que não cabe mais no card', reprovado: 'teve a entrega reprovada na conferência', falha: 'não conseguiu terminar (falha)',
+      conexao: 'não fez na conta o que o pedido pede (conferência de entrega)' }[why.kind];
     this.results.setWorkState(ws, taskId, 'processamento', reinforce ? `${coord?.name ?? 'A coordenação'} chamou ${who.name} para uma nova estratégia` : `${who.name} está resolvendo com a equipe`);
     audit(this.db, null, { workspaceId: ws, actorType: 'agent', actorId: who.id, action: 'task.persist', targetType: 'task', targetId: taskId,
-      evidence: { runId: r.id, round, kind: why.kind, by: who.name, stuck, motivo: clip(why.text, 4000) },
+      evidence: { runId: r.id, round, kind: why.kind, by: who.name, stuck, motivo: clip(why.text, 4000), ...(why.refazer ? { refazer: clip(why.refazer, 4000) } : {}) },
       result: `Rodada ${round} de ${PERSIST_ROUNDS}: ${stuck} ${label}; ${reinforce ? `${who.name} entra como reforço para montar uma nova estratégia` : `${who.name} resolve com a equipe`}` });
     this.bus.publish(ws, 'tasks.changed', { id: taskId });
     return true;
   }
 
   /** O que quem decide recebe: o card inteiro, o que travou, as rodadas anteriores e as saídas possíveis. */
-  private persistBrief(ws: string, taskId: string, c: { who: Member; coord: Member | undefined; stuck: string; why: { kind: string; text: string }; round: number;
+  private persistBrief(ws: string, taskId: string, c: { who: Member; coord: Member | undefined; stuck: string; why: Travou; round: number;
     rounds: PersistRound[]; reinforce: boolean }): string {
     const t = getTask(this.db, ws, taskId);
     const purpose = this.db.get<{ purpose: string | null }>('SELECT purpose FROM tasks WHERE id = ?', taskId)?.purpose;
@@ -424,7 +500,8 @@ export class Teamwork {
     const each = steps.length ? Math.floor(PLAN_BUDGET / steps.length) : 0;
     const files = filesBrief(this.db, this.filesDir, ws, taskId);
     const what = { pergunta: `quis perguntar à pessoa: “${c.why.text}”`, ajuda: `pediu ajuda e o pedido não cabe mais neste card (já tem etapas de ajuda demais ou é a ajuda pedida de volta a quem pediu):\n${c.why.text}`,
-      reprovado: `entregou, mas a conferência reprovou: ${c.why.text}`, falha: `não conseguiu terminar: ${c.why.text}` }[c.why.kind] ?? c.why.text;
+      reprovado: `entregou, mas a conferência reprovou: ${c.why.text}`, falha: `não conseguiu terminar: ${c.why.text}`,
+      conexao: `não fez na conta o que o pedido pede, segundo a conferência de entrega (o registro do serviço, não o texto do agente): ${c.why.text}` }[c.why.kind] ?? c.why.text;
     return [
       c.reinforce
         ? `Você é ${c.who.name}. ${c.coord && c.coord.id !== c.who.id ? `${c.coord.name}, que coordena a equipe, chamou você` : 'A equipe chamou você'} como reforço para montar uma estratégia NOVA para este card (rodada ${c.round} de ${PERSIST_ROUNDS}): as tentativas anteriores não resolveram.`
@@ -435,6 +512,7 @@ export class Teamwork {
       steps.length ? `\nEtapas do card:\n${steps.map((s) => `${s.position}. ${names.get(s.agent_id) ?? 'Agente'} — ${s.title} [${s.status}]${s.output ? `\n${clip(stripControl(s.output), each)}` : ''}`).join('\n\n')}` : '',
       files ? `\n${files}` : '',
       `\nO que travou: ${c.stuck} ${what}`,
+      c.why.refazer ? `\nO que a conferência de entrega mostra e o que fazer agora: ${c.why.refazer}\nÉ uma falha pequena do trabalho, não uma decisão da pessoa: resolva e ponha para fazer de novo. O que já saiu pela conta não sai de novo. Envio que pede a confirmação da pessoa continua pedindo (o cartão aparece para ela).` : '',
       c.rounds.length ? `\nRodadas anteriores (não repita o que não funcionou):\n${c.rounds.map((x) => `- Rodada ${x.round}: ${x.stuck} (${x.kind}) → ${x.by} decidiu ${x.decision ?? '—'}${x.detail ? `: ${clip(x.detail, 1200)}` : ''}`).join('\n')}` : '',
       '',
       'Regras: o usuário quer a entrega pronta, e rápido. Ele é leigo: sabe o que quer, não como resolver. A equipe resolve sozinha — nunca devolva a ele um problema do trabalho (texto cortado, formato, ferramenta, quem faz o quê, como resolver). Dado que falta e não é essencial: a entrega sai com [PREENCHER] e a lista do que falta.',
@@ -457,7 +535,7 @@ export class Teamwork {
     const decide = (decision: string, detail: string, result: string) => audit(this.db, null, { workspaceId: ws, actorType: 'agent', actorId: r.agent_id,
       action: 'task.persist_decision', targetType: 'task', targetId: taskId, evidence: { runId: r.id, round, decision, detail: clip(detail, 4000) }, result });
     if (status !== 'succeeded' || !text.trim()) {
-      decide('sem decisão', status, `${who} não chegou a uma decisão (${status}): o card segue como estava`);
+      decide('sem decisão', status, `${who} não chegou a uma decisão (${status === 'cancelled' ? 'parada' : status === 'succeeded' ? 'sem resposta' : 'não terminou'}): o card segue como estava`);
       // a decisão não veio: o que travou segue o caminho de sempre (a pessoa fica sabendo)
       if (orig && /\[\[\s*perguntar\b/i.test(orig.output ?? '')) this.settle(orig, 'succeeded', orig.output);
       else {
@@ -487,7 +565,10 @@ export class Teamwork {
     }
     if (!instruction) { decide('sem decisão', text, `${who} não deu uma instrução utilizável: o card segue como estava`); this.results.restoreWorkState(ws, taskId); return; }
     decide('instruir', instruction, `${who} respondeu e o trabalho segue`);
-    this.results.teamAnswer(ws, taskId, instruction, who);
+    // o que a conferência de entrega mostrou vai junto, com as palavras dela: quem tenta de novo sabe o que faltou e o que
+    // já saiu pela conta (não repetir), seja qual for a instrução
+    const refazer = this.persistRounds(taskId).at(-1)?.refazer;
+    this.results.teamAnswer(ws, taskId, refazer && !instruction.includes(refazer) ? `${instruction}\n\nO que a conferência de entrega mostrou (siga também): ${refazer}` : instruction, who);
     try { this.work(ws, taskId, null); } catch { this.results.setWorkState(ws, taskId, 'solicitada', `${who} respondeu: esperando a vez`); }
   }
 
@@ -503,14 +584,15 @@ export class Teamwork {
     const board = defaultBoard(this.db, ws).id;
     const sorted = plans.map((p, i) => ({ p, i })).sort((a, b) => (a.p.order ?? 999 + a.i) - (b.p.order ?? 999 + b.i));
     const many = sorted.length > 1;
-    const made: Array<{ taskId: string; number: number; plan: Plan; i: number; after: number[] }> = [];
+    const made: Array<{ taskId: string; number: number; title: string; plan: Plan; i: number; after: number[] }> = [];
     const tz = workspaceTz(this.db, ws);
     for (const { p, i } of sorted) {
       const m = this.purpose.createPlan(r, p, (x) => createTask(this.db, null, ws, { type: 'agent', id: r.agent_id }, {
         title: x.title, description: x.description, boardId: board, columnId: this.column(board, COLS.todo) ?? undefined, agentId: x.agentId, origin: 'chat',
         dueOn: parseDue(p.due || (many ? x.title : x.purpose || x.title), tz), // "até sexta" no pedido: o card já nasce com o prazo
+        titleSource: x.titleSource,
       }), { group: many ? String(i + 1) : undefined, quiet: many });
-      if (m) made.push({ taskId: m.taskId, number: m.number, plan: p, i, after: p.after ?? [] });
+      if (m) made.push({ taskId: m.taskId, number: m.number, title: m.title, plan: p, i, after: p.after ?? [] });
     }
     if (!made.length) return [];
     // ordem da fila: a recomendada; "depois de": pela ordem (ou posição) dos planos desta resposta
@@ -526,7 +608,7 @@ export class Teamwork {
       const name = (n: number) => made.find((x) => x.number === n);
       const lines = made.map((m) => {
         const deps = this.db.all<{ number: number }>('SELECT p.number FROM task_deps d JOIN tasks p ON p.id = d.after_id WHERE d.task_id = ?', m.taskId).map((d) => `#${d.number}`);
-        return `#${m.number} ${clip(m.plan.objective, 90)}${deps.length ? ` (depois do ${deps.join(', ')})` : ''}`;
+        return `#${m.number} ${clip(m.title, 90)}${deps.length ? ` (depois do ${deps.join(', ')})` : ''}`;
       });
       void name;
       this.purpose.note(ws, r.conversation_id, `Sistema — ${made.length} cards abertos, nesta ordem na fila:\n${lines.join('\n')}\nCada um entrega aqui quando ficar pronto.`);
@@ -555,12 +637,14 @@ export class Teamwork {
 
   /**
    * Etapa do meio que entregou: guarda a entrega, passa o card ao agente da próxima etapa e já põe para trabalhar.
-   * Pergunta ao usuário, pedido de ajuda, falha ou entrega curta demais não passam adiante (false: a conferência decide).
+   * Pergunta ao usuário, pedido de ajuda, falha, entrega curta demais ou um cartão esperando o clique da pessoa (a etapa
+   * ainda não terminou: ela continua na mesma etapa quando a pessoa decidir) não passam adiante (false: a conferência decide).
    */
   private advance(r: RunRow, status: RunStatus, output: string | null, steps: StepRow[]): boolean {
     const cur = currentStep(steps);
     if (!cur || status !== 'succeeded' || cur.position === steps[steps.length - 1].position) return false;
     if (/\[\[\s*perguntar\b/i.test(output ?? '') || words(stripControl(output ?? '')) < STEP_MIN_WORDS) return false;
+    if (r.task_id && this.results.cartaoEsperando(r.task_id)) return false;
     const next = steps.find((s) => s.position > cur.position && s.status !== 'feita');
     if (!next) return false;
     const ws = r.workspace_id; const taskId = r.task_id!;
@@ -868,7 +952,8 @@ export class Teamwork {
     const back = this.results.pendingReturn(workspaceId, t.id);
     const files = filesBrief(this.db, this.filesDir, workspaceId, t.id);
     const plan = this.planBrief(workspaceId, t.id);
-    const closing = plan && !plan.last ? STEP_CLOSING : CLOSING[kind] ?? CLOSING.informativo;
+    // a última etapa (ou o card sem plano) entrega à pessoa: termina com a linha para ela decidir de relance
+    const closing = plan && !plan.last ? STEP_CLOSING : `${CLOSING[kind] ?? CLOSING.informativo} ${PARA_VOCE}`;
     const input = [
       `Tarefa #${t.number}: ${t.title}`, plan ? plan.text : t.description,
       files ? `\n${files}` : '',
@@ -882,7 +967,7 @@ export class Teamwork {
     ].filter(Boolean).join('\n');
     const run = this.executor.enqueue({
       workspaceId, agentId, taskId: t.id, kind: 'subtask', input: clip(input, TEXTO_MAX), maxInput: TEXTO_MAX,
-      instructions: instructionsFor(this.db, workspaceId, agentId, 'Canal: quadro da equipe. Responda com o resultado da tarefa.'),
+      instructions: instructionsFor(this.db, workspaceId, agentId, 'Canal: quadro da equipe. Responda com o resultado da tarefa.', { foco: { taskId: t.id, texto: t.title } }),
       idempotencyKey: `queue-${t.id}-${attempts + 1}`,
     });
     if (plan) this.db.run("UPDATE task_steps SET status = 'em_andamento', run_id = ? WHERE id = ?", run.id, plan.stepId);
