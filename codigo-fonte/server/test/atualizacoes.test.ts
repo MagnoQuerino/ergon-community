@@ -89,11 +89,12 @@ describe('Atualizações: canal pela versão instalada, versões anteriores e av
     // a rota usa a mesma regra; o aplicativo confere de novo do lado dele
     const app = fs.readFileSync(path.resolve(import.meta.dirname, '../src/app.ts'), 'utf8');
     assert.ok(app.includes('previous: anterioresParaVoltar(st.releases)'));
-    const rs = fs.readFileSync(path.resolve(import.meta.dirname, '../../desktop/src-tauri/src/atualizacao.rs'), 'utf8');
-    assert.ok(rs.includes('fora_das_duas_anteriores(alvo, instalada'));
+    // o Rust (desktop/) e o manifesto do canal (scripts/) não vão na imagem de teste do Docker (só shared/server/web)
+    const rsArq = path.resolve(import.meta.dirname, '../../desktop/src-tauri/src/atualizacao.rs');
+    if (fs.existsSync(rsArq)) assert.ok(fs.readFileSync(rsArq, 'utf8').includes('fora_das_duas_anteriores(alvo, instalada'));
     // quantas o manifesto do canal carrega em "recentes" é o que a lista usa para saber se a instalada ainda está nela
-    const mjs = fs.readFileSync(path.resolve(import.meta.dirname, '../../scripts/distribuicao/manifesto.mjs'), 'utf8');
-    assert.equal(Number(/export const RECENTES = (\d+);/.exec(mjs)?.[1]), RECENTES_DO_CANAL);
+    const mjsArq = path.resolve(import.meta.dirname, '../../scripts/distribuicao/manifesto.mjs');
+    if (fs.existsSync(mjsArq)) assert.equal(Number(/export const RECENTES = (\d+);/.exec(fs.readFileSync(mjsArq, 'utf8'))?.[1]), RECENTES_DO_CANAL);
   });
 
   test('a versão mínima para voltar é a mesma no servidor e no aplicativo do computador', () => {

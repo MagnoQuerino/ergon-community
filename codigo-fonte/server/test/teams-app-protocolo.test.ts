@@ -162,7 +162,7 @@ describe('edição Community', () => {
     const proibidas = new RegExp(['Her' + 'mes', 'M' + 'G3', 'am' + 'agno', 'fund' + 'ador'].join('|'));
     const arquivos = [...fs.readdirSync(path.join(raiz, 'server', 'src', 'services', 'teams-app')).map((f) => path.join(raiz, 'server', 'src', 'services', 'teams-app', f)),
       path.join(raiz, 'web', 'src', 'views', 'ConexoesView.tsx'), path.join(raiz, 'connectors', 'teams', 'appPackage', 'manifest.template.json')];
-    for (const f of arquivos) {
+    for (const f of arquivos.filter((x) => fs.existsSync(x))) { // connectors/ não vai na imagem de teste do Docker
       // só as frases (entre aspas) contam: a expressão que tira o nome do motor das respostas é montada por partes
       const frases = fs.readFileSync(f, 'utf8').match(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? [];
       for (const x of frases) assert.doesNotMatch(x, proibidas, `${path.basename(f)}: ${x.slice(0, 80)}`);
