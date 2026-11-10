@@ -259,7 +259,7 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.doesNotMatch(tela, /canais que você liberar/, 'não há escolha de canais: o alcance é o da credencial');
     assert.doesNotMatch(tela, /disabled=\{busy \|\| !filled\}/, 'Conectar não fica apagado sem dizer o que falta');
     assert.match(tela, /Aqui o teste só lê; a escrita aparece no primeiro uso/);
-    assert.match(ler('community/publico/README.md'), /CRM e atendimento; financeiro sem mover dinheiro/);
+    assert.match(ler('community/publico/README.md'), /CRM, atendimento e financeiro:\*\* o financeiro cadastra clientes e cria cobranças, \*\*nunca paga nem transfere\*\*/);
     assert.doesNotMatch(tela, /Só leitura: os agentes consultam cobranças/, 'o financeiro também escreve; só leitura é o atalho da conexão');
     assert.match(codigo, /\/> \{t\('conexoes\.soLeitura\.rotulo'\)\}<\/label>/, 'o atalho é uma caixa de marcar, nunca um botão apagado');
     assert.match(tela, /'soLeitura\.rotulo': 'Só leitura'/);
