@@ -50,7 +50,11 @@ const local = (tz: string, ms: number) => { const p = localParts(tz, ms); return
 const t3 = (s: string, max = 160) => neutral(clip(s.replace(/\s+/g, ' ').trim(), max), max + 2);
 /** Bloco de texto de terceiros (mantém as linhas, desarma as linhas de controle). */
 const defuse = (s: string) => s.replace(/\[\s*\[/g, '[ [').replace(/\]\s*\]/g, '] ]');
-const STOP = new Set(['para', 'como', 'qual', 'quais', 'sobre', 'entre', 'depois', 'antes', 'ainda', 'mais', 'menos', 'muito', 'pelo', 'pela', 'pelos', 'pelas', 'este', 'esta', 'esse', 'essa', 'isso', 'isto', 'aquele', 'aquela', 'onde', 'quando', 'porque', 'preciso', 'quero', 'fazer', 'feito', 'tudo', 'todos', 'todas', 'cada', 'outro', 'outra', 'nosso', 'nossa', 'meu', 'minha', 'seus', 'suas', 'dele', 'dela', 'projeto', 'assunto', 'cliente', 'tarefa', 'tarefas', 'semana', 'hoje', 'amanha', 'ontem', 'reuniao', 'with', 'from', 'that', 'this']);
+const STOP = new Set(['para', 'como', 'qual', 'quais', 'sobre', 'entre', 'depois', 'antes', 'ainda', 'mais', 'menos', 'muito', 'pelo', 'pela', 'pelos', 'pelas', 'este', 'esta', 'esse', 'essa', 'isso', 'isto', 'aquele', 'aquela', 'onde', 'quando', 'porque', 'preciso', 'quero', 'fazer', 'feito', 'tudo', 'todos', 'todas', 'cada', 'outro', 'outra', 'nosso', 'nossa', 'meu', 'minha', 'seus', 'suas', 'dele', 'dela', 'projeto', 'assunto', 'cliente', 'tarefa', 'tarefas', 'semana', 'hoje', 'amanha', 'ontem', 'reuniao', 'with', 'from', 'that', 'this',
+  // inglês
+  'what', 'which', 'when', 'where', 'about', 'before', 'after', 'still', 'more', 'less', 'very', 'into', 'your', 'their', 'there', 'here', 'have', 'need', 'want',
+  'please', 'make', 'done', 'every', 'each', 'other', 'these', 'those', 'them', 'they', 'project', 'subject', 'client', 'customer', 'task', 'tasks', 'week', 'today',
+  'tomorrow', 'yesterday', 'meeting', 'emails', 'email', 'messages', 'message', 'some', 'something', 'anything', 'everything', 'should', 'would', 'could']);
 
 /** Palavras que contam numa busca: termos entre aspas inteiros, e as palavras de 4+ letras que não são vazias. */
 export function searchTerms(text: string, max = 6): string[] {
@@ -83,7 +87,7 @@ const fileParam = (p: ParamValues, k: string): FileRef[] => ((p[k] ?? []) as unk
 const listParam = (p: ParamValues, k: string): string[] => ((p[k] ?? []) as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim()).map((x) => x.trim());
 
 /** O pedido fala de e-mail ou de mensagens recebidas (palavras dobradas, sem acento). */
-const ASKS_MESSAGES = /(^|[^a-z])(e-?mails?|mensage|caixa de entrada|inbox|correio|chegou|chegaram|recebi|recebemos|canais|whatsapp|teams)/;
+const ASKS_MESSAGES = /(^|[^a-z])(e-?mails?|mensage|caixa de entrada|inbox|correio|chegou|chegaram|recebi|recebemos|canais|whatsapp|teams|messages?\b|mailbox|came in|arrived|i received|we received|i got|channels)/;
 
 /**
  * Numa conversa com quem tem a ferramenta Mensagens dos canais: o pedido fala de e-mail ou de mensagens → o que chegou

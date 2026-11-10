@@ -1,5 +1,6 @@
 import type { FxSpec } from '../iso/cosmetics.ts';
 import { useResource } from '../lib/live.ts';
+import { useT } from '../i18n/index.ts';
 
 export type FxTarget = { all: true } | { agentName: string } | { charKey: string };
 export interface FxOption { id: string; packageId: string; item: number; title: string; effect: string; label: string; color: string; intensity: number; target: FxTarget }
@@ -22,15 +23,16 @@ export function useFxOptions(): FxOption[] {
  * está instalado; comprar ou instalar fica na loja (Configurações › Pacotes). Sem pacotes, só diz isso.
  */
 export function EffectPicker({ value, onChange, options }: { value: FxChoice; onChange: (c: FxChoice) => void; options: FxOption[] }) {
-  if (!options.length) return <p className="hint">Nenhum efeito instalado. Efeitos vêm dos Pacotes (Configurações › Pacotes); o agente funciona igual sem eles.</p>;
+  const t = useT();
+  if (!options.length) return <p className="hint">{t('equipe.efeitos.nenhum')}</p>;
   const on = (c: FxChoice) => (c.mode === value.mode && (c.mode !== 'custom' || (value.mode === 'custom' && value.option === c.option)));
   const chip = (c: FxChoice, label: string, title?: string) => (
     <button key={c.mode === 'custom' ? c.option : c.mode} type="button" className={`chip chip--pick ${on(c) ? 'is-on' : ''}`} aria-pressed={on(c)} title={title} onClick={() => onChange(c)}>{label}</button>
   );
   return (
-    <div className="chips" role="group" aria-label="Efeitos dos seus Pacotes">
-      {chip({ mode: 'inherit' }, 'Padrão da cidade', 'O que os pacotes instalados já aplicam a ele')}
-      {chip({ mode: 'off' }, 'Sem efeito')}
+    <div className="chips" role="group" aria-label={t('equipe.efeitos.grupo')}>
+      {chip({ mode: 'inherit' }, t('equipe.efeitos.padrao'), t('equipe.efeitos.padraoDica'))}
+      {chip({ mode: 'off' }, t('equipe.efeitos.sem'))}
       {options.map((o) => chip({ mode: 'custom', option: o.id }, o.label, `${o.label} · ${o.title}`))}
     </div>
   );

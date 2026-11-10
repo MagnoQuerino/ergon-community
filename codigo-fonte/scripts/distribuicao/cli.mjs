@@ -79,7 +79,8 @@ switch (cmd) {
       componentes,
     };
     if (!m.clienteMinimo) delete m.clienteMinimo;
-    // atualização de segurança: a linha "Segurança (obrigatória): motivo" nas novidades da versão (o corpo da página de
+    // atualização de segurança: o comentário <!-- seguranca: motivo --> ou a linha "Segurança (obrigatória): motivo"
+    // ("Security (required): motivo" em notas em inglês) nas novidades da versão (o corpo da página de
     // lançamento, que sai do CHANGELOG) entra assinada no manifesto; o aplicativo bloqueia o uso até atualizar
     const seg = seguranca(rel.body ?? '');
     if (seg) m.seguranca = seg;

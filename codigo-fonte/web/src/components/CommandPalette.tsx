@@ -5,6 +5,16 @@ import { getRecents, type Recent } from '../lib/recents.ts';
 import { rank } from '../lib/search.ts';
 import type { AgentLite } from '../lib/types.ts';
 import { Icon } from './Icon.tsx';
+import { useIdioma, useT } from '../i18n/index.ts';
+
+const TIPO: Record<Recent['kind'], 'geral.busca.tipoCard' | 'geral.busca.tipoAgente' | 'geral.busca.tipoRotina'> = { card: 'geral.busca.tipoCard', agente: 'geral.busca.tipoAgente', rotina: 'geral.busca.tipoRotina' };
+/** O quadro de um card recente sai do endereço dele (no idioma da hora); o agente traz o papel dele. */
+function ondeDoRecente(r: Recent, t: ReturnType<typeof useT>): string | undefined {
+  if (r.kind !== 'card') return r.where;
+  if (r.href?.startsWith('#equipe')) return t('geral.nav.fluxos');
+  if (r.href?.startsWith('#tarefas')) return t('geral.nav.tarefas');
+  return undefined;
+}
 
 /** Um resultado da busca: o que aparece e o que acontece ao escolher. */
 export interface PaletteItem { key: string; label: string; sub?: string; icon: string; keywords?: string; run: () => void }
@@ -23,6 +33,8 @@ export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onC
   onCard: (t: CardHit) => void; onRoutine: (id: string, name: string) => void; onRecent: (r: Recent) => void;
   onClose: () => void;
 }) {
+  const t = useT();
+  const idioma = useIdioma();
   const ref = useRef<HTMLDivElement>(null);
   const [q, setQ] = useState('');
   const [found, setFound] = useState<Found | null>(null);
@@ -38,12 +50,12 @@ export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onC
     if (!term) { setFound(null); setBusy(false); return; }
     const my = ++seq.current;
     setBusy(true);
-    const t = window.setTimeout(async () => {
+    const espera = window.setTimeout(async () => {
       try { const r = await api.get<Found>(`/api/search?q=${encodeURIComponent(term.slice(0, 100))}`); if (my === seq.current) setFound(r); }
       catch { if (my === seq.current) setFound({ tasks: [], routines: [] }); }
       finally { if (my === seq.current) setBusy(false); }
     }, 160);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(espera);
   }, [q]);
 
   const groups = useMemo(() => {
@@ -52,22 +64,25 @@ export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onC
       .map((it) => ({ it, r: rank(term, `${it.label} ${it.sub ?? ''} ${it.keywords ?? ''}`) })).filter((x) => x.r >= 0)
       .sort((a, b) => b.r - a.r).slice(0, max).map((x) => x.it);
     if (!term) {
-      const rec: PaletteItem[] = recents.map((r) => ({
-        key: `rec-${r.kind}-${r.id}`, label: r.label, sub: { card: 'Card', agente: 'Agente', rotina: 'Rotina' }[r.kind] + (r.where ? ` · ${r.where}` : ''),
-        icon: { card: 'tasks', agente: 'users', rotina: 'repeat' }[r.kind], run: () => onRecent(r),
-      }));
-      return [['Recentes', rec], ['Ações', base.acoes], ['Ir para', base.areas]] as Array<[string, PaletteItem[]]>;
+      const rec: PaletteItem[] = recents.map((r) => {
+        const onde = ondeDoRecente(r, t);
+        return {
+          key: `rec-${r.kind}-${r.id}`, label: r.label, sub: t(TIPO[r.kind]) + (onde ? ` · ${onde}` : ''),
+          icon: { card: 'tasks', agente: 'users', rotina: 'repeat' }[r.kind], run: () => onRecent(r),
+        };
+      });
+      return [[t('geral.busca.recentes'), rec], [t('geral.busca.acoes'), base.acoes], [t('geral.busca.irPara'), base.areas]] as Array<[string, PaletteItem[]]>;
     }
-    const cards: PaletteItem[] = (found?.tasks ?? []).map((t) => ({
-      key: `card-${t.id}`, label: `#${t.number} ${t.title}`, icon: 'tasks', run: () => onCard(t),
-      sub: `${t.audience === 'team' ? 'Fluxos da equipe' : t.origin === 'mirror' ? 'Tarefas (ligada a um aplicativo)' : 'Tarefas'} · ${t.completed ? 'concluída' : t.column_name}`,
+    const cards: PaletteItem[] = (found?.tasks ?? []).map((c) => ({
+      key: `card-${c.id}`, label: `#${c.number} ${c.title}`, icon: 'tasks', run: () => onCard(c),
+      sub: `${c.audience === 'team' ? t('geral.nav.fluxos') : c.origin === 'mirror' ? t('geral.busca.tarefasLigada') : t('geral.nav.tarefas')} · ${c.completed ? t('geral.busca.concluida') : c.column_name}`,
     }));
     const rotinas: PaletteItem[] = (found?.routines ?? []).map((r) => ({
-      key: `rot-${r.id}`, label: r.name, sub: r.status === 'active' ? 'Rotina ligada' : 'Rotina pausada', icon: 'repeat', run: () => onRoutine(r.id, r.name),
+      key: `rot-${r.id}`, label: r.name, sub: r.status === 'active' ? t('geral.busca.rotinaLigada') : t('geral.busca.rotinaPausada'), icon: 'repeat', run: () => onRoutine(r.id, r.name),
     }));
     const agentes: PaletteItem[] = (found?.agents ?? []).map((a) => ({ key: `ag-${a.id}`, label: a.name, sub: a.role, icon: 'users', run: () => onAgent(a) }));
-    return [['Cards', cards], ['Agentes', agentes], ['Rotinas', rotinas], ['Ações', pick(base.acoes, 5)], ['Ir para', pick(base.areas, 6)]] as Array<[string, PaletteItem[]]>;
-  }, [q, found, recents, base]); // eslint-disable-line react-hooks/exhaustive-deps
+    return [[t('geral.busca.cards'), cards], [t('geral.busca.agentes'), agentes], [t('geral.busca.rotinas'), rotinas], [t('geral.busca.acoes'), pick(base.acoes, 5)], [t('geral.busca.irPara'), pick(base.areas, 6)]] as Array<[string, PaletteItem[]]>;
+  }, [q, found, recents, base, idioma]); // eslint-disable-line react-hooks/exhaustive-deps
   const flat = groups.flatMap(([, items]) => items);
   useEffect(() => { setActive(0); }, [q, found]);
   // a opção escolhida fica à vista ao andar com as setas
@@ -89,17 +104,17 @@ export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onC
 
   return (
     <div className="palette-back">
-      <div ref={ref} className="palette" role="dialog" aria-modal="true" aria-label="Buscar no Ergon">
+      <div ref={ref} className="palette" role="dialog" aria-modal="true" aria-label={t('geral.busca.aria')}>
         <div className="palette__input">
           <Icon name="search" size={18} />
           <input data-autofocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} maxLength={100}
-            placeholder="Buscar cards, agentes, rotinas e áreas…" aria-label="Buscar"
+            placeholder={t('geral.busca.campo')} aria-label={t('geral.busca.campoAria')}
             role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list"
             aria-activedescendant={flat[active] ? `pal-${flat[active].key}` : undefined} />
           {busy && <span className="palette__busy" aria-hidden="true" />}
           <kbd>Esc</kbd>
         </div>
-        <div id="palette-list" role="listbox" aria-label="Resultados" className="palette__list">
+        <div id="palette-list" role="listbox" aria-label={t('geral.busca.resultados')} className="palette__list">
           {groups.map(([name, items]) => items.length > 0 && (
             <div key={name} role="group" aria-label={name}>
               <div className="palette__group" aria-hidden="true">{name}</div>
@@ -116,10 +131,10 @@ export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onC
               })}
             </div>
           ))}
-          {empty && <p className="palette__empty">Nada encontrado para “{q.trim()}”. Tente o número do card (#12) ou outra palavra do título.</p>}
-          {!q.trim() && !recents.length && <p className="palette__empty palette__empty--soft">Os cards, agentes e rotinas que você abrir aparecem aqui como recentes.</p>}
+          {empty && <p className="palette__empty">{t('geral.busca.nada', { termo: q.trim() })}</p>}
+          {!q.trim() && !recents.length && <p className="palette__empty palette__empty--soft">{t('geral.busca.semRecentes')}</p>}
         </div>
-        <footer className="palette__foot" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> escolher</span><span><kbd>Enter</kbd> abrir</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd> busca de qualquer lugar</span></footer>
+        <footer className="palette__foot" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> {t('geral.busca.escolher')}</span><span><kbd>Enter</kbd> {t('geral.busca.abrir')}</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd> {t('geral.busca.qualquerLugar')}</span></footer>
       </div>
     </div>
   );

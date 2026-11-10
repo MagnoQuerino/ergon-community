@@ -7,6 +7,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { TeamAgent } from './teamData.ts';
+import { t } from '../i18n/index.ts';
 
 export type DropTarget = { kind: 'sector'; id: string; name: string } | { kind: 'structure'; id: string; name: string } | { kind: 'tray'; id: ''; name: string };
 interface DragState { agent: TeamAgent }
@@ -26,17 +27,27 @@ export function targetAt(x: number, y: number): { el: HTMLElement; t: DropTarget
   return { el, t: { kind, id: (el.dataset.dropId ?? '') as '', name: el.dataset.dropName ?? '' } as DropTarget };
 }
 
-/** O destino aceita este agente? (o servidor confere de novo; isto só orienta o destaque) */
-export function dropProblem(a: TeamAgent, t: DropTarget): string | null {
-  if (t.kind === 'tray') return null;
-  if (t.kind === 'sector') {
-    if (a.sector_key === t.id) return 'já está neste setor';
-    if (a.coordinator) return 'o Coordenador não muda de setor';
+type Problema = 'mesmoSetor' | 'coordenador' | 'mesmaCasa' | 'desativado';
+/** Por que o destino não aceita este agente (o servidor confere de novo; isto só orienta o destaque). */
+function problemaDe(a: TeamAgent, d: DropTarget): Problema | null {
+  if (d.kind === 'tray') return null;
+  if (d.kind === 'sector') {
+    if (a.sector_key === d.id) return 'mesmoSetor';
+    if (a.coordinator) return 'coordenador';
     return null;
   }
-  if (a.building_id === t.id) return 'já mora aqui';
-  if (a.status !== 'active') return 'desativado: reative antes';
+  if (a.building_id === d.id) return 'mesmaCasa';
+  if (a.status !== 'active') return 'desativado';
   return null;
+}
+const MOTIVO = { mesmoSetor: 'quadro.arrastar.mesmoSetor', coordenador: 'quadro.arrastar.coordenador', mesmaCasa: 'quadro.arrastar.mesmaCasa', desativado: 'quadro.arrastar.desativado' } as const;
+/** "Já está aqui": soltar no lugar onde o agente já está não precisa de aviso. */
+const jaEstaLa = (p: Problema | null) => p === 'mesmoSetor' || p === 'mesmaCasa';
+
+/** O destino aceita este agente? Não: o motivo, para a tela (o servidor confere de novo; isto só orienta o destaque). */
+export function dropProblem(a: TeamAgent, d: DropTarget): string | null {
+  const p = problemaDe(a, d);
+  return p ? t(MOTIVO[p]) : null;
 }
 
 function scrollParent(el: HTMLElement | null): HTMLElement {
@@ -65,7 +76,7 @@ export function beginDrag(e: React.PointerEvent<HTMLElement>, agent: TeamAgent, 
     const problem = over ? dropProblem(agent, over.t) : null;
     if (over) { over.el.classList.toggle('is-drop-over', !problem); over.el.classList.toggle('is-drop-bad', !!problem); }
     const hint = document.getElementById('drag-ghost-hint');
-    if (hint) hint.textContent = !over ? 'Solte num setor ou numa construção' : problem ? `Não: ${problem}` : over.t.kind === 'tray' ? 'Escolher o destino…' : `Mover para ${over.t.name}`;
+    if (hint) hint.textContent = !over ? t('quadro.arrastar.solte') : problem ? t('quadro.arrastar.nao', { motivo: problem }) : over.t.kind === 'tray' ? t('quadro.arrastar.escolher') : t('quadro.arrastar.moverPara', { nome: over.t.name });
   };
   const autoscroll = () => {
     raf = 0; if (!active) return;
@@ -87,13 +98,13 @@ export function beginDrag(e: React.PointerEvent<HTMLElement>, agent: TeamAgent, 
     removeEventListener('touchmove', stopScroll);
     if (!active) return;
     over?.el.classList.remove('is-drop-over', 'is-drop-bad');
-    const t = over?.t; const problem = t ? dropProblem(agent, t) : null; const ok = drop && t && !problem;
+    const d = over?.t; const p = d ? problemaDe(agent, d) : null; const ok = drop && d && !p;
     active = false; state = null; emit(); document.body.classList.remove('is-dragging');
     // o clique que vem depois de soltar não abre o perfil
     addEventListener('click', swallowClick, { capture: true, once: true }); setTimeout(() => removeEventListener('click', swallowClick, { capture: true }), 0);
-    if (ok && t) { if (t.kind === 'tray') h.onTray(agent); else h.onDrop(agent, t); }
+    if (ok && d) { if (d.kind === 'tray') h.onTray(agent); else h.onDrop(agent, d); }
     // soltou num destino que não aceita: diz por quê ("já está aqui" não precisa de aviso)
-    else if (drop && t && problem && !problem.startsWith('já')) h.onRefuse?.(agent, problem);
+    else if (drop && d && p && !jaEstaLa(p)) h.onRefuse?.(agent, t(MOTIVO[p]));
   };
   const move = (ev: PointerEvent) => {
     x = ev.clientX; y = ev.clientY;

@@ -12,10 +12,11 @@ import { Icon } from '../components/Icon.tsx';
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { AgentAvatar } from '../components/AgentAvatar.tsx';
 import { VirtualGrid } from '../components/VirtualGrid.tsx';
+import { fmtNumero, useT } from '../i18n/index.ts';
 
 type OpenAgent = (id: string, tab?: 'conversa' | 'perfil' | 'atividade', draft?: string | null, conversationId?: string | null, lite?: AgentLite | null) => void;
-const RUN: Record<string, { label: string; cls: string }> = {
-  running: { label: 'trabalhando', cls: 'dot--green dot--pulse' }, queued: { label: 'na fila', cls: 'dot--amber' }, waiting_user: { label: 'esperando você', cls: 'dot--amber dot--pulse' },
+const RUN: Partial<Record<string, { label: 'cidade.foco.trabalhando' | 'cidade.foco.naFila' | 'cidade.foco.esperandoVoce'; cls: string }>> = {
+  running: { label: 'cidade.foco.trabalhando', cls: 'dot--green dot--pulse' }, queued: { label: 'cidade.foco.naFila', cls: 'dot--amber' }, waiting_user: { label: 'cidade.foco.esperandoVoce', cls: 'dot--amber dot--pulse' },
 };
 /** Um colega na coluna da equipe: a linha leve (das conversas, das amostras, da busca), com o andamento quando se sabe. */
 type Who = AgentLite & { run_status?: TeamAgent['run_status']; coordinator?: boolean };
@@ -38,6 +39,8 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
   state: AppState; selectedId: string | null; onSelect: (id: string) => void; onOpenAgent: OpenAgent;
   onAskCoordinator: (text: string) => void; onExit: () => void; onGo: (v: View) => void;
 }) {
+  const t = useT();
+  const runLabel = (k: string | null | undefined) => { const r = k ? RUN[k] : undefined; return r ? t(r.label) : undefined; };
   const scope = state.workspace.id;
   const coord = state.team.coordinator;
   const [q, setQ] = useState('');
@@ -105,8 +108,8 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
       <button key={a.id} className={`foco-agent ${agent?.id === a.id ? 'is-on' : ''}`} onClick={() => { onSelect(a.id); if (size === 'narrow') setPane('conversa'); }} aria-current={agent?.id === a.id ? 'true' : undefined}>
         <AgentAvatar agent={a} size={28} />
         <span className="foco-agent__txt"><b>{a.name}{fixed && <Icon name="lock" size={11} />}</b><small>{a.role}</small></span>
-        {m && <Marks unread={a.id === agent?.id ? 0 : m.unread} priority={m.priority ?? (m.waiting ? 'alta' : null)} reason={m.priorityReason ?? (m.waiting ? `${m.waiting} pedido(s) esperando você` : null)} />}
-        {run && <span className={`dot ${RUN[run]?.cls ?? ''}`} title={RUN[run]?.label} />}
+        {m && <Marks unread={a.id === agent?.id ? 0 : m.unread} priority={m.priority ?? (m.waiting ? 'alta' : null)} reason={m.priorityReason ?? (m.waiting ? t('cidade.foco.pedidosEsperando', { n: m.waiting }) : null)} />}
+        {run && <span className={`dot ${RUN[run]?.cls ?? ''}`} title={runLabel(run)} />}
       </button>
     );
   };
@@ -116,36 +119,36 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
     <div ref={root} className={`foco foco--${size}`}>
       {size !== 'wide' && (
         <div className="foco__switch">
-          <div className="foco__tabs" role="tablist" aria-label="Áreas do Modo Foco">
-            {size === 'narrow' && tabBtn(pane === 'equipe', <><Icon name="users" size={14} /> Equipe</>, () => setPane('equipe'), 'eq')}
-            {tabBtn(pane !== 'lado' && (size === 'mid' || pane === 'conversa'), <><Icon name="chat" size={14} /> {agent?.name ?? 'Conversa'}</>, () => setPane('conversa'), 'cv')}
-            {tabBtn(pane === 'lado' && tab === 'decisoes', <><Icon name="bell" size={14} /> Aguardando{pending ? <span className="foco__count">{pending}</span> : null}</>, () => pickSide('decisoes'), 'dc')}
-            {tabBtn(pane === 'lado' && tab === 'quadro', <><Icon name="layers" size={14} /> Quadro</>, () => pickSide('quadro'), 'qd')}
+          <div className="foco__tabs" role="tablist" aria-label={t('cidade.foco.areas')}>
+            {size === 'narrow' && tabBtn(pane === 'equipe', <><Icon name="users" size={14} /> {t('cidade.foco.equipe')}</>, () => setPane('equipe'), 'eq')}
+            {tabBtn(pane !== 'lado' && (size === 'mid' || pane === 'conversa'), <><Icon name="chat" size={14} /> {agent?.name ?? t('cidade.foco.conversa')}</>, () => setPane('conversa'), 'cv')}
+            {tabBtn(pane === 'lado' && tab === 'decisoes', <><Icon name="bell" size={14} /> {t('cidade.foco.aguardando')}{pending ? <span className="foco__count">{pending}</span> : null}</>, () => pickSide('decisoes'), 'dc')}
+            {tabBtn(pane === 'lado' && tab === 'quadro', <><Icon name="layers" size={14} /> {t('cidade.foco.quadro')}</>, () => pickSide('quadro'), 'qd')}
           </div>
-          <button className="btn btn--sm btn--ghost" onClick={onExit} title="Sair do Modo Foco (Esc)"><Icon name="x" size={14} /> Sair</button>
+          <button className="btn btn--sm btn--ghost" onClick={onExit} title={t('cidade.foco.sairDica')}><Icon name="x" size={14} /> {t('cidade.foco.sair')}</button>
         </div>
       )}
-      {show.team && <aside className="foco__team" aria-label="Equipe">
+      {show.team && <aside className="foco__team" aria-label={t('cidade.foco.equipe')}>
         <div className="foco__head">
-          <b>Modo Foco</b>
-          {size === 'wide' && <button className="btn btn--sm btn--ghost" onClick={onExit} title="Voltar (Esc)"><Icon name="x" size={14} /> Sair</button>}
+          <b>{t('cidade.foco.titulo')}</b>
+          {size === 'wide' && <button className="btn btn--sm btn--ghost" onClick={onExit} title={t('cidade.foco.voltarDica')}><Icon name="x" size={14} /> {t('cidade.foco.sair')}</button>}
         </div>
-        <label className="foco__search"><Icon name="search" size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar agente" aria-label="Buscar agente" /></label>
+        <label className="foco__search"><Icon name="search" size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('cidade.foco.buscar')} aria-label={t('cidade.foco.buscar')} /></label>
         {dq ? (
           <div className="foco__group">
-            <span className="foco__group-name">Resultados{found.ready ? ` · ${found.total}` : ''}</span>
-            <Part list={found} chip={chip} wait="Procurando…" empty="Ninguém com esse nome." />
+            <span className="foco__group-name">{found.ready ? t('cidade.foco.resultadosTotal', { n: found.total }) : t('cidade.foco.resultados')}</span>
+            <Part list={found} chip={chip} wait={t('cidade.foco.procurando')} empty={t('cidade.foco.ninguemComNome')} />
           </div>
         ) : sector ? (
           <div className="foco__group">
-            <button className="linkish" onClick={() => setSector(null)}><span className="flip"><Icon name="chevron" size={12} /></span> Todos os setores</button>
-            <span className="foco__group-name">{sector.name}{members.ready ? ` · ${members.total}` : ''}</span>
-            <Part list={members} chip={chip} wait="Carregando…" empty="Ninguém neste setor." />
+            <button className="linkish" onClick={() => setSector(null)}><span className="flip"><Icon name="chevron" size={12} /></span> {t('cidade.foco.todosSetores')}</button>
+            <span className="foco__group-name">{sector.name}{members.ready ? ` · ${fmtNumero(members.total)}` : ''}</span>
+            <Part list={members} chip={chip} wait={t('geral.comum.carregando')} empty={t('cidade.foco.ninguemNoSetor')} />
           </div>
         ) : (
           <>
-            {coord && <div className="foco__group"><span className="foco__group-name">Coordenador</span>{chip(coord, true)}</div>}
-            {talked.length > 0 && <div className="foco__group"><span className="foco__group-name">Conversas</span>{talked.map((a) => chip(a))}</div>}
+            {coord && <div className="foco__group"><span className="foco__group-name">{t('cidade.foco.coordenador')}</span>{chip(coord, true)}</div>}
+            {talked.length > 0 && <div className="foco__group"><span className="foco__group-name">{t('cidade.foco.conversas')}</span>{talked.map((a) => chip(a))}</div>}
             {sectors.data?.items.map((s) => {
               const shown = s.sample.filter((a) => a.id !== coord?.id);
               if (!shown.length && s.count <= s.sample.length) return null;
@@ -153,40 +156,40 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
                 <div key={s.key} className="foco__group">
                   <span className="foco__group-name">{s.name}</span>
                   {shown.map((a) => chip(a))}
-                  {s.count > s.sample.length && <button className="linkish" onClick={() => setSector({ key: s.key, name: s.name })}>Ver todos ({s.count.toLocaleString('pt-BR')})</button>}
+                  {s.count > s.sample.length && <button className="linkish" onClick={() => setSector({ key: s.key, name: s.name })}>{t('cidade.foco.verTodos', { n: fmtNumero(s.count) })}</button>}
                 </div>
               );
             })}
             {(sectors.prev || sectors.next) && (
               <div className="row row--wrap">
-                <button className="btn btn--sm btn--ghost" onClick={() => sectors.prev?.()} hidden={!sectors.prev}><span className="flip"><Icon name="chevron" size={12} /></span> Anteriores</button>
-                <span className="muted small">{sectors.data?.total ?? 0} setores</span>
-                <button className="btn btn--sm btn--ghost" onClick={() => sectors.next?.()} hidden={!sectors.next}>Próximos <Icon name="chevron" size={12} /></button>
+                <button className="btn btn--sm btn--ghost" onClick={() => sectors.prev?.()} hidden={!sectors.prev}><span className="flip"><Icon name="chevron" size={12} /></span> {t('cidade.foco.anteriores')}</button>
+                <span className="muted small">{t('cidade.foco.setores', { n: sectors.data?.total ?? 0 })}</span>
+                <button className="btn btn--sm btn--ghost" onClick={() => sectors.next?.()} hidden={!sectors.next}>{t('cidade.foco.proximos')} <Icon name="chevron" size={12} /></button>
               </div>
             )}
-            {sectors.error && <p className="error small">{sectors.error} <button className="linkish" onClick={sectors.reload}>Tentar de novo</button></p>}
+            {sectors.error && <p className="error small">{sectors.error} <button className="linkish" onClick={sectors.reload}>{t('cidade.foco.tentarDeNovo')}</button></p>}
           </>
         )}
-        <p className="hint foco__note">A cidade continua viva em segundo plano.</p>
+        <p className="hint foco__note">{t('cidade.foco.cidadeViva')}</p>
       </aside>}
 
-      {show.chat && <section className="foco__chat" aria-label="Conversa">
+      {show.chat && <section className="foco__chat" aria-label={t('cidade.foco.conversa')}>
         {agent ? (
           <>
             <header className="foco__chat-head">
               <AgentAvatar agent={agent} size={36} />
-              <div className="foco__chat-who"><b>{agent.name}</b><small>{agent.role} · {agent.sector_name}{run ? ` · ${RUN[run]?.label}` : ''}</small></div>
-              <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', null, null, agent)}><Icon name="edit" size={13} /> Perfil</button>
+              <div className="foco__chat-who"><b>{agent.name}</b><small>{agent.role} · {agent.sector_name}{run && runLabel(run) ? ` · ${runLabel(run)}` : ''}</small></div>
+              <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', null, null, agent)}><Icon name="edit" size={13} /> {t('cidade.foco.perfil')}</button>
             </header>
             <ChatPanel key={agent.id} agent={agent} embedded />
           </>
-        ) : waiting ? null : <p className="muted center">Nenhum agente ativo.</p>}
+        ) : waiting ? null : <p className="muted center">{t('cidade.foco.nenhumAgente')}</p>}
       </section>}
 
-      {show.side && <aside className="foco__side" aria-label="Decisões e quadro">
+      {show.side && <aside className="foco__side" aria-label={t('cidade.foco.lado')}>
         {size === 'wide' && <div className="foco__tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'decisoes'} className={tab === 'decisoes' ? 'is-on' : ''} onClick={() => setTab('decisoes')}>Aguardando você{pending ? <span className="foco__count">{pending}</span> : null}</button>
-          <button role="tab" aria-selected={tab === 'quadro'} className={tab === 'quadro' ? 'is-on' : ''} onClick={() => setTab('quadro')}>Quadro da equipe</button>
+          <button role="tab" aria-selected={tab === 'decisoes'} className={tab === 'decisoes' ? 'is-on' : ''} onClick={() => setTab('decisoes')}>{t('cidade.foco.aguardandoVoce')}{pending ? <span className="foco__count">{pending}</span> : null}</button>
+          <button role="tab" aria-selected={tab === 'quadro'} className={tab === 'quadro' ? 'is-on' : ''} onClick={() => setTab('quadro')}>{t('cidade.foco.quadroEquipe')}</button>
         </div>}
         {tab === 'decisoes' ? (
           <DecisionsPanel inline onOpenAgent={onOpenAgent} onGo={onGo} />
@@ -195,20 +198,20 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
             {columns.map(({ c, tasks }) => (
               <div key={c.id} className="foco__col">
                 <span className="foco__group-name">{c.name} <span className="muted">{tasks.length}</span></span>
-                {tasks.map((t) => (
-                  <button key={t.id} className="foco__task" onClick={() => setOpenTask(t.id)}>
-                    <span className="muted small">#{t.number}</span> <span className="foco__task-title">{t.title}</span>
-                    <small className="muted">{(t.agent_id && t.agent_name) || 'triagem'}{t.run_status ? ` · ${RUN[t.run_status]?.label ?? t.run_status}` : ''}</small>
+                {tasks.map((task) => (
+                  <button key={task.id} className="foco__task" onClick={() => setOpenTask(task.id)}>
+                    <span className="muted small">#{task.number}</span> <span className="foco__task-title">{task.title}</span>
+                    <small className="muted">{(task.agent_id && task.agent_name) || t('cidade.foco.triagem')}{task.run_status ? ` · ${runLabel(task.run_status) ?? task.run_status}` : ''}</small>
                   </button>
                 ))}
                 {!tasks.length && <span className="muted small">—</span>}
               </div>
             ))}
-            {!board.data && <p className="muted small">Carregando o quadro…</p>}
-            {done > 0 && <p className="hint">{done} concluída(s). <button className="linkish" onClick={() => onGo('equipe')}>Ver o quadro inteiro</button></p>}
+            {!board.data && <p className="muted small">{t('cidade.foco.carregandoQuadro')}</p>}
+            {done > 0 && <p className="hint">{t('cidade.foco.concluidas', { n: done })} <button className="linkish" onClick={() => onGo('equipe')}>{t('cidade.foco.verQuadro')}</button></p>}
           </div>
         )}
-        {tab === 'quadro' && pending > 0 && <p className="hint">{pending} decisão(ões) esperando você. <button className="linkish" onClick={() => setTab('decisoes')}>Ver</button></p>}
+        {tab === 'quadro' && pending > 0 && <p className="hint">{t('cidade.foco.decisoes', { n: pending })} <button className="linkish" onClick={() => setTab('decisoes')}>{t('cidade.foco.ver')}</button></p>}
       </aside>}
       {openTask && board.data && <TaskDetail taskId={openTask} columns={board.data.columns} mode="team" onClose={() => setOpenTask(null)} onAskCoordinator={onAskCoordinator} />}
     </div>
@@ -217,12 +220,13 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
 
 /** Uma lista por partes na coluna da equipe: só as linhas à vista viram botões, e a próxima página chega ao rolar. */
 function Part({ list, chip, wait, empty }: { list: ReturnType<typeof useAgentList>; chip: (a: Who, fixed?: boolean) => ReactNode; wait: string; empty: string }) {
-  if (list.error) return <p className="error small">{list.error} <button className="linkish" onClick={list.reload}>Tentar de novo</button></p>;
+  const t = useT();
+  if (list.error) return <p className="error small">{list.error} <button className="linkish" onClick={list.reload}>{t('cidade.foco.tentarDeNovo')}</button></p>;
   if (!list.ready) return <p className="muted small">{wait}</p>;
   // flex: none — dentro da coluna (flex) a grade guarda a altura de todas as linhas, e a coluna rola
   return (
     <div style={{ flex: 'none' }}>
-      <VirtualGrid items={list.items} hasMore={!!list.next} onNeedMore={list.more} rowHeight={CHIP_H} gap={3} minColWidth={10_000} keyOf={(a) => a.id} label="Agentes"
+      <VirtualGrid items={list.items} hasMore={!!list.next} onNeedMore={list.more} rowHeight={CHIP_H} gap={3} minColWidth={10_000} keyOf={(a) => a.id} label={t('cidade.foco.agentes')}
         render={(a) => chip(a, a.coordinator)} empty={<p className="muted small">{empty}</p>} />
     </div>
   );

@@ -381,7 +381,10 @@ describe('a leitura e a escrita juntas', () => {
     const tela = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'src', 'components', 'TaskDetail.tsx'), 'utf8');
     assert.match(tela, /descricao_cortada/, 'lê a marca do vínculo');
     assert.match(tela, /description\.length >= 8000/, 'e o tamanho, para o vínculo de antes da marca');
-    assert.match(tela, /Esta descrição é maior do que cabe aqui: edite no aplicativo\./);
+    // o aviso vem do dicionário da tela (web/src/i18n/pt/tarefa.ts)
+    assert.match(tela, /t\('tarefa\.editavel\.descricaoCortada'\)/);
+    const dicionario = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'src', 'i18n', 'pt', 'tarefa.ts'), 'utf8');
+    assert.match(dicionario, /'editavel\.descricaoCortada': 'Esta descrição é maior do que cabe aqui: edite no aplicativo\.'/);
     assert.match(tela, /cortada \? \(/, 'sem campo de edição quando cortada');
     assert.match(tela, /&& !cortada\) body\.description/, 'a descrição cortada não vai no envio');
     assert.match(tela, /e\.code === 'descricao_longa'[\s\S]{0,200}setDesc\(saved\.current\.desc\)[\s\S]{0,80}await run\(\)/, 'no 409, volta a de antes e grava o título sozinho');

@@ -36,8 +36,11 @@ export const PROFILES = [
 
 /** Colunas do quadro da equipe: a revisão, a espera e a falha são estados dentro do andamento (aparecem no card). */
 export const DEFAULT_COLUMNS = ['A fazer', 'Em andamento', 'Concluído'];
+/** O código fixo de cada coluna acima (colunas.ts): o sistema anda com os cards pelo código, nunca pelo nome. */
+export const DEFAULT_COLUMN_KEYS = ['todo', 'doing', 'done'] as const;
 /** Colunas do quadro do usuário ("Minhas tarefas", lista local). */
 export const USER_COLUMNS = ['A fazer', 'Fazendo', 'Feito'];
+export const USER_COLUMN_KEYS = ['todo', 'doing', 'done'] as const;
 
 export interface SeedResult { workspaceId: string; boardId: string; buildingId: string }
 
@@ -96,12 +99,12 @@ export function createWorkspace(db: Db, name: string, opts: { demo: boolean; slo
   const boardId = id('brd');
   db.run("INSERT INTO boards (id, workspace_id, name, origin, audience, created_at) VALUES (?, ?, ?, 'native', 'team', ?)", boardId, workspaceId, 'Quadro da equipe', ts);
   DEFAULT_COLUMNS.forEach((c, i) => {
-    db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', id('col'), workspaceId, boardId, c, i);
+    db.run('INSERT INTO columns (id, workspace_id, board_id, name, position, system_key) VALUES (?, ?, ?, ?, ?, ?)', id('col'), workspaceId, boardId, c, i, DEFAULT_COLUMN_KEYS[i] ?? null);
   });
   const userBoard = id('brd');
   db.run("INSERT INTO boards (id, workspace_id, name, origin, audience, created_at) VALUES (?, ?, ?, 'native', 'user', ?)", userBoard, workspaceId, 'Minhas tarefas', ts);
   USER_COLUMNS.forEach((c, i) => {
-    db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', id('col'), workspaceId, userBoard, c, i);
+    db.run('INSERT INTO columns (id, workspace_id, board_id, name, position, system_key) VALUES (?, ?, ?, ?, ?, ?)', id('col'), workspaceId, userBoard, c, i, USER_COLUMN_KEYS[i] ?? null);
   });
 
   // Canais internos do caminho de ingestão (a interface mostra as integrações, não estas linhas):

@@ -1,5 +1,5 @@
 # Ergon 1.0.1 — pacote para instalar neste computador (imagens publicadas; nada é compilado aqui).
-# Use o lançador:  Windows: .\ergon.cmd instalar     macOS/Linux: ./ergon.sh instalar
+# Use o lançador:  Windows: .\ergon.cmd install     macOS/Linux: ./ergon.sh install
 # Abra por http://localhost:8787 (as passkeys do navegador só valem nesse nome).
 # Este arquivo é gerado pela esteira de lançamento a partir de deploy/local/docker-compose.yml.
 name: ergon

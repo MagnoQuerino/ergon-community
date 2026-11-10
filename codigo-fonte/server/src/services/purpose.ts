@@ -59,7 +59,8 @@ export function parsePlan(text: string | null): Plan | null {
 
 const reviewOf = (v: string | undefined): Plan['review'] => {
   const x = fold(v ?? '').trim();
-  return /^(nao|não|no|0|sem)$/.test(x) ? 'nao' : /^(forte|completa|total)$/.test(x) ? 'forte' : x ? 'leve' : undefined;
+  // também os valores em inglês (a coordenação pode escrever no idioma da conversa): none, strong, full, light
+  return /^(nao|não|no|none|0|sem|off)$/.test(x) ? 'nao' : /^(forte|completa|total|strong|full|thorough)$/.test(x) ? 'forte' : x ? 'leve' : undefined;
 };
 const numbers = (v: string | undefined) => (v ?? '').split(/[^0-9]+/).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 10);
 

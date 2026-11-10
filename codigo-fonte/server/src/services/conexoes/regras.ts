@@ -89,8 +89,8 @@ export function resumoDaProposta(r: RegraSemResumo): string {
 const ALIAS: Record<string, IntegrationKind> = { outlook: 'microsoft', teams: 'microsoft', 'microsoft 365': 'microsoft', office: 'microsoft', gmail: 'google', 'google workspace': 'google', whatsapp: 'whatsapp', zap: 'whatsapp' };
 /** "microsoft", "Microsoft 365", "outlook", "todas" → os kinds (["*"] = todas). Desconhecida: null. */
 function conexoesDe(v: string): string[] | null {
-  const partes = fold(v).split(/[|,;/]|\s+e\s+/).map((x) => x.trim()).filter(Boolean);
-  if (!partes.length || partes.some((p) => /^(todas?|tudo|\*|qualquer)$/.test(p))) return ['*'];
+  const partes = fold(v).split(/[|,;/]|\s+e\s+|\s+and\s+/).map((x) => x.trim()).filter(Boolean);
+  if (!partes.length || partes.some((p) => /^(todas?|tudo|\*|qualquer|all|any|every|everything)$/.test(p))) return ['*'];
   const out = new Set<string>();
   for (const p of partes) {
     const k = ALIAS[p] ?? INTEGRATIONS.find((d) => d.kind === p || fold(d.name) === p)?.kind;
@@ -102,13 +102,17 @@ function conexoesDe(v: string): string[] | null {
 function riscosDe(v: string): RiscoLiberado[] {
   const t = fold(v);
   const out = new Set<RiscoLiberado>();
-  if (/\b(envi|mand|respond|dispar|public|escrev|tud)/.test(t)) out.add('enviar');
-  if (/\b(organiz|cri|mov|escrev|tud)/.test(t)) out.add('organizar');
+  // também em inglês (a coordenação pode escrever os valores no idioma da conversa): send, organize, delete, all
+  if (/\b(envi|mand|respond|dispar|public|escrev|tud|send|repl|answer|forward|post|write|all\b|every)/.test(t)) out.add('enviar');
+  if (/\b(organiz|cri|mov|escrev|tud|organis|creat|write|all\b|every)/.test(t)) out.add('organizar');
   // apagar só quando a regra fala em apagar (decisão de 09/11): "tudo" não inclui
-  if (/\b(apag|exclu|delet|remov)/.test(t)) out.add('apagar');
+  if (/\b(apag|exclu|delet|remov|eras|trash)/.test(t)) out.add('apagar');
   return RISCOS_LIBERAVEIS.filter((r) => out.has(r));
 }
-const alcanceDe = (v: string | undefined): Alcance => { const t = fold(v ?? ''); return /24|dia|hoje/.test(t) ? '24h' : /sempre|permanente/.test(t) ? 'sempre' : 'pedido'; };
+const alcanceDe = (v: string | undefined): Alcance => {
+  const t = fold(v ?? '');
+  return /24|dia|hoje|day|today/.test(t) ? '24h' : /sempre|permanente|always|permanent|forever/.test(t) ? 'sempre' : 'pedido';
+};
 
 /** [[regra acao="enviar" conexao="microsoft|todas" alcance="pedido|24h|sempre" so="email"]] na resposta da coordenação (até 3). */
 export function parseRegras(text: string | null): RegraSemResumo[] {
@@ -133,31 +137,58 @@ const SEM_APROVACAO = [
   /\bsem\s+(?:precisar\s+)?(?:eu\s+)?(?:aprovar|confirmar)\b/,
   /\bnao\s+(?:precisa[m]?|e\s+preciso)\s+(?:mais\s+)?(?:me\s+)?(?:pedir|esperar|aguardar|de)\s+(?:a\s+|da\s+|minha\s+)*(?:aprovacao|confirmacao|autorizacao|permissao)\b/,
   /\b(?:esta|estao|fica|ficam)\s+(?:liberad|autorizad)[oa]s?\s+(?:a|para|pra)\b/,
+  // inglês: "without my approval", "without asking me", "no need to ask for my confirmation", "you're allowed to send"
+  /\bwithout\s+(?:my\s+|our\s+|your\s+|the\s+|any\s+)?(?:approval|confirmation|permission|authori[sz]ation|sign-?off|ok|okay)\b/,
+  /\bwithout\s+(?:first\s+)?(?:asking|checking\s+with|consulting|waiting\s+for)\b/,
+  /\bwithout\s+(?:needing|having)\s+(?:me\s+)?to\s+(?:approve|confirm)\b/,
+  /\b(?:no\s+need|(?:you\s+)?(?:don't|do\s+not|doesn't|does\s+not)\s+need)\s+(?:to\s+)?(?:ask(?:\s+me)?(?:\s+for)?\s+|wait\s+for\s+|get\s+|check\s+with\s+me\s+for\s+)?(?:my\s+|our\s+)?(?:approval|confirmation|permission|authori[sz]ation|sign-?off)\b/,
+  /\bno\s+need\s+to\s+(?:ask|check\s+with)\s+me\b/,
+  /\b(?:are|is|you're|you\s+are)\s+(?:now\s+)?(?:allowed|authori[sz]ed|cleared|free)\s+to\b/,
 ];
 const VERBO: Record<RiscoLiberado, RegExp> = {
-  enviar: /\b(?:mand(?:ar|em|e|a)|envi(?:ar|em|e|a)|dispar(?:ar|em|e|a)|respond(?:er|am|a)|encaminh(?:ar|em|e|a)|public(?:ar)|publiquem|publique|post(?:ar|em|e))\b/,
-  apagar: /\b(?:apag(?:ar|a)|apaguem|apague|exclu(?:ir|am|a)|delet(?:ar|em|e))\b/,
-  organizar: /\b(?:organiz(?:ar|em|e)|cri(?:ar|em|e)|mov(?:er|am|a))\b/,
+  enviar: /\b(?:mand(?:ar|em|e|a)|envi(?:ar|em|e|a)|dispar(?:ar|em|e|a)|respond(?:er|am|a)|encaminh(?:ar|em|e|a)|public(?:ar)|publiquem|publique|post(?:ar|em|e)|send|reply|respond|answer|forward|post|publish|email)\b/,
+  apagar: /\b(?:apag(?:ar|a)|apaguem|apague|exclu(?:ir|am|a)|delet(?:ar|em|e)|delete|remove|erase|trash)\b/,
+  organizar: /\b(?:organiz(?:ar|em|e)|cri(?:ar|em|e)|mov(?:er|am|a)|organi[sz]e|create|move|file|sort|archive)\b/,
 };
 /**
  * "não mandem", "nunca apaguem", "não precisa criar": a negação vale só para o verbo dela, na mesma oração e sem passar de
- * uma vírgula ("Não esperem, podem enviar..." não nega o envio).
+ * uma vírgula ("Não esperem, podem enviar..." não nega o envio). Em inglês: "don't delete", "never send", "do not move".
  */
 const RADICAL: Record<RiscoLiberado, string> = { enviar: '(?:mand|envi|dispar|respond|encaminh|public|post)', apagar: '(?:apag|exclu|delet)', organizar: '(?:organiz|cri|mov)' };
-const negado = (oracao: string, risco: RiscoLiberado): boolean => new RegExp(`\\b(?:nao|nunca|jamais|nem)\\s+(?:[^\\s,]+\\s+){0,2}?${RADICAL[risco]}`).test(oracao);
+const RADICAL_EN: Record<RiscoLiberado, string> = { enviar: '(?:send|repl|respond|answer|forward|post|publish|email)', apagar: '(?:delet|remov|eras|trash)', organizar: '(?:organi[sz]|creat|mov|archiv)' };
+/**
+ * Também a vontade negada, com mais palavras até o verbo ("não quero que vocês enviem…", "I don't want you to send…",
+ * "we would never like anyone to post…"), o que não pode em hipótese alguma ("em hipótese alguma enviem", "under no
+ * circumstances send") e o aparte entre vírgulas ("Please don't, under any circumstances, send…"). "Não deixem de enviar"
+ * e "don't hesitate/forget to send" pedem o envio: não negam.
+ */
+const VONTADE_PT = '(?:quero|queremos|quer|gostaria|gostariamos|aceito|aceitamos|permito|permitimos|autorizo|autorizamos|deixo|deixamos)';
+const VONTADE_EN = '(?:want|wish|allow|let|permit|authori[sz]e|like)';
+const APARTE = /,?\s*\b(?:under\s+(?:any|no)\s+circumstances|in\s+any\s+case|at\s+all|ever|em\s+hipotese\s+(?:alguma|nenhuma)|de\s+jeito\s+(?:algum|nenhum)|de\s+forma\s+(?:alguma|nenhuma)|de\s+modo\s+algum)\b\s*,?/g;
+const negado = (oracao: string, risco: RiscoLiberado): boolean => {
+  const o = oracao.replace(APARTE, (x) => (/\bno\s+circumstances\b/.test(x) ? ' never ' : /\b(?:hipotese|jeito|forma|modo)\b/.test(x) ? ' nunca ' : ' '));
+  return new RegExp(`\\b(?:nao|nunca|jamais|nem)\\s+(?!esquec|hesit|deix\\w*\\s+de\\b)(?:[^\\s,]+\\s+){0,2}?${RADICAL[risco]}`).test(o)
+    || new RegExp(`\\b(?:nao|nunca|jamais)\\s+${VONTADE_PT}\\b(?:\\s+[^\\s,]+){0,4}?\\s+${RADICAL[risco]}`).test(o)
+    || new RegExp(`(?:\\b(?:not|never)|n't)\\s+(?!hesitate|forget|wait|need|be\\s+afraid|hold\\s+back)(?:[^\\s,]+\\s+){0,2}?${RADICAL_EN[risco]}`).test(o)
+    || new RegExp(`\\bno\\s+(?:[^\\s,]+\\s+){0,1}?${RADICAL_EN[risco]}`).test(o)
+    || new RegExp(`(?:\\b(?:not|never)|n't)\\s+(?:\\w+\\s+)?${VONTADE_EN}\\b(?:\\s+[^\\s,]+){0,4}?\\s+${RADICAL_EN[risco]}`).test(o);
+};
 /** "quem mandou?", "por que enviaram sem aprovação": o que já passou (uma reclamação, uma pergunta) não libera nada */
-const PASSADO = /\b(?:mandou|mandaram|enviou|enviaram|disparou|dispararam|respondeu|responderam|encaminhou|encaminharam|publicou|publicaram|postou|postaram|apagou|apagaram|excluiu|excluiram|deletou|deletaram|criou|criaram|moveu|moveram|organizou|organizaram)\b/;
-const INTERROGA = /^(?:quem|por que|porque|por qual motivo|pra que|para que)\b/;
+const PASSADO_PT = /\b(?:mandou|mandaram|enviou|enviaram|disparou|dispararam|respondeu|responderam|encaminhou|encaminharam|publicou|publicaram|postou|postaram|apagou|apagaram|excluiu|excluiram|deletou|deletaram|criou|criaram|moveu|moveram|organizou|organizaram)\b/;
+// inglês: "sent" também é o particípio ("can be sent"): só com quem fez antes ("who sent", "why did you send")
+const PASSADO_EN = /\b(?:who|you|they|someone|somebody|he|she)\s+(?:just\s+)?(?:sent|replied|responded|answered|forwarded|posted|published|emailed|deleted|removed|created|moved)\b|\bwhy\s+did\s+(?:you|they|someone)\b/;
+const PASSADO = { test: (s: string) => PASSADO_PT.test(s) || PASSADO_EN.test(s) };
+const INTERROGA = /^(?:quem|por que|porque|por qual motivo|pra que|para que|who|why|how come|what for)\b/;
 /** onde a pessoa diz o canal: sem nomear e-mail, mensagem, conta ou uma conexão, "todas as conexões" seria um chute */
-const CANAL = /\be-?mails?\b|\bcorreio\b|\bmensage(?:m|ns)\b|\bcontas?\b|\bcana(?:l|is)\b|\bconex(?:ao|oes)\b/;
+const CANAL = /\be-?mails?\b|\bcorreio\b|\bmensage(?:m|ns)\b|\bcontas?\b|\bcana(?:l|is)\b|\bconex(?:ao|oes)\b|\bmessages?\b|\baccounts?\b|\bchannels?\b|\bconnections?\b|\bchats?\b/;
 const ROTA = Object.keys(RADICAL) as RiscoLiberado[];
 
-/** As orações da mensagem: frases (com o fim, para saber se é pergunta), separadas também em "mas", "porém", "exceto". */
+/** As orações da mensagem: frases (com o fim, para saber se é pergunta), separadas também em "mas", "porém", "exceto" ("but", "except"). */
 function oracoes(t: string): Array<{ texto: string; pergunta: boolean }> {
   const out: Array<{ texto: string; pergunta: boolean }> = [];
   for (const m of t.matchAll(/([^.;!?\n]+)([.;!?\n]*)/g)) {
     const pergunta = m[2].includes('?');
-    for (const p of m[1].split(/,?\s+(?:mas|porem|so que|exceto|menos|contudo|entretanto|todavia)\s+/)) if (p.trim()) out.push({ texto: p.trim(), pergunta });
+    for (const p of m[1].split(/,?\s+(?:mas|porem|so que|exceto|menos|contudo|entretanto|todavia|but|however|except|unless|apart from)\s+/)) if (p.trim()) out.push({ texto: p.trim(), pergunta });
   }
   return out;
 }
@@ -167,7 +198,7 @@ function semAprovacao(oracao: string): RegExpExecArray | null {
   for (const r of SEM_APROVACAO) { const m = r.exec(oracao); if (m && (!melhor || m.index < melhor.index)) melhor = m; }
   return melhor;
 }
-const limpa = (texto: string): string => fold(texto).replace(/[“”"]/g, ' ').replace(/\s+/g, ' ');
+const limpa = (texto: string): string => fold(texto).replace(/[’‘]/g, "'").replace(/[“”"]/g, ' ').replace(/\s+/g, ' ');
 
 /**
  * A frase da pessoa, por regras: "podem mandar os e-mails sem me pedir aprovação" → a proposta (o cartão). Conta o verbo
@@ -191,7 +222,7 @@ export function regraDaFrase(texto: string, ligadas: readonly string[]): RegraSe
     const antes = o.texto.slice(0, m.index);
     const resto = o.texto.slice(m.index + m[0].length);
     // logo depois da expressão, só quando ela pede o complemento: "aprovação para enviar", "liberados a mandar"
-    const logoDepois = /\b(?:a|para|pra)$/.test(m[0]) || /^\s*(?:para|pra|de)\b/.test(resto) ? resto.trim().split(' ').slice(0, 4).join(' ') : '';
+    const logoDepois = /\b(?:a|para|pra|to)$/.test(m[0]) || /^\s*(?:para|pra|de|to|for)\b/.test(resto) ? resto.trim().split(' ').slice(0, 4).join(' ') : '';
     for (const r of ROTA) if ((VERBO[r].test(antes) || VERBO[r].test(logoDepois)) && !negado(o.texto, r)) riscos.add(r);
   }
   if (!achou) return null;
@@ -199,7 +230,7 @@ export function regraDaFrase(texto: string, ligadas: readonly string[]): RegraSe
   for (const o of partes) for (const r of ROTA) if (negado(o.texto, r)) riscos.delete(r);
   if (!riscos.size) return null;
   const email = /\be-?mails?\b|\bcorreio\b/.test(t);
-  const outroCanal = /\bmensage(?:m|ns)\b|\bteams\b|\bwhats/.test(t);
+  const outroCanal = /\bmensage(?:m|ns)\b|\bteams\b|\bwhats|\bmessages?\b|\bchats?\b/.test(t);
   const so = email && !outroCanal ? 'email' as const : null;
   const nomeadas = new Set<string>();
   for (const [alias, k] of Object.entries(ALIAS)) if (new RegExp(`\\b${alias}\\b`).test(t)) nomeadas.add(k);
@@ -207,15 +238,18 @@ export function regraDaFrase(texto: string, ligadas: readonly string[]): RegraSe
   if (!nomeadas.size && !CANAL.test(t)) return null;
   const doEmail = ligadas.filter((k) => k === 'microsoft' || k === 'google');
   const conexoes = nomeadas.size ? [...nomeadas] : so === 'email' ? (doEmail.length ? doEmail : ['microsoft', 'google']) : ['*'];
-  const alcance: Alcance = /\b(?:sempre|a partir de agora|de agora em diante|daqui (?:pra|para) frente|daqui em diante|permanente\w*)\b/.test(t) ? 'sempre'
-    : /\b(?:hoje|24 ?h|24 horas|por um dia|ate amanha)\b/.test(t) ? '24h' : 'pedido';
+  const alcance: Alcance = /\b(?:sempre|a partir de agora|de agora em diante|daqui (?:pra|para) frente|daqui em diante|permanente\w*|always|from now on|going forward|from here on|permanently|forever)\b/.test(t) ? 'sempre'
+    : /\b(?:hoje|24 ?h|24 horas|por um dia|ate amanha|today|for 24 ?hours|for a day|for the day|until tomorrow)\b/.test(t) ? '24h' : 'pedido';
   return { kind: 'regra', riscos: RISCOS_LIBERAVEIS.filter((r) => riscos.has(r)), conexoes, so, alcance };
 }
 
 /** Palavras que, sozinhas, não dizem nada além da liberação ("a partir de agora", "podem", "os e-mails", "por favor"). */
 const ENCHIMENTO = new Set(['pode', 'podem', 'podes', 'voces', 'voce', 'vcs', 'mails', 'mail', 'emails', 'email', 'e-mail', 'e-mails', 'mensagens', 'mensagem', 'tambem', 'todos', 'todas',
   'tudo', 'agora', 'entao', 'sim', 'nos', 'para', 'pra', 'por', 'favor', 'obrigado', 'obrigada', 'combinado', 'certo', 'beleza', 'pessoal', 'equipe', 'gente', 'time', 'partir',
-  'diante', 'daqui', 'frente', 'sempre', 'hoje', 'horas', 'dia', 'ola', 'bom', 'boa', 'isso', 'esses', 'essas', 'estes', 'estas', 'meus', 'minhas', 'seus', 'suas']);
+  'diante', 'daqui', 'frente', 'sempre', 'hoje', 'horas', 'dia', 'ola', 'bom', 'boa', 'isso', 'esses', 'essas', 'estes', 'estas', 'meus', 'minhas', 'seus', 'suas',
+  // inglês
+  'you', 'can', 'all', 'guys', 'team', 'everyone', 'from', 'now', 'going', 'forward', 'always', 'today', 'please', 'thanks', 'the', 'messages', 'message', 'also', 'sure',
+  'okay', 'then', 'here', 'hours', 'day', 'your', 'our', 'and', 'any', 'anymore', 'just', 'feel', 'free', 'hey', 'hello']);
 /**
  * A mensagem só libera (nada além de "a partir de agora, podem mandar os e-mails sem me pedir aprovação")? Então a regra que
  * vale de verdade substitui a regra de texto. Com outra coisa junto ("respondam sempre em inglês"), as duas propostas ficam.

@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useState, type ChangeEvent } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import { ESCOLHA_CONSCIENTE, NOME_ESCOLHIDO, PROBLEMA_TEAMS, SO_O_SEU_CODIGO, linhaDoEstado, previaDaConta, type ContaDoTeams } from '../lib/teams-app.ts';
+import { escolhaConsciente, linhaDoEstado, nomeEscolhido, previaDaConta, problemaDoTeams, soOSeuCodigo, type ContaDoTeams } from '../lib/teams-app.ts';
 import type { EtapaConsentimento, Integration } from '../lib/types.ts';
 import { AVISO_APROVAR_SEM_CARTAO, ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, erroDaConexao, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, textoDaVolta } from '../lib/textos-tela.ts';
+import { fmtData, fmtDataHora, fmtLista, t as tr, tn, useT } from '../i18n/index.ts';
 import { AiAccounts } from '../components/AiAccounts.tsx';
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
@@ -11,20 +12,25 @@ import { Icon } from '../components/Icon.tsx';
 import { TextoLongo } from '../components/TextoLongo.tsx';
 import { BotoesRegra, type Alcance } from '../components/CartaoRegra.tsx';
 
-const STATE: Record<Integration['state'], [string, string]> = {
-  off: ['não conectado', ''], pending: ['conectando…', 'badge--warn'], connected: ['conectado', 'badge--ok'], error: ['com problema', 'badge--err'],
+/** O selo de cada estado: a chave do texto (traduzida na hora de mostrar) e a classe. */
+const STATE: Record<Integration['state'], [`conexoes.estado.${Integration['state']}`, string]> = {
+  off: ['conexoes.estado.off', ''], pending: ['conexoes.estado.pending', 'badge--warn'], connected: ['conexoes.estado.connected', 'badge--ok'], error: ['conexoes.estado.error', 'badge--err'],
 };
 
-/** Os aplicativos conectados por token ou chave, por tipo. */
-const SECOES: Array<{ titulo: string; texto: string; grupos: string[] }> = [
-  { titulo: 'Tarefas e quadros', grupos: ['tarefas'], texto: 'Depois de conectar, escolha a lista ou o quadro em Tarefas: fica ligado nos dois sentidos, e os agentes também criam e movem tarefas lá. A conta precisa ter permissão para alterar as tarefas.' },
-  { titulo: 'Conversas e equipes', grupos: ['conversas'], texto: 'Os agentes leem o que a conta ou o bot conectado alcança (cada aplicativo diz qual é o alcance) e respondem quando você pede.' },
-  { titulo: 'Vendas e atendimento', grupos: ['vendas', 'suporte'], texto: 'Os agentes consultam clientes, negócios e chamados, registram o que combinarem com você e respondem quando você pede.' },
-  { titulo: 'Documentos, código e agenda', grupos: ['documentos'], texto: 'Os agentes procuram, leem e escrevem nas páginas, repositórios e compromissos que a credencial alcança.' },
-  { titulo: 'Financeiro', grupos: ['financeiro'], texto: 'Os agentes consultam cobranças e contas e, quando você pede, cadastram clientes e criam cobranças e contas a receber. Nada é pago, transferido, estornado ou cancelado por aqui. Para só consultar, marque "Só leitura" na conexão.' },
+/** Os aplicativos conectados por token ou chave, por tipo (o título e o texto são chaves do dicionário). */
+type Secao = 'tarefas' | 'conversas' | 'vendas' | 'documentos' | 'financeiro';
+const SECOES: Array<{ titulo: `conexoes.secao.${Secao}.titulo`; texto: `conexoes.secao.${Secao}.texto`; grupos: string[] }> = [
+  { titulo: 'conexoes.secao.tarefas.titulo', grupos: ['tarefas'], texto: 'conexoes.secao.tarefas.texto' },
+  { titulo: 'conexoes.secao.conversas.titulo', grupos: ['conversas'], texto: 'conexoes.secao.conversas.texto' },
+  { titulo: 'conexoes.secao.vendas.titulo', grupos: ['vendas', 'suporte'], texto: 'conexoes.secao.vendas.texto' },
+  { titulo: 'conexoes.secao.documentos.titulo', grupos: ['documentos'], texto: 'conexoes.secao.documentos.texto' },
+  { titulo: 'conexoes.secao.financeiro.titulo', grupos: ['financeiro'], texto: 'conexoes.secao.financeiro.texto' },
 ];
 
-const badgeOf = (i: Integration): [string, string] => (i.auth === 'soon' ? ['em breve', 'badge--soon'] : STATE[i.state]);
+const badgeOf = (i: Integration): [string, string] => {
+  const [chave, cls] = i.auth === 'soon' ? ['conexoes.estado.soon' as const, 'badge--soon'] : STATE[i.state];
+  return [tr(chave), cls];
+};
 
 /** O que os agentes fazem em cada conexão ligada, o ajuste da pessoa e a escolha de liberar tudo (GET /api/conexoes). */
 interface Permissoes { tipos: Record<string, string>; acoes: Record<string, string> }
@@ -41,6 +47,7 @@ interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => vo
  * conferir com o serviço; "em breve" diz o que falta.
  */
 export function ConexoesView() {
+  const t = useT();
   const list = useResource<Integration[]>('/api/integrations', ['integrations.changed']);
   // já buscado por baixo ao abrir o app (App.tsx): as seções que dependem dele abrem prontas
   const cx = useResource<EstadoConexoes>('/api/conexoes', ['integrations.changed']);
@@ -94,23 +101,23 @@ export function ConexoesView() {
   return (
     <div className="page">
       <header className="page__head">
-        <h2>Conexões</h2>
-        <p className="muted">A conta de IA que move os agentes e os aplicativos e canais que a equipe usa por você. Credenciais ficam só neste computador, cifradas; nunca no navegador.</p>
+        <h2>{t('conexoes.titulo')}</h2>
+        <p className="muted">{t('conexoes.intro')}</p>
       </header>
       {volta && list.data && <p className="ok" role="status">{textoDaVolta(volta.kind, volta.status, all.find((i) => i.kind === volta.kind)?.state === 'connected')}</p>}
       {list.error && <p className="error">{list.error}</p>}
 
       <section className="conn-group conn-group--feature">
-        <h3>Contas de IA</h3>
-        <p className="muted small">A conta que paga os modelos que os agentes usam.</p>
+        <h3>{t('conexoes.ia.titulo')}</h3>
+        <p className="muted small">{t('conexoes.ia.texto')}</p>
         <ModeloPadrao />
         <AiAccounts />
       </section>
 
       {wa && (
         <section className="conn-group conn-group--feature">
-          <h3>WhatsApp <span className="badge badge--exp">Experimental</span></h3>
-          <p className="muted small">As conversas que você permitir viram pedidos e tarefas para a equipe, e você pode pedir a um agente que responda. Nada é enviado sem você pedir ou confirmar, a menos que você ligue "Liberar tudo". <button className="link link--inline" onClick={() => setRisks(true)}>Ver informações e riscos</button></p>
+          <h3>WhatsApp <span className="badge badge--exp">{t('conexoes.wa.experimental')}</span></h3>
+          <p className="muted small">{t('conexoes.wa.intro')} <button className="link link--inline" onClick={() => setRisks(true)}>{t('conexoes.wa.verRiscos')}</button></p>
           <Detail i={wa} reload={list.reload} estado={estadoDe(wa.kind)} feature />
           {risks && <WhatsAppRisks onClose={() => setRisks(false)} />}
         </section>
@@ -118,12 +125,12 @@ export function ConexoesView() {
 
       {accounts.length > 0 && (
         <section className="conn-group conn-group--feature">
-          <h3>Microsoft 365 e Google</h3>
-          <p className="muted small">Entre com a conta, sem digitar senha no Ergon. Microsoft: Planner, To Do, Teams, e-mail, agenda e arquivos. Google: Tasks, Agenda, Gmail e Drive. Os agentes consultam e agem por você, com a regra de confirmação abaixo.</p>
+          <h3>{t('conexoes.contas.titulo')}</h3>
+          <p className="muted small">{t('conexoes.contas.texto')}</p>
           {/* duas coisas diferentes que o nome "Teams" junta: a conta (agora) e conversar com o coordenador por lá (depois) */}
           <ul className="conn-explica small">
-            <li><b>Microsoft 365: a equipe age na sua conta.</b> Com o seu login, os agentes leem e respondem por você no e-mail, na agenda, nos arquivos, nas tarefas e no Teams, quando você pede ou numa rotina. Ninguém fica olhando a conta o tempo todo.</li>
-            <li><b>Conversar com a equipe pelo Teams: é outra coisa.</b> Você manda pedidos à equipe de dentro do Teams, como se ela fosse um colega lá, e recebe as respostas ali. Fica logo abaixo, em Teams (em breve).</li>
+            <li><b>{t('conexoes.contas.m365Titulo')}</b> {t('conexoes.contas.m365Texto')}</li>
+            <li><b>{t('conexoes.contas.teamsTitulo')}</b> {t('conexoes.contas.teamsTexto')}</li>
           </ul>
           <div className="feature-grid">{accounts.map((i) => <Detail key={i.kind} i={i} reload={list.reload} estado={estadoDe(i.kind)} feature />)}</div>
         </section>
@@ -138,17 +145,17 @@ export function ConexoesView() {
       <Regras />
 
       <div className="row row--wrap conn-tools">
-        <label className="conn-search"><Icon name="focus" size={14} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar (ex.: Slack, Trello, HubSpot)" aria-label="Procurar aplicativo" /></label>
-        <button className={`chip ${!onlyOn ? 'chip--on' : ''}`} aria-pressed={!onlyOn} onClick={() => setOnlyOn(false)}>Todos ({ready})</button>
-        <button className={`chip ${onlyOn ? 'chip--on' : ''}`} aria-pressed={onlyOn} onClick={() => setOnlyOn(true)}>Conectados ({connected})</button>
+        <label className="conn-search"><Icon name="focus" size={14} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('conexoes.busca.placeholder')} aria-label={t('conexoes.busca.aria')} /></label>
+        <button className={`chip ${!onlyOn ? 'chip--on' : ''}`} aria-pressed={!onlyOn} onClick={() => setOnlyOn(false)}>{t('conexoes.busca.todos', { n: ready })}</button>
+        <button className={`chip ${onlyOn ? 'chip--on' : ''}`} aria-pressed={onlyOn} onClick={() => setOnlyOn(true)}>{t('conexoes.busca.conectados', { n: connected })}</button>
       </div>
       {SECOES.map((sec) => {
         const nela = shown.filter((i) => sec.grupos.includes(i.group));
         if (!nela.length) return null;
         return (
           <section className="conn-group" key={sec.titulo}>
-            <h3>{sec.titulo}</h3>
-            <p className="muted small">{sec.texto}</p>
+            <h3>{t(sec.titulo)}</h3>
+            <p className="muted small">{t(sec.texto)}</p>
             <div className="conn-tiles">
               {nela.map((i) => {
                 const [label, cls] = badgeOf(i);
@@ -167,9 +174,9 @@ export function ConexoesView() {
         );
       })}
       {achadosNoDestaque.length > 0 && (
-        <p className="muted">Em destaque, acima: {achadosNoDestaque.map((i, n) => <Fragment key={i.kind}>{n ? ', ' : ''}<button className="link link--inline" onClick={() => irAte(i.kind)}>{i.name}</button></Fragment>)}.</p>
+        <p className="muted">{tn('conexoes.busca.emDestaque', { lista: achadosNoDestaque.map((i, n) => <Fragment key={i.kind}>{n ? ', ' : ''}<button className="link link--inline" onClick={() => irAte(i.kind)}>{i.name}</button></Fragment>) })}</p>
       )}
-      {list.data && !shown.length && !achadosNoDestaque.length && <p className="muted">Nada encontrado{term ? ` para "${q}"` : ''}.</p>}
+      {list.data && !shown.length && !achadosNoDestaque.length && <p className="muted">{term ? t('conexoes.busca.nadaPara', { q }) : t('conexoes.busca.nada')}</p>}
     </div>
   );
 }
@@ -177,19 +184,23 @@ export function ConexoesView() {
 /** Cartão de uma conexão: aberto ao clicar num bloco, ou sempre aberto em destaque (WhatsApp, Microsoft, Google). */
 /** Autorização com prazo (Google com o app em teste): avisa a data e, perto do fim, pede para renovar. */
 function RenewBy({ at }: { at: string }) {
+  const t = useT();
   const days = Math.ceil((Date.parse(at) - Date.now()) / 86_400_000);
-  const date = new Date(at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-  if (days <= 2) return <p className="warn">A autorização vence {days <= 0 ? 'hoje' : `em ${days} dia${days > 1 ? 's' : ''}`} ({date}): clique em Desconectar e entre de novo com o Google para renovar.</p>;
-  return <p className="hint">Autorização válida até {date} (app do Google em modo de teste: renove a cada 7 dias; o Briefing avisa antes).</p>;
+  const date = fmtData(at, { day: '2-digit', month: '2-digit' });
+  if (days <= 2) return <p className="warn">{days <= 0 ? t('conexoes.prazo.venceHoje', { data: date }) : t('conexoes.prazo.venceEm', { n: days, data: date })}</p>;
+  return <p className="hint">{t('conexoes.prazo.valida', { data: date })}</p>;
 }
 
-/** O texto com a palavra "Tarefas" virando o link para a tela de Tarefas. */
+/** O texto com a palavra "Tarefas" (no idioma da tela) virando o link para a tela de Tarefas. */
 function ComLinkTarefas({ texto }: { texto: string }) {
-  const [antes, ...depois] = texto.split('Tarefas');
-  return <>{antes}{depois.length > 0 && <><a href="#tarefas">Tarefas</a>{depois.join('Tarefas')}</>}</>;
+  const t = useT();
+  const palavra = t('conexoes.tarefas.link');
+  const [antes, ...depois] = texto.split(palavra);
+  return <>{antes}{depois.length > 0 && <><a href="#tarefas">{palavra}</a>{depois.join(palavra)}</>}</>;
 }
 
 function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reload: () => void; estado: EstadoDe; onClose?: () => void; feature?: boolean }) {
+  const t = useT();
   const [label, cls] = badgeOf(i);
   // o teste apontou permissão que falta ("use o botão Autorizar de novo, acima"): o botão aparece, mesmo sem problema gravado
   const [faltouNoTeste, setFaltouNoTeste] = useState(false);
@@ -203,17 +214,17 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
       <header className="row">
         <BrandLogo kind={i.kind} name={i.name} size={feature ? 36 : 32} />
         <strong>{i.name}</strong><span className={`badge ${cls}`}>{label}</span>
-        {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label="Fechar"><Icon name="x" size={16} /></button>}
+        {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}
       </header>
       <p className="muted">{i.about}</p>
-      {i.state === 'connected' && i.sharedFrom && <p className="hint">Esta conta vem do workspace <b>{i.sharedFrom}</b>. As permissões e os quadros abaixo são só deste workspace.</p>}
+      {i.state === 'connected' && i.sharedFrom && <p className="hint">{tn('conexoes.detalhe.compartilhada', { workspace: <b>{i.sharedFrom}</b> })}</p>}
       {i.state !== 'connected' && i.auth !== 'soon' && <UsarDeOutroWorkspace i={i} reload={reload} />}
-      {i.state === 'connected' && i.account && <p>Conta: <strong>{i.account}</strong>{i.lastSyncAt ? <span className="muted small"> · última leitura {new Date(i.lastSyncAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span> : null}</p>}
+      {i.state === 'connected' && i.account && <p>{tn('conexoes.detalhe.conta', { conta: <strong>{i.account}</strong> })}{i.lastSyncAt ? <span className="muted small"> {t('conexoes.detalhe.ultimaLeitura', { quando: fmtDataHora(i.lastSyncAt) })}</span> : null}</p>}
       {/* conectada também: o último problema (ex.: a credencial sem permissão de escrita) fica à vista até a próxima ação dar
           certo; o pedido ao administrador no primeiro acesso não é falha (o cartão explica), e o erro cru do login não aparece */}
       {erro && <p className="error">{erro}</p>}
       {i.state === 'connected' && i.renewBy && <RenewBy at={i.renewBy} />}
-      {i.auth === 'soon' ? <p className="hint">{i.soon ?? 'Em preparo.'}</p>
+      {i.auth === 'soon' ? <p className="hint">{i.soon ?? t('conexoes.detalhe.emPreparo')}</p>
         : i.kind === 'whatsapp' ? <WhatsApp i={i} reload={reload} />
         : i.auth === 'token' ? <TokenConnect i={i} reload={reload} autorizar={faltouNoTeste} />
         : <Sso i={i} reload={reload} faltam={estado.eu?.faltam ?? []} etapas={estado.eu?.etapas ?? []} recarregar={estado.reload} autorizar={faltouNoTeste} />}
@@ -229,6 +240,7 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
  * onde existe uma escrita inofensiva para testar (os quadros de tarefas; em Microsoft e Google, também um rascunho).
  */
 function TestarConexao({ i, reload, onFaltou }: { i: Integration; reload: () => void; onFaltou: (faltou: boolean) => void }) {
+  const t = useT();
   const [itens, setItens] = useState<Array<{ nome: string; ok: boolean; detalhe: string }> | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -240,6 +252,7 @@ function TestarConexao({ i, reload, onFaltou }: { i: Integration; reload: () => 
     // fixo do servidor, FALTA_AUTORIZAR) mostra o "Autorizar de novo" acima
     try {
       const r = await api.post<{ itens: Array<{ nome: string; ok: boolean; detalhe: string }> }>(`/api/conexoes/${i.kind}/testar`, corpo);
+      // i18n-ok: reconhece o texto fixo que o servidor manda (FALTA_AUTORIZAR), não é texto de tela
       setItens(r.itens); onFaltou(r.itens.some((x) => !x.ok && x.detalhe.startsWith('falta autorizar de novo'))); reload();
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   };
@@ -256,61 +269,66 @@ function TestarConexao({ i, reload, onFaltou }: { i: Integration; reload: () => 
   return (
     <div className="conn-teste">
       <p className="row row--wrap">
-        <button className="btn btn--sm" disabled={busy} onClick={() => void rodar({})}>{busy ? 'Testando…' : 'Testar conexão'}</button>
-        {i.tasks && !(semQuadro && i.kind !== 'microsoft') && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void escrita()}>{quadros?.length && quadro ? 'Criar a tarefa de teste' : 'Testar escrita'}</button>}
+        <button className="btn btn--sm" disabled={busy} onClick={() => void rodar({})}>{busy ? t('conexoes.teste.testando') : t('conexoes.teste.testar')}</button>
+        {i.tasks && !(semQuadro && i.kind !== 'microsoft') && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void escrita()}>{quadros?.length && quadro ? t('conexoes.teste.criarTarefa') : t('conexoes.teste.testarEscrita')}</button>}
       </p>
-      {!i.tasks && <p className="hint">Aqui o teste só lê; a escrita aparece no primeiro uso.</p>}
+      {!i.tasks && <p className="hint">{t('conexoes.teste.soLe')}</p>}
       {quadros && (quadros.length
-        ? <label className="field">Onde criar a tarefa de teste (fica concluída, pode apagar depois)<select value={quadro} onChange={(e) => setQuadro(e.target.value)}>{quadros.map((q) => <option key={q.externalId} value={q.externalId}>{q.name}</option>)}</select></label>
-        : <p className="hint">{i.kind === 'microsoft' ? 'Esta conta não tem lista do To Do nem plano do Planner: o teste de escrita deixa só o rascunho.' : 'Esta conta não tem quadro ou lista para o teste de escrita.'}</p>)}
+        ? <label className="field">{t('conexoes.teste.ondeCriar')}<select value={quadro} onChange={(e) => setQuadro(e.target.value)}>{quadros.map((q) => <option key={q.externalId} value={q.externalId}>{q.name}</option>)}</select></label>
+        : <p className="hint">{i.kind === 'microsoft' ? t('conexoes.teste.semListaMicrosoft') : t('conexoes.teste.semQuadro')}</p>)}
       {err && <p className="error">{err}</p>}
-      {itens && <ul className="conn-teste__lista">{itens.map((x) => <li key={x.nome}><span className={`badge ${x.ok ? 'badge--ok' : 'badge--err'}`}>{x.ok ? 'ok' : 'falhou'}</span> {x.nome}{x.ok ? '' : <span className="muted small"> — {x.detalhe}</span>}</li>)}</ul>}
+      {itens && <ul className="conn-teste__lista">{itens.map((x) => <li key={x.nome}><span className={`badge ${x.ok ? 'badge--ok' : 'badge--err'}`}>{x.ok ? t('conexoes.teste.ok') : t('conexoes.teste.falhou')}</span> {x.nome}{x.ok ? '' : <span className="muted small"> — {x.detalhe}</span>}</li>)}</ul>}
     </div>
   );
 }
 
-const RISCO_ROTULO: Record<string, [string, string]> = {
-  ler: ['Ler', 'consultar e buscar'], organizar: ['Escrever', 'criar, mudar e deixar rascunhos nas suas ferramentas'], enviar: ['Enviar', 'mandar algo a outras pessoas'], apagar: ['Apagar', 'apagar ou cancelar'],
+/** Cada tipo de ação: as chaves do rótulo e da dica. */
+type Risco = 'ler' | 'organizar' | 'enviar' | 'apagar';
+const RISCO_ROTULO: Record<string, [`conexoes.risco.${Risco}`, `conexoes.risco.${Risco}Dica`]> = {
+  ler: ['conexoes.risco.ler', 'conexoes.risco.lerDica'], organizar: ['conexoes.risco.organizar', 'conexoes.risco.organizarDica'],
+  enviar: ['conexoes.risco.enviar', 'conexoes.risco.enviarDica'], apagar: ['conexoes.risco.apagar', 'conexoes.risco.apagarDica'],
 };
-const AJUSTE_ROTULO: Array<[string, string]> = [['regra', 'Seguir a regra'], ['confirmar', 'Sempre pedir confirmação'], ['desligado', 'Desligado']];
+const AJUSTE_ROTULO: Array<[string, `conexoes.ajuste.${'regra' | 'confirmar' | 'desligado'}`]> = [['regra', 'conexoes.ajuste.regra'], ['confirmar', 'conexoes.ajuste.confirmar'], ['desligado', 'conexoes.ajuste.desligado']];
 
 /** O que os agentes podem fazer nesta conexão: por tipo de ação e, abrindo a lista, ação por ação. */
 function AcoesDaConexao({ i, estado }: { i: Integration; estado: EstadoDe }) {
+  const t = useT();
   const [err, setErr] = useState<string | null>(null);
   // o erro do atalho fica junto da caixa: a lista abaixo vem fechada, e o erro lá dentro ninguém veria
   const [errSoLeitura, setErrSoLeitura] = useState<string | null>(null);
   const eu = estado.eu;
   // ainda chegando: o título já ocupa o lugar, para nada abaixo pular quando a lista chegar
-  if (!eu) return estado.pronto ? null : <details className="conn-acoes"><summary>O que os agentes podem fazer aqui</summary></details>;
+  if (!eu) return estado.pronto ? null : <details className="conn-acoes"><summary>{t('conexoes.acoes.titulo')}</summary></details>;
   const salvar = async (p: Permissoes) => { setErr(null); try { await api.put(`/api/conexoes/${i.kind}/permissoes`, { permissoes: p }); estado.reload(); } catch (e) { setErr(errMsg(e)); } };
   const tipos = Object.keys(RISCO_ROTULO).filter((r) => eu.acoes.some((a) => a.risco === r));
   const soLeitura = async (on: boolean) => { setErrSoLeitura(null); try { await api.put(`/api/conexoes/${i.kind}/so-leitura`, { on }); estado.reload(); } catch (e) { setErrSoLeitura(errMsg(e)); } };
+  const opcoes = AJUSTE_ROTULO.map(([v, l]) => <option key={v} value={v}>{t(l)}</option>);
   return (
     <>
     {/* um clique: tudo o que escreve nesta conexão fica desligado; desmarcar devolve o ajuste de escrita de antes */}
     {eu.escreve && (
       <div className="conn-so-leitura">
-        <label className="check"><input type="checkbox" checked={!!eu.soLeitura} onChange={(e) => void soLeitura(e.target.checked)} /> Só leitura</label>
-        <span className="muted small"> {eu.soLeitura ? 'Os agentes só consultam aqui: nada é criado, mudado, enviado ou apagado. Desmarcar devolve o ajuste de antes.' : 'Marque para os agentes só consultarem aqui, sem criar, mudar, enviar ou apagar nada.'}</span>
+        <label className="check"><input type="checkbox" checked={!!eu.soLeitura} onChange={(e) => void soLeitura(e.target.checked)} /> {t('conexoes.soLeitura.rotulo')}</label>
+        <span className="muted small"> {eu.soLeitura ? t('conexoes.soLeitura.ligada') : t('conexoes.soLeitura.desligada')}</span>
         {errSoLeitura && <p className="error" role="alert">{errSoLeitura}</p>}
       </div>
     )}
     <details className="conn-acoes">
-      <summary>O que os agentes podem fazer aqui ({eu.acoes.length})</summary>
+      <summary>{t('conexoes.acoes.tituloN', { n: eu.acoes.length })}</summary>
       {/* o envio dos quadros ligados confere o mesmo ajuste: só o desligado o barra */}
-      {i.tasks && <p className="hint">Desligar uma ação também impede que o que você faz nos quadros ligados chegue ao aplicativo. "Sempre pedir confirmação" vale só para os agentes.</p>}
+      {i.tasks && <p className="hint">{t('conexoes.acoes.quadrosLigados')}</p>}
       <div className="conn-acoes__tipos">
         {tipos.map((r) => (
-          <label key={r} className="field field--inline" title={RISCO_ROTULO[r][1]}>{RISCO_ROTULO[r][0]}
-            <select value={eu.permissoes.tipos[r] ?? 'regra'} onChange={(e) => void salvar({ ...eu.permissoes, tipos: { ...eu.permissoes.tipos, [r]: e.target.value } })}>{AJUSTE_ROTULO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <label key={r} className="field field--inline" title={t(RISCO_ROTULO[r][1])}>{t(RISCO_ROTULO[r][0])}
+            <select value={eu.permissoes.tipos[r] ?? 'regra'} onChange={(e) => void salvar({ ...eu.permissoes, tipos: { ...eu.permissoes.tipos, [r]: e.target.value } })}>{opcoes}</select>
           </label>
         ))}
       </div>
       <ul className="conn-acoes__lista">
         {eu.acoes.map((a) => (
           <li key={a.id}>
-            <span>{a.rotulo} <span className="muted small">({RISCO_ROTULO[a.risco]?.[0] ?? a.risco})</span></span>
-            <select aria-label={`Ajuste de ${a.rotulo}`} value={eu.permissoes.acoes[a.id] ?? eu.permissoes.tipos[a.risco] ?? 'regra'} onChange={(e) => void salvar({ ...eu.permissoes, acoes: { ...eu.permissoes.acoes, [a.id]: e.target.value } })}>{AJUSTE_ROTULO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            <span>{a.rotulo} <span className="muted small">({RISCO_ROTULO[a.risco] ? t(RISCO_ROTULO[a.risco][0]) : a.risco})</span></span>
+            <select aria-label={t('conexoes.acoes.ajusteDe', { acao: a.rotulo })} value={eu.permissoes.acoes[a.id] ?? eu.permissoes.tipos[a.risco] ?? 'regra'} onChange={(e) => void salvar({ ...eu.permissoes, acoes: { ...eu.permissoes.acoes, [a.id]: e.target.value } })}>{opcoes}</select>
           </li>
         ))}
       </ul>
@@ -322,15 +340,16 @@ function AcoesDaConexao({ i, estado }: { i: Integration; estado: EstadoDe }) {
 
 /** Conexão é por workspace: conectar uma conta nova aqui, ou usar a que já está em outro workspace seu. */
 function UsarDeOutroWorkspace({ i, reload }: { i: Integration; reload: () => void }) {
+  const t = useT();
   // vem junto da lista de conexões: o bloco abre já com a opção, sem empurrar o formulário depois
   const contas = i.reutilizaveis ?? [];
   const [err, setErr] = useState<string | null>(null);
   if (!contas.length) return null;
   return (
     <div className="conn-reusar">
-      <p className="hint">Já conectada em outro workspace seu. Use a mesma conta aqui, sem conectar de novo:</p>
+      <p className="hint">{t('conexoes.reusar.texto')}</p>
       <p className="row row--wrap">{contas.map((c) => (
-        <button key={c.workspaceId} className="btn btn--sm" onClick={async () => { setErr(null); try { await api.post(`/api/conexoes/${i.kind}/usar-de`, { workspaceId: c.workspaceId }); reload(); } catch (e) { setErr(errMsg(e)); } }}>Usar {c.conta ?? 'a conta'} de {c.workspace}</button>
+        <button key={c.workspaceId} className="btn btn--sm" onClick={async () => { setErr(null); try { await api.post(`/api/conexoes/${i.kind}/usar-de`, { workspaceId: c.workspaceId }); reload(); } catch (e) { setErr(errMsg(e)); } }}>{c.conta ? t('conexoes.reusar.usar', { conta: c.conta, workspace: c.workspace }) : t('conexoes.reusar.usarSemNome', { workspace: c.workspace })}</button>
       ))}</p>
       {err && <p className="error">{err}</p>}
     </div>
@@ -347,12 +366,13 @@ interface TelaRegras {
   texto: Array<{ id: string; text: string; created_at: string }>;
   propostas: { texto: Array<{ id: string; text: string; created_at: string }>; cartoes: Array<{ id: string; summary: string; alcance: Alcance; agent_name: string | null; created_at: string }> };
 }
-const dia = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+const dia = (iso: string) => fmtData(iso, { day: '2-digit', month: '2-digit' });
 /**
  * Conexões › Regras, o lugar único das regras: o que você liberou para a equipe fazer sem pedir a sua confirmação (com
  * desfazer), as regras de texto que valem nas conversas (com desligar) e o que foi proposto e espera você.
  */
 function Regras() {
+  const t = useT();
   const r = useResource<TelaRegras>('/api/conexoes/regras', ['rules.changed', 'proposals.changed']);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -365,50 +385,50 @@ function Regras() {
   const vazio = d && !d.regras.length && !d.texto.length && !d.propostas.texto.length && !d.propostas.cartoes.length;
   return (
     <section className="conn-group" id="conn-regras">
-      <h3>Regras</h3>
-      <p className="muted small">Para dar mais autonomia à equipe, peça na conversa, por exemplo: “podem mandar os e-mails sem me pedir aprovação”. Aparece um cartão para você escolher até quando vale: só naquele pedido, por 24 h ou sempre. Apagar só entra quando você fala em apagar. A segurança fica por sua conta: o que você libera aqui vale também quando a equipe trabalha sozinha e depois de ler mensagens de outras pessoas. Desfazer vale na hora.</p>
+      <h3>{t('conexoes.regras.titulo')}</h3>
+      <p className="muted small">{t('conexoes.regras.texto')}</p>
       {err && <p className="error" role="alert">{err}</p>}
       {ok && <p className="ok" role="status">{ok}</p>}
       {!d && r.error && <p className="error">{r.error}</p>}
-      {vazio && <p className="muted">Nenhuma regra por enquanto: tudo segue o que está acima.</p>}
+      {vazio && <p className="muted">{t('conexoes.regras.vazio')}</p>}
 
-      {!!d?.propostas.cartoes.length && <h4 className="rt-sub">Esperando você</h4>}
+      {!!d?.propostas.cartoes.length && <h4 className="rt-sub">{t('conexoes.regras.esperando')}</h4>}
       {d?.propostas.cartoes.map((c) => (
         <article key={c.id} className="dec-card">
-          <div className="dec-card__top"><span className="badge">regra proposta{c.agent_name ? ` · ${c.agent_name}` : ''}</span></div>
+          <div className="dec-card__top"><span className="badge">{c.agent_name ? t('conexoes.regras.propostaDe', { agente: c.agent_name }) : t('conexoes.regras.proposta')}</span></div>
           <div className="dec-card__txt"><TextoLongo texto={c.summary} /></div>
           <div className="row row--wrap dec-card__acts">
-            {indo === c.id ? <span className="badge" role="status">Aplicando…</span>
-              : <BotoesRegra sugerido={c.alcance} ocupado={!!indo} onEscolher={(alcance) => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'apply', alcance }), 'Regra aplicada.')}
-                onRecusar={() => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'reject' }), 'Recusada.')} />}
+            {indo === c.id ? <span className="badge" role="status">{t('conexoes.regras.aplicando')}</span>
+              : <BotoesRegra sugerido={c.alcance} ocupado={!!indo} onEscolher={(alcance) => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'apply', alcance }), t('conexoes.regras.aplicada'))}
+                onRecusar={() => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'reject' }), t('conexoes.regras.recusada'))} />}
           </div>
         </article>
       ))}
-      {d?.propostas.texto.map((t) => (
-        <article key={t.id} className="dec-card">
-          <div className="dec-card__top"><span className="badge">regra de conversa proposta</span></div>
-          <div className="dec-card__txt">{t.text}</div>
+      {d?.propostas.texto.map((x) => (
+        <article key={x.id} className="dec-card">
+          <div className="dec-card__top"><span className="badge">{t('conexoes.regras.conversaProposta')}</span></div>
+          <div className="dec-card__txt">{x.text}</div>
           <div className="row row--wrap dec-card__acts">
-            <button className="btn btn--sm btn--primary" disabled={!!indo} onClick={() => void fazer(t.id, () => api.post(`/api/rules/${t.id}`, { decision: 'active' }), 'Regra ativada.')}>Ativar</button>
-            <button className="btn btn--sm btn--ghost" disabled={!!indo} onClick={() => void fazer(t.id, () => api.post(`/api/rules/${t.id}`, { decision: 'rejected' }), 'Recusada.')}>Recusar</button>
+            <button className="btn btn--sm btn--primary" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'active' }), t('conexoes.regras.ativada'))}>{t('conexoes.regras.ativar')}</button>
+            <button className="btn btn--sm btn--ghost" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'rejected' }), t('conexoes.regras.recusada'))}>{t('conexoes.regras.recusar')}</button>
           </div>
         </article>
       ))}
 
-      {!!d?.regras.length && <h4 className="rt-sub">Liberado sem pedir a sua confirmação</h4>}
+      {!!d?.regras.length && <h4 className="rt-sub">{t('conexoes.regras.liberado')}</h4>}
       {d?.regras.map((x) => (
         <div key={x.id} className="regra-linha">
           <span className="regra-linha__txt"><b>{x.texto.charAt(0).toUpperCase() + x.texto.slice(1)}</b>
-            <span className="muted small"> · {x.alcanceTexto} · desde {dia(x.criadaEm)}{x.tipo === 'acao' ? ` · ${!x.usos ? 'ainda não usada' : x.usos === 1 ? 'usada 1 vez' : `usada ${x.usos} vezes`}` : ''}</span></span>
-          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/conexoes/regras/${x.id}/desfazer`), 'Desfeita: volta a pedir a sua confirmação.')}>{indo === x.id ? 'Desfazendo…' : 'Desfazer'}</button>
+            <span className="muted small"> · {x.alcanceTexto} · {t('conexoes.regras.desde', { data: dia(x.criadaEm) })}{x.tipo === 'acao' ? ` · ${t('conexoes.regras.usos', { n: x.usos })}` : ''}</span></span>
+          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/conexoes/regras/${x.id}/desfazer`), t('conexoes.regras.desfeita'))}>{indo === x.id ? t('conexoes.regras.desfazendo') : t('conexoes.regras.desfazer')}</button>
         </div>
       ))}
 
-      {!!d?.texto.length && <h4 className="rt-sub">Combinado nas conversas</h4>}
-      {d?.texto.map((t) => (
-        <div key={t.id} className="regra-linha">
-          <span className="regra-linha__txt">{t.text}<span className="muted small"> · desde {dia(t.created_at)}</span></span>
-          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(t.id, () => api.post(`/api/rules/${t.id}`, { decision: 'rejected' }), 'Desligada.')}>{indo === t.id ? 'Desligando…' : 'Desligar'}</button>
+      {!!d?.texto.length && <h4 className="rt-sub">{t('conexoes.regras.combinado')}</h4>}
+      {d?.texto.map((x) => (
+        <div key={x.id} className="regra-linha">
+          <span className="regra-linha__txt">{x.text}<span className="muted small"> · {t('conexoes.regras.desde', { data: dia(x.created_at) })}</span></span>
+          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'rejected' }), t('conexoes.regras.desligada'))}>{indo === x.id ? t('conexoes.regras.desligando') : t('conexoes.acao.desligar')}</button>
         </div>
       ))}
     </section>
@@ -416,6 +436,7 @@ function Regras() {
 }
 
 function LiberarTudo({ estado: st }: { estado: { data: EstadoConexoes | null; reload: () => void } }) {
+  const t = useT();
   const [err, setErr] = useState<string | null>(null);
   const trocar = (rota: string) => async (e: ChangeEvent<HTMLInputElement>) => { setErr(null); try { await api.put(rota, { on: e.target.checked }); st.reload(); } catch (x) { setErr(errMsg(x)); } };
   // a seção fica sempre no lugar; enquanto a escolha não chega (quase nunca: vem na pré-carga), a linha só guarda o espaço
@@ -424,35 +445,36 @@ function LiberarTudo({ estado: st }: { estado: { data: EstadoConexoes | null; re
     : <span className="check" aria-hidden="true" style={{ visibility: 'hidden' }}><input type="checkbox" tabIndex={-1} readOnly /> {rotulo}</span>;
   return (
     <section className="conn-group">
-      <h3>O que pede a sua confirmação</h3>
-      <p className="muted small">O que você clica vai direto. O que você pede na conversa também, e o agente pergunta se não estiver claro. Pede confirmação: o que não partiu de você (rotina, mensagem recebida, iniciativa do agente), envio a outra pessoa depois de o agente ler conteúdo de fora, e apagar. Criar cobrança no Asaas também pede sempre, mesmo pedida por você e com "Liberar tudo" ligado, porque o cliente é avisado na hora.</p>
+      <h3>{t('conexoes.cuidado.titulo')}</h3>
+      <p className="muted small">{t('conexoes.cuidado.texto')}</p>
       {opcao(st.data?.confirmarOrganizar, '/api/conexoes/confirmar-organizar', ROTULO_CONFIRMAR_ORGANIZAR)}
-      <p className="muted small">Organizar é criar, mudar e deixar rascunhos nas suas ferramentas. Sem esta opção, o que você pede na conversa vai direto, mesmo que o agente tenha lido e-mails antes.</p>
+      <p className="muted small">{t('conexoes.cuidado.organizar')}</p>
       {opcao(st.data?.aprovarDepoisDeLer, '/api/conexoes/aprovar-depois-de-ler', ROTULO_APROVAR_DEPOIS_DE_LER)}
-      <p className="muted small">Os agentes tratam o que leem como informação, nunca como ordem. Com esta opção, depois de ler e-mails, mensagens ou arquivos das suas contas, abrir um site ou rodar um programa espera o seu clique num cartão. No cartão, você escolhe por quanto tempo vale: 1 h, 8 h ou 72 h naquela conversa ou card, ou sempre (em todas, até você desfazer em Regras, abaixo). Aprovar libera o grupo inteiro: qualquer site, ou qualquer programa. A busca na internet segue valendo.</p>
+      <p className="muted small">{t('conexoes.cuidado.depoisDeLer')}</p>
       {st.data?.aprovarDepoisDeLerBarra && <p className="warn">{AVISO_APROVAR_SEM_CARTAO}</p>}
-      {opcao(st.data?.liberarTudo, '/api/conexoes/liberar-tudo', 'Liberar tudo, por minha conta')}
-      {st.data?.liberarTudo && <p className="warn">Sem confirmações: um e-mail ou mensagem malicioso que um agente leia pode levá-lo a enviar, apagar ou mandar dados seus para fora sem você ver antes. A aprovação para abrir sites e rodar programas também sai. O que você ajustou em cada conexão, "sempre pedir confirmação antes de organizar" e o cartão de criar cobrança no Asaas continuam valendo.</p>}
+      {opcao(st.data?.liberarTudo, '/api/conexoes/liberar-tudo', t('conexoes.cuidado.liberarTudo'))}
+      {st.data?.liberarTudo && <p className="warn">{t('conexoes.cuidado.liberarTudoAviso')}</p>}
       {err && <p className="error">{err}</p>}
     </section>
   );
 }
 
 
-function Disconnect({ i, reload, label = 'Desconectar' }: { i: Integration; reload: () => void; label?: string }) {
+function Disconnect({ i, reload, label }: { i: Integration; reload: () => void; label?: string }) {
+  const t = useT();
   const [ask, setAsk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  if (!ask) return <button className="btn btn--sm btn--ghost" onClick={() => setAsk(true)}>{label}</button>;
+  if (!ask) return <button className="btn btn--sm btn--ghost" onClick={() => setAsk(true)}>{label ?? t('conexoes.desconectar.botao')}</button>;
   // o que acontece de verdade: conta emprestada só deixa de ser usada aqui; a que outros workspaces usam continua com eles
   const outros = i.usadaEm ?? [];
-  const efeito = i.sharedFrom ? `Este workspace deixa de usar a conta; ela segue conectada em ${i.sharedFrom}.`
-    : outros.length ? `Sai deste workspace, mas ${outros.length === 1 ? `o workspace ${outros[0]} continua` : `os workspaces ${outros.join(', ')} continuam`} usando esta conta. Para cortar o acesso de vez, desconecte lá também.`
-    : 'As credenciais guardadas neste computador são apagadas.';
+  const efeito = i.sharedFrom ? t('conexoes.desconectar.emprestada', { workspace: i.sharedFrom })
+    : outros.length ? (outros.length === 1 ? t('conexoes.desconectar.outroUm', { workspace: outros[0] }) : t('conexoes.desconectar.outrosVarios', { lista: fmtLista(outros) }))
+    : t('conexoes.desconectar.apaga');
   return (
     <div className="confirm">
-      {i.sharedFrom ? 'Deixar de usar' : 'Desconectar'} {i.name}? {efeito} O que já foi lido continua aqui.
-      <button className="btn btn--sm btn--primary" onClick={async () => { try { await api.del(`/api/integrations/${i.kind}`); setAsk(false); reload(); } catch (e) { setErr(errMsg(e)); } }}>{i.sharedFrom ? 'Deixar de usar' : 'Desconectar'}</button>
-      <button className="btn btn--sm btn--ghost" onClick={() => setAsk(false)}>Cancelar</button>
+      {i.sharedFrom ? t('conexoes.desconectar.perguntaEmprestada', { nome: i.name, efeito }) : t('conexoes.desconectar.pergunta', { nome: i.name, efeito })}
+      <button className="btn btn--sm btn--primary" onClick={async () => { try { await api.del(`/api/integrations/${i.kind}`); setAsk(false); reload(); } catch (e) { setErr(errMsg(e)); } }}>{i.sharedFrom ? t('conexoes.desconectar.deixarDeUsar') : t('conexoes.desconectar.botao')}</button>
+      <button className="btn btn--sm btn--ghost" onClick={() => setAsk(false)}>{t('conexoes.acao.cancelar')}</button>
       {err && <span className="error">{err}</span>}
     </div>
   );
@@ -460,6 +482,7 @@ function Disconnect({ i, reload, label = 'Desconectar' }: { i: Integration; relo
 
 /** Credencial colada: um ou mais campos (token, chave, endereço, e-mail), conferidos no serviço antes de conectar. */
 function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => void; autorizar: boolean }) {
+  const t = useT();
   const [trocar, setTrocar] = useState(false);
   const [v, setV] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -472,21 +495,22 @@ function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => 
       {i.aviso && (
         <div className="conn-reautorizar">
           <p className="warn">{i.aviso}</p>
-          <button className="btn btn--primary" onClick={() => { setOk(null); setTrocar(true); }}>Reconectar do novo jeito</button>
+          <button className="btn btn--primary" onClick={() => { setOk(null); setTrocar(true); }}>{t('conexoes.token.reconectarNovo')}</button>
         </div>
       )}
       {/* o agente ou o teste diz à pessoa "autorizar de novo": aqui isso é colar uma credencial com a permissão que faltou */}
       {(i.error || autorizar) && (
         <div className="conn-reautorizar">
-          <p className="warn">Se faltou permissão, gere no {i.name} uma credencial com permissão de escrita e cole aqui.</p>
-          <button className="btn btn--primary" onClick={() => { setOk(null); setTrocar(true); }}>Autorizar de novo</button>
+          <p className="warn">{t('conexoes.token.faltouPermissao', { app: i.name })}</p>
+          <button className="btn btn--primary" onClick={() => { setOk(null); setTrocar(true); }}>{t('conexoes.acao.autorizarDeNovo')}</button>
         </div>
       )}
-      <button className="btn btn--sm btn--ghost" onClick={() => { setOk(null); setTrocar(true); }}>Conectar outra conta neste workspace</button>{' '}
-      <Disconnect i={i} reload={reload} label={i.sharedFrom ? 'Deixar de usar neste workspace' : 'Desconectar deste workspace'} />
+      <button className="btn btn--sm btn--ghost" onClick={() => { setOk(null); setTrocar(true); }}>{t('conexoes.acao.outraConta')}</button>{' '}
+      <Disconnect i={i} reload={reload} label={i.sharedFrom ? t('conexoes.desconectar.deixarAqui') : t('conexoes.desconectar.desteWorkspace')} />
     </>
   );
-  const fields = i.fields.length ? i.fields : [{ name: 'token', label: 'Token', secret: true, placeholder: 'Cole o token aqui', opcional: false }];
+  // i18n-ok: 'token' é o nome do campo que a API espera; o rótulo e o exemplo vêm do dicionário
+  const fields = i.fields.length ? i.fields : [{ name: 'token', label: t('conexoes.token.campo'), secret: true, placeholder: t('conexoes.token.campoExemplo'), opcional: false }];
   // Trello: com a chave digitada, o link já abre a autorização (leitura e escrita, sem validade) para gerar o token
   const trelloKey = i.kind === 'trello' && /^[a-f0-9]{32}$/i.test((v.key ?? '').trim()) ? v.key.trim() : null;
   return (
@@ -494,29 +518,29 @@ function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => 
       e.preventDefault(); setErr(null);
       // o botão nunca fica apagado esperando: faltou um campo, a tela diz qual
       const faltam = fields.filter((f) => !f.opcional && !(v[f.name] ?? '').trim());
-      if (faltam.length) { setErr(`Preencha: ${faltam.map((f) => f.label).join(', ')}.`); return; }
+      if (faltam.length) { setErr(t('conexoes.token.preencha', { campos: fmtLista(faltam.map((f) => f.label)) })); return; }
       setBusy(true);
       try {
         // campo opcional em branco não vai (ex.: o endereço do GitLab, em branco para gitlab.com)
         const credentials = Object.fromEntries(fields.filter((f) => (v[f.name] ?? '').trim()).map((f) => [f.name, (v[f.name] ?? '').trim()]));
         const r = await api.post<{ account: string }>(`/api/integrations/${i.kind}/token`, { credentials });
-        setV({}); setTrocar(false); setOk(`Conectada: ${r.account}.`); reload();
+        setV({}); setTrocar(false); setOk(t('conexoes.token.conectada', { conta: r.account })); reload();
       } catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
     }}>
       {i.help?.antes && <p className="warn conn-antes" role="note">{i.help.antes}</p>}
-      {i.help && <p className="hint">{i.help.steps} <a href={i.help.url} target="_blank" rel="noreferrer noopener">Abrir a página</a></p>}
+      {i.help && <p className="hint">{i.help.steps} <a href={i.help.url} target="_blank" rel="noreferrer noopener">{t('conexoes.token.abrirPagina')}</a></p>}
       {!!i.help?.extras?.length && <p className="row row--wrap">{i.help.extras.map((x) => ('url' in x
         ? <a key={x.rotulo} className="btn btn--sm btn--ghost" href={x.url} target="_blank" rel="noreferrer noopener">{x.rotulo}</a>
         : <CopiarTexto key={x.rotulo} rotulo={x.rotulo} texto={x.copiar} />))}</p>}
-      {trelloKey && <p className="hint"><a href={`https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&name=Ergon&key=${trelloKey}`} target="_blank" rel="noreferrer noopener">Gerar o token (leitura e escrita, sem prazo de validade)</a> e cole abaixo.</p>}
+      {trelloKey && <p className="hint">{tn('conexoes.token.trello', { link: <a href={`https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&name=Ergon&key=${trelloKey}`} target="_blank" rel="noreferrer noopener">{t('conexoes.token.trelloLink')}</a> })}</p>}
       {fields.map((f) => (
         <label key={f.name} className="field">{f.label}
           <input type={f.secret ? 'password' : 'text'} autoComplete="off" spellCheck={false} value={v[f.name] ?? ''} placeholder={f.placeholder} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
         </label>
       ))}
       <p className="row row--wrap">
-        <button className="btn btn--primary" disabled={busy}>{busy ? 'Conferindo…' : 'Conectar'}</button>
-        {trocar && <button type="button" className="btn btn--ghost" onClick={() => { setTrocar(false); setV({}); setErr(null); }}>Cancelar</button>}
+        <button className="btn btn--primary" disabled={busy}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.token.conectar')}</button>
+        {trocar && <button type="button" className="btn btn--ghost" onClick={() => { setTrocar(false); setV({}); setErr(null); }}>{t('conexoes.acao.cancelar')}</button>}
       </p>
       {err && <p className="error">{err}</p>}
     </form>
@@ -525,81 +549,78 @@ function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => 
 
 /** Texto longo para colar noutro lugar (ex.: o texto do app do Slack): um botão, em vez do texto no meio dos passos. */
 function CopiarTexto({ rotulo, texto }: { rotulo: string; texto: string }) {
+  const t = useT();
   const [feito, setFeito] = useState<'copiado' | 'mostrar' | null>(null);
   useEffect(() => { if (feito !== 'copiado') return; const t = window.setTimeout(() => setFeito(null), 2500); return () => window.clearTimeout(t); }, [feito]);
   return (
     <>
-      <button type="button" className="btn btn--sm btn--ghost" onClick={async () => { try { await navigator.clipboard.writeText(texto); setFeito('copiado'); } catch { setFeito('mostrar'); } }}>{feito === 'copiado' ? 'Copiado' : rotulo}</button>
+      {/* i18n-ok: "copiado" e "mostrar" são estados internos do botão; o texto vem do dicionário */}
+      <button type="button" className="btn btn--sm btn--ghost" onClick={async () => { try { await navigator.clipboard.writeText(texto); setFeito('copiado'); } catch { setFeito('mostrar'); } }}>{feito === 'copiado' ? t('conexoes.copiar.copiado') : rotulo}</button>
       {/* sem acesso à área de transferência: o texto aparece selecionado, para copiar com Ctrl+C */}
       {feito === 'mostrar' && <textarea className="conn-copiar" readOnly rows={3} value={texto} aria-label={rotulo} ref={(el) => el?.select()} />}
     </>
   );
 }
 
-/** Textos de cada login com a conta (o mecanismo é um só no servidor: sso.ts). */
-const SSO_TEXT: Record<string, { button: string; what: string; connected: string }> = {
-  microsoft: {
-    button: 'Entrar com a Microsoft',
-    what: 'Você entra na página da Microsoft e autoriza o aplicativo Ergon a usar, em seu nome: tarefas (Planner e To Do), e-mail, agenda, arquivos e, em conta de trabalho, o Teams. Os agentes consultam e agem quando você pede; o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões. A autorização vem em partes: primeiro enviar e-mail, criar arquivos e o Teams, que qualquer conta autoriza; depois a leitura (e-mail, agenda, arquivos, tarefas), que numa empresa costuma precisar da aprovação do administrador. Se precisar, a tela mostra o pedido pronto para você enviar a ele.',
-    connected: 'Tarefas: escolha um plano do Planner ou uma lista do To Do em Tarefas (depois de liberada a leitura). Em conta de trabalho, os agentes também mandam mensagens no Teams e, com a leitura liberada, leem as conversas.',
-  },
-  google: {
-    button: 'Entrar com o Google',
-    what: 'Você entra na página do Google e autoriza o aplicativo Ergon a usar, em seu nome: Google Tasks, Agenda, Gmail e Drive. Os agentes consultam e agem quando você pede; o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
-    connected: 'Tarefas: escolha uma lista do Google Tasks em Tarefas. Ela fica ligada nos dois sentidos: dar check, mover ou editar aqui muda lá.',
-  },
+/** Textos de cada login com a conta (o mecanismo é um só no servidor: sso.ts): as chaves do dicionário. */
+type Provedor = 'microsoft' | 'google';
+const SSO_TEXT: Record<string, { button: `conexoes.sso.${Provedor}.botao`; what: `conexoes.sso.${Provedor}.oQue`; connected: `conexoes.sso.${Provedor}.conectado` }> = {
+  microsoft: { button: 'conexoes.sso.microsoft.botao', what: 'conexoes.sso.microsoft.oQue', connected: 'conexoes.sso.microsoft.conectado' },
+  google: { button: 'conexoes.sso.google.botao', what: 'conexoes.sso.google.oQue', connected: 'conexoes.sso.google.conectado' },
 };
 
 function Sso({ i, reload, faltam, etapas, recarregar, autorizar }: { i: Integration; reload: () => void; faltam: string[]; etapas: EtapaConsentimento[]; recarregar: () => void; autorizar: boolean }) {
+  const t = useT();
   const [err, setErr] = useState<string | null>(null);
-  const t = SSO_TEXT[i.kind] ?? { button: `Entrar com ${i.name}`, what: '', connected: '' };
+  const chaves = SSO_TEXT[i.kind];
+  const txt = chaves ? { button: t(chaves.button), what: t(chaves.what), connected: t(chaves.connected) } : { button: t('conexoes.sso.entrarCom', { nome: i.name }), what: '', connected: '' };
   const entrar = async () => { setErr(null); try { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`); location.href = r.url; } catch (e) { setErr(errMsg(e)); } };
   if (i.state === 'connected') return (
     <>
-      {t.connected && <p className="hint">{t.connected}</p>}
+      {txt.connected && <p className="hint">{txt.connected}</p>}
       {i.kind === 'microsoft' && etapas.length > 0 && <EtapasMicrosoft etapas={etapas} recarregar={recarregar} />}
-      <p><button className="btn btn--sm btn--ghost" onClick={() => void entrar()}>Conectar outra conta neste workspace</button></p>
+      <p><button className="btn btn--sm btn--ghost" onClick={() => void entrar()}>{t('conexoes.acao.outraConta')}</button></p>
       {/* faltou permissão (conta antiga, ou o serviço recusou uma ação): o botão que o agente e o teste apontam */}
       {(faltam.length > 0 || !!i.error || autorizar) && (
         <div className="conn-reautorizar">
-          {faltam.length > 0 && <p className="warn">Esta conta foi conectada antes de os agentes poderem agir nela. Autorize de novo para liberar as ações novas (a conexão atual continua funcionando enquanto isso).</p>}
-          <button className="btn btn--primary" onClick={() => void entrar()}>Autorizar de novo</button>
+          {faltam.length > 0 && <p className="warn">{t('conexoes.sso.antesDasAcoes')}</p>}
+          <button className="btn btn--primary" onClick={() => void entrar()}>{t('conexoes.acao.autorizarDeNovo')}</button>
         </div>
       )}
       {err && <p className="error">{err}</p>}
       <Disconnect i={i} reload={reload} />
     </>
   );
-  if (!i.ready) return <p className="hint">Para entrar com a conta, o aplicativo Ergon precisa estar registrado {i.setup?.place ?? 'no provedor'} (passo único de quem instala o Ergon; veja {i.setup?.doc ?? 'a documentação'}). Depois, é só clicar em "{t.button}".</p>;
+  if (!i.ready) return <p className="hint">{t('conexoes.sso.naoRegistrado', { lugar: i.setup?.place ?? t('conexoes.sso.noProvedor'), doc: i.setup?.doc ?? t('conexoes.sso.aDocumentacao'), botao: txt.button })}</p>;
   const comecar = async () => { setErr(null); try { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`); location.href = r.url; } catch (e) { setErr(errMsg(e)); reload(); } };
   // a empresa exige o administrador já no primeiro login: o pedido vem pronto aqui, antes de haver conta conectada
   if (i.adminBase) return (
     <>
       <div className="conn-etapas conn-reautorizar">
-        <h4>A sua empresa precisa aprovar o Ergon</h4>
-        <p className="small">A conta Microsoft da sua empresa não deixa ninguém autorizar o Ergon sozinho: quem administra a conta aprova uma vez, e depois você entra normalmente.</p>
+        <h4>{t('conexoes.admin.empresaPrecisa')}</h4>
+        <p className="small">{t('conexoes.admin.empresaTexto')}</p>
         {/* o primeiro acesso pede tudo de uma vez: a mensagem ao administrador diz tudo o que o link pede */}
-        <PedirAoAdministrador link={i.adminBase.link} etapa="base" depois="Já aprovaram? Entrar de novo" />
-        <p className="row row--wrap"><button className="btn btn--primary" onClick={() => void comecar()}>Já aprovaram? Entrar de novo</button></p>
+        <PedirAoAdministrador link={i.adminBase.link} etapa="base" depois={t('conexoes.admin.jaAprovaramEntrar')} />
+        <p className="row row--wrap"><button className="btn btn--primary" onClick={() => void comecar()}>{t('conexoes.admin.jaAprovaramEntrar')}</button></p>
       </div>
       {err && <p className="error">{err}</p>}
     </>
   );
   return (
     <>
-      <button className="btn btn--primary" onClick={() => void comecar()}>{t.button}</button>
-      {t.what && <p className="hint">{t.what}</p>}
+      <button className="btn btn--primary" onClick={() => void comecar()}>{txt.button}</button>
+      {txt.what && <p className="hint">{txt.what}</p>}
       {err && <p className="error">{err}</p>}
     </>
   );
 }
 
-/** O que cada etapa da Microsoft libera, dito para a pessoa (sso.ts tem as permissões de cada uma). */
-const ETAPA_TEXTO: Record<EtapaConsentimento['id'], { titulo: string; oQue: string }> = {
-  base: { titulo: 'Enviar e-mail e criar arquivos', oQue: 'enviar e-mail em seu nome e criar arquivos no OneDrive' },
-  trabalho: { titulo: 'Teams: conversas e mensagens', oQue: 'ver as suas conversas e times e mandar mensagens no Teams' },
-  leitura: { titulo: 'Ler e organizar', oQue: 'ler e-mail, agenda, arquivos, tarefas (Planner e To Do), contatos e o conteúdo das conversas do Teams' },
-  canais: { titulo: 'Ler os canais do Teams (opcional)', oQue: 'ler as mensagens dos canais dos times' },
+/** O que cada etapa da Microsoft libera, dito para a pessoa (sso.ts tem as permissões de cada uma): as chaves do dicionário. */
+const ETAPA_TEXTO: Record<EtapaConsentimento['id'], { titulo: `conexoes.etapa.${EtapaConsentimento['id']}.titulo`; oQue: `conexoes.etapa.${EtapaConsentimento['id']}.oQue` }> = {
+  base: { titulo: 'conexoes.etapa.base.titulo', oQue: 'conexoes.etapa.base.oQue' },
+  trabalho: { titulo: 'conexoes.etapa.trabalho.titulo', oQue: 'conexoes.etapa.trabalho.oQue' },
+  leitura: { titulo: 'conexoes.etapa.leitura.titulo', oQue: 'conexoes.etapa.leitura.oQue' },
+  canais: { titulo: 'conexoes.etapa.canais.titulo', oQue: 'conexoes.etapa.canais.oQue' },
 };
 
 /**
@@ -607,6 +628,7 @@ const ETAPA_TEXTO: Record<EtapaConsentimento['id'], { titulo: string; oQue: stri
  * administrador (o link pronto, que ela mesma copia e envia) ou entrar de novo depois que ele aprovou.
  */
 function EtapasMicrosoft({ etapas, recarregar }: { etapas: EtapaConsentimento[]; recarregar: () => void }) {
+  const t = useT();
   const [err, setErr] = useState<string | null>(null);
   const pedir = async (etapa: EtapaConsentimento['id']) => {
     setErr(null);
@@ -615,7 +637,7 @@ function EtapasMicrosoft({ etapas, recarregar }: { etapas: EtapaConsentimento[];
   };
   return (
     <div className="conn-etapas conn-reautorizar">
-      <h4>O que esta conta já liberou</h4>
+      <h4>{t('conexoes.etapas.titulo')}</h4>
       <ul className="conn-teste__lista conn-etapas__lista">{etapas.map((e) => <EtapaLinha key={e.id} e={e} pedir={() => void pedir(e.id)} />)}</ul>
       {err && <p className="error">{err}</p>}
     </div>
@@ -623,39 +645,40 @@ function EtapasMicrosoft({ etapas, recarregar }: { etapas: EtapaConsentimento[];
 }
 
 function EtapaLinha({ e, pedir }: { e: EtapaConsentimento; pedir: () => void }) {
-  const t = ETAPA_TEXTO[e.id];
+  const t = useT();
+  const txt = ETAPA_TEXTO[e.id];
   // o motivo gravado na etapa, em português (o erro da Microsoft fica só no registro)
   const motivo = motivoDoLogin(e.erro);
-  const titulo = <><b>{t.titulo}</b> <span className="muted small">({t.oQue})</span></>;
-  if (e.estado === 'ok') return <li><span className="badge badge--ok">liberado</span> {titulo}</li>;
+  const titulo = <><b>{t(txt.titulo)}</b> <span className="muted small">({t(txt.oQue)})</span></>;
+  if (e.estado === 'ok') return <li><span className="badge badge--ok">{t('conexoes.etapa.liberado')}</span> {titulo}</li>;
   if (e.estado === 'aprovado') return (
-    <li><span className="badge badge--ok">aprovado pelo administrador</span> {titulo}
-      <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>Autorizar agora</button><span className="muted small">Falta só você entrar de novo para a aprovação valer aqui.</span></p>
+    <li><span className="badge badge--ok">{t('conexoes.etapa.aprovado')}</span> {titulo}
+      <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>{t('conexoes.etapa.autorizarAgora')}</button><span className="muted small">{t('conexoes.etapa.faltaEntrar')}</span></p>
     </li>
   );
   if (e.estado === 'pedido') return (
-    <li><span className="badge badge--warn">esperando a Microsoft</span> {titulo}
-      <p className="row row--wrap"><span className="muted small">A página da Microsoft está aberta. Se você a fechou, abra de novo.</span><button className="btn btn--sm btn--ghost" onClick={pedir}>Abrir de novo</button></p>
+    <li><span className="badge badge--warn">{t('conexoes.etapa.esperando')}</span> {titulo}
+      <p className="row row--wrap"><span className="muted small">{t('conexoes.etapa.paginaAberta')}</span><button className="btn btn--sm btn--ghost" onClick={pedir}>{t('conexoes.etapa.abrirDeNovo')}</button></p>
     </li>
   );
   // na empresa, leitura e canais costumam ser do administrador (e o Teams, quando a empresa exige): o pedido vem pronto, e quem
   // envia é a pessoa. Os canais são opcionais e o login segue até eles sozinho: voltar sem eles é esperado, nada em vermelho
   if (e.administrador && e.link && (e.estado === 'bloqueado' || e.opcional)) return (
-    <li><span className={`badge ${e.estado === 'bloqueado' && !e.opcional ? 'badge--err' : ''}`}>precisa do administrador</span> {titulo}
-      <p className="small">{e.opcional ? 'Opcional. Ler os canais sempre precisa da aprovação do administrador da empresa.' : 'Precisa da aprovação do administrador da empresa.'}{motivo ? <span className="muted"> {motivo}</span> : null}</p>
+    <li><span className={`badge ${e.estado === 'bloqueado' && !e.opcional ? 'badge--err' : ''}`}>{t('conexoes.etapa.precisaAdmin')}</span> {titulo}
+      <p className="small">{e.opcional ? t('conexoes.etapa.opcionalCanais') : t('conexoes.etapa.precisaAprovacao')}{motivo ? <span className="muted"> {motivo}</span> : null}</p>
       <PedirAoAdministrador link={e.link} etapa={e.id} />
-      <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>Já aprovaram? Conectar de novo</button></p>
+      <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>{t('conexoes.admin.jaAprovaramConectar')}</button></p>
     </li>
   );
   return (
-    <li><span className="badge">{e.estado === 'bloqueado' ? 'não liberado' : 'falta liberar'}</span> {titulo}
+    <li><span className="badge">{e.estado === 'bloqueado' ? t('conexoes.etapa.naoLiberado') : t('conexoes.etapa.faltaLiberar')}</span> {titulo}
       {motivo && <p className="muted small">{motivo}</p>}
       <p className="row row--wrap">
-        <button className="btn btn--sm btn--primary" onClick={pedir}>{e.estado === 'bloqueado' ? 'Tentar de novo' : e.id === 'leitura' ? 'Liberar leitura' : e.id === 'base' ? 'Autorizar de novo' : 'Liberar'}</button>
-        {e.administrador && <span className="muted small">Numa empresa, isto costuma precisar da aprovação do administrador.</span>}
+        <button className="btn btn--sm btn--primary" onClick={pedir}>{e.estado === 'bloqueado' ? t('conexoes.etapa.tentarDeNovo') : e.id === 'leitura' ? t('conexoes.etapa.liberarLeitura') : e.id === 'base' ? t('conexoes.acao.autorizarDeNovo') : t('conexoes.etapa.liberar')}</button>
+        {e.administrador && <span className="muted small">{t('conexoes.etapa.costumaAdmin')}</span>}
       </p>
       {/* quem já sabe que a empresa exige o administrador vai direto ao pedido, sem passar pela página da Microsoft */}
-      {e.administrador && e.link && <details><summary className="small">Pedir ao administrador</summary><PedirAoAdministrador link={e.link} etapa={e.id} /></details>}
+      {e.administrador && e.link && <details><summary className="small">{t('conexoes.admin.pedir')}</summary><PedirAoAdministrador link={e.link} etapa={e.id} /></details>}
     </li>
   );
 }
@@ -665,14 +688,15 @@ function EtapaLinha({ e, pedir }: { e: EtapaConsentimento; pedir: () => void }) 
  * copia e envia ela mesma; nada sai daqui sozinho. Quem aprova abre noutro computador, e a página final tenta voltar para este:
  * lá ela pode mostrar um erro, e isso é esperado.
  */
-function PedirAoAdministrador({ link, etapa, depois = 'Já aprovaram? Conectar de novo' }: { link: string; etapa: EtapaConsentimento['id']; depois?: string }) {
+function PedirAoAdministrador({ link, etapa, depois }: { link: string; etapa: EtapaConsentimento['id']; depois?: string }) {
+  const t = useT();
   const oQue = oQuePedirAoAdministrador(etapa);
-  const mensagem = `Olá! Uso o Ergon com a minha conta Microsoft da empresa e preciso que você aprove o aplicativo Ergon para ${oQue} em meu nome. É só abrir este link com a sua conta de administrador e aceitar: ${link}\nNo fim, a página pode mostrar um erro de conexão: é esperado, porque ela tenta voltar para o meu computador. Obrigado!`;
+  const mensagem = t('conexoes.admin.mensagem', { oQue, link });
   return (
     <div className="conn-admin conn-reautorizar">
-      <p className="small"><b>Pedir ao administrador</b></p>
-      <p className="hint">Copie o link e envie você mesmo a quem administra a conta Microsoft da sua empresa: nada sai daqui sozinho. A pessoa abre o link, entra com a conta de administrador e aprova. No fim, a página pode mostrar um erro de "não foi possível acessar": é esperado, porque ela tenta voltar para este computador. Depois que aprovarem, clique em "{depois}".</p>
-      <p className="row row--wrap"><CopiarTexto rotulo="Copiar o link do pedido" texto={link} /><CopiarTexto rotulo="Copiar uma mensagem pronta" texto={mensagem} /></p>
+      <p className="small"><b>{t('conexoes.admin.pedir')}</b></p>
+      <p className="hint">{t('conexoes.admin.instrucoes', { depois: depois ?? t('conexoes.admin.jaAprovaramConectar') })}</p>
+      <p className="row row--wrap"><CopiarTexto rotulo={t('conexoes.admin.copiarLink')} texto={link} /><CopiarTexto rotulo={t('conexoes.admin.copiarMensagem')} texto={mensagem} /></p>
     </div>
   );
 }
@@ -680,6 +704,7 @@ function PedirAoAdministrador({ link, etapa, depois = 'Já aprovaram? Conectar d
 interface WaState { status: string; experimental?: boolean; riscosAceitos?: boolean; qr: string | null; me: string | null; error: string | null; read: number; seen: number; filters: { direct: boolean; groups: boolean; cards: boolean; labels: string[]; exceptions: string[] }; chats: Array<{ id: string; name: string; group: boolean }>; labels: string[] }
 
 function WhatsApp({ i, reload }: { i: Integration; reload: () => void }) {
+  const t = useT();
   const st = useResource<WaState>('/api/integrations/whatsapp', ['integrations.changed', 'events.changed']);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -698,41 +723,41 @@ function WhatsApp({ i, reload }: { i: Integration; reload: () => void }) {
     <>
       {i.state !== 'connected' && live !== 'qr' && live !== 'starting' && (
         <>
-          <button className="btn btn--primary" onClick={() => void start()} disabled={busy}>Conectar com QR code</button>
-          <p className="hint">Experimental: lê as conversas que você permitir e, só quando você pedir ou confirmar, responde por você (com "Liberar tudo" ligado, sem confirmar). Nada é marcado como lido e você não aparece "online". Enviar por um cliente não oficial aumenta o risco de o WhatsApp limitar o número. Usa uma biblioteca de código aberto, não oficial do WhatsApp. Prefira um número de trabalho.</p>
+          <button className="btn btn--primary" onClick={() => void start()} disabled={busy}>{t('conexoes.wa.conectarQr')}</button>
+          <p className="hint">{t('conexoes.wa.experimentalTexto')}</p>
         </>
       )}
-      {live === 'starting' && <p className="muted">Preparando o QR code…</p>}
+      {live === 'starting' && <p className="muted">{t('conexoes.wa.preparandoQr')}</p>}
       {live === 'qr' && st.data?.qr && (
         <div className="qr">
-          <img src={st.data.qr} alt="QR code para conectar o WhatsApp" width={240} height={240} />
+          <img src={st.data.qr} alt={t('conexoes.wa.qrAlt')} width={240} height={240} />
           <ol className="small">
-            <li>No celular, abra o WhatsApp.</li>
-            <li>Toque em <b>Aparelhos conectados</b> › <b>Conectar um aparelho</b>.</li>
-            <li>Aponte a câmera para este código.</li>
+            <li>{t('conexoes.wa.passo1')}</li>
+            <li>{tn('conexoes.wa.passo2', { aparelhos: <b>{t('conexoes.wa.aparelhosConectados')}</b>, conectar: <b>{t('conexoes.wa.conectarAparelho')}</b> })}</li>
+            <li>{t('conexoes.wa.passo3')}</li>
           </ol>
-          <button className="btn btn--sm btn--ghost" onClick={stop}>Cancelar</button>
+          <button className="btn btn--sm btn--ghost" onClick={stop}>{t('conexoes.acao.cancelar')}</button>
         </div>
       )}
       {st.data?.error && <p className="error">{st.data.error}</p>}
       {i.state === 'connected' && f && (
         <div className="wa-filters">
-          <p className="small">{live === 'connected' ? <span className="badge badge--ok">lendo agora</span> : <span className="badge badge--warn">{live === 'starting' ? 'reconectando' : 'parado'}</span>} {st.data!.read} mensagens lidas nesta sessão{st.data!.seen > st.data!.read ? ` · ${st.data!.seen - st.data!.read} ignoradas pelos filtros` : ''}</p>
-          {live !== 'connected' && live !== 'starting' && <button className="btn btn--sm" onClick={() => void start()}>Retomar leitura</button>}
-          <h4>O que é lido</h4>
-          <label className="check"><input type="checkbox" checked={f.direct} onChange={(e) => void setF({ direct: e.target.checked })} /> Conversas individuais</label>
-          <label className="check"><input type="checkbox" checked={f.groups} onChange={(e) => void setF({ groups: e.target.checked })} /> Grupos</label>
-          <label className="check"><input type="checkbox" checked={f.cards} onChange={(e) => void setF({ cards: e.target.checked })} /> Pedidos identificados viram card para a equipe (triagem)</label>
-          <ListEditor label="Só conversas com estas etiquetas (WhatsApp Business; vazio = todas)" values={f.labels} suggestions={st.data!.labels} onChange={(labels) => void setF({ labels })} placeholder="ex.: Clientes" />
-          <ListEditor label="Nunca ler (exceções: nome ou número)" values={f.exceptions} suggestions={st.data!.chats.map((c) => c.name)} onChange={(exceptions) => void setF({ exceptions })} placeholder="ex.: Família" />
-          <Disconnect i={i} reload={() => { st.reload(); reload(); }} label="Desconectar (sai do aparelho)" />
+          <p className="small">{live === 'connected' ? <span className="badge badge--ok">{t('conexoes.wa.lendo')}</span> : <span className="badge badge--warn">{live === 'starting' ? t('conexoes.wa.reconectando') : t('conexoes.wa.parado')}</span>} {t('conexoes.wa.lidas', { n: st.data!.read })}{st.data!.seen > st.data!.read ? ` ${t('conexoes.wa.ignoradas', { n: st.data!.seen - st.data!.read })}` : ''}</p>
+          {live !== 'connected' && live !== 'starting' && <button className="btn btn--sm" onClick={() => void start()}>{t('conexoes.wa.retomar')}</button>}
+          <h4>{t('conexoes.wa.oQueELido')}</h4>
+          <label className="check"><input type="checkbox" checked={f.direct} onChange={(e) => void setF({ direct: e.target.checked })} /> {t('conexoes.wa.individuais')}</label>
+          <label className="check"><input type="checkbox" checked={f.groups} onChange={(e) => void setF({ groups: e.target.checked })} /> {t('conexoes.wa.grupos')}</label>
+          <label className="check"><input type="checkbox" checked={f.cards} onChange={(e) => void setF({ cards: e.target.checked })} /> {t('conexoes.wa.cards')}</label>
+          <ListEditor label={t('conexoes.wa.etiquetas')} values={f.labels} suggestions={st.data!.labels} onChange={(labels) => void setF({ labels })} placeholder={t('conexoes.wa.etiquetasExemplo')} />
+          <ListEditor label={t('conexoes.wa.nuncaLer')} values={f.exceptions} suggestions={st.data!.chats.map((c) => c.name)} onChange={(exceptions) => void setF({ exceptions })} placeholder={t('conexoes.wa.nuncaLerExemplo')} />
+          <Disconnect i={i} reload={() => { st.reload(); reload(); }} label={t('conexoes.wa.desconectar')} />
         </div>
       )}
       {err && <p className="error">{err}</p>}
       {i.state === 'connected' && st.data && !st.data.riscosAceitos && (
         <div className="conn-reautorizar">
-          <p className="warn">Os agentes agora podem responder pelo WhatsApp quando você pede. Antes do primeiro envio, leia as informações e os riscos.</p>
-          <button className="btn btn--primary" onClick={() => setAceite(true)}>Ver e aceitar</button>
+          <p className="warn">{t('conexoes.wa.podemResponder')}</p>
+          <button className="btn btn--primary" onClick={() => setAceite(true)}>{t('conexoes.wa.verEAceitar')}</button>
         </div>
       )}
       {aceite && <WhatsAppRisks onClose={() => setAceite(false)} onAccept={async () => { setAceite(false); try { await api.post('/api/integrations/whatsapp/aceitar-riscos'); st.reload(); } catch (e) { setErr(errMsg(e)); } }} />}
@@ -743,43 +768,47 @@ function WhatsApp({ i, reload }: { i: Integration; reload: () => void }) {
 
 /** Informações e riscos do WhatsApp experimental. Com onAccept, conectar só depois do "li e entendi". Mudou o texto
  *  em algo que importa? Suba WA_RISKS_VERSION (server/src/services/whatsapp.ts) para pedir o aceite de novo. */
+type ItemDeRisco = 'c1' | 'c2' | 'c3' | 'r1' | 'r2' | 'r3' | 'r4' | 'r5' | 'r6';
 function WhatsAppRisks({ onClose, onAccept }: { onClose: () => void; onAccept?: () => void }) {
+  const t = useT();
   const [ok, setOk] = useState(false);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
+  /** um item da lista: a frase inteira, com o trecho em negrito no lugar de {destaque} */
+  const item = (frase: `conexoes.riscos.${ItemDeRisco}`, destaque: `conexoes.riscos.${ItemDeRisco}Destaque`) => <li>{tn(frase, { destaque: <b>{t(destaque)}</b> })}</li>;
   return (
     <div className="lock lock--dialog" role="dialog" aria-modal="true" aria-labelledby="wa-risks-title" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="auth__card wa-risks">
-        <h2 className="auth__title" id="wa-risks-title">WhatsApp (experimental): informações e riscos</h2>
-        <h4>Como funciona</h4>
+        <h2 className="auth__title" id="wa-risks-title">{t('conexoes.riscos.titulo')}</h2>
+        <h4>{t('conexoes.riscos.comoFunciona')}</h4>
         <ul className="small">
-          <li>Você lê um QR code com o celular e este computador vira um <b>aparelho conectado</b> da sua conta, como o WhatsApp Web.</li>
-          <li>A conexão usa uma biblioteca de código aberto (Baileys) que <b>não é oficial</b> nem aprovada pelo WhatsApp ou pela Meta.</li>
-          <li><b>Envio só quando pedido:</b> os agentes enviam da sua conta quando você pede ou confirma num cartão. Se você ligar "Liberar tudo" em Conexões, o que não partiu de você (uma rotina, uma mensagem recebida) também pode sair sem cartão. Ler não marca como lido e você não aparece "online".</li>
-          <li>Só entram as conversas que os filtros permitem (grupos começam desligados), e dá para pôr exceções, como "Família".</li>
+          {item('conexoes.riscos.c1', 'conexoes.riscos.c1Destaque')}
+          {item('conexoes.riscos.c2', 'conexoes.riscos.c2Destaque')}
+          {item('conexoes.riscos.c3', 'conexoes.riscos.c3Destaque')}
+          <li>{t('conexoes.riscos.c4')}</li>
         </ul>
-        <h4>Riscos</h4>
+        <h4>{t('conexoes.riscos.riscos')}</h4>
         <ul className="small">
-          <li><b>Enviar aumenta o risco:</b> mensagens automáticas e denúncias de quem recebe podem levar a restrição ou banimento. Evite escrever a quem nunca falou com você.</li>
-          <li><b>O número pode ser restringido ou banido.</b> Os termos do WhatsApp não permitem clientes não oficiais. Use um número de trabalho ou secundário, nunca um número do qual você não pode abrir mão.</li>
-          <li><b>Pode parar de funcionar sem aviso</b> quando o WhatsApp muda a forma de conectar. Nesse caso, a leitura para até uma versão nova corrigir.</li>
-          <li><b>A sessão fica neste computador</b>, cifrada junto com os seus dados. Quem tiver acesso a ela consegue ler as suas conversas como aparelho conectado. Mantenha o computador com senha e guarde os backups com cuidado.</li>
-          <li><b>As mensagens lidas vão para o modelo de IA</b> que você configurou, para identificar pedidos. Se o modelo é de um serviço na internet, o texto passa por esse serviço. Respeite a privacidade de quem fala com você (LGPD).</li>
-          <li><b>Licença diferente:</b> a biblioteca usa um componente sob GPL-3.0 (libsignal), distribuído junto com este recurso. Detalhes no arquivo NOTICE.</li>
+          {item('conexoes.riscos.r1', 'conexoes.riscos.r1Destaque')}
+          {item('conexoes.riscos.r2', 'conexoes.riscos.r2Destaque')}
+          {item('conexoes.riscos.r3', 'conexoes.riscos.r3Destaque')}
+          {item('conexoes.riscos.r4', 'conexoes.riscos.r4Destaque')}
+          {item('conexoes.riscos.r5', 'conexoes.riscos.r5Destaque')}
+          {item('conexoes.riscos.r6', 'conexoes.riscos.r6Destaque')}
         </ul>
-        <h4>Para parar</h4>
-        <p className="small">Em Conexões, "Desconectar (sai do aparelho)" encerra a sessão e apaga a cópia local. Você também pode remover o aparelho no celular, em <b>Aparelhos conectados</b>.</p>
+        <h4>{t('conexoes.riscos.parar')}</h4>
+        <p className="small">{tn('conexoes.riscos.pararTexto', { aparelhos: <b>{t('conexoes.wa.aparelhosConectados')}</b> })}</p>
         {onAccept ? (
           <>
-            <label className="check"><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> Li e entendi os riscos. Quero conectar mesmo assim.</label>
-            <button className="btn btn--primary btn--block" disabled={!ok} onClick={onAccept}>Aceitar e mostrar o QR code</button>
-            <button className="btn btn--block auth__alt" onClick={onClose}>Agora não</button>
+            <label className="check"><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> {t('conexoes.riscos.li')}</label>
+            <button className="btn btn--primary btn--block" disabled={!ok} onClick={onAccept}>{t('conexoes.riscos.aceitar')}</button>
+            <button className="btn btn--block auth__alt" onClick={onClose}>{t('conexoes.riscos.agoraNao')}</button>
           </>
         ) : (
-          <button className="btn btn--block" onClick={onClose}>Fechar</button>
+          <button className="btn btn--block" onClick={onClose}>{t('conexoes.acao.fechar')}</button>
         )}
       </div>
     </div>
@@ -787,6 +816,7 @@ function WhatsAppRisks({ onClose, onAccept }: { onClose: () => void; onAccept?: 
 }
 
 function ListEditor({ label, values, suggestions, onChange, placeholder }: { label: string; values: string[]; suggestions: string[]; onChange: (v: string[]) => void; placeholder: string }) {
+  const t = useT();
   const [v, setV] = useState('');
   const add = (x: string) => { const s = x.trim(); if (s && !values.includes(s)) onChange([...values, s]); setV(''); };
   const sugg = suggestions.filter((s) => !values.includes(s) && (!v || s.toLowerCase().includes(v.toLowerCase()))).slice(0, 6);
@@ -794,7 +824,7 @@ function ListEditor({ label, values, suggestions, onChange, placeholder }: { lab
     <div className="field">
       {label}
       <div className="row row--wrap">
-        {values.map((x) => <span key={x} className="skill">{x} <button className="x" onClick={() => onChange(values.filter((y) => y !== x))} aria-label={`Tirar ${x}`}>×</button></span>)}
+        {values.map((x) => <span key={x} className="skill">{x} <button className="x" onClick={() => onChange(values.filter((y) => y !== x))} aria-label={t('conexoes.lista.tirar', { item: x })}>×</button></span>)}
         <form className="row" onSubmit={(e) => { e.preventDefault(); add(v); }}><input value={v} onChange={(e) => setV(e.target.value)} placeholder={placeholder} aria-label={label} /></form>
       </div>
       {sugg.length > 0 && v && <div className="row row--wrap">{sugg.map((s) => <button key={s} className="chip" onClick={() => add(s)}>+ {s}</button>)}</div>}
@@ -809,10 +839,11 @@ interface EstadoTeams {
   teamsAppUrl?: string; problem?: string; relay?: { fromEnv: boolean; url: string | null };
 }
 interface PreviaTeams { claimId: string; teamsName: string; conta?: ContaDoTeams; organizacao?: string | null }
-const DESLIGADA_POR: Record<string, string> = {
-  teams: 'desligada pelo Teams', uninstall: 'o app foi removido do Teams', blocked: 'o Teams bloqueou as mensagens do app', relay: 'precisa ser ligada de novo',
+/** Por que a conta do Teams caiu: o código que vem do servidor → a chave do texto. */
+const DESLIGADA_POR: Record<string, `conexoes.teams.desligadaPor.${'teams' | 'uninstall' | 'blocked' | 'relay'}`> = {
+  teams: 'conexoes.teams.desligadaPor.teams', uninstall: 'conexoes.teams.desligadaPor.uninstall', blocked: 'conexoes.teams.desligadaPor.blocked', relay: 'conexoes.teams.desligadaPor.relay',
 };
-const dataCurta = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const dataCurta = (iso: string) => fmtData(iso, { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 /**
  * Conexões › Teams › "Conversar com a equipe pelo Teams": a pessoa fala com o app no Teams, o app mostra um código, ela
@@ -820,6 +851,7 @@ const dataCurta = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { d
  * resposta volta lá; o que precisa dela também avisa lá (ligado por padrão).
  */
 function TeamsConversa() {
+  const t = useT();
   const st = useResource<EstadoTeams>('/api/teams-app', ['teams.changed']);
   const [codigo, setCodigo] = useState('');
   const [previa, setPrevia] = useState<PreviaTeams | null>(null);
@@ -834,7 +866,7 @@ function TeamsConversa() {
   const d = st.data;
   const agir = async (fn: () => Promise<unknown>) => {
     setErr(null); setBusy(true);
-    try { await fn(); st.reload(); } catch (x) { setErr(x instanceof ApiError && x.code === 'invalid_login' ? 'Senha incorreta.' : errMsg(x)); } finally { setBusy(false); }
+    try { await fn(); st.reload(); } catch (x) { setErr(x instanceof ApiError && x.code === 'invalid_login' ? t('conexoes.teams.senhaIncorreta') : errMsg(x)); } finally { setBusy(false); }
   };
   const pedirPrevia = async (tentativa = 0): Promise<void> => {
     setErr(null); setBusy(true); setPronto(null);
@@ -847,38 +879,40 @@ function TeamsConversa() {
     } finally { setBusy(false); }
   };
   // enquanto a resposta não chega (quase nunca: vem na pré-carga), a seção só guarda o lugar
-  if (!d) return <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><strong>Conversar com a equipe pelo Teams</strong><p className="muted">…</p></article>;
+  if (!d) return <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><strong>{t('conexoes.teams.titulo')}</strong><p className="muted">…</p></article>;
   const ligados = d.bindings.filter((b) => b.status !== 'revoked');
   const caidos = d.bindings.filter((b) => b.status === 'revoked');
+  const problema = problemaDoTeams(d.problem);
+  const linha = linhaDoEstado(d.connection, d.problem);
   return (
     <article className={`card conn feature ${ligados.length ? 'feature--on' : ''}`}>
-      <header className="row"><BrandLogo kind="teams" name="Teams" size={36} /><strong>Conversar com a equipe pelo Teams</strong>
-        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? 'conectado' : 'sem conexão'}</span> : <span className="badge badge--soon">em breve</span>}</header>
-      <p className="muted">Mande pedidos à sua equipe numa conversa com o app Ergon no Teams e receba as respostas ali mesmo. As confirmações chegam como cartões com Aprovar e Recusar, e o que precisa de você também avisa no Teams.</p>
-      {!d.available ? <p className="hint">Em breve: conversar com a equipe pelo Teams, pelo WhatsApp e por outros aplicativos de conversa.</p> : <>
-        {d.problem && PROBLEMA_TEAMS[d.problem] && <p className="warn">{PROBLEMA_TEAMS[d.problem]}</p>}
-        {linhaDoEstado(d.connection, d.problem) && <p className="small">{linhaDoEstado(d.connection, d.problem)}</p>}
+      <header className="row"><BrandLogo kind="teams" name="Teams" size={36} /><strong>{t('conexoes.teams.titulo')}</strong>
+        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? t('conexoes.estado.connected') : t('conexoes.estado.semConexao')}</span> : <span className="badge badge--soon">{t('conexoes.estado.soon')}</span>}</header>
+      <p className="muted">{t('conexoes.teams.intro')}</p>
+      {!d.available ? <p className="hint">{t('conexoes.teams.emBreve')}</p> : <>
+        {problema && <p className="warn">{problema}</p>}
+        {linha && <p className="small">{linha}</p>}
         {(ligados.length > 0 || caidos.length > 0) && (
-          <label className="check"><input type="checkbox" checked={d.enabled} disabled={busy} onChange={(e) => void agir(() => api.post('/api/teams-app/enabled', { enabled: e.target.checked }))} /> Conversar pelo Teams</label>
+          <label className="check"><input type="checkbox" checked={d.enabled} disabled={busy} onChange={(e) => void agir(() => api.post('/api/teams-app/enabled', { enabled: e.target.checked }))} /> {t('conexoes.teams.conversarPeloTeams')}</label>
         )}
         {ligados.length > 0 && (
           <ul className="conn-teams-lista">
             {ligados.map((b) => (
               <li key={b.id}>
-                <div><b>{b.teamsName ?? 'Conta do Teams'}</b> · ligado em {dataCurta(b.linkedAt)}{b.status === 'paused' ? <span className="muted small"> (conversa desligada)</span> : null}</div>
-                <label className="check"><input type="checkbox" checked={b.notices} disabled={busy} onChange={(e) => void agir(() => api.patch(`/api/teams-app/bindings/${b.id}`, { notices: e.target.checked }))} /> Avisar no Teams o que precisa de você</label>
+                <div>{tn('conexoes.teams.ligadoEm', { nome: <b>{b.teamsName ?? t('conexoes.teams.contaDoTeams')}</b>, data: dataCurta(b.linkedAt) })}{b.status === 'paused' ? <span className="muted small"> {t('conexoes.teams.conversaDesligada')}</span> : null}</div>
+                <label className="check"><input type="checkbox" checked={b.notices} disabled={busy} onChange={(e) => void agir(() => api.patch(`/api/teams-app/bindings/${b.id}`, { notices: e.target.checked }))} /> {t('conexoes.teams.avisar')}</label>
                 {desligar === b.id
-                  ? <div className="confirm">Desligar esta conta do Teams? Os pedidos que ainda esperam no serviço são apagados, e o Teams avisa que a conta foi desligada.
-                      <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void agir(async () => { await api.del(`/api/teams-app/bindings/${b.id}`); setDesligar(null); })}>Desligar</button>
-                      <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(null)}>Cancelar</button></div>
-                  : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(b.id)}>Desligar</button>}
+                  ? <div className="confirm">{t('conexoes.teams.desligarPergunta')}
+                      <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void agir(async () => { await api.del(`/api/teams-app/bindings/${b.id}`); setDesligar(null); })}>{t('conexoes.teams.desligar')}</button>
+                      <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(null)}>{t('conexoes.acao.cancelar')}</button></div>
+                  : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(b.id)}>{t('conexoes.teams.desligar')}</button>}
               </li>
             ))}
           </ul>
         )}
         {caidos.map((b) => (
-          <p key={b.id} className="warn">{b.teamsName ?? 'Conta do Teams'}: {DESLIGADA_POR[b.revokedBy ?? ''] ?? 'desligada'}. Para ligar de novo, mande uma mensagem ao app no Teams e digite o código abaixo.{' '}
-            <button className="link link--inline" disabled={busy} onClick={() => void agir(() => api.del(`/api/teams-app/bindings/${b.id}`))}>Tirar da lista</button></p>
+          <p key={b.id} className="warn">{t('conexoes.teams.caida', { nome: b.teamsName ?? t('conexoes.teams.contaDoTeams'), motivo: DESLIGADA_POR[b.revokedBy ?? ''] ? t(DESLIGADA_POR[b.revokedBy ?? '']) : t('conexoes.teams.desligada') })}{' '}
+            <button className="link link--inline" disabled={busy} onClick={() => void agir(() => api.del(`/api/teams-app/bindings/${b.id}`))}>{t('conexoes.teams.tirarDaLista')}</button></p>
         ))}
         {pronto && <p className="ok" role="status">{pronto}</p>}
         {previa ? (() => {
@@ -890,38 +924,38 @@ function TeamsConversa() {
               e.preventDefault();
               void agir(async () => {
                 await api.post('/api/teams-app/confirm', { claimId: previa.claimId, password: senha, ...(pv.exigeEscolha ? { ciente } : {}) });
-                setPronto(`Pronto: a conta do Teams "${previa.teamsName}" está ligada. Escreva no Teams, e o pedido vai para a sua equipe.`);
+                setPronto(t('conexoes.teams.pronto', { nome: previa.teamsName }));
                 setPrevia(null); setSenha(''); setCodigo(''); setCiente(false);
               });
             }}>
               <p><b>{pv.pergunta}</b></p>
-              <p className="hint">{NOME_ESCOLHIDO} {SO_O_SEU_CODIGO}</p>
+              <p className="hint">{nomeEscolhido()} {soOSeuCodigo()}</p>
               {pv.aviso && <p className={pv.forte ? 'error' : 'warn'} role="alert">{pv.aviso}</p>}
-              {pv.exigeEscolha && <label className="check"><input type="checkbox" checked={ciente} disabled={busy} onChange={(e) => setCiente(e.target.checked)} /> {ESCOLHA_CONSCIENTE}</label>}
-              <p className="hint">Quem escreve por essa conta fala com a equipe como você. Confirme com a sua senha.</p>
+              {pv.exigeEscolha && <label className="check"><input type="checkbox" checked={ciente} disabled={busy} onChange={(e) => setCiente(e.target.checked)} /> {escolhaConsciente()}</label>}
+              <p className="hint">{t('conexoes.teams.quemEscreve')}</p>
               <div className="row row--wrap">
-                <input type="password" autoComplete="current-password" required placeholder="Sua senha" aria-label="Sua senha" value={senha} onChange={(e) => setSenha(e.target.value)} />
-                <button className="btn btn--sm btn--primary" disabled={busy || !senha || (pv.exigeEscolha && !ciente)}>{busy ? 'Conferindo…' : 'Ligar'}</button>
-                <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => { const c = previa; setPrevia(null); setSenha(''); setCiente(false); void api.post('/api/teams-app/cancel', { claimId: c.claimId }).catch(() => undefined); }}>Cancelar</button>
+                <input type="password" autoComplete="current-password" required placeholder={t('conexoes.teams.suaSenha')} aria-label={t('conexoes.teams.suaSenha')} value={senha} onChange={(e) => setSenha(e.target.value)} />
+                <button className="btn btn--sm btn--primary" disabled={busy || !senha || (pv.exigeEscolha && !ciente)}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.teams.ligar')}</button>
+                <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => { const c = previa; setPrevia(null); setSenha(''); setCiente(false); void api.post('/api/teams-app/cancel', { claimId: c.claimId }).catch(() => undefined); }}>{t('conexoes.acao.cancelar')}</button>
               </div>
             </form>
           );
         })() : (
           <form onSubmit={(e) => { e.preventDefault(); if (!preparando) void pedirPrevia(); }}>
             <ol className="small conn-passos">
-              <li>No Teams, procure o app <b>Ergon</b> e abra uma conversa.{d.teamsAppUrl && <> <a href={d.teamsAppUrl} target="_blank" rel="noreferrer noopener">Abrir no Teams</a></>}</li>
-              <li>O app mostra um código.</li>
-              <li>Digite o código aqui.</li>
+              <li>{tn('conexoes.teams.passo1', { ergon: <b>Ergon</b> })}{d.teamsAppUrl && <> <a href={d.teamsAppUrl} target="_blank" rel="noreferrer noopener">{t('conexoes.teams.abrirNoTeams')}</a></>}</li>
+              <li>{t('conexoes.teams.passo2')}</li>
+              <li>{t('conexoes.teams.passo3')}</li>
             </ol>
-            <p className="hint">{SO_O_SEU_CODIGO}</p>
+            <p className="hint">{soOSeuCodigo()}</p>
             <div className="row row--wrap">
-              <label className="field">Código<input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="ABCD-EFGH" autoComplete="off" spellCheck={false} maxLength={20} /></label>
-              <button className="btn btn--sm btn--primary" disabled={busy || preparando > 0 || codigo.replace(/[\s-]/g, '').length < 8}>{busy || preparando ? 'Conferindo…' : 'Confirmar'}</button>
+              <label className="field">{t('conexoes.teams.codigo')}<input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder={t('conexoes.teams.codigoExemplo')} autoComplete="off" spellCheck={false} maxLength={20} /></label>
+              <button className="btn btn--sm btn--primary" disabled={busy || preparando > 0 || codigo.replace(/[\s-]/g, '').length < 8}>{busy || preparando ? t('conexoes.acao.conferindo') : t('conexoes.teams.confirmar')}</button>
             </div>
-            {preparando > 0 && <p className="small" role="status">Preparando a conexão com o Teams…</p>}
+            {preparando > 0 && <p className="small" role="status">{t('conexoes.teams.preparando')}</p>}
           </form>
         )}
-        <p className="hint">Só a conversa direta com o app funciona por enquanto (grupos, canais e arquivos ainda não). Com o Ergon fechado, o app responde na hora que recebeu e guarda o pedido, cifrado, por até 7 dias.</p>
+        <p className="hint">{t('conexoes.teams.soDireta')}</p>
       </>}
       {err && <p className="error" role="alert">{err}</p>}
       {d.relay && !d.relay.fromEnv && <EnderecoTeams atual={d.relay.url} reload={st.reload} />}
@@ -931,17 +965,18 @@ function TeamsConversa() {
 
 /** Ajuste da instalação (quem administra o Ergon neste computador): o endereço do serviço do Teams. */
 function EnderecoTeams({ atual, reload }: { atual: string | null; reload: () => void }) {
+  const t = useT();
   const [url, setUrl] = useState(atual ?? '');
   const [err, setErr] = useState<string | null>(null);
   return (
     <details className="small">
-      <summary>Ajuste da instalação</summary>
+      <summary>{t('conexoes.teams.ajusteInstalacao')}</summary>
       <form className="row row--wrap" onSubmit={async (e) => {
         e.preventDefault(); setErr(null);
         try { await api.put('/api/teams-app/relay-url', { url: url.trim() || null }); reload(); } catch (x) { setErr(errMsg(x)); }
       }}>
-        <label className="field">Endereço do serviço do Teams<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" autoComplete="off" spellCheck={false} /></label>
-        <button className="btn btn--sm">Salvar</button>
+        <label className="field">{t('conexoes.teams.endereco')}<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" autoComplete="off" spellCheck={false} /></label>
+        <button className="btn btn--sm">{t('conexoes.acao.salvar')}</button>
       </form>
       {err && <p className="error">{err}</p>}
     </details>

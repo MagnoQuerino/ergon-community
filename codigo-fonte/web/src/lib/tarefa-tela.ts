@@ -1,24 +1,31 @@
 // Textos e regras da tela "Detalhes da tarefa", fora do componente para o teste (tarefa-tela.test.ts) conferir: o
 // histórico em linhas curtas (a resposta inteira só com "ver mais"), "Como foi conferido" em palavras de todo dia, e o
-// que cada arquivo mostra no "Ver" (o resto só baixa). Nada de jargão: a pessoa bate o olho e decide.
+// que cada arquivo mostra no "Ver" (o resto só baixa). Nada de jargão: a pessoa bate o olho e decide. Os textos vêm do
+// dicionário da área "tarefa" (i18n/pt/tarefa.ts e i18n/en/tarefa.ts), no idioma da tela.
+import { t, type Chave, type ValoresDe } from '../i18n/index.ts';
 
-/** Rótulo curto de cada linha do histórico. */
-export const ACTION_LABEL: Record<string, string> = {
-  'task.create': 'Card criado', 'task.update': 'Card alterado', 'task.delegate': 'Pedido a um agente', 'task.completion_reported': 'Conclusão informada (aguarda confirmação)',
-  'source.edited': 'Mensagem de origem editada', 'mirror.task.import': 'Veio do aplicativo de origem', 'mirror.task.update': 'Atualizado pelo aplicativo de origem',
-  'mirror.task.missing': 'Não apareceu na última leitura', 'mirror.push': 'Enviado ao aplicativo', 'mirror.push.error': 'Não foi ao aplicativo', 'link.confirmed': 'Vínculo confirmado', 'link.rejected': 'Vínculo rejeitado', 'link.revert': 'Vínculo revertido',
-  'agent.result.succeeded': 'Entrega', 'agent.result.failed': 'Não conseguiu', 'agent.result.cancelled': 'Trabalho parado',
-  'task.route': 'Encaminhado pela coordenação', 'task.reassign': 'Redistribuído pela coordenação', 'task.handoff': 'Pedido de ajuda',
-  'task.help_result': 'Ajuda recebida', 'task.queue_start': 'Começou a trabalhar', 'review.start': 'Revisão pedida',
-  'review.approved': 'Revisão: entrega razoável', 'review.limit': 'Revisão: limite de rodadas', 'review.stopped': 'Revisão interrompida',
-  'task.result': 'Conferência', 'task.work_state': 'Situação', 'operation.run': 'Análise feita pelo sistema', 'operation.refused': 'Análise recusada',
-  'task.waiting_help': 'Aguardando colegas', 'task.queue': 'Ordem da fila', 'task.requires_approval': 'Aprovação', 'agent.tools': 'Ferramentas do agente',
-  'task.plan': 'Plano da coordenação', 'task.step_done': 'Etapa entregue', 'task.delivery': 'Entrega na conversa', 'task.deleted': 'Card apagado', 'task.cancelled': 'Card cancelado', 'task.help_not_done': 'Ajuda não veio',
-  'task.conexao': 'Sua decisão num cartão', 'task.title': 'Título alterado', 'task.title_kept': 'Título mantido (o seu)', 'task.title_refused': 'Título sugerido não aplicado',
-  'task.persist': 'A equipe tentou de novo', 'task.persist_decision': 'Decisão da equipe', 'task.persist_exhausted': 'A equipe não resolveu: com você',
-  'task.help_step': 'Colega entrou numa etapa', 'task.review_round': 'Nova versão pedida', 'conexao.pessoa': 'Só você resolve',
+/** As chaves da área sem marcador ({nome}): as que uma tabela de rótulos guarda e t() mostra sem valores. */
+export type ChaveSimples = { [K in Extract<Chave, `tarefa.${string}`>]: [keyof ValoresDe<K>] extends [never] ? K : never }[Extract<Chave, `tarefa.${string}`>];
+
+/** Rótulo curto de cada linha do histórico: a chave do dicionário (o texto sai no idioma da tela). */
+export const ACTION_LABEL: Record<string, ChaveSimples> = {
+  'task.create': 'tarefa.acao.cardCriado', 'task.update': 'tarefa.acao.cardAlterado', 'task.delegate': 'tarefa.acao.pedidoAUmAgente', 'task.completion_reported': 'tarefa.acao.conclusaoInformada',
+  'source.edited': 'tarefa.acao.origemEditada', 'mirror.task.import': 'tarefa.acao.veioDoAplicativo', 'mirror.task.update': 'tarefa.acao.atualizadoPeloAplicativo',
+  'mirror.task.missing': 'tarefa.acao.naoApareceu', 'mirror.push': 'tarefa.acao.enviadoAoAplicativo', 'mirror.push.error': 'tarefa.acao.naoFoiAoAplicativo',
+  'link.confirmed': 'tarefa.acao.vinculoConfirmado', 'link.rejected': 'tarefa.acao.vinculoRejeitado', 'link.revert': 'tarefa.acao.vinculoRevertido',
+  'agent.result.succeeded': 'tarefa.acao.entrega', 'agent.result.failed': 'tarefa.acao.naoConseguiu', 'agent.result.cancelled': 'tarefa.acao.trabalhoParado',
+  'task.route': 'tarefa.acao.encaminhado', 'task.reassign': 'tarefa.acao.redistribuido', 'task.handoff': 'tarefa.acao.pedidoDeAjuda',
+  'task.help_result': 'tarefa.acao.ajudaRecebida', 'task.queue_start': 'tarefa.acao.comecouATrabalhar', 'review.start': 'tarefa.acao.revisaoPedida',
+  'review.approved': 'tarefa.acao.revisaoRazoavel', 'review.limit': 'tarefa.acao.revisaoLimite', 'review.stopped': 'tarefa.acao.revisaoInterrompida',
+  'task.result': 'tarefa.acao.conferencia', 'task.work_state': 'tarefa.acao.situacao', 'operation.run': 'tarefa.acao.analiseFeita', 'operation.refused': 'tarefa.acao.analiseRecusada',
+  'task.waiting_help': 'tarefa.acao.aguardandoColegas', 'task.queue': 'tarefa.acao.ordemDaFila', 'task.requires_approval': 'tarefa.acao.aprovacao', 'agent.tools': 'tarefa.acao.ferramentas',
+  'task.plan': 'tarefa.acao.plano', 'task.step_done': 'tarefa.acao.etapaEntregue', 'task.delivery': 'tarefa.acao.entregaNaConversa', 'task.deleted': 'tarefa.acao.cardApagado',
+  'task.cancelled': 'tarefa.acao.cardCancelado', 'task.help_not_done': 'tarefa.acao.ajudaNaoVeio',
+  'task.conexao': 'tarefa.acao.decisaoNumCartao', 'task.title': 'tarefa.acao.tituloAlterado', 'task.title_kept': 'tarefa.acao.tituloMantido', 'task.title_refused': 'tarefa.acao.tituloNaoAplicado',
+  'task.persist': 'tarefa.acao.tentouDeNovo', 'task.persist_decision': 'tarefa.acao.decisaoDaEquipe', 'task.persist_exhausted': 'tarefa.acao.equipeNaoResolveu',
+  'task.help_step': 'tarefa.acao.colegaNumaEtapa', 'task.review_round': 'tarefa.acao.novaVersao', 'conexao.pessoa': 'tarefa.acao.soVoceResolve',
   // a ação numa conta foi direto, sem cartão, pela regra que você aprovou (Conexões › Regras)
-  'task.regra': 'Liberado pela sua regra',
+  'task.regra': 'tarefa.acao.liberadoPelaRegra',
 };
 /** ações cujo resultado (texto) explica o que aconteceu: entram no "ver mais" da linha */
 const SHOW_RESULT = new Set(['task.queue', 'task.route', 'task.reassign', 'task.handoff', 'task.help_result', 'task.result', 'task.work_state', 'operation.run', 'operation.refused', 'task.waiting_help',
@@ -32,7 +39,7 @@ export interface LinhaHistorico { titulo: string; quem: string; resumo: string |
 
 /** linhas de controle ([[...]]) fora do texto que a pessoa lê */
 const semControle = (s: string) => s.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]\s*/g, '').trim();
-const primeira = (s: string, max = 90) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length <= max ? t : `${t.slice(0, max - 1).replace(/\s+\S*$/, '')}…`; };
+const primeira = (s: string, max = 90) => { const x = s.replace(/\s+/g, ' ').trim(); return x.length <= max ? x : `${x.slice(0, max - 1).replace(/\s+\S*$/, '')}…`; };
 
 /**
  * Uma linha do histórico, curta: "Aspásia entregou", "Card criado", "Começou a trabalhar". O texto que explica e a
@@ -42,16 +49,21 @@ export function linhaDoHistorico(e: LogRow, nomeDe: (id: string | null) => strin
   let ev: Record<string, unknown> = {};
   try { ev = e.evidence ? (JSON.parse(e.evidence) as Record<string, unknown>) : {}; } catch { ev = {}; }
   const agente = e.actor_type === 'agent' ? nomeDe(e.actor_id) : null;
-  const quem = agente ?? (e.actor_type === 'user' ? 'você' : e.actor_type === 'connector' ? 'aplicativo' : 'sistema');
+  const quem = agente ?? t(e.actor_type === 'user' ? 'tarefa.nomes.voce' : e.actor_type === 'connector' ? 'tarefa.nomes.aplicativo' : 'tarefa.nomes.sistema');
   const saida = typeof ev.output === 'string' && ev.output.trim() ? semControle(ev.output) : null;
   const pedido = typeof ev.request === 'string' && ev.request.trim() ? ev.request.trim() : null;
   const erro = typeof ev.error === 'string' && ev.error ? ev.error : null;
-  let titulo = ACTION_LABEL[e.action] ?? 'Registro';
-  if (typeof ev.reviewStep === 'string' && ev.reviewStep) titulo = ev.reviewStep === 'questions' ? `${agente ?? revisor ?? 'A revisão'} perguntou` : `${agente ?? 'Quem fez'} respondeu`;
-  else if (ENTREGA.has(e.action)) titulo = `${agente ?? (typeof ev.from === 'string' ? ev.from : 'O agente')} entregou`;
-  else if (e.action === 'agent.result.failed') titulo = `${agente ?? 'O agente'} não conseguiu`;
-  else if (e.action === 'task.queue_start') titulo = agente ? `${agente} começou a trabalhar` : 'Começou a trabalhar';
-  else if (e.action === 'task.work_state' && e.result) titulo = `Situação: ${e.result.split(' — ')[0].toLowerCase()}`;
+  const rotulo = ACTION_LABEL[e.action];
+  let titulo = t(rotulo ?? 'tarefa.historico.registro');
+  if (typeof ev.reviewStep === 'string' && ev.reviewStep) {
+    titulo = ev.reviewStep === 'questions'
+      ? t('tarefa.historico.perguntou', { nome: agente ?? revisor ?? t('tarefa.nomes.aRevisao') })
+      : t('tarefa.historico.respondeu', { nome: agente ?? t('tarefa.nomes.quemFezInicio') });
+  } else if (ENTREGA.has(e.action)) titulo = t('tarefa.historico.entregou', { nome: agente ?? (typeof ev.from === 'string' ? ev.from : t('tarefa.nomes.oAgente')) });
+  else if (e.action === 'agent.result.failed') titulo = t('tarefa.historico.naoConseguiu', { nome: agente ?? t('tarefa.nomes.oAgente') });
+  else if (e.action === 'task.queue_start' && agente) titulo = t('tarefa.historico.comecouATrabalhar', { nome: agente });
+  // a situação vem do servidor ("Em processamento — pegou da fila"): a parte antes do travessão, em minúscula
+  else if (e.action === 'task.work_state' && e.result) titulo = t('tarefa.historico.situacao', { estado: e.result.split(' — ')[0].toLowerCase() });
   const texto = SHOW_RESULT.has(e.action) && e.result && e.action !== 'task.work_state' ? e.result : null;
   const nota = e.action === 'task.work_state' && e.result.includes(' — ') ? e.result.split(' — ').slice(1).join(' — ') : null;
   const detalhe = [texto ?? nota, pedido].filter(Boolean).join('\n\n') || null;
@@ -62,28 +74,40 @@ export function linhaDoHistorico(e: LogRow, nomeDe: (id: string | null) => strin
 // ------------------------------------------------------------------------------------------- Como foi conferido
 
 /** cada ponto da conferência em palavras de todo dia (o servidor guarda o rótulo técnico) */
-const CRITERIO: Record<string, string> = {
-  execucao: 'O trabalho terminou sem erro', modelo: 'Escrito pelo agente com a conta de IA', conteudo: 'A entrega está completa (não é só um resumo)',
-  alegacao: 'Não é só um “pronto”', pendencias: 'Nada ficou pendente', conexao: 'Feito na conta, com a confirmação do aplicativo',
-  entregavel: 'Documento salvo no card', operacao: 'Números calculados pelo sistema a partir do arquivo', confirmacao: 'A sua confirmação de que foi feito',
-  humano: 'Aprovado por você', declaracao: 'O agente não disse que deixou de fazer', entrada: 'O arquivo necessário está no card',
+const CRITERIO: Record<string, ChaveSimples> = {
+  execucao: 'tarefa.criterio.execucao', modelo: 'tarefa.criterio.modelo', conteudo: 'tarefa.criterio.conteudo',
+  alegacao: 'tarefa.criterio.alegacao', pendencias: 'tarefa.criterio.pendencias', conexao: 'tarefa.criterio.conexao',
+  entregavel: 'tarefa.criterio.entregavel', operacao: 'tarefa.criterio.operacao', confirmacao: 'tarefa.criterio.confirmacao',
+  humano: 'tarefa.criterio.humano', declaracao: 'tarefa.criterio.declaracao', entrada: 'tarefa.criterio.entrada',
 };
 /** detalhe que só ajuda quando o ponto não passou (o nome do modelo, a contagem de palavras) */
 const DETALHE_SO_SE_FALHOU = new Set(['modelo', 'conteudo', 'execucao']);
 
 export function criterioSimples(c: { id: string; label: string; ok: boolean; detail?: string }): { texto: string; detalhe: string | null } {
   const detalhe = c.detail && (!c.ok || !DETALHE_SO_SE_FALHOU.has(c.id)) ? c.detail : null;
-  return { texto: CRITERIO[c.id] ?? c.label, detalhe };
+  const chave = CRITERIO[c.id];
+  return { texto: chave ? t(chave) : c.label, detalhe };
 }
+
+/** A situação da conferência (o estado que o servidor guarda), com a primeira letra maiúscula. */
+const ESTADO_DA_CONFERENCIA: Record<string, ChaveSimples> = {
+  validado: 'tarefa.conferido.estado.validado', reprovado: 'tarefa.conferido.estado.reprovado', aguardando_aprovacao: 'tarefa.conferido.estado.aguardando_aprovacao',
+  aguardando_info: 'tarefa.conferido.estado.aguardando_info', sem_confirmacao: 'tarefa.conferido.estado.sem_confirmacao', falha: 'tarefa.conferido.estado.falha',
+  confirmado_humano: 'tarefa.conferido.estado.confirmado_humano', devolvido: 'tarefa.conferido.estado.devolvido', descartado: 'tarefa.conferido.estado.descartado',
+};
+export const estadoDaConferencia = (estado: string): string => t(ESTADO_DA_CONFERENCIA[estado] ?? 'tarefa.conferido.estado.conferido');
 
 /** A justificativa da conferência sem o jargão ("Concluída com evidência: 5 critérios atendidos"). */
 export function justificativaSimples(j: string | null | undefined): string {
-  const t = (j ?? '').trim();
-  if (/^Concluída com evidência: \d+ critérios atendidos/.test(t)) {
-    const n = /(\d+) entregável\(is\)/.exec(t)?.[1];
-    return `Tudo o que a conferência pede foi atendido${n ? `; ${n === '1' ? 'o arquivo entregue está' : `os ${n} arquivos entregues estão`} no card` : ''}.`;
+  const s = (j ?? '').trim();
+  // o servidor escreve a justificativa em português: estes padrões só a reconhecem
+  if (/^Concluída com evidência: \d+ critérios atendidos/.test(s)) {
+    const n = /(\d+) entregável\(is\)/.exec(s)?.[1];
+    return n ? t('tarefa.conferido.tudoAtendidoArquivos', { n: Number(n) }) : t('tarefa.conferido.tudoAtendido');
   }
-  return t.replace(/^Concluída com evidência:\s*/, 'Feito, com a confirmação: ').replace(/\bentregável\(is\)/g, 'arquivo(s)');
+  const resto = s.replace(/\bentregável\(is\)/g, 'arquivo(s)'); // i18n-ok: troca a palavra dentro do texto em português que o servidor manda
+  const prefixo = /^Concluída com evidência:\s*/;
+  return prefixo.test(resto) ? t('tarefa.conferido.feitoComConfirmacao', { resto: resto.replace(prefixo, '') }) : resto;
 }
 
 // ------------------------------------------------------------------------------------------- Ver um arquivo
@@ -106,5 +130,6 @@ export function previaDe(filename: string, mime: string): Previa {
 }
 
 /** Situação → cor da etiqueta e da faixa (o servidor manda o tom, resumo-tarefa.ts). */
+// i18n-ok: os tons são nomes de classe (tdet__sit--feito), não texto de tela
 export const TOM: Record<string, string> = { decidir: 'decidir', precisa: 'precisa', trabalhando: 'trabalhando', fila: 'fila', feito: 'feito', falhou: 'falhou' };
-export const tomDe = (t: string | null | undefined): string => TOM[t ?? ''] ?? 'fila';
+export const tomDe = (x: string | null | undefined): string => TOM[x ?? ''] ?? 'fila';

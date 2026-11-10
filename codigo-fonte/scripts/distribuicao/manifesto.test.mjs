@@ -130,6 +130,36 @@ test('ordem das versões, inclusive pré-versões', () => {
   assert.equal(compararVersoes('1.0.1', '1.0.1'), 0);
 });
 
+test('atualização de segurança em qualquer idioma das notas: o campo explícito e a linha em inglês', () => {
+  const motivo = 'fecha uma falha no acesso ao cofre do motor.';
+  // o campo explícito (comentário, que a página e o aplicativo não mostram), em qualquer idioma das notas
+  assert.deepEqual(seguranca(`## 1.1.0\n<!-- seguranca: ${motivo} -->\n- New features.`), { obrigatoria: true, motivo });
+  assert.deepEqual(seguranca(`## 1.1.0\n<!-- security: closes a flaw in the engine vault -->\n- New features.`), { obrigatoria: true, motivo: 'closes a flaw in the engine vault' });
+  assert.deepEqual(seguranca(`<!--\n  segurança:\n  ${motivo}\n-->`), { obrigatoria: true, motivo }, 'o comentário pode ocupar várias linhas');
+  // a linha das notas em inglês
+  assert.deepEqual(seguranca('## 1.1.0\n- **Security (required):** closes a flaw in the engine vault.\n- Other improvements.'), { obrigatoria: true, motivo: 'closes a flaw in the engine vault.' });
+  assert.deepEqual(seguranca('- Security (mandatory): closes a flaw in the engine vault.'), { obrigatoria: true, motivo: 'closes a flaw in the engine vault.' });
+  // o português de sempre continua
+  assert.deepEqual(seguranca(`- **Segurança (obrigatória):** ${motivo}`), { obrigatoria: true, motivo });
+  // nada disso: atualização comum; motivo curto não vale
+  assert.equal(seguranca('## 1.1.0\n- Security improvements in the login.'), null, '"security" solto não é obrigatório');
+  assert.equal(seguranca('<!-- security: curto -->'), null);
+  assert.equal(seguranca('<!-- outra marca: qualquer coisa longa o bastante -->'), null);
+  // o piso carregado adiante também enxerga as versões marcadas em inglês
+  assert.equal(segurancaMinima([{ tag_name: 'v1.1.0-rc.26', body: '<!-- security: closes a flaw in the engine vault -->' }, { tag_name: 'v1.1.0-rc.27', body: '- Improvements.' }], '1.1.0-rc.27'), '1.1.0-rc.26');
+});
+
+test('o exemplo do campo nas notas (entre crases, num bloco de código, no meio da frase) não marca a versão como obrigatória', () => {
+  const exemplo = '<!-- security: reason for the update -->';
+  assert.equal(seguranca(`## 1.1.0\n- New: mark a release as required with \`${exemplo}\` in the notes.`), null, 'entre crases');
+  assert.equal(seguranca(`## 1.1.0\n- Como marcar:\n\n\`\`\`\n${exemplo}\n\`\`\`\n- Outras melhorias.`), null, 'bloco de código');
+  assert.equal(seguranca('## 1.1.0\n```md\n- **Security (required):** closes a flaw in the engine vault.\n```'), null, 'a linha dentro do bloco também não');
+  assert.equal(seguranca(`- Use ${exemplo} para marcar.`), null, 'no meio da frase');
+  assert.equal(segurancaMinima([{ tag_name: 'v1.1.0-rc.26', body: `- Novo: o campo \`${exemplo}\`.` }, { tag_name: 'v1.1.0-rc.27', body: '- Improvements.' }], '1.1.0-rc.27'), null, 'nem o piso');
+  // numa linha só dele, depois de um exemplo entre crases, continua valendo
+  assert.deepEqual(seguranca(`- O campo \`${exemplo}\` é novo.\n\n  <!-- security: closes a flaw in the engine vault -->\n`), { obrigatoria: true, motivo: 'closes a flaw in the engine vault' });
+});
+
 test('atualização de segurança: lida das novidades, assinada no manifesto; forma errada recusada', () => {
   assert.deepEqual(seguranca('## 1.0.3\n- **Segurança (obrigatória):** fecha uma falha no acesso ao cofre do motor.\n- Outras melhorias.'),
     { obrigatoria: true, motivo: 'fecha uma falha no acesso ao cofre do motor.' });

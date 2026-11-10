@@ -26,7 +26,8 @@ traz uma equipe pronta. Nunca inclua script, HTML, SVG, programa, senha, chave d
 
 - ZIP com `manifest.json` na raiz e `data/package.json`; imagens opcionais em `preview/` (PNG ou WebP reais, até 1024 px).
 - Nomes de arquivo: minúsculas, números, `.`, `_`, `-`; sem acento, espaço, `..` ou `\`. Nada fora do manifesto.
-- `manifest_version: 2`; `package_id` = `comunidade.<criador>.<nome>` (minúsculas, números, hífen); `version` `1.0.0`;
+- `manifest_version: 2` (o 3 é só dos pacotes assinados pela loja oficial e não instala nas versões anteriores);
+  `package_id` = `comunidade.<criador>.<nome>` (minúsculas, números, hífen); `version` `1.0.0`;
   `title` ≤ 80; `summary` ≤ 600, sem HTML; `ergon: { "min": "1.0.0" }`; `license` (ex.: `CC-BY-4.0`);
   `creator_id`; `kind`; `components` com `path`, `sha256` (hex), `size` (bytes) e `type`
   (`application/json`, `image/png` ou `image/webp`) de cada arquivo; `preview` opcional (caminhos das imagens).

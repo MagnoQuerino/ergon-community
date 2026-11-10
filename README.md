@@ -28,6 +28,7 @@ conta, anote a frase de recuperação e conecte uma conta de IA. Mais detalhes: 
 
 Por enquanto pelo pacote com contêineres, com o [Podman](https://podman.io) instalado e ligado: baixe esta pasta (botão
 verde **Code › Download ZIP**), descompacte e, num terminal, dentro da pasta: `bash "Instalar Ergon no Linux e macOS.sh"`.
+Depois, o comando `ergon` funciona em qualquer terminal: `ergon help` mostra o que ele faz (`start`, `stop`, `update`…).
 Passo a passo e o que fazer se esquecer a senha: [docs/INSTALAR.md](docs/INSTALAR.md).
 
 Todas as versões, com as somas SHA-256 para conferir os arquivos, ficam na

@@ -7,24 +7,26 @@ import { RecoveryReveal } from '../components/AuthFlow.tsx';
 import { Loading } from '../brand/Brand.tsx';
 import { BaixarMeusDados } from '../components/BaixarMeusDados.tsx';
 import { TEXTO_ANTES_DE_EXCLUIR, TEXTO_EXCLUIR_CONTA } from '../lib/textos-tela.ts';
+import { fmtDataHora, t as tr, tn, useT } from '../i18n/index.ts';
 
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+const when = (iso: string | null) => (iso ? fmtDataHora(iso) : '—');
 /** "Chrome · Windows" a partir do user agent (só para reconhecer a sessão). */
 function device(ua: string | null): string {
   const s = ua ?? '';
-  const b = /Edg\//.test(s) ? 'Edge' : /Chrome\//.test(s) ? 'Chrome' : /Firefox\//.test(s) ? 'Firefox' : /Safari\//.test(s) ? 'Safari' : 'Navegador';
+  const b = /Edg\//.test(s) ? 'Edge' : /Chrome\//.test(s) ? 'Chrome' : /Firefox\//.test(s) ? 'Firefox' : /Safari\//.test(s) ? 'Safari' : tr('conta.seg.navegador');
   const o = /Windows/.test(s) ? 'Windows' : /Mac OS X/.test(s) ? 'macOS' : /Android/.test(s) ? 'Android' : /iPhone|iPad/.test(s) ? 'iOS' : /Linux/.test(s) ? 'Linux' : '';
   return o ? `${b} · ${o}` : b;
 }
 
 /** Botão liga/desliga do destrancar sozinho (precisa do ajudante do computador para ligar). */
 function AutoUnlockSwitch({ s, busy, onOn, onOff }: { s: SecurityStatus; busy: boolean; onOn: () => void; onOff: () => void }) {
+  const t = useT();
   const on = s.autoUnlock.length > 0;
   const pending = !on && s.autoUnlockPending;
   return (
-    <button role="switch" aria-checked={on || pending} aria-label="Destrancar sozinho ao ligar o computador" className={`switch ${on || pending ? 'switch--on' : ''}`}
+    <button role="switch" aria-checked={on || pending} aria-label={t('conta.seg.destrancarSozinho')} className={`switch ${on || pending ? 'switch--on' : ''}`}
       disabled={busy || pending || (!on && !s.agentConfigured)} onClick={on ? onOff : onOn}>
-      <span className="switch__knob" /><span className="switch__txt">{on ? 'Ligado' : pending ? 'Ligando…' : 'Desligado'}</span>
+      <span className="switch__knob" /><span className="switch__txt">{on ? t('conta.estado.ligado') : pending ? t('conta.estado.ligando') : t('conta.estado.desligado')}</span>
     </button>
   );
 }
@@ -34,27 +36,28 @@ function AutoUnlockSwitch({ s, busy, onOn, onOff }: { s: SecurityStatus; busy: b
  * passa a ser a do computador. Desligar mostra antes um aviso curto dos riscos.
  */
 function LockCard({ s, busy, onSet }: { s: SecurityStatus; busy: boolean; onSet: (on: boolean) => void }) {
+  const t = useT();
   const [ask, setAsk] = useState(false);
   const on = s.lock.enabled;
   return (
     <section className="card">
       <div className="row sec-toggle">
-        <h3>Trancamento</h3>
-        <button role="switch" aria-checked={on} aria-label="Trancar o Ergon ao reiniciar" className={`switch ${on ? 'switch--on' : ''}`}
+        <h3>{t('conta.seg.trancamento')}</h3>
+        <button role="switch" aria-checked={on} aria-label={t('conta.seg.trancamentoAria')} className={`switch ${on ? 'switch--on' : ''}`}
           disabled={busy || ask} onClick={() => (on ? setAsk(true) : onSet(true))}>
-          <span className="switch__knob" /><span className="switch__txt">{on ? 'Ligado' : 'Desligado'}</span>
+          <span className="switch__knob" /><span className="switch__txt">{on ? t('conta.estado.ligado') : t('conta.estado.desligado')}</span>
         </button>
       </div>
       {on
-        ? <p>Ligado: ao reiniciar, o Ergon pede a senha (ou a frase) para abrir, e a sessão vale {s.lock.sessionDays} dias. Os agentes esperam até você destrancar.</p>
-        : <p>Desligado: o Ergon abre sozinho ao reiniciar e você não digita senha ({s.lock.sessionDays} dias sem pedir, renovados com o uso). Quem protege o acesso é o computador.</p>}
+        ? <p>{t('conta.seg.trancamentoLigadoTexto', { n: s.lock.sessionDays })}</p>
+        : <p>{t('conta.seg.trancamentoDesligadoTexto', { n: s.lock.sessionDays })}</p>}
       {ask && (
-        <div className="lock-warn" role="alertdialog" aria-label="Desligar o trancamento">
-          <p><b>Antes de desligar:</b> quem usar este computador — ou copiar os arquivos do Ergon — abre o Ergon e lê tudo, sem senha. Os dados continuam cifrados no disco, mas a chave fica ao lado deles. Use só se o computador é seu, tem senha ou biometria e a criptografia do disco (BitLocker, FileVault) ligada, e não fica desbloqueado sem você.</p>
-          <p>Mais seguro e também sem senha: deixe o trancamento ligado e use <b>Destrancar sozinho</b> (abaixo) — a chave fica no cofre do sistema, presa à sua conta do computador, e não junto dos dados.</p>
+        <div className="lock-warn" role="alertdialog" aria-label={t('conta.seg.desligarAria')}>
+          <p>{tn('conta.seg.desligarAviso', { antes: <b>{t('conta.seg.antesDeDesligar')}</b> })}</p>
+          <p>{tn('conta.seg.desligarAlternativa', { destrancar: <b>{t('conta.seg.destrancarSozinhoCurto')}</b> })}</p>
           <div className="row">
-            <button className="btn btn--primary" disabled={busy} onClick={() => { setAsk(false); onSet(false); }}>Desligar mesmo assim</button>
-            <button className="btn btn--ghost" disabled={busy} onClick={() => setAsk(false)}>Manter ligado</button>
+            <button className="btn btn--primary" disabled={busy} onClick={() => { setAsk(false); onSet(false); }}>{t('conta.seg.desligarMesmoAssim')}</button>
+            <button className="btn btn--ghost" disabled={busy} onClick={() => setAsk(false)}>{t('conta.seg.manterLigado')}</button>
           </div>
         </div>
       )}
@@ -64,6 +67,7 @@ function LockCard({ s, busy, onSet }: { s: SecurityStatus; busy: boolean; onSet:
 
 /** Configurações › Segurança: senha, trava, frase, autenticador, passkeys, destrancar sozinho e sessões. */
 export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => void }) {
+  const t = useT();
   const st = useResource<SecurityStatus>('/api/security/status', []);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
@@ -79,8 +83,8 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
   // ligando: o ajudante do computador busca a chave em poucos segundos; a tela acompanha
   useEffect(() => {
     if (!s?.autoUnlockPending) return;
-    const t = window.setInterval(() => st.reload(), 2000);
-    return () => clearInterval(t);
+    const timer = window.setInterval(() => st.reload(), 2000);
+    return () => clearInterval(timer);
   }, [s?.autoUnlockPending]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const act = async (label: string, fn: () => Promise<unknown>, ok?: string) => {
@@ -95,133 +99,131 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
 
       <section className="card">
-        <h3>Proteção dos dados</h3>
+        <h3>{t('conta.seg.protecao')}</h3>
         <ul className="sec-list">
-          <li><span className="badge badge--ok">cifrado</span> Banco de dados inteiro (SQLCipher, AES-256)</li>
-          <li><span className="badge badge--ok">cifrado</span> Conversas, tarefas, instruções, arquivos e chaves das conexões (AES-256-GCM, chave própria por workspace)</li>
-          {isolated && <li><span className="badge badge--ok">só seu</span> {s.people!.count} pessoas neste computador: a chave dos seus dados é sua (abre com a sua senha ou frase); quem administra o Ergon não lê nada do que é seu</li>}
+          <li><span className="badge badge--ok">{t('conta.seg.cifrado')}</span> {t('conta.seg.cifradoBanco')}</li>
+          <li><span className="badge badge--ok">{t('conta.seg.cifrado')}</span> {t('conta.seg.cifradoConteudo')}</li>
+          {isolated && <li><span className="badge badge--ok">{t('conta.seg.soSeu')}</span> {t('conta.seg.isolado', { n: s.people!.count })}</li>}
           {s.motorVault
-            ? <li><span className="badge badge--ok">cifrado</span> Dados da equipe de IA: contas conectadas, histórico e memória (cofre cifrado)</li>
-            : <li><span className="badge">sem equipe de IA</span> Equipe de IA desligada nesta instalação (nada a cifrar)</li>}
+            ? <li><span className="badge badge--ok">{t('conta.seg.cifrado')}</span> {t('conta.seg.cifradoEquipe')}</li>
+            : <li><span className="badge">{t('conta.seg.semEquipe')}</span> {t('conta.seg.semEquipeTexto')}</li>}
         </ul>
-        <p className="hint">{s.lock.enabled
-          ? 'A chave mestra só existe na memória enquanto o Ergon está aberto. Ao reiniciar, é preciso a senha (ou a frase, ou o destrancar sozinho) para abrir.'
-          : 'Sem trancamento, a chave para abrir fica guardada ao lado dos dados: protege contra quem só levar o banco, não contra quem usar este computador.'} Recomendado também: criptografia do disco do sistema (BitLocker no Windows, FileVault no macOS, LUKS no Linux) — protege o resto do computador.</p>
+        <p className="hint">{s.lock.enabled ? t('conta.seg.chaveNaMemoria') : t('conta.seg.chaveAoLado')} {t('conta.seg.discoRecomendado')}</p>
       </section>
 
       {admin && s.mode === 'local' && s.protected && (
         <LockCard s={s} busy={busy === 'lock'} onSet={(on) => void act('lock', () => api.put('/api/security/lock', { enabled: on }),
-          on ? 'Trancamento ligado. Ao reiniciar, o Ergon vai pedir a senha.' : 'Trancamento desligado. O Ergon abre sozinho; mantenha este computador protegido.')} />
+          on ? t('conta.seg.trancamentoLigadoOk') : t('conta.seg.trancamentoDesligadoOk'))} />
       )}
 
       <section className="card">
-        <h3>Senha</h3>
+        <h3>{t('conta.senha.rotulo')}</h3>
         <form className="row row--wrap" onSubmit={(e) => {
           e.preventDefault();
-          if (pw.next !== pw.confirm) return setMsg({ kind: 'error', text: 'As senhas novas não são iguais.' });
-          void act('senha', async () => { await api.post('/api/security/password', { current: pw.current, next: pw.next }); setPw({ current: '', next: '', confirm: '' }); }, 'Senha alterada. As outras sessões foram encerradas.');
+          if (pw.next !== pw.confirm) return setMsg({ kind: 'error', text: t('conta.senha.novasDiferentes') });
+          void act('senha', async () => { await api.post('/api/security/password', { current: pw.current, next: pw.next }); setPw({ current: '', next: '', confirm: '' }); }, t('conta.seg.senhaAlterada'));
         }}>
-          <label className="field">Senha atual<input required type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></label>
-          <label className="field">Senha nova<input required type="password" autoComplete="new-password" minLength={s.minPassword} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></label>
-          <label className="field">Repita<input required type="password" autoComplete="new-password" minLength={s.minPassword} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} /></label>
-          <button className="btn btn--primary" disabled={busy === 'senha'}>{busy === 'senha' ? 'Salvando…' : 'Trocar senha'}</button>
+          <label className="field">{t('conta.senha.atual')}<input required type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></label>
+          <label className="field">{t('conta.senha.nova')}<input required type="password" autoComplete="new-password" minLength={s.minPassword} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></label>
+          <label className="field">{t('conta.seg.repita')}<input required type="password" autoComplete="new-password" minLength={s.minPassword} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} /></label>
+          <button className="btn btn--primary" disabled={busy === 'senha'}>{busy === 'senha' ? t('conta.acao.salvando') : t('conta.seg.trocarSenha')}</button>
         </form>
-        <p className="hint">Mínimo de {s.minPassword} caracteres; uma frase de 3 ou 4 palavras é forte e fácil de lembrar. A senha nova também abre os dados depois de reiniciar.</p>
+        <p className="hint">{t('conta.seg.senhaDica', { min: s.minPassword })}</p>
       </section>
 
       <IdleLock minutes={s.idleMinutes} owner busy={busy === 'idle'} onSave={(m, label) => void act('idle', () => api.put('/api/security/idle', { minutes: m }), label)} />
 
       <section className="card">
-        {!rec && <h3>{isolated ? 'A sua frase de recuperação' : 'Frase de recuperação'}</h3>}
+        {!rec && <h3>{isolated ? t('conta.seg.suaFrase') : t('conta.frase.titulo')}</h3>}
         {rec ? (
-          <div className="sec-reveal"><RecoveryReveal r={rec} onDone={() => { setRec(null); setMsg({ kind: 'ok', text: 'Frase confirmada. Uma frase anterior, se havia, deixou de valer.' }); st.reload(); onChanged(); }} onCancel={() => setRec(null)} /></div>
+          <div className="sec-reveal"><RecoveryReveal r={rec} onDone={() => { setRec(null); setMsg({ kind: 'ok', text: t('conta.seg.fraseConfirmada') }); st.reload(); onChanged(); }} onCancel={() => setRec(null)} /></div>
         ) : (
           <>
-            <p>{s.recovery ? <><span className="badge badge--ok">confirmada</span> A frase de 24 palavras abre os dados se a senha for esquecida.</> : <><span className="badge badge--warn">sem frase</span> Ainda não há uma frase confirmada: se a senha for esquecida, os dados não abrem.</>}</p>
-            <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('frase', async () => setRec(await api.post('/api/security/recovery/new')))}>{s.recovery ? 'Gerar frase nova' : 'Gerar a frase'}</button>
-            <p className="hint">Gerar uma nova invalida a anterior assim que você confirmar 3 palavras dela.</p>
+            <p>{s.recovery ? <><span className="badge badge--ok">{t('conta.seg.confirmada')}</span> {t('conta.seg.comFrase')}</> : <><span className="badge badge--warn">{t('conta.seg.semFrase')}</span> {t('conta.seg.semFraseTexto')}</>}</p>
+            <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('frase', async () => setRec(await api.post('/api/security/recovery/new')))}>{s.recovery ? t('conta.seg.gerarNova') : t('conta.seg.gerar')}</button>
+            <p className="hint">{t('conta.seg.gerarDica')}</p>
           </>
         )}
       </section>
 
       <section className="card">
-        <h3>Autenticador (código de 6 dígitos)</h3>
+        <h3>{t('conta.seg.autenticador')}</h3>
         {s.totp ? (
           <>
-            <p><span className="badge badge--ok">ligado</span> Pedido no login e ao destrancar, junto com a senha.</p>
-            <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('totp-off', () => api.del('/api/security/totp'), 'Autenticador desligado.')}>Desligar</button>
+            <p><span className="badge badge--ok">{t('conta.seg.ligadoSelo')}</span> {t('conta.seg.totpLigadoTexto')}</p>
+            <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('totp-off', () => api.del('/api/security/totp'), t('conta.seg.totpDesligadoOk'))}>{t('conta.seg.desligar')}</button>
           </>
         ) : totp ? (
-          <form className="totp" onSubmit={(e) => { e.preventDefault(); void act('totp', async () => { await api.post('/api/security/totp/confirm', { code: totp.code.replace(/\s/g, '') }); setTotp(null); }, 'Autenticador ligado.'); }}>
-            <img src={totp.qr} alt="QR code para o aplicativo autenticador" width={180} height={180} />
+          <form className="totp" onSubmit={(e) => { e.preventDefault(); void act('totp', async () => { await api.post('/api/security/totp/confirm', { code: totp.code.replace(/\s/g, '') }); setTotp(null); }, t('conta.seg.totpLigadoOk')); }}>
+            <img src={totp.qr} alt={t('conta.seg.qrAlt')} width={180} height={180} />
             <div>
-              <p>1. No aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…), leia o QR code.</p>
-              <p className="muted small">Sem câmera? Digite a chave: <code className="totp__secret">{totp.secret.replace(/(.{4})/g, '$1 ').trim()}</code></p>
-              <label className="field">2. Digite o código que aparece<input required autoFocus inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" value={totp.code} onChange={(e) => setTotp({ ...totp, code: e.target.value })} /></label>
-              <div className="row"><button className="btn btn--primary btn--sm" disabled={!!busy}>Ligar</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => setTotp(null)}>Cancelar</button></div>
+              <p>{t('conta.seg.totpPasso1')}</p>
+              <p className="muted small">{tn('conta.seg.semCamera', { chave: <code className="totp__secret">{totp.secret.replace(/(.{4})/g, '$1 ').trim()}</code> })}</p>
+              <label className="field">{t('conta.seg.totpPasso2')}<input required autoFocus inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" value={totp.code} onChange={(e) => setTotp({ ...totp, code: e.target.value })} /></label>
+              <div className="row"><button className="btn btn--primary btn--sm" disabled={!!busy}>{t('conta.seg.ligar')}</button><button type="button" className="btn btn--ghost btn--sm" onClick={() => setTotp(null)}>{t('conta.acao.cancelar')}</button></div>
             </div>
           </form>
         ) : (
           <>
-            <p className="muted">Opcional: um código do aplicativo autenticador, além da senha, para entrar.</p>
-            <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('totp-start', async () => { const r = await api.post<{ secret: string; qr: string }>('/api/security/totp/start'); setTotp({ secret: r.secret, qr: r.qr, code: '' }); })}>Configurar</button>
+            <p className="muted">{t('conta.seg.totpOpcional')}</p>
+            <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('totp-start', async () => { const r = await api.post<{ secret: string; qr: string }>('/api/security/totp/start'); setTotp({ secret: r.secret, qr: r.qr, code: '' }); })}>{t('conta.seg.configurar')}</button>
           </>
         )}
       </section>
 
       <section className="card">
-        <h3>Passkeys</h3>
-        <p className="muted small">Entrar e destrancar com a digital, o rosto ou o PIN do aparelho (Windows Hello, Touch ID, celular). A chave privada nunca sai do aparelho.</p>
+        <h3>{t('conta.seg.passkeys')}</h3>
+        <p className="muted small">{t('conta.seg.passkeysTexto')}</p>
         {s.passkeys.length > 0 && (
           <ul className="sec-rows">
             {s.passkeys.map((p) => (
-              <li key={p.id}><b>{p.name}</b><span className="muted small">criada {when(p.created_at)} · último uso {when(p.last_used_at)}</span>
-                <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('pk-del', () => api.del(`/api/security/passkeys/${p.id}`), 'Passkey removida.')}>Remover</button></li>
+              <li key={p.id}><b>{p.name}</b><span className="muted small">{t('conta.seg.passkeyLinha', { criada: when(p.created_at), uso: when(p.last_used_at) })}</span>
+                <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('pk-del', () => api.del(`/api/security/passkeys/${p.id}`), t('conta.seg.passkeyRemovida'))}>{t('conta.acao.remover')}</button></li>
             ))}
           </ul>
         )}
         {here ? (
-          <form className="row row--wrap" onSubmit={(e) => { e.preventDefault(); void act('pk', async () => { await passkeyRegister(pkName.trim() || 'Este computador'); setPkName(''); }, 'Passkey cadastrada.'); }}>
-            <label className="field">Nome (para reconhecer depois)<input value={pkName} maxLength={60} placeholder="Ex.: Notebook, Celular" onChange={(e) => setPkName(e.target.value)} /></label>
-            <button className="btn btn--primary" disabled={!!busy}>{busy === 'pk' ? 'Esperando o aparelho…' : 'Adicionar passkey'}</button>
+          <form className="row row--wrap" onSubmit={(e) => { e.preventDefault(); void act('pk', async () => { await passkeyRegister(pkName.trim() || t('conta.seg.passkeyNomePadrao')); setPkName(''); }, t('conta.seg.passkeyCadastrada')); }}>
+            <label className="field">{t('conta.seg.passkeyNome')}<input value={pkName} maxLength={60} placeholder={t('conta.seg.passkeyNomeExemplo')} onChange={(e) => setPkName(e.target.value)} /></label>
+            <button className="btn btn--primary" disabled={!!busy}>{busy === 'pk' ? t('conta.seg.esperandoAparelho') : t('conta.seg.adicionarPasskey')}</button>
           </form>
-        ) : <p className="hint warn">Passkeys só funcionam abrindo o Ergon por <a href={s.publicUrl}>{s.publicUrl}</a>.</p>}
+        ) : <p className="hint warn">{tn('conta.seg.passkeysSoPor', { endereco: <a href={s.publicUrl}>{s.publicUrl}</a> })}</p>}
       </section>
 
       {s.mode === 'local' && (s.lock.enabled || isolated) && (
         <section className="card">
           <div className="row sec-toggle">
-            <h3>{isolated ? 'Abrir os meus dados sozinho ao ligar o computador' : 'Destrancar sozinho ao ligar o computador'}</h3>
+            <h3>{isolated ? t('conta.seg.abrirMeusDadosSozinho') : t('conta.seg.destrancarSozinho')}</h3>
             <AutoUnlockSwitch s={s} busy={!!busy} onOn={() => void act('auto-on', () => api.post('/api/security/auto-unlock'))}
-              onOff={() => void act('auto-off', () => api.del('/api/security/auto-unlock'), 'Desligado. Depois de reiniciar, o Ergon vai pedir a senha.')} />
+              onOff={() => void act('auto-off', () => api.del('/api/security/auto-unlock'), t('conta.seg.autoDesligadoOk'))} />
           </div>
           {s.autoUnlock.length
-            ? <p>Ligado em <b>{s.autoUnlock[0].label || 'este computador'}</b> desde {when(s.autoUnlock[0].createdAt)}. Depois de reiniciar, o Ergon destranca sozinho e os agentes voltam ao trabalho sem esperar você.</p>
-            : s.autoUnlockPending ? <p className="muted">Ligando… {s.agent ? 'o ajudante deste computador está guardando a chave.' : 'esperando o ajudante deste computador (ele começa ao entrar no computador).'}</p>
-            : <p>Desligado: depois de reiniciar, o Ergon pede a senha, e os agentes esperam até você digitar.</p>}
-          {!s.autoUnlock.length && !s.agentConfigured && <p className="hint warn">Esta instalação ainda não tem o ajudante do computador (ele vem com o instalador do Ergon), então o botão fica indisponível.</p>}
-          <p className="hint">A chave fica no cofre do próprio sistema (proteção de dados do Windows, Chaves do macOS ou o chaveiro do Linux), presa à sua conta do computador: quem entrar nela abre o Ergon sem a senha. Recomendado se o computador é só seu e tem senha, PIN ou biometria.</p>
-          {isolated && <p className="hint warn">Várias pessoas usam este computador: ligue só se a sua conta do Windows (ou do macOS/Linux) é só sua. Se todos entram na mesma conta do computador, quem usar essa conta abre os seus dados sem a sua senha.</p>}
+            ? <p>{tn('conta.seg.autoLigadoEm', { onde: <b>{s.autoUnlock[0].label || t('conta.seg.esteComputador')}</b>, desde: when(s.autoUnlock[0].createdAt) })}</p>
+            : s.autoUnlockPending ? <p className="muted">{s.agent ? t('conta.seg.autoLigandoAjudante') : t('conta.seg.autoLigandoEsperando')}</p>
+            : <p>{t('conta.seg.autoDesligadoTexto')}</p>}
+          {!s.autoUnlock.length && !s.agentConfigured && <p className="hint warn">{t('conta.seg.semAjudante')}</p>}
+          <p className="hint">{t('conta.seg.cofreDica')}</p>
+          {isolated && <p className="hint warn">{t('conta.seg.variasPessoas')}</p>}
         </section>
       )}
 
       {!admin && s.mode === 'local' && (
         <section className="card">
-          <h3>Excluir a minha conta</h3>
+          <h3>{t('conta.seg.excluirTitulo')}</h3>
           <p className="muted">{TEXTO_EXCLUIR_CONTA}</p>
           <div className="sec-passo">
             <p><b>1. {TEXTO_ANTES_DE_EXCLUIR}</b></p>
             <BaixarMeusDados />
           </div>
-          <p><b>2. Excluir</b></p>
+          <p><b>{t('conta.seg.excluirPasso')}</b></p>
           {leaving === null
-            ? <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setLeaving('')}>Excluir a minha conta…</button>
+            ? <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setLeaving('')}>{t('conta.seg.excluirComecar')}</button>
             : (
               <form className="lock-warn" onSubmit={(e) => { e.preventDefault(); void act('leave', async () => { await api.del('/api/me/account', { confirm: leaving }); location.hash = ''; location.reload(); }); }}>
-                <label className="field">Digite o seu usuário ({me.user.username}) para confirmar<input required autoFocus value={leaving} onChange={(e) => setLeaving(e.target.value)} /></label>
+                <label className="field">{t('conta.seg.excluirConfirmar', { usuario: me.user.username })}<input required autoFocus value={leaving} onChange={(e) => setLeaving(e.target.value)} /></label>
                 <div className="row">
-                  <button className="btn btn--danger btn--sm" disabled={busy === 'leave' || leaving !== me.user.username}>{busy === 'leave' ? 'Excluindo…' : 'Excluir de vez'}</button>
-                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setLeaving(null)}>Cancelar</button>
+                  <button className="btn btn--danger btn--sm" disabled={busy === 'leave' || leaving !== me.user.username}>{busy === 'leave' ? t('conta.acao.excluindo') : t('conta.acao.excluirDeVez')}</button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setLeaving(null)}>{t('conta.acao.cancelar')}</button>
                 </div>
               </form>
             )}
@@ -229,11 +231,11 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
       )}
 
       <section className="card">
-        <h3>Sessões abertas</h3>
+        <h3>{t('conta.seg.sessoes')}</h3>
         <ul className="sec-rows">
           {s.sessions.map((x) => (
-            <li key={x.id}><b>{device(x.user_agent)}</b><span className="muted small">{x.current ? 'esta sessão · ' : ''}desde {when(x.created_at)} · último uso {when(x.last_seen_at)}</span>
-              {!x.current && <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('sess', () => api.del(`/api/security/sessions/${x.id}`), 'Sessão encerrada.')}>Encerrar</button>}</li>
+            <li key={x.id}><b>{device(x.user_agent)}</b><span className="muted small">{t(x.current ? 'conta.seg.sessaoAtual' : 'conta.seg.sessaoOutra', { desde: when(x.created_at), uso: when(x.last_seen_at) })}</span>
+              {!x.current && <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('sess', () => api.del(`/api/security/sessions/${x.id}`), t('conta.seg.sessaoEncerrada'))}>{t('conta.seg.encerrar')}</button>}</li>
           ))}
         </ul>
       </section>
@@ -246,6 +248,7 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
  * até 24 h). Só mouse e teclado contam; com a tela trancada, os agentes continuam trabalhando.
  */
 function IdleLock({ minutes, owner, busy, onSave }: { minutes: number; owner: boolean; busy: boolean; onSave: (minutes: number, label: string) => void }) {
+  const t = useT();
   const on = minutes > 0;
   const initUnit = minutes > 0 && minutes % 60 === 0 ? 'h' : 'min';
   const [unit, setUnit] = useState<'min' | 'h'>(initUnit);
@@ -253,31 +256,35 @@ function IdleLock({ minutes, owner, busy, onSave }: { minutes: number; owner: bo
   useEffect(() => { if (minutes > 0) { const u = minutes % 60 === 0 ? 'h' : 'min'; setUnit(u); setValue(String(u === 'h' ? minutes / 60 : minutes)); } }, [minutes]);
   const n = Math.round(Number(value.replace(',', '.')) * (unit === 'h' ? 60 : 1));
   const valid = Number.isFinite(n) && n >= 1 && n <= 24 * 60;
-  const text = (m: number) => (m % 60 === 0 ? `${m / 60} h` : m > 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`);
+  const text = (m: number) => (m % 60 === 0 ? t('conta.trava.h', { h: m / 60 }) : m > 60 ? t('conta.trava.hMin', { h: Math.floor(m / 60), min: m % 60 }) : t('conta.trava.min', { min: m }));
   return (
     <section className="card">
       <header className="row">
-        <h3>Trava por inatividade</h3>
-        <button role="switch" aria-checked={on} aria-label="Trancar a tela por inatividade" className={`switch ${on ? 'switch--on' : ''}`} disabled={!owner || busy}
-          onClick={() => onSave(on ? 0 : (valid ? n : 15), on ? 'Trava desligada.' : `Trava ligada: tranca depois de ${text(valid ? n : 15)} sem uso.`)}>
-          <span className="switch__knob" /><span className="switch__txt">{on ? 'Ligada' : 'Desligada'}</span>
+        <h3>{t('conta.trava.titulo')}</h3>
+        <button role="switch" aria-checked={on} aria-label={t('conta.trava.aria')} className={`switch ${on ? 'switch--on' : ''}`} disabled={!owner || busy}
+          onClick={() => onSave(on ? 0 : (valid ? n : 15), on ? t('conta.trava.desligadaOk') : t('conta.trava.ligadaOk', { tempo: text(valid ? n : 15) }))}>
+          <span className="switch__knob" /><span className="switch__txt">{on ? t('conta.trava.ligada') : t('conta.trava.desligada')}</span>
         </button>
       </header>
       {on ? (
         <div className="row row--wrap">
-          <label className="field field--inline">Trancar a tela depois de
-            <input type="number" min={1} max={unit === 'h' ? 24 : 1440} step={unit === 'h' ? 0.5 : 1} value={value} disabled={!owner} onChange={(e) => setValue(e.target.value)} style={{ width: 80 }} />
-            <select value={unit} disabled={!owner} onChange={(e) => setUnit(e.target.value as 'min' | 'h')}>
-              <option value="min">minutos</option><option value="h">horas</option>
-            </select>
-            sem uso</label>
-          <button className="btn btn--sm" disabled={!owner || busy || !valid || n === minutes} onClick={() => onSave(n, `Trava ajustada: ${text(n)} sem uso.`)}>Salvar</button>
-          {!valid && <span className="hint warn">De 1 minuto a 24 horas.</span>}
+          <label className="field field--inline">{tn('conta.trava.depoisDe', {
+            campo: (
+              <>
+                <input type="number" min={1} max={unit === 'h' ? 24 : 1440} step={unit === 'h' ? 0.5 : 1} value={value} disabled={!owner} onChange={(e) => setValue(e.target.value)} style={{ width: 80 }} />
+                <select value={unit} disabled={!owner} onChange={(e) => setUnit(e.target.value as 'min' | 'h')}>
+                  <option value="min">{t('conta.trava.minutos')}</option><option value="h">{t('conta.trava.horas')}</option>
+                </select>
+              </>
+            ),
+          })}</label>
+          <button className="btn btn--sm" disabled={!owner || busy || !valid || n === minutes} onClick={() => onSave(n, t('conta.trava.ajustadaOk', { tempo: text(n) }))}>{t('conta.acao.salvar')}</button>
+          {!valid && <span className="hint warn">{t('conta.trava.limites')}</span>}
         </div>
       ) : (
-        <p className="muted">Desligada: a tela não tranca sozinha. Se o computador fica em lugar com outras pessoas, ligue e escolha depois de quanto tempo sem usar.</p>
+        <p className="muted">{t('conta.trava.desligadaTexto')}</p>
       )}
-      <p className="hint">Só mouse e teclado contam. Com a tela trancada, os agentes continuam trabalhando; nada fica visível até destrancar com a senha.</p>
+      <p className="hint">{t('conta.trava.dica')}</p>
     </section>
   );
 }

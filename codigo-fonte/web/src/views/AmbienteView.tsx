@@ -19,6 +19,8 @@ import { indicadores, type Indicador } from '../lib/barra.ts';
 import { THEMES } from '../iso/theme.ts';
 import { useTheme } from '../lib/theme.ts';
 import { typeOf } from '../../../shared/city.ts';
+import { fmtNumero, tn, useT } from '../i18n/index.ts';
+import { comumDoTipo, nomeDaConstrucao, nomeDoAndar, nomeDoTipo } from '../world/buildings.ts';
 
 // palco e loja carregados à parte, para não pesar o primeiro acesso; o palco já começa a vir junto com os dados da
 // cidade (a cena espera os moradores para montar e, sem isso, só então buscaria o código)
@@ -30,13 +32,8 @@ const StoreDialog = lazy(loadStore);
 // a loja já vem carregada quando a pessoa clica num lote (abrir só mostra, sem esperar)
 if (typeof window !== 'undefined') window.setTimeout(() => { void loadStore().catch(() => undefined); }, 3000);
 
-/** Alexandre Magno passeia pela ágora: não é agente e não conversa — o clique mostra a bio. */
-const FOUNDER_BIO = {
-  name: 'Alexandre Magno',
-  title: 'criador do Ergon · aposentado',
-  text: 'Antes dos 30 já tinha um império e uma dúzia de cidades com o próprio nome. Fundou o Ergon, entregou a coordenação a Aristóteles — o antigo professor, que não perde a chance de lembrar quem ensinou quem — e se aposentou para passear pela ágora fazendo perguntas a quem trabalha.',
-  note: 'Não atende pedidos: está de folga desde 323 a.C.',
-};
+/** Alexandre Magno passeia pela ágora: não é agente e não conversa — o clique mostra a bio (textos em cidade.bio.*). */
+const NPC_NAME = 'Alexandre Magno'; // i18n-ok: nome de personagem, não se traduz
 
 // dia e noite da cidade = tema da plataforma (lib/theme.ts): trocar aqui troca o app inteiro
 const CHAT_W = 380;
@@ -73,6 +70,7 @@ function agentOfTeam(a: TeamAgent): Agent {
 export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, active = true }: {
   state: AppState; onNavigate: (v: View) => void; selectedId: string | null; onSelect: (id: string | null) => void; reload: () => void; active?: boolean;
 }) {
+  const t = useT();
   const { theme: themeId } = useTheme();
   const [editing, setEditing] = useState(false);
   const [lost, setLost] = useState(false);
@@ -165,7 +163,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
     try {
       const r = await api.post<{ id: string }>('/api/structures', { kind, i, j });
       setStore(null); changed();
-      setToast(`${typeOf(kind)?.name ?? 'Estrutura'} construída — versão local: grátis.`);
+      setToast(t('cidade.tela.construida', { nome: typeOf(kind) ? nomeDoTipo(kind) : t('cidade.tela.estrutura') }));
       setTimeout(() => sceneApi.current?.flyTo(r.id), 400);
       setCard(r.id);
     } catch (e) { setToast(errMsg(e)); }
@@ -183,7 +181,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
   };
   const loading = (
     <div className="stage__loading">
-      <ErgonLoader onDark label={city.error ? `Não deu para carregar a cidade agora (${city.error}). Tentando de novo…` : 'Carregando a cidade…'} />
+      <ErgonLoader onDark label={city.error ? t('cidade.tela.erroCarregar', { erro: city.error }) : t('cidade.tela.carregando')} />
     </div>
   );
 
@@ -210,7 +208,7 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
 
         <CityBar
           picker={<StructurePicker structures={structs} value={card} onPick={pick} onAgent={locate} />}
-          pickKey={structs.find((x) => x.id === card)?.name ?? 'Cidade'}
+          pickKey={cardStruct ? nomeDaConstrucao(cardStruct.name, cardStruct.kind) : t('cidade.localizar.cidade')}
           track={ops && !editing ? indicadores({ busy: ops.local.busy, limit: ops.local.limit, decisoes: ops.decisions.total, entregas: ops.deliveries.total }) : NO_TRACK}
           isOn={(k) => (k === 'trabalho' || k === 'entregas') && central === k}
           onTrack={(k) => { if (k === 'voce') openDecisions(); else if (central === k) setCentral(null); else openCentral(k); }}
@@ -218,8 +216,8 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
           calm={calm} onCalm={() => savePrefs({ cityCalm: !calm })} />
         {editing && (
           <div className="editbar" role="status">
-            <Icon name="map" size={16} /> Arraste um prédio ou área para outro lote livre (verde: cabe; vermelho: não cabe). Ruas, árvores e braseiros se refazem sozinhos. <kbd>Esc</kbd> cancela.
-            <button className="btn btn--gold btn--sm" onClick={() => setEditing(false)}>Concluir</button>
+            <Icon name="map" size={16} /> {tn('cidade.editor.dica', { esc: <kbd>Esc</kbd> })}
+            <button className="btn btn--gold btn--sm" onClick={() => setEditing(false)}>{t('cidade.editor.concluir')}</button>
           </div>
         )}
         {cardStruct && !editing && (
@@ -229,12 +227,12 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
         )}
         {toast && <div className="toast" role="status">{toast}</div>}
         {bio && (
-          <aside className="bio-card" role="dialog" aria-label={`Bio de ${FOUNDER_BIO.name}`}>
-            <button className="icon-btn" onClick={() => setBio(false)} aria-label="Fechar"><Icon name="x" /></button>
-            <h3>{FOUNDER_BIO.name}</h3>
-            <span className="muted">{FOUNDER_BIO.title}</span>
-            <p>{FOUNDER_BIO.text}</p>
-            <p className="muted">{FOUNDER_BIO.note}</p>
+          <aside className="bio-card" role="dialog" aria-label={t('cidade.bio.aria', { nome: NPC_NAME })}>
+            <button className="icon-btn" onClick={() => setBio(false)} aria-label={t('cidade.tela.fechar')}><Icon name="x" /></button>
+            <h3>{NPC_NAME}</h3>
+            <span className="muted">{t('cidade.bio.titulo')}</span>
+            <p>{t('cidade.bio.texto')}</p>
+            <p className="muted">{t('cidade.bio.nota')}</p>
           </aside>
         )}
         {store && (
@@ -263,14 +261,16 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
  * câmera até lá; a lista só existe enquanto está aberta. Praças e áreas, que são poucas, vêm da própria cidade.
  */
 function StructurePicker({ structures, value, onPick, onAgent }: { structures: Structure[]; value: string | null; onPick: (id: string) => void; onAgent: (a: TeamAgent) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useSurface(ref, { onClose: () => setOpen(false), outside: true, active: open });
   const cur = structures.find((s) => s.id === value);
+  const curName = cur ? nomeDaConstrucao(cur.name, cur.kind) : t('cidade.localizar.cidade');
   return (
     <div className="picker" ref={ref}>
-      <button className={`cb-pill picker__btn ${open ? 'is-open' : ''}`} onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open} aria-label={`Localizar: ${cur ? cur.name : 'Cidade'}`} title="Localizar um agente ou uma construção">
-        <Icon name="map" size={16} /><span className="cb-pill__txt picker__name">{cur ? cur.name : 'Cidade'}</span><Icon name="chevron" size={16} />
+      <button className={`cb-pill picker__btn ${open ? 'is-open' : ''}`} onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open} aria-label={t('cidade.localizar.aria', { nome: curName })} title={t('cidade.localizar.dica')}>
+        <Icon name="map" size={16} /><span className="cb-pill__txt picker__name">{curName}</span><Icon name="chevron" size={16} />
       </button>
       {open && <Finder structures={structures} value={value} onPick={(id) => { onPick(id); setOpen(false); }} onAgent={(a) => { onAgent(a); setOpen(false); }} />}
     </div>
@@ -280,11 +280,12 @@ function StructurePicker({ structures, value, onPick, onAgent }: { structures: S
 const foldName = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 function Finder({ structures, value, onPick, onAgent }: { structures: Structure[]; value: string | null; onPick: (id: string) => void; onAgent: (a: TeamAgent) => void }) {
+  const t = useT();
   const [q, setQ] = useState(''); const [dq, setDq] = useState('');
   useEffect(() => { const t = setTimeout(() => setDq(q.trim()), 200); return () => clearTimeout(t); }, [q]);
   // a linha leve traz o andar (building_id, floor_level): a câmera vai até lá mesmo sem o agente carregado
   type Ag = { items: TeamAgent[]; total: number };
-  type Bu = { items: Array<{ id: string; name: string; kind_name: string; active: number; slots: number }>; total: number };
+  type Bu = { items: Array<{ id: string; kind: string; name: string; kind_name: string; active: number; slots: number }>; total: number };
   const agentsRes = useResource<Ag>(dq ? `/api/team/agents?q=${encodeURIComponent(dq)}&limit=6` : null, []);
   const buildsRes = useResource<Bu>(dq ? `/api/team/structures?limit=8&sample=0&q=${encodeURIComponent(dq)}` : null, ['city.changed', 'agents.changed']);
   // enquanto o termo novo carrega, a lista do termo anterior fica (sem piscar "nada encontrado")
@@ -294,35 +295,35 @@ function Finder({ structures, value, onPick, onAgent }: { structures: Structure[
   // sem termo: os prédios da própria cidade, como antes (até 60; a cidade grande busca pelo nome)
   const LOCAL = 60;
   const work = structures.filter((s) => typeOf(s.kind)?.category === 'trabalho');
-  const localB: Bu = { items: work.slice(0, LOCAL).map((s) => ({ id: s.id, name: s.name, kind_name: typeOf(s.kind)?.common ?? s.kind, active: s.floors.reduce((n, f) => n + f.active, 0), slots: s.floors.reduce((n, f) => n + f.slots, 0) })), total: work.length };
+  const localB: Bu = { items: work.slice(0, LOCAL).map((s) => ({ id: s.id, kind: s.kind, name: s.name, kind_name: s.kind, active: s.floors.reduce((n, f) => n + f.active, 0), slots: s.floors.reduce((n, f) => n + f.slots, 0) })), total: work.length };
   const builds = { data: dq ? buildsRes.data ?? lastB.current : localB };
-  const areas = structures.filter((s) => typeOf(s.kind)?.category !== 'trabalho' && (!dq || foldName(s.name).includes(foldName(dq))));
+  const areas = structures.filter((s) => typeOf(s.kind)?.category !== 'trabalho' && (!dq || [s.name, nomeDaConstrucao(s.name, s.kind)].some((n) => foldName(n).includes(foldName(dq)))));
   const none = dq && !busy && !agents.data?.items.length && !builds.data?.items.length && !areas.length;
   return (
-    <div className="picker__menu picker__menu--open picker__menu--finder" role="listbox" aria-label="Localizar" aria-busy={busy}>
+    <div className="picker__menu picker__menu--open picker__menu--finder" role="listbox" aria-label={t('cidade.localizar.menu')} aria-busy={busy}>
       <label className="picker__search"><Icon name="search" size={14} />
-        <input data-autofocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Localizar agente ou construção" aria-label="Localizar agente ou construção" />
+        <input data-autofocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('cidade.localizar.campo')} aria-label={t('cidade.localizar.campo')} />
       </label>
-      {!dq && <button role="option" aria-selected={!value} className={`picker__item ${!value ? 'picker__item--on' : ''}`} onClick={() => onPick('cidade')}><span>Cidade inteira</span><span className="muted">{structures.length} estruturas</span></button>}
-      {!!agents.data?.items.length && <div className="picker__group">Agentes{agents.data.total > agents.data.items.length ? ` · ${agents.data.total}` : ''}</div>}
+      {!dq && <button role="option" aria-selected={!value} className={`picker__item ${!value ? 'picker__item--on' : ''}`} onClick={() => onPick('cidade')}><span>{t('cidade.localizar.cidadeInteira')}</span><span className="muted">{t('cidade.localizar.estruturas', { n: structures.length })}</span></button>}
+      {!!agents.data?.items.length && <div className="picker__group">{agents.data.total > agents.data.items.length ? t('cidade.localizar.agentesTotal', { n: agents.data.total }) : t('cidade.localizar.agentes')}</div>}
       {agents.data?.items.map((a) => (
         <button key={a.id} role="option" aria-selected={false} className="picker__item" onClick={() => onAgent(a)}>
-          <span>{a.name}</span><span className="muted">{a.role}{a.building_name ? ` · ${a.building_name}` : ''}</span>
+          <span>{a.name}</span><span className="muted">{a.role}{a.building_name ? ` · ${nomeDaConstrucao(a.building_name)}` : ''}</span>
         </button>
       ))}
-      {!!builds.data?.items.length && <div className="picker__group">Prédios{builds.data.total > builds.data.items.length ? ` · ${builds.data.total} (busque pelo nome)` : ''}</div>}
+      {!!builds.data?.items.length && <div className="picker__group">{builds.data.total > builds.data.items.length ? t('cidade.localizar.prediosTotal', { n: builds.data.total }) : t('cidade.localizar.predios')}</div>}
       {builds.data?.items.map((s) => (
         <button key={s.id} role="option" aria-selected={s.id === value} className={`picker__item ${s.id === value ? 'picker__item--on' : ''}`} onClick={() => onPick(s.id)}>
-          <span>{s.name}</span><span className="muted">{s.kind_name}{s.slots ? ` · ${s.active}/${s.slots}` : ''}</span>
+          <span>{nomeDaConstrucao(s.name, s.kind)}</span><span className="muted">{s.kind ? comumDoTipo(s.kind) : s.kind_name}{s.slots ? ` · ${fmtNumero(s.active)}/${fmtNumero(s.slots)}` : ''}</span>
         </button>
       ))}
-      {!!areas.length && <div className="picker__group">Praças, lazer e moradias</div>}
+      {!!areas.length && <div className="picker__group">{t('cidade.localizar.areas')}</div>}
       {areas.map((s) => (
         <button key={s.id} role="option" aria-selected={s.id === value} className={`picker__item ${s.id === value ? 'picker__item--on' : ''}`} onClick={() => onPick(s.id)}>
-          <span>{s.name}</span><span className="muted">{typeOf(s.kind)?.common}</span>
+          <span>{nomeDaConstrucao(s.name, s.kind)}</span><span className="muted">{typeOf(s.kind) ? comumDoTipo(s.kind) : null}</span>
         </button>
       ))}
-      {none && <p className="hint picker__empty">Nada encontrado para “{dq}”.</p>}
+      {none && <p className="hint picker__empty">{t('cidade.localizar.nada', { busca: dq })}</p>}
     </div>
   );
 }
@@ -332,19 +333,20 @@ function Finder({ structures, value, onPick, onAgent }: { structures: Structure[
  * moradores dele andar por andar (o prédio todo, do servidor). Nada de um botão por agente da cidade inteira.
  */
 function HtmlPlan({ structures, known, onSelect, selectedId }: { structures: Structure[]; known: CityAgent[]; onSelect: (id: string) => void; selectedId: string | null }) {
+  const t = useT();
   const work = structures.filter((s) => s.floors.length);
   const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="htmlplan">
-      <p className="hint">O palco gráfico foi perdido: modo HTML ativo. Todo o trabalho continua disponível.</p>
+      <p className="hint">{t('cidade.simples.aviso')}</p>
       {work.map((s) => {
         const on = open === s.id;
         const active = s.floors.reduce((n, f) => n + f.active, 0); const slots = s.floors.reduce((n, f) => n + f.slots, 0);
         return (
           <section key={s.id} className="htmlplan__floor">
             <h3>
-              <button className="link" aria-expanded={on} onClick={() => setOpen(on ? null : s.id)} title={on ? 'Recolher' : 'Ver quem está em cada andar'}>{s.name}</button>{' '}
-              <span className="muted">{active}/{slots} vagas · {s.floors.length} {s.floors.length === 1 ? 'andar' : 'andares'}</span>
+              <button className="link" aria-expanded={on} onClick={() => setOpen(on ? null : s.id)} title={on ? t('cidade.simples.recolher') : t('cidade.simples.verAndares')}>{nomeDaConstrucao(s.name, s.kind)}</button>{' '}
+              <span className="muted">{t('cidade.simples.vagas', { ativos: fmtNumero(active), vagas: fmtNumero(slots) })} · {t('cidade.simples.andares', { n: s.floors.length })}</span>
             </h3>
             {on && <HtmlBuilding s={s} known={known} onSelect={onSelect} selectedId={selectedId} />}
           </section>
@@ -355,6 +357,7 @@ function HtmlPlan({ structures, known, onSelect, selectedId }: { structures: Str
 }
 
 function HtmlBuilding({ s, known, onSelect, selectedId }: { s: Structure; known: CityAgent[]; onSelect: (id: string) => void; selectedId: string | null }) {
+  const t = useT();
   const res = useResource<CityAgentsPage>(`/api/city/agents?b=${encodeURIComponent(s.id)}`, ['agents.changed', 'city.changed', 'runs.changed']);
   // até chegar, os que a cena já tinha deste prédio (na mesma ordem)
   const by = useMemo(() => {
@@ -367,15 +370,15 @@ function HtmlBuilding({ s, known, onSelect, selectedId }: { s: Structure; known:
   }, [res.data, known, s.id]);
   return (
     <>
-      {res.error && !res.data && <p className="hint warn" role="status">Não deu para ler os moradores agora ({res.error}).</p>}
+      {res.error && !res.data && <p className="hint warn" role="status">{t('cidade.simples.erroMoradores', { erro: res.error })}</p>}
       {[...s.floors].reverse().map((f) => (
         <div key={f.id}>
-          <p className="small"><b>{f.name}</b> <span className="muted">{f.active}/{f.slots} vagas</span></p>
+          <p className="small"><b>{nomeDoAndar(f.name)}</b> <span className="muted">{t('cidade.simples.vagas', { ativos: fmtNumero(f.active), vagas: fmtNumero(f.slots) })}</span></p>
           <div className="htmlplan__agents">
             {(by.get(f.id) ?? []).map((a) => (
               <button key={a.id} className={`agent-chip ${selectedId === a.id ? 'agent-chip--on' : ''}`} onClick={() => onSelect(a.id)}>
                 <span className="avatar avatar--sm" style={{ background: a.color }}>{a.name[0]}</span> {a.name}
-                {a.run_status && <span className="badge badge--warn">{a.run_status === 'running' ? 'trabalhando' : a.run_status === 'queued' ? 'na fila' : 'aguarda'}</span>}
+                {a.run_status && <span className="badge badge--warn">{a.run_status === 'running' ? t('cidade.simples.trabalhando') : a.run_status === 'queued' ? t('cidade.simples.naFila') : t('cidade.simples.aguarda')}</span>}
               </button>
             ))}
           </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { fmtNumero, useT } from '../i18n/index.ts';
 import { api, errMsg, type ApiError } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { useSurface } from '../lib/surface.ts';
@@ -13,8 +14,9 @@ import { DistributionDialog } from '../components/DistributionDialog.tsx';
 import { NewGroupDialog } from '../components/NewGroupDialog.tsx';
 import { VirtualGrid } from '../components/VirtualGrid.tsx';
 import { cardClick } from '../lib/cardClick.ts';
+import { tipoComum } from '../lib/team.ts';
 
-const RUN_LABEL: Record<string, string> = { running: 'trabalhando', queued: 'na fila', waiting_user: 'aguarda você' };
+const RUN_LABEL = { running: 'equipe.rodando.trabalhando', queued: 'equipe.rodando.naFila', waiting_user: 'equipe.rodando.aguardaVoce' } as const;
 const CARD_H = 132; const CARD_MIN = 280;
 type Mode = 'setor' | 'estrutura';
 type Open = { kind: 'sector'; key: string; name: string } | { kind: 'structure'; id: string; name: string } | null;
@@ -34,6 +36,7 @@ const readMode = (): Mode => { try { return localStorage.getItem(MODE_KEY) === '
 type OpenAgent = (id: string, tab?: 'conversa' | 'perfil', lite?: TeamAgent) => void;
 // as mudanças (reativar, voltar ao tema, criar) chegam pelo aviso agents.changed: listas, contagens e o /api/state se acertam sozinhos
 export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAgent }) {
+  const t = useT();
   const scope = state.workspace.id;
   const summary = useResource<TeamSummary>('/api/team/summary', ['agents.changed', 'city.changed']).data;
   const [mode, setMode] = useState<Mode>(readMode);
@@ -66,16 +69,17 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
       if (!r.changed) return;
       const back: MoveDest = dest.kind === 'sector' ? { kind: 'sector', key: r.from.sectorKey, name: r.from.sectorName } : { kind: 'structure', id: r.from.structureId ?? '', name: r.from.structureName ?? '' };
       const now = { ...a, sector_key: r.to.sectorKey, sector_name: r.to.sectorName, building_id: r.to.structureId, building_name: r.to.structureName };
-      const text = opts.undo ? `Desfeito: ${a.name} voltou para ${dest.kind === 'sector' ? `o setor ${r.to.sectorName}` : r.to.structureName}.`
-        : dest.kind === 'sector' ? `${a.name} agora está no setor ${dest.name}. Papel, instruções e ferramentas continuam os mesmos.`
-          : `${a.name} agora mora em ${dest.name}${r.grew ? ' (com um andar novo)' : ''}. Setor e trabalhos continuam os mesmos.`;
-      setToast({ text, actions: opts.undo || !back.name ? [] : [{ label: 'Desfazer', run: () => { setToast(null); void move(now, back, { undo: true, expect: dest.kind === 'sector' ? { sectorKey: r.to.sectorKey } : { structureId: r.to.structureId ?? undefined } }); } }] });
+      const text = opts.undo
+        ? (dest.kind === 'sector' ? t('equipe.mover.desfeitoSetor', { nome: a.name, setor: r.to.sectorName }) : t('equipe.mover.desfeitoLugar', { nome: a.name, lugar: r.to.structureName ?? '' }))
+        : dest.kind === 'sector' ? t('equipe.mover.setor', { nome: a.name, setor: dest.name })
+          : t(r.grew ? 'equipe.mover.lugarComAndar' : 'equipe.mover.lugar', { nome: a.name, lugar: dest.name });
+      setToast({ text, actions: opts.undo || !back.name ? [] : [{ label: t('equipe.desfazer'), run: () => { setToast(null); void move(now, back, { undo: true, expect: dest.kind === 'sector' ? { sectorKey: r.to.sectorKey } : { structureId: r.to.structureId ?? undefined } }); } }] });
     } catch (e) {
       const code = (e as ApiError).code;
       if (code === 'structure_full' && dest.kind === 'structure') {
-        setToast({ text: `${dest.name} está cheia.`, tone: 'error', actions: [
-          { label: 'Adicionar andar e mover', run: () => { setToast(null); void move(a, dest, { ...opts, addFloor: true }); } },
-          { label: 'Escolher outra', run: () => { setToast(null); setTray({ agent: a, tab: 'structure' }); } },
+        setToast({ text: t('equipe.mover.cheia', { lugar: dest.name }), tone: 'error', actions: [
+          { label: t('equipe.mover.adicionarAndar'), run: () => { setToast(null); void move(a, dest, { ...opts, addFloor: true }); } },
+          { label: t('equipe.mover.escolherOutra'), run: () => { setToast(null); setTray({ agent: a, tab: 'structure' }); } },
         ] });
       } else setToast({ text: errMsg(e), tone: 'error' });
     } finally { busy.current.delete(a.id); setPending(new Set(busy.current)); }
@@ -87,7 +91,7 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
   }, [move]);
   const drag = useCallback((e: React.PointerEvent<HTMLElement>, a: TeamAgent) => beginDrag(e, a, {
     onDrop, onTray: (x) => setTray({ agent: x, tab: 'structure' }), disabled: busy.current.has(a.id),
-    onRefuse: (x, why) => setToast({ text: `${x.name} não mudou: ${why}.`, tone: 'error' }),
+    onRefuse: (x, why) => setToast({ text: t('equipe.mover.recusado', { nome: x.name, motivo: why }), tone: 'error' }),
   }), [onDrop]);
   const pickFromTray = (p: Pick) => {
     const a = tray?.agent; setTray(null); if (!a) return;
@@ -95,7 +99,7 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
   };
   const card = (a: TeamAgent, extra?: ReactNode) => <AgentCard key={a.id} a={a} pending={pending.has(a.id)} onOpen={onOpen} onDrag={drag} onMove={(x, tab) => setTray({ agent: x, tab })} extra={extra} />;
   const reactivate = async (a: TeamAgent) => {
-    try { await api.post(`/api/agents/${a.id}/reactivate`); setToast({ text: `${a.name} voltou à equipe.` }); } catch (err) { setToast({ text: errMsg(err), tone: 'error' }); }
+    try { await api.post(`/api/agents/${a.id}/reactivate`); setToast({ text: t('equipe.reativado', { nome: a.name }) }); } catch (err) { setToast({ text: errMsg(err), tone: 'error' }); }
   };
 
   // a contagem do /api/state já está na tela desde o início; a da Equipe chega por baixo
@@ -104,46 +108,46 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
     <div className="page equipe">
       <header className="equipe__head">
         <div>
-          <h2>Equipe</h2>
-          <p className="muted">{total} agente{total === 1 ? '' : 's'} · {mode === 'setor' ? 'Especialistas organizados por setor' : 'O endereço de cada especialista'}</p>
+          <h2>{t('equipe.titulo')}</h2>
+          <p className="muted">{t('equipe.contagem', { n: total })} · {mode === 'setor' ? t('equipe.subtituloSetor') : t('equipe.subtituloLugar')}</p>
         </div>
         <div className="equipe__actions">
           <div className="equipe__more">
-              <button className="icon-btn" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)} aria-label="Mais ações" title="Mais ações"><Icon name="dots" /></button>
+              <button className="icon-btn" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)} aria-label={t('equipe.maisAcoes')} title={t('equipe.maisAcoes')}><Icon name="dots" /></button>
               {menu && <MoreMenu themed={(summary?.themed ?? 0) > 0} onClose={() => setMenu(false)} onDistribute={() => { setMenu(false); setDistrib(true); }} onRestore={async () => {
                 setMenu(false);
                 try {
                   const r = await api.post<{ restored: string[]; skipped: string[] }>('/api/team/restore-theme');
-                  setToast({ text: r.skipped.length ? `Voltaram: ${r.restored.join(', ') || 'nenhum'}. Ficaram como estão: ${r.skipped.join('; ')}.` : 'Nomes e histórias gregos de volta. Funções e instruções continuam como estavam.' });
+                  setToast({ text: r.skipped.length ? t('equipe.tema.voltaram', { nomes: r.restored.join(', ') || t('equipe.tema.nenhum'), ficaram: r.skipped.join('; ') }) : t('equipe.tema.restaurado') });
                 } catch (e) { setToast({ text: errMsg(e), tone: 'error' }); }
               }} />}
           </div>
           <button className="btn" onClick={() => setNewGroup(mode === 'setor' ? 'sector' : 'structure')}>
-            <Icon name={mode === 'setor' ? 'layers' : 'temple'} size={15} /> {mode === 'setor' ? 'Novo setor' : 'Nova construção'}
+            <Icon name={mode === 'setor' ? 'layers' : 'temple'} size={15} /> {mode === 'setor' ? t('equipe.novoSetor') : t('equipe.novaConstrucao')}
           </button>
-          <button className="btn btn--primary" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> Novo agente</button>
+          <button className="btn btn--primary" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> {t('equipe.novoAgente')}</button>
         </div>
       </header>
 
       <div className="equipe__bar">
-        <div className="seg" role="tablist" aria-label="Apresentação">
-          <button role="tab" aria-selected={mode === 'setor'} className={`seg__btn ${mode === 'setor' ? 'seg__btn--on is-on' : ''}`} onClick={() => { setMode('setor'); setOpen(null); }}><Icon name="layers" size={14} /> Por setor</button>
-          <button role="tab" aria-selected={mode === 'estrutura'} className={`seg__btn ${mode === 'estrutura' ? 'seg__btn--on is-on' : ''}`} onClick={() => { setMode('estrutura'); setOpen(null); }}><Icon name="temple" size={14} /> Por estrutura</button>
+        <div className="seg" role="tablist" aria-label={t('equipe.apresentacao')}>
+          <button role="tab" aria-selected={mode === 'setor'} className={`seg__btn ${mode === 'setor' ? 'seg__btn--on is-on' : ''}`} onClick={() => { setMode('setor'); setOpen(null); }}><Icon name="layers" size={14} /> {t('equipe.porSetor')}</button>
+          <button role="tab" aria-selected={mode === 'estrutura'} className={`seg__btn ${mode === 'estrutura' ? 'seg__btn--on is-on' : ''}`} onClick={() => { setMode('estrutura'); setOpen(null); }}><Icon name="temple" size={14} /> {t('equipe.porEstrutura')}</button>
         </div>
         <label className="equipe__search"><Icon name="search" size={14} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar pelo nome ou pelo que faz" aria-label="Buscar na equipe" />
-          {q && <button className="icon-btn" onClick={() => setQ('')} aria-label="Limpar a busca"><Icon name="x" size={13} /></button>}
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('equipe.buscarDica')} aria-label={t('equipe.buscarNaEquipe')} />
+          {q && <button className="icon-btn" onClick={() => setQ('')} aria-label={t('equipe.limparBusca')}><Icon name="x" size={13} /></button>}
         </label>
-        <span className="muted small equipe__tip">Arraste pelo boneco · ou use “Mover para…”</span>
+        <span className="muted small equipe__tip">{t('equipe.dicaArraste')}</span>
       </div>
 
       {dq ? (
-        <MemberList title={`Resultados para “${dq}”`} filter={{ q: dq, status: 'all' }} scope={scope} card={(a) => card(a)} empty="Ninguém encontrado." />
+        <MemberList title={t('equipe.resultados', { busca: dq })} filter={{ q: dq, status: 'all' }} scope={scope} card={(a) => card(a)} empty={t('equipe.ninguemEncontrado')} />
       ) : open ? (
         <section className="equipe__open" data-drop-kind={open.kind} data-drop-id={open.kind === 'sector' ? open.key : open.id} data-drop-name={open.name}>
-          <button className="linkish equipe__back" onClick={() => setOpen(null)}><span className="flip"><Icon name="chevron" size={13} /></span> {open.kind === 'sector' ? 'Todos os setores' : 'Todas as construções'}</button>
+          <button className="linkish equipe__back" onClick={() => setOpen(null)}><span className="flip"><Icon name="chevron" size={13} /></span> {open.kind === 'sector' ? t('equipe.todosSetores') : t('equipe.todasConstrucoes')}</button>
           <MemberList title={open.name} filter={open.kind === 'sector' ? { sector: open.key } : { structure: open.id }} scope={scope} card={(a) => card(a)}
-            empty={open.kind === 'sector' ? 'Ninguém neste setor ainda. Arraste alguém para cá ou use “Mover para…”.' : 'Sem moradores. Arraste alguém para cá ou use “Mover para…”.'} />
+            empty={open.kind === 'sector' ? t('equipe.vazioSetor') : t('equipe.vazioLugar')} />
         </section>
       ) : mode === 'setor' ? (
         <SectorGroups scope={scope} card={(a) => card(a)} onOpenGroup={setOpen} />
@@ -153,15 +157,15 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
 
       {!dq && !open && (summary?.agents.archived ?? 0) > 0 && (
         <details className="equipe__off">
-          <summary className="muted">Desativados ({summary!.agents.archived})</summary>
-          <MemberList title="" filter={{ status: 'archived' }} scope={scope} empty="Ninguém desativado."
-            card={(a) => card(a, <button className="btn btn--sm" onClick={(e) => { e.stopPropagation(); void reactivate(a); }}><Icon name="undo" size={13} /> Reativar</button>)} />
+          <summary className="muted">{t('equipe.desativados', { n: summary!.agents.archived })}</summary>
+          <MemberList title="" filter={{ status: 'archived' }} scope={scope} empty={t('equipe.ninguemDesativado')}
+            card={(a) => card(a, <button className="btn btn--sm" onClick={(e) => { e.stopPropagation(); void reactivate(a); }}><Icon name="undo" size={13} /> {t('equipe.reativar')}</button>)} />
         </details>
       )}
 
       <p className="equipe__foot muted small">
-        <span>{mode === 'setor' ? 'Mudar de setor preserva o papel, as instruções e as ferramentas.' : 'Mudar de endereço preserva o setor e os trabalhos.'}</span>
-        <span>Clique no nome para abrir o perfil</span>
+        <span>{mode === 'setor' ? t('equipe.rodapeSetor') : t('equipe.rodapeLugar')}</span>
+        <span>{t('equipe.rodapeClique')}</span>
       </p>
 
       <DragLayer sectors={mode === 'setor' ? state.sectors : []} />
@@ -169,24 +173,24 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
         <div className={`equipe__toast ${toast.tone === 'error' ? 'equipe__toast--error' : ''}`} role="status">
           <span>{toast.text}</span>
           {toast.actions?.map((x) => <button key={x.label} className="linkish" onClick={x.run}>{x.label}</button>)}
-          <button className="icon-btn" onClick={() => setToast(null)} aria-label="Fechar aviso"><Icon name="x" size={13} /></button>
+          <button className="icon-btn" onClick={() => setToast(null)} aria-label={t('equipe.fecharAviso')}><Icon name="x" size={13} /></button>
         </div>
       )}
       {creating && <NewAgentDialog onClose={() => setCreating(false)} onCreated={(r) => {
         setCreating(false);
-        setToast({ text: `${r.name} entrou na equipe, no setor ${r.sector}${r.sectorReason ? ` (${r.sectorReason})` : ''}. A aparência escolhida foi mantida.`, actions: [{ label: 'Abrir perfil', run: () => { setToast(null); onOpen(r.id, 'perfil'); } }] });
+        setToast({ text: r.sectorReason ? t('equipe.criado.agenteComMotivo', { nome: r.name, setor: r.sector, motivo: r.sectorReason }) : t('equipe.criado.agente', { nome: r.name, setor: r.sector }), actions: [{ label: t('equipe.abrirPerfil'), run: () => { setToast(null); onOpen(r.id, 'perfil'); } }] });
       }} />}
       {newGroup && <NewGroupDialog kind={newGroup} onClose={() => setNewGroup(null)} onCreated={(g) => {
         setNewGroup(null); setQ('');
-        setToast({ text: g.kind === 'sector' ? `Setor ${g.name} criado. Arraste colegas para ele ou use “Mover para…”.` : `${g.name} erguida na cidade. Arraste colegas para ela ou use “Mover para…”.`,
-          actions: [{ label: 'Abrir', run: () => { setToast(null); setOpen(g); } }] });
+        setToast({ text: g.kind === 'sector' ? t('equipe.criado.setor', { nome: g.name }) : t('equipe.criado.construcao', { nome: g.name }),
+          actions: [{ label: t('equipe.abrir'), run: () => { setToast(null); setOpen(g); } }] });
       }} />}
-      {tray && <MoveTray agent={tray.agent} initial={tray.tab} title={`Mover ${tray.agent.name} para…`} onPick={pickFromTray} onClose={() => setTray(null)} />}
+      {tray && <MoveTray agent={tray.agent} initial={tray.tab} title={t('equipe.moverAgentePara', { nome: tray.agent.name })} onPick={pickFromTray} onClose={() => setTray(null)} />}
       {distrib && <DistributionDialog onClose={() => setDistrib(false)} onApplied={(r) => {
         setDistrib(false);
-        setToast({ text: `${r.moved} agente${r.moved === 1 ? '' : 's'} mudaram de endereço. Setores e trabalhos continuam os mesmos.`, actions: [{ label: 'Desfazer', run: async () => {
+        setToast({ text: t('equipe.distribuidos', { n: r.moved }), actions: [{ label: t('equipe.desfazer'), run: async () => {
           setToast(null);
-          try { const u = await api.post<{ moved: number }>(`/api/team/distribution/undo/${r.batchId}`); setToast({ text: `Desfeito: ${u.moved} agente${u.moved === 1 ? '' : 's'} voltaram para onde estavam.` }); }
+          try { const u = await api.post<{ moved: number }>(`/api/team/distribution/undo/${r.batchId}`); setToast({ text: t('equipe.distribuicaoDesfeita', { n: u.moved }) }); }
           catch (e) { setToast({ text: errMsg(e), tone: 'error' }); }
         } }] });
       }} />}
@@ -197,98 +201,103 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
 function MoreMenu({ themed, onClose, onRestore, onDistribute }: { themed: boolean; onClose: () => void; onRestore: () => void; onDistribute: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useSurface(ref, { onClose, outside: true });
+  const t = useT();
   return (
     <div ref={ref} className="equipe__menu" role="menu">
-      <button role="menuitem" onClick={onDistribute}><Icon name="layers" size={14} /> Sugerir distribuição…</button>
-      {themed && <button role="menuitem" onClick={onRestore}><Icon name="palette" size={14} /> Voltar aos nomes e histórias gregos</button>}
+      <button role="menuitem" onClick={onDistribute}><Icon name="layers" size={14} /> {t('equipe.menu.distribuir')}</button>
+      {themed && <button role="menuitem" onClick={onRestore}><Icon name="palette" size={14} /> {t('equipe.menu.voltarGregos')}</button>}
     </div>
   );
 }
 
 /** Membros de um grupo, de uma busca ou os desativados: por partes, com a grade virtualizada. */
 function MemberList({ title, filter, scope, card, empty }: { title: string; filter: { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all' }; scope: string; card: (a: TeamAgent) => ReactNode; empty: string }) {
+  const t = useT();
   const list = useAgentList(filter, scope);
   return (
     <div className="members">
-      {title && <h3 className="members__title">{title} <span className="muted">· {list.ready ? list.total : '…'}</span></h3>}
-      {list.error && <p className="error">{list.error} <button className="linkish" onClick={list.reload}>Tentar de novo</button></p>}
-      {list.ready && <VirtualGrid items={list.items} hasMore={!!list.next} onNeedMore={list.more} rowHeight={CARD_H} minColWidth={CARD_MIN} render={card} keyOf={(a) => a.id} label={title || 'Agentes'} empty={<p className="hint">{empty}</p>} />}
+      {title && <h3 className="members__title">{title} <span className="muted">· {list.ready ? fmtNumero(list.total) : '…'}</span></h3>}
+      {list.error && <p className="error">{list.error} <button className="linkish" onClick={list.reload}>{t('equipe.tentarDeNovo')}</button></p>}
+      {list.ready && <VirtualGrid items={list.items} hasMore={!!list.next} onNeedMore={list.more} rowHeight={CARD_H} minColWidth={CARD_MIN} render={card} keyOf={(a) => a.id} label={title || t('equipe.agentes')} empty={<p className="hint">{empty}</p>} />}
     </div>
   );
 }
 
-function Pager({ page, total, what }: { page: { prev: null | (() => void); next: null | (() => void) }; total: number; what: string }) {
+function Pager({ page, label }: { page: { prev: null | (() => void); next: null | (() => void) }; label: string }) {
+  const t = useT();
   if (!page.prev && !page.next) return null;
   return (
     <div className="equipe__pager">
-      <button className="btn btn--sm btn--ghost" onClick={() => page.prev?.()} hidden={!page.prev}><span className="flip"><Icon name="chevron" size={13} /></span> Anteriores</button>
-      <span className="muted small">{total} {what}</span>
-      <button className="btn btn--sm btn--ghost" onClick={() => page.next?.()} hidden={!page.next}>Próximos <Icon name="chevron" size={13} /></button>
+      <button className="btn btn--sm btn--ghost" onClick={() => page.prev?.()} hidden={!page.prev}><span className="flip"><Icon name="chevron" size={13} /></span> {t('equipe.anteriores')}</button>
+      <span className="muted small">{label}</span>
+      <button className="btn btn--sm btn--ghost" onClick={() => page.next?.()} hidden={!page.next}>{t('equipe.proximos')} <Icon name="chevron" size={13} /></button>
     </div>
   );
 }
 
 /** Por setor: um recipiente por setor (com amostra e contagem), que também recebe agentes arrastados. */
 function SectorGroups({ scope, card, onOpenGroup }: { scope: string; card: (a: TeamAgent) => ReactNode; onOpenGroup: (o: Open) => void }) {
+  const t = useT();
   const g = useGroupPages<TeamSector>((c) => teamUrl.sectors('', c, 24), scope);
-  if (g.error) return <p className="error">{g.error} <button className="linkish" onClick={g.reload}>Tentar de novo</button></p>;
+  if (g.error) return <p className="error">{g.error} <button className="linkish" onClick={g.reload}>{t('equipe.tentarDeNovo')}</button></p>;
   if (!g.data) return <div className="groups groups--loading" aria-busy="true" />;
   return (
     <>
       <div className="groups">
         {g.data.items.map((s) => (
-          <section key={s.key} className="group" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name} aria-label={`Setor ${s.name}`}>
+          <section key={s.key} className="group" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name} aria-label={t('equipe.setorAria', { nome: s.name })}>
             {/* o cabeçalho do setor abre o setor inteiro (antes, só o "Ver todos" pequeno, e só quando não cabia todo mundo) */}
             <header className="group__head card-click" onClick={cardClick(() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name }))}>
-              <h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })} aria-label={`Abrir o setor ${s.name}`}>{s.name}</button></h3><span className="muted">{s.count}</span>
+              <h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })} aria-label={t('equipe.abrirSetor', { nome: s.name })}>{s.name}</button></h3><span className="muted">{fmtNumero(s.count)}</span>
             </header>
             <div className="group__cards">
               {s.sample.map(card)}
-              {!s.count && <p className="group__empty hint">Ninguém aqui ainda. Arraste alguém para cá.</p>}
+              {!s.count && <p className="group__empty hint">{t('equipe.vazioGrupo')}</p>}
             </div>
-            {s.count > s.sample.length && <button className="linkish group__all" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })}>Ver todos ({s.count})</button>}
+            {s.count > s.sample.length && <button className="linkish group__all" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })}>{t('equipe.verTodos', { n: s.count })}</button>}
             {s.description && <p className="group__desc muted small">{s.description}</p>}
           </section>
         ))}
       </div>
-      <Pager page={g} total={g.data.total} what="setores" />
+      <Pager page={g} label={t('equipe.totalSetores', { n: g.data.total })} />
     </>
   );
 }
 
 /** Por estrutura: cada construção com ocupação, os moradores (amostra) e os lugares livres; com espaço para subir, "Andar". */
 function StructureGroups({ scope, card, onOpenGroup, onToast }: { scope: string; card: (a: TeamAgent) => ReactNode; onOpenGroup: (o: Open) => void; onToast: (t: Toast) => void }) {
+  const t = useT();
   const g = useGroupPages<TeamStructure>((c) => teamUrl.structures({}, c, 24), scope);
   const [adding, setAdding] = useState<string | null>(null);
   const addFloor = async (b: TeamStructure) => {
     if (adding) return; setAdding(b.id);
-    try { await api.post(`/api/structures/${b.id}/floors`); onToast({ text: `Andar novo em ${b.name}.` }); g.reload(); }
+    try { await api.post(`/api/structures/${b.id}/floors`); onToast({ text: t('equipe.andarNovo', { nome: b.name }) }); g.reload(); }
     catch (e) { onToast({ text: errMsg(e), tone: 'error' }); } finally { setAdding(null); }
   };
-  if (g.error) return <p className="error">{g.error} <button className="linkish" onClick={g.reload}>Tentar de novo</button></p>;
+  if (g.error) return <p className="error">{g.error} <button className="linkish" onClick={g.reload}>{t('equipe.tentarDeNovo')}</button></p>;
   if (!g.data) return <div className="groups groups--loading" aria-busy="true" />;
   return (
     <>
       <div className="groups">
         {g.data.items.map((b) => (
-          <section key={b.id} className={`building ${b.free === 0 ? 'building--full' : ''}`} data-drop-kind="structure" data-drop-id={b.id} data-drop-name={b.name} aria-label={`${b.name}: ${b.active} de ${b.slots} lugares`}>
+          <section key={b.id} className={`building ${b.free === 0 ? 'building--full' : ''}`} data-drop-kind="structure" data-drop-id={b.id} data-drop-name={b.name} aria-label={t('equipe.construcaoAria', { n: b.slots, nome: b.name, ocupados: b.active })}>
             <header className="building__head card-click" onClick={cardClick(() => onOpenGroup({ kind: 'structure', id: b.id, name: b.name }))}>
               <span className="building__icon"><Icon name="temple" size={18} /></span>
-              <div><h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'structure', id: b.id, name: b.name })} aria-label={`Abrir ${b.name}`}>{b.name}</button></h3><span className="muted small">{b.active} de {b.slots} lugares · {b.kind_name}</span></div>
+              <div><h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'structure', id: b.id, name: b.name })} aria-label={t('equipe.abrirLugar', { nome: b.name })}>{b.name}</button></h3><span className="muted small">{t('equipe.ocupacao', { n: b.slots, ocupados: b.active, tipo: tipoComum(b.kind, b.kind_name) })}</span></div>
             </header>
             <div className="building__people">
               {b.sample.map(card)}
-              {b.free > 0 && <div className="building__free" aria-hidden="true"><Icon name="plus" size={14} /><span>{b.free} lugar{b.free === 1 ? '' : 'es'} livre{b.free === 1 ? '' : 's'}</span></div>}
+              {b.free > 0 && <div className="building__free" aria-hidden="true"><Icon name="plus" size={14} /><span>{t('equipe.livres', { n: b.free })}</span></div>}
             </div>
             <footer className="building__foot">
-              <span className={`small ${b.free === 0 ? 'building__full' : 'muted'}`}>{b.free === 0 ? 'Cheia' : 'Recebe agentes'}</span>
-              {b.active > b.sample.length && <button className="linkish" onClick={() => onOpenGroup({ kind: 'structure', id: b.id, name: b.name })}>Ver todos ({b.active})</button>}
-              {b.can_grow && <button className="btn btn--sm btn--ghost" onClick={() => void addFloor(b)} aria-busy={adding === b.id}><Icon name="plus" size={13} /> {adding === b.id ? 'Subindo…' : 'Andar'}</button>}
+              <span className={`small ${b.free === 0 ? 'building__full' : 'muted'}`}>{b.free === 0 ? t('equipe.cheia') : t('equipe.recebeAgentes')}</span>
+              {b.active > b.sample.length && <button className="linkish" onClick={() => onOpenGroup({ kind: 'structure', id: b.id, name: b.name })}>{t('equipe.verTodos', { n: b.active })}</button>}
+              {b.can_grow && <button className="btn btn--sm btn--ghost" onClick={() => void addFloor(b)} aria-busy={adding === b.id}><Icon name="plus" size={13} /> {adding === b.id ? t('equipe.subindo') : t('equipe.andar')}</button>}
             </footer>
           </section>
         ))}
       </div>
-      <Pager page={g} total={g.data.total} what="construções" />
+      <Pager page={g} label={t('equipe.totalConstrucoes', { n: g.data.total })} />
     </>
   );
 }
@@ -298,31 +307,32 @@ function AgentCard({ a, pending, onOpen, onDrag, onMove, extra }: {
   a: TeamAgent; pending: boolean; onOpen: OpenAgent;
   onDrag: (e: React.PointerEvent<HTMLElement>, a: TeamAgent) => void; onMove: (a: TeamAgent, tab: 'sector' | 'structure') => void; extra?: ReactNode;
 }) {
+  const t = useT();
   const [menu, setMenu] = useState(false);
   const open = () => onOpen(a.id, 'perfil', a);
   return (
     // o card inteiro é a alça de arraste (menos o menu e os botões de ação); um clique continua abrindo o perfil
     <article className={`tcard ${a.status !== 'active' ? 'tcard--off' : ''} ${pending ? 'is-pending' : ''}`} aria-busy={pending}
-      title={pending ? 'Movendo…' : 'Arraste para mudar de setor ou de construção · clique para abrir o perfil'}
+      title={pending ? t('equipe.card.movendoDica') : t('equipe.card.dica')}
       onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('.tcard__menu, [role="menu"], button:not(.tcard__name)')) onDrag(e, a); }}
       onClick={cardClick(open)}>
       <span className="tcard__fig"><AgentFigure agent={a} /></span>
       <div className="tcard__body">
-        <button className="tcard__name" onClick={open} aria-label={`Abrir o perfil de ${a.name}`}>{a.name}</button>
+        <button className="tcard__name" onClick={open} aria-label={t('equipe.card.abrirPerfilDe', { nome: a.name })}>{a.name}</button>
         <span className="tcard__role">{a.role}</span>
         <span className="tcard__sector">{a.sector_name}</span>
-        {a.coordinator && <span className="tcard__meta"><Icon name="lock" size={12} /> Cargo fixo</span>}
+        {a.coordinator && <span className="tcard__meta"><Icon name="lock" size={12} /> {t('equipe.card.cargoFixo')}</span>}
         <span className="tcard__meta"><Icon name="pin" size={12} /> {a.building_name ?? '—'}</span>
-        {pending ? <span className="badge">movendo…</span> : a.run_status ? <span className="badge badge--warn">{RUN_LABEL[a.run_status]}</span> : null}
-        {a.status !== 'active' && <span className="muted small">{a.deactivation_note ?? 'desativado'}</span>}
+        {pending ? <span className="badge">{t('equipe.card.movendo')}</span> : a.run_status ? <span className="badge badge--warn">{t(RUN_LABEL[a.run_status])}</span> : null}
+        {a.status !== 'active' && <span className="muted small">{a.deactivation_note ?? t('equipe.card.desativado')}</span>}
         {extra}
       </div>
       <div className="tcard__menu">
-        <button className="icon-btn" aria-haspopup="menu" aria-expanded={menu} aria-label={`Ações de ${a.name}`} onClick={() => setMenu((v) => !v)}><Icon name="dots" size={16} /></button>
+        <button className="icon-btn" aria-haspopup="menu" aria-expanded={menu} aria-label={t('equipe.card.acoesDe', { nome: a.name })} onClick={() => setMenu((v) => !v)}><Icon name="dots" size={16} /></button>
         {menu && <CardMenu onClose={() => setMenu(false)} items={[
-          { label: 'Abrir perfil', icon: 'users', run: open },
-          ...(a.status === 'active' ? [{ label: 'Mover para outra construção…', icon: 'temple', run: () => onMove(a, 'structure') }] : []),
-          ...(!a.coordinator ? [{ label: 'Mudar de setor…', icon: 'layers', run: () => onMove(a, 'sector') }] : []),
+          { label: t('equipe.abrirPerfil'), icon: 'users', run: open },
+          ...(a.status === 'active' ? [{ label: t('equipe.card.moverConstrucao'), icon: 'temple', run: () => onMove(a, 'structure') }] : []),
+          ...(!a.coordinator ? [{ label: t('equipe.card.mudarSetor'), icon: 'layers', run: () => onMove(a, 'sector') }] : []),
         ]} />}
       </div>
     </article>
@@ -350,16 +360,17 @@ function CardMenu({ items, onClose }: { items: Array<{ label: string; icon: stri
 /** Durante o arraste: o boneco seguindo o ponteiro e, embaixo, uma faixa larga para soltar — com os setores à mão (por
  * setor) e "outro destino" para o que não está na tela. */
 function DragLayer({ sectors }: { sectors: Array<{ key: string; name: string }> }) {
+  const t = useT();
   const a = useDragging();
   if (!a) return null;
   return (
     <>
       <div id="drag-ghost" className="drag-ghost" aria-hidden="true">
         <AgentFigure agent={a} />
-        <span><b>{a.name}</b><small id="drag-ghost-hint">Solte num setor ou numa construção</small></span>
+        <span><b>{a.name}</b><small id="drag-ghost-hint">{t('equipe.arraste.solte')}</small></span>
       </div>
-      <div className="drag-tray" data-drop-kind="tray" data-drop-id="" data-drop-name="Mover para…" role="note">
-        <span className="drag-tray__hint"><Icon name="search" size={15} /> Solte aqui para escolher um destino que não está na tela · Esc cancela</span>
+      <div className="drag-tray" data-drop-kind="tray" data-drop-id="" data-drop-name={t('equipe.moverPara')} role="note">
+        <span className="drag-tray__hint"><Icon name="search" size={15} /> {t('equipe.arraste.bandeja')}</span>
         {sectors.length > 0 && (
           <span className="drag-tray__chips">
             {sectors.map((s) => <span key={s.key} className="drag-tray__chip" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name}>{s.name}</span>)}

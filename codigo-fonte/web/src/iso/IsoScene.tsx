@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import type { SceneProps } from '../scene/types.ts';
 import { IsoEngine } from './engine.ts';
+import { useT } from '../i18n/index.ts';
 
 /** Palco isométrico em pixel art (Canvas 2D). */
 export default function IsoScene(p: SceneProps) {
+  const t = useT();
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const eng = useRef<IsoEngine | null>(null);
@@ -58,7 +60,7 @@ export default function IsoScene(p: SceneProps) {
   return (
     <div ref={wrap} className="iso">
       <canvas ref={canvas} className="iso__canvas" role="img"
-        aria-label="Cidade em pixel art: passe o mouse num prédio para escolher o andar e clique para abrir; clique num agente para conversar, num lote livre para construir. Arraste para mover, roda do mouse para aproximar, duplo clique para ver a cidade inteira, Esc fecha o prédio." />
+        aria-label={t('cidade.tela.palco')} />
     </div>
   );
 }

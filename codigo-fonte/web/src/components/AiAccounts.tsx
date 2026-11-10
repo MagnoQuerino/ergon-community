@@ -7,37 +7,38 @@ import { BrandLogo } from './BrandLogo.tsx';
 import { Icon } from './Icon.tsx';
 import { Typewriter } from './Typewriter.tsx';
 import { FRASE_RENOVANDO, semJargao } from '../lib/textos-tela.ts';
+import { fmtHora, tn, useT, type Chave } from '../i18n/index.ts';
 
 interface Login { provider: string; sessionId: string; userCode: string | null; verificationUrl: string | null; expiresAt: string | null; pollSeconds: number }
-const BILLING: Record<string, string> = {
-  subscription: 'Assinatura: sem custo por uso; valem a mensalidade e os limites do plano. O painel mostra só os tokens.',
-  credits: 'Créditos: cada uso consome os créditos da conta (na Nous, os da sua assinatura). O custo aparece no painel quando a conta informa o valor cobrado; o saldo fica no portal da conta.',
-  api: 'Chave de API: cobra por uso; o custo aparece quando o provedor informa o valor cobrado.',
-  none: 'Nenhuma conta conectada: a equipe ainda não trabalha nos pedidos.',
-};
+const BILLING = {
+  subscription: 'configuracoes.contas.billingAssinatura',
+  credits: 'configuracoes.contas.billingCreditos',
+  api: 'configuracoes.contas.billingApi',
+  none: 'configuracoes.contas.billingNenhuma',
+} as const satisfies Record<string, Chave>;
 /** A melhor escolha para o Ergon: uma assinatura, os principais modelos do mercado e um modelo por agente. */
 const RECOMMENDED = 'nous';
 const NOUS_WHY = [
-  'Os principais modelos do mercado numa assinatura só — Claude, GPT, Gemini, DeepSeek e muitos outros',
-  'Plano grátis com modelos gratuitos para começar sem gastar nada',
-  'Cada agente com o modelo certo: o mais forte para quem pensa, o mais econômico para quem organiza',
-  'Melhor resultado pelo menor custo: você não paga modelo de ponta para tarefa simples',
-];
+  'configuracoes.contas.nousPorque1',
+  'configuracoes.contas.nousPorque2',
+  'configuracoes.contas.nousPorque3',
+  'configuracoes.contas.nousPorque4',
+] as const satisfies readonly Chave[];
 /** Enquanto a IA da conta acorda, os cartões não aparecem (nada de botão esperando): um carregamento com uma frase
  *  só, sorteada destas; quando ela responde, os cartões chegam prontos para conectar. */
 export const ACORDANDO_IA = [
-  'Acendendo a chama do templo da sabedoria…',
-  'Aristóteles está reunindo a equipe na ágora…',
-  'Tentando tirar Sócrates de um diálogo interminável na feira de Atenas…',
-  'Hipátia afina os instrumentos do observatório…',
-  'Abrindo as portas da biblioteca de Alexandria…',
-  'Arquimedes confere as alavancas uma última vez…',
-  'Heródoto termina de anotar a viagem…',
-  'Fídias tira o pó das estátuas da ágora…',
-];
+  'configuracoes.contas.acordando1',
+  'configuracoes.contas.acordando2',
+  'configuracoes.contas.acordando3',
+  'configuracoes.contas.acordando4',
+  'configuracoes.contas.acordando5',
+  'configuracoes.contas.acordando6',
+  'configuracoes.contas.acordando7',
+  'configuracoes.contas.acordando8',
+] as const satisfies readonly Chave[];
 /** depois disso sem resposta, o carregamento diz que está demorando (e continua conferindo) */
 const PACIENCIA_MS = 5 * 60_000;
-export const sortear = (lista: string[]) => lista[Math.floor(Math.random() * lista.length)];
+export const sortear = <T,>(lista: readonly T[]): T => lista[Math.floor(Math.random() * lista.length)];
 
 /**
  * A IA da conta ainda acordando: logo e uma frase (sem botões); avisa só se passar muito do normal. renovando: a equipe está
@@ -45,14 +46,15 @@ export const sortear = (lista: string[]) => lista[Math.floor(Math.random() * lis
  * para a pessoa: com peça interna (motor, gerente, endereço…), fica no registro.
  */
 export function AcordandoIa({ desde, erro, onRetry, renovando }: { desde: number; erro?: string | null; onRetry: () => void; renovando?: boolean }) {
+  const t = useT();
   const [frase] = useState(() => sortear(ACORDANDO_IA));
   const demorando = Date.now() - desde > PACIENCIA_MS;
   const motivo = semJargao(erro);
   return (
     <div className="ai-acordando" role="status">
       <ErgonLogo height={44} animated />
-      <Typewriter key={renovando ? 'renovando' : 'acordando'} phrases={[renovando ? FRASE_RENOVANDO : frase]} />
-      {demorando && <p className="muted small">Está levando mais que o normal{motivo ? ` (${motivo})` : ''}. Continuamos tentando. <button className="link" onClick={onRetry}>Tentar de novo</button></p>}
+      <Typewriter key={renovando ? 'renovando' : 'acordando'} phrases={[renovando ? FRASE_RENOVANDO : t(frase)]} />
+      {demorando && <p className="muted small">{motivo ? t('configuracoes.contas.demorandoMotivo', { motivo }) : t('configuracoes.contas.demorando')} <button className="link" onClick={onRetry}>{t('configuracoes.contas.tentarDeNovo')}</button></p>}
     </div>
   );
 }
@@ -64,6 +66,7 @@ export function AcordandoIa({ desde, erro, onRetry, renovando }: { desde: number
  * Configurações.
  */
 export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch?: boolean }) {
+  const t = useT();
   const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const [login, setLogin] = useState<Login | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -75,8 +78,12 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
     try { setLogin(await api.post<Login>(`/api/ai/accounts/${provider}/login`)); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
   const conectado = (quem: string | null | undefined, modelo: string | null | undefined) => {
-    const m = modelo ? ` Modelo para começar: ${modelo} (troque quando quiser em Configurações › IA da equipe ou no perfil de cada agente).` : '';
-    setMsg({ kind: 'ok', text: `Conta conectada${quem ? ` (${quem})` : ''}. ${pitch ? 'A equipe já pode trabalhar de verdade.' : 'Os modelos dela já aparecem em Configurações.'}${m}` });
+    const frases = [
+      quem ? t('configuracoes.contas.conectadaDe', { quem }) : t('configuracoes.contas.conectada'),
+      pitch ? t('configuracoes.contas.prontaParaTrabalhar') : t('configuracoes.contas.modelosAparecem'),
+      ...(modelo ? [t('configuracoes.contas.modeloInicial', { modelo })] : []),
+    ];
+    setMsg({ kind: 'ok', text: frases.join(' ') });
     status.reload(); emitLocal('ai.changed'); onChanged?.();
   };
   useEffect(() => {
@@ -89,18 +96,18 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
         if (r.status === 'pending') { window.setTimeout(poll, login.pollSeconds * 1000); return; }
         setLogin(null);
         if (r.status === 'approved') conectado(r.email, r.starterModel);
-        else setMsg({ kind: 'error', text: r.error ?? `Login não concluído (${r.status}).` });
+        else setMsg({ kind: 'error', text: r.error ?? t('configuracoes.contas.loginNaoConcluido', { status: r.status }) });
       } catch (e) { if (!stop) { setLogin(null); setMsg({ kind: 'error', text: errMsg(e) }); } }
     };
-    const t = window.setTimeout(poll, login.pollSeconds * 1000);
-    return () => { stop = true; clearTimeout(t); };
+    const timer = window.setTimeout(poll, login.pollSeconds * 1000);
+    return () => { stop = true; clearTimeout(timer); };
   }, [login]); // eslint-disable-line react-hooks/exhaustive-deps
   // motor da pessoa ainda ligando (conta nova: até alguns minutos; um erro de tempo na primeira vez também passa):
   // confere a cada 3 s até responder; os botões se liberam sozinhos
   useEffect(() => {
     if (!s || s.available || !s.motor) return;
-    const t = window.setTimeout(() => status.reload(), 3000);
-    return () => clearTimeout(t);
+    const timer = window.setTimeout(() => status.reload(), 3000);
+    return () => clearTimeout(timer);
   }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
   const disconnect = async (provider: string) => {
     try { await api.del(`/api/ai/accounts/${provider}`); status.reload(); emitLocal('ai.changed'); onChanged?.(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
@@ -111,55 +118,54 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
   const nous = s.accounts.find((a) => a.id === RECOMMENDED);
   const others = s.accounts.filter((a) => a.id !== RECOMMENDED);
   const otherOn = others.some((a) => a.connected) || (s.byok ?? []).some((b) => b.connected);
+  const billing = (BILLING as Partial<Record<string, (typeof BILLING)[keyof typeof BILLING]>>)[s.default.billing];
   const codigo = (provider: string) => login?.provider === provider && (
     <div className="device" role="status">
-      <p>1. Abra <a href={login.verificationUrl ?? '#'} target="_blank" rel="noreferrer noopener">a página de login</a> e entre na sua conta.</p>
-      <p>2. Confirme este código: <code className="device__code">{login.userCode}</code></p>
-      <p className="muted small">Esperando a confirmação…{login.expiresAt ? ` (vale até ${new Date(login.expiresAt).toLocaleTimeString('pt-BR', { timeStyle: 'short' })})` : ''}</p>
-      <button className="btn btn--sm btn--ghost" onClick={async () => { await api.del(`/api/ai/logins/${login.sessionId}`).catch(() => {}); setLogin(null); }}>Cancelar</button>
+      <p>{tn('configuracoes.contas.passo1', { pagina: <a href={login.verificationUrl ?? '#'} target="_blank" rel="noreferrer noopener">{t('configuracoes.contas.paginaDeLogin')}</a> })}</p>
+      <p>{tn('configuracoes.contas.passo2', { codigo: <code className="device__code">{login.userCode}</code> })}</p>
+      <p className="muted small">{login.expiresAt ? t('configuracoes.contas.esperandoAte', { hora: fmtHora(login.expiresAt) }) : t('configuracoes.contas.esperando')}</p>
+      <button className="btn btn--sm btn--ghost" onClick={async () => { await api.del(`/api/ai/logins/${login.sessionId}`).catch(() => {}); setLogin(null); }}>{t('configuracoes.comum.cancelar')}</button>
     </div>
   );
   return (
     <>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
-      {s.executor === 'simulated' && <p className="hint warn">Esta instalação está configurada para não usar contas de IA: as respostas dos agentes não passam pela conta conectada.</p>}
-      {!s.available && <p className="hint">A conexão de contas de IA não está disponível nesta instalação.</p>}
+      {s.executor === 'simulated' && <p className="hint warn">{t('configuracoes.contas.instalacaoSemContas')}</p>}
+      {!s.available && <p className="hint">{t('configuracoes.contas.indisponivel')}</p>}
       {nous && (
-        <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''}`} aria-label="Nous Portal, a melhor escolha">
-          <span className="ai-best__ribbon"><Icon name="check" size={12} /> Melhor escolha</span>
+        <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''}`} aria-label={t('configuracoes.contas.nousAria')}>
+          <span className="ai-best__ribbon"><Icon name="check" size={12} /> {t('configuracoes.contas.melhorEscolha')}</span>
           <header className="ai-best__head">
             <BrandLogo kind={nous.id} name={nous.name} size={44} />
             <div>
-              <h4>Assinatura {nous.name}</h4>
-              <p>A melhor experiência no Ergon, pelo custo e pela versatilidade.</p>
+              <h4>{t('configuracoes.contas.assinatura', { nome: nous.name })}</h4>
+              <p>{t('configuracoes.contas.nousExperiencia')}</p>
             </div>
-            <span className={`badge ${nous.connected ? 'badge--ok' : 'badge--rec'}`}>{nous.connected ? 'conectada' : 'recomendada'}</span>
+            <span className={`badge ${nous.connected ? 'badge--ok' : 'badge--rec'}`}>{nous.connected ? t('configuracoes.comum.conectada') : t('configuracoes.contas.recomendada')}</span>
           </header>
-          <ul className="ai-best__why">{NOUS_WHY.map((w) => <li key={w}><Icon name="check" size={14} /> {w}</li>)}</ul>
+          <ul className="ai-best__why">{NOUS_WHY.map((w) => <li key={w}><Icon name="check" size={14} /> {t(w)}</li>)}</ul>
           {nous.connected
-            ? <div className="row"><span className="ok-inline"><Icon name="check" size={14} /> Conectada: cada agente pode usar um modelo diferente (perfil do agente › Modelo de IA).</span><span className="grow" /><button className="btn btn--sm btn--ghost" onClick={() => disconnect(nous.id)}>Desconectar</button></div>
-            : login?.provider !== nous.id && <button className="btn btn--gold ai-best__cta" disabled={!s.available || !!login} onClick={() => start(nous.id)}>Conectar a Nous{otherOn ? ' também' : ''}</button>}
+            ? <div className="row"><span className="ok-inline"><Icon name="check" size={14} /> {t('configuracoes.contas.nousConectada')}</span><span className="grow" /><button className="btn btn--sm btn--ghost" onClick={() => disconnect(nous.id)}>{t('configuracoes.comum.desconectar')}</button></div>
+            : login?.provider !== nous.id && <button className="btn btn--gold ai-best__cta" disabled={!s.available || !!login} onClick={() => start(nous.id)}>{otherOn ? t('configuracoes.contas.conectarNousTambem') : t('configuracoes.contas.conectarNous')}</button>}
           {codigo(nous.id)}
-          {!nous.connected && otherOn && <p className="hint">Você já tem outra conta ligada. Conectando a Nous também, cada agente pode usar o modelo mais adequado e mais barato para o trabalho dele.</p>}
+          {!nous.connected && otherOn && <p className="hint">{t('configuracoes.contas.nousOutraLigada')}</p>}
         </article>
       )}
       {others.length > 0 && (
         <div className="ai-alt">
-          <span className="ai-alt__label">Outra opção</span>
+          <span className="ai-alt__label">{t('configuracoes.contas.outraOpcao')}</span>
           {others.map((a) => (
             <div key={a.id} className={`ai-alt__row ${a.connected ? 'ai-alt__row--on' : ''} ${login?.provider === a.id ? 'ai-alt__row--open' : ''}`}>
               <div className="ai-alt__main">
                 <BrandLogo kind={a.id} name={a.name} size={26} />
                 <div className="ai-alt__txt">
                   <b>{a.name}</b>
-                  <small>{a.id === 'openai-codex'
-                    ? 'Já paga o ChatGPT? Conecte também e a equipe aproveita a assinatura que você já tem, sem pagar por uso. Dá para ter as duas contas ligadas e escolher, por agente, o modelo de cada uma.'
-                    : a.about}</small>
+                  <small>{a.id === 'openai-codex' ? t('configuracoes.contas.chatgpt') : a.about}</small>
                 </div>
-                <span className={`badge ${a.connected ? 'badge--ok' : ''}`}>{a.connected ? 'conectada' : a.detail}</span>
+                <span className={`badge ${a.connected ? 'badge--ok' : ''}`}>{a.connected ? t('configuracoes.comum.conectada') : a.detail}</span>
                 {a.connected
-                  ? <button className="btn btn--sm btn--ghost" onClick={() => disconnect(a.id)}>Desconectar</button>
-                  : login?.provider !== a.id && <button className="btn btn--sm" disabled={!s.available || !!login} onClick={() => start(a.id)}>Conectar</button>}
+                  ? <button className="btn btn--sm btn--ghost" onClick={() => disconnect(a.id)}>{t('configuracoes.comum.desconectar')}</button>
+                  : login?.provider !== a.id && <button className="btn btn--sm" disabled={!s.available || !!login} onClick={() => start(a.id)}>{t('configuracoes.comum.conectar')}</button>}
               </div>
               {codigo(a.id)}
             </div>
@@ -167,7 +173,7 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
         </div>
       )}
       {!pitch && s.available && <ChavePropria byok={s.byok ?? []} custom={s.byokCustom ?? []} onDone={(m) => conectado(null, m)} onRemoved={() => { status.reload(); emitLocal('ai.changed'); onChanged?.(); }} />}
-      {(!pitch || s.accounts.some((a) => a.connected)) && <p className="hint">{BILLING[s.default.billing]}</p>}
+      {(!pitch || s.accounts.some((a) => a.connected)) && billing && <p className="hint">{t(billing)}</p>}
     </>
   );
 }
@@ -175,9 +181,9 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
 
 type Escolha = { tipo: 'chave'; id: string } | { tipo: 'outro' | 'lmstudio' | 'ollama' };
 const LOCAIS = {
-  lmstudio: { nome: 'LM Studio', porta: 1234, dica: 'No LM Studio, ligue o servidor e a opção "Serve on Local Network".' },
-  ollama: { nome: 'Ollama', porta: 11434, dica: 'No Ollama, deixe o servidor aceitar conexões da rede (OLLAMA_HOST=0.0.0.0).' },
-} as const;
+  lmstudio: { nome: 'LM Studio', porta: 1234, dica: 'configuracoes.byok.dicaLmstudio' }, // i18n-ok: nome do produto, igual nas duas línguas
+  ollama: { nome: 'Ollama', porta: 11434, dica: 'configuracoes.byok.dicaOllama' }, // i18n-ok: nome do produto, igual nas duas línguas
+} as const satisfies Record<string, { nome: string; porta: number; dica: Chave }>;
 
 /**
  * Chave própria (BYOK): a lista é a dos provedores que o motor de IA já suporta (com busca), mais "Outro (compatível
@@ -188,6 +194,7 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
   byok: NonNullable<AiStatus['byok']>; custom: NonNullable<AiStatus['byokCustom']>;
   onDone: (starterModel: string | null) => void; onRemoved: () => void;
 }) {
+  const t = useT();
   const [busca, setBusca] = useState('');
   const [escolha, setEscolha] = useState<Escolha | null>(null);
   const [chave, setChave] = useState('');
@@ -219,68 +226,66 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
   };
   const pronto = escolha?.tipo === 'chave' ? chave.trim().length >= 8 : url.trim().startsWith('http');
   const conectados = [
-    ...ligados.map((b) => ({ k: b.id, nome: b.name, det: 'chave de API', del: `/api/ai/byok/${b.id}` })),
+    ...ligados.map((b) => ({ k: b.id, nome: b.name, det: t('configuracoes.byok.chaveDeApi'), del: `/api/ai/byok/${b.id}` })),
     ...custom.map((c) => ({ k: c.id, nome: c.name, det: `${c.baseUrl}${c.model ? ` · ${c.model}` : ''}`, del: `/api/ai/byok-custom/${c.id}` })),
   ];
   return (
     <div className="ai-alt ai-byok">
-      <span className="ai-alt__label">Chave própria (BYOK)</span>
-      <p className="muted small">Já usa outro provedor? Conecte a sua chave de API (o custo é por uso, na sua conta do provedor), um serviço compatível com a OpenAI ou um modelo rodando na sua rede (LM Studio, Ollama).</p>
+      <span className="ai-alt__label">{t('configuracoes.byok.rotulo')}</span>
+      <p className="muted small">{t('configuracoes.byok.texto')}</p>
       {conectados.map((x) => (
         <div key={x.k} className="ai-alt__row ai-alt__row--on">
           <div className="ai-alt__main">
             <BrandLogo kind={x.k} name={x.nome} size={26} />
             <div className="ai-alt__txt"><b>{x.nome}</b><small>{x.det}</small></div>
-            <span className="badge badge--ok">conectada</span>
-            <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void remover(x.del)}>Desconectar</button>
+            <span className="badge badge--ok">{t('configuracoes.comum.conectada')}</span>
+            <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void remover(x.del)}>{t('configuracoes.comum.desconectar')}</button>
           </div>
         </div>
       ))}
       {!escolha ? (
         <div className="ai-byok__pick">
-          <input className="input" type="search" placeholder={`Buscar entre ${byok.length} provedores…`} value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar provedor" />
-          <ul className="ai-byok__list" aria-label="Provedores">
+          <input className="input" type="search" placeholder={t('configuracoes.byok.buscar', { n: byok.length })} value={busca} onChange={(e) => setBusca(e.target.value)} aria-label={t('configuracoes.byok.buscarAria')} />
+          <ul className="ai-byok__list" aria-label={t('configuracoes.byok.provedores')}>
             {opcoes.slice(0, 60).map((b) => (
               <li key={b.id}><button className="ai-byok__opt" onClick={() => escolher({ tipo: 'chave', id: b.id })}><BrandLogo kind={b.id} name={b.name} size={22} /> {b.name}</button></li>
             ))}
-            {!opcoes.length && <li className="muted small">Nenhum provedor com esse nome. Se ele for compatível com a OpenAI, use "Outro".</li>}
+            {!opcoes.length && <li className="muted small">{t('configuracoes.byok.nenhum')}</li>}
           </ul>
           <div className="ai-byok__extras">
-            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'outro' })}>Outro (compatível com OpenAI)</button>
-            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'lmstudio' })}>Modelo local: LM Studio</button>
-            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'ollama' })}>Modelo local: Ollama</button>
+            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'outro' })}>{t('configuracoes.byok.outro')}</button>
+            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'lmstudio' })}>{t('configuracoes.byok.modeloLocal', { nome: LOCAIS.lmstudio.nome })}</button>
+            <button className="btn btn--sm" onClick={() => escolher({ tipo: 'ollama' })}>{t('configuracoes.byok.modeloLocal', { nome: LOCAIS.ollama.nome })}</button>
           </div>
         </div>
       ) : (
         <form className="device ai-byok__form" onSubmit={(e) => { e.preventDefault(); void salvar(); }}>
           {escolha.tipo === 'chave' ? (
             <>
-              <label htmlFor="byok-chave">Chave de API — {prov?.name}{prov?.url && <> <a href={prov.url} target="_blank" rel="noreferrer noopener">(criar uma)</a></>}</label>
+              <label htmlFor="byok-chave">{t('configuracoes.byok.chaveDe', { nome: prov?.name ?? '' })}{prov?.url && <> <a href={prov.url} target="_blank" rel="noreferrer noopener">{t('configuracoes.byok.criarUma')}</a></>}</label>
               <input id="byok-chave" className="input" type="password" autoComplete="off" spellCheck={false} value={chave} autoFocus onChange={(e) => setChave(e.target.value)} />
             </>
           ) : (
             <>
               {escolha.tipo === 'outro' && (
                 <>
-                  <label htmlFor="byok-nome">Nome (como vai aparecer na lista de modelos)</label>
-                  <input id="byok-nome" className="input" maxLength={40} placeholder="Ex.: Meu provedor" value={nome} autoFocus onChange={(e) => setNome(e.target.value)} />
+                  <label htmlFor="byok-nome">{t('configuracoes.byok.nome')}</label>
+                  <input id="byok-nome" className="input" maxLength={40} placeholder={t('configuracoes.byok.nomeExemplo')} value={nome} autoFocus onChange={(e) => setNome(e.target.value)} />
                 </>
               )}
-              <label htmlFor="byok-url">{escolha.tipo === 'outro' ? 'Endereço da API (https; na maioria termina em /v1)' : `Endereço do ${LOCAIS[escolha.tipo].nome} na sua rede`}</label>
-              <input id="byok-url" className="input" type="url" spellCheck={false} placeholder={escolha.tipo === 'outro' ? 'https://api.exemplo.com/v1' : ''} value={url} autoFocus={escolha.tipo !== 'outro'} onChange={(e) => setUrl(e.target.value)} />
-              {escolha.tipo !== 'outro' && <p className="muted small">Use o endereço do computador onde o modelo roda, na rede local (ex.: 192.168.0.10). {LOCAIS[escolha.tipo].dica}</p>}
-              <label htmlFor="byok-chave">Chave de API (se o serviço pedir)</label>
+              <label htmlFor="byok-url">{escolha.tipo === 'outro' ? t('configuracoes.byok.enderecoApi') : t('configuracoes.byok.enderecoLocal', { nome: LOCAIS[escolha.tipo].nome })}</label>
+              <input id="byok-url" className="input" type="url" spellCheck={false} placeholder={escolha.tipo === 'outro' ? t('configuracoes.byok.enderecoExemplo') : ''} value={url} autoFocus={escolha.tipo !== 'outro'} onChange={(e) => setUrl(e.target.value)} />
+              {escolha.tipo !== 'outro' && <p className="muted small">{t('configuracoes.byok.localDica')} {t(LOCAIS[escolha.tipo].dica)}</p>}
+              <label htmlFor="byok-chave">{t('configuracoes.byok.chaveSePedir')}</label>
               <input id="byok-chave" className="input" type="password" autoComplete="off" spellCheck={false} value={chave} onChange={(e) => setChave(e.target.value)} />
             </>
           )}
           {err && <p className="error" role="alert">{err}</p>}
           <div className="row">
-            <button className="btn btn--sm btn--primary" disabled={busy || !pronto}>{busy ? 'Conferindo…' : 'Conectar'}</button>
-            <button type="button" className="btn btn--sm btn--ghost" onClick={() => escolher(null)}>Cancelar</button>
+            <button className="btn btn--sm btn--primary" disabled={busy || !pronto}>{busy ? t('configuracoes.comum.conferindo') : t('configuracoes.comum.conectar')}</button>
+            <button type="button" className="btn btn--sm btn--ghost" onClick={() => escolher(null)}>{t('configuracoes.comum.cancelar')}</button>
           </div>
-          <p className="muted small">{escolha.tipo === 'chave'
-            ? 'A chave é conferida no provedor e guardada no cofre da equipe de IA desta conta, cifrada. Ela não aparece de novo aqui.'
-            : 'O endereço é conferido antes de gravar, e os modelos que ele oferece passam a aparecer na escolha de modelos.'}</p>
+          <p className="muted small">{escolha.tipo === 'chave' ? t('configuracoes.byok.notaChave') : t('configuracoes.byok.notaEndereco')}</p>
         </form>
       )}
       {err && !escolha && <p className="error" role="alert">{err}</p>}

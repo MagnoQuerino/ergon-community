@@ -52,9 +52,12 @@ const PRAZO_TEXTO: Record<PrazoDepoisDeLer, string> = { '1h': 'por 1 hora', '8h'
 const DEDUPE_MS = 15 * 60_000;
 const INCERTO = /pode ter feito ou n[aã]o/i;
 /** A pessoa pede para repetir (em texto sem acento, fold): "mande de novo", "reenvie", "outra vez". */
-const REPETIR = /\b(de novo|novamente|outra vez|mais uma vez|reenvi\w*|reencaminh\w*|repita|repetir)\b/;
-/** Ao organizar, a pessoa pede outro igual de propósito ("outra venda igual", "mais um lançamento"), em texto sem acento. */
-const OUTRO_IGUAL = /\b(?:outr[ao]s?|mais uma?)\s+(?:\w+\s+){0,2}?(?:igua(?:l|is)|venda|lancamento|conta|cadastro|registro)\b/;
+const REPETIR = /\b(de novo|novamente|outra vez|mais uma vez|reenvi\w*|reencaminh\w*|repita|repetir|again|one more time|resend\w*|re-send\w*|re-?forward\w*|repeat)\b/;
+/**
+ * Ao organizar, a pessoa pede outro igual de propósito ("outra venda igual", "mais um lançamento"; "another identical
+ * sale", "one more entry"), em texto sem acento.
+ */
+const OUTRO_IGUAL = /\b(?:outr[ao]s?|mais uma?)\s+(?:\w+\s+){0,2}?(?:igua(?:l|is)|venda|lancamento|conta|cadastro|registro)\b|\b(?:another|one more)\s+(?:\w+\s+){0,2}?(?:identical|same|sale|entry|account|record|registration)\b/;
 const MAX_RESPOSTA = 30_000;
 
 export interface RespostaAcao {

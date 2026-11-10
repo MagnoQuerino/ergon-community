@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { splashHtml } from './src/brand/logo.ts';
+import geral from './src/i18n/pt/geral.ts';
 
 // versão única (package.json da raiz) gravada na interface: uma aba antiga percebe quando o servidor foi atualizado
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
@@ -16,7 +17,8 @@ function brand(): Plugin {
     name: 'ergon-brand',
     transformIndexHtml: (html) => html
       .replace('<!--ergon:brand-css-->', `<style>${css()}</style>`)
-      .replace('<!--ergon:splash-->', splashHtml()),
+      // antes de o app carregar a página nasce em pt-BR (index.html); o app troca a legenda para o idioma da pessoa
+      .replace('<!--ergon:splash-->', splashHtml(geral['comum.carregando'])),
   };
 }
 

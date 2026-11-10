@@ -6,7 +6,9 @@
 //   3. as ferramentas entram no botão "Mais";
 //   4. janela de celular: o Localizar fica só com o ícone (o nome segue no aria-label);
 //   5. último recurso (janela bem estreita, 320 px): o indicador de menor prioridade (entregas) entra no "Mais".
-// A decisão é pura (testável); quem mede é o componente (CityBar.tsx), antes de pintar.
+// A decisão é pura (testável); quem mede é o componente (CityBar.tsx), antes de pintar. Os textos saem no idioma atual
+// (quem chama redesenha na troca: CityBar e AmbienteView usam useT()).
+import { fmtNumero, t } from '../i18n/index.ts';
 
 export const NIVEL_MAX = 5;
 
@@ -19,8 +21,8 @@ export function proximoNivel(nivel: number, precisa: number, tem: number): numbe
 export interface ModoCidade { icon: 'walk' | 'stand'; label: string; title: string }
 export function modoCidade(calmo: boolean): ModoCidade {
   return calmo
-    ? { icon: 'stand', label: 'Modo calmo', title: 'Modo calmo: sem passeios nem lazer; o trabalho, as etiquetas e as decisões continuam à vista. Clique para a cidade viva.' }
-    : { icon: 'walk', label: 'Cidade viva', title: 'Cidade viva: passeios e lazer. Clique para o modo calmo (menos movimento, o trabalho continua à vista).' };
+    ? { icon: 'stand', label: t('cidade.barra.modoCalmo'), title: t('cidade.barra.modoCalmoDica') }
+    : { icon: 'walk', label: t('cidade.barra.cidadeViva'), title: t('cidade.barra.cidadeVivaDica') };
 }
 
 /** Degrau 5: os indicadores que ficam à vista e os que entram no menu "Mais" (só as entregas; o resto nunca sai). */
@@ -33,11 +35,11 @@ export function noMenuMais<T extends { key: string }>(track: T[], nivel: number)
 export interface Indicador { key: 'trabalho' | 'voce' | 'entregas'; icon: string; texto: string; curto: string; title: string; atencao?: boolean }
 export function indicadores(o: { busy: number; limit: number | null; decisoes: number; entregas: number }): Indicador[] {
   const out: Indicador[] = [{
-    key: 'trabalho', icon: 'layers', texto: `${o.busy} em andamento${o.limit !== null ? ` de ${o.limit}` : ''}`, curto: String(o.busy),
-    title: 'Central de Trabalho: o que está em andamento, o que espera e por quê',
+    key: 'trabalho', icon: 'layers', curto: fmtNumero(o.busy), title: t('cidade.barra.emAndamentoDica'),
+    texto: o.limit !== null ? t('cidade.barra.emAndamentoDe', { n: o.busy, limite: fmtNumero(o.limit) }) : t('cidade.barra.emAndamento', { n: o.busy }),
   }];
-  if (o.decisoes > 0) out.push({ key: 'voce', icon: 'bell', texto: `${o.decisoes} precisa${o.decisoes === 1 ? '' : 'm'} de você`, curto: String(o.decisoes), title: 'Aguardando você: responder, aprovar ou devolver', atencao: true });
-  if (o.entregas > 0) out.push({ key: 'entregas', icon: 'check', texto: `${o.entregas} entrega${o.entregas === 1 ? '' : 's'}`, curto: String(o.entregas), title: 'Entregas recentes' });
+  if (o.decisoes > 0) out.push({ key: 'voce', icon: 'bell', texto: t('cidade.barra.precisaDeVoce', { n: o.decisoes }), curto: fmtNumero(o.decisoes), title: t('cidade.barra.precisaDeVoceDica'), atencao: true });
+  if (o.entregas > 0) out.push({ key: 'entregas', icon: 'check', texto: t('cidade.barra.entregas', { n: o.entregas }), curto: fmtNumero(o.entregas), title: t('cidade.barra.entregasDica') });
   return out;
 }
 

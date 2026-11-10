@@ -5,8 +5,9 @@ import { inDesktopApp, rollbackInDesktopApp } from '../lib/desktop.ts';
 import { anteriores, textoVersoesAnteriores, voltaNaLista } from '../lib/atualizacoes.ts';
 import { savePrefs, usePrefs } from '../lib/prefs.ts';
 import type { VersionInfo } from '../lib/types.ts';
+import { fmtData, fmtDataHora, tn, useT } from '../i18n/index.ts';
 
-const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
+const dia = (iso: string | null) => (iso ? fmtData(iso, { day: '2-digit', month: 'short', year: 'numeric' }) : '');
 
 /**
  * Configurações › Atualizações: a versão instalada, "Verificar agora", atualizar (no Ergon Desktop, a tela do aplicativo
@@ -18,6 +19,7 @@ const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-
  * outros casos, a página da versão.
  */
 export function AtualizacoesPanel({ admin }: { admin: boolean }) {
+  const t = useT();
   const v = useResource<VersionInfo>('/api/version', []);
   const prefs = usePrefs();
   const desktop = inDesktopApp();
@@ -33,8 +35,8 @@ export function AtualizacoesPanel({ admin }: { admin: boolean }) {
     setBusy(true); setMsg(null);
     try {
       const r = await api.get<VersionInfo>('/api/version?verificar=1');
-      setMsg(r.updateAvailable && r.latest ? null : r.latest ? { kind: 'ok', text: 'Você está na versão mais recente.' }
-        : { kind: 'error', text: r.configured ? 'Não deu para consultar as versões agora (sem internet?). Tente de novo daqui a pouco.' : 'Esta instalação não consulta versões novas (cópia do código: atualiza pelo próprio código).' });
+      setMsg(r.updateAvailable && r.latest ? null : r.latest ? { kind: 'ok', text: t('configuracoes.atual.maisRecente') }
+        : { kind: 'error', text: r.configured ? t('configuracoes.atual.semConsulta') : t('configuracoes.atual.naoConsulta') });
       v.reload();
     } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); }
   };
@@ -42,60 +44,62 @@ export function AtualizacoesPanel({ admin }: { admin: boolean }) {
     setBackup({ busy: true, text: null, err: false });
     try {
       await api.post('/api/admin/backup');
-      setBackup({ busy: false, err: false, text: 'Backup feito e conferido. Ele fica com a instalação e o lançador copia para a pasta de backups do computador.' });
+      setBackup({ busy: false, err: false, text: t('configuracoes.atual.backupFeito') });
     } catch (e) { setBackup({ busy: false, err: true, text: errMsg(e) }); }
   };
   const nova = d.updateAvailable && d.latest ? d.latest : null;
   const teste = d.version.includes('-');
+  const canal = teste ? t('configuracoes.atual.canalTeste') : t('configuracoes.atual.canalEstavel');
 
   return (
     <>
       <section className="card">
-        <h3>Versão instalada</h3>
-        <p>Ergon <b>{d.version}</b>{d.build !== 'dev' ? ` (${d.build})` : ''} · {teste ? 'canal de teste (pré-versões)' : 'canal estável'}
-          {d.checkedAt ? <span className="muted"> · consultado em {new Date(d.checkedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span> : null}</p>
+        <h3>{t('configuracoes.atual.titulo')}</h3>
+        <p>{d.build !== 'dev'
+          ? tn('configuracoes.atual.linhaBuild', { versao: <b>{d.version}</b>, build: d.build, canal })
+          : tn('configuracoes.atual.linha', { versao: <b>{d.version}</b>, canal })}
+          {d.checkedAt ? <span className="muted"> · {t('configuracoes.atual.consultado', { quando: fmtDataHora(d.checkedAt) })}</span> : null}</p>
         {nova ? (
           <div className="upd-new">
-            <p><b>Versão {nova.version} disponível.</b> {desktop ? 'A atualização faz um backup dos dados antes e, se a versão nova não responder, volta sozinha para esta.' : 'Baixe o instalador na página da versão e instale por cima desta; seus dados ficam.'}</p>
-            {nova.notes && <details><summary>O que mudou</summary><pre className="upd-notes">{nova.notes}</pre></details>}
+            <p><b>{t('configuracoes.atual.novaDisponivel', { versao: nova.version })}</b> {desktop ? t('configuracoes.atual.novaDesktop') : t('configuracoes.atual.novaWeb')}</p>
+            {nova.notes && <details><summary>{t('configuracoes.atual.oQueMudou')}</summary><pre className="upd-notes">{nova.notes}</pre></details>}
             <div className="row">
               {desktop
-                ? <button className="btn btn--primary" onClick={() => { location.href = '/__desktop/atualizacoes'; }}>Atualizar agora</button>
-                : nova.url && <a className="btn btn--primary" href={nova.url} target="_blank" rel="noreferrer noopener">Baixar a versão {nova.version}</a>}
+                ? <button className="btn btn--primary" onClick={() => { location.href = '/__desktop/atualizacoes'; }}>{t('configuracoes.atual.atualizarAgora')}</button>
+                : nova.url && <a className="btn btn--primary" href={nova.url} target="_blank" rel="noreferrer noopener">{t('configuracoes.atual.baixarVersao', { versao: nova.version })}</a>}
             </div>
           </div>
         ) : null}
         <div className="row">
-          <button className="btn" onClick={() => void verificar()}>{busy ? 'Verificando…' : 'Verificar agora'}</button>
+          <button className="btn" onClick={() => void verificar()}>{busy ? t('configuracoes.atual.verificando') : t('configuracoes.atual.verificar')}</button>
         </div>
         {msg && <p className={msg.kind === 'ok' ? 'ok' : 'error'} role="status">{msg.text}</p>}
       </section>
 
       <section className="card">
         <div className="row sec-toggle">
-          <h3>Avisar quando sair versão nova</h3>
-          <button role="switch" aria-checked={prefs.updateNotice} aria-label="Procurar versão nova ao abrir o Ergon" className={`switch ${prefs.updateNotice ? 'switch--on' : ''}`}
+          <h3>{t('configuracoes.atual.avisoTitulo')}</h3>
+          <button role="switch" aria-checked={prefs.updateNotice} aria-label={t('configuracoes.atual.avisoAria')} className={`switch ${prefs.updateNotice ? 'switch--on' : ''}`}
             onClick={() => savePrefs({ updateNotice: !prefs.updateNotice })}>
-            <span className="switch__knob" /><span className="switch__txt">{prefs.updateNotice ? 'Ligado' : 'Desligado'}</span>
+            <span className="switch__knob" /><span className="switch__txt">{prefs.updateNotice ? t('configuracoes.comum.ligado') : t('configuracoes.comum.desligado')}</span>
           </button>
         </div>
         {prefs.updateNotice
-          ? <p>Ligado: ao abrir, o aplicativo consulta a página de versões e, se houver uma nova, mostra “Atualização disponível” no alto da tela. Nenhum dado seu vai junto.</p>
-          : <p>Desligado: versão nova só é procurada quando você clica em “Verificar agora”.</p>}
+          ? <p>{t('configuracoes.atual.avisoLigado')}</p>
+          : <p>{t('configuracoes.atual.avisoDesligado')}</p>}
       </section>
 
       <section className="card">
-        <h3>Voltar para uma versão anterior</h3>
-        <p>Use só se a versão nova trouxe um problema que atrapalha o seu trabalho. <b>Atenção:</b> o que foi criado ou mudado na versão
-          mais nova pode não abrir, ou abrir com defeito, na anterior. Faça um backup antes.</p>
+        <h3>{t('configuracoes.atual.voltarTitulo')}</h3>
+        <p>{tn('configuracoes.atual.voltarTexto', { atencao: <b>{t('configuracoes.atual.atencao')}</b> })}</p>
         {admin && (
           <div className="row">
-            <button className="btn" onClick={() => void fazerBackup()}>{backup.busy ? 'Fazendo backup…' : 'Fazer backup agora'}</button>
+            <button className="btn" onClick={() => void fazerBackup()}>{backup.busy ? t('configuracoes.atual.fazendoBackup') : t('configuracoes.comum.fazerBackup')}</button>
           </div>
         )}
         {backup.text && <p className={backup.err ? 'error' : 'ok'} role="status">{backup.text}</p>}
         {!voltar ? (
-          <div className="row"><button className="btn" onClick={() => { setVoltar(true); if (!d.previous?.length) void verificar(); }}>Ver versões anteriores</button></div>
+          <div className="row"><button className="btn" onClick={() => { setVoltar(true); if (!d.previous?.length) void verificar(); }}>{t('configuracoes.atual.verAnteriores')}</button></div>
         ) : d.previous && d.previous.length > 0 ? (
           <>
             <p className="muted small">{textoVersoesAnteriores({ app: voltaPeloApp, admin })}</p>
@@ -104,18 +108,18 @@ export function AtualizacoesPanel({ admin }: { admin: boolean }) {
                 const volta = voltaNaLista(r, { app: voltaPeloApp, admin });
                 return (
                   <li key={r.version}>
-                    <span><b>{r.version}</b>{r.prerelease ? ' · pré-versão' : ''}{r.publishedAt ? <span className="muted"> · {dia(r.publishedAt)}</span> : null}
+                    <span><b>{r.version}</b>{r.prerelease ? ` · ${t('configuracoes.atual.preVersao')}` : ''}{r.publishedAt ? <span className="muted"> · {dia(r.publishedAt)}</span> : null}
                       {volta.nota && <span className="muted small upd-nota">{volta.nota}</span>}</span>
                     <span className="row upd-acoes">
-                      {volta.voltar && <button className="btn btn--sm" onClick={() => { location.href = volta.voltar!; }}>Voltar para esta versão</button>}
-                      {r.url && <a className="btn btn--sm" href={r.url} target="_blank" rel="noreferrer noopener">Página da versão</a>}
+                      {volta.voltar && <button className="btn btn--sm" onClick={() => { location.href = volta.voltar!; }}>{t('configuracoes.atual.voltarBotao')}</button>}
+                      {r.url && <a className="btn btn--sm" href={r.url} target="_blank" rel="noreferrer noopener">{t('configuracoes.atual.paginaDaVersao')}</a>}
                     </span>
                   </li>
                 );
               })}
             </ul>
           </>
-        ) : <p className="muted">{busy ? 'Consultando…' : 'A lista de versões ainda não veio. Clique em “Verificar agora”.'}</p>}
+        ) : <p className="muted">{busy ? t('configuracoes.atual.consultando') : t('configuracoes.atual.semLista')}</p>}
       </section>
     </>
   );

@@ -43,6 +43,26 @@ test('"Ver": .md formatado, texto, .csv em tabela, imagem e PDF; Word e Excel s�
   assert.equal(previaDe('pagina.html', 'text/html'), 'baixar', 'HTML nunca é mostrado');
 });
 
+test('em inglês: as mesmas linhas no idioma da tela, com o nome do agente como está', async () => {
+  const { setIdioma } = await import('../i18n/index.ts');
+  await setIdioma('en', { guardar: false });
+  try {
+    const l = linhaDoHistorico(linha({ action: 'agent.result.succeeded', actor_type: 'agent', actor_id: 'agt_a', evidence: JSON.stringify({ output: 'ok' }) }), nomeDe);
+    assert.equal(l.titulo, 'Aspásia delivered');
+    assert.equal(linhaDoHistorico(linha({ action: 'task.create', actor_type: 'user' }), nomeDe).titulo, 'Card created');
+    assert.equal(linhaDoHistorico(linha({ action: 'task.create', actor_type: 'user' }), nomeDe).quem, 'you');
+    assert.equal(linhaDoHistorico(linha({ action: 'task.queue_start' }), nomeDe).titulo, 'Started working');
+    assert.equal(linhaDoHistorico(linha({ action: 'acao.que.nao.existe' }), nomeDe).titulo, 'Entry');
+    assert.equal(criterioSimples({ id: 'modelo', label: 'x', ok: true }).texto, 'Written by the agent with the AI account');
+    assert.equal(criterioSimples({ id: 'novo', label: 'Rótulo do servidor', ok: true }).texto, 'Rótulo do servidor', 'ponto sem tradução: o rótulo do servidor');
+    assert.equal(justificativaSimples('Concluída com evidência: 5 critérios atendidos, 1 entregável(is) no card.'), 'Everything the check asks for was met; the delivered file is on the card.');
+    assert.equal(justificativaSimples('Concluída com evidência: 5 critérios atendidos, 3 entregável(is) no card.'), 'Everything the check asks for was met; the 3 delivered files are on the card.');
+    assert.equal(justificativaSimples('Concluída com evidência: 4 critérios atendidos.'), 'Everything the check asks for was met.');
+  } finally {
+    await setIdioma('pt-BR', { guardar: false });
+  }
+});
+
 // a tela nunca fala do modo de teste nem jura que é "de verdade": essas frases não existem mais no app
 const PROIBIDAS = /n[aã]o simulad[ao]|\(n[aã]o simulada\)|dados reais|n[aã]o [eé] demonstra[cç][aã]o|modo simulado:/i;
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -73,4 +93,11 @@ test('nenhuma tela fala de simulação nem põe o selo "real" (a falta de conta 
     const texto = semComentarios(fs.readFileSync(path.join(raiz, f), 'utf8'));
     assert.doesNotMatch(texto, /respostas simuladas|modo de simula[cç][aã]o|SIMULADAS/, f);
   }
+});
+
+test('inglês da tarefa: o mesmo papel com o mesmo nome, a revisão com o complemento e a leitura do aplicativo sem confundir com a conferência', async () => {
+  const { default: en } = await import('../i18n/en/tarefa.ts');
+  assert.equal(en['nomes.quemFezInicio'].toLowerCase(), en['nomes.quemFez'], 'quem fez: um termo só');
+  assert.match(en['msg.revisaoPedida'], /ask \{autor\} some questions\.$/);
+  assert.doesNotMatch(en['acao.naoApareceu'], /\bcheck/i, 'a conferência usa "check"; a leitura do aplicativo não');
 });

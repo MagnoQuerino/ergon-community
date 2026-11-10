@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { api, setCsrf, setGuard } from './lib/api.ts';
 import { startActivity } from './lib/activity.ts';
-import { THEME_ICON, THEME_LABEL, THEME_NEXT, setThemeMode, useTheme } from './lib/theme.ts';
+import { THEME_ICON, THEME_NEXT, rotuloDoTema, setThemeMode, useTheme } from './lib/theme.ts';
+import { fmtCompacto, fmtDataHora, fmtHora, fmtMoeda, fmtNumero, tn, useIdioma, useT } from './i18n/index.ts';
 import { clearResourceCache, prefetchResources, startLive, useLiveStatus, useResource } from './lib/live.ts';
 import type { AppState, AuthState, Me, Usage, VersionInfo, View } from './lib/types.ts';
 import { AuthFlow, AutoUnlockPrompt, LockOverlay, PersonOpenScreen, ProtectScreen, ReauthDialog } from './components/AuthFlow.tsx';
@@ -43,6 +44,8 @@ type Auth = { state: 'loading' } | { state: 'out'; st: AuthState } | { state: 'i
 type Waiter = (ok: boolean) => void;
 
 export function App() {
+  // trocar de idioma redesenha a tela inteira na hora (sem recarregar e sem perder o que está aberto)
+  useIdioma();
   const [auth, setAuth] = useState<Auth>({ state: 'loading' });
   const [locked, setLocked] = useState(false);
   const [reauth, setReauth] = useState(false);
@@ -60,7 +63,8 @@ export function App() {
       if (s.sealed || s.needsSetup || !s.authenticated) { clearResourceCache(); release(lockWaiters, false); release(reauthWaiters, false); setLocked(false); return setAuth({ state: 'out', st: s }); }
       const me = await api.get<Me>('/api/me');
       setCsrf(me.csrf);
-      initPrefs(me.prefs);
+      // o idioma da pessoa já com o dicionário baixado antes de a tela dela aparecer (nada de trocar de língua na frente dela)
+      await initPrefs(me.prefs, me.user.id);
       // volume e aleatório da música são da pessoa; nada começa a tocar aqui
       music.configure(me.prefs, (p) => savePrefs(p));
       setLocked(me.locked);
@@ -103,33 +107,36 @@ export function App() {
   );
 }
 
-const NAV: Array<{ id: View; label: string; icon: string }> = [
-  { id: 'ambiente', label: 'Cidade', icon: 'temple' },
-  { id: 'agentes', label: 'Equipe', icon: 'users' },
-  { id: 'rotinas', label: 'Rotinas', icon: 'repeat' },
-  { id: 'equipe', label: 'Fluxos da equipe', icon: 'layers' },
-  { id: 'tarefas', label: 'Tarefas', icon: 'tasks' },
-  { id: 'documentos', label: 'Documentos', icon: 'folder' },
-  { id: 'atividade', label: 'Atividade', icon: 'activity' },
-  { id: 'conexoes', label: 'Conexões', icon: 'plug' },
-  { id: 'configuracao', label: 'Configurações', icon: 'gear' },
+// os nomes ficam como chave e são traduzidos na hora de mostrar (a troca de idioma redesenha o menu)
+type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'configuracoes' | 'ajuda'}`;
+const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
+  { id: 'ambiente', label: 'geral.nav.cidade', icon: 'temple' },
+  { id: 'agentes', label: 'geral.nav.equipe', icon: 'users' },
+  { id: 'rotinas', label: 'geral.nav.rotinas', icon: 'repeat' },
+  { id: 'equipe', label: 'geral.nav.fluxos', icon: 'layers' },
+  { id: 'tarefas', label: 'geral.nav.tarefas', icon: 'tasks' },
+  { id: 'documentos', label: 'geral.nav.documentos', icon: 'folder' },
+  { id: 'atividade', label: 'geral.nav.atividade', icon: 'activity' },
+  { id: 'conexoes', label: 'geral.nav.conexoes', icon: 'plug' },
+  { id: 'configuracao', label: 'geral.nav.configuracoes', icon: 'gear' },
 ];
 /** no pé do menu: manuais, dicas e contornos */
-const HELP_NAV = { id: 'ajuda' as View, label: 'Ajuda', icon: 'help' };
+const HELP_NAV: { id: View; label: ChaveNav; icon: string } = { id: 'ajuda', label: 'geral.nav.ajuda', icon: 'help' };
 
-/** Tour inicial: um passo por área (os textos usam o nome de quem coordena hoje). */
-const tourSteps = (coord: string): TourStep[] => [
-  { target: 'nav-ambiente', title: 'Cidade', text: `A cidade da sua equipe. Cada pessoa nas construções é um agente; clique em alguém para conversar.` },
-  { target: 'nav-agentes', title: 'Equipe', text: `Os personagens da equipe, por setor ou por construção: arraste para reorganizar, clique para abrir o perfil, crie agentes com prévia. Ou peça a ${coord}.` },
-  { target: 'nav-rotinas', title: 'Rotinas', text: 'Trabalhos que se repetem sozinhos, como o Briefing Diário. Ao ativar, a rotina se adapta ao seu jeito.' },
-  { target: 'nav-equipe', title: 'Fluxos da equipe', text: 'O quadro onde os agentes trabalham: cada card tem responsável e o histórico do que foi feito.' },
-  { target: 'nav-tarefas', title: 'Tarefas', text: 'As suas tarefas. Quando quiser ajuda, envie qualquer uma para a equipe.' },
-  { target: 'decisions', title: 'Aguardando você', text: 'Tudo que precisa da sua decisão: propostas da equipe, perguntas e sugestões. Nada importante muda sem o seu clique.' },
-  { target: 'nav-conexoes', title: 'Conexões', text: 'Conecte a sua conta de IA (é ela que põe a equipe para trabalhar), e-mail, WhatsApp e quadros de tarefas.' },
-  { target: 'nav-ajuda', title: 'Ajuda', text: `Manuais, dicas e contornos para quando algo não sair como esperado. E ${coord} sempre pode ajudar na conversa.` },
+/** Tour inicial: um passo por área (os textos usam o nome de quem coordena hoje). Montado na hora, no idioma atual. */
+const tourSteps = (t: ReturnType<typeof useT>, coord: string): TourStep[] => [
+  { target: 'nav-ambiente', title: t('geral.nav.cidade'), text: t('geral.tour.cidade') },
+  { target: 'nav-agentes', title: t('geral.nav.equipe'), text: t('geral.tour.equipe', { coord }) },
+  { target: 'nav-rotinas', title: t('geral.nav.rotinas'), text: t('geral.tour.rotinas') },
+  { target: 'nav-equipe', title: t('geral.nav.fluxos'), text: t('geral.tour.fluxos') },
+  { target: 'nav-tarefas', title: t('geral.nav.tarefas'), text: t('geral.tour.tarefas') },
+  { target: 'decisions', title: t('geral.tour.aguardando'), text: t('geral.tour.aguardandoTexto') },
+  { target: 'nav-conexoes', title: t('geral.nav.conexoes'), text: t('geral.tour.conexoes') },
+  { target: 'nav-ajuda', title: t('geral.nav.ajuda'), text: t('geral.tour.ajuda', { coord }) },
 ];
 
 function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLogout: () => void; onIdle: () => void; onMeChanged: () => void; onOverlay: (on: boolean) => void }) {
+  const t = useT();
   const st = useResource<AppState>('/api/state', ['runs.changed', 'agents.changed', 'tasks.changed', 'rules.changed', 'city.changed', 'proposals.changed', 'integrations.changed']);
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed', 'agents.changed']);
   // versão do servidor (relida ao reconectar): servidor atualizado com esta aba aberta pede recarregar
@@ -216,7 +223,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
 
   // a equipe sem a lista inteira: o Coordenador e uns nomes para as dicas (o resto vem por partes, em cada tela)
   const coordinator = s.team.coordinator;
-  const coordLabel = coordinator?.name ?? 'a coordenação';
+  const coordLabel = coordinator?.name ?? t('geral.comum.aCoordenacao');
   // a janela abre pelo id, já com a linha leve de quem abriu (o perfil completo chega por baixo); o recente é
   // gravado pela própria janela quando o perfil chega
   const openAgent = (id: string, tab: 'conversa' | 'perfil' | 'atividade' = 'conversa', draft: string | null = null, conversationId: string | null = null, lite: AgentHead | null = null) => {
@@ -226,21 +233,22 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const askCoordinator = (text: string) => { if (coordinator) openAgent(coordinator.id, 'conversa', text); };
   const startTour = () => { setFocus(false); setWin(null); setDecisions(false); setTour(true); };
   const endTour = () => { setTour(false); savePrefs({ tourDone: true }); };
-  const tipOther = s.team.others[0]?.name ?? 'um agente';
+  const tipOther = s.team.others[0]?.name ?? t('geral.comum.umAgente');
   const sim = s.executor.mode === 'simulated';
 
   // avisos que pedem ação: nunca somem por falta de espaço (na janela estreita viram um contador que abre o Estado)
   const alerts: Alert[] = [
-    ...(sim ? [{ id: 'sim', label: 'SEM CONTA DE IA', tone: 'warn' as const, title: 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é a assinatura Nous. Veja Configurações.', act: () => setView('configuracao') }] : []),
-    ...(ver.data && ver.data.version !== __ERGON_VERSION__ ? [{ id: 'reload', label: 'NOVA VERSÃO · RECARREGAR', tone: 'warn' as const, title: `O Ergon foi atualizado para a versão ${ver.data.version}. Esta aba ainda está com a ${__ERGON_VERSION__}.`, act: () => location.reload() }] : []),
+    ...(sim ? [{ id: 'sem-ia', label: t('geral.alerta.semIa'), tone: 'warn' as const, title: t('geral.alerta.semIaDica'), act: () => setView('configuracao') }] : []),
+    ...(ver.data && ver.data.version !== __ERGON_VERSION__ ? [{ id: 'reload', label: t('geral.alerta.novaVersao'), tone: 'warn' as const, title: t('geral.alerta.novaVersaoDica', { nova: ver.data.version, atual: __ERGON_VERSION__ }), act: () => location.reload() }] : []),
   ];
   // trocar de área limpa o endereço antes (o card aberto numa área não reabre na outra: o painel não fecha mais antes do clique)
   const go = (v: View) => { setFocus(false); setCard(null); if (location.hash.slice(1) !== v) history.replaceState(null, '', `#${v}`); setView(v); };
   // a busca leva a um card (quadro certo, card aberto no endereço), a uma rotina ou a um recente
   const goHash = (href: string) => { setFocus(false); location.hash = href; };
-  const openCard = (t: CardHit) => {
-    const href = t.audience === 'team' ? `#equipe?card=${t.id}` : `#tarefas?board=${t.board_id}&card=${t.id}`;
-    pushRecent({ kind: 'card', id: t.id, label: `#${t.number} ${t.title}`, where: t.audience === 'team' ? 'Fluxos da equipe' : 'Tarefas', href });
+  // o quadro do recente (Fluxos da equipe ou Tarefas) a busca tira do endereço, no idioma da hora
+  const openCard = (c: CardHit) => {
+    const href = c.audience === 'team' ? `#equipe?card=${c.id}` : `#tarefas?board=${c.board_id}&card=${c.id}`;
+    pushRecent({ kind: 'card', id: c.id, label: `#${c.number} ${c.title}`, href });
     goHash(href);
   };
   // créditos da música: Configurações rolada até eles, com o bloco aberto (de novo, se já estiver lá)
@@ -256,22 +264,22 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   };
   const paletteBase: { acoes: PaletteItem[]; areas: PaletteItem[] } = {
     acoes: [
-      ...(coordinator ? [{ key: 'a-pedir', label: `Pedir a ${coordinator.name}`, sub: 'Encaminha a quem faz', icon: 'chat', keywords: 'conversar perguntar', run: () => openAgent(coordinator.id, 'conversa') }] : []),
-      { key: 'a-decisoes', label: 'Aguardando você', sub: `${s.decisionsPending} pendente(s)`, icon: 'bell', keywords: 'decisoes propostas aprovar', run: () => setDecisions(true) },
-      { key: 'a-foco', label: focus ? 'Sair do Modo Foco' : 'Modo Foco', sub: 'O trabalho sem a cidade', icon: 'focus', run: () => setFocus((f) => !f) },
-      { key: 'a-estado', label: 'Estado do Ergon', sub: 'Processos, consumo e avisos', icon: 'pulse', keywords: 'execucoes consumo', run: () => setStatusOpen(true) },
-      { key: 'a-limite', label: 'Trabalhos ao mesmo tempo', sub: 'Configurações › Andamento da equipe', icon: 'gauge', keywords: 'limite concorrencia fila', run: () => go('configuracao') },
-      { key: 'a-seguranca', label: 'Segurança', sub: 'Configurações › Segurança', icon: 'shield', keywords: 'senha frase recuperacao', run: () => goHash('#configuracao?seguranca') },
-      { key: 'a-tour', label: 'Fazer o tour', sub: 'Uma volta rápida pelas áreas', icon: 'compass', keywords: 'ajuda', run: () => startTour() },
+      ...(coordinator ? [{ key: 'a-pedir', label: t('geral.barra.pedirA', { nome: coordinator.name }), sub: t('geral.busca.pedirSub'), icon: 'chat', keywords: t('geral.busca.pedirPalavras'), run: () => openAgent(coordinator.id, 'conversa') }] : []),
+      { key: 'a-decisoes', label: t('geral.busca.aguardando'), sub: t('geral.busca.pendentes', { n: s.decisionsPending }), icon: 'bell', keywords: t('geral.busca.aguardandoPalavras'), run: () => setDecisions(true) },
+      { key: 'a-foco', label: focus ? t('geral.busca.sairDoFoco') : t('geral.barra.modoFoco'), sub: t('geral.busca.focoSub'), icon: 'focus', run: () => setFocus((f) => !f) },
+      { key: 'a-estado', label: t('geral.busca.estado'), sub: t('geral.busca.estadoSub'), icon: 'pulse', keywords: t('geral.busca.estadoPalavras'), run: () => setStatusOpen(true) },
+      { key: 'a-limite', label: t('geral.busca.limite'), sub: t('geral.busca.limiteSub'), icon: 'gauge', keywords: t('geral.busca.limitePalavras'), run: () => go('configuracao') },
+      { key: 'a-seguranca', label: t('geral.busca.seguranca'), sub: t('geral.busca.segurancaSub'), icon: 'shield', keywords: t('geral.busca.segurancaPalavras'), run: () => goHash('#configuracao?seguranca') },
+      { key: 'a-tour', label: t('geral.busca.tour'), sub: t('geral.busca.tourSub'), icon: 'compass', keywords: t('geral.busca.tourPalavras'), run: () => startTour() },
     ],
-    areas: [...NAV, HELP_NAV].map((n) => ({ key: `v-${n.id}`, label: n.label, icon: n.icon, run: () => go(n.id) })),
+    areas: [...NAV, HELP_NAV].map((n) => ({ key: `v-${n.id}`, label: t(n.label), icon: n.icon, run: () => go(n.id) })),
   };
   const navItems = (inDrawer: boolean) => (
     <>
       {[...NAV, HELP_NAV].map((n) => (
         <button key={n.id} data-tour={inDrawer ? undefined : `nav-${n.id}`} data-autofocus={inDrawer && view === n.id ? '' : undefined} className={`nav ${n.id === HELP_NAV.id ? 'nav--foot' : ''} ${view === n.id && !focus ? 'nav--on' : ''}`}
-          onClick={() => { go(n.id); if (inDrawer) setNavOpen(false); }} aria-current={view === n.id && !focus ? 'page' : undefined} title={navCompact && !inDrawer ? n.label : undefined}>
-          <Icon name={n.icon} /> <span className="nav__label">{n.label}</span>
+          onClick={() => { go(n.id); if (inDrawer) setNavOpen(false); }} aria-current={view === n.id && !focus ? 'page' : undefined} title={navCompact && !inDrawer ? t(n.label) : undefined}>
+          <Icon name={n.icon} /> <span className="nav__label">{t(n.label)}</span>
         </button>
       ))}
     </>
@@ -281,41 +289,41 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   return (
     <div className={`shell ${focus ? 'shell--focus' : ''} ${navCompact ? 'shell--compact' : ''}`}>
       {/* teclado: o primeiro Tab oferece pular o cabeçalho e o menu (WCAG 2.4.1) */}
-      <button className="skip" onClick={() => document.querySelector<HTMLElement>('main.main')?.focus()}>Pular para o conteúdo</button>
+      <button className="skip" onClick={() => document.querySelector<HTMLElement>('main.main')?.focus()}>{t('geral.barra.pularConteudo')}</button>
       <header className="topbar">
-        <button className="tb-icon topbar__menu" data-keep-surface onClick={() => setNavOpen((v) => !v)} aria-label={['Menu', alerts.length ? `${alerts.length} aviso(s) no Estado` : '', upd ? 'atualização disponível' : ''].filter(Boolean).join(' · ')} title="Menu" aria-expanded={navOpen} aria-controls="nav-drawer">
+        <button className="tb-icon topbar__menu" data-keep-surface onClick={() => setNavOpen((v) => !v)} aria-label={[t('geral.barra.menu'), alerts.length ? t('geral.barra.menuAvisos', { n: alerts.length }) : '', upd ? t('geral.barra.menuAtualizacao') : ''].filter(Boolean).join(' · ')} title={t('geral.barra.menu')} aria-expanded={navOpen} aria-controls="nav-drawer">
           <Icon name="menu" size={20} />
           {/* só na janela estreita (o Estado e o aviso de versão ficam na gaveta): o menu avisa que há algo lá */}
           {(alerts.length > 0 || !!upd) && <span className="tb-badge tb-badge--warn topbar__menu-badge" aria-hidden="true">!</span>}
         </button>
-        <div className="brand" title={live.status === 'ao_vivo' ? `Conectado ao servidor local · atualizado às ${(live.at ?? new Date(s.serverTime)).toLocaleTimeString('pt-BR', { timeStyle: 'short' })}` : live.status === 'conectando' ? 'Conectando ao servidor local…' : 'Reconectando ao servidor local…'}>
+        <div className="brand" title={live.status === 'ao_vivo' ? t('geral.barra.conectado', { hora: fmtHora(live.at ?? new Date(s.serverTime)) }) : live.status === 'conectando' ? t('geral.barra.conectando') : t('geral.barra.reconectando')}>
           {/* o logo leva de volta à Cidade, de qualquer tela */}
-          <button type="button" className="brand__home" onClick={() => go('ambiente')} aria-label="Ir para a Cidade" title="Cidade"><ErgonLogo kind="horizontal" onDark height={28} /></button>
-          <span className={`dot ${live.status === 'ao_vivo' ? 'dot--green' : 'dot--amber dot--pulse'}`} role="img" aria-label={live.status === 'ao_vivo' ? 'conectado' : 'reconectando'} />
+          <button type="button" className="brand__home" onClick={() => go('ambiente')} aria-label={t('geral.barra.irParaCidade')} title={t('geral.barra.cidade')}><ErgonLogo kind="horizontal" onDark height={28} /></button>
+          <span className={`dot ${live.status === 'ao_vivo' ? 'dot--green' : 'dot--amber dot--pulse'}`} role="img" aria-label={live.status === 'ao_vivo' ? t('geral.barra.pontoConectado') : t('geral.barra.pontoReconectando')} />
         </div>
         <WorkspaceSwitcher current={s.workspace.name} />
         {coordinator && (
-          <button className="btn btn--gold topbar__ask" onClick={() => openAgent(coordinator.id, 'conversa')} aria-label={`Pedir a ${coordinator.name}`} title={`Peça qualquer coisa: ${coordinator.name} encaminha a quem faz`}>
-            <Icon name="chat" size={16} /><span className="topbar__ask-long">Pedir a {coordinator.name}</span><span className="topbar__ask-short">Pedir</span>
+          <button className="btn btn--gold topbar__ask" onClick={() => openAgent(coordinator.id, 'conversa')} aria-label={t('geral.barra.pedirA', { nome: coordinator.name })} title={t('geral.barra.pedirDica', { nome: coordinator.name })}>
+            <Icon name="chat" size={16} /><span className="topbar__ask-long">{t('geral.barra.pedirA', { nome: coordinator.name })}</span><span className="topbar__ask-short">{t('geral.barra.pedirCurto')}</span>
           </button>
         )}
         {/* busca no meio, com cara de campo; à direita, ícones do mesmo tamanho (Estado, Aguardando você, Música, Tema), o
             Modo Foco com o nome (nunca some: na janela estreita quem sai para o menu são os outros) e a conta */}
         <span className="topbar__grow">
-          <button className="tb-search" data-keep-surface onClick={() => setPalette((v) => !v)} aria-label="Buscar (Ctrl+K)" title="Buscar cards, agentes, rotinas e áreas (Ctrl+K)" aria-expanded={palette}>
-            <Icon name="search" size={16} /><span className="tb-search__txt">Buscar cards, agentes, rotinas…</span><kbd className="tb-search__kbd">Ctrl K</kbd>
+          <button className="tb-search" data-keep-surface onClick={() => setPalette((v) => !v)} aria-label={t('geral.barra.buscar')} title={t('geral.barra.buscarDica')} aria-expanded={palette}>
+            <Icon name="search" size={16} /><span className="tb-search__txt">{t('geral.barra.buscarCampo')}</span><kbd className="tb-search__kbd">Ctrl K</kbd>
           </button>
         </span>
         {upd && (
-          <button className="tb-upd" onClick={openUpdates} aria-label={`Atualização disponível: versão ${upd}`} title={`Versão ${upd} disponível. Ver em Configurações › Atualizações`}>
-            <Icon name="download" size={14} /><span className="tb-upd__txt">Atualização disponível</span>
+          <button className="tb-upd" onClick={openUpdates} aria-label={t('geral.barra.atualizacaoAria', { versao: upd })} title={t('geral.barra.atualizacaoDica', { versao: upd })}>
+            <Icon name="download" size={14} /><span className="tb-upd__txt">{t('geral.barra.atualizacao')}</span>
           </button>
         )}
         <span className="topbar__icons">
           <span className="topbar__statuswrap">
             <button className={`tb-icon ${statusOpen ? 'is-on' : ''}`} data-keep-surface onClick={() => setStatusOpen((v) => !v)} aria-expanded={statusOpen}
-              aria-label={`Estado: ${running} em execução${queued ? `, ${queued} na fila` : ''}${alerts.length ? `; ${alerts.length} aviso(s): ${alerts.map((a) => a.label).join(', ')}` : ''}`}
-              title={[running ? `${running} em execução` : queued ? `${queued} na fila` : 'Nada em execução', ...alerts.map((a) => a.label)].join(' · ')}>
+              aria-label={`${t('geral.estado.rotulo')}: ${[t('geral.estado.emExecucao', { n: running }), queued ? t('geral.estado.naFila', { n: queued }) : ''].filter(Boolean).join(', ')}${alerts.length ? `; ${t('geral.estado.avisos', { n: alerts.length })}: ${alerts.map((a) => a.label).join(', ')}` : ''}`}
+              title={[running ? t('geral.estado.emExecucao', { n: running }) : queued ? t('geral.estado.naFila', { n: queued }) : t('geral.estado.nadaEmExecucao'), ...alerts.map((a) => a.label)].join(' · ')}>
               <Icon name="activity" size={18} />
               {alerts.length > 0 ? <span className="tb-badge tb-badge--warn">!</span>
                 : (running > 0 || queued > 0) && <span className={`tb-dot ${running ? 'tb-dot--green' : 'tb-dot--amber'}`} />}
@@ -327,15 +335,15 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
             )}
           </span>
           <button data-tour="decisions" data-keep-surface className={`tb-icon ${decisions ? 'is-on' : ''}`} onClick={() => setDecisions((v) => !v)} aria-expanded={decisions}
-            aria-label={`${pending} aguardando você`} title={pending ? `${pending} aguardando você` : 'Nada aguardando você'}>
+            aria-label={t('geral.decisoes.aguardando', { n: pending })} title={t('geral.decisoes.aguardando', { n: pending })}>
             <Icon name="bell" size={18} />{pending > 0 && <span className="tb-badge">{pending > 99 ? '99+' : pending}</span>}
           </button>
           <MusicButton onCredits={openCredits} />
-          <button className="tb-icon topbar__theme" onClick={() => setThemeMode(THEME_NEXT[theme.mode])} aria-label={THEME_LABEL[theme.mode]} title={THEME_LABEL[theme.mode]}>
+          <button className="tb-icon topbar__theme" onClick={() => setThemeMode(THEME_NEXT[theme.mode])} aria-label={rotuloDoTema(theme.mode)} title={rotuloDoTema(theme.mode)}>
             <Icon name={THEME_ICON[theme.mode]} size={18} />
           </button>
-          <button className={`tb-pill topbar__focus ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} title={focus ? 'Sair do Modo Foco (Esc)' : 'Modo Foco: o trabalho sem a cidade (Esc volta)'}>
-            <Icon name="focus" size={16} /><span className="topbar__focus-txt">Modo Foco</span>
+          <button className={`tb-pill topbar__focus ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} title={focus ? t('geral.barra.sairDoFoco') : t('geral.barra.modoFocoDica')}>
+            <Icon name="focus" size={16} /><span className="topbar__focus-txt">{t('geral.barra.modoFoco')}</span>
           </button>
           <span className="topbar__sep" aria-hidden="true" />
           <AccountMenu me={me} onLogout={logout} onAccount={() => goHash('#configuracao?conta')} />
@@ -343,10 +351,10 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       </header>
 
       {!focus && (
-        <nav className="sidebar" aria-label="Navegação">
+        <nav className="sidebar" aria-label={t('geral.nav.aria')}>
           {navItems(false)}
-          <button className="nav nav--collapse" onClick={() => setNavCompact((v) => !v)} aria-pressed={navCompact} title={navCompact ? 'Mostrar os nomes do menu' : 'Recolher o menu (só ícones)'}>
-            <Icon name={navCompact ? 'chevron-right' : 'chevron-left'} /> <span className="nav__label">Recolher menu</span>
+          <button className="nav nav--collapse" onClick={() => setNavCompact((v) => !v)} aria-pressed={navCompact} title={navCompact ? t('geral.nav.mostrarNomes') : t('geral.nav.recolherDica')}>
+            <Icon name={navCompact ? 'chevron-right' : 'chevron-left'} /> <span className="nav__label">{t('geral.nav.recolher')}</span>
           </button>
         </nav>
       )}
@@ -355,13 +363,13 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           {navItems(true)}
           {/* o que o cabeçalho não mostra nas janelas mais estreitas continua aqui */}
           <div className="navdrawer__foot">
-            <button className="nav" onClick={() => { setNavOpen(false); setPalette(true); }}><Icon name="search" /> <span className="nav__label">Buscar <span className="nav__hint">(Ctrl+K)</span></span></button>
-            <button className="nav" onClick={() => { setNavOpen(false); setStatusOpen(true); }}><Icon name="pulse" /> <span className="nav__label">Estado do Ergon{running ? ` · ${running} em execução` : ''}{alerts.length ? ` · ${alerts.length} aviso(s)` : ''}</span></button>
+            <button className="nav" onClick={() => { setNavOpen(false); setPalette(true); }}><Icon name="search" /> <span className="nav__label">{t('geral.nav.buscar')} <span className="nav__hint">(Ctrl+K)</span></span></button>
+            <button className="nav" onClick={() => { setNavOpen(false); setStatusOpen(true); }}><Icon name="pulse" /> <span className="nav__label">{[t('geral.nav.estado'), running ? t('geral.estado.emExecucao', { n: running }) : '', alerts.length ? t('geral.estado.avisos', { n: alerts.length }) : ''].filter(Boolean).join(' · ')}</span></button>
             {/* na janela mais estreita o seletor de workspace sai da barra: o balão dele abre daqui */}
-            <button className="nav" onClick={() => { setNavOpen(false); abrirBalao('workspace'); }}><Icon name="layers" /> <span className="nav__label">Workspace: {s.workspace.name}</span></button>
-            {upd && <button className="nav" onClick={() => { setNavOpen(false); openUpdates(); }}><Icon name="download" /> <span className="nav__label">Atualização disponível <span className="nav__hint">(versão {upd})</span></span></button>}
-            <button className="nav" onClick={() => setThemeMode(THEME_NEXT[theme.mode])}><Icon name={THEME_ICON[theme.mode]} /> <span className="nav__label">{THEME_LABEL[theme.mode].split(' (')[0].split(':')[0]}</span></button>
-            <button className="nav" onClick={logout}><Icon name="logout" /> <span className="nav__label">Sair ({me.user.displayName})</span></button>
+            <button className="nav" onClick={() => { setNavOpen(false); abrirBalao('workspace'); }}><Icon name="layers" /> <span className="nav__label">{t('geral.nav.workspace', { nome: s.workspace.name })}</span></button>
+            {upd && <button className="nav" onClick={() => { setNavOpen(false); openUpdates(); }}><Icon name="download" /> <span className="nav__label">{t('geral.nav.atualizacao')} <span className="nav__hint">{t('geral.nav.atualizacaoVersao', { versao: upd })}</span></span></button>}
+            <button className="nav" onClick={() => setThemeMode(THEME_NEXT[theme.mode])}><Icon name={THEME_ICON[theme.mode]} /> <span className="nav__label">{rotuloDoTema(theme.mode, true)}</span></button>
+            <button className="nav" onClick={logout}><Icon name="logout" /> <span className="nav__label">{t('geral.nav.sair', { nome: me.user.displayName })}</span></button>
           </div>
         </NavDrawer>
       )}
@@ -404,14 +412,14 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           onFinish={({ tour: t, goal: g }) => { setOnb(null); setGoal(g); onMeChanged(); st.reload(); if (t) startTour(); }} />
       )}
       {tour && (
-        <Tour steps={tourSteps(coordLabel)} onClose={endTour} final={(close) => (
+        <Tour steps={tourSteps(t, coordLabel)} onClose={endTour} final={(close) => (
           <div className="tour__final">
-            <h3>Pronto!</h3>
-            <p>{coordinator ? <>Que tal começar conversando com <b>{coordinator.name}</b>? {goal ? 'O seu objetivo já vai escrito na mensagem.' : 'Conte o que você quer resolver primeiro.'}</> : 'Explore à vontade. A Ajuda fica no pé do menu.'}</p>
+            <h3>{t('geral.tour.pronto')}</h3>
+            <p>{coordinator ? <>{tn('geral.tour.conversarCom', { nome: <b>{coordinator.name}</b> })} {goal ? t('geral.tour.objetivoEscrito') : t('geral.tour.conteObjetivo')}</> : t('geral.tour.explore')}</p>
             <div className="tour__nav">
-              <button className="btn btn--sm" onClick={close}>Explorar sozinho</button>
+              <button className="btn btn--sm" onClick={close}>{t('geral.tour.explorarSozinho')}</button>
               <span className="tour__grow" />
-              {coordinator && <button className="btn btn--sm btn--primary" autoFocus onClick={() => { close(); openAgent(coordinator.id, 'conversa', goal ? `Quero começar por: ${goal}` : null); }}><Icon name="chat" size={14} /> Conversar com {coordinator.name}</button>}
+              {coordinator && <button className="btn btn--sm btn--primary" autoFocus onClick={() => { close(); openAgent(coordinator.id, 'conversa', goal ? t('geral.tour.mensagemObjetivo', { objetivo: goal }) : null); }}><Icon name="chat" size={14} /> {t('geral.tour.conversarBotao', { nome: coordinator.name })}</button>}
             </div>
           </div>
         )} />
@@ -435,14 +443,15 @@ const saveLocalPref = (k: string, v: string) => { try { localStorage.setItem(k, 
 
 /** Menu inteiro na janela estreita: abre pelo botão do cabeçalho; fecha ao escolher, no Esc ou clicando fora. */
 function NavDrawer({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  const t = useT();
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, modal: true, outside: true });
   return (
     <div className="navdrawer-back">
-      <nav ref={ref} id="nav-drawer" className="navdrawer" aria-label="Menu">
+      <nav ref={ref} id="nav-drawer" className="navdrawer" aria-label={t('geral.barra.menu')}>
         <div className="navdrawer__head">
           <ErgonLogo kind="horizontal" onDark height={26} />
-          <button className="icon-btn" onClick={onClose} aria-label="Fechar o menu (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
+          <button className="icon-btn" onClick={onClose} aria-label={t('geral.nav.fecharMenu')} title={t('geral.comum.fechar')}><Icon name="x" /></button>
         </div>
         {children}
       </nav>
@@ -457,14 +466,15 @@ function NavDrawer({ onClose, children }: { onClose: () => void; children: React
 function StatusPanel({ onClose, live, runs, capacity, usage, alerts, onAct }: {
   onClose: () => void; live: string; runs: AppState['runs']; capacity: AppState['capacity']; usage: Usage | null; alerts: Alert[]; onAct: (a: Alert) => void;
 }) {
+  const t = useT();
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, outside: true });
   return (
     <aside ref={ref} className="status-pop" role="dialog" aria-labelledby="status-title">
-      <div className="drawer__head"><h3 className="drawer__title" id="status-title">Estado do Ergon</h3><button className="icon-btn" onClick={onClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button></div>
+      <div className="drawer__head"><h3 className="drawer__title" id="status-title">{t('geral.estado.titulo')}</h3><button className="icon-btn" onClick={onClose} aria-label={t('geral.comum.fechar')} title={t('geral.comum.fechar')}><Icon name="x" /></button></div>
       {alerts.length > 0 && (
         <section className="block">
-          <h4>Avisos</h4>
+          <h4>{t('geral.estado.alertas')}</h4>
           <div className="status-panel__alerts">
             {alerts.map((a) => (
               <button key={a.id} className="dec-link" onClick={() => onAct(a)}><span><b>{a.label}</b><br /><span className="muted small">{a.title}</span></span><Icon name="chevron-right" size={14} /></button>
@@ -473,50 +483,58 @@ function StatusPanel({ onClose, live, runs, capacity, usage, alerts, onAct }: {
         </section>
       )}
       <section className="block">
-        <h4>Agora</h4>
+        <h4>{t('geral.estado.agora')}</h4>
         <div className="kv">
-          <span>Processos</span><b>{runs.processes} trabalhando <span className="muted">({runs.limit.limit === null ? 'sem limite' : `até ${runs.limit.limit} ao mesmo tempo`})</span>{runs.cardsWaiting ? <> · {runs.cardsWaiting} card{runs.cardsWaiting === 1 ? '' : 's'} esperando em A fazer</> : null}</b>
-          <span>Conversas</span><b>livres <span className="muted">(não entram no limite)</span></b>
-          <span>Equipe</span><b>{capacity.active} agentes · {capacity.slots} vagas</b>
-          <span>Servidor</span><b>{live === 'ao_vivo' ? 'conectado' : 'reconectando…'}</b>
+          <span>{t('geral.estado.processos')}</span><b>{t('geral.estado.trabalhando', { n: runs.processes })} <span className="muted">({runs.limit.limit === null ? t('geral.estado.semLimite') : t('geral.estado.ateLimite', { limite: fmtNumero(runs.limit.limit) })})</span>{runs.cardsWaiting ? <> · {t('geral.estado.cardsEsperando', { n: runs.cardsWaiting })}</> : null}</b>
+          <span>{t('geral.estado.conversas')}</span><b>{t('geral.estado.conversasLivres')} <span className="muted">{t('geral.estado.foraDoLimite')}</span></b>
+          <span>{t('geral.estado.equipe')}</span><b>{t('geral.estado.agentes', { n: capacity.active })} · {t('geral.estado.vagas', { n: capacity.slots })}</b>
+          <span>{t('geral.estado.servidor')}</span><b>{live === 'ao_vivo' ? t('geral.estado.conectado') : t('geral.estado.reconectando')}</b>
         </div>
       </section>
       <section className="block">
-        <h4>Consumo</h4>
+        <h4>{t('geral.consumo.titulo')}</h4>
         <div className="row row--wrap"><UsageChips usage={usage} /></div>
-        <p className="hint">Tokens e custo como a conta de IA informa; nada é estimado.</p>
+        <p className="hint">{t('geral.consumo.nota')}</p>
       </section>
     </aside>
   );
 }
 
-const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : n >= 1e3 ? `${(n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : String(n));
-const fmtUsd = (v: number) => `US$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: v < 1 ? 4 : 2 })}`;
+// no idioma da tela: 1,2 mi · 3,4 mil / 1.2M · 3.4K; US$ 1,50 / $1.50
+const fmtTokens = (n: number) => (n >= 1e3 ? fmtCompacto(n) : fmtNumero(n));
+const fmtUsd = (v: number) => fmtMoeda(v, 'USD', { minimumFractionDigits: 2, maximumFractionDigits: v < 1 ? 4 : 2 });
 
 /**
  * Consumo: tokens sempre (mês ⇄ ano, com um clique). Custo só quando a conta informa o valor cobrado —
  * assinatura (ChatGPT) não tem custo por uso, então o chip some. Limites de plano só quando informados.
  */
+// a nota pela forma de cobrança: a nota pronta que o servidor manda vem sempre em português
+const NOTA_COBRANCA = {
+  subscription: 'geral.consumo.notaAssinatura', credits: 'geral.consumo.notaCreditos', api: 'geral.consumo.notaApi', none: 'geral.consumo.notaSem',
+} as const satisfies Record<Usage['billing'], string>;
+
 function UsageChips({ usage }: { usage: Usage | null }) {
+  const t = useT();
   const [year, setYear] = useState(false);
   if (!usage) return null;
-  const p = year ? usage.year : usage.month; const label = year ? 'ano' : 'mês';
+  const p = year ? usage.year : usage.month; const label = year ? t('geral.consumo.ano') : t('geral.consumo.mes');
+  const outro = year ? t('geral.consumo.mes') : t('geral.consumo.ano');
   const tokens = p.tokensIn + p.tokensOut;
   const sub = usage.subscription;
   return (
     <>
       <button className="chip chip--stat" onClick={() => setYear((v) => !v)} aria-pressed={year}
-        title={`Tokens neste ${label}: entrada ${p.tokensIn.toLocaleString('pt-BR')} · saída ${p.tokensOut.toLocaleString('pt-BR')} · ${p.runs} execuções reais. ${usage.note} Clique para ver o ${year ? 'mês' : 'ano'}.`}>
-        <Icon name="token" size={14} /> {fmtTokens(tokens)} tokens <span className="muted">· {label}</span>
+        title={t('geral.consumo.tokensDica', { periodo: label, entrada: fmtNumero(p.tokensIn), saida: fmtNumero(p.tokensOut), n: p.runs, nota: t(NOTA_COBRANCA[usage.billing]), outro })}>
+        <Icon name="token" size={14} /> {t('geral.consumo.tokens', { qtd: fmtTokens(tokens) })} <span className="muted">· {label}</span>
       </button>
       {usage.costVisible && (
         <button className={`chip chip--stat ${p.costUsd === null ? 'chip--muted' : ''}`} onClick={() => setYear((v) => !v)} aria-pressed={year}
-          title={p.costUsd === null ? `A conta não informou custo neste ${label}. Nada é estimado.` : `Custo cobrado informado pela conta em ${p.runsWithCost} execução(ões) deste ${label}. Sem estimativas.`}>
-          <Icon name="coins" size={14} /> {p.costUsd === null ? 'US$ —' : fmtUsd(p.costUsd)} <span className="muted">· {label}</span>
+          title={p.costUsd === null ? t('geral.consumo.semCusto', { periodo: label }) : t('geral.consumo.custoDica', { n: p.runsWithCost, periodo: label })}>
+          <Icon name="coins" size={14} /> {p.costUsd === null ? t('geral.consumo.custoVazio') : fmtUsd(p.costUsd)} <span className="muted">· {label}</span>
         </button>
       )}
       {sub?.windows.map((w) => (
-        <span key={w.label} className="chip chip--stat" title={`${sub.provider}: limite ${w.label}${w.resetsAt ? ` · renova ${new Date(w.resetsAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}` : ''}`}>
+        <span key={w.label} className="chip chip--stat" title={w.resetsAt ? t('geral.consumo.limiteRenova', { provedor: sub.provider, janela: w.label, quando: fmtDataHora(w.resetsAt) }) : t('geral.consumo.limite', { provedor: sub.provider, janela: w.label })}>
           <Icon name="clock" size={14} /> {w.label} <span className="meter"><span style={{ width: `${Math.min(100, w.usedPercent)}%` }} /></span> {Math.round(w.usedPercent)}%
         </span>
       ))}

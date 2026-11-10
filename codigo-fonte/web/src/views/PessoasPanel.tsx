@@ -5,14 +5,16 @@ import type { Me, PeopleInfo } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { cardClick } from '../lib/cardClick.ts';
 import { textoRemoverPessoa } from '../lib/textos-tela.ts';
+import { fmtDataHora, fmtLista, tn, useT } from '../i18n/index.ts';
 
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+const when = (iso: string | null) => (iso ? fmtDataHora(iso) : '—');
 
 /**
  * Configurações › Pessoas (só quem administra): quem tem conta neste computador, quem pode criar conta nova e os
  * convites. Quem administra não vê nada do conteúdo de ninguém: só nomes, datas e se a frase pessoal já existe.
  */
 export function PessoasPanel({ me }: { me: Me }) {
+  const t = useT();
   const res = useResource<PeopleInfo>('/api/people', []);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -33,8 +35,8 @@ export function PessoasPanel({ me }: { me: Me }) {
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
 
       <section className="card">
-        <h3>Pessoas neste computador</h3>
-        <p className="muted">Cada pessoa tem a própria conta e a própria equipe de IA. Os dados de cada uma ficam cifrados com a chave dela: você administra o Ergon, mas não vê nada do que é dos outros{d.isolated ? '' : ' (o isolamento começa quando a segunda pessoa criar a conta)'}.</p>
+        <h3>{t('conta.pessoas.titulo')}</h3>
+        <p className="muted">{d.isolated ? t('conta.pessoas.explica') : t('conta.pessoas.explicaAntes')}</p>
         <ul className="sec-rows">
           {d.people.map((p) => {
             const abrir = () => setAberta((a) => (a === p.id ? null : p.id));
@@ -42,18 +44,18 @@ export function PessoasPanel({ me }: { me: Me }) {
             return (
               <li key={p.id} className="card-click" onClick={cardClick(abrir)}>
                 <b><button type="button" className="card-open" onClick={abrir} aria-expanded={aberta === p.id} aria-controls={`pessoa-${p.id}`}>{p.displayName}</button></b>
-                <span className="muted small">{p.username}{p.admin ? ' · administra' : ''} · desde {when(p.createdAt)} · último uso {when(p.lastSeen)}</span>
-                {!p.phrase && <span className="badge badge--warn" title="Sem a frase pessoal confirmada, uma senha esquecida trava os dados dessa pessoa para sempre.">sem frase</span>}
-                {!p.admin && p.id !== me.user.id && <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setRemoving({ id: p.id, username: p.username, typed: '' })}>Remover</button>}
+                <span className="muted small">{t(p.admin ? 'conta.pessoas.linhaAdmin' : 'conta.pessoas.linha', { usuario: p.username, desde: when(p.createdAt), uso: when(p.lastSeen) })}</span>
+                {!p.phrase && <span className="badge badge--warn" title={t('conta.pessoas.semFraseDica')}>{t('conta.seg.semFrase')}</span>}
+                {!p.admin && p.id !== me.user.id && <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => setRemoving({ id: p.id, username: p.username, typed: '' })}>{t('conta.acao.remover')}</button>}
                 {aberta === p.id && (
                   // os detalhes abertos são para ler e copiar: clicar neles não fecha (só a linha de cima alterna)
                   <dl id={`pessoa-${p.id}`} className="pessoa__det" data-card-skip>
-                    <dt>Usuário</dt><dd>{p.username}{eu ? ' (você)' : ''}</dd>
-                    <dt>Papel</dt><dd>{p.admin ? 'Administra o Ergon neste computador: pessoas, convites e conta nova. Não vê o conteúdo dos outros.' : 'Usa a própria conta e a própria equipe de IA.'}</dd>
-                    <dt>Conta criada</dt><dd>{when(p.createdAt)}</dd>
-                    <dt>Último uso</dt><dd>{p.lastSeen ? when(p.lastSeen) : 'Ainda não entrou.'}</dd>
-                    <dt>Frase pessoal</dt><dd>{p.phrase ? 'Confirmada: com ela, uma senha esquecida não trava os dados.' : eu ? 'Ainda não confirmada. Sem ela, uma senha esquecida trava os seus dados para sempre. Você gera em Configurações › Segurança.' : 'Ainda não confirmada. Sem ela, uma senha esquecida trava os dados dessa pessoa para sempre. Ela gera em Configurações › Segurança.'}</dd>
-                    {p.migrated && <><dt>Dados</dt><dd>{eu ? 'Cifrados com a sua chave: só você abre.' : 'Cifrados com a chave dela: só ela abre, ao entrar com a própria senha.'}</dd></>}
+                    <dt>{t('conta.campo.usuario')}</dt><dd>{eu ? t('conta.pessoas.voce', { usuario: p.username }) : p.username}</dd>
+                    <dt>{t('conta.pessoas.papel')}</dt><dd>{p.admin ? t('conta.pessoas.papelAdmin') : t('conta.pessoas.papelComum')}</dd>
+                    <dt>{t('conta.pessoas.criada')}</dt><dd>{when(p.createdAt)}</dd>
+                    <dt>{t('conta.pessoas.ultimoUso')}</dt><dd>{p.lastSeen ? when(p.lastSeen) : t('conta.pessoas.nuncaEntrou')}</dd>
+                    <dt>{t('conta.pessoas.frasePessoal')}</dt><dd>{p.phrase ? t('conta.pessoas.fraseOk') : eu ? t('conta.pessoas.fraseFaltaVoce') : t('conta.pessoas.fraseFaltaOutra')}</dd>
+                    {p.migrated && <><dt>{t('conta.pessoas.dados')}</dt><dd>{eu ? t('conta.pessoas.dadosVoce') : t('conta.pessoas.dadosOutra')}</dd></>}
                   </dl>
                 )}
               </li>
@@ -61,41 +63,41 @@ export function PessoasPanel({ me }: { me: Me }) {
           })}
         </ul>
         {removing && (
-          <form className="lock-warn" role="alertdialog" aria-label="Remover conta" onSubmit={(e) => {
+          <form className="lock-warn" role="alertdialog" aria-label={t('conta.pessoas.removerAria')} onSubmit={(e) => {
             e.preventDefault();
-            void act('remove', async () => { await api.del(`/api/people/${removing.id}`, { confirm: removing.typed }); setRemoving(null); }, 'Conta removida: a chave dela saiu primeiro, depois os dados, os arquivos e a equipe de IA dela.');
+            void act('remove', async () => { await api.del(`/api/people/${removing.id}`, { confirm: removing.typed }); setRemoving(null); }, t('conta.pessoas.removida'));
           }}>
-            <p><b>Remover a conta de {removing.username}?</b> {textoRemoverPessoa(removing.username)}</p>
-            <label className="field">Digite o usuário dela para confirmar<input required autoFocus value={removing.typed} onChange={(e) => setRemoving({ ...removing, typed: e.target.value })} /></label>
+            <p><b>{t('conta.pessoas.removerPergunta', { usuario: removing.username })}</b> {textoRemoverPessoa(removing.username)}</p>
+            <label className="field">{t('conta.pessoas.removerDigite')}<input required autoFocus value={removing.typed} onChange={(e) => setRemoving({ ...removing, typed: e.target.value })} /></label>
             <div className="row">
-              <button className="btn btn--danger btn--sm" disabled={busy === 'remove' || removing.typed !== removing.username}>{busy === 'remove' ? 'Removendo…' : 'Remover de vez'}</button>
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setRemoving(null)}>Cancelar</button>
+              <button className="btn btn--danger btn--sm" disabled={busy === 'remove' || removing.typed !== removing.username}>{busy === 'remove' ? t('conta.pessoas.removendo') : t('conta.pessoas.removerDeVez')}</button>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setRemoving(null)}>{t('conta.acao.cancelar')}</button>
             </div>
           </form>
         )}
-        {without.length > 0 && <p className="hint warn">{without.map((p) => p.displayName).join(', ')} ainda {without.length > 1 ? 'não geraram' : 'não gerou'} a frase pessoal (Configurações › Segurança). Antes disso, ninguém mais consegue criar conta aqui.</p>}
+        {without.length > 0 && <p className="hint warn">{t('conta.pessoas.semFraseAviso', { n: without.length, nomes: fmtLista(without.map((p) => p.displayName)) })}</p>}
       </section>
 
       <section className="card">
-        <h3>Conta nova</h3>
-        <div className="radio-list" role="radiogroup" aria-label="Quem pode criar conta">
+        <h3>{t('conta.pessoas.contaNova')}</h3>
+        <div className="radio-list" role="radiogroup" aria-label={t('conta.pessoas.quemPodeAria')}>
           <label className="check"><input type="radio" name="signup" checked={d.signup === 'aberto'} disabled={!!busy}
-            onChange={() => void act('signup', () => api.put('/api/people/signup', { policy: 'aberto' }), 'Qualquer pessoa neste computador pode criar a própria conta.')} />
-            <span><b>Qualquer pessoa neste computador</b> cria a própria conta na tela de entrada (recomendado: cada conta só vê o que é dela).</span></label>
+            onChange={() => void act('signup', () => api.put('/api/people/signup', { policy: 'aberto' }), t('conta.pessoas.abertoOk'))} />
+            <span>{tn('conta.pessoas.abertoTexto', { quem: <b>{t('conta.pessoas.abertoQuem')}</b> })}</span></label>
           <label className="check"><input type="radio" name="signup" checked={d.signup === 'convite'} disabled={!!busy}
-            onChange={() => void act('signup', () => api.put('/api/people/signup', { policy: 'convite' }), 'Conta nova só com convite.')} />
-            <span><b>Só com convite</b>: você gera um código de uso único e entrega à pessoa.</span></label>
+            onChange={() => void act('signup', () => api.put('/api/people/signup', { policy: 'convite' }), t('conta.pessoas.conviteOk'))} />
+            <span>{tn('conta.pessoas.conviteTexto', { quem: <b>{t('conta.pessoas.conviteQuem')}</b> })}</span></label>
         </div>
         {d.signup === 'convite' && (
           <>
             {code
-              ? <p className="ok" role="status">Código do convite: <code className="invite-code">{code.code}</code> — vale uma vez, até {when(code.expiresAt)}. Ele aparece só agora.</p>
-              : <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('invite', async () => setCode(await api.post('/api/people/invites')))}>Gerar convite</button>}
+              ? <p className="ok" role="status">{tn('conta.pessoas.codigo', { codigo: <code className="invite-code">{code.code}</code>, ate: when(code.expiresAt) })}</p>
+              : <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('invite', async () => setCode(await api.post('/api/people/invites')))}>{t('conta.pessoas.gerarConvite')}</button>}
             {d.invites.length > 0 && (
               <ul className="sec-rows">
                 {d.invites.map((i) => (
-                  <li key={i.id}><span className="muted small">convite de {when(i.created_at)} · vale até {when(i.expires_at)}</span>
-                    <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('revoke', () => api.del(`/api/people/invites/${i.id}`), 'Convite cancelado.')}>Cancelar</button></li>
+                  <li key={i.id}><span className="muted small">{t('conta.pessoas.conviteLinha', { criado: when(i.created_at), ate: when(i.expires_at) })}</span>
+                    <button className="btn btn--sm btn--ghost" disabled={!!busy} onClick={() => void act('revoke', () => api.del(`/api/people/invites/${i.id}`), t('conta.pessoas.conviteCancelado'))}>{t('conta.acao.cancelar')}</button></li>
                 ))}
               </ul>
             )}

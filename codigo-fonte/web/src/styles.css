@@ -326,6 +326,14 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--navy); }
 .task__top input { flex: none; margin-top: 2px; }
 .task__title { font-weight: 500; }
 .task__meta { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+/* Card do quadro com altura contida: título longo em até 3 linhas com "…" (o título inteiro no passar do mouse e ao
+   abrir) e etiquetas sempre dentro da caixa (texto longo encolhe com "…"; o nome inteiro fica no title) */
+.task { overflow: hidden; }
+.task__top { min-width: 0; }
+.task__title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; min-width: 0; }
+.task__meta { min-width: 0; }
+.task__meta > * { min-width: 0; max-width: 100%; }
+.task__meta .badge, .task__meta .who, .task__meta .due { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer { position: fixed; right: 0; top: 56px; bottom: 0; width: min(440px, 100%); background: var(--panel); border-left: 1px solid var(--line); box-shadow: -6px 0 20px rgba(0, 0, 0, .08); padding: 14px 16px; overflow: auto; z-index: 5; }
 .drawer__head { display: flex; align-items: center; gap: 8px; }
 .drawer__head .icon-btn { margin-left: auto; }
@@ -1236,6 +1244,11 @@ body:has(.cdock) .tip { right: 100px; }
 .acct-pop__who b { overflow-wrap: anywhere; }
 .acct-pop__item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .acct-pop__item:hover, .acct-pop__item:focus-visible { background: var(--panel-2); }
+/* idioma: Português / English (no menu do avatar, uma linha; em Minha conta, com a explicação) */
+.idioma { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.idioma--compacto { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; }
+.idioma .seg__btn { color: var(--ink); }
+.idioma .seg__btn--on { color: #fff; }
 /* Minha conta (Configurações) */
 .conta__foto { display: flex; align-items: center; gap: 16px; margin: 8px 0 16px; flex-wrap: wrap; }
 .conta__foto-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -1243,6 +1256,8 @@ body:has(.cdock) .tip { right: 100px; }
 .conta__nome { display: grid; gap: 6px; }
 .conta__dados { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .conta__dados h4 { margin: 0 0 4px; }
+.conta__nome + .idioma { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.idioma h4, .idioma p { margin: 0; }
 .baixar-dados { display: grid; gap: 6px; justify-items: start; }
 .sec-passo { margin: 8px 0 12px; padding: 8px 12px; border-left: 3px solid var(--gold); }
 .sec-passo p { margin: 0 0 6px; }

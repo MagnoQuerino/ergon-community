@@ -71,7 +71,7 @@ test('o endereço do pedido é o que o aplicativo intercepta (janela.rs) e a ver
 
 test('a tela de Atualizações usa o botão no aplicativo, só onde vale e para quem administra', () => {
   const tsx = readFileSync(new URL('../views/AtualizacoesPanel.tsx', import.meta.url), 'utf8');
-  assert.match(tsx, /Voltar para esta versão/);
+  assert.ok(tsx.includes("t('configuracoes.atual.voltarBotao')"), 'o botão Voltar para esta versão');
   assert.match(tsx, /voltaNaLista\(r, \{ app: voltaPeloApp, admin \}\)/);
   assert.match(tsx, /textoVersoesAnteriores\(\{ app: voltaPeloApp, admin \}\)/);
   assert.match(tsx, /const voltaPeloApp = rollbackInDesktopApp\(\)/);

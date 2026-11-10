@@ -1,5 +1,6 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
 import { parseMarkdown, type Block, type Inline } from '../lib/markdown.ts';
+import { t, useIdioma } from '../i18n/index.ts';
 
 /** Inline → elementos (o texto sempre como texto: o React escapa). */
 function inl(c: Inline[], key = ''): ReactNode[] {
@@ -14,8 +15,8 @@ function inl(c: Inline[], key = ''): ReactNode[] {
       case 'code': return <code key={k}>{x.v}</code>;
       case 'a': return <a key={k} href={x.href} target="_blank" rel="noreferrer noopener">{inl(x.c, k)}</a>;
       case 'img': return (
-        <a key={k} className="msg__img" href={`/api/artifacts/${x.id}/download?inline=1`} target="_blank" rel="noreferrer" title="Abrir a imagem (também em Documentos)">
-          <img src={`/api/artifacts/${x.id}/download?inline=1`} alt="Imagem gerada pelo agente" loading="lazy" />
+        <a key={k} className="msg__img" href={`/api/artifacts/${x.id}/download?inline=1`} target="_blank" rel="noreferrer" title={t('geral.arquivo.abrirImagem')}>
+          <img src={`/api/artifacts/${x.id}/download?inline=1`} alt={t('geral.arquivo.imagemDoAgente')} loading="lazy" />
         </a>
       );
     }
@@ -44,6 +45,7 @@ function block(b: Block, k: string): ReactNode {
 
 /** Texto dos colegas formatado (Markdown seguro, sem HTML). */
 export function Markdown({ text, className }: { text: string; className?: string }) {
+  useIdioma(); // a dica e o texto alternativo da imagem trocam de idioma junto com a tela
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   return <div className={`md ${className ?? ''}`}>{blocks.map((b, i) => block(b, String(i)))}</div>;
 }

@@ -1,5 +1,5 @@
 // Conferência e restauração de backups (services/backup.ts). Roda num contêiner de uso único com o mesmo volume
-// de dados e com o servidor do Ergon PARADO — o lançador cuida disso: .\ergon.cmd restaurar <pasta do backup>.
+// de dados e com o servidor do Ergon PARADO — o lançador cuida disso: .\ergon.cmd restore <pasta do backup>.
 // Nunca apaga: o que estava no lugar vai para /data/backups/pre-restore-<data>, e "desfazer" traz de volta.
 //   node server/src/restore-cli.ts preparar                         cria /data/backups (a entrada é copiada para lá)
 //   node server/src/restore-cli.ts conferir  <pasta|arquivo.sqlite>

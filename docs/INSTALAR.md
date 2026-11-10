@@ -26,8 +26,8 @@ este computador (`http://localhost:8787`). Tudo o que ele guarda fica cifrado co
 
 | | Zip do repositório | `ergon-local-<versão>.zip` |
 |---|---|---|
-| Windows (caminho avançado) | `codigo-fonte\instalador\ergon.cmd instalar` | `.\ergon.cmd instalar` |
-| macOS e Linux | `bash "Instalar Ergon no Linux e macOS.sh"` | `./ergon.sh instalar` |
+| Windows (caminho avançado) | `codigo-fonte\instalador\ergon.cmd install` | `.\ergon.cmd install` |
+| macOS e Linux | `bash "Instalar Ergon no Linux e macOS.sh"` | `./ergon.sh install` |
 
 O lançador instala o Ergon numa pasta sua (Windows: `%LOCALAPPDATA%\Programs\Ergon`; macOS/Linux:
 `~/.local/share/ergon`) e põe o comando `ergon` no PATH: depois disso, use `ergon` de qualquer terminal novo e
@@ -48,14 +48,22 @@ Quer uma janela própria em vez do navegador? Instale também o [Ergon Desktop](
 
 | Comando | O que faz |
 |---|---|
-| `ergon iniciar` / `ergon parar` | liga e desliga |
+| `ergon start` / `ergon stop` | liga e desliga |
 | `ergon status` | estado e versão |
 | `ergon backup` | backup completo e conferido (banco, arquivos, conexões) numa pasta em `~/.ergon/backups` |
-| `ergon restaurar <pasta>` | volta a um backup (veja abaixo) |
-| `ergon atualizar` | backup + versão nova (o Ergon avisa quando sai uma); a atual fica guardada e, se a nova não responder, volta sozinho para ela |
+| `ergon restore <pasta>` | volta a um backup (veja abaixo) |
+| `ergon update` | backup + versão nova (o Ergon avisa quando sai uma); a atual fica guardada e, se a nova não responder, volta sozinho para ela |
 | `ergon logs` | últimas linhas, para diagnóstico |
-| `ergon remover` | tira o Ergon do computador e **guarda os dados** (conversas, tarefas, arquivos, conexões, segredos e backups): instalar de novo volta de onde parou |
-| `ergon remover --tudo` | tira o Ergon e **apaga** os dados, os segredos e os backups (pede para digitar APAGAR) |
+| `ergon uninstall` | tira o Ergon do computador e **guarda os dados** (conversas, tarefas, arquivos, conexões, segredos e backups): instalar de novo volta de onde parou |
+| `ergon uninstall --purge` | tira o Ergon e **apaga** os dados, os segredos e os backups (pede para digitar APAGAR, ou DELETE) |
+| `ergon help` / `ergon version` | os comandos / a versão instalada |
+
+Os nomes de antes, em português (`instalar`, `iniciar`, `parar`, `atualizar`, `restaurar`, `remover`…), continuam
+valendo. `ergon help` lista todos; as mensagens saem em português ou em inglês, conforme o idioma do computador
+(`ERGON_LANG=pt` ou `ERGON_LANG=en` escolhe).
+
+**Vindo da 1.1.0-rc.25 ou de antes:** o lançador instalado só conhece os nomes em português; para chegar a esta
+versão, use `ergon atualizar` (depois dela, os dois nomes valem).
 
 ## Backup e restauração
 
@@ -64,11 +72,11 @@ O backup é uma pasta `ergon-<data>` com o banco, os arquivos (anexos e entregas
 protegido, tudo sai cifrado: o backup só abre com a **senha ou a frase de recuperação daquela época** — guarde as
 duas. A chave do "sem trancamento" não vai junto (é só deste computador).
 
-`ergon restaurar <pasta>` confere o backup inteiro antes de mexer em qualquer coisa, mostra a data e o que tem,
+`ergon restore <pasta>` confere o backup inteiro antes de mexer em qualquer coisa, mostra a data e o que tem,
 pergunta, e só então troca. O que estava no lugar **não é apagado**: vai para `/data/backups/pre-restore-<data>`
-no volume, e `ergon desfazer-restauracao pre-restore-<data>` volta ao que era.
+no volume, e `ergon restore --undo pre-restore-<data>` volta ao que era.
 
-**Em outro computador**: `ergon instalar`, **não crie a conta**, e rode `ergon restaurar <pasta>`. Depois, entre
+**Em outro computador**: `ergon install`, **não crie a conta**, e rode `ergon restore <pasta>`. Depois, entre
 com a senha (ou a frase) da época do backup. Ficam de fora e precisam ser refeitos: a conta de IA dos agentes
 (**Configurações › IA da equipe**, a memória do motor de IA fica no computador antigo) e os segredos desta
 instalação em `~/.ergon/secrets` (copie a pasta junto se usa o app Google próprio). Se você já tinha criado uma
@@ -84,7 +92,7 @@ Ergon destranca sozinho ao ligar o computador e os agentes seguem trabalhando.
 Quem guarda a chave é o ajudante do Ergon, que roda na sua conta do computador: ela fica no cofre do sistema
 (proteção de dados do Windows, Chaves do macOS, libsecret no Linux), presa à sua conta — quem entrar nela abre o
 Ergon sem a senha. Recomendado se o computador é só seu e tem senha, PIN ou biometria. Desligar pelo mesmo botão
-invalida a chave na hora. Para tirar o ajudante do computador: `ergon ajudante remover`.
+invalida a chave na hora. Para tirar o ajudante do computador: `ergon helper uninstall`.
 
 ## Esqueceu a senha?
 

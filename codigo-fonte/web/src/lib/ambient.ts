@@ -2,6 +2,8 @@
  * Leitura do trabalho da equipe para o Ambiente (GET /api/ambient/operations, server/src/services/ambient.ts).
  * Só leitura: as ações abrem os painéis de sempre (card, "Aguardando você", conversa).
  */
+import { t } from '../i18n/index.ts';
+
 export const OPS_URL = '/api/ambient/operations';
 /** eventos que mudam o trabalho (o mesmo SSE do resto do Ergon; recarga agregada pelo useResource) */
 export const OPS_EVENTS = ['tasks.changed', 'runs.changed', 'proposals.changed', 'rules.changed', 'agents.changed'];
@@ -46,11 +48,10 @@ export const cloudOn = (d: Distribution | null | undefined): boolean => !!d?.wor
 export function elapsed(iso: string | null, now = Date.now()): string {
   if (!iso) return '';
   const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
-  if (s < 60) return 'agora';
+  if (s < 60) return t('cidade.tempo.agora');
   const m = Math.round(s / 60);
-  if (m < 60) return `há ${m} min`;
+  if (m < 60) return t('cidade.tempo.min', { n: m });
   const h = Math.round(m / 60);
-  if (h < 24) return `há ${h} h`;
-  const d = Math.round(h / 24);
-  return d === 1 ? 'há 1 dia' : `há ${d} dias`;
+  if (h < 24) return t('cidade.tempo.h', { n: h });
+  return t('cidade.tempo.dias', { n: Math.round(h / 24) });
 }

@@ -3,6 +3,7 @@ import { proximoNivel, modoCidade, noMenuMais, type Indicador } from '../lib/bar
 import { savePrefs, usePrefs } from '../lib/prefs.ts';
 import { useSurface } from '../lib/surface.ts';
 import { Icon } from './Icon.tsx';
+import { useIdioma, useT } from '../i18n/index.ts';
 
 /**
  * Barra de cima da Cidade, numa linha só e em pílulas iguais (mesma altura, raio, ícone e linha de base):
@@ -14,13 +15,15 @@ export function CityBar({ picker, pickKey, track, onTrack, isOn, editing, onEdit
   editing: boolean; onEdit: () => void; calm: boolean; onCalm: () => void;
 }) {
   // recolher é escolha da pessoa (vai com as preferências dela, não fica no navegador: na multiconta não passa de uma a outra)
+  const t = useT();
+  const idioma = useIdioma();
   const recolhida = usePrefs().cityBarCollapsed === true;
   const recolher = (v: boolean) => savePrefs({ cityBarCollapsed: v });
   const bar = useRef<HTMLDivElement>(null);
   const [largura, setLargura] = useState(0);
   // o degrau vale para esta largura e este conteúdo (inclusive o nome no Localizar); mudou qualquer um, recomeça do 0
   // e sobe até caber, antes de pintar
-  const assinatura = `${largura}|${pickKey}|${track.map((t) => t.texto).join('|')}|${calm}|${editing}|${recolhida}`;
+  const assinatura = `${largura}|${pickKey}|${track.map((t) => t.texto).join('|')}|${calm}|${editing}|${recolhida}|${idioma}`;
   const [fit, setFit] = useState({ assinatura: '', nivel: 0 });
   const nivel = fit.assinatura === assinatura ? fit.nivel : 0;
   const [mais, setMais] = useState(false);
@@ -49,9 +52,9 @@ export function CityBar({ picker, pickKey, track, onTrack, isOn, editing, onEdit
   const modo = modoCidade(calm);
   if (recolhida) {
     return (
-      <div ref={bar} className="citybar citybar--recolhida" role="group" aria-label="Barra da cidade">
+      <div ref={bar} className="citybar citybar--recolhida" role="group" aria-label={t('cidade.barra.aria')}>
         <span className="citybar__group citybar__tools">
-          <button className="cb-pill cb-pill--icon" onClick={() => recolher(false)} title="Mostrar a barra da cidade" aria-label="Mostrar a barra da cidade">
+          <button className="cb-pill cb-pill--icon" onClick={() => recolher(false)} title={t('cidade.barra.mostrar')} aria-label={t('cidade.barra.mostrar')}>
             <Icon name="chevron" size={16} />
           </button>
         </span>
@@ -64,16 +67,16 @@ export function CityBar({ picker, pickKey, track, onTrack, isOn, editing, onEdit
   // último degrau (janela bem estreita): o indicador de menor prioridade (entregas) também vai para o "Mais"
   const [visiveis, extras] = noMenuMais(track, nivel);
   const ferramentas: Ferramenta[] = [
-    { key: 'editar', icon: 'edit', label: 'Editar mapa', title: 'Editor do mapa: arraste prédios e áreas para outros lotes', on: editing, run: onEdit },
+    { key: 'editar', icon: 'edit', label: t('cidade.barra.editar'), title: t('cidade.barra.editarDica'), on: editing, run: onEdit },
     { key: 'modo', icon: modo.icon, label: modo.label, title: modo.title, on: false, run: onCalm },
-    { key: 'recolher', icon: 'chevron-up', label: 'Recolher a barra', title: 'Recolher a barra da cidade (a cidade fica livre)', on: false, run: () => recolher(true) },
+    { key: 'recolher', icon: 'chevron-up', label: t('cidade.barra.recolher'), title: t('cidade.barra.recolherDica'), on: false, run: () => recolher(true) },
   ];
   const doMenu: Ferramenta[] = [...extras.map((t) => ({ key: t.key, icon: t.icon, label: t.texto, title: t.title, on: isOn(t.key), run: () => onTrack(t.key) })), ...ferramentas];
   return (
-    <div ref={bar} className={`citybar citybar--n${nivel}`} role="group" aria-label="Barra da cidade">
+    <div ref={bar} className={`citybar citybar--n${nivel}`} role="group" aria-label={t('cidade.barra.aria')}>
       <span className="citybar__group citybar__pick">{picker}</span>
       {visiveis.length > 0 && (
-        <span className="citybar__group citybar__track" role="group" aria-label="Trabalho da equipe">
+        <span className="citybar__group citybar__track" role="group" aria-label={t('cidade.barra.trabalho')}>
           {visiveis.map((t) => (
             <button key={t.key} className={`cb-pill ${t.atencao ? 'cb-pill--att' : ''} ${isOn(t.key) ? 'is-on' : ''}`} onClick={() => onTrack(t.key)}
               aria-pressed={t.key === 'voce' ? undefined : isOn(t.key)} title={compacto ? `${t.texto} · ${t.title}` : t.title} aria-label={compacto ? t.texto : undefined}>
@@ -100,15 +103,16 @@ type Ferramenta = { key: string; icon: string; label: string; title: string; on:
 
 /** Degrau 3: as ferramentas num menu (o nome de cada uma por extenso). */
 function MaisMenu({ open, onToggle, onClose, items }: { open: boolean; onToggle: () => void; onClose: () => void; items: Ferramenta[] }) {
+  const t = useT();
   const ref = useRef<HTMLSpanElement>(null);
   useSurface(ref, { onClose, outside: true, active: open });
   return (
     <span className="citybar__more" ref={ref}>
-      <button className={`cb-pill cb-pill--icon ${open ? 'is-on' : ''}`} onClick={onToggle} aria-haspopup="menu" aria-expanded={open} aria-label="Mais ferramentas" title="Mais: editar o mapa, modo da cidade e recolher a barra">
+      <button className={`cb-pill cb-pill--icon ${open ? 'is-on' : ''}`} onClick={onToggle} aria-haspopup="menu" aria-expanded={open} aria-label={t('cidade.barra.mais')} title={t('cidade.barra.maisDica')}>
         <Icon name="more" size={16} />
       </button>
       {open && (
-        <span className="citybar__menu" role="menu" aria-label="Ferramentas da cidade">
+        <span className="citybar__menu" role="menu" aria-label={t('cidade.barra.ferramentas')}>
           {items.map((f) => (
             <button key={f.key} role="menuitem" className={`citybar__mi ${f.on ? 'is-on' : ''}`} onClick={() => { onClose(); f.run(); }} title={f.title}>
               <Icon name={f.icon} size={16} /><span>{f.label}</span>{f.on && <Icon name="check" size={14} />}

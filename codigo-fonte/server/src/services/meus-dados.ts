@@ -37,7 +37,8 @@ export const MEUS_DADOS_MAX_TEXTO = 50 * 1024 * 1024;
 const MAX_ENTRADAS = Math.min(20_000, ZIP_MAX_ENTRIES - 10);
 
 export interface MeusDadosDeps { db: Db; cfg: Pick<Config, 'filesDir'>; routines: Routines; owners: WorkspaceOwners }
-export interface MeusDadosOpts { maxBytes?: number; maxTexto?: number; maxEntradas?: number; agora?: Date }
+/** idioma: o da tela de quem pediu (cabeçalho X-Ergon-Lang): em inglês, o LEIA-ME vem como README.txt, em inglês */
+export interface MeusDadosOpts { maxBytes?: number; maxTexto?: number; maxEntradas?: number; agora?: Date; idioma?: 'pt-BR' | 'en' }
 export interface DeFora { arquivo: string; tamanho: number; motivo: string }
 export interface MeusDados {
   /** o arquivo em pedaços, para mandar aos poucos (chamar uma vez só) */
@@ -70,7 +71,7 @@ export function nomeSeguro(nome: string | null | undefined, max = 80): string {
 }
 
 /** os arquivos da raiz do ZIP: nenhuma pasta de workspace pode ter um destes nomes */
-const NA_RAIZ = ['LEIA-ME.txt', 'minha-conta.json', 'foto-de-perfil.jpg', 'foto-de-perfil.png', 'foto-de-perfil.webp'];
+const NA_RAIZ = ['LEIA-ME.txt', 'README.txt', 'minha-conta.json', 'foto-de-perfil.jpg', 'foto-de-perfil.png', 'foto-de-perfil.webp'];
 
 /**
  * Os caminhos do ZIP, num conjunto só para arquivos e pastas (sem diferença de maiúsculas, como no Windows): nenhum
@@ -256,6 +257,8 @@ export async function exportarMeusDados(d: MeusDadosDeps, user: { id: string; us
   const tzPessoa = wsDoFuso ? workspaceTz(db, wsDoFuso.workspace_id) : DEFAULT_TZ;
   const fechados: string[] = [];
   const resumo: string[] = [];
+  /** o mesmo resumo, em inglês (o README de quem usa a tela em inglês) */
+  const resumoEn: string[] = [];
 
   for (const m of memberships) {
     const ws = m.workspace_id;
@@ -427,13 +430,17 @@ export async function exportarMeusDados(d: MeusDadosDeps, user: { id: string; us
       const contatos = db.all<{ connection_id: string; display_name: string | null }>('SELECT connection_id, display_name FROM external_identities WHERE workspace_id = ? ORDER BY created_at', ws);
       const nomeLimpo = (s: string | null | undefined) => { const v = aberto(s); return v && !pareceSegredo(v) ? v : null; };
       await addTexto([raiz], 'contas-conectadas.json', json({
-        aviso: 'Só os nomes. O acesso a cada conta (senhas, tokens, chaves) não sai do Ergon: para usar de novo, conecte a conta outra vez.',
+        // o aviso no idioma de quem baixou (o README em inglês fala dele); os nomes dos campos são dados e ficam iguais
+        aviso: opts.idioma === 'en'
+          ? 'Only the names. Access to each account (passwords, keys, saved access) never leaves Ergon: to use one again, connect the account again.'
+          : 'Só os nomes. O acesso a cada conta (senhas, tokens, chaves) não sai do Ergon: para usar de novo, conecte a conta outra vez.',
         contas: contas.map((c) => ({ servico: c.kind, conta: nomeLimpo(c.account_label), situacao: c.state === 'connected' ? 'conectada' : c.state === 'error' ? 'com problema' : c.state === 'pending' ? 'conectando' : 'desligada' })),
         canais: canais.map((c) => ({ tipo: c.kind, nome: nomeLimpo(c.label) })),
         contatos: contatos.map((c) => ({ nome: nomeLimpo(c.display_name), canal: canalDe.get(c.connection_id) ?? null })).filter((c) => c.nome),
       }), undefined, tz);
     }
     resumo.push(`- ${raiz}: ${convs.length} conversa(s)${dona ? `, ${nTarefas} tarefa(s)` : ''}, ${nDocs} documento(s)${dona ? '' : ' (só o que é seu: as suas conversas e os arquivos que você enviou)'}`);
+    resumoEn.push(`- ${raiz}: ${plEn(convs.length, 'conversation')}${dona ? `, ${plEn(nTarefas, 'task')}` : ''}, ${plEn(nDocs, 'document')}${dona ? '' : ' (only what is yours: your conversations and the files you sent)'}`);
   }
 
   // o cadastro dela (sem senha, sem segredo do autenticador): sempre vem, fora dos tetos
@@ -487,8 +494,68 @@ export async function exportarMeusDados(d: MeusDadosDeps, user: { id: string; us
     leiaMe.push('Para guardar esses, baixe um a um em Documentos (ou apague alguns arquivos grandes e baixe de novo) antes de excluir a conta.');
   } else leiaMe.push('', 'Nada ficou de fora.');
   leiaMe.push('');
+  const en = opts.idioma === 'en';
+  const texto = en ? readmeEn({ agora: new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeStyle: 'short', timeZone: tzPessoa }).format(agora), user, maxBytes, maxTexto, resumo: resumoEn, fechados, deFora }) : leiaMe;
   // o LEIA-ME vai primeiro (é o que aparece no topo ao abrir o ZIP); quebras de linha do Windows: abre certo no Bloco de Notas
-  await zip.add({ name: caminhos.fixo('LEIA-ME.txt'), data: `﻿${leiaMe.join('\r\n')}`, mtime: agora, tz: tzPessoa }, { primeiro: true });
+  await zip.add({ name: caminhos.fixo(en ? 'README.txt' : 'LEIA-ME.txt'), data: `﻿${texto.join('\r\n')}`, mtime: agora, tz: tzPessoa }, { primeiro: true });
 
   return { partes: () => zip.partes(), bytes: zip.tamanho(), nome: `meus-dados-ergon-${diaNoFuso(agora, tzPessoa)}.zip`, arquivos: zip.quantas, deFora };
+}
+
+// ---------------------------------------------------------------- o README em inglês (a tela de quem pediu em inglês)
+const mbEn = (n: number) => `${(Math.round((n / 1024 / 1024) * 10) / 10).toLocaleString('en-US')} MB`;
+/** "1 conversation", "3 conversations" */
+const plEn = (n: number, coisa: string) => `${n} ${coisa}${n === 1 ? '' : 's'}`;
+/** o motivo de um arquivo de fora, em inglês (os do servidor; outro, como veio) */
+function motivoEn(m: string): string {
+  if (m === 'arquivos demais para um só download') return 'too many files for a single download';
+  if (m === 'não foi possível abrir o arquivo guardado') return 'the stored file could not be opened';
+  const limite = /^passaria do limite de (.+) MB de (documentos|texto) deste download$/.exec(m);
+  if (limite) return `it would go over the ${limite[1].replace(',', '.')} MB limit for ${limite[2] === 'texto' ? 'text' : 'documents'} in this download`;
+  return m;
+}
+function readmeEn(x: { agora: string; user: { username: string; displayName: string }; maxBytes: number; maxTexto: number; resumo: string[]; fechados: string[]; deFora: DeFora[] }): string[] {
+  const linhas = [
+    'Your Ergon data',
+    '===============',
+    '',
+    `Downloaded on: ${x.agora}`,
+    `Account: ${x.user.displayName} (${x.user.username})`,
+    `Ergon version: ${VERSION}`,
+    '',
+    'WARNING: THIS FILE IS NOT ENCRYPTED.',
+    'Inside Ergon, your data is encrypted with your key. Here it comes out readable, so you can open it on any computer',
+    'without Ergon. Anyone who has this file can read everything in it: keep it somewhere safe (a drive or a folder',
+    'that is only yours) and delete it when you no longer need it.',
+    '',
+    'What is in here (one folder per workspace; folder and file names stay as they are in Ergon):',
+    '- conversas (conversations): one conversation per text file, with the agent, the date and the messages; attachments point to the documentos folder.',
+    '- tarefas (tasks): the cards in a spreadsheet (tarefas.csv, opens in Excel) and in tarefas.json, with title, description, status, owner, due date and dates.',
+    `- documentos (documents): files and deliverables as they were sent or produced, with their original names. What was in the trash comes in the "${PASTA_LIXEIRA}" folder.`,
+    '- rotinas.json (routines): the routines and the settings of each one.',
+    '- equipe (team): the agents, sectors, instructions and trained skills (equipe.json and the competencias folder), and the team',
+    '  outline (esqueleto-da-equipe.json): the shape of the team in the format Ergon reads, to set up the same team again.',
+    '- regras.json (rules): the rules you approved.',
+    '- contas-conectadas.json (connected accounts): only the names of the connected accounts and contacts.',
+    '- minha-conta.json (my account), and the profile photo if there is one: your account details.',
+    '',
+    '.json files are plain text: they open in Notepad or any editor. Dates are in each workspace\'s time zone.',
+    '',
+    'What is left out on purpose: your password, your personal key, the recovery phrase, and the passwords, keys and saved',
+    'access of connected accounts (any piece of text that looks like a password or a key shows up as [removido]). Nothing',
+    'that belongs to someone else comes either (their conversations and the files they sent).',
+    '',
+    `Limits of this download: ${mbEn(x.maxBytes)} of documents and ${mbEn(x.maxTexto)} of text.`,
+    '',
+    'Summary:',
+    ...(x.resumo.length ? x.resumo : ['- no workspace with data to download']),
+  ];
+  if (x.fechados.length) linhas.push('', `Not included, because they were locked at the time: ${x.fechados.join(', ')}. The owner needs to sign in to Ergon first.`);
+  if (x.deFora.length) {
+    linhas.push('', `${plEn(x.deFora.length, 'FILE').toUpperCase()} LEFT OUT:`, ...x.deFora.slice(0, 500).map((f) => `- ${f.arquivo} (${mbEn(f.tamanho)}): ${motivoEn(f.motivo)}`));
+    if (x.deFora.length > 500) linhas.push(`- and ${x.deFora.length - 500} more`);
+    linhas.push('To keep those, download them one by one in Documents (or delete some large files and download again) before deleting your account.');
+  } else linhas.push('', 'Nothing was left out.');
+  linhas.push('');
+  return linhas;
 }

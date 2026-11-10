@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { EMBLEM_VIEWBOX, emblemMarkup, logoSvg, palette, splashHtml, type LockupKind } from './logo.ts';
 import { useTheme } from '../lib/theme.ts';
+import { useT } from '../i18n/index.ts';
 
 // Desenho e animação vêm de logo.ts e brand.css (embutido no index.html); aqui só os invólucros para o React.
 // O conteúdo vem de geometria fixa (nenhum texto de usuário), por isso o innerHTML.
@@ -39,7 +40,9 @@ export function ErgonLogo({ kind = 'horizontal', height = 28, onDark, mono, anim
  */
 export function Splash({ label }: { label?: string }) {
   const [t0] = useState(() => `${Math.round(performance.now())}ms`);
-  const html = useMemo(() => splashHtml(label), [label]);
+  const t = useT();
+  const texto = label ?? t('geral.comum.carregando');
+  const html = useMemo(() => splashHtml(texto), [texto]);
   return <div style={{ '--t0': t0 } as CSSProperties} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -70,7 +73,8 @@ export function PhraseLoader({ phrases, size = 96, every = 2600, onDark }: { phr
 }
 
 /** "Carregando…" numa linha: o emblema pequeno fazendo a onda ao lado do texto (ou o erro, se houver). */
-export function Loading({ error, label = 'Carregando…' }: { error?: string | null; label?: string }) {
+export function Loading({ error, label }: { error?: string | null; label?: string }) {
+  const t = useT();
   if (error) return <p className="muted">{error}</p>;
-  return <p className="muted eg-inline" role="status"><ErgonMark size={18} animated loopOnly /> {label}</p>;
+  return <p className="muted eg-inline" role="status"><ErgonMark size={18} animated loopOnly /> {label ?? t('geral.comum.carregando')}</p>;
 }

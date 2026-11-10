@@ -6,9 +6,11 @@
 # (scripts/distribuicao/servidor-teste.mjs) e confere que o motor mudou: a imagem exata da versão nova, o plugin com
 # as Conexões dentro do cofre, a marca da configuração do cofre (2 ou mais) com ergon_conexoes na API, os mesmos
 # volumes e a mesma conta. Em seguida apaga a pasta do zip, usa o comando "ergon" de outra pasta, testa loja, modelos
-# da comunidade, WhatsApp experimental e backup; "ergon remover" (os dados ficam; as imagens dos dois repositórios do
-# Ergon, o do serviço e o -hermes do motor de IA, saem), instala de novo (a conta volta) e "ergon remover --tudo"
-# (nada fica).
+# da comunidade, WhatsApp experimental e backup; "ergon uninstall" (os dados ficam; as imagens dos dois repositórios do
+# Ergon, o do serviço e o -hermes do motor de IA, saem), instala de novo (a conta volta) e "ergon uninstall --purge"
+# (nada fica). Com o lançador da versão de partida, os nomes de antes (instalar, atualizar), que ele conhece; com o da
+# versão nova, os nomes novos se ele os conhece (desde a 1.1.0-rc.26; os de antes continuam valendo, e
+# scripts/teste-lancador.sh confere os dois), e os de antes se for um pacote publicado anterior a eles.
 #   REPO=dono/ergon-community bash scripts/homologar-pacote.sh
 #   REPO=dono/ergon-community PACOTE_DIR=pacote PACOTE_ANTIGO=1.1.0-rc.22 bash scripts/homologar-pacote.sh
 # PACOTE_ANTIGO: a pasta de um pacote, ou uma versão publicada em REPO (1.1.0-rc.22 ou v1.1.0-rc.22); "anterior" (o
@@ -20,7 +22,7 @@ B=http://localhost:8787
 E="$HOME/.local/bin/ergon"; PROG="$HOME/.local/share/ergon"
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORTA_TESTE="${PORTA_TESTE:-18999}"
-export ERGON_SEM_NAVEGADOR=1
+export ERGON_NO_BROWSER=1 ERGON_SEM_NAVEGADOR=1   # o novo e o de antes (o lançador da versão de partida)
 R=0
 ok() { echo "ok    $1 — $2"; }
 falha() { echo "FALHA $1 — $2"; R=1; }
@@ -92,6 +94,7 @@ done
 # ---------------------------------------------------------------- instalar a partir da pasta do zip
 PARTIDA=pacote; V0="$V"; [[ -n "$VA" ]] && { PARTIDA=antigo; V0="$VA"; }
 cp -r "$W/$PARTIDA" "$W/zip"; cd "$W/zip"
+# "instalar": o nome que o lançador da versão de partida conhece
 if ./ergon.sh instalar > "$W/instalar.log" 2>&1; then ok "ergon.sh instalar ($V0)" "$(grep -v '^\s*$' "$W/instalar.log" | tail -1)"; else falha "ergon.sh instalar ($V0)" "$(tail -5 "$W/instalar.log" | tr '\n' ' ')"; fi
 [[ -x "$E" && -f "$PROG/ergon.sh" && -f "$PROG/docker-compose.yml" ]] && ok "instalado numa pasta fixa" "$PROG, comando $E" || falha "instalado numa pasta fixa" "$(ls -la "$PROG" "$E" 2>&1 | head -3 | tr '\n' ' ')"
 # o motor de contêineres que o lançador escolheu (gravado no .env; o lançador de uma versão antiga usa o Docker)
@@ -211,14 +214,24 @@ T=$(c -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -d '{"t
 [[ "$T" == 201 ]] && ok "tarefa" "criada" || falha "tarefa" "$T"
 
 "$E" status > "$W/status.log" 2>&1 && ok "ergon status" "$(tail -1 "$W/status.log")" || falha "ergon status" "$(tail -2 "$W/status.log" | tr '\n' ' ')"
+# os nomes dos comandos no lançador instalado: os novos (em inglês) desde a 1.1.0-rc.26; num pacote anterior, os de antes
+# (o lançador antigo responde a um comando que não conhece com a ajuda, que não começa por "Ergon <número>")
+VER="$("$E" version 2>/dev/null | head -1)"
+if [[ "$VER" =~ ^Ergon\ [0-9] ]]; then
+  [[ "$VER" == "Ergon $V" ]] && ok "ergon version" "$VER" || falha "ergon version" "$VER (esperado: Ergon $V)"
+  N_UPDATE=update; N_UNINSTALL=uninstall; N_PURGE=--purge; N_INSTALL=install; CONFIRMA=ERGON_CONFIRM; PALAVRA=DELETE
+else
+  ok "ergon version" "pacote anterior aos nomes novos: seguem os de antes"
+  N_UPDATE=atualizar; N_UNINSTALL=remover; N_PURGE=--tudo; N_INSTALL=instalar; CONFIRMA=ERGON_CONFIRMAR; PALAVRA=APAGAR
+fi
 "$E" backup > "$W/backup.log" 2>&1 && ok "ergon backup" "$(tail -1 "$W/backup.log")" || falha "ergon backup" "$(tail -3 "$W/backup.log" | tr '\n' ' ')"
 # sem versão mais nova publicada: nada muda (com a atualização de verdade, pelo mesmo manifesto local)
-ERGON_UPDATE_URL="$URL_TESTE" "$E" atualizar > "$W/atualizar.log" 2>&1 && ok "ergon atualizar" "$(tail -1 "$W/atualizar.log")" || falha "ergon atualizar" "$(tail -3 "$W/atualizar.log" | tr '\n' ' ')"
+ERGON_UPDATE_URL="$URL_TESTE" "$E" "$N_UPDATE" > "$W/atualizar.log" 2>&1 && ok "ergon $N_UPDATE" "$(tail -1 "$W/atualizar.log")" || falha "ergon $N_UPDATE" "$(tail -3 "$W/atualizar.log" | tr '\n' ' ')"
 
 # ---------------------------------------------------------------- remover: o Ergon sai, os dados ficam
 REPOS="$(refs "$PROG/docker-compose.yml" | while read -r r; do repo_de "$r"; done | sort -u | tr '\n' ' ')"
 sobra() { local r s=''; for r in $REPOS; do "$MC" images --format '{{.Repository}}' 2>/dev/null | grep -qxF "$r" && s="$s $r"; done; printf '%s' "$s"; }
-"$E" remover > "$W/remover.log" 2>&1 && ok "ergon remover" "$(tail -1 "$W/remover.log")" || falha "ergon remover" "$(tail -3 "$W/remover.log" | tr '\n' ' ')"
+"$E" "$N_UNINSTALL" > "$W/remover.log" 2>&1 && ok "ergon $N_UNINSTALL" "$(tail -1 "$W/remover.log")" || falha "ergon $N_UNINSTALL" "$(tail -3 "$W/remover.log" | tr '\n' ' ')"
 [[ -z "$("$MC" ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$("$MC" ps -aq --filter label=ergon.motor)" ]] && ok "contêineres" "nenhum do Ergon" || falha "contêineres" "$("$MC" ps -a --format '{{.Names}}' | tr '\n' ' ')"
 S="$(sobra)"; [[ -z "$S" ]] && ok "imagens" "nenhuma dos repositórios do Ergon (o do serviço e o do motor de IA: $REPOS)" || falha "imagens" "ficaram de$S"
 "$MC" volume ls -q | grep -q '^ergon_ergon-data$' && ok "dados guardados" "volume ergon_ergon-data continua" || falha "dados guardados" "o volume sumiu"
@@ -226,15 +239,15 @@ if [[ -n "$VA" ]]; then "$MC" volume ls -q | grep -q '^ergon_motor-' && ok "cofr
 [[ ! -e "$E" && ! -d "$PROG" && -f "$HOME/.ergon/secrets/ergon.env" && -n "$(ls "$HOME/.ergon/backups" 2>/dev/null)" ]] && ok "comando e pasta do programa" "removidos; segredos e backups guardados" || falha "comando e pasta do programa" "$(ls -d "$E" "$PROG" "$HOME/.ergon"/* 2>&1 | tr '\n' ' ')"
 
 # ---------------------------------------------------------------- instalar de novo: a conta volta
-cp -r "$W/pacote" "$W/zip2"; (cd "$W/zip2" && ./ergon.sh instalar > "$W/reinstalar.log" 2>&1) && ok "instalar de novo" "$(tail -1 "$W/reinstalar.log")" || falha "instalar de novo" "$(tail -3 "$W/reinstalar.log" | tr '\n' ' ')"
+cp -r "$W/pacote" "$W/zip2"; (cd "$W/zip2" && ./ergon.sh "$N_INSTALL" > "$W/reinstalar.log" 2>&1) && ok "instalar de novo" "$(tail -1 "$W/reinstalar.log")" || falha "instalar de novo" "$(tail -3 "$W/reinstalar.log" | tr '\n' ' ')"
 rm -rf "$W/zip2"
 no_ar || falha "no ar de novo" "sem resposta"
 L=$(curl -sS -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -H "origin: $B" -d "{\"username\":\"homologacao\",\"password\":\"$PW\"}" "$B/api/auth/login")
 [[ "$L" == 200 ]] && ok "dados de volta" "a mesma conta entra com a mesma senha" || falha "dados de volta" "login $L"
 
-# ---------------------------------------------------------------- remover --tudo: nada fica
-ERGON_CONFIRMAR=errado "$E" remover --tudo > "$W/nao.log" 2>&1; "$MC" volume ls -q | grep -q '^ergon_ergon-data$' && ok "remover --tudo sem confirmar" "nada apagado" || falha "remover --tudo sem confirmar" "apagou"
-ERGON_CONFIRMAR=APAGAR "$E" remover --tudo > "$W/tudo.log" 2>&1 && ok "ergon remover --tudo" "$(tail -1 "$W/tudo.log")" || falha "ergon remover --tudo" "$(tail -3 "$W/tudo.log" | tr '\n' ' ')"
+# ---------------------------------------------------------------- uninstall --purge: nada fica
+env "$CONFIRMA=errado" "$E" "$N_UNINSTALL" "$N_PURGE" > "$W/nao.log" 2>&1; "$MC" volume ls -q | grep -q '^ergon_ergon-data$' && ok "$N_UNINSTALL $N_PURGE sem confirmar" "nada apagado" || falha "$N_UNINSTALL $N_PURGE sem confirmar" "apagou"
+env "$CONFIRMA=$PALAVRA" "$E" "$N_UNINSTALL" "$N_PURGE" > "$W/tudo.log" 2>&1 && ok "ergon $N_UNINSTALL $N_PURGE" "$(tail -1 "$W/tudo.log")" || falha "ergon $N_UNINSTALL $N_PURGE" "$(tail -3 "$W/tudo.log" | tr '\n' ' ')"
 [[ -z "$("$MC" volume ls -q | grep -E '^ergon_')" ]] && ok "volumes" "nenhum do Ergon" || falha "volumes" "$("$MC" volume ls -q | grep -E '^ergon_' | tr '\n' ' ')"
 S="$(sobra)"; [[ -z "$("$MC" ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$S" ]] && ok "contêineres e imagens" "nenhum" || falha "contêineres e imagens" "ficaram:$S"
 [[ ! -e "$HOME/.ergon" && ! -e "$E" && ! -d "$PROG" ]] && ok "vestígios" "sem ~/.ergon, sem comando, sem pasta do programa" || falha "vestígios" "$(ls -d "$HOME/.ergon" "$E" "$PROG" 2>&1 | tr '\n' ' ')"

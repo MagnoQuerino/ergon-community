@@ -9,6 +9,7 @@ New-Item -ItemType Directory -Force -Path "$T\zip", "$T\local", "$T\home\.ergon\
 $env:ERGON_LOCAL_DIR = "$T\local"; $env:ERGON_BACKUPS_DIR = "$T\home\.ergon\backups"; $env:ERGON_PROGRAM_DIR = "$T\programa"
 $env:ERGON_PATH_FILE = "$T\path.txt"; $env:ERGON_INSTALACAO = "$T\home\.ergon\instalacao.json"; $env:ERGON_STARTUP_DIR = "$T\inicio"
 Set-Content $env:ERGON_PATH_FILE 'C:\Windows;C:\Outra'
+$env:ERGON_LANG = 'pt'   # as mensagens conferidas aqui sao as em portugues
 
 . $Ergon *> $null   # carrega as funções do lançador (sem comando: só mostraria a ajuda)
 $Fonte = $false; $Local = "$T\local"; $Backups = "$T\home\.ergon\backups"; $Segredos = "$T\home\.ergon\secrets"; $Projeto = 'ergon'
@@ -83,7 +84,17 @@ Check ($rm -match 'ergon_ergon-data' -and $rm -match 'ergon_hermes-vault' -and $
 Check ($rm -notmatch 'outro_dados') 'volume de outro projeto não é tocado'
 Check (-not (Test-Path "$T\home\.ergon\secrets") -and -not (Test-Path $Backups) -and -not (Test-Path $Local)) 'segredos, backups e registros apagados'
 
+Write-Host 'F) uninstall --purge com o ERGON_CONFIRM novo e DELETE: apaga do mesmo jeito'
 Remove-Item Env:\ERGON_CONFIRMAR
+New-Item -ItemType Directory -Force -Path $Segredos, "$Backups\ergon-2" | Out-Null; Set-Content "$Segredos\ergon.env" 'X=1'
+$env:ERGON_CONFIRM = 'nao'; $script:calls = @()
+$erro = ''; try { Remove-Ergon -Tudo } catch { $erro = $_.Exception.Message }
+Check ($erro -match 'Nada foi apagado' -and $script:calls.Count -eq 0 -and (Test-Path "$Segredos\ergon.env")) 'ERGON_CONFIRM com outra resposta: nada apagado'
+$env:ERGON_CONFIRM = 'DELETE'; $script:calls = @()
+Remove-Ergon -Tudo
+Check (-not (Test-Path "$T\home\.ergon\secrets") -and -not (Test-Path $Backups) -and ($script:said -match 'com os dados')) 'DELETE confirma como o APAGAR'
+
+Remove-Item Env:\ERGON_CONFIRM
 Remove-Item -Recurse -Force $T -ErrorAction SilentlyContinue   # o teste não deixa nada no disco
 Write-Host ''
 Write-Host "$ok ok, $($falhas.Count) falha(s)"

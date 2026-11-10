@@ -439,7 +439,7 @@ fn instalar_linux(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
 
     ev(Evento::Etapa("ligar"));
     let mut c = comando("/bin/bash");
-    c.arg(pac.join("ergon.sh")).arg("instalar").env("ERGON_SEM_NAVEGADOR", "1").env("ERGON_MOTOR", "podman").current_dir(&pac);
+    c.arg(pac.join("ergon.sh")).arg("instalar").env("ERGON_SEM_NAVEGADOR", "1").env("ERGON_MOTOR", "podman").env("ERGON_LANG", "pt").current_dir(&pac);
     transmitir(&mut c, Duration::from_secs(40 * 60), ev).map_err(|e| format!("A instalação dos serviços parou: {e}"))?;
 
     ev(Evento::Etapa("conferir"));

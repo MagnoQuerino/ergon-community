@@ -1,3 +1,5 @@
+import { t } from '../i18n/index.ts';
+
 /**
  * Voltar para uma versão anterior (Configurações › Atualizações). No Ergon Desktop, a versão que tem o pacote
  * assinado do canal ganha o botão "Voltar para esta versão": ele leva a "/__desktop/voltar?versao=X", que o aplicativo
@@ -38,14 +40,14 @@ export function voltaNaLista(r: VersaoAnterior, onde: OndeVolta): VoltaNaLista {
   // fora do aplicativo, ou sem administrar (o texto da seção diz a quem pedir): só a página da versão
   if (!onde.app || !onde.admin) return { voltar: null, nota: null };
   if (r.rollback === 'pode') return { voltar: `${PEDIDO_VOLTAR}?versao=${encodeURIComponent(r.version)}`, nota: null };
-  if (r.rollback === 'instalada-fora') return { voltar: null, nota: 'A versão instalada já não está entre as publicadas recentemente, e por aqui não dá para voltar. Na página desta versão está o instalador.' };
-  if (r.rollback === 'antiga') return { voltar: null, nota: 'Antiga demais para voltar com segurança: nela, a equipe e os seus dados de agora não voltariam juntos.' };
-  return { voltar: null, nota: 'Esta versão não tem o pacote para voltar pelo aplicativo; na página dela está o instalador.' };
+  if (r.rollback === 'instalada-fora') return { voltar: null, nota: t('configuracoes.atual.notaInstaladaFora') };
+  if (r.rollback === 'antiga') return { voltar: null, nota: t('configuracoes.atual.notaAntiga') };
+  return { voltar: null, nota: t('configuracoes.atual.notaSemPacote') };
 }
 
 /** O texto da lista de versões anteriores, conforme a volta vale aqui e quem olha (função pura: testável). */
 export function textoVersoesAnteriores(onde: OndeVolta): string {
-  if (!onde.app) return 'Na página de cada versão estão os instaladores. Baixe o da versão escolhida e instale por cima desta.';
-  if (!onde.admin) return 'Voltar de versão muda o Ergon de todas as pessoas deste computador: peça a quem administra o Ergon aqui.';
-  return 'Dá para voltar só para as duas versões anteriores a esta. Escolha uma e clique em “Voltar para esta versão”: o aplicativo confere a versão, explica o que pode acontecer e só troca depois da sua confirmação, com um backup dos seus dados antes (se o backup não der certo, você escolhe se volta mesmo assim). Os dados ficam.';
+  if (!onde.app) return t('configuracoes.atual.anterioresWeb');
+  if (!onde.admin) return t('configuracoes.atual.anterioresNaoAdmin');
+  return t('configuracoes.atual.anterioresAdmin');
 }

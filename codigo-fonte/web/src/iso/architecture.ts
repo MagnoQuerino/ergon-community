@@ -12,6 +12,7 @@ import type { Wall } from '../world/buildings.ts';
 
 export type Order = 'doric' | 'ionic' | 'corinthian';
 export function orderFor(level: number): Order { return level === 0 ? 'doric' : level === 1 ? 'ionic' : 'corinthian'; }
+// i18n-ok: nome interno das ordens de coluna (não aparece na tela)
 export const ORDER_NAME: Record<Order, string> = { doric: 'dórica', ionic: 'jônica', corinthian: 'coríntia' };
 
 const cache = new Map<string, Sprite>();

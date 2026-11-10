@@ -13,8 +13,8 @@
  * Desenha sob demanda: parado, nenhum quadro; em movimento, 60 quadros/s (30 se o navegador não acompanhar).
  */
 import { CELL, placeError, typeOf } from '../../../shared/city.ts';
-import { FLOOR_H, handoffSpot, idleSpotOf, seatOf, stairBox, tarpBox, tarpPlace, visitSpot, type Activity } from '../world/buildings.ts';
-import type { House } from '../world/areas.ts';
+import { FLOOR_H, handoffSpot, idleSpotOf, seatOf, stairBox, tarpBox, tarpPlace, visitSpot, type Activity, type ChaveDaVida } from '../world/buildings.ts';
+import type { ChaveDoLugar, House } from '../world/areas.ts';
 import { Town, type AreaInst, type BuildingInst, type Loc, type StructureIn } from '../world/town.ts';
 import type { AABB, P3, Vec2 } from '../world/geom.ts';
 import { startMove, stepMove, targetFor, visualFor, type Mover, type Visual } from '../scene/agentState.ts';
@@ -33,6 +33,7 @@ import { paintFx, paintPet } from './cosmetics.ts';
 import { blob } from './props.ts';
 import { between, isNightHour, msUntilMorning, pairAt, pickActivity, pickChoice, rng, type Bubble, type LifeChoice } from './life.ts';
 import { fillPoly } from './raster.ts';
+import { fmtNumero, onIdioma, t as tr } from '../i18n/index.ts';
 
 export interface EngineCallbacks {
   onSelectAgent(id: string): void;
@@ -57,7 +58,8 @@ interface Plan {
   facing: Facing; mirror: boolean; sit: boolean; perch: boolean;
   gestures: Gesture[]; expr: Expr; bubble: Bubble;
   carry: boolean; group: string | null; dur: [number, number]; key: string | null;
-  label: string | null; area: string | null; tour: Vec2[] | null; fast: boolean; hide: boolean;
+  /** o que se lê ao clicar na área ("na fonte"): a chave do dicionário, traduzida na hora de mostrar */
+  label: ChaveDaVida | null; area: string | null; tour: Vec2[] | null; fast: boolean; hide: boolean;
 }
 interface Life { mode: 'home' | 'going' | 'doing' | 'waiting' | 'returning'; until: number; plan: Plan | null; next: Plan | null; since: number; toured: boolean }
 interface Group { id: string; kind: GroupKind; members: string[]; created: number; started: number; until: number; timeout: number }
@@ -140,7 +142,9 @@ interface Occupancy { by: Map<string, { levels: Map<number, { n: number; working
 interface FloorCount { active: number; working: number; waiting: number; queued: number }
 /** Nomes no texto de uma casa do bairro (o resto vira "e mais X", pelo total da cidade). */
 const HOUSE_NAMES = 6;
-const fmtN = (n: number) => n.toLocaleString('pt-BR');
+/** os lugares da cidade pelo tipo da área (o texto "a caminho"); outro lugar fica como está */
+const LUGAR: Partial<Record<string, ChaveDoLugar>> = { agora: 'cidade.lugar.agora', teatro: 'cidade.lugar.teatro', termas: 'cidade.lugar.termas', ginasio: 'cidade.lugar.ginasio', bairro: 'cidade.lugar.bairro' };
+const lugarDe = (area: string): string => { const k = LUGAR[area]; return k ? tr(k) : area; };
 
 /** Máscara de pixels opacos de um sprite (clique só onde há desenho), calculada uma vez. */
 const masks = new WeakMap<Sprite, Uint8Array>();
@@ -242,7 +246,10 @@ export class IsoEngine {
     canvas.addEventListener('contextlost', this.onLostCtx);
     document.addEventListener('visibilitychange', this.onVis);
     window.addEventListener('keydown', this.onKey);
+    // trocar de idioma redesenha os rótulos (nomes das áreas, placas, regiões e o que se lê ao clicar)
+    this.offIdioma = onIdioma(() => this.invalidate());
   }
+  private offIdioma: () => void;
 
   dispose(): void {
     this.disposed = true;
@@ -254,6 +261,7 @@ export class IsoEngine {
     c.removeEventListener('contextlost', this.onLostCtx);
     document.removeEventListener('visibilitychange', this.onVis);
     window.removeEventListener('keydown', this.onKey);
+    this.offIdioma();
   }
 
   // ================================================================ entradas vindas do React
@@ -881,12 +889,12 @@ export class IsoEngine {
     const a = this.town.areaOf(kind); if (!a) return false;
     const partner = this.pickOne(this.available(null, rt, now, true)); if (!partner) return false;
     const W = this.areaW(a);
-    let A: Vec2; let B: Vec2; let key: string; let label: string;
-    if (kind === 'ginasio') { if (!a.def.wrestle) return false; [A, B] = a.def.wrestle.map(W) as [Vec2, Vec2]; key = `c:${a.id}:luta`; label = 'lutando'; }
+    let A: Vec2; let B: Vec2; let key: string; let label: ChaveDaVida;
+    if (kind === 'ginasio') { if (!a.def.wrestle) return false; [A, B] = a.def.wrestle.map(W) as [Vec2, Vec2]; key = `c:${a.id}:luta`; label = 'cidade.vida.lutando'; }
     else {
       const free = a.def.chats.map((_, i) => i).filter((i) => !busy.has(`c:${a.id}:chat${i}`));
       const ci = this.pickOne(free); if (ci === null) return false;
-      [A, B] = pairAt(a.def.chats[ci]).map(W) as [Vec2, Vec2]; key = `c:${a.id}:chat${ci}`; label = 'conversando';
+      [A, B] = pairAt(a.def.chats[ci]).map(W) as [Vec2, Vec2]; key = `c:${a.id}:chat${ci}`; label = 'cidade.vida.conversando';
     }
     if (busy.has(key) || this.crowded([A, B], [rt, partner])) return false;
     const id = this.newGroup(kind === 'ginasio' ? 'wrestle' : this.rand() < 0.2 ? 'debate' : 'chat', [rt, partner], now, 60000);
@@ -908,11 +916,11 @@ export class IsoEngine {
     if (seats.length < n) return false;
     const W = this.areaW(a);
     const id = this.newGroup('assembly', [rt, ...listeners], now, 60000);
-    this.startPlan(rt, basePlan({ kind: 'group', loc: OUT, spot: W(a.def.speaker), facing: 'back', group: id, key: kp, area: 'teatro', label: 'falando na assembleia' }), now);
+    this.startPlan(rt, basePlan({ kind: 'group', loc: OUT, spot: W(a.def.speaker), facing: 'back', group: id, key: kp, area: 'teatro', label: 'cidade.vida.discursando' }), now);
     const chosen = seats.sort(() => this.rand() - 0.5).slice(0, n);
     listeners.forEach((m, k) => {
       const { s, i } = chosen[k];
-      this.startPlan(m, basePlan({ kind: 'group', loc: OUT, spot: W(s.spot), y: s.y, mirror: s.mirror, perch: true, group: id, key: `c:${a.id}:assento${i}`, area: 'teatro', label: 'na plateia' }), now);
+      this.startPlan(m, basePlan({ kind: 'group', loc: OUT, spot: W(s.spot), y: s.y, mirror: s.mirror, perch: true, group: id, key: `c:${a.id}:assento${i}`, area: 'teatro', label: 'cidade.vida.naPlateia' }), now);
     });
     return true;
   }
@@ -925,7 +933,7 @@ export class IsoEngine {
   private startHome(rt: Rt, now: number, night: boolean): boolean {
     const hh = this.houseOf(rt); if (!hh) return false;
     const dur: [number, number] = night ? [msUntilMorning(new Date()), msUntilMorning(new Date()) + 60000] : [15000, 30000];
-    this.startPlan(rt, basePlan({ kind: 'home', loc: OUT, spot: this.areaW(hh.a)(hh.h.door), facing: 'back', hide: true, dur, label: 'dormindo', area: `casa${hh.h.id}` }), now);
+    this.startPlan(rt, basePlan({ kind: 'home', loc: OUT, spot: this.areaW(hh.a)(hh.h.door), facing: 'back', hide: true, dur, label: 'cidade.vida.dormindo', area: `casa${hh.h.id}` }), now);
     return true;
   }
 
@@ -1403,8 +1411,8 @@ export class IsoEngine {
     for (const r of regions) {
       const [wx, wy] = project(r.x, 0, r.z); const [sx, sy] = this.toScreen(wx, wy);
       if (sx < -100 * dpr || sx > this.W + 100 * dpr || sy < -40 * dpr || sy > this.H + 40 * dpr) continue;
-      const l1 = `${r.agents} agente${r.agents === 1 ? '' : 's'} · ${r.structures} ${r.structures === 1 ? 'construção' : 'construções'}`;
-      const l2 = r.waiting ? `${r.waiting} esperando você` : r.working ? `${r.working} trabalhando` : '';
+      const l1 = `${tr('cidade.regiao.agentes', { n: r.agents })} · ${tr('cidade.regiao.construcoes', { n: r.structures })}`;
+      const l2 = r.waiting ? tr('cidade.regiao.esperandoVoce', { n: r.waiting }) : r.working ? tr('cidade.regiao.trabalhando', { n: r.working }) : '';
       const w = Math.max(g.measureText(l1).width, l2 ? g.measureText(l2).width : 0) + 16 * dpr; const hh = (l2 ? 38 : 22) * dpr;
       g.save(); g.globalAlpha = 0.94; g.fillStyle = '#fffdf8'; g.strokeStyle = th.outline; g.lineWidth = dpr;
       g.beginPath(); g.roundRect(sx - w / 2, sy - hh / 2, w, hh, 8 * dpr); g.fill(); g.stroke(); g.restore();
@@ -1836,7 +1844,7 @@ export class IsoEngine {
     this.shadow(fx, fy);
     this.g.drawImage(s.canvas, fx - s.ax, fy - s.ay);
     this.drawn.push({ kind: 'agent', id: NPC_ID, x: fx - s.ax, y: fy - s.ay, s });
-    this.agentsDrawn.push({ id: NPC_ID, fx, fy: fy + RES, name: 'Alexandre Magno', sel: false });
+    this.agentsDrawn.push({ id: NPC_ID, fx, fy: fy + RES, name: 'Alexandre Magno', sel: false }); // i18n-ok: nome de personagem, não se traduz
     if (gesture === 'think' && Math.floor(now / 1700) % 2 === 0) this.drawIcon(BUBBLE_ROWS.think, { o: this.theme.outline, w: '#fbf7ee', d: this.theme.outline }, fx + 5 * RES, fy - STAND_HEAD - 8 * RES);
   }
 
@@ -1908,7 +1916,7 @@ export class IsoEngine {
       const text = list.length > 3 ? `${nums} +${list.length - 3}` : nums;
       const one = list.length === 1 ? list[0] : null;
       pill(sx, sy, text, list.some(isWait), list.every((t) => t.kind === 'treinando'),
-        { tag: one, building: one ? null : b, title: one ? one.title : `${list.length} trabalhos aqui: ${list.map((t) => t.label).join(', ')} (abre a Central de Trabalho)` });
+        { tag: one, building: one ? null : b, title: one ? one.title : tr('cidade.etiqueta.varios', { n: list.length, lista: list.map((t) => t.label).join(', ') }) });
     }
   }
 
@@ -1980,15 +1988,15 @@ export class IsoEngine {
       const [, badgeY] = this.toScreen(...project(b.ox, art.top + 0.6, b.oz + b.spec.D / 2));
       const sy = Math.min(roofY, badgeY - 12 * RES * this.k);
       const pips = o.limit !== null && o.limit <= 8 ? { on: Math.min(o.busy, o.limit), total: o.limit } : undefined;
-      const rows: Row[] = [{ kind: 'central', text: o.limit === null ? `Trabalho · ${o.busy} em andamento` : `Trabalho · ${o.busy}/${o.limit}`, pips }];
-      if (o.ready || o.blocked) rows.push({ kind: 'espera', text: [o.ready ? `${o.ready} na espera` : '', o.blocked ? `${o.blocked} parado${o.blocked === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') });
-      if (o.deliveries) rows.push({ kind: 'entregas', text: `${o.deliveries} entrega${o.deliveries === 1 ? '' : 's'} recente${o.deliveries === 1 ? '' : 's'}` });
+      const rows: Row[] = [{ kind: 'central', text: o.limit === null ? tr('cidade.placa.trabalho', { n: o.busy }) : tr('cidade.placa.trabalhoDe', { ocupadas: fmtNumero(o.busy), limite: fmtNumero(o.limit) }), pips }];
+      if (o.ready || o.blocked) rows.push({ kind: 'espera', text: [o.ready ? tr('cidade.placa.naEspera', { n: o.ready }) : '', o.blocked ? tr('cidade.placa.parados', { n: o.blocked }) : ''].filter(Boolean).join(' · ') });
+      if (o.deliveries) rows.push({ kind: 'entregas', text: tr('cidade.placa.entregas', { n: o.deliveries }) });
       panel(rows, sx, sy - 6 * this.dpr);
     }
     const ag = this.town.areaOf('agora');
     if (ag && o.decisions > 0) {
       const [sx, sy] = this.toScreen(...project((ag.lot.x0 + ag.lot.x1) / 2, 2.2, (ag.lot.z0 + ag.lot.z1) / 2));
-      panel([{ kind: 'decisoes', text: `${o.decisions} ${o.decisions === 1 ? 'decisão espera' : 'decisões esperam'} você` }], sx, sy);
+      panel([{ kind: 'decisoes', text: tr('cidade.placa.decisoes', { n: o.decisions }) }], sx, sy);
     }
   }
 
@@ -2030,18 +2038,21 @@ export class IsoEngine {
 
   // ================================================================ o que está acontecendo (para o clique nas áreas)
   private statusOf(rt: Rt): string {
-    if (rt.visual === 'working') return 'trabalhando';
-    if (rt.visual === 'attention') return 'na fila';
-    if (rt.visual === 'waiting') return 'aguardando você';
+    if (rt.visual === 'working') return tr('cidade.estado.trabalhando');
+    if (rt.visual === 'attention') return tr('cidade.estado.naFila');
+    if (rt.visual === 'waiting') return tr('cidade.estado.aguardandoVoce');
     const p = rt.life.plan;
-    if (p?.label && (rt.life.mode === 'doing' || rt.life.mode === 'waiting')) return p.label;
-    if (p?.area && rt.life.mode === 'going') return `a caminho (${p.area.startsWith('casa') ? 'casa' : p.area})`;
-    return 'no trabalho';
+    if (p?.label && (rt.life.mode === 'doing' || rt.life.mode === 'waiting')) return tr(p.label);
+    if (p?.area && rt.life.mode === 'going') {
+      if (p.area.startsWith('casa')) return tr('cidade.estado.aCaminhoDeCasa');
+      return tr('cidade.estado.aCaminho', { lugar: lugarDe(p.area) });
+    }
+    return tr('cidade.estado.noTrabalho');
   }
 
   private areaText(hit: AreaHit): string {
     const list = (area: string) => [...this.rts.values()].filter((rt) => rt.life.plan?.area === area && rt.visual === 'idle' && rt.life.mode !== 'home' && rt.life.mode !== 'returning');
-    const who = (rts: Rt[]) => (rts.length ? rts.map((rt) => `${rt.a.name} ${this.statusOf(rt)}`).join(' · ') : 'ninguém agora');
+    const who = (rts: Rt[]) => (rts.length ? rts.map((rt) => `${rt.a.name} ${this.statusOf(rt)}`).join(' · ') : tr('cidade.estado.ninguem'));
     switch (hit.kind) {
       case 'casa': {
         // até 6 nomes de quem está carregado; o resto pelo total da cidade (as casas se repetem: com milhares de
@@ -2049,16 +2060,17 @@ export class IsoEngine {
         const a = this.town.areaOf('bairro'); const houses = a?.def.houses ?? []; const id = hit.ref ?? 0;
         const res = [...this.rts.values()].filter((rt) => houses.length && rt.house % houses.length === id);
         const total = Math.max(res.length, residentsOf(id, houses.length, this.countTotal ?? this.rts.size));
-        if (!total) return `Casa ${id + 1} · vazia, pronta para novos agentes`;
-        const shown = res.slice(0, HOUSE_NAMES).map((rt) => `${rt.a.name} ${this.hidden(rt) ? 'dormindo' : this.statusOf(rt)}`);
-        if (!shown.length) return `Casa ${id + 1} · ${fmtN(total)} ${total === 1 ? 'morador' : 'moradores'}`;
+        const casa = id + 1;
+        if (!total) return tr('cidade.casa.vazia', { casa });
+        const shown = res.slice(0, HOUSE_NAMES).map((rt) => `${rt.a.name} ${this.hidden(rt) ? tr('cidade.vida.dormindo') : this.statusOf(rt)}`);
+        if (!shown.length) return tr('cidade.casa.moradores', { n: total, casa });
         const more = total - shown.length;
-        return `Casa ${id + 1} · ${shown.join(' · ')}${more > 0 ? ` · e mais ${fmtN(more)}` : ''}`;
+        return more > 0 ? tr('cidade.casa.nomesEMais', { casa, nomes: shown.join(' · '), n: more }) : tr('cidade.casa.nomes', { casa, nomes: shown.join(' · ') });
       }
-      case 'termas': return `Termas · ${who(list('termas'))}`;
-      case 'ginasio': return `Ginásio · ${who(list('ginasio'))}`;
-      case 'agora': return `Ágora · ${who(list('agora'))} · o mural de avisos abre Conexões`;
-      case 'teatro': return `Teatro · ${who(list('teatro'))}`;
+      case 'termas': return tr('cidade.area.termas', { quem: who(list('termas')) });
+      case 'ginasio': return tr('cidade.area.ginasio', { quem: who(list('ginasio')) });
+      case 'agora': return tr('cidade.area.agora', { quem: who(list('agora')) });
+      case 'teatro': return tr('cidade.area.teatro', { quem: who(list('teatro')) });
       default: return '';
     }
   }
@@ -2130,7 +2142,7 @@ export class IsoEngine {
     const same = JSON.stringify(hover) === JSON.stringify(this.hover);
     this.hover = hover;
     const tag = this.editing ? null : this.tagAt(e);
-    this.canvas.title = tag ? `${tag.title} · clique para abrir` : '';
+    this.canvas.title = tag ? tr('cidade.etiqueta.abrir', { titulo: tag.title }) : '';
     if (tag) { this.canvas.style.cursor = 'pointer'; if (!same) this.invalidate(); return; }
     if (!this.editing && this.plaqueAt(e)) { this.canvas.style.cursor = 'pointer'; if (!same) this.invalidate(); return; }
     this.canvas.style.cursor = this.editing ? (hover ? 'grab' : 'default') : hit && (hit.kind !== 'area' || hit.hit.kind !== 'agora') && hit.kind !== 'floor' ? 'pointer' : 'grab';
@@ -2161,9 +2173,9 @@ export class IsoEngine {
     const plaque = this.editing ? null : this.plaqueAt(e);
     if (plaque) { this.cb.onObject(plaque); return; }
     const [wx, wy] = this.toWorld(e);
-    const tr = this.tarpRect;
-    if (!this.editing && this.ops && !this.ops.cloud && tr && wx >= tr[0] && wx <= tr[2] && wy >= tr[1] && wy <= tr[3]) {
-      this.cb.onObject('info', 'Posto reservado para trabalhos na nuvem: coberto com lona, ainda sem uso nesta versão.');
+    const lona = this.tarpRect;
+    if (!this.editing && this.ops && !this.ops.cloud && lona && wx >= lona[0] && wx <= lona[2] && wy >= lona[1] && wy <= lona[3]) {
+      this.cb.onObject('info', tr('cidade.placa.lona'));
       return;
     }
     const hit = this.hitAt(wx, wy);

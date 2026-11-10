@@ -8,6 +8,7 @@ import type { Config } from './config.ts';
 import { normalizeBridge, normalizeTeamsActivity, normalizeWhatsAppMessage, type BridgePayload } from './connectors/normalize.ts';
 import type { Db } from './db/db.ts';
 import { HttpError, fold, id as newId, notFound, now, redactUrl, safeEqual } from './lib/util.ts';
+import { comTextoDoResultado, reconhecer, tx, type Texto } from './lib/textos.ts';
 import { INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
 import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
@@ -63,7 +64,7 @@ import { cardDocuments, inboxForChat } from './services/routine-sources.ts';
 import { TRAINING_KEY, Trainings } from './services/trainings.ts';
 import { NICHES, PRESETS, USES, applyOnboarding, onboardingChoice, onboardingOptions, onboardingState, skipOnboarding } from './services/team-presets.ts';
 import { createOwnWorkspace, deleteWorkspace, listWorkspaces, renameWorkspace } from './services/workspaces.ts';
-import { readPrefs, writePrefs } from './services/prefs.ts';
+import { IDIOMAS, readPrefs, writePrefs, type Idioma } from './services/prefs.ts';
 import { isSource } from './services/routine-catalog.ts';
 import { Teamwork, parseTrainRequests } from './services/teamwork.ts';
 import { CATEGORIES as AMBIENT_CATEGORIES, readAmbient, type Category as AmbientCategory } from './services/ambient.ts';
@@ -81,6 +82,7 @@ import { addStructureFloor, createStructure, createStructureAuto, ensureCity, li
 import { usageSummary } from './services/usage.ts';
 import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PASSOS_SETTING, compactacaoDaEquipe, medirExecucao, passosDaEquipe, resumoComposicao } from './services/custo.ts';
 import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard, ensureBoards, getTask, taskLog, updateTask, userBoard } from './services/tasks.ts';
+import { chaveDaColuna } from './services/colunas.ts';
 import { USER_COLUMNS } from './services/seed.ts';
 import { loadWorld } from './world-hook.ts';
 import { exportBlueprint, importBlueprint } from './services/blueprint.ts';
@@ -629,11 +631,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: cfg.maxUploadBytes }, (_req, body, done) => done(null, body));
 
   app.setErrorHandler((err: any, req, reply) => {
-    if (err instanceof HttpError) return reply.status(err.status).send({ error: err.code, message: err.message });
+    // o código do texto ao lado do português (a tela traduz; sem código conhecido, mostra o português que veio)
+    if (err instanceof HttpError) { const t = err.texto ?? reconhecer(err.message, 'erro.'); return reply.status(err.status).send({ error: err.code, message: err.message, ...(t ? { message_t: t } : {}) }); }
     if (err.validation) return reply.status(400).send({ error: 'validation', message: err.message });
     if (err.statusCode && err.statusCode < 500) return reply.status(err.statusCode).send({ error: err.code ?? 'request', message: err.message });
     req.log.error({ err: { message: err.message, stack: err.stack } }, 'erro interno');
-    return reply.status(500).send({ error: 'internal', message: 'erro interno' });
+    return reply.status(500).send({ error: 'internal', message: 'erro interno', message_t: tx('erro.interno') });
   });
 
   app.addHook('onSend', async (_req, reply, payload) => {
@@ -817,10 +820,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     schema: { body: { type: 'object', additionalProperties: false, properties: {
       tips: { type: 'boolean' }, tourDone: { type: 'boolean' }, resetTips: { type: 'boolean' }, updateNotice: { type: 'boolean' },
       cityCalm: { type: 'boolean' }, musicVolume: { type: 'number', minimum: 0, maximum: 1 }, musicShuffle: { type: 'boolean' }, cityBarCollapsed: { type: 'boolean' },
+      lang: { type: 'string', enum: [...IDIOMAS] },
       dismiss: { type: 'array', maxItems: 20, items: S.str(60, 1) } } } },
   }, async (req) => {
     const a = auth(req);
-    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; updateNotice?: boolean; cityCalm?: boolean; musicVolume?: number; musicShuffle?: boolean; cityBarCollapsed?: boolean; dismiss?: string[] });
+    return writePrefs(db, a.workspaceId, a.userId, req.body as { tips?: boolean; tourDone?: boolean; resetTips?: boolean; updateNotice?: boolean; cityCalm?: boolean; musicVolume?: number; musicShuffle?: boolean; cityBarCollapsed?: boolean; lang?: Idioma; dismiss?: string[] });
   });
 
   // Boas-vindas: como a pessoa vai usar e em que área trabalha definem a equipe de partida (tudo editável depois)
@@ -1140,7 +1144,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const runs = db.all(`SELECT r.id, r.kind, r.status, r.mode, r.model, r.tokens_in, r.tokens_out, r.cost_usd, r.created_at, r.finished_at, r.error, r.task_id,
         ${OWN_CONVERSATION} AS conversation_id FROM runs r
       WHERE r.agent_id = ? AND r.workspace_id = ? ORDER BY r.created_at DESC LIMIT 20`, a.userId, agentId, a.workspaceId);
-    const tasks = db.all(`SELECT t.id, t.number, t.title, t.completed, c.name AS column_name FROM tasks t JOIN columns c ON c.id = t.column_id
+    const tasks = db.all(`SELECT t.id, t.number, t.title, t.completed, c.name AS column_name, c.system_key AS column_key FROM tasks t JOIN columns c ON c.id = t.column_id
       JOIN boards b ON b.id = t.board_id WHERE t.agent_id = ? AND t.workspace_id = ? AND t.archived = 0 AND b.audience = 'team' ORDER BY t.completed, t.number DESC LIMIT 30`, agentId, a.workspaceId);
     const totals = db.get(`SELECT COUNT(*) AS runs, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out FROM runs WHERE agent_id = ? AND workspace_id = ? AND mode = 'real'`, agentId, a.workspaceId);
     return { runs, tasks, totals };
@@ -1305,7 +1309,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
    * (as ações nas contas, a aprovação depois de ler e as demais, com os mesmos ganchos e o mesmo registro).
    */
   // a mesma decisão para o app e para o Teams (o cartão no Teams chama esta função; alcance e prazo só vêm da tela)
-  const decidirProposta = async (ws: string, userId: string, pid: string, decision: 'apply' | 'reject', o: { alcance?: Alcance; prazo?: PrazoDepoisDeLer } = {}): Promise<{ status: string; result: string }> => {
+  const decidirProposta = async (ws: string, userId: string, pid: string, decision: 'apply' | 'reject', o: { alcance?: Alcance; prazo?: PrazoDepoisDeLer } = {}): Promise<{ status: string; result: string; result_t?: Texto }> => {
     if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, ws)) return conexoes.decidirProposta(ws, userId, pid, decision);
     if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_REGRA)) return conexoes.decidirRegra(ws, userId, pid, decision, o.alcance);
     if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_DEPOIS_DE_LER)) return conexoes.decidirAprovacao(ws, userId, pid, decision, o.prazo);
@@ -1646,8 +1650,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const num = /^#?(\d{1,7})$/.exec(q)?.[1];
     const words = q.split(/\s+/).filter(Boolean);
     const hit = (s: string) => { const f = fold(s); return words.length > 0 && words.every((w) => f.includes(w)); };
-    const tasks = db.all<{ id: string; number: number; title: string; completed: number; board_id: string; audience: string; origin: string; column_name: string }>(
-      `SELECT t.id, t.number, t.title, t.completed, t.board_id, b.audience, b.origin, c.name AS column_name
+    const tasks = db.all<{ id: string; number: number; title: string; completed: number; board_id: string; audience: string; origin: string; column_name: string; column_key: string | null }>(
+      `SELECT t.id, t.number, t.title, t.completed, t.board_id, b.audience, b.origin, c.name AS column_name, c.system_key AS column_key
          FROM tasks t JOIN boards b ON b.id = t.board_id JOIN columns c ON c.id = t.column_id
         WHERE t.workspace_id = ? AND t.archived = 0 ORDER BY t.completed, t.updated_at DESC LIMIT 3000`, a.workspaceId)
       .filter((t) => (num !== undefined && String(t.number) === num) || hit(t.title)).slice(0, 12);
@@ -1712,7 +1716,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const question = result?.state === 'aguardando_info' && typeof result.evidenceData.pergunta === 'string' ? result.evidenceData.pergunta : null;
     const missing = result?.state === 'aguardando_info' && !question ? result.justification : null;
     // a linha para a pessoa ("Para você decidir: …") vai na faixa de decisão: no histórico, a entrega aparece sem ela
-    const log = (taskLog(db, a.workspaceId, taskId) as Array<{ actor_type: string; actor_id: string | null; evidence: string | null }>).map((e) => {
+    // as frases fixas do sistema vão também com código (result_t): a tela traduz
+    const log = comTextoDoResultado(taskLog(db, a.workspaceId, taskId) as Array<{ actor_type: string; actor_id: string | null; action: string; evidence: string | null; result: string }>).map((e) => {
       if (!e.evidence || !/"output"/.test(e.evidence)) return e;
       try {
         const ev = JSON.parse(e.evidence) as { output?: unknown };
@@ -1732,6 +1737,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       files: { inputs: files.filter((x) => x.role === 'entrada'), deliverables: files.filter((x) => x.role === 'entregavel') }, operations: ops, work,
       queue,
       column: db.get<{ name: string }>('SELECT name FROM columns WHERE id = ?', task.column_id)?.name ?? null,
+      // o código fixo da coluna (todo, doing, with_you, done; null em quadro espelhado): a tela decide por ele, não pelo nome
+      columnKey: chaveDaColuna(db, task.column_id),
       // aberto de fora do quadro ("aguardando você", uma conversa): a tela escolhe o modo pelo quadro do card
       board: db.get<{ audience: string; origin: string; source: string | null }>('SELECT b.audience, b.origin, i.kind AS source FROM boards b LEFT JOIN integrations i ON i.id = b.connection_id WHERE b.id = ?', task.board_id) ?? null,
       steps, question, missing,
@@ -2092,9 +2099,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
 
   // Atividade, eventos, regras, saída -----------------------------------------------------------------
-  app.get('/api/activity', async (req) => db.all(
+  app.get('/api/activity', async (req) => comTextoDoResultado(db.all<{ action: string; result: string }>(
     'SELECT id, actor_type, actor_id, action, target_type, target_id, evidence, result, created_at FROM audit_events WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT 200',
-    auth(req).workspaceId));
+    auth(req).workspaceId)));
 
   // Conexões: o que falta autorizar, a escolha de liberar tudo, testar com a conta real e a ação da própria pessoa
   app.get('/api/conexoes', async (req) => {

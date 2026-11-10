@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, ProcessLimit, Usage } from '../lib/types.ts';
-import { COMPACTAR_AJUDA, COMPACTAR_ATUALIZACAO, COMPACTAR_DEPOIS, COMPACTAR_ROTULO, COMPOSICAO_ESTIMADA, COMPOSICAO_INTRO, COMPOSICAO_NOTA, COMPOSICAO_VAZIA, PASSOS_AJUDA, PASSOS_DEPOIS, PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, detalhe, fatias, passosCompartilhado, tamanhoMedio } from '../lib/custo.ts';
+import { PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, compactarAjuda, compactarAtualizacao, compactarDepois, compactarRotulo, composicaoEstimada, composicaoIntro, composicaoNota, composicaoVazia, detalhe, fatias, passosAjuda, passosCompartilhado, passosDepois, tamanhoMedio } from '../lib/custo.ts';
+import { fmtMoeda, fmtNumero, tn, useT } from '../i18n/index.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { holdersText } from '../lib/team.ts';
@@ -27,6 +28,7 @@ const WorldPanel = worldMod ? lazy(worldMod) : null;
 /** Configuração: as ferramentas da equipe (andamento, consumo), a conta, o workspace, a segurança e, para quem administra
  *  o Ergon neste computador, as pessoas e a saúde da instalação. */
 export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: AppState; me: Me; onMeChanged: () => void; reload: () => void }) {
+  const t = useT();
   const admin = me.admin;
   const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'seguranca' | 'saude' | 'pessoas' | 'pacotes' | 'world' | 'atualizacoes'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('atualizacoes') ? 'atualizacoes' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world' : location.hash.includes('pacotes') ? 'pacotes'
     : location.hash.includes('saude') && admin ? 'saude' : location.hash.includes('pessoas') && admin ? 'pessoas' : 'ia'));
@@ -39,17 +41,17 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
   return (
     <div className="page">
       <header className="page__head">
-        <h2>Configurações</h2>
+        <h2>{t('configuracoes.titulo')}</h2>
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>Ferramentas da equipe</button>
-          <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>Minha conta</button>
-          <button role="tab" aria-selected={tab === 'workspace'} className={`tab ${tab === 'workspace' ? 'tab--on' : ''}`} onClick={() => setTab('workspace')}>Workspace</button>
-          <button role="tab" aria-selected={tab === 'seguranca'} className={`tab ${tab === 'seguranca' ? 'tab--on' : ''}`} onClick={() => setTab('seguranca')}>Segurança</button>
-          {admin && me.mode === 'local' && <button role="tab" aria-selected={tab === 'pessoas'} className={`tab ${tab === 'pessoas' ? 'tab--on' : ''}`} onClick={() => setTab('pessoas')}>Pessoas</button>}
-          <button role="tab" aria-selected={tab === 'pacotes'} className={`tab ${tab === 'pacotes' ? 'tab--on' : ''}`} onClick={() => setTab('pacotes')}>Pacotes</button>
-          {WorldPanel && <button role="tab" aria-selected={tab === 'world'} className={`tab ${tab === 'world' ? 'tab--on' : ''}`} onClick={() => setTab('world')}>Conta Ergon</button>}
-          {me.mode === 'local' && <button role="tab" aria-selected={tab === 'atualizacoes'} className={`tab ${tab === 'atualizacoes' ? 'tab--on' : ''}`} onClick={() => setTab('atualizacoes')}>Atualizações</button>}
-          {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>Saúde</button>}
+          <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>{t('configuracoes.abas.ferramentas')}</button>
+          <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>{t('configuracoes.abas.conta')}</button>
+          <button role="tab" aria-selected={tab === 'workspace'} className={`tab ${tab === 'workspace' ? 'tab--on' : ''}`} onClick={() => setTab('workspace')}>{t('configuracoes.abas.workspace')}</button>
+          <button role="tab" aria-selected={tab === 'seguranca'} className={`tab ${tab === 'seguranca' ? 'tab--on' : ''}`} onClick={() => setTab('seguranca')}>{t('configuracoes.abas.seguranca')}</button>
+          {admin && me.mode === 'local' && <button role="tab" aria-selected={tab === 'pessoas'} className={`tab ${tab === 'pessoas' ? 'tab--on' : ''}`} onClick={() => setTab('pessoas')}>{t('configuracoes.abas.pessoas')}</button>}
+          <button role="tab" aria-selected={tab === 'pacotes'} className={`tab ${tab === 'pacotes' ? 'tab--on' : ''}`} onClick={() => setTab('pacotes')}>{t('configuracoes.abas.pacotes')}</button>
+          {WorldPanel && <button role="tab" aria-selected={tab === 'world'} className={`tab ${tab === 'world' ? 'tab--on' : ''}`} onClick={() => setTab('world')}>{t('configuracoes.abas.contaErgon')}</button>}
+          {me.mode === 'local' && <button role="tab" aria-selected={tab === 'atualizacoes'} className={`tab ${tab === 'atualizacoes' ? 'tab--on' : ''}`} onClick={() => setTab('atualizacoes')}>{t('configuracoes.abas.atualizacoes')}</button>}
+          {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>{t('configuracoes.abas.saude')}</button>}
         </div>
       </header>
       {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
@@ -61,13 +63,14 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
 
 /** Segurança só com a senha atual: pedida toda vez que a aba abre (vale enquanto ela estiver aberta). */
 function SegurancaGate({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [ok, setOk] = useState(false);
   const [senha, setSenha] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (ok) return <>{children}</>;
   const entrar = async () => {
-    if (!senha) { setErr('Digite a sua senha atual.'); return; }
+    if (!senha) { setErr(t('configuracoes.gate.senhaVazia')); return; }
     setBusy(true); setErr(null);
     try { await api.post('/api/session/unlock', { password: senha }); setSenha(''); setOk(true); }
     catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
@@ -77,11 +80,11 @@ function SegurancaGate({ children }: { children: React.ReactNode }) {
     <div className="seg-gate">
       <div className="seg-gate__fundo" aria-hidden="true" inert>{children}</div>
       <div className="seg-gate__dialogo" role="dialog" aria-modal="false" aria-labelledby="seg-gate-titulo">
-        <h3 id="seg-gate-titulo"><Icon name="lock" size={16} /> Desbloquear opções de segurança</h3>
-        <p className="muted small">Senha, frase de recuperação, verificação em duas etapas e trancamento ficam protegidos. Digite a sua senha atual para mexer neles.</p>
+        <h3 id="seg-gate-titulo"><Icon name="lock" size={16} /> {t('configuracoes.gate.titulo')}</h3>
+        <p className="muted small">{t('configuracoes.gate.texto')}</p>
         <form className="seg-gate__form" onSubmit={(e) => { e.preventDefault(); void entrar(); }}>
-          <input className="input" type="password" autoComplete="current-password" autoFocus aria-label="Senha atual" placeholder="Senha atual" value={senha} onChange={(e) => { setSenha(e.target.value); setErr(null); }} />
-          <button className="btn btn--primary" disabled={busy}>{busy ? 'Conferindo…' : 'Desbloquear'}</button>
+          <input className="input" type="password" autoComplete="current-password" autoFocus aria-label={t('configuracoes.gate.senhaAtual')} placeholder={t('configuracoes.gate.senhaAtual')} value={senha} onChange={(e) => { setSenha(e.target.value); setErr(null); }} />
+          <button className="btn btn--primary" disabled={busy}>{busy ? t('configuracoes.comum.conferindo') : t('configuracoes.gate.desbloquear')}</button>
         </form>
         {err && <p className="error" role="alert">{err}</p>}
       </div>
@@ -91,21 +94,24 @@ function SegurancaGate({ children }: { children: React.ReactNode }) {
 
 /** Rodapé com a versão instalada; o botão leva a Configurações › Atualizações (verificar, atualizar, voltar, aviso). */
 function VersionCard({ onOpen }: { onOpen: () => void }) {
+  const t = useT();
   const v = useResource<VersionInfo>('/api/version', []);
   if (!v.data) return null;
   const d = v.data;
+  const onde = d.mode === 'cloud' ? t('configuracoes.rodape.nuvem') : t('configuracoes.rodape.local');
   return (
     <div className="hint version version--row">
       <span>
-        Ergon {d.version}{d.build !== 'dev' ? ` (${d.build})` : ''} · {d.mode === 'cloud' ? 'nuvem' : 'neste computador'}
-        {d.updateAvailable && d.latest ? <> · <b>versão {d.latest.version} disponível</b></> : null}
+        {d.build !== 'dev' ? t('configuracoes.rodape.versaoBuild', { versao: d.version, build: d.build, onde }) : t('configuracoes.rodape.versao', { versao: d.version, onde })}
+        {d.updateAvailable && d.latest ? <> · <b>{t('configuracoes.rodape.disponivel', { versao: d.latest.version })}</b></> : null}
       </span>
-      {d.mode === 'local' && <button className="btn btn--sm" onClick={onOpen}>Atualizações</button>}
+      {d.mode === 'local' && <button className="btn btn--sm" onClick={onOpen}>{t('configuracoes.abas.atualizacoes')}</button>}
     </div>
   );
 }
 
 function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
+  const t = useT();
   const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const tools = useResource<ToolWithHolders[]>('/api/ai/tools', ['agents.changed']);
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed']);
@@ -115,56 +121,58 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
 
   // quem tem cada ferramenta vem na própria lista (holders): basta relê-la
   const toggleTool = async (id: string, on: boolean) => {
-    const enabled = (tools.data ?? []).filter((t) => t.kind === 'ia' && t.platform && t.id !== id).map((t) => t.id);
+    const enabled = (tools.data ?? []).filter((f) => f.kind === 'ia' && f.platform && f.id !== id).map((f) => f.id);
     try { await api.put('/api/ai/tools', { enabled: on ? [...enabled, id] : enabled }); tools.reload(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
   const s = status.data;
 
   return (
     <>
-      <p className="muted">As ferramentas que os agentes podem usar, o andamento e o consumo da equipe. A conta de IA e o modelo padrão ficam em <a href="#conexoes">Conexões</a>.</p>
+      <p className="muted">{tn('configuracoes.ia.intro', { conexoes: <a href="#conexoes">{t('configuracoes.ia.introConexoes')}</a> })}</p>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
 
       <section className="card">
-        <h3>Ferramentas da equipe</h3>
-        <p className="muted small">O que fica ligado para os agentes. Cada agente usa só as que tem no perfil; quem não tem pede ajuda a um colega (a coordenação controla essas travas).</p>
-        <p className="hint"><Icon name="lock" size={12} /> As que executam código ficam protegidas: ligar pede a sua senha. Também dá para pedir conversando com qualquer agente (“liga o Terminal para a Hipátia”): o pedido vai para a coordenação, e você confirma com a senha na conversa com ela.</p>
+        <h3>{t('configuracoes.abas.ferramentas')}</h3>
+        <p className="muted small">{t('configuracoes.ferr.texto')}</p>
+        <p className="hint"><Icon name="lock" size={12} /> {t('configuracoes.ferr.protegidas')}</p>
         <div className="tools-grid">
-          {(tools.data ?? []).filter((t) => t.kind === 'ia' || t.id === 'agenda').map((t) => t.kind === 'ergon' ? (
+          {(tools.data ?? []).filter((f) => f.kind === 'ia' || f.id === 'agenda').map((f) => f.kind === 'ergon' ? (
             // do próprio Ergon: sempre ligada (vale para quem a tem no perfil)
-            <label key={t.id} className="tool-opt tool-opt--on">
-              <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title="Ferramenta do próprio Ergon: sempre ligada" />
-              <span className="tool-opt__txt"><b>{t.label}</b><small>{t.note}</small></span>
-              <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[t.status]}`}>ligada</span>
-                <span className="muted small">{holdersText(t.holders)}</span></span>
+            <label key={f.id} className="tool-opt tool-opt--on">
+              <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title={t('configuracoes.ferr.sempreLigadaDica')} />
+              <span className="tool-opt__txt"><b>{f.label}</b><small>{f.note}</small></span>
+              <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{t('configuracoes.ferr.ligada')}</span>
+                <span className="muted small">{holdersText(f.holders)}</span></span>
             </label>
           ) : (
-            <label key={t.id} className={`tool-opt ${t.platform ? 'tool-opt--on' : ''} ${!t.safe && !t.guarded ? 'tool-opt--off' : ''}`}>
-              <input type="checkbox" checked={!!t.platform} disabled={(!t.safe && !t.guarded) || !s?.available || t.id === 'passos'} onChange={(e) => void toggleTool(t.id, e.target.checked)} />
-              <span className="tool-opt__txt"><b>{t.guarded && <Icon name="lock" size={12} />} {t.label}</b><small>{t.note.replace(/ — (desligada|bloqueada):.*$/, '')}{t.guarded && !t.platform ? ' · ligar pede a sua senha' : ''}</small></span>
-              <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[t.status]}`}>{t.safe || t.guarded ? (t.platform ? 'ligada' : t.guarded ? 'protegida' : 'desligada') : 'bloqueada'}</span>
-                <span className="muted small">{holdersText(t.holders)}</span></span>
+            <label key={f.id} className={`tool-opt ${f.platform ? 'tool-opt--on' : ''} ${!f.safe && !f.guarded ? 'tool-opt--off' : ''}`}>
+              <input type="checkbox" checked={!!f.platform} disabled={(!f.safe && !f.guarded) || !s?.available || f.id === 'passos'} onChange={(e) => void toggleTool(f.id, e.target.checked)} />
+              <span className="tool-opt__txt"><b>{f.guarded && <Icon name="lock" size={12} />} {f.label}</b><small>{f.note.replace(/ — (desligada|bloqueada):.*$/, '')}{f.guarded && !f.platform ? ` · ${t('configuracoes.ferr.pedeSenha')}` : ''}</small></span>
+              <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{f.safe || f.guarded ? (f.platform ? t('configuracoes.ferr.ligada') : f.guarded ? t('configuracoes.ferr.protegida') : t('configuracoes.ferr.desligada')) : t('configuracoes.ferr.bloqueada')}</span>
+                <span className="muted small">{holdersText(f.holders)}</span></span>
             </label>
           ))}
         </div>
       </section>
 
       <section className="card">
-        <h3>Andamento da equipe</h3>
+        <h3>{t('configuracoes.andamento.titulo')}</h3>
         <label className="check"><input type="checkbox" checked={state.teamAutorun} onChange={async (e) => { try { await api.put('/api/team/autorun', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
-          A equipe pega sozinha as tarefas de “A fazer”, de cima para baixo</label>
+          {t('configuracoes.andamento.autorun')}</label>
         <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
-          A equipe puxa conversa quando você chega (boas-vindas com o resumo e quem precisa de você)</label>
+          {t('configuracoes.andamento.iniciativa')}</label>
         <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <CompactacaoField ligada={state.teamCompactacao !== false} pendente={state.teamCompactacaoPendente === true} atualizacao={state.teamCompactacaoAtualizacao === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-        <p className="hint">Conversas não entram no limite: você fala com qualquer agente a qualquer hora, mesmo com a equipe ocupada. Cards, rotinas e revisões acima do limite esperam a vez — os cards em “A fazer”, onde você pode marcar Prioridade ou arrastar para o topo. Cada tarefa usa o modelo de IA e conta no consumo.</p>
+        <p className="hint">{t('configuracoes.andamento.dica')}</p>
       </section>
 
       {usage.data && (
         <section className="card">
-          <h3>Consumo</h3>
-          <p>Este mês: <strong>{(usage.data.month.tokensIn + usage.data.month.tokensOut).toLocaleString('pt-BR')}</strong> tokens em {usage.data.month.runs} execuções reais{usage.data.costVisible && usage.data.month.costUsd !== null ? <> · custo informado: <strong>US$ {usage.data.month.costUsd.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}</strong></> : null}.</p>
+          <h3>{t('configuracoes.consumo.titulo')}</h3>
+          <p>{usage.data.costVisible && usage.data.month.costUsd !== null
+            ? tn('configuracoes.consumo.mesComCusto', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong>, custo: <strong>{fmtMoeda(usage.data.month.costUsd, 'USD', { maximumFractionDigits: 4 })}</strong> })
+            : tn('configuracoes.consumo.mes', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong> })}</p>
           <p className="hint">{usage.data.note}</p>
         </section>
       )}
@@ -180,6 +188,7 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
  * de recarregar a tela); a resposta do salvar só antecipa o aviso até o estado chegar.
  */
 function PassosField({ value, pendente, outros, onSaved, onError }: { value: number; pendente: boolean; outros: number; onSaved: () => void; onError: (text: string) => void }) {
+  const t = useT();
   const [escolha, setEscolha] = useState(value);
   const [depois, setDepois] = useState(pendente);
   useEffect(() => { setEscolha(value); }, [value]);
@@ -193,11 +202,11 @@ function PassosField({ value, pendente, outros, onSaved, onError }: { value: num
   const opcoes = [...new Set([...PASSOS_OPCOES, escolha])].sort((a, b) => a - b);
   return (
     <div className="field field--limit">
-      <label htmlFor="passos-pedido">Passos por pedido</label>
+      <label htmlFor="passos-pedido">{t('configuracoes.passos.rotulo')}</label>
       <select id="passos-pedido" value={String(escolha)} onChange={(e) => void save(Number(e.target.value))} aria-describedby="passos-pedido-hint">
-        {opcoes.map((n) => <option key={n} value={n}>até {n} passos{n === PASSOS_PADRAO ? ' (padrão)' : ''}</option>)}
+        {opcoes.map((n) => <option key={n} value={n}>{n === PASSOS_PADRAO ? t('configuracoes.passos.opcaoPadrao', { n }) : t('configuracoes.passos.opcao', { n })}</option>)}
       </select>
-      <small id="passos-pedido-hint" className="muted">{PASSOS_AJUDA}{outros ? ` ${passosCompartilhado(outros)}` : ''}{depois ? ` ${PASSOS_DEPOIS}` : ''}</small>
+      <small id="passos-pedido-hint" className="muted">{passosAjuda()}{outros ? ` ${passosCompartilhado(outros)}` : ''}{depois ? ` ${passosDepois()}` : ''}</small>
     </div>
   );
 }
@@ -209,6 +218,7 @@ function PassosField({ value, pendente, outros, onSaved, onError }: { value: num
  * guardada); a resposta do salvar só antecipa o aviso até o estado chegar.
  */
 function CompactacaoField({ ligada, pendente, atualizacao, outros, onSaved, onError }: { ligada: boolean; pendente: boolean; atualizacao: boolean; outros: number; onSaved: () => void; onError: (text: string) => void }) {
+  useT(); // troca de idioma redesenha os textos de lib/custo.ts
   const [on, setOn] = useState(ligada);
   const [depois, setDepois] = useState(pendente);
   const [chega, setChega] = useState(atualizacao);
@@ -223,11 +233,11 @@ function CompactacaoField({ ligada, pendente, atualizacao, outros, onSaved, onEr
       setChega(r.atualizacao === true); setDepois(!r.applied && r.atualizacao !== true); onSaved();
     } catch (x) { setOn(antes); onError(errMsg(x)); }
   };
-  const aviso = chega ? COMPACTAR_ATUALIZACAO : depois ? COMPACTAR_DEPOIS : '';
+  const aviso = chega ? compactarAtualizacao() : depois ? compactarDepois() : '';
   return (
     <div className="compactar">
-      <label className="check"><input type="checkbox" checked={on} onChange={(e) => void save(e.target.checked)} aria-describedby="compactar-hint" /> {COMPACTAR_ROTULO}</label>
-      <p id="compactar-hint" className="hint">{COMPACTAR_AJUDA}{outros ? ` ${passosCompartilhado(outros)}` : ''}</p>
+      <label className="check"><input type="checkbox" checked={on} onChange={(e) => void save(e.target.checked)} aria-describedby="compactar-hint" /> {compactarRotulo()}</label>
+      <p id="compactar-hint" className="hint">{compactarAjuda()}{outros ? ` ${passosCompartilhado(outros)}` : ''}</p>
       {aviso && <p className="hint" role="status">{aviso}</p>}
     </div>
   );
@@ -235,22 +245,24 @@ function CompactacaoField({ ligada, pendente, atualizacao, outros, onSaved, onEr
 
 /** Do que é feita cada chamada ao modelo: a equipe toda e os agentes que mais gastam (últimos 30 dias, medido). */
 function ComposicaoCard({ data }: { data: ComposicaoResumo }) {
+  const t = useT();
   const linhas = data.geral ? [data.geral, ...data.agentes.slice(0, 8)] : [];
   return (
     <section className="card">
-      <h3>Do que é feita cada chamada</h3>
-      <p className="muted small">{COMPOSICAO_INTRO}</p>
-      {!linhas.length ? <p className="hint">{COMPOSICAO_VAZIA}</p> : (
+      <h3>{t('configuracoes.custo.composicaoTitulo')}</h3>
+      <p className="muted small">{composicaoIntro()}</p>
+      {!linhas.length ? <p className="hint">{composicaoVazia()}</p> : (
         <div className="custo-lista">
           {linhas.map((a, i) => <ComposicaoLinha key={a.agentId || 'geral'} a={a} geral={i === 0} />)}
         </div>
       )}
-      {!!linhas.length && <p className="hint">{COMPOSICAO_NOTA}{linhas.some((a) => a.estimado) ? ` ${COMPOSICAO_ESTIMADA}` : ''}</p>}
+      {!!linhas.length && <p className="hint">{composicaoNota()}{linhas.some((a) => a.estimado) ? ` ${composicaoEstimada()}` : ''}</p>}
     </section>
   );
 }
 
 function ComposicaoLinha({ a, geral }: { a: ComposicaoAgente; geral: boolean }) {
+  useT(); // troca de idioma redesenha os textos de lib/custo.ts
   const partes = fatias(a);
   return (
     <div className="custo-linha">
@@ -271,6 +283,7 @@ function ComposicaoLinha({ a, geral }: { a: ComposicaoAgente; geral: boolean }) 
 
 /** Quantos processos andam ao mesmo tempo: automático (pela memória que o Ergon tem), um número ou sem limite. */
 function ProcessLimitField({ limit, onSaved, onError }: { limit: ProcessLimit; onSaved: () => void; onError: (text: string) => void }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const numbers = [...new Set([1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 24, 32, ...(typeof limit.choice === 'number' ? [limit.choice] : [])])].sort((a, b) => a - b);
   const save = async (v: string) => {
@@ -280,15 +293,15 @@ function ProcessLimitField({ limit, onSaved, onError }: { limit: ProcessLimit; o
   };
   return (
     <div className="field field--limit">
-      <label htmlFor="proc-limit">Trabalhos ao mesmo tempo</label>
+      <label htmlFor="proc-limit">{t('configuracoes.limite.rotulo')}</label>
       <select id="proc-limit" value={String(limit.choice)} disabled={busy} onChange={(e) => void save(e.target.value)} aria-describedby="proc-limit-hint">
-        <option value="auto">Automático ({limit.machine} nesta máquina)</option>
-        {numbers.map((n) => <option key={n} value={n}>{n} ao mesmo tempo{n === 5 ? ' (padrão)' : ''}</option>)}
-        <option value="ilimitado">Sem limite</option>
+        <option value="auto">{t('configuracoes.limite.auto', { maquina: limit.machine })}</option>
+        {numbers.map((n) => <option key={n} value={n}>{n === 5 ? t('configuracoes.limite.opcaoPadrao', { n }) : t('configuracoes.limite.opcao', { n })}</option>)}
+        <option value="ilimitado">{t('configuracoes.limite.semLimite')}</option>
       </select>
       <small id="proc-limit-hint" className="muted">
-        O padrão é 5. O automático usa um a cada 4 GB de memória do Ergon (aqui: {limit.memoryGb.toLocaleString('pt-BR')} GB, {limit.cpus} núcleos), até 6. Sem limite, tudo anda junto: só num computador forte.
-        {limit.cap !== null ? ` O seu plano permite até ${limit.cap}.` : ''}
+        {t('configuracoes.limite.ajuda', { memoria: fmtNumero(limit.memoryGb), nucleos: limit.cpus })}
+        {limit.cap !== null ? ` ${t('configuracoes.limite.plano', { teto: limit.cap })}` : ''}
       </small>
     </div>
   );

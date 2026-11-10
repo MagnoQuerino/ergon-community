@@ -161,7 +161,10 @@ describe('edição Community', () => {
   test('nada de "o nome do motor" nos textos do recurso, nem nomes internos', () => {
     const proibidas = new RegExp(['Her' + 'mes', 'M' + 'G3', 'am' + 'agno', 'fund' + 'ador'].join('|'));
     const arquivos = [...fs.readdirSync(path.join(raiz, 'server', 'src', 'services', 'teams-app')).map((f) => path.join(raiz, 'server', 'src', 'services', 'teams-app', f)),
-      path.join(raiz, 'web', 'src', 'views', 'ConexoesView.tsx'), path.join(raiz, 'connectors', 'teams', 'appPackage', 'manifest.template.json')];
+      path.join(raiz, 'web', 'src', 'views', 'ConexoesView.tsx'), path.join(raiz, 'web', 'src', 'lib', 'teams-app.ts'),
+      // os textos da tela de Conexões, nas duas línguas
+      path.join(raiz, 'web', 'src', 'i18n', 'pt', 'conexoes.ts'), path.join(raiz, 'web', 'src', 'i18n', 'en', 'conexoes.ts'),
+      path.join(raiz, 'connectors', 'teams', 'appPackage', 'manifest.template.json')];
     for (const f of arquivos.filter((x) => fs.existsSync(x))) { // connectors/ não vai na imagem de teste do Docker
       // só as frases (entre aspas) contam: a expressão que tira o nome do motor das respostas é montada por partes
       const frases = fs.readFileSync(f, 'utf8').match(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? [];

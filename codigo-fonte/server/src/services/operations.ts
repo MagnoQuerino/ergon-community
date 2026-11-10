@@ -13,6 +13,7 @@ import { openArtifact, removeArtifact, saveArtifact } from './artifacts.ts';
 import { CsvError, parseCsv, parseDate, safeCell } from './csv.ts';
 import { OP_VERSION, SchemaError, analyzePerformance, indicatorsCsv, performanceReport, type Performance } from './ops/desempenho.ts';
 import { localParts } from './routine-time.ts';
+import { mesAntesDoDia } from './due.ts';
 import { workspaceTz } from './routine-proposals.ts';
 
 export const OPERATIONS = {
@@ -46,9 +47,17 @@ export function todayIn(db: Db, workspaceId: string): string {
 export const neutral = (s: string, max = 80): string => s.replace(/\[\s*\[|\]\s*\]/g, (m) => m.replace(/\s+/g, '').split('').join(' ')).replace(/[\r\n\t]+/g, ' ').slice(0, max);
 
 /** Data de referência explícita no pedido ("data de referência: 24/10/2026", "referência 2026-10-24"); null = não disse. */
-export function referenceFrom(text: string): string | null {
-  const m = fold(text).match(/referencia\s*(?:[:=]|em|de|e|do dia)?\s*(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})/);
-  return m ? parseDate(m[1]) ?? null : null;
+export function referenceFrom(text: string, tz = 'America/Sao_Paulo'): string | null {
+  const t = fold(text);
+  const m = t.match(/referencia\s*(?:[:=]|em|de|e|do dia)?\s*(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})/);
+  if (m) return parseDate(m[1]) ?? null;
+  // inglês: "reference date: 2026-10-24", "as of 10/24/2026". Com um número acima de 12, só há uma leitura; com os dois
+  // até 12 ("as of 05/10/2026"), vale a ordem do lugar do workspace: mês/dia nos Estados Unidos, dia/mês no resto
+  const e = t.match(/\b(?:reference(?:\s+date)?|as\s+of)\s*(?:[:=]|is|of|on)?\s*(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})/);
+  if (!e) return null;
+  const us = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{2,4})$/.exec(e[1]);
+  if (us && Number(us[1]) <= 12 && Number(us[3]) <= 31 && (Number(us[3]) > 12 || mesAntesDoDia(tz))) return parseDate(`${us[3]}/${us[1]}/${us[4]}`) ?? parseDate(e[1]) ?? null;
+  return parseDate(e[1]) ?? null;
 }
 
 /** Arquivos ligados a uma tarefa (entrada e entregáveis), só do workspace. */

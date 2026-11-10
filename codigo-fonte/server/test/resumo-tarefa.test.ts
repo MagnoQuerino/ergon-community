@@ -175,7 +175,7 @@ describe('resumo da tarefa no card (GET /api/tasks/:id)', () => {
     for (const titulo of ['Revisar contrato', 'Pagar fornecedor', 'Agendar visita']) assert.equal((await executar(c.sessao, 'tarefa.criar', { titulo, quadro: 'Vendas' })).json.status, 'feita');
     await terminar(c.run, 'Criei as três tarefas no quadro Vendas.\n\nFeito: criei no Asana as 3 tarefas pedidas, no quadro Vendas.');
     const d = await detalhe(c.task);
-    assert.deepEqual(d.resumo.situacao, { tom: 'feito', texto: 'Feito' });
+    assert.deepEqual({ tom: d.resumo.situacao.tom, texto: d.resumo.situacao.texto }, { tom: 'feito', texto: 'Feito' });
     assert.equal(d.resumo.faixa.frase, 'Tarefas criadas em Asana: Revisar contrato, Pagar fornecedor e Agendar visita.');
     assert.match(d.resumo.faixa.doAgente ?? '', /criei no Asana as 3 tarefas/);
     const saida = d.log.filter((e) => e.evidence && /"output"/.test(e.evidence)).map((e) => JSON.parse(e.evidence!).output as string);
@@ -187,7 +187,7 @@ describe('resumo da tarefa no card (GET /api/tasks/:id)', () => {
     for (const titulo of ['Revisar contrato', 'Pagar fornecedor']) assert.equal((await executar(c.sessao, 'tarefa.criar', { titulo, quadro: 'Vendas' })).json.status, 'aguardando_confirmacao');
     await terminar(c.run, 'Pedi a sua confirmação para criar as duas tarefas.\nPara você decidir: criar no Asana as tarefas Revisar contrato e Pagar fornecedor.');
     let d = await detalhe(c.task);
-    assert.deepEqual(d.resumo.situacao, { tom: 'decidir', texto: 'Esperando sua aprovação' });
+    assert.deepEqual({ tom: d.resumo.situacao.tom, texto: d.resumo.situacao.texto }, { tom: 'decidir', texto: 'Esperando sua aprovação' });
     assert.equal(d.resumo.faixa.frase, 'Aguardando sua aprovação para criar as tarefas “Revisar contrato” e “Pagar fornecedor” em Asana.');
     const antes = Number(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM runs WHERE task_id = ?', c.task)!.n);
     const ids = cartoesDe(c.task);
@@ -247,7 +247,7 @@ describe('resumo da tarefa no card (GET /api/tasks/:id)', () => {
     await terminar(c.run, `${PALAVRAS}\n\nPara você decidir: escolher entre o plano A (R$ 50) e o B (R$ 80).`);
     const d = await detalhe(c.task);
     assert.equal(h.db.get<{ completed: number }>('SELECT completed FROM tasks WHERE id = ?', c.task)!.completed, 1, JSON.stringify(d.resumo));
-    assert.deepEqual(d.resumo.situacao, { tom: 'feito', texto: 'Feito' });
+    assert.deepEqual({ tom: d.resumo.situacao.tom, texto: d.resumo.situacao.texto }, { tom: 'feito', texto: 'Feito' });
     assert.doesNotMatch(d.resumo.faixa.frase, /plano A/);
     assert.ok(d.resumo.faixa.itens.includes('Ficou para você decidir: escolher entre o plano A (R$ 50) e o B (R$ 80).'), JSON.stringify(d.resumo.faixa));
     assert.equal(d.resumo.faixa.doAgente, null);
@@ -267,7 +267,7 @@ describe('resumo da tarefa no card (GET /api/tasks/:id)', () => {
     const c = await card('Escrever o relatório de vendas de outubro para a diretoria', { aprovar: true });
     await terminar(c.run, `Segue o relatório.\n# Relatório de vendas — outubro\n\n${PALAVRAS}\n\nPara você decidir: aprovar o relatório de outubro com as 3 recomendações para a diretoria.`);
     const d = await detalhe(c.task);
-    assert.deepEqual(d.resumo.situacao, { tom: 'decidir', texto: 'Esperando sua aprovação' });
+    assert.deepEqual({ tom: d.resumo.situacao.tom, texto: d.resumo.situacao.texto }, { tom: 'decidir', texto: 'Esperando sua aprovação' });
     assert.match(d.resumo.faixa.frase, /^Aguardando sua aprovação do documento “Relatório de vendas — outubro”, entregue por .+\.$/);
     assert.match(d.resumo.faixa.doAgente ?? '', /: aprovar o relatório de outubro com as 3 recomendações para a diretoria\.$/);
     assert.ok(!d.resumo.faixa.itens.includes(AVISO_SEM_CARTAO), 'aprovar um relatório não promete envio');
@@ -314,7 +314,7 @@ describe('resumo da tarefa no card (GET /api/tasks/:id)', () => {
   test('trabalhando agora, e a instrução de entrega pede a linha para a pessoa', async () => {
     const c = await card('Escrever o relatório de vendas de outubro para a diretoria');
     const d = await detalhe(c.task);
-    assert.deepEqual(d.resumo.situacao, { tom: 'trabalhando', texto: 'Trabalhando' });
+    assert.deepEqual({ tom: d.resumo.situacao.tom, texto: d.resumo.situacao.texto }, { tom: 'trabalhando', texto: 'Trabalhando' });
     assert.match(d.resumo.faixa.frase, /está trabalhando nisto agora\.$/);
     assert.match(h.db.get<{ input: string }>('SELECT input FROM runs WHERE id = ?', c.run)!.input, /"Para você decidir: …"[\s\S]*"Feito: …"/);
   });
@@ -324,7 +324,7 @@ describe('resumo da tarefa no card (GET /api/tasks/:id)', () => {
     const c = await card('Enviar e-mail ao fornecedor Delta pedindo o orçamento revisado');
     await terminar(c.run, 'Preparei o e-mail para a Delta, pronto para você enviar.');
     const d = await detalhe(c.task);
-    assert.deepEqual(d.resumo.situacao, { tom: 'falhou', texto: 'Não foi feito' });
+    assert.deepEqual({ tom: d.resumo.situacao.tom, texto: d.resumo.situacao.texto }, { tom: 'falhou', texto: 'Não foi feito' });
     assert.match(d.resumo.faixa.frase, /^Não foi feito: .*não chegou a usar a conexão/);
     assert.ok(!/O card fica aberto/.test(d.resumo.faixa.frase));
   });

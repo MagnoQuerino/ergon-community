@@ -250,7 +250,7 @@ describe('interrupções no meio (processo morto, disco que some)', () => {
       points++;
       const pre = unfinishedRestore(pathsOf(target).backupsDir);
       if (pre) {
-        assert.match(threw.message, /não deu para voltar tudo.*desfazer-restauracao/);
+        assert.match(threw.message, /não deu para voltar tudo.*ergon restore --undo pre-restore-/);
         undoRestore(path.join(pathsOf(target).backupsDir, pre), pathsOf(target));
         assert.equal(unfinishedRestore(pathsOf(target).backupsDir), null, 'desfeita, o servidor pode subir');
       } else {

@@ -8,6 +8,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { log, scrub } from '../lib/log.ts';
 import { tentarDeNovo, type Tentativas } from '../lib/tentar-de-novo.ts';
 import { HttpError, now } from '../lib/util.ts';
+import { idiomaDoPedido, type IdiomaDoPedido } from '../lib/textos.ts';
 import { throttle } from '../security/factors.ts';
 import { SESSION_COOKIE, createSession, requireRecentAuth, type AuthContext } from '../services/auth.ts';
 import { audit } from '../services/bus.ts';
@@ -136,7 +137,8 @@ export function registerPeopleRoutes(app: FastifyInstance, d: PeopleRouteDeps): 
   // descer): quem chega depois recebe "espere um pouco" em vez de derrubar o servidor.
   const montando = new Set<string>();
   const aoMesmoTempo = Math.max(1, d.exportarAoMesmoTempo ?? EXPORTAR_AO_MESMO_TEMPO);
-  const exportar = async (a: AuthContext, reply: FastifyReply) => {
+  // idioma: o da tela de quem pediu (X-Ergon-Lang): o LEIA-ME do arquivo vem nele
+  const exportar = async (a: AuthContext, reply: FastifyReply, idioma: IdiomaDoPedido = 'pt-BR') => {
     requireRecentAuth(a);
     if (d.people.sealed(a)) throw new HttpError(423, 'person_sealed', 'Digite a sua senha para abrir os seus dados.');
     if (montando.has(a.userId)) throw new HttpError(429, 'export_busy', 'O seu arquivo ainda está sendo montado. Espere ele terminar de baixar.');
@@ -145,7 +147,7 @@ export function registerPeopleRoutes(app: FastifyInstance, d: PeopleRouteDeps): 
     let liberado = false;
     const liberar = () => { if (!liberado) { liberado = true; montando.delete(a.userId); } };
     try {
-      const r = await exportarMeusDados({ db, cfg, routines: d.routines, owners: d.people.owners }, { id: a.userId, username: a.username, displayName: a.displayName });
+      const r = await exportarMeusDados({ db, cfg, routines: d.routines, owners: d.people.owners }, { id: a.userId, username: a.username, displayName: a.displayName }, { idioma });
       audit(db, d.bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'people.export',
         evidence: { arquivos: r.arquivos, bytes: r.bytes, deFora: r.deFora.length }, result: 'dados baixados (arquivo legível, sem cifra)' });
       // o arquivo desce aos poucos, um pedaço por vez; a vaga só libera quando ele terminou de descer (ou a conexão caiu)
@@ -155,11 +157,11 @@ export function registerPeopleRoutes(app: FastifyInstance, d: PeopleRouteDeps): 
         .header('content-length', String(r.bytes)).header('cache-control', 'no-store').header('x-ergon-de-fora', String(r.deFora.length)).send(corpo);
     } catch (e) { liberar(); throw e; }
   };
-  app.post('/api/me/export', async (req, reply) => exportar(d.auth(req), reply));
+  app.post('/api/me/export', async (req, reply) => exportar(d.auth(req), reply, idiomaDoPedido(req.headers)));
   // pelo id: quem administra (ou qualquer outra pessoa) não baixa os dados de ninguém; só a própria pessoa
   app.post('/api/people/:id/export', { schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^usr_[a-f0-9]{32}$' } } } } }, async (req, reply) => {
     const a = d.auth(req);
     if ((req.params as { id: string }).id !== a.userId) throw new HttpError(403, 'only_self', 'Só a própria pessoa baixa os dados dela. Peça para ela usar "Baixar meus dados" em Configurações › Minha conta.');
-    return exportar(a, reply);
+    return exportar(a, reply, idiomaDoPedido(req.headers));
   });
 }

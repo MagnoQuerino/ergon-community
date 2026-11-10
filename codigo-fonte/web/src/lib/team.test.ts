@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { agentOptions, coordLabel, examplesOf, holdersText, restOf } from './team.ts';
+import { agentOptions, coordLabel, examplesOf, holdersText, restOf, tipoComum } from './team.ts';
 
 test('quem tem a ferramenta: contagem do servidor e até 3 nomes, o resto em "e mais" (nunca some calado)', () => {
   assert.equal(holdersText(undefined), 'ninguém');
@@ -38,4 +38,55 @@ test('resto da equipe nas conversas: tira quem já tem conversa, na mesma ordem;
   assert.equal(restOf(items, new Set()), items, 'sem conversas: a mesma lista');
   const big = Array.from({ length: 48 }, (_, i) => ({ id: `agt_${i}` }));
   assert.equal(restOf(big, new Set(big.map((x) => x.id))).length, 0, 'página inteira já nas conversas: a próxima vem ao rolar');
+});
+
+test('personalidades na tela: o português do dicionário é o de shared/personalities.ts, e o inglês tem os mesmos exemplos', async () => {
+  const { PERSONALITIES, EXTREME_WARNING } = await import('../../../shared/personalities.ts');
+  const { default: pt } = await import('../i18n/pt/equipe.ts');
+  const { default: en } = await import('../i18n/en/equipe.ts');
+  const P = pt as Record<string, unknown>; const E = en as Record<string, unknown>;
+  for (const p of PERSONALITIES) {
+    assert.equal(P[`persona.${p.id}.nome`], p.label, p.id);
+    assert.equal(P[`persona.${p.id}.resumo`], p.summary, p.id);
+    assert.deepEqual(String(P[`persona.${p.id}.exemplos`]).split('\n'), p.examples, p.id);
+    assert.equal(String(E[`persona.${p.id}.exemplos`]).split('\n').length, p.examples.length, `${p.id}: um exemplo em inglês para cada um`);
+  }
+  assert.equal(P['persona.aviso'], EXTREME_WARNING);
+});
+
+test('a descrição do tipo de construção vem do dicionário da Cidade; um tipo sem chave fica com a do dado', async () => {
+  const { pt } = await import('../i18n/pt/index.ts');
+  const { en } = await import('../i18n/en/index.ts');
+  const { setIdioma } = await import('../i18n/index.ts');
+  const { CATALOG } = await import('../../../shared/city.ts');
+  // um tipo sem chave (de um pacote): fica com a descrição que veio no dado
+  assert.equal(tipoComum('tipo-de-um-pacote', 'galpão'), 'galpão');
+  const cidade = (d: unknown) => (d as Record<string, Record<string, string> | undefined>).cidade ?? {};
+  try {
+    for (const [idioma, dic] of [['pt-BR', pt], ['en', en]] as const) {
+      await setIdioma(idioma, { guardar: false });
+      for (const x of CATALOG) {
+        const traduzido = cidade(dic)[`tipo.${x.id}.comum`];
+        // com a chave da Cidade, o texto do idioma; sem ela (antes da junção com a área cidade), a reserva
+        assert.equal(tipoComum(x.id, x.common), traduzido ?? x.common, `${idioma}: ${x.id}`);
+      }
+    }
+  } finally {
+    await setIdioma('pt-BR', { guardar: false });
+  }
+});
+
+test('faixas e preço dos modelos: os termos do glossário (os mesmos do texto de Conexões, que aparece junto)', async () => {
+  const { GLOSSARIO } = await import('../i18n/glossario.ts');
+  const { default: pt } = await import('../i18n/pt/equipe.ts');
+  const { default: en } = await import('../i18n/en/equipe.ts');
+  const P = pt as Record<string, unknown>; const E = en as Record<string, unknown>;
+  const termo = (x: string) => GLOSSARIO.find((g) => g.pt === x)?.en;
+  for (const k of ['modelo.economico', 'modelo.intermediario', 'modelo.ponta']) assert.equal(E[k], termo(String(P[k])), k);
+  assert.equal(E['faixa.economico'], 'budget');
+  assert.equal(E['faixa.intermediario'], 'mid-range');
+  assert.equal(E['faixa.ponta'], 'premium');
+  assert.ok(String(P['modelo.preco']).includes('por milhão de tokens'));
+  assert.equal(E['modelo.preco'], 'US${entrada} / US${saida} per million units of text (input / output)');
+  assert.equal(E['ferramenta.bloqueada'], termo(String(P['ferramenta.bloqueada'])));
 });

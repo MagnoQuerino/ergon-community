@@ -1,5 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 import { SurfaceStack, markDismissClick, type CloseWhy, type SurfaceEntry } from './surface-stack.ts';
+import { t } from '../i18n/index.ts';
 
 export type { CloseWhy } from './surface-stack.ts';
 
@@ -122,11 +123,12 @@ export function useSurface(ref: RefObject<HTMLElement | null>, opts: SurfaceOpti
 
 /**
  * Fechar com algo digitado e não salvo: pergunta (só aí; fechar sem pendência nunca pergunta). true = pode fechar.
+ * `what`: o que se perde, já no idioma da tela ("o agente novo" / "the new agent").
  */
 export const keepTyped = (dirty: boolean, what: string): boolean => {
   if (!dirty) return true;
   discardAsks++;
-  return window.confirm(`Descartar ${what}?`);
+  return window.confirm(t('geral.comum.descartar', { oQue: what }));
 };
 
 /** Há uma janela modal aberta agora (a dica da tela fica atrás do fundo dela: some até a janela fechar). */

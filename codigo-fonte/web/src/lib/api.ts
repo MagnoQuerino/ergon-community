@@ -1,4 +1,8 @@
 // Cliente HTTP: mesma origem, cookie HttpOnly e token CSRF em cabeçalho. Nenhum segredo no navegador.
+// O idioma da tela vai em X-Ergon-Lang (o que o servidor gera na hora segue ele) e os textos que o servidor manda com
+// código (campo_t) chegam já no idioma da tela (lib/textos-tela.ts: traduzirResposta).
+import { idiomaAtual, t } from '../i18n/index.ts';
+import { traduzirResposta } from './textos-tela.ts';
 let csrf = '';
 export function setCsrf(t: string) { csrf = t; }
 
@@ -16,17 +20,17 @@ let guard: Guard | null = null;
 export function setGuard(g: Guard | null) { guard = g; }
 
 async function call<T>(method: string, url: string, body?: unknown, headers: Record<string, string> = {}, retried = false): Promise<T> {
-  const init: RequestInit = { method, credentials: 'same-origin', headers: { ...headers } };
+  const init: RequestInit = { method, credentials: 'same-origin', headers: { 'X-Ergon-Lang': idiomaAtual(), ...headers } };
   if (method !== 'GET') (init.headers as Record<string, string>)['X-CSRF-Token'] = csrf;
   if (body instanceof Blob) init.body = body;
   else if (body !== undefined) { init.body = JSON.stringify(body); (init.headers as Record<string, string>)['Content-Type'] = 'application/json'; }
   const res = await fetch(url, init);
   const text = await res.text();
   let json: unknown = null;
-  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  try { json = text ? traduzirResposta(JSON.parse(text)) : null; } catch { json = null; }
   if (!res.ok) {
     const j = (json ?? {}) as { error?: string; message?: string };
-    const code = j.error ?? 'erro';
+    const code = j.error ?? 'erro'; // i18n-ok: código interno do erro, não aparece na tela
     if (guard && !retried && ((res.status === 423 && code === 'locked') || (res.status === 401 && code === 'reauth'))) {
       if (await guard(code)) return call<T>(method, url, body, headers, true);
     } else if (guard && (res.status === 428 || (res.status === 401 && code === 'unauthenticated') || (res.status === 423 && (code === 'sealed' || code === 'person_sealed')))) void guard(code);
@@ -58,6 +62,7 @@ export function uploadFile<T>(file: File, where: { conversationId?: string; fold
     x.withCredentials = true;
     x.setRequestHeader('Content-Type', 'application/octet-stream');
     x.setRequestHeader('X-CSRF-Token', csrf);
+    x.setRequestHeader('X-Ergon-Lang', idiomaAtual());
     x.setRequestHeader('X-Filename', encodeURIComponent(file.name));
     x.setRequestHeader('X-File-Type', file.type || 'application/octet-stream');
     if (where.conversationId) x.setRequestHeader('X-Conversation-Id', where.conversationId);
@@ -66,12 +71,12 @@ export function uploadFile<T>(file: File, where: { conversationId?: string; fold
     x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
     x.onload = () => {
       let j: { error?: string; message?: string } & Record<string, unknown> = {};
-      try { j = JSON.parse(x.responseText || '{}'); } catch { /* sem corpo */ }
+      try { j = traduzirResposta(JSON.parse(x.responseText || '{}')); } catch { /* sem corpo */ }
       if (x.status >= 200 && x.status < 300) resolve(j as T);
-      else reject(new ApiError(x.status, j.error ?? 'erro', j.message ?? `HTTP ${x.status}`));
+      else reject(new ApiError(x.status, j.error ?? 'erro', j.message ?? `HTTP ${x.status}`)); // i18n-ok: código interno do erro
     };
-    x.onerror = () => reject(new ApiError(0, 'network', 'a conexão caiu no meio do envio'));
-    x.onabort = () => reject(new ApiError(0, 'aborted', 'envio cancelado'));
+    x.onerror = () => reject(new ApiError(0, 'network', t('geral.arquivo.conexaoCaiu')));
+    x.onabort = () => reject(new ApiError(0, 'aborted', t('geral.arquivo.envioCancelado')));
     signal?.addEventListener('abort', () => x.abort(), { once: true });
     x.send(file);
   });
@@ -82,10 +87,10 @@ export function uploadFile<T>(file: File, where: { conversationId?: string; fold
  * tela trancada ou confirmação de identidade pausam o pedido até a pessoa digitar a senha, e ele é refeito uma vez.
  */
 export async function postForFile(url: string, body: unknown, retried = false): Promise<{ blob: Blob; headers: Headers }> {
-  const res = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body) });
+  const res = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Ergon-Lang': idiomaAtual() }, body: JSON.stringify(body) });
   if (!res.ok) {
-    const j = await res.json().catch(() => ({})) as { error?: string; message?: string };
-    const code = j.error ?? 'erro';
+    const j = traduzirResposta(await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    const code = j.error ?? 'erro'; // i18n-ok: código interno do erro, não aparece na tela
     if (guard && !retried && ((res.status === 423 && code === 'locked') || (res.status === 401 && code === 'reauth'))) {
       if (await guard(code)) return postForFile(url, body, true);
     }

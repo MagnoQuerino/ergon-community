@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useT } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { keepTyped, useSurface } from '../lib/surface.ts';
 import { teamUrl, useGroupPages, type TeamSector } from '../lib/teamData.ts';
@@ -17,6 +18,7 @@ const SHOWN = 6;
  * ferramentas e modelo começam com o padrão do setor e ficam no perfil.
  */
 export function NewAgentDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (r: { id: string; name: string; sector: string; sectorReason: string | null }) => void }) {
+  const t = useT();
   const ref = useRef<HTMLElement>(null);
   const [seed, setSeed] = useState(() => newSeed());
   const [color] = useState(() => COLORS[Math.floor(Math.random() * COLORS.length)]);
@@ -27,18 +29,19 @@ export function NewAgentDialog({ onClose, onCreated }: { onClose: () => void; on
   const [tray, setTray] = useState<'sector' | 'structure' | null>(null);
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
   const dirty = !!(name || role);
-  const close = () => { if (!busy && keepTyped(dirty, 'o agente novo')) onClose(); };
+  const close = () => { if (!busy && keepTyped(dirty, t('equipe.novo.descartar'))) onClose(); };
   useSurface(ref, { onClose: close, modal: true, outside: true, active: !tray });
   const sectors = useGroupPages<TeamSector>((c) => `${teamUrl.sectors('', c, SHOWN)}&sample=0`, 'novo');
   const options = useFxOptions();
-  const draft = useMemo(() => ({ name: name.trim() || 'Novo agente', color, role, look_seed: seed }), [name, color, role, seed]);
+  const novoNome = t('equipe.novoAgente');
+  const draft = useMemo(() => ({ name: name.trim() || novoNome, color, role, look_seed: seed }), [name, color, role, seed, novoNome]);
   const effects = effectsFor(fx, options, { name });
   const shownSectors = sectors.data?.items ?? [];
   const extraSector = sector && !shownSectors.some((s) => s.key === sector.key);
 
   const create = async () => {
     if (busy) return; // duplo clique não cria dois
-    if (!name.trim() || !role.trim()) { setErr('Preencha o nome e o que ele faz.'); return; }
+    if (!name.trim() || !role.trim()) { setErr(t('equipe.novo.preencha')); return; }
     setBusy(true); setErr(null);
     try {
       const r = await api.post<{ id: string; sector: string; sectorReason: string | null }>('/api/agents', {
@@ -58,45 +61,45 @@ export function NewAgentDialog({ onClose, onCreated }: { onClose: () => void; on
     <div className="dlg-back">
       <section ref={ref} className="dlg newagent2" role="dialog" aria-modal="true" aria-labelledby="newagent-t">
         <header className="dlg__head">
-          <h3 id="newagent-t">Novo agente</h3>
-          <button className="icon-btn" onClick={close} aria-label="Fechar (Esc)"><Icon name="x" /></button>
+          <h3 id="newagent-t">{t('equipe.novoAgente')}</h3>
+          <button className="icon-btn" onClick={close} aria-label={t('equipe.novo.fechar')}><Icon name="x" /></button>
         </header>
         <form className="newagent2__body" onSubmit={(e) => { e.preventDefault(); void create(); }}>
           <div className="newagent2__look">
-            <div className="newagent2__stage"><AgentPreview agent={draft} fx={effects} size={5} label={`Prévia de ${draft.name}`} /></div>
-            <button type="button" className="btn btn--ghost btn--block" onClick={() => setSeed(newSeed())}><Icon name="shuffle" size={14} /> Sortear outro</button>
+            <div className="newagent2__stage"><AgentPreview agent={draft} fx={effects} size={5} label={t('equipe.novo.previa', { nome: draft.name })} /></div>
+            <button type="button" className="btn btn--ghost btn--block" onClick={() => setSeed(newSeed())}><Icon name="shuffle" size={14} /> {t('equipe.novo.sortear')}</button>
             <strong className="center">{draft.name}</strong>
-            <span className="muted small center">Mesmo boneco na cidade e no perfil</span>
+            <span className="muted small center">{t('equipe.novo.mesmoBoneco')}</span>
           </div>
           <div className="newagent2__fields">
-            <label className="field">Nome<input required maxLength={40} placeholder="ex.: Temístocles" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></label>
-            <label className="field">O que ele faz?<input required maxLength={80} placeholder="ex.: Propostas comerciais" value={role} onChange={(e) => setRole(e.target.value)} /></label>
-            <div className="field"><span>Setor</span>
-              <div className="chips" role="group" aria-label="Setor">
-                <button type="button" className={`chip chip--pick ${!sector ? 'is-on' : ''}`} aria-pressed={!sector} onClick={() => setSector(null)} title="A coordenação escolhe pelo que ele faz">Automático</button>
+            <label className="field">{t('equipe.novo.nome')}<input required maxLength={40} placeholder={t('equipe.novo.nomeEx')} value={name} onChange={(e) => setName(e.target.value)} autoFocus /></label>
+            <label className="field">{t('equipe.novo.faz')}<input required maxLength={80} placeholder={t('equipe.novo.fazEx')} value={role} onChange={(e) => setRole(e.target.value)} /></label>
+            <div className="field"><span>{t('equipe.novo.setor')}</span>
+              <div className="chips" role="group" aria-label={t('equipe.novo.setor')}>
+                <button type="button" className={`chip chip--pick ${!sector ? 'is-on' : ''}`} aria-pressed={!sector} onClick={() => setSector(null)} title={t('equipe.novo.automaticoDica')}>{t('equipe.novo.automatico')}</button>
                 {shownSectors.map((s) => <button key={s.key} type="button" className={`chip chip--pick ${sector?.key === s.key ? 'is-on' : ''}`} aria-pressed={sector?.key === s.key} onClick={() => setSector({ key: s.key, name: s.name })}>{s.name}</button>)}
                 {extraSector && <button type="button" className="chip chip--pick is-on" aria-pressed>{sector!.name}</button>}
-                {(sectors.data?.total ?? 0) > SHOWN && <button type="button" className="chip chip--pick" onClick={() => setTray('sector')}><Icon name="search" size={12} /> Outro setor…</button>}
+                {(sectors.data?.total ?? 0) > SHOWN && <button type="button" className="chip chip--pick" onClick={() => setTray('sector')}><Icon name="search" size={12} /> {t('equipe.novo.outroSetor')}</button>}
               </div>
             </div>
-            <div className="field"><span>Endereço</span>
+            <div className="field"><span>{t('equipe.novo.endereco')}</span>
               <div className="newagent2__place">
                 <button type="button" className="newagent2__placebtn" onClick={() => setTray('structure')}>
-                  <Icon name="pin" size={14} /> {place ? place.name : 'Primeiro lugar livre · ajuste depois'}
+                  <Icon name="pin" size={14} /> {place ? place.name : t('equipe.novo.primeiroLivre')}
                 </button>
-                {place && <button type="button" className="icon-btn" onClick={() => setPlace(null)} aria-label="Voltar ao primeiro lugar livre" title="Voltar ao primeiro lugar livre"><Icon name="x" size={14} /></button>}
+                {place && <button type="button" className="icon-btn" onClick={() => setPlace(null)} aria-label={t('equipe.novo.voltarPrimeiro')} title={t('equipe.novo.voltarPrimeiro')}><Icon name="x" size={14} /></button>}
               </div>
             </div>
-            <div className="field"><span>Efeitos dos seus Pacotes</span><EffectPicker value={fx} onChange={setFx} options={options} /></div>
+            <div className="field"><span>{t('equipe.efeitos.grupo')}</span><EffectPicker value={fx} onChange={setFx} options={options} /></div>
             {err && <p className="error" role="alert">{err}</p>}
           </div>
           <footer className="dlg__foot">
-            <button type="button" className="btn btn--ghost" onClick={close}>Cancelar</button>
-            <button type="submit" className="btn btn--primary" aria-busy={busy}><Icon name="plus" size={14} /> {busy ? 'Criando…' : 'Criar agente'}</button>
+            <button type="button" className="btn btn--ghost" onClick={close}>{t('equipe.novo.cancelar')}</button>
+            <button type="submit" className="btn btn--primary" aria-busy={busy}><Icon name="plus" size={14} /> {busy ? t('equipe.novo.criando') : t('equipe.novo.criar')}</button>
           </footer>
         </form>
       </section>
-      {tray && <MoveTray agent={null} kinds={[tray]} initial={tray} title={tray === 'sector' ? 'Setor do agente novo' : 'Endereço do agente novo'} onPick={pick} onClose={() => setTray(null)} />}
+      {tray && <MoveTray agent={null} kinds={[tray]} initial={tray} title={tray === 'sector' ? t('equipe.novo.setorTitulo') : t('equipe.novo.enderecoTitulo')} onPick={pick} onClose={() => setTray(null)} />}
     </div>
   );
 }

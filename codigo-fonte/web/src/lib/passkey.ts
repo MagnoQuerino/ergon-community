@@ -1,6 +1,7 @@
 // Passkeys (WebAuthn): o navegador assina o desafio com a chave do aparelho; o servidor só guarda a chave pública.
 import { browserSupportsWebAuthn, startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { ApiError, api } from './api.ts';
+import { t } from '../i18n/index.ts';
 
 type Options = { key: string; options: Parameters<typeof startAuthentication>[0]['optionsJSON'] };
 type RegOptions = { key: string; options: Parameters<typeof startRegistration>[0]['optionsJSON'] };
@@ -12,8 +13,8 @@ export const passkeysHere = (rpId: string) => browserSupportsWebAuthn() && locat
 function friendly(e: unknown): never {
   if (e instanceof ApiError) throw e;
   const name = e instanceof Error ? e.name : '';
-  if (name === 'NotAllowedError' || name === 'AbortError') throw new Error('Passkey cancelada ou não reconhecida neste aparelho.');
-  if (name === 'InvalidStateError') throw new Error('Esta passkey já está cadastrada.');
+  if (name === 'NotAllowedError' || name === 'AbortError') throw new Error(t('conta.passkey.cancelada'));
+  if (name === 'InvalidStateError') throw new Error(t('conta.passkey.jaCadastrada'));
   throw new Error(e instanceof Error ? e.message : String(e));
 }
 

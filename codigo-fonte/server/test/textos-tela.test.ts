@@ -129,7 +129,10 @@ test('ferramentas, Treinar e guia: os nomes que a tela mostra, iguais no servido
   assert.equal(TOOLS.habilidades.label, 'Competências da biblioteca');
   assert.equal(TOOLS.habilidades.toolset, 'skills', 'o nome do dado não muda: só o rótulo');
   const janela = fs.readFileSync(path.resolve(src, '../../web/src/components/AgentWindow.tsx'), 'utf8');
-  assert.ok(janela.includes(`"${TOOLS.habilidades.label}"`), 'a janela do agente cita a ferramenta pelo mesmo nome');
+  // o texto da janela está no dicionário português da área "agente" (a janela só tem as chaves)
+  const textosDaJanela = fs.readFileSync(path.resolve(src, '../../web/src/i18n/pt/agente.ts'), 'utf8');
+  assert.ok(textosDaJanela.includes(`"${TOOLS.habilidades.label}"`), 'a janela do agente cita a ferramenta pelo mesmo nome');
+  assert.match(janela, /t\('agente\.perfil\.competenciasDica'\)/, 'a janela mostra a dica que cita a ferramenta');
   assert.doesNotMatch(janela.replace(/hermesSkills|shownSkills|toggleSkill|skillQ|className="skill[\w-]*"|skill-item[\w-]*|\.skills\b|\/api\/ai\/skills|Skill\[\]|<Skill/g, ''), />[^<>{}]*\bSkills?\b[^<>{}]*</);
   for (const k of ['microsoft', 'google'] as const) {
     assert.equal(SSO[k].doc, 'o guia de instalação', k);

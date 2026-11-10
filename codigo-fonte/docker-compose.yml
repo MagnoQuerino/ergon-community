@@ -1,5 +1,5 @@
 # Ergon — cópia do código (desenvolvimento): constrói as imagens aqui. Use o lançador (.\ergon.cmd ou
-# ./ergon.sh): instalar, iniciar, atualizar (git pull + build), backup...  →  http://localhost:8787
+# ./ergon.sh): install, start, update (git pull + build), backup...  →  http://localhost:8787
 # (abra por "localhost": as passkeys do navegador só valem nesse nome)
 # Motor de IA no perfil "hermes" (o lançador já liga). Pacote de versão (imagens publicadas): deploy/local/.
 name: ergon

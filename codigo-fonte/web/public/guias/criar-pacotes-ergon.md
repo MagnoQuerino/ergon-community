@@ -51,6 +51,7 @@ Regras do ZIP (o Ergon recusa o pacote inteiro se qualquer uma falhar):
 
 | campo | regra |
 | --- | --- |
+| `manifest_version` | `2`. O `3` é só dos pacotes assinados pela loja oficial (um modelo no 3 não instala nas versões anteriores) |
 | `package_id` | `espaço.criador.nome` (minúsculas, números e hífen). Use `comunidade.<você>.<nome>`; `ergon.oficial.*` é só da loja oficial |
 | `version` | semver simples: `1.0.0` |
 | `title` / `summary` | até 80 / 600 caracteres; sem HTML |

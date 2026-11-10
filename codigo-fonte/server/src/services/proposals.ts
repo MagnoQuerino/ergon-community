@@ -7,6 +7,7 @@
  */
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
+import { emPt, junto, reconhecer, textoDoResultado, tx, type Texto } from '../lib/textos.ts';
 import { audit, type Bus } from './bus.ts';
 import { archiveAgent, createAgent, reactivateAgent, updateAgent, type AgentLimits } from './capacity.ts';
 import { FIXED_MSG } from './team.ts';
@@ -188,15 +189,22 @@ export function parseProposals(text: string | null): Proposal[] {
 export function parseChatCommand(text: string): Proposal | null {
   const t = text.trim();
   // "renomeie o #12 para …", "mova o card 12 para …": é o card, não um agente (o sistema aplica pela regra do card)
-  const card = (s: string) => /#\d{1,6}\b|\b(?:card|cart[aã]o|tarefa)\b/i.test(s);
-  const mv = t.match(/^(?:por favor,?\s*)?(?:mova|mover|mude|mudar|transfira|transferir|passe|passar|coloque|colocar)\s+(?:o\s+|a\s+)?(.{2,40}?)\s+(?:para|pro|pra)\s+(?:o\s+|a\s+)?(?:setor\s+(?:de\s+|da\s+|do\s+)?)?(.{3,60}?)[.!]?$/i);
+  const card = (s: string) => /#\d{1,6}\b|\b(?:card|cart[aã]o|tarefa|task)\b/i.test(s);
+  // as frases valem em português e em inglês ("move Fídias to Communication", "rename Hipátia to Ana", "cancel card 12")
+  const mv = t.match(/^(?:por favor,?\s*)?(?:mova|mover|mude|mudar|transfira|transferir|passe|passar|coloque|colocar)\s+(?:o\s+|a\s+)?(.{2,40}?)\s+(?:para|pro|pra)\s+(?:o\s+|a\s+)?(?:setor\s+(?:de\s+|da\s+|do\s+)?)?(.{3,60}?)[.!]?$/i)
+    // em inglês, só com a palavra do setor ("to the Sales team", "to the Communication sector"): "move the meeting to
+    // Friday" não é mudar alguém de setor
+    ?? t.match(/^(?:please,?\s*)?(?:move|transfer|reassign)\s+(?:the\s+)?(.{2,40}?)\s+(?:to|into)\s+(?:the\s+)?(.{3,60}?)\s+(?:sector|team|department)[.!]?$/i);
   if (mv && !card(mv[1])) return { kind: 'sector', agent: mv[1].trim(), sector: mv[2].trim() };
-  const rn = t.match(/^(?:por favor,?\s*)?(?:renomeie|renomear|mude o nome d[oae]s?|troque o nome d[oae]s?)\s+(?:o\s+|a\s+)?(.{2,40}?)\s+(?:para|pra)\s+["“]?([^"”.!]{2,40})["”]?[.!]?$/i);
+  const rn = t.match(/^(?:por favor,?\s*)?(?:renomeie|renomear|mude o nome d[oae]s?|troque o nome d[oae]s?)\s+(?:o\s+|a\s+)?(.{2,40}?)\s+(?:para|pra)\s+["“]?([^"”.!]{2,40})["”]?[.!]?$/i)
+    ?? t.match(/^(?:please,?\s*)?(?:rename|change\s+the\s+name\s+of)\s+(?:the\s+)?(.{2,40}?)\s+to\s+["“]?([^"”.!]{2,40})["”]?[.!]?$/i);
   if (rn && !card(rn[1])) return { kind: 'edit_agent', agent: rn[1].trim(), changes: { name: rn[2].trim() } };
-  const nw = t.match(/^(?:por favor,?\s*)?(?:crie|criar|contrate|contratar|adicione|adicionar)\s+(?:um\s+|uma\s+)?(?:novo\s+|nova\s+)?agente\s+(?:chamad[oa]\s+)?["“]?([^"”,—–-]{2,40}?)["”]?\s*(?:,|—|–|-|para|como|que\s+cuide\s+de)\s*(.{3,80}?)[.!]?$/i);
+  const nw = t.match(/^(?:por favor,?\s*)?(?:crie|criar|contrate|contratar|adicione|adicionar)\s+(?:um\s+|uma\s+)?(?:novo\s+|nova\s+)?agente\s+(?:chamad[oa]\s+)?["“]?([^"”,—–-]{2,40}?)["”]?\s*(?:,|—|–|-|para|como|que\s+cuide\s+de)\s*(.{3,80}?)[.!]?$/i)
+    ?? t.match(/^(?:please,?\s*)?(?:create|hire|add)\s+(?:a\s+|an\s+)?(?:new\s+)?agent\s+(?:called\s+|named\s+)?["“]?([^"”,—–-]{2,40}?)["”]?\s*(?:,|—|–|-|to|as|who\s+(?:handles|takes\s+care\s+of|does))\s*(.{3,80}?)[.!]?$/i);
   if (nw) return { kind: 'create_agent', name: nw[1].trim(), role: nw[2].trim(), sector: 'automático' };
   // "cancele / pare / apague o card 12" ("para o card 12…" fica de fora: começa muita frase que não é ordem)
-  const del = t.match(/^(?:por favor,?\s*)?(?:cancele|cancela|cancelar|pare|parar|interrompa|interromper|apague|apagar|exclua|excluir|delete|deletar|remova|remover)\s+(?:o\s+|a\s+)?(?:card|tarefa|cart[aã]o)\s*(?:n[º°o.]?\s*)?#?(\d{1,6})\b(?:\s*[,.:;—–-]?\s*(?:porque|pois|motivo:?)?\s*(.{0,200}))?$/i);
+  const del = t.match(/^(?:por favor,?\s*)?(?:cancele|cancela|cancelar|pare|parar|interrompa|interromper|apague|apagar|exclua|excluir|delete|deletar|remova|remover)\s+(?:o\s+|a\s+)?(?:card|tarefa|cart[aã]o)\s*(?:n[º°o.]?\s*)?#?(\d{1,6})\b(?:\s*[,.:;—–-]?\s*(?:porque|pois|motivo:?)?\s*(.{0,200}))?$/i)
+    ?? t.match(/^(?:please,?\s*)?(?:cancel|stop|delete|remove|drop)\s+(?:the\s+)?(?:card|task)\s*(?:no\.?\s*|number\s+)?#?(\d{1,6})\b(?:\s*[,.:;—–-]?\s*(?:because|since|reason:?)?\s*(.{0,200}))?$/i);
   if (del) return { kind: 'delete_task', number: Number(del[1]), reason: clip((del[2] ?? '').replace(/[.!]$/, '').trim(), 200) };
   return null;
 }
@@ -463,7 +471,17 @@ export interface ProposalHooks {
   purge?: (p: Extract<Proposal, { kind: 'purge' }>) => string;
 }
 
-export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: string, proposalId: string, decision: 'apply' | 'reject', hooks: ProposalHooks = {}): { status: string; result: string } {
+/** a frase principal com os pedaços que se juntam a ela (" (Analista)", " — Coordenador: …") */
+const comSufixos = (x: Texto, ...sufixos: Array<Texto | false | null | undefined | ''>): Texto => {
+  const s = sufixos.filter((v): v is Texto => !!v);
+  return s.length ? junto([x, ...s], '') : x;
+};
+
+/**
+ * result: o português de sempre (gravado na proposta e no registro); result_t: o mesmo com código (lib/textos.ts), para
+ * "Aguardando você" mostrar no idioma da tela. Sem frase conhecida (o resultado de um gancho), só o português.
+ */
+export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: string, proposalId: string, decision: 'apply' | 'reject', hooks: ProposalHooks = {}): { status: string; result: string; result_t?: Texto } {
   const row = db.get<{ kind: string; payload: string; status: string; conversation_id: string | null }>(
     'SELECT kind, payload, status, conversation_id FROM agent_proposals WHERE id = ? AND workspace_id = ?', proposalId, workspaceId);
   if (!row) throw notFound('proposta');
@@ -473,7 +491,12 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
   if (row.kind === 'info_request') throw new HttpError(400, 'respond', 'Responda pelo próprio cartão (responder, aprovar ou devolver).');
   if (row.kind === 'conexao' || row.kind === 'depois_de_ler' || row.kind === 'regra') throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
   let status: 'applied' | 'rejected' | 'failed' = 'rejected';
-  let result = 'recusada';
+  let texto: Texto | null = tx('proposta.recusada');
+  let result = emPt(texto);
+  /** a frase com código e o português dela */
+  const feito = (t: Texto) => { texto = t; result = emPt(t); };
+  /** o que um gancho devolveu (só texto): o código quando é uma frase conhecida */
+  const doGancho = (r: string) => { result = r; texto = textoDoResultado('proposal.applied', r); };
   if (decision === 'apply') {
     try {
       if (p.kind === 'permission') {
@@ -491,28 +514,29 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         const s = c.sector ? sectorByName(db, workspaceId, c.sector) : undefined;
         if (c.sector && !s) throw new HttpError(404, 'sector', `não encontrei o setor "${c.sector}"`);
         updateAgent(db, bus, workspaceId, userId, a.id, { name: c.name, role: c.role, sectorKey: s?.key, charter: c.charter, skills: c.skills, bio: c.bio });
-        result = `${c.name && c.name !== a.name ? `${a.name} agora é ${c.name}` : `${a.name} atualizado`}${c.role ? ` (${c.role})` : ''}${kept ? ' — Coordenador: função e setor são fixos e ficaram como estavam' : ''}`;
+        feito(comSufixos(c.name && c.name !== a.name ? tx('proposta.agenteRenomeado', { antes: a.name, nome: c.name }) : tx('proposta.agenteAtualizado', { nome: a.name }),
+          c.role && tx('proposta.comFuncao', { funcao: c.role }), kept && tx('proposta.coordenadorFixo')));
       } else if (p.kind === 'deactivate_agent') {
         const a = findAgent(db, workspaceId, p.agent);
         if (!a) throw new HttpError(404, 'agent', `não encontrei o agente "${p.agent}"`);
         const r = archiveAgent(db, bus, workspaceId, userId, a.id);
-        result = `${a.name} desativado${r.redistributed.length ? `; ${r.redistributed.length} tarefa(s) passaram a colegas` : ''}`;
+        feito(r.redistributed.length ? tx('proposta.desativadoRedistribuido', { nome: a.name, n: r.redistributed.length }) : tx('proposta.desativado', { nome: a.name }));
       } else if (p.kind === 'reactivate_agent') {
         const a = findAny(db, workspaceId, p.agent, 'archived');
         if (!a) throw new HttpError(404, 'agent', `não encontrei um agente desativado chamado "${p.agent}"`);
         reactivateAgent(db, bus, workspaceId, userId, a.id, null, hooks.limits);
-        result = `${a.name} de volta à equipe`;
+        feito(tx('proposta.deVolta', { nome: a.name }));
       } else if (p.kind === 'sector_edit') {
         const s = sectorByName(db, workspaceId, p.sector);
         if (!s) throw new HttpError(404, 'sector', `não encontrei o setor "${p.sector}"`);
         const r = updateSector(db, bus, workspaceId, { type: 'user', id: userId }, s.key, p.changes);
-        result = `setor ${r.name} atualizado`;
+        feito(tx('proposta.setorAtualizado', { nome: r.name }));
       } else if (p.kind === 'sector_new') {
         const r = createSector(db, bus, workspaceId, { type: 'user', id: userId }, { name: p.name, description: p.description });
-        result = `setor ${r.name} criado`;
+        feito(tx('proposta.setorCriado', { nome: r.name }));
       } else if (p.kind === 'routine' || p.kind === 'routine_edit') {
         if (!hooks.routine) throw new HttpError(503, 'routines', 'rotinas indisponíveis');
-        result = hooks.routine(p);
+        doGancho(hooks.routine(p));
       } else if (p.kind === 'task') {
         // com responsável da equipe vai para o quadro da equipe (vira trabalho dele); sem, fica nas suas tarefas
         const a = p.assignee ? findAgent(db, workspaceId, p.assignee) : undefined;
@@ -524,19 +548,20 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
           boardId: a ? defaultBoard(db, workspaceId).id : userBoard(db, workspaceId).id, agentId: a?.id ?? null, origin: 'chat', dueOn: p.due,
           ...(named ? { titleSource: named.source } : {}),
         });
-        result = `tarefa #${t.number} criada${a ? ` para ${a.name}` : ' nas suas tarefas'}${p.assignee && !a ? ` (não achei "${p.assignee}" na equipe)` : ''}`;
+        feito(comSufixos(a ? tx('proposta.tarefaPara', { numero: t.number, nome: a.name }) : tx('proposta.tarefaSuas', { numero: t.number }),
+          !!p.assignee && !a && tx('proposta.naoAchei', { nome: p.assignee })));
       } else if (p.kind === 'ledger') {
         if (!hooks.ledger) throw new HttpError(503, 'routines', 'rotinas indisponíveis');
-        result = hooks.ledger(p, userId);
+        doGancho(hooks.ledger(p, userId));
       } else if (p.kind === 'batch') {
         if (!hooks.batch) throw new HttpError(503, 'tasks', 'quadro indisponível');
-        result = hooks.batch(p);
+        doGancho(hooks.batch(p));
       } else if (p.kind === 'purge') {
         if (!hooks.purge) throw new HttpError(503, 'documents', 'Documentos indisponível');
-        result = hooks.purge(p);
+        doGancho(hooks.purge(p));
       } else if (p.kind === 'delete_task') {
         if (!hooks.deleteTask) throw new HttpError(503, 'tasks', 'quadro indisponível');
-        result = hooks.deleteTask(p.number, p.reason);
+        doGancho(hooks.deleteTask(p.number, p.reason));
       } else if (p.kind === 'tools') {
         // propostas antigas (antes da regra acima) também não liberam código sem a senha
         if (p.action === 'dar' && TOOLS[p.tool]?.guarded) throw new HttpError(400, 'needs_password', 'Ferramenta que executa código só com a sua senha: peça de novo ao agente para ele pedir permissão.');
@@ -545,14 +570,14 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         const cur = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', a.id)?.tools ?? '[]') as string[];
         const next = p.action === 'dar' ? [...new Set([...cur, p.tool])] : cur.filter((t) => t !== p.tool);
         updateAgent(db, bus, workspaceId, userId, a.id, { tools: next });
-        result = `${TOOLS[p.tool]?.label ?? p.tool} ${p.action === 'dar' ? 'liberada para' : 'retirada de'} ${a.name}`;
+        feito(tx(p.action === 'dar' ? 'proposta.ferramentaLiberada' : 'proposta.ferramentaRetirada', { ferramenta: TOOLS[p.tool]?.label ?? p.tool, nome: a.name }));
       } else if (p.kind === 'sector') {
         const a = findAgent(db, workspaceId, p.agent);
         if (!a) throw new HttpError(404, 'agent', `não encontrei o agente "${p.agent}"`);
         const s = sectorByName(db, workspaceId, p.sector);
         if (!s) throw new HttpError(404, 'sector', `não encontrei o setor "${p.sector}"`);
         const r = moveToSector(db, bus, workspaceId, { type: 'user', id: userId }, a.id, s.key);
-        result = `${r.name} agora está no setor ${r.sector}`;
+        feito(tx('proposta.mudouDeSetor', { nome: r.name, setor: r.sector }));
       } else if (p.kind === 'handoff') {
         throw new HttpError(409, 'decided', 'aviso: a autorização é feita na conversa com a coordenação');
       } else if (p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra') {
@@ -561,12 +586,13 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         const auto = /^autom/i.test(fold(p.sector));
         const s = auto ? null : sectorByName(db, workspaceId, p.sector);
         const r = createAgent(db, bus, workspaceId, userId, { name: p.name, role: p.role, sectorKey: s?.key ?? 'auto' }, hooks.limits);
-        result = `${p.name} criado no setor ${r.sector}${r.sectorReason ? ` (${r.sectorReason})` : ''}`;
+        feito(comSufixos(tx('proposta.agenteCriado', { nome: p.name, setor: r.sector }), r.sectorReason && tx('resumo.parenteses', { t: r.sectorReason })));
       }
       status = 'applied';
     } catch (err) {
       status = 'failed';
       result = err instanceof Error ? err.message : 'falha';
+      texto = err instanceof HttpError ? err.texto ?? reconhecer(err.message, 'erro.') : null;
     }
   }
   db.run('UPDATE agent_proposals SET status = ?, result = ?, decided_at = ? WHERE id = ?', status, db.seal(workspaceId, clip(result, 300)), now(), proposalId);
@@ -574,5 +600,6 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
   audit(db, bus, { workspaceId, actorType: 'user', actorId: userId, action: `proposal.${status}`, targetType: 'proposal', targetId: proposalId, evidence: p, result });
   bus.publish(workspaceId, 'proposals.changed', { conversationId: row.conversation_id });
   if (row.conversation_id) bus.publish(workspaceId, 'messages.changed', { conversationId: row.conversation_id });
-  return { status, result };
+  const t: Texto | null = texto;
+  return t ? { status, result, result_t: t } : { status, result };
 }

@@ -39,7 +39,7 @@ export interface GraphicPack {
 
 export const GRECIA_CLASSICA: GraphicPack = {
   id: 'grecia-classica',
-  name: 'Grécia Clássica',
+  name: 'Grécia Clássica', // i18n-ok: nome interno do pacote gráfico (não aparece na tela)
   figure: {
     hairStyles: [['short', 5], ['curly', 4], ['long', 3], ['bun', 3], ['ponytail', 2], ['cropped', 2], ['bald', 1]],
     beards: [['none', 5], ['full', 3], ['short', 2]],

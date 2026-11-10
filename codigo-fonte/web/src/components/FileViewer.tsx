@@ -6,6 +6,7 @@ import { size } from '../lib/files.ts';
 import { previaDe } from '../lib/tarefa-tela.ts';
 import { Icon } from './Icon.tsx';
 import { Markdown } from './Markdown.tsx';
+import { useT } from '../i18n/index.ts';
 
 interface Preview { kind: 'text' | 'sheet' | 'inline' | 'none'; text?: string; detail?: string | null; sheets?: Array<{ name: string; rows: string[][] }> }
 
@@ -18,6 +19,7 @@ interface Preview { kind: 'text' | 'sheet' | 'inline' | 'none'; text?: string; d
  * ficava preso a ele, e a barra do topo e o botão da conversa apareciam por cima do diálogo.
  */
 export function FileViewer({ file, onClose }: { file: { id: string; filename: string; mime: string; size: number }; onClose: () => void }) {
+  const t = useT();
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, modal: true, outside: true });
   const tipo = previaDe(file.filename, file.mime);
@@ -26,9 +28,9 @@ export function FileViewer({ file, onClose }: { file: { id: string; filename: st
   const corpo = () => {
     if (tipo === 'imagem') return <img className="fview__img" src={`${url}?inline=1`} alt={file.filename} />;
     if (tipo === 'pdf') return <iframe className="fview__pdf" src={`${url}?inline=1`} title={file.filename} />;
-    if (tipo === 'baixar') return <p className="muted">Este tipo de arquivo abre no seu computador: use Baixar.</p>;
-    if (pv.error) return <p className="error">Não deu para abrir agora. Use Baixar.</p>;
-    if (!pv.data) return <p className="muted">Abrindo…</p>;
+    if (tipo === 'baixar') return <p className="muted">{t('geral.arquivo.abreNoComputador')}</p>;
+    if (pv.error) return <p className="error">{t('geral.arquivo.naoAbriu')}</p>;
+    if (!pv.data) return <p className="muted">{t('geral.arquivo.abrindo')}</p>;
     if (pv.data.kind === 'sheet' && pv.data.sheets?.length) {
       return pv.data.sheets.map((s) => (
         <div key={s.name} className="md__table fview__table">
@@ -40,7 +42,7 @@ export function FileViewer({ file, onClose }: { file: { id: string; filename: st
       ));
     }
     if (pv.data.kind === 'text' && pv.data.text) return tipo === 'markdown' ? <Markdown text={pv.data.text} className="fview__md" /> : <pre className="fview__text">{pv.data.text}</pre>;
-    return <p className="muted">Sem prévia para este arquivo{pv.data.detail ? ` (${pv.data.detail})` : ''}. Use Baixar.</p>;
+    return <p className="muted">{pv.data.detail ? t('geral.arquivo.semPreviaDetalhe', { detalhe: pv.data.detail }) : t('geral.arquivo.semPrevia')}</p>;
   };
   return createPortal(
     <div className="dlg-back fview-back">
@@ -48,8 +50,8 @@ export function FileViewer({ file, onClose }: { file: { id: string; filename: st
         <header className="dlg__head">
           <h3 id={`fview-${file.id}`} className="fview__name" title={file.filename}>{file.filename}</h3>
           <div className="row">
-            <a className="btn btn--sm" href={url} download={file.filename}><Icon name="download" size={13} /> Baixar ({size(file.size)})</a>
-            <button className="icon-btn" onClick={onClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
+            <a className="btn btn--sm" href={url} download={file.filename}><Icon name="download" size={13} /> {t('geral.arquivo.baixar', { tamanho: size(file.size) })}</a>
+            <button className="icon-btn" onClick={onClose} aria-label={t('geral.comum.fechar')} title={t('geral.comum.fechar')}><Icon name="x" /></button>
           </div>
         </header>
         <div className="fview__body">{corpo()}</div>

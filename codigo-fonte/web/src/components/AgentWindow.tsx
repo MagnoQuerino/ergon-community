@@ -20,15 +20,28 @@ import { openCard, openConversation } from '../lib/open.ts';
 import { EffectPicker, effectsFor, useFxOptions, type FxChoice } from './EffectPicker.tsx';
 import { MoveTray, type Pick as MovePick } from './MoveTray.tsx';
 import { newSeed } from '../world/pack.ts';
+import { fmtDataHora, fmtLista, fmtNumero, tn, useT, type Chave, type ValoresDe } from '../i18n/index.ts';
+/** chave de texto sem valores a preencher (os rótulos das tabelas abaixo) */
+type Rotulo = { [K in Chave]: keyof ValoresDe<K> extends never ? K : never }[Chave];
 
 type Tab = 'conversa' | 'perfil' | 'treinar' | 'atividade';
+const ABA: Readonly<Record<Tab, Rotulo>> = { conversa: 'agente.aba.conversa', perfil: 'agente.aba.perfil', treinar: 'agente.treinar', atividade: 'agente.aba.atividade' };
 interface Activity {
   runs: Array<{ id: string; kind: string; status: string; mode: string; model: string | null; tokens_in: number | null; tokens_out: number | null; created_at: string; error: string | null; task_id?: string | null; conversation_id?: string | null }>;
   tasks: Array<{ id: string; number: number; title: string; completed: number; column_name: string }>;
   totals: { runs: number; tokens_in: number | null; tokens_out: number | null };
 }
-const RUN_STATUS: Record<string, string> = { queued: 'na fila', running: 'trabalhando', waiting_user: 'aguarda você', succeeded: 'concluída', failed: 'falhou', cancelled: 'cancelada' };
-const fmtN = (n: number | null | undefined) => (n ?? 0).toLocaleString('pt-BR');
+const RUN_STATUS: Readonly<Record<string, Rotulo>> = {
+  queued: 'agente.execucao.naFila', running: 'agente.execucao.trabalhando', waiting_user: 'agente.execucao.aguardaVoce',
+  succeeded: 'agente.execucao.concluida', failed: 'agente.execucao.falhou', cancelled: 'agente.execucao.cancelada',
+};
+/** o estado de uma ferramenta (o servidor manda a palavra em português; a tela mostra no idioma da pessoa) */
+const TOOL_STATUS: Readonly<Record<AgentTool['status'], Rotulo>> = {
+  'disponível': 'agente.ferramenta.disponivel', 'parcial': 'agente.ferramenta.parcial', 'desligada': 'agente.ferramenta.desligada',
+  'bloqueada': 'agente.ferramenta.bloqueada', 'preparado': 'agente.ferramenta.preparado', 'planejado': 'agente.ferramenta.planejado',
+  'atualizando': 'agente.ferramenta.atualizando',
+};
+const fmtN = (n: number | null | undefined) => fmtNumero(n ?? 0);
 
 /** O que quem abre já sabe do agente (a linha leve da lista, da conversa, da busca): o cabeçalho e a conversa aparecem na hora. */
 export type AgentHead = AgentLite & Partial<Pick<TeamAgent, 'status' | 'run_status' | 'building_name'>>;
@@ -49,6 +62,7 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
   agentId: string; initial?: AgentHead | null; coordName: string; sectors: Sector[]; initialTab?: Tab; draft?: string | null; conversationId?: string | null;
   onClose: () => void; onGone: () => void;
 }) {
+  const t = useT();
   const full = useResource<FullAgent>(`/api/agents/${agentId}`, ['agents.changed']);
   // a linha leve: endereço e andamento, relida também quando muda uma execução DESTE agente (o perfil não muda com ela)
   const row = useResource<TeamAgent>(`/api/team/agents/${agentId}`, ['agents.changed', 'city.changed']);
@@ -79,7 +93,7 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
   // perfil alterado e não salvo: fechar (X, Esc, clique no fundo) pergunta antes, em vez de perder em silêncio
   const dirty = useRef(false);
   const ref = useRef<HTMLElement>(null);
-  const requestClose = () => { if (keepTyped(dirty.current, `as alterações no perfil de ${head?.name ?? 'este agente'}`)) onClose(); };
+  const requestClose = () => { if (keepTyped(dirty.current, t('agente.janela.descartarPerfil', { nome: head?.name ?? t('agente.janela.esteAgente') }))) onClose(); };
   useSurface(ref, { onClose: requestClose, modal: true, outside: true });
   const reload = () => { full.reload(); row.reload(); };
   return (
@@ -93,15 +107,15 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
                 <strong id={`awin-${agentId}`}>{head.name}</strong>
                 <span className="muted">{head.role} · {head.sector_name}{place ? ` · ${place}` : ''}</span>
               </div>
-              {a && <span className="chip" title="Modelo de IA deste agente">{modelName(a.model)}</span>}
-              {status !== 'active' && <span className="badge badge--warn">desativado</span>}
-              {run && <span className="badge badge--warn">{RUN_STATUS[run]}</span>}
-              <button className="icon-btn" onClick={requestClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
+              {a && <span className="chip" title={t('agente.janela.modeloDica')}>{modelName(a.model)}</span>}
+              {status !== 'active' && <span className="badge badge--warn">{t('agente.janela.desativado')}</span>}
+              {run && <span className="badge badge--warn">{t(RUN_STATUS[run])}</span>}
+              <button className="icon-btn" onClick={requestClose} aria-label={t('agente.janela.fechar')} title={t('agente.janela.fechar')}><Icon name="x" /></button>
             </header>
             <div className="tabs" role="tablist">
               {(['conversa', 'perfil', 'treinar', 'atividade'] as Tab[]).map((k) => (
                 <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'tab--on' : ''}`} disabled={(k === 'conversa' || k === 'treinar') && status !== 'active'} onClick={() => setTab(k)}>
-                  {{ conversa: 'Conversas', perfil: 'Perfil e ferramentas', treinar: 'Treinar', atividade: 'Atividade' }[k]}
+                  {t(ABA[k])}
                 </button>
               ))}
             </div>
@@ -116,7 +130,7 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
           <>
             <header className="awin__head">
               <span className="grow" />
-              <button className="icon-btn" onClick={onClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
+              <button className="icon-btn" onClick={onClose} aria-label={t('agente.janela.fechar')} title={t('agente.janela.fechar')}><Icon name="x" /></button>
             </header>
             <div className="awin__body"><Loading error={failed} /></div>
           </>
@@ -129,13 +143,14 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
 function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirty }: {
   agent: FullAgent; row: TeamAgent | null; sectors: Sector[]; coordName: string; reload: () => void; onClose: () => void; onDirty: (dirty: boolean) => void;
 }) {
+  const t = useT();
   const catalog = useResource<ModelCatalog>('/api/ai/models', ['ai.changed']);
   const tools = useResource<AgentTool[]>('/api/ai/tools', ['agents.changed']);
   const skills = useResource<Skill[]>('/api/ai/skills', []);
   // a construção muda pelo "Mover para…" (a mesma operação da Equipe, com conferência no servidor), não pelo Salvar
   const init = () => ({
     name: agent.name, role: agent.role, sectorKey: agent.profile, model: agent.model, provider: agent.provider, charter: agent.charter ?? '', bio: agent.bio ?? '',
-    skills: agent.skills, hermesSkills: agent.hermes_skills, tools: agent.tools.map((t) => t.id),
+    skills: agent.skills, hermesSkills: agent.hermes_skills, tools: agent.tools.map((tool) => tool.id),
     lookSeed: agent.look_seed ?? null,
   });
   const [f, setF] = useState(init);
@@ -147,7 +162,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
   const fxOptions = useFxOptions();
   const fxChoice: FxChoice = agent.fx?.mode === 'custom' && agent.fx.option ? { mode: 'custom', option: agent.fx.option } : { mode: agent.fx?.mode === 'off' ? 'off' : 'inherit' };
   const setFx = async (c: FxChoice) => {
-    try { await api.put(`/api/agents/${agent.id}/fx`, c); reload(); setMsg({ kind: 'ok', text: c.mode === 'inherit' ? 'Efeito: o padrão da cidade.' : c.mode === 'off' ? 'Sem efeito neste agente.' : 'Efeito aplicado (na cidade também).' }); }
+    try { await api.put(`/api/agents/${agent.id}/fx`, c); reload(); setMsg({ kind: 'ok', text: t(c.mode === 'inherit' ? 'agente.perfil.efeitoPadrao' : c.mode === 'off' ? 'agente.perfil.efeitoNenhum' : 'agente.perfil.efeitoAplicado') }); }
     catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
   // mover: a mesma operação da Equipe (setor OU construção, com conferência no servidor)
@@ -155,7 +170,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
   const moveTo = async (p: MovePick) => {
     setTray(null);
     const body = p.kind === 'sector' ? { sectorKey: p.key, expect: { sectorKey: agent.profile } } : { structureId: p.id, expect: { structureId: agent.building_id }, ...(p.addFloor ? { addFloor: true } : {}) };
-    try { await api.post(`/api/agents/${agent.id}/move`, body); setMsg({ kind: 'ok', text: p.kind === 'sector' ? `Agora no setor ${p.name}. Papel, instruções e ferramentas continuam.` : `Agora mora em ${p.name}. Setor e trabalhos continuam.` }); reload(); }
+    try { await api.post(`/api/agents/${agent.id}/move`, body); setMsg({ kind: 'ok', text: t(p.kind === 'sector' ? 'agente.perfil.movidoSetor' : 'agente.perfil.movidoConstrucao', { nome: p.name }) }); reload(); }
     catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
   const [drafting, setDrafting] = useState<string | null>(null);
@@ -173,7 +188,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
     const base = init();
     for (const k of Object.keys(f) as Array<keyof typeof f>) if (JSON.stringify(f[k]) !== JSON.stringify(base[k])) body[k] = f[k];
     if ('model' in body || 'provider' in body) { body.model = f.model; if (f.model) body.provider = f.provider; else delete body.provider; }
-    try { await api.patch(`/api/agents/${agent.id}`, body); setMsg({ kind: 'ok', text: 'Salvo. Vale a partir da próxima conversa ou tarefa.' }); reload(); }
+    try { await api.patch(`/api/agents/${agent.id}`, body); setMsg({ kind: 'ok', text: t('agente.perfil.salvo') }); reload(); }
     catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
 
@@ -196,13 +211,13 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
         setDrafting(null);
         if (r.draft) {
           setF((x) => ({ ...x, charter: r.draft!.charter, skills: r.draft!.methods.length ? r.draft!.methods : x.skills, tools: r.draft!.tools.length ? [...new Set([...r.draft!.tools])] : x.tools }));
-          setMsg({ kind: 'ok', text: 'A coordenação escreveu uma proposta. Revise e clique em Salvar.' });
-        } else setMsg({ kind: 'error', text: r.error ?? 'A coordenação não devolveu uma proposta legível; tente de novo ou escreva você mesmo.' });
+          setMsg({ kind: 'ok', text: t('agente.perfil.propostaPronta') });
+        } else setMsg({ kind: 'error', text: r.error ?? t('agente.perfil.propostaIlegivel') });
       } catch (e) { if (!stop) { setDrafting(null); setMsg({ kind: 'error', text: errMsg(e) }); } }
     };
     void poll();
     return () => { stop = true; };
-  }, [drafting]);
+  }, [drafting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deactivate = async () => {
     setMsg(null);
@@ -218,7 +233,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
   const recommended = new Set(sector?.tools ?? []);
   // o Coordenador é o único cargo fixo: função, setor e ferramentas de coordenação não mudam; o resto é livre
   const fixed = !!agent.coordinator;
-  const toggleTool = (id: string, on: boolean) => setF((x) => ({ ...x, tools: on ? [...new Set([...x.tools, id])] : x.tools.filter((t) => t !== id) }));
+  const toggleTool = (id: string, on: boolean) => setF((x) => ({ ...x, tools: on ? [...new Set([...x.tools, id])] : x.tools.filter((k) => k !== id) }));
   const shownSkills = useMemo(() => {
     const q = skillQ.trim().toLowerCase();
     return (skills.data ?? []).filter((s) => !q || s.name.includes(q) || s.description.toLowerCase().includes(q) || s.category.includes(q)).slice(0, 40);
@@ -228,95 +243,96 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
   return (
     <div className="editor">
       {agent.bio && <p className="profile__bio">{agent.bio}</p>}
-      {!active && agent.deactivation_note && <p className="hint">Desativado: {agent.deactivation_note}.</p>}
-      {fixed && <p className="fixed-note"><Icon name="lock" size={13} /> <span><b>Cargo fixo.</b> O Coordenador está sempre na equipe e a função dele não muda: ele recebe os pedidos e encaminha. Nome, aparência, história, foco, modelo e ferramentas extras são seus.</span></p>}
+      {!active && agent.deactivation_note && <p className="hint">{t('agente.perfil.desativadoNota', { nota: agent.deactivation_note })}</p>}
+      {fixed && <p className="fixed-note"><Icon name="lock" size={13} /> <span><b>{t('agente.perfil.cargoFixoTitulo')}</b> {t('agente.perfil.cargoFixo')}</span></p>}
       {/* aparência: o boneco da cidade, sorteado do pacote gráfico (Grécia Clássica) a cada "Redefinir" */}
       <div className="look-row">
-        <div className="look-row__stage"><AgentPreview agent={{ ...agent, look_seed: f.lookSeed }} fx={effectsFor(fxChoice, fxOptions, agent)} size={3} label={`Aparência de ${agent.name}`} /></div>
+        <div className="look-row__stage"><AgentPreview agent={{ ...agent, look_seed: f.lookSeed }} fx={effectsFor(fxChoice, fxOptions, agent)} size={3} label={t('agente.perfil.aparenciaDe', { nome: agent.name })} /></div>
         <div className="look-row__txt">
-          <b>Aparência</b>
-          <span className="hint">O boneco da cidade e o retrato das conversas. "Redefinir" sorteia outro, combinando cabelo, barba, roupa e objetos da Grécia Clássica; a cor da roupa continua a do agente.</span>
+          <b>{t('agente.perfil.aparencia')}</b>
+          <span className="hint">{t('agente.perfil.aparenciaDica')}</span>
           <div className="row row--wrap">
-            <button type="button" className="btn btn--sm" onClick={() => setF((x) => ({ ...x, lookSeed: newSeed() }))}><Icon name="repeat" size={13} /> Redefinir</button>
-            {agent.char_key && f.lookSeed !== null && <button type="button" className="btn btn--sm btn--ghost" onClick={() => setF((x) => ({ ...x, lookSeed: null }))}>Voltar ao original</button>}
-            {f.lookSeed !== (agent.look_seed ?? null) && <span className="hint">Clique em Salvar para manter.</span>}
+            <button type="button" className="btn btn--sm" onClick={() => setF((x) => ({ ...x, lookSeed: newSeed() }))}><Icon name="repeat" size={13} /> {t('agente.perfil.redefinir')}</button>
+            {agent.char_key && f.lookSeed !== null && <button type="button" className="btn btn--sm btn--ghost" onClick={() => setF((x) => ({ ...x, lookSeed: null }))}>{t('agente.perfil.voltarOriginal')}</button>}
+            {f.lookSeed !== (agent.look_seed ?? null) && <span className="hint">{t('agente.perfil.salvarParaManter')}</span>}
           </div>
-          <b className="look-row__sub">Efeitos dos seus Pacotes</b>
+          <b className="look-row__sub">{t('agente.perfil.efeitosPacotes')}</b>
           <EffectPicker value={fxChoice} onChange={(c) => void setFx(c)} options={fxOptions} />
           {active && (
             <div className="row row--wrap look-row__move">
-              <span className="hint"><Icon name="pin" size={12} /> {place ?? '—'} · setor {sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name}</span>
-              <button type="button" className="btn btn--sm btn--ghost" onClick={() => setTray('structure')}><Icon name="temple" size={13} /> Mover para…</button>
+              <span className="hint"><Icon name="pin" size={12} /> {t('agente.perfil.ondeMora', { lugar: place ?? '—', setor: sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name })}</span>
+              <button type="button" className="btn btn--sm btn--ghost" onClick={() => setTray('structure')}><Icon name="temple" size={13} /> {t('agente.perfil.moverPara')}</button>
             </div>
           )}
         </div>
       </div>
       {tray && <MoveTray agent={row ?? { id: agent.id, name: agent.name, role: agent.role, color: agent.color, status: agent.status, demo: !!agent.demo, coordinator: !!agent.coordinator, char_key: agent.char_key, look_seed: agent.look_seed ?? null, deactivation_note: agent.deactivation_note, sector_key: agent.profile, sector_name: agent.sector_name, building_id: agent.building_id, building_name: null, floor_name: null, floor_id: agent.floor_id, floor_level: agent.floor_level, run_status: agent.run_status }}
-        initial={tray} title={`Mover ${agent.name} para…`} onPick={(p) => void moveTo(p)} onClose={() => setTray(null)} />}
+        initial={tray} title={t('agente.perfil.moverNomePara', { nome: agent.name })} onPick={(p) => void moveTo(p)} onClose={() => setTray(null)} />}
       <PersonalityPicker agent={agent} onChanged={reload} />
       <div className="editor__grid">
-        <label className="field">Nome<input value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
-        <label className="field">Papel (função){fixed ? ' — fixo' : ''}<input value={f.role} maxLength={80} disabled={fixed} onChange={(e) => setF({ ...f, role: e.target.value })} /></label>
-        <label className="field">Setor
+        <label className="field">{t('agente.perfil.nome')}<input value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="field">{t(fixed ? 'agente.perfil.papelFixo' : 'agente.perfil.papel')}<input value={f.role} maxLength={80} disabled={fixed} onChange={(e) => setF({ ...f, role: e.target.value })} /></label>
+        <label className="field">{t('agente.perfil.setor')}
           <select value={f.sectorKey} disabled={fixed} onChange={(e) => setF({ ...f, sectorKey: e.target.value })}>
             {sectors.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
           </select>
-          {sector?.description && <span className="hint">{sector.description} {sector.creates_tasks === 'demands' ? 'Cria cards para demandas claras.' : 'Só cria card quando você pede.'}</span>}
+          {sector?.description && <span className="hint">{sector.description} {t(sector.creates_tasks === 'demands' ? 'agente.perfil.criaCards' : 'agente.perfil.soCardPedido')}</span>}
         </label>
         {/* a cidade pode ter milhares de construções: escolher é pelo "Mover para…" (com busca e por partes), não num select */}
-        <div className="field">Construção
-          <button type="button" className="btn btn--ghost" onClick={() => setTray('structure')} disabled={!active} title={active ? 'Escolher outra construção (vale na hora)' : undefined}>
-            <Icon name="temple" size={13} /> {place ?? '—'}{active ? ' · Mover para…' : ''}
+        <div className="field">{t('agente.perfil.construcao')}
+          <button type="button" className="btn btn--ghost" onClick={() => setTray('structure')} disabled={!active} title={active ? t('agente.perfil.escolherConstrucao') : undefined}>
+            <Icon name="temple" size={13} /> {place ?? '—'}{active ? ` · ${t('agente.perfil.moverPara')}` : ''}
           </button>
         </div>
-        <label className="field editor__wide">Modelo de IA
-          {catalog.error ? <span className="hint">Sem conta de IA conectada: usa o modelo padrão. Conecte uma conta em Conexões para escolher.</span>
+        <label className="field editor__wide">{t('agente.perfil.modeloIa')}
+          {catalog.error ? <span className="hint">{t('agente.perfil.semContaIa')}</span>
             : <ModelSelect catalog={catalog.data} value={f.model} provider={f.provider} onChange={(model, provider) => setF({ ...f, model, provider })} />}
-          <span className="hint">Cada agente pode ter o seu. "Padrão da conta" segue o modelo escolhido em Configurações. Preço: o publicado pela conta, por milhão de tokens de entrada / saída.</span>
+          <span className="hint">{t('agente.perfil.modeloDica')}</span>
         </label>
-        <label className="field editor__wide">História (bio)
-          <textarea rows={2} maxLength={600} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} placeholder="Quem é este personagem, em duas linhas. Aparece no perfil e na cidade." />
-          <span className="hint">É o tom do personagem, não uma instrução para a IA. Trocar de tema? Mude nome e história à vontade: a função continua a mesma.</span>
+        <label className="field editor__wide">{t('agente.perfil.historia')}
+          <textarea rows={2} maxLength={600} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} placeholder={t('agente.perfil.historiaExemplo')} />
+          <span className="hint">{t('agente.perfil.historiaDica')}</span>
         </label>
       </div>
 
-      <label className="field">{fixed ? 'Foco da coordenação (o protocolo do cargo vai sempre; aqui entra o seu jeito: prioridades, tom, o que vem primeiro)' : 'Instruções (o que vai para a IA a cada execução)'}
+      <label className="field">{t(fixed ? 'agente.perfil.focoCoordenacao' : 'agente.perfil.instrucoes')}
         <textarea rows={6} maxLength={4000} value={f.charter} onChange={(e) => setF({ ...f, charter: e.target.value })} />
       </label>
       {!fixed && <div className="row">
-        <button className="btn btn--sm" onClick={draft} disabled={!!drafting || !f.role.trim()}><Icon name="edit" size={13} /> {drafting ? 'A coordenação está escrevendo…' : 'Escrever com a coordenação'}</button>
-        <span className="hint">{coordName} redige instruções, métodos e ferramentas a partir do papel e do setor; você revisa antes de salvar.</span>
+        <button className="btn btn--sm" onClick={draft} disabled={!!drafting || !f.role.trim()}><Icon name="edit" size={13} /> {t(drafting ? 'agente.perfil.escrevendo' : 'agente.perfil.escreverComCoordenacao')}</button>
+        <span className="hint">{t('agente.perfil.escreverDica', { coord: coordName })}</span>
       </div>}
 
       <div className="block">
-        <h4>Métodos</h4>
+        <h4>{t('agente.perfil.metodos')}</h4>
         <div className="row row--wrap">
-          {f.skills.map((s) => <span key={s} className="skill">{s} <button className="x" aria-label={`Tirar ${s}`} onClick={() => setF({ ...f, skills: f.skills.filter((x) => x !== s) })}>×</button></span>)}
+          {f.skills.map((s) => <span key={s} className="skill">{s} <button className="x" aria-label={t('agente.tirar', { nome: s })} onClick={() => setF({ ...f, skills: f.skills.filter((x) => x !== s) })}>×</button></span>)}
           <form className="row" onSubmit={(e) => { e.preventDefault(); const v = newMethod.trim(); if (v) setF({ ...f, skills: [...new Set([...f.skills, v])] }); setNewMethod(''); }}>
-            <input value={newMethod} maxLength={80} placeholder="novo método…" onChange={(e) => setNewMethod(e.target.value)} aria-label="Novo método" />
+            <input value={newMethod} maxLength={80} placeholder={t('agente.perfil.novoMetodoExemplo')} onChange={(e) => setNewMethod(e.target.value)} aria-label={t('agente.perfil.novoMetodo')} />
           </form>
         </div>
         {sector && sector.skills.some((s) => !f.skills.includes(s)) && (
-          <p className="hint">Sugestões do setor: {sector.skills.filter((s) => !f.skills.includes(s)).map((s) => <button key={s} className="linkish" onClick={() => setF({ ...f, skills: [...f.skills, s] })}>+ {s}</button>)}</p>
+          <p className="hint">{tn('agente.perfil.sugestoesSetor', { itens: sector.skills.filter((s) => !f.skills.includes(s)).map((s) => <button key={s} className="linkish" onClick={() => setF({ ...f, skills: [...f.skills, s] })}>+ {s}</button>) })}</p>
         )}
       </div>
 
       <div className="block">
-        <h4>Ferramentas <span className="muted small">— cada agente se especializa; quem não tem uma ferramenta pede ajuda a quem tem (a coordenação controla as travas)</span></h4>
+        <h4>{t('agente.perfil.ferramentas')} <span className="muted small">{t('agente.perfil.ferramentasDica')}</span></h4>
         <div className="tools-grid">
-          {(tools.data ?? []).filter((t) => fixed || !COORDINATOR_ONLY.includes(t.id)).map((t) => {
-            const on = f.tools.includes(t.id);
+          {(tools.data ?? []).filter((tool) => fixed || !COORDINATOR_ONLY.includes(tool.id)).map((tool) => {
+            const on = f.tools.includes(tool.id);
             // só o que executa código espera a autorização com a senha; o resto se escolhe sempre (o estado aparece ao lado)
-            const blocked = t.status === 'bloqueada' && !!t.guarded && !on;
-            const locked = fixed && COORDINATOR_TOOLS.includes(t.id);
+            const blocked = tool.status === 'bloqueada' && !!tool.guarded && !on;
+            const locked = fixed && COORDINATOR_TOOLS.includes(tool.id);
+            const plena = tool.status === 'disponível'; // i18n-ok: o estado que o servidor manda, não texto de tela
             return (
-              <label key={t.id} className={`tool-opt ${on ? 'tool-opt--on' : ''} ${blocked ? 'tool-opt--off' : ''}`} title={t.note}>
-                <input type="checkbox" checked={on} disabled={blocked || locked} onChange={(e) => toggleTool(t.id, e.target.checked)} />
-                <span className="tool-opt__txt"><b>{t.label}</b><small>{t.note}</small></span>
+              <label key={tool.id} className={`tool-opt ${on ? 'tool-opt--on' : ''} ${blocked ? 'tool-opt--off' : ''}`} title={tool.note}>
+                <input type="checkbox" checked={on} disabled={blocked || locked} onChange={(e) => toggleTool(tool.id, e.target.checked)} />
+                <span className="tool-opt__txt"><b>{tool.label}</b><small>{tool.note}</small></span>
                 <span className="tool-opt__tags">
-                  {locked && <span className="badge">do cargo</span>}
-                  {!locked && recommended.has(t.id) && <span className="badge">recomendada</span>}
-                  {t.status !== 'disponível' && <span className={`badge ${TOOL_BADGE[t.status]}`}>{t.status}</span>}
+                  {locked && <span className="badge">{t('agente.perfil.doCargo')}</span>}
+                  {!locked && recommended.has(tool.id) && <span className="badge">{t('agente.perfil.recomendada')}</span>}
+                  {!plena && <span className={`badge ${TOOL_BADGE[tool.status]}`}>{TOOL_STATUS[tool.status] ? t(TOOL_STATUS[tool.status]) : tool.status}</span>}
                 </span>
               </label>
             );
@@ -325,13 +341,13 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
       </div>
 
       <div className="block">
-        <h4>Competências da biblioteca <span className="muted small">— instruções prontas que o agente consulta quando tem a ferramenta "Competências da biblioteca"</span></h4>
-        {f.hermesSkills.length > 0 && <div className="row row--wrap">{f.hermesSkills.map((s) => <span key={s} className="skill">{s} <button className="x" onClick={() => toggleSkill(s)} aria-label={`Tirar ${s}`}>×</button></span>)}</div>}
-        {f.hermesSkills.length > 0 && !f.tools.includes('habilidades') && <p className="hint warn">Sem a ferramenta "Competências da biblioteca", o agente só recebe o nome das competências como orientação.</p>}
+        <h4>{t('agente.perfil.competencias')} <span className="muted small">{t('agente.perfil.competenciasDica')}</span></h4>
+        {f.hermesSkills.length > 0 && <div className="row row--wrap">{f.hermesSkills.map((s) => <span key={s} className="skill">{s} <button className="x" onClick={() => toggleSkill(s)} aria-label={t('agente.tirar', { nome: s })}>×</button></span>)}</div>}
+        {f.hermesSkills.length > 0 && !f.tools.includes('habilidades') && <p className="hint warn">{t('agente.perfil.semFerramentaCompetencias')}</p>}
         {(skills.data?.length ?? 0) > 0 ? (
           <details>
-            <summary className="muted">Escolher na biblioteca ({skills.data!.length})</summary>
-            <input value={skillQ} onChange={(e) => setSkillQ(e.target.value)} placeholder="buscar (ex.: pesquisa, planilha, apresentação)" aria-label="Buscar competência" className="skill-search" />
+            <summary className="muted">{t('agente.perfil.escolherBiblioteca', { n: skills.data!.length })}</summary>
+            <input value={skillQ} onChange={(e) => setSkillQ(e.target.value)} placeholder={t('agente.perfil.buscarExemplo')} aria-label={t('agente.perfil.buscarCompetencia')} className="skill-search" />
             <div className="skill-list">
               {shownSkills.map((s) => (
                 <button key={s.name} className={`skill-item ${f.hermesSkills.includes(s.name) ? 'skill-item--on' : ''}`} onClick={() => toggleSkill(s.name)}>
@@ -340,30 +356,30 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
               ))}
             </div>
           </details>
-        ) : <p className="hint">Biblioteca de competências indisponível (sem conta de IA conectada).</p>}
+        ) : <p className="hint">{t('agente.perfil.bibliotecaIndisponivel')}</p>}
       </div>
 
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       {offResult && (
         <div className="ok">
-          {agent.name} desativado. {offResult.redistributed.length ? `Tarefas redistribuídas pela coordenação: ${offResult.redistributed.map((r) => `#${r.number} → ${r.to}`).join(', ')}.` : 'Não havia tarefas abertas.'}
-          {offResult.tools.length ? ` Ferramentas que só ele tinha: ${offResult.tools.map((t) => `${t.label} → ${t.to}`).join(', ')}.` : ''}
+          {t('agente.perfil.desativadoOk', { nome: agent.name })} {offResult.redistributed.length ? t('agente.perfil.redistribuidas', { lista: fmtLista(offResult.redistributed.map((r) => `#${r.number} → ${r.to}`)) }) : t('agente.perfil.semTarefasAbertas')}
+          {offResult.tools.length ? ` ${t('agente.perfil.ferramentasSoDele', { lista: fmtLista(offResult.tools.map((x) => `${x.label} → ${x.to}`)) })}` : ''}
         </div>
       )}
       <div className="editor__foot">
-        {fixed ? <span className="hint">O Coordenador não sai da equipe.</span> : active ? (
+        {fixed ? <span className="hint">{t('agente.perfil.coordenadorNaoSai')}</span> : active ? (
           confirmOff ? (
             <div className="confirm">
-              Ao desativar {agent.name}, a coordenação revisa os fluxos que dependem dele: as tarefas abertas passam a colegas e as ferramentas que só ele tinha são repassadas. Conversas e histórico ficam guardados e você pode reativar depois.
-              <button className="btn btn--sm btn--primary" onClick={deactivate}>Desativar</button>
-              <button className="btn btn--sm btn--ghost" onClick={() => setConfirmOff(false)}>Cancelar</button>
+              {t('agente.perfil.confirmarDesativar', { nome: agent.name })}
+              <button className="btn btn--sm btn--primary" onClick={deactivate}>{t('agente.desativar')}</button>
+              <button className="btn btn--sm btn--ghost" onClick={() => setConfirmOff(false)}>{t('agente.cancelar')}</button>
             </div>
-          ) : <button className="btn btn--ghost" onClick={() => setConfirmOff(true)}>Desativar agente</button>
-        ) : <button className="btn" onClick={reactivate}>Reativar</button>}
+          ) : <button className="btn btn--ghost" onClick={() => setConfirmOff(true)}>{t('agente.perfil.desativarAgente')}</button>
+        ) : <button className="btn" onClick={reactivate}>{t('agente.perfil.reativar')}</button>}
         <span className="grow" />
-        <button className="btn btn--ghost" onClick={() => { setF(init()); setMsg(null); }} disabled={!dirty}>Desfazer</button>
-        <button className="btn btn--primary" onClick={save} disabled={!dirty}>Salvar</button>
-        {!active && <button className="btn btn--ghost" onClick={onClose}>Fechar</button>}
+        <button className="btn btn--ghost" onClick={() => { setF(init()); setMsg(null); }} disabled={!dirty}>{t('agente.perfil.desfazer')}</button>
+        <button className="btn btn--primary" onClick={save} disabled={!dirty}>{t('agente.perfil.salvar')}</button>
+        {!active && <button className="btn btn--ghost" onClick={onClose}>{t('agente.perfil.fechar')}</button>}
       </div>
     </div>
   );
@@ -371,35 +387,37 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
 
 function ActivityTab({ agentId }: { agentId: string }) {
   const d = useResource<Activity>(`/api/agents/${agentId}/activity`, ['runs.changed', 'tasks.changed']);
+  const t = useT();
   if (!d.data) return <Loading error={d.error} />;
-  const t = d.data.totals;
+  const tot = d.data.totals;
   return (
     <div>
-      <p className="muted">{fmtN(t.runs)} execuções reais · {fmtN((t.tokens_in ?? 0) + (t.tokens_out ?? 0))} tokens (entrada {fmtN(t.tokens_in)} · saída {fmtN(t.tokens_out)})</p>
-      <h4>Com quem está o quê</h4>
+      <p className="muted">{t('agente.atividade.resumo', { n: tot.runs, total: fmtN((tot.tokens_in ?? 0) + (tot.tokens_out ?? 0)), entrada: fmtN(tot.tokens_in), saida: fmtN(tot.tokens_out) })}</p>
+      <h4>{t('agente.atividade.comQuem')}</h4>
       {d.data.tasks.length ? (
         // cada tarefa abre o card dela (antes, a lista só mostrava)
-        <ul className="plain">{d.data.tasks.map((x) => <li key={x.id} className="card-click" onClick={cardClick(() => openCard(x.id))}><button type="button" className="card-open" onClick={() => openCard(x.id)} aria-label={`Abrir o card #${x.number}: ${x.title}`}><span className="muted">#{x.number}</span> {x.title}</button> <span className={`badge ${x.completed ? 'badge--ok' : ''}`}>{x.completed ? 'feito' : x.column_name}</span></li>)}</ul>
-      ) : <p className="hint">Nenhuma tarefa no quadro da equipe.</p>}
-      <h4>Últimas execuções</h4>
+        <ul className="plain">{d.data.tasks.map((x) => <li key={x.id} className="card-click" onClick={cardClick(() => openCard(x.id))}><button type="button" className="card-open" onClick={() => openCard(x.id)} aria-label={t('agente.atividade.abrirCard', { numero: x.number, titulo: x.title })}><span className="muted">#{x.number}</span> {x.title}</button> <span className={`badge ${x.completed ? 'badge--ok' : ''}`}>{x.completed ? t('agente.atividade.feito') : x.column_name}</span></li>)}</ul>
+      ) : <p className="hint">{t('agente.atividade.semTarefas')}</p>}
+      <h4>{t('agente.atividade.ultimas')}</h4>
       <div className="table-wrap"><table className="table">
-        <thead><tr><th>Quando</th><th>Tipo</th><th>Modelo</th><th>Tokens</th><th>Estado</th></tr></thead>
+        <thead><tr><th>{t('agente.atividade.quando')}</th><th>{t('agente.atividade.tipo')}</th><th>{t('agente.atividade.modelo')}</th><th>{t('agente.atividade.consumo')}</th><th>{t('agente.atividade.estado')}</th></tr></thead>
         <tbody>{d.data.runs.map((r) => {
           // a execução abre o card ou a conversa dela; sem nenhum dos dois, a linha fica só para ler
           const dest = destinoDaExecucao({ task_id: r.task_id, conversation_id: r.conversation_id, agent_id: agentId });
           const ir = dest?.tipo === 'card' ? () => openCard(dest.id) : dest?.tipo === 'conversa' ? () => openConversation(dest.agentId, dest.conversationId) : null;
-          const quando = new Date(r.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+          const quando = fmtDataHora(r.created_at);
+          const tipo = t(r.kind === 'chat' ? 'agente.atividade.conversa' : 'agente.atividade.tarefa');
           return (
-          <tr key={r.id} {...(ir && dest ? { className: 'row-click', tabIndex: 0, title: rotuloDoDestino(dest), 'aria-label': rotuloDaLinha(dest, `${r.kind === 'chat' ? 'conversa' : 'tarefa'}, ${quando}`), onClick: cardClick(ir), onKeyDown: cardKey(ir) } : {})}>
+          <tr key={r.id} {...(ir && dest ? { className: 'row-click', tabIndex: 0, title: rotuloDoDestino(dest), 'aria-label': rotuloDaLinha(dest, `${tipo}, ${quando}`), onClick: cardClick(ir), onKeyDown: cardKey(ir) } : {})}>
             <td>{quando}{ir && <span className="act-open" aria-hidden="true"> ›</span>}</td>
-            <td>{r.kind === 'chat' ? 'conversa' : 'tarefa'}</td>
-            <td>{r.mode === 'simulated' ? <span className="badge badge--warn">sem conta de IA</span> : modelName(r.model)}</td>
+            <td>{tipo}</td>
+            <td>{r.mode === 'simulated' ? <span className="badge badge--warn">{t('agente.atividade.semContaIa')}</span> : modelName(r.model)}</td>
             <td>{r.tokens_in === null ? '—' : fmtN((r.tokens_in ?? 0) + (r.tokens_out ?? 0))}</td>
-            <td>{RUN_STATUS[r.status] ?? r.status}{r.error ? <span className="small error-inline"> {r.error}</span> : null}</td>
+            <td>{RUN_STATUS[r.status] ? t(RUN_STATUS[r.status]) : r.status}{r.error ? <span className="small error-inline"> {r.error}</span> : null}</td>
           </tr>
           );
         })}
-        {!d.data.runs.length && <tr><td colSpan={5} className="muted">Ainda sem execuções.</td></tr>}</tbody>
+        {!d.data.runs.length && <tr><td colSpan={5} className="muted">{t('agente.atividade.semExecucoes')}</td></tr>}</tbody>
       </table></div>
     </div>
   );

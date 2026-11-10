@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
 
 /** gain: o que a faixa precisa para tocar no mesmo nível das outras (medido; 0..1) */
 export interface Track { file: string; title: string; author: string; source: string; license: string; licenseUrl: string; sha256: string; gain?: number }
-export interface MusicState { tracks: Track[]; index: number; playing: boolean; volume: number; shuffle: boolean; error: string | null }
+export interface MusicState { tracks: Track[]; index: number; playing: boolean; volume: number; shuffle: boolean; error: 'lista' | 'faixas' | null }
 
 const BASE = '/musica/';
 const FADE_MS = 1200;
@@ -61,7 +61,7 @@ export class Player {
     if (this.st.tracks.length) return Promise.resolve();
     this.loading ??= fetch(`${BASE}musicas.json`).then((r) => r.json()).then((m: { tracks: Track[] }) => {
       this.set({ tracks: Array.isArray(m.tracks) ? m.tracks : [], index: 0 });
-    }).catch(() => { this.loading = null; this.set({ error: 'Não deu para abrir a lista de músicas.' }); });
+    }).catch(() => { this.loading = null; this.set({ error: 'lista' }); });
     return this.loading;
   }
 
@@ -73,7 +73,7 @@ export class Player {
     a.addEventListener('error', () => {
       if (!this.st.playing) return;
       this.fails++;
-      if (this.fails >= Math.max(1, this.st.tracks.length)) { this.pause(); this.set({ error: 'As músicas não abriram neste computador.' }); return; }
+      if (this.fails >= Math.max(1, this.st.tracks.length)) { this.pause(); this.set({ error: 'faixas' }); return; }
       this.next();
     });
     a.addEventListener('playing', () => { this.fails = 0; });

@@ -8,8 +8,11 @@
  * A Stoa mantém as plantas desenhadas à mão (salão de trabalho e biblioteca, alternando por andar); os
  * outros tipos usam o gerador: fileiras de mesas, escada encostada numa parede, circulação na frente.
  */
-import { typeOf } from '../../../shared/city.ts';
+import { CATALOG, typeOf } from '../../../shared/city.ts';
 import type { Expr, Facing, Gesture } from '../iso/figures.ts';
+import { t, type Chave } from '../i18n/index.ts';
+/** As chaves do que os agentes fazem nas áreas ("na fonte"): texto sem valor nenhum. */
+export type ChaveDaVida = Extract<Chave, `cidade.vida.${string}`>;
 import { boxAt, type Box, type Vec2 } from './geom.ts';
 
 export const FLOOR_H = 3.2;
@@ -27,7 +30,8 @@ export interface Activity {
   sit?: boolean;
   perch?: boolean;
   dur: [number, number];
-  label?: string;
+  /** o que a pessoa lê ao clicar na área ("na fonte"): a chave do dicionário, traduzida na hora de mostrar */
+  label?: ChaveDaVida;
   tour?: Vec2[];
   fast?: boolean;
   y?: number; // altura dos pés quando não é o chão (degraus do teatro)
@@ -225,6 +229,7 @@ function stoaPlan(level: number): FloorPlan {
     act({ id: 'divagar', spot: [4.0, -1.8], facing: 'front', mirror: true, gestures: ['think', 'none'], bubble: 'think', dur: [5000, 9000] }),
   ];
   return {
+    // i18n-ok: nome interno da planta (não aparece na tela)
     id: lib ? 'biblioteca' : 'salao', name: lib ? 'Biblioteca e conselho' : 'Salão de trabalho',
     floor: lib ? 'planks' : 'checker',
     carpets: [{ x0: -7.45, z0: -3.75, x1: 1.95, z1: 2.05 }, { x0: 2.7, z0: -0.9, x1: 4.95, z1: 2.1 }],
@@ -318,7 +323,7 @@ function genericPlan(spec: BuildingSpec, level: number, slots: number): FloorPla
     if (chats.some(([cx]) => Math.abs(cx - x) < 2.4)) continue;
     if (okSpot([x, cz]) && okSpot([x + 0.8, cz - 0.8])) chats.push([x, cz]);
   }
-  const lname = level === 0 ? 'Térreo' : `${level}º andar`;
+  const lname = level === 0 ? 'Térreo' : `${level}º andar`; // i18n-ok: nome interno da planta (o andar na tela vem de nomeDoAndar)
   return {
     id: `${spec.style}-${level}`, name: lname, floor: F.floor,
     carpets: rows.length ? [{ x0: xmin - 0.9, z0: rows[0] - 1.05, x1: Math.min(I.x1 - 0.2, xmax + 1.6), z1: rows[rows.length - 1] + 0.75 }] : [],
@@ -356,4 +361,42 @@ export function floorBlocks(spec: BuildingSpec, plan: FloorPlan, level: number, 
   for (const w of plan.walls) out.push(w);
   if (spec.stair && (level < floors - 1 || level > 0)) out.push(stairBox(spec.stair));
   return out;
+}
+
+// ================================================================ nomes de fábrica na tela
+// As construções e os andares que o sistema cria sozinho nascem com o nome em português (o servidor grava "Stoa de
+// Ergon", "Ágora", "Oikos 2", "Térreo", "1º andar"). Na tela eles seguem o idioma; o nome que a pessoa escreveu fica
+// como está.
+
+/** Os tipos do catálogo (shared/city.ts) com nome no dicionário. Um tipo de mod fica com o nome dele. */
+export const TIPOS_DE_FABRICA = ['stoa', 'oikos', 'ergasterion', 'pharmakopoleion', 'didaskaleion', 'oikia', 'emporion', 'bouleuterion', 'agora', 'teatro', 'termas', 'ginasio', 'bairro'] as const;
+export type TipoDeFabrica = typeof TIPOS_DE_FABRICA[number];
+const deFabrica = (kind: string): kind is TipoDeFabrica => (TIPOS_DE_FABRICA as readonly string[]).includes(kind);
+
+/** O nome do tipo ("Termas" / "Baths"). */
+export function nomeDoTipo(kind: string): string { return deFabrica(kind) ? t(`cidade.tipo.${kind}.nome`) : typeOf(kind)?.name ?? kind; }
+/** O equivalente de hoje ("piscina" / "pool"). */
+export function comumDoTipo(kind: string): string { return deFabrica(kind) ? t(`cidade.tipo.${kind}.comum`) : typeOf(kind)?.common ?? kind; }
+/** A descrição do tipo, no cartão da construção. */
+export function descricaoDoTipo(kind: string): string { return deFabrica(kind) ? t(`cidade.tipo.${kind}.descricao`) : typeOf(kind)?.description ?? ''; }
+
+const STOA_DO_ERGON = /^Stoa d[eo] Ergon$/;
+/**
+ * O nome de uma construção na tela: o de fábrica no idioma atual ("Stoa de Ergon" → "Stoa of Ergon", "Termas 2" →
+ * "Baths 2"); o que a pessoa escreveu, como está. Com `kind`, só o nome do próprio tipo conta como de fábrica.
+ */
+export function nomeDaConstrucao(nome: string, kind?: string): string {
+  if (STOA_DO_ERGON.test(nome)) return t('cidade.fabrica.stoaDoErgon');
+  const m = /^(.+?)(?: (\d+))?$/.exec(nome);
+  if (!m) return nome;
+  const tipo = kind !== undefined ? (typeOf(kind)?.name === m[1] ? kind : null) : CATALOG.find((c) => c.name === m[1])?.id ?? null;
+  if (!tipo || !deFabrica(tipo)) return nome;
+  return m[2] ? `${nomeDoTipo(tipo)} ${m[2]}` : nomeDoTipo(tipo);
+}
+
+/** O nome de um andar na tela: "Térreo" e "2º andar" (os de fábrica) no idioma atual; outro nome, como está. */
+export function nomeDoAndar(nome: string): string {
+  if (nome === 'Térreo') return t('cidade.andar.terreo'); // i18n-ok: reconhece o nome que o servidor grava
+  const m = /^(\d+)º andar$/.exec(nome);
+  return m ? t('cidade.andar.n', { nivel: m[1] }) : nome;
 }

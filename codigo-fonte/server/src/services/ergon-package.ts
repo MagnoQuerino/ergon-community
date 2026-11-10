@@ -1,5 +1,5 @@
 /**
- * Pacote `.ergon` (docs/FORMATOS_ERGON.md): ZIP com manifest.json (versão 2) + dados JSON + imagens de prévia.
+ * Pacote `.ergon` (docs/FORMATOS_ERGON.md): ZIP com manifest.json (formato 2; 3 quando assinado) + dados JSON + imagens de prévia.
  * Pacotes VISUAIS e de equipe são SÓ DADOS: nada de script, HTML, SVG ou programa, nenhuma permissão, nenhuma
  * credencial. Skill/plugin têm contrato próprio (permissões declaradas, revisão e isolamento) e não são instalados
  * por esta versão. A validação é do mesmo código no aparelho, na Community e na loja.
@@ -8,6 +8,18 @@
  * sem nomes repetidos (mesmo trocando maiúsculas), limites de quantidade, tamanho e taxa de compressão (bomba de
  * ZIP), extensões permitidas + assinatura real dos bytes (PNG/WebP), dimensão de imagem, hash de cada parte
  * conferido contra o manifesto, nada fora do manifesto, e assinatura Ed25519 opcional (oficial = verificado).
+ *
+ * Assinatura (versão 3): Ed25519 sobre o SHA-256 de "ergon-package-v3\n" + o manifesto inteiro (sem `signature`) em
+ * JSON canônico PROFUNDO: chaves em ordem em todos os níveis, listas na ordem delas. Assim o hash de cada arquivo
+ * (`components`) faz parte do que foi assinado. A versão 2 usava um replacer em lista no JSON.stringify, que apagava
+ * as chaves dos objetos aninhados (os `components` viravam `{}`): dava para trocar um arquivo e o sha256 dele sem a
+ * assinatura perceber. Por isso pacote v2 ASSINADO é recusado (só a loja oficial assina; a versão nova vem com o
+ * Ergon, e o que já está instalado continua funcionando porque fica guardado no banco); v2 sem assinatura continua
+ * entrando como "não verificado", igual a qualquer pacote da comunidade.
+ *
+ * O formato 3 só é usado onde protege alguma coisa: no pacote ASSINADO. Pacote sem assinatura (comunidade, exportar
+ * do editor) continua saindo no formato 2, que as versões anteriores do Ergon instalam (elas recusam qualquer outro
+ * número). `signature` ausente, null ou outro valor falso = sem assinatura, como antes.
  */
 import crypto from 'node:crypto';
 import { validateBlueprint, type Blueprint } from '../../../shared/blueprint.ts';
@@ -28,8 +40,12 @@ const ID = /^[a-z0-9][a-z0-9-]{1,30}\.[a-z0-9][a-z0-9-]{1,30}\.[a-z0-9][a-z0-9-]
 const SEMVER = /^\d{1,3}\.\d{1,3}\.\d{1,4}$/;
 
 export interface Component { path: string; sha256: string; size: number; type: 'application/json' | 'image/png' | 'image/webp' }
+/** formato do pacote ASSINADO (a assinatura cobre os arquivos) */
+export const MANIFEST_VERSION = 3;
+/** formato do pacote sem assinatura: o mesmo que as versões anteriores do Ergon instalam */
+export const MANIFEST_VERSION_UNSIGNED = 2;
 export interface Manifest {
-  manifest_version: 2; package_id: string; version: string; title: string; summary: string; creator_id: string; license: string;
+  manifest_version: 2 | 3; package_id: string; version: string; title: string; summary: string; creator_id: string; license: string;
   ergon: { min: string; max?: string }; kind: PackageKind; components: Component[]; preview?: string[]; tags?: string[];
   dependencies?: Array<{ package_id: string; range: string; optional?: boolean }>;
   capability_requirements?: { render2d?: number; max_particles?: number };
@@ -68,8 +84,21 @@ function centralDirectory(buf: Buffer): Array<{ name: string; comp: number; size
   return out;
 }
 
-const canonicalManifest = (m: Manifest) => { const { signature: _s, ...rest } = m; void _s; return JSON.stringify(rest, Object.keys(rest).sort()); };
-export const manifestDigest = (m: Manifest) => crypto.createHash('sha256').update(canonicalManifest(m)).digest();
+/** JSON canônico profundo: objetos com as chaves em ordem (em todos os níveis), listas na ordem delas, sem espaços.
+ *  Campo com valor undefined some (como no JSON); número não finito, função ou símbolo é recusado. */
+export function canonicalJson(v: unknown): string {
+  if (v === null || typeof v === 'boolean' || typeof v === 'string') return JSON.stringify(v);
+  if (typeof v === 'number') { if (!Number.isFinite(v)) throw new PackageError(['manifesto com número inválido']); return JSON.stringify(v); }
+  if (Array.isArray(v)) return `[${v.map((x) => (x === undefined ? 'null' : canonicalJson(x))).join(',')}]`;
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`).join(',')}}`;
+  }
+  throw new PackageError(['manifesto com valor que não é JSON']);
+}
+const SIGNING_PREFIX = 'ergon-package-v3\n';
+/** O que a assinatura cobre: o manifesto inteiro sem `signature` (inclusive `manifest_version` e cada componente). */
+export const manifestDigest = (m: Manifest) => { const { signature: _s, ...rest } = m; void _s; return crypto.createHash('sha256').update(SIGNING_PREFIX + canonicalJson(rest)).digest(); };
 
 function checkTarget(t: unknown, p: string, e: string[]) {
   const x = t as Record<string, unknown> | null;
@@ -136,7 +165,8 @@ export function validatePackage(buf: Buffer, officialKeys: Record<string, string
   let m: Manifest;
   try { m = JSON.parse(mf.read().toString('utf8')); } catch { throw new PackageError(['manifest.json ilegível']); }
   // ---- manifesto
-  if (m.manifest_version !== 2) e.push('manifest_version precisa ser 2');
+  if (!m || typeof m !== 'object' || Array.isArray(m)) throw new PackageError(['manifest.json ilegível']);
+  if (m.manifest_version !== 3 && m.manifest_version !== 2) e.push('manifest_version precisa ser 2 ou 3');
   if (!ID.test(String(m.package_id))) e.push('package_id no formato espaço.criador.nome');
   if (!SEMVER.test(String(m.version))) e.push('version semver (1.2.3)');
   if (typeof m.title !== 'string' || !m.title.trim() || m.title.length > 80) e.push('title obrigatório (até 80)');
@@ -171,12 +201,20 @@ export function validatePackage(buf: Buffer, officialKeys: Record<string, string
   if (!EXEC_KINDS.has(m.kind)) { if (!declared.has('data/package.json')) e.push('falta data/package.json'); else checkData(m.kind, data as Record<string, unknown>, e); }
   // ---- assinatura (opcional): oficial = verificado; sem assinatura = "não verificado"; assinatura inválida = recusa
   let verified = false; let keyId: string | null = null;
-  if (m.signature) {
-    const key = officialKeys[m.signature.key_id];
-    if (!key) e.push('assinatura de chave desconhecida');
+  // null, "" e outros valores falsos = sem assinatura (como na rc.25): só uma assinatura que existe conta
+  const signed = !!m.signature;
+  if (signed && m.manifest_version === 2) {
+    // a assinatura da versão 2 não cobria os arquivos: não vale mais (veja o comentário do topo)
+    e.push('pacote oficial de uma versão antiga do Ergon: a assinatura dele não vale mais. Instale a versão nova pela Loja (o que você já instalou continua funcionando)');
+  } else if (signed && m.manifest_version === 3) {
+    const sg = m.signature as Partial<NonNullable<Manifest['signature']>>;
+    if (typeof sg !== 'object' || Array.isArray(sg) || sg.alg !== 'ed25519' || typeof sg.sig !== 'string' || typeof sg.key_id !== 'string') e.push('assinatura em formato desconhecido');
+    else if (!Object.hasOwn(officialKeys, sg.key_id)) e.push('assinatura de chave desconhecida');
     else {
-      const ok = crypto.verify(null, manifestDigest(m), crypto.createPublicKey({ key: Buffer.from(key, 'base64'), format: 'der', type: 'spki' }), Buffer.from(m.signature.sig, 'base64'));
-      if (!ok) e.push('assinatura não confere (pacote alterado?)'); else { verified = true; keyId = m.signature.key_id; }
+      let ok = false;
+      try { ok = crypto.verify(null, manifestDigest(m), crypto.createPublicKey({ key: Buffer.from(officialKeys[sg.key_id], 'base64'), format: 'der', type: 'spki' }), Buffer.from(sg.sig, 'base64')); }
+      catch { ok = false; }
+      if (!ok) e.push('assinatura não confere (pacote alterado?)'); else { verified = true; keyId = sg.key_id; }
     }
   }
   if (e.length) throw new PackageError(e);
@@ -184,14 +222,38 @@ export function validatePackage(buf: Buffer, officialKeys: Record<string, string
 }
 
 /** Monta um .ergon (exportar o que a pessoa personalizou; também usado nos testes e na loja). */
-export async function buildPackage(m: Omit<Manifest, 'components' | 'signature' | 'manifest_version'>, data: PackageData | null, images: Record<string, Buffer> = {}, sign?: { keyId: string; privatePkcs8B64: string }): Promise<Buffer> {
+export async function buildPackage(m: Omit<Manifest, 'components' | 'signature' | 'manifest_version'>, data: PackageData | null, images: Record<string, Buffer> = {}, sign?: SignWith): Promise<Buffer> {
   const { writeZip } = await import('../lib/zip.ts');
   const files: Array<{ name: string; data: Buffer }> = [];
   const components: Component[] = [];
   const add = (path: string, bytes: Buffer, type: Component['type']) => { files.push({ name: path, data: bytes }); components.push({ path, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), size: bytes.length, type }); };
   if (data) add('data/package.json', Buffer.from(JSON.stringify(data)), 'application/json');
   for (const [p, b] of Object.entries(images)) add(p, b, p.endsWith('.webp') ? 'image/webp' : 'image/png');
-  const manifest: Manifest = { manifest_version: 2, ...m, components };
-  if (sign) manifest.signature = { alg: 'ed25519', key_id: sign.keyId, sig: crypto.sign(null, manifestDigest(manifest), crypto.createPrivateKey({ key: Buffer.from(sign.privatePkcs8B64, 'base64'), format: 'der', type: 'pkcs8' })).toString('base64') };
+  // formato 3 só para o assinado; sem assinatura sai no 2, que as versões anteriores instalam
+  const manifest: Manifest = { ...m, manifest_version: sign ? MANIFEST_VERSION : MANIFEST_VERSION_UNSIGNED, components };
+  if (sign) manifest.signature = signatureFor(manifest, sign);
   return writeZip([{ name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest, null, 2)) }, ...files]);
+}
+
+type SignWith = { keyId: string; privatePkcs8B64: string };
+const signatureFor = (m: Manifest, sign: SignWith): NonNullable<Manifest['signature']> =>
+  ({ alg: 'ed25519', key_id: sign.keyId, sig: crypto.sign(null, manifestDigest(m), crypto.createPrivateKey({ key: Buffer.from(sign.privatePkcs8B64, 'base64'), format: 'der', type: 'pkcs8' })).toString('base64') });
+
+/**
+ * Reassina um pacote que já existe no formato atual, sem mexer no conteúdo: os mesmos arquivos, o mesmo manifesto
+ * (só sobe manifest_version e troca a assinatura). Antes de assinar, o pacote passa pela validação inteira sem a
+ * assinatura antiga (hash e tamanho de cada arquivo conferidos), então só se reassina o que confere com o manifesto.
+ */
+export async function resignPackage(buf: Buffer, sign: SignWith): Promise<Buffer> {
+  const { writeZip } = await import('../lib/zip.ts');
+  const files = readZip(buf);
+  const mf = files.get('manifest.json');
+  if (!mf) throw new PackageError(['falta manifest.json na raiz']);
+  const { signature: _s, ...rest } = JSON.parse(mf.read().toString('utf8')) as Manifest; void _s;
+  const manifest: Manifest = { ...rest, manifest_version: MANIFEST_VERSION };
+  const others = [...files.entries()].filter(([n]) => n !== 'manifest.json' && !n.endsWith('/')).map(([name, e]) => ({ name, data: e.read() }));
+  const zip = (m: Manifest) => writeZip([{ name: 'manifest.json', data: Buffer.from(JSON.stringify(m, null, 2)) }, ...others]);
+  validatePackage(zip(manifest));
+  manifest.signature = signatureFor(manifest, sign);
+  return zip(manifest);
 }

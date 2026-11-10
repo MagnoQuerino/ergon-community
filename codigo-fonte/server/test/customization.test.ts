@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { Db } from '../src/db/db.ts';
+import { readLang, readPrefs } from '../src/services/prefs.ts';
 import { parseChatCommand, parseProposals } from '../src/services/proposals.ts';
 import { stripControl } from '../src/services/teamwork.ts';
 import { ensureSectors } from '../src/services/sectors.ts';
@@ -8,7 +12,7 @@ import { createAgent, ensureCoordinator } from '../src/services/capacity.ts';
 import { instructionsFor } from '../src/services/runs.ts';
 import { CHARACTERS } from '../src/services/characters.ts';
 import type { HermesClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
-import { allAgents, drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, drain, harness, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
 
 /** Motor falso: devolve o que o teste mandar. */
 class FakeMotor implements HermesClient {
@@ -246,6 +250,49 @@ describe('boas-vindas: a escolha define a equipe de partida', () => {
     assert.equal((await req(h, 'GET', '/api/me', s)).json.onboarding, 'done');
     h.db.run("DELETE FROM workspace_settings WHERE workspace_id = ? AND key = 'onboarding'", s.workspaceId);
     assert.equal((await req(h, 'GET', '/api/me', s)).json.onboarding, 'done', 'workspaces de antes do onboarding não são interrompidos');
+  });
+
+  test('preferências: o idioma da tela é da pessoa (só português ou inglês) e não some com as outras mudanças', async () => {
+    assert.equal((await req(h, 'GET', '/api/me', s)).json.prefs.lang, undefined, 'sem escolha: vale o do navegador');
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { lang: 'en' })).json.lang, 'en');
+    assert.equal((await req(h, 'GET', '/api/me', s)).json.prefs.lang, 'en');
+    // mudar outra preferência não apaga a escolha do idioma
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { cityCalm: true })).json.lang, 'en');
+    for (const ruim of ['es', 'pt', 'EN', 'pt-br', '', 1, null]) {
+      assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { lang: ruim })).status, 400, `idioma recusado: ${String(ruim)}`);
+    }
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { lang: 'pt-BR', cityCalm: false })).json.lang, 'pt-BR');
+    assert.equal((await req(h, 'GET', '/api/me', s)).json.prefs.lang, 'pt-BR');
+    // um valor estranho gravado direto no banco não chega à tela
+    h.db.run("UPDATE users SET lang = 'xx' WHERE id = ?", s.userId);
+    assert.equal((await req(h, 'GET', '/api/me', s)).json.prefs.lang, undefined);
+    // o idioma é da pessoa, não do workspace: entrar em outro workspace dela (ou criar um) não troca a língua
+    const primeiro = s.workspaceId;
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { lang: 'en', cityCalm: true })).json.lang, 'en');
+    const novo = await req(h, 'POST', '/api/workspaces', s, { name: 'Outro' });
+    assert.equal(novo.status, 201);
+    const noNovo = (await req(h, 'GET', '/api/me', s)).json;
+    assert.equal(noNovo.prefs.lang, 'en', 'a escolha vale no workspace novo');
+    assert.equal(noNovo.prefs.cityCalm, false, 'as outras preferências continuam sendo de cada workspace');
+    assert.equal((await req(h, 'PUT', '/api/me/prefs', s, { lang: 'pt-BR' })).json.lang, 'pt-BR');
+    assert.equal(readPrefs(h.db, primeiro, s.userId).lang, 'pt-BR', 'a troca feita no novo vale no primeiro');
+    assert.equal(readPrefs(h.db, primeiro, s.userId).cityCalm, true);
+    assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM workspace_settings WHERE key = ? AND value LIKE '%\"lang\"%'", `prefs:${s.userId}`)!.n, 0,
+      'o idioma não fica guardado no workspace');
+  });
+
+  test('quem já tinha conta antes desta versão continua em português quando o inglês for liberado', () => {
+    const migrations = fs.readdirSync(path.join(import.meta.dirname, '..', 'src', 'db', 'migrations')).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
+    const idx = migrations.indexOf('0040_idioma_da_pessoa.sql');
+    assert.ok(idx > 0);
+    const db = new Db(path.join(tmpDir(), 'db', 'ergon.sqlite'));
+    db.migrate({ until: migrations[idx - 1] });
+    db.run("INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES ('usr_antigo', 'antigo', 'Antigo', 'x', ?)", new Date().toISOString());
+    db.migrate();
+    assert.equal(readLang(db, 'usr_antigo'), 'pt-BR', 'conta de antes: português, mesmo com o navegador em inglês');
+    db.run("INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES ('usr_novo', 'novo', 'Novo', 'x', ?)", new Date().toISOString());
+    assert.equal(readLang(db, 'usr_novo'), undefined, 'conta nova: sem escolha (vale o idioma do navegador)');
+    db.close();
   });
 });
 

@@ -1,7 +1,8 @@
 import type { RecentConversation } from './types.ts';
 
 export type Section = 'fixadas' | 'precisa' | 'recentes';
-export const SECTION_LABEL: Record<Section, string> = { fixadas: 'Fixadas', precisa: 'Precisa de você', recentes: 'Recentes' };
+/** O nome de cada grupo da lista: a chave do dicionário, traduzida na hora de mostrar (t(SECTION_LABEL[s])). */
+export const SECTION_LABEL: { readonly [S in Section]: `conversas.secao.${S}` } = { fixadas: 'conversas.secao.fixadas', precisa: 'conversas.secao.precisa', recentes: 'conversas.secao.recentes' };
 
 /**
  * Um contato na lista de conversas: o colega, as conversas com ele (os assuntos), o que você ainda não leu, se alguma

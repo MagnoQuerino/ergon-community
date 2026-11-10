@@ -77,6 +77,12 @@ export interface UpdateState { latest: Release | null; releases: ReleaseItem[]; 
 const VERSION_TAG = /^v?\d+\.\d+\.\d+(-[\w.]+)?$/;
 
 /**
+ * As notas sem os comentários HTML: o campo de segurança obrigatória (<!-- seguranca: motivo -->, scripts/distribuicao/
+ * manifesto.mjs) e outras marcas para a publicação não aparecem na tela.
+ */
+export const semComentarios = (s: string): string => (s.includes('<!--') ? s.replace(/<!--[\s\S]*?-->/g, '').replace(/\n{3,}/g, '\n\n').trim() : s);
+
+/**
  * Aviso de versão nova: consulta a página de versões publicada (ERGON_UPDATE_URL, ex.: latest.json da página de
  * versões do GitHub) só quando a interface pede — ao abrir o Ergon, se a pessoa não desligou o aviso, ou no botão
  * "Verificar agora" —, no máximo uma vez por minuto. Pela API de versões do GitHub vêm também as pré-versões (quem
@@ -127,7 +133,7 @@ export class UpdateCheck {
         // o pacote assinado de cada versão fica anexado a ela, com o nome do canal (o mesmo que esta instalação segue)
         const assets = Array.isArray(x.assets) ? x.assets.map((a) => (typeof a?.name === 'string' ? a.name : '')) : [];
         return { version, url: typeof x.html_url === 'string' && x.html_url.startsWith('https://') ? x.html_url : null, publishedAt: x.published_at ?? null, prerelease: !!x.prerelease,
-          rollback: rollbackOf(version, assets, teste ? 'teste' : 'estavel'), notes: typeof x.body === 'string' ? x.body.slice(0, 2000) : null };
+          rollback: rollbackOf(version, assets, teste ? 'teste' : 'estavel'), notes: typeof x.body === 'string' ? semComentarios(x.body).slice(0, 2000) : null };
       })
       .sort((a, b) => (newer(a.version, b.version) ? -1 : newer(b.version, a.version) ? 1 : 0));
     const top = items[0];
@@ -143,6 +149,6 @@ export class UpdateCheck {
     if (!r.ok) return null;
     const j = (await r.json()) as Partial<Release> & { published_at?: string };
     if (typeof j.version !== 'string' || !VERSION_TAG.test(j.version)) return null;
-    return { version: j.version.replace(/^v/, ''), notes: typeof j.notes === 'string' ? j.notes.slice(0, 2000) : null, url: typeof j.url === 'string' && j.url.startsWith('https://') ? j.url : null, publishedAt: j.publishedAt ?? j.published_at ?? null };
+    return { version: j.version.replace(/^v/, ''), notes: typeof j.notes === 'string' ? semComentarios(j.notes).slice(0, 2000) : null, url: typeof j.url === 'string' && j.url.startsWith('https://') ? j.url : null, publishedAt: j.publishedAt ?? j.published_at ?? null };
   }
 }

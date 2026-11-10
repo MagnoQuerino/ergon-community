@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { fmtDataHora, fmtHora, tn, useT } from '../i18n/index.ts';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
 import { dragHasFiles, inlinePreview, isImage, kindOf, size } from '../lib/files.ts';
 import { useLiveEvent, useResource } from '../lib/live.ts';
@@ -17,21 +18,14 @@ import { Markdown } from './Markdown.tsx';
 const DRAFTS = new Map<string, string>();
 
 /** Sugestões da conversa vazia, no jeito de cada colega (clicar põe no campo; nada de comando para decorar). */
-const SUGGEST: Record<string, string[]> = {
-  aristoteles: ['O que a equipe está fazendo agora?', 'Preciso de um contrato de prestação de serviço', 'Organiza os meus Documentos por cliente'],
-  hipatia: ['Pesquisa os principais concorrentes de ', 'Resume este documento para mim', 'O que já sabemos sobre '],
-  herodoto: ['Escreve um e-mail de cobrança educado para ', 'Revisa este texto e deixa mais claro', 'Faz um post curto sobre '],
-  arquimedes: ['Analisa esta planilha de vendas', 'Monta um orçamento para ', 'Calcula a margem de '],
-  fidias: ['Monta uma apresentação sobre ', 'Ideias de logo para ', 'Cria uma imagem de '],
-  socrates: ['Critica este plano sem dó', 'Onde este texto está fraco?', 'Faz as perguntas difíceis sobre '],
-  platao: ['Me ajuda a pensar a estratégia de ', 'Qual é a ideia central por trás de ', 'Organiza minhas ideias sobre '],
-  hesiodo: ['O que vence esta semana?', 'Me lembra amanhã às 9h de ', 'Monta a pauta da reunião de '],
-  diogenes: ['Resolve isto para mim: ', 'Faz a lista do que comprar para ', 'Me dá o passo a passo para '],
-  aspasia: ['Responde este cliente: ', 'Escreve uma mensagem de WhatsApp para ', 'Como respondo esta reclamação?'],
-  euclides: ['Confere este documento', 'Tem erro nesta planilha?', 'Este contrato está completo?'],
-  hipodamo: ['Planeja o projeto de ', 'Monta um cronograma para ', 'Quais são as etapas para '],
+const COLEGAS_COM_SUGESTAO = ['aristoteles', 'hipatia', 'herodoto', 'arquimedes', 'fidias', 'socrates', 'platao', 'hesiodo', 'diogenes', 'aspasia', 'euclides', 'hipodamo'] as const;
+type ComSugestao = (typeof COLEGAS_COM_SUGESTAO)[number] | 'outro';
+const temSugestao = (k: string | null): k is (typeof COLEGAS_COM_SUGESTAO)[number] => (COLEGAS_COM_SUGESTAO as readonly string[]).includes(k ?? '');
+/** as chaves das três sugestões do colega (as que terminam em espaço continuam no campo) */
+const suggestionsFor = (a: { char_key: string | null }): Array<`conversas.sugestao.${ComSugestao}${1 | 2 | 3}`> => {
+  const k: ComSugestao = temSugestao(a.char_key) ? a.char_key : 'outro';
+  return [`conversas.sugestao.${k}1`, `conversas.sugestao.${k}2`, `conversas.sugestao.${k}3`];
 };
-const suggestionsFor = (a: { char_key: string | null }) => SUGGEST[a.char_key ?? ''] ?? ['Me ajuda com ', 'Resume este arquivo', 'O que você faz de melhor?'];
 
 /**
  * O colega da conversa: a linha leve que quem abriu já tem (nome, papel, setor, cor) basta para conversar; com o
@@ -42,7 +36,11 @@ export type ChatAgent = Pick<Agent, 'id' | 'name' | 'role' | 'color' | 'sector_n
 /** Corta um texto em uma linha (citação, marcadas). */
 const clip1 = (t: string, n: number) => { const x = t.replace(/\s+/g, ' ').trim(); return x.length > n ? `${x.slice(0, n - 1)}…` : x; };
 
-const CARD_STATE = (c: { completed: number; work_state: string | null }) => (Number(c.completed) ? 'concluído' : c.work_state === 'aguardando_aprovacao' ? 'com você' : 'em andamento');
+/** O estado do card que saiu da conversa (a chave do rótulo; a classe da cor, em cardStateClass). */
+type CardState = 'concluido' | 'comVoce' | 'andamento';
+const CARD_STATE = (c: { completed: number; work_state: string | null }): CardState => (Number(c.completed) ? 'concluido' : c.work_state === 'aguardando_aprovacao' ? 'comVoce' : 'andamento');
+// as classes de cor do estilo continuam com o nome de antes
+const cardStateClass = (s: CardState) => `msg__card-state msg__card-state--${s === 'concluido' ? 'concluído' : s === 'comVoce' ? 'com-você' : 'em-andamento'}`; // i18n-ok: nome de classe do estilo
 
 /** Arquivo subindo ou pronto para ir junto da mensagem. */
 interface Pending { key: string; file: File; progress: number; art: Attachment | null; error: string | null; abort: AbortController }
@@ -55,6 +53,7 @@ function systemKind(text: string): { kind: 'fail' | 'stop' | 'docs' | 'note'; te
   const undo = text.match(/\{\{desfazer:(aud_[a-f0-9]{32})\}\}/)?.[1] ?? null;
   const clean = text.replace(/\s*\{\{desfazer:aud_[a-f0-9]{32}\}\}/, '').replace(/^Sistema — /, '');
   if (/^Não deu certo desta vez: /.test(clean)) return { kind: 'fail', text: clean, undo: null };
+  // i18n-ok: reconhece a nota que o servidor escreve (em português); a nota em si vem pronta de lá
   if (clean === 'Você interrompeu.' || /^Parou: /.test(clean)) return { kind: 'stop', text: clean, undo: null };
   if (/^Documentos — /.test(clean)) return { kind: 'docs', text: clean.replace(/^Documentos — /, ''), undo };
   return { kind: 'note', text: clean, undo: null };
@@ -69,29 +68,33 @@ function download(name: string, mime: string, body: string) {
 
 /** Ficha de um arquivo da mensagem (imagem com miniatura; o resto com o tipo); clicar abre ou baixa. */
 function FileChip({ f, progress, error, onRemove }: { f: { filename: string; mime: string; size: number; id?: string }; progress?: number; error?: string | null; onRemove?: () => void }) {
+  const t = useT();
   const href = f.id ? `/api/artifacts/${f.id}/download${inlinePreview(f.mime) ? '?inline=1' : ''}` : undefined;
   const body = (
     <>
       {f.id && isImage(f.mime) ? <img src={`/api/artifacts/${f.id}/download?inline=1`} alt="" loading="lazy" /> : <span className="fchip__icon"><Icon name={f.mime.startsWith('image/') ? 'image' : 'file'} size={16} /></span>}
-      <span className="fchip__txt"><b title={f.filename}>{f.filename}</b><small>{error ? error : progress !== undefined && progress < 1 && !f.id ? `subindo… ${Math.round(progress * 100)}%` : `${kindOf(f.filename, f.mime)} · ${size(f.size)}`}</small></span>
+      <span className="fchip__txt"><b title={f.filename}>{f.filename}</b><small>{error ? error : progress !== undefined && progress < 1 && !f.id ? t('conversas.arquivo.subindo', { pct: Math.round(progress * 100) }) : `${kindOf(f.filename, f.mime)} · ${size(f.size)}`}</small></span>
       {progress !== undefined && !f.id && !error && <span className="fchip__bar" style={{ width: `${Math.round(progress * 100)}%` }} />}
     </>
   );
   return (
     <span className={`fchip ${error ? 'fchip--err' : ''}`}>
-      {href ? <a className="fchip__main" href={href} target="_blank" rel="noreferrer" title="Abrir (também em Documentos)">{body}</a> : <span className="fchip__main">{body}</span>}
-      {onRemove && <button type="button" className="fchip__x" onClick={onRemove} aria-label={`Tirar ${f.filename}`}><Icon name="x" size={12} /></button>}
+      {href ? <a className="fchip__main" href={href} target="_blank" rel="noreferrer" title={t('conversas.arquivo.abrir')}>{body}</a> : <span className="fchip__main">{body}</span>}
+      {onRemove && <button type="button" className="fchip__x" onClick={onRemove} aria-label={t('conversas.arquivo.tirar', { nome: f.filename })}><Icon name="x" size={12} /></button>}
     </span>
   );
 }
 
 /** "Platão está escrevendo…" (ou o que ele está fazendo agora), com as reticências animadas. */
 function Typing({ who, activity, status }: { who: string; activity: string | null; status: string | null }) {
-  const what = status === 'queued' ? 'vai começar já já' : status === 'waiting_user' ? 'esperando você' : activity ? activity : 'está escrevendo';
+  const t = useT();
+  // activity: o que o colega faz agora, como o servidor descreve
+  const what = status === 'queued' ? t('conversas.digitando.fila', { nome: who }) : status === 'waiting_user' ? t('conversas.digitando.esperando', { nome: who })
+    : activity ? t('conversas.digitando.atividade', { nome: who, atividade: activity }) : t('conversas.digitando.escrevendo', { nome: who });
   return (
     <div className="msg msg--agent msg--typing" aria-live="polite">
       <span className="typing" aria-hidden="true"><i /><i /><i /></span>
-      <span className="typing__txt">{who} {what}…</span>
+      <span className="typing__txt">{what}</span>
     </div>
   );
 }
@@ -105,6 +108,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   /** outro assunto aberto daqui (bifurcar) */
   onOpenConversation?: (agentId: string, conversationId: string) => void;
 }) {
+  const t = useT();
   const convs = useResource<Conversation[]>(`/api/conversations?agentId=${agent.id}`, ['messages.changed']);
   const [convId, setConvId] = useState<string | null>(conversationId ?? null);
   // rascunho por agente, na memória desta aba: fechar a janela ou trocar de agente não apaga o que você digitou
@@ -142,7 +146,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       try { await api.post(`/api/proposals/${p.id}`, { decision }); } catch (e) { failed.push(`${p.summary.slice(0, 60)} (${errMsg(e)})`); }
     }
     setBatchBusy(false); props.reload();
-    if (failed.length) setErr(`${failed.length === 1 ? 'Uma não foi aplicada' : `${failed.length} não foram aplicadas`}: ${failed.join(' · ')}`);
+    if (failed.length) setErr(t('conversas.proposta.falharam', { n: failed.length, lista: failed.join(' · ') }));
   };
 
   const picked = useRef(!!conversationId);
@@ -158,7 +162,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
 
   // abrir a conversa (ou trocar de conversa) já deixa o cursor no campo: é só escrever
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { const t = window.setTimeout(() => input.current?.focus({ preventScroll: true }), 60); return () => window.clearTimeout(t); }, [convId, agent.id]);
+  useEffect(() => { const h = window.setTimeout(() => input.current?.focus({ preventScroll: true }), 60); return () => window.clearTimeout(h); }, [convId, agent.id]);
   // o campo cresce com o texto (até um limite) e volta ao tamanho de uma linha depois de enviar
   useLayoutEffect(() => {
     const el = input.current; if (!el) return;
@@ -267,25 +271,25 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const pending = useRef<{ id: string; text: string } | null>(null);
   /** Enter envia; com o colega trabalhando, a mensagem entra na fila e vai quando ele terminar (editável até ir). */
   async function send() {
-    const t = text.trim();
+    const txt = text.trim();
     const ready = files.filter((f) => f.art).map((f) => f.art!);
-    if (!t && !ready.length && !uploading) return;
+    if (!txt && !ready.length && !uploading) return;
     if (semIa) { setAvisoIa(true); ai.reload(); return; }
     // arquivo ainda subindo: a mensagem sai sozinha quando ele terminar (sem botão esperando)
-    if (uploading) { setSendWhenReady(true); setHint('Mando assim que os arquivos terminarem de subir.'); return; }
+    if (uploading) { setSendWhenReady(true); setHint(t('conversas.campo.aguardandoArquivos')); return; }
     setErr(null); setHint(null); setSendWhenReady(false);
     // colega trabalhando (ou a anterior ainda indo): esta entra na fila
     const queue = busy || optimistic.some((o) => !o.serverId);
     const key = requestId();
-    setOptimistic((cur) => [...cur, { key, text: t, files: ready, serverId: null, queued: queue }]);
+    setOptimistic((cur) => [...cur, { key, text: txt, files: ready, serverId: null, queued: queue }]);
     // o campo limpa na hora: dá para escrever a próxima enquanto esta vai; se não for, o texto volta
     setText(''); setFiles([]);
-    const restore = () => setTextRaw((cur) => { const v = cur ? cur : t; DRAFTS.set(keyRef.current, v); return v; });
+    const restore = () => setTextRaw((cur) => { const v = cur ? cur : txt; DRAFTS.set(keyRef.current, v); return v; });
     try {
       const id = await ensureConv();
       // mesmo identificador ao reenviar após falha de rede: o servidor não duplica
-      if (!pending.current || pending.current.text !== t) pending.current = { id: requestId(), text: t };
-      const body = { text: t, clientRequestId: pending.current.id, ...(ready.length ? { attachments: ready.map((f) => f.id) } : {}), ...(replying ? { replyTo: replying.id } : {}) };
+      if (!pending.current || pending.current.text !== txt) pending.current = { id: requestId(), text: txt };
+      const body = { text: txt, clientRequestId: pending.current.id, ...(ready.length ? { attachments: ready.map((f) => f.id) } : {}), ...(replying ? { replyTo: replying.id } : {}) };
       setReplying(null);
       const post = (q: boolean) => api.post<{ messageId: string }>(`/api/conversations/${id}/messages`, { ...body, ...(q ? { queue: true } : {}) });
       // a tela ainda não sabia que ele começou a responder: a mensagem vai para a fila em vez de voltar
@@ -325,7 +329,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     try { await api.post(`/api/conversations/${convId}/retry`); msgs.reload(); } catch (e) { setErr(errMsg(e)); }
   }
   async function undoDocs(id: string) {
-    try { await api.post(`/api/documents/undo/${id}`); setHint('Desfeito.'); } catch (e) { setErr(errMsg(e)); }
+    try { await api.post(`/api/documents/undo/${id}`); setHint(t('conversas.acao.desfeito')); } catch (e) { setErr(errMsg(e)); }
   }
 
   // fila: editar ou tirar o que ainda não foi
@@ -338,10 +342,10 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
 
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (m: Message) => {
-    try { await navigator.clipboard.writeText(plainText(stripControl(m.content))); setCopied(m.id); window.setTimeout(() => setCopied(null), 1600); } catch { setErr('Não deu para copiar aqui; selecione o texto e use Ctrl+C.'); }
+    try { await navigator.clipboard.writeText(plainText(stripControl(m.content))); setCopied(m.id); window.setTimeout(() => setCopied(null), 1600); } catch { setErr(t('conversas.acao.naoCopiou')); }
   };
-  const title = convs.data?.find((c) => c.id === convId)?.title ?? `Conversa com ${agent.name}`;
-  const saveDoc = (m: Message) => download(`${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60).trim() || 'entrega'}.doc`, 'application/msword', toWordHtml(stripControl(m.content), title));
+  const title = convs.data?.find((c) => c.id === convId)?.title ?? t('conversas.conversa.com', { nome: agent.name });
+  const saveDoc = (m: Message) => download(`${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60).trim() || t('conversas.arquivo.entrega')}.doc`, 'application/msword', toWordHtml(stripControl(m.content), title));
 
   // o assunto atual e a última leitura dele (o divisor "Novas mensagens" fica onde você parou)
   const conv = convs.data?.find((c) => c.id === convId) ?? null;
@@ -362,10 +366,10 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const [revising, setRevising] = useState<{ taskId: string; number: number; text: string } | null>(null);
   const sendRevise = async () => {
     if (!revising || revising.text.trim().length < 3) return;
-    try { await api.post(`/api/tasks/${revising.taskId}/revise`, { text: revising.text.trim() }); setRevising(null); msgs.reload(); props.reload(); setHint(`O card #${revising.number} voltou para a equipe com o que você quer mudar.`); }
+    try { await api.post(`/api/tasks/${revising.taskId}/revise`, { text: revising.text.trim() }); setRevising(null); msgs.reload(); props.reload(); setHint(t('conversas.card.voltou', { numero: revising.number })); }
     catch (e) { setErr(errMsg(e)); }
   };
-  const copyMine = async (m: Message) => { try { await navigator.clipboard.writeText(m.content); setCopied(m.id); window.setTimeout(() => setCopied(null), 1600); } catch { setErr('Não deu para copiar aqui; selecione o texto e use Ctrl+C.'); } };
+  const copyMine = async (m: Message) => { try { await navigator.clipboard.writeText(m.content); setCopied(m.id); window.setTimeout(() => setCopied(null), 1600); } catch { setErr(t('conversas.acao.naoCopiou')); } };
 
   // ir até uma mensagem (busca, marcadas, citação): rola e destaca
   const [flash, setFlash] = useState<string | null>(null);
@@ -383,7 +387,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const [q, setQ] = useState('');
   const [hitAt, setHitAt] = useState(0);
   const folded = (x: string) => x.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-  const hits = useMemo(() => { const t = folded(q.trim()); return t.length < 2 ? [] : list.filter((m) => m.role !== 'system' && folded(m.content).includes(t)).map((m) => m.id); }, [q, list]);
+  const hits = useMemo(() => { const alvo = folded(q.trim()); return alvo.length < 2 ? [] : list.filter((m) => m.role !== 'system' && folded(m.content).includes(alvo)).map((m) => m.id); }, [q, list]);
   useEffect(() => { setHitAt(hits.length ? hits.length - 1 : 0); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (panel === 'busca' && hits[hitAt]) goTo(hits[hitAt]); }, [hitAt, hits.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
   const marks = useResource<Array<{ id: string; role: string; content: string; created_at: string }>>(panel === 'marcadas' && convId ? `/api/conversations/${convId}/marks` : null, ['messages.changed']);
@@ -407,7 +411,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   };
 
   return (
-    <section className={`chat ${compact ? 'chat--compact' : ''} ${embedded ? 'chat--embedded' : ''} ${drag ? 'chat--drag' : ''}`} aria-label={`Conversa com ${agent.name}`}
+    <section className={`chat ${compact ? 'chat--compact' : ''} ${embedded ? 'chat--embedded' : ''} ${drag ? 'chat--drag' : ''}`} aria-label={t('conversas.conversa.com', { nome: agent.name })}
       onDragEnter={(e) => { if (!dragHasFiles(e)) return; e.preventDefault(); dragDepth.current++; setDrag(true); }}
       onDragOver={(e) => { if (dragHasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
       onDragLeave={() => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDrag(false); }}
@@ -416,50 +420,50 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         <span className="avatar" style={{ background: agent.color }} aria-hidden="true">{agent.name[0]}</span>
         <div className="chat__who">
           <strong>{agent.name}</strong>
-          <span>{busy ? <span className="chat__status">trabalhando…</span> : `${agent.role} · ${agent.sector_name}`}</span>
+          <span>{busy ? <span className="chat__status">{t('conversas.conversa.trabalhando')}</span> : `${agent.role} · ${agent.sector_name}`}</span>
         </div>
-        {onClose && <button className="icon-btn" onClick={onClose} aria-label="Fechar conversa"><Icon name="x" /></button>}
+        {onClose && <button className="icon-btn" onClick={onClose} aria-label={t('conversas.conversa.fechar')}><Icon name="x" /></button>}
       </header>}
       {agent.char_key && !embedded && agent.skills && agent.tools && (
         <details className="chat__profile">
-          <summary>{agent.bio ? agent.bio.split(/(?<=[.!?])\s/)[0] : 'Perfil'} <span className="muted">perfil</span></summary>
+          <summary>{agent.bio ? agent.bio.split(/(?<=[.!?])\s/)[0] : t('conversas.conversa.perfil')} <span className="muted">{t('conversas.conversa.perfilCurto')}</span></summary>
           <AgentProfile agent={{ bio: agent.bio ?? null, skills: agent.skills, tools: agent.tools, model: agent.model ?? null, model_hint: agent.model_hint ?? null }} />
         </details>
       )}
       {!hidePicker && <div className="chat__convs">
-        <select value={convId ?? ''} onChange={(e) => setConvId(e.target.value || null)} aria-label="Conversa">
-          {(!convs.data?.length || !convId) && <option value="">{convs.data?.length ? 'Nova conversa' : 'Nenhuma conversa'}</option>}
-          {convs.data?.map((c) => <option key={c.id} value={c.id}>{c.title} · {new Date(c.last_at ?? c.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</option>)}
+        <select value={convId ?? ''} onChange={(e) => setConvId(e.target.value || null)} aria-label={t('conversas.conversa.seletor')}>
+          {(!convs.data?.length || !convId) && <option value="">{convs.data?.length ? t('conversas.conversa.nova') : t('conversas.conversa.nenhuma')}</option>}
+          {convs.data?.map((c) => <option key={c.id} value={c.id}>{c.title} · {fmtDataHora(c.last_at ?? c.created_at)}</option>)}
         </select>
-        <button className="btn btn--ghost" onClick={async () => { setErr(null); try { const c = await api.post<Conversation>('/api/conversations', { agentId: agent.id }); setConvId(c.id); picked.current = true; convs.reload(); } catch (e) { setErr(errMsg(e)); } }}><Icon name="plus" size={14} /> Nova</button>
+        <button className="btn btn--ghost" onClick={async () => { setErr(null); try { const c = await api.post<Conversation>('/api/conversations', { agentId: agent.id }); setConvId(c.id); picked.current = true; convs.reload(); } catch (e) { setErr(errMsg(e)); } }}><Icon name="plus" size={14} /> {t('conversas.conversa.novaCurto')}</button>
       </div>}
       {convId && (
         <div className="chat__tools">
           {panel === 'busca' ? (
             <div className="chat__find" role="search">
               <Icon name="search" size={14} />
-              <input ref={searchInput} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nesta conversa" aria-label="Buscar nesta conversa"
+              <input ref={searchInput} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('conversas.ferramentas.buscar')} aria-label={t('conversas.ferramentas.buscar')}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (hits.length) setHitAt((i) => (e.shiftKey ? (i + 1) % hits.length : (i - 1 + hits.length) % hits.length)); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPanel(null); setQ(''); } }} />
-              <span className="muted small">{q.trim().length < 2 ? '' : hits.length ? `${hits.length - hitAt} de ${hits.length}` : 'nada'}</span>
-              <button type="button" className="icon-btn" disabled={!hits.length} onClick={() => setHitAt((i) => (i - 1 + hits.length) % hits.length)} aria-label="Anterior (Enter)" title="Anterior (Enter)"><Icon name="chevron-up" size={14} /></button>
-              <button type="button" className="icon-btn" disabled={!hits.length} onClick={() => setHitAt((i) => (i + 1) % hits.length)} aria-label="Próxima (Shift+Enter)" title="Próxima (Shift+Enter)"><Icon name="chevron" size={14} /></button>
-              <button type="button" className="icon-btn" onClick={() => { setPanel(null); setQ(''); }} aria-label="Fechar a busca"><Icon name="x" size={14} /></button>
+              <span className="muted small">{q.trim().length < 2 ? '' : hits.length ? t('conversas.ferramentas.posicao', { atual: hits.length - hitAt, total: hits.length }) : t('conversas.ferramentas.nada')}</span>
+              <button type="button" className="icon-btn" disabled={!hits.length} onClick={() => setHitAt((i) => (i - 1 + hits.length) % hits.length)} aria-label={t('conversas.ferramentas.anterior')} title={t('conversas.ferramentas.anterior')}><Icon name="chevron-up" size={14} /></button>
+              <button type="button" className="icon-btn" disabled={!hits.length} onClick={() => setHitAt((i) => (i + 1) % hits.length)} aria-label={t('conversas.ferramentas.proxima')} title={t('conversas.ferramentas.proxima')}><Icon name="chevron" size={14} /></button>
+              <button type="button" className="icon-btn" onClick={() => { setPanel(null); setQ(''); }} aria-label={t('conversas.ferramentas.fecharBusca')}><Icon name="x" size={14} /></button>
             </div>
           ) : <span className="grow" />}
-          {panel !== 'busca' && <button type="button" className="icon-btn" onClick={() => { setPanel('busca'); window.setTimeout(() => searchInput.current?.focus(), 30); }} title="Buscar nesta conversa (Ctrl+F)" aria-label="Buscar nesta conversa"><Icon name="search" size={15} /></button>}
-          <button type="button" className={`icon-btn ${panel === 'marcadas' ? 'is-on' : ''}`} onClick={() => setPanel(panel === 'marcadas' ? null : 'marcadas')} title="Mensagens marcadas" aria-label="Mensagens marcadas"><Icon name="pin" size={15} /></button>
-          <button type="button" className={`icon-btn ${panel === 'midia' ? 'is-on' : ''}`} onClick={() => setPanel(panel === 'midia' ? null : 'midia')} title="Arquivos e links desta conversa" aria-label="Arquivos e links desta conversa"><Icon name="clip" size={15} /></button>
+          {panel !== 'busca' && <button type="button" className="icon-btn" onClick={() => { setPanel('busca'); window.setTimeout(() => searchInput.current?.focus(), 30); }} title={t('conversas.ferramentas.buscarDica')} aria-label={t('conversas.ferramentas.buscar')}><Icon name="search" size={15} /></button>}
+          <button type="button" className={`icon-btn ${panel === 'marcadas' ? 'is-on' : ''}`} onClick={() => setPanel(panel === 'marcadas' ? null : 'marcadas')} title={t('conversas.ferramentas.marcadas')} aria-label={t('conversas.ferramentas.marcadas')}><Icon name="pin" size={15} /></button>
+          <button type="button" className={`icon-btn ${panel === 'midia' ? 'is-on' : ''}`} onClick={() => setPanel(panel === 'midia' ? null : 'midia')} title={t('conversas.ferramentas.midiaDica')} aria-label={t('conversas.ferramentas.midiaDica')}><Icon name="clip" size={15} /></button>
         </div>
       )}
       {panel === 'marcadas' && (
-        <div className="chat__panel" aria-label="Mensagens marcadas">
-          {!marks.data?.length ? <p className="muted small">Nenhuma mensagem marcada. Use “Marcar” numa mensagem para achar depois.</p>
-            : marks.data.map((m) => <button key={m.id} type="button" className="chat__panel-item" onClick={() => goTo(m.id)}><b>{m.role === 'user' ? 'Você' : agent.name}</b><span>{m.content}</span><time className="muted small">{new Date(m.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</time></button>)}
+        <div className="chat__panel" aria-label={t('conversas.ferramentas.marcadas')}>
+          {!marks.data?.length ? <p className="muted small">{t('conversas.ferramentas.nenhumaMarcada')}</p>
+            : marks.data.map((m) => <button key={m.id} type="button" className="chat__panel-item" onClick={() => goTo(m.id)}><b>{m.role === 'user' ? t('conversas.conversa.voce') : agent.name}</b><span>{m.content}</span><time className="muted small">{fmtDataHora(m.created_at)}</time></button>)}
         </div>
       )}
       {panel === 'midia' && (
-        <div className="chat__panel" aria-label="Arquivos e links">
-          {!media.data?.files.length && !media.data?.links.length && <p className="muted small">Ainda não há arquivos nem links nesta conversa.</p>}
+        <div className="chat__panel" aria-label={t('conversas.ferramentas.midia')}>
+          {!media.data?.files.length && !media.data?.links.length && <p className="muted small">{t('conversas.ferramentas.semMidia')}</p>}
           {!!media.data?.files.length && <div className="msg__files">{media.data.files.map((x) => <FileChip key={x.id} f={x} />)}</div>}
           {media.data?.links.map((l) => <a key={`${l.message_id}-${l.url}`} className="chat__panel-item" href={l.url} target="_blank" rel="noreferrer noopener"><Icon name="compass" size={13} /><span>{l.url}</span></a>)}
         </div>
@@ -467,9 +471,9 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       <div className="chat__msgs" role="log" aria-live="polite" ref={box} onScroll={onScroll}>
         {!list.length && !shownOptimistic.length && (
           <div className="chat__empty">
-            <p>Fale com {agent.name} como fala com um colega. Pode arrastar arquivos para cá, de qualquer tipo.</p>
+            <p>{t('conversas.conversa.vazia', { nome: agent.name })}</p>
             <div className="chat__suggest">
-              {suggestionsFor(agent).map((s) => <button key={s} type="button" className="chip" onClick={() => { setText(s); input.current?.focus(); }}>{s.trim()}</button>)}
+              {suggestionsFor(agent).map((k) => { const s = t(k); return <button key={k} type="button" className="chip" onClick={() => { setText(s); input.current?.focus(); }}>{s.trim()}</button>; })}
             </div>
           </div>
         )}
@@ -484,17 +488,17 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
               return (
                 <div key={m.id} className={`msg msg--system msg--${k.kind} ${anim}`}>
                   <div className="msg__body">{k.kind === 'note' ? <SystemNote text={k.text} /> : k.text}</div>
-                  {k.kind === 'fail' && m.id === lastMsg?.id && !busy && <button type="button" className="btn btn--sm" onClick={() => void retry()}><Icon name="repeat" size={12} /> Tentar de novo</button>}
-                  {k.kind === 'docs' && k.undo && <button type="button" className="linkish" onClick={() => void undoDocs(k.undo!)}><Icon name="undo" size={12} /> Desfazer</button>}
+                  {k.kind === 'fail' && m.id === lastMsg?.id && !busy && <button type="button" className="btn btn--sm" onClick={() => void retry()}><Icon name="repeat" size={12} /> {t('conversas.acao.tentarDeNovo')}</button>}
+                  {k.kind === 'docs' && k.undo && <button type="button" className="linkish" onClick={() => void undoDocs(k.undo!)}><Icon name="undo" size={12} /> {t('conversas.acao.desfazer')}</button>}
                 </div>
               );
             }
             if (m.queued && editing?.id === m.id) {
               return (
                 <form key={m.id} className="msg msg--user msg--queued msg--editing" onSubmit={(e) => { e.preventDefault(); void saveEdit(); }}>
-                  <textarea autoFocus value={editing.text} rows={2} onChange={(e) => setEditing({ id: m.id, text: e.target.value })} aria-label="Editar a mensagem da fila"
+                  <textarea autoFocus value={editing.text} rows={2} onChange={(e) => setEditing({ id: m.id, text: e.target.value })} aria-label={t('conversas.acao.editarFila')}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit(); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(null); } }} />
-                  <div className="row"><button className="btn btn--sm btn--primary">Salvar</button><button type="button" className="btn btn--sm btn--ghost" onClick={() => setEditing(null)}>Cancelar</button></div>
+                  <div className="row"><button className="btn btn--sm btn--primary">{t('conversas.acao.salvar')}</button><button type="button" className="btn btn--sm btn--ghost" onClick={() => setEditing(null)}>{t('conversas.acao.cancelar')}</button></div>
                 </form>
               );
             }
@@ -502,26 +506,26 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             const quoted = m.reply_to ? byId.get(m.reply_to) : null;
             return (
               <Fragment key={m.id}>
-              {m.id === firstNew && <div className="chat__new" role="separator"><span>Novas mensagens</span></div>}
+              {m.id === firstNew && <div className="chat__new" role="separator"><span>{t('conversas.conversa.novasMensagens')}</span></div>}
               <div data-mid={m.id} className={`msg msg--${m.role} ${m.queued ? 'msg--queued' : ''} ${cont ? 'msg--cont' : ''} ${anim} ${flash === m.id ? 'msg--flash' : ''} ${panel === 'busca' && hits.includes(m.id) ? (hits[hitAt] === m.id ? 'msg--hit msg--hit-on' : 'msg--hit') : ''} ${m.marked ? 'msg--marked' : ''}`}>
-                {quoted && <button type="button" className="msg__quote" onClick={() => goTo(quoted.id)}><b>{quoted.role === 'user' ? 'Você' : agent.name}</b>{quoteOf(quoted)}</button>}
-                {m.role === 'agent' && m.mode === 'simulated' && <span className="badge badge--warn">sem conta de IA</span>}
+                {quoted && <button type="button" className="msg__quote" onClick={() => goTo(quoted.id)}><b>{quoted.role === 'user' ? t('conversas.conversa.voce') : agent.name}</b>{quoteOf(quoted)}</button>}
+                {m.role === 'agent' && m.mode === 'simulated' && <span className="badge badge--warn">{t('conversas.conversa.semIa')}</span>}
                 {body && <div className="msg__body">{m.role === 'agent' ? <Markdown text={body} /> : body}</div>}
                 {!!m.attachments?.length && <div className="msg__files">{m.attachments.map((f) => <FileChip key={f.id} f={f} />)}</div>}
                 <div className="msg__foot">
-                  <time>{m.queued ? `na fila · vai quando ${agent.name} terminar` : new Date(m.created_at).toLocaleTimeString('pt-BR', { timeStyle: 'short' })}</time>
+                  <time>{m.queued ? t('conversas.conversa.naFilaVai', { nome: agent.name }) : fmtHora(m.created_at)}</time>
                   {m.queued ? (
                     <span className="msg__acts">
-                      <button type="button" className="linkish" onClick={() => setEditing({ id: m.id, text: m.content })}><Icon name="edit" size={12} /> Editar</button>
-                      <button type="button" className="linkish" onClick={() => void dropQueued(m.id)}><Icon name="x" size={12} /> Tirar</button>
+                      <button type="button" className="linkish" onClick={() => setEditing({ id: m.id, text: m.content })}><Icon name="edit" size={12} /> {t('conversas.acao.editar')}</button>
+                      <button type="button" className="linkish" onClick={() => void dropQueued(m.id)}><Icon name="x" size={12} /> {t('conversas.acao.tirar')}</button>
                     </span>
                   ) : body || m.attachments?.length ? (
                     <span className="msg__acts">
-                      <button type="button" className="linkish" onClick={() => void (m.role === 'agent' ? copy(m) : copyMine(m))} title="Copiar o texto"><Icon name={copied === m.id ? 'check' : 'copy'} size={12} /> {copied === m.id ? 'Copiado' : 'Copiar'}</button>
-                      <button type="button" className="linkish" onClick={() => { setReplying(m); input.current?.focus(); }} title="Responder citando esta mensagem"><Icon name="undo" size={12} /> Responder</button>
-                      <button type="button" className={`linkish ${m.marked ? 'is-on' : ''}`} onClick={() => void toggleMark(m)} title={m.marked ? 'Tirar a marca' : 'Marcar para achar depois'}><Icon name="pin" size={12} /> {m.marked ? 'Marcada' : 'Marcar'}</button>
-                      <button type="button" className="linkish" onClick={() => void fork(m)} title="Novo assunto a partir desta mensagem"><Icon name="plus" size={12} /> Novo assunto</button>
-                      {m.role === 'agent' && body.length > 1200 && <button type="button" className="linkish" onClick={() => saveDoc(m)} title="Baixar como documento (abre no Word)"><Icon name="download" size={12} /> Documento</button>}
+                      <button type="button" className="linkish" onClick={() => void (m.role === 'agent' ? copy(m) : copyMine(m))} title={t('conversas.acao.copiarDica')}><Icon name={copied === m.id ? 'check' : 'copy'} size={12} /> {copied === m.id ? t('conversas.acao.copiado') : t('conversas.acao.copiar')}</button>
+                      <button type="button" className="linkish" onClick={() => { setReplying(m); input.current?.focus(); }} title={t('conversas.acao.responderDica')}><Icon name="undo" size={12} /> {t('conversas.acao.responder')}</button>
+                      <button type="button" className={`linkish ${m.marked ? 'is-on' : ''}`} onClick={() => void toggleMark(m)} title={m.marked ? t('conversas.acao.tirarMarca') : t('conversas.acao.marcarDica')}><Icon name="pin" size={12} /> {m.marked ? t('conversas.acao.marcada') : t('conversas.acao.marcar')}</button>
+                      <button type="button" className="linkish" onClick={() => void fork(m)} title={t('conversas.acao.novoAssuntoDica')}><Icon name="plus" size={12} /> {t('conversas.acao.novoAssunto')}</button>
+                      {m.role === 'agent' && body.length > 1200 && <button type="button" className="linkish" onClick={() => saveDoc(m)} title={t('conversas.acao.documentoDica')}><Icon name="download" size={12} /> {t('conversas.acao.documento')}</button>}
                     </span>
                   ) : null}
                 </div>
@@ -530,14 +534,14 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
                     {m.cards.map((c) => (
                       <div key={c.id} className="msg__card">
                         <button type="button" className="linkish" onClick={() => openCard(c.id)}>#{c.number}</button>
-                        <span className={`msg__card-state msg__card-state--${CARD_STATE(c).replace(' ', '-')}`}>{CARD_STATE(c)}{c.review_round > 1 ? ` · versão ${c.review_round}` : ''}</span>
+                        <span className={cardStateClass(CARD_STATE(c))}>{c.review_round > 1 ? t('conversas.card.comVersao', { estado: t(`conversas.card.${CARD_STATE(c)}`), versao: c.review_round }) : t(`conversas.card.${CARD_STATE(c)}`)}</span>
                         {revising?.taskId === c.id ? (
                           <form className="msg__revise" onSubmit={(e) => { e.preventDefault(); void sendRevise(); }}>
-                            <input autoFocus value={revising.text} onChange={(e) => setRevising({ ...revising, text: e.target.value })} placeholder="O que ajustar? (volta uma versão nova no mesmo card)" aria-label="O que revisar"
+                            <input autoFocus value={revising.text} onChange={(e) => setRevising({ ...revising, text: e.target.value })} placeholder={t('conversas.card.revisarCampo')} aria-label={t('conversas.card.revisarAria')}
                               onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRevising(null); } }} />
-                            <button className="btn btn--sm btn--primary">Revisar</button>
+                            <button className="btn btn--sm btn--primary">{t('conversas.card.revisar')}</button>
                           </form>
-                        ) : Number(c.completed) ? <button type="button" className="btn btn--sm btn--ghost" onClick={() => setRevising({ taskId: c.id, number: c.number, text: '' })}><Icon name="repeat" size={12} /> Revisar</button> : null}
+                        ) : Number(c.completed) ? <button type="button" className="btn btn--sm btn--ghost" onClick={() => setRevising({ taskId: c.id, number: c.number, text: '' })}><Icon name="repeat" size={12} /> {t('conversas.card.revisar')}</button> : null}
                       </div>
                     ))}
                   </div>
@@ -555,15 +559,15 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
               <div key={p.id} className={`proposal-card proposal-card--${p.status}`}>
                 <span className="badge">{PROPOSAL_KIND[p.kind] ?? p.kind}</span>
                 <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
-                {p.status === 'proposed' && deciding[p.id] ? <span className="badge" role="status">{deciding[p.id] === 'reject' ? 'Recusando…' : p.kind === 'conexao' ? 'Enviando…' : p.kind === 'depois_de_ler' ? 'Aprovando…' : p.kind === 'purge' ? 'Apagando…' : 'Aplicando…'}</span>
+                {p.status === 'proposed' && deciding[p.id] ? <span className="badge" role="status">{deciding[p.id] === 'reject' ? t('conversas.proposta.recusando') : p.kind === 'conexao' ? t('conversas.proposta.enviando') : p.kind === 'depois_de_ler' ? t('conversas.proposta.aprovando') : p.kind === 'purge' ? t('conversas.proposta.apagando') : t('conversas.proposta.aplicando')}</span>
                 : p.status === 'proposed' && p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} onEscolher={(alcance) => void decide(p.id, 'apply', { alcance })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' && p.kind === 'depois_de_ler' ? <BotoesPrazo onEscolher={(prazo) => void decide(p.id, 'apply', { prazo })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' ? (
                   <span className="row">
-                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'conexao' ? 'Confirmar' : p.kind === 'depois_de_ler' ? 'Aprovar' : p.kind === 'routine' ? 'Ativar rotina' : p.kind === 'batch' ? 'Abrir todos' : p.kind === 'purge' ? 'Apagar de vez' : 'Aplicar'}</button>
-                    <button className="btn btn--sm btn--ghost" onClick={() => decide(p.id, 'reject')}>Recusar</button>
+                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'conexao' ? t('conversas.proposta.confirmar') : p.kind === 'depois_de_ler' ? t('conversas.proposta.aprovar') : p.kind === 'routine' ? t('conversas.proposta.ativarRotina') : p.kind === 'batch' ? t('conversas.proposta.abrirTodos') : p.kind === 'purge' ? t('conversas.proposta.apagarDeVez') : t('conversas.proposta.aplicar')}</button>
+                    <button className="btn btn--sm btn--ghost" onClick={() => decide(p.id, 'reject')}>{t('conversas.proposta.recusar')}</button>
                   </span>
-                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? 'autorizada' : p.kind === 'conexao' ? 'feita' : p.kind === 'depois_de_ler' ? 'aprovada' : 'aplicada') : p.status === 'failed' ? 'falhou' : 'recusada'}</span>}
+                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? t('conversas.proposta.autorizada') : p.kind === 'conexao' ? t('conversas.proposta.feita') : p.kind === 'depois_de_ler' ? t('conversas.proposta.aprovada') : t('conversas.proposta.aplicada')) : p.status === 'failed' ? t('conversas.proposta.falhou') : t('conversas.proposta.recusada')}</span>}
               </div>
             );
         })}
@@ -571,63 +575,63 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           <div key={o.key} className="msg msg--user msg--in msg--sending">
             {o.text && <div className="msg__body">{o.text}</div>}
             {!!o.files.length && <div className="msg__files">{o.files.map((f) => <FileChip key={f.id} f={f} />)}</div>}
-            <div className="msg__foot"><time>{o.queued ? 'na fila' : 'enviando…'}</time></div>
+            <div className="msg__foot"><time>{o.queued ? t('conversas.conversa.naFila') : t('conversas.conversa.enviando')}</time></div>
           </div>
         ))}
         {batch.length >= 2 && (
-          <div className="proposal-batch" role="group" aria-label="Todas as propostas pendentes">
-            <span>{batch.length} propostas esperando você nesta conversa</span>
-            <button className="btn btn--sm btn--primary" disabled={batchBusy} onClick={() => void decideAll('apply')}>Aplicar todas</button>
-            <button className="btn btn--sm btn--ghost" disabled={batchBusy} onClick={() => void decideAll('reject')}>Recusar todas</button>
+          <div className="proposal-batch" role="group" aria-label={t('conversas.proposta.todasAria')}>
+            <span>{t('conversas.proposta.esperando', { n: batch.length })}</span>
+            <button className="btn btn--sm btn--primary" disabled={batchBusy} onClick={() => void decideAll('apply')}>{t('conversas.proposta.aplicarTodas')}</button>
+            <button className="btn btn--sm btn--ghost" disabled={batchBusy} onClick={() => void decideAll('reject')}>{t('conversas.proposta.recusarTodas')}</button>
           </div>
         )}
         {busy && (live?.text
           ? (
             <div className="msg msg--agent msg--live">
               <div className="msg__body"><Markdown text={stripControl(live.text)} /><span className="caret" aria-hidden="true" /></div>
-              {live.activity && <div className="msg__activity"><span className="typing" aria-hidden="true"><i /><i /><i /></span> {agent.name} está {live.activity}…</div>}
+              {live.activity && <div className="msg__activity"><span className="typing" aria-hidden="true"><i /><i /><i /></span> {t('conversas.aoVivo.atividade', { nome: agent.name, atividade: live.activity })}</div>}
             </div>
           )
           : <Typing who={agent.name} activity={live?.activity ?? null} status={lastRun?.run_status ?? null} />)}
         {!busy && cards.length > 0 && (
           <div className="msg msg--system msg--stop">
-            <div className="msg__body">{cards.length === 1 ? `O card #${cards[0].number} que saiu desta conversa continua andando.` : `${cards.length} cards desta conversa continuam andando.`}</div>
-            {cards.map((c) => <button key={c.id} type="button" className="btn btn--sm" onClick={() => setStopCard(c)}><Icon name="stop" size={12} /> Parar o card #{c.number}</button>)}
+            <div className="msg__body">{cards.length === 1 ? t('conversas.card.umContinua', { numero: cards[0].number }) : t('conversas.card.variosContinuam', { n: cards.length })}</div>
+            {cards.map((c) => <button key={c.id} type="button" className="btn btn--sm" onClick={() => setStopCard(c)}><Icon name="stop" size={12} /> {t('conversas.card.parar', { numero: c.number })}</button>)}
           </div>
         )}
       </div>
-      {fresh > 0 && <button type="button" className="chat__fresh" onClick={toEnd}>↓ {fresh === 1 ? '1 mensagem nova' : `${fresh} mensagens novas`}</button>}
+      {fresh > 0 && <button type="button" className="chat__fresh" onClick={toEnd}>↓ {t('conversas.conversa.mensagensNovas', { n: fresh })}</button>}
       {err && <p className="error" role="alert">{err}</p>}
       {hint && <p className="chat__hint" role="status">{hint}</p>}
       {avisoIa && (
-        <ConfirmPopup title="Conecte um provedor de IA" confirmLabel="Conectar agora"
+        <ConfirmPopup title={t('conversas.semIa.titulo')} confirmLabel={t('conversas.semIa.conectar')}
           onConfirm={() => { setAvisoIa(false); location.hash = '#conexoes'; }} onCancel={() => setAvisoIa(false)}>
-          <p>Você ainda não conectou um provedor de IA ao Ergon, então não é possível conversar com os agentes ainda. Leva um minuto: a sua mensagem fica guardada aqui.</p>
+          <p>{t('conversas.semIa.corpo')}</p>
         </ConfirmPopup>
       )}
       {stopCard && (
-        <ConfirmPopup title={`Parar o card #${stopCard.number}?`} confirmLabel="Parar o card"
+        <ConfirmPopup title={t('conversas.card.pararTitulo', { numero: stopCard.number })} confirmLabel={t('conversas.card.pararConfirmar')}
           onConfirm={async () => { const c = stopCard; setStopCard(null); try { await api.post(`/api/tasks/${c.id}/cancel`, {}); setCards((cur) => cur.filter((x) => x.id !== c.id)); } catch (e) { setErr(errMsg(e)); } }}
           onCancel={() => setStopCard(null)}>
-          <p>“{stopCard.title}”: o trabalho para e o card sai do quadro. O histórico fica. <button type="button" className="linkish" onClick={() => openCard(stopCard.id)}>Ver o card</button></p>
+          <p>{tn('conversas.card.pararCorpo', { titulo: stopCard.title, link: <button type="button" className="linkish" onClick={() => openCard(stopCard.id)}>{t('conversas.card.verCard')}</button> })}</p>
         </ConfirmPopup>
       )}
-      {drag && <div className="chat__drop" aria-hidden="true"><Icon name="clip" size={28} /><b>Solte para enviar a {agent.name}</b><small>qualquer tipo de arquivo</small></div>}
+      {drag && <div className="chat__drop" aria-hidden="true"><Icon name="clip" size={28} /><b>{t('conversas.campo.solte', { nome: agent.name })}</b><small>{t('conversas.campo.qualquerTipo')}</small></div>}
       <form className="chat__input" onSubmit={(e) => { e.preventDefault(); void send(); }}>
-        {replying && <div className="chat__replying"><Icon name="undo" size={13} /><span><b>{replying.role === 'user' ? 'Você' : agent.name}</b> {quoteOf(replying)}</span><button type="button" className="icon-btn" onClick={() => setReplying(null)} aria-label="Não responder citando"><Icon name="x" size={13} /></button></div>}
+        {replying && <div className="chat__replying"><Icon name="undo" size={13} /><span><b>{replying.role === 'user' ? t('conversas.conversa.voce') : agent.name}</b> {quoteOf(replying)}</span><button type="button" className="icon-btn" onClick={() => setReplying(null)} aria-label={t('conversas.campo.naoCitar')}><Icon name="x" size={13} /></button></div>}
         {files.length > 0 && <div className="chat__files">{files.map((f) => <FileChip key={f.key} f={f.art ?? { filename: f.file.name, mime: f.file.type || 'application/octet-stream', size: f.file.size }} progress={f.progress} error={f.error} onRemove={() => removeFile(f.key)} />)}</div>}
         <div className="chat__row">
-          <button type="button" className="icon-btn chat__clip" onClick={() => picker.current?.click()} aria-label="Anexar arquivos" title="Anexar arquivos (ou arraste para a conversa)"><Icon name="clip" /></button>
+          <button type="button" className="icon-btn chat__clip" onClick={() => picker.current?.click()} aria-label={t('conversas.campo.anexar')} title={t('conversas.campo.anexarDica')}><Icon name="clip" /></button>
           <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ''; }} />
           <textarea ref={input} data-autofocus data-esc-own={working ? '' : undefined} value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} rows={1}
-            placeholder={busy ? `Escreva a próxima: vai quando ${agent.name} terminar` : `Fale com ${agent.name}…`}
+            placeholder={busy ? t('conversas.campo.proxima', { nome: agent.name }) : t('conversas.campo.falarCom', { nome: agent.name })}
             onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); void addFiles(e.clipboardData.files); } }}
             // Enter envia (com o colega trabalhando, entra na fila) · Shift+Enter quebra a linha · Esc para a resposta
-            onKeyDown={keyDown} aria-label="Mensagem" aria-describedby={`chat-keys-${agent.id}`} />
-          <span id={`chat-keys-${agent.id}`} hidden>Enter envia; Shift+Enter quebra a linha; com o colega trabalhando, Enter põe na fila e Esc para a resposta.</span>
-          {working && <button type="button" className="btn chat__stop" onClick={() => void stop()} aria-label="Parar a resposta (Esc)" title="Parar (Esc)"><Icon name="stop" /></button>}
+            onKeyDown={keyDown} aria-label={t('conversas.campo.mensagem')} aria-describedby={`chat-keys-${agent.id}`} />
+          <span id={`chat-keys-${agent.id}`} hidden>{t('conversas.campo.teclas')}</span>
+          {working && <button type="button" className="btn chat__stop" onClick={() => void stop()} aria-label={t('conversas.campo.parar')} title={t('conversas.campo.pararDica')}><Icon name="stop" /></button>}
           {(!busy || text.trim() || files.length > 0) && (
-            <button className="btn btn--primary chat__send" type="submit" aria-label={busy ? 'Pôr na fila' : 'Enviar (Enter)'} title={busy ? 'Pôr na fila (vai quando terminar)' : 'Enviar (Enter)'}>
+            <button className="btn btn--primary chat__send" type="submit" aria-label={busy ? t('conversas.campo.porNaFila') : t('conversas.campo.enviar')} title={busy ? t('conversas.campo.porNaFilaDica') : t('conversas.campo.enviar')}>
               <Icon name={busy ? 'clock' : 'send'} />
             </button>
           )}

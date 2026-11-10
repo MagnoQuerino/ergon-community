@@ -41,13 +41,26 @@ export function compararVersoes(a, b) {
 }
 
 /**
- * Atualização de segurança nas novidades da versão: uma linha "Segurança (obrigatória): motivo" (com ou sem marcador e
- * negrito, como no CHANGELOG). Sem a linha: atualização comum (nada é obrigatório).
+ * Atualização de segurança nas novidades da versão, em qualquer idioma das notas:
+ *   1. o campo explícito, que não depende do texto: um comentário `<!-- seguranca: motivo -->` (ou `<!-- security:
+ *      motivo -->`) numa linha só dele (pode ocupar várias linhas). A página de lançamento não mostra o comentário; o
+ *      aplicativo também não (version.ts tira os comentários das notas);
+ *   2. ou a linha das novidades, com ou sem marcador e negrito, como no CHANGELOG: "Segurança (obrigatória): motivo" e,
+ *      em notas em inglês, "Security (required): motivo" ou "Security (mandatory): motivo".
+ * O que está entre crases ou num bloco de código não conta: explicar o recurso nas notas (com um exemplo do comentário)
+ * não marca a versão como obrigatória, nem deixa o piso para as seguintes. Sem nada disso: atualização comum (nada é
+ * obrigatório). Para o aplicativo de teste, montar-teste.mjs aceita --seguranca "motivo".
  */
+const MARCADOR_SEGURANCA = /^[ \t]*<!--\s*(?:seguran[çc]a|security)\s*:\s*((?:(?!-->)[\s\S])*?)\s*-->[ \t]*$/im;
+const LINHA_SEGURANCA = /^(?:Segurança \(obrigatória\)|Seguranca \(obrigatoria\)|Security \((?:required|mandatory)\))\s*:/i;
+/** as notas sem os blocos de código (```…``` e ~~~…~~~) e sem os trechos entre crases */
+const semCodigo = (s) => s.replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?(^[ \t]*\1[^\n]*$|(?![\s\S]))/gm, '').replace(/(`+)[^`\n]*?\1/g, '');
 export function seguranca(texto) {
-  const l = String(texto).split(/\r?\n/).map((x) => x.replace(/^[\s>*-]+/, '').replace(/\*\*/g, '').trim()).find((x) => /^Segurança \(obrigatória\):/i.test(x));
-  if (!l) return null;
-  const motivo = l.replace(/^Segurança \(obrigatória\):/i, '').trim().slice(0, 400);
+  const s = semCodigo(String(texto ?? '').replace(/\r\n?/g, '\n'));
+  const marcado = MARCADOR_SEGURANCA.exec(s);
+  const l = marcado ? null : s.split(/\r?\n/).map((x) => x.replace(/^[\s>*-]+/, '').replace(/\*\*/g, '').trim()).find((x) => LINHA_SEGURANCA.test(x));
+  if (!marcado && !l) return null;
+  const motivo = (marcado ? marcado[1].replace(/\s+/g, ' ') : l.replace(LINHA_SEGURANCA, '')).trim().slice(0, 400);
   return motivo.length >= 10 ? { obrigatoria: true, motivo } : null;
 }
 

@@ -32,7 +32,8 @@ const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const tela = (() => {
   try {
     const ler = (f: string) => { try { return fs.readFileSync(path.join(RAIZ, f), 'utf8'); } catch { return ''; } };
-    return fs.readFileSync(path.join(RAIZ, 'web/src/views/ConexoesView.tsx'), 'utf8') + ler('web/src/lib/textos-tela.ts');
+    // os textos da própria tela ficam no dicionário (web/src/i18n/pt/conexoes.ts); os do servidor, em pt/servidor.ts
+    return fs.readFileSync(path.join(RAIZ, 'web/src/views/ConexoesView.tsx'), 'utf8') + ler('web/src/i18n/pt/conexoes.ts') + ler('web/src/lib/textos-tela.ts') + ler('web/src/i18n/pt/servidor.ts');
   } catch { return null; }
 })();
 

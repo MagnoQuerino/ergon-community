@@ -225,7 +225,7 @@ export function applyRestore(src: string, p: DataPaths, stamp = new Date().toISO
     // voltou tudo: o diário sai; não voltou: fica "trocando" (o servidor não sobe e "desfazer" junta o resto)
     if (back) fs.rmSync(path.join(pre, 'restauracao.json'), { force: true });
     throw new Error(back ? `a troca falhou e os dados atuais voltaram ao lugar: ${(e as Error).message}`
-      : `a troca falhou e não deu para voltar tudo (${(e as Error).message}); nada foi apagado: rode "desfazer-restauracao ${path.basename(pre)}"`);
+      : `a troca falhou e não deu para voltar tudo (${(e as Error).message}); nada foi apagado: rode "ergon restore --undo ${path.basename(pre)}"`);
   }
   const unlock = path.join(p.dataDir, 'unlock.key');
   if (fs.existsSync(unlock)) copy(unlock, path.join(pre, 'unlock.key'));

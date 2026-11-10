@@ -117,7 +117,7 @@ jobs:
           echo "$cofre" | grep -q conteudo-do-cofre && echo "$cofre" | grep -q volume-so-cifrado && ok "cofre do motor cria, monta e grava cifrado no Podman da conta (especificação desta versão)" || falha "cofre do motor no Podman"
           rede=$(podman exec ergon_ergon_1 node -e 'fetch("https://api.github.com").then(r=>console.log("internet",r.status)).catch(e=>console.log("sem-internet",e.message))' 2>&1)
           echo "$rede"; echo "$rede" | grep -q 'internet [0-9]' && ok "os serviços alcançam a internet" || falha "serviços sem internet"
-          bash ~/.local/share/ergon/ergon.sh parar > /dev/null 2>&1; bash ~/.local/share/ergon/ergon.sh subir > /tmp/subir.log 2>&1 && ok "parar e ligar de novo pelo lançador" || { falha "religar"; cat /tmp/subir.log; }
+          bash ~/.local/share/ergon/ergon.sh stop > /dev/null 2>&1; bash ~/.local/share/ergon/ergon.sh subir > /tmp/subir.log 2>&1 && ok "desligar (stop) e ligar de novo pelo lançador (subir: o nome que o Desktop usa)" || { falha "religar"; cat /tmp/subir.log; }
           [ "$falhas" = 0 ] && echo 'resultado: tudo ok' || { echo "$falhas falha(s)"; exit 1; }
 
   # Atualização de verdade, com troca do motor: parte do pacote PUBLICADO da versão de partida (conta criada, motor da

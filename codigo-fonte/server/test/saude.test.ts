@@ -50,7 +50,10 @@ describe('painel de saúde', () => {
     const deps = { db: h.db, cfg: h.cfg, vault: h.vault, hermes, executorMode: () => 'real' as const, motorVault: () => mv, inContainer: () => false };
     const motor = async () => (await healthPanel(deps)).componentes.find((c) => c.id === 'motor')!;
     // depois de reiniciar só o Ergon: o receptor do cofre já não responde, o guardião fica "desligado", o motor responde
-    assert.deepEqual(await motor(), { id: 'motor', nome: 'Equipe de IA', estado: 'operacional', detalhe: 'no ar · cofre aberto' });
+    // nome_t/detalhe_t: o mesmo texto com código (lib/textos.ts), para a tela traduzir
+    const { nome_t, detalhe_t, ...noAr } = await motor();
+    assert.deepEqual(noAr, { id: 'motor', nome: 'Equipe de IA', estado: 'operacional', detalhe: 'no ar · cofre aberto' });
+    assert.deepEqual([nome_t, detalhe_t], [{ codigo: 'saude.nome.motor' }, { codigo: 'junto', valores: { itens: [{ codigo: 'saude.noAr' }, { codigo: 'saude.cofreAberto' }], sep: ' · ' } }]);
     ok = false; mv = { state: 'aguardando', lastError: null };
     assert.equal((await motor()).estado, 'indisponivel'); assert.match((await motor()).detalhe, /^abrindo o cofre da equipe \(a primeira vez pode levar minutos\)$/);
     mv = { state: 'erro', lastError: 'chave recusada' };
@@ -88,7 +91,9 @@ describe('painel de saúde', () => {
     const base = { db: h.db, cfg: h.cfg, vault: h.vault, hermes, executorMode: () => 'real' as const, motorVault: () => ({ state: 'aberto', lastError: null }), inContainer: () => false };
     const ms = { estado: 'aberto' as const, erro: null, semConexoes: false, falha: null as string | null, adiada: null as string | null, versao: '9.9.9-rc.1' };
     const motor = async (x: Partial<typeof ms>, semConexoes = false) => (await healthPanel({ ...base, motor: () => ({ ...ms, ...x }), semConexoes: () => semConexoes })).componentes.find((c) => c.id === 'motor')!;
-    assert.deepEqual(await motor({ estado: 'renovando' as never }), { id: 'motor', nome: 'Equipe de IA', estado: 'limitado', detalhe: 'Atualizando a equipe para a versão 9.9.9-rc.1: os pedidos novos esperam (até 30 minutos) e seguem sozinhos quando terminar' });
+    // nome_t/detalhe_t: o mesmo texto com código (lib/textos.ts); aqui conta o português
+    const { nome_t: _n, detalhe_t: _d, ...renovando } = await motor({ estado: 'renovando' as never });
+    assert.deepEqual(renovando, { id: 'motor', nome: 'Equipe de IA', estado: 'limitado', detalhe: 'Atualizando a equipe para a versão 9.9.9-rc.1: os pedidos novos esperam (até 30 minutos) e seguem sozinhos quando terminar' });
     const sem = await motor({ semConexoes: true });
     const SEM_CONEXOES = 'no ar · as Conexões não estão nesta versão da equipe: os agentes ainda não conseguem usar as contas conectadas';
     assert.equal(sem.estado, 'limitado'); assert.equal(sem.detalhe, SEM_CONEXOES);

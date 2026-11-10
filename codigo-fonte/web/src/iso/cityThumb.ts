@@ -72,9 +72,10 @@ export function drawCityThumb(c: HTMLCanvasElement, t: Theme, looks: Look[], w: 
 
 /** Moradores de sempre (sem skin): três da equipe grega, para a prévia de um tema. */
 export function defaultLooks(t: Theme): Look[] {
+  // os nomes dos personagens não se traduzem (e aqui só sorteiam a aparência)
   return [
-    lookFor({ name: 'Aristóteles', color: '#1d184b', key: 'aristoteles' }, t),
-    lookFor({ name: 'Hipátia', color: '#2f6f8f', key: 'hipatia' }, t),
-    lookFor({ name: 'Fídias', color: '#a33b4c', key: 'fidias' }, t),
+    lookFor({ name: 'Aristóteles', color: '#1d184b', key: 'aristoteles' }, t), // i18n-ok: nome de personagem
+    lookFor({ name: 'Hipátia', color: '#2f6f8f', key: 'hipatia' }, t), // i18n-ok: nome de personagem
+    lookFor({ name: 'Fídias', color: '#a33b4c', key: 'fidias' }, t), // i18n-ok: nome de personagem
   ];
 }

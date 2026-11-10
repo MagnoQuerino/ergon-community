@@ -37,6 +37,14 @@ const VAZIAS = new Set([
   'falei', 'falou', 'falamos', 'disse', 'dito', 'combinamos', 'combinei', 'conversamos', 'parou', 'parei', 'parado', 'refaca', 'refaz',
   'refazer', 'refiz', 'repete', 'repita', 'repetir', 'aham', 'uhum', 'hum', 'hmm', 'sobre', 'antes', 'depois', 'ontem', 'hoje', 'amanha', 'fica',
   'ficou', 'ficar', 'termina', 'terminar', 'acabar', 'certinho', 'certeza', 'serio', 'espera', 'esperando', 'aguardo', 'aguardando', 'gente',
+  // inglês: as mesmas confirmações, pedidos genéricos, pronomes e cumprimentos ("yes", "do it", "can you help?", "try again")
+  'yes', 'yeah', 'yep', 'nope', 'this', 'that', 'these', 'those', 'the', 'and', 'but', 'its', 'it\'s', 'thing', 'things', 'stuff', 'something', 'anything', 'nothing',
+  'please', 'pls', 'thanks', 'thank', 'thx', 'can', 'could', 'would', 'will', 'you', 'your', 'him', 'her', 'them', 'they', 'his', 'our', 'mine', 'for', 'with', 'without',
+  'make', 'doing', 'did', 'does', 'done', 'just', 'now', 'right', 'away', 'asap', 'again', 'try', 'retry', 'help', 'need', 'want', 'wanted', 'let', 'lets', 'keep', 'going',
+  'continue', 'carry', 'proceed', 'follow', 'what', 'which', 'where', 'when', 'why', 'how', 'who', 'hello', 'hey', 'good', 'morning', 'afternoon', 'evening', 'great',
+  'perfect', 'cool', 'nice', 'sure', 'okay', 'alright', 'fine', 'got', 'understood', 'agreed', 'deal', 'sounds', 'like', 'there', 'here', 'about', 'said', 'told',
+  'talked', 'discussed', 'earlier', 'before', 'after', 'yesterday', 'today', 'tomorrow', 'stopped', 'left', 'off', 'redo', 'repeat', 'finish', 'wait', 'waiting',
+  'any', 'some', 'all', 'rest', 'more', 'other', 'another', 'same', 'too', 'also', 'still', 'yet', 'urgent', 'quick', 'quickly', 'update', 'news', 'approved', 'approve',
 ]);
 
 /**
@@ -46,6 +54,9 @@ const VAZIAS = new Set([
 const GENERICAS = new Set([
   'pedido', 'pedidos', 'status', 'andamento', 'situacao', 'retorno', 'resultado', 'entrega', 'entregar', 'tarefa', 'card', 'resposta', 'responder',
   'trabalho', 'atender', 'atendimento', 'demanda', 'usuario', 'pessoa', 'duvida', 'duvidas', 'pergunta', 'assunto', 'solicitacao',
+  // inglês
+  'request', 'requests', 'order', 'orders', 'progress', 'situation', 'result', 'results', 'delivery', 'deliver', 'task', 'tasks', 'answer', 'reply', 'respond',
+  'response', 'work', 'job', 'user', 'question', 'questions', 'issue', 'topic', 'subject', 'ticket',
 ]);
 
 /**
@@ -79,7 +90,7 @@ const firstSentence = (s: string): string => s.trim().split(/(?<=[.!?])\s+|\n/)[
 /** Uma linha, até max caracteres, cortada em palavra (com "…" quando corta), sem pontuação solta no fim. */
 export function cutTitle(text: string, max = 90): string {
   const line = text.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim()
-    .replace(/^(?:oi|ola|olá|bom dia|boa tarde|boa noite)[,!.\s]+/i, '');
+    .replace(/^(?:oi|ola|olá|bom dia|boa tarde|boa noite|hi|hello|hey|good morning|good afternoon|good evening)[,!.\s]+/i, '');
   const short = line.length <= max ? line : (() => {
     const space = line[max] === ' ' ? max : line.lastIndexOf(' ', max);
     return `${(space >= max / 2 ? line.slice(0, space) : line.slice(0, max)).replace(/[\s,;:.!?…–—-]+$/, '')}…`;

@@ -5,6 +5,7 @@ import { App } from './App.tsx';
 import './styles.css';
 import { installElastic } from './lib/elastic.ts';
 import { rememberDesktopApp } from './lib/desktop.ts';
+import { prepararIdioma } from './i18n/index.ts';
 
 // Ergon atualizado com a aba aberta: as partes antigas da interface somem do servidor. Recarrega uma vez para
 // pegar a versão nova (sem laço: se falhar de novo em 30 s, deixa o erro aparecer).
@@ -21,4 +22,6 @@ rememberDesktopApp();
 installElastic();
 // tema claro ou escuro antes de desenhar (também no login), com o relógio do automático
 startTheme();
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+// o dicionário do idioma inicial antes de desenhar (o português já vem junto; o inglês chega num instante, com a tela de
+// carregamento à vista): a tela nunca aparece numa língua e troca para outra
+void prepararIdioma().then(() => createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>));

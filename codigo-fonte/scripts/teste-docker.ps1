@@ -8,6 +8,7 @@ if (Test-Path $T) { Remove-Item -Recurse -Force $T }
 New-Item -ItemType Directory -Force -Path $T, "$T\data\Docker", "$T\startup" | Out-Null
 $env:ERGON_LOCAL_DIR = "$T\local"; $env:ERGON_DOCKER_DATA = "$T\data"; $env:ERGON_DOCKER_PROC = 'ergon-docker-falso-inexistente'
 $env:ERGON_DOCKER_WAIT = '6'; $env:ERGON_STARTUP_DIR = "$T\startup"; $env:ERGON_RUN_KEY = 'HKCU:\Software\ErgonTesteDocker\Run'
+$env:ERGON_LANG = 'pt'   # as mensagens conferidas aqui são as em português
 $env:ERGON_DOCKER_CLI = "$T\docker.cmd"; $env:ERGON_DOCKER_EXE = "$T\docker-desktop.cmd"
 # CLI falsa: "no ar" quando existe up.flag
 Set-Content -Encoding ascii "$T\docker.cmd" "@echo off`r`nif exist `"%~dp0up.flag`" (exit /b 0) else (exit /b 1)"
@@ -79,18 +80,20 @@ $o = Run @('docker')
 Check ($o -match 'sem o erro dos sockets\): nada foi mexido') 'avisou sem mexer'
 Check ((Sobras).Count -eq 0 -and (Diag) -eq 0) 'nenhuma pasta posta de lado, nada registrado'
 
-Write-Host 'G) instalar e remover (chave de teste e pasta Inicializar de teste)'
-Reset; New-Item -Force -Path $env:ERGON_RUN_KEY | Out-Null
-Set-ItemProperty -Path $env:ERGON_RUN_KEY -Name 'Docker Desktop' -Value 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
-$o = Run @('docker', 'instalar')
-Check (-not (Get-ItemProperty -Path $env:ERGON_RUN_KEY -Name 'Docker Desktop' -ErrorAction SilentlyContinue)) 'entrada do Docker retirada do início'
-Check ((Get-Content "$T\local\docker-inicio-original.txt" -Raw).Trim() -eq 'C:\Program Files\Docker\Docker\Docker Desktop.exe') 'entrada original guardada'
-$vbs = Get-Content "$T\startup\Ergon - Docker.vbs" -Raw
-Check ($vbs -match 'WScript\.Shell' -and $vbs -match '-WindowStyle Hidden' -and $vbs -match 'ergon\.ps1"" docker"') 'atalho escondido criado'
-$o = Run @('docker', 'remover')
-Check ((Get-ItemProperty -Path $env:ERGON_RUN_KEY -Name 'Docker Desktop').'Docker Desktop' -eq 'C:\Program Files\Docker\Docker\Docker Desktop.exe') 'remover devolve a entrada original'
-Check (-not (Test-Path "$T\startup\Ergon - Docker.vbs") -and -not (Test-Path "$T\local\docker-inicio-original.txt")) 'remover apaga o atalho e a cópia'
-Remove-Item -Recurse -Force 'HKCU:\Software\ErgonTesteDocker'
+foreach ($par in @(@('install', 'uninstall'), @('instalar', 'remover'))) {
+  Write-Host "G) docker $($par[0]) e docker $($par[1]) (chave de teste e pasta Inicializar de teste)"
+  Reset; New-Item -Force -Path $env:ERGON_RUN_KEY | Out-Null
+  Set-ItemProperty -Path $env:ERGON_RUN_KEY -Name 'Docker Desktop' -Value 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+  $o = Run @('docker', $par[0])
+  Check (-not (Get-ItemProperty -Path $env:ERGON_RUN_KEY -Name 'Docker Desktop' -ErrorAction SilentlyContinue)) 'entrada do Docker retirada do início'
+  Check ((Get-Content "$T\local\docker-inicio-original.txt" -Raw).Trim() -eq 'C:\Program Files\Docker\Docker\Docker Desktop.exe') 'entrada original guardada'
+  $vbs = Get-Content "$T\startup\Ergon - Docker.vbs" -Raw
+  Check ($vbs -match 'WScript\.Shell' -and $vbs -match '-WindowStyle Hidden' -and $vbs -match 'ergon\.ps1"" docker"') 'atalho escondido criado'
+  $o = Run @('docker', $par[1])
+  Check ((Get-ItemProperty -Path $env:ERGON_RUN_KEY -Name 'Docker Desktop').'Docker Desktop' -eq 'C:\Program Files\Docker\Docker\Docker Desktop.exe') "$($par[1]) devolve a entrada original"
+  Check (-not (Test-Path "$T\startup\Ergon - Docker.vbs") -and -not (Test-Path "$T\local\docker-inicio-original.txt")) "$($par[1]) apaga o atalho e a cópia"
+  Remove-Item -Recurse -Force 'HKCU:\Software\ErgonTesteDocker'
+}
 
 Write-Host ''
 Write-Host "$ok verificações ok, $($falhas.Count) falha(s)"

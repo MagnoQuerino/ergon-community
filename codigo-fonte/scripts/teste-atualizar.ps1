@@ -11,6 +11,7 @@ $T = Join-Path ([IO.Path]::GetTempPath()) 'ergon-atualizar-teste'
 if (Test-Path $T) { Remove-Item -Recurse -Force $T }
 New-Item -ItemType Directory -Force -Path "$T\pacote", "$T\nova", "$T\local", "$T\backups" | Out-Null
 $env:ERGON_LOCAL_DIR = "$T\local"; $env:ERGON_BACKUPS_DIR = "$T\backups"; $env:ERGON_CONFIRMAR = 'sim'
+$env:ERGON_LANG = 'pt'   # as mensagens conferidas aqui são as em português
 
 . $Ergon *> $null   # carrega as funções do lançador (sem comando: só mostraria a ajuda)
 $Raiz = "$T\pacote"; $Fonte = $false; $Local = "$T\local"; $Backups = "$T\backups"
@@ -90,7 +91,7 @@ Check ($script:said -match 'Voltou para a 0\.3\.0 e está no ar') 'avisou que vo
 Write-Host 'C) nem a anterior responde: diz qual backup restaurar (não restaura sozinho)'
 Pacote; $script:respostas = @($false, $false)
 $erro = ''; try { Update } catch { $erro = $_.Exception.Message }
-Check ($erro -match 'Nem a versão 0\.3\.0 respondeu' -and $erro -match 'restaurar ".*ergon-antes-de-atualizar"') 'aponta o backup feito antes de atualizar'
+Check ($erro -match 'Nem a versão 0\.3\.0 respondeu' -and $erro -match 'restore ".*ergon-antes-de-atualizar"') 'aponta o backup feito antes de atualizar'
 
 Write-Host 'D) publicada é mais antiga ou igual: não mexe'
 Pacote; $script:manifest.version = '0.2.9'

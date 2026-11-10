@@ -31,6 +31,9 @@ for (const arq of lista(pasta).sort()) {
   const m = v.manifest;
   if (!ID.test(m.package_id)) { problemas.push(`${rel}: package_id deve ser comunidade.<criador>.<nome> (é ${m.package_id})`); continue; }
   if (m.package_id.split('.')[1] !== rel.split('/')[1]) { problemas.push(`${rel}: a pasta deve ser a do criador do package_id (${m.package_id.split('.')[1]})`); continue; }
+  // o catálogo é um só para todas as versões: o formato 3 (dos pacotes assinados pela loja oficial) não instala nas
+  // versões anteriores do Ergon, então os modelos da comunidade ficam no 2
+  if (m.manifest_version !== 2) { problemas.push(`${rel}: use "manifest_version": 2 (o 3 é só dos pacotes assinados da loja oficial e não instala nas versões anteriores)`); continue; }
   if (!INSTALLABLE.has(m.kind)) { problemas.push(`${rel}: o tipo ${m.kind} ainda não se instala pela loja`); continue; }
   if (vistos.has(m.package_id)) { problemas.push(`${rel}: package_id repetido (${m.package_id})`); continue; }
   vistos.add(m.package_id);

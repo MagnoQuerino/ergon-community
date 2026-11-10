@@ -83,21 +83,31 @@ export function scheduleText(t: Trigger): string {
 
 /**
  * Lê "quando" em português (o que a coordenação escreve numa proposta): "dias úteis 8h", "toda sexta às 17:00",
- * "seg e qui 10h", "todo dia 7:30", "manual". Sem dia reconhecível = manual.
+ * "seg e qui 10h", "todo dia 7:30", "manual". Sem dia reconhecível = manual. Também em inglês (a coordenação escreve no
+ * idioma da conversa): "weekdays 8am", "every Friday at 5 pm", "Mon and Thu 10:00", "daily 7:30", "on demand".
  */
 export function parseWhen(text: string, tz: string): Trigger {
   const s = fold(text).replace(/-feira/g, '');
-  if (!s.trim() || /manual|sob demanda|quando (eu )?pedir/.test(s)) return { kind: 'manual' };
+  if (!s.trim() || /manual|sob demanda|quando (eu )?pedir|on demand|when i ask|on request/.test(s)) return { kind: 'manual' };
   let days: number[] = [];
-  if (/dias? ute(is|l)|seg\w* a sex|segunda a sexta|de segunda a sexta/.test(s)) days = [1, 2, 3, 4, 5];
-  else if (/todo(s)? (o )?dia|diari|cada dia/.test(s)) days = [0, 1, 2, 3, 4, 5, 6];
+  if (/dias? ute(is|l)|seg\w* a sex|segunda a sexta|de segunda a sexta|weekdays?|business days?|work ?days?|mon\w* (to|-|through|thru) fri/.test(s)) days = [1, 2, 3, 4, 5];
+  else if (/todo(s)? (o )?dia|diari|cada dia|every ?day|daily/.test(s)) days = [0, 1, 2, 3, 4, 5, 6];
   else {
-    const map: Array<[RegExp, number]> = [[/\bdom(ingo)?\b/, 0], [/\bseg(unda)?\b/, 1], [/\bter(ca)?\b/, 2], [/\bqua(rta)?\b/, 3], [/\bqui(nta)?\b/, 4], [/\bsex(ta)?\b/, 5], [/\bsab(ado)?\b/, 6]];
-    days = map.filter(([re]) => re.test(s)).map(([, d]) => d);
-    if (!days.length && /seman/.test(s)) days = [1];
+    const map: Array<[RegExp, number]> = [[/\bdom(ingo)?\b/, 0], [/\bseg(unda)?\b/, 1], [/\bter(ca)?\b/, 2], [/\bqua(rta)?\b/, 3], [/\bqui(nta)?\b/, 4], [/\bsex(ta)?\b/, 5], [/\bsab(ado)?\b/, 6],
+      [/\bsun(day)?s?\b/, 0], [/\bmon(day)?s?\b/, 1], [/\btue(s|sday)?s?\b/, 2], [/\bwed(nesday)?s?\b/, 3], [/\bthu(rs?|rsday)?s?\b/, 4], [/\bfri(day)?s?\b/, 5], [/\bsat(urday)?s?\b/, 6]];
+    days = [...new Set(map.filter(([re]) => re.test(s)).map(([, d]) => d))].sort((a, b) => a - b);
+    if (!days.length && /seman|week/.test(s)) days = [1];
   }
   if (!days.length) return { kind: 'manual' };
-  const tm = s.match(/(\d{1,2})\s*(?:h|:)\s*(\d{2})?/) ?? s.match(/\bas (\d{1,2})\b/);
+  // 8am, 5 pm, 5:30pm (inglês); 8h, 17:00, às 9 (português). O "7h" do português vem primeiro, e o am/pm só com o fim
+  // da palavra: "às 7h, 2 amostras" é às 07:00, não às 2 da manhã
+  const ap = /\b\d{1,2}\s*h(\d{2})?\b/.test(s) ? null : s.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?![a-z])/);
+  if (ap) {
+    let h = Number(ap[1]) % 12; if (/^p/.test(ap[3])) h += 12;
+    const m = ap[2] ? Math.min(59, Number(ap[2])) : 0;
+    return { kind: 'schedule', days, time: `${String(Math.min(23, h)).padStart(2, '0')}:${String(m).padStart(2, '0')}`, tz };
+  }
+  const tm = s.match(/(\d{1,2})\s*(?:h|:)\s*(\d{2})?/) ?? s.match(/\b(?:as|at) (\d{1,2})\b/);
   const hh = tm ? Math.min(23, Number(tm[1])) : 8;
   const mm = tm && tm[2] ? Math.min(59, Number(tm[2])) : 0;
   return { kind: 'schedule', days, time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, tz };

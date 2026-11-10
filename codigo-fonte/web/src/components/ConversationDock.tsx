@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { fmtData, fmtHora, t, useT } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { SECTION_LABEL, contactsOf, unreadTotal, type Contact, type Section } from '../lib/conversations.ts';
 import { cachedResource, useResource } from '../lib/live.ts';
@@ -18,26 +19,28 @@ const withAgent = (list: RecentConversation[] | null): WithAgent[] => (list ?? [
 /** O colega de cada contato, pelo id. */
 const litesOf = (list: WithAgent[]) => new Map(list.map((c) => [c.agent_id, c.agent]));
 
-/** Quando: "agora", "há 5 min", "ontem 14:20", "12/10". */
+/** Quando: "agora", "há 5 min", "ontem 14:20", "12/10" (no idioma da tela; quem mostra usa useT() e redesenha na troca). */
 export const when = (iso: string) => {
   const d = new Date(iso); const min = Math.round((Date.now() - d.getTime()) / 60_000);
-  if (min < 1) return 'agora';
-  if (min < 60) return `há ${min} min`;
+  if (min < 1) return t('conversas.quando.agora');
+  if (min < 60) return t('conversas.quando.minutos', { n: min });
   const today = new Date(); const y = new Date(Date.now() - 86_400_000);
-  const hm = d.toLocaleTimeString('pt-BR', { timeStyle: 'short' });
+  const hm = fmtHora(d);
   if (d.toDateString() === today.toDateString()) return hm;
-  if (d.toDateString() === y.toDateString()) return `ontem ${hm}`;
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  if (d.toDateString() === y.toDateString()) return t('conversas.quando.ontem', { hora: hm });
+  return fmtData(d, { day: '2-digit', month: '2-digit' });
 };
 
 /** Ponto de não lida (com o número) e a marca de prioridade do colega. */
 export function Marks({ unread, priority, reason }: { unread: number; priority: 'urgente' | 'alta' | null; reason?: string | null }) {
+  const t = useT();
+  const marca = priority === 'urgente' ? t('conversas.marca.urgente') : t('conversas.marca.precisa');
   return (
     <>
-      {priority && <span className={`prio prio--${priority}`} title={reason ? `${priority === 'urgente' ? 'Urgente' : 'Precisa de você'}: ${reason}` : priority === 'urgente' ? 'Urgente' : 'Precisa de você'}>
-        <Icon name="flag" size={11} />{priority === 'urgente' ? 'urgente' : 'você'}
+      {priority && <span className={`prio prio--${priority}`} title={reason ? t('conversas.marca.comMotivo', { marca, motivo: reason }) : marca}>
+        <Icon name="flag" size={11} />{priority === 'urgente' ? t('conversas.marca.urgenteCurto') : t('conversas.marca.voceCurto')}
       </span>}
-      {unread > 0 && <span className="unread" aria-label={`${unread} não lida(s)`}>{unread > 9 ? '9+' : unread}</span>}
+      {unread > 0 && <span className="unread" aria-label={t('conversas.marca.naoLidas', { n: unread })}>{unread > 9 ? '9+' : unread}</span>}
     </>
   );
 }
@@ -49,6 +52,7 @@ export function Marks({ unread, priority, reason }: { unread: number; priority: 
  * embutidos nas conversas (o servidor já manda só as de colegas ativos); sem nenhuma, o atalho abre o Coordenador.
  */
 export function ConversationDock({ coordinator, hidden }: { coordinator: AgentLite | null; hidden?: boolean }) {
+  const t = useT();
   const recent = useResource<RecentConversation[]>('/api/conversations/recent', ['messages.changed', 'agents.changed', 'conversations.changed', 'proposals.changed']);
   const list = useMemo(() => withAgent(recent.data), [recent.data]);
   const lites = useMemo(() => litesOf(list), [list]);
@@ -60,9 +64,9 @@ export function ConversationDock({ coordinator, hidden }: { coordinator: AgentLi
     const coord = coordinator;
     if (!coord) return null;
     return (
-      <div className="cdock" role="navigation" aria-label="Conversas">
+      <div className="cdock" role="navigation" aria-label={t('conversas.titulo')}>
         <button type="button" className="cdock__bubble cdock__bubble--main cdock__bubble--vazio" onClick={() => openConversation(coord.id, null)}
-          aria-label={`Conversas: começar com ${coord.name}`} title={`Conversas: comece falando com ${coord.name}`}>
+          aria-label={t('conversas.doca.comecarAria', { nome: coord.name })} title={t('conversas.doca.comecarDica', { nome: coord.name })}>
           <Icon name="chat" size={26} />
         </button>
       </div>
@@ -72,15 +76,17 @@ export function ConversationDock({ coordinator, hidden }: { coordinator: AgentLi
   // quem tem algo não lido vem para a frente
   const ordered = [...people].sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0));
   const [first, ...back] = ordered;
+  const firstName = agentOf(first.agentId).name;
+  const mainLabel = first.unread ? t('conversas.doca.mandouMensagem', { nome: firstName }) : t('conversas.doca.retomarCom', { nome: firstName });
   const ring = (c: Contact) => (c.unread > 0 ? `cdock__bubble--new ${c.priority ? `cdock__bubble--${c.priority}` : ''}` : '');
   return (
-    <div className="cdock" role="navigation" aria-label="Retomar conversas">
+    <div className="cdock" role="navigation" aria-label={t('conversas.doca.retomar')}>
       {back.slice().reverse().map((c, i) => {
         const a = agentOf(c.agentId);
         const depth = back.length - i; // o mais antigo fica mais atrás
         return (
           <button key={c.agentId} type="button" className={`cdock__bubble cdock__bubble--back cdock__bubble--d${depth} ${ring(c)}`} style={{ ['--i' as string]: depth }}
-            onClick={() => openConversation(c.agentId, c.latest.id)} aria-label={`Conversa com ${a.name}${c.unread ? `: ${c.unread} não lida(s)` : ''}`} title={`${a.name} · ${when(c.lastAt)}`}>
+            onClick={() => openConversation(c.agentId, c.latest.id)} aria-label={c.unread ? t('conversas.doca.conversaComNaoLidas', { nome: a.name, n: c.unread }) : t('conversas.doca.conversaCom', { nome: a.name })} title={`${a.name} · ${when(c.lastAt)}`}>
             <AgentAvatar agent={a} size={44} />
             {c.unread > 0 && <span className="cdock__count">{c.unread > 9 ? '9+' : c.unread}</span>}
             <span className="cdock__name">{a.name}</span>
@@ -88,8 +94,8 @@ export function ConversationDock({ coordinator, hidden }: { coordinator: AgentLi
         );
       })}
       <button type="button" className={`cdock__bubble cdock__bubble--main ${ring(first)}`} onClick={() => openConversation(first.agentId, first.latest.id)}
-        aria-label={`${first.unread ? `${agentOf(first.agentId).name} mandou mensagem` : `Retomar a conversa com ${agentOf(first.agentId).name}`}${total ? ` (${total} não lida(s) ao todo)` : ''}`}
-        title={`${first.unread ? 'Mensagem nova de' : 'Retomar a conversa com'} ${agentOf(first.agentId).name} (${when(first.lastAt)})`}>
+        aria-label={total ? t('conversas.doca.totalNaoLidas', { frase: mainLabel, n: total }) : mainLabel}
+        title={first.unread ? t('conversas.doca.mensagemNovaDe', { nome: firstName, quando: when(first.lastAt) }) : t('conversas.doca.retomarComQuando', { nome: firstName, quando: when(first.lastAt) })}>
         <AgentAvatar agent={agentOf(first.agentId)} size={58} />
         {total > 0 && <span className="cdock__count cdock__count--main">{total > 9 ? '9+' : total}</span>}
       </button>
@@ -106,14 +112,16 @@ interface SearchResult {
   links: Array<{ url: string; conversationId: string; agentId: string; agent: string; messageId: string; created_at: string }>;
 }
 type Filter = 'tudo' | 'contatos' | 'assuntos' | 'mensagens' | 'arquivos' | 'links';
-const FILTERS: Array<[Filter, string]> = [['tudo', 'Tudo'], ['contatos', 'Contatos'], ['assuntos', 'Assuntos'], ['mensagens', 'Mensagens'], ['arquivos', 'Arquivos'], ['links', 'Links']];
+/** os filtros da busca: a chave do nome de cada um (traduzido na hora de mostrar) */
+const FILTERS: Array<[Filter, `conversas.busca.${Filter}`]> = [['tudo', 'conversas.busca.tudo'], ['contatos', 'conversas.busca.contatos'], ['assuntos', 'conversas.busca.assuntos'], ['mensagens', 'conversas.busca.mensagens'], ['arquivos', 'conversas.busca.arquivos'], ['links', 'conversas.busca.links']];
 /** assuntos visíveis por colega antes do "ver todos" */
 const TOPICS_SHOWN = 5;
 /** altura de uma linha da seção Equipe (retrato de 34 + respiro), para a lista virtualizada */
 const ROW_H = 46;
 
 /** Menu de um assunto: renomear, fixar, marcar como não lida, arquivar. */
-function TopicMenu({ t, onRename, onDone }: { t: RecentConversation; onRename: () => void; onDone: (patch: Record<string, unknown>) => void }) {
+function TopicMenu({ topic, onRename, onDone }: { topic: RecentConversation; onRename: () => void; onDone: (patch: Record<string, unknown>) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -125,13 +133,13 @@ function TopicMenu({ t, onRename, onDone }: { t: RecentConversation; onRename: (
   const pick = (patch: Record<string, unknown>) => { setOpen(false); onDone(patch); };
   return (
     <div className="convs__menu" ref={ref}>
-      <button type="button" className="icon-btn convs__pin" onClick={() => setOpen((o) => !o)} aria-label="Opções do assunto" aria-expanded={open}><Icon name="dots" size={13} /></button>
+      <button type="button" className="icon-btn convs__pin" onClick={() => setOpen((o) => !o)} aria-label={t('conversas.menu.opcoes')} aria-expanded={open}><Icon name="dots" size={13} /></button>
       {open && (
         <div className="convs__menu-list" role="menu">
-          <button role="menuitem" onClick={() => { setOpen(false); onRename(); }}><Icon name="pen" size={13} /> Renomear</button>
-          <button role="menuitem" onClick={() => pick({ pinned: !t.pinned_at })}><Icon name="pin" size={13} /> {t.pinned_at ? 'Soltar do topo' : 'Fixar no topo'}</button>
-          <button role="menuitem" onClick={() => pick({ unread: true })}><Icon name="bell" size={13} /> Marcar como não lida</button>
-          <button role="menuitem" onClick={() => pick({ archived: true })}><Icon name="folder" size={13} /> Arquivar (a busca acha)</button>
+          <button role="menuitem" onClick={() => { setOpen(false); onRename(); }}><Icon name="pen" size={13} /> {t('conversas.menu.renomear')}</button>
+          <button role="menuitem" onClick={() => pick({ pinned: !topic.pinned_at })}><Icon name="pin" size={13} /> {topic.pinned_at ? t('conversas.menu.soltar') : t('conversas.menu.fixar')}</button>
+          <button role="menuitem" onClick={() => pick({ unread: true })}><Icon name="bell" size={13} /> {t('conversas.menu.naoLida')}</button>
+          <button role="menuitem" onClick={() => pick({ archived: true })}><Icon name="folder" size={13} /> {t('conversas.menu.arquivar')}</button>
         </div>
       )}
     </div>
@@ -146,15 +154,16 @@ const Hit = ({ text, hit }: { text: string; hit: [number, number] }) => <>{text.
  * à vista viram botões — com 10 mil agentes, continuam umas poucas dezenas. Quem já está nas seções acima não repete.
  */
 function TeamRest({ scope, shown, currentId, onOpen }: { scope: string; shown: ReadonlySet<string>; currentId: string | null; onOpen: (a: TeamAgent) => void }) {
+  const t = useT();
   const list = useAgentList({ status: 'active' }, scope);
   const items = useMemo(() => restOf(list.items, shown), [list.items, shown]);
   if (!list.ready || (!items.length && !list.next)) return null;
   return (
     <div className="convs__section">
-      <span className="convs__section-name">Equipe</span>
+      <span className="convs__section-name">{t('conversas.secao.equipe')}</span>
       {/* flex: none — dentro da lista (flex) a grade guarda a altura de todas as linhas, e a lista rola */}
       <div style={{ flex: 'none' }}>
-        <VirtualGrid items={items} hasMore={!!list.next} onNeedMore={list.more} rowHeight={ROW_H} gap={2} minColWidth={10_000} keyOf={(a) => a.id} label="Equipe"
+        <VirtualGrid items={items} hasMore={!!list.next} onNeedMore={list.more} rowHeight={ROW_H} gap={2} minColWidth={10_000} keyOf={(a) => a.id} label={t('conversas.secao.equipe')}
           render={(a) => (
             <button className={`convs__item ${a.id === currentId ? 'is-on' : ''}`} onClick={() => onOpen(a)}>
               <AgentAvatar agent={a} size={34} />
@@ -176,6 +185,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
   coordinator: TeamAgent | null; scope: string; initial: { agentId: string | null; conversationId: string | null }; onClose: () => void;
   onOpenAgent: (id: string, tab?: 'conversa' | 'perfil' | 'atividade', lite?: AgentLite | null) => void;
 }) {
+  const t = useT();
   // agents.changed: nome e rosto novos de um colega aparecem na lista sem fechar e abrir de novo
   const recent = useResource<RecentConversation[]>('/api/conversations/recent', ['messages.changed', 'conversations.changed', 'proposals.changed', 'agents.changed']);
   const list = useMemo(() => withAgent(recent.data), [recent.data]);
@@ -224,46 +234,46 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
   const inSections = useMemo(() => new Set(lites.keys()), [lites]);
   return (
     <div className="awin-back">
-      <section ref={ref} className="awin convs" role="dialog" aria-modal="true" aria-label="Conversas">
-        <aside className="convs__list" aria-label="Suas conversas">
+      <section ref={ref} className="awin convs" role="dialog" aria-modal="true" aria-label={t('conversas.titulo')}>
+        <aside className="convs__list" aria-label={t('conversas.lista.suas')}>
           <div className="convs__head">
-            <b>Conversas</b>
-            <button className="icon-btn" onClick={onClose} aria-label="Fechar (Esc)" title="Fechar (Esc)"><Icon name="x" /></button>
+            <b>{t('conversas.titulo')}</b>
+            <button className="icon-btn" onClick={onClose} aria-label={t('conversas.lista.fechar')} title={t('conversas.lista.fechar')}><Icon name="x" /></button>
           </div>
-          <label className="foco__search"><Icon name="search" size={14} /><input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar contatos, assuntos, mensagens, arquivos… (Ctrl+K)" aria-label="Buscar nas conversas"
+          <label className="foco__search"><Icon name="search" size={14} /><input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('conversas.busca.campo')} aria-label={t('conversas.busca.aria')}
             onKeyDown={(e) => { if (e.key === 'Escape' && q) { e.preventDefault(); e.stopPropagation(); setQ(''); } }} /></label>
           {searching && (
-            <div className="convs__filters" role="group" aria-label="Filtrar a busca">
-              {FILTERS.map(([k, label]) => <button key={k} type="button" className={`chip ${filter === k ? 'chip--on' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)}>{label}</button>)}
+            <div className="convs__filters" role="group" aria-label={t('conversas.busca.filtrar')}>
+              {FILTERS.map(([k, label]) => <button key={k} type="button" className={`chip ${filter === k ? 'chip--on' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)}>{t(label)}</button>)}
             </div>
           )}
           {err && <p className="error small">{err}</p>}
           {searching ? (
             <div className="convs__results">
-              {!found.data && <p className="muted small">Procurando…</p>}
-              {!!found.data?.contatos.length && <div className="convs__section"><span className="convs__section-name">Contatos</span>
+              {!found.data && <p className="muted small">{t('conversas.busca.procurando')}</p>}
+              {!!found.data?.contatos.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.contatos')}</span>
                 {found.data.contatos.map((a) => { const c = contacts.find((x) => x.agentId === a.id); return (
                   <button key={a.id} type="button" className="convs__item" onClick={() => open(a.id, c?.latest.id ?? null, null, a)}><AgentAvatar agent={a} size={30} /><span className="convs__txt"><b>{a.name}</b><small>{a.role}</small></span></button>); })}</div>}
-              {!!found.data?.assuntos.length && <div className="convs__section"><span className="convs__section-name">Assuntos</span>
-                {found.data.assuntos.map((t) => <button key={t.id} type="button" className="convs__result" onClick={() => open(t.agentId, t.id)}><b>{t.title}</b><small>{t.agent}{t.archived ? ' · arquivado' : ''}</small></button>)}</div>}
-              {!!found.data?.mensagens.length && <div className="convs__section"><span className="convs__section-name">Mensagens</span>
-                {found.data.mensagens.map((m) => <button key={m.id} type="button" className="convs__result" onClick={() => open(m.agentId, m.conversationId, m.id)}><small>{m.role === 'user' ? 'Você' : m.agent} · {m.title} · {when(m.created_at)}</small><span><Hit text={m.text} hit={m.hit} /></span></button>)}</div>}
-              {!!found.data?.arquivos.length && <div className="convs__section"><span className="convs__section-name">Arquivos</span>
-                {found.data.arquivos.map((f) => <button key={f.id} type="button" className="convs__result" onClick={() => (f.agentId && f.conversation_id ? open(f.agentId, f.conversation_id, f.message_id, f.agent ?? null) : window.open(`/api/artifacts/${f.id}/download`, '_blank'))}><b><Icon name="file" size={12} /> {f.filename}</b><small>{f.agentId ? `na conversa com ${f.agent?.name ?? 'Colega'}` : 'em Documentos'} · {when(f.created_at)}</small></button>)}</div>}
-              {!!found.data?.links.length && <div className="convs__section"><span className="convs__section-name">Links</span>
+              {!!found.data?.assuntos.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.assuntos')}</span>
+                {found.data.assuntos.map((x) => <button key={x.id} type="button" className="convs__result" onClick={() => open(x.agentId, x.id)}><b>{x.title}</b><small>{x.agent}{x.archived ? ` · ${t('conversas.busca.arquivado')}` : ''}</small></button>)}</div>}
+              {!!found.data?.mensagens.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.mensagens')}</span>
+                {found.data.mensagens.map((m) => <button key={m.id} type="button" className="convs__result" onClick={() => open(m.agentId, m.conversationId, m.id)}><small>{m.role === 'user' ? t('conversas.busca.voce') : m.agent} · {m.title} · {when(m.created_at)}</small><span><Hit text={m.text} hit={m.hit} /></span></button>)}</div>}
+              {!!found.data?.arquivos.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.arquivos')}</span>
+                {found.data.arquivos.map((f) => <button key={f.id} type="button" className="convs__result" onClick={() => (f.agentId && f.conversation_id ? open(f.agentId, f.conversation_id, f.message_id, f.agent ?? null) : window.open(`/api/artifacts/${f.id}/download`, '_blank'))}><b><Icon name="file" size={12} /> {f.filename}</b><small>{f.agentId ? t('conversas.busca.naConversaCom', { nome: f.agent?.name ?? t('conversas.busca.colega') }) : t('conversas.busca.emDocumentos')} · {when(f.created_at)}</small></button>)}</div>}
+              {!!found.data?.links.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.links')}</span>
                 {found.data.links.map((l) => <button key={`${l.messageId}-${l.url}`} type="button" className="convs__result" onClick={() => open(l.agentId, l.conversationId, l.messageId)}><b>{l.url}</b><small>{l.agent} · {when(l.created_at)}</small></button>)}</div>}
-              {found.data && !found.data.contatos.length && !found.data.assuntos.length && !found.data.mensagens.length && !found.data.arquivos.length && !found.data.links.length && <p className="muted small">Nada encontrado.</p>}
+              {found.data && !found.data.contatos.length && !found.data.assuntos.length && !found.data.mensagens.length && !found.data.arquivos.length && !found.data.links.length && <p className="muted small">{t('conversas.busca.nada')}</p>}
             </div>
           ) : (
             <>
               {sections.map(({ s, items }) => (
                 <div key={s} className="convs__section">
-                  <span className="convs__section-name">{SECTION_LABEL[s]}</span>
+                  <span className="convs__section-name">{t(SECTION_LABEL[s])}</span>
                   <ul>
                     {items.map((c) => {
                       const a = lites.get(c.agentId) as AgentLite;
                       const on = c.agentId === current.agentId;
-                      const preview = c.latest.last_text ? `${c.latest.last_role === 'user' ? 'Você: ' : ''}${c.latest.last_text}` : a.role;
+                      const preview = c.latest.last_text ? (c.latest.last_role === 'user' ? t('conversas.lista.voceDisse', { texto: c.latest.last_text }) : c.latest.last_text) : a.role;
                       const all = expanded.has(c.agentId);
                       const topics = all ? c.convs : c.convs.slice(0, TOPICS_SHOWN);
                       return (
@@ -272,32 +282,32 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
                             <span className={`convs__avatar ${c.unread ? 'convs__avatar--new' : ''}`}><AgentAvatar agent={a} size={34} /></span>
                             <span className="convs__txt">
                               <span className="convs__line"><b>{a.name}</b><time className="muted small">{when(c.lastAt)}</time></span>
-                              <span className="convs__line"><small title={c.priorityReason ?? undefined}>{c.priority && c.priorityReason ? c.priorityReason : preview}</small><Marks unread={c.unread} priority={c.priority ?? (c.waiting ? 'alta' : null)} reason={c.priorityReason ?? (c.waiting ? `${c.waiting} pedido(s) esperando você` : null)} /></span>
+                              <span className="convs__line"><small title={c.priorityReason ?? undefined}>{c.priority && c.priorityReason ? c.priorityReason : preview}</small><Marks unread={c.unread} priority={c.priority ?? (c.waiting ? 'alta' : null)} reason={c.priorityReason ?? (c.waiting ? t('conversas.lista.pedidosEsperando', { n: c.waiting }) : null)} /></span>
                             </span>
                           </button>
                           {on && (
-                            <ul className="convs__topics" aria-label={`Assuntos com ${a.name}`}>
-                              {topics.map((t) => (
-                                <li key={t.id} className={`convs__topic ${t.id === (current.conversationId ?? c.latest.id) ? 'is-on' : ''}`}>
-                                  {renaming?.id === t.id ? (
-                                    <form className="convs__rename" onSubmit={(e) => { e.preventDefault(); const n = renaming.title.trim(); setRenaming(null); if (n && n !== t.title) void patch(t.id, { title: n }); }}>
-                                      <input autoFocus value={renaming.title} onChange={(e) => setRenaming({ id: t.id, title: e.target.value })} onBlur={() => setRenaming(null)} aria-label="Novo nome do assunto"
+                            <ul className="convs__topics" aria-label={t('conversas.lista.assuntosCom', { nome: a.name })}>
+                              {topics.map((tp) => (
+                                <li key={tp.id} className={`convs__topic ${tp.id === (current.conversationId ?? c.latest.id) ? 'is-on' : ''}`}>
+                                  {renaming?.id === tp.id ? (
+                                    <form className="convs__rename" onSubmit={(e) => { e.preventDefault(); const n = renaming.title.trim(); setRenaming(null); if (n && n !== tp.title) void patch(tp.id, { title: n }); }}>
+                                      <input autoFocus value={renaming.title} onChange={(e) => setRenaming({ id: tp.id, title: e.target.value })} onBlur={() => setRenaming(null)} aria-label={t('conversas.lista.novoNome')}
                                         onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenaming(null); } }} />
                                     </form>
                                   ) : (
-                                    <button type="button" className="convs__topic-main" onClick={() => open(c.agentId, t.id)} onDoubleClick={() => setRenaming({ id: t.id, title: t.title })} title={`${t.title} (duplo clique renomeia)`}>
-                                      {t.pinned_at && <Icon name="pin" size={11} />}<span>{t.title}</span>
-                                      <Marks unread={t.unread ?? 0} priority={t.priority ?? null} reason={t.priority_reason} />
+                                    <button type="button" className="convs__topic-main" onClick={() => open(c.agentId, tp.id)} onDoubleClick={() => setRenaming({ id: tp.id, title: tp.title })} title={t('conversas.lista.assuntoDica', { titulo: tp.title })}>
+                                      {tp.pinned_at && <Icon name="pin" size={11} />}<span>{tp.title}</span>
+                                      <Marks unread={tp.unread ?? 0} priority={tp.priority ?? null} reason={tp.priority_reason} />
                                     </button>
                                   )}
-                                  <TopicMenu t={t} onRename={() => setRenaming({ id: t.id, title: t.title })} onDone={(p) => void patch(t.id, p)} />
+                                  <TopicMenu topic={tp} onRename={() => setRenaming({ id: tp.id, title: tp.title })} onDone={(p) => void patch(tp.id, p)} />
                                 </li>
                               ))}
                               {c.convs.length > TOPICS_SHOWN && (
                                 <li><button type="button" className="linkish convs__new-topic" onClick={() => setExpanded((x) => { const n = new Set(x); if (all) n.delete(c.agentId); else n.add(c.agentId); return n; })}>
-                                  {all ? 'ver menos' : `ver todos (${c.convs.length})`}</button></li>
+                                  {all ? t('conversas.lista.verMenos') : t('conversas.lista.verTodos', { n: c.convs.length })}</button></li>
                               )}
-                              <li><button type="button" className="linkish convs__new-topic" onClick={() => void newTopic(c.agentId)}><Icon name="plus" size={12} /> Novo assunto</button></li>
+                              <li><button type="button" className="linkish convs__new-topic" onClick={() => void newTopic(c.agentId)}><Icon name="plus" size={12} /> {t('conversas.lista.novoAssunto')}</button></li>
                             </ul>
                           )}
                         </li>
@@ -316,12 +326,12 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
               <header className="foco__chat-head">
                 <AgentAvatar agent={agent} size={36} />
                 <div className="foco__chat-who"><b>{agent.name}</b><small>{agent.role} · {agent.sector_name}</small></div>
-                <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', agent)}><Icon name="edit" size={13} /> Perfil</button>
+                <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', agent)}><Icon name="edit" size={13} /> {t('conversas.lista.perfil')}</button>
               </header>
               <ChatPanel key={`${agent.id}-${current.conversationId ?? 'nova'}`} agent={agent} embedded hidePicker conversationId={current.conversationId}
                 focusMessage={sel.messageId ?? null} onOpenConversation={(agentId, conversationId) => { setSel({ agentId, conversationId }); recent.reload(); }} />
             </>
-          ) : waiting ? null : <p className="muted center">Nenhum agente ativo.</p>}
+          ) : waiting ? null : <p className="muted center">{t('conversas.lista.nenhumAgente')}</p>}
         </div>
       </section>
     </div>

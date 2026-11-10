@@ -17,13 +17,17 @@ export interface ReviewRow {
   status: 'open' | 'approved' | 'limit' | 'stopped'; round: number; max_rounds: number; verdict: string | null; created_at: string; finished_at: string | null;
 }
 
-const CHANNEL = 'Canal: revisão socrática de uma tarefa no Ergon. Responda em português, de forma objetiva.';
+const CHANNEL = 'Canal: revisão socrática de uma tarefa no Ergon. Responda no idioma em que a tarefa foi escrita, de forma objetiva; a linha do VEREDITO fica sempre com estas palavras ("VEREDITO: pronto" ou "VEREDITO: ajustar").';
 
-/** Último "VEREDITO: pronto|ajustar" do texto (null se não houver). */
+/**
+ * Último veredito do texto (null se não houver): "VEREDITO: pronto|ajustar" e, quando o revisor responde em inglês,
+ * "VERDICT: ready|revise" (também "approved", "adjust", "needs changes"). As duas línguas valem sempre.
+ */
+const VEREDITO = /\b(?:VEREDITO|VERDICT)\s*:\s*\**\s*(pronto|ajustar|ready|approved|revise|adjust|needs (?:changes|revision|work))\b/gi;
 export function parseVerdict(text: string | null): 'pronto' | 'ajustar' | null {
-  const all = [...(text ?? '').matchAll(/VEREDITO\s*:\s*(pronto|ajustar)/gi)];
-  const last = all.at(-1);
-  return last ? (last[1].toLowerCase() as 'pronto' | 'ajustar') : null;
+  const last = [...(text ?? '').matchAll(VEREDITO)].at(-1);
+  if (!last) return null;
+  return /^(pronto|ready|approved)$/i.test(last[1]) ? 'pronto' : 'ajustar';
 }
 
 export class ReviewService {

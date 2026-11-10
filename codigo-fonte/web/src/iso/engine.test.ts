@@ -204,3 +204,27 @@ test('sprites dos bonecos com limite: o menos usado sai (passear pela cidade gra
   const s = figureSprite(look(2899), 'front', 'stand', 0, false, th);
   assert.equal(figureSprite(look(2899), 'front', 'stand', 0, false, th), s);
 });
+
+test('idioma: os textos do desenho saem no idioma atual e a troca redesenha a cidade', async () => {
+  const { setIdioma } = await import('../i18n/index.ts');
+  g.document.documentElement ??= {}; // o idioma vai para <html lang>
+  const { e, x } = mk();
+  e.setAgents(Array.from({ length: 12 }, (_, n) => sa(`p${n}`, n % 2, Math.floor(n / 2), Math.floor(n / 2))));
+  e.setCounts({ total: 12, structures: [] });
+  x.dirty = false;
+  await setIdioma('en', { guardar: false });
+  try {
+    assert.equal(x.dirty, true, 'trocar de idioma pede um quadro novo');
+    assert.equal(x.areaText({ kind: 'casa', ref: 8 }), 'House 9 · empty, ready for new agents');
+    assert.equal(x.areaText({ kind: 'casa', ref: 0 }), 'House 1 · Nome p0 at work · Nome p1 at work');
+    assert.match(x.areaText({ kind: 'agora' }), /^Agora · .* · the notice board opens Connections$/);
+    assert.match(x.areaText({ kind: 'termas' }), /^Baths · /);
+  } finally {
+    await setIdioma('pt-BR', { guardar: false });
+    e.dispose();
+  }
+  x.dirty = false;
+  await setIdioma('en', { guardar: false });
+  await setIdioma('pt-BR', { guardar: false });
+  assert.equal(x.dirty, false, 'depois de descartado, o motor não ouve mais a troca');
+});

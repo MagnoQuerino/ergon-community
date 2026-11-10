@@ -180,7 +180,7 @@ test('Rotinas: o card inteiro da rotina abre a edição, e o nome é o botão do
   assert.match(s, /className=\{`card rt-item card-click[^`]*`\} onClick=\{cardClick\(onEdit\)\}/);
   assert.match(s, /<h3><button type="button" className="card-open" onClick=\{onEdit\}/);
   // os botões de antes continuam lá
-  assert.match(s, /<Icon name="edit" size=\{13\} \/> Editar<\/button>/);
+  assert.match(s, /<Icon name="edit" size=\{13\} \/> \{t\('rotinas\.cartao\.editar'\)\}<\/button>/);
 });
 
 test('Rotinas: trocar de rotina com a gaveta aberta nunca leva o que foi digitado para a outra', () => {
@@ -199,7 +199,7 @@ test('Documentos: arquivos, pastas e o resultado da busca abrem pela linha intei
   assert.match(s, /onClick=\{cardClick\(\(\) => setOpenFile\(f\)\)\}/);
   assert.match(s, /cardClick\(\(\) => go\(f\.id\)\)/);
   assert.doesNotMatch(s, /<li key=\{f\.id\} className="ditem" onClick=/, 'a linha da busca sem botão (só mouse) voltou');
-  assert.match(s, /aria-label=\{`\$\{f\.filename\}: abrir a prévia`\}/);
+  assert.match(s, /aria-label=\{t\('documentos\.busca\.abrirPrevia', \{ nome: f\.filename \}\)\}/);
   // sair da renomeação clicando na própria linha não entra na pasta (o campo perde o foco já no pressionar)
   assert.match(s, /onPointerDown=\{\(\) => \{ leftRename\.current = renaming\?\.id === f\.id \? f\.id : null; \}\}/);
   assert.match(s, /if \(leftRename\.current === f\.id\) \{ leftRename\.current = null; return; \} cardClick\(\(\) => go\(f\.id\)\)\(e\);/);
@@ -218,7 +218,7 @@ test('Tarefas: no quadro e na lista, o card e a linha inteira abrem, com Enter e
   assert.equal((s.match(/onKeyDown=\{cardKey\(\(\) => onOpen\(t\.id\)\)\}/g) ?? []).length, 2);
   assert.doesNotMatch(s, /if \(e\.key === 'Enter'\) onOpen/, 'o Enter na situação abria o card');
   // a linha da lista diz ao leitor de tela o que é, como o card do quadro
-  assert.ok(s.includes('aria-label={`Tarefa #${t.number}: ${t.title}, ${c.name}`} title="Abrir o card"'), 'rótulo da linha da lista');
+  assert.ok(s.includes("aria-label={tr('quadro.linha.aria', { numero: t.number, titulo: t.title, coluna: nomeDaColuna(c) })} title={tr('quadro.linha.abrir')}"), 'rótulo da linha da lista');
 });
 
 test('Atividade: cada linha do registro, dos eventos e das execuções abre o que aconteceu', () => {
@@ -228,7 +228,8 @@ test('Atividade: cada linha do registro, dos eventos e das execuções abre o qu
   // a linha diz o que abre ao leitor de tela, e a seta marca as que abrem (a dica fala da seta)
   assert.match(s, /'aria-label': rotuloDaLinha\(d, resumo\)/);
   assert.equal((s.match(/\{seta\(d\)\}/g) ?? []).length, 3);
-  assert.match(s, /As linhas com › abrem o que aconteceu/);
+  assert.ok(s.includes("t('servidor.atividade.linhasAbrem')"), 'a dica da seta');
+  assert.match(ler('i18n/pt/servidor.ts'), /'atividade\.linhasAbrem': 'As linhas com › abrem o que aconteceu/);
   // a evidência e o erro são para ler e copiar: clicar (ou dar duplo clique) neles não leva para outra área
   assert.match(s, /<td className="pre small" data-card-skip>\{e\.evidence/);
   assert.match(s, /<td className="small" data-card-skip>\{r\.error/);
@@ -244,8 +245,12 @@ test('Pessoas, Aguardando você, Equipe e a janela do agente usam o mesmo padrã
   // clicar nos detalhes abertos (para ler, copiar) não fecha
   assert.match(p, /className="pessoa__det" data-card-skip>/);
   // nada de presença que não confere: a chave na memória não quer dizer que ela está usando agora
+  // os textos da tela vêm do dicionário (i18n/pt/conta.ts): a tela usa a chave, o dicionário tem a frase
+  const ptConta = ler('i18n/pt/conta.ts');
   assert.doesNotMatch(p, /abertos agora|ela entrou/);
-  assert.match(p, /Você gera em Configurações › Segurança/);
+  assert.doesNotMatch(ptConta, /abertos agora|ela entrou/);
+  assert.match(p, /t\('conta\.pessoas\.fraseFaltaVoce'\)/);
+  assert.match(ptConta, /'pessoas\.fraseFaltaVoce': '[^']*Você gera em Configurações › Segurança/);
   const d = ler('components/DecisionsPanel.tsx');
   assert.match(d, /onClick=\{onOpen \? cardClick\(onOpen\) : undefined\}/);
   // errar Aprovar/Recusar por pouco não tira a pessoa do painel

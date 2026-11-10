@@ -30,7 +30,7 @@ export const SECTORS: SectorDef[] = [
     tools: ['quadro', 'encaminhar', 'delegar', 'revisao', 'regras', 'passos'],
     skills: ['Triagem por categorias', 'Quem faz o quê', 'Etapas com responsável', 'Fila por prioridade'],
     members: ['aristoteles', 'hipodamo'],
-    stems: ['coorden', 'gest', 'gerent', 'lider', 'projet', 'planej', 'plano', 'cronogram', 'escopo', 'roadmap', 'prioriz'],
+    stems: ['coorden', 'gest', 'gerent', 'lider', 'projet', 'planej', 'plano', 'cronogram', 'escopo', 'roadmap', 'prioriz', 'coordinat', 'manag', 'leader', 'project', 'planning', 'schedul', 'scope', 'prioriti'],
   },
   {
     key: 'central', name: 'Central de demandas', createsTasks: 'demands',
@@ -44,7 +44,7 @@ export const SECTORS: SectorDef[] = [
     tools: ['quadro', 'passos', 'saida', 'conexoes'],
     skills: ['Pedido ou informação?', 'Registro de compromissos', 'Cobrança gentil de prazos', 'O simples primeiro'],
     members: ['aspasia', 'hesiodo', 'diogenes'],
-    stems: ['atend', 'cliente', 'fornecedor', 'comunic', 'mensag', 'whatsapp', 'teams', 'e-mail', 'email', 'prazo', 'agenda', 'acompanh', 'secretari', 'assistent', 'operac', 'suporte', 'compra', 'financeir', 'cobranc'],
+    stems: ['atend', 'cliente', 'fornecedor', 'comunic', 'mensag', 'whatsapp', 'teams', 'e-mail', 'email', 'prazo', 'agenda', 'acompanh', 'secretari', 'assistent', 'operac', 'suporte', 'compra', 'financeir', 'cobranc', 'customer', 'supplier', 'vendor', 'message', 'deadline', 'calendar', 'follow', 'secretary', 'assistant', 'operation', 'support', 'purchas', 'billing'],
   },
   {
     key: 'producao', name: 'Produção (textos e design)', createsTasks: 'explicit_only',
@@ -54,7 +54,7 @@ export const SECTORS: SectorDef[] = [
     tools: ['arquivos', 'quadro', 'imagens', 'visao'],
     skills: ['Português claro', 'Texto sob medida para o público', 'Hierarquia visual', 'Resumo executivo'],
     members: ['herodoto', 'fidias'],
-    stems: ['redac', 'redig', 'escrev', 'texto', 'conteud', 'copy', 'relatori', 'design', 'apresentac', 'slide', 'visual', 'marketing', 'social', 'post', 'arte', 'revisao de texto'],
+    stems: ['redac', 'redig', 'escrev', 'texto', 'conteud', 'copy', 'relatori', 'design', 'apresentac', 'slide', 'visual', 'marketing', 'social', 'post', 'arte', 'revisao de texto', 'writ', 'draft', 'content', 'report', 'presentation'],
   },
   {
     key: 'brainstorm', name: 'Brainstorming e pesquisa', createsTasks: 'explicit_only',
@@ -67,7 +67,7 @@ export const SECTORS: SectorDef[] = [
     tools: ['arquivos', 'web', 'passos', 'habilidades'],
     skills: ['Formular o problema certo', 'Alternativas com prós e contras', 'Fontes datadas', 'Fato, inferência e lacuna'],
     members: ['platao', 'hipatia'],
-    stems: ['pesquis', 'estud', 'ideia', 'conceit', 'estrateg', 'inova', 'brainstorm', 'mercado', 'concorr', 'benchmark', 'tendenc', 'reflex', 'filosof'],
+    stems: ['pesquis', 'estud', 'ideia', 'conceit', 'estrateg', 'inova', 'brainstorm', 'mercado', 'concorr', 'benchmark', 'tendenc', 'reflex', 'filosof', 'research', 'study', 'idea', 'concept', 'strategy', 'strategic', 'innovat', 'market research', 'competitor', 'trend', 'philosoph'],
   },
   {
     key: 'qualidade', name: 'Análise e qualidade', createsTasks: 'explicit_only',
@@ -77,7 +77,7 @@ export const SECTORS: SectorDef[] = [
     tools: ['quadro', 'arquivos', 'revisao'],
     skills: ['Conta reproduzível', 'Critérios de aceite, um a um', 'Elenco: testar a coerência', 'Critério de entrega razoável'],
     members: ['arquimedes', 'euclides', 'socrates'],
-    stems: ['dados', 'numer', 'planilh', 'analis', 'estatist', 'financ', 'orcament', 'contab', 'qualidade', 'confer', 'audit', 'revis', 'critic', 'valid', 'teste', 'jurid', 'compliance'],
+    stems: ['dados', 'numer', 'planilh', 'analis', 'estatist', 'financ', 'orcament', 'contab', 'qualidade', 'confer', 'audit', 'revis', 'critic', 'valid', 'teste', 'jurid', 'compliance', 'number', 'spreadsheet', 'analy', 'statistics', 'budget', 'accounting', 'quality', 'review', 'testing'],
   },
 ];
 

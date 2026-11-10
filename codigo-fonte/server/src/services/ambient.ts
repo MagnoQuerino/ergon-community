@@ -85,7 +85,7 @@ const PAGE = 20;
 
 interface TaskRow {
   id: string; number: number; title: string; agent_id: string | null; agent_name: string | null; agent_status: string | null;
-  column_name: string; work_state: string | null; sync_origin: string | null; priority: number; updated_at: string;
+  column_name: string; column_key: string | null; work_state: string | null; sync_origin: string | null; priority: number; updated_at: string;
   run_id: string | null; run_status: string | null; run_key: string | null; run_started: string | null; run_created: string | null; run_mode: string | null;
   attempts: number; last_status: string | null;
 }
@@ -107,7 +107,7 @@ export function readAmbient(db: Db, input: {
 
   // cards abertos do quadro da equipe, com a execução ativa (a mais antiga, como o quadro mostra) e as tentativas
   const tasks = db.all<TaskRow>(
-    `SELECT t.id, t.number, t.title, t.agent_id, a.name AS agent_name, a.status AS agent_status, c.name AS column_name, t.work_state,
+    `SELECT t.id, t.number, t.title, t.agent_id, a.name AS agent_name, a.status AS agent_status, c.name AS column_name, c.system_key AS column_key, t.work_state,
             t.sync_origin, t.priority, t.updated_at,
             r.id AS run_id, r.status AS run_status, r.idempotency_key AS run_key, r.started_at AS run_started, r.created_at AS run_created, r.mode AS run_mode,
             (SELECT COUNT(*) FROM runs q WHERE q.task_id = t.id AND q.idempotency_key LIKE 'queue-%'
@@ -167,7 +167,7 @@ export function readAmbient(db: Db, input: {
     }
     if (!t.agent_id || t.agent_status !== 'active') { push('impedido', 'sem_responsavel', 'Sem responsável ativo: escolha alguém no card', ['cancelar']); continue; }
     if (t.sync_origin) { push('impedido', 'espelhado', 'Veio de outro aplicativo: a equipe não pega sozinha', ['cancelar']); continue; }
-    if (t.column_name !== TODO_COLUMN) { push('impedido', 'fora_da_fila', `Em "${t.column_name}" sem ninguém trabalhando: ponha para trabalhar no card`, ['cancelar']); continue; }
+    if (t.column_key !== TODO_COLUMN) { push('impedido', 'fora_da_fila', `Em "${t.column_name}" sem ninguém trabalhando: ponha para trabalhar no card`, ['cancelar']); continue; }
     if (Number(t.attempts) >= MAX_ATTEMPTS) { push('falhou', 'tentativas', 'Tentativas esgotadas: ponha para trabalhar de novo no card', ['cancelar']); continue; }
     const pos = position.get(t.id) ?? null;
     if (pos === null) { push('impedido', 'desconhecido', 'Não entra na fila agora: veja o card', ['cancelar']); continue; }

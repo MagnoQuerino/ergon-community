@@ -196,11 +196,12 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 /**
  * Tela de carregamento (a mesma no index.html, antes do app carregar, e no app): o emblema se forma — as cinco
  * pessoas chegam girando de fora até a roda e o centro dourado aparece — e depois uma onda passa de pessoa em
- * pessoa, no sentido horário, enquanto o centro respira. A palavra entra letra a letra.
+ * pessoa, no sentido horário, enquanto o centro respira. A palavra entra letra a letra. A legenda vem de quem chama, já
+ * no idioma da tela (o index.html, antes de o app carregar, usa o português do dicionário: a página nasce em pt-BR).
  */
-export function splashHtml(label?: string): string {
+export function splashHtml(label: string): string {
   return `<div class="eg-splash" role="status" aria-live="polite">`
     + `<svg class="eg-mark eg-anim" viewBox="${EMBLEM_VIEWBOX}" aria-hidden="true">${emblemMarkup(palette())}</svg>`
     + `<svg class="eg-word eg-anim" viewBox="${WORD_BOX.x} ${WORD_BOX.y} ${WORD_BOX.w} ${WORD_BOX.h}" aria-hidden="true">${wordMarkup(BRAND.navy)}</svg>`
-    + `<p class="eg-splash__label">${esc(label ?? 'Carregando…')}</p></div>`;
+    + `<p class="eg-splash__label">${esc(label)}</p></div>`;
 }

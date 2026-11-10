@@ -3,6 +3,7 @@
 // navegador (é uma preferência de tela, como o tamanho da janela).
 import { useSyncExternalStore } from 'react';
 import { isDarkHour } from '../iso/life.ts';
+import { t } from '../i18n/index.ts';
 
 export type ThemeMode = 'auto' | 'dia' | 'noite';
 export type ThemeId = 'dia' | 'noite';
@@ -38,9 +39,8 @@ export function setThemeMode(m: ThemeMode): void {
 }
 
 export const THEME_NEXT: Record<ThemeMode, ThemeMode> = { auto: 'dia', dia: 'noite', noite: 'auto' };
-export const THEME_LABEL: Record<ThemeMode, string> = {
-  auto: 'Tema automático: claro de dia, escuro à noite (o relógio da cidade)', dia: 'Tema claro (sempre dia)', noite: 'Tema escuro (sempre noite)',
-};
+/** O nome do tema no idioma atual: inteiro (dica do botão) ou curto (o item do menu). */
+export const rotuloDoTema = (m: ThemeMode, curto = false): string => (curto ? t(`geral.tema.${m}Curto`) : t(`geral.tema.${m}`));
 export const THEME_ICON: Record<ThemeMode, string> = { auto: 'auto', dia: 'sun', noite: 'moon' };
 
 let snap = { mode, theme: themeOf(mode, hour), hour };

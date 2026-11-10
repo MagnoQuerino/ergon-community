@@ -14,6 +14,7 @@
  * e sem cartão esperando, Aprovar só conclui o card (a faixa avisa quando a linha do agente fala em enviar ou pagar).
  */
 import type { Db } from '../db/db.ts';
+import { emPt, tx, type Codigo, type Texto, type Valor } from '../lib/textos.ts';
 import { clip } from '../lib/util.ts';
 import { integrationDef } from './integrations.ts';
 import { taskFiles } from './operations.ts';
@@ -26,8 +27,10 @@ export interface LinhaParaVoce { tipo: TipoLinha; texto: string }
 /**
  * "Para você decidir: …" / "Feito: …" numa linha própria, com ou sem negrito. Marcador de lista ("- Feito: …") e
  * citação não contam: num documento que termina com um quadro de status ou um checklist, essa linha é conteúdo.
+ * A equipe escreve a linha no idioma da conversa: em inglês, "For you to decide: …" / "Done: …" (as palavras-chave que as
+ * instruções pedem, PARA_VOCE em teamwork.ts). As duas línguas valem sempre.
  */
-const LINHA = /^\s*(?:\*\*|__)?\s*(para voc[eê] decidir|feito)\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.+?)\s*(?:\*\*|__)?\s*$/i;
+const LINHA = /^\s*(?:\*\*|__)?\s*(para voc[eê] decidir|feito|for you to decide|done)\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.+?)\s*(?:\*\*|__)?\s*$/i;
 const CONTROLE = /^\s*\[\[(?:[^\]]|\](?!\]))*\]\]\s*$/;
 
 /**
@@ -45,15 +48,15 @@ export function separarLinhaParaVoce(texto: string | null | undefined): { corpo:
   const frase = m[2].replace(/^["“]|["”]$/g, '').trim();
   if (frase.length < 3) return { corpo: s, linha: null };
   const corpo = [...linhas.slice(0, i), ...linhas.slice(i + 1)].join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  return { corpo, linha: { tipo: /^feito$/i.test(m[1]) ? 'feito' : 'decidir', texto: clip(frase.replace(/\s+/g, ' '), 400) } };
+  return { corpo, linha: { tipo: /^(feito|done)$/i.test(m[1]) ? 'feito' : 'decidir', texto: clip(frase.replace(/\s+/g, ' '), 400) } };
 }
 
 /**
  * A linha do agente fala em enviar, criar, pagar… mas nenhum cartão espera o seu clique: Aprovar só conclui o card.
  * A tela e a conversa dizem isso, para ninguém aprovar achando que algo vai sair.
  */
-const PROMETE_ACAO = /\b(enviar|envios?|mandar|criar|pagar|pagamentos?|publicar|agendar|marcar|cobrar|cobran[cç]as?|transferir|transfer[eê]ncias?|apagar|excluir)\b/i;
-export const AVISO_SEM_CARTAO = 'Aprovar só conclui este card: nada é enviado, criado ou pago numa conta por este clique.';
+const PROMETE_ACAO = /\b(enviar|envios?|mandar|criar|pagar|pagamentos?|publicar|agendar|marcar|cobrar|cobran[cç]as?|transferir|transfer[eê]ncias?|apagar|excluir|send|sending|create|pay|payments?|publish|schedule|book|charge|transfers?|delete|remove)\b/i;
+export const AVISO_SEM_CARTAO = emPt(tx('resumo.avisoSemCartao'));
 export const avisoSemCartao = (linha: LinhaParaVoce | null): string | null => (linha?.tipo === 'decidir' && PROMETE_ACAO.test(linha.texto) ? AVISO_SEM_CARTAO : null);
 
 /** O texto sem a linha para a pessoa (o que aparece na entrega, no documento e na conversa). */
@@ -92,16 +95,16 @@ export function etapaCurta(titulo: string, max = 72): string {
 const NOMES_COMO_VERBO = new Set(['Oscar', 'Edgar', 'Baltazar', 'Itamar', 'Omar', 'Gilmar', 'Vilmar', 'Valdemar', 'Waldemar', 'Altamir', 'Ademir', 'Valdir', 'Jair', 'Aldair', 'Altair', 'Adir', 'Walter', 'Peter', 'Esther', 'Ester', 'Heitor', 'Vitor', 'Victor', 'Igor', 'Nestor', 'Junior', 'Planner', 'Hubspot', 'Twitter', 'Messenger', 'Docker', 'Flor', 'Amor']);
 
 // ------------------------------------------------------------------------------------------- fatos das contas
+// As frases saem como Texto (código + valores, lib/textos.ts): a tela traduz; o português (emPt) continua indo junto.
 
 type Grupo = 'apagar' | 'email' | 'resposta' | 'mensagem' | 'cobranca' | 'tarefa' | 'tarefa_mudar' | 'agenda' | 'documento' | 'mover' | 'outro';
 /** copia: quem vai em cópia (o cc de um e-mail), que pesa na decisão tanto quanto o destinatário */
-interface Fato { grupo: Grupo; app: string; alvos: string[]; copia?: string[]; nomes: string[]; resumo: string; verbo?: 'criar' | 'atualizar' | 'cancelar'; coisa?: 'email' | 'mensagem' | 'item' }
+interface Fato { grupo: Grupo; app: Valor; alvos: string[]; copia?: string[]; nomes: string[]; resumo: string; verbo?: 'criar' | 'atualizar' | 'cancelar'; coisa?: 'email' | 'mensagem' | 'item' }
 
-const lista = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} e ${xs.at(-1)}`);
 const aspas = (s: string) => `“${s}”`;
 const unicos = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
-/** no máximo 3 nomes; o resto vira "e mais N" */
-const poucos = (xs: string[], n = 3) => (xs.length <= n ? lista(xs) : `${xs.slice(0, n).join(', ')} e mais ${xs.length - n}`);
+/** no máximo 3 nomes; o resto vira "e mais N" (a lista vai como lista: cada idioma junta do seu jeito) */
+const poucos = (xs: readonly Valor[], n = 3): Valor => (xs.length <= n ? xs : tx('resumo.eMais', { itens: xs.slice(0, n).map((x) => emPt(x)).join(', '), mais: xs.length - n }));
 
 /** valor de texto de um parâmetro (lista, texto separado por vírgula, ou nada) */
 function valores(a: Record<string, unknown>, ...chaves: string[]): string[] {
@@ -118,11 +121,11 @@ const umValor = (a: Record<string, unknown>, ...chaves: string[]) => {
 };
 
 /** O nome do aplicativo de uma ação: o Teams e o WhatsApp pelo nome, o resto pelo nome da conexão. */
-function appDe(conexao: string, acao: string): string {
+function appDe(conexao: string, acao: string): Valor {
   if (acao.startsWith('teams.')) return 'Teams';
   if (acao.startsWith('whatsapp.')) return 'WhatsApp';
-  if (acao.startsWith('email.')) return 'e-mail';
-  if (acao.startsWith('agenda.')) return 'agenda';
+  if (acao.startsWith('email.')) return tx('resumo.app.email');
+  if (acao.startsWith('agenda.')) return tx('resumo.app.agenda');
   return integrationDef(conexao as never)?.name ?? conexao;
 }
 
@@ -156,79 +159,84 @@ export function fatoDaAcao(x: { conexao: string; acao: string; args: string | nu
 
 const ORDEM: Grupo[] = ['apagar', 'email', 'resposta', 'mensagem', 'cobranca', 'tarefa', 'tarefa_mudar', 'agenda', 'documento', 'mover', 'outro'];
 const juntar = (fatos: Fato[]) => ORDEM.map((g) => fatos.filter((f) => f.grupo === g)).filter((x) => x.length);
-const em = (fs: Fato[]) => { const apps = unicos(fs.map((f) => f.app)); return apps.length ? ` em ${lista(apps)}` : ''; };
-const no = (fs: Fato[]) => { const apps = unicos(fs.map((f) => f.app)); return apps.length ? ` no ${lista(apps)}` : ''; };
-const qtd = (n: number, um: string, varios: string) => (n === 1 ? um : `${n} ${varios}`);
+/** os aplicativos das ações, sem repetir (o e-mail e a agenda pelo nome de cada idioma) */
+const appsDe = (fs: Fato[]): Valor[] => { const vistos = new Set<string>(); return fs.map((f) => f.app).filter((a) => { const k = emPt(a).trim(); if (!k || vistos.has(k)) return false; vistos.add(k); return true; }); };
+const em = (fs: Fato[]): Valor => { const apps = appsDe(fs); return apps.length ? tx('resumo.em', { apps }) : ''; };
+const no = (fs: Fato[]): Valor => { const apps = appsDe(fs); return apps.length ? tx('resumo.no', { apps }) : ''; };
 /** R$ 1.290,50: o valor de uma cobrança, como o parâmetro veio */
 function reais(v: unknown): string {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v.replace(',', '.')) : NaN;
   return Number.isFinite(n) && n > 0 ? `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
 }
-/** o que se apaga: [um, vários, um feito, vários feitos] */
-const COISA = {
-  email: ['um e-mail', 'e-mails', 'E-mail apagado', 'e-mails apagados'], mensagem: ['uma mensagem', 'mensagens', 'Mensagem apagada', 'mensagens apagadas'],
-  item: ['um item', 'itens', 'Item apagado', 'itens apagados'],
-} as const;
-const copiaDe = (fs: Fato[]) => { const cc = unicos(fs.flatMap((f) => f.copia ?? [])); return cc.length ? `, com cópia para ${poucos(cc)}` : ''; };
+const para = (alvos: string[]): Valor => (alvos.length ? tx('resumo.para', { quem: poucos(alvos) }) : '');
+const copiaDe = (fs: Fato[]): Valor => { const cc = unicos(fs.flatMap((f) => f.copia ?? [])); return cc.length ? tx('resumo.comCopia', { quem: poucos(cc) }) : ''; };
+const sobre = (nomes: string[]): Valor => (nomes.length ? tx('resumo.sobre', { nomes: poucos(nomes.map(aspas)) }) : '');
+const espaco = (nomes: string[], n?: number): Valor => (nomes.length ? tx('resumo.espaco', { t: poucos(nomes.map(aspas), n) }) : '');
+const convite = (alvos: string[]): Valor => (alvos.length ? tx('resumo.comConvite', { quem: poucos(alvos) }) : '');
 /** o resumo de cada ação (que já diz o verbo), no máximo 3: nunca "fazer N ações" sem dizer quais */
 const cada = (fs: Fato[]) => poucos(unicos(fs.map((f) => clip(f.resumo.replace(/[.:\s]+$/, ''), 110))).map((r) => r.charAt(0).toLowerCase() + r.slice(1)));
 
-/** O que espera o seu clique, numa frase no infinitivo ("enviar 2 e-mails para Ana e Bruno, sobre “Orçamento”"). */
-export function fraseDoPendente(fatos: Fato[]): string {
-  return lista(juntar(fatos).map((fs) => {
+/** O que espera o seu clique, com código para a tela traduzir ("enviar 2 e-mails para Ana e Bruno, sobre “Orçamento”"). */
+export function textoDoPendente(fatos: Fato[]): Valor[] {
+  return juntar(fatos).map((fs): Valor => {
     const n = fs.length; const alvos = unicos(fs.flatMap((f) => f.alvos)); const nomes = unicos(fs.flatMap((f) => f.nomes));
     switch (fs[0].grupo) {
-      case 'apagar': { const c = COISA[fs[0].coisa ?? 'item']; return `apagar ${qtd(n, c[0], c[1])}${fs[0].coisa === 'email' ? '' : em(fs)}`; }
-      case 'mover': return `mover ${qtd(n, 'um e-mail', 'e-mails')}${nomes.length ? ` para ${nomes.length === 1 ? 'a pasta' : 'as pastas'} ${poucos(nomes.map(aspas))}` : ''}`;
-      case 'cobranca': return `criar ${qtd(n, 'uma cobrança', 'cobranças')}${em(fs)}${nomes.length ? ` (${poucos(nomes)})` : ''}, e o Asaas avisa o cliente`;
-      case 'email': return `enviar ${qtd(n, 'um e-mail', 'e-mails')}${alvos.length ? ` para ${poucos(alvos)}` : ''}${copiaDe(fs)}${nomes.length ? `, sobre ${poucos(nomes.map(aspas))}` : ''}`;
-      case 'resposta': return `responder ${qtd(n, 'um e-mail', 'e-mails')}`;
-      case 'mensagem': return `mandar ${qtd(n, 'uma mensagem', 'mensagens')}${alvos.length ? ` para ${poucos(alvos)}` : ''}${no(fs)}`;
-      case 'tarefa': return nomes.length ? `criar ${n === 1 ? 'a tarefa' : 'as tarefas'} ${poucos(nomes.map(aspas), 4)}${em(fs)}` : `criar ${qtd(n, 'uma tarefa', 'tarefas')}${em(fs)}`;
-      case 'tarefa_mudar': return `mudar ${n === 1 ? 'a tarefa' : 'as tarefas'}${nomes.length ? ` ${poucos(nomes.map(aspas))}` : ''}${em(fs)}`;
-      case 'agenda': return `${fs[0].verbo === 'cancelar' ? 'desmarcar' : 'marcar'} na agenda${nomes.length ? ` ${poucos(nomes.map(aspas))}` : ''}${alvos.length ? `, com convite para ${poucos(alvos)}` : ''}`;
-      case 'documento': return `${fs[0].verbo === 'criar' ? 'criar' : 'atualizar'} ${n === 1 ? 'o documento' : 'os documentos'}${nomes.length ? ` ${poucos(nomes.map(aspas))}` : ''}${em(fs)}`;
+      case 'apagar': { const c = fs[0].coisa ?? 'item'; return tx('resumo.pendente.apagar', { qtd: tx(`resumo.qtd.${c}`, { n }), em: c === 'email' ? '' : em(fs) }); }
+      case 'mover': return tx('resumo.pendente.mover', { qtd: tx('resumo.qtd.email', { n }), pasta: nomes.length ? tx('resumo.paraPasta', { n: nomes.length, nomes: poucos(nomes.map(aspas)) }) : '' });
+      case 'cobranca': return tx('resumo.pendente.cobranca', { qtd: tx('resumo.qtd.cobranca', { n }), em: em(fs), valores: nomes.length ? tx('resumo.parenteses', { t: poucos(nomes) }) : '' });
+      case 'email': return tx('resumo.pendente.email', { qtd: tx('resumo.qtd.email', { n }), para: para(alvos), copia: copiaDe(fs), sobre: sobre(nomes) });
+      case 'resposta': return tx('resumo.pendente.resposta', { qtd: tx('resumo.qtd.email', { n }) });
+      case 'mensagem': return tx('resumo.pendente.mensagem', { qtd: tx('resumo.qtd.mensagem', { n }), para: para(alvos), no: no(fs) });
+      case 'tarefa': return nomes.length ? tx('resumo.pendente.tarefaComNome', { n, nomes: poucos(nomes.map(aspas), 4), em: em(fs) }) : tx('resumo.pendente.tarefa', { qtd: tx('resumo.qtd.tarefa', { n }), em: em(fs) });
+      case 'tarefa_mudar': return tx('resumo.pendente.tarefaMudar', { n, nomes: espaco(nomes), em: em(fs) });
+      case 'agenda': return tx(fs[0].verbo === 'cancelar' ? 'resumo.pendente.agendaDesmarcar' : 'resumo.pendente.agendaMarcar', { nomes: espaco(nomes), convite: convite(alvos) });
+      case 'documento': return tx(fs[0].verbo === 'criar' ? 'resumo.pendente.documentoCriar' : 'resumo.pendente.documentoAtualizar', { n, nomes: espaco(nomes), em: em(fs) });
       default: return cada(fs);
     }
-  }));
+  });
 }
+/** O que espera o seu clique, numa frase no infinitivo ("enviar 2 e-mails para Ana e Bruno, sobre “Orçamento”"). */
+export const fraseDoPendente = (fatos: Fato[]): string => emPt(textoDoPendente(fatos));
 
-/** O que já foi feito, uma frase por tipo ("2 e-mails enviados para Ana e Bruno." · "Tarefas criadas: X, Y e Z."). */
-export function frasesDoFeito(fatos: Fato[]): string[] {
-  return juntar(fatos).map((fs) => {
+const doisPontos = (nomes: string[], n?: number): Valor => (nomes.length ? tx('resumo.doisPontos', { t: poucos(nomes.map(aspas), n) }) : '');
+/** O que já foi feito, uma frase por tipo, com código ("2 e-mails enviados para Ana e Bruno." · "Tarefas criadas: X, Y e Z."). */
+export function textosDoFeito(fatos: Fato[]): Texto[] {
+  return juntar(fatos).map((fs): Texto => {
     const n = fs.length; const alvos = unicos(fs.flatMap((f) => f.alvos)); const nomes = unicos(fs.flatMap((f) => f.nomes));
     switch (fs[0].grupo) {
-      case 'apagar': { const c = COISA[fs[0].coisa ?? 'item']; return `${qtd(n, c[2], c[3])}${fs[0].coisa === 'email' ? '' : em(fs)}.`; }
-      case 'mover': return `${qtd(n, 'E-mail movido', 'e-mails movidos')}${nomes.length ? ` para ${poucos(nomes.map(aspas))}` : ''}.`;
-      case 'cobranca': return `${qtd(n, 'Cobrança criada', 'cobranças criadas')}${em(fs)}${nomes.length ? ` (${poucos(nomes)})` : ''}.`;
-      case 'email': return `${qtd(n, 'E-mail enviado', 'e-mails enviados')}${alvos.length ? ` para ${poucos(alvos)}` : ''}${copiaDe(fs)}${nomes.length ? `, sobre ${poucos(nomes.map(aspas))}` : ''}.`;
-      case 'resposta': return `${qtd(n, 'Resposta enviada', 'respostas enviadas')} por e-mail.`;
-      case 'mensagem': return `${qtd(n, 'Mensagem enviada', 'mensagens enviadas')}${alvos.length ? ` para ${poucos(alvos)}` : ''}${no(fs)}.`;
-      case 'tarefa': return nomes.length ? `${n === 1 ? 'Tarefa criada' : 'Tarefas criadas'}${em(fs)}: ${poucos(nomes, 6)}.` : `${qtd(n, 'Tarefa criada', 'tarefas criadas')}${em(fs)}.`;
-      case 'tarefa_mudar': return `${n === 1 ? 'Tarefa atualizada' : 'Tarefas atualizadas'}${em(fs)}${nomes.length ? `: ${poucos(nomes, 6)}` : ''}.`;
-      case 'agenda': return `${fs[0].verbo === 'cancelar' ? 'Desmarcado na agenda' : fs[0].verbo === 'atualizar' ? 'Atualizado na agenda' : 'Marcado na agenda'}${nomes.length ? `: ${poucos(nomes.map(aspas))}` : ''}${alvos.length ? `, com convite para ${poucos(alvos)}` : ''}.`;
-      case 'documento': return `${n === 1 ? 'Documento' : 'Documentos'}${nomes.length ? ` ${poucos(nomes.map(aspas))}` : ''} ${fs[0].verbo === 'criar' ? (n === 1 ? 'criado' : 'criados') : (n === 1 ? 'atualizado' : 'atualizados')}${em(fs)}.`;
-      default: return `${cada(fs)} (feito${em(fs)}).`;
+      case 'apagar': { const c = fs[0].coisa ?? 'item'; return tx(`resumo.feito.apagar.${c}`, { n, em: c === 'email' ? '' : em(fs) }, 'maiuscula'); }
+      case 'mover': return tx('resumo.feito.mover', { n, para: nomes.length ? tx('resumo.para', { quem: poucos(nomes.map(aspas)) }) : '' }, 'maiuscula');
+      case 'cobranca': return tx('resumo.feito.cobranca', { n, em: em(fs), valores: nomes.length ? tx('resumo.parenteses', { t: poucos(nomes) }) : '' }, 'maiuscula');
+      case 'email': return tx('resumo.feito.email', { n, para: para(alvos), copia: copiaDe(fs), sobre: sobre(nomes) }, 'maiuscula');
+      case 'resposta': return tx('resumo.feito.resposta', { n }, 'maiuscula');
+      case 'mensagem': return tx('resumo.feito.mensagem', { n, para: para(alvos), no: no(fs) }, 'maiuscula');
+      case 'tarefa': return nomes.length ? tx('resumo.feito.tarefaComNome', { n, em: em(fs), nomes: poucos(nomes, 6) }, 'maiuscula') : tx('resumo.feito.tarefa', { n, em: em(fs) }, 'maiuscula');
+      case 'tarefa_mudar': return tx('resumo.feito.tarefaMudar', { n, em: em(fs), nomes: nomes.length ? tx('resumo.doisPontos', { t: poucos(nomes, 6) }) : '' }, 'maiuscula');
+      case 'agenda': return tx(fs[0].verbo === 'cancelar' ? 'resumo.feito.agendaDesmarcar' : fs[0].verbo === 'atualizar' ? 'resumo.feito.agendaAtualizar' : 'resumo.feito.agendaMarcar', { nomes: doisPontos(nomes), convite: convite(alvos) }, 'maiuscula');
+      case 'documento': return tx(fs[0].verbo === 'criar' ? 'resumo.feito.documentoCriar' : 'resumo.feito.documentoAtualizar', { n, nomes: espaco(nomes), em: em(fs) }, 'maiuscula');
+      default: return tx('resumo.feito.outro', { acoes: cada(fs), em: em(fs) }, 'maiuscula');
     }
-  }).map((s) => s.charAt(0).toUpperCase() + s.slice(1));
+  });
 }
+/** O que já foi feito, uma frase por tipo ("2 e-mails enviados para Ana e Bruno." · "Tarefas criadas: X, Y e Z."). */
+export const frasesDoFeito = (fatos: Fato[]): string[] => textosDoFeito(fatos).map((t) => emPt(t));
 
 // ------------------------------------------------------------------------------------------- o resumo
 
 export type Tom = 'decidir' | 'precisa' | 'trabalhando' | 'fila' | 'feito' | 'falhou';
+/**
+ * Cada texto vai em português e, ao lado (campo_t), com código e valores para a tela traduzir. O que o agente escreveu
+ * (a linha "Feito: …", a pergunta) vai como veio: já está no idioma da conversa.
+ */
 export interface ResumoTarefa {
   /** a situação em uma palavra (ou quase), com a cor pelo tom */
-  situacao: { tom: Tom; texto: string };
+  situacao: { tom: Tom; texto: string; texto_t: Valor };
   /** a faixa de decisão: título curto, a frase exata, os fatos já feitos e a linha do agente quando ela complementa */
-  faixa: { titulo: string; frase: string; itens: string[]; doAgente: string | null };
+  faixa: { titulo: string; titulo_t: Valor; frase: string; frase_t: Valor; itens: string[]; itens_t: Valor[]; doAgente: string | null; doAgente_t: Valor | null };
 }
 
 /** os critérios que não passaram, em palavras de todo dia (a conferência inteira fica em "Como foi conferido") */
-const MOTIVO: Record<string, string> = {
-  execucao: 'o trabalho parou no meio', modelo: 'a resposta não foi escrita pela conta de IA', conteudo: 'a entrega ficou curta demais',
-  alegacao: 'a resposta só disse que terminou', pendencias: 'ficou uma pergunta sem resposta', entregavel: 'o documento não foi salvo',
-  operacao: 'a análise do arquivo não foi feita', conexao: 'a ação na conta não foi confirmada pelo aplicativo', declaracao: 'o agente disse que não fez',
-};
+const MOTIVO = new Set(['execucao', 'modelo', 'conteudo', 'alegacao', 'pendencias', 'entregavel', 'operacao', 'conexao', 'declaracao']);
 
 interface Ctx { queue?: { position: number; total: number } | null }
 
@@ -250,21 +258,24 @@ function desdeDoResumo(db: Db, ws: string, taskId: string, concluida: boolean): 
 const maiuscula = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const ponto = (s: string) => (/[.!?…]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
 const sem = (s: string, re: RegExp) => s.replace(re, '').trim();
+/** o texto como frase (maiúscula e ponto): no Texto, pela forma (cada idioma aplica depois de traduzir) */
+const comoFrase = (v: Valor): Valor => (typeof v === 'string' ? ponto(maiuscula(v)) : typeof v === 'number' || Array.isArray(v) ? v : { ...(v as Texto), forma: 'frase' });
 
 /**
  * A proteção "depois de ler": o que o clique libera, com o endereço ou o programa exato que o cartão mostra
  * ("que Aspásia abra o site exemplo.com depois de ler as suas contas"). É uma decisão à parte, nunca em lote.
  */
-export function fraseDepoisDeLer(p: { agente?: string; grupo?: string; chaves?: string[]; alvo?: string }, quem: string): string {
-  const ag = p.agente ?? quem;
+export function textoDepoisDeLer(p: { agente?: string; grupo?: string; chaves?: string[]; alvo?: string }, quem: Valor): Texto {
+  const agente: Valor = p.agente ?? quem;
   const chaves = Array.isArray(p.chaves) ? p.chaves : [];
-  if (chaves[0] === 'pagina') return `que ${ag} mexa na página aberta no navegador depois de ler as suas contas`;
+  if (chaves[0] === 'pagina') return tx('resumo.depoisDeLer.pagina', { agente });
   const sites = chaves.filter((k) => k.startsWith('site:')).map((k) => { const o = k.slice(5); try { return new URL(o).host; } catch { return o; } });
-  if (p.grupo !== 'programas' && sites.length) return `que ${ag} abra ${sites.length > 1 ? `os sites ${poucos(sites)}` : `o site ${sites[0]}`} depois de ler as suas contas`;
+  if (p.grupo !== 'programas' && sites.length) return tx('resumo.depoisDeLer.sites', { agente, n: sites.length, sites: sites.length > 1 ? poucos(sites) : sites[0] });
   const alvo = clip((p.alvo ?? '').replace(/\s+/g, ' ').trim(), 90);
-  if (p.grupo === 'programas') return `que ${ag} rode ${alvo ? `o programa ${aspas(alvo)}` : 'um programa'} depois de ler as suas contas`;
-  return `que ${ag} ${alvo ? `use o navegador em ${aspas(alvo)}` : 'abra um site'} depois de ler as suas contas`;
+  if (p.grupo === 'programas') return alvo ? tx('resumo.depoisDeLer.programa', { agente, alvo: aspas(alvo) }) : tx('resumo.depoisDeLer.umPrograma', { agente });
+  return alvo ? tx('resumo.depoisDeLer.navegador', { agente, alvo: aspas(alvo) }) : tx('resumo.depoisDeLer.umSite', { agente });
 }
+export const fraseDepoisDeLer = (p: { agente?: string; grupo?: string; chaves?: string[]; alvo?: string }, quem: string): string => emPt(textoDepoisDeLer(p, quem));
 
 /** O título do documento entregue: o primeiro cabeçalho do texto ("# Relatório de outubro"). */
 function tituloDoDocumento(texto: string | null): string | null {
@@ -281,7 +292,8 @@ export function resumoDaTarefa(db: Db, ws: string, taskId: string, ctx: Ctx = {}
     'SELECT t.id, t.title, t.completed, t.completed_by, t.work_state, t.agent_id, b.audience FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.id = ? AND t.workspace_id = ?', taskId, ws);
   if (!t || t.audience !== 'team') return null;
   const nome = (agentId: string | null | undefined) => (agentId ? db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', agentId)?.name ?? null : null);
-  const quem = nome(t.agent_id) ?? 'A equipe';
+  const semNome = !nome(t.agent_id);
+  const quem: Valor = nome(t.agent_id) ?? tx('resumo.aEquipe');
   const concluida = !!Number(t.completed);
   const res = db.get<{ state: string; justification: string; evidence: string; criteria: string; decided_by: string }>(
     'SELECT state, justification, evidence, criteria, decided_by FROM task_results WHERE workspace_id = ? AND task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1', ws, taskId);
@@ -292,60 +304,66 @@ export function resumoDaTarefa(db: Db, ws: string, taskId: string, ctx: Ctx = {}
   // fatos: o que espera o seu clique, e o que o serviço já fez neste trabalho (o card e os que nasceram dele)
   const cartoes = db.all<{ kind: string; payload: string; summary: string | null }>(`SELECT p.kind, p.payload, p.summary FROM agent_proposals p JOIN runs r ON r.id = p.run_id
      WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, ws);
-  const pendentes: Fato[] = []; const aprovacoes: string[] = [];
+  const pendentes: Fato[] = []; const aprovacoes: Texto[] = [];
   for (const c of cartoes) {
     let p: { acaoId?: string; agente?: string; grupo?: string; chaves?: string[]; alvo?: string } = {};
     try { p = JSON.parse(c.payload) as typeof p; } catch { continue; }
-    if (c.kind === 'depois_de_ler') { aprovacoes.push(fraseDepoisDeLer(p, quem)); continue; }
+    if (c.kind === 'depois_de_ler') { aprovacoes.push(textoDepoisDeLer(p, quem)); continue; }
     const row = p.acaoId ? db.get<{ conexao: string; acao: string; args: string | null; resumo: string | null }>('SELECT conexao, acao, args, resumo FROM conexao_acoes WHERE id = ? AND workspace_id = ?', p.acaoId, ws) : undefined;
     if (row) pendentes.push(fatoDaAcao(row));
   }
-  const feitos = frasesDoFeito(db.all<{ conexao: string; acao: string; args: string | null; resumo: string | null }>(
+  const feitos = textosDoFeito(db.all<{ conexao: string; acao: string; args: string | null; resumo: string | null }>(
     `SELECT conexao, acao, args, resumo FROM conexao_acoes WHERE workspace_id = ? AND status = 'feita' AND risco <> 'ler' AND created_at > ?
        AND (task_id = ? OR task_id IN (SELECT id FROM tasks WHERE parent_task_id = ?)) ORDER BY created_at LIMIT 60`, ws, desde, taskId, taskId).map(fatoDaAcao));
+  const jaFeito = (f: Valor) => tx('resumo.item.jaFeito', { feito: f });
 
   // a entrega mais recente deste trabalho: a linha para a pessoa e o título do documento
   const saida = db.get<{ output: string | null; agent_id: string }>(
     "SELECT output, agent_id FROM runs WHERE task_id = ? AND workspace_id = ? AND status = 'succeeded' AND idempotency_key LIKE 'queue-%' AND created_at > ? ORDER BY created_at DESC, rowid DESC LIMIT 1", taskId, ws, desde);
   const { corpo, linha } = separarLinhaParaVoce(saida?.output ?? null);
-  const autor = nome(saida?.agent_id) ?? quem;
+  const autor: Valor = nome(saida?.agent_id) ?? quem;
   // o que o trabalho entregou como arquivo neste trabalho: a análise da planilha, ou o texto salvo como documento
   const arquivos = taskFiles(db, ws, taskId).filter((f) => f.role === 'entregavel' && f.created_at > desde).length;
   const analise = arquivos > 0 && !!db.get("SELECT 1 AS x FROM operations WHERE task_id = ? AND workspace_id = ? AND status <> 'erro' AND created_at > ?", taskId, ws, desde);
   const doc = arquivos > 0 && !analise ? tituloDoDocumento(corpo) : null;
-  const entregue = !arquivos ? null : analise ? 'Relatório e indicadores calculados a partir da planilha, nos arquivos abaixo.'
-    : `${doc ? `Documento ${aspas(doc)}` : arquivos === 1 ? 'Documento' : `${arquivos} arquivos`} ${arquivos === 1 || doc ? 'entregue' : 'entregues'}, nos arquivos abaixo.`;
-  const daLinha = linha ? `${autor}: ${ponto(linha.texto)}` : null;
+  const entregue: Texto | null = !arquivos ? null : analise ? tx('resumo.entregue.analise')
+    : doc ? tx('resumo.entregue.documento', { documento: aspas(doc) }) : tx('resumo.entregue.arquivos', { n: arquivos });
+  const daLinha: Texto | null = linha ? tx('resumo.doAgente', { autor, texto: ponto(linha.texto) }) : null;
 
   const ativa = db.get<{ agent_id: string; status: string }>("SELECT agent_id, status FROM runs WHERE task_id = ? AND workspace_id = ? AND status IN ('queued', 'running', 'waiting_user') ORDER BY created_at DESC LIMIT 1", taskId, ws);
-  const montar = (tom: Tom, texto: string, titulo: string, frase: string, itens: string[] = [], doAgente: string | null = null): ResumoTarefa =>
-    ({ situacao: { tom, texto }, faixa: { titulo, frase: ponto(maiuscula(frase)), itens, doAgente } });
+  const montar = (tom: Tom, texto: Texto, titulo: Texto, frase: Valor, itens: Valor[] = [], doAgente: Texto | null = null): ResumoTarefa => {
+    const f = comoFrase(frase);
+    return {
+      situacao: { tom, texto: emPt(texto), texto_t: texto },
+      faixa: { titulo: emPt(titulo), titulo_t: titulo, frase: emPt(f), frase_t: f, itens: itens.map((x) => emPt(x)), itens_t: itens, doAgente: doAgente ? emPt(doAgente) : null, doAgente_t: doAgente },
+    };
+  };
 
   // 1. espera o seu clique num cartão: a frase vem do que o serviço vai fazer, nunca do texto do agente
   // A proteção "depois de ler" é uma decisão à parte (a tela não a junta no "Aprovar" das ações nas contas): com ações
   // esperando, ela vai como item próprio; sozinha, é a frase
   if (!concluida && (pendentes.length || aprovacoes.length)) {
-    const frase = pendentes.length ? `Aguardando sua aprovação para ${fraseDoPendente(pendentes)}` : `Aguardando sua aprovação ${lista(aprovacoes.map((x) => `para ${x}`))}`;
-    const aParte = pendentes.length ? aprovacoes.map((x) => `À parte, decida no cartão abaixo: ${ponto(maiuscula(x))}`) : [];
-    return montar('decidir', 'Esperando sua aprovação', 'Para você decidir', frase, [...aParte, ...feitos.map((f) => `Já feito: ${f}`)], linha?.tipo === 'decidir' ? daLinha : null);
+    const frase = pendentes.length ? tx('resumo.frase.aprovarPara', { acoes: textoDoPendente(pendentes) }) : tx('resumo.frase.aprovar', { itens: aprovacoes.map((x) => tx('resumo.frase.paraX', { x })) });
+    const aParte = pendentes.length ? aprovacoes.map((x) => tx('resumo.item.aParte', { x: comoFrase(x) })) : [];
+    return montar('decidir', tx('resumo.situacao.esperandoAprovacao'), tx('resumo.titulo.paraDecidir'), frase, [...aParte, ...feitos.map(jaFeito)], linha?.tipo === 'decidir' ? daLinha : null);
   }
   // 2. concluída: o que foi feito, pelos fatos; a linha "Feito: …" do agente completa (ou é a frase, sem fatos). A linha
   // "Para você decidir: …" num card que concluiu sozinho nunca vira "o que foi feito": fica à parte, como o que é seu
   if (concluida) {
     const porVoce = res?.state === 'confirmado_humano' || t.completed_by === 'human';
     const feito = linha?.tipo === 'feito' ? linha : null;
-    const frase = feitos[0] ?? entregue ?? (feito ? ponto(maiuscula(feito.texto)) : porVoce ? 'Aprovada por você' : 'Concluída e conferida pelo sistema');
-    const resto = feitos.length ? [...feitos.slice(1), ...(entregue ? [entregue] : [])] : [];
-    const seu = linha?.tipo === 'decidir' ? [`Ficou para você decidir: ${ponto(linha.texto)}`] : [];
-    return montar('feito', 'Feito', 'O que foi feito', frase, [...resto, ...seu], (feitos.length || entregue) && feito ? daLinha : null);
+    const frase: Valor = feitos[0] ?? entregue ?? (feito ? ponto(maiuscula(feito.texto)) : porVoce ? tx('resumo.frase.aprovadaPorVoce') : tx('resumo.frase.conferidaSistema'));
+    const resto: Valor[] = feitos.length ? [...feitos.slice(1), ...(entregue ? [entregue] : [])] : [];
+    const seu = linha?.tipo === 'decidir' ? [tx('resumo.item.ficouParaVoce', { x: ponto(linha.texto) })] : [];
+    return montar('feito', tx('resumo.situacao.feito'), tx('resumo.titulo.feito'), frase, [...resto, ...seu], (feitos.length || entregue) && feito ? daLinha : null);
   }
   // 3. trabalhando agora (a etapa da vez, quando há plano)
   if (ativa) {
     const etapas = db.all<{ position: number; title: string; status: string; agent_id: string }>('SELECT position, title, status, agent_id FROM task_steps WHERE task_id = ? ORDER BY position', taskId);
     const cur = etapas.find((s) => s.status === 'em_andamento');
-    const quemAgora = nome(ativa.agent_id) ?? quem;
-    const frase = cur ? `${quemAgora} está na etapa ${cur.position} de ${etapas.length}: ${etapaCurta(cur.title)}` : `${quemAgora} está trabalhando nisto agora`;
-    return montar('trabalhando', 'Trabalhando', 'Agora', frase, feitos.map((f) => `Já feito: ${f}`));
+    const quemAgora: Valor = nome(ativa.agent_id) ?? quem;
+    const frase = cur ? tx('resumo.frase.naEtapa', { quem: quemAgora, etapa: cur.position, total: etapas.length, titulo: etapaCurta(cur.title) }) : tx('resumo.frase.trabalhandoAgora', { quem: quemAgora });
+    return montar('trabalhando', tx('resumo.situacao.trabalhando'), tx('resumo.titulo.agora'), frase, feitos.map(jaFeito));
   }
   const ajuda = db.all<{ number: number; name: string | null }>('SELECT t.number, a.name FROM tasks t LEFT JOIN agents a ON a.id = t.agent_id WHERE t.parent_task_id = ? AND t.completed = 0 AND t.archived = 0 ORDER BY t.number', taskId);
   const state = t.work_state ?? 'solicitada';
@@ -353,38 +371,46 @@ export function resumoDaTarefa(db: Db, ws: string, taskId: string, ctx: Ctx = {}
   // 4. o que só você resolve, a pergunta do agente, e o que você recusou
   if (state === 'aguardando_info' || res?.state === 'descartado') {
     const pergunta = typeof ev.pergunta === 'string' && ev.pergunta ? ev.pergunta : null;
-    if (pergunta) return montar('precisa', 'Precisa de você', 'Para você responder', `${quem} pergunta: ${pergunta}`, feitos.map((f) => `Já feito: ${f}`));
-    return montar('precisa', 'Precisa de você', 'O que falta', `Falta algo seu: ${sem(res?.justification ?? 'uma informação', /\s*Responda e ponha para trabalhar de novo\.?$/)}`, feitos.map((f) => `Já feito: ${f}`));
+    if (pergunta) return montar('precisa', tx('resumo.situacao.precisaDeVoce'), tx('resumo.titulo.responder'), tx('resumo.frase.pergunta', { quem, pergunta }), feitos.map(jaFeito));
+    const falta: Valor = res?.justification !== undefined && res?.justification !== null ? sem(res.justification, /\s*Responda e ponha para trabalhar de novo\.?$/) : tx('resumo.umaInformacao');
+    return montar('precisa', tx('resumo.situacao.precisaDeVoce'), tx('resumo.titulo.falta'), tx('resumo.frase.faltaAlgo', { falta }), feitos.map(jaFeito));
   }
   if (state === 'falha') {
-    if (pessoa) return montar('precisa', 'Precisa de você', 'Só você resolve', maiuscula(pessoa), feitos.map((f) => `Já feito: ${f}`));
+    if (pessoa) return montar('precisa', tx('resumo.situacao.precisaDeVoce'), tx('resumo.titulo.soVoce'), maiuscula(pessoa), feitos.map(jaFeito));
     const motivo = sem(res?.justification ?? '', /^Não foi feito( por inteiro)?:\s*/i).replace(/\s*O card (fica|continua) aberto\.?/g, '').replace(/\s*Nada conta como entregue sem evidência;?/g, '').trim();
-    return montar('falhou', 'Não foi feito', 'O que aconteceu', motivo ? `Não foi feito: ${motivo.charAt(0).toLowerCase()}${motivo.slice(1)}` : 'Não foi feito', feitos.map((f) => `Já feito: ${f}`));
+    return montar('falhou', tx('resumo.situacao.naoFeito'), tx('resumo.titulo.aconteceu'),
+      motivo ? tx('resumo.frase.naoFeitoMotivo', { motivo: `${motivo.charAt(0).toLowerCase()}${motivo.slice(1)}` }) : tx('resumo.frase.naoFeito'), feitos.map(jaFeito));
   }
   // 5. esperando a sua aprovação da entrega (ou a sua confirmação do que é fora do sistema). Nenhum cartão espera o
   // clique: Aprovar só conclui o card. A frase sai dos fatos (o documento, o que o serviço fez, quem entregou); a
   // linha do agente vai abaixo, com o nome dele, e um aviso quando ela fala em enviar, criar ou pagar
   if (state === 'aguardando_aprovacao') {
-    const aviso = avisoSemCartao(linha);
+    const aviso = avisoSemCartao(linha) ? tx('resumo.avisoSemCartao') : null;
     if (res?.state === 'sem_confirmacao') {
-      return montar('decidir', 'Esperando sua confirmação', 'Para você confirmar', `Confirme quando estiver feito: ${aspas(t.title)}`, entregue ? [entregue] : [], daLinha);
+      return montar('decidir', tx('resumo.situacao.esperandoConfirmacao'), tx('resumo.titulo.confirmar'), tx('resumo.frase.confirme', { titulo: aspas(t.title) }), entregue ? [entregue] : [], daLinha);
     }
     const comDoc = !feitos.length && !!doc;
-    const base = feitos.length ? `Aguardando sua aprovação. ${feitos[0]}`
-      : comDoc ? `Aguardando sua aprovação do documento ${aspas(doc!)}, entregue por ${autor}`
-      : `Aguardando sua aprovação da entrega de ${autor}`;
-    const itens = [...feitos.slice(1).map((f) => `Já feito: ${f}`), ...(entregue && !comDoc ? [entregue] : []), ...(aviso ? [aviso] : [])];
-    return montar('decidir', 'Esperando sua aprovação', 'Para você decidir', base, itens, daLinha);
+    const base = feitos.length ? tx('resumo.frase.aprovarFeito', { feito: feitos[0] })
+      : comDoc ? tx('resumo.frase.aprovarDocumento', { documento: aspas(doc!), autor })
+      : tx('resumo.frase.aprovarEntrega', { autor });
+    const itens: Valor[] = [...feitos.slice(1).map(jaFeito), ...(entregue && !comDoc ? [entregue] : []), ...(aviso ? [aviso] : [])];
+    return montar('decidir', tx('resumo.situacao.esperandoAprovacao'), tx('resumo.titulo.paraDecidir'), base, itens, daLinha);
   }
   // 6. não passou na conferência: você decide se aprova assim mesmo
   if (state === 'revisao') {
     let crit: Array<{ id: string; ok: boolean }> = [];
     try { crit = JSON.parse(res?.criteria ?? '[]') as typeof crit; } catch { crit = []; }
-    const motivos = unicos(crit.filter((c) => !c.ok && MOTIVO[c.id]).map((c) => MOTIVO[c.id]));
-    return montar('decidir', 'Precisa da sua decisão', 'Para você decidir', `A entrega de ${autor} não passou na conferência${motivos.length ? `: ${lista(motivos)}` : ''}. Aprove assim mesmo ou peça um ajuste`, [], daLinha);
+    const motivos = [...new Set(crit.filter((c) => !c.ok && MOTIVO.has(c.id)).map((c) => c.id))].map((id) => tx(`resumo.motivo.${id}` as Codigo));
+    return montar('decidir', tx('resumo.situacao.precisaDecisao'), tx('resumo.titulo.paraDecidir'), tx('resumo.frase.naoPassou', { autor, motivos: motivos.length ? tx('resumo.doisPontos', { t: motivos }) : '' }), [], daLinha);
   }
-  if (ajuda.length) return montar('trabalhando', 'Trabalhando', 'Agora', `Esperando ${lista(unicos(ajuda.map((x) => x.name ?? 'um colega')))} terminar a parte que falta (card ${ajuda.map((x) => `#${x.number}`).join(', ')})`, feitos.map((f) => `Já feito: ${f}`));
-  if (ctx.queue) return montar('fila', 'Na fila', 'Agora', `Na fila: ${ctx.queue.position}º de ${ctx.queue.total}. ${quem === 'A equipe' ? 'A coordenação encaminha' : `${quem} começa`} quando chegar a vez`);
-  if (['processamento', 'resultado', 'validacao'].includes(state)) return montar('trabalhando', 'Trabalhando', 'Agora', `${quem} está trabalhando nisto`);
-  return montar('fila', 'Esperando para começar', 'Agora', t.agent_id ? `${quem} começa assim que puder` : 'A coordenação vai encaminhar a quem faz');
+  if (ajuda.length) {
+    const nomes = unicos(ajuda.map((x) => x.name ?? '\u0000')).map((n): Valor => (n === '\u0000' ? tx('resumo.umColega') : n));
+    return montar('trabalhando', tx('resumo.situacao.trabalhando'), tx('resumo.titulo.agora'), tx('resumo.frase.esperandoColegas', { nomes, cards: ajuda.map((x) => `#${x.number}`).join(', ') }), feitos.map(jaFeito));
+  }
+  if (ctx.queue) {
+    const { position: posicao, total } = ctx.queue;
+    return montar('fila', tx('resumo.situacao.naFila'), tx('resumo.titulo.agora'), semNome ? tx('resumo.frase.naFilaCoordenacao', { posicao, total }) : tx('resumo.frase.naFila', { posicao, total, quem }));
+  }
+  if (['processamento', 'resultado', 'validacao'].includes(state)) return montar('trabalhando', tx('resumo.situacao.trabalhando'), tx('resumo.titulo.agora'), tx('resumo.frase.trabalhando', { quem }));
+  return montar('fila', tx('resumo.situacao.esperandoComecar'), tx('resumo.titulo.agora'), t.agent_id ? tx('resumo.frase.comecaLogo', { quem }) : tx('resumo.frase.coordenacaoVaiEncaminhar'));
 }

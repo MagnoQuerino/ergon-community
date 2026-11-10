@@ -94,7 +94,10 @@ const quote = (s: string): string => semSegredos(s).split(/\r?\n/).map((l) => `>
 /** Texto longo: corta com aviso de quanto ficou de fora. */
 const long = (s: string, max = MAX_TEXT): string => (s.length > max ? `${s.slice(0, max)}\n[… cortado aqui: mais ${(s.length - max).toLocaleString('pt-BR')} caracteres]` : s);
 /** Trechos em que o agente diz que não conseguiu (triagem por palavras: pode haver falso positivo). */
-const CANT = /nao (tenho|consigo|consegui|posso|pude)( [a-z]+){0,3} (acesso|acessar|ler|criar|enviar|escrever|salvar|gravar|conectar|consultar|permissao|ferramenta)|sem (acesso|permissao)|nao tenho como|nao e possivel|nao foi possivel|fora do meu alcance/;
+const CANT_PT = /nao (tenho|consigo|consegui|posso|pude)( [a-z]+){0,3} (acesso|acessar|ler|criar|enviar|escrever|salvar|gravar|conectar|consultar|permissao|ferramenta)|sem (acesso|permissao)|nao tenho como|nao e possivel|nao foi possivel|fora do meu alcance/;
+/** o mesmo, quando o agente responde em inglês ("I couldn't access", "I don't have permission", "it wasn't possible") */
+const CANT_EN = /\b(i|we) (can't|cannot|can not|couldn't|could not|am unable to|was unable to|wasn't able to|was not able to|don't|do not|didn't|did not)( [a-z]+){0,3} (access|read|create|send|write|save|connect|look up|permission|tool)|\bwithout (access|permission)\b|\b(i|we) have no (access|permission|way)\b|\b(it|this) (isn't|is not|wasn't|was not) possible\b|\bbeyond my reach\b/;
+const CANT = { exec: (s: string) => CANT_PT.exec(s) ?? CANT_EN.exec(s.replace(/[’‘]/g, "'")) };
 
 export function activityReport(db: Db, o: ReportOpts): { markdown: string; filename: string; periodo: { de: string; ate: string; ajustes: string[] }; stats: { bytes: number; cortes: string[]; execucoes: number; mensagens: number; eventos: number } } {
   const ws = o.workspaceId;

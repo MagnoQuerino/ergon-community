@@ -21,6 +21,7 @@ import type { EspacoMotores, MotorSaude, PorqueDadosAntigos } from './motors.ts'
 import { machineDefault } from './concurrency.ts';
 import { BACKUPS_MANTER } from './backup.ts';
 import { decimal, paraTela } from '../lib/texto-tela.ts';
+import { junto, reconhecer, tx, type Codigo, type Texto, type Valor } from '../lib/textos.ts';
 
 /** O nome do componente da IA na Saúde (o id continua "motor": é dado, não aparece). */
 const EQUIPE = 'Equipe de IA';
@@ -30,7 +31,8 @@ export const SAUDE_LABEL: Record<Saude, string> = { operacional: 'Operacional', 
 const ORDER: Saude[] = ['operacional', 'limitado', 'atencao', 'indisponivel'];
 const worst = (a: Saude, b: Saude) => (ORDER.indexOf(a) >= ORDER.indexOf(b) ? a : b);
 
-export interface Componente { id: string; nome: string; estado: Saude; detalhe: string }
+/** nome_t, detalhe_t: o mesmo texto com código (lib/textos.ts), para a tela traduzir; sem eles, vale o português */
+export interface Componente { id: string; nome: string; estado: Saude; detalhe: string; nome_t?: Texto; detalhe_t?: Valor }
 /** O aviso da cópia antiga (sem jargão): por que ela não saiu sozinha, e que quem decide é a pessoa. */
 export function textoDadosAntigos(porque: PorqueDadosAntigos, mantida = false): string {
   const pq = porque === 'sem-copia' ? 'o cofre cifrado da equipe foi criado sem ela, então o que estiver nela só existe ali'
@@ -41,7 +43,7 @@ export function textoDadosAntigos(porque: PorqueDadosAntigos, mantida = false): 
 }
 
 /** espaco: um motor por pessoa (gerente de motores): o que a limpeza liberou e os cofres de contas que já não existem */
-export interface PainelSaude { estado: Saude; rotulo: string; resumo: string; componentes: Componente[]; geradoEm: string; espaco?: EspacoMotores | null }
+export interface PainelSaude { estado: Saude; rotulo: string; resumo: string; componentes: Componente[]; geradoEm: string; espaco?: EspacoMotores | null; rotulo_t?: Texto; resumo_t?: Valor }
 
 export interface HealthDeps {
   db: Db; cfg: Config; vault: Vault; hermes: HermesClient | null;
@@ -182,7 +184,24 @@ export async function healthPanel(d: HealthDeps): Promise<PainelSaude> {
   let estado: Saude = 'operacional';
   for (const x of c) estado = worst(estado, x.id === 'motor' && x.estado === 'indisponivel' ? 'atencao' : x.estado);
   const problemas = c.filter((x) => x.estado !== 'operacional');
-  return { estado, rotulo: SAUDE_LABEL[estado], resumo: problemas.length ? problemas.map((x) => `${x.nome}: ${x.detalhe}`).join(' · ') : 'tudo funcionando', componentes: c, geradoEm: new Date().toISOString(), espaco };
+  const comT = c.map(comTextos);
+  const problemasT = comT.filter((x) => x.estado !== 'operacional');
+  // o resumo com código só quando cada pedaço é conhecido (senão, a tela mostra o português inteiro)
+  const resumoT = problemasT.every((x) => x.nome_t && x.detalhe_t) ? (problemasT.length ? junto(problemasT.map((x) => tx('saude.problema', { nome: x.nome_t!, detalhe: x.detalhe_t! })), ' · ') : tx('saude.tudoFuncionando')) : undefined;
+  return { estado, rotulo: SAUDE_LABEL[estado], rotulo_t: tx(`saude.estado.${estado}`), resumo: problemas.length ? problemas.map((x) => `${x.nome}: ${x.detalhe}`).join(' · ') : 'tudo funcionando', ...(resumoT ? { resumo_t: resumoT } : {}), componentes: comT, geradoEm: new Date().toISOString(), espaco };
+}
+
+/**
+ * A parte da Saúde com o código do nome e do detalhe: o detalhe é feito de pedaços (" · "), e só ganha código quando
+ * todos são frases conhecidas (lib/textos.ts, prefixo saude.); um pedaço com o erro ou um nome de fora deixa o português.
+ */
+function comTextos(x: Componente): Componente {
+  // o nome pelo id da parte, e só quando é o nome fixo de sempre (o da Equipe de IA, por exemplo)
+  const nome = reconhecer(x.nome, 'saude.nome.');
+  const nomeT = nome && nome.codigo === `saude.nome.${x.id}` ? tx(nome.codigo as Codigo) : undefined;
+  const partes = x.detalhe.split(' · ').map((p) => reconhecer(p, 'saude.'));
+  const detalheT = partes.every((p): p is Texto => !!p) ? (partes.length === 1 ? partes[0] : junto(partes, ' · ')) : undefined;
+  return { ...x, ...(nomeT ? { nome_t: nomeT } : {}), ...(detalheT ? { detalhe_t: detalheT } : {}) };
 }
 
 const pct = (xs: number[], p: number) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor((s.length - 1) * p))]; };

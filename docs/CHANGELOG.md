@@ -1,5 +1,15 @@
 # Novidades
 
+## 1.1.0-rc.26 (pré-versão de teste)
+
+- **Ergon em inglês.** Em Configurações › Minha conta (ou no menu do seu avatar), escolha Português ou English: a tela
+  inteira muda na hora, sem recarregar, e a escolha fica guardada para você. Na primeira vez, vale o idioma do
+  navegador. A equipe responde no idioma em que você escreve.
+- **Comandos em inglês no lançador:** `ergon install`, `ergon update`, `ergon uninstall`, `ergon help`… Os nomes em
+  português continuam funcionando.
+- **Pacotes da loja mais seguros:** a assinatura dos pacotes oficiais agora cobre todo o conteúdo do pacote.
+- **Cards mais compactos:** títulos longos ficam em até 3 linhas, com "…", e as etiquetas não saem mais da caixa.
+
 ## 1.1.0-rc.25 (pré-versão de teste)
 
 - **Detalhes da tarefa, para decidir de relance.** No topo, em destaque, o que a equipe pede a você: "Aguardando sua

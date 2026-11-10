@@ -11,6 +11,8 @@ export type Destino =
   | { tipo: 'endereco'; href: string }
   | { tipo: 'aba'; aba: 'eventos' };
 
+import { t } from '../i18n/index.ts';
+
 const ID = /^[a-z]{2,8}_[A-Za-z0-9]{6,64}$/;
 const KIND = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 const id = (v: string | null | undefined): string | null => (v && ID.test(v) ? v : null);
@@ -54,12 +56,12 @@ export function destinoDoRegistro(e: { target_type: string | null; target_id?: s
 /** O que a linha diz que abre (o "title" e o rótulo para quem usa leitor de tela). */
 export function rotuloDoDestino(d: Destino): string {
   switch (d.tipo) {
-    case 'card': return 'Abrir o card';
-    case 'conversa': return 'Abrir a conversa';
-    case 'agente': return 'Abrir o agente';
-    case 'execucao': return 'Abrir o que esta execução fez';
-    case 'aba': return 'Ver nos eventos de origem';
-    case 'endereco': return d.href.startsWith('#rotinas') ? 'Abrir a rotina' : d.href.startsWith('#conexoes') ? 'Abrir a conexão' : 'Abrir a lista';
+    case 'card': return t('servidor.destino.card');
+    case 'conversa': return t('servidor.destino.conversa');
+    case 'agente': return t('servidor.destino.agente');
+    case 'execucao': return t('servidor.destino.execucao');
+    case 'aba': return t('servidor.destino.aba');
+    case 'endereco': return d.href.startsWith('#rotinas') ? t('servidor.destino.rotina') : d.href.startsWith('#conexoes') ? t('servidor.destino.conexao') : t('servidor.destino.lista');
   }
 }
 
@@ -69,5 +71,5 @@ export function rotuloDoDestino(d: Destino): string {
  */
 export function rotuloDaLinha(d: Destino, resumo: string): string {
   const r = resumo.replace(/\s+/g, ' ').trim();
-  return r ? `${rotuloDoDestino(d)}: ${r}` : rotuloDoDestino(d);
+  return r ? t('servidor.destino.linha', { rotulo: rotuloDoDestino(d), resumo: r }) : rotuloDoDestino(d);
 }

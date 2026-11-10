@@ -92,8 +92,8 @@ test('T8: na Microsoft, o próximo passo de Tarefas só depois de liberada a lei
 
 test('T4: a renovação e a limpeza falam da equipe, não do motor (Saúde e Contas de IA)', () => {
   assert.equal(FRASE_RENOVANDO, 'Atualizando a equipe para a versão nova… os pedidos esperam e seguem sozinhos.');
-  assert.equal(textoDoLiberado({ liberado: 2.4 * 1024 ** 3, removidas: 3 }, false), '2,4 GB liberados: 3 versão(ões) antiga(s) da equipe apagada(s). Nenhum dado seu foi apagado.');
-  assert.equal(textoDoLiberado({ liberado: null, removidas: 1 }, true), 'Espaço liberado dentro do ambiente do Ergon: 1 versão(ões) antiga(s) da equipe apagada(s). Nenhum dado seu foi apagado.');
+  assert.equal(textoDoLiberado({ liberado: 2.4 * 1024 ** 3, removidas: 3 }, false), '2,4 GB liberados: 3 versões antigas da equipe apagadas. Nenhum dado seu foi apagado.');
+  assert.equal(textoDoLiberado({ liberado: null, removidas: 1 }, true), 'Espaço liberado dentro do ambiente do Ergon: 1 versão antiga da equipe apagada. Nenhum dado seu foi apagado.');
   assert.equal(textoDoLiberado({ liberado: 0, removidas: 0 }, false), 'Nada para liberar agora: as versões antigas já tinham saído.');
   const ultima = textoUltimaLimpeza({ at: '2026-11-02T12:00:00Z', liberado: 5 * 1024 ** 2, removidas: 2 }, false);
   assert.match(ultima, /^Última limpeza das versões antigas da equipe \(\d{2}\/\d{2}\/2026\): 5 MB liberados\.$/);
@@ -160,13 +160,19 @@ test('T12/T4: o jargão apontado na rc.24 saiu das telas', () => {
     ['views/ConexoesView.tsx', /O token precisa ter permissão de escrita/],
     ['components/AiAccounts.tsx', /sem custo por token/],
     ['views/AjudaView.tsx', /sem custo por token/],
+    ['i18n/pt/ajuda.ts', /sem custo por token/],
     ['views/SaudePanel.tsx', /volume do Ergon|do motor|nenhum motor/],
-    ['components/ChatCards.tsx', /ambiente isolado do motor de IA/],
+    // o aviso de permissão do ChatCards mora no dicionário de conversas
+    ['i18n/pt/conversas.ts', /ambiente isolado do motor de IA|\bmotor\b/],
+    ['i18n/en/conversas.ts', /\b(engine|container)s?\b/i],
     // revisão dos textos da rc.24: "motor" nas telas de conta, pessoas, segurança e proteção; "Skill"; ponto decimal no custo
     ['components/AiAccounts.tsx', /motor de IA/],
     ['components/AuthFlow.tsx', /motor de IA/],
     ['views/PessoasPanel.tsx', /\bmotor\b/],
     ['views/SegurancaPanel.tsx', /\bmotor\b/],
+    // os textos dessas telas moraram para os dicionários da área conta: o jargão também não entra lá
+    ['i18n/pt/conta.ts', /\bmotor\b/i],
+    ['i18n/en/conta.ts', /\bengine\b|\bcontainer\b|\btoken\b|\bHermes\b/i],
     ['views/world/WorldPanel.tsx', /motor de IA/],
     ['views/PacotesPanel.tsx', /'Skill'/],
     ['views/OtherViews.tsx', /cost_usd\.toFixed\(4\)\}/],
@@ -200,17 +206,20 @@ test('as telas usam os textos acima (e não as cópias antigas)', () => {
   tem(sp, /rotuloDoCofre\(cofre\.alvo\.conta\)/, 'T6');
 });
 
-test('decisão 19: o histórico do card diz em português o que a equipe fez ao tentar de novo (nunca o nome cru do registro)', () => {
+test('decisão 19: o histórico do card diz em português o que a equipe fez ao tentar de novo (nunca o nome cru do registro)', async () => {
   // os rótulos do histórico saíram do componente para lib/tarefa-tela.ts (linhas curtas, com o "ver mais")
   const td = codigo('lib/tarefa-tela.ts');
   const rotulos = td.slice(td.indexOf('const ACTION_LABEL'), td.indexOf('};', td.indexOf('const ACTION_LABEL')));
   const mostra = td.slice(td.indexOf('const SHOW_RESULT'), td.indexOf(']);', td.indexOf('const SHOW_RESULT')));
   for (const acao of ['task.persist', 'task.persist_decision', 'task.persist_exhausted', 'task.help_step', 'conexao.pessoa']) {
-    assert.match(rotulos, new RegExp(`'${acao.replace('.', '\.')}': '[^']+'`), `${acao}: rótulo na tela`);
+    assert.match(rotulos, new RegExp(`'${acao.replace('.', '\.')}': 'tarefa\\.[^']+'`), `${acao}: rótulo na tela (uma chave do dicionário)`);
     assert.ok(mostra.includes(`'${acao}'`), `${acao}: o histórico mostra o que houve`);
   }
-  assert.match(rotulos, /'task\.persist': 'A equipe tentou de novo'/);
-  assert.match(rotulos, /'conexao\.pessoa': 'Só você resolve'/);
+  // o texto vem do dicionário (i18n/pt/tarefa.ts), no idioma da tela
+  const { ACTION_LABEL } = await import('./tarefa-tela.ts'); const { t } = await import('../i18n/index.ts');
+  assert.equal(t(ACTION_LABEL['task.persist']), 'A equipe tentou de novo');
+  assert.equal(t(ACTION_LABEL['conexao.pessoa']), 'Só você resolve');
+  assert.equal(t(ACTION_LABEL['task.regra']), 'Liberado pela sua regra', 'o histórico do card diz que foi pela regra');
 });
 
 test('Conexões: as escolhas de cuidado (aprovar antes de abrir sites ou rodar programas, confirmar antes de organizar) aparecem claras', () => {
@@ -218,7 +227,8 @@ test('Conexões: as escolhas de cuidado (aprovar antes de abrir sites ou rodar p
   for (const r of [ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, AVISO_APROVAR_SEM_CARTAO]) { assert.doesNotMatch(r, jargao); assert.doesNotMatch(r, PROIBIDAS); }
   assert.match(ROTULO_APROVAR_DEPOIS_DE_LER, /aprovação antes de abrir sites ou rodar programas/);
   assert.match(ROTULO_CONFIRMAR_ORGANIZAR, /confirmação antes de organizar/);
-  const cx = codigo('views/ConexoesView.tsx');
+  // os textos da tela de Conexões ficam no dicionário (i18n/pt/conexoes.ts): o código e o português juntos
+  const cx = codigo('views/ConexoesView.tsx') + codigo('i18n/pt/conexoes.ts');
   tem(cx, /ROTULO_APROVAR_DEPOIS_DE_LER/, 'a opção está na tela de Conexões');
   tem(cx, /\/api\/conexoes\/aprovar-depois-de-ler/, 'e liga e desliga de verdade');
   // equipe ainda sem o pedido de aprovação: a tela avisa que, por enquanto, isso barra em vez de mostrar o cartão
@@ -231,7 +241,7 @@ test('Conexões: as escolhas de cuidado (aprovar antes de abrir sites ou rodar p
 });
 
 test('rc.26: as regras num lugar só (Conexões › Regras), com os botões do alcance e do prazo nos cartões', () => {
-  const cr = codigo('components/CartaoRegra.tsx');
+  const cr = codigo('components/CartaoRegra.tsx') + codigo('i18n/pt/conexoes.ts');
   for (const r of ['Só neste pedido', 'Por 24 h', 'Sempre', "'1 h'", "'8 h'", "'72 h'"]) tem(cr, new RegExp(r), `botão ${r}`);
   for (const arq of ['components/ChatPanel.tsx', 'components/DecisionsPanel.tsx']) {
     tem(codigo(arq), /<BotoesRegra /, `${arq}: o cartão de regra com o alcance`);
@@ -241,12 +251,10 @@ test('rc.26: as regras num lugar só (Conexões › Regras), com os botões do a
   const cx = codigo('views/ConexoesView.tsx');
   tem(cx, /id="conn-regras"/, 'a seção Regras em Conexões');
   tem(cx, /\/api\/conexoes\/regras\/\$\{x\.id\}\/desfazer/, 'Desfazer de verdade');
-  tem(cx, /decision: 'rejected' \}\), 'Desligada\.'/, 'as regras de texto se desligam ali');
+  tem(cx, /decision: 'rejected' \}\), t\('conexoes\.regras\.desligada'\)/, 'as regras de texto se desligam ali');
   const at = codigo('views/OtherViews.tsx');
   naoTem(at, /Regras propostas/, 'a aba antiga saiu de Atividade');
   tem(at, /'#conexoes\?regras'/, 'o endereço antigo leva a Conexões › Regras');
-  const td = codigo('lib/tarefa-tela.ts');
-  tem(td, /'task\.regra': 'Liberado pela sua regra'/, 'o histórico do card diz que foi pela regra');
 });
 
 test('a cópia antiga dos dados da equipe: a pergunta diz que não tem volta, sem jargão; a frase do pedido é a que o servidor exige', async () => {
@@ -263,7 +271,7 @@ test('a cópia antiga dos dados da equipe: a pergunta diz que não tem volta, se
   assert.match(tela, /c\.id === 'dados-antigos'/);
   // manter também é decisão: o botão existe, chama a rota, e some depois de mantida (apagar segue)
   assert.match(tela, /\/api\/saude\/dados-antigos\/manter'/);
-  assert.match(tela, /!esp\?\.dadosAntigos\?\.mantida && <button[^\n]*>Manter a cópia<\/button>/);
+  assert.match(tela, /!esp\?\.dadosAntigos\?\.mantida && <button[^\n]*>\{t\('configuracoes\.saude\.manterCopia'\)\}<\/button>/);
   const { TEXTO_MANTIDOS_DADOS_ANTIGOS } = await import('./textos-tela.ts');
   assert.doesNotMatch(TEXTO_MANTIDOS_DADOS_ANTIGOS, CRU);
   assert.doesNotMatch(TEXTO_MANTIDOS_DADOS_ANTIGOS, PROIBIDAS);
@@ -295,7 +303,8 @@ test('baixar meus dados e excluir a conta: o arquivo sai legível, os backups de
   const pes = fs.readFileSync(path.join(views, 'PessoasPanel.tsx'), 'utf8');
   const conta = fs.readFileSync(path.join(views, 'ContaPanel.tsx'), 'utf8');
   assert.ok(!seg.includes('nem por backup') && seg.includes('TEXTO_EXCLUIR_CONTA') && seg.includes('<BaixarMeusDados'), 'Segurança: baixar antes de excluir');
-  assert.ok(seg.indexOf('<BaixarMeusDados') < seg.indexOf('Excluir a minha conta…'), 'o passo de baixar vem antes do botão de excluir');
+  // o botão "Excluir a minha conta…" pela chave (o texto está em i18n/pt/conta.ts)
+  assert.ok(seg.indexOf('<BaixarMeusDados') < seg.indexOf("t('conta.seg.excluirComecar')"), 'o passo de baixar vem antes do botão de excluir');
   assert.ok(!pes.includes('nem você nem ela conseguem recuperar') && pes.includes('textoRemoverPessoa('), 'Pessoas: o aviso certo');
   assert.ok(conta.includes('<BaixarMeusDados'), 'Minha conta: baixar a qualquer momento');
 });

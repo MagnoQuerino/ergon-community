@@ -6,6 +6,9 @@
  */
 import { boxAt, type Box, type Vec2 } from './geom.ts';
 import { benchSeat, type Activity } from './buildings.ts';
+import type { Chave } from '../i18n/index.ts';
+/** As chaves dos nomes dos lugares ("Ágora"). */
+export type ChaveDoLugar = Extract<Chave, `cidade.lugar.${string}`>;
 
 export type AreaKind = 'agora' | 'teatro' | 'termas' | 'ginasio' | 'bairro';
 export type AreaPropKind = 'olive' | 'cypress' | 'fountain' | 'mural' | 'bench' | 'brazier' | 'house' | 'herm' | 'amphora' | 'plant' | 'bush';
@@ -16,7 +19,8 @@ export interface TheaterGeo { x: number; z: number; r0: number; row: number; row
 
 export interface AreaDef {
   kind: AreaKind;
-  name: string;
+  /** o nome do lugar: a chave do dicionário (traduzida na hora de mostrar) */
+  name: ChaveDoLugar;
   paved: Box[];
   blocks: Box[];
   circles: Array<{ x: number; z: number; r: number }>;
@@ -47,7 +51,7 @@ function agora(): AreaDef {
   const mural: Box = { x0: -3.8, z0: 0.6, x1: -0.8, z1: 1.2 };
   const benches: Vec2[] = [[-2.4, 4.6], [3.4, 4.4]];
   return {
-    kind: 'agora', name: 'Ágora',
+    kind: 'agora', name: 'cidade.lugar.agora',
     paved: [{ x0: -HALF, z0: -HALF, x1: HALF, z1: HALF }],
     blocks: [mural, ...benches.map(([x, z]) => boxAt(x, z, 0.9, 0.26))],
     circles: [fountain, { x: -5.6, z: -5.6, r: 0.3 }, { x: 5.6, z: -5.6, r: 0.3 }, { x: -5.8, z: 3.0, r: 0.45 }, { x: 5.9, z: 5.8, r: 0.45 }, { x: -5.9, z: 5.9, r: 0.45 }],
@@ -58,11 +62,11 @@ function agora(): AreaDef {
       { kind: 'olive', x: -5.8, z: 3.0, k: 1 }, { kind: 'olive', x: 5.9, z: 5.8, k: 1 }, { kind: 'cypress', x: -5.9, z: 5.9, k: 0.9 },
     ],
     activities: [
-      act({ id: 'fonte-o', spot: [fountain.x - fountain.r - 0.35, fountain.z + 0.1], facing: 'front', mirror: false, gestures: ['reach', 'none'], dur: [4000, 7000], label: 'na fonte', expr: 'smile' }),
-      act({ id: 'fonte-n', spot: [fountain.x + 0.1, fountain.z - fountain.r - 0.35], facing: 'front', mirror: true, gestures: ['reach', 'none'], dur: [4000, 7000], label: 'na fonte', expr: 'smile' }),
-      act({ id: 'mural-1', spot: [mural.x0 + 0.7, mural.z1 + 0.7], facing: 'back', mirror: false, gestures: ['none', 'think'], dur: [5000, 9000], label: 'lendo os avisos' }),
-      act({ id: 'mural-2', spot: [mural.x1 - 0.7, mural.z1 + 0.7], facing: 'back', mirror: false, gestures: ['think', 'point'], dur: [5000, 9000], label: 'lendo os avisos' }),
-      act({ id: 'banco', spot: benchSeat(benches[1], 1), facing: 'front', mirror: true, gestures: ['none', 'think'], perch: true, dur: [8000, 14000], label: 'sentado na ágora', expr: 'smile' }),
+      act({ id: 'fonte-o', spot: [fountain.x - fountain.r - 0.35, fountain.z + 0.1], facing: 'front', mirror: false, gestures: ['reach', 'none'], dur: [4000, 7000], label: 'cidade.vida.naFonte', expr: 'smile' }),
+      act({ id: 'fonte-n', spot: [fountain.x + 0.1, fountain.z - fountain.r - 0.35], facing: 'front', mirror: true, gestures: ['reach', 'none'], dur: [4000, 7000], label: 'cidade.vida.naFonte', expr: 'smile' }),
+      act({ id: 'mural-1', spot: [mural.x0 + 0.7, mural.z1 + 0.7], facing: 'back', mirror: false, gestures: ['none', 'think'], dur: [5000, 9000], label: 'cidade.vida.lendoAvisos' }),
+      act({ id: 'mural-2', spot: [mural.x1 - 0.7, mural.z1 + 0.7], facing: 'back', mirror: false, gestures: ['think', 'point'], dur: [5000, 9000], label: 'cidade.vida.lendoAvisos' }),
+      act({ id: 'banco', spot: benchSeat(benches[1], 1), facing: 'front', mirror: true, gestures: ['none', 'think'], perch: true, dur: [8000, 14000], label: 'cidade.vida.sentadoNaAgora', expr: 'smile' }),
     ],
     chats: [[-1.8, -2.6], [2.4, 2.6], [-4.4, -1.0]],
     seats: [], speaker: null, wrestle: null, houses: [],
@@ -92,11 +96,11 @@ function teatro(): AreaDef {
     return r >= T.r0 - 0.1 && a >= T.a0 - 6 && a <= T.a1 + 6 && (r <= outer + 0.2 || a > T.a0 + 10 && a < T.a1 - 10);
   };
   return {
-    kind: 'teatro', name: 'Teatro',
+    kind: 'teatro', name: 'cidade.lugar.teatro',
     paved: [{ x0: T.x - 1.0, z0: T.z + 1.6, x1: T.x + 1.0, z1: HALF }, { x0: T.x + 1.6, z0: T.z - 1.0, x1: HALF, z1: T.z + 1.0 }],
     blocks: [], circles: [{ x: -6.0, z: -6.0, r: 0.45 }, { x: 5.6, z: 5.6, r: 0.45 }], blockTest,
     props: [{ kind: 'cypress', x: -6.0, z: -6.0, k: 1.1 }, { kind: 'olive', x: 5.6, z: 5.6, k: 0.9 }, { kind: 'brazier', x: T.x + 2.9, z: T.z + 2.9 }],
-    activities: [act({ id: 'ensaio', spot: [T.x - 0.4, T.z - 0.4], facing: 'back', mirror: false, gestures: ['talk', 'point', 'talk', 'none'], dur: [6000, 10000], label: 'ensaiando um discurso', bubble: 'talk' })],
+    activities: [act({ id: 'ensaio', spot: [T.x - 0.4, T.z - 0.4], facing: 'back', mirror: false, gestures: ['talk', 'point', 'talk', 'none'], dur: [6000, 10000], label: 'cidade.vida.ensaiando', bubble: 'talk' })],
     chats: [[T.x + 3.2, T.z + 2.4]], seats, speaker: [T.x - 0.4, T.z - 0.4], wrestle: null, houses: [], npcSpots: [], theater: T,
   };
 }
@@ -110,10 +114,10 @@ function termas(): AreaDef {
   const swim = (lane: number) => {
     const z = lanes[lane];
     const tour: Vec2[] = [[-3.0, 0.2], [-2.4, z], [2.2, z], [-2.3, z], [2.2, z], [-2.4, z], [-3.0, 0.2], [-4.2, 0.2]];
-    return act({ id: `nadar-${lane}`, spot: [-4.2, 0.2], facing: 'front', mirror: false, gestures: ['reach', 'none'], dur: [0, 0], tour, label: 'nadando', expr: 'smile' });
+    return act({ id: `nadar-${lane}`, spot: [-4.2, 0.2], facing: 'front', mirror: false, gestures: ['reach', 'none'], dur: [0, 0], tour, label: 'cidade.vida.nadando', expr: 'smile' });
   };
   return {
-    kind: 'termas', name: 'Termas',
+    kind: 'termas', name: 'cidade.lugar.termas',
     paved: [{ x0: -HALF, z0: -3, x1: HALF, z1: 3 }],
     blocks: [{ x0: water.x0 - rim, z0: water.z0 - rim, x1: water.x1 + rim, z1: water.z1 + rim }, ...benches.map(([x, z]) => boxAt(x, z, 0.9, 0.26))],
     circles: [{ x: 6.2, z: -2.3, r: 0.3 }, { x: -6.2, z: -2.3, r: 0.3 }, { x: -5.8, z: -2.4, r: 0.25 }, { x: 6.2, z: 0.4, r: 0.3 }],
@@ -123,7 +127,7 @@ function termas(): AreaDef {
     ],
     activities: [
       swim(0), swim(1), swim(2),
-      ...benches.flatMap((b, i) => ([-1, 1] as const).map((s) => act({ id: `espreguicadeira-${i}${s}`, spot: benchSeat(b, s), facing: 'front', mirror: true, gestures: ['none'], perch: true, dur: [9000, 16000], label: 'descansando', expr: 'smile' }))),
+      ...benches.flatMap((b, i) => ([-1, 1] as const).map((s) => act({ id: `espreguicadeira-${i}${s}`, spot: benchSeat(b, s), facing: 'front', mirror: true, gestures: ['none'], perch: true, dur: [9000, 16000], label: 'cidade.vida.descansando', expr: 'smile' }))),
     ],
     chats: [[3.6, 0.9]], seats: [], speaker: null, wrestle: null, houses: [], npcSpots: [],
     pool: { water, rim, steps, deck: { x0: -HALF, z0: -3, x1: HALF, z1: 3 }, lanes },
@@ -138,7 +142,7 @@ function ginasio(): AreaDef {
   const run: Vec2[] = [[-5.9, 5.8], [-5.9, -5.8], [-5.9, 5.8], [-5.9, -5.8], [-5.9, 4.2]];
   const run2: Vec2[] = [[-5.6, -5.6], [-5.6, 5.6], [-5.6, -5.6], [-5.6, 5.6], [-5.6, -4.0]];
   return {
-    kind: 'ginasio', name: 'Ginásio',
+    kind: 'ginasio', name: 'cidade.lugar.ginasio',
     paved: [],
     blocks: [boxAt(bench[0], bench[1], 0.9, 0.26)],
     circles: [{ x: -4.4, z: 6.0, r: 0.3 }, { x: 4.4, z: -6.0, r: 0.45 }, { x: 6.1, z: -5.8, r: 0.45 }, { x: 6.1, z: -2.6, r: 0.45 }, { x: 5.4, z: 5.2, r: 0.45 }],
@@ -147,12 +151,12 @@ function ginasio(): AreaDef {
       { kind: 'cypress', x: 4.4, z: -6.0, k: 1 }, { kind: 'cypress', x: 6.1, z: -5.8, k: 1.1 }, { kind: 'cypress', x: 6.1, z: -2.6, k: 0.9 }, { kind: 'olive', x: 5.4, z: 5.2, k: 1 },
     ],
     activities: [
-      act({ id: 'correr', spot: [-5.9, 4.2], facing: 'front', mirror: true, gestures: ['none'], dur: [0, 0], tour: run, fast: true, label: 'correndo', expr: 'focused' }),
-      act({ id: 'correr-2', spot: [-5.6, -4.0], facing: 'front', mirror: true, gestures: ['none'], dur: [0, 0], tour: run2, fast: true, label: 'correndo', expr: 'focused' }),
-      act({ id: 'disco', spot: [-2.2, -1.8], facing: 'front', mirror: false, gestures: ['reach', 'reach', 'point', 'none'], dur: [6000, 10000], label: 'arremessando o disco', expr: 'focused' }),
-      act({ id: 'exercicio', spot: [1.6, 2.4], facing: 'front', mirror: true, gestures: ['joy', 'none'], dur: [5000, 8000], label: 'se exercitando', expr: 'focused' }),
-      act({ id: 'exercicio-2', spot: [1.8, -1.6], facing: 'front', mirror: false, gestures: ['joy', 'none'], dur: [5000, 8000], label: 'se exercitando', expr: 'focused' }),
-      ...([-1, 1] as const).map((s) => act({ id: `arquibancada-${s}`, spot: benchSeat(bench, s), facing: 'front', mirror: true, gestures: ['none', 'talk'], perch: true, dur: [8000, 14000], label: 'assistindo', expr: 'smile' })),
+      act({ id: 'correr', spot: [-5.9, 4.2], facing: 'front', mirror: true, gestures: ['none'], dur: [0, 0], tour: run, fast: true, label: 'cidade.vida.correndo', expr: 'focused' }),
+      act({ id: 'correr-2', spot: [-5.6, -4.0], facing: 'front', mirror: true, gestures: ['none'], dur: [0, 0], tour: run2, fast: true, label: 'cidade.vida.correndo', expr: 'focused' }),
+      act({ id: 'disco', spot: [-2.2, -1.8], facing: 'front', mirror: false, gestures: ['reach', 'reach', 'point', 'none'], dur: [6000, 10000], label: 'cidade.vida.disco', expr: 'focused' }),
+      act({ id: 'exercicio', spot: [1.6, 2.4], facing: 'front', mirror: true, gestures: ['joy', 'none'], dur: [5000, 8000], label: 'cidade.vida.exercitando', expr: 'focused' }),
+      act({ id: 'exercicio-2', spot: [1.8, -1.6], facing: 'front', mirror: false, gestures: ['joy', 'none'], dur: [5000, 8000], label: 'cidade.vida.exercitando', expr: 'focused' }),
+      ...([-1, 1] as const).map((s) => act({ id: `arquibancada-${s}`, spot: benchSeat(bench, s), facing: 'front', mirror: true, gestures: ['none', 'talk'], perch: true, dur: [8000, 14000], label: 'cidade.vida.assistindo', expr: 'smile' })),
     ],
     chats: [[3.4, 4.4]], seats: [], speaker: null, wrestle: [[-1.0, 0.8], [-0.2, 0.0]], houses: [], npcSpots: [],
     gym: { track, court, discus: [-2.2, -2.0], ring: [-0.6, 0.4] },
@@ -171,7 +175,7 @@ function bairro(): AreaDef {
     return { id, x0, z0: row.z0, x1, z1: row.z1, h: HEIGHTS[id], door: [dx, row.z1 + 0.35] as Vec2, street: [dx, row.lane] as Vec2 };
   }));
   return {
-    kind: 'bairro', name: 'Bairro',
+    kind: 'bairro', name: 'cidade.lugar.bairro',
     paved: [...HOUSE_ROWS.map((r) => ({ x0: -HALF, z0: r.lane - 0.6, x1: HALF, z1: r.lane + 0.6 })), { x0: -3.05, z0: -HALF, x1: -1.9, z1: HALF }, { x0: 1.9, z0: -HALF, x1: 3.05, z1: HALF }],
     blocks: houses.map((h) => ({ x0: h.x0, z0: h.z0, x1: h.x1, z1: h.z1 })),
     circles: [],

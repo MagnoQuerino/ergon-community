@@ -30,6 +30,8 @@ const ler = (rel: string) => {
   if (rel.startsWith('community/publico/')) return fs.readFileSync(path.join(RAIZ, '..', rel.slice('community/publico/'.length)), 'utf8');
   return fs.readFileSync(fs.existsSync(path.join(RAIZ, rel)) ? path.join(RAIZ, rel) : path.join(RAIZ, '..', rel), 'utf8');
 };
+/** a tela de Conexões: o código e os textos dela, que ficam no dicionário (web/src/i18n/pt/conexoes.ts) */
+const lerTela = () => `${ler('web/src/views/ConexoesView.tsx')}\n${ler('web/src/i18n/pt/conexoes.ts')}`;
 /** os guias (docs/ e o README público) não vão para a imagem de teste do Docker: lá os testes de texto pulam */
 const COM_GUIAS = (() => { try { ler('docs/CONEXOES.md'); ler('community/publico/README.md'); return true; } catch { return false; } })();
 /** o que é para o agente: parâmetro, id, nome de outra ação, prefixo de token, linguagem de consulta */
@@ -244,31 +246,33 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
   test('WhatsApp: "nunca sozinhos" saiu, e quem aceitou aquele texto aceita de novo', () => {
     assert.ok(WA_RISKS_VERSION >= 3);
     assert.equal(risksAccepted({ riscos: { versao: 2 } }), false);
-    const tela = ler('web/src/views/ConexoesView.tsx');
+    const tela = lerTela();
     assert.doesNotMatch(tela, /nunca sozinhos|Nada é enviado sozinho/);
     assert.match(tela, /Liberar tudo" em Conexões, o que não partiu de você/);
     assert.doesNotMatch(ler('community/publico/docs/WHATSAPP.md'), /nunca sozinhos/);
   });
 
   test('Conexões: a escrita e o alcance como são', () => {
-    const tela = ler('web/src/views/ConexoesView.tsx');
+    const tela = lerTela();
+    const codigo = ler('web/src/views/ConexoesView.tsx');
     assert.doesNotMatch(tela, /Gerar o token \(só leitura\)/, 'o link do Trello pede leitura e escrita');
     assert.doesNotMatch(tela, /canais que você liberar/, 'não há escolha de canais: o alcance é o da credencial');
     assert.doesNotMatch(tela, /disabled=\{busy \|\| !filled\}/, 'Conectar não fica apagado sem dizer o que falta');
     assert.match(tela, /Aqui o teste só lê; a escrita aparece no primeiro uso/);
     assert.match(ler('community/publico/README.md'), /CRM e atendimento; financeiro sem mover dinheiro/);
     assert.doesNotMatch(tela, /Só leitura: os agentes consultam cobranças/, 'o financeiro também escreve; só leitura é o atalho da conexão');
-    assert.match(tela, /\/> Só leitura<\/label>/, 'o atalho é uma caixa de marcar, nunca um botão apagado');
+    assert.match(codigo, /\/> \{t\('conexoes\.soLeitura\.rotulo'\)\}<\/label>/, 'o atalho é uma caixa de marcar, nunca um botão apagado');
+    assert.match(tela, /'soLeitura\.rotulo': 'Só leitura'/);
     assert.match(tela, /Reconectar do novo jeito/);
     // o erro do atalho aparece junto da caixa, e não dentro da lista que vem fechada
-    const caixa = tela.indexOf('/> Só leitura</label>'); const lista = tela.indexOf('<details className="conn-acoes">', caixa);
-    const erroDoAtalho = tela.indexOf('{errSoLeitura && <p className="error"', caixa);
+    const caixa = codigo.indexOf("/> {t('conexoes.soLeitura.rotulo')}</label>"); const lista = codigo.indexOf('<details className="conn-acoes">', caixa);
+    const erroDoAtalho = codigo.indexOf('{errSoLeitura && <p className="error"', caixa);
     assert.ok(erroDoAtalho > caixa && erroDoAtalho < lista, 'o erro do "Só leitura" fica fora da lista fechada');
     assert.match(tela, /api\.put\(`\/api\/conexoes\/\$\{i\.kind\}\/so-leitura`, \{ on \}\); estado\.reload\(\); \} catch \(e\) \{ setErrSoLeitura\(errMsg\(e\)\)/);
   });
 
   test('Microsoft: a conta e o "Teams como canal" separados; cada etapa com o próximo passo, sem botão apagado esperando', () => {
-    const tela = ler('web/src/views/ConexoesView.tsx');
+    const tela = lerTela();
     assert.match(tela, /Microsoft 365: a equipe age na sua conta\./);
     // conversar pelo Teams deixou de ser "em breve" (rc.26: o app público, ligado por código), e segue separado da conta
     assert.match(tela, /Conversar com a equipe pelo Teams: é outra coisa\./);
@@ -305,14 +309,19 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
 
   test('listas ligadas nos dois sentidos: sem "espelho" na tela', () => {
     // o nome do arquivo (conexoes/espelho.ts) pode aparecer nos comentários; a palavra, não
-    for (const f of ['web/src/views/TarefasView.tsx', 'web/src/views/AjudaView.tsx', 'web/src/components/CommandPalette.tsx']) assert.doesNotMatch(ler(f), /espelh(?!o\.ts)/i, f);
-    assert.doesNotMatch(ler('web/src/views/ConexoesView.tsx'), /espelho/);
+    for (const f of ['web/src/views/TarefasView.tsx', 'web/src/views/AjudaView.tsx', 'web/src/i18n/pt/ajuda.ts', 'web/src/components/CommandPalette.tsx']) assert.doesNotMatch(ler(f), /espelh(?!o.ts)/i, f);
+    assert.doesNotMatch(lerTela(), /espelho/);
     // (types.ts puxa código do navegador: lido como texto)
-    assert.match(ler('web/src/lib/types.ts'), /mirror: 'ligada'/);
+    assert.match(ler('web/src/lib/types.ts'), /mirror: 'servidor\.origem\.mirror'/);
+    assert.match(ler('web/src/i18n/pt/servidor.ts'), /'origem\.mirror': 'ligada'/);
     // os rótulos do histórico do card ficam em lib/tarefa-tela.ts (as linhas curtas da tela de detalhes)
     const detalhe = ler('web/src/lib/tarefa-tela.ts');
-    assert.match(detalhe, /'mirror\.push': 'Enviado ao aplicativo'/);
-    assert.match(detalhe, /'mirror\.push\.error': 'Não foi ao aplicativo'/);
+    // (cada rótulo é uma chave do dicionário da tela, web/src/i18n/pt/tarefa.ts)
+    assert.match(detalhe, /'mirror\.push': 'tarefa\.acao\.enviadoAoAplicativo'/);
+    assert.match(detalhe, /'mirror\.push\.error': 'tarefa\.acao\.naoFoiAoAplicativo'/);
+    const textos = ler('web/src/i18n/pt/tarefa.ts');
+    assert.match(textos, /'acao\.enviadoAoAplicativo': 'Enviado ao aplicativo'/);
+    assert.match(textos, /'acao\.naoFoiAoAplicativo': 'Não foi ao aplicativo'/);
   });
 
   test('docs: nada de botão que não existe nem frase para o dono do projeto', () => {
@@ -329,8 +338,8 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.match(ler('docs/ROTINAS.md'), /o que parte de uma rotina pede confirmação, a menos que você ligue "Liberar tudo" em Conexões/);
     // nenhum texto que chega à pessoa promete a confirmação sem dizer que "Liberar tudo" a tira
     const promessa = /(?:O|o) que não partiu de você pede a sua confirmação(?!, a menos que você ligue "Liberar tudo")/;
-    for (const f of ['community/publico/README.md', 'web/src/views/AjudaView.tsx', 'web/src/views/ConexoesView.tsx']) assert.doesNotMatch(ler(f), promessa, f);
-    assert.equal(ler('web/src/views/ConexoesView.tsx').match(/o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões/g)?.length, 2, 'Microsoft e Google');
+    for (const f of ['community/publico/README.md', 'web/src/views/AjudaView.tsx', 'web/src/i18n/pt/ajuda.ts', 'web/src/views/ConexoesView.tsx', 'web/src/i18n/pt/conexoes.ts']) assert.doesNotMatch(ler(f), promessa, f);
+    assert.equal(lerTela().match(/o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões/g)?.length, 2, 'Microsoft e Google');
     // e "Liberar tudo" não desfaz o que a pessoa desligou
     assert.match(ler('docs/CONEXOES.md'), /"Liberar tudo, por minha conta": tira as confirmações da regra e a aprovação depois de ler conteúdo privado[\s\S]{0,140}o que você desligou continua desligado/);
     const aspasia = CHARACTERS.find((c) => c.key === 'aspasia')!.bio;
@@ -340,7 +349,7 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
 
   test('quadros ligados: a tela e o doc dizem que desligar também vale para o quadro, e confirmar só para os agentes', () => {
     const frase = /Desligar uma ação também impede que o que você faz nos quadros ligados chegue ao aplicativo\. "Sempre pedir confirmação" vale só para os agentes\./;
-    assert.match(ler('web/src/views/ConexoesView.tsx'), frase);
+    assert.match(lerTela(), frase);
     assert.match(ler('docs/CONEXOES.md'), /desligar uma ação também impede que o que você faz no quadro .* chegue\s+ao aplicativo\. "Sempre pedir confirmação" vale só para os agentes/);
   });
 
@@ -351,14 +360,25 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
 
   test('cartão de ação numa conta: quem recusa lê "Recusando…", e o já decidido noutro lugar só relê', () => {
     // "Enviando…" só no cartão que envia a uma conta; ativar rotina, abrir cards e apagar de vez dizem o que fazem
-    assert.match(ler('web/src/components/ChatPanel.tsx'), /deciding\[p\.id\] === 'reject' \? 'Recusando…' : p\.kind === 'conexao' \? 'Enviando…' : p\.kind === 'depois_de_ler' \? 'Aprovando…' : p\.kind === 'purge' \? 'Apagando…' : 'Aplicando…'/);
-    assert.match(ler('web/src/components/DecisionsPanel.tsx'), /decisao === 'reject' \? 'Recusando…' : 'Recusar'/);
+    // a conversa traduzida: as chaves no componente e o texto no dicionário português
+    assert.match(ler('web/src/components/ChatPanel.tsx'), /deciding\[p\.id\] === 'reject' \? t\('conversas\.proposta\.recusando'\) : p\.kind === 'conexao' \? t\('conversas\.proposta\.enviando'\) : p\.kind === 'depois_de_ler' \? t\('conversas\.proposta\.aprovando'\) : p\.kind === 'purge' \? t\('conversas\.proposta\.apagando'\) : t\('conversas\.proposta\.aplicando'\)/);
+    const dicConversas = ler('web/src/i18n/pt/conversas.ts');
+    for (const [chave, texto] of [['recusando', 'Recusando…'], ['enviando', 'Enviando…'], ['aprovando', 'Aprovando…'], ['apagando', 'Apagando…'], ['aplicando', 'Aplicando…']]) {
+      assert.ok(dicConversas.includes(`'proposta.${chave}': '${texto}'`), `conversas.proposta.${chave}`);
+    }
+    assert.match(ler('web/src/components/DecisionsPanel.tsx'), /decisao === 'reject' \? t\('servidor\.decisoes\.recusando'\) : t\('servidor\.decisoes\.recusar'\)/);
+    assert.match(ler('web/src/i18n/pt/servidor.ts'), /'decisoes\.recusando': 'Recusando…'/);
     const detalhe = ler('web/src/components/TaskDetail.tsx');
     assert.match(detalhe, /e instanceof ApiError && e\.status === 409 && e\.code === 'decided'\) return null/);
     // a faixa de decisão: "Aprovar" decide o que a frase diz (um cartão, ou todos de uma vez); cada botão diz o que está indo
-    assert.match(detalhe, /'Aprovando…' : n > 1 \? `Aprovar \(\$\{n\}\)` : 'Aprovar'/);
-    assert.match(detalhe, /'Recusando…' : 'Recusar'/);
-    assert.match(detalhe, /indo\(`reject:\$\{c\.id\}`, 'Recusar este', 'Recusando…'\)/);
+    // (os textos vêm do dicionário da tela: web/src/i18n/pt/tarefa.ts)
+    assert.match(detalhe, /t\('tarefa\.aprovando'\) : n > 1 \? t\('tarefa\.aprovarN', \{ n \}\) : t\('tarefa\.aprovar'\)/);
+    assert.match(detalhe, /t\('tarefa\.recusando'\) : t\('tarefa\.recusar'\)/);
+    assert.match(detalhe, /indo\(`reject:\$\{c\.id\}`, t\('tarefa\.cartoes\.recusarEste'\), t\('tarefa\.recusando'\)\)/);
+    const textos = ler('web/src/i18n/pt/tarefa.ts');
+    for (const [chave, texto] of [['aprovando', 'Aprovando…'], ['aprovarN', 'Aprovar ({n})'], ['aprovar', 'Aprovar'], ['recusando', 'Recusando…'], ['recusar', 'Recusar'], ['cartoes.recusarEste', 'Recusar este']]) {
+      assert.ok(textos.includes(`'${chave}': '${texto}'`), `${chave}: ${texto}`);
+    }
     // a aprovação depois de ler: os botões do prazo (1 h, 8 h, 72 h, sempre)
     assert.match(detalhe, /<BotoesPrazo /);
   });

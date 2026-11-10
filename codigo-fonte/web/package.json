@@ -1,6 +1,6 @@
 {
   "name": "@ergon/web",
-  "version": "1.1.0-rc.25",
+  "version": "1.1.0-rc.26",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test src/world/*.test.ts src/iso/*.test.ts src/brand/*.test.ts src/lib/*.test.ts"
+    "test": "node --test src/world/*.test.ts src/iso/*.test.ts src/brand/*.test.ts src/lib/*.test.ts src/i18n/*.test.ts"
   },
   "devDependencies": {
     "@simplewebauthn/browser": "14.0.0",

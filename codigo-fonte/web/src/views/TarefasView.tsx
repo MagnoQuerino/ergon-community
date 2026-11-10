@@ -6,6 +6,7 @@ import { pushRecent } from '../lib/recents.ts';
 import { SOURCE_LABEL, type BoardSummary, type BoardView, type Integration, type TaskCard } from '../lib/types.ts';
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
+import { fmtHora, tn, useT } from '../i18n/index.ts';
 
 const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } };
@@ -16,6 +17,7 @@ const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } cat
  * ou editar aqui muda lá (conexoes/espelho.ts).
  */
 export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
+  const t = useT();
   const boards = useResource<BoardSummary[]>('/api/boards', ['tasks.changed']);
   const ints = useResource<Integration[]>('/api/integrations', ['integrations.changed']);
   const mine = (boards.data ?? []).filter((b) => b.audience === 'user');
@@ -31,7 +33,7 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   useEffect(() => { if (hashBoard && hashBoard !== boardId && mine.some((b) => b.id === hashBoard)) setBoardId(hashBoard); }, [hashBoard, boards.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const opened = view.data?.tasks.find((t) => t.id === openTask);
   useEffect(() => {
-    if (opened && boardId) pushRecent({ kind: 'card', id: opened.id, label: `#${opened.number} ${opened.title}`, where: 'Tarefas', href: `#tarefas?board=${boardId}&card=${opened.id}` });
+    if (opened && boardId) pushRecent({ kind: 'card', id: opened.id, label: `#${opened.number} ${opened.title}`, where: t('quadro.tarefas.titulo'), href: `#tarefas?board=${boardId}&card=${opened.id}` });
   }, [opened?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [newTitle, setNewTitle] = useState('');
   const [newDue, setNewDue] = useState('');
@@ -48,17 +50,17 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
 
   const create = async () => {
     if (!boardId) return;
-    if (!newTitle.trim()) { setErr('Escreva o título da tarefa.'); return; }
+    if (!newTitle.trim()) { setErr(t('quadro.tarefas.escrevaTitulo')); return; }
     setErr(null);
     try { await api.post('/api/tasks', { title: newTitle.trim(), boardId, ...(newDue ? { dueOn: newDue } : {}) }); setNewTitle(''); setNewDue(''); view.reload(); } catch (e) { setErr(errMsg(e)); }
   };
   const move = async (taskId: string, columnId: string) => {
-    const t = view.data?.tasks.find((x) => x.id === taskId);
-    if (!t || t.column_id === columnId) return;
-    try { await api.patch(`/api/tasks/${taskId}`, { columnId, expectedRevision: t.revision }); view.reload(); } catch (e) { setErr(errMsg(e)); }
+    const card = view.data?.tasks.find((x) => x.id === taskId);
+    if (!card || card.column_id === columnId) return;
+    try { await api.patch(`/api/tasks/${taskId}`, { columnId, expectedRevision: card.revision }); view.reload(); } catch (e) { setErr(errMsg(e)); }
   };
-  const toggle = async (t: TaskCard, completed: boolean) => {
-    try { await api.patch(`/api/tasks/${t.id}`, { completed, expectedRevision: t.revision }); view.reload(); } catch (e) { setErr(errMsg(e)); }
+  const toggle = async (card: TaskCard, completed: boolean) => {
+    try { await api.patch(`/api/tasks/${card.id}`, { completed, expectedRevision: card.revision }); view.reload(); } catch (e) { setErr(errMsg(e)); }
   };
   const pick = async (kind: string) => {
     setPicking({ kind, lists: null });
@@ -79,48 +81,48 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   return (
     <div className="page page--board">
       <header className="page__head">
-        <h2>Tarefas</h2>
-        <p className="muted">As suas tarefas. As da equipe de agentes ficam em Fluxos da equipe.</p>
+        <h2>{t('quadro.tarefas.titulo')}</h2>
+        <p className="muted">{t('quadro.tarefas.sub')}</p>
       </header>
       <div className="toolbar">
-        <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v.startsWith('+')) void pick(v.slice(1)); else { setBoardId(v); setOpenTask(null); } }} aria-label="Lista">
+        <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v.startsWith('+')) void pick(v.slice(1)); else { setBoardId(v); setOpenTask(null); } }} aria-label={t('quadro.tarefas.lista')}>
           <optgroup label="Ergon">{mine.filter((b) => b.origin === 'native').map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>
           {grupos.map((i) => (
-            <optgroup key={i.kind} label={i.state === 'connected' ? i.name : `${i.name} (precisa reconectar)`}>
+            <optgroup key={i.kind} label={i.state === 'connected' ? i.name : t('quadro.tarefas.precisaReconectar', { nome: i.name })}>
               {mine.filter((b) => b.source === i.kind).map((b) => <option key={b.id} value={b.id}>{b.name.replace(/^(Planner|To Do) › /, '$1 › ')}</option>)}
-              {i.state === 'connected' && <option value={`+${i.kind}`}>+ Ligar outra lista do {SOURCE_LABEL[i.kind] ?? i.name}…</option>}
+              {i.state === 'connected' && <option value={`+${i.kind}`}>{t('quadro.tarefas.ligarOutra', { app: SOURCE_LABEL[i.kind] ?? i.name })}</option>}
             </optgroup>
           ))}
         </select>
         <ViewToggle view={mode} onChange={(v) => { setMode(v); save('ergon.tarefas.view', v); }} />
         {mirror && current && (
           <span className={`badge ${current.sync_state === 'error' ? 'badge--err' : ''}`}>
-            {current.sync_state === 'error' ? `falha ao ler: ${current.last_error}` : `ligada a ${SOURCE_LABEL[current.source ?? ''] ?? 'aplicativo'} · lido às ${current.last_synced_at ? new Date(current.last_synced_at).toLocaleTimeString('pt-BR', { timeStyle: 'short' }) : '—'}`}
+            {current.sync_state === 'error' ? t('quadro.tarefas.falhaAoLer', { erro: current.last_error ?? '' }) : t('quadro.tarefas.ligadaA', { app: SOURCE_LABEL[current.source ?? ''] ?? t('quadro.tarefas.aplicativo'), hora: current.last_synced_at ? fmtHora(current.last_synced_at) : '—' })}
           </span>
         )}
-        {mirror && <button className="btn btn--sm" onClick={sync} disabled={syncing}>{syncing ? 'Atualizando…' : 'Atualizar agora'}</button>}
+        {mirror && <button className="btn btn--sm" onClick={sync} disabled={syncing}>{syncing ? t('quadro.tarefas.atualizando') : t('quadro.tarefas.atualizarAgora')}</button>}
         {(
           <form className="row grow" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-            <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Nova tarefa… (dá para escrever o prazo: “até sexta”)" maxLength={200} aria-label="Título da nova tarefa" />
-            <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} aria-label="Prazo (opcional)" title="Prazo (opcional)" className="new-due" />
-            <button className="btn btn--primary" type="submit">Adicionar</button>
+            <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={t('quadro.tarefas.nova')} maxLength={200} aria-label={t('quadro.tarefas.novaAria')} />
+            <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} aria-label={t('quadro.tarefas.prazoOpcional')} title={t('quadro.tarefas.prazoOpcional')} className="new-due" />
+            <button className="btn btn--primary" type="submit">{t('quadro.tarefas.adicionar')}</button>
           </form>
         )}
       </div>
       {caiu && (
-        <p className="warn">A conexão com {caiu.name} precisa ser refeita: até lá, esta lista não troca mudanças com o aplicativo. <button className="linkish" onClick={() => onGo('conexoes')}>Reconectar em Conexões</button></p>
+        <p className="warn">{t('quadro.tarefas.conexaoCaiu', { nome: caiu.name })} <button className="linkish" onClick={() => onGo('conexoes')}>{t('quadro.tarefas.reconectar')}</button></p>
       )}
       {!connected.length && (
-        <p className="hint">Usa Trello, Jira, Asana, monday.com, ClickUp, Notion, Planner, To Do, Todoist ou outro app de tarefas? <button className="linkish" onClick={() => onGo('conexoes')}>Conecte em Conexões</button> e escolha a lista aqui: ela fica ligada nos dois sentidos (dar check, mover ou editar aqui muda lá, e o que mudar lá chega aqui).</p>
+        <p className="hint">{tn('quadro.tarefas.dicaConectar', { link: <button className="linkish" onClick={() => onGo('conexoes')}>{t('quadro.tarefas.conecte')}</button> })}</p>
       )}
       {picking && (
         <section className="card picklist">
-          <div className="row"><strong>Qual lista do {SOURCE_LABEL[picking.kind] ?? picking.kind} ligar?</strong><span className="grow" /><button className="btn btn--sm btn--ghost" onClick={() => setPicking(null)}>Fechar</button></div>
+          <div className="row"><strong>{t('quadro.tarefas.qualLista', { app: SOURCE_LABEL[picking.kind] ?? picking.kind })}</strong><span className="grow" /><button className="btn btn--sm btn--ghost" onClick={() => setPicking(null)}>{t('quadro.tarefas.fechar')}</button></div>
           {picking.error && <p className="error">{picking.error}</p>}
-          {!picking.lists && <p className="muted">Lendo as listas da sua conta…</p>}
+          {!picking.lists && <p className="muted">{t('quadro.tarefas.lendoListas')}</p>}
           <div className="row row--wrap">
             {picking.lists?.map((l) => <button key={l.externalId} className="chip" disabled={syncing} onClick={() => mirrorList(picking.kind, l.externalId)}>{l.name}</button>)}
-            {picking.lists && !picking.lists.length && !picking.error && <span className="muted">Nenhuma lista encontrada nesta conta.</span>}
+            {picking.lists && !picking.lists.length && !picking.error && <span className="muted">{t('quadro.tarefas.semListas')}</span>}
           </div>
         </section>
       )}

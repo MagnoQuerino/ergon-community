@@ -5,6 +5,7 @@ import { enfileirarEspelho, type OpEspelho } from './conexoes/espelho.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { validDue } from './due.ts';
 import type { TitleSource } from './card-title.ts';
+import { chavePeloNome, marcarColunas } from './colunas.ts';
 
 export type TaskOrigin = 'manual' | 'chat' | 'teams' | 'whatsapp' | 'mirror' | 'demo';
 
@@ -67,16 +68,19 @@ export function ensureBoards(db: Db, bus: Bus | null, workspaceId: string, userC
     if (!db.get("SELECT 1 AS x FROM boards WHERE workspace_id = ? AND origin = 'native' AND audience = 'user'", workspaceId)) {
       const bid = id('brd');
       db.run("INSERT INTO boards (id, workspace_id, name, origin, audience, created_at) VALUES (?, ?, 'Minhas tarefas', 'native', 'user', ?)", bid, workspaceId, now());
-      userColumns.forEach((c, i) => db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', id('col'), workspaceId, bid, c, i));
+      userColumns.forEach((c, i) => db.run('INSERT INTO columns (id, workspace_id, board_id, name, position, system_key) VALUES (?, ?, ?, ?, ?, ?)', id('col'), workspaceId, bid, c, i,
+        chavePeloNome(c, 'user')));
       changed = true;
     }
-    // quadro da equipe: "Com você" (o que espera a sua aprovação), entre Em andamento e Concluído
+    // as colunas de fábrica sem o código fixo (quadro de antes, backup antigo): marcadas pelo nome, uma vez
+    marcarColunas(db, workspaceId);
+    // quadro da equipe: "Com você" (o que espera a sua aprovação), entre Em andamento e Concluído (achados pelo código)
     for (const b of db.all<{ id: string }>("SELECT id FROM boards WHERE workspace_id = ? AND origin = 'native' AND audience = 'team'", workspaceId)) {
-      if (db.get("SELECT 1 AS x FROM columns WHERE board_id = ? AND name = 'Com você'", b.id)) continue;
-      const done = db.get<{ position: number }>("SELECT position FROM columns WHERE board_id = ? AND name = 'Concluído'", b.id);
+      if (db.get("SELECT 1 AS x FROM columns WHERE board_id = ? AND system_key = 'with_you'", b.id)) continue;
+      const done = db.get<{ position: number }>("SELECT position FROM columns WHERE board_id = ? AND system_key = 'done'", b.id);
       if (!done) continue;
       db.run('UPDATE columns SET position = position + 1 WHERE board_id = ? AND position >= ?', b.id, done.position);
-      db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', id('col'), workspaceId, b.id, 'Com você', done.position);
+      db.run("INSERT INTO columns (id, workspace_id, board_id, name, position, system_key) VALUES (?, ?, ?, ?, ?, 'with_you')", id('col'), workspaceId, b.id, 'Com você', done.position);
       changed = true;
     }
     if (!getSetting(db, workspaceId, 'fixtures.retired')) {
@@ -249,7 +253,7 @@ export function updateTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
 export function boardView(db: Db, workspaceId: string, boardId: string) {
   const board = db.get<{ audience: string }>('SELECT * FROM boards WHERE id = ? AND workspace_id = ?', boardId, workspaceId);
   if (!board) throw notFound('quadro');
-  const columns = db.all('SELECT id, name, position, external_id FROM columns WHERE board_id = ? AND workspace_id = ? ORDER BY position', boardId, workspaceId);
+  const columns = db.all('SELECT id, name, position, external_id, system_key FROM columns WHERE board_id = ? AND workspace_id = ? ORDER BY position', boardId, workspaceId);
   // no quadro da equipe, cada card mostra também o andamento real: execução ativa, revisão e repasses
   const tasks = db.all(
     `SELECT t.id, t.number, t.column_id, t.agent_id, t.title, t.description, t.completed, t.completed_by, t.completed_at, t.origin,
@@ -285,7 +289,9 @@ export function taskLog(db: Db, workspaceId: string, taskId: string) {
 
 // Similaridade --------------------------------------------------------------------------------
 
-const STOP = new Set(['a', 'o', 'as', 'os', 'de', 'da', 'do', 'das', 'dos', 'e', 'para', 'pra', 'com', 'um', 'uma', 'no', 'na', 'em', 'que', 'por', 'favor', 'preciso', 'precisamos', 'tarefa']);
+const STOP = new Set(['a', 'o', 'as', 'os', 'de', 'da', 'do', 'das', 'dos', 'e', 'para', 'pra', 'com', 'um', 'uma', 'no', 'na', 'em', 'que', 'por', 'favor', 'preciso', 'precisamos', 'tarefa',
+  // inglês
+  'the', 'and', 'for', 'with', 'please', 'need', 'task', 'to', 'of', 'in', 'on', 'an']);
 
 export function tokens(s: string): Set<string> {
   return new Set(fold(s).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.has(w)));

@@ -55,8 +55,10 @@ Botão "Abrir a pasta de registros" no diagnóstico da tela de abertura. Windows
 
 - **Uma versão só.** Cada versão publica, juntos e com o mesmo número: as imagens Docker, o pacote local, o
   instalador Windows, o `.deb` e o AppImage, com as somas `SHA256SUMS-*.txt`.
-- **Atualizar a janela não atualiza os serviços.** Os serviços são atualizados por `ergon atualizar` (com backup
+- **Atualizar a janela não atualiza os serviços.** Os serviços são atualizados por `ergon update` (com backup
   antes). O aplicativo confere se o Ergon instalado é compatível e, se não for, avisa e oferece o navegador.
+  Vindo da 1.1.0-rc.25 ou de antes, o lançador instalado só conhece os nomes em português: para chegar a esta
+  versão, use `ergon atualizar` (depois dela, os dois nomes valem).
 - **Sem atualização automática do aplicativo nesta versão.** A versão nova se instala por cima com o instalador
   novo; os dados ficam, porque estão no Docker.
 

@@ -62,7 +62,7 @@ test('indicadores: só o que existe; compacto = número; singular e plural', () 
 });
 
 test('barra geral: Modo Foco com ícone e texto (o texto nunca some) e a música sempre à vista, fora da Cidade', () => {
-  assert.match(app, /className=\{`tb-pill topbar__focus[\s\S]{0,400}?>\s*<Icon name="focus" size=\{16\} \/><span className="topbar__focus-txt">Modo Foco<\/span>/);
+  assert.match(app, /className=\{`tb-pill topbar__focus[\s\S]{0,400}?>\s*<Icon name="focus" size=\{16\} \/><span className="topbar__focus-txt">\{t\('geral\.barra\.modoFoco'\)\}<\/span>/);
   assert.match(app, /<MusicButton onCredits=/);
   assert.doesNotMatch(cidade, /MusicButton/, 'a música saiu da tela da Cidade');
   // nenhuma regra esconde o texto do Modo Foco, o próprio botão ou a música
@@ -126,7 +126,10 @@ test('degrau 5 (janela bem estreita): só as entregas vão para o "Mais"; antes 
 
 test('barra da Cidade: o nome no Localizar entra na assinatura dos degraus (voltar para a Cidade volta ao degrau certo)', () => {
   assert.match(barra, /const assinatura = `\$\{largura\}\|\$\{pickKey\}\|/);
-  assert.match(cidade, /pickKey=\{structs\.find\(\(x\) => x\.id === card\)\?\.name \?\? 'Cidade'\}/);
+  // o mesmo nome que o Localizar mostra (o de fábrica no idioma atual) e, sem construção escolhida, "Cidade"
+  assert.match(cidade, /pickKey=\{cardStruct \? nomeDaConstrucao\(cardStruct\.name, cardStruct\.kind\) : t\('cidade\.localizar\.cidade'\)\}/);
+  // trocar de idioma muda a largura dos textos: o degrau recomeça
+  assert.match(barra, /const assinatura = `[^`]*\|\$\{idioma\}`;/);
 });
 
 test('barra da Cidade recolhida: preferência da pessoa (servidor), não do navegador', () => {
@@ -161,7 +164,7 @@ test('janela estreita: o Estado e o workspace saem da barra, mas o balão deles 
   assert.match(css, /\.topbar__wswrap \{ display: contents; \}/);
   assert.match(css, /\.topbar__ws \{ display: none; \}/);
   // a gaveta tem o que saiu: Estado, Workspace (abre o balão dele), Atualização disponível
-  assert.match(app, /abrirBalao\('workspace'\)[\s\S]{0,200}Workspace: \{s\.workspace\.name\}/);
+  assert.match(app, /abrirBalao\('workspace'\)[\s\S]{0,200}t\('geral\.nav\.workspace', \{ nome: s\.workspace\.name \}\)/);
   assert.match(app, /\{upd && <button className="nav" onClick=\{\(\) => \{ setNavOpen\(false\); openUpdates\(\); \}\}>/);
   assert.match(app, /setStatusOpen\(true\); \}\}><Icon name="pulse" \/>/);
 });

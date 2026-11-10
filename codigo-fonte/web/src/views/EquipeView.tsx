@@ -7,6 +7,7 @@ import { agentOptions } from '../lib/team.ts';
 import type { AppState, BoardSummary, BoardView } from '../lib/types.ts';
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
+import { useT } from '../i18n/index.ts';
 
 /**
  * Fluxos da equipe: o quadro dos agentes. Eles registram as demandas, pegam a próxima da fila, pedem ajuda uns
@@ -14,6 +15,7 @@ import { Board, ViewToggle } from '../components/Board.tsx';
  * Para mudar algo, conversa com a coordenação.
  */
 export function EquipeView({ state, compact, onAskCoordinator, reload }: { state: AppState; compact?: boolean; onAskCoordinator: (text: string) => void; reload: () => void }) {
+  const t = useT();
   const boards = useResource<BoardSummary[]>('/api/boards', ['tasks.changed']);
   const team = boards.data?.find((b) => b.audience === 'team');
   const view = useResource<BoardView>(team ? `/api/boards/${team.id}` : null, ['tasks.changed', 'runs.changed']);
@@ -27,20 +29,20 @@ export function EquipeView({ state, compact, onAskCoordinator, reload }: { state
   // card aberto entra nos recentes da busca (Ctrl+K)
   const opened = view.data?.tasks.find((t) => t.id === openTask);
   useEffect(() => {
-    if (opened) pushRecent({ kind: 'card', id: opened.id, label: `#${opened.number} ${opened.title}`, where: 'Fluxos da equipe', href: `#equipe?card=${opened.id}` });
+    if (opened) pushRecent({ kind: 'card', id: opened.id, label: `#${opened.number} ${opened.title}`, where: t('quadro.equipe.titulo'), href: `#equipe?card=${opened.id}` });
   }, [opened?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // o filtro "Agente": quem tem card neste quadro (o nome vem no card), não a equipe inteira
   const options = useMemo(() => agentOptions(view.data?.tasks ?? []), [view.data?.tasks]);
   // escolhido sem card agora (o último foi concluído e saiu, por exemplo): volta a mostrar todos
   const pick = !who || who === '-' || !view.data || options.some((o) => o.id === who) ? who : '';
-  const tasks = (view.data?.tasks ?? []).filter((t) => !pick || t.agent_id === pick || (pick === '-' && !t.agent_id));
+  const tasks = (view.data?.tasks ?? []).filter((x) => !pick || x.agent_id === pick || (pick === '-' && !x.agent_id));
   const auto = state.teamAutorun;
   const setAuto = async (enabled: boolean) => {
     setErr(null);
     try { await api.put('/api/team/autorun', { enabled }); reload(); } catch (e) { setErr(errMsg(e)); }
   };
-  const working = (view.data?.tasks ?? []).filter((t) => t.run_status).length;
-  const todo = view.data?.columns.find((c) => c.name === 'A fazer')?.id;
+  const working = (view.data?.tasks ?? []).filter((x) => x.run_status).length;
+  const todo = view.data?.columns.find((c) => c.system_key === 'todo')?.id;
   const lim = state.runs.limit.limit;
   // arrastar na fila: a ordem vai para o servidor; o quadro se atualiza pelo aviso de mudança
   const reorder = async (taskId: string, before: string | null) => {
@@ -52,30 +54,30 @@ export function EquipeView({ state, compact, onAskCoordinator, reload }: { state
     <div className={`page page--board ${compact ? 'page--compact' : ''}`}>
       {!compact && (
         <header className="page__head">
-          <h2>Fluxos da equipe</h2>
-          <p className="muted">O quadro dos agentes: quem está com cada tarefa, o que um passa ao outro e o que espera na fila. É automático — você acompanha e, para mudar algo, fala com a coordenação.</p>
+          <h2>{t('quadro.equipe.titulo')}</h2>
+          <p className="muted">{t('quadro.equipe.sub')}</p>
         </header>
       )}
       <div className="toolbar">
         <ViewToggle view={mode} onChange={setMode} />
-        <select value={pick} onChange={(e) => setWho(e.target.value)} aria-label="Agente">
-          <option value="">Todos os agentes</option>
-          <option value="-">Na triagem</option>
+        <select value={pick} onChange={(e) => setWho(e.target.value)} aria-label={t('quadro.equipe.agente')}>
+          <option value="">{t('quadro.equipe.todos')}</option>
+          <option value="-">{t('quadro.equipe.naTriagem')}</option>
           {options.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <span className="grow" />
         {!compact && (
-          <label className={`switch ${auto ? 'switch--on' : ''}`} title="Quando ligado, a equipe pega as tarefas de “A fazer”, de cima para baixo, até o limite de trabalhos ao mesmo tempo (Configurações)">
+          <label className={`switch ${auto ? 'switch--on' : ''}`} title={t('quadro.equipe.autoDica')}>
             <input type="checkbox" checked={auto} onChange={(e) => void setAuto(e.target.checked)} />
-            <span>Andamento automático {auto ? 'ligado' : 'desligado'}</span>
+            <span>{auto ? t('quadro.equipe.autoLigado') : t('quadro.equipe.autoDesligado')}</span>
           </label>
         )}
       </div>
       {!compact && (
         <p className="hint">
           {auto
-            ? `A equipe pega as tarefas de “A fazer” de cima para baixo, ${lim === null ? 'sem limite de trabalhos ao mesmo tempo' : `até ${lim} ao mesmo tempo`}${working ? ` (agora: ${working} em andamento)` : ''}; o resto espera a vez. Arraste para mudar a ordem ou marque Prioridade no card. Conversas não entram no limite.`
-            : 'Desligado: os agentes só trabalham quando você conversa com eles. Ligue para a equipe dar andamento à fila sozinha (cada tarefa usa o modelo de IA e conta no consumo).'}
+            ? t('quadro.equipe.dicaLigado', { limite: lim === null ? t('quadro.equipe.semLimite') : t('quadro.equipe.ateLimite', { n: lim }), agora: working ? t('quadro.equipe.agora', { n: working }) : '' })
+            : t('quadro.equipe.dicaDesligado')}
         </p>
       )}
       {err && <p className="error" role="alert">{err}</p>}

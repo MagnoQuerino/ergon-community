@@ -27,6 +27,7 @@ import { parseDue } from './due.ts';
 import { parseRenames, renameCard } from './card-title.ts';
 import { cadeiaDe, lidoEm, marcarEm } from './conexoes/marca.ts';
 import { workspaceTz } from './routine-proposals.ts';
+import { colunaPorChave, type ChaveColuna } from './colunas.ts';
 
 export interface HelpRequest { agent: string; request: string }
 /** uma rodada do ciclo de persistência (task.persist) e a decisão dela (task.persist_decision) */
@@ -68,7 +69,8 @@ const words = (s: string) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [])
 /** etapa intermediária com menos que isto não passa adiante (vai para a conferência, com o motivo) */
 const STEP_MIN_WORDS = 10;
 
-const COLS = { todo: 'A fazer', doing: 'Em andamento', done: 'Concluído' };
+/** as colunas do quadro da equipe pelo código fixo (colunas.ts), nunca pelo nome: o nome pode estar em outro idioma ou renomeado */
+const COLS = { todo: 'todo', doing: 'doing', done: 'done' } as const;
 /** Ordem da fila em "A fazer": a posição que você deu (arrastando ou com Prioridade) ou a de chegada (número do card). */
 export const QUEUE_ORDER = 'COALESCE(t.queue_pos, t.number), t.number';
 export const MAX_ATTEMPTS = 2;
@@ -77,20 +79,20 @@ export const MAX_ATTEMPTS = 2;
  * aberto, com responsável ativo, criado na equipe (espelhado de outro aplicativo não entra), sem ajuda aberta, sem
  * execução ativa, com tentativas disponíveis desde a última devolução e no estado de quem ainda vai trabalhar.
  * O mesmo trecho decide o próximo card (next) e o que o Ambiente mostra como "pronto": a leitura não inventa fila.
- * Parâmetros: o quadro da equipe, o nome da coluna "A fazer" e o limite de tentativas.
+ * Parâmetros: o quadro da equipe, o código da coluna "A fazer" (TODO_COLUMN) e o limite de tentativas.
  */
 export const ELIGIBLE_SQL = `t.board_id = ? AND t.completed = 0 AND t.archived = 0 AND a.status = 'active'
-          AND c.name = ? AND t.sync_origin IS NULL
+          AND c.system_key = ? AND t.sync_origin IS NULL
           AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.parent_task_id = t.id AND k.completed = 0 AND k.archived = 0)
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user'))
           AND (SELECT COUNT(*) FROM runs r WHERE r.task_id = t.id AND r.idempotency_key LIKE 'queue-%'
                  AND r.created_at > COALESCE((SELECT MAX(x.decided_at) FROM task_results x WHERE x.task_id = t.id AND x.state = 'devolvido'), '')) < ?
           AND COALESCE(t.work_state, 'solicitada') IN ('solicitada', 'processamento')
           AND NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks p ON p.id = d.after_id WHERE d.task_id = t.id AND p.completed = 0 AND p.archived = 0)`;
-/** nome da coluna da fila (o mesmo que o agendador usa) */
-export const TODO_COLUMN = 'A fazer';
+/** o código da coluna da fila, "A fazer" (o mesmo que o agendador usa) */
+export const TODO_COLUMN = COLS.todo;
 /** O pedido fala de um arquivo que não veio junto: perguntar antes de gastar uma chamada de modelo. */
-const MENTIONS_FILE = /(^|[^a-z])(planilh|csv|anexad|em anexo|esta tabela|este arquivo|neste arquivo|nesse arquivo|desse arquivo|deste arquivo)/;
+const MENTIONS_FILE = /(^|[^a-z])(planilh|csv|anexad|em anexo|esta tabela|este arquivo|neste arquivo|nesse arquivo|desse arquivo|deste arquivo|spreadsheet|attached|the attachment|this table|this file|the file i (sent|attached|uploaded)|in this file|from this file)/;
 const CLOSING: Record<string, string> = {
   dados: 'Os números acima foram calculados pelo sistema a partir do arquivo e já estão nos entregáveis do card. Escreva um comentário curto (até 150 palavras) para quem pediu: o que se destaca e o que merece atenção. Não recalcule, não estime e não invente números.',
   documental: 'Entregue o documento completo, pronto para usar, em Markdown: ele será salvo como entregável do card. Não diga apenas que terminou — o documento é a entrega.',
@@ -102,7 +104,7 @@ const CLOSING: Record<string, string> = {
  * A última linha da entrega, para a pessoa (resumo-tarefa.ts): ela abre o card, lê só essa frase e decide. A linha sai do
  * texto da entrega (não aparece duas vezes); sem ela, a tela usa só o que o sistema registrou.
  */
-export const PARA_VOCE = 'Termine com UMA última linha para a pessoa, sozinha, sem marcador de lista, em linguagem simples, com os números, nomes e destinos de verdade: "Para você decidir: …" quando ela precisa aprovar ou escolher algo antes de seguir (diga exatamente o que ela decide), ou "Feito: …" quando nada depende dela (o que foi feito, onde e para quem). Aprovar o card não envia, não cria e não paga nada: o que sai por uma conta conectada pede o cartão de confirmação das Conexões; nunca escreva que aprovar fará isso. Exemplos: "Para você decidir: escolher entre o plano A (R$ 50 por mês) e o B (R$ 80 por mês)." · "Para você decidir: aprovar o texto do orçamento revisado para Ana e Bruno." · "Feito: criei no Planner as tarefas Revisar contrato, Pagar fornecedor e Agendar visita." Só essa linha; não repita a entrega nela.';
+export const PARA_VOCE = 'Termine com UMA última linha para a pessoa, sozinha, sem marcador de lista, em linguagem simples, com os números, nomes e destinos de verdade: "Para você decidir: …" quando ela precisa aprovar ou escolher algo antes de seguir (diga exatamente o que ela decide), ou "Feito: …" quando nada depende dela (o que foi feito, onde e para quem). Aprovar o card não envia, não cria e não paga nada: o que sai por uma conta conectada pede o cartão de confirmação das Conexões; nunca escreva que aprovar fará isso. Exemplos: "Para você decidir: escolher entre o plano A (R$ 50 por mês) e o B (R$ 80 por mês)." · "Para você decidir: aprovar o texto do orçamento revisado para Ana e Bruno." · "Feito: criei no Planner as tarefas Revisar contrato, Pagar fornecedor e Agendar visita." Só essa linha; não repita a entrega nela. Escreva-a no idioma da conversa com a pessoa; em inglês, comece exatamente com "For you to decide: …" ou "Done: …".';
 /** etapa do meio de um plano: a entrega é para a próxima etapa, não para o usuário */
 const STEP_CLOSING = 'Entregue o resultado completo da sua etapa, em texto, pronto para a próxima etapa usar. Não diga apenas que terminou.';
 /**
@@ -168,8 +170,8 @@ export class Teamwork {
   /** Andamento automático: ligado por padrão (as automações começam ligadas); só "0" — você desligou — para. */
   autorun(workspaceId: string): boolean { return getSetting(this.db, workspaceId, 'team.autorun') !== '0'; }
 
-  private column(boardId: string, name: string): string | null {
-    return this.db.get<{ id: string }>('SELECT id FROM columns WHERE board_id = ? AND name = ? ORDER BY position LIMIT 1', boardId, name)?.id ?? null;
+  private column(boardId: string, chave: ChaveColuna): string | null {
+    return colunaPorChave(this.db, boardId, chave);
   }
 
   /**
@@ -873,7 +875,7 @@ export class Teamwork {
         agentId = holder.id;
       }
       this.results.setWorkState(workspaceId, taskId, 'processamento', 'o sistema está analisando o arquivo');
-      const op = this.ops.run(workspaceId, { taskId, agentId, op: 'analise-desempenho', referencia: referenceFrom(text) });
+      const op = this.ops.run(workspaceId, { taskId, agentId, op: 'analise-desempenho', referencia: referenceFrom(text, workspaceTz(this.db, workspaceId)) });
       if (op.status === 'erro') {
         this.results.needInput(workspaceId, taskId, kind, `O arquivo não pôde ser analisado: ${op.error} Corrija a planilha, anexe de novo e ponha para trabalhar.`, 'aguardando_info', op.id, actor.id);
         return null;
@@ -888,7 +890,7 @@ export class Teamwork {
     const board = defaultBoard(this.db, workspaceId).id;
     return this.db.all<{ id: string; k: number; priority: number }>(
       `SELECT t.id, COALESCE(t.queue_pos, t.number) AS k, t.priority FROM tasks t JOIN columns c ON c.id = t.column_id
-        WHERE t.workspace_id = ? AND t.board_id = ? AND c.name = ? AND t.completed = 0 AND t.archived = 0
+        WHERE t.workspace_id = ? AND t.board_id = ? AND c.system_key = ? AND t.completed = 0 AND t.archived = 0
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user'))
         ORDER BY ${QUEUE_ORDER}`, workspaceId, board, COLS.todo);
   }

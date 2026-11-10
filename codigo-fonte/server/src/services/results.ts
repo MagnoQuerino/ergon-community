@@ -14,6 +14,8 @@
  */
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, now } from '../lib/util.ts';
+import { emPt, tx } from '../lib/textos.ts';
+import { idioma, semNomeComum } from '../lib/idioma.ts';
 import { audit, type Bus } from './bus.ts';
 import { saveArtifact } from './artifacts.ts';
 import { TOOLS, motorScope, platformToolsets, toolStatus } from './characters.ts';
@@ -26,6 +28,7 @@ import type { RunRow, RunStatus } from './runs.ts';
 import { getTask, updateTask, type Actor } from './tasks.ts';
 import { questionIn } from './purpose.ts';
 import { semLinhaParaVoce } from './resumo-tarefa.ts';
+import { colunaPorChave, type ChaveColuna } from './colunas.ts';
 
 export type ResultKind = 'informativo' | 'documental' | 'dados' | 'externo';
 /** descartado: a pessoa recusou no cartão a ação que era o trabalho do card (não é falha nem entrega; o card fica aberto esperando ela) */
@@ -45,32 +48,55 @@ export const KIND_LABEL: Record<ResultKind, string> = {
   informativo: 'Informativo (a resposta basta)', documental: 'Documental (exige um documento entregue)',
   dados: 'Dados (números calculados do arquivo)', externo: 'Externo (exige confirmação da fonte)',
 };
-/** Coluna do quadro de cada estado: revisão, espera e falha ficam em andamento (o estado real aparece no card). */
-const COLUMN: Record<WorkState, string> = {
-  solicitada: 'A fazer', processamento: 'Em andamento', resultado: 'Em andamento', validacao: 'Em andamento', concluida: 'Concluído',
-  aguardando_info: 'Em andamento', falha: 'Em andamento', revisao: 'Em andamento', aguardando_aprovacao: 'Com você',
+/**
+ * Coluna do quadro de cada estado, pelo código fixo (colunas.ts), nunca pelo nome: revisão, espera e falha ficam em
+ * andamento (o estado real aparece no card).
+ */
+const COLUMN: Record<WorkState, ChaveColuna> = {
+  solicitada: 'todo', processamento: 'doing', resultado: 'doing', validacao: 'doing', concluida: 'done',
+  aguardando_info: 'doing', falha: 'doing', revisao: 'doing', aguardando_aprovacao: 'with_you',
 };
 /** coluna de quem está esperando você (aprovação); quadro antigo sem ela: fica em andamento */
-export const WITH_YOU = 'Com você';
+export const WITH_YOU: ChaveColuna = 'with_you';
 /** descartado (recusado por você no cartão): o card fica aberto esperando o que mudar, ou que você o cancele */
 const WORK_OF: Record<ResultState, WorkState | null> = {
   validado: 'concluida', confirmado_humano: 'concluida', aguardando_aprovacao: 'aguardando_aprovacao', sem_confirmacao: 'aguardando_aprovacao',
   aguardando_info: 'aguardando_info', reprovado: 'revisao', falha: 'falha', devolvido: 'solicitada', descartado: 'aguardando_info',
 };
 
+/**
+ * As conferências entendem português e inglês, sempre as duas juntas (a pessoa pode misturar, e a equipe responde no
+ * idioma de quem pediu). O texto chega sem acentos e em minúsculas (fold), com o apóstrofo curvo trocado pelo reto
+ * ("couldn’t" = "couldn't"): o comprimento não muda, e as posições valem no texto original.
+ */
+const fe = (s: string) => fold(s).replace(/[’‘ʼ`]/g, "'");
+/** junta dois grupos de alternativas "(a|b)" e "(c|d)" em "(a|b|c|d)" */
+const alt = (...gs: string[]) => `(${gs.map((g) => g.slice(1, -1)).join('|')})`;
+
 const has = (t: string, stems: string[]) => stems.some((s) => new RegExp(`(^|[^a-z])${s}`).test(t));
-const DATA = ['analis', 'analiz', 'indicador', 'desempenho', 'planilh', 'dados', 'metric', 'estatistic', 'relatori', 'kpi', 'csv', 'percentu', 'contag', 'calcul', 'resumo'];
+const DATA = ['analis', 'analiz', 'indicador', 'desempenho', 'planilh', 'dados', 'metric', 'estatistic', 'relatori', 'kpi', 'csv', 'percentu', 'contag', 'calcul', 'resumo',
+  // inglês
+  'analy', 'indicator', 'performance', 'spreadsheet', 'data\\b', 'statistic', 'reports?\\b', 'reporting\\b', 'percent', 'count(s|ing)?\\b', 'summar'];
 // Só verbos de ação (infinitivo e imperativo). Radicais soltos pegavam substantivos e adjetivos: "dados públicos" e
 // "páginas públicas" (publi[cq]) faziam uma pesquisa virar "ação externa à espera de confirmação", e a resposta não
 // voltava a quem pediu; "agenda", "telefone", "compra" e "versão paga" também caíam aqui.
 const EXTERNAL = ['enviar\\b', 'envie\\b', 'mandar\\b', 'mande\\b', 'publicar', 'publique', 'postar\\b', 'poste\\b', 'agendar\\b', 'agende\\b',
   'marcar (uma )?reuniao', 'pagar\\b', 'pague\\b', 'quitar', 'transferir', 'transfira', 'comprar\\b', 'compre\\b', 'contratar\\b', 'contrate\\b',
-  'ligar para', 'telefonar', 'cadastrar\\b', 'cadastre\\b', 'responder (ao|a|o) (cliente|fornecedor)', 'protocolar', 'submeter', 'assinar'];
-const DOCUMENT = ['relatori', 'document', 'propost', 'redig', 'redac', 'escrev', 'texto', 'plano', 'apresentac', 'roteiro', 'artigo', 'carta', 'comunicado', 'parecer', 'manual', 'politica', 'procedimento', 'ata\\b', 'e-?mail', 'resumo', 'minuta', 'contrato', 'briefing', 'post\\b'];
+  'ligar para', 'telefonar', 'cadastrar\\b', 'cadastre\\b', 'responder (ao|a|o) (cliente|fornecedor)', 'protocolar', 'submeter', 'assinar',
+  // inglês: o verbo no imperativo (o mesmo que o infinitivo, com "to" antes: ver externoDeFato). Em inglês o verbo e o
+  // substantivo costumam ser a mesma palavra ("pay", "transfer", "hire"): esses só contam com o objeto logo depois
+  'send\\b', 'publish\\b', 'post (it|this|that|them|the|on|in|to)\\b', 'schedule (a |an |the )?(meeting|call|appointment)', 'book (a |an |the )?(meeting|call|room|flight|hotel|appointment)',
+  'pay (the|this|that|it|them|my|our|an?|for)\\b', 'wire (the|money|funds)\\b', 'transfer (the |money|funds|\\d)', 'buy (the|a|an|some|it|them|\\d)', 'purchase (the|a|an|some|it|them)\\b',
+  'hire (a|an|the|someone)\\b', 'phone (him|her|them|the)\\b', 'sign up (for|to|on)\\b', 'register (the|a|an|me|us|for|on)\\b',
+  'reply to (the )?(client|customer|supplier|vendor)', 'respond to (the )?(client|customer|supplier|vendor)', 'submit (the|this|a|an|it|our|my)\\b', 'sign (the|this) (contract|agreement|document|form)'];
+const DOCUMENT = ['relatori', 'document', 'propost', 'redig', 'redac', 'escrev', 'texto', 'plano', 'apresentac', 'roteiro', 'artigo', 'carta', 'comunicado', 'parecer', 'manual', 'politica', 'procedimento', 'ata\\b', 'e-?mail', 'resumo', 'minuta', 'contrato', 'briefing', 'post\\b',
+  // inglês
+  // "report" sem o fim da palavra pegava o português "reporte ao fornecedor", "reportagem"
+  'reports?\\b', 'reporting\\b', 'proposal', 'draft', 'write\\b', 'writing', 'text\\b', 'plan\\b', 'presentation', 'script', 'article', 'letter', 'memo\\b', 'announcement', 'policy', 'procedure', 'minutes\\b', 'summary', 'contract', 'brief\\b'];
 
 /** Tipo de trabalho, pelas palavras do pedido e pelos arquivos que vieram com ele (sem modelo). */
 export function classifyTask(text: string, hasCsvInput: boolean): ResultKind {
-  const t = fold(text);
+  const t = fe(text);
   if (hasCsvInput && has(t, DATA)) return 'dados';
   if (externoDeFato(t)) return 'externo';
   if (has(t, DOCUMENT)) return 'documental';
@@ -79,7 +105,10 @@ export function classifyTask(text: string, hasCsvInput: boolean): ResultKind {
 
 const SIMULATED = '[Simulação — sem modelo de IA]';
 /** "Concluído.", "Feito!", "Tarefa realizada com sucesso" — alegação de conclusão sem o trabalho. */
-const CLAIM = /^(ok[.!]?\s*)?((a )?tarefa |o trabalho |tudo )?(foi )?(conclu[ií]d[ao]|feit[ao]|pront[ao]|realizad[ao]|finalizad[ao]|entregue|resolvid[ao]|done)( com sucesso)?[.!]*$/i;
+const CLAIM_PT = /^(ok[.!]?\s*)?((a )?tarefa |o trabalho |tudo )?(foi )?(conclu[ií]d[ao]|feit[ao]|pront[ao]|realizad[ao]|finalizad[ao]|entregue|resolvid[ao]|done)( com sucesso)?[.!]*$/i;
+/** "Done.", "All done!", "Task completed successfully", "It's finished." */
+const CLAIM_EN = /^(ok(ay)?[.!,]?\s*)?((the )?task |the work |it |this |that |everything |all )?(is |was |has been |'s |is now |have been )?(all )?(done|complete|completed|finished|ready|delivered|resolved|sorted)( successfully)?[.!]*$/i;
+const CLAIM = { test: (s: string) => CLAIM_PT.test(s) || CLAIM_EN.test(s.replace(/[’‘]/g, "'")) };
 const words = (s: string) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 const control = (s: string) => s.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, ' ').replace(/\s+/g, ' ').trim();
 const MIN_WORDS: Record<ResultKind, number> = { informativo: 25, documental: 120, dados: 0, externo: 25 };
@@ -102,12 +131,28 @@ export function deliverableBody(raw: string): string {
  * Verbos no infinitivo, no imperativo e na forma do dia a dia ("responde o João", "lê meus emails", "dá uma olhada"):
  * "o e-mail enviado ontem" não é pedido de envio, e "o que o cliente responde" também não (sujeito antes do verbo, em pede).
  */
-const ENVIAR = '(enviar|envie|envia|mandar|mande|manda|responder|responda|responde|encaminhar|encaminhe|encaminha|disparar|dispare|dispara|repassar|repasse|repassa|avisar|avise|avisa)';
-const MENSAGEM = '(enviar|envie|envia|mandar|mande|manda|responder|responda|responde|avisar|avise|avisa|escrever|escreva|escreve|postar|poste|posta|publicar|publique|publica|falar|fale|fala|perguntar|pergunte|cobrar|cobre|cobra|chamar|chame|chama|diga (ao|a|para|pro|pra))';
-const LER = '(ler|leia|le|resumir|resuma|resume|buscar|busque|busca|procurar|procure|procura|verificar|verifique|verifica|ver|veja|ve|olhar|olhe|olha|levantar|levante|levanta|listar|liste|checar|cheque|checa|varrer|varra|varre|avaliar|avalie|avalia|analisar|analise|analisa|monitorar|monitore|monitora|acompanhar|acompanhe|acompanha|mapear|mapeie|mapeia|extrair|extraia|extrai|conferir|confira|confere|(da|de|dar) uma olhada|o que (rolou|chegou))';
-const CRIAR = '(criar|crie|cria|cadastrar|cadastre|cadastra|lancar|lance|lanca|jogar|jogue|joga|abrir|abra|abre|adicionar|adicione|adiciona|registrar|registre|registra|colocar|coloque|coloca|incluir|inclua|inclui|subir|suba|sobe|passar|passe|transformar|transforme|transforma|botar|bote|bota|ponha)';
-const MUDAR = '(concluir|conclua|conclui|fechar|feche|fecha|finalizar|finalize|finaliza|marcar|marque|marca|mover|mova|move|arrastar|arraste|arrasta|atualizar|atualize|atualiza)';
-const AGENDAR = '(agendar|agende|marcar|marque|marca|remarcar|remarque|remarca|desmarcar|desmarque|desmarca|bloquear|bloqueie|bloqueia|reservar|reserve|reserva)';
+const ENVIAR_PT = '(enviar|envie|envia|mandar|mande|manda|responder|responda|responde|encaminhar|encaminhe|encaminha|disparar|dispare|dispara|repassar|repasse|repassa|avisar|avise|avisa)';
+const MENSAGEM_PT = '(enviar|envie|envia|mandar|mande|manda|responder|responda|responde|avisar|avise|avisa|escrever|escreva|escreve|postar|poste|posta|publicar|publique|publica|falar|fale|fala|perguntar|pergunte|cobrar|cobre|cobra|chamar|chame|chama|diga (ao|a|para|pro|pra))';
+const LER_PT = '(ler|leia|le|resumir|resuma|resume|buscar|busque|busca|procurar|procure|procura|verificar|verifique|verifica|ver|veja|ve|olhar|olhe|olha|levantar|levante|levanta|listar|liste|checar|cheque|checa|varrer|varra|varre|avaliar|avalie|avalia|analisar|analise|analisa|monitorar|monitore|monitora|acompanhar|acompanhe|acompanha|mapear|mapeie|mapeia|extrair|extraia|extrai|conferir|confira|confere|(da|de|dar) uma olhada|o que (rolou|chegou))';
+const CRIAR_PT = '(criar|crie|cria|cadastrar|cadastre|cadastra|lancar|lance|lanca|jogar|jogue|joga|abrir|abra|abre|adicionar|adicione|adiciona|registrar|registre|registra|colocar|coloque|coloca|incluir|inclua|inclui|subir|suba|sobe|passar|passe|transformar|transforme|transforma|botar|bote|bota|ponha)';
+const MUDAR_PT = '(concluir|conclua|conclui|fechar|feche|fecha|finalizar|finalize|finaliza|marcar|marque|marca|mover|mova|move|arrastar|arraste|arrasta|atualizar|atualize|atualiza)';
+const AGENDAR_PT = '(agendar|agende|marcar|marque|marca|remarcar|remarque|remarca|desmarcar|desmarque|desmarca|bloquear|bloqueie|bloqueia|reservar|reserve|reserva)';
+// inglês: o imperativo é a própria forma base ("send", "reply"); a terceira pessoa tem -s ("the client replies") e não casa
+const ENVIAR_EN = "(send|reply|respond|answer|forward|notify|let (him|her|them) know)";
+// "tell me what…" e "ask me" são para a própria pessoa, não uma mensagem a alguém
+const MENSAGEM_EN = "(send|reply|respond|answer|notify|write|post|publish|tell (?!me |us )[a-z]+|ask (?!me |us )[a-z]+|text|ping|message|dm|chase|follow up with)";
+const LER_EN = "(read|summari[sz]e|search|look (at|through|for|into)|check|review|go through|scan|list|find|fetch|see|monitor|track|analy[sz]e|extract|catch up on|what (came in|arrived|happened))";
+const CRIAR_EN = "(create|add|make|open|log|register|put|turn|set up|enter|file)";
+const MUDAR_EN = "(complete|close|finish|mark|move|update|check off|tick off)";
+const AGENDAR_EN = "(schedule|book|set up|reschedule|cancel|block|reserve|arrange)";
+const ENVIAR = alt(ENVIAR_PT, ENVIAR_EN);
+const MENSAGEM = alt(MENSAGEM_PT, MENSAGEM_EN);
+const LER = alt(LER_PT, LER_EN);
+const CRIAR = alt(CRIAR_PT, CRIAR_EN);
+const MUDAR = alt(MUDAR_PT, MUDAR_EN);
+const AGENDAR = alt(AGENDAR_PT, AGENDAR_EN);
+/** o verbo achado é do inglês (para as regras do inglês: o sujeito antes dele, o "to" do infinitivo) */
+const VERBO_EN = new RegExp(`^${alt(ENVIAR_EN, MENSAGEM_EN, LER_EN, CRIAR_EN, MUDAR_EN, AGENDAR_EN)}$`);
 /** Endereço de e-mail citado no pedido ("envie a proposta para ana@empresa.com.br"). */
 const ENDERECO = '[a-z0-9_+-]+(\\.[a-z0-9_+-]+)*@[a-z0-9-]+\\.[a-z]';
 /** A forma do dia a dia é também a da terceira pessoa ("o cliente responde"): com sujeito logo antes, não é pedido. */
@@ -116,11 +161,16 @@ const COLOQUIAL = new Set(['envia', 'manda', 'responde', 'encaminha', 'dispara',
   'cria', 'cadastra', 'lanca', 'joga', 'abre', 'adiciona', 'registra', 'coloca', 'inclui', 'sobe', 'transforma', 'bota', 'conclui', 'fecha', 'finaliza', 'marca', 'move',
   'arrasta', 'atualiza', 'remarca', 'desmarca', 'bloqueia', 'reserva']);
 const VERBO_DO_PEDIDO = new RegExp(`\\b(${[ENVIAR, MENSAGEM, LER, CRIAR, MUDAR, AGENDAR].map((x) => x.slice(1, -1)).join('|')})\\b`);
-const TAREFAS = '(tarefas?|cards?|itens|atividades?|pendencias?)';
+/**
+ * "o cliente responde" (português) e "they reply", "when I ask" (inglês): com sujeito logo antes, não é pedido (a terceira
+ * pessoa do inglês tem -s e já não casa: "the client replies")
+ */
+const SUJEITO_EN = /\b(he|she|they|it|who|nobody|no one|someone|somebody|everyone|everybody|i|we)\s+(also\s+|usually\s+|always\s+|never\s+|often\s+|just\s+)?$/;
+const TAREFAS = '(tarefas?|cards?|itens|atividades?|pendencias?|tasks?|items?|to-?dos?)';
 /** a e b na mesma frase, perto um do outro, nas duas ordens */
 const perto = (a: string, b: string, n = 70) => new RegExp(`\\b${a}\\b[^.?!\\n]{0,${n}}\\b${b}|\\b${b}[^.?!\\n]{0,40}\\b${a}\\b`);
-/** o aplicativo citado como lugar ("no Planner", "pelo Trello"): "regressão linear" não é o Linear */
-const noApp = (app: string) => `(no|na|nos|nas|pelo|pela|do|da|para o|para a|em|ao)\\s+${app}\\b`;
+/** o aplicativo citado como lugar ("no Planner", "pelo Trello", "in Planner", "on Slack"): "regressão linear" não é o Linear */
+const noApp = (app: string) => `(no|na|nos|nas|pelo|pela|do|da|para o|para a|em|ao|in|on|into|via|through|to|from|in my|on my|in the|on the)\\s+${app}\\b`;
 /** Como cada aplicativo aparece num pedido de tarefa (o nome dele, ou o do aplicativo de tarefas da conta). */
 const APP_TAREFAS: Partial<Record<string, string>> = { microsoft: '(planner|microsoft to ?do|to-do)', google: '(google tasks|tarefas do google)' };
 const appDe = (k: string) => APP_TAREFAS[k] ?? fold(integrationDef(k)?.name ?? k).split(/[^a-z0-9]+/)[0];
@@ -136,14 +186,15 @@ interface Familia { id: string; oQue: string; envio: boolean; ler?: boolean; aco
  */
 const FAMILIAS: Familia[] = [
   { id: 'email.enviar', oQue: 'enviar o e-mail', envio: true, acoes: /^email\.(enviar|responder|enviar_rascunho)$/,
-    quer: () => new RegExp(`${perto(ENVIAR, 'e-?mails?').source}|\\b${ENVIAR}\\b[^.?!\\n]{0,80}\\b${ENDERECO}`) },
+    // "email Ana the proposal" (inglês): o próprio "email" é o verbo, no começo da frase
+    quer: () => new RegExp(`${perto(ENVIAR, 'e-?mails?').source}|\\b${ENVIAR}\\b[^.?!\\n]{0,80}\\b${ENDERECO}|(^|[.!?\\n]\\s*)(please\\s+)?e-?mail\\s+(him|her|them|the|this|it|[a-z]+@|[a-z]+\\s+(the|a|an|this|our|my)\\b)`) },
   { id: 'email.ler', oQue: 'ler os e-mails', envio: false, ler: true, acoes: /^email\.(buscar|ler)$/,
-    quer: () => new RegExp(`${perto(LER, '(e-?mails?|caixa de entrada|minha caixa|inbox)').source}|\\b${LER}\\b[^.?!\\n]{0,60}\\b${ENDERECO}`) },
+    quer: () => new RegExp(`${perto(LER, '(e-?mails?|caixa de entrada|minha caixa|inbox|mailbox)').source}|\\b${LER}\\b[^.?!\\n]{0,60}\\b${ENDERECO}`) },
   { id: 'teams.enviar', oQue: 'mandar a mensagem no Teams', envio: true, acoes: /^teams\.(enviar|nova_conversa|enviar_canal)$/, quer: () => perto(MENSAGEM, 'teams') },
   { id: 'teams.ler', oQue: 'ler as conversas do Teams', envio: false, ler: true, acoes: /^teams\.(ler|conversas)$/,
-    quer: () => new RegExp(`${perto(LER, 'teams').source}|\\b(conversas|mensagens|chats?) (do|no|pelo) teams\\b`) },
+    quer: () => new RegExp(`${perto(LER, 'teams').source}|\\b(conversas|mensagens|chats?) (do|no|pelo) teams\\b|\\b(conversations|messages|chats?) (in|on|from) teams\\b`) },
   { id: 'agenda.criar', oQue: 'marcar na agenda', envio: false, acoes: /^agenda\.(criar|editar)$/,
-    quer: () => new RegExp(`${perto(AGENDAR, '(reuniao|reunioes|compromisso|evento|horario)').source}|\\b(criar|crie|colocar|coloque|adicionar|adicione|ponha)\\b[^.?!\\n]{0,40}\\b(na (minha )?agenda|no (meu )?calendario)|${perto(ENVIAR, 'convites?').source}`) },
+    quer: () => new RegExp(`${perto(AGENDAR, '(reuniao|reunioes|compromisso|evento|horario|meetings?|appointments?|events?|calls?)').source}|\\b(criar|crie|colocar|coloque|adicionar|adicione|ponha|create|add|put)\\b[^.?!\\n]{0,40}\\b(na (minha )?agenda|no (meu )?calendario|(on|in|to) (my |our |the )?(calendar|agenda))|${perto(ENVIAR, '(convites?|invites?|invitations?)').source}`) },
   { id: 'whatsapp.enviar', oQue: 'mandar a mensagem no WhatsApp', envio: true, acoes: /^whatsapp\.enviar$/, quer: () => perto(MENSAGEM, '(whatsapp|zap|wpp)') },
   { id: 'tarefa.criar', oQue: 'criar as tarefas', envio: false, app: 'texto', acoes: /^tarefa\.criar$|\.criar_tarefa$/, quer: () => perto(CRIAR, TAREFAS) },
   { id: 'tarefa.mudar', oQue: 'mudar as tarefas', envio: false, app: 'texto', acoes: /^tarefa\.(concluir|mover|editar)$/, quer: () => perto(MUDAR, TAREFAS) },
@@ -158,12 +209,16 @@ const FAMILIAS: Familia[] = [
  */
 const PRODUZ = '(escrever|escreva|escreve|redigir|redija|redige|criar|crie|cria|fazer|faca|faz|montar|monte|monta|elaborar|elabore|elabora|preparar|prepare|prepara|desenvolver|desenvolva|produzir|produza|gerar|gere|gera)';
 const OBRA = '(guia|politica|treinamento|manual|cartilha|boas praticas|tutorial|curso|aula|palestra|sobre o uso|sobre como|a importancia de)';
-const SOBRE_O_ASSUNTO = new RegExp(`\\b${PRODUZ}(\\s+[a-z-]+){0,3}?\\s+${OBRA}\\b`);
+const PRODUZ_EN = '(write|draft|create|make|build|prepare|develop|produce|generate|put together|design)';
+const OBRA_EN = '(guide|policy|training|manual|handbook|playbook|best practices|tutorial|course|class|lesson|talk|lecture|about how|about the use|on how|about the importance of)';
+const SOBRE_O_ASSUNTO = new RegExp(`\\b${PRODUZ}(\\s+[a-z-]+){0,3}?\\s+${OBRA}\\b|\\b${PRODUZ_EN}(\\s+[a-z-]+){0,3}?\\s+${OBRA_EN}\\b`);
 /** Envio pedido de fato, no imperativo e sem negação ("envie", "mande", não "não envie", "me mande" ou "para enviar"). */
-const IMPERATIVO_ENVIO = /\b(envie|envia|mande|manda|encaminhe|encaminha|dispare|dispara|repasse|repassa|responda|responde|avise|avisa|poste|publique)\b/g;
+const IMPERATIVO_ENVIO = /\b(envie|envia|mande|manda|encaminhe|encaminha|dispare|dispara|repasse|repassa|responda|responde|avise|avisa|poste|publique|send|forward|reply|respond|notify|post|publish)\b/g;
 function enviaDeFato(frase: string): boolean {
   for (const m of frase.matchAll(IMPERATIVO_ENVIO)) {
-    if (!/\b(nao|nunca|sem|me|eu|que)\s+$/.test(frase.slice(Math.max(0, (m.index ?? 0) - 12), m.index))) return true;
+    const antes = frase.slice(Math.max(0, (m.index ?? 0) - 14), m.index);
+    // português: "não envie", "me mande", "que eu envie"; inglês: "don't send", "to send", "I'll send", "will send"
+    if (!/\b(nao|nunca|sem|me|eu|que)\s+$/.test(antes) && !/(\b(not|never|to|will|i|we|without)|n't|'ll)\s+$/.test(antes)) return true;
   }
   return false;
 }
@@ -173,20 +228,41 @@ const FICA_COM_A_PESSOA = new RegExp([
   '\\bpara (eu|mim|a gente|voce|nos|que eu|que a gente|que voce) (enviar|mandar|responder|encaminhar|disparar|postar|publicar|repassar)\\b',
   '\\bque (eu|a gente|nos) (mesm[oa]s? )?(vou|vamos|irei|iremos|vai|possa|possamos) (enviar|mandar|responder|encaminhar|disparar|postar|publicar|repassar)\\b',
   '\\beu mesm[oa] (envio|mando|respondo|encaminho|vou)\\b', '\\bajud\\w* a (responder|escrever|redigir|enviar|mandar|montar|preparar)\\b',
+  // inglês: "without sending", "don't send", "just draft", "for me to send", "I'll send it myself", "help me reply"
+  '\\bwithout (sending|replying|responding|forwarding|posting|publishing)\\b', "\\b(don't|do not|never|dont) (send|reply|respond|forward|post|publish|email)\\b",
+  '\\bbefore (sending|replying|you send)\\b', '\\b(just|only) (draft|prepare|write)\\b',
+  '\\bfor (me|us|you) to (send|reply|respond|forward|post|publish|review)\\b',
+  "\\b(i'll|i will|we'll|we will|i'm going to|i am going to|we're going to|i can|i'd like to) (send|reply|respond|forward|post|publish)( it| them| this)?( myself| ourselves)?\\b",
+  '\\b(i|we) (send|reply|forward) (it|them|this) (myself|ourselves)\\b', '\\bhelp me (to )?(reply|respond|write|draft|send|prepare|answer)\\b',
 ].join('|'));
 /** Preparo (rascunho, minuta, modelo): fica com a pessoa só quando não é o que ela manda enviar ("envie o rascunho à Ana"). */
-const PREPARO = /rascunho|\b(redij|redig|minuta|modelo de|template|esboco)/;
+const PREPARO = /rascunho|\b(redij|redig|minuta|modelo de|template|esboco)|\b(drafts?|outline)\b/;
 /** Leitura do que a pessoa já trouxe ("as conversas que colei abaixo"): não é para ler na conta. */
-const JA_TROUXE = /\b(que (eu )?(colei|mandei|anexei|copiei|enviei aqui)|colad[ao]s?|em anexo|anexad[ao]s?|abaixo|acima)\b/;
+const JA_TROUXE = /\b(que (eu )?(colei|mandei|anexei|copiei|enviei aqui)|colad[ao]s?|em anexo|anexad[ao]s?|abaixo|acima|(that|which) i (pasted|attached|copied|sent here|shared)|i (pasted|attached|copied)|pasted|attached|below|above)\b/;
 /** O e-mail ou a conversa que a pessoa colou ("responder este e-mail que colei", "o e-mail abaixo"). */
-const JA_TROUXE_MENSAGEM = /\b(e-?mails?|mensage(m|ns)|conversas?)\s+(que (eu )?(colei|mandei|anexei|copiei|enviei aqui)|colad[ao]s?|abaixo|acima|em anexo|anexad[ao]s?)\b/;
+const JA_TROUXE_MENSAGEM = /\b(e-?mails?|mensage(m|ns)|conversas?|messages?|conversations?|chats?)\s+(que (eu )?(colei|mandei|anexei|copiei|enviei aqui)|colad[ao]s?|abaixo|acima|em anexo|anexad[ao]s?|(that |which )?i (pasted|attached|copied|shared)|pasted|attached|below|above)\b/;
 /** Pergunta sobre o assunto ("Qual a melhor hora para enviar e-mails?"); o pedido educado ("Pode mandar…?") continua pedido. */
-const PERGUNTA = /^\s*(qual|quais|quando|como|por que|porque|onde|quanto|quantos|quantas|o que e|vale a pena|devo|e melhor|existe|tem algum)\b/;
-const EDUCADO = /\b(pode|poderia|podes|consegue|conseguiria|da para|da pra|tem como|por favor)\b/;
-/** "ferramentas para enviar", "a melhor hora para enviar": o envio é o assunto. */
-const PARA_ENVIAR = /\b(ferramentas?|apps?|aplicativos?|programas?|sistemas?|plataformas?|softwares?|servicos?|solucao|solucoes|maneiras?|formas?|jeitos?|dicas?|hora|horario|horarios|momento|dias?|estrategias?|tecnicas?|exemplos?|regras?|motivos?|razoes)\s+([a-z-]+\s+){0,2}(para|pra|de)\s+$/;
+const PERGUNTA = /^\s*(qual|quais|quando|como|por que|porque|onde|quanto|quantos|quantas|o que e|vale a pena|devo|e melhor|existe|tem algum|what|which|when|how|why|where|is it worth|should i|should we|is it better|is there|are there|do you know)\b/;
+const EDUCADO = /\b(pode|poderia|podes|consegue|conseguiria|da para|da pra|tem como|por favor|can you|could you|would you|will you|please|would you mind)\b/;
+/** "ferramentas para enviar", "a melhor hora para enviar", "tools to send", "the best time to send": o envio é o assunto. */
+const PARA_ENVIAR = /\b(ferramentas?|apps?|aplicativos?|programas?|sistemas?|plataformas?|softwares?|servicos?|solucao|solucoes|maneiras?|formas?|jeitos?|dicas?|hora|horario|horarios|momento|dias?|estrategias?|tecnicas?|exemplos?|regras?|motivos?|razoes)\s+([a-z-]+\s+){0,2}(para|pra|de)\s+$|\b(tools?|apps?|applications?|programs?|systems?|platforms?|software|services?|solutions?|ways?|tips?|time|times|hours?|moment|days?|strateg(y|ies)|techniques?|examples?|rules?|reasons?)\s+([a-z-]+\s+){0,2}(to|for)\s+$/;
 /** Explicação ou pesquisa ("explicando por que devemos responder e-mails"): com o verbo no infinitivo, é o assunto. */
-const EXPLICA = /\b(por que|porque|explic\w*|pesquis\w*|compar\w*)\b/;
+const EXPLICA = /\b(por que|porque|explic\w*|pesquis\w*|compar\w*|why|explain\w*|research\w*)\b/;
+/** o verbo do inglês no infinitivo ("to send", "we should reply"): o "to" ou o modal logo antes */
+const INFINITIVO_EN = /\b(to|should|must|shall|ought to)\s+$/;
+/**
+ * Em inglês, o verbo e o substantivo costumam ser a mesma palavra: "the last message from Ana", "the post on Teams", "the
+ * reply from the client". Depois de artigo ou determinante, nunca é o verbo do pedido.
+ */
+const DETERMINANTE_EN = /\b(the|a|an|this|that|these|those|my|your|his|her|its|our|their|last|latest|first|next|previous|new|each|every|any|some|one|which|whose|of|quick|short|long|same|other)\s+$|'s\s+$/;
+/**
+ * E estas, que são substantivos tão comuns quanto verbos, só contam como verbo no começo da oração ("Reply to João…"),
+ * depois de "please", "can you", "and", "then", "to", ou com a pessoa logo depois ("message Ana", "post it").
+ */
+const AMBIGUO_EN = new Set(['message', 'post', 'text', 'answer', 'reply', 'dm', 'ping', 'list', 'check', 'file', 'log', 'review', 'search', 'track', 'book', 'block',
+  'mark', 'schedule', 'update', 'cancel', 'reserve', 'monitor', 'scan', 'open']);
+const COMECO_EN = /(^|[,:;(]|\b(please|pls|kindly|(can|could|would|will) you|and|then|also|now|just|quickly|to|ok|okay|hi|hey))\s*$/;
+const OBJETO_EN = /^\s+(it|this|that|them|him|her|us|everyone|everybody|back)\b/;
 
 /**
  * Ação externa pedida de fato: a pergunta ("Qual a melhor hora para enviar e-mails?"), a pesquisa ("ferramentas para
@@ -200,7 +276,7 @@ function externoDeFato(t: string): boolean {
     const fins = ['.', '\n', '?', '!'].map((x) => t.indexOf(x, at)).filter((x) => x >= 0);
     const fim = fins.length ? Math.min(...fins) : t.length;
     const antes = t.slice(ini, at);
-    const infinitivo = /^[a-z]+r\b/.test(t.slice(at));
+    const infinitivo = /^[a-z]+r\b/.test(t.slice(at)) || INFINITIVO_EN.test(antes);
     if ((t[fim] === '?' || PERGUNTA.test(t.slice(ini, fim))) && !EDUCADO.test(antes)) continue;
     if (infinitivo && (PARA_ENVIAR.test(antes) || EXPLICA.test(antes))) continue;
     return true;
@@ -217,6 +293,8 @@ function pede(t: string, re: RegExp, f: { envio: boolean; ler?: boolean }): bool
     const at = m.index ?? 0;
     const antes = t.slice(Math.max(0, at - 30), at);
     if (/\b(como|ensine|explique|tutorial|passo a passo|dica|nao|nunca|sem)\s+(eu\s+|a gente\s+|se\s+|posso\s+|devo\s+|faco\s+|que\s+)?$/.test(antes)) continue;
+    // inglês: "how to send", "how do I reply", "teach me to", "don't send", "never reply", "without"
+    if (/(\b(how|teach me|explain|tutorial|step by step|tips? (on|for)|not|never|without)|n't)\s+(to\s+|do i\s+|can i\s+|should i\s+|do you\s+|i\s+|we\s+)?$/.test(antes)) continue;
     const ini = Math.max(...['.', '\n', '?', '!'].map((x) => t.lastIndexOf(x, at))) + 1;
     const fins = ['.', '\n', '?', '!'].map((x) => t.indexOf(x, at + m[0].length)).filter((x) => x >= 0);
     const fim = fins.length ? Math.min(...fins) : t.length;
@@ -226,16 +304,27 @@ function pede(t: string, re: RegExp, f: { envio: boolean; ler?: boolean }): bool
     const vAt = at + (v?.index ?? 0);
     const antesDoVerbo = t.slice(ini, vAt);
     if (v && COLOQUIAL.has(v[1]) && /\b(o|a|os|as|ele|ela|eles|elas|quem|ninguem|alguem|voce|se)\s+([a-z-]+\s+){0,2}$/.test(antesDoVerbo)) continue;
+    const en = !!v && VERBO_EN.test(v[1]);
+    if (en && SUJEITO_EN.test(antesDoVerbo)) continue;
+    if (v && en) {
+      // a palavra do inglês num pedido em português não é o verbo dele ("revise o texto do post do Teams")
+      if (idioma(frase) === 'pt') continue;
+      // "the last message from Ana", "the post on Teams": o substantivo, não o pedido
+      if (DETERMINANTE_EN.test(antesDoVerbo)) continue;
+      if (AMBIGUO_EN.has(v[1].split(' ')[0]) && !COMECO_EN.test(antesDoVerbo) && !OBJETO_EN.test(t.slice(vAt + v[1].length))) continue;
+    }
     if (SOBRE_O_ASSUNTO.test(frase) && !enviaDeFato(frase)) continue;
     if (f.envio) {
       if (FICA_COM_A_PESSOA.test(frase)) continue;
       if (PREPARO.test(frase) && !enviaDeFato(frase)) continue;
       if (JA_TROUXE_MENSAGEM.test(frase) && !enviaDeFato(frase)) continue;
       if ((t[fim] === '?' || PERGUNTA.test(frase)) && !EDUCADO.test(antesDoVerbo)) continue;
-      const infinitivo = !!v && /r$/.test(v[1]);
+      const infinitivo = !!v && (en ? INFINITIVO_EN.test(antesDoVerbo) : /r$/.test(v[1]));
       if (infinitivo && (PARA_ENVIAR.test(antesDoVerbo) || EXPLICA.test(antesDoVerbo))) continue;
       // "me manda um resumo dos meus e-mails": os e-mails são o que ler, e a resposta vem aqui (a leitura vale pela rede)
       if (/\bme\s+$/.test(antesDoVerbo) && /\b(dos|das|nos|nas|meus|minhas|seus|suas)\s+e-?mails?\b/.test(m[0])) continue;
+      // "send me a summary of my emails": o mesmo, em inglês
+      if (/\b(send|give|get|bring|forward) me\b[^.?!\n]{0,40}\b(of|from|on|about|in) (my|our|the|all|all my|all the) (e-?mails?|inbox|messages)\b/.test(frase)) continue;
     }
     if (f.ler && JA_TROUXE.test(frase)) continue;
     return true;
@@ -251,7 +340,8 @@ function listadas(db: Db, ws: string): Map<string, string[]> {
 export interface Intencao { id: string; oQue: string; envio: boolean; pares: string[] }
 /** O que o pedido quer fazer numa conta e por quais ações (conexao:acao) das contas conectadas isso sai. */
 export function intencoesDoPedido(db: Db, ws: string, pedido: string): Intencao[] {
-  const t = fold(pedido);
+  // "the sales teams", "on Monday", "the notion that…": a palavra comum não é o aplicativo
+  const t = semNomeComum(pedido, fe(pedido));
   const contas = listadas(db, ws);
   const out: Intencao[] = [];
   for (const f of FAMILIAS) {
@@ -273,20 +363,22 @@ export function intencoesDoPedido(db: Db, ws: string, pedido: string): Intencao[
  */
 interface Superficie { oQue: string; nome: string; acoes: RegExp; afirma: string; kinds?: string[] }
 /** o que o agente diz que fez, na primeira pessoa ("escrevi o e-mail" é texto, não ação na conta: fica de fora) */
-const AFIRMA_ENVIO = 'enviei|mandei|respondi|avisei|encaminhei|disparei|repassei|postei|publiquei';
-const AFIRMA_LER = 'li|olhei|verifiquei|chequei|busquei|procurei|varri';
-const AFIRMA_CRIAR = 'criei|cadastrei|adicionei|coloquei|agendei|marquei|remarquei|movi|atualizei';
+// inglês: o passado não diz a pessoa ("the email you sent"), então só com o sujeito do agente ("I sent", "I've replied")
+const EU_EN = "(i|i've|i have|we|we've|we have|i just|i've just|i have just|i already|i've already)";
+const AFIRMA_ENVIO = `enviei|mandei|respondi|avisei|encaminhei|disparei|repassei|postei|publiquei|${EU_EN} (sent|replied|responded|answered|forwarded|notified|posted|published|messaged)`;
+const AFIRMA_LER = `li|olhei|verifiquei|chequei|busquei|procurei|varri|${EU_EN} (read|checked|looked at|looked through|went through|searched|scanned|reviewed)`;
+const AFIRMA_CRIAR = `criei|cadastrei|adicionei|coloquei|agendei|marquei|remarquei|movi|atualizei|${EU_EN} (created|added|scheduled|booked|moved|updated|set up|put|logged|marked)`;
 const SUPERFICIES: Superficie[] = [
   { oQue: 'usar o Teams', nome: 'teams', acoes: /^teams\./, afirma: `${AFIRMA_ENVIO}|${AFIRMA_LER}` },
-  { oQue: 'usar o e-mail', nome: '(e-?mails?|outlook|gmail|caixa de entrada|inbox)', acoes: /^email\./, afirma: `${AFIRMA_ENVIO}|${AFIRMA_LER}` },
-  { oQue: 'usar a agenda', nome: '(agenda|calendario)', acoes: /^agenda\./, afirma: `${AFIRMA_CRIAR}|olhei|verifiquei|chequei` },
+  { oQue: 'usar o e-mail', nome: '(e-?mails?|outlook|gmail|caixa de entrada|inbox|mailbox)', acoes: /^email\./, afirma: `${AFIRMA_ENVIO}|${AFIRMA_LER}` },
+  { oQue: 'usar a agenda', nome: '(agenda|calendario|calendar)', acoes: /^agenda\./, afirma: `${AFIRMA_CRIAR}|olhei|verifiquei|chequei|${EU_EN} (checked|looked at)` },
   { oQue: 'usar as tarefas da conta', nome: '(planner|microsoft to ?do|to-do|google tasks|tarefas do google)', acoes: /^tarefa\.|\.criar_tarefa$/, afirma: `${AFIRMA_CRIAR}|${AFIRMA_LER}` },
   { oQue: 'usar o WhatsApp', nome: '(whatsapp|zap|wpp)', acoes: /^whatsapp\./, afirma: `${AFIRMA_ENVIO}|${AFIRMA_LER}` },
 ];
 /** comparação e pesquisa sobre o aplicativo ("compare o Teams e o Slack") não são trabalho nele */
-const REDE_FORA = /\b(compar\w*|pesquis\w*|diferenca entre|vantagens|desvantagens)\b/;
+const REDE_FORA = /\b(compar\w*|pesquis\w*|diferenca entre|vantagens|desvantagens|research\w*|difference between|pros and cons|advantages|disadvantages)\b/;
 export function intencoesPelaConta(db: Db, ws: string, pedido: string, resposta: string): Intencao[] {
-  const t = fold(pedido); const r = fold(resposta);
+  const t = semNomeComum(pedido, fe(pedido)); const r = semNomeComum(resposta, fe(resposta));
   const contas = listadas(db, ws);
   const frasesDoPedido = t.split(/[.?!\n]+/).filter((f) => f.trim() && !SOBRE_O_ASSUNTO.test(f) && !FICA_COM_A_PESSOA.test(f) && !JA_TROUXE.test(f)
     && !REDE_FORA.test(f) && !PERGUNTA.test(f) && !PREPARO.test(f));
@@ -296,7 +388,7 @@ export function intencoesPelaConta(db: Db, ws: string, pedido: string, resposta:
     .map((k) => ({ oQue: `usar o ${nomeDe(k)}`, nome: appDe(k), acoes: /./, afirma: `${AFIRMA_ENVIO}|${AFIRMA_LER}|${AFIRMA_CRIAR}`, kinds: [k] }));
   const out: Intencao[] = [];
   for (const sup of [...SUPERFICIES, ...outros]) {
-    const lugar = new RegExp(`\\b(no|na|nos|nas|pelo|pela|meu|minha|meus|minhas|seu|sua|seus|suas)\\s+${sup.nome}\\b`);
+    const lugar = new RegExp(`\\b(no|na|nos|nas|pelo|pela|meu|minha|meus|minhas|seu|sua|seus|suas|in|on|via|through|my|our|your|in my|on my|in our|on our)\\s+${sup.nome}\\b`);
     const afirma = perto(`(${sup.afirma})`, sup.nome, 80);
     if (!frasesDoPedido.some((f) => lugar.test(f)) && (trouxe || !afirma.test(r))) continue;
     const pares: string[] = [];
@@ -318,16 +410,33 @@ export function intencoesPelaConta(db: Db, ws: string, pedido: string, resposta:
  * pessoa faz (pagar um boleto): ali "não tenho acesso ao seu banco" é o esperado, e só contam as frases que não deixam
  * dúvida e as que falam das Conexões, da ferramenta do agente ou de uma conta (Teams, e-mail, agenda…).
  */
-const SOBRE_A_CONTA = /\b(conexo(es|ao)|ferramentas?|integrac\w*|teams|e-?mails?|outlook|caixa de entrada|agenda|calendario|planner|to ?do|whatsapp|slack|telegram|discord|conversas|mensage(m|ns)|onedrive|sharepoint|google)\b/;
-const NAO_FEITO_FORTE = /\bnao (saiu|sai) do papel\b|\bnada (foi|ficou) (feito|criado|executado|realizado|concluido)\b/;
+const SOBRE_A_CONTA = /\b(conexo(es|ao)|ferramentas?|integrac\w*|teams|e-?mails?|outlook|caixa de entrada|agenda|calendario|planner|to ?do|whatsapp|slack|telegram|discord|conversas|mensage(m|ns)|onedrive|sharepoint|google|connections?|tools?|integrations?|inbox|mailbox|calendar|chats?|conversations?|messages?)\b/;
+const NAO_FEITO_FORTE = new RegExp([
+  '\\bnao (saiu|sai) do papel\\b', '\\bnada (foi|ficou) (feito|criado|executado|realizado|concluido)\\b',
+  // inglês: "nothing was done", "it never got off the ground" — as mesmas do português: "nothing was sent yet: the draft
+  // is above for your approval" é o rascunho honesto, como "nada foi enviado ainda"
+  '\\bnothing (was|has been|got|could be) (done|created|executed|completed|carried out)\\b', "\\b(never|didn't|did not) (get|got) off the ground\\b",
+].join('|'));
 const VERBO_FEITO = '(enviar|mandar|criar|acessar|ler|publicar|agendar|executar|concluir|fazer|realizar|completar|terminar|entregar|usar|abrir|conectar|responder|cadastrar|registrar|lancar|avaliar|analisar|marcar|mover|buscar|consultar)';
+// os mesmos verbos do português: "find", "get", "make", "reach", "fetch" e "do" sozinhos dão frase de resultado ("I couldn't
+// find any errors", "I couldn't get the exact figure, so…", "we can't make this decision for you", "we cannot do much")
+const VERBO_FEITO_EN = '(send|create|access|read|publish|post|schedule|book|run|execute|complete|finish|do (it|this|that|the (task|work|job))|perform|deliver|use|open|connect|reply|respond|answer|register|log|analy[sz]e|evaluate|mark|move|search|look up|carry out)';
+/** "não consegui", "I couldn't", "I was unable to", "I wasn't able to", "I failed to" */
+const NAO_PUDE_EN = "(couldn't|could not|wasn't able to|was not able to|weren't able to|were not able to|was unable to|were unable to|am unable to|are unable to|can't|cannot|can not|failed to|didn't manage to|did not manage to|haven't been able to|have not been able to)";
 const NAO_FEITO = new RegExp([
   `\\bnao (consegui|conseguimos|pude|pudemos|fui capaz de|foi possivel|deu para) ${VERBO_FEITO}\\b`,
   '\\bnao (tenho|temos|tive|tivemos) (acesso|permissao|como|a ferramenta|essa ferramenta|ferramenta)\\b',
   '\\b(as conexoes|a conexao|a ferramenta|as ferramentas|essa ferramenta|a integracao|o acesso|minhas ferramentas)( [a-z]+){0,3} (ainda )?nao (esta|estao|estava|estavam|foi|foram) (habilitad|disponive|liberad|ativad|configurad)\\w*',
+  // inglês: só o que o agente diz de si mesmo ("I couldn't send", "we don't have access") ou da ferramenta dele
+  `\\b(i|we) ${NAO_PUDE_EN} ${VERBO_FEITO_EN}\\b`,
+  `\\b(it|this) (wasn't|was not|isn't|is not) possible to ${VERBO_FEITO_EN}\\b`,
+  "\\b(i|we) (don't|do not|didn't|did not|no longer) have (access|permission|the permission|the tool|that tool|this tool|a tool|the right tool|a way|any way)\\b",
+  '\\b(i|we) (have|had) no (access|permission|way)\\b',
+  "\\b(the connections?|the tools?|that tool|this tool|the integrations?|my tools|my access|access)( [a-z]+){0,3} (is|are|was|were)( still)? not (enabled|available|turned on|configured|set up|activated|allowed)\\b",
+  "\\b(the connections?|the tools?|that tool|this tool|the integrations?|my tools|my access|access)( [a-z]+){0,3} (isn't|aren't|wasn't|weren't)( yet)? (enabled|available|turned on|configured|set up|activated|allowed)\\b",
 ].join('|'));
 export function naoFeito(texto: string, soForte = false): string | null {
-  const t = fold(texto);
+  const t = fe(texto);
   const trecho = (i: number) => {
     const ini = Math.max(...['.', '\n', '!', '?'].map((x) => texto.lastIndexOf(x, i))) + 1;
     const fins = ['.', '\n', '!', '?'].map((x) => texto.indexOf(x, i)).filter((x) => x >= 0);
@@ -342,7 +451,7 @@ export function naoFeito(texto: string, soForte = false): string | null {
     const fins = ['.', '\n', '!', '?'].map((x) => t.indexOf(x, m.index + m[0].length)).filter((x) => x >= 0);
     if (!SOBRE_A_CONTA.test(t.slice(m.index, fins.length ? Math.min(...fins) : t.length))) return null;
   }
-  const ressalva = /^[^.?!\n]{0,80}\b(mas|porem|entao usei|em vez disso|no lugar)\b/.test(t.slice(m.index + m[0].length));
+  const ressalva = /^[^.?!\n]{0,80}\b(mas|porem|entao usei|em vez disso|no lugar|but|however|so i used|instead|in its place)\b/.test(t.slice(m.index + m[0].length));
   return !ressalva && (m.index < 300 || words(texto) < 150) ? trecho(m.index) : null;
 }
 
@@ -416,8 +525,8 @@ export class Results {
       audit(this.db, null, { workspaceId, actorType: 'system', actorId: 'ergon', action: 'task.work_state', targetType: 'task', targetId: taskId,
         evidence: { de: t.work_state, para: state }, result: note ? `${WORK_LABEL[state]} — ${note}` : WORK_LABEL[state] });
     }
-    const colId = this.db.get<{ id: string }>('SELECT id FROM columns WHERE board_id = ? AND name = ? ORDER BY position LIMIT 1', t.board_id, COLUMN[state])?.id
-      ?? (COLUMN[state] === WITH_YOU ? this.db.get<{ id: string }>("SELECT id FROM columns WHERE board_id = ? AND name = 'Em andamento' ORDER BY position LIMIT 1", t.board_id)?.id : undefined);
+    const colId = colunaPorChave(this.db, t.board_id, COLUMN[state])
+      ?? (COLUMN[state] === WITH_YOU ? colunaPorChave(this.db, t.board_id, 'doing') : null);
     const patch: { columnId?: string; completed?: boolean } = {};
     if (colId && colId !== t.column_id) patch.columnId = colId;
     if (state === 'concluida' && !Number(t.completed)) patch.completed = true;
@@ -607,7 +716,7 @@ export class Results {
         return this.record(ws, task.id, r.id, kind, 'aguardando_info', c, ev, `O arquivo não pôde ser analisado: ${op.error}. Corrija a planilha, anexe de novo e ponha para trabalhar.`, 'ergon');
       }
       c.push({ id: 'operacao', label: 'Análise calculada pelo sistema a partir do arquivo', ok: true, detail: (() => { try { const p = JSON.parse(op.params) as { referencia: string; versao: string }; return `${OPERATION_LABEL} · referência ${p.referencia.split('-').reverse().join('/')} · ${p.versao}`; } catch { return OPERATION_LABEL; } })() });
-      this.setWorkState(ws, task.id, 'resultado', `${(JSON.parse(op.outputs) as string[]).length} entregáveis gerados`);
+      this.setWorkState(ws, task.id, 'resultado', emPt(tx('historico.nota.entregaveis', { n: (JSON.parse(op.outputs) as string[]).length })));
       this.setWorkState(ws, task.id, 'validacao');
       c.push(...this.ops.verify(ws, op));
       ev.deliverables = JSON.parse(op.outputs);

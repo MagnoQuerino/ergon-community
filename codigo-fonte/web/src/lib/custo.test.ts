@@ -2,9 +2,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
 import {
-  COMPOSICAO_ESTIMADA, COMPOSICAO_INTRO, COMPOSICAO_NOTA, COMPOSICAO_VAZIA, PASSOS_AJUDA, PASSOS_DEPOIS, PASSOS_OPCOES, PASSOS_PADRAO,
-  COMPACTAR_AJUDA, COMPACTAR_ATUALIZACAO, COMPACTAR_DEPOIS, COMPACTAR_ROTULO, chamadasTexto, detalhe, fatias, passosCompartilhado, pct, resumidasTexto, tamanhoMedio,
+  PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, compactarAjuda, compactarAtualizacao, compactarDepois, compactarRotulo, composicaoEstimada, composicaoIntro,
+  composicaoNota, composicaoVazia, detalhe, fatias, passosAjuda, passosCompartilhado, passosDepois, pct, resumidasTexto, tamanhoMedio,
 } from './custo.ts';
+import { setIdioma } from '../i18n/index.ts';
+
+// os textos vêm do dicionário (área configuracoes); o teste lê em português, o idioma padrão
+const COMPOSICAO_ESTIMADA = composicaoEstimada(), COMPOSICAO_INTRO = composicaoIntro(), COMPOSICAO_NOTA = composicaoNota(), COMPOSICAO_VAZIA = composicaoVazia();
+const PASSOS_AJUDA = passosAjuda(), PASSOS_DEPOIS = passosDepois();
+const COMPACTAR_AJUDA = compactarAjuda(), COMPACTAR_ATUALIZACAO = compactarAtualizacao(), COMPACTAR_DEPOIS = compactarDepois(), COMPACTAR_ROTULO = compactarRotulo();
 
 // o que a pessoa não deve ler: as peças por dentro do Ergon e o jargão (montado por partes: a exportação pública recusa
 // arquivos com os nomes privados escritos por inteiro)
@@ -59,7 +65,7 @@ test('os textos da tela, sem jargão nem as peças por dentro', () => {
   // e o cartão na tela usa estes textos (nada escrito à mão com jargão no componente)
   const view = fs.readFileSync(new URL('../views/ConfiguracaoView.tsx', import.meta.url), 'utf8');
   const cartao = view.slice(view.indexOf('function PassosField'), view.indexOf('/** Quantos processos andam ao mesmo tempo'));
-  assert.ok(cartao.includes('COMPOSICAO_INTRO') && cartao.includes('PASSOS_AJUDA'), 'o componente usa os textos daqui');
+  assert.ok(cartao.includes('composicaoIntro()') && cartao.includes('passosAjuda()'), 'o componente usa os textos daqui');
   const literais = [...cartao.matchAll(/>([^<>{}]+)</g)].map((m) => m[1].trim()).filter(Boolean);
   for (const l of literais) assert.doesNotMatch(l, JARGAO, l);
 });
@@ -85,12 +91,33 @@ test('rc.26: resumir as conversas longas (ligado por padrão), com texto simples
   // a escolha fica junto dos passos por pedido e usa os textos daqui, sem botão parado esperando
   const view = fs.readFileSync(new URL('../views/ConfiguracaoView.tsx', import.meta.url), 'utf8');
   const campo = view.slice(view.indexOf('function CompactacaoField'), view.indexOf('/** Do que é feita cada chamada ao modelo'));
-  assert.ok(campo.includes('COMPACTAR_ROTULO') && campo.includes('COMPACTAR_AJUDA') && campo.includes("'/api/team/compactacao'"));
+  assert.ok(campo.includes('compactarRotulo()') && campo.includes('compactarAjuda()') && campo.includes("'/api/team/compactacao'"));
   assert.doesNotMatch(campo, /disabled=/);
   // a mesma caixa de marcar das outras da seção (fora do bloco de letra pequena dos campos) e o aviso em linha própria
   assert.doesNotMatch(campo, /className="field/);
   assert.match(campo, /<label className="check">/);
-  assert.ok(campo.includes('COMPACTAR_ATUALIZACAO') && campo.includes('role="status"'));
+  assert.ok(campo.includes('compactarAtualizacao()') && campo.includes('role="status"'));
   assert.ok(view.includes('atualizacao={state.teamCompactacaoAtualizacao === true}'), 'o aviso da atualização vem do servidor');
   assert.ok(view.indexOf('<CompactacaoField') > view.indexOf('<PassosField'), 'logo depois dos passos por pedido');
+});
+
+test('rc.26: em inglês, os mesmos textos sem jargão, com o plural e os números do idioma', async () => {
+  await setIdioma('en', { guardar: false });
+  try {
+    const textos = [composicaoIntro(), composicaoVazia(), composicaoNota(), composicaoEstimada(), passosAjuda(), passosDepois(), passosCompartilhado(2),
+      compactarRotulo(), compactarAjuda(), compactarDepois(), compactarAtualizacao(), resumidasTexto(3, 40),
+      detalhe({ instrucoes: { agente: 0.5, base: 0.2, competencias: 0.1 }, cache: 0.3, chamadas: 2 }), tamanhoMedio(61_000)];
+    for (const t of textos) { assert.doesNotMatch(t, JARGAO, t); assert.doesNotMatch(t, /[ãõçÃÕÇ]/, t); }
+    assert.equal(tamanhoMedio(4_250), '≈ 4.3K per call');
+    assert.equal(tamanhoMedio(58_000), '≈ 58K per call');
+    assert.equal(tamanhoMedio(1_250_000), '≈ 1.3M per call');
+    assert.equal(chamadasTexto(1), '1 call');
+    assert.equal(chamadasTexto(1200), '1,200 calls');
+    assert.match(passosCompartilhado(1), /^This also applies to the other workspace that uses the same team/);
+    assert.match(passosCompartilhado(3), /the other 3 workspaces that use the same team/);
+    assert.match(resumidasTexto(1, 1), /^Conversation summarized in 1 request:/);
+    assert.match(resumidasTexto(3, 40), /^Conversation summarized in 3 of 40 requests:/);
+    assert.deepEqual(fatias({ partes: { instrucoes: 0.42, ferramentas: 0.05, memoria: 0.01, anexos: 0.2, conversa: 0.32 } }).map((x) => x.rotulo), ['Instructions', 'Tools', 'Memory', 'Attachments and data', 'Conversation']);
+    assert.match(compactarAtualizacao(), /see Health/);
+  } finally { await setIdioma('pt-BR', { guardar: false }); }
 });

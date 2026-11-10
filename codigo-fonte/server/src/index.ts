@@ -10,7 +10,7 @@ const cfg = loadConfig();
 const halfway = unfinishedRestore(cfg.backupsDir);
 if (halfway) {
   // sem o banco no lugar, subir criaria uma instalação vazia por cima dos dados guardados
-  console.error(`Restauração interrompida no meio da troca (${halfway}). Nada foi apagado: rode "ergon desfazer-restauracao ${halfway}" (volta ao que era, juntando o que ficou pela metade); depois, se quiser, restaure de novo.`);
+  console.error(`Restauração interrompida no meio da troca (${halfway}). Nada foi apagado: rode "ergon restore --undo ${halfway}" (volta ao que era, juntando o que ficou pela metade); depois, se quiser, restaure de novo.`);
   process.exit(1);
 }
 const vault = new Vault(cfg.dataDir, cfg.kdf);

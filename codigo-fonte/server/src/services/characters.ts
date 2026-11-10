@@ -246,17 +246,17 @@ export function teamSummary(): string {
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 /** Radicais por especialista, em ordem de desempate. Sem modelo: regras simples e auditáveis. */
 const ROUTES: Array<{ key: string; stems: string[] }> = [
-  { key: 'arquimedes', stems: ['planilh', 'numer', 'dados', 'metric', 'indicador', 'orcament', 'custo', 'calcul', 'grafic', 'estatistic', 'percent', 'excel', 'tabela', 'receita', 'despes', 'financ', 'kpi', 'quantitativ'] },
-  { key: 'hipatia', stems: ['pesquis', 'fonte', 'referenc', 'levantament', 'estudo', 'benchmark', 'literatura', 'arquivo'] },
-  { key: 'fidias', stems: ['design', 'apresentac', 'slide', 'layout', 'logo', 'identidade visual', 'imagem', 'banner', 'visual', 'infografic', 'folder'] },
-  { key: 'herodoto', stems: ['redig', 'redac', 'escrev', 'texto', 'relatori', 'propost', 'e-mail', 'email', 'carta', 'artigo', 'document', 'comunicado'] },
-  { key: 'platao', stems: ['conceit', 'ideia', 'estrateg', 'visao', 'principi', 'framework', 'repens', 'reflex', 'proposito'] },
-  { key: 'hipodamo', stems: ['projet', 'planej', 'plano', 'cronogram', 'etapa', 'marco', 'roadmap', 'escopo', 'implant'] },
-  { key: 'hesiodo', stems: ['prazo', 'agenda', 'lembr', 'acompanh', 'follow', 'status', 'reuniao', 'pauta', 'cobrar', 'vencimento'] },
-  { key: 'aspasia', stems: ['respond', 'mensag', 'cliente', 'fornecedor', 'whatsapp', 'teams', 'ligar', 'ligacao', 'comunic', 'avisar', 'negoci'] },
-  { key: 'euclides', stems: ['confer', 'checar', 'verific', 'qualidade', 'formatac', 'consistenc', 'auditar', 'validar'] },
-  { key: 'socrates', stems: ['revis', 'critic', 'question', 'parecer'] },
-  { key: 'diogenes', stems: ['fazer', 'resolver', 'execut', 'comprar', 'enviar', 'organiz', 'arrum', 'instal', 'trocar', 'consert', 'cadastr'] },
+  { key: 'arquimedes', stems: ['planilh', 'numer', 'dados', 'metric', 'indicador', 'orcament', 'custo', 'calcul', 'grafic', 'estatistic', 'percent', 'excel', 'tabela', 'receita', 'despes', 'financ', 'kpi', 'quantitativ', 'spreadsheet', 'number', 'budget', 'pricing', 'chart', 'statistics', 'revenue', 'expense'] },
+  { key: 'hipatia', stems: ['pesquis', 'fonte', 'referenc', 'levantament', 'estudo', 'benchmark', 'literatura', 'arquivo', 'research', 'survey', 'study', 'studies', 'literature'] },
+  { key: 'fidias', stems: ['design', 'apresentac', 'slide', 'layout', 'logo', 'identidade visual', 'imagem', 'banner', 'visual', 'infografic', 'folder', 'presentation', 'infograph', 'brochure', 'flyer'] },
+  { key: 'herodoto', stems: ['redig', 'redac', 'escrev', 'texto', 'relatori', 'propost', 'e-mail', 'email', 'carta', 'artigo', 'document', 'comunicado', 'write', 'writing', 'draft', 'report', 'proposal', 'letter', 'article', 'announcement'] },
+  { key: 'platao', stems: ['conceit', 'ideia', 'estrateg', 'visao', 'principi', 'framework', 'repens', 'reflex', 'proposito', 'concept', 'idea', 'principle', 'rethink', 'reflect', 'purpose'] },
+  { key: 'hipodamo', stems: ['projet', 'planej', 'plano', 'cronogram', 'etapa', 'marco', 'roadmap', 'escopo', 'implant', 'project', 'planning', 'timeline', 'milestone', 'scope', 'rollout'] },
+  { key: 'hesiodo', stems: ['prazo', 'agenda', 'lembr', 'acompanh', 'follow', 'status', 'reuniao', 'pauta', 'cobrar', 'vencimento', 'deadline', 'calendar', 'remind', 'meeting', 'due date'] },
+  { key: 'aspasia', stems: ['respond', 'mensag', 'cliente', 'fornecedor', 'whatsapp', 'teams', 'ligar', 'ligacao', 'comunic', 'avisar', 'negoci', 'reply', 'message', 'customer', 'supplier', 'vendor', 'negotiat', 'notify'] },
+  { key: 'euclides', stems: ['confer', 'checar', 'verific', 'qualidade', 'formatac', 'consistenc', 'auditar', 'validar', 'check', 'verify', 'quality', 'formatting', 'auditing', 'validat'] },
+  { key: 'socrates', stems: ['revis', 'critic', 'question', 'parecer', 'review', 'critiq', 'feedback'] },
+  { key: 'diogenes', stems: ['fazer', 'resolver', 'execut', 'comprar', 'enviar', 'organiz', 'arrum', 'instal', 'trocar', 'consert', 'cadastr', 'buy', 'purchase', 'organis', 'register', 'fix it'] },
 ];
 
 /** Radicais de encaminhamento conhecidos de um personagem (vale enquanto ele mantém a função original). */

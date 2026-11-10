@@ -13,11 +13,17 @@ import type { SkinData } from '../../../shared/skin.ts';
 import { useSurface } from '../lib/surface.ts';
 import { cardClick } from '../lib/cardClick.ts';
 import { Icon } from '../components/Icon.tsx';
+import { t, useT, type Chave } from '../i18n/index.ts';
 
 interface Installed { id: string; packageId: string; version: string; kind: string; title: string; verified: boolean; active: boolean; installedAt: string }
 interface Preview { packageId: string; version: string; kind: string; title: string; summary: string; verified: boolean; installable: boolean; reason: string | null; changes: string[] }
 
-const KIND: Record<string, string> = { skin: 'Skin da cidade', 'city-theme': 'Tema da cidade', fx: 'Efeito', pet: 'Pet', 'character-look': 'Aparência', 'team-blueprint': 'Equipe', skill: 'Competência', plugin: 'Plugin' };
+const KIND: Record<string, Extract<Chave, `documentos.pacotes.tipo.${string}`>> = {
+  skin: 'documentos.pacotes.tipo.skin', 'city-theme': 'documentos.pacotes.tipo.cityTheme', fx: 'documentos.pacotes.tipo.fx', pet: 'documentos.pacotes.tipo.pet',
+  'character-look': 'documentos.pacotes.tipo.characterLook', 'team-blueprint': 'documentos.pacotes.tipo.teamBlueprint', skill: 'documentos.pacotes.tipo.skill', plugin: 'documentos.pacotes.tipo.plugin',
+};
+/** O nome do tipo no idioma da tela (um tipo novo, que esta versão não conhece, aparece como veio). */
+const tipoDe = (kind: string): string => (KIND[kind] ? t(KIND[kind]) : kind);
 
 /**
  * Configurações › Pacotes: instalar um .ergon (tema, efeitos, pets, aparências, equipe) com prévia e desfazer.
@@ -28,6 +34,7 @@ const PW = 44; const PH = 34; // prévia em unidades da pixel art (× RES no can
 
 /** Prévia ao vivo: um agente de verdade com o efeito ou o pet, desenhados pelo mesmo código da cidade, a qualquer hora. */
 function Preview({ agent, fx, pet }: { agent: PreviewAgent | null; fx: FxSpec | null; pet: PetSpec | null }) {
+  const t = useT();
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = ref.current; const g = c?.getContext('2d'); if (!c || !g) return;
@@ -48,7 +55,7 @@ function Preview({ agent, fx, pet }: { agent: PreviewAgent | null; fx: FxSpec | 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
   }, [agent?.name, agent?.color, agent?.role, agent?.char_key, agent?.look_seed, fx?.effect, fx?.color, fx?.intensity, pet?.species, pet?.color]);
-  return <canvas ref={ref} width={PW * RES} height={PH * RES} role="img" aria-label={`Prévia em ${agent?.name ?? 'um agente'}`} style={{ width: PW * 4, height: PH * 4, imageRendering: 'pixelated', borderRadius: 8 }} />;
+  return <canvas ref={ref} width={PW * RES} height={PH * RES} role="img" aria-label={t('documentos.pacotes.previa.em', { nome: agent?.name ?? t('documentos.pacotes.previa.umAgente') })} style={{ width: PW * 4, height: PH * 4, imageRendering: 'pixelated', borderRadius: 8 }} />;
 }
 
 interface CatalogPreview {
@@ -61,9 +68,10 @@ interface CatalogPreview {
 interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
 
 const INSTALAVEIS = ['city-theme', 'fx', 'pet', 'character-look', 'team-blueprint', 'skin'];
-const CATEGORIAS: Array<{ k: string; l: string }> = [
-  { k: 'todos', l: 'Todos' }, { k: 'skin', l: 'Skins' }, { k: 'city-theme', l: 'Temas' }, { k: 'fx', l: 'Efeitos' },
-  { k: 'pet', l: 'Pets' }, { k: 'team-blueprint', l: 'Equipes' }, { k: 'outros', l: 'Outros' },
+const CATEGORIAS: Array<{ k: string; l: Extract<Chave, `documentos.pacotes.cat.${string}`> }> = [
+  { k: 'todos', l: 'documentos.pacotes.cat.todos' }, { k: 'skin', l: 'documentos.pacotes.cat.skins' }, { k: 'city-theme', l: 'documentos.pacotes.cat.temas' },
+  { k: 'fx', l: 'documentos.pacotes.cat.efeitos' }, { k: 'pet', l: 'documentos.pacotes.cat.pets' }, { k: 'team-blueprint', l: 'documentos.pacotes.cat.equipes' },
+  { k: 'outros', l: 'documentos.pacotes.cat.outros' },
 ];
 const PRINCIPAIS = new Set(['skin', 'city-theme', 'fx', 'pet', 'team-blueprint']);
 const POR_PAGINA = 9;
@@ -92,6 +100,7 @@ function temaDoPacote(t: { base: 'dia' | 'noite'; colors: Record<string, string>
 
 /** Equipe do pacote: os setores (o que muda de uma área para outra) e quem vem nela. */
 function EquipePrevia({ p }: { p: CatalogPreview }) {
+  const t = useT();
   const ag = p.agents ?? [];
   const setores = p.sectors ?? [];
   return (
@@ -102,7 +111,7 @@ function EquipePrevia({ p }: { p: CatalogPreview }) {
       </span>
       <span className="loja-previa__rostos">
         {ag.slice(0, 6).map((a, i) => <AgentAvatar key={i} agent={{ name: a.name, color: a.color, role: a.role, char_key: a.charKey, look_seed: null }} size={24} />)}
-        <span className="loja-previa__conta">{ag.length} agentes</span>
+        <span className="loja-previa__conta">{t('documentos.pacotes.previa.agentes', { n: ag.length })}</span>
       </span>
     </span>
   );
@@ -110,6 +119,7 @@ function EquipePrevia({ p }: { p: CatalogPreview }) {
 
 /** Prévia de um pacote: a imagem dele; senão, a cidade com a skin/tema, a equipe, ou o efeito/pet num agente. */
 function PreviaPacote({ item, agent }: { item: CatalogItem; agent: PreviewAgent | null }) {
+  const t = useT();
   const p = item.preview;
   const cena = useMemo(() => {
     if (p?.skin) {
@@ -122,7 +132,7 @@ function PreviaPacote({ item, agent }: { item: CatalogItem; agent: PreviewAgent 
     return null;
   }, [p]);
   if (p?.images) return <img className="loja-previa__img" src={`/api/packages/catalog/official/${encodeURIComponent(item.id)}/preview/0`} alt="" loading="lazy" />;
-  if (cena) return <CidadePrevia theme={cena.th} looks={cena.looks} label={`Prévia da cidade: ${item.title}`} />;
+  if (cena) return <CidadePrevia theme={cena.th} looks={cena.looks} label={t('documentos.pacotes.previa.cidade', { titulo: item.title })} />;
   if (p?.agents?.length) return <EquipePrevia p={p} />;
   if (p?.fx || p?.pet) {
     return (
@@ -131,16 +141,13 @@ function PreviaPacote({ item, agent }: { item: CatalogItem; agent: PreviewAgent 
       </span>
     );
   }
-  return <span className="loja-previa__cores"><span className="loja-previa__tipo">{KIND[item.kind] ?? item.kind}</span></span>;
+  return <span className="loja-previa__cores"><span className="loja-previa__tipo">{tipoDe(item.kind)}</span></span>;
 }
 
 /** O que cada categoria é, em uma frase (as Equipes, principalmente, não são óbvias). */
-const SOBRE: Record<string, string> = {
-  skin: 'A cidade inteira com outra cara: cores, prédios, roupas, nomes das construções e os personagens que vestem a sua equipe. Só aparência.',
-  'city-theme': 'Só as cores da cidade (chão, céu, detalhes), de dia ou de noite.',
-  fx: 'Efeitos visuais em agentes: aura, brilho, círculo ou rastro de fogo.',
-  pet: 'Um bichinho que acompanha o agente pela cidade.',
-  'team-blueprint': 'Uma equipe pronta para uma área: setores, funções e o jeito de trabalhar de cada agente. Instalar acrescenta esses agentes e setores ao seu workspace (sem ferramentas novas, rotinas pausadas); nada do que você já tem é apagado, e desfazer tira tudo o que entrou.',
+const SOBRE: Record<string, Extract<Chave, `documentos.pacotes.sobre.${string}`>> = {
+  skin: 'documentos.pacotes.sobre.skin', 'city-theme': 'documentos.pacotes.sobre.cityTheme', fx: 'documentos.pacotes.sobre.fx', pet: 'documentos.pacotes.sobre.pet',
+  'team-blueprint': 'documentos.pacotes.sobre.teamBlueprint',
 };
 
 /**
@@ -149,6 +156,7 @@ const SOBRE: Record<string, string> = {
  * paginação e uma página de detalhe por pacote; instalar é o mesmo caminho de qualquer pacote (desfazer em Instalados).
  */
 function Loja({ busy, agent, onInstall }: { busy: boolean; agent: PreviewAgent | null; onInstall: (url: string, item: CatalogItem) => Promise<boolean> }) {
+  const t = useT();
   const of = useResource<CatalogItem[]>('/api/packages/catalog/official', []);
   const [origem, setOrigem] = useState<'oficiais' | 'comunidade'>('oficiais');
   const [com, setCom] = useState<CatalogItem[] | null>(null);
@@ -181,35 +189,35 @@ function Loja({ busy, agent, onInstall }: { busy: boolean; agent: PreviewAgent |
     }
   };
   const botao = (x: CatalogItem, grande = false) => (x.installed
-    ? <span className="badge badge--ok">instalado</span>
-    : <button className={`btn ${grande ? 'btn--primary' : 'btn--sm'}`} disabled={busy || !INSTALAVEIS.includes(x.kind)} onClick={(e) => { e.stopPropagation(); void instalar(x); }}>Instalar</button>);
+    ? <span className="badge badge--ok">{t('documentos.pacotes.loja.instalado')}</span>
+    : <button className={`btn ${grande ? 'btn--primary' : 'btn--sm'}`} disabled={busy || !INSTALAVEIS.includes(x.kind)} onClick={(e) => { e.stopPropagation(); void instalar(x); }}>{t('documentos.pacotes.loja.instalar')}</button>);
   return (
     <section className="card loja">
       <div className="loja__topo">
-        <h3>Loja</h3>
-        <div className="loja__origem" role="tablist" aria-label="Origem">
-          <button role="tab" aria-selected={origem === 'oficiais'} className={`chip chip--btn ${origem === 'oficiais' ? 'is-on' : ''}`} onClick={() => setOrigem('oficiais')}>Oficiais</button>
-          <button role="tab" aria-selected={origem === 'comunidade'} className={`chip chip--btn ${origem === 'comunidade' ? 'is-on' : ''}`} onClick={() => { setOrigem('comunidade'); if (!com && !lendo) void carregar(false); }}>Comunidade</button>
+        <h3>{t('documentos.pacotes.loja.titulo')}</h3>
+        <div className="loja__origem" role="tablist" aria-label={t('documentos.pacotes.loja.origem')}>
+          <button role="tab" aria-selected={origem === 'oficiais'} className={`chip chip--btn ${origem === 'oficiais' ? 'is-on' : ''}`} onClick={() => setOrigem('oficiais')}>{t('documentos.pacotes.loja.oficiais')}</button>
+          <button role="tab" aria-selected={origem === 'comunidade'} className={`chip chip--btn ${origem === 'comunidade' ? 'is-on' : ''}`} onClick={() => { setOrigem('comunidade'); if (!com && !lendo) void carregar(false); }}>{t('documentos.pacotes.loja.comunidade')}</button>
         </div>
-        <input className="input loja__busca" type="search" placeholder="Buscar pacotes…" value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar pacotes" />
+        <input className="input loja__busca" type="search" placeholder={t('documentos.pacotes.loja.buscar')} value={busca} onChange={(e) => setBusca(e.target.value)} aria-label={t('documentos.pacotes.loja.buscarAria')} />
       </div>
       <p className="muted small">{origem === 'oficiais'
-        ? 'Vêm com o Ergon, verificados, e funcionam sem internet.'
-        : 'Feitos por quem usa o Ergon, num catálogo público lido só agora, porque você pediu. Não são verificados: instale o que fizer sentido para você.'}</p>
-      <div className="loja__cats" role="tablist" aria-label="Categorias">
+        ? t('documentos.pacotes.loja.oficiaisDica')
+        : t('documentos.pacotes.loja.comunidadeDica')}</p>
+      <div className="loja__cats" role="tablist" aria-label={t('documentos.pacotes.loja.categorias')}>
         {CATEGORIAS.map((c) => {
           const n = contar(c.k);
           return (c.k === 'todos' || n > 0) && (
-            <button key={c.k} role="tab" aria-selected={cat === c.k} className={`chip chip--btn ${cat === c.k ? 'is-on' : ''}`} onClick={() => setCat(c.k)}>{c.l} <span className="muted">{n}</span></button>
+            <button key={c.k} role="tab" aria-selected={cat === c.k} className={`chip chip--btn ${cat === c.k ? 'is-on' : ''}`} onClick={() => setCat(c.k)}>{t(c.l)} <span className="muted">{n}</span></button>
           );
         })}
-        <label className="loja__novos small"><input type="checkbox" checked={soNovos} onChange={(e) => setSoNovos(e.target.checked)} /> Só os que não tenho</label>
+        <label className="loja__novos small"><input type="checkbox" checked={soNovos} onChange={(e) => setSoNovos(e.target.checked)} /> {t('documentos.pacotes.loja.soNovos')}</label>
       </div>
-      {SOBRE[cat] && <p className="hint loja__sobre">{SOBRE[cat]}</p>}
-      {origem === 'comunidade' && aviso && <p className="muted" role="status">{aviso} <button className="link" disabled={lendo} onClick={() => void carregar(true)}>Tentar de novo</button></p>}
+      {SOBRE[cat] && <p className="hint loja__sobre">{t(SOBRE[cat])}</p>}
+      {origem === 'comunidade' && aviso && <p className="muted" role="status">{aviso} <button className="link" disabled={lendo} onClick={() => void carregar(true)}>{t('documentos.pacotes.loja.tentarDeNovo')}</button></p>}
       {((origem === 'comunidade' && lendo) || (origem === 'oficiais' && !of.data)) && <Loading error={origem === 'oficiais' ? of.error : null} />}
-      {!lendo && lista.length > 0 && !filtrada.length && <p className="muted">Nada com esses filtros.</p>}
-      {origem === 'comunidade' && com && !com.length && <p className="muted">O catálogo da comunidade ainda está vazio.</p>}
+      {!lendo && lista.length > 0 && !filtrada.length && <p className="muted">{t('documentos.pacotes.loja.nadaFiltros')}</p>}
+      {origem === 'comunidade' && com && !com.length && <p className="muted">{t('documentos.pacotes.loja.comunidadeVazia')}</p>}
       {vista.length > 0 && (
         <ul className="loja__grade">
           {vista.map((x) => (
@@ -219,11 +227,11 @@ function Loja({ busy, agent, onInstall }: { busy: boolean; agent: PreviewAgent |
               <article className="loja-card" onClick={cardClick(() => setAberto(x))}>
                 <div className="loja-previa"><PreviaPacote item={x} agent={agent} /></div>
                 <div className="loja-card__txt">
-                  <b><button type="button" className="card-open" onClick={() => setAberto(x)} aria-label={`${x.title}: ver detalhes`}>{x.title}</button></b>
-                  <span className="muted small">{KIND[x.kind] ?? x.kind}{x.author ? ` · por ${x.author}` : ''}</span>
+                  <b><button type="button" className="card-open" onClick={() => setAberto(x)} aria-label={t('documentos.pacotes.loja.verDetalhes', { titulo: x.title })}>{x.title}</button></b>
+                  <span className="muted small">{tipoDe(x.kind)}{x.author ? ` · ${t('documentos.pacotes.loja.porAutor', { autor: x.author })}` : ''}</span>
                 </div>
                 <div className="loja-card__pe">
-                  {x.verified ? <span className="badge">verificado</span> : <span className="badge badge--warn" title="Sem a assinatura do Ergon: instale só se confiar em quem fez.">não verificado</span>}
+                  {x.verified ? <span className="badge">{t('documentos.pacotes.loja.verificado')}</span> : <span className="badge badge--warn" title={t('documentos.pacotes.loja.semAssinatura')}>{t('documentos.pacotes.loja.naoVerificado')}</span>}
                   {botao(x)}
                 </div>
               </article>
@@ -232,15 +240,15 @@ function Loja({ busy, agent, onInstall }: { busy: boolean; agent: PreviewAgent |
         </ul>
       )}
       {paginas > 1 && (
-        <nav className="loja__paginas" aria-label="Páginas">
-          <button className="btn btn--sm btn--ghost" disabled={pagina === 0} onClick={() => setPagina((p) => p - 1)}>Anterior</button>
+        <nav className="loja__paginas" aria-label={t('documentos.pacotes.loja.paginas')}>
+          <button className="btn btn--sm btn--ghost" disabled={pagina === 0} onClick={() => setPagina((p) => p - 1)}>{t('documentos.pacotes.loja.anterior')}</button>
           {Array.from({ length: paginas }, (_, i) => (
             <button key={i} className={`chip chip--btn ${i === pagina ? 'is-on' : ''}`} aria-current={i === pagina ? 'page' : undefined} onClick={() => setPagina(i)}>{i + 1}</button>
           ))}
-          <button className="btn btn--sm btn--ghost" disabled={pagina >= paginas - 1} onClick={() => setPagina((p) => p + 1)}>Próxima</button>
+          <button className="btn btn--sm btn--ghost" disabled={pagina >= paginas - 1} onClick={() => setPagina((p) => p + 1)}>{t('documentos.pacotes.loja.proxima')}</button>
         </nav>
       )}
-      {origem === 'comunidade' && com && <button className="link" disabled={lendo} onClick={() => void carregar(true)}>Atualizar a lista</button>}
+      {origem === 'comunidade' && com && <button className="link" disabled={lendo} onClick={() => void carregar(true)}>{t('documentos.pacotes.loja.atualizarLista')}</button>}
       {aberto && <DetalhePacote item={aberto} agent={agent} acao={botao(aberto, true)} onClose={() => setAberto(null)} />}
     </section>
   );
@@ -248,6 +256,7 @@ function Loja({ busy, agent, onInstall }: { busy: boolean; agent: PreviewAgent |
 
 /** Página de detalhe de um pacote: prévia grande, descrição, o que ele traz e instalar. */
 function DetalhePacote({ item, agent, acao, onClose }: { item: CatalogItem; agent: PreviewAgent | null; acao: React.ReactNode; onClose: () => void }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   useSurface(ref, { onClose, modal: true, outside: true });
   const p = item.preview;
@@ -256,17 +265,17 @@ function DetalhePacote({ item, agent, acao, onClose }: { item: CatalogItem; agen
       <div ref={ref} className="cpop__card loja-detalhe" role="dialog" aria-modal="true" aria-labelledby="loja-det-titulo">
         <div className="loja-detalhe__previa loja-previa"><PreviaPacote item={item} agent={agent} /></div>
         <h3 id="loja-det-titulo">{item.title}</h3>
-        <p className="muted small">{KIND[item.kind] ?? item.kind} · versão {item.version}{item.author ? ` · por ${item.author}` : ''} · {item.verified ? 'verificado' : 'não verificado'}</p>
+        <p className="muted small">{tipoDe(item.kind)} · {t('documentos.pacotes.detalhe.versao', { versao: item.version })}{item.author ? ` · ${t('documentos.pacotes.loja.porAutor', { autor: item.author })}` : ''} · {item.verified ? t('documentos.pacotes.loja.verificado') : t('documentos.pacotes.loja.naoVerificado')}</p>
         {p?.tagline && p.tagline !== item.summary && <p><i>{p.tagline}</i></p>}
         <p>{item.summary}</p>
-        {SOBRE[item.kind] && <p className="hint">{SOBRE[item.kind]}</p>}
-        {item.kind === 'team-blueprint' && p?.sectors?.length ? <p className="small"><b>Setores:</b> {p.sectors.join(', ')}</p> : null}
-        {p?.names.length ? <p className="small"><b>{item.kind === 'team-blueprint' ? 'Na equipe' : 'Personagens'}:</b> {p.names.join(', ')}</p> : null}
-        {p?.swatches.length ? <div className="loja-detalhe__cores" aria-label="Cores">{p.swatches.map((c) => <span key={c} style={{ background: c }} title={c} />)}</div> : null}
-        {p?.tags.length ? <p className="small muted">{p.tags.map((t) => `#${t}`).join(' ')}</p> : null}
-        {!INSTALAVEIS.includes(item.kind) && <p className="hint">Este tipo de pacote ainda não pode ser instalado nesta versão.</p>}
+        {SOBRE[item.kind] && <p className="hint">{t(SOBRE[item.kind])}</p>}
+        {item.kind === 'team-blueprint' && p?.sectors?.length ? <p className="small"><b>{t('documentos.pacotes.detalhe.setores')}</b> {p.sectors.join(', ')}</p> : null}
+        {p?.names.length ? <p className="small"><b>{item.kind === 'team-blueprint' ? t('documentos.pacotes.detalhe.naEquipe') : t('documentos.pacotes.detalhe.personagens')}</b> {p.names.join(', ')}</p> : null}
+        {p?.swatches.length ? <div className="loja-detalhe__cores" aria-label={t('documentos.pacotes.detalhe.cores')}>{p.swatches.map((c) => <span key={c} style={{ background: c }} title={c} />)}</div> : null}
+        {p?.tags.length ? <p className="small muted">{p.tags.map((x) => `#${x}`).join(' ')}</p> : null}
+        {!INSTALAVEIS.includes(item.kind) && <p className="hint">{t('documentos.pacotes.detalhe.naoInstalavel')}</p>}
         <div className="cpop__acts">
-          <button className="btn btn--ghost" onClick={onClose}>Fechar</button>
+          <button className="btn btn--ghost" onClick={onClose}>{t('documentos.fechar')}</button>
           {acao}
         </div>
       </div>
@@ -276,6 +285,7 @@ function DetalhePacote({ item, agent, acao, onClose }: { item: CatalogItem; agen
 
 /** agent: quem aparece na prévia viva de efeitos e pets (o Coordenador; sem ele, um boneco padrão) */
 export function PacotesPanel({ agent = null }: { agent?: PreviewAgent | null }) {
+  const t = useT();
   const res = useResource<Installed[]>('/api/packages', []);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -291,12 +301,12 @@ export function PacotesPanel({ agent = null }: { agent?: PreviewAgent | null }) 
   };
   const install = async () => {
     if (!file) return; setBusy(true);
-    try { await send('/api/packages/install', file); setMsg({ kind: 'ok', text: 'Pacote aplicado. Dá para desfazer quando quiser.' }); setPreview(null); setFile(null); res.reload(); window.dispatchEvent(new Event('ergon:packages')); }
+    try { await send('/api/packages/install', file); setMsg({ kind: 'ok', text: t('documentos.pacotes.msg.aplicado') }); setPreview(null); setFile(null); res.reload(); window.dispatchEvent(new Event('ergon:packages')); }
     catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); }
   };
   const undo = async (p: Installed) => {
     setBusy(true);
-    try { await api.del(`/api/packages/${p.id}`); setMsg({ kind: 'ok', text: `"${p.title}" desfeito: voltou como estava.` }); res.reload(); window.dispatchEvent(new Event('ergon:packages')); }
+    try { await api.del(`/api/packages/${p.id}`); setMsg({ kind: 'ok', text: t('documentos.pacotes.msg.desfeito', { titulo: p.title }) }); res.reload(); window.dispatchEvent(new Event('ergon:packages')); }
     catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); }
   };
   if (!res.data) return <Loading error={res.error} />;
@@ -306,41 +316,41 @@ export function PacotesPanel({ agent = null }: { agent?: PreviewAgent | null }) 
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       <Loja busy={busy} agent={agent} onInstall={async (url, item) => {
         setMsg(null); setBusy(true);
-        try { await api.post(url, { id: item.id }); setMsg({ kind: 'ok', text: `"${item.title}" aplicado. Dá para desfazer em Instalados.` }); res.reload(); window.dispatchEvent(new Event('ergon:packages')); return true; }
+        try { await api.post(url, { id: item.id }); setMsg({ kind: 'ok', text: t('documentos.pacotes.msg.aplicadoLoja', { titulo: item.title }) }); res.reload(); window.dispatchEvent(new Event('ergon:packages')); return true; }
         catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); return false; } finally { setBusy(false); }
       }} />
       <section className="card">
-        <h3>Criar o seu pacote</h3>
-        <p className="muted">Um pacote .ergon é um arquivo só de dados (cores, prédios, roupas, personagens ou uma equipe). Dá para montar à mão, por quem programa, ou pedir a uma IA.</p>
+        <h3>{t('documentos.pacotes.criar.titulo')}</h3>
+        <p className="muted">{t('documentos.pacotes.criar.texto')}</p>
         <div className="row row--wrap">
-          <a className="btn" href="/guias/criar-pacotes-ergon.md" download="criar-pacotes-ergon.md"><Icon name="download" size={14} /> Guia técnico (.md)</a>
-          <a className="btn" href="/guias/SKILL.md" download="SKILL.md"><Icon name="download" size={14} /> SKILL.md para criar com IA</a>
+          <a className="btn" href="/guias/criar-pacotes-ergon.md" download="criar-pacotes-ergon.md"><Icon name="download" size={14} /> {t('documentos.pacotes.criar.guia')}</a>
+          <a className="btn" href="/guias/SKILL.md" download="SKILL.md"><Icon name="download" size={14} /> {t('documentos.pacotes.criar.skill')}</a>
         </div>
-        <p className="hint">O guia explica o formato, cada tipo e como montar o arquivo. O SKILL.md é para colocar numa IA (Claude, ChatGPT, Gemini…): ela passa a saber criar e conferir o pacote para você. Depois, é só instalar aqui embaixo.</p>
+        <p className="hint">{t('documentos.pacotes.criar.dica')}</p>
       </section>
       <section className="card">
-        <h3>Instalar um pacote .ergon</h3>
-        <p className="muted">Temas da cidade, efeitos (aura, círculo de fogo, brilho, rastro), pets, aparências e equipes. Um pacote só traz aparência e textos: nunca ferramentas, contas ou acesso aos seus dados.</p>
+        <h3>{t('documentos.pacotes.instalar.titulo')}</h3>
+        <p className="muted">{t('documentos.pacotes.instalar.texto')}</p>
         <input ref={input} type="file" accept=".ergon" hidden onChange={(e) => void choose(e.target.files?.[0] ?? null)} />
-        <button className="btn" disabled={busy} onClick={() => input.current?.click()}>Escolher arquivo .ergon</button>
+        <button className="btn" disabled={busy} onClick={() => input.current?.click()}>{t('documentos.pacotes.instalar.escolher')}</button>
         {preview && (
           <div className="card card--inner">
-            <b>{preview.title}</b> <span className="muted small">{KIND[preview.kind] ?? preview.kind} · {preview.packageId} {preview.version}</span>
-            {preview.verified ? <span className="badge">verificado pela loja</span> : <span className="badge badge--warn" title="Sem a assinatura da loja do Ergon: instale só se confiar em quem fez.">não verificado</span>}
+            <b>{preview.title}</b> <span className="muted small">{tipoDe(preview.kind)} · {preview.packageId} {preview.version}</span>
+            {preview.verified ? <span className="badge">{t('documentos.pacotes.instalar.verificadoLoja')}</span> : <span className="badge badge--warn" title={t('documentos.pacotes.instalar.semAssinatura')}>{t('documentos.pacotes.loja.naoVerificado')}</span>}
             <p className="small">{preview.summary}</p>
             <ul className="small">{preview.changes.map((c) => <li key={c}>{c}</li>)}</ul>
-            {preview.installable ? <button className="btn btn--primary" disabled={busy} onClick={() => void install()}>Aplicar</button> : <p className="muted small">{preview.reason}</p>}
+            {preview.installable ? <button className="btn btn--primary" disabled={busy} onClick={() => void install()}>{t('documentos.pacotes.instalar.aplicar')}</button> : <p className="muted small">{preview.reason}</p>}
           </div>
         )}
       </section>
       <section className="card">
-        <h3>Instalados</h3>
-        {!ativos.length && <p className="muted">Nenhum pacote aplicado: a cidade está como veio.</p>}
+        <h3>{t('documentos.pacotes.instalados.titulo')}</h3>
+        {!ativos.length && <p className="muted">{t('documentos.pacotes.instalados.nenhum')}</p>}
         <ul className="sec-rows">
           {ativos.map((p) => (
             <li key={p.id}>
-              <b>{p.title}</b><span className="muted small">{KIND[p.kind] ?? p.kind} · {p.version}{p.verified ? ' · verificado' : ' · não verificado'}</span>
-              <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void undo(p)}>Desfazer</button>
+              <b>{p.title}</b><span className="muted small">{tipoDe(p.kind)} · {p.version} · {p.verified ? t('documentos.pacotes.loja.verificado') : t('documentos.pacotes.loja.naoVerificado')}</span>
+              <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void undo(p)}>{t('documentos.desfazer')}</button>
             </li>
           ))}
         </ul>

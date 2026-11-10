@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { colsFor, visibleRange } from '../lib/virtual.ts';
+import { useT } from '../i18n/index.ts';
 
 /**
  * Grade virtualizada que rola com a página (qualquer ancestral com rolagem): mede a própria posição na janela e
@@ -10,6 +11,7 @@ export function VirtualGrid<T>({ items, hasMore, onNeedMore, rowHeight, minColWi
   items: T[]; hasMore: boolean; onNeedMore: () => void; rowHeight: number; minColWidth: number; gap?: number;
   render: (item: T) => ReactNode; keyOf: (item: T) => string; label: string; empty?: ReactNode;
 }) {
+  const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [range, setRange] = useState<[number, number]>([0, 0]);
@@ -44,7 +46,7 @@ export function VirtualGrid<T>({ items, hasMore, onNeedMore, rowHeight, minColWi
         const i = range[0] + k; const row = Math.floor(i / cols); const col = i % cols;
         return <div key={keyOf(it)} role="listitem" className="vgrid__cell" style={{ top: row * rowH, left: col * (colW + gap), width: colW, height: rowHeight }}>{render(it)}</div>;
       })}
-      {hasMore && <div className="vgrid__more muted small" style={{ top: Math.ceil(count / cols) * rowH }}>Carregando mais…</div>}
+      {hasMore && <div className="vgrid__more muted small" style={{ top: Math.ceil(count / cols) * rowH }}>{t('geral.comum.carregandoMais')}</div>}
     </div>
   );
 }

@@ -691,11 +691,19 @@ const PEDE_EQUIPE_INTEIRA = new RegExp([
   `\\b(dar|libere|liberar|ligue|ligar|tire|tirar|tira|remova|remover|bloqueie|bloquear|desligue|desligar)\\b (a |o |as |os )?(ferramenta|acesso|${ROTULOS})\\b`,
   // "de as Conexões ao…" (o "dê" digitado sem acento): com o artigo logo depois, não é a preposição
   `\\bde (a|o|as|os) (ferramenta|acesso|${ROTULOS})\\b`,
+  // inglês (a pessoa pode escrever nas duas línguas): reorganize, rename, "the whole team", "who has", "list my agents"…
+  'reorgani[sz]', 'restructur', '\\brename', '\\btheme\\b', "\\beveryone'?s names?\\b", '\\ball (the )?names\\b', '\\beveryone\\b', '\\ball (the |my |our )?(agents|colleagues)\\b',
+  '\\b(the )?(whole|entire) team\\b', "\\bwho (on|in) (the|my|our) team\\b", '\\bwho (has|does|handles|can|knows)\\b',
+  '\\b(list|show|see)\\b (me )?(all )?(the |my |our )?(agents|colleagues|team)\\b', '\\bhow many (agents|colleagues)\\b', '\\b(sectors|departments)\\b', '\\btool locks?\\b',
+  'deactivat', 'reactivat', '\\bmove\\b[^.?!]{0,60}\\b(sector|department)\\b', '\\btransfer\\b', '\\bhire\\b', '\\bpromot', '\\bfire (him|her|them|the)\\b',
+  '\\bnew (agent|colleague)\\b', '\\bcreate (an?|new) (agent|colleague)\\b',
+  '\\b(change|rename|update)\\b[^.?!]{0,40}\\b(name|role|title|sector|bio|personality) of\\b',
+  '\\b(give|grant|remove|take away|turn off|turn on|enable|disable|block)\\b (the )?(tool|access)\\b',
 ].join('|'));
 /** "dê Conexões ao redator": sem o acento, o "dê" é a preposição "de"; por isso este confere o texto antes do fold */
 const DE_FERRAMENTA = new RegExp(`(^|[^\\p{L}])(dê|dá)\\s+(a |o |as |os )?(ferramenta|acesso|${Object.values(TOOLS).map((t) => escRe(t.label.toLowerCase())).join('|')})(?![\\p{L}])`, 'u');
 /** "mova a designer para o Comercial", "passe o redator para Vendas": o verbo de mudar alguém de lugar e o nome de um setor */
-const MOVER = /\b(mova|mover|movam|passe|passar|transfira|leve|levar|coloque|colocar|ponha)\b/;
+const MOVER = /\b(mova|mover|movam|passe|passar|transfira|leve|levar|coloque|colocar|ponha|move|transfer|reassign|put)\b/;
 /**
  * Quanto tempo parada a conversa "esfria": o provedor guarda o cache da conversa por alguns minutos (5 no padrão do motor;
  * alguns provedores, até 10). Passado isso, mudar as instruções já não custa nada: o começo do pedido seria lido inteiro de

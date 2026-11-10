@@ -54,7 +54,7 @@ export interface SkinStyle {
 
 export const ALEXANDRIA_NOITE: Theme = {
   id: 'alexandria-noite',
-  name: 'Alexandria à noite',
+  name: 'Alexandria à noite', // i18n-ok: nome interno do tema (não aparece na tela)
   bg: '#2b2736',
   pebble: '#353041',
   grass: '#3a4640',
@@ -99,7 +99,7 @@ export const ALEXANDRIA_NOITE: Theme = {
 /** Tema diurno (padrão): mesma identidade — ameixa, marfim, bronze, teal — sob luz do dia. */
 export const ALEXANDRIA_DIA: Theme = {
   id: 'alexandria-dia',
-  name: 'Alexandria de dia',
+  name: 'Alexandria de dia', // i18n-ok: nome interno do tema (não aparece na tela)
   bg: '#c6b893',
   pebble: '#b8a983',
   grass: '#8c9a62',

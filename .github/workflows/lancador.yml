@@ -44,16 +44,16 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - name: O lançador (caminho avançado no Windows) põe o "ergon" no PATH e numa pasta fixa; remover tira os dois
+      - name: O lançador (caminho avançado no Windows) põe o "ergon" no PATH e numa pasta fixa; uninstall tira os dois
         shell: pwsh
         run: |
           # o zip do repositório como uma pessoa baixaria: a pasta do lançador
           $z = Join-Path $env:RUNNER_TEMP 'ergon-community-main'; New-Item -ItemType Directory -Force "$z\codigo-fonte" | Out-Null
           Copy-Item -Recurse instalador "$z\codigo-fonte\instalador"
           $prog = Join-Path $env:LOCALAPPDATA 'Programs\Ergon'
-          # sem Docker Linux no runner o "instalar" para no Docker, depois de pôr o programa no lugar
+          # sem Docker Linux no runner o "install" para no Docker, depois de pôr o programa no lugar
           $env:ERGON_SEM_PAUSA = '1'
-          & cmd /c "`"$z\codigo-fonte\instalador\ergon.cmd`" instalar"
+          & cmd /c "`"$z\codigo-fonte\instalador\ergon.cmd`" install"
           if (-not (Test-Path "$prog\ergon.cmd")) { throw 'o programa não foi para a pasta fixa' }
           $p = [Environment]::GetEnvironmentVariable('Path', 'User')
           if ($p -notlike "*$prog*") { throw "a pasta do programa não entrou no PATH: $p" }
@@ -61,10 +61,10 @@ jobs:
           # um terminal novo acha o "ergon" pelo PATH do usuário
           $env:Path = "$p;$env:Path"
           $ajuda = & cmd /c "cd /d %TEMP% && ergon" 2>&1 | Out-String
-          if ($ajuda -notmatch 'remover --tudo') { throw "o comando ergon não respondeu de outra pasta: $ajuda" }
+          if ($ajuda -notmatch 'uninstall --purge') { throw "o comando ergon não respondeu de outra pasta: $ajuda" }
           Write-Host 'ok    instalado numa pasta fixa, no PATH, e "ergon" responde de outra pasta'
-          & cmd /c "cd /d %TEMP% && ergon remover"
+          & cmd /c "cd /d %TEMP% && ergon uninstall"
           Start-Sleep -Seconds 8
           if (Test-Path $prog) { throw 'a pasta do programa ficou' }
           if ([Environment]::GetEnvironmentVariable('Path', 'User') -like "*$prog*") { throw 'o PATH ficou com a pasta do programa' }
-          Write-Host 'ok    ergon remover tirou a pasta do programa e o PATH'
+          Write-Host 'ok    ergon uninstall tirou a pasta do programa e o PATH'

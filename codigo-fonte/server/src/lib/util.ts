@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { emPt, type Texto } from './textos.ts';
 
 export function id(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -43,10 +44,13 @@ export function verifyPassword(password: string, stored: string): boolean {
 export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
-    super(message);
+  /** o texto com código e valores (lib/textos.ts), para a tela traduzir; sem ele, o tratador reconhece pelo texto */
+  readonly texto: Texto | null;
+  constructor(status: number, code: string, message: string | Texto) {
+    super(typeof message === 'string' ? message : emPt(message));
     this.status = status;
     this.code = code;
+    this.texto = typeof message === 'string' ? null : message;
   }
 }
 

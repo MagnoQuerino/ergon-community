@@ -121,6 +121,9 @@ pub fn rodar_lancador(app: &AppHandle, raiz: &Path, comando: &'static str) -> Re
         c.arg(&lancador).arg(comando);
         c
     };
+    // as telas do Desktop ainda são só em português: as linhas do lançador também (a rc.27 passa o idioma do app).
+    // Só uma variável: o lançador de antes a ignora, e os nomes dos comandos seguem os de sempre.
+    c.env("ERGON_LANG", "pt");
     c.current_dir(raiz).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     log::info!("lançador: {comando}");
     let mut filho = c.spawn().map_err(|e| format!("Não foi possível rodar o lançador do Ergon ({e})."))?;

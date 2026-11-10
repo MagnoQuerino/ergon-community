@@ -1,4 +1,5 @@
 import type { TeamAgent } from './teamData.ts';
+import { t, type Chave } from '../i18n/index.ts';
 
 export interface Floor { id: string; building_id: string; level: number; name: string; slots: number; active: number; origin: 'base' | 'simulated' | 'entitlement' }
 /** Andar com as contagens do servidor (agentes ativos por status de trabalho): janelas, selo e mapa sem carregar ninguém. */
@@ -109,7 +110,8 @@ export interface Me {
 }
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
 /** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean; cityBarCollapsed?: boolean }
+/** lang: o idioma escolhido pela pessoa (sem escolha: o do navegador) */
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean; cityBarCollapsed?: boolean; lang?: 'pt-BR' | 'en' }
 export interface OnboardingOptions {
   state: 'pending' | 'done'; choice: { use?: string; niche?: string; preset?: string; skipped?: boolean } | null;
   uses: Array<{ key: string; label: string; hint: string }>; niches: Array<{ key: string; label: string }>;
@@ -145,7 +147,8 @@ export interface PeopleInfo {
   people: Array<{ id: string; username: string; displayName: string; createdAt: string; lastSeen: string | null; admin: boolean; phrase: boolean; open: boolean; migrated: boolean }>;
 }
 export interface BoardSummary { id: string; name: string; origin: 'native' | 'mirror'; audience: 'team' | 'user'; source: string | null; sync_state: string | null; last_synced_at: string | null; last_error: string | null }
-export interface Column { id: string; name: string; position: number }
+/** system_key: o código fixo das colunas do sistema (todo, doing, with_you, done); null nas colunas de quadros espelhados */
+export interface Column { id: string; name: string; position: number; system_key?: 'todo' | 'doing' | 'with_you' | 'done' | null }
 /** Trabalhos ao mesmo tempo: a sua escolha (ou o padrão da máquina), sob o teto do plano. limit null = sem limite. */
 export interface ProcessLimit {
   limit: number | null; choice: 'auto' | 'ilimitado' | number; machine: number; cap: number | null; memoryGb: number; cpus: number;
@@ -187,11 +190,20 @@ export interface RecentConversation {
   agent?: AgentLite;
 }
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
-export const PROPOSAL_KIND: Record<string, string> = {
-  question: 'pergunta', routine: 'rotina', routine_edit: 'ajuste de rotina', sector: 'setor', create_agent: 'novo agente', tools: 'ferramenta',
-  permission: 'permissão', handoff: 'passado à coordenação', edit_agent: 'agente', deactivate_agent: 'desativar', reactivate_agent: 'reativar', sector_edit: 'setor', sector_new: 'novo setor',
-  task: 'tarefa proposta', ledger: 'lançamentos', delete_task: 'cancelar card', info_request: 'pedido do card', batch: 'cards', purge: 'apagar de vez', conexao: 'ação numa conta', depois_de_ler: 'pede aprovação', regra: 'regra',
-};
+const TIPOS = ['question', 'routine', 'routine_edit', 'sector', 'create_agent', 'tools', 'permission', 'handoff', 'edit_agent', 'deactivate_agent', 'reactivate_agent', 'sector_edit',
+  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra'] as const;
+/** Uma tabela de rótulos lida na hora de mostrar: cada chave pelo dicionário, no idioma atual (a tela redesenha ao trocar). */
+const rotulo = t as (chave: Chave) => string;
+function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record<string, string> {
+  const tem = new Set(chaves);
+  return new Proxy({} as Record<string, string>, {
+    get: (_o, k) => (typeof k === 'string' && tem.has(k) ? rotulo(chave(k)) : undefined),
+    has: (_o, k) => typeof k === 'string' && tem.has(k),
+    ownKeys: () => [...tem],
+    getOwnPropertyDescriptor: (_o, k) => (typeof k === 'string' && tem.has(k) ? { enumerable: true, configurable: true, value: rotulo(chave(k)) } : undefined),
+  });
+}
+export const PROPOSAL_KIND: Record<string, string> = rotulos(TIPOS, (k) => `servidor.tipo.${k}` as Chave);
 export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'regra' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
@@ -242,12 +254,16 @@ export interface EtapaConsentimento {
 }
 export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
 
-export const ORIGIN_LABEL: Record<string, string> = {
-  manual: 'manual', chat: 'conversa', teams: 'Teams', whatsapp: 'WhatsApp', mirror: 'ligada', demo: 'demonstração',
-};
+const ORIGENS = { manual: 'servidor.origem.manual', chat: 'servidor.origem.chat', mirror: 'servidor.origem.mirror', demo: 'servidor.origem.demo' } as const;
+/** a origem do card: Teams e WhatsApp pelo nome da marca; o resto pelo dicionário */
+export const ORIGIN_LABEL: Record<string, string> = new Proxy({} as Record<string, string>, {
+  get: (_o, k) => (k === 'teams' ? 'Teams' : k === 'whatsapp' ? 'WhatsApp' : typeof k === 'string' && k in ORIGENS ? t(ORIGENS[k as keyof typeof ORIGENS]) : undefined),
+  has: (_o, k) => typeof k === 'string' && (k in ORIGENS || k === 'teams' || k === 'whatsapp'),
+});
+// i18n-ok: nomes de produto (marcas), não se traduzem
 export const SOURCE_LABEL: Record<string, string> = {
-  microsoft: 'Microsoft', google: 'Google Tasks', asana: 'Asana', todoist: 'Todoist', trello: 'Trello', jira: 'Jira', clickup: 'ClickUp', monday: 'monday.com',
-  notion: 'Notion', linear: 'Linear', airtable: 'Airtable', smartsheet: 'Smartsheet', pipefy: 'Pipefy', github: 'GitHub Projects',
+  microsoft: 'Microsoft', google: 'Google Tasks', asana: 'Asana', todoist: 'Todoist', trello: 'Trello', jira: 'Jira', clickup: 'ClickUp', monday: 'monday.com', // i18n-ok: nomes de produto
+  notion: 'Notion', linear: 'Linear', airtable: 'Airtable', smartsheet: 'Smartsheet', pipefy: 'Pipefy', github: 'GitHub Projects', // i18n-ok: nomes de produto
 };
 
 /**

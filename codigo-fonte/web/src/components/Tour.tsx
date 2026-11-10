@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useT } from '../i18n/index.ts';
 import { useSurface } from '../lib/surface.ts';
 import { Icon } from './Icon.tsx';
 
@@ -19,6 +20,7 @@ function boxOf(target: string): Box {
 }
 
 export function Tour({ steps, final, onClose }: { steps: TourStep[]; final: (close: () => void) => ReactNode; onClose: (finished: boolean) => void }) {
+  const t = useT();
   const [i, setI] = useState(0);
   const [box, setBox] = useState<Box>(null);
   const atEnd = i >= steps.length;
@@ -54,19 +56,19 @@ export function Tour({ steps, final, onClose }: { steps: TourStep[]; final: (clo
     : null;
 
   return (
-    <div ref={root} className="tour" role="dialog" aria-modal="true" aria-label="Tour pelo Ergon">
+    <div ref={root} className="tour" role="dialog" aria-modal="true" aria-label={t('ajuda.tour.aria')}>
       {box ? <div className="tour__spot" style={box} /> : <div className="tour__dim" />}
       <div className={`tour__card ${pos ? '' : 'tour__card--center'}`} style={pos ?? undefined}>
         {atEnd ? final(() => onClose(true)) : (
           <>
-            <div className="tour__count">{i + 1} de {steps.length}</div>
+            <div className="tour__count">{t('ajuda.tour.contagem', { atual: i + 1, total: steps.length })}</div>
             <h3>{step.title}</h3>
             <p>{step.text}</p>
             <div className="tour__nav">
-              <button className="link" onClick={() => onClose(false)}>Sair do tour</button>
+              <button className="link" onClick={() => onClose(false)}>{t('ajuda.tour.sair')}</button>
               <span className="tour__grow" />
-              {i > 0 && <button className="btn btn--sm" onClick={() => setI(i - 1)}>Voltar</button>}
-              <button className="btn btn--sm btn--primary" autoFocus onClick={() => setI(i + 1)}>{i === steps.length - 1 ? 'Concluir' : 'Próximo'} <Icon name="chevron" size={13} /></button>
+              {i > 0 && <button className="btn btn--sm" onClick={() => setI(i - 1)}>{t('ajuda.tour.voltar')}</button>}
+              <button className="btn btn--sm btn--primary" autoFocus onClick={() => setI(i + 1)}>{i === steps.length - 1 ? t('ajuda.tour.concluir') : t('ajuda.tour.proximo')} <Icon name="chevron" size={13} /></button>
             </div>
           </>
         )}

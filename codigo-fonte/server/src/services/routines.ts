@@ -12,6 +12,7 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import { log, scrub } from '../lib/log.ts';
+import { idioma } from '../lib/idioma.ts';
 import { saveArtifact } from './artifacts.ts';
 import { audit, type Bus } from './bus.ts';
 import { characterByKey } from './characters.ts';
@@ -80,8 +81,10 @@ export interface Section {
 }
 export interface Gathered { sections: Section[]; facts: string; novelty: boolean; signal: boolean; counts: Record<string, number> }
 
-interface OpenTask { number: number; title: string; created_at: string; updated_at: string; completed_at: string | null; col: string; audience: string; agent: string | null; board: string; completed: number; due_on: string | null }
+interface OpenTask { number: number; title: string; created_at: string; updated_at: string; completed_at: string | null; col: string; colkey?: string | null; audience: string; agent: string | null; board: string; completed: number; due_on: string | null }
 const DOING = /fazendo|andamento|doing|progress|revis|review|execu/i;
+/** Em andamento: pelo código fixo da coluna nos quadros do sistema (colunas.ts); pelo nome só nos quadros espelhados. */
+const emAndamento = (t: { col: string; colkey?: string | null }) => (t.colkey ? t.colkey === 'doing' : DOING.test(t.col));
 const daysSince = (iso: string) => Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
 const ago = (iso: string) => { const d = daysSince(iso); return d <= 0 ? 'hoje' : d === 1 ? 'há 1 dia' : `há ${d} dias`; };
 const q = (s: string) => `"${clip(s.replace(/\s+/g, ' '), 90)}"`;
@@ -89,7 +92,7 @@ const q = (s: string) => `"${clip(s.replace(/\s+/g, ' '), 90)}"`;
 /** Coleta as fontes pedidas. `since` = desde a última execução (ou a janela padrão). */
 export function gather(db: Db, workspaceId: string, sources: SourceId[], since: string, opts: { staleDays: number; horizonDays?: number }): Gathered {
   const tasks = db.all<OpenTask>(
-    `SELECT t.number, t.title, t.created_at, t.updated_at, t.completed_at, t.completed, t.due_on, c.name AS col, b.audience, b.name AS board, a.name AS agent
+    `SELECT t.number, t.title, t.created_at, t.updated_at, t.completed_at, t.completed, t.due_on, c.name AS col, c.system_key AS colkey, b.audience, b.name AS board, a.name AS agent
        FROM tasks t JOIN columns c ON c.id = t.column_id JOIN boards b ON b.id = t.board_id LEFT JOIN agents a ON a.id = t.agent_id
       WHERE t.workspace_id = ? AND t.archived = 0 AND (t.completed = 0 OR t.completed_at >= ? OR t.created_at >= ?)
       ORDER BY t.updated_at DESC`, workspaceId, since, since);
@@ -116,10 +119,10 @@ export function gather(db: Db, workspaceId: string, sources: SourceId[], since: 
       ];
       add(key, props.length + Number(links) + Number(rules) + waiting.length, lines, { news: lines.length > 0 });
     } else if (key === 'tarefas.andamento') {
-      const doing = open.filter((t) => DOING.test(t.col)).sort((a, b) => a.updated_at.localeCompare(b.updated_at));
+      const doing = open.filter((t) => emAndamento(t)).sort((a, b) => a.updated_at.localeCompare(b.updated_at));
       add(key, doing.length, doing.slice(0, 10).map((t) => line(t, daysSince(t.updated_at) >= 1 ? ` · sem movimento ${ago(t.updated_at)}` : '')));
     } else if (key === 'tarefas.fila') {
-      const todo = open.filter((t) => !DOING.test(t.col));
+      const todo = open.filter((t) => !emAndamento(t));
       add(key, todo.length, todo.slice(0, 8).map((t) => line(t)));
     } else if (key === 'tarefas.novas') {
       const n = tasks.filter((t) => t.created_at >= since);
@@ -183,8 +186,8 @@ const STATE_RISK: Record<string, string> = { falha: 'a última execução falhou
  */
 function deadlineSection(db: Db, workspaceId: string, today: string, opts: { staleDays: number; horizonDays?: number }): Section {
   const horizon = Math.max(0, Math.min(14, opts.horizonDays ?? 3));
-  const rows = db.all<{ number: number; title: string; due_on: string; updated_at: string; work_state: string | null; audience: string; origin: string; board: string; agent: string | null; ext: string | null; col: string }>(
-    `SELECT t.number, t.title, t.due_on, t.updated_at, t.work_state, b.audience, b.origin, b.name AS board, a.name AS agent, t.external_assignee AS ext, c.name AS col
+  const rows = db.all<{ number: number; title: string; due_on: string; updated_at: string; work_state: string | null; audience: string; origin: string; board: string; agent: string | null; ext: string | null; col: string; colkey: string | null }>(
+    `SELECT t.number, t.title, t.due_on, t.updated_at, t.work_state, b.audience, b.origin, b.name AS board, a.name AS agent, t.external_assignee AS ext, c.name AS col, c.system_key AS colkey
        FROM tasks t JOIN columns c ON c.id = t.column_id JOIN boards b ON b.id = t.board_id LEFT JOIN agents a ON a.id = t.agent_id
       WHERE t.workspace_id = ? AND t.archived = 0 AND t.completed = 0 AND t.due_on IS NOT NULL AND t.due_on <= ?
       ORDER BY t.due_on, t.number`, workspaceId, addDays(today, horizon));
@@ -201,7 +204,7 @@ function deadlineSection(db: Db, workspaceId: string, today: string, opts: { sta
     if (team && !t.agent) flags.push('sem responsável');
     const idle = daysSince(t.updated_at);
     if (idle >= opts.staleDays) flags.push(`parada há ${idle} dias`);
-    if (!DOING.test(t.col) && days <= 1) flags.push('ainda não começou');
+    if (!emAndamento(t) && days <= 1) flags.push('ainda não começou');
     if (t.work_state && STATE_RISK[t.work_state]) flags.push(STATE_RISK[t.work_state]);
     let when: string;
     if (days < 0) { when = `ATRASADA há ${-days} dia(s) (prazo ${brd(t.due_on)})`; late++; }
@@ -309,13 +312,64 @@ export interface EvidenceLevels {
 }
 
 const TIME = /\b([01]?\d|2[0-3])(?::|h)([0-5]\d)\b/g;
-const times = (s: string) => new Set([...s.matchAll(TIME)].map((m) => `${m[1].padStart(2, '0')}:${m[2]}`));
+/** "8 pm", "8:30 PM", "11am" (a agenda em inglês): 20:00, 20:30, 11:00 */
+const TIME_AP = /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])/gi;
+const hhmm = (h: number, m: number) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+const doze = (h: number, ap: string) => (h % 12) + (/^p/i.test(ap) ? 12 : 0);
+const times = (s: string) => {
+  const out = new Set<string>();
+  for (const m of s.matchAll(TIME)) {
+    // "2:15 pm" é 14:15: o am/pm logo depois decide (o horário de 24 h fica como está)
+    const ap = /^\s*(a\.?m\.?|p\.?m\.?)(?![a-z])/i.exec(s.slice((m.index ?? 0) + m[0].length));
+    const h = Number(m[1]);
+    out.add(ap && h >= 1 && h <= 12 ? hhmm(doze(h, ap[1]), Number(m[2])) : `${m[1].padStart(2, '0')}:${m[2]}`);
+  }
+  for (const m of s.matchAll(TIME_AP)) if (!m[2]) out.add(hhmm(doze(Number(m[1]), m[3]), 0));
+  return out;
+};
 /** Datas dd/mm citadas (dd/mm, dd/mm/aaaa) e as que existem nos dados (também AAAA-MM-DD). */
 const DATE_BR = /\b(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\b/g;
+const ddmm = (d: number, mo: number) => (d >= 1 && d <= 31 && mo >= 1 && mo <= 12 ? `${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}` : null);
+const MES_NOME: Record<string, number> = {
+  jan: 1, janeiro: 1, january: 1, fev: 2, fevereiro: 2, feb: 2, february: 2, mar: 3, marco: 3, march: 3, abr: 4, abril: 4, apr: 4, april: 4,
+  mai: 5, maio: 5, may: 5, jun: 6, junho: 6, june: 6, jul: 7, julho: 7, july: 7, ago: 8, agosto: 8, aug: 8, august: 8,
+  set: 9, setembro: 9, sep: 9, sept: 9, september: 9, out: 10, outubro: 10, oct: 10, october: 10, nov: 11, novembro: 11, november: 11,
+  dez: 12, dezembro: 12, dec: 12, december: 12,
+};
+const MESES = Object.keys(MES_NOME).sort((a, b) => b.length - a.length).join('|');
+/**
+ * Sem o "de"/"of", só os nomes do inglês, e sem os que também são palavras comuns: "Marco 1" é um marco do projeto, não
+ * 1º de março; "8 out of 10", "set 3 reminders" e "you may 5" não são datas. Em português, a data vem com "de".
+ */
+const MESES_EN_SEGUROS = ['january', 'jan', 'february', 'feb', 'march', 'april', 'apr', 'june', 'jun', 'july', 'jul', 'august', 'aug', 'september', 'sept', 'sep', 'october', 'oct', 'november', 'nov', 'december', 'dec'].join('|');
+/** "9 de novembro", "9 Nov", "9th of November" (dia antes) e "Nov 9", "November 9th" (mês antes) */
+const DATA_NOME_DM = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th|º)?\\s+(?:(?:de|of)\\s+(${MESES})|(${MESES_EN_SEGUROS}))\\b`, 'gi');
+const DATA_NOME_MD = new RegExp(`\\b(${MESES_EN_SEGUROS})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'gi');
+const mesNome = (s: string) => MES_NOME[s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()] ?? 0;
+/**
+ * As datas citadas no texto, cada uma com as leituras possíveis: "09/11" pode ser 9 de novembro (dia/mês) ou 11 de
+ * setembro (mês/dia, o costume americano) — a data confere se alguma leitura está nos dados. "31/10" e "10/31" só têm uma.
+ */
+function datesCited(s: string, ingles: boolean): Array<{ raw: string; cands: string[] }> {
+  const out: Array<{ raw: string; cands: string[] }> = [];
+  for (const m of s.matchAll(DATE_BR)) {
+    const a = Number(m[1]), b = Number(m[2]);
+    // em português, "11/03" é 11 de março; a leitura mês/dia só vale no texto em inglês (ou quando dia/mês não existe: "11/23")
+    const dm = ddmm(a, b);
+    const cands = [...new Set((ingles || !dm ? [dm, ddmm(b, a)] : [dm]).filter((x): x is string => !!x))];
+    if (cands.length) out.push({ raw: cands[0], cands });
+  }
+  for (const m of s.matchAll(DATA_NOME_DM)) { const x = ddmm(Number(m[1]), mesNome(m[2] ?? m[3])); if (x) out.push({ raw: x, cands: [x] }); }
+  for (const m of s.matchAll(DATA_NOME_MD)) { const x = ddmm(Number(m[2]), mesNome(m[1])); if (x) out.push({ raw: x, cands: [x] }); }
+  return out;
+}
+/** As datas que existem nos dados (dd/mm, AAAA-MM-DD e as escritas com o nome do mês). */
 const dates = (s: string, iso = false) => {
   const out = new Set<string>();
-  for (const m of s.matchAll(DATE_BR)) { const d = Number(m[1]), mo = Number(m[2]); if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) out.add(`${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}`); }
+  for (const m of s.matchAll(DATE_BR)) { const x = ddmm(Number(m[1]), Number(m[2])); if (x) out.add(x); }
   if (iso) for (const m of s.matchAll(/\b\d{4}-(\d{2})-(\d{2})\b/g)) out.add(`${m[2]}/${m[1]}`);
+  for (const m of s.matchAll(DATA_NOME_DM)) { const x = ddmm(Number(m[1]), mesNome(m[2] ?? m[3])); if (x) out.add(x); }
+  for (const m of s.matchAll(DATA_NOME_MD)) { const x = ddmm(Number(m[2]), mesNome(m[1])); if (x) out.add(x); }
   return out;
 };
 /** Códigos citáveis dos fatos: #14 (tarefa), E3 (e-mail), P2, R1, H4, M5, Q1 (reunião), N7 (notícia), L12 (lançamento), C2.3 (obrigação), D1 (documento). */
@@ -325,17 +379,36 @@ const URL_RE = /https:\/\/[^\s)\]>"'<]+/g;
 const urls = (s: string) => [...s.matchAll(URL_RE)].map((m) => m[0].replace(/[.,;:!?]+$/, ''));
 
 /** Números do texto que precisam estar nos dados (tira datas, horários, códigos, links e marcadores de lista). */
-export function numbersIn(s: string, strict = true): Array<{ raw: string; value: number; dec: number }> {
+/**
+ * Um número escrito de mais de um jeito possível: "12,500" é 12,5 em português e 12500 em inglês; "12.500" é 12500 em
+ * português e 12,5 em inglês. As leituras possíveis vão em `alts`: o número confere se alguma delas está nos dados.
+ */
+export interface NumeroCitado { raw: string; value: number; dec: number; alts: Array<{ value: number; dec: number }> }
+export function numbersIn(s: string, strict = true): NumeroCitado[] {
   const t = s.replace(URL_RE, ' ').replace(/§?[A-Z]\d{1,3}(?:\.\d{1,3})*\b/g, ' ').replace(/#\d+/g, ' ').replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, ' ')
-    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ').replace(/\b([01]?\d|2[0-3])(?::|h)[0-5]\d\b/g, ' ').replace(/^\s*\d{1,2}[.)]\s/gm, ' ');
-  const out: Array<{ raw: string; value: number; dec: number }> = [];
-  for (const m of t.matchAll(/(?<![\d.,])(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+,\d+|\d+\.\d{1,2}(?!\d)|\d+)(\s?%)?/g)) {
-    // 12.500 é doze mil e quinhentos (milhar com ponto); 12,5 e 12.5 são decimais
-    const grouped = /^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(m[1]);
-    const v = grouped ? Number(m[1].replace(/\./g, '').replace(',', '.')) : parseNumber(m[1]); if (v === null || !Number.isFinite(v)) continue;
-    const dec = m[1].includes(',') ? m[1].split(',')[1].length : /^\d+\.\d{1,2}$/.test(m[1]) ? m[1].split('.')[1].length : 0;
-    if (strict && !m[2] && dec === 0 && (v <= 12 || (v >= 1990 && v <= 2100))) continue; // contagens pequenas e anos
-    out.push({ raw: m[0].trim(), value: v, dec });
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ').replace(/\b([01]?\d|2[0-3])(?::|h)[0-5]\d\b/g, ' ').replace(TIME_AP, ' ').replace(DATA_NOME_DM, ' ').replace(DATA_NOME_MD, ' ')
+    .replace(/^\s*\d{1,2}[.)]\s/gm, ' ');
+  const out: NumeroCitado[] = [];
+  for (const m of t.matchAll(/(?<![\d.,])(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+,\d+|\d+\.\d{1,2}(?!\d)|\d+)(\s?%)?/g)) {
+    const n = m[1];
+    const alts: Array<{ value: number; dec: number }> = [];
+    let v: number | null; let dec: number;
+    if (/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(n)) {
+      // 12.500 é doze mil e quinhentos (milhar com ponto, português); em inglês, "12.500" seria 12,5
+      v = Number(n.replace(/\./g, '').replace(',', '.')); dec = n.includes(',') ? n.split(',')[1].length : 0;
+      if (/^\d{1,3}\.\d{3}$/.test(n)) alts.push({ value: Number(n), dec: 3 });
+    } else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(n)) {
+      // 12,500.50 (milhar com vírgula, inglês); "12,500" sozinho também é 12,5 em português
+      v = Number(n.replace(/,/g, '')); dec = n.includes('.') ? n.split('.')[1].length : 0;
+      if (/^\d{1,3},\d{3}$/.test(n)) alts.push({ value: Number(n.replace(',', '.')), dec: 3 });
+    } else {
+      // 12,5 e 12.5 são decimais
+      v = parseNumber(n);
+      dec = n.includes(',') ? n.split(',')[1].length : /^\d+\.\d{1,2}$/.test(n) ? n.split('.')[1].length : 0;
+    }
+    if (v === null || !Number.isFinite(v)) continue;
+    if (strict && !m[2] && dec === 0 && !alts.length && (v <= 12 || (v >= 1990 && v <= 2100))) continue; // contagens pequenas e anos
+    out.push({ raw: m[0].trim(), value: v, dec, alts });
   }
   return out;
 }
@@ -379,6 +452,8 @@ export function checkRun(x: CheckInput): RunChecks {
   c.push({ id: 'autor', label: x.mode === 'real' ? 'Texto escrito por um modelo de IA' : 'Resumo montado pelo sistema, sem modelo', ok: x.mode !== 'simulated' });
   const known = `${x.facts}\n${x.known ?? ''}`;
   if (x.mode === 'real') {
+    // o texto da rotina em inglês: as datas e os números também podem estar no costume de lá (mês/dia, milhar com vírgula)
+    const ingles = idioma(x.text) === 'en';
     const kt = new Set([...times(known), ...times(x.when)]);
     const invented = [...times(x.text)].filter((t) => !kt.has(t));
     if (!x.freeDates) c.push({ id: 'horarios', label: 'Horários citados estão nos dados', ok: !invented.length, detail: invented.length ? `não estão nos dados: ${invented.join(', ')}` : undefined });
@@ -388,13 +463,18 @@ export function checkRun(x: CheckInput): RunChecks {
     const badRefs = [...tokens(x.text)].filter((k) => !have.has(k) && (k.startsWith('#') || letters.has(k[0])));
     c.push({ id: 'referencias', label: 'Tarefas e itens citados (#14, E3, L5…) existem nos dados', ok: !badRefs.length, detail: badRefs.length ? `não existem: ${badRefs.join(', ')}` : undefined });
     const knownDates = new Set([...dates(known, true), ...dates(x.when)]);
-    const badDates = [...dates(x.text)].filter((d) => !knownDates.has(d));
+    // cada data citada confere por qualquer uma das leituras dela (09/11: dia/mês ou mês/dia)
+    const badDates = [...new Set(datesCited(x.text, ingles).filter((d) => !d.cands.some((c) => knownDates.has(c))).map((d) => d.raw))];
     if (!x.freeDates) c.push({ id: 'datas', label: 'Datas citadas estão nos dados', ok: !badDates.length, detail: badDates.length ? `não estão nos dados: ${badDates.join(', ')}` : undefined });
     else c.push({ id: 'datas', label: 'Datas e horários novos são sugestões do agente', ok: true, detail: badDates.length || invented.length ? `sugeridos: ${[...badDates, ...invented].slice(0, 8).join(', ')} — confira antes de aprovar` : undefined });
     if (x.extra?.includes('numeros')) {
-      const pool = numbersIn(known, false).map((n) => Math.abs(n.value));
+      // a segunda leitura ("12,500" como 12,5; "12.500" como 12,5) só vale para o texto em inglês: no português, "R$ 12.500"
+      // é doze mil e quinhentos e não confere com um 12,5 dos dados
+      const alts = (n: NumeroCitado) => (ingles ? n.alts : []);
+      const pool = numbersIn(known, false).flatMap((n) => [n.value, ...alts(n).map((a) => a.value)]).map(Math.abs);
       const near = (v: number, dec: number) => pool.some((k) => Math.abs(Math.round(k * 10 ** dec) / 10 ** dec - v) < 0.5 / 10 ** dec + 1e-9);
-      const bad = [...new Set(numbersIn(x.text).filter((n) => !near(Math.abs(n.value), n.dec)).map((n) => n.raw))].slice(0, 8);
+      // "12,500.50" (inglês) e "12.500,50" (português) conferem do mesmo jeito; em inglês, "12,500" confere como 12500 ou 12,5
+      const bad = [...new Set(numbersIn(x.text).filter((n) => ![{ value: n.value, dec: n.dec }, ...alts(n)].some((a) => near(Math.abs(a.value), a.dec))).map((n) => n.raw))].slice(0, 8);
       c.push({ id: 'numeros', label: 'Números citados estão nos dados (contados pelo sistema)', ok: !bad.length, detail: bad.length ? `não estão nos dados: ${bad.join(', ')}` : undefined });
     }
     if (x.extra?.includes('links')) {
