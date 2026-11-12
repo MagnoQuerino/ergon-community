@@ -238,14 +238,15 @@ st = ponte("GET")
 check("consulta: Conexões ligadas e o que o Hermes conhece", st[0] == 200 and "ergon_conexoes" in st[1]["enabled"] and st[1].get("known") == ["homeassistant"], str(st))
 st = ponte("PUT", {"enabled": ["todo", "web"]})
 check("desligar: a ponte grava também o conjunto como conhecido (unido ao que estava)",
-      st == (200, {"ok": True, "enabled": ["todo", "web"], "known": ["ergon_conexoes", "homeassistant"]}), str(st))
+      st == (200, {"ok": True, "enabled": ["ergon_cartoes", "todo", "web"], "known": ["ergon_cartoes", "ergon_conexoes", "homeassistant"]}), str(st))
+check("desligar: os cartões (perguntar, pedir chave) ficam sempre ligados na API, como a lista de passos", "ergon_cartoes" in api_ligadas(), str(api_ligadas()))
 check("desligar: o Hermes deixa de ligar as Conexões na API", "ergon_conexoes" not in api_ligadas(), str(api_ligadas()))
 kn = hc.read_user_config_raw(Path(HOME) / "config.yaml").get("known_plugin_toolsets")
-check("desligar: o que o Hermes conhecia continua (API e Teams)", kn == {"api_server": ["ergon_conexoes", "homeassistant"], "teams": ["homeassistant"]}, str(kn))
-st = ponte("PUT", {"enabled": ["todo", "web", "ergon_conexoes", "browser", "file"]})
-check("religar: Conexões de volta; o que não é do conjunto seguro não entra", st[0] == 200 and st[1]["enabled"] == ["ergon_conexoes", "todo", "web"]
+check("desligar: o que o Hermes conhecia continua (API e Teams)", kn == {"api_server": ["ergon_cartoes", "ergon_conexoes", "homeassistant"], "teams": ["homeassistant"]}, str(kn))
+st = ponte("PUT", {"enabled": ["todo", "web", "ergon_conexoes", "delegation", "cronjob"]})
+check("religar: Conexões de volta; o que não é do conjunto seguro não entra", st[0] == 200 and st[1]["enabled"] == ["ergon_cartoes", "ergon_conexoes", "todo", "web"]
       and "ergon_conexoes" in api_ligadas(), str((st, api_ligadas())))
-check("consulta depois: conhecido sem repetir", ponte("GET")[1].get("known") == ["ergon_conexoes", "homeassistant"])
+check("consulta depois: conhecido sem repetir", ponte("GET")[1].get("known") == ["ergon_cartoes", "ergon_conexoes", "homeassistant"])
 
 
 # a saúde diz a versão do plugin, a configuração do cofre e o que este motor sabe fazer

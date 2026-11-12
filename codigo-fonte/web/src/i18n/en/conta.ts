@@ -317,6 +317,19 @@ const conta: Traducao<typeof pt> = {
   // ——— baixar meus dados ———
   'baixar.botao': 'Download my data',
   'baixar.montando': 'Preparing the file…',
+  'chaves.titulo': "Keys stored for the team",
+  'chaves.texto': "Keys, passwords and access codes the team asked for and you provided in a protected card. Only the names appear here: the value never comes back to the screen. Agents use them without seeing the value.",
+  'chaves.lendo': "Loading…",
+  'chaves.indisponivel': "The team is not on right now: the keys show up here when it is back.",
+  'chaves.nenhuma': "No keys stored.",
+  'chaves.pedidaPor': "requested by {nome}",
+  'chaves.apagar': "Delete",
+  'chaves.apagando': "Deleting…",
+  'chaves.sudo': "Administrator password",
+  'chaves.sudoTexto': "kept for Terminal commands",
+  'chaves.apagarTitulo': "Delete the key {nome}?",
+  'chaves.apagarSudoTitulo': "Delete the administrator password?",
+  'chaves.apagarCorpo': "It leaves the team's vault. If an agent needs it again, it will ask in a card.",
 };
 
 export default conta;

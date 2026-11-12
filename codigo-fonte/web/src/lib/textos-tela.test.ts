@@ -237,7 +237,8 @@ test('Conexões: as escolhas de cuidado (aprovar antes de abrir sites ou rodar p
   tem(cx, /ROTULO_CONFIRMAR_ORGANIZAR/, 'confirmar antes de organizar também');
   tem(cx, /\/api\/conexoes\/confirmar-organizar/, 'e liga e desliga de verdade');
   // o cartão de aprovação e o de regra são decididos um a um: nunca entram no "aplicar todas"
-  tem(codigo('components/ChatPanel.tsx'), /'conexao', 'depois_de_ler', 'regra'\]\.includes\(p\.kind\)/, 'fora do aplicar todas');
+  // (e o cartão de um comando de risco que o motor parou pedindo aprovação, rc.27)
+  tem(codigo('components/ChatPanel.tsx'), /'conexao', 'depois_de_ler', 'aprovacao', 'regra', 'segredo'\]\.includes\(p\.kind\)/, 'fora do aplicar todas');
 });
 
 test('rc.26: as regras num lugar só (Conexões › Regras), com os botões do alcance e do prazo nos cartões', () => {

@@ -91,13 +91,18 @@ export class Trainings {
   private readonly db: Db; private readonly bus: Bus; private readonly executor: RunExecutor; private readonly cfg: Config;
   /** a ponte do motor (null = sem motor real) */
   /** ponte de controle do motor do workspace (um motor por pessoa: o da pessoa dona) */
-  control: (workspaceId: string) => SkillControl | null = () => null;
+  control: (workspaceId: string, perfil?: string | null) => SkillControl | null = () => null;
+  /**
+   * O perfil do agente no motor, quando está pronto (rc.27): as competências dele moram ali. Sem perfil (motor antigo, ainda
+   * não criado), tudo vale no perfil padrão, como até a rc.26.
+   */
+  perfilDe: (workspaceId: string, agentId: string) => string | null = () => null;
   /** execução:competência já contadas (o agente pode carregar a mesma competência mais de uma vez na execução) */
   private readonly usedIn = new Set<string>();
   constructor(db: Db, bus: Bus, executor: RunExecutor, cfg: Config) { this.db = db; this.bus = bus; this.executor = executor; this.cfg = cfg; }
 
-  private ctl(ws: string): SkillControl {
-    const c = this.control(ws);
+  private ctl(ws: string, perfil?: string | null): SkillControl {
+    const c = this.control(ws, perfil ?? null);
     if (!c) throw new HttpError(503, 'no_training', 'A equipe de IA não oferece o treinamento agora. Tente de novo daqui a pouco.');
     return c;
   }
@@ -284,21 +289,28 @@ export class Trainings {
     return (src.files?.length ?? 0) + (src.links?.length ?? 0) > 0;
   }
 
+  /** O perfil em que a execução do treinamento rodou (null = o padrão). */
+  private perfilDoTreino(runId: string | null): string | null {
+    return runId ? this.db.get<{ p: string | null }>('SELECT hermes_profile AS p FROM runs WHERE id = ?', runId)?.p ?? null : null;
+  }
+
   /** Fim da execução de treinamento: monta a proposta para revisão, ou diz por que falhou. Nunca "concluído" sem competência. */
   async finished(r: RunRow, status: RunStatus, output: string | null): Promise<void> {
     const t = this.forRun(r);
     if (!t || t.status !== 'executando') return;
     const ws = t.workspace_id;
+    // a escrita em espera ficou no perfil em que a execução do treinamento rodou
+    const perfil = this.perfilDoTreino(t.run_id ?? r.id);
     // as escritas em espera desta competência, na ordem em que foram feitas (só o treinamento dela pode escrevê-la;
     // os avisos do motor durante a execução são a conferência)
     let writes: PendingSkillWrite[] = [];
     let readErr: string | null = null;
-    try { writes = await this.ctl(ws).pending(parse<string[]>(t.pending, []), t.skill_name); }
+    try { writes = await this.ctl(ws, perfil).pending(parse<string[]>(t.pending, []), t.skill_name); }
     catch (err) { readErr = err instanceof Error ? err.message : String(err); }
     const pending = [...new Set(writes.map((w) => w.id))]; // as operações de um lote têm o mesmo id
     if (pending.length) this.db.run('UPDATE trainings SET pending = ? WHERE id = ?', JSON.stringify(pending), t.id);
     const fail = async (why: string) => {
-      if (pending.length) await this.control(ws)?.discard(pending).catch(() => undefined);
+      if (pending.length) await this.control(ws, perfil)?.discard(pending).catch(() => undefined);
       this.db.run("UPDATE trainings SET status = 'falhou', error = ?, problems = ?, summary = ? WHERE id = ?", why, JSON.stringify([why]), output ? this.db.seal(ws, clip(stripControl(output), 4000)) : null, t.id);
       audit(this.db, this.bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'training.failed', targetType: 'agent', targetId: t.agent_id, evidence: { training: t.id }, result: why });
       this.bus.publish(ws, 'agents.changed', {});
@@ -332,15 +344,16 @@ export class Trainings {
     const t = this.row(ws, trainingId);
     if (t.status !== 'em_revisao') throw new HttpError(409, 'not_review', 'Este treinamento não está aguardando revisão.');
     const pending = parse<string[]>(t.pending, []);
+    const perfil = this.perfilDoTreino(t.run_id);
     if (decision === 'descartar') {
-      await this.control(ws)?.discard(pending).catch(() => undefined);
+      await this.control(ws, perfil)?.discard(pending).catch(() => undefined);
       this.db.run("UPDATE trainings SET status = 'descartado', decided_at = ?, decided_by = ? WHERE id = ?", now(), userId, t.id);
       audit(this.db, this.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'training.discard', targetType: 'agent', targetId: t.agent_id, evidence: { training: t.id }, result: 'competência proposta descartada' });
       this.bus.publish(ws, 'agents.changed', {});
       return this.view(ws, t.id);
     }
     let files: Record<string, string>;
-    try { files = await this.ctl(ws).apply(pending, t.skill_name); }
+    try { files = await this.ctl(ws, perfil).apply(pending, t.skill_name); }
     catch (err) { throw new HttpError(502, 'apply_failed', `A equipe de IA não gravou a competência${porque(err)}. Nada mudou; tente aprovar de novo.`); }
     const meta = skillMeta(files['SKILL.md'] ?? '');
     const src = this.db.seal(ws, t.sources); // a leitura devolve decifrado: cifra de novo para a versão
@@ -372,12 +385,12 @@ export class Trainings {
       if (s.status === 'removida') throw new HttpError(409, 'removed', 'Competência removida: restaure uma versão para usá-la de novo.');
       this.db.run('UPDATE agent_skills SET status = ?, updated_at = ? WHERE id = ?', action === 'ativar' ? 'ativa' : 'desativada', now(), s.id);
     } else if (action === 'remover') {
-      await this.ctl(ws).remove(s.name).catch((err) => { throw new HttpError(502, 'remove_failed', `A equipe de IA não removeu a competência${porque(err)}. Tente de novo.`); });
+      await this.ctl(ws, this.perfilDe(ws, s.agent_id)).remove(s.name).catch((err) => { throw new HttpError(502, 'remove_failed', `A equipe de IA não removeu a competência${porque(err)}. Tente de novo.`); });
       this.db.run("UPDATE agent_skills SET status = 'removida', updated_at = ? WHERE id = ?", now(), s.id);
     } else {
       const v = this.db.get<{ files: string; sources: string; version: number }>('SELECT files, sources, version FROM agent_skill_versions WHERE skill_id = ? AND version = ?', s.id, Number(version ?? 0));
       if (!v) throw notFound('versão');
-      const files = await this.ctl(ws).restore(s.name, parse(v.files, {})).catch((err) => { throw new HttpError(502, 'restore_failed', `A equipe de IA não restaurou a competência${porque(err)}. Tente de novo.`); });
+      const files = await this.ctl(ws, this.perfilDe(ws, s.agent_id)).restore(s.name, parse(v.files, {})).catch((err) => { throw new HttpError(502, 'restore_failed', `A equipe de IA não restaurou a competência${porque(err)}. Tente de novo.`); });
       const next = Number(this.db.get<{ v: number }>('SELECT MAX(version) AS v FROM agent_skill_versions WHERE skill_id = ?', s.id)?.v ?? 0) + 1;
       const meta = skillMeta(files['SKILL.md'] ?? '');
       this.db.run('INSERT INTO agent_skill_versions (id, workspace_id, skill_id, version, files, sources, training_id, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)',

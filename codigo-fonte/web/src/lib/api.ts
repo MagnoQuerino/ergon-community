@@ -44,6 +44,15 @@ export const api = {
   post: <T>(url: string, body?: unknown) => call<T>('POST', url, body ?? {}),
   patch: <T>(url: string, body: unknown) => call<T>('PATCH', url, body),
   put: <T>(url: string, body: unknown) => call<T>('PUT', url, body),
+  /** POST que devolve um arquivo (o áudio do "Ouvir"); erro como nos outros */
+  postBlob: async (url: string, body: unknown): Promise<Blob> => {
+    const res = await fetch(url, { method: 'POST', credentials: 'same-origin', body: JSON.stringify(body),
+      headers: { 'X-Ergon-Lang': idiomaAtual(), 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' } });
+    if (res.ok) return res.blob();
+    let j: { error?: string; message?: string } = {};
+    try { j = traduzirResposta(await res.json()) as typeof j; } catch { /* sem corpo */ }
+    throw new ApiError(res.status, j.error ?? 'erro', j.message ?? `HTTP ${res.status}`); // i18n-ok: código interno do erro
+  },
   del: <T>(url: string, body?: unknown) => call<T>('DELETE', url, body),
   upload: <T>(file: File, taskId?: string) => call<T>('POST', '/api/artifacts', file, {
     'Content-Type': 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name), 'X-File-Type': file.type || 'application/octet-stream',

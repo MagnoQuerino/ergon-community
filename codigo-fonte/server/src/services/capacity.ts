@@ -4,7 +4,7 @@ import { HttpError, id, notFound, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { typeOf } from '../../../shared/city.ts';
 import type { Config } from '../config.ts';
-import { CHARACTERS, TOOLS, characterColumns } from './characters.ts';
+import { CHARACTERS, COMPETENCIAS_PRONTAS, TOOLS, characterColumns, comBeneficios } from './characters.ts';
 import { COORDINATOR_ONLY, COORDINATOR_ROLE, COORDINATOR_SECTOR, COORDINATOR_TOOLS, FIXED_MSG, activeTeam, coordinatorFocus, coordinatorOf, routeTo } from './team.ts';
 import { SECTORS, autoSector, listSectors, sectorByKey } from './sectors.ts';
 import { onboardingChoice, presetByKey } from './team-presets.ts';
@@ -132,8 +132,9 @@ export function createAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
       const floorId = pickFloor(db, workspaceId, input.floorId, input.structureId, limits ? { bus, actor: actorUserId, limits } : undefined);
       const agentId = id('agt');
       // ferramentas que executam código nunca vêm de graça: só por autorização com a senha (permissão na conversa ou perfil);
-      // encaminhar as demandas é só do Coordenador
-      const tools = [...new Set([...(input.tools?.length ? cleanList(input.tools, 20, 30).filter((t) => TOOLS[t]) : sector.tools), 'contas'])]
+      // encaminhar as demandas é só do Coordenador. Sem lista pedida: as do setor mais os benefícios (regra do dono, 12/11:
+      // vem tudo ligado; a pessoa tira de quem não precisa)
+      const tools = [...new Set([...(input.tools?.length ? cleanList(input.tools, 20, 30).filter((t) => TOOLS[t]) : comBeneficios(sector.tools)), 'contas'])]
         .filter((t) => !TOOLS[t]?.guarded && !COORDINATOR_ONLY.includes(t));
       const skills = input.skills?.length ? cleanList(input.skills, 12, 80) : sector.skills.slice(0, 3);
       const charter = input.charter?.trim() ? input.charter.trim().slice(0, 4000) : defaultCharter(role, sector.name, sector.description);
@@ -141,7 +142,8 @@ export function createAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
         `INSERT INTO agents (id, workspace_id, floor_id, profile_id, name, role, color, status, created_at, charter, skills, tools, hermes_skills, model, provider, look_seed)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
         agentId, workspaceId, floorId, sector.id, name, role, color, now(), db.seal(workspaceId, charter), JSON.stringify(skills), JSON.stringify(tools),
-        JSON.stringify(cleanList(input.hermesSkills, 20, 80)), input.model ?? null, input.model ? input.provider ?? null : null,
+        // sem lista pedida: as competências prontas (regra do dono, 12/11); a pessoa desliga por agente em Treinar
+        JSON.stringify(input.hermesSkills === undefined ? COMPETENCIAS_PRONTAS : cleanList(input.hermesSkills, 20, 80)), input.model ?? null, input.model ? input.provider ?? null : null,
         // agente novo nasce com o boneco da prévia (semente enviada) ou um sorteado do pacote gráfico
         input.lookSeed && Number.isInteger(input.lookSeed) && input.lookSeed > 0 && input.lookSeed <= 2147483647 ? input.lookSeed : randomInt(1, 2147483647));
       // efeito escolhido na criação: na mesma transação (cancelou ou falhou, nada fica pela metade)
@@ -453,9 +455,9 @@ export function ensureCoordinator(db: Db, bus: Bus | null, workspaceId: string, 
           const ch = CHARACTERS.find((x) => x.key === 'aristoteles')!;
           const k = characterColumns(ch);
           const floor = pickFloor(db, workspaceId, null, null, bus ? { bus, actor: 'ergon', limits } : undefined);
-          db.run(`INSERT INTO agents (id, workspace_id, floor_id, profile_id, name, role, color, status, demo, created_at, char_key, bio, charter, skills, tools, model_hint, coordinator)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, ?, ?, ?, 1)`,
-            id('agt'), workspaceId, floor, sector.id, ch.name, COORDINATOR_ROLE, ch.color, now(), k.char_key, k.bio, db.seal(workspaceId, k.charter), k.skills, k.tools, k.model_hint);
+          db.run(`INSERT INTO agents (id, workspace_id, floor_id, profile_id, name, role, color, status, demo, created_at, char_key, bio, charter, skills, tools, model_hint, hermes_skills, coordinator)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+            id('agt'), workspaceId, floor, sector.id, ch.name, COORDINATOR_ROLE, ch.color, now(), k.char_key, k.bio, db.seal(workspaceId, k.charter), k.skills, k.tools, k.model_hint, k.hermes_skills);
           fixed.push('criado');
         }
         if (cand) fixed.push('marcado');

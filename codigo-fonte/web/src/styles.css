@@ -1371,6 +1371,18 @@ body:has(.cdock) .tip { right: 100px; }
 .modelo-padrao { display: grid; gap: 8px; padding: 12px 14px; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .modelo-padrao__head { display: grid; gap: 2px; }
 .modelo-padrao .hint { margin: 0; }
+/* modelos por tarefa: seção recolhida, uma linha por tarefa (nome e o que faz à esquerda, o seletor e a conta do custo à direita) */
+.modelos-tarefa { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.modelos-tarefa > summary { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; cursor: pointer; }
+.modelos-tarefa[open] > summary { margin-bottom: 8px; }
+.modelos-tarefa .hint { margin: 0; }
+.modelos-tarefa__economia { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.modelos-tarefa__previa ul { margin: 6px 0; padding-left: 18px; }
+.modelos-tarefa__lista { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.modelos-tarefa__linha { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 6px 14px; align-items: start; padding-top: 10px; border-top: 1px dashed var(--line); }
+.modelos-tarefa__linha label, .modelos-tarefa__escolha { display: grid; gap: 2px; min-width: 0; }
+.modelos-tarefa__escolha select { width: 100%; min-width: 0; }
+@media (max-width: 640px) { .modelos-tarefa__linha { grid-template-columns: 1fr; } }
 
 /* zona de perigo do workspace (excluir) */
 .ws-perigo { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 18px; padding: 12px 14px; border: 1px solid #e3b4a8; border-radius: 12px; background: var(--fx-f-fdf3f0); }
@@ -2123,3 +2135,64 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .conn-teams-lista { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
 .conn-teams-lista > li { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line, #e3d9c8); }
 .conn-passos { margin: 8px 0; padding-left: 20px; }
+
+/* rc.27 — ajustes da equipe de IA: plano B (modelos reserva), pausa, limites da conta e orientar sem interromper */
+.reserva { margin: 8px 0 4px; }
+.reserva__lista { list-style: decimal; margin: 6px 0 8px; padding: 0 0 0 22px; display: grid; gap: 4px; }
+.reserva__item { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.reserva__item::marker { color: var(--muted); font-size: 12px; }
+.reserva__nome { overflow-wrap: anywhere; }
+.reserva__acoes { float: right; display: inline-flex; gap: 2px; margin: -2px -2px 0 8px; }
+.reserva__novo { gap: 8px; align-items: center; }
+.reserva__novo select { min-width: 0; max-width: 100%; flex: 1 1 180px; }
+.pausa { margin: 4px 0 12px; }
+.pausa__linha { gap: 10px; align-items: center; }
+.pausa .hint { margin: 6px 0 0; }
+.pausa__estado { font-weight: 600; color: var(--warn); }
+.pausa--compacto { margin: 10px 0 0; }
+.tb-pausa { border-color: var(--amber); color: var(--amber); }
+.cidade-pausa { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100% - 32px); padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); box-shadow: 0 8px 24px rgba(16, 24, 32, .18); font-size: 13px; }
+.cidade-pausa .pausa--compacto { margin: 0; }
+.cidade-pausa .pausa__estado { display: none; }
+.cota { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.cota__titulo { margin: 0 0 6px; font-size: 13px; }
+.cota__conta { margin: 0 0 10px; }
+.cota__barra { height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--line); background: var(--panel-2); margin: 5px 0 4px; max-width: 420px; }
+.cota__resta { display: block; height: 100%; background: var(--teal); }
+.cota__resta--pouco { background: var(--terracotta); }
+.cota__frases { margin: 0; padding: 0; list-style: none; font-size: 13px; display: grid; gap: 2px; }
+.status-pop__cota { margin: 8px 0 0; font-size: 13px; }
+.orientar { margin: 12px 0 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; }
+.orientar__rotulo { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.orientar__linha { gap: 8px; align-items: center; }
+.orientar__linha .input { flex: 1 1 auto; min-width: 0; }
+.orientar .hint, .orientar .error { margin: 6px 0 0; font-size: 12px; }
+.orientar--compacto { margin: 0; padding: 6px 12px; border: 0; border-top: 1px dashed var(--line); border-radius: 0; }
+.orientar--compacto .orientar__rotulo { font-weight: 500; color: var(--muted); margin-bottom: 4px; }
+
+/* rc.27: cartões pedidos pelo agente (pergunta com várias opções, chave e senha protegidas) e trabalho contínuo */
+.question-card__opt { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.question-card__nao { justify-self: start; }
+.perm-card--segredo input[type="password"] { font-family: var(--mono, monospace); }
+.perm-card--done { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: var(--panel-2); border-left-color: var(--line); color: var(--muted); }
+.cmd-bar { display: grid; gap: 6px; margin: 4px 0; }
+.cmd-bar--compacto { padding: 0 12px; }
+.cmd-bar__acoes { display: flex; flex-wrap: wrap; gap: 4px; }
+.cmd-bar--compacto .cmd-bar__acoes .btn { font-size: 12px; padding: 2px 8px; }
+.cmd-bar__ativos, .cmd-bar__recentes { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cmd-bar__ativo { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 8px; background: var(--panel); font-size: 13px; }
+.cmd-bar__ativo > span { flex: 1; min-width: 0; }
+.cmd-bar__form { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.cmd-bar__form p { margin: 0; }
+.cmd-bar__num { width: 72px; }
+.cmd-dica { display: grid; gap: 2px; margin: 0 12px 4px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.cmd-dica__item { display: flex; align-items: center; gap: 6px; text-align: left; border: 0; background: none; padding: 4px 6px; border-radius: 6px; cursor: pointer; color: inherit; font-size: 13px; }
+.cmd-dica__item:hover, .cmd-dica__item:focus-visible { background: var(--panel-2); }
+
+/* Capacidades da equipe (rc.27): conselho, loja de competências, conectores prontos e voz */
+.stack { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.card--inset { margin: 6px 0 10px; padding: 10px 12px; border: 1px solid var(--line, rgba(127, 127, 127, .25)); border-radius: 8px; background: var(--bg-soft, transparent); box-shadow: none; }
+.pre-wrap { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
+.conn-prontos { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.msg__transcricao { flex-basis: 100%; font-size: .9em; padding: 4px 8px; border-left: 3px solid var(--accent, #2f4f8a); white-space: pre-wrap; }

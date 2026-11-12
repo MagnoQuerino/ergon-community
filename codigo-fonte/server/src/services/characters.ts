@@ -20,7 +20,7 @@ export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' |
  * safe: o usuário liga e desliga livremente. guarded: executa código — bloqueada por padrão; só com a senha
  * (em Configurações ou no cartão de permissão que aparece na conversa quando um agente precisa dela).
  */
-export interface ToolDef { id: string; label: string; kind: 'ergon' | 'ia'; toolset?: string; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean }
+export interface ToolDef { id: string; label: string; kind: 'ergon' | 'ia'; toolset?: string; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; /** custo ou risco: a tela avisa antes de ligar */ aviso?: 'custo' | 'risco' }
 
 /** O que o usuário precisa saber antes de liberar uma ferramenta que executa código. */
 export const GUARDED_RISK = 'O agente passa a executar programas e comandos no ambiente isolado da equipe: pode criar e apagar arquivos ali, instalar pacotes e acessar a internet. Enquanto ele tiver a ferramenta, toda ação dele nas suas contas conectadas pede a sua confirmação, inclusive leitura; e, depois que um programa rodou ali, as dos colegas também, até a equipe reiniciar. Libere só para pedidos seus.';
@@ -41,7 +41,7 @@ export const TOOLS: Record<string, ToolDef> = {
   contas: { id: 'contas', label: 'Conexões', kind: 'ia', toolset: 'ergon_conexoes', status: 'desligada', note: 'usa de verdade as contas e aplicativos conectados: consulta qualquer período, cria e conclui tarefas, deixa rascunhos, responde pessoas; o que precisar de confirmação vira um cartão para você', safe: true },
   passos: { id: 'passos', label: 'Lista de passos', kind: 'ia', toolset: 'todo', status: 'desligada', note: 'organiza o trabalho em passos durante a execução', safe: true },
   web: { id: 'web', label: 'Pesquisa na web', kind: 'ia', toolset: 'web', status: 'desligada', note: 'pesquisa e lê páginas públicas', safe: true },
-  imagens: { id: 'imagens', label: 'Criar imagens', kind: 'ia', toolset: 'image_gen', status: 'desligada', note: 'gera imagens a partir de uma descrição (pode consumir créditos da conta)', safe: true },
+  imagens: { id: 'imagens', label: 'Criar imagens', kind: 'ia', toolset: 'image_gen', status: 'desligada', aviso: 'custo', note: 'gera imagens a partir de uma descrição. Custo: cada imagem consome créditos da conta de IA', safe: true },
   visao: { id: 'visao', label: 'Ler imagens', kind: 'ia', toolset: 'vision', status: 'desligada', note: 'analisa imagens enviadas na conversa', safe: true },
   habilidades: { id: 'habilidades', label: 'Competências da biblioteca', kind: 'ia', toolset: 'skills', status: 'desligada', note: 'consulta as competências atribuídas ao agente (sem criar nem editar competências)', safe: true },
   calculo: { id: 'calculo', label: 'Executar código', kind: 'ia', toolset: 'code_execution', status: 'bloqueada', note: 'roda programas em Python: cálculos, planilhas, gráficos e análise de dados', guarded: true },
@@ -49,7 +49,53 @@ export const TOOLS: Record<string, ToolDef> = {
   // do próprio Ergon (antes, o agendador do motor: o lembrete disparava fora da vista, então ficava bloqueado): o agente
   // propõe na conversa, você aprova e o lembrete entra em Suas tarefas com o prazo
   agenda: { id: 'agenda', label: 'Lembretes com data', kind: 'ergon', status: 'disponível', note: 'anota lembretes e prazos: o agente propõe na conversa, você aprova e ele aparece em Suas tarefas com a data' },
+  // rc.27: tudo o que a equipe de IA sabe fazer aparece aqui. Regra do dono (12/11): o que é benefício vem ligado (na equipe
+  // e em cada agente, BENEFICIOS), mesmo quando custa; o aviso diz o custo ou o risco, e a pessoa tira para economizar. As
+  // travas continuam: gravar arquivo só com Terminal ou Executar código; com a proteção de Conexões ligada pela pessoa
+  // (conexoes.aprovar_depois_de_ler, desligada por padrão: decisão de 08/11), abrir sites depois de ler as contas pede aprovação.
+  leitura: { id: 'leitura', label: 'Ler e procurar arquivos', kind: 'ia', toolset: 'file', status: 'desligada', aviso: 'risco', note: 'lê e procura arquivos no ambiente isolado da equipe (PDF, planilhas, textos), ao lado da leitura dos documentos do Ergon; só lê: gravar e alterar arquivos fica para quem também tem Terminal ou Executar código', safe: true },
+  navegador: { id: 'navegador', label: 'Navegador automático', kind: 'ia', toolset: 'browser', status: 'desligada', aviso: 'risco', note: 'abre sites, clica, preenche e lê páginas num navegador de verdade, para portais sem integração. Risco: uma página pode trazer instruções escondidas tentando manipular o agente; o que ela diz é dado, não instrução. Para aprovar antes de o agente abrir sites depois de ler as suas contas, ligue a proteção em Conexões. Cada página lida também consome mais da conta de IA', safe: true },
+  video: { id: 'video', label: 'Ver vídeos', kind: 'ia', toolset: 'video', status: 'desligada', aviso: 'custo', note: 'assiste a um vídeo e descreve ou resume. Custo: um vídeo consome bem mais da conta de IA que um texto', safe: true },
+  videogen: { id: 'videogen', label: 'Criar vídeos', kind: 'ia', toolset: 'video_gen', status: 'desligada', aviso: 'custo', note: 'gera vídeos curtos a partir de uma descrição ou de uma imagem. Precisa de uma conta de vídeo ligada (chave própria, em Conexões › Chave própria); cada vídeo é cobrado por ela', safe: true },
+  xbusca: { id: 'xbusca', label: 'Busca no X', kind: 'ia', toolset: 'x_search', status: 'desligada', aviso: 'custo', note: 'pesquisa publicações públicas do X (Twitter). Precisa de uma conta da xAI ligada (chave própria, em Conexões › Chave própria); cada busca é cobrada por ela', safe: true },
+  voz: { id: 'voz', label: 'Responder em áudio', kind: 'ia', toolset: 'tts', status: 'desligada', aviso: 'custo', note: 'grava a resposta em áudio quando você pede. A voz padrão é grátis e usa a internet; outras vozes são cobradas pela conta delas', safe: true },
+  // conectores prontos do motor: um conjunto por conector instalado (Conexões › Mais aplicativos); o plugin barra a escrita
+  // onde a pessoa não liberou
+  conectores: { id: 'conectores', label: 'Conectores prontos', kind: 'ia', status: 'desligada', aviso: 'risco', note: 'usa os aplicativos instalados em Conexões › Mais aplicativos: consulta à vontade; mudar dados só no aplicativo em que você liberou a escrita', safe: true },
 };
+
+/**
+ * Regra do dono (12/11): todo benefício vem ligado em cada agente (novo, de um modelo de equipe ou de antes), mesmo os que
+ * custam; a pessoa tira de quem não precisa. Fora: as que executam código (Terminal, Executar código: só com a senha) e as
+ * ferramentas do Ergon que dependem do papel (quadro, encaminhar...). Busca no X e criar vídeos entram também: sem a chave
+ * da pessoa, a plataforma não as tem, e o agente não recebe nada (o plugin só libera o que está ligado para a equipe).
+ */
+export const BENEFICIOS: readonly string[] = ['contas', 'passos', 'web', 'visao', 'imagens', 'habilidades', 'leitura', 'navegador', 'video', 'voz', 'conectores', 'videogen', 'xbusca'];
+/** As ferramentas que a rc.27 trouxe: ninguém as escolheu antes, então entram em todo agente de antes, mesmo nos que a pessoa editou. */
+export const BENEFICIOS_NOVOS: readonly string[] = ['leitura', 'navegador', 'video', 'voz', 'conectores', 'videogen', 'xbusca'];
+/**
+ * As competências prontas que vêm com a equipe e a pessoa mais procura (Word, Excel, PDF, PowerPoint, atas, revisão semanal):
+ * ligadas em todo agente por padrão (regra do dono, 12/11). O nome que o motor não tiver é ignorado por ele. Custo: a lista
+ * entra nas instruções de cada chamada; a pessoa desliga por agente em Treinar. (O mesmo de DESTAQUE em
+ * web/src/components/CompetenciasProntas.tsx.)
+ */
+export const COMPETENCIAS_PRONTAS: readonly string[] = ['docx', 'xlsx', 'pdf', 'powerpoint', 'meeting-action-items', 'weekly-review-planning', 'document-to-action-items', 'excel-author', 'pptx-author'];
+/** As ferramentas de um agente com os benefícios (sem repetir, na ordem: as dele primeiro). */
+export const comBeneficios = (tools: readonly string[]): string[] => [...new Set([...tools, ...BENEFICIOS])].filter((t) => TOOLS[t] && !TOOLS[t].guarded);
+/**
+ * Os conjuntos-benefício da plataforma que o Ergon liga sozinho quando faltam (ausente = ligado; só o desligado gravado pela
+ * pessoa, 'ferramentas.<id>' = 'desligado', fica): as Conexões e os que a imagem da rc.27 traz. Os de antes (pesquisa,
+ * imagens...) já vinham ligados pela migração do cofre, e a escolha deles na rc.26 não era gravada: não são religados.
+ */
+export const BENEFICIOS_DA_PLATAFORMA: readonly string[] = ['contas', 'leitura', 'navegador', 'video', 'voz'];
+/** As ferramentas da equipe que a pessoa desligou ('ferramentas.<id>' = 'desligado') em algum destes workspaces (null: todos). */
+export function ferramentasDesligadas(db: Db, workspaceIds: string[] | null): Set<string> {
+  const rows = db.all<{ workspace_id: string; key: string }>("SELECT workspace_id, key FROM workspace_settings WHERE key LIKE 'ferramentas.%' AND value = 'desligado'");
+  const ids = workspaceIds ? new Set(workspaceIds) : null;
+  return new Set(rows.filter((r) => !ids || ids.has(r.workspace_id)).map((r) => r.key.slice('ferramentas.'.length)).filter((id) => TOOLS[id]?.safe));
+}
+/** Ferramentas com aviso de custo ou risco (a tela mostra o aviso antes de ligar). */
+export type AvisoFerramenta = 'custo' | 'risco';
 
 /**
  * Estado real das ferramentas de IA: conjuntos ligados no motor usado pelos agentes do Ergon — um por motor (várias
@@ -82,11 +128,19 @@ export function platformToolsets(scope = '_'): { enabled: string[]; known: strin
 /** O motor já foi lido e não tem este conjunto (nem desligado): está numa versão sem ele. */
 export function motorSemConjunto(toolset: string, scope = '_'): boolean { const s = stateOf(scope); return s.at > 0 && s.known.size > 0 && !s.known.has(toolset); }
 type ToolCtx = { channels?: boolean; workspaceId?: string | null; scope?: string; contas?: boolean };
+/** Conectores prontos (MCP) ligados em cada motor (lidos pela ponte das capacidades): sem nenhum, a ferramenta fica desligada. */
+const conectoresPorEscopo = new Map<string, string[]>();
+export function setConectoresLigados(nomes: string[], scope = '_'): void { conectoresPorEscopo.set(scope, [...nomes]); }
+export const conectoresLigados = (scope = '_'): string[] => conectoresPorEscopo.get(scope) ?? [];
 const scopeFor = (ctx: ToolCtx) => ctx.scope ?? scopeOf(ctx.workspaceId);
 const enabledFor = (ctx: ToolCtx) => stateOf(scopeFor(ctx)).enabled;
 
 /** Estado atual de uma ferramenta (ferramentas de IA dependem do que está ligado na plataforma). */
 export function toolStatus(t: ToolDef, ctx: ToolCtx = {}): ToolDef {
+  if (t.kind === 'ia' && t.id === 'conectores') {
+    const n = conectoresLigados(scopeFor(ctx)).length;
+    return n ? { ...t, status: 'disponível' } : { ...t, status: 'desligada', note: `${t.note} — nenhum aplicativo instalado: instale em Conexões › Mais aplicativos` };
+  }
   if (t.kind === 'ia') {
     const on = enabledFor(ctx);
     if (t.guarded) {
@@ -103,7 +157,7 @@ export function toolStatus(t: ToolDef, ctx: ToolCtx = {}): ToolDef {
       if (renovacaoFalhou(scopeFor(ctx))) return { ...t, status: 'bloqueada', note: `${t.note} — ${CONEXOES_FORA_ATE_A_PROXIMA}` };
       return { ...t, status: 'atualizando', note: `${t.note} — sendo atualizadas neste computador: voltam sozinhas quando a atualização da equipe terminar` };
     }
-    return { ...t, status: 'desligada', note: `${t.note} — desligada: ligue em Configurações › Ferramentas` };
+    return { ...t, status: 'desligada', note: `${t.note} — desligada para a equipe: ligue em Configurações › Ferramentas` };
   }
   if (t.id === 'conexoes' && ctx.channels) return { ...t, status: 'parcial' };
   return t;
@@ -277,7 +331,8 @@ export function routeDemand(text: string): { key: string; words: string[] } | nu
 
 // ---------------- equipe de demonstração: criação e atualização ----------------
 export function characterColumns(c: Character) {
-  return { char_key: c.key, bio: c.bio, charter: c.charter, skills: JSON.stringify(c.skills), tools: JSON.stringify([...c.tools, 'contas']), model_hint: c.modelHint };
+  return { char_key: c.key, bio: c.bio, charter: c.charter, skills: JSON.stringify(c.skills), tools: JSON.stringify(comBeneficios(c.tools)), model_hint: c.modelHint,
+    hermes_skills: JSON.stringify(COMPETENCIAS_PRONTAS) };
 }
 
 /**
@@ -337,9 +392,9 @@ export function upgradeDemoTeam(db: Db, bus: Bus | null, workspaceId: string, sl
       const fl = [pref, ...floors.filter((f) => f !== pref)].find((f) => f && count(f.id) < slotsOf(f.id));
       if (!fl) continue;
       const cols = characterColumns(c);
-      db.run(`INSERT INTO agents (id, workspace_id, floor_id, profile_id, name, role, color, status, demo, created_at, char_key, bio, charter, skills, tools, model_hint)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?, ?, ?, ?, ?, ?)`,
-        id('agt'), workspaceId, fl.id, profiles.get(c.profile)!, c.name, c.role, c.color, now(), cols.char_key, cols.bio, db.seal(workspaceId, cols.charter), cols.skills, cols.tools, cols.model_hint);
+      db.run(`INSERT INTO agents (id, workspace_id, floor_id, profile_id, name, role, color, status, demo, created_at, char_key, bio, charter, skills, tools, model_hint, hermes_skills)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id('agt'), workspaceId, fl.id, profiles.get(c.profile)!, c.name, c.role, c.color, now(), cols.char_key, cols.bio, db.seal(workspaceId, cols.charter), cols.skills, cols.tools, cols.model_hint, cols.hermes_skills);
       out.added.push(c.name);
     }
     if (out.renamed.length || out.added.length || out.moved.length) {
@@ -396,6 +451,47 @@ export function grantConnectionsTool(db: Db, bus: Bus | null, workspaceId: strin
     }
     db.run("INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, 'tools.contas', ?, ?)", workspaceId, now(), now());
     if (n) audit(db, null, { workspaceId, actorType: 'system', actorId: 'ergon', action: 'agent.tools', evidence: { add: 'contas', agentes: n }, result: `${n} agente(s) passaram a usar as Conexões` });
+  });
+  if (n) bus?.publish(workspaceId, 'agents.changed', {});
+  return n;
+}
+
+/**
+ * Instalações de antes da rc.27 (uma vez por workspace, marca 'tools.rc27'): cada agente ativo recebe os benefícios que faltam.
+ * As ferramentas novas da rc.27 (ninguém as escolheu) vão para todos. As de antes (pesquisa, imagens, competências...) vão
+ * para quem nunca teve as ferramentas mudadas pela pessoa (a lista ainda é a do sistema: semente, modelo de equipe); quem a
+ * pessoa editou fica com o que ela escolheu. As competências prontas (COMPETENCIAS_PRONTAS) entram em quem está sem nenhuma e
+ * nunca teve a lista mudada pela pessoa. Nada é tirado. Depois da marca, o que a pessoa tirar de um agente fica tirado.
+ */
+export function grantBenefitTools(db: Db, bus: Bus | null, workspaceId: string): number {
+  if (db.get("SELECT 1 AS x FROM workspace_settings WHERE workspace_id = ? AND key = 'tools.rc27'", workspaceId)) return 0;
+  const agents = db.all<{ id: string; tools: string | null }>("SELECT id, tools FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId);
+  if (!agents.length) return 0; // equipe ainda não criada: quem nasce já vem com eles
+  const editados = new Set<string>();
+  const competenciasEscolhidas = new Set<string>();
+  for (const e of db.all<{ target_id: string | null; evidence: string | null }>("SELECT target_id, evidence FROM audit_events WHERE workspace_id = ? AND action = 'agent.update' AND actor_type = 'user'", workspaceId)) {
+    try {
+      const mudou = (JSON.parse(e.evidence ?? '{}') as { changed?: string[] }).changed ?? [];
+      if (e.target_id && mudou.includes('ferramentas')) editados.add(e.target_id);
+      if (e.target_id && mudou.includes('skills')) competenciasEscolhidas.add(e.target_id);
+    } catch { /* ilegível: não conta */ }
+  }
+  const lista = (v: string | null): string[] => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
+  let n = 0;
+  db.tx(() => {
+    for (const a of db.all<{ id: string; tools: string | null; hermes_skills: string | null }>("SELECT id, tools, hermes_skills FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId)) {
+      const tools = lista(a.tools);
+      const somar = (editados.has(a.id) ? BENEFICIOS_NOVOS : BENEFICIOS).filter((t) => !tools.includes(t));
+      // as competências prontas: só em quem está sem nenhuma e nunca teve a lista mudada pela pessoa
+      const competencias = !lista(a.hermes_skills).length && !competenciasEscolhidas.has(a.id) ? COMPETENCIAS_PRONTAS : [];
+      if (!somar.length && !competencias.length) continue;
+      if (somar.length) db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify([...tools, ...somar]), a.id);
+      if (competencias.length) db.run('UPDATE agents SET hermes_skills = ? WHERE id = ?', JSON.stringify(competencias), a.id);
+      n++;
+    }
+    db.run("INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, 'tools.rc27', ?, ?)", workspaceId, now(), now());
+    if (n) audit(db, null, { workspaceId, actorType: 'system', actorId: 'ergon', action: 'agent.tools', evidence: { add: 'beneficios', agentes: n },
+      result: `${n} agente(s) passaram a ter todas as ferramentas da equipe (tire de quem não precisa, para economizar)` });
   });
   if (n) bus?.publish(workspaceId, 'agents.changed', {});
   return n;

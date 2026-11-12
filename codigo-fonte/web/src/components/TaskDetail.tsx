@@ -10,10 +10,14 @@ import { gravarNome } from '../lib/titulo-card.ts';
 import { fmtDataHora, tn, useT } from '../i18n/index.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
+import { OrientarCampo } from './AjustesEquipe.tsx';
 import { DueChip } from './Board.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
 import { BotoesPrazo, type Prazo } from './CartaoRegra.tsx';
 import { ActionBar, IconAction, TaskFiles, TechDetails, type TaskFile, type WorkInfo } from './TaskWork.tsx';
+import { QuestionCard, SecretCard } from './ChatCards.tsx';
+import { ComandosBar } from './Comandos.tsx';
+import type { Proposal } from '../lib/types.ts';
 
 interface Step { position: number; agentId: string; title: string; short?: string; status: 'pendente' | 'em_andamento' | 'feita' | 'falhou'; doneAt: string | null }
 /** o que a pessoa vê de cara (server/src/services/resumo-tarefa.ts): a situação e a frase exata do que decide */
@@ -50,6 +54,8 @@ interface Detail {
   reviewer?: { id: string; name: string } | null;
   /** ações numa conta pedidas neste card, esperando o seu clique */
   conexoes?: Array<{ id: string; kind?: string; summary: string; created_at: string }>;
+  /** perguntas do agente e pedidos de chave ou senha feitos neste card, esperando você */
+  cartoes?: Proposal[];
 }
 
 /** o estado da revisão crítica (o que o servidor guarda) → a chave do texto */
@@ -270,7 +276,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   const conexoes = data.conexoes ?? [];
   // o "Aprovar" grande decide as ações nas contas que a tela mostra (todas de uma vez); a proteção "depois de ler"
   // (abrir um site, rodar um programa) é uma decisão à parte, uma a uma — só vira o botão grande quando é a única
-  const contas = conexoes.filter((c) => c.kind !== 'depois_de_ler');
+  // (e um comando de risco que o motor parou pedindo aprovação: também um por um)
+  const contas = conexoes.filter((c) => c.kind === 'conexao');
   const lote = contas.length ? contas : conexoes.length === 1 ? conexoes : [];
   // cartão de ação numa conta: um, ou todos de uma vez ("Aprovar" decide o que a faixa diz); já decidido noutro lugar: só relê
   // prazo: o cartão de aprovação depois de ler as contas (1 h, 8 h, 72 h, sempre)
@@ -396,6 +403,16 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
     if (lote.length === 1 && lote[0].kind === 'depois_de_ler') {
       const c = lote[0];
       botoes = <BotoesPrazo ocupado={!!busy} onEscolher={(prazo) => void decidir(c.id, 'apply', prazo)} onRecusar={() => void decidir(c.id, 'reject')} />;
+    } else if (lote.length === 1 && lote[0].kind === 'aprovacao') {
+      const c = lote[0];
+      botoes = <>
+        <button className="btn btn--primary btn--big" aria-busy={busy === `apply:${c.id}`} onClick={() => void decidir(c.id, 'apply')}>
+          <Icon name="check" size={16} /> {indo(`apply:${c.id}`, t('tarefa.aprovar'), t('tarefa.aprovando'))}
+        </button>
+        <button className="btn btn--big" aria-busy={busy === `reject:${c.id}`} onClick={() => void decidir(c.id, 'reject')}>
+          <Icon name="x" size={16} /> {indo(`reject:${c.id}`, t('tarefa.recusar'), t('tarefa.recusando'))}
+        </button>
+      </>;
     } else if (lote.length) {
       const n = lote.length;
       botoes = <>
@@ -555,6 +572,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
             </section>
           )}
           {!resumo && <>{ajusteBox}{confirmBox}{feedback}</>}
+          {/* rc.27: com o trabalho andando, um recado que não interrompe (o agente lê no próximo passo) */}
+          {mode === 'team' && active?.status === 'running' && <OrientarCampo rota={`/api/tasks/${tk.id}/steer`} nome={oAgente()} />}
           {/* sem o resumo (servidor antigo): o motivo da falha à vista, como antes */}
           {mode === 'team' && need === 'retry' && !resumo && <p className="ask-box ask-box--line" role="status">{motivoDaFalha(work?.result?.justification)}</p>}
 
@@ -563,7 +582,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
             <section className="block tdet__cartoes" aria-label={t('tarefa.cartoes.titulo')}>
               <h4>{conexoes.length > 1 ? t('tarefa.cartoes.tituloN', { n: conexoes.length }) : t('tarefa.cartoes.titulo')}</h4>
               {conexoes.map((c) => (
-                <div key={c.id} className="tdet__cartao" role="group" aria-label={c.kind === 'depois_de_ler' ? t('tarefa.cartoes.esperandoAprovacao') : t('tarefa.cartoes.esperandoConfirmacao')}>
+                <div key={c.id} className="tdet__cartao" role="group" aria-label={c.kind === 'depois_de_ler' || c.kind === 'aprovacao' ? t('tarefa.cartoes.esperandoAprovacao') : t('tarefa.cartoes.esperandoConfirmacao')}>
                   <p className="pre"><TextoLongo texto={c.summary} /></p>
                   {!(lote.length === 1 && lote[0].id === c.id) && (c.kind === 'depois_de_ler' ? (
                     <BotoesPrazo ocupado={!!busy} onEscolher={(prazo) => void decidir(c.id, 'apply', prazo)} onRecusar={() => void decidir(c.id, 'reject')} />
@@ -575,6 +594,24 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
                   ))}
                 </div>
               ))}
+            </section>
+          )}
+
+          {/* perguntas do agente e pedidos de chave ou senha feitos neste card: o mesmo cartão da conversa */}
+          {(data.cartoes ?? []).length > 0 && (
+            <section className="block tdet__cartoes" aria-label={t('tarefa.cartoesAgente.titulo')}>
+              <h4>{t('tarefa.cartoesAgente.titulo')}</h4>
+              {(data.cartoes ?? []).map((c) => c.kind === 'segredo'
+                ? <SecretCard key={c.id} p={c} onDone={d.reload} />
+                : <QuestionCard key={c.id} p={c} onDone={d.reload} />)}
+            </section>
+          )}
+
+          {/* trabalho contínuo: meta com juiz, repetir até cumprir, checagem periódica, comentar sem interromper, revisão independente */}
+          {mode === 'team' && !tk.completed && (
+            <section className="block" aria-label={t('tarefa.continuo.titulo')}>
+              <h4>{t('tarefa.continuo.titulo')}</h4>
+              <ComandosBar listaUrl={`/api/comandos?taskId=${tk.id}`} postUrl={`/api/tasks/${tk.id}/comandos`} />
             </section>
           )}
 

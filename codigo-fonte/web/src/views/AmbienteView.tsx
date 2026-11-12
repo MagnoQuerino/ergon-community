@@ -15,6 +15,7 @@ import { openDecisions } from '../lib/open.ts';
 import type { SceneApi, SceneFocus, SceneObject, SceneOps, SceneTag, StructureIn } from '../scene/types.ts';
 import { savePrefs, usePrefs } from '../lib/prefs.ts';
 import { CityBar } from '../components/CityBar.tsx';
+import { PausaControle } from '../components/AjustesEquipe.tsx';
 import { indicadores, type Indicador } from '../lib/barra.ts';
 import { THEMES } from '../iso/theme.ts';
 import { useTheme } from '../lib/theme.ts';
@@ -206,6 +207,13 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
           </div>
         )}
 
+        {/* rc.27: a equipe em pausa aparece na Cidade (ninguém começa trabalho novo); retomar fica à mão */}
+        {state.teamPausa?.pausada && (
+          <div className="cidade-pausa" role="status">
+            <Icon name="pause" size={14} /> <span>{t('configuracoes.ajustes.pausa.cidade')}</span>
+            <PausaControle compacto pausa={state.teamPausa} onMudou={reload} onError={(text) => setToast(text)} />
+          </div>
+        )}
         <CityBar
           picker={<StructurePicker structures={structs} value={card} onPick={pick} onAgent={locate} />}
           pickKey={cardStruct ? nomeDaConstrucao(cardStruct.name, cardStruct.kind) : t('cidade.localizar.cidade')}

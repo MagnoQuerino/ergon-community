@@ -16,8 +16,8 @@ test('no Ergon Desktop, a versão com o pacote assinado ganha o botão que leva 
 test('antiga demais ou sem o pacote: sem botão, com o porquê em palavras simples', () => {
   const antiga = voltaNaLista(v('1.1.0-rc.9', 'antiga'), ADMIN);
   assert.equal(antiga.voltar, null);
-  assert.match(antiga.nota ?? '', /antiga demais/i);
-  assert.match(antiga.nota ?? '', /equipe/, 'diz que a equipe não voltaria junto');
+  assert.match(antiga.nota ?? '', /mudou a base da equipe/i);
+  assert.match(antiga.nota ?? '', /backup feito na atualização/, 'diz o caminho para voltar ao que era antes: o backup');
   for (const r of [v('1.1.0-rc.25', 'sem-pacote'), v('1.1.0-rc.25')]) {
     const s = voltaNaLista(r, ADMIN);
     assert.equal(s.voltar, null);

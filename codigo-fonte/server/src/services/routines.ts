@@ -30,7 +30,8 @@ import type { FeedRead } from './web-feeds.ts';
 import { routineProposalsFrom, workspaceTz, type RoutineChanges, type RoutineProposal, type RoutineSpec } from './routine-proposals.ts';
 import { heuristicAdaptation, parseSetupReply, setupChannel, studyUser, type Adaptation } from './routine-setup.ts';
 import { parseCategories, parseTaskProposals, recordProposals, type LedgerItem, type Proposal } from './proposals.ts';
-import { cleanTrigger, fmtLocal, localParts, nextOccurrence, scheduleText, validTz } from './routine-time.ts';
+import { cleanTrigger, fmtLocal, localParts, nextOccurrence, previousOccurrence, scheduleText, validTz } from './routine-time.ts';
+import { ESPERA_DO_MOTOR_MS } from './rotinas-motor.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { stripControl } from './teamwork.ts';
@@ -606,6 +607,16 @@ export class Routines {
   /** busca das fontes públicas (radares); trocada nos testes */
   webFetch: ((url: string) => Promise<string>) | null = null;
 
+  /**
+   * Rotinas no agendador do motor (rc.27, rotinas-motor.ts): o horário desta rotina está com o agendador do motor? Com ele,
+   * o Ergon não dispara no horário — só se o aviso do motor não chegar em ESPERA_DO_MOTOR_MS. null = tudo pelo Ergon.
+   */
+  doMotor: ((routineId: string) => boolean) | null = null;
+  /** a próxima execução que o agendador do motor informou (a tela mostra esta) */
+  proximaDoMotor: ((routineId: string) => string | null) | null = null;
+  /** o aviso do horário chegou do motor (o serviço das rotinas no motor confere a próxima) */
+  aoDisparar: ((routineId: string) => void) | null = null;
+
   constructor(db: Db, bus: Bus, executor: RunExecutor, cfg: Pick<Config, 'filesDir' | 'maxUploadBytes' | 'maxContextChars' | 'maxDocumentChars' | 'mode' | 'maxStorageBytes'>) {
     this.db = db; this.bus = bus; this.executor = executor;
     this.deps = { filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes, maxContextChars: cfg.maxContextChars, maxDocumentChars: cfg.maxDocumentChars, storageQuota: cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0, mode: () => executor.mode };
@@ -660,7 +671,7 @@ export class Routines {
     return {
       id: r.id, name: r.name, template: r.template_key, templateName: tpl?.name ?? null, category: r.category, categoryLabel: CATEGORIES[r.category as keyof typeof CATEGORIES] ?? r.category,
       status: r.status, version: r.version, conversationId: r.conversation_id, agentId: agent?.id ?? null, agentName: agent?.name ?? null,
-      trigger, schedule: scheduleText(trigger), nextRunAt: r.next_run_at, lastRunAt: r.last_run_at,
+      trigger, schedule: scheduleText(trigger), nextRunAt: (r.status === 'active' ? this.proximaDoMotor?.(r.id) : null) ?? r.next_run_at, lastRunAt: r.last_run_at,
       running: !!last && ['queued', 'gathering', 'running'].includes(last.status), last: last ?? null,
       hasSetup: !!this.db.get('SELECT 1 AS x FROM routine_setups WHERE routine_id = ?', r.id),
       config: { sources: config.sources, sourceLabels: config.sources?.map((s) => SOURCES[s]) ?? [], condition: config.condition, instruction: config.instruction, extra: config.extra, deliver: config.deliver, staleDays: config.staleDays, params: config.params ?? {} },
@@ -839,6 +850,11 @@ export class Routines {
    * Quem executa, pela função: "coordenacao" = quem coordena hoje; a chave de um personagem vale enquanto ele está no
    * setor original (senão, quem estiver nesse setor); um nome vale como nome. Por último, quem coordena.
    */
+  /** Quem executa esta rotina hoje (o job dela no agendador do motor fica no perfil deste agente). */
+  agenteDe(r: Pick<RoutineRow, 'workspace_id' | 'config'>): { id: string; name: string } | null {
+    return this.resolveAgent(r.workspace_id, parseJson<RoutineConfig>(r.config, {} as RoutineConfig));
+  }
+
   private resolveAgent(workspaceId: string, c: Pick<RoutineConfig, 'agent'>): { id: string; name: string } | null {
     const team = activeTeam(this.db, workspaceId);
     const coord = coordinatorOf(team) ?? null;
@@ -1232,6 +1248,9 @@ export class Routines {
       // 1. horários vencidos (cada horário vira no máximo uma execução)
       for (const r of this.db.all<RoutineRow>("SELECT * FROM routines WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ? AND ws_open(workspace_id)", nowIso)) {
         const slot = r.next_run_at!;
+        // no agendador do motor: o aviso dele dispara; o Ergon só roda se o aviso não chegar (motor desligado, falhou)
+        if (this.doMotor?.(r.id) && Date.now() - Date.parse(slot) < ESPERA_DO_MOTOR_MS) continue;
+        if (this.doMotor?.(r.id)) log.warn({ routineId: r.id, slot }, 'rotina: o agendador do motor não avisou; o Ergon roda este horário');
         const trigger = parseJson<Trigger>(r.trigger, { kind: 'manual' });
         this.db.run('UPDATE routines SET next_run_at = ? WHERE id = ?', nextOccurrence(trigger, new Date()), r.id);
         const key = `schedule:${r.id}:${slot}`;
@@ -1276,6 +1295,39 @@ export class Routines {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * O aviso do agendador do motor (o job da rotina disparou no perfil do agente). O horário é o da agenda da rotina que
+   * acabou de passar: a mesma chave do agendador do Ergon (schedule:<rotina>:<horário>), então o aviso repetido, o
+   * "rodar agora" do agendador num horário que já rodou e a reserva do Ergon nunca rodam em dobro. Atrasado demais (o motor
+   * ficou fora e recuperou o horário perdido depois), fica registrado como perdido, como antes.
+   */
+  disparoDoMotor(workspaceId: string, routineId: string, emMs: number): 'rodou' | 'perdida' | 'pulada' | 'ja' | 'ignorada' {
+    const r = this.db.get<RoutineRow>('SELECT * FROM routines WHERE id = ? AND workspace_id = ?', routineId, workspaceId);
+    if (!r || r.status !== 'active' || !this.db.workspaceOpen(workspaceId)) return 'ignorada';
+    const trigger = parseJson<Trigger>(r.trigger, { kind: 'manual' });
+    const quando = Number.isFinite(emMs) && emMs > 0 ? Math.min(emMs, Date.now()) : Date.now();
+    // o aviso pode chegar um pouco antes do minuto exato (o tique do agendador): vale o horário até 2 min à frente
+    const slot = previousOccurrence(trigger, new Date(quando + 120_000));
+    if (!slot) return 'ignorada';
+    this.aoDisparar?.(r.id);
+    if (r.next_run_at && r.next_run_at <= slot) this.db.run('UPDATE routines SET next_run_at = ? WHERE id = ?', nextOccurrence(trigger, new Date(Math.max(Date.now(), Date.parse(slot) + 1000))), r.id);
+    const key = `schedule:${r.id}:${slot}`;
+    if (this.db.get('SELECT 1 AS x FROM routine_runs WHERE idempotency_key = ?', key)) return 'ja';
+    if (Date.now() - Date.parse(slot) > MISSED_MS) {
+      this.createRun(r, 'schedule', key, slot, null, 'missed', `Não rodou ${fmtLocal(slot, workspaceTz(this.db, r.workspace_id))}: o Ergon estava desligado ou trancado`);
+      return 'perdida';
+    }
+    if (this.db.get("SELECT 1 AS x FROM routine_runs WHERE routine_id = ? AND status IN ('queued', 'gathering', 'running')", r.id)) {
+      this.createRun(r, 'schedule', key, slot, null, 'skipped', 'A rodada anterior ainda estava em andamento: este horário ficou de fora.');
+      return 'pulada';
+    }
+    const rr = this.createRun(r, 'schedule', key, slot, null);
+    if (!rr) return 'ja';
+    log.info({ routineId: r.id, slot, routineRunId: rr.id }, 'rotina: horário avisado pelo agendador do motor');
+    if (rr.status === 'queued') void this.execute(rr.id);
+    return rr.status === 'queued' ? 'rodou' : 'pulada';
   }
 
   // --- ativação adaptativa -------------------------------------------------------------------------------------

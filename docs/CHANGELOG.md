@@ -1,5 +1,51 @@
 # Novidades
 
+## 1.1.0-rc.27 (pré-versão de teste)
+
+- **Cada agente com memória própria.** Os agentes da equipe lembram o que você ensinou e o seu jeito de trabalhar, só
+  naquele workspace. Nada entra na memória sem a sua aprovação (aba Memória na janela do agente); depois das conversas,
+  a equipe anota o que vale lembrar e espera o seu OK. Os agentes também buscam nas próprias conversas antigas, e o que
+  você ensinou no Treinar passa a ser de cada agente e nunca é arquivado sozinho.
+- **Ajudantes para trabalhos grandes.** Cada agente divide um trabalho grande em partes e chama ajudantes temporários
+  para fazê-las ao mesmo tempo (até 10; reduza em Configurações para economizar).
+- **A experiência completa, de cara.** Todos os agentes já vêm com pesquisa na web e leitura de páginas, navegador
+  automático, ver vídeos, ler arquivos, responder em áudio e competências prontas (Word, Excel, PDF, PowerPoint, atas,
+  revisão semanal). Mais passos por pedido (90) e raciocínio profundo. Tudo vem ligado, com o aviso do que custa mais,
+  e você reduz quando quiser economizar. Áudios na conversa viram texto sozinhos, no seu computador, sem custo de IA.
+- **Modelos por tarefa e conselho de modelos.** No modelo de cada agente, escolha um modelo para ver imagens, resumir
+  conversas, dar nome às conversas, revisar, ajudantes e mais, ou "usar o principal". Na "Revisão em conselho", vários
+  modelos revisam uma resposta importante e um junta as opiniões (monta-se sozinho quando você tem dois ou mais modelos
+  nas suas contas; custa de 2 a 4 vezes mais).
+- **Plano B para a IA.** Se o modelo principal falhar ou a conta chegar ao limite, a equipe continua com um modelo
+  reserva de outra conta conectada, e o card mostra quando o reserva entrou. O Consumo mostra quanto resta da sua cota
+  (5 horas, semana) e do saldo, e quando renova.
+- **Você no controle.** "Não treinar com os meus dados" vem ligado e pede aos provedores que não usem as suas conversas
+  para treinar (onde o provedor aceita). Um botão pausa a equipe (na barra de cima e na Cidade) até você retomar.
+  Mande um recado a um trabalho em andamento e o agente segue com ele, sem recomeçar. Busca privada opcional, pontos de
+  volta para desfazer o que um agente gravou, aviso de código inseguro e limpeza de arquivos temporários.
+- **Chaves e senhas pedidas com segurança.** Quando um agente precisa de uma chave ou da senha de administrador, ele
+  pede num cartão protegido: o valor vai direto para o cofre, não aparece na conversa, vale na hora para o trabalho e,
+  apagado, deixa de valer na hora. As chaves guardadas ficam em Configurações › Segurança.
+- **Aprovações sem perder o fio.** Um comando de risco ou um envio por uma das suas contas pede a sua aprovação num
+  cartão; o agente espera alguns minutos e continua na hora. Se você responder depois, nada se perde.
+- **Os agentes perguntam de volta.** A pergunta vem como cartão, com opções, e a sua resposta volta para o mesmo
+  trabalho. Quando um colega chama você ("Oi! Tem um minutinho?"), ele já diz o assunto e vai direto ao ponto; se você
+  já resolveu por outro caminho, ele avisa em vez de cobrar.
+- **Trabalho contínuo:** Meta com juiz, Repetir até cumprir, Checagem periódica, Comentar sem interromper e Revisão
+  independente (por um colega que não fez o trabalho), na conversa e no card, ou pelos atalhos /meta /repetir /checagem
+  /comentar /revisao.
+- **Converse com a equipe pelo Telegram e pelo Discord**, por um bot seu (passo a passo em Conexões). Respostas,
+  aprovações com botões e avisos do que precisa de você chegam por lá. No Telegram, o que você mandar com o Ergon
+  fechado chega quando ele abrir.
+- **Mais aplicativos em Conexões:** dezenas de apps prontos (Notion, Linear, Stripe, Figma…), só para consulta até você
+  liberar a escrita em cada um. Loja de competências com conferência de segurança antes de você aprovar, e conquistas
+  da equipe.
+- **Rotinas mais pontuais:** rodam no relógio da própria equipe, no agente responsável; o horário perdido com o Ergon
+  fechado é recuperado e a tela mostra a próxima execução.
+- **Atualização:** esta versão muda a base da equipe, por isso o aplicativo não volta para versões anteriores a ela.
+  Para voltar ao que era antes, use o backup feito na atualização. Logo depois de ligar, as telas não mostram mais
+  "erro interno": o sistema espera um instante e, se ainda não der, pede para tentar de novo.
+
 ## 1.1.0-rc.26 (pré-versão de teste)
 
 - **Ergon em inglês.** Em Configurações › Minha conta (ou no menu do seu avatar), escolha Português ou English: a tela

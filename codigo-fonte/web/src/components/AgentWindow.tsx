@@ -10,7 +10,9 @@ import { Loading } from '../brand/Brand.tsx';
 import { ChatPanel } from './ChatPanel.tsx';
 import { Icon } from './Icon.tsx';
 import { ModelSelect, TOOL_BADGE, modelName } from './AgentProfile.tsx';
+import { ModelosPorTarefa } from './ModelosPorTarefa.tsx';
 import { TrainTab } from './TrainTab.tsx';
+import { MemoriaTab } from './MemoriaTab.tsx';
 import { PersonalityPicker } from './PersonalityPicker.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { AgentPreview } from './AgentPreview.tsx';
@@ -24,8 +26,8 @@ import { fmtDataHora, fmtLista, fmtNumero, tn, useT, type Chave, type ValoresDe 
 /** chave de texto sem valores a preencher (os rótulos das tabelas abaixo) */
 type Rotulo = { [K in Chave]: keyof ValoresDe<K> extends never ? K : never }[Chave];
 
-type Tab = 'conversa' | 'perfil' | 'treinar' | 'atividade';
-const ABA: Readonly<Record<Tab, Rotulo>> = { conversa: 'agente.aba.conversa', perfil: 'agente.aba.perfil', treinar: 'agente.treinar', atividade: 'agente.aba.atividade' };
+type Tab = 'conversa' | 'perfil' | 'treinar' | 'memoria' | 'atividade';
+const ABA: Readonly<Record<Tab, Rotulo>> = { conversa: 'agente.aba.conversa', perfil: 'agente.aba.perfil', treinar: 'agente.treinar', memoria: 'agente.aba.memoria', atividade: 'agente.aba.atividade' };
 interface Activity {
   runs: Array<{ id: string; kind: string; status: string; mode: string; model: string | null; tokens_in: number | null; tokens_out: number | null; created_at: string; error: string | null; task_id?: string | null; conversation_id?: string | null }>;
   tasks: Array<{ id: string; number: number; title: string; completed: number; column_name: string }>;
@@ -46,7 +48,9 @@ const fmtN = (n: number | null | undefined) => fmtNumero(n ?? 0);
 /** O que quem abre já sabe do agente (a linha leve da lista, da conversa, da busca): o cabeçalho e a conversa aparecem na hora. */
 export type AgentHead = AgentLite & Partial<Pick<TeamAgent, 'status' | 'run_status' | 'building_name'>>;
 /** GET /api/agents/:id: o perfil completo, com o efeito pessoal escolhido. */
-type FullAgent = Agent & { fx?: { mode: FxChoice['mode']; option: string | null } };
+type FullAgent = Agent & { fx?: { mode: FxChoice['mode']; option: string | null };
+  /** o perfil do agente no motor, quando já está pronto (rc.27); null/ausente = ainda sem perfil */
+  hermesPerfil?: string | null };
 
 /** Sem a linha de quem abriu: o que as telas já buscaram (a lista de conversas traz o colega embutido). */
 function cachedHead(id: string): AgentHead | null {
@@ -113,7 +117,7 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
               <button className="icon-btn" onClick={requestClose} aria-label={t('agente.janela.fechar')} title={t('agente.janela.fechar')}><Icon name="x" /></button>
             </header>
             <div className="tabs" role="tablist">
-              {(['conversa', 'perfil', 'treinar', 'atividade'] as Tab[]).map((k) => (
+              {(['conversa', 'perfil', 'treinar', 'memoria', 'atividade'] as Tab[]).map((k) => (
                 <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? 'tab--on' : ''}`} disabled={(k === 'conversa' || k === 'treinar') && status !== 'active'} onClick={() => setTab(k)}>
                   {t(ABA[k])}
                 </button>
@@ -122,7 +126,8 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
             <div className="awin__body">
               {tab === 'conversa' && <div className="awin__chat"><ChatPanel agent={{ ...head, id: agentId }} embedded draft={draft} conversationId={conversationId} /></div>}
               {tab === 'perfil' && (a ? <ProfileEditor agent={a} row={r} sectors={sectors} coordName={coordName} reload={reload} onClose={onClose} onDirty={(v) => { dirty.current = v; }} /> : <Loading error={full.error} />)}
-              {tab === 'treinar' && <TrainTab agent={{ id: agentId, name: head.name }} />}
+              {tab === 'treinar' && <TrainTab agent={{ id: agentId, name: head.name }} full={a} onAgentChanged={reload} />}
+              {tab === 'memoria' && <MemoriaTab agent={{ id: agentId, name: head.name }} />}
               {tab === 'atividade' && <ActivityTab agentId={agentId} />}
             </div>
           </>
@@ -289,6 +294,8 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
             : <ModelSelect catalog={catalog.data} value={f.model} provider={f.provider} onChange={(model, provider) => setF({ ...f, model, provider })} />}
           <span className="hint">{t('agente.perfil.modeloDica')}</span>
         </label>
+        {/* os modelos das tarefas de apoio DESTE agente (o perfil dele no motor); enquanto o perfil não fica pronto, os da equipe */}
+        {!catalog.error && <div className="editor__wide"><ModelosPorTarefa perfil={agent.hermesPerfil ?? null} deTodaEquipe={!agent.hermesPerfil} /></div>}
         <label className="field editor__wide">{t('agente.perfil.historia')}
           <textarea rows={2} maxLength={600} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} placeholder={t('agente.perfil.historiaExemplo')} />
           <span className="hint">{t('agente.perfil.historiaDica')}</span>
@@ -333,6 +340,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
                   {locked && <span className="badge">{t('agente.perfil.doCargo')}</span>}
                   {!locked && recommended.has(tool.id) && <span className="badge">{t('agente.perfil.recomendada')}</span>}
                   {!plena && <span className={`badge ${TOOL_BADGE[tool.status]}`}>{TOOL_STATUS[tool.status] ? t(TOOL_STATUS[tool.status]) : tool.status}</span>}
+                  {tool.aviso && <span className="badge badge--warn" title={tool.aviso === 'custo' ? t('agente.aviso.custoDica') : t('agente.aviso.riscoDica')}>{tool.aviso === 'custo' ? t('agente.aviso.custo') : t('agente.aviso.risco')}</span>}
                 </span>
               </label>
             );

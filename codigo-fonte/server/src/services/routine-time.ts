@@ -66,6 +66,22 @@ export function nextOccurrence(t: Trigger, from: Date): string | null {
   return null;
 }
 
+/**
+ * Último horário até `until` (inclusive), ou null se a rotina é só manual: o horário que um aviso do agendador do motor
+ * está disparando (rotinas-motor.ts). Mesmo formato de nextOccurrence (a chave da execução é a mesma dos dois lados).
+ */
+export function previousOccurrence(t: Trigger, until: Date): string | null {
+  if (t.kind !== 'schedule' || !t.days.length) return null;
+  const [hh, mm] = t.time.split(':').map(Number);
+  for (let i = 0; i <= 8; i++) {
+    const p = localParts(t.tz, until.getTime() - i * DAY);
+    if (!t.days.includes(p.wd)) continue;
+    const at = zonedToUtc(t.tz, p.y, p.m, p.d, hh, mm);
+    if (at <= until.getTime()) return new Date(at).toISOString();
+  }
+  return null;
+}
+
 const NAMES = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 const FULL = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 

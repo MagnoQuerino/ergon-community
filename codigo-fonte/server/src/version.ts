@@ -22,14 +22,17 @@ export function newer(a: string, b: string): boolean {
 }
 
 /**
- * A versão mais antiga para a qual o Ergon Desktop volta pelo próprio aplicativo: a 1.1.0-rc.24. Antes dela, o gerente
+ * A versão mais antiga para a qual o Ergon Desktop volta pelo próprio aplicativo: a 1.1.0-rc.27. Ela muda a base da equipe
+ * (cada agente vira um perfil do motor, com memória, competências e conversas próprias; migração 4 do cofre): numa versão
+ * anterior, a equipe não acharia os agentes onde eles passaram a morar. Para voltar ao que era antes dela, o caminho é o
+ * backup feito na atualização. (Até a rc.26 a mínima era a 1.1.0-rc.24: antes dela, o gerente
  * de motores nunca recriava o motor de cada pessoa quando a versão mudava: numa volta para uma anterior, só o núcleo
  * voltaria e a equipe seguiria na imagem de agora (e a 1.1.0-rc.14 já tinha trocado Docker por Podman dentro do
  * ambiente do Windows). O aplicativo tem a mesma trava (desktop/src-tauri/src/atualizacao.rs, VOLTA_MINIMA; um teste
  * confere que as duas andam juntas). Uma versão que mude os dados de um jeito que as anteriores não abram sobe este
- * valor (e o do aplicativo) para ela mesma.
+ * valor (e o do aplicativo) para ela mesma.)
  */
-export const VOLTA_MINIMA = '1.1.0-rc.24';
+export const VOLTA_MINIMA = '1.1.0-rc.27';
 
 /**
  * Dá para voltar a esta versão pelo aplicativo? 'pode': ela tem, publicado, o pacote assinado do canal; 'antiga':

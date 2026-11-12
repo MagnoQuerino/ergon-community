@@ -88,9 +88,9 @@ export function createWorkspace(db: Db, name: string, opts: { demo: boolean; slo
       perFloor[level]++;
       const k = characterColumns(c);
       db.run(
-        `INSERT INTO agents (id, workspace_id, floor_id, profile_id, name, role, color, status, demo, created_at, char_key, bio, charter, skills, tools, model_hint, coordinator)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        id('agt'), workspaceId, floorIds[level], profileIds[c.profile], c.name, c.role, c.color, ts, k.char_key, k.bio, db.seal(workspaceId, k.charter), k.skills, k.tools, k.model_hint,
+        `INSERT INTO agents (id, workspace_id, floor_id, profile_id, name, role, color, status, demo, created_at, char_key, bio, charter, skills, tools, model_hint, hermes_skills, coordinator)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id('agt'), workspaceId, floorIds[level], profileIds[c.profile], c.name, c.role, c.color, ts, k.char_key, k.bio, db.seal(workspaceId, k.charter), k.skills, k.tools, k.model_hint, k.hermes_skills,
         c.key === 'aristoteles' ? 1 : 0, // o cargo fixo: o Coordenador
       );
     }

@@ -9,6 +9,8 @@ import { AuthFlow, AutoUnlockPrompt, LockOverlay, PersonOpenScreen, ProtectScree
 import { ErgonLogo, Splash } from './brand/Brand.tsx';
 import { DecisionsPanel } from './components/DecisionsPanel.tsx';
 import { Icon } from './components/Icon.tsx';
+import { PausaControle } from './components/AjustesEquipe.tsx';
+import { fraseCurtaDaCota } from './lib/ajustes.ts';
 import { AgentWindow, type AgentHead } from './components/AgentWindow.tsx';
 import { AgentesView } from './views/AgentesView.tsx';
 import { AmbienteView } from './views/AmbienteView.tsx';
@@ -160,7 +162,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   };
   // as outras telas já buscadas por baixo: trocar de menu só mostra o que está pronto
   useEffect(() => {
-    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations', '/api/conexoes', '/api/conexoes/regras', '/api/teams-app',
+    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations', '/api/conexoes', '/api/conexoes/regras', '/api/teams-app', '/api/canais',
       '/api/conversations/recent', '/api/artifacts', '/api/routines', '/api/routines/library', '/api/routines/recommend', '/api/people', '/api/packages',
       '/api/packages/catalog/official', '/api/decisions', '/api/saude', '/api/workspaces', '/api/packages/cosmetics']), 400);
     return () => clearTimeout(t);
@@ -319,6 +321,12 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
             <Icon name="download" size={14} /><span className="tb-upd__txt">{t('geral.barra.atualizacao')}</span>
           </button>
         )}
+        {/* rc.27: equipe em pausa, sempre à vista na barra de cima; abre o Estado, onde se retoma */}
+        {s.teamPausa?.pausada && (
+          <button className="tb-upd tb-pausa" data-keep-surface onClick={() => setStatusOpen(true)} aria-label={t('configuracoes.ajustes.pausa.dica')} title={t('configuracoes.ajustes.pausa.dica')}>
+            <Icon name="pause" size={14} /><span className="tb-upd__txt">{t('configuracoes.ajustes.pausa.emPausa')}</span>
+          </button>
+        )}
         <span className="topbar__icons">
           <span className="topbar__statuswrap">
             <button className={`tb-icon ${statusOpen ? 'is-on' : ''}`} data-keep-surface onClick={() => setStatusOpen((v) => !v)} aria-expanded={statusOpen}
@@ -330,7 +338,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
             </button>
             {/* o Estado é um balão abaixo do botão; os avisos (simulação, atualização) aparecem lá */}
             {statusOpen && (
-              <StatusPanel onClose={() => setStatusOpen(false)} live={live.status} runs={s.runs} capacity={s.capacity} usage={usage.data} alerts={alerts}
+              <StatusPanel onClose={() => setStatusOpen(false)} live={live.status} runs={s.runs} capacity={s.capacity} usage={usage.data} alerts={alerts} pausa={s.teamPausa} onPausa={st.reload}
                 onAct={(a) => { setStatusOpen(false); a.act(); }} />
             )}
           </span>
@@ -463,10 +471,13 @@ function NavDrawer({ onClose, children }: { onClose: () => void; children: React
  * Estado do Ergon, sob demanda: o que está rodando, a capacidade, o consumo (só o que a conta informa) e os avisos.
  * Antes, tudo isso disputava o cabeçalho com "Aguardando você"; na janela estreita, parte sumia sem aviso.
  */
-function StatusPanel({ onClose, live, runs, capacity, usage, alerts, onAct }: {
+function StatusPanel({ onClose, live, runs, capacity, usage, alerts, onAct, pausa, onPausa }: {
   onClose: () => void; live: string; runs: AppState['runs']; capacity: AppState['capacity']; usage: Usage | null; alerts: Alert[]; onAct: (a: Alert) => void;
+  pausa: AppState['teamPausa']; onPausa: () => void;
 }) {
   const t = useT();
+  const [erroPausa, setErroPausa] = useState<string | null>(null);
+  const cota = fraseCurtaDaCota(usage?.accounts);
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, outside: true });
   return (
@@ -490,10 +501,14 @@ function StatusPanel({ onClose, live, runs, capacity, usage, alerts, onAct }: {
           <span>{t('geral.estado.equipe')}</span><b>{t('geral.estado.agentes', { n: capacity.active })} · {t('geral.estado.vagas', { n: capacity.slots })}</b>
           <span>{t('geral.estado.servidor')}</span><b>{live === 'ao_vivo' ? t('geral.estado.conectado') : t('geral.estado.reconectando')}</b>
         </div>
+        {/* rc.27: pausar e retomar a equipe (nenhum trabalho novo começa; o que está andando termina) */}
+        <PausaControle pausa={pausa} onMudou={onPausa} onError={setErroPausa} />
+        {erroPausa && <p className="error" role="alert">{erroPausa}</p>}
       </section>
       <section className="block">
         <h4>{t('geral.consumo.titulo')}</h4>
         <div className="row row--wrap"><UsageChips usage={usage} /></div>
+        {cota && <p className="status-pop__cota">{cota}</p>}
         <p className="hint">{t('geral.consumo.nota')}</p>
       </section>
     </aside>

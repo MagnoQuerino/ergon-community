@@ -78,6 +78,9 @@ const ERROS = {
   'erro.jaDecidido': 'Já decidido noutro lugar: nada mudou agora.',
   'erro.tarefaConcluida': 'Esta tarefa já está concluída.',
   'erro.equipeTrabalhando': 'a equipe ainda está trabalhando neste card',
+  'erro.orientarNaoAndando': 'Este trabalho não está em andamento agora: não há o que orientar.',
+  'erro.orientarNaoAceitou': 'A equipe não recebeu a orientação agora. Tente de novo em instantes.',
+  'erro.reservaForaDaConta': 'Esse modelo não está numa conta de IA conectada.',
   'erro.agenteTrabalhando': 'O agente já está trabalhando neste card.',
   'erro.agenteAindaTrabalhando': 'O agente ainda está trabalhando neste card: espere terminar.',
   'erro.rotinaExecutando': 'Esta rotina já está executando: espere terminar.',
@@ -98,6 +101,7 @@ const ERROS = {
   'erro.conflitoRevisao': 'A tarefa mudou desde a última leitura; recarregue antes de salvar.',
   'erro.recomendacaoSemIa': 'A recomendação precisa de uma conta de IA conectada (Conexões).',
   'erro.equipeDesligadaAgora': 'A sua equipe de IA não está ligada agora; tente de novo em instantes.',
+  'erro.equipeAbrindo': 'A sua equipe de IA ainda está ligando ou não respondeu agora; tente de novo em instantes.',
   'erro.equipeNaoLigada': 'Configuração de IA indisponível: a equipe de IA não está ligada nesta instalação.',
   'erro.catalogoSemEquipe': 'Catálogo de modelos indisponível: a equipe de IA não está ligada.',
   'erro.semInternetInstalar': 'Sem conexão com a internet agora: tente instalar quando houver conexão.',
@@ -120,6 +124,9 @@ const ERROS = {
   'erro.quadroIndisponivel': 'quadro indisponível',
   'erro.rotinasIndisponiveis': 'rotinas indisponíveis',
   'erro.semWorldOnline': 'Sem conexão com o Ergon Online agora: nada foi alterado. Tente de novo.',
+  'erro.modelosTarefaNaoChegou': 'Os modelos por tarefa chegam com a próxima atualização da equipe de IA. Nada foi alterado.',
+  'erro.tarefaDeApoioDesconhecida': 'Essa tarefa de apoio não existe na sua equipe de IA. Nada foi alterado.',
+  'erro.modeloTarefaNaoGravado': 'Não foi possível gravar o modelo agora. Nada foi alterado: tente de novo.',
 } as const satisfies Record<string, Msg>;
 
 /** As linhas do histórico (audit_events.result) que são frases fixas do sistema. */
@@ -162,6 +169,10 @@ const HISTORICO = {
   'historico.tituloMantido': '{nome} sugeriu outro título (“{titulo}”); fica o que a pessoa escolheu',
   'historico.cardCancelado': 'card #{numero} cancelado (saiu do quadro; o histórico fica)',
   'historico.dadosBaixados': 'dados baixados (arquivo legível, sem cifra)',
+  'historico.reservaUsada': 'o modelo principal não respondeu: o trabalho foi feito pelo modelo reserva {modelo}',
+  'historico.orientou': 'orientação enviada ao trabalho em andamento',
+  'historico.equipePausada': 'equipe em pausa: o trabalho novo espera você retomar',
+  'historico.equipeRetomada': 'equipe retomada: o trabalho que esperava volta a andar',
 } as const satisfies Record<string, Msg>;
 
 /** O resumo do card (services/resumo-tarefa.ts): a situação, a faixa "Para você decidir"/"Feito" e as frases dela. */

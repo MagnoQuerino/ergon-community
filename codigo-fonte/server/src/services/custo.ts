@@ -15,15 +15,22 @@
  */
 import type { Db } from '../db/db.ts';
 import { now } from '../lib/util.ts';
-import type { ChamadaMedida, HermesControlClient, MedicaoSessao } from './hermes.ts';
+import { HermesError, type ChamadaMedida, type HermesControlClient, type MedicaoSessao } from './hermes.ts';
 import { getSetting, setSetting } from './sectors.ts';
 
 // ---------------------------------------------------------------- passos por pedido (agent.max_turns no motor)
-/** o padrão (a migração 1 do cofre grava 20) e o intervalo que a ponte do motor aceita (PASSOS_MIN/PASSOS_MAX no plugin) */
-export const PASSOS_PADRAO = 20;
+/**
+ * O padrão e o intervalo que a ponte do motor aceita (PASSOS_PADRAO, PASSOS_MIN e PASSOS_MAX no plugin). Regra do dono
+ * (12/11): a experiência máxima de cara. O padrão é 90, o que o próprio motor grava na instalação (o dele, sem nada
+ * gravado, é sem limite); a migração 10 do cofre leva o 20 da migração 1, que ninguém escolheu, a 90. Menos passos gasta
+ * menos: a pessoa reduz em Configurações. O teto, 150, segura um laço que nunca termina.
+ */
+export const PASSOS_PADRAO = 90;
 export const PASSOS_MIN = 5;
-export const PASSOS_MAX = 60;
-export const PASSOS_OPCOES = [5, 10, 15, 20, 30, 40, 60] as const;
+export const PASSOS_MAX = 150;
+export const PASSOS_OPCOES = [5, 10, 20, 40, 60, 90, 120, 150] as const;
+/** o padrão de antes (migração 1 do cofre e a trava de abertura até a rc.24): no motor sem escolha da pessoa, vira o novo */
+export const PASSOS_ANTIGO = 20;
 export const PASSOS_SETTING = 'team.max_turns';
 
 /** o valor que o motor confirmou por último (gravado em cada workspace do motor): a tela diz se a escolha já vale */
@@ -47,8 +54,9 @@ export function passosEscolhidos(db: Db, workspaceIds: string[] | null): number 
 
 /**
  * Deixa o motor com o que vale: a escolha mais recente entre os workspaces dele; sem escolha, o que ele tem — a menos que
- * esteja fora de 5 a 60 ou não seja um número (um script, um agente com Terminal ou uma edição à mão gravou 500 ou
- * "unlimited"): aí volta ao padrão, 20, para sempre haver um teto que a pessoa não escolheu desfazer. Grava, em cada
+ * esteja fora de 5 a 150 ou não seja um número (um script, um agente com Terminal ou uma edição à mão gravou 500 ou
+ * "unlimited"), ou que seja o 20 de antes (que ninguém escolheu: só uma escolha gravada vale): aí vai ao padrão, 90, e
+ * sempre há um teto que a pessoa não escolheu desfazer. Grava, em cada
  * workspace do motor, o valor que ele confirmou (a tela diz se a escolha já vale). Devolve esse valor; null = motor sem a
  * ponte dos passos (versão anterior). Erro de rede sobe (quem chama tenta de novo depois).
  */
@@ -56,8 +64,14 @@ export async function sincronizarPassos(db: Db, control: HermesControlClient | n
   if (!control?.setPassos || !control.passos) return null;
   const escolha = passosEscolhidos(db, ids);
   let atual = await control.passos();
-  const alvo = escolha ?? (atual !== null && passoValido(atual) ? null : PASSOS_PADRAO);
-  if (alvo !== null && atual !== alvo) atual = await control.setPassos(alvo);
+  const alvo = escolha ?? (atual !== null && passoValido(atual) && atual !== PASSOS_ANTIGO ? null : PASSOS_PADRAO);
+  if (alvo !== null && atual !== alvo) {
+    try { atual = await control.setPassos(alvo); }
+    catch (err) {
+      // motor de antes (o teto dele era 60): recusa o padrão novo; sem escolha da pessoa, fica com o que tem até a atualização
+      if (!(escolha === null && err instanceof HermesError && err.status === 400)) throw err;
+    }
+  }
   if (atual !== null) for (const ws of ids) if (getSetting(db, ws, PASSOS_MOTOR) !== String(atual)) setSetting(db, ws, PASSOS_MOTOR, String(atual));
   return atual;
 }

@@ -7,7 +7,7 @@
 import type { Db } from '../db/db.ts';
 import { clip, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
-import { CHARACTERS, characterByKey } from './characters.ts';
+import { CHARACTERS, characterByKey, comBeneficios } from './characters.ts';
 import { getSetting, listSectors, setSetting } from './sectors.ts';
 import { createTask, userBoard } from './tasks.ts';
 import { COORDINATOR_ONLY, activeTeam, coordinatorOf } from './team.ts';
@@ -306,7 +306,8 @@ export function applyOnboarding(db: Db, bus: Bus, workspaceId: string, userId: s
         const s = sectors.get(ch.profile);
         const ag = db.get<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ? AND char_key = ? AND coordinator = 0', workspaceId, x.char);
         if (!ag || !s) continue;
-        const tools = [...new Set([...ch.tools, ...(x.extra ?? [])])].filter((t) => !COORDINATOR_ONLY.includes(t));
+        // as do personagem, as que o modelo de equipe acrescenta e os benefícios (sem eles, o modelo apagaria o que vem ligado)
+        const tools = comBeneficios([...ch.tools, ...(x.extra ?? [])]).filter((t) => !COORDINATOR_ONLY.includes(t));
         db.run("UPDATE agents SET role = ?, charter = ?, skills = ?, tools = ?, profile_id = ?, status = 'active', archived_at = NULL, deactivation_note = NULL WHERE id = ?",
           x.role, db.seal(workspaceId, charterOf(x)), JSON.stringify(x.skills), JSON.stringify(tools), s.id, ag.id);
       }

@@ -58,13 +58,14 @@ describe('Atualizações: canal pela versão instalada, versões anteriores e av
     globalThis.fetch = (async () => new Response(JSON.stringify(lista), { status: 200 })) as typeof fetch;
     const st = await new UpdateCheck(URL_MANIFESTO, '1.1.0-rc.26').check();
     const por = Object.fromEntries(st.releases.map((r) => [r.version, r.rollback]));
-    assert.deepEqual(por, { '1.1.0-rc.26': 'pode', '1.1.0-rc.25': 'pode', '1.1.0-rc.23': 'antiga', '1.1.0-rc.22': 'antiga', '1.1.0-rc.21': 'antiga', '1.1.0-rc.13': 'antiga', '1.1.0-rc.9': 'antiga', '1.1.1': 'sem-pacote', '1.1.0': 'sem-pacote' });
+    assert.deepEqual(por, { '1.1.0-rc.26': 'antiga', '1.1.0-rc.25': 'antiga', '1.1.0-rc.23': 'antiga', '1.1.0-rc.22': 'antiga', '1.1.0-rc.21': 'antiga', '1.1.0-rc.13': 'antiga', '1.1.0-rc.9': 'antiga', '1.1.1': 'sem-pacote', '1.1.0': 'sem-pacote' });
     const estavel = await new UpdateCheck(URL_MANIFESTO, '1.1.1').check();
     assert.deepEqual(estavel.releases.map((r) => [r.version, r.rollback]), [['1.1.1', 'sem-pacote'], ['1.1.0', 'pode']], 'canal estável: o pacote estável');
-    assert.equal(VOLTA_MINIMA, '1.1.0-rc.24', 'antes da rc.24 a equipe não voltaria junto (o gerente não recriava o motor)');
-    assert.equal(rollbackOf('1.1.0-rc.24', assinado('teste').map((a) => a.name), 'teste'), 'pode', 'a mínima ainda pode');
-    assert.equal(rollbackOf('1.1.0-rc.24', ['manifesto-teste.json'], 'teste'), 'sem-pacote', 'só o manifesto, sem a assinatura: não serve');
-    assert.equal(rollbackOf('1.1.0-rc.24', assinado('estavel').map((a) => a.name), 'teste'), 'sem-pacote', 'pacote do outro canal');
+    assert.equal(VOLTA_MINIMA, '1.1.0-rc.27', 'a rc.27 muda a base da equipe (perfis): antes dela, só pelo backup da atualização');
+    assert.equal(rollbackOf('1.1.0-rc.27', assinado('teste').map((a) => a.name), 'teste'), 'pode', 'a mínima ainda pode');
+    assert.equal(rollbackOf('1.1.0-rc.26', assinado('teste').map((a) => a.name), 'teste'), 'antiga', 'a rc.26, mesmo com o pacote assinado, já não');
+    assert.equal(rollbackOf('1.1.0-rc.27', ['manifesto-teste.json'], 'teste'), 'sem-pacote', 'só o manifesto, sem a assinatura: não serve');
+    assert.equal(rollbackOf('1.1.0-rc.27', assinado('estavel').map((a) => a.name), 'teste'), 'sem-pacote', 'pacote do outro canal');
     assert.equal(rollbackOf('1.0.1', assinado('estavel').map((a) => a.name), 'estavel'), 'antiga');
   });
 

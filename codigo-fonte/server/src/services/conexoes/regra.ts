@@ -52,7 +52,8 @@ export function decidir(x: { risco: Risco; origem: Origem; leuDeFora: boolean; l
  * marca a sessão como tendo lido conteúdo de fora. O plugin do motor (ergon_bridge, _LEEM_ENDERECO_*) repete esta lista.
  * Imagem em data: não vem de endereço nenhum (já está na conversa): não conta.
  */
-export const LEEM_ENDERECO = { prefixos: ['web_', 'browser'], nomes: ['vision_analyze'] } as const;
+// mcp__: os conectores prontos do motor (rc.27) trazem conteúdo de um aplicativo de fora
+export const LEEM_ENDERECO = { prefixos: ['web_', 'browser', 'mcp__'], nomes: ['vision_analyze'] } as const;
 export const leEndereco = (tool: string, alvo?: string | null): boolean =>
   LEEM_ENDERECO.prefixos.some((p) => tool.startsWith(p)) || ((LEEM_ENDERECO.nomes as readonly string[]).includes(tool) && !/^\s*data:/i.test(alvo ?? ''));
 
@@ -78,6 +79,9 @@ export const BLOQUEADAS_DEPOIS_DE_LER: ReadonlySet<string> = new Set([
   'browser_',
   'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_scroll', 'browser_back', 'browser_press',
   'browser_get_images', 'browser_vision', 'browser_console', 'browser_cdp', 'browser_dialog', 'browser_vault', 'browser_exec',
+  // rc.27: ver um vídeo abre o endereço dele; um conector pronto (MCP) leva o que o agente escreve a um aplicativo de fora.
+  // Os nomes dos conectores são montados pelo motor na hora (mcp__<conector>__<ferramenta>): só o prefixo os pega.
+  'video_analyze', 'mcp__',
 ]);
 
 /** Como o cartão chama o pedido: abrir sites (página, imagem por endereço, navegador) ou rodar programas. */

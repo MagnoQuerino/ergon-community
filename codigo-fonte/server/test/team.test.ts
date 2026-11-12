@@ -113,7 +113,16 @@ describe('setores e agente = subagente', () => {
     assert.equal(r2.model, 'deepseek/deepseek-v4.1-flash-1017', 'registra o modelo padrão de verdade, não o nome do motor');
   });
 
+  // a pessoa especializou a equipe: só Hipátia pesquisa na web (as ferramentas vêm todas ligadas; ela tirou dos outros)
+  const soHipatiaPesquisa = () => {
+    for (const a of h.db.all<{ id: string; tools: string; char_key: string | null }>("SELECT id, tools, char_key FROM agents WHERE workspace_id = ?", s.workspaceId)) {
+      if (a.char_key === 'hipatia') continue;
+      h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify((JSON.parse(a.tools) as string[]).filter((t) => t !== 'web')), a.id);
+    }
+  };
+
   test('trava de ferramentas: o plugin sabe o agente da sessão, o que ele pode e quem tem o resto', async () => {
+    soHipatiaPesquisa();
     const run = h.db.get<{ hermes_session_id: string; agent_id: string }>('SELECT hermes_session_id, agent_id FROM runs WHERE hermes_session_id IS NOT NULL ORDER BY created_at LIMIT 1')!;
     const tok = { 'x-ergon-bridge-token': 'token-da-ponte-de-teste-0123456789' };
     assert.equal((await req(h, 'POST', '/internal/bridge/v1/tool-policy', null, { session_id: run.hermes_session_id }, { 'x-ergon-bridge-token': 'errado-errado-errado-errado-1' })).status, 401);
@@ -180,6 +189,7 @@ describe('setores e agente = subagente', () => {
   });
 
   test('desativar: a coordenação redistribui tarefas abertas e ferramentas exclusivas', async () => {
+    soHipatiaPesquisa();
     const st = { ...(await req(h, 'GET', '/api/state', s)).json, agents: await allAgents(h, s) };
     const hip = agentBy(st, 'hipatia');
     const t = (await req(h, 'POST', '/api/tasks', s, { title: 'Levantar fontes sobre o mercado', agentId: hip.id })).json;

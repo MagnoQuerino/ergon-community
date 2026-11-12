@@ -6,6 +6,9 @@ import type { Me, SecurityStatus } from '../lib/types.ts';
 import { RecoveryReveal } from '../components/AuthFlow.tsx';
 import { Loading } from '../brand/Brand.tsx';
 import { BaixarMeusDados } from '../components/BaixarMeusDados.tsx';
+import { PrivacidadeCard } from '../components/AjustesEquipe.tsx';
+import { Icon } from '../components/Icon.tsx';
+import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { TEXTO_ANTES_DE_EXCLUIR, TEXTO_EXCLUIR_CONTA } from '../lib/textos-tela.ts';
 import { fmtDataHora, t as tr, tn, useT } from '../i18n/index.ts';
 
@@ -116,6 +119,9 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
           on ? t('conta.seg.trancamentoLigadoOk') : t('conta.seg.trancamentoDesligadoOk'))} />
       )}
 
+      {/* rc.27: o que a equipe de IA faz com os seus dados (não treinar; busca privada) */}
+      <PrivacidadeCard />
+
       <section className="card">
         <h3>{t('conta.senha.rotulo')}</h3>
         <form className="row row--wrap" onSubmit={(e) => {
@@ -189,6 +195,8 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
           </form>
         ) : <p className="hint warn">{tn('conta.seg.passkeysSoPor', { endereco: <a href={s.publicUrl}>{s.publicUrl}</a> })}</p>}
       </section>
+
+      <ChavesDaEquipe />
 
       {s.mode === 'local' && (s.lock.enabled || isolated) && (
         <section className="card">
@@ -285,6 +293,55 @@ function IdleLock({ minutes, owner, busy, onSave }: { minutes: number; owner: bo
         <p className="muted">{t('conta.trava.desligadaTexto')}</p>
       )}
       <p className="hint">{t('conta.trava.dica')}</p>
+    </section>
+  );
+}
+
+/**
+ * Chaves, senhas e tokens que a equipe pediu e você informou num cartão protegido: só os nomes (o valor nunca volta à
+ * tela), para quê e quando; apagar tira do cofre da equipe. A senha de administrador guardada aparece aqui também.
+ */
+function ChavesDaEquipe() {
+  const t = useT();
+  const r = useResource<{ disponivel: boolean; sudo: boolean; chaves: Array<{ nome: string; motivo: string; quando: string; agente: string }> }>('/api/seguranca/chaves', ['audit.created']);
+  const [apagar, setApagar] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const x = r.data;
+  const confirmar = async () => {
+    const nome = apagar; if (!nome) return;
+    setBusy(true); setErr(null);
+    try { await api.del(`/api/seguranca/chaves/${nome}`); setApagar(null); r.reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card">
+      <h3>{t('conta.chaves.titulo')}</h3>
+      <p className="muted small">{t('conta.chaves.texto')}</p>
+      {!x ? <p className="muted small">{r.error ?? t('conta.chaves.lendo')}</p>
+        : !x.disponivel ? <p className="hint small">{t('conta.chaves.indisponivel')}</p>
+        : !x.chaves.length && !x.sudo ? <p className="muted small">{t('conta.chaves.nenhuma')}</p>
+        : (
+          <ul className="sec-rows">
+            {x.chaves.map((c) => (
+              <li key={c.nome}><b className="mono">{c.nome}</b>
+                <span className="muted small">{[c.motivo, c.agente && t('conta.chaves.pedidaPor', { nome: c.agente }), c.quando && fmtDataHora(c.quando)].filter(Boolean).join(' · ')}</span>
+                <button className="btn btn--sm btn--ghost" onClick={() => setApagar(c.nome)}><Icon name="trash" size={13} /> {t('conta.chaves.apagar')}</button>
+              </li>
+            ))}
+            {x.sudo && (
+              <li><b>{t('conta.chaves.sudo')}</b><span className="muted small">{t('conta.chaves.sudoTexto')}</span>
+                <button className="btn btn--sm btn--ghost" onClick={() => setApagar('SUDO_PASSWORD')}><Icon name="trash" size={13} /> {t('conta.chaves.apagar')}</button>
+              </li>
+            )}
+          </ul>
+        )}
+      {apagar && (
+        <ConfirmPopup title={apagar === 'SUDO_PASSWORD' ? t('conta.chaves.apagarSudoTitulo') : t('conta.chaves.apagarTitulo', { nome: apagar })} confirmLabel={busy ? t('conta.chaves.apagando') : t('conta.chaves.apagar')}
+          onConfirm={() => void confirmar()} onCancel={() => setApagar(null)}>
+          <p>{t('conta.chaves.apagarCorpo')}</p>
+        </ConfirmPopup>
+      )}
+      {err && <p className="error" role="alert">{err}</p>}
     </section>
   );
 }

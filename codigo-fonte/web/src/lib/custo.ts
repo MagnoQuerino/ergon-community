@@ -4,9 +4,9 @@
 import type { ComposicaoAgente } from './types.ts';
 import { fmtNumero, t, type Chave } from '../i18n/index.ts';
 
-/** as escolhas da tela (o servidor aceita de 5 a 60; o padrão é 20) */
-export const PASSOS_OPCOES = [5, 10, 15, 20, 30, 40, 60];
-export const PASSOS_PADRAO = 20;
+/** as escolhas da tela (o servidor aceita de 5 a 150; o padrão é 90: a experiência completa, e a pessoa reduz para economizar) */
+export const PASSOS_OPCOES = [5, 10, 20, 40, 60, 90, 120, 150];
+export const PASSOS_PADRAO = 90;
 
 export const passosAjuda = () => t('configuracoes.custo.passosAjuda');
 export const passosDepois = () => t('configuracoes.custo.passosDepois');

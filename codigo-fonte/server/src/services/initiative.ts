@@ -3,7 +3,9 @@
  * - a coordenação dá as boas-vindas e presta contas: o que foi entregue, o que anda e quem precisa dela — os cartões
  *   desses pedidos aparecem logo abaixo, e responder ali resolve em todo lugar (é o mesmo pedido);
  * - cada colega que precisa dela num card puxa conversa direto, com uma abertura pronta, sem IA ("opa, tá online?").
- *   Só quando a pessoa responde ele carrega o pedido e explica. Ignorou, fica nisso: na próxima chegada (outro dia) ele
+ *   A abertura já diz o assunto de leve e guarda o motivo (messages.motivo): quando a pessoa responde ("oi, pode falar"),
+ *   a execução da resposta recebe a própria abertura (que não passou pelo motor) e o estado de agora de cada card, e ele
+ *   segue direto ao assunto — ou diz que já se resolveu. Ignorou, fica nisso: na próxima chegada (outro dia) ele
  *   tenta mais uma vez; depois de duas, o pedido só aparece no resumo da coordenação. Sem enxurrada, sem esquecer.
  * E o agente marca a conversa como urgente ou "precisa de você" ([[prioridade]]); a marca sai quando a pessoa responde.
  */
@@ -18,6 +20,21 @@ import { workspaceTz } from './routine-proposals.ts';
 import { instructionsFor, type RunExecutor, type RunStatus, type RunRow } from './runs.ts';
 import { firstName, personalityOf } from './voices.ts';
 import { getSetting } from './sectors.ts';
+import { readLang } from './prefs.ts';
+
+/** Um card do motivo de uma abertura: o que o colega precisa da pessoa nele (fotografia de quando chamou). */
+export interface CardDoMotivo { id: string; number: number; title: string; need: 'info' | 'approval' | 'review'; question: string | null }
+/** Por que o colega puxou conversa (messages.motivo, cifrado): os cards em que ele precisa da pessoa. */
+export interface Motivo { cards: CardDoMotivo[] }
+
+/** O assunto, de leve, no fim da abertura ("É sobre “Levantamento de concorrentes”."): a pessoa já sabe do que se trata. */
+export function assuntoDeLeve(cards: Array<{ title: string }>, lang: 'pt' | 'en'): string {
+  const t = clip(cards[0]?.title.replace(/\s+/g, ' ').trim() ?? '', 60);
+  if (!t) return '';
+  const mais = cards.length - 1;
+  if (lang === 'en') return `It’s about “${t}”${mais === 1 ? ' and one more thing' : mais > 1 ? ` and ${mais} more things` : ''}.`;
+  return `É sobre “${t}”${mais === 1 ? ' e mais uma coisa' : mais > 1 ? ` e mais ${mais} coisas` : ''}.`;
+}
 
 /** fora há tanto tempo (ou outro dia): chegou */
 export const ARRIVAL_GAP_MS = 4 * 3600_000;
@@ -98,15 +115,17 @@ export class Initiative {
     return c?.id ?? createConversation(this.db, workspaceId, userId, agentId).id;
   }
 
-  private sayAs(workspaceId: string, conversationId: string, text: string): void {
-    this.db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at) VALUES (?, ?, ?, 'agent', ?, 'local', ?)`,
-      id('msg'), workspaceId, conversationId, this.db.seal(workspaceId, clip(text, 6000)), now());
+  /** `motivo`: a abertura de quem puxou conversa guarda por quê (os cards), para a resposta seguir do assunto. */
+  private sayAs(workspaceId: string, conversationId: string, text: string, motivo?: Motivo): void {
+    this.db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at, motivo) VALUES (?, ?, ?, 'agent', ?, 'local', ?, ?)`,
+      id('msg'), workspaceId, conversationId, this.db.seal(workspaceId, clip(text, 6000)), now(), motivo ? this.db.seal(workspaceId, JSON.stringify(motivo)) : null);
     this.bus.publish(workspaceId, 'messages.changed', { conversationId });
   }
 
-  /** Cada colega que precisa da pessoa num card puxa conversa (abertura pronta, no jeito dele). */
+  /** Cada colega que precisa da pessoa num card puxa conversa (abertura pronta, no jeito dele, com o assunto de leve). */
   private openers(workspaceId: string, userId: string, cards: ReturnType<typeof pendingDecisions>['cards']): void {
     const tz = workspaceTz(this.db, workspaceId);
+    const lang = readLang(this.db, userId) === 'en' ? 'en' : 'pt';
     const coord = this.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND coordinator = 1 AND status = 'active'", workspaceId)?.id;
     const by = new Map<string, typeof cards>();
     for (const c of cards) {
@@ -125,7 +144,9 @@ export class Initiative {
       });
       if (!due.length) continue;
       const conv = this.conversationWith(workspaceId, userId, agentId);
-      this.sayAs(workspaceId, conv, openerFor(personalityOf(this.db, workspaceId, agentId, userId), name || 'você', local(tz).hour, Date.now() % 7));
+      const abre = openerFor(personalityOf(this.db, workspaceId, agentId, userId), name || (lang === 'en' ? 'there' : 'você'), local(tz).hour, Date.now() % 7, lang);
+      const motivo: Motivo = { cards: due.map((c) => ({ id: c.id, number: c.number, title: c.title, need: c.need as CardDoMotivo['need'], question: c.question ?? null })) };
+      this.sayAs(workspaceId, conv, [abre, assuntoDeLeve(due, lang)].filter(Boolean).join(' '), motivo);
       for (const c of due) {
         this.db.run(`INSERT INTO nudges (workspace_id, user_id, agent_id, item_key, conversation_id, count, last_at) VALUES (?, ?, ?, ?, ?, 1, ?)
                      ON CONFLICT (workspace_id, user_id, item_key) DO UPDATE SET count = CASE WHEN nudges.answered_at IS NULL THEN nudges.count + 1 ELSE 1 END,
@@ -133,7 +154,7 @@ export class Initiative {
           workspaceId, userId, agentId, `card:${c.id}`, conv, now());
       }
       this.db.run("UPDATE conversations SET priority = COALESCE(priority, 'alta'), priority_reason = COALESCE(priority_reason, ?), priority_at = COALESCE(priority_at, ?) WHERE id = ?",
-        this.db.seal(workspaceId, clip(`precisa de você no card #${due[0].number}`, 160)), now(), conv);
+        this.db.seal(workspaceId, clip(lang === 'en' ? `needs you on card #${due[0].number}` : `precisa de você no card #${due[0].number}`, 160)), now(), conv);
       audit(this.db, this.bus, { workspaceId, actorType: 'agent', actorId: agentId, action: 'initiative.opener', targetType: 'conversation', targetId: conv,
         evidence: { cards: due.map((c) => c.number) }, result: 'puxou conversa' });
     }
@@ -215,15 +236,63 @@ export class Initiative {
   }
 
   /**
-   * A pessoa respondeu ao colega que puxou conversa: as pendências dele com ela contam como respondidas, os cartões
-   * aparecem nesta conversa e o colega recebe o que precisa explicar. null = ele não tinha puxado nada.
+   * A abertura que esta mensagem da pessoa responde: a última fala do colega que puxou conversa nesta conversa, sem outra
+   * mensagem da pessoa no meio (a resposta é a primeira depois do chamado). Com o motivo guardado (messages.motivo) ou,
+   * para as aberturas de antes dele, os cards das pendências que ele puxou nesta conversa (nudges). Tudo vem do banco:
+   * vale depois de reinício e em "tentar de novo".
    */
-  replyContext(workspaceId: string, userId: string, agentId: string, conversationId: string): string | null {
-    const open = this.db.all<{ item_key: string }>('SELECT item_key FROM nudges WHERE workspace_id = ? AND user_id = ? AND agent_id = ? AND answered_at IS NULL', workspaceId, userId, agentId);
-    if (!open.length) return null;
-    this.db.run('UPDATE nudges SET answered_at = ? WHERE workspace_id = ? AND user_id = ? AND agent_id = ? AND answered_at IS NULL', now(), workspaceId, userId, agentId);
-    const cards = pendingDecisions(this.db, workspaceId).cards.filter((c) => open.some((n) => n.item_key === `card:${c.id}`));
-    if (!cards.length) return null;
+  private aberturaRespondida(workspaceId: string, userId: string, agentId: string, conversationId: string, messageId: string): { texto: string; cards: CardDoMotivo[] } | null {
+    // a abertura com o motivo guardado (outra fala do sistema depois dela não a esconde); sem nenhuma, a última fala pronta
+    // do colega (as aberturas de antes do motivo guardado)
+    const antes = (filtro: string) => this.db.get<{ content: string; motivo: string | null; created_at: string }>(
+      `SELECT o.content, o.motivo, o.created_at FROM messages m JOIN messages o ON o.conversation_id = m.conversation_id
+        WHERE m.id = ? AND m.conversation_id = ? AND o.workspace_id = ? AND o.role = 'agent' AND o.run_id IS NULL AND ${filtro}
+          AND (o.created_at < m.created_at OR (o.created_at = m.created_at AND o.rowid < m.rowid))
+        ORDER BY o.created_at DESC, o.rowid DESC LIMIT 1`, messageId, conversationId, workspaceId);
+    const o = antes('o.motivo IS NOT NULL') ?? antes('1 = 1');
+    if (!o) return null;
+    // a pessoa já tinha respondido a esse chamado antes (esta é outra mensagem): a conversa já seguiu com o assunto
+    const meio = this.db.get(
+      `SELECT 1 AS x FROM messages m JOIN messages u ON u.conversation_id = m.conversation_id
+        WHERE m.id = ? AND u.role = 'user' AND u.id <> m.id AND u.created_at >= ? AND (u.created_at < m.created_at OR (u.created_at = m.created_at AND u.rowid < m.rowid)) LIMIT 1`,
+      messageId, o.created_at);
+    if (meio) return null;
+    if (o.motivo) {
+      try {
+        const m = JSON.parse(o.motivo) as Motivo;
+        const cards = (Array.isArray(m.cards) ? m.cards : []).filter((c) => c && typeof c.id === 'string').slice(0, 8);
+        if (cards.length) return { texto: o.content, cards };
+      } catch { /* motivo ilegível: segue pelas pendências */ }
+    }
+    // abertura de antes do motivo guardado: as pendências que este colega puxou nesta conversa
+    // (a pendência é gravada logo depois da abertura, no mesmo passo: só as daquele chamado)
+    const ns = this.db.all<{ item_key: string; last_at: string }>("SELECT item_key, last_at FROM nudges WHERE workspace_id = ? AND user_id = ? AND agent_id = ? AND conversation_id = ? AND item_key LIKE 'card:%' ORDER BY last_at DESC LIMIT 8",
+      workspaceId, userId, agentId, conversationId).filter((n) => { const d = Date.parse(n.last_at) - Date.parse(o.created_at); return d >= 0 && d < 60_000; });
+    const cards = ns.map((n) => this.db.get<{ id: string; number: number; title: string; work_state: string }>('SELECT id, number, title, work_state FROM tasks WHERE id = ? AND workspace_id = ?', n.item_key.slice(5), workspaceId))
+      .filter((t): t is { id: string; number: number; title: string; work_state: string } => !!t)
+      .map((t) => ({ id: t.id, number: t.number, title: t.title, need: (t.work_state === 'aguardando_info' ? 'info' : t.work_state === 'revisao' ? 'review' : 'approval') as CardDoMotivo['need'], question: null }));
+    return cards.length ? { texto: o.content, cards } : null;
+  }
+
+  /** Como está agora um card do motivo que não espera mais pela pessoa (fato curto para o colega). */
+  private comoFicou(workspaceId: string, taskId: string): string {
+    const t = this.db.get<{ completed: number; archived: number }>('SELECT completed, archived FROM tasks WHERE id = ? AND workspace_id = ?', taskId, workspaceId);
+    if (!t) return 'não existe mais';
+    if (Number(t.completed)) return 'já foi concluído';
+    if (Number(t.archived)) return 'foi arquivado';
+    if (this.db.get("SELECT 1 AS x FROM runs WHERE task_id = ? AND status IN ('queued', 'running', 'waiting_user') LIMIT 1", taskId)) return 'já voltou a andar (a equipe está trabalhando nele)';
+    return 'não espera mais por ela';
+  }
+
+  /** O que precisa dela num card que ainda espera (o mesmo texto para a abertura e para a pendência puxada noutra conversa). */
+  private static precisa(c: { need: string; question: string | null }): string {
+    return c.need === 'info' ? `precisa de uma informação${c.question ? `: ${clip(c.question, 300)}` : ''}`
+      : c.need === 'review' ? 'a revisão não passou; precisa da decisão dela (aprovar assim mesmo ou devolver com instrução)'
+      : 'foi entregue e espera a aprovação dela (Aprovar conclui; Pedir ajustes faz outra versão no mesmo card): pergunte se ela conseguiu ler';
+  }
+
+  /** Os cartões dos cards que esperam a pessoa, nesta conversa (responder aqui resolve em todo lugar). */
+  private cartoesAqui(workspaceId: string, agentId: string, conversationId: string, cards: Array<{ id: string; number: number; title: string; need: string; question: string | null }>): void {
     const props = this.db.all<{ id: string; payload: string }>("SELECT id, payload FROM agent_proposals WHERE workspace_id = ? AND status = 'proposed' AND kind = 'info_request'", workspaceId);
     for (const c of cards) {
       const p = props.find((x) => { try { return (JSON.parse(x.payload) as { taskId?: string }).taskId === c.id; } catch { return false; } });
@@ -238,14 +307,52 @@ export class Initiative {
         this.bus.publish(workspaceId, 'proposals.changed', { conversationId });
       }
     }
+  }
+
+  /**
+   * A pessoa escreveu ao colega. Se é a resposta a uma abertura dele ("oi, pode falar" depois do "tem um minutinho?"), o
+   * colega recebe a própria abertura e o motivo dela com o estado de agora de cada card — o que ainda espera a pessoa
+   * (com o cartão aqui) e o que já se resolveu enquanto isso —, para seguir direto ao assunto em vez de tratar a resposta
+   * como um cumprimento novo. Fora de uma abertura, as pendências que ele puxou noutra conversa ainda valem (como antes).
+   * As pendências dele com ela contam como respondidas. `messageId`: a mensagem dela que vai ao agente (sem ela, só as
+   * pendências). null = nada a dizer.
+   */
+  replyContext(workspaceId: string, userId: string, agentId: string, conversationId: string, messageId?: string | null): string | null {
+    const open = this.db.all<{ item_key: string }>('SELECT item_key FROM nudges WHERE workspace_id = ? AND user_id = ? AND agent_id = ? AND answered_at IS NULL', workspaceId, userId, agentId);
+    if (open.length) this.db.run('UPDATE nudges SET answered_at = ? WHERE workspace_id = ? AND user_id = ? AND agent_id = ? AND answered_at IS NULL', now(), workspaceId, userId, agentId);
+    const ab = messageId ? this.aberturaRespondida(workspaceId, userId, agentId, conversationId, messageId) : null;
+    if (ab) return this.contextoDaAbertura(workspaceId, agentId, conversationId, ab);
+    if (!open.length) return null;
+    const cards = pendingDecisions(this.db, workspaceId).cards.filter((c) => open.some((n) => n.item_key === `card:${c.id}`));
+    if (!cards.length) return null;
+    this.cartoesAqui(workspaceId, agentId, conversationId, cards);
     // a pergunta e o título vão nas instruções desta conversa: o card que recebeu conteúdo de fora a marca também
     const lido = this.lidoDe(cards.map((c) => c.id), []);
     if (lido.deFora) marcarEm(this.db, workspaceId, [`conv:${conversationId}`], { privado: lido.privado, motivo: 'pendência de card' });
-    const what = cards.map((c) => `- card #${c.number} “${clip(c.title, 90)}”: ${c.need === 'info' ? `precisa de uma informação${c.question ? `: ${clip(c.question, 300)}` : ''}` : c.need === 'review' ? 'a revisão não passou; precisa da decisão dela (aprovar assim mesmo ou devolver com instrução)' : 'foi entregue e espera a aprovação dela (Aprovar conclui; Pedir ajustes faz outra versão no mesmo card): pergunte se ela conseguiu ler'}`).join('\n');
+    const what = cards.map((c) => `- card #${c.number} “${clip(c.title, 90)}”: ${Initiative.precisa(c)}`).join('\n');
     return [
       'Você puxou conversa com a pessoa porque precisa dela nisto (fatos do sistema):', what,
       'Agora explique em poucas palavras, no seu jeito, o que precisa e por quê; o cartão para ela responder aparece logo abaixo da sua mensagem (não peça para ela abrir o card). Se ela trouxe outro assunto, atenda primeiro e lembre da sua pendência em uma frase no fim.',
     ].join('\n');
+  }
+
+  /** O contexto da resposta a uma abertura: a fala dele, o que ainda espera a pessoa e o que já se resolveu. */
+  private contextoDaAbertura(workspaceId: string, agentId: string, conversationId: string, ab: { texto: string; cards: CardDoMotivo[] }): string {
+    const agora = new Map(pendingDecisions(this.db, workspaceId).cards.map((c) => [c.id, c]));
+    const esperam = ab.cards.flatMap((c) => { const x = agora.get(c.id); return x ? [{ ...c, number: x.number, title: x.title, need: x.need as CardDoMotivo['need'], question: x.question ?? c.question }] : []; });
+    const resolvidos = ab.cards.filter((c) => !agora.has(c.id)).map((c) => ({ ...c, estado: this.comoFicou(workspaceId, c.id) }));
+    if (esperam.length) this.cartoesAqui(workspaceId, agentId, conversationId, esperam);
+    const lido = this.lidoDe(ab.cards.map((c) => c.id), []);
+    if (lido.deFora) marcarEm(this.db, workspaceId, [`conv:${conversationId}`], { privado: lido.privado, motivo: 'pendência de card' });
+    const card = (c: { number: number; title: string }) => `card #${c.number} “${clip(c.title, 90)}”`;
+    return [
+      `Foi você quem puxou conversa com a pessoa, nesta conversa, com esta mensagem sua: “${clip(ab.texto.replace(/\s+/g, ' '), 300)}”. A mensagem dela agora é a resposta a esse chamado: não trate como um cumprimento novo, não pergunte o que ela precisa nem se ofereça para ajudar. Vá direto ao assunto que fez você chamar, no seu jeito e no idioma em que ela escreveu.`,
+      esperam.length ? `Por que você chamou (fatos do sistema, de agora):\n${esperam.map((c) => `- ${card(c)}: ${Initiative.precisa(c)}`).join('\n')}` : '',
+      resolvidos.length ? `${esperam.length ? 'Já resolvido' : 'O que fez você chamar já se resolveu'} enquanto isso (fatos do sistema, de agora):\n${resolvidos.map((c) => `- ${card(c)}: ${c.estado}`).join('\n')}` : '',
+      esperam.length
+        ? `Explique em poucas palavras o que precisa e por quê; o cartão para ela responder aparece logo abaixo da sua mensagem (não peça para ela abrir o card).${resolvidos.length ? ' Não cobre o que já se resolveu.' : ''} Se ela trouxe outro assunto, atenda primeiro e lembre da sua pendência em uma frase no fim.`
+        : 'Diga em uma frase, no seu jeito, que isso já se resolveu enquanto isso e que não precisa mais dela nisso: não cobre nem peça o que já foi feito. Se ela trouxe outro assunto, atenda.',
+    ].filter(Boolean).join('\n');
   }
 
   /** Marcação de prioridade que o agente pediu na resposta ([[prioridade]]). */

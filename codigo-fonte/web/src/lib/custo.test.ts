@@ -47,10 +47,12 @@ test('a linha de detalhe: de que são feitas as instruções e o que o provedor 
   assert.doesNotMatch(detalhe({ instrucoes: { agente: 0.5, base: 0.1, competencias: 0 }, cache: null, chamadas: 1 }), /reaproveitado/);
 });
 
-test('passos por pedido: o padrão 20 está nas escolhas, dentro do que o servidor aceita (5 a 60)', () => {
-  assert.ok(PASSOS_OPCOES.includes(PASSOS_PADRAO));
-  assert.ok(PASSOS_OPCOES.every((n) => n >= 5 && n <= 60));
-  assert.match(PASSOS_AJUDA, /O padrão é 20\./);
+test('passos por pedido: o padrão 90 (a experiência completa) está nas escolhas, dentro do que o servidor aceita (5 a 150)', () => {
+  assert.equal(PASSOS_PADRAO, 90);
+  assert.ok(PASSOS_OPCOES.includes(PASSOS_PADRAO) && PASSOS_OPCOES.includes(20), 'quem escolheu 20 ainda acha a opção');
+  assert.ok(PASSOS_OPCOES.every((n) => n >= 5 && n <= 150));
+  assert.match(PASSOS_AJUDA, /O padrão é 90/);
+  assert.match(PASSOS_AJUDA, /diminua para economizar/);
   assert.match(PASSOS_AJUDA, /conta no consumo/);
   // um motor para vários workspaces: a tela avisa que a escolha vale para todos
   assert.equal(passosCompartilhado(0), '');

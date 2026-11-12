@@ -74,6 +74,11 @@ export interface RespostaAcao {
   desligada?: boolean;
   /** o serviço não confirmou se fez (pode ter saído): repetir poderia mandar duas vezes */
   incerto?: boolean;
+  /**
+   * aprovações nativas (rc.27): o cartão que espera a pessoa e o que ele mostra. Só para o plugin (ele segura o turno no
+   * portão de aprovação do motor até ela decidir e tira estes dois campos antes de responder ao modelo).
+   */
+  cartao?: string; resumo?: string;
 }
 /** O que a marca no card guarda além do motivo (fica só no servidor; o agente não recebe): o risco da chamada e a linha. */
 interface DaMarca { risco?: Risco; dedupe?: string | null }
@@ -95,6 +100,11 @@ export interface ConexoesDeps {
   continuar?(r: { workspaceId: string; agentId: string; conversationId: string; userId: string; texto: string; chave: string }): void;
   /** card da equipe: o que a pessoa decidiu no cartão vai para o histórico do card (resumo) e para o agente (texto), e o card volta a andar */
   devolverAoCard?(r: { workspaceId: string; taskId: string; userId: string; texto: string; resumo: string }): void;
+  /**
+   * Aprovações nativas (rc.27, aprovacoes.ts): o turno de quem pediu ainda espera este cartão no portão de aprovação do motor?
+   * Então a decisão volta à ferramenta no mesmo turno (responder), sem continuação; se o motor já não esperava, segue como antes.
+   */
+  nativa?: { aoVivo(workspaceId: string, proposalId: string): boolean; responder(workspaceId: string, proposalId: string, aprovar: boolean): Promise<boolean> };
 }
 
 export class Conexoes {
@@ -236,7 +246,7 @@ export class Conexoes {
    * abre o cartão de aprovação com o alvo (o endereço ou o programa), um por grupo e por conversa ou card enquanto espera;
    * recusado há pouco, não pede de novo; sem conversa nem card, não há onde pedir e a ferramenta fica de fora.
    */
-  pedirAprovacao(r: RunLike & Pick<RunDaSessao, 'juntas'>, tool: string, alvo: string): { liberada: boolean; texto: string } {
+  pedirAprovacao(r: RunLike & Pick<RunDaSessao, 'juntas'>, tool: string, alvo: string): { liberada: boolean; texto: string; cartao?: string } {
     if (dispensaAprovacao(tool, alvo) || !negadaPor(tool, this.bloqueadas(r))) return { liberada: true, texto: '' };
     const grupo = grupoDepoisDeLer(tool);
     // "Sempre", aprovado num cartão: vale no workspace inteiro até a pessoa desfazer em Conexões › Regras
@@ -266,11 +276,20 @@ export class Conexoes {
     const resumo = `${agente} quer ${verbo} depois de ler conteúdo das suas contas${mostra ? `:\n${clip(mostra, 4000)}` : '.'}\n(Pede aprovação porque você ligou essa proteção em Conexões. Aprovar libera ${todos} ${onde} pelo prazo que você escolher: 1 h, 8 h, 72 h ou sempre. "Sempre" vale em todas as conversas e cards, até você desfazer em Conexões › Regras.${aviso})`;
     recordProposals(this.db, this.d.bus, r.workspace_id, { conversationId: r.conversation_id ?? null, runId: r.id },
       [{ kind: 'depois_de_ler', agente, grupo, escopo, chaves, ferramenta: clip(tool, 60), alvo: clip(alvo, 4000), resumo }]);
+    const cartao = this.ultimoCartao(r.workspace_id, r.id, KIND_DEPOIS_DE_LER);
     audit(this.db, this.d.bus, { workspaceId: r.workspace_id, actorType: 'agent', actorId: r.agent_id, action: 'conexoes.depois_de_ler.pedido', targetType: 'run', targetId: r.id,
       evidence: { ferramenta: tool, grupo, run: r.id }, result: `pede aprovação para ${oQue}${alvo.trim() ? `: ${clip(alvo, 200)}` : ''}` });
     const volta = r.task_id ? 'quando ela decidir, a decisão entra no histórico deste card e o card volta para você continuar'
       : 'quando ela decidir, você recebe a resposta nesta conversa e continua';
-    return { liberada: false, texto: `A ferramenta '${tool}' espera a aprovação da pessoa: esta conversa leu conteúdo privado das contas, e ela pediu para aprovar antes de ${oQue}. O cartão já está com ela; não tente outro caminho. Diga isso em uma frase e pare por aqui: ${volta}.` };
+    return { liberada: false, texto: `A ferramenta '${tool}' espera a aprovação da pessoa: esta conversa leu conteúdo privado das contas, e ela pediu para aprovar antes de ${oQue}. O cartão já está com ela; não tente outro caminho. Diga isso em uma frase e pare por aqui: ${volta}.`,
+      ...(cartao ? { cartao } : {}) };
+  }
+
+  /** O cartão que acabou de ser aberto para esta execução (o mais recente do tipo; com acaoId, o desta ação). */
+  private ultimoCartao(ws: string, runId: string | null, kind: string, acaoId?: string): string | undefined {
+    if (!runId) return undefined;
+    const l = this.db.all<{ id: string; payload: string }>('SELECT id, payload FROM agent_proposals WHERE workspace_id = ? AND run_id = ? AND kind = ? AND status = ? ORDER BY created_at DESC, rowid DESC LIMIT 5', ws, runId, kind, 'proposed');
+    return (acaoId ? l.find((x) => { try { return (JSON.parse(x.payload) as { acaoId?: string }).acaoId === acaoId; } catch { return false; } }) : l[0])?.id;
   }
   /** O que o clique libera, como o cartão diz: o site, a página aberta, ou o programa (ou pedido) exato. */
   private oQueAprova(chaves: readonly string[]): string {
@@ -286,7 +305,15 @@ export class Conexoes {
    * 1 h (o de antes), 8 h, 72 h — ou "Sempre", no workspace inteiro (regras.ts, até ela desfazer em Conexões › Regras);
    * recusado, o agente termina sem. Nos dois, o trabalho continua.
    */
-  decidirAprovacao(ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject', prazo: PrazoDepoisDeLer = '1h'): { status: string; result: string } {
+  async decidirAprovacao(ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject', prazo: PrazoDepoisDeLer = '1h'): Promise<{ status: string; result: string }> {
+    // o turno de quem pediu ainda espera no portão de aprovação do motor (rc.27): a decisão volta à ferramenta, no mesmo turno
+    const vivo = this.d.nativa?.aoVivo(ws, proposalId) ?? false;
+    const r = this.decidirAprovacaoAgora(ws, userId, proposalId, decisao, prazo, vivo);
+    if (vivo && !(await this.d.nativa!.responder(ws, proposalId, decisao === 'apply').catch(() => false))) r.continuar();
+    return { status: r.status, result: r.result };
+  }
+
+  private decidirAprovacaoAgora(ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject', prazo: PrazoDepoisDeLer, segurar: boolean): { status: string; result: string; continuar: () => void } {
     const p = this.db.get<{ payload: string; status: string; conversation_id: string | null; run_id: string | null }>('SELECT payload, status, conversation_id, run_id FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', proposalId, ws, KIND_DEPOIS_DE_LER);
     if (!p) throw notFound('pedido de aprovação');
     if (p.status !== 'proposed') throw new HttpError(409, 'decided', 'este pedido já foi decidido');
@@ -311,7 +338,7 @@ export class Conexoes {
     const paraAgente = ok
       ? `A pessoa aprovou ${oQue} ${vale}: a ferramenta '${x.ferramenta}' já funciona, para ${x.grupo === 'programas' ? 'qualquer programa' : 'qualquer site'}. Continue ${trabalho} de onde parou.`
       : `A pessoa recusou ${oQue} ${onde}. Não use a ferramenta '${x.ferramenta}' nem outro caminho para isso; termine ${trabalho} sem ela e diga o que ficou de fora.`;
-    try {
+    const continuar = () => { try {
       if (run?.task_id) {
         this.d.devolverAoCard?.({ workspaceId: ws, taskId: run.task_id, userId, resumo: ok ? `Você aprovou: ${oQue} ${prazo === 'sempre' ? 'sempre, em todas as conversas e cards' : `neste card ${quanto}`}` : `Você recusou: ${oQue} neste card`, texto: paraAgente });
       } else if (run?.conversation_id) {
@@ -321,8 +348,9 @@ export class Conexoes {
       }
     } catch (e) {
       if (p.conversation_id) this.nota(ws, p.conversation_id, `Sistema — você ${ok ? 'aprovou' : 'recusou'}, mas o agente não pôde continuar agora (${clip(e instanceof Error ? e.message : String(e), 160)}). Para seguir, escreva aqui.`);
-    }
-    return { status: ok ? 'applied' : 'rejected', result };
+    } };
+    if (!segurar) continuar();
+    return { status: ok ? 'applied' : 'rejected', result, continuar };
   }
 
   // ---------------------------------------------------------------------------------------------------- credenciais
@@ -747,12 +775,32 @@ export class Conexoes {
     // o cartão mostra tudo: conta, destino real e motivo antes do texto, e o texto inteiro (proposals.ts)
     recordProposals(this.db, this.d.bus, b.ws, { conversationId: b.run?.conversation_id ?? null, runId: b.run?.id ?? null },
       [{ kind: 'conexao', acaoId: rowId, conexao: integrationDef(b.kind)!.name, conta: this.contaDe(b.ws, b.kind), ...(b.detalhe ? { detalhe: b.detalhe } : {}), resumo: b.acao.resumo(b.mostrar ?? b.args), porque }]);
+    const cartao = this.ultimoCartao(b.ws, b.run?.id ?? null, 'conexao', rowId);
     audit(this.db, this.d.bus, { workspaceId: b.ws, actorType: 'agent', actorId: b.run?.agent_id ?? null, action: 'conexao.confirmacao', targetType: 'integration', targetId: b.kind, evidence: { acao: b.acao.id, risco: b.risco, origem: b.origem, leuDeFora: b.leuDeFora }, result: `espera confirmação: ${porque}` });
     // o que acontece de fato depois do clique (decidirProposta): o card volta a andar, a conversa continua, ou ninguém recebe
     const volta = b.run?.task_id ? 'quando ela decidir, o resultado entra no histórico deste card e o card volta para você continuar'
       : b.run?.conversation_id ? 'quando ela decidir, você recebe o resultado nesta conversa e continua'
       : 'o resultado não volta para você: termine o que puder sem esta ação e diga que ela ficou esperando a pessoa';
-    return { ok: true, status: 'aguardando_confirmacao', texto: `A ação espera o clique da pessoa num cartão com todos os detalhes. Diga isso em uma frase e não repita a ação: ${volta}.` };
+    return { ok: true, status: 'aguardando_confirmacao', texto: `A ação espera o clique da pessoa num cartão com todos os detalhes. Diga isso em uma frase e não repita a ação: ${volta}.`,
+      ...(cartao ? { cartao, resumo: clip(`${integrationDef(b.kind)!.name}: ${b.acao.resumo(b.mostrar ?? b.args)}`, 900) } : {}) };
+  }
+
+  /**
+   * O resultado de um cartão de confirmação para a ferramenta que segurou o turno no portão de aprovação do motor (rc.27):
+   * a decisão que vale é a que está aqui (o clique executou o que o cartão mostrou), nunca o que o modelo disser.
+   */
+  resultadoDoCartao(run: RunLike, cartao: string): RespostaAcao {
+    const p = this.db.get<{ payload: string; status: string; result: string | null; run_id: string | null }>("SELECT payload, status, result, run_id FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", cartao, run.workspace_id);
+    if (!p || p.run_id !== run.id) return { ok: false, status: 'falhou', texto: 'Cartão desconhecido para este trabalho: não sei se a ação foi feita. Diga isso à pessoa.' };
+    const { acaoId } = JSON.parse(p.payload) as { acaoId: string };
+    const row = this.db.get<{ status: string; resultado: string | null; erro: string | null }>('SELECT status, resultado, erro FROM conexao_acoes WHERE id = ? AND workspace_id = ?', acaoId, run.workspace_id);
+    if (!row || row.status === 'pendente') {
+      const volta = run.task_id ? 'quando ela decidir, o resultado entra no histórico deste card e o card volta para você continuar' : 'quando ela decidir, você recebe o resultado nesta conversa e continua';
+      return { ok: true, status: 'aguardando_confirmacao', texto: `A pessoa ainda não decidiu: o cartão continua com ela. Diga isso em uma frase e não repita a ação: ${volta}.` };
+    }
+    if (row.status === 'recusada') return { ok: false, status: 'falhou', texto: 'A pessoa recusou no cartão. Não faça esta ação por outro caminho; siga sem ela e diga o que ficou de fora.' };
+    if (row.status === 'feita') return { ok: true, status: 'feita', texto: `A pessoa confirmou e foi feito. Resultado: ${row.resultado ?? p.result ?? 'feito'}\nNão repita esta ação; siga a partir daí.` };
+    return { ok: false, status: 'falhou', texto: `A pessoa confirmou, mas a ação não deu: ${row.erro ?? p.result ?? 'sem detalhe'}. Conte isso a ela; não tente outro caminho.` };
   }
 
   /**
@@ -821,7 +869,17 @@ export class Conexoes {
    * O clique no cartão de confirmação. `pelaRegra`: a pessoa aprovou uma regra que cobre este cartão (decidirRegra); o que
    * volta a quem pediu vai para `avisos` (uma continuação por conversa ou card, não uma por cartão).
    */
-  async decidirProposta(ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject', o: { pelaRegra?: RegraConexao; avisos?: Aviso[] } = {}): Promise<{ status: string; result: string }> {
+  async decidirProposta(ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject', o: { pelaRegra?: RegraConexao; avisos?: Aviso[]; semNativa?: boolean } = {}): Promise<{ status: string; result: string }> {
+    // o turno de quem pediu ainda espera no portão de aprovação do motor (rc.27): o resultado volta à própria ferramenta no
+    // mesmo turno, sem continuação; se o motor parou de esperar neste instante, a continuação segue como antes
+    if (!o.semNativa && this.d.nativa?.aoVivo(ws, proposalId)) {
+      const avisos: Aviso[] = [];
+      const out = await this.decidirProposta(ws, userId, proposalId, decisao, { ...o, avisos, semNativa: true });
+      if (await this.d.nativa.responder(ws, proposalId, decisao === 'apply').catch(() => false)) return out;
+      if (o.avisos) o.avisos.push(...avisos);
+      else this.entregarAvisos(ws, userId, avisos);
+      return out;
+    }
     const p = this.db.get<{ payload: string; status: string; conversation_id: string | null; run_id: string | null }>("SELECT payload, status, conversation_id, run_id FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", proposalId, ws);
     if (!p) throw notFound('proposta');
     if (p.status !== 'proposed') throw new HttpError(409, 'decided', 'esta proposta já foi decidida');
@@ -997,6 +1055,18 @@ export class Conexoes {
             'Não repita o que já saiu. Continue o pedido de onde parou: as próximas ações desse tipo vão direto, sem cartão, e ao contar à pessoa diga que foram liberadas pela regra dela.'].join('\n') });
       } catch (e) {
         this.nota(ws, conversationId, `Sistema — a regra foi aplicada e o que esperava saiu, mas o agente não pôde continuar agora (${clip(e instanceof Error ? e.message : String(e), 160)}). Para seguir, escreva aqui.`);
+      }
+    }
+  }
+
+  /** O que voltaria a quem pediu, entregue agora (o motor parou de esperar o cartão): ao card ou à conversa. */
+  private entregarAvisos(ws: string, userId: string, avisos: Aviso[]): void {
+    for (const a of avisos) {
+      try {
+        if (a.taskId) this.d.devolverAoCard?.({ workspaceId: ws, taskId: a.taskId, userId, texto: a.card, resumo: a.historico });
+        else if (a.conversa && a.agentId && a.conversationId) this.d.continuar?.({ workspaceId: ws, agentId: a.agentId, conversationId: a.conversationId, userId, chave: a.chave, texto: a.conversa });
+      } catch (e) {
+        if (a.conversationId) this.nota(ws, a.conversationId, `Sistema — a decisão valeu, mas o agente não pôde continuar agora (${clip(e instanceof Error ? e.message : String(e), 160)}). Para seguir, escreva aqui.`);
       }
     }
   }

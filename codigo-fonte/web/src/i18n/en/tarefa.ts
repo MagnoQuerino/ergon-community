@@ -271,6 +271,8 @@ const tarefa: Traducao<typeof pt> = {
   'revisao.approved': 'delivery looks reasonable',
   'revisao.limit': 'round limit reached: some points remain',
   'revisao.stopped': 'stopped',
+  'cartoesAgente.titulo': "The agent needs you",
+  'continuo.titulo': "Ongoing work",
 };
 
 export default tarefa;

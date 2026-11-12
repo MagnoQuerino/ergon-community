@@ -62,8 +62,10 @@ export function AgentProfile({ agent, compact }: { agent: ProfileFields; compact
 }
 
 /** Seletor de modelo: "padrão da conta" + modelos das contas conectadas, com faixa e preço publicado. */
-export function ModelSelect({ catalog, value, provider, onChange, allowDefault = true, id }: {
+export function ModelSelect({ catalog, value, provider, onChange, allowDefault = true, id, defaultLabel }: {
   catalog: ModelCatalog | null; value: string | null; provider: string | null; allowDefault?: boolean; id?: string;
+  /** o texto da opção "sem escolha" (nos modelos por tarefa: "Usar o principal"); sem ele, "Padrão da conta" */
+  defaultLabel?: string;
   onChange: (model: string | null, provider: string | null) => void;
 }) {
   const t = useT();
@@ -75,7 +77,7 @@ export function ModelSelect({ catalog, value, provider, onChange, allowDefault =
     m.tier === 'grátis' ? t('equipe.faixa.gratis') : m.input !== null ? t('equipe.modelo.preco', { entrada: dinheiro(m.input), saida: m.output !== null ? dinheiro(m.output) : '?' }) : '';
   return (
     <select id={id} value={key} onChange={(e) => { const v = e.target.value; if (!v) onChange(null, null); else { const [p, ...rest] = v.split('::'); onChange(rest.join('::'), p); } }}>
-      {allowDefault && <option value="">{catalog?.default.model ? t('equipe.modelo.padraoDaContaCom', { modelo: catalog.default.label }) : t('equipe.modelo.padraoDaContaOpcao')}</option>}
+      {allowDefault && <option value="">{defaultLabel ?? (catalog?.default.model ? t('equipe.modelo.padraoDaContaCom', { modelo: catalog.default.label }) : t('equipe.modelo.padraoDaContaOpcao'))}</option>}
       {catalog?.providers.map((p) => (
         <optgroup key={p.id} label={p.billing === 'subscription' ? t('equipe.modelo.assinatura', { nome: p.name }) : p.name}>
           {p.models.map((m) => (

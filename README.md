@@ -12,13 +12,16 @@ e entregam.
 - **Peça como pediria a uma pessoa:** "responde o João no Teams", "organiza minha semana", "revisa esse contrato".
 - **Veja o trabalho acontecendo** na cidade e no quadro de tarefas, com cada card mostrando quem está com ele e o que falta.
 - **Decida de relance:** quando a equipe precisa de você, o card diz exatamente o que você está aprovando, com um botão.
+- **Uma equipe que aprende com você:** cada agente tem memória própria, lembra o seu jeito de trabalhar e chama
+  ajudantes para dividir os trabalhos grandes.
 - **Seus dados ficam com você:** tudo roda na sua máquina, cifrado com a sua senha. Sem conta no projeto, sem
   servidor nosso no meio. A IA usa a conta de IA que **você** conectar.
 
 > 🇬🇧 **In English:** Ergon is a team of AI agents that works on your own computer: twelve historical characters,
-> led by Aristotle, who plan, split and deliver your tasks while you watch them in a pixel-art city. The whole app is
-> available in **English** (Settings › My account), the launcher speaks English (`ergon install`, `ergon update`,
-> `ergon help`), and your data stays encrypted on your machine. Download links are right below.
+> led by Aristotle, who plan, split and deliver your tasks while you watch them in a pixel-art city. Each agent has its
+> own memory, calls helpers for big jobs and asks before anything sensitive. The whole app is available in **English**
+> (Settings › My account), the launcher speaks English (`ergon install`, `ergon update`, `ergon help`), and your
+> data stays encrypted on your machine. Download links are right below.
 
 ---
 
@@ -68,12 +71,27 @@ Peça na conversa ou crie cards. A coordenação dá um nome claro a cada pedido
 - **Nada é dado como feito sem prova:** a tarefa só é concluída com evidência do que foi feito.
 - **Pequenos tropeços a equipe resolve sozinha:** confere e tenta de novo, sem repetir o que já saiu.
 - **Para você, só o que só você pode decidir.**
+- **Os agentes perguntam de volta** num cartão, com opções, e a sua resposta volta para o mesmo trabalho. Mande um recado
+  a um trabalho em andamento e o agente segue com ele, sem recomeçar; ou pause a equipe inteira com um botão.
+
+### 🧠 Uma equipe que lembra, pesquisa e se multiplica
+- **Memória de cada agente:** ele lembra o que você ensinou e o seu jeito, só naquele workspace. Nada entra na memória
+  sem a sua aprovação.
+- **Ajudantes para o trabalho grande:** o agente divide o trabalho em partes e chama até 10 ajudantes ao mesmo tempo.
+- **Tudo ligado de cara:** pesquisa na web, navegador automático, ver vídeos, ler arquivos, responder em áudio e
+  competências prontas (Word, Excel, PDF, PowerPoint, atas). Quer economizar? Você reduz em Configurações.
+- **Plano B para a IA:** se o modelo principal falhar ou a conta chegar ao limite, um modelo reserva de outra conta
+  sua assume, e você vê quanto resta da sua cota no Consumo. Para uma resposta importante, a **Revisão em conselho**
+  põe vários modelos para revisar.
 
 ### ✅ Aprovar de relance
 Quando algo precisa de você, o card diz exatamente o que está em jogo: *"Aprovar o envio de 2 e-mails para Fulano e
-Cicrano sobre o orçamento"*, com o botão **Aprovar** ali do lado. Quer mais autonomia? Diga ao Aristóteles *"podem
-mandar sem me pedir"* e escolha por quanto tempo: só neste pedido, 24 horas ou sempre. Todas as regras ficam num lugar
-só, com **Desfazer**.
+Cicrano sobre o orçamento"*, com o botão **Aprovar** ali do lado. Comandos de risco também pedem a sua aprovação, e o
+agente continua na hora em que você responde. Quer mais autonomia? Diga ao Aristóteles *"podem mandar sem me pedir"* e
+escolha por quanto tempo: só neste pedido, 24 horas ou sempre. Todas as regras ficam num lugar só, com **Desfazer**.
+
+Precisa de uma chave ou da senha de administrador? O agente pede num **cartão protegido**: o valor vai direto para o
+cofre e nunca aparece na conversa.
 
 ### 🔌 Conexões que os agentes usam de verdade
 - **Microsoft 365 e Google:** e-mail, agenda, arquivos, Teams e tarefas ([Microsoft](docs/MICROSOFT.md),
@@ -81,17 +99,22 @@ só, com **Desfazer**.
 - **Gestão de tarefas, ligada nos dois sentidos:** Trello, Jira, Asana, monday.com, ClickUp, Notion, Pipefy, Todoist,
   Linear e outros. Marcou como feito aqui, fica feito lá.
 - **Conversa:** Slack, Discord, Telegram e WhatsApp experimental ([riscos](docs/WHATSAPP.md)).
+- **Fale com a equipe pelo Telegram e pelo Discord,** por um bot seu: respostas, aprovações com botões e avisos do que
+  precisa de você chegam por lá.
+- **Dezenas de apps prontos** (Notion, Linear, Stripe, Figma…), só para consulta até você liberar a escrita em cada um.
 - **CRM, atendimento e financeiro:** o financeiro cadastra clientes e cria cobranças, **nunca paga nem transfere**, e
   qualquer conexão fica em **Só leitura** com um clique.
 - **Confirmação por padrão:** o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo"
   em Conexões.
 
 ### 🔁 Rotinas
-Briefing do dia, guardião de prazos, radar de compromissos, revisão de contratos, conferência financeira e outras. O
-que foi lido e conferido fica sempre à vista ([docs/ROTINAS.md](docs/ROTINAS.md)).
+Briefing do dia, guardião de prazos, radar de compromissos, revisão de contratos, conferência financeira e outras. Elas
+rodam no relógio da própria equipe, recuperam o horário perdido com o Ergon fechado, e o que foi lido e conferido fica
+sempre à vista ([docs/ROTINAS.md](docs/ROTINAS.md)).
 
 ### 🎓 Treinar
-Ensine uma competência a um agente com texto, documentos e links. Você revisa e aprova antes de ela entrar em uso.
+Ensine uma competência a um agente com texto, documentos e links. Você revisa e aprova antes de ela entrar em uso, e o
+que você ensinou fica com aquele agente, sem nunca ser arquivado sozinho.
 
 ### 🏛️ Uma cidade que mostra o trabalho
 Cada card em andamento aparece na cidade, junto de quem está trabalhando nele. Quem treina vai ao Ginásio, e a

@@ -155,7 +155,7 @@ export function requestsContext(db: Db, workspaceId: string, max = 8): string {
   const rows = db.all<{ id: string; number: number; title: string; purpose: string | null; completed: number; work_state: string | null; agent: string | null; asked: string | null; cartao: number }>(
     `SELECT t.id, t.number, t.title, t.purpose, t.completed, t.work_state, a.name AS agent, ca.name AS asked,
             (EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente')
-              OR EXISTS (SELECT 1 FROM agent_proposals ap JOIN runs ar ON ar.id = ap.run_id WHERE ar.task_id = t.id AND ap.kind = 'depois_de_ler' AND ap.status = 'proposed')) AS cartao
+              OR EXISTS (SELECT 1 FROM agent_proposals ap JOIN runs ar ON ar.id = ap.run_id WHERE ar.task_id = t.id AND ap.kind IN ('depois_de_ler', 'aprovacao') AND ap.status = 'proposed')) AS cartao
        FROM tasks t LEFT JOIN agents a ON a.id = t.agent_id LEFT JOIN conversations c ON c.id = t.conversation_id LEFT JOIN agents ca ON ca.id = c.agent_id
       WHERE t.workspace_id = ? AND t.conversation_id IS NOT NULL AND t.archived = 0 AND (t.completed = 0 OR t.updated_at > ?)
       ORDER BY t.completed, t.updated_at DESC LIMIT ?`, workspaceId, since, max);

@@ -6,10 +6,13 @@
  */
 import type { Config } from '../config.ts';
 import { HttpError } from '../lib/util.ts';
-import { TOOLS, platformToolsets, setPlatformToolsets, toolStatus, type ToolDef } from './characters.ts';
-import type { ByokCatalog, ByokCustomInput, HermesClient, HermesControlClient, LoginPoll, LoginStart, ModelOptions, SkillInfo } from './hermes.ts';
+import { BENEFICIOS_DA_PLATAFORMA, TOOLS, platformToolsets, setPlatformToolsets, toolStatus, type ToolDef } from './characters.ts';
+import { PERFIL_RE, type AuxModels, type ByokCatalog, type ByokCustomInput, type HermesClient, type HermesControlClient, type LoginPoll, type LoginStart, type ModelOptions, type SkillInfo } from './hermes.ts';
+import { tx } from '../lib/textos.ts';
 import type { Db } from '../db/db.ts';
 import { sincronizarCompactacao, sincronizarPassos } from './custo.ts';
+import { sincronizarAjustes, sincronizarPausa } from './ajustes-motor.ts';
+import type { AjustesMotor, CotaConta } from './hermes.ts';
 
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 export interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
@@ -72,6 +75,63 @@ export interface AiStatus {
   byokCustom: ByokCatalog['custom'];
 }
 
+/** A chave da linha dos ajudantes temporários em "Modelos por tarefa" (no motor, delegation.provider/model). */
+export const TAREFA_AJUDANTES = 'delegation';
+/** As tarefas de apoio que o botão da economia preenche: resumir a conversa, dar nome à conversa e ver imagens. */
+export const TAREFAS_ECONOMIA = ['compression', 'title_generation', 'vision'] as const;
+
+/** A conta de onde sai o custo de um modelo. */
+export interface ContaDoCusto { id: string; name: string; billing: Billing }
+export interface ModeloEscolhido { provider: string; model: string; label: string; tier: ModelEntry['tier']; input: number | null; output: number | null }
+export interface TaskModelRow {
+  /** a chave da tarefa no motor (vision, compression… e as que os plugins registrarem); 'delegation' = os ajudantes */
+  task: string;
+  kind: 'apoio' | 'ajudantes';
+  /** a escolha gravada; os dois nulos = usa o principal (nos ajudantes: o modelo do agente que pediu a ajuda) */
+  provider: string | null; model: string | null;
+  /** o modelo que roda de fato nessa tarefa (o escolhido, ou o principal) e a conta de onde sai o custo dele */
+  runs: { provider: string | null; model: string | null; label: string; account: ContaDoCusto | null };
+  /** tarefa registrada por um complemento: o nome e a explicação que ele declarou */
+  declared?: { label: string; hint: string; by: string; follows: string | null };
+}
+export interface TaskModels {
+  /** false = a equipe de IA desta instalação ainda não tem os modelos por tarefa (chega ao atualizar) */
+  supported: boolean;
+  main: { provider: string | null; model: string | null; label: string; account: ContaDoCusto | null };
+  tasks: TaskModelRow[];
+}
+export interface TaskModelChange { task: string; provider: string | null; model: string | null }
+export interface EconomySuggestion {
+  /** o modelo econômico escolhido para as tarefas de texto (null = nada a sugerir; ver `reason`) */
+  model: (ModeloEscolhido & { account: ContaDoCusto }) | null;
+  /** o que muda se aplicar, tarefa por tarefa: de qual modelo e conta para qual */
+  changes: Array<{ task: string; from: TaskModelRow['runs']; to: ModeloEscolhido & { account: ContaDoCusto } }>;
+  /** tarefas que ficam como estão: 'same' = já usa esse modelo; 'vision' = não se sabe de um modelo econômico que veja imagens */
+  kept: Array<{ task: string; reason: 'same' | 'vision' }>;
+  /** sem sugestão: 'unsupported' (a equipe de IA ainda não tem o recurso), 'none' (nenhum modelo econômico nas contas),
+   *  'main' (o modelo principal já é tão barato quanto o mais econômico) */
+  reason: 'unsupported' | 'none' | 'main' | null;
+}
+
+/**
+ * O primeiro modelo de uma lista pela ordem das faixas de preço (a mesma régua do "modelo para começar"): dentro da
+ * faixa, o de menor preço publicado de entrada (empate: o de menor saída). `null` na ordem = sem preço publicado.
+ */
+export function porFaixa<T extends { tier: ModelEntry['tier']; input: number | null; output: number | null }>(models: T[], ordem: Array<ModelEntry['tier']>, maisBarato = false): T | null {
+  for (const faixa of ordem) {
+    const dela = models.filter((m) => m.tier === faixa);
+    if (!dela.length) continue;
+    if (!maisBarato) return dela[0];
+    return [...dela].sort((a, b) => (a.input ?? 0) - (b.input ?? 0) || (a.output ?? 0) - (b.output ?? 0))[0];
+  }
+  return null;
+}
+/** Para começar (o modelo principal): intermediário > econômico > grátis > sem preço; no plano gratuito, só grátis. */
+export const ORDEM_PARA_COMECAR: Array<ModelEntry['tier']> = ['intermediário', 'econômico', 'grátis', null];
+/** Para as tarefas de apoio (economia): econômico > grátis > intermediário; nunca o de ponta nem o sem preço publicado. */
+export const ORDEM_ECONOMIA: Array<ModelEntry['tier']> = ['econômico', 'grátis', 'intermediário'];
+const SO_GRATIS: Array<ModelEntry['tier']> = ['grátis'];
+
 export class AiService {
   private readonly cfg: Config;
   private readonly hermes: HermesClient | null;
@@ -108,26 +168,37 @@ export class AiService {
    * Configurações › Ferramentas). Rede de segurança para motores que vieram de uma versão sem as Conexões. E o contrário:
    * a pessoa desligou (a escolha só passou a ser gravada na rc.24: as versões de antes não gravavam nada) e o motor voltou
    * com as Conexões ligadas (renovado, ou a migração do cofre pôs o conjunto na lista): a escolha dela vale de novo ao
-   * abrir. Devolve o que mudou ('ligou', 'desligou') ou null.
+   * abrir. Devolve o que mudou ('ligou', 'desligou') ou null. (rc.27: só as Conexões, por ensureBeneficios.)
    */
   async ensureConexoes(desligadoPelaPessoa: boolean): Promise<'ligou' | 'desligou' | null> {
+    const r = await this.ensureBeneficios(new Set(desligadoPelaPessoa ? ['contas'] : []), ['contas']);
+    if (!r) return null;
+    return r.desligou.includes(CONEXOES) ? 'desligou' : r.ligou.includes(CONEXOES) ? 'ligou' : null;
+  }
+
+  /**
+   * Benefícios ligados por padrão (regra do dono, 12/11; ausente = ligado), a generalização das Conexões: ao abrir o motor,
+   * cada conjunto-benefício da plataforma (BENEFICIOS_DA_PLATAFORMA: as Conexões e os que a imagem da rc.27 traz) que o motor
+   * aceita e não está ligado é ligado — a menos que a pessoa o tenha desligado ('ferramentas.<id>' = 'desligado', gravado em
+   * Configurações › Ferramentas). E o contrário: o que a pessoa desligou e o motor trouxe ligado de novo (recriado, migração
+   * do cofre) volta a ficar desligado. Os que executam código nunca entram aqui. Devolve os conjuntos que mudaram, ou null
+   * (sem a ponte de controle).
+   */
+  async ensureBeneficios(desligadosPelaPessoa: ReadonlySet<string>, ids: readonly string[] = BENEFICIOS_DA_PLATAFORMA): Promise<{ ligou: string[]; desligou: string[] } | null> {
     if (!this.control) return null;
     const cur = await this.control.apiToolsets();
-    if (desligadoPelaPessoa) {
-      if (!cur.enabled.includes(CONEXOES)) return null;
-      const enabled = await this.control.setApiToolsets(cur.enabled.filter((t) => t !== CONEXOES));
-      setPlatformToolsets(enabled, this.scope);
-      return enabled.includes(CONEXOES) ? null : 'desligou';
-    }
-    if (!cur.safe.includes(CONEXOES) || cur.enabled.includes(CONEXOES)) return null;
-    const enabled = await this.control.setApiToolsets([...new Set([...cur.enabled, CONEXOES])]);
+    const conjunto = (id: string) => (TOOLS[id]?.safe ? TOOLS[id].toolset : undefined);
+    const tirar = [...desligadosPelaPessoa].map(conjunto).filter((t): t is string => !!t && cur.enabled.includes(t));
+    const por = ids.filter((id) => !desligadosPelaPessoa.has(id)).map(conjunto).filter((t): t is string => !!t && cur.safe.includes(t) && !cur.enabled.includes(t));
+    if (!tirar.length && !por.length) return { ligou: [], desligou: [] };
+    const enabled = await this.control.setApiToolsets([...new Set([...cur.enabled.filter((t) => !tirar.includes(t)), ...por])]);
     setPlatformToolsets(enabled, this.scope);
-    return enabled.includes(CONEXOES) ? 'ligou' : null;
+    return { ligou: por.filter((t) => enabled.includes(t)), desligou: tirar.filter((t) => !enabled.includes(t)) };
   }
 
   /**
    * Passos por pedido: deixa o motor com o que vale para os workspaces dele (a escolha mais recente; sem escolha, o que
-   * ele tem, salvo valor fora do intervalo, que volta a 20). Devolve o valor que o motor ficou, ou null se o motor não tem
+   * ele tem, salvo valor fora do intervalo ou o 20 de antes, que vão a 90). Devolve o valor que o motor ficou, ou null se o motor não tem
    * a ponte dos passos (versão anterior). Erro de rede sobe.
    */
   async sincronizarPassos(db: Db, workspaceIds: string[]): Promise<number | null> {
@@ -139,6 +210,44 @@ export class AiService {
   async sincronizarCompactacao(db: Db, workspaceIds: string[]): Promise<boolean | null> {
     return sincronizarCompactacao(db, this.control, workspaceIds);
   }
+
+  /**
+   * Ajustes da equipe que são configuração do motor (ajustes-motor.ts): modelos reserva, não treinar com os dados, busca
+   * privada, arrumar competências sem uso, e o idioma das mensagens do motor. O motor fica com as escolhas mais recentes
+   * dos workspaces dele. Devolve como ficou, ou null se o motor não tem a ponte dos ajustes. Erro de rede sobe.
+   */
+  async sincronizarAjustes(db: Db, workspaceIds: string[], idioma?: 'pt' | 'en'): Promise<AjustesMotor | null> {
+    // o catálogo de modelos diz quais contas estão conectadas (a reserva automática sai dele); sem ele, a reserva não é mexida
+    const opcoes = await this.modelOptions().catch(() => null);
+    return sincronizarAjustes(db, this.control, workspaceIds, { opcoes, idioma });
+  }
+  /** Pausa da equipe: a parada geral do motor igual à escolha. null = motor sem a ponte da pausa. Erro de rede sobe. */
+  async sincronizarPausa(db: Db, workspaceIds: string[]): Promise<boolean | null> {
+    return sincronizarPausa(db, this.control, workspaceIds);
+  }
+  /** Limites e saldo da conta de IA, lidos do provedor pelo motor (guardados 5 min aqui também). null = motor sem a ponte. */
+  private cotaCache: { at: number; data: CotaConta[] | null } | null = null;
+  async cota(atualizar = false): Promise<CotaConta[] | null> {
+    if (!atualizar && this.cotaCache && Date.now() - this.cotaCache.at < 5 * 60_000) return this.cotaCache.data;
+    if (!this.control?.cota) return null;
+    try {
+      const data = await this.control.cota(atualizar);
+      this.cotaCache = { at: Date.now(), data };
+      return data;
+    } catch { return this.cotaCache?.data ?? null; }
+  }
+  /** as contas conectadas e os modelos de cada uma, para a pessoa montar a lista de modelos reserva */
+  async opcoesDeReserva(): Promise<{ principal: { provider: string | null; model: string | null }; contas: Array<{ id: string; name: string; billing: Billing; models: Array<{ id: string; label: string }> }> }> {
+    const o = await this.modelOptions().catch(() => null);
+    return {
+      principal: { provider: o?.provider ?? null, model: o?.model ?? null },
+      contas: (o?.providers ?? []).filter((x) => x.authenticated && x.models.length).map((x) => ({
+        id: x.slug, name: ACCOUNTS.find((a) => a.id === x.slug)?.name ?? x.name, billing: billingOf(x.slug),
+        models: x.models.slice(0, 400).map((m) => ({ id: m, label: modelLabel(m) })) })),
+    };
+  }
+  /** conta do modelo padrão já lida (sem rede) */
+  cachedDefaultProvider(): string | null { return this.def?.provider ?? null; }
 
   /** Modelo padrão da conta (cache de 60 s; usado também para saber se há custo por uso). */
   async defaultModel(force = false): Promise<{ provider: string | null; model: string | null }> {
@@ -219,6 +328,138 @@ export class AiService {
     return r;
   }
 
+  // ---------------- modelos por tarefa (tarefas de apoio do motor e ajudantes temporários) ----------------
+  /** Chamada ao motor com o erro dele virando mensagem para a pessoa (e não "erro interno"). */
+  private async noMotor<T>(f: () => Promise<T>): Promise<T> {
+    try { return await f(); } catch (e) {
+      if (e instanceof HttpError) throw e;
+      const st = (e as { status?: number }).status;
+      if (st && st >= 400 && st < 500 && st !== 404) throw new HttpError(400, 'task_model', (e as Error).message);
+      throw new HttpError(503, 'ai_unavailable', tx('erro.modeloTarefaNaoGravado'));
+    }
+  }
+  private perfil(perfil: string | null | undefined): string | null {
+    if (!perfil) return null;
+    if (!PERFIL_RE.test(perfil)) throw new HttpError(400, 'profile', 'perfil inválido');
+    return perfil;
+  }
+  private conta(cat: ModelCatalog | null, provider: string | null): ContaDoCusto | null {
+    if (!provider) return null;
+    const p = cat?.providers.find((x) => x.id === provider);
+    return { id: provider, name: p?.name ?? ACCOUNTS.find((a) => a.id === provider)?.name ?? provider, billing: p?.billing ?? billingOf(provider) };
+  }
+
+  /**
+   * Modelos por tarefa: TODAS as tarefas de apoio que o motor devolver (as dele e as que os complementos registrarem),
+   * cada uma com o modelo escolhido (ou "usa o principal") e a conta de onde sai o custo, mais a linha dos ajudantes
+   * temporários. `perfil`: o perfil do agente no motor; sem ele, vale o do motor (hoje, um por pessoa).
+   */
+  async taskModels(perfil?: string | null): Promise<TaskModels> {
+    const pf = this.perfil(perfil);
+    const c = this.control;
+    const cat = await this.catalog().catch(() => null);
+    const semRecurso = async (): Promise<TaskModels> => {
+      const d = await this.defaultModel();
+      return { supported: false, main: { ...d, label: modelLabel(d.model), account: this.conta(cat, d.provider) }, tasks: [] };
+    };
+    if (!c?.auxModels) return semRecurso();
+    const aux: AuxModels | null = await this.noMotor(() => c.auxModels!(pf));
+    if (!aux) return semRecurso();
+    const main = { ...aux.main, label: modelLabel(aux.main.model), account: this.conta(cat, aux.main.provider) };
+    const roda = (provider: string | null, model: string | null): TaskModelRow['runs'] =>
+      (provider && model ? { provider, model, label: modelLabel(model), account: this.conta(cat, provider) } : { provider: main.provider, model: main.model, label: main.label, account: main.account });
+    const tasks: TaskModelRow[] = aux.tasks.filter((t) => t.task !== TAREFA_AJUDANTES).map((t) => ({
+      task: t.task, kind: 'apoio' as const, provider: t.provider, model: t.model,
+      // tarefa de complemento que segue outra e não tem modelo próprio: roda onde a outra roda
+      runs: t.provider ? roda(t.provider, t.model) : roda(t.effective?.provider ?? null, t.effective?.model ?? null),
+      ...(t.label || t.plugin ? { declared: { label: t.label ?? t.task, hint: t.hint ?? '', by: t.plugin ?? '', follows: t.inheritFrom ?? null } } : {}),
+    }));
+    const del = c.delegacao ? await c.delegacao(pf).catch(() => null) : null;
+    if (del) tasks.push({ task: TAREFA_AJUDANTES, kind: 'ajudantes', provider: del.provider, model: del.model, runs: roda(del.provider, del.model) });
+    return { supported: true, main, tasks };
+  }
+
+  /**
+   * Grava o modelo de uma ou mais tarefas (provider e model nulos = voltar a usar o principal). Para na primeira que
+   * pedir confirmação de custo (modelo caro) e devolve a pergunta; as anteriores já ficaram gravadas (`applied`).
+   */
+  async setTaskModels(changes: TaskModelChange[], confirm: boolean, perfil?: string | null): Promise<{ ok: boolean; confirmMessage: string | null; applied: string[] }> {
+    const pf = this.perfil(perfil);
+    const c = this.need();
+    for (const ch of changes) {
+      if (!ch.provider !== !ch.model) throw new HttpError(400, 'model', 'escolha a conta e o modelo, ou nenhum dos dois');
+      if (ch.provider && ch.model) await this.assertModel(ch.provider, ch.model);
+    }
+    // a leitura diz se este motor tem o recurso: o de antes aceitaria a gravação como se fosse o modelo principal
+    const aux = c.auxModels && c.setAuxModel ? await this.noMotor(() => c.auxModels!(pf)) : null;
+    if (!aux) throw new HttpError(409, 'task_models_unsupported', tx('erro.modelosTarefaNaoChegou'));
+    const conhecidas = new Set(aux.tasks.map((t) => t.task));
+    for (const ch of changes) {
+      if (ch.task !== TAREFA_AJUDANTES && !conhecidas.has(ch.task)) throw new HttpError(400, 'task', tx('erro.tarefaDeApoioDesconhecida'));
+    }
+    const applied: string[] = [];
+    for (const ch of changes) {
+      if (ch.task === TAREFA_AJUDANTES) {
+        const ok = c.setDelegacao ? await this.noMotor(() => c.setDelegacao!(ch.provider, ch.model, pf)) : null;
+        if (!ok) throw new HttpError(409, 'task_models_unsupported', tx('erro.modelosTarefaNaoChegou'));
+      } else {
+        const r = await this.noMotor(() => c.setAuxModel!(ch.task, ch.provider, ch.model, confirm, pf));
+        if (!r.ok) {
+          if (r.confirmMessage) return { ok: false, confirmMessage: r.confirmMessage, applied };
+          throw new HttpError(503, 'ai_unavailable', tx('erro.modeloTarefaNaoGravado'));
+        }
+      }
+      applied.push(ch.task);
+    }
+    return { ok: true, confirmMessage: null, applied };
+  }
+
+  /**
+   * Sugestão de economia: resumir a conversa, dar nome à conversa e ver imagens com o modelo mais barato das contas
+   * conectadas (econômico > grátis > intermediário; conta no plano gratuito, só grátis; nunca o de ponta). Ver imagens
+   * só recebe um modelo que o motor sabe que enxerga imagens. Só diz o que mudaria: quem aplica é a pessoa.
+   */
+  async economySuggestion(perfil?: string | null): Promise<EconomySuggestion> {
+    const tm = await this.taskModels(perfil);
+    if (!tm.supported) return { model: null, changes: [], kept: [], reason: 'unsupported' };
+    const cat = await this.catalog();
+    const contas = await this.need().accounts().catch(() => []);
+    const gratuita = (id: string) => contas.find((a) => a.id === id)?.freeTier === true;
+    // os candidatos de cada conta (pela régua dela) e, entre as contas, o mais barato; empate: a conta do principal
+    const todos = cat.providers.flatMap((p) => p.models
+      .filter((m) => (gratuita(p.id) ? SO_GRATIS : ORDEM_ECONOMIA).includes(m.tier))
+      .map((m) => ({ provider: p.id, model: m.id, label: m.label, tier: m.tier, input: m.input, output: m.output, account: { id: p.id, name: p.name, billing: p.billing } })));
+    const ordenar = (faixa: ModelEntry['tier']) => todos.filter((m) => m.tier === faixa)
+      .sort((a, b) => (a.input ?? 0) - (b.input ?? 0) || (a.output ?? 0) - (b.output ?? 0) || Number(b.provider === tm.main.provider) - Number(a.provider === tm.main.provider));
+    const fila = ORDEM_ECONOMIA.flatMap(ordenar);
+    const escolhido = fila[0] ?? null;
+    if (!escolhido) return { model: null, changes: [], kept: [], reason: 'none' };
+    // o principal já é tão barato quanto (mesmo modelo, ou preço publicado menor ou igual): nada a ganhar
+    const principal = cat.providers.find((p) => p.id === tm.main.provider)?.models.find((m) => m.id === tm.main.model);
+    const precoDe = (m: { tier: ModelEntry['tier']; input: number | null }) => (m.tier === 'grátis' ? 0 : m.input);
+    const pPrincipal = principal ? precoDe(principal) : null;
+    const pEscolhido = precoDe(escolhido);
+    if ((tm.main.provider === escolhido.provider && tm.main.model === escolhido.model) || (pPrincipal !== null && pEscolhido !== null && pPrincipal <= pEscolhido)) {
+      return { model: null, changes: [], kept: [], reason: 'main' };
+    }
+    // ver imagens: o primeiro da fila que o motor sabe que enxerga imagens
+    let paraImagens: typeof escolhido | null = null;
+    const alvo = tm.tasks.filter((t) => (TAREFAS_ECONOMIA as readonly string[]).includes(t.task));
+    if (alvo.some((t) => t.task === 'vision')) {
+      const cand = fila.slice(0, 20);
+      const ve = this.control?.modelosVisao ? await this.control.modelosVisao(cand.map((m) => ({ provider: m.provider, model: m.model }))).catch(() => null) : null;
+      paraImagens = ve ? cand.find((_, i) => ve[i] === true) ?? null : null;
+    }
+    const changes: EconomySuggestion['changes'] = []; const kept: EconomySuggestion['kept'] = [];
+    for (const t of alvo) {
+      const to = t.task === 'vision' ? paraImagens : escolhido;
+      if (!to) { kept.push({ task: t.task, reason: 'vision' }); continue; }
+      if (t.runs.provider === to.provider && t.runs.model === to.model) { kept.push({ task: t.task, reason: 'same' }); continue; }
+      changes.push({ task: t.task, from: t.runs, to });
+    }
+    return { model: escolhido, changes, kept, reason: null };
+  }
+
   async skills(): Promise<SkillInfo[]> {
     if (this.skillsCache && Date.now() - this.skillsCache.at < 10 * 60_000) return this.skillsCache.data;
     if (!this.control) return [];
@@ -283,8 +524,7 @@ export class AiService {
     const p = (await this.catalog(true)).providers.find((x) => x.id === provider);
     if (!p?.models.length) return null;
     const gratuito = (await this.need().accounts().catch(() => [])).find((a) => a.id === provider)?.freeTier === true;
-    const ordem: Array<ModelEntry['tier']> = gratuito ? ['grátis'] : ['intermediário', 'econômico', 'grátis', null];
-    const m = ordem.map((t) => p.models.find((x) => x.tier === t)).find(Boolean);
+    const m = porFaixa(p.models, gratuito ? SO_GRATIS : ORDEM_PARA_COMECAR);
     if (!m) return null;
     const r = await this.need().setDefaultModel(provider, m.id, false);
     if (!r.ok) return null;

@@ -60,8 +60,15 @@ describe('trava depois de ler conteúdo privado: nomes do Hermes de verdade', ()
   });
 
   test('nenhum nome inventado: cada entrada existe no motor (ou, se prefixo, pega alguma ferramenta dele)', () => {
-    const fantasmas = [...BLOQUEADAS_DEPOIS_DE_LER].filter((d) => (d.endsWith('_') ? ![...TODAS].some((t) => t.startsWith(d)) : !TODAS.has(d)));
+    // mcp__: os nomes dos conectores prontos o motor monta na hora (mcp__<conector>__<ferramenta>, tools/mcp_tool_schema.py)
+    const fantasmas = [...BLOQUEADAS_DEPOIS_DE_LER].filter((d) => d !== 'mcp__' && (d.endsWith('_') ? ![...TODAS].some((t) => t.startsWith(d)) : !TODAS.has(d)));
     assert.deepEqual(fantasmas, [], `nomes que não existem no Hermes ${FIXTURE.hermes}: ${fantasmas.join(', ')}`);
+  });
+
+  test('conectores prontos (rc.27): qualquer ferramenta de conector cai pelo prefixo e conta como conteúdo de fora', () => {
+    assert.ok(negada('mcp__notion__search') && negada('mcp__linear__create_issue'));
+    assert.ok(leEndereco('mcp__context7__get_docs'));
+    assert.ok(negada('video_analyze') && TS.video?.includes('video_analyze'));
   });
 
   test('ler pela web ou pelo navegador marca conteúdo de fora; imagem em data: não', () => {

@@ -298,6 +298,8 @@ describe('executor Hermes (cliente falso que segue o contrato documentado)', () 
     const s = await setupOwner(h);
     const hip = h.db.get<{ id: string }>("SELECT id FROM agents WHERE char_key = 'hipatia'")!.id;
     const dio = h.db.get<{ id: string }>("SELECT id FROM agents WHERE char_key = 'diogenes'")!.id;
+    // as ferramentas vêm todas ligadas (regra do dono); aqui a pessoa tirou do Diógenes as que levam tempo (pesquisa, navegador...)
+    h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(['quadro', 'passos', 'saida', 'visao', 'imagens', 'habilidades', 'leitura', 'voz']), dio);
     const conv = async (agentId: string) => (await req(h, 'POST', '/api/conversations', s, { agentId })).json.id as string;
     const send = async (c: string, key: string) => (await req(h, 'POST', `/api/conversations/${c}/messages`, s, { text: 'Sobre o que é a empresa do site exemplo.com?', clientRequestId: key })).json.runId as string;
     const pesquisa = await send(await conv(hip), 'req-herm-long-1');

@@ -3,6 +3,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { ModelCatalog } from '../lib/types.ts';
 import { ModelSelect } from './AgentProfile.tsx';
+import { ModelosPorTarefa } from './ModelosPorTarefa.tsx';
 import { useT } from '../i18n/index.ts';
 
 /**
@@ -42,6 +43,7 @@ export function ModeloPadrao({ onChanged }: { onChanged?: () => void }) {
       </div>
       {confirm && <div className="confirm">{confirm} <button className="btn btn--sm btn--primary" onClick={() => void salvar(true)}>{t('conexoes.modelo.usarMesmoAssim')}</button><button className="btn btn--sm btn--ghost" onClick={() => setConfirm(null)}>{t('conexoes.acao.cancelar')}</button></div>}
       <p className="hint">{t('conexoes.modelo.preco')}</p>
+      <ModelosPorTarefa />
     </div>
   );
 }

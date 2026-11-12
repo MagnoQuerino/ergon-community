@@ -124,26 +124,46 @@ export function HandoffCard({ p }: { p: Proposal }) {
  */
 export function QuestionCard({ p, onDone }: { p: Proposal; onDone: () => void }) {
   const t = useT();
-  const options = (() => { try { return (JSON.parse(p.payload ?? '{}') as { options?: string[] }).options ?? []; } catch { return []; } })();
+  // pedido: a pergunta veio da ferramenta do agente (a resposta volta no mesmo trabalho); multi: aceita várias opções
+  const d = (() => { try { return JSON.parse(p.payload ?? '{}') as { options?: string[]; pedido?: string; multi?: boolean }; } catch { return {}; } })();
+  const options = d.options ?? [];
   const [other, setOther] = useState('');
   const [showOther, setShowOther] = useState(false);
+  const [marcadas, setMarcadas] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const answer = async (a: string) => {
+  const answer = async (a: string, varias?: string[]) => {
     if (!a.trim()) return;
     setBusy(true); setErr(null);
-    try { await api.post(`/api/proposals/${p.id}/answer`, { answer: a.trim() }); onDone(); } catch (e) { setErr(errMsg(e)); setBusy(false); }
+    try { await api.post(`/api/proposals/${p.id}/answer`, { answer: a.trim(), ...(varias?.length ? { answers: varias } : {}) }); onDone(); } catch (e) { setErr(errMsg(e)); setBusy(false); }
+  };
+  const naoResponder = async () => {
+    setBusy(true); setErr(null);
+    try { await api.post(`/api/proposals/${p.id}`, { decision: 'reject' }); onDone(); } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
   if (p.status !== 'proposed') return (
-    <div className="question-card question-card--done"><span className="question-card__q">{p.summary}</span><span className="badge badge--ok">{p.result}</span></div>
+    <div className="question-card question-card--done"><span className="question-card__q">{p.summary}</span><span className={`badge${p.status === 'applied' ? ' badge--ok' : ''}`}>{p.result?.split('\n').join(', ')}</span></div>
   );
   return (
     <div className="question-card" role="group" aria-label={p.summary}>
       <span className="question-card__q">{p.summary}</span>
-      <div className="question-card__opts">
-        {options.map((o) => <button key={o} className="btn btn--sm" disabled={busy} onClick={() => void answer(o)}>{o}</button>)}
-        {!showOther && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setShowOther(true)}>{t('conversas.pergunta.outra')}</button>}
-      </div>
+      {d.multi ? (
+        <div className="question-card__opts">
+          {options.map((o) => (
+            <label key={o} className="question-card__opt">
+              <input type="checkbox" checked={marcadas.includes(o)} onChange={(e) => setMarcadas((cur) => (e.target.checked ? [...cur, o] : cur.filter((x) => x !== o)))} /> {o}
+            </label>
+          ))}
+          {marcadas.length > 0 && <button className="btn btn--sm btn--primary" aria-busy={busy} onClick={() => void answer(marcadas.join(', '), marcadas)}>{t('conversas.pergunta.responder')}</button>}
+          {!showOther && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setShowOther(true)}>{t('conversas.pergunta.outra')}</button>}
+        </div>
+      ) : (
+        <div className="question-card__opts">
+          {options.map((o, i) => <button key={o} className="btn btn--sm" disabled={busy} onClick={() => void answer(o)}>{o}{d.pedido && i === 0 && options.length > 1 ? <span className="muted small"> · {t('conversas.pergunta.recomendada')}</span> : null}</button>)}
+          {!showOther && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setShowOther(true)}>{t('conversas.pergunta.outra')}</button>}
+        </div>
+      )}
+      {d.pedido && <button type="button" className="linkish small question-card__nao" disabled={busy} onClick={() => void naoResponder()}>{t('conversas.pergunta.naoResponder')}</button>}
       {showOther && (
         <form className="row" onSubmit={(e) => { e.preventDefault(); void answer(other); }}>
           <input value={other} maxLength={300} onChange={(e) => setOther(e.target.value)} placeholder={t('conversas.pergunta.campo')} aria-label={t('conversas.pergunta.outra')} autoFocus />
@@ -152,5 +172,53 @@ export function QuestionCard({ p, onDone }: { p: Proposal; onDone: () => void })
       )}
       {err && <p className="error" role="alert">{err}</p>}
     </div>
+  );
+}
+
+/**
+ * Cartão protegido: o agente pediu uma chave, senha ou token (pedir_chave) ou a senha de administrador (pedir_senha_admin).
+ * O valor vai direto ao cofre da equipe: não aparece na conversa, no histórico nem nos registros, e o agente recebe só o
+ * nome. A senha de administrador vale só para este trabalho, a menos que você marque guardar.
+ */
+// i18n-ok: o resultado que o servidor grava quando a senha fica no cofre (server/src/services/cartoes.ts), não é texto de tela
+const SUDO_GUARDADA = 'guardada para a equipe';
+export function SecretCard({ p, onDone }: { p: Proposal; onDone: () => void }) {
+  const t = useT();
+  const d = (() => { try { return JSON.parse(p.payload ?? '{}') as { tipo?: 'chave' | 'sudo'; nome?: string; motivo?: string; agente?: string }; } catch { return {}; } })();
+  const sudo = d.tipo === 'sudo';
+  const [valor, setValor] = useState('');
+  const [guardar, setGuardar] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (p.status !== 'proposed') return (
+    <div className="perm-card perm-card--done"><Icon name="lock" size={14} /> {sudo ? t('conversas.segredo.feitoSudo') : t('conversas.segredo.feito', { nome: d.nome ?? '' })}{' '}
+      <span className={`badge${p.status === 'applied' ? ' badge--ok' : ''}`}>{p.status !== 'applied' ? t('conversas.segredo.recusado')
+        : sudo ? (p.result === SUDO_GUARDADA ? t('conversas.segredo.guardada') : t('conversas.segredo.soEste')) : t('conversas.segredo.guardadaComo', { nome: d.nome ?? '' })}</span></div>
+  );
+  const recusar = async () => {
+    setBusy(true); setErr(null);
+    try { await api.post(`/api/proposals/${p.id}`, { decision: 'reject' }); onDone(); } catch (e) { setErr(errMsg(e)); setBusy(false); }
+  };
+  return (
+    <form className="perm-card perm-card--segredo" autoComplete="off" onSubmit={async (e) => {
+      e.preventDefault(); if (!valor) return; setErr(null); setBusy(true);
+      try { await api.post(`/api/proposals/${p.id}/segredo`, { valor, ...(sudo ? { guardar } : {}) }); setValor(''); onDone(); }
+      catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
+    }}>
+      <div className="perm-card__head"><Icon name={sudo ? 'shield' : 'key'} size={16} /> <b>{sudo ? t('conversas.segredo.tituloSudo', { nome: d.agente ?? '' }) : t('conversas.segredo.titulo', { nome: d.agente ?? '', chave: d.nome ?? '' })}</b></div>
+      {d.motivo && <p className="perm-card__what">{d.motivo}</p>}
+      <p className="hint small">{sudo ? t('conversas.segredo.comoSudo') : t('conversas.segredo.como', { nome: d.nome ?? '' })}</p>
+      {sudo && <p className="hint warn small">{t('conversas.segredo.riscoSudo')}</p>}
+      <div className="row row--wrap">
+        <input type="password" autoComplete="new-password" spellCheck={false} required value={valor} maxLength={4000} onChange={(e) => setValor(e.target.value)}
+          placeholder={sudo ? t('conversas.segredo.campoSudo') : t('conversas.segredo.campo')} aria-label={sudo ? t('conversas.segredo.campoSudo') : t('conversas.segredo.campo')} />
+        <button className="btn btn--sm btn--primary" aria-busy={busy}>{busy ? t('conversas.segredo.guardando') : t('conversas.segredo.entregar')}</button>
+        <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void recusar()}>{t('conversas.segredo.naoInformar')}</button>
+      </div>
+      {sudo && (
+        <label className="row small"><input type="checkbox" checked={guardar} onChange={(e) => setGuardar(e.target.checked)} /> {t('conversas.segredo.guardarSudo')}</label>
+      )}
+      {err && <p className="error" role="alert">{err}</p>}
+    </form>
   );
 }

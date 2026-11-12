@@ -270,6 +270,8 @@ const tarefa = {
   'revisao.approved': 'entrega razoável',
   'revisao.limit': 'limite de rodadas: ainda há pontos',
   'revisao.stopped': 'interrompida',
+  'cartoesAgente.titulo': "O agente precisa de você",
+  'continuo.titulo': "Trabalho contínuo",
 } as const satisfies Area;
 
 export default tarefa;

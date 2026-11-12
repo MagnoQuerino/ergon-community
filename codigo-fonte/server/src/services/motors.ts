@@ -41,8 +41,9 @@ import type { Vault } from '../security/keys.ts';
 import { VERSION } from '../version.ts';
 import { AiService } from './ai.ts';
 import { audit } from './bus.ts';
-import { setMotorScope, setRenovacaoFalhou } from './characters.ts';
+import { ferramentasDesligadas, setMotorScope, setRenovacaoFalhou } from './characters.ts';
 import { CAPACIDADE_APROVAR_DEPOIS_DE_LER, CAPACIDADE_CONEXOES, HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient, type MotorInfo } from './hermes.ts';
+import { idiomaDoMotor } from './idioma-motor.ts';
 import { isAdmin, type WorkspaceOwners } from './people.ts';
 import { instanceSetting, setInstanceSetting } from './security.ts';
 
@@ -694,23 +695,31 @@ export class Motors {
     const ai = this.forUser(userId).ai;
     void ai.defaultModel().catch(() => null);
     await ai.refreshToolsets();
-    // ausente = ligado: as Conexões ligam sozinhas, a menos que a pessoa as tenha desligado
+    // ausente = ligado (regra do dono, 12/11): as Conexões e as ferramentas da equipe que são benefício ligam sozinhas, a menos
+    // que a pessoa as tenha desligado; o que ela desligou fica desligado também num motor recriado
     try {
-      const mudou = await ai.ensureConexoes(this.conexoesDesligadas(userId));
-      if (mudou === 'ligou') this.auditar(userId, 'ai.tools', 'Conexões ligadas para a equipe (padrão: ligadas, a menos que você desligue)', { add: 'ergon_conexoes' });
-      if (mudou === 'desligou') this.auditar(userId, 'ai.tools', 'Conexões desligadas para a equipe, como você escolheu em Configurações › Ferramentas', { remove: 'ergon_conexoes' });
-      if (mudou) await ai.refreshToolsets();
+      const mudou = await ai.ensureBeneficios(this.ferramentasDesligadas(userId));
+      if (mudou?.ligou.length) this.auditar(userId, 'ai.tools', mudou.ligou.includes('ergon_conexoes') && mudou.ligou.length === 1
+        ? 'Conexões ligadas para a equipe (padrão: ligadas, a menos que você desligue)'
+        : 'ferramentas da equipe ligadas (padrão: ligadas, a menos que você desligue em Configurações › Ferramentas)', { add: mudou.ligou });
+      if (mudou?.desligou.length) this.auditar(userId, 'ai.tools', `${mudou.desligou.length === 1 && mudou.desligou[0] === 'ergon_conexoes' ? 'Conexões desligadas' : 'ferramentas desligadas'} para a equipe, como você escolheu em Configurações › Ferramentas`, { remove: mudou.desligou });
+      if (mudou && (mudou.ligou.length || mudou.desligou.length)) await ai.refreshToolsets();
     } catch { /* fica para a próxima abertura */ }
     // passos por pedido: a escolha da pessoa (Configurações › Ferramentas da equipe) vale também num motor recriado ou que
-    // estava desligado quando ela escolheu; sem escolha, o motor fica com o que tem (20, da migração do cofre), salvo valor
-    // fora de 5 a 60, que volta a 20. Falhou agora (painel interno ainda subindo)? O passo de 60 s do servidor tenta de novo.
+    // estava desligado quando ela escolheu; sem escolha, o motor fica com o que tem, salvo valor fora de 5 a 150 ou o 20 de
+    // antes (que ninguém escolheu), que vão a 90. Falhou agora (painel interno ainda subindo)? O passo de 60 s do servidor tenta de novo.
     try { await ai.sincronizarPassos(this.d.db, this.d.owners.owned(userId)); } catch { /* o passo de 60 s tenta de novo */ }
     // resumir as conversas longas mais cedo: o mesmo caminho (a escolha vale também num motor recriado ou desligado)
     try { await ai.sincronizarCompactacao(this.d.db, this.d.owners.owned(userId)); } catch { /* o passo de 60 s tenta de novo */ }
+    // rc.27: os ajustes da equipe (modelos reserva, não treinar com os dados, busca privada, arrumar competências, idioma) e
+    // a pausa — o mesmo caminho: valem também num motor recriado ou que estava desligado quando a pessoa escolheu
+    try { await ai.sincronizarAjustes(this.d.db, this.d.owners.owned(userId), idiomaDoMotor(this.d.db, userId)); } catch { /* o passo de 60 s tenta de novo */ }
+    try { await ai.sincronizarPausa(this.d.db, this.d.owners.owned(userId)); } catch { /* o passo de 60 s tenta de novo */ }
   }
   /** A pessoa desligou as Conexões da equipe (Configurações › Ferramentas): gravado por workspace dela. */
-  private conexoesDesligadas(userId: string): boolean {
-    return this.d.owners.owned(userId).some((ws) => this.d.db.get<{ value: string }>("SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = 'ferramentas.contas'", ws)?.value === 'desligado');
+  /** As ferramentas da equipe que a pessoa desligou em algum workspace dela ('ferramentas.<id>' = 'desligado'). */
+  private ferramentasDesligadas(userId: string): Set<string> {
+    return ferramentasDesligadas(this.d.db, this.d.owners.owned(userId));
   }
   private async info(userId: string): Promise<MotorInfo | null> {
     const c = this.forUser(userId).control;

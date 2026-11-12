@@ -316,6 +316,19 @@ const conta = {
   // ——— baixar meus dados ———
   'baixar.botao': 'Baixar meus dados',
   'baixar.montando': 'Montando o arquivo…',
+  'chaves.titulo': "Chaves guardadas para a equipe",
+  'chaves.texto': "Chaves, senhas e códigos de acesso que a equipe pediu e você informou num cartão protegido. Aqui aparecem só os nomes: o valor nunca volta à tela. Os agentes usam sem ver o valor.",
+  'chaves.lendo': "Lendo…",
+  'chaves.indisponivel': "A equipe não está ligada agora: as chaves aparecem aqui quando ela voltar.",
+  'chaves.nenhuma': "Nenhuma chave guardada.",
+  'chaves.pedidaPor': "pedida por {nome}",
+  'chaves.apagar': "Apagar",
+  'chaves.apagando': "Apagando…",
+  'chaves.sudo': "Senha de administrador",
+  'chaves.sudoTexto': "guardada para os comandos do Terminal",
+  'chaves.apagarTitulo': "Apagar a chave {nome}?",
+  'chaves.apagarSudoTitulo': "Apagar a senha de administrador?",
+  'chaves.apagarCorpo': "Ela sai do cofre da equipe. Se um agente precisar dela de novo, ele pede num cartão.",
 } as const satisfies Area;
 
 export default conta;

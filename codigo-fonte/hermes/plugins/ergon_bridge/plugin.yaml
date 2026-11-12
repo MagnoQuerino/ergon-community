@@ -1,15 +1,28 @@
 name: ergon_bridge
 # a mesma de PLUGIN_VERSION (__init__.py) e do rótulo ergon.plugin.version (hermes/Dockerfile): um teste confere
-version: "0.4.0"
-description: "Ergon: registra no Ergon cada mensagem admitida de Teams/WhatsApp (post_gateway_admission); barra ferramentas que o agente do Ergon não tem (pre_tool_call); conta ao Ergon o que o Treinar gravou e leu (post_tool_call); mede o tamanho de cada parte de cada chamada ao modelo e o total informado pelo provedor, sem guardar conteúdo (pre_api_request, post_api_request); ferramentas das Conexões, que só repassam ao Ergon; pede a aprovação da pessoa depois de ler as contas quando ela liga essa proteção (pre_tool_call); ponte de controle interna com rotas fechadas (contas, modelo padrão, catálogo, passos por pedido, medição). Sem chamadas de modelo."
+version: "0.6.0"
+description: "Ergon: registra no Ergon cada mensagem admitida de Teams/WhatsApp (post_gateway_admission); entrega ao Ergon cada mensagem do Telegram e do Discord antes de qualquer turno do motor, com o pareamento nativo do gateway para quem ainda não foi ligado, e manda as respostas, os cartões com botões e os avisos pelo adaptador vivo (pre_gateway_dispatch, register_platform_handler); barra ferramentas que o agente do Ergon não tem (pre_tool_call); conta ao Ergon o que o Treinar gravou e leu (post_tool_call); mede o tamanho de cada parte de cada chamada ao modelo e o total informado pelo provedor, sem guardar conteúdo (pre_api_request, post_api_request); ferramentas das Conexões, que só repassam ao Ergon; pede a aprovação da pessoa depois de ler as contas quando ela liga essa proteção (pre_tool_call); equipe nativa: cada agente é um perfil do motor, criado e atualizado pela ponte de controle, com memória longa aprovada pela pessoa, busca só nas próprias conversas e ajudantes temporários que herdam a política de quem chamou (subagent_start, subagent_stop); modelos por tarefa de apoio; ponte de controle interna com rotas fechadas (contas, modelo padrão, catálogo, passos por pedido, medição, perfis, ajustes do motor, limites da conta, pausa, canais, capacidades da equipe, conselho, loja de competências, conectores prontos, voz); com a escolha ligada, pede ao OpenRouter que não use os dados para treino (llm_request); cartões: perguntar de volta, pedido seguro de chave e senha de administrador (o valor vai direto ao cofre do motor, nunca ao modelo), com os ganchos de espera humana; o juiz da meta e o pedido de revisão do Hermes para o Ergon conduzir. Rotinas: cada rotina com horário é um job do agendador do Hermes no perfil do agente (sem chamar modelo: o aviso do horário volta ao Ergon); aprovações nativas: o que pede o sim da pessoa no Ergon segura o turno no portão de aprovação do Hermes até ela decidir no cartão. O plugin não chama modelo, salvo o juiz da meta, a pedido da pessoa."
 author: Ergon (MVP local)
 kind: standalone
 provides_tools:
   - conexoes_listar
   - conexoes_executar
+  - perguntar
+  - pedir_chave
+  - pedir_senha_admin
 provides_hooks:
   - post_gateway_admission
+  - pre_gateway_dispatch
   - pre_tool_call
   - post_tool_call
   - pre_api_request
   - post_api_request
+  - subagent_start
+  - subagent_stop
+  - on_human_input_request
+  - on_human_input_resolved
+  - transform_tool_result
+  - post_llm_call
+# rc.27: "não treinar com os meus dados" em cada chamada pelo OpenRouter (acrescenta provider.data_collection ao pedido)
+provides_middleware:
+  - llm_request

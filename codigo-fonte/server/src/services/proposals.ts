@@ -30,7 +30,14 @@ export type Proposal =
   /** criar ou ajustar uma rotina (pela conversa com a coordenação ou pela recomendação semanal) */
   | RoutineProposal
   /** pergunta com opções que o agente faz na conversa; a resposta volta como mensagem do usuário */
-  | { kind: 'question'; question: string; options: string[] }
+  | { kind: 'question'; question: string; options: string[];
+      /** pergunta feita pela ferramenta do motor (cartoes.ts): o pedido dela, a pergunta dentro dele e se aceita várias opções */
+      pedido?: string; qid?: string; multi?: boolean }
+  /**
+   * chave, senha ou token que o agente pede por uma ferramenta do motor (cartoes.ts): cartão protegido. Aqui só o nome e o
+   * motivo; o VALOR nunca é gravado (vai direto ao cofre do motor)
+   */
+  | { kind: 'segredo'; tipo: 'chave' | 'sudo'; nome: string; motivo: string; agente: string; pedido: string }
   /** personalização completa: qualquer agente (nome, função, setor, instruções, métodos, bio) */
   | { kind: 'edit_agent'; agent: string; changes: { name?: string; role?: string; sector?: string; charter?: string; skills?: string[]; bio?: string } }
   | { kind: 'deactivate_agent'; agent: string; reason: string }
@@ -62,7 +69,12 @@ export type Proposal =
    */
   | PropostaRegra
   /** apagar de vez (arquivos ou a lixeira): só com o seu clique; a equipe nunca apaga sozinha */
-  | { kind: 'purge'; agent: string; artifactIds: string[]; names: string[]; emptyTrash?: boolean };
+  | { kind: 'purge'; agent: string; artifactIds: string[]; names: string[]; emptyTrash?: boolean }
+  /**
+   * aprovação nativa (rc.27, aprovacoes.ts): o motor parou o turno pedindo a sua aprovação para um comando de risco
+   * (approval.request); pedido = o id do pedido no motor
+   */
+  | { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string };
 
 export interface LedgerItem { n: number; data: string; descricao: string; valor: number; documento: string; categoria: string; centro: string; confianca: string }
 
@@ -231,7 +243,7 @@ const findAny = (db: Db, workspaceId: string, name: string, status: 'active' | '
 function describe(db: Db, workspaceId: string, p: Proposal): string {
   // conta, destino e motivo antes do texto: o começo do cartão basta para decidir, e o texto segue inteiro
   if (p.kind === 'conexao') return [`${p.conexao}${p.conta ? ` · pela conta ${p.conta}` : ''}`, p.detalhe, `(Pede confirmação porque ${p.porque}.)`, p.resumo].filter(Boolean).join('\n');
-  if (p.kind === 'depois_de_ler' || p.kind === 'regra') return p.resumo;
+  if (p.kind === 'depois_de_ler' || p.kind === 'regra' || p.kind === 'aprovacao') return p.resumo;
   if (p.kind === 'edit_agent') {
     const c = p.changes; const who = findAgent(db, workspaceId, p.agent)?.name ?? p.agent;
     const parts = [c.name && `nome → ${c.name}`, c.role && `função → ${c.role}`, c.sector && `setor → ${sectorByName(db, workspaceId, c.sector)?.name ?? c.sector}`,
@@ -247,6 +259,7 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   if (p.kind === 'sector_new') return `Criar o setor ${p.name}${p.description ? `: ${p.description}` : ''}`;
   if (p.kind === 'routine' || p.kind === 'routine_edit') return describeRoutineProposal(db, workspaceId, p);
   if (p.kind === 'question') return p.question;
+  if (p.kind === 'segredo') return p.tipo === 'sudo' ? `${p.agente} pede a senha de administrador: ${p.motivo}` : `${p.agente} pede a chave ${p.nome}: ${p.motivo}`;
   if (p.kind === 'batch') {
     const lines = [...p.plans].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)).map((x, i) => `${i + 1}. ${clip(cardTitle({ plan: x.objective, candidates: [x.steps[0]?.task] }).title, 90)} —${x.steps.map((s) => s.agent).join(' → ')}${x.after?.length ? ` (depois do ${x.after.join(', ')})` : ''}`);
     return `Abrir ${p.plans.length} cards, nesta ordem na fila:\n${lines.join('\n')}`;
@@ -308,7 +321,7 @@ export function recordProposals(db: Db, bus: Bus, workspaceId: string, ctx: { co
       db.run(`INSERT INTO agent_proposals (id, workspace_id, conversation_id, run_id, kind, payload, summary, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id('apr'), workspaceId, ctx.conversationId, ctx.runId, p.kind, db.seal(workspaceId, JSON.stringify(p)),
-        db.seal(workspaceId, clip(describe(db, workspaceId, p), p.kind === 'conexao' ? MAX_CONEXAO : ['routine', 'routine_edit', 'edit_agent', 'batch', 'purge', 'depois_de_ler', 'regra'].includes(p.kind) ? 6000 : 300)),
+        db.seal(workspaceId, clip(describe(db, workspaceId, p), p.kind === 'conexao' ? MAX_CONEXAO : ['routine', 'routine_edit', 'edit_agent', 'batch', 'purge', 'depois_de_ler', 'regra', 'aprovacao'].includes(p.kind) || (p.kind === 'question' && p.pedido) ? 6000 : 300)),
         // o aviso de pedido passado à coordenação não espera decisão (a senha é pedida lá)
         p.kind === 'handoff' ? 'applied' : 'proposed', now());
     }
@@ -341,7 +354,7 @@ export function reconsiderProposal(db: Db, bus: Bus, workspaceId: string, userId
 const WAITING_STATES = ['aguardando_info', 'aguardando_aprovacao', 'revisao'];
 /** card que espera o clique numa ação de conta já aparece pelo cartão dela (com #N e quem pediu): não conta duas vezes */
 const SEM_CONEXAO_PENDENTE = "NOT EXISTS (SELECT 1 FROM conexao_acoes x WHERE x.task_id = t.id AND x.status = 'pendente')"
-  + " AND NOT EXISTS (SELECT 1 FROM agent_proposals ap JOIN runs ar ON ar.id = ap.run_id WHERE ar.task_id = t.id AND ap.kind = 'depois_de_ler' AND ap.status = 'proposed')";
+  + " AND NOT EXISTS (SELECT 1 FROM agent_proposals ap JOIN runs ar ON ar.id = ap.run_id WHERE ar.task_id = t.id AND ap.kind IN ('depois_de_ler', 'aprovacao') AND ap.status = 'proposed')";
 /**
  * o que não foi feito (falha) nunca aparece aqui com Aprovar: falha se resolve no card ("Tentar de novo" ou cancelar),
  * e "aprovar" o que não aconteceu seria concluir sem evidência (results.ts recusa). O que você recusou no cartão
@@ -358,13 +371,16 @@ const SEM_FALHA = "COALESCE((SELECT y.state FROM task_results y WHERE y.task_id 
 export function pendingDecisions(db: Db, workspaceId: string) {
   // ação numa conta pedida num card da equipe: o card (#N, com link) e quem pediu vêm da execução
   const proposals = db.all<{ id: string; kind: string; summary: string; payload: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id: string | null; task_number: number | null }>(
-    `SELECT p.id, p.kind, p.summary, CASE WHEN p.kind = 'regra' THEN p.payload END AS payload, p.created_at, p.conversation_id, c.agent_id, COALESCE(a.name, ra.name) AS agent_name, c.purpose, t.id AS task_id, t.number AS task_number
+    `SELECT p.id, p.kind, p.summary, CASE WHEN p.kind IN ('regra', 'segredo') OR (p.kind = 'question' AND p.conversation_id IS NULL) THEN p.payload END AS payload, p.created_at, p.conversation_id, c.agent_id, COALESCE(a.name, ra.name) AS agent_name, c.purpose, t.id AS task_id, t.number AS task_number
        FROM agent_proposals p LEFT JOIN conversations c ON c.id = p.conversation_id LEFT JOIN agents a ON a.id = c.agent_id
-       LEFT JOIN runs r ON r.id = p.run_id AND p.kind IN ('conexao', 'depois_de_ler') LEFT JOIN agents ra ON ra.id = r.agent_id LEFT JOIN tasks t ON t.id = r.task_id
+       LEFT JOIN runs r ON r.id = p.run_id AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao', 'segredo', 'question') LEFT JOIN agents ra ON ra.id = r.agent_id LEFT JOIN tasks t ON t.id = r.task_id
       WHERE p.workspace_id = ? AND p.status = 'proposed' AND p.kind <> 'info_request' ORDER BY p.created_at DESC LIMIT 50`, workspaceId);
   const waiting = db.all<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>(
     `SELECT r.id, r.conversation_id, r.agent_id, a.name AS agent_name, r.created_at FROM runs r JOIN agents a ON a.id = r.agent_id
-      WHERE r.workspace_id = ? AND r.status = 'waiting_user' ORDER BY r.created_at`, workspaceId);
+      WHERE r.workspace_id = ? AND r.status = 'waiting_user'
+        -- parada no portão de aprovação do motor com o cartão já aqui (aprovações nativas): o cartão basta, sem item repetido
+        AND NOT EXISTS (SELECT 1 FROM agent_proposals ap WHERE ap.run_id = r.id AND ap.status = 'proposed' AND ap.kind IN ('aprovacao', 'conexao', 'depois_de_ler'))
+      ORDER BY r.created_at`, workspaceId);
   const cards = db.all<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; result_state: string | null; evidence: string | null; justification: string | null }>(
     `SELECT t.id, t.number, t.title, t.work_state, t.agent_id, a.name AS agent_name, t.updated_at,
             x.state AS result_state, x.evidence, x.justification
@@ -394,7 +410,7 @@ export function pendingDecisions(db: Db, workspaceId: string) {
 export function pendingCount(db: Db, workspaceId: string): number {
   const n = (sql: string, ...args: string[]) => Number(db.get<{ n: number }>(sql, ...args)?.n ?? 0);
   return n("SELECT COUNT(*) AS n FROM agent_proposals WHERE workspace_id = ? AND status = 'proposed' AND kind <> 'info_request'", workspaceId)
-    + n("SELECT COUNT(*) AS n FROM runs WHERE workspace_id = ? AND status = 'waiting_user'", workspaceId)
+    + n("SELECT COUNT(*) AS n FROM runs r WHERE r.workspace_id = ? AND r.status = 'waiting_user' AND NOT EXISTS (SELECT 1 FROM agent_proposals ap WHERE ap.run_id = r.id AND ap.status = 'proposed' AND ap.kind IN ('aprovacao', 'conexao', 'depois_de_ler'))", workspaceId)
     + n(`SELECT COUNT(*) AS n FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.workspace_id = ? AND b.audience = 'team' AND t.completed = 0 AND t.archived = 0
           AND t.work_state IN (${WAITING_STATES.map(() => '?').join(', ')}) AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status IN ('queued', 'running', 'waiting_user')) AND ${SEM_CONEXAO_PENDENTE} AND ${SEM_FALHA}`, workspaceId, ...WAITING_STATES)
     + n("SELECT COUNT(*) AS n FROM link_proposals p JOIN tasks t ON t.id = p.task_id WHERE p.workspace_id = ? AND p.status = 'proposed' AND t.archived = 0", workspaceId)
@@ -425,7 +441,7 @@ export function answerQuestion(db: Db, bus: Bus, workspaceId: string, userId: st
 
 export function listProposals(db: Db, workspaceId: string, conversationId?: string | null) {
   return db.all(
-    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff', 'regra') THEN payload END AS payload FROM agent_proposals
+    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff', 'regra', 'segredo') THEN payload END AS payload FROM agent_proposals
       WHERE workspace_id = ? ${conversationId ? 'AND (conversation_id = ? OR id IN (SELECT proposal_id FROM proposal_links WHERE conversation_id = ?))' : ''} ORDER BY created_at DESC LIMIT 50`,
     ...(conversationId ? [workspaceId, conversationId, conversationId] : [workspaceId]));
 }
@@ -489,7 +505,8 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
   const p = JSON.parse(row.payload) as Proposal;
   if (p.kind === 'permission' && decision === 'apply') throw new HttpError(400, 'needs_password', 'Para liberar, autorize com a sua senha no próprio cartão.');
   if (row.kind === 'info_request') throw new HttpError(400, 'respond', 'Responda pelo próprio cartão (responder, aprovar ou devolver).');
-  if (row.kind === 'conexao' || row.kind === 'depois_de_ler' || row.kind === 'regra') throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
+  if (row.kind === 'conexao' || row.kind === 'depois_de_ler' || row.kind === 'regra' || row.kind === 'aprovacao') throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
+  if (row.kind === 'segredo') throw new HttpError(400, 'segredo', 'Responda pelo próprio cartão protegido.');
   let status: 'applied' | 'rejected' | 'failed' = 'rejected';
   let texto: Texto | null = tx('proposta.recusada');
   let result = emPt(texto);
@@ -580,8 +597,10 @@ export function decideProposal(db: Db, bus: Bus, workspaceId: string, userId: st
         feito(tx('proposta.mudouDeSetor', { nome: r.name, setor: r.sector }));
       } else if (p.kind === 'handoff') {
         throw new HttpError(409, 'decided', 'aviso: a autorização é feita na conversa com a coordenação');
-      } else if (p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra') {
+      } else if (p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' || p.kind === 'aprovacao') {
         throw new HttpError(400, 'conexao', 'Esta ação passa pela confirmação das conexões.');
+      } else if (p.kind === 'segredo') {
+        throw new HttpError(400, 'segredo', 'Responda pelo próprio cartão protegido.');
       } else {
         const auto = /^autom/i.test(fold(p.sector));
         const s = auto ? null : sectorByName(db, workspaceId, p.sector);

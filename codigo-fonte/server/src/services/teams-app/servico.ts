@@ -497,7 +497,7 @@ export class TeamsApp {
     const registrar = (estado: 'feito' | 'decidindo') => this.d.db.run(
       'INSERT OR IGNORE INTO teams_inbound (delivery_id, user_id, kind, message_id, received_at, state, decision, binding_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       String(f.id), b.user_id, 'card.action', p, now(), estado, decisao, b.binding_id);
-    if (prop.status !== 'proposed' || ['permission', 'question', 'info_request', 'handoff'].includes(prop.kind)) {
+    if (prop.status !== 'proposed' || ['permission', 'question', 'segredo', 'info_request', 'handoff'].includes(prop.kind)) {
       // já decidido (no Ergon ou noutro cartão), ou é do tipo que só se responde no Ergon: o cartão diz isso
       this.atualizarCartaoDe(p, b, typeof v.cardActivityId === 'string' ? v.cardActivityId : null, true);
       registrar('feito');
@@ -652,6 +652,8 @@ export class TeamsApp {
     const { titulo, texto } = partesDoResumo(p.summary);
     if (p.kind === 'permission') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para autorizar (pede a sua senha).' };
     if (p.kind === 'question') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para responder.' };
+    // pedido de chave ou senha: o valor só se digita no Ergon (nunca passa pelo Teams)
+    if (p.kind === 'segredo') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para informar: o valor nunca passa por aqui.' };
     return { tipo: 'decisao', p: p.id, titulo, texto };
   }
 

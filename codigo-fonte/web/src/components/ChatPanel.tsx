@@ -7,12 +7,15 @@ import { plainText, toWordHtml } from '../lib/markdown.ts';
 import { openCard } from '../lib/open.ts';
 import { PROPOSAL_KIND, stripControl, type Agent, type AiStatus, type Attachment, type Conversation, type Message, type Proposal } from '../lib/types.ts';
 import { ConfirmPopup } from './ConfirmPopup.tsx';
-import { HandoffCard, PermissionCard, QuestionCard, RequestCard, SystemNote } from './ChatCards.tsx';
+import { HandoffCard, PermissionCard, QuestionCard, RequestCard, SecretCard, SystemNote } from './ChatCards.tsx';
+import { ComandosBar, DicaDeAtalhos, useFraseDoComando, type ResultadoComando } from './Comandos.tsx';
 import { Icon } from './Icon.tsx';
+import { OrientarCampo } from './AjustesEquipe.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
 import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
+import { RECURSOS, audiosParaTranscrever, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
 
 /** Rascunhos das conversas (por agente), só na memória da aba: nada de conteúdo da conversa em disco ou na URL. */
 const DRAFTS = new Map<string, string>();
@@ -137,7 +140,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     finally { setDeciding((x) => { const y = { ...x }; delete y[id]; return y; }); props.reload(); }
   };
   // várias propostas de uma vez (um tema inteiro, por exemplo): aplicar ou recusar todas, na ordem em que vieram
-  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff', 'conexao', 'depois_de_ler', 'regra'].includes(p.kind));
+  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff', 'conexao', 'depois_de_ler', 'aprovacao', 'regra', 'segredo'].includes(p.kind));
   const [batchBusy, setBatchBusy] = useState(false);
   const decideAll = async (decision: 'apply' | 'reject') => {
     setBatchBusy(true); setErr(null);
@@ -178,6 +181,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const list = msgs.data ?? [];
   const lastRun = [...list].reverse().find((m) => m.run_id);
   const busy = !!lastRun && ['queued', 'running', 'waiting_user'].includes(lastRun.run_status ?? '');
+  const lastAgentId = [...list].reverse().find((m) => m.role === 'agent')?.id ?? null;
 
   // resposta chegando ao vivo: o texto até aqui e o que o colega faz agora (o servidor avisa; o texto vem sob pedido)
   const liveRun = busy ? lastRun?.run_id ?? null : null;
@@ -270,6 +274,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
 
   const pending = useRef<{ id: string; text: string } | null>(null);
   /** Enter envia; com o colega trabalhando, a mensagem entra na fila e vai quando ele terminar (editável até ir). */
+  const fraseComando = useFraseDoComando();
   async function send() {
     const txt = text.trim();
     const ready = files.filter((f) => f.art).map((f) => f.art!);
@@ -295,7 +300,11 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       // a tela ainda não sabia que ele começou a responder: a mensagem vai para a fila em vez de voltar
       const r = await post(queue).catch((e) => { if (e instanceof ApiError && e.code === 'busy' && !queue) return post(true); throw e; });
       pending.current = null;
-      setOptimistic((cur) => cur.map((o) => (o.key === key ? { ...o, serverId: r.messageId } : o)));
+      // atalho (/meta, /goal…): virou um comando; o que aconteceu aparece como dica, não como mensagem
+      const comando = (r as { comando?: ResultadoComando }).comando;
+      if (comando) setHint(fraseComando(comando));
+      if (comando && !r.messageId) setOptimistic((cur) => cur.filter((o) => o.key !== key));
+      else setOptimistic((cur) => cur.map((o) => (o.key === key ? { ...o, serverId: r.messageId } : o)));
       msgs.reload(); convs.reload();
     } catch (e) {
       setOptimistic((cur) => cur.filter((o) => o.key !== key));
@@ -339,6 +348,47 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     try { await api.patch(`/api/messages/${editing.id}`, { text: editing.text }); setEditing(null); msgs.reload(); } catch (e) { setErr(errMsg(e)); }
   };
   const dropQueued = async (id: string) => { try { await api.del(`/api/messages/${id}`); msgs.reload(); } catch (e) { setErr(errMsg(e)); } };
+
+  // voz e conselho (rc.27): os botões só aparecem onde a equipe deste computador sabe fazer
+  const rec = useResource<RecursosEstado>(RECURSOS, []);
+  const [tocando, setTocando] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ouvir = async (m: Message) => {
+    if (tocando === m.id) { audioRef.current?.pause(); setTocando(null); return; }
+    setTocando(m.id);
+    try {
+      const blob = await api.postBlob(`${RECURSOS}/voz/falar`, { mensagem: m.id });
+      audioRef.current?.pause();
+      const a = new Audio(URL.createObjectURL(blob));
+      audioRef.current = a;
+      a.onended = () => { setTocando(null); URL.revokeObjectURL(a.src); };
+      await a.play();
+    } catch (e) { setTocando(null); setErr(errMsg(e)); }
+  };
+  const [transcricoes, setTranscricoes] = useState<Record<string, string>>({});
+  const transcrever = async (f: Attachment) => {
+    setTranscricoes((x) => ({ ...x, [f.id]: '' }));
+    try { const r = await api.post<{ texto: string }>(`${RECURSOS}/voz/transcrever`, { arquivo: f.id }); setTranscricoes((x) => ({ ...x, [f.id]: r.texto || t('conversas.recursos.semFala') })); }
+    catch (e) { setTranscricoes((x) => { const n = { ...x }; delete n[f.id]; return n; }); setErr(errMsg(e)); }
+  };
+  // o áudio que a pessoa manda agora vira texto sozinho quando a equipe transcreve neste computador (no próprio computador,
+  // sem custo de IA; regra do dono, 12/11: pronto para usar); os de antes ficam com o botão "Transcrever"
+  const aberturaRef = useRef(Date.now());
+  // cada áudio é tentado sozinho uma vez: se falhar, fica o botão (sem repetir o pedido e o erro a cada mudança da conversa)
+  const tentadosRef = useRef(new Set<string>());
+  useEffect(() => {
+    // só o transcritor local (sem custo); com uma conta de voz paga, fica o botão
+    if (!String(rec.data?.voz.transcrever ?? '').startsWith('local')) return;
+    for (const f of audiosParaTranscrever(list, aberturaRef.current - 60_000, tentadosRef.current)) {
+      tentadosRef.current.add(f.id);
+      if (!(f.id in transcricoes)) void transcrever(f);
+    }
+  }, [list, rec.data?.voz.transcrever]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [conselho, setConselho] = useState(false);
+  const pedirConselho = async () => {
+    setConselho(false);
+    try { await api.post(`/api/conversations/${convId}/conselho`, { clientRequestId: requestId() }); msgs.reload(); } catch (e) { setErr(errMsg(e)); }
+  };
 
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (m: Message) => {
@@ -511,7 +561,13 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
                 {quoted && <button type="button" className="msg__quote" onClick={() => goTo(quoted.id)}><b>{quoted.role === 'user' ? t('conversas.conversa.voce') : agent.name}</b>{quoteOf(quoted)}</button>}
                 {m.role === 'agent' && m.mode === 'simulated' && <span className="badge badge--warn">{t('conversas.conversa.semIa')}</span>}
                 {body && <div className="msg__body">{m.role === 'agent' ? <Markdown text={body} /> : body}</div>}
-                {!!m.attachments?.length && <div className="msg__files">{m.attachments.map((f) => <FileChip key={f.id} f={f} />)}</div>}
+                {!!m.attachments?.length && <div className="msg__files">{m.attachments.map((f) => (
+                  <Fragment key={f.id}>
+                    <FileChip f={f} />
+                    {rec.data?.voz.transcrever && ehAudio(f) && !(f.id in transcricoes) && <button type="button" className="linkish" onClick={() => void transcrever(f)}><Icon name="file" size={12} /> {t('conversas.recursos.transcrever')}</button>}
+                    {f.id in transcricoes && <div className="msg__transcricao">{transcricoes[f.id] ? <><b>{t('conversas.recursos.transcricao')}</b> {transcricoes[f.id]}</> : <span className="muted">{t('conversas.recursos.transcrevendo')}</span>}</div>}
+                  </Fragment>
+                ))}</div>}
                 <div className="msg__foot">
                   <time>{m.queued ? t('conversas.conversa.naFilaVai', { nome: agent.name }) : fmtHora(m.created_at)}</time>
                   {m.queued ? (
@@ -526,6 +582,8 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
                       <button type="button" className={`linkish ${m.marked ? 'is-on' : ''}`} onClick={() => void toggleMark(m)} title={m.marked ? t('conversas.acao.tirarMarca') : t('conversas.acao.marcarDica')}><Icon name="pin" size={12} /> {m.marked ? t('conversas.acao.marcada') : t('conversas.acao.marcar')}</button>
                       <button type="button" className="linkish" onClick={() => void fork(m)} title={t('conversas.acao.novoAssuntoDica')}><Icon name="plus" size={12} /> {t('conversas.acao.novoAssunto')}</button>
                       {m.role === 'agent' && body.length > 1200 && <button type="button" className="linkish" onClick={() => saveDoc(m)} title={t('conversas.acao.documentoDica')}><Icon name="download" size={12} /> {t('conversas.acao.documento')}</button>}
+                      {m.role === 'agent' && body && rec.data?.voz.falar && <button type="button" className={`linkish ${tocando === m.id ? 'is-on' : ''}`} onClick={() => void ouvir(m)} title={t('conversas.recursos.ouvirDica')}><Icon name={tocando === m.id ? 'stop' : 'play'} size={12} /> {tocando === m.id ? t('conversas.recursos.parar') : t('conversas.recursos.ouvir')}</button>}
+                      {m.role === 'agent' && body && rec.data && m.id === lastAgentId && !busy && <button type="button" className="linkish" onClick={() => setConselho(true)} title={t('conversas.recursos.conselhoDica')}><Icon name="users" size={12} /> {t('conversas.recursos.conselho')}</button>}
                     </span>
                   ) : null}
                 </div>
@@ -553,21 +611,22 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           if (!p) return null;
           return p.kind === 'info_request' ? <RequestCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} />
             : p.kind === 'question' ? <QuestionCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} />
+            : p.kind === 'segredo' ? <SecretCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} />
             : p.kind === 'handoff' ? <HandoffCard key={p.id} p={p} />
             : p.kind === 'permission' && p.status === 'proposed' ? <PermissionCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} onReject={() => decide(p.id, 'reject')} />
             : (
               <div key={p.id} className={`proposal-card proposal-card--${p.status}`}>
                 <span className="badge">{PROPOSAL_KIND[p.kind] ?? p.kind}</span>
-                <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
-                {p.status === 'proposed' && deciding[p.id] ? <span className="badge" role="status">{deciding[p.id] === 'reject' ? t('conversas.proposta.recusando') : p.kind === 'conexao' ? t('conversas.proposta.enviando') : p.kind === 'depois_de_ler' ? t('conversas.proposta.aprovando') : p.kind === 'purge' ? t('conversas.proposta.apagando') : t('conversas.proposta.aplicando')}</span>
+                <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
+                {p.status === 'proposed' && deciding[p.id] ? <span className="badge" role="status">{deciding[p.id] === 'reject' ? t('conversas.proposta.recusando') : p.kind === 'conexao' ? t('conversas.proposta.enviando') : p.kind === 'depois_de_ler' || p.kind === 'aprovacao' ? t('conversas.proposta.aprovando') : p.kind === 'purge' ? t('conversas.proposta.apagando') : t('conversas.proposta.aplicando')}</span>
                 : p.status === 'proposed' && p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} onEscolher={(alcance) => void decide(p.id, 'apply', { alcance })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' && p.kind === 'depois_de_ler' ? <BotoesPrazo onEscolher={(prazo) => void decide(p.id, 'apply', { prazo })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' ? (
                   <span className="row">
-                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'conexao' ? t('conversas.proposta.confirmar') : p.kind === 'depois_de_ler' ? t('conversas.proposta.aprovar') : p.kind === 'routine' ? t('conversas.proposta.ativarRotina') : p.kind === 'batch' ? t('conversas.proposta.abrirTodos') : p.kind === 'purge' ? t('conversas.proposta.apagarDeVez') : t('conversas.proposta.aplicar')}</button>
+                    <button className="btn btn--sm btn--primary" onClick={() => decide(p.id, 'apply')}>{p.kind === 'conexao' ? t('conversas.proposta.confirmar') : p.kind === 'depois_de_ler' || p.kind === 'aprovacao' ? t('conversas.proposta.aprovar') : p.kind === 'routine' ? t('conversas.proposta.ativarRotina') : p.kind === 'batch' ? t('conversas.proposta.abrirTodos') : p.kind === 'purge' ? t('conversas.proposta.apagarDeVez') : t('conversas.proposta.aplicar')}</button>
                     <button className="btn btn--sm btn--ghost" onClick={() => decide(p.id, 'reject')}>{t('conversas.proposta.recusar')}</button>
                   </span>
-                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? t('conversas.proposta.autorizada') : p.kind === 'conexao' ? t('conversas.proposta.feita') : p.kind === 'depois_de_ler' ? t('conversas.proposta.aprovada') : t('conversas.proposta.aplicada')) : p.status === 'failed' ? t('conversas.proposta.falhou') : t('conversas.proposta.recusada')}</span>}
+                ) : <span className={`badge ${p.status === 'applied' ? 'badge--ok' : p.status === 'failed' ? 'badge--err' : ''}`}>{p.status === 'applied' ? (p.kind === 'permission' ? t('conversas.proposta.autorizada') : p.kind === 'conexao' ? t('conversas.proposta.feita') : p.kind === 'depois_de_ler' || p.kind === 'aprovacao' ? t('conversas.proposta.aprovada') : t('conversas.proposta.aplicada')) : p.status === 'failed' ? t('conversas.proposta.falhou') : t('conversas.proposta.recusada')}</span>}
               </div>
             );
         })}
@@ -600,6 +659,8 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           </div>
         )}
       </div>
+      {/* rc.27: a resposta está sendo feita: um recado que não interrompe (parar continua no botão de sempre) */}
+      {busy && lastRun?.run_id && lastRun.run_status === 'running' && <OrientarCampo compacto rota={`/api/runs/${lastRun.run_id}/steer`} nome={agent.name} />}
       {fresh > 0 && <button type="button" className="chat__fresh" onClick={toEnd}>↓ {t('conversas.conversa.mensagensNovas', { n: fresh })}</button>}
       {err && <p className="error" role="alert">{err}</p>}
       {hint && <p className="chat__hint" role="status">{hint}</p>}
@@ -607,6 +668,11 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         <ConfirmPopup title={t('conversas.semIa.titulo')} confirmLabel={t('conversas.semIa.conectar')}
           onConfirm={() => { setAvisoIa(false); location.hash = '#conexoes'; }} onCancel={() => setAvisoIa(false)}>
           <p>{t('conversas.semIa.corpo')}</p>
+        </ConfirmPopup>
+      )}
+      {conselho && (
+        <ConfirmPopup title={t('conversas.recursos.conselhoTitulo')} confirmLabel={t('conversas.recursos.conselhoPedir')} onConfirm={() => void pedirConselho()} onCancel={() => setConselho(false)}>
+          <p>{t('conversas.recursos.conselhoTexto')}</p>
         </ConfirmPopup>
       )}
       {stopCard && (
@@ -617,6 +683,9 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         </ConfirmPopup>
       )}
       {drag && <div className="chat__drop" aria-hidden="true"><Icon name="clip" size={28} /><b>{t('conversas.campo.solte', { nome: agent.name })}</b><small>{t('conversas.campo.qualquerTipo')}</small></div>}
+      <ComandosBar compacto listaUrl={convId ? `/api/comandos?conversationId=${convId}` : null} postUrl={convId ? `/api/conversations/${convId}/comandos` : null}
+        garantir={async () => `/api/conversations/${await ensureConv()}/comandos`} onFeito={(f) => setHint(f)} />
+      {/^\/[\p{L}]*$/u.test(text) && <DicaDeAtalhos onEscolher={(inicio) => { setText(inicio); input.current?.focus(); }} />}
       <form className="chat__input" onSubmit={(e) => { e.preventDefault(); void send(); }}>
         {replying && <div className="chat__replying"><Icon name="undo" size={13} /><span><b>{replying.role === 'user' ? t('conversas.conversa.voce') : agent.name}</b> {quoteOf(replying)}</span><button type="button" className="icon-btn" onClick={() => setReplying(null)} aria-label={t('conversas.campo.naoCitar')}><Icon name="x" size={13} /></button></div>}
         {files.length > 0 && <div className="chat__files">{files.map((f) => <FileChip key={f.key} f={f.art ?? { filename: f.file.name, mime: f.file.type || 'application/octet-stream', size: f.file.size }} progress={f.progress} error={f.error} onRemove={() => removeFile(f.key)} />)}</div>}

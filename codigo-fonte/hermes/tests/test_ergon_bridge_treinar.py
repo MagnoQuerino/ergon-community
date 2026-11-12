@@ -161,7 +161,7 @@ check("lote: aplicado (principal + referência), nome forçado, privado",
       "references/campos.md" in files4 and f'name: "{LOTE}"' in files4.get("SKILL.md", "") and "ergon-privado" in files4.get("SKILL.md", "")
       and str(b._skill_dir(LOTE)).endswith(f"/ergon/{LOTE}"), str(files4)[:300])
 check("lote: escrita em espera consumida", not b.skills_pending(set(), LOTE))
-b._apply_write({"action": "delete", "name": LOTE})
+b.skills_remove(LOTE)
 
 # ---------- restaurar a versão 1 e remover
 files3 = b.skills_restore(NAME, files)
@@ -171,7 +171,12 @@ try:
     check("aplicar escrita de outra competência/inexistente: recusado", False)
 except ValueError:
     check("aplicar escrita de outra competência/inexistente: recusado", True)
+from tools import skill_usage  # noqa: E402
+
+check("rc.27: a competência treinada fica fixada (a arrumação automática do motor não a arquiva)", skill_usage.get_record(NAME).get("pinned") is True, str(skill_usage.get_record(NAME)))
 r = b._apply_write({"action": "delete", "name": NAME})
+check("rc.27: fixada, o motor não a apaga por conta própria", not r.get("success") and b._skill_dir(NAME) is not None, str(r)[:200])
+r = b.skills_remove(NAME)
 check("remover: some da biblioteca", r.get("success") and b._skill_dir(NAME) is None, str(r))
 
 print("TUDO OK" if ok else "HOUVE FALHA")

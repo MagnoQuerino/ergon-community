@@ -45,6 +45,10 @@ with open(os.path.join(HOME, "config.yaml"), "w", encoding="utf-8") as f:
   enabled: [ergon_bridge]
 platform_toolsets:
   api_server: [todo, web, skills, ergon_conexoes]
+# como no motor de verdade (migrações 2 e 12 do cofre): conjunto de plugin conhecido e fora da lista = desligado. Sem
+# isto, o Hermes ligaria os cartões na plataforma e a conta das definições não bateria com o agente deste teste.
+known_plugin_toolsets:
+  api_server: [ergon_conexoes, ergon_cartoes]
 tools:
   tool_search:
     enabled: "off"
@@ -314,7 +318,10 @@ cfg = load_config()
 check("passos: o resto da configuração fica (plugin, ferramentas, busca desligada)",
       "ergon_conexoes" in (cfg.get("platform_toolsets", {}).get("api_server") or []) and str(cfg.get("tools", {}).get("tool_search", {}).get("enabled")).lower() in ("off", "false"),
       str({k: cfg.get(k) for k in ("platform_toolsets", "tools")})[:300])
-for ruim in (4, 61, "20", True, None, 20.5):
+for bom in (90, 150):
+    check(f"passos: {bom} aceito (o padrão do Ergon a partir da rc.27 é 90; o teto, 150)", ponte("PUT", "/ergon/v1/passos", {"max_turns": bom}) == (200, {"ok": True, "max_turns": bom}))
+ponte("PUT", "/ergon/v1/passos", {"max_turns": 33})
+for ruim in (4, 151, "20", True, None, 20.5):
     check(f"passos: {ruim!r} recusado", ponte("PUT", "/ergon/v1/passos", {"max_turns": ruim})[0] == 400)
 check("passos: sem o token, nada", ponte("PUT", "/ergon/v1/passos", {"max_turns": 10}, token="")[0] == 401 and _current_max_iterations() == 33)
 print(f"      (gravado {'pela rota do painel interno' if pelo_painel else 'pelas funções de configuração do Hermes'})")

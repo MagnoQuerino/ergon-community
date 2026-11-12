@@ -49,7 +49,7 @@ HERMES_CLI = "/opt/hermes/.venv/bin/hermes"
 CONFIG_MARKER = ".ergon-config"
 MIGRACOES_MARKER = ".ergon-migracoes"
 # Conjuntos de ferramentas que o plugin do Ergon registra (o mesmo de _ERGON_PLUGIN_TOOLSETS no plugin)
-ERGON_PLUGIN_TOOLSETS = ("ergon_conexoes",)
+ERGON_PLUGIN_TOOLSETS = ("ergon_conexoes", "ergon_cartoes")
 API_TOOLSETS_PADRAO = ["todo", "web", "vision", "image_gen", "skills", "ergon_conexoes"]
 MIGRACOES: tuple[tuple[int, str, dict], ...] = (
     # 1: plugin ligado; na API (agentes do Ergon) só o conjunto seguro de ferramentas — o plugin barra, a cada chamada,
@@ -100,6 +100,144 @@ MIGRACOES: tuple[tuple[int, str, dict], ...] = (
     (3, "compactação da conversa", {"se_ausente": [
         ["compression.threshold_tokens", "150000"],
     ]}),
+    # 4 (rc.27): a equipe nativa. Cada agente do Ergon passa a ser um perfil do Hermes (profiles/<nome>: SOUL, memória,
+    # competências e histórico próprios), atendido pelo MESMO gateway em /p/<perfil>/v1/runs. Com um perfil só no disco, o
+    # gateway decide no boot que não há o que multiplexar (hermes_cli/gateway_multiplex_mode.py) e passa a responder 404 a
+    # todo /p/<outro>/ até reiniciar; com a chave explícita ele multiplexa desde o primeiro boot e acha cada perfil novo pela
+    # pasta, sem reiniciar (provado no motor de verdade em 10/11). Os perfis em si são criados pelo plugin, a pedido do
+    # servidor (ponte de controle, /ergon/v1/perfis/<nome>): aqui só a chave. O perfil padrão continua igual (contas de IA,
+    # configuração da equipe, conversas de antes).
+    (4, "equipe nativa (perfis)", {"passos": [
+        ["config", "set", "gateway.multiplex_profiles", "true"],
+    ]}),
+    # 5 (rc.27, frente "rápidos"): padrões do que o Hermes faz sozinho, só onde ninguém escolheu nada (a chave não existe).
+    #  - curator.enabled false: o Curator do Hermes marca como paradas (14 dias) e arquiva (30 dias) as competências
+    #    criadas por agente que ninguém usa, sozinho, a cada 7 dias (agent/curator.py; padrão do Hermes: ligado). No Ergon
+    #    a pessoa aprova cada competência (Treinar): nada some sem ela pedir. Arquivar não dá mais poder à equipe (só tira
+    #    competências da lista, sem a pessoa pedir), e o Curator só administra as criadas por agente, que no Ergon quase não
+    #    existem: é uma economia, não um benefício, e fica desligado. A opção fica à vista em Configurações ("Arrumar
+    #    competências sem uso"), e as competências treinadas ficam fixadas no motor e em cada perfil (o Curator pula as
+    #    fixadas), pela ponte de controle.
+    #  - provider_routing.data_collection deny: "Não treinar com os meus dados", ligado por padrão (vale no OpenRouter, que
+    #    é quem aceita o pedido; a pessoa desliga em Configurações › Segurança). Na rota de execuções quem põe o pedido em
+    #    cada chamada é o plugin (on_llm_request), lendo esta mesma chave.
+    #  - auxiliary.background_review.enabled true + skills.creation_nudge_interval 0 (regra do dono de 12/11: benefício vem
+    #    ligado). A revisão de fundo do Hermes faz duas coisas separadas, depois que a resposta já foi entregue: revisar as
+    #    competências (dispara a cada skills.creation_nudge_interval passos, só com skill_manage à vista: agent/agent_init.py,
+    #    _apply_agent_section; agent/turn_finalizer.py) e anotar na memória longa (dispara a cada memory.nudge_interval = 10
+    #    mensagens da pessoa, só onde há a ferramenta memory: agent/turn_context.py, _tick_memory_nudge). No Ergon a trava do
+    #    Treinar barra toda escrita de competência fora de um treinamento autorizado: a revisão de competências só gastava
+    #    chamadas (medido em hermes/tests/test_ergon_bridge_rapidos.py: 3 chamadas para não gravar nada), e com o intervalo 0
+    #    ela nunca dispara. Fica a anotação de memória, a parte que traz benefício: só nos perfis dos agentes (a ferramenta
+    #    memory vem no perfil, migração 4), cerca de uma chamada a mais a cada 10 mensagens, no mesmo modelo e aproveitando o
+    #    cache da conversa. A gravação fica em espera (memory.write_approval, que o plugin liga em cada perfil) e a pessoa
+    #    aprova na aba Memória; ela desliga em Configurações › Andamento da equipe ("Anotar na memória depois da conversa").
+    #    A política de ferramentas do Ergon reconhece a sessão também depois do fim da execução (a revisão roda depois da
+    #    entrega). O perfil de cada agente herda as duas chaves da configuração da equipe.
+    #  - security.redact_secrets true: o Hermes já mascara segredos no que mostra e registra (padrão dele); fica gravado.
+    # Os modelos reserva (fallback_providers), a busca privada e o idioma são escolhas da pessoa: vão pela ponte de controle.
+    (5, "padrões da rc.27", {"se_ausente": [
+        ["curator.enabled", "false"],
+        ["auxiliary.background_review.enabled", "true"],
+        ["skills.creation_nudge_interval", "0"],
+        ["provider_routing.data_collection", "deny"],
+        ["security.redact_secrets", "true"],
+    ]}),
+    # 6 (rc.27, frente dos cartões): o conjunto ergon_cartoes do plugin
+    # (perguntar de volta, pedido seguro de chave, senha de administrador) ligado na API e conhecido nas três plataformas,
+    # do mesmo jeito da migração 2: união com o que já está lá (o que a pessoa ligou continua), a lista da API antes da
+    # marca de conhecido, e Teams/WhatsApp diretos sem o conjunto (conhecido e fora da lista = desligado). A base, para um
+    # cofre sem a lista, é escrita aqui (e não por uma constante) para o conteúdo publicado nunca mudar por tabela.
+    (6, "cartões", {"unir": [
+        ["platform_toolsets.api_server", ["ergon_cartoes"], ["todo", "web", "vision", "image_gen", "skills", "ergon_conexoes"]],
+        ["known_plugin_toolsets.api_server", ["ergon_cartoes"], []],
+        ["known_plugin_toolsets.teams", ["ergon_cartoes"], []],
+        ["known_plugin_toolsets.whatsapp", ["ergon_cartoes"], []],
+    ]}),
+    # 7 (rc.27, frente "recursos"): proteções para quem liga Terminal ou Executar
+    # código, que não custam nada enquanto essas ferramentas estão desligadas, e a limpeza dos arquivos temporários.
+    # (a) checkpoints.enabled: o Hermes guarda o
+    # estado da pasta de trabalho antes da primeira gravação de arquivo de cada pedido (tools/checkpoint_manager.py), e o
+    # Ergon oferece "voltar atrás" (ponte: /ergon/v1/checkpoints). Só se a chave não existe: quem escolheu fica. (b) o
+    # plugin security-guidance, que vem com o Hermes: acrescenta um aviso ao resultado da gravação de um arquivo com
+    # padrão perigoso (eval, pickle.load, verify=False...), sem barrar nada e sem chamada de modelo. O que a pessoa
+    # desligar depois em Configurações › Capacidades da equipe fica desligado (a migração roda uma vez). (c) o plugin
+    # disk-cleanup, que vem com o Hermes: apaga os arquivos temporários de teste e de saída que os agentes criam dentro do
+    # motor (test_*, tmp_*), sem nunca tocar em workspace, projetos, perfis, memória, sessões ou competências (README do
+    # plugin). Não chama o modelo e poupa disco; a pessoa desliga em Capacidades da equipe. Os plugins são lidos quando o
+    # Hermes sobe, e a migração roda antes dele: vale desde a primeira abertura.
+    # As ferramentas novas da rc.27 (navegador, vídeo, leitura de arquivos, voz) ligam na migração 10.
+    (7, "proteções do terminal e limpeza", {
+        "se_ausente": [["checkpoints.enabled", "true"]],
+        "passos": [["plugins", "enable", "security-guidance"], ["plugins", "enable", "disk-cleanup"]],
+    }),
+    # 8 (rc.27, frente "canais"): conversar com a equipe pelo Telegram e pelo
+    # Discord (o plugin entrega cada mensagem ao Ergon antes de qualquer turno do Hermes: pre_gateway_dispatch).
+    # - Telegram guarda por até 24 horas o que chega com o bot desligado, mas o adaptador do Hermes descarta essa fila ao
+    #   iniciar (platforms.telegram.extra.drop_pending_on_cold_boot, padrão true: bom para servidor sempre ligado). O
+    #   Ergon fecha junto com o computador da pessoa: com false, o que ela mandou com o Ergon fechado chega, em ordem,
+    #   quando ele abre (plugins/platforms/telegram/adapter.py, _cold_boot_drop_pending; docs do Hermes, "Cold-boot
+    #   pending queue"). O Discord não guarda conversa direta para o bot desligado, e a recuperação do adaptador
+    #   (missed_message_backfill) só olha canais de servidor: nada a ligar aqui, e a tela diz isso.
+    # Só o que está ausente: um valor que alguém gravou fica como está.
+    (8, "canais Telegram e Discord", {"se_ausente": [
+        ["platforms.telegram.extra.drop_pending_on_cold_boot", "false"],
+    ]}),
+    # 9 (rc.27, frente "rotinas"): aprovações nativas. O que pede o sim da pessoa (comandos perigosos do Terminal, e o que o
+    # Ergon segura no portão de aprovação do Hermes: ações nas contas que pedem confirmação, abrir sites ou rodar programas
+    # depois de ler as contas) para o turno até ela decidir no cartão do Ergon, que responde pela API
+    # (POST /v1/runs/{id}/approval). (a) approvals.mode manual: o padrão do Hermes é "smart", que antes de perguntar à pessoa
+    # faz uma chamada a mais ao modelo e pode aprovar sozinho um comando de risco; no Ergon quem aprova é a pessoa (e sai
+    # mais barato). (b) approvals.timeout 300: o turno espera até 5 minutos (o mesmo número de PRAZO_DO_MOTOR_MS no
+    # servidor); sem resposta, o cartão continua com a pessoa e a resposta segue depois. Só o que está ausente: quem
+    # escolheu outro valor fica com ele.
+    (9, "aprovações nativas", {"se_ausente": [
+        ["approvals.mode", "manual"],
+        ["approvals.timeout", "300"],
+    ]}),
+    # 10 (rc.27, regra do dono de 12/11: todos os benefícios, mesmo os que custam, ligados por padrão; a pessoa reduz para
+    # economizar). Só onde ninguém escolheu: o que a pessoa ligou, desligou ou mudou fica como está.
+    #  - trocar_se (tipo novo, aditivo): troca o valor SÓ onde ainda está o que a migração 1 gravou. A migração 1 é publicada
+    #    e não muda; quem tem outro valor (escolhido na tela ou por alguém) fica com ele.
+    #    · agent.max_turns 20 → 90: o padrão do Hermes é sem limite (o teto cortava trabalhos no meio sem avisar:
+    #      hermes_cli/config_defaults.py), e 90 é o número que o próprio Hermes grava na instalação enxuta
+    #      (hermes_cli/setup_quick.py). O servidor guarda a escolha da pessoa (Configurações › Andamento da equipe, "Passos
+    #      por pedido") e manda de novo quando o motor abre: quem escolheu 20 de propósito continua com 20. O mesmo número
+    #      está em PASSOS_PADRAO no servidor (server/src/services/custo.ts); o teto, em PASSOS_MAX no plugin (um teste confere).
+    #    · agent.reasoning_effort low → high: o "low" só veio da migração 1 (não havia tela para isso). "high" é o máximo
+    #      útil sem chegar aos níveis extremos (xhigh, max, ultra); o Hermes ajusta ao que cada provedor aceita e não manda
+    #      nada a um modelo que não raciocina (hermes_constants.py, parse_reasoning_effort). A pessoa reduz em Configurações ›
+    #      Andamento da equipe ("Profundidade do raciocínio", pela ponte: /ergon/v1/raciocinio). Os perfis copiam o valor.
+    #  - se_ausente:
+    #    · agent.budget_warning_ratio 0.75: com um teto de passos, o Hermes avisa o agente uma vez, perto do fim, para fechar
+    #      o trabalho (sem isso o corte acontece calado). Custa uma frase curta, só nos pedidos longos.
+    #    · web.extract_backend exa: com o pacote da busca direta (ddgs) na imagem e sem chave de busca, o Hermes escolhe sozinho
+    #      o DuckDuckGo, que SÓ busca, e ler a página inteira (web_extract) passaria a falhar ("search-only backend":
+    #      tools/web_tools.py, _autodetect_backend; tools/web_tools_extract.py). A Exa lê páginas sem chave pelo plano
+    #      gratuito (plugins/web/exa/provider.py, use_keyless) e, com a chave da pessoa, pelo plano dela. A busca em si fica
+    #      com a escolha do Hermes. Com a busca privada ligada (sem os serviços gratuitos de terceiros), a leitura de páginas
+    #      fica cortada, como a tela avisa.
+    #  - unir: as ferramentas que a imagem da rc.27 traz (o navegador, com o Chromium e o programa que o dirige; ver vídeos;
+    #    ler e procurar arquivos; falar em áudio, com a voz grátis) entram na lista da API. É união: o que a pessoa desligou
+    #    continua desligado, e esses conjuntos não existiam antes (ninguém os escolheu). Ficam fora as que precisam de algo
+    #    que só a pessoa fornece (busca no X e criar vídeos: a chave de outro serviço). As travas continuam: o plugin barra,
+    #    a cada chamada, o que o agente não tem; gravar arquivo só com Terminal ou Executar código; com a proteção de Conexões
+    #    ligada pela pessoa (opcional, desligada por padrão: decisão de 08/11), abrir sites depois de ler as contas pede
+    #    aprovação. A base, para um cofre sem a lista, é escrita aqui (o conteúdo publicado nunca muda por
+    #    tabela). Quem dá as ferramentas aos agentes é o servidor (server/src/services/characters.ts, BENEFICIOS).
+    (10, "experiência completa", {
+        "se_ausente": [
+            ["agent.budget_warning_ratio", "0.75"],
+            ["web.extract_backend", "exa"],
+        ],
+        "trocar_se": [
+            ["agent.max_turns", "20", "90"],
+            ["agent.reasoning_effort", "low", "high"],
+        ],
+        "unir": [
+            ["platform_toolsets.api_server", ["browser", "file", "tts", "video"], ["todo", "web", "vision", "image_gen", "skills", "ergon_conexoes"]],
+        ],
+    }),
 )
 CONFIG_VERSION = MIGRACOES[-1][0]
 # Travas de segurança: valem em TODA abertura, além das migrações (reaplicar uma migração desfaria escolhas da
@@ -110,10 +248,12 @@ ENFORCED_STEPS = [
     # a chama). Com a busca ligada, o Hermes esconde atrás dela TODA ferramenta de plugin (tools/tool_search.py,
     # is_deferrable_tool_name), e as do plugin são as Conexões; o que ela pouparia nos agentes do Ergon é pouco
     # (docs/CUSTO_DAS_CHAMADAS.md; o teste hermes/tests/test_ergon_bridge_custo.py mede). Fica desligada.
-    ["config", "set", "tools.tool_search.enabled", "off"],
-    # agent.max_turns saiu daqui na rc.25: a pessoa escolhe no Ergon (Configurações › Ferramentas da equipe, "Passos por
+    # rc.27: com um conector pronto (MCP) ligado, a busca fica como a pessoa deixou (enforce_safety, _conectores_ligados):
+    # as ferramentas de dezenas de conectores não cabem todas em cada chamada. Sem conector ligado, desligada como antes.
+    # agent.max_turns saiu daqui na rc.25: a pessoa escolhe no Ergon (Configurações › Andamento da equipe, "Passos por
     # pedido"; o servidor grava pela ponte de controle, /ergon/v1/passos), e uma trava a cada abertura desfaria a escolha.
-    # O padrão, 20, continua vindo da migração 1 (e os cofres de antes já têm 20, gravado por esta trava até a rc.24).
+    # O padrão era 20 (migração 1; os cofres de antes têm 20, gravado por esta trava até a rc.24); a migração 10 leva o 20
+    # que ninguém escolheu a 90.
 ]
 ENTRY = ["/opt/hermes/docker/entrypoint-dispatch.sh", *sys.argv[1:]]
 PR_CAPBSET_DROP = 24  # prctl(2)
@@ -247,8 +387,24 @@ def ensure_api_key() -> None:
     os.chmod(path, 0o600)
 
 
+BUSCA_DESLIGADA = ["config", "set", "tools.tool_search.enabled", "off"]
+
+
+def _conectores_ligados() -> bool:
+    """Há algum conector pronto (MCP) ligado no config.yaml? (mcp_servers.<nome>, sem enabled: false). Config ilegível:
+    não (a busca de ferramentas fica desligada, o comportamento de antes)."""
+    try:
+        servidores = ler_config().get("mcp_servers")
+    except Exception:  # noqa: BLE001
+        return False
+    if not isinstance(servidores, dict):
+        return False
+    return any(isinstance(c, dict) and c.get("enabled", True) not in (False, "false", "off", "no", 0) for c in servidores.values())
+
+
 def enforce_safety() -> bool:
-    failed = [" ".join(step[:3]) for step in ENFORCED_STEPS if as_hermes(step).returncode != 0]
+    passos = list(ENFORCED_STEPS) + ([] if _conectores_ligados() else [BUSCA_DESLIGADA])
+    failed = [" ".join(step[:3]) for step in passos if as_hermes(step).returncode != 0]
     if failed:
         # sem a trava, o Treinar não grava nada (o Ergon só aplica escrita em espera); avisa e segue
         log(f"trava de segurança não aplicada ({', '.join(failed)}); nova tentativa na próxima abertura")
@@ -408,17 +564,45 @@ def _se_ausente(entradas: list) -> bool:
     return True
 
 
+def _texto(valor) -> str:
+    """Um valor do config.yaml como o "config set" o escreveria (20 e "20" são o mesmo; true e "true" também)."""
+    if isinstance(valor, bool):
+        return "true" if valor else "false"
+    return "" if valor is None else str(valor).strip()
+
+
+def _trocar_se(entradas: list) -> bool:
+    """Cada [chave, antigo, novo]: grava "novo" só se a chave existe e ainda vale "antigo" (o que uma migração publicada
+    gravou e ninguém mudou). Ausente ou com outro valor: fica como está (foi escolha de alguém). Já trocado: não chama
+    nada. Para na primeira falha."""
+    cfg = ler_config()
+    for chave, antigo, novo in entradas:
+        if not _existe(cfg, chave) or _texto(_pegar(cfg, chave)) != antigo:
+            continue
+        if as_hermes(["config", "set", chave, novo]).returncode != 0:
+            log(f"não consegui gravar {chave}")
+            return False
+    return True
+
+
 def aplicar(conteudo: dict) -> bool:
-    if "se_ausente" in conteudo:
-        return _se_ausente(conteudo["se_ausente"])
+    """Uma migração pode ter mais de uma parte (rc.27): se_ausente, depois trocar_se, depois passos, depois unir. Para na
+    primeira que falha."""
+    conhecidas = [k for k in ("se_ausente", "trocar_se", "passos", "unir") if k in conteudo]
+    if not conhecidas or set(conteudo) - set(conhecidas):
+        raise ValueError("migração sem passos conhecidos")
+    if "se_ausente" in conteudo and not _se_ausente(conteudo["se_ausente"]):
+        return False
+    if "trocar_se" in conteudo and not _trocar_se(conteudo["trocar_se"]):
+        return False
     if "passos" in conteudo:
         failed = [" ".join(step[:3]) for step in conteudo["passos"] if as_hermes(step).returncode != 0]
         if failed:
             log(f"passos que falharam: {', '.join(failed)}")
-        return not failed
-    if "unir" in conteudo:
-        return _unir(conteudo["unir"])
-    raise ValueError("migração sem passos conhecidos")
+            return False
+    if "unir" in conteudo and not _unir(conteudo["unir"]):
+        return False
+    return True
 
 
 def configure() -> bool:

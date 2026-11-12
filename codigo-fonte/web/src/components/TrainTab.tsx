@@ -4,6 +4,7 @@ import { useResource } from '../lib/live.ts';
 import type { Agent, AgentSkill, ArtifactRow, Training, TrainingList, TrainingSources } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
+import { CompetenciasProntas } from './CompetenciasProntas.tsx';
 import { fmtDataHora, useT, type Chave, type ValoresDe } from '../i18n/index.ts';
 /** chave de texto sem valores a preencher (os rótulos das tabelas abaixo) */
 type Rotulo = { [K in Chave]: keyof ValoresDe<K> extends never ? K : never }[Chave];
@@ -23,7 +24,7 @@ const SKILL_STATUS: Record<AgentSkill['status'], { rotulo: Rotulo; cls: string }
  * Treinar: a pessoa ensina uma competência ao agente (texto, arquivos, links); o agente estuda só esse material e
  * escreve uma proposta; nada vale até a pessoa revisar e aprovar. Aprovada, é só deste agente, com versões.
  */
-export function TrainTab({ agent }: { agent: Pick<Agent, 'id' | 'name'> }) {
+export function TrainTab({ agent, full, onAgentChanged }: { agent: Pick<Agent, 'id' | 'name'>; full?: Agent | null; onAgentChanged?: () => void }) {
   const t = useT();
   const d = useResource<TrainingList>(`/api/agents/${agent.id}/trainings`, ['agents.changed']);
   const running = d.data?.trainings.some((x) => x.status === 'executando') ?? false;
@@ -53,6 +54,7 @@ export function TrainTab({ agent }: { agent: Pick<Agent, 'id' | 'name'> }) {
         {skills.length ? skills.map((s) => <SkillCard key={s.id} s={s} reload={d.reload} onTeachMore={() => teachMore(s.id)} />)
           : <p className="hint">{t('agente.treino.nenhuma')}</p>}
       </div>
+      {full && <CompetenciasProntas agent={full} reload={onAgentChanged ?? d.reload} />}
       {history.length > 0 && (
         <details className="block">
           <summary className="muted">{t('agente.treino.historico', { n: history.length })}</summary>

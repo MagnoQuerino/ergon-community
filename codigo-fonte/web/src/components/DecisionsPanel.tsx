@@ -128,7 +128,7 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
           ))}
 
           {team.length > 0 && <h4 className="rt-sub">{t('servidor.decisoes.propostas')}</h4>}
-          {team.map((p) => p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' ? (
+          {team.map((p) => p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' ? (
             // ação numa conta: o texto inteiro (recolhido quando longo) e de onde veio — o card (#N · quem pediu) ou a conversa.
             // Este cartão existe para ler antes de Confirmar um envio em nome da pessoa: ele NÃO abre inteiro (clicar no texto
             // que se está lendo, ou errar Confirmar/Recusar por pouco, tirava o painel da frente); abre só pelo "#N · quem"
@@ -146,15 +146,16 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
                   : p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} ocupado={!!busy} onEscolher={(alcance) => void proposal(p.id, 'apply', { alcance })} onRecusar={() => void proposal(p.id, 'reject')} />
                   : p.kind === 'depois_de_ler' ? <BotoesPrazo ocupado={!!busy} onEscolher={(prazo) => void proposal(p.id, 'apply', { prazo })} onRecusar={() => void proposal(p.id, 'reject')} />
                   : <>
-                    <button className="btn btn--sm btn--primary" disabled={!!busy} onClick={() => void proposal(p.id, 'apply')}>{busy === p.id && decisao === 'apply' ? t('servidor.decisoes.enviando') : t('servidor.decisoes.confirmar')}</button>
+                    <button className="btn btn--sm btn--primary" disabled={!!busy} onClick={() => void proposal(p.id, 'apply')}>{busy === p.id && decisao === 'apply' ? t('servidor.decisoes.enviando') : p.kind === 'aprovacao' ? t('servidor.decisoes.aprovar') : t('servidor.decisoes.confirmar')}</button>
                     <button className="btn btn--sm" disabled={!!busy} onClick={() => void proposal(p.id, 'reject')}>{busy === p.id && decisao === 'reject' ? t('servidor.decisoes.recusando') : t('servidor.decisoes.recusar')}</button>
                   </>}
               </div>
             </article>
           ) : (
             <Item key={p.id} badge={p.agent_name ? t('servidor.decisoes.tipoDeQuem', { tipo: KIND[p.kind] ?? p.kind, nome: p.agent_name }) : KIND[p.kind] ?? p.kind} onOpen={conv(p)} openLabel={t('servidor.decisoes.abrirConversa')}
-              actions={p.kind === 'question'
-                ? conv(p) && <button className="btn btn--sm btn--primary" onClick={conv(p)}><Icon name="chat" size={13} /> {t('servidor.decisoes.responder')}</button>
+              actions={p.kind === 'question' || p.kind === 'segredo'
+                ? (conv(p) ?? (p.task_id ? () => openCard(p.task_id!) : null)) && <button className="btn btn--sm btn--primary" onClick={conv(p) ?? (() => openCard(p.task_id!))}>
+                  <Icon name={p.kind === 'segredo' ? 'key' : 'chat'} size={13} /> {p.kind === 'segredo' ? t('servidor.decisoes.informar') : t('servidor.decisoes.responder')}</button>
                 : p.kind === 'permission'
                 ? conv(p) && <button className="btn btn--sm btn--primary" onClick={conv(p)}><Icon name="key" size={13} /> {t('servidor.decisoes.autorizar')}</button>
                 : <>

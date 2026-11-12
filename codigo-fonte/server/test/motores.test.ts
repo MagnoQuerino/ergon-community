@@ -461,23 +461,23 @@ describe('renovação do motor (versão nova)', () => {
   test('passos por pedido: escolhidos com o motor desligado, chegam quando ele abre; falhou na abertura, o passo de fundo leva', async () => {
     const { h, a, b, infra } = await setup();
     const ca = infra.controlOf(a.userId); const cb = infra.controlOf(b.userId);
-    assert.deepEqual(ca.passosGravados, [], 'sem escolha e com 20 no motor: nada muda');
+    assert.deepEqual(ca.passosGravados, [90], 'sem escolha e com o 20 de antes no motor: vai ao padrão novo (90)');
     await h.motors.stop(a.userId);
     const r = await req(h, 'PUT', '/api/team/max-turns', a, { value: 40 });
     assert.deepEqual(r.json, { value: 40, applied: false, outros: 0 }, 'o motor do Alexandre está desligado');
     assert.equal((await req(h, 'GET', '/api/state', a)).json.teamMaxTurnsPendente, true);
     await h.motors.ensure(a.userId);
-    assert.deepEqual(ca.passosGravados, [40], 'ao abrir, o motor recebe a escolha');
+    assert.deepEqual(ca.passosGravados, [90, 40], 'ao abrir, o motor recebe a escolha');
     assert.equal((await req(h, 'GET', '/api/state', a)).json.teamMaxTurnsPendente, false);
-    assert.deepEqual(cb.passosGravados, [], 'o motor da Bruna não é tocado');
-    assert.equal((await req(h, 'GET', '/api/state', b)).json.teamMaxTurns, 20, 'e a tela dela segue com o dela');
+    assert.deepEqual(cb.passosGravados, [90], 'o motor da Bruna não é tocado pela escolha do Alexandre');
+    assert.equal((await req(h, 'GET', '/api/state', b)).json.teamMaxTurns, 90, 'e a tela dela segue com o dela');
     // a Bruna escolhe com o motor dela desligado; ao abrir, o painel interno ainda não responde: o passo de fundo leva depois
     await h.motors.stop(b.userId);
     await req(h, 'PUT', '/api/team/max-turns', b, { value: 10 });
     cb.passosFora = true;
     await h.motors.ensure(b.userId);
     assert.equal(h.motors.state(b.userId).state, 'aberto');
-    assert.deepEqual(cb.passosGravados, []);
+    assert.deepEqual(cb.passosGravados, [90]);
     assert.equal((await req(h, 'GET', '/api/state', b)).json.teamMaxTurnsPendente, true, 'a tela diz que ainda não chegou');
     cb.passosFora = false;
     h.startBackground();
@@ -488,15 +488,18 @@ describe('renovação do motor (versão nova)', () => {
     await h.close();
   });
 
-  test('passos por pedido: um valor fora de 5 a 60 no motor (sem escolha da pessoa) volta a 20 ao abrir', async () => {
+  test('passos por pedido: um valor fora de 5 a 150 no motor (sem escolha da pessoa) vai a 90 ao abrir; um valor válido fica', async () => {
     const { h, a, infra } = await setup();
     const ca = infra.controlOf(a.userId);
     ca.passosNoMotor = 500; // um script ou um agente com Terminal gravou isto
     await h.motors.stop(a.userId); await h.motors.ensure(a.userId);
-    assert.equal(ca.passosNoMotor, 20);
+    assert.equal(ca.passosNoMotor, 90);
     ca.passosNoMotor = null; // "unlimited": a ponte não devolve número
     await h.motors.stop(a.userId); await h.motors.ensure(a.userId);
-    assert.equal(ca.passosNoMotor, 20);
+    assert.equal(ca.passosNoMotor, 90);
+    ca.passosNoMotor = 120;
+    await h.motors.stop(a.userId); await h.motors.ensure(a.userId);
+    assert.equal(ca.passosNoMotor, 120, 'sem escolha, o motor fica com o que tem');
     await h.close();
   });
 });

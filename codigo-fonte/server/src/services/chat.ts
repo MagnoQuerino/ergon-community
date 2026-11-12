@@ -89,7 +89,7 @@ export function listMessages(db: Db, workspaceId: string, userId: string, conver
 /**
  * A pessoa escreveu na conversa: ela está lida e a marcação de prioridade do agente sai (a pessoa respondeu). A
  * pendência que o colega puxou ("opa, tá online?") conta como respondida quando a mensagem vai ao agente
- * (chatHooks.replyContext, que também traz o cartão para cá).
+ * (chatHooks.replyContext, que também traz o cartão para cá e dá ao colega o motivo do chamado).
  */
 function onUserMessage(db: Db, _workspaceId: string, conv: ConversationRow): void {
   db.run('UPDATE conversations SET read_at = ?, priority = NULL, priority_reason = NULL, priority_at = NULL WHERE id = ?', now(), conv.id);
@@ -100,7 +100,8 @@ function onUserMessage(db: Db, _workspaceId: string, conv: ConversationRow): voi
  * responde, o que precisa explicar). Ficam aqui para a conversa não depender da iniciativa.
  */
 export const chatHooks: {
-  replyContext?: (workspaceId: string, userId: string, agentId: string, conversationId: string) => string | null;
+  /** `messageId`: a mensagem da pessoa que vai ao agente (a resposta a uma abertura dele leva o motivo do chamado) */
+  replyContext?: (workspaceId: string, userId: string, agentId: string, conversationId: string, messageId?: string | null) => string | null;
   /**
    * o canal da conversa, quando não é a tela do Ergon (ex.: a conversa "Teams", services/teams-app); `messageId`: a
    * mensagem que vai ao agente (o canal pode dizer algo dela, como um pedido que chegou com atraso)
@@ -121,7 +122,7 @@ const CHANNEL_NOTE = 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do
  * nem regra); `queue`: com uma resposta em andamento, a mensagem entra na fila da conversa (Ctrl+Enter) e vai para o
  * agente quando ele terminar, em vez de ser recusada.
  */
-export interface SendOptions { note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null }
+export interface SendOptions { /** Revisão em conselho: a resposta vem do conselho de modelos */ conselho?: boolean; note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null }
 
 export function sendMessage(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, userId: string, conversationId: string,
   text: string, clientRequestId: string, maxMessages: number, maxChars: number, opts: SendOptions = {}) {
@@ -196,7 +197,7 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
     : applyDecision(db, bus, workspaceId, { type: 'user', id: userId }, decision, { origin: 'chat', messageId, agentId: conv.agent_id });
   if (command) recordProposals(db, bus, workspaceId, { conversationId, runId: null }, [command]);
   const acted = !!command || (decision.kind !== 'none' && decision.kind !== 'clarify');
-  const reply = opts.plain ? null : chatHooks.replyContext?.(workspaceId, userId, conv.agent_id, conversationId) ?? null;
+  const reply = opts.plain ? null : chatHooks.replyContext?.(workspaceId, userId, conv.agent_id, conversationId, messageId) ?? null;
   const fork = forkContext(db, conversationId);
   // respondendo a uma mensagem: o colega sabe a qual
   const quoted = db.get<{ content: string; role: string }>('SELECT q.content, q.role FROM messages m JOIN messages q ON q.id = m.reply_to WHERE m.id = ?', messageId);
@@ -213,6 +214,7 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
         regra ? `O sistema já mostrou à pessoa, nesta conversa, um cartão para liberar sem confirmação: ${descreverRegra(regra)}. Ela escolhe ali até quando vale (só neste pedido, por 24 h ou sempre). Não escreva [[regra ...]] para isto e não diga que já está liberado antes de ela escolher; se precisar agir antes, siga como sempre (o que pedir confirmação espera o cartão).` : ''].filter(Boolean).join('\n'),
       { requests: !opts.plain, userId, foco: { conversationId, texto: content } }),
     idempotencyKey: `chat-${messageId}`,
+    ...(opts.conselho ? { via: 'conselho' as const } : {}),
   });
   db.run('UPDATE messages SET run_id = ?, queued = 0 WHERE id = ?', run.id, messageId);
   if (regra) recordProposals(db, bus, workspaceId, { conversationId, runId: run.id }, [{ ...regra, resumo: resumoDaProposta(regra) }]);
@@ -321,9 +323,11 @@ export function retryLast(db: Db, bus: Bus, executor: RunExecutor, workspaceId: 
   if (last === 'succeeded') throw new HttpError(409, 'answered', 'essa mensagem já foi respondida');
   const files = db.all<AttachmentInfo>('SELECT a.id, a.filename, a.mime, a.size FROM message_attachments ma JOIN artifacts a ON a.id = ma.artifact_id WHERE ma.message_id = ?', m.id);
   const n = Number(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runs WHERE idempotency_key LIKE ?", `chat-${m.id}%`)?.n ?? 0);
+  // a resposta a uma abertura do colega leva o motivo do chamado também na nova tentativa
+  const reply = chatHooks.replyContext?.(workspaceId, userId, conv.agent_id, conversationId, m.id) ?? null;
   const run = executor.enqueue({
     workspaceId, agentId: conv.agent_id, conversationId, kind: 'chat', input: [m.content, attachmentLine(files)].filter(Boolean).join('\n'),
-    instructions: instructionsFor(db, workspaceId, conv.agent_id, [channelNoteFor(conversationId, m.id), files.length && !m.content ? FILE_ONLY_NOTE : ''].filter(Boolean).join('\n'), { requests: true, userId, foco: { conversationId, texto: m.content } }),
+    instructions: instructionsFor(db, workspaceId, conv.agent_id, [channelNoteFor(conversationId, m.id), reply ?? '', files.length && !m.content ? FILE_ONLY_NOTE : ''].filter(Boolean).join('\n'), { requests: true, userId, foco: { conversationId, texto: m.content } }),
     idempotencyKey: `chat-${m.id}-de-novo-${n}`,
   });
   db.run('UPDATE messages SET run_id = ? WHERE id = ?', run.id, m.id);

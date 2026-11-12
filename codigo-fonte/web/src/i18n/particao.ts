@@ -22,16 +22,16 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // o card aberto
   tarefa: ['components/TaskDetail.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
   // as conversas
-  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts'],
+  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts'],
   // a Equipe e criar agentes
   equipe: [
     'views/AgentesView.tsx', 'components/AgentProfile.tsx', 'components/NewAgentDialog.tsx', 'components/NewGroupDialog.tsx',
     'components/DistributionDialog.tsx', 'components/PersonalityPicker.tsx', 'components/EffectPicker.tsx', 'lib/team.ts',
   ],
   // a janela do agente e Treinar
-  agente: ['components/AgentWindow.tsx', 'components/TrainTab.tsx'],
+  agente: ['components/AgentWindow.tsx', 'components/TrainTab.tsx', 'components/CompetenciasProntas.tsx'],
   rotinas: ['views/RotinasView.tsx'],
-  conexoes: ['views/ConexoesView.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'lib/teams-app.ts'],
+  conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts'],
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
     'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
@@ -39,7 +39,8 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   ],
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [
-    'views/ConfiguracaoView.tsx', 'components/AiAccounts.tsx', 'lib/custo.ts', 'views/AtualizacoesPanel.tsx', 'lib/atualizacoes.ts', 'views/SaudePanel.tsx',
+    'views/ConfiguracaoView.tsx', 'components/AiAccounts.tsx', 'components/CapacidadesPanel.tsx', 'lib/recursos.ts', 'lib/custo.ts', 'views/AtualizacoesPanel.tsx', 'lib/atualizacoes.ts', 'views/SaudePanel.tsx',
+    'components/AjustesEquipe.tsx', 'lib/ajustes.ts',
   ],
   // Entrar, Segurança, Minha conta e Pessoas
   conta: ['components/AuthFlow.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],

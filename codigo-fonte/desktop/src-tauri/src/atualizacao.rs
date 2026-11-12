@@ -32,12 +32,14 @@ const LIMITE_MANIFESTO: u64 = 1 << 20;
 const APP: &str = env!("CARGO_PKG_VERSION");
 /// onde o pacote anterior fica guardado durante a troca (dentro do ambiente)
 const ANTERIOR: &str = "/opt/ergon-pacote.anterior";
-/// A versão mais antiga para a qual o aplicativo volta: a 1.1.0-rc.24. Antes dela, o Ergon nunca recriava a equipe de
+/// A versão mais antiga para a qual o aplicativo volta: a 1.1.0-rc.27, que muda a base da equipe (cada agente vira um
+/// perfil do motor; numa versão anterior a equipe não acharia os agentes). Para voltar ao que era antes dela, o caminho é
+/// o backup feito na atualização. (Até a rc.26 a mínima era a 1.1.0-rc.24: antes dela, o Ergon nunca recriava a equipe de
 /// cada pessoa (os agentes) quando a versão mudava: numa volta para uma anterior, só o centro voltaria e a equipe
 /// seguiria na versão de agora (e a 1.1.0-rc.14 já tinha trocado o que roda dentro do ambiente, Podman no lugar do
 /// Docker). O servidor usa o mesmo valor na lista de versões (server/src/version.ts, VOLTA_MINIMA; um teste do
-/// servidor confere que os dois andam juntos).
-pub const VOLTA_MINIMA: &str = "1.1.0-rc.24";
+/// servidor confere que os dois andam juntos).)
+pub const VOLTA_MINIMA: &str = "1.1.0-rc.27";
 /// onde cada versão publicada guarda o seu manifesto assinado (manifesto-<canal>.json, anexado à página dela)
 const VERSOES: &str = "https://github.com/MagnoQuerino/ergon-community/releases/download";
 /// começo da mensagem quando o backup antes de voltar não deu certo: a tela oferece "voltar mesmo sem backup"
@@ -308,7 +310,7 @@ pub fn motivo_para_nao_voltar(alvo: &str, instalada: Option<&str>, seguranca: Op
     }
     if anterior_a(alvo, VOLTA_MINIMA) {
         return Some(format!(
-            "A {alvo} é antiga demais para voltar com segurança: ela é anterior à {VOLTA_MINIMA}, e nela a equipe e os seus dados de agora não voltariam juntos. Por aqui, dá para voltar até a {VOLTA_MINIMA}."
+            "A {alvo} é anterior à {VOLTA_MINIMA}, que mudou a base da equipe: por aqui, não dá para voltar para antes dela. Para voltar ao que era antes, use o backup feito na atualização."
         ));
     }
     if let Some(s) = seguranca {
@@ -560,17 +562,17 @@ mod testes {
     #[test]
     fn voltar_so_para_anterior_e_nao_antiga_demais() {
         let pode = |alvo: &str, inst: Option<&str>| motivo_para_nao_voltar(alvo, inst, None);
-        assert_eq!(VOLTA_MINIMA, "1.1.0-rc.24", "antes da rc.24 a equipe não voltaria junto (o gerente não recriava)");
-        assert_eq!(pode("1.1.0-rc.25", Some("1.1.0-rc.26")), None, "anterior e depois da mínima: pode");
-        assert_eq!(pode(VOLTA_MINIMA, Some("1.1.0-rc.26")), None, "a mínima ainda pode");
-        assert_eq!(pode("1.1.0-rc.26", Some("1.1.0")), None, "da final para a última pré-versão");
-        let antiga = pode("1.1.0-rc.23", Some("1.1.0-rc.26")).expect("antes da mínima: não pode");
-        assert!(antiga.contains("antiga demais") && antiga.contains(VOLTA_MINIMA) && antiga.contains("equipe"), "{antiga}");
-        assert!(pode("1.1.0-rc.13", Some("1.1.0-rc.26")).is_some());
-        assert!(pode("1.1.0-rc.9", Some("1.1.0-rc.26")).is_some(), "rc.9 < rc.24 (número, não texto)");
-        assert!(pode("1.0.1", Some("1.1.0-rc.26")).is_some());
-        assert!(pode("1.1.0-rc.24", Some("1.1.0-rc.24")).unwrap().contains("já está"), "a mesma: nada a fazer");
-        assert!(pode("1.1.0-rc.25", Some("1.1.0-rc.24")).unwrap().contains("Atualizar"), "mais nova: é atualizar");
+        assert_eq!(VOLTA_MINIMA, "1.1.0-rc.27", "a rc.27 muda a base da equipe (perfis): antes dela, só pelo backup");
+        assert_eq!(pode("1.1.0-rc.28", Some("1.1.0-rc.29")), None, "anterior e depois da mínima: pode");
+        assert_eq!(pode(VOLTA_MINIMA, Some("1.1.0-rc.29")), None, "a mínima ainda pode");
+        assert_eq!(pode("1.1.0-rc.29", Some("1.1.0")), None, "da final para a última pré-versão");
+        let antiga = pode("1.1.0-rc.26", Some("1.1.0-rc.27")).expect("antes da mínima: não pode");
+        assert!(antiga.contains("base da equipe") && antiga.contains(VOLTA_MINIMA) && antiga.contains("backup"), "{antiga}");
+        assert!(pode("1.1.0-rc.24", Some("1.1.0-rc.28")).is_some());
+        assert!(pode("1.1.0-rc.9", Some("1.1.0-rc.28")).is_some(), "rc.9 < rc.27 (número, não texto)");
+        assert!(pode("1.0.1", Some("1.1.0-rc.28")).is_some());
+        assert!(pode("1.1.0-rc.27", Some("1.1.0-rc.27")).unwrap().contains("já está"), "a mesma: nada a fazer");
+        assert!(pode("1.1.0-rc.28", Some("1.1.0-rc.27")).unwrap().contains("Atualizar"), "mais nova: é atualizar");
         assert!(pode("1.1.0-rc.25", None).is_some(), "sem saber a instalada: não volta");
     }
 

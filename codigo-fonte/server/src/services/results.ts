@@ -655,9 +655,11 @@ export class Results {
    * Conexões, abrir sites ou rodar programas depois de ler as contas. Nada dele avança nem é conferido antes disso
    * (evaluate abaixo; teamwork.ts, advance e decidiuDuranteExecucao).
    */
-  cartaoEsperando(taskId: string): 'conexao' | 'depois_de_ler' | null {
+  cartaoEsperando(taskId: string): 'conexao' | 'depois_de_ler' | 'aprovacao' | null {
     if (this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE task_id = ? AND status = 'pendente'", taskId)) return 'conexao';
     if (this.db.get("SELECT 1 AS x FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.kind = 'depois_de_ler' AND p.status = 'proposed'", taskId)) return 'depois_de_ler';
+    // um comando de risco esperando a sua aprovação (aprovação nativa do motor, rc.27): o card espera com você
+    if (this.db.get("SELECT 1 AS x FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.kind = 'aprovacao' AND p.status = 'proposed'", taskId)) return 'aprovacao';
     return null;
   }
 
@@ -695,7 +697,8 @@ export class Results {
     // (ou pediu aprovação para abrir sites ou rodar programas depois de ler as contas, com a proteção ligada: o mesmo)
     const esperando = this.cartaoEsperando(task.id);
     if (esperando) {
-      this.setWorkState(ws, task.id, 'aguardando_aprovacao', esperando === 'conexao' ? 'esperando a sua confirmação num cartão (ação numa conta)' : 'esperando a sua aprovação num cartão (abrir sites ou rodar programas)');
+      this.setWorkState(ws, task.id, 'aguardando_aprovacao', esperando === 'conexao' ? 'esperando a sua confirmação num cartão (ação numa conta)'
+        : esperando === 'aprovacao' ? 'esperando a sua aprovação num cartão (um comando de risco)' : 'esperando a sua aprovação num cartão (abrir sites ou rodar programas)');
       return null;
     }
     const asked = /\[\[\s*perguntar\b/i.test(output ?? '');

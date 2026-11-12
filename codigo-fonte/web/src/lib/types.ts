@@ -30,6 +30,22 @@ export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 export interface Usage {
   month: UsagePeriod; year: UsagePeriod; subscription: null | { provider: string; windows: Array<{ label: string; usedPercent: number; resetsAt: string | null }> };
   billing: Billing; costVisible: boolean; note: string; executor: 'real' | 'simulated';
+  /** rc.27: limites e saldo de cada conta de IA, como o provedor informa; ausente = servidor de antes */
+  accounts?: ContaDeIa[];
+}
+export interface JanelaDeUso { kind: 'sessao' | 'semana' | 'semana_modelo' | 'assinatura' | 'chave' | 'outro'; label: string; usedPercent: number; leftPercent: number; resetsAt: string | null; scope: 'conta' | 'modelo' }
+export interface ContaDeIa { provider: string; plan: string | null; windows: JanelaDeUso[]; balanceUsd: number | null; unlimited: boolean; renewsAt: string | null; readAt: string | null }
+export interface ModeloReserva { provider: string; model: string }
+export type Raciocinio = 'high' | 'medium' | 'low' | 'modelo';
+/** GET /api/team/ajustes: as escolhas da equipe que valem na equipe de IA, e as contas conectadas para montar a reserva */
+export interface AjustesDaEquipe {
+  reserva: { modo: 'auto' | 'lista' | 'desligado'; lista: ModeloReserva[]; emUso: ModeloReserva[] };
+  naoTreinar: boolean; buscaPrivada: boolean; buscaPrivadaAguarda: boolean; arrumarCompetencias: boolean;
+  /** anotar na memória depois da conversa (ligado por padrão) e a profundidade do raciocínio (alta por padrão) */
+  anotarMemoria: boolean; raciocinio: Raciocinio;
+  pendente: boolean; atualizacao: boolean; outros: number;
+  pausa: { pausada: boolean; desde: string | null };
+  opcoes?: { principal: { provider: string | null; model: string | null }; contas: Array<{ id: string; name: string; billing: Billing; models: Array<{ id: string; label: string }> }> };
 }
 /** GET /api/usage/composicao: do que é feita cada chamada ao modelo, por agente (frações de 0 a 1) */
 export interface ComposicaoAgente {
@@ -48,7 +64,7 @@ export interface Capacity { slots: number; active: number; free: number; floors?
 export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado' | 'atualizando';
 /** Ferramenta do catálogo do Ergon com o estado real ("planejado" nunca aparece como disponível). */
 /** guarded: executa código — bloqueada por padrão, liberada só com a senha */
-export interface AgentTool { id: string; label: string; kind: 'ergon' | 'ia'; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; platform?: boolean }
+export interface AgentTool { id: string; label: string; kind: 'ergon' | 'ia'; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; platform?: boolean; toolset?: string; /** custo ou risco: a tela avisa */ aviso?: 'custo' | 'risco' }
 export interface Sector { id: string; key: string; name: string; description: string | null; creates_tasks: 'demands' | 'explicit_only'; tools: string[]; skills: string[]; position: number; custom: number; members: number }
 export interface Agent {
   id: string; name: string; role: string; color: string; status: 'active' | 'archived'; demo: number; floor_id: string; floor_level: number; building_id: string;
@@ -88,6 +104,12 @@ export interface AppState {
   teamCompactacaoPendente?: boolean;
   /** a equipe é de antes desta opção: a escolha fica guardada e chega com a próxima atualização da equipe */
   teamCompactacaoAtualizacao?: boolean;
+  /** ajudantes temporários dos agentes (ligados por padrão, poucos ao mesmo tempo) */
+  teamAjudantes?: { ligado: boolean; max: number };
+  /** quantos agentes já trabalham no próprio perfil (memória, competências e conversas dele) */
+  teamPerfis?: { total: number; prontos: number };
+  /** rc.27: a equipe em pausa (nenhum trabalho novo começa até retomar); ausente = servidor de antes */
+  teamPausa?: { pausada: boolean; desde: string | null };
   /** personagens da equipe de partida com nome ou história de outro tema (0 = tema padrão) */
   themed: number;
   /** processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele */
@@ -191,7 +213,7 @@ export interface RecentConversation {
 }
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
 const TIPOS = ['question', 'routine', 'routine_edit', 'sector', 'create_agent', 'tools', 'permission', 'handoff', 'edit_agent', 'deactivate_agent', 'reactivate_agent', 'sector_edit',
-  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra'] as const;
+  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra', 'segredo', 'aprovacao'] as const;
 /** Uma tabela de rótulos lida na hora de mostrar: cada chave pelo dicionário, no idioma atual (a tela redesenha ao trocar). */
 const rotulo = t as (chave: Chave) => string;
 function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record<string, string> {
@@ -204,7 +226,7 @@ function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record
   });
 }
 export const PROPOSAL_KIND: Record<string, string> = rotulos(TIPOS, (k) => `servidor.tipo.${k}` as Chave);
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'regra' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
@@ -369,3 +391,8 @@ export interface AgentSkill {
   versions: Array<{ version: number; createdAt: string; trainingId: string | null; sources: TrainingSources }>;
 }
 export interface TrainingList { skills: AgentSkill[]; trainings: Training[] }
+/** A memória longa de um agente (rc.27): pronta = o agente já trabalha no próprio perfil */
+export interface MemoriaDoAgente {
+  pronta: boolean; notas: string; pessoa: string;
+  pendentes: Array<{ id: string; criado: number | null; alvo: 'pessoa' | 'notas'; itens: Array<{ acao: string; texto: string; antes: string }> }>;
+}

@@ -2,11 +2,13 @@
  * Consumo de modelo: só o que o provedor informou nas execuções reais (tokens de entrada e saída e, quando
  * houver, o custo cobrado). Ausente não vira zero e nada é estimado. O painel se adapta à conta:
  * assinatura (ChatGPT) não tem custo por uso; créditos (Nous) e chave de API só mostram custo quando o
- * provedor informa o valor cobrado. Tokens valem sempre. Limites de assinatura (5 h / semana) só aparecem
- * quando o motor os informar (a versão atual não informa).
+ * provedor informa o valor cobrado. Tokens valem sempre. Os limites e o saldo da assinatura (5 h / semana, créditos)
+ * vêm do provedor, lidos pelo motor (rc.27: a ponte de controle, /ergon/v1/cota): `accounts`. Motor de antes ou
+ * provedor que não informa: lista vazia (a tela não mostra nada no lugar).
  */
 import type { Db } from '../db/db.ts';
 import type { Billing } from './ai.ts';
+import type { CotaConta } from './hermes.ts';
 
 export interface UsagePeriod {
   from: string;
@@ -22,11 +24,27 @@ export interface UsageSummary {
   month: UsagePeriod;
   year: UsagePeriod;
   subscription: null | { provider: string; windows: Array<{ label: string; usedPercent: number; resetsAt: string | null }> };
+  /** limites e saldo de cada conta de IA, como o provedor informa (nunca estimado); vazio = não informado */
+  accounts: ContaDeIa[];
   /** tipo de cobrança da conta do modelo padrão */
   billing: Billing;
   /** mostrar custo? só quando algum custo cobrado foi informado (nunca estimado) */
   costVisible: boolean;
   note: string;
+}
+
+/** Uma janela de limite: quanto RESTA (0 a 100) e quando renova. */
+export interface JanelaDeUso { kind: 'sessao' | 'semana' | 'semana_modelo' | 'assinatura' | 'chave' | 'outro'; label: string; usedPercent: number; leftPercent: number; resetsAt: string | null; scope: 'conta' | 'modelo' }
+export interface ContaDeIa { provider: string; plan: string | null; windows: JanelaDeUso[]; balanceUsd: number | null; unlimited: boolean; renewsAt: string | null; readAt: string | null }
+
+/** O que o motor leu do provedor → o que a tela mostra (o que resta, arredondado; datas só se forem datas). */
+export function contasDeIa(cota: CotaConta[] | null | undefined): ContaDeIa[] {
+  const data = (v: string | null) => (v && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : null);
+  return (cota ?? []).map((c) => ({
+    provider: c.provedor, plan: c.plano,
+    windows: c.janelas.map((w) => { const usado = Math.round(Math.max(0, Math.min(100, w.usado))); return { kind: w.tipo, label: w.rotulo, usedPercent: usado, leftPercent: 100 - usado, resetsAt: data(w.renovaEm), scope: w.escopo }; }),
+    balanceUsd: c.saldoUsd, unlimited: c.saldoIlimitado, renewsAt: data(c.renovaEm), readAt: data(c.lidoEm),
+  })).filter((c) => c.windows.length || c.balanceUsd !== null || c.unlimited);
 }
 
 /** Início do mês e do ano no fuso de quem pergunta (minutos de diferença para UTC, como Date.getTimezoneOffset). */
@@ -58,12 +76,12 @@ const NOTE: Record<Billing, string> = {
   none: 'Sem conta de IA conectada: a equipe não trabalha nos pedidos, sem consumo.',
 };
 
-export function usageSummary(db: Db, workspaceId: string, tzOffsetMin: number, nowMs = Date.now(), billing: Billing = 'none'): UsageSummary {
+export function usageSummary(db: Db, workspaceId: string, tzOffsetMin: number, nowMs = Date.now(), billing: Billing = 'none', cota: CotaConta[] | null = null): UsageSummary {
   const s = periodStarts(nowMs, tzOffsetMin);
   const month = period(db, workspaceId, s.month);
   const year = period(db, workspaceId, s.year);
   return {
-    month, year, subscription: null, billing,
+    month, year, subscription: null, accounts: contasDeIa(cota), billing,
     costVisible: billing !== 'subscription' && (month.runsWithCost > 0 || year.runsWithCost > 0),
     note: NOTE[billing],
   };

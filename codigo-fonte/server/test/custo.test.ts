@@ -6,9 +6,9 @@
  *     relógio do motor compensado;
  *  D) as instruções do agente com as partes fixas primeiro e os dados de agora por último (o cache do provedor reaproveita
  *     o começo que se repete) — o protocolo de cada parte e a nota do canal ficam fora do bloco de dados;
- *  25) passos por pedido: 20 por padrão, a pessoa escolhe (5 a 60); o valor vai ao motor na hora, na abertura e no passo
- *     de 60 s enquanto não chegou; a tela mostra o que vale de fato no motor e se ainda não chegou; valor fora do
- *     intervalo no motor volta a 20.
+ *  25) passos por pedido: 90 por padrão (rc.27, regra do dono: a experiência máxima de cara), a pessoa escolhe (5 a 150);
+ *     o valor vai ao motor na hora, na abertura e no passo de 60 s enquanto não chegou; a tela mostra o que vale de fato no
+ *     motor e se ainda não chegou; valor fora do intervalo no motor, ou o 20 de antes que ninguém escolheu, vai a 90.
  *  rc.26) a conversa resumida mais cedo (compactação): ligada por padrão, a pessoa desliga; o motor recebe na hora, na
  *     abertura e no passo de fundo; a tela mostra em quantos pedidos a conversa foi resumida. Equipe grande: a coordenação
  *     recebe um resumo da equipe (contagem por setor, os ligados ao card e à conversa, quem tem as ferramentas sensíveis),
@@ -349,7 +349,7 @@ describe('D) instruções: as partes fixas primeiro, os dados de agora por últi
 });
 
 describe('25) passos por pedido', () => {
-  test('padrão 20; a pessoa escolhe e o motor recebe na hora; fora do intervalo, recusado', async () => {
+  test('padrão 90; a pessoa escolhe e o motor recebe na hora; fora do intervalo, recusado', async () => {
     const { h, s, p } = await umMotor();
     const st0 = (await req(h, 'GET', '/api/state', s)).json;
     assert.equal(st0.teamMaxTurns, PASSOS_PADRAO); assert.equal(st0.teamMaxTurnsPendente, false);
@@ -362,7 +362,7 @@ describe('25) passos por pedido', () => {
     // o mesmo valor de novo: o motor já tem, nada é regravado
     await req(h, 'PUT', '/api/team/max-turns', s, { value: 40 });
     assert.deepEqual(p.st.gravados, [40]);
-    for (const v of [4, 61, 20.5, '20', null]) assert.equal((await req(h, 'PUT', '/api/team/max-turns', s, { value: v })).status, 400, String(v));
+    for (const v of [4, 151, 20.5, '20', null]) assert.equal((await req(h, 'PUT', '/api/team/max-turns', s, { value: v })).status, 400, String(v));
     const aud = h.db.get<{ result: string }>("SELECT result FROM audit_events WHERE action = 'team.max_turns' ORDER BY created_at DESC LIMIT 1");
     assert.match(aud?.result ?? '', /até 40 passos por pedido/);
     await h.close();
@@ -416,16 +416,26 @@ describe('25) passos por pedido', () => {
     await h.close();
   });
 
-  test('sem escolha, o motor fica com o que tem; um valor fora de 5 a 60 (ou "sem limite") volta a 20', async () => {
-    for (const [noMotor, depois] of [[30, 30], [500, 20], [null, 20], [3, 20]] as const) {
+  test('sem escolha, o motor fica com o que tem; o 20 de antes, um valor fora de 5 a 150 (ou "sem limite") vão a 90', async () => {
+    for (const [noMotor, depois] of [[30, 30], [120, 120], [20, 90], [500, 90], [null, 90], [3, 90]] as const) {
       const { h, p } = await umMotor();
       p.st.passos = noMotor;
       h.startBackground();
       await new Promise((x) => setTimeout(x, 80));
       assert.equal(p.st.passos, depois, `motor com ${noMotor}`);
-      assert.deepEqual(p.st.gravados, depois === noMotor ? [] : [20]);
+      assert.deepEqual(p.st.gravados, depois === noMotor ? [] : [90]);
       await h.close();
     }
+  });
+
+  test('motor de antes (teto 60) recusa o padrão novo: sem escolha, fica com o que tem e não dá erro; com escolha, o erro sobe', async () => {
+    const { h, s, p } = await umMotor();
+    const antigo = { ...p.control, setPassos: async (n: number) => { if (n > 60) throw new HermesError(400, 'envie max_turns entre 5 e 60'); p.st.gravados.push(n); p.st.passos = n; return n; } } as unknown as HermesControlClient;
+    assert.equal(await sincronizarPassos(h.db, antigo, [s.workspaceId]), 20);
+    assert.deepEqual(p.st.gravados, []);
+    setSetting(h.db, s.workspaceId, 'team.max_turns', '120');
+    await assert.rejects(sincronizarPassos(h.db, antigo, [s.workspaceId]), (e: unknown) => e instanceof HermesError && e.status === 400);
+    await h.close();
   });
 
   test('a escolha mais recente entre os workspaces do motor; o valor confirmado fica gravado em cada um', async () => {

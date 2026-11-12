@@ -1,3 +1,4 @@
+import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
 import { Fragment, useEffect, useState, type ChangeEvent } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -46,6 +47,7 @@ interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => vo
  * destaque, e depois os aplicativos de tarefas e quadros, na ordem de fama no Brasil. "Conectado" só depois de
  * conferir com o serviço; "em breve" diz o que falta.
  */
+
 export function ConexoesView() {
   const t = useT();
   const list = useResource<Integration[]>('/api/integrations', ['integrations.changed']);
@@ -141,6 +143,8 @@ export function ConexoesView() {
         <TeamsConversa />
       </section>
 
+      <ConversaPorCanais />
+
       <LiberarTudo estado={cx} />
       <Regras />
 
@@ -173,6 +177,7 @@ export function ConexoesView() {
           </section>
         );
       })}
+      <ConectoresProntos dono />
       {achadosNoDestaque.length > 0 && (
         <p className="muted">{tn('conexoes.busca.emDestaque', { lista: achadosNoDestaque.map((i, n) => <Fragment key={i.kind}>{n ? ', ' : ''}<button className="link link--inline" onClick={() => irAte(i.kind)}>{i.name}</button></Fragment>) })}</p>
       )}
@@ -829,6 +834,120 @@ function ListEditor({ label, values, suggestions, onChange, placeholder }: { lab
       </div>
       {sugg.length > 0 && v && <div className="row row--wrap">{sugg.map((s) => <button key={s} className="chip" onClick={() => add(s)}>+ {s}</button>)}</div>}
     </div>
+  );
+}
+
+/** GET /api/canais: conversar com a equipe pelo Telegram e pelo Discord (o bot da própria pessoa). */
+type NomeCanal = 'telegram' | 'discord';
+interface EstadoCanal {
+  disponivel: boolean; motivo?: 'motor' | 'versao'; bot: boolean; conexao: 'conectado' | 'conectando' | 'sem_conexao' | null; codigoRecusado?: boolean;
+  ligado: { nome: string | null; desde: string; avisos: boolean } | null;
+}
+const ERRO_CANAL: Record<string, `conexoes.canal.erro.${'formato' | 'codigo' | 'tentativas' | 'motor'}`> = {
+  formato: 'conexoes.canal.erro.formato', codigo: 'conexoes.canal.erro.codigo', tentativas: 'conexoes.canal.erro.tentativas', motor: 'conexoes.canal.erro.motor',
+};
+
+/**
+ * Conexões › "Conversar com a equipe pelo Telegram / pelo Discord": a pessoa cria o bot dela, cola o código (fica com a
+ * equipe dela, protegido), manda uma mensagem ao bot, digita o código que ele responde e confirma com a senha. Daí em
+ * diante, o que ela escreve ao bot vai para a equipe, e as respostas, os cartões e os avisos voltam por lá.
+ */
+function ConversaPorCanal({ canal, estado, reload }: { canal: NomeCanal; estado: EstadoCanal; reload: () => void }) {
+  const t = useT();
+  const [token, setToken] = useState('');
+  const [codigo, setCodigo] = useState('');
+  const [senha, setSenha] = useState('');
+  const [trocar, setTrocar] = useState(false);
+  const [desligar, setDesligar] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [pronto, setPronto] = useState(false);
+  const nome = canal === 'telegram' ? 'Telegram' : 'Discord';
+  const agir = async (fn: () => Promise<unknown>, depois?: () => void) => {
+    setErr(null); setBusy(true);
+    try { await fn(); depois?.(); reload(); } catch (x) {
+      if (x instanceof ApiError && x.code === 'invalid_login') setErr(t('conexoes.canal.senhaIncorreta'));
+      else if (x instanceof ApiError && ERRO_CANAL[x.code]) setErr(t(ERRO_CANAL[x.code]));
+      else setErr(errMsg(x));
+    } finally { setBusy(false); }
+  };
+  const e = estado;
+  const titulo = canal === 'telegram' ? t('conexoes.canal.titulo.telegram') : t('conexoes.canal.titulo.discord');
+  const conexao = e.conexao === 'conectado' ? t('conexoes.canal.conexao.conectado') : e.conexao === 'sem_conexao' ? t('conexoes.canal.conexao.semConexao') : e.conexao === 'conectando' ? t('conexoes.canal.conexao.conectando') : null;
+  const passos = canal === 'telegram'
+    ? <ol className="small">
+        <li>{tn('conexoes.canal.tg.passo1', { botfather: <a href="https://t.me/BotFather" target="_blank" rel="noreferrer noopener">@BotFather</a> })}</li>
+        <li>{t('conexoes.canal.tg.passo2')}</li>
+        <li>{t('conexoes.canal.tg.passo3')}</li>
+      </ol>
+    : <ol className="small">
+        <li>{tn('conexoes.canal.dc.passo1', { portal: <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer noopener">{t('conexoes.canal.dc.portal')}</a> })}</li>
+        <li>{t('conexoes.canal.dc.passo2')}</li>
+        <li>{t('conexoes.canal.dc.passo3')}</li>
+        <li>{t('conexoes.canal.dc.passo4')}</li>
+      </ol>;
+  const formBot = (
+    <form className="row row--wrap" onSubmit={(ev) => { ev.preventDefault(); void agir(() => api.put(`/api/canais/${canal}/bot`, { token: token.trim() }), () => { setToken(''); setTrocar(false); }); }}>
+      <label className="field">{t('conexoes.canal.codigoDoBot')}<input type="password" value={token} onChange={(ev) => setToken(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={200} /></label>
+      <button className="btn btn--sm btn--primary" disabled={busy || token.trim().length < 20}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.canal.guardar')}</button>
+      {trocar && <button type="button" className="btn btn--sm btn--ghost" onClick={() => { setTrocar(false); setToken(''); }}>{t('conexoes.canal.cancelar')}</button>}
+    </form>
+  );
+  return (
+    <article className={`card conn feature ${e.ligado ? 'feature--on' : ''}`}>
+      <header className="row"><BrandLogo kind={canal} name={nome} size={36} /><strong>{titulo}</strong></header>
+      <p className="muted">{t('conexoes.canal.intro')}</p>
+      {!e.disponivel ? <p className="hint">{e.motivo === 'versao' ? t('conexoes.canal.indisponivel.versao') : t('conexoes.canal.indisponivel.motor')}</p> : <>
+        {e.ligado ? <>
+          <p>{tn('conexoes.canal.ligadoComo', { nome: <b>{e.ligado.nome || t('conexoes.canal.contaSemNome')}</b>, data: fmtData(e.ligado.desde) })}</p>
+          {conexao && <p className="small" role="status">{conexao}</p>}
+          {e.codigoRecusado && <p className="warn">{t('conexoes.canal.codigoRecusado', { canal: nome })}</p>}
+          <label className="check"><input type="checkbox" checked={e.ligado.avisos} disabled={busy} onChange={(ev) => void agir(() => api.patch(`/api/canais/${canal}`, { avisos: ev.target.checked }))} /> {t('conexoes.canal.avisar')}</label>
+          {pronto && <p className="ok" role="status">{t('conexoes.canal.pronto')}</p>}
+        </> : !e.bot || trocar ? <>
+          {passos}
+          {formBot}
+          <p className="hint">{t('conexoes.canal.guardado')}</p>
+        </> : <>
+          {conexao && <p className="small" role="status">{conexao}</p>}
+          {e.codigoRecusado && <p className="warn">{t('conexoes.canal.codigoRecusado', { canal: nome })}</p>}
+          <p>{t('conexoes.canal.parear.passo')}</p>
+          <form className="row row--wrap" onSubmit={(ev) => { ev.preventDefault(); void agir(() => api.post(`/api/canais/${canal}/parear`, { codigo, password: senha }), () => { setCodigo(''); setSenha(''); setPronto(true); }); }}>
+            <label className="field">{t('conexoes.canal.parear.codigo')}<input value={codigo} onChange={(ev) => setCodigo(ev.target.value)} placeholder="ABCD2345" autoComplete="off" spellCheck={false} maxLength={20} /></label>
+            <input type="password" autoComplete="current-password" placeholder={t('conexoes.canal.suaSenha')} aria-label={t('conexoes.canal.suaSenha')} value={senha} onChange={(ev) => setSenha(ev.target.value)} />
+            <button className="btn btn--sm btn--primary" disabled={busy || !senha || codigo.replace(/[\s-]/g, '').length < 8}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.canal.parear.ligar')}</button>
+          </form>
+          <p className="hint">{t('conexoes.canal.parear.quemEscreve')}</p>
+        </>}
+        {err && <p className="err" role="alert">{err}</p>}
+        {(e.bot || e.ligado) && !trocar && <div className="row row--wrap">
+          {!e.ligado && <button className="btn btn--sm btn--ghost" onClick={() => setTrocar(true)}>{t('conexoes.canal.trocarBot')}</button>}
+          {desligar
+            ? <div className="confirm">{t('conexoes.canal.desligarPergunta')}
+                <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void agir(() => api.del(`/api/canais/${canal}`), () => { setDesligar(false); setPronto(false); })}>{t('conexoes.canal.desligar')}</button>
+                <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(false)}>{t('conexoes.canal.cancelar')}</button></div>
+            : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(true)}>{t('conexoes.canal.desligar')}</button>}
+        </div>}
+        <p className="hint">{canal === 'telegram' ? t('conexoes.canal.fechado.telegram') : t('conexoes.canal.fechado.discord')} {t('conexoes.canal.soDireta')}</p>
+      </>}
+    </article>
+  );
+}
+
+/** A seção dos dois canais (o lugar fica reservado até a resposta, que vem na pré-carga). */
+function ConversaPorCanais() {
+  const t = useT();
+  const st = useResource<Record<NomeCanal, EstadoCanal>>('/api/canais', ['canais.changed']);
+  return (
+    <section className="conn-group conn-group--feature" id="conn-canais">
+      <h3>{t('conexoes.canal.secaoTitulo')}</h3>
+      <p className="muted small">{t('conexoes.canal.secaoTexto')}</p>
+      <div className="feature-grid">
+        {st.data
+          ? (['telegram', 'discord'] as const).map((c) => <ConversaPorCanal key={c} canal={c} estado={st.data![c]} reload={st.reload} />)
+          : <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><p className="muted">…</p></article>}
+      </div>
+    </section>
   );
 }
 

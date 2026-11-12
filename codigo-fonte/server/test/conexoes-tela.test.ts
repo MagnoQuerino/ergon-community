@@ -361,7 +361,7 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
   test('cartão de ação numa conta: quem recusa lê "Recusando…", e o já decidido noutro lugar só relê', () => {
     // "Enviando…" só no cartão que envia a uma conta; ativar rotina, abrir cards e apagar de vez dizem o que fazem
     // a conversa traduzida: as chaves no componente e o texto no dicionário português
-    assert.match(ler('web/src/components/ChatPanel.tsx'), /deciding\[p\.id\] === 'reject' \? t\('conversas\.proposta\.recusando'\) : p\.kind === 'conexao' \? t\('conversas\.proposta\.enviando'\) : p\.kind === 'depois_de_ler' \? t\('conversas\.proposta\.aprovando'\) : p\.kind === 'purge' \? t\('conversas\.proposta\.apagando'\) : t\('conversas\.proposta\.aplicando'\)/);
+    assert.match(ler('web/src/components/ChatPanel.tsx'), /deciding\[p\.id\] === 'reject' \? t\('conversas\.proposta\.recusando'\) : p\.kind === 'conexao' \? t\('conversas\.proposta\.enviando'\) : p\.kind === 'depois_de_ler' \|\| p\.kind === 'aprovacao' \? t\('conversas\.proposta\.aprovando'\) : p\.kind === 'purge' \? t\('conversas\.proposta\.apagando'\) : t\('conversas\.proposta\.aplicando'\)/);
     const dicConversas = ler('web/src/i18n/pt/conversas.ts');
     for (const [chave, texto] of [['recusando', 'Recusando…'], ['enviando', 'Enviando…'], ['aprovando', 'Aprovando…'], ['apagando', 'Apagando…'], ['aplicando', 'Aplicando…']]) {
       assert.ok(dicConversas.includes(`'proposta.${chave}': '${texto}'`), `conversas.proposta.${chave}`);

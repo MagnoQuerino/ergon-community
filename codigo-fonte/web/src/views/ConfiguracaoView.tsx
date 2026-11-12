@@ -13,11 +13,13 @@ import type { Me, VersionInfo } from '../lib/types.ts';
 /** GET /api/ai/tools: cada ferramenta com quem a tem (contagem e até 3 nomes, o Coordenador primeiro). */
 type ToolWithHolders = AgentTool & { holders?: { count: number; sample: string[] } };
 import { SaudePanel } from './SaudePanel.tsx';
+import { CapacidadesPanel } from '../components/CapacidadesPanel.tsx';
 import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
 import { PacotesPanel } from './PacotesPanel.tsx';
 import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
 import { MusicCreditsBlock } from '../components/MusicButton.tsx';
+import { ArrumarField, CotaLinhas, MemoriaField, PausaControle, RaciocinioField, ReservaCard, useAjustes } from '../components/AjustesEquipe.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
 
 // módulo opcional (views/world): a Community não traz essa pasta
@@ -54,7 +56,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>{t('configuracoes.abas.saude')}</button>}
         </div>
       </header>
-      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
       <VersionCard onOpen={() => setTab('atualizacoes')} />
       <MusicCreditsBlock />
     </div>
@@ -110,14 +112,16 @@ function VersionCard({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
+function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void; dono: boolean }) {
   const t = useT();
   const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const tools = useResource<ToolWithHolders[]>('/api/ai/tools', ['agents.changed']);
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed']);
   const composicao = useResource<ComposicaoResumo>('/api/usage/composicao?dias=30', ['usage.changed']);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-
+  // rc.27: plano B (modelos reserva), arrumar competências sem uso e a pausa da equipe
+  const ajustes = useAjustes((text) => setMsg({ kind: 'error', text }));
+  const atualizarCota = async () => { try { await api.get(`/api/usage?tz=${new Date().getTimezoneOffset()}&atualizar=1`); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } usage.reload(); };
 
   // quem tem cada ferramenta vem na própria lista (holders): basta relê-la
   const toggleTool = async (id: string, on: boolean) => {
@@ -136,7 +140,8 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
         <p className="muted small">{t('configuracoes.ferr.texto')}</p>
         <p className="hint"><Icon name="lock" size={12} /> {t('configuracoes.ferr.protegidas')}</p>
         <div className="tools-grid">
-          {(tools.data ?? []).filter((f) => f.kind === 'ia' || f.id === 'agenda').map((f) => f.kind === 'ergon' ? (
+          {/* conectores prontos não ligam aqui: instalam em Conexões › Mais aplicativos (a seção Capacidades da equipe explica) */}
+          {(tools.data ?? []).filter((f) => (f.kind === 'ia' && f.id !== 'conectores') || f.id === 'agenda').map((f) => f.kind === 'ergon' ? (
             // do próprio Ergon: sempre ligada (vale para quem a tem no perfil)
             <label key={f.id} className="tool-opt tool-opt--on">
               <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title={t('configuracoes.ferr.sempreLigadaDica')} />
@@ -149,21 +154,31 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
               <input type="checkbox" checked={!!f.platform} disabled={(!f.safe && !f.guarded) || !s?.available || f.id === 'passos'} onChange={(e) => void toggleTool(f.id, e.target.checked)} />
               <span className="tool-opt__txt"><b>{f.guarded && <Icon name="lock" size={12} />} {f.label}</b><small>{f.note.replace(/ — (desligada|bloqueada):.*$/, '')}{f.guarded && !f.platform ? ` · ${t('configuracoes.ferr.pedeSenha')}` : ''}</small></span>
               <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{f.safe || f.guarded ? (f.platform ? t('configuracoes.ferr.ligada') : f.guarded ? t('configuracoes.ferr.protegida') : t('configuracoes.ferr.desligada')) : t('configuracoes.ferr.bloqueada')}</span>
+                {f.aviso && <span className="badge badge--warn" title={f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custoDica') : t('configuracoes.ferr.aviso.riscoDica')}>{f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custo') : t('configuracoes.ferr.aviso.risco')}</span>}
                 <span className="muted small">{holdersText(f.holders)}</span></span>
             </label>
           ))}
         </div>
       </section>
 
+      <ReservaCard a={ajustes.a} salvar={ajustes.salvar} aviso={ajustes.aviso} />
+
+      <CapacidadesPanel dono={dono} />
+
       <section className="card">
         <h3>{t('configuracoes.andamento.titulo')}</h3>
+        <PausaControle pausa={ajustes.a?.pausa ?? state.teamPausa} onMudou={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <label className="check"><input type="checkbox" checked={state.teamAutorun} onChange={async (e) => { try { await api.put('/api/team/autorun', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
           {t('configuracoes.andamento.autorun')}</label>
         <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
           {t('configuracoes.andamento.iniciativa')}</label>
         <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+        <RaciocinioField a={ajustes.a} salvar={ajustes.salvar} />
+        <AjudantesField valor={state.teamAjudantes ?? { ligado: true, max: AJUDANTES_MAX }} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <CompactacaoField ligada={state.teamCompactacao !== false} pendente={state.teamCompactacaoPendente === true} atualizacao={state.teamCompactacaoAtualizacao === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+        <MemoriaField a={ajustes.a} salvar={ajustes.salvar} />
+        <ArrumarField a={ajustes.a} salvar={ajustes.salvar} />
         <p className="hint">{t('configuracoes.andamento.dica')}</p>
       </section>
 
@@ -174,6 +189,7 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
             ? tn('configuracoes.consumo.mesComCusto', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong>, custo: <strong>{fmtMoeda(usage.data.month.costUsd, 'USD', { maximumFractionDigits: 4 })}</strong> })
             : tn('configuracoes.consumo.mes', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong> })}</p>
           <p className="hint">{usage.data.note}</p>
+          <CotaLinhas contas={usage.data.accounts} onAtualizar={atualizarCota} />
         </section>
       )}
 
@@ -183,7 +199,7 @@ function IaPanel({ state, reload }: { state: AppState; reload: () => void }) {
 }
 
 /**
- * Passos por pedido: quantas idas ao modelo um pedido pode dar (padrão 20). Grava na hora; vale no próximo pedido. O valor
+ * Passos por pedido: quantas idas ao modelo um pedido pode dar (padrão 90). Grava na hora; vale no próximo pedido. O valor
  * e o aviso de que ainda não chegou à equipe vêm do servidor (o que vale de fato no motor deste workspace, também depois
  * de recarregar a tela); a resposta do salvar só antecipa o aviso até o estado chegar.
  */
@@ -207,6 +223,40 @@ function PassosField({ value, pendente, outros, onSaved, onError }: { value: num
         {opcoes.map((n) => <option key={n} value={n}>{n === PASSOS_PADRAO ? t('configuracoes.passos.opcaoPadrao', { n }) : t('configuracoes.passos.opcao', { n })}</option>)}
       </select>
       <small id="passos-pedido-hint" className="muted">{passosAjuda()}{outros ? ` ${passosCompartilhado(outros)}` : ''}{depois ? ` ${passosDepois()}` : ''}</small>
+    </div>
+  );
+}
+
+/**
+ * Ajudantes temporários (rc.27): os subagentes do motor, para cada agente dividir um trabalho grande. Ligados por padrão,
+ * com o máximo do motor ao mesmo tempo (regra do dono, 12/11); o aviso diz que custam (cada um é mais uma conversa com o
+ * modelo) e a pessoa desliga ou diminui para economizar.
+ */
+/** o teto dos ajudantes ao mesmo tempo (o mesmo do servidor, AJUDANTES_MAX em server/src/services/perfis.ts: o do motor) */
+const AJUDANTES_MAX = 10;
+
+function AjudantesField({ valor, onSaved, onError }: { valor: { ligado: boolean; max: number }; onSaved: () => void; onError: (text: string) => void }) {
+  const t = useT();
+  const [v, setV] = useState(valor);
+  useEffect(() => { setV(valor); }, [valor.ligado, valor.max]);
+  const save = async (n: { ligado: boolean; max: number }) => {
+    const antes = v;
+    setV(n);
+    try { await api.put('/api/team/ajudantes', n); onSaved(); }
+    catch (x) { setV(antes); onError(errMsg(x)); }
+  };
+  return (
+    <div className="compactar">
+      <label className="check"><input type="checkbox" checked={v.ligado} onChange={(e) => void save({ ...v, ligado: e.target.checked })} aria-describedby="ajudantes-hint" /> {t('configuracoes.ajudantes.rotulo')}</label>
+      {v.ligado && (
+        <div className="field field--limit">
+          <label htmlFor="ajudantes-max">{t('configuracoes.ajudantes.quantos')}</label>
+          <select id="ajudantes-max" value={String(v.max)} onChange={(e) => void save({ ...v, max: Number(e.target.value) })}>
+            {[...new Set([1, 2, 3, 4, 6, 8, AJUDANTES_MAX, v.max])].sort((x, y) => x - y).map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+      )}
+      <p id="ajudantes-hint" className="hint">{t('configuracoes.ajudantes.ajuda')}</p>
     </div>
   );
 }

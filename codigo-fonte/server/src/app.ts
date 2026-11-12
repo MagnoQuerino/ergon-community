@@ -20,6 +20,10 @@ import { EspelhoEscrita } from './services/conexoes/espelho.ts';
 import { log, scrub, setLog } from './lib/log.ts';
 import { paraTela } from './lib/texto-tela.ts';
 import { S, idParams, strList } from './lib/schemas.ts';
+import { Cartoes, type PedidoCartao } from './services/cartoes.ts';
+import { Aprovacoes, KIND_APROVACAO } from './services/aprovacoes.ts';
+import { RotinasNoMotor } from './services/rotinas-motor.ts';
+import { Comandos, parseComando, INTERVALO_MAX_S, INTERVALO_MIN_S, RODADAS_MAX, type Alvo, type TipoComando } from './services/comandos.ts';
 import { registerIntegrationRoutes } from './routes/integracoes.ts';
 import {
   SESSION_COOKIE, checkCredentials, extendSession, logout, needsSetup, resolveSession, setupOwner, switchWorkspace, touchSession, userFactors, requireRecentAuth, type AuthContext,
@@ -27,6 +31,11 @@ import {
 import { PersonKeySource, Vault } from './security/keys.ts';
 import { WorkspaceOwners, isAdmin, openPersonWithPassword, signupPolicy } from './services/people.ts';
 import { registerPeopleRoutes } from './routes/pessoas.ts';
+import { registerAjustesRoutes } from './routes/equipe-ajustes.ts';
+import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } from './services/ajustes-motor.ts';
+import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
+import { registerRecursosRoutes } from './routes/recursos.ts';
+import { Recursos } from './services/recursos.ts';
 import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, anterioresParaVoltar, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
@@ -49,7 +58,7 @@ import { applyDocCommands, createFolder, emptyTrash, purgeFiles, purgeRequest, f
 import { personalityOf, setPersonality } from './services/voices.ts';
 import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
-import { HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
+import { HermesError, HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
 import { CONEXOES, type AiService } from './services/ai.ts';
 import { equipeNaSaude, Motors } from './services/motors.ts';
 import { Integrations, integrationRow, setIntegration, type IntegrationKind } from './services/integrations.ts';
@@ -75,9 +84,10 @@ import { KIND_LABEL, Results, WORK_LABEL, type WorkState } from './services/resu
 import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setSetting } from './services/sectors.ts';
 import { findConnection, ingestEvent, syncConfiguredIdentities, upsertIdentity } from './services/ingest.ts';
 import { FixtureTaskProvider, importBoards } from './services/mirror.ts';
-import { RunExecutor, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
+import { RunExecutor, almaDoAgente, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
+import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
 import { ReviewService } from './services/review.ts';
-import { GUARDED_TOOLSETS, TOOLS, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
+import { GUARDED_TOOLSETS, TOOLS, ferramentasDesligadas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PASSOS_SETTING, compactacaoDaEquipe, medirExecucao, passosDaEquipe, resumoComposicao } from './services/custo.ts';
@@ -90,6 +100,7 @@ import { Packages } from './services/packages.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
 import { buildPackage, validatePackage } from './services/ergon-package.ts';
 import { TeamsApp, registerTeamsAppRoutes } from './services/teams-app/index.ts';
+import { Canais, registerCanaisRoutes } from './services/canais/index.ts';
 import type { Tokens } from './services/sso.ts';
 
 declare module 'fastify' {
@@ -113,6 +124,10 @@ export interface AppDeps {
 export interface ErgonApp {
   app: FastifyInstance;
   executor: RunExecutor;
+  cartoes: Cartoes;
+  aprovacoes: Aprovacoes;
+  rotinasMotor: RotinasNoMotor;
+  comandos: Comandos;
   reviews: ReviewService;
   teamwork: Teamwork;
   operations: Operations;
@@ -123,6 +138,8 @@ export interface ErgonApp {
   integrations: Integrations;
   conexoes: Conexoes;
   espelhoEscrita: EspelhoEscrita;
+  /** a equipe nativa (rc.27): o perfil de cada agente no motor */
+  perfis: Perfis;
   whatsapp: WhatsAppReader;
   initiative: Initiative;
   bus: Bus;
@@ -132,6 +149,7 @@ export interface ErgonApp {
   motors: Motors;
   /** conversar com a equipe pelo Teams (app público, pelo serviço do Teams) */
   teamsApp: TeamsApp;
+  canais: Canais;
   /** liga os trabalhos em segundo plano (ferramentas, espelhos, fila da equipe, WhatsApp, cofre do motor) */
   startBackground(): void;
   stopBackground(): Promise<void>;
@@ -192,6 +210,31 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     executor.motorUnavailableSince = (ws) => motors.semRespostaDesde(ws);
     executor.motorGiveUpText = () => motors.semRespostaTexto();
   }
+  /** o serviço das rotinas no motor nasce depois deste ponto (o barramento já avisa) */
+  const rotinasMotorRef: { atual: RotinasNoMotor | null } = { atual: null };
+  // Equipe nativa (rc.27, services/perfis.ts): cada agente é um perfil do motor, criado na criação do agente e, para os
+  // que já existiam, pela volta de 60 s (a migração de quem vem da rc.26). As execuções do agente vão para o perfil dele.
+  const perfis = new Perfis(db, bus);
+  perfis.control = (ws) => motors.control(ws);
+  perfis.scope = (ws) => motors.scope(ws);
+  if (motors.perPerson) perfis.pronto = (ws) => motors.accepting(ws);
+  executor.perfilDe = (ws, ag) => perfis.perfilPronto(ws, ag);
+  executor.almaDe = (ws, ag) => { try { return almaDoAgente(db, ws, ag); } catch { return null; } };
+  executor.perfilSumiu = (ag) => perfis.sumiu(ag);
+  // o pedido do agente espera a última mudança dele chegar ao perfil (com limite curto: PERFIL_ESPERA_MS)
+  executor.perfilEmDia = (ws, ag) => perfis.emDiaCom(ws, ag);
+  executor.perfilApressar = (ws, ag) => perfis.apressar(ws, ag);
+  executor.perfilEsperaMs = PERFIL_ESPERA_MS;
+  // o agente mudou (criado, editado, ferramentas, competências, modelo): o perfil dele recebe logo, sem esperar a volta
+  {
+    const publicar = bus.publish.bind(bus);
+    bus.publish = (ws, type, data) => {
+      publicar(ws, type, data);
+      if (type === 'agents.changed') { perfis.agendar(ws); rotinasMotorRef.atual?.agendar(ws); }
+      // a rotina mudou (criada, editada, pausada, arquivada): o job dela no agendador do motor acompanha
+      else if (type === 'routines.changed' && !(data as { run?: string } | undefined)?.run) rotinasMotorRef.atual?.agendar(ws);
+    };
+  }
   // as Conexões de um agente ficam "atualizando" (não "desligadas") quando há conta ligada e o motor ainda não as tem
   setContasConectadas((ws) => !!db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND state = 'connected' LIMIT 1", ws));
   const reviews = new ReviewService(db, bus, executor, cfg);
@@ -202,13 +245,27 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const teamwork = new Teamwork(db, bus, executor, results, operations, cfg.filesDir);
   // a equipe puxa conversa quando a pessoa chega; o colega que puxou recebe o que precisa explicar quando ela responde
   const initiative = new Initiative(db, bus, executor);
-  chatHooks.replyContext = (ws, userId, agentId, convId) => initiative.replyContext(ws, userId, agentId, convId);
+  chatHooks.replyContext = (ws, userId, agentId, convId, messageId) => initiative.replyContext(ws, userId, agentId, convId, messageId);
   // imagens anexadas na conversa vão para a visão do modelo
   executor.imagesFor = async (r) => (await attachmentContext(db, cfg, r.workspace_id, attachmentsOfRun(db, r.workspace_id, r.id).filter((f) => f.mime.startsWith('image/')), 0)).images;
   const routines = new Routines(db, bus, executor, cfg);
+  // rotinas no agendador do motor (rc.27, services/rotinas-motor.ts): cada rotina com horário é um job no perfil do agente
+  // que a executa; a volta de 60 s passa as de quem vem da rc.26. O Ergon só dispara se o aviso do motor não chegar.
+  const rotinasMotor = new RotinasNoMotor(db, bus);
+  rotinasMotor.control = (ws) => motors.control(ws);
+  rotinasMotor.scope = (ws) => motors.scope(ws);
+  if (motors.perPerson) rotinasMotor.pronto = (ws) => motors.accepting(ws);
+  rotinasMotor.perfilDe = (ws, ag) => perfis.perfilPronto(ws, ag)?.nome ?? null;
+  rotinasMotor.agenteDe = (r) => routines.agenteDe(r);
+  routines.doMotor = (rid) => rotinasMotor.noMotor(rid);
+  routines.proximaDoMotor = (rid) => rotinasMotor.proxima(rid);
+  routines.aoDisparar = (rid) => rotinasMotor.disparou(rid);
+  rotinasMotorRef.atual = rotinasMotor;
   // Treinar: o /learn do motor escreve a competência em espera; o Ergon mostra, a pessoa aprova (ver trainings.ts)
   const trainings = new Trainings(db, bus, executor, cfg);
-  trainings.control = (ws) => motors.control(ws)?.skills_ ?? null;
+  // as competências moram no perfil do agente (rc.27); sem perfil pronto, no perfil padrão, como antes
+  trainings.control = (ws, perfil) => { const c = motors.control(ws); return perfil && c?.skillsDe ? c.skillsDe(perfil) : c?.skills_ ?? null; };
+  trainings.perfilDe = (ws, ag) => perfis.perfilPronto(ws, ag)?.nome ?? null;
   executor.onFinish((r, status, output) => {
     if (r.idempotency_key.startsWith(TRAINING_KEY)) void trainings.finished(r, status, output).catch(() => undefined);
   });
@@ -228,6 +285,41 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // rotinas leem a agenda, os e-mails e as tarefas das contas conectadas (só leitura)
   routines.accounts = new AccountReader(db, integrations.sso, { googleTesting: cfg.googleTesting });
   executor.defaultModel = (ws) => aiOf(ws).cachedDefault();
+  // cartões pedidos pelo agente por uma ferramenta do motor: perguntar de volta, pedido seguro de chave, senha de administrador
+  const cartoes = new Cartoes(db, bus);
+  cartoes.control = (ws) => motors.control(ws);
+  // aprovações nativas (rc.27): o motor para o turno pedindo aprovação (approval.request); o cartão é do Ergon e a resposta
+  // vai pela API do motor. O tempo parado esperando a pessoa (cartão ou aprovação) não conta no limite da execução.
+  const aprovacoes = new Aprovacoes(db, bus);
+  aprovacoes.hermesOf = (ws) => motors.hermes(ws);
+  aprovacoes.continuar = (r, userId, texto) => cartoes.continuar(r, userId, texto);
+  executor.esperaHumana = (runId) => cartoes.esperaMs(runId) + aprovacoes.esperaMs(runId);
+  executor.aoPedirAprovacao = (r, e) => aprovacoes.pedido(r, e);
+  executor.aoResolverAprovacao = (r, e) => aprovacoes.respondido(r, e);
+  executor.onFinish((r) => aprovacoes.execucaoTerminou(r));
+  /** a pessoa por trás de uma execução: quem é dono da conversa; num card, quem é dono do workspace */
+  const pessoaDe = (r: RunRow): string | null => (r.conversation_id ? db.get<{ u: string }>('SELECT owner_user_id AS u FROM conversations WHERE id = ?', r.conversation_id)?.u : null)
+    ?? db.get<{ u: string }>("SELECT user_id AS u FROM memberships WHERE workspace_id = ? AND role = 'owner' ORDER BY created_at LIMIT 1", r.workspace_id)?.u ?? null;
+  // a resposta chegou depois de a ferramenta parar de esperar: segue como continuação imediata, na conversa ou no card
+  cartoes.continuar = (r, userId, texto) => {
+    try {
+      if (r.conversation_id) {
+        const note = routines.channelFor(r.conversation_id);
+        sendMessage(db, bus, executor, r.workspace_id, userId, r.conversation_id, texto, `cartao-${newId('x').replace(/[^A-Za-z0-9]/g, '').slice(-30)}`, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: true, queue: true });
+      } else if (r.task_id) teamwork.respond(r.workspace_id, userId, r.task_id, 'answer', texto);
+    } catch { /* a conversa encheu ou o card já saiu: a resposta fica registrada no cartão */ }
+  };
+  executor.onFinish((r) => cartoes.execucaoTerminou(r, pessoaDe));
+  // trabalho contínuo: meta com juiz, repetir até cumprir, checagem periódica, comentar sem interromper, revisão independente
+  const comandos = new Comandos(db, bus, executor, {
+    enviar: (ws, userId, conversationId, texto, chave, nota) => {
+      const canal = routines.channelFor(conversationId);
+      const r = sendMessage(db, bus, executor, ws, userId, conversationId, texto, chave, cfg.maxConversationMessages, cfg.maxInputChars, { note: [canal, nota].filter(Boolean).join('\n\n') || null, plain: true });
+      return { runId: r.runId };
+    },
+    devolver: (ws, userId, taskId, texto) => ({ runId: teamwork.respond(ws, userId, taskId, 'return', texto).runId }),
+    control: (ws) => motors.control(ws), hermes: (ws) => motors.hermes(ws),
+  });
   // imagens geradas pelos agentes chegam ao Ergon pela ponte de controle (ver RunExecutor.withMedia)
   executor.media = motors.perPerson || control?.media ? async (p, ws) => {
     const c = motors.control(ws);
@@ -303,6 +395,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   /** os workspaces de um motor: os da pessoa (um motor por pessoa) ou todos (um motor só, escopo "_") */
   const workspacesDoEscopo = (u: string): string[] => (u === '_' ? db.all<{ id: string }>('SELECT id FROM workspaces').map((w) => w.id) : owners.owned(u));
   const workspacesDoMotor = (ws: string): string[] => workspacesDoEscopo(motors.scope(ws));
+  // rc.27 — pausar a equipe: em pausa, a fila não começa trabalho novo (o motor é um só para estes workspaces)
+  executor.pausada = (ws) => pausaDaEquipe(db, workspacesDoMotor(ws)).pausada;
+  // rc.27 — modelos reserva: a cadeia que o motor confirmou e o modelo principal, para registrar quando o reserva atendeu
+  executor.reservaDe = (ws) => {
+    const m = ajustesNoMotor(db, workspacesDoMotor(ws));
+    return { cadeia: m && m !== 'sem' ? m.reserva : [], padrao: { provider: motors.ai(ws).cachedDefaultProvider(), model: motors.ai(ws).cachedDefault() } };
+  };
+  /** o idioma das mensagens do motor de um escopo (a pessoa dona dele; num motor só, quem é dono do primeiro workspace) */
+  const idiomaDoEscopo = (escopo: string): 'pt' | 'en' | undefined => (escopo === '_' ? idiomaDaInstalacao(db) : idiomaDoMotor(db, escopo));
   const agenteExecutaCodigo = (ws: string, agentId: string): boolean => {
     let list: string[] = [];
     try { const x = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', agentId)?.tools ?? '[]'); if (Array.isArray(x)) list = x.map(String); } catch { /* sem ferramentas legíveis */ }
@@ -328,6 +429,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       ...wss, ...FERRAMENTAS_DE_CODIGO, desde);
   };
   const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado,
+    // aprovações nativas (rc.27): o turno de quem pediu espera no portão do motor; a decisão volta à ferramenta
+    nativa: { aoVivo: (ws, pid) => aprovacoes.aoVivo(ws, pid), responder: (ws, pid, ok) => aprovacoes.responder(ws, pid, ok) },
     // confirmou no cartão: o agente recebe o resultado e continua o pedido na mesma conversa
     continuar: (x) => { executor.enqueue({
       workspaceId: x.workspaceId, agentId: x.agentId, conversationId: x.conversationId, kind: 'chat', input: x.texto, maxInput: cfg.maxDocumentChars,
@@ -359,7 +462,21 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     contaMicrosoft: (ws) => { const t = integrations.secrets.read<Tokens>(ws, 'microsoft'); return t ? { tid: t.tid, oid: t.oid, account: t.account } : null; },
     // o clique no cartão do Teams decide pela mesma função da tela (POST /api/proposals/:id)
     decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao) });
-  chatHooks.channelNote = (conv, msg) => { try { return teamsApp.notaDoCanal(conv, msg); } catch { return null; } };
+  // conversar com a equipe pelo Telegram e pelo Discord: o bot da pessoa, no motor dela (gateway do Hermes, conexão de saída)
+  const capsCache = new Map<string, { at: number; caps: string[] | null }>();
+  const canais = new Canais({ db, bus, cfg, executor, owners, control: (ws) => motors.control(ws), permite: (m, ws) => motors.allows(m, ws),
+    capacidades: async (ws) => {
+      const c = capsCache.get(ws);
+      if (c && Date.now() - c.at < 60_000) return c.caps;
+      const info = await motors.control(ws)?.info?.().catch(() => null);
+      const caps = info?.ok ? info.capacidades ?? [] : null;
+      capsCache.set(ws, { at: Date.now(), caps });
+      return caps;
+    },
+    decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao) });
+  chatHooks.channelNote = (conv, msg) => {
+    try { return teamsApp.notaDoCanal(conv, msg) ?? canais.notaDoCanal(conv, msg); } catch { return null; }
+  };
   // workspaces antigos: setores, quadros (equipe × seus) e a equipe de personagens (uma vez; preserva conversas e tarefas)
   const limits = limitsFor(cfg);
   const storageQuota = cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0;
@@ -374,6 +491,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     try { ensureCoordinator(db, bus, ws, limits); } catch (err) { bootIssues.push({ workspace: ws, error: (err as Error).message }); }
     grantDataTool(db, bus, ws); // instalações antigas: quem cuida de números recebe a Análise de dados (uma vez)
     grantConnectionsTool(db, bus, ws); // instalações antigas: a equipe passa a usar as Conexões (uma vez)
+    grantBenefitTools(db, bus, ws); // rc.27: cada agente recebe os benefícios que faltam (uma vez; regra do dono, 12/11)
     upgradeBriefingSources(db, bus, ws); // Briefing já instalado passa a ler as contas conectadas (uma vez)
   };
   for (const w of db.all<{ id: string }>('SELECT id FROM workspaces')) upkeep(w.id);
@@ -382,6 +500,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     for (const ws of owners.owned(userId)) upkeep(ws);
     void motors.ensure(userId).catch(() => undefined); // o motor dela liga e o cofre dele abre com a chave dela
     teamsApp.personOpened(userId); // o que o serviço do Teams guardava para ela chega agora
+    canais.personOpened(userId); // e o que esperava para sair pelo Telegram e pelo Discord
   };
   // execução da fila que terminou sem decisão (o servidor caiu no meio): decide agora, uma única vez
   const reconciled = results.reconcile();
@@ -517,14 +636,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       } catch { /* fica o erro no quadro */ }
     }
   };
-  // um motor só: as Conexões ligam por padrão uma vez por execução do servidor (ausente = ligado), salvo se desligadas
+  // um motor só: as Conexões e os benefícios da equipe ligam por padrão uma vez por execução do servidor (ausente = ligado),
+  // salvo os que a pessoa desligou
   let conexoesPadrao = false;
   const conexoesNoMotorUnico = async () => {
     if (motors.perPerson || conexoesPadrao || !control) return;
-    const desligado = !!db.get("SELECT 1 AS x FROM workspace_settings WHERE key = 'ferramentas.contas' AND value = 'desligado' LIMIT 1");
-    const mudou = await ai.ensureConexoes(desligado);
+    const mudou = await ai.ensureBeneficios(ferramentasDesligadas(db, null));
     conexoesPadrao = true;
-    if (mudou) await ai.refreshToolsets();
+    if (mudou && (mudou.ligou.length || mudou.desligou.length)) await ai.refreshToolsets();
   };
   // passos por pedido (custo.ts): cada motor aberto fica com o que vale para os workspaces dele. Na primeira volta (e a
   // cada abertura de um motor por pessoa, em Motors.aberto) confere tudo, inclusive o teto quando ninguém escolheu; depois,
@@ -552,6 +671,20 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       void x.sincronizarCompactacao(db, ids).catch(() => { compactacaoConferida.delete(x.scope); });
     }
   };
+  // rc.27 — ajustes da equipe no motor (modelos reserva, não treinar com os dados, busca privada, arrumar competências,
+  // idioma) e a pausa: confere na primeira volta; depois, enquanto alguma escolha não chegou e a cada AJUSTES_RECONFERE_MS
+  // (uma conta de IA conectada ou desconectada muda a reserva automática; a pessoa pode ter trocado o idioma)
+  const ajustesConferidos = new Map<string, number>();
+  const ajustesNosMotores = () => {
+    for (const x of motors.openAis()) {
+      const ids = workspacesDoEscopo(x.scope);
+      const quando = ajustesConferidos.get(x.scope);
+      if (quando !== undefined && !ajustesDaEquipe(db, ids).pendente && Date.now() - quando < AJUSTES_RECONFERE_MS) continue;
+      ajustesConferidos.set(x.scope, Date.now());
+      void x.sincronizarAjustes(db, ids, idiomaDoEscopo(x.scope)).catch(() => { ajustesConferidos.delete(x.scope); });
+      void x.sincronizarPausa(db, ids).catch(() => undefined);
+    }
+  };
   const startBackground = () => {
     if (timers.length) return;
     espelhoEscrita.start();
@@ -560,9 +693,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       void conexoesNoMotorUnico().catch(() => undefined);
       passosNosMotores();
       compactacaoNosMotores();
+      // os perfis dos agentes (criar os que faltam, atualizar os que mudaram): só nos motores abertos, poucos por vez
+      void perfis.volta(motors.openAis().flatMap((x) => workspacesDoEscopo(x.scope))).catch(() => undefined);
+      // as rotinas com horário no agendador do motor (criar, atualizar, conferir a próxima execução; migração da rc.26)
+      void rotinasMotor.volta(motors.openAis().flatMap((x) => workspacesDoEscopo(x.scope))).catch(() => undefined);
+      ajustesNosMotores();
     };
     refreshAi();
     timers.push(setInterval(refreshAi, 60_000));
+    timers.push(setInterval(() => { try { comandos.tick(); } catch { /* tenta na próxima volta */ } }, 30_000)); // repetir e checagem periódica
     // um motor por pessoa: quem não usa há algum tempo tem o motor desligado (volta quando precisar)
     if (motors.perPerson) timers.push(setInterval(() => void motors.stopIdle(), 10 * 60_000));
     // a cada minuto: quem está "renovando" e ficou livre é renovado; motor reiniciado por fora recebe a chave de novo; e,
@@ -589,19 +728,22 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     }
     whatsapp.resumeAll(); // só sessões que o usuário já pareou; nunca gera QR sozinho
     void teamsApp.start(); // com endereço do serviço do Teams e o cofre aberto: a conexão de saída deste Ergon
+    canais.start();
   };
   // a tela da pessoa (Saúde, Conexões) acompanha o motor dela; e cada motor que abre pode liberar a limpeza da versão e,
   // com o cofre herdado aberto, a cópia antiga dos dados do motor (sem cifra) sai sozinha (uma vez)
   motors.onChange = (userId, state) => {
     for (const ws of owners.owned(userId)) bus.publish(ws, 'motor.changed', { state });
     if (state === 'aberto') {
+      // o que mudou nos agentes enquanto o motor estava fora (fechado, ligando, renovando) chega aos perfis agora
+      for (const ws of owners.owned(userId)) perfis.motorAbriu(ws);
       void motors.limparSePronto().catch(() => undefined);
       void motors.apagarDadosAntigos(userId).catch(() => undefined);
     }
   };
   // a passada do espelho em andamento termina antes de desligar (o que saiu para o aplicativo fica gravado), com um teto
   const pararEspelho = () => new Promise<void>((ok) => { const t = setTimeout(ok, 10_000); espelhoEscrita.stop().catch(() => undefined).finally(() => { clearTimeout(t); ok(); }); });
-  const stopBackground = async () => { for (const t of timers.splice(0)) clearInterval(t); await pararEspelho(); teamwork.stop(); routines.stop(); hermesVault.stop(); await whatsapp.stopAll(); await teamsApp.stop(); };
+  const stopBackground = async () => { for (const t of timers.splice(0)) clearInterval(t); await pararEspelho(); teamwork.stop(); routines.stop(); hermesVault.stop(); await whatsapp.stopAll(); await teamsApp.stop(); canais.stop(); };
   // nome do cookie inclui a porta: cookies não separam por porta, e instâncias locais (real/teste) não podem colidir
   const COOKIE = `${SESSION_COOKIE}_${cfg.port}`;
   const bridgeLimiter = new Limiter(120, 60_000);
@@ -635,6 +777,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (err instanceof HttpError) { const t = err.texto ?? reconhecer(err.message, 'erro.'); return reply.status(err.status).send({ error: err.code, message: err.message, ...(t ? { message_t: t } : {}) }); }
     if (err.validation) return reply.status(400).send({ error: 'validation', message: err.message });
     if (err.statusCode && err.statusCode < 500) return reply.status(err.statusCode).send({ error: err.code ?? 'request', message: err.message });
+    // a equipe de IA não respondeu (logo depois de ligar, a ponte ainda não ouve) ou recusou: nunca "erro interno". Vale
+    // para toda rota que chama o motor sem tratar o erro dele (ensaio da rc.27: Contas de IA › endereço próprio)
+    if (err instanceof HermesError) {
+      req.log.warn({ status: err.status, erro: scrub(err.message, 200), url: redactUrl(req.url) }, 'a equipe de IA não atendeu o pedido');
+      if (err.status >= 500 || err.status === 429 || err.status === 0) {
+        return reply.status(503).send({ error: 'ai_unavailable', message: 'A sua equipe de IA ainda está ligando ou não respondeu agora; tente de novo em instantes.', message_t: tx('erro.equipeAbrindo') });
+      }
+      const t = reconhecer(err.message, 'erro.');
+      return reply.status(502).send({ error: 'ai_refused', message: err.message, ...(t ? { message_t: t } : {}) });
+    }
     req.log.error({ err: { message: err.message, stack: err.stack } }, 'erro interno');
     return reply.status(500).send({ error: 'internal', message: 'erro interno', message_t: tx('erro.interno') });
   });
@@ -850,7 +1002,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
   const secApi = registerSecurityRoutes(app, sec);
   registerTeamsAppRoutes(app, { teamsApp, owner, admin, verify: secApi.verify });
-  registerPeopleRoutes(app, { ...sec, upkeep: personOpened, routines, removeMotor: async (u) => { await teamsApp.pessoaRemovida(u).catch(() => undefined); await motors.remove(u); } });
+  registerPeopleRoutes(app, { ...sec, upkeep: personOpened, routines, removeMotor: async (u) => { await teamsApp.pessoaRemovida(u).catch(() => undefined); canais.pessoaRemovida(u); await motors.remove(u); } });
 
   app.post('/api/session/workspace', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['workspaceId'], properties: { workspaceId: S.id('ws') } } },
@@ -949,8 +1101,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         const p = passosDaEquipe(db, ids);
         const c = compactacaoDaEquipe(db, ids);
         return { teamMaxTurns: p.valor, teamMaxTurnsPendente: p.pendente, teamMaxTurnsOutros: ids.filter((w) => w !== a.workspaceId).length,
-          teamCompactacao: c.ligada, teamCompactacaoPendente: c.pendente, teamCompactacaoAtualizacao: c.atualizacao };
+          teamCompactacao: c.ligada, teamCompactacaoPendente: c.pendente, teamCompactacaoAtualizacao: c.atualizacao,
+          // rc.27: a equipe em pausa (nenhum trabalho novo começa) — a barra de cima e a Cidade mostram
+          teamPausa: pausaDaEquipe(db, ids) };
       })(),
+      // ajudantes temporários (rc.27) e quantos agentes já trabalham no próprio perfil (memória, competências e conversas dele)
+      teamAjudantes: ajudantesDo(db, a.workspaceId), teamPerfis: perfis.situacao(a.workspaceId),
       themed: themedCharacters(db, a.workspaceId).length + themedSectors(db, a.workspaceId).length,
       serverTime: now(),
     };
@@ -1057,7 +1213,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = auth(req); const agentId = (req.params as { id: string }).id;
     const r = fullAgents(a.workspaceId, a.userId, { agentId })[0];
     if (!r) throw notFound('agente');
-    return { ...profileOut(r), fx: agentFxChoice(db, a.workspaceId, agentId) };
+    // hermesPerfil (rc.27): o perfil do agente no motor, quando já está pronto (os modelos por tarefa da janela do agente valem
+    // nele); null = ainda sem perfil, as escolhas valem para a equipe da pessoa
+    return { ...profileOut(r), fx: agentFxChoice(db, a.workspaceId, agentId), hermesPerfil: perfis.perfilPronto(a.workspaceId, agentId)?.nome ?? null };
   });
   // perfis completos por páginas (até 100), na ordem de antes (ativos e desativados): compatibilidade e testes
   app.get('/api/agents', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { cursor: cursorQ, limit: limitQ } } } }, async (req) => {
@@ -1213,6 +1371,34 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (r.ok) audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.default_model', evidence: { provider: b.provider, model: b.model }, result: 'modelo padrão alterado' });
     return r;
   });
+  // Modelos por tarefa: o modelo de cada tarefa de apoio (resumir a conversa, dar nome, ver imagens… todas as que a equipe
+  // de IA tiver) e o dos ajudantes temporários. `perfil`: o perfil do agente; sem ele, vale para a equipe da pessoa.
+  const perfilId = { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' };
+  const soPerfil = { type: 'object', additionalProperties: false, properties: { perfil: perfilId } };
+  // o perfil pedido tem de ser de um agente deste workspace (o motor da pessoa atende vários workspaces dela)
+  const perfilDoWs = (ws: string, perfil: string | undefined): string | undefined => {
+    if (!perfil) return undefined;
+    if (!db.get('SELECT 1 AS x FROM agent_profiles WHERE profile = ? AND workspace_id = ?', perfil, ws)) throw notFound('agente');
+    return perfil;
+  };
+  app.get('/api/ai/task-models', { schema: { querystring: soPerfil } }, async (req) => { const ws = auth(req).workspaceId; return aiOf(ws).taskModels(perfilDoWs(ws, (req.query as { perfil?: string }).perfil)); });
+  app.get('/api/ai/task-models/economy', { schema: { querystring: soPerfil } }, async (req) => { const ws = auth(req).workspaceId; return aiOf(ws).economySuggestion(perfilDoWs(ws, (req.query as { perfil?: string }).perfil)); });
+  app.put('/api/ai/task-models', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['changes'], properties: {
+      perfil: perfilId, confirm: { type: 'boolean' },
+      changes: { type: 'array', minItems: 1, maxItems: 60, items: { type: 'object', additionalProperties: false, required: ['task', 'provider', 'model'], properties: {
+        task: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{0,63}$' },
+        provider: { anyOf: [providerId, { type: 'null' }] }, model: { anyOf: [{ type: 'string', pattern: '^[\\w./:@+-]{1,160}$' }, { type: 'null' }] },
+      } } },
+    } } },
+  }, async (req) => {
+    const a = owner(req);
+    const b = req.body as { perfil?: string; confirm?: boolean; changes: Array<{ task: string; provider: string | null; model: string | null }> };
+    const r = await aiOf(a.workspaceId).setTaskModels(b.changes, !!b.confirm, perfilDoWs(a.workspaceId, b.perfil));
+    const feitas = b.changes.filter((c) => r.applied.includes(c.task));
+    if (feitas.length) audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.task_models', evidence: { perfil: b.perfil ?? null, changes: feitas }, result: 'modelos por tarefa alterados' });
+    return r;
+  });
   app.post('/api/ai/accounts/:provider/login', {
     schema: { params: { type: 'object', required: ['provider'], properties: { provider: { enum: ['nous', 'openai-codex'] } } } },
   }, async (req) => {
@@ -1294,9 +1480,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const on = new Set(platformToolsets(motorScope(a.workspaceId)).enabled);
     if (wanted.some((t) => TOOLS[t]?.guarded && !on.has(TOOLS[t].toolset ?? ''))) requireRecentAuth(a);
     const enabled = await aiOf(a.workspaceId).setPlatformTools(wanted);
-    // a escolha da pessoa sobre as Conexões fica gravada: desligadas por ela, o motor não liga de novo sozinho (ausente = ligado)
-    if (on.has(CONEXOES) && !wanted.includes('contas')) setSetting(db, a.workspaceId, 'ferramentas.contas', 'desligado');
-    else if (wanted.includes('contas')) setSetting(db, a.workspaceId, 'ferramentas.contas', 'ligado');
+    // a escolha da pessoa sobre cada ferramenta da equipe fica gravada: desligada por ela, o motor não liga de novo sozinho,
+    // nem recriado (ausente = ligado; regra do dono, 12/11). Só o que mudou agora é gravado.
+    for (const t of Object.values(TOOLS)) {
+      if (!t.safe || !t.toolset) continue;
+      if (on.has(t.toolset) && !wanted.includes(t.id)) setSetting(db, a.workspaceId, `ferramentas.${t.id}`, 'desligado');
+      else if (wanted.includes(t.id) && (!on.has(t.toolset) || getSetting(db, a.workspaceId, `ferramentas.${t.id}`) === 'desligado')) setSetting(db, a.workspaceId, `ferramentas.${t.id}`, 'ligado');
+    }
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.tools', evidence: { enabled }, result: 'ferramentas da equipe atualizadas' });
     bus.publish(a.workspaceId, 'agents.changed', {});
     return { enabled };
@@ -1311,7 +1501,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // a mesma decisão para o app e para o Teams (o cartão no Teams chama esta função; alcance e prazo só vêm da tela)
   const decidirProposta = async (ws: string, userId: string, pid: string, decision: 'apply' | 'reject', o: { alcance?: Alcance; prazo?: PrazoDepoisDeLer } = {}): Promise<{ status: string; result: string; result_t?: Texto }> => {
     if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, ws)) return conexoes.decidirProposta(ws, userId, pid, decision);
+    // cartão aberto pelo agente (pergunta, chave, senha): recusar avisa o agente; responder é pelo próprio cartão
+    if (cartoes.doMotor(ws, pid)) {
+      if (decision !== 'reject') throw new HttpError(400, 'answer', 'Responda pelo próprio cartão.');
+      cartoes.recusar(ws, userId, pid);
+      return { status: 'rejected', result: 'você preferiu não responder' };
+    }
     if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_REGRA)) return conexoes.decidirRegra(ws, userId, pid, decision, o.alcance);
+    // um comando de risco que o motor parou pedindo aprovação (aprovações nativas, rc.27)
+    if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_APROVACAO)) return aprovacoes.decidir(ws, userId, pid, decision);
     if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_DEPOIS_DE_LER)) return conexoes.decidirAprovacao(ws, userId, pid, decision, o.prazo);
     return decideProposal(db, bus, ws, userId, pid, decision,
       { routine: (p) => routines.applyProposal(ws, userId, p), ledger: (p, u) => routines.registerLedger(ws, u, p), limits,
@@ -1383,9 +1581,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   // pergunta com opções na conversa: a resposta (todas da rodada juntas) volta ao agente como mensagem sua
   app.post('/api/proposals/:id/answer', {
-    schema: { params: idParams('apr'), body: { type: 'object', additionalProperties: false, required: ['answer'], properties: { answer: S.str(300, 1) } } },
+    schema: { params: idParams('apr'), body: { type: 'object', additionalProperties: false, required: ['answer'], properties: { answer: S.str(300, 1),
+      answers: { type: 'array', maxItems: 6, items: S.str(300, 1) } } } },
   }, async (req) => {
     const a = owner(req);
+    // pergunta feita pela ferramenta do motor: a resposta volta ao agente no mesmo trabalho (ou, se ele já parou de esperar, como continuação)
+    if (cartoes.doMotor(a.workspaceId, (req.params as { id: string }).id)) {
+      const b = req.body as { answer: string; answers?: string[] };
+      const r = cartoes.responderPergunta(a.workspaceId, a.userId, (req.params as { id: string }).id, b.answers?.length ? b.answers : b.answer);
+      return { sent: r.entregue === 'continuacao', entregue: r.entregue };
+    }
     const r = answerQuestion(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id, (req.body as { answer: string }).answer);
     if (!r.message) return { sent: false };
     const note = routines.channelFor(r.conversationId);
@@ -1393,6 +1598,59 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (note) routines.markAdapting(r.conversationId, sent.runId);
     return { sent: true, runId: sent.runId };
   });
+  // Cartão protegido (chave, senha ou token que o agente pediu): o valor vai direto ao cofre da equipe. Nunca é gravado no
+  // banco, não entra na conversa, no histórico nem nos registros; a resposta desta rota também não o repete.
+  app.post('/api/proposals/:id/segredo', {
+    bodyLimit: 16 * 1024,
+    schema: { params: idParams('apr'), body: { type: 'object', additionalProperties: false, required: ['valor'], properties: { valor: S.str(4000, 1), guardar: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const b = req.body as { valor: string; guardar?: boolean };
+    const r = await cartoes.responderSegredo(a.workspaceId, a.userId, (req.params as { id: string }).id, b.valor, b.guardar === true);
+    return { ok: true, entregue: r.entregue, nome: r.nome };
+  });
+  // Configurações › Segurança › Chaves guardadas para a equipe: só os nomes (nunca os valores) e apagar
+  app.get('/api/seguranca/chaves', async (req) => cartoes.chaves(owner(req).workspaceId));
+  app.delete('/api/seguranca/chaves/:nome', {
+    schema: { params: { type: 'object', required: ['nome'], properties: { nome: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,60}$' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    return cartoes.apagarChave(a.workspaceId, a.userId, (req.params as { nome: string }).nome);
+  });
+
+  // Trabalho contínuo numa conversa ou num card: meta com juiz, repetir até cumprir, checagem periódica, comentar sem
+  // interromper e revisão independente (comandos.ts). Os atalhos digitados na conversa (/meta, /goal…) caem na mesma função.
+  const comandoSchema = { type: 'object', additionalProperties: false, required: ['tipo'], properties: {
+    tipo: { enum: ['meta', 'repetir', 'checagem', 'comentar', 'revisao'] }, texto: S.str(4000), criterio: S.str(2000),
+    intervaloS: { type: 'integer', minimum: INTERVALO_MIN_S, maximum: INTERVALO_MAX_S }, max: { type: 'integer', minimum: 1, maximum: RODADAS_MAX }, parar: { type: 'boolean' } } };
+  type CorpoComando = { tipo: TipoComando; texto?: string; criterio?: string; intervaloS?: number; max?: number; parar?: boolean };
+  const alvoDe = (q: { conversationId?: string; taskId?: string }): Alvo => {
+    if (q.conversationId) return { conversationId: q.conversationId };
+    if (q.taskId) return { taskId: q.taskId };
+    throw new HttpError(400, 'alvo', 'diga a conversa ou o card');
+  };
+  app.get('/api/comandos', {
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: { conversationId: S.id('cnv'), taskId: S.id('tsk') } } },
+  }, async (req) => {
+    const a = auth(req);
+    const q = req.query as { conversationId?: string; taskId?: string };
+    if (q.conversationId) getConversation(db, a.workspaceId, a.userId, q.conversationId);
+    return { comandos: comandos.listar(a.workspaceId, alvoDe(q)) };
+  });
+  app.post('/api/conversations/:id/comandos', { schema: { params: idParams('cnv'), body: comandoSchema } }, async (req) => {
+    const a = auth(req);
+    return comandos.executar(a.workspaceId, a.userId, { conversationId: (req.params as { id: string }).id }, req.body as CorpoComando);
+  });
+  app.post('/api/tasks/:id/comandos', { schema: { params: idParams('tsk'), body: comandoSchema } }, async (req) => {
+    const a = owner(req);
+    return comandos.executar(a.workspaceId, a.userId, { taskId: (req.params as { id: string }).id }, req.body as CorpoComando);
+  });
+  app.delete('/api/comandos/:id', { schema: { params: idParams('cmd') } }, async (req) => {
+    const a = auth(req);
+    comandos.parar(a.workspaceId, a.userId, (req.params as { id: string }).id);
+    return { ok: true };
+  });
+
   // sugestão de rotina recusada volta para decisão, do jeito que estava (sem refazer a análise)
   app.post('/api/proposals/:id/reconsider', { schema: { params: idParams('apr') } }, async (req) => {
     const a = owner(req);
@@ -1612,13 +1870,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // Consumo (tokens e custo informados pelo provedor; nunca estimados) -----------------------------------------
   app.get('/api/usage', {
-    schema: { querystring: { type: 'object', additionalProperties: false, properties: { tz: { type: 'string', pattern: '^-?[0-9]{1,4}$' } } } },
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: { tz: { type: 'string', pattern: '^-?[0-9]{1,4}$' }, atualizar: { enum: ['1'] } } } },
   }, async (req) => {
-    const tz = Number((req.query as { tz?: string }).tz ?? 0);
+    const q = req.query as { tz?: string; atualizar?: string };
+    const tz = Number(q.tz ?? 0);
     const ws = auth(req).workspaceId;
     await aiOf(ws).defaultModel().catch(() => null);
     const billing = executor.mode === 'simulated' ? 'none' as const : aiOf(ws).billing();
-    return { ...usageSummary(db, ws, Math.max(-840, Math.min(840, tz)), Date.now(), billing), executor: executor.mode };
+    // rc.27: os limites e o saldo da conta de IA, lidos do provedor pelo motor (nunca estimados; motor de antes: nada)
+    const cota = executor.mode === 'simulated' ? null : await aiOf(ws).cota(q.atualizar === '1').catch(() => null);
+    return { ...usageSummary(db, ws, Math.max(-840, Math.min(840, tz)), Date.now(), billing, cota), executor: executor.mode };
   });
 
   // Do que é feita cada chamada ao modelo, por agente (medido nas execuções reais; ver services/custo.ts)
@@ -1746,7 +2007,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       children: db.all<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE parent_task_id = ? AND archived = 0 ORDER BY number', taskId),
       // ações numa conta pedidas neste card, esperando o seu clique (o mesmo cartão da conversa e de "aguardando você")
       conexoes: db.all<{ id: string; kind: string; summary: string; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
-        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
+        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
+      // perguntas do agente e pedidos de chave ou senha feitos neste card (cartoes.ts), esperando você: o mesmo cartão da conversa
+      cartoes: db.all<{ id: string; kind: string; summary: string; payload: string; status: string; result: string | null; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.payload, p.status, p.result, p.created_at
+        FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('question', 'segredo') AND p.status = 'proposed' ORDER BY p.created_at, p.rowid`, taskId, a.workspaceId),
+      // trabalho contínuo ligado neste card (meta com juiz, repetir, checagem, revisão independente)
+      comandos: comandos.listar(a.workspaceId, { taskId }),
       origin: conv ? { conversationId: conv.owner_user_id === a.userId ? conv.id : null, agentId: conv.agent_id, deliverAgentId: origin?.deliver_agent_id ?? conv.agent_id, purpose: origin?.purpose ?? null, delivered } : null };
   });
 
@@ -1848,6 +2114,51 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // revisão socrática: Sócrates pergunta ao responsável pela tarefa, em rodadas limitadas
   // Treinar -------------------------------------------------------------------------------------------------
+  // Memória longa do agente (rc.27): o que ele sabe da pessoa, as notas dele e as anotações esperando a aprovação
+  const memoriaDo = (ws: string, agentId: string) => {
+    if (!db.get('SELECT 1 AS x FROM agents WHERE id = ? AND workspace_id = ?', agentId, ws)) throw new HttpError(404, 'not_found', 'Agente não encontrado.');
+    const perfil = perfis.perfilPronto(ws, agentId)?.nome ?? null;
+    const c = motors.control(ws);
+    return { perfil, c: perfil && c?.memoria && c.decidirMemoria ? c : null };
+  };
+  app.get('/api/agents/:id/memoria', { schema: { params: idParams('agt') } }, async (req) => {
+    const a = owner(req);
+    const { perfil, c } = memoriaDo(a.workspaceId, (req.params as { id: string }).id);
+    // ainda sem o perfil (motor de antes, ou preparando o agente): a tela diz que a memória começa quando ele estiver pronto
+    if (!perfil || !c) return { pronta: false, notas: '', pessoa: '', pendentes: [] };
+    try { return { pronta: true, ...(await c.memoria!(perfil)) }; }
+    catch (err) { throw new HttpError(503, 'memory_unavailable', paraTela(err instanceof Error ? err.message : '', 'A equipe não respondeu agora. Tente de novo daqui a pouco.')); }
+  });
+  app.post('/api/agents/:id/memoria/:pid', {
+    schema: { params: { type: 'object', required: ['id', 'pid'], properties: { id: S.id('agt'), pid: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,40}$' } } },
+      body: { type: 'object', additionalProperties: false, required: ['aprovar'], properties: { aprovar: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const p = req.params as { id: string; pid: string };
+    const { aprovar } = req.body as { aprovar: boolean };
+    const { perfil, c } = memoriaDo(a.workspaceId, p.id);
+    if (!perfil || !c) throw new HttpError(409, 'no_profile', 'A memória deste agente ainda não está pronta.');
+    try { await c.decidirMemoria!(perfil, p.pid, aprovar); }
+    catch (err) { throw new HttpError(err instanceof HermesError && err.status === 400 ? 409 : 503, 'memory_decide', paraTela(err instanceof Error ? err.message : '', 'A equipe não respondeu agora. Tente de novo daqui a pouco.')); }
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: aprovar ? 'agent.memory.approve' : 'agent.memory.discard', targetType: 'agent', targetId: p.id,
+      evidence: { pendingId: p.pid }, result: aprovar ? 'anotação aprovada: entra na memória do agente' : 'anotação recusada' });
+    bus.publish(a.workspaceId, 'agents.memoria', { id: p.id });
+    return { pronta: true, ...(await c.memoria!(perfil)) };
+  });
+
+  // Ajudantes temporários dos agentes (subagentes do motor): ligados por padrão, com poucos ao mesmo tempo (cada um é uma
+  // conversa a mais com o modelo: custa). A escolha vale para todos os agentes do workspace, no próximo pedido.
+  app.put('/api/team/ajudantes', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['ligado', 'max'], properties: { ligado: { type: 'boolean' }, max: { type: 'integer', minimum: AJUDANTES_MIN, maximum: AJUDANTES_MAX } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const v = gravarAjudantes(db, a.workspaceId, req.body as { ligado: boolean; max: number });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'team.helpers', evidence: { ...v },
+      result: v.ligado ? `ajudantes temporários ligados (até ${v.max} ao mesmo tempo)` : 'ajudantes temporários desligados' });
+    bus.publish(a.workspaceId, 'agents.changed', {});
+    return v;
+  });
+
   app.get('/api/agents/:id/trainings', { schema: { params: idParams('agt') } }, async (req) => {
     const a = owner(req);
     return trainings.list(a.workspaceId, (req.params as { id: string }).id);
@@ -1986,6 +2297,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // na conversa de preparo de uma rotina, a coordenação recebe o contexto do preparo (e a mensagem não vira tarefa)
     const convId = (req.params as { id: string }).id;
     const note = routines.channelFor(convId);
+    // atalho digitado (/meta, /repetir, /checagem, /comentar, /revisao e os nomes originais /goal, /loop, /heartbeat, /btw,
+    // /review, em qualquer idioma): vira o comando, não uma mensagem para o agente
+    const atalho = !b.attachments?.length ? parseComando(b.text) : null;
+    if (atalho) {
+      const r = await comandos.executar(a.workspaceId, a.userId, { conversationId: convId }, { tipo: atalho.tipo, texto: atalho.texto, criterio: atalho.criterio, intervaloS: atalho.intervaloS, parar: atalho.parar });
+      // comentário sem trabalho em andamento: segue como mensagem normal (o agente lê e responde)
+      if (r.codigo !== 'sem_trabalho') return reply.status(200).send({ messageId: null, runId: r.runId ?? null, summary: null, replayed: false, queued: false, comando: r });
+      const m = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, atalho.texto, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, replyTo: b.replyTo ?? null });
+      return reply.status(m.replayed ? 200 : 201).send({ ...m, comando: r });
+    }
     // queue: com o agente ainda respondendo, a mensagem espera na fila da conversa (Ctrl+Enter) em vez de ser recusada
     const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, attachments: b.attachments ?? [], replyTo: b.replyTo ?? null });
     return reply.status(r.replayed ? 200 : 201).send(r);
@@ -2238,6 +2559,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // Integrações da conta (Microsoft, Google, WhatsApp e os apps de tarefas): routes/integracoes.ts
   registerIntegrationRoutes(app, { db, bus, integrations, whatsapp, auth, owner });
+
+  // Ajustes da equipe no motor (modelos reserva, não treinar, busca privada, arrumar competências), pausa e orientar um
+  // trabalho em andamento: routes/equipe-ajustes.ts
+  registerAjustesRoutes(app, { db, bus, executor, auth, owner, aiOf, workspacesDoMotor, idiomaDoMotor: (ws) => idiomaDoEscopo(motors.scope(ws)),
+    conversaDe: (ws, userId, conversationId) => { getConversation(db, ws, userId, conversationId); } });
+
+  // Capacidades da equipe (rc.27): conselho de modelos, loja de competências, conectores prontos, proteções do Terminal,
+  // conquistas e voz, pela ponte de controle do motor: routes/recursos.ts
+  const recursos = new Recursos({ db, bus, control: (ws) => motors.control(ws), scope: (ws) => motorScope(ws), modelos: (ws) => aiOf(ws).opcoesDeReserva() });
+  registerRecursosRoutes(app, { db, bus, recursos, executor, cfg, auth, owner });
 
   // Fixtures: simulação local identificada (nunca chamada de "conectado") ------------------------------
   const fixtureFile = (platform: string, name: string) => {
@@ -2537,6 +2868,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!m) throw new HttpError(401, 'bridge_auth', 'token da ponte inválido');
     return m;
   };
+  registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
   app.post('/internal/bridge/v1/events', {
     bodyLimit: 64 * 1024,
     schema: { body: { type: 'object', required: ['schema', 'platform', 'message_id', 'text'], properties: {
@@ -2580,7 +2912,58 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const skills = [...new Set([...trainings.activeSkills(agentId!).map((x) => x.name), ...own])];
     const tr = run ? trainings.forRun(run) : null;
     const training = tr && tr.status === 'executando' && run!.status !== 'succeeded' ? trainings.policy(tr) : null;
-    return { known: true, agent: ag.name, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), holders, guarded: GUARDED_TOOLSETS, skills, training };
+    // no perfil do agente (rc.27): também a memória longa (com aprovação), a busca nas conversas dele e os ajudantes
+    const doPerfil = run?.hermes_profile && !training ? extrasDoPerfil(db, ag.workspace_id) : [];
+    const conectores = { ligado: list(ag.tools).includes('conectores'), escrita: recursos.escrita(ag.workspace_id) };
+    return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil], holders, guarded: GUARDED_TOOLSETS, skills, training };
+  });
+
+  // Ajudantes temporários (subagentes do motor): o plugin avisa o começo e o fim (com o resultado). A execução do Ergon
+  // espera os que faltam e continua com o resultado antes de entregar (RunExecutor.continuarComAjudantes).
+  app.post('/internal/bridge/v1/ajudante', {
+    bodyLimit: 64 * 1024,
+    schema: { body: { type: 'object', required: ['evento', 'filho'], properties: { evento: { enum: ['inicio', 'fim'] }, session_id: S.str(200), filho: S.str(200, 1), estado: S.str(40), resumo: S.str(24_000) } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { evento: 'inicio' | 'fim'; session_id?: string; filho: string; estado?: string; resumo?: string };
+    const found = await executor.runForSession(String(b.session_id ?? ''), '');
+    const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
+    if (!run) return { ok: false };
+    if (b.evento === 'inicio') executor.ajudanteComecou(run.id, b.filho);
+    else executor.ajudanteTerminou(run.id, b.filho, b.estado ?? '', b.resumo ?? '');
+    return { ok: true };
+  });
+
+  // Rotinas no agendador do motor (rc.27): o job da rotina disparou no perfil do agente; o Ergon roda o horário (coleta,
+  // condição, trabalho do agente, conferência). O mesmo horário tem a mesma chave dos dois lados: nunca roda em dobro.
+  app.post('/internal/bridge/v1/rotina/disparo', {
+    bodyLimit: 4 * 1024,
+    schema: { body: { type: 'object', required: ['rotina'], properties: { rotina: { type: 'string', pattern: '^rtn_[0-9a-f]{32}$' }, perfil: S.str(40), em: { type: 'number' } } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { rotina: string; perfil?: string; em?: number };
+    const r = db.get<{ workspace_id: string }>('SELECT workspace_id FROM routines WHERE id = ?', b.rotina);
+    // a rotina de outra pessoa é desconhecida para este motor
+    if (!r || !motors.allows(motor, r.workspace_id)) return { ok: false, resultado: 'ignorada' };
+    const resultado = routines.disparoDoMotor(r.workspace_id, b.rotina, Number(b.em ?? 0) * 1000);
+    return { ok: true, resultado };
+  });
+
+  // Memória longa: o agente quis anotar algo e a escrita ficou em espera no motor. A pessoa aprova ou recusa no perfil do
+  // agente (aba Memória); aqui só avisa a tela.
+  app.post('/internal/bridge/v1/memoria-pendente', {
+    bodyLimit: 4 * 1024,
+    schema: { body: { type: 'object', properties: { session_id: S.str(200), task_id: S.str(200), pending_id: S.str(40) } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { session_id?: string; task_id?: string; pending_id?: string };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    const run = found && motors.allows(motor, found.workspace_id) ? found : null;
+    if (!run) return { ok: false };
+    audit(db, null, { workspaceId: run.workspace_id, actorType: 'agent', actorId: run.agent_id, action: 'agent.memory.pending', targetType: 'agent', targetId: run.agent_id,
+      evidence: { runId: run.id, pendingId: b.pending_id ?? null }, result: 'anotação na memória esperando a aprovação da pessoa' });
+    bus.publish(run.workspace_id, 'agents.memoria', { id: run.agent_id });
+    return { ok: true };
   });
 
   // O plugin barrou uma ferramenta pela lista de bloqueadas (proteção ligada, depois de ler as contas): confere de novo e,
@@ -2600,16 +2983,19 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Ferramentas de conexão no motor: o plugin só repassa; a regra, as credenciais e o registro ficam aqui
   app.post('/internal/bridge/v1/conexoes', {
     bodyLimit: 256 * 1024,
-    schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar'] }, session_id: S.str(200), task_id: S.str(200), conexao: S.str(40), acao: S.str(80), parametros: { type: 'object' }, leu_web: { type: 'boolean' } } } },
+    schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar', 'cartao'] }, session_id: S.str(200), task_id: S.str(200), conexao: S.str(40), acao: S.str(80), parametros: { type: 'object' }, leu_web: { type: 'boolean' },
+      cartao: { type: 'string', pattern: '^apr_[0-9a-f]{32}$' } } } },
   }, async (req) => {
     const motor = bridgeMotor(req);
-    const b = req.body as { op: 'listar' | 'executar'; session_id?: string; task_id?: string; conexao?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean };
+    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; conexao?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean; cartao?: string };
     const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
     const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
     if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
     const tools = ((): string[] => { try { return JSON.parse(db.get<{ tools: string | null }>("SELECT tools FROM agents WHERE id = ? AND status = 'active'", run.agent_id)?.tools ?? '[]') as string[]; } catch { return []; } })();
     if (!tools.includes('contas')) return { ok: false, status: 'falhou', texto: 'As Conexões não estão liberadas para este agente: peça a um colega que tenha, ou diga à pessoa.' };
     if (b.op === 'listar') return { ok: true, status: 'feita', texto: conexoes.listar(run.workspace_id, b.conexao) };
+    // a ferramenta segurou o turno no portão de aprovação do motor e a pessoa decidiu (ou o prazo acabou): o que vale é o daqui
+    if (b.op === 'cartao') return b.cartao ? conexoes.resultadoDoCartao(run, b.cartao) : { ok: false, status: 'falhou', texto: 'Cartão desconhecido.' };
     if (!b.conexao || !b.acao) return { ok: false, status: 'falhou', texto: 'Diga a conexão e a ação (veja conexoes_listar).' };
     if (!platformToolsets(motorScope(run.workspace_id)).at) await aiOf(run.workspace_id).refreshToolsets(); // codigoLigado precisa da leitura
     // a regra de execução de código olha o agente desta execução (codigoLigado lê daqui)
@@ -2636,6 +3022,44 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const tr = run ? trainings.forRun(run) : null;
     if (!tr) return { ok: false };
     trainings.event(tr, { tool: String(b.tool ?? ''), pending_id: b.pending_id, staged: b.staged, reads: b.reads });
+    return { ok: true };
+  });
+
+  // Cartões pedidos pelo agente (ferramentas perguntar, pedir_chave e pedir_senha_admin do plugin): abrir e consultar. A
+  // resposta de uma pergunta e a senha de administrador de um trabalho só voltam por aqui, à execução que pediu; o valor de
+  // uma chave nunca passa por esta rota (o Ergon o manda direto à ponte de controle do motor).
+  const cartaoBase = { session_id: S.str(200), task_id: S.str(200), pedido: { type: 'string', pattern: '^[a-f0-9]{16,64}$' }, tipo: { enum: ['pergunta', 'chave', 'sudo'] } };
+  app.post('/internal/bridge/v1/cartao', {
+    bodyLimit: 64 * 1024,
+    schema: { body: { type: 'object', required: ['pedido', 'tipo'], properties: { ...cartaoBase, nome: S.str(80), motivo: S.str(400),
+      perguntas: { type: 'array', maxItems: 5, items: { type: 'object', required: ['qid', 'pergunta'], properties: { qid: S.str(20, 1), pergunta: S.str(2000, 1),
+        opcoes: { type: 'array', maxItems: 4, items: S.str(8000) }, varias: { type: 'boolean' } } } } } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as PedidoCartao & { session_id?: string; task_id?: string; perguntas?: Array<{ qid: string; pergunta: string; opcoes?: string[]; varias?: boolean }> };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    const run = found && motors.allows(motor, found.workspace_id) ? found : null;
+    return cartoes.abrir(run, { pedido: b.pedido, tipo: b.tipo, nome: b.nome, motivo: b.motivo,
+      perguntas: (b.perguntas ?? []).map((q) => ({ qid: q.qid, pergunta: q.pergunta, opcoes: q.opcoes ?? [], varias: q.varias === true })) });
+  });
+  app.post('/internal/bridge/v1/cartao/estado', {
+    bodyLimit: 4 * 1024,
+    schema: { body: { type: 'object', required: ['pedido'], properties: { ...cartaoBase, desistir: { type: 'boolean' } } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { pedido: string; desistir?: boolean };
+    // a execução é a do cartão (não a mais recente da sessão: outra pode ter começado na mesma conversa)
+    const l = db.get<{ run_id: string }>('SELECT run_id FROM cartoes_motor WHERE pedido = ?', b.pedido);
+    const run = l ? db.get<RunRow>('SELECT * FROM runs WHERE id = ?', l.run_id) : undefined;
+    return cartoes.estado(run && motors.allows(motor, run.workspace_id) ? run : null, b.pedido, b.desistir === true);
+  });
+  // os ganchos de espera humana do motor: toda vez que ele para esperando uma pessoa (nunca traz o que ela digitou)
+  app.post('/internal/bridge/v1/espera', {
+    bodyLimit: 4 * 1024,
+    schema: { body: { type: 'object', properties: { fase: S.str(20), kind: S.str(40), request_id: S.str(64), session_id: S.str(200), outcome: S.str(40) } } },
+  }, async (req) => {
+    bridgeMotor(req);
+    cartoes.espera(req.body as { fase?: string; kind?: string; outcome?: string });
     return { ok: true };
   });
 
@@ -2725,7 +3149,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, executor, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, startBackground, stopBackground };
+  return { app, executor, cartoes, aprovacoes, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
 }
 
 class Limiter {

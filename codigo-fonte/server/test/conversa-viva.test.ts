@@ -265,7 +265,7 @@ describe('conversa com a equipe: colegas, ao vivo, arquivos, iniciativa e Docume
     // respondeu: a Hipátia explica, e o cartão aparece nesta conversa
     await say(hipConv, 'oi, tô sim'); await drain(h, 3);
     const p = motor.started.at(-1)!;
-    assert.match(p.instructions, /Você puxou conversa com a pessoa porque precisa dela nisto/);
+    assert.match(p.instructions, /Foi você quem puxou conversa com a pessoa, nesta conversa, com esta mensagem sua/);
     assert.match(p.instructions, new RegExp(`card #${t.number}`));
     const props = (await req(h, 'GET', `/api/proposals?conversationId=${hipConv}`, s)).json as Array<{ kind: string; status: string }>;
     assert.ok(props.some((x) => x.kind === 'info_request' && x.status === 'proposed'), 'o cartão para responder ali mesmo');
