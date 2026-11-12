@@ -642,10 +642,11 @@ mod testes {
 
     #[test]
     fn voltar_nao_passa_por_cima_de_seguranca_obrigatoria() {
-        let m = motivo_para_nao_voltar("1.1.0-rc.25", Some("1.1.0-rc.28"), Some("1.1.0-rc.26")).expect("a rc.26 é de segurança");
-        assert!(m.contains("1.1.0-rc.26") && m.contains("segurança"), "{m}");
-        assert_eq!(motivo_para_nao_voltar("1.1.0-rc.26", Some("1.1.0-rc.28"), Some("1.1.0-rc.26")), None, "a própria de segurança pode");
-        assert_eq!(motivo_para_nao_voltar("1.1.0-rc.27", Some("1.1.0-rc.28"), Some("1.1.0-rc.26")), None, "depois dela também");
+        // versões depois da VOLTA_MINIMA (1.1.0-rc.27), para que só a regra de segurança decida
+        let m = motivo_para_nao_voltar("1.1.0-rc.28", Some("1.1.0-rc.31"), Some("1.1.0-rc.29")).expect("a rc.29 é de segurança");
+        assert!(m.contains("1.1.0-rc.29") && m.contains("segurança"), "{m}");
+        assert_eq!(motivo_para_nao_voltar("1.1.0-rc.29", Some("1.1.0-rc.31"), Some("1.1.0-rc.29")), None, "a própria de segurança pode");
+        assert_eq!(motivo_para_nao_voltar("1.1.0-rc.30", Some("1.1.0-rc.31"), Some("1.1.0-rc.29")), None, "depois dela também");
     }
 
     #[test]

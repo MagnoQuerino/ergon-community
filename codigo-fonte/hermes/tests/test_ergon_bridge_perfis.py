@@ -174,6 +174,8 @@ env = {**os.environ, "HERMES_HOME": HOME, "HOME": HOME, "API_SERVER_ENABLED": "t
        "ERGON_CONTROL_PORT": str(PONTE), "ERGON_BRIDGE_URL": f"http://127.0.0.1:{PORTA_ERGON}/internal/bridge/v1/events", "ERGON_BRIDGE_TOKEN": TOKEN,
        "HERMES_GATEWAY_NO_SUPERVISE": "1"}
 log = open("/tmp/gateway-teste.log", "w")
+if os.geteuid() == 0:  # a CI roda os testes como root; o motor de verdade roda como usuário comum
+    env["HERMES_ALLOW_ROOT_GATEWAY"] = "1"
 gw = subprocess.Popen(["/opt/hermes/.venv/bin/hermes", "gateway", "run", "--no-supervise"], env=env, stdout=log, stderr=subprocess.STDOUT, cwd=HOME)
 
 
