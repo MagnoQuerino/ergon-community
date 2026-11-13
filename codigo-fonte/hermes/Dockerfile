@@ -6,7 +6,7 @@ FROM ${HERMES_IMAGE}
 
 # versão do plugin do Ergon nesta imagem: a mesma do plugin.yaml e de PLUGIN_VERSION (um teste confere); o gerente e o
 # diagnóstico leem sem abrir o motor
-LABEL ergon.plugin.version="0.6.0"
+LABEL ergon.plugin.version="0.7.0"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gocryptfs fuse3 \

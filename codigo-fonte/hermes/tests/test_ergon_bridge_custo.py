@@ -226,6 +226,12 @@ for i, (m, c) in enumerate(zip(med, chamadas)):
           f"{m.get('ferramentas')} × {ferr_real} ({m.get('n_ferramentas')} × {len(tools)})")
     check(f"A{i}: a conversa medida bate com a que foi (±3%)", abs(m.get("conversa", 0) - conv_real) <= max(50, conv_real * 0.03), f"{m.get('conversa')} × {conv_real}")
     check(f"A{i}: o total informado pelo provedor, com a parte do cache", m.get("uso") == {"entrada": 4321, "cache_lido": 4000, "cache_gravado": 0, "saida": 55}, str(m.get("uso")))
+# a equipe tem mais conjuntos que este agente (a gestão do coordenador, num motor sem a marca do cofre): a medição soma só
+# as definições que foram ao modelo, pelos nomes no pedido, e não uma proporção das da equipe
+_cache = next(iter(bridge._ferramentas_cache.values()), None)
+check("A: a equipe leva mais ferramentas que este agente, e a medição segue exata", _cache is not None and _cache[1] > len(chamadas[0].get("tools") or [])
+      and all(m.get("ferramentas_exato") for m in med), str(_cache[:3] if _cache else None))
+check("A: sem os nomes no pedido, a conta volta à proporção (não exata)", bridge._tamanho_ferramentas("api_server", 3)[1] is False)
 check("A: as chamadas do mesmo pedido levam a mesma marca (o turno), sem o id do motor", len({x.get("turno") for x in med}) == 1 and len(med[0].get("turno") or "") == 16
       and SESSAO not in med[0]["turno"], str([x.get("turno") for x in med]))
 check("A: o número de cada chamada vai de 1 a N no pedido", [x.get("n") for x in med] == [1, 2, 3], str([x.get("n") for x in med]))

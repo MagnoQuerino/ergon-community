@@ -54,8 +54,7 @@ const deliverOf = (s: string | undefined): Deliver[] => {
 
 /** Monta (e valida) a rotina de uma proposta. Sem nome, ou sem modelo e sem instrução, não vira proposta. */
 export function specFrom(a: Record<string, string>, tz: string): RoutineSpec | null {
-  const t = a.modelo ? templateByKey(fold(a.modelo).trim().replace(/\s+/g, '-')) : undefined;
-  const tpl = t?.available ? t : undefined;
+  const tpl = a.modelo ? templateByKey(fold(a.modelo).trim().replace(/\s+/g, '-')) : undefined;
   const d = tpl?.defaults;
   const name = clip((a.nome || tpl?.name || '').replace(/\s+/g, ' '), 60).trim();
   const instruction = clip(a.instrucao ?? '', 1500).trim();
@@ -148,12 +147,11 @@ export function describeRoutineProposal(db: Db, workspaceId: string, p: RoutineP
  * das instruções se repete de um pedido para o outro (cache do provedor).
  */
 export function routineHowFor(): string {
-  const ready = CATALOG.filter((t) => t.available);
   return [
     'Rotinas: trabalhos recorrentes que o sistema executa sozinho (coleta os dados por código e chama um agente só para o que pede análise). As rotinas deste workspace estão na situação do workspace, abaixo.',
     'Quando o usuário pedir uma rotina (ou mudar uma), mostre antes uma prévia curta: o que faz, quando, o que olha, quem executa e o que entrega. Depois escreva UMA linha de controle; nada vale até o usuário aplicar:',
     '[[propor-rotina nome="Nome curto" quando="seg a sex 08:00" agente="Nome do agente" fontes="id,id" condicao="sempre|novidades|sinal" entrega="conversa,arquivo" instrucao="o trabalho, em 2 a 5 frases"]]',
-    `Para partir de um modelo pronto, acrescente modelo="chave" (e use instrucao só para o ajuste): ${ready.map((t) => `${t.key} (${t.name})`).join(', ')}.`,
+    `Para partir de um modelo pronto, acrescente modelo="chave" (e use instrucao só para o ajuste): ${CATALOG.map((t) => `${t.key} (${t.name})`).join(', ')}.`,
     '[[ajustar-rotina rotina="Nome da rotina" quando="..." fontes="..." ajuste="o que muda no trabalho"]] (só o que mudar)',
     `Fontes permitidas (a coleta é do Ergon; você não cria operações novas nem executa código): ${Object.entries(SOURCES).map(([k, v]) => `${k} = ${v}`).join('; ')}.`,
     'condicao: sempre; novidades = só usa o modelo se algo mudou; sinal = só quando a coleta acha algo que pede atenção (economiza créditos).',

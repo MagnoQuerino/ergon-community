@@ -133,6 +133,7 @@ const documentos = {
   'pacotes.detalhe.naEquipe': 'Na equipe:',
   'pacotes.detalhe.personagens': 'Personagens:',
   'pacotes.detalhe.cores': 'Cores',
+  'pacotes.legibilidade': { one: '{n} cor deste pacote foi ajustada para o texto se ler bem (o tom continua o mesmo).', other: '{n} cores deste pacote foram ajustadas para o texto se ler bem (o tom continua o mesmo).' },
   'pacotes.detalhe.naoInstalavel': 'Este tipo de pacote ainda não pode ser instalado nesta versão.',
   // instalar, criar e desfazer
   'pacotes.msg.aplicado': 'Pacote aplicado. Dá para desfazer quando quiser.',

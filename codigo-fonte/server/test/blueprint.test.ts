@@ -4,6 +4,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { validateBlueprint } from '../../shared/blueprint.ts';
+import { importBlueprint } from '../src/services/blueprint.ts';
+import { limitsFor } from '../src/services/capacity.ts';
 import { addPerson, harness, req, setupOwner } from './helpers.ts';
 
 describe('esqueleto do workspace', () => {
@@ -34,20 +36,21 @@ describe('esqueleto do workspace', () => {
 
     const b = await addPerson(h, 'bruna', 'senha-da-bruna-123');
     const antes = h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND status = 'active'", b.workspaceId)!.n;
-    const prev = await req(h, 'POST', '/api/blueprint/import', b, { blueprint: bp });
-    assert.equal(prev.status, 200);
+    // aplicar o esqueleto é do serviço (modelos de equipe e módulo opcional); a rota sem cliente saiu na rc.29
+    assert.equal((await req(h, 'POST', '/api/blueprint/import', b, { blueprint: bp })).status, 404);
+    const importar = (apply: boolean) => importBlueprint(h.db, h.bus, h.routines, b.workspaceId, b.userId, bp, apply, limitsFor(h.cfg));
+    const prev = { json: importar(false) };
     assert.equal(prev.json.applied, false);
     assert.deepEqual(prev.json.coordinator, { from: 'Aristóteles', to: 'Gandalf' });
     assert.ok(prev.json.agents.some((x: { name: string }) => x.name === 'Frodo'));
     assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND status = 'active'", b.workspaceId)!.n, antes);
 
-    const ap = await req(h, 'POST', '/api/blueprint/import', b, { blueprint: bp, apply: true });
-    assert.equal(ap.status, 200);
+    const ap = { json: importar(true) };
     assert.equal(ap.json.applied, true);
     const frodo = h.db.get<{ tools: string | null; model: string | null; provider: string | null }>("SELECT tools, model, provider FROM agents WHERE workspace_id = ? AND name = 'Frodo'", b.workspaceId)!;
     assert.ok(frodo, 'Frodo criado');
     // só as ferramentas de qualquer agente novo daquele setor; nada do esqueleto, nada que execute código
-    const manual = (await req(h, 'POST', '/api/agents', b, { name: 'Sam', role: 'Pesquisa de campo', sectorKey: ap.json.agents.find((x: { name: string }) => x.name === 'Frodo').sector })).json;
+    const manual = (await req(h, 'POST', '/api/agents', b, { name: 'Sam', role: 'Pesquisa de campo', sectorKey: ap.json.agents.find((x: { name: string }) => x.name === 'Frodo')!.sector })).json;
     const samTools = h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', manual.id)!.tools;
     assert.deepEqual(JSON.parse(frodo.tools ?? '[]').sort(), JSON.parse(samTools ?? '[]').sort());
     for (const t of ['executar-codigo', 'terminal']) assert.ok(!(frodo.tools ?? '').includes(t));

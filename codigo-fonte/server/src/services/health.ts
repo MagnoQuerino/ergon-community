@@ -232,7 +232,7 @@ export async function diagnostics(d: HealthDeps): Promise<Record<string, unknown
     configuracao: {
       motor: cfg.hermesApiKey ? 'definido' : 'ausente', cofreDoMotor: cfg.hermesVaultUrl ? 'definido' : 'ausente', ponte: cfg.bridgeToken ? 'definida' : 'ausente',
       microsoft: cfg.msClientId ? 'app registrado' : 'sem app', google: cfg.googleClientId && cfg.googleClientSecret ? 'app registrado' : 'sem app', googleEmTeste: cfg.googleTesting,
-      teams: cfg.teams.enabled, whatsapp: cfg.whatsapp.enabled, tetoDeProcessos: cfg.maxConcurrentRuns || 'sem teto', processosPadraoDaMaquina: machineDefault(), limiteDiario: cfg.dailyRunLimit, tempoLimiteS: cfg.runTimeoutSeconds,
+      tetoDeProcessos: cfg.maxConcurrentRuns || 'sem teto', processosPadraoDaMaquina: machineDefault(), limiteDiario: cfg.dailyRunLimit, tempoLimiteS: cfg.runTimeoutSeconds,
     },
     memoria: { rssMB: Math.round(mem.rss / 1024 / 1024), heapMB: Math.round(mem.heapUsed / 1024 / 1024) },
     banco: { migracoes: db.all<{ name: string }>('SELECT name FROM schema_migrations ORDER BY name').map((r) => r.name), cifrado: Db.isEncryptedFile(cfg.dbPath) },

@@ -26,11 +26,12 @@ este computador (`http://localhost:8787`). Tudo o que ele guarda fica cifrado co
 
 | | Zip do repositório | `ergon-local-<versão>.zip` |
 |---|---|---|
-| Windows (caminho avançado) | `codigo-fonte\instalador\ergon.cmd install` | `.\ergon.cmd install` |
 | macOS e Linux | `bash "Instalar Ergon no Linux e macOS.sh"` | `./ergon.sh install` |
 
-O lançador instala o Ergon numa pasta sua (Windows: `%LOCALAPPDATA%\Programs\Ergon`; macOS/Linux:
-`~/.local/share/ergon`) e põe o comando `ergon` no PATH: depois disso, use `ergon` de qualquer terminal novo e
+No Windows, o caminho é o Ergon Desktop: o lançador antigo pelo Docker Desktop (instalações até a versão rc.11) saiu e
+hoje só mostra esse aviso.
+
+O lançador instala o Ergon numa pasta sua (`~/.local/share/ergon`) e põe o comando `ergon` no PATH: depois disso, use `ergon` de qualquer terminal novo e
 apague a pasta do zip se quiser. Ele também gera os segredos internos em `~/.ergon/secrets` (nunca no OneDrive), sobe os
 contêineres, deixa o ajudante do computador pronto (ele começa sozinho ao entrar no computador) e abre o
 navegador. No primeiro acesso:

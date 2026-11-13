@@ -143,7 +143,7 @@ export function createAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
          VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
         agentId, workspaceId, floorId, sector.id, name, role, color, now(), db.seal(workspaceId, charter), JSON.stringify(skills), JSON.stringify(tools),
         // sem lista pedida: as competências prontas (regra do dono, 12/11); a pessoa desliga por agente em Treinar
-        JSON.stringify(input.hermesSkills === undefined ? COMPETENCIAS_PRONTAS : cleanList(input.hermesSkills, 20, 80)), input.model ?? null, input.model ? input.provider ?? null : null,
+        JSON.stringify(input.hermesSkills === undefined ? COMPETENCIAS_PRONTAS : cleanList(input.hermesSkills, 200, 80)), input.model ?? null, input.model ? input.provider ?? null : null,
         // agente novo nasce com o boneco da prévia (semente enviada) ou um sorteado do pacote gráfico
         input.lookSeed && Number.isInteger(input.lookSeed) && input.lookSeed > 0 && input.lookSeed <= 2147483647 ? input.lookSeed : randomInt(1, 2147483647));
       // efeito escolhido na criação: na mesma transação (cancelou ou falhou, nada fica pela metade)
@@ -195,7 +195,7 @@ export function updateAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
       if (p.charter !== undefined) set('charter', db.seal(workspaceId, p.charter.trim().slice(0, 4000) || null), 'instruções');
       if (p.skills !== undefined) set('skills', JSON.stringify(cleanList(p.skills, 12, 80)), 'métodos');
       if (p.tools !== undefined) set('tools', JSON.stringify(cleanList(p.tools, 20, 30).filter((t) => TOOLS[t])), 'ferramentas');
-      if (p.hermesSkills !== undefined) set('hermes_skills', JSON.stringify(cleanList(p.hermesSkills, 20, 80)), 'skills');
+      if (p.hermesSkills !== undefined) set('hermes_skills', JSON.stringify(cleanList(p.hermesSkills, 200, 80)), 'skills');
       if (p.model !== undefined) { set('model', p.model || null, 'modelo'); set('provider', p.model ? p.provider ?? null : null, 'conta do modelo'); }
       if (p.color !== undefined && /^#[0-9a-f]{6}$/i.test(p.color)) set('color', p.color, 'cor');
       if (p.bio !== undefined) set('bio', (p.bio ?? '').trim().slice(0, 600) || null, 'bio');
@@ -382,54 +382,6 @@ export function reactivateAgent(db: Db, bus: Bus, workspaceId: string, actorUser
     mapCapacityError(err);
   }
   bus.publish(workspaceId, 'agents.changed', { id: agentId });
-}
-
-/**
- * Expansão SIMULADA e gratuita, local: adiciona um andar. Nenhum pagamento, saldo ou
- * desconto. O cliente não altera capacidade; somente esta rota no servidor.
- */
-export function addSimulatedFloor(db: Db, bus: Bus, workspaceId: string, actorUserId: string, slotsPerFloor: number, maxFloors: number): string {
-  const floorId = db.tx(() => {
-    const b = db.get<{ id: string; kind: string }>("SELECT id, kind FROM buildings WHERE workspace_id = ? AND kind = 'stoa' AND removed_at IS NULL ORDER BY created_at LIMIT 1", workspaceId);
-    if (!b) throw notFound('construção');
-    const info = db.get<{ n: number; top: number | null }>(
-      'SELECT COUNT(*) AS n, MAX(level) AS top FROM floors WHERE building_id = ? AND removed_at IS NULL', b.id);
-    const n = Number(info?.n ?? 0);
-    const max = Math.min(maxFloors, typeOf(b.kind)?.floors.max ?? maxFloors);
-    if (n >= max) throw new HttpError(409, 'max_floors', `A Stoa comporta até ${max} andares: para mais agentes, construa outra estrutura num lote livre.`);
-    const level = info?.top === null || info?.top === undefined ? 0 : Number(info.top) + 1;
-    const fid = id('flr');
-    db.run(
-      `INSERT INTO floors (id, workspace_id, building_id, level, name, slots, origin, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'simulated', ?)`,
-      fid, workspaceId, b.id, level, level === 0 ? 'Térreo' : `${level}º andar`, slotsPerFloor, now());
-    audit(db, null, {
-      workspaceId, actorType: 'user', actorId: actorUserId, action: 'floor.add_simulated', targetType: 'floor', targetId: fid,
-      evidence: { level, slots: slotsPerFloor, payment: 'nenhum (versão local, grátis)' }, result: 'ok',
-    });
-    return fid;
-  });
-  bus.publish(workspaceId, 'agents.changed', { floor: floorId });
-  return floorId;
-}
-
-export function removeFloor(db: Db, bus: Bus, workspaceId: string, actorUserId: string, floorId: string): void {
-  try {
-    db.tx(() => {
-      const f = db.get<{ origin: string; level: number; building_id: string }>('SELECT origin, level, building_id FROM floors WHERE id = ? AND workspace_id = ? AND removed_at IS NULL', floorId, workspaceId);
-      if (!f) throw notFound('andar');
-      // o andar mais alto DESTA construção (cada construção tem a sua pilha)
-      const top = db.get<{ top: number }>('SELECT MAX(level) AS top FROM floors WHERE building_id = ? AND removed_at IS NULL', f.building_id);
-      if (Number(top?.top) !== Number(f.level)) throw new HttpError(409, 'not_top_floor', 'Remova somente o andar mais alto da construção.');
-      if (f.origin === 'base') throw new HttpError(409, 'base_floor', 'Os andares que vêm com a construção não são removíveis.');
-      db.run('UPDATE floors SET removed_at = ? WHERE id = ?', now(), floorId);
-      audit(db, null, { workspaceId, actorType: 'user', actorId: actorUserId, action: 'floor.remove', targetType: 'floor', targetId: floorId, result: 'ok' });
-    });
-  } catch (err) {
-    if (err instanceof HttpError) throw err;
-    mapCapacityError(err);
-  }
-  bus.publish(workspaceId, 'agents.changed', { floor: floorId });
 }
 
 /**

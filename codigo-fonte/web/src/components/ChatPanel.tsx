@@ -146,7 +146,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     finally { decidindo.current.delete(id); setDeciding((x) => { const y = { ...x }; delete y[id]; return y; }); props.reload(); }
   };
   // várias propostas de uma vez (um tema inteiro, por exemplo): aplicar ou recusar todas, na ordem em que vieram
-  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff', 'conexao', 'depois_de_ler', 'aprovacao', 'regra', 'segredo'].includes(p.kind));
+  const batch = (props.data ?? []).filter((p) => p.status === 'proposed' && !['question', 'permission', 'info_request', 'handoff', 'conexao', 'depois_de_ler', 'aprovacao', 'regra', 'segredo', 'gestao'].includes(p.kind));
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchDecisao, setBatchDecisao] = useState<'apply' | 'reject'>('apply');
   const decideAll = async (decision: 'apply' | 'reject') => {
@@ -624,8 +624,8 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             : p.kind === 'permission' && p.status === 'proposed' ? <PermissionCard key={p.id} p={p} onDone={() => { props.reload(); msgs.reload(); }} onReject={() => decide(p.id, 'reject')} />
             : (
               <div key={p.id} className={`proposal-card proposal-card--${p.status}`}>
-                <Selo icone={p.kind === 'purge' || p.kind === 'delete_task' ? 'trash' : p.kind === 'routine' || p.kind === 'routine_edit' ? 'repeat' : p.kind === 'conexao' ? 'plug' : p.kind === 'regra' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'permission' ? 'shield-check' : 'flag'}>{PROPOSAL_KIND[p.kind] ?? p.kind}</Selo>
-                <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
+                <Selo icone={p.kind === 'purge' || p.kind === 'delete_task' ? 'trash' : p.kind === 'routine' || p.kind === 'routine_edit' ? 'repeat' : p.kind === 'conexao' ? 'plug' : p.kind === 'regra' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'permission' || p.kind === 'gestao' ? 'shield-check' : 'flag'}>{PROPOSAL_KIND[p.kind] ?? p.kind}</Selo>
+                <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' || p.kind === 'gestao' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
                 {p.status === 'proposed' && p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} ocupado={deciding[p.id] === 'reject' ? 'recusar' : deciding[p.id] ? 'aplicar' : false} onEscolher={(alcance) => void decide(p.id, 'apply', { alcance })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' && p.kind === 'depois_de_ler' ? <BotoesPrazo ocupado={deciding[p.id] === 'reject' ? 'recusar' : deciding[p.id] ? 'aplicar' : false} onEscolher={(prazo) => void decide(p.id, 'apply', { prazo })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' ? (

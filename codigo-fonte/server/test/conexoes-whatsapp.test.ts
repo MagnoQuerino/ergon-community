@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, test, type TestContext } from 'node:test';
-import { loadConfig } from '../src/config.ts';
 import { Db } from '../src/db/db.ts';
 import { now } from '../src/lib/util.ts';
 import { Bus } from '../src/services/bus.ts';
@@ -57,14 +56,13 @@ async function montar(t: TestContext, filtros: Record<string, unknown> = {}) {
   db.run("INSERT INTO workspaces (id, name, created_at) VALUES (?, 'Teste', ?)", WS, now());
   db.run("INSERT INTO connections (id, workspace_id, kind, label, mode, created_at) VALUES ('con_wa', ?, 'whatsapp', 'WhatsApp', 'real', ?)", WS, now());
   const bus = new Bus();
-  const cfg = loadConfig({ ERGON_DATA_DIR: dir, ERGON_KDF: 'test' } as NodeJS.ProcessEnv);
   const ints = { liveState: () => null, secrets: { cipher: () => null, dirFor: () => dir, removeDir() {}, read: () => null }, disconnect() {} } as unknown as Integrations;
   const filtrar = (f: Record<string, unknown>) => setIntegration(db, WS, 'whatsapp', { settings: { cards: false, riscos: { versao: WA_RISKS_VERSION }, ...f } });
   filtrar(filtros);
   /** um leitor recém-ligado: nada na memória, só o que está no banco (é o que sobra depois de reiniciar) */
   const ligar = async (abrir = true) => {
     const fake = fakeBaileys();
-    const wa = new WhatsAppReader(db, bus, cfg, ints);
+    const wa = new WhatsAppReader(db, bus, ints);
     wa.loader = async () => fake.mod;
     wa.qrLoader = async () => ({ toDataURL: async () => 'data:image/png;base64,QR' });
     await wa.start(WS, null);

@@ -56,6 +56,11 @@ export function ModelosPorTarefa({ perfil, deTodaEquipe = false }: { perfil?: st
       <summary>
         <b>{t('conexoes.tarefas.titulo')}</b>
         <span className="muted small">{!tm || !tm.supported ? '' : proprias ? t('conexoes.tarefas.resumoProprias', { n: proprias }) : t('conexoes.tarefas.resumoTodas')}</span>
+        <span className="modelos-tarefa__acao" aria-hidden="true">
+          <span className="modelos-tarefa__abrir">{t('conexoes.tarefas.ajustar')}</span>
+          <span className="modelos-tarefa__fechar">{t('conexoes.tarefas.recolher')}</span>
+          <span className="modelos-tarefa__seta">▸</span>
+        </span>
       </summary>
       <p className="hint">{t('conexoes.tarefas.texto')}</p>
       {deTodaEquipe && <p className="hint">{t('conexoes.tarefas.todaEquipe')}</p>}

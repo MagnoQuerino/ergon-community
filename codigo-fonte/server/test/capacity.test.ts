@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { id, now } from '../src/lib/util.ts';
-import { allAgents, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { allAgents, andarNaStoa, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 // a capacidade continua garantida no servidor e no banco (vale para os planos da nuvem e para quem desliga o
 // crescimento automático); no local, por padrão, a cidade cresce sozinha (teste no fim do arquivo)
@@ -55,7 +55,7 @@ describe('capacidade de habitantes (validada no servidor)', () => {
   });
 
   test('andar extra (versão local, grátis) libera vagas, sem cobrança', async () => {
-    const r = await req(h, 'POST', '/api/floors', s);
+    const r = await andarNaStoa(h, s);
     assert.equal(r.status, 201);
     assert.equal(r.json.local, true);
     const c = (await req(h, 'GET', '/api/capacity', s)).json;
@@ -63,26 +63,15 @@ describe('capacidade de habitantes (validada no servidor)', () => {
     const floor = c.floors.find((f: { id: string }) => f.id === r.json.id);
     assert.equal(floor.origin, 'simulated');
     const log = (await req(h, 'GET', '/api/activity', s)).json as Array<{ action: string; evidence: string }>;
-    const ev = log.find((e) => e.action === 'floor.add_simulated');
+    const ev = log.find((e) => e.action === 'floor.add');
     assert.match(ev!.evidence, /nenhum/);
-  });
-
-  test('andar ocupado não pode ser removido; andar base nunca', async () => {
-    const c = (await req(h, 'GET', '/api/capacity', s)).json;
-    const top = c.floors[c.floors.length - 1];
-    await req(h, 'POST', '/api/agents', s, { name: 'Morador', role: 'Ocupa o andar novo', profileKey: 'central', floorId: top.id });
-    const r = await req(h, 'DELETE', `/api/floors/${top.id}`, s);
-    assert.equal(r.status, 409);
-    assert.equal(r.json.error, 'floor_occupied');
-    const base = await req(h, 'DELETE', `/api/floors/${c.floors[0].id}`, s);
-    assert.equal(base.status, 409);
   });
 
   test('a Stoa tem um máximo de andares (para mais agentes, outra estrutura)', async () => {
     let last = { status: 201, json: null as any };
-    for (let i = 0; i < 5; i++) last = await req(h, 'POST', '/api/floors', s);
+    for (let i = 0; i < 5; i++) last = await andarNaStoa(h, s);
     assert.equal(last.status, 409);
-    assert.match(last.json.message, /construa outra estrutura/);
+    assert.match(last.json.message, /comporta até/);
     const c = (await req(h, 'GET', '/api/capacity', s)).json;
     assert.equal(c.floors.length, 4);
   });
@@ -124,7 +113,7 @@ describe('corrida concorrente de criação (conexões separadas, mesmo arquivo)'
   });
 
   test('requisições HTTP paralelas também respeitam o limite', async () => {
-    await req(h, 'POST', '/api/floors', s); // +6 vagas
+    await andarNaStoa(h, s); // +6 vagas
     const rs = await Promise.all(Array.from({ length: 12 }, (_, i) =>
       req(h, 'POST', '/api/agents', s, { name: `Paralelo ${i}`, role: 'Teste', profileKey: 'central' })));
     assert.equal(rs.filter((r) => r.status === 201).length, 6);

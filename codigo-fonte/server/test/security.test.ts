@@ -297,10 +297,10 @@ describe('endereço, versão e o que a interface precisa saber', () => {
 });
 
 describe('modo nuvem: configuração insegura não sobe', () => {
-  test('exige https, cookie seguro, token de configuração e nada só-local', () => {
-    assert.throws(() => loadConfig({ ERGON_MODE: 'cloud' } as NodeJS.ProcessEnv), /https.*COOKIE_SECURE.*SETUP_TOKEN.*FIXTURES/);
-    assert.throws(() => loadConfig({ ERGON_MODE: 'cloud', ERGON_PUBLIC_URL: 'https://app.exemplo.com', ERGON_COOKIE_SECURE: 'true', ERGON_SETUP_TOKEN: 'x'.repeat(32), ERGON_FIXTURES_ENABLED: 'false', ERGON_WHATSAPP_ENABLED: 'true' } as NodeJS.ProcessEnv), /WhatsApp/);
-    const ok = loadConfig({ ERGON_MODE: 'cloud', ERGON_PUBLIC_URL: 'https://app.exemplo.com', ERGON_COOKIE_SECURE: 'true', ERGON_SETUP_TOKEN: 'x'.repeat(32), ERGON_FIXTURES_ENABLED: 'false' } as NodeJS.ProcessEnv);
+  // as simulações de canal e o WhatsApp pelo gateway do motor (as duas chaves só-local de antes) saíram na rc.29
+  test('exige https, cookie seguro e token de configuração', () => {
+    assert.throws(() => loadConfig({ ERGON_MODE: 'cloud' } as NodeJS.ProcessEnv), /https.*COOKIE_SECURE.*SETUP_TOKEN/);
+    const ok = loadConfig({ ERGON_MODE: 'cloud', ERGON_PUBLIC_URL: 'https://app.exemplo.com', ERGON_COOKIE_SECURE: 'true', ERGON_SETUP_TOKEN: 'x'.repeat(32) } as NodeJS.ProcessEnv);
     assert.equal(ok.mode, 'cloud');
   });
 });

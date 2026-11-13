@@ -71,7 +71,8 @@ export function sealFilesAtRest(cfg: Config, cipher: FieldCipher): number {
   if (fs.existsSync(sec)) {
     for (const f of fs.readdirSync(sec)) {
       const full = path.join(sec, f);
-      const m = f.match(/^(ws_[a-f0-9]{32})-([a-z]+)(\.json)?$/);
+      // as outras contas do mesmo aplicativo (rc.29) têm o id delas no nome; o rótulo da cifra é o do aplicativo
+      const m = f.match(/^(ws_[a-f0-9]{32})-([a-z]+)(?:\.c[a-f0-9]{8})?(\.json)?$/);
       if (!m) continue;
       if (fs.statSync(full).isDirectory()) { for (const g of fs.readdirSync(full)) seal(path.join(full, g), m[1], `${m[2]}/${g}`); } else seal(full, m[1], `${m[2]}.json`);
     }

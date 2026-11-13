@@ -128,6 +128,11 @@ check("endereço que não responde: nada é cadastrado", byok("POST", "/ergon/v1
 chamadas.clear()
 check("apagar endpoint próprio: só byok-*", byok("DELETE", "/ergon/v1/byok/custom/byok-lm-studio")[0] == 200 and chamadas == [("DELETE", "/api/providers/custom-endpoints/byok-lm-studio", None)]
       and byok("DELETE", "/ergon/v1/byok/custom/ergon-ai")[0] == 404)
+# a ponte de controle não repassa a lista dos endpoints próprios nem o "activate" (saíram na rc.29: ninguém chamava)
+passa = lambda m, p: any(mm == m and rx.fullmatch(p) for mm, rx, _q in b._ROUTES)  # noqa: E731
+check("ponte: só gravar e apagar o endpoint ergon-ai passam",
+      passa("POST", "/api/providers/custom-endpoints") and passa("DELETE", "/api/providers/custom-endpoints/ergon-ai")
+      and not passa("GET", "/api/providers/custom-endpoints") and not passa("POST", "/api/providers/custom-endpoints/ergon-ai/activate"))
 
 print("TUDO OK" if ok else "HOUVE FALHA")
 sys.exit(0 if ok else 1)

@@ -29,6 +29,10 @@ const DOC_SOURCES = new Set<SourceId>(['documentos', 'planilhas', 'financeiro.la
 
 export interface ExtraCtx {
   db: Db; ws: string; since: string; tz: string; filesDir: string; accounts: AccountReader | null;
+  /** as contas que a rotina escolheu ler (ids das linhas em integrations); vazio ou ausente = todas as ligadas */
+  contas?: string[];
+  /** de quais aplicativos são as contas escolhidas (a escolha vale mesmo se a escolhida saiu do banco) */
+  contasApps?: string[];
   input: RunInput; params: ParamValues; horizonDays: number;
   /** caracteres para o texto dos documentos (o resto do contexto vai para as outras fontes) */
   docBudget: number;
@@ -72,7 +76,7 @@ async function loadDocs(ctx: ExtraCtx, refs: FileRef[], docReads: DocRead[]): Pr
       if (r.kind === 'ergon') { const a = openArtifact(ctx.db, ctx.filesDir, ctx.ws, r.id); doc = await readDocument(a.filename, a.mime, a.data); }
       else {
         if (!ctx.accounts) throw new Error('conta não conectada');
-        const f = await ctx.accounts.fetchFile(ctx.ws, { provider: r.kind, id: r.id }); doc = await readDocument(f.name, f.mime, f.data);
+        const f = await ctx.accounts.fetchFile(ctx.ws, { provider: r.kind, id: r.id, conta: r.conta ?? '' }); doc = await readDocument(f.name, f.mime, f.data);
       }
       out.push(doc);
       docReads.push({ name: doc.name, status: doc.status, detail: doc.detail, chars: doc.text.length + (doc.sheets?.reduce((s, x) => s + x.rows.length, 0) ?? 0), source: r.kind });
@@ -203,10 +207,21 @@ export async function gatherExtra(ctx: ExtraCtx, sources: SourceId[]): Promise<E
     } else if (key === 'email.caixa' || key === 'email.pendencias' || key === 'email.responder' || key === 'email.relacionados') {
       await mailSection(ctx, key, res, add);
     } else if (key === 'mensagens.texto') {
-      const ev = ctx.db.all<{ platform: string; actor: string | null; text: string | null; at: string; task: string | null }>(
-        `SELECT c.kind AS platform, e.actor_display AS actor, e.text_excerpt AS text, e.received_at AS at, e.task_id AS task FROM source_events e JOIN connections c ON c.id = e.connection_id
-          WHERE e.workspace_id = ? AND e.received_at >= ? AND e.is_fixture = 0 ORDER BY e.received_at DESC LIMIT 40`, ctx.ws, ctx.since);
-      add(key, ev.length, ev.map((e, i) => { const l = local(ctx.tz, Date.parse(e.at)); return `M${i + 1} · ${l.d} ${l.t} · ${e.platform === 'whatsapp' ? 'WhatsApp' : e.platform === 'teams' ? 'Teams' : e.platform} · ${t3(e.actor ?? 'desconhecido', 50)}: "${t3(e.text ?? '(sem texto)', 400)}"${e.task ? ' · já virou tarefa' : ''}`; }), { news: ev.length > 0, signal: ev.length > 0 });
+      // de qual número chegou (com mais de um), e só dos números que a rotina escolheu e que a pessoa deixou ligados
+      const todos = ctx.db.all<{ platform: string; actor: string | null; text: string | null; at: string; task: string | null; conta: string | null }>(
+        `SELECT c.kind AS platform, e.actor_display AS actor, e.text_excerpt AS text, e.received_at AS at, e.task_id AS task, e.integracao_id AS conta FROM source_events e JOIN connections c ON c.id = e.connection_id
+          WHERE e.workspace_id = ? AND e.received_at >= ? AND e.is_fixture = 0 ORDER BY e.received_at DESC LIMIT 200`, ctx.ws, ctx.since);
+      const numeros = ctx.db.all<{ id: string; apelido: string | null; account_label: string | null; ativa: number }>("SELECT id, apelido, account_label, ativa FROM integrations WHERE workspace_id = ? AND kind = 'whatsapp'", ctx.ws);
+      const escolhidos = (ctx.contas ?? []).filter((id) => numeros.some((n) => n.id === id));
+      // a rotina escolheu algum número: vale mesmo que o escolhido tenha saído (aí não lê nenhum, em vez de ler todos)
+      const comEscolha = escolhidos.length > 0 || (ctx.contasApps ?? []).includes('whatsapp');
+      const ligado = (id: string) => numeros.find((n) => n.id === id)?.ativa === 1;
+      const semNumero = comEscolha && !escolhidos.some(ligado);
+      const nomeDe = new Map(numeros.map((n) => [n.id, (n.apelido ?? '').trim() || (n.account_label ?? '').trim()]));
+      const varios = numeros.filter((n) => n.ativa !== 0 && nomeDe.get(n.id)).length > 1;
+      const ev = todos.filter((e) => e.platform !== 'whatsapp' || !e.conta || ((comEscolha ? escolhidos.includes(e.conta) : true) && ligado(e.conta))).slice(0, 40);
+      const avisoNumero = semNumero ? ['(o número de WhatsApp escolhido para esta rotina não está mais conectado ou ligado: nenhuma mensagem de WhatsApp foi lida; escolha outro número na rotina)'] : [];
+      add(key, ev.length, [...avisoNumero, ...ev.map((e, i) => { const l = local(ctx.tz, Date.parse(e.at)); const num = e.platform === 'whatsapp' && varios && e.conta && nomeDe.get(e.conta) ? ` (${t3(nomeDe.get(e.conta)!, 60)})` : ''; return `M${i + 1} · ${l.d} ${l.t} · ${e.platform === 'whatsapp' ? 'WhatsApp' : e.platform === 'teams' ? 'Teams' : e.platform}${num} · ${t3(e.actor ?? 'desconhecido', 50)}: "${t3(e.text ?? '(sem texto)', 400)}"${e.task ? ' · já virou tarefa' : ''}`; })], { news: ev.length > 0 || semNumero, signal: ev.length > 0 || semNumero });
     } else if (key === 'agenda.proximas') {
       await meetingsSection(ctx, res, add);
     } else if (key === 'web.noticias' || key === 'web.regulatorio' || key === 'web.concorrentes') {
@@ -326,7 +341,8 @@ function weekLines(db: Db, ws: string, since: string, today: string): { count: n
 type Add = (key: SourceId, count: number, lines: string[], flags?: { signal?: boolean; news?: boolean; required?: string[]; label?: string }) => void;
 const mailLine = (code: string, m: MailItem, tz: string, extra = '') => {
   const l = local(tz, m.at);
-  return `${code} · ${l.d} ${l.t} · ${m.folder === 'sent' ? `você para ${t3(m.to.join(', ') || 'destinatário', 80)}` : `de ${t3(m.from, 60)}`}: "${t3(m.subject || '(sem assunto)', 120)}"${m.important ? ' · importante' : ''}${m.unread ? ' · não lido' : ''}${extra} · ${m.account === 'google' ? 'Google' : 'Microsoft'}`;
+  // com mais de uma conta do mesmo aplicativo, diz de qual conta veio
+  return `${code} · ${l.d} ${l.t} · ${m.folder === 'sent' ? `você para ${t3(m.to.join(', ') || 'destinatário', 80)}` : `de ${t3(m.from, 60)}`}: "${t3(m.subject || '(sem assunto)', 120)}"${m.important ? ' · importante' : ''}${m.unread ? ' · não lido' : ''}${extra} · ${m.account === 'google' ? 'Google' : 'Microsoft'}${m.contaNome ? ` (${t3(m.contaNome, 60)})` : ''}`;
 };
 
 async function mailSection(ctx: ExtraCtx, key: SourceId, res: ExtraResult, add: Add): Promise<void> {
@@ -371,7 +387,7 @@ async function mailSection(ctx: ExtraCtx, key: SourceId, res: ExtraResult, add: 
   cands = cands.sort((a, b) => Number(b.important) - Number(a.important) || b.at - a.at).slice(0, 5);
   const lines: string[] = [];
   for (const [i, m] of cands.entries()) {
-    const body = await ctx.accounts.mailBody(ctx.ws, m.account, m.id);
+    const body = await ctx.accounts.mailBody(ctx.ws, m.account, m.id, m.conta ?? '');
     const hist = inbox.concat(sent).filter((x) => x.thread === m.thread && x.id !== m.id).sort((a, b) => a.at - b.at).slice(-4);
     lines.push(mailLine(`R${i + 1}`, m, ctx.tz));
     lines.push(...defuse(clip(body || m.preview, 1800)).split(/\n+/).filter((x) => x.trim()).slice(0, 30).map((x) => `  R${i + 1} texto: ${x.trim()}`));

@@ -100,6 +100,17 @@ describe('em inglês', () => {
     assert.equal(r.log[1].result, 'frase do agente');
   });
 
+  test('o cartão da gestão do coordenador (summary_t): a ação, os campos, sim/não e o nome no idioma da tela', () => {
+    const r = tela.traduzirResposta({ proposals: [{ kind: 'gestao', summary: 'Aristóteles quer: Criar um agente.\n- name: Temístocles\n- ativo: sim\n- agente: agente Sócrates\nNada muda até você aplicar.',
+      summary_t: { codigo: 'junto', valores: { sep: '\n', itens: [
+        { codigo: 'proposta.gestao.quer', valores: { agente: 'Aristóteles', acao: { codigo: 'proposta.gestao.acao.agente.criar' } } },
+        { codigo: 'proposta.gestao.campo', valores: { campo: 'name', valor: 'Temístocles' } },
+        { codigo: 'proposta.gestao.campo', valores: { campo: 'ativo', valor: { codigo: 'proposta.gestao.sim' } } },
+        { codigo: 'proposta.gestao.campo', valores: { campo: 'agente', valor: { codigo: 'proposta.gestao.nome.agt', valores: { nome: 'Sócrates' } } } },
+        { codigo: 'proposta.gestao.nadaMuda' }] } } }] });
+    assert.equal(r.proposals[0].summary, 'Aristóteles wants to: Create an agent.\n- name: Temístocles\n- ativo: yes\n- agente: agent Sócrates\nNothing changes until you apply it.');
+  });
+
   test('cada código do servidor monta em inglês, sem marcador sobrando e sem letra do português', () => {
     const erros: string[] = [];
     for (const [codigo, m] of Object.entries(PT)) {

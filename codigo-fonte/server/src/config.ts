@@ -100,15 +100,11 @@ export interface Config {
   maxUploadBytes: number;
   /** total de arquivos por workspace: só na nuvem, conforme o plano (0 = sem limite) */
   maxStorageBytes: number;
-  fixturesEnabled: boolean;
-  fixturesDir: string;
-  teams: { enabled: boolean; tenantId: string | null; allowedUsers: string[] };
   /**
    * Conversar com a equipe pelo Teams (app público): endereço https do serviço do Teams (ERGON_TEAMS_RELAY_URL). Tem
    * prioridade sobre o ajuste da instalação; sem nenhum dos dois, o recurso fica indisponível (services/teams-app).
    */
   teamsRelayUrl: string | null;
-  whatsapp: { enabled: boolean; ownerIds: string[]; monitoredChats: string[]; sendEnabled: boolean };
   simulatedDelayMs: number;
   workerTickMs: number;
   leaseSeconds: number;
@@ -199,20 +195,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     autoGrow: bool(env.ERGON_AUTOGROW, mode === 'local'),
     maxUploadBytes: int(env.ERGON_MAX_UPLOAD_BYTES, 50 * 1024 * 1024, 1024, 500 * 1024 * 1024),
     maxStorageBytes: int(env.ERGON_MAX_STORAGE_MB, 0, 0, 10_000_000) * 1024 * 1024,
-    fixturesEnabled: bool(env.ERGON_FIXTURES_ENABLED, true),
-    fixturesDir: path.resolve(env.ERGON_FIXTURES_DIR ?? path.join(import.meta.dirname, '..', '..', 'fixtures')),
-    teams: {
-      enabled: bool(env.ERGON_TEAMS_ENABLED, false),
-      tenantId: env.ERGON_TEAMS_TENANT_ID || null,
-      allowedUsers: list(env.ERGON_TEAMS_ALLOWED_USERS),
-    },
     teamsRelayUrl: env.ERGON_TEAMS_RELAY_URL?.trim() || null,
-    whatsapp: {
-      enabled: bool(env.ERGON_WHATSAPP_ENABLED, false),
-      ownerIds: list(env.ERGON_WHATSAPP_OWNER_IDS),
-      monitoredChats: list(env.ERGON_WHATSAPP_MONITORED_CHATS),
-      sendEnabled: bool(env.ERGON_WHATSAPP_SEND_ENABLED, false),
-    },
     simulatedDelayMs: int(env.ERGON_SIMULATED_DELAY_MS, 1200, 0, 60000),
     workerTickMs: int(env.ERGON_WORKER_TICK_MS, 500, 20, 60000),
     leaseSeconds: int(env.ERGON_LEASE_SECONDS, 30, 2, 600),
@@ -223,8 +206,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     if (!publicUrl.startsWith('https://')) fix.push('ERGON_PUBLIC_URL com https://');
     if (!cfg.cookieSecure) fix.push('ERGON_COOKIE_SECURE=true');
     if (!cfg.setupToken || cfg.setupToken.length < 24) fix.push('ERGON_SETUP_TOKEN com 24+ caracteres (ninguém de fora cria o proprietário)');
-    if (cfg.fixturesEnabled) fix.push('ERGON_FIXTURES_ENABLED=false');
-    if (cfg.whatsapp.enabled) fix.push('ERGON_WHATSAPP_ENABLED=false (WhatsApp por QR é só local; na nuvem, a API oficial)');
     if (fix.length) throw new Error(`modo nuvem: ajuste ${fix.join('; ')}`);
   }
   return { ...cfg, ...overrides };

@@ -59,7 +59,7 @@ export function MinhaContaPanel({ me, onChanged }: { me: Me; onChanged: () => vo
         </div>
         <p className="muted small">{tn('conta.minha.usuarioEntrar', { usuario: <b>{me.user.username}</b> })}</p>
       </form>
-      {/* Português / English (escondido até o inglês ser liberado) */}
+      {/* Português / English */}
       <SeletorIdioma />
       <div className="conta__dados">
         <h4>{t('conta.minha.baixarTitulo')}</h4>

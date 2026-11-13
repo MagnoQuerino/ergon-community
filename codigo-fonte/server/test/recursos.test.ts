@@ -101,6 +101,12 @@ describe('capacidades da equipe', () => {
     assert.equal(tools.find((t) => t.id === 'conectores')!.status, 'disponível');
   });
 
+  test('conquistas saíram (rc.29): a rota não existe e nada vai à ponte', async () => {
+    const r = await req(h, 'GET', '/api/recursos/conquistas', s);
+    assert.equal(r.status, 404);
+    assert.ok(!ponte.chamadas.some((c) => c.sub.startsWith('conquistas')), 'a ponte não é chamada');
+  });
+
   test('proteções do Terminal: o dono liga e desliga; fica registrado', async () => {
     const r = await req(h, 'PUT', '/api/recursos', s, { limpeza: true, codigoInseguro: false });
     assert.equal(r.status, 200, JSON.stringify(r.json));

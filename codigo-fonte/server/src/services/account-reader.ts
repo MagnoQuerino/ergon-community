@@ -6,10 +6,12 @@
  * OneDrive ou do Google Drive. Anexos, nunca. Tudo o que vem de terceiros é dado, não instrução
  * (neutralizado antes de chegar ao agente). Cada leitura registra o que aconteceu (lida, não conectada, sem permissão,
  * autorização vencida, erro): o briefing diz o que não conseguiu ler em vez de fingir que leu.
+ * Várias contas (rc.29): lê todas as contas ligadas de cada aplicativo (dois e-mails, duas agendas), ou só as que a rotina
+ * escolheu (`so`); cada item diz de qual conta veio.
  */
 import type { Db } from '../db/db.ts';
 import { clip } from '../lib/util.ts';
-import { setIntegration } from './integrations.ts';
+import { nomeDaConta, setIntegration, type IntegrationRow } from './integrations.ts';
 import { ProviderError } from './mirror.ts';
 import { xmlText } from './doc-text.ts';
 import { neutral } from './operations.ts';
@@ -22,6 +24,8 @@ export type ReadKind = 'agenda' | 'email' | 'tarefas' | 'arquivos';
 export type ReadStatus = 'ok' | 'nao_conectada' | 'sem_permissao' | 'expirada' | 'erro';
 export interface SourceRead {
   account: SsoKind; what: ReadKind; status: ReadStatus; label: string | null; count: number; ms: number; detail?: string;
+  /** qual das contas do aplicativo ('' = a principal), quando há mais de uma */
+  conta?: string;
   /** a leitura parou no limite (havia mais páginas): o que veio é uma parte, e a conferência diz isso */
   truncated?: boolean;
 }
@@ -60,11 +64,12 @@ function today(tz: string): { start: number; end: number; date: string } {
 }
 
 export interface MailItem {
-  account: SsoKind; id: string; thread: string; at: number; from: string; fromAddr: string; to: string[];
+  /** conta: qual das contas do aplicativo ('' = a principal); contaNome: como ela aparece, quando há mais de uma */
+  account: SsoKind; conta?: string; contaNome?: string; id: string; thread: string; at: number; from: string; fromAddr: string; to: string[];
   subject: string; preview: string; important: boolean; unread: boolean; folder: 'inbox' | 'sent';
 }
-export interface EventItem { account: SsoKind; start: number; end: number; allDay: boolean; title: string; where: string; attendees: string[]; organizer: string; description: string }
-export interface CloudFile { provider: SsoKind; id: string; name: string; size: number; modified: string | null; mime: string; folder: string }
+export interface EventItem { account: SsoKind; conta?: string; contaNome?: string; start: number; end: number; allDay: boolean; title: string; where: string; attendees: string[]; organizer: string; description: string }
+export interface CloudFile { provider: SsoKind; conta?: string; id: string; name: string; size: number; modified: string | null; mime: string; folder: string }
 /** caixa: prioritários desde a última vez; pendencias: 14 dias de entrada e de saída; relacionados: busca por termos (30 dias) */
 export type MailMode = 'caixa' | 'pendencias' | 'relacionados';
 type Get = (url: string, headers?: Record<string, string>) => Promise<any>;
@@ -90,17 +95,42 @@ export function withoutQuoted(text: string): string {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** Uma conta conectada que a leitura usa. várias: o aplicativo tem mais de uma (o que se lê diz de qual veio). */
+interface ContaLida { kind: SsoKind; conta: string; label: string | null; connectedAt: string | null; varias: boolean }
+
 export class AccountReader {
   private readonly db: Db; private readonly sso: SsoAuth; private readonly googleTesting: boolean;
+  /** as contas que esta leitura pode usar (ids das linhas em integrations); null = todas as ligadas. Ver `so`. */
+  private filtro: Set<string> | null = null;
+  /** os aplicativos em que a rotina escolheu alguma conta (gravado com a escolha): valem mesmo se a escolhida saiu do banco */
+  private apps: Set<string> = new Set();
   constructor(db: Db, sso: SsoAuth, opts: { googleTesting: boolean }) { this.db = db; this.sso = sso; this.googleTesting = opts.googleTesting; }
 
-  /** "última leitura" de Conexões e do diagnóstico: antes, só a importação manual de uma lista a atualizava */
-  private readOk(ws: string, k: SsoKind): void { setIntegration(this.db, ws, k, { last_sync_at: new Date().toISOString() }); }
+  /**
+   * A mesma leitura, só nas contas escolhidas (a rotina que lê um e-mail e não o outro). Por aplicativo: escolher alguma conta
+   * dele limita àquelas; um aplicativo sem nenhuma escolhida continua com todas. Vazio ou null: todas.
+   */
+  so(ids: readonly string[] | null | undefined, apps?: readonly string[] | null): AccountReader {
+    if (!ids?.length) return this;
+    const r = Object.create(this) as AccountReader;
+    r.filtro = new Set(ids);
+    r.apps = new Set(apps ?? []);
+    return r;
+  }
 
-  private connected(ws: string): Array<{ kind: SsoKind; label: string | null; connectedAt: string | null }> {
-    return this.db.all<{ kind: SsoKind; account_label: string | null; connected_at: string | null }>(
-      "SELECT kind, account_label, connected_at FROM integrations WHERE workspace_id = ? AND kind IN ('microsoft', 'google') AND state = 'connected'", ws)
-      .map((r) => ({ kind: r.kind, label: r.account_label, connectedAt: r.connected_at }));
+  /** "última leitura" de Conexões e do diagnóstico: antes, só a importação manual de uma lista a atualizava */
+  private readOk(ws: string, k: SsoKind, conta = ''): void { setIntegration(this.db, ws, k, { last_sync_at: new Date().toISOString() }, conta); }
+
+  /** As contas Microsoft e Google conectadas e ligadas pela pessoa (a principal primeiro), já com a escolha da rotina. */
+  private connected(ws: string): ContaLida[] {
+    const rows = this.db.all<IntegrationRow>(
+      "SELECT * FROM integrations WHERE workspace_id = ? AND kind IN ('microsoft', 'google') AND state = 'connected' AND ativa = 1 ORDER BY kind, CASE WHEN conta = '' THEN 0 ELSE 1 END, created_at, rowid", ws);
+    const f = this.filtro;
+    // o aplicativo em que a rotina escolheu alguma conta: a escolha vale mesmo com a escolhida desligada ou caída agora (aí
+    // não lê esse aplicativo, e a leitura diz isso), em vez de passar a ler as contas que a pessoa deixou de fora
+    const comEscolha = f ? new Set(this.db.all<{ kind: string; id: string }>("SELECT kind, id FROM integrations WHERE workspace_id = ? AND kind IN ('microsoft', 'google')", ws).filter((x) => f.has(x.id)).map((x) => x.kind).concat([...this.apps])) : null;
+    const escolhidas = f ? rows.filter((r) => !comEscolha!.has(r.kind) || f.has(r.id)) : rows;
+    return escolhidas.map((r) => ({ kind: r.kind as SsoKind, conta: r.conta, label: nomeDaConta(r) || r.account_label, connectedAt: r.connected_at, varias: rows.filter((x) => x.kind === r.kind).length > 1 }));
   }
 
   /** Lê o que foi pedido em todas as contas conectadas. Uma conta com problema não impede as outras. */
@@ -109,35 +139,42 @@ export class AccountReader {
     const accounts = this.connected(ws);
     for (const w of what) {
       for (const k of ['microsoft', 'google'] as SsoKind[]) {
-        const acc = accounts.find((a) => a.kind === k);
-        if (!acc) { out.reads.push({ account: k, what: w, status: 'nao_conectada', label: null, count: 0, ms: 0 }); continue; }
-        const t0 = Date.now();
-        try {
-          const token = await this.sso.accessToken(ws, k);
-          const cut = { truncated: false };
-          const n = await this.one(k, w, this.authed(ws, k, token), since, tz, out, opts.horizonDays ?? 0, cut);
-          out.reads.push({ account: k, what: w, status: 'ok', label: acc.label, count: n, ms: Date.now() - t0, ...(cut.truncated ? { truncated: true, detail: 'parou no limite de leitura: pode haver mais' } : {}) });
-          this.readOk(ws, k);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          // renovação recusada pelo provedor = autorização vencida (Google em teste: a cada 7 dias); some da tela como erro
-          const expired = err instanceof ProviderError && err.kind === 'forbidden' && (err.reauth || /recusou o acesso|venceu|não há renovação/.test(msg));
-          const status: ReadStatus = expired ? 'expirada' : err instanceof ProviderError && err.kind === 'forbidden' ? 'sem_permissao' : 'erro';
-          if (expired) setIntegration(this.db, ws, k, { state: 'error', last_error: `A autorização ${k === 'google' ? 'do Google' : 'da Microsoft'} venceu: entre de novo em Conexões.` });
-          out.reads.push({ account: k, what: w, status, label: acc.label, count: 0, ms: Date.now() - t0, detail: clip(msg, 160) });
+        const doApp = accounts.filter((a) => a.kind === k);
+        if (!doApp.length) { out.reads.push({ account: k, what: w, status: 'nao_conectada', label: null, count: 0, ms: 0 }); continue; }
+        for (const acc of doApp) {
+          const t0 = Date.now();
+          const daConta = acc.varias ? { conta: acc.conta } : {};
+          try {
+            const token = await this.sso.accessToken(ws, k, { conta: acc.conta });
+            const cut = { truncated: false };
+            const antes = { agenda: out.agenda.length, email: out.email.length, tarefas: out.tarefas.length };
+            const n = await this.one(k, w, this.authed(ws, k, token, undefined, acc.conta), since, tz, out, opts.horizonDays ?? 0, cut);
+            // com mais de uma conta do mesmo aplicativo, cada linha diz de qual conta veio
+            if (acc.varias && acc.label) for (const [lista, de] of [[out.agenda, antes.agenda], [out.email, antes.email], [out.tarefas, antes.tarefas]] as const) for (const it of lista.slice(de)) it.line = `${it.line} · conta ${neutral(clip(acc.label, 60), 62)}`;
+            out.reads.push({ account: k, what: w, status: 'ok', label: acc.label, count: n, ms: Date.now() - t0, ...daConta, ...(cut.truncated ? { truncated: true, detail: 'parou no limite de leitura: pode haver mais' } : {}) });
+            this.readOk(ws, k, acc.conta);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            // renovação recusada pelo provedor = autorização vencida (Google em teste: a cada 7 dias); some da tela como erro
+            const expired = err instanceof ProviderError && err.kind === 'forbidden' && (err.reauth || /recusou o acesso|venceu|não há renovação/.test(msg));
+            const status: ReadStatus = expired ? 'expirada' : err instanceof ProviderError && err.kind === 'forbidden' ? 'sem_permissao' : 'erro';
+            if (expired) setIntegration(this.db, ws, k, { state: 'error', last_error: `A autorização ${k === 'google' ? 'do Google' : 'da Microsoft'} venceu: entre de novo em Conexões.` }, acc.conta);
+            out.reads.push({ account: k, what: w, status, label: acc.label, count: 0, ms: Date.now() - t0, detail: clip(msg, 160), ...daConta });
+          }
         }
       }
     }
-    // avisos que o usuário precisa ver (e o briefing repassa)
+    // avisos que o usuário precisa ver (e o briefing repassa); com mais de uma conta, diz qual
+    const quem = (r: SourceRead) => `${ACCOUNT_LABEL[r.account]}${r.conta !== undefined && r.label ? ` (${neutral(clip(r.label, 60), 62)})` : ''}`;
     for (const r of out.reads) {
-      if (r.status === 'expirada') out.warnings.push(`${ACCOUNT_LABEL[r.account]}: a autorização venceu — entre de novo em Conexões › ${ACCOUNT_LABEL[r.account]}.`);
+      if (r.status === 'expirada') out.warnings.push(`${quem(r)}: a autorização venceu — entre de novo em Conexões › ${ACCOUNT_LABEL[r.account]}.`);
       // na Microsoft, a leitura numa empresa costuma precisar do administrador (consentimento em etapas): "autorize de novo" ali não resolve
-      else if (r.status === 'sem_permissao') out.warnings.push(`${ACCOUNT_LABEL[r.account]}: sem permissão para ler ${r.what === 'email' ? 'e-mail' : r.what} (${r.account === 'microsoft' ? 'em Conexões › Microsoft 365: "Liberar leitura" ou, numa empresa, "Pedir ao administrador"' : 'autorize em Conexões'}).`);
-      else if (r.status === 'erro') out.warnings.push(`${ACCOUNT_LABEL[r.account]}: não consegui ler ${r.what === 'email' ? 'o e-mail' : r.what === 'agenda' ? 'a agenda' : 'as tarefas'} agora (${clip(r.detail ?? 'erro', 80)}).`);
-      else if (r.truncated) out.warnings.push(`${ACCOUNT_LABEL[r.account]}: ${r.what === 'email' ? 'e-mails' : r.what === 'agenda' ? 'agenda' : 'tarefas'} lidos em parte — havia mais do que o limite de leitura (${r.count} considerados).`);
+      else if (r.status === 'sem_permissao') out.warnings.push(`${quem(r)}: sem permissão para ler ${r.what === 'email' ? 'e-mail' : r.what} (${r.account === 'microsoft' ? 'em Conexões › Microsoft 365: "Liberar leitura" ou, numa empresa, "Pedir ao administrador"' : 'autorize em Conexões'}).`);
+      else if (r.status === 'erro') out.warnings.push(`${quem(r)}: não consegui ler ${r.what === 'email' ? 'o e-mail' : r.what === 'agenda' ? 'a agenda' : 'as tarefas'} agora (${clip(r.detail ?? 'erro', 80)}).`);
+      else if (r.truncated) out.warnings.push(`${quem(r)}: ${r.what === 'email' ? 'e-mails' : r.what === 'agenda' ? 'agenda' : 'tarefas'} lidos em parte — havia mais do que o limite de leitura (${r.count} considerados).`);
     }
     out.warnings = [...new Set(out.warnings)];
-    const g = accounts.find((a) => a.kind === 'google');
+    const g = accounts.find((a) => a.kind === 'google' && a.conta === '') ?? accounts.find((a) => a.kind === 'google');
     if (g && this.googleTesting && g.connectedAt) {
       const left = Math.ceil((Date.parse(g.connectedAt) + GOOGLE_TESTING_DAYS * 86_400_000 - Date.now()) / 86_400_000);
       if (left <= 2 && !out.reads.some((r) => r.account === 'google' && r.status === 'expirada')) {
@@ -155,14 +192,14 @@ export class AccountReader {
    * repete só aquela requisição — é leitura, repetir não duplica nada (repetir a leitura inteira duplicaria o que já
    * tinha sido lido nas páginas anteriores). `onRenew`: quem usa o acesso fora daqui recebe o novo.
    */
-  private authed(ws: string, k: SsoKind, token: string, onRenew?: (t: string) => void): Get {
+  private authed(ws: string, k: SsoKind, token: string, onRenew?: (t: string) => void, conta = ''): Get {
     let current = token; let renewed = false;
     const call = (url: string, headers: Record<string, string>) => request(url, { headers: { Authorization: `Bearer ${current}`, ...headers } });
     return async (url, headers = {}) => {
       try { return await call(url, headers); } catch (e) {
         if (renewed || !(e instanceof ProviderError && e.status === 401)) throw e;
         renewed = true;
-        current = await this.sso.accessToken(ws, k, { force: true });
+        current = await this.sso.accessToken(ws, k, { force: true, conta });
         onRenew?.(current);
         return call(url, headers);
       }
@@ -293,22 +330,34 @@ export class AccountReader {
   // --- comunicação, reuniões e arquivos (rotinas das fases 2, 3 e 5) -------------------------------------------------
 
   /** Uma leitura numa conta, com o resultado registrado (lida, não conectada, sem permissão, vencida, erro). */
-  private async withAccount<T>(ws: string, k: SsoKind, what: ReadKind, reads: SourceRead[], fn: (get: Get) => Promise<{ value: T; count: number; truncated?: boolean }>): Promise<T | null> {
-    const acc = this.connected(ws).find((a) => a.kind === k);
-    if (!acc) { reads.push({ account: k, what, status: 'nao_conectada', label: null, count: 0, ms: 0 }); return null; }
-    const t0 = Date.now();
-    try {
-      const r = await fn(this.authed(ws, k, await this.sso.accessToken(ws, k)));
-      reads.push({ account: k, what, status: 'ok', label: acc.label, count: r.count, ms: Date.now() - t0, ...(r.truncated ? { truncated: true, detail: 'parou no limite de leitura: pode haver mais' } : {}) });
-      this.readOk(ws, k);
-      return r.value;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const expired = err instanceof ProviderError && err.kind === 'forbidden' && (err.reauth || /recusou o acesso|venceu|não há renovação/.test(msg));
-      if (expired) setIntegration(this.db, ws, k, { state: 'error', last_error: `A autorização ${k === 'google' ? 'do Google' : 'da Microsoft'} venceu: entre de novo em Conexões.` });
-      reads.push({ account: k, what, status: expired ? 'expirada' : err instanceof ProviderError && err.kind === 'forbidden' ? 'sem_permissao' : 'erro', label: acc.label, count: 0, ms: Date.now() - t0, detail: clip(msg, 160) });
-      return null;
+  /**
+   * Uma leitura em cada conta do aplicativo (todas as ligadas, ou só a `conta` pedida), com o resultado registrado conta a conta
+   * (lida, não conectada, sem permissão, vencida, erro). `fn` recebe a conta, para marcar de onde veio cada item.
+   */
+  private async withAccount<T>(ws: string, k: SsoKind, what: ReadKind, reads: SourceRead[], fn: (get: Get, acc: ContaLida) => Promise<{ value: T; count: number; truncated?: boolean }>, conta?: string): Promise<T | null> {
+    const contas = this.connected(ws).filter((a) => a.kind === k && (conta === undefined || a.conta === conta));
+    if (!contas.length) { reads.push({ account: k, what, status: 'nao_conectada', label: null, count: 0, ms: 0 }); return null; }
+    let valor: T | null = null;
+    for (const acc of contas) {
+      const t0 = Date.now();
+      const daConta = acc.varias ? { conta: acc.conta } : {};
+      try {
+        const r = await fn(this.authed(ws, k, await this.sso.accessToken(ws, k, { conta: acc.conta }), undefined, acc.conta), acc);
+        reads.push({ account: k, what, status: 'ok', label: acc.label, count: r.count, ms: Date.now() - t0, ...daConta, ...(r.truncated ? { truncated: true, detail: 'parou no limite de leitura: pode haver mais' } : {}) });
+        this.readOk(ws, k, acc.conta);
+        valor ??= r.value;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const expired = err instanceof ProviderError && err.kind === 'forbidden' && (err.reauth || /recusou o acesso|venceu|não há renovação/.test(msg));
+        if (expired) setIntegration(this.db, ws, k, { state: 'error', last_error: `A autorização ${k === 'google' ? 'do Google' : 'da Microsoft'} venceu: entre de novo em Conexões.` }, acc.conta);
+        reads.push({ account: k, what, status: expired ? 'expirada' : err instanceof ProviderError && err.kind === 'forbidden' ? 'sem_permissao' : 'erro', label: acc.label, count: 0, ms: Date.now() - t0, detail: clip(msg, 160), ...daConta });
+      }
     }
+    return valor;
+  }
+  /** Marca os itens novos com a conta de onde vieram (só quando o aplicativo tem mais de uma). */
+  private static marcar<X extends { conta?: string; contaNome?: string }>(lista: X[], de: number, acc: ContaLida): void {
+    for (const it of lista.slice(de)) { it.conta = acc.conta; if (acc.varias && acc.label) it.contaNome = acc.label; }
   }
 
   /** E-mails com a prévia (o começo do texto), de entrada e, nas pendências, os que você enviou. */
@@ -319,9 +368,10 @@ export class AccountReader {
     const terms = (opts.terms ?? []).map((t) => t.replace(/["'\\()]/g, ' ').trim()).filter((t) => t.length >= 3).slice(0, 4);
     if (mode === 'relacionados' && !terms.length) return { items, reads };
     for (const k of ['microsoft', 'google'] as SsoKind[]) {
-      await this.withAccount<void>(ws, k, 'email', reads, async (get) => {
+      await this.withAccount<void>(ws, k, 'email', reads, async (get, acc) => {
         const before = items.length;
         const full = k === 'microsoft' ? await this.graphMail(get, mode, from, terms, max, items) : await this.gmail(get, mode, from, terms, max, items);
+        AccountReader.marcar(items, before, acc);
         return { value: undefined, count: items.length - before, truncated: full };
       });
     }
@@ -342,7 +392,7 @@ export class AccountReader {
         const j = await get(`https://graph.microsoft.com/v1.0/me/messages?${new URLSearchParams({ $search: `"${t}"`, $select: sel, $top: '15' })}`);
         for (const m of (j.value ?? []) as any[]) {
           const at = Date.parse(m.receivedDateTime ?? m.sentDateTime);
-          if (at >= Date.parse(from) && !items.some((x) => x.id === String(m.id))) push(m, 'inbox');
+          if (at >= Date.parse(from) && !items.some((x) => x.id === String(m.id) && x.account === 'microsoft')) push(m, 'inbox');
         }
       }
       return false; // busca por assunto: amostra por definição (as 15 mais relevantes por termo)
@@ -381,7 +431,8 @@ export class AccountReader {
   }
 
   /** Texto de um e-mail, sem o histórico citado (Assistente de Respostas). */
-  async mailBody(ws: string, k: SsoKind, mid: string): Promise<string> {
+  /** `conta`: a conta de onde o e-mail veio (MailItem.conta); sem ela, a principal. */
+  async mailBody(ws: string, k: SsoKind, mid: string, conta = ''): Promise<string> {
     const text = await this.withAccount<string>(ws, k, 'email', [], async (get) => {
       if (k === 'microsoft') {
         const m = await get(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(mid)}?$select=body,uniqueBody`, { Prefer: 'outlook.body-content-type="text"' });
@@ -392,7 +443,7 @@ export class AccountReader {
       const walk = (p: any) => { if (!p) return; if (p.mimeType === 'text/plain' && p.body?.data) parts.push(p); for (const x of p.parts ?? []) walk(x); };
       walk(m.payload);
       return { value: parts.map((p) => Buffer.from(String(p.body.data), 'base64url').toString('utf8')).join('\n') || String(m.snippet ?? ''), count: 1 };
-    });
+    }, conta);
     return text === null ? '' : withoutQuoted(text);
   }
 
@@ -401,7 +452,7 @@ export class AccountReader {
     const reads: SourceRead[] = []; const items: EventItem[] = [];
     const start = Date.now(); const end = start + Math.max(1, Math.min(days, 14)) * 86_400_000;
     for (const k of ['microsoft', 'google'] as SsoKind[]) {
-      await this.withAccount<void>(ws, k, 'agenda', reads, async (get) => {
+      await this.withAccount<void>(ws, k, 'agenda', reads, async (get, acc) => {
         const before = items.length;
         let more = false;
         if (k === 'microsoft') {
@@ -426,6 +477,7 @@ export class AccountReader {
               organizer: who(e.organizer?.displayName, e.organizer?.email), description: String(e.description ?? '').replace(/<[^>]+>/g, ' ') });
           }
         }
+        AccountReader.marcar(items, before, acc);
         return { value: undefined, count: items.length - before, truncated: more };
       });
     }
@@ -439,7 +491,7 @@ export class AccountReader {
     const term = q.replace(/['"\\]/g, ' ').trim().slice(0, 80);
     if (term.length < 2) return { items, reads };
     for (const k of ['microsoft', 'google'] as SsoKind[]) {
-      await this.withAccount<void>(ws, k, 'arquivos', reads, async (get) => {
+      await this.withAccount<void>(ws, k, 'arquivos', reads, async (get, acc) => {
         const before = items.length;
         if (k === 'microsoft') {
           const j = await get(`https://graph.microsoft.com/v1.0/me/drive/root/search(q='${encodeURIComponent(term)}')?$select=id,name,size,file,lastModifiedDateTime,parentReference&$top=25`);
@@ -449,6 +501,8 @@ export class AccountReader {
           const j = await get(`https://www.googleapis.com/drive/v3/files?${new URLSearchParams({ q: query, fields: 'files(id,name,mimeType,size,modifiedTime)', pageSize: '25', orderBy: 'modifiedTime desc' })}`);
           for (const x of (j.files ?? []) as any[]) items.push({ provider: k, id: String(x.id), name: String(x.name ?? ''), size: Number(x.size ?? 0), modified: x.modifiedTime ?? null, mime: String(x.mimeType ?? ''), folder: 'Google Drive' });
         }
+        // o arquivo de outra conta: a pasta diz de qual (e o pedido do conteúdo vai à mesma conta)
+        for (const it of items.slice(before)) { it.conta = acc.conta; if (acc.varias && acc.label) it.folder = `${it.folder} · ${clip(acc.label, 60)}`; }
         return { value: undefined, count: items.length - before };
       });
     }
@@ -456,10 +510,11 @@ export class AccountReader {
   }
 
   /** O conteúdo atual de um arquivo escolhido (rotinas agendadas veem a versão mais nova a cada execução). */
-  async fetchFile(ws: string, ref: { provider: SsoKind; id: string }): Promise<{ name: string; mime: string; data: Buffer }> {
+  async fetchFile(ws: string, ref: { provider: SsoKind; id: string; conta?: string }): Promise<{ name: string; mime: string; data: Buffer }> {
     const k = ref.provider;
-    let token = await this.sso.accessToken(ws, k);
-    const get = this.authed(ws, k, token, (t) => { token = t; });
+    const conta = ref.conta ?? '';
+    let token = await this.sso.accessToken(ws, k, { conta });
+    const get = this.authed(ws, k, token, (t) => { token = t; }, conta);
     const raw = async (url: string): Promise<Buffer> => {
       let res: Response;
       try { res = await fetchWithPolicy(() => fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) }), { budgetMs: 60_000 }); } catch { throw new ProviderError('unavailable', 'o serviço não respondeu'); }

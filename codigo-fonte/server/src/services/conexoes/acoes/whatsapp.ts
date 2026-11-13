@@ -16,11 +16,12 @@ import { jidDeConversa, type MensagemGuardada } from '../../whatsapp.ts';
 import { ErroAcao, num, precisa, txt, type Acao, type Args } from '../tipos.ts';
 
 export interface WhatsAppDasAcoes {
-  enviar(ws: string, jid: string, texto: string): Promise<string>;
+  /** conta: qual dos números do WhatsApp ('' ou ausente = o principal) */
+  enviar(ws: string, jid: string, texto: string, conta?: string): Promise<string>;
   /** só as conversas fora das exceções (o leitor já tira) */
-  conversas(ws: string): Array<{ jid: string; nome: string; salvo?: boolean }>;
+  conversas(ws: string, conta?: string): Array<{ jid: string; nome: string; salvo?: boolean }>;
   /** recusa com ErroAcao o que os filtros não permitem */
-  mensagens(ws: string, jid: string, limite: number): Promise<MensagemGuardada[]>;
+  mensagens(ws: string, jid: string, limite: number, conta?: string): Promise<MensagemGuardada[]>;
 }
 
 /** Teto nosso, não do WhatsApp: o cartão de confirmação e o registro cortam o resumo em 6000, e o texto tem de caber inteiro. */
@@ -47,8 +48,8 @@ function quando(tz: string, iso: string): string {
  * `aceitaParecida`: para ler, basta uma única parecida. Para enviar, não: a lista é parcial, e "João" não pode virar
  * "João da Padaria" num envio que ninguém desfaz.
  */
-function escolher(wa: WhatsAppDasAcoes, ws: string, termo: string, aceitaParecida: boolean): { jid: string; nome: string; conhecida: boolean } {
-  const lista = wa.conversas(ws);
+function escolher(wa: WhatsAppDasAcoes, ctx: { workspaceId: string; conta?: string }, termo: string, aceitaParecida: boolean): { jid: string; nome: string; conhecida: boolean } {
+  const lista = wa.conversas(ctx.workspaceId, ctx.conta);
   if (termo.includes('@')) {
     if (!jidDeConversa(termo)) throw new ErroAcao(`"${neutral(termo)}" não é uma conversa do WhatsApp: use o nome, ou um jid como 5511999990000@s.whatsapp.net ou 123456789@g.us`);
     const achada = lista.find((c) => c.jid === termo);
@@ -87,7 +88,7 @@ export function acoesWhatsApp(wa: WhatsAppDasAcoes): Acao[] {
       async run(ctx, a) {
         const busca = fold(txt(a, 'busca', 200)?.trim() ?? '');
         const limite = num(a, 'limite', 50, 200);
-        const todas = wa.conversas(ctx.workspaceId).filter((c) => fold(`${c.nome} ${c.jid}`).includes(busca)).sort((x, y) => x.nome.localeCompare(y.nome, 'pt-BR'));
+        const todas = wa.conversas(ctx.workspaceId, ctx.conta).filter((c) => fold(`${c.nome} ${c.jid}`).includes(busca)).sort((x, y) => x.nome.localeCompare(y.nome, 'pt-BR'));
         const linhas = todas.slice(0, limite).map((c) => `- ${rotulo(c)}${grupo(c.jid) ? ' · grupo' : ''}`);
         const topo = todas.length > limite ? `Mostrando ${limite} de ${todas.length} conversas.` : `${todas.length} conversa(s).`;
         return { texto: [`${topo} ${LISTA_PARCIAL}`, ...linhas].join('\n'), deFora: true, privado: true };
@@ -103,8 +104,8 @@ export function acoesWhatsApp(wa: WhatsAppDasAcoes): Acao[] {
       },
       resumo: (a) => `Ler as mensagens guardadas da conversa "${cru(a.conversa)}" no WhatsApp`,
       async run(ctx, a) {
-        const c = escolher(wa, ctx.workspaceId, precisa(a, 'conversa', 200), true);
-        const msgs = await wa.mensagens(ctx.workspaceId, c.jid, num(a, 'limite', 20, 100));
+        const c = escolher(wa, ctx, precisa(a, 'conversa', 200), true);
+        const msgs = await wa.mensagens(ctx.workspaceId, c.jid, num(a, 'limite', 20, 100), ctx.conta);
         const topo = msgs.length ? `${msgs.length} mensagem(ns) recebida(s) de ${rotulo(c)}, da mais antiga para a mais nova.` : `Nenhuma mensagem guardada de ${rotulo(c)}.`;
         const linhas = [...msgs].reverse().map((m) => `- ${quando(ctx.tz, m.em)}${neutral(m.autor ?? 'desconhecido')}: "${neutral(m.texto, 500)}"`);
         return { texto: [`${topo} ${LEITOR_LIMITADO}`, ...linhas].join('\n'), deFora: true, privado: true };
@@ -123,17 +124,17 @@ export function acoesWhatsApp(wa: WhatsAppDasAcoes): Acao[] {
       async preparar(ctx, a) {
         textoDe(a);
         const termo = precisa(a, 'conversa', 200);
-        const c = escolher(wa, ctx.workspaceId, termo, false);
+        const c = escolher(wa, ctx, termo, false);
         const porNome = !termo.includes('@') && !NUMERO.test(termo);
-        const salvo = wa.conversas(ctx.workspaceId).find((x) => x.jid === c.jid)?.salvo === true;
+        const salvo = wa.conversas(ctx.workspaceId, ctx.conta).find((x) => x.jid === c.jid)?.salvo === true;
         return { args: { ...a, conversa: c.jid }, detalhe: `Para: ${neutral(c.nome)} (${grupo(c.jid) ? 'grupo' : `número ${c.jid.split('@')[0]}`})`,
           confirmar: porNome && !salvo ? 'o nome desta conversa não vem da sua agenda: quem escreve escolhe o próprio nome' : undefined };
       },
       async run(ctx, a) {
         const texto = textoDe(a);
         const termo = precisa(a, 'conversa', 200);
-        const c = escolher(wa, ctx.workspaceId, termo, false);
-        const id = await wa.enviar(ctx.workspaceId, c.jid, texto);
+        const c = escolher(wa, ctx, termo, false);
+        const id = await wa.enviar(ctx.workspaceId, c.jid, texto, ctx.conta);
         // só o que o agente passou e o que o sistema sabe: o nome salvo no contato é de terceiros e não volta aqui
         const aviso = c.conhecida ? '' : ' Esta conversa ainda não tinha aparecido por aqui: confira no celular se chegou.';
         return { texto: `Mensagem enviada para "${neutral(termo)}" (${c.jid})${id ? `, id ${id}` : ''}. O sistema não recebe confirmação de entrega.${aviso}` };

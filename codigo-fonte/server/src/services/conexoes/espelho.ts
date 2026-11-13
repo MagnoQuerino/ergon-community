@@ -56,17 +56,17 @@ export function escritaPendente(db: Db, taskId: string, desde?: string): boolean
 }
 
 interface Linha { id: string; workspace_id: string; task_id: string; op: string; tipo: string; attempts: number; created_at: string; seq: number }
-interface Destino { kind: string; connection_id: string; quadro: string; externo: string | null; settings: string; arquivada: number }
+interface Destino { kind: string; /** qual das contas do aplicativo (a do quadro) */ conta: string; connection_id: string; quadro: string; externo: string | null; settings: string; arquivada: number }
 
 export class EspelhoEscrita {
   private readonly db: Db; private readonly bus: Bus;
-  private readonly escritor: (ws: string, kind: string) => EscritorTarefas | null;
+  private readonly escritor: (ws: string, kind: string, conta?: string) => EscritorTarefas | null;
   private timer: NodeJS.Timeout | null = null;
   private ocupado = false;
   private denovo = false;
   private parado = false;
   private passada: Promise<void> | null = null;
-  constructor(db: Db, bus: Bus, escritor: (ws: string, kind: string) => EscritorTarefas | null) { this.db = db; this.bus = bus; this.escritor = escritor; }
+  constructor(db: Db, bus: Bus, escritor: (ws: string, kind: string, conta?: string) => EscritorTarefas | null) { this.db = db; this.bus = bus; this.escritor = escritor; }
 
   start(): void {
     this.parado = false;
@@ -85,7 +85,7 @@ export class EspelhoEscrita {
 
   private destino(taskId: string, workspaceId: string): Destino | null {
     return this.db.get<Destino>(
-      `SELECT i.kind, b.connection_id, b.external_id AS quadro, l.external_id AS externo, i.settings, t.archived AS arquivada
+      `SELECT i.kind, i.conta, b.connection_id, b.external_id AS quadro, l.external_id AS externo, i.settings, t.archived AS arquivada
          FROM tasks t JOIN boards b ON b.id = t.board_id JOIN integrations i ON i.id = b.connection_id
          LEFT JOIN task_links l ON l.task_id = t.id AND l.connection_id = b.connection_id
         WHERE t.id = ? AND t.workspace_id = ?`, taskId, workspaceId) ?? null;
@@ -150,7 +150,7 @@ export class EspelhoEscrita {
       return this.falhou(l, `a ação "${acao.nome}" está desligada em Conexões › ${integrationDef(kind)?.name ?? kind}`);
     }
     let w: EscritorTarefas | null;
-    try { w = this.escritor(l.workspace_id, d.kind); } catch { return this.falhou(l, 'não deu para ler a credencial desta conexão: conecte de novo em Conexões'); }
+    try { w = this.escritor(l.workspace_id, d.kind, d.conta); } catch { return this.falhou(l, 'não deu para ler a credencial desta conexão: conecte de novo em Conexões'); }
     if (!w) return this.falhou(l, 'a conexão não está ligada: confira em Conexões');
     if (op.tipo !== 'criar' && !d.externo) return this.falhou(l, 'a tarefa não chegou a ser criada no aplicativo; tente de novo a criação');
     this.db.run("UPDATE mirror_outbox SET status = 'enviando' WHERE id = ?", l.id);

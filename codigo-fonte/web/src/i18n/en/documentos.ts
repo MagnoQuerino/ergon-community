@@ -122,6 +122,7 @@ const documentos: Traducao<typeof pt> = {
   'pacotes.detalhe.naEquipe': 'On the team:',
   'pacotes.detalhe.personagens': 'Characters:',
   'pacotes.detalhe.cores': 'Colors',
+  'pacotes.legibilidade': { one: '{n} color in this package was adjusted so the text is easy to read (the shade stays the same).', other: '{n} colors in this package were adjusted so the text is easy to read (the shade stays the same).' },
   'pacotes.detalhe.naoInstalavel': 'This type of package can’t be installed in this version yet.',
   'pacotes.msg.aplicado': 'Package applied. You can undo it whenever you like.',
   'pacotes.msg.desfeito': '"{titulo}" undone: back to how it was.',

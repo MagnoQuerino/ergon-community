@@ -5,7 +5,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from './config.ts';
-import { normalizeBridge, normalizeTeamsActivity, normalizeWhatsAppMessage, type BridgePayload } from './connectors/normalize.ts';
 import type { Db } from './db/db.ts';
 import { PAGE_CSP } from './lib/protecao-pagina.ts';
 import { HttpError, fold, id as newId, notFound, now, redactUrl, safeEqual } from './lib/util.ts';
@@ -36,12 +35,14 @@ import { registerAjustesRoutes } from './routes/equipe-ajustes.ts';
 import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } from './services/ajustes-motor.ts';
 import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
 import { registerRecursosRoutes } from './routes/recursos.ts';
+import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
+import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
 import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, anterioresParaVoltar, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
 import { Bus, audit } from './services/bus.ts';
-import { addSimulatedFloor, archiveAgent, capacityInfo, capacityTotals, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, removeFloor, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
+import { archiveAgent, capacityInfo, capacityTotals, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
 import {
   agentsLite, coordinatorFor, decodeCursor, encodeCursor, lastOutcomeOf, listTeamAgents, listTeamSectors, listTeamStructures, pageLimit, reviewerFor, runStatusOf, searchAgents,
   teamAgent, teamInfo, teamSummary, toolHolders,
@@ -61,7 +62,8 @@ import { routeTeamTask } from './services/actions.ts';
 import { HermesError, HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
 import { CONEXOES, type AiService } from './services/ai.ts';
 import { equipeNaSaude, Motors } from './services/motors.ts';
-import { Integrations, integrationRow, setIntegration, type IntegrationKind } from './services/integrations.ts';
+import { Integrations, contasDe, integrationRow, nomeDaConta, setIntegration, type IntegrationKind } from './services/integrations.ts';
+import { contaDoPedido, contaSchema } from './routes/integracoes.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
@@ -82,7 +84,6 @@ import { AccountReader } from './services/account-reader.ts';
 import { Operations, taskFiles, linkFile } from './services/operations.ts';
 import { KIND_LABEL, Results, WORK_LABEL, type WorkState } from './services/results.ts';
 import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setSetting } from './services/sectors.ts';
-import { findConnection, ingestEvent, syncConfiguredIdentities, upsertIdentity } from './services/ingest.ts';
 import { importBoards } from './services/mirror.ts';
 import { RunExecutor, almaDoAgente, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
 import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
@@ -95,12 +96,14 @@ import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard,
 import { chaveDaColuna } from './services/colunas.ts';
 import { USER_COLUMNS } from './services/seed.ts';
 import { loadWorld } from './world-hook.ts';
-import { exportBlueprint, importBlueprint } from './services/blueprint.ts';
+import { exportBlueprint } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
-import { buildPackage, validatePackage } from './services/ergon-package.ts';
 import { TeamsApp, registerTeamsAppRoutes } from './services/teams-app/index.ts';
 import { Canais, registerCanaisRoutes } from './services/canais/index.ts';
+import { Bilhetes, Gestao, KIND_GESTAO, TOOLSET_GESTAO, type AcaoGestao } from './services/gestao.ts';
+import { gestaoServicos } from './services/gestao-servicos.ts';
+import { resumirEsquema } from './services/gestao-esquema.ts';
 import type { Tokens } from './services/sso.ts';
 
 declare module 'fastify' {
@@ -126,6 +129,8 @@ export interface ErgonApp {
   executor: RunExecutor;
   cartoes: Cartoes;
   aprovacoes: Aprovacoes;
+  /** aplicativos conectados pela pessoa (servidor MCP próprio), uma conta por conexão */
+  appsProprios: McpProprios;
   rotinasMotor: RotinasNoMotor;
   comandos: Comandos;
   reviews: ReviewService;
@@ -168,7 +173,7 @@ const ENROLL_OK = new Set([...LOCKED_OK, '/api/security/status', '/api/security/
 const UNPROTECTED_OK = new Set([...LOCKED_OK, '/api/security/protect', '/api/security/status', '/api/security/recovery/confirm', '/api/state']);
 
 /** arquivo escolhido para uma rotina (do Ergon ou da nuvem) */
-const fileRefSchema = { type: 'object', additionalProperties: false, required: ['kind', 'id'], properties: { kind: { enum: ['ergon', 'microsoft', 'google'] }, id: { type: 'string', minLength: 4, maxLength: 200 }, name: { type: 'string', maxLength: 200 } } };
+const fileRefSchema = { type: 'object', additionalProperties: false, required: ['kind', 'id'], properties: { kind: { enum: ['ergon', 'microsoft', 'google'] }, id: { type: 'string', minLength: 4, maxLength: 200 }, name: { type: 'string', maxLength: 200 }, conta: { type: 'string', pattern: '^(|c[0-9a-f]{8})$' } } };
 /** o que a rotina acompanha: listas de texto/endereços ou arquivos escolhidos */
 const paramsSchema = { type: 'object', maxProperties: 10, additionalProperties: { type: 'array', maxItems: 30, items: { anyOf: [{ type: 'string', maxLength: 400 }, fileRefSchema] } } };
 /** prazo da tarefa: AAAA-MM-DD ou null (tira o prazo) */
@@ -382,7 +387,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return parts.length ? parts.join('\n\n') : null;
   };
   db.run("UPDATE runs SET model = NULL WHERE model IS NOT NULL AND model NOT LIKE '%/%'"); // nome do motor, não do modelo
-  const whatsapp = new WhatsAppReader(db, bus, cfg, integrations);
+  const whatsapp = new WhatsAppReader(db, bus, integrations);
   /**
    * Execução de código vale pelo AGENTE, não pelo motor inteiro: o pedido da pessoa a um agente sem Terminal nem Executar
    * código lê e organiza direto. Quem roda programas no motor alcança a ponte com o token dele e poderia se passar por outra
@@ -444,6 +449,51 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       if (segurando.has(x.taskId)) return;
       retomarCard(x.workspaceId, x.taskId);
     } });
+  // Gestão pelo coordenador (rc.29): as rotas da tela, rodadas por dentro com a sessão da pessoa (gestao.ts)
+  const bilhetes = new Bilhetes();
+  const rotasDaTela = new Map<string, { schema?: Record<string, unknown>; gestao?: Omit<AcaoGestao, 'metodo' | 'rota'> }>();
+  const gestao = new Gestao({ db, bus,
+    rodar: async (ctx, metodo, url, corpo) => {
+      const t = bilhetes.emitir(ctx);
+      try {
+        const r = await app.inject({ method: metodo, url, headers: { 'x-ergon-gestao': t, ...(corpo !== undefined ? { 'content-type': 'application/json' } : {}) },
+          payload: corpo === undefined ? undefined : JSON.stringify(corpo) });
+        let json: unknown = null;
+        try { json = r.body ? JSON.parse(r.body) : null; } catch { json = r.body.slice(0, 4000); }
+        return { status: r.statusCode, json };
+      } finally { bilhetes.fechar(t); }
+    },
+    temRota: (metodo, rota) => rotasDaTela.has(`${metodo} ${rota}`),
+    extras: () => [...rotasDaTela.entries()].flatMap(([k, v]) => {
+      if (!v.gestao) return [];
+      const [metodo, rota] = k.split(' ') as [AcaoGestao['metodo'], string];
+      return [{ ...v.gestao, metodo, rota }];
+    }),
+    esquema: (metodo, rota) => resumirEsquema(rotasDaTela.get(`${metodo} ${rota}`)?.schema, metodo),
+    nativa: { aoVivo: (ws, pid) => aprovacoes.aoVivo(ws, pid), responder: (ws, pid, ok) => aprovacoes.responder(ws, pid, ok) },
+    continuar: (x) => { executor.enqueue({
+      workspaceId: x.workspaceId, agentId: x.agentId, conversationId: x.conversationId, kind: 'chat', input: x.texto, maxInput: cfg.maxDocumentChars,
+      instructions: instructionsFor(db, x.workspaceId, x.agentId, channelNoteFor(x.conversationId), { userId: x.userId, foco: { conversationId: x.conversationId } }),
+      idempotencyKey: x.chave }); },
+    devolverAoCard: (x) => {
+      audit(db, bus, { workspaceId: x.workspaceId, actorType: 'user', actorId: x.userId, action: 'task.conexao', targetType: 'task', targetId: x.taskId, evidence: { paraAgente: x.texto }, result: x.resumo });
+      bus.publish(x.workspaceId, 'tasks.changed', { id: x.taskId });
+      if (!segurando.has(x.taskId)) retomarCard(x.workspaceId, x.taskId);
+    },
+    marcar: (run, motivo) => conexoes.marcar(run, { privado: true, motivo }),
+    podeAfrouxar: (run) => conexoes.podeSugerirRegra(run),
+    herdar: (run, taskId) => {
+      const ok = db.run('UPDATE tasks SET origin_run_id = ? WHERE id = ? AND workspace_id = ? AND origin_run_id IS NULL', run.id, taskId, run.workspace_id).changes > 0;
+      // o card já vinha de outra execução: o que esta leu passa para ele (a próxima execução do card herda a marca)
+      const l = ok ? null : conexoes.leu(run);
+      if (l?.deFora) conexoes.marcar({ ...run, task_id: taskId }, { privado: l.privado, motivo: 'gestao/card' });
+    },
+    // links do Treinar abertos sem clique: como o [[treinar]] (o pedido partiu da pessoa e nada de fora, nem privado, foi lido)
+    linksLivres: (run) => { if (conexoes.liberarTudo(run.workspace_id)) return true; const l = conexoes.leu(run); return conexoes.origem(run) === 'pessoa' && !l.deFora && !l.privado; },
+    // ligada aos serviços das outras frentes (contas por apelido, conexão própria, competência enviada): gestao-servicos.ts
+    ...gestaoServicos({ db, filesDir: cfg.filesDir, apps: () => appsProprios, recursos: () => recursos,
+      memoria: async (ws, agentId) => { const { perfil, c } = memoriaDo(ws, agentId); return perfil && c ? await c.memoria!(perfil) : null; } }),
+  });
   /** O card volta a andar depois do clique num cartão (o de agora, ou o último de "Aprovar" vários de uma vez). */
   function retomarCard(ws: string, taskId: string): void {
     const t = db.get<{ completed: number; archived: number; audience: string }>('SELECT t.completed, t.archived, b.audience FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.id = ?', taskId);
@@ -626,13 +676,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     try { await syncMirrorsOnce(); } finally { mirrorsBusy = false; }
   };
   const syncMirrorsOnce = async () => {
-    for (const b of db.all<{ id: string; workspace_id: string; connection_id: string; external_id: string; kind: IntegrationKind; last_synced_at: string | null }>(
-      `SELECT b.id, b.workspace_id, b.connection_id, b.external_id, i.kind, b.last_synced_at FROM boards b JOIN integrations i ON i.id = b.connection_id
+    for (const b of db.all<{ id: string; workspace_id: string; connection_id: string; external_id: string; kind: IntegrationKind; conta: string; last_synced_at: string | null }>(
+      `SELECT b.id, b.workspace_id, b.connection_id, b.external_id, i.kind, i.conta, b.last_synced_at FROM boards b JOIN integrations i ON i.id = b.connection_id
         WHERE b.origin = 'mirror' AND i.state = 'connected' AND ws_open(b.workspace_id)`)) {
       try {
-        const rep = await importBoards(db, bus, b.workspace_id, b.connection_id, '', integrations.provider(b.workspace_id, b.kind), [b.external_id]);
+        const rep = await importBoards(db, bus, b.workspace_id, b.connection_id, '', integrations.provider(b.workspace_id, b.kind, b.conta), [b.external_id]);
         // a leitura automática também conta como "última leitura" da conta (antes, só a importação manual contava)
-        if (rep.boards[0] && rep.boards[0].state !== 'error') setIntegration(db, b.workspace_id, b.kind, { last_sync_at: now() });
+        if (rep.boards[0] && rep.boards[0].state !== 'error') setIntegration(db, b.workspace_id, b.kind, { last_sync_at: now() }, b.conta);
       } catch { /* fica o erro no quadro */ }
     }
   };
@@ -746,13 +796,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const stopBackground = async () => { for (const t of timers.splice(0)) clearInterval(t); await pararEspelho(); teamwork.stop(); routines.stop(); hermesVault.stop(); await whatsapp.stopAll(); await teamsApp.stop(); canais.stop(); };
   // nome do cookie inclui a porta: cookies não separam por porta, e instâncias locais (real/teste) não podem colidir
   const COOKIE = `${SESSION_COOKIE}_${cfg.port}`;
-  const bridgeLimiter = new Limiter(120, 60_000);
-  syncConfiguredIdentities(db, cfg);
 
   const app = Fastify({
     logger: process.env.NODE_ENV === 'test' ? false : {
       level: process.env.ERGON_LOG_LEVEL ?? 'info',
-      redact: { paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-csrf-token"]', 'req.headers["x-ergon-bridge-token"]'], censor: '[redigido]' },
+      redact: { paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-csrf-token"]', 'req.headers["x-ergon-bridge-token"]', 'req.headers["x-ergon-gestao"]'], censor: '[redigido]' },
       // o endereço de retorno do login (Microsoft/Google) traz o código de autorização na URL: nunca vai para o log
       serializers: {
         req: (r: { method: string; url: string; hostname?: string; ip?: string; socket?: { remotePort?: number } }) =>
@@ -767,6 +815,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   setLog(process.env.NODE_ENV === 'test' ? null : app.log);
   for (const b of bootIssues) app.log.error(b, 'coordenador: não deu para garantir agora (tenta de novo no próximo início)');
   if (reconciled) app.log.info({ reconciled }, 'resultados de execuções recuperados no início');
+  // as rotas da tela, para a gestão pelo coordenador (gestao.ts): o esquema de cada uma e a marca config.gestao das outras frentes
+  app.addHook('onRoute', (o) => {
+    if (!o.url.startsWith('/api/')) return;
+    const cfgRota = (o.config ?? {}) as { gestao?: Omit<AcaoGestao, 'metodo' | 'rota'> };
+    for (const m of [o.method].flat()) if (m !== 'HEAD') rotasDaTela.set(`${m} ${o.url}`, { schema: o.schema as Record<string, unknown> | undefined, gestao: cfgRota.gestao });
+  });
   await app.register(fastifyCookie);
   app.decorateRequest('auth', null);
 
@@ -814,9 +868,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       if (site && site !== 'same-origin' && site !== 'none') throw new HttpError(403, 'origin', 'requisição entre sites bloqueada');
     }
     if (PUBLIC_API.has(url)) return;
-    const auth = resolveSession(db, req.cookies[COOKIE], idleMinutes(db));
+    // a gestão pelo coordenador roda a rota com a sessão da pessoa por um bilhete de uso único que nunca sai do processo
+    // (gestao.ts); bilhete desconhecido não vale nada
+    const viaGestao = bilhetes.ler(req.headers['x-ergon-gestao']);
+    if (viaGestao === null) throw new HttpError(401, 'unauthenticated', 'faça login');
+    const auth = viaGestao ?? resolveSession(db, req.cookies[COOKIE], idleMinutes(db));
     if (!auth) throw new HttpError(401, 'unauthenticated', 'faça login');
-    if (isWrite(req.method)) {
+    if (isWrite(req.method) && !viaGestao) {
       const token = req.headers['x-csrf-token'];
       if (typeof token !== 'string' || !safeEqual(token, auth.csrf)) throw new HttpError(403, 'csrf', 'A página ficou desatualizada: recarregue e tente de novo.');
     }
@@ -828,6 +886,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       if (!f.totp && !f.passkeys) throw new HttpError(428, 'enroll_2fa', 'Configure um autenticador ou uma passkey para continuar.');
     }
     // atividade de verdade (escritas e o sinal de mouse/teclado) adia a trava; recargas automáticas (GET) não
+    if (viaGestao) { req.auth = auth; return; }
     if (!auth.locked && isWrite(req.method)) touchSession(db, auth.tokenHash);
     // sem trancamento, a sessão se renova com o uso (uma vez por dia): quem protege é o computador
     if (sessionDays(cfg, vault) === SESSION_DAYS_OPEN && Date.parse(auth.expiresAt ?? '') < Date.now() + (SESSION_DAYS_OPEN - 1) * 86400_000) {
@@ -1255,7 +1314,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     schema: { body: { type: 'object', additionalProperties: false, required: ['name', 'role'], properties: {
       name: S.str(40, 1), role: S.str(80, 1), sectorKey: { anyOf: [{ const: 'auto' }, sectorKey] }, profileKey: sectorKey,
       structureId: S.id('bld'), floorId: S.id('flr'), color: S.str(7), charter: S.str(4000), skills: strList(12, 80), tools: strList(20, 30),
-      hermesSkills: strList(20, 80), model: modelId, provider: providerId,
+      hermesSkills: strList(200, 80), model: modelId, provider: providerId,
       lookSeed: { type: 'integer', minimum: 1, maximum: 2147483647 }, fx: fxChoiceSchema } } },
   }, async (req, reply) => {
     const a = owner(req);
@@ -1268,7 +1327,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.patch('/api/agents/:id', {
     schema: { params: idParams('agt'), body: { type: 'object', additionalProperties: false, minProperties: 1, properties: {
       name: S.str(40, 1), role: S.str(80, 1), sectorKey, charter: S.str(4000), skills: strList(12, 80), tools: strList(20, 30), bio: S.str(600),
-      hermesSkills: strList(20, 80), model: modelId, provider: providerId, color: S.str(7), structureId: S.id('bld'),
+      hermesSkills: strList(200, 80), model: modelId, provider: providerId, color: S.str(7), structureId: S.id('bld'),
       lookSeed: { anyOf: [{ type: 'integer', minimum: 1, maximum: 2147483647 }, { type: 'null' }] } } } },
   }, async (req) => {
     const a = owner(req);
@@ -1498,6 +1557,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // a mesma decisão para o app e para o Teams (o cartão no Teams chama esta função; alcance e prazo só vêm da tela)
   const decidirProposta = async (ws: string, userId: string, pid: string, decision: 'apply' | 'reject', o: { alcance?: Alcance; prazo?: PrazoDepoisDeLer } = {}): Promise<{ status: string; result: string; result_t?: Texto }> => {
     if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, ws)) return conexoes.decidirProposta(ws, userId, pid, decision);
+    // uma mudança de configuração pedida pelo coordenador (gestão, rc.29): roda a rota da tela com a sessão de quem clicou
+    if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_GESTAO)) return gestao.decidir(ws, userId, pid, decision);
     // cartão aberto pelo agente (pergunta, chave, senha): recusar avisa o agente; responder é pelo próprio cartão
     if (cartoes.doMotor(ws, pid)) {
       if (decision !== 'reject') throw new HttpError(400, 'answer', 'Responda pelo próprio cartão.');
@@ -1681,10 +1742,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.patch('/api/routines/:id', {
     schema: { params: idParams('rtn'), body: { type: 'object', additionalProperties: false, properties: {
       name: S.str(60, 1), trigger: triggerSchema, extra: S.str(600), status: { enum: ['active', 'paused'] }, staleDays: { type: 'integer', minimum: 1, maximum: 60 },
-      sources: { type: 'array', maxItems: 12, items: S.str(40, 1) }, tz: S.str(64, 1), params: paramsSchema } } },
+      sources: { type: 'array', maxItems: 12, items: S.str(40, 1) }, tz: S.str(64, 1), params: paramsSchema,
+      // as contas que a rotina lê, quando há mais de uma do mesmo aplicativo (vazio = todas)
+      contas: { type: 'array', maxItems: 40, items: { type: 'string', pattern: '^int_[0-9a-f]{32}$' } } } } },
   }, async (req) => {
     const a = owner(req);
-    const b = req.body as { name?: string; trigger?: never; extra?: string; status?: 'active' | 'paused'; staleDays?: number; sources?: string[]; tz?: string; params?: unknown };
+    const b = req.body as { name?: string; trigger?: never; extra?: string; status?: 'active' | 'paused'; staleDays?: number; sources?: string[]; tz?: string; params?: unknown; contas?: string[] };
     const onlyStatus = Object.keys(b).every((k) => k === 'status' || k === 'tz');
     return routines.update(a.workspaceId, a.userId, (req.params as { id: string }).id, { ...b, sources: b.sources?.filter(isSource) },
       onlyStatus ? (b.status === 'paused' ? 'pausada' : 'retomada') : 'editada em Rotinas');
@@ -1816,11 +1879,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return limit;
   });
 
-  app.post('/api/floors', async (req, reply) => {
-    const a = owner(req);
-    const floorId = addSimulatedFloor(db, bus, a.workspaceId, a.userId, cfg.slotsPerFloor, cfg.maxFloors);
-    return reply.status(201).send({ id: floorId, local: true, note: 'Versão local: andar grátis. Nenhuma cobrança.' });
-  });
 
   // Cidade: estruturas nos lotes (loja, editor do mapa) ------------------------------------------------------
   const lot = { type: 'integer', minimum: -1000, maximum: 1000 };
@@ -1884,11 +1942,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     schema: { querystring: { type: 'object', additionalProperties: false, properties: { dias: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|[1-3][0-9]{2})$' } } } },
   }, async (req) => resumoComposicao(db, auth(req).workspaceId, Number((req.query as { dias?: string }).dias ?? 30)));
 
-  app.delete('/api/floors/:id', { schema: { params: idParams('flr') } }, async (req) => {
-    const a = owner(req);
-    removeFloor(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id);
-    return { ok: true };
-  });
 
   // Kanban ---------------------------------------------------------------------------------------
   app.get('/api/boards', async (req) => db.all(
@@ -2004,7 +2057,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       children: db.all<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE parent_task_id = ? AND archived = 0 ORDER BY number', taskId),
       // ações numa conta pedidas neste card, esperando o seu clique (o mesmo cartão da conversa e de "aguardando você")
       conexoes: db.all<{ id: string; kind: string; summary: string; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
-        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
+        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao', 'gestao') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
       // perguntas do agente e pedidos de chave ou senha feitos neste card (cartoes.ts), esperando você: o mesmo cartão da conversa
       cartoes: db.all<{ id: string; kind: string; summary: string; payload: string; status: string; result: string | null; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.payload, p.status, p.result, p.created_at
         FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('question', 'segredo') AND p.status = 'proposed' ORDER BY p.created_at, p.rowid`, taskId, a.workspaceId),
@@ -2387,7 +2440,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Conexões: o que falta autorizar, a escolha de liberar tudo, testar com a conta real e a ação da própria pessoa
   app.get('/api/conexoes', async (req) => {
     const a = auth(req);
-    return { liberarTudo: conexoes.liberarTudo(a.workspaceId), aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId), aprovarDepoisDeLerBarra: motors.barraSemAprovar(a.workspaceId), confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind) })) };
+    return { liberarTudo: conexoes.liberarTudo(a.workspaceId), aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId), aprovarDepoisDeLerBarra: motors.barraSemAprovar(a.workspaceId), confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind),
+      // cada conta tem a sua escrita liberada (ou não) e o seu ajuste por ação; com uma só, a tela é a de antes
+      contas: contasDe(db, a.workspaceId, kind).filter((c) => c.state === 'connected').map((c) => ({ conta: c.conta, nome: nomeDaConta(c), principal: c.conta === '', ativa: c.ativa !== 0, faltam: conexoes.faltamTudo(a.workspaceId, kind, c.conta), comErro: c.last_error, ...conexoes.catalogoDe(a.workspaceId, kind, c.conta) })) })) };
   });
   app.put('/api/conexoes/liberar-tudo', { schema: { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
     const a = owner(req);
@@ -2419,31 +2474,37 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   const conexaoParam = { type: 'object', required: ['kind'], properties: { kind: S.str(20, 3) } };
   // o que cada conexão pode fazer: por tipo (ler, organizar, enviar, apagar) e por ação
-  app.put('/api/conexoes/:kind/permissoes', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['permissoes'], properties: { permissoes: { type: 'object', additionalProperties: false, properties: {
+  app.put('/api/conexoes/:kind/permissoes', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['permissoes'], properties: { conta: contaSchema, permissoes: { type: 'object', additionalProperties: false, properties: {
     tipos: { type: 'object', maxProperties: 4, additionalProperties: S.str(12) }, acoes: { type: 'object', maxProperties: 200, additionalProperties: S.str(12) } } } } } } }, async (req) => {
     const a = owner(req);
     const kind = (req.params as { kind: IntegrationKind }).kind;
-    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
-    return { permissoes: conexoes.setPermissoes(a.workspaceId, a.userId, kind, (req.body as { permissoes: Permissoes }).permissoes) };
+    const conta = contaDoPedido((req.body as { conta?: string }).conta);
+    if (integrationRow(db, a.workspaceId, kind, conta).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
+    return { permissoes: conexoes.setPermissoes(a.workspaceId, a.userId, kind, (req.body as { permissoes: Permissoes }).permissoes, undefined, conta) };
   });
   // o atalho "Só leitura": um clique desliga tudo o que escreve nesta conexão (e outro volta a escrita para a regra)
-  app.put('/api/conexoes/:kind/so-leitura', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
+  app.put('/api/conexoes/:kind/so-leitura', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' }, conta: contaSchema } } } }, async (req) => {
     const a = owner(req);
     const kind = (req.params as { kind: IntegrationKind }).kind;
-    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
-    const permissoes = conexoes.setSoLeitura(a.workspaceId, a.userId, kind, (req.body as { on: boolean }).on);
-    return { permissoes, soLeitura: conexoes.catalogoDe(a.workspaceId, kind).soLeitura };
+    const conta = contaDoPedido((req.body as { conta?: string }).conta);
+    if (integrationRow(db, a.workspaceId, kind, conta).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
+    const permissoes = conexoes.setSoLeitura(a.workspaceId, a.userId, kind, (req.body as { on: boolean }).on, conta);
+    return { permissoes, soLeitura: conexoes.catalogoDe(a.workspaceId, kind, conta).soLeitura };
   });
   // a mesma conta em mais de um workspace seu: usar a de outro, sem conectar de novo (a lista de integrações traz as contas)
-  app.post('/api/conexoes/:kind/usar-de', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['workspaceId'], properties: { workspaceId: S.str(60, 3) } } } }, async (req) => {
+  // origemConta: qual das contas de lá; conta: em qual daqui ("nova" = mais uma conta; sem dizer, a principal, como antes)
+  app.post('/api/conexoes/:kind/usar-de', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['workspaceId'], properties: { workspaceId: S.str(60, 3), origemConta: contaSchema, conta: contaSchema } } } }, async (req) => {
     const a = owner(req);
-    return { conta: integrations.usarDe(a.workspaceId, a.userId, (req.params as { kind: IntegrationKind }).kind, (req.body as { workspaceId: string }).workspaceId) };
+    const b = req.body as { workspaceId: string; origemConta?: string; conta?: string };
+    return { conta: integrations.usarDe(a.workspaceId, a.userId, (req.params as { kind: IntegrationKind }).kind, b.workspaceId, contaDoPedido(b.origemConta), contaDoPedido(b.conta, true)) };
   });
-  app.post('/api/conexoes/:kind/testar', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, properties: { escrita: { type: 'boolean' }, quadro: S.str(300) } } } }, async (req) => {
+  app.post('/api/conexoes/:kind/testar', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, properties: { escrita: { type: 'boolean' }, quadro: S.str(300), conta: contaSchema } } } }, async (req) => {
     const a = owner(req);
     const kind = (req.params as { kind: IntegrationKind }).kind;
-    if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
-    return { itens: await conexoes.testar(a.workspaceId, a.userId, kind, (req.body ?? {}) as { escrita?: boolean; quadro?: string }) };
+    const b = (req.body ?? {}) as { escrita?: boolean; quadro?: string; conta?: string };
+    const conta = contaDoPedido(b.conta);
+    if (integrationRow(db, a.workspaceId, kind, conta).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
+    return { itens: await conexoes.testar(a.workspaceId, a.userId, kind, { escrita: b.escrita, quadro: b.quadro, conta }) };
   });
   // envio ao aplicativo que falhou: a pessoa pede de novo
   app.post('/api/tasks/:id/reenviar', { schema: { params: idParams('tsk') } }, async (req) => {
@@ -2513,48 +2574,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   registerAjustesRoutes(app, { db, bus, executor, auth, owner, aiOf, workspacesDoMotor, idiomaDoMotor: (ws) => idiomaDoEscopo(motors.scope(ws)),
     conversaDe: (ws, userId, conversationId) => { getConversation(db, ws, userId, conversationId); } });
 
-  // Capacidades da equipe (rc.27): conselho de modelos, loja de competências, conectores prontos, proteções do Terminal,
-  // conquistas e voz, pela ponte de controle do motor: routes/recursos.ts
-  const recursos = new Recursos({ db, bus, control: (ws) => motors.control(ws), scope: (ws) => motorScope(ws), modelos: (ws) => aiOf(ws).opcoesDeReserva() });
+  // Capacidades da equipe (rc.27): conselho de modelos, loja de competências, conectores prontos, proteções do Terminal
+  // e voz, pela ponte de controle do motor: routes/recursos.ts
+  const recursos = new Recursos({ db, bus, control: (ws) => motors.control(ws), scope: (ws) => motorScope(ws), modelos: (ws) => aiOf(ws).opcoesDeReserva(),
+    aoMudarCompetencias: (ws) => aiOf(ws).esquecerCompetencias() });
   registerRecursosRoutes(app, { db, bus, recursos, executor, cfg, auth, owner });
+  // aplicativos conectados pela pessoa (servidor MCP que o catálogo não traz, rc.29): routes/mcp-proprio.ts
+  const appsProprios = new McpProprios({ db, bus, recursos });
+  registerMcpProprioRoutes(app, { apps: appsProprios, auth, owner });
 
-  // Fixtures: simulação local identificada (nunca chamada de "conectado") ------------------------------
-  const fixtureFile = (platform: string, name: string) => {
-    if (!cfg.fixturesEnabled) throw new HttpError(404, 'fixtures_disabled', 'fixtures desabilitadas');
-    if (!['teams', 'whatsapp'].includes(platform) || !/^[a-z0-9-]{1,40}$/.test(name)) throw notFound('fixture');
-    const file = path.join(cfg.fixturesDir, platform, `${name}.json`);
-    if (!fs.existsSync(file)) throw notFound('fixture');
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as { description?: string; identities?: Array<{ id: string; name: string; canCommand: boolean }>; events: Array<Record<string, unknown>> };
-  };
-
-  app.get('/api/fixtures', async (req) => {
-    auth(req);
-    const out: Array<{ platform: string; name: string; description: string; events: number }> = [];
-    for (const platform of ['teams', 'whatsapp']) {
-      const dir = path.join(cfg.fixturesDir, platform);
-      if (!fs.existsSync(dir)) continue;
-      for (const f of fs.readdirSync(dir).filter((x) => /^[a-z0-9-]{1,40}\.json$/.test(x))) {
-        const data = fixtureFile(platform, f.replace(/\.json$/, ''));
-        out.push({ platform, name: f.replace(/\.json$/, ''), description: data.description ?? '', events: data.events.length });
-      }
-    }
-    return out;
-  });
-
-  app.post('/api/fixtures/:platform/:name/replay', {
-    schema: { params: { type: 'object', required: ['platform', 'name'], properties: { platform: { enum: ['teams', 'whatsapp'] }, name: { type: 'string', pattern: '^[a-z0-9-]{1,40}$' } } } },
-  }, async (req) => {
-    const a = owner(req);
-    const { platform, name } = req.params as { platform: 'teams' | 'whatsapp'; name: string };
-    const data = fixtureFile(platform, name);
-    const conn = findConnection(db, a.workspaceId, platform, 'fixture');
-    for (const ident of data.identities ?? []) upsertIdentity(db, conn, ident.id, ident.name, ident.canCommand);
-    const results = data.events.map((ev) => {
-      const e = platform === 'teams' ? normalizeTeamsActivity(ev, 'fixture-bot') : normalizeWhatsAppMessage(ev);
-      return ingestEvent(db, bus, cfg, conn, e, true);
-    });
-    return { fixture: true, platform, name, results };
-  });
 
   // Arquivos ----------------------------------------------------------------------------------------------
   app.get('/api/artifacts', async (req) => listArtifacts(db, auth(req).workspaceId));
@@ -2791,24 +2819,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!m) throw new HttpError(401, 'bridge_auth', 'token da ponte inválido');
     return m;
   };
+  // O canal antigo de Teams e WhatsApp pelo gateway do motor (POST /internal/bridge/v1/events) saiu na rc.29: o Teams
+  // é pelo app com relé (services/teams-app), o WhatsApp pelo leitor por QR (services/whatsapp.ts) e o Telegram e o
+  // Discord pelas rotas dos canais. Um plugin antigo que ainda mande evento para cá recebe 404 e não responde ninguém.
   registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
-  app.post('/internal/bridge/v1/events', {
-    bodyLimit: 64 * 1024,
-    schema: { body: { type: 'object', required: ['schema', 'platform', 'message_id', 'text'], properties: {
-      schema: { const: 'ergon.bridge.v1' }, platform: { enum: ['teams', 'whatsapp'] }, message_id: S.str(200, 1), text: S.str(8000),
-      event_type: { enum: ['message', 'message_edit'] }, version: S.str(40), session_key: S.str(256), source: { type: 'object', maxProperties: 30 } } } },
-  }, async (req) => {
-    const motor = bridgeMotor(req);
-    if (bridgeLimiter.hit(`bridge:${motor}`)) throw new HttpError(429, 'rate_limited', 'limite de eventos por minuto');
-    const p = req.body as BridgePayload;
-    const enabled = p.platform === 'teams' ? cfg.teams.enabled : cfg.whatsapp.enabled;
-    if (!enabled) throw new HttpError(403, 'connector_disabled', 'conector desabilitado no Ergon');
-    const e = normalizeBridge(p);
-    // um motor por pessoa: a mensagem entra no workspace de quem é o motor
-    const conn = findConnection(db, motor === '_' ? null : owners.owned(motor)[0] ?? null, p.platform, 'real');
-    const r = ingestEvent(db, bus, cfg, conn, e, false);
-    return { action: r.action, reply: r.reply, event_id: r.eventId, duplicate: r.duplicate, status: r.status };
-  });
 
   // Plugin do Ergon no motor: antes de cada ferramenta, pergunta de qual agente é a sessão e o que ele pode usar.
   // Resposta mínima (nome do agente, conjuntos liberados e quem tem cada um, para o agente pedir ajuda).
@@ -2837,8 +2851,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const training = tr && tr.status === 'executando' && run!.status !== 'succeeded' ? trainings.policy(tr) : null;
     // no perfil do agente (rc.27): também a memória longa (com aprovação), a busca nas conversas dele e os ajudantes
     const doPerfil = run?.hermes_profile && !training ? extrasDoPerfil(db, ag.workspace_id) : [];
-    const conectores = { ligado: list(ag.tools).includes('conectores'), escrita: recursos.escrita(ag.workspace_id) };
-    return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil], holders, guarded: GUARDED_TOOLSETS, skills, training };
+    // a classe de cada ferramenta dos aplicativos conectados pela pessoa (rc.29); sem nenhum, a chave nem vai
+    const tipos = appsProprios.politica(ag.workspace_id);
+    const conectores = { ligado: list(ag.tools).includes('conectores'), escrita: recursos.escrita(ag.workspace_id), ...(Object.keys(tipos).length ? { tipos } : {}) };
+    // a gestão do Ergon (rc.29): só o coordenador, fora de um treinamento
+    const daGestao = !training && gestao.ehCoordenador({ agent_id: agentId!, workspace_id: ag.workspace_id }) ? [TOOLSET_GESTAO] : [];
+    return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil, ...daGestao], holders, guarded: GUARDED_TOOLSETS, skills, training };
   });
 
   // Ajudantes temporários (subagentes do motor): o plugin avisa o começo e o fim (com o resultado). A execução do Ergon
@@ -2906,11 +2924,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Ferramentas de conexão no motor: o plugin só repassa; a regra, as credenciais e o registro ficam aqui
   app.post('/internal/bridge/v1/conexoes', {
     bodyLimit: 256 * 1024,
-    schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar', 'cartao'] }, session_id: S.str(200), task_id: S.str(200), conexao: S.str(40), acao: S.str(80), parametros: { type: 'object' }, leu_web: { type: 'boolean' },
+    schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar', 'cartao'] }, session_id: S.str(200), task_id: S.str(200), conexao: S.str(40), conta: S.str(120), acao: S.str(80), parametros: { type: 'object' }, leu_web: { type: 'boolean' },
       cartao: { type: 'string', pattern: '^apr_[0-9a-f]{32}$' } } } },
   }, async (req) => {
     const motor = bridgeMotor(req);
-    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; conexao?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean; cartao?: string };
+    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; conexao?: string; conta?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean; cartao?: string };
     const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
     const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
     if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
@@ -2923,7 +2941,27 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!platformToolsets(motorScope(run.workspace_id)).at) await aiOf(run.workspace_id).refreshToolsets(); // codigoLigado precisa da leitura
     // a regra de execução de código olha o agente desta execução (codigoLigado lê daqui)
     const conexao = b.conexao; const acao = b.acao;
-    return runAtual.run(run, () => conexoes.executar(run, conexao, acao, b.parametros ?? {}, { leuWeb: b.leu_web }));
+    // conta: qual das contas do aplicativo (o apelido, o e-mail ou o número); sem dizer, a principal
+    return runAtual.run(run, () => conexoes.executar(run, conexao, acao, b.parametros ?? {}, { leuWeb: b.leu_web, conta: b.conta }));
+  });
+
+  // Gestão pelo coordenador (rc.29): o plugin só repassa; a regra, a sessão da pessoa e o registro ficam aqui (gestao.ts)
+  app.post('/internal/bridge/v1/gestao', {
+    bodyLimit: 256 * 1024,
+    schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar', 'cartao'] }, session_id: S.str(200), task_id: S.str(200), area: S.str(60), acao: S.str(80), parametros: { type: 'object' },
+      cartao: { type: 'string', pattern: '^apr_[0-9a-f]{32}$' } } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; area?: string; acao?: string; parametros?: Record<string, unknown>; cartao?: string };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    // a sessão de outra pessoa é desconhecida para este motor
+    const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
+    if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
+    if (!gestao.ehCoordenador(run)) return { ok: false, status: 'falhou', texto: 'A gestão do Ergon é da coordenação: peça ao coordenador.' };
+    if (b.op === 'listar') return { ok: true, status: 'feita', texto: gestao.listar(b.area) };
+    if (b.op === 'cartao') return b.cartao ? gestao.resultadoDoCartao(run, b.cartao) : { ok: false, status: 'falhou', texto: 'Cartão desconhecido.' };
+    if (!b.acao) return { ok: false, status: 'falhou', texto: 'Diga a ação (veja gestao_listar).' };
+    return gestao.executar(run, b.acao, b.parametros ?? {});
   });
 
   app.post('/internal/bridge/v1/training-event', {
@@ -2986,21 +3024,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { ok: true };
   });
 
-  app.get('/internal/bridge/v1/health', async (req) => {
-    bridgeMotor(req);
-    return { ok: true, teams: cfg.teams.enabled, whatsapp: cfg.whatsapp.enabled };
-  });
 
-  // Esqueleto do workspace (shared/blueprint.ts): a forma, sem segredos nem direitos; aplicar instala tudo pausado ---
+  // Esqueleto do workspace (shared/blueprint.ts): a forma, sem segredos nem direitos (aplicar: importBlueprint, pelos
+  // modelos de equipe e pelo módulo opcional, instala tudo pausado) ----------------------------------------------------
   app.get('/api/blueprint/export', async (req) => exportBlueprint(db, routines, owner(req).workspaceId));
-  app.post('/api/blueprint/import', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['blueprint'], properties: { blueprint: { type: 'object' }, apply: { type: 'boolean' } } } },
-    bodyLimit: 1_100_000,
-  }, async (req) => {
-    const a = owner(req);
-    const b = req.body as { blueprint: unknown; apply?: boolean };
-    return importBlueprint(db, bus, routines, a.workspaceId, a.userId, b.blueprint, b.apply === true, limits);
-  });
 
   // Pacotes .ergon (só dados: tema, efeitos, pets, aparências, equipe) — instalar, prévia, desfazer --------------
   // chave oficial do Ergon (pacotes que vêm com ele) + as que a instalação acrescentar (ERGON_PACKAGE_KEYS: id=SPKI,…)
@@ -3032,17 +3059,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.post('/api/packages/install', ergonBody, async (req) => { const a = owner(req); return packages.install(a.workspaceId, a.userId, req.body as Buffer); });
   app.delete('/api/packages/:id', { schema: { params: idParams('pkg') } }, async (req) => { const a = owner(req); packages.uninstall(a.workspaceId, a.userId, (req.params as { id: string }).id); return { ok: true }; });
   // editor simples: monta um .ergon (efeito, pet ou tema) para ver na cidade, baixar e publicar; mesma validação da instalação
-  app.post('/api/packages/build', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['kind', 'title', 'data'], properties: {
-      kind: { enum: ['fx', 'pet', 'city-theme'] }, title: S.str(60, 2), data: { type: 'object' } } } },
-  }, async (req, reply) => {
-    owner(req);
-    const b = req.body as { kind: 'fx' | 'pet' | 'city-theme'; title: string; data: Record<string, unknown> };
-    const slug = b.title.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'pacote';
-    const buf = await buildPackage({ package_id: `comunidade.local.${slug}`, version: '1.0.0', title: b.title, summary: 'Criado no editor do Ergon', creator_id: 'local', license: 'CC-BY-4.0', ergon: { min: '0.2.0' }, kind: b.kind }, b.data as never);
-    try { validatePackage(buf); } catch (e) { throw new HttpError(400, 'package_invalid', (e as Error).message); }
-    return reply.header('content-type', 'application/x-ergon').header('content-disposition', `attachment; filename="${slug}.ergon"`).send(buf);
-  });
 
   // módulo opcional (server/src/world): a Community não traz esse código ---------------------------------------
   app.get('/api/distribution', async () => ({ distribution: cfg.distribution, world: world?.status() ?? { available: false } }));
@@ -3068,19 +3084,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, executor, cartoes, aprovacoes, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
+  return { app, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
 }
 
-class Limiter {
-  private hits = new Map<string, number[]>();
-  private readonly max: number;
-  private readonly windowMs: number;
-  constructor(max: number, windowMs: number) { this.max = max; this.windowMs = windowMs; }
-  hit(key: string): boolean {
-    const t = Date.now();
-    const arr = (this.hits.get(key) ?? []).filter((x) => t - x < this.windowMs);
-    arr.push(t);
-    this.hits.set(key, arr);
-    return arr.length > this.max;
-  }
-}

@@ -565,7 +565,8 @@ export function cleanFileRef(x: unknown): FileRef | null {
   const kind = r.kind === 'ergon' || r.kind === 'microsoft' || r.kind === 'google' ? r.kind : null;
   const fid = typeof r.id === 'string' ? r.id : '';
   if (!kind || !(kind === 'ergon' ? ART_ID : CLOUD_ID).test(fid)) return null;
-  return { kind, id: fid, name: clip(String(r.name ?? 'arquivo').replace(/[\u0000-\u001f]/g, ''), 120) };
+  const conta = kind !== 'ergon' && typeof r.conta === 'string' && /^c[a-f0-9]{8}$/.test(r.conta) ? r.conta : '';
+  return { kind, id: fid, name: clip(String(r.name ?? 'arquivo').replace(/[\u0000-\u001f]/g, ''), 120), ...(conta ? { conta } : {}) };
 }
 
 /** Os parâmetros do modelo, limpos: listas de texto, endereços https e arquivos escolhidos. */
@@ -674,7 +675,7 @@ export class Routines {
       trigger, schedule: scheduleText(trigger), nextRunAt: (r.status === 'active' ? this.proximaDoMotor?.(r.id) : null) ?? r.next_run_at, lastRunAt: r.last_run_at,
       running: !!last && ['queued', 'gathering', 'running'].includes(last.status), last: last ?? null,
       hasSetup: !!this.db.get('SELECT 1 AS x FROM routine_setups WHERE routine_id = ?', r.id),
-      config: { sources: config.sources, sourceLabels: config.sources?.map((s) => SOURCES[s]) ?? [], condition: config.condition, instruction: config.instruction, extra: config.extra, deliver: config.deliver, staleDays: config.staleDays, params: config.params ?? {} },
+      config: { sources: config.sources, sourceLabels: config.sources?.map((s) => SOURCES[s]) ?? [], condition: config.condition, instruction: config.instruction, extra: config.extra, deliver: config.deliver, staleDays: config.staleDays, params: config.params ?? {}, contas: config.contas ?? [] },
       input: tpl?.input ?? null, paramSpecs: tpl?.params ?? [], missing: missingParams(tpl, config.params), outputs: tpl?.outputs ?? [], proposes: tpl?.proposes ?? null,
       createdAt: r.created_at, updatedAt: r.updated_at,
     };
@@ -743,7 +744,7 @@ export class Routines {
   install(workspaceId: string, userId: string, key: string, opts: { trigger?: unknown; extra?: string; tz?: string | null; staleDays?: number; adapt?: boolean; params?: unknown } = {}) {
     const t = templateByKey(key);
     if (!t) throw notFound('rotina da biblioteca');
-    if (!t.available || !t.defaults) throw new HttpError(409, 'not_available', `${t.name} chega na fase ${t.phase} do plano de rotinas.`);
+    if (!t.defaults) throw new HttpError(409, 'not_available', `${t.name} não pode ser ativada nesta versão.`);
     const tz = this.tz(workspaceId, opts.tz);
     const trigger = opts.trigger !== undefined ? cleanTrigger(opts.trigger, tz) : t.defaults.trigger.kind === 'schedule' ? { ...t.defaults.trigger, tz } : { kind: 'manual' as const };
     if (opts.adapt) {
@@ -768,12 +769,19 @@ export class Routines {
   }
 
   /** Muda a configuração (vira versão nova) ou só pausa/retoma. */
-  update(workspaceId: string, userId: string, routineId: string, patch: RoutineChanges & { status?: 'active' | 'paused'; staleDays?: number; tz?: string | null; params?: unknown }, note: string) {
+  update(workspaceId: string, userId: string, routineId: string, patch: RoutineChanges & { status?: 'active' | 'paused'; staleDays?: number; tz?: string | null; params?: unknown; contas?: string[] }, note: string) {
     const r = this.row(workspaceId, routineId);
     const tz = this.tz(workspaceId, patch.tz);
     const config = parseJson<RoutineConfig>(r.config, {} as RoutineConfig);
     let trigger = parseJson<Trigger>(r.trigger, { kind: 'manual' });
-    const changed = patch.name !== undefined || patch.trigger !== undefined || patch.extra !== undefined || patch.sources !== undefined || patch.condition !== undefined || patch.staleDays !== undefined || patch.params !== undefined;
+    const changed = patch.name !== undefined || patch.trigger !== undefined || patch.extra !== undefined || patch.sources !== undefined || patch.condition !== undefined || patch.staleDays !== undefined || patch.params !== undefined || patch.contas !== undefined;
+    // as contas escolhidas: só as deste workspace (de outra pessoa nunca entram); vazio = todas
+    if (patch.contas !== undefined) {
+      const daqui = new Map(this.db.all<{ id: string; kind: string }>('SELECT id, kind FROM integrations WHERE workspace_id = ?', workspaceId).map((x) => [x.id, x.kind]));
+      config.contas = [...new Set(patch.contas)].filter((x) => daqui.has(x)).slice(0, 40);
+      config.contasApps = [...new Set(config.contas.map((x) => daqui.get(x)!))];
+      if (!config.contas.length) { delete config.contas; delete config.contasApps; }
+    }
     if (patch.params !== undefined) config.params = cleanParams(r.template_key ? templateByKey(r.template_key) : undefined, patch.params);
     if (patch.trigger !== undefined) trigger = cleanTrigger(patch.trigger, tz);
     if (patch.extra !== undefined) config.extra = clip(patch.extra, 600);
@@ -982,7 +990,7 @@ export class Routines {
       let reads: SourceRead[] = []; let warnings: string[] = [];
       if (wanted.length) {
         const f: AccountFacts = this.accounts
-          ? await this.accounts.read(r.workspace_id, [...new Set(wanted.map((w) => READ_KIND[w]))], since, tz, { horizonDays: wanted.includes('prazos.pessoais') ? (c.horizonDays ?? 3) : 0 })
+          ? await this.accounts.so(c.contas, c.contasApps).read(r.workspace_id, [...new Set(wanted.map((w) => READ_KIND[w]))], since, tz, { horizonDays: wanted.includes('prazos.pessoais') ? (c.horizonDays ?? 3) : 0 })
           : { agenda: [], email: [], emailImportant: 0, tarefas: [], tarefasAtrasadas: 0, warnings: [], reads: wanted.flatMap((w) => (['microsoft', 'google'] as const).map((account) => ({ account, what: READ_KIND[w], status: 'nao_conectada' as const, label: null, count: 0, ms: 0 }))) };
         reads = f.reads; warnings = f.warnings;
         g = summarize([...accountSections(f, wanted), ...g.sections]);
@@ -993,7 +1001,7 @@ export class Routines {
       const budget = docRoutine ? this.deps.maxDocumentChars : this.deps.maxContextChars;
       let docReads: DocRead[] = []; let feedReads: FeedRead[] = []; let data: RunData | null = null;
       if (extraWanted.length) {
-        const x = await gatherExtra({ db: this.db, ws: r.workspace_id, since, tz, filesDir: this.deps.filesDir, accounts: this.accounts, input, params: c.params ?? {},
+        const x = await gatherExtra({ db: this.db, ws: r.workspace_id, since, tz, filesDir: this.deps.filesDir, accounts: this.accounts?.so(c.contas, c.contasApps) ?? null, contas: c.contas, contasApps: c.contasApps, input, params: c.params ?? {},
           horizonDays: c.horizonDays ?? 60, docBudget: Math.floor(budget * 0.6), fetcher: this.webFetch ?? undefined }, extraWanted);
         reads = [...reads, ...x.reads]; warnings = [...warnings, ...x.warnings]; docReads = x.docReads; feedReads = x.feedReads;
         const { docs: _d, ...rest } = x.data; data = rest;
@@ -1563,14 +1571,13 @@ export class Routines {
       this.db.run('INSERT INTO conversations (id, workspace_id, agent_id, owner_user_id, title, hermes_session_key, created_at, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         conv, workspaceId, coord.id, owner, 'Rotinas · recomendações', `ergon:${workspaceId}:routine-recommend:conv:${conv}`, now(), 'routine-recommend');
     }
-    const ready = CATALOG.filter((t) => t.available);
     const channel = [
       'Canal: análise semanal de rotinas do Ergon (o usuário ligou "recomendação inteligente de rotinas").',
       'Procure nos dados trabalho que se repete ou é feito de improviso (pedidos parecidos aos agentes, tarefas que voltam toda semana) e que uma rotina faria sozinha.',
       'Regras: no máximo 3 sugestões, só com evidência nos dados; nada que já exista ou já tenha sido recusado; só o que dá para fazer com as fontes permitidas (o que dependeria de e-mail, WhatsApp, documentos ou web, cite como ideia para quando essas conexões chegarem, sem linha de controle).',
       'Para cada sugestão, uma linha exatamente assim:',
       '[[sugerir-rotina nome="Nome curto" quando="toda segunda 9h" agente="Nome" fontes="id,id" condicao="sempre|novidades|sinal" instrucao="o trabalho em 2 a 4 frases" motivo="a evidência: o que se repete e quantas vezes" mensagem="2 a 3 frases para o usuário, em tom de colega ou mentor, humanas e diretas, começando com uma saudação"]]',
-      `Se uma rotina pronta resolver, use modelo="chave" em vez de fontes e instrucao: ${ready.map((t) => `${t.key} (${t.name}: ${t.benefit})`).join(' · ')}.`,
+      `Se uma rotina pronta resolver, use modelo="chave" em vez de fontes e instrucao: ${CATALOG.map((t) => `${t.key} (${t.name}: ${t.benefit})`).join(' · ')}.`,
       `Fontes permitidas: ${Object.entries(SOURCES).map(([k, v]) => `${k} = ${v}`).join('; ')}.`,
       'Fora das linhas, escreva um resumo de 2 a 4 linhas do que você viu (ou diga que não achou nada novo esta semana).',
     ].join('\n');

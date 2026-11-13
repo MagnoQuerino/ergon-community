@@ -446,6 +446,9 @@ export class AiService {
     return { model: escolhido, changes, kept, reason: null };
   }
 
+  /** A biblioteca mudou (instalada da loja, enviada, removida): a próxima leitura vai ao motor. */
+  esquecerCompetencias(): void { this.skillsCache = null; }
+
   async skills(): Promise<SkillInfo[]> {
     if (this.skillsCache && Date.now() - this.skillsCache.at < 10 * 60_000) return this.skillsCache.data;
     if (!this.control) return [];

@@ -105,7 +105,7 @@ test('tempo relativo: há 5 minutos / 5 minutes ago; agora / now', () => {
 });
 
 test('t(): português de saída; trocar o idioma baixa o inglês, vale na hora, avisa quem ouve e muda o <html lang>', async () => {
-  assert.equal(I.idiomaAtual(), 'pt-BR', 'sem escolha guardada (e o inglês ainda não liberado): português');
+  assert.equal(I.idiomaAtual(), 'pt-BR', 'sem escolha guardada: português');
   assert.equal(html(), 'pt-BR');
   assert.equal(I.t('geral.barra.modoFoco'), 'Modo Foco');
   assert.equal(I.t('geral.barra.pedirA', { nome: 'Aristóteles' }), 'Pedir a Aristóteles');
@@ -139,44 +139,35 @@ test('t(): português de saída; trocar o idioma baixa o inglês, vale na hora, 
   assert.equal(I.t('geral.naoExiste' as never), 'geral.naoExiste', 'chave desconhecida aparece como está (nunca quebra a tela)');
 });
 
-test('a ordem ao entrar, com o inglês liberado: pessoa (servidor) > a escolha dela neste navegador > o navegador', () => {
+test('a ordem ao entrar: pessoa (servidor) > a escolha dela neste navegador > o navegador', () => {
   const nav = (lingua: string) => Object.defineProperty(globalThis, 'navigator', { value: { language: lingua }, configurable: true });
   guardado.clear();
   nav('pt-BR');
-  assert.deepEqual(I.decidirAoEntrar('en', 'usr_a', true), { idioma: 'en', lembrar: true, gravar: null }, 'a escolha da pessoa vence o navegador');
-  assert.deepEqual(I.decidirAoEntrar(undefined, 'usr_a', true), { idioma: 'pt-BR', lembrar: false, gravar: null }, 'sem escolha: o navegador');
+  assert.deepEqual(I.decidirAoEntrar('en', 'usr_a'), { idioma: 'en', lembrar: true, gravar: null }, 'a escolha da pessoa vence o navegador');
+  assert.deepEqual(I.decidirAoEntrar(undefined, 'usr_a'), { idioma: 'pt-BR', lembrar: false, gravar: null }, 'sem escolha: o navegador');
   // a gravação no servidor falhou (savePrefs é silencioso): a escolha dela neste navegador vale e vai de novo ao servidor
   guardado.set('ergon.idioma:usr_a', 'en');
-  assert.deepEqual(I.decidirAoEntrar(undefined, 'usr_a', true), { idioma: 'en', lembrar: true, gravar: 'en' });
+  assert.deepEqual(I.decidirAoEntrar(undefined, 'usr_a'), { idioma: 'en', lembrar: true, gravar: 'en' });
   // multiconta: a escolha da A neste navegador não passa para a B (que segue o navegador)
   guardado.set('ergon.idioma', 'en');
-  assert.deepEqual(I.decidirAoEntrar(undefined, 'usr_b', true), { idioma: 'pt-BR', lembrar: false, gravar: null });
-  assert.equal(I.idiomaInicial(true), 'en', 'a tela de entrada: a última escolha feita neste navegador');
+  assert.deepEqual(I.decidirAoEntrar(undefined, 'usr_b'), { idioma: 'pt-BR', lembrar: false, gravar: null });
+  assert.equal(I.idiomaInicial(), 'en', 'a tela de entrada: a última escolha feita neste navegador');
   guardado.clear();
-  assert.equal(I.idiomaInicial(true), 'pt-BR', 'a tela de entrada sem escolha: o navegador');
+  assert.equal(I.idiomaInicial(), 'pt-BR', 'a tela de entrada sem escolha: o navegador');
   nav('en-US');
-  assert.equal(I.idiomaInicial(true), 'en');
-  assert.deepEqual(I.decidirAoEntrar('pt-BR', 'usr_a', true), { idioma: 'pt-BR', lembrar: true, gravar: null }, 'navegador em inglês, pessoa em português');
-  assert.deepEqual(I.decidirAoEntrar('es', 'usr_a', true), { idioma: 'en', lembrar: false, gravar: null }, 'valor estranho = sem escolha');
+  assert.equal(I.idiomaInicial(), 'en');
+  assert.deepEqual(I.decidirAoEntrar('pt-BR', 'usr_a'), { idioma: 'pt-BR', lembrar: true, gravar: null }, 'navegador em inglês, pessoa em português');
+  assert.deepEqual(I.decidirAoEntrar('es', 'usr_a'), { idioma: 'en', lembrar: false, gravar: null }, 'valor estranho = sem escolha');
   nav('pt-BR');
 });
 
-test('enquanto o inglês não é liberado: a tela abre em português e quem ainda não tem idioma recebe o português no servidor', async () => {
+test('ao entrar: a decisão vale na tela e a escolha fica nos dois lugares deste navegador', async () => {
   guardado.clear();
-  assert.deepEqual(I.decidirAoEntrar(undefined, 'usr_a', false), { idioma: 'pt-BR', lembrar: false, gravar: 'pt-BR' },
-    'a conta criada agora também fica em português no dia em que o inglês chegar');
-  assert.deepEqual(I.decidirAoEntrar('en', 'usr_a', false), { idioma: 'pt-BR', lembrar: false, gravar: null }, 'a escolha gravada não muda a tela ainda');
-  // quem confere a tradução guarda "en" neste navegador e ele vale
-  guardado.set('ergon.idioma', 'en');
-  assert.deepEqual(I.decidirAoEntrar('pt-BR', 'usr_a', false), { idioma: 'en', lembrar: false, gravar: null });
-  assert.equal(I.idiomaInicial(false), 'en');
-  guardado.clear();
-  assert.equal(I.idiomaInicial(false), 'pt-BR');
-  // usarIdiomaDaPessoa aplica a decisão (com a constante de verdade) e devolve o que gravar
+  // usarIdiomaDaPessoa aplica a decisão e devolve o que gravar (sem escolha em lugar nenhum: nada a gravar)
   await I.setIdioma('pt-BR', { guardar: false });
   const r = I.usarIdiomaDaPessoa(undefined, 'usr_a');
   await r.pronto;
-  assert.equal(r.gravar, I.IDIOMA_INGLES_LIBERADO ? null : 'pt-BR');
+  assert.equal(r.gravar, null);
   // escolher depois de entrar guarda nos dois lugares deste navegador: o da tela de entrada e o da pessoa
   await I.setIdioma('en');
   assert.equal(guardado.get('ergon.idioma'), 'en');

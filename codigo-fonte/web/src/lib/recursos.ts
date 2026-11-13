@@ -17,8 +17,18 @@ export interface ConectorCatalogo {
   depois: string; instalado: boolean; ligado: boolean;
 }
 export interface Conectores { catalogo: ConectorCatalogo[]; servidores: Array<{ nome: string; ligado: boolean; entrada: string }>; busca_ferramentas: boolean; escrita: string[] }
-export interface Conquista { id: string; nome: string; descricao: string; categoria: string; nivel: string; conquistada: boolean; progresso: number }
 export interface PontoDeVolta { id: string; quando: string; pasta: string; motivo: string; arquivos: number }
+
+/** Aplicativos conectados pela pessoa (rc.29): GET /api/recursos/apps-proprios. */
+export type TipoFerramenta = 'leitura' | 'escrita' | 'envio';
+export interface FerramentaApp { nome: string; descricao: string; sugerido: TipoFerramenta; tipo: TipoFerramenta }
+export interface AppConectado {
+  nome: string; app: string; apelido: string | null; icone: string | null; transporte: 'http' | 'sse' | 'stdio';
+  /** a conta dentro do aplicativo, como nas Conexões: '' = a principal */
+  conta: string; principal: boolean;
+  endereco: string | null; comando: string | null; argumentos: string[];
+  chaves: Array<{ tipo: 'cabecalho' | 'variavel'; nome: string }>; ferramentas: FerramentaApp[]; testadoEm: string | null; erro: string | null; criadoEm: string;
+}
 
 export const RECURSOS = '/api/recursos';
 

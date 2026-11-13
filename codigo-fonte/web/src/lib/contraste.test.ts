@@ -7,18 +7,19 @@ import {
   MIN_GRAFICO, MIN_TEXTO, TINTA_CLARA, TINTA_ESCURA, contrast, ensureContrast, inkOn, letterStyle, over, parseColor, ratioRgb, readableOn, type Rgb,
 } from './contraste.ts';
 import {
-  ajustadosNoEscuro, contrasteSobre, fontComInherit, fundoDe, letraDe, letraPequenaEmControle, opacidadeEmTexto, regras, resolveColor, splitTop, temas, valor,
-  variaveisInexistentes, type Cor, type Regra, type Vars,
+  BLOCOS_DE_TEMA, ajustadosNoEscuro, ajustesPorTema, contrasteSobre, coresSoltas, fontComInherit, fundoDe, letraDe, letraPequenaEmControle, opacidadeEmTexto, regras,
+  resolveColor, splitTop, temas, valor, variaveisInexistentes, varsDoBloco, type Cor, type Regra, type Vars,
 } from './contraste-folha.ts';
 
 // O teste que reprova a publicação quando algum texto, ícone ou contorno de foco fica ilegível (WCAG: texto 4,5:1;
-// ícone, borda de controle e foco 3:1), nos temas claro e escuro. Lê a própria folha de estilos.
+// ícone, borda de controle e foco 3:1), nos temas claro, escuro e alto contraste (este pede 7:1 para texto). Lê a própria
+// folha de estilos: as cores de função dos três blocos de tema e cada regra das telas.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const css = fs.readFileSync(path.join(src, 'styles.css'), 'utf8');
-const { claro, escuro } = temas(css);
-const THEMES: Array<[string, Vars]> = [['claro', claro], ['escuro', escuro]];
+const { claro, escuro, contraste } = temas(css);
+const THEMES: Array<[string, Vars]> = [['claro', claro], ['escuro', escuro], ['contraste', contraste]];
 const RS = regras(css);
 
 const cor = (value: string, vars: Vars): Cor => {
@@ -41,111 +42,168 @@ const fontes = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: t
 const CODIGO = fontes(src).map((f) => ({ f: path.relative(src, f).replace(/\\/g, '/'), s: fs.readFileSync(f, 'utf8') }));
 const codigo = (f: string) => { const x = CODIGO.find((c) => c.f === f); assert.ok(x, f); return x.s; };
 
-// ---------- tabela de usos: todo texto oficial contra toda superfície oficial ----------
+// ---------- tabela de usos das cores de função: todo texto contra toda superfície onde ele aparece ----------
 
-const SUPERFICIES = ['var(--bg)', 'var(--panel)', 'var(--panel-2)', 'var(--glass)'];
-/** fundos coloridos onde aparece texto neutro (secundário, link): cartões amarelos, de pergunta, mensagem sua, estados */
-const FUNDOS_TINGIDOS = ['var(--warn-bg)', 'var(--ok-bg)', 'var(--err-bg)', 'var(--fx-f-fffaf0)', 'var(--fx-f-fffaf2)', 'var(--fx-f-fbf4e6)',
-  'var(--fx-f-f2f8f9)', 'var(--fx-f-e5eef3)'];
-const NEUTROS = ['var(--ink)', 'var(--muted)', 'var(--navy)', 'var(--teal)', 'var(--gold-ink)'];
-const ESTADOS: Array<[string, string]> = [['var(--warn)', 'var(--warn-bg)'], ['var(--ok)', 'var(--ok-bg)'], ['var(--err)', 'var(--err-bg)']];
-/** [texto, fundo, onde]: selos e botões de cor própria (a lista da auditoria) */
-const USOS: Array<[string, string, string]> = [
-  ['var(--fx-t-4b2f8f)', 'var(--fx-f-ede4ff)', 'selo de simulação'],
-  ['var(--fx-t-3d2c00)', 'var(--fx-f-f6d77c)', 'aviso da barra de cima'],
-  ['var(--fx-t-7a5a00)', 'var(--fx-f-fbefd2)', 'selo recomendado'],
-  ['var(--fx-t-8f4529)', 'color-mix(in srgb, var(--terracotta) 14%, var(--panel))', 'prioridade / precisa de você'],
-  ['var(--gold-ink)', 'color-mix(in srgb, var(--gold) 18%, var(--panel))', 'posição do card'],
-  ['var(--gold-ink)', 'var(--fx-f-fbf4e6)', 'fixo / prazo perto'],
-  ['#1d1606', 'var(--gold)', 'botão dourado (no escuro o texto é fixo: :root[data-theme="dark"] .btn--gold)'],
-  ['#ffffff', 'var(--navy-bg)', 'botão principal / barra de cima'],
+/** As superfícies onde aparece texto de leitura (o vidro é pintado sobre o fundo da tela). */
+const SUPERFICIES = ['--bg', '--panel', '--panel-2', '--glass', '--campo'];
+/** Textos neutros: o principal, o secundário, a marca (texto, linha e foco), o link e o dourado de texto. */
+const TEXTOS = ['--ink', '--muted', '--navy', '--teal', '--link', '--gold-ink'];
+/** Cada estado: as cores dele que existem (o -suave-2/-3 e o -ponto só em alguns). */
+const ESTADOS = ['neutro', 'info', 'sucesso', 'atencao', 'urgente', 'perigo', 'dourado', 'marca', 'agua'];
+const SUFIXOS = ['suave', 'suave-2', 'suave-3', 'hover', 'texto', 'borda', 'borda-2', 'borda-forte', 'cheio', 'cheio-borda', 'cheio-hover', 'sobre', 'ponto', 'vivo', 'faixa'];
+const doEstado = (e: string, s: string) => `--${e}-${s}`;
+const tem = (nome: string) => claro[nome] !== undefined;
+const suaves = (e: string) => ['suave', 'suave-2', 'suave-3'].map((s) => doEstado(e, s)).filter(tem);
+/** Na barra de cima e no menu (a inversa): textos e pontos. */
+const NA_INVERSA = { fundos: ['--inversa', '--inversa-2'], textos: ['--texto-inverso', '--texto-inverso-2', '--texto-inverso-3'], pontos: ['--inversa-sucesso', '--inversa-aviso', '--inversa-agua', '--atencao-ponto', '--dourado-vivo', '--dourado-cheio'] };
+/** [texto, fundo, onde]: pares que não são do padrão de estado */
+const PARES: Array<[string, string, string]> = [
+  ['--palco-texto', '--palco', '"Carregando" no palco da Cidade'],
+  ['--codigo-texto', '--codigo-fundo', 'bloco de código'],
+  ['--dourado-sobre', '--dourado-vivo', 'retrato da conta na barra'],
+  ['--dourado-sobre', '--inversa-aviso', 'o "!" da barra'],
+  ['--atencao-sobre', '--atencao-cheio', 'contador da barra'],
+  ['--dourado-sobre', '--dourado-cheio-hover', 'botão dourado (passando o mouse)'],
+  ['--texto-inverso', '--legenda-fundo', 'legenda sobre imagem na loja (pior caso: imagem branca)'],
 ];
+/** Cores sem texto em cima, que não pedem contraste (enfeite, véu, linha divisória, sombra) ou que têm teste próprio. */
+const DECORATIVAS = new Set(['--line', '--line-suave', '--borda-forte', '--capa-1', '--capa-2', '--previa-1', '--previa-2', '--lona-1', '--lona-2',
+  '--veu', '--veu-forte', '--realce', '--inversa-veu', '--inversa-hover', '--inversa-ativo', '--inversa-linha', '--inversa-linha-forte', '--gold', '--terracotta',
+  '--cb-line', '--ponto-anel', '--navy-bg', '--navy-2-bg', '--ok', '--ok-bg', '--warn', '--warn-bg', '--err', '--err-bg', '--borda-campo']);
+const minDe = (nome: string) => (nome === 'contraste' ? 7 : MIN_TEXTO);
 
-test('tabela de usos: texto neutro e de estado sobre toda superfície oficial ≥ 4,5, nos dois temas', () => {
-  const bad: string[] = [];
-  for (const [nome, v] of THEMES) {
-    for (const fg of NEUTROS) for (const bg of [...SUPERFICIES, ...FUNDOS_TINGIDOS]) { const r = razao(fg, bg, v); if (r < MIN_TEXTO) bad.push(`${nome}: ${fg} sobre ${bg} = ${r.toFixed(2)}`); }
-    for (const [fg, own] of ESTADOS) for (const bg of [...SUPERFICIES, own]) { const r = razao(fg, bg, v); if (r < MIN_TEXTO) bad.push(`${nome}: ${fg} sobre ${bg} = ${r.toFixed(2)}`); }
-    for (const [fg, bg, onde] of USOS) { const r = razao(fg, bg, v); if (r < MIN_TEXTO) bad.push(`${nome}: ${onde} (${fg} sobre ${bg}) = ${r.toFixed(2)}`); }
-  }
-  assert.deepEqual(bad, []);
+test('toda cor de função tem lugar na tabela de usos (cor nova sem linha na tabela reprova)', () => {
+  const classificadas = new Set<string>([...SUPERFICIES, ...TEXTOS, ...NA_INVERSA.fundos, ...NA_INVERSA.textos, ...NA_INVERSA.pontos, ...DECORATIVAS,
+    ...PARES.flat().filter((x) => x.startsWith('--')), ...ESTADOS.flatMap((e) => SUFIXOS.map((s) => doEstado(e, s)))]);
+  const cores = Object.keys(claro).filter((k) => { const c = resolveColor(claro[k], claro); return !!c && !('undef' in c); });
+  assert.ok(cores.length > 80, `poucas cores lidas: ${cores.length}`);
+  assert.deepEqual(cores.filter((k) => !classificadas.has(k)), []);
+  // os temas só redefinem cores que existem no claro (nada de nome novo escondido num tema)
+  for (const sel of BLOCOS_DE_TEMA.slice(1)) assert.deepEqual(Object.keys(varsDoBloco(css, sel)).filter((k) => !(k in claro)), [], sel);
+  // cada estado tem as cinco: suave, texto, borda, cheio e texto-sobre-cheio
+  for (const e of ESTADOS) for (const s of ['suave', 'texto', 'borda', 'cheio', 'sobre']) assert.ok(tem(doEstado(e, s)), `falta ${doEstado(e, s)}`);
 });
 
-test('tabela de usos: foco, ícones e pontinhos ≥ 3, nos dois temas (o dourado fica só como enfeite)', () => {
+test('tabela de usos: texto ≥ 4,5 (alto contraste: 7) sobre toda superfície e todo fundo de estado, nos três temas', () => {
   const bad: string[] = [];
-  const claras = [...SUPERFICIES, 'var(--warn-bg)', 'var(--fx-f-fffaf0)'];
-  const escuras = ['var(--navy-bg)', 'var(--navy-2-bg)']; // barra de cima e menu
-  const foco = valor(RS.find((r) => r.sel.startsWith(':where(a, button') && r.sel.endsWith(':focus-visible')) as Regra, 'outline') ?? '';
-  assert.match(foco, /^2px solid var\(--navy\)$/, `o contorno de foco de tudo é o azul-marinho (está: ${foco})`);
-  const navy = 'var(--navy)';
-  const anel = ultimo(':is(.topbar, .sidebar, .navdrawer) :focus-visible', 'box-shadow').replace(/^0 0 0 2px\s+/, '');
-  const icones = ['.tip__ico', '.ditem__icon--folder'].map((s) => [s, ultimo(s, 'color')] as const);
-  const dots = ['.dot', '.dot--green', '.dot--amber'].map((s) => ultimo(s, 'background'));
-  const ring = parseColor(ultimo('.dot', 'box-shadow').replace(/^inset 0 0 0 [\d.]+px\s+/, '')); assert.ok(ring);
-  assert.equal(ultimo(':root[data-theme="dark"] .dot', 'box-shadow'), 'none');
+  const medir = (nome: string, v: Vars, fg: string, bg: string, min: number, onde = '') => { const r = razao(`var(${fg})`, `var(${bg})`, v); if (r < min) bad.push(`${nome}: ${fg} sobre ${bg}${onde ? ` (${onde})` : ''} = ${r.toFixed(2)}`); };
   for (const [nome, v] of THEMES) {
-    for (const bg of claras) { const r = razao(navy, bg, v); if (r < MIN_GRAFICO) bad.push(`${nome}: foco sobre ${bg} = ${r.toFixed(2)}`); }
-    // na barra e no menu: o anel claro por dentro (ou o próprio contorno, no escuro)
-    for (const bg of escuras) { const r = Math.max(razao(navy, bg, v), razao(anel, bg, v)); if (r < MIN_GRAFICO) bad.push(`${nome}: foco na barra sobre ${bg} = ${r.toFixed(2)}`); }
-    for (const [s, c] of icones) for (const bg of claras) { const r = razao(c, bg, v); if (r < MIN_GRAFICO) bad.push(`${nome}: ícone ${s} sobre ${bg} = ${r.toFixed(2)}`); }
-    for (const fill of dots) for (const bg of [...claras, ...escuras]) {
-      // o pontinho se destaca pela cor ou pelo contorno de dentro (no escuro o contorno sai)
-      const B = superficie(bg, v); const F = over(cor(fill, v), B);
-      const r = Math.max(ratioRgb(F, B), nome === 'escuro' ? 0 : ratioRgb(over(ring, F), B));
-      if (r < MIN_GRAFICO) bad.push(`${nome}: pontinho ${fill} sobre ${bg} = ${r.toFixed(2)}`);
+    const min = minDe(nome);
+    // texto neutro: nas superfícies e nos fundos suaves de todo estado (o secundário aparece dentro dos cartões coloridos)
+    for (const fg of TEXTOS) for (const bg of [...SUPERFICIES, ...ESTADOS.flatMap(suaves)]) medir(nome, v, fg, bg, min);
+    for (const e of ESTADOS) {
+      for (const bg of [...SUPERFICIES, ...suaves(e), ...[doEstado(e, 'hover')].filter(tem)]) medir(nome, v, doEstado(e, 'texto'), bg, min);
+      medir(nome, v, doEstado(e, 'sobre'), doEstado(e, 'cheio'), min, 'texto sobre o cheio');
+    }
+    for (const fg of NA_INVERSA.textos) for (const bg of NA_INVERSA.fundos) medir(nome, v, fg, bg, min, 'barra / menu');
+    for (const [fg, bg, onde] of PARES) {
+      if (fg === '--texto-inverso' && bg === '--legenda-fundo') { const B = over(cor(`var(${bg})`, v), [255, 255, 255]); const r = ratioRgb(over(cor(`var(${fg})`, v), B), B); if (r < min) bad.push(`${nome}: ${onde} = ${r.toFixed(2)}`); continue; }
+      medir(nome, v, fg, bg, min, onde);
     }
   }
   assert.deepEqual(bad, []);
 });
 
+test('tabela de usos: contorno de campo, foco, ícones e pontinhos ≥ 3, nos três temas (o dourado fica só como enfeite)', () => {
+  const bad: string[] = [];
+  const claras = [...SUPERFICIES, '--atencao-suave', '--dourado-suave-2', '--info-suave', '--agua-suave'];
+  const foco = valor(RS.find((r) => r.sel.startsWith(':where(a, button') && r.sel.endsWith(':focus-visible')) as Regra, 'outline') ?? '';
+  assert.match(foco, /^var\(--foco-largura\) solid var\(--navy\)$/, `o contorno de foco de tudo é o azul-marinho (está: ${foco})`);
+  assert.equal(contraste['--foco-largura'], '3px', 'no alto contraste o foco é mais largo');
+  const anel = ultimo(':is(.topbar, .sidebar, .navdrawer) :focus-visible', 'box-shadow').replace(/^0 0 0 2px\s+/, '');
+  const icones = ['.tip__ico', '.ditem__icon--folder'].map((s) => [s, ultimo(s, 'color')] as const);
+  const dots = ['.dot', '.dot--green', '.dot--amber'].map((s) => ultimo(s, 'background'));
+  assert.match(ultimo('.dot', 'box-shadow'), /^inset 0 0 0 [\d.]+px var\(--ponto-anel\)$/);
+  for (const [nome, v] of THEMES) {
+    const medir = (fg: string, bg: string, onde: string) => { const r = razao(fg, bg, v); if (r < MIN_GRAFICO) bad.push(`${nome}: ${onde} = ${r.toFixed(2)}`); };
+    for (const bg of claras) { medir('var(--navy)', `var(${bg})`, `foco sobre ${bg}`); medir('var(--borda-campo)', `var(${bg})`, `contorno de campo sobre ${bg}`); }
+    // na barra e no menu: o anel claro por dentro (ou o próprio contorno, no escuro)
+    for (const bg of NA_INVERSA.fundos) { const r = Math.max(razao('var(--navy)', `var(${bg})`, v), razao(anel, `var(${bg})`, v)); if (r < MIN_GRAFICO) bad.push(`${nome}: foco na barra sobre ${bg} = ${r.toFixed(2)}`); }
+    for (const p of NA_INVERSA.pontos) for (const bg of NA_INVERSA.fundos) medir(`var(${p})`, `var(${bg})`, `${p} na barra`);
+    for (const [s, c] of icones) for (const bg of claras) medir(c, `var(${bg})`, `ícone ${s} sobre ${bg}`);
+    const ring = cor('var(--ponto-anel)', v);
+    for (const fill of dots) for (const bg of claras) {
+      // o pontinho se destaca pela cor ou pelo contorno de dentro (no escuro o contorno é transparente)
+      const B = superficie(`var(${bg})`, v); const F = over(cor(fill, v), B);
+      const r = Math.max(ratioRgb(F, B), ring.a > 0 ? ratioRgb(over(ring, F), B) : 0);
+      if (r < MIN_GRAFICO) bad.push(`${nome}: pontinho ${fill} sobre ${bg} = ${r.toFixed(2)}`);
+    }
+    // no alto contraste toda borda de estado aparece (selos e cartões com contorno visível)
+    if (nome === 'contraste') for (const e of ESTADOS) for (const bg of [...SUPERFICIES, ...suaves(e)]) medir(`var(${doEstado(e, 'borda')})`, `var(${bg})`, `${doEstado(e, 'borda')} sobre ${bg}`);
+  }
+  assert.deepEqual(bad, []);
+});
+
+test('opção escolhida (ferramenta, habilidade, andar): a borda que marca a escolha ≥ 3 sobre o painel e sobre o próprio fundo, nos três temas', () => {
+  // no escuro da rc.28 essas bordas eram claras (bem visíveis); com as cores de função, a escolha não pode sumir
+  const ESCOLHA: Array<[string, string]> = [['.tool-opt--on', '--sucesso-borda-forte'], ['.skill-item--on', '--marca-borda-forte'], ['.scard__floor--on', '--agua-borda-forte']];
+  const bad: string[] = [];
+  for (const [sel, borda] of ESCOLHA) {
+    assert.equal(ultimo(sel, 'border-color'), `var(${borda})`, `${sel} marca a escolha com ${borda}`);
+    const fundo = ultimo(sel, 'background');
+    for (const [nome, v] of THEMES) for (const bg of ['var(--panel)', fundo]) {
+      const r = razao(`var(${borda})`, bg, v); if (r < MIN_GRAFICO) bad.push(`${nome}: ${sel} sobre ${bg} = ${r.toFixed(2)}`);
+    }
+  }
+  assert.deepEqual(bad, []);
+});
+
+test('o dourado da marca (bronze) nos enfeites de estado: música tocando, espaço atual e posto ocupado', () => {
+  // a rc.28 pintava esses três com --gold; continuam no mesmo tom (o --dourado-vivo é o amarelo do retrato da conta)
+  for (const [sel, prop] of [['.tb-dot--music', 'background'], ['.ws-item.is-current', 'border-color'], ['.posto--on', 'background']] as const) assert.equal(ultimo(sel, prop), 'var(--dourado-cheio)', sel);
+  assert.equal(claro['--dourado-cheio'], 'var(--gold)');
+});
+
 test('nenhum contorno de foco dourado (o dourado não chega a 3:1 sobre o fundo claro)', () => {
-  const bad = RS.filter((r) => /:focus(-visible|-within)?\b/.test(r.sel) && r.decls.some((d) => /^(outline(-color)?|box-shadow)$/.test(d.prop) &&/--gold\b|#c9a227/.test(d.value)))
+  const bad = RS.filter((r) => /:focus(-visible|-within)?\b/.test(r.sel) && r.decls.some((d) => /^(outline(-color)?|box-shadow)$/.test(d.prop) && /--gold\b|#c9a227/.test(d.value)))
     .map((r) => `linha ${r.line}: ${r.sel}`);
   assert.deepEqual(bad, []);
 });
 
+test('cores só nos três blocos de tema: nenhuma cor solta nem --fx-* nas regras das telas (as sombras ficam de fora)', () => {
+  assert.deepEqual(coresSoltas(css), []);
+  assert.doesNotMatch(css, /--fx-/);
+  // o leitor pega cada caso (prova com uma folha de mentira)
+  const mini = `:root { --a: #fff; --fx-b-ddd: #ddd; }\n.x { color: #123456; }\n.y { background: var(--a, #fff); }\n.z { border: 1px solid rgba(0, 0, 0, .1); }\n`
+    + `.s { box-shadow: 0 1px 2px rgba(0, 0, 0, .2); }\n.n { color: var(--navy); }\n.w { color: white; }\n.f { color: var(--fx-t-1d1606); }\n.t { background: transparent; color: currentColor; }`;
+  assert.deepEqual(coresSoltas(mini).map((l) => l.split(': ')[1].split(' ')[0]), ['--fx-b-ddd', '.x', '.y', '.z', '.w', '.f']);
+});
+
+test('nenhuma regra de tela tem ajuste próprio por tema (cada tema só redefine as cores de função: acabaram as listas de remendo)', () => {
+  assert.deepEqual(ajustesPorTema(css), []);
+  // o leitor dos ajustes por seletor inteiro continua certo (abre :is e não confunde pedaço de nome)
+  const mini = regras(':root[data-theme="dark"] .btn--primary, :root[data-theme="dark"] .msg--user { color: #fff; }\n'
+    + ':root[data-theme="dark"] :is(.btn--gold, .user .avatar) { color: #000; }\n.btn { color: red; }');
+  assert.deepEqual([...ajustadosNoEscuro(mini)].sort(), ['.btn--gold', '.btn--primary', '.msg--user', '.user .avatar']);
+  assert.equal(ajustesPorTema(':root[data-theme="dark"] { --a: #000; }\n:root[data-theme="contraste"] .x { color: var(--a); }').length, 1);
+});
+
 // ---------- regras com texto sobre fundo próprio ----------
 
-/** Fundo de trás de uma regra translúcida: a barra de cima / o menu são azul-marinho; o resto, o painel. */
+/** Fundo de trás de uma regra translúcida: a barra de cima / o menu são a inversa; o resto, o painel. */
 const CROMO = /\.(topbar|tb-|sidebar|navdrawer|nav\b|nav--|nav__|brand)/;
 
-test('nenhuma regra com texto sobre fundo próprio abaixo de 4,5, no claro e no escuro (inclusive transparência e color-mix)', () => {
-  // ajustes próprios do escuro: o seletor ajustado é avaliado pelo ajuste, não pela regra de base (seletor inteiro:
-  // '.btn' continua medido no escuro mesmo existindo '.btn--gold' ajustado)
-  const darkFixed = ajustadosNoEscuro(RS);
+test('nenhuma regra com texto sobre fundo próprio abaixo de 4,5 (alto contraste: 7), nos três temas (inclusive transparência e color-mix)', () => {
   const bad: string[] = [];
   for (const r of RS) {
     if (r.at.some((a) => /keyframes/.test(a))) continue;
     const bg = fundoDe(r);
-    // sem cor própria, o texto herda a cor principal (--ink): o caso do botão claro fixo com texto claro no escuro
+    // sem cor própria, o texto herda a cor principal (--ink)
     const fg = valor(r, 'color') ?? (r.decls.some((d) => /^(font|font-size|padding)$/.test(d.prop)) ? 'var(--ink)' : undefined);
     if (!bg || !fg || /inherit|currentcolor/i.test(fg)) continue;
-    const scopedDark = r.sel.includes('data-theme="dark"');
     const op = Number(valor(r, 'opacity') ?? 1);
     for (const [nome, vars] of THEMES) {
-      if (scopedDark && nome === 'claro') continue;
-      if (!scopedDark && nome === 'escuro' && splitTop(r.sel, ',').some((s) => darkFixed.has(s.trim()))) continue;
       const b = resolveColor(bg, vars); const f = resolveColor(fg, vars);
       if (!b || !f || 'undef' in b || 'undef' in f || b.a === 0) continue;
-      const base = over(cor(CROMO.test(r.sel) ? 'var(--navy-bg)' : 'var(--panel)', vars), [255, 255, 255]);
+      const base = over(cor(CROMO.test(r.sel) ? 'var(--inversa)' : 'var(--panel)', vars), [255, 255, 255]);
       const c = contrasteSobre(f, b, base, Number.isFinite(op) && op > 0 ? op : 1);
-      if (c < MIN_TEXTO) bad.push(`${nome} ${c.toFixed(2)}: linha ${r.line} ${r.sel.slice(0, 80)} (${fg} sobre ${bg})`);
+      if (c < minDe(nome)) bad.push(`${nome} ${c.toFixed(2)}: linha ${r.line} ${r.sel.slice(0, 80)} (${fg} sobre ${bg})`);
     }
   }
   assert.deepEqual(bad, []);
 });
 
-test('o ajuste do escuro vale por seletor inteiro: ".btn" continua medido no escuro mesmo com ".btn--gold" ajustado', () => {
-  const mini = regras(':root[data-theme="dark"] .btn--primary, :root[data-theme="dark"] .msg--user { color: #fff; }\n'
-    + ':root[data-theme="dark"] :is(.btn--gold, .user .avatar) { color: #000; }\n.btn { color: red; }');
-  assert.deepEqual([...ajustadosNoEscuro(mini)].sort(), ['.btn--gold', '.btn--primary', '.msg--user', '.user .avatar']);
-  // na folha de verdade: as regras de base que eram puladas por pedaço de nome agora são medidas no escuro
-  const fixos = ajustadosNoEscuro(RS);
-  for (const s of ['.btn', '.chip', '.msg', 'code', '.avatar', '.topbar', '.switch']) assert.equal(fixos.has(s), false, `${s} é medido no escuro`);
-  for (const s of ['.btn--primary', '.chip--on', '.msg--user', '.md__code', 'img.avatar', '.btn--gold', '.switch--on']) assert.equal(fixos.has(s), true, `${s} tem ajuste no escuro`);
-});
-
-test('selo amarelo dentro de cartão amarelo: borda ou fundo do selo com 3:1 contra o cartão (nunca suave sobre suave)', () => {
+test('selo dentro de cartão da mesma cor: borda ou fundo do selo com 3:1 contra o cartão (nunca suave sobre suave), nos três temas', () => {
   const CARTOES = ['.perm-card', '.req-card', '.ask-box', '.proposal-card', '.dec-card--routine', '.lock-warn', '.confirm', '.device', '.onb__invite', '.fixed-note'];
   const SELOS = ['.badge--warn', '.badge--rec', '.due--soon', '.due--today', '.prio--alta', '.rt-need', '.msg__card-state--com-você', '.tdet__sit--decidir'];
   const proprio = (s: string) => RS.filter((r) => !r.at.length && splitTop(r.sel, ',').some((p) => p.trim() === s));
@@ -166,17 +224,17 @@ test('selo amarelo dentro de cartão amarelo: borda ou fundo do selo com 3:1 con
   assert.deepEqual(bad, []);
 });
 
-test('na fila e enviando: só o corpo da mensagem fica translúcido, e mesmo assim se lê (≥ 4,5); a hora segue legível', () => {
+test('na fila e enviando: só o corpo da mensagem fica translúcido, e mesmo assim se lê; a hora segue legível', () => {
   for (const s of ['.msg--queued', '.msg--sending']) assert.equal(RS.find((r) => r.sel === s && valor(r, 'opacity')), undefined, `${s} não pode apagar a mensagem inteira`);
   const corpo = RS.find((r) => r.sel.includes('.msg--queued > .msg__body')); assert.ok(corpo);
   const op = Number(valor(corpo, 'opacity')); assert.ok(op > 0 && op < 1);
-  const fundoSeu = { claro: ultimo('.msg--user', 'background'), escuro: ultimo(':root[data-theme="dark"] .msg--user', 'background') };
+  const fundoSeu = ultimo('.msg--user', 'background');
   for (const [nome, v] of THEMES) {
-    for (const bg of [nome === 'claro' ? fundoSeu.claro : fundoSeu.escuro, 'var(--panel-2)']) {
+    for (const bg of [fundoSeu, 'var(--panel-2)']) {
       const B = superficie(bg, v);
       const corpoR = contrasteSobre(cor('var(--ink)', v), { rgb: B, a: 1 }, B, op);
       assert.ok(corpoR >= MIN_TEXTO, `${nome}: corpo na fila sobre ${bg} = ${corpoR.toFixed(2)}`);
-      assert.ok(razao('var(--muted)', bg, v) >= MIN_TEXTO, `${nome}: hora "na fila" sobre ${bg}`);
+      assert.ok(razao('var(--muted)', bg, v) >= minDe(nome), `${nome}: hora "na fila" sobre ${bg}`);
     }
   }
 });
@@ -297,6 +355,8 @@ test('readableOn: quando nenhuma tinta chega a 4,5, ajusta o fundo pelo menor pa
   assert.equal(ensureContrast('#ffffff', '#1d184b'), '#1d184b');
   assert.ok(contrast('#ffffff', ensureContrast('#ffffff', '#c08a2a')) >= MIN_TEXTO);
   assert.ok(contrast(TINTA_ESCURA, ensureContrast(TINTA_ESCURA, '#2f4f8a')) >= MIN_TEXTO);
+  // texto cinza médio sobre fundo claro: clarear não chega; escurece o fundo (o outro lado) em vez de desistir
+  assert.ok(contrast('#8a8a8a', ensureContrast('#8a8a8a', '#f3e7c3')) >= MIN_TEXTO);
   assert.equal(inkOn('#ffe066'), TINTA_ESCURA); assert.equal(inkOn('#1d184b'), TINTA_CLARA); assert.equal(inkOn(null), TINTA_CLARA);
 });
 

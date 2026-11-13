@@ -63,8 +63,8 @@ const parseList = (v: string | null): string[] => { try { const x = JSON.parse(v
 
 /** Tudo o que é do agente e não do pedido: o SOUL, as ferramentas, a memória, a busca, os ajudantes, o modelo e as competências. */
 export function pedidoDoPerfil(db: Db, workspaceId: string, agentId: string): PedidoDePerfil | null {
-  const a = db.get<{ tools: string | null; hermes_skills: string | null; model: string | null; provider: string | null; status: string }>(
-    'SELECT tools, hermes_skills, model, provider, status FROM agents WHERE id = ? AND workspace_id = ?', agentId, workspaceId);
+  const a = db.get<{ tools: string | null; hermes_skills: string | null; model: string | null; provider: string | null; status: string; coordinator: number }>(
+    'SELECT tools, hermes_skills, model, provider, status, coordinator FROM agents WHERE id = ? AND workspace_id = ?', agentId, workspaceId);
   if (!a || a.status !== 'active') return null;
   const tools = parseList(a.tools);
   // as do Treinar (ativas e desativadas: o perfil guarda; quem barra o uso é a trava do Ergon) e as da biblioteca atribuídas
@@ -80,6 +80,8 @@ export function pedidoDoPerfil(db: Db, workspaceId: string, agentId: string): Pe
     ajudantes: { ligado: aj.ligado, max: aj.max },
     modelo: a.model ? { provider: a.provider ?? '', model: a.model } : null,
     competencias: [...new Set([...aprendidas, ...biblioteca])].sort(),
+    // só o coordenador gerencia o Ergon pelas ferramentas de gestão (rc.29, gestao.ts)
+    ...(Number(a.coordinator) === 1 ? { gestao: true } : {}),
   };
 }
 

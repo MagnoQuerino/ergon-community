@@ -109,6 +109,15 @@ check("vai à rota certa, com o token da ponte", bool(envio) and envio[-1]["toke
 b = envio[-1]["body"] if envio else {}
 check("com a sessão e a tarefa do motor", b.get("session_id") == "sessao-1" and b.get("task_id") == "tarefa-1", str(b))
 check("com conexão, ação e parâmetros", b.get("conexao") == "asana" and b.get("acao") == "tarefa.criar" and b.get("parametros") == {"titulo": "Teste"}, str(b))
+check("sem dizer a conta, nada de conta no pedido (o Ergon usa a principal)", "conta" not in b, str(b))
+
+# ---------- várias contas no mesmo aplicativo (rc.29): o modelo diz qual, e o plugin só repassa
+_plugin = next((m for m in list(sys.modules.values()) if hasattr(m, "_CONEXOES_EXECUTAR")), None)
+esquema = (getattr(_plugin, "_CONEXOES_EXECUTAR", {}) or {}).get("parameters", {}).get("properties", {})
+check("o modelo vê o parâmetro conta", "conta" in esquema, str(list(esquema)))
+model_tools.handle_function_call("conexoes_executar", {"conexao": "google", "acao": "email.enviar", "parametros": {}, "conta": "Pessoal"}, task_id="tarefa-1", session_id="sessao-1")
+b = [s for s in seen if s["path"].endswith("/conexoes")][-1]["body"]
+check("a conta pedida vai ao Ergon", b.get("conta") == "Pessoal" and b.get("conexao") == "google", str(b))
 
 raw = model_tools.handle_function_call("conexoes_listar", {"conexao": "asana"}, task_id="tarefa-1", session_id="sessao-1")
 check("listar também passa", json.loads(raw).get("texto") == "recebi listar", str(raw))
@@ -238,15 +247,20 @@ st = ponte("GET")
 check("consulta: Conexões ligadas e o que o Hermes conhece", st[0] == 200 and "ergon_conexoes" in st[1]["enabled"] and st[1].get("known") == ["homeassistant"], str(st))
 st = ponte("PUT", {"enabled": ["todo", "web"]})
 check("desligar: a ponte grava também o conjunto como conhecido (unido ao que estava)",
-      st == (200, {"ok": True, "enabled": ["ergon_cartoes", "todo", "web"], "known": ["ergon_cartoes", "ergon_conexoes", "homeassistant"]}), str(st))
+      st == (200, {"ok": True, "enabled": ["ergon_cartoes", "todo", "web"], "known": ["ergon_cartoes", "ergon_conexoes", "ergon_gestao", "homeassistant"]}), str(st))
 check("desligar: os cartões (perguntar, pedir chave) ficam sempre ligados na API, como a lista de passos", "ergon_cartoes" in api_ligadas(), str(api_ligadas()))
 check("desligar: o Hermes deixa de ligar as Conexões na API", "ergon_conexoes" not in api_ligadas(), str(api_ligadas()))
+# a gestão (rc.29) é do perfil do coordenador: na equipe ela fica conhecida e fora da lista, ou seja, desligada
+check("desligar: a gestão do coordenador fica conhecida e desligada na equipe", "ergon_gestao" not in api_ligadas(), str(api_ligadas()))
 kn = hc.read_user_config_raw(Path(HOME) / "config.yaml").get("known_plugin_toolsets")
-check("desligar: o que o Hermes conhecia continua (API e Teams)", kn == {"api_server": ["ergon_cartoes", "ergon_conexoes", "homeassistant"], "teams": ["homeassistant"]}, str(kn))
+check("desligar: o que o Hermes conhecia continua (API e Teams)", kn == {"api_server": ["ergon_cartoes", "ergon_conexoes", "ergon_gestao", "homeassistant"], "teams": ["homeassistant"]}, str(kn))
 st = ponte("PUT", {"enabled": ["todo", "web", "ergon_conexoes", "delegation", "cronjob"]})
 check("religar: Conexões de volta; o que não é do conjunto seguro não entra", st[0] == 200 and st[1]["enabled"] == ["ergon_cartoes", "ergon_conexoes", "todo", "web"]
       and "ergon_conexoes" in api_ligadas(), str((st, api_ligadas())))
-check("consulta depois: conhecido sem repetir", ponte("GET")[1].get("known") == ["ergon_cartoes", "ergon_conexoes", "homeassistant"])
+st = ponte("PUT", {"enabled": ["todo", "ergon_gestao"]})
+check("a gestão do coordenador não se liga na equipe pela ponte", st[0] == 200 and "ergon_gestao" not in st[1]["enabled"] and "ergon_gestao" not in api_ligadas(), str((st, api_ligadas())))
+st = ponte("PUT", {"enabled": ["todo", "web", "ergon_conexoes"]})
+check("consulta depois: conhecido sem repetir", ponte("GET")[1].get("known") == ["ergon_cartoes", "ergon_conexoes", "ergon_gestao", "homeassistant"])
 
 
 # a saúde diz a versão do plugin, a configuração do cofre e o que este motor sabe fazer

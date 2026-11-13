@@ -7,6 +7,7 @@ import { SOURCE_LABEL, type BoardSummary, type BoardView, type Integration, type
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
 import { fmtHora, tn, useT } from '../i18n/index.ts';
+import { comConta, nomeNaTela, temVariasContas } from '../lib/contas.ts';
 
 const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } };
@@ -38,7 +39,8 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   const [newTitle, setNewTitle] = useState('');
   const [newDue, setNewDue] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [picking, setPicking] = useState<{ kind: string; lists: Array<{ externalId: string; name: string }> | null; error?: string } | null>(null);
+  // conta: de qual das contas do aplicativo vem a lista ('' = a principal), quando há mais de uma
+  const [picking, setPicking] = useState<{ kind: string; conta: string; lists: Array<{ externalId: string; name: string }> | null; error?: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const current = mine.find((b) => b.id === boardId);
   const mirror = current?.origin === 'mirror';
@@ -62,14 +64,14 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   const toggle = async (card: TaskCard, completed: boolean) => {
     try { await api.patch(`/api/tasks/${card.id}`, { completed, expectedRevision: card.revision }); view.reload(); } catch (e) { setErr(errMsg(e)); }
   };
-  const pick = async (kind: string) => {
-    setPicking({ kind, lists: null });
-    try { const r = await api.get<{ lists: Array<{ externalId: string; name: string }> }>(`/api/integrations/${kind}/lists`); setPicking({ kind, lists: r.lists }); }
-    catch (e) { setPicking({ kind, lists: [], error: errMsg(e) }); }
+  const pick = async (kind: string, conta = '') => {
+    setPicking({ kind, conta, lists: null });
+    try { const r = await api.get<{ lists: Array<{ externalId: string; name: string }> }>(comConta(`/api/integrations/${kind}/lists`, conta)); setPicking({ kind, conta, lists: r.lists }); }
+    catch (e) { setPicking({ kind, conta, lists: [], error: errMsg(e) }); }
   };
-  const mirrorList = async (kind: string, listId: string) => {
+  const mirrorList = async (kind: string, listId: string, conta = '') => {
     setErr(null); setSyncing(true);
-    try { const r = await api.post<{ boardId: string }>('/api/boards/mirror', { kind, listId }); setPicking(null); boards.reload(); setBoardId(r.boardId); }
+    try { const r = await api.post<{ boardId: string }>('/api/boards/mirror', { kind, listId, ...(conta ? { conta } : {}) }); setPicking(null); boards.reload(); setBoardId(r.boardId); }
     catch (e) { setErr(errMsg(e)); } finally { setSyncing(false); }
   };
   const sync = async () => {
@@ -85,12 +87,14 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
         <p className="muted">{t('quadro.tarefas.sub')}</p>
       </header>
       <div className="toolbar">
-        <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v.startsWith('+')) void pick(v.slice(1)); else { setBoardId(v); setOpenTask(null); } }} aria-label={t('quadro.tarefas.lista')}>
+        <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v.startsWith('+')) { const [k, c] = v.slice(1).split('|'); void pick(k, c ?? ''); } else { setBoardId(v); setOpenTask(null); } }} aria-label={t('quadro.tarefas.lista')}>
           <optgroup label="Ergon">{mine.filter((b) => b.origin === 'native').map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>
           {grupos.map((i) => (
             <optgroup key={i.kind} label={i.state === 'connected' ? i.name : t('quadro.tarefas.precisaReconectar', { nome: i.name })}>
               {mine.filter((b) => b.source === i.kind).map((b) => <option key={b.id} value={b.id}>{b.name.replace(/^(Planner|To Do) › /, '$1 › ')}</option>)}
-              {i.state === 'connected' && <option value={`+${i.kind}`}>{t('quadro.tarefas.ligarOutra', { app: SOURCE_LABEL[i.kind] ?? i.name })}</option>}
+              {/* mais de uma conta: a lista nova vem da conta escolhida */}
+              {i.state === 'connected' && !temVariasContas(i) && <option value={`+${i.kind}`}>{t('quadro.tarefas.ligarOutra', { app: SOURCE_LABEL[i.kind] ?? i.name })}</option>}
+              {temVariasContas(i) && (i.contas ?? []).filter((c) => c.state === 'connected').map((c) => <option key={c.id} value={`+${i.kind}|${c.conta}`}>{t('quadro.tarefas.ligarOutraDaConta', { app: SOURCE_LABEL[i.kind] ?? i.name, conta: nomeNaTela(c, i.name) })}</option>)}
             </optgroup>
           ))}
         </select>
@@ -121,7 +125,7 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
           {picking.error && <p className="error">{picking.error}</p>}
           {!picking.lists && <p className="muted">{t('quadro.tarefas.lendoListas')}</p>}
           <div className="row row--wrap">
-            {picking.lists?.map((l) => <button key={l.externalId} className="chip" disabled={syncing} onClick={() => mirrorList(picking.kind, l.externalId)}>{l.name}</button>)}
+            {picking.lists?.map((l) => <button key={l.externalId} className="chip" disabled={syncing} onClick={() => mirrorList(picking.kind, l.externalId, picking.conta)}>{l.name}</button>)}
             {picking.lists && !picking.lists.length && !picking.error && <span className="muted">{t('quadro.tarefas.semListas')}</span>}
           </div>
         </section>

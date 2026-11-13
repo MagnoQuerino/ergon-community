@@ -4,6 +4,7 @@
  * skin. Tudo aqui é aparência: nada muda função, ferramenta ou dado de ninguém.
  */
 import { deriveThemeColors, hashText, pickWeighted, rollSkinLook, skinRng, type ColorRef, type SkinData, type SkinLook } from '../../../shared/skin.ts';
+import { etiquetasLegiveis } from '../../../shared/legibilidade.ts';
 import { GRECIA_CLASSICA, type GraphicPack } from '../world/pack.ts';
 import type { Kit } from './figureParts.ts';
 import type { Look } from './figures.ts';
@@ -19,7 +20,17 @@ export function skinTheme(base: Theme, skin: SkinData, mode: ThemeId): Theme {
   out.id = `${base.id}+${skin.id}`;
   out.name = `${skin.name} (${mode === 'noite' ? 'noite' : 'dia'})`;
   out.skin = { id: skin.id, arch: skin.arch, water: skin.ground.water, roadLine: skin.ground.roadLine, swap: skin.decor.swap, night: mode === 'noite' };
-  return out as unknown as Theme;
+  return comEtiquetasLegiveis(out as unknown as Theme, mode);
+}
+
+/**
+ * Etiquetas da Cidade legíveis em qualquer skin ou tema instalado: o texto (o contorno) sobre o papiro e sobre o laranja
+ * de espera passa de 4,5:1, mexendo só na luz do fundo da etiqueta (shared/legibilidade.ts; o mesmo que o validador
+ * de pacotes grava). Sem nada a ajustar, devolve o próprio tema.
+ */
+export function comEtiquetasLegiveis(t: Theme, mode: ThemeId): Theme {
+  const r = etiquetasLegiveis(t.outline, t.papyrus, t.marks.waiting, mode);
+  return r.ajustes.length ? { ...t, papyrus: r.papyrus, marks: { ...t.marks, waiting: r.waiting } } : t;
 }
 
 /** Pacote gráfico da paisagem gerada (borda, lotes livres e cruzamentos). */

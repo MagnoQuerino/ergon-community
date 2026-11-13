@@ -69,10 +69,6 @@ Fica como está por enquanto: são as frases que a tela monta a partir do que o 
 motivos de falha). A equipe da área "servidor" migra junto com a frente que faz o servidor mandar códigos em vez de
 frases; o teste dele (`textos-tela.test.ts`) continua conferindo o português.
 
-## Conferir o inglês antes de ele ser liberado
-
-Enquanto `IDIOMA_INGLES_LIBERADO` (em `idiomas.ts`) é `false`, o seletor fica escondido e a tela abre em português.
-Para conferir: no console do navegador, `localStorage.setItem('ergon.idioma', 'en')` e recarregar (volta com `'pt-BR'`).
 
 ## De onde vem o idioma (uma ordem só, em `index.ts`)
 
@@ -82,12 +78,11 @@ Para conferir: no console do navegador, `localStorage.setItem('ergon.idioma', 'e
   a escolha dela guardada neste navegador (`ergon.idioma:<pessoa>`; a gravação no servidor tinha falhado: vai de novo)
   > o idioma do navegador. Na multiconta, a tela de entrada fica na língua de quem entrou por último; ao entrar, a tela
   da pessoa já abre na dela (o App espera o dicionário antes de desenhar).
-- **Quem já usava o Ergon:** a migração `0040_idioma_da_pessoa.sql` grava `pt-BR` em todas as contas que já existiam,
-  e enquanto o inglês não é liberado a tela grava `pt-BR` em quem entra sem idioma. No dia de ligar o inglês, ninguém
-  que usa o Ergon em português vê a tela mudar de língua por ter o navegador ou o Windows em inglês; só contas novas
-  seguem o navegador.
+- **Quem já usava o Ergon:** a migração `0040_idioma_da_pessoa.sql` gravou `pt-BR` nas contas que já existiam (o
+  inglês ficou escondido até a rc.26): quem usava o Ergon em português não viu a tela mudar de língua por ter o
+  navegador ou o Windows em inglês; só contas novas seguem o navegador.
 
-## No dia de ligar o inglês (IDIOMA_INGLES_LIBERADO = true)
+## Cuidados com o inglês
 
 - Nenhum arquivo de tela com texto em português fora do dicionário (o teste-catraca garante).
 - Os ensaios de tela no navegador (`scripts/telas/*.mjs`, Edge headless costuma vir em en-US) procuram textos em

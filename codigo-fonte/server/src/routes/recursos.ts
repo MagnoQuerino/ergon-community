@@ -7,6 +7,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Db } from '../db/db.ts';
 import { S, idParams } from '../lib/schemas.ts';
 import { HttpError, notFound } from '../lib/util.ts';
+import { updateAgent } from '../services/capacity.ts';
+import { NOME_COMPETENCIA, pacoteDoPedido } from '../services/competencias.ts';
 import { openArtifact } from '../services/artifacts.ts';
 import type { AuthContext } from '../services/auth.ts';
 import type { Bus } from '../services/bus.ts';
@@ -78,6 +80,68 @@ export function registerRecursosRoutes(app: FastifyInstance, d: RecursosRoutesDe
   app.post('/api/recursos/loja/instalar', { schema: { body: { type: 'object', additionalProperties: false, required: ['id', 'vi'], properties: { id: ID_COMPETENCIA, vi: { const: true } } } } },
     async (req) => { const a = owner(req); return recursos.instalar(a.workspaceId, a.userId, (req.body as { id: string }).id); });
 
+  // ---- adicionar uma competência pronta (rc.29): SKILL.md, pasta compactada ou texto colado, com a mesma varredura da loja
+  const PACOTE = { texto: S.str(400_000), zip: { type: 'string', maxLength: 6_000_000 }, nomeArquivo: S.str(200) };
+  const ENVIO = 8 * 1024 * 1024;
+  type Pedido = { texto?: string; zip?: string; nomeArquivo?: string };
+  const listaDe = (v: string | null): string[] => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
+  /** Liga (ou tira) a competência nos agentes, com a ferramenta das competências junto (sem ela o agente não consulta). */
+  const nosAgentes = (ws: string, userId: string, ids: string[], nome: string, ligar: boolean) => {
+    for (const agentId of ids) {
+      const ag = db.get<{ tools: string | null; hermes_skills: string | null }>('SELECT tools, hermes_skills FROM agents WHERE id = ? AND workspace_id = ?', agentId, ws);
+      if (!ag) continue;
+      const tem = listaDe(ag.hermes_skills);
+      const tools = listaDe(ag.tools);
+      if (ligar && tem.includes(nome)) continue;
+      if (!ligar && !tem.includes(nome)) continue;
+      const novas = ligar ? [...tem, nome] : tem.filter((x) => x !== nome);
+      updateAgent(db, bus, ws, userId, agentId, { hermesSkills: novas, ...(ligar && !tools.includes('habilidades') ? { tools: [...tools, 'habilidades'] } : {}) });
+    }
+  };
+  app.post('/api/recursos/competencias/previa', { bodyLimit: ENVIO, schema: { body: { type: 'object', additionalProperties: false, properties: PACOTE } } }, async (req) => {
+    const a = auth(req);
+    const p = pacoteDoPedido(req.body as Pedido);
+    const varredura = await recursos.varrerEnvio(a.workspaceId, p);
+    return { nome: p.nome, titulo: p.titulo, descricao: p.descricao, arquivos: Object.keys(p.arquivos).sort(), ignorados: p.ignorados, texto: p.arquivos['SKILL.md'], varredura };
+  });
+  app.post('/api/recursos/competencias/instalar', {
+    bodyLimit: ENVIO,
+    schema: { body: { type: 'object', additionalProperties: false, required: ['destino'], properties: { ...PACOTE, destino: { enum: ['agente', 'equipe'] }, agente: S.id('agt'), riscoAceito: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const b = req.body as Pedido & { destino: 'agente' | 'equipe'; agente?: string; riscoAceito?: boolean };
+    const ativos = db.all<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at", a.workspaceId).map((x) => x.id);
+    if (b.destino === 'agente' && (!b.agente || !ativos.includes(b.agente))) throw new HttpError(400, 'agente', 'escolha um agente ativo desta equipe');
+    const p = pacoteDoPedido(b);
+    const r = await recursos.enviar(a.workspaceId, a.userId, p, b.riscoAceito === true);
+    const alvos = b.destino === 'equipe' ? ativos : [b.agente!];
+    nosAgentes(a.workspaceId, a.userId, alvos, p.nome, true);
+    return { ok: true, nome: p.nome, atualizada: r?.atualizada === true, agentes: alvos.length };
+  });
+  app.get('/api/recursos/competencias/conteudo', { schema: { querystring: { type: 'object', required: ['nome'], properties: { nome: { type: 'string', pattern: NOME_COMPETENCIA.source } } } } },
+    async (req) => recursos.conteudo(auth(req).workspaceId, (req.query as { nome: string }).nome));
+  app.delete('/api/recursos/competencias/:nome', { schema: { params: { type: 'object', required: ['nome'], properties: { nome: { type: 'string', pattern: NOME_COMPETENCIA.source } } } } }, async (req) => {
+    const a = owner(req);
+    const nome = (req.params as { nome: string }).nome;
+    if (nome.startsWith('ergon-')) throw new HttpError(400, 'treinar', 'as competências do Treinar se removem no cartão delas');
+    await recursos.removerCompetencia(a.workspaceId, a.userId, nome);
+    nosAgentes(a.workspaceId, a.userId, db.all<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ?', a.workspaceId).map((x) => x.id), nome, false);
+    return { ok: true };
+  });
+  // Ligar ou desligar uma competência da biblioteca num agente: a conta é feita aqui, sobre a lista gravada (dois cliques
+  // seguidos na tela não apagam um ao outro, como aconteceria mandando a lista inteira que a tela tinha)
+  app.post('/api/recursos/competencias/ligar', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['agente', 'nome', 'ligar'], properties: { agente: S.id('agt'), nome: { type: 'string', pattern: NOME_COMPETENCIA.source }, ligar: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const b = req.body as { agente: string; nome: string; ligar: boolean };
+    if (b.nome.startsWith('ergon-')) throw new HttpError(400, 'treinar', 'as competências do Treinar se ligam e desligam no cartão delas');
+    if (!db.get('SELECT 1 FROM agents WHERE id = ? AND workspace_id = ?', b.agente, a.workspaceId)) throw new HttpError(404, 'not_found', 'agente não encontrado');
+    nosAgentes(a.workspaceId, a.userId, [b.agente], b.nome, b.ligar);
+    const ag = db.get<{ hermes_skills: string | null }>('SELECT hermes_skills FROM agents WHERE id = ? AND workspace_id = ?', b.agente, a.workspaceId);
+    return { ok: true, competencias: listaDe(ag?.hermes_skills ?? null) };
+  });
+
   // ---- conectores prontos (Conexões › Mais aplicativos)
   const retornoDe = (req: FastifyRequest, nome: string) => {
     const base = (cfg.publicUrl || `${req.protocol}://${req.headers.host ?? 'localhost'}`).replace(/\/+$/, '');
@@ -121,8 +185,7 @@ export function registerRecursosRoutes(app: FastifyInstance, d: RecursosRoutesDe
     return reply.send(paginaRetorno(ok));
   });
 
-  // ---- conquistas, voltar atrás
-  app.get('/api/recursos/conquistas', async (req) => recursos.conquistas(auth(req).workspaceId));
+  // ---- voltar atrás
   app.get('/api/recursos/checkpoints', async (req) => recursos.checkpoints(owner(req).workspaceId));
   app.post('/api/recursos/checkpoints/voltar', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['pasta', 'id'], properties: { pasta: S.str(300, 1), id: { type: 'string', pattern: '^[0-9a-f]{7,64}$' } } } },

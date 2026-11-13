@@ -88,7 +88,7 @@ describe('Guardião dos Prazos', () => {
   test('está na biblioteca, pronto, à tarde nos dias úteis, com Hesíodo', async () => {
     const lib = (await req(h, 'GET', '/api/routines/library', s)).json;
     const g = lib.routines.find((r: { key: string }) => r.key === 'guardiao-prazos');
-    assert.equal(g.available, true);
+    assert.ok(g, 'na biblioteca, pronta (todas as rotinas funcionam: sem o selo "em breve")');
     const rt = (await req(h, 'GET', `/api/routines/${rid}`, s)).json;
     assert.match(rt.schedule, /Seg a sex às 14:00/);
     assert.deepEqual(rt.config.sources, ['prazos.risco', 'prazos.pessoais', 'prazos.mudancas']);

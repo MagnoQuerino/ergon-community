@@ -77,12 +77,9 @@ export function createWorkspace(db: Db, name: string, opts: { demo: boolean; slo
     db.run('INSERT INTO columns (id, workspace_id, board_id, name, position, system_key) VALUES (?, ?, ?, ?, ?, ?)', id('col'), workspaceId, userBoard, c, i, USER_COLUMN_KEYS[i] ?? null);
   });
 
-  // Canais internos do caminho de ingestão (a interface mostra as integrações, não estas linhas):
-  // 'real' recebe mensagens dos canais conectados; 'fixture' só existe para testes (simulação identificada).
+  // Canais internos do caminho de ingestão (a interface mostra as integrações, não estas linhas): 'real' recebe as
+  // mensagens do WhatsApp lido por QR; o espelho de simulação só existe para testes.
   const conns: Array<[string, string, string, string]> = [
-    ['teams', 'fixture', 'Teams — simulação de teste', 'central'],
-    ['teams', 'real', 'Teams', 'central'],
-    ['whatsapp', 'fixture', 'WhatsApp — simulação de teste', 'central'],
     ['whatsapp', 'real', 'WhatsApp', 'central'],
     ['mirror_fixture', 'fixture', 'Espelho — simulação de teste', 'central'],
   ];

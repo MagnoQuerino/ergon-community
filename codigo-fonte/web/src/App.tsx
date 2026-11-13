@@ -162,7 +162,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   };
   // as outras telas já buscadas por baixo: trocar de menu só mostra o que está pronto
   useEffect(() => {
-    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations', '/api/conexoes', '/api/conexoes/regras', '/api/teams-app', '/api/canais',
+    const t = window.setTimeout(() => prefetchResources(['/api/boards', '/api/ai/status', '/api/ai/models', '/api/ai/tools', '/api/ai/skills', '/api/limits', '/api/integrations', '/api/conexoes', '/api/conexoes/regras', '/api/recursos/apps-proprios', '/api/teams-app', '/api/canais',
       '/api/conversations/recent', '/api/artifacts', '/api/routines', '/api/routines/library', '/api/routines/recommend', '/api/people', '/api/packages',
       '/api/packages/catalog/official', '/api/decisions', '/api/saude', '/api/workspaces', '/api/packages/cosmetics']), 400);
     return () => clearTimeout(t);

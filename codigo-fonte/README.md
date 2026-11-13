@@ -8,7 +8,7 @@ npm test            # servidor e interface
 podman build --target test .
 ```
 
-Rode os comandos aqui, em `codigo-fonte/`. O `ergon.cmd` / `ergon.sh` desta pasta constrói as imagens a partir do
+Rode os comandos aqui, em `codigo-fonte/`. O `ergon.sh` desta pasta constrói as imagens a partir do
 código; o de `instalador/` é o pacote da versão publicada, que baixa as imagens prontas (é o que os instaladores
 da raiz usam).
 

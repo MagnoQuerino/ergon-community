@@ -31,13 +31,18 @@ export const PRAZO_DO_MOTOR_MS = 300_000;
 export const PREVIA_VALE_MS = 24 * 3600_000;
 export const KIND_APROVACAO = 'aprovacao';
 const CARTAO_DO_ERGON = /^plugin_rule:ergon_(apr_[0-9a-f]{32})$/;
+/**
+ * Enviar em nome da pessoa por um aplicativo conectado (MCP, rc.29): o plugin pede o portão do motor com esta regra, e o
+ * pedido inteiro (aplicativo, ferramenta e parâmetros) vem na descrição. A conferência na regra = um envio, como está.
+ */
+export const ENVIO_POR_APLICATIVO = /^plugin_rule:ergon_mcp_[0-9a-f]{24}$/;
 const ATIVA = (r: Pick<RunRow, 'status'> | null | undefined) => !!r && (r.status === 'running' || r.status === 'waiting_user');
 
 interface Linha {
   run_id: string; request_id: string; workspace_id: string; proposal_id: string | null; tipo: 'motor' | 'cartao'; comando: string | null; padrao: string | null;
   estado: 'esperando' | 'respondida' | 'expirou'; espera_ms: number; created_at: string; decided_at: string | null;
 }
-export interface PedidoDeAprovacao { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string }
+export interface PedidoDeAprovacao { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string; envio?: true }
 
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
@@ -64,7 +69,9 @@ export class Aprovacoes {
     const run = this.run(dele.id) ?? dele;
     const requestId = clip(e.requestId || `sem-id-${hash(`${e.patternKey ?? ''}|${e.command ?? ''}`).slice(0, 16)}`, 64);
     const cartao = CARTAO_DO_ERGON.exec(e.patternKey ?? '')?.[1] ?? null;
-    const comando = clip(e.command ?? '', 4000);
+    const envio = ENVIO_POR_APLICATIVO.test(e.patternKey ?? '');
+    // no envio por aplicativo, o que a pessoa aprova é o pedido da descrição (o "comando" do motor é só o nome da ferramenta)
+    const comando = clip((envio ? e.description : e.command) ?? '', 4000);
     const ins = this.db.run(`INSERT OR IGNORE INTO aprovacoes_motor (run_id, request_id, workspace_id, proposal_id, tipo, comando, padrao, estado, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'esperando', ?)`, run.id, requestId, run.workspace_id, cartao, cartao ? 'cartao' : 'motor',
       this.db.seal(run.workspace_id, comando || null), clip(e.patternKey ?? '', 200) || null, new Date(this.agora()).toISOString());
@@ -79,15 +86,19 @@ export class Aprovacoes {
     const previa = this.db.get<{ id: string }>('SELECT id FROM aprovacoes_previas WHERE sessao = ? AND comando_hash = ? AND expires_at > ?',
       sessionKeyFor(run), hash(comando), new Date(this.agora()).toISOString());
     if (previa) {
+      // um envio em nome da pessoa vale uma vez só: o mesmo envio de novo pede outro sim
+      if (envio) this.db.run('DELETE FROM aprovacoes_previas WHERE id = ?', previa.id);
       audit(this.db, this.bus, { workspaceId: run.workspace_id, actorType: 'system', actorId: 'ergon', action: 'aprovacao.motor.previa', targetType: 'run', targetId: run.id,
         evidence: { run: run.id }, result: 'comando aprovado antes pela pessoa nesta conversa: liberado sem outro cartão' });
       await this.enviar(run, requestId, true);
       return;
     }
     const agente = this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', run.agent_id)?.name ?? 'O agente';
-    const descricao = clip((e.description ?? '').replace(/\s+/g, ' ').trim(), 300);
-    const resumo = `${agente} quer rodar um comando que pede a sua aprovação${descricao ? ` (${descricao})` : ''}:\n${clip(comando || '(sem o texto do comando)', 3000)}`;
-    const payload: PedidoDeAprovacao = { kind: 'aprovacao', pedido: requestId, agente, comando, descricao, resumo };
+    const descricao = envio ? '' : clip((e.description ?? '').replace(/\s+/g, ' ').trim(), 300);
+    const resumo = envio
+      ? `${agente} quer enviar algo em seu nome por um aplicativo conectado. Confira antes de aprovar (vale só para este envio):\n${clip(comando || '(sem o pedido)', 3000)}`
+      : `${agente} quer rodar um comando que pede a sua aprovação${descricao ? ` (${descricao})` : ''}:\n${clip(comando || '(sem o texto do comando)', 3000)}`;
+    const payload: PedidoDeAprovacao = { kind: 'aprovacao', pedido: requestId, agente, comando, descricao, resumo, ...(envio ? { envio: true as const } : {}) };
     recordProposals(this.db, this.bus, run.workspace_id, { conversationId: run.conversation_id ?? null, runId: run.id }, [payload]);
     const pid = this.db.get<{ id: string }>("SELECT id FROM agent_proposals WHERE workspace_id = ? AND run_id = ? AND kind = 'aprovacao' ORDER BY created_at DESC, rowid DESC LIMIT 1", run.workspace_id, run.id)?.id ?? null;
     this.db.run('UPDATE aprovacoes_motor SET proposal_id = ? WHERE run_id = ? AND request_id = ?', pid, run.id, requestId);
@@ -179,9 +190,13 @@ export class Aprovacoes {
         id('apv'), workspaceId, sessionKeyFor(run), hash(x.comando), new Date(this.agora() + PREVIA_VALE_MS).toISOString(), now());
     }
     const comando = clip(x.comando, 1500);
-    this.continuar(run, userId, ok
-      ? `Aprovei o comando que esperava a minha aprovação:\n${comando}\nRode-o de novo agora (ele já sai aprovado) e continue de onde parou.`
-      : `Recusei o comando que esperava a minha aprovação:\n${comando}\nNão rode esse comando nem outro que faça o mesmo; termine sem ele e diga o que ficou de fora.`);
+    this.continuar(run, userId, x.envio
+      ? (ok
+        ? `Aprovei o envio que esperava a minha aprovação:\n${comando}\nFaça de novo exatamente este envio agora (ele já sai aprovado) e continue de onde parou.`
+        : `Recusei o envio que esperava a minha aprovação:\n${comando}\nNão envie isso nem por outro caminho; termine sem ele e diga o que ficou de fora.`)
+      : ok
+        ? `Aprovei o comando que esperava a minha aprovação:\n${comando}\nRode-o de novo agora (ele já sai aprovado) e continue de onde parou.`
+        : `Recusei o comando que esperava a minha aprovação:\n${comando}\nNão rode esse comando nem outro que faça o mesmo; termine sem ele e diga o que ficou de fora.`);
     return { status: ok ? 'applied' : 'rejected', result };
   }
 

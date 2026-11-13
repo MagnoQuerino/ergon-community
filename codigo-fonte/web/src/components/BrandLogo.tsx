@@ -17,6 +17,7 @@ const MONOGRAM: Record<string, { hex: string; letter: string }> = {
   smartsheet: { hex: '#0073EC', letter: 'S' },
   pipefy: { hex: '#3B5BFD', letter: 'P' },
   bitrix: { hex: '#2FC6F6', letter: 'B' },
+  gohighlevel: { hex: '#188BF6', letter: 'H' },
 };
 
 export function BrandLogo({ kind, name, size = 40 }: { kind: string; name: string; size?: number }) {

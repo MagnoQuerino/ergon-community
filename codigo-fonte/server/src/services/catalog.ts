@@ -33,6 +33,8 @@ export interface CatalogPreview {
   skin?: unknown; theme?: { base: 'dia' | 'noite'; colors: Record<string, string> };
   /** para a prévia da equipe: quem vem nela, por setor */
   agents?: Array<{ name: string; role: string; color: string; charKey: string | null; coordinator: boolean }>; sectors?: string[];
+  /** quantas cores foram ajustadas para se lerem (a prévia da loja avisa) */
+  legibilidade?: number;
 }
 export interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
 
@@ -62,6 +64,7 @@ export function previewOf(v: ValidatedPackage): CatalogPreview {
     ...(d.theme ? { theme: d.theme } : {}),
     ...(d.blueprint ? { agents: d.blueprint.agents.slice(0, 24).map((a) => ({ name: a.name, role: a.role, color: a.color, charKey: a.charKey, coordinator: a.coordinator })), sectors: d.blueprint.sectors.map((x) => x.name).slice(0, 12) } : {}),
     images: (v.manifest.preview ?? []).filter((p) => v.assets[p]).length, tags: (v.manifest.tags ?? []).slice(0, 8),
+    ...(v.legibilidade.length ? { legibilidade: v.legibilidade.length } : {}),
   };
 }
 interface IndexEntry { id: string; version: string; title: string; summary: string; kind: string; author: string; path: string; sha256: string; size: number }

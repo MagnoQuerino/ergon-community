@@ -101,23 +101,21 @@ describe('instalar e desfazer no workspace', () => {
   });
 });
 
-describe('editor simples', () => {
-  test('monta um .ergon válido que instala e desfaz; dado fora do formato é recusado; sem sessão não monta', async () => {
+describe('pacote montado localmente', () => {
+  test('um .ergon montado aqui é válido, instala e desfaz; dado fora do formato é recusado', async () => {
     const h = await harness(); const a = await setupOwner(h);
-    const build = (s: Session, body: unknown) => h.app.inject({ method: 'POST', url: '/api/packages/build', payload: body as object, headers: { cookie: s.cookie, 'x-csrf-token': s.csrf, origin: ORIGIN } });
-    const r = await build(a, { kind: 'fx', title: 'Aura de Hipátia', data: fx });
-    assert.equal(r.statusCode, 200);
-    assert.equal(r.headers['content-type'], 'application/x-ergon');
-    assert.match(String(r.headers['content-disposition']), /aura-de-hipatia\.ergon/);
-    const p = validatePackage(r.rawPayload);
+    // a rota do editor (POST /api/packages/build), sem tela desde a rc.25, saiu na rc.29: monta-se pelo serviço
+    assert.equal((await h.app.inject({ method: 'POST', url: '/api/packages/build', payload: { kind: 'fx', title: 'Aura', data: fx }, headers: { cookie: a.cookie, 'x-csrf-token': a.csrf, origin: ORIGIN } })).statusCode, 404);
+    const manifesto = (kind: string, title: string) => ({ package_id: 'comunidade.local.aura-de-hipatia', version: '1.0.0', title, summary: 'Montado no teste', creator_id: 'local', license: 'CC-BY-4.0', ergon: { min: '0.2.0' }, kind }) as never;
+    const buf = await buildPackage(manifesto('fx', 'Aura de Hipátia'), fx);
+    const p = validatePackage(buf);
     assert.deepEqual([p.manifest.package_id, p.manifest.kind, p.verified], ['comunidade.local.aura-de-hipatia', 'fx', false]);
-    const i = (await send(h, '/api/packages/install', a, r.rawPayload)).json();
+    const i = (await send(h, '/api/packages/install', a, buf)).json();
     assert.equal((await h.app.inject({ method: 'GET', url: '/api/packages/cosmetics', headers: { cookie: a.cookie } })).json().effects.length, 1);
     await h.app.inject({ method: 'DELETE', url: `/api/packages/${i.id}`, headers: { cookie: a.cookie, 'x-csrf-token': a.csrf, origin: ORIGIN } });
     assert.equal((await h.app.inject({ method: 'GET', url: '/api/packages/cosmetics', headers: { cookie: a.cookie } })).json().effects.length, 0);
-    assert.equal((await build(a, { kind: 'fx', title: 'Ruim', data: { effects: [{ target: { all: true }, effect: 'javascript', color: 'red' }] } })).statusCode, 400);
-    assert.equal((await build(a, { kind: 'plugin', title: 'Plugin', data: {} })).statusCode, 400, 'editor só monta visual');
-    assert.equal((await h.app.inject({ method: 'POST', url: '/api/packages/build', payload: { kind: 'fx', title: 'Aura', data: fx }, headers: { origin: ORIGIN } })).statusCode, 401, 'sem sessão não monta');
+    const ruim = await buildPackage(manifesto('fx', 'Ruim'), { effects: [{ target: { all: true }, effect: 'javascript', color: 'red' }] } as never).catch((e: Error) => e);
+    assert.throws(() => { if (ruim instanceof Error) throw ruim; validatePackage(ruim); }, 'efeito fora do formato é recusado');
   });
 });
 
@@ -242,5 +240,52 @@ describe('skins da cidade', () => {
       assert.deepEqual(agents().map((a) => [a.char_key, a.name, a.bio]), antes.map((a) => [a.char_key, a.name, a.bio]));
       assert.equal(((await req(h, 'GET', '/api/packages/cosmetics', s)).json as { skin: unknown }).skin, null);
     } finally { await h.close(); }
+  });
+});
+
+describe('cores ilegíveis em pacotes da comunidade: corrigidas sozinhas e avisadas, nunca recusadas', () => {
+  test('skin com etiqueta ilegível, tema com contorno claro demais e equipe com cor sem letra legível passam corrigidos', async () => {
+    const { contrast, MIN_TEXTO } = await import('../../shared/contraste.ts');
+    const { deriveThemeColors } = await import('../../shared/skin.ts');
+    const { ETIQUETAS_DE_FABRICA } = await import('../../shared/legibilidade.ts');
+    // skin: papiro (cloth) quase da cor do contorno à noite
+    const sk = structuredClone(OFFICIAL_SKINS[0]);
+    sk.palette.noite = { ...sk.palette.noite, seeds: { ...sk.palette.noite.seeds, cloth: '#3a3a44', outline: '#16111d' }, colors: {} };
+    const v = validatePackage(await buildPackage({ ...base('skin'), package_id: 'comunidade.ana.skin-escura' }, { skin: sk }));
+    assert.ok(v.legibilidade.some((a) => a.onde === 'etiqueta' && a.tema === 'noite'), JSON.stringify(v.legibilidade));
+    const n = v.data.skin!.palette.noite;
+    const d = { ...deriveThemeColors(n.seeds), ...(n.colors ?? {}) } as { outline: string; papyrus: [string, string] };
+    for (const c of d.papyrus) assert.ok(contrast(d.outline, c) >= MIN_TEXTO, `${c}: ${contrast(d.outline, c).toFixed(2)}`);
+    assert.equal(validateSkin(v.data.skin).ok, true);
+    // tema da cidade com contorno cinza-claro: o contorno passa a se ler no papiro e no laranja de espera
+    const tema = validatePackage(await buildPackage({ ...base('city-theme'), package_id: 'comunidade.ana.tema-claro' }, { theme: { base: 'dia', colors: { outline: '#b0a890', bg: '#ddd5c0' } } }));
+    const o = tema.data.theme!.colors.outline;
+    assert.notEqual(o, '#b0a890');
+    for (const c of [...ETIQUETAS_DE_FABRICA.dia.papyrus, ETIQUETAS_DE_FABRICA.dia.marks.waiting]) assert.ok(contrast(o, c) >= MIN_TEXTO, `${o} sobre ${c}`);
+    assert.equal(tema.data.theme!.colors.bg, '#ddd5c0', 'o resto do tema fica como veio');
+    assert.deepEqual(tema.legibilidade.map((a) => a.onde), ['contorno']);
+    // equipe: a cor de agente em que nem a letra escura nem a branca se lê vira o mesmo tom com outra luz; o resto fica
+    const { legibilizarEquipe } = await import('../../shared/legibilidade.ts');
+    const eq = legibilizarEquipe({ agents: [{ name: 'Fídias', color: '#c08a2a' }, { name: 'Cinza', color: '#7a7a7a' }] });
+    assert.equal(eq.blueprint.agents![0].color, '#c08a2a', 'Fídias continua dourado (a letra escura se lê)');
+    assert.notEqual(eq.blueprint.agents![1].color, '#7a7a7a');
+    assert.deepEqual(eq.ajustes.map((x) => [x.onde, x.quem]), [['retrato', 'Cinza']]);
+    // o que já se lê não ganha aviso
+    assert.deepEqual(validatePackage(await buildPackage(base('fx'), fx)).legibilidade, []);
+    assert.deepEqual(validatePackage(await buildPackage({ ...base('city-theme'), package_id: 'comunidade.ana.tema-ok' }, { theme: { base: 'noite', colors: { bg: '#202020' } } })).legibilidade, []);
+  });
+
+  test('a prévia avisa quantas cores foram ajustadas, e o que se instala é a versão corrigida', async () => {
+    const h = await harness(); const a = await setupOwner(h);
+    const buf = await buildPackage({ ...base('city-theme'), package_id: 'comunidade.ana.tema-palido' }, { theme: { base: 'dia', colors: { outline: '#c8c0a8' } } });
+    const pre = (await send(h, '/api/packages/preview', a, buf)).json() as { legibilidade: number };
+    assert.equal(pre.legibilidade, 1);
+    assert.equal((await send(h, '/api/packages/install', a, buf)).statusCode, 200);
+    const cos = (await h.app.inject({ method: 'GET', url: '/api/packages/cosmetics', headers: { cookie: a.cookie } })).json() as { theme: { colors: Record<string, string> } };
+    assert.notEqual(cos.theme.colors.outline, '#c8c0a8');
+    // na loja: o item do catálogo leva o número para a prévia mostrar o aviso
+    const { previewOf } = await import('../src/services/catalog.ts');
+    assert.equal(previewOf(validatePackage(buf)).legibilidade, 1);
+    assert.equal(previewOf(validatePackage(await buildPackage(base('fx'), fx))).legibilidade, undefined);
   });
 });

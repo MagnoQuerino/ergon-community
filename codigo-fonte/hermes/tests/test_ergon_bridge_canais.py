@@ -100,13 +100,23 @@ from hermes_cli.lifecycle import has_hook  # noqa: E402
 discover_plugins()
 pm = get_plugin_manager()
 check("gancho pre_gateway_dispatch registrado no Hermes", has_hook("pre_gateway_dispatch"))
-check("gancho post_gateway_admission continua registrado (Teams e WhatsApp)", has_hook("post_gateway_admission"))
+check("gancho post_gateway_admission continua registrado (trava dos outros canais)", has_hook("post_gateway_admission"))
 fab_tg = pm.get_platform_handler_factories("telegram")
 fab_dc = pm.get_platform_handler_factories("discord")
 check("fábrica de botões do Telegram registrada", len(fab_tg) == 1 and fab_tg[0][0].__name__ == "_fabrica_telegram", str(fab_tg))
 check("fábrica de botões do Discord registrada", len(fab_dc) == 1 and fab_dc[0][0].__name__ == "_fabrica_discord", str(fab_dc))
 b = sys.modules[fab_tg[0][0].__module__]  # o módulo do plugin como o Hermes carregou
 check("capacidade 'canais' anunciada ao Ergon", "canais" in b.CAPACIDADES, str(b.CAPACIDADES))
+# trava: fora do Telegram e do Discord, nenhuma conversa do gateway chega ao agente (o canal antigo de Teams e WhatsApp saiu)
+fora = {p: asyncio.run(b.on_admission(platform=p, text="/tarefa x", source={"user_id": "1"})) for p in ("whatsapp", "teams", "slack", "webhook", "signal", "")}
+check("trava: WhatsApp, Teams e os outros canais do gateway são consumidos sem turno nem resposta", all(v == {"action": "handled"} for v in fora.values()), str(fora))
+from gateway.config import Platform as _Plataforma  # noqa: E402
+
+check("trava: aceita a plataforma como enum do Hermes", asyncio.run(b.on_admission(platform=_Plataforma("whatsapp"))) == {"action": "handled"}
+      and asyncio.run(b.on_admission(platform=_Plataforma("api_server"))) is None)
+dentro = {p: asyncio.run(b.on_admission(platform=p)) for p in ("api_server", "cron", "telegram", "discord")}
+check("trava: os agentes do Ergon, o agendador, o Telegram e o Discord seguem o caminho deles", all(v is None for v in dentro.values()), str(dentro))
+check("trava: o spool do canal antigo não existe mais", not hasattr(b, "_spool") and not hasattr(b, "_decide"))
 # a busca da saída não começa sozinha neste teste: fica para a parte 6
 laco_de_verdade = b._canal_laco
 b._canal_laco = lambda: None

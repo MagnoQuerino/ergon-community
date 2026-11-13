@@ -8,7 +8,7 @@ import type { Db } from '../../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../../lib/util.ts';
 import { audit, type Bus } from '../bus.ts';
 import { CONEXOES_FORA_ATE_A_PROXIMA, TOOLS, toolStatus } from '../characters.ts';
-import { CONTA_ID, consentimentoDe, estadoAdmin, integrationDef, integrationRow, setIntegration, settingsOf, type IntegrationKind, type Integrations } from '../integrations.ts';
+import { CONTA_ID, acharConta, nomeUnico, consentimentoDe, contaPorId, contasDe, estadoAdmin, integrationDef, integrationRow, nomeDaConta, setIntegration, settingsOf, type IntegrationKind, type IntegrationRow, type Integrations } from '../integrations.ts';
 import { importBoards, ProviderError } from '../mirror.ts';
 import { recordProposals } from '../proposals.ts';
 import { workspaceTz } from '../routine-proposals.ts';
@@ -18,7 +18,7 @@ import { ETAPAS, STATE_TTL, contaPessoalMicrosoft, isSso, listaDeEscopos, propri
 import { pipefyAntigo, request } from '../task-providers.ts';
 import { transporteBytes } from './acoes/google.ts';
 import type { CtxMicrosoft } from './acoes/microsoft.ts';
-import { acoesDe, ajusteDe, ESCRITA, escreve, escritorPara, permissoesDe, registrarAcoesDaConta, RISCOS, soLeituraDe, type Permissoes, type WaAcoes } from './catalogo.ts';
+import { acoesDe, ajusteDe, ESCRITA, escreve, escritorPara, permissoesDe, registrarAcoesDaConta, RISCOS, soLeituraDe, textoDasContas, type Permissoes, type WaAcoes } from './catalogo.ts';
 import { conectorDe, httpDoConectorDe } from './conectores/index.ts';
 import { cadeiaDe, lidoEm, marcarRun, runDeOrigem, type Lido } from './marca.ts';
 import { MARCA_PESSOA, episodioDoCard, respostaDaPessoa, type MotivoPessoa } from '../episodio.ts';
@@ -138,8 +138,9 @@ export class Conexoes {
       result: on ? 'organizar nas contas pede confirmação' : 'organizar nas contas segue a regra' });
   }
 
+  /** Os aplicativos com alguma conta conectada (a tela de permissões mostra todos; o agente, só as contas ligadas). */
   ligadas(ws: string): IntegrationKind[] {
-    return this.db.all<{ kind: IntegrationKind }>("SELECT kind FROM integrations WHERE workspace_id = ? AND state = 'connected' ORDER BY kind", ws).map((r) => r.kind);
+    return this.db.all<{ kind: IntegrationKind }>("SELECT DISTINCT kind FROM integrations WHERE workspace_id = ? AND state = 'connected' ORDER BY kind", ws).map((r) => r.kind);
   }
 
   // ------------------------------------------------------------------------------- de onde veio o pedido e o que foi lido
@@ -354,9 +355,9 @@ export class Conexoes {
   }
 
   // ---------------------------------------------------------------------------------------------------- credenciais
-  private http(ws: string, kind: IntegrationKind): Http {
+  private http(ws: string, kind: IntegrationKind, conta = ''): Http {
     if (conectorDe(kind)) {
-      const c = this.d.integrations.secrets.read<Record<string, string>>(ws, kind);
+      const c = this.d.integrations.secrets.read<Record<string, string>>(ws, kind, conta);
       if (!c) return () => { throw new ProviderError('forbidden', 'credencial ausente: conecte de novo em Conexões', { reauth: true }); };
       return httpDoConectorDe(kind, c);
     }
@@ -364,36 +365,36 @@ export class Conexoes {
     const sso = this.d.integrations.sso;
     const http: Http = async (url, init = {}) => {
       const call = (t: string) => request(url, { ...init, headers: { Authorization: `Bearer ${t}`, ...init.headers } });
-      try { return await call(await sso.accessToken(ws, kind)); } catch (e) {
+      try { return await call(await sso.accessToken(ws, kind, { conta })); } catch (e) {
         if (!(e instanceof ProviderError && e.status === 401)) throw e;
-        return call(await sso.accessToken(ws, kind, { force: true })); // 401: o serviço não fez nada, repetir é seguro
+        return call(await sso.accessToken(ws, kind, { force: true, conta })); // 401: o serviço não fez nada, repetir é seguro
       }
     };
     // arquivos do Google trafegam em bytes, não em JSON
-    return kind === 'google' ? Object.assign(http, { bytes: transporteBytes((renovar) => sso.accessToken(ws, kind, { force: renovar })) }) : http;
+    return kind === 'google' ? Object.assign(http, { bytes: transporteBytes((renovar) => sso.accessToken(ws, kind, { force: renovar, conta })) }) : http;
   }
 
   /** Quem escreve neste aplicativo (também usado pelo espelho). O ajuste de cada ação, cada uma confere o seu (e o espelho, por operação). */
-  escritor = (ws: string, kind: string): EscritorTarefas | null => {
+  escritor = (ws: string, kind: string, conta = ''): EscritorTarefas | null => {
     const k = kind as IntegrationKind;
     const def = integrationDef(k);
-    if (!def?.tasks || integrationRow(this.db, ws, k).state !== 'connected') return null;
-    const creds = isSso(k) ? {} : this.d.integrations.secrets.read<Record<string, string>>(ws, k);
+    if (!def?.tasks || integrationRow(this.db, ws, k, conta).state !== 'connected') return null;
+    const creds = isSso(k) ? {} : this.d.integrations.secrets.read<Record<string, string>>(ws, k, conta);
     if (!creds) return null;
-    return escritorPara(k, creds, this.http(ws, k), workspaceTz(this.db, ws));
+    return escritorPara(k, creds, this.http(ws, k, conta), workspaceTz(this.db, ws));
   };
 
-  private ctx(ws: string, kind: IntegrationKind): CtxAcao | CtxTarefas {
+  private ctx(ws: string, kind: IntegrationKind, conta = ''): CtxAcao | CtxTarefas {
     // Microsoft: a ação sabe o que a conta deu (a lista de conversas do Teams sem a prévia, quando falta a leitura)
-    const tem = kind === 'microsoft' ? this.autorizadas(ws, kind) : null;
-    const base: CtxMicrosoft = { workspaceId: ws, tz: workspaceTz(this.db, ws), http: this.http(ws, kind), ...(conectorDe(kind) ? { creds: this.d.integrations.secrets.read<Record<string, string>>(ws, kind) ?? {} } : {}),
+    const tem = kind === 'microsoft' ? this.autorizadas(ws, kind, conta) : null;
+    const base: CtxMicrosoft = { workspaceId: ws, conta, tz: workspaceTz(this.db, ws), http: this.http(ws, kind, conta), ...(conectorDe(kind) ? { creds: this.d.integrations.secrets.read<Record<string, string>>(ws, kind, conta) ?? {} } : {}),
       ...(tem ? { temEscopo: (e: string) => coberto(tem, e, true) } : {}) };
     if (!integrationDef(kind)?.tasks) return base;
-    const provedor = this.d.integrations.provider(ws, kind);
+    const provedor = this.d.integrations.provider(ws, kind, conta);
     return {
-      ...base, provedor, escritor: this.escritor(ws, kind),
+      ...base, provedor, escritor: this.escritor(ws, kind, conta),
       aoEscrever: async (quadro: string) => {
-        const row = integrationRow(this.db, ws, kind);
+        const row = integrationRow(this.db, ws, kind, conta);
         if (!this.db.get("SELECT 1 AS x FROM boards WHERE connection_id = ? AND external_id = ? AND origin = 'mirror'", row.id, quadro)) return;
         await importBoards(this.db, this.d.bus, ws, row.id, '', provedor, [quadro]);
       },
@@ -404,14 +405,14 @@ export class Conexoes {
    * Permissões que a conta autorizou (as que o serviço disse ter dado, somadas as etapas; em conta antiga, as que foram pedidas).
    * A Microsoft escreve a mesma permissão com o endereço do Graph ou com o id dele na frente: contam igual ao nome curto.
    */
-  private autorizadas(ws: string, kind: IntegrationKind): Set<string> | null {
+  private autorizadas(ws: string, kind: IntegrationKind, conta = ''): Set<string> | null {
     if (!isSso(kind)) return null;
-    const t = this.d.integrations.secrets.read<{ granted?: string; scopes?: string }>(ws, kind as SsoKind);
+    const t = this.d.integrations.secrets.read<{ granted?: string; scopes?: string }>(ws, kind as SsoKind, conta);
     const s = t?.granted ?? t?.scopes;
     return s ? new Set(listaDeEscopos(s).map((x) => x.toLowerCase())) : null;
   }
-  faltam(ws: string, kind: IntegrationKind, a: Pick<Acao, 'escopos' | 'risco'>): string[] {
-    const tem = this.autorizadas(ws, kind);
+  faltam(ws: string, kind: IntegrationKind, a: Pick<Acao, 'escopos' | 'risco'>, conta = ''): string[] {
+    const tem = this.autorizadas(ws, kind, conta);
     if (!tem) return [];
     // para ler, quem autorizou só a leitura antes das ações novas continua lendo; e a permissão de escrita inclui a de leitura
     const le = typeof a.risco !== 'function' && a.risco === 'ler';
@@ -423,8 +424,8 @@ export class Conexoes {
    * Microsoft, só as que a própria pessoa autoriza (etapa A): leitura e canais têm a linha deles na tela, com o pedido ao
    * administrador, e "Autorizar de novo" não resolveria.
    */
-  faltamTudo(ws: string, kind: IntegrationKind): string[] {
-    const todas = [...new Set(this.acoes(ws, kind).flatMap((a) => this.faltam(ws, kind, a)))];
+  faltamTudo(ws: string, kind: IntegrationKind, conta = ''): string[] {
+    const todas = [...new Set(this.acoes(ws, kind, conta).flatMap((a) => this.faltam(ws, kind, a, conta)))];
     if (kind !== 'microsoft') return todas;
     // o Teams que a empresa só libera com o administrador também tem a linha dele, com o pedido
     const sozinha = new Set((['base', 'trabalho'] as const).filter((e) => !this.teamsComAdministrador(ws, e)).flatMap((e) => proprioDaEtapa(e, true)).map((x) => x.toLowerCase()));
@@ -437,8 +438,8 @@ export class Conexoes {
   }
 
   /** Conta pessoal da Microsoft: pela marca do login ou, em credencial antiga, pelo domínio (sso.ts). */
-  private pessoal(ws: string, kind: IntegrationKind): boolean {
-    return kind === 'microsoft' && contaPessoalMicrosoft(this.d.integrations.secrets.read<{ pessoal?: boolean; account?: string }>(ws, kind));
+  private pessoal(ws: string, kind: IntegrationKind, conta = ''): boolean {
+    return kind === 'microsoft' && contaPessoalMicrosoft(this.d.integrations.secrets.read<{ pessoal?: boolean; account?: string }>(ws, kind, conta));
   }
 
   /**
@@ -446,11 +447,11 @@ export class Conexoes {
    * da empresa quem libera, e o texto leva o link pronto do pedido; "autorizar de novo" ali não resolve (a pessoa não pode dar).
    * `pessoa`: o que a tela de teste mostra, sem nome técnico.
    */
-  private semPermissao(ws: string, kind: IntegrationKind, faltam: string[]): { agente: string; pessoa: string; autorizar: boolean } {
+  private semPermissao(ws: string, kind: IntegrationKind, faltam: string[], conta = ''): { agente: string; pessoa: string; autorizar: boolean } {
     const nome = integrationDef(kind)!.name;
     const padrao = { agente: `A conta ${nome} ainda não autorizou esta ação (falta ${faltam.join(', ')}). Diga à pessoa para abrir Conexões › ${nome} › Autorizar de novo.`, pessoa: FALTA_AUTORIZAR, autorizar: true };
     if (kind !== 'microsoft') return padrao;
-    const pessoal = this.pessoal(ws, kind);
+    const pessoal = this.pessoal(ws, kind, conta);
     const etapas = new Set(faltam.map((e) => etapaDoEscopo(e, !pessoal)));
     if (![...etapas].every((e) => e === 'leitura' || e === 'canais' || this.teamsComAdministrador(ws, e))) return padrao;
     // o pedido da leitura cobre também o Teams (cada etapa pede as anteriores)
@@ -469,12 +470,12 @@ export class Conexoes {
   }
 
   /** As etapas do consentimento da Microsoft, como a tela mostra (sem conta pessoal: sem Teams nem canais). */
-  etapasDe(ws: string): EtapaDaTela[] {
-    const cred = this.d.integrations.secrets.read<{ pessoal?: boolean; account?: string }>(ws, 'microsoft');
+  etapasDe(ws: string, conta = ''): EtapaDaTela[] {
+    const cred = this.d.integrations.secrets.read<{ pessoal?: boolean; account?: string }>(ws, 'microsoft', conta);
     if (!cred) return [];
     const trabalho = !contaPessoalMicrosoft(cred);
-    const tem = this.autorizadas(ws, 'microsoft');
-    const marcas = consentimentoDe(integrationRow(this.db, ws, 'microsoft')).etapas ?? {};
+    const tem = this.autorizadas(ws, 'microsoft', conta);
+    const marcas = consentimentoDe(integrationRow(this.db, ws, 'microsoft', conta)).etapas ?? {};
     return ETAPAS.filter((id) => proprioDaEtapa(id, trabalho).length).map((id): EtapaDaTela => {
       // credencial muito antiga, sem saber o que foi dado: vale o que as versões anteriores pediam (tudo, menos canais)
       const dada = tem ? proprioDaEtapa(id, trabalho).every((e) => coberto(tem, e, true)) : id !== 'canais';
@@ -493,19 +494,20 @@ export class Conexoes {
   // -------------------------------------------------------------------------------------------------------- catálogo
   private acoesDe(kind: IntegrationKind): Acao[] { return acoesDe(kind, this.d.whatsapp); }
   /** As ações desta conta: Teams não existe em conta pessoal da Microsoft, então nem aparece nem pede autorização. */
-  private acoes(ws: string, kind: IntegrationKind): Acao[] {
+  private acoes(ws: string, kind: IntegrationKind, conta = ''): Acao[] {
     const l = this.acoesDe(kind);
-    return this.pessoal(ws, kind) ? l.filter((a) => !a.trabalho) : l;
+    return this.pessoal(ws, kind, conta) ? l.filter((a) => !a.trabalho) : l;
   }
-  private ajuste(ws: string, kind: IntegrationKind, acao: Acao, args: Args): Ajuste {
-    return ajusteDe(settingsOf(integrationRow(this.db, ws, kind)), acao.id, riscoDe(acao, args));
+  /** O ajuste é de cada conta: a escrita liberada numa não vale para a outra. */
+  private ajuste(ws: string, kind: IntegrationKind, acao: Acao, args: Args, conta = ''): Ajuste {
+    return ajusteDe(settingsOf(integrationRow(this.db, ws, kind, conta)), acao.id, riscoDe(acao, args));
   }
 
   /** Para a tela: o que cada conexão faz, o ajuste de cada tipo e de cada ação e, na Microsoft, o estado de cada etapa. */
-  catalogoDe(ws: string, kind: IntegrationKind): { permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: Risco }>; soLeitura: boolean; escreve: boolean; etapas?: EtapaDaTela[] } {
-    const permissoes = permissoesDe(settingsOf(integrationRow(this.db, ws, kind))); const acoes = this.acoes(ws, kind);
+  catalogoDe(ws: string, kind: IntegrationKind, conta = ''): { permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: Risco }>; soLeitura: boolean; escreve: boolean; etapas?: EtapaDaTela[] } {
+    const permissoes = permissoesDe(settingsOf(integrationRow(this.db, ws, kind, conta))); const acoes = this.acoes(ws, kind, conta);
     return { permissoes, acoes: acoes.map((a) => ({ id: a.id, rotulo: a.rotulo ?? a.descricao, risco: riscoDe(a, {}), ...(a.sempreConfirma ? { sempreConfirma: true } : {}) })), soLeitura: soLeituraDe(permissoes, acoes), escreve: acoes.some(escreve),
-      ...(kind === 'microsoft' ? { etapas: this.etapasDe(ws) } : {}) };
+      ...(kind === 'microsoft' ? { etapas: this.etapasDe(ws, conta) } : {}) };
   }
   /**
    * O atalho "Só leitura" da tela: ligar desliga toda ação que escreve (por tipo, e sem exceção por ação que a deixe ligada) e
@@ -513,9 +515,9 @@ export class Conexoes {
    * Desligar devolve esse ajuste: o "sempre confirmar" e o "desligado" que a pessoa tinha posto voltam como estavam. Sem
    * ajuste guardado (ou se ele mesmo já era só leitura), a escrita volta para a regra. As leituras ficam como estavam.
    */
-  setSoLeitura(ws: string, userId: string, kind: IntegrationKind, on: boolean): Permissoes {
-    const s = settingsOf(integrationRow(this.db, ws, kind));
-    const p = permissoesDe(s); const todas = this.acoes(ws, kind);
+  setSoLeitura(ws: string, userId: string, kind: IntegrationKind, on: boolean, conta = ''): Permissoes {
+    const s = settingsOf(integrationRow(this.db, ws, kind, conta));
+    const p = permissoesDe(s); const todas = this.acoes(ws, kind, conta);
     const daEscrita = new Set(todas.filter(escreve).map((a) => a.id));
     const soDaLeitura: Permissoes = { tipos: Object.fromEntries(Object.entries(p.tipos).filter(([r]) => !ESCRITA.includes(r as Risco))), acoes: Object.fromEntries(Object.entries(p.acoes).filter(([id]) => !daEscrita.has(id))) };
     const guardado = s.soLeituraAntes as Partial<Permissoes> | undefined;
@@ -524,18 +526,18 @@ export class Conexoes {
       const antes: Permissoes = guardado && soLeituraDe(p, todas) ? { tipos: { ...(guardado.tipos ?? {}) }, acoes: { ...(guardado.acoes ?? {}) } }
         : { tipos: Object.fromEntries(Object.entries(p.tipos).filter(([r]) => ESCRITA.includes(r as Risco))), acoes: Object.fromEntries(Object.entries(p.acoes).filter(([id]) => daEscrita.has(id))) };
       const tipos = { ...soDaLeitura.tipos }; for (const r of ESCRITA) tipos[r] = 'desligado';
-      return this.setPermissoes(ws, userId, kind, { tipos, acoes: soDaLeitura.acoes }, antes);
+      return this.setPermissoes(ws, userId, kind, { tipos, acoes: soDaLeitura.acoes }, antes, conta);
     }
     const volta: Permissoes = { tipos: { ...soDaLeitura.tipos, ...(guardado?.tipos ?? {}) }, acoes: { ...soDaLeitura.acoes, ...(guardado?.acoes ?? {}) } };
     // o retrato que já era só leitura deixaria a caixa marcada depois do clique: aí a escrita volta para a regra
-    return this.setPermissoes(ws, userId, kind, guardado && !soLeituraDe(volta, todas) ? volta : soDaLeitura, null);
+    return this.setPermissoes(ws, userId, kind, guardado && !soLeituraDe(volta, todas) ? volta : soDaLeitura, null, conta);
   }
   /**
    * soLeituraAntes: o ajuste que desmarcar "Só leitura" devolve (setSoLeitura grava ou apaga). Sem ele (a tela mudou um ajuste
    * à mão), o retrato guardado só fica enquanto a conexão continuar só leitura: ligar uma escrita à mão já é sair dela.
    */
-  setPermissoes(ws: string, userId: string, kind: IntegrationKind, p: Permissoes, soLeituraAntes?: Permissoes | null): Permissoes {
-    const validos = new Map(this.acoes(ws, kind).map((a) => [a.id, a]));
+  setPermissoes(ws: string, userId: string, kind: IntegrationKind, p: Permissoes, soLeituraAntes?: Permissoes | null, conta = ''): Permissoes {
+    const validos = new Map(this.acoes(ws, kind, conta).map((a) => [a.id, a]));
     const AJUSTES = new Set<string>(['regra', 'confirmar', 'desligado']);
     const limpo: Permissoes = { tipos: {}, acoes: {} };
     for (const r of RISCOS) { const v = p.tipos?.[r]; if (v && AJUSTES.has(v) && v !== 'regra') limpo.tipos[r] = v; }
@@ -544,11 +546,11 @@ export class Conexoes {
       const a = validos.get(id);
       if (a && AJUSTES.has(v) && (v !== 'regra' || limpo.tipos[riscoDe(a, {})])) limpo.acoes[id] = v;
     }
-    const row = integrationRow(this.db, ws, kind);
+    const row = integrationRow(this.db, ws, kind, conta);
     const { soLeituraAntes: guardado, ...resto } = settingsOf(row) as Record<string, unknown>;
     const antes = soLeituraAntes === undefined ? (guardado && soLeituraDe(limpo, [...validos.values()]) ? guardado : null) : soLeituraAntes;
-    setIntegration(this.db, ws, kind, { settings: { ...resto, permissoes: limpo, ...(antes ? { soLeituraAntes: antes } : {}) } });
-    audit(this.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'conexao.permissoes', targetType: 'integration', targetId: kind, evidence: { ...limpo }, result: 'ajuste das ações atualizado' });
+    setIntegration(this.db, ws, kind, { settings: { ...resto, permissoes: limpo, ...(antes ? { soLeituraAntes: antes } : {}) } }, conta);
+    audit(this.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'conexao.permissoes', targetType: 'integration', targetId: kind, evidence: { ...limpo, ...(conta ? { conta } : {}) }, result: 'ajuste das ações atualizado' });
     this.d.bus.publish(ws, 'integrations.changed', { kind });
     return limpo;
   }
@@ -561,18 +563,22 @@ export class Conexoes {
     const ligadas = this.ligadas(ws);
     if (conexao && !ligadas.includes(conexao as IntegrationKind)) return `A conexão "${clip(conexao, 40)}" não está ligada. Ligadas: ${ligadas.join(', ') || 'nenhuma'}. Peça à pessoa para conectar em Conexões.`;
     if (!conexao && !ligadas.length) return 'Nenhuma conexão ligada. Peça à pessoa para conectar em Conexões.';
-    const ver = (k: IntegrationKind) => this.acoes(ws, k).filter((a) => this.ajuste(ws, k, a, {}) !== 'desligado');
+    // a conta que vale sem dizer qual (a principal, ou a única ligada): as ações e os ajustes listados são os dela
+    const padrao = (k: IntegrationKind) => { const l = this.d.integrations.contasDoAgente(ws, k); return l.find((c) => c.principal) ?? (l.length === 1 ? l[0] : null); };
+    const ver = (k: IntegrationKind, conta = padrao(k)?.conta ?? '') => this.acoes(ws, k, conta).filter((a) => this.ajuste(ws, k, a, {}, conta) !== 'desligado');
+    const contas = (k: IntegrationKind) => textoDasContas(this.d.integrations.contasDoAgente(ws, k));
     if (!conexao && ligadas.length > 1) {
-      return `Conexões ligadas (chame de novo com conexao="..." para ver as ações e os parâmetros de uma):\n${ligadas.map((k) => `- ${integrationDef(k)?.name ?? k} (conexao="${k}"): ${ver(k).length} ações`).join('\n')}`;
+      return `Conexões ligadas (chame de novo com conexao="..." para ver as ações e os parâmetros de uma):\n${ligadas.map((k) => `- ${integrationDef(k)?.name ?? k} (conexao="${k}"): ${ver(k).length} ações${contas(k)}`).join('\n')}`;
     }
     const k = (conexao ?? ligadas[0]) as IntegrationKind;
-    const linhas = ver(k).map((a) => {
+    const conta = padrao(k)?.conta ?? '';
+    const linhas = ver(k, conta).map((a) => {
       const ps = Object.entries(a.params).map(([n, p]) => `${n}${p.obrigatorio ? '*' : ''} (${p.descricao})`).join('; ');
-      const f = this.faltam(ws, k, a);
+      const f = this.faltam(ws, k, a, conta);
       return `- ${a.id}: ${a.descricao}${ps ? `. Parâmetros: ${ps}` : ''}${f.length ? '. AINDA NÃO AUTORIZADA nesta conta' : ''}`;
     });
-    if (!linhas.length) return `${integrationDef(k)?.name ?? k} (conexao="${k}"): a pessoa desligou todas as ações aqui. Conte isso a ela se o pedido precisar desta conexão.`;
-    return `${integrationDef(k)?.name ?? k} (conexao="${k}"). Parâmetro com * é obrigatório; use só os nomes listados.\n${linhas.join('\n')}`;
+    if (!linhas.length) return `${integrationDef(k)?.name ?? k} (conexao="${k}")${contas(k)}: a pessoa desligou todas as ações aqui. Conte isso a ela se o pedido precisar desta conexão.`;
+    return `${integrationDef(k)?.name ?? k} (conexao="${k}")${contas(k)}. Parâmetro com * é obrigatório; use só os nomes listados.\n${linhas.join('\n')}`;
   }
 
   // -------------------------------------------------------------------------------------------------------- execução
@@ -580,7 +586,7 @@ export class Conexoes {
    * Pedido de um agente durante uma execução. O que parou no que só a pessoa resolve (autorizar a conta, uma ação que ela
    * desligou, um envio que o serviço não confirmou) fica marcado no card (marcarPessoa): a equipe não tenta de novo sozinha.
    */
-  async executar(run: RunDaSessao, conexao: string, acaoId: string, bruto: Args, extra: { leuWeb?: boolean } = {}): Promise<RespostaAcao> {
+  async executar(run: RunDaSessao, conexao: string, acaoId: string, bruto: Args, extra: { leuWeb?: boolean; conta?: string } = {}): Promise<RespostaAcao> {
     const { marca, ...r } = await this.executarAgora(run, conexao, acaoId, bruto, extra);
     if (!r.ok) this.marcarPessoa(run.workspace_id, { taskId: run.task_id, runId: run.id, agentId: run.agent_id }, conexao, acaoId, r, marca);
     return r;
@@ -599,24 +605,24 @@ export class Conexoes {
       result: `${def.name}: ${oQue}` });
   }
 
-  private async executarAgora(run: RunDaSessao, conexao: string, acaoId: string, bruto: Args, extra: { leuWeb?: boolean }): Promise<Interna> {
+  private async executarAgora(run: RunDaSessao, conexao: string, acaoId: string, bruto: Args, extra: { leuWeb?: boolean; conta?: string }): Promise<Interna> {
     const ws = run.workspace_id;
     if (extra.leuWeb) this.marcar(run, { privado: false, motivo: 'internet' });
-    const achada = this.achar(ws, conexao, acaoId, bruto);
+    const achada = this.achar(ws, conexao, acaoId, bruto, { pedida: extra.conta });
     if ('ok' in achada) return achada;
-    const { kind, acao } = achada;
+    const { kind, acao, conta, row: daConta } = achada;
     // nome de parâmetro inventado seria descartado em silêncio, e o agente diria que fez o que não fez (um prazo, por exemplo)
     const desconhecidos = Object.keys(bruto).filter((n) => !(n in acao.params) && !vazio(bruto[n]));
     if (desconhecidos.length) return { ok: false, status: 'falhou', texto: `Parâmetro desconhecido: ${desconhecidos.map((n) => `"${clip(n, 40)}"`).join(', ')}. Os válidos em ${acao.id} são: ${Object.keys(acao.params).join(', ') || 'nenhum'}. Nada foi feito.` };
     const origem = this.origem(run);
     const leuDeFora = this.leu(run).deFora;
-    if (this.ajuste(ws, kind, acao, bruto) === 'desligado') return { ok: false, status: 'falhou', texto: `A pessoa desligou esta ação em Conexões › ${integrationDef(kind)!.name}. Conte isso a ela; não tente outro caminho.`, desligada: true, marca: { risco: riscoDe(acao, bruto) } };
+    if (this.ajuste(ws, kind, acao, bruto, conta) === 'desligado') return { ok: false, status: 'falhou', texto: `A pessoa desligou esta ação em Conexões › ${integrationDef(kind)!.name}${conta ? ` (conta ${nomeDaConta(daConta)})` : ''}. Conte isso a ela; não tente outro caminho.`, desligada: true, marca: { risco: riscoDe(acao, bruto) } };
     // o que o cartão precisa mostrar, e o alvo fixado: o clique executa exatamente o que a pessoa viu
     let args = bruto; let detalhe: string | undefined; let obriga: string | undefined; let fixou: string[] = [];
     if (acao.preparar) {
-      try { const p = await acao.preparar(this.ctx(ws, kind), bruto); args = p.args ?? bruto; detalhe = p.detalhe; obriga = p.confirmar; fixou = p.fixou ?? []; } catch (e) {
+      try { const p = await acao.preparar(this.ctx(ws, kind, conta), bruto); args = p.args ?? bruto; detalhe = p.detalhe; obriga = p.confirmar; fixou = p.fixou ?? []; } catch (e) {
         if (e instanceof ErroAcao && e.opcoes?.length) this.marcar(run, { privado: false, motivo: `${kind}/opcoes` }); // as opções trazem nomes escritos por outras pessoas
-        if (e instanceof ProviderError) this.anotarFalha(ws, kind, e, acao.id);
+        if (e instanceof ProviderError) this.anotarFalha(ws, kind, e, acao.id, conta);
         const msg = e instanceof Error ? e.message : String(e);
         return { ok: false, status: 'falhou', texto: `Não deu: ${clip(msg, 600)}. Conte à pessoa o que houve; não diga que fez.`, opcoes: e instanceof ErroAcao ? e.opcoes : undefined, autorizar: e instanceof ProviderError && e.kind === 'forbidden' };
       }
@@ -628,17 +634,18 @@ export class Conexoes {
     // a regra que ela aprovou (regras.ts): o tipo, a conexão e o alcance; "só neste pedido" vale para todas as execuções
     // que podem ter chamado (as que dividem a sessão)
     const regra = liberar ? null : this.regras.cobre(ws, [run, ...(run.juntas ?? [])], kind, acao.id, risco, codigo);
-    let decisao = decidir({ risco, origem, leuDeFora, liberarTudo: liberar, codigoLigado: codigo, ajuste: this.ajuste(ws, kind, acao, args), confirmarOrganizar, regra: !!regra, sempreConfirma: !!acao.sempreConfirma });
+    let decisao = decidir({ risco, origem, leuDeFora, liberarTudo: liberar, codigoLigado: codigo, ajuste: this.ajuste(ws, kind, acao, args, conta), confirmarOrganizar, regra: !!regra, sempreConfirma: !!acao.sempreConfirma });
     if (obriga && decisao === 'direto' && !liberar) decisao = 'confirmar';
     // o cartão mostra o que o agente pediu onde o preparar fixou o id do alvo (o detalhe diz o alvo lido); o clique usa o id
     const mostrar = fixou.length ? { ...args, ...Object.fromEntries(fixou.map((n) => [n, bruto[n]])) } : undefined;
     let porque = obriga ?? (run.juntas?.length ? PORQUE.juntas
-      : confirmarOrganizar && risco === 'organizar' && this.ajuste(ws, kind, acao, args) === 'regra' ? 'você pediu confirmação antes de organizar'
-      : acao.sempreConfirma && !regra && this.ajuste(ws, kind, acao, args) === 'regra' && !codigo ? acao.sempreConfirma : undefined);
-    const base: Base = { ws, kind, acao, args, mostrar, risco, origem, leuDeFora, decisao, run, userId: null, detalhe, alvo: fixou.length ? detalhe : undefined, porque,
+      : confirmarOrganizar && risco === 'organizar' && this.ajuste(ws, kind, acao, args, conta) === 'regra' ? 'você pediu confirmação antes de organizar'
+      : acao.sempreConfirma && !regra && this.ajuste(ws, kind, acao, args, conta) === 'regra' && !codigo ? acao.sempreConfirma : undefined);
+    const base: Base = { ws, kind, conta, integracaoId: daConta.id, acao, args, mostrar, risco, origem, leuDeFora, decisao, run, userId: null, detalhe, alvo: fixou.length ? detalhe : undefined, porque,
       ...(regra && decisao === 'direto' && risco !== 'ler' ? { regra } : {}) };
     if (decisao === 'recusar') return { ok: false, status: 'falhou', texto: `A pessoa desligou esta ação em Conexões › ${integrationDef(kind)!.name}. Conte isso a ela; não tente outro caminho.`, desligada: true, marca: { risco } };
-    const dedupe = risco === 'ler' ? null : crypto.createHash('sha256').update(JSON.stringify([run.task_id ?? sessionKeyFor(run), kind, acao.id, args])).digest('hex');
+    // o mesmo envio por duas contas são dois envios (a principal mantém a marca de antes: os cartões esperando continuam valendo)
+    const dedupe = risco === 'ler' ? null : crypto.createHash('sha256').update(JSON.stringify([run.task_id ?? sessionKeyFor(run), kind, acao.id, args, ...(conta ? [daConta.id] : [])])).digest('hex');
     if (dedupe) {
       // cartão esperando vale o tempo que ficar esperando; feita, a janela de repetição — e, num card, o trabalho atual
       // inteiro (episodio.ts): a nova tentativa da equipe não manda de novo o que já saiu pela conta
@@ -680,25 +687,48 @@ export class Conexoes {
   }
 
   /** Clique da própria pessoa numa tela do Ergon: é ela quem decide, vai direto. */
-  async daPessoa(ws: string, userId: string, conexao: string, acaoId: string, args: Args): Promise<RespostaAcao> {
-    const achada = this.achar(ws, conexao, acaoId, args);
+  /** Clique da própria pessoa numa tela do Ergon (o teste da conexão): é ela quem decide, vai direto. `conta`: qual delas ('' = a principal). */
+  async daPessoa(ws: string, userId: string, conexao: string, acaoId: string, args: Args, conta = ''): Promise<RespostaAcao> {
+    const achada = this.achar(ws, conexao, acaoId, args, { slot: conta });
     if ('ok' in achada) return achada;
-    if (this.ajuste(ws, achada.kind, achada.acao, args) === 'desligado') return { ok: false, status: 'falhou', texto: `Esta ação está desligada em Conexões › ${integrationDef(achada.kind)!.name}.` };
-    return this.rodar({ ws, kind: achada.kind, acao: achada.acao, args, risco: riscoDe(achada.acao, args), origem: 'pessoa', leuDeFora: false, decisao: 'direto', run: null, userId }, null);
+    if (this.ajuste(ws, achada.kind, achada.acao, args, achada.conta) === 'desligado') return { ok: false, status: 'falhou', texto: `Esta ação está desligada em Conexões › ${integrationDef(achada.kind)!.name}.` };
+    return this.rodar({ ws, kind: achada.kind, conta: achada.conta, integracaoId: achada.row.id, acao: achada.acao, args, risco: riscoDe(achada.acao, args), origem: 'pessoa', leuDeFora: false, decisao: 'direto', run: null, userId }, null);
   }
 
-  private achar(ws: string, conexao: string, acaoId: string, args: Args): { kind: IntegrationKind; acao: Acao } | RespostaAcao {
+  /**
+   * A conexão, a conta e a ação. A conta: a que o agente pediu (`pedida`: o apelido, o e-mail, o número), a fixada no cartão ou
+   * no teste (`slot`), ou, sem dizer, a principal (ou a única ligada). Conta desligada pela pessoa não é usada.
+   */
+  private achar(ws: string, conexao: string, acaoId: string, args: Args, o: { pedida?: string; slot?: string } = {}): { kind: IntegrationKind; acao: Acao; conta: string; row: IntegrationRow } | RespostaAcao {
     const kind = conexao as IntegrationKind;
     const falha = (texto: string, x: Partial<RespostaAcao> = {}): RespostaAcao => ({ ok: false, status: 'falhou', texto, ...x });
     if (!integrationDef(kind)) return falha(`Não existe a conexão "${clip(conexao, 40)}".`, { opcoes: this.ligadas(ws) });
-    if (integrationRow(this.db, ws, kind).state !== 'connected') return falha(`${integrationDef(kind)!.name} não está conectado. Diga à pessoa para conectar em Conexões.`, { autorizar: true });
-    const acoes = this.acoes(ws, kind);
+    const nome = integrationDef(kind)!.name;
+    const conectadas = contasDe(this.db, ws, kind).filter((c) => c.state === 'connected');
+    if (!conectadas.length) return falha(`${nome} não está conectado. Diga à pessoa para conectar em Conexões.`, { autorizar: true });
+    const usaveis = conectadas.filter((c) => c.ativa !== 0);
+    const nomeDe = nomeUnico(contasDe(this.db, ws, kind));
+    const nomes = usaveis.map((c) => nomeDe(c));
+    let row: IntegrationRow | null;
+    if (o.slot !== undefined) {
+      row = conectadas.find((c) => c.conta === o.slot) ?? null;
+      if (!row) return falha(`Esta conta de ${nome} não está conectada agora. Diga à pessoa para conferir em Conexões.`, { autorizar: true });
+    } else if (String(o.pedida ?? '').trim()) {
+      row = acharConta(conectadas, o.pedida, nomeDe);
+      if (!row) return falha(`${nome} não tem a conta "${clip(String(o.pedida), 60)}". Contas que você pode usar: ${nomes.map((n) => `"${n}"`).join(', ') || 'nenhuma'}. Passe conta com um destes nomes, ou pergunte à pessoa qual é.`, { opcoes: nomes });
+    } else {
+      row = usaveis.find((c) => c.conta === '') ?? (usaveis.length === 1 ? usaveis[0] : null);
+      if (!row && usaveis.length) return falha(`A conta principal de ${nome} está desligada. Diga qual conta usar, com conta="...": ${nomes.map((n) => `"${n}"`).join(', ')}. Se não souber qual, pergunte à pessoa.`, { opcoes: nomes });
+    }
+    if (!row || row.ativa === 0) return falha(`A pessoa desligou ${row ? `a conta "${nomeDaConta(row)}"` : 'as contas'} de ${nome} em Conexões. Conte isso a ela; não use outra conta sem ela pedir.`, { desligada: true });
+    const conta = row.conta;
+    const acoes = this.acoes(ws, kind, conta);
     const acao = acoes.find((a) => a.id === acaoId);
-    if (!acao) return falha(`${integrationDef(kind)!.name} não tem a ação "${clip(acaoId, 60)}".`, { opcoes: acoes.map((a) => a.id) });
+    if (!acao) return falha(`${nome} não tem a ação "${clip(acaoId, 60)}".`, { opcoes: acoes.map((a) => a.id) });
     for (const [n, p] of Object.entries(acao.params)) if (p.obrigatorio && (args[n] === undefined || args[n] === null || args[n] === '')) return falha(`Falta o parâmetro "${n}" (${p.descricao}).`);
-    const f = this.faltam(ws, kind, acao);
-    if (f.length) { const p = this.semPermissao(ws, kind, f); return falha(p.agente, { autorizar: p.autorizar, ...(p.autorizar ? {} : { administrador: true }) }); }
-    return { kind, acao };
+    const f = this.faltam(ws, kind, acao, conta);
+    if (f.length) { const p = this.semPermissao(ws, kind, f, conta); return falha(p.agente, { autorizar: p.autorizar, ...(p.autorizar ? {} : { administrador: true }) }); }
+    return { kind, acao, conta, row };
   }
 
   /**
@@ -729,7 +759,13 @@ export class Conexoes {
   }
 
   /** A conta por onde a ação sai (a que está conectada agora). */
-  private contaDe(ws: string, kind: IntegrationKind): string | null { return integrationRow(this.db, ws, kind).account_label ?? null; }
+  private contaDe(ws: string, kind: IntegrationKind, conta = ''): string | null { return integrationRow(this.db, ws, kind, conta).account_label ?? null; }
+  /** Como o cartão diz por qual conta sai: o apelido e, quando ele não é o próprio endereço, o e-mail, o número ou o nome da conta. */
+  private rotuloDaConta(ws: string, kind: IntegrationKind, conta = ''): string | null {
+    const r = integrationRow(this.db, ws, kind, conta);
+    const ap = (r.apelido ?? '').trim(); const ac = (r.account_label ?? '').trim();
+    return ap && ac && fold(ap) !== fold(ac) ? `${ap} (${ac})` : ap || ac || null;
+  }
   /**
    * Marca da credencial por onde a ação sai: o nome da conta não prova que é a mesma (duas contas "Ana", ou um nome genérico
    * como "conta Trello"). Login com a conta: a conta que o serviço deu no login, porque a renovação troca o refresh_token da
@@ -737,8 +773,8 @@ export class Conexoes {
    * são segredo (endereço, e-mail), porque um token novo da mesma conta ("Autorizar de novo") é a mesma conta. Sem o id: a
    * credencial guardada inteira. Só o hash fica no cartão.
    */
-  private credencialDe(ws: string, kind: IntegrationKind): string | null {
-    const c = this.d.integrations.secrets.read<Record<string, unknown>>(ws, kind);
+  private credencialDe(ws: string, kind: IntegrationKind, slot = ''): string | null {
+    const c = this.d.integrations.secrets.read<Record<string, unknown>>(ws, kind, slot);
     if (!c) return null;
     // Pipefy conectado com o código pessoal (antes da conta de serviço): os campos de então, que eram só o segredo. Com os
     // campos novos, a marca mudaria sem ninguém reconectar e o cartão esperando seria recusado na atualização
@@ -760,21 +796,21 @@ export class Conexoes {
     const rowId = id('cxa');
     // o cartão guarda também a marca da credencial (o clique confere) e o alvo lido (o que a pessoa lê no resultado)
     const espera = status === 'pendente';
-    this.db.run(`INSERT INTO conexao_acoes (id, workspace_id, run_id, agent_id, user_id, conversation_id, task_id, conexao, conta, credencial, acao, risco, origem, leu_de_fora, decisao, status, args, resumo, alvo, resultado, erro, dedupe, ms, regra_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      rowId, ws, b.run?.id ?? null, b.run?.agent_id ?? null, b.userId, b.run?.conversation_id ?? null, b.run?.task_id ?? null, b.kind, this.db.seal(ws, this.contaDe(ws, b.kind)),
-      this.db.seal(ws, espera ? this.credencialDe(ws, b.kind) : null), b.acao.id, b.risco, b.origem, b.leuDeFora ? 1 : 0, b.decisao, status,
-      this.db.seal(ws, JSON.stringify(b.args)), this.db.seal(ws, clip(b.acao.resumo(b.mostrar ?? b.args), 6000)), this.db.seal(ws, espera && b.alvo ? clip(b.alvo, 2000) : null), resultado, erro, dedupe, x.ms ?? null, espera ? null : b.regra?.id ?? null, now());
+    this.db.run(`INSERT INTO conexao_acoes (id, workspace_id, run_id, agent_id, user_id, conversation_id, task_id, conexao, conta, credencial, acao, risco, origem, leu_de_fora, decisao, status, args, resumo, alvo, resultado, erro, dedupe, ms, regra_id, created_at, integracao_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      rowId, ws, b.run?.id ?? null, b.run?.agent_id ?? null, b.userId, b.run?.conversation_id ?? null, b.run?.task_id ?? null, b.kind, this.db.seal(ws, this.contaDe(ws, b.kind, b.conta)),
+      this.db.seal(ws, espera ? this.credencialDe(ws, b.kind, b.conta) : null), b.acao.id, b.risco, b.origem, b.leuDeFora ? 1 : 0, b.decisao, status,
+      this.db.seal(ws, JSON.stringify(b.args)), this.db.seal(ws, clip(b.acao.resumo(b.mostrar ?? b.args), 6000)), this.db.seal(ws, espera && b.alvo ? clip(b.alvo, 2000) : null), resultado, erro, dedupe, x.ms ?? null, espera ? null : b.regra?.id ?? null, now(), b.integracaoId ?? null);
     return rowId;
   }
 
   private pedirConfirmacao(b: Base, dedupe: string | null): RespostaAcao {
     const rowId = this.registrar(b, dedupe, 'pendente');
-    const ajuste = this.ajuste(b.ws, b.kind, b.acao, b.args);
+    const ajuste = this.ajuste(b.ws, b.kind, b.acao, b.args, b.conta);
     const porque = ajuste === 'confirmar' ? 'você pediu confirmação para esta ação' : b.porque ?? (b.origem === 'fora' ? PORQUE.fora : b.risco === 'apagar' ? PORQUE.apagar : b.leuDeFora && b.risco === 'enviar' ? PORQUE.leu : PORQUE.codigo);
     // o cartão mostra tudo: conta, destino real e motivo antes do texto, e o texto inteiro (proposals.ts)
     recordProposals(this.db, this.d.bus, b.ws, { conversationId: b.run?.conversation_id ?? null, runId: b.run?.id ?? null },
-      [{ kind: 'conexao', acaoId: rowId, conexao: integrationDef(b.kind)!.name, conta: this.contaDe(b.ws, b.kind), ...(b.detalhe ? { detalhe: b.detalhe } : {}), resumo: b.acao.resumo(b.mostrar ?? b.args), porque }]);
+      [{ kind: 'conexao', acaoId: rowId, conexao: integrationDef(b.kind)!.name, conta: this.rotuloDaConta(b.ws, b.kind, b.conta), ...(b.detalhe ? { detalhe: b.detalhe } : {}), resumo: b.acao.resumo(b.mostrar ?? b.args), porque }]);
     const cartao = this.ultimoCartao(b.ws, b.run?.id ?? null, 'conexao', rowId);
     audit(this.db, this.d.bus, { workspaceId: b.ws, actorType: 'agent', actorId: b.run?.agent_id ?? null, action: 'conexao.confirmacao', targetType: 'integration', targetId: b.kind, evidence: { acao: b.acao.id, risco: b.risco, origem: b.origem, leuDeFora: b.leuDeFora }, result: `espera confirmação: ${porque}` });
     // o que acontece de fato depois do clique (decidirProposta): o card volta a andar, a conversa continua, ou ninguém recebe
@@ -782,13 +818,16 @@ export class Conexoes {
       : b.run?.conversation_id ? 'quando ela decidir, você recebe o resultado nesta conversa e continua'
       : 'o resultado não volta para você: termine o que puder sem esta ação e diga que ela ficou esperando a pessoa';
     return { ok: true, status: 'aguardando_confirmacao', texto: `A ação espera o clique da pessoa num cartão com todos os detalhes. Diga isso em uma frase e não repita a ação: ${volta}.`,
-      ...(cartao ? { cartao, resumo: clip(`${integrationDef(b.kind)!.name}: ${b.acao.resumo(b.mostrar ?? b.args)}`, 900) } : {}) };
+      ...(cartao ? { cartao, resumo: clip(`${integrationDef(b.kind)!.name}${this.variasContas(b.ws, b.kind) ? ` (pela conta ${this.rotuloDaConta(b.ws, b.kind, b.conta) ?? 'principal'})` : ''}: ${b.acao.resumo(b.mostrar ?? b.args)}`, 900) } : {}) };
   }
 
   /**
    * O resultado de um cartão de confirmação para a ferramenta que segurou o turno no portão de aprovação do motor (rc.27):
    * a decisão que vale é a que está aqui (o clique executou o que o cartão mostrou), nunca o que o modelo disser.
    */
+  /** Há mais de uma conta deste aplicativo: o que a pessoa lê diz por qual delas. */
+  private variasContas(ws: string, kind: IntegrationKind): boolean { return contasDe(this.db, ws, kind).filter((c) => c.state !== 'off').length > 1; }
+
   resultadoDoCartao(run: RunLike, cartao: string): RespostaAcao {
     const p = this.db.get<{ payload: string; status: string; result: string | null; run_id: string | null }>("SELECT payload, status, result, run_id FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", cartao, run.workspace_id);
     if (!p || p.run_id !== run.id) return { ok: false, status: 'falhou', texto: 'Cartão desconhecido para este trabalho: não sei se a ação foi feita. Diga isso à pessoa.' };
@@ -808,34 +847,34 @@ export class Conexoes {
    * Permissão recusada fica anotada pela ação (no preparar também, onde nenhuma linha "falhou" é gravada), para o sucesso de
    * outra ação não apagar o problema nem o "Autorizar de novo" (rodar). Sem problema à vista, as anotações antigas não valem.
    */
-  private anotarFalha(ws: string, kind: IntegrationKind, e: ProviderError, acaoId: string): void {
-    const row = integrationRow(this.db, ws, kind);
+  private anotarFalha(ws: string, kind: IntegrationKind, e: ProviderError, acaoId: string, conta = ''): void {
+    const row = integrationRow(this.db, ws, kind, conta);
     if (row.state !== 'connected') return;
-    if (e.reauth) setIntegration(this.db, ws, kind, { state: 'error', last_error: `A autorização venceu: entre de novo em Conexões. (${clip(e.message, 120)})` });
+    if (e.reauth) setIntegration(this.db, ws, kind, { state: 'error', last_error: `A autorização venceu: entre de novo em Conexões. (${clip(e.message, 120)})` }, conta);
     else if (e.kind === 'forbidden') {
       const msg = clip(e.message, 300);
       const recusadas = recusadasDe(row);
       delete recusadas[acaoId]; // a mais recente fica por último
-      setIntegration(this.db, ws, kind, { last_error: msg, settings: { ...settingsOf(row), recusadas: { ...recusadas, [acaoId]: msg } } });
+      setIntegration(this.db, ws, kind, { last_error: msg, settings: { ...settingsOf(row), recusadas: { ...recusadas, [acaoId]: msg } } }, conta);
     }
   }
 
   private async rodar(b: Base, dedupe: string | null): Promise<Interna> {
     const t0 = Date.now();
     try {
-      const r: Resultado = await b.acao.run(this.ctx(b.ws, b.kind), b.args);
+      const r: Resultado = await b.acao.run(this.ctx(b.ws, b.kind, b.conta), b.args);
       const ms = Date.now() - t0;
       if (r.deFora && b.run) this.marcar(b.run, { privado: !!r.privado, motivo: `${b.kind}/${b.acao.id}` });
       this.registrar(b, dedupe, 'feita', { resultado: b.risco === 'ler' ? null : r.texto, ms });
       // a permissão que o serviço recusou numa outra ação fica à vista (é ela que mostra o "Autorizar de novo" na tela) até
       // essa mesma ação dar certo ou a pessoa conectar de novo; qualquer outro problema antigo sai com o sucesso
-      const row = integrationRow(this.db, b.ws, b.kind);
+      const row = integrationRow(this.db, b.ws, b.kind, b.conta);
       const recusadas = recusadasDe(row);
       delete recusadas[b.acao.id];
       const s = settingsOf(row);
-      setIntegration(this.db, b.ws, b.kind, { last_sync_at: now(), last_error: Object.values(recusadas).at(-1) ?? null, ...(Object.keys(s.recusadas ?? {}).length ? { settings: { ...s, recusadas } } : {}) });
+      setIntegration(this.db, b.ws, b.kind, { last_sync_at: now(), last_error: Object.values(recusadas).at(-1) ?? null, ...(Object.keys(s.recusadas ?? {}).length ? { settings: { ...s, recusadas } } : {}) }, b.conta);
       audit(this.db, this.d.bus, { workspaceId: b.ws, actorType: b.run ? 'agent' : 'user', actorId: b.run?.agent_id ?? b.userId, action: 'conexao.acao', targetType: 'integration', targetId: b.kind,
-        evidence: { acao: b.acao.id, risco: b.risco, decisao: b.decisao, origem: b.origem, leuDeFora: b.leuDeFora, ms, run: b.run?.id ?? null, ...(b.regra ? { regra: b.regra.id } : {}) },
+        evidence: { acao: b.acao.id, risco: b.risco, decisao: b.decisao, origem: b.origem, leuDeFora: b.leuDeFora, ms, run: b.run?.id ?? null, ...(b.regra ? { regra: b.regra.id } : {}), ...(b.conta ? { conta: b.conta } : {}) },
         result: b.risco === 'ler' ? 'lido' : `${b.regra ? 'liberado pela sua regra: ' : ''}${clip(r.texto, 200)}` });
       // foi direto pela regra que ela aprovou, num card: o histórico do card diz (a confirmada no cartão já tem a linha dela)
       if (b.regra && b.run?.task_id && !b.linha) {
@@ -854,7 +893,7 @@ export class Conexoes {
       const autorizar = e instanceof ProviderError && e.kind === 'forbidden';
       // as opções trazem nomes escritos por outras pessoas; o erro de uma leitura pode repetir o que leu (o nome de um arquivo)
       if (b.run && (b.risco === 'ler' || (e instanceof ErroAcao && e.opcoes?.length))) this.marcar(b.run, { privado: false, motivo: `${b.kind}/${b.risco === 'ler' ? 'erro' : 'opcoes'}` });
-      if (e instanceof ProviderError) this.anotarFalha(b.ws, b.kind, e, b.acao.id);
+      if (e instanceof ProviderError) this.anotarFalha(b.ws, b.kind, e, b.acao.id, b.conta);
       this.registrar(b, dedupe, 'falhou', { erro: clip(msg, 500), ms });
       audit(this.db, this.d.bus, { workspaceId: b.ws, actorType: b.run ? 'agent' : 'user', actorId: b.run?.agent_id ?? b.userId, action: 'conexao.acao.error', targetType: 'integration', targetId: b.kind,
         evidence: { acao: b.acao.id, risco: b.risco, ms, erro: clip(msg, 300), run: b.run?.id ?? null }, result: clip(msg, 200) });
@@ -884,8 +923,8 @@ export class Conexoes {
     if (!p) throw notFound('proposta');
     if (p.status !== 'proposed') throw new HttpError(409, 'decided', 'esta proposta já foi decidida');
     const { acaoId } = JSON.parse(p.payload) as { acaoId: string };
-    const row = this.db.get<{ id: string; conexao: IntegrationKind; conta: string | null; credencial: string | null; acao: string; args: string; resumo: string | null; alvo: string | null; risco: Risco; origem: Origem; leu_de_fora: number; run_id: string | null; agent_id: string | null; conversation_id: string | null; task_id: string | null; dedupe: string | null; status: string }>(
-      'SELECT id, conexao, conta, credencial, acao, args, resumo, alvo, risco, origem, leu_de_fora, run_id, agent_id, conversation_id, task_id, dedupe, status FROM conexao_acoes WHERE id = ? AND workspace_id = ?', acaoId, ws);
+    const row = this.db.get<{ id: string; conexao: IntegrationKind; conta: string | null; credencial: string | null; acao: string; args: string; resumo: string | null; alvo: string | null; risco: Risco; origem: Origem; leu_de_fora: number; run_id: string | null; agent_id: string | null; conversation_id: string | null; task_id: string | null; dedupe: string | null; status: string; integracao_id: string | null }>(
+      'SELECT id, conexao, conta, credencial, acao, args, resumo, alvo, risco, origem, leu_de_fora, run_id, agent_id, conversation_id, task_id, dedupe, status, integracao_id FROM conexao_acoes WHERE id = ? AND workspace_id = ?', acaoId, ws);
     if (!row || row.status !== 'pendente') throw new HttpError(409, 'decided', 'esta ação já foi decidida');
     const nome = integrationDef(row.conexao)?.name ?? row.conexao;
     const oQue = `${nome}: ${clip((row.resumo ?? row.acao).replace(/\s+/g, ' '), 200)}`;
@@ -922,19 +961,23 @@ export class Conexoes {
       avisar(false, { card: `${oQue} — a pessoa confirmou, mas nada foi feito: ${motivo}.`, conversa: `A pessoa confirmou, mas nada foi feito: ${motivo}. Conte isso a ela; não tente outro caminho.`, historico: `Você confirmou, mas nada foi feito: ${oQue} (${motivo})` });
       return out;
     };
+    // a conta do cartão (pelo id da linha: continua a mesma se a principal mudou depois); cartões de antes: a principal
+    const daLinha = row.integracao_id ? contaPorId(this.db, ws, row.integracao_id) : null;
+    if (row.integracao_id && !daLinha) return naoFeita(`a conta de ${nome} por onde isto sairia foi removida depois do cartão; peça de novo para ver por qual conta sai`);
+    const slot = daLinha?.conta ?? '';
     // o que valia quando o cartão nasceu pode ter mudado: conexão desligada, ação desligada, outra conta conectada
-    const achada = this.achar(ws, row.conexao, row.acao, args);
+    const achada = this.achar(ws, row.conexao, row.acao, args, { slot });
     // a conta pediu para autorizar de novo, ou a ação foi desligada: o card fica sabendo que só a pessoa resolve
     const doCard = { taskId: row.task_id, runId: row.run_id, agentId: row.agent_id };
     if ('ok' in achada) { this.marcarPessoa(ws, doCard, row.conexao, row.acao, achada); return naoFeita(paraPessoa(achada.texto).replace(/\.$/, '')); }
-    if (this.ajuste(ws, achada.kind, achada.acao, args) === 'desligado') {
+    if (this.ajuste(ws, achada.kind, achada.acao, args, slot) === 'desligado') {
       this.marcarPessoa(ws, doCard, row.conexao, row.acao, { ok: false, status: 'falhou', texto: '', desligada: true }, { risco: riscoDe(achada.acao, args) });
       return naoFeita(`esta ação foi desligada em Conexões › ${nome} depois do cartão`);
     }
-    const conta = this.contaDe(ws, row.conexao);
+    const conta = this.contaDe(ws, row.conexao, slot);
     if ((conta ?? '') !== (row.conta ?? '')) return naoFeita(`a conta de ${nome} mudou depois do cartão${row.conta ? ` (era ${row.conta}${conta ? `, agora é ${conta}` : ''})` : ''}; peça de novo para ver por qual conta sai`);
     // o mesmo nome não prova a mesma conta: outra credencial guardada depois do cartão também não vale
-    if (this.credencialDe(ws, row.conexao) !== row.credencial) return naoFeita(`${nome} foi conectado de novo depois do cartão, e o nome da conta não garante que é a mesma; peça de novo para ver por qual conta sai`);
+    if (this.credencialDe(ws, row.conexao, slot) !== row.credencial) return naoFeita(`${nome} foi conectado de novo depois do cartão, e o nome da conta não garante que é a mesma; peça de novo para ver por qual conta sai`);
     // outro cartão igual já saiu há pouco (ou neste mesmo trabalho do card): não repete
     const janela = new Date(Date.now() - DEDUPE_MS).toISOString();
     const per = row.task_id ? this.dedupeDesde(ws, row.task_id, row.conexao, row.acao) : { desde: janela, corte: '' };
@@ -945,7 +988,7 @@ export class Conexoes {
     const run = row.run_id ? this.db.get<RunRow>('SELECT * FROM runs WHERE id = ?', row.run_id) ?? null : null;
     // a pessoa viu destino e texto e clicou: executa o que ficou guardado, nunca o que o agente disser agora
     this.db.run("UPDATE conexao_acoes SET status = 'feita', decided_at = ? WHERE id = ?", now(), row.id); // o clique duplo não executa duas vezes
-    const { marca, ...r } = await this.rodar({ ws, kind: row.conexao, acao: achada.acao, args, risco: row.risco, origem: row.origem, leuDeFora: !!row.leu_de_fora, decisao: 'direto', run, userId, linha: row.id,
+    const { marca, ...r } = await this.rodar({ ws, kind: row.conexao, conta: slot, integracaoId: achada.row.id, acao: achada.acao, args, risco: row.risco, origem: row.origem, leuDeFora: !!row.leu_de_fora, decisao: 'direto', run, userId, linha: row.id,
       ...(o.pelaRegra ? { regra: o.pelaRegra } : {}) }, row.dedupe);
     // a conta pediu para autorizar de novo, ou não confirmou se fez: o card fica sabendo que só a pessoa resolve
     if (!r.ok) this.marcarPessoa(ws, { taskId: row.task_id, runId: row.run_id, agentId: row.agent_id }, row.conexao, row.acao, r, marca);
@@ -1082,16 +1125,17 @@ export class Conexoes {
    * Prova com a conta real, sem mostrar conteúdo: cada leitura diz se funcionou e, se não, o motivo. `escrita`: faz uma
    * escrita de verdade e inofensiva (uma tarefa de teste concluída em seguida, ou um rascunho), a pedido da pessoa.
    */
-  async testar(ws: string, userId: string, kind: IntegrationKind, opts: { escrita?: boolean; quadro?: string } = {}): Promise<ItemTeste[]> {
+  async testar(ws: string, userId: string, kind: IntegrationKind, opts: { escrita?: boolean; quadro?: string; conta?: string } = {}): Promise<ItemTeste[]> {
     const def = integrationDef(kind);
     if (!def) throw notFound('conexão');
     const out: ItemTeste[] = [];
-    const acoes = this.acoes(ws, kind);
+    const conta = opts.conta ?? '';
+    const acoes = this.acoes(ws, kind, conta);
     // a pessoa lê o rótulo, nunca o texto escrito para o agente; permissão que falta aponta o botão, sem o nome técnico dela
     const nome = (a: Acao) => a.rotulo ?? a.descricao;
     const motivo = (r: RespostaAcao) => (r.autorizar ? FALTA_AUTORIZAR : paraPessoa(r.texto));
     // permissão que falta: "autorizar de novo", ou, na leitura da Microsoft em empresa, o pedido ao administrador
-    const semPermissao = (a: Acao): string | null => { const f = this.faltam(ws, kind, a); return f.length ? this.semPermissao(ws, kind, f).pessoa : null; };
+    const semPermissao = (a: Acao): string | null => { const f = this.faltam(ws, kind, a, conta); return f.length ? this.semPermissao(ws, kind, f, conta).pessoa : null; };
     // toda leitura que não precisa de escolha da pessoa; as de busca recebem um termo qualquer
     for (const a of acoes.filter((x) => riscoDe(x, {}) === 'ler')) {
       const args: Args = { limite: 1 };
@@ -1100,7 +1144,7 @@ export class Conexoes {
       if (faltam.includes('texto')) args.texto = 'a';
       const falta = semPermissao(a);
       if (falta) { out.push({ nome: nome(a), ok: false, detalhe: falta }); continue; }
-      const r = await this.daPessoa(ws, userId, kind, a.id, args);
+      const r = await this.daPessoa(ws, userId, kind, a.id, args, conta);
       if (!r.ok && /falta "|Falta o parâmetro|só funciona com/.test(r.texto)) continue; // pede um dado que só a pessoa tem, ou não vale para esta credencial
       out.push({ nome: nome(a), ok: r.ok, detalhe: r.ok ? 'funcionou' : motivo(r) });
     }
@@ -1111,22 +1155,22 @@ export class Conexoes {
     if (opts.escrita) {
       const carimbo = `Teste do Ergon (pode apagar) ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
       if (acoes.some((a) => a.id === 'tarefa.criar') && (def.tasks && (kind !== 'microsoft' || opts.quadro))) {
-        const c = await this.daPessoa(ws, userId, kind, 'tarefa.criar', { quadro: opts.quadro, titulo: carimbo });
+        const c = await this.daPessoa(ws, userId, kind, 'tarefa.criar', { quadro: opts.quadro, titulo: carimbo }, conta);
         out.push({ nome: 'criar uma tarefa de teste', ok: c.ok, detalhe: c.ok ? c.texto : motivo(c) });
         if (c.ok) {
-          const d = await this.daPessoa(ws, userId, kind, 'tarefa.concluir', { quadro: opts.quadro, tarefa: carimbo });
+          const d = await this.daPessoa(ws, userId, kind, 'tarefa.concluir', { quadro: opts.quadro, tarefa: carimbo }, conta);
           out.push({ nome: 'concluir a tarefa de teste', ok: d.ok, detalhe: d.ok ? d.texto : motivo(d) });
         }
       }
       if (acoes.some((a) => a.id === 'email.rascunho')) {
-        const me = this.d.integrations.secrets.read<{ account?: string }>(ws, kind)?.account;
-        const c = await this.daPessoa(ws, userId, kind, 'email.rascunho', { para: me ?? '', assunto: carimbo, texto: 'Rascunho de teste criado pelo botão Testar do Ergon. Pode apagar.' });
+        const me = this.d.integrations.secrets.read<{ account?: string }>(ws, kind, conta)?.account;
+        const c = await this.daPessoa(ws, userId, kind, 'email.rascunho', { para: me ?? '', assunto: carimbo, texto: 'Rascunho de teste criado pelo botão Testar do Ergon. Pode apagar.' }, conta);
         out.push({ nome: 'deixar um rascunho de teste na sua caixa', ok: c.ok, detalhe: c.ok ? c.texto : motivo(c) });
       }
     }
     // o teste roda aqui no servidor: a equipe usa a conexão pelo motor, e só ele diz se ela consegue
     out.push(equipeConsegue(ws));
-    audit(this.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'conexao.teste', targetType: 'integration', targetId: kind, evidence: { itens: out.map((x) => `${x.nome}: ${x.ok ? 'ok' : x.detalhe}`) }, result: `${out.filter((x) => x.ok).length} de ${out.length} funcionaram` });
+    audit(this.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'conexao.teste', targetType: 'integration', targetId: kind, evidence: { ...(conta ? { conta } : {}), itens: out.map((x) => `${x.nome}: ${x.ok ? 'ok' : x.detalhe}`) }, result: `${out.filter((x) => x.ok).length} de ${out.length} funcionaram` });
     return out;
   }
 }
@@ -1135,12 +1179,13 @@ export class Conexoes {
  * linha: a ação confirmada no cartão (o resultado fica na linha dela). mostrar: os args do texto do cartão, quando o
  * preparar trocou nomes por ids; alvo: o detalhe lido nesse caso, que é o que a pessoa lê no resultado.
  */
-interface Base { ws: string; kind: IntegrationKind; acao: Acao; args: Args; mostrar?: Args; risco: Risco; origem: Origem; leuDeFora: boolean; decisao: Decisao; run: RunRow | null; userId: string | null; detalhe?: string; alvo?: string; porque?: string; linha?: string;
+interface Base { ws: string; kind: IntegrationKind; /** qual das contas ('' = a principal) e o id da linha dela */ conta: string; integracaoId?: string; acao: Acao; args: Args; mostrar?: Args; risco: Risco; origem: Origem; leuDeFora: boolean; decisao: Decisao; run: RunRow | null; userId: string | null; detalhe?: string; alvo?: string; porque?: string; linha?: string;
   /** a regra aprovada pela pessoa que deixou a ação ir sem cartão (regras.ts) */
   regra?: RegraConexao }
 /** O que a pessoa decidiu num cartão de confirmação e volta a quem pediu (decidirProposta, avisar). */
 interface Aviso { feita: boolean; taskId: string | null; agentId: string | null; conversationId: string | null; chave: string; card: string; conversa: string | null; historico: string }
 const vazio = (v: unknown) => v === undefined || v === null || v === '';
+
 /**
  * As ações em que o serviço recusou a permissão, com a mensagem, da mais antiga à mais recente (anotarFalha). Valem enquanto o
  * problema à vista na conexão for uma delas: conectar de novo, ou outro problema gravado depois, deixa as anotações para trás.

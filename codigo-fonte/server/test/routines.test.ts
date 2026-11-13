@@ -43,7 +43,7 @@ describe('rotinas sem modelo de IA (simulação)', () => {
   test('biblioteca: as 25 rotinas prontas, com o que cada uma pede e o que falta conectar', async () => {
     const lib = (await req(h, 'GET', '/api/routines/library', s)).json;
     assert.equal(lib.routines.length, 25);
-    assert.ok(lib.routines.every((r: { available: boolean }) => r.available), 'fases 1 a 5: todas funcionam');
+    assert.ok(lib.routines.every((r: Record<string, unknown>) => !('available' in r)), 'fases 1 a 5: todas funcionam (sem o selo "em breve")');
     const plan = lib.routines.find((r: { key: string }) => r.key === 'planejador-projetos');
     assert.equal(plan.input.text.required, true, 'pede o objetivo na hora de executar');
     assert.equal(plan.proposes, 'tarefas');

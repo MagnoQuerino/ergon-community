@@ -106,6 +106,7 @@ const quadro: Traducao<typeof pt> = {
   'tarefas.lista': 'List',
   'tarefas.precisaReconectar': '{nome} (needs reconnecting)',
   'tarefas.ligarOutra': '+ Link another {app} list…',
+  'tarefas.ligarOutraDaConta': '+ Link another {app} list ({conta})…',
   'tarefas.falhaAoLer': "couldn't read: {erro}",
   'tarefas.ligadaA': 'linked to {app} · checked at {hora}',
   'tarefas.aplicativo': 'the app',

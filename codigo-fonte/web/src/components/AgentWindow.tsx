@@ -126,7 +126,7 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
             <div className="awin__body">
               {tab === 'conversa' && <div className="awin__chat"><ChatPanel agent={{ ...head, id: agentId }} embedded draft={draft} conversationId={conversationId} /></div>}
               {tab === 'perfil' && (a ? <ProfileEditor agent={a} row={r} sectors={sectors} coordName={coordName} reload={reload} onClose={onClose} onDirty={(v) => { dirty.current = v; }} /> : <Loading error={full.error} />)}
-              {tab === 'treinar' && <TrainTab agent={{ id: agentId, name: head.name }} full={a} onAgentChanged={reload} />}
+              {tab === 'treinar' && <TrainTab agent={{ id: agentId, name: head.name }} full={a} onAgentChanged={reload} onConversa={() => setTab('conversa')} />}
               {tab === 'memoria' && <MemoriaTab agent={{ id: agentId, name: head.name }} />}
               {tab === 'atividade' && <ActivityTab agentId={agentId} />}
             </div>

@@ -38,7 +38,7 @@ export function tmpDir(): string {
 }
 
 export function testConfig(dataDir: string, over: Partial<Config> = {}): Config {
-  return loadConfig({ ERGON_DATA_DIR: dataDir, ERGON_SIMULATED_DELAY_MS: '0', ERGON_FIXTURES_DIR: FIXTURES, ERGON_KDF: 'test', ERGON_MAX_CONCURRENT_RUNS: '1' } as NodeJS.ProcessEnv, over);
+  return loadConfig({ ERGON_DATA_DIR: dataDir, ERGON_SIMULATED_DELAY_MS: '0', ERGON_KDF: 'test', ERGON_MAX_CONCURRENT_RUNS: '1' } as NodeJS.ProcessEnv, over);
 }
 
 export interface Harness extends ErgonApp {
@@ -170,4 +170,10 @@ export function oldPlaces(full: Array<{ id: string; status: string; building_id:
 /** As construções da cidade com os andares e as contagens (GET /api/city/overview). */
 export async function cityStructures(h: ErgonApp, s: Session): Promise<any[]> {
   return (await req(h, 'GET', '/api/city/overview', s)).json.structures;
+}
+
+/** Um andar a mais na Stoa, pelo mesmo caminho da tela (Cidade › a construção › mais um andar). */
+export async function andarNaStoa(h: Harness, s: Session) {
+  const b = h.db.get<{ id: string }>("SELECT id FROM buildings WHERE workspace_id = ? AND kind = 'stoa' AND removed_at IS NULL ORDER BY created_at LIMIT 1", s.workspaceId)!;
+  return req(h, 'POST', `/api/structures/${b.id}/floors`, s);
 }

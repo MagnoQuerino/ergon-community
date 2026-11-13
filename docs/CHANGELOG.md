@@ -1,5 +1,37 @@
 # Novidades
 
+## 1.1.0-rc.29 (pré-versão de teste)
+
+- **Várias contas por aplicativo.** Ligue dois ou mais e-mails, números de WhatsApp (cada um com o seu pareamento) e
+  contas de qualquer aplicativo, cada uma com um apelido e uma delas como principal. Os agentes escolhem por qual conta
+  enviar, e o cartão de confirmação diz qual é. As rotinas monitoram uma, várias ou todas as contas, e o que chega diz
+  de qual conta veio. Quem tem uma conta só não percebe diferença.
+- **GoHighLevel (LeadConnector) em Conexões**, pelo servidor oficial da HighLevel, com o passo a passo de onde pegar a
+  chave e o ID da subconta. Cada subconta é uma conta, e cada uma começa em "Só leitura" até você liberar a escrita.
+  Mensagem a cliente sempre pede confirmação.
+- **Conectar outro aplicativo.** Qualquer aplicativo que tenha um servidor MCP pode ser ligado em Conexões, mesmo os que
+  o Ergon não traz prontos: informe o endereço (ou o programa) ou cole a configuração que o aplicativo publica. As
+  chaves vão para o cofre, o Ergon testa a conexão e separa o que só lê do que muda dados; a escrita fica bloqueada até
+  você liberar, e envios em seu nome pedem confirmação.
+- **Loja de competências com cara de loja**: vitrine com busca, categorias e destaques. As competências instaladas
+  ganharam busca e filtros.
+- **Adicionar uma competência pronta (SKILL.md).** No Treinar, envie o arquivo SKILL.md, uma pasta compactada ou cole o
+  texto, veja a prévia do que ela faz e instale num agente ou na equipe toda, depois da mesma conferência de segurança
+  da loja. O Treinar agora mostra no topo as três coisas diferentes: ensinar um jeito de trabalhar, adicionar uma
+  competência pronta e dar arquivos para consulta.
+- **O coordenador gerencia tudo.** Pela conversa, o coordenador faz o que as telas fazem: cria e organiza tarefas, lê
+  e-mails e mensagens, conecta aplicativos, instala competências (pedindo ajuda a colegas para escrevê-las), ajusta
+  rotinas, agentes e modelos. O que muda configuração, gasta, apaga, dá acesso ou envia em seu nome vem antes num
+  cartão para você aprovar, no idioma da tela. Senhas e chaves continuam só pelo cartão protegido.
+- **Tema de alto contraste**, ao lado de claro, escuro e automático, e ligado sozinho quando o sistema pede mais
+  contraste. As cores do aplicativo inteiro foram reorganizadas para manter a leitura em todos os temas, e temas da
+  comunidade com cor ilegível são corrigidos sozinhos, com aviso na loja.
+- **"Modelos por tarefa"** agora aparece como um botão de abrir ("Ajustar ▸"), em vez de passar despercebido.
+- **Saiu o quadro "Conquistas e mascotes"**, que não mudava nada no trabalho.
+- **Mais leve por dentro.** Saíram o caminho antigo do Docker Desktop no Windows (quem ainda tiver essa instalação vê
+  um aviso para usar o Ergon Desktop, e os atalhos antigos de início são arrumados), o canal antigo de Teams e WhatsApp,
+  rotas e documentos sem uso. A equipe de cada pessoa é atualizada sozinha para receber as novidades.
+
 ## 1.1.0-rc.28 (pré-versão de teste)
 
 - **Botões maiores e mais fáceis de ver nos cartões.** Os pedidos e aprovações da conversa, de "Aguardando você" e do

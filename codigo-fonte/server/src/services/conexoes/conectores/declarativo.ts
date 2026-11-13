@@ -86,6 +86,13 @@ export interface ConectorDef {
    * confere a credencial antes de dizer "conectado" e dá o nome da conta e, quando o serviço tem, o id dela lá (usuário,
    * bot, portal): o que diz se um token novo é da mesma conta (ver ContaConferida)
    */
+  /**
+   * o aplicativo fala por outro protocolo que não REST (ex.: MCP, mcp.ts): as chamadas das ações e de quemSou vão por aqui, com
+   * o caminho e o corpo que esse transporte entende; base e auth ficam só como descrição
+   */
+  transporte?: (c: Credenciais) => Http;
+  /** a conexão nova começa em "Só leitura": os agentes só consultam até a pessoa liberar a escrita em Conexões (pedido do dono, GoHighLevel) */
+  comecaSoLeitura?: boolean;
   quemSou: { caminho: string | ((c: Credenciais) => string); metodo?: 'GET' | 'POST'; corpo?: unknown | ((c: Credenciais) => unknown); semRepetir?: boolean; nome: (j: any) => string; id?: (j: any) => unknown };
   acoes: AcaoDecl[];
 }
@@ -114,11 +121,11 @@ function valoresDe(c: Credenciais): string[] {
 }
 
 /** Chamada autenticada ao conector: o caminho é relativo ao endereço base, que nunca vem do modelo. */
-export function httpDoConector(def: Pick<ConectorDef, 'auth' | 'base' | 'erroNoCorpo'>, c: Credenciais): Http {
+export function httpDoConector(def: Pick<ConectorDef, 'auth' | 'base' | 'erroNoCorpo' | 'transporte'>, c: Credenciais): Http {
   const base = (typeof def.base === 'function' ? def.base(c) : def.base).replace(/\/+$/, '');
   const segredos = valoresDe(c);
   const limpar = (t: string) => segredos.reduce((r, s) => r.split(s).join('***'), t);
-  const http = chamadaDoConector(def, c, base, segredos, limpar);
+  const http = def.transporte ? def.transporte(c) : chamadaDoConector(def, c, base, segredos, limpar);
   return async (caminho, init = {}) => {
     try { return await http(caminho, init); } catch (e) {
       if (e instanceof Error) e.message = limpar(e.message);

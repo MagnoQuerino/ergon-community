@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/db.ts';
-import { HttpError, id, now } from '../lib/util.ts';
+import { HttpError, fold, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { ProviderError, type BoardSnapshot, type ExternalBoard, type TaskProvider } from './mirror.ts';
 import { SSO, STATE_TTL, SsoAuth, isSso, type Etapa, type SsoKind } from './sso.ts';
@@ -32,7 +32,7 @@ export type IntegrationKind =
   | 'microsoft' | 'google' | 'whatsapp' | 'asana' | 'todoist' | 'trello' | 'jira' | 'clickup' | 'monday' | 'notion' | 'linear'
   | 'airtable' | 'smartsheet' | 'pipefy' | 'github' | 'bitrix'
   // conectores por dados (conexoes/conectores) e os ainda em preparo
-  | 'slack' | 'discord' | 'telegram' | 'mattermost' | 'rocketchat' | 'hubspot' | 'pipedrive' | 'rdstation' | 'kommo' | 'zendesk' | 'freshdesk' | 'intercom'
+  | 'slack' | 'discord' | 'telegram' | 'mattermost' | 'rocketchat' | 'hubspot' | 'pipedrive' | 'rdstation' | 'kommo' | 'gohighlevel' | 'zendesk' | 'freshdesk' | 'intercom'
   | 'confluence' | 'gitlab' | 'calendly' | 'asaas' | 'omie' | 'zoom' | 'googlechat' | 'salesforce' | 'dropbox';
 /** Campo de credencial pedido na tela (o valor nunca volta ao navegador). */
 export interface CredentialField { name: string; label: string; secret?: boolean; placeholder?: string; pattern?: RegExp; patternHelp?: string; opcional?: boolean }
@@ -45,6 +45,8 @@ export interface IntegrationDef {
   fields?: CredentialField[]; help?: { url: string; steps: string; antes?: string; extras?: AjudaExtra[] }; soon?: string;
   /** conectou do jeito que o serviço deixou de recomendar: continua valendo, e a tela avisa para reconectar do novo jeito */
   credencialAntiga?: { antiga: (c: Record<string, string>) => boolean; aviso: string };
+  /** a conexão nova começa em "Só leitura" (ConectorDef.comecaSoLeitura): os agentes só consultam até a pessoa liberar a escrita */
+  comecaSoLeitura?: boolean;
 }
 
 const TOKEN: CredentialField[] = [{ name: 'token', label: 'Token', secret: true, placeholder: 'Cole o token aqui' }];
@@ -127,7 +129,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
 ];
 /** Os aplicativos que entram por dados (leitura e escrita parametrizadas em conexoes/conectores) e os ainda em preparo. */
 INTEGRATIONS.push(
-  ...CONECTORES.map((c): IntegrationDef => ({ kind: c.kind as IntegrationKind, name: c.nome, auth: 'token', group: c.grupo, tasks: false, site: c.site, about: c.sobre, fields: c.campos, help: { url: c.ajuda.url, steps: c.ajuda.passos, ...(c.ajuda.extras ? { extras: c.ajuda.extras } : {}) } })),
+  ...CONECTORES.map((c): IntegrationDef => ({ kind: c.kind as IntegrationKind, name: c.nome, auth: 'token', group: c.grupo, tasks: false, site: c.site, about: c.sobre, fields: c.campos, help: { url: c.ajuda.url, steps: c.ajuda.passos, ...(c.ajuda.extras ? { extras: c.ajuda.extras } : {}) }, ...(c.comecaSoLeitura ? { comecaSoLeitura: true } : {}) })),
   { kind: 'zoom', name: 'Zoom', auth: 'soon', group: 'conversas', tasks: false, site: 'zoom.us', about: 'Reuniões e gravações do Zoom.', soon: 'Em preparo: pede o registro de um aplicativo no Zoom.' },
   { kind: 'googlechat', name: 'Google Chat', auth: 'soon', group: 'conversas', tasks: false, site: 'chat.google.com', about: 'Espaços e mensagens do Google Chat.', soon: 'Em preparo: junto com a verificação do Google.' },
   { kind: 'salesforce', name: 'Salesforce', auth: 'soon', group: 'vendas', tasks: false, site: 'salesforce.com', about: 'Contas, contatos e oportunidades do Salesforce.', soon: 'Em preparo: pede o registro de um aplicativo no Salesforce.' },
@@ -144,63 +146,132 @@ export const TASK_KINDS = INTEGRATIONS.filter((d) => d.tasks && d.auth !== 'soon
  * workspace: `read` e `write` seguem até lá (a renovação do acesso vale para todos); `readOwn` e `writeOwn` não seguem, e
  * são os que o login usa, para uma conta nova nunca sobrescrever a do workspace de origem.
  */
+/** O id de uma conta além da principal: "c" + 8 letras e números (a principal é ''). */
+export const CONTA_RE = /^c[a-f0-9]{8}$/;
+export const novaContaId = (): string => `c${crypto.randomBytes(4).toString('hex')}`;
+/** De onde vem a credencial de uma conta: o workspace e qual das contas de lá (emprestada de outro workspace). */
+export interface OrigemDaCredencial { ws: string; conta: string }
 export class SecretStore {
   private readonly dir: string;
   readonly cipher: () => FieldCipher | null;
-  /** de qual workspace é a credencial desta conexão */
-  origem: (workspaceId: string, kind: string) => string = (w) => w;
+  /** de qual workspace (e de qual das contas de lá) é a credencial desta conexão */
+  origem: (workspaceId: string, kind: string, conta: string) => OrigemDaCredencial = (w, _k, c) => ({ ws: w, conta: c });
   constructor(dataDir: string, cipher: () => FieldCipher | null = () => null) { this.dir = path.join(dataDir, 'secrets'); this.cipher = cipher; }
-  private file(workspaceId: string, kind: string) {
-    if (!/^ws_[a-f0-9]{32}$/.test(workspaceId) || !/^[a-z]{3,20}$/.test(kind)) throw new Error('chave de segredo inválida');
-    return path.join(this.dir, `${workspaceId}-${kind}.json`);
+  /** A principal (conta '') fica onde sempre ficou; as outras, ao lado, com o id da conta no nome. */
+  private file(workspaceId: string, kind: string, conta = '') {
+    if (!/^ws_[a-f0-9]{32}$/.test(workspaceId) || !/^[a-z]{3,20}$/.test(kind) || (conta !== '' && !CONTA_RE.test(conta))) throw new Error('chave de segredo inválida');
+    return path.join(this.dir, `${workspaceId}-${kind}${conta ? `.${conta}` : ''}.json`);
   }
-  read<T = Record<string, unknown>>(workspaceId: string, kind: string): T | null { return this.readOwn<T>(this.origem(workspaceId, kind), kind); }
-  write(workspaceId: string, kind: string, data: unknown): void { this.writeOwn(this.origem(workspaceId, kind), kind, data); }
-  readOwn<T = Record<string, unknown>>(workspaceId: string, kind: string): T | null {
+  read<T = Record<string, unknown>>(workspaceId: string, kind: string, conta = ''): T | null { const o = this.origem(workspaceId, kind, conta); return this.readOwn<T>(o.ws, kind, o.conta); }
+  write(workspaceId: string, kind: string, data: unknown, conta = ''): void { const o = this.origem(workspaceId, kind, conta); this.writeOwn(o.ws, kind, data, o.conta); }
+  readOwn<T = Record<string, unknown>>(workspaceId: string, kind: string, conta = ''): T | null {
     let raw: Buffer;
-    try { raw = fs.readFileSync(this.file(workspaceId, kind)); } catch { return null; }
+    try { raw = fs.readFileSync(this.file(workspaceId, kind, conta)); } catch { return null; }
     const c = this.cipher();
     if (FieldCipher.isSealedBytes(raw) && !c) return null; // cifrado e o Ergon trancado: não lê
     return JSON.parse((c ? c.openBytes(raw, `${kind}.json`) : raw).toString('utf8')) as T;
   }
-  writeOwn(workspaceId: string, kind: string, data: unknown): void {
+  writeOwn(workspaceId: string, kind: string, data: unknown, conta = ''): void {
     fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    const f = this.file(workspaceId, kind);
+    const f = this.file(workspaceId, kind, conta);
     const plain = Buffer.from(JSON.stringify(data), 'utf8');
     const c = this.cipher();
     fs.writeFileSync(`${f}.tmp`, c ? c.sealBytes(workspaceId, plain, `${kind}.json`) : plain, { mode: 0o600 });
     fs.renameSync(`${f}.tmp`, f);
   }
-  remove(workspaceId: string, kind: string): void { try { fs.rmSync(this.file(workspaceId, kind), { force: true }); } catch { /* já removido */ } }
-  /** pasta própria (sessão do WhatsApp, vários arquivos) */
-  dirFor(workspaceId: string, kind: string): string {
-    const d = this.file(workspaceId, kind).replace(/\.json$/, '');
+  remove(workspaceId: string, kind: string, conta = ''): void { try { fs.rmSync(this.file(workspaceId, kind, conta), { force: true }); } catch { /* já removido */ } }
+  /** pasta própria (sessão do WhatsApp, vários arquivos): uma por conta, cada número com o seu pareamento */
+  dirFor(workspaceId: string, kind: string, conta = ''): string {
+    const d = this.file(workspaceId, kind, conta).replace(/\.json$/, '');
     fs.mkdirSync(d, { recursive: true, mode: 0o700 });
     return d;
   }
-  removeDir(workspaceId: string, kind: string): void { try { fs.rmSync(this.file(workspaceId, kind).replace(/\.json$/, ''), { recursive: true, force: true }); } catch { /* já removida */ } }
+  removeDir(workspaceId: string, kind: string, conta = ''): void { try { fs.rmSync(this.file(workspaceId, kind, conta).replace(/\.json$/, ''), { recursive: true, force: true }); } catch { /* já removida */ } }
+  /**
+   * Troca a credencial (e a pasta) de duas contas do mesmo aplicativo no mesmo workspace: é o que acontece ao escolher outra
+   * principal. O rótulo da cifra é o mesmo para todas as contas do aplicativo, então o arquivo só muda de nome.
+   */
+  trocar(workspaceId: string, kind: string, a: string, b: string): void {
+    const fa = this.file(workspaceId, kind, a); const fb = this.file(workspaceId, kind, b);
+    for (const [x, y] of [[fa, fb], [fa.replace(/\.json$/, ''), fb.replace(/\.json$/, '')]]) {
+      const temX = fs.existsSync(x); const temY = fs.existsSync(y);
+      if (temX) fs.renameSync(x, `${x}.troca`);
+      if (temY) fs.renameSync(y, x);
+      if (temX) fs.renameSync(`${x}.troca`, y);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- estado no banco
-export interface IntegrationRow { id: string; workspace_id: string; kind: IntegrationKind; origem_workspace_id: string | null; state: 'off' | 'pending' | 'connected' | 'error'; account_label: string | null; settings: string; connected_at: string | null; last_sync_at: string | null; last_error: string | null }
+/**
+ * Uma conta de um aplicativo neste workspace. `conta` '' é a principal (a que vale quando ninguém diz qual usar, e a única de
+ * quem tem uma só); as outras têm id próprio (CONTA_RE). apelido: o nome que a pessoa deu; ativa: 0 = a pessoa desligou.
+ */
+export interface IntegrationRow { id: string; workspace_id: string; kind: IntegrationKind; conta: string; origem_workspace_id: string | null; origem_conta: string; state: 'off' | 'pending' | 'connected' | 'error'; account_label: string | null; apelido: string | null; ativa: number; settings: string; connected_at: string | null; last_sync_at: string | null; last_error: string | null; created_at: string }
 
-export function integrationRow(db: Db, workspaceId: string, kind: IntegrationKind): IntegrationRow {
-  let r = db.get<IntegrationRow>('SELECT * FROM integrations WHERE workspace_id = ? AND kind = ?', workspaceId, kind);
+/** A conta: a principal nasce quando falta (como sempre); outra conta que não existe é um erro (nasce só em Integrations.novaConta). */
+export function integrationRow(db: Db, workspaceId: string, kind: IntegrationKind, conta = ''): IntegrationRow {
+  let r = db.get<IntegrationRow>('SELECT * FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ?', workspaceId, kind, conta);
   if (!r) {
-    db.run("INSERT INTO integrations (id, workspace_id, kind, state, settings, created_at) VALUES (?, ?, ?, 'off', '{}', ?)", id('int'), workspaceId, kind, now());
-    r = db.get<IntegrationRow>('SELECT * FROM integrations WHERE workspace_id = ? AND kind = ?', workspaceId, kind)!;
+    if (conta !== '') throw new HttpError(404, 'conta', 'esta conta não existe mais neste workspace');
+    db.run("INSERT INTO integrations (id, workspace_id, kind, conta, state, settings, created_at) VALUES (?, ?, ?, '', 'off', '{}', ?)", id('int'), workspaceId, kind, now());
+    r = db.get<IntegrationRow>("SELECT * FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ''", workspaceId, kind)!;
   }
   return r;
 }
 
-export function setIntegration(db: Db, workspaceId: string, kind: IntegrationKind, patch: Partial<Pick<IntegrationRow, 'state' | 'account_label' | 'last_error' | 'last_sync_at' | 'connected_at'>> & { settings?: Record<string, unknown> }): void {
-  integrationRow(db, workspaceId, kind);
-  const sets: string[] = []; const vals: Array<string | null> = [];
+export type PatchIntegracao = Partial<Pick<IntegrationRow, 'state' | 'account_label' | 'apelido' | 'last_error' | 'last_sync_at' | 'connected_at'>> & { settings?: Record<string, unknown>; ativa?: boolean };
+export function setIntegration(db: Db, workspaceId: string, kind: IntegrationKind, patch: PatchIntegracao, conta = ''): void {
+  integrationRow(db, workspaceId, kind, conta);
+  const sets: string[] = []; const vals: Array<string | number | null> = [];
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
-    sets.push(`${k} = ?`); vals.push(k === 'settings' ? JSON.stringify(v) : k === 'account_label' ? db.seal(workspaceId, v as string | null) : (v as string | null));
+    sets.push(`${k} = ?`);
+    vals.push(k === 'settings' ? JSON.stringify(v) : k === 'ativa' ? (v ? 1 : 0) : k === 'account_label' || k === 'apelido' ? db.seal(workspaceId, v as string | null) : (v as string | null));
   }
-  if (sets.length) db.run(`UPDATE integrations SET ${sets.join(', ')} WHERE workspace_id = ? AND kind = ?`, ...vals, workspaceId, kind);
+  if (sets.length) db.run(`UPDATE integrations SET ${sets.join(', ')} WHERE workspace_id = ? AND kind = ? AND conta = ?`, ...vals, workspaceId, kind, conta);
+}
+
+/** Como a conta aparece para a pessoa e para os agentes: o apelido dela ou, sem apelido, o e-mail, o número ou o nome da conta. */
+export const nomeDaConta = (r: Pick<IntegrationRow, 'apelido' | 'account_label'>): string => (r.apelido ?? '').trim() || (r.account_label ?? '').trim();
+/** As contas de um aplicativo neste workspace: a principal primeiro, depois na ordem em que entraram. */
+export function contasDe(db: Db, workspaceId: string, kind: string): IntegrationRow[] {
+  return db.all<IntegrationRow>("SELECT * FROM integrations WHERE workspace_id = ? AND kind = ? ORDER BY CASE WHEN conta = '' THEN 0 ELSE 1 END, created_at, rowid", workspaceId, kind);
+}
+/** A conta (linha) pelo id, deste workspace: o que a ação, o quadro e a mensagem recebida guardam (estável quando a principal muda). */
+export const contaPorId = (db: Db, workspaceId: string, integracaoId: string): IntegrationRow | null =>
+  db.get<IntegrationRow>('SELECT * FROM integrations WHERE id = ? AND workspace_id = ?', integracaoId, workspaceId) ?? null;
+/** As contas conectadas e ligadas pela pessoa, de todos os aplicativos ou de um. */
+export function contasLigadas(db: Db, workspaceId: string, kinds?: readonly string[]): IntegrationRow[] {
+  return db.all<IntegrationRow>("SELECT * FROM integrations WHERE workspace_id = ? AND state = 'connected' AND ativa = 1 ORDER BY kind, CASE WHEN conta = '' THEN 0 ELSE 1 END, created_at, rowid", workspaceId)
+    .filter((r) => !kinds || kinds.includes(r.kind));
+}
+
+/**
+ * Qual conta usar, pelo que foi dito (o apelido, o e-mail ou número, ou o id): sem dizer, a principal. Comparação sem acento
+ * nem maiúscula; o apelido vale antes do nome da conta. Não achou, ou achou mais de uma: null (quem chama diz as opções).
+ */
+export type ContaQualquer = Pick<IntegrationRow, 'conta' | 'apelido' | 'account_label'>;
+/**
+ * O nome que distingue cada conta de um aplicativo: duas contas com o mesmo nome (o mesmo nome de conta, sem apelido)
+ * viram "Ana" e "Ana (2)", na ordem de `todas` (contasDe: a principal primeiro). O agente vê esse nome e pode pedi-lo.
+ */
+export function nomeUnico<C extends ContaQualquer>(todas: readonly C[]): (c: ContaQualquer) => string {
+  const base = (c: ContaQualquer) => nomeDaConta(c) || (c.conta ? c.conta : 'principal');
+  const nomes = new Map<string, string>(); const vistos = new Map<string, number>();
+  for (const c of todas) { const b = base(c); const k = fold(b); const n = (vistos.get(k) ?? 0) + 1; vistos.set(k, n); nomes.set(c.conta, n > 1 ? `${b} (${n})` : b); }
+  return (c) => nomes.get(c.conta) ?? base(c);
+}
+export function acharConta<C extends ContaQualquer>(contas: readonly C[], pedido: string | null | undefined, nome: (c: ContaQualquer) => string = nomeUnico(contas)): C | null {
+  const p = fold(String(pedido ?? '').trim());
+  if (!p) return contas.find((c) => c.conta === '') ?? null;
+  const exatas = (f: (c: C) => string) => contas.filter((c) => fold(f(c).trim()) === p);
+  for (const f of [(c: C) => c.conta || 'principal', (c: C) => c.apelido ?? '', (c: C) => c.account_label ?? '', (c: C) => nome(c)]) {
+    const a = exatas(f);
+    if (a.length === 1) return a[0];
+  }
+  const parte = contas.filter((c) => p.length >= 3 && [c.apelido ?? '', c.account_label ?? ''].some((x) => fold(x).includes(p)));
+  return parte.length === 1 ? parte[0] : null;
 }
 
 export const settingsOf = (r: IntegrationRow): Record<string, unknown> => { try { return JSON.parse(r.settings) as Record<string, unknown>; } catch { return {}; } };
@@ -241,25 +312,25 @@ export function motivoDoProvedor(kind: 'microsoft' | 'google', error: string | n
   return codigo ? `${quem} não concluiu a autorização (código ${codigo}, para o suporte).` : `${quem} não concluiu a autorização.`;
 }
 /** erro null: o login deu certo (a marca sai). */
-export function marcarBaseBloqueada(db: Db, workspaceId: string, erro: string | null): void {
-  const r = integrationRow(db, workspaceId, 'microsoft');
+export function marcarBaseBloqueada(db: Db, workspaceId: string, erro: string | null, conta = ''): void {
+  const r = integrationRow(db, workspaceId, 'microsoft', conta);
   const c = consentimentoDe(r);
   if (erro === null && !c.baseBloqueada) return;
-  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, baseBloqueada: erro === null ? null : { em: now(), erro } } } });
+  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, baseBloqueada: erro === null ? null : { em: now(), erro } } } }, conta);
 }
 export const consentimentoDe = (r: IntegrationRow): Consentimento => {
   const c = settingsOf(r).consentimento;
   return c && typeof c === 'object' ? c as Consentimento : {};
 };
-export function marcarEtapa(db: Db, workspaceId: string, etapa: Etapa, marca: Omit<MarcaEtapa, 'em'> | null): void {
-  const r = integrationRow(db, workspaceId, 'microsoft');
+export function marcarEtapa(db: Db, workspaceId: string, etapa: Etapa, marca: Omit<MarcaEtapa, 'em'> | null, conta = ''): void {
+  const r = integrationRow(db, workspaceId, 'microsoft', conta);
   const c = consentimentoDe(r);
   const etapas = { ...(c.etapas ?? {}) };
   // pedir de novo uma etapa que a empresa só libera com o administrador não apaga isso: se a página da Microsoft não voltar, a
   // tela continua com o pedido ao administrador (e não "Tentar de novo")
   const admin = marca?.estado === 'pedido' && etapas[etapa]?.admin === true && marca.admin === undefined ? { admin: true } : {};
   if (marca) etapas[etapa] = { ...marca, ...admin, em: now() }; else delete etapas[etapa];
-  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, etapas } } });
+  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, etapas } } }, conta);
 }
 /** O `state` do link do administrador: um por workspace, guardado (o link pronto na tela não muda a cada leitura). */
 export function estadoAdmin(db: Db, workspaceId: string): string {
@@ -275,24 +346,24 @@ export function estadoAdmin(db: Db, workspaceId: string): string {
  * pessoa de novo a ela (sso.ts). O "aprovado" pelo administrador conta como não recusada: aí ela passa. A marca herdada (veio
  * junto de uma etapa anterior, sem esta ter sido pedida) também não conta.
  */
-export function etapaJaRecusada(db: Db, workspaceId: string, etapa: Etapa): boolean {
-  const m = consentimentoDe(integrationRow(db, workspaceId, 'microsoft')).etapas?.[etapa];
+export function etapaJaRecusada(db: Db, workspaceId: string, etapa: Etapa, conta = ''): boolean {
+  const m = consentimentoDe(integrationRow(db, workspaceId, 'microsoft', conta)).etapas?.[etapa];
   return (m?.estado === 'bloqueado' && m.herdada !== true) || (m?.estado === 'pedido' && Date.now() - Date.parse(m.em) > STATE_TTL);
 }
 /** De quem é um `state` de link do administrador (a volta da Microsoft não traz a sessão de ninguém). */
 export function workspaceDoEstadoAdmin(db: Db, estado: string): string | null {
   if (!/^[A-Za-z0-9_-]{20,64}$/.test(estado)) return null;
-  for (const r of db.all<IntegrationRow>("SELECT * FROM integrations WHERE kind = 'microsoft'")) if (consentimentoDe(r).estadoAdmin === estado) return r.workspace_id;
+  for (const r of db.all<IntegrationRow>("SELECT * FROM integrations WHERE kind = 'microsoft' AND conta = ''")) if (consentimentoDe(r).estadoAdmin === estado) return r.workspace_id;
   return null;
 }
 /**
  * "Conectando…": o login começou agora (o "conectando…" vence junto com o `state`, em 10 minutos). O estado de antes fica
  * guardado: um login abandonado volta a ele (uma conexão caída continua caída, com o motivo, e não vira "conectada").
  */
-export function marcarConectando(db: Db, workspaceId: string, kind: IntegrationKind): void {
-  const r = integrationRow(db, workspaceId, kind);
+export function marcarConectando(db: Db, workspaceId: string, kind: IntegrationKind, conta = ''): void {
+  const r = integrationRow(db, workspaceId, kind, conta);
   const antes = r.state === 'pending' ? settingsOf(r).antesDeConectar : { state: r.state, last_error: r.last_error ?? null };
-  setIntegration(db, workspaceId, kind, { state: 'pending', last_error: null, settings: { ...settingsOf(r), pendenteDesde: now(), antesDeConectar: antes ?? null } });
+  setIntegration(db, workspaceId, kind, { state: 'pending', last_error: null, settings: { ...settingsOf(r), pendenteDesde: now(), antesDeConectar: antes ?? null } }, conta);
 }
 /**
  * Para onde volta um login que não terminou: sem credencial, desligada; com ela, o estado de antes (caída continua caída,
@@ -307,11 +378,11 @@ export function voltaDoConectando(r: IntegrationRow, temCredencial: boolean, mot
 }
 const clipTxt = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 /** Outra conta entrou neste workspace: as marcas das etapas da conta de antes (aprovado, pedido, bloqueado) não valem para ela. */
-export function limparEtapas(db: Db, workspaceId: string): void {
-  const r = integrationRow(db, workspaceId, 'microsoft');
+export function limparEtapas(db: Db, workspaceId: string, conta = ''): void {
+  const r = integrationRow(db, workspaceId, 'microsoft', conta);
   const c = consentimentoDe(r);
   if (!c.etapas || !Object.keys(c.etapas).length) return;
-  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, etapas: {} } } });
+  setIntegration(db, workspaceId, 'microsoft', { settings: { ...settingsOf(r), consentimento: { ...c, etapas: {} } } }, conta);
 }
 
 // ---------------------------------------------------------------- HTTP com token do usuário
@@ -440,8 +511,10 @@ export class MicrosoftTasksProvider implements TaskProvider {
   /** fuso do workspace: o Planner guarda o prazo como instante em UTC (ver dueAt) */
   private readonly tz: string;
   private names = new Map<string, string>();
-  constructor(auth: SsoAuth, workspaceId: string, tz: string) { this.auth = auth; this.workspaceId = workspaceId; this.tz = tz; }
-  private async g(p: string) { return renewOn401((force) => this.auth.accessToken(this.workspaceId, 'microsoft', { force }), (t) => call(`https://graph.microsoft.com/v1.0${p}`, t)); }
+  /** qual das contas Microsoft deste workspace ('' = a principal) */
+  private readonly conta: string;
+  constructor(auth: SsoAuth, workspaceId: string, tz: string, conta = '') { this.auth = auth; this.workspaceId = workspaceId; this.tz = tz; this.conta = conta; }
+  private async g(p: string) { return renewOn401((force) => this.auth.accessToken(this.workspaceId, 'microsoft', { force, conta: this.conta }), (t) => call(`https://graph.microsoft.com/v1.0${p}`, t)); }
   async listBoards() {
     const out: Array<ExternalBoard & { taskCount: number }> = [];
     try { for (const p of (await this.g('/me/planner/plans')).value ?? []) out.push({ externalId: `planner:${p.id}`, name: `Planner › ${p.title}`, version: String(p['@odata.etag'] ?? ''), taskCount: -1 }); } catch { /* conta pessoal: sem Planner */ }
@@ -514,9 +587,10 @@ export class GoogleTasksProvider implements TaskProvider {
   readonly name = 'google'; readonly isFixture = false;
   readonly supports = { title: true, description: true, completion: true, columns: false, writeBack: false } as const;
   private readonly auth: SsoAuth; private readonly workspaceId: string;
-  constructor(auth: SsoAuth, workspaceId: string) { this.auth = auth; this.workspaceId = workspaceId; }
+  private readonly conta: string;
+  constructor(auth: SsoAuth, workspaceId: string, conta = '') { this.auth = auth; this.workspaceId = workspaceId; this.conta = conta; }
   private base = 'https://tasks.googleapis.com/tasks/v1';
-  private async g(p: string) { return renewOn401((force) => this.auth.accessToken(this.workspaceId, 'google', { force }), (t) => call(`${this.base}${p}`, t)); }
+  private async g(p: string) { return renewOn401((force) => this.auth.accessToken(this.workspaceId, 'google', { force, conta: this.conta }), (t) => call(`${this.base}${p}`, t)); }
   async listBoards() {
     const j = await this.g('/users/@me/lists?maxResults=100');
     return ((j.items ?? []) as any[]).map((l) => ({ externalId: String(l.id), name: String(l.title ?? 'Lista'), version: String(l.updated ?? ''), taskCount: -1 }));
@@ -562,48 +636,79 @@ export function tokenProvider(kind: IntegrationKind, c: Record<string, string>):
   }
 }
 
+/** Uma conta como a tela mostra (Conexões › aplicativo › contas). */
+export interface ContaDaTela {
+  /** '' = a principal */
+  conta: string; id: string; principal: boolean; nome: string; apelido: string | null; account: string | null;
+  state: IntegrationRow['state']; ativa: boolean; error: string | null; connectedAt: string | null; lastSyncAt: string | null;
+  sharedFrom: string | null; live: Record<string, unknown> | null; renewBy: string | null; aviso: string | null;
+}
+/** Uma conta como o agente vê: o nome para pedir por ela (conta="...") e se é a principal. */
+export interface ContaDoAgente { conta: string; nome: string; principal: boolean }
+
 // ---------------------------------------------------------------- serviço
 export class Integrations {
   readonly secrets: SecretStore;
   /** login com a conta (Microsoft, Google), parametrizado */
   readonly sso: SsoAuth;
   private readonly db: Db; private readonly bus: Bus;
-  /** estado ao vivo de canais com processo próprio (WhatsApp) */
-  liveState: (workspaceId: string, kind: IntegrationKind) => Record<string, unknown> | null = () => null;
+  /** estado ao vivo de canais com processo próprio (WhatsApp), por conta */
+  liveState: (workspaceId: string, kind: IntegrationKind, conta: string) => Record<string, unknown> | null = () => null;
+  /** antes e depois de trocar a principal (o WhatsApp para e retoma as sessões dos dois números) */
+  antesDeTrocar: (workspaceId: string, kind: IntegrationKind) => Promise<void> = async () => undefined;
+  depoisDeTrocar: (workspaceId: string, kind: IntegrationKind) => void = () => undefined;
   private readonly googleTesting: boolean;
   constructor(db: Db, bus: Bus, cfg: Config) { this.db = db; this.bus = bus; this.secrets = new SecretStore(cfg.dataDir, () => db.fieldCipher);
-    this.secrets.origem = (ws, kind) => db.get<{ o: string | null }>('SELECT origem_workspace_id AS o FROM integrations WHERE workspace_id = ? AND kind = ?', ws, kind)?.o ?? ws;
-    this.sso = new SsoAuth(cfg, this.secrets, (ws, kind, antes, conta) => { if (antes !== conta) this.promover(ws, kind); }, (ws, etapa) => etapaJaRecusada(db, ws, etapa));  this.googleTesting = cfg.googleTesting; }
+    this.secrets.origem = (ws, kind, conta) => {
+      const r = db.get<{ o: string | null; oc: string | null }>('SELECT origem_workspace_id AS o, origem_conta AS oc FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ?', ws, kind, conta);
+      return r?.o ? { ws: r.o, conta: r.oc ?? '' } : { ws, conta };
+    };
+    this.sso = new SsoAuth(cfg, this.secrets, (ws, kind, antes, conta, slot) => { if (antes !== conta) this.promover(ws, kind, slot); }, (ws, etapa, slot) => etapaJaRecusada(db, ws, etapa, slot));  this.googleTesting = cfg.googleTesting; }
 
-  /** userId: o dono do workspace, que pode usar aqui uma conta dos outros workspaces dele (só ele vê as opções). */
   /**
    * Login com a conta que não voltou em 10 minutos (o `state` já venceu): sai do "conectando…" e diz por quê. Com a credencial de
    * antes, a conexão continua como estava; sem ela, fica desligada. Sem a hora de início (versão anterior), também venceu.
    */
-  vencerConectando(workspaceId: string, kind: IntegrationKind): IntegrationRow {
-    const r = integrationRow(this.db, workspaceId, kind);
+  vencerConectando(workspaceId: string, kind: IntegrationKind, conta = ''): IntegrationRow {
+    const r = integrationRow(this.db, workspaceId, kind, conta);
     if (!isSso(kind) || r.state !== 'pending') return r;
     const desde = Date.parse(String(settingsOf(r).pendenteDesde ?? ''));
     if (Number.isFinite(desde) && Date.now() - desde <= STATE_TTL) return r;
-    const tem = !!this.secrets.read(workspaceId, kind);
+    const tem = !!this.secrets.read(workspaceId, kind, conta);
     const quem = kind === 'google' ? 'do Google' : 'da Microsoft';
     const caida = (settingsOf(r).antesDeConectar as { state?: string } | undefined)?.state === 'error';
     setIntegration(this.db, workspaceId, kind, voltaDoConectando(r, tem, tem && !caida
       ? `A nova autorização ${quem} não terminou em 10 minutos; a conexão de antes continua valendo.`
-      : `O login ${quem} não terminou em 10 minutos. Para tentar de novo, clique em "Entrar com ${kind === 'google' ? 'o Google' : 'a Microsoft'}".`));
-    return integrationRow(this.db, workspaceId, kind);
+      : `O login ${quem} não terminou em 10 minutos. Para tentar de novo, clique em "Entrar com ${kind === 'google' ? 'o Google' : 'a Microsoft'}".`), conta);
+    return integrationRow(this.db, workspaceId, kind, conta);
   }
 
+  /**
+   * Conta a mais que ficou desligada sem credencial (o login ou o QR de uma conta nova que não terminou, ou uma que a pessoa
+   * desconectou e não tem quadro ligado): sai da lista. A principal nunca sai (é o cartão do aplicativo).
+   */
+  private limparAbandonadas(workspaceId: string, kind: IntegrationKind): void {
+    for (const r of contasDe(this.db, workspaceId, kind)) {
+      if (!r.conta || r.state !== 'off' || r.origem_workspace_id) continue;
+      if (this.secrets.readOwn(workspaceId, kind, r.conta) || this.db.get('SELECT 1 AS x FROM boards WHERE connection_id = ? LIMIT 1', r.id)) continue;
+      this.secrets.removeDir(workspaceId, kind, r.conta);
+      this.db.run('DELETE FROM integrations WHERE id = ?', r.id);
+    }
+  }
+
+  /** userId: o dono do workspace, que pode usar aqui uma conta dos outros workspaces dele (só ele vê as opções). */
   list(workspaceId: string, userId: string | null = null) {
     return INTEGRATIONS.map((d) => {
       // "em breve": nada no banco, só o cartão honesto
+      if (d.auth !== 'soon') this.limparAbandonadas(workspaceId, d.kind);
       const r = d.auth === 'soon' ? null : isSso(d.kind) ? this.vencerConectando(workspaceId, d.kind) : integrationRow(this.db, workspaceId, d.kind);
       const s = r ? settingsOf(r) : {};
+      const contas = d.auth === 'soon' ? [] : contasDe(this.db, workspaceId, d.kind).map((c) => this.contaDaTela(workspaceId, d, isSso(d.kind) && c.conta ? this.vencerConectando(workspaceId, d.kind, c.conta) : c));
       return {
         kind: d.kind, name: d.name, auth: d.auth, group: d.group, about: d.about, tasks: d.tasks, site: d.site, soon: d.soon ?? null, help: d.help ?? null,
         fields: (d.fields ?? []).map((f) => ({ name: f.name, label: f.label, secret: !!f.secret, placeholder: f.placeholder ?? '', opcional: !!f.opcional })),
         // o jeito antigo de conectar ainda vale, mas a tela pede para reconectar do novo jeito
-        aviso: r?.state === 'connected' && d.credencialAntiga && d.credencialAntiga.antiga(this.secrets.read<Record<string, string>>(workspaceId, d.kind) ?? {}) ? d.credencialAntiga.aviso : null,
+        aviso: r ? this.avisoDe(workspaceId, d, r) : null,
         state: r?.state ?? 'off', account: r?.account_label ?? null, connectedAt: r?.connected_at ?? null, lastSyncAt: r?.last_sync_at ?? null, error: r?.last_error ?? null,
         settings: d.kind === 'whatsapp' ? s : {}, ready: !isSso(d.kind) || this.sso.configured(d.kind),
         // conta emprestada de outro workspace seu
@@ -611,19 +716,36 @@ export class Integrations {
         // os outros workspaces que usam a credencial que mora aqui: desconectar aqui não corta o acesso deles (promover).
         // São workspaces do dono: só ele vê os nomes, como os reutilizáveis
         usadaEm: userId && r && !r.origem_workspace_id && r.state === 'connected'
-          ? this.db.all<{ name: string }>('SELECT w.name FROM integrations i JOIN workspaces w ON w.id = i.workspace_id WHERE i.origem_workspace_id = ? AND i.kind = ? ORDER BY w.name', workspaceId, d.kind).map((x) => x.name) : [],
-        // a mesma conta já conectada noutro workspace da pessoa: vem junto, para a tela abrir pronta
-        reutilizaveis: userId && r && r.state !== 'connected' ? this.reutilizaveis(workspaceId, userId, d.kind) : [],
+          ? this.db.all<{ name: string }>("SELECT w.name FROM integrations i JOIN workspaces w ON w.id = i.workspace_id WHERE i.origem_workspace_id = ? AND i.kind = ? AND i.origem_conta = '' ORDER BY w.name", workspaceId, d.kind).map((x) => x.name) : [],
+        // a mesma conta já conectada noutro workspace da pessoa: vem junto, para a tela abrir pronta (e para "Adicionar outra conta")
+        reutilizaveis: userId && r ? this.reutilizaveis(workspaceId, userId, d.kind) : [],
         setup: isSso(d.kind) ? { needs: SSO[d.kind].needs, doc: SSO[d.kind].doc, place: SSO[d.kind].place } : null,
-        live: this.liveState(workspaceId, d.kind),
+        live: this.liveState(workspaceId, d.kind, ''),
         // Google com o app em teste: a autorização vale 7 dias (depois, entrar de novo); a tela avisa antes. Conta emprestada
         // vence junto com a do workspace onde ela mora (o connected_at daqui é a hora do empréstimo)
         renewBy: d.kind === 'google' && this.googleTesting && r?.state === 'connected' ? this.renovarAte(r) : null,
         // empresa que não deixa ninguém autorizar sozinho: o primeiro login volta sem a conta, e o pedido ao administrador
         // aparece já no cartão desconectado (o link da leitura inclui o que o primeiro login pediria)
         adminBase: d.kind === 'microsoft' && r && r.state !== 'connected' ? this.adminBase(workspaceId, r) : null,
+        // todas as contas deste aplicativo (rc.29): a principal primeiro. Quem tem uma só vê a mesma tela de antes
+        contas,
       };
     });
+  }
+
+  private avisoDe(workspaceId: string, d: IntegrationDef, r: IntegrationRow): string | null {
+    return r.state === 'connected' && d.credencialAntiga && d.credencialAntiga.antiga(this.secrets.read<Record<string, string>>(workspaceId, d.kind, r.conta) ?? {}) ? d.credencialAntiga.aviso : null;
+  }
+
+  private contaDaTela(workspaceId: string, d: IntegrationDef, c: IntegrationRow): ContaDaTela {
+    return {
+      conta: c.conta, id: c.id, principal: c.conta === '', nome: nomeDaConta(c), apelido: c.apelido ?? null, account: c.account_label ?? null,
+      state: c.state, ativa: c.ativa !== 0, error: c.last_error ?? null, connectedAt: c.connected_at ?? null, lastSyncAt: c.last_sync_at ?? null,
+      sharedFrom: c.origem_workspace_id ? this.db.get<{ name: string }>('SELECT name FROM workspaces WHERE id = ?', c.origem_workspace_id)?.name ?? null : null,
+      live: this.liveState(workspaceId, d.kind, c.conta),
+      renewBy: d.kind === 'google' && this.googleTesting && c.state === 'connected' ? this.renovarAte(c) : null,
+      aviso: this.avisoDe(workspaceId, d, c),
+    };
   }
 
   /** O pedido ao administrador antes da primeira conexão: só depois que o login da Microsoft voltou dizendo que precisa dele. */
@@ -636,24 +758,88 @@ export class Integrations {
 
   private renovarAte(r: IntegrationRow): string | null {
     const desde = r.origem_workspace_id
-      ? this.db.get<{ c: string | null }>('SELECT connected_at AS c FROM integrations WHERE workspace_id = ? AND kind = ?', r.origem_workspace_id, r.kind)?.c ?? null
+      ? this.db.get<{ c: string | null }>('SELECT connected_at AS c FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ?', r.origem_workspace_id, r.kind, r.origem_conta ?? '')?.c ?? null
       : r.connected_at;
     return desde ? new Date(Date.parse(desde) + 7 * 86_400_000).toISOString() : null;
   }
 
-  provider(workspaceId: string, kind: IntegrationKind): TaskProvider {
-    const r = integrationRow(this.db, workspaceId, kind);
+  provider(workspaceId: string, kind: IntegrationKind, conta = ''): TaskProvider {
+    const r = integrationRow(this.db, workspaceId, kind, conta);
     if (r.state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
-    if (kind === 'microsoft') return new MicrosoftTasksProvider(this.sso, workspaceId, workspaceTz(this.db, workspaceId));
-    if (kind === 'google') return new GoogleTasksProvider(this.sso, workspaceId);
-    const creds = this.secrets.read<Record<string, string>>(workspaceId, kind);
+    if (kind === 'microsoft') return new MicrosoftTasksProvider(this.sso, workspaceId, workspaceTz(this.db, workspaceId), conta);
+    if (kind === 'google') return new GoogleTasksProvider(this.sso, workspaceId, conta);
+    const creds = this.secrets.read<Record<string, string>>(workspaceId, kind, conta);
     // Pipefy: a conta de serviço não tem token (Client ID e Client Secret); quem conectou antes, sim
     if (!creds?.token && !(kind === 'pipefy' && creds?.client_id)) throw new HttpError(409, 'not_connected', 'credencial ausente: conecte de novo');
     return tokenProvider(kind, creds);
   }
 
+  // ------------------------------------------------------------------- várias contas do mesmo aplicativo
+  /**
+   * Uma conta a mais deste aplicativo, ainda sem credencial (o login com a conta ou o QR do WhatsApp começam por aqui). Quem
+   * ainda não tem nenhuma usa a principal: a primeira conta é sempre a principal.
+   */
+  novaConta(workspaceId: string, kind: IntegrationKind): string {
+    const p = integrationRow(this.db, workspaceId, kind);
+    if (p.state === 'off' && !p.origem_workspace_id && !this.secrets.readOwn(workspaceId, kind)) return '';
+    const conta = novaContaId();
+    this.db.run("INSERT INTO integrations (id, workspace_id, kind, conta, state, settings, created_at) VALUES (?, ?, ?, ?, 'off', ?, ?)", id('int'), workspaceId, kind, conta,
+      // os filtros e o aceite dos riscos do WhatsApp valem para a pessoa, não para um número: o número novo começa com os da principal
+      // (o número de quem pareou e o estado do pareamento são de cada número: não vêm junto, ou o novo pareceria repetido)
+      kind === 'whatsapp' ? JSON.stringify((({ numero: _n, recusadas: _r, pendenteDesde: _p, antesDeConectar: _a, ...resto }) => resto)(settingsOf(p))) : '{}', now());
+    return conta;
+  }
+
+  /** As contas que a equipe pode usar agora neste aplicativo (conectadas e ligadas), como o agente pede por elas. */
+  contasDoAgente(workspaceId: string, kind: IntegrationKind): ContaDoAgente[] {
+    const nome = nomeUnico(contasDe(this.db, workspaceId, kind));
+    return contasLigadas(this.db, workspaceId, [kind]).map((r) => ({ conta: r.conta, nome: nome(r), principal: r.conta === '' }));
+  }
+
+  /** O apelido da conta (vazio: volta a valer o e-mail, o número ou o nome da conta). Dois iguais no mesmo aplicativo confundiriam quem pede. */
+  renomear(workspaceId: string, userId: string, kind: IntegrationKind, conta: string, apelido: string): void {
+    const r = integrationRow(this.db, workspaceId, kind, conta);
+    const novo = apelido.replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (novo && contasDe(this.db, workspaceId, kind).some((c) => c.id !== r.id && fold(nomeDaConta(c)) === fold(novo))) throw new HttpError(409, 'apelido_repetido', 'Outra conta deste aplicativo já tem esse nome. Escolha outro.');
+    setIntegration(this.db, workspaceId, kind, { apelido: novo || null }, conta);
+    audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.apelido', targetType: 'integration', targetId: r.id, evidence: { kind }, result: novo ? 'apelido da conta atualizado' : 'apelido da conta removido' });
+    this.bus.publish(workspaceId, 'integrations.changed', { kind });
+  }
+
+  /** Liga ou desliga a conta para a equipe e as rotinas (a credencial continua guardada). */
+  ligar(workspaceId: string, userId: string, kind: IntegrationKind, conta: string, ativa: boolean): void {
+    const r = integrationRow(this.db, workspaceId, kind, conta);
+    setIntegration(this.db, workspaceId, kind, { ativa }, conta);
+    audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.ativa', targetType: 'integration', targetId: r.id, evidence: { kind, ativa }, result: ativa ? 'a equipe e as rotinas voltam a usar esta conta' : 'a equipe e as rotinas deixam de usar esta conta' });
+    this.bus.publish(workspaceId, 'integrations.changed', { kind });
+  }
+
+  /**
+   * Outra conta passa a ser a principal (a que vale quando ninguém diz qual usar). Só o `conta` das duas linhas troca, com a
+   * credencial e a pasta de cada uma: o id, os quadros, as permissões e o registro seguem cada conta. Quem usa uma delas
+   * emprestada noutro workspace continua apontando para a mesma conta.
+   */
+  async tornarPrincipal(workspaceId: string, userId: string | null, kind: IntegrationKind, conta: string): Promise<void> {
+    if (!conta) return;
+    const x = integrationRow(this.db, workspaceId, kind, conta);
+    const p = integrationRow(this.db, workspaceId, kind);
+    await this.antesDeTrocar(workspaceId, kind);
+    try {
+      const tmp = novaContaId();
+      this.db.tx(() => {
+        this.db.run('UPDATE integrations SET conta = ? WHERE id = ?', tmp, p.id);
+        this.db.run("UPDATE integrations SET conta = '' WHERE id = ?", x.id);
+        this.db.run('UPDATE integrations SET conta = ? WHERE id = ?', conta, p.id);
+        this.db.run("UPDATE integrations SET origem_conta = CASE origem_conta WHEN '' THEN ? ELSE '' END WHERE origem_workspace_id = ? AND kind = ? AND origem_conta IN ('', ?)", conta, workspaceId, kind, conta);
+      });
+      this.secrets.trocar(workspaceId, kind, '', conta);
+    } finally { this.depoisDeTrocar(workspaceId, kind); }
+    if (userId) audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.principal', targetType: 'integration', targetId: x.id, evidence: { kind }, result: 'esta conta passou a ser a principal' });
+    this.bus.publish(workspaceId, 'integrations.changed', { kind });
+  }
+
   /** Credencial colada (token e, conforme o app, chave, endereço ou e-mail): confere com uma chamada real antes de chamar de "conectado". */
-  async connectToken(workspaceId: string, userId: string, kind: IntegrationKind, input: Record<string, string>): Promise<string> {
+  async connectToken(workspaceId: string, userId: string, kind: IntegrationKind, input: Record<string, string>, contaPedida = ''): Promise<string> {
     const d = integrationDef(kind);
     if (!d || d.auth !== 'token') throw new HttpError(400, 'kind', 'esta conexão não usa token');
     const creds: Record<string, string> = {};
@@ -668,50 +854,90 @@ export class Integrations {
     if (kind === 'jira' && !jiraHost(creds.site)) throw new HttpError(400, 'field', 'Endereço do Jira: use sua-empresa.atlassian.net (só Jira Cloud)');
     // o segredo da conta de serviço só vai ao próprio Pipefy
     if (kind === 'pipefy' && creds.token_url) { try { creds.token_url = enderecoTokenPipefy(creds.token_url); } catch (e) { throw new HttpError(400, 'field', e instanceof Error ? e.message : 'endereço inválido'); } }
+    if (contaPedida && contaPedida !== 'nova') integrationRow(this.db, workspaceId, kind, contaPedida); // a conta existe
     let conta: ContaConferida;
     try { conta = d.tasks ? await tokenProvider(kind, creds).whoami() : await conferir(kind, creds); } catch (err) {
       if (err instanceof ErroAcao) throw new HttpError(400, 'field', err.message);
       throw new HttpError(400, 'token_rejected', err instanceof ProviderError ? `O ${d.name} recusou: ${err.message}` : 'não consegui conferir a credencial');
     }
+    const campos = d.fields ?? TOKEN;
+    const igual = (antes: Record<string, unknown> | null, f: CredentialField) => (antes?.[f.name] ?? '') === (creds[f.name] ?? '');
+    /** a mesma conta do serviço: o id dela no mesmo endereço (site, e-mail, região) ou, sem id, a mesma credencial colada de novo */
+    const mesmaConta = (antes: Record<string, unknown> | null) => !!antes && (campos.every((f) => igual(antes, f)) || (!!conta.id && antes[CONTA_ID] === conta.id && campos.filter((f) => !f.secret).every((f) => igual(antes, f))));
+    // conta nova: a mesma conta já conectada aqui (outra linha deste aplicativo) não entra duas vezes
+    let slot = contaPedida === 'nova' ? null : contaPedida;
+    if (slot === null) {
+      const repetida = contasDe(this.db, workspaceId, kind).find((c) => c.state !== 'off' && mesmaConta(this.secrets.read<Record<string, unknown>>(workspaceId, kind, c.conta)));
+      if (repetida) throw new HttpError(409, 'ja_conectada', `Esta conta já está conectada aqui${nomeDaConta(repetida) ? ` (${nomeDaConta(repetida)})` : ''}.`);
+      slot = this.novaConta(workspaceId, kind);
+    }
     const account = conta.nome;
     // credencial nova onde a conta mora: só continua valendo para quem a usa emprestada noutros workspaces se for a mesma conta.
     // O nome não prova isso (duas contas podem ter o mesmo nome): vale o id da conta no serviço, no mesmo endereço (site,
     // e-mail, região); sem id conhecido, só a mesma credencial colada de novo. Outra conta: quem usava fica com a de antes
-    const row = integrationRow(this.db, workspaceId, kind);
-    const antes = row.origem_workspace_id ? null : this.secrets.readOwn<Record<string, unknown>>(workspaceId, kind);
-    const campos = d.fields ?? TOKEN;
-    const igual = (f: CredentialField) => (antes?.[f.name] ?? '') === (creds[f.name] ?? '');
-    const mesma = !!antes && (campos.every(igual) || (!!conta.id && antes[CONTA_ID] === conta.id && campos.filter((f) => !f.secret).every(igual)));
-    if (!row.origem_workspace_id && !mesma) this.promover(workspaceId, kind);
-    this.db.run('UPDATE integrations SET origem_workspace_id = NULL WHERE workspace_id = ? AND kind = ?', workspaceId, kind);
-    this.secrets.writeOwn(workspaceId, kind, conta.id ? { ...creds, [CONTA_ID]: conta.id } : creds);
-    setIntegration(this.db, workspaceId, kind, { state: 'connected', account_label: account.slice(0, 120), connected_at: now(), last_error: null });
-    this.reativarQuemUsa(workspaceId, kind);
-    audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.connect', targetType: 'integration', targetId: kind, evidence: { account }, result: 'conectado (conferido no serviço)' });
+    const row = integrationRow(this.db, workspaceId, kind, slot);
+    const antes = row.origem_workspace_id ? null : this.secrets.readOwn<Record<string, unknown>>(workspaceId, kind, slot);
+    if (!row.origem_workspace_id && !mesmaConta(antes)) this.promover(workspaceId, kind, slot);
+    this.db.run("UPDATE integrations SET origem_workspace_id = NULL, origem_conta = '' WHERE id = ?", row.id);
+    this.secrets.writeOwn(workspaceId, kind, conta.id ? { ...creds, [CONTA_ID]: conta.id } : creds, slot);
+    setIntegration(this.db, workspaceId, kind, { state: 'connected', account_label: account.slice(0, 120), connected_at: now(), last_error: null }, slot);
+    this.comecarSoLeitura(workspaceId, kind, conta.id, slot);
+    this.reativarQuemUsa(workspaceId, kind, slot);
+    audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.connect', targetType: 'integration', targetId: kind, evidence: { account, ...(slot ? { conta: slot } : {}) }, result: slot ? 'outra conta conectada (conferida no serviço)' : 'conectado (conferido no serviço)' });
     this.bus.publish(workspaceId, 'integrations.changed', { kind });
     return account;
   }
 
-  // ------------------------------------------------------------------- a mesma conta em mais de um workspace seu
-  /** Contas desta conexão nos seus outros workspaces, que este pode usar sem conectar de novo. WhatsApp é um aparelho só: fica fora. */
-  reutilizaveis(workspaceId: string, userId: string, kind: IntegrationKind): Array<{ workspaceId: string; workspace: string; conta: string | null }> {
-    if (kind === 'whatsapp') return [];
-    return this.db.all<{ id: string; name: string; conta: string | null }>(
-      `SELECT w.id, w.name, i.account_label AS conta FROM integrations i JOIN workspaces w ON w.id = i.workspace_id
-         JOIN memberships m ON m.workspace_id = i.workspace_id AND m.user_id = ? AND m.role = 'owner'
-        WHERE i.kind = ? AND i.state = 'connected' AND i.origem_workspace_id IS NULL AND i.workspace_id <> ? ORDER BY w.name`, userId, kind, workspaceId)
-      .map((r) => ({ workspaceId: r.id, workspace: r.name, conta: r.conta }));
+  /**
+   * A primeira conexão de um app que começa só para consulta (comecaSoLeitura): a escrita fica desligada até a pessoa
+   * desmarcar "Só leitura" em Conexões. Um ajuste que ela já fez continua como estava quando a conta é a mesma (reconectar,
+   * chave nova da mesma subconta); outra conta (outra subconta do HighLevel, depois de desconectar a primeira) começa de
+   * novo em "Só leitura": o que ela liberou valia para a outra empresa. settings.soLeituraConta guarda de qual conta é o ajuste.
+   * Vale por conta do app (slot): cada subconta do HighLevel é uma conta, e a que entra com "Adicionar outra conta" nasce
+   * com settings vazios, logo começa trancada, sem herdar o que a principal liberou.
+   */
+  private comecarSoLeitura(workspaceId: string, kind: IntegrationKind, contaId: unknown, slot = ''): void {
+    if (!integrationDef(kind)?.comecaSoLeitura) return;
+    const s = settingsOf(integrationRow(this.db, workspaceId, kind, slot));
+    const conta = contaId === undefined || contaId === null || contaId === '' ? null : String(contaId);
+    const outraConta = !!conta && typeof s.soLeituraConta === 'string' && s.soLeituraConta !== conta;
+    if (s.permissoes !== undefined && !outraConta) {
+      if (conta && s.soLeituraConta !== conta) setIntegration(this.db, workspaceId, kind, { settings: { ...s, soLeituraConta: conta } }, slot);
+      return;
+    }
+    const { soLeituraAntes: _antes, ...resto } = s as Record<string, unknown>;
+    setIntegration(this.db, workspaceId, kind, { settings: { ...resto, permissoes: { tipos: { organizar: 'desligado', enviar: 'desligado', apagar: 'desligado' }, acoes: {} }, ...(conta ? { soLeituraConta: conta } : {}) } }, slot);
   }
 
-  /** Este workspace passa a usar a conta de outro workspace da mesma pessoa. Permissões e quadros continuam de cada um. */
-  usarDe(workspaceId: string, userId: string, kind: IntegrationKind, origem: string): string | null {
-    const achada = this.reutilizaveis(workspaceId, userId, kind).find((x) => x.workspaceId === origem);
+  // ------------------------------------------------------------------- a mesma conta em mais de um workspace seu
+  /** Contas desta conexão nos seus outros workspaces, que este pode usar sem conectar de novo. WhatsApp é um aparelho só: fica fora. */
+  reutilizaveis(workspaceId: string, userId: string, kind: IntegrationKind): Array<{ workspaceId: string; workspace: string; conta: string | null; origemConta: string }> {
+    if (kind === 'whatsapp') return [];
+    // as que este workspace já usa emprestadas não aparecem de novo
+    const ja = new Set(this.db.all<{ k: string }>("SELECT origem_workspace_id || '|' || origem_conta AS k FROM integrations WHERE workspace_id = ? AND kind = ? AND origem_workspace_id IS NOT NULL", workspaceId, kind).map((r) => r.k));
+    return this.db.all<{ id: string; name: string; conta: string | null; apelido: string | null; slot: string }>(
+      `SELECT w.id, w.name, i.account_label AS conta, i.apelido, i.conta AS slot FROM integrations i JOIN workspaces w ON w.id = i.workspace_id
+         JOIN memberships m ON m.workspace_id = i.workspace_id AND m.user_id = ? AND m.role = 'owner'
+        WHERE i.kind = ? AND i.state = 'connected' AND i.origem_workspace_id IS NULL AND i.workspace_id <> ? ORDER BY w.name, CASE WHEN i.conta = '' THEN 0 ELSE 1 END, i.created_at`, userId, kind, workspaceId)
+      .filter((r) => !ja.has(`${r.id}|${r.slot}`))
+      .map((r) => ({ workspaceId: r.id, workspace: r.name, conta: nomeDaConta({ apelido: r.apelido, account_label: r.conta }) || r.conta, origemConta: r.slot }));
+  }
+
+  /**
+   * Este workspace passa a usar a conta de outro workspace da mesma pessoa. Permissões e quadros continuam de cada um.
+   * `conta`: em qual conta daqui ('nova' = mais uma conta; sem dizer, a principal, como antes).
+   */
+  usarDe(workspaceId: string, userId: string, kind: IntegrationKind, origem: string, origemConta = '', contaPedida = ''): string | null {
+    const achada = this.reutilizaveis(workspaceId, userId, kind).find((x) => x.workspaceId === origem && x.origemConta === origemConta);
     if (!achada) throw new HttpError(404, 'origem', 'esta conta não está disponível nos seus outros workspaces');
-    const atual = integrationRow(this.db, workspaceId, kind);
-    if (!atual.origem_workspace_id && atual.state === 'connected') this.promover(workspaceId, kind);
-    if (!atual.origem_workspace_id) { this.secrets.remove(workspaceId, kind); }
-    this.db.run('UPDATE integrations SET origem_workspace_id = ? WHERE workspace_id = ? AND kind = ?', origem, workspaceId, kind);
-    setIntegration(this.db, workspaceId, kind, { state: 'connected', account_label: (achada.conta ?? '').slice(0, 120) || null, connected_at: now(), last_error: null });
+    const slot = contaPedida === 'nova' ? this.novaConta(workspaceId, kind) : contaPedida;
+    const atual = integrationRow(this.db, workspaceId, kind, slot);
+    if (!atual.origem_workspace_id && atual.state === 'connected') this.promover(workspaceId, kind, slot);
+    if (!atual.origem_workspace_id) { this.secrets.remove(workspaceId, kind, slot); }
+    this.db.run('UPDATE integrations SET origem_workspace_id = ?, origem_conta = ? WHERE id = ?', origem, origemConta, atual.id);
+    const daOrigem = integrationRow(this.db, origem, kind, origemConta);
+    setIntegration(this.db, workspaceId, kind, { state: 'connected', account_label: (daOrigem.account_label ?? '').slice(0, 120) || null, connected_at: now(), last_error: null }, slot);
+    this.comecarSoLeitura(workspaceId, kind, this.secrets.readOwn<Record<string, unknown>>(origem, kind, origemConta)?.[CONTA_ID], slot);
     audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.link', targetType: 'integration', targetId: kind, evidence: { origem, workspace: achada.workspace }, result: `usa a conta do workspace ${achada.workspace}` });
     this.bus.publish(workspaceId, 'integrations.changed', { kind });
     return achada.conta;
@@ -721,54 +947,71 @@ export class Integrations {
    * Este workspace vai deixar a credencial (desconectou, trocou de conta ou está sendo apagado): quem a usa emprestada não
    * pode cair junto. O primeiro fica com ela e os outros passam a apontar para ele.
    */
-  promover(workspaceId: string, kind: string): void {
-    const deps = this.db.all<{ workspace_id: string }>('SELECT workspace_id FROM integrations WHERE origem_workspace_id = ? AND kind = ? ORDER BY created_at', workspaceId, kind);
+  promover(workspaceId: string, kind: string, conta = ''): void {
+    const deps = this.db.all<{ id: string; workspace_id: string; conta: string }>('SELECT id, workspace_id, conta FROM integrations WHERE origem_workspace_id = ? AND kind = ? AND origem_conta = ? ORDER BY created_at', workspaceId, kind, conta);
     if (!deps.length) return;
-    const creds = this.secrets.readOwn<Record<string, unknown>>(workspaceId, kind);
-    const [novo, ...resto] = deps.map((d) => d.workspace_id);
-    if (creds) this.secrets.writeOwn(novo, kind, creds);
+    const creds = this.secrets.readOwn<Record<string, unknown>>(workspaceId, kind, conta);
+    const [novo, ...resto] = deps;
+    if (creds) this.secrets.writeOwn(novo.workspace_id, kind, creds, novo.conta);
     this.db.tx(() => {
-      this.db.run('UPDATE integrations SET origem_workspace_id = NULL WHERE workspace_id = ? AND kind = ?', novo, kind);
-      for (const w of resto) this.db.run('UPDATE integrations SET origem_workspace_id = ? WHERE workspace_id = ? AND kind = ?', novo, w, kind);
+      this.db.run("UPDATE integrations SET origem_workspace_id = NULL, origem_conta = '' WHERE id = ?", novo.id);
+      for (const w of resto) this.db.run('UPDATE integrations SET origem_workspace_id = ?, origem_conta = ? WHERE id = ?', novo.workspace_id, novo.conta, w.id);
     });
   }
   /** A credencial que mora aqui voltou a valer: quem a usa emprestada e tinha caído por ela volta junto (o estado é de cada workspace). */
-  private reativarQuemUsa(workspaceId: string, kind: IntegrationKind): void {
-    for (const r of this.db.all<{ w: string }>("SELECT workspace_id AS w FROM integrations WHERE origem_workspace_id = ? AND kind = ? AND state = 'error'", workspaceId, kind)) {
-      setIntegration(this.db, r.w, kind, { state: 'connected', last_error: null });
+  private reativarQuemUsa(workspaceId: string, kind: IntegrationKind, conta = ''): void {
+    for (const r of this.db.all<{ w: string; c: string }>("SELECT workspace_id AS w, conta AS c FROM integrations WHERE origem_workspace_id = ? AND kind = ? AND origem_conta = ? AND state = 'error'", workspaceId, kind, conta)) {
+      setIntegration(this.db, r.w, kind, { state: 'connected', last_error: null }, r.c);
       this.bus.publish(r.w, 'integrations.changed', { kind });
     }
   }
   /** Workspace sendo apagado: as contas que os outros usam ficam com eles. */
   promoverTudo(workspaceId: string): void {
-    for (const r of this.db.all<{ kind: string }>('SELECT DISTINCT kind FROM integrations WHERE origem_workspace_id = ?', workspaceId)) this.promover(workspaceId, r.kind);
+    for (const r of this.db.all<{ kind: string; c: string }>('SELECT DISTINCT kind, origem_conta AS c FROM integrations WHERE origem_workspace_id = ?', workspaceId)) this.promover(workspaceId, r.kind, r.c);
   }
 
-  disconnect(workspaceId: string, userId: string, kind: IntegrationKind): void {
-    const emprestada = integrationRow(this.db, workspaceId, kind).origem_workspace_id;
-    if (emprestada) {
+  /**
+   * Desconecta uma conta. A principal fica no cartão, desligada, como sempre; se houver outra conta conectada, ela passa a ser a
+   * principal (a equipe não fica sem conta à toa). Outra conta sai da lista (os quadros ligados a ela ficam, sem atualizar).
+   */
+  async disconnect(workspaceId: string, userId: string, kind: IntegrationKind, conta = ''): Promise<void> {
+    const row = integrationRow(this.db, workspaceId, kind, conta);
+    if (row.origem_workspace_id) {
       // só deixa de usar: a conta segue funcionando no workspace dela
-      this.db.run('UPDATE integrations SET origem_workspace_id = NULL WHERE workspace_id = ? AND kind = ?', workspaceId, kind);
-      setIntegration(this.db, workspaceId, kind, { state: 'off', account_label: null, last_error: null });
+      this.db.run("UPDATE integrations SET origem_workspace_id = NULL, origem_conta = '' WHERE id = ?", row.id);
+      setIntegration(this.db, workspaceId, kind, { state: 'off', account_label: null, last_error: null }, conta);
       audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.unlink', targetType: 'integration', targetId: kind, result: 'deixou de usar a conta do outro workspace' });
-      this.bus.publish(workspaceId, 'integrations.changed', { kind });
-      return;
+    } else {
+      this.promover(workspaceId, kind, conta);
+      this.secrets.remove(workspaceId, kind, conta);
+      if (kind === 'whatsapp') this.secrets.removeDir(workspaceId, kind, conta);
+      setIntegration(this.db, workspaceId, kind, { state: 'off', account_label: null, last_error: null }, conta);
+      audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.disconnect', targetType: 'integration', targetId: kind, evidence: conta ? { conta } : {}, result: 'desconectado (credenciais locais apagadas)' });
     }
-    this.promover(workspaceId, kind);
-    this.secrets.remove(workspaceId, kind);
-    if (kind === 'whatsapp') this.secrets.removeDir(workspaceId, kind);
-    setIntegration(this.db, workspaceId, kind, { state: 'off', account_label: null, last_error: null });
-    audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.disconnect', targetType: 'integration', targetId: kind, result: 'desconectado (credenciais locais apagadas)' });
+    if (conta) { setIntegration(this.db, workspaceId, kind, { apelido: null }, conta); this.limparAbandonadas(workspaceId, kind); }
+    else {
+      const outra = contasDe(this.db, workspaceId, kind).find((c) => c.conta && c.state === 'connected');
+      if (outra) await this.tornarPrincipal(workspaceId, null, kind, outra.conta);
+    }
     this.bus.publish(workspaceId, 'integrations.changed', { kind });
   }
 
   /** Volta do login com a conta: só aqui a integração vira "conectada" (o provedor já entregou o acesso). */
-  markSso(kind: SsoKind, workspaceId: string, userId: string, account: string): void {
-    this.db.run('UPDATE integrations SET origem_workspace_id = NULL WHERE workspace_id = ? AND kind = ?', workspaceId, kind);
-    setIntegration(this.db, workspaceId, kind, { state: 'connected', account_label: account.slice(0, 120), connected_at: now(), last_error: null });
-    this.reativarQuemUsa(workspaceId, kind);
-    audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.connect', targetType: 'integration', targetId: kind, evidence: { account }, result: `conectado (login com a conta)` });
+  markSso(kind: SsoKind, workspaceId: string, userId: string, account: string, conta = ''): void {
+    this.db.run("UPDATE integrations SET origem_workspace_id = NULL, origem_conta = '' WHERE workspace_id = ? AND kind = ? AND conta = ?", workspaceId, kind, conta);
+    setIntegration(this.db, workspaceId, kind, { state: 'connected', account_label: account.slice(0, 120), connected_at: now(), last_error: null }, conta);
+    this.reativarQuemUsa(workspaceId, kind, conta);
+    audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: 'integration.connect', targetType: 'integration', targetId: kind, evidence: { account, ...(conta ? { conta } : {}) }, result: conta ? 'outra conta conectada (login com a conta)' : `conectado (login com a conta)` });
     this.bus.publish(workspaceId, 'integrations.changed', { kind });
+  }
+
+  /**
+   * A mesma conta do serviço já está noutra linha deste aplicativo neste workspace (entrou duas vezes com o mesmo e-mail): a
+   * nova sai, e a de antes continua. Devolve o nome da que já estava.
+   */
+  repetidaNoLogin(kind: SsoKind, workspaceId: string, conta: string, account: string): string | null {
+    const outra = contasDe(this.db, workspaceId, kind).find((c) => c.conta !== conta && c.state !== 'off' && fold(this.secrets.read<{ account?: string }>(workspaceId, kind, c.conta)?.account ?? c.account_label ?? '') === fold(account));
+    return outra ? nomeDaConta(outra) || account : null;
   }
 
   connectedChannels(workspaceId: string): boolean {

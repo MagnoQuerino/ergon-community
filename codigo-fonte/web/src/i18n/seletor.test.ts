@@ -1,19 +1,21 @@
-// O seletor de idioma e o caminho da escolha: menu do avatar e Minha conta, escondido até o inglês ser liberado, a
-// escolha gravada na pessoa (o servidor aceita os mesmos idiomas da tela) e a tela inteira redesenhando na troca.
+// O seletor de idioma e o caminho da escolha: menu do avatar e Minha conta, sempre à vista, a escolha gravada na
+// pessoa (o servidor aceita os mesmos idiomas da tela) e a tela inteira redesenhando na troca.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
-import { IDIOMAS, IDIOMA_INGLES_LIBERADO, NOME_DO_IDIOMA } from './idiomas.ts';
+import * as idiomas from './idiomas.ts';
+import { IDIOMAS, NOME_DO_IDIOMA } from './idiomas.ts';
 import { pt } from './pt/index.ts';
 import { en } from './en/index.ts';
 
 const ler = (p: string) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
-test('seletor no menu do avatar e em Minha conta, "Português" / "English", escondido até o inglês ser liberado', () => {
+test('seletor no menu do avatar e em Minha conta, "Português" / "English", sempre à vista', () => {
   assert.deepEqual(NOME_DO_IDIOMA, { 'pt-BR': 'Português', en: 'English' }, 'cada idioma escrito nele mesmo');
-  assert.equal(typeof IDIOMA_INGLES_LIBERADO, 'boolean');
+  // a chave que escondia o inglês até a rc.26 saiu na rc.29: o seletor não some mais
+  assert.equal('IDIOMA_INGLES_LIBERADO' in idiomas, false);
   const seletor = ler('../components/SeletorIdioma.tsx');
-  assert.match(seletor, /if \(!IDIOMA_INGLES_LIBERADO\) return null;/);
+  assert.doesNotMatch(seletor, /return null;/);
   assert.match(seletor, /onClick=\{\(\) => escolherIdioma\(l\)\}/);
   // dentro do menu do avatar (role=menu) os filhos têm de ser itens do menu: grupo + menuitemradio; em Minha conta, radiogroup
   assert.match(seletor, /role=\{compacto \? 'group' : 'radiogroup'\}/);

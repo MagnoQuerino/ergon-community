@@ -29,9 +29,9 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
     'components/DistributionDialog.tsx', 'components/PersonalityPicker.tsx', 'components/EffectPicker.tsx', 'lib/team.ts',
   ],
   // a janela do agente e Treinar
-  agente: ['components/AgentWindow.tsx', 'components/TrainTab.tsx', 'components/CompetenciasProntas.tsx'],
+  agente: ['components/AgentWindow.tsx', 'components/TrainTab.tsx', 'components/CompetenciasProntas.tsx', 'components/AdicionarCompetencia.tsx', 'lib/competencias-tela.ts'],
   rotinas: ['views/RotinasView.tsx'],
-  conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts'],
+  conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts'],
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
     'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',

@@ -213,7 +213,7 @@ export interface RecentConversation {
 }
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
 const TIPOS = ['question', 'routine', 'routine_edit', 'sector', 'create_agent', 'tools', 'permission', 'handoff', 'edit_agent', 'deactivate_agent', 'reactivate_agent', 'sector_edit',
-  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra', 'segredo', 'aprovacao'] as const;
+  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra', 'segredo', 'aprovacao', 'gestao'] as const;
 /** Uma tabela de rótulos lida na hora de mostrar: cada chave pelo dicionário, no idioma atual (a tela redesenha ao trocar). */
 const rotulo = t as (chave: Chave) => string;
 function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record<string, string> {
@@ -226,7 +226,7 @@ function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record
   });
 }
 export const PROPOSAL_KIND: Record<string, string> = rotulos(TIPOS, (k) => `servidor.tipo.${k}` as Chave);
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
@@ -240,13 +240,13 @@ export interface AiStatus {
   accounts: Array<{ id: string; name: string; billing: Billing; about: string; site: string; connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
 }
-export interface Skill { name: string; description: string; category: string; enabled: boolean }
+export interface Skill { name: string; description: string; category: string; enabled: boolean; origem?: 'equipe' | 'loja' | 'enviada' | 'criada' }
 export interface Integration {
   kind: string; name: string; /** nome do workspace de onde vem a conta, quando emprestada */ sharedFrom?: string | null;
   /** os outros workspaces que usam a conta que mora aqui (desconectar aqui não corta o acesso deles) */
   usadaEm?: string[];
   /** a mesma conta já conectada noutro workspace seu, para usar aqui sem conectar de novo (só o dono vê) */
-  reutilizaveis?: Array<{ workspaceId: string; workspace: string; conta: string | null }>;
+  reutilizaveis?: Array<{ workspaceId: string; workspace: string; conta: string | null; /** qual das contas de lá ('' = a principal) */ origemConta?: string }>;
   /** oauth: login com a conta · qr: WhatsApp · token: credencial colada · soon: ainda não (motivo em "soon") */
   auth: 'oauth' | 'qr' | 'token' | 'soon'; group: 'contas' | 'tarefas' | 'conversas' | 'vendas' | 'suporte' | 'documentos' | 'financeiro'; about: string; tasks: boolean; site: string; soon: string | null;
   /** extras: links com rótulo e textos com botão de copiar, fora dos passos */
@@ -263,6 +263,14 @@ export interface Integration {
   live: { status: string; qr: string | null; me: string | null; error: string | null; read: number; seen: number } | null;
   /** Microsoft sem conta conectada: o primeiro login voltou dizendo que a empresa exige o administrador (o pedido pronto) */
   adminBase?: { link: string; erro: string | null } | null;
+  /** todas as contas deste aplicativo (rc.29), a principal primeiro; com uma só, a tela é a de sempre */
+  contas?: ContaDaTela[];
+}
+/** Uma das contas de um aplicativo (GET /api/integrations, server/src/services/integrations.ts). conta '' = a principal. */
+export interface ContaDaTela {
+  conta: string; id: string; principal: boolean; /** o apelido ou, sem ele, o e-mail, o número ou o nome da conta */ nome: string; apelido: string | null; account: string | null;
+  state: Integration['state']; /** a equipe e as rotinas usam esta conta (a pessoa pode desligar) */ ativa: boolean; error: string | null; connectedAt: string | null; lastSyncAt: string | null;
+  sharedFrom: string | null; live: Integration['live']; renewBy: string | null; aviso: string | null;
 }
 /**
  * Uma etapa do consentimento da Microsoft (GET /api/conexoes): base (enviar e-mail e criar arquivos), trabalho (Teams), leitura
@@ -294,7 +302,8 @@ export const stripControl = (s: string): string => s
 // Rotinas -------------------------------------------------------------------------------------------------
 export type RoutineTrigger = { kind: 'manual' } | { kind: 'schedule'; days: number[]; time: string; tz?: string };
 /** arquivo escolhido para uma rotina: de Documentos ou do OneDrive/Google Drive */
-export interface FileRef { kind: 'ergon' | 'microsoft' | 'google'; id: string; name: string }
+/** conta: de qual das contas Microsoft ou Google ('' ou ausente = a principal) */
+export interface FileRef { kind: 'ergon' | 'microsoft' | 'google'; id: string; name: string; conta?: string }
 export type ParamValues = Record<string, Array<string | FileRef>>;
 /** o que a rotina acompanha (configurado uma vez) */
 export interface ParamSpec { key: string; label: string; kind: 'lista' | 'urls' | 'arquivos'; placeholder?: string; hint?: string; required?: boolean; max?: number }
@@ -303,7 +312,7 @@ export interface InputSpec { text?: { label: string; placeholder: string; requir
 export interface RoutineTemplate {
   key: string; name: string; category: string; benefit: string; produces: string; examines: string;
   needs: Array<{ id: string; label: string; ok: boolean }>; agents: string[]; agentNames: string[];
-  modes: Array<'manual' | 'schedule' | 'event' | 'condition'>; approvals: string; privateData: boolean; phase: number; available: boolean;
+  modes: Array<'manual' | 'schedule' | 'event' | 'condition'>; approvals: string; privateData: boolean; phase: number;
   sample?: string; schedule: string | null; defaultTrigger: RoutineTrigger | null; sources: string[]; installed: Array<{ id: string; status: string }>;
   input?: InputSpec; params?: ParamSpec[]; proposes?: 'tarefas' | 'lancamentos'; outputs?: string[];
 }
@@ -314,11 +323,12 @@ export interface Routine {
   status: 'setup' | 'active' | 'paused'; version: number; conversationId: string | null; agentId: string | null; agentName: string | null; hasSetup: boolean;
   trigger: RoutineTrigger; schedule: string; nextRunAt: string | null; lastRunAt: string | null; running: boolean;
   last: { id: string; status: RoutineRunStatus; summary: string | null; finished_at: string | null; created_at: string; error: string | null } | null;
-  config: { sources: string[]; sourceLabels: string[]; condition: 'sempre' | 'novidades' | 'sinal'; instruction: string; extra: string; deliver: string[]; staleDays: number; params: ParamValues };
+  config: { sources: string[]; sourceLabels: string[]; condition: 'sempre' | 'novidades' | 'sinal'; instruction: string; extra: string; deliver: string[]; staleDays: number; params: ParamValues;
+    /** as contas que a rotina lê, quando há mais de uma do mesmo aplicativo (vazio = todas) */ contas?: string[] };
   /** o que pede ao executar, o que acompanha e o que falta configurar */
   input: InputSpec | null; paramSpecs: ParamSpec[]; missing: string[]; outputs: string[]; proposes: 'tarefas' | 'lancamentos' | null;
 }
-export interface CloudFile { provider: 'microsoft' | 'google'; id: string; name: string; size: number; modified: string | null; mime: string; folder: string }
+export interface CloudFile { provider: 'microsoft' | 'google'; conta?: string; id: string; name: string; size: number; modified: string | null; mime: string; folder: string }
 export interface ArtifactRow { id: string; filename: string; mime: string; size: number; task_id: string | null; created_at: string }
 export type RoutineDeliverable = { type: 'conversa'; id: string } | { type: 'arquivo'; id: string; name: string };
 export interface RoutineRun {

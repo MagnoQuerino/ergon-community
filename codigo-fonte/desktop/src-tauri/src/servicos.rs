@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Prazo do lançador (instalação antiga, sem o ambiente próprio): abrir o Docker Desktop e subir os serviços pode levar
-/// minutos na primeira vez do dia.
+/// Prazo do lançador (instalação no Linux, sem o ambiente próprio): subir os serviços pode levar minutos na primeira
+/// vez do dia.
 const PRAZO_LANCADOR: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone, Serialize)]
@@ -26,9 +26,9 @@ fn raiz_atual(estado: &Estado) -> Option<PathBuf> {
     estado.ultimo.lock().ok().and_then(|d| d.as_ref().and_then(|d| d.raiz.clone())).or_else(|| instalacao::localizar().raiz)
 }
 
-/// Liga os serviços do Ergon: no ambiente próprio, por dentro dele; numa instalação antiga, pelo lançador, que liga o
-/// motor de contêineres (no Windows, o Docker Desktop, com a recuperação de travamento) e usa "subir", que não instala
-/// nada no início do sistema. A saída chega à tela de abertura linha a linha.
+/// Liga os serviços do Ergon: no ambiente próprio, por dentro dele; numa instalação pelo lançador (Linux), com "subir",
+/// que não instala nada no início do sistema (no Windows, o lançador antigo do Docker Desktop só dá o aviso do
+/// aplicativo). A saída chega à tela de abertura linha a linha.
 #[tauri::command]
 pub fn subir_servicos(app: AppHandle, estado: State<'_, Estado>) -> Result<(), String> {
     if crate::ambiente::ativo() {
@@ -184,10 +184,11 @@ pub fn abrir_no_navegador(estado: State<'_, Estado>) -> Result<(), String> {
     tauri_plugin_opener::open_url(format!("http://localhost:{porta}/"), None::<&str>).map_err(|e| e.to_string())
 }
 
-/// Páginas oficiais de ajuda (lista fechada: a tela pede pelo tema, nunca pelo endereço).
+/// Páginas oficiais de ajuda (lista fechada: a tela pede pelo tema, nunca pelo endereço). As do Docker só valem no
+/// Linux de uma instalação antiga pelo Docker; a do Docker Desktop no Windows saiu na rc.29.
 pub fn pagina_de_ajuda(tema: &str) -> Option<&'static str> {
     Some(match tema {
-        "docker" if cfg!(windows) => "https://docs.docker.com/desktop/setup/install/windows-install/",
+        "docker" | "docker_rootless" | "docker_pos_instalacao" if cfg!(windows) => return None,
         "docker" => "https://docs.docker.com/engine/install/",
         "docker_rootless" => "https://docs.docker.com/engine/security/rootless/",
         "docker_pos_instalacao" => "https://docs.docker.com/engine/install/linux-postinstall/",
@@ -216,7 +217,12 @@ mod testes {
 
     #[test]
     fn ajuda_so_por_tema_conhecido() {
-        assert!(pagina_de_ajuda("docker").unwrap().starts_with("https://docs.docker.com/"));
+        if cfg!(windows) {
+            assert!(pagina_de_ajuda("docker").is_none(), "Windows: nada do Docker Desktop");
+        } else {
+            assert!(pagina_de_ajuda("docker").unwrap().starts_with("https://docs.docker.com/engine/"));
+        }
+        assert!(pagina_de_ajuda("instalar_ergon").unwrap().starts_with("https://github.com/"));
         assert!(pagina_de_ajuda("https://exemplo.com").is_none());
         assert!(pagina_de_ajuda("").is_none());
     }

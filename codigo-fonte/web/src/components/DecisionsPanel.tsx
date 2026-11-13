@@ -144,13 +144,13 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
           ))}
 
           {team.length > 0 && <h4 className="rt-sub">{t('servidor.decisoes.propostas')}</h4>}
-          {team.map((p) => p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' ? (
+          {team.map((p) => p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' || p.kind === 'gestao' ? (
             // ação numa conta: o texto inteiro (recolhido quando longo) e de onde veio — o card (#N · quem pediu) ou a conversa.
             // Este cartão existe para ler antes de Confirmar um envio em nome da pessoa: ele NÃO abre inteiro (clicar no texto
             // que se está lendo, ou errar Confirmar/Recusar por pouco, tirava o painel da frente); abre só pelo "#N · quem"
             <article key={p.id} className="dec-card">
               <div className="dec-card__top">
-                <Selo icone={p.kind === 'regra' ? 'shield-check' : 'plug'}>{KIND[p.kind]}</Selo>
+                <Selo icone={p.kind === 'regra' || p.kind === 'gestao' ? 'shield-check' : 'plug'}>{KIND[p.kind]}</Selo>
                 {p.task_id ? <button type="button" className={ACAO.leve} onClick={() => openCard(p.task_id!)} title={t('servidor.decisoes.abrirCard', { numero: p.task_number ?? '' })}>#{p.task_number}{p.agent_name ? t('servidor.decisoes.deQuem', { nome: p.agent_name }) : ''}</button>
                   : conv(p) ? <button type="button" className={ACAO.leve} onClick={conv(p)} title={t('servidor.decisoes.abrirConversa')}>{p.agent_name ?? t('servidor.decisoes.aConversa')}</button>
                   : p.agent_name && <span className="muted small">{p.agent_name}</span>}

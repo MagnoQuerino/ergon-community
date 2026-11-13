@@ -39,8 +39,6 @@ const rotinas: Traducao<typeof pt> = {
   'estado.emPreparo': 'Setting up',
   'estado.pausada': 'Paused',
   'estado.esperandoVoce': 'Waiting for you',
-  'fase.emBreve': 'Coming soon',
-  'fase.n': 'Phase {fase}',
   'modelo.falta': 'missing: {nome}',
   'modelo.privados': 'private data: only with your permission',
 
@@ -117,10 +115,6 @@ const rotinas: Traducao<typeof pt> = {
   'ativar.ativando': 'Turning on…',
   'ativar.outra': 'Turn on another',
   'ativar.ativar': 'Turn on',
-  'ativar.proxima': 'Coming next, still in this first phase of the routines plan. In the meantime, you can ask for something similar in a chat with {nome}.',
-  'ativar.proximaCom': 'Coming next, still in this first phase of the routines plan, along with: {lista}. In the meantime, you can ask for something similar in a chat with {nome}.',
-  'ativar.fase': 'Arrives in phase {fase} of the routines plan. In the meantime, you can ask for something similar in a chat with {nome}.',
-  'ativar.faseCom': 'Arrives in phase {fase} of the routines plan, along with: {lista}. In the meantime, you can ask for something similar in a chat with {nome}.',
 
   // ——— minhas rotinas ———
   'minhas.vazia': 'No routines turned on yet',
@@ -185,6 +179,8 @@ const rotinas: Traducao<typeof pt> = {
   'editar.ajuste': 'Instructions (what this routine should keep in mind)',
   'editar.ajusteEx': 'E.g.: prioritize supplier requests.',
   'editar.parada': 'Treat a task as stalled after (days)',
+  'editar.contas': 'Accounts this routine reads',
+  'editar.contasDica': 'You have more than one account here. Tick the ones the routine should read; with all ticked, it also reads the ones you connect later. The result says which account each item came from.',
   'editar.pecaMudar': 'To change what the routine looks at or does, ask {nome}: you see a preview and approve it.',
   'editar.salvar': 'Save',
   'editar.fechar': 'Close',

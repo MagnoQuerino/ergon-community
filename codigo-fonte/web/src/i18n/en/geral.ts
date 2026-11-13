@@ -46,6 +46,8 @@ const geral: Traducao<typeof pt> = {
   'tema.autoCurto': 'Automatic theme',
   'tema.diaCurto': 'Light theme',
   'tema.noiteCurto': 'Dark theme',
+  'tema.contraste': 'High contrast theme (black text on white, strong outlines)',
+  'tema.contrasteCurto': 'High contrast',
 
   'musica.nome': 'Ambient music',
   'musica.tocando': 'Ambient music: playing {faixa}',

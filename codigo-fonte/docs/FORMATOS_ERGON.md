@@ -92,7 +92,8 @@ criados). Desfazer devolve isso; conversas, tarefas e rotinas da pessoa não sã
 Configurações › Pacotes › Criar o seu pacote oferece dois arquivos para baixar (em `web/public/guias/`): o guia técnico
 (`criar-pacotes-ergon.md`, para quem programa: formato, cada tipo, vocabulário da skin e como montar o ZIP) e um
 `SKILL.md` para colocar numa IA, que passa a saber criar e conferir o pacote. O editor de efeitos que existia na tela
-saiu; `POST /api/packages/build` continua para os testes e para exportar.
+saiu, e a rota dele (`POST /api/packages/build`) saiu na rc.29: um pacote se monta com `buildPackage`
+(`server/src/services/ergon-package.ts`), que os testes e a geração dos pacotes oficiais usam.
 
 ## Prévias na loja
 

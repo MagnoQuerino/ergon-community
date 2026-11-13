@@ -6,14 +6,14 @@ import { Db } from '../src/db/db.ts';
 import { findConnection } from '../src/services/ingest.ts';
 import { importBoards } from '../src/services/mirror.ts';
 import { FixtureTaskProvider } from './mirror-fixture.ts';
-import { allAgents, drain, harness, loginAs, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
+import { FIXTURES, allAgents, andarNaStoa, drain, harness, loginAs, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
 
 describe('espelho de quadro (fixture em formato inspirado no Planner)', () => {
   let h: Harness;
   let s: Session;
   // o provedor de fixture só existe nos testes: a importação é a mesma dos aplicativos reais (importBoards)
   const imp = (variant: string) => importBoards(h.db, h.bus, s.workspaceId, findConnection(h.db, s.workspaceId, 'mirror_fixture', 'fixture').id, s.userId,
-    new FixtureTaskProvider(h.cfg.fixturesDir, variant), ['plan-fixture-1']);
+    new FixtureTaskProvider(FIXTURES, variant), ['plan-fixture-1']);
   const mirrored = () => h.db.all<{ id: string; title: string; completed: number; completed_by: string | null; column: string; ext: string; sync_state: string; conflict: string | null; extra: string }>(
     `SELECT t.id, t.title, t.completed, t.completed_by, c.name AS column, l.external_id AS ext, l.sync_state, l.conflict, l.external_extra AS extra
        FROM tasks t JOIN task_links l ON l.task_id = t.id JOIN columns c ON c.id = t.column_id ORDER BY l.external_id`);
@@ -21,7 +21,7 @@ describe('espelho de quadro (fixture em formato inspirado no Planner)', () => {
   after(async () => { await h.close(); });
 
   test('prévia mostra alcance antes de importar', async () => {
-    const p = new FixtureTaskProvider(h.cfg.fixturesDir, 'planner-like-v1');
+    const p = new FixtureTaskProvider(FIXTURES, 'planner-like-v1');
     assert.equal(p.isFixture, true);
     assert.equal((await p.listBoards()).length, 2);
     assert.equal(p.supports.writeBack, false);
@@ -90,7 +90,7 @@ describe('persistência após reinício e backup', () => {
     const dir = tmpDir();
     const h1 = await harness({}, { dir });
     const s1 = await setupOwner(h1);
-    await req(h1, 'POST', '/api/floors', s1);
+    await andarNaStoa(h1, s1);
     const task = (await req(h1, 'POST', '/api/tasks', s1, { title: 'Sobrevive ao reinício' })).json;
     await req(h1, 'PATCH', `/api/tasks/${task.id}`, s1, { completed: true });
     const st = { agents: await allAgents(h1, s1) };

@@ -165,6 +165,12 @@ pub fn decidir(e: Entrada) -> Diagnostico {
                 marcar(&mut d, "porta_ocupada", &format!("Outra aplicação está usando a porta {porta}"),
                     format!("Algo responde em localhost:{porta}, mas não é o serviço do Ergon desta instalação. Por segurança, esta janela não abre esse endereço. Feche a outra aplicação (ou mude a porta do Ergon) e tente de novo."),
                     &["tentar", "diagnostico"]);
+            } else if e.windows {
+                // Windows: o motor de contêineres é o Podman do ambiente do Ergon (a instalação pelo Docker Desktop, até a
+                // rc.11, não é mais atendida): nada de ajuda do Docker aqui
+                marcar(&mut d, "nao_confirmado", "Não foi possível confirmar a instalação",
+                    "O Ergon responde, mas o ambiente do Ergon não respondeu a tempo para confirmar que é o desta instalação. Por segurança, esta janela não abre o endereço até confirmar.".into(),
+                    &["tentar", "diagnostico"]);
             } else {
                 marcar(&mut d, "nao_confirmado", "Não foi possível confirmar a instalação",
                     "O Ergon responde, mas sem acesso ao Docker não dá para confirmar que é o desta instalação. Por segurança, esta janela não abre o endereço até confirmar.".into(),
@@ -336,10 +342,14 @@ mod testes {
         let d = decidir(entrada(ok(), Docker::Pronto("27".into()), vec![c("ergon", "exited", "")]));
         assert_eq!(d.estado, "porta_ocupada");
         assert!(!d.confirmado);
-        // sem Docker não dá para confirmar
+        // sem o motor de contêineres não dá para confirmar; no Windows, sem a ajuda do Docker Desktop (saiu na rc.29)
         let d = decidir(entrada(ok(), Docker::SemPermissao("x".into()), vec![]));
         assert_eq!(d.estado, "nao_confirmado");
         assert!(!d.confirmado);
+        assert!(!d.acoes.iter().any(|a| a.starts_with("ajuda:docker")), "{:?}", d.acoes);
+        let d = decidir(Entrada { windows: false, ..entrada(ok(), Docker::SemPermissao("x".into()), vec![]) });
+        assert_eq!(d.estado, "nao_confirmado");
+        assert!(d.acoes.iter().any(|a| a == "ajuda:docker"), "{:?}", d.acoes);
     }
 
     #[test]

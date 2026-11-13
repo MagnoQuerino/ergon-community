@@ -22,7 +22,7 @@ import type { RunExecutor } from '../runs.ts';
 import { instanceSetting, setInstanceSetting } from '../security.ts';
 import { coordinatorFor } from '../team-query.ts';
 import { migrarTeamsApp, type PessoaRow, type SaidaRow, type VinculoRow } from './armazenamento.ts';
-import { dataHora, montarCartao, partesDoResumo, resumoParaTeams, textoParaTeams, type DesenhoCartao, type EstadoDecisao, type ItemCartao } from './cartoes.ts';
+import { ABRIR_LONGO, KINDS_INTEIROS, LIMITE_TEAMS, cabeNoCanal, dataHora, montarCartao, partesDoResumo, resumoParaTeams, textoParaTeams, type DesenhoCartao, type EstadoDecisao, type ItemCartao } from './cartoes.ts';
 import { ClienteRele, ErroDoRele, type Ack, type EstadoConexao, type Quadro } from './cliente.ts';
 import {
   ID_CLAIM, ID_INSTALACAO, ID_VINCULO, PROTOCOLO, abrirSelado, aadDoSelo, assinar, enderecoDoRele, gerarChaves, hashDaConta, mensagemRegistro, normalizarCodigo,
@@ -490,12 +490,12 @@ export class TeamsApp {
     if (v.verb !== 'ergon.decidir' || !/^apr_[a-f0-9]{32}$/.test(p) || (decisao !== 'apply' && decisao !== 'reject') || !tokenConfere(this.chaves()!, p, b.binding_id, data.t)) {
       return { ok: false, status: 'rejected', error: { code: 'invalid' } };
     }
-    const prop = this.d.db.get<{ status: string; kind: string }>('SELECT status, kind FROM agent_proposals WHERE id = ? AND workspace_id = ?', p, b.workspace_id);
+    const prop = this.d.db.get<{ status: string; kind: string; summary: string }>('SELECT status, kind, summary FROM agent_proposals WHERE id = ? AND workspace_id = ?', p, b.workspace_id);
     if (!prop) return { ok: false, status: 'rejected', error: { code: 'invalid' } };
     const registrar = (estado: 'feito' | 'decidindo') => this.d.db.run(
       'INSERT OR IGNORE INTO teams_inbound (delivery_id, user_id, kind, message_id, received_at, state, decision, binding_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       String(f.id), b.user_id, 'card.action', p, now(), estado, decisao, b.binding_id);
-    if (prop.status !== 'proposed' || ['permission', 'question', 'segredo', 'info_request', 'handoff'].includes(prop.kind)) {
+    if (prop.status !== 'proposed' || ['permission', 'question', 'segredo', 'info_request', 'handoff'].includes(prop.kind) || !cabeNoCanal(prop.kind, prop.summary, LIMITE_TEAMS)) {
       // já decidido (no Ergon ou noutro cartão), ou é do tipo que só se responde no Ergon: o cartão diz isso
       this.atualizarCartaoDe(p, b, typeof v.cardActivityId === 'string' ? v.cardActivityId : null, true);
       registrar('feito');
@@ -652,7 +652,9 @@ export class TeamsApp {
     if (p.kind === 'question') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para responder.' };
     // pedido de chave ou senha: o valor só se digita no Ergon (nunca passa pelo Teams)
     if (p.kind === 'segredo') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para informar: o valor nunca passa por aqui.' };
-    return { tipo: 'decisao', p: p.id, titulo, texto };
+    // a pessoa aprova exatamente o que lê: o pedido longo demais para o cartão se decide no Ergon
+    if (!cabeNoCanal(p.kind, p.summary, LIMITE_TEAMS)) return { tipo: 'aviso', p: p.id, titulo, texto, abrir: ABRIR_LONGO };
+    return { tipo: 'decisao', p: p.id, titulo, texto, ...(KINDS_INTEIROS.includes(p.kind) ? { inteiro: true } : {}) };
   }
 
   /** As confirmações pedidas na conversa "Teams" viram cartões no Teams (contrato, 7.2 item 3). */

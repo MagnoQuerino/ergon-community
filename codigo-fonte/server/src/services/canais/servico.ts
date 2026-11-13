@@ -22,7 +22,7 @@ import { pendingDecisions } from '../proposals.ts';
 import { workspaceTz } from '../routine-proposals.ts';
 import type { RunExecutor } from '../runs.ts';
 import { coordinatorFor } from '../team-query.ts';
-import { dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
+import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
 export const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
 export const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord' };
@@ -240,9 +240,10 @@ export class Canais {
     const m = /^([ar]):(apr_[a-f0-9]{32})$/.exec(dado);
     if (!m) return { ok: false };
     const pid = m[2]; const decisao = m[1] === 'a' ? 'apply' : 'reject';
-    const prop = this.d.db.get<{ status: string; kind: string }>('SELECT status, kind FROM agent_proposals WHERE id = ? AND workspace_id = ?', pid, v.workspace_id);
+    const prop = this.d.db.get<{ status: string; kind: string; summary: string }>('SELECT status, kind, summary FROM agent_proposals WHERE id = ? AND workspace_id = ?', pid, v.workspace_id);
     if (!prop) return { ok: false, reply: RESPOSTA.jaDecidido };
-    if (SO_NO_ERGON.includes(prop.kind)) return { ok: true, reply: RESPOSTA.noErgon };
+    // um botão antigo de um pedido que não cabe inteiro no canal também não decide
+    if (SO_NO_ERGON.includes(prop.kind) || !cabeNoCanal(prop.kind, prop.summary, LIMITE_CANAL)) return { ok: true, reply: RESPOSTA.noErgon };
     if (prop.status !== 'proposed') { this.atualizarCartoes(v.workspace_id); return { ok: true, reply: RESPOSTA.jaDecidido }; }
     const chave = `${v.canal}:${v.user_id}:clique:${evento || pid}`.slice(0, 300);
     if (this.d.db.run('INSERT OR IGNORE INTO canais_entrada (chave, user_id, canal, tipo, request_id, recebida_em) VALUES (?, ?, ?, ?, ?, ?)', chave, v.user_id, v.canal, 'clique', pid, now()).changes === 0) return { ok: true };
@@ -303,11 +304,13 @@ export class Canais {
 
   private textoDoCartao(titulo: string, summary: string): string {
     const { titulo: t, texto } = partesDoResumo(summary);
-    return [titulo, textoParaTeams(t, 300), texto ? textoParaTeams(texto, 2500) : ''].filter(Boolean).join('\n\n');
+    return [titulo, textoParaTeams(t, 300), texto ? textoParaTeams(texto, LIMITE_CANAL) : ''].filter(Boolean).join('\n\n');
   }
   private cartao(v: VinculoRow, p: { id: string; kind: string; summary: string }, titulo: string): void {
-    const decide = !SO_NO_ERGON.includes(p.kind);
-    const texto = this.textoDoCartao(titulo, p.summary) + (decide ? '' : `\n\n${p.kind === 'permission' ? 'Abra o Ergon para autorizar (pede a sua senha).'
+    // a pessoa aprova exatamente o que lê: o pedido que não cabe inteiro no canal se decide no Ergon
+    const cabe = cabeNoCanal(p.kind, p.summary, LIMITE_CANAL);
+    const decide = !SO_NO_ERGON.includes(p.kind) && cabe;
+    const texto = this.textoDoCartao(titulo, p.summary) + (decide ? '' : `\n\n${!cabe ? ABRIR_LONGO : p.kind === 'permission' ? 'Abra o Ergon para autorizar (pede a sua senha).'
       : p.kind === 'segredo' ? 'Abra o Ergon para informar: o valor nunca passa por aqui.' : 'Abra o Ergon para responder.'}`);
     const botoes: Array<[string, string]> = decide ? [['Aprovar', `a:${p.id}`], ['Recusar', `r:${p.id}`]] : [];
     const s = this.enfileirar(v, 'cartao', { texto, botoes });

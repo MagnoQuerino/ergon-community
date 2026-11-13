@@ -95,3 +95,52 @@ test('o mesmo agente veste sempre o mesmo boneco e o pet da skin é estável', (
   assert.ok(pets.every((p) => !p || p.species === 'gato'));
   assert.deepEqual(skinPet('agt-3', sk), skinPet('agt-3', sk));
 });
+
+// ---------- etiquetas da Cidade legíveis em toda skin (shared/legibilidade.ts) ----------
+import { contrast, MIN_TEXTO } from '../lib/contraste.ts';
+import { ETIQUETAS_DE_FABRICA, legibilizarSkin } from '../../../shared/legibilidade.ts';
+import { deriveThemeColors, validateSkin } from '../../../shared/skin.ts';
+import { parseColor } from '../lib/contraste.ts';
+
+const hsl = (h: string) => { const [r, g, b] = parseColor(h)!.rgb.map((x) => x / 255); const mx = Math.max(r, g, b); const mn = Math.min(r, g, b); const d = mx - mn; const l = (mx + mn) / 2;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0; const h0 = !d ? 0 : mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return [h0 * 60, s]; };
+const tom = (h: string) => hsl(h)[0]; const sat = (h: string) => hsl(h)[1];
+import { comEtiquetasLegiveis } from './skin.ts';
+
+const etiquetas = (t: Theme) => [t.papyrus[0], t.papyrus[1], t.marks.waiting].map((c) => contrast(t.outline, c));
+
+test('etiquetas da Cidade: as cores de fábrica que o validador usa são as do tema da Cidade', () => {
+  for (const m of ['dia', 'noite'] as const) {
+    assert.deepEqual(ETIQUETAS_DE_FABRICA[m], { outline: THEMES[m].outline, papyrus: THEMES[m].papyrus, marks: THEMES[m].marks });
+    for (const r of etiquetas(THEMES[m])) assert.ok(r >= MIN_TEXTO, `${m}: ${r.toFixed(2)}`);
+  }
+});
+
+test('etiquetas da Cidade: as 6 skins oficiais se leem de dia e de noite (≥ 4,5), corrigidas sozinhas onde precisava', () => {
+  assert.equal(OFFICIAL_SKINS.length, 6);
+  let corrigidas = 0;
+  for (const sk of OFFICIAL_SKINS) for (const mode of ['dia', 'noite'] as const) {
+    const t = skinTheme(THEMES[mode], sk, mode);
+    for (const r of etiquetas(t)) assert.ok(r >= MIN_TEXTO, `${sk.id} ${mode}: ${r.toFixed(2)}`);
+    // o contorno (que desenha a cidade inteira) não muda: só o fundo da etiqueta
+    const spec = sk.palette[mode];
+    assert.equal(t.outline, ({ ...deriveThemeColors(spec.seeds), ...(spec.colors ?? {}) } as { outline: string }).outline);
+  }
+  // a auditoria achou cromo-9 de noite, vila-ronrom e enseada-coral de dia abaixo de 4,5: o validador corrige e avisa
+  for (const sk of OFFICIAL_SKINS) corrigidas += legibilizarSkin(sk).ajustes.length;
+  assert.ok(corrigidas >= 3, `ajustes: ${corrigidas}`);
+});
+
+test('etiquetas da Cidade: a correção da skin é estável (corrigir de novo não muda nada) e mantém o tom', () => {
+  for (const sk of OFFICIAL_SKINS) {
+    const uma = legibilizarSkin(sk);
+    assert.deepEqual(legibilizarSkin(uma.skin).ajustes, [], sk.id);
+    for (const a of uma.ajustes) { assert.notEqual(a.de, a.para); assert.ok(Math.abs(tom(a.de) - tom(a.para)) < 4 || sat(a.de) < 0.08, `${sk.id}: ${a.de} → ${a.para} mudou de tom`); }
+    // a skin corrigida passa na validação de sempre
+    assert.equal(validateSkin(uma.skin).ok, true, sk.id);
+  }
+  // tema com contorno claro demais: as etiquetas ganham fundo mais escuro e se leem
+  const t = comEtiquetasLegiveis({ ...THEMES.dia, outline: '#8a8a8a' }, 'dia');
+  for (const r of etiquetas(t)) assert.ok(r >= MIN_TEXTO, r.toFixed(2));
+  assert.equal(comEtiquetasLegiveis(THEMES.noite, 'noite'), THEMES.noite);
+});

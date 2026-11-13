@@ -80,7 +80,7 @@ export function importBlueprint(db: Db, bus: Bus, routines: Routines, workspaceI
     if (existing.has(a.name.toLowerCase())) { plan.skipped.push(`agente "${a.name}" já existe`); continue; }
     plan.agents.push({ name: a.name, role: a.role, sector: sectorKeys.has(a.sectorKey) ? a.sectorKey : 'auto' });
   }
-  const library = new Set((routines.library(workspaceId) as { routines: Array<{ key: string; available?: boolean }> }).routines.filter((r) => r.available !== false).map((r) => r.key));
+  const library = new Set((routines.library(workspaceId) as { routines: Array<{ key: string }> }).routines.map((r) => r.key));
   for (const r of bp.routines) {
     if (!library.has(r.template)) { plan.skipped.push(`rotina "${r.name}": modelo ${r.template} não existe nesta versão`); continue; }
     plan.routines.push({ name: r.name, template: r.template, status: 'paused' });

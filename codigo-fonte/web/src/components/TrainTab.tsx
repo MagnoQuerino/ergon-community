@@ -4,7 +4,11 @@ import { useResource } from '../lib/live.ts';
 import type { Agent, AgentSkill, ArtifactRow, Training, TrainingList, TrainingSources } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
-import { CompetenciasProntas } from './CompetenciasProntas.tsx';
+import { AdicionarCompetencia } from './AdicionarCompetencia.tsx';
+import { CompetenciasInstaladas, LojaCompetencias, SKILLS } from './CompetenciasProntas.tsx';
+import { RECURSOS } from '../lib/recursos.ts';
+import { ehArquivoDeCompetencia } from '../lib/competencias-tela.ts';
+import { prefetchResources } from '../lib/live.ts';
 import { fmtDataHora, useT, type Chave, type ValoresDe } from '../i18n/index.ts';
 /** chave de texto sem valores a preencher (os rótulos das tabelas abaixo) */
 type Rotulo = { [K in Chave]: keyof ValoresDe<K> extends never ? K : never }[Chave];
@@ -20,12 +24,24 @@ const SKILL_STATUS: Record<AgentSkill['status'], { rotulo: Rotulo; cls: string }
   removida: { rotulo: 'agente.treino.competencia.removida', cls: 'badge--err' },
 };
 
+/** As três coisas diferentes que dá para fazer no Treinar (rc.29), cada uma com o seu painel. */
+export type ModoTreinar = 'ensinar' | 'adicionar' | 'consulta';
+const MODOS: ReadonlyArray<{ id: ModoTreinar; icone: string; titulo: Rotulo; texto: 'agente.modo.ensinar.texto' | 'agente.modo.pronta.texto' | 'agente.modo.consulta.texto' }> = [
+  { id: 'ensinar', icone: 'bulb', titulo: 'agente.modo.ensinar.titulo', texto: 'agente.modo.ensinar.texto' },
+  { id: 'adicionar', icone: 'plus', titulo: 'agente.modo.pronta.titulo', texto: 'agente.modo.pronta.texto' },
+  { id: 'consulta', icone: 'folder', titulo: 'agente.modo.consulta.titulo', texto: 'agente.modo.consulta.texto' },
+];
+
 /**
- * Treinar: a pessoa ensina uma competência ao agente (texto, arquivos, links); o agente estuda só esse material e
- * escreve uma proposta; nada vale até a pessoa revisar e aprovar. Aprovada, é só deste agente, com versões.
+ * Treinar: no topo, as três coisas diferentes — ensinar um jeito de trabalhar (o agente estuda o material e escreve uma
+ * proposta, que só vale depois de aprovada), adicionar uma competência pronta (SKILL.md, pasta compactada ou a loja) e
+ * dar arquivos para consulta (o que fica no card ou na conversa). Embaixo, as competências instaladas, com busca.
  */
-export function TrainTab({ agent, full, onAgentChanged }: { agent: Pick<Agent, 'id' | 'name'>; full?: Agent | null; onAgentChanged?: () => void }) {
+export function TrainTab({ agent, full, onAgentChanged, onConversa }: { agent: Pick<Agent, 'id' | 'name'>; full?: Agent | null; onAgentChanged?: () => void; onConversa?: () => void }) {
   const t = useT();
+  const [modo, setModo] = useState<ModoTreinar>('ensinar');
+  // a loja e a biblioteca já vêm carregando: trocar de painel não espera
+  useEffect(() => { prefetchResources([SKILLS, `${RECURSOS}/loja`]); }, []);
   const d = useResource<TrainingList>(`/api/agents/${agent.id}/trainings`, ['agents.changed']);
   const running = d.data?.trainings.some((x) => x.status === 'executando') ?? false;
   useEffect(() => { // os avisos ao vivo já atualizam; a consulta periódica é a rede de segurança enquanto aprende
@@ -44,17 +60,53 @@ export function TrainTab({ agent, full, onAgentChanged }: { agent: Pick<Agent, '
   const history = trainings.filter((x) => !review.includes(x)).slice(0, 8);
   const ativas = skills.filter((s) => s.status === 'ativa').length;
   const teachMore = (id: string) => { setTarget(id); formRef.current?.closest('.awin__body')?.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const recarregar = () => { d.reload(); onAgentChanged?.(); };
   return (
     <div className="train">
-      <p className="hint">{t('agente.treino.intro', { nome: agent.name })}</p>
-      <div ref={formRef}><TrainForm agent={agent} skills={skills} target={target} setTarget={setTarget} onStarted={d.reload} /></div>
-      {review.length > 0 && <div className="block"><h4>{t('agente.treino.treinamentos')}</h4>{review.map((x) => <TrainingCard key={x.id} t={x} skills={skills} reload={d.reload} onSeen={() => setSeen([...seen, x.id])} />)}</div>}
-      <div className="block">
-        <h4>{t('agente.treino.aprendidas')} {skills.length ? <span className="muted small">{t('agente.treino.ativas', { n: ativas })}</span> : null}</h4>
-        {skills.length ? skills.map((s) => <SkillCard key={s.id} s={s} reload={d.reload} onTeachMore={() => teachMore(s.id)} />)
-          : <p className="hint">{t('agente.treino.nenhuma')}</p>}
+      <h3 className="train__pergunta">{t('agente.treino.oQueFazer', { nome: agent.name })}</h3>
+      <div className="train__modos" role="tablist" aria-label={t('agente.treino.oQueFazer', { nome: agent.name })}>
+        {MODOS.map((m) => (
+          <button key={m.id} role="tab" aria-selected={modo === m.id} className={`train__modo ${modo === m.id ? 'train__modo--on' : ''}`} onClick={() => setModo(m.id)}>
+            <span className="train__modo-icone" aria-hidden="true"><Icon name={m.icone} size={20} /></span>
+            <b>{t(m.titulo)}</b>
+            <span className="small">{t(m.texto, { nome: agent.name })}</span>
+          </button>
+        ))}
       </div>
-      {full && <CompetenciasProntas agent={full} reload={onAgentChanged ?? d.reload} />}
+      {review.length > 0 && <div className="block"><h4>{t('agente.treino.treinamentos')}</h4>{review.map((x) => <TrainingCard key={x.id} t={x} skills={skills} reload={d.reload} onSeen={() => setSeen([...seen, x.id])} />)}</div>}
+      {modo === 'ensinar' && (
+        <div className="train__painel" role="tabpanel">
+          <p className="hint">{t('agente.treino.intro', { nome: agent.name })}</p>
+          <div ref={formRef}><TrainForm agent={agent} skills={skills} target={target} setTarget={setTarget} onStarted={d.reload} onPronta={() => setModo('adicionar')} /></div>
+        </div>
+      )}
+      {modo === 'adicionar' && (
+        <div className="train__painel" role="tabpanel">
+          {full ? <><AdicionarCompetencia agent={full} reload={recarregar} /><LojaCompetencias agent={full} reload={recarregar} /></> : <Loading />}
+        </div>
+      )}
+      {modo === 'consulta' && (
+        <div className="train__painel block" role="tabpanel">
+          <h4><Icon name="folder" size={14} /> {t('agente.modo.consulta.titulo')}</h4>
+          <p>{t('agente.consulta.p1', { nome: agent.name })}</p>
+          <p className="small">{t('agente.consulta.p2')}</p>
+          <p className="small">{t('agente.consulta.p3', { nome: agent.name })}</p>
+          <div className="row row--wrap">
+            {onConversa && <button className="btn btn--primary" onClick={onConversa}><Icon name="chat" size={14} /> {t('agente.consulta.conversa', { nome: agent.name })}</button>}
+            <button className="btn" onClick={() => setModo('ensinar')}><Icon name="bulb" size={14} /> {t('agente.consulta.ensinar')}</button>
+          </div>
+        </div>
+      )}
+      {full ? (
+        <CompetenciasInstaladas agent={full} treinadas={skills} reload={recarregar} onAtualizar={() => setModo('adicionar')}
+          detalheTreino={(s) => <SkillCard s={s} reload={d.reload} onTeachMore={() => { setModo('ensinar'); teachMore(s.id); }} />} />
+      ) : (
+        <div className="block">
+          <h4>{t('agente.treino.aprendidas')} {skills.length ? <span className="muted small">{t('agente.treino.ativas', { n: ativas })}</span> : null}</h4>
+          {skills.length ? skills.map((s) => <SkillCard key={s.id} s={s} reload={d.reload} onTeachMore={() => teachMore(s.id)} />)
+            : <p className="hint">{t('agente.treino.nenhuma')}</p>}
+        </div>
+      )}
       {history.length > 0 && (
         <details className="block">
           <summary className="muted">{t('agente.treino.historico', { n: history.length })}</summary>
@@ -68,7 +120,7 @@ export function TrainTab({ agent, full, onAgentChanged }: { agent: Pick<Agent, '
   );
 }
 
-function TrainForm({ agent, skills, target, setTarget, onStarted }: { agent: Pick<Agent, 'id' | 'name'>; skills: AgentSkill[]; target: string; setTarget: (id: string) => void; onStarted: () => void }) {
+function TrainForm({ agent, skills, target, setTarget, onStarted, onPronta }: { agent: Pick<Agent, 'id' | 'name'>; skills: AgentSkill[]; target: string; setTarget: (id: string) => void; onStarted: () => void; onPronta: () => void }) {
   const t = useT();
   const [request, setRequest] = useState('');
   const [title, setTitle] = useState('');
@@ -124,6 +176,10 @@ function TrainForm({ agent, skills, target, setTarget, onStarted }: { agent: Pic
       <div className="editor__grid">
         <div className="field">{t('agente.treino.arquivos')} <span className="muted small">({files.length})</span>
           <FilePick value={files} onChange={setFiles} />
+          {files.filter((f) => ehArquivoDeCompetencia(f.name)).slice(0, 1).map((f) => (
+            <p key={f.id} className="hint warn">{t('agente.treino.pareceCompetencia', { arquivo: f.name })}{' '}
+              <button type="button" className="linkish" onClick={onPronta}>{t('agente.treino.irParaPronta')}</button></p>
+          ))}
         </div>
         <div className="field">{t('agente.treino.links')} <span className="muted small">({links.length})</span>
           {links.length > 0 && <ul className="rt-files__sel">{links.map((l) => <li key={l}><Icon name="compass" size={12} /> <span className="train__url">{l}</span>

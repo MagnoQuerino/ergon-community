@@ -133,15 +133,6 @@ describe('assinatura dos pacotes (manifest_version 3)', () => {
     const v = validatePackage(livre, keys);
     assert.deepEqual([v.manifest.manifest_version, v.verified], [2, false]);
     assert.equal(manifestOf(await buildPackage(base(), fx, {}, sign)).manifest_version, 3);
-    // o editor do Ergon (montar e baixar um .ergon) também sai no 2
-    const h = await harness();
-    try {
-      const s = await setupOwner(h);
-      const r = await h.app.inject({ method: 'POST', url: '/api/packages/build', payload: { kind: 'fx', title: 'Brilho meu', data: fx }, headers: { cookie: s.cookie, 'x-csrf-token': s.csrf, origin: ORIGIN } });
-      assert.equal(r.statusCode, 200, r.body);
-      const m = manifestOf(r.rawPayload);
-      assert.deepEqual([m.manifest_version, m.signature], [2, undefined]);
-    } finally { await h.close(); }
   });
 
   test('signature null, vazia ou falsa = sem assinatura ("não verificado"), no formato 2 e no 3, como na rc.25', async () => {

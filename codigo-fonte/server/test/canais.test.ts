@@ -259,3 +259,21 @@ test('a ponte interna dos canais exige o token do motor', async () => {
   const r = await req(h, 'POST', '/internal/bridge/v1/canais/saida', null, { schema: 'ergon.canais.v1', canais: ['telegram'] }, { 'x-ergon-bridge-token': 'x'.repeat(30) });
   assert.equal(r.status, 401);
 });
+
+test('cartão de gestão longo demais para o canal: sem Aprovar/Recusar (decide no Ergon); botão forjado não aplica', async () => {
+  recebidos.length = 0;
+  await ligar();
+  await entrada({ tipo: 'mensagem', user_id: '111222333', chat_id: '111222333', message_id: '1', text: 'mude as instruções do colega' });
+  await ate(() => motor.pedidos.length === 1);
+  await terminar('Vou pedir.');
+  await ateSair((x) => x.tipo === 'texto', 'a resposta não saiu');
+  const longo = `Aristóteles quer: Mudar um agente.\n- instructions: ${'Responda sempre com a tabela de preços. '.repeat(120)}FIM\nNada muda até você aplicar.`;
+  recordProposals(h.db, h.bus, s.workspaceId, { conversationId: conversa()!, runId: null }, [{ kind: 'gestao', acao: 'agente.editar', parametros: { id: 'agt_x' }, resumo: longo, agente: 'Aristóteles' } as never]);
+  const cartao = await ateSair((x) => x.tipo === 'cartao', 'o cartão não saiu');
+  assert.deepEqual(cartao.botoes ?? [], [], 'sem Aprovar/Recusar: a pessoa não leria o pedido inteiro');
+  assert.match(cartao.texto, /longo demais para aparecer aqui inteiro/);
+  const pid = h.db.get<{ id: string }>("SELECT id FROM agent_proposals WHERE kind = 'gestao' AND workspace_id = ?", s.workspaceId)!.id;
+  const r = await entrada({ tipo: 'clique', user_id: '111222333', chat_id: '111222333', dado: `a:${pid}`, evento: 'e-longo' });
+  assert.equal(r.json.reply, RESPOSTA.noErgon);
+  assert.equal(h.db.get<{ status: string }>('SELECT status FROM agent_proposals WHERE id = ?', pid)!.status, 'proposed');
+});

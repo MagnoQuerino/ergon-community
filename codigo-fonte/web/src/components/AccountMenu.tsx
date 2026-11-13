@@ -40,7 +40,7 @@ function Menu({ me, onClose, onAccount, onLogout }: { me: Me; onClose: () => voi
         <span><b>{me.user.displayName}</b><br /><span className="muted small">{me.user.username}</span></span>
       </div>
       <button className="acct-pop__item" role="menuitem" onClick={onAccount}><Icon name="gear" size={16} /> {t('geral.conta.minha')}</button>
-      {/* Português / English: troca na hora, sem fechar o menu (escondido até o inglês ser liberado) */}
+      {/* Português / English: troca na hora, sem fechar o menu */}
       <SeletorIdioma compacto />
       <button className="acct-pop__item" role="menuitem" onClick={onLogout} title={t('geral.conta.alternarDica')}>
         <Icon name="repeat" size={16} /> {t('geral.conta.alternar')}

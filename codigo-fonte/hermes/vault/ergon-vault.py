@@ -5,8 +5,8 @@ diretório passa a ser a vista decifrada de um cofre gocryptfs no volume /vault:
 cifrado. A chave vem do Ergon (derivada da chave mestra, que só existe depois que a pessoa destranca o Ergon)
 pela rede interna, com o token da ponte. Sem chave, o Hermes não sobe.
 
-Primeira vez: cria o cofre e copia para dentro os dados de antes (volume antigo montado em /legacy, só
-leitura — ele não é apagado; a pessoa decide quando remover). Depois monta, copia o plugin do Ergon, aplica as
+Primeira vez: cria o cofre (a cópia dos dados de antes do cofre, de um volume antigo montado em /legacy, saiu na
+rc.29: nenhuma versão que ainda atualiza pelo app monta esse volume). Depois monta, copia o plugin do Ergon, aplica as
 migrações de configuração do Ergon que ainda faltam (MIGRACOES) e passa a vez ao ponto de entrada original do Hermes
 (s6), mantendo o processo 1. Assim a instalação não precisa de nenhum passo manual no motor.
 
@@ -28,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 VAULT = "/vault"
 PLAIN = "/opt/data"
-LEGACY = "/legacy"
+
 PLUGIN_SRC = "/opt/ergon/plugins/ergon_bridge"
 MARKER = ".ergon-vault"
 HERMES_UID = 10000
@@ -47,7 +47,7 @@ HERMES_CLI = "/opt/hermes/.venv/bin/hermes"
 CONFIG_MARKER = ".ergon-config"
 MIGRACOES_MARKER = ".ergon-migracoes"
 # Conjuntos de ferramentas que o plugin do Ergon registra (o mesmo de _ERGON_PLUGIN_TOOLSETS no plugin)
-ERGON_PLUGIN_TOOLSETS = ("ergon_conexoes", "ergon_cartoes")
+ERGON_PLUGIN_TOOLSETS = ("ergon_conexoes", "ergon_cartoes", "ergon_gestao")
 API_TOOLSETS_PADRAO = ["todo", "web", "vision", "image_gen", "skills", "ergon_conexoes"]
 MIGRACOES: tuple[tuple[int, str, dict], ...] = (
     # 1: plugin ligado; na API (agentes do Ergon) só o conjunto seguro de ferramentas — o plugin barra, a cada chamada,
@@ -236,6 +236,17 @@ MIGRACOES: tuple[tuple[int, str, dict], ...] = (
             ["platform_toolsets.api_server", ["browser", "file", "tts", "video"], ["todo", "web", "vision", "image_gen", "skills", "ergon_conexoes"]],
         ],
     }),
+    # 11 (rc.29, frente "coordenador"; a frente "MCP próprio" não precisou de migração do cofre, e a 12 prevista virou 11): o conjunto
+    # ergon_gestao do plugin (o coordenador gerencia e configura o Ergon: gestao_listar, gestao_executar). Ele vale SÓ no
+    # perfil do coordenador, que o plugin monta com a lista própria (_config_do_perfil). Na configuração da equipe e nos
+    # canais diretos fica conhecido e fora da lista = desligado (sem isto, o Hermes ligaria o conjunto de plugin que não
+    # conhece em toda plataforma: hermes_cli/tools_config.py, _enabled_plugin_toolsets). Só união: nada que a pessoa
+    # escolheu muda, e a lista da API não ganha o conjunto.
+    (11, "gestão pelo coordenador", {"unir": [
+        ["known_plugin_toolsets.api_server", ["ergon_gestao"], []],
+        ["known_plugin_toolsets.teams", ["ergon_gestao"], []],
+        ["known_plugin_toolsets.whatsapp", ["ergon_gestao"], []],
+    ]}),
 )
 CONFIG_VERSION = MIGRACOES[-1][0]
 # Travas de segurança: valem em TODA abertura, além das migrações (reaplicar uma migração desfaria escolhas da
@@ -335,15 +346,9 @@ def open_vault(key: str, previous: str | None = None) -> None:
     os.chmod(PLAIN, 0o700)
     marker = os.path.join(PLAIN, MARKER)
     if not os.path.exists(marker):
-        legacy = [n for n in os.listdir(LEGACY)] if os.path.isdir(LEGACY) else []
-        if legacy:
-            log(f"migrando {len(legacy)} itens do volume antigo para o cofre")
-            # o gocryptfs (usuário do motor) grava tudo como ele: preservar outro dono seria recusado
-            r = subprocess.run(["cp", "-a", "--no-preserve=ownership", f"{LEGACY}/.", f"{PLAIN}/"], capture_output=True, timeout=1800)
-            if r.returncode != 0:
-                raise RuntimeError(f"falha ao migrar os dados antigos: {r.stderr.decode()[-300:]}")
+        # a marca diz se a cópia antiga entrou no cofre (o plugin a lê em dados_antigos): nos cofres criados agora, não
         with open(marker, "w", encoding="utf-8") as f:
-            json.dump({"migrated_from_legacy": bool(legacy)}, f)
+            json.dump({"migrated_from_legacy": False}, f)
         os.chown(marker, HERMES_UID, HERMES_UID)
     # plugin do Ergon: o código vem da imagem/projeto (só leitura); a cópia fica dentro do cofre
     if os.path.isdir(PLUGIN_SRC):

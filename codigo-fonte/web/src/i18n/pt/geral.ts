@@ -51,6 +51,8 @@ const geral = {
   'tema.autoCurto': 'Tema automático',
   'tema.diaCurto': 'Tema claro',
   'tema.noiteCurto': 'Tema escuro',
+  'tema.contraste': 'Tema de alto contraste (texto preto sobre branco, contornos fortes)',
+  'tema.contrasteCurto': 'Alto contraste',
 
   // ——— música ambiente ———
   'musica.nome': 'Música ambiente',

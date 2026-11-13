@@ -9,9 +9,10 @@ import pt from '../i18n/pt/rotinas.ts';
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tela = () => fs.readFileSync(path.join(raiz, 'views/RotinasView.tsx'), 'utf8');
 
-test('Rotinas: as listas de "faltam" e do apoio continuam juntadas por vírgula (mesmo português de antes)', () => {
+test('Rotinas: a lista do apoio continua juntada por vírgula (mesmo português de antes)', () => {
   const s = tela();
-  assert.match(s, /const faltam = missing\.map\(\(n\) => n\.label\)\.join\(', '\);/);
+  // a lista do que falta só aparecia no texto "em breve", que saiu na rc.29 com o selo (as 24 rotinas funcionam)
+  assert.doesNotMatch(s, /const faltam =/);
   assert.match(s, /apoio: tpl\.agentNames\.slice\(1\)\.join\(', '\)/);
 });
 

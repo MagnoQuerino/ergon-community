@@ -1,7 +1,7 @@
 // Leitura da folha de estilos para o teste de contraste que reprova a publicação (contraste.test.ts).
-// Entende blocos dentro de @media/@supports, as variáveis dos dois temas, var() com reserva, color-mix(in srgb, …) e
+// Entende blocos dentro de @media/@supports, as variáveis dos três temas (claro, escuro e alto contraste), var() com reserva, color-mix(in srgb, …) e
 // transparência; e aponta os defeitos que a conta simples não via: variável inexistente, atalho `font` com `inherit`,
-// opacidade baixa em texto e letra pequena em controle.
+// opacidade baixa em texto, letra pequena em controle, cor solta fora das cores de função e cor com nome de cor fixa.
 
 import { over, parseColor, ratioRgb, type Rgb } from './contraste.ts';
 
@@ -85,12 +85,18 @@ export function ajustadosNoEscuro(rs: Regra[]): Set<string> {
 export const emKeyframes = (r: Regra) => r.at.some((a) => /^@(-webkit-)?keyframes/.test(a));
 export const valor = (r: Regra, prop: string) => { let v: string | undefined; for (const d of r.decls) if (d.prop === prop) v = d.value; return v; };
 
-/** As variáveis dos dois temas: o claro (`:root`) e o escuro (o claro mais `:root[data-theme="dark"]`). */
-export function temas(css: string): { claro: Vars; escuro: Vars } {
-  const rs = regras(css).filter((r) => !r.at.length);
-  const of = (sel: string) => Object.fromEntries(rs.filter((r) => r.sel === sel).flatMap((r) => r.decls.filter((d) => d.prop.startsWith('--')).map((d) => [d.prop, d.value])));
-  const claro = of(':root');
-  return { claro, escuro: { ...claro, ...of(':root[data-theme="dark"]') } };
+/** Os blocos de cores de cada tema: só eles podem ter cor escrita (hex, rgb, nome). */
+export const BLOCOS_DE_TEMA = [':root', ':root[data-theme="dark"]', ':root[data-theme="contraste"]'] as const;
+
+/** As variáveis de um bloco de tema, como estão escritas. */
+export function varsDoBloco(css: string, sel: string): Vars {
+  return Object.fromEntries(regras(css).filter((r) => !r.at.length && r.sel === sel).flatMap((r) => r.decls.filter((d) => d.prop.startsWith('--')).map((d) => [d.prop, d.value])));
+}
+
+/** As variáveis dos três temas: o claro (`:root`), o escuro e o alto contraste (cada um: o claro mais o bloco dele). */
+export function temas(css: string): { claro: Vars; escuro: Vars; contraste: Vars } {
+  const claro = varsDoBloco(css, ':root');
+  return { claro, escuro: { ...claro, ...varsDoBloco(css, BLOCOS_DE_TEMA[1]) }, contraste: { ...claro, ...varsDoBloco(css, BLOCOS_DE_TEMA[2]) } };
 }
 
 const NOMES: Record<string, Cor> = { white: { rgb: [255, 255, 255], a: 1 }, black: { rgb: [0, 0, 0], a: 1 }, transparent: { rgb: [0, 0, 0], a: 0 } };
@@ -206,4 +212,39 @@ export function letraPequenaEmControle(css: string, min = 12, excecoes: Iterable
     if (partes.length) bad.push(`linha ${r.line}: ${partes.join(', ').slice(0, 80)} (${px}px)`);
   }
   return bad;
+}
+
+/** Cor escrita direto: #hex, rgb()/rgba()/hsl() ou um nome de cor (white, black, red…). transparent e currentColor não contam. */
+const COR_ESCRITA = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(|\b(?:white|black|red|green|blue|yellow|orange|purple|gray|grey|silver|maroon|navy|teal|olive|lime|aqua|fuchsia|gold|pink|brown|beige|ivory)\b/i;
+/** o valor sem os nomes de variável (var(--navy) não é a cor "navy") */
+const semNomes = (v: string) => v.replace(/--[\w-]+/g, '');
+/** Sombras: a cor é só a da sombra (preto ou branco translúcido), não uma cor da tela. */
+const SO_SOMBRA = new Set(['box-shadow', 'text-shadow', 'filter', '-webkit-filter']);
+
+/**
+ * Cor solta: cor escrita direto numa regra de tela (fora dos blocos de tema), inclusive como reserva de var(). Toda cor
+ * da tela vem das cores de função (var(--…)); as sombras ficam de fora. Também reprova as cores com nome de cor fixa
+ * (--fx-…), que o tema escuro precisava remendar seletor a seletor.
+ */
+export function coresSoltas(css: string): string[] {
+  const bad: string[] = [];
+  for (const r of regras(css)) {
+    if (!r.at.length && (BLOCOS_DE_TEMA as readonly string[]).includes(r.sel)) {
+      for (const d of r.decls) if (/^--fx-/.test(d.prop)) bad.push(`linha ${r.line}: ${d.prop} (cor com nome de cor fixa)`); // i18n-ok: mensagem do teste de contraste, nunca vai à tela
+      continue;
+    }
+    for (const d of r.decls) {
+      if (/var\(\s*--fx-/.test(d.value) || /^--fx-/.test(d.prop)) { bad.push(`linha ${r.line}: ${r.sel.slice(0, 60)} usa --fx-`); continue; }
+      if (SO_SOMBRA.has(d.prop)) continue;
+      // nomes de propriedade e de animação não são cor (ex.: "animation: gold-pulse"); só o valor das que pintam
+      if (/^(animation|transition|font|content|grid|counter|will-change)/.test(d.prop)) continue;
+      if (COR_ESCRITA.test(semNomes(d.value))) bad.push(`linha ${r.line}: ${r.sel.slice(0, 60)} { ${d.prop}: ${d.value.slice(0, 60)} }`);
+    }
+  }
+  return bad;
+}
+
+/** Seletores com ajuste próprio por tema (`:root[data-theme="…"] .x`): cada tema só redefine as cores de função. */
+export function ajustesPorTema(css: string): string[] {
+  return regras(css).filter((r) => r.sel.includes('[data-theme=') && !(BLOCOS_DE_TEMA as readonly string[]).includes(r.sel)).map((r) => `linha ${r.line}: ${r.sel.slice(0, 90)}`);
 }

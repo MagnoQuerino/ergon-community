@@ -221,6 +221,8 @@ export function textoDaVolta(kind: Provedor, status: string, conectada: boolean)
     case 'admin-aprovou-outro': return t('servidor.tela.volta.adminAprovouOutro');
     case 'admin-recusou-outro': return t('servidor.tela.volta.adminRecusouOutro');
     case 'admin-base': return t('servidor.tela.volta.adminBase');
+    // "Adicionar outra conta" entrou numa conta que já estava aqui: nada mudou
+    case 'ja-conectada': return t('servidor.tela.volta.jaConectada', { nome });
     case 'recusado': return kind === 'google' ? t('servidor.tela.volta.canceladoGoogle') : t('servidor.tela.volta.canceladoMicrosoft');
     default: return kind === 'google' ? t('servidor.tela.volta.naoConcluiuGoogle') : t('servidor.tela.volta.naoConcluiuMicrosoft');
   }

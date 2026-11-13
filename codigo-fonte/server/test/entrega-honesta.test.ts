@@ -301,7 +301,7 @@ describe('entrega honesta: o que conta como pedido numa conta e como "não fiz"'
 describe('rotina "Teams + e-mail → tarefas": uma rodada por dia, conferida pelo registro do serviço', () => {
   test('o catálogo não oferece mais que uma rodada por dia para o que lê o Teams', () => {
     const t = templateByKey('teams-email-tarefas')!;
-    assert.ok(t && t.available);
+    assert.ok(t);
     assert.ok(leTeams(t));
     assert.deepEqual(t.conexoes!.le.flatMap((g) => g.acoes).sort(), ['email.buscar', 'email.ler', 'teams.conversas', 'teams.ler']);
     assert.deepEqual(t.conexoes!.cria.acoes, ['tarefa.criar']);

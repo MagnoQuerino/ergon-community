@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { keepTyped, useSurface } from '../lib/surface.ts';
-import type { ArtifactRow, CloudFile, EvidenceLevels, FileRef, InputSpec, ParamSpec, ParamValues, RecommendState, Routine, RoutineLibrary, RoutineRun, RoutineRunDetail, RoutineRunStatus, RoutineSetupState, RoutineTemplate, RoutineTrigger, View } from '../lib/types.ts';
+import type { ArtifactRow, CloudFile, EvidenceLevels, FileRef, InputSpec, Integration, ParamSpec, ParamValues, RecommendState, Routine, RoutineLibrary, RoutineRun, RoutineRunDetail, RoutineRunStatus, RoutineSetupState, RoutineTemplate, RoutineTrigger, View } from '../lib/types.ts';
 import type { TeamAgent } from '../lib/teamData.ts';
 import { Loading, PhraseLoader } from '../brand/Brand.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { useHashParam } from '../lib/route.ts';
+import { alternarConta, contaMarcada, gruposDaRotina, nomeNaTela } from '../lib/contas.ts';
 import { pushRecent } from '../lib/recents.ts';
 import { cardClick } from '../lib/cardClick.ts';
 import { fmtData, fmtLista, fmtNumero, t, tn, useIdioma, useT, type Chave } from '../i18n/index.ts';
@@ -31,8 +32,7 @@ const STATUS: Record<RoutineRunStatus, { label: Rotulo; cls: string }> = {
 };
 const when = (iso: string | null) => (iso ? fmtData(iso, { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) || '—' : '—');
 const MODES: Record<string, Rotulo> = { manual: 'rotinas.modo.manual', schedule: 'rotinas.modo.schedule', event: 'rotinas.modo.event', condition: 'rotinas.modo.condition' };
-/** fase 1 ainda não pronta = vem a seguir; as outras dizem a fase do plano */
-const phaseLabel = (n: number) => (n === 1 ? t('rotinas.fase.emBreve') : t('rotinas.fase.n', { fase: n }));
+
 const CONDITION: Record<string, Rotulo> = { sempre: 'rotinas.condicao.sempre', novidades: 'rotinas.condicao.novidades', sinal: 'rotinas.condicao.sinal' };
 /** o rótulo da tabela, ou o valor como veio (um valor novo que a tela ainda não conhece) */
 const rotulo = (tabela: Record<string, Rotulo>, k: string) => (tabela[k] ? t(tabela[k]) : k);
@@ -132,7 +132,7 @@ function Library({ lib, coordName, onGo, onInstalled }: { lib: RoutineLibrary; c
   const [open, setOpen] = useState<RoutineTemplate | null>(null);
   const [only, setOnly] = useState(false);
   // por finalidade; "só as que já dá para usar" esconde as que pedem uma conexão que ainda falta
-  const usable = (r: RoutineTemplate) => r.available && r.needs.every((n) => n.ok);
+  const usable = (r: RoutineTemplate) => r.needs.every((n) => n.ok);
   const groups = useMemo(() => Object.entries(lib.categories).map(([k, label]) => ({ key: k, label, items: lib.routines.filter((r) => r.category === k && (!only || usable(r))) }))
     .filter((g) => g.items.length), [lib, only]); // eslint-disable-line react-hooks/exhaustive-deps
   const ready = lib.routines.filter(usable).length;
@@ -160,10 +160,10 @@ function TemplateCard({ tpl, onOpen }: { tpl: RoutineTemplate; onOpen: () => voi
   const active = tpl.installed.length > 0;
   const missing = tpl.needs.filter((n) => !n.ok);
   return (
-    <button className={`rt-card ${tpl.available ? '' : 'rt-card--soon'} ${active ? 'rt-card--on' : ''}`} onClick={onOpen}>
+    <button className={`rt-card ${active ? 'rt-card--on' : ''}`} onClick={onOpen}>
       <span className="rt-card__head">
         <b>{tpl.name}</b>
-        {active ? <span className="badge badge--ok">{t('rotinas.estado.ativa')}</span> : tpl.available ? <span className="badge badge--ok">{t('rotinas.estado.pronta')}</span> : <span className="badge badge--soon">{phaseLabel(tpl.phase)}</span>}
+        <span className="badge badge--ok">{active ? t('rotinas.estado.ativa') : t('rotinas.estado.pronta')}</span>
       </span>
       <span className="rt-card__txt">{tpl.benefit}</span>
       <span className="rt-card__meta">
@@ -229,10 +229,7 @@ function TemplateDrawer({ tpl, coordName, onClose, onGo, onInstalled }: { tpl: R
       onInstalled(r.id);
     } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
-  const faltam = missing.map((n) => n.label).join(', ');
-  const emBreve = tpl.phase === 1
-    ? (missing.length ? t('rotinas.ativar.proximaCom', { lista: faltam, nome: tpl.agentNames[0] }) : t('rotinas.ativar.proxima', { nome: tpl.agentNames[0] }))
-    : (missing.length ? t('rotinas.ativar.faseCom', { fase: tpl.phase, lista: faltam, nome: tpl.agentNames[0] }) : t('rotinas.ativar.fase', { fase: tpl.phase, nome: tpl.agentNames[0] }));
+
   const ajuste = [
     specs.some((p) => p.required) ? t('rotinas.ativar.soDiga') : t('rotinas.ativar.nada'),
     asksInput ? t('rotinas.ativar.ajustaPedido', { nome: coordName }) : t('rotinas.ativar.ajustaRoda', { nome: coordName }),
@@ -241,7 +238,7 @@ function TemplateDrawer({ tpl, coordName, onClose, onGo, onInstalled }: { tpl: R
   return (
     <aside ref={ref} className="drawer rt-drawer" role="dialog" aria-label={tpl.name}>
       <div className="drawer__head">
-        <span className={`badge ${tpl.available ? 'badge--ok' : 'badge--soon'}`}>{tpl.available ? t('rotinas.estado.pronta') : phaseLabel(tpl.phase)}</span>
+        <span className="badge badge--ok">{t('rotinas.estado.pronta')}</span>
         <button className="icon-btn" onClick={close} aria-label={t('geral.comum.fechar')} title={t('geral.comum.fechar')}><Icon name="x" /></button>
       </div>
       <h3 className="drawer__title">{tpl.name}</h3>
@@ -265,31 +262,25 @@ function TemplateDrawer({ tpl, coordName, onClose, onGo, onInstalled }: { tpl: R
           <blockquote className="rt-sample">{tpl.sample}</blockquote>
         </>
       )}
-      {tpl.available ? (
+      <div className="rt-adapt">
+        <Icon name="auto" size={16} />
+        <p>{ajuste}</p>
+      </div>
+      {tpl.input && <p className="hint"><Icon name="send" size={12} /> {t('rotinas.entrada.aoExecutar', { oque: inputHint(tpl.input) })}</p>}
+      {specs.length > 0 && (
         <>
-          <div className="rt-adapt">
-            <Icon name="auto" size={16} />
-            <p>{ajuste}</p>
-          </div>
-          {tpl.input && <p className="hint"><Icon name="send" size={12} /> {t('rotinas.entrada.aoExecutar', { oque: inputHint(tpl.input) })}</p>}
-          {specs.length > 0 && (
-            <>
-              <h4 className="rt-sub">{t('rotinas.ativar.oQueAcompanhar')}</h4>
-              <ParamsEditor specs={specs} value={params} onChange={setParams} />
-            </>
-          )}
-          <label className="field">{t('rotinas.ativar.contar')}
-            <textarea rows={2} maxLength={600} value={extra} onChange={(e) => setExtra(e.target.value)} placeholder={t('rotinas.ativar.contarEx')} />
-          </label>
-          {err && <p className="error" role="alert">{err}</p>}
-          {lacking.length > 0 && <p className="hint warn">{t('rotinas.ativar.preencha', { campos: lacking.map((p) => p.label).join(', ') })}</p>}
-          <div className="row row--wrap">
-            <button className="btn btn--primary" disabled={busy} onClick={() => void install()}>{busy ? t('rotinas.ativar.ativando') : tpl.installed.length ? t('rotinas.ativar.outra') : t('rotinas.ativar.ativar')}</button>
-          </div>
+          <h4 className="rt-sub">{t('rotinas.ativar.oQueAcompanhar')}</h4>
+          <ParamsEditor specs={specs} value={params} onChange={setParams} />
         </>
-      ) : (
-        <p className="hint">{emBreve}</p>
       )}
+      <label className="field">{t('rotinas.ativar.contar')}
+        <textarea rows={2} maxLength={600} value={extra} onChange={(e) => setExtra(e.target.value)} placeholder={t('rotinas.ativar.contarEx')} />
+      </label>
+      {err && <p className="error" role="alert">{err}</p>}
+      {lacking.length > 0 && <p className="hint warn">{t('rotinas.ativar.preencha', { campos: lacking.map((p) => p.label).join(', ') })}</p>}
+      <div className="row row--wrap">
+        <button className="btn btn--primary" disabled={busy} onClick={() => void install()}>{busy ? t('rotinas.ativar.ativando') : tpl.installed.length ? t('rotinas.ativar.outra') : t('rotinas.ativar.ativar')}</button>
+      </div>
     </aside>
   );
 }
@@ -501,7 +492,7 @@ function FilePicker({ value, onChange, max, accept }: { value: FileRef[]; onChan
             <label className="btn btn--sm">{t('rotinas.arquivos.enviar')}<input type="file" hidden accept={accept} onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ''; }} /></label>
           </div>
           {local.length > 0 && <ul className="rt-files__list">{local.map((a) => <li key={a.id}><button type="button" className="link" disabled={has({ kind: 'ergon', id: a.id, name: a.filename })} onClick={() => add({ kind: 'ergon', id: a.id, name: a.filename })}>{a.filename}</button> <span className="muted small">{t('rotinas.arquivos.noErgon', { quando: when(a.created_at) })}</span></li>)}</ul>}
-          {cloud && (cloud.length ? <ul className="rt-files__list">{cloud.map((c) => <li key={c.id}><button type="button" className="link" onClick={() => add({ kind: c.provider, id: c.id, name: c.name })}>{c.name}</button> <span className="muted small">{c.provider === 'google' ? ORIGEM.google : c.folder} · {when(c.modified)}</span></li>)}</ul> : <p className="muted small">{t('rotinas.arquivos.nadaNuvem')}</p>)}
+          {cloud && (cloud.length ? <ul className="rt-files__list">{cloud.map((c) => <li key={c.id}><button type="button" className="link" onClick={() => add({ kind: c.provider, id: c.id, name: c.name, ...(c.conta ? { conta: c.conta } : {}) })}>{c.name}</button> <span className="muted small">{c.provider === 'google' ? ORIGEM.google : c.folder} · {when(c.modified)}</span></li>)}</ul> : <p className="muted small">{t('rotinas.arquivos.nadaNuvem')}</p>)}
           <p className="hint">{t('rotinas.arquivos.formatos')}</p>
         </>
       )}
@@ -517,12 +508,16 @@ function EditDrawer({ r, coordName, onClose, onDirty, reload }: { r: Routine; co
   const [extra, setExtra] = useState(r.config.extra ?? '');
   const [stale, setStale] = useState(r.config.staleDays ?? 3);
   const [params, setParams] = useState<ParamValues>(r.config.params ?? {});
+  // as contas que a rotina lê, quando há mais de uma do mesmo aplicativo (vazio = todas)
+  const [contas, setContas] = useState<string[]>(r.config.contas ?? []);
+  const ints = useResource<Integration[]>('/api/integrations', ['integrations.changed']);
+  const grupos = gruposDaRotina(ints.data ?? [], r.config.sources);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const versions = useResource<Array<{ version: number; name: string; schedule: string; note: string | null; created_at: string }>>(`/api/routines/${r.id}/versions`, ['routines.changed']);
   const usesStale = r.config.sources.includes('tarefas.paradas');
   const ref = useRef<HTMLElement>(null);
-  const dirty = name !== r.name || JSON.stringify(trigger) !== JSON.stringify(r.trigger) || extra !== (r.config.extra ?? '') || stale !== (r.config.staleDays ?? 3) || JSON.stringify(params) !== JSON.stringify(r.config.params ?? {});
+  const dirty = name !== r.name || JSON.stringify(trigger) !== JSON.stringify(r.trigger) || extra !== (r.config.extra ?? '') || stale !== (r.config.staleDays ?? 3) || JSON.stringify(params) !== JSON.stringify(r.config.params ?? {}) || JSON.stringify(contas) !== JSON.stringify(r.config.contas ?? []);
   useEffect(() => { onDirty?.(dirty); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   const close = () => { if (keepTyped(dirty, t('rotinas.editar.descartar'))) onClose(); };
   useSurface(ref, { onClose: close, outside: true });
@@ -530,7 +525,7 @@ function EditDrawer({ r, coordName, onClose, onDirty, reload }: { r: Routine; co
     if (trigger.kind === 'schedule' && !trigger.days.length) { setMsg({ ok: false, text: t('rotinas.editar.umDia') }); return; }
     setBusy(true); setMsg(null);
     try {
-      await api.patch(`/api/routines/${r.id}`, { name: name.trim() || r.name, trigger: { ...trigger, ...(trigger.kind === 'schedule' ? { tz: TZ } : {}) }, extra: extra.trim(), ...(usesStale ? { staleDays: stale } : {}), ...(r.paramSpecs.length ? { params } : {}), tz: TZ });
+      await api.patch(`/api/routines/${r.id}`, { name: name.trim() || r.name, trigger: { ...trigger, ...(trigger.kind === 'schedule' ? { tz: TZ } : {}) }, extra: extra.trim(), ...(usesStale ? { staleDays: stale } : {}), ...(r.paramSpecs.length ? { params } : {}), ...(grupos.length || (r.config.contas ?? []).length ? { contas } : {}), tz: TZ });
       setMsg({ ok: true, text: t('rotinas.editar.salvo') }); reload(); versions.reload();
     } catch (e) { setMsg({ ok: false, text: errMsg(e) }); } finally { setBusy(false); }
   };
@@ -552,6 +547,18 @@ function EditDrawer({ r, coordName, onClose, onDirty, reload }: { r: Routine; co
       </label>
       {usesStale && <label className="field">{t('rotinas.editar.parada')}<input type="number" min={1} max={60} value={stale} onChange={(e) => setStale(Number(e.target.value) || 3)} /></label>}
       {r.paramSpecs.length > 0 && <><h4 className="rt-sub">{t('rotinas.ativar.oQueAcompanhar')}</h4><ParamsEditor specs={r.paramSpecs} value={params} onChange={setParams} /></>}
+      {/* duas contas do mesmo aplicativo (dois e-mails, dois números): a rotina lê uma, várias ou todas */}
+      {grupos.length > 0 && (
+        <>
+          <h4 className="rt-sub">{t('rotinas.editar.contas')}</h4>
+          <p className="hint">{t('rotinas.editar.contasDica')}</p>
+          {grupos.map((g) => (
+            <fieldset key={g.kind} className="rt-contas"><legend>{g.name}</legend>
+              {g.contas.map((c) => <label key={c.id} className="check"><input type="checkbox" checked={contaMarcada(contas, g.contas, c.id)} onChange={() => setContas(alternarConta(contas, g.contas, c.id))} /> {nomeNaTela(c, g.name)}</label>)}
+            </fieldset>
+          ))}
+        </>
+      )}
       <dl className="rt-facts">
         <dt>{t('rotinas.ficha.olha')}</dt><dd>{r.config.sourceLabels.join('; ')}</dd>
         <dt>{t('rotinas.ficha.usaModelo')}</dt><dd>{rotulo(CONDITION, r.config.condition)}</dd>

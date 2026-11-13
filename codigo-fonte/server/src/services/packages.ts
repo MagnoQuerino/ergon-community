@@ -69,6 +69,8 @@ export class Packages {
       for (const c of d.skin.characters) for (const a of this.agentsOf(ws, { charKey: c.charKey })) changes.push(`${a.name} aparece como ${c.name} (nome e bio; a função continua a mesma)`);
     }
     return { packageId: p.manifest.package_id, version: p.manifest.version, kind: p.manifest.kind, title: p.manifest.title, summary: p.manifest.summary, verified: p.verified,
+      // quantas cores foram ajustadas para se lerem (a tela avisa; o pacote instala já corrigido)
+      legibilidade: p.legibilidade.length,
       installable: p.installable, reason: p.installable ? null : 'Este tipo de pacote ainda não é instalado nesta versão (skills e plugins pedem revisão e isolamento próprios).', changes };
   }
 

@@ -115,6 +115,7 @@ const quadro = {
   'tarefas.lista': 'Lista',
   'tarefas.precisaReconectar': '{nome} (precisa reconectar)',
   'tarefas.ligarOutra': '+ Ligar outra lista do {app}…',
+  'tarefas.ligarOutraDaConta': '+ Ligar outra lista do {app} ({conta})…',
   'tarefas.falhaAoLer': 'falha ao ler: {erro}',
   'tarefas.ligadaA': 'ligada a {app} · lido às {hora}',
   'tarefas.aplicativo': 'aplicativo',

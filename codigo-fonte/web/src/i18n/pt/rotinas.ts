@@ -40,8 +40,6 @@ const rotinas = {
   'estado.emPreparo': 'Em preparo',
   'estado.pausada': 'Pausada',
   'estado.esperandoVoce': 'Esperando você',
-  'fase.emBreve': 'Em breve',
-  'fase.n': 'Fase {fase}',
   'modelo.falta': 'falta: {nome}',
   'modelo.privados': 'dados privados: só com a sua autorização',
 
@@ -118,10 +116,6 @@ const rotinas = {
   'ativar.ativando': 'Ativando…',
   'ativar.outra': 'Ativar outra',
   'ativar.ativar': 'Ativar',
-  'ativar.proxima': 'Vem a seguir, ainda nesta primeira fase do plano de rotinas. Enquanto isso, dá para pedir algo parecido na conversa com {nome}.',
-  'ativar.proximaCom': 'Vem a seguir, ainda nesta primeira fase do plano de rotinas, junto com: {lista}. Enquanto isso, dá para pedir algo parecido na conversa com {nome}.',
-  'ativar.fase': 'Chega na fase {fase} do plano de rotinas. Enquanto isso, dá para pedir algo parecido na conversa com {nome}.',
-  'ativar.faseCom': 'Chega na fase {fase} do plano de rotinas, junto com: {lista}. Enquanto isso, dá para pedir algo parecido na conversa com {nome}.',
 
   // ——— minhas rotinas ———
   'minhas.vazia': 'Nenhuma rotina ligada ainda',
@@ -186,6 +180,8 @@ const rotinas = {
   'editar.ajuste': 'Ajuste (o que esta rotina deve levar em conta)',
   'editar.ajusteEx': 'Ex.: priorize pedidos de fornecedores.',
   'editar.parada': 'Considerar tarefa parada depois de (dias)',
+  'editar.contas': 'Contas que esta rotina lê',
+  'editar.contasDica': 'Você tem mais de uma conta aqui. Marque as que a rotina deve ler; com todas marcadas, ela lê também as que você conectar depois. O resultado diz de qual conta veio cada item.',
   'editar.pecaMudar': 'Para mudar o que a rotina olha ou faz, peça a {nome}: a prévia aparece e você aprova.',
   'editar.salvar': 'Salvar',
   'editar.fechar': 'Fechar',

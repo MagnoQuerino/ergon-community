@@ -7,7 +7,7 @@ import { figureSprite, lookFor } from '../iso/figures.ts';
 import { RES } from '../iso/projection.ts';
 import { THEMES, type Theme } from '../iso/theme.ts';
 import { drawCityThumb, defaultLooks } from '../iso/cityThumb.ts';
-import { agentSkinLook, skinTheme } from '../iso/skin.ts';
+import { agentSkinLook, comEtiquetasLegiveis, skinTheme } from '../iso/skin.ts';
 import { AgentAvatar } from '../components/AgentAvatar.tsx';
 import type { SkinData } from '../../../shared/skin.ts';
 import { useSurface } from '../lib/surface.ts';
@@ -16,7 +16,7 @@ import { Icon } from '../components/Icon.tsx';
 import { t, useT, type Chave } from '../i18n/index.ts';
 
 interface Installed { id: string; packageId: string; version: string; kind: string; title: string; verified: boolean; active: boolean; installedAt: string }
-interface Preview { packageId: string; version: string; kind: string; title: string; summary: string; verified: boolean; installable: boolean; reason: string | null; changes: string[] }
+interface Preview { packageId: string; version: string; kind: string; title: string; summary: string; verified: boolean; installable: boolean; reason: string | null; changes: string[]; legibilidade?: number }
 
 const KIND: Record<string, Extract<Chave, `documentos.pacotes.tipo.${string}`>> = {
   skin: 'documentos.pacotes.tipo.skin', 'city-theme': 'documentos.pacotes.tipo.cityTheme', fx: 'documentos.pacotes.tipo.fx', pet: 'documentos.pacotes.tipo.pet',
@@ -64,6 +64,8 @@ interface CatalogPreview {
   images: number; tags: string[];
   skin?: SkinData; theme?: { base: 'dia' | 'noite'; colors: Record<string, string> };
   agents?: Array<{ name: string; role: string; color: string; charKey: string | null; coordinator: boolean }>; sectors?: string[];
+  /** cores do pacote ajustadas para se lerem (o servidor corrige; aqui só o aviso) */
+  legibilidade?: number;
 }
 interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
 
@@ -95,7 +97,7 @@ function temaDoPacote(t: { base: 'dia' | 'noite'; colors: Record<string, string>
   const base = THEMES[t.base] ?? THEMES.dia;
   const out: Record<string, unknown> = { ...base };
   for (const [k, v] of Object.entries(t.colors)) if (typeof out[k] === 'string' && /^#[0-9a-f]{6}$/i.test(v)) out[k] = v;
-  return out as unknown as Theme;
+  return comEtiquetasLegiveis(out as unknown as Theme, t.base === 'noite' ? 'noite' : 'dia');
 }
 
 /** Equipe do pacote: os setores (o que muda de uma área para outra) e quem vem nela. */
@@ -273,6 +275,7 @@ function DetalhePacote({ item, agent, acao, onClose }: { item: CatalogItem; agen
         {p?.names.length ? <p className="small"><b>{item.kind === 'team-blueprint' ? t('documentos.pacotes.detalhe.naEquipe') : t('documentos.pacotes.detalhe.personagens')}</b> {p.names.join(', ')}</p> : null}
         {p?.swatches.length ? <div className="loja-detalhe__cores" aria-label={t('documentos.pacotes.detalhe.cores')}>{p.swatches.map((c) => <span key={c} style={{ background: c }} title={c} />)}</div> : null}
         {p?.tags.length ? <p className="small muted">{p.tags.map((x) => `#${x}`).join(' ')}</p> : null}
+        {p?.legibilidade ? <p className="hint loja-legivel">{t('documentos.pacotes.legibilidade', { n: p.legibilidade })}</p> : null}
         {!INSTALAVEIS.includes(item.kind) && <p className="hint">{t('documentos.pacotes.detalhe.naoInstalavel')}</p>}
         <div className="cpop__acts">
           <button className="btn btn--ghost" onClick={onClose}>{t('documentos.fechar')}</button>
@@ -339,6 +342,7 @@ export function PacotesPanel({ agent = null }: { agent?: PreviewAgent | null }) 
             {preview.verified ? <span className="badge">{t('documentos.pacotes.instalar.verificadoLoja')}</span> : <span className="badge badge--warn" title={t('documentos.pacotes.instalar.semAssinatura')}>{t('documentos.pacotes.loja.naoVerificado')}</span>}
             <p className="small">{preview.summary}</p>
             <ul className="small">{preview.changes.map((c) => <li key={c}>{c}</li>)}</ul>
+            {preview.legibilidade ? <p className="hint loja-legivel">{t('documentos.pacotes.legibilidade', { n: preview.legibilidade })}</p> : null}
             {preview.installable ? <button className="btn btn--primary" disabled={busy} onClick={() => void install()}>{t('documentos.pacotes.instalar.aplicar')}</button> : <p className="muted small">{preview.reason}</p>}
           </div>
         )}

@@ -1,7 +1,7 @@
 // Galeria dos cartões: página só de desenvolvimento (web/galeria.html, servida pelo vite; o build publica só o
 // index.html). Mostra os cartões de verdade — a conversa, "Aguardando você" e o card aberto — com dados de exemplo.
 //   /galeria.html?tema=escuro&largura=380&posts=pendentes&lang=en
-//   tema: claro (padrão) | escuro · largura: ambas (padrão) | 380 | larga · posts: ok (padrão) | pendentes
+//   tema: claro (padrão) | escuro | contraste · largura: ambas (padrão) | 380 | larga · posts: ok (padrão) | pendentes
 import { createRoot } from 'react-dom/client';
 import '../styles.css';
 import './galeria.css';
@@ -12,7 +12,7 @@ import { Galeria } from './Galeria.tsx';
 declare global { interface Window { __galeria?: Registro & { pronta: boolean } } }
 
 const q = new URLSearchParams(location.search);
-document.documentElement.dataset.theme = q.get('tema') === 'escuro' ? 'dark' : 'light';
+document.documentElement.dataset.theme = q.get('tema') === 'escuro' ? 'dark' : q.get('tema') === 'contraste' ? 'contraste' : 'light';
 const registro = simularServidor(q.get('posts') === 'pendentes');
 window.__galeria = Object.assign(registro, { pronta: false });
 const largura = q.get('largura');

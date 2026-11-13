@@ -659,7 +659,7 @@ export class Results {
     if (this.db.get("SELECT 1 AS x FROM conexao_acoes WHERE task_id = ? AND status = 'pendente'", taskId)) return 'conexao';
     if (this.db.get("SELECT 1 AS x FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.kind = 'depois_de_ler' AND p.status = 'proposed'", taskId)) return 'depois_de_ler';
     // um comando de risco esperando a sua aprovação (aprovação nativa do motor, rc.27): o card espera com você
-    if (this.db.get("SELECT 1 AS x FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.kind = 'aprovacao' AND p.status = 'proposed'", taskId)) return 'aprovacao';
+    if (this.db.get("SELECT 1 AS x FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.kind IN ('aprovacao', 'gestao') AND p.status = 'proposed'", taskId)) return 'aprovacao';
     return null;
   }
 

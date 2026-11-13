@@ -44,8 +44,7 @@ ENV NODE_ENV=production \
     ERGON_HOST=0.0.0.0 \
     ERGON_PORT=8787 \
     ERGON_DATA_DIR=/data \
-    ERGON_WEB_DIR=/app/web/dist \
-    ERGON_FIXTURES_DIR=/app/fixtures
+    ERGON_WEB_DIR=/app/web/dist
 WORKDIR /app
 COPY --from=manifestos /m ./
 # sem o cache e os registros datados do npm (deixavam a camada diferente a cada build da mesma fonte)
@@ -56,7 +55,6 @@ COPY web/package.json web/
 COPY shared shared
 COPY server/src server/src
 COPY server/catalogo server/catalogo
-COPY fixtures fixtures
 COPY --from=build /app/web/dist web/dist
 RUN mkdir -p /data && chown node:node /data
 USER node

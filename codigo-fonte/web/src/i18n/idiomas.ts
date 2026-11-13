@@ -5,12 +5,6 @@ export type Idioma = 'pt-BR' | 'en';
 export const IDIOMAS: readonly Idioma[] = ['pt-BR', 'en'];
 export const IDIOMA_PADRAO: Idioma = 'pt-BR';
 
-/**
- * O inglês só aparece para a pessoa quando todas as telas estiverem traduzidas. Enquanto for false: o seletor de idioma
- * fica escondido e o idioma do navegador não troca nada (a tela abre em português). Uma escolha já guardada continua
- * valendo (é como as equipes de tradução conferem o inglês: localStorage 'ergon.idioma' = 'en').
- */
-export const IDIOMA_INGLES_LIBERADO = true;
 
 /** O nome de cada idioma escrito nele mesmo (igual nas duas telas: quem não lê a língua atual acha a sua). */
 export const NOME_DO_IDIOMA: Record<Idioma, string> = { 'pt-BR': 'Português', en: 'English' };

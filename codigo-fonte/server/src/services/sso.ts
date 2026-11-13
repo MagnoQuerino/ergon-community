@@ -192,19 +192,19 @@ export function podeAprovarPelaEmpresa(...tokens: Array<string | undefined>): bo
  * `semCanais`: o encadeamento terminou antes dos canais porque eles precisam do administrador e não se sabe que a conta é a de
  * quem aprova pela empresa (ou eles já voltaram sem ser dados): a tela oferece o pedido.
  */
-export interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; next?: string; proxima?: Etapa; semCanais?: boolean }
+export interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; /** qual das contas deste aplicativo ('' = a principal) */ conta: string; next?: string; proxima?: Etapa; semCanais?: boolean }
 
 export class SsoAuth {
   private readonly cfg: Config;
   private readonly secrets: SecretStore;
-  private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number; etapa: Etapa; scopes: string }>();
+  private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number; etapa: Etapa; scopes: string; conta: string }>();
   private readonly refreshing = new Map<string, Promise<string>>();
   /** login com outra conta neste workspace: quem usava a antiga em outros workspaces fica com ela */
-  private readonly aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string) => void;
+  private readonly aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string, slot: string) => void;
   /** a etapa já foi pedida a esta mesma conta e voltou sem ser dada (ou não voltou): o encadeamento não insiste (integrations.ts) */
-  private readonly jaRecusada: (workspaceId: string, etapa: Etapa) => boolean;
-  constructor(cfg: Config, secrets: SecretStore, aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string) => void = () => undefined,
-    jaRecusada: (workspaceId: string, etapa: Etapa) => boolean = () => false) { this.aoTrocarConta = aoTrocarConta; this.jaRecusada = jaRecusada; this.cfg = cfg; this.secrets = secrets; }
+  private readonly jaRecusada: (workspaceId: string, etapa: Etapa, slot: string) => boolean;
+  constructor(cfg: Config, secrets: SecretStore, aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string, slot: string) => void = () => undefined,
+    jaRecusada: (workspaceId: string, etapa: Etapa, slot: string) => boolean = () => false) { this.aoTrocarConta = aoTrocarConta; this.jaRecusada = jaRecusada; this.cfg = cfg; this.secrets = secrets; }
 
   /** O botão só funciona com o app registrado no provedor (identificador e, no Google, o segredo). */
   configured(kind: SsoKind): boolean {
@@ -219,12 +219,15 @@ export class SsoAuth {
 
   /** Etapa de um login em andamento (uma etapa recusada não desfaz as anteriores). */
   stageOf(state: string): Etapa | null { return this.pending.get(state)?.etapa ?? null; }
+  /** Qual das contas do aplicativo um login em andamento conecta ('' = a principal). */
+  contaOf(state: string): string { return this.pending.get(state)?.conta ?? ''; }
 
   /**
    * Endereço do login. Microsoft: `etapa` diz o que pedir (a base escolhe a conta; as outras seguem com a mesma, sem escolher de
    * novo, e mostram só o consentimento do que falta). `trabalho`: conta de trabalho ou escola (sem dizer, vale a credencial guardada).
    */
-  start(kind: SsoKind, workspaceId: string, userId: string, opts: { etapa?: Etapa; loginHint?: string; trabalho?: boolean } = {}): string {
+  start(kind: SsoKind, workspaceId: string, userId: string, opts: { etapa?: Etapa; loginHint?: string; trabalho?: boolean; conta?: string } = {}): string {
+    const conta = opts.conta ?? '';
     const p = SSO[kind];
     if (!this.configured(kind)) throw new HttpError(409, 'sso_not_configured', `Falta registrar o aplicativo Ergon ${p.place}: é um passo único de quem instala o Ergon (veja ${p.doc}).`);
     for (const [k, v] of this.pending) if (Date.now() - v.at > STATE_TTL) this.pending.delete(k);
@@ -235,13 +238,13 @@ export class SsoAuth {
     let scopes = p.scopes;
     let extra = p.extra;
     if (etapa !== 'base') {
-      const t = this.secrets.read<Tokens>(workspaceId, kind);
+      const t = this.secrets.read<Tokens>(workspaceId, kind, conta);
       const trabalho = opts.trabalho ?? !contaPessoalMicrosoft(t);
       scopes = [...OIDC, ...escoposDaEtapa(etapa, trabalho)].join(' ');
       const hint = opts.loginHint ?? (t?.account?.includes('@') ? t.account : undefined);
       extra = { response_mode: 'query', ...(hint ? { login_hint: hint } : {}) };
     }
-    this.pending.set(state, { kind, workspaceId, userId, verifier, at: Date.now(), etapa, scopes });
+    this.pending.set(state, { kind, workspaceId, userId, verifier, at: Date.now(), etapa, scopes, conta });
     const q = new URLSearchParams({
       client_id: p.clientId(this.cfg)!, response_type: 'code', redirect_uri: this.redirectUri(kind), scope: scopes,
       state, code_challenge: challenge, code_challenge_method: 'S256', ...extra,
@@ -274,16 +277,16 @@ export class SsoAuth {
     const { id_token: idToken, ...keep } = tok;
     // autorizar de novo sem vir renovação nova não pode derrubar a conexão: fica a anterior
     // (só a credencial deste workspace: a de outro, emprestada, é de outra conta e não se mistura)
-    const antes = this.secrets.readOwn<Tokens>(s.workspaceId, kind);
-    if (antes && antes.account !== account) this.aoTrocarConta(s.workspaceId, kind, antes.account, account);
+    const antes = this.secrets.readOwn<Tokens>(s.workspaceId, kind, s.conta);
+    if (antes && antes.account !== account) this.aoTrocarConta(s.workspaceId, kind, antes.account, account, s.conta);
     // a mesma conta (até a emprestada de outro workspace seu): o que ela já deu soma ao desta etapa
-    const conhecida = antes ?? this.secrets.read<Tokens>(s.workspaceId, kind);
+    const conhecida = antes ?? this.secrets.read<Tokens>(s.workspaceId, kind, s.conta);
     const mesma = conhecida?.account === account ? conhecida : null;
     const claims = idClaims(idToken);
     const tid = typeof claims.tid === 'string' ? claims.tid : mesma?.tid;
     const oid = typeof claims.oid === 'string' && GUID.test(claims.oid) ? claims.oid.toLowerCase() : mesma?.oid;
     // uma renovação da credencial anterior ainda andando não serve mais a ninguém (ela é descartada ao terminar)
-    this.refreshing.delete(`${s.workspaceId}:${kind}`);
+    this.refreshing.delete(this.chaveRenovacao(s.workspaceId, kind, s.conta));
     let granted = keep.granted;
     if (kind === 'microsoft') {
       // sem `scope` na resposta, o token vale para o que foi pedido (v2-oauth2-auth-code-flow). A etapa base recomeça do que a conta
@@ -296,7 +299,8 @@ export class SsoAuth {
       ...keep, ...(granted !== undefined ? { granted } : {}), refresh_token: keep.refresh_token || (antes?.account === account ? antes?.refresh_token : '') || '', account, scopes: s.scopes,
       ...(kind === 'microsoft' && pessoal !== undefined ? { pessoal } : {}), ...(kind === 'microsoft' && typeof tid === 'string' ? { tid } : {}),
       ...(kind === 'microsoft' && typeof oid === 'string' ? { oid } : {}),
-    } satisfies Tokens);
+    } satisfies Tokens, s.conta);
+    const conta = s.conta;
     // já conectada; segue para o que falta (Teams, a leitura e, em conta de trabalho, os canais). Sem o locatário, não dá para saber
     if (kind === 'microsoft' && typeof claims.tid === 'string') {
       const trabalho = claims.tid !== MSA_TENANT;
@@ -305,15 +309,15 @@ export class SsoAuth {
       // aprova, quando não se sabe, ou quando esta mesma conta já voltou sem eles, o encadeamento termina e a tela oferece o
       // pedido ao administrador (sem mandar a pessoa a uma página da Microsoft sem saída)
       const aprova = trabalho ? podeAprovarPelaEmpresa(idToken, keep.access_token) : null;
-      const canais = aprova === true && !(mesma && this.jaRecusada(s.workspaceId, 'canais'));
+      const canais = aprova === true && !(mesma && this.jaRecusada(s.workspaceId, 'canais', conta));
       const { proxima, semCanais } = this.proximaEtapa(s.etapa, trabalho, listaDeEscopos(granted), canais);
       if (proxima) {
         const hint = typeof claims.preferred_username === 'string' ? claims.preferred_username : undefined;
-        return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, proxima, next: this.start(kind, s.workspaceId, s.userId, { etapa: proxima, loginHint: hint, trabalho }) };
+        return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta, proxima, next: this.start(kind, s.workspaceId, s.userId, { etapa: proxima, loginHint: hint, trabalho, conta }) };
       }
-      if (semCanais) return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, semCanais: true };
+      if (semCanais) return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta, semCanais: true };
     }
-    return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa };
+    return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta };
   }
 
   /** `scopes`: o que pedir na troca; null = sem `scope` (a renovação vale para o que foi pedido no login). */
@@ -363,21 +367,26 @@ export class SsoAuth {
    * Acesso válido para chamar o provedor; renova sozinho com o refresh token quando está para vencer. `force`: o
    * serviço disse 401 com um acesso que ainda não venceu (senha trocada, sessão revogada) — renova agora.
    */
-  async accessToken(workspaceId: string, kind: SsoKind, opts: { force?: boolean } = {}): Promise<string> {
-    const t = this.secrets.read<Tokens>(workspaceId, kind);
+  /** Uma renovação por credencial: os workspaces que usam a mesma conta (e a mesma conta de lá) esperam a mesma. */
+  private chaveRenovacao(workspaceId: string, kind: SsoKind, conta: string): string { const o = this.secrets.origem(workspaceId, kind, conta); return `${o.ws}:${o.conta}:${kind}`; }
+
+  /** `conta`: qual das contas deste aplicativo ('' = a principal). */
+  async accessToken(workspaceId: string, kind: SsoKind, opts: { force?: boolean; conta?: string } = {}): Promise<string> {
+    const conta = opts.conta ?? '';
+    const t = this.secrets.read<Tokens>(workspaceId, kind, conta);
     if (!t) throw new ProviderError('forbidden', `conta ${kind === 'google' ? 'Google' : 'Microsoft'} não conectada`);
     if (!opts.force && t.expires_at - Date.now() > 120_000) return t.access_token;
     if (!t.refresh_token) throw new ProviderError('forbidden', 'o acesso venceu e não há renovação: conecte de novo em Conexões', { reauth: true });
     // uma renovação por conta de cada vez: leituras em paralelo esperam a mesma (sem gastar o refresh token duas vezes)
     // workspaces que usam a mesma conta esperam a mesma renovação
-    const key = `${this.secrets.origem(workspaceId, kind)}:${kind}`;
+    const key = this.chaveRenovacao(workspaceId, kind, conta);
     const running = this.refreshing.get(key);
     if (running) return running;
     const p: Promise<string> = (async () => {
       const { id_token: idToken, ...n } = await this.token(kind, { grant_type: 'refresh_token', refresh_token: t.refresh_token }, this.escoposDaRenovacao(kind, t));
       // desconectou ou entrou com outra conta enquanto a renovação andava: gravar agora desfaria isso (e a conta antiga
       // voltaria com o nome da nova)
-      const atual = this.secrets.read<Tokens>(workspaceId, kind);
+      const atual = this.secrets.read<Tokens>(workspaceId, kind, conta);
       if (!atual || atual.refresh_token !== t.refresh_token) throw new ProviderError('unavailable', 'a conta mudou durante a renovação do acesso; tente de novo');
       // Microsoft: o `scope` da resposta é o que o acesso cobre agora; e o id_token traz o locatário a quem conectou antes de ele ser guardado
       const tid = kind === 'microsoft' ? (typeof idClaims(idToken).tid === 'string' ? String(idClaims(idToken).tid) : t.tid) : undefined;
@@ -386,7 +395,7 @@ export class SsoAuth {
       const granted = n.granted !== undefined ? (kind === 'microsoft' ? listaDeEscopos(n.granted).join(' ') : n.granted) : t.granted;
       const pessoal = t.pessoal ?? (tid ? tid === MSA_TENANT : undefined);
       this.secrets.write(workspaceId, kind, { ...n, ...(granted !== undefined ? { granted } : {}), account: t.account, ...(t.scopes ? { scopes: t.scopes } : {}),
-        ...(pessoal !== undefined ? { pessoal } : {}), ...(tid ? { tid } : {}), ...(oid ? { oid } : {}) });
+        ...(pessoal !== undefined ? { pessoal } : {}), ...(tid ? { tid } : {}), ...(oid ? { oid } : {}) }, conta);
       return n.access_token;
     })().finally(() => { if (this.refreshing.get(key) === p) this.refreshing.delete(key); });
     this.refreshing.set(key, p);

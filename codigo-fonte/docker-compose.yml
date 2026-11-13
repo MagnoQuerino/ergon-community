@@ -1,5 +1,5 @@
-# Ergon — cópia do código (desenvolvimento): constrói as imagens aqui. Use o lançador (.\ergon.cmd ou
-# ./ergon.sh): install, start, update (git pull + build), backup...  →  http://localhost:8787
+# Ergon — cópia do código (desenvolvimento): constrói as imagens aqui. Use o lançador
+# (./ergon.sh): install, start, update (git pull + build), backup...  →  http://localhost:8787
 # (abra por "localhost": as passkeys do navegador só valem nesse nome)
 # Motor de IA no perfil "hermes" (o lançador já liga). Pacote de versão (imagens publicadas): deploy/local/.
 name: ergon
@@ -26,14 +26,6 @@ services:
       ERGON_SLOTS_PER_FLOOR: ${ERGON_SLOTS_PER_FLOOR:-6}
       ERGON_REVIEW_MAX_ROUNDS: ${ERGON_REVIEW_MAX_ROUNDS:-2}
       ERGON_ALLOWED_ORIGINS: http://localhost:${ERGON_PORT:-8787},http://127.0.0.1:${ERGON_PORT:-8787}
-      ERGON_TEAMS_ENABLED: ${ERGON_TEAMS_ENABLED:-false}
-      ERGON_TEAMS_TENANT_ID: ${ERGON_TEAMS_TENANT_ID:-}
-      ERGON_TEAMS_ALLOWED_USERS: ${ERGON_TEAMS_ALLOWED_USERS:-}
-      ERGON_WHATSAPP_ENABLED: ${ERGON_WHATSAPP_ENABLED:-false}
-      ERGON_WHATSAPP_OWNER_IDS: ${ERGON_WHATSAPP_OWNER_IDS:-}
-      ERGON_WHATSAPP_MONITORED_CHATS: ${ERGON_WHATSAPP_MONITORED_CHATS:-}
-      ERGON_WHATSAPP_SEND_ENABLED: ${ERGON_WHATSAPP_SEND_ENABLED:-false}
-      ERGON_FIXTURES_ENABLED: ${ERGON_FIXTURES_ENABLED:-false}   # simulações de canal: só para testes
       ERGON_MS_CLIENT_ID: ${ERGON_MS_CLIENT_ID:-}   # app público do Ergon no Microsoft Entra (login com a conta Microsoft)
       ERGON_GOOGLE_CLIENT_ID: ${ERGON_GOOGLE_CLIENT_ID:-}   # cliente OAuth do Ergon no Google Cloud; o segredo fica em ergon.env (secrets)
       ERGON_OAUTH_REDIRECT_BASE: ${ERGON_OAUTH_REDIRECT_BASE:-}   # só se o Ergon for aberto por outro endereço que não localhost

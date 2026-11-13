@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { montarCartao, textoParaTeams, partesDoResumo } from '../src/services/teams-app/cartoes.ts';
+import { cabeNoCanal, montarCartao, textoParaTeams, partesDoResumo } from '../src/services/teams-app/cartoes.ts';
 import {
   abrirSelado, enderecoDoRele, esperaDaTentativa, gerarChaves, normalizarCodigo, personRefDe, reacaoAoFechar, selar, tokenCartao, tokenConfere, wsDoRele,
 } from '../src/services/teams-app/protocolo.ts';
@@ -170,5 +170,23 @@ describe('edição Community', () => {
       const frases = fs.readFileSync(f, 'utf8').match(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? [];
       for (const x of frases) assert.doesNotMatch(x, proibidas, `${path.basename(f)}: ${x.slice(0, 80)}`);
     }
+  });
+});
+
+describe('cartão que a pessoa aprova exatamente como lê (gestão, conexão)', () => {
+  test('só decide fora do Ergon quando o título e o texto aparecem inteiros', () => {
+    assert.equal(cabeNoCanal('gestao', `Mudar um agente\n${'a'.repeat(2000)}`, 2500), true);
+    assert.equal(cabeNoCanal('gestao', `Mudar um agente\n${'a'.repeat(3000)}`, 2500), false);
+    assert.equal(cabeNoCanal('gestao', 'Mudar\n- instruções: {{desfazer:abc}} e [[plano x]]', 2500), false, 'o canal tiraria pedaços do texto');
+    assert.equal(cabeNoCanal('sector_new', `Criar setor\n${'a'.repeat(9000)}`, 2500), true, 'os outros tipos seguem como antes');
+  });
+  test('no Teams, o cartão que encolhe a ponto de cortar o texto fica sem botões', () => {
+    const k = gerarChaves();
+    const item = (n: number) => ({ tipo: 'decisao' as const, p: 'apr_1', titulo: 'Mudar um agente', texto: 'b'.repeat(n), inteiro: true });
+    const cabe = montarCartao({ titulo: 'Precisa de você', itens: [item(1000)] }, new Map(), 'bnd_aaaaaaaa', k, 'America/Sao_Paulo');
+    assert.ok((cabe.body as any[]).some((b) => b.type === 'ActionSet'));
+    const longo = montarCartao({ titulo: 'Precisa de você', itens: [item(7000)] }, new Map(), 'bnd_aaaaaaaa', k, 'America/Sao_Paulo');
+    assert.ok(!(longo.body as any[]).some((b) => b.type === 'ActionSet'), 'sem Aprovar/Recusar');
+    assert.match(JSON.stringify(longo), /longo demais para aparecer aqui inteiro/);
   });
 });

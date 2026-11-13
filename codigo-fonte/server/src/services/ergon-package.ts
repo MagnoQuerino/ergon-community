@@ -24,6 +24,7 @@
 import crypto from 'node:crypto';
 import { validateBlueprint, type Blueprint } from '../../../shared/blueprint.ts';
 import { validateSkin, type SkinData } from '../../../shared/skin.ts';
+import { legibilizarPacote, type AjusteDeCor } from '../../../shared/legibilidade.ts';
 import { readZip } from '../lib/zip.ts';
 
 export const PACKAGE_KINDS = ['city-theme', 'skin', 'building-pack', 'character-look', 'clothing', 'accessory', 'fx', 'pet', 'team-blueprint', 'routine-blueprint', 'skill', 'plugin'] as const;
@@ -62,7 +63,11 @@ export interface PackageData {
   /** skin da cidade (shared/skin.ts): paleta, arquitetura, roupas, decoração e até 10 personagens */
   skin?: SkinData;
 }
-export interface ValidatedPackage { manifest: Manifest; data: PackageData; assets: Record<string, Buffer>; verified: boolean; keyId: string | null; sha256: string; installable: boolean }
+export interface ValidatedPackage {
+  manifest: Manifest; data: PackageData; assets: Record<string, Buffer>; verified: boolean; keyId: string | null; sha256: string; installable: boolean;
+  /** cores que não se liam e foram corrigidas sozinhas (shared/legibilidade.ts); `data` já vem corrigido. A prévia avisa. */
+  legibilidade: AjusteDeCor[];
+}
 
 export class PackageError extends Error { readonly problems: string[]; constructor(problems: string[]) { super(`pacote recusado: ${problems.slice(0, 4).join('; ')}`); this.problems = problems; } }
 
@@ -218,7 +223,10 @@ export function validatePackage(buf: Buffer, officialKeys: Record<string, string
     }
   }
   if (e.length) throw new PackageError(e);
-  return { manifest: m, data, assets, verified, keyId, sha256: crypto.createHash('sha256').update(buf).digest('hex'), installable: INSTALLABLE.has(m.kind) };
+  // cores ilegíveis (etiquetas da Cidade, contorno do tema, cor de agente sem letra que se leia) não recusam o pacote:
+  // são corrigidas aqui, e a prévia da loja avisa (decisão 13). Só depois de verificada a assinatura (ela cobre o original)
+  const leg = EXEC_KINDS.has(m.kind) ? { data, ajustes: [] as AjusteDeCor[] } : legibilizarPacote(data);
+  return { manifest: m, data: leg.data, assets, verified, keyId, sha256: crypto.createHash('sha256').update(buf).digest('hex'), installable: INSTALLABLE.has(m.kind), legibilidade: leg.ajustes };
 }
 
 /** Monta um .ergon (exportar o que a pessoa personalizou; também usado nos testes e na loja). */

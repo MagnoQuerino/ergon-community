@@ -37,7 +37,8 @@ services:
 volumes:
   dados: {}
 EOF
-echo 'ERGON_PORT=18792' > "$RAIZ/.env"
+# instalação antiga pelo Docker: sem ERGON_MOTOR=docker, o aplicativo leria o .env como do Podman (o padrão)
+printf 'ERGON_PORT=18792\nERGON_MOTOR=docker\n' > "$RAIZ/.env"
 export ERGON_INSTALACAO=/tmp/ergon-teste/instalacao.json
 printf '{"raiz":"%s","porta":18792}\n' "$RAIZ" > "$ERGON_INSTALACAO"
 chmod 755 /tmp/ergon-teste && chmod 644 "$ERGON_INSTALACAO"

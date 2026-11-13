@@ -330,7 +330,12 @@ export function mapRemoteStatus(s: string): 'running' | 'waiting_user' | 'succee
 export interface AccountStatus { id: string; name: string; connected: boolean; freeTier: boolean | null; tier: string | null; expiresAt: string | null }
 export interface LoginStart { sessionId: string; userCode: string | null; verificationUrl: string | null; expiresAt: string | null; pollSeconds: number }
 export interface LoginPoll { status: string; error: string | null; email: string | null; model: string | null }
-export interface SkillInfo { name: string; description: string; category: string; enabled: boolean }
+/** origem: já vem com a equipe, instalada da loja, enviada pela pessoa (Adicionar competência) ou criada pela equipe */
+export type OrigemCompetencia = 'equipe' | 'loja' | 'enviada' | 'criada';
+export interface SkillInfo { name: string; description: string; category: string; enabled: boolean; origem?: OrigemCompetencia }
+/** De onde veio uma competência da biblioteca, pelo que o motor diz dela (provenance e a pasta). */
+export const origemDe = (provenance: unknown, category: string): OrigemCompetencia =>
+  category === 'enviadas' ? 'enviada' : provenance === 'hub' ? 'loja' : provenance === 'bundled' ? 'equipe' : 'criada';
 
 /**
  * O que o plugin do Ergon no motor diz de si (GET /ergon/v1/health): versão do plugin, versão da configuração do cofre e
@@ -368,6 +373,8 @@ export interface PedidoDePerfil {
   modelo: { provider: string; model: string } | null;
   /** competências do agente (as aprendidas no Treinar e as da biblioteca atribuídas): moram no perfil */
   competencias: string[];
+  /** o coordenador gerencia o Ergon (rc.29): o perfil dele recebe as ferramentas de gestão (gestao.ts) */
+  gestao?: boolean;
 }
 /** A memória longa de um agente: o que ele sabe da pessoa, as notas dele e o que espera aprovação. */
 export interface MemoriaDoAgente {
@@ -687,10 +694,11 @@ export class HttpHermesControl implements HermesControlClient {
     const q = query && Object.keys(query).length ? `?${new URLSearchParams(query)}` : '';
     let res: Response;
     try {
-      // instalar uma competência ou um conector e transcrever um áudio levam mais tempo
+      // instalar uma competência ou um conector, transcrever um áudio e conectar ou testar um aplicativo conectado pela
+      // pessoa (o programa pode ser baixado na primeira vez) levam mais tempo
       res = await fetchPonte(`${this.baseUrl}/ergon/v1/${sub}${q}`, {
         method, headers: { 'Content-Type': 'application/json', 'X-Ergon-Bridge-Token': this.token },
-        body: body === undefined || method === 'GET' ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(/instalar|voz/.test(sub) ? 300000 : 30000),
+        body: body === undefined || method === 'GET' ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(/instalar|voz|conectores-proprio/.test(sub) ? 300000 : 30000),
       });
     } catch { throw new HermesError(503, 'a equipe de IA não respondeu agora'); }
     const text = await res.text();
@@ -749,7 +757,7 @@ export class HttpHermesControl implements HermesControlClient {
 
   async skills(): Promise<SkillInfo[]> {
     const j = await this.call('GET', '/api/skills');
-    return (Array.isArray(j) ? j : []).map((s: any) => ({ name: String(s.name), description: String(s.description ?? ''), category: String(s.category ?? 'outras'), enabled: s.enabled !== false }));
+    return (Array.isArray(j) ? j : []).map((s: any) => ({ name: String(s.name), description: String(s.description ?? ''), category: String(s.category ?? 'outras'), enabled: s.enabled !== false, origem: origemDe(s.provenance, String(s.category ?? '')) }));
   }
 
   async apiToolsets() { const j = await this.call('GET', '/ergon/v1/api-toolsets'); return { enabled: (j.enabled ?? []).map(String), safe: (j.safe ?? []).map(String) }; }

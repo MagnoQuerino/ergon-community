@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { ModelCatalog } from '../lib/types.ts';
-import { RECURSOS, type Conquista, type Conselho, type PontoDeVolta, type RecursosEstado, type Vaga } from '../lib/recursos.ts';
+import { RECURSOS, type Conselho, type PontoDeVolta, type RecursosEstado, type Vaga } from '../lib/recursos.ts';
 import { Icon } from './Icon.tsx';
 import { fmtDataHora, useT } from '../i18n/index.ts';
 
@@ -71,7 +71,6 @@ export function CapacidadesPanel({ dono }: { dono: boolean }) {
         <p className="muted small">{t('configuracoes.cap.lote.texto')}</p>
       </section>
       <ConselhoCard dono={dono} />
-      <ConquistasCard />
     </>
   );
 }
@@ -164,30 +163,6 @@ function ConselhoCard({ dono }: { dono: boolean }) {
         </div>
       )}
       <p className="hint">{t('configuracoes.cap.conselho.como')}</p>
-    </section>
-  );
-}
-
-function ConquistasCard() {
-  const t = useT();
-  const q = useResource<{ conquistas: Conquista[] }>(`${RECURSOS}/conquistas`, ['runs.changed']);
-  const lista = q.data?.conquistas ?? [];
-  const feitas = lista.filter((c) => c.conquistada);
-  return (
-    <section className="card">
-      <h3>{t('configuracoes.cap.conquistas.titulo')}</h3>
-      <p className="muted small">{t('configuracoes.cap.conquistas.texto')}</p>
-      {!q.data ? <p className="muted small">{q.error ?? t('configuracoes.cap.lendo')}</p> : !lista.length ? <p className="muted small">{t('configuracoes.cap.conquistas.vazio')}</p> : (
-        <>
-          <p className="small">{t('configuracoes.cap.conquistas.contagem', { n: feitas.length, total: lista.length })}</p>
-          <ul className="plain small">
-            {[...feitas, ...lista.filter((c) => !c.conquistada && c.progresso > 0)].slice(0, 12).map((c) => (
-              <li key={c.id}>{c.conquistada ? <Icon name="check" size={12} /> : <span className="muted">{c.progresso}%</span>} <b>{c.nome}</b>{c.nivel ? ` · ${c.nivel}` : ''} <span className="muted">{c.descricao}</span></li>
-            ))}
-          </ul>
-        </>
-      )}
-      <p className="hint">{t('configuracoes.cap.conquistas.mascotes')}</p>
     </section>
   );
 }

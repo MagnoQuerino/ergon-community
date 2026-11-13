@@ -25,7 +25,7 @@ import { figureCacheSize, figureSprite, hashOf, lookFor, npcLook, reserveFigures
 import { bandHighlight, buildingBox, closedArt, closedRect, closedSmall, hasClosed, hasSmall, openArt, reserveClosed, reserveSmall, type ArtItem, type Layer, type OpenArt } from './buildingArt.ts';
 import { Lru } from './lru.ts';
 import { CHUNK, areaHits, boxPoly, cityItems, drawGroundChunk, type AreaHit, type CityItem } from './areaArt.ts';
-import { agentSkinLook, lookFromSkin, skinPack, skinPet, skinTheme, type ActiveSkin } from './skin.ts';
+import { agentSkinLook, comEtiquetasLegiveis, lookFromSkin, skinPack, skinPet, skinTheme, type ActiveSkin } from './skin.ts';
 import type { SkinData } from '../../../shared/skin.ts';
 import { sortItems, type Sortable } from './sort.ts';
 import { THEMES, mix, type Theme, type ThemeId } from './theme.ts';
@@ -362,7 +362,8 @@ export class IsoEngine {
     if (!o) return base;
     const out: Record<string, unknown> = { ...base };
     for (const [k, v] of Object.entries(o.colors)) if (typeof out[k] === 'string' && /^#[0-9a-f]{6}$/i.test(v)) out[k] = v;
-    return out as unknown as Theme;
+    // o tema instalado pode trocar o contorno (o texto das etiquetas): elas continuam legíveis
+    return comEtiquetasLegiveis(out as unknown as Theme, mode);
   }
 
   setTheme(id: ThemeId): void {

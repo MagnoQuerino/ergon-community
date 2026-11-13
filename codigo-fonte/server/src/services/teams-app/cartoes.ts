@@ -36,12 +36,31 @@ export function textoParaTeams(t: string, max = MAX_TEXTO_SAIDA): string {
   if (s.length > max) s = `${s.slice(0, max - 60).trimEnd()}\n\n… (a resposta continua no Ergon)`;
   return s;
 }
+/** Os cartões em que a pessoa aprova exatamente o que lê (o pedido aplicado é o texto do cartão): ou cabem inteiros, ou não decidem fora do Ergon. */
+export const KINDS_INTEIROS: readonly string[] = ['gestao', 'conexao'];
+/** O texto aparece inteiro num canal com este limite: nada cortado nem tirado (marcadores, chaves duplas, etiquetas). */
+export function apareceInteiro(texto: string, max: number): boolean {
+  const t = String(texto ?? '');
+  return !/\[\[|\{\{|<\/?[a-zA-Z]/.test(t) && textoParaTeams(t, Number.MAX_SAFE_INTEGER).length <= max;
+}
+/** O limite do texto de um cartão no Telegram e no Discord, e o maior do Teams (o cartão do Teams encolhe se não couber). */
+export const LIMITE_CANAL = 2500;
+export const LIMITE_TEAMS = 6000;
+/** O cartão pode ter Aprovar fora do Ergon: o tipo não exige o texto inteiro, ou o título e o texto cabem inteiros. */
+export function cabeNoCanal(kind: string, summary: string, max: number): boolean {
+  if (!KINDS_INTEIROS.includes(kind)) return true;
+  const s = String(summary ?? '').trim();
+  const i = s.indexOf('\n');
+  const titulo = i < 0 ? s : s.slice(0, i); const texto = i < 0 ? '' : s.slice(i + 1).trim();
+  return titulo.length <= 200 && apareceInteiro(titulo, 200) && apareceInteiro(texto, max);
+}
+export const ABRIR_LONGO = 'Abra o Ergon para decidir: o pedido é longo demais para aparecer aqui inteiro.';
 /** Texto curto da notificação do Teams (≤ 120). */
 export const resumoParaTeams = (t: string) => corta(textoParaTeams(t, 2000).replace(/\s+/g, ' '), 120);
 
 /** Um item do cartão: uma decisão (aprovar/recusar aqui) ou um aviso que se responde no Ergon. */
 export type ItemCartao =
-  | { tipo: 'decisao'; p: string; titulo: string; texto: string }
+  | { tipo: 'decisao'; p: string; titulo: string; texto: string; /** só decide aqui se o texto aparecer inteiro (KINDS_INTEIROS) */ inteiro?: boolean }
   /** p: a proposta, quando o aviso é de uma (pedido de senha, pergunta): decidida no Ergon, o cartão mostra a linha final */
   | { tipo: 'aviso'; titulo: string; texto: string; abrir: string; p?: string };
 export interface DesenhoCartao { titulo: string; itens: ItemCartao[] }
@@ -99,6 +118,8 @@ export function montarCartao(d: DesenhoCartao, estados: Map<string, EstadoDecisa
         continue;
       }
       const e = estados.get(it.p);
+      // o pedido aplicado é o texto inteiro: cortado neste tamanho de cartão, nada de botões (decide no Ergon)
+      if (it.inteiro && it.texto && !apareceInteiro(it.texto, max) && (!e || e.status === 'proposed')) { body.push(bloco(ABRIR_LONGO, { isSubtle: true })); continue; }
       if (!e || (e.status === 'proposed' && !e.jaDecidido)) body.push(botoes(it.p, tokenCartao(chaves, it.p, bindingId)));
       else body.push(bloco(linhaFinal(e, tz), { weight: 'Bolder', color: e.status === 'applied' ? 'Good' : e.status === 'failed' ? 'Attention' : 'Default' }));
     }

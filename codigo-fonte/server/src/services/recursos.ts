@@ -1,13 +1,14 @@
 /**
  * Capacidades da equipe (rc.27): o que a equipe de IA já sabe fazer e o Ergon mostra num lugar só (Configurações ›
  * Capacidades da equipe), com o que é benefício ligado por padrão (regra do dono, 12/11) e o aviso de custo ou risco. Tudo passa pela ponte de controle do motor
- * (rotas fechadas /ergon/v1/recursos, conselho, loja, conectores, conquistas, checkpoints, voz, do plugin do Ergon);
+ * (rotas fechadas /ergon/v1/recursos, conselho, loja, conectores, checkpoints, voz, do plugin do Ergon);
  * aqui ficam a escolha da pessoa que é do Ergon (escrita por conector), as mensagens em português e o registro.
  */
 import type { Db } from '../db/db.ts';
 import { HttpError } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { setConectoresLigados } from './characters.ts';
+import type { PacoteCompetencia } from './competencias.ts';
 import type { HermesControlClient } from './hermes.ts';
 import { getSetting } from './sectors.ts';
 
@@ -23,6 +24,8 @@ export interface RecursosDeps {
   scope: (workspaceId: string) => string;
   /** o modelo principal e as contas de IA conectadas, com os modelos de cada uma (para montar o conselho sozinho) */
   modelos?: (workspaceId: string) => Promise<OpcoesDeModelos>;
+  /** a biblioteca de competências mudou (a lista guardada do motor fica velha) */
+  aoMudarCompetencias?: (workspaceId: string) => void;
 }
 type Vaga = { provider: string; model: string };
 export interface OpcoesDeModelos { principal: { provider: string | null; model: string | null }; contas: Array<{ id: string; models: Array<{ id: string }> }> }
@@ -55,6 +58,7 @@ export function conselhoAutomaticoDe(atual: { opinam: Vaga[]; agrega: Vaga } | n
 function erroDaPonte(status: number, json: any): HttpError {
   const d = typeof json?.error === 'string' ? json.error : typeof json?.detail === 'string' ? json.detail : '';
   if (status === 404) return new HttpError(409, 'recursos_atualizando', 'esta capacidade chega com a próxima atualização da equipe neste computador');
+  if (status === 409 && json?.varredura?.politica === 'ask') return Object.assign(new HttpError(409, 'varredura_atencao', 'a varredura de segurança achou pontos de atenção: marque que entendeu o risco para instalar'), { varredura: json.varredura });
   if (status === 409 && json?.varredura) return Object.assign(new HttpError(409, 'varredura_barrou', 'a varredura de segurança barrou esta competência: ela não foi instalada'), { varredura: json.varredura });
   if (status >= 500) return new HttpError(503, 'recursos_indisponivel', d ? `a equipe de IA não concluiu agora: ${d.slice(0, 200)}` : 'a equipe de IA não respondeu agora; tente de novo');
   return new HttpError(400, 'recursos_recusado', d ? d.slice(0, 300) : 'a equipe de IA recusou o pedido');
@@ -129,9 +133,29 @@ export class Recursos {
     const r = await this.ponte(ws, 'POST', 'loja/instalar', { id });
     audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'recursos.competencia.instalar', evidence: { id, veredito: r?.varredura?.veredito ?? null },
       result: `competência instalada da loja: ${id}` });
-    this.d.bus.publish(ws, 'agents.changed', {});
+    this.mudouBiblioteca(ws);
     return r;
   }
+
+  // ---- competências enviadas pela pessoa (Adicionar competência, rc.29)
+  private mudouBiblioteca(ws: string) { this.d.aoMudarCompetencias?.(ws); this.d.bus.publish(ws, 'agents.changed', {}); }
+  /** A varredura de segurança do motor sobre os arquivos (nada é gravado). */
+  async varrerEnvio(ws: string, p: Pick<PacoteCompetencia, 'nome' | 'arquivos'>) { return this.ponte(ws, 'POST', 'loja/varrer', { nome: p.nome, arquivos: p.arquivos }); }
+  /** Grava na biblioteca da equipe; o motor varre de novo e o que ela barra (ou o que tem atenção sem o aceite) não entra. */
+  async enviar(ws: string, userId: string, p: PacoteCompetencia, riscoAceito: boolean) {
+    const r = await this.ponte(ws, 'POST', 'loja/enviar', { nome: p.nome, arquivos: p.arquivos, risco_aceito: riscoAceito });
+    audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'recursos.competencia.enviar',
+      evidence: { nome: p.nome, arquivos: Object.keys(p.arquivos), veredito: r?.varredura?.veredito ?? null, riscoAceito, atualizada: r?.atualizada === true },
+      result: `competência ${r?.atualizada ? 'atualizada' : 'adicionada'} na biblioteca da equipe: ${p.nome}` });
+    this.mudouBiblioteca(ws);
+    return r;
+  }
+  async removerCompetencia(ws: string, userId: string, nome: string) {
+    await this.ponte(ws, 'POST', 'loja/remover', { nome });
+    audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'recursos.competencia.remover', evidence: { nome }, result: `competência removida da biblioteca: ${nome}` });
+    this.mudouBiblioteca(ws);
+  }
+  async conteudo(ws: string, nome: string) { return this.ponte(ws, 'GET', 'loja/conteudo', undefined, { nome }); }
 
   // ---- conectores prontos
   escrita(ws: string): string[] {
@@ -177,8 +201,7 @@ export class Recursos {
   async fluxoConector(ws: string, fluxo: string) { return this.ponte(ws, 'GET', `conectores-entrada/${fluxo}`); }
   async retornoConector(ws: string, nome: string, campos: Record<string, string>) { return this.ponte(ws, 'POST', `conectores-retorno/${nome}`, campos); }
 
-  // ---- conquistas, voltar atrás e voz
-  async conquistas(ws: string) { return this.ponte(ws, 'GET', 'conquistas'); }
+  // ---- voltar atrás e voz
   async checkpoints(ws: string) { return this.ponte(ws, 'GET', 'checkpoints'); }
   async voltar(ws: string, userId: string, pasta: string, id: string) {
     const r = await this.ponte(ws, 'POST', 'checkpoints/voltar', { pasta, id });

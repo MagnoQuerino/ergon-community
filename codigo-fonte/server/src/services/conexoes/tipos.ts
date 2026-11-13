@@ -23,7 +23,7 @@ export interface Resultado {
 /** Chamada já autenticada com a conta. Escrita precisa dizer `kind: 'write'` (lib/http.ts: não repete às cegas). */
 export type Http = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: unknown; kind?: 'read' | 'write' }) => Promise<any>;
 
-export interface CtxAcao { workspaceId: string; tz: string; http: Http; /** conector que manda a credencial no corpo (Omie): nunca vai ao modelo */ creds?: Record<string, string> }
+export interface CtxAcao { workspaceId: string; tz: string; http: Http; /** qual das contas do aplicativo ('' = a principal) */ conta?: string; /** conector que manda a credencial no corpo (Omie): nunca vai ao modelo */ creds?: Record<string, string> }
 
 export interface Acao {
   /** ex.: 'email.buscar' */

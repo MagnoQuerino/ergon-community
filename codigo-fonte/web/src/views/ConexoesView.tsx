@@ -1,9 +1,11 @@
 import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
+import { OutroAplicativo } from '../components/OutroAplicativo.tsx';
 import { Fragment, useEffect, useState, type ChangeEvent } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { escolhaConsciente, linhaDoEstado, nomeEscolhido, previaDaConta, problemaDoTeams, soOSeuCodigo, type ContaDoTeams } from '../lib/teams-app.ts';
-import type { EtapaConsentimento, Integration } from '../lib/types.ts';
+import type { ContaDaTela, EtapaConsentimento, Integration } from '../lib/types.ts';
+import { acoesDaLinha, comConta, comoAdicionar, nomeNaTela, podeAdicionar, temVariasContas } from '../lib/contas.ts';
 import { AVISO_APROVAR_SEM_CARTAO, ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, erroDaConexao, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, textoDaVolta } from '../lib/textos-tela.ts';
 import { fmtData, fmtDataHora, fmtLista, t as tr, tn, useT } from '../i18n/index.ts';
 import { AiAccounts } from '../components/AiAccounts.tsx';
@@ -15,6 +17,7 @@ import { BotoesRegra, type Alcance } from '../components/CartaoRegra.tsx';
 import { Selo } from '../components/Selo.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { useEnvioPorItem } from '../lib/envio.ts';
+import { noIdioma } from '../lib/textos-de-app.ts';
 
 /** O selo de cada estado: a chave do texto (traduzida na hora de mostrar) e a classe. */
 const STATE: Record<Integration['state'], [`conexoes.estado.${Integration['state']}`, string]> = {
@@ -40,7 +43,9 @@ const badgeOf = (i: Integration): [string, string] => {
 interface Permissoes { tipos: Record<string, string>; acoes: Record<string, string> }
 /** etapas: só na Microsoft (o que a conta já liberou, etapa por etapa) */
 /** soLeitura: tudo o que escreve está desligado; escreve: a conexão tem alguma ação que escreve (o atalho só aparece aí) */
-interface EstadoConexao { kind: string; faltam: string[]; comErro: string | null; permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: string }>; soLeitura?: boolean; escreve?: boolean; etapas?: EtapaConsentimento[] }
+interface EstadoConexao { kind: string; faltam: string[]; comErro: string | null; permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: string }>; soLeitura?: boolean; escreve?: boolean; etapas?: EtapaConsentimento[];
+  /** cada conta conectada deste aplicativo, com a escrita dela (rc.29) */
+  contas?: Array<{ conta: string; nome: string; principal: boolean; ativa: boolean; soLeitura?: boolean; escreve?: boolean }> }
 interface EstadoConexoes { liberarTudo: boolean; aprovarDepoisDeLer?: boolean; aprovarDepoisDeLerBarra?: boolean; confirmarOrganizar?: boolean; ligadas: EstadoConexao[] }
 /** O estado de uma conexão; pronto = a resposta já chegou (antes disso, as seções guardam o lugar). */
 interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => void }
@@ -86,7 +91,8 @@ export function ConexoesView() {
     const t = window.setTimeout(() => document.getElementById(`conn-${alvo}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
     return () => window.clearTimeout(t);
   }, [alvo, !!list.data]); // eslint-disable-line react-hooks/exhaustive-deps
-  const all = list.data ?? [];
+  // os textos de cada aplicativo no idioma da tela (o que o dicionário não tem segue como o servidor mandou)
+  const all = (list.data ?? []).map((i) => noIdioma(i, t));
   const term = q.trim().toLowerCase();
   const casa = (i: Integration) => (!onlyOn || i.state === 'connected') && (!term || `${i.name} ${i.about}`.toLowerCase().includes(term));
   // WhatsApp tem o próprio destaque
@@ -181,6 +187,7 @@ export function ConexoesView() {
         );
       })}
       <ConectoresProntos dono />
+      <OutroAplicativo dono />
       {achadosNoDestaque.length > 0 && (
         <p className="muted">{tn('conexoes.busca.emDestaque', { lista: achadosNoDestaque.map((i, n) => <Fragment key={i.kind}>{n ? ', ' : ''}<button className="link link--inline" onClick={() => irAte(i.kind)}>{i.name}</button></Fragment>) })}</p>
       )}
@@ -236,6 +243,7 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
         : i.kind === 'whatsapp' ? <WhatsApp i={i} reload={reload} />
         : i.auth === 'token' ? <TokenConnect i={i} reload={reload} autorizar={faltouNoTeste} />
         : <Sso i={i} reload={reload} faltam={estado.eu?.faltam ?? []} etapas={estado.eu?.etapas ?? []} recarregar={estado.reload} autorizar={faltouNoTeste} />}
+      {i.auth !== 'soon' && <ContasDoApp i={i} reload={reload} estado={estado} />}
       {passo && <p className="hint">{passo.link ? <ComLinkTarefas texto={passo.texto} /> : passo.texto}</p>}
       {i.state === 'connected' && <AcoesDaConexao i={i} estado={estado} />}
       {i.state === 'connected' && <TestarConexao i={i} reload={reload} onFaltou={setFaltouNoTeste} />}
@@ -247,7 +255,7 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
  * Prova com a conta real: cada capacidade diz se funcionou e, se não, o motivo. A escrita de teste só com o clique, e só
  * onde existe uma escrita inofensiva para testar (os quadros de tarefas; em Microsoft e Google, também um rascunho).
  */
-function TestarConexao({ i, reload, onFaltou }: { i: Integration; reload: () => void; onFaltou: (faltou: boolean) => void }) {
+function TestarConexao({ i, reload, onFaltou, conta = '' }: { i: Integration; reload: () => void; onFaltou: (faltou: boolean) => void; conta?: string }) {
   const t = useT();
   const [itens, setItens] = useState<Array<{ nome: string; ok: boolean; detalhe: string }> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -259,7 +267,7 @@ function TestarConexao({ i, reload, onFaltou }: { i: Integration; reload: () => 
     // o resultado pode ter gravado um problema da conexão (ou apagado o antigo): a tela relê. Permissão que falta (o texto
     // fixo do servidor, FALTA_AUTORIZAR) mostra o "Autorizar de novo" acima
     try {
-      const r = await api.post<{ itens: Array<{ nome: string; ok: boolean; detalhe: string }> }>(`/api/conexoes/${i.kind}/testar`, corpo);
+      const r = await api.post<{ itens: Array<{ nome: string; ok: boolean; detalhe: string }> }>(`/api/conexoes/${i.kind}/testar`, conta ? { ...corpo, conta } : corpo);
       // i18n-ok: reconhece o texto fixo que o servidor manda (FALTA_AUTORIZAR), não é texto de tela
       setItens(r.itens); onFaltou(r.itens.some((x) => !x.ok && x.detalhe.startsWith('falta autorizar de novo'))); reload();
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
@@ -267,7 +275,7 @@ function TestarConexao({ i, reload, onFaltou }: { i: Integration; reload: () => 
   const escrita = async () => {
     if (quadros?.length && quadro) return rodar({ escrita: true, quadro });
     try {
-      const r = await api.get<{ lists: Array<{ externalId: string; name: string }> }>(`/api/integrations/${i.kind}/lists`);
+      const r = await api.get<{ lists: Array<{ externalId: string; name: string }> }>(comConta(`/api/integrations/${i.kind}/lists`, conta));
       setQuadros(r.lists); setQuadro(r.lists[0]?.externalId ?? '');
       // Microsoft sem lista nem plano: o rascunho de teste roda assim mesmo
       if (!r.lists.length && i.kind === 'microsoft') await rodar({ escrita: true });
@@ -277,7 +285,7 @@ function TestarConexao({ i, reload, onFaltou }: { i: Integration; reload: () => 
   return (
     <div className="conn-teste">
       <p className="row row--wrap">
-        <button className="btn btn--sm" disabled={busy} onClick={() => void rodar({})}>{busy ? t('conexoes.teste.testando') : t('conexoes.teste.testar')}</button>
+        <button className="btn btn--sm" disabled={busy} onClick={() => void rodar({})}>{busy ? t('conexoes.teste.testando') : conta ? t('conexoes.multi.testar') : t('conexoes.teste.testar')}</button>
         {i.tasks && !(semQuadro && i.kind !== 'microsoft') && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void escrita()}>{quadros?.length && quadro ? t('conexoes.teste.criarTarefa') : t('conexoes.teste.testarEscrita')}</button>}
       </p>
       {!i.tasks && <p className="hint">{t('conexoes.teste.soLe')}</p>}
@@ -357,7 +365,7 @@ function UsarDeOutroWorkspace({ i, reload }: { i: Integration; reload: () => voi
     <div className="conn-reusar">
       <p className="hint">{t('conexoes.reusar.texto')}</p>
       <p className="row row--wrap">{contas.map((c) => (
-        <button key={c.workspaceId} className="btn btn--sm" onClick={async () => { setErr(null); try { await api.post(`/api/conexoes/${i.kind}/usar-de`, { workspaceId: c.workspaceId }); reload(); } catch (e) { setErr(errMsg(e)); } }}>{c.conta ? t('conexoes.reusar.usar', { conta: c.conta, workspace: c.workspace }) : t('conexoes.reusar.usarSemNome', { workspace: c.workspace })}</button>
+        <button key={`${c.workspaceId}|${c.origemConta ?? ''}`} className="btn btn--sm" onClick={async () => { setErr(null); try { await api.post(`/api/conexoes/${i.kind}/usar-de`, { workspaceId: c.workspaceId, ...(c.origemConta ? { origemConta: c.origemConta } : {}) }); reload(); } catch (e) { setErr(errMsg(e)); } }}>{c.conta ? t('conexoes.reusar.usar', { conta: c.conta, workspace: c.workspace }) : t('conexoes.reusar.usarSemNome', { workspace: c.workspace })}</button>
       ))}</p>
       {err && <p className="error">{err}</p>}
     </div>
@@ -470,7 +478,7 @@ function LiberarTudo({ estado: st }: { estado: { data: EstadoConexoes | null; re
 }
 
 
-function Disconnect({ i, reload, label }: { i: Integration; reload: () => void; label?: string }) {
+function Disconnect({ i, reload, label, conta = '' }: { i: Integration; reload: () => void; label?: string; conta?: string }) {
   const t = useT();
   const [ask, setAsk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -483,7 +491,7 @@ function Disconnect({ i, reload, label }: { i: Integration; reload: () => void; 
   return (
     <div className="confirm">
       {i.sharedFrom ? t('conexoes.desconectar.perguntaEmprestada', { nome: i.name, efeito }) : t('conexoes.desconectar.pergunta', { nome: i.name, efeito })}
-      <button className="btn btn--sm btn--primary" onClick={async () => { try { await api.del(`/api/integrations/${i.kind}`); setAsk(false); reload(); } catch (e) { setErr(errMsg(e)); } }}>{i.sharedFrom ? t('conexoes.desconectar.deixarDeUsar') : t('conexoes.desconectar.botao')}</button>
+      <button className="btn btn--sm btn--primary" onClick={async () => { try { await api.del(comConta(`/api/integrations/${i.kind}`, conta)); setAsk(false); reload(); } catch (e) { setErr(errMsg(e)); } }}>{i.sharedFrom ? t('conexoes.desconectar.deixarDeUsar') : t('conexoes.desconectar.botao')}</button>
       <button className="btn btn--sm btn--ghost" onClick={() => setAsk(false)}>{t('conexoes.acao.cancelar')}</button>
       {err && <span className="error">{err}</span>}
     </div>
@@ -491,9 +499,10 @@ function Disconnect({ i, reload, label }: { i: Integration; reload: () => void; 
 }
 
 /** Credencial colada: um ou mais campos (token, chave, endereço, e-mail), conferidos no serviço antes de conectar. */
-function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => void; autorizar: boolean }) {
+/** conta: 'nova' (mais uma conta deste aplicativo) ou a de outra conta que caiu; sem ela, a principal, como sempre. */
+function TokenConnect({ i, reload, autorizar, conta, onCancel }: { i: Integration; reload: () => void; autorizar: boolean; conta?: string; onCancel?: () => void }) {
   const t = useT();
-  const [trocar, setTrocar] = useState(false);
+  const [trocar, setTrocar] = useState(!!conta);
   const [v, setV] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -533,8 +542,8 @@ function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => 
       try {
         // campo opcional em branco não vai (ex.: o endereço do GitLab, em branco para gitlab.com)
         const credentials = Object.fromEntries(fields.filter((f) => (v[f.name] ?? '').trim()).map((f) => [f.name, (v[f.name] ?? '').trim()]));
-        const r = await api.post<{ account: string }>(`/api/integrations/${i.kind}/token`, { credentials });
-        setV({}); setTrocar(false); setOk(t('conexoes.token.conectada', { conta: r.account })); reload();
+        const r = await api.post<{ account: string }>(`/api/integrations/${i.kind}/token`, conta ? { credentials, conta } : { credentials });
+        setV({}); setTrocar(!!conta); setOk(t('conexoes.token.conectada', { conta: r.account })); reload(); onCancel?.();
       } catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
     }}>
       {i.help?.antes && <p className="warn conn-antes" role="note">{i.help.antes}</p>}
@@ -550,7 +559,7 @@ function TokenConnect({ i, reload, autorizar }: { i: Integration; reload: () => 
       ))}
       <p className="row row--wrap">
         <button className="btn btn--primary" disabled={busy}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.token.conectar')}</button>
-        {trocar && <button type="button" className="btn btn--ghost" onClick={() => { setTrocar(false); setV({}); setErr(null); }}>{t('conexoes.acao.cancelar')}</button>}
+        {trocar && <button type="button" className="btn btn--ghost" onClick={() => { setTrocar(!!conta); setV({}); setErr(null); onCancel?.(); }}>{t('conexoes.acao.cancelar')}</button>}
       </p>
       {err && <p className="error">{err}</p>}
     </form>
@@ -711,11 +720,142 @@ function PedirAoAdministrador({ link, etapa, depois }: { link: string; etapa: Et
   );
 }
 
+/**
+ * As contas deste aplicativo (rc.29): a principal é o próprio cartão, como sempre; com mais de uma, a lista diz qual é a
+ * principal, deixa dar um nome a cada uma, ligar e desligar para a equipe e as rotinas, a escrita de cada uma e trocar a
+ * principal. "Adicionar outra conta" aparece com a principal conectada.
+ */
+function ContasDoApp({ i, reload, estado }: { i: Integration; reload: () => void; estado: EstadoDe }) {
+  const t = useT();
+  const contas = i.contas ?? [];
+  const varias = temVariasContas(i);
+  const outrasPendentes = contas.filter((c) => !c.principal && c.state !== 'off');
+  if (!varias && !podeAdicionar(i) && !outrasPendentes.length) return null;
+  return (
+    <section className="conn-contas" aria-label={t('conexoes.multi.titulo')}>
+      {varias && (
+        <>
+          <h4>{t('conexoes.multi.titulo')}</h4>
+          <p className="hint">{t('conexoes.multi.texto')}</p>
+          <ul className="conn-contas__lista">{contas.filter((c) => c.state !== 'off').map((c) => <LinhaDaConta key={c.id} i={i} c={c} reload={reload} estado={estado} />)}</ul>
+        </>
+      )}
+      {!varias && outrasPendentes.map((c) => <LinhaDaConta key={c.id} i={i} c={c} reload={reload} estado={estado} />)}
+      {podeAdicionar(i) && <AdicionarConta i={i} reload={reload} />}
+    </section>
+  );
+}
+
+/** Uma conta da lista: o nome (editável), o selo, a principal, ligada para a equipe, só leitura e o que fazer com ela. */
+function LinhaDaConta({ i, c, reload, estado }: { i: Integration; c: ContaDaTela; reload: () => void; estado: EstadoDe }) {
+  const t = useT();
+  const [nomeando, setNomeando] = useState(false);
+  const [apelido, setApelido] = useState(c.apelido ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [testar, setTestar] = useState(false);
+  const pode = acoesDaLinha(i, c);
+  const chave = c.principal ? 'principal' : c.conta;
+  const doCatalogo = estado.eu?.contas?.find((x) => x.conta === c.conta);
+  const [label, cls] = STATE[c.state] ? [t(STATE[c.state][0]), STATE[c.state][1]] : ['', ''];
+  const mudar = async (corpo: Record<string, unknown>) => {
+    if (busy) return; // o clique duplo não manda duas vezes
+    setErr(null); setBusy(true);
+    try { await api.patch(`/api/integrations/${i.kind}/contas/${chave}`, corpo); setNomeando(false); reload(); estado.reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+  const soLeitura = async (on: boolean) => { setErr(null); try { await api.put(`/api/conexoes/${i.kind}/so-leitura`, { on, conta: c.conta }); estado.reload(); } catch (e) { setErr(errMsg(e)); } };
+  const entrarDeNovo = async () => { setErr(null); try { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`, { conta: c.conta }); location.href = r.url; } catch (e) { setErr(errMsg(e)); } };
+  // a conta como o cartão de sempre a vê: o WhatsApp de outro número e o "conectar de novo" por credencial usam os mesmos blocos
+  const comoIntegracao: Integration = { ...i, state: c.state, account: c.account, error: c.error, connectedAt: c.connectedAt, lastSyncAt: c.lastSyncAt, sharedFrom: c.sharedFrom, usadaEm: [], aviso: c.aviso, live: c.live };
+  return (
+    <li className={`conn-conta ${c.ativa ? '' : 'conn-conta--off'}`}>
+      <div className="row row--wrap">
+        <strong>{nomeNaTela(c, t('conexoes.multi.semNome'))}</strong>
+        {c.principal ? <span className="badge badge--ok">{t('conexoes.multi.principal')}</span> : <span className={`badge ${cls}`}>{label}</span>}
+        {!c.ativa && <span className="badge">{t('conexoes.multi.desligada')}</span>}
+        {c.apelido && c.account && c.apelido !== c.account && <span className="muted small">{c.account}</span>}
+        <span className="grow" />
+        {pode.tornarPrincipal && <button className="btn btn--sm btn--ghost" onClick={() => void mudar({ principal: true })}>{busy ? t('conexoes.multi.salvando') : t('conexoes.multi.tornarPrincipal')}</button>}
+        {!nomeando && <button className="btn btn--sm btn--ghost" onClick={() => { setApelido(c.apelido ?? ''); setNomeando(true); }}>{t('conexoes.multi.renomear')}</button>}
+      </div>
+      {nomeando && (
+        <form className="row row--wrap" onSubmit={(e) => { e.preventDefault(); void mudar({ apelido: apelido.trim() }); }}>
+          <label className="field">{t('conexoes.multi.apelido')}
+            <input type="text" maxLength={60} value={apelido} placeholder={c.account ?? ''} onChange={(e) => setApelido(e.target.value)} autoFocus />
+          </label>
+          <button className="btn btn--sm btn--primary">{busy ? t('conexoes.multi.salvando') : t('conexoes.acao.salvar')}</button>
+          <button type="button" className="btn btn--sm btn--ghost" onClick={() => setNomeando(false)}>{t('conexoes.acao.cancelar')}</button>
+          <span className="hint">{t('conexoes.multi.apelidoDica')}</span>
+        </form>
+      )}
+      {c.error && !c.principal && <p className="error">{c.error}</p>}
+      {c.state === 'connected' && c.lastSyncAt && <p className="muted small">{t('conexoes.detalhe.ultimaLeitura', { quando: fmtDataHora(c.lastSyncAt) })}</p>}
+      {pode.ligarDesligar && <label className="check"><input type="checkbox" checked={c.ativa} onChange={(e) => void mudar({ ativa: e.target.checked })} /> {t('conexoes.multi.usada')}</label>}
+      {/* a escrita é de cada conta: só leitura numa não muda a outra */}
+      {pode.ligarDesligar && doCatalogo?.escreve && <label className="check"><input type="checkbox" checked={!!doCatalogo.soLeitura} onChange={(e) => void soLeitura(e.target.checked)} /> {t('conexoes.multi.soLeitura')}</label>}
+      {pode.whatsapp && <WhatsApp i={comoIntegracao} reload={reload} conta={c.conta} />}
+      {pode.conectarDeNovo && (i.auth === 'token'
+        ? <TokenConnect i={comoIntegracao} reload={reload} autorizar conta={c.conta} />
+        : <p><button className="btn btn--sm btn--primary" onClick={() => void entrarDeNovo()}>{t('conexoes.multi.conectarDeNovo')}</button></p>)}
+      <p className="row row--wrap">
+        {!c.principal && c.state === 'connected' && (testar ? null : <button className="btn btn--sm btn--ghost" onClick={() => setTestar(true)}>{t('conexoes.multi.testar')}</button>)}
+        {pode.desconectar && !pode.whatsapp && <Disconnect i={comoIntegracao} reload={reload} conta={c.conta} label={t('conexoes.multi.desconectar')} />}
+      </p>
+      {testar && <TestarConexao i={comoIntegracao} reload={reload} onFaltou={() => undefined} conta={c.conta} />}
+      {err && <p className="error" role="alert">{err}</p>}
+    </li>
+  );
+}
+
+/** "Adicionar outra conta": colar a credencial da outra, entrar com ela, ler o QR do outro número, ou usar a de outro workspace. */
+function AdicionarConta({ i, reload }: { i: Integration; reload: () => void }) {
+  const t = useT();
+  const [aberto, setAberto] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const como = comoAdicionar(i);
+  const reusar = i.reutilizaveis ?? [];
+  const entrar = async () => {
+    if (busy) return;
+    setErr(null); setBusy(true);
+    try {
+      if (como === 'login') { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`, { conta: 'nova' }); location.href = r.url; return; }
+      // o número novo aparece na lista, com o QR dele
+      await api.post('/api/integrations/whatsapp/start', { conta: 'nova' }); setAberto(false); reload();
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+  const usar = async (workspaceId: string, origemConta: string) => { setErr(null); try { await api.post(`/api/conexoes/${i.kind}/usar-de`, { workspaceId, origemConta, conta: 'nova' }); setAberto(false); reload(); } catch (e) { setErr(errMsg(e)); } };
+  if (!aberto) return <p><button className="btn btn--sm" onClick={() => setAberto(true)}><Icon name="plus" size={14} /> {como === 'qr' ? t('conexoes.multi.adicionarNumero') : t('conexoes.multi.adicionar')}</button></p>;
+  return (
+    <div className="conn-adicionar">
+      <p className="hint">{como === 'credencial' ? t('conexoes.multi.adicionarCredencial') : como === 'login' ? t('conexoes.multi.adicionarLogin') : t('conexoes.multi.adicionarQr')}</p>
+      {como === 'credencial'
+        ? <TokenConnect i={{ ...i, state: 'off', error: null, aviso: null }} reload={reload} autorizar={false} conta="nova" onCancel={() => setAberto(false)} />
+        : (
+          <p className="row row--wrap">
+            <button className="btn btn--primary" onClick={() => void entrar()}>{busy ? t('conexoes.acao.conferindo') : como === 'qr' ? t('conexoes.multi.adicionarNumero') : t('conexoes.multi.adicionar')}</button>
+            <button className="btn btn--ghost" onClick={() => setAberto(false)}>{t('conexoes.acao.cancelar')}</button>
+          </p>
+        )}
+      {reusar.length > 0 && (
+        <>
+          <p className="hint">{t('conexoes.multi.usarDeOutro')}</p>
+          <p className="row row--wrap">{reusar.map((r) => (
+            <button key={`${r.workspaceId}|${r.origemConta ?? ''}`} className="btn btn--sm btn--ghost" onClick={() => void usar(r.workspaceId, r.origemConta ?? '')}>{r.conta ? t('conexoes.reusar.usar', { conta: r.conta, workspace: r.workspace }) : t('conexoes.reusar.usarSemNome', { workspace: r.workspace })}</button>
+          ))}</p>
+        </>
+      )}
+      {err && <p className="error" role="alert">{err}</p>}
+    </div>
+  );
+}
+
 interface WaState { status: string; experimental?: boolean; riscosAceitos?: boolean; qr: string | null; me: string | null; error: string | null; read: number; seen: number; filters: { direct: boolean; groups: boolean; cards: boolean; labels: string[]; exceptions: string[] }; chats: Array<{ id: string; name: string; group: boolean }>; labels: string[] }
 
-function WhatsApp({ i, reload }: { i: Integration; reload: () => void }) {
+/** conta: qual dos números ('' = o principal); cada número tem o seu QR, a sua leitura e os seus filtros. */
+function WhatsApp({ i, reload, conta = '' }: { i: Integration; reload: () => void; conta?: string }) {
   const t = useT();
-  const st = useResource<WaState>('/api/integrations/whatsapp', ['integrations.changed', 'events.changed']);
+  const st = useResource<WaState>(comConta('/api/integrations/whatsapp', conta), ['integrations.changed', 'events.changed']);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const live = st.data?.status ?? 'off';
@@ -724,10 +864,10 @@ function WhatsApp({ i, reload }: { i: Integration; reload: () => void }) {
   const start = async (aceitoRiscos = false) => {
     if (!aceitoRiscos && !st.data?.riscosAceitos) { setAsk(true); return; }
     setErr(null); setBusy(true); setAsk(false);
-    try { await api.post('/api/integrations/whatsapp/start', aceitoRiscos ? { aceitoRiscos: true } : {}); st.reload(); reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+    try { await api.post('/api/integrations/whatsapp/start', { ...(aceitoRiscos ? { aceitoRiscos: true } : {}), ...(conta ? { conta } : {}) }); st.reload(); reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   };
-  const stop = async () => { try { await api.post('/api/integrations/whatsapp/stop'); st.reload(); reload(); } catch (e) { setErr(errMsg(e)); } };
-  const setF = async (patch: Partial<WaState['filters']>) => { setErr(null); try { await api.put('/api/integrations/whatsapp/filters', patch); st.reload(); } catch (e) { setErr(errMsg(e)); } };
+  const stop = async () => { try { await api.post('/api/integrations/whatsapp/stop', conta ? { conta } : {}); st.reload(); reload(); } catch (e) { setErr(errMsg(e)); } };
+  const setF = async (patch: Partial<WaState['filters']>) => { setErr(null); try { await api.put('/api/integrations/whatsapp/filters', conta ? { ...patch, conta } : patch); st.reload(); } catch (e) { setErr(errMsg(e)); } };
   const f = st.data?.filters;
   return (
     <>
@@ -760,7 +900,7 @@ function WhatsApp({ i, reload }: { i: Integration; reload: () => void }) {
           <label className="check"><input type="checkbox" checked={f.cards} onChange={(e) => void setF({ cards: e.target.checked })} /> {t('conexoes.wa.cards')}</label>
           <ListEditor label={t('conexoes.wa.etiquetas')} values={f.labels} suggestions={st.data!.labels} onChange={(labels) => void setF({ labels })} placeholder={t('conexoes.wa.etiquetasExemplo')} />
           <ListEditor label={t('conexoes.wa.nuncaLer')} values={f.exceptions} suggestions={st.data!.chats.map((c) => c.name)} onChange={(exceptions) => void setF({ exceptions })} placeholder={t('conexoes.wa.nuncaLerExemplo')} />
-          <Disconnect i={i} reload={() => { st.reload(); reload(); }} label={t('conexoes.wa.desconectar')} />
+          <Disconnect i={i} reload={() => { st.reload(); reload(); }} label={conta ? t('conexoes.multi.desconectarNumero') : t('conexoes.wa.desconectar')} conta={conta} />
         </div>
       )}
       {err && <p className="error">{err}</p>}

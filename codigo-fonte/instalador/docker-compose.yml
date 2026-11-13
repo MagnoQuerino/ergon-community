@@ -1,5 +1,5 @@
 # Ergon 1.0.1 — pacote para instalar neste computador (imagens publicadas; nada é compilado aqui).
-# Use o lançador:  Windows: .\ergon.cmd install     macOS/Linux: ./ergon.sh install
+# Use o lançador:  ./ergon.sh install   (no Windows, o aplicativo Ergon Desktop)
 # Abra por http://localhost:8787 (as passkeys do navegador só valem nesse nome).
 # Este arquivo é gerado pela esteira de lançamento a partir de deploy/local/docker-compose.yml.
 name: ergon
@@ -26,14 +26,6 @@ services:
       ERGON_RUN_TIMEOUT_SECONDS: ${ERGON_RUN_TIMEOUT_SECONDS:-180}
       ERGON_LONG_RUN_TIMEOUT_SECONDS: ${ERGON_LONG_RUN_TIMEOUT_SECONDS:-600}   # quem pesquisa na web ou executa código
       ERGON_ALLOWED_ORIGINS: http://localhost:${ERGON_PORT:-8787},http://127.0.0.1:${ERGON_PORT:-8787}
-      ERGON_FIXTURES_ENABLED: "false"
-      ERGON_TEAMS_ENABLED: ${ERGON_TEAMS_ENABLED:-false}
-      ERGON_TEAMS_TENANT_ID: ${ERGON_TEAMS_TENANT_ID:-}
-      ERGON_TEAMS_ALLOWED_USERS: ${ERGON_TEAMS_ALLOWED_USERS:-}
-      ERGON_WHATSAPP_ENABLED: ${ERGON_WHATSAPP_ENABLED:-false}
-      ERGON_WHATSAPP_OWNER_IDS: ${ERGON_WHATSAPP_OWNER_IDS:-}
-      ERGON_WHATSAPP_MONITORED_CHATS: ${ERGON_WHATSAPP_MONITORED_CHATS:-}
-      ERGON_WHATSAPP_SEND_ENABLED: ${ERGON_WHATSAPP_SEND_ENABLED:-false}
       ERGON_MS_CLIENT_ID: ${ERGON_MS_CLIENT_ID:-}
       ERGON_GOOGLE_CLIENT_ID: ${ERGON_GOOGLE_CLIENT_ID:-}
     volumes:

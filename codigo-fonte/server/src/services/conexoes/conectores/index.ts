@@ -11,6 +11,7 @@ import { GITHUB_EXTRAS } from './extras-github.ts';
 import { NOTION_EXTRAS } from './extras-notion.ts';
 import { FRESHDESK } from './freshdesk.ts';
 import { GITLAB } from './gitlab.ts';
+import { GOHIGHLEVEL } from './gohighlevel.ts';
 import { HUBSPOT } from './hubspot.ts';
 import { INTERCOM } from './intercom.ts';
 import { KOMMO } from './kommo.ts';
@@ -29,7 +30,7 @@ import type { ContaConferida } from '../../task-providers.ts';
 // a ordem é a da tela, dentro de cada grupo: os mais conhecidos no Brasil primeiro
 export const CONECTORES: ConectorDef[] = [
   SLACK, DISCORD, TELEGRAM, MATTERMOST, ROCKETCHAT,
-  HUBSPOT, RDSTATION, PIPEDRIVE, KOMMO, ZENDESK, FRESHDESK, INTERCOM,
+  HUBSPOT, RDSTATION, PIPEDRIVE, KOMMO, GOHIGHLEVEL, ZENDESK, FRESHDESK, INTERCOM,
   CONFLUENCE, GITLAB, CALENDLY,
   OMIE, ASAAS,
 ];

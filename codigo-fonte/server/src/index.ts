@@ -39,10 +39,10 @@ const { app, executor, startBackground, stopBackground } = await buildApp({ cfg,
 
 if (applied.length) app.log.info({ applied }, 'migrations aplicadas');
 app.log.info({
-  mode: cfg.mode, vault: vault.state(), executor: cfg.executor, maxConcurrentRuns: cfg.maxConcurrentRuns, teams: cfg.teams.enabled, whatsapp: cfg.whatsapp.enabled,
+  mode: cfg.mode, vault: vault.state(), executor: cfg.executor, maxConcurrentRuns: cfg.maxConcurrentRuns,
   control: cfg.hermesControlUrl ? 'definida' : 'ausente', motorVault: cfg.hermesVaultUrl ? 'definido' : 'ausente',
   microsoft: cfg.msClientId ? 'app registrado' : 'sem app', google: cfg.googleClientId && cfg.googleClientSecret ? 'app registrado' : 'sem app',
-  whatsappSend: cfg.whatsapp.sendEnabled, fixtures: cfg.fixturesEnabled, hermesKey: cfg.hermesApiKey ? 'definida' : 'ausente',
+  hermesKey: cfg.hermesApiKey ? 'definida' : 'ausente',
   bridgeToken: cfg.bridgeToken ? 'definido' : 'ausente',
   agentToken: cfg.agentToken ? 'definido' : 'ausente',
 }, 'configuração (sem segredos)');

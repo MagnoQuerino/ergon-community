@@ -71,6 +71,7 @@ PUBLICADAS = {
     8: "dcb04c1aa49dd525e46103165390edbce357f589f6525b2e901713a3b24d9ce0",  # canais: Telegram entrega o que chegou com o Ergon fechado
     9: "9d03eb25994ce91d2c287bf9efa1c11775c881317a4910e6736b3e130d36af0b",  # aprovações nativas: o modo manual (sem a chamada a mais ao modelo) e o prazo de 5 min
     10: "58919bde6cadbd978b1d7fc84ae6bca03c1991262a9e343cae91a8fb90740083",  # experiência completa: passos 20→90, raciocínio low→high, aviso antes do teto, leitura de páginas, navegador/vídeo/arquivos/voz
+    11: "6bb6880828d7a1ad1ed7c464029d5c0557f4476ba822cf01aa9bcfd09fcf7680",  # gestão pelo coordenador: ergon_gestao conhecido (desligado) fora do perfil dele
 }
 
 
@@ -450,14 +451,14 @@ shutil.rmtree(cofre_teste, ignore_errors=True)
 os.makedirs(cofre_teste)
 open(os.path.join(cofre_teste, "gocryptfs.conf"), "w").close()
 reset({}, marca="1")
-guardados = {k: getattr(v, k) for k in ("VAULT", "LEGACY", "PLUGIN_SRC", "gocryptfs", "own_vault", "ensure_api_key", "configure", "enforce_safety")}
+guardados = {k: getattr(v, k) for k in ("VAULT", "PLUGIN_SRC", "gocryptfs", "own_vault", "ensure_api_key", "configure", "enforce_safety")}
 
 
 def explode(*_a, **_k):
     raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
 
-v.VAULT, v.LEGACY, v.PLUGIN_SRC = cofre_teste, HOME + "-sem-legado", HOME + "-sem-plugin"
+v.VAULT, v.PLUGIN_SRC = cofre_teste, HOME + "-sem-plugin"
 v.gocryptfs = lambda *_a, **_k: (0, "")
 v.own_vault = lambda: 0
 v.ensure_api_key = lambda: None
@@ -496,6 +497,9 @@ check("rc.27, cofre novo: os cartões na API e conhecidos nas três plataformas,
       "ergon_cartoes" in _c["platform_toolsets"]["api_server"] and "ergon_conexoes" in _c["platform_toolsets"]["api_server"]
       and all("ergon_cartoes" in _c["known_plugin_toolsets"][p] for p in ("api_server", "teams", "whatsapp"))
       and "ergon_cartoes" not in _c["platform_toolsets"]["teams"] + _c["platform_toolsets"]["whatsapp"], str(_c))
+check("rc.29, cofre novo: a gestão do coordenador conhecida nas três plataformas e fora de todas as listas (migração 11: só no perfil dele)",
+      all("ergon_gestao" in _c["known_plugin_toolsets"][p] for p in ("api_server", "teams", "whatsapp"))
+      and "ergon_gestao" not in _c["platform_toolsets"]["api_server"] + _c["platform_toolsets"]["teams"] + _c["platform_toolsets"]["whatsapp"], str(_c))
 check("rc.27, cofre novo: Telegram entrega o que chegou com o Ergon fechado (migração 8)",
       _c.get("platforms", {}).get("telegram", {}).get("extra", {}).get("drop_pending_on_cold_boot") is False, str(_c.get("platforms")))
 check("rc.27, cofre novo: aprovações pela pessoa, sem a chamada a mais ao modelo, com o turno esperando 5 min (migração 9)",
@@ -516,7 +520,7 @@ check("rc.27, segunda abertura: nada", v.configure() is True and calls == [], st
 
 # padrões seguros, cartões, proteções e canais: só onde ninguém escolheu — o que a pessoa ligou ou desligou fica como está
 ESCOLHIDO = {"platform_toolsets": {"api_server": DELE + ["ergon_cartoes"]},
-             "known_plugin_toolsets": {"api_server": ["ergon_cartoes"], "teams": ["ergon_cartoes"], "whatsapp": ["ergon_cartoes"]},
+             "known_plugin_toolsets": {"api_server": ["ergon_cartoes", "ergon_gestao"], "teams": ["ergon_cartoes", "ergon_gestao"], "whatsapp": ["ergon_cartoes", "ergon_gestao"]},
              "curator": {"enabled": True, "interval_hours": 24}, "auxiliary": {"background_review": {"enabled": True}},
              "provider_routing": {"data_collection": "allow", "sort": "price"}, "security": {"redact_secrets": True},
              "checkpoints": {"enabled": False}, "platforms": {"telegram": {"extra": {"drop_pending_on_cold_boot": True}}},
@@ -562,7 +566,7 @@ for rotulo, agente, depois in (("os valores da migração 1", {"max_turns": 20, 
     res = v.configure()
     _a = cfg_now().get("agent") or {}
     check(f"migração 10, {rotulo}: passos e raciocínio ficam {depois}", res is True and {k: _a.get(k) for k in ("max_turns", "reasoning_effort") if k in _a} == depois
-          and json.loads(marca_now()) == {"versao": 10}, str((res, _a, calls)))
+          and json.loads(marca_now()) == {"versao": ULTIMA}, str((res, _a, calls)))
     check(f"migração 10, {rotulo}: o aviso perto do teto e a leitura de páginas onde faltavam; a união mantém o que a pessoa tinha",
           _a.get("budget_warning_ratio") == 0.75 and cfg_now()["web"]["extract_backend"] == "exa"
           and cfg_now()["platform_toolsets"]["api_server"] == sorted({"todo", "terminal"} | NOVAS_DA_10), str(cfg_now()))
@@ -572,7 +576,7 @@ reset({"agent": {"max_turns": 20}}, migracoes='{"versao": 9}')
 falhar.add("agent.max_turns")
 check("migração 10 falhou na troca: a marca fica na 9 e tenta de novo depois", v.configure() is False and json.loads(marca_now()) == {"versao": 9}, str(marca_now()))
 falhar.clear()
-check("migração 10, de novo: termina", v.configure() is True and cfg_now()["agent"]["max_turns"] == 90 and json.loads(marca_now()) == {"versao": 10}, str(cfg_now()))
+check("migração 10, de novo: termina", v.configure() is True and cfg_now()["agent"]["max_turns"] == 90 and json.loads(marca_now()) == {"versao": ULTIMA}, str(cfg_now()))
 v.MIGRACOES = tuple(m for m in TODAS_AS_MIGRACOES if m[0] <= 3)
 v.CONFIG_VERSION = 3
 reset()
@@ -798,8 +802,8 @@ check("cartões: só as migrações que faltavam rodam (nada da 1, da 2 nem da 3
 check("cartões: entram na API com o que a pessoa ligou; as Conexões que ela desligou continuam desligadas",
       c["platform_toolsets"]["api_server"] == sorted(set(SEM_CONEXOES + ["ergon_cartoes"]) | {"browser", "file", "tts", "video"}), str(c["platform_toolsets"]))
 check("cartões: conhecidos nas três plataformas, unidos ao que já estava",
-      c["known_plugin_toolsets"] == {"api_server": ["ergon_cartoes", "ergon_conexoes", "homeassistant"], "teams": ["ergon_cartoes", "ergon_conexoes"],
-                                     "whatsapp": ["ergon_cartoes", "ergon_conexoes"]}, str(c.get("known_plugin_toolsets")))
+      c["known_plugin_toolsets"] == {"api_server": ["ergon_cartoes", "ergon_conexoes", "ergon_gestao", "homeassistant"], "teams": ["ergon_cartoes", "ergon_conexoes", "ergon_gestao"],
+                                     "whatsapp": ["ergon_cartoes", "ergon_conexoes", "ergon_gestao"]}, str(c.get("known_plugin_toolsets")))
 check("cartões: as escolhas da pessoa ficam (passos por pedido, resumo desligado; o raciocínio ausente fica ausente)",
       c["agent"]["max_turns"] == 33 and c["compression"]["threshold_tokens"] is None and "reasoning_effort" not in c["agent"], str(c))
 api, teams, wa = ferramentas("api_server"), ferramentas("teams"), ferramentas("whatsapp")

@@ -10,7 +10,6 @@ const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 if (!args.length) { console.error('Uso: node scripts/restore.mjs <pasta do backup>  |  --undo pre-restore-<data>'); process.exit(2); }
 const cmd = args[0] === '--undo' || args[0] === '--desfazer' ? ['restore', '--undo', args[1] ?? ''] : ['restore', path.resolve(args[0])];
-const r = process.platform === 'win32'
-  ? spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'ergon.ps1'), ...cmd], { stdio: 'inherit' })
-  : spawnSync('bash', [path.join(root, 'ergon.sh'), ...cmd], { stdio: 'inherit' });
+// no Windows, dentro do WSL (o lançador do Docker Desktop saiu na rc.29)
+const r = spawnSync('bash', [path.join(root, 'ergon.sh'), ...cmd], { stdio: 'inherit' });
 process.exit(r.status ?? 1);

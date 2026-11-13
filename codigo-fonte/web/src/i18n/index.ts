@@ -11,12 +11,12 @@
 // O TypeScript confere tudo: a chave tem de existir no dicionário e os valores têm de ser os marcadores dela.
 import { createElement, Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { pt, type Dicionario } from './pt/index.ts';
-import { IDIOMA_INGLES_LIBERADO, IDIOMA_PADRAO, ehIdioma, idiomaDoNavegador, type Idioma } from './idiomas.ts';
+import { IDIOMA_PADRAO, ehIdioma, idiomaDoNavegador, type Idioma } from './idiomas.ts';
 import * as N from './nucleo.ts';
 import type { Marcadores, Mensagem, Plural } from './tipos.ts';
 
 export type { Idioma } from './idiomas.ts';
-export { IDIOMAS, IDIOMA_INGLES_LIBERADO, NOME_DO_IDIOMA, ehIdioma } from './idiomas.ts';
+export { IDIOMAS, NOME_DO_IDIOMA, ehIdioma } from './idiomas.ts';
 
 type Areas = { readonly [area: string]: { readonly [chave: string]: Mensagem } };
 // o português vem junto com a tela; o inglês só é baixado por quem usa (quem fala português não paga nada a mais)
@@ -69,8 +69,6 @@ const CHAVE_LOCAL = 'ergon.idioma';
 //     neste navegador (a gravação no servidor falhou: grava de novo) > o idioma do navegador.
 // Na multiconta, a tela de entrada fica na língua de quem entrou por último neste navegador; depois de entrar, a tela
 // da pessoa já abre na língua dela (o App espera o dicionário antes de desenhar: nada troca de língua no meio da tela).
-// Enquanto o inglês não é liberado: a tela abre em português e só a chave 'ergon.idioma' deste navegador troca (é como
-// as equipes conferem o inglês); a escolha gravada na pessoa não muda a tela.
 const chaveDaPessoa = (quem: string) => `${CHAVE_LOCAL}:${quem}`;
 const lerGuardado = (chave = CHAVE_LOCAL): Idioma | null => { try { const v = localStorage.getItem(chave); return ehIdioma(v) ? v : null; } catch { return null; } };
 const guardarEm = (chave: string, l: Idioma) => { try { localStorage.setItem(chave, l); } catch { /* sem armazenamento: vale só nesta visita */ } };
@@ -79,24 +77,20 @@ let pessoa: string | null = null;
 const guardar = (l: Idioma) => { guardarEm(CHAVE_LOCAL, l); if (pessoa) guardarEm(chaveDaPessoa(pessoa), l); };
 const linguaDoNavegador = (): string | undefined => (typeof navigator === 'undefined' ? undefined : navigator.language);
 
-/** Sem escolha nenhuma: o idioma do navegador (enquanto o inglês não é liberado, o português). */
-function idiomaSemEscolha(liberado: boolean = IDIOMA_INGLES_LIBERADO): Idioma {
-  return liberado ? idiomaDoNavegador(linguaDoNavegador()) : IDIOMA_PADRAO;
-}
+/** Sem escolha nenhuma: o idioma do navegador. */
+const idiomaSemEscolha = (): Idioma => idiomaDoNavegador(linguaDoNavegador());
 /** Ao abrir a página (antes de entrar): a última escolha feita neste navegador; sem ela, a do navegador. */
-export function idiomaInicial(liberado: boolean = IDIOMA_INGLES_LIBERADO): Idioma { return lerGuardado() ?? idiomaSemEscolha(liberado); }
+export function idiomaInicial(): Idioma { return lerGuardado() ?? idiomaSemEscolha(); }
 
 /**
  * O idioma ao entrar, pela ORDEM acima. `lembrar`: guardar neste navegador. `gravar`: o que mandar ao servidor — a
- * escolha guardada aqui que não chegou lá; ou, enquanto o inglês não é liberado, o português de quem ainda não tem
- * idioma (quem usa o Ergon em português não vê a tela mudar de língua no dia em que o inglês chegar).
+ * escolha guardada aqui que não chegou lá.
  */
-export function decidirAoEntrar(doServidor: unknown, quem: string | null, liberado: boolean = IDIOMA_INGLES_LIBERADO): { idioma: Idioma; lembrar: boolean; gravar: Idioma | null } {
-  if (!liberado) return { idioma: lerGuardado() ?? IDIOMA_PADRAO, lembrar: false, gravar: ehIdioma(doServidor) ? null : IDIOMA_PADRAO };
+export function decidirAoEntrar(doServidor: unknown, quem: string | null): { idioma: Idioma; lembrar: boolean; gravar: Idioma | null } {
   if (ehIdioma(doServidor)) return { idioma: doServidor, lembrar: true, gravar: null };
   const daqui = quem ? lerGuardado(chaveDaPessoa(quem)) : null;
   if (daqui) return { idioma: daqui, lembrar: true, gravar: daqui };
-  return { idioma: idiomaSemEscolha(true), lembrar: false, gravar: null };
+  return { idioma: idiomaSemEscolha(), lembrar: false, gravar: null };
 }
 
 /** o idioma em que a tela está: só muda quando o dicionário do pedido já chegou (t() e a tela sempre na mesma língua) */
