@@ -7,7 +7,7 @@
 import { CELL, STREET, cityExtent, freeCells, lotBox, lotOwners, typeOf, type Extent, type Placed } from '../../../shared/city.ts';
 import { areaDef, type AreaDef } from './areas.ts';
 import { FLOOR_H, WALL_T, floorBlocks, footprintBox, interior, planFor, specOf, stairEnds, stairPath, type BuildingSpec, type FloorPlan } from './buildings.ts';
-import { grow, inBox, shiftBox, type Box, type P3, type Vec2 } from './geom.ts';
+import { inBox, shiftBox, type Box, type P3, type Vec2 } from './geom.ts';
 import { NavGrid } from './nav.ts';
 import { GRECIA_CLASSICA, pick, rng, seedOf, type DecorKind, type GraphicPack } from './pack.ts';
 
@@ -386,9 +386,3 @@ function dedupe(pts: P3[]): P3[] {
   for (const p of pts) { const q = out[out.length - 1]; if (!q || Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) > 1e-4) out.push(p); }
   return out;
 }
-
-/** Ponto do mundo a partir de coordenadas locais de uma área. */
-export const areaPoint = (a: AreaInst, p: Vec2): Vec2 => [p[0] + a.ox, p[1] + a.oz];
-/** Ponto do mundo a partir de coordenadas locais de um prédio. */
-export const buildingPoint = (b: BuildingInst, p: Vec2): Vec2 => [p[0] + b.ox, p[1] + b.oz];
-export { grow };

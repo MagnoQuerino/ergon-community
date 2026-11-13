@@ -81,7 +81,7 @@ describe('isolamento entre workspaces e conversas', () => {
     assert.equal((await req(h, 'GET', `/api/conversations/${conv.id}/messages`, b)).status, 404);
     assert.equal((await req(h, 'POST', `/api/conversations/${conv.id}/messages`, b, { text: 'invasão', clientRequestId: 'req-isol-0002' })).status, 404);
     assert.equal((await req(h, 'GET', `/api/runs/${run.id}`, b)).status, 404);
-    assert.equal((await req(h, 'POST', `/api/agents/${state.agents[0].id}/archive`, b)).status, 404);
+    assert.equal((await req(h, 'POST', `/api/agents/${state.agents[0].id}/deactivate`, b)).status, 404);
     // listas de B não contêm nada de A
     const bTasks = (await req(h, 'GET', '/api/activity', b)).json as Array<{ target_id: string }>;
     assert.ok(!bTasks.some((e) => e.target_id === task.id));

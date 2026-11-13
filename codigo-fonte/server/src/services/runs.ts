@@ -575,14 +575,6 @@ export class RunExecutor {
   }
 
   /**
-   * Qual agente está por trás de uma sessão do motor (o plugin pergunta antes de cada ferramenta).
-   * Sessão ainda não registrada: consulta as execuções ativas uma vez. Desconhecida = não é do Ergon.
-   */
-  async agentForSession(sessionId: string, taskId: string): Promise<string | null> {
-    return (await this.runForSession(sessionId, taskId))?.agent_id ?? null;
-  }
-
-  /**
    * A execução por trás de uma sessão do motor; null = não é do Ergon. A mesma conversa reusa a sessão: entre as
    * execuções dela vale a que está em andamento (a mais recente só quando nenhuma está), para a chamada de uma
    * execução nova não sair com a origem de uma antiga que já terminou. Duas ou mais em andamento na mesma sessão (a
@@ -770,9 +762,6 @@ export class RunExecutor {
     const ok = /^(completed|success)$/.test(estado);
     a.resultados.push(ok ? clip(resultado || '(o ajudante terminou sem texto)', 24_000) : `(um ajudante não terminou: ${clip(estado || 'sem motivo', 60)})${resultado ? ` ${clip(resultado, 4000)}` : ''}`);
   }
-
-  /** Quantos ajudantes ainda trabalham numa execução (para a tela e os testes). */
-  ajudantesAbertos(runId: string): number { return this.ajudantes.get(runId)?.abertos.size ?? 0; }
 
   /**
    * A execução remota terminou: se chamou ajudantes, espera os que faltam e, com todos de volta, continua na mesma sessão

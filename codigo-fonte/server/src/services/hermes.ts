@@ -346,8 +346,6 @@ export interface MotorInfo {
 }
 /** capacidade (rc.27): as rotinas com horário ficam no agendador do motor, no perfil do agente (/ergon/v1/rotinas) */
 export const CAPACIDADE_ROTINAS = 'rotinas';
-/** capacidade (rc.27): o que pede o sim da pessoa no Ergon segura o turno no portão de aprovação do motor */
-export const CAPACIDADE_APROVACOES = 'aprovacoes';
 /** O job de uma rotina no agendador do motor, como o plugin informa. */
 export interface JobDaRotina { rotina: string; jobId: string | null; proxima: string | null; ultima: string | null; ultimoEstado: string | null; pausada: boolean; agenda: string | null }
 /** O que o Ergon pede para o job de uma rotina: no perfil do agente, nestes dias (0 = domingo) e hora, no fuso da pessoa. */
@@ -359,8 +357,6 @@ export function parseJobDaRotina(j: unknown): JobDaRotina {
   const job = s(o.job_id, 12);
   return { rotina: s(o.rotina, 40) ?? '', jobId: job && /^[a-f0-9]{12}$/.test(job) ? job : null, proxima: iso(o.proxima), ultima: iso(o.ultima), ultimoEstado: s(o.ultimo_estado, 40), pausada: o.pausada === true, agenda: s(o.agenda, 80) };
 }
-/** capacidade (rc.27): o motor cria e atende um perfil por agente (equipe nativa) */
-export const CAPACIDADE_PERFIS = 'perfis';
 /** O que o Ergon pede para o perfil de um agente (PUT /ergon/v1/perfis/<nome>): tudo o que é do agente e não do pedido. */
 export interface PedidoDePerfil {
   /** identidade, função e instruções do agente (o SOUL.md do perfil) */
@@ -395,12 +391,6 @@ export function parseMemoria(j: unknown): MemoriaDoAgente {
 export const CAPACIDADE_CONEXOES = 'conexoes';
 /** capacidade que diz que, com a proteção ligada em Conexões, o plugin pede a aprovação da pessoa (sem ela, só barra) */
 export const CAPACIDADE_APROVAR_DEPOIS_DE_LER = 'aprovar_depois_de_ler';
-/** capacidade que diz que o motor lê e grava o modelo de cada tarefa de apoio e o dos ajudantes temporários */
-export const CAPACIDADE_MODELOS_TAREFA = 'modelos_tarefa';
-/** perguntar de volta, pedido seguro de chave e senha de administrador (plugin 0.5.0+) */
-export const CAPACIDADE_CARTOES = 'cartoes';
-/** o juiz da meta e o pedido de revisão do próprio motor (plugin 0.5.0+) */
-export const CAPACIDADE_COMANDOS = 'comandos';
 /** Chaves que a pessoa guardou para a equipe por um cartão: só nomes (nunca valores); sudo: há senha de administrador guardada */
 export interface ChavesGuardadas { chaves: Array<{ nome: string; motivo: string; quando: string; agente: string }>; sudo: boolean }
 export interface VereditoMeta { veredito: 'done' | 'continue' | 'blocked' | 'wait' | 'skipped'; motivo: string; continuar: string; semJuiz: boolean }
@@ -664,7 +654,7 @@ const pick = (o: Record<string, unknown>, ...keys: string[]): string | null => {
 };
 
 /**
- * Cliente da ponte de controle (rede interna do Docker, token da ponte). O plugin só deixa passar uma lista
+ * Cliente da ponte de controle (rede interna dos contêineres, token da ponte). O plugin só deixa passar uma lista
  * fechada de rotas do painel interno do Hermes; aqui ficam os formatos que o Ergon usa.
  */
 export class HttpHermesControl implements HermesControlClient {

@@ -10,8 +10,7 @@ leitura — ele não é apagado; a pessoa decide quando remover). Depois monta, 
 migrações de configuração do Ergon que ainda faltam (MIGRACOES) e passa a vez ao ponto de entrada original do Hermes
 (s6), mantendo o processo 1. Assim a instalação não precisa de nenhum passo manual no motor.
 
-Sem ERGON_VAULT=1, só passa a vez (comportamento original). Com o argumento --ergon-configurar (motor único, sem
-cofre: scripts/hermes-init.mjs), só aplica a configuração, com as mesmas migrações, e sai.
+Sem ERGON_VAULT=1, só passa a vez (comportamento original).
 """
 
 from __future__ import annotations
@@ -35,9 +34,8 @@ MARKER = ".ergon-vault"
 HERMES_UID = 10000
 HERMES_CLI = "/opt/hermes/.venv/bin/hermes"
 
-# Configuração do motor pelo Ergon, em migrações numeradas (o modo de motor único, scripts/hermes-init.mjs, usa
-# estas mesmas). Cada cofre guarda em MIGRACOES_MARKER a última que recebeu ({"versao": N}) e, a cada abertura, recebe
-# em ordem só as que faltam, gravando a marca a cada uma. CONFIG_MARKER fica sempre com o texto "1", o único que as
+# Configuração do motor pelo Ergon, em migrações numeradas. Cada cofre guarda em MIGRACOES_MARKER a última que
+# recebeu ({"versao": N}) e, a cada abertura, recebe em ordem só as que faltam, gravando a marca a cada uma. CONFIG_MARKER fica sempre com o texto "1", o único que as
 # imagens até a rc.22 entendem: numa volta automática para a imagem anterior, o cofre dela vê "1" e não reaplica a
 # configuração inteira por cima das escolhas da pessoa (Terminal e Executar código ligados). Vale a maior versão
 # legível das duas: sem MIGRACOES_MARKER (cofre de antes) ou com ela ilegível, o CONFIG_MARKER "1" = migração 1.
@@ -366,7 +364,7 @@ def open_vault(key: str, previous: str | None = None) -> None:
 
 
 def as_hermes(args: list[str]) -> subprocess.CompletedProcess:
-    # já como o usuário do motor (motor único: docker compose exec -u 10000), não há troca a fazer
+    # já como o usuário do motor, não há troca a fazer
     who = {} if os.getuid() == HERMES_UID else {"user": HERMES_UID, "group": HERMES_UID, "extra_groups": []}
     return subprocess.run([HERMES_CLI, *args], **who, env={**os.environ, "HOME": PLAIN}, capture_output=True, timeout=120)
 
@@ -414,7 +412,10 @@ def enforce_safety() -> bool:
 
 
 def _versao_legivel(raw: str) -> int | None:
-    """A versão gravada na marca, ou None se a marca não é legível (vazia, cortada, outra coisa)."""
+    """A versão gravada na marca: {"versao": N} (MIGRACOES_MARKER) ou o texto puro das versões antigas (CONFIG_MARKER);
+    None se a marca não é legível (vazia, cortada, outra coisa). O texto puro vale no máximo 1: quando a marca era
+    texto, "2" queria dizer "configuração inteira, versão 2" (um teste de 26/10, nunca publicado), e não "migração 2" —
+    contar como 2 pularia a migração das Conexões."""
     raw = raw.strip()
     if raw.isdigit():
         return min(int(raw), 1)
@@ -423,15 +424,6 @@ def _versao_legivel(raw: str) -> int | None:
     except (ValueError, AttributeError):
         v = None
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
-
-
-def versao_da_marca(raw: str) -> int:
-    """A versão gravada na marca: {"versao": N} (MIGRACOES_MARKER) ou o texto puro das versões antigas (CONFIG_MARKER).
-    O texto puro vale no máximo 1: quando a marca era texto, "2" queria dizer "configuração inteira, versão 2" (um
-    teste de 26/10, nunca publicado), e não "migração 2" — contar como 2 pularia a migração das Conexões.
-    Qualquer outra coisa vale 0: aplica desde a primeira, como antes (as migrações são idempotentes)."""
-    v = _versao_legivel(raw)
-    return 0 if v is None else v
 
 
 def ler_marca() -> int:
@@ -641,14 +633,6 @@ def configure() -> bool:
     return True
 
 
-def configurar_agora() -> int:
-    """Motor único, sem cofre (scripts/hermes-init.mjs): chave da API no .env do perfil, migrações e travas."""
-    ensure_api_key()
-    ok = configure()
-    ok = enforce_safety() and ok
-    return 0 if ok else 1
-
-
 class Receiver(BaseHTTPRequestHandler):
     server_version = "ergon-vault/1"
     opened = threading.Event()
@@ -716,8 +700,6 @@ def drop_mount_privilege() -> None:
 
 
 def main() -> None:
-    if sys.argv[1:2] == ["--ergon-configurar"]:
-        sys.exit(configurar_agora())
     if os.environ.get("ERGON_VAULT") != "1":
         os.execv(ENTRY[0], ENTRY)
     port = int(os.environ.get("ERGON_VAULT_PORT", "8644"))

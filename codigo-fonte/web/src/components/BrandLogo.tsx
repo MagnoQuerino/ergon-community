@@ -1,7 +1,9 @@
 import { SIMPLE_ICONS } from './simple-icons.ts';
+import { inkOn } from '../lib/contraste.ts';
 
 /**
- * Logo de cada conexão: o desenho oficial aberto (Simple Icons) em branco sobre a cor da marca. Sem logo aberto,
+ * Logo de cada conexão: o desenho oficial aberto (Simple Icons) sobre a cor da marca, em branco ou na tinta escura (a
+ * que se lê sobre aquela cor: inkOn). Sem logo aberto,
  * a inicial na cor da marca — nunca um desenho que imite o logo. Microsoft: o símbolo dos botões "Entrar com a
  * Microsoft", que as diretrizes de login da Microsoft pedem.
  */
@@ -14,7 +16,6 @@ const MONOGRAM: Record<string, { hex: string; letter: string }> = {
   monday: { hex: '#6161FF', letter: 'm' },
   smartsheet: { hex: '#0073EC', letter: 'S' },
   pipefy: { hex: '#3B5BFD', letter: 'P' },
-  wrike: { hex: '#08CF65', letter: 'W' },
   bitrix: { hex: '#2FC6F6', letter: 'B' },
 };
 
@@ -36,7 +37,7 @@ export function BrandLogo({ kind, name, size = 40 }: { kind: string; name: strin
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={name} className="brand-logo">
         <rect width={size} height={size} rx={r} fill={icon.hex} />
-        <g transform={`translate(${pad} ${pad}) scale(${inner / 24})`}><path d={icon.path} fill="#fff" /></g>
+        <g transform={`translate(${pad} ${pad}) scale(${inner / 24})`}><path d={icon.path} fill={inkOn(icon.hex)} /></g>
       </svg>
     );
   }
@@ -44,7 +45,7 @@ export function BrandLogo({ kind, name, size = 40 }: { kind: string; name: strin
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={name} className="brand-logo">
       <rect width={size} height={size} rx={r} fill={m.hex} />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fill="#fff" fontSize={size * 0.5} fontWeight="700" fontFamily="system-ui, sans-serif">{m.letter}</text>
+      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fill={inkOn(m.hex)} fontSize={size * 0.5} fontWeight="700" fontFamily="system-ui, sans-serif">{m.letter}</text>
     </svg>
   );
 }

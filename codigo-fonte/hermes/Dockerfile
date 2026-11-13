@@ -44,8 +44,7 @@ RUN set -eu; cd /opt/hermes; \
     rm -rf /tmp/ergon-confere
 
 COPY vault/ergon-vault.py /usr/local/lib/ergon/ergon-vault.py
-# plugin do Ergon dentro da imagem (a instalação não depende de arquivos do projeto); em desenvolvimento o
-# docker-compose.yml monta a pasta do projeto por cima
+# plugin do Ergon dentro da imagem (a instalação não depende de arquivos do projeto)
 COPY plugins/ergon_bridge /opt/ergon/plugins/ergon_bridge
 
 ENTRYPOINT ["/opt/hermes/.venv/bin/python", "/usr/local/lib/ergon/ergon-vault.py"]

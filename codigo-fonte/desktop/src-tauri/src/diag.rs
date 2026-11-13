@@ -15,8 +15,9 @@ pub const CORE_MINIMO: &str = "0.2.0";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostico {
-    /// pronto | parado | iniciando | docker_ausente | docker_parado | docker_sem_permissao | nao_instalado |
-    /// porta_ocupada | nao_confirmado | incompativel | com_erro
+    /// pronto | parado | iniciando | nao_instalado | podman_ausente | podman_falha | porta_ocupada | nao_confirmado |
+    /// incompativel | com_erro; docker_ausente | docker_parado | docker_sem_permissao só no Linux de uma instalação antiga
+    /// pelo Docker
     pub estado: &'static str,
     pub titulo: String,
     pub explicacao: String,
@@ -25,13 +26,7 @@ pub struct Diagnostico {
     pub avisos: Vec<String>,
     /// só um diagnóstico confirmado libera abrir o Ergon na janela
     pub confirmado: bool,
-    pub url: String,
     pub porta: u16,
-    pub versao_app: String,
-    pub versao_core: Option<String>,
-    pub trancado: bool,
-    pub teste: bool,
-    pub windows: bool,
     pub detalhes: Vec<String>,
     /// uma instalação pelo ambiente próprio começou e não terminou (depois de reiniciar, continua sozinha)
     pub continuar: bool,
@@ -153,13 +148,7 @@ pub fn decidir(e: Entrada) -> Diagnostico {
         acoes: vec![],
         avisos: vec![],
         confirmado: false,
-        url,
         porta,
-        versao_app: env!("CARGO_PKG_VERSION").into(),
-        versao_core: if let Resposta::Ergon(s) = &e.saude { Some(s.versao.clone()) } else { None },
-        trancado: matches!(&e.saude, Resposta::Ergon(s) if s.trancado),
-        teste: e.inst.teste,
-        windows: e.windows,
         detalhes,
         continuar: false,
         raiz: raiz.clone(),
@@ -260,27 +249,18 @@ pub fn decidir(e: Entrada) -> Diagnostico {
         }
         return d;
     }
+    // daqui em diante: Linux com uma instalação (pelo Podman ou pelo Docker de uma instalação antiga), ou
+    // Windows com o ambiente próprio ligado (sempre Docker::Pronto, pelas saídas acima)
     match &e.docker {
-        Docker::Ausente if e.windows => instalar_proprio(&mut d, false),
         Docker::Ausente => marcar(&mut d, "docker_ausente", "O Docker não está instalado",
             "A versão local do Ergon roda no Docker, que guarda os serviços e os dados. Instale o Docker pelo site oficial e volte aqui: nada é instalado sem você pedir.".into(),
             &["ajuda:docker", "tentar"]),
         Docker::SemPermissao(_) => marcar(&mut d, "docker_sem_permissao", "Sem acesso ao Docker",
             "Seu usuário não tem permissão para usar o Docker. O recomendado é o Docker sem root (rootless); a outra saída, entrar no grupo \"docker\", dá a esse usuário poder de administrador sobre o computador. Este aplicativo não muda permissões: a escolha é sua.".into(),
             &["ajuda:docker_rootless", "ajuda:docker_pos_instalacao", "tentar"]),
-        Docker::Parado(_) | Docker::Falha(_) => {
-            if e.windows && raiz.is_some() {
-                marcar(&mut d, "docker_parado", "O Docker está fechado",
-                    "O Ergon roda dentro do Docker. Clique em \"Iniciar Ergon\": o Docker Desktop abre e os serviços sobem (leva alguns minutos na primeira vez do dia).".into(),
-                    &["iniciar", "tentar", "diagnostico"]);
-            } else if e.windows {
-                instalar_proprio(&mut d, true);
-            } else {
-                marcar(&mut d, "docker_parado", "O serviço do Docker está parado",
-                    "Inicie o Docker (o Docker Engine sobe como serviço do sistema: \"sudo systemctl start docker\", ou ative para subir sozinho com \"sudo systemctl enable docker\") e tente de novo.".into(),
-                    &["tentar", "ajuda:docker", "diagnostico"]);
-            }
-        }
+        Docker::Parado(_) | Docker::Falha(_) => marcar(&mut d, "docker_parado", "O serviço do Docker está parado",
+            "Inicie o Docker (o Docker Engine sobe como serviço do sistema: \"sudo systemctl start docker\", ou ative para subir sozinho com \"sudo systemctl enable docker\") e tente de novo.".into(),
+            &["tentar", "ajuda:docker", "diagnostico"]),
         Docker::Pronto(_) => {
             if ergon.map(|c| c.estado == "running").unwrap_or(false) {
                 marcar(&mut d, "iniciando", "O Ergon está iniciando", "Os serviços estão ligados, mas o Ergon ainda não responde. Esperando…".into(), &["tentar", "diagnostico"]);
@@ -290,12 +270,12 @@ pub fn decidir(e: Entrada) -> Diagnostico {
                 } else {
                     marcar(&mut d, "parado", "O Ergon está desligado", "Os serviços estão parados e a pasta da instalação não foi encontrada: ligue pelo lançador (ergon iniciar) uma vez, para ela ficar registrada.".into(), &["tentar", "diagnostico", "ajuda:instalar_ergon"]);
                 }
-            } else if e.windows {
-                instalar_proprio(&mut d, true);
             } else {
-                marcar(&mut d, "nao_instalado", "O Ergon ainda não está instalado neste computador",
-                    "Este aplicativo abre o Ergon local, que roda no Docker. Instale os serviços do Ergon (pacote local) e abra o aplicativo de novo.".into(),
-                    &["ajuda:instalar_ergon", "tentar"]);
+                // não acontece na prática (sem instalação registrada, o Linux usa o Podman e sai antes): por garantia, o
+                // mesmo convite de instalar, nunca um "pronto" sem título
+                marcar(&mut d, "nao_instalado", "Bem-vindo ao Ergon",
+                    "Uma equipe dos maiores pensadores da Grécia antiga está pronta para trabalhar com você. Vamos erguer a cidade deles aqui mesmo, no seu computador.".into(),
+                    &["instalar"]);
             }
         }
     }
@@ -314,7 +294,9 @@ pub fn coletar() -> Diagnostico {
     };
     let p = crate::ambiente::ler_progresso();
     let mut d = decidir(Entrada { inst, saude, docker, conteineres, windows: cfg!(windows), ambiente: crate::ambiente::ativo(), podman: !cfg!(windows) && docker::linux_usa_podman() });
-    d.continuar = cfg!(windows) && !p.concluida.is_empty() && p.concluida != "pronto" && d.estado == "nao_instalado";
+    // reinicio_pedido: o Windows reiniciou depois de ativar o WSL e a instalação continua sozinha (se o WSL ainda não
+    // responder, instalar() zera a marca e mostra o erro: não vira um laço)
+    d.continuar = cfg!(windows) && ((!p.concluida.is_empty() && p.concluida != "pronto") || p.reinicio_pedido) && d.estado == "nao_instalado";
     if d.continuar {
         d.titulo = "Continuando a instalação do Ergon".into();
     }
@@ -413,7 +395,7 @@ mod testes {
         let linux = |docker| Entrada { windows: false, ..entrada(Resposta::Nada("x".into()), docker, vec![]) };
         assert_eq!(decidir(linux(Docker::Parado("x".into()))).estado, "docker_parado");
         let d = decidir(linux(Docker::Pronto("27".into())));
-        assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "ajuda:instalar_ergon"));
+        assert_eq!((d.estado, d.acoes[0].as_str()), ("nao_instalado", "instalar"));
         assert_eq!(decidir(linux(Docker::SemPermissao("x".into()))).estado, "docker_sem_permissao");
         let linux_c = |cs| Entrada { windows: false, ..entrada(Resposta::Nada("x".into()), Docker::Pronto("27".into()), cs) };
         assert_eq!(decidir(linux_c(vec![c("ergon", "exited", "")])).estado, "parado");

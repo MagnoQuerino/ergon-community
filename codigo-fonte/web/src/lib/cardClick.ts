@@ -59,7 +59,7 @@ export function selectionIn(card: CardNode, sel: SelectionLike | null | undefine
 }
 
 /** O texto selecionado agora dentro do card (vazio sem janela, como nos testes, ou se o navegador não deixar ler). */
-export function selectedText(card: CardNode): string {
+function selectedText(card: CardNode): string {
   try { return typeof window === 'undefined' ? '' : selectionIn(card, window.getSelection()); } catch { return ''; }
 }
 

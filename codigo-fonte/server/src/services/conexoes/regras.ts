@@ -73,7 +73,6 @@ export function descreverAlcance(r: Pick<RegraConexao, 'alcance' | 'expira_em'>)
   if (r.alcance === '24h') return `por 24 h${r.expira_em ? ` (até ${quando(r.expira_em)})` : ''}`;
   return 'só no pedido em que foi aprovada';
 }
-export const ROTULO_ALCANCE: Record<Alcance, string> = { pedido: 'Só neste pedido', '24h': 'Por 24 h', sempre: 'Sempre' };
 /** O texto do cartão: o que libera, o que continua pedindo e o cuidado, antes dos botões. */
 export function resumoDaProposta(r: RegraSemResumo): string {
   const linhas = [`Liberar sem pedir a sua confirmação: ${descreverRegra(r)}.`];

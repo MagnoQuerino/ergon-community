@@ -10,7 +10,7 @@ import { useT } from '../i18n/index.ts';
 const amp = (size: number) => (size >= 64 ? 26 : Math.min(70, Math.round((26 * 64) / size)));
 
 /** Emblema (cinco pessoas em volta do centro dourado). `animated`: em movimento; `loopOnly`: sem a entrada. */
-export function ErgonMark({ size = 24, onDark, mono, animated, loopOnly, title, className }: {
+function ErgonMark({ size = 24, onDark, mono, animated, loopOnly, title, className }: {
   size?: number; onDark?: boolean; mono?: string; animated?: boolean; loopOnly?: boolean; title?: string; className?: string;
 }) {
   // sem indicação: a versão do tema da tela (o logo claro no escuro, o escuro no claro)

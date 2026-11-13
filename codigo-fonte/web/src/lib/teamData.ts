@@ -26,7 +26,6 @@ export interface TeamSummary {
   capacity: { slots: number; active: number; free: number }; coordinatorId: string | null; themed: number; autoGrow: boolean;
 }
 export interface Placement { sectorKey: string; sectorName: string; structureId: string | null; structureName: string | null }
-export type Destination = { kind: 'sector'; key: string; name: string } | { kind: 'structure'; id: string; name: string };
 
 /** Igual ao `fold()` do banco (server/src/db/db.ts): sem acento e em minúsculas. */
 export const fold = (v: string): string => v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -82,7 +81,7 @@ export const teamUrl = {
  * lista tem a sua), para duas listas abertas que buscam o mesmo agente ao mesmo tempo não descartarem uma à outra.
  */
 const agentSeq = new Map<string, number>();
-export async function fetchTeamAgent(id: string, seqs: Map<string, number> = agentSeq): Promise<TeamAgent | null | 'stale'> {
+async function fetchTeamAgent(id: string, seqs: Map<string, number> = agentSeq): Promise<TeamAgent | null | 'stale'> {
   const my = (seqs.get(id) ?? 0) + 1; seqs.set(id, my);
   try {
     const a = await api.get<TeamAgent>(`/api/team/agents/${id}`);

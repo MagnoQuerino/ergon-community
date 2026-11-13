@@ -141,7 +141,7 @@ export function traduzirResposta<T>(json: T): T {
 }
 
 /** Refaz no idioma atual tudo o que já veio do servidor e ainda está na tela. */
-export function retraduzirCarregados(): void {
+function retraduzirCarregados(): void {
   for (const w of VIVOS) {
     const o = w.deref();
     const reservas = o && RESERVAS.get(o);
@@ -300,7 +300,7 @@ export function semJargao(texto: string | null | undefined): string | null {
 export const tamanho = (b: number) => (b >= 1024 ** 3 ? t('servidor.tela.espaco.gb', { gb: fmtNumero(b / 1024 ** 3, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })
   : b >= 1024 ** 2 ? t('servidor.tela.espaco.mb', { mb: fmtNumero(Math.round(b / 1024 ** 2)) }) : t('servidor.tela.espaco.menosDe1Mb'));
 /** No Windows o Ergon roda num ambiente próprio: o espaço sai de dentro dele (o disco do Windows não encolhe na hora). */
-export const ondeLibera = (noWindows: boolean) => (noWindows ? t('servidor.tela.espaco.dentroDoAmbiente') : '');
+const ondeLibera = (noWindows: boolean) => (noWindows ? t('servidor.tela.espaco.dentroDoAmbiente') : '');
 /** o que saiu, sem inventar número quando não deu para medir */
 const saiu = (liberado: number | null, noWindows: boolean) => (liberado === null
   ? (noWindows ? t('servidor.tela.espaco.liberadoNoAmbiente') : t('servidor.tela.espaco.liberado'))

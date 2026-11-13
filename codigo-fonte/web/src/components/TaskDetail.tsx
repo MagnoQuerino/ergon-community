@@ -14,6 +14,7 @@ import { OrientarCampo } from './AjustesEquipe.tsx';
 import { DueChip } from './Board.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
 import { BotoesPrazo, type Prazo } from './CartaoRegra.tsx';
+import { ACAO, ACAO_GRANDE, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { ActionBar, IconAction, TaskFiles, TechDetails, type TaskFile, type WorkInfo } from './TaskWork.tsx';
 import { QuestionCard, SecretCard } from './ChatCards.tsx';
 import { ComandosBar } from './Comandos.tsx';
@@ -192,6 +193,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   const [ajuste, setAjuste] = useState<{ modo: 'return' | 'revise'; texto: string } | null>(null);
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState<string | null>(null); // o clique em andamento (o botão diz o que está indo; nada fica cinza esperando)
+  const indoRef = useRef<string | null>(null); // a mesma trava, já valendo antes de a tela redesenhar (dois cliques seguidos)
   const [confirmCancel, setConfirmCancel] = useState(false); // "Cancelar a tarefa" pede confirmação ali mesmo
   useEffect(() => { if (!savedNow) return; const h = window.setTimeout(() => setSavedNow(false), 2500); return () => window.clearTimeout(h); }, [savedNow]);
   const ref = useRef<HTMLElement>(null);
@@ -269,9 +271,9 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   };
   /** Um clique por vez: o segundo clique enquanto o primeiro vai é ignorado (o botão diz "Aprovando…", não fica cinza). */
   const act = async (what: string, fn: () => Promise<string | null>) => {
-    if (busy) return;
-    setErr(null); setOk(null); setBusy(what);
-    try { const m = await fn(); if (m) setOk(m); d.reload(); } catch (e) { setErr(errMsg(e)); d.reload(); } finally { setBusy(null); }
+    if (busy || indoRef.current) return;
+    indoRef.current = what; setErr(null); setOk(null); setBusy(what);
+    try { const m = await fn(); if (m) setOk(m); d.reload(); } catch (e) { setErr(errMsg(e)); d.reload(); } finally { indoRef.current = null; setBusy(null); }
   };
   const conexoes = data.conexoes ?? [];
   // o "Aprovar" grande decide as ações nas contas que a tela mostra (todas de uma vez); a proteção "depois de ler"
@@ -359,6 +361,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   const resumo = data.resumo ?? null;
   const tom = tomDe(resumo?.situacao.tom ?? (tk.completed ? 'feito' : 'fila')); // i18n-ok: o tom é nome de classe, não texto de tela
   const indo = (what: string, label: string, doing: string) => (busy === what ? doing : label);
+  /** o cartão de prazo: qual decisão dele está indo ("Enviando…" no principal, "Recusando…" no Recusar) */
+  const ocupadoDe = (id: string) => (busy === `apply:${id}` ? 'aplicar' as const : busy === `reject:${id}` ? 'recusar' as const : false);
   const origemDoCard = MARCAS_DE_ORIGEM[tk.origin] ?? (ORIGEM[tk.origin] ? t(ORIGEM[tk.origin]) : tk.origin);
 
   // confirmação de cancelar/apagar, logo abaixo dos botões: diz o que para, o que vai junto e quem fica sabendo
@@ -370,11 +374,11 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
         {children.length > 0 && ` ${t('tarefa.confirmar.vaiJunto', { lista: children.map((c) => `#${c.number} ${c.title}`).join('; ') })}`}
         {origin && !origin.delivered && !tk.completed && ` ${t('tarefa.confirmar.conversaSabe')}`}
       </p>
-      <div className="row">
-        <button className="btn btn--sm btn--danger" aria-busy={busy === 'cancel'} onClick={() => void cancel()}>
+      <div className={FILEIRA}>
+        <button className={ACAO.perigoso} aria-busy={busy === 'cancel'} onClick={() => void cancel()}>
           <Icon name="trash" size={13} /> {indo('cancel', editable ? t('tarefa.apagar') : tk.completed ? t('tarefa.tirarDoQuadro') : t('tarefa.cancelarTarefa'), t('tarefa.cancelando'))}
         </button>
-        <button className="btn btn--sm" onClick={() => setConfirmCancel(false)}>{t('tarefa.voltar')}</button>
+        <button className={ACAO.secundario} onClick={() => setConfirmCancel(false)}>{t('tarefa.voltar')}</button>
       </div>
     </div>
   );
@@ -389,9 +393,9 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
       <label className="field">{ajuste.modo === 'revise' ? t('tarefa.ajuste.revisar') : t('tarefa.ajuste.devolver')}
         <textarea data-autofocus rows={3} value={ajuste.texto} onChange={(e) => setAjuste({ ...ajuste, texto: e.target.value })} placeholder={t('tarefa.ajuste.exemplo')} />
       </label>
-      <div className="row">
-        <button className="btn btn--primary" aria-busy={busy === 'return' || busy === 'revise'}><Icon name="send" size={14} /> {busy === 'return' || busy === 'revise' ? t('tarefa.enviando') : t('tarefa.ajuste.enviar')}</button>
-        <button type="button" className="btn btn--ghost" onClick={() => setAjuste(null)}>{t('tarefa.voltar')}</button>
+      <div className={FILEIRA}>
+        <button className={ACAO.principal} aria-busy={busy === 'return' || busy === 'revise'}><Icon name="send" size={14} /> {busy === 'return' || busy === 'revise' ? t('tarefa.enviando') : t('tarefa.ajuste.enviar')}</button>
+        <button type="button" className={ACAO.secundario} onClick={() => setAjuste(null)}>{t('tarefa.voltar')}</button>
       </div>
     </form>
   );
@@ -402,48 +406,48 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   if (mode === 'team' && !tk.completed) {
     if (lote.length === 1 && lote[0].kind === 'depois_de_ler') {
       const c = lote[0];
-      botoes = <BotoesPrazo ocupado={!!busy} onEscolher={(prazo) => void decidir(c.id, 'apply', prazo)} onRecusar={() => void decidir(c.id, 'reject')} />;
+      botoes = <BotoesPrazo ocupado={ocupadoDe(c.id)} onEscolher={(prazo) => void decidir(c.id, 'apply', prazo)} onRecusar={() => void decidir(c.id, 'reject')} />;
     } else if (lote.length === 1 && lote[0].kind === 'aprovacao') {
       const c = lote[0];
       botoes = <>
-        <button className="btn btn--primary btn--big" aria-busy={busy === `apply:${c.id}`} onClick={() => void decidir(c.id, 'apply')}>
+        <button className={ACAO_GRANDE.principal} aria-busy={busy === `apply:${c.id}`} onClick={() => void decidir(c.id, 'apply')}>
           <Icon name="check" size={16} /> {indo(`apply:${c.id}`, t('tarefa.aprovar'), t('tarefa.aprovando'))}
         </button>
-        <button className="btn btn--big" aria-busy={busy === `reject:${c.id}`} onClick={() => void decidir(c.id, 'reject')}>
+        <button className={ACAO_GRANDE.secundario} aria-busy={busy === `reject:${c.id}`} onClick={() => void decidir(c.id, 'reject')}>
           <Icon name="x" size={16} /> {indo(`reject:${c.id}`, t('tarefa.recusar'), t('tarefa.recusando'))}
         </button>
       </>;
     } else if (lote.length) {
       const n = lote.length;
       botoes = <>
-        <button className="btn btn--primary btn--big" aria-busy={busy === 'apply' || busy?.startsWith('apply:')} onClick={() => void decidirTodos('apply')}>
+        <button className={ACAO_GRANDE.principal} aria-busy={busy === 'apply' || busy?.startsWith('apply:')} onClick={() => void decidirTodos('apply')}>
           <Icon name="check" size={16} /> {busy === 'apply' || busy?.startsWith('apply:') ? t('tarefa.aprovando') : n > 1 ? t('tarefa.aprovarN', { n }) : t('tarefa.aprovar')}
         </button>
-        <button className="btn btn--big" aria-busy={busy === 'reject' || busy?.startsWith('reject:')} onClick={() => void decidirTodos('reject')}>
+        <button className={ACAO_GRANDE.secundario} aria-busy={busy === 'reject' || busy?.startsWith('reject:')} onClick={() => void decidirTodos('reject')}>
           <Icon name="x" size={16} /> {busy === 'reject' || busy?.startsWith('reject:') ? t('tarefa.recusando') : t('tarefa.recusar')}
         </button>
       </>;
     } else if (need === 'approval' || need === 'review') {
       botoes = <>
-        <button className="btn btn--primary btn--big" aria-busy={busy === 'approve'} onClick={() => void respond('approve')}>
+        <button className={ACAO_GRANDE.principal} aria-busy={busy === 'approve'} onClick={() => void respond('approve')}>
           <Icon name="check" size={16} /> {indo('approve', external ? t('tarefa.confirmarFeito') : need === 'review' ? t('tarefa.aprovarAssimMesmo') : t('tarefa.aprovar'), t('tarefa.aprovando'))}
         </button>
-        <button className="btn btn--big" aria-pressed={ajuste?.modo === 'return'} onClick={() => pedirAjuste('return')}><Icon name="undo" size={16} /> {t('tarefa.pedirAjuste')}</button>
+        <button className={ACAO_GRANDE.secundario} aria-pressed={ajuste?.modo === 'return'} onClick={() => pedirAjuste('return')}><Icon name="undo" size={16} /> {t('tarefa.pedirAjuste')}</button>
       </>;
     } else if (need === 'retry') {
       botoes = <>
-        <button className="btn btn--primary btn--big" aria-busy={busy === 'work'} onClick={() => void startWork()}><Icon name="repeat" size={16} /> {indo('work', t('tarefa.tentarDeNovo'), t('tarefa.comecando'))}</button>
-        <button className="btn btn--big" aria-pressed={ajuste?.modo === 'return'} onClick={() => pedirAjuste('return')}><Icon name="undo" size={16} /> {t('tarefa.pedirAjuste')}</button>
+        <button className={ACAO_GRANDE.principal} aria-busy={busy === 'work'} onClick={() => void startWork()}><Icon name="repeat" size={16} /> {indo('work', t('tarefa.tentarDeNovo'), t('tarefa.comecando'))}</button>
+        <button className={ACAO_GRANDE.secundario} aria-pressed={ajuste?.modo === 'return'} onClick={() => pedirAjuste('return')}><Icon name="undo" size={16} /> {t('tarefa.pedirAjuste')}</button>
       </>;
     } else if (need === 'info') {
       botoes = <>
-        <button className="btn btn--primary btn--big" aria-busy={busy === 'answer'} onClick={() => { if (answer.trim()) void respond('answer', answer.trim()); else setErr(t('tarefa.escrevaResposta')); }}>
+        <button className={ACAO_GRANDE.principal} aria-busy={busy === 'answer'} onClick={() => { if (answer.trim()) void respond('answer', answer.trim()); else setErr(t('tarefa.escrevaResposta')); }}>
           <Icon name="send" size={16} /> {indo('answer', t('tarefa.responder'), t('tarefa.enviando'))}
         </button>
-        <button className="btn btn--big" aria-pressed={ajuste?.modo === 'return'} onClick={() => pedirAjuste('return')}><Icon name="undo" size={16} /> {t('tarefa.pedirAjuste')}</button>
+        <button className={ACAO_GRANDE.secundario} aria-pressed={ajuste?.modo === 'return'} onClick={() => pedirAjuste('return')}><Icon name="undo" size={16} /> {t('tarefa.pedirAjuste')}</button>
       </>;
     } else if (!active && work && tom === 'fila') {
-      botoes = <button className="btn btn--big" aria-busy={busy === 'work'} onClick={() => void startWork()}><Icon name="play" size={16} /> {indo('work', t('tarefa.comecarAgora'), t('tarefa.comecando'))}</button>;
+      botoes = <button className={ACAO_GRANDE.secundario} aria-busy={busy === 'work'} onClick={() => void startWork()}><Icon name="play" size={16} /> {indo('work', t('tarefa.comecarAgora'), t('tarefa.comecando'))}</button>;
     }
   }
 
@@ -585,11 +589,11 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
                 <div key={c.id} className="tdet__cartao" role="group" aria-label={c.kind === 'depois_de_ler' || c.kind === 'aprovacao' ? t('tarefa.cartoes.esperandoAprovacao') : t('tarefa.cartoes.esperandoConfirmacao')}>
                   <p className="pre"><TextoLongo texto={c.summary} /></p>
                   {!(lote.length === 1 && lote[0].id === c.id) && (c.kind === 'depois_de_ler' ? (
-                    <BotoesPrazo ocupado={!!busy} onEscolher={(prazo) => void decidir(c.id, 'apply', prazo)} onRecusar={() => void decidir(c.id, 'reject')} />
+                    <BotoesPrazo ocupado={ocupadoDe(c.id)} onEscolher={(prazo) => void decidir(c.id, 'apply', prazo)} onRecusar={() => void decidir(c.id, 'reject')} />
                   ) : (
-                    <div className="row">
-                      <button className="btn btn--sm" aria-busy={busy === `apply:${c.id}`} onClick={() => void decidir(c.id, 'apply')}>{indo(`apply:${c.id}`, t('tarefa.cartoes.aprovarEste'), t('tarefa.aprovando'))}</button>
-                      <button className="btn btn--sm btn--ghost" aria-busy={busy === `reject:${c.id}`} onClick={() => void decidir(c.id, 'reject')}>{indo(`reject:${c.id}`, t('tarefa.cartoes.recusarEste'), t('tarefa.recusando'))}</button>
+                    <div className={FILEIRA}>
+                      <button className={ACAO.principal} aria-busy={busy === `apply:${c.id}`} onClick={() => void decidir(c.id, 'apply')}>{indo(`apply:${c.id}`, t('tarefa.cartoes.aprovarEste'), t('tarefa.aprovando'))}</button>
+                      <button className={ACAO.secundario} aria-busy={busy === `reject:${c.id}`} onClick={() => void decidir(c.id, 'reject')}>{indo(`reject:${c.id}`, t('tarefa.cartoes.recusarEste'), t('tarefa.recusando'))}</button>
                     </div>
                   ))}
                 </div>

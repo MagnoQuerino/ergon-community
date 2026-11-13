@@ -21,23 +21,23 @@ import { cachedResource, useLiveEvent, useResource } from './live.ts';
 import type { CityAgent, CityAgentsPage, CityOverview } from './types.ts';
 import type { SceneAgent, SceneWindow } from '../scene/types.ts';
 
-export const OVERVIEW_URL = '/api/city/overview';
-export const CITY_AGENTS_URL = '/api/city/agents';
+const OVERVIEW_URL = '/api/city/overview';
+const CITY_AGENTS_URL = '/api/city/agents';
 /** até aqui, a cidade inteira (e volta para ela); acima de REGION_MIN, por região */
-export const WHOLE_MAX = 1200;
-export const REGION_MIN = 1500;
+const WHOLE_MAX = 1200;
+const REGION_MIN = 1500;
 /** agentes carregados que se quer (por região) e o teto duro de carregados */
 export const BUDGET = 1500;
 export const HARD_CAP = 2500;
 export const GRACE_MS = 15_000;
 export const MAP_UNLOAD_MS = 20_000;
 export const SETTLE_MS = 250;
-export const FLOORS_PER_REQUEST = 100;
-export const IDS_PER_REQUEST = 200;
+const FLOORS_PER_REQUEST = 100;
+const IDS_PER_REQUEST = 200;
 /** eventos: juntados por COALESCE_MS e no máximo um recarregar a cada EVENT_GAP_MS */
-export const EVENT_GAP_MS = 1000;
-export const COALESCE_MS = 150;
-export const RETRY_MS = 3000;
+const EVENT_GAP_MS = 1000;
+const COALESCE_MS = 150;
+const RETRY_MS = 3000;
 
 export type CityMode = 'cidade' | 'regiao';
 export interface Clock { now(): number; after(ms: number, fn: () => void): unknown; cancel(h: unknown): void }
@@ -58,7 +58,7 @@ const realClock: Clock = {
 };
 
 /** Ordem do servidor: construção (comparação de código, como o BINARY do SQLite), andar e vaga. */
-export function cityOrder(a: CityAgent, b: CityAgent): number {
+function cityOrder(a: CityAgent, b: CityAgent): number {
   if (a.building_id !== b.building_id) return a.building_id < b.building_id ? -1 : 1;
   return a.level - b.level || a.slot - b.slot;
 }

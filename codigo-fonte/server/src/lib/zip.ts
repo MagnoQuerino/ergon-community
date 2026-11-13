@@ -144,17 +144,13 @@ const deflateRaw = (b: Buffer) => new Promise<Buffer>((ok, falha) => zlib.deflat
  */
 export class ZipMontador {
   private entradas: Packed[] = [];
-  private bytes = 0;
   get quantas(): number { return this.entradas.length; }
-  /** o que está guardado na memória até agora (compactado) */
-  get guardado(): number { return this.bytes; }
   /** `primeiro`: vai para o topo da lista (o LEIA-ME, montado por último, aparece primeiro ao abrir o ZIP) */
   async add(f: ZipInput, opts: { primeiro?: boolean } = {}): Promise<void> {
     if (this.entradas.length >= ZIP_MAX_ENTRIES) throw new ZipError('entradas demais para um ZIP');
     const raw = rawOf(f.data);
     const p = pack(f, raw, f.store ? raw : await deflateRaw(raw));
     if (opts.primeiro) this.entradas.unshift(p); else this.entradas.push(p);
-    this.bytes += p.comp.length;
   }
   /** o tamanho exato do arquivo final */
   tamanho(): number {
@@ -165,7 +161,7 @@ export class ZipMontador {
   /** Entrega o arquivo em pedaços; depois disso o montador fica vazio. */
   partes(): Generator<Buffer> {
     const tudo: Array<Packed | null> = this.entradas;
-    this.entradas = []; this.bytes = 0;
+    this.entradas = [];
     return assembleParts(tudo);
   }
 }

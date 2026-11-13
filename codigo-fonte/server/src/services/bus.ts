@@ -43,10 +43,6 @@ export class Bus {
     if (buf.length === 0 || buf[0].seq > after + 1) return null;
     return buf.filter((e) => e.seq > after);
   }
-
-  listenerCount(workspaceId: string): number {
-    return this.listeners.get(workspaceId)?.size ?? 0;
-  }
 }
 
 export interface AuditInput {

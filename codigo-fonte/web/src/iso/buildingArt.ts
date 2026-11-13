@@ -19,10 +19,10 @@ import { halfWallSprite, objectSprite, stepSprite } from './furniture.ts';
 import { mix, type Theme } from './theme.ts';
 import { Lru } from './lru.ts';
 
-export const SLAB = 0.5; // entablamento/laje entre andares (só na Stoa e nos pórticos clássicos)
-export const CUT_H = 0.85; // altura única do corte das paredes, colunas e parapeitos do andar aberto
+const SLAB = 0.5; // entablamento/laje entre andares (só na Stoa e nos pórticos clássicos)
+const CUT_H = 0.85; // altura única do corte das paredes, colunas e parapeitos do andar aberto
 const IN_H = FLOOR_H - 0.4; // altura das paredes internas do andar aberto
-export const CUT_STEPS = 4; // degraus visíveis da escada que sobe para um andar oculto
+const CUT_STEPS = 4; // degraus visíveis da escada que sobe para um andar oculto
 
 /** `s`: pixels do canvas por pixel do mundo (1 = resolução cheia; menor = cópia reduzida para zoom afastado). */
 export interface Layer { canvas: HTMLCanvasElement; x0: number; y0: number; s?: number }
@@ -97,13 +97,13 @@ function makeLayer(r: Rect, draw: (g: CanvasRenderingContext2D, P: Proj) => void
   return { canvas: c, x0: r.x0, y0: r.y0 };
 }
 /** Faces visíveis de um andar (frente +z e direita +x; com topo se nada estiver em cima). */
-export function bandFaces(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, top: boolean): P2[][] {
+function bandFaces(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, top: boolean): P2[][] {
   const front: P2[] = [project(x0, y1, z1), project(x1, y1, z1), project(x1, y0, z1), project(x0, y0, z1)];
   const right: P2[] = [project(x1, y1, z1), project(x1, y1, z0), project(x1, y0, z0), project(x1, y0, z1)];
   return top ? [front, right, [project(x0, y1, z0), project(x1, y1, z0), project(x1, y1, z1), project(x0, y1, z1)]] : [front, right];
 }
 /** Silhueta projetada de uma caixa (hexágono). */
-export function silhouette(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): P2[] {
+function silhouette(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): P2[] {
   return [project(x0, y1, z0), project(x1, y1, z0), project(x1, y0, z0), project(x1, y0, z1), project(x0, y0, z1), project(x0, y1, z1)];
 }
 const blit = (g: CanvasRenderingContext2D, s: Sprite, P: Proj, x: number, y: number, z: number) => { const [sx, sy] = P(x, y, z); g.drawImage(s.canvas, sx - s.ax, sy - s.ay); };

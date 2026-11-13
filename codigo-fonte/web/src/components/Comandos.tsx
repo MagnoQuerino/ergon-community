@@ -21,7 +21,7 @@ const TIPOS: TipoComando[] = ['meta', 'repetir', 'checagem', 'comentar', 'revisa
 const ICONE: Record<TipoComando, string> = { meta: 'flag', repetir: 'repeat', checagem: 'pulse', comentar: 'chat', revisao: 'shield' };
 const INTERVALOS = [900, 1800, 3600, 6 * 3600, 86400];
 /** os atalhos digitados, na ordem em que a dica mostra (o do Ergon e o original) */
-export const ATALHOS: Array<{ tipo: TipoComando; nomes: string }> = [
+const ATALHOS: Array<{ tipo: TipoComando; nomes: string }> = [
   { tipo: 'meta', nomes: '/meta · /goal' }, { tipo: 'repetir', nomes: '/repetir · /loop' }, { tipo: 'checagem', nomes: '/checagem · /heartbeat' },
   { tipo: 'comentar', nomes: '/comentar · /btw' }, { tipo: 'revisao', nomes: '/revisao · /review' },
 ];

@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from './config.ts';
 import type { Db } from './db/db.ts';
+import { PAGE_CSP } from './lib/protecao-pagina.ts';
 import { HttpError } from './lib/util.ts';
 import { throttle } from './security/factors.ts';
 import type { Vault } from './security/keys.ts';
@@ -34,7 +35,7 @@ export async function buildGate(cfg: Config, vault: Vault, openDb: () => Db): Pr
   });
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff'); reply.header('Referrer-Policy', 'no-referrer'); reply.header('X-Frame-Options', 'DENY');
-    reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    reply.header('Content-Security-Policy', PAGE_CSP);
     return payload;
   });
   app.addHook('onRequest', canonicalHostHook(cfg));

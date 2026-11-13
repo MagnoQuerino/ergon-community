@@ -35,8 +35,6 @@ export const AJUSTES_MOTOR = 'team.ajustes.motor';
 /** o motor é de antes dos ajustes (plugin sem a capacidade): as escolhas ficam guardadas e chegam com a atualização */
 export const SEM_AJUSTES = 'sem';
 export const CAPACIDADE_AJUSTES = 'ajustes';
-export const CAPACIDADE_PAUSA = 'pausa';
-export const CAPACIDADE_COTA = 'cota';
 export const RESERVA_MAX = 5;
 /** na reserva automática: no máximo estas contas (cada uma com um modelo) */
 export const RESERVA_AUTO_MAX = 3;

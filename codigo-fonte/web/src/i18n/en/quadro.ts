@@ -3,13 +3,6 @@ import type pt from '../pt/quadro.ts';
 import type { Traducao } from '../tipos.ts';
 
 const quadro: Traducao<typeof pt> = {
-  'colunaComVoce': 'With you',
-
-  'grupo.fila': 'Queued',
-  'grupo.andamento': 'In progress',
-  'grupo.voce': 'Needs you',
-  'grupo.problema': 'Has a problem',
-  'grupo.concluida': 'Done',
   'situacao.naFila': 'Queued',
   'situacao.trabalhando': 'Working',
   'situacao.feito': 'Done',
@@ -26,15 +19,6 @@ const quadro: Traducao<typeof pt> = {
   'estado.falha': 'Failed',
   'estado.revisao': 'Needs review',
   'estado.aguardandoAprovacao': 'Waiting for approval',
-  'resultado.validado': 'checked',
-  'resultado.reprovado': "didn't pass",
-  'resultado.aguardandoAprovacao': 'waiting for your approval',
-  'resultado.aguardandoInfo': 'waiting for information',
-  'resultado.semConfirmacao': 'no outside confirmation',
-  'resultado.falha': 'failed',
-  'resultado.confirmadoHumano': 'approved by you',
-  'resultado.devolvido': 'sent back by you',
-  'resultado.descartado': 'declined by you',
 
   'prazo.rotulo': '{semana}, {data}',
   'prazo.hoje': 'today',

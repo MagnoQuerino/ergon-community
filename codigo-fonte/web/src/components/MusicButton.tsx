@@ -82,7 +82,7 @@ export function MusicCreditsBlock() {
 }
 
 /** Créditos: título, autor, origem e licença de cada faixa (em Configurações). */
-export function MusicCredits() {
+function MusicCredits() {
   const t = useT();
   const m = useMusic();
   if (!m.tracks.length) { music.ensureList(); return <p className="small muted">{t('geral.comum.carregando')}</p>; }

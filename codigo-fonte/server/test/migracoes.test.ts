@@ -11,7 +11,7 @@ import { describe, test } from 'node:test';
 import { Db } from '../src/db/db.ts';
 import { KDF_TEST } from '../src/security/crypto.ts';
 import { hashPassword } from '../src/security/password.ts';
-import { harness, loginAs, req, tmpDir } from './helpers.ts';
+import { harness, loginAs, req, setupOwner, tmpDir } from './helpers.ts';
 
 const MIGRATIONS = fs.readdirSync(path.join(import.meta.dirname, '..', 'src', 'db', 'migrations')).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
 const PASSWORD = 'senha-de-uma-versao-antiga';
@@ -103,5 +103,21 @@ describe('migração a partir de bancos antigos', () => {
     assert.equal(db.migrate().length, MIGRATIONS.length);
     assert.deepEqual(db.migrate(), []);
     db.close();
+  });
+
+  test('senha guardada em scrypt (instalação antiga): o login aceita e regrava em Argon2id', async () => {
+    const h = await harness();
+    const s = await setupOwner(h, 'antigo', PASSWORD);
+    // o formato das versões antigas: scrypt$N$r$p$sal$chave, montado aqui como elas montavam
+    const sal = crypto.randomBytes(16);
+    const chave = crypto.scryptSync(PASSWORD, sal, 64, { N: 16384, r: 8, p: 1 });
+    h.db.run('UPDATE users SET password_hash = ? WHERE id = ?', `scrypt$16384$8$1$${sal.toString('base64url')}$${chave.toString('base64url')}`, s.userId);
+    const hash = () => h.db.get<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = ?', s.userId)!.password_hash;
+    assert.equal((await req(h, 'POST', '/api/auth/login', null, { username: 'antigo', password: 'outra-senha-qualquer-123' })).status, 401, 'senha errada continua barrada');
+    assert.match(hash(), /^scrypt\$/, 'sem entrar, nada muda');
+    await loginAs(h, 'antigo', PASSWORD);
+    assert.match(hash(), /^argon2id\$/, 'regravada no formato de hoje');
+    await loginAs(h, 'antigo', PASSWORD); // e a senha continua a mesma
+    await h.close();
   });
 });

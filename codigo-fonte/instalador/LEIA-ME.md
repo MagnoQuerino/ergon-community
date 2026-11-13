@@ -42,7 +42,7 @@ navegador. No primeiro acesso:
 4. Em **Configurações › IA da equipe**, conecte uma conta de IA para os agentes trabalharem.
 5. Em **Conexões**, conecte seus apps de tarefas (Trello, Jira, Asana, monday.com, ClickUp, Notion…).
 
-Quer uma janela própria em vez do navegador? Instale também o [Ergon Desktop](DESKTOP.md).
+Quer uma janela própria em vez do navegador? Instale também o [Ergon Desktop](https://github.com/MagnoQuerino/ergon-community/blob/main/docs/DESKTOP.md).
 
 ## No dia a dia
 

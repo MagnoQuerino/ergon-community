@@ -60,9 +60,6 @@ export function textoDaTarefa(row: Pick<TaskModelRow, 'task' | 'declared'>): { n
 /** Quantas tarefas têm modelo próprio (o resumo da seção recolhida). */
 export const comModeloProprio = (tm: TaskModels | null): number => (tm?.tasks ?? []).filter((t) => !!t.provider && !!t.model).length;
 
-/** A tarefa usa o principal? (sem escolha gravada) */
-export const usaOPrincipal = (t: Pick<TaskModelRow, 'provider' | 'model'>): boolean => !t.provider || !t.model;
-
 /** O que gravar ao aplicar a sugestão de economia: exatamente o que a pessoa viu na prévia. */
 export const mudancasDaEconomia = (s: EconomySuggestion): TaskModelChange[] => s.changes.map((c) => ({ task: c.task, provider: c.to.provider, model: c.to.model }));
 

@@ -253,7 +253,7 @@ describe('instalação antiga sem criptografia', () => {
     assert.ok(!fs.readFileSync(cfg.dbPath).includes(Buffer.from('segredo antigo em claro')));
     const cell = h.db.raw.prepare('SELECT text FROM rules').get() as { text: string };
     assert.match(cell.text, /^ev1\./, 'dado antigo cifrado por campo');
-    assert.equal((await req(h, 'GET', '/api/rules', s)).json[0].text, 'segredo antigo em claro');
+    assert.equal(h.db.get<{ text: string }>('SELECT text FROM rules')!.text, 'segredo antigo em claro', 'e a leitura decifra');
     assert.equal((await req(h, 'GET', '/api/boards', s)).status, 200);
     await h.close();
   });

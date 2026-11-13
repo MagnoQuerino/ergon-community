@@ -157,11 +157,6 @@ export function registerPeopleRoutes(app: FastifyInstance, d: PeopleRouteDeps): 
         .header('content-length', String(r.bytes)).header('cache-control', 'no-store').header('x-ergon-de-fora', String(r.deFora.length)).send(corpo);
     } catch (e) { liberar(); throw e; }
   };
+  // só a própria pessoa: não há rota pelo id, então quem administra (ou qualquer outra pessoa) não baixa os dados de ninguém
   app.post('/api/me/export', async (req, reply) => exportar(d.auth(req), reply, idiomaDoPedido(req.headers)));
-  // pelo id: quem administra (ou qualquer outra pessoa) não baixa os dados de ninguém; só a própria pessoa
-  app.post('/api/people/:id/export', { schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^usr_[a-f0-9]{32}$' } } } } }, async (req, reply) => {
-    const a = d.auth(req);
-    if ((req.params as { id: string }).id !== a.userId) throw new HttpError(403, 'only_self', 'Só a própria pessoa baixa os dados dela. Peça para ela usar "Baixar meus dados" em Configurações › Minha conta.');
-    return exportar(a, reply, idiomaDoPedido(req.headers));
-  });
 }

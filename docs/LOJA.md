@@ -16,7 +16,7 @@ efeitos em volta dos personagens, pets e equipes prontas por área.
 
 Cada skin muda a cidade de dia e de noite, os prédios, as roupas e a paisagem que nasce quando a cidade cresce, e veste
 até 10 agentes com personagens próprios (nome e bio). A função de cada agente não muda. Uma skin por vez; desfazer
-devolve os nomes e a cidade de antes. O formato está em [FORMATOS_ERGON.md](FORMATOS_ERGON.md).
+devolve os nomes e a cidade de antes. O formato está em [FORMATOS_ERGON.md](../codigo-fonte/docs/FORMATOS_ERGON.md).
 
 ## Na loja (Configurações › Pacotes)
 

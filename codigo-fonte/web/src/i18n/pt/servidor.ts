@@ -2,7 +2,7 @@
 //
 // Os códigos que o servidor manda (erro.*, historico.*, resumo.*, proposta.*, saude.*) têm aqui o MESMO português de
 // server/src/lib/textos.ts (o teste lib/textos-servidor.test.ts confere): a tela traduz pelo código e, sem código
-// conhecido, mostra o português que veio junto. O resto (decisoes.*, atividade.*, destino.*, tipo.*, origem.*, tela.*)
+// conhecido, mostra o português que veio junto. O resto (decisoes.*, atividade.*, destino.*, tipo.*, tela.*)
 // é texto da própria tela.
 import type { Area } from '../tipos.ts';
 
@@ -123,7 +123,7 @@ const servidor = {
   'destino.lista': 'Abrir a lista',
   'destino.linha': '{rotulo}: {resumo}',
 
-  // ——— o rótulo curto de cada tipo de proposta e a origem do card (lib/types.ts)
+  // ——— o rótulo curto de cada tipo de proposta (lib/types.ts)
   'tipo.question': 'pergunta',
   'tipo.routine': 'rotina',
   'tipo.routine_edit': 'ajuste de rotina',
@@ -148,10 +148,6 @@ const servidor = {
   'tipo.aprovacao': 'comando para aprovar',
   'tipo.regra': 'regra',
   'tipo.segredo': 'chave',
-  'origem.manual': 'manual',
-  'origem.chat': 'conversa',
-  'origem.mirror': 'ligada',
-  'origem.demo': 'demonstração',
 
   // ——— frases que a tela monta a partir do que o servidor manda (lib/textos-tela.ts)
   'tela.login.adminNaoAprovou': 'O administrador não aprovou o pedido.',

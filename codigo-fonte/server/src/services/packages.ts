@@ -173,11 +173,4 @@ export class Packages {
     // escolhas pessoais (perfil/criação) por cima dos alvos dos pacotes: pessoal > alvos, sem aplicar duas vezes
     return { skin, theme, effects: applyAgentFx(this.db, ws, effects), pets };
   }
-
-  asset(ws: string, packageId: string, path: string): { bytes: Buffer; type: string } {
-    const r = this.db.get<Row>('SELECT assets FROM installed_packages WHERE id = ? AND workspace_id = ?', packageId, ws);
-    const all = r?.assets ? JSON.parse(r.assets) as Record<string, string> : {};
-    if (!Object.hasOwn(all, path)) throw new HttpError(404, 'not_found', 'imagem não encontrada');
-    return { bytes: Buffer.from(all[path], 'base64'), type: path.endsWith('.webp') ? 'image/webp' : 'image/png' };
-  }
 }

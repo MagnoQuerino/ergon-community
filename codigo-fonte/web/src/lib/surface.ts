@@ -2,8 +2,6 @@ import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 import { SurfaceStack, markDismissClick, type CloseWhy, type SurfaceEntry } from './surface-stack.ts';
 import { t } from '../i18n/index.ts';
 
-export type { CloseWhy } from './surface-stack.ts';
-
 /**
  * Superfícies temporárias (gavetas, janelas, diálogos, o menu) com o mesmo comportamento em todo o Ergon:
  * - Escape fecha só a de cima (os campos de texto de um Modo de tela ficam com o Escape deles);
@@ -135,6 +133,3 @@ export const keepTyped = (dirty: boolean, what: string): boolean => {
 export function useModalOpen(): boolean {
   return useSyncExternalStore((f) => { watchers.add(f); return () => { watchers.delete(f); }; }, () => stack.hasModal());
 }
-
-/** Quantas superfícies estão abertas (testes e depuração). */
-export const openSurfaces = (): number => stack.size;

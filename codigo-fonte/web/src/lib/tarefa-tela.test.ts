@@ -88,8 +88,8 @@ test('nenhuma tela fala de simulação nem põe o selo "real" (a falta de conta 
   const telas = arquivos(path.join(raiz, 'web', 'src')).filter((f) => f.endsWith('.tsx'));
   const achados = telas.filter((f) => !EXCECOES.includes(path.relative(raiz, f)) && MODO_TESTE.test(semComentarios(fs.readFileSync(f, 'utf8')))).map((f) => path.relative(raiz, f));
   assert.deepEqual(achados, []);
-  // os textos do servidor que vão para a tela (o consumo, a saúde, as conexões) também
-  for (const f of ['server/src/services/usage.ts', 'server/src/services/health.ts', 'server/src/services/connections.ts']) {
+  // os textos do servidor que vão para a tela (o consumo, a saúde) também
+  for (const f of ['server/src/services/usage.ts', 'server/src/services/health.ts']) {
     const texto = semComentarios(fs.readFileSync(path.join(raiz, f), 'utf8'));
     assert.doesNotMatch(texto, /respostas simuladas|modo de simula[cç][aã]o|SIMULADAS/, f);
   }

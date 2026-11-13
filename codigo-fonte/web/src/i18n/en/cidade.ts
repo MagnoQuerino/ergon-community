@@ -3,8 +3,6 @@ import type pt from '../pt/cidade.ts';
 import type { Traducao } from '../tipos.ts';
 
 const cidade: Traducao<typeof pt> = {
-  'cidadeViva': 'Living city',
-
   // ——— the City screen ———
   'tela.carregando': 'Loading the city…',
   'tela.erroCarregar': "Couldn't load the city right now ({erro}). Trying again…",

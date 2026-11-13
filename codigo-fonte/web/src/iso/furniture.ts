@@ -4,7 +4,7 @@
  * cabe na caixa declarada na planta — é a caixa que decide quem cobre quem.
  */
 import { RES } from './projection.ts';
-import { backQuad, fillPoly, flatQuad, isoBox, line, sideQuad, type Tone } from './raster.ts';
+import { backQuad, flatQuad, isoBox, line, sideQuad, type Tone } from './raster.ts';
 import { amphoraSprite, benchSprite, blob, deskSprite, fitSprite, mapTableSprite, plantSprite, scrollBasketSprite, stoolSprite, type Sprite } from './props.ts';
 import { klismosSprite, readingDeskSprite, roundTableSprite } from './architecture.ts';
 import { mix, type Theme } from './theme.ts';
@@ -173,5 +173,3 @@ export function objectSprite(t: Theme, o: PlanObj): Sprite {
     default: return chestSprite(t);
   }
 }
-
-export { fillPoly };

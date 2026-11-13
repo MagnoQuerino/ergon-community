@@ -8,7 +8,7 @@
 import type { Activity, Bubble } from '../world/buildings.ts';
 import type { Vec2 } from '../world/geom.ts';
 
-export type { Activity, Bubble };
+export type { Bubble };
 
 /** Gerador determinístico, para a vida não depender de Math.random nos testes. */
 export function rng(seed: number): () => number {

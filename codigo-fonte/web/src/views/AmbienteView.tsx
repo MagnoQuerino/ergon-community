@@ -19,6 +19,7 @@ import { PausaControle } from '../components/AjustesEquipe.tsx';
 import { indicadores, type Indicador } from '../lib/barra.ts';
 import { THEMES } from '../iso/theme.ts';
 import { useTheme } from '../lib/theme.ts';
+import { TINTA_CLARA, inkOn, letterStyle } from '../lib/contraste.ts';
 import { typeOf } from '../../../shared/city.ts';
 import { fmtNumero, tn, useT } from '../i18n/index.ts';
 import { comumDoTipo, nomeDaConstrucao, nomeDoAndar, nomeDoTipo } from '../world/buildings.ts';
@@ -180,9 +181,11 @@ export function AmbienteView({ state, onNavigate, selectedId, onSelect, reload, 
     if (a.building_id && a.floor_level !== null && a.floor_level !== undefined) sceneApi.current?.focusAgentAt(a.id, a.building_id, a.floor_level);
     else sceneApi.current?.focusAgent(a.id);
   };
+  // o "Carregando" fica sobre o chão da cidade (claro de dia, escuro à noite): a tinta que se lê sobre ele
+  const loadingInk = inkOn(THEMES[themeId].bg);
   const loading = (
-    <div className="stage__loading">
-      <ErgonLoader onDark label={city.error ? t('cidade.tela.erroCarregar', { erro: city.error }) : t('cidade.tela.carregando')} />
+    <div className="stage__loading" style={{ color: loadingInk }}>
+      <ErgonLoader onDark={loadingInk === TINTA_CLARA} label={city.error ? t('cidade.tela.erroCarregar', { erro: city.error }) : t('cidade.tela.carregando')} />
     </div>
   );
 
@@ -385,7 +388,7 @@ function HtmlBuilding({ s, known, onSelect, selectedId }: { s: Structure; known:
           <div className="htmlplan__agents">
             {(by.get(f.id) ?? []).map((a) => (
               <button key={a.id} className={`agent-chip ${selectedId === a.id ? 'agent-chip--on' : ''}`} onClick={() => onSelect(a.id)}>
-                <span className="avatar avatar--sm" style={{ background: a.color }}>{a.name[0]}</span> {a.name}
+                <span className="avatar avatar--sm" style={letterStyle(a.color)}>{a.name[0]}</span> {a.name}
                 {a.run_status && <span className="badge badge--warn">{a.run_status === 'running' ? t('cidade.simples.trabalhando') : a.run_status === 'queued' ? t('cidade.simples.naFila') : t('cidade.simples.aguarda')}</span>}
               </button>
             ))}

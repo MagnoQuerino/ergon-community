@@ -1,6 +1,6 @@
 {
   "name": "ergon-community",
-  "version": "1.1.0-rc.27",
+  "version": "1.1.0-rc.28",
   "license": "Apache-2.0",
   "private": true,
   "description": "Ergon Community: uma equipe de agentes de IA que trabalha no seu computador.",
@@ -17,7 +17,6 @@
     "test": "npm test -w server && npm test -w web",
     "build": "npm run build -w web",
     "start": "node server/src/index.ts",
-    "teams:manifest": "node scripts/teams-manifest.mjs",
-    "secrets:init": "node scripts/init-secrets.mjs"
+    "teams:manifest": "node scripts/teams-manifest.mjs"
   }
 }

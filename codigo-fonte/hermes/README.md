@@ -10,7 +10,7 @@ Research), numa imagem estendida por este diretório:
 - **Plugin `ergon_bridge`** (`plugins/ergon_bridge`): liga o motor ao Ergon (eventos dos canais, tarefas) e trava, por
   agente, as ferramentas que ele pode usar. Ferramentas como Terminal e Executar código só são liberadas com a senha
   de quem administra o Ergon.
-- **Sem portas publicadas.** A API do motor só é alcançável pelo Ergon, na rede interna do Docker. A chave da API vem
+- **Sem portas publicadas.** A API do motor só é alcançável pelo Ergon, na rede interna dos contêineres. A chave da API vem
   de `~/.ergon/secrets`, gerada na instalação.
 - **Um motor por pessoa.** Cada conta do Ergon neste computador tem o próprio contêiner do motor, com cofre e conta de
   IA próprios, criado pelo gerente de motores.

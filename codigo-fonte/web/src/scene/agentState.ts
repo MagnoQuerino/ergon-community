@@ -26,7 +26,7 @@ export interface Mover {
   pos: [number, number, number];
 }
 
-export const SPEED = 2.2; // unidades por segundo
+const SPEED = 2.2; // unidades por segundo
 
 export function startMove(from: [number, number, number], path: Array<[number, number, number]>): Mover {
   return { path: path.length ? path : [from], seg: 0, t: 0, pos: [...from] };

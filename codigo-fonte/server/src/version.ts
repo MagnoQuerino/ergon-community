@@ -56,7 +56,6 @@ export function rollbackOf(version: string, assets: string[], channel: 'teste' |
  * manifesto assinado do canal ("recentes", desktop/src-tauri/src/atualizacao.rs, fora_das_duas_anteriores). Fora do
  * Desktop (servidor, Linux), a lista segue com até LISTA_ANTERIORES versões, cada uma com a página do instalador.
  */
-export const VOLTA_ANTERIORES = 2;
 export const LISTA_ANTERIORES = 12;
 /** Quantas versões o manifesto do canal carrega em "recentes" (scripts/distribuicao/manifesto.mjs, RECENTES). */
 export const RECENTES_DO_CANAL = 12;
@@ -111,9 +110,6 @@ export class UpdateCheck {
     this.cache = { at: Date.now(), latest: ok ? st.latest : this.cache?.latest ?? null, releases: st.releases.length ? st.releases : this.cache?.releases ?? [], checkedAt: ok ? new Date().toISOString() : this.cache?.checkedAt ?? null };
     return this.cached();
   }
-
-  /** compatível com o uso antigo: a versão publicada mais nova do canal */
-  async latest(): Promise<Release | null> { return (await this.check()).latest; }
 
   private api(): string | null {
     const m = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/releases\//.exec(this.url ?? '');

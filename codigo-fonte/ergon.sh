@@ -220,17 +220,15 @@ restaurar() {
   [[ -n "$chave" && "$chave" != sem ]] && say 'Depois, o Ergon pode pedir a senha (ou a frase de recuperação) da época do backup.' 'Afterwards, Ergon may ask for the password (or the recovery phrase) from the time of the backup.'
   say "O que está no lugar agora vai para /data/backups/pre-restore-$c (nada é apagado)." "What is in place now goes to /data/backups/pre-restore-$c (nothing is deleted)."
   confirmar "$(txt 'Restaurar agora?' 'Restore now?')" || { say 'Nada foi alterado.' 'Nothing was changed.'; return 0; }
-  local motor; motor="$(cid hermes 2>/dev/null || true)"
   compose stop ergon
   local r; r="$(restore_tool -- restaurar "$alvo" "$c")"
   [[ "$(field ok <<<"$r")" == true ]] || { compose start ergon; fail "A restauração não foi feita; os dados atuais continuam no lugar. $(field error <<<"$r")" "The restore was not done; the current data is still in place. $(field error <<<"$r")"; }
   if [[ "$(field keyring <<<"$r")" == outra ]]; then
-    [[ -n "$motor" ]] && compose stop hermes
     local m; m="$(restore_tool "${MOTOR_ROOT[@]}" -- motor /vault "/data/backups/pre-restore-$c/motor")"
     [[ "$(field ok <<<"$m")" == true ]] || say "Atenção: o cofre do motor não foi posto de lado ($(field error <<<"$m")); o motor pode não abrir com a chave restaurada." \
       "Warning: the engine vault was not set aside ($(field error <<<"$m")); the engine may not open with the restored key."
   fi
-  compose start ergon; [[ -n "$motor" ]] && compose start hermes
+  compose start ergon
   local h; h="$(wait_health 240)" || fail "O Ergon não respondeu depois de restaurar. Para voltar: ./ergon.sh restore --undo pre-restore-$c" "Ergon did not respond after the restore. To go back: ./ergon.sh restore --undo pre-restore-$c"
   if [[ "$(field sealed <<<"$h")" == true ]]; then say "Restaurado. Abra $URL e digite a senha (ou a frase) da época do backup." "Restored. Open $URL and type the password (or the phrase) from the time of the backup."
   else say "Restaurado. No ar em $URL." "Restored. Running at $URL."; fi
@@ -242,17 +240,15 @@ desfazer_restauracao() {
   [[ "$pre" =~ ^pre-restore-[A-Za-z0-9_-]+$ ]] || fail 'Diga qual: ./ergon.sh restore --undo pre-restore-<data>  (o nome aparece ao restaurar)' 'Say which one: ./ergon.sh restore --undo pre-restore-<date>  (the name is shown when restoring)'
   need_motor
   confirmar "$(txt "Voltar ao que era antes da restauração $pre?" "Go back to how it was before the restore $pre?")" || { say 'Nada foi alterado.' 'Nothing was changed.'; return 0; }
-  local motor; motor="$(cid hermes 2>/dev/null || true)"
   compose stop ergon
   local r; r="$(restore_tool -- desfazer "/data/backups/$pre")"
   [[ "$(field ok <<<"$r")" == true ]] || { compose start ergon; fail "Não deu para desfazer: $(field error <<<"$r")" "Could not undo: $(field error <<<"$r")"; }
   local aside; aside="$(field aside <<<"$r")"
   if [[ "$(field motor <<<"$r")" == true ]]; then
-    [[ -n "$motor" ]] && compose stop hermes
     local m; m="$(restore_tool "${MOTOR_ROOT[@]}" -- motor-volta /vault "/data/backups/$pre/motor" "$aside/motor")"
     [[ "$(field ok <<<"$m")" == true ]] || say "Atenção: o cofre do motor não voltou ($(field error <<<"$m"))." "Warning: the engine vault did not come back ($(field error <<<"$m"))."
   fi
-  compose start ergon; [[ -n "$motor" ]] && compose start hermes
+  compose start ergon
   say "Voltou ao que era antes da restauração. O restaurado ficou guardado em $aside." "Back to how it was before the restore. The restored data was kept in $aside."
 }
 
@@ -378,9 +374,10 @@ limpar_versoes() {
 }
 
 # ---------------------------------------------------------------- ajudante (destrancar sozinho)
-# O Ergon roda no Docker e não alcança o cofre do sistema. O ajudante roda na sua conta desde que você entra no
-# computador: avisa o Ergon que está ali; quando você liga "Destrancar sozinho" na tela, busca a chave e a guarda
-# nas Chaves do macOS (ou no chaveiro do Linux, via libsecret); se o Ergon reiniciar trancado, destranca.
+# O Ergon roda em contêineres (Podman; Docker numa instalação antiga) e não alcança o cofre do sistema. O ajudante
+# roda na sua conta desde que você entra no computador: avisa o Ergon que está ali; quando você liga "Destrancar
+# sozinho" na tela, busca a chave e a guarda nas Chaves do macOS (ou no chaveiro do Linux, via libsecret); se o
+# Ergon reiniciar trancado, destranca.
 # Desligar na tela invalida a chave, e o ajudante apaga a dela.
 LOCAL="${ERGON_LOCAL_DIR:-$HOME/.ergon}"
 INICIO_MAC="$HOME/Library/LaunchAgents/com.ergon.ajudante.plist"
@@ -659,7 +656,7 @@ comando() {
   case "$c" in
     install) instalar_programa
       if ! mesma "$DESTINO" "$RAIZ"; then
-        # continua pela cópia instalada: o registro, o ajudante e o Docker passam a usar a pasta do programa
+        # continua pela cópia instalada: o registro, o ajudante e o motor de contêineres passam a usar a pasta do programa
         /bin/bash "$DESTINO/ergon.sh" install
         say "Pode apagar a pasta do zip ($RAIZ). Em um terminal novo: ergon status" "You can delete the zip folder ($RAIZ). In a new terminal: ergon status"; exit 0
       fi

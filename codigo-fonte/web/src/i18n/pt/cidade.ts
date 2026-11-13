@@ -2,8 +2,6 @@
 import type { Area } from '../tipos.ts';
 
 const cidade = {
-  'cidadeViva': 'Cidade viva',
-
   // ——— a tela da Cidade ———
   'tela.carregando': 'Carregando a cidade…',
   'tela.erroCarregar': 'Não deu para carregar a cidade agora ({erro}). Tentando de novo…',

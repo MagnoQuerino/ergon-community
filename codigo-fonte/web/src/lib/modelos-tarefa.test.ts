@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import conexoesEn from '../i18n/en/conexoes.ts';
 import conexoesPt from '../i18n/pt/conexoes.ts';
 import {
-  TAREFA_AJUDANTES, TEXTO_DA_TAREFA, comModeloProprio, enderecoDaEconomia, enderecoDaLista, mudancasDaEconomia, situacaoDaEconomia, textoDaTarefa, usaOPrincipal,
+  TAREFA_AJUDANTES, TEXTO_DA_TAREFA, comModeloProprio, enderecoDaEconomia, enderecoDaLista, mudancasDaEconomia, situacaoDaEconomia, textoDaTarefa,
   type EconomySuggestion, type OndeRoda, type TaskModelRow, type TaskModels,
 } from './modelos-tarefa.ts';
 
@@ -51,14 +51,11 @@ test('tarefa que a tela não conhece aparece de qualquer jeito: com o que o comp
   assert.deepEqual(textoDaTarefa({ task: 'constructor' }), { nome: { texto: 'constructor' }, oque: null });
 });
 
-test('o resumo da seção recolhida: quantas têm modelo próprio; sem escolha = usa o principal', () => {
+test('o resumo da seção recolhida: quantas têm modelo próprio', () => {
   const tm: TaskModels = { supported: true, main: principal, tasks: [linha('vision'), linha('compression', 'deepseek/flash'), linha('title_generation', 'deepseek/flash'), linha(TAREFA_AJUDANTES)] };
   assert.equal(comModeloProprio(tm), 2);
   assert.equal(comModeloProprio({ ...tm, tasks: tm.tasks.map((t) => linha(t.task)) }), 0);
   assert.equal(comModeloProprio(null), 0);
-  assert.equal(usaOPrincipal(linha('vision')), true);
-  assert.equal(usaOPrincipal(linha('vision', 'x/y')), false);
-  assert.equal(usaOPrincipal({ provider: 'nous', model: null }), true);
 });
 
 test('a economia: aplicar manda exatamente o que a prévia mostrou; e cada motivo de não haver nada a aplicar', () => {

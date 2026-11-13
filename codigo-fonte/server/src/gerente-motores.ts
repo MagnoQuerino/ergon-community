@@ -1,6 +1,6 @@
 /**
  * Ponto de entrada do gerente de motores (serviço "motores" do docker-compose.yml): o único contêiner com o socket
- * do Docker. Ver services/motor-manager.ts.
+ * do motor de contêineres (Podman; Docker numa instalação antiga). Ver services/motor-manager.ts.
  */
 import { dockerOver, memBytes, selfContainerIds, serveManager } from './services/motor-manager.ts';
 

@@ -1,6 +1,6 @@
 /**
- * Rotas de Conexões: contas (Microsoft, Google), apps de tarefas por credencial, espelho de listas, WhatsApp por QR
- * e a confirmação de canal real. A Microsoft entra em etapas (sso.ts), e o "conectando…" vence em 10 minutos (Integrations.list).
+ * Rotas de Conexões: contas (Microsoft, Google), apps de tarefas por credencial, espelho de listas e WhatsApp por QR.
+ * A Microsoft entra em etapas (sso.ts), e o "conectando…" vence em 10 minutos (Integrations.list).
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Db } from '../db/db.ts';
@@ -236,18 +236,5 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'integration.whatsapp.filters', evidence: { ...f }, result: 'filtros atualizados' });
     bus.publish(a.workspaceId, 'integrations.changed', { kind: 'whatsapp' });
     return f;
-  });
-
-  // Confirmação humana de teste real no canal: única forma de chegar a "conectado".
-  app.post('/api/connections/:id/validate', { schema: { params: idParams('con') } }, async (req) => {
-    const a = owner(req);
-    const id = (req.params as { id: string }).id;
-    const c = db.get<{ kind: string; mode: string; last_real_event_at: string | null }>('SELECT kind, mode, last_real_event_at FROM connections WHERE id = ? AND workspace_id = ?', id, a.workspaceId);
-    if (!c) throw notFound('conexão');
-    if (c.mode !== 'real' || !['teams', 'whatsapp'].includes(c.kind)) throw new HttpError(409, 'not_validatable', 'somente conexões reais de canal');
-    if (!c.last_real_event_at) throw new HttpError(409, 'no_events', 'nenhum evento recebido pela ponte ainda');
-    db.run('UPDATE connections SET validated_at = ?, validated_by = ? WHERE id = ?', now(), a.userId, id);
-    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'connection.validate', targetType: 'connection', targetId: id, evidence: { kind: c.kind, lastRealEventAt: c.last_real_event_at }, result: 'confirmado pelo proprietário' });
-    return { ok: true };
   });
 }

@@ -131,5 +131,5 @@ export function previaDe(filename: string, mime: string): Previa {
 
 /** Situação → cor da etiqueta e da faixa (o servidor manda o tom, resumo-tarefa.ts). */
 // i18n-ok: os tons são nomes de classe (tdet__sit--feito), não texto de tela
-export const TOM: Record<string, string> = { decidir: 'decidir', precisa: 'precisa', trabalhando: 'trabalhando', fila: 'fila', feito: 'feito', falhou: 'falhou' };
+const TOM: Record<string, string> = { decidir: 'decidir', precisa: 'precisa', trabalhando: 'trabalhando', fila: 'fila', feito: 'feito', falhou: 'falhou' };
 export const tomDe = (x: string | null | undefined): string => TOM[x ?? ''] ?? 'fila';

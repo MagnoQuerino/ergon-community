@@ -36,7 +36,7 @@ describe('capacidade de habitantes (validada no servidor)', () => {
   test('arquivar libera vaga; reativar com capacidade cheia é bloqueado', async () => {
     const st = { agents: await allAgents(h, s) };
     const victim = st.agents.find((a: { coordinator: number }) => !a.coordinator).id;
-    assert.equal((await req(h, 'POST', `/api/agents/${victim}/archive`, s)).status, 200);
+    assert.equal((await req(h, 'POST', `/api/agents/${victim}/deactivate`, s)).status, 200);
     const created = await req(h, 'POST', '/api/agents', s, { name: 'Nova', role: 'Ocupa a vaga', profileKey: 'brainstorm' });
     assert.equal(created.status, 201);
     const re = await req(h, 'POST', `/api/agents/${victim}/reactivate`, s);
@@ -49,7 +49,7 @@ describe('capacidade de habitantes (validada no servidor)', () => {
     const agent = st.agents.find((a: { status: string; coordinator: number }) => a.status === 'active' && !a.coordinator);
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agent.id })).json;
     await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: 'olá', clientRequestId: 'req-busy-00001' });
-    const r = await req(h, 'POST', `/api/agents/${agent.id}/archive`, s);
+    const r = await req(h, 'POST', `/api/agents/${agent.id}/deactivate`, s);
     assert.equal(r.status, 409);
     assert.equal(r.json.error, 'agent_busy');
   });
@@ -97,7 +97,7 @@ describe('corrida concorrente de criação (conexões separadas, mesmo arquivo)'
   test('8 criações simultâneas com 2 vagas livres → exatamente 2 sucessos', async () => {
     // abre 2 vagas: arquiva 2 agentes
     const st = { agents: await allAgents(h, s) };
-    for (const a of st.agents.filter((x: { coordinator: number }) => !x.coordinator).slice(0, 2)) assert.equal((await req(h, 'POST', `/api/agents/${a.id}/archive`, s)).status, 200);
+    for (const a of st.agents.filter((x: { coordinator: number }) => !x.coordinator).slice(0, 2)) assert.equal((await req(h, 'POST', `/api/agents/${a.id}/deactivate`, s)).status, 200);
     const barrier = new SharedArrayBuffer(8);
     const flag = new Int32Array(barrier);
     const N = 8;
@@ -152,7 +152,7 @@ describe('versão local: quantos agentes quiser', () => {
     // reativar também cabe sempre
     const st = { agents: await allAgents(h, s) };
     const one = st.agents.find((a: { coordinator: number; status: string }) => !a.coordinator && a.status === 'active');
-    assert.equal((await req(h, 'POST', `/api/agents/${one.id}/archive`, s)).status, 200);
+    assert.equal((await req(h, 'POST', `/api/agents/${one.id}/deactivate`, s)).status, 200);
     await req(h, 'POST', '/api/agents', s, { name: 'Ocupa a vaga', role: 'Teste', profileKey: 'central' });
     assert.equal((await req(h, 'POST', `/api/agents/${one.id}/reactivate`, s)).status, 200);
   });

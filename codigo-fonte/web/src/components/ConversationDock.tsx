@@ -20,7 +20,7 @@ const withAgent = (list: RecentConversation[] | null): WithAgent[] => (list ?? [
 const litesOf = (list: WithAgent[]) => new Map(list.map((c) => [c.agent_id, c.agent]));
 
 /** Quando: "agora", "há 5 min", "ontem 14:20", "12/10" (no idioma da tela; quem mostra usa useT() e redesenha na troca). */
-export const when = (iso: string) => {
+const when = (iso: string) => {
   const d = new Date(iso); const min = Math.round((Date.now() - d.getTime()) / 60_000);
   if (min < 1) return t('conversas.quando.agora');
   if (min < 60) return t('conversas.quando.minutos', { n: min });

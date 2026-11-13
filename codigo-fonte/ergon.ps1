@@ -29,7 +29,6 @@ $Local = if ($env:ERGON_LOCAL_DIR) { $env:ERGON_LOCAL_DIR } else { Join-Path $en
 $Backups = if ($env:ERGON_BACKUPS_DIR) { $env:ERGON_BACKUPS_DIR } else { Join-Path $HOME '.ergon\backups' }   # outra pasta: disco externo, por exemplo
 $Manifesto = 'https://github.com/MagnoQuerino/ergon-community/releases/latest/download/latest.json'
 $Inicializar = Join-Path ([Environment]::GetFolderPath('Startup')) 'Ergon - ajudante.vbs'
-$Antigo = Join-Path ([Environment]::GetFolderPath('Startup')) 'Ergon - destravar.cmd'
 $Guardada = Join-Path $Local 'destravar.json'
 # onde o pacote fica instalado (o comando "ergon" aponta para cá); ERGON_PROGRAM_DIR: testes isolados
 $Programa = if ($env:ERGON_PROGRAM_DIR) { $env:ERGON_PROGRAM_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\Ergon' }
@@ -232,13 +231,6 @@ function Backup {
   $dest = Join-Path $Backups $nome
   & docker cp "${id}:/data/backups/$nome" $dest | Out-Null
   if ($LASTEXITCODE -ne 0) { Fail "O backup ficou no volume (/data/backups/$nome), mas a cópia para $Backups falhou." "The backup is in the volume (/data/backups/$nome), but copying it to $Backups failed." }
-  if ($nome -match '\.sqlite$') {
-    # servidor de uma versão anterior: backup antigo (só o banco e o keyring) — vale, mas não leva arquivos e conexões
-    & docker cp "${id}:/data/backups/$nome.keyring.json" (Join-Path $Backups "$nome.keyring.json") 2>$null | Out-Null
-    Say "Backup (formato antigo: só o banco e o keyring; atualize o Ergon para o backup completo): $dest" "Backup (old format: only the database and the keyring; update Ergon for the full backup): $dest"
-    Limit-Backups $nome
-    return $true
-  }
   if (-not (Test-Path -LiteralPath (Join-Path $dest 'manifest.json'))) { Fail "O backup ficou no volume (/data/backups/$nome), mas a cópia para $Backups saiu incompleta." "The backup is in the volume (/data/backups/$nome), but the copy to $Backups came out incomplete." }
   Say "Backup completo e conferido (banco, arquivos e conexões): $dest" "Full backup, checked (database, files and connections): $dest"
   Limit-Backups $nome
@@ -304,17 +296,14 @@ function Restore([string]$origem) {
   if ($c.keyring -and $c.keyring -ne 'sem') { Say 'Depois, o Ergon pode pedir a senha (ou a frase de recuperação) da época do backup.' 'Afterwards, Ergon may ask for the password (or the recovery phrase) from the time of the backup.' }
   Say "O que está no lugar agora vai para /data/backups/pre-restore-$carimbo (nada é apagado)." "What is in place now goes to /data/backups/pre-restore-$carimbo (nothing is deleted)."
   if (-not (Confirm-Step (T 'Restaurar agora?' 'Restore now?'))) { Say 'Nada foi alterado.' 'Nothing was changed.'; return }
-  $motor = ComposeOut @('ps', '-q', 'hermes')
   Compose @('stop', 'ergon')
   $r = Invoke-Restore @('restaurar', $alvo, $carimbo)
   if (-not $r.ok) { Compose @('start', 'ergon'); Fail "A restauração não foi feita; os dados atuais continuam no lugar. $($r.error)" "The restore was not done; the current data is still in place. $($r.error)" }
   if ($r.keyring -eq 'outra') {
-    if ($motor) { Compose @('stop', 'hermes') }
     $m = Invoke-Restore @('motor', '/vault', "/data/backups/pre-restore-$carimbo/motor") $MotorRoot
     if (-not $m.ok) { Say "Atenção: o cofre do motor não foi posto de lado ($($m.error)); o motor pode não abrir com a chave restaurada." "Warning: the engine vault was not set aside ($($m.error)); the engine may not open with the restored key." }
   }
   Compose @('start', 'ergon')
-  if ($motor) { Compose @('start', 'hermes') }
   $h = Wait-Health 240
   if (-not $h) { Fail "O Ergon não respondeu depois de restaurar. Para voltar: .\ergon.cmd restore --undo pre-restore-$carimbo" "Ergon did not respond after the restore. To go back: .\ergon.cmd restore --undo pre-restore-$carimbo" }
   if ($h.sealed) { Say "Restaurado. Abra $Url e digite a senha (ou a frase) da época do backup." "Restored. Open $Url and type the password (or the phrase) from the time of the backup." }
@@ -327,17 +316,14 @@ function Undo-Restore([string]$pre) {
   Test-Docker
   if (-not (Confirm-Step (T "Voltar ao que era antes da restauração $pre?" "Go back to how it was before the restore $pre?"))) { Say 'Nada foi alterado.' 'Nothing was changed.'; return }
   $carimbo = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH-mm-ss-fff') + 'Z'
-  $motor = ComposeOut @('ps', '-q', 'hermes')
   Compose @('stop', 'ergon')
   $r = Invoke-Restore @('desfazer', "/data/backups/$pre")
   if (-not $r.ok) { Compose @('start', 'ergon'); Fail "Não deu para desfazer: $($r.error)" "Could not undo: $($r.error)" }
   if ($r.motor) {
-    if ($motor) { Compose @('stop', 'hermes') }
     $m = Invoke-Restore @('motor-volta', '/vault', "/data/backups/$pre/motor", "$($r.aside)/motor") $MotorRoot
     if (-not $m.ok) { Say "Atenção: o cofre do motor não voltou ($($m.error))." "Warning: the engine vault did not come back ($($m.error))." }
   }
   Compose @('start', 'ergon')
-  if ($motor) { Compose @('start', 'hermes') }
   Say "Voltou ao que era antes da restauração. O restaurado ficou guardado em $($r.aside)." "Back to how it was before the restore. The restored data was kept in $($r.aside)."
 }
 
@@ -485,11 +471,11 @@ function Get-AgentToken {
   if ($l) { return $l.Matches[0].Groups[1].Value.Trim() } else { return $null }
 }
 # Várias pessoas no computador: uma chave por pessoa que ligou "abrir sozinho" nesta conta do Windows (cada uma
-# cifrada com DPAPI). Arquivo de antes (uma chave só, {id, blob}) continua valendo.
+# cifrada com DPAPI), em {keys: [{id, blob}]}.
 function Read-SavedEntries {
   if (-not (Test-Path $Guardada)) { return @() }
   try { $j = Get-Content $Guardada -Raw | ConvertFrom-Json } catch { return @() }
-  if ($j.keys) { return @($j.keys) } elseif ($j.id) { return @([pscustomobject]@{ id = $j.id; blob = $j.blob }) } else { return @() }
+  if ($j.keys) { return @($j.keys) } else { return @() }
 }
 function Read-SavedKeys {
   $out = @()
@@ -529,7 +515,6 @@ function Run-Helper {
     try {
       $r = Invoke-RestMethod -Method Post -Uri "$Url/api/agent/hello" -Headers $h -ContentType 'application/json' -Body ($body | ConvertTo-Json) -TimeoutSec 5 -ErrorAction Stop
       foreach ($id in @($r.invalid)) { if ($id) { Remove-SavedKey $id; Write-HelperLog 'abrir sozinho desligado na tela: uma chave apagada' 'automatic unlock turned off on screen: one key deleted' } }
-      if ($r.keyValid -eq $false -and $null -eq $r.invalid) { Remove-SavedKey $saved[0].id; Write-HelperLog 'destrancar sozinho desligado na tela: chave apagada' 'automatic unlock turned off on screen: key deleted' }
       # várias pessoas: a parte de quem ligou "abrir sozinho" ainda está fechada → abre com a chave dela
       foreach ($id in @($r.closed)) {
         $k = $saved | Where-Object { $_.id -eq $id } | Select-Object -First 1
@@ -570,12 +555,11 @@ function Install-Helper {
   # sem janela: o atalho .vbs chama o PowerShell escondido ao entrar no Windows
   $cmd = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"`"$PSCommandPath`"`" ajudante"
   Set-Content -Encoding Default -Path $Inicializar -Value "CreateObject(`"WScript.Shell`").Run `"$cmd`", 0, False"
-  Remove-Item -Force -ErrorAction SilentlyContinue $Antigo
   Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$Inicializar`"" -WindowStyle Hidden
   Say 'Ajudante do computador ativo (começa sozinho ao entrar no Windows).' 'Computer helper active (starts on its own when you sign in to Windows).'
 }
 function Remove-Helper {
-  Remove-Item -Force -ErrorAction SilentlyContinue $Inicializar, $Antigo, $Guardada
+  Remove-Item -Force -ErrorAction SilentlyContinue $Inicializar, $Guardada
   Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -match 'ergon\.ps1.*(ajudante|helper)' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false }
   Say 'Ajudante removido e chave apagada deste computador. O destrancar sozinho fica desligado.' 'Helper removed and key deleted from this computer. Automatic unlock is now off.'
 }

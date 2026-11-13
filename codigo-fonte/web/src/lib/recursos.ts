@@ -38,5 +38,3 @@ export function audiosParaTranscrever<A extends Anexo>(list: ReadonlyArray<{ rol
   }
   return out;
 }
-/** Avisos que acompanham uma ferramenta (o servidor manda o código; a tela traduz). */
-export type AvisoFerramenta = 'custo' | 'risco';

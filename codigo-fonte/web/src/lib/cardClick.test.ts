@@ -254,9 +254,9 @@ test('Pessoas, Aguardando você, Equipe e a janela do agente usam o mesmo padrã
   const d = ler('components/DecisionsPanel.tsx');
   assert.match(d, /onClick=\{onOpen \? cardClick\(onOpen\) : undefined\}/);
   // errar Aprovar/Recusar por pouco não tira a pessoa do painel
-  assert.ok(d.includes('<div className="row row--wrap dec-card__acts" data-card-skip>{actions}</div>'));
-  // o cartão que pede para Confirmar um envio em nome da pessoa não abre inteiro: só pelo "#N · quem"
-  assert.match(d, /<article key=\{p\.id\} className="dec-card">\s*<div className="dec-card__top">\s*<span className="badge">\{KIND\[p\.kind\]\}/);
+  assert.ok(d.includes('<div className={`${FILEIRA} dec-card__acts`} data-card-skip>{actions}</div>'));
+  // o cartão que pede para Confirmar um envio em nome da pessoa não abre inteiro: só pelo "#N · quem" (rc.28: o selo com ícone)
+  assert.match(d, /<article key=\{p\.id\} className="dec-card">\s*<div className="dec-card__top">\s*<Selo icone=\{[^}]+\}>\{KIND\[p\.kind\]\}/);
   assert.doesNotMatch(d, /cardClick\(\(\) => openCard\(p\.task_id!\)\)/);
   const e = ler('views/AgentesView.tsx');
   assert.match(e, /onClick=\{cardClick\(open\)\}/);

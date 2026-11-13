@@ -5,7 +5,7 @@ Para usar o Ergon, não precisa desta pasta: veja o [README da raiz](../README.m
 ```
 npm ci
 npm test            # servidor e interface
-docker build --target test .
+podman build --target test .
 ```
 
 Rode os comandos aqui, em `codigo-fonte/`. O `ergon.cmd` / `ergon.sh` desta pasta constrói as imagens a partir do

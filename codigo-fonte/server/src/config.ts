@@ -70,7 +70,7 @@ export interface Config {
   /** endereço base de volta do login (padrão http://localhost:<porta>), se o Ergon for aberto por outro endereço */
   oauthRedirectBase: string | null;
   bridgeToken: string | null;
-  /** ajudante do computador (fora do Docker): guarda a chave do destrancar sozinho no cofre do sistema */
+  /** ajudante do computador (fora dos contêineres): guarda a chave do destrancar sozinho no cofre do sistema */
   agentToken: string | null;
   /** teto de processos ao mesmo tempo por workspace (na nuvem, o do plano); 0 = sem teto: vale a escolha do usuário */
   maxConcurrentRuns: number;
@@ -102,7 +102,7 @@ export interface Config {
   maxStorageBytes: number;
   fixturesEnabled: boolean;
   fixturesDir: string;
-  teams: { enabled: boolean; tenantId: string | null; allowedUsers: string[]; botId: string | null };
+  teams: { enabled: boolean; tenantId: string | null; allowedUsers: string[] };
   /**
    * Conversar com a equipe pelo Teams (app público): endereço https do serviço do Teams (ERGON_TEAMS_RELAY_URL). Tem
    * prioridade sobre o ajuste da instalação; sem nenhum dos dois, o recurso fica indisponível (services/teams-app).
@@ -205,7 +205,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
       enabled: bool(env.ERGON_TEAMS_ENABLED, false),
       tenantId: env.ERGON_TEAMS_TENANT_ID || null,
       allowedUsers: list(env.ERGON_TEAMS_ALLOWED_USERS),
-      botId: env.ERGON_TEAMS_BOT_ID || null,
     },
     teamsRelayUrl: env.ERGON_TEAMS_RELAY_URL?.trim() || null,
     whatsapp: {

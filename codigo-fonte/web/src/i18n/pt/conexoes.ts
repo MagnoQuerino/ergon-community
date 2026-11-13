@@ -113,7 +113,6 @@ const conexoes = {
   'regras.esperando': 'Esperando você',
   'regras.proposta': 'regra proposta',
   'regras.propostaDe': 'regra proposta · {agente}',
-  'regras.aplicando': 'Aplicando…',
   'regras.aplicada': 'Regra aplicada.',
   'regras.recusada': 'Recusada.',
   'regras.conversaProposta': 'regra de conversa proposta',
@@ -376,7 +375,6 @@ const conexoes = {
   // ——— os botões dos cartões de regra e de aprovação (components/CartaoRegra.tsx) ———
   'cartao.ateQuando': 'Até quando vale',
   'cartao.porQuantoTempo': 'Aprovar por quanto tempo',
-  'cartao.aprovarPor': 'Aprovar por',
   'cartao.recusar': 'Recusar',
   'alcance.pedido': 'Só neste pedido',
   'alcance.24h': 'Por 24 h',
@@ -385,6 +383,15 @@ const conexoes = {
   'prazo.8h': '8 h',
   'prazo.72h': '72 h',
   'prazo.sempre': 'Sempre',
+  // rc.28: com mais de 3 ações o cartão recolhe num principal com o seletor ao lado
+  'cartao.aprovarPorPrazo': 'Aprovar por {prazo}',
+  'cartao.aprovarSempre': 'Aprovar sempre',
+  'cartao.prazo': 'Prazo da aprovação',
+  'cartao.permitir.pedido': 'Permitir só neste pedido',
+  'cartao.permitir.24h': 'Permitir por 24 h',
+  'cartao.permitir.sempre': 'Permitir sempre',
+  'cartao.enviando': 'Enviando…',
+  'cartao.recusando': 'Recusando…',
 
   // ——— o modelo padrão (components/ModeloPadrao.tsx) ———
   'modelo.titulo': 'Modelo padrão',

@@ -163,20 +163,6 @@ export class AiService {
   }
 
   /**
-   * Conexões ligadas por padrão (ausente = ligado): ao abrir o motor, se o conjunto das Conexões é um dos seguros mas não
-   * está ligado, liga — a menos que a pessoa tenha desligado (`desligadoPelaPessoa`, gravado quando ela tira em
-   * Configurações › Ferramentas). Rede de segurança para motores que vieram de uma versão sem as Conexões. E o contrário:
-   * a pessoa desligou (a escolha só passou a ser gravada na rc.24: as versões de antes não gravavam nada) e o motor voltou
-   * com as Conexões ligadas (renovado, ou a migração do cofre pôs o conjunto na lista): a escolha dela vale de novo ao
-   * abrir. Devolve o que mudou ('ligou', 'desligou') ou null. (rc.27: só as Conexões, por ensureBeneficios.)
-   */
-  async ensureConexoes(desligadoPelaPessoa: boolean): Promise<'ligou' | 'desligou' | null> {
-    const r = await this.ensureBeneficios(new Set(desligadoPelaPessoa ? ['contas'] : []), ['contas']);
-    if (!r) return null;
-    return r.desligou.includes(CONEXOES) ? 'desligou' : r.ligou.includes(CONEXOES) ? 'ligou' : null;
-  }
-
-  /**
    * Benefícios ligados por padrão (regra do dono, 12/11; ausente = ligado), a generalização das Conexões: ao abrir o motor,
    * cada conjunto-benefício da plataforma (BENEFICIOS_DA_PLATAFORMA: as Conexões e os que a imagem da rc.27 traz) que o motor
    * aceita e não está ligado é ligado — a menos que a pessoa o tenha desligado ('ferramentas.<id>' = 'desligado', gravado em

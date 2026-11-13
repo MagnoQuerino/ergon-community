@@ -3,12 +3,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { Db } from '../src/db/db.ts';
+import { findConnection } from '../src/services/ingest.ts';
+import { importBoards } from '../src/services/mirror.ts';
+import { FixtureTaskProvider } from './mirror-fixture.ts';
 import { allAgents, drain, harness, loginAs, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
 
 describe('espelho de quadro (fixture em formato inspirado no Planner)', () => {
   let h: Harness;
   let s: Session;
-  const imp = (variant: string) => req(h, 'POST', '/api/mirror/import', s, { variant, boards: ['plan-fixture-1'] });
+  // o provedor de fixture só existe nos testes: a importação é a mesma dos aplicativos reais (importBoards)
+  const imp = (variant: string) => importBoards(h.db, h.bus, s.workspaceId, findConnection(h.db, s.workspaceId, 'mirror_fixture', 'fixture').id, s.userId,
+    new FixtureTaskProvider(h.cfg.fixturesDir, variant), ['plan-fixture-1']);
   const mirrored = () => h.db.all<{ id: string; title: string; completed: number; completed_by: string | null; column: string; ext: string; sync_state: string; conflict: string | null; extra: string }>(
     `SELECT t.id, t.title, t.completed, t.completed_by, c.name AS column, l.external_id AS ext, l.sync_state, l.conflict, l.external_extra AS extra
        FROM tasks t JOIN task_links l ON l.task_id = t.id JOIN columns c ON c.id = t.column_id ORDER BY l.external_id`);
@@ -16,16 +21,16 @@ describe('espelho de quadro (fixture em formato inspirado no Planner)', () => {
   after(async () => { await h.close(); });
 
   test('prévia mostra alcance antes de importar', async () => {
-    const p = (await req(h, 'GET', '/api/mirror/preview?variant=planner-like-v1', s)).json;
-    assert.equal(p.fixture, true);
-    assert.equal(p.boards.length, 2);
+    const p = new FixtureTaskProvider(h.cfg.fixturesDir, 'planner-like-v1');
+    assert.equal(p.isFixture, true);
+    assert.equal((await p.listBoards()).length, 2);
     assert.equal(p.supports.writeBack, false);
   });
 
   test('importar duas vezes não duplica', async () => {
-    const r1 = (await imp('planner-like-v1')).json;
+    const r1 = await imp('planner-like-v1');
     assert.equal(r1.boards[0].created, 4);
-    const r2 = (await imp('planner-like-v1')).json;
+    const r2 = await imp('planner-like-v1');
     assert.equal(r2.boards[0].created, 0);
     assert.equal(r2.boards[0].unchanged, 4);
     assert.equal(mirrored().length, 4);
@@ -40,7 +45,7 @@ describe('espelho de quadro (fixture em formato inspirado no Planner)', () => {
   test('mudanças externas: renomear, mover, concluir, ausente, novo; conclusão humana e campos extras preservados', async () => {
     const t1 = mirrored().find((t) => t.ext === 'ptask-1')!;
     await req(h, 'PATCH', `/api/tasks/${t1.id}`, s, { completed: true }); // pessoa conclui no Ergon
-    const r = (await imp('planner-like-v2')).json.boards[0];
+    const r = (await imp('planner-like-v2')).boards[0];
     assert.equal(r.created, 1);
     assert.equal(r.missing, 1);
     assert.equal(r.conflicts, 1);
@@ -58,13 +63,13 @@ describe('espelho de quadro (fixture em formato inspirado no Planner)', () => {
     const cols = h.db.all<{ name: string }>("SELECT c.name FROM columns c JOIN boards b ON b.id = c.board_id WHERE b.origin = 'mirror' ORDER BY position");
     assert.deepEqual(cols.map((c) => c.name), ['A fazer', 'Em andamento', 'Concluído']);
     // reimportar v2: idempotente
-    const again = (await imp('planner-like-v2')).json.boards[0];
+    const again = (await imp('planner-like-v2')).boards[0];
     assert.equal(again.created + again.updated, 0);
   });
 
   test('perda de permissão marca erro e não esvazia nem exclui', async () => {
     const before = mirrored().length;
-    const r = (await imp('planner-like-erro')).json.boards[0];
+    const r = (await imp('planner-like-erro')).boards[0];
     assert.equal(r.state, 'error');
     assert.equal(mirrored().length, before);
     const b = h.db.get<{ sync_state: string; last_error: string }>("SELECT sync_state, last_error FROM boards WHERE origin = 'mirror'")!;

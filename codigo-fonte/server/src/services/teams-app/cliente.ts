@@ -175,9 +175,6 @@ export class ClienteRele {
     p.reenvio.unref?.();
   }
 
-  /** Quantos pedidos esperam ack (a saída não manda o mesmo id duas vezes). */
-  emVoo(id: string): boolean { return this.pendentes.has(id); }
-
   private limpar(p: Pendente): void { if (p.reenvio) clearTimeout(p.reenvio); if (p.prazo) clearTimeout(p.prazo); p.reenvio = null; p.prazo = null; }
 
   private rejeitarPendentes(): void {

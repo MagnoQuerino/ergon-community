@@ -30,7 +30,7 @@
     "homepage": "https://github.com/MagnoQuerino/ergon-community",
     "category": "Productivity",
     "shortDescription": "Sua equipe de agentes de IA, numa janela própria",
-    "longDescription": "O Ergon Desktop abre o Ergon instalado neste computador numa janela própria: confere os serviços locais (Docker), liga o que estiver parado quando você pede e mostra a mesma interface do navegador. Os dados continuam nos serviços do Ergon; remover o aplicativo não apaga nada.",
+    "longDescription": "O Ergon Desktop abre o Ergon instalado neste computador numa janela própria: confere os serviços do Ergon, liga o que estiver parado quando você pede e mostra a mesma interface do navegador. Os dados continuam nos serviços do Ergon; remover o aplicativo não apaga nada.",
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
       "nsis": {

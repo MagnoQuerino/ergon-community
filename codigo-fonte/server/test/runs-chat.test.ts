@@ -121,7 +121,7 @@ describe('chat: interpretação e política por perfil', () => {
     const after1 = h.db.get<{ title: string; revision: number }>('SELECT title, revision FROM tasks WHERE id = ?', t.id)!;
     assert.equal(after1.title, 'Relatório trimestral de despesas (Q3)');
     await say(central, 'A partir de agora, todo relatório deve ter um resumo executivo', 'req-chat-0007');
-    const rules = (await req(h, 'GET', '/api/rules', s)).json;
+    const rules = h.db.all<{ status: string }>('SELECT status FROM rules WHERE workspace_id = ?', s.workspaceId);
     assert.equal(rules.length, 1);
     assert.equal(rules[0].status, 'proposed');
     assert.equal(h.db.get<{ title: string }>('SELECT title FROM tasks WHERE id = ?', t.id)!.title, after1.title);
@@ -142,21 +142,6 @@ describe('chat: interpretação e política por perfil', () => {
     await drain(h, 3);
     const ok = await req(h, 'POST', `/api/conversations/${central}/messages`, s, { text: 'outra', clientRequestId: 'req-chat-busy2' });
     assert.equal(ok.status, 201);
-  });
-
-  test('delegar tarefa a agente usa a mesma fila e registra resultado no log da tarefa', async () => {
-    await drain(h, 3);
-    const st = { agents: await allAgents(h, s) };
-    const t = h.db.get<{ id: string }>('SELECT id FROM tasks ORDER BY number LIMIT 1')!;
-    const r = await req(h, 'POST', `/api/tasks/${t.id}/delegate`, s, { agentId: st.agents[2].id, instruction: 'sugira próximo passo', requestId: 'req-deleg-0001' });
-    assert.equal(r.status, 202);
-    await drain(h, 3);
-    const log = (await req(h, 'GET', `/api/tasks/${t.id}`, s)).json.log as Array<{ action: string; evidence: string }>;
-    const res = log.find((e) => e.action === 'agent.result.succeeded');
-    assert.ok(res);
-    assert.match(res!.evidence, /simulated/);
-    // subtarefa não cria habitante
-    assert.equal((await req(h, 'GET', '/api/capacity', s)).json.active, 12);
   });
 });
 

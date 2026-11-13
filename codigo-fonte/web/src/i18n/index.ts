@@ -28,7 +28,7 @@ const CARREGAR: Record<Idioma, () => Promise<Areas>> = {
 };
 const carregando = new Map<Idioma, Promise<void>>();
 /** Baixa o dicionário do idioma (uma vez). Falhou (sem rede no meio da troca): a próxima tentativa baixa de novo. */
-export function carregarIdioma(l: Idioma): Promise<void> {
+function carregarIdioma(l: Idioma): Promise<void> {
   if (DICIONARIOS[l]) return Promise.resolve();
   let p = carregando.get(l);
   if (!p) {
@@ -80,7 +80,7 @@ const guardar = (l: Idioma) => { guardarEm(CHAVE_LOCAL, l); if (pessoa) guardarE
 const linguaDoNavegador = (): string | undefined => (typeof navigator === 'undefined' ? undefined : navigator.language);
 
 /** Sem escolha nenhuma: o idioma do navegador (enquanto o inglês não é liberado, o português). */
-export function idiomaSemEscolha(liberado: boolean = IDIOMA_INGLES_LIBERADO): Idioma {
+function idiomaSemEscolha(liberado: boolean = IDIOMA_INGLES_LIBERADO): Idioma {
   return liberado ? idiomaDoNavegador(linguaDoNavegador()) : IDIOMA_PADRAO;
 }
 /** Ao abrir a página (antes de entrar): a última escolha feita neste navegador; sem ela, a do navegador. */

@@ -230,12 +230,15 @@ ERGON_UPDATE_URL="$URL_TESTE" "$E" "$N_UPDATE" > "$W/atualizar.log" 2>&1 && ok "
 
 # ---------------------------------------------------------------- remover: o Ergon sai, os dados ficam
 REPOS="$(refs "$PROG/docker-compose.yml" | while read -r r; do repo_de "$r"; done | sort -u | tr '\n' ' ')"
-sobra() { local r s=''; for r in $REPOS; do "$MC" images --format '{{.Repository}}' 2>/dev/null | grep -qxF "$r" && s="$s $r"; done; printf '%s' "$s"; }
+# a lista vai inteira para uma variável antes da busca: com "pipefail", um "| grep -q" que acha logo na primeira linha
+# fecha o cano, o programa da esquerda sai com erro e a conferência reprova o que está certo
+sobra() { local r s='' i; i="$("$MC" images --format '{{.Repository}}' 2>/dev/null || true)"; for r in $REPOS; do grep -qxF "$r" <<<"$i" && s="$s $r"; done; printf '%s' "$s"; }
+tem_volume() { local v; v="$("$MC" volume ls -q 2>/dev/null || true)"; grep -q "$1" <<<"$v"; }
 "$E" "$N_UNINSTALL" > "$W/remover.log" 2>&1 && ok "ergon $N_UNINSTALL" "$(tail -1 "$W/remover.log")" || falha "ergon $N_UNINSTALL" "$(tail -3 "$W/remover.log" | tr '\n' ' ')"
 [[ -z "$("$MC" ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$("$MC" ps -aq --filter label=ergon.motor)" ]] && ok "contêineres" "nenhum do Ergon" || falha "contêineres" "$("$MC" ps -a --format '{{.Names}}' | tr '\n' ' ')"
 S="$(sobra)"; [[ -z "$S" ]] && ok "imagens" "nenhuma dos repositórios do Ergon (o do serviço e o do motor de IA: $REPOS)" || falha "imagens" "ficaram de$S"
-"$MC" volume ls -q | grep -q '^ergon_ergon-data$' && ok "dados guardados" "volume ergon_ergon-data continua" || falha "dados guardados" "o volume sumiu"
-if [[ -n "$VA" ]]; then "$MC" volume ls -q | grep -q '^ergon_motor-' && ok "cofre do motor guardado" "o volume do motor da pessoa continua" || falha "cofre do motor guardado" "o volume sumiu"; fi
+tem_volume '^ergon_ergon-data$' && ok "dados guardados" "volume ergon_ergon-data continua" || falha "dados guardados" "o volume sumiu"
+if [[ -n "$VA" ]]; then tem_volume '^ergon_motor-' && ok "cofre do motor guardado" "o volume do motor da pessoa continua" || falha "cofre do motor guardado" "o volume sumiu"; fi
 [[ ! -e "$E" && ! -d "$PROG" && -f "$HOME/.ergon/secrets/ergon.env" && -n "$(ls "$HOME/.ergon/backups" 2>/dev/null)" ]] && ok "comando e pasta do programa" "removidos; segredos e backups guardados" || falha "comando e pasta do programa" "$(ls -d "$E" "$PROG" "$HOME/.ergon"/* 2>&1 | tr '\n' ' ')"
 
 # ---------------------------------------------------------------- instalar de novo: a conta volta
@@ -246,7 +249,7 @@ L=$(curl -sS -o /dev/null -w '%{http_code}' -H 'content-type: application/json' 
 [[ "$L" == 200 ]] && ok "dados de volta" "a mesma conta entra com a mesma senha" || falha "dados de volta" "login $L"
 
 # ---------------------------------------------------------------- uninstall --purge: nada fica
-env "$CONFIRMA=errado" "$E" "$N_UNINSTALL" "$N_PURGE" > "$W/nao.log" 2>&1; "$MC" volume ls -q | grep -q '^ergon_ergon-data$' && ok "$N_UNINSTALL $N_PURGE sem confirmar" "nada apagado" || falha "$N_UNINSTALL $N_PURGE sem confirmar" "apagou"
+env "$CONFIRMA=errado" "$E" "$N_UNINSTALL" "$N_PURGE" > "$W/nao.log" 2>&1; tem_volume '^ergon_ergon-data$' && ok "$N_UNINSTALL $N_PURGE sem confirmar" "nada apagado" || falha "$N_UNINSTALL $N_PURGE sem confirmar" "apagou"
 env "$CONFIRMA=$PALAVRA" "$E" "$N_UNINSTALL" "$N_PURGE" > "$W/tudo.log" 2>&1 && ok "ergon $N_UNINSTALL $N_PURGE" "$(tail -1 "$W/tudo.log")" || falha "ergon $N_UNINSTALL $N_PURGE" "$(tail -3 "$W/tudo.log" | tr '\n' ' ')"
 [[ -z "$("$MC" volume ls -q | grep -E '^ergon_')" ]] && ok "volumes" "nenhum do Ergon" || falha "volumes" "$("$MC" volume ls -q | grep -E '^ergon_' | tr '\n' ' ')"
 S="$(sobra)"; [[ -z "$("$MC" ps -aq --filter label=com.docker.compose.project=ergon)" && -z "$S" ]] && ok "contêineres e imagens" "nenhum" || falha "contêineres e imagens" "ficaram:$S"

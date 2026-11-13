@@ -293,7 +293,7 @@ describe('núcleo operacional: cenários integrados (Etapa 9)', () => {
     let d = await detail(ext.id);
     assert.equal(d.task.completed, 0); assert.equal(d.work.result.state, 'sem_confirmacao'); assert.equal(d.work.state, 'aguardando_aprovacao');
     assert.equal(d.files.deliverables.length, 1, 'o preparo fica no card');
-    assert.equal((await req(h, 'POST', `/api/tasks/${ext.id}/decision`, s, { decision: 'aprovar' })).json.justification, 'Ação externa confirmada por você.');
+    assert.equal((await req(h, 'POST', `/api/tasks/${ext.id}/respond`, s, { action: 'approve' })).json.result, 'Ação externa confirmada por você.');
     d = await detail(ext.id);
     assert.equal(d.task.completed, 1); assert.equal(d.task.completed_by, 'human', 'conclusão por decisão sua é conclusão humana');
     assert.equal(d.work.result.state, 'confirmado_humano'); assert.equal(d.work.result.decidedBy, s.userId);
@@ -305,10 +305,10 @@ describe('núcleo operacional: cenários integrados (Etapa 9)', () => {
     await work(appr.id);
     d = await detail(appr.id);
     assert.equal(d.task.completed, 0); assert.equal(d.work.state, 'aguardando_aprovacao'); assert.equal(d.work.result.state, 'aguardando_aprovacao');
-    assert.equal((await req(h, 'POST', `/api/tasks/${appr.id}/decision`, s, { decision: 'devolver', note: '' })).status, 400, 'devolver exige instrução');
-    await req(h, 'POST', `/api/tasks/${appr.id}/decision`, s, { decision: 'aprovar', note: 'Conferi os números.' });
+    assert.equal((await req(h, 'POST', `/api/tasks/${appr.id}/respond`, s, { action: 'return', text: '' })).status, 400, 'devolver exige instrução');
+    await req(h, 'POST', `/api/tasks/${appr.id}/respond`, s, { action: 'approve' });
     d = await detail(appr.id);
-    assert.equal(d.task.completed, 1); assert.match(d.work.result.justification, /Aprovada e concluída por você\. Conferi os números\./);
+    assert.equal(d.task.completed, 1); assert.match(d.work.result.justification, /Aprovada e concluída por você\./);
     // execução tardia (reinício) não mexe no que você decidiu
     assert.equal(h.results.reconcile(), 0);
     assert.equal((await detail(appr.id)).work.result.state, 'confirmado_humano');
@@ -324,7 +324,7 @@ describe('núcleo operacional: cenários integrados (Etapa 9)', () => {
     const del = d.files.deliverables[0].id;
     assert.equal((await req(h, 'GET', `/api/tasks/${c.id}`, b)).status, 404);
     assert.equal((await req(h, 'POST', `/api/tasks/${c.id}/work`, b)).status, 404);
-    assert.equal((await req(h, 'POST', `/api/tasks/${c.id}/decision`, b, { decision: 'aprovar' })).status, 404);
+    assert.equal((await req(h, 'POST', `/api/tasks/${c.id}/respond`, b, { action: 'approve' })).status, 404);
     assert.equal((await req(h, 'PUT', `/api/tasks/${c.id}/approval`, b, { required: true })).status, 404);
     assert.equal((await req(h, 'GET', `/api/artifacts/${del}/download`, b)).status, 404);
     assert.equal((await upload(c.id, SAMPLE, 'x.csv', 'text/csv', b)).status, 404, 'não anexa arquivo ao card de outro workspace');

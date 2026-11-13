@@ -11,7 +11,6 @@ import { GRECIA_CLASSICA, rollFigure, type GraphicPack, type HairStyle, type Hea
 import type { SkinFace, Species } from '../../../shared/skin.ts';
 import { hairBack, hairFront, headwear as skinHeadwear, item as skinItem, kitBottom, kitCape, kitLegs, kitSleeves, kitTop, speciesAndFace, type Kit, type Pen } from './figureParts.ts';
 
-export type { HairStyle, Item } from '../world/pack.ts';
 export type Facing = 'front' | 'back'; // frente = 3/4 virado para o observador; costas = afastando-se
 export type Pose = 'stand' | 'walk' | 'sit' | 'perch'; // sit = atrás da mesa (pernas escondidas); perch = em banco ou degrau, pernas à mostra
 export type Expr = 'smile' | 'neutral' | 'surprised' | 'focused' | 'worried' | 'angry';
@@ -482,7 +481,7 @@ export function gridBox(grid: Grid): [number, number, number, number] {
   return [x0, y0, x1, y1];
 }
 
-export function gridSprite(grid: Grid, ax: number, ay: number): Sprite {
+function gridSprite(grid: Grid, ax: number, ay: number): Sprite {
   const h = grid.length; const w = grid[0]?.length ?? 0;
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const g = c.getContext('2d')!;

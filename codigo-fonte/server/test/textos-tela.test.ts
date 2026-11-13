@@ -10,7 +10,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { decimal, paraTela, temJargao } from '../src/lib/texto-tela.ts';
-import { GUARDED_RISK, TOOLS } from '../src/services/characters.ts';
+import { TOOLS } from '../src/services/characters.ts';
 import { motivoDoProvedor } from '../src/services/integrations.ts';
 import { motivoParaTela } from '../src/services/motors.ts';
 import { SSO } from '../src/services/sso.ts';
@@ -124,8 +124,6 @@ test('ferramentas, Treinar e guia: os nomes que a tela mostra, iguais no servido
     assert.ok(!jargao(`${t.label} ${t.note}`), t.id);
     assert.doesNotMatch(`${t.label} ${t.note}`, PROIBIDAS, t.id);
   }
-  assert.ok(!jargao(GUARDED_RISK));
-  assert.match(GUARDED_RISK, /ambiente isolado da equipe/);
   assert.equal(TOOLS.habilidades.label, 'Competências da biblioteca');
   assert.equal(TOOLS.habilidades.toolset, 'skills', 'o nome do dado não muda: só o rótulo');
   const janela = fs.readFileSync(path.resolve(src, '../../web/src/components/AgentWindow.tsx'), 'utf8');

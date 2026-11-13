@@ -104,7 +104,6 @@ export class TeamsApp {
   cliente: ClienteRele | null = null;
   problema: Problema = null;
   teamsAppUrl: string | null = null;
-  private recebendoFila = false;
   private registradoDeNovo = false;
   private fila: Promise<void> = Promise.resolve();
   /** o relógio deste computador (os testes adiantam ou atrasam) */
@@ -410,8 +409,7 @@ export class TeamsApp {
         if (ack.status === 'accepted') for (const fn of depois) { try { fn(); } catch (err) { log.warn({ erro: (err as Error).message.slice(0, 120) }, 'teams: depois do ack'); } }
         return;
       }
-      case 'queue.begin': this.recebendoFila = true; return;
-      case 'queue.end': this.recebendoFila = false; return;
+      case 'queue.begin': case 'queue.end': return; // o começo e o fim do que ficou guardado no serviço: as entregas vêm no meio
       case 'error': return;
       case 'ack': return; // confirmação que chegou depois do prazo do pedido: nada a fazer
       default:
@@ -1086,8 +1084,4 @@ export class TeamsApp {
     }
     this.avisarTela(userId);
   }
-
-  /** Para os testes e o diagnóstico: o que está na fila de saída. */
-  pendentesDeSaida(): number { return Number(this.d.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM teams_outbox WHERE status = 'pending'")?.n ?? 0); }
-  recebendoGuardados(): boolean { return this.recebendoFila; }
 }

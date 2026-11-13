@@ -2,8 +2,7 @@
 
 A tela fala português e inglês por dicionários: `pt/<area>.ts` é a origem e `en/<area>.ts` é a tradução, tipada pelo
 português. Cada arquivo de tela pertence a uma área (`particao.ts`); a equipe da área só mexe nos arquivos dela, no
-`pt/<area>.ts`, no `en/<area>.ts` e na lista dela em `pendentes.ts`. Os índices (`pt/index.ts`, `en/index.ts`) já têm
-todas as áreas e não mudam.
+`pt/<area>.ts` e no `en/<area>.ts`. Os índices (`pt/index.ts`, `en/index.ts`) já têm todas as áreas e não mudam.
 
 ## O passo a passo
 
@@ -16,8 +15,7 @@ todas as áreas e não mudam.
 2. Escreva a chave em `pt/<area>.ts` com o texto de hoje, sem mudar nada, e a mesma chave em `en/<area>.ts` com o
    inglês (termos fixos em `GLOSSARIO.md`). Nomes de chave: o lugar e a ideia (`barra.modoFoco`,
    `estado.naFila`), nunca a frase.
-3. Tire o arquivo da lista da sua área em `pendentes.ts`.
-4. Rode `cd web && npm test` e `npx tsc --noEmit -p .`. Testes antigos que procuravam o texto em português dentro do
+3. Rode `cd web && npm test` e `npx tsc --noEmit -p .`. Testes antigos que procuravam o texto em português dentro do
    código (`assert.match(app, /Modo Foco/)`) passam a procurar a chave (`t('geral.barra.modoFoco')`).
 
 ## Formas de texto
@@ -53,8 +51,7 @@ na linha (ou na de cima), e somem quando o servidor passar a mandar um código.
 
 ## O teste-catraca (catraca.test.ts)
 
-Falha quando um arquivo de tela fora de `pendentes.ts` tem texto em português escrito direto no código, e quando um
-arquivo da lista já está limpo (para a lista só diminuir). A heurística está no começo de `varredura.ts`: texto solto
+Falha quando um arquivo de tela tem texto em português escrito direto no código. A heurística está no começo de `varredura.ts`: texto solto
 no JSX, letras acentuadas do português, frases (duas palavras ou mais com maiúscula, ponto final ou palavra curta do
 português; num template, `${n} agentes` e o plural montado à mão), texto em atributo ou propriedade visível (`title`,
 `aria-label`, `placeholder`, `label`, `name`…) ou no argumento de quem mostra (`toast`, `alert`, `confirm`, `setHint`,
@@ -63,8 +60,8 @@ argumento, valor padrão, valor inicial ou retorno, e o `'pt-BR'` fixo. Ao falha
 e texto de cada achado.
 
 A palavra solta com maiúscula também pega nomes internos (`'Files'` do arrastar arquivos, um valor que a API espera
-assim). Esses ficam com `// i18n-ok: <porquê>` na linha (ou na de cima). Não tire o arquivo dos pendentes com texto
-de tela marcado como i18n-ok: o comentário é para o que não é tela.
+assim). Esses ficam com `// i18n-ok: <porquê>` na linha (ou na de cima). Não marque texto de tela como i18n-ok: o
+comentário é para o que não é tela.
 
 ## lib/textos-tela.ts (área servidor)
 
@@ -92,7 +89,7 @@ Para conferir: no console do navegador, `localStorage.setItem('ergon.idioma', 'e
 
 ## No dia de ligar o inglês (IDIOMA_INGLES_LIBERADO = true)
 
-- `pendentes.ts` vazio em todas as áreas (o teste-catraca garante).
+- Nenhum arquivo de tela com texto em português fora do dicionário (o teste-catraca garante).
 - Os ensaios de tela no navegador (`scripts/telas/*.mjs`, Edge headless costuma vir em en-US) procuram textos em
   português como "Modo Foco": fixe o idioma deles (`localStorage 'ergon.idioma' = 'pt-BR'` antes de abrir, ou
   `--lang=pt-BR`) ou faça-os procurar pelas duas línguas.

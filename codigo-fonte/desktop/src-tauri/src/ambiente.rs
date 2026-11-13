@@ -44,16 +44,6 @@ const fn mesmo_texto(a: &str, b: &str) -> bool {
 const LIMITE_MANIFESTO: u64 = 1 << 20;
 const PORTA: u16 = crate::instalacao::PORTA_PADRAO;
 
-pub const ETAPAS: [(&str, &str); 7] = [
-    ("diagnostico", "Conferindo este computador"),
-    ("wsl", "Preparando o Windows (WSL)"),
-    ("baixar", "Baixando os componentes"),
-    ("importar", "Criando o ambiente do Ergon"),
-    ("configurar", "Configurando"),
-    ("ligar", "Ligando os serviços"),
-    ("conferir", "Conferindo a instalação"),
-];
-
 pub enum Evento {
     Etapa(&'static str),
     Linha(String),
@@ -132,11 +122,6 @@ fn gravar_progresso(p: &mut Progresso) -> Result<(), String> {
 fn concluir(p: &mut Progresso, etapa: &str) -> Result<(), String> {
     p.concluida = etapa.into();
     gravar_progresso(p)
-}
-#[cfg_attr(not(test), allow(dead_code))]
-fn passou(p: &Progresso, etapa: &str) -> bool {
-    let i = |e: &str| ETAPAS.iter().position(|(n, _)| *n == e);
-    matches!((i(&p.concluida), i(etapa)), (Some(a), Some(b)) if a >= b) || p.concluida == "pronto"
 }
 
 /// A instalação pelo ambiente próprio terminou neste computador (o aplicativo usa o motor de contêineres de dentro dele).
@@ -274,11 +259,25 @@ pub fn instalar(ev: &mut dyn FnMut(Evento)) -> Result<Fim, String> {
     sem_boas_vindas_do_wsl();
     if !wsl_pronto() {
         if p.reinicio_pedido {
-            return Err("O WSL ainda não responde depois do reinício. Reinicie o Windows mais uma vez; se continuar, rode a instalação de novo.".into());
+            // a próxima tentativa (botão Começar) ativa de novo, em vez de pedir outro reinício
+            p.reinicio_pedido = false;
+            gravar_progresso(&mut p)?;
+            return Err(format!("O WSL ainda não responde depois do reinício. Tente de novo: o Ergon ativa o WSL outra vez. {}", fim_do_registro_de_ativacao()).trim().to_string());
         }
         ev(Evento::Linha("Ativando o WSL do Windows (o Windows pede permissão de administrador)…".into()));
-        ativar_wsl()?;
-        if !wsl_pronto() {
+        let precisa_reiniciar = match ativar_wsl(ev)? {
+            Ativacao::Terminou { pede_reinicio: true, .. } => true,
+            _ if wsl_pronto() => false,
+            // terminou bem, mas o WSL só responde depois de o Windows reiniciar
+            Ativacao::Terminou { codigo: 0, .. } => true,
+            Ativacao::Terminou { codigo, .. } => {
+                return Err(format!("O Windows não conseguiu ativar o WSL (código {codigo}). {}", fim_do_registro_de_ativacao()).trim().to_string());
+            }
+            Ativacao::AindaRodando => {
+                return Err(format!("A ativação do WSL passou de 30 minutos sem terminar. Confira a internet; em computador de empresa, o bloqueio de downloads pode impedir a ativação: peça ao suporte para instalar o WSL e abra o Ergon de novo. {}", fim_do_registro_de_ativacao()).trim().to_string());
+            }
+        };
+        if precisa_reiniciar {
             p.reinicio_pedido = true;
             gravar_progresso(&mut p)?;
             agendar_continuacao()?;
@@ -534,20 +533,383 @@ pub(crate) fn transmitir(c: &mut Command, prazo: Duration, ev: &mut dyn FnMut(Ev
 }
 
 // ------------------------------------------------------------------------------------------------- Windows
-/// `wsl --install --no-distribution`, com o pedido de administrador do Windows (UAC). Só ativa o WSL: nenhuma
-/// distribuição é instalada além da nossa.
-fn ativar_wsl() -> Result<(), String> {
+#[derive(Debug, PartialEq)]
+enum Ativacao {
+    Terminou { codigo: u32, pede_reinicio: bool },
+    /// passou do prazo e o instalador do Windows continua rodando (não é interrompido: parar no meio estraga mais)
+    AindaRodando,
+}
+
+/// O que o instalador do WSL escreveu na última tentativa (fica na pasta do ambiente, para o diagnóstico).
+fn registro_de_ativacao() -> PathBuf {
+    pasta().join("ativar-wsl.log")
+}
+
+/// `wsl --install --no-distribution --web-download`, com o pedido de administrador do Windows (UAC). Só ativa o WSL:
+/// nenhuma distribuição é instalada além da nossa. Lições do primeiro teste num computador sem WSL:
+/// - `--web-download` baixa o WSL direto da Microsoft no GitHub, sem a Loja (bloqueada em muitas empresas, e aí o
+///   instalador fica parado sem dizer nada); o próprio Ergon já depende do GitHub para baixar os componentes;
+/// - espera só o processo que abrimos (o `Start-Process -Wait` de antes esperava também tudo o que o instalador deixa
+///   aberto e podia ficar 30 minutos parado com o WSL já ativado);
+/// - a saída do instalador vai para um arquivo, que a tela acompanha: a pessoa vê o download andar.
+fn ativar_wsl(ev: &mut dyn FnMut(Evento)) -> Result<Ativacao, String> {
     // nos testes, ativar o WSL reiniciaria a máquina de teste: proibido
     if cfg!(feature = "origens-de-teste") && std::env::var_os("ERGON_PROIBIR_ATIVAR_WSL").is_some() {
         return Err("TESTE: o WSL não foi encontrado e ativá-lo está proibido neste teste".into());
     }
-    let ps = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
-    let mut c = comando(ps);
-    c.args(["-NoProfile", "-NonInteractive", "-Command", "try { $p = Start-Process -FilePath \"$env:SystemRoot\\System32\\wsl.exe\" -ArgumentList '--install','--no-distribution' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode } catch { exit 1223 }"]);
-    let o = rodar(c, Duration::from_secs(30 * 60)).map_err(|e| e.to_string())?;
-    match o.status.code() {
-        Some(1223) => Err("A permissão de administrador foi negada. O WSL é necessário para o Ergon; tente de novo e aceite o pedido do Windows.".into()),
-        _ => Ok(()),
+    fs::create_dir_all(pasta()).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(registro_de_ativacao());
+    // A saída do cmd elevado vem por um cano com nome (criado por nós, sem administrador) e não por um arquivo: um
+    // processo de administrador escrevendo numa pasta da conta pode ser desviado para um arquivo do sistema. Um cano
+    // por passo, então cada parte tem uma codificação só (o WSL antigo escreve em UTF-16, o novo em UTF-8).
+    let coletor = elevado::Coletor::novo(3).ok();
+    let p = elevado::abrir_como_administrador(&cmd_exe(), &linha_de_ativacao(&wsl_exe(), coletor.as_ref().map(|c| c.nome()))).map_err(|c| match c {
+        1223 => "A permissão de administrador foi negada. O WSL é necessário para o Ergon; tente de novo e aceite o pedido do Windows.".to_string(),
+        c => format!("O Windows não abriu o instalador do WSL (código {c})."),
+    })?;
+    ev(Evento::Linha("Permissão concedida. Baixando e ativando o WSL (leva alguns minutos)…".into()));
+    let fim = Instant::now() + Duration::from_secs(30 * 60);
+    let (mut vistas, mut ultimo_progresso, mut avisou) = (0usize, None::<Instant>, false);
+    loop {
+        let codigo = p.esperar(Duration::from_secs(1));
+        if codigo.is_some() {
+            if let Some(c) = &coletor {
+                c.soltar();
+            }
+        }
+        let partes = coletor.as_ref().map(|c| c.partes(codigo.is_some())).unwrap_or_default();
+        let texto = texto_das_partes(&partes);
+        if partes.len() >= 2 && !avisou {
+            avisou = true;
+            ev(Evento::Linha("Este Windows tem o WSL antigo: atualizando o WSL por outro caminho…".into()));
+        }
+        let linhas = linhas_do_registro(&texto, codigo.is_some());
+        for l in linhas.iter().skip(vistas) {
+            if eh_progresso(l) {
+                // a barra de progresso reescreve a mesma linha várias vezes por segundo: uma a cada 5 s basta
+                if ultimo_progresso.is_some_and(|t: Instant| t.elapsed() < Duration::from_secs(5)) {
+                    continue;
+                }
+                ultimo_progresso = Some(Instant::now());
+            }
+            ev(Evento::Linha(l.chars().take(300).collect()));
+        }
+        vistas = vistas.max(linhas.len());
+        let acabou = codigo.is_some() || Instant::now() > fim;
+        if acabou {
+            // o registro para o diagnóstico é gravado por nós, sem administrador
+            let _ = fs::write(registro_de_ativacao(), texto.as_bytes());
+        }
+        if let Some(codigo) = codigo {
+            return Ok(Ativacao::Terminou { codigo, pede_reinicio: pede_reinicio(codigo, &texto) });
+        }
+        if acabou {
+            return Ok(Ativacao::AindaRodando);
+        }
+    }
+}
+
+/// O texto de cada passo, cada um na sua codificação, um depois do outro.
+fn texto_das_partes(partes: &[Vec<u8>]) -> String {
+    partes.iter().map(|b| texto_wsl(b)).collect::<Vec<_>>().join("\n")
+}
+
+/// Parâmetros do cmd elevado (os caminhos e o cano vão entre aspas; com /s, o cmd tira só as aspas de fora). Cada
+/// passo manda a saída para o cano com nome, quando há um (sem ele, a saída se perde, mas a ativação acontece).
+/// O WSL antigo que vinha com o Windows (10 e Server 2022) não conhece "--install --no-distribution" e sai com erro
+/// na hora (medido na esteira): aí a segunda tentativa troca esse WSL pelo atual com "--update --web-download" e
+/// repete a ativação, já com o wsl.exe novo.
+fn linha_de_ativacao(wsl: &Path, cano: Option<&str>) -> String {
+    let w = wsl.display();
+    let r = cano.map(|c| format!(" > \"{c}\" 2>&1")).unwrap_or_default();
+    format!(
+        "/d /s /c \"set WSL_UTF8=1&& \"{w}\" --install --no-distribution --web-download{r} || (\"{w}\" --update --web-download{r}& \"{w}\" --install --no-distribution --web-download{r})\""
+    )
+}
+fn cmd_exe() -> PathBuf {
+    std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join(r"System32\cmd.exe")
+}
+/// Linhas do registro (a barra de progresso volta com \r). Enquanto o instalador roda, a última pode estar pela metade.
+fn linhas_do_registro(texto: &str, terminou: bool) -> Vec<String> {
+    let mut partes: Vec<&str> = texto.split(['\r', '\n']).collect();
+    if !terminou {
+        partes.pop();
+    }
+    partes.into_iter().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()
+}
+fn eh_progresso(l: &str) -> bool {
+    l.contains('%') && (l.starts_with('[') || l.chars().filter(|c| *c == '=').count() > 3)
+}
+/// 3010 = "terminou, falta reiniciar"; o texto cobre o Windows em português e em inglês.
+fn pede_reinicio(codigo: u32, texto: &str) -> bool {
+    let t = texto.to_lowercase();
+    codigo == 3010 || ["reboot", "restart", "reinicializ", "reinicie", "reiniciar"].iter().any(|p| t.contains(p))
+}
+/// As últimas mensagens do instalador, para o erro e o diagnóstico.
+fn fim_do_registro_de_ativacao() -> String {
+    let texto = fs::read(registro_de_ativacao()).map(|b| texto_wsl(&b)).unwrap_or_default();
+    resumo_do_registro(&texto)
+}
+fn resumo_do_registro(texto: &str) -> String {
+    let l: Vec<String> = linhas_do_registro(texto, true).into_iter().filter(|l| !eh_progresso(l)).collect();
+    if l.is_empty() {
+        return String::new();
+    }
+    let u = l[l.len().saturating_sub(3)..].join(" / ");
+    format!("Última mensagem do Windows: {}", u.chars().take(300).collect::<String>())
+}
+
+/// Abrir um programa com o pedido de administrador do Windows e esperar só por ele (ShellExecuteEx com "runas").
+#[cfg(windows)]
+mod elevado {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use std::time::Duration;
+
+    #[repr(C)]
+    struct Info {
+        cb_size: u32,
+        mascara: u32,
+        hwnd: *mut c_void,
+        verbo: *const u16,
+        arquivo: *const u16,
+        parametros: *const u16,
+        pasta: *const u16,
+        mostrar: i32,
+        inst_app: *mut c_void,
+        id_list: *mut c_void,
+        classe: *const u16,
+        chave_classe: *mut c_void,
+        tecla: u32,
+        icone: *mut c_void,
+        processo: *mut c_void,
+    }
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteExW(info: *mut Info) -> i32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn WaitForSingleObject(h: *mut c_void, ms: u32) -> u32;
+        fn GetExitCodeProcess(h: *mut c_void, codigo: *mut u32) -> i32;
+        fn CloseHandle(h: *mut c_void) -> i32;
+    }
+    const SEE_MASK_NOCLOSEPROCESS: u32 = 0x40;
+    const SEE_MASK_NOASYNC: u32 = 0x100;
+    const SW_HIDE: i32 = 0;
+    const WAIT_OBJECT_0: u32 = 0;
+    const WAIT_TIMEOUT: u32 = 0x102;
+
+    pub struct Processo(*mut c_void);
+    impl Processo {
+        /// Some(código) quando terminou; None se ainda roda depois da espera.
+        pub fn esperar(&self, d: Duration) -> Option<u32> {
+            match unsafe { WaitForSingleObject(self.0, d.as_millis() as u32) } {
+                WAIT_TIMEOUT => None,
+                WAIT_OBJECT_0 => {
+                    let mut c = 0u32;
+                    Some(if unsafe { GetExitCodeProcess(self.0, &mut c) } != 0 { c } else { u32::MAX })
+                }
+                _ => Some(u32::MAX),
+            }
+        }
+    }
+    impl Drop for Processo {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+    fn larga(s: &std::ffi::OsStr) -> Vec<u16> {
+        s.encode_wide().chain(Some(0)).collect()
+    }
+    /// Err(1223) = a pessoa recusou o pedido do Windows.
+    pub fn abrir_como_administrador(programa: &Path, parametros: &str) -> Result<Processo, u32> {
+        let (verbo, arquivo, params) = (larga("runas".as_ref()), larga(programa.as_os_str()), larga(parametros.as_ref()));
+        let mut i = Info {
+            cb_size: std::mem::size_of::<Info>() as u32,
+            mascara: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+            hwnd: std::ptr::null_mut(),
+            verbo: verbo.as_ptr(),
+            arquivo: arquivo.as_ptr(),
+            parametros: params.as_ptr(),
+            pasta: std::ptr::null(),
+            mostrar: SW_HIDE,
+            inst_app: std::ptr::null_mut(),
+            id_list: std::ptr::null_mut(),
+            classe: std::ptr::null(),
+            chave_classe: std::ptr::null_mut(),
+            tecla: 0,
+            icone: std::ptr::null_mut(),
+            processo: std::ptr::null_mut(),
+        };
+        if unsafe { ShellExecuteExW(&mut i) } == 0 {
+            return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32);
+        }
+        if i.processo.is_null() {
+            return Err(0);
+        }
+        Ok(Processo(i.processo))
+    }
+
+    // ------------------------------------------------------------------ canos com nome (a saída do cmd elevado)
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateNamedPipeW(nome: *const u16, abertura: u32, modo: u32, maximo: u32, saida: u32, entrada: u32, espera: u32, seguranca: *mut c_void) -> *mut c_void;
+        fn ConnectNamedPipe(h: *mut c_void, sobreposto: *mut c_void) -> i32;
+        fn ReadFile(h: *mut c_void, buf: *mut u8, n: u32, lidos: *mut u32, sobreposto: *mut c_void) -> i32;
+        fn CreateFileW(nome: *const u16, acesso: u32, compartilhar: u32, seguranca: *mut c_void, disposicao: u32, flags: u32, modelo: *mut c_void) -> *mut c_void;
+        fn LocalFree(h: *mut c_void) -> *mut c_void;
+    }
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl: *const u16, revisao: u32, sd: *mut *mut c_void, tamanho: *mut u32) -> i32;
+    }
+    #[repr(C)]
+    struct AtributosSeguranca {
+        tamanho: u32,
+        descritor: *mut c_void,
+        herdar: i32,
+    }
+    /// Quem pode usar o cano: o sistema, o dono (a pessoa) e quem está como administrador. Sem os administradores,
+    /// numa conta sem privilégio em que outra pessoa digita a senha de administrador (comum em empresas), o cmd elevado
+    /// roda como outra conta, não abre o cano e, pelo jeito do cmd, nem roda o passo.
+    const QUEM_PODE: &str = "D:P(A;;GA;;;SY)(A;;GA;;;OW)(A;;GA;;;BA)";
+    const PIPE_ACCESS_INBOUND: u32 = 0x1;
+    const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x0008_0000;
+    /// PIPE_TYPE_BYTE, PIPE_READMODE_BYTE e PIPE_WAIT valem 0: só a recusa de quem vem pela rede
+    const PIPE_REJECT_REMOTE_CLIENTS: u32 = 0x8;
+    const ERROR_PIPE_CONNECTED: i32 = 535;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const OPEN_EXISTING: u32 = 3;
+    fn invalido(h: *mut c_void) -> bool {
+        h.is_null() || h as isize == -1
+    }
+    struct Cano(*mut c_void);
+    // o handle só é usado pela linha que o recebe
+    unsafe impl Send for Cano {}
+
+    type Partes = std::sync::Arc<std::sync::Mutex<Vec<(usize, Vec<u8>)>>>;
+
+    /// Recebe o que o cmd elevado escreve: n instâncias do mesmo cano, uma por passo; cada uma vira uma parte, na ordem
+    /// em que o passo se conectou. Criado por nós, sem administrador; só aceita quem está neste computador.
+    pub struct Coletor {
+        nome: String,
+        n: usize,
+        partes: Partes,
+        vivas: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl Coletor {
+        pub fn novo(n: usize) -> Result<Coletor, u32> {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            let unico = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+            let nome = format!(r"\\.\pipe\ergon-ativar-wsl-{}-{unico}", std::process::id());
+            let largo = larga(nome.as_ref());
+            let partes: Partes = Default::default();
+            let ordem = std::sync::Arc::new(AtomicUsize::new(0));
+            let vivas = std::sync::Arc::new(AtomicUsize::new(0));
+            let mut sd: *mut c_void = std::ptr::null_mut();
+            let sddl = larga(QUEM_PODE.as_ref());
+            if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut sd, std::ptr::null_mut()) } == 0 {
+                return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32);
+            }
+            let mut atributos = AtributosSeguranca { tamanho: std::mem::size_of::<AtributosSeguranca>() as u32, descritor: sd, herdar: 0 };
+            for i in 0..n {
+                let abertura = PIPE_ACCESS_INBOUND | if i == 0 { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
+                let h = unsafe { CreateNamedPipeW(largo.as_ptr(), abertura, PIPE_REJECT_REMOTE_CLIENTS, n as u32, 0, 64 * 1024, 0, &mut atributos as *mut AtributosSeguranca as *mut c_void) };
+                if invalido(h) {
+                    let e = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
+                    if i == 0 {
+                        unsafe { LocalFree(sd) };
+                        return Err(e);
+                    }
+                    break;
+                }
+                let (cano, partes, ordem, vivas) = (Cano(h), partes.clone(), ordem.clone(), vivas.clone());
+                vivas.fetch_add(1, Ordering::SeqCst);
+                std::thread::spawn(move || {
+                    let cano = cano;
+                    let ligado = unsafe { ConnectNamedPipe(cano.0, std::ptr::null_mut()) } != 0
+                        || std::io::Error::last_os_error().raw_os_error() == Some(ERROR_PIPE_CONNECTED);
+                    if ligado {
+                        let idx = ordem.fetch_add(1, Ordering::SeqCst);
+                        if let Ok(mut p) = partes.lock() {
+                            p.push((idx, Vec::new()));
+                        }
+                        let mut buf = vec![0u8; 4096];
+                        loop {
+                            let mut lidos = 0u32;
+                            let ok = unsafe { ReadFile(cano.0, buf.as_mut_ptr(), buf.len() as u32, &mut lidos, std::ptr::null_mut()) } != 0;
+                            if !ok || lidos == 0 {
+                                break;
+                            }
+                            if let Ok(mut p) = partes.lock() {
+                                if let Some(x) = p.iter_mut().find(|x| x.0 == idx) {
+                                    x.1.extend_from_slice(&buf[..lidos as usize]);
+                                }
+                            }
+                        }
+                    }
+                    unsafe { CloseHandle(cano.0) };
+                    vivas.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+            unsafe { LocalFree(sd) };
+            Ok(Coletor { nome, n, partes, vivas })
+        }
+        pub fn nome(&self) -> &str {
+            &self.nome
+        }
+        /// O que cada passo escreveu até agora, na ordem dos passos. Depois do fim, as partes vazias (as instâncias
+        /// soltas por nós) ficam de fora.
+        pub fn partes(&self, terminou: bool) -> Vec<Vec<u8>> {
+            let mut p = self.partes.lock().map(|p| p.clone()).unwrap_or_default();
+            p.sort_by_key(|x| x.0);
+            p.into_iter().map(|x| x.1).filter(|b| !terminou || !b.is_empty()).collect()
+        }
+        /// Depois que o cmd terminou: solta as instâncias que ninguém usou (elas esperariam uma conexão para sempre) e
+        /// espera um pouco as linhas de leitura acabarem de ler o resto.
+        pub fn soltar(&self) {
+            use std::sync::atomic::Ordering;
+            let largo = larga(self.nome.as_ref());
+            for _ in 0..self.n {
+                let h = unsafe { CreateFileW(largo.as_ptr(), GENERIC_WRITE, 0, std::ptr::null_mut(), OPEN_EXISTING, 0, std::ptr::null_mut()) };
+                if !invalido(h) {
+                    unsafe { CloseHandle(h) };
+                }
+            }
+            let ate = std::time::Instant::now() + Duration::from_secs(2);
+            while self.vivas.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < ate {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+}
+#[cfg(not(windows))]
+mod elevado {
+    use std::path::Path;
+    use std::time::Duration;
+    pub struct Processo;
+    impl Processo {
+        pub fn esperar(&self, _: Duration) -> Option<u32> {
+            Some(u32::MAX)
+        }
+    }
+    pub fn abrir_como_administrador(_: &Path, _: &str) -> Result<Processo, u32> {
+        Err(0)
+    }
+    pub struct Coletor;
+    impl Coletor {
+        pub fn novo(_: usize) -> Result<Coletor, u32> {
+            Err(0)
+        }
+        pub fn nome(&self) -> &str {
+            ""
+        }
+        pub fn partes(&self, _: bool) -> Vec<Vec<u8>> {
+            Vec::new()
+        }
+        pub fn soltar(&self) {}
     }
 }
 
@@ -555,7 +917,7 @@ fn ativar_wsl() -> Result<(), String> {
 fn agendar_continuacao() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut c = comando(reg_exe());
-    c.args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce", "/v", "ErgonInstalacao", "/t", "REG_SZ", "/f", "/d"]).arg(format!("\"{}\" --continuar-instalacao", exe.display()));
+    c.args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce", "/v", "ErgonInstalacao", "/t", "REG_SZ", "/f", "/d"]).arg(format!("\"{}\"", exe.display()));
     let o = rodar(c, Duration::from_secs(30)).map_err(|e| e.to_string())?;
     if o.status.success() { Ok(()) } else { Err("Não deu para agendar a continuação depois do reinício.".into()) }
 }
@@ -627,11 +989,77 @@ mod testes {
     }
 
     #[test]
-    fn retomada_por_etapa() {
-        let p = Progresso { concluida: "baixar".into(), ..Default::default() };
-        assert!(passou(&p, "wsl") && passou(&p, "baixar") && !passou(&p, "importar"));
-        assert!(passou(&Progresso { concluida: "pronto".into(), ..Default::default() }, "conferir"));
-        assert!(!passou(&Progresso::default(), "diagnostico"));
+    fn ativacao_do_wsl_sem_loja_e_com_registro() {
+        let w = Path::new(r"C:\Windows\System32\wsl.exe");
+        let l = linha_de_ativacao(w, Some(r"\\.\pipe\ergon-ativar-wsl-1-2"));
+        assert_eq!(l, r#"/d /s /c "set WSL_UTF8=1&& "C:\Windows\System32\wsl.exe" --install --no-distribution --web-download > "\\.\pipe\ergon-ativar-wsl-1-2" 2>&1 || ("C:\Windows\System32\wsl.exe" --update --web-download > "\\.\pipe\ergon-ativar-wsl-1-2" 2>&1& "C:\Windows\System32\wsl.exe" --install --no-distribution --web-download > "\\.\pipe\ergon-ativar-wsl-1-2" 2>&1)""#);
+        // sem o cano, a ativação acontece do mesmo jeito (só a saída se perde)
+        assert_eq!(linha_de_ativacao(w, None), r#"/d /s /c "set WSL_UTF8=1&& "C:\Windows\System32\wsl.exe" --install --no-distribution --web-download || ("C:\Windows\System32\wsl.exe" --update --web-download& "C:\Windows\System32\wsl.exe" --install --no-distribution --web-download)""#);
+        // cada passo na sua codificação: o WSL antigo em UTF-16, o novo em UTF-8
+        let antigo: Vec<u8> = "--install: unrecognized option: no-distribution\r\n".encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        let t = texto_das_partes(&[antigo, "Instalando: Subsistema do Windows para Linux\r\n".as_bytes().to_vec()]);
+        assert_eq!(linhas_do_registro(&t, true), vec!["--install: unrecognized option: no-distribution", "Instalando: Subsistema do Windows para Linux"]);
+    }
+
+    /// O caminho de verdade: o cmd aberto com o pedido de administrador escreve no cano criado sem administrador. Só
+    /// com ERGON_TESTE_ELEVADO (na esteira, onde a máquina é administradora e o Windows não pergunta); numa máquina de
+    /// desenvolvimento ele abriria o pedido do Windows.
+    #[cfg(windows)]
+    #[test]
+    fn cmd_elevado_escreve_no_cano_criado_sem_administrador() {
+        if std::env::var_os("ERGON_TESTE_ELEVADO").is_none() {
+            return;
+        }
+        let c = elevado::Coletor::novo(3).expect("cano com nome");
+        let n = c.nome().to_string();
+        let p = elevado::abrir_como_administrador(&cmd_exe(), &format!("/d /s /c \"(echo elevado) > \"{n}\" 2>&1 || exit /b 7\"")).expect("cmd elevado");
+        let codigo = p.esperar(Duration::from_secs(60)).expect("o cmd elevado terminou");
+        assert_eq!(codigo, 0, "o cmd elevado abriu o cano");
+        c.soltar();
+        let partes: Vec<String> = c.partes(true).iter().map(|b| texto_wsl(b).trim().to_string()).collect();
+        assert_eq!(partes, vec!["elevado"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn coletor_recebe_cada_passo_pelo_cano_e_solta_o_que_sobra() {
+        use std::os::windows::process::CommandExt;
+        let c = elevado::Coletor::novo(3).expect("cano com nome");
+        let n = c.nome().to_string();
+        assert!(n.starts_with(r"\\.\pipe\ergon-ativar-wsl-"));
+        let st = std::process::Command::new(cmd_exe())
+            // um segundo entre os passos, como entre os passos do wsl: a ordem das partes é a ordem de conexão
+            .raw_arg(format!("/d /s /c \"(echo um) > \"{n}\" 2>&1 & ping -n 2 127.0.0.1 > nul & (echo dois) > \"{n}\" 2>&1\""))
+            .status()
+            .expect("cmd");
+        assert!(st.success());
+        // a terceira instância ninguém usou: soltar não pode travar
+        let t0 = Instant::now();
+        c.soltar();
+        assert!(t0.elapsed() < Duration::from_secs(5));
+        let p: Vec<String> = c.partes(true).iter().map(|b| texto_wsl(b).trim().to_string()).collect();
+        assert_eq!(p, vec!["um", "dois"]);
+        // o nome é único: outro coletor no mesmo processo não colide
+        let d = elevado::Coletor::novo(1).expect("outro cano");
+        assert_ne!(d.nome(), n);
+        d.soltar();
+    }
+
+    #[test]
+    fn registro_da_ativacao_com_barra_de_progresso() {
+        let t = "Baixando: Subsistema do Windows para Linux 2.6.1\r\n[====      12.0%      ]\r[========  40.0%    ]\r[===";
+        // rodando: a última parte pode estar pela metade e fica de fora
+        assert_eq!(linhas_do_registro(t, false), vec!["Baixando: Subsistema do Windows para Linux 2.6.1", "[====      12.0%      ]", "[========  40.0%    ]"]);
+        assert_eq!(linhas_do_registro(t, true).len(), 4);
+        assert!(eh_progresso("[========  40.0%    ]") && !eh_progresso("Instalando: 100% concluído? não"));
+        let fim = "Baixando: WSL\r\n[==== 50.0% ]\r\nInstalando: Plataforma de Máquina Virtual\r\nA operação solicitada foi bem-sucedida. As alterações não entrarão em vigor até que o sistema seja reinicializado.\r\n";
+        assert!(pede_reinicio(0, fim));
+        assert!(pede_reinicio(0, "The requested operation is successful. Changes will not be effective until the system is rebooted."));
+        assert!(pede_reinicio(3010, ""));
+        assert!(!pede_reinicio(0, "A operação foi concluída com êxito."));
+        let r = resumo_do_registro(fim);
+        assert!(r.starts_with("Última mensagem do Windows: Baixando: WSL / Instalando") && !r.contains("50.0%"), "{r}");
+        assert_eq!(resumo_do_registro(""), "");
     }
 
     #[test]

@@ -272,7 +272,7 @@ export function ProtectScreen({ onDone, onLogout }: { onDone: () => void; onLogo
 }
 
 /** Formulário de destrancar/confirmar: senha ou passkey (o autenticador é só no login). */
-export function UnlockForm({ factors, rpId, submitLabel, onDone }: { factors: { totp: boolean; passkeys: number }; rpId: string; submitLabel: string; onDone: () => void }) {
+function UnlockForm({ factors, rpId, submitLabel, onDone }: { factors: { totp: boolean; passkeys: number }; rpId: string; submitLabel: string; onDone: () => void }) {
   const t = useT();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);

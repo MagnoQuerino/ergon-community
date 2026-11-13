@@ -28,7 +28,6 @@ import { getSetting, setSetting } from './sectors.ts';
 export const PASSOS_PADRAO = 90;
 export const PASSOS_MIN = 5;
 export const PASSOS_MAX = 150;
-export const PASSOS_OPCOES = [5, 10, 20, 40, 60, 90, 120, 150] as const;
 /** o padrão de antes (migração 1 do cofre e a trava de abertura até a rc.24): no motor sem escolha da pessoa, vira o novo */
 export const PASSOS_ANTIGO = 20;
 export const PASSOS_SETTING = 'team.max_turns';

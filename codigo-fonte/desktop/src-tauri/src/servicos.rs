@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Prazo do lançador: abrir o Docker Desktop e subir os serviços pode levar minutos na primeira vez do dia.
+/// Prazo do lançador (instalação antiga, sem o ambiente próprio): abrir o Docker Desktop e subir os serviços pode levar
+/// minutos na primeira vez do dia.
 const PRAZO_LANCADOR: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone, Serialize)]
@@ -25,8 +26,9 @@ fn raiz_atual(estado: &Estado) -> Option<PathBuf> {
     estado.ultimo.lock().ok().and_then(|d| d.as_ref().and_then(|d| d.raiz.clone())).or_else(|| instalacao::localizar().raiz)
 }
 
-/// Liga o Docker (no Windows, o Docker Desktop, com a recuperação de travamento do lançador) e os serviços do
-/// Ergon. Usa "subir", que não instala nada no início do sistema. A saída chega à tela de abertura linha a linha.
+/// Liga os serviços do Ergon: no ambiente próprio, por dentro dele; numa instalação antiga, pelo lançador, que liga o
+/// motor de contêineres (no Windows, o Docker Desktop, com a recuperação de travamento) e usa "subir", que não instala
+/// nada no início do sistema. A saída chega à tela de abertura linha a linha.
 #[tauri::command]
 pub fn subir_servicos(app: AppHandle, estado: State<'_, Estado>) -> Result<(), String> {
     if crate::ambiente::ativo() {
@@ -51,7 +53,7 @@ pub fn subir_servicos(app: AppHandle, estado: State<'_, Estado>) -> Result<(), S
     Ok(())
 }
 
-/// Para os serviços do Ergon (só pela bandeja, depois de você confirmar). O Docker continua aberto.
+/// Para os serviços do Ergon (só pela bandeja, depois de você confirmar). O motor de contêineres continua como estava.
 pub fn parar_servicos(app: &AppHandle) -> Result<(), String> {
     if crate::ambiente::ativo() {
         return crate::ambiente::parar(&mut |e| emitir(app, e));

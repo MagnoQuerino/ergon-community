@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
-import { aprovadoPor, chavesDeAprovacao, decidir, dispensaAprovacao, grupoDepoisDeLer, negadaPor, siteDe } from '../src/services/conexoes/regra.ts';
+import { chavesDeAprovacao, decidir, dispensaAprovacao, grupoDepoisDeLer, negadaPor, siteDe } from '../src/services/conexoes/regra.ts';
 import type { HermesClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
 import { setIntegration } from '../src/services/integrations.ts';
 import { setHttpClock } from '../src/lib/http.ts';
@@ -400,13 +400,6 @@ describe('proteção depois de ler as contas', () => {
     assert.deepEqual(chavesDeAprovacao('terminal', '  ls  '), ['exato:terminal:ls']);
     assert.deepEqual(chavesDeAprovacao('browser_click', '{}'), ['pagina']);
     assert.deepEqual(chavesDeAprovacao('browser_uma_nova', 'x'), ['exato:browser_uma_nova:x'], 'ferramenta nova do navegador: o pedido exato');
-    const aprovadas = new Set(['site:https://a.exemplo', 'exato:terminal:ls']);
-    assert.ok(aprovadoPor(['site:https://a.exemplo'], aprovadas));
-    assert.ok(!aprovadoPor(['site:https://a.exemplo', 'site:https://b.exemplo'], aprovadas), 'todos os sites do pedido');
-    assert.ok(aprovadoPor(['pagina'], aprovadas), 'a página aberta vale com um site aprovado');
-    assert.ok(!aprovadoPor(['pagina'], new Set(['exato:terminal:ls'])), 'um programa aprovado não libera o navegador');
-    assert.ok(!aprovadoPor(['exato:terminal:ls -la'], aprovadas));
-    assert.ok(!aprovadoPor([], aprovadas));
     assert.ok(dispensaAprovacao('vision_analyze', ' DATA:image/png;base64,AA'));
     assert.ok(!dispensaAprovacao('vision_analyze', 'https://x.exemplo/a.png'));
     assert.ok(!dispensaAprovacao('web_extract', 'data:text/html,oi'));

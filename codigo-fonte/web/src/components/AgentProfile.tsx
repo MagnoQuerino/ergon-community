@@ -11,7 +11,7 @@ const TOOL_STATUS = {
   'bloqueada': 'equipe.ferramenta.bloqueada', 'preparado': 'equipe.ferramenta.preparado', 'planejado': 'equipe.ferramenta.planejado',
   'atualizando': 'equipe.ferramenta.atualizando',
 } as const satisfies Record<AgentTool['status'], string>;
-export const toolStatusLabel = (s: AgentTool['status']): string => (TOOL_STATUS[s] ? t(TOOL_STATUS[s]) : s);
+const toolStatusLabel = (s: AgentTool['status']): string => (TOOL_STATUS[s] ? t(TOOL_STATUS[s]) : s);
 const HINT_LABEL = {
   ponta: 'equipe.modelo.ponta', intermediário: 'equipe.modelo.intermediario', econômico: 'equipe.modelo.economico',
 } as const satisfies Record<NonNullable<Agent['model_hint']>, string>;

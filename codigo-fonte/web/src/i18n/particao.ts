@@ -1,6 +1,6 @@
 // A partição da tela em áreas, para várias equipes traduzirem ao mesmo tempo sem pisar umas nas outras: cada arquivo de
-// tela pertence a UMA área, e a equipe da área só mexe nos arquivos dela, em pt/<area>.ts, en/<area>.ts e na lista
-// dela em pendentes.ts. Os caminhos são a partir de web/src. Arquivos de views/world só existem na distribuição
+// tela pertence a UMA área, e a equipe da área só mexe nos arquivos dela, em pt/<area>.ts e en/<area>.ts. Os caminhos
+// são a partir de web/src. Arquivos de views/world só existem na distribuição
 // proprietária (a Community não os traz): os testes pulam o que não existir.
 import type { NomeDaArea } from './pt/index.ts';
 
@@ -55,4 +55,8 @@ export const FORA_DA_VARREDURA: readonly string[] = [
   'components/simple-icons.ts', // gerado do Simple Icons: só os nomes das marcas, que não se traduzem
   'views/world/glossario-moeda.ts', // a lista do glossário (a moeda escrita nas duas línguas), não texto de tela
   'views/world/textos.ts', // o dicionário do World nas duas línguas (fica no módulo do World: a Community não o traz)
+  // a galeria dos cartões (rc.28): página só de desenvolvimento (web/galeria.html), com dados de exemplo; não vai para a versão publicada
+  'galeria/Galeria.tsx',
+  'galeria/main.tsx',
+  'galeria/simular.ts',
 ];

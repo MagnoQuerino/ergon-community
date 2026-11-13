@@ -11,8 +11,6 @@ export const MAX_QUADRO = 128 * 1024;
 export const MAX_TEXTO_SAIDA = 20_000;
 export const MAX_CARTAO = 28 * 1024;
 
-/** id de quadro que pede confirmação (2.5) */
-export const ID_QUADRO = /^[a-z]{3}_[A-Za-z0-9_-]{8,40}$/;
 export const ID_VINCULO = /^bnd_[A-Za-z0-9_-]{8,40}$/;
 export const ID_CLAIM = /^clm_[A-Za-z0-9_-]{8,40}$/;
 export const ID_INSTALACAO = /^ins_[A-Za-z0-9_-]{8,40}$/;

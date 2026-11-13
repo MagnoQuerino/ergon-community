@@ -162,11 +162,11 @@ v.MIGRACOES = tuple(m for m in TODAS_AS_MIGRACOES if m[0] <= 3)
 v.CONFIG_VERSION = 3
 
 # ---------------------------------------------------------------- 2. a marca
-check("marca antiga '1' vale 1", v.versao_da_marca("1") == 1 and v.versao_da_marca("1\n") == 1)
-check("texto puro vale no máximo 1 ('2' era a configuração inteira, não a migração 2)", v.versao_da_marca("2") == 1 and v.versao_da_marca("0") == 0)
-check("marca nova {\"versao\": 2}", v.versao_da_marca('{"versao": 2}') == 2)
-check("marca vazia, estranha ou inválida vale 0",
-      all(v.versao_da_marca(x) == 0 for x in ("", "lixo", '{"versao": true}', '{"versao": -1}', '{"versao": "2"}', "[2]", "{")))
+check("marca antiga '1' vale 1", v._versao_legivel("1") == 1 and v._versao_legivel("1\n") == 1)
+check("texto puro vale no máximo 1 ('2' era a configuração inteira, não a migração 2)", v._versao_legivel("2") == 1 and v._versao_legivel("0") == 0)
+check("marca nova {\"versao\": 2}", v._versao_legivel('{"versao": 2}') == 2)
+check("marca vazia, estranha ou inválida não é legível (None)",
+      all(v._versao_legivel(x) is None for x in ("", "lixo", '{"versao": true}', '{"versao": -1}', '{"versao": "2"}', "[2]", "{")))
 os.makedirs(HOME, exist_ok=True)
 lidas = []
 for raw in ("1", "2", '{"versao": 2}', "lixo"):

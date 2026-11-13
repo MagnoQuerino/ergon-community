@@ -1,7 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import type { Db } from '../db/db.ts';
-import { HttpError, id, notFound, now } from '../lib/util.ts';
+import { id, notFound, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { escritaPendente } from './conexoes/espelho.ts';
 
@@ -10,7 +8,7 @@ import { escritaPendente } from './conexoes/espelho.ts';
  * no quadro do usuário. Esta é a leitura dos campos combinados: título, descrição, situação (concluída ou
  * não) e responsável; colunas quando o aplicativo tem (buckets, seções). O sentido contrário (o que a pessoa faz
  * no Ergon vai para o aplicativo) fica em conexoes/espelho.ts. Os provedores reais ficam em integrations.ts;
- * a fixture "planner-like" existe só para testes.
+ * a fixture "planner-like" existe só nos testes (test/mirror-fixture.ts).
  */
 export interface ExternalBoard { externalId: string; name: string; version: string }
 export interface ExternalColumn { externalId: string; name: string; order: number }
@@ -40,45 +38,6 @@ export interface TaskProvider {
   readonly supports: { title: true; description: boolean; completion: boolean; columns: boolean; writeBack: boolean };
   listBoards(): Promise<Array<ExternalBoard & { taskCount: number }>>;
   getBoard(externalId: string): Promise<BoardSnapshot>;
-}
-
-const FIXTURE_NAME = /^[a-z0-9-]{1,40}$/;
-
-/** Fixture em formato inspirado no Planner (buckets, percentComplete, etag). NÃO é Planner conectado. */
-export class FixtureTaskProvider implements TaskProvider {
-  readonly name = 'fixture-planner-like';
-  readonly isFixture = true;
-  readonly supports = { title: true, description: true, completion: true, columns: true, writeBack: false } as const;
-  private readonly data: any;
-
-  constructor(fixturesDir: string, variant: string) {
-    if (!FIXTURE_NAME.test(variant)) throw new HttpError(400, 'fixture', 'fixture inválida');
-    const file = path.join(fixturesDir, 'mirror', `${variant}.json`);
-    if (!fs.existsSync(file)) throw new HttpError(404, 'fixture', 'fixture inexistente');
-    this.data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  }
-
-  private check(): void {
-    if (this.data.error === 'forbidden') throw new ProviderError('forbidden', 'permissão revogada no aplicativo externo (simulado)');
-    if (this.data.error === 'unavailable') throw new ProviderError('unavailable', 'serviço externo indisponível (simulado)');
-  }
-
-  async listBoards() {
-    this.check();
-    return (this.data.plans as any[]).map((p) => ({ externalId: p.id, name: p.title, version: p['@odata.etag'], taskCount: p.tasks.length }));
-  }
-
-  async getBoard(externalId: string): Promise<BoardSnapshot> {
-    this.check();
-    const p = (this.data.plans as any[]).find((x) => x.id === externalId);
-    if (!p) throw new ProviderError('not_found', 'quadro não encontrado (ou sem acesso)');
-    const columns = (p.buckets as any[]).map((b, i) => ({ externalId: b.id, name: b.name, order: i }));
-    const tasks = (p.tasks as any[]).map((t) => {
-      const { id: tid, bucketId, title, description, percentComplete, '@odata.etag': etag, ...extra } = t;
-      return { externalId: tid, columnExternalId: bucketId, title, description: description ?? '', completed: percentComplete === 100, version: etag, extra };
-    });
-    return { board: { externalId: p.id, name: p.title, version: p['@odata.etag'] }, columns, tasks, complete: p.pageComplete !== false };
-  }
 }
 
 export interface ImportReport {

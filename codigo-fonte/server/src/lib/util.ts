@@ -23,14 +23,7 @@ export function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ha, hb) && a.length === b.length;
 }
 
-const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
-
-export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16);
-  const key = crypto.scryptSync(password, salt, SCRYPT.keylen, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p });
-  return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString('base64url')}$${key.toString('base64url')}`;
-}
-
+/** Senhas guardadas em scrypt pelas versões antigas: só conferir (security/password.ts regrava em Argon2id). */
 export function verifyPassword(password: string, stored: string): boolean {
   const [alg, n, r, p, salt, key] = stored.split('$');
   if (alg !== 'scrypt' || !salt || !key) return false;
@@ -63,13 +56,6 @@ export function fold(s: string): string {
 
 export function clip(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '…';
-}
-
-/** Mascara identificadores externos (telefone, IDs) para logs e interface. */
-export function maskId(s: string | null | undefined): string | null {
-  if (!s) return null;
-  if (s.length <= 6) return '•••';
-  return `${s.slice(0, 3)}•••${s.slice(-3)}`;
 }
 
 /** URL para log: valores de parâmetros sensíveis (código de autorização, tokens, segredos) viram [redigido]. */

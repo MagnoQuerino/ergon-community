@@ -1,6 +1,5 @@
-// Teste-catraca da tradução: nenhum arquivo de tela fora de pendentes.ts tem texto em português escrito direto no
-// código (tem de vir do dicionário, por t()), e a lista de pendentes só diminui (arquivo já limpo sai dela). A
-// heurística está explicada no começo de varredura.ts; COMO-TRADUZIR.md tem o passo a passo.
+// Teste-catraca da tradução: nenhum arquivo de tela tem texto em português escrito direto no código (tem de vir do
+// dicionário, por t()). A heurística está explicada no começo de varredura.ts; COMO-TRADUZIR.md tem o passo a passo.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +7,6 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { varrer } from './varredura.ts';
 import { FORA_DA_VARREDURA } from './particao.ts';
-import { PENDENTES } from './pendentes.ts';
 
 const SRC = fileURLToPath(new URL('../', import.meta.url));
 
@@ -24,21 +22,14 @@ function arquivos(dir = SRC): string[] {
   return out.sort();
 }
 
-test('catraca: texto de tela em português só nos arquivos ainda pendentes; arquivo limpo sai da lista', () => {
-  const pendentes = new Set(Object.values(PENDENTES).flat());
+test('catraca: nenhum arquivo de tela tem texto em português fora do dicionário', () => {
   const erros: string[] = [];
-  const vistos = new Set<string>();
   for (const rel of arquivos()) {
-    vistos.add(rel);
     const achados = varrer(fs.readFileSync(path.join(SRC, rel), 'utf8'), rel);
-    if (pendentes.has(rel)) {
-      if (!achados.length) erros.push(`${rel}: já não tem texto escrito direto — tire o arquivo de i18n/pendentes.ts`);
-    } else if (achados.length) {
+    if (achados.length) {
       erros.push(`${rel}: texto de tela fora do dicionário (use t() de i18n/index.ts):\n${achados.slice(0, 15).map((a) => `    linha ${a.linha} (regra ${a.regra}): ${a.texto}`).join('\n')}${achados.length > 15 ? `\n    … e mais ${achados.length - 15}` : ''}`);
     }
   }
-  // pendente que não existe: só views/world pode faltar (a Community não traz)
-  for (const f of pendentes) if (!vistos.has(f) && !f.startsWith('views/world/')) erros.push(`${f}: está em i18n/pendentes.ts mas não existe`);
   assert.equal(erros.length, 0, `\n${erros.join('\n')}`);
 });
 

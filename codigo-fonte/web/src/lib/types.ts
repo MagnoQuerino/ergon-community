@@ -276,12 +276,6 @@ export interface EtapaConsentimento {
 }
 export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
 
-const ORIGENS = { manual: 'servidor.origem.manual', chat: 'servidor.origem.chat', mirror: 'servidor.origem.mirror', demo: 'servidor.origem.demo' } as const;
-/** a origem do card: Teams e WhatsApp pelo nome da marca; o resto pelo dicionário */
-export const ORIGIN_LABEL: Record<string, string> = new Proxy({} as Record<string, string>, {
-  get: (_o, k) => (k === 'teams' ? 'Teams' : k === 'whatsapp' ? 'WhatsApp' : typeof k === 'string' && k in ORIGENS ? t(ORIGENS[k as keyof typeof ORIGENS]) : undefined),
-  has: (_o, k) => typeof k === 'string' && (k in ORIGENS || k === 'teams' || k === 'whatsapp'),
-});
 // i18n-ok: nomes de produto (marcas), não se traduzem
 export const SOURCE_LABEL: Record<string, string> = {
   microsoft: 'Microsoft', google: 'Google Tasks', asana: 'Asana', todoist: 'Todoist', trello: 'Trello', jira: 'Jira', clickup: 'ClickUp', monday: 'monday.com', // i18n-ok: nomes de produto

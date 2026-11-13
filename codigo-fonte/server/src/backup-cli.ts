@@ -1,5 +1,5 @@
 // Backup consistente com o servidor em execução. Imprime só o nome do arquivo.
-//   docker compose exec -T ergon node server/src/backup-cli.ts
+//   podman compose exec -T ergon node server/src/backup-cli.ts   (docker compose exec, numa instalação antiga)
 // Com o Ergon protegido, o banco só abre no processo do servidor (a chave fica na memória dele): pede o backup
 // a ele pela rota interna. O arquivo sai cifrado com a mesma chave (só abre com a senha ou a frase).
 import { loadConfig } from './config.ts';

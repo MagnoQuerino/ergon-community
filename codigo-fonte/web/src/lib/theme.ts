@@ -15,7 +15,7 @@ let hour = new Date().getHours();
 const subs = new Set<() => void>();
 
 /** O tema que vale agora (no automático, pelo relógio). */
-export const themeOf = (m: ThemeMode, h: number): ThemeId => (m === 'auto' ? (isDarkHour(h) ? 'noite' : 'dia') : m);
+const themeOf = (m: ThemeMode, h: number): ThemeId => (m === 'auto' ? (isDarkHour(h) ? 'noite' : 'dia') : m);
 
 function apply(): void {
   if (typeof document === 'undefined') return;

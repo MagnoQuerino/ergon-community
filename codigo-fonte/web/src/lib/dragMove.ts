@@ -20,7 +20,7 @@ const subscribe = (l: () => void) => { listeners.add(l); return () => { listener
 export function useDragging(): TeamAgent | null { return useSyncExternalStore(subscribe, () => state?.agent ?? null, () => null); }
 
 /** Destino sob o ponteiro: o elemento com data-drop-kind mais próximo. */
-export function targetAt(x: number, y: number): { el: HTMLElement; t: DropTarget } | null {
+function targetAt(x: number, y: number): { el: HTMLElement; t: DropTarget } | null {
   const el = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest<HTMLElement>('[data-drop-kind]');
   if (!el) return null;
   const kind = el.dataset.dropKind as DropTarget['kind'];

@@ -1,6 +1,6 @@
 """Ponte Ergon ↔ Hermes. O Ergon é a interface; o Hermes roda por baixo e nunca é exposto ao usuário.
 
-Três partes, todas sem chamar modelo e sem ler credenciais de provedor:
+Partes, todas sem chamar modelo e sem ler credenciais de provedor:
 
 1. Canais (``post_gateway_admission``, conferido em Hermes v0.22.2): registra no Ergon cada mensagem
    ADMITIDA pelo gateway (Teams/WhatsApp). O hook é *fail-open* no Hermes, por isso este plugin nunca
@@ -11,9 +11,9 @@ Três partes, todas sem chamar modelo e sem ler credenciais de provedor:
    especializado, com as ferramentas que a coordenação (Aristóteles) liberou. A API do Hermes não escolhe
    ferramentas por execução, então a plataforma liga o conjunto seguro e este hook barra, a cada chamada, o
    que o agente da sessão não tem — dizendo quem da equipe tem, para ele pedir ajuda. Sessão desconhecida
-   (gateway direto, agendamentos) ou Ergon fora do ar: só o conjunto básico (ERGON_BASE_TOOLSETS, "todo").
+   (gateway direto, agendamentos) ou Ergon fora do ar: só o conjunto básico ("todo", em _BASE_TOOLSETS).
 
-3. Ponte de controle (rede interna do Docker, porta ERGON_CONTROL_PORT): o painel do Hermes roda só em
+3. Ponte de controle (rede interna dos contêineres, porta ERGON_CONTROL_PORT): o painel do Hermes roda só em
    127.0.0.1 dentro do contêiner; o Ergon chega a ele por aqui, com o token da ponte, e SÓ às rotas da
    lista abaixo (login de contas por código, modelo padrão, catálogo de modelos e skills, ferramentas da
    plataforma da API, passos por pedido, resumo das conversas longas, medição do custo, as chaves que a pessoa guardou
@@ -69,7 +69,6 @@ PLUGIN_VERSION = "0.6.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
-# compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
 # perfis (rc.27): cada agente da equipe é um perfil do motor (/ergon/v1/perfis/<nome>); memoria: a memória longa do perfil,
 # com a escrita em espera até a pessoa aprovar; ajudantes: os subagentes do motor, com aviso de começo e fim ao Ergon
 # modelos_tarefa: o modelo de cada tarefa de apoio (GET /api/model/auxiliary, POST /api/model/set com scope auxiliary), o
@@ -100,7 +99,7 @@ _CONFIG_MARKER = ".ergon-config"
 
 _PLATFORMS = ("teams", "whatsapp")
 _SOURCE_KEYS = ("chat_id", "chat_name", "chat_type", "user_id", "user_name", "thread_id", "is_bot", "scope_id", "guild_id", "message_id")
-_TIMEOUT = float(os.environ.get("ERGON_BRIDGE_TIMEOUT", "4"))
+_TIMEOUT = 4.0
 _SPOOL_MAX = 500
 _lock = threading.Lock()
 
@@ -211,18 +210,14 @@ async def on_admission(**kwargs: Any) -> dict[str, Any] | None:
 
 # ---------------------------------------------------------------- 2. ferramentas por agente
 
-def _csv(name: str, default: str) -> list[str]:
-    return [s.strip() for s in os.environ.get(name, default).split(",") if s.strip()]
-
-
-_BASE_TOOLSETS = _csv("ERGON_BASE_TOOLSETS", "todo")
+_BASE_TOOLSETS = ["todo"]
 # Ferramentas fora do uso comum, mesmo com o conjunto ligado (criar/editar skills): skill_manage só passa pela
 # regra do Treinar (_skills_gate), na sessão de um treinamento autorizado e só para aquela competência.
-_DENY_TOOLS = frozenset(_csv("ERGON_DENY_TOOLS", "skill_manage"))
+_DENY_TOOLS = frozenset({"skill_manage"})
 # Leitura do catálogo da busca de ferramentas do Hermes: algumas ferramentas (lista de passos, criar imagens) só
 # chegam ao modelo por ela. Só lê o catálogo; a chamada de verdade (tool_call) o Hermes desembrulha antes deste
 # hook, que confere o nome real da ferramenta. Antes, barrada para todos: as duas ficavam inalcançáveis.
-_CATALOG_TOOLS = frozenset(_csv("ERGON_CATALOG_TOOLS", "tool_search,tool_describe"))
+_CATALOG_TOOLS = frozenset({"tool_search", "tool_describe"})
 _ESCRITA_DE_ARQUIVO = frozenset({"write_file", "patch"})
 _ESCREVEM_ARQUIVO_COM = frozenset({"terminal", "code_execution"})
 _POLICY_TTL = 20.0
@@ -516,7 +511,7 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
 
 # ---------------------------------------------------------------- conexões: as contas e os aplicativos conectados
 # O plugin só repassa: credenciais, regra de confirmação e registro ficam no Ergon. O motor nunca vê token de conta.
-_CONEXOES_TIMEOUT = float(os.environ.get("ERGON_CONEXOES_TIMEOUT", "90"))
+_CONEXOES_TIMEOUT = 90.0
 _web_lida: dict[str, float] = {}
 # As ferramentas que trazem o conteúdo de um endereço (a mesma lista de LEEM_ENDERECO em conexoes/regra.ts no Ergon):
 # usar uma delas é ler conteúdo de fora. Imagem em data: não vem de endereço nenhum (já está na conversa).
@@ -1137,7 +1132,7 @@ def _perfis_laco() -> None:
             _perfis_acompanhar()
         except Exception:  # noqa: BLE001 - nunca derruba o motor
             pass
-        time.sleep(float(os.environ.get("ERGON_PERFIS_PASSO_S", "5")))
+        time.sleep(5.0)
 
 
 def perfil_garantir(nome: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -2349,15 +2344,9 @@ def on_post_llm_call(session_id: str = "", **_: Any) -> None:
     return None
 
 
-_esperas_vistas: list[dict[str, Any]] = []  # as últimas esperas humanas vistas pelos ganchos (sem o que a pessoa digitou)
-
-
 def _avisar_espera(fase: str, kw: dict[str, Any]) -> None:
     ev = {"fase": fase, "kind": str(kw.get("kind") or "")[:40], "request_id": str(kw.get("request_id") or "")[:64],
           "session_id": str(kw.get("session_id") or "")[:200], "outcome": str(kw.get("outcome") or "")[:40]}
-    with _chaves_lock:
-        _esperas_vistas.append(ev)
-        del _esperas_vistas[:-50]
 
     def enviar() -> None:
         try:
@@ -2803,7 +2792,7 @@ def _canal_reiniciar() -> bool:
     "no dependency environment is committed for this install" e o gateway segue igual (conferido no motor de verdade); o
     comando direto, como o usuário do motor, reinicia sob o s6. Sai depois da resposta desta rota (a ponte de controle pode
     estar no próprio gateway) e solto do processo, para não morrer junto com ele."""
-    cli = os.environ.get("ERGON_HERMES_CLI", "/opt/hermes/.venv/bin/hermes")
+    cli = "/opt/hermes/.venv/bin/hermes"
     if not os.path.exists(cli):
         return False
 
@@ -2856,7 +2845,7 @@ _ROUTES: list[tuple[str, re.Pattern[str], tuple[str, ...]]] = [
     # o modelo de cada tarefa de apoio (resumir a conversa, dar nome, ver imagens…): a lista é a do Hermes, com as
     # tarefas que os plugins registrarem; gravar é POST /api/model/set com scope "auxiliary" (ver _sanitize_model_set)
     ("GET", re.compile(r"/api/model/auxiliary"), ()),
-    ("GET", re.compile(r"/api/model/options"), ("refresh", "include_unconfigured")),
+    ("GET", re.compile(r"/api/model/options"), ("refresh",)),
     ("POST", re.compile(r"/api/model/set"), ()),
     ("GET", re.compile(r"/api/skills"), ()),
     # endpoint próprio "ergon-ai" (módulo opcional, sem uso na Community): aponta para um gateway com a
@@ -2872,11 +2861,12 @@ _ROUTES: list[tuple[str, re.Pattern[str], tuple[str, ...]]] = [
 # rc.27: navegador, vídeo (ver e criar), busca no X, leitura de arquivos e voz entram na lista do que a pessoa pode ligar.
 # Regra do dono (12/11): o navegador, ver vídeos, ler arquivos e a voz vêm ligados (migração 10 do cofre), com o aviso de
 # custo ou de risco na tela; busca no X e criar vídeos precisam da chave de outro serviço e ligam quando a pessoa a tiver.
-_SAFE_TOOLSETS = frozenset(_csv("ERGON_SAFE_TOOLSETS", "todo,web,vision,image_gen,skills,ergon_conexoes,ergon_cartoes,browser,video,video_gen,x_search,file,tts"))
+_SAFE_TOOLSETS = frozenset({"todo", "web", "vision", "image_gen", "skills", "ergon_conexoes", "ergon_cartoes", "browser", "video",
+                            "video_gen", "x_search", "file", "tts"})
 # sempre ligados na API, qualquer que seja a lista pedida: a lista de passos e os cartões (sem eles o agente não tem como
 # perguntar nem pedir uma chave com segurança; quem pode usar é decidido a cada chamada, na trava)
 _SEMPRE_TOOLSETS = frozenset({"todo", _TS_CARTOES})
-_GUARDED_TOOLSETS = frozenset(_csv("ERGON_GUARDED_TOOLSETS", "code_execution,terminal"))
+_GUARDED_TOOLSETS = frozenset({"code_execution", "terminal"})
 _MAX_BODY = 16 * 1024
 _ROTAS_GRANDES = ("/ergon/v1/meta/julgar", "/ergon/v1/revisao/pedido")
 _control_started = False
@@ -3118,7 +3108,6 @@ def _dash_call(method: str, path: str, query: str, body: dict[str, Any] | None) 
 # ficam no Ergon), a conferência de evidência, o acompanhamento ao vivo, o parar, a conversa da rotina e as aprovações
 # (num job com agente, o Hermes nega toda aprovação: "cron jobs run without a user present") continuam como eram.
 _ROTINA_ID = re.compile(r"rtn_[0-9a-f]{32}")
-_JOB_ID = re.compile(r"[a-f0-9]{12}")
 _HORA = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
 _DISPAROS_PASSO = float(os.environ.get("ERGON_DISPAROS_PASSO_S", "2"))
 _DISPARO_VALE_S = 3 * 86400  # aviso que o Ergon não recebeu em 3 dias: fica para trás (o Ergon registra como perdido)
@@ -3395,7 +3384,6 @@ def _segurar_ate_decidir(tool_name: str, texto: str, cartao: str) -> bool:
 _PLUGINS_DO_MOTOR = {"codigo_inseguro": "security-guidance", "limpeza": "disk-cleanup"}
 _NOME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,60}")
 _ID_COMPETENCIA = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/+-]{1,200}")
-_FLUXO = re.compile(r"[A-Za-z0-9_-]{8,80}")
 _VOZ_MAX = 25 * 1024 * 1024
 _AUDIO_EXT = (".ogg", ".oga", ".opus", ".mp3", ".m4a", ".mp4", ".wav", ".webm", ".flac", ".aac")
 # Conectores prontos (MCP): sem a escrita liberada pela pessoa no Ergon, só passam as ferramentas de consulta. A lista é
@@ -3773,7 +3761,7 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "corpo inválido"})
         if path.startswith("/ergon/v1/learn-prompt") or path.startswith("/ergon/v1/skills/"):
             return self._training(method, path, body or {})
-        if path == "/ergon/v1/perfis" or path.startswith("/ergon/v1/perfis/"):
+        if path.startswith("/ergon/v1/perfis/"):
             return self._perfis(method, path, body or {})
         if path == "/ergon/v1/rotinas" or path.startswith("/ergon/v1/rotinas/"):
             return self._rotinas(method, path, dict(urllib.parse.parse_qsl(parts.query)), body or {})
@@ -3867,12 +3855,10 @@ class _ControlHandler(BaseHTTPRequestHandler):
         if sub == "recursos" and method == "GET":
             return self._json(200, recursos_estado())
         if sub == "recursos" and method == "PUT":
-            pedidos = {k: v for k, v in body.items() if k in ("checkpoints", "codigo_inseguro", "limpeza", "busca_ferramentas")}
+            pedidos = {k: v for k, v in body.items() if k in ("checkpoints", "codigo_inseguro", "limpeza")}
             if not pedidos or not all(isinstance(v, bool) for v in pedidos.values()):
-                raise ValueError("envie checkpoints, codigo_inseguro, limpeza ou busca_ferramentas: true ou false")
+                raise ValueError("envie checkpoints, codigo_inseguro ou limpeza: true ou false")
             if "checkpoints" in pedidos and self._painel("PUT", "/api/config", "", {"config": {"checkpoints": {"enabled": pedidos["checkpoints"]}}}) is None:
-                return None
-            if "busca_ferramentas" in pedidos and self._painel("PUT", "/api/config", "", {"config": {"tools": {"tool_search": {"enabled": "on" if pedidos["busca_ferramentas"] else "off"}}}}) is None:
                 return None
             reiniciar = False
             for chave, nome in _PLUGINS_DO_MOTOR.items():
@@ -4092,11 +4078,9 @@ class _ControlHandler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
 
     def _perfis(self, method: str, path: str, body: dict[str, Any]) -> None:
-        """Equipe nativa: GET /ergon/v1/perfis (os nomes); PUT /ergon/v1/perfis/<nome> (cria ou atualiza);
-        GET …/<nome>/memoria; POST …/<nome>/memoria/pendentes {id, aprovar}."""
+        """Equipe nativa: PUT /ergon/v1/perfis/<nome> (cria ou atualiza); GET …/<nome>/memoria;
+        POST …/<nome>/memoria/pendentes {id, aprovar}."""
         try:
-            if path == "/ergon/v1/perfis" and method == "GET":
-                return self._json(200, {"perfis": perfis_listar()})
             m = re.fullmatch(r"/ergon/v1/perfis/(erg-[0-9a-f]{20})(/memoria(/pendentes)?)?", path)
             if not m:
                 return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})

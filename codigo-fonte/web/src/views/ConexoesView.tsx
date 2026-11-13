@@ -12,6 +12,9 @@ import { BrandLogo } from '../components/BrandLogo.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { TextoLongo } from '../components/TextoLongo.tsx';
 import { BotoesRegra, type Alcance } from '../components/CartaoRegra.tsx';
+import { Selo } from '../components/Selo.tsx';
+import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
+import { useEnvioPorItem } from '../lib/envio.ts';
 
 /** O selo de cada estado: a chave do texto (traduzida na hora de mostrar) e a classe. */
 const STATE: Record<Integration['state'], [`conexoes.estado.${Integration['state']}`, string]> = {
@@ -381,11 +384,14 @@ function Regras() {
   const r = useResource<TelaRegras>('/api/conexoes/regras', ['rules.changed', 'proposals.changed']);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
-  const [indo, setIndo] = useState<string | null>(null);
-  const fazer = async (id: string, fn: () => Promise<unknown>, feito: string) => {
-    setErr(null); setOk(null); setIndo(id);
-    try { const x = await fn() as { result?: string } | undefined; setOk(x?.result ?? feito); } catch (e) { setErr(errMsg(e)); } finally { setIndo(null); r.reload(); }
-  };
+  // rc.28: a trava é por item — o botão fica ativo dizendo o que está indo, o segundo clique no MESMO item não manda de
+  // novo, e o clique noutra regra enquanto uma vai é enviado de verdade (nada de clique que some)
+  const { vai, enviar } = useEnvioPorItem();
+  // acao: 'aplicar' ou 'recusar' (o botão certo diz "Enviando…" ou "Recusando…"); desfazer e desligar dizem o deles
+  const fazer = (id: string, fn: () => Promise<unknown>, feito: string, acao: 'aplicar' | 'recusar' = 'aplicar') => enviar(id, acao, async () => {
+    setErr(null); setOk(null);
+    try { const x = await fn() as { result?: string } | undefined; setOk(x?.result ?? feito); } catch (e) { setErr(errMsg(e)); } finally { r.reload(); }
+  });
   const d = r.data;
   const vazio = d && !d.regras.length && !d.texto.length && !d.propostas.texto.length && !d.propostas.cartoes.length;
   return (
@@ -400,22 +406,21 @@ function Regras() {
       {!!d?.propostas.cartoes.length && <h4 className="rt-sub">{t('conexoes.regras.esperando')}</h4>}
       {d?.propostas.cartoes.map((c) => (
         <article key={c.id} className="dec-card">
-          <div className="dec-card__top"><span className="badge">{c.agent_name ? t('conexoes.regras.propostaDe', { agente: c.agent_name }) : t('conexoes.regras.proposta')}</span></div>
+          <div className="dec-card__top"><Selo icone="shield-check">{c.agent_name ? t('conexoes.regras.propostaDe', { agente: c.agent_name }) : t('conexoes.regras.proposta')}</Selo></div>
           <div className="dec-card__txt"><TextoLongo texto={c.summary} /></div>
-          <div className="row row--wrap dec-card__acts">
-            {indo === c.id ? <span className="badge" role="status">{t('conexoes.regras.aplicando')}</span>
-              : <BotoesRegra sugerido={c.alcance} ocupado={!!indo} onEscolher={(alcance) => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'apply', alcance }), t('conexoes.regras.aplicada'))}
-                onRecusar={() => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'reject' }), t('conexoes.regras.recusada'))} />}
+          <div className={`${FILEIRA} dec-card__acts`}>
+            <BotoesRegra sugerido={c.alcance} ocupado={vai(c.id, 'recusar') ? 'recusar' : vai(c.id) ? 'aplicar' : false} onEscolher={(alcance) => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'apply', alcance }), t('conexoes.regras.aplicada'))}
+              onRecusar={() => void fazer(c.id, () => api.post(`/api/proposals/${c.id}`, { decision: 'reject' }), t('conexoes.regras.recusada'), 'recusar')} />
           </div>
         </article>
       ))}
       {d?.propostas.texto.map((x) => (
         <article key={x.id} className="dec-card">
-          <div className="dec-card__top"><span className="badge">{t('conexoes.regras.conversaProposta')}</span></div>
+          <div className="dec-card__top"><Selo icone="chat">{t('conexoes.regras.conversaProposta')}</Selo></div>
           <div className="dec-card__txt">{x.text}</div>
-          <div className="row row--wrap dec-card__acts">
-            <button className="btn btn--sm btn--primary" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'active' }), t('conexoes.regras.ativada'))}>{t('conexoes.regras.ativar')}</button>
-            <button className="btn btn--sm btn--ghost" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'rejected' }), t('conexoes.regras.recusada'))}>{t('conexoes.regras.recusar')}</button>
+          <div className={`${FILEIRA} dec-card__acts`}>
+            <button className={ACAO.principal} aria-busy={vai(x.id, 'aplicar')} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'active' }), t('conexoes.regras.ativada'))}>{vai(x.id, 'aplicar') ? t('conexoes.cartao.enviando') : t('conexoes.regras.ativar')}</button>
+            <button className={ACAO.secundario} aria-busy={vai(x.id, 'recusar')} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'rejected' }), t('conexoes.regras.recusada'), 'recusar')}>{vai(x.id, 'recusar') ? t('conexoes.cartao.recusando') : t('conexoes.regras.recusar')}</button>
           </div>
         </article>
       ))}
@@ -425,7 +430,7 @@ function Regras() {
         <div key={x.id} className="regra-linha">
           <span className="regra-linha__txt"><b>{x.texto.charAt(0).toUpperCase() + x.texto.slice(1)}</b>
             <span className="muted small"> · {x.alcanceTexto} · {t('conexoes.regras.desde', { data: dia(x.criadaEm) })}{x.tipo === 'acao' ? ` · ${t('conexoes.regras.usos', { n: x.usos })}` : ''}</span></span>
-          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/conexoes/regras/${x.id}/desfazer`), t('conexoes.regras.desfeita'))}>{indo === x.id ? t('conexoes.regras.desfazendo') : t('conexoes.regras.desfazer')}</button>
+          <button className="btn btn--sm" aria-busy={vai(x.id)} onClick={() => void fazer(x.id, () => api.post(`/api/conexoes/regras/${x.id}/desfazer`), t('conexoes.regras.desfeita'))}>{vai(x.id) ? t('conexoes.regras.desfazendo') : t('conexoes.regras.desfazer')}</button>
         </div>
       ))}
 
@@ -433,7 +438,7 @@ function Regras() {
       {d?.texto.map((x) => (
         <div key={x.id} className="regra-linha">
           <span className="regra-linha__txt">{x.text}<span className="muted small"> · {t('conexoes.regras.desde', { data: dia(x.created_at) })}</span></span>
-          <button className="btn btn--sm" disabled={!!indo} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'rejected' }), t('conexoes.regras.desligada'))}>{indo === x.id ? t('conexoes.regras.desligando') : t('conexoes.acao.desligar')}</button>
+          <button className="btn btn--sm" aria-busy={vai(x.id)} onClick={() => void fazer(x.id, () => api.post(`/api/rules/${x.id}`, { decision: 'rejected' }), t('conexoes.regras.desligada'))}>{vai(x.id) ? t('conexoes.regras.desligando') : t('conexoes.acao.desligar')}</button>
         </div>
       ))}
     </section>

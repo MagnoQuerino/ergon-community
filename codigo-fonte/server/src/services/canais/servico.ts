@@ -584,7 +584,4 @@ export class Canais {
     for (const t of ['canais_vinculos', 'canais_saida', 'canais_cartoes', 'canais_avisados']) this.d.db.run(`DELETE FROM ${t} WHERE user_id = ? AND canal = ?`, userId, canal);
     this.digitar.delete(`${userId}|${canal}`);
   }
-
-  /** Para os testes e o diagnóstico. */
-  pendentesDeSaida(): number { return Number(this.d.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM canais_saida WHERE status IN ('pending', 'em_voo')")?.n ?? 0); }
 }

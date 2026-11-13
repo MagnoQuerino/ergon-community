@@ -114,7 +114,6 @@ const conexoes: Traducao<typeof pt> = {
   'regras.esperando': 'Waiting for you',
   'regras.proposta': 'proposed rule',
   'regras.propostaDe': 'proposed rule · {agente}',
-  'regras.aplicando': 'Applying…',
   'regras.aplicada': 'Rule applied.',
   'regras.recusada': 'Declined.',
   'regras.conversaProposta': 'proposed chat rule',
@@ -332,7 +331,6 @@ const conexoes: Traducao<typeof pt> = {
   // ——— os botões dos cartões de regra e de aprovação (components/CartaoRegra.tsx) ———
   'cartao.ateQuando': 'How long it applies',
   'cartao.porQuantoTempo': 'Approve for how long',
-  'cartao.aprovarPor': 'Approve for',
   'cartao.recusar': 'Decline',
   'alcance.pedido': 'Just this request',
   'alcance.24h': 'For 24 hours',
@@ -341,6 +339,14 @@ const conexoes: Traducao<typeof pt> = {
   'prazo.8h': '8 hours',
   'prazo.72h': '72 hours',
   'prazo.sempre': 'Always',
+  'cartao.aprovarPorPrazo': 'Approve for {prazo}',
+  'cartao.aprovarSempre': 'Always approve',
+  'cartao.prazo': 'Approval period',
+  'cartao.permitir.pedido': 'Allow just this request',
+  'cartao.permitir.24h': 'Allow for 24 hours',
+  'cartao.permitir.sempre': 'Always allow',
+  'cartao.enviando': 'Sending…',
+  'cartao.recusando': 'Declining…',
 
   // ——— o modelo padrão (components/ModeloPadrao.tsx) ———
 // ——— Telegram e Discord: conversar com a equipe pelo bot da pessoa (views/ConexoesView.tsx, ConversaPorCanal) ———

@@ -17,20 +17,15 @@ test('o selo do card no quadro usa as mesmas palavras da situação nos detalhes
 
 test('os rótulos do quadro trocam de idioma na hora (a tabela lê o dicionário a cada leitura)', async () => {
   const { setIdioma } = await import('../i18n/index.ts');
-  const { RESULT_LABEL, WORK_LABEL, DISPLAY_LABEL } = await import('./work.ts');
+  const { WORK_LABEL } = await import('./work.ts');
   try {
     await setIdioma('en', { guardar: false });
     assert.equal(situacaoDe('aguardando_aprovacao'), 'Waiting for your approval');
     assert.equal(situacaoDe('estado_desconhecido'), 'Queued');
     assert.equal(WORK_LABEL.revisao, 'Needs review');
-    assert.equal(DISPLAY_LABEL.voce, 'Needs you');
-    assert.equal(RESULT_LABEL.confirmado_humano, 'approved by you');
-    assert.equal(RESULT_LABEL.inexistente, undefined, 'resultado desconhecido continua sem rótulo');
   } finally {
     await setIdioma('pt-BR', { guardar: false });
   }
-  assert.equal(RESULT_LABEL.reprovado, 'não passou');
-  assert.deepEqual(Object.keys(RESULT_LABEL).length, 9);
 });
 
 test('a coluna Atualizada fica curta nos dois idiomas (coluna estreita) e o relógio adiantado não vira "daqui a"', async () => {

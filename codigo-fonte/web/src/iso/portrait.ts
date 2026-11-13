@@ -80,6 +80,3 @@ export function bodyUrl(a: PortraitAgent, scale = 2, skin: ActiveSkin | null = n
   bodies.set(key, out);
   return out;
 }
-
-/** Quantas imagens estão guardadas (medição de escala: não pode crescer sem limite). */
-export const portraitCacheSize = () => ({ portraits: cache.size, bodies: bodies.size, max: cache.max + bodies.max });

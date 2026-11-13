@@ -7,7 +7,6 @@ import { pt } from './pt/index.ts';
 import { en } from './en/index.ts';
 import { GLOSSARIO } from './glossario.ts';
 import { PARTICAO, FORA_DA_VARREDURA } from './particao.ts';
-import { PENDENTES } from './pendentes.ts';
 import type { Mensagem, Plural } from './tipos.ts';
 
 type Areas = Record<string, Record<string, Mensagem>>;
@@ -99,9 +98,8 @@ test('glossário: o GLOSSARIO.md explica todos os termos da lista (e vice-versa 
   for (const x of GLOSSARIO) { assert.ok(!vistos.has(x.pt), `termo repetido: ${x.pt}`); vistos.add(x.pt); }
 });
 
-test('partição: as mesmas áreas do dicionário, cada arquivo numa área só, e os pendentes dentro da área deles', () => {
+test('partição: as mesmas áreas do dicionário e cada arquivo numa área só', () => {
   assert.deepEqual(Object.keys(PARTICAO).sort(), Object.keys(PT).sort(), 'uma área da partição para cada área do dicionário');
-  assert.deepEqual(Object.keys(PENDENTES).sort(), Object.keys(PT).sort(), 'uma lista de pendentes para cada área');
   const dono = new Map<string, string>();
   for (const [a, arqs] of Object.entries(PARTICAO)) for (const f of arqs) {
     assert.ok(!dono.has(f), `${f} em duas áreas: ${dono.get(f)} e ${a}`);
@@ -110,10 +108,6 @@ test('partição: as mesmas áreas do dicionário, cada arquivo numa área só, 
     // views/world só existe na distribuição proprietária
     if (!f.startsWith('views/world/')) assert.ok(existe(f), `${f} (área ${a}) não existe`);
     assert.match(f, /^[\w/.-]+\.tsx?$/, `caminho a partir de web/src: ${f}`);
-  }
-  for (const [a, arqs] of Object.entries(PENDENTES)) {
-    assert.equal(new Set(arqs).size, arqs.length, `pendente repetido na área ${a}`);
-    for (const f of arqs) assert.equal(dono.get(f), a, `${f} está nos pendentes de "${a}" mas a partição o põe em "${dono.get(f) ?? 'nenhuma área'}"`);
   }
   // cada área tem o seu arquivo nos dois idiomas
   for (const a of Object.keys(PT)) for (const l of ['pt', 'en']) assert.ok(existe(`i18n/${l}/${a}.ts`), `falta i18n/${l}/${a}.ts`);

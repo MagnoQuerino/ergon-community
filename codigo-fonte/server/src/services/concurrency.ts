@@ -22,8 +22,8 @@ export const MAX_CHOICE = 32;
 export const DEFAULT_CHOICE = 5;
 
 /**
- * Padrão desta máquina: um processo a cada 4 GB de memória, sem passar do número de núcleos nem de 6. Dentro do Docker,
- * a memória é a que o Docker recebeu (é dela que o motor de IA vive), não a do computador inteiro.
+ * Padrão desta máquina: um processo a cada 4 GB de memória, sem passar do número de núcleos nem de 6. Dentro de um
+ * contêiner, a memória é a que o motor de contêineres recebeu (é dela que o motor de IA vive), não a do computador inteiro.
  */
 export function machineDefault(memBytes = os.totalmem(), cpus = os.availableParallelism()): number {
   return Math.max(1, Math.min(Math.floor(memBytes / 1024 ** 3 / 4), cpus, 6));

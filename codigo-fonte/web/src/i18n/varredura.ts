@@ -41,7 +41,7 @@ const PALAVRAS_PT = new Set(('de da do das dos para pra com sem uma um uns umas 
 const PALAVRAS_SOLTAS = new Set(('ontem hoje amanha nunca sempre nenhum nenhuma sim pronto pronta feito feita falhou ' +
   'erro aguardando trabalhando parado parada pausado pausada desfeito salvo enviado enviando copiado carregando').split(' '));
 /** Nomes que valem nas duas línguas: não pedem tradução quando aparecem sozinhos no JSX. */
-export const UNIVERSAIS = new Set(('Ergon Ctrl Cmd Alt Shift Esc Enter Tab K OK Nous Microsoft Google GitHub WhatsApp Teams ' +
+const UNIVERSAIS = new Set(('Ergon Ctrl Cmd Alt Shift Esc Enter Tab K OK Nous Microsoft Google GitHub WhatsApp Teams ' +
   'Telegram Slack Discord Notion Trello Outlook Gmail Planner PNG JPEG WebP PDF CSV JSON URL ZIP MB KB GB ID API Linux ' +
   'Windows macOS Mac PC Wi-Fi Stripe OpenAI ChatGPT Claude Anthropic Gemini Podman Tauri Pix Jira Asana Todoist ClickUp ' +
   'Linear Airtable Monday SharePoint OneDrive Dropbox Zoom Edge Chrome Firefox Safari Android iOS iPhone iPad Word Excel ' +

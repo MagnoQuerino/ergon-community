@@ -53,7 +53,7 @@ function valueNoise(x: number, z: number): number {
   return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz;
 }
 /** Umidade do chão num ponto do mundo: manchas grandes e suaves, com um pouco de grão. 0 = verde, 1 = seco. */
-export function groundAt(x: number, z: number): number {
+function groundAt(x: number, z: number): number {
   return 0.68 * valueNoise(x / 7.5, z / 7.5) + 0.32 * valueNoise(x / 2.6 + 31.7, z / 2.6 + 17.3);
 }
 
@@ -268,7 +268,7 @@ export function drawGroundChunk(g: CanvasRenderingContext2D, town: Town, t: Them
 const cache = new Map<string, Sprite>();
 function cached(key: string, make: () => Sprite): Sprite { let s = cache.get(key); if (!s) { s = make(); cache.set(key, s); } return s; }
 
-export function oliveTreeSprite(t: Theme, k: number): Sprite {
+function oliveTreeSprite(t: Theme, k: number): Sprite {
   return cached(`${t.id}|olive|${k.toFixed(2)}`, () => fitSprite(-1.1, 0, -1.1, 1.1, 2.6 * k, 1.1, (g, P) => {
     line(g, P(0, 0, 0), P(0.1, 1.0 * k, 0.05), t.woodDark[1]); line(g, P(0.04, 0, 0), P(0.14, 1.0 * k, 0.05), t.woodDark[0]);
     line(g, P(0.1, 0.8 * k, 0.05), P(-0.3, 1.4 * k, 0), t.woodDark[1]);
@@ -406,4 +406,4 @@ export function areaHits(town: Town): AreaHit[] {
   return hits;
 }
 
-export { boxPoly, screenBox };
+export { boxPoly };

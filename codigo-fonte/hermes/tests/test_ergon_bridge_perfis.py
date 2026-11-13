@@ -378,8 +378,8 @@ try:
     # 8. o perfil padrão continua como antes (quem ainda não migrou roda nele)
     est, saida, _r = rodar("", "oi", [fala("Oi do padrão.")], "sess-padrao-1")
     check("o perfil padrão continua atendendo em /v1/runs", est == "completed" and saida == "Oi do padrão." and "MARCA-ALMA" not in chamadas[0]["sistema"], str((est, saida)))
-    st, lst = ponte("GET", "/ergon/v1/perfis")
-    check("a ponte lista os perfis da equipe", st == 200 and lst.get("perfis") == [HIP, EUC], str(lst))
+    pastas = sorted(x for x in os.listdir(os.path.join(HOME, "profiles")) if x.startswith("erg-") and os.path.isdir(os.path.join(HOME, "profiles", x)))
+    check("os dois perfis da equipe existem na pasta do motor", pastas == [HIP, EUC], str(pastas))
 finally:
     gw.terminate()
     try:

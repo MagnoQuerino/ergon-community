@@ -12,7 +12,6 @@
  */
 import { PERSONALITY, isPersonality } from './personalities.ts';
 
-export const SKIN_FORMAT_VERSION = 1;
 export const SKIN_MAX_CHARACTERS = 10;
 
 export const SKIN_SPECIES = ['human', 'elf', 'orc', 'gnome'] as const;

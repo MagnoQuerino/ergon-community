@@ -156,7 +156,7 @@ describe('ponte interna Hermes → Ergon', () => {
   before(async () => {
     h = await harness({
       bridgeToken: BRIDGE_TOKEN,
-      teams: { enabled: true, tenantId: 'tenant-real', allowedUsers: ['aad-real-owner'], botId: null },
+      teams: { enabled: true, tenantId: 'tenant-real', allowedUsers: ['aad-real-owner'] },
     });
     s = await setupOwner(h);
     // identidades reais vêm da configuração, sincronizadas na inicialização
@@ -181,13 +181,6 @@ describe('ponte interna Hermes → Ergon', () => {
     assert.equal(e.is_fixture, 0);
     assert.equal(e.mode, 'real');
     assert.ok(e.task_id);
-    const conns = (await req(h, 'GET', '/api/connections', s)).json as Array<{ id: string; kind: string; mode: string; state: string }>;
-    const teamsConn = conns.find((c) => c.kind === 'teams' && c.mode === 'real')! as { id: string; state: string };
-    // eventos pela ponte não bastam: "conectado" só após confirmação humana de teste real
-    assert.equal(teamsConn.state, 'nao_validado');
-    assert.equal((await req(h, 'POST', `/api/connections/${teamsConn.id}/validate`, s)).status, 200);
-    const after = (await req(h, 'GET', '/api/connections', s)).json as Array<{ kind: string; mode: string; state: string }>;
-    assert.equal(after.find((c) => c.kind === 'teams' && c.mode === 'real')!.state, 'conectado');
     // workspace vem da conexão, não do payload
     const t = (await req(h, 'GET', `/api/tasks/${e.task_id}`, s)).json.task;
     assert.equal(t.workspace_id, s.workspaceId);

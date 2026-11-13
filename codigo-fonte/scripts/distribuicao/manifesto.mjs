@@ -5,12 +5,12 @@
 import crypto from 'node:crypto';
 
 export const FORMATO = 1;
-export const EDICOES = ['community', 'proprietary'];
-export const CANAIS = ['estavel', 'teste'];
+const EDICOES = ['community', 'proprietary'];
+const CANAIS = ['estavel', 'teste'];
 // Hosts de onde um artefato pode vir (HTTPS, inclusive depois de redirecionar). Nada que a página ou o manifesto
 // mandem fora daqui é baixado; mudar de origem (CDN própria) é um cliente novo, assinado pelo manifesto anterior.
-export const ORIGENS = ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com', 'ghcr.io', 'pkg-containers.githubusercontent.com'];
-export const LIMITE_REDIRECIONAMENTOS = 5;
+const ORIGENS = ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com', 'ghcr.io', 'pkg-containers.githubusercontent.com'];
+const LIMITE_REDIRECIONAMENTOS = 5;
 
 export class Recusa extends Error {
   constructor(codigo, msg) { super(`${codigo}: ${msg}`); this.codigo = codigo; }
@@ -163,7 +163,7 @@ export function assinar(bytes, chave) {
 }
 
 // chaves: { [keyId]: { publica: <SPKI base64>, revogadaEm?: ISO } } — o chaveiro embutido no cliente
-export function conferirAssinatura(bytes, sigBytes, chaves, agora = new Date()) {
+function conferirAssinatura(bytes, sigBytes, chaves, agora = new Date()) {
   let sig; try { sig = JSON.parse(Buffer.from(sigBytes).toString('utf8')); } catch { recusa('ASSINATURA', 'arquivo de assinatura ilegível'); }
   if (!sig || typeof sig.keyId !== 'string' || !KEYID.test(sig.keyId) || typeof sig.assinatura !== 'string') recusa('ASSINATURA', 'assinatura sem chave ou valor');
   const k = Object.hasOwn(chaves, sig.keyId) ? chaves[sig.keyId] : null;

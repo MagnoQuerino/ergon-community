@@ -39,13 +39,15 @@ beforeEach(async () => {
 });
 afterEach(() => h.close());
 const usar = () => req(h, 'POST', '/api/conexoes/asana/usar-de', s, { workspaceId: a });
+// as contas de outro workspace vêm junto da lista de conexões (só enquanto a conexão não está ligada aqui)
+const reutilizaveis = async (kind: string, sess = s) => (await req(h, 'GET', '/api/integrations', sess)).json.find((i: { kind: string }) => i.kind === kind).reutilizaveis as Array<{ workspaceId: string; conta: string }>;
 
 describe('a mesma conta em mais de um workspace', () => {
   test('o workspace novo não tem a conexão, mas oferece a do outro', async () => {
     assert.equal(estado(b)?.state ?? 'off', 'off');
-    const r = (await req(h, 'GET', '/api/conexoes/asana/reutilizaveis', s)).json;
-    assert.deepEqual(r.contas.map((c: { conta: string }) => c.conta), ['Ana Empresa']);
-    assert.equal(r.contas[0].workspaceId, a);
+    const contas = await reutilizaveis('asana');
+    assert.deepEqual(contas.map((c) => c.conta), ['Ana Empresa']);
+    assert.equal(contas[0].workspaceId, a);
   });
 
   test('usar a do outro: a credencial é uma só, sem cópia', async () => {
@@ -146,7 +148,8 @@ describe('a mesma conta em mais de um workspace', () => {
 
   test('só entre os workspaces da própria pessoa', async () => {
     const outra = await addPerson(h, 'outra', 'senha-comprida-da-outra-1');
-    assert.deepEqual((await req(h, 'GET', '/api/conexoes/asana/reutilizaveis', outra)).json.contas, []);
+    assert.equal(estado(outra.workspaceId)?.state ?? 'off', 'off');
+    assert.deepEqual(await reutilizaveis('asana', outra), []);
     const r = await req(h, 'POST', '/api/conexoes/asana/usar-de', outra, { workspaceId: a });
     assert.equal(r.status, 404);
     assert.equal(estado(outra.workspaceId)?.state ?? 'off', 'off');
@@ -155,7 +158,8 @@ describe('a mesma conta em mais de um workspace', () => {
   test('WhatsApp é um aparelho só: não se empresta', async () => {
     h.integrations.secrets.writeOwn(a, 'whatsapp', { x: 1 });
     setIntegration(h.db, a, 'whatsapp', { state: 'connected', account_label: 'Número', connected_at: new Date().toISOString() });
-    assert.deepEqual((await req(h, 'GET', '/api/conexoes/whatsapp/reutilizaveis', s)).json.contas, []);
+    assert.equal(estado(b, 'whatsapp')?.state ?? 'off', 'off');
+    assert.deepEqual(await reutilizaveis('whatsapp'), []);
     assert.equal((await req(h, 'POST', '/api/conexoes/whatsapp/usar-de', s, { workspaceId: a })).status, 404);
   });
 });

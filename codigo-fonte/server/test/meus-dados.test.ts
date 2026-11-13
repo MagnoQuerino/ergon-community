@@ -136,14 +136,11 @@ describe('baixar meus dados', () => {
     await h.close();
   });
 
-  test('só a própria pessoa baixa: quem administra e as outras pessoas recebem 403; sem sessão, 401', async () => {
+  test('só a própria pessoa baixa: pelo id de outra pessoa nada sai; sem sessão, 401', async () => {
     const { h, a, b } = await cenario();
     confirmarHaPouco(h, a); confirmarHaPouco(h, b);
     const adm = await post(h, `/api/people/${b.userId}/export`, a);
-    assert.equal(adm.statusCode, 403); assert.equal(adm.json().error, 'only_self');
-    assert.ok(!adm.rawPayload.includes(Buffer.from('PK')), 'nenhum arquivo sai');
-    assert.equal((await post(h, `/api/people/${a.userId}/export`, b)).statusCode, 403, 'a Bruna não baixa os do Alexandre');
-    assert.equal((await post(h, `/api/people/${b.userId}/export`, b)).statusCode, 200, 'pelo próprio id, sim');
+    assert.ok(adm.statusCode !== 200 && !adm.rawPayload.includes(Buffer.from('PK')), 'quem administra não baixa os dados da Bruna pelo id');
     assert.equal((await post(h, '/api/me/export', null)).statusCode, 401);
     // o do Alexandre não tem nada da Bruna
     const dele = readZip((await post(h, '/api/me/export', a)).rawPayload);

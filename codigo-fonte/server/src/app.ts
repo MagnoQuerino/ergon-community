@@ -7,6 +7,7 @@ import path from 'node:path';
 import type { Config } from './config.ts';
 import { normalizeBridge, normalizeTeamsActivity, normalizeWhatsAppMessage, type BridgePayload } from './connectors/normalize.ts';
 import type { Db } from './db/db.ts';
+import { PAGE_CSP } from './lib/protecao-pagina.ts';
 import { HttpError, fold, id as newId, notFound, now, redactUrl, safeEqual } from './lib/util.ts';
 import { comTextoDoResultado, reconhecer, tx, type Texto } from './lib/textos.ts';
 import { INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
@@ -56,7 +57,6 @@ import { Initiative } from './services/initiative.ts';
 import { forkFrom, marksOf, mediaOf, searchAll, setMark, updateConversation, type SearchKind } from './services/conversation-tools.ts';
 import { applyDocCommands, createFolder, emptyTrash, purgeFiles, purgeRequest, folderForConversation, folderForTask, listFolder, parseDocCommands, preview, restore, searchFiles, trash, tree, undo, updateFile, updateFolder } from './services/documents.ts';
 import { personalityOf, setPersonality } from './services/voices.ts';
-import { connectionStatuses } from './services/connections.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HermesError, HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
 import { CONEXOES, type AiService } from './services/ai.ts';
@@ -83,7 +83,7 @@ import { Operations, taskFiles, linkFile } from './services/operations.ts';
 import { KIND_LABEL, Results, WORK_LABEL, type WorkState } from './services/results.ts';
 import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setSetting } from './services/sectors.ts';
 import { findConnection, ingestEvent, syncConfiguredIdentities, upsertIdentity } from './services/ingest.ts';
-import { FixtureTaskProvider, importBoards } from './services/mirror.ts';
+import { importBoards } from './services/mirror.ts';
 import { RunExecutor, almaDoAgente, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
 import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
 import { ReviewService } from './services/review.ts';
@@ -796,8 +796,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     reply.header('Referrer-Policy', 'no-referrer');
     // a prévia de um arquivo (imagem, PDF) define a própria política, mais fechada (download, abaixo); o resto, a de sempre
     if (!reply.hasHeader('X-Frame-Options')) reply.header('X-Frame-Options', 'DENY');
-    if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy',
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy', PAGE_CSP);
     return payload;
   });
 
@@ -1286,12 +1285,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
 
   // Desativar (antes "arquivar"): a coordenação redistribui tarefas abertas e ferramentas exclusivas
-  const deactivate = async (req: FastifyRequest) => {
+  app.post('/api/agents/:id/deactivate', { schema: { params: idParams('agt') } }, async (req) => {
     const a = owner(req);
     return { ok: true, ...archiveAgent(db, bus, a.workspaceId, a.userId, (req.params as { id: string }).id) };
-  };
-  app.post('/api/agents/:id/deactivate', { schema: { params: idParams('agt') } }, deactivate);
-  app.post('/api/agents/:id/archive', { schema: { params: idParams('agt') } }, deactivate);
+  });
 
   // Janela do agente: o que ele fez (execuções com modelo e tokens) e com que tarefas está
   app.get('/api/agents/:id/activity', { schema: { params: idParams('agt') } }, async (req) => {
@@ -2074,21 +2071,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return teamwork.arrange(a.workspaceId, (req.params as { id: string }).id, a.userId, req.body as { priority?: boolean; before?: string | null; move?: 'up' | 'down' });
   });
 
-  // sua decisão sobre o card da equipe: aprovar e concluir (ou confirmar a ação externa), ou devolver com instrução
-  app.post('/api/tasks/:id/decision', {
-    schema: { params: idParams('tsk'), body: { type: 'object', additionalProperties: false, required: ['decision'], properties: {
-      decision: { enum: ['aprovar', 'devolver'] }, note: S.str(cfg.maxInputChars) } } },
-  }, async (req) => {
-    const a = auth(req);
-    const taskId = (req.params as { id: string }).id;
-    if (boardAudience(db, a.workspaceId, getTask(db, a.workspaceId, taskId).board_id) !== 'team') throw new HttpError(409, 'not_team', 'Nas suas tarefas, conclua pelo próprio card.');
-    const b = req.body as { decision: 'aprovar' | 'devolver'; note?: string };
-    const r = results.decide(a.workspaceId, { type: 'user', id: a.userId }, taskId, b.decision, b.note ?? null);
-    if (r.state === 'confirmado_humano') teamwork.helpApproved(a.workspaceId, taskId); // card de ajuda: quem pediu continua; da conversa: entrega
-    else teamwork.purpose.closeRequests(a.workspaceId, taskId, r.justification);
-    return { state: r.state, justification: r.justification };
-  });
-
   // a sua resposta a um card que espera você (do card, de "aguardando você" ou da conversa): já põe o trabalho para andar
   app.post('/api/tasks/:id/respond', { schema: { params: idParams('tsk'), body: respondSchema } }, async (req) => {
     const a = auth(req);
@@ -2228,28 +2210,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const t = routeTeamTask(db, bus, a.workspaceId, { type: 'user', id: a.userId }, { title: src.title, description: src.description, parentTaskId: src.id, dueOn: src.due_on });
     for (const x of taskFiles(db, a.workspaceId, src.id).filter((y) => y.role === 'entrada')) linkFile(db, a.workspaceId, t.id, x.id, 'entrada');
     return reply.status(201).send(t);
-  });
-
-  app.post('/api/tasks/:id/delegate', {
-    schema: { params: idParams('tsk'), body: { type: 'object', additionalProperties: false, required: ['agentId', 'instruction', 'requestId'], properties: {
-      agentId: S.id('agt'), instruction: S.str(2000, 3), requestId: { type: 'string', pattern: '^[A-Za-z0-9-]{8,64}$' } } } },
-  }, async (req, reply) => {
-    const a = auth(req);
-    const taskId = (req.params as { id: string }).id;
-    const b = req.body as { agentId: string; instruction: string; requestId: string };
-    const t = getTask(db, a.workspaceId, taskId);
-    const ag = db.get<{ status: string }>('SELECT status FROM agents WHERE id = ? AND workspace_id = ?', b.agentId, a.workspaceId);
-    if (!ag) throw notFound('agente');
-    if (ag.status !== 'active') throw new HttpError(409, 'agent_archived', 'agente desativado');
-    // subtarefa temporária: não cria habitante e passa pela mesma fila/limite de concorrência
-    const run = executor.enqueue({
-      workspaceId: a.workspaceId, agentId: b.agentId, taskId, kind: 'subtask',
-      input: `Tarefa #${t.number}: ${t.title}\n${t.description}\n\nPedido: ${b.instruction}`,
-      instructions: instructionsFor(db, a.workspaceId, b.agentId, 'Canal: delegação de tarefa no Ergon. Responda com um resultado curto.', { foco: { taskId } }),
-      idempotencyKey: `delegate-${taskId}-${b.requestId}`,
-    });
-    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'task.delegate', targetType: 'task', targetId: taskId, evidence: { runId: run.id, agentId: b.agentId }, result: 'enfileirada' });
-    return reply.status(202).send({ runId: run.id, mode: run.mode });
   });
 
   app.post('/api/link-proposals/:id', {
@@ -2474,11 +2434,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const permissoes = conexoes.setSoLeitura(a.workspaceId, a.userId, kind, (req.body as { on: boolean }).on);
     return { permissoes, soLeitura: conexoes.catalogoDe(a.workspaceId, kind).soLeitura };
   });
-  // a mesma conta em mais de um workspace seu: usar a de outro, sem conectar de novo
-  app.get('/api/conexoes/:kind/reutilizaveis', { schema: { params: conexaoParam } }, async (req) => {
-    const a = owner(req);
-    return { contas: integrations.reutilizaveis(a.workspaceId, a.userId, (req.params as { kind: IntegrationKind }).kind) };
-  });
+  // a mesma conta em mais de um workspace seu: usar a de outro, sem conectar de novo (a lista de integrações traz as contas)
   app.post('/api/conexoes/:kind/usar-de', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['workspaceId'], properties: { workspaceId: S.str(60, 3) } } } }, async (req) => {
     const a = owner(req);
     return { conta: integrations.usarDe(a.workspaceId, a.userId, (req.params as { kind: IntegrationKind }).kind, (req.body as { workspaceId: string }).workspaceId) };
@@ -2488,11 +2444,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const kind = (req.params as { kind: IntegrationKind }).kind;
     if (integrationRow(db, a.workspaceId, kind).state !== 'connected') throw new HttpError(409, 'not_connected', 'integração não conectada');
     return { itens: await conexoes.testar(a.workspaceId, a.userId, kind, (req.body ?? {}) as { escrita?: boolean; quadro?: string }) };
-  });
-  app.post('/api/conexoes/:kind/acao', { schema: { params: conexaoParam, body: { type: 'object', additionalProperties: false, required: ['acao'], properties: { acao: S.str(80, 3), parametros: { type: 'object' } } } } }, async (req) => {
-    const a = owner(req);
-    const b = req.body as { acao: string; parametros?: Record<string, unknown> };
-    return conexoes.daPessoa(a.workspaceId, a.userId, (req.params as { kind: string }).kind, b.acao, b.parametros ?? {});
   });
   // envio ao aplicativo que falhou: a pessoa pede de novo
   app.post('/api/tasks/:id/reenviar', { schema: { params: idParams('tsk') } }, async (req) => {
@@ -2540,8 +2491,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     `SELECT o.id, c.kind AS platform, c.mode, o.body, o.status, o.created_at FROM outbox o JOIN connections c ON c.id = o.connection_id
       WHERE o.workspace_id = ? ORDER BY o.created_at DESC LIMIT 100`, auth(req).workspaceId));
 
-  app.get('/api/rules', async (req) => db.all('SELECT id, text, status, created_at, decided_at FROM rules WHERE workspace_id = ? ORDER BY created_at DESC', auth(req).workspaceId));
-
   app.post('/api/rules/:id', {
     schema: { params: idParams('rul'), body: { type: 'object', additionalProperties: false, required: ['decision'], properties: { decision: { enum: ['active', 'rejected'] } } } },
   }, async (req) => {
@@ -2555,7 +2504,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { ok: true };
   });
 
-  app.get('/api/connections', async (req) => connectionStatuses(db, cfg, auth(req).workspaceId, hermes));
 
   // Integrações da conta (Microsoft, Google, WhatsApp e os apps de tarefas): routes/integracoes.ts
   registerIntegrationRoutes(app, { db, bus, integrations, whatsapp, auth, owner });
@@ -2606,31 +2554,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       return ingestEvent(db, bus, cfg, conn, e, true);
     });
     return { fixture: true, platform, name, results };
-  });
-
-  // Espelho de quadro (fixture) -------------------------------------------------------------------------
-  const MIRROR_VARIANTS = ['planner-like-v1', 'planner-like-v2', 'planner-like-erro'];
-  app.get('/api/mirror/preview', {
-    schema: { querystring: { type: 'object', additionalProperties: false, properties: { variant: { enum: MIRROR_VARIANTS } } } },
-  }, async (req) => {
-    auth(req);
-    const variant = (req.query as { variant?: string }).variant ?? 'planner-like-v1';
-    const p = new FixtureTaskProvider(cfg.fixturesDir, variant);
-    try {
-      return { fixture: true, provider: p.name, supports: p.supports, boards: await p.listBoards() };
-    } catch (err) {
-      return { fixture: true, provider: p.name, supports: p.supports, boards: [], error: err instanceof Error ? err.message : 'falha' };
-    }
-  });
-
-  app.post('/api/mirror/import', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['variant', 'boards'], properties: {
-      variant: { enum: MIRROR_VARIANTS }, boards: { type: 'array', minItems: 1, maxItems: 20, items: S.str(100, 1) } } } },
-  }, async (req) => {
-    const a = owner(req);
-    const b = req.body as { variant: string; boards: string[] };
-    const conn = findConnection(db, a.workspaceId, 'mirror_fixture', 'fixture');
-    return importBoards(db, bus, a.workspaceId, conn.id, a.userId, new FixtureTaskProvider(cfg.fixturesDir, b.variant), b.boards);
   });
 
   // Arquivos ----------------------------------------------------------------------------------------------
@@ -2720,7 +2643,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return reply.send(f.data); // decifrado na memória (até o limite de upload), nunca gravado aberto
   });
 
-  // Backup pelo script do computador (docker compose exec … backup-cli): o banco cifrado só abre neste processo
+  // Backup pelo script do computador (podman compose exec … backup-cli): o banco cifrado só abre neste processo
   /**
    * Backup completo (services/backup.ts): banco, keyring, arquivos e conexões numa pasta conferida por SHA-256.
    * Sem a chave do acesso sem trancamento: só abre com a senha ou a frase daquele momento.
@@ -2757,7 +2680,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     semConexoes: () => motorSemConjunto(CONEXOES, motorScope(a.workspaceId)),
     espaco: () => motors.espaco() });
   app.get('/api/saude', async (req) => healthPanel(healthDepsFor(admin(req))));
-  /** Erro do gerente de motores em linguagem simples (a tela mostra; nada de código de erro do Docker). */
+  /** Erro do gerente de motores em linguagem simples (a tela mostra; nada de código de erro do motor de contêineres). */
   const gerenteErro = (e: unknown): HttpError => {
     const st = Number((e as { status?: number }).status);
     const tecnico = scrub((e as Error)?.message, 300);
@@ -2861,7 +2784,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     req.raw.on('close', () => { clearInterval(hb); unsub(); });
   });
 
-  // Ponte interna Hermes → Ergon (rede Docker interna; token próprio) --------------------------------------
+  // Ponte interna Hermes → Ergon (rede interna dos contêineres; token próprio) ------------------------------
   /** Motor que chama a ponte (token dele); com um motor por pessoa, o token da instalação não vale aqui. */
   const bridgeMotor = (req: FastifyRequest): string => {
     const m = motors.identify(req.headers['x-ergon-bridge-token']);
@@ -3119,10 +3042,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const buf = await buildPackage({ package_id: `comunidade.local.${slug}`, version: '1.0.0', title: b.title, summary: 'Criado no editor do Ergon', creator_id: 'local', license: 'CC-BY-4.0', ergon: { min: '0.2.0' }, kind: b.kind }, b.data as never);
     try { validatePackage(buf); } catch (e) { throw new HttpError(400, 'package_invalid', (e as Error).message); }
     return reply.header('content-type', 'application/x-ergon').header('content-disposition', `attachment; filename="${slug}.ergon"`).send(buf);
-  });
-  app.get('/api/packages/:id/asset', { schema: { params: idParams('pkg'), querystring: { type: 'object', required: ['path'], properties: { path: S.str(200, 3) } } } }, async (req, reply) => {
-    const a = auth(req); const x = packages.asset(a.workspaceId, (req.params as { id: string }).id, (req.query as { path: string }).path);
-    return reply.header('content-type', x.type).header('content-security-policy', "default-src 'none'").send(x.bytes);
   });
 
   // módulo opcional (server/src/world): a Community não traz esse código ---------------------------------------

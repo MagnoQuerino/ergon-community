@@ -26,7 +26,7 @@ const NOUS_WHY = [
 ] as const satisfies readonly Chave[];
 /** Enquanto a IA da conta acorda, os cartões não aparecem (nada de botão esperando): um carregamento com uma frase
  *  só, sorteada destas; quando ela responde, os cartões chegam prontos para conectar. */
-export const ACORDANDO_IA = [
+const ACORDANDO_IA = [
   'configuracoes.contas.acordando1',
   'configuracoes.contas.acordando2',
   'configuracoes.contas.acordando3',

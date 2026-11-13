@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { KX, KY, KZ, fitScale, insidePoly, project, unproject } from './projection.ts';
+import { KX, KY, KZ, insidePoly, project, unproject } from './projection.ts';
 import { fillPoly, line, projector, type PixelCtx } from './raster.ts';
 import { FIG_AY, HEAD_BOTTOM, figureGrid, gridBox, gridExtent, itemForRole, lookFor, mirrorGrid, npcLook } from './figures.ts';
 import { ALEXANDRIA_NOITE as T } from './theme.ts';
@@ -22,14 +22,6 @@ test('projeção 2:1: x desce à direita, z desce à esquerda, altura sobe', () 
     const [ux, uz] = unproject(...project(x, 0, z));
     assert.ok(Math.abs(ux - x) < 0.15 && Math.abs(uz - z) < 0.15, `ida e volta de (${x}, ${z})`);
   }
-});
-
-test('ampliação é sempre inteira e limitada', () => {
-  const b = { x0: -150, y0: -110, x1: 150, y1: 90 };
-  assert.equal(fitScale(b, 1200, 800), 4);
-  assert.equal(fitScale(b, 300, 200), 1);
-  assert.equal(fitScale(b, 100, 100), 1, 'nunca menor que 1');
-  assert.equal(fitScale(b, 9000, 9000), 8, 'nunca maior que 8');
 });
 
 test('polígono sem suavização: losango simétrico e quadriláteros vizinhos sem frestas nem buracos', () => {

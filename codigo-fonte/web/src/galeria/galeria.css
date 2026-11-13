@@ -1,0 +1,20 @@
+/* Galeria dos cartões (só desenvolvimento): a moldura. Os cartões usam o styles.css do app, sem nada daqui. */
+html, body, #root { height: auto; }
+.gal { padding: 16px 20px 80px; display: grid; gap: 28px; }
+.gal h1 { margin: 0; font-size: 20px; }
+.gal__nota { margin: 0; color: var(--muted); font-size: 13px; }
+.gal__sec > h2 { margin: 0 0 8px; font-size: 15px; }
+.gal__cols { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
+.gal__col { flex: none; border: 1px dashed var(--line); border-radius: 10px; background: var(--panel); }
+.gal__col > h3 { margin: 0; padding: 4px 10px; font-size: 11.5px; font-weight: 600; color: var(--muted); border-bottom: 1px dashed var(--line); }
+.gal__col--larga { width: 600px; }
+/* a gaveta de 380 px: a mesma margem interna da gaveta do app (14 × 16) */
+.gal__col--380 { width: 380px; }
+.gal__miolo { padding: 14px 16px; }
+.gal__miolo--chat { padding: 0; }
+/* as gavetas e a conversa ficam no fluxo da página (no app são fixas à direita) */
+.gal .drawer { position: static; width: auto; box-shadow: none; border: 0; padding: 0; overflow: visible; z-index: auto; }
+.gal .chat { width: auto; border: 0; }
+.gal .chat__msgs { overflow: visible; }
+.gal__pecas { display: grid; gap: 12px; }
+.gal__peca > h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; }

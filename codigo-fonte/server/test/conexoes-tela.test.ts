@@ -311,9 +311,9 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     // o nome do arquivo (conexoes/espelho.ts) pode aparecer nos comentários; a palavra, não
     for (const f of ['web/src/views/TarefasView.tsx', 'web/src/views/AjudaView.tsx', 'web/src/i18n/pt/ajuda.ts', 'web/src/components/CommandPalette.tsx']) assert.doesNotMatch(ler(f), /espelh(?!o.ts)/i, f);
     assert.doesNotMatch(lerTela(), /espelho/);
-    // (types.ts puxa código do navegador: lido como texto)
-    assert.match(ler('web/src/lib/types.ts'), /mirror: 'servidor\.origem\.mirror'/);
-    assert.match(ler('web/src/i18n/pt/servidor.ts'), /'origem\.mirror': 'ligada'/);
+    // a origem do card na tela de detalhes (TaskDetail.tsx puxa código do navegador: lido como texto)
+    assert.match(ler('web/src/components/TaskDetail.tsx'), /mirror: 'tarefa\.origem\.mirror'/);
+    assert.match(ler('web/src/i18n/pt/tarefa.ts'), /'origem\.mirror': 'ligada'/);
     // os rótulos do histórico do card ficam em lib/tarefa-tela.ts (as linhas curtas da tela de detalhes)
     const detalhe = ler('web/src/lib/tarefa-tela.ts');
     // (cada rótulo é uma chave do dicionário da tela, web/src/i18n/pt/tarefa.ts)
@@ -361,12 +361,15 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
   test('cartão de ação numa conta: quem recusa lê "Recusando…", e o já decidido noutro lugar só relê', () => {
     // "Enviando…" só no cartão que envia a uma conta; ativar rotina, abrir cards e apagar de vez dizem o que fazem
     // a conversa traduzida: as chaves no componente e o texto no dicionário português
-    assert.match(ler('web/src/components/ChatPanel.tsx'), /deciding\[p\.id\] === 'reject' \? t\('conversas\.proposta\.recusando'\) : p\.kind === 'conexao' \? t\('conversas\.proposta\.enviando'\) : p\.kind === 'depois_de_ler' \|\| p\.kind === 'aprovacao' \? t\('conversas\.proposta\.aprovando'\) : p\.kind === 'purge' \? t\('conversas\.proposta\.apagando'\) : t\('conversas\.proposta\.aplicando'\)/);
+    // (rc.28: cada botão diz o dele — o principal o que está indo, o Recusar "Recusando…" — e nenhum some esperando)
+    const conversa = ler('web/src/components/ChatPanel.tsx');
+    assert.match(conversa, /deciding\[p\.id\] === 'apply' \? \(p\.kind === 'conexao' \? t\('conversas\.proposta\.enviando'\) : p\.kind === 'depois_de_ler' \|\| p\.kind === 'aprovacao' \? t\('conversas\.proposta\.aprovando'\) : p\.kind === 'purge' \? t\('conversas\.proposta\.apagando'\) : t\('conversas\.proposta\.aplicando'\)\)/);
+    assert.match(conversa, /deciding\[p\.id\] === 'reject' \? t\('conversas\.proposta\.recusando'\) : t\('conversas\.proposta\.recusar'\)/);
     const dicConversas = ler('web/src/i18n/pt/conversas.ts');
     for (const [chave, texto] of [['recusando', 'Recusando…'], ['enviando', 'Enviando…'], ['aprovando', 'Aprovando…'], ['apagando', 'Apagando…'], ['aplicando', 'Aplicando…']]) {
       assert.ok(dicConversas.includes(`'proposta.${chave}': '${texto}'`), `conversas.proposta.${chave}`);
     }
-    assert.match(ler('web/src/components/DecisionsPanel.tsx'), /decisao === 'reject' \? t\('servidor\.decisoes\.recusando'\) : t\('servidor\.decisoes\.recusar'\)/);
+    assert.match(ler('web/src/components/DecisionsPanel.tsx'), /vai\(p\.id, 'reject'\) \? t\('servidor\.decisoes\.recusando'\) : t\('servidor\.decisoes\.recusar'\)/);
     assert.match(ler('web/src/i18n/pt/servidor.ts'), /'decisoes\.recusando': 'Recusando…'/);
     const detalhe = ler('web/src/components/TaskDetail.tsx');
     assert.match(detalhe, /e instanceof ApiError && e\.status === 409 && e\.code === 'decided'\) return null/);

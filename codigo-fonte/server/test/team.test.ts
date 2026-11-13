@@ -317,9 +317,9 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     assert.equal(card.work.kind, 'documental');
     assert.ok(card.work.result.criteria.some((c: { id: string; ok: boolean }) => c.id === 'conteudo' && !c.ok));
     assert.equal(col(t.id), 'Em andamento', 'revisão é uma etapa do andamento: o estado aparece no card');
-    // você devolve com instrução; na próxima rodada o documento vem inteiro e o card conclui com o entregável
-    assert.equal((await req(h, 'POST', `/api/tasks/${t.id}/decision`, s, { decision: 'devolver', note: 'Quero o relatório completo, não o aviso.' })).status, 200);
-    assert.equal(col(t.id), 'A fazer');
+    // você devolve com instrução (o mesmo /respond da tela); na próxima rodada o documento vem inteiro e o card conclui com o entregável
+    assert.equal((await req(h, 'POST', `/api/tasks/${t.id}/respond`, s, { action: 'return', text: 'Quero o relatório completo, não o aviso.' })).status, 200);
+    assert.equal(col(t.id), 'Em andamento', 'a sua resposta já põe o card para trabalhar de novo');
     finalReply = relatorio;
     await step();
     assert.match(motor.started.at(-1)!.input, /devolveu o trabalho com esta instrução.*relatório completo/s);

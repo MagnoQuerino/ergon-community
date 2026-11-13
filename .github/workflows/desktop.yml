@@ -83,6 +83,9 @@ jobs:
           key: desktop-windows-${{ env.RUST_VERSAO }}-${{ hashFiles('codigo-fonte/desktop/src-tauri/Cargo.lock') }}
       - name: Testes do aplicativo
         working-directory: codigo-fonte/desktop/src-tauri
+        # a máquina da esteira é administradora sem o pedido do Windows: o teste do cmd elevado roda de verdade
+        env:
+          ERGON_TESTE_ELEVADO: 1
         run: cargo test --locked --release
       - name: Lançador do Windows (sintaxe)
         shell: pwsh

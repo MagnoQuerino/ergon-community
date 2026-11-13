@@ -1,6 +1,7 @@
 // Ergon Desktop: a mesma interface do Ergon (servida pelo Ergon local, em http://localhost:8787) numa janela
 // própria, com uma tela de abertura que confere os serviços e os liga quando você pede. Nada da interface é
-// duplicado aqui; esta camada só conhece a saúde do Ergon, o Docker e os lançadores (ergon.ps1 / ergon.sh).
+// duplicado aqui; esta camada só conhece a saúde do Ergon, o motor de contêineres (Podman; Docker numa
+// instalação antiga) e os lançadores (ergon.ps1 / ergon.sh).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ambiente;

@@ -17,7 +17,7 @@ import { boxAt, type Box, type Vec2 } from './geom.ts';
 
 export const FLOOR_H = 3.2;
 export const WALL_T = 0.3;
-export const STEP_RISE = FLOOR_H / 10;
+const STEP_RISE = FLOOR_H / 10;
 
 export type Bubble = 'talk' | 'think' | 'exclaim' | 'drop' | null;
 export interface Activity {
@@ -152,7 +152,7 @@ export function stairPath(st: StairSpec): Array<{ p: Vec2; h: number }> {
 
 // ---------------------------------------------------------------- planta da Stoa (feita à mão)
 export const STOA_DESKS: Vec2[] = [[-5.8, -2.6], [-2.6, -2.6], [0.6, -2.6], [-5.8, 0.8], [-2.6, 0.8], [0.6, 0.8]];
-export const MEET_TABLE = { x: 3.75, z: 0.9, hx: 0.62, hz: 0.72 };
+const MEET_TABLE = { x: 3.75, z: 0.9, hx: 0.62, hz: 0.72 };
 const ROOM_WALLS: Wall[] = [
   { x0: 2.3, z0: -4.7, x1: 2.5, z1: -1.3 }, // sala da direita: parede oeste (porta entre z −1,3 e −0,1)
   { x0: 2.3, z0: -0.1, x1: 2.5, z1: 2.5 },

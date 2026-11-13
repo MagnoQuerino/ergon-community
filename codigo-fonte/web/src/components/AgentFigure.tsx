@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { bodyUrl, type PortraitAgent } from '../iso/portrait.ts';
 import { useActiveSkin } from '../lib/cosmetics.ts';
+import { letterStyle } from '../lib/contraste.ts';
 
 /**
  * O boneco inteiro do agente, o mesmo da cidade (com a skin ativa), como imagem em cache: nada de cena nem animação
@@ -10,6 +11,6 @@ export function AgentFigure({ agent, scale = 2, className = '' }: { agent: Portr
   const skin = useActiveSkin();
   const img = useMemo(() => { try { return bodyUrl(agent, scale, skin); } catch { return null; } },
     [agent.id, agent.name, agent.color, agent.role, agent.char_key, agent.look_seed, scale, skin]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!img) return <span className={`avatar ${className}`} style={{ background: agent.color }} aria-hidden="true">{agent.name[0]}</span>;
+  if (!img) return <span className={`avatar ${className}`} style={letterStyle(agent.color)} aria-hidden="true">{agent.name[0]}</span>;
   return <img className={`pxfigure ${className}`} src={img.url} width={img.w} height={img.h} alt="" aria-hidden="true" draggable={false} />;
 }

@@ -29,7 +29,6 @@ export interface WaFilters {
   /** pedidos identificados viram card para a triagem da equipe */
   cards: boolean;
 }
-export const DEFAULT_FILTERS: WaFilters = { direct: true, groups: false, labels: [], exceptions: [], cards: true };
 
 /** Versão do texto de informações e riscos (web/src/views/ConexoesView.tsx): mudou o texto, pede o aceite de novo. */
 /** 2: o aceite passou a dizer que os agentes podem enviar; quem aceitou o texto de "somente leitura" aceita de novo antes de enviar. */

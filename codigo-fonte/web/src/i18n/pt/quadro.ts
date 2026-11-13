@@ -2,14 +2,7 @@
 import type { Area } from '../tipos.ts';
 
 const quadro = {
-  'colunaComVoce': 'Com você',
-
-  // lib/work.ts: os grupos dos filtros, o selo do card, o estado interno e o resultado da conferência
-  'grupo.fila': 'Na fila',
-  'grupo.andamento': 'Em andamento',
-  'grupo.voce': 'Precisa de você',
-  'grupo.problema': 'Com problema',
-  'grupo.concluida': 'Concluída',
+  // lib/work.ts: o selo do card e o estado interno
   'situacao.naFila': 'Na fila',
   'situacao.trabalhando': 'Trabalhando',
   'situacao.feito': 'Feito',
@@ -26,15 +19,6 @@ const quadro = {
   'estado.falha': 'Falha',
   'estado.revisao': 'Revisão necessária',
   'estado.aguardandoAprovacao': 'Aguardando aprovação',
-  'resultado.validado': 'validado',
-  'resultado.reprovado': 'não passou',
-  'resultado.aguardandoAprovacao': 'aguarda sua aprovação',
-  'resultado.aguardandoInfo': 'aguarda informação',
-  'resultado.semConfirmacao': 'sem confirmação externa',
-  'resultado.falha': 'falhou',
-  'resultado.confirmadoHumano': 'aprovado por você',
-  'resultado.devolvido': 'devolvido por você',
-  'resultado.descartado': 'recusado por você',
 
   // o prazo do card
   'prazo.rotulo': '{semana}, {data}',

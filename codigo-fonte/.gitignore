@@ -6,7 +6,6 @@ secrets/*
 .env
 *.sqlite
 *.sqlite-*
-docs/screenshots/*.tmp
 connectors/teams/build/
 __pycache__/
 *.pyc

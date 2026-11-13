@@ -1,6 +1,6 @@
 /**
- * Gerente de motores: o único contêiner com acesso ao Docker. Cria, liga, desliga, renova e remove o contêiner do
- * motor de IA de cada pessoa — sempre a mesma imagem e a mesma configuração do motor do Ergon (cofre gocryptfs, nenhum
+ * Gerente de motores: o único contêiner com acesso ao motor de contêineres (Podman; Docker numa instalação antiga).
+ * Cria, liga, desliga, renova e remove o contêiner do motor de IA de cada pessoa — sempre a mesma imagem e a mesma configuração do motor do Ergon (cofre gocryptfs, nenhum
  * privilégio além do de montar o cofre, que o próprio cofre solta depois de montar), cada um com o cofre e os tokens
  * dele, derivados do token da instalação (que nenhum motor recebe).
  *

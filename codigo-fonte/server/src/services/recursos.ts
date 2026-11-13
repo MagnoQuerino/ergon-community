@@ -11,7 +11,6 @@ import { setConectoresLigados } from './characters.ts';
 import type { HermesControlClient } from './hermes.ts';
 import { getSetting } from './sectors.ts';
 
-export const CAPACIDADE_RECURSOS = 'recursos';
 /** Onde fica a lista dos conectores em que a pessoa liberou a escrita (workspace_settings). */
 export const ESCRITA_CONECTORES = 'conectores.escrita';
 

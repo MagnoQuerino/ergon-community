@@ -5,6 +5,7 @@ import { cardClick, cardKey } from '../lib/cardClick.ts';
 import { DISPLAY_BADGE, WORK_LABEL, displayOf, haQuantoTempo, situacaoDe, type WorkState } from '../lib/work.ts';
 import { fmtData, idiomaAtual, t as tx, useT } from '../i18n/index.ts';
 import { nomeDaColuna } from '../lib/colunas.ts';
+import { letterStyle } from '../lib/contraste.ts';
 
 const RUN_LABEL = { running: 'quadro.execucao.trabalhando', queued: 'quadro.execucao.naFila', waiting_user: 'quadro.execucao.aguardaVoce' } as const;
 const runLabel = (s: string) => (s in RUN_LABEL ? tx(RUN_LABEL[s as keyof typeof RUN_LABEL]) : s);
@@ -17,7 +18,7 @@ const teamEmpty = (k: string | null | undefined) => (k && k in TEAM_EMPTY ? tx(T
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 /** Prazo para mostrar: "qui, 30/10" ("Thu, 10/30"), com a situação (atrasada, hoje, nos próximos 2 dias). */
-export function dueInfo(due: string | null, done = false): { label: string; cls: string; title: string } | null {
+function dueInfo(due: string | null, done = false): { label: string; cls: string; title: string } | null {
   if (!due) return null;
   const [y, m, d] = due.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
@@ -99,7 +100,7 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
       </>
     );
   };
-  const chipOf = (ag: { name: string; color?: string }, title?: string) => <span className="who" title={title}><span className="avatar avatar--xs" style={{ background: ag.color }}>{ag.name[0]}</span>{ag.name}</span>;
+  const chipOf = (ag: { name: string; color?: string }, title?: string) => <span className="who" title={title}><span className="avatar avatar--xs" style={letterStyle(ag.color)}>{ag.name[0]}</span>{ag.name}</span>;
   /** Com quem está: o agente (equipe), quem o aplicativo diz (espelho), o agente que recebeu (enviada à equipe) ou você. */
   const who = (t: TaskCard, inList = false) => {
     const ag = agentOf(t.agent_id, t.agent_name, t.agent_color);

@@ -119,7 +119,7 @@ const servidor: Traducao<typeof pt> = {
   'destino.lista': 'Open the list',
   'destino.linha': '{rotulo}: {resumo}',
 
-  // ——— proposal types and card origin
+  // ——— proposal types
   'tipo.question': 'question',
   'tipo.routine': 'routine',
   'tipo.routine_edit': 'routine change',
@@ -144,10 +144,6 @@ const servidor: Traducao<typeof pt> = {
   'tipo.aprovacao': 'command to approve',
   'tipo.regra': 'rule',
   'tipo.segredo': 'key',
-  'origem.manual': 'manual',
-  'origem.chat': 'conversation',
-  'origem.mirror': 'linked',
-  'origem.demo': 'demo',
 
   // ——— sentences the screen builds from what the server sends
   'tela.login.adminNaoAprovou': 'The administrator did not approve the request.',

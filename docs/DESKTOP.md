@@ -12,8 +12,9 @@ O navegador continua sendo uma alternativa: tudo o que a janela mostra também a
 
 ## Antes
 
-No Windows, nada antes: o aplicativo instala o Ergon. No Linux, ele abre o Ergon instalado neste computador:
-instale o Ergon primeiro ([INSTALAR.md](INSTALAR.md)); sem ele, a tela de abertura explica o que falta.
+No Windows e no Linux com o pacote `.deb`, nada antes: na primeira vez, o aplicativo instala o Ergon. Com o AppImage,
+só o que a seção dele pede (o FUSE 2, o Podman e o podman-compose do sistema); com eles, a tela de abertura também
+instala o Ergon na primeira vez e, se faltar algo, explica o quê.
 
 ## Windows 10 e 11
 
@@ -27,7 +28,7 @@ instale o Ergon primeiro ([INSTALAR.md](INSTALAR.md)); sem ele, a tela de abertu
    reinicie: a instalação continua sozinha). Não precisa instalar Docker.
 4. Crie a conta, anote a frase de recuperação e conecte uma conta de IA.
 
-Atualizar: Configurações › Verificar atualizações (seus dados ganham uma cópia antes). Remover: Configurações ›
+Atualizar: Configurações › Atualizações › "Atualizar agora" (seus dados ganham uma cópia antes). Remover: Configurações ›
 Aplicativos › Ergon › Desinstalar; o desinstalador pergunta se apaga também os dados.
 
 ## Linux (Ubuntu 24.04 ou mais novo, Debian 12)
@@ -53,14 +54,16 @@ Botão "Abrir a pasta de registros" no diagnóstico da tela de abertura. Windows
 
 ## Versões
 
-- **Uma versão só.** Cada versão publica, juntos e com o mesmo número: as imagens Docker, o pacote local, o
+- **Uma versão só.** Cada versão publica, juntos e com o mesmo número: as imagens de contêiner, o pacote local, o
   instalador Windows, o `.deb` e o AppImage, com as somas `SHA256SUMS-*.txt`.
-- **Atualizar a janela não atualiza os serviços.** Os serviços são atualizados por `ergon update` (com backup
-  antes). O aplicativo confere se o Ergon instalado é compatível e, se não for, avisa e oferece o navegador.
-  Vindo da 1.1.0-rc.25 ou de antes, o lançador instalado só conhece os nomes em português: para chegar a esta
+- **A atualização vem pelo aplicativo.** No Windows, Configurações › Atualizações › "Atualizar agora" atualiza o
+  Ergon e a janela juntos: seus dados ganham uma cópia antes e, se a versão nova não responder, a de antes volta
+  sozinha. Nada se atualiza sem você pedir. No Linux, a mesma tela avisa quando sai versão nova; o pacote novo se
+  instala por cima, pelo instalador de aplicativos, e os dados ficam. O aplicativo confere se o Ergon instalado é
+  compatível e, se não for, avisa e oferece o navegador.
+- **Caminho avançado (terminal).** Quem instalou pelo lançador atualiza com `ergon update` (com cópia dos dados
+  antes). Vindo da 1.1.0-rc.25 ou de antes, o lançador instalado só conhece os nomes em português: para chegar a esta
   versão, use `ergon atualizar` (depois dela, os dois nomes valem).
-- **Sem atualização automática do aplicativo nesta versão.** A versão nova se instala por cima com o instalador
-  novo; os dados ficam, porque estão no Docker.
 
 ## Compilar
 

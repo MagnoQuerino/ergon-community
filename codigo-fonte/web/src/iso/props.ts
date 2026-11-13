@@ -100,29 +100,6 @@ export function stoolSprite(t: Theme): Sprite {
   }));
 }
 
-/** Coluna dórica simplificada; `stub` = recorte arquitetônico (só a base, para não esconder ninguém). */
-export function columnSprite(t: Theme, height: number, stub: boolean): Sprite {
-  return cached(`${t.id}|col|${height.toFixed(2)}|${stub ? 1 : 0}`, () => fitSprite(-0.47, 0, -0.47, 0.47, height, 0.47, (g, P) => {
-    const m = t.marble;
-    if (stub) { // recorte: só a base e a seção cortada do fuste, rente ao piso
-      isoBox(g, P, -0.42, 0, -0.42, 0.42, 0.14, 0.42, m, t.outline);
-      flatQuad(g, P, 0.14, -0.29, -0.29, 0.29, 0.29, m[2]);
-      flatQuad(g, P, 0.14, -0.18, -0.18, 0.18, 0.18, m[1]);
-      return;
-    }
-    isoBox(g, P, -0.42, 0, -0.42, 0.42, 0.16, 0.42, m, t.outline);
-    const shaftTop = height - 0.32;
-    isoBox(g, P, -0.29, 0.16, -0.29, 0.29, shaftTop, 0.29, m, t.outline);
-    // caneluras: linhas verticais alternadas nas duas faces visíveis
-    for (const f of [-0.19, -0.07, 0.05, 0.17]) {
-      line(g, P(f, 0.22, 0.29), P(f, shaftTop - 0.06, 0.29), m[2]);
-      line(g, P(0.29, 0.22, f), P(0.29, shaftTop - 0.06, f), t.outline);
-    }
-    isoBox(g, P, -0.38, height - 0.32, -0.38, 0.38, height - 0.16, 0.38, m, t.outline);
-    isoBox(g, P, -0.46, height - 0.16, -0.46, 0.46, height, 0.46, m, t.outline);
-  }));
-}
-
 /** Vaso com oliveira baixa. */
 export function plantSprite(t: Theme): Sprite {
   return cached(`${t.id}|plant`, () => fitSprite(-0.6, 0, -0.6, 0.6, 1.45, 0.6, (g, P) => {

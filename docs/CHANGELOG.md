@@ -1,5 +1,29 @@
 # Novidades
 
+## 1.1.0-rc.28 (pré-versão de teste)
+
+- **Botões maiores e mais fáceis de ver nos cartões.** Os pedidos e aprovações da conversa, de "Aguardando você" e do
+  card têm um botão principal grande e destacado; "Recusar" e os outros botões de apoio ganharam contorno bem visível.
+  Os selos de situação (Aplicada, Com você…) vêm sempre com um símbolo, além da cor. A aprovação por um tempo ficou
+  mais simples: um botão "Aprovar por 8 h", com a escolha do tempo ao lado.
+- **Sem clique perdido.** Ao clicar, o botão continua ativo e mostra "Enviando…"; um segundo clique sem querer não
+  manda o pedido de novo, e aprovar um item enquanto outro ainda está indo funciona. Resposta em branco? O cartão avisa
+  o que falta, em vez de não fazer nada.
+- **Copiar, responder, marcar e ouvir** aparecem sempre na tela de toque e na última resposta do agente, com letra
+  maior.
+- **Leitura para todos.** Regras de contraste em todo o aplicativo, nos temas claro e escuro: acabou a letra amarela
+  sobre fundo amarelo nos selos, os textos de agentes desligados, conexões "em breve", rotinas pausadas e mensagens
+  "na fila" ficaram legíveis, e os retratos com a inicial do agente escolhem sozinhos a letra clara ou escura (Fídias
+  continua dourado). O contorno que mostra onde você está ao navegar pelo teclado ficou bem visível em todo lugar. Uma
+  conferência automática impede que uma versão nova saia com texto ilegível.
+- **O botão "Ouvir" das conversas volta a tocar o áudio.**
+- **Instalação no Windows sem travar no WSL.** A ativação do WSL não depende mais da Loja da Microsoft (bloqueada em
+  muitas empresas), mostra na tela o que o Windows está fazendo e, no Windows com o WSL antigo, atualiza por outro
+  caminho com o mesmo pedido de administrador. Depois do reinício pedido, a instalação continua sozinha; se algo der
+  errado, a mensagem diz o que o Windows respondeu.
+- **Mais leve por dentro.** Uma limpeza tirou código, telas e documentos antigos que não eram mais usados (cerca de
+  2.800 linhas a menos), sem mudar o que você usa.
+
 ## 1.1.0-rc.27 (pré-versão de teste)
 
 - **Cada agente com memória própria.** Os agentes da equipe lembram o que você ensinou e o seu jeito de trabalhar, só

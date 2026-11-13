@@ -138,7 +138,7 @@ describe('personalização completa: o sistema segue a função, não o nome', (
     // pelo perfil (API): a função e o setor recusam; nome, história e foco passam
     assert.equal((await req(h, 'PATCH', `/api/agents/${coord.id}`, s, { role: 'Roteirista' })).json.error, 'fixed_role');
     assert.equal((await req(h, 'PATCH', `/api/agents/${coord.id}`, s, { sectorKey: 'central' })).json.error, 'fixed_sector');
-    assert.equal((await req(h, 'POST', `/api/agents/${coord.id}/archive`, s)).json.error, 'fixed_coordinator');
+    assert.equal((await req(h, 'POST', `/api/agents/${coord.id}/deactivate`, s)).json.error, 'fixed_coordinator');
     assert.equal((await req(h, 'PATCH', `/api/agents/${coord.id}`, s, { name: 'Mithrandir', bio: 'O Cinzento.', charter: 'Paciência com os hobbits; prazos primeiro.' })).status, 200);
     // o protocolo do cargo vai sempre nas instruções, com o foco do usuário depois
     const ins = instructionsFor(h.db, s.workspaceId, coord.id, '');

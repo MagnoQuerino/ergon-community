@@ -2,7 +2,7 @@
  * Um motor de IA por pessoa. Cada conta tem o próprio contêiner do motor, com cofre próprio (chave
  * derivada da chave pessoal dela) e a própria conta de IA: um agente com Terminal ou Executar código não alcança os
  * dados de outra pessoa, e o consumo de IA é de quem pediu. O gerente de motores — o único contêiner com acesso ao
- * Docker — cria, liga e desliga os contêineres; aqui o Ergon escolhe o motor de cada workspace, entrega a chave do
+ * motor de contêineres (Podman; Docker numa instalação antiga) — cria, liga e desliga os contêineres; aqui o Ergon escolhe o motor de cada workspace, entrega a chave do
  * cofre quando a pessoa abre a parte dela e reconhece qual motor está chamando a ponte (um token por motor, derivado
  * do da instalação; nenhum motor tem o da instalação).
  *

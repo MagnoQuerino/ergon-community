@@ -10,7 +10,7 @@ import { t, type Chave } from '../i18n/index.ts';
 export type WorkState = 'solicitada' | 'processamento' | 'resultado' | 'validacao' | 'concluida' | 'aguardando_info' | 'falha' | 'revisao' | 'aguardando_aprovacao';
 export type Display = 'fila' | 'andamento' | 'voce' | 'problema' | 'concluida';
 
-export const DISPLAY_OF: Record<WorkState, Display> = {
+const DISPLAY_OF: Record<WorkState, Display> = {
   solicitada: 'fila', processamento: 'andamento', resultado: 'andamento', validacao: 'andamento', concluida: 'concluida',
   aguardando_info: 'voce', aguardando_aprovacao: 'voce', revisao: 'problema', falha: 'problema',
 };
@@ -26,13 +26,9 @@ function rotulos<K extends string>(chaves: Record<K, Chave>): Readonly<Record<K,
   return o;
 }
 
-export const DISPLAY_LABEL: Readonly<Record<Display, string>> = rotulos<Display>({
-  fila: 'quadro.grupo.fila', andamento: 'quadro.grupo.andamento', voce: 'quadro.grupo.voce', problema: 'quadro.grupo.problema', concluida: 'quadro.grupo.concluida',
-});
-
 /**
  * O selo do card no quadro, com as mesmas palavras da situação nos detalhes da tarefa (server/src/services/resumo-tarefa.ts):
- * quem bate o olho no quadro e abre o card lê a mesma coisa. Os grupos acima (DISPLAY_LABEL) continuam nos filtros.
+ * quem bate o olho no quadro e abre o card lê a mesma coisa.
  */
 export const SITUACAO_LABEL: Readonly<Record<WorkState, string>> = rotulos<WorkState>({
   solicitada: 'quadro.situacao.naFila', processamento: 'quadro.situacao.trabalhando', resultado: 'quadro.situacao.trabalhando',
@@ -51,14 +47,6 @@ export const WORK_LABEL: Readonly<Record<WorkState, string>> = rotulos<WorkState
   solicitada: 'quadro.estado.solicitada', processamento: 'quadro.estado.processamento', resultado: 'quadro.estado.resultado',
   validacao: 'quadro.estado.validacao', concluida: 'quadro.estado.concluida', aguardando_info: 'quadro.estado.aguardandoInfo',
   falha: 'quadro.estado.falha', revisao: 'quadro.estado.revisao', aguardando_aprovacao: 'quadro.estado.aguardandoAprovacao',
-});
-
-type Resultado = 'validado' | 'reprovado' | 'aguardando_aprovacao' | 'aguardando_info' | 'sem_confirmacao' | 'falha' | 'confirmado_humano' | 'devolvido' | 'descartado';
-/** O resultado da conferência, em minúscula (entra no meio da frase). Resultado desconhecido: undefined. */
-export const RESULT_LABEL: Readonly<Record<string, string>> = rotulos<Resultado>({
-  validado: 'quadro.resultado.validado', reprovado: 'quadro.resultado.reprovado', aguardando_aprovacao: 'quadro.resultado.aguardandoAprovacao',
-  aguardando_info: 'quadro.resultado.aguardandoInfo', sem_confirmacao: 'quadro.resultado.semConfirmacao', falha: 'quadro.resultado.falha',
-  confirmado_humano: 'quadro.resultado.confirmadoHumano', devolvido: 'quadro.resultado.devolvido', descartado: 'quadro.resultado.descartado',
 });
 
 /**

@@ -13,7 +13,7 @@ services:
     ports:
       - "127.0.0.1:${ERGON_PORT:-8787}:8787"   # só localhost; nunca na LAN
     env_file:
-      - path: ${ERGON_SECRETS_DIR:-./secrets}/ergon.env   # segredos fora do Git (gerados por npm run secrets:init)
+      - path: ${ERGON_SECRETS_DIR:-./secrets}/ergon.env   # segredos fora do Git (gerados pelo lançador: ergon install)
         required: false
     environment:
       ERGON_EXECUTOR: ${ERGON_EXECUTOR:-simulated}

@@ -50,6 +50,6 @@ describe('atividade do agente: a execução traz o card e a conversa dela', () =
     assert.ok(atv);
     assert.equal(atv.conversation_id, null);
     // e a conversa, de fato, não abre para ela (o que a linha prometeria)
-    assert.equal((await req(h, 'GET', `/api/conversations/${conv}`, b)).status, 404);
+    assert.equal((await req(h, 'GET', `/api/conversations/${conv}/messages`, b)).status, 404);
   });
 });

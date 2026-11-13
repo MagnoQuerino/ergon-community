@@ -107,9 +107,6 @@ export async function postForFile(url: string, body: unknown, retried = false): 
   }
   return { blob: await res.blob(), headers: res.headers };
 }
-export async function postForBlob(url: string, body: unknown): Promise<Blob> {
-  return (await postForFile(url, body)).blob;
-}
 
 /** Entrega um arquivo para a pessoa salvar. */
 export function salvarArquivo(blob: Blob, nome: string): void {

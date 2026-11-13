@@ -1,19 +1,16 @@
 /**
  * Arquitetura clássica em pixel art: colunas redondas por ordem (dórica no térreo, jônica no 1º andar,
  * coríntia acima — a sobreposição das ordens das stoas helenísticas), frisos (tríglifos e métopas, óvulos e
- * dentículos), meias-paredes em segmentos (intercalam com os personagens), parede lateral com janelas e porta,
- * parapeito das varandas e móveis próprios da biblioteca. Tudo desenhado uma vez em sprites ou camadas.
+ * dentículos), antefixas, meandro do piso, mapa de parede e móveis próprios da biblioteca. Tudo desenhado uma vez
+ * em sprites ou camadas.
  */
-import { RES, KX, KY, KZ, project, type P2 } from './projection.ts';
-import { fillPoly, flatQuad, isoBox, line, sideQuad, backQuad, type Proj, type Tone } from './raster.ts';
+import { RES, KX, KY, KZ, type P2 } from './projection.ts';
+import { fillPoly, isoBox, line, type Proj, type Tone } from './raster.ts';
 import { blob, fitSprite, makeSprite, type Sprite } from './props.ts';
-import { mix, shade, type Theme } from './theme.ts';
-import type { Wall } from '../world/buildings.ts';
+import { mix, type Theme } from './theme.ts';
 
 export type Order = 'doric' | 'ionic' | 'corinthian';
 export function orderFor(level: number): Order { return level === 0 ? 'doric' : level === 1 ? 'ionic' : 'corinthian'; }
-// i18n-ok: nome interno das ordens de coluna (não aparece na tela)
-export const ORDER_NAME: Record<Order, string> = { doric: 'dórica', ionic: 'jônica', corinthian: 'coríntia' };
 
 const cache = new Map<string, Sprite>();
 function cached(key: string, make: () => Sprite): Sprite { let s = cache.get(key); if (!s) { s = make(); cache.set(key, s); } return s; }
@@ -165,88 +162,6 @@ export function antefixes(g: CanvasRenderingContext2D, P: Proj, t: Theme, y: num
   }
 }
 
-// ---------------- meias-paredes ----------------
-export interface WallPiece { sprite: Sprite; x: number; z: number; depth: number }
-/**
- * Meia parede em segmentos de até 1 unidade (cada um ordenado com os personagens): rodapé na cor da sala,
- * faixa clara e capa de mármore. Salão: rodapé ameixa como as paredes; biblioteca: lambri de madeira.
- */
-export function halfWallPieces(t: Theme, w: Wall, style: 'stoa' | 'biblioteca'): WallPiece[] {
-  const alongX = w.x1 - w.x0 >= w.z1 - w.z0;
-  const len = alongX ? w.x1 - w.x0 : w.z1 - w.z0;
-  const n = Math.max(1, Math.ceil(len / 1.3)); const step = len / n;
-  const H = 0.72; const thick = (alongX ? w.z1 - w.z0 : w.x1 - w.x0) * 0.8; // baixa e fina: separa sem esconder
-  const out: WallPiece[] = [];
-  for (let i = 0; i < n; i++) {
-    const a = (alongX ? w.x0 : w.z0) + i * step; const b = a + step;
-    const cx = alongX ? (a + b) / 2 : (w.x0 + w.x1) / 2; const cz = alongX ? (w.z0 + w.z1) / 2 : (a + b) / 2;
-    const hx = alongX ? step / 2 : thick / 2; const hz = alongX ? thick / 2 : step / 2;
-    const key = `${t.id}|hw|${style}|${hx.toFixed(3)}|${hz.toFixed(3)}`;
-    const sprite = cached(key, () => fitSprite(-hx - 0.05, 0, -hz - 0.05, hx + 0.05, H, hz + 0.05, (g, P) => {
-      const low: Tone = style === 'stoa' ? [t.dado, mix(t.dado, '#000000', 0.08), mix(t.dado, '#000000', 0.22)] : t.wood;
-      isoBox(g, P, -hx, 0, -hz, hx, 0.4, hz, low, t.outline);
-      isoBox(g, P, -hx, 0.4, -hz, hx, H - 0.08, hz, [t.wallBack, t.wallBack, t.wallSide], t.outline);
-      line(g, P(-hx, 0.4, hz), P(hx, 0.4, hz), style === 'stoa' ? t.trim : t.bronze[1]);
-      isoBox(g, P, -hx - 0.03, H - 0.08, -hz - 0.03, hx + 0.03, H, hz + 0.03, t.marble, t.outline);
-      if (style === 'biblioteca') for (const f of [-0.5, 0, 0.5]) { // painéis do lambri
-        if (alongX) line(g, P(f * hx, 0.06, hz), P(f * hx, 0.34, hz), mix(t.wood[1], '#000000', 0.25));
-        else line(g, P(hx, 0.06, f * hz), P(hx, 0.34, f * hz), mix(t.wood[2], '#000000', 0.25));
-      }
-    }, 3 * RES));
-    out.push({ sprite, x: cx, z: cz, depth: cx + cz });
-  }
-  return out;
-}
-
-// ---------------- parede lateral (+x) e parapeito ----------------
-/**
- * Parede lateral direita de um andar (x = 7.7…8): inteira com janelas (e a porta do térreo), ou cortada à
- * meia altura quando o andar está em foco — o corte deixa ver o interior, como numa maquete.
- */
-export function sideWall(g: CanvasRenderingContext2D, P: Proj, t: Theme, y: number, h: number, cut: boolean, door: boolean, style: 'stoa' | 'biblioteca'): void {
-  const x0 = 7.7; const x1 = 8.0; const zs: Array<[number, number]> = door ? [[-5, 3.3], [4.5, 5]] : [[-5, 5]];
-  const top = cut ? 1.0 : h;
-  const tone: Tone = [t.stone[0], t.wallSide, mix(t.wallSide, t.outline, 0.18)];
-  for (const [z0, z1] of zs) isoBox(g, P, x0, y, z0, x1, y + top, z1, tone, t.outline);
-  // rodapé e friso (como as paredes de dentro, pelo lado de fora)
-  for (const [z0, z1] of zs) { sideQuad(g, P, x1, z0, z1, y, y + Math.min(0.35, top), mix(tone[2], t.outline, 0.12)); }
-  if (cut) {
-    for (const [z0, z1] of zs) isoBox(g, P, x0 - 0.03, y + top, z0, x1 + 0.03, y + top + 0.08, z1, t.marble, t.outline);
-  } else {
-    // janelas (lintel claro, abertura escura ou céu, peitoril e montante)
-    const sky = style === 'biblioteca' ? t.sky : t.windowDark;
-    for (const [z0, z1] of [[-3.4, -2.2], [-0.4, 0.8]] as Array<[number, number]>) {
-      sideQuad(g, P, x1, z0 - 0.08, z1 + 0.08, y + 1.0, y + 2.15, t.outline);
-      sideQuad(g, P, x1, z0, z1, y + 1.05, y + 2.05, sky);
-      sideQuad(g, P, x1, z0 - 0.12, z1 + 0.12, y + 2.05, y + 2.2, t.stone[0]);
-      sideQuad(g, P, x1, z0 - 0.06, z1 + 0.06, y + 0.95, y + 1.05, t.stone[1]);
-      line(g, P(x1, y + 1.05, (z0 + z1) / 2), P(x1, y + 2.05, (z0 + z1) / 2), t.stone[1]);
-    }
-    if (door) { // vão da porta lateral com verga
-      sideQuad(g, P, x1, 3.3, 4.5, y + 2.2, y + 2.4, t.stone[0]);
-      isoBox(g, P, x0, y + 2.2, 3.3, x1, y + h, 4.5, tone, t.outline);
-      sideQuad(g, P, x1, 3.3, 4.5, y + 2.2, y + 2.38, t.stone[0]);
-    }
-    line(g, P(x1, y + h - 0.02, -5), P(x1, y + h - 0.02, 5), t.stone[0]);
-  }
-  if (door) { // soleira
-    flatQuad(g, P, y + 0.01, x0, 3.3, x1, 4.5, t.stone[0]);
-    if (cut) for (const z of [3.3, 4.5]) isoBox(g, P, x0 - 0.02, y, z - 0.08, x1 + 0.02, y + 1.15, z + 0.08, t.marble, t.outline);
-  }
-}
-
-/** Parapeito da varanda (andares de cima): meia parede de mármore entre as colunas da frente. */
-export function parapet(g: CanvasRenderingContext2D, P: Proj, t: Theme, y: number, cols: number[], colR: number): void {
-  const xs = [-8, ...cols.flatMap((c) => [c - colR, c + colR]), 8];
-  for (let i = 0; i < xs.length; i += 2) {
-    const a = xs[i]; const b = xs[i + 1]; if (b - a < 0.1) continue;
-    isoBox(g, P, a, y, 4.72, b, y + 0.82, 4.98, [t.stone[0], t.stone[1], t.stone[2]], t.outline);
-    line(g, P(a + 0.12, y + 0.18, 4.98), P(b - 0.12, y + 0.18, 4.98), mix(t.stone[1], t.outline, 0.25)); // moldura do painel
-    line(g, P(a + 0.12, y + 0.66, 4.98), P(b - 0.12, y + 0.66, 4.98), t.stone[0]);
-    isoBox(g, P, a - 0.02, y + 0.82, 4.69, b + 0.02, y + 0.92, 5.01, t.marble, t.outline);
-  }
-}
-
 // ---------------- móveis da biblioteca ----------------
 /** Mesa de leitura com tampo inclinado (atril) e rolos empilhados — distinta das mesas do salão. */
 export function readingDeskSprite(t: Theme, variant: number): Sprite {
@@ -289,23 +204,6 @@ export function roundTableSprite(t: Theme): Sprite {
   }));
 }
 
-/** Estante alta de pergaminhos (parede do fundo da biblioteca): nichos com rolos. */
-export function backShelves(g: CanvasRenderingContext2D, P: Proj, t: Theme, y: number, x0: number, x1: number, zb: number): void {
-  const d = 0.42; const h = 2.35;
-  isoBox(g, P, x0, y, zb, x1, y + h, zb + d, t.woodDark, t.outline);
-  const cols = Math.floor((x1 - x0) / 0.5);
-  for (let r = 0; r < 4; r++) for (let c = 0; c < cols; c++) {
-    const a = x0 + 0.08 + c * ((x1 - x0 - 0.16) / cols); const b = a + (x1 - x0 - 0.16) / cols - 0.07;
-    const h0 = y + 0.14 + r * 0.55; const h1 = h0 + 0.44;
-    backQuad(g, P, zb + d, a, b, h0, h1, '#20160f');
-    for (const [dx, dh] of [[0.1, 0.1], [0.25, 0.1], [0.17, 0.24], [0.33, 0.24]]) {
-      if (((r * 7 + c * 3 + dx * 10) | 0) % 6 === 0 || a + dx > b - 0.04) continue;
-      const [px, py] = P(a + dx, h0 + dh, zb + d); g.fillStyle = t.papyrus[0]; g.fillRect(px - RES, py - 1, 2 * RES, RES + 1); g.fillStyle = t.papyrus[1]; g.fillRect(px, py, 1, 1);
-    }
-  }
-  line(g, P(x0, y + h, zb + d), P(x1, y + h, zb + d), t.wood[0]);
-}
-
 /** Mapa de Eratóstenes pintado na parede (bibliotecário de Alexandria): oikoumene com meridianos. */
 export function wallMap(g: CanvasRenderingContext2D, P: Proj, t: Theme, y: number, x0: number, x1: number, zb: number): void {
   const Q = (u: number, h: number) => P(x0 + (x1 - x0) * u, y + h, zb);
@@ -320,16 +218,6 @@ export function wallMap(g: CanvasRenderingContext2D, P: Proj, t: Theme, y: numbe
   }
   line(g, Q(0.08, 1.72), Q(0.92, 1.8), t.teal[1]);
   const [ax, ay] = Q(0.5, 1.62); g.fillStyle = t.terracotta[1]; g.fillRect(ax - 1, ay - 1, RES + 1, RES + 1); // Alexandria
-}
-
-/** Janela na parede esquerda (x constante) da biblioteca. */
-export function leftWindow(g: CanvasRenderingContext2D, P: Proj, t: Theme, y: number, x: number, z0: number, z1: number): void {
-  sideQuad(g, P, x, z0 - 0.08, z1 + 0.08, y + 1.0, y + 2.15, t.outline);
-  sideQuad(g, P, x, z0, z1, y + 1.05, y + 2.05, t.sky);
-  line(g, P(x, y + 1.6, z0), P(x, y + 1.6, z1), mix(t.sky, '#ffffff', 0.35)); // horizonte
-  sideQuad(g, P, x, z0 - 0.12, z1 + 0.12, y + 2.05, y + 2.2, t.stone[0]);
-  sideQuad(g, P, x, z0 - 0.06, z1 + 0.06, y + 0.95, y + 1.05, t.stone[1]);
-  line(g, P(x, y + 1.05, (z0 + z1) / 2), P(x, y + 2.05, (z0 + z1) / 2), t.stone[1]);
 }
 
 /** Barra em meandro (grega) no piso: tapetes. Desenhada em unidades do piso. */
@@ -348,9 +236,3 @@ export function meanderBand(g: CanvasRenderingContext2D, P: Proj, y: number, x0:
     along([x + h * 0.45, z + unit * 0.33], [x + h * 0.45, z + unit * 0.66]);
   }
 }
-
-/** Polígono de clique de uma caixa vertical (silhueta projetada). */
-export function boxHit(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): P2[] {
-  return [project(x0, y1, z0), project(x1, y1, z0), project(x1, y0, z0), project(x1, y0, z1), project(x0, y0, z1), project(x0, y1, z1)];
-}
-export { shade };

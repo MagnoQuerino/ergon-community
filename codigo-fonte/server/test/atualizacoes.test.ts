@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
-import { anterioresParaVoltar, LISTA_ANTERIORES, RECENTES_DO_CANAL, rollbackOf, UpdateCheck, VOLTA_ANTERIORES, VOLTA_MINIMA } from '../src/version.ts';
+import { anterioresParaVoltar, LISTA_ANTERIORES, RECENTES_DO_CANAL, rollbackOf, UpdateCheck, VOLTA_MINIMA } from '../src/version.ts';
 import { harness, req, setupOwner } from './helpers.ts';
 
 const URL_MANIFESTO = 'https://github.com/dono/ergon-community/releases/latest/download/latest.json';
@@ -70,7 +70,6 @@ describe('Atualizações: canal pela versão instalada, versões anteriores e av
   });
 
   test('as versões anteriores, a mais nova primeiro; o corte nas duas é do Desktop (a tela e o aplicativo), não da lista toda', () => {
-    assert.equal(VOLTA_ANTERIORES, 2);
     assert.equal(LISTA_ANTERIORES, 12);
     const r = (version: string) => ({ version, rollback: 'pode' as const });
     const lista = [r('1.1.0-rc.28'), r('1.1.0-rc.24'), r('1.1.0-rc.27'), r('1.1.0-rc.25'), r('1.1.0-rc.26'), r('1.1.0-rc.9')];

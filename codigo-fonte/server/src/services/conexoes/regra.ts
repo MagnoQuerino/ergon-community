@@ -105,8 +105,8 @@ export function siteDe(linha: string): string | null {
   return null;
 }
 /**
- * O que uma aprovação prende (revisão de 08/11): aprovar o endereço que o cartão mostra não libera outro site, e aprovar
- * um programa não libera outro programa (um programa alcança a internet inteira). Chaves: "site:<origem>" para cada
+ * O que exatamente foi pedido, para o cartão mostrar (na revisão de 08/11 era também o que a aprovação prendia; desde
+ * 09/11 aprovar vale para o grupo inteiro, conexoes/servico.ts, gruposAprovados). Chaves: "site:<origem>" para cada
  * endereço; "pagina" para mexer na página já aberta; "exato:<ferramenta>:<pedido>" para o resto (programas, código no
  * navegador, cofre de senhas do navegador, ferramenta nova do navegador).
  */
@@ -118,9 +118,6 @@ export function chavesDeAprovacao(tool: string, alvo: string): string[] {
   if (!linhas.length) return [exato('')];
   return [...new Set(linhas.map((l) => { const s = siteDe(l); return s ? `site:${s}` : exato(l); }))];
 }
-/** As chaves do pedido já foram aprovadas? A página aberta vale com um site aprovado ali (foi por ele que ela abriu). */
-export const aprovadoPor = (chaves: readonly string[], aprovadas: ReadonlySet<string>): boolean =>
-  chaves.length > 0 && chaves.every((k) => aprovadas.has(k) || (k === 'pagina' && [...aprovadas].some((x) => x.startsWith('site:'))));
 /** Imagem que já está na conversa (data:) não vem de endereço nenhum: não pede aprovação (o mesmo de leEndereco). */
 export const dispensaAprovacao = (tool: string, alvo: string): boolean => tool === 'vision_analyze' && /^\s*data:/i.test(alvo);
 /** Quanto tempo vale a aprovação sem prazo escolhido (cartões de antes da escolha), naquela conversa ou card. */

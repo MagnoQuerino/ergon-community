@@ -22,9 +22,6 @@ export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' |
  */
 export interface ToolDef { id: string; label: string; kind: 'ergon' | 'ia'; toolset?: string; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; /** custo ou risco: a tela avisa antes de ligar */ aviso?: 'custo' | 'risco' }
 
-/** O que o usuário precisa saber antes de liberar uma ferramenta que executa código. */
-export const GUARDED_RISK = 'O agente passa a executar programas e comandos no ambiente isolado da equipe: pode criar e apagar arquivos ali, instalar pacotes e acessar a internet. Enquanto ele tiver a ferramenta, toda ação dele nas suas contas conectadas pede a sua confirmação, inclusive leitura; e, depois que um programa rodou ali, as dos colegas também, até a equipe reiniciar. Libere só para pedidos seus.';
-
 /** Catálogo de ferramentas do Ergon, com o estado padrão de cada uma ("planejado" nunca aparece como disponível). */
 export const TOOLS: Record<string, ToolDef> = {
   quadro: { id: 'quadro', label: 'Quadro da equipe', kind: 'ergon', status: 'disponível', note: 'cria e move cards conforme o setor; o sistema aplica as permissões' },
@@ -290,11 +287,6 @@ export const CHARACTERS: Character[] = [
 ];
 
 export function characterByKey(key: string | null | undefined): Character | undefined { return CHARACTERS.find((c) => c.key === key); }
-
-/** Resumo da equipe (vai nas instruções de quem coordena). */
-export function teamSummary(): string {
-  return 'Equipe do Ergon (nome — função):\n' + CHARACTERS.map((c) => `- ${c.name} — ${c.role}`).join('\n');
-}
 
 // ---------------- encaminhamento por regras (Aristóteles) ----------------
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
