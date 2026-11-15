@@ -12,7 +12,7 @@ import { harness, req, setupOwner } from './helpers.ts';
 const raiz = path.resolve(import.meta.dirname, '..', '..');
 
 test('Community: o cliente do World vem junto, desligado sem endereço, e tudo funciona sem serviço externo', async () => {
-  delete process.env.ERGON_WORLD_URL;
+  process.env.ERGON_WORLD_URL = '';
   const h = await harness();
   const s = await setupOwner(h);
   const d = await req(h, 'GET', '/api/distribution');

@@ -1,4 +1,4 @@
-export const DEFAULT_WORLD_URL = '';
+export const DEFAULT_WORLD_URL = 'https://api.ergonworld.com';
 
 export interface WorldConfig {
   /** serviço do Ergon World (https; http só para teste local). Vazio = World desligado nesta instalação */

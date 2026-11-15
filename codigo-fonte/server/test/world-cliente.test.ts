@@ -18,7 +18,7 @@ before(async () => {
   world = await new FakeWorld().start();
   process.env.ERGON_WORLD_URL = world.url;
 });
-after(async () => { delete process.env.ERGON_WORLD_URL; await world.stop(); });
+after(async () => { process.env.ERGON_WORLD_URL = ''; await world.stop(); });
 
 const novoWorkspace = async (h: Harness, s: Session, name: string): Promise<string> => {
   const r = await req(h, 'POST', '/api/workspaces', s, { name });
@@ -33,7 +33,7 @@ const tarefas = (h: Harness, ws: string) => h.db.all<{ title: string }>('SELECT 
 
 describe('sem o endereço do World', () => {
   test('o estado diz "não configurado", as rotas do World não existem e tudo local funciona', async () => {
-    delete process.env.ERGON_WORLD_URL;
+    process.env.ERGON_WORLD_URL = '';
     try {
       const h = await harness(); const s = await setupOwner(h);
       const d = await req(h, 'GET', '/api/distribution');

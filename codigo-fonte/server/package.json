@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test --test-concurrency=1 test/*.test.ts"
+    "test": "node --test --test-concurrency=1 --import ./test/setup.ts test/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",

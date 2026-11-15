@@ -55,7 +55,7 @@ describe('World Sync entre dois computadores da mesma pessoa', () => {
   let world: FakeWorld; let pc1: Harness; let a1: Session; let pc2: Harness; let a2: Session;
   const FRASE = 'frase de recuperação do sync da ana para o teste';
   before(async () => { world = await new FakeWorld().start(); process.env.ERGON_WORLD_URL = world.url; });
-  after(async () => { delete process.env.ERGON_WORLD_URL; await pc1?.close(); await pc2?.close(); await world.stop(); });
+  after(async () => { process.env.ERGON_WORLD_URL = ''; await pc1?.close(); await pc2?.close(); await world.stop(); });
 
   const agenteId = (h: Harness, ws: string, nome: string) => h.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND name = ? AND status = 'active'", ws, nome)!.id;
   const agentes = (h: Harness, ws: string) => h.db.all<{ name: string }>("SELECT name FROM agents WHERE workspace_id = ? AND status = 'active'", ws).map((a) => a.name);
