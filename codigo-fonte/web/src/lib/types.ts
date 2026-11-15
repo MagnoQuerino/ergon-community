@@ -322,6 +322,7 @@ export interface Routine {
   id: string; name: string; template: string | null; templateName: string | null; category: string; categoryLabel: string;
   status: 'setup' | 'active' | 'paused'; version: number; conversationId: string | null; agentId: string | null; agentName: string | null; hasSetup: boolean;
   trigger: RoutineTrigger; schedule: string; nextRunAt: string | null; lastRunAt: string | null; running: boolean;
+  /** na nuvem (Ergon World): este computador não roda a rotina até ela voltar */ remote?: boolean;
   last: { id: string; status: RoutineRunStatus; summary: string | null; finished_at: string | null; created_at: string; error: string | null } | null;
   config: { sources: string[]; sourceLabels: string[]; condition: 'sempre' | 'novidades' | 'sinal'; instruction: string; extra: string; deliver: string[]; staleDays: number; params: ParamValues;
     /** as contas que a rotina lê, quando há mais de uma do mesmo aplicativo (vazio = todas) */ contas?: string[] };

@@ -22,17 +22,23 @@ const LOCAL_REASON: Record<string, string> = {
 
 export interface Eligibility { template: string; name: string; eligible: boolean; executorReady: boolean; adapter: string | null; blocking: Array<{ source: string; reason: string }> }
 
+/** As fontes de uma rotina (as do modelo ou as que a pessoa escolheu): podem rodar fora daqui, e com qual adaptador. */
+export function sourcesEligibility(sources: readonly string[]): Pick<Eligibility, 'eligible' | 'executorReady' | 'adapter' | 'blocking'> {
+  const blocking: Eligibility['blocking'] = [];
+  const adapters = new Set<string | null>();
+  for (const s of sources) {
+    if (REMOTE[s]) adapters.add(REMOTE[s].adapter);
+    else blocking.push({ source: s, reason: LOCAL_REASON[s] ?? (s.startsWith('tarefas.') || s.startsWith('prazos.') ? 'tarefas do quadro local (Sync não dá leitura ao executor sem concessão específica)' : s.startsWith('financeiro.') || s.startsWith('contratos.') ? 'dados importados no Ergon local' : 'fonte local') });
+  }
+  if (!sources.length) blocking.push({ source: '-', reason: 'rotina sem fontes' });
+  const eligible = blocking.length === 0;
+  const ready = eligible && adapters.size === 1 && !adapters.has(null);
+  return { eligible, executorReady: ready, adapter: ready ? [...adapters][0] : null, blocking };
+}
+
 export function jobEligibility(): Eligibility[] {
   return CATALOG.map((t) => {
-    const blocking: Eligibility['blocking'] = [];
-    const adapters = new Set<string | null>();
-    if (!t.defaults) blocking.push({ source: '-', reason: 'rotina ainda sem configuração padrão' });
-    for (const s of (t.defaults?.config.sources ?? []) as string[]) {
-      if (REMOTE[s]) adapters.add(REMOTE[s].adapter);
-      else blocking.push({ source: s, reason: LOCAL_REASON[s] ?? (s.startsWith('tarefas.') || s.startsWith('prazos.') ? 'tarefas do quadro local (Sync não dá leitura ao executor sem concessão específica)' : s.startsWith('financeiro.') || s.startsWith('contratos.') ? 'dados importados no Ergon local' : 'fonte local') });
-    }
-    const eligible = blocking.length === 0;
-    const ready = eligible && adapters.size === 1 && !adapters.has(null);
-    return { template: t.key, name: t.name, eligible, executorReady: ready, adapter: ready ? [...adapters][0] : null, blocking };
+    if (!t.defaults) return { template: t.key, name: t.name, eligible: false, executorReady: false, adapter: null, blocking: [{ source: '-', reason: 'rotina ainda sem configuração padrão' }] };
+    return { template: t.key, name: t.name, ...sourcesEligibility(t.defaults.config.sources as string[]) };
   });
 }

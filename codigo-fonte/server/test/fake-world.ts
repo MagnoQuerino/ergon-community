@@ -7,12 +7,27 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { wrapForDevice } from '../src/world/sync-crypto.ts';
 
 interface Account { id: string; email: string; password: string; displayName: string; emailVerified: boolean }
 interface Device { id: string; accountId: string; name: string; publicKey: string; syncPublicKey: string; challenge: string; status: 'pending' | 'active' | 'revoked'; session: string | null; lastSeenAt: string }
-interface Workspace { id: string; owner: string; plan: string | null; head: number; changes: Array<Record<string, unknown>>; envelopes: Map<string, { keyVersion: number; wrapped: string }>; recovery: { keyVersion: number; wrapped: string } | null }
+interface Workspace { id: string; owner: string; label: string | null; plan: string | null; head: number; changes: Array<Record<string, unknown>>; envelopes: Map<string, { keyVersion: number; wrapped: string }>; recovery: { keyVersion: number; wrapped: string } | null }
+
+interface Owner { holder: 'local' | 'world'; deviceId: string | null; generation: number; leaseUntil: number; jobId: string | null }
+interface Handoff { id: string; ws: string; card: string; accountId: string; deviceId: string; intent: string; status: 'preparing' | 'staged' | 'committed' | 'rejected' | 'expired'; generation: number; adapter: string; routineRef: string; cardState: string; jobId: string | null; reason: string | null; checksum: string | null; pkg: unknown; expiresAt: number }
+interface HJob { id: string; ws: string; accountId: string; state: string; reason: string | null; result: string | null; routineRef: string; spec: unknown; queuedAt: string }
 
 const hex = (n: number) => crypto.randomBytes(n).toString('hex');
+/** JSON canônico, escrito à parte (como no World): o cliente tem de chegar ao mesmo sha256 sem copiar daqui */
+function canonical(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
+}
+const checksumOf = (pkg: unknown) => `sha256:${crypto.createHash('sha256').update(canonical(pkg)).digest('hex')}`;
+const TERMINAL = ['succeeded', 'failed', 'cancelled', 'rejected'];
+const CARD_RE = /^[A-Za-z0-9_:.-]{1,120}$/;
 
 export class FakeWorld {
   accounts = new Map<string, Account>();
@@ -20,6 +35,17 @@ export class FakeWorld {
   devices = new Map<string, Device>();
   workspaces = new Map<string, Workspace>();
   bindings: Array<{ accountId: string; localPersonId: string }> = [];
+  // "Rodar na nuvem" (world/src/handoffs.ts): dono de cada cartão (a geração é o fencing token), transferências, Jobs
+  owners = new Map<string, Owner>();
+  handoffs = new Map<string, Handoff>();
+  hjobs = new Map<string, HJob>();
+  effects = new Set<string>();
+  adapters = ['web_feed'];
+  leaseMs = 90_000;
+  /** o próximo pedido que casar é processado, mas a resposta se perde (a conexão cai) */
+  dropResponse: RegExp | null = null;
+  /** chamado logo antes de processar um aceite (commit): para mudar a posse no meio, como outro computador faria */
+  onCommit: ((h: { ws: string; card: string }) => void) | null = null;
   /** cada pedido recebido (método, caminho e corpo), para os testes conferirem o que saiu do aparelho */
   log: Array<{ method: string; path: string; body: any; auth: string | null }> = [];
   /** quantos aparelhos com sessão ao mesmo tempo */
@@ -42,6 +68,19 @@ export class FakeWorld {
 
   /** Simula o pagamento confirmado (o webhook do Stripe no World de verdade). */
   activate(ws: string, plan = 'world_pro'): void { this.workspaces.get(ws)!.plan = plan; }
+  /** O executor do World: o Job passa a rodar (ou termina, com o resultado cifrado para os aparelhos da pessoa). */
+  runJob(jobId: string, state: 'running' | 'succeeded' | 'failed', result?: unknown): void {
+    const j = this.hjobs.get(jobId)!; j.state = state;
+    if (state === 'failed') j.reason = 'a fonte não respondeu';
+    if (state !== 'succeeded') return;
+    const key = crypto.randomBytes(32); const n = crypto.randomBytes(12);
+    const c = crypto.createCipheriv('aes-256-gcm', key, n); c.setAAD(Buffer.from(`ergon/job-result/v1|${jobId}`));
+    const ct = Buffer.concat([c.update(JSON.stringify(result ?? {})), c.final(), c.getAuthTag()]);
+    const devs = [...this.devices.values()].filter((d) => d.accountId === j.accountId && d.status === 'active');
+    j.result = JSON.stringify({ v: 1, nonce: n.toString('base64'), ct: ct.toString('base64'), keys: Object.fromEntries(devs.map((d) => [d.id, wrapForDevice(key, d.syncPublicKey, `job:${jobId}`, 1)])) });
+  }
+  /** Outro computador assume o cartão (a posse local deste venceu): o próximo aceite daqui é recusado. */
+  takeOver(ws: string, card: string): void { const o = this.owners.get(`${ws}|${card}`)!; o.deviceId = `dev_${hex(16)}`; o.generation += 1; o.leaseUntil = Date.now() + this.leaseMs; }
   calls(path: string): number { return this.log.filter((x) => x.path.split('?')[0] === path).length; }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -57,6 +96,7 @@ export class FakeWorld {
     const fail = (status: number, error: string, extra: Record<string, unknown> = {}) => send(status, { error, message: error, ...extra });
     try {
       const out = this.route(req.method ?? 'GET', u, body, bearer);
+      if (this.dropResponse?.test(`${req.method} ${u.pathname}`)) { this.dropResponse = null; res.destroy(); return; }
       if ('fail' in out) fail(out.fail[0], out.fail[1], out.fail[2]);
       else send(out.status ?? 200, out.json);
     } catch (e) { fail(500, 'internal', { detail: String(e) }); }
@@ -129,7 +169,7 @@ export class FakeWorld {
     const mine = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && w.owner === acc.id ? w : null; };
     if (key === 'POST /v1/bindings') { this.bindings.push({ accountId: acc.id, localPersonId: b.localPersonId }); return { json: { ok: true } }; }
     if (key === 'POST /v1/authorize') {
-      const workspaces = [...this.workspaces.values()].filter((w) => w.owner === acc.id).map((w) => ({ workspaceId: w.id, role: 'owner', status: w.plan ? 'active' : 'none', plan_sku: w.plan }));
+      const workspaces = [...this.workspaces.values()].filter((w) => w.owner === acc.id).map((w) => ({ workspaceId: w.id, label: w.label, role: 'owner', status: w.plan ? 'active' : 'none', plan_sku: w.plan }));
       return { json: { authorizedUntil: new Date(Date.now() + 900_000).toISOString(), account: { email: acc.email }, workspaces } };
     }
     if (key === 'GET /v1/devices') return { json: [...this.devices.values()].filter((d) => d.accountId === acc.id && d.status !== 'pending').map((d) => ({ id: d.id, name: d.name, status: d.status, current: d === dev, connected: !!d.session, lastSeenAt: d.lastSeenAt })) };
@@ -147,12 +187,25 @@ export class FakeWorld {
       return { json: { url: `https://checkout.stripe.com/c/pay/cs_test_${hex(8)}?ws=${w.id}&sku=${b.sku}` } };
     }
     if (key === 'GET /v1/wallet') { const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] }; return { json: { available: w.plan ? '1000.000000' : '0.000000', reserved: '0.000000', lots: [] } }; }
-    if (key === 'GET /v1/jobs') { const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] }; return { json: { slots: w.plan ? 5 : 0, running: 0, jobs: [] } }; }
+    if (key === 'GET /v1/jobs') {
+      const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
+      const jobs = [...this.hjobs.values()].filter((j) => j.ws === w.id && !TERMINAL.includes(j.state)).map((j) => ({ id: j.id, state: j.state, routineRef: j.routineRef, queuedAt: j.queuedAt, startedAt: null, mine: j.accountId === acc.id }));
+      return { json: { slots: w.plan ? 5 : 0, running: jobs.filter((j) => j.state === 'running').length, jobs } };
+    }
+    const handoff = this.handoffRoutes(method, p, u, b, dev, acc.id, mine);
+    if (handoff) return handoff;
     // ---------------------------------------------------------------- Sync: o World guarda envelopes e mudanças cifradas
     if (key === 'POST /v1/sync/workspaces') {
-      const w: Workspace = { id: `sws_${hex(16)}`, owner: acc.id, plan: null, head: 0, changes: [], envelopes: new Map(), recovery: null };
+      if (b.label !== undefined && (typeof b.label !== 'string' || !b.label.trim() || b.label.trim().length > 60)) return { fail: [400, 'label'] };
+      const w: Workspace = { id: `sws_${hex(16)}`, owner: acc.id, label: typeof b.label === 'string' ? b.label.trim() : null, plan: null, head: 0, changes: [], envelopes: new Map(), recovery: null };
       this.workspaces.set(w.id, w);
       return { json: { workspaceId: w.id, keyVersion: 1 } };
+    }
+    m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/label$/.exec(p);
+    if (m && method === 'PUT') {
+      const w = mine(m[1]); if (!w) return { fail: [404, 'sync_workspace'] };
+      if (typeof b.label !== 'string' || !b.label.trim() || b.label.trim().length > 60) return { fail: [400, 'label'] };
+      w.label = b.label.trim(); return { json: { label: w.label } };
     }
     m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/(envelopes|envelope|devices-needing-key|changes)$/.exec(p);
     if (m) {
@@ -188,6 +241,117 @@ export class FakeWorld {
       }
     }
     return { fail: [404, 'not_found'] };
+  }
+
+  // ---------------------------------------------------------------- "Rodar na nuvem" (mesmas regras de world/src/handoffs.ts)
+  private handoffRoutes(method: string, p: string, u: URL, b: any, dev: Device, accountId: string, mine: (id: string | null) => Workspace | null): { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] } | null {
+    type Out = { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] };
+    const plan = (ws: unknown): Workspace | Out => {
+      const w = mine(typeof ws === 'string' ? ws : null);
+      if (!w) return { fail: [404, 'sync_workspace'] };
+      if (!w.plan) return { fail: [402, 'jobs_not_in_plan'] };
+      return w;
+    };
+    const isOut = (x: Workspace | Out): x is Out => 'fail' in x;
+    const owner = (ws: string, card: string) => this.owners.get(`${ws}|${card}`) ?? null;
+    const holdLocal = (ws: string, card: string, expected?: number) => {
+      const o = owner(ws, card);
+      if (!o) { this.owners.set(`${ws}|${card}`, { holder: 'local', deviceId: dev.id, generation: 1, leaseUntil: Date.now() + this.leaseMs, jobId: null }); return { ok: true, generation: 1, holder: 'local' }; }
+      if (o.holder === 'local' && o.deviceId === dev.id && (expected === undefined || expected === o.generation)) { o.leaseUntil = Date.now() + this.leaseMs; return { ok: true, generation: o.generation, holder: 'local' }; }
+      if (o.holder === 'local' && o.deviceId !== dev.id && o.leaseUntil <= Date.now() && expected === undefined) { o.deviceId = dev.id; o.generation += 1; o.leaseUntil = Date.now() + this.leaseMs; return { ok: true, generation: o.generation, holder: 'local' }; }
+      return { ok: false, generation: o.generation, holder: o.holder === 'world' ? 'world' : 'other_device', jobId: o.jobId };
+    };
+    const view = (h: Handoff) => {
+      const o = owner(h.ws, h.card); const j = h.jobId ? this.hjobs.get(h.jobId) : null;
+      return { handoffId: h.id, workspaceId: h.ws, cardRef: h.card, status: h.status, reason: h.reason, jobId: h.jobId, jobState: j?.state ?? null, owner: o ? { holder: o.holder, generation: o.generation } : null };
+    };
+    const mineH = (id: string) => { const h = this.handoffs.get(id); return h && h.accountId === accountId ? h : null; };
+    if (method === 'POST' && p === '/v1/jobs/handoffs/prepare') {
+      const w = plan(b.workspaceId); if (isOut(w)) return w;
+      if (typeof b.cardRef !== 'string' || !CARD_RE.test(b.cardRef)) return { fail: [400, 'card_ref'] };
+      if (typeof b.intentKey !== 'string' || !/^[A-Za-z0-9_:.-]{8,80}$/.test(b.intentKey)) return { fail: [400, 'intent_key'] };
+      const intent = `${accountId}:${b.intentKey}`;
+      const prev = [...this.handoffs.values()].find((h) => h.intent === intent);
+      if (prev) return { json: view(prev) };
+      if (b.cardState === 'running_local') return { fail: [409, 'checkpoint_required'] };
+      if (!['queued_local', 'waiting_external', 'waiting_user'].includes(b.cardState)) return { fail: [409, 'not_portable'] };
+      if (!this.adapters.includes(b.adapter)) return { fail: [409, 'no_remote_executor'] };
+      const own = holdLocal(w.id, b.cardRef);
+      if (!own.ok) return { fail: [409, own.holder === 'world' ? 'already_remote' : 'card_owned_elsewhere', { holder: own.holder }] };
+      for (const h of this.handoffs.values()) if (h.ws === w.id && h.card === b.cardRef && ['preparing', 'staged'].includes(h.status) && h.expiresAt < Date.now()) h.status = 'expired';
+      if ([...this.handoffs.values()].some((h) => h.ws === w.id && h.card === b.cardRef && ['preparing', 'staged'].includes(h.status))) return { fail: [409, 'handoff_open'] };
+      const h: Handoff = { id: `hof_${hex(16)}`, ws: w.id, card: b.cardRef, accountId, deviceId: dev.id, intent, status: 'preparing', generation: own.generation, adapter: b.adapter, routineRef: String(b.routineRef ?? b.cardRef).slice(0, 80), cardState: b.cardState, jobId: null, reason: null, checksum: null, pkg: null, expiresAt: Date.now() + 30 * 60_000 };
+      this.handoffs.set(h.id, h);
+      return { json: view(h) };
+    }
+    let m = /^\/v1\/jobs\/handoffs\/(hof_[a-f0-9]{32})(?:\/(stage|commit))?$/.exec(p);
+    if (m) {
+      const h = mineH(m[1]); if (!h) return { fail: [404, 'handoff'] };
+      if (method === 'GET' && !m[2]) return { json: view(h) };
+      if (method === 'POST' && m[2] === 'stage') {
+        if (h.status !== 'preparing' && h.status !== 'staged') return { fail: [409, 'handoff_state'] };
+        if (h.expiresAt < Date.now()) return { fail: [410, 'handoff_expired'] };
+        if (b.sequence !== 1 || typeof b.stageId !== 'string' || !b.stageId) return { fail: [400, 'stage'] };
+        if (checksumOf(b.package) !== b.checksum) return { fail: [400, 'checksum'] };
+        const urls = b.package?.urls;
+        if (!Array.isArray(urls) || !urls.length || urls.length > 10 || urls.some((x: unknown) => typeof x !== 'string' || !x.startsWith('https://'))) return { fail: [400, 'job_spec'] };
+        if (h.checksum && h.checksum !== b.checksum) return { fail: [409, 'checkpoint_conflict'] };
+        h.status = 'staged'; h.checksum = b.checksum; h.pkg = b.package;
+        return { json: view(h) };
+      }
+      if (method === 'POST' && m[2] === 'commit') {
+        if (h.status === 'committed') return { json: view(h) };
+        if (this.onCommit) { const f = this.onCommit; this.onCommit = null; f(h); }
+        if (h.status !== 'staged') return { fail: [409, h.status === 'preparing' ? 'checkpoint_missing' : 'handoff_state'] };
+        if (h.expiresAt < Date.now()) return { fail: [410, 'handoff_expired'] };
+        const o = owner(h.ws, h.card);
+        if (!o || o.holder !== 'local' || o.deviceId !== dev.id || o.generation !== Number(b.expectedGeneration) || o.generation !== h.generation) {
+          h.status = 'rejected'; h.reason = 'posse do cartão mudou';
+          return { fail: [409, 'fenced'] };
+        }
+        const j: HJob = { id: `job_${hex(16)}`, ws: h.ws, accountId, state: 'queued', reason: null, result: null, routineRef: h.routineRef, spec: h.pkg, queuedAt: new Date().toISOString() };
+        this.hjobs.set(j.id, j);
+        o.holder = 'world'; o.deviceId = null; o.leaseUntil = 0; o.jobId = j.id; o.generation += 1;
+        h.status = 'committed'; h.jobId = j.id;
+        return { json: view(h) };
+      }
+    }
+    if (method === 'POST' && p === '/v1/jobs/heartbeats') {
+      const w = plan(b.workspaceId); if (isOut(w)) return w;
+      if (!Array.isArray(b.cards) || b.cards.length > 200) return { fail: [400, 'cards'] };
+      return { json: { leaseSeconds: this.leaseMs / 1000, cards: b.cards.map((x: { cardRef: string; generation?: number }) => ({ cardRef: x.cardRef, ...holdLocal(w.id, x.cardRef, x.generation) })) } };
+    }
+    if (method === 'POST' && p === '/v1/jobs/cards/effects') {
+      const w = plan(b.workspaceId); if (isOut(w)) return w;
+      const o = owner(w.id, b.cardRef);
+      if (!o || o.holder !== 'local' || o.deviceId !== dev.id || o.generation !== Number(b.generation) || o.leaseUntil <= Date.now()) return { fail: [409, 'fenced', { holder: o?.holder ?? null, generation: o?.generation ?? null }] };
+      const k = `${w.id}|${b.cardRef}|${b.effectKey}`;
+      const first = !this.effects.has(k); this.effects.add(k);
+      return { json: { first } };
+    }
+    if (method === 'POST' && p === '/v1/jobs/cards/claim') {
+      const w = plan(b.workspaceId); if (isOut(w)) return w;
+      const o = owner(w.id, b.cardRef); if (!o) return { fail: [404, 'card'] };
+      if (o.holder === 'local' && o.deviceId === dev.id) return { json: { holder: 'local', generation: o.generation } };
+      if (o.generation !== Number(b.expectedGeneration)) return { fail: [409, 'fenced', { generation: o.generation }] };
+      if (o.holder === 'world') { const j = o.jobId ? this.hjobs.get(o.jobId) : null; if (j && !TERMINAL.includes(j.state)) return { fail: [409, 'remote_running'] }; }
+      else if (o.leaseUntil > Date.now()) return { fail: [409, 'card_owned_elsewhere'] };
+      o.holder = 'local'; o.deviceId = dev.id; o.jobId = null; o.generation += 1; o.leaseUntil = Date.now() + this.leaseMs;
+      return { json: { holder: 'local', generation: o.generation } };
+    }
+    if (method === 'GET' && p === '/v1/jobs/cards') {
+      const w = plan(u.searchParams.get('workspace')); if (isOut(w)) return w;
+      return { json: [...this.owners.entries()].filter(([k]) => k.startsWith(`${w.id}|`)).map(([k, o]) => {
+        const j = o.jobId ? this.hjobs.get(o.jobId) : null;
+        return { cardRef: k.slice(w.id.length + 1), holder: o.holder === 'world' ? 'world' : o.deviceId === dev.id ? 'this_device' : 'other_device', generation: o.generation, active: o.holder === 'world' ? !TERMINAL.includes(j?.state ?? '') : o.leaseUntil > Date.now(), jobId: o.jobId, jobState: j?.state ?? null };
+      }) };
+    }
+    m = /^\/v1\/jobs\/(job_[a-f0-9]{32})$/.exec(p);
+    if (m && method === 'GET') {
+      const j = this.hjobs.get(m[1]); if (!j || j.accountId !== accountId) return { fail: [404, 'job'] };
+      return { json: { id: j.id, state: j.state, reason: j.reason, adapter: 'web_feed', result: j.result } };
+    }
+    return null;
   }
 
   private token(accountId: string): string {

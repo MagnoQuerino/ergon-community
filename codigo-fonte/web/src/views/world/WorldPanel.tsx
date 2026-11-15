@@ -5,8 +5,11 @@ import { Loading } from '../../brand/Brand.tsx';
 import { ConnectForm, DeviceLimit, erroConta, type LoginLimit } from './WorldLinkDialog.tsx';
 import { fmtData, fmtDataHora, fmtDracmas, fmtLista, fmtMoeda, fmtNumero } from '../../i18n/index.ts';
 import { tw, twn, useTw, type ChaveWorld } from './textos.ts';
+import { nomeDoWorkspace } from './nuvem-cartao.ts';
 
-interface WorkspaceRef { workspaceId: string; role: string; status: string; plan_sku: string | null }
+interface WorkspaceRef { workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }
+/** o nome do workspace do World; o código curto só quando ele não tem nome */
+const nomeWs = (w: WorkspaceRef): string => { const n = nomeDoWorkspace(w); return 'nome' in n ? n.nome : tw('vinculo.existente', { codigo: n.codigo }); };
 interface LocalWs { id: string; name: string; current: boolean }
 interface Link { accountEmail: string | null; emailVerified: boolean; deviceId: string; workspaces?: WorkspaceRef[]; boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean }
 interface Status { configured: boolean; service: string | null; me: { displayName: string }; deviceLimit: LoginLimit | null; link: Link | null; localWorkspaces: LocalWs[] }
@@ -142,7 +145,7 @@ function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn: () => 
             <label className="field">{t('vinculo.world')}
               <select value={remote} onChange={(ev) => setRemote(ev.target.value)}>
                 <option value="">{t('vinculo.novo')}</option>
-                {remotes.map((w) => <option key={w.workspaceId} value={w.workspaceId}>{t('vinculo.existente', { codigo: `${w.workspaceId.slice(0, 12)}…` })}{w.plan_sku ? ` · ${w.plan_sku.replace('world_', '')}` : ''}</option>)}
+                {remotes.map((w) => <option key={w.workspaceId} value={w.workspaceId}>{nomeWs(w)}{w.plan_sku ? ` · ${w.plan_sku.replace('world_', '')}` : ''}</option>)}
               </select>
             </label>
           </div>
@@ -241,7 +244,7 @@ function Transfer({ others, busy, go }: { others: WorkspaceRef[]; busy: boolean;
     <details>
       <summary>{t('transferir.titulo')}</summary>
       <div className="row row--wrap">
-        <label className="field">{t('transferir.para')}<select value={to} onChange={(ev) => setTo(ev.target.value)}>{others.map((w) => <option key={w.workspaceId} value={w.workspaceId}>{w.workspaceId.slice(0, 12)}…{w.plan_sku ? ` · ${w.plan_sku.replace('world_', '').replace('_annual', ` ${t('transferir.anual')}`)}` : ` · ${t('transferir.semPlano')}`}</option>)}</select></label>
+        <label className="field">{t('transferir.para')}<select value={to} onChange={(ev) => setTo(ev.target.value)}>{others.map((w) => <option key={w.workspaceId} value={w.workspaceId}>{nomeWs(w)}{w.plan_sku ? ` · ${w.plan_sku.replace('world_', '').replace('_annual', ` ${t('transferir.anual')}`)}` : ` · ${t('transferir.semPlano')}`}</option>)}</select></label>
         <label className="field">{t('transferir.dracmas')}<input inputMode="decimal" value={amount} onChange={(ev) => setAmount(ev.target.value)} placeholder="500" /></label>
       </div>
       <p className="muted small">{t('transferir.texto')}</p>

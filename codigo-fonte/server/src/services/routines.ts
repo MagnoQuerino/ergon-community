@@ -33,6 +33,7 @@ import { parseCategories, parseTaskProposals, recordProposals, type LedgerItem, 
 import { cleanTrigger, fmtLocal, localParts, nextOccurrence, previousOccurrence, scheduleText, validTz } from './routine-time.ts';
 import { ESPERA_DO_MOTOR_MS } from './rotinas-motor.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
+import { remoteHolder, routineCard } from './remote-work.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { stripControl } from './teamwork.ts';
 
@@ -674,6 +675,8 @@ export class Routines {
       status: r.status, version: r.version, conversationId: r.conversation_id, agentId: agent?.id ?? null, agentName: agent?.name ?? null,
       trigger, schedule: scheduleText(trigger), nextRunAt: (r.status === 'active' ? this.proximaDoMotor?.(r.id) : null) ?? r.next_run_at, lastRunAt: r.last_run_at,
       running: !!last && ['queued', 'gathering', 'running'].includes(last.status), last: last ?? null,
+      // na nuvem (Ergon World): este computador não executa a rotina até ela voltar
+      remote: !!remoteHolder(this.db, r.workspace_id, routineCard(r.id)),
       hasSetup: !!this.db.get('SELECT 1 AS x FROM routine_setups WHERE routine_id = ?', r.id),
       config: { sources: config.sources, sourceLabels: config.sources?.map((s) => SOURCES[s]) ?? [], condition: config.condition, instruction: config.instruction, extra: config.extra, deliver: config.deliver, staleDays: config.staleDays, params: config.params ?? {}, contas: config.contas ?? [] },
       input: tpl?.input ?? null, paramSpecs: tpl?.params ?? [], missing: missingParams(tpl, config.params), outputs: tpl?.outputs ?? [], proposes: tpl?.proposes ?? null,
@@ -904,6 +907,39 @@ export class Routines {
     return { ...(text ? { text } : {}), ...(files.length ? { files } : {}) };
   }
 
+  /** A rodada esperando a vez aqui sai da fila: a rotina acabou de ir para a nuvem ("Rodar na nuvem"). */
+  handedOff(workspaceId: string, routineId: string): void {
+    for (const rr of this.db.all<RoutineRunRow>("SELECT * FROM routine_runs WHERE workspace_id = ? AND routine_id = ? AND status = 'queued'", workspaceId, routineId)) {
+      this.close(rr, 'cancelled', { summary: 'Foi para a nuvem' });
+    }
+    this.bus.publish(workspaceId, 'routines.changed', { id: routineId });
+  }
+
+  /**
+   * Rodada feita fora deste computador (o Ergon World): entra no histórico da rotina e o resultado vai para a conversa
+   * dela, como uma rodada daqui. A mesma chave não registra duas vezes.
+   */
+  recordRemote(workspaceId: string, routineId: string, x: { key: string; status: 'succeeded' | 'failed'; summary: string; output: string }): string {
+    const r = this.row(workspaceId, routineId);
+    const key = `remote:${x.key}`;
+    const dup = this.db.get<{ id: string }>('SELECT id FROM routine_runs WHERE idempotency_key = ?', key);
+    if (dup) return dup.id;
+    const rid = id('rrn'); const at = now();
+    this.db.run(`INSERT INTO routine_runs (id, workspace_id, routine_id, version, trigger, slot, idempotency_key, status, created_at, started_at)
+                 VALUES (?, ?, ?, ?, 'manual', NULL, ?, 'running', ?, ?)`, rid, workspaceId, r.id, r.version, key, at, at);
+    const rr = this.db.get<RoutineRunRow>('SELECT * FROM routine_runs WHERE id = ?', rid)!;
+    const agent = this.resolveAgent(workspaceId, parseJson<RoutineConfig>(r.config, {} as RoutineConfig));
+    const deliverables: Deliverable[] = [];
+    if (agent && x.output) {
+      const conv = this.conversation(r, agent.id);
+      this.note(workspaceId, conv, `${r.name} — na nuvem, ${fmtLocal(at, workspaceTz(this.db, workspaceId))}\n${x.output}`);
+      deliverables.push({ type: 'conversa', id: conv });
+    }
+    this.close(rr, x.status, { output: x.output || null, summary: x.summary, deliverables, ...(x.status === 'failed' ? { error: x.summary } : {}) });
+    this.bus.publish(workspaceId, 'routines.changed', { id: r.id, run: rid });
+    return rid;
+  }
+
   /** Executar agora (botão ou pedido na conversa). Uma por vez; limite por dia. */
   runNow(workspaceId: string, userId: string, routineId: string, requestId: string, rawInput?: unknown) {
     const r = this.row(workspaceId, routineId);
@@ -914,6 +950,7 @@ export class Routines {
     const dup = this.db.get<{ id: string }>('SELECT id FROM routine_runs WHERE idempotency_key = ?', key);
     if (dup) return this.runDetail(workspaceId, dup.id);
     if (busy) throw new HttpError(409, 'busy', 'Esta rotina já está executando: espere terminar.');
+    if (remoteHolder(this.db, workspaceId, routineCard(r.id))) throw new HttpError(409, 'remote', 'Esta rotina está na nuvem. Traga para este computador para rodar aqui.');
     const today = this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = ? AND created_at >= ? AND status != 'missed'", r.id, new Date(Date.now() - 86_400_000).toISOString());
     if (Number(today?.n ?? 0) >= (c.maxPerDay ?? 6)) {
       throw new HttpError(429, 'routine_limit', (c.maxPerDay ?? 6) === 1 ? 'Esta rotina já rodou nas últimas 24 horas (uma rodada por dia).' : `Limite de ${c.maxPerDay ?? 6} execuções desta rotina em 24 horas.`);
@@ -947,6 +984,8 @@ export class Routines {
    * nasce pulada, com o aviso, e não chega ao agente.
    */
   private createRun(r: RoutineRow, trigger: 'manual' | 'schedule' | 'chat', key: string, slot: string | null, userId: string | null, status: RoutineRunStatus = 'queued', summary: string | null = null, input: RunInput | null = null): RoutineRunRow | null {
+    // na nuvem: a rodada é de lá (o horário passa sem rodar aqui, sem registro de "perdida")
+    if (remoteHolder(this.db, r.workspace_id, routineCard(r.id))) return null;
     if (status === 'queued' && this.teamsLidoHoje(r)) {
       status = 'skipped';
       summary = `O Teams já foi lido nas últimas 24 horas (uma leitura por dia): ${trigger === 'schedule' ? 'este horário ficou de fora' : 'esta rodada ficou de fora'}.`;
@@ -972,6 +1011,7 @@ export class Routines {
     if (!rr || !['queued', 'gathering'].includes(rr.status)) return;
     const r = this.db.get<RoutineRow>('SELECT * FROM routines WHERE id = ?', rr.routine_id);
     if (!r || r.status === 'archived') return this.close(rr, 'cancelled', { error: 'rotina removida' });
+    if (remoteHolder(this.db, r.workspace_id, routineCard(r.id))) return this.close(rr, 'cancelled', { summary: 'Foi para a nuvem' });
     const started = rr.started_at ?? now();
     this.db.run("UPDATE routine_runs SET status = 'gathering', started_at = ? WHERE id = ?", started, rr.id);
     log.info({ routineRunId: rr.id, routineId: r.id, template: r.template_key, trigger: rr.trigger, slot: rr.slot }, 'rotina: coletando');
@@ -1314,6 +1354,7 @@ export class Routines {
   disparoDoMotor(workspaceId: string, routineId: string, emMs: number): 'rodou' | 'perdida' | 'pulada' | 'ja' | 'ignorada' {
     const r = this.db.get<RoutineRow>('SELECT * FROM routines WHERE id = ? AND workspace_id = ?', routineId, workspaceId);
     if (!r || r.status !== 'active' || !this.db.workspaceOpen(workspaceId)) return 'ignorada';
+    if (remoteHolder(this.db, workspaceId, routineCard(r.id))) return 'ignorada'; // na nuvem: o horário é de lá
     const trigger = parseJson<Trigger>(r.trigger, { kind: 'manual' });
     const quando = Number.isFinite(emMs) && emMs > 0 ? Math.min(emMs, Date.now()) : Date.now();
     // o aviso pode chegar um pouco antes do minuto exato (o tique do agendador): vale o horário até 2 min à frente

@@ -31,6 +31,19 @@ const pt = {
   'nuvem.estado.semSaldo': 'esperando saldo',
   'nuvem.rodape': 'Esperar na fila da nuvem não é cobrado.',
 
+  // "Rodar na nuvem" nos cartões
+  'cartao.rodar': 'Rodar na nuvem',
+  'cartao.enviando': 'Enviando…',
+  'cartao.enviado': 'Na fila da nuvem.',
+  'cartao.trazer': 'Trazer para este computador',
+  'cartao.trazendo': 'Trazendo…',
+  'cartao.trazido': 'De volta a este computador.',
+  'cartao.selo.naFila': 'Na fila da nuvem',
+  'cartao.selo.trabalhando': 'Trabalhando na nuvem',
+  'cartao.selo.concluido': 'Concluído na nuvem',
+  'cartao.selo.falhou': 'Falhou na nuvem',
+  'cartao.selo.preparando': 'Enviando para a nuvem',
+
   // Ergon World nas Configurações
   'mundo.titulo': 'Ergon World',
   'mundo.texto': 'Plano, créditos e sincronização para um workspace seu.',
@@ -285,6 +298,18 @@ const en: Traducao<typeof pt> = {
   'nuvem.estado.naFila': 'queued',
   'nuvem.estado.semSaldo': 'waiting for balance',
   'nuvem.rodape': 'Waiting in the cloud queue is free.',
+
+  'cartao.rodar': 'Run in the cloud',
+  'cartao.enviando': 'Sending…',
+  'cartao.enviado': 'Queued in the cloud.',
+  'cartao.trazer': 'Bring back to this computer',
+  'cartao.trazendo': 'Bringing back…',
+  'cartao.trazido': 'Back on this computer.',
+  'cartao.selo.naFila': 'Queued in the cloud',
+  'cartao.selo.trabalhando': 'Working in the cloud',
+  'cartao.selo.concluido': 'Done in the cloud',
+  'cartao.selo.falhou': 'Failed in the cloud',
+  'cartao.selo.preparando': 'Sending to the cloud',
 
   'mundo.titulo': 'Ergon World',
   'mundo.texto': 'Plan, credits and sync for one of your workspaces.',

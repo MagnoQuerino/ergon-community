@@ -19,6 +19,11 @@ import { ActionBar, IconAction, TaskFiles, TechDetails, type TaskFile, type Work
 import { QuestionCard, SecretCard } from './ChatCards.tsx';
 import { ComandosBar } from './Comandos.tsx';
 import type { Proposal } from '../lib/types.ts';
+import { semNuvem, type NuvemNoCartao } from '../lib/nuvem-cartao.ts';
+
+/** "Rodar na nuvem" (módulo do Ergon World, se estiver nesta instalação): o item do menu e o selo do card */
+const nuvemMod = Object.values(import.meta.glob<{ useNuvemNoCartao: (ref: string | null) => NuvemNoCartao }>('../views/world/CardNuvem.tsx', { eager: true }))[0];
+const useNuvemNoCartao = nuvemMod?.useNuvemNoCartao ?? semNuvem;
 
 interface Step { position: number; agentId: string; title: string; short?: string; status: 'pendente' | 'em_andamento' | 'feita' | 'falhou'; doneAt: string | null }
 /** o que a pessoa vê de cara (server/src/services/resumo-tarefa.ts): a situação e a frase exata do que decide */
@@ -71,7 +76,7 @@ const STEP_ICON: Record<Step['status'], string> = { feita: 'check', em_andamento
 const marcaDeCorte = (extra: string | undefined): boolean => !!extra && (JSON.parse(extra) as { descricao_cortada?: boolean }).descricao_cortada === true;
 
 /** Item do menu "⋯". */
-interface MenuItem { icon: string; label: string; onClick: () => void; danger?: boolean; on?: boolean; sep?: boolean }
+interface MenuItem { icon: string; label: string; onClick: () => void; danger?: boolean; on?: boolean; sep?: boolean; disabled?: boolean; motivo?: string }
 /** Menu "⋯" da tarefa: o que não é a decisão de agora (executar de novo, revisar, abrir a conversa, excluir…). */
 function MaisAcoes({ items }: { items: MenuItem[] }) {
   const t = useT();
@@ -94,8 +99,8 @@ function MaisAcoes({ items }: { items: MenuItem[] }) {
         <div className="tdet__menulist" role="menu">
           {items.map((it, i) => (
             <button key={i} type="button" role={it.on === undefined ? 'menuitem' : 'menuitemcheckbox'} className={`${it.danger ? 'is-danger' : ''} ${it.sep ? 'has-sep' : ''}`} aria-checked={it.on === undefined ? undefined : it.on}
-              onClick={() => { setOpen(false); it.onClick(); }}>
-              <Icon name={it.icon} size={14} /> <span>{it.label}</span>{it.on ? <Icon name="check" size={13} /> : null}
+              disabled={it.disabled} title={it.motivo} onClick={() => { setOpen(false); it.onClick(); }}>
+              <Icon name={it.icon} size={14} /> <span>{it.label}{it.motivo ? <span className="muted small"> · {it.motivo}</span> : null}</span>{it.on ? <Icon name="check" size={13} /> : null}
             </button>
           ))}
         </div>
@@ -202,6 +207,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   const rev = useRef(0);
   const queue = useRef<Promise<boolean>>(Promise.resolve(true));
   const idRef = useRef(taskId);
+  const nuvem = useNuvemNoCartao(`card:${taskId}`);
   idRef.current = taskId;
   useEffect(() => {
     if (!d.data) return;
@@ -470,12 +476,14 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
       if (data.queue.position > 1) menu.push({ icon: 'chevron-up', label: t('tarefa.menu.subir'), onClick: () => void arrange({ move: 'up' }) });
       if (data.queue.position < data.queue.total) menu.push({ icon: 'chevron', label: t('tarefa.menu.descer'), onClick: () => void arrange({ move: 'down' }) });
     }
+    if (nuvem.item) menu.push({ ...nuvem.item, sep: true });
     menu.push({ icon: 'trash', label: tk.completed ? t('tarefa.tirarDoQuadro') : t('tarefa.menu.excluir'), danger: true, sep: true, onClick: () => setConfirmCancel(true) });
   }
 
   const feedback = <>
     {err && <p className="error" role="alert">{err}</p>}
     {ok && <p className="ok" role="status">{ok}</p>}
+    {nuvem.aviso && <p className="hint" role="status">{nuvem.aviso}</p>}
   </>;
   const reenviar = async () => { try { await api.post(`/api/tasks/${tk.id}/reenviar`); d.reload(); } catch (e) { setErr(errMsg(e)); } };
 
@@ -534,6 +542,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
           <header className="tdet__head">
             <div className="tdet__titlebox">
               <span className="tdet__num">#{tk.number}</span>
+              {nuvem.selo && <span className={`badge ${nuvem.selo.tom === 'info' ? '' : `badge--${nuvem.selo.tom}`}`}>{nuvem.selo.texto}</span>}
               {mode === 'team' && naming !== null ? (
                 <form className="row task-rename" data-esc-own onSubmit={(e) => { e.preventDefault(); void rename(); }}>
                   <input aria-label={t('tarefa.renomear.campo')} value={naming} autoFocus maxLength={200} onChange={(e) => setNaming(e.target.value)}

@@ -194,7 +194,9 @@ export class WorldLinks {
   }
 }
 
-/** Tira do workspace local o que o ligava ao World (o id do workspace World e o estado do Sync). Dados locais ficam. */
+/** Tira do workspace local o que o ligava ao World (o id do workspace World, o estado do Sync e dos cartões na nuvem). Dados locais ficam. */
 export function forgetWorkspace(db: Db, ws: string): void {
-  for (const t of ['world_sync_conflicts', 'world_sync_records', 'world_sync', 'world_workspace_ids']) db.run(`DELETE FROM ${t} WHERE workspace_id = ?`, ws);
+  for (const t of ['world_sync_conflicts', 'world_sync_records', 'world_sync', 'world_workspace_ids', 'world_cards']) db.run(`DELETE FROM ${t} WHERE workspace_id = ?`, ws);
+  // sem o World, nada fica preso "na nuvem": os cartões voltam a ser deste computador
+  db.run("DELETE FROM remote_work WHERE workspace_id = ? AND holder = 'world'", ws);
 }

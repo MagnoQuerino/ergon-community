@@ -17,6 +17,7 @@ import { loadWorldConfig, type WorldConfig } from './config.ts';
 import { forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, type AccountInput, type DeviceChoice } from './link.ts';
 import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
+import { CARD_REF, CloudCards } from './cards.ts';
 
 /** O que o World responde nas contas, em frases curtas (a mensagem dele pode vir em outro idioma). */
 const ACCOUNT_ERRORS: Record<string, [number, string]> = {
@@ -221,6 +222,34 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
           return { available: false, reason: off ? 'offline' : 'erro', message: off ? 'Sem conexão com o Ergon World agora.' : 'O Ergon World não respondeu à leitura dos Jobs.', last };
         }
       });
+      // ---------------------------------------------------------------- "Rodar na nuvem": cartões do workspace ligado
+      // Cartão que nunca foi à nuvem não fala com o World. A leitura do World (estado do Job, resultado) é no máximo a
+      // cada 20 s por workspace, e só enquanto houver cartão na nuvem.
+      const minMs = Number.parseInt(env.ERGON_WORLD_CARDS_MIN_MS ?? '', 10);
+      const cards = new CloudCards({ db, client, links: L(), routines: h.routines, bus: h.bus, worldId: (ws) => sync.worldId(ws), minMs: Number.isFinite(minMs) && minMs >= 0 ? minMs : 20_000 });
+      const cardRef = (v: unknown): string => {
+        if (typeof v !== 'string' || !CARD_REF.test(v)) throw new HttpError(400, 'invalid', 'cartão inválido');
+        return v;
+      };
+      // o coordenador também faz, conversando ("continua isso na nuvem"): a mesma rota, com o clique da pessoa (gestao.ts)
+      const refBody = { body: { type: 'object', additionalProperties: false, required: ['ref'], properties: { ref: { type: 'string', pattern: CARD_REF.source } } } };
+      app.get('/api/world/cards', { config: { gestao: { id: 'nuvem.cartoes', area: 'rotinas', rotulo: 'Ver quais cartões podem rodar na nuvem do Ergon World e os que estão lá', aprova: false } } }, async (req) => {
+        const a = h.auth(req); const ref = (req.query as { ref?: string }).ref;
+        // só o workspace ligado ao World, com a conta conectada, oferece a nuvem; nos outros, nada muda
+        if (!worldWs(a) || !links?.session(a.userId)) return { offer: false, stale: false, cards: [] };
+        let stale = false;
+        await cards.refresh(a.userId, a.workspaceId).catch(() => { stale = true; });
+        return { offer: true, stale, cards: ref ? [cards.view(a.workspaceId, cardRef(ref))] : cards.list(a.workspaceId) };
+      });
+      app.post('/api/world/cards/send', { schema: refBody, config: { gestao: { id: 'nuvem.rodar', area: 'rotinas', rotulo: 'Rodar na nuvem do Ergon World um cartão na fila ou em espera (ref: rotina:<id> ou card:<id>)', aprova: true } } }, async (req) => {
+        const a = h.owner(req); const ref = cardRef((req.body as { ref?: unknown } | undefined)?.ref);
+        return cards.send(a.userId, boundWs(a), ref);
+      });
+      app.post('/api/world/cards/claim', { schema: refBody, config: { gestao: { id: 'nuvem.trazer', area: 'rotinas', rotulo: 'Trazer para este computador um cartão que terminou na nuvem', aprova: true } } }, async (req) => {
+        const a = h.owner(req); const ref = cardRef((req.body as { ref?: unknown } | undefined)?.ref);
+        return cards.claim(a.userId, boundWs(a), ref);
+      });
+
       // créditos (só do workspace), extrato, recarga automática (o dono), teto por pessoa (o gestor) e transferência
       app.get('/api/world/wallet', async (req) => {
         const a = h.auth(req); const w = worldWs(a);
@@ -329,7 +358,21 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         for (const r of db.all<{ user_id: string }>("SELECT user_id FROM world_links WHERE status = 'active'")) void L().renew(r.user_id).catch(() => undefined);
       }, wcfg.refreshSeconds * 1000);
       timer.unref();
-      app.addHook('onClose', async () => clearInterval(timer));
+      // cartões na nuvem: o estado do Job e o resultado chegam mesmo com a tela fechada (só enquanto houver algum)
+      const cardsTimer = setInterval(() => {
+        for (const w of cards.watched()) void cards.refresh(w.user_id, w.workspace_id).catch(() => undefined);
+      }, 20_000);
+      cardsTimer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); });
+      // renomear o workspace ligado aqui renomeia o do World (o nome que aparece no lugar do código)
+      app.addHook('onResponse', async (req, reply) => {
+        if (req.method !== 'PATCH' || req.routeOptions.url !== '/api/workspaces/:id' || reply.statusCode !== 200) return;
+        const ws = String((req.params as { id?: string }).id ?? '');
+        const owner = db.get<{ user_id: string }>("SELECT user_id FROM world_links WHERE bound_workspace_id = ? AND status = 'active'", ws);
+        const w = owner ? sync.worldId(ws) : null; const s = owner ? links?.session(owner.user_id) : null;
+        const label = sync.labelOf(ws).label;
+        if (w && s && label) void client.call('PUT', `/v1/sync/workspaces/${w}/label`, { label }, s).catch(() => undefined);
+      });
     },
   };
 }

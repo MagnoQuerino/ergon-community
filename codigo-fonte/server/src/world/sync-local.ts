@@ -37,6 +37,12 @@ export class LocalSync {
     return { enabled: false, syncWorkspaceId: w?.sync_workspace_id ?? null, origin: w?.origin ?? null };
   }
 
+  /** O nome do workspace local, que o World mostra no lugar do código (1 a 60 caracteres). */
+  labelOf(ws: string): { label?: string } {
+    const n = (this.db.get<{ name: string }>('SELECT name FROM workspaces WHERE id = ?', ws)?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    return n ? { label: n } : {};
+  }
+
   /** O workspace World deste workspace local (com ou sem a sincronização ligada), ou null. */
   worldId(ws: string): string | null {
     return this.row(ws)?.sync_workspace_id ?? this.db.get<{ sync_workspace_id: string }>('SELECT sync_workspace_id FROM world_workspace_ids WHERE workspace_id = ?', ws)?.sync_workspace_id ?? null;
@@ -49,7 +55,7 @@ export class LocalSync {
   async ensureWorld(userId: string, ws: string): Promise<string> {
     const cur = this.worldId(ws);
     if (cur) return cur;
-    const w = await this.client.call<{ workspaceId: string }>('POST', '/v1/sync/workspaces', {}, this.ctx(userId).session);
+    const w = await this.client.call<{ workspaceId: string }>('POST', '/v1/sync/workspaces', this.labelOf(ws), this.ctx(userId).session);
     this.db.run("INSERT INTO world_workspace_ids (workspace_id, sync_workspace_id, created_at, origin) VALUES (?, ?, ?, 'created')", ws, w.workspaceId, now());
     return w.workspaceId;
   }
@@ -67,7 +73,7 @@ export class LocalSync {
     const origin = this.db.get<{ origin: string }>('SELECT origin FROM world_workspace_ids WHERE workspace_id = ?', ws)?.origin;
     if (origin === 'joined') throw new HttpError(409, 'sync_join', 'Este workspace já sincroniza em outro computador: entre nele com a frase de recuperação ou autorize por lá.');
     const known = this.worldId(ws); // já existe (créditos/plano antes da sincronização): a chave nasce agora, versão 1
-    const w = known ? { workspaceId: known, keyVersion: 1 } : await this.client.call<{ workspaceId: string; keyVersion: number }>('POST', '/v1/sync/workspaces', {}, c.session);
+    const w = known ? { workspaceId: known, keyVersion: 1 } : await this.client.call<{ workspaceId: string; keyVersion: number }>('POST', '/v1/sync/workspaces', this.labelOf(ws), c.session);
     const dek = newWorkspaceKey();
     await this.client.call('PUT', `/v1/sync/workspaces/${w.workspaceId}/envelopes`, { kind: 'device', deviceId: c.deviceId, keyVersion: w.keyVersion, wrapped: wrapForDevice(dek, c.keys.x25519Public, w.workspaceId, w.keyVersion) }, c.session);
     if (recoveryPhrase) await this.client.call('PUT', `/v1/sync/workspaces/${w.workspaceId}/envelopes`, { kind: 'recovery', keyVersion: w.keyVersion, wrapped: wrapForRecovery(dek, recoveryPhrase, w.workspaceId, w.keyVersion) }, c.session);

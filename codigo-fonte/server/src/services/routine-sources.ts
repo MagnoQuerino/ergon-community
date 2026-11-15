@@ -414,15 +414,24 @@ async function meetingsSection(ctx: ExtraCtx, res: ExtraResult, add: Add): Promi
   add(key, real.length, lines.length ? lines : ['(nenhuma reunião com outras pessoas nas próximas 36 horas)'], { news: real.length > 0, signal: real.length > 0 });
 }
 
-async function webSection(ctx: ExtraCtx, key: SourceId, res: ExtraResult, add: Add): Promise<void> {
-  const feeds = listParam(ctx.params, 'feeds').filter((u) => /^https:\/\//i.test(u)).map((u) => ({ label: new URL(u).hostname, url: u }));
+/**
+ * O que uma fonte pública da rotina lê: as buscas de notícias (dos assuntos, concorrentes ou temas) e os feeds RSS que a
+ * pessoa indicou. O mesmo endereço vale aqui e no Job remoto (Ergon World, adaptador web_feed).
+ */
+export function webQueries(key: SourceId, params: ParamValues): { queries: Array<{ label: string; url: string }>; feeds: Array<{ label: string; url: string }> } {
+  const feeds = listParam(params, 'feeds').filter((u) => /^https:\/\//i.test(u)).map((u) => ({ label: new URL(u).hostname, url: u }));
   let queries: Array<{ label: string; url: string }> = [];
-  if (key === 'web.noticias') queries = listParam(ctx.params, 'termos').map((t) => ({ label: t, url: newsUrl(t) }));
-  if (key === 'web.concorrentes') queries = listParam(ctx.params, 'concorrentes').map((t) => ({ label: t, url: newsUrl(`"${t}"`) }));
-  if (key === 'web.regulatorio') queries = listParam(ctx.params, 'temas').flatMap((t) => [
+  if (key === 'web.noticias') queries = listParam(params, 'termos').map((t) => ({ label: t, url: newsUrl(t) }));
+  if (key === 'web.concorrentes') queries = listParam(params, 'concorrentes').map((t) => ({ label: t, url: newsUrl(`"${t}"`) }));
+  if (key === 'web.regulatorio') queries = listParam(params, 'temas').flatMap((t) => [
     { label: t, url: newsUrl(`${t} (resolução OR portaria OR "instrução normativa" OR "consulta pública" OR norma OR regulamento)`, 14) },
     { label: `${t} (Diário Oficial)`, url: newsUrl(`${t} site:in.gov.br`, 14) },
   ]);
+  return { queries, feeds };
+}
+
+async function webSection(ctx: ExtraCtx, key: SourceId, res: ExtraResult, add: Add): Promise<void> {
+  const { queries, feeds } = webQueries(key, ctx.params);
   if (!queries.length && !feeds.length) { add(key, 0, [`(configure o que acompanhar: ${key === 'web.concorrentes' ? 'os concorrentes' : key === 'web.regulatorio' ? 'os órgãos e temas' : 'os assuntos'} da rotina)`]); return; }
   const since = ctx.since < new Date(Date.now() - 14 * 86_400_000).toISOString() ? new Date(Date.now() - 14 * 86_400_000).toISOString() : ctx.since;
   const r = await readFeeds([...queries, ...feeds], since, { max: 40, fetcher: ctx.fetcher });
