@@ -22,7 +22,7 @@ const configuracoes = {
   'abas.seguranca': 'Segurança',
   'abas.pessoas': 'Pessoas',
   'abas.pacotes': 'Pacotes',
-  'abas.contaErgon': 'Conta Ergon',
+  'abas.contaErgon': 'Ergon World',
   'abas.atualizacoes': 'Atualizações',
   'abas.saude': 'Saúde',
 

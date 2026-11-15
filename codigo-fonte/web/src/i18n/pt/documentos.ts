@@ -1,6 +1,5 @@
 // Área "documentos": Documentos, Pacotes, a loja da Cidade e o World. Os arquivos da área estão em ../particao.ts; o passo a passo, em ../COMO-TRADUZIR.md.
-// Os textos do World ficam no módulo dele (views/world/textos.ts): a Community não traz o World, e a exportação
-// pública recusa o nome da moeda e dos planos.
+// Os textos do World ficam no módulo dele (views/world/textos.ts).
 import type { Area } from '../tipos.ts';
 
 const documentos = {

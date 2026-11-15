@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { KDF_STRONG, KDF_TEST, type KdfParams } from './security/crypto.ts';
 
@@ -7,16 +6,15 @@ export const ERGON_MS_APP = 'a5c42f25-1caa-45db-9220-79708764914e';
 
 export type ExecutorMode = 'simulated' | 'hermes';
 /**
- * Distribuição: 'proprietary' carrega o módulo opcional em server/src/world, se existir; a Community não traz esse
- * módulo e funciona sem rede. Não confundir com `mode`
- * (local/cloud), que trata do antigo motor hospedado.
+ * Distribuição declarada (Community por padrão). O cliente do Ergon World (server/src/world) carrega em qualquer uma e
+ * só liga com o endereço do World. Não confundir com `mode` (local/cloud), que trata do antigo motor hospedado.
  */
 export type Distribution = 'proprietary' | 'community';
 
 export interface Config {
   /** local (um computador, dados cifrados com a senha) ou cloud (serviço hospedado; 2º fator obrigatório) */
   mode: 'local' | 'cloud';
-  /** proprietária (padrão) ou Community; ver Distribution */
+  /** Community (padrão) ou proprietary; ver Distribution */
   distribution: Distribution;
   /** loja: pasta dos pacotes oficiais embutidos, índice público dos modelos da comunidade e o fetch (testes) */
   catalogDir?: string;
@@ -137,8 +135,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
   const executor = (env.ERGON_EXECUTOR ?? 'simulated') as ExecutorMode;
   if (executor !== 'simulated' && executor !== 'hermes') throw new Error('ERGON_EXECUTOR deve ser simulated ou hermes');
   const mode = (env.ERGON_MODE ?? 'local') as Config['mode'];
-  // sem ERGON_DISTRIBUTION: proprietary só quando o módulo opcional (server/src/world) está presente
-  const distribution = (env.ERGON_DISTRIBUTION || (fs.existsSync(path.join(import.meta.dirname, 'world')) ? 'proprietary' : 'community')) as Distribution;
+  const distribution = (env.ERGON_DISTRIBUTION || 'community') as Distribution;
   if (distribution !== 'proprietary' && distribution !== 'community') throw new Error('ERGON_DISTRIBUTION deve ser proprietary ou community');
   if (mode !== 'local' && mode !== 'cloud') throw new Error('ERGON_MODE deve ser local ou cloud');
   const publicUrl = (env.ERGON_PUBLIC_URL || `http://localhost:${port}`).replace(/\/+$/, '');

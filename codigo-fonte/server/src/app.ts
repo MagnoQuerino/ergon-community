@@ -191,7 +191,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const vault = deps.vault ?? new Vault(cfg.dataDir, cfg.kdf);
   // local: a chave de cada workspace é da pessoa dona dele (várias pessoas no mesmo computador)
   const owners = new WorkspaceOwners(db);
-  const world = cfg.distribution === 'proprietary' ? await loadWorld(cfg) : null;
+  const world = await loadWorld(cfg);
   if (vault.state() === 'open' && !db.fieldCipher) db.setCipher(cfg.mode === 'local' ? vault.personKeySource(owners.of) : vault.keySource());
   const personKeys = (): PersonKeySource | null => (db.fieldCipher?.source instanceof PersonKeySource ? db.fieldCipher.source : null);
   // parte fechada (a pessoa ainda não entrou depois de reiniciar): as tarefas de fundo pulam os workspaces dela
@@ -3060,7 +3060,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.delete('/api/packages/:id', { schema: { params: idParams('pkg') } }, async (req) => { const a = owner(req); packages.uninstall(a.workspaceId, a.userId, (req.params as { id: string }).id); return { ok: true }; });
   // editor simples: monta um .ergon (efeito, pet ou tema) para ver na cidade, baixar e publicar; mesma validação da instalação
 
-  // módulo opcional (server/src/world): a Community não traz esse código ---------------------------------------
+  // cliente do Ergon World (server/src/world): sem o endereço do World, só o estado -----------------------------
   app.get('/api/distribution', async () => ({ distribution: cfg.distribution, world: world?.status() ?? { available: false } }));
   if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits });
 

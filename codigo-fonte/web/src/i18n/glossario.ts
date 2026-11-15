@@ -6,7 +6,7 @@ export interface Termo { readonly pt: string; readonly en: string; readonly conf
 
 export const GLOSSARIO: readonly Termo[] = [
   // a moeda do World não se traduz (decisão de 09/11): o mesmo símbolo nas duas línguas. O nome dela fica na lista do
-  // módulo do World (views/world/glossario-moeda.ts), que só existe na distribuição proprietária
+  // módulo do World (views/world/glossario-moeda.ts)
   { pt: '₯', en: '₯', conferir: true },
 
   // as áreas do menu

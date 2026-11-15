@@ -40,7 +40,7 @@ export const summaryOf = (o: AmbientOps, cloud = false): OpsSummary => ({ cloud,
   attention: o.totals.precisa_de_voce, decisions: o.decisions.total, deliveries: o.deliveries.total,
 });
 
-/** Trabalho na nuvem ligado nesta instalação (edição com o World e o serviço configurado). */
+/** Trabalho na nuvem ligado nesta instalação (o endereço do Ergon World configurado). */
 export interface Distribution { distribution: string; world: { available: boolean; configured?: boolean } }
 export const cloudOn = (d: Distribution | null | undefined): boolean => !!d?.world.available && !!d.world.configured;
 

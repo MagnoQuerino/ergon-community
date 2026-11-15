@@ -23,7 +23,7 @@ const configuracoes: Traducao<typeof pt> = {
   'abas.seguranca': 'Security',
   'abas.pessoas': 'People',
   'abas.pacotes': 'Packages',
-  'abas.contaErgon': 'Ergon account',
+  'abas.contaErgon': 'Ergon World',
   'abas.atualizacoes': 'Updates',
   'abas.saude': 'Health',
 

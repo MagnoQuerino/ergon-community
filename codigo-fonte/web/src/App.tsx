@@ -19,7 +19,7 @@ import { initPrefs, savePrefs, usePrefs } from './lib/prefs.ts';
 import { music } from './lib/music.ts';
 import { MusicButton } from './components/MusicButton.tsx';
 import { abrirBalao, useBalao } from './lib/balao.ts';
-// só na distribuição proprietária (a Community não traz views/world): entrar com a Conta Ergon de qualquer tela
+// cliente do Ergon World (views/world): conectar de qualquer tela quando um recurso do World pede a conta
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
 import { useSurface } from './lib/surface.ts';

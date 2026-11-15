@@ -1,0 +1,200 @@
+/**
+ * Conta do Ergon World na instalação local: criar a conta ou entrar (e-mail e senha, direto na API de contas do World),
+ * registrar este computador como aparelho (chave Ed25519 gerada aqui; a privada nunca sai, cifrada com a chave da
+ * pessoa) e ligar a conta ao perfil local. O acesso local continua o mesmo: a conta do World não substitui o login.
+ * A senha só vai ao World quando a pessoa a digita para a conta do World (ou escolhe reaproveitar a do Ergon, conferida
+ * aqui antes), uma vez, por HTTPS; a chave pessoal local nunca vai.
+ */
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { Db } from '../db/db.ts';
+import { HttpError } from '../lib/util.ts';
+import { CLOSED_VALUE, SEALED_PREFIX } from '../security/fields.ts';
+import { instanceSetting, setInstanceSetting } from '../services/security.ts';
+import type { WorldConfig } from './config.ts';
+
+const nowIso = () => new Date().toISOString();
+
+export interface LinkRow { user_id: string; workspace_id: string; account_id: string; device_id: string; account_email: string | null; email_verified: number; device_keys: string; session_token: string; authorized_until: string | null; entitlement: string | null; bound_workspace_id: string | null; status: string }
+
+/** Migrações próprias do módulo World local (w0001…), registradas em world_migrations. */
+export function migrateWorldLocal(db: Db, dir = path.join(import.meta.dirname, 'migrations')): string[] {
+  db.raw.exec('CREATE TABLE IF NOT EXISTS world_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
+  const done = new Set(db.all<{ name: string }>('SELECT name FROM world_migrations').map((r) => r.name));
+  const out: string[] = [];
+  for (const f of fs.readdirSync(dir).filter((x) => /^w\d{4}_.+\.sql$/.test(x)).sort()) {
+    if (done.has(f)) continue;
+    db.raw.exec('BEGIN');
+    try { db.raw.exec(fs.readFileSync(path.join(dir, f), 'utf8')); db.run('INSERT INTO world_migrations (name, applied_at) VALUES (?, ?)', f, nowIso()); db.raw.exec('COMMIT'); }
+    catch (e) { db.raw.exec('ROLLBACK'); throw e; }
+    out.push(f);
+  }
+  return out;
+}
+
+export class WorldClient {
+  readonly cfg: WorldConfig;
+  readonly fetchImpl: typeof fetch;
+  constructor(cfg: WorldConfig, fetchImpl: typeof fetch = fetch) { this.cfg = cfg; this.fetchImpl = fetchImpl; }
+
+  /** Chamada ao World. Sem rede → 503 world_offline (nada foi alterado). */
+  async call<T = Record<string, unknown>>(method: string, p: string, body?: unknown, session?: string | null): Promise<T> {
+    if (!this.cfg.url) throw new HttpError(503, 'world_unconfigured', 'O Ergon World não está configurado nesta instalação.');
+    let r: Response;
+    try {
+      r = await this.fetchImpl(`${this.cfg.url}${p}`, {
+        method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(session ? { authorization: `Bearer ${session}` } : {}) },
+        body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10_000),
+      });
+    } catch { throw new HttpError(503, 'world_offline', 'Sem conexão com o Ergon World agora. Tente de novo.'); }
+    const j = await r.json().catch(() => ({})) as { error?: string; message?: string };
+    if (!r.ok) throw Object.assign(new HttpError(r.status === 401 ? 401 : r.status >= 500 ? 503 : r.status, j.error ?? 'world_error', j.message ?? `World respondeu ${r.status}`), { detail: j });
+    return j as T;
+  }
+}
+
+/** Identificador desta instalação (aleatório, sem dados da máquina). */
+function installationId(db: Db): string {
+  let v = instanceSetting(db, 'world_installation_id');
+  if (!v) { v = crypto.randomBytes(18).toString('base64url'); setInstanceSetting(db, 'world_installation_id', v); }
+  return v;
+}
+
+export interface ConnectedDevice { id: string; name: string; lastSeenAt: string | null }
+/** a conta do World: nova (com o nome) ou que já existe */
+export interface AccountInput { kind: 'signup' | 'login'; email: string; password: string; displayName?: string }
+/** aparelho a liberar quando a conta já está no limite (2 com sessão / 4 cadastrados) */
+export interface DeviceChoice { endSessionsOf?: string; replaceDeviceId?: string }
+interface AccountReply { accountId: string; idToken: string; emailVerified: boolean }
+
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+/** o token da conta vale 5 minutos no World: para escolher qual aparelho liberar, guardamos um pouco menos */
+const PENDING_MS = 4 * 60_000;
+
+export function checkAccountInput(a: AccountInput): void {
+  if (!EMAIL.test(a.email)) throw new HttpError(400, 'invalid_email', 'E-mail inválido.');
+  if (a.password.length < 10) throw new HttpError(400, 'password_short', 'A senha precisa de 10 caracteres ou mais.');
+  if (a.kind === 'signup' && !a.displayName?.trim()) throw new HttpError(400, 'invalid_name', 'Informe o nome.');
+}
+
+export class WorldLinks {
+  readonly db: Db;
+  readonly cfg: WorldConfig;
+  readonly client: WorldClient;
+  /** login recusado por limite: quais aparelhos, para a pessoa escolher (15 min) */
+  private limits = new Map<string, { at: number; kind: 'session_limit' | 'device_limit'; devices: ConnectedDevice[] }>();
+  /** a conta já respondeu, falta só o aparelho caber: o token curto da conta, na memória, por poucos minutos */
+  private pending = new Map<string, { at: number; idToken: string; email: string; emailVerified: boolean; sealWs: string }>();
+  constructor(db: Db, cfg: WorldConfig, client: WorldClient) { this.db = db; this.cfg = cfg; this.client = client; }
+
+  get(userId: string): LinkRow | null { return this.db.get<LinkRow>("SELECT * FROM world_links WHERE user_id = ? AND status = 'active'", userId) ?? null; }
+
+  /** O último login desta pessoa foi recusado por limite: qual (sessões ou cadastro) e quais aparelhos (ou null). */
+  limit(userId: string): { kind: 'session_limit' | 'device_limit'; devices: ConnectedDevice[]; canRetry: boolean } | null {
+    const l = this.limits.get(userId);
+    if (!l || Date.now() - l.at >= 15 * 60_000) return null;
+    const p = this.pending.get(userId);
+    return { kind: l.kind, devices: l.devices, canRetry: !!p && Date.now() - p.at < PENDING_MS };
+  }
+
+  /**
+   * Conecta esta pessoa a uma conta do World: cria a conta ou entra com ela, registra este computador e liga ao perfil
+   * local. `sealWs`: o workspace cuja chave (a da pessoa) cifra as chaves do aparelho e a sessão.
+   */
+  async connect(userId: string, sealWs: string, account: AccountInput, choice: DeviceChoice = {}): Promise<LinkRow> {
+    checkAccountInput(account);
+    const email = account.email.trim().toLowerCase();
+    const body = account.kind === 'signup' ? { email, password: account.password, displayName: account.displayName!.trim().slice(0, 80) } : { email, password: account.password };
+    const r = await this.client.call<AccountReply>('POST', account.kind === 'signup' ? '/v1/accounts' : '/v1/accounts/login', body);
+    return this.registerDevice(userId, sealWs, { idToken: r.idToken, email, emailVerified: r.emailVerified === true }, choice);
+  }
+
+  /** Depois de um limite de aparelhos: tenta de novo liberando o aparelho escolhido, sem pedir a senha outra vez. */
+  async retryDevice(userId: string, choice: DeviceChoice): Promise<LinkRow> {
+    const p = this.pending.get(userId);
+    if (!p || Date.now() - p.at >= PENDING_MS) { this.pending.delete(userId); throw new HttpError(409, 'world_login_again', 'Entre de novo com o e-mail e a senha do Ergon World.'); }
+    return this.registerDevice(userId, p.sealWs, p, choice);
+  }
+
+  private async registerDevice(userId: string, sealWs: string, acc: { idToken: string; email: string; emailVerified: boolean }, choice: DeviceChoice): Promise<LinkRow> {
+    for (const d of [choice.endSessionsOf, choice.replaceDeviceId]) if (d !== undefined && !/^dev_[a-f0-9]{32}$/.test(d)) throw new HttpError(400, 'invalid', 'aparelho inválido');
+    const ed = crypto.generateKeyPairSync('ed25519'); const x = crypto.generateKeyPairSync('x25519');
+    const pub = (k: crypto.KeyObject) => k.export({ format: 'der', type: 'spki' }).toString('base64');
+    const priv = (k: crypto.KeyObject) => k.export({ format: 'der', type: 'pkcs8' }).toString('base64');
+    let reg: { deviceId: string; challenge: string; accountId: string };
+    let conf: { sessionToken: string };
+    try {
+      reg = await this.client.call('POST', '/v1/devices/register', {
+        idToken: acc.idToken, installationId: installationId(this.db), name: `${os.hostname().slice(0, 40)} · Ergon`, publicKey: pub(ed.publicKey), syncPublicKey: pub(x.publicKey),
+        ...(choice.endSessionsOf ? { endSessionsOf: choice.endSessionsOf } : {}), ...(choice.replaceDeviceId ? { replaceDeviceId: choice.replaceDeviceId } : {}) });
+      const sig = crypto.sign(null, Buffer.from(reg.challenge), ed.privateKey).toString('base64');
+      conf = await this.client.call('POST', '/v1/devices/confirm', { deviceId: reg.deviceId, signature: sig });
+    } catch (e) {
+      // limite de aparelhos com sessão: guarda quais estão conectados para a pessoa escolher qual encerrar
+      const d = (e as { detail?: { devices?: ConnectedDevice[] } }).detail;
+      const code = (e as HttpError).code;
+      if ((code === 'session_limit' || code === 'device_limit') && Array.isArray(d?.devices)) {
+        this.limits.set(userId, { at: Date.now(), kind: code, devices: d.devices.slice(0, 10) });
+        if (!this.pending.has(userId)) this.pending.set(userId, { at: Date.now(), ...acc, sealWs });
+      }
+      throw e;
+    }
+    this.limits.delete(userId); this.pending.delete(userId);
+    await this.client.call('POST', '/v1/bindings', { localPersonId: userId }, conf.sessionToken);
+    const au = await this.client.call<{ authorizedUntil: string; account?: { email: string | null }; workspaces?: unknown[] }>('POST', '/v1/authorize', {}, conf.sessionToken);
+    const keys = JSON.stringify({ ed25519: priv(ed.privateKey), x25519: priv(x.privateKey), ed25519Public: pub(ed.publicKey), x25519Public: pub(x.publicKey) });
+    this.db.run(`INSERT INTO world_links (user_id, workspace_id, account_id, device_id, account_email, email_verified, device_keys, session_token, authorized_until, entitlement, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+      ON CONFLICT (user_id) DO UPDATE SET workspace_id = excluded.workspace_id, account_id = excluded.account_id, device_id = excluded.device_id, account_email = excluded.account_email,
+        email_verified = excluded.email_verified, device_keys = excluded.device_keys, session_token = excluded.session_token, authorized_until = excluded.authorized_until,
+        entitlement = excluded.entitlement, bound_workspace_id = NULL, status = 'active', updated_at = excluded.updated_at`,
+    userId, sealWs, reg.accountId, reg.deviceId, au.account?.email ?? acc.email, acc.emailVerified ? 1 : 0, this.db.seal(sealWs, keys), this.db.seal(sealWs, conf.sessionToken), au.authorizedUntil,
+    JSON.stringify(au.workspaces ?? []), nowIso(), nowIso());
+    return this.get(userId)!;
+  }
+
+  /** Sessão do aparelho da pessoa (decifrada só se a parte dela estiver aberta). */
+  session(userId: string): string | null {
+    const l = this.get(userId);
+    if (!l || l.session_token.startsWith(SEALED_PREFIX) || l.session_token === CLOSED_VALUE) return null;
+    return l.session_token;
+  }
+
+  /** O workspace local ligado ao World desta pessoa (só ele tem o plano e sincroniza), ou null. */
+  bound(userId: string): string | null { return this.get(userId)?.bound_workspace_id ?? null; }
+  setBound(userId: string, ws: string | null): void { this.db.run('UPDATE world_links SET bound_workspace_id = ?, updated_at = ? WHERE user_id = ?', ws, nowIso(), userId); }
+  markEmailVerified(userId: string): void { this.db.run('UPDATE world_links SET email_verified = 1, updated_at = ? WHERE user_id = ?', nowIso(), userId); }
+
+  /** Renova o resumo do plano com o World (só leitura); aparelho revogado no World → vínculo local cai. */
+  async renew(userId: string): Promise<string | null> {
+    const s = this.session(userId);
+    if (!s) return null;
+    try {
+      const au = await this.client.call<{ authorizedUntil: string; workspaces?: unknown[] }>('POST', '/v1/authorize', {}, s);
+      this.db.run('UPDATE world_links SET authorized_until = ?, entitlement = ?, updated_at = ? WHERE user_id = ?', au.authorizedUntil, JSON.stringify(au.workspaces ?? []), nowIso(), userId);
+      return au.authorizedUntil;
+    } catch (e) {
+      if ((e as HttpError).status === 401) this.db.run("UPDATE world_links SET status = 'revoked', authorized_until = NULL, updated_at = ? WHERE user_id = ?", nowIso(), userId);
+      throw e;
+    }
+  }
+
+  /**
+   * Desconecta deste computador: o aparelho sai da conta (se houver rede) e o vínculo local some, com a ligação do
+   * workspace e o estado do Sync dele. Os dados locais ficam como estão.
+   */
+  async unlink(userId: string): Promise<void> {
+    const l = this.db.get<LinkRow>('SELECT * FROM world_links WHERE user_id = ?', userId); const s = this.session(userId);
+    if (l && s && l.status === 'active') await this.client.call('DELETE', `/v1/devices/${l.device_id}`, undefined, s).catch(() => undefined); // offline: o aparelho fica para revogar no outro aparelho
+    if (l?.bound_workspace_id) forgetWorkspace(this.db, l.bound_workspace_id);
+    this.db.run('DELETE FROM world_links WHERE user_id = ?', userId);
+    this.limits.delete(userId); this.pending.delete(userId);
+  }
+}
+
+/** Tira do workspace local o que o ligava ao World (o id do workspace World e o estado do Sync). Dados locais ficam. */
+export function forgetWorkspace(db: Db, ws: string): void {
+  for (const t of ['world_sync_conflicts', 'world_sync_records', 'world_sync', 'world_workspace_ids']) db.run(`DELETE FROM ${t} WHERE workspace_id = ?`, ws);
+}

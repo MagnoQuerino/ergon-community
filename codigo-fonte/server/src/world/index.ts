@@ -1,0 +1,335 @@
+/**
+ * Cliente do Ergon World no servidor local. Sem endereço do World (ERGON_WORLD_URL ou DEFAULT_WORLD_URL), nada disto
+ * liga e a instalação segue 100% local. Com ele, a pessoa pode conectar uma conta do World (nova ou que já existe) e
+ * escolher UM workspace local para ligar ao workspace dela no World: só esse tem o plano (créditos, Ergon AI, Jobs) e
+ * sincroniza, cifrado no aparelho. Os outros workspaces, mundos e agentes continuam locais, como antes.
+ *
+ * O acesso local não depende do World: entrar, editar e as tarefas de fundo funcionam com ou sem conta, com ou sem
+ * rede. Sem rede, só os serviços do World esperam (o Sync continua depois).
+ */
+import type { FastifyRequest } from 'fastify';
+import type { Config } from '../config.ts';
+import { HttpError } from '../lib/util.ts';
+import { throttle } from '../security/factors.ts';
+import { checkCredentials, defaultWorkspace } from '../services/auth.ts';
+import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
+import { loadWorldConfig, type WorldConfig } from './config.ts';
+import { forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, type AccountInput, type DeviceChoice } from './link.ts';
+import { LocalSync } from './sync-local.ts';
+import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
+
+/** O que o World responde nas contas, em frases curtas (a mensagem dele pode vir em outro idioma). */
+const ACCOUNT_ERRORS: Record<string, [number, string]> = {
+  invalid_credentials: [400, 'E-mail ou senha incorretos.'],
+  email_in_use: [409, 'Já existe uma conta com este e-mail. Use Entrar.'],
+  invalid_request: [400, 'Confira o e-mail e a senha (10 caracteres ou mais).'],
+  too_many_attempts: [429, 'Muitas tentativas. Espere um pouco e tente de novo.'],
+  account_locked: [423, 'Conta bloqueada por enquanto. Tente de novo mais tarde.'],
+  email_unconfigured: [503, 'Envio de e-mail indisponível agora.'],
+  invalid_code: [400, 'Código inválido ou vencido.'],
+  session_limit: [409, 'Sua conta já está conectada em 2 aparelhos. Escolha um para encerrar a sessão.'],
+  device_limit: [409, 'Sua conta já tem 4 aparelhos cadastrados. Escolha um para remover.'],
+};
+/** Erro do World nas rotas de conta, sem 401 (a tela local trataria como sessão local encerrada). */
+function accountError(e: unknown): never {
+  const code = (e as HttpError).code;
+  const m = ACCOUNT_ERRORS[code];
+  if (m) throw Object.assign(new HttpError(m[0], code, m[1]), { detail: (e as { detail?: unknown }).detail });
+  if ((e as HttpError).status === 401) throw new HttpError(400, code ?? 'world_error', 'O Ergon World recusou o pedido.');
+  throw e;
+}
+
+const str = (v: unknown, max = 200): string | undefined => (typeof v === 'string' && v.length <= max ? v : undefined);
+const DEVICE = /^dev_[a-f0-9]{32}$/;
+const SWS = /^sws_[a-f0-9]{32}$/;
+
+export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch): WorldModule {
+  const wcfg: WorldConfig = loadWorldConfig(env);
+  const client = new WorldClient(wcfg, fetchImpl);
+  let links: WorldLinks | null = null;
+  return {
+    status(): WorldStatus {
+      return { available: true, configured: !!wcfg.url };
+    },
+    async register(h: WorldHost) {
+      const { app, db } = h;
+      if (wcfg.url) {
+        migrateWorldLocal(db);
+        links = new WorldLinks(db, wcfg, client);
+      }
+      const L = (): WorldLinks => { if (!links) throw new HttpError(503, 'world_unconfigured', 'O Ergon World não está configurado nesta instalação.'); return links; };
+      const sessionOf = (userId: string): string => {
+        const s = L().session(userId);
+        if (!s) throw new HttpError(428, 'world_link_required', 'Conecte ao Ergon World para usar este recurso.');
+        return s;
+      };
+      /** os workspaces locais de que a pessoa é dona: só um deles pode ser ligado ao World */
+      const ownWorkspaces = (userId: string) => db.all<{ id: string; name: string }>(
+        "SELECT w.id, w.name FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? AND m.role = 'owner' ORDER BY w.created_at", userId);
+
+      app.get('/api/world/status', async (req) => {
+        const a = h.auth(req);
+        const l = links?.get(a.userId) ?? null;
+        const bound = l?.bound_workspace_id ?? null;
+        return {
+          available: true, configured: !!wcfg.url, service: wcfg.url ? new URL(wcfg.url).origin : null,
+          me: { displayName: a.displayName },
+          link: l ? {
+            accountEmail: l.account_email, emailVerified: !!l.email_verified, deviceId: l.device_id, refreshedAt: l.authorized_until,
+            workspaces: l.entitlement ? JSON.parse(l.entitlement) : [],
+            boundWorkspaceId: bound, boundWorkspaceName: bound ? db.get<{ name: string }>('SELECT name FROM workspaces WHERE id = ?', bound)?.name ?? null : null,
+            currentIsBound: !!bound && bound === a.workspaceId,
+          } : null,
+          localWorkspaces: ownWorkspaces(a.userId).map((w) => ({ ...w, current: w.id === a.workspaceId })),
+          // login recusado pelo limite de aparelhos: quais estão conectados (para escolher qual encerrar)
+          deviceLimit: links?.limit(a.userId) ?? null,
+        };
+      });
+      if (!wcfg.url) return; // sem World: nada além do estado
+
+      // ---------------------------------------------------------------- conta do World
+      /**
+       * Conectar: conta nova (e-mail, nome, senha), conta que já existe (e-mail e senha) ou conta nova com as mesmas
+       * credenciais do Ergon (o nome local, um e-mail e a senha local, conferida aqui antes de ir ao World).
+       */
+      app.post('/api/world/connect', async (req) => {
+        const a = h.auth(req);
+        const b = (req.body ?? {}) as Record<string, unknown>;
+        const mode = b.mode; const email = str(b.email, 254)?.trim() ?? '';
+        const choice: DeviceChoice = { endSessionsOf: str(b.endSessionsOf, 40), replaceDeviceId: str(b.replaceDeviceId, 40) };
+        let account: AccountInput;
+        if (mode === 'local') {
+          const pw = str(b.localPassword, 1024) ?? '';
+          throttle.check(`world-local:${a.userId}`);
+          try { await checkCredentials(db, a.username, pw, cfg.kdf); }
+          catch { throttle.fail(`world-local:${a.userId}`); throw new HttpError(400, 'invalid_local_password', 'Senha do Ergon incorreta.'); }
+          throttle.ok(`world-local:${a.userId}`);
+          if (pw.length < 10) throw new HttpError(400, 'password_short', 'A senha do Ergon tem menos de 10 caracteres. Crie uma conta com outra senha.');
+          account = { kind: 'signup', email, password: pw, displayName: a.displayName };
+        } else if (mode === 'signup') account = { kind: 'signup', email, password: str(b.password, 1024) ?? '', displayName: str(b.displayName, 80) ?? '' };
+        else if (mode === 'login') account = { kind: 'login', email, password: str(b.password, 1024) ?? '' };
+        else throw new HttpError(400, 'invalid', 'Escolha criar uma conta ou entrar.');
+        if (L().get(a.userId)) throw new HttpError(409, 'world_already_linked', 'Este perfil já está conectado ao Ergon World.');
+        const l = await L().connect(a.userId, defaultWorkspace(db, a.userId), account, choice).catch(accountError);
+        return { ok: true, accountEmail: l.account_email, emailVerified: !!l.email_verified };
+      });
+      /** Conta no limite de aparelhos: tenta de novo liberando o escolhido (sem digitar a senha outra vez). */
+      app.post('/api/world/connect/device', async (req) => {
+        const a = h.auth(req); const b = (req.body ?? {}) as Record<string, unknown>;
+        const choice: DeviceChoice = { endSessionsOf: str(b.endSessionsOf, 40), replaceDeviceId: str(b.replaceDeviceId, 40) };
+        if (!choice.endSessionsOf && !choice.replaceDeviceId) throw new HttpError(400, 'invalid', 'Escolha um aparelho.');
+        const l = await L().retryDevice(a.userId, choice).catch(accountError);
+        return { ok: true, accountEmail: l.account_email, emailVerified: !!l.email_verified };
+      });
+      app.post('/api/world/account/email/verify', async (req) => {
+        const a = h.auth(req); const l = L().get(a.userId);
+        const code = str((req.body as { code?: unknown } | undefined)?.code, 20)?.trim();
+        if (!l?.account_email) throw new HttpError(428, 'world_link_required', 'Conecte ao Ergon World primeiro.');
+        if (!code) throw new HttpError(400, 'invalid_code', 'Informe o código.');
+        await client.call('POST', '/v1/accounts/email/verify', { email: l.account_email, code }).catch(accountError);
+        L().markEmailVerified(a.userId);
+        return { emailVerified: true };
+      });
+      app.post('/api/world/account/email/resend', async (req) => {
+        const l = L().get(h.auth(req).userId);
+        if (!l?.account_email) throw new HttpError(428, 'world_link_required', 'Conecte ao Ergon World primeiro.');
+        await client.call('POST', '/v1/accounts/email/resend', { email: l.account_email }).catch(accountError);
+        return { ok: true };
+      });
+      app.post('/api/world/account/password/forgot', async (req) => {
+        h.auth(req);
+        const email = str((req.body as { email?: unknown } | undefined)?.email, 254)?.trim();
+        if (!email) throw new HttpError(400, 'invalid_email', 'E-mail inválido.');
+        await client.call('POST', '/v1/accounts/password/forgot', { email }).catch(accountError);
+        return { ok: true };
+      });
+      app.post('/api/world/account/password/reset', async (req) => {
+        h.auth(req); const b = (req.body ?? {}) as Record<string, unknown>;
+        const email = str(b.email, 254)?.trim(); const code = str(b.code, 20)?.trim(); const password = str(b.password, 1024);
+        if (!email || !code || !password) throw new HttpError(400, 'invalid', 'Informe o e-mail, o código e a senha nova.');
+        if (password.length < 10) throw new HttpError(400, 'password_short', 'A senha precisa de 10 caracteres ou mais.');
+        await client.call('POST', '/v1/accounts/password/reset', { email, code, password }).catch(accountError);
+        return { ok: true };
+      });
+      app.post('/api/world/unlink', async (req) => { await L().unlink(h.auth(req).userId); return { ok: true }; });
+      app.post('/api/world/refresh', async (req) => ({ refreshedAt: await L().renew(h.auth(req).userId) }));
+
+      // ---------------------------------------------------------------- qual workspace local é o do World
+      const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: h.limits });
+      /**
+       * Liga UM workspace local (de que a pessoa é dona) ao World: a um workspace World novo ou a um que já existe na
+       * conta (criado em outro computador; a sincronização dele entra depois, com a chave).
+       */
+      app.post('/api/world/bind', async (req) => {
+        const a = h.auth(req); const b = (req.body ?? {}) as Record<string, unknown>;
+        const ws = str(b.workspaceId, 64) ?? a.workspaceId; const sws = b.syncWorkspaceId;
+        if (!ownWorkspaces(a.userId).some((w) => w.id === ws)) throw new HttpError(403, 'not_owner', 'Só um workspace seu pode ser ligado ao Ergon World.');
+        const cur = L().bound(a.userId);
+        if (cur && cur !== ws) throw new HttpError(409, 'already_bound', 'Outro workspace seu já está ligado ao Ergon World. Desligue-o antes.');
+        if (sws !== undefined && sws !== null && (typeof sws !== 'string' || !SWS.test(sws))) throw new HttpError(400, 'invalid', 'workspace do World inválido');
+        sessionOf(a.userId);
+        const known = sync.worldId(ws);
+        if (typeof sws === 'string' && sws !== known) { forgetWorkspace(db, ws); sync.adopt(ws, sws); }
+        else if (!known) await sync.ensureWorld(a.userId, ws);
+        L().setBound(a.userId, ws);
+        return { boundWorkspaceId: ws, syncWorkspaceId: sync.worldId(ws) };
+      });
+      /** Desliga o workspace do World neste computador: ele volta a ser só local (os dados ficam; o World guarda o dele). */
+      app.delete('/api/world/bind', async (req) => {
+        const a = h.auth(req); const ws = L().bound(a.userId);
+        if (ws) { forgetWorkspace(db, ws); L().setBound(a.userId, null); }
+        return { ok: true };
+      });
+      /** O workspace World do workspace atual, só se ele for o ligado ao World pela pessoa (os outros ficam locais). */
+      const worldWs = (a: { userId: string; workspaceId: string }): string | null => (links?.bound(a.userId) === a.workspaceId ? sync.worldId(a.workspaceId) : null);
+      const boundWs = (a: { userId: string; workspaceId: string }): string => {
+        if (links?.bound(a.userId) !== a.workspaceId) throw new HttpError(409, 'world_not_bound', 'Este workspace não está ligado ao Ergon World.');
+        return a.workspaceId;
+      };
+
+      // ---------------------------------------------------------------- proxies do World com a sessão da própria pessoa
+      app.get('/api/world/catalog', async () => client.call('GET', '/v1/catalog'));
+      app.get('/api/world/devices', async (req) => client.call('GET', '/v1/devices', undefined, sessionOf(h.auth(req).userId)));
+      app.post('/api/world/devices/:id/end-sessions', async (req) => {
+        const id = String((req.params as { id: string }).id);
+        if (!DEVICE.test(id)) throw new HttpError(400, 'invalid', 'aparelho inválido');
+        return client.call('POST', `/v1/devices/${id}/end-sessions`, {}, sessionOf(h.auth(req).userId));
+      });
+      // ---------------------------------------------------------------- plano do workspace World ligado
+      const NONE = { workspaceId: null, role: 'owner', entitlement: { status: 'none', plan_sku: null, tier: null, people: 0, job_slots: 0, effective_until: null, grace_until: null }, seatsUsed: 0, subscription: null, items: [], invoices: [] };
+      app.get('/api/world/billing', async (req) => {
+        const a = h.auth(req); const w = worldWs(a);
+        return w ? client.call('GET', `/v1/billing/state?workspace=${w}`, undefined, sessionOf(a.userId)) : NONE;
+      });
+      // Central de Trabalho, ala "Na nuvem": os Jobs do workspace no World, lidos aqui (a sessão não vai à tela), com
+      // frescor próprio e no máximo uma leitura a cada 20 s por pessoa e workspace; falha não vira zero
+      const jobsCache = new Map<string, { at: number; pool: RemotePool }>();
+      app.get('/api/world/jobs', async (req): Promise<RemotePool | RemoteUnavailable> => {
+        const a = h.auth(req); const key = `${a.userId}|${a.workspaceId}`; const hit = jobsCache.get(key);
+        if (hit && Date.now() - hit.at < 20_000) return hit.pool;
+        const last = hit ? { ...hit.pool, stale: true } : null;
+        const w = worldWs(a);
+        if (!w) return { available: false, reason: 'sem_workspace', message: 'Este workspace não está ligado ao Ergon World.', last: null };
+        let session: string;
+        try { session = sessionOf(a.userId); } catch { return { available: false, reason: 'sem_conta', message: 'Conecte ao Ergon World para ver os Jobs.', last }; }
+        try {
+          const pool = normalizeJobs(await client.call<RemoteJobsRaw>('GET', `/v1/jobs?workspace=${encodeURIComponent(w)}`, undefined, session));
+          jobsCache.set(key, { at: Date.now(), pool });
+          return pool;
+        } catch (e) {
+          const off = (e as { code?: string }).code === 'world_offline';
+          return { available: false, reason: off ? 'offline' : 'erro', message: off ? 'Sem conexão com o Ergon World agora.' : 'O Ergon World não respondeu à leitura dos Jobs.', last };
+        }
+      });
+      // créditos (só do workspace), extrato, recarga automática (o dono), teto por pessoa (o gestor) e transferência
+      app.get('/api/world/wallet', async (req) => {
+        const a = h.auth(req); const w = worldWs(a);
+        return w ? client.call('GET', `/v1/wallet?workspace=${w}`, undefined, sessionOf(a.userId)) : { available: '0.000000', reserved: '0.000000', lots: [] };
+      });
+      app.get('/api/world/wallet/statement', async (req) => {
+        const a = h.auth(req); const w = worldWs(a); const cur = (req.query as { cursor?: string }).cursor;
+        return w ? client.call('GET', `/v1/wallet/statement?workspace=${w}${cur ? `&cursor=${encodeURIComponent(cur)}` : ''}`, undefined, sessionOf(a.userId)) : { next: null, entries: [] };
+      });
+      const needWorld = (a: { userId: string; workspaceId: string }): string => {
+        const w = worldWs(a);
+        if (!w) throw new HttpError(409, 'world_not_bound', 'Este workspace não está ligado ao Ergon World.');
+        return w;
+      };
+      app.put('/api/world/wallet/autotopup', async (req) => {
+        const a = h.owner(req); const w = needWorld(a);
+        return client.call('PUT', `/v1/wallet/autotopup?workspace=${w}`, req.body ?? {}, sessionOf(a.userId));
+      });
+      app.post('/api/world/wallet/transfer', async (req) => {
+        const a = h.owner(req); const w = needWorld(a);
+        const b = (req.body ?? {}) as { toWorkspaceId?: unknown; dracmas?: unknown; idempotencyKey?: unknown };
+        if (typeof b.toWorkspaceId !== 'string' || typeof b.dracmas !== 'string' || typeof b.idempotencyKey !== 'string') throw new HttpError(400, 'invalid', 'destino, valor e chave da intenção obrigatórios');
+        return client.call('POST', '/v1/wallet/transfers', { fromWorkspaceId: w, toWorkspaceId: b.toWorkspaceId, dracmas: b.dracmas, idempotencyKey: b.idempotencyKey }, sessionOf(a.userId));
+      });
+      app.get('/api/world/budgets', async (req) => {
+        const a = h.auth(req); const w = worldWs(a);
+        return w ? client.call('GET', `/v1/workspaces/${w}/budgets`, undefined, sessionOf(a.userId)) : { manager: false, period: null, members: [] };
+      });
+      app.put('/api/world/budgets/:account', async (req) => {
+        const a = h.auth(req); const w = needWorld(a); const acc = String((req.params as { account: string }).account);
+        if (!/^acc_[a-f0-9]{32}$/.test(acc)) throw new HttpError(400, 'invalid', 'pessoa inválida');
+        const cap = (req.body as { capDracmas?: unknown } | undefined)?.capDracmas;
+        if (cap !== null && typeof cap !== 'string') throw new HttpError(400, 'invalid', 'teto em Dracmas (texto) ou livre (null)');
+        return client.call('PUT', `/v1/workspaces/${w}/budgets/${acc}`, { capDracmas: cap }, sessionOf(a.userId));
+      });
+      app.post('/api/world/billing/checkout', async (req) => {
+        const b = req.body as { sku?: string; idempotencyKey?: string };
+        if (typeof b?.sku !== 'string' || typeof b.idempotencyKey !== 'string') throw new HttpError(400, 'invalid', 'sku e chave da intenção obrigatórios');
+        const back = `${cfg.publicUrl}/?world=`;
+        // plano ou recarga: são do workspace ligado ao World; quem compra é a pessoa dona
+        const a = h.owner(req);
+        const body = { sku: b.sku, idempotencyKey: b.idempotencyKey, successUrl: `${back}pago`, cancelUrl: `${back}cancelado`, workspaceId: needWorld(a) };
+        return client.call('POST', '/v1/billing/checkout', body, sessionOf(a.userId));
+      });
+      app.post('/api/world/billing/portal', async (req) => client.call('POST', '/v1/billing/portal', { returnUrl: `${cfg.publicUrl}/?world=portal` }, sessionOf(h.auth(req).userId)));
+      const change = (path: string) => async (req: FastifyRequest) => {
+        const a = h.owner(req); const w = needWorld(a);
+        const b = (req.body ?? {}) as Record<string, unknown>;
+        const pick = Object.fromEntries(['plan', 'seats', 'jobPacks', 'prorationDate', 'idempotencyKey'].filter((k) => b[k] !== undefined).map((k) => [k, b[k]]));
+        return client.call('POST', path, { ...pick, workspaceId: w }, sessionOf(a.userId));
+      };
+      app.post('/api/world/billing/change/preview', change('/v1/billing/change/preview'));
+      app.post('/api/world/billing/change/confirm', change('/v1/billing/change/confirm'));
+      app.post('/api/world/billing/cancel', change('/v1/billing/cancel'));
+
+      // ---------------------------------------------------------------- Ergon AI em um clique
+      // credencial do World (por aparelho+pessoa) → endpoint próprio "ergon-ai" na equipe de IA DA PRÓPRIA PESSOA; a
+      // conta de IA que ela já tenha continua lá (o Ergon AI entra ao lado; "como padrão" só se ela escolher)
+      const aiBase = (env.ERGON_WORLD_AI_URL || `${wcfg.url}/v1/ai`).replace(/\/+$/, '');
+      app.post('/api/world/ai/connect', async (req) => {
+        const a = h.auth(req);
+        const makeDefault = (req.body as { makeDefault?: unknown } | undefined)?.makeDefault === true;
+        const w = needWorld(a);
+        const control = h.controlFor(a.workspaceId);
+        if (!control?.ergonAi) throw new HttpError(503, 'motor_unavailable', 'A sua equipe de IA não está ligada agora; tente de novo em instantes.');
+        const cred = await client.call<{ token: string; expiresAt: string }>('POST', '/v1/ai/credentials', { localPersonId: a.userId, workspaceId: w }, sessionOf(a.userId));
+        const list = await client.call<{ data: Array<{ id: string }> }>('GET', '/v1/ai/models', undefined, cred.token);
+        const models = list.data.map((m) => m.id);
+        if (!models.length) throw new HttpError(503, 'ergon_ai_unavailable', 'Nenhum modelo do Ergon AI disponível agora.');
+        await control.ergonAi({ baseUrl: aiBase, apiKey: cred.token, models, makeDefault });
+        return { ok: true, models, default: makeDefault, expiresAt: cred.expiresAt };
+      });
+      app.delete('/api/world/ai', async (req) => {
+        const a = h.auth(req);
+        await h.controlFor(a.workspaceId)?.removeErgonAi?.().catch(() => undefined);
+        await client.call('DELETE', '/v1/ai/credentials', undefined, sessionOf(a.userId)).catch(() => undefined);
+        return { ok: true };
+      });
+      app.get('/api/world/ai/usage', async (req) => client.call('GET', '/v1/ai/usage', undefined, sessionOf(h.auth(req).userId)));
+
+      // ---------------------------------------------------------------- World Sync: só o workspace ligado
+      const phrase = (req: FastifyRequest) => { const v = (req.body as { recoveryPhrase?: unknown } | undefined)?.recoveryPhrase; return typeof v === 'string' && v.trim().length >= 20 ? v.trim() : undefined; };
+      app.get('/api/world/sync', async (req) => {
+        const a = h.auth(req);
+        return links?.bound(a.userId) === a.workspaceId ? { bound: true, ...sync.status(a.workspaceId) } : { bound: false, enabled: false };
+      });
+      app.post('/api/world/sync/enable', async (req) => { const a = h.owner(req); return sync.enable(a.userId, boundWs(a), phrase(req)); });
+      app.post('/api/world/sync/join', async (req) => {
+        const a = h.owner(req); const ws = boundWs(a);
+        const id = String((req.body as { syncWorkspaceId?: string })?.syncWorkspaceId ?? sync.worldId(ws) ?? '');
+        if (!SWS.test(id)) throw new HttpError(400, 'invalid', 'workspace do World inválido');
+        return sync.join(a.userId, ws, id, phrase(req));
+      });
+      app.post('/api/world/sync/share', async (req) => { const a = h.owner(req); return sync.share(a.userId, boundWs(a)); });
+      app.post('/api/world/sync/push', async (req) => { const a = h.owner(req); return sync.push(a.userId, boundWs(a)); });
+      app.post('/api/world/sync/pull', async (req) => { const a = h.owner(req); return sync.pull(a.userId, boundWs(a), (req.body as { apply?: unknown } | undefined)?.apply === true); });
+      app.get('/api/world/sync/conflicts', async (req) => { const a = h.owner(req); return links?.bound(a.userId) === a.workspaceId ? sync.conflicts(a.userId, a.workspaceId) : []; });
+      app.post('/api/world/sync/conflicts/:id', async (req) => {
+        const a = h.owner(req); const keep = (req.body as { keep?: unknown } | undefined)?.keep;
+        if (keep !== 'mine' && keep !== 'theirs') throw new HttpError(400, 'invalid', 'escolha manter a sua versão ou ficar com a do outro aparelho');
+        return sync.resolve(a.userId, boundWs(a), String((req.params as { id: string }).id), keep);
+      });
+
+      // renova sozinha o resumo do plano de quem está conectado (uma pessoa por vez, sem pressa); sem rede, só espera
+      const timer = setInterval(() => {
+        for (const r of db.all<{ user_id: string }>("SELECT user_id FROM world_links WHERE status = 'active'")) void L().renew(r.user_id).catch(() => undefined);
+      }, wcfg.refreshSeconds * 1000);
+      timer.unref();
+      app.addHook('onClose', async () => clearInterval(timer));
+    },
+  };
+}

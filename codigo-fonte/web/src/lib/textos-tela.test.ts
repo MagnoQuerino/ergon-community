@@ -140,8 +140,7 @@ const arquivos = (d: string): string[] => fs.readdirSync(d, { withFileTypes: tru
   .flatMap((e) => e.isDirectory() ? arquivos(path.join(d, e.name)) : /\.tsx?$/.test(e.name) && !e.name.endsWith('.test.ts') ? [path.join(d, e.name)] : []);
 /** o código sem os comentários (de bloco, de JSX e de linha; um "//" dentro de endereço também corta, o que só esconde texto) */
 const semComentarios = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/(^|[^:'"`\\])\/\/.*$/, '$1')).join('\n');
-// o World não vai na cópia Community: lá o arquivo não existe e não há o que conferir
-const codigo = (rel: string) => (rel.includes('/world/') && !fs.existsSync(path.join(raiz, rel)) ? '' : semComentarios(fs.readFileSync(path.join(raiz, rel), 'utf8')));
+const codigo = (rel: string) => semComentarios(fs.readFileSync(path.join(raiz, rel), 'utf8'));
 
 test('T3: nenhuma tela usa os nomes proibidos (bastidores e nomes privados)', () => {
   const achados: string[] = [];

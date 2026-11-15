@@ -22,7 +22,7 @@ import { MusicCreditsBlock } from '../components/MusicButton.tsx';
 import { ArrumarField, CotaLinhas, MemoriaField, PausaControle, RaciocinioField, ReservaCard, useAjustes } from '../components/AjustesEquipe.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
 
-// módulo opcional (views/world): a Community não traz essa pasta
+// cliente do Ergon World (views/world), carregado sob demanda
 const worldMod = Object.values(import.meta.glob<{ default: ComponentType }>('./world/WorldPanel.tsx'))[0];
 const WorldPanel = worldMod ? lazy(worldMod) : null;
 
