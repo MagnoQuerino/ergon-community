@@ -6,23 +6,12 @@ import { fmtCompacto, fmtDataHora, fmtHora, fmtMoeda, fmtNumero, tn, useIdioma, 
 import { clearResourceCache, prefetchResources, startLive, useLiveStatus, useResource } from './lib/live.ts';
 import type { AppState, AuthState, Me, Usage, VersionInfo, View } from './lib/types.ts';
 import { AuthFlow, AutoUnlockPrompt, LockOverlay, PersonOpenScreen, ProtectScreen, ReauthDialog } from './components/AuthFlow.tsx';
-import { ErgonLogo, Splash } from './brand/Brand.tsx';
-import { DecisionsPanel } from './components/DecisionsPanel.tsx';
+import { ErgonLogo, Loading, Splash } from './brand/Brand.tsx';
 import { Icon } from './components/Icon.tsx';
 import { PausaControle } from './components/AjustesEquipe.tsx';
 import { fraseCurtaDaCota } from './lib/ajustes.ts';
-import { AgentWindow, type AgentHead } from './components/AgentWindow.tsx';
-import { AgentesView } from './views/AgentesView.tsx';
+import type { AgentHead } from './components/AgentWindow.tsx';
 import { AmbienteView } from './views/AmbienteView.tsx';
-import { AtividadeView } from './views/OtherViews.tsx';
-import { DocumentosView } from './views/DocumentosView.tsx';
-import { RotinasView } from './views/RotinasView.tsx';
-import { ConexoesView } from './views/ConexoesView.tsx';
-import { ConfiguracaoView } from './views/ConfiguracaoView.tsx';
-import { EquipeView } from './views/EquipeView.tsx';
-import { TarefasView } from './views/TarefasView.tsx';
-import { FocoView } from './views/FocoView.tsx';
-import { AjudaView } from './views/AjudaView.tsx';
 import { Onboarding } from './components/Onboarding.tsx';
 import { Tour, type TourStep } from './components/Tour.tsx';
 import { ViewTip } from './components/Tips.tsx';
@@ -34,9 +23,45 @@ import { abrirBalao, useBalao } from './lib/balao.ts';
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
 import { useSurface } from './lib/surface.ts';
-import { CommandPalette, type CardHit, type PaletteItem } from './components/CommandPalette.tsx';
+
+// As outras áreas chegam sob demanda (a Cidade, a primeira tela, já vem no pacote principal): o app abre mais leve, e
+// logo depois de abrir, com o navegador ocioso, todas são buscadas em segundo plano para a troca de área ser imediata.
+const AREAS = {
+  agentes: () => import('./views/AgentesView.tsx'), atividade: () => import('./views/OtherViews.tsx'),
+  documentos: () => import('./views/DocumentosView.tsx'), rotinas: () => import('./views/RotinasView.tsx'),
+  conexoes: () => import('./views/ConexoesView.tsx'), configuracao: () => import('./views/ConfiguracaoView.tsx'),
+  equipe: () => import('./views/EquipeView.tsx'), tarefas: () => import('./views/TarefasView.tsx'),
+  foco: () => import('./views/FocoView.tsx'), ajuda: () => import('./views/AjudaView.tsx'),
+  // e as janelas que abrem por cima de qualquer área
+  agente: () => import('./components/AgentWindow.tsx'), card: () => import('./components/TaskDetail.tsx'),
+  decisoes: () => import('./components/DecisionsPanel.tsx'), paleta: () => import('./components/CommandPalette.tsx'),
+};
+function area<K extends string, M extends Record<K, ComponentType<any>>>(load: () => Promise<M>, nome: K) {
+  return lazy(async () => ({ default: (await load())[nome] }));
+}
+const AgentesView = area(AREAS.agentes, 'AgentesView');
+const AtividadeView = area(AREAS.atividade, 'AtividadeView');
+const DocumentosView = area(AREAS.documentos, 'DocumentosView');
+const RotinasView = area(AREAS.rotinas, 'RotinasView');
+const ConexoesView = area(AREAS.conexoes, 'ConexoesView');
+const ConfiguracaoView = area(AREAS.configuracao, 'ConfiguracaoView');
+const EquipeView = area(AREAS.equipe, 'EquipeView');
+const TarefasView = area(AREAS.tarefas, 'TarefasView');
+const FocoView = area(AREAS.foco, 'FocoView');
+const AjudaView = area(AREAS.ajuda, 'AjudaView');
+const AgentWindow = area(AREAS.agente, 'AgentWindow');
+const TaskDetail = area(AREAS.card, 'TaskDetail');
+const DecisionsPanel = area(AREAS.decisoes, 'DecisionsPanel');
+const CommandPalette = area(AREAS.paleta, 'CommandPalette');
+let areasBuscadas = false;
+function buscarAreas(): void {
+  if (areasBuscadas) return;
+  areasBuscadas = true;
+  const buscar = () => { for (const load of Object.values(AREAS)) void load().catch(() => undefined); };
+  if ('requestIdleCallback' in window) window.requestIdleCallback(buscar, { timeout: 4000 }); else setTimeout(buscar, 1500);
+}
+import type { CardHit, PaletteItem } from './components/CommandPalette.tsx';
 import { ConversationDock, ConversationsDialog } from './components/ConversationDock.tsx';
-import { TaskDetail } from './components/TaskDetail.tsx';
 import { WorkspaceSwitcher } from './components/Workspaces.tsx';
 import { AccountMenu } from './components/AccountMenu.tsx';
 import { onOpenCard, onOpenConversation, onOpenDecisions } from './lib/open.ts';
@@ -167,6 +192,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       '/api/packages/catalog/official', '/api/decisions', '/api/saude', '/api/workspaces', '/api/packages/cosmetics']), 400);
     return () => clearTimeout(t);
   }, []);
+  useEffect(buscarAreas, []);
   const [view, setView] = useState<View>(() => (location.hash.slice(1).split('?')[0] as View) || 'ambiente');
   // janela do agente (conversas, perfil, atividade), aberta de qualquer tela
   const [win, setWin] = useState<{ id: string; tab: 'conversa' | 'perfil' | 'atividade'; draft: string | null; conversationId: string | null; lite: AgentHead | null } | null>(null);
@@ -387,6 +413,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         <div className="keep" hidden={focus || view !== 'ambiente'}>
           <AmbienteView state={s} onNavigate={setView} selectedId={selected} onSelect={setSelected} reload={st.reload} active={!focus && view === 'ambiente'} />
         </div>
+        <Suspense fallback={<Loading />}>
         {focus ? (
           <FocoView state={s} selectedId={selected} onSelect={setSelected} onOpenAgent={openAgent} onAskCoordinator={askCoordinator}
             onExit={() => setFocus(false)} onGo={(v) => { setFocus(false); setView(v); }} />
@@ -409,11 +436,14 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         ) : (
           <AtividadeView onOpenAgent={(id, tab) => openAgent(id, tab)} />
         )}
+        </Suspense>
       </main>
       {/* conversas por baixo; o perfil aberto dali vem por cima e, ao fechar, volta para a conversa */}
       {convs && <ConversationsDialog coordinator={coordinator} scope={s.workspace.id} initial={convs} onClose={() => setConvs(null)} onOpenAgent={(id, tab, lite) => openAgent(id, tab, null, null, lite ?? null)} />}
+      <Suspense fallback={null}>
       {win && <AgentWindow key={`${win.id}-${win.conversationId ?? ''}`} agentId={win.id} initial={win.lite} coordName={coordLabel} sectors={s.sectors} initialTab={win.tab} draft={win.draft} conversationId={win.conversationId}
         onClose={() => setWin(null)} onGone={() => { removeRecent('agente', win.id); setWin(null); }} />}
+      </Suspense>
       {!focus && !onb && !tour && <ViewTip view={view} coord={coordLabel} other={tipOther} onTour={startTour} />}
       {onb && (
         <Onboarding displayName={me.user.displayName} workspaceName={s.workspace.name} redo={onb === 'redo'} onCancel={() => setOnb(null)}
@@ -432,11 +462,13 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           </div>
         )} />
       )}
+      <Suspense fallback={null}>
       {palette && (
         <CommandPalette base={paletteBase} onAgent={(a) => openAgent(a.id, 'conversa', null, null, a)} onCard={openCard} onRoutine={openRoutine} onRecent={openRecent} onClose={() => setPalette(false)} />
       )}
       {decisions && <DecisionsPanel onClose={() => setDecisions(false)} onOpenAgent={(...a) => { setDecisions(false); openAgent(...a); }} onGo={(v) => { setDecisions(false); setView(v); }} />}
       {card && <TaskDetail key={card} taskId={card} mode="auto" over onClose={() => setCard(null)} onAskCoordinator={(t) => { setCard(null); setConvs(null); askCoordinator(t); }} />}
+      </Suspense>
       <ConversationDock coordinator={coordinator} hidden={!!convs || !!win || focus || tour || !!onb} />
 
     </div>

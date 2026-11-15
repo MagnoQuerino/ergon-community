@@ -6,6 +6,8 @@ declare module 'better-sqlite3-multiple-ciphers' {
       get(...params: unknown[]): unknown;
       all(...params: unknown[]): unknown[];
       run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+      /** em execução agora (uma função do banco consultando de dentro dela): não dá para reusar */
+      readonly busy: boolean;
     }
     interface Database {
       prepare(sql: string): Statement;
