@@ -36,7 +36,7 @@ export const MAX_ENVIO = 5000;
 export const MAX_TITULO = 500;
 /** Uma página pode passar disso: o cartão guarda o texto inteiro, mas a tela recolhe o longo, e o aviso pede para abrir. */
 export const tamanhoNoCartao = (t: unknown): string => { const n = String(t ?? '').length; return n > MAX_ENVIO ? ` (${n} caracteres: abra "Ver o texto inteiro" no cartão antes de confirmar)` : ''; };
-export const sim = (v: unknown): boolean => v === true || v === 'true' || v === 'sim';
+const sim = (v: unknown): boolean => v === true || v === 'true' || v === 'sim';
 
 const CERCA = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 /**
@@ -86,7 +86,7 @@ const ARROBA = new RegExp(/(?<![\\`])(`+)(?!`).*?[^`]\1(?!`)|(^|[^\w\\])((?:\\\\
 const semMencao = (l: string): string => l.replace(ARROBA, (m, crase, antes, barras) => (crase ? m : `${antes}${barras}\\@`));
 const COMANDO = /^\/[\w-]+(\s.*)?$/;
 /** Usado em descrição e comentário. O GitLab apaga \r antes de procurar comandos: "\r/close" viraria comando, por isso sai aqui. */
-export const textoParaGitLab = (t: unknown): string => foraDeBlocoDeCodigo(String(t ?? '').replace(/\r/g, ''), (l) => (COMANDO.test(l) ? `\`${l}\`` : semMencao(l)));
+const textoParaGitLab = (t: unknown): string => foraDeBlocoDeCodigo(String(t ?? '').replace(/\r/g, ''), (l) => (COMANDO.test(l) ? `\`${l}\`` : semMencao(l)));
 
 // ----------------------------------------------------------------------------------------------------- leitura
 const P_PROJETO: Param = { tipo: 'texto', obrigatorio: true, descricao: 'id do projeto ou caminho, como grupo/projeto' };

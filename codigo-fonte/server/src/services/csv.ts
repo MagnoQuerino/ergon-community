@@ -7,7 +7,7 @@
  * Conteúdo de arquivo é dado: nada aqui interpreta ou executa o que está dentro das células.
  */
 
-export interface CsvLimits { maxBytes: number; maxRows: number; maxCols: number; maxCell: number }
+interface CsvLimits { maxBytes: number; maxRows: number; maxCols: number; maxCell: number }
 export const CSV_LIMITS: CsvLimits = { maxBytes: 20 * 1024 * 1024, maxRows: 200_000, maxCols: 200, maxCell: 10_000 };
 
 export interface CsvTable { headers: string[]; rows: string[][]; delimiter: ',' | ';' | '\t'; bom: boolean; lines: number[] }

@@ -36,12 +36,11 @@
 import { clip } from '../../../lib/util.ts';
 import { neutral } from '../../operations.ts';
 import { consultaMcp, riscoMcp, transporteMcp, type ArgLogico, type FerramentaMcp } from '../mcp.ts';
-import { linhaDe, type AcaoDecl, type ConectorDef, type Credenciais } from './declarativo.ts';
+import { exigeAlgum, ficha, linhaDe, riscoDeAtribuir, vazio, type AcaoDecl, type ConectorDef, type Credenciais } from './declarativo.ts';
 import { ErroAcao, type Args, type CtxAcao, type Http, type Param, type Risco } from '../tipos.ts';
 
 export const GHL_MCP_URL = 'https://services.leadconnectorhq.com/mcp/';
 const NOME = 'HighLevel';
-const vazio = (v: unknown) => v === undefined || v === null || v === '';
 
 /** A permissão da integração privada (como a tela da HighLevel mostra) que cada grupo de ferramentas pede. */
 const PERMISSAO: Array<[RegExp, string]> = [
@@ -87,9 +86,6 @@ function listaEm(j: unknown, chaves: string[], fundo = 0): any[] {
 /** O objeto com um destes nomes (ou a própria resposta). */
 const objetoEm = (j: any, chaves: string[]): any => { for (const k of chaves) { const v = j?.[k] ?? j?.data?.[k]; if (v && typeof v === 'object' && !Array.isArray(v)) return v; } return j?.data && typeof j.data === 'object' && !Array.isArray(j.data) ? j.data : j; };
 
-/** Só o que veio preenchido, com o valor limpo por linhaDe: texto de terceiros nunca vira linha de controle. */
-const ficha = (x: unknown, campos: Array<[string, string]>, max = 400): string =>
-  campos.flatMap(([rotulo, campo]) => { const v = linhaDe(`{${campo}}`, x, max); return v ? [`${rotulo}: ${v}`] : []; }).join(', ');
 const comNome = (x: any) => ({ ...x, _nome: x?.contactName || x?.name || x?.fullName || [x?.firstName, x?.lastName].filter(Boolean).join(' ') || x?.contact?.name, _tags: Array.isArray(x?.tags) ? x.tags.join(', ') : x?.tags });
 const linhas = (l: any[], f: (x: any) => string, vaziaDiz = 'nada encontrado'): string => (l.length ? l.map((x) => `- ${f(x)}`).join('\n') : vaziaDiz);
 /** Forma desconhecida: o JSON compacto, curto e numa linha só (texto de terceiros nunca vira linha de controle). */
@@ -145,10 +141,6 @@ const argsFicha = (a: Args): ArgLogico[] => [
   arg(['firstName', 'first_name'], a.nome), arg(['lastName', 'last_name'], a.sobrenome), arg(['email'], a.email),
   arg(['phone'], a.telefone), arg(['companyName', 'company_name'], a.empresa),
 ];
-const exigeAlgum = (...nomes: string[]) => async (_c: CtxAcao, a: Args): Promise<Args> => {
-  if (!nomes.some((n) => !vazio(a[n]))) throw new ErroAcao(`diga pelo menos um destes: ${nomes.join(', ')}`);
-  return a;
-};
 
 /** O nome do contato, para o cartão: o agente só tem o id. Só lê; id que não existe para aqui, antes do cartão. */
 async function nomeDoContato(ctx: CtxAcao, id: unknown): Promise<string> {
@@ -161,7 +153,6 @@ async function nomeDoContato(ctx: CtxAcao, id: unknown): Promise<string> {
 
 const CANAIS = ['SMS', 'Email', 'WhatsApp', 'IG', 'FB', 'Live_Chat'];
 const NOME_CANAL: Record<string, string> = { SMS: 'SMS', Email: 'e-mail', WhatsApp: 'WhatsApp', IG: 'Instagram', FB: 'Facebook Messenger', Live_Chat: 'chat do site' };
-const riscoDeAtribuir = (a: Args): Risco => (vazio(a.responsavel) ? 'organizar' : 'enviar');
 
 // ------------------------------------------------------------------------------------------- as ações da lista curada
 const ler = (d: { id: string; descricao: string; rotulo?: string; ferramenta: string; params?: Record<string, Param>; resumo: string | ((a: Args) => string); args: (a: Args, c: Credenciais) => ArgLogico[]; texto: (j: any, a: Args) => string }): AcaoDecl => ({

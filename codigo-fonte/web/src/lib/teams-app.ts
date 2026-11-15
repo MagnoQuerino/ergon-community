@@ -15,7 +15,7 @@ export const soOSeuCodigo = () => t('conexoes.teams.soOSeuCodigo');
 /** A escolha consciente, quando a conta não foi conferida como a da pessoa. */
 export const escolhaConsciente = () => t('conexoes.teams.escolhaConsciente');
 
-export interface Previa { pergunta: string; aviso: string | null; forte: boolean; exigeEscolha: boolean }
+interface Previa { pergunta: string; aviso: string | null; forte: boolean; exigeEscolha: boolean }
 
 /**
  * O que a prévia mostra para cada caso (contrato 12.1). Só a conta conferida como a dela dispensa a escolha consciente; a

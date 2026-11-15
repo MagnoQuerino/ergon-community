@@ -9,7 +9,7 @@ import type { AuthContext } from '../auth.ts';
 import type { NomeCanal } from '../hermes.ts';
 import type { Canais } from './servico.ts';
 
-export interface CanaisRoutesDeps {
+interface CanaisRoutesDeps {
   canais: Canais;
   owner: (req: FastifyRequest) => AuthContext;
   verify: (req: FastifyRequest, ctx: AuthContext, body: { password?: string; code?: string; key?: string; response?: Record<string, unknown> }) => Promise<void>;

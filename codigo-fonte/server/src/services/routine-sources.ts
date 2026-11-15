@@ -27,7 +27,7 @@ export const EXTRA_SOURCES = new Set<SourceId>(['entrada', 'documentos', 'planil
   'mensagens.texto', 'agenda.proximas', 'web.noticias', 'web.regulatorio', 'web.concorrentes', 'financeiro.lancamentos', 'financeiro.conferencia', 'contratos.obrigacoes']);
 const DOC_SOURCES = new Set<SourceId>(['documentos', 'planilhas', 'financeiro.lancamentos', 'financeiro.conferencia', 'contratos.obrigacoes']);
 
-export interface ExtraCtx {
+interface ExtraCtx {
   db: Db; ws: string; since: string; tz: string; filesDir: string; accounts: AccountReader | null;
   /** as contas que a rotina escolheu ler (ids das linhas em integrations); vazio ou ausente = todas as ligadas */
   contas?: string[];

@@ -10,7 +10,7 @@ import { audit, type Bus } from './bus.ts';
 import { CHARACTERS, routeDemand } from './characters.ts';
 import { COORDINATOR_SECTOR, FIXED_MSG } from './team.ts';
 
-export interface SectorDef {
+interface SectorDef {
   key: string; name: string; description: string; createsTasks: 'demands' | 'explicit_only';
   instructions: string; examples: Array<{ in: string; out: string }>; tools: string[]; skills: string[];
   /** personagens da equipe de demonstração que pertencem a este setor */
@@ -81,9 +81,9 @@ export const SECTORS: SectorDef[] = [
   },
 ];
 
-export const sectorDef = (key: string | null | undefined): SectorDef | undefined => SECTORS.find((s) => s.key === key);
+const sectorDef = (key: string | null | undefined): SectorDef | undefined => SECTORS.find((s) => s.key === key);
 
-export interface SectorRow {
+interface SectorRow {
   id: string; key: string; name: string; description: string | null; creates_tasks: 'demands' | 'explicit_only';
   instructions: string; tools: string[]; skills: string[]; position: number; custom: number; members: number;
 }

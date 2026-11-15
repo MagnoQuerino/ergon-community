@@ -4,8 +4,8 @@ import path from 'node:path';
 import { FieldCipher, SEALED_PREFIX } from '../security/fields.ts';
 import type { WorkspaceKeySource } from '../security/keys.ts';
 
-export type SqlValue = null | number | bigint | string | Buffer | Uint8Array;
-export type Row = Record<string, SqlValue>;
+type SqlValue = null | number | bigint | string | Buffer | Uint8Array;
+type Row = Record<string, SqlValue>;
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, 'migrations');
 

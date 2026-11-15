@@ -35,7 +35,7 @@ const SHOW_RESULT = new Set(['task.queue', 'task.route', 'task.reassign', 'task.
 const ENTREGA = new Set(['agent.result.succeeded', 'task.help_result', 'task.step_done']);
 
 export interface LogRow { id: string; actor_type: string; actor_id: string | null; action: string; evidence: string | null; result: string; created_at: string }
-export interface LinhaHistorico { titulo: string; quem: string; resumo: string | null; detalhe: string | null; saida: string | null; erro: string | null }
+interface LinhaHistorico { titulo: string; quem: string; resumo: string | null; detalhe: string | null; saida: string | null; erro: string | null }
 
 /** linhas de controle ([[...]]) fora do texto que a pessoa lê */
 const semControle = (s: string) => s.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]\s*/g, '').trim();
@@ -112,7 +112,7 @@ export function justificativaSimples(j: string | null | undefined): string {
 
 // ------------------------------------------------------------------------------------------- Ver um arquivo
 
-export type Previa = 'markdown' | 'texto' | 'tabela' | 'imagem' | 'pdf' | 'baixar';
+type Previa = 'markdown' | 'texto' | 'tabela' | 'imagem' | 'pdf' | 'baixar';
 const IMAGEM = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 /**
  * O que o "Ver" mostra, por cima da tarefa: texto formatado (.md), texto, tabela (.csv), imagem e PDF (o leitor do

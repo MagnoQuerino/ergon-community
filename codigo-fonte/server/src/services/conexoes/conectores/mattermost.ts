@@ -71,7 +71,7 @@ export const conferirTexto = async (_ctx: CtxAcao, a: Args): Promise<Args> => {
 
 /** Dos nomes citados: quais chamam muita gente (em minúsculas) e quais não deu para conferir. */
 export interface Citados { chamam: Set<string>; semConferir: string[] }
-export interface TextoDoCartao { texto: string; aviso?: string; confirmar?: string }
+interface TextoDoCartao { texto: string; aviso?: string; confirmar?: string }
 
 /**
  * O texto que o cartão mostra e o clique envia: sem @all e sem menção a quem chama muita gente. O que não deu para conferir fica

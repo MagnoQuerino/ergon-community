@@ -370,7 +370,7 @@ export function floorBlocks(spec: BuildingSpec, plan: FloorPlan, level: number, 
 
 /** Os tipos do catálogo (shared/city.ts) com nome no dicionário. Um tipo de mod fica com o nome dele. */
 export const TIPOS_DE_FABRICA = ['stoa', 'oikos', 'ergasterion', 'pharmakopoleion', 'didaskaleion', 'oikia', 'emporion', 'bouleuterion', 'agora', 'teatro', 'termas', 'ginasio', 'bairro'] as const;
-export type TipoDeFabrica = typeof TIPOS_DE_FABRICA[number];
+type TipoDeFabrica = typeof TIPOS_DE_FABRICA[number];
 const deFabrica = (kind: string): kind is TipoDeFabrica => (TIPOS_DE_FABRICA as readonly string[]).includes(kind);
 
 /** O nome do tipo ("Termas" / "Baths"). */

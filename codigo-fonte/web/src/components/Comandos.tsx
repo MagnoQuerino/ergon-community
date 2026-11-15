@@ -11,7 +11,7 @@ import { Icon } from './Icon.tsx';
  */
 
 export type TipoComando = 'meta' | 'repetir' | 'checagem' | 'comentar' | 'revisao';
-export interface Comando {
+interface Comando {
   id: string; kind: 'meta' | 'repetir' | 'checagem' | 'revisao'; texto: string; criterio: string | null; intervalo_s: number | null;
   max_rodadas: number; rodadas: number; status: 'ativo' | 'cumprido' | 'esgotado' | 'bloqueado' | 'parado'; nota: string | null; updated_at: string;
 }

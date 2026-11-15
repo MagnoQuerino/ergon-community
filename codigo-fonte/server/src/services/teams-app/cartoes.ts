@@ -39,7 +39,7 @@ export function textoParaTeams(t: string, max = MAX_TEXTO_SAIDA): string {
 /** Os cartões em que a pessoa aprova exatamente o que lê (o pedido aplicado é o texto do cartão): ou cabem inteiros, ou não decidem fora do Ergon. */
 export const KINDS_INTEIROS: readonly string[] = ['gestao', 'conexao'];
 /** O texto aparece inteiro num canal com este limite: nada cortado nem tirado (marcadores, chaves duplas, etiquetas). */
-export function apareceInteiro(texto: string, max: number): boolean {
+function apareceInteiro(texto: string, max: number): boolean {
   const t = String(texto ?? '');
   return !/\[\[|\{\{|<\/?[a-zA-Z]/.test(t) && textoParaTeams(t, Number.MAX_SAFE_INTEGER).length <= max;
 }

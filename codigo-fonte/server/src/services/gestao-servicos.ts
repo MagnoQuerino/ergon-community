@@ -21,7 +21,7 @@ type Params = Record<string, unknown>;
 const CONTA_DA_ROTA = /^(|principal|nova|c[0-9a-f]{8})$/;
 const ARQUIVO = /^art_[0-9a-f]{8,}$/;
 
-export interface GestaoServicosDeps {
+interface GestaoServicosDeps {
   db: Db; filesDir: string; apps: () => McpProprios; recursos: () => Recursos;
   /** a memória de um agente com o que espera aprovação (o cartão mostra o texto da anotação); null = ainda não pronta */
   memoria?: (ws: string, agentId: string) => Promise<{ pendentes: Array<{ id: string; alvo: string; itens: Array<{ acao: string; texto: string; antes: string }> }> } | null>;

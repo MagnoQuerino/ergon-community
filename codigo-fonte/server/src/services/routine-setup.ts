@@ -18,7 +18,7 @@ import { localParts, parseWhen, scheduleText } from './routine-time.ts';
 const STOP = new Set(('a o os as de da do das dos e em no na nos nas para pra por com sem um uma uns umas que se ao aos à às ' +
   'fazer ver revisar enviar mandar pedir verificar conferir criar novo nova sobre mais até cada todo toda todos todas').split(' '));
 
-export interface Profile {
+interface Profile {
   facts: string;
   /** hora local em que o usuário costuma começar (pela primeira atividade de cada dia), se der para saber */
   startHour: number | null;
@@ -126,7 +126,7 @@ export function heuristicAdaptation(t: RoutineTemplate, p: Profile, tz: string):
   return out;
 }
 
-export interface SetupReply { config: (Adaptation & { name?: string }) | null; questions: Array<{ question: string; options: string[] }> }
+interface SetupReply { config: (Adaptation & { name?: string }) | null; questions: Array<{ question: string; options: string[] }> }
 
 /** Lê a resposta da coordenação no preparo. */
 export function parseSetupReply(text: string | null, tz: string): SetupReply {

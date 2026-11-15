@@ -15,30 +15,14 @@
  * Risco: atribuir a alguém (responsavel) pode avisar essa pessoa, então conta como envio; sem isso, só organiza.
  */
 import { neutral } from '../../operations.ts';
-import { hostSeguro, linhaDe, type AcaoDecl, type ConectorDef, type Credenciais } from './declarativo.ts';
-import { ErroAcao, seg, type Acao, type Args, type CtxAcao, type Param, type Risco } from '../tipos.ts';
-
-const vazio = (v: unknown) => v === undefined || v === null || v === '';
+import { detalhes, exigeAlgum, ficha, hostSeguro, linhaDe, riscoDeAtribuir, vazio, type AcaoDecl, type ConectorDef, type Credenciais } from './declarativo.ts';
+import { ErroAcao, seg, type Acao, type Args, type CtxAcao, type Param } from '../tipos.ts';
 
 /** Aceita "suaempresa" ou "suaempresa.kommo.com". A credencial só vai a um subdomínio do próprio Kommo. */
 const hostDoKommo = (c: Credenciais): string => {
   const v = String(c.subdominio ?? '').trim();
   return hostSeguro(/[./:]/.test(v) ? v : `${v}.kommo.com`, /^[a-z0-9-]+\.kommo\.com$/).split(':')[0];
 };
-
-/** Só o que veio preenchido, com o valor limpo por linhaDe: texto de terceiros nunca vira linha de controle. */
-const ficha = (x: unknown, campos: Array<[string, string]>, max = 400): string =>
-  campos.flatMap(([rotulo, campo]) => { const v = linhaDe(`{${campo}}`, x, max); return v ? [`${rotulo}: ${v}`] : []; }).join(', ');
-
-/** O que a pessoa lê no cartão: cada campo preenchido, por extenso e sem cortar. */
-const detalhes = (a: Args, rotulos: Record<string, string>): string =>
-  Object.entries(rotulos).flatMap(([k, rotulo]) => (vazio(a[k]) ? [] : [`${rotulo}: ${String(a[k])}`])).join('\n');
-
-const exigeAlgum = (...nomes: string[]) => async (_c: CtxAcao, a: Args): Promise<Args> => {
-  if (!nomes.some((n) => !vazio(a[n]))) throw new ErroAcao(`diga pelo menos um destes: ${nomes.join(', ')}`);
-  return a;
-};
-const riscoDeAtribuir = (a: Args): Risco => (vazio(a.responsavel) ? 'organizar' : 'enviar');
 
 /** A qual registro a tarefa ou nota pertence: o Kommo aceita um só. */
 const QUEM: Array<[string, string]> = [['negocio', 'leads'], ['contato', 'contacts'], ['empresa', 'companies']];

@@ -36,7 +36,7 @@ const POR_VOLTA = 20;
 /** motor sem a capacidade (plugin de antes): não pergunta de novo antes disto */
 const SEM_SUPORTE_MS = 10 * 60_000;
 
-export type EstadoDoJob = 'pendente' | 'pronto' | 'falhou' | 'fora';
+type EstadoDoJob = 'pendente' | 'pronto' | 'falhou' | 'fora';
 interface Linha {
   routine_id: string; workspace_id: string; profile: string | null; job_id: string | null; state: EstadoDoJob; fingerprint: string | null;
   next_run_at: string | null; last_fire_at: string | null; synced_at: string | null; tries: number; error: string | null; updated_at: string;

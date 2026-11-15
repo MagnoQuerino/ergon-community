@@ -20,7 +20,7 @@ export interface Kit {
   /** cor do agente num distintivo no peito, quando a roupa não usa a cor dele */
   badge: string | null;
 }
-export interface Extra { species: Species; face: SkinFace; hat: [string, string] | null; kit: Kit | null }
+interface Extra { species: Species; face: SkinFace; hat: [string, string] | null; kit: Kit | null }
 
 const DARK = '#2b2b33';
 const LEATHER = '#4a3a28';

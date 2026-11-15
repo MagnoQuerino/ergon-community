@@ -493,7 +493,7 @@ export async function grantPermission(db: Db, bus: Bus, workspaceId: string, use
 }
 
 /** Quem aplica as propostas de rotina (o serviço de rotinas, ligado pelo app). */
-export interface ProposalHooks {
+interface ProposalHooks {
   routine?: (p: RoutineProposal) => string; ledger?: (p: Extract<Proposal, { kind: 'ledger' }>, userId: string) => string; limits?: AgentLimits;
   /** cancelar um card (para o trabalho dele, fecha os pedidos abertos e tira do quadro); devolve o resultado em texto */
   deleteTask?: (number: number, reason: string) => string;

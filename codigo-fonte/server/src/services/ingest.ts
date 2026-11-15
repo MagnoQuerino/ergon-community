@@ -30,7 +30,7 @@ export interface InboundEvent {
   integracaoId?: string | null;
 }
 
-export interface IngestResult {
+interface IngestResult {
   eventId: string;
   duplicate: boolean;
   status: string;
@@ -40,7 +40,7 @@ export interface IngestResult {
 
 const EXT_ID = /^[\w:.@+=/-]{1,200}$/;
 
-export function validateInbound(e: InboundEvent): void {
+function validateInbound(e: InboundEvent): void {
   if (!EXT_ID.test(e.externalId)) throw new HttpError(400, 'external_id', 'ID externo inválido');
   if (!/^[\w.-]{1,40}$/.test(e.version)) throw new HttpError(400, 'version', 'versão inválida');
   if (typeof e.text !== 'string' || e.text.length > 8000) throw new HttpError(400, 'text', 'texto inválido');

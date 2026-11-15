@@ -15,7 +15,7 @@ const proposta = (id: string, kind: Proposal['kind'], summary: string, min: numb
 const pedido = (need: string, extra: object = {}) => carga({ taskId: 't-aprovacao', number: 92, title: 'Relatório de vendas', need, agent: 'Hipátia', question: null, excerpt: 'O relatório ficou com 12 páginas e 3 gráficos.', ...extra });
 
 /** Todos os tipos de cartão da conversa, em todos os estados. */
-export const PROPOSTAS: Proposal[] = [
+const PROPOSTAS: Proposal[] = [
   proposta('p-info', 'info_request', 'Hipátia precisa de uma informação', 10, { payload: pedido('info', { question: 'Qual é o período do relatório?' }) }),
   proposta('p-aprov', 'info_request', 'Hipátia pede a sua aprovação', 11, { payload: pedido('approval') }),
   proposta('p-rev', 'info_request', 'Entrega para revisar', 12, { payload: pedido('review', { review: true, round: 2 }) }),
@@ -49,7 +49,7 @@ export const PROPOSTAS: Proposal[] = [
 ];
 
 const NOTA = ['Rotina "Resumo das vendas" acionada:', '09:00 começou', '09:01 leu a planilha', '09:02 montou o resumo', '09:03 pediu revisão', '09:05 entregou'].join('\n');
-export const MENSAGENS: Message[] = [
+const MENSAGENS: Message[] = [
   { id: 'm1', role: 'user', content: 'Preciso do relatório de vendas do mês e do resumo para a reunião.', mode: 'real', run_id: null, created_at: em(1), run_status: null },
   { id: 'm2', role: 'agent', content: 'Combinado. Abri dois cards e já volto com as entregas.', mode: 'real', run_id: 'r1', created_at: em(2), run_status: 'done', marked: 1 },
   { id: 'm3', role: 'system', content: NOTA, mode: 'local', run_id: null, created_at: em(3), run_status: null },
@@ -66,7 +66,7 @@ export const MENSAGENS: Message[] = [
   { id: 'm9', role: 'system', content: 'Não deu certo desta vez: a conta de IA não respondeu.', mode: 'local', run_id: null, created_at: em(74), run_status: null },
 ];
 
-export const DECISOES: Decisions = {
+const DECISOES: Decisions = {
   cards: [
     { id: 't-info', number: 93, title: 'Resumo para a reunião', work_state: 'aguardando_info', agent_id: 'ag2', agent_name: 'Hipátia', updated_at: em(0), need: 'info', question: 'Qual é o período do resumo?', external: false, justification: null },
     { id: 't-aprovacao', number: 92, title: 'Relatório de vendas', work_state: 'aguardando_aprovacao', agent_id: 'ag2', agent_name: 'Hipátia', updated_at: em(0), need: 'approval', question: null, external: false, justification: null },

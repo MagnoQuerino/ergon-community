@@ -7,7 +7,7 @@ import { createWorkspace } from './seed.ts';
 export const SESSION_COOKIE = 'ergon_session';
 const SESSION_DAYS = 7;
 /** Ações sensíveis pedem a senha (ou passkey) de novo se a última confirmação passou disto. */
-export const REAUTH_MS = 5 * 60_000;
+const REAUTH_MS = 5 * 60_000;
 
 export interface AuthContext {
   userId: string;

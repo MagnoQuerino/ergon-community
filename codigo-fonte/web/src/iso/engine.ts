@@ -35,7 +35,7 @@ import { between, isNightHour, msUntilMorning, pairAt, pickActivity, pickChoice,
 import { fillPoly } from './raster.ts';
 import { fmtNumero, onIdioma, t as tr } from '../i18n/index.ts';
 
-export interface EngineCallbacks {
+interface EngineCallbacks {
   onSelectAgent(id: string): void;
   onObject(kind: SceneObject, text?: string): void;
   onLot(i: number, j: number): void;

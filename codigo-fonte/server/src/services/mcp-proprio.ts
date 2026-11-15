@@ -25,10 +25,10 @@ import type { Recursos } from './recursos.ts';
 import { acharConta, novaContaId } from './integrations.ts';
 
 export type TipoFerramenta = 'leitura' | 'escrita' | 'envio';
-export const TIPOS: readonly TipoFerramenta[] = ['leitura', 'escrita', 'envio'];
-export interface FerramentaApp { nome: string; descricao: string; sugerido: TipoFerramenta; tipo: TipoFerramenta }
-export interface ChaveApp { tipo: 'cabecalho' | 'variavel'; nome: string }
-export interface AppConectado {
+const TIPOS: readonly TipoFerramenta[] = ['leitura', 'escrita', 'envio'];
+interface FerramentaApp { nome: string; descricao: string; sugerido: TipoFerramenta; tipo: TipoFerramenta }
+interface ChaveApp { tipo: 'cabecalho' | 'variavel'; nome: string }
+interface AppConectado {
   nome: string; app: string; apelido: string | null;
   /** a conta dentro do aplicativo: '' = a principal (modelo das Conexões) */
   conta: string; principal: boolean; icone: string | null; transporte: TransporteMcp;
@@ -41,7 +41,7 @@ export interface PedidoApp {
   endereco?: string; comando?: string; argumentos?: string[];
   cabecalhos?: Record<string, string>; variaveis?: Record<string, string>;
 }
-export interface ResultadoTeste { ok: boolean; erro: string; erro_t?: Texto; ferramentas: FerramentaApp[] }
+interface ResultadoTeste { ok: boolean; erro: string; erro_t?: Texto; ferramentas: FerramentaApp[] }
 /** a frase fixa do Ergon no erro do teste ("o aplicativo não respondeu"…) vai com o código, para a tela traduzir */
 const erroT = (e: string | null): { erro_t?: Texto } => { const t = e ? reconhecer(e, 'erro.') : null; return t ? { erro_t: t } : {}; };
 
@@ -59,13 +59,13 @@ const ENDERECO = /^https?:\/\/[^\s"'<>`\\$]{3,2000}$/i;
  * "$" no endereço ou num argumento: o motor troca ${VAR} pelo valor do ambiente (onde estão as chaves dos provedores e das
  * outras conexões) e o mandaria ao aplicativo. A chave vai num cabeçalho ou numa variável, que o cofre guarda.
  */
-export const REFERENCIA = /\$/;
-export const ERRO_REFERENCIA_ENDERECO = 'O endereço não pode trazer referências a chaves ($). Ponha a chave num cabeçalho.';
-export const ERRO_REFERENCIA_ARGUMENTO = 'Os argumentos não podem trazer referências a chaves ($). Ponha a chave numa variável.';
+const REFERENCIA = /\$/;
+const ERRO_REFERENCIA_ENDERECO = 'O endereço não pode trazer referências a chaves ($). Ponha a chave num cabeçalho.';
+const ERRO_REFERENCIA_ARGUMENTO = 'Os argumentos não podem trazer referências a chaves ($). Ponha a chave numa variável.';
 const ICONE = /^[a-z0-9-]{1,40}$/;
 const lista = <T>(v: string, padrao: T[] = []): T[] => { try { const x = JSON.parse(v); return Array.isArray(x) ? x as T[] : padrao; } catch { return padrao; } };
 /** O que junta as contas de um aplicativo: o nome sem acento, maiúscula nem espaço repetido. */
-export const chaveDoApp = (app: string): string => fold(app.replace(/\s+/g, ' ').trim());
+const chaveDoApp = (app: string): string => fold(app.replace(/\s+/g, ' ').trim());
 const ehTipo = (v: unknown): v is TipoFerramenta => typeof v === 'string' && (TIPOS as readonly string[]).includes(v);
 
 /** Trecho do caminho com cara de chave: prefixo conhecido, ou 20+ letras e números misturados (servidores que põem a chave no caminho). */
@@ -103,7 +103,7 @@ export function argumentosParaTela(args: string[]): string[] {
 }
 
 /** Confere o pedido da tela (ou da coordenação). Erro claro, sem mostrar valores. */
-export function conferirPedido(p: PedidoApp): void {
+function conferirPedido(p: PedidoApp): void {
   const app = (p.app ?? '').trim();
   if (!app || app.length > 60) throw new HttpError(400, 'app_nome', 'dê um nome ao aplicativo (até 60 letras)');
   if ((p.apelido ?? '').length > 40) throw new HttpError(400, 'app_apelido', 'o apelido da conta tem até 40 letras');

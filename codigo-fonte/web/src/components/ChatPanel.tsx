@@ -37,7 +37,7 @@ const suggestionsFor = (a: { char_key: string | null }): Array<`conversas.sugest
  * O colega da conversa: a linha leve que quem abriu já tem (nome, papel, setor, cor) basta para conversar; com o
  * perfil completo (GET /api/agents/:id), o cabeçalho fora das janelas mostra também a história e o perfil.
  */
-export type ChatAgent = Pick<Agent, 'id' | 'name' | 'role' | 'color' | 'sector_name' | 'char_key'> & Partial<ProfileFields>;
+type ChatAgent = Pick<Agent, 'id' | 'name' | 'role' | 'color' | 'sector_name' | 'char_key'> & Partial<ProfileFields>;
 
 /** Corta um texto em uma linha (citação, marcadas). */
 const clip1 = (t: string, n: number) => { const x = t.replace(/\s+/g, ' ').trim(); return x.length > n ? `${x.slice(0, n - 1)}…` : x; };

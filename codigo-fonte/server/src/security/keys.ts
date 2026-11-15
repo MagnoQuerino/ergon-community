@@ -20,8 +20,8 @@ import { HttpError, id, now } from '../lib/util.ts';
 import { KDF_STRONG, argon2id, b64u, decrypt, encrypt, fromB64u, hkdf, randomKey, timingSafeEq, type KdfParams } from './crypto.ts';
 
 /** 'mk': chave pessoal embrulhada pela MK — só enquanto há uma pessoa só na instalação (ver Vault). */
-export type WrapType = 'password' | 'recovery' | 'auto' | 'mk';
-export interface Wrap {
+type WrapType = 'password' | 'recovery' | 'auto' | 'mk';
+interface Wrap {
   id: string; type: WrapType;
   /** 'open': embrulho do acesso sem trancamento (chave em unlock.key); sem isto, é o do ajudante do computador */
   purpose?: 'open';
@@ -33,14 +33,14 @@ export interface Wrap {
  * Parte de uma pessoa no keyring: a chave pessoal (PK) embrulhada pela senha, pela frase e (opcional) pelo cofre do
  * sistema dela; `mk` é a MK cifrada pela PK (quem abre a própria parte também abre a instalação depois de reiniciar).
  */
-export interface PersonEntry { username: string; check: string; mk: string; wraps: Wrap[]; createdAt: string }
-export interface KeyringFile { v: 1 | 2; createdAt: string; check: string; wraps: Wrap[]; people?: Record<string, PersonEntry> }
+interface PersonEntry { username: string; check: string; mk: string; wraps: Wrap[]; createdAt: string }
+interface KeyringFile { v: 1 | 2; createdAt: string; check: string; wraps: Wrap[]; people?: Record<string, PersonEntry> }
 
 const fold = (s: string) => s.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().trim();
 
 /** Frase de recuperação: 24 palavras (lista oficial BIP-39 em português), 256 bits de entropia. */
-export const RECOVERY_WORDS = 24;
-export function newRecoveryPhrase(): string { return generateMnemonic(wordlist, 256); }
+const RECOVERY_WORDS = 24;
+function newRecoveryPhrase(): string { return generateMnemonic(wordlist, 256); }
 /** Aceita a frase como a pessoa digitar: acentos, maiúsculas e espaços extras não importam. */
 export function normalizePhrase(input: string): string | null {
   const byFold = new Map(wordlist.map((w) => [fold(w), w]));
@@ -51,7 +51,7 @@ export function normalizePhrase(input: string): string | null {
 const phraseSecret = (phrase: string) => Buffer.from(mnemonicToEntropy(phrase, wordlist)).toString('hex');
 
 /** Arquivo do keyring (volume de dados; legível só pelo servidor). Gravação atômica. */
-export class Keyring {
+class Keyring {
   readonly file: string;
   private readonly kdf: KdfParams;
   constructor(dataDir: string, kdf: KdfParams = KDF_STRONG) { this.file = path.join(dataDir, 'keyring.json'); this.kdf = kdf; }
@@ -108,7 +108,7 @@ export interface WorkspaceKeySource {
   instanceKey(): Buffer;
 }
 
-export class LocalKeySource implements WorkspaceKeySource {
+class LocalKeySource implements WorkspaceKeySource {
   readonly name = 'local';
   private readonly wrapKey: Buffer;
   private readonly inst: Buffer;
@@ -166,7 +166,7 @@ export class PersonKeySource implements WorkspaceKeySource {
   instanceKey(): Buffer { return this.legacy.instanceKey(); }
 }
 
-export type VaultState = 'unprotected' | 'sealed' | 'open';
+type VaultState = 'unprotected' | 'sealed' | 'open';
 
 /**
  * Cofre da instância: estado (sem proteção / selado / aberto), destrancar por senha, frase ou chave do

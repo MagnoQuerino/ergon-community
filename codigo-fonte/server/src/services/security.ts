@@ -24,7 +24,7 @@ import { audit, type Bus } from './bus.ts';
 import { isAdmin, openPersonWithPassword, type WorkspaceOwners } from './people.ts';
 
 /** Colunas sensíveis cifradas com a chave do workspace (a lista que vai para a nuvem). */
-export const SEALED_COLUMNS: Array<{ table: string; cols: string[] }> = [
+const SEALED_COLUMNS: Array<{ table: string; cols: string[] }> = [
   { table: 'messages', cols: ['content'] },
   { table: 'runs', cols: ['input', 'instructions', 'output'] },
   { table: 'tasks', cols: ['title', 'description'] },
@@ -39,7 +39,7 @@ export const SEALED_COLUMNS: Array<{ table: string; cols: string[] }> = [
 ];
 
 /** Cifra o que foi gravado antes da proteção (instalação antiga ou dados de demonstração do 1º uso). */
-export function sealExisting(db: Db): number {
+function sealExisting(db: Db): number {
   let n = 0;
   db.tx(() => {
     for (const { table, cols } of SEALED_COLUMNS) {
@@ -53,7 +53,7 @@ export function sealExisting(db: Db): number {
 }
 
 /** Cifra anexos e credenciais gravados em disco antes da proteção (mesma DEK do workspace). */
-export function sealFilesAtRest(cfg: Config, cipher: FieldCipher): number {
+function sealFilesAtRest(cfg: Config, cipher: FieldCipher): number {
   let n = 0;
   const seal = (file: string, ws: string | null, name: string) => {
     const data = fs.readFileSync(file);
@@ -122,7 +122,7 @@ export function applyLockChoice(db: Db, vault: Vault, cfg: Config, bus: Bus | nu
 
 /** Trava por inatividade: 0 = desligada (padrão). O usuário liga em Configurações › Segurança e escolhe o tempo. */
 export const idleMinutes = (db: Db): number => Number(instanceSetting(db, 'idle_minutes') ?? 0);
-export const IDLE_MAX_MINUTES = 24 * 60;
+const IDLE_MAX_MINUTES = 24 * 60;
 
 export function rpConfig(cfg: Config): RpConfig {
   const u = new URL(cfg.publicUrl);

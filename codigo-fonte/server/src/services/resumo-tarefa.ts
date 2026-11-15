@@ -21,8 +21,8 @@ import { taskFiles } from './operations.ts';
 
 // ------------------------------------------------------------------------------------------- a linha do agente
 
-export type TipoLinha = 'decidir' | 'feito';
-export interface LinhaParaVoce { tipo: TipoLinha; texto: string }
+type TipoLinha = 'decidir' | 'feito';
+interface LinhaParaVoce { tipo: TipoLinha; texto: string }
 
 /**
  * "Para você decidir: …" / "Feito: …" numa linha própria, com ou sem negrito. Marcador de lista ("- Feito: …") e
@@ -223,12 +223,12 @@ export const frasesDoFeito = (fatos: Fato[]): string[] => textosDoFeito(fatos).m
 
 // ------------------------------------------------------------------------------------------- o resumo
 
-export type Tom = 'decidir' | 'precisa' | 'trabalhando' | 'fila' | 'feito' | 'falhou';
+type Tom = 'decidir' | 'precisa' | 'trabalhando' | 'fila' | 'feito' | 'falhou';
 /**
  * Cada texto vai em português e, ao lado (campo_t), com código e valores para a tela traduzir. O que o agente escreveu
  * (a linha "Feito: …", a pergunta) vai como veio: já está no idioma da conversa.
  */
-export interface ResumoTarefa {
+interface ResumoTarefa {
   /** a situação em uma palavra (ou quase), com a cor pelo tom */
   situacao: { tom: Tom; texto: string; texto_t: Valor };
   /** a faixa de decisão: título curto, a frase exata, os fatos já feitos e a linha do agente quando ela complementa */
@@ -265,7 +265,7 @@ const comoFrase = (v: Valor): Valor => (typeof v === 'string' ? ponto(maiuscula(
  * A proteção "depois de ler": o que o clique libera, com o endereço ou o programa exato que o cartão mostra
  * ("que Aspásia abra o site exemplo.com depois de ler as suas contas"). É uma decisão à parte, nunca em lote.
  */
-export function textoDepoisDeLer(p: { agente?: string; grupo?: string; chaves?: string[]; alvo?: string }, quem: Valor): Texto {
+function textoDepoisDeLer(p: { agente?: string; grupo?: string; chaves?: string[]; alvo?: string }, quem: Valor): Texto {
   const agente: Valor = p.agente ?? quem;
   const chaves = Array.isArray(p.chaves) ? p.chaves : [];
   if (chaves[0] === 'pagina') return tx('resumo.depoisDeLer.pagina', { agente });

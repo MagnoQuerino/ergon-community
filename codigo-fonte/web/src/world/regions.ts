@@ -5,7 +5,7 @@
  */
 import { CELL, RESIDENTS_PER_HOUSE } from '../../../shared/city.ts';
 
-export interface RegionInput { id: string; i: number; j: number; w: number; d: number }
+interface RegionInput { id: string; i: number; j: number; w: number; d: number }
 export interface Occ { agents: number; working: number; waiting: number }
 
 /**
@@ -37,7 +37,7 @@ export function residentsOf(h: number, houses: number, total: number, per = RESI
   for (let k = h; k * per < total; k += houses) n += Math.min(per, total - k * per);
   return n;
 }
-export interface Region { key: string; ri: number; rj: number; structures: number; agents: number; working: number; waiting: number; x: number; z: number }
+interface Region { key: string; ri: number; rj: number; structures: number; agents: number; working: number; waiting: number; x: number; z: number }
 
 /** Lado da região em lotes para o zoom: grande o bastante para os rótulos não se encavalarem. */
 export function regionSize(k: number, minPx = 150): number {

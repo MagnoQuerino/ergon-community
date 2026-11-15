@@ -5,7 +5,7 @@
  */
 
 /** Peças por dentro do Ergon e erros de rede: não dizem nada à pessoa. */
-export const JARGAO_TELA = /\bmotor(?:es)?\b|\bgerente\b|ponte de controle|cont[eê]iner(?:es)?|\bpodman\b|\bdocker\b|\bimagem\b|\btoken\b|\bscopes?\b|\bGraph\b|AADSTS\d*|respondeu \d{3}|fetch failed|\bsocket\b|\btimeout\b|\baborted\b|\b\d{1,3}(?:\.\d{1,3}){3}\b/i;
+const JARGAO_TELA = /\bmotor(?:es)?\b|\bgerente\b|ponte de controle|cont[eê]iner(?:es)?|\bpodman\b|\bdocker\b|\bimagem\b|\btoken\b|\bscopes?\b|\bGraph\b|AADSTS\d*|respondeu \d{3}|fetch failed|\bsocket\b|\btimeout\b|\baborted\b|\b\d{1,3}(?:\.\d{1,3}){3}\b/i;
 /** códigos de erro do sistema (ECONNREFUSED, ETIMEDOUT…): em maiúsculas, para não pegar palavras como "ESTADO" com /i */
 const ERRO_DE_REDE = /\bE[A-Z]{4,}\b/;
 

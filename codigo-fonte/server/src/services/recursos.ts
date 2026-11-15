@@ -13,10 +13,10 @@ import type { HermesControlClient } from './hermes.ts';
 import { getSetting } from './sectors.ts';
 
 /** Onde fica a lista dos conectores em que a pessoa liberou a escrita (workspace_settings). */
-export const ESCRITA_CONECTORES = 'conectores.escrita';
+const ESCRITA_CONECTORES = 'conectores.escrita';
 
 type Metodo = 'GET' | 'PUT' | 'POST' | 'DELETE';
-export interface RecursosDeps {
+interface RecursosDeps {
   db: Db; bus: Bus;
   /** a ponte de controle do motor do workspace (um motor por pessoa) */
   control: (workspaceId: string) => HermesControlClient | null;
@@ -28,9 +28,9 @@ export interface RecursosDeps {
   aoMudarCompetencias?: (workspaceId: string) => void;
 }
 type Vaga = { provider: string; model: string };
-export interface OpcoesDeModelos { principal: { provider: string | null; model: string | null }; contas: Array<{ id: string; models: Array<{ id: string }> }> }
+interface OpcoesDeModelos { principal: { provider: string | null; model: string | null }; contas: Array<{ id: string; models: Array<{ id: string }> }> }
 /** no máximo quantos opinam no conselho montado sozinho (cada um é uma chamada a mais por revisão) */
-export const CONSELHO_AUTO_MAX = 3;
+const CONSELHO_AUTO_MAX = 3;
 
 /**
  * O conselho montado sozinho (regra do dono, 12/11: pronto para usar), como a reserva automática: quem opina é o modelo

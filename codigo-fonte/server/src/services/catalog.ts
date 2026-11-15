@@ -21,11 +21,11 @@ import type { Packages } from './packages.ts';
 export const OFFICIAL_KEYS: Record<string, string> = {
   'ergon-oficial-2026': 'MCowBQYDK2VwAyEAWpdDKrIsv7LSjovZUHnTQ2iezzFAIswXHXsz5mz8a8k=',
 };
-export const COMMUNITY_INDEX_URL = 'https://raw.githubusercontent.com/MagnoQuerino/ergon-community/main/catalogo/index.json';
+const COMMUNITY_INDEX_URL = 'https://raw.githubusercontent.com/MagnoQuerino/ergon-community/main/catalogo/index.json';
 
 /** Prévia de um pacote para a galeria: tiradas dos dados dele (cores, personagens, membros, o efeito ou o pet), sem
  *  executar nada; e quantas imagens de prévia ele traz (servidas por /api/packages/catalog/official/:id/preview/:n). */
-export interface CatalogPreview {
+interface CatalogPreview {
   swatches: string[]; names: string[]; tagline?: string;
   fx?: { effect: string; color: string; intensity: number }; pet?: { species: string; color: string };
   images: number; tags: string[];
@@ -36,7 +36,7 @@ export interface CatalogPreview {
   /** quantas cores foram ajustadas para se lerem (a prévia da loja avisa) */
   legibilidade?: number;
 }
-export interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
+interface CatalogItem { id: string; version: string; title: string; summary: string; kind: string; verified: boolean; installed: boolean; author?: string; preview?: CatalogPreview }
 
 const COR = /^#[0-9a-f]{3,8}$/i;
 const cor = (x: unknown): string | null => (typeof x === 'string' && COR.test(x) ? x : null);

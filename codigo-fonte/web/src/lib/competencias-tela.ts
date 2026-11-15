@@ -39,14 +39,14 @@ export function instaladas(biblioteca: readonly Skill[], ligadas: readonly strin
 }
 
 /** Sem acento e em minúsculas, para a busca achar "reuniao" em "Reunião". */
-export const dobrar = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const dobrar = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const casa = (busca: string, ...campos: string[]) => {
   const termos = dobrar(busca).split(/\s+/).filter(Boolean);
   const alvo = dobrar(campos.join(' '));
   return termos.every((t) => alvo.includes(t));
 };
 
-export interface FiltroInstaladas { busca: string; de: 'agente' | 'equipe'; origem: Origem | 'todas' }
+interface FiltroInstaladas { busca: string; de: 'agente' | 'equipe'; origem: Origem | 'todas' }
 /** "deste agente": só as ligadas nele; "equipe toda": a biblioteca inteira e as do Treinar dele. */
 export function filtrarInstaladas(itens: readonly Instalada[], f: FiltroInstaladas): Instalada[] {
   return itens.filter((i) => (f.de === 'equipe' || i.ligada || (i.origem === 'treinar'))
@@ -65,7 +65,7 @@ export const removivel = (i: Instalada) => i.origem === 'enviada' || i.origem ==
 
 // ---------------------------------------------------------------- loja
 /** As que a pessoa costuma procurar primeiro (documentos de escritório, atas, revisão semanal). */
-export const DESTAQUE = ['docx', 'xlsx', 'pdf', 'powerpoint', 'meeting-action-items', 'weekly-review-planning', 'document-to-action-items', 'excel-author', 'pptx-author'];
+const DESTAQUE = ['docx', 'xlsx', 'pdf', 'powerpoint', 'meeting-action-items', 'weekly-review-planning', 'document-to-action-items', 'excel-author', 'pptx-author'];
 
 /** As categorias da vitrine, das que têm mais competências para as que têm menos. */
 export function categoriasDaLoja(lista: readonly CompetenciaLoja[]): Array<{ categoria: string; n: number }> {
@@ -74,7 +74,7 @@ export function categoriasDaLoja(lista: readonly CompetenciaLoja[]): Array<{ cat
   return [...n].map(([categoria, k]) => ({ categoria, n: k })).sort((a, b) => b.n - a.n || a.categoria.localeCompare(b.categoria));
 }
 
-export interface FiltroLoja { busca: string; categoria: string | null }
+interface FiltroLoja { busca: string; categoria: string | null }
 /** A vitrine: a busca local (enquanto a pessoa digita) e a categoria; as em destaque e as não instaladas primeiro. */
 export function filtrarLoja(lista: readonly CompetenciaLoja[], f: FiltroLoja): CompetenciaLoja[] {
   return lista.filter((c) => (!f.categoria || c.categoria === f.categoria) && (!f.busca.trim() || casa(f.busca, c.nome, c.descricao, c.categoria)))

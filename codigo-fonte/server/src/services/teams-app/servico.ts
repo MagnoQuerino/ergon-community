@@ -31,10 +31,10 @@ import {
 
 /** A instrução do canal (contrato, 7.2 item 1): quem escreve e por onde. */
 export const NOTA_TEAMS = 'Canal: conversa pelo Teams. Quem escreve é a pessoa dona do workspace, pela conta do Teams ligada por código. A resposta vai para o Teams: texto simples, sem tabelas largas.';
-export const TITULO_CONVERSA = 'Teams';
+const TITULO_CONVERSA = 'Teams';
 
 /** Para o agente, quando o pedido chegou com atraso (a fila do serviço guardou enquanto este Ergon estava fechado). */
-export const notaDeAtraso = (quando: string) => `Pedido enviado pelo Teams em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
+const notaDeAtraso = (quando: string) => `Pedido enviado pelo Teams em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
 /** Mais velho que isto (ou vindo da fila do serviço), o pedido é tratado como atrasado. */
 const ATRASO_MS = 10 * 60_000;
 
@@ -61,7 +61,7 @@ const ERROS: Record<string, [number, string]> = {
 };
 const erroDaTela = (code: string) => { const [s, m] = ERROS[code] ?? [502, 'O serviço do Teams não aceitou agora. Tente de novo em instantes.']; return new HttpError(s, code in ERROS ? code : 'teams_relay', m); };
 
-export type Problema = 'assinatura' | 'revogada' | 'versao' | 'substituida' | 'religar' | 'registro' | null;
+type Problema = 'assinatura' | 'revogada' | 'versao' | 'substituida' | 'religar' | 'registro' | null;
 
 /**
  * De quem é a conta do Teams que pediu o código, comparada com a conta Microsoft 365 ligada a este workspace (contrato
@@ -72,9 +72,9 @@ export type Problema = 'assinatura' | 'revogada' | 'versao' | 'substituida' | 'r
  * - outra_organizacao: outra organização;
  * - sem_conferir: sem conta Microsoft ligada (ou o serviço não informou), então não dá para conferir.
  */
-export type ContaDoTeams = 'sua' | 'outra_pessoa' | 'organizacao' | 'outra_organizacao' | 'sem_conferir';
+type ContaDoTeams = 'sua' | 'outra_pessoa' | 'organizacao' | 'outra_organizacao' | 'sem_conferir';
 
-export interface TeamsAppDeps {
+interface TeamsAppDeps {
   db: Db; bus: Bus; cfg: Config; vault: Vault; executor: RunExecutor; owners: WorkspaceOwners;
   /** a mesma decisão de POST /api/proposals/:id (conexões, depois de ler e as demais), com os mesmos ganchos */
   decidir: (ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject') => Promise<{ status: string; result: string }>;
@@ -86,7 +86,7 @@ export interface TeamsAppDeps {
 }
 
 /** Ajustes de tempo (os testes encurtam). */
-export interface AjustesTeams {
+interface AjustesTeams {
   avisosMs: number; saidaMs: number; digitandoMs: number; atrasoMs: number;
   /** prazo dos pedidos da tela ao serviço (ligar/desligar, avisos): o estado daqui já foi gravado, a conexão seguinte confere */
   pedidoMs?: number;

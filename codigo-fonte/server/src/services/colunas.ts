@@ -14,7 +14,7 @@ import type { Db } from '../db/db.ts';
 import { fold } from '../lib/util.ts';
 
 export type ChaveColuna = 'todo' | 'doing' | 'with_you' | 'done';
-export const CHAVES_COLUNA: readonly ChaveColuna[] = ['todo', 'doing', 'with_you', 'done'];
+const CHAVES_COLUNA: readonly ChaveColuna[] = ['todo', 'doing', 'with_you', 'done'];
 
 /** Os nomes de fábrica de cada coluna, nos dois idiomas (para os quadros sem código e para o que vem de outro aparelho). */
 const NOMES: Record<'team' | 'user', Partial<Record<ChaveColuna, string[]>>> = {

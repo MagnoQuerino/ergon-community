@@ -39,7 +39,7 @@ export interface StartRun {
 /** O nome de um perfil de agente no motor (o mesmo formato que o plugin aceita). */
 export const PERFIL_NOME = /^erg-[0-9a-f]{20}$/;
 /** O começo do caminho da API do motor para um perfil ('' = o perfil padrão). */
-export const prefixoDoPerfil = (profile: string | null | undefined): string => (profile && PERFIL_NOME.test(profile) ? `/p/${profile}` : '');
+const prefixoDoPerfil = (profile: string | null | undefined): string => (profile && PERFIL_NOME.test(profile) ? `/p/${profile}` : '');
 
 /**
  * Evento da execução, ao vivo (GET /v1/runs/{id}/events, SSE, conferido no Hermes v0.22.2): message.delta (texto
@@ -88,7 +88,7 @@ export function pedidoNaoChegou(err: unknown): boolean {
   return codigos.some((c) => !!c && NAO_CHEGOU.has(c));
 }
 /** as esperas entre as tentativas quando a ponte ainda não ouve (no total, uns 3,5 s) */
-export const ESPERAS_PONTE = [500, 1000, 2000];
+const ESPERAS_PONTE = [500, 1000, 2000];
 export async function fetchPonte(url: string, init: RequestInit, esperas: readonly number[] = ESPERAS_PONTE): Promise<Response> {
   for (let i = 0; ; i++) {
     try { return await fetch(url, init); } catch (err) {
@@ -107,7 +107,7 @@ export class HermesError extends Error {
 }
 
 /** Conversar pelo Telegram e pelo Discord: o motivo de uma recusa da ponte (a tela traduz pelo código). */
-export type CodigoCanal = 'formato' | 'codigo' | 'tentativas' | 'motor';
+type CodigoCanal = 'formato' | 'codigo' | 'tentativas' | 'motor';
 export class CanalErro extends Error {
   readonly code: CodigoCanal;
   constructor(code: CodigoCanal, message: string) { super(message); this.code = code; }
@@ -295,7 +295,7 @@ export function parseServed(raw: unknown): { provider: string | null; model: str
   return provider || model ? { provider, model } : null;
 }
 
-export function parseModelOptions(json: Record<string, unknown>): ModelOptions {
+function parseModelOptions(json: Record<string, unknown>): ModelOptions {
   const providers = (Array.isArray(json.providers) ? json.providers : []) as Array<Record<string, unknown>>;
   return {
     model: typeof json.model === 'string' ? json.model : null,
@@ -355,7 +355,7 @@ export const CAPACIDADE_ROTINAS = 'rotinas';
 export interface JobDaRotina { rotina: string; jobId: string | null; proxima: string | null; ultima: string | null; ultimoEstado: string | null; pausada: boolean; agenda: string | null }
 /** O que o Ergon pede para o job de uma rotina: no perfil do agente, nestes dias (0 = domingo) e hora, no fuso da pessoa. */
 export interface PedidoDeRotina { perfil: string; antes?: string | null; nome: string; dias: number[]; hora: string; fuso: string; ligada: boolean }
-export function parseJobDaRotina(j: unknown): JobDaRotina {
+function parseJobDaRotina(j: unknown): JobDaRotina {
   const o = (j && typeof j === 'object' ? j : {}) as Record<string, unknown>;
   const s = (v: unknown, n = 64) => (typeof v === 'string' && v ? v.slice(0, n) : null);
   const iso = (v: unknown) => { const x = s(v); return x && Number.isFinite(Date.parse(x)) ? new Date(Date.parse(x)).toISOString() : null; };
@@ -381,7 +381,7 @@ export interface MemoriaDoAgente {
   notas: string; pessoa: string;
   pendentes: Array<{ id: string; criado: number | null; alvo: 'pessoa' | 'notas'; itens: Array<{ acao: string; texto: string; antes: string }> }>;
 }
-export function parseMemoria(j: unknown): MemoriaDoAgente {
+function parseMemoria(j: unknown): MemoriaDoAgente {
   const o = (j && typeof j === 'object' ? j : {}) as Record<string, unknown>;
   const txt = (v: unknown, n: number) => (typeof v === 'string' ? v.slice(0, n) : '');
   const pend = Array.isArray(o.pendentes) ? o.pendentes : [];

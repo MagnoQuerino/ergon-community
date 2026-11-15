@@ -8,7 +8,7 @@ import { S } from '../lib/schemas.ts';
 import type { AuthContext } from '../services/auth.ts';
 import type { McpProprios, PedidoApp, TipoFerramenta } from '../services/mcp-proprio.ts';
 
-export interface McpProprioRoutesDeps {
+interface McpProprioRoutesDeps {
   apps: McpProprios;
   auth: (req: FastifyRequest) => AuthContext;
   owner: (req: FastifyRequest) => AuthContext;

@@ -25,7 +25,7 @@ const SKILL_STATUS: Record<AgentSkill['status'], { rotulo: Rotulo; cls: string }
 };
 
 /** As três coisas diferentes que dá para fazer no Treinar (rc.29), cada uma com o seu painel. */
-export type ModoTreinar = 'ensinar' | 'adicionar' | 'consulta';
+type ModoTreinar = 'ensinar' | 'adicionar' | 'consulta';
 const MODOS: ReadonlyArray<{ id: ModoTreinar; icone: string; titulo: Rotulo; texto: 'agente.modo.ensinar.texto' | 'agente.modo.pronta.texto' | 'agente.modo.consulta.texto' }> = [
   { id: 'ensinar', icone: 'bulb', titulo: 'agente.modo.ensinar.titulo', texto: 'agente.modo.ensinar.texto' },
   { id: 'adicionar', icone: 'plus', titulo: 'agente.modo.pronta.titulo', texto: 'agente.modo.pronta.texto' },

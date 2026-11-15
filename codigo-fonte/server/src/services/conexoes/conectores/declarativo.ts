@@ -168,7 +168,8 @@ export const conferirConector = async (def: ConectorDef, c: Credenciais): Promis
 // ---------------------------------------------------------------------------------------------------------- moldes
 const pegar = (x: unknown, caminho: string): unknown => caminho.split('.').reduce<unknown>((v, k) => (v && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined), x);
 const SO_MOLDE = /^\{([\w.]+)\}$/;
-const vazio = (v: unknown) => v === undefined || v === null || v === '';
+/** Vazio: sem valor, nulo ou texto vazio (zero e false contam como preenchidos). */
+export const vazio = (v: unknown) => v === undefined || v === null || v === '';
 
 function molde(v: unknown, a: Args): unknown {
   if (typeof v === 'string') {
@@ -195,6 +196,25 @@ function molde(v: unknown, a: Args): unknown {
 export function linhaDe(m: string, x: unknown, max = 400): string {
   return m.replace(/\{([\w.]+)\}/g, (_m, k: string) => { const v = pegar(x, k); return vazio(v) ? '' : neutral(clip(String(v).replace(/\s+/g, ' '), max), max + 2); }).replace(/\s+/g, ' ').trim();
 }
+
+// ------------------------------------------------------------------------------ ajudantes das ações dos conectores
+/** Texto de uma nota em HTML (Pipedrive, HubSpot), sem as marcas. */
+export const semHtml = (s: unknown) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+/** O conteúdo da nota é HTML: o texto vai como foi escrito, e cada quebra de linha fica. */
+export const paraHtml = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>');
+/** Só o que veio preenchido, com o valor limpo por linhaDe: texto de terceiros nunca vira linha de controle. */
+export const ficha = (x: unknown, campos: Array<[string, string]>, max = 400): string =>
+  campos.flatMap(([rotulo, campo]) => { const v = linhaDe(`{${campo}}`, x, max); return v ? [`${rotulo}: ${v}`] : []; }).join(', ');
+/** O que a pessoa lê no cartão: cada campo preenchido, por extenso e sem cortar. */
+export const detalhes = (a: Args, rotulos: Record<string, string>): string =>
+  Object.entries(rotulos).flatMap(([k, rotulo]) => (vazio(a[k]) ? [] : [`${rotulo}: ${String(a[k])}`])).join('\n');
+/** Busca ou filtro que precisa de pelo menos um dos campos. */
+export const exigeAlgum = (...nomes: string[]) => async (_c: CtxAcao, a: Args): Promise<Args> => {
+  if (!nomes.some((n) => !vazio(a[n]))) throw new ErroAcao(`diga pelo menos um destes: ${nomes.join(', ')}`);
+  return a;
+};
+/** Atribuir a alguém avisa essa pessoa (enviar); sem responsável, só organiza. */
+export const riscoDeAtribuir = (a: Args): Risco => (vazio(a.responsavel) ? 'organizar' : 'enviar');
 
 /**
  * Parâmetros conferidos e nos tipos certos, com padrão e teto. Na leitura, o número acima do teto vira o teto (pedir 500 e

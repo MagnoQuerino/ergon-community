@@ -9,7 +9,7 @@ import { descreverRegra, regraDaFrase, resumoDaProposta, soLiberacao } from './c
 import { attachToMessage, attachmentLine, attachmentsOf, type AttachmentInfo } from './attachments.ts';
 import { forkContext } from './conversation-tools.ts';
 
-export interface ConversationRow {
+interface ConversationRow {
   id: string; workspace_id: string; agent_id: string; owner_user_id: string; title: string; hermes_session_key: string; created_at: string;
 }
 
@@ -122,7 +122,7 @@ const CHANNEL_NOTE = 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do
  * nem regra); `queue`: com uma resposta em andamento, a mensagem entra na fila da conversa (Ctrl+Enter) e vai para o
  * agente quando ele terminar, em vez de ser recusada.
  */
-export interface SendOptions { /** Revisão em conselho: a resposta vem do conselho de modelos */ conselho?: boolean; note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null }
+interface SendOptions { /** Revisão em conselho: a resposta vem do conselho de modelos */ conselho?: boolean; note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null }
 
 export function sendMessage(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, userId: string, conversationId: string,
   text: string, clientRequestId: string, maxMessages: number, maxChars: number, opts: SendOptions = {}) {

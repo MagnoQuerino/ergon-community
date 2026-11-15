@@ -41,7 +41,7 @@ export function semSegredos(s: string): string {
     .replace(/\b[A-Za-z0-9_\-+/=]{64,}\b/g, '<oculto>');
 }
 
-export interface ReportOpts {
+interface ReportOpts {
   workspaceId: string; userId: string; tz: string; conteudo: boolean;
   /** período pedido (AAAA-MM-DD; sem ele, os últimos 7 dias): o usado de fato volta em `periodo` */
   de?: string; ate?: string;

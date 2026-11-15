@@ -8,7 +8,7 @@ import { isDarkHour } from '../iso/life.ts';
 import { t } from '../i18n/index.ts';
 
 export type ThemeMode = 'auto' | 'dia' | 'noite' | 'contraste';
-export type ThemeId = 'dia' | 'noite';
+type ThemeId = 'dia' | 'noite';
 const KEY = 'ergon.themeMode';
 
 const read = (): ThemeMode => { try { const v = localStorage.getItem(KEY); return v === 'dia' || v === 'noite' || v === 'contraste' ? v : 'auto'; } catch { return 'auto'; } };

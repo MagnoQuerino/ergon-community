@@ -27,7 +27,7 @@ export function fraseDaJanela(w: JanelaDeUso): string {
   return w.resetsAt ? t('configuracoes.ajustes.cota.restaRenova', { pct, cota, quando: fmtDataHora(w.resetsAt) }) : t('configuracoes.ajustes.cota.resta', { pct, cota });
 }
 
-export interface LinhaDeConta { titulo: string; frases: string[]; /** a menor sobra entre as janelas da conta (0 a 100), para a barra; null = sem janela */ resta: number | null }
+interface LinhaDeConta { titulo: string; frases: string[]; /** a menor sobra entre as janelas da conta (0 a 100), para a barra; null = sem janela */ resta: number | null }
 /** Uma conta de IA em linhas para a tela: o título (conta e plano) e as frases (cada janela, o saldo, a renovação). */
 export function linhasDaConta(c: ContaDeIa): LinhaDeConta {
   const conta = nomeDaConta(c.provider);

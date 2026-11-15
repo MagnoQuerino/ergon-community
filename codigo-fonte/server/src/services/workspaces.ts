@@ -11,7 +11,7 @@ import { HttpError, now } from '../lib/util.ts';
 import type { PersonKeySource } from '../security/keys.ts';
 import { createWorkspace } from './seed.ts';
 
-export interface WorkspaceSummary {
+interface WorkspaceSummary {
   id: string; name: string; role: string; createdAt: string; current: boolean;
   agents: number; openTasks: number; working: number; waiting: number;
 }

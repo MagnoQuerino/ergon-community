@@ -16,7 +16,7 @@ import * as N from './nucleo.ts';
 import type { Marcadores, Mensagem, Plural } from './tipos.ts';
 
 export type { Idioma } from './idiomas.ts';
-export { IDIOMAS, NOME_DO_IDIOMA, ehIdioma } from './idiomas.ts';
+export { IDIOMAS, NOME_DO_IDIOMA } from './idiomas.ts';
 
 type Areas = { readonly [area: string]: { readonly [chave: string]: Mensagem } };
 // o português vem junto com a tela; o inglês só é baixado por quem usa (quem fala português não paga nada a mais)
@@ -49,7 +49,7 @@ export type ValoresDe<K extends Chave> = MensagemDe<K> extends Plural
   : { readonly [P in NomesDe<MensagemDe<K>>]: string | number };
 type Args<K extends Chave> = [NomesDe<MensagemDe<K>>] extends [never] ? [] : [valores: ValoresDe<K>];
 /** Para tn(): cada marcador pode ser um pedaço de tela (negrito, link, ícone). */
-export type PedacosDe<K extends Chave> = MensagemDe<K> extends Plural
+type PedacosDe<K extends Chave> = MensagemDe<K> extends Plural
   ? { readonly n: number } & { readonly [P in Exclude<NomesDe<MensagemDe<K>>, 'n'>]: ReactNode }
   : { readonly [P in NomesDe<MensagemDe<K>>]: ReactNode };
 
@@ -180,5 +180,4 @@ export const fmtBytes = (b: number) => N.fmtBytes(atual, b);
 export const fmtData = (d: N.Data, opcoes?: Intl.DateTimeFormatOptions) => N.fmtData(atual, d, opcoes);
 export const fmtHora = (d: N.Data) => N.fmtHora(atual, d);
 export const fmtDataHora = (d: N.Data) => N.fmtDataHora(atual, d);
-export const fmtRelativo = (d: N.Data, agora?: number) => N.fmtRelativo(atual, d, agora);
 export const fmtLista = (itens: readonly string[], tipo?: 'conjunction' | 'disjunction') => N.fmtLista(atual, itens, tipo);

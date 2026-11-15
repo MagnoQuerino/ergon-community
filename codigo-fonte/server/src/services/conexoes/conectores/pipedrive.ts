@@ -15,28 +15,10 @@
  * Risco: atribuir a alguém (responsavel) pode avisar essa pessoa, então conta como envio; sem isso, só organiza.
  */
 import { neutral } from '../../operations.ts';
-import { linhaDe, type AcaoDecl, type ConectorDef } from './declarativo.ts';
-import { ErroAcao, dia, seg, type Acao, type Args, type CtxAcao, type Param, type Risco } from '../tipos.ts';
+import { detalhes, exigeAlgum, ficha, paraHtml, riscoDeAtribuir, semHtml, vazio, type AcaoDecl, type ConectorDef } from './declarativo.ts';
+import { ErroAcao, dia, seg, type Acao, type Args, type CtxAcao, type Param } from '../tipos.ts';
 
-const vazio = (v: unknown) => v === undefined || v === null || v === '';
 /** Tira as etiquetas e desfaz o escape de paraHtml, por último o &amp;: o que foi escrito volta igual. O resultado passa por linhaDe antes de chegar ao agente. */
-export const semHtml = (s: unknown) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-/** O conteúdo da nota é HTML: o texto vai como foi escrito, e cada quebra de linha fica. */
-export const paraHtml = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>');
-
-/** Só o que veio preenchido, com o valor limpo por linhaDe: texto de terceiros nunca vira linha de controle. */
-const ficha = (x: unknown, campos: Array<[string, string]>, max = 400): string =>
-  campos.flatMap(([rotulo, campo]) => { const v = linhaDe(`{${campo}}`, x, max); return v ? [`${rotulo}: ${v}`] : []; }).join(', ');
-
-/** O que a pessoa lê no cartão: cada campo preenchido, por extenso e sem cortar. */
-const detalhes = (a: Args, rotulos: Record<string, string>): string =>
-  Object.entries(rotulos).flatMap(([k, rotulo]) => (vazio(a[k]) ? [] : [`${rotulo}: ${String(a[k])}`])).join('\n');
-
-const exigeAlgum = (...nomes: string[]) => async (_c: CtxAcao, a: Args): Promise<Args> => {
-  if (!nomes.some((n) => !vazio(a[n]))) throw new ErroAcao(`diga pelo menos um destes: ${nomes.join(', ')}`);
-  return a;
-};
-const riscoDeAtribuir = (a: Args): Risco => (vazio(a.responsavel) ? 'organizar' : 'enviar');
 
 /** Na lista vêm objetos ({ value }); na busca, textos. */
 const valores = (l: unknown): string => (Array.isArray(l) ? l.map((e) => (typeof e === 'string' ? e : e?.value)).filter(Boolean).join(' / ') : '');

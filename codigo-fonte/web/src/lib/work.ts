@@ -8,7 +8,7 @@
 import { t, type Chave } from '../i18n/index.ts';
 
 export type WorkState = 'solicitada' | 'processamento' | 'resultado' | 'validacao' | 'concluida' | 'aguardando_info' | 'falha' | 'revisao' | 'aguardando_aprovacao';
-export type Display = 'fila' | 'andamento' | 'voce' | 'problema' | 'concluida';
+type Display = 'fila' | 'andamento' | 'voce' | 'problema' | 'concluida';
 
 const DISPLAY_OF: Record<WorkState, Display> = {
   solicitada: 'fila', processamento: 'andamento', resultado: 'andamento', validacao: 'andamento', concluida: 'concluida',

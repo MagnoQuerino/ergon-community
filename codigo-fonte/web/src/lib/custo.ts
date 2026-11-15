@@ -25,7 +25,7 @@ export const composicaoVazia = () => t('configuracoes.custo.composicaoVazia');
 export const composicaoNota = () => t('configuracoes.custo.composicaoNota');
 export const composicaoEstimada = () => t('configuracoes.custo.composicaoEstimada');
 
-export interface Fatia { id: 'instrucoes' | 'ferramentas' | 'memoria' | 'anexos' | 'conversa'; rotulo: string; fracao: number; pct: string }
+interface Fatia { id: 'instrucoes' | 'ferramentas' | 'memoria' | 'anexos' | 'conversa'; rotulo: string; fracao: number; pct: string }
 const ROTULOS = {
   instrucoes: 'configuracoes.custo.fatiaInstrucoes',
   ferramentas: 'configuracoes.custo.fatiaFerramentas',

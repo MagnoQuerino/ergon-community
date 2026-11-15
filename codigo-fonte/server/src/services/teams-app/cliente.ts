@@ -15,7 +15,7 @@ export class ErroDoRele extends Error {
   constructor(code: string, detalhe: Record<string, unknown> = {}) { super(code); this.code = code; this.detalhe = detalhe; }
 }
 
-export interface OpcoesCliente {
+interface OpcoesCliente {
   url: string;
   installationId: () => string;
   assinar: (mensagem: string) => string;

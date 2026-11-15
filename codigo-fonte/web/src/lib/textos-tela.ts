@@ -16,9 +16,9 @@ import { emitLocal } from './live.ts';
 // ---------------------------------------------------------------- o que vem do servidor com código
 
 /** Um valor de um texto do servidor: texto cru (nome, título, o que o agente escreveu), número, outro texto ou lista. */
-export type ValorServidor = string | number | TextoServidor | readonly ValorServidor[];
+type ValorServidor = string | number | TextoServidor | readonly ValorServidor[];
 /** Um texto do servidor: o código (a chave da área "servidor") e os valores dos marcadores. */
-export interface TextoServidor { readonly codigo: string; readonly valores?: Readonly<Record<string, ValorServidor>>; readonly forma?: 'maiuscula' | 'frase' }
+interface TextoServidor { readonly codigo: string; readonly valores?: Readonly<Record<string, ValorServidor>>; readonly forma?: 'maiuscula' | 'frase' }
 
 const SERVIDOR = pt.servidor as unknown as Readonly<Record<string, Mensagem>>;
 const ehTexto = (v: unknown): v is TextoServidor => !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as TextoServidor).codigo === 'string';

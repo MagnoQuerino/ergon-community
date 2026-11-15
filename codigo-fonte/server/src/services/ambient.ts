@@ -20,13 +20,13 @@ import { defaultBoard } from './tasks.ts';
 import { ELIGIBLE_SQL, MAX_ATTEMPTS, QUEUE_ORDER, TODO_COLUMN } from './teamwork.ts';
 import { agentsLite, type AgentLite } from './team-query.ts';
 
-export const AMBIENT_VERSION = 1;
+const AMBIENT_VERSION = 1;
 export const CATEGORIES = ['ativo', 'pronto', 'bloqueado', 'precisa_de_voce', 'impedido', 'falhou'] as const;
 export type Category = typeof CATEGORIES[number];
 /** ações que os painéis atuais já fazem (a interface só leva até eles; o servidor valida de novo) */
-export type Action = 'abrir' | 'priorizar' | 'responder' | 'parar' | 'cancelar' | 'conversa';
+type Action = 'abrir' | 'priorizar' | 'responder' | 'parar' | 'cancelar' | 'conversa';
 
-export interface OpsItem {
+interface OpsItem {
   /** chave estável: origem e id (o mesmo card não vira dois itens por ter execução, etapa ou revisão) */
   key: string;
   source: 'task' | 'run';
@@ -50,11 +50,11 @@ export interface OpsItem {
   dependsOn: Array<{ taskId: string; number: number; agentName: string | null }>;
   actions: Action[];
 }
-export interface Delivery {
+interface Delivery {
   taskId: string; number: number; title: string; agentName: string | null; completedAt: string;
   by: 'agent' | 'human' | 'external'; resultState: string | null; kind: string | null; deliverables: number; simulated: boolean;
 }
-export interface AmbientOps {
+interface AmbientOps {
   version: number; at: string; workspaceId: string;
   local: {
     limit: number | null; choice: ProcessLimit['choice']; cap: number | null;

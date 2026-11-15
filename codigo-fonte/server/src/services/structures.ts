@@ -5,7 +5,7 @@
  * Versão local: criar estruturas e andares é grátis e sem limite de quantidade (só o máximo de andares
  * de cada tipo). Nada aqui cobra, debita ou simula pagamento.
  */
-import { CATALOG, DEFAULT_LOTS, cellsOf, cityExtent, fitAt, footprintOf, freeCells, placeError, typeOf, type Placed, type PlaceError } from '../../../shared/city.ts';
+import { DEFAULT_LOTS, cellsOf, cityExtent, fitAt, footprintOf, freeCells, placeError, typeOf, type Placed, type PlaceError } from '../../../shared/city.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, id, notFound, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
@@ -250,5 +250,3 @@ export function growForAgent(db: Db, bus: Bus, workspaceId: string, actorUserId:
     throw new HttpError(409, 'capacity_exceeded', 'Não achei lugar na cidade para mais uma construção.');
   });
 }
-
-export { CATALOG };

@@ -433,7 +433,7 @@ roteiro[:] = [ferramenta("pedir_senha_admin", {"motivo": "atualizar os pacotes t
 rodar("sessao-f", "atualize os pacotes")
 res = resultado(1)
 check("senha guardada: o modelo recebe só a confirmação", res.get("ok") is True and "ficou guardada" in str(res.get("texto")), str(res))
-check("senha guardada: está no .env como SUDO_PASSWORD e a lista diz que há uma", f"SUDO_PASSWORD=" in open(os.path.join(HOME, ".env"), encoding="utf-8").read()
+check("senha guardada: está no .env como SUDO_PASSWORD e a lista diz que há uma", "SUDO_PASSWORD=" in open(os.path.join(HOME, ".env"), encoding="utf-8").read()
       and ponte("GET", "/ergon/v1/chaves")[1].get("sudo") is True)
 check("senha guardada: o Hermes passa a usá-la (configurada)", sudo._transform_sudo_command("sudo true")[1] == SENHA_GUARDADA + "\n")
 limpar()

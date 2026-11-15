@@ -31,7 +31,7 @@
  */
 import crypto from 'node:crypto';
 import { neutral } from '../../operations.ts';
-import { linhaDe, type ConectorDef } from './declarativo.ts';
+import { linhaDe, vazio, type ConectorDef } from './declarativo.ts';
 import { ErroAcao, dia as diaDe, seg, type Acao, type Args, type CtxAcao, type Param, type Resultado } from '../tipos.ts';
 
 type Campos = Array<[rotulo: string, campo: string]>;
@@ -58,7 +58,6 @@ const SITUACOES = ['PENDING', 'RECEIVED', 'CONFIRMED', 'OVERDUE', 'REFUNDED', 'R
 const dia = (descricao: string): Param => ({ tipo: 'texto', descricao: `${descricao}, no formato AAAA-MM-DD` });
 
 // ---------------------------------------------------------------------------------------------------------- escrita
-const vazio = (v: unknown) => v === undefined || v === null || v === '';
 const FORMAS = ['UNDEFINED', 'BOLETO', 'PIX', 'CREDIT_CARD'];
 const NOME_FORMA: Record<string, string> = { UNDEFINED: 'o cliente escolhe', BOLETO: 'boleto', PIX: 'Pix', CREDIT_CARD: 'cartão de crédito' };
 /** R$ com vírgula, como a pessoa lê no cartão de confirmação. */

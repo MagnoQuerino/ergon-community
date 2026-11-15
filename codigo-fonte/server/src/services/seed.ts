@@ -5,14 +5,14 @@ import { SECTORS, setSetting } from './sectors.ts';
 import { ensureCity } from './structures.ts';
 
 /** Colunas do quadro da equipe: a revisão, a espera e a falha são estados dentro do andamento (aparecem no card). */
-export const DEFAULT_COLUMNS = ['A fazer', 'Em andamento', 'Concluído'];
+const DEFAULT_COLUMNS = ['A fazer', 'Em andamento', 'Concluído'];
 /** O código fixo de cada coluna acima (colunas.ts): o sistema anda com os cards pelo código, nunca pelo nome. */
-export const DEFAULT_COLUMN_KEYS = ['todo', 'doing', 'done'] as const;
+const DEFAULT_COLUMN_KEYS = ['todo', 'doing', 'done'] as const;
 /** Colunas do quadro do usuário ("Minhas tarefas", lista local). */
 export const USER_COLUMNS = ['A fazer', 'Fazendo', 'Feito'];
-export const USER_COLUMN_KEYS = ['todo', 'doing', 'done'] as const;
+const USER_COLUMN_KEYS = ['todo', 'doing', 'done'] as const;
 
-export interface SeedResult { workspaceId: string; boardId: string; buildingId: string }
+interface SeedResult { workspaceId: string; boardId: string; buildingId: string }
 
 /**
  * Workspace novo com a equipe de partida. `welcome`: é de uma conta que acabou de chegar — a interface faz as

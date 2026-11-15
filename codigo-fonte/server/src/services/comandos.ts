@@ -24,7 +24,7 @@ import type { RunExecutor, RunRow, RunStatus } from './runs.ts';
 
 export type TipoComando = 'meta' | 'repetir' | 'checagem' | 'comentar' | 'revisao';
 export type Alvo = { conversationId: string; taskId?: undefined } | { taskId: string; conversationId?: undefined };
-export interface ComandoRow {
+interface ComandoRow {
   id: string; workspace_id: string; user_id: string; conversation_id: string | null; task_id: string | null;
   kind: 'meta' | 'repetir' | 'checagem' | 'revisao'; texto: string; criterio: string | null; intervalo_s: number | null; max_rodadas: number; rodadas: number;
   status: 'ativo' | 'cumprido' | 'esgotado' | 'bloqueado' | 'parado'; nota: string | null; proxima_em: string | null; run_id: string | null; created_at: string; updated_at: string;
@@ -41,11 +41,11 @@ const NOMES: Record<TipoComando, string[]> = {
 const PARAR = ['parar', 'stop', 'pare', 'cancelar', 'cancel', 'clear', 'off'];
 export const INTERVALO_MIN_S = 60;
 export const INTERVALO_MAX_S = 7 * 86400;
-export const INTERVALO_PADRAO_S = 30 * 60;
+const INTERVALO_PADRAO_S = 30 * 60;
 // meta: 20, o mesmo do motor (goals.max_turns); repetir e checagem são o freio de um laço que a pessoa iniciou
 export const RODADAS_PADRAO: Record<'meta' | 'repetir' | 'checagem', number> = { meta: 20, repetir: 12, checagem: 24 };
 export const RODADAS_MAX = 50;
-export const KEY_REVISAO = 'comando-revisao-';
+const KEY_REVISAO = 'comando-revisao-';
 const KEY_RODADA = 'cmd';
 
 /** "5m", "2h", "90s", "1d", "30 min", "a cada 2 horas", "every 10 minutes" → segundos (null = não é um intervalo). */
@@ -57,7 +57,7 @@ export function parseIntervalo(s: string): number | null {
   return Number(m[1]) * mult;
 }
 
-export interface ComandoLido { tipo: TipoComando; texto: string; intervaloS: number | null; criterio: string | null; parar: boolean }
+interface ComandoLido { tipo: TipoComando; texto: string; intervaloS: number | null; criterio: string | null; parar: boolean }
 /**
  * Um atalho digitado na conversa: "/meta entregar o relatório com três seções", "/repetir 30m confira a caixa de entrada
  * até: chegar a resposta do cliente", "/heartbeat every 2h veja se o site está no ar", "/btw use o tom formal",
@@ -94,7 +94,7 @@ const TX = {
   comentario: { pt: (t: string) => `Comentário entregue sem interromper: ${t}`, en: (t: string) => `Comment delivered without interrupting: ${t}` },
 } as const;
 
-export interface ComandosDeps {
+interface ComandosDeps {
   /** envia um texto à conversa como a pessoa (uma nova rodada do agente); nota: instrução extra só para o agente */
   enviar: (ws: string, userId: string, conversationId: string, texto: string, chave: string, nota: string | null) => { runId: string | null };
   /** devolve o card à equipe com uma instrução (nova rodada no mesmo card) */

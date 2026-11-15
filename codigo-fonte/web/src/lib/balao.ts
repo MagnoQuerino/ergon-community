@@ -3,7 +3,7 @@
 // anterior é este armazém: abrir um fecha o que estava aberto, sem um ficar por cima do outro.
 import { useSyncExternalStore } from 'react';
 
-export type Balao = 'estado' | 'workspace' | 'musica' | 'conta' | 'decisoes';
+type Balao = 'estado' | 'workspace' | 'musica' | 'conta' | 'decisoes';
 
 let atual: Balao | null = null;
 const subs = new Set<() => void>();

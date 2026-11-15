@@ -23,9 +23,9 @@ import { getSetting } from './sectors.ts';
 import { readLang } from './prefs.ts';
 
 /** Um card do motivo de uma abertura: o que o colega precisa da pessoa nele (fotografia de quando chamou). */
-export interface CardDoMotivo { id: string; number: number; title: string; need: 'info' | 'approval' | 'review'; question: string | null }
+interface CardDoMotivo { id: string; number: number; title: string; need: 'info' | 'approval' | 'review'; question: string | null }
 /** Por que o colega puxou conversa (messages.motivo, cifrado): os cards em que ele precisa da pessoa. */
-export interface Motivo { cards: CardDoMotivo[] }
+interface Motivo { cards: CardDoMotivo[] }
 
 /** O assunto, de leve, no fim da abertura ("É sobre “Levantamento de concorrentes”."): a pessoa já sabe do que se trata. */
 export function assuntoDeLeve(cards: Array<{ title: string }>, lang: 'pt' | 'en'): string {
@@ -37,14 +37,14 @@ export function assuntoDeLeve(cards: Array<{ title: string }>, lang: 'pt' | 'en'
 }
 
 /** fora há tanto tempo (ou outro dia): chegou */
-export const ARRIVAL_GAP_MS = 4 * 3600_000;
+const ARRIVAL_GAP_MS = 4 * 3600_000;
 /** quantas vezes um colega puxa o mesmo pedido (uma por chegada, em dias diferentes) */
 const NUDGE_MAX = 2;
 /** marcas de urgente por agente em 24 h (mais que isso é alarme falso) */
 const URGENT_MAX = 3;
 /** boas-vindas por dia */
 const WELCOME_MAX = 2;
-export const WELCOME_KEY = 'chat-boas-vindas-';
+const WELCOME_KEY = 'chat-boas-vindas-';
 
 const local = (tz: string, at = Date.now()) => {
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(at));

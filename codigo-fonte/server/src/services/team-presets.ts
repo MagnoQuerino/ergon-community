@@ -46,7 +46,7 @@ type SectorKey = 'coordenacao' | 'central' | 'producao' | 'brainstorm' | 'qualid
  * ferramentas do personagem (nenhuma permissão nova); `extra` acrescenta ferramentas seguras quando o preset precisa.
  */
 interface A { char: string; role: string; focus: string; skills: string[]; extra?: string[] }
-export interface TeamPreset {
+interface TeamPreset {
   key: string; title: string; summary: string;
   sectors: Partial<Record<SectorKey, [string, string]>>;
   agents: A[];
@@ -262,7 +262,7 @@ export const PRESETS: TeamPreset[] = [
 export const presetByKey = (k: string): TeamPreset | undefined => PRESETS.find((p) => p.key === k);
 
 /** O preset de quem chega: uso pessoal sempre leva à equipe pessoal; senão, a área; área "outra" fica na equipe geral. */
-export function presetFor(use: string, niche: string): TeamPreset | null {
+function presetFor(use: string, niche: string): TeamPreset | null {
   if (use === 'pessoal') return presetByKey('pessoal')!;
   return presetByKey(niche) ?? null;
 }
@@ -270,7 +270,7 @@ export function presetFor(use: string, niche: string): TeamPreset | null {
 const charterOf = (x: A) => `${x.focus} Entregue resultados prontos para usar e diga o que depende de outras pessoas. Se o pedido for vago, faça uma pergunta curta antes de começar. Quando outro colega for mais indicado, diga quem e por quê.`;
 
 /** aiConnected: a conta de IA já foi conectada nas boas-vindas (não precisa do passo "conectar") */
-export interface OnboardingInput { use: string; niche: string; nicheOther?: string; company?: string; goal?: string; aiConnected?: boolean }
+interface OnboardingInput { use: string; niche: string; nicheOther?: string; company?: string; goal?: string; aiConnected?: boolean }
 
 /**
  * Aplica o perfil escolhido no primeiro acesso: renomeia os setores, dá a cada personagem o ofício do preset

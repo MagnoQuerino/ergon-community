@@ -28,11 +28,11 @@ import { descreverAlcance, descreverRegra, MAIOR_PRAZO_MS, PRAZO_MS, RegrasConex
 import type { CtxTarefas } from './tarefas.ts';
 import { ErroAcao, type Acao, type Args, type CtxAcao, type EscritorTarefas, type Http, type Resultado, type Risco } from './tipos.ts';
 
-export const LIBERAR_TUDO = 'conexoes.liberar_tudo';
+const LIBERAR_TUDO = 'conexoes.liberar_tudo';
 /** Depois de ler conteúdo das contas, pedir aprovação antes de abrir sites ou rodar programas. Ausente = desligado (decisão de 08/11). */
-export const APROVAR_DEPOIS_DE_LER = 'conexoes.aprovar_depois_de_ler';
+const APROVAR_DEPOIS_DE_LER = 'conexoes.aprovar_depois_de_ler';
 /** Sempre pedir confirmação antes de organizar (criar, mudar, deixar rascunhos), em todas as contas. Ausente = desligado. */
-export const CONFIRMAR_ORGANIZAR = 'conexoes.confirmar_organizar';
+const CONFIRMAR_ORGANIZAR = 'conexoes.confirmar_organizar';
 /** O cartão de aprovação: abrir sites ou rodar programas depois de ler conteúdo das contas (proposals.ts). */
 export const KIND_DEPOIS_DE_LER = 'depois_de_ler';
 /** O que o cartão de aprovação guarda (proposals.ts): onde vale, o grupo e o que exatamente foi pedido (regra.ts, chavesDeAprovacao). */
@@ -60,7 +60,7 @@ const REPETIR = /\b(de novo|novamente|outra vez|mais uma vez|reenvi\w*|reencamin
 const OUTRO_IGUAL = /\b(?:outr[ao]s?|mais uma?)\s+(?:\w+\s+){0,2}?(?:igua(?:l|is)|venda|lancamento|conta|cadastro|registro)\b|\b(?:another|one more)\s+(?:\w+\s+){0,2}?(?:identical|same|sale|entry|account|record|registration)\b/;
 const MAX_RESPOSTA = 30_000;
 
-export interface RespostaAcao {
+interface RespostaAcao {
   ok: boolean;
   status: 'feita' | 'aguardando_confirmacao' | 'falhou';
   texto: string;
@@ -83,16 +83,16 @@ export interface RespostaAcao {
 /** O que a marca no card guarda além do motivo (fica só no servidor; o agente não recebe): o risco da chamada e a linha. */
 interface DaMarca { risco?: Risco; dedupe?: string | null }
 type Interna = RespostaAcao & { marca?: DaMarca };
-export interface ItemTeste { nome: string; ok: boolean; detalhe: string }
+interface ItemTeste { nome: string; ok: boolean; detalhe: string }
 /**
  * Uma etapa do consentimento da Microsoft, para a tela: dada ("ok"), ainda não pedida ("falta"), com o login aberto ("pedido",
  * 10 minutos), pedida sem sucesso ou sem volta ("bloqueado"), ou aprovada pelo administrador e esperando a pessoa entrar de novo.
  * `administrador`: na empresa, esta etapa costuma precisar dele; `link`: o pedido pronto para a pessoa copiar e enviar.
  */
-export interface EtapaDaTela { id: Etapa; estado: 'ok' | 'falta' | 'pedido' | 'bloqueado' | 'aprovado'; opcional: boolean; administrador: boolean; link: string | null; erro: string | null }
+interface EtapaDaTela { id: Etapa; estado: 'ok' | 'falta' | 'pedido' | 'bloqueado' | 'aprovado'; opcional: boolean; administrador: boolean; link: string | null; erro: string | null }
 type RunLike = Pick<RunRow, 'id' | 'workspace_id' | 'agent_id' | 'conversation_id' | 'task_id' | 'idempotency_key'>;
 
-export interface ConexoesDeps {
+interface ConexoesDeps {
   db: Db; bus: Bus; integrations: Integrations; whatsapp: WaAcoes;
   /** terminal ou execução de código ligados no motor desta pessoa: quem os usa alcança a ponte (regra.ts) */
   codigoLigado(workspaceId: string, run?: Pick<RunRow, 'id' | 'agent_id' | 'workspace_id'>): boolean;

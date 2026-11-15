@@ -8,7 +8,7 @@
  */
 import crypto from 'node:crypto';
 
-export const KEY_BYTES = 32;
+const KEY_BYTES = 32;
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 

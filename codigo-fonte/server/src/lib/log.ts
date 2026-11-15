@@ -4,7 +4,7 @@
  * nunca conteúdo do usuário. O servidor liga no registro do Fastify (o mesmo das requisições, com o `reqId` delas);
  * nos testes fica quieto. Nada é enviado para fora: o registro é o do contêiner.
  */
-export interface Log { info(o: object, m: string): void; warn(o: object, m: string): void; error(o: object, m: string): void }
+interface Log { info(o: object, m: string): void; warn(o: object, m: string): void; error(o: object, m: string): void }
 const quiet: Log = { info() {}, warn() {}, error() {} };
 let current: Log = quiet;
 export const log: Log = { info: (o, m) => current.info(o, m), warn: (o, m) => current.warn(o, m), error: (o, m) => current.error(o, m) };

@@ -45,7 +45,7 @@ export class Bus {
   }
 }
 
-export interface AuditInput {
+interface AuditInput {
   workspaceId: string;
   actorType: 'user' | 'agent' | 'system' | 'connector';
   actorId?: string | null;

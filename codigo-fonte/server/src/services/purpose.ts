@@ -32,12 +32,12 @@ export interface Plan { objective: string; steps: PlanStep[]; review?: 'nao' | '
 /** acima disto, o lote espera a sua confirmação ("Abrir todos") */
 export const BATCH_CONFIRM = 8;
 /** teto de cards numa resposta */
-export const BATCH_MAX = 30;
-export const MAX_STEPS = 8;
+const BATCH_MAX = 30;
+const MAX_STEPS = 8;
 /** prefixo das execuções de entrega (a conversa continua; não entra no limite de processos) */
 export const DELIVERY_KEY = 'entrega-';
 /** a entrega de cada rodada (a 1ª sem sufixo; ajustes pedidos por você: #r2, #r3…) */
-export const deliveryKey = (origin: string, round: number) => `${DELIVERY_KEY}${origin}${round > 1 ? `#r${round}` : ''}`;
+const deliveryKey = (origin: string, round: number) => `${DELIVERY_KEY}${origin}${round > 1 ? `#r${round}` : ''}`;
 /** a mesma chave, em SQL, para o card `t` */
 export const DELIVERY_KEY_SQL = (t = 't') => `'${DELIVERY_KEY}' || ${t}.origin_run_id || CASE WHEN ${t}.review_round > 1 THEN '#r' || ${t}.review_round ELSE '' END`;
 /** card pronto para entregar: concluído, ou entregue a você e esperando a sua aprovação */
@@ -125,7 +125,7 @@ export const currentStep = (steps: StepRow[]): StepRow | undefined =>
  * O pedido do usuário por trás de uma execução da conversa: a mensagem dele que a disparou; numa continuação
  * (entrega, permissão), a última mensagem dele antes dela.
  */
-export function purposeOf(db: Db, r: Pick<RunRow, 'id' | 'conversation_id' | 'created_at'>): string {
+function purposeOf(db: Db, r: Pick<RunRow, 'id' | 'conversation_id' | 'created_at'>): string {
   if (!r.conversation_id) return '';
   const own = db.get<{ content: string }>("SELECT content FROM messages WHERE run_id = ? AND role = 'user' LIMIT 1", r.id)?.content;
   if (own) return own;

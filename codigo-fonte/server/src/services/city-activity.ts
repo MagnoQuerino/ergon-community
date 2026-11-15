@@ -9,9 +9,9 @@
  */
 import type { Db } from '../db/db.ts';
 
-export type ActivityKind = 'executando' | 'na_fila' | 'aguardando_voce' | 'revisando' | 'aguardando_aprovacao' | 'aguardando_info' | 'treinando';
+type ActivityKind = 'executando' | 'na_fila' | 'aguardando_voce' | 'revisando' | 'aguardando_aprovacao' | 'aguardando_info' | 'treinando';
 
-export interface ActivityTag {
+interface ActivityTag {
   kind: ActivityKind;
   /** agentes envolvidos; `lead` leva a etiqueta (os demais ficam ligados a ela, sem repetir) */
   agents: string[];
@@ -27,7 +27,7 @@ export interface ActivityTag {
 }
 
 /** teto por leitura (a cidade mostra as do que está na tela; mais que isso seria ruído) */
-export const ACTIVITY_LIMIT = 800;
+const ACTIVITY_LIMIT = 800;
 
 const TITLES: Record<ActivityKind, (n: number | null) => string> = {
   executando: (n) => `Trabalhando na tarefa #${n}`,

@@ -24,20 +24,20 @@ import type { RunExecutor } from '../runs.ts';
 import { coordinatorFor } from '../team-query.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
-export const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
-export const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord' };
+const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
+const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord' };
 /** O formato do código de cada bot (o mesmo do plugin): o que não tem esse jeito nem vai ao motor. */
-export const FORMATO_TOKEN: Record<NomeCanal, RegExp> = {
+const FORMATO_TOKEN: Record<NomeCanal, RegExp> = {
   telegram: /^\d{5,14}:[A-Za-z0-9_-]{30,64}$/,
   discord: /^[A-Za-z0-9_-]{18,40}\.[A-Za-z0-9_-]{4,12}\.[A-Za-z0-9_-]{20,90}$/,
 };
-export const CAPACIDADE_CANAIS = 'canais';
+const CAPACIDADE_CANAIS = 'canais';
 /** A instrução do canal para chat.ts (chatHooks.channelNote). */
 export const notaCanal = (c: NomeCanal) => `Canal: conversa pelo ${NOME_CANAL[c]}. Quem escreve é a pessoa dona do workspace, pela conta do ${NOME_CANAL[c]} ligada por código. A resposta vai para o ${NOME_CANAL[c]}: texto simples, sem tabelas largas.`;
-export const notaDeAtrasoCanal = (c: NomeCanal, quando: string) => `Pedido enviado pelo ${NOME_CANAL[c]} em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
+const notaDeAtrasoCanal = (c: NomeCanal, quando: string) => `Pedido enviado pelo ${NOME_CANAL[c]} em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
 const ATRASO_MS = 10 * 60_000;
 /** O que só se responde no Ergon: autorização com senha, pergunta, pedido de chave ou senha (o valor nunca passa pelo canal). */
-export const SO_NO_ERGON = ['permission', 'question', 'segredo', 'info_request', 'handoff'];
+const SO_NO_ERGON = ['permission', 'question', 'segredo', 'info_request', 'handoff'];
 const DIA = 86_400_000;
 /** Textos que o bot manda de imediato (nas duas línguas: a pessoa pode usar o Ergon em qualquer uma). */
 export const RESPOSTA = {
@@ -54,7 +54,7 @@ interface VinculoRow {
   conversation_id: string | null; cursor_rowid: number; aviso_janela: string | null; primeira_em: string | null; created_at: string;
 }
 interface SaidaRow { id: string; user_id: string; canal: NomeCanal; workspace_id: string; tipo: 'texto' | 'cartao' | 'editar'; payload: string; status: string; tentativas: number; proximo_em: string; message_id: string | null; created_at: string }
-export interface ItemSaida { id: string; canal: NomeCanal; tipo: 'texto' | 'cartao' | 'editar' | 'digitando'; chat_id: string; user_id: string; texto?: string; botoes?: Array<[string, string]>; message_id?: string }
+interface ItemSaida { id: string; canal: NomeCanal; tipo: 'texto' | 'cartao' | 'editar' | 'digitando'; chat_id: string; user_id: string; texto?: string; botoes?: Array<[string, string]>; message_id?: string }
 
 const MIGRACOES: Array<[string, string]> = [
   ['c0001_canais', `
@@ -77,7 +77,7 @@ const MIGRACOES: Array<[string, string]> = [
       PRIMARY KEY (user_id, canal, item));
   `],
 ];
-export function migrarCanais(db: Db): void {
+function migrarCanais(db: Db): void {
   db.raw.exec('CREATE TABLE IF NOT EXISTS canais_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
   const feitas = new Set(db.all<{ name: string }>('SELECT name FROM canais_migrations').map((r) => r.name));
   for (const [nome, sql] of MIGRACOES) {
@@ -86,7 +86,7 @@ export function migrarCanais(db: Db): void {
   }
 }
 
-export interface CanaisDeps {
+interface CanaisDeps {
   db: Db; bus: Bus; cfg: Config; executor: RunExecutor; owners: WorkspaceOwners;
   /** a ponte de controle do motor do workspace (null: motor desligado ou instalação sem motor) */
   control: (ws: string) => HermesControlClient | null;
@@ -99,7 +99,7 @@ export interface CanaisDeps {
 }
 
 /** Ajustes de tempo (os testes encurtam). */
-export interface AjustesCanais { avisosMs: number; atrasoMs: number; digitandoMs: number; esperaMaxMs: number; arrendamentoMs: number }
+interface AjustesCanais { avisosMs: number; atrasoMs: number; digitandoMs: number; esperaMaxMs: number; arrendamentoMs: number }
 
 export class Canais {
   readonly d: CanaisDeps;

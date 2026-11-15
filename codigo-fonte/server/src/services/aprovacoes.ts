@@ -28,21 +28,21 @@ import { sessionKeyFor, type RunRow } from './runs.ts';
 /** O prazo do motor para uma aprovação (approvals.timeout no cofre, migração 9): até lá o turno fica parado esperando. */
 export const PRAZO_DO_MOTOR_MS = 300_000;
 /** O comando aprovado depois do prazo vale na mesma conversa (ou card) por este tempo. */
-export const PREVIA_VALE_MS = 24 * 3600_000;
+const PREVIA_VALE_MS = 24 * 3600_000;
 export const KIND_APROVACAO = 'aprovacao';
 const CARTAO_DO_ERGON = /^plugin_rule:ergon_(apr_[0-9a-f]{32})$/;
 /**
  * Enviar em nome da pessoa por um aplicativo conectado (MCP, rc.29): o plugin pede o portão do motor com esta regra, e o
  * pedido inteiro (aplicativo, ferramenta e parâmetros) vem na descrição. A conferência na regra = um envio, como está.
  */
-export const ENVIO_POR_APLICATIVO = /^plugin_rule:ergon_mcp_[0-9a-f]{24}$/;
+const ENVIO_POR_APLICATIVO = /^plugin_rule:ergon_mcp_[0-9a-f]{24}$/;
 const ATIVA = (r: Pick<RunRow, 'status'> | null | undefined) => !!r && (r.status === 'running' || r.status === 'waiting_user');
 
 interface Linha {
   run_id: string; request_id: string; workspace_id: string; proposal_id: string | null; tipo: 'motor' | 'cartao'; comando: string | null; padrao: string | null;
   estado: 'esperando' | 'respondida' | 'expirou'; espera_ms: number; created_at: string; decided_at: string | null;
 }
-export interface PedidoDeAprovacao { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string; envio?: true }
+interface PedidoDeAprovacao { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string; envio?: true }
 
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 

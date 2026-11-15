@@ -133,7 +133,7 @@ const cursorDe = (a: Args): string | undefined => {
 const haMais = (j: any): string => (j?.nextPageToken ? `\nHá mais resultados: repita os mesmos parâmetros com cursor="${String(j.nextPageToken)}".` : '');
 
 // --------------------------------------------------------------------------------------------- bytes (arquivos)
-export interface RespostaBytes { data: Buffer; mime: string }
+interface RespostaBytes { data: Buffer; mime: string }
 export type HttpBytes = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: Buffer; kind?: 'read' | 'write'; teto?: number }) => Promise<RespostaBytes>;
 /**
  * `Http` fala JSON: request() passa o corpo por JSON.stringify e a resposta por JSON.parse. Baixar do Drive e enviar multipart

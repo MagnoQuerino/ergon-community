@@ -9,9 +9,9 @@ import { t } from '../i18n/index.ts';
  * e só para quem administra o Ergon: a volta troca a versão da instalação inteira, com os dados de todas as pessoas.
  */
 /** instalada-fora: a instalada já não está entre as publicadas recentemente (o aplicativo recusaria a volta). */
-export type Rollback = 'pode' | 'antiga' | 'sem-pacote' | 'instalada-fora';
+type Rollback = 'pode' | 'antiga' | 'sem-pacote' | 'instalada-fora';
 
-export interface VersaoAnterior { version: string; url: string | null; publishedAt: string | null; prerelease: boolean; rollback?: Rollback }
+interface VersaoAnterior { version: string; url: string | null; publishedAt: string | null; prerelease: boolean; rollback?: Rollback }
 
 /**
  * No Ergon Desktop (onde a volta é pelo aplicativo), só as DUAS versões publicadas logo antes da instalada aparecem
@@ -25,7 +25,7 @@ export const anteriores = <T>(lista: T[] | null | undefined, peloApp: boolean): 
 /** Endereço que o aplicativo do computador intercepta (nunca chega ao servidor). */
 export const PEDIDO_VOLTAR = '/__desktop/voltar';
 
-export interface VoltaNaLista {
+interface VoltaNaLista {
   /** endereço do botão "Voltar para esta versão" (null: sem botão) */
   voltar: string | null;
   /** o porquê de não ter o botão, em palavras simples (null: nada a dizer) */
@@ -33,7 +33,7 @@ export interface VoltaNaLista {
 }
 
 /** Onde a lista está: `app`, a volta pelo próprio aplicativo vale aqui; `admin`, quem olha administra o Ergon. */
-export interface OndeVolta { app: boolean; admin: boolean }
+interface OndeVolta { app: boolean; admin: boolean }
 
 /** O que a lista mostra para uma versão anterior (função pura: testável). */
 export function voltaNaLista(r: VersaoAnterior, onde: OndeVolta): VoltaNaLista {

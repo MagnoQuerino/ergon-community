@@ -26,7 +26,7 @@ function checkPlan(db: Db, workspaceId: string, limits?: AgentLimits): void {
 }
 
 
-export interface CapacityInfo {
+interface CapacityInfo {
   slots: number;
   active: number;
   free: number;
@@ -90,7 +90,7 @@ function pickFloor(db: Db, workspaceId: string, floorId?: string | null, structu
 
 const COLORS = ['#2f6f8f', '#8a5a2b', '#c2603a', '#3f7d4e', '#6b4f8f', '#a33b4c', '#2d5f5a', '#b07d1f', '#4a5a8c', '#7a6a3a'];
 
-export interface AgentInput {
+interface AgentInput {
   name: string; role: string;
   /** chave do setor ou 'auto' (a coordenação escolhe pelo papel) */
   sectorKey?: string; profileKey?: string;
@@ -105,7 +105,7 @@ export interface AgentInput {
 }
 
 /** Instruções iniciais de um agente novo (o usuário edita depois, ou pede à coordenação que escreva). */
-export function defaultCharter(role: string, sectorName: string, sectorDescription: string | null): string {
+function defaultCharter(role: string, sectorName: string, sectorDescription: string | null): string {
   return `Você é responsável por: ${role}. Trabalha no setor ${sectorName}${sectorDescription ? ` (${sectorDescription.replace(/\.$/, '')})` : ''}. ` +
     'Entregue resultados prontos para usar e diga o que depende de outras pessoas. Se o pedido for vago, faça uma pergunta curta antes de começar. ' +
     'Quando outro colega da equipe for mais indicado, diga quem e por quê.';
@@ -160,7 +160,7 @@ export function createAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
   }
 }
 
-export interface AgentPatch {
+interface AgentPatch {
   name?: string; role?: string; sectorKey?: string; charter?: string; skills?: string[]; tools?: string[]; hermesSkills?: string[];
   /** null = volta ao modelo padrão da conta */
   model?: string | null; provider?: string | null; color?: string; structureId?: string;
@@ -218,8 +218,8 @@ export function updateAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
 }
 
 /** Onde o agente está: o setor (vínculo funcional) e a construção (endereço). */
-export interface Placement { sectorKey: string; sectorName: string; structureId: string | null; structureName: string | null }
-export interface MoveInput {
+interface Placement { sectorKey: string; sectorName: string; structureId: string | null; structureName: string | null }
+interface MoveInput {
   sectorKey?: string; structureId?: string;
   /** construção cheia: adiciona um andar e muda, na mesma transação (só quando a pessoa escolhe) */
   addFloor?: boolean;
@@ -294,8 +294,8 @@ export function moveAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: st
 
 const ACTIVE_RUN = "('queued', 'running', 'waiting_user')";
 
-export interface Redistribution { number: number; title: string; to: string; reason: string }
-export interface ToolHandover { tool: string; label: string; to: string }
+interface Redistribution { number: number; title: string; to: string; reason: string }
+interface ToolHandover { tool: string; label: string; to: string }
 
 /**
  * Desativar: o agente sai da cidade (vaga liberada, histórico e conversas preservados) e a coordenação

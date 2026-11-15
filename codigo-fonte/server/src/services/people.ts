@@ -37,7 +37,7 @@ export class WorkspaceOwners {
 export const isAdmin = (db: Db, userId: string): boolean => !!db.get<{ a: number }>('SELECT is_admin AS a FROM users WHERE id = ?', userId)?.a;
 
 /** Chaves antigas (pela MK) dos workspaces da pessoa passam a ser embrulhadas pela chave dela. O conteúdo não muda. */
-export function rewrapPersonDeks(db: Db, keys: PersonKeySource, owners: WorkspaceOwners, userId: string): number {
+function rewrapPersonDeks(db: Db, keys: PersonKeySource, owners: WorkspaceOwners, userId: string): number {
   let n = 0;
   db.tx(() => {
     for (const ws of owners.owned(userId)) {
@@ -65,7 +65,7 @@ export async function openPersonWithPassword(db: Db, vault: Vault, keys: PersonK
 
 // ---------------------------------------------------------------- contas novas
 /** Quem pode criar conta neste computador: qualquer pessoa (padrão) ou só com convite do administrador. */
-export type SignupPolicy = 'aberto' | 'convite';
+type SignupPolicy = 'aberto' | 'convite';
 export const signupPolicy = (db: Db): SignupPolicy => (instanceSetting(db, 'signup') === 'convite' ? 'convite' : 'aberto');
 
 const INVITE_DAYS = 7;
@@ -86,7 +86,7 @@ export function revokeInvite(db: Db, inviteId: string): boolean {
   return db.run('DELETE FROM invites WHERE id = ? AND used_at IS NULL', inviteId).changes > 0;
 }
 
-export interface RegisterDeps { db: Db; vault: Vault; keys: PersonKeySource; owners: WorkspaceOwners; cfg: Config }
+interface RegisterDeps { db: Db; vault: Vault; keys: PersonKeySource; owners: WorkspaceOwners; cfg: Config }
 /**
  * Conta nova neste computador: chave pessoal, conta, workspace próprio (com as boas-vindas) e a frase dela, mostrada
  * uma vez. A instalação precisa estar aberta; quem já usa o computador precisa ter a frase pessoal (a partir de agora,

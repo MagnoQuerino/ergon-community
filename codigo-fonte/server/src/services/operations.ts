@@ -16,26 +16,26 @@ import { localParts } from './routine-time.ts';
 import { mesAntesDoDia } from './due.ts';
 import { workspaceTz } from './routine-proposals.ts';
 
-export const OPERATIONS = {
+const OPERATIONS = {
   'analise-desempenho': {
     id: 'analise-desempenho', label: 'Análise de desempenho por responsável', tool: 'dados', input: 'CSV de tarefas',
     description: 'Lê uma planilha de tarefas (id, responsável, prazo original, prazo vigente, data de conclusão, situação) e calcula, pelo sistema, total, concluídas, abertas, em atraso, alterações de prazo e cumprimento dos prazos, no geral e por responsável. Entrega um relatório (Markdown) e um CSV de indicadores.',
   },
 } as const;
-export type OperationId = keyof typeof OPERATIONS;
-export const isOperation = (s: string): s is OperationId => s in OPERATIONS;
+type OperationId = keyof typeof OPERATIONS;
+const isOperation = (s: string): s is OperationId => s in OPERATIONS;
 
 export interface OperationRow {
   id: string; workspace_id: string; task_id: string; agent_id: string; op: string; input_artifact_id: string; params: string;
   status: 'ok' | 'erro'; result: string | null; error: string | null; outputs: string; idempotency_key: string; duration_ms: number | null; created_at: string;
 }
-export interface TaskFile { id: string; filename: string; mime: string; size: number; role: 'entrada' | 'entregavel'; created_at: string }
+interface TaskFile { id: string; filename: string; mime: string; size: number; role: 'entrada' | 'entregavel'; created_at: string }
 
 const isCsv = (f: { filename: string; mime: string }) => f.mime === 'text/csv' || /\.csv$/i.test(f.filename);
 const list = (v: string | null) => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
 
 /** Hoje no fuso do workspace (a data de referência padrão, sempre gravada explicitamente). */
-export function todayIn(db: Db, workspaceId: string): string {
+function todayIn(db: Db, workspaceId: string): string {
   const p = localParts(workspaceTz(db, workspaceId), Date.now());
   return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
 }
@@ -209,7 +209,7 @@ export class Operations {
 }
 
 /** O que o agente recebe da operação (estruturado; os números já calculados). */
-export function summary(p: Performance): Record<string, unknown> {
+function summary(p: Performance): Record<string, unknown> {
   return {
     referencia: p.referencia, linhas_lidas: p.lidas, linhas_validas: p.validas, problemas: p.problemas.length,
     geral: p.geral, por_responsavel: p.porResponsavel,

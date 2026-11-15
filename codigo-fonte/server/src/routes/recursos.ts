@@ -16,7 +16,7 @@ import { getConversation, sendMessage } from '../services/chat.ts';
 import { PEDIDO_CONSELHO, ehAudio, type Recursos } from '../services/recursos.ts';
 import type { RunExecutor } from '../services/runs.ts';
 
-export interface RecursosRoutesDeps {
+interface RecursosRoutesDeps {
   db: Db; bus: Bus; recursos: Recursos; executor: RunExecutor;
   cfg: { filesDir: string; maxConversationMessages: number; maxInputChars: number; publicUrl?: string | null };
   auth: (req: FastifyRequest) => AuthContext;

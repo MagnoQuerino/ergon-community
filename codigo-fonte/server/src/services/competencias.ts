@@ -22,9 +22,9 @@ export interface PacoteCompetencia {
   ignorados: string[];
 }
 
-export const ENVIO_MAX_ARQUIVOS = 80;
-export const ENVIO_MAX_ARQUIVO = 400 * 1024;
-export const ENVIO_MAX_TOTAL = 800 * 1024;
+const ENVIO_MAX_ARQUIVOS = 80;
+const ENVIO_MAX_ARQUIVO = 400 * 1024;
+const ENVIO_MAX_TOTAL = 800 * 1024;
 /** o nome que o motor aceita para uma competência da biblioteca; "ergon-" é das aprendidas no Treinar */
 export const NOME_COMPETENCIA = /^[a-z0-9][a-z0-9_.-]{0,80}$/;
 const TEXTO = /\.(md|markdown|txt|json|ya?ml|csv|tsv|py|sh|bash|js|mjs|ts|html?|css|xml|toml|ini|cfg|sql|r|rb|ps1|tex|j2|jinja)$/i;
