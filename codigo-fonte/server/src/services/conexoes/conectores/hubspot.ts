@@ -15,26 +15,10 @@
  * Risco: atribuir a alguém (responsavel) pode avisar essa pessoa, então conta como envio; sem isso, só organiza.
  */
 import { neutral } from '../../operations.ts';
-import { linhaDe, type AcaoDecl, type ConectorDef } from './declarativo.ts';
-import { paraHtml, semHtml } from './pipedrive.ts';
-import { ErroAcao, seg, type Acao, type Args, type CtxAcao, type Param, type Risco } from '../tipos.ts';
+import { detalhes, exigeAlgum, ficha, linhaDe, paraHtml, riscoDeAtribuir, semHtml, vazio, type AcaoDecl, type ConectorDef } from './declarativo.ts';
+import { ErroAcao, seg, type Acao, type Args, type CtxAcao, type Param } from '../tipos.ts';
 
 const V = '2026-09';
-const vazio = (v: unknown) => v === undefined || v === null || v === '';
-
-/** Só o que veio preenchido, com o valor limpo por linhaDe: texto de terceiros nunca vira linha de controle. */
-const ficha = (x: unknown, campos: Array<[string, string]>, max = 400): string =>
-  campos.flatMap(([rotulo, campo]) => { const v = linhaDe(`{${campo}}`, x, max); return v ? [`${rotulo}: ${v}`] : []; }).join(', ');
-
-/** O que a pessoa lê no cartão: cada campo preenchido, por extenso e sem cortar. */
-const detalhes = (a: Args, rotulos: Record<string, string>): string =>
-  Object.entries(rotulos).flatMap(([k, rotulo]) => (vazio(a[k]) ? [] : [`${rotulo}: ${String(a[k])}`])).join('\n');
-
-const exigeAlgum = (...nomes: string[]) => async (_c: CtxAcao, a: Args): Promise<Args> => {
-  if (!nomes.some((n) => !vazio(a[n]))) throw new ErroAcao(`diga pelo menos um destes: ${nomes.join(', ')}`);
-  return a;
-};
-const riscoDeAtribuir = (a: Args): Risco => (vazio(a.responsavel) ? 'organizar' : 'enviar');
 
 /** Na busca o cursor vai no corpo, como "after": sai de a.cursor para o motor não repetir na consulta. */
 const cursorNoCorpo = async (_c: CtxAcao, a: Args): Promise<Args> => { const { cursor, ...resto } = a; return { ...resto, after: cursor }; };

@@ -16,7 +16,7 @@ export function pull(current: number, delta: number): number {
   return sign * Math.min(MAX_PULL, Math.abs(next));
 }
 
-export interface Box { scrollTop: number; scrollLeft: number; scrollHeight: number; scrollWidth: number; clientHeight: number; clientWidth: number }
+interface Box { scrollTop: number; scrollLeft: number; scrollHeight: number; scrollWidth: number; clientHeight: number; clientWidth: number }
 
 /** A área já está no fim na direção do giro? (1 px de folga para o arredondamento do navegador) */
 export function atEdge(b: Box, axis: 'y' | 'x', delta: number): boolean {

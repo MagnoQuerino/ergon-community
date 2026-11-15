@@ -28,7 +28,7 @@ import { legibilizarPacote, type AjusteDeCor } from '../../../shared/legibilidad
 import { readZip } from '../lib/zip.ts';
 
 export const PACKAGE_KINDS = ['city-theme', 'skin', 'building-pack', 'character-look', 'clothing', 'accessory', 'fx', 'pet', 'team-blueprint', 'routine-blueprint', 'skill', 'plugin'] as const;
-export type PackageKind = typeof PACKAGE_KINDS[number];
+type PackageKind = typeof PACKAGE_KINDS[number];
 const EXEC_KINDS = new Set<PackageKind>(['skill', 'plugin']);
 /** tipos que esta versão instala (o resto valida, mas fica para versões seguintes) */
 export const INSTALLABLE = new Set<PackageKind>(['city-theme', 'skin', 'character-look', 'fx', 'pet', 'team-blueprint']);
@@ -40,11 +40,11 @@ const HEX = /^#[0-9a-f]{6}$/i;
 const ID = /^[a-z0-9][a-z0-9-]{1,30}\.[a-z0-9][a-z0-9-]{1,30}\.[a-z0-9][a-z0-9-]{1,40}$/;
 const SEMVER = /^\d{1,3}\.\d{1,3}\.\d{1,4}$/;
 
-export interface Component { path: string; sha256: string; size: number; type: 'application/json' | 'image/png' | 'image/webp' }
+interface Component { path: string; sha256: string; size: number; type: 'application/json' | 'image/png' | 'image/webp' }
 /** formato do pacote ASSINADO (a assinatura cobre os arquivos) */
-export const MANIFEST_VERSION = 3;
+const MANIFEST_VERSION = 3;
 /** formato do pacote sem assinatura: o mesmo que as versões anteriores do Ergon instalam */
-export const MANIFEST_VERSION_UNSIGNED = 2;
+const MANIFEST_VERSION_UNSIGNED = 2;
 export interface Manifest {
   manifest_version: 2 | 3; package_id: string; version: string; title: string; summary: string; creator_id: string; license: string;
   ergon: { min: string; max?: string }; kind: PackageKind; components: Component[]; preview?: string[]; tags?: string[];
@@ -103,7 +103,7 @@ export function canonicalJson(v: unknown): string {
 }
 const SIGNING_PREFIX = 'ergon-package-v3\n';
 /** O que a assinatura cobre: o manifesto inteiro sem `signature` (inclusive `manifest_version` e cada componente). */
-export const manifestDigest = (m: Manifest) => { const { signature: _s, ...rest } = m; void _s; return crypto.createHash('sha256').update(SIGNING_PREFIX + canonicalJson(rest)).digest(); };
+const manifestDigest = (m: Manifest) => { const { signature: _s, ...rest } = m; void _s; return crypto.createHash('sha256').update(SIGNING_PREFIX + canonicalJson(rest)).digest(); };
 
 function checkTarget(t: unknown, p: string, e: string[]) {
   const x = t as Record<string, unknown> | null;

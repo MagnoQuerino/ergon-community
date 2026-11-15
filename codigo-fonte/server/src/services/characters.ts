@@ -91,8 +91,6 @@ export function ferramentasDesligadas(db: Db, workspaceIds: string[] | null): Se
   const ids = workspaceIds ? new Set(workspaceIds) : null;
   return new Set(rows.filter((r) => !ids || ids.has(r.workspace_id)).map((r) => r.key.slice('ferramentas.'.length)).filter((id) => TOOLS[id]?.safe));
 }
-/** Ferramentas com aviso de custo ou risco (a tela mostra o aviso antes de ligar). */
-export type AvisoFerramenta = 'custo' | 'risco';
 
 /**
  * Estado real das ferramentas de IA: conjuntos ligados no motor usado pelos agentes do Ergon — um por motor (várias
@@ -128,7 +126,7 @@ type ToolCtx = { channels?: boolean; workspaceId?: string | null; scope?: string
 /** Conectores prontos (MCP) ligados em cada motor (lidos pela ponte das capacidades): sem nenhum, a ferramenta fica desligada. */
 const conectoresPorEscopo = new Map<string, string[]>();
 export function setConectoresLigados(nomes: string[], scope = '_'): void { conectoresPorEscopo.set(scope, [...nomes]); }
-export const conectoresLigados = (scope = '_'): string[] => conectoresPorEscopo.get(scope) ?? [];
+const conectoresLigados = (scope = '_'): string[] => conectoresPorEscopo.get(scope) ?? [];
 const scopeFor = (ctx: ToolCtx) => ctx.scope ?? scopeOf(ctx.workspaceId);
 const enabledFor = (ctx: ToolCtx) => stateOf(scopeFor(ctx)).enabled;
 
@@ -171,8 +169,8 @@ export function toolsetsFor(toolIds: string[], ctx: ToolCtx = {}): string[] {
 /** Ferramentas que executam código: conjunto do motor → id no Ergon (o plugin pede permissão em vez de improvisar). */
 export const GUARDED_TOOLSETS: Record<string, string> = Object.fromEntries(Object.values(TOOLS).filter((t) => t.guarded && t.toolset).map((t) => [t.toolset!, t.id]));
 
-export type ModelHint = 'ponta' | 'intermediário' | 'econômico';
-export interface Character {
+type ModelHint = 'ponta' | 'intermediário' | 'econômico';
+interface Character {
   /** setor (chave em sectors.ts) */
   key: string; name: string; role: string; profile: string; color: string; level: number;
   /** nome do agente de demonstração antigo que este personagem substitui (preserva conversas e tarefas) */

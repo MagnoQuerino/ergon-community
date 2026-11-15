@@ -9,13 +9,13 @@ import type { Db } from '../db/db.ts';
 import { foldText } from '../db/db.ts';
 import { HttpError, fold } from '../lib/util.ts';
 
-export const PAGE_MAX = 100;
-export const PAGE_DEFAULT = 48;
+const PAGE_MAX = 100;
+const PAGE_DEFAULT = 48;
 /** Amostra de um grupo recolhido (setor ou construção): poucos rostos, a contagem diz o resto. */
-export const SAMPLE = 4;
+const SAMPLE = 4;
 
 const WORK_KINDS = CATALOG.filter((t) => t.category === 'trabalho').map((t) => t.id);
-export const ACTIVE_RUN = "('queued', 'running', 'waiting_user')";
+const ACTIVE_RUN = "('queued', 'running', 'waiting_user')";
 
 /**
  * Status de trabalho de um agente (uma definição só: perfil, listas, Cidade e contagens por andar): o da execução
@@ -33,7 +33,7 @@ const TOOLS_ARR = "CASE WHEN json_valid(a.tools) THEN CASE WHEN json_type(a.tool
 const hasTool = (tool: string) => `EXISTS (SELECT 1 FROM json_each(${TOOLS_ARR}) j WHERE j.value = '${tool}')`;
 
 /** Projeção leve de um agente para listas (sem instruções, ferramentas nem modelo). */
-export interface TeamAgent {
+interface TeamAgent {
   id: string; name: string; role: string; color: string; status: 'active' | 'archived'; demo: boolean; coordinator: boolean;
   char_key: string | null; look_seed: number | null; deactivation_note: string | null;
   sector_key: string; sector_name: string; building_id: string | null; building_name: string | null; floor_name: string | null;
@@ -41,7 +41,7 @@ export interface TeamAgent {
   floor_id: string | null; floor_level: number | null;
   run_status: string | null;
 }
-export interface Page<T> { items: T[]; total: number; next: string | null }
+interface Page<T> { items: T[]; total: number; next: string | null }
 
 // cursor: posição depois do último item (base64url de um JSON), validado na volta
 const encode = (v: unknown[]) => Buffer.from(JSON.stringify(v)).toString('base64url');
@@ -71,7 +71,7 @@ const agentOut = (r: AgentRow): TeamAgent => ({
   floor_id: r.floor_id, floor_level: r.floor_level === null ? null : Number(r.floor_level), run_status: r.run_status,
 });
 
-export interface AgentQuery { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all'; cursor?: string; limit?: number }
+interface AgentQuery { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all'; cursor?: string; limit?: number }
 
 /**
  * Agentes em ordem estável: o Coordenador primeiro, depois pelo nome (sem acento) e pelo id (nomes podem se repetir).
@@ -103,7 +103,7 @@ export function teamAgent(db: Db, workspaceId: string, agentId: string): TeamAge
 const sampleOf = (db: Db, workspaceId: string, cond: string, arg: string) =>
   db.all<AgentRow>(`SELECT ${AGENT_COLS} ${AGENT_FROM} WHERE a.workspace_id = ? AND a.status = 'active' AND ${cond} ORDER BY a.coordinator DESC, fold(a.name), a.id LIMIT ?`, workspaceId, arg, SAMPLE).map(agentOut);
 
-export interface TeamSector { key: string; name: string; description: string | null; custom: boolean; count: number; sample: TeamAgent[] }
+interface TeamSector { key: string; name: string; description: string | null; custom: boolean; count: number; sample: TeamAgent[] }
 
 /** Setores na ordem da equipe (posição), com quantos membros ativos e uma amostra. */
 export function listTeamSectors(db: Db, workspaceId: string, o: { q?: string; cursor?: string; limit?: number; sample?: boolean } = {}): Page<TeamSector> {
@@ -125,7 +125,7 @@ export function listTeamSectors(db: Db, workspaceId: string, o: { q?: string; cu
   };
 }
 
-export interface TeamStructure {
+interface TeamStructure {
   id: string; kind: string; kind_name: string; name: string; i: number; j: number;
   floors: number; max_floors: number; slots: number; active: number; free: number; can_grow: boolean; sample: TeamAgent[];
 }
@@ -162,7 +162,7 @@ export function listTeamStructures(db: Db, workspaceId: string, maxFloors: numbe
   };
 }
 
-export interface TeamSummary {
+interface TeamSummary {
   agents: { active: number; archived: number }; sectors: number; structures: number;
   capacity: { slots: number; active: number; free: number }; coordinatorId: string | null;
 }
@@ -227,12 +227,12 @@ export function agentsLite(db: Db, workspaceId: string, ids: Iterable<string | n
 }
 
 /** O que as telas precisam saber da equipe sem a lista inteira (vai no /api/state). */
-export interface TeamInfo {
+interface TeamInfo {
   active: number; archived: number; coordinator: TeamAgent | null; reviewer: { id: string; name: string } | null;
   /** os primeiros ativos que não coordenam, na ordem de antes (construção, andar, chegada): dicas e exemplos da Ajuda */
   others: Array<{ id: string; name: string }>;
 }
-export const OTHERS = 3;
+const OTHERS = 3;
 
 export function teamInfo(db: Db, workspaceId: string): TeamInfo {
   const ag = db.get<{ active: number; archived: number }>("SELECT SUM(status = 'active') AS active, SUM(status = 'archived') AS archived FROM agents WHERE workspace_id = ?", workspaceId);
@@ -254,13 +254,13 @@ export function teamInfo(db: Db, workspaceId: string): TeamInfo {
  * acento, sem caixa). -1 = não serve; 2 = o texto começa com a primeira palavra; 1 = alguma palavra do texto começa
  * com ela; 0 = aparece no meio.
  */
-export function rank(q: string, text: string): number {
+function rank(q: string, text: string): number {
   const words = fold(q).split(/\s+/).filter(Boolean);
   const t = fold(text);
   if (!words.length || !words.every((w) => t.includes(w))) return -1;
   return t.startsWith(words[0]) ? 2 : t.split(/[^a-z0-9#]+/).some((p) => p.startsWith(words[0])) ? 1 : 0;
 }
-export const SEARCH_AGENTS = 6;
+const SEARCH_AGENTS = 6;
 
 /**
  * Agentes da busca rápida (Ctrl+K): os ativos com todas as palavras em nome, papel e setor, ordenados pela nota antes
@@ -277,7 +277,7 @@ export function searchAgents(db: Db, workspaceId: string, q: string, max = SEARC
     .sort((x, y) => y.n - x.n).slice(0, max).map((x) => liteOut(x.r));
 }
 
-export const HOLDER_SAMPLE = 3;
+const HOLDER_SAMPLE = 3;
 /**
  * Quem tem cada ferramenta (Configurações): quantos e até 3 nomes, o Coordenador primeiro e depois pelo nome sem
  * acento. Uma consulta para o catálogo inteiro.

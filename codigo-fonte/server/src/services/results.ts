@@ -34,7 +34,7 @@ export type ResultKind = 'informativo' | 'documental' | 'dados' | 'externo';
 /** descartado: a pessoa recusou no cartão a ação que era o trabalho do card (não é falha nem entrega; o card fica aberto esperando ela) */
 export type ResultState = 'validado' | 'reprovado' | 'aguardando_aprovacao' | 'aguardando_info' | 'sem_confirmacao' | 'falha' | 'confirmado_humano' | 'devolvido' | 'descartado';
 export type WorkState = 'solicitada' | 'processamento' | 'resultado' | 'validacao' | 'concluida' | 'aguardando_info' | 'falha' | 'revisao' | 'aguardando_aprovacao';
-export interface Criterion { id: string; label: string; ok: boolean; detail?: string }
+interface Criterion { id: string; label: string; ok: boolean; detail?: string }
 export interface ResultRow {
   id: string; workspace_id: string; task_id: string; run_id: string | null; kind: ResultKind; state: ResultState;
   criteria: string; evidence: string; justification: string; decided_by: string; created_at: string; decided_at: string | null;
@@ -57,7 +57,7 @@ const COLUMN: Record<WorkState, ChaveColuna> = {
   aguardando_info: 'doing', falha: 'doing', revisao: 'doing', aguardando_aprovacao: 'with_you',
 };
 /** coluna de quem está esperando você (aprovação); quadro antigo sem ela: fica em andamento */
-export const WITH_YOU: ChaveColuna = 'with_you';
+const WITH_YOU: ChaveColuna = 'with_you';
 /** descartado (recusado por você no cartão): o card fica aberto esperando o que mudar, ou que você o cancele */
 const WORK_OF: Record<ResultState, WorkState | null> = {
   validado: 'concluida', confirmado_humano: 'concluida', aguardando_aprovacao: 'aguardando_aprovacao', sem_confirmacao: 'aguardando_aprovacao',
@@ -337,7 +337,7 @@ function listadas(db: Db, ws: string): Map<string, string[]> {
   return new Map(acoesLigadas(db, ws).filter((x) => x.ids.length).map((x) => [x.kind, x.ids]));
 }
 
-export interface Intencao { id: string; oQue: string; envio: boolean; pares: string[] }
+interface Intencao { id: string; oQue: string; envio: boolean; pares: string[] }
 /** O que o pedido quer fazer numa conta e por quais ações (conexao:acao) das contas conectadas isso sai. */
 export function intencoesDoPedido(db: Db, ws: string, pedido: string): Intencao[] {
   // "the sales teams", "on Monday", "the notion that…": a palavra comum não é o aplicativo
@@ -456,7 +456,7 @@ export function naoFeito(texto: string, soForte = false): string | null {
 }
 
 /** Uma ação numa conta registrada pelo serviço das Conexões (servico.ts). */
-export interface AcaoRegistrada { conexao: string; acao: string; status: 'pendente' | 'feita' | 'falhou' | 'recusada'; risco: string; erro: string | null; resultado: string | null; resumo: string | null; user_id: string | null; created_at: string }
+interface AcaoRegistrada { conexao: string; acao: string; status: 'pendente' | 'feita' | 'falhou' | 'recusada'; risco: string; erro: string | null; resultado: string | null; resumo: string | null; user_id: string | null; created_at: string }
 /** As ações registradas de uma execução, de um card (e dos cards que nasceram dele) ou das duas coisas, desde uma data. */
 export function acoesRegistradas(db: Db, ws: string, f: { runId?: string | null; taskId?: string | null; desde?: string }): AcaoRegistrada[] {
   return db.all<AcaoRegistrada>(`SELECT conexao, acao, status, risco, erro, resultado, resumo, user_id, created_at FROM conexao_acoes

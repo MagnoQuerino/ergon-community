@@ -15,7 +15,7 @@ import { HttpError } from '../lib/util.ts';
 
 // ---------------------------------------------------------------- autenticador (TOTP)
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-export function base32(buf: Buffer): string {
+function base32(buf: Buffer): string {
   let bits = 0; let value = 0; let out = '';
   for (const byte of buf) { value = (value << 8) | byte; bits += 8; while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; } }
   if (bits > 0) out += B32[(value << (5 - bits)) & 31];

@@ -9,7 +9,7 @@ export function nomeParaGravar(texto: string | null, atual: string): string | nu
   return nome && nome !== atual ? nome : null;
 }
 
-export type Gravacao = { fechar: true; salvo: boolean; revision?: number } | { fechar: false; salvo: false; erro: unknown };
+type Gravacao = { fechar: true; salvo: boolean; revision?: number } | { fechar: false; salvo: false; erro: unknown };
 
 /**
  * Grava o nome. Só o título muda (não há o que mesclar), então vai sem a revisão: a equipe mover o card ou a

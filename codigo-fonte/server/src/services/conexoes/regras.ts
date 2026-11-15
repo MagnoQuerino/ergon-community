@@ -27,7 +27,7 @@ export const PRAZO_MS: Record<Exclude<PrazoDepoisDeLer, 'sempre'>, number> = { '
 /** O mais longo dos prazos com hora marcada: a consulta dos cartões aprovados não precisa ir além. */
 export const MAIOR_PRAZO_MS = 72 * HORA;
 /** "Só neste pedido" também termina sozinha: um pedido que ninguém fecha não fica liberado para sempre. */
-export const PEDIDO_VALE_MS = 7 * 24 * HORA;
+const PEDIDO_VALE_MS = 7 * 24 * HORA;
 /** "Só neste pedido": o que ela escrever na mesma conversa até 6 h depois de aprovar continua o pedido ("ok, pode enviar agora"). */
 export const PEDIDO_SEGUE_MS = 6 * HORA;
 export type RiscoLiberado = Exclude<Risco, 'ler'>;
@@ -37,7 +37,7 @@ const RISCOS_LIBERAVEIS: readonly RiscoLiberado[] = ['organizar', 'enviar', 'apa
 export type PropostaRegra = { kind: 'regra'; riscos: RiscoLiberado[]; conexoes: string[]; so: 'email' | null; alcance: Alcance; resumo: string;
   /** a coordenação sugeriu (o marcador), não foi a frase da pessoa: o cartão diz */
   sugerida?: boolean };
-export type RegraSemResumo = Omit<PropostaRegra, 'resumo'>;
+type RegraSemResumo = Omit<PropostaRegra, 'resumo'>;
 /**
  * O pedido em que a regra foi aprovada: a execução que propôs (e o card dela) — o que nasce dela entra pela cadeia
  * (cadeiaDoPedido). `desde`: quando ela começou; as mensagens seguintes da pessoa na mesma conversa, até PEDIDO_SEGUE_MS
@@ -66,7 +66,7 @@ export function descreverRegra(r: { riscos: readonly string[]; conexoes: readonl
   const onde = r.conexoes.includes('*') ? 'em todas as conexões' : r.conexoes.length === 1 ? `pela conta ${nomeDe(r.conexoes[0])}` : `pelas contas ${lista(r.conexoes.map(nomeDe))}`;
   return `${lista(oque)} ${onde}`;
 }
-export const descreverGrupo = (g: GrupoDepoisDeLer): string => (g === 'sites' ? 'abrir sites depois de ler conteúdo das contas' : 'rodar programas depois de ler conteúdo das contas');
+const descreverGrupo = (g: GrupoDepoisDeLer): string => (g === 'sites' ? 'abrir sites depois de ler conteúdo das contas' : 'rodar programas depois de ler conteúdo das contas');
 const quando = (iso: string): string => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 export function descreverAlcance(r: Pick<RegraConexao, 'alcance' | 'expira_em'>): string {
   if (r.alcance === 'sempre') return 'sempre';

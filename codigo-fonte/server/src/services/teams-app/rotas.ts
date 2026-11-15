@@ -8,7 +8,7 @@ import { S } from '../../lib/schemas.ts';
 import type { AuthContext } from '../auth.ts';
 import type { TeamsApp } from './servico.ts';
 
-export interface TeamsAppRoutesDeps {
+interface TeamsAppRoutesDeps {
   teamsApp: TeamsApp;
   owner: (req: FastifyRequest) => AuthContext;
   admin: (req: FastifyRequest) => AuthContext;

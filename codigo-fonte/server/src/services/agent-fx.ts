@@ -11,12 +11,12 @@ import type { Db } from '../db/db.ts';
 import { HttpError, now } from '../lib/util.ts';
 import type { PackageData, Target } from './ergon-package.ts';
 
-export const FX_LABEL: Record<string, string> = { aura: 'Aura', celestial_glow: 'Brilho celeste', fire_circle: 'Círculo de fogo', fire_trail: 'Rastro de fogo' };
+const FX_LABEL: Record<string, string> = { aura: 'Aura', celestial_glow: 'Brilho celeste', fire_circle: 'Círculo de fogo', fire_trail: 'Rastro de fogo' };
 
 /** `target`: a quem o pacote já aplica o efeito (herdar = esses alvos), para a prévia da criação mostrar o que vai valer. */
-export interface FxOption { id: string; packageId: string; item: number; title: string; effect: string; label: string; color: string; intensity: number; target: Target }
+interface FxOption { id: string; packageId: string; item: number; title: string; effect: string; label: string; color: string; intensity: number; target: Target }
 export type FxChoice = { mode: 'inherit' } | { mode: 'off' } | { mode: 'custom'; option: string };
-export interface FxEffect { agentId: string; effect: string; color: string; intensity: number }
+interface FxEffect { agentId: string; effect: string; color: string; intensity: number }
 
 /** Efeitos utilizáveis: os dos pacotes de efeito instalados e ativos neste workspace (a loja é outro caminho). */
 export function fxOptions(db: Db, workspaceId: string): FxOption[] {

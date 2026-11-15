@@ -223,12 +223,12 @@ const NOMES: Record<string, { sql: string; rotulo: string }> = {
   rgc: { sql: 'SELECT oque AS n FROM regras_conexoes WHERE id = ? AND workspace_id = ?', rotulo: 'regra' },
 };
 /** Campos que o servidor guarda no cartão para conferir na hora de aplicar (não são da rota nem aparecem para a pessoa). */
-export const CAMPOS_INTERNOS = new Set(['integracao']);
+const CAMPOS_INTERNOS = new Set(['integracao']);
 
-export interface RespostaGestao { ok: boolean; status: 'feita' | 'aguardando_confirmacao' | 'falhou'; texto: string; cartao?: string; resumo?: string }
+interface RespostaGestao { ok: boolean; status: 'feita' | 'aguardando_confirmacao' | 'falhou'; texto: string; cartao?: string; resumo?: string }
 interface Payload { kind: 'gestao'; acao: string; parametros: Params; resumo: string; agente: string; resumo_t?: Texto }
 
-export interface GestaoDeps {
+interface GestaoDeps {
   db: Db; bus: Bus;
   /** roda uma rota da tela por dentro, com a sessão desta pessoa (app.ts: app.inject com o bilhete de uso único) */
   rodar: (ctx: AuthContext, metodo: Metodo, url: string, corpo: unknown) => Promise<{ status: number; json: unknown }>;

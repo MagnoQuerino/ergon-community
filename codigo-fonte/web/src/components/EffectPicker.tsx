@@ -2,8 +2,8 @@ import type { FxSpec } from '../iso/cosmetics.ts';
 import { useResource } from '../lib/live.ts';
 import { useT } from '../i18n/index.ts';
 
-export type FxTarget = { all: true } | { agentName: string } | { charKey: string };
-export interface FxOption { id: string; packageId: string; item: number; title: string; effect: string; label: string; color: string; intensity: number; target: FxTarget }
+type FxTarget = { all: true } | { agentName: string } | { charKey: string };
+interface FxOption { id: string; packageId: string; item: number; title: string; effect: string; label: string; color: string; intensity: number; target: FxTarget }
 export type FxChoice = { mode: 'inherit' } | { mode: 'off' } | { mode: 'custom'; option: string };
 
 /** Efeitos que valem para o agente com esta escolha (a mesma regra do servidor: pessoal > alvos dos pacotes). */

@@ -32,7 +32,7 @@ export interface AmbientOps {
 }
 
 /** Resumo para a cena (placas da cidade): só números, sem títulos. */
-export interface OpsSummary {
+interface OpsSummary {
   busy: number; limit: number | null; ready: number; blocked: number; attention: number; decisions: number; deliveries: number; cloud: boolean;
 }
 export const summaryOf = (o: AmbientOps, cloud = false): OpsSummary => ({ cloud,

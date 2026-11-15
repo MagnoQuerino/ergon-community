@@ -44,7 +44,7 @@ const MAX_EVENTS = 40;
 const PAGE = { events: 4, mailMs: 4, mailGoogle: 2, lists: 5, tasks: 10, planner: 10, listCap: 50 };
 const MAIL_META = 100; // detalhes (assunto, remetente) do Gmail: um pedido por mensagem
 /** Google com o app em modo de teste: a autorização (refresh token) vale 7 dias. */
-export const GOOGLE_TESTING_DAYS = 7;
+const GOOGLE_TESTING_DAYS = 7;
 
 const two = (n: number) => String(n).padStart(2, '0');
 const hm = (tz: string, ms: number) => { const p = localParts(tz, ms); return `${two(p.hh)}:${two(p.mm)}`; };
@@ -68,10 +68,10 @@ export interface MailItem {
   account: SsoKind; conta?: string; contaNome?: string; id: string; thread: string; at: number; from: string; fromAddr: string; to: string[];
   subject: string; preview: string; important: boolean; unread: boolean; folder: 'inbox' | 'sent';
 }
-export interface EventItem { account: SsoKind; conta?: string; contaNome?: string; start: number; end: number; allDay: boolean; title: string; where: string; attendees: string[]; organizer: string; description: string }
-export interface CloudFile { provider: SsoKind; conta?: string; id: string; name: string; size: number; modified: string | null; mime: string; folder: string }
+interface EventItem { account: SsoKind; conta?: string; contaNome?: string; start: number; end: number; allDay: boolean; title: string; where: string; attendees: string[]; organizer: string; description: string }
+interface CloudFile { provider: SsoKind; conta?: string; id: string; name: string; size: number; modified: string | null; mime: string; folder: string }
 /** caixa: prioritários desde a última vez; pendencias: 14 dias de entrada e de saída; relacionados: busca por termos (30 dias) */
-export type MailMode = 'caixa' | 'pendencias' | 'relacionados';
+type MailMode = 'caixa' | 'pendencias' | 'relacionados';
 type Get = (url: string, headers?: Record<string, string>) => Promise<any>;
 
 const MAX_FILE = 15 * 1024 * 1024;

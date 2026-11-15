@@ -15,10 +15,10 @@ import { sincronizarAjustes, sincronizarPausa } from './ajustes-motor.ts';
 import type { AjustesMotor, CotaConta } from './hermes.ts';
 
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
-export interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
+interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
 
 /** Contas que o usuário conecta pelo Ergon (login por código, no navegador dele). */
-export const ACCOUNTS: AccountDef[] = [
+const ACCOUNTS: AccountDef[] = [
   { id: 'nous', name: 'Nous Portal', billing: 'credits', site: 'https://portal.nousresearch.com',
     about: 'A melhor escolha para o Ergon: uma assinatura com os principais modelos do mercado (Claude, GPT, Gemini, DeepSeek…), plano grátis com modelos gratuitos e um modelo por agente — o mais forte para quem pensa, o mais econômico para quem organiza. O consumo sai dos créditos da assinatura.' },
   { id: 'openai-codex', name: 'ChatGPT (assinatura)', billing: 'subscription', site: 'https://chatgpt.com',
@@ -48,7 +48,7 @@ export function modelLabel(id: string | null | undefined): string {
   const suffix = tag === 'free' ? ' (grátis)' : tag === 'US' ? ' (servidores nos EUA)' : tag ? ` (${tag})` : '';
   return name + suffix;
 }
-export const vendorOf = (id: string): string => VENDORS[id.split('/')[0]] ?? (id.includes('/') ? id.split('/')[0] : '');
+const vendorOf = (id: string): string => VENDORS[id.split('/')[0]] ?? (id.includes('/') ? id.split('/')[0] : '');
 
 const price = (s: string | undefined): number | null => { const n = s ? Number(String(s).replace(/[^0-9.]/g, '')) : NaN; return Number.isFinite(n) ? n : null; };
 /** Faixa pelo preço publicado de entrada (US$ por milhão de tokens): orienta a escolha, não é estimativa de gasto. */
@@ -58,12 +58,12 @@ export function tierOf(inputPerM: number | null, free: boolean): 'grátis' | 'ec
   return inputPerM <= 0.5 ? 'econômico' : inputPerM <= 3 ? 'intermediário' : 'ponta';
 }
 
-export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: ReturnType<typeof tierOf> }
-export interface ModelCatalog {
+interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: ReturnType<typeof tierOf> }
+interface ModelCatalog {
   default: { provider: string | null; model: string | null; label: string };
   providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }>;
 }
-export interface AiStatus {
+interface AiStatus {
   executor: 'real' | 'simulated';
   /** a ponte de controle responde (contas, modelo padrão, skills) */
   available: boolean;
@@ -76,14 +76,14 @@ export interface AiStatus {
 }
 
 /** A chave da linha dos ajudantes temporários em "Modelos por tarefa" (no motor, delegation.provider/model). */
-export const TAREFA_AJUDANTES = 'delegation';
+const TAREFA_AJUDANTES = 'delegation';
 /** As tarefas de apoio que o botão da economia preenche: resumir a conversa, dar nome à conversa e ver imagens. */
-export const TAREFAS_ECONOMIA = ['compression', 'title_generation', 'vision'] as const;
+const TAREFAS_ECONOMIA = ['compression', 'title_generation', 'vision'] as const;
 
 /** A conta de onde sai o custo de um modelo. */
-export interface ContaDoCusto { id: string; name: string; billing: Billing }
-export interface ModeloEscolhido { provider: string; model: string; label: string; tier: ModelEntry['tier']; input: number | null; output: number | null }
-export interface TaskModelRow {
+interface ContaDoCusto { id: string; name: string; billing: Billing }
+interface ModeloEscolhido { provider: string; model: string; label: string; tier: ModelEntry['tier']; input: number | null; output: number | null }
+interface TaskModelRow {
   /** a chave da tarefa no motor (vision, compression… e as que os plugins registrarem); 'delegation' = os ajudantes */
   task: string;
   kind: 'apoio' | 'ajudantes';
@@ -94,14 +94,14 @@ export interface TaskModelRow {
   /** tarefa registrada por um complemento: o nome e a explicação que ele declarou */
   declared?: { label: string; hint: string; by: string; follows: string | null };
 }
-export interface TaskModels {
+interface TaskModels {
   /** false = a equipe de IA desta instalação ainda não tem os modelos por tarefa (chega ao atualizar) */
   supported: boolean;
   main: { provider: string | null; model: string | null; label: string; account: ContaDoCusto | null };
   tasks: TaskModelRow[];
 }
-export interface TaskModelChange { task: string; provider: string | null; model: string | null }
-export interface EconomySuggestion {
+interface TaskModelChange { task: string; provider: string | null; model: string | null }
+interface EconomySuggestion {
   /** o modelo econômico escolhido para as tarefas de texto (null = nada a sugerir; ver `reason`) */
   model: (ModeloEscolhido & { account: ContaDoCusto }) | null;
   /** o que muda se aplicar, tarefa por tarefa: de qual modelo e conta para qual */

@@ -133,7 +133,7 @@ export type ExtraCheck = 'numeros' | 'links' | 'trechos' | 'propostas' | 'conexo
  */
 export interface UsoConexoes { le: Array<{ rotulo: string; acoes: string[] }>; cria: { rotulo: string; acoes: string[] } }
 /** Uma ação registrada pelo serviço das Conexões numa execução (conexao_acoes). */
-export interface AcaoDaExecucao { acao: string; status: 'pendente' | 'feita' | 'falhou' | 'recusada'; erro?: string | null }
+interface AcaoDaExecucao { acao: string; status: 'pendente' | 'feita' | 'falhou' | 'recusada'; erro?: string | null }
 
 /**
  * A Microsoft permite consultar um mesmo recurso do Teams para ver se mudou no máximo uma vez por dia; para saber antes

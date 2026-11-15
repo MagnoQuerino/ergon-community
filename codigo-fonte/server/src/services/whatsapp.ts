@@ -18,7 +18,7 @@ import { findConnection, ingestEvent, type InboundEvent } from './ingest.ts';
 import { contasDe, integrationRow, setIntegration, settingsOf, type Integrations } from './integrations.ts';
 import { FieldCipher } from '../security/fields.ts';
 
-export interface WaFilters {
+interface WaFilters {
   /** ler conversas individuais */
   direct: boolean;
   /** ler grupos */

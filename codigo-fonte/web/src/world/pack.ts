@@ -76,7 +76,7 @@ export function pick<T>(r: () => number, list: Weighted<T>): T {
 }
 
 /** As partes de um boneco sorteado (as cores de pele e cabelo são índices no tema; a roupa usa a cor do agente). */
-export interface FigureParts {
+interface FigureParts {
   skin: number; hair: number; extraHair: string | null; hairStyle: HairStyle; beard: Beard; headwear: Headwear;
   outfit: Outfit; item: Item; hem: boolean;
 }

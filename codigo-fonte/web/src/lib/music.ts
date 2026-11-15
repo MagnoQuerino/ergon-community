@@ -7,8 +7,8 @@
 import { useSyncExternalStore } from 'react';
 
 /** gain: o que a faixa precisa para tocar no mesmo nível das outras (medido; 0..1) */
-export interface Track { file: string; title: string; author: string; source: string; license: string; licenseUrl: string; sha256: string; gain?: number }
-export interface MusicState { tracks: Track[]; index: number; playing: boolean; volume: number; shuffle: boolean; error: 'lista' | 'faixas' | null }
+interface Track { file: string; title: string; author: string; source: string; license: string; licenseUrl: string; sha256: string; gain?: number }
+interface MusicState { tracks: Track[]; index: number; playing: boolean; volume: number; shuffle: boolean; error: 'lista' | 'faixas' | null }
 
 const BASE = '/musica/';
 const FADE_MS = 1200;

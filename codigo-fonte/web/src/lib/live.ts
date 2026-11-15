@@ -4,7 +4,7 @@ import { api } from './api.ts';
 // Uma única conexão SSE por aba/workspace; componentes assinam tipos de evento e recarregam dados.
 type Handler = (type: string, data: unknown) => void;
 const handlers = new Set<Handler>();
-export type LiveStatus = 'conectando' | 'ao_vivo' | 'reconectando';
+type LiveStatus = 'conectando' | 'ao_vivo' | 'reconectando';
 const statusListeners = new Set<(s: LiveStatus, at: Date | null) => void>();
 let source: EventSource | null = null;
 let lastEventAt: Date | null = null;

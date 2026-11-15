@@ -14,7 +14,7 @@ export function validTz(tz: string | null | undefined): tz is string {
 }
 
 /** Deslocamento do fuso em minutos naquele instante (São Paulo = -180). */
-export function offsetMinutes(tz: string, ts: number): number {
+function offsetMinutes(tz: string, ts: number): number {
   const name = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }).formatToParts(ts).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
   const m = name.match(/GMT([+-])(\d{2}):?(\d{2})?/);
   return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0)) : 0;

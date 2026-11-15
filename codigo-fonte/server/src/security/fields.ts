@@ -15,7 +15,7 @@ export const CLOSED_VALUE = '[fechado]';
 const KID = /^(ws_[a-f0-9]{32}|_)$/;
 
 /** Onde as DEKs embrulhadas ficam (tabela workspace_keys); implementado pelo Db, sem decifrar nada. */
-export interface DekStore {
+interface DekStore {
   getWrapped(workspaceId: string): string | null;
   putWrapped(workspaceId: string, wrapped: string, source: string): void;
 }

@@ -27,7 +27,7 @@
 // comentário.
 import ts from 'typescript';
 
-export interface Achado { linha: number; texto: string; regra: 1 | 2 | 3 | 4 | 5 | 6 }
+interface Achado { linha: number; texto: string; regra: 1 | 2 | 3 | 4 | 5 | 6 }
 
 /** Letras que só o português usa (o inglês não acentua). */
 const ACENTO = /[áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ]/;

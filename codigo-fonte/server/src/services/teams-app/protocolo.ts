@@ -16,7 +16,7 @@ export const ID_CLAIM = /^clm_[A-Za-z0-9_-]{8,40}$/;
 export const ID_INSTALACAO = /^ins_[A-Za-z0-9_-]{8,40}$/;
 
 /** Alfabeto do código de ligação (1.2): sem 0 O 1 I L. */
-export const ALFABETO_CODIGO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const ALFABETO_CODIGO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 /** Aceita minúsculas, espaços e hífen; devolve as 8 letras/números em maiúsculas, ou null se não for um código. */
 export function normalizarCodigo(entrada: string): string | null {
   const c = entrada.toUpperCase().replace(/[\s-]+/g, '');
@@ -103,7 +103,7 @@ export function selar(instBoxPublic: string, valor: unknown, aad: string, fixo?:
 
 // ------------------------------------------------------------------------------------------------ fechamento (2.2)
 /** O que o cliente faz quando a conexão fecha com cada código. */
-export type Reacao = { acao: 'reconectar'; esperaMs?: number } | { acao: 'parar'; motivo: 'assinatura' | 'revogada' | 'versao' | 'substituida' } | { acao: 'registrar_de_novo' };
+type Reacao = { acao: 'reconectar'; esperaMs?: number } | { acao: 'parar'; motivo: 'assinatura' | 'revogada' | 'versao' | 'substituida' } | { acao: 'registrar_de_novo' };
 export function reacaoAoFechar(code: number): Reacao {
   switch (code) {
     case 4401: return { acao: 'parar', motivo: 'assinatura' };

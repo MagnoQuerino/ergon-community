@@ -12,8 +12,8 @@ export const BRAND = {
   night: '#140C34', tealOnDark: '#25859A', goldOnDark: '#C39463', black: '#141414',
 } as const;
 
-export type Tone = 'navy' | 'teal' | 'gold';
-export interface Figure {
+type Tone = 'navy' | 'teal' | 'gold';
+interface Figure {
   id: 'top' | 'right' | 'left' | 'lowRight' | 'lowLeft';
   /** posição na roda (graus de tela: 0 = direita, 90 = baixo) */
   angle: number;
@@ -32,7 +32,7 @@ type Pt = [number, number];
  * Faixa entre duas elipses centradas em (cx, cy), com o eixo maior na direção `axis` (graus), cortada nas pontas
  * pelos segmentos `cuts` (ponto externo → ponto interno). `mid` é um ponto no meio da faixa.
  */
-export interface Band { cx: number; cy: number; axis: number; ai: number; bi: number; ao: number; bo: number; mid: Pt; cuts: [[Pt, Pt], [Pt, Pt]] }
+interface Band { cx: number; cy: number; axis: number; ai: number; bi: number; ao: number; bo: number; mid: Pt; cuts: [[Pt, Pt], [Pt, Pt]] }
 
 const f = (n: number) => Math.round(n * 10) / 10;
 const rad = (deg: number) => (deg * Math.PI) / 180;
@@ -95,7 +95,7 @@ export function figures(): Figure[] {
   ];
 }
 
-export interface Palette { navy: string; teal: string; gold: string }
+interface Palette { navy: string; teal: string; gold: string }
 /** Cores do emblema: normal (fundo claro), escura (fundo escuro) ou de uma cor só. */
 export function palette(opts: { onDark?: boolean; mono?: string } = {}): Palette {
   if (opts.mono) return { navy: opts.mono, teal: opts.mono, gold: opts.mono };
@@ -109,7 +109,7 @@ export function palette(opts: { onDark?: boolean; mono?: string } = {}): Palette
  * do E e perna do R soltas da haste, G e O levemente largos, N com vértices em ponta. Unidades da arte-mestre:
  * altura das maiúsculas 119, linha de base em y = 119. Cada letra é uma lista de partes (uniões, não furos).
  */
-export const WORD_BOX = { x: 0, y: -4, w: 789, h: 129.4 } as const;
+const WORD_BOX = { x: 0, y: -4, w: 789, h: 129.4 } as const;
 export function wordmark(): Array<{ ch: string; parts: string[] }> {
   const ring = (cx: number, cy: number, rx: number, ry: number, ix: number, iy: number) =>
     `M${cx + rx} ${cy}A${rx} ${ry} 0 1 1 ${cx - rx} ${cy}A${rx} ${ry} 0 1 1 ${cx + rx} ${cy}Z`
@@ -144,7 +144,7 @@ export function emblemMarkup(p: Palette): string {
 }
 
 /** Conteúdo do logotipo: uma letra por grupo (--i para a entrada letra a letra). */
-export function wordMarkup(color: string): string {
+function wordMarkup(color: string): string {
   return `<g fill="${color}">${wordmark().map((l, i) => `<g class="eg-letter" style="--i:${i}">${l.parts.map((d) => `<path d="${d}"/>`).join('')}</g>`).join('')}</g>`;
 }
 

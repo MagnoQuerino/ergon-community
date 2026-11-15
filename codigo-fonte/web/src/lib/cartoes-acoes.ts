@@ -8,7 +8,7 @@
 //   opcao      — cada opção de uma pergunta (40 px, largura total no cartão estreito)
 // O selo dos estados (Aplicada, Com você) é .card-selo: 12,5–13 px, peso 600, sempre com ícone e texto.
 
-export type NivelAcao = 'principal' | 'secundario' | 'perigoso' | 'leve' | 'opcao';
+type NivelAcao = 'principal' | 'secundario' | 'perigoso' | 'leve' | 'opcao';
 
 /** As classes de cada nível. As cores continuam as de sempre (btn--primary, btn--danger): o nível muda o tamanho. */
 export const ACAO: Readonly<Record<NivelAcao, string>> = {

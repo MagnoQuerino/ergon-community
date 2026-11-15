@@ -23,8 +23,8 @@ export type TipoCartao = 'pergunta' | 'chave' | 'sudo';
 export interface PerguntaDoMotor { qid: string; pergunta: string; opcoes: string[]; varias: boolean }
 export interface PedidoCartao { pedido: string; tipo: TipoCartao; perguntas?: PerguntaDoMotor[]; nome?: string; motivo?: string }
 /** O que a ferramenta do motor recebe. valor: só a senha de administrador de um trabalho (uma vez; nunca gravada). */
-export interface EstadoCartao { estado: 'esperando' | 'respondida' | 'recusada' | 'cancelada' | 'falhou'; respostas?: Record<string, string | string[]>; valor?: string; guardada?: boolean; texto?: string }
-export interface SegredoPayload { kind: 'segredo'; tipo: 'chave' | 'sudo'; nome: string; motivo: string; agente: string; pedido: string }
+interface EstadoCartao { estado: 'esperando' | 'respondida' | 'recusada' | 'cancelada' | 'falhou'; respostas?: Record<string, string | string[]>; valor?: string; guardada?: boolean; texto?: string }
+interface SegredoPayload { kind: 'segredo'; tipo: 'chave' | 'sudo'; nome: string; motivo: string; agente: string; pedido: string }
 
 const NOME_CHAVE = /^[A-Z][A-Z0-9_]{2,60}$/;
 const SUDO = 'SUDO_PASSWORD';

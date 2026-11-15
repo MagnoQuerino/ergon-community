@@ -59,7 +59,7 @@ export class SchemaError extends Error {
 }
 
 /** Qual coluna do arquivo é cada campo do esquema. */
-export function mapColumns(headers: string[]): Record<Field, number | null> {
+function mapColumns(headers: string[]): Record<Field, number | null> {
   const keys = headers.map(key);
   const out = {} as Record<Field, number | null>;
   for (const f of Object.keys(ALIASES) as Field[]) {

@@ -53,7 +53,7 @@ const deliverOf = (s: string | undefined): Deliver[] => {
 };
 
 /** Monta (e valida) a rotina de uma proposta. Sem nome, ou sem modelo e sem instrução, não vira proposta. */
-export function specFrom(a: Record<string, string>, tz: string): RoutineSpec | null {
+function specFrom(a: Record<string, string>, tz: string): RoutineSpec | null {
   const tpl = a.modelo ? templateByKey(fold(a.modelo).trim().replace(/\s+/g, '-')) : undefined;
   const d = tpl?.defaults;
   const name = clip((a.nome || tpl?.name || '').replace(/\s+/g, ' '), 60).trim();

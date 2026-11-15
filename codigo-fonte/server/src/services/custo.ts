@@ -29,7 +29,7 @@ export const PASSOS_PADRAO = 90;
 export const PASSOS_MIN = 5;
 export const PASSOS_MAX = 150;
 /** o padrão de antes (migração 1 do cofre e a trava de abertura até a rc.24): no motor sem escolha da pessoa, vira o novo */
-export const PASSOS_ANTIGO = 20;
+const PASSOS_ANTIGO = 20;
 export const PASSOS_SETTING = 'team.max_turns';
 
 /** o valor que o motor confirmou por último (gravado em cada workspace do motor): a tela diz se a escolha já vale */
@@ -111,7 +111,7 @@ export function compactacaoEscolhida(db: Db, workspaceIds: string[] | null): boo
 }
 
 /** a capacidade do plugin que traz a ponte da compactação (rc.26); sem ela, o motor é de antes e só a atualização traz */
-export const CAPACIDADE_COMPACTACAO = 'compactacao';
+const CAPACIDADE_COMPACTACAO = 'compactacao';
 /** COMPACTAR_MOTOR = SEM_COMPACTACAO: o motor é de antes da compactação mais cedo (chega com a próxima atualização da equipe) */
 export const SEM_COMPACTACAO = 'sem';
 /** motor de antes: de quanto em quanto tempo o passo de fundo confere de novo (pela saúde) se ele já foi atualizado */
@@ -157,8 +157,8 @@ export function compactacaoDaEquipe(db: Db, ids: string[]): { ligada: boolean; p
 
 
 // ---------------------------------------------------------------- composição das chamadas
-export interface PartesTokens { base: number; ergon: number; competencias: number; ferramentas: number; memoria: number; anexos: number; conversa: number }
-export interface ComposicaoExecucao extends PartesTokens {
+interface PartesTokens { base: number; ergon: number; competencias: number; ferramentas: number; memoria: number; anexos: number; conversa: number }
+interface ComposicaoExecucao extends PartesTokens {
   chamadas: number;
   /** total de entrada das chamadas (informado pelo provedor; nas que ele não informou, estimado pelo tamanho) */
   entrada: number;
@@ -305,8 +305,8 @@ export async function medirExecucao(db: Db, control: HermesControlClient | null,
 
 // ---------------------------------------------------------------- o resumo para a tela
 /** frações (0 a 1) do que entra em cada chamada; anexos = o que o sistema juntou aos pedidos (anexos, documentos, contas) */
-export interface Fatias { instrucoes: number; ferramentas: number; memoria: number; anexos: number; conversa: number }
-export interface ComposicaoAgente {
+interface Fatias { instrucoes: number; ferramentas: number; memoria: number; anexos: number; conversa: number }
+interface ComposicaoAgente {
   agentId: string; nome: string; execucoes: number; chamadas: number;
   /** tamanho médio de cada chamada (tokens de entrada) */
   mediaPorChamada: number;
@@ -320,7 +320,7 @@ export interface ComposicaoAgente {
   /** em quantas execuções (pedidos) a conversa foi resumida pelo caminho (rc.26): a parte antiga virou um resumo */
   resumidas: number;
 }
-export interface ComposicaoResumo { dias: number; agentes: ComposicaoAgente[]; geral: ComposicaoAgente | null }
+interface ComposicaoResumo { dias: number; agentes: ComposicaoAgente[]; geral: ComposicaoAgente | null }
 
 type Soma = { execucoes: number; chamadas: number; base: number; ergon: number; competencias: number; ferramentas: number;
   memoria: number; anexos: number; conversa: number; entrada: number; cache_lido: number; informado: number; resumidas: number };

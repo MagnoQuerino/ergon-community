@@ -18,7 +18,7 @@ export function proximoNivel(nivel: number, precisa: number, tem: number): numbe
 }
 
 /** Modo da cidade: um botão só, com ícone próprio (nada a ver com o Modo Foco). */
-export interface ModoCidade { icon: 'walk' | 'stand'; label: string; title: string }
+interface ModoCidade { icon: 'walk' | 'stand'; label: string; title: string }
 export function modoCidade(calmo: boolean): ModoCidade {
   return calmo
     ? { icon: 'stand', label: t('cidade.barra.modoCalmo'), title: t('cidade.barra.modoCalmoDica') }

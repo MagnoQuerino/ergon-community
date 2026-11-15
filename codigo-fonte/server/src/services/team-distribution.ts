@@ -12,10 +12,10 @@ import { HttpError, id } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 
 const WORK_KINDS = CATALOG.filter((t) => t.category === 'trabalho').map((t) => t.id);
-export const LIST_MAX = 200;
+const LIST_MAX = 200;
 
-export interface PlannedMove { agentId: string; name: string; sector: string; from: string; fromName: string; to: string; toName: string }
-export interface Plan {
+interface PlannedMove { agentId: string; name: string; sector: string; from: string; fromName: string; to: string; toName: string }
+interface Plan {
   planId: string; total: number; moves: PlannedMove[];
   structures: Array<{ id: string; name: string; before: number; after: number; slots: number }>;
   blocked: Array<{ sector: string; home: string; waiting: number }>;

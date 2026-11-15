@@ -3,7 +3,7 @@
 // Numa lista de cartões, a trava é por item (criarTravaPorItem): o clique noutro cartão vai de verdade.
 import { useRef, useState } from 'react';
 
-export interface Trava {
+interface Trava {
   /** o nome da ação em andamento (para o botão certo dizer "enviando"); null = nada indo */
   readonly indo: string | null;
   /**
@@ -42,7 +42,7 @@ export function useEnvio(): { indo: string | null; enviar: Trava['rodar'] } {
  * o segundo clique no MESMO item não envia de novo, mas o clique noutro cartão enquanto um vai é enviado de verdade
  * (como na rc.27) — nada de clique que some. Guarda, por item, qual ação está indo, para o botão certo dizer "enviando".
  */
-export interface TravaPorItem {
+interface TravaPorItem {
   /** item → ação em andamento (uma cópia nova a cada mudança, para a tela redesenhar) */
   readonly indo: ReadonlyMap<string, string>;
   /** Roda fn se nada deste item estiver indo; senão devolve undefined sem chamar fn. `segurar` como em Trava.rodar. */

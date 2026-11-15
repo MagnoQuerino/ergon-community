@@ -160,7 +160,7 @@ export interface MotorSaude {
 }
 
 /** "sha256:abc123…" ou "repo@sha256:abc…" ou "repo:tag" → um nome curto para a tela e o registro. */
-export function imagemCurta(ref: string | null | undefined): string {
+function imagemCurta(ref: string | null | undefined): string {
   if (!ref) return 'desconhecida';
   const d = /sha256:([a-f0-9]{12})/.exec(ref) ?? /^([a-f0-9]{12})[a-f0-9]{52}$/.exec(ref);
   if (d) return d[1];
@@ -193,7 +193,7 @@ export function filtrarOrfaos(db: Db, nomes: string[], semMarca: string[] = []):
   return out;
 }
 
-export interface MotorDeps {
+interface MotorDeps {
   cfg: Config; db: Db; vault: Vault; owners: WorkspaceOwners;
   /** o motor de antes (um motor só): usado quando não há gerente */
   legacy: MotorClients;

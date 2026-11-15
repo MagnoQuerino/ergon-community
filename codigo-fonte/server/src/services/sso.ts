@@ -22,7 +22,7 @@ import type { SecretStore } from './integrations.ts';
 
 export type SsoKind = 'microsoft' | 'google';
 
-export interface SsoProvider {
+interface SsoProvider {
   kind: SsoKind;
   /** nome para mensagens ("a Microsoft recusou…") e o lugar do registro do app ("na Microsoft") */
   label: string;
@@ -113,14 +113,14 @@ export const STATE_TTL = 10 * 60_000;
 /** As outras formas com que a Microsoft escreve uma permissão do Graph (resposta do token, link do administrador). */
 const PREFIXO_GRAPH = /^(?:https:\/\/graph\.microsoft\.com\/|00000003-0000-0000-c000-000000000000\/)/i;
 /** "https://graph.microsoft.com/Mail.Read" e "00000003-…/Mail.Read" contam como "Mail.Read". */
-export const normalizarEscopo = (e: string): string => e.trim().replace(PREFIXO_GRAPH, '');
+const normalizarEscopo = (e: string): string => e.trim().replace(PREFIXO_GRAPH, '');
 /** A lista de uma resposta (separada por espaço; o exemplo oficial chega a vir percent-codificado), no nome curto. */
 export function listaDeEscopos(s: string | null | undefined): string[] {
   return String(s ?? '').split(/\s+/).filter(Boolean).map((x) => { try { return decodeURIComponent(x); } catch { return x; } })
     .flatMap((x) => x.split(/\s+/)).map(normalizarEscopo).filter(Boolean);
 }
 /** União sem repetir (sem diferença de maiúsculas), na ordem em que apareceram. */
-export function uniaoDeEscopos(...listas: string[][]): string[] {
+function uniaoDeEscopos(...listas: string[][]): string[] {
   const vistos = new Set<string>(); const out: string[] = [];
   for (const e of listas.flat()) { const k = e.toLowerCase(); if (!vistos.has(k)) { vistos.add(k); out.push(e); } }
   return out;
@@ -134,7 +134,7 @@ export function proprioDaEtapa(etapa: Etapa, trabalho: boolean): string[] {
   return trabalho ? [...E.canais] : [];
 }
 /** O que o login de uma etapa pede: ela e as anteriores (o token que volta cobre tudo o que foi dado até ali). */
-export function escoposDaEtapa(etapa: Etapa, trabalho: boolean): string[] {
+function escoposDaEtapa(etapa: Etapa, trabalho: boolean): string[] {
   return uniaoDeEscopos(...ETAPAS.slice(0, ETAPAS.indexOf(etapa) + 1).map((e) => proprioDaEtapa(e, trabalho)));
 }
 
@@ -192,7 +192,7 @@ export function podeAprovarPelaEmpresa(...tokens: Array<string | undefined>): bo
  * `semCanais`: o encadeamento terminou antes dos canais porque eles precisam do administrador e não se sabe que a conta é a de
  * quem aprova pela empresa (ou eles já voltaram sem ser dados): a tela oferece o pedido.
  */
-export interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; /** qual das contas deste aplicativo ('' = a principal) */ conta: string; next?: string; proxima?: Etapa; semCanais?: boolean }
+interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; /** qual das contas deste aplicativo ('' = a principal) */ conta: string; next?: string; proxima?: Etapa; semCanais?: boolean }
 
 export class SsoAuth {
   private readonly cfg: Config;

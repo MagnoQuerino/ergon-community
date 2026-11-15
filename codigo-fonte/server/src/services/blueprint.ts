@@ -57,7 +57,7 @@ function cleanTrigger(t: unknown): BlueprintTrigger {
   return { kind: 'manual' };
 }
 
-export interface BlueprintPlan {
+interface BlueprintPlan {
   coordinator: { from: string; to: string } | null;
   agents: Array<{ name: string; role: string; sector: string }>;
   routines: Array<{ name: string; template: string; status: 'paused' }>;

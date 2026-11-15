@@ -39,9 +39,9 @@ const EVENT_GAP_MS = 1000;
 const COALESCE_MS = 150;
 const RETRY_MS = 3000;
 
-export type CityMode = 'cidade' | 'regiao';
+type CityMode = 'cidade' | 'regiao';
 export interface Clock { now(): number; after(ms: number, fn: () => void): unknown; cancel(h: unknown): void }
-export interface CityLoaderDeps {
+interface CityLoaderDeps {
   /** GET /api/city/agents?<consulta>: `all=1[&cursor=…]`, `f=<andar>,…` ou `ids=<agente>,…` */
   agents(query: string): Promise<CityAgentsPage>;
   /** pede o overview de novo (a resposta chega por setOverview) */

@@ -53,7 +53,7 @@ export function decidir(x: { risco: Risco; origem: Origem; leuDeFora: boolean; l
  * Imagem em data: não vem de endereço nenhum (já está na conversa): não conta.
  */
 // mcp__: os conectores prontos do motor (rc.27) trazem conteúdo de um aplicativo de fora
-export const LEEM_ENDERECO = { prefixos: ['web_', 'browser', 'mcp__'], nomes: ['vision_analyze'] } as const;
+const LEEM_ENDERECO = { prefixos: ['web_', 'browser', 'mcp__'], nomes: ['vision_analyze'] } as const;
 export const leEndereco = (tool: string, alvo?: string | null): boolean =>
   LEEM_ENDERECO.prefixos.some((p) => tool.startsWith(p)) || ((LEEM_ENDERECO.nomes as readonly string[]).includes(tool) && !/^\s*data:/i.test(alvo ?? ''));
 

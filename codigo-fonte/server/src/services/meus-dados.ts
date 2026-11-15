@@ -31,16 +31,16 @@ import { DEFAULT_TZ } from './routine-time.ts';
 import type { Routines } from './routines.ts';
 
 /** documentos e entregas: até 200 MB por arquivo baixado */
-export const MEUS_DADOS_MAX_BYTES = 200 * 1024 * 1024;
+const MEUS_DADOS_MAX_BYTES = 200 * 1024 * 1024;
 /** o texto (conversas, tarefas, equipe, competências, rotinas, regras): até 50 MB por arquivo baixado */
-export const MEUS_DADOS_MAX_TEXTO = 50 * 1024 * 1024;
+const MEUS_DADOS_MAX_TEXTO = 50 * 1024 * 1024;
 const MAX_ENTRADAS = Math.min(20_000, ZIP_MAX_ENTRIES - 10);
 
-export interface MeusDadosDeps { db: Db; cfg: Pick<Config, 'filesDir'>; routines: Routines; owners: WorkspaceOwners }
+interface MeusDadosDeps { db: Db; cfg: Pick<Config, 'filesDir'>; routines: Routines; owners: WorkspaceOwners }
 /** idioma: o da tela de quem pediu (cabeçalho X-Ergon-Lang): em inglês, o LEIA-ME vem como README.txt, em inglês */
-export interface MeusDadosOpts { maxBytes?: number; maxTexto?: number; maxEntradas?: number; agora?: Date; idioma?: 'pt-BR' | 'en' }
-export interface DeFora { arquivo: string; tamanho: number; motivo: string }
-export interface MeusDados {
+interface MeusDadosOpts { maxBytes?: number; maxTexto?: number; maxEntradas?: number; agora?: Date; idioma?: 'pt-BR' | 'en' }
+interface DeFora { arquivo: string; tamanho: number; motivo: string }
+interface MeusDados {
   /** o arquivo em pedaços, para mandar aos poucos (chamar uma vez só) */
   partes(): Generator<Buffer>;
   /** o tamanho exato do arquivo */
@@ -194,13 +194,13 @@ const relogio = (tz: string, longo = false) => {
   return f;
 };
 /** data e hora no fuso do workspace (não no do computador que roda o servidor) */
-export const quando = (iso: string | null | undefined, tz: string): string => {
+const quando = (iso: string | null | undefined, tz: string): string => {
   if (!iso) return '';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? String(iso) : relogio(tz).format(d);
 };
 /** AAAA-MM-DD no fuso dado */
-export const diaNoFuso = (d: Date, tz: string): string => {
+const diaNoFuso = (d: Date, tz: string): string => {
   if (Number.isNaN(d.getTime())) return '';
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d).map((x) => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day}`;

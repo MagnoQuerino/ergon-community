@@ -4,8 +4,8 @@ import path from 'node:path';
 import { FieldCipher, SEALED_PREFIX } from '../security/fields.ts';
 import type { WorkspaceKeySource } from '../security/keys.ts';
 
-export type SqlValue = null | number | bigint | string | Buffer | Uint8Array;
-export type Row = Record<string, SqlValue>;
+type SqlValue = null | number | bigint | string | Buffer | Uint8Array;
+type Row = Record<string, SqlValue>;
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, 'migrations');
 
@@ -20,6 +20,8 @@ export const foldText = (v: string): string => v.normalize('NFD').replace(/[̀-�
  * bruta de 256 bits derivada da chave mestra). Com `setCipher`, campos sensíveis são gravados cifrados
  * pela chave do workspace (`seal`) e decifrados sozinhos na leitura — a camada que vai para a nuvem.
  */
+const STMT_CACHE_MAX = 1000;
+
 export class Db {
   readonly raw: Database.Database;
   private depth = 0;
@@ -90,18 +92,34 @@ export class Db {
     return row;
   }
 
+  /**
+   * Consultas já compiladas, por texto: compilar o SQL custa mais do que rodar uma consulta curta, e o servidor repete
+   * as mesmas o tempo todo. O SQLite recompila sozinho o que uma migração mudou; a que estiver em uso agora (uma função
+   * do banco consultando de dentro dela) ganha uma cópia avulsa. Teto para SQL montado na hora não crescer sem fim.
+   */
+  private readonly stmts = new Map<string, Database.Statement>();
+  private stmt(sql: string): Database.Statement {
+    let s = this.stmts.get(sql);
+    if (s && !s.busy) return s;
+    if (s) return this.raw.prepare(sql);
+    s = this.raw.prepare(sql);
+    if (this.stmts.size >= STMT_CACHE_MAX) this.stmts.delete(this.stmts.keys().next().value!);
+    this.stmts.set(sql, s);
+    return s;
+  }
+
   get<T = Row>(sql: string, ...params: SqlValue[]): T | undefined {
-    return this.openRow(this.raw.prepare(sql).get(...params) as T | undefined);
+    return this.openRow(this.stmt(sql).get(...params) as T | undefined);
   }
 
   all<T = Row>(sql: string, ...params: SqlValue[]): T[] {
-    const rows = this.raw.prepare(sql).all(...params) as T[];
+    const rows = this.stmt(sql).all(...params) as T[];
     if (this.cipher) for (const r of rows) this.openRow(r);
     return rows;
   }
 
   run(sql: string, ...params: SqlValue[]): { changes: number } {
-    const r = this.raw.prepare(sql).run(...params);
+    const r = this.stmt(sql).run(...params);
     return { changes: Number(r.changes) };
   }
 
@@ -141,6 +159,8 @@ export class Db {
       });
       applied.push(f);
     }
+    // o esquema mudou: as consultas compiladas antes (SELECT * inclusive) são refeitas na próxima vez
+    if (applied.length) this.stmts.clear();
     return applied;
   }
 

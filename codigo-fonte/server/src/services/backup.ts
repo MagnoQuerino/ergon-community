@@ -17,9 +17,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Db } from '../db/db.ts';
 
-export const BACKUP_FORMAT = 2;
-export interface BackupEntry { path: string; bytes: number; sha256: string }
-export interface BackupManifest {
+const BACKUP_FORMAT = 2;
+interface BackupEntry { path: string; bytes: number; sha256: string }
+interface BackupManifest {
   format: number; app: 'ergon'; createdAt: string; version: string; encrypted: boolean;
   /** migrações aplicadas no banco copiado (restaurar numa versão mais nova aplica as que faltarem) */
   migrations: string[];
@@ -37,7 +37,7 @@ const SAFE_ENTRY = /^(db\.sqlite|keyring\.json|(files|secrets)(\/[^/\\\u0000-\u0
 /** o que a restauração troca, nesta ordem; tudo dentro da pasta de dados */
 const ITEMS = ['db', 'files', 'secrets', 'keyring.json'] as const;
 
-export function sha256File(file: string): string {
+function sha256File(file: string): string {
   const h = crypto.createHash('sha256');
   const fd = fs.openSync(file, 'r');
   const buf = Buffer.alloc(1 << 20);
@@ -155,7 +155,7 @@ export function verifyBackup(dir: string): { ok: boolean; problems: string[]; ma
   return { ok: problems.length === 0, problems, manifest: m };
 }
 
-export type KeyRelation = 'mesma' | 'outra' | 'nova' | 'sem';
+type KeyRelation = 'mesma' | 'outra' | 'nova' | 'sem';
 /** A chave do backup é a desta instalação? 'outra': o cofre do motor daqui foi feito com outra chave. */
 export function keyRelation(p: DataPaths, backupCheck: string | null): KeyRelation {
   if (!backupCheck) return 'sem';
@@ -163,7 +163,7 @@ export function keyRelation(p: DataPaths, backupCheck: string | null): KeyRelati
   return !cur ? 'nova' : cur === backupCheck ? 'mesma' : 'outra';
 }
 
-export interface RestoreResult { pre: string; items: string[]; keyring: KeyRelation; from: string; version: string | null; migrations: number }
+interface RestoreResult { pre: string; items: string[]; keyring: KeyRelation; from: string; version: string | null; migrations: number }
 
 /**
  * Troca os dados pelos do backup, com o servidor parado. 1) copia e confere tudo numa área de preparo no mesmo

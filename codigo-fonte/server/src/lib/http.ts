@@ -11,7 +11,7 @@
  * das conexões e o envio dos quadros escrevem nos serviços: toda escrita declara `kind: 'write'`.
  */
 export type HttpKind = 'read' | 'write';
-export interface RetryPolicy {
+interface RetryPolicy {
   kind?: HttpKind;
   /** tentativas no total (padrão 3) */
   attempts?: number;
@@ -47,7 +47,7 @@ const errCode = (e: unknown): string | null => {
   return typeof c === 'string' ? c : null;
 };
 /** a requisição com certeza não saiu (repetir é seguro mesmo numa escrita) */
-export const notSent = (e: unknown): boolean => { const c = errCode(e); return !!c && NOT_SENT.has(c); };
+const notSent = (e: unknown): boolean => { const c = errCode(e); return !!c && NOT_SENT.has(c); };
 
 /** Falha de rede depois das tentativas. `unknownOutcome`: escrita que pode ter sido feita do outro lado. */
 export class NetworkFailure extends Error {

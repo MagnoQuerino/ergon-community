@@ -35,7 +35,7 @@
  * CPF, CNPJ e dados bancários servem de filtro ou ficam de fora: não saem nas respostas.
  */
 import crypto from 'node:crypto';
-import { linhaDe, type ConectorDef, type Credenciais } from './declarativo.ts';
+import { linhaDe, vazio, type ConectorDef, type Credenciais } from './declarativo.ts';
 import { ErroAcao, type Args, type CtxAcao, type Param } from '../tipos.ts';
 
 type Chamada = 'ListarEmpresas' | 'ListarContasReceber' | 'ConsultarContaReceber' | 'ListarContasPagar' | 'ConsultarContaPagar' | 'PesquisarLancamentos' | 'ListarClientes' | 'ConsultarCliente'
@@ -104,7 +104,6 @@ const fichaOuNada = (j: any, campos: Campos, chave: string): string => ficha(j?.
 const ligado = (v: unknown) => v === true || v === 'true' || v === 'sim';
 
 // ---------------------------------------------------------------------------------------------------------- escrita
-const vazio = (v: unknown) => v === undefined || v === null || v === '';
 /**
  * O dia no fuso do workspace (AAAA-MM-DD). Em UTC, um pedido repetido às 21h01 em Brasília já cairia no dia seguinte e
  * levaria outro código: a Omie lançaria duas vezes.

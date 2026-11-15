@@ -20,7 +20,7 @@ export interface TeamStructure {
   id: string; kind: string; kind_name: string; name: string; i: number; j: number;
   floors: number; max_floors: number; slots: number; active: number; free: number; can_grow: boolean; sample: TeamAgent[];
 }
-export interface Page<T> { items: T[]; total: number; next: string | null }
+interface Page<T> { items: T[]; total: number; next: string | null }
 export interface TeamSummary {
   agents: { active: number; archived: number }; sectors: number; structures: number;
   capacity: { slots: number; active: number; free: number }; coordinatorId: string | null; themed: number; autoGrow: boolean;
@@ -36,7 +36,7 @@ export function compareAgents(a: TeamAgent, b: TeamAgent): number {
   return cmp(fold(a.name), fold(b.name)) || cmp(a.id, b.id);
 }
 
-export interface AgentFilter { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all' }
+interface AgentFilter { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all' }
 /** O agente cabe nesta lista? (o que o servidor filtra, para acertar a lista sem pedir de novo) */
 export function matches(a: TeamAgent, f: AgentFilter): boolean {
   const status = f.structure ? 'active' : f.status ?? 'active';
@@ -47,7 +47,7 @@ export function matches(a: TeamAgent, f: AgentFilter): boolean {
   return true;
 }
 
-export interface ListState { items: TeamAgent[]; total: number; next: string | null }
+interface ListState { items: TeamAgent[]; total: number; next: string | null }
 /**
  * Acerta uma lista carregada com a versão nova de um agente (ou null = sumiu). Pura (testada): fora do filtro, sai;
  * dentro e já presente, troca no lugar certo; dentro e ausente, entra se a posição cair no trecho já carregado (ou a

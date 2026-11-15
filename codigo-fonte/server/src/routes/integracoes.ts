@@ -14,7 +14,7 @@ import { ProviderError, importBoards } from '../services/mirror.ts';
 import { ETAPAS, SSO_KINDS, isEtapa, type Etapa, type SsoKind } from '../services/sso.ts';
 import { filtersOf, risksAccepted, WA_RISKS_VERSION, type WhatsAppReader } from '../services/whatsapp.ts';
 
-export interface IntegrationRoutesDeps {
+interface IntegrationRoutesDeps {
   db: Db; bus: Bus; integrations: Integrations; whatsapp: WhatsAppReader;
   /** sessão válida (qualquer membro) */ auth: (req: FastifyRequest) => AuthContext;
   /** sessão do dono do workspace */ owner: (req: FastifyRequest) => AuthContext;

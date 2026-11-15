@@ -63,7 +63,7 @@ const GENERICAS = new Set([
  * Quantas palavras dizem do que se trata: as de assunto e, quando há alguma (ou um número que identifica), também as
  * genéricas e o número. 0: nada ("?", "ok", "faz isso", "Atender o pedido").
  */
-export function subjectWords(s: string | null | undefined): number {
+function subjectWords(s: string | null | undefined): number {
   const words = fold(s ?? '').split(/[^a-z0-9]+/).filter(Boolean);
   const especificas = words.filter((w) => w.length > 2 && !/^\d+$/.test(w) && !VAZIAS.has(w) && !GENERICAS.has(w)).length;
   const genericas = words.filter((w) => GENERICAS.has(w)).length;
@@ -116,7 +116,7 @@ export function cardTitle(opts: { plan?: string | null; candidates?: Array<strin
   return { title: provisionalTitle(opts.agentName), source: 'provisorio' };
 }
 
-export interface Rename { number: number; title: string }
+interface Rename { number: number; title: string }
 
 /**
  * [[titulo card="12" novo="Título curto e contextual"]] na resposta da coordenação (também [[renomear-card numero="12"
@@ -136,7 +136,7 @@ export function parseRenames(text: string | null | undefined): Rename[] {
   return out;
 }
 
-export type RenameResult = 'renomeado' | 'igual' | 'pessoa' | 'vago' | 'fora';
+type RenameResult = 'renomeado' | 'igual' | 'pessoa' | 'vago' | 'fora';
 
 /**
  * Card de antes da marca (title_source NULL): a pessoa trocou o título? A migração 0039 só lê o histórico em claro;

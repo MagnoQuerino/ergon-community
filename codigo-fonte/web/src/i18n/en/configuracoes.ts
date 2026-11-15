@@ -261,7 +261,6 @@ const configuracoes: Traducao<typeof pt> = {
   // ——— rc.27: ajustes da equipe de IA (plano B, privacidade, competências sem uso, pausa, limites da conta, orientar) ———
   'ajustes.depois': 'The team hasn\'t received the change yet: it will as soon as it\'s running.',
   'ajustes.atualizacao': 'Arrives with the team\'s next update (see Health); your choice is saved.',
-  'ajustes.compartilhado': { one: 'Also applies to your other workspace.', other: 'Also applies to your {n} other workspaces.' },
   'ajustes.reserva.titulo': 'Plan B: backup models',
   'ajustes.reserva.texto': 'When the main model fails or the account hits its limit, the team carries on with a backup model, in list order.',
   'ajustes.reserva.modo': 'Backup models',

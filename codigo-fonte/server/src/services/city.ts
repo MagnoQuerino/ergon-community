@@ -18,12 +18,12 @@ import { LITE_COLS, decodeCursor, encodeCursor, lastOutcomeOf, runStatusOf, type
 /** Limites de cada pedido (o transporte, não quantos agentes existem: o resto vem por páginas ou noutro pedido). */
 export const CITY_LIMITS = { page: 2000, floors: 100, buildings: 64, ids: 200, per: 50 };
 
-export interface CityAgent extends AgentLite {
+interface CityAgent extends AgentLite {
   building_id: string; floor_id: string; level: number; slot: number; house: number;
   run_status: 'queued' | 'running' | 'waiting_user' | null; last_outcome: string | null;
 }
-export interface CityAgentsPage { total: number; agents: CityAgent[]; next: string | null }
-export type CityQuery =
+interface CityAgentsPage { total: number; agents: CityAgent[]; next: string | null }
+type CityQuery =
   | { mode: 'all'; cursor?: string }
   | { mode: 'floors'; floors: string[] }
   | { mode: 'buildings'; buildings: string[]; per?: number }
@@ -33,7 +33,7 @@ const SET = `FROM agents a JOIN floors f ON f.id = a.floor_id JOIN profiles p ON
 const marks = (n: number) => Array.from({ length: n }, () => '?').join(', ');
 
 /** Quantos ativos no workspace: o mesmo conjunto dos moradores (decide entre a cidade inteira e por região). */
-export function cityTotal(db: Db, workspaceId: string): number {
+function cityTotal(db: Db, workspaceId: string): number {
   return Number(db.get<{ n: number }>(`SELECT COUNT(*) AS n ${SET}`, workspaceId)?.n ?? 0);
 }
 

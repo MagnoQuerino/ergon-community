@@ -18,31 +18,31 @@ import type { Db } from '../db/db.ts';
 import { HermesError, type AjustesMotor, type AjustesPatch, type HermesControlClient, type ModeloReserva, type ModelOptions, type Raciocinio } from './hermes.ts';
 import { getSetting, setSetting } from './sectors.ts';
 
-export const RESERVA_SETTING = 'team.reserva';
-export const NAO_TREINAR_SETTING = 'team.naoTreinar';
-export const BUSCA_PRIVADA_SETTING = 'team.buscaPrivada';
-export const ARRUMAR_SETTING = 'team.arrumarCompetencias';
-export const PAUSA_SETTING = 'team.pausa';
-export const ANOTAR_MEMORIA_SETTING = 'team.anotarMemoria';
-export const RACIOCINIO_SETTING = 'team.raciocinio';
+const RESERVA_SETTING = 'team.reserva';
+const NAO_TREINAR_SETTING = 'team.naoTreinar';
+const BUSCA_PRIVADA_SETTING = 'team.buscaPrivada';
+const ARRUMAR_SETTING = 'team.arrumarCompetencias';
+const PAUSA_SETTING = 'team.pausa';
+const ANOTAR_MEMORIA_SETTING = 'team.anotarMemoria';
+const RACIOCINIO_SETTING = 'team.raciocinio';
 export const RACIOCINIOS: readonly Raciocinio[] = ['high', 'medium', 'low', 'modelo'];
 /** o padrão (migração 10 do cofre: o "low" que ninguém escolheu vira "high"; RACIOCINIO_PADRAO no plugin) */
-export const RACIOCINIO_PADRAO: Raciocinio = 'high';
+const RACIOCINIO_PADRAO: Raciocinio = 'high';
 /** no motor, a do modelo é '' */
 const noMotor = (r: Raciocinio): string => (r === 'modelo' ? '' : r);
 /** o que o motor confirmou por último (JSON de AjustesMotor), ou SEM_AJUSTES; gravado em cada workspace do motor */
 export const AJUSTES_MOTOR = 'team.ajustes.motor';
 /** o motor é de antes dos ajustes (plugin sem a capacidade): as escolhas ficam guardadas e chegam com a atualização */
 export const SEM_AJUSTES = 'sem';
-export const CAPACIDADE_AJUSTES = 'ajustes';
+const CAPACIDADE_AJUSTES = 'ajustes';
 export const RESERVA_MAX = 5;
 /** na reserva automática: no máximo estas contas (cada uma com um modelo) */
-export const RESERVA_AUTO_MAX = 3;
+const RESERVA_AUTO_MAX = 3;
 export const AJUSTES_RECONFERE_MS = 10 * 60_000;
 
 export type ReservaModo = 'auto' | 'lista' | 'desligado';
-export interface ReservaEscolha { modo: ReservaModo; lista: ModeloReserva[] }
-export interface EscolhasDaEquipe { reserva: ReservaEscolha; naoTreinar: boolean; buscaPrivada: boolean; arrumarCompetencias: boolean; anotarMemoria: boolean; raciocinio: Raciocinio }
+interface ReservaEscolha { modo: ReservaModo; lista: ModeloReserva[] }
+interface EscolhasDaEquipe { reserva: ReservaEscolha; naoTreinar: boolean; buscaPrivada: boolean; arrumarCompetencias: boolean; anotarMemoria: boolean; raciocinio: Raciocinio }
 
 function ultimaEntre(db: Db, key: string, ids: string[]): string | undefined {
   if (!ids.length) return undefined;
@@ -67,7 +67,7 @@ export function reservaLimpa(raw: unknown): ModeloReserva[] {
   return out.slice(0, RESERVA_MAX);
 }
 
-export function reservaEscolhida(db: Db, ids: string[]): ReservaEscolha {
+function reservaEscolhida(db: Db, ids: string[]): ReservaEscolha {
   try {
     const v = JSON.parse(ultimaEntre(db, RESERVA_SETTING, ids) ?? 'null') as Partial<ReservaEscolha> | null;
     if (v && (v.modo === 'lista' || v.modo === 'desligado' || v.modo === 'auto')) return { modo: v.modo, lista: v.modo === 'lista' ? reservaLimpa(v.lista) : [] };
@@ -107,7 +107,7 @@ export function reservaValida(lista: ModeloReserva[], o: ModelOptions | null): M
   return lista.filter((e) => o.providers.some((p) => p.slug === e.provider && p.authenticated && p.models.includes(e.model)));
 }
 
-export interface ContextoDosAjustes {
+interface ContextoDosAjustes {
   /** o catálogo de modelos do motor (contas conectadas); null = não deu para ler agora (a reserva não é mexida) */
   opcoes: ModelOptions | null;
   /** o idioma da pessoa dona do motor; undefined = sem escolha (o motor fica como está) */
@@ -169,7 +169,7 @@ export async function sincronizarAjustes(db: Db, control: HermesControlClient | 
   return atual;
 }
 
-export interface AjustesDaEquipe {
+interface AjustesDaEquipe {
   reserva: { modo: ReservaModo; lista: ModeloReserva[]; /** o que está valendo no motor agora */ emUso: ModeloReserva[] };
   naoTreinar: boolean;
   buscaPrivada: boolean;
@@ -231,7 +231,7 @@ export function reservaUsada(served: { provider: string | null; model: string | 
  * execuções do Hermes não confere a parada, então quem segura os pedidos do Ergon é a fila do próprio Ergon (RunExecutor).
  * A pausa é do motor: vale para todos os workspaces dele.
  */
-export interface PausaDaEquipe { pausada: boolean; desde: string | null }
+interface PausaDaEquipe { pausada: boolean; desde: string | null }
 export function pausaDaEquipe(db: Db, ids: string[]): PausaDaEquipe {
   const v = ultimaEntre(db, PAUSA_SETTING, ids);
   if (!v || v === 'desligado') return { pausada: false, desde: null };

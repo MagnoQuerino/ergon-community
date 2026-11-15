@@ -11,7 +11,7 @@ import { fetchWithPolicy } from '../lib/http.ts';
 import { xmlText } from './doc-text.ts';
 import { neutral } from './operations.ts';
 
-export interface FeedItem { title: string; link: string; source: string; at: string | null; summary: string }
+interface FeedItem { title: string; link: string; source: string; at: string | null; summary: string }
 export interface FeedRead { label: string; url: string; status: 'ok' | 'erro' | 'bloqueado'; count: number; detail?: string; ms: number }
 
 const MAX_BYTES = 2 * 1024 * 1024; const TIMEOUT = 12_000;
@@ -43,10 +43,10 @@ export async function checkUrl(raw: string, lookup: (h: string) => Promise<strin
 }
 const defaultLookup = async (h: string) => (await dns.lookup(h, { all: true })).map((a) => a.address);
 
-export class FeedError extends Error { readonly kind: 'erro' | 'bloqueado'; constructor(kind: 'erro' | 'bloqueado', m: string) { super(m); this.kind = kind; } }
+class FeedError extends Error { readonly kind: 'erro' | 'bloqueado'; constructor(kind: 'erro' | 'bloqueado', m: string) { super(m); this.kind = kind; } }
 
 /** Busca com os limites (redirecionamento conferido a cada salto). */
-export async function safeFetch(raw: string, lookup?: (h: string) => Promise<string[]>): Promise<string> {
+async function safeFetch(raw: string, lookup?: (h: string) => Promise<string[]>): Promise<string> {
   let url = await checkUrl(raw, lookup);
   for (let hop = 0; hop < 4; hop++) {
     let res: Response;

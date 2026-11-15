@@ -12,7 +12,7 @@
 import { Worker } from 'node:worker_threads';
 import type { DocText } from './doc-text.ts';
 
-export interface IsolateOpts { timeoutMs?: number; memMb?: number; /** só para testes: outro programa de worker */ workerUrl?: URL }
+interface IsolateOpts { timeoutMs?: number; memMb?: number; /** só para testes: outro programa de worker */ workerUrl?: URL }
 const DEFAULT = { timeoutMs: 30_000, memMb: 384 };
 const MAX_PARALLEL = 2;
 

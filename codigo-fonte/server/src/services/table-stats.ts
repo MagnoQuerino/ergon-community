@@ -6,7 +6,7 @@
 import { parseDate, parseNumber, toCsv } from './csv.ts';
 import type { Sheet } from './doc-text.ts';
 
-export type ColType = 'numero' | 'data' | 'texto' | 'vazia';
+type ColType = 'numero' | 'data' | 'texto' | 'vazia';
 export interface ColumnStat {
   name: string; type: ColType; filled: number; blanks: number;
   sum?: number; min?: number; max?: number; mean?: number; median?: number;

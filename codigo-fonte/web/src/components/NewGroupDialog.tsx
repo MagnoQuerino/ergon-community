@@ -9,7 +9,7 @@ import { Icon } from './Icon.tsx';
 /** Construções de trabalho que a loja oferece (as cívicas, como a ágora, são únicas e já vêm com a cidade). */
 const WORK = CATALOG.filter((t) => t.category === 'trabalho' && t.store);
 
-export type NewGroup = { kind: 'sector'; key: string; name: string } | { kind: 'structure'; id: string; name: string };
+type NewGroup = { kind: 'sector'; key: string; name: string } | { kind: 'structure'; id: string; name: string };
 
 /**
  * Setor ou construção nova direto na Equipe. O setor nasce com as instruções e ferramentas de partida da Central (dá

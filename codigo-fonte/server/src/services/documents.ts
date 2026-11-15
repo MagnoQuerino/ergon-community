@@ -13,8 +13,8 @@ import { markdownToDocx } from '../lib/docx.ts';
 import { audit, type Bus } from './bus.ts';
 import { readDocument } from './doc-isolated.ts';
 
-export interface FolderRow { id: string; parent_id: string | null; name: string; system_key: string | null; created_at: string; deleted_at: string | null }
-export interface FileRow { id: string; filename: string; mime: string; size: number; created_at: string; folder_id: string | null; task_id: string | null; deleted_at: string | null }
+interface FolderRow { id: string; parent_id: string | null; name: string; system_key: string | null; created_at: string; deleted_at: string | null }
+interface FileRow { id: string; filename: string; mime: string; size: number; created_at: string; folder_id: string | null; task_id: string | null; deleted_at: string | null }
 
 const SYSTEM_ROOTS: Record<string, string> = { cards: 'Entregas', conversas: 'Conversas', rotinas: 'Rotinas' };
 /** nomes de antes (a pasta dos cards se chamava Cards): trocados uma vez, se a pessoa não tinha mudado */
@@ -28,7 +28,7 @@ function fixLegacyNames(db: Db, workspaceId: string): void {
   }
 }
 /** lixeira: guarda por este tempo; depois a limpeza apaga de vez */
-export const TRASH_DAYS = 30;
+const TRASH_DAYS = 30;
 
 function folderName(name: string): string {
   const n = name.replace(/[\\/]/g, '-').replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '').replace(/\s+/g, ' ').trim();
@@ -36,7 +36,7 @@ function folderName(name: string): string {
   return n.slice(0, 80);
 }
 
-export function folders(db: Db, workspaceId: string, opts: { trash?: boolean } = {}): FolderRow[] {
+function folders(db: Db, workspaceId: string, opts: { trash?: boolean } = {}): FolderRow[] {
   return db.all<FolderRow>(`SELECT id, parent_id, name, system_key, created_at, deleted_at FROM folders WHERE workspace_id = ? AND deleted_at IS ${opts.trash ? 'NOT ' : ''}NULL ORDER BY created_at, id`, workspaceId);
 }
 
@@ -47,7 +47,7 @@ function folderOf(db: Db, workspaceId: string, folderId: string): FolderRow {
 }
 
 /** Pasta automática (cria se faltar). */
-export function systemFolder(db: Db, workspaceId: string, key: string, name: string, parentKey?: string): string {
+function systemFolder(db: Db, workspaceId: string, key: string, name: string, parentKey?: string): string {
   const cur = db.get<{ id: string; deleted_at: string | null }>('SELECT id, deleted_at FROM folders WHERE workspace_id = ? AND system_key = ?', workspaceId, key);
   if (cur) { if (cur.deleted_at) db.run('UPDATE folders SET deleted_at = NULL WHERE id = ?', cur.id); return cur.id; }
   const parent = parentKey ? systemFolder(db, workspaceId, parentKey, SYSTEM_ROOTS[parentKey] ?? parentKey) : null;
@@ -69,7 +69,7 @@ export function folderForTask(db: Db, workspaceId: string, taskId: string): stri
  * Arquivos de antes das pastas (ou gravados por outro caminho) ganham lugar: o do card, o da conversa ou a raiz.
  * Idempotente e barato (só os sem pasta).
  */
-export function adoptLoose(db: Db, workspaceId: string): void {
+function adoptLoose(db: Db, workspaceId: string): void {
   fixLegacyNames(db, workspaceId);
   const loose = db.all<{ id: string; task_id: string | null }>('SELECT id, task_id FROM artifacts WHERE workspace_id = ? AND folder_id IS NULL AND deleted_at IS NULL LIMIT 500', workspaceId);
   for (const a of loose) {
@@ -124,7 +124,7 @@ export function searchFiles(db: Db, workspaceId: string, q: string) {
 }
 
 /** Caminho "Clientes/ACME" → pasta (cria as que faltam se `create`). */
-export function folderByPath(db: Db, workspaceId: string, pathText: string, create: boolean): string | null {
+function folderByPath(db: Db, workspaceId: string, pathText: string, create: boolean): string | null {
   const parts = pathText.split('/').map((p) => p.trim()).filter(Boolean);
   if (!parts.length) return null;
   let parent: string | null = null;
@@ -147,7 +147,7 @@ function assertNotInside(db: Db, workspaceId: string, folderId: string, target: 
   }
 }
 
-export interface DocActor { type: 'user' | 'agent'; id: string }
+interface DocActor { type: 'user' | 'agent'; id: string }
 const actorOf = (a: DocActor) => ({ actorType: a.type, actorId: a.id });
 
 /** Registro com o "antes" (para desfazer). Devolve o id do registro. */
@@ -317,7 +317,7 @@ export async function preview(db: Db, cfg: Pick<Config, 'filesDir'>, workspaceId
 const attr = (body: string, k: string) => body.match(new RegExp(`${k}\\s*=\\s*"([^"]*)"`, 'i'))?.[1]?.trim() ?? '';
 const TAG = /\[\[\s*(pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|copiar-arquivo|salvar-documento|apagar|esvaziar-lixeira)\b((?:[^\]]|\](?!\]))*)\]\]/gi;
 
-export interface DocCommand { op: 'pasta' | 'mover-arquivo' | 'renomear-arquivo' | 'renomear-pasta' | 'lixeira' | 'copiar-arquivo' | 'salvar-documento' | 'apagar' | 'esvaziar-lixeira'; caminho: string; arquivo: string; para: string; nome: string; pasta: string; formato: string }
+interface DocCommand { op: 'pasta' | 'mover-arquivo' | 'renomear-arquivo' | 'renomear-pasta' | 'lixeira' | 'copiar-arquivo' | 'salvar-documento' | 'apagar' | 'esvaziar-lixeira'; caminho: string; arquivo: string; para: string; nome: string; pasta: string; formato: string }
 
 export function parseDocCommands(text: string | null): DocCommand[] {
   return [...(text ?? '').matchAll(TAG)].slice(0, 30).map((m) => ({

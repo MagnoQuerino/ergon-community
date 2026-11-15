@@ -6,13 +6,13 @@
 import type { ContaDaTela, Integration } from './types.ts';
 
 /** As contas que contam (a que ficou pela metade, desligada e sem credencial, o servidor já tira da lista). */
-export const contasDe = (i: Pick<Integration, 'contas'>): ContaDaTela[] => i.contas ?? [];
+const contasDe = (i: Pick<Integration, 'contas'>): ContaDaTela[] => i.contas ?? [];
 
 /** A lista de contas aparece quando há mais de uma (conectada, conectando ou com problema). */
 export const temVariasContas = (i: Pick<Integration, 'contas'>): boolean => contasDe(i).filter((c) => c.state !== 'off').length > 1;
 
 /** De que jeito se conecta mais uma conta deste aplicativo. */
-export type ComoAdicionar = 'credencial' | 'login' | 'qr';
+type ComoAdicionar = 'credencial' | 'login' | 'qr';
 export function comoAdicionar(i: Pick<Integration, 'auth'>): ComoAdicionar | null {
   return i.auth === 'token' ? 'credencial' : i.auth === 'oauth' ? 'login' : i.auth === 'qr' ? 'qr' : null;
 }
@@ -33,7 +33,7 @@ export const outrasContas = (i: Pick<Integration, 'contas'>): ContaDaTela[] => c
 export const nomeNaTela = (c: Pick<ContaDaTela, 'nome'>, reserva: string): string => c.nome.trim() || reserva;
 
 /** O que uma linha da lista oferece. */
-export interface AcoesDaLinha {
+interface AcoesDaLinha {
   /** virar a principal (a que vale quando ninguém diz qual usar) */
   tornarPrincipal: boolean;
   /** ligar e desligar para a equipe e as rotinas */

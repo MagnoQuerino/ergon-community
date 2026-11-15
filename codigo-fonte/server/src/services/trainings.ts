@@ -30,11 +30,11 @@ const porque = (err: unknown): string => {
   return m ? `: ${m}` : '';
 };
 
-export type TrainingStatus = 'executando' | 'em_revisao' | 'falhou' | 'aprovado' | 'descartado';
-export interface TrainingInput { request: string; title?: string; fileIds?: string[]; links?: string[]; skillId?: string | null }
-export interface FileSource { id: string; name: string; status: 'lido' | 'sem_texto' | 'nao_suportado' | 'erro'; chars: number; detail?: string }
-export interface LinkSource { url: string; status: 'pendente' | 'lido' | 'falhou'; chars: number; detail?: string }
-export interface TrainingSources { files: FileSource[]; links: LinkSource[] }
+type TrainingStatus = 'executando' | 'em_revisao' | 'falhou' | 'aprovado' | 'descartado';
+interface TrainingInput { request: string; title?: string; fileIds?: string[]; links?: string[]; skillId?: string | null }
+interface FileSource { id: string; name: string; status: 'lido' | 'sem_texto' | 'nao_suportado' | 'erro'; chars: number; detail?: string }
+interface LinkSource { url: string; status: 'pendente' | 'lido' | 'falhou'; chars: number; detail?: string }
+interface TrainingSources { files: FileSource[]; links: LinkSource[] }
 
 interface TrainingRow {
   id: string; workspace_id: string; agent_id: string; skill_name: string; skill_id: string | null; status: TrainingStatus; title: string; title_fixed: number;
@@ -64,7 +64,7 @@ function cleanLink(raw: string): string | null {
   return u.toString();
 }
 /** frontmatter mínimo: description e o título (# ...) do SKILL.md */
-export function skillMeta(skillMd: string): { description: string; title: string } {
+function skillMeta(skillMd: string): { description: string; title: string } {
   const fm = skillMd.match(/^---\n([\s\S]*?)\n---/);
   const desc = fm?.[1].match(/^description:\s*["']?(.+?)["']?\s*$/m)?.[1] ?? '';
   const title = skillMd.replace(/^---\n[\s\S]*?\n---\n?/, '').match(/^#\s+(.+)$/m)?.[1] ?? '';

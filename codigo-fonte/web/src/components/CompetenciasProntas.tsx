@@ -22,7 +22,7 @@ const GRAVIDADE: Record<string, Rotulo> = { critical: 'agente.loja.grav.critical
 const PAGINA = 24;
 
 /** Liga ou desliga uma competência da biblioteca neste agente (com a ferramenta das competências junto). */
-export async function ligarNoAgente(agent: Pick<Agent, 'id'>, nome: string, ligar: boolean): Promise<void> {
+async function ligarNoAgente(agent: Pick<Agent, 'id'>, nome: string, ligar: boolean): Promise<void> {
   // a conta é do servidor, sobre a lista gravada: dois cliques seguidos (antes de a tela recarregar) não se apagam, e a
   // ferramenta das competências vai junto quando liga
   await api.post(`${RECURSOS}/competencias/ligar`, { agente: agent.id, nome, ligar });

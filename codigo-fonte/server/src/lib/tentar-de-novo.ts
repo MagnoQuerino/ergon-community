@@ -11,7 +11,7 @@ export interface Tentativas {
 }
 
 /** 30 s, 2 min, 10 min, 1 h e 6 h: o motivo comum (o serviço ainda subindo, o disco ocupado) passa bem antes. */
-export const ESPERAS_PADRAO = [30_000, 120_000, 600_000, 3_600_000, 21_600_000];
+const ESPERAS_PADRAO = [30_000, 120_000, 600_000, 3_600_000, 21_600_000];
 
 export function tentarDeNovo(fn: () => Promise<unknown>, opts: { esperas?: number[]; aoFalhar?: (erro: unknown, tentativa: number, desiste: boolean) => void } = {}): Tentativas {
   const esperas = opts.esperas ?? ESPERAS_PADRAO;

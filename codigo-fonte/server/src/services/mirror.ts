@@ -40,7 +40,7 @@ export interface TaskProvider {
   getBoard(externalId: string): Promise<BoardSnapshot>;
 }
 
-export interface ImportReport {
+interface ImportReport {
   boards: Array<{ externalId: string; boardId: string | null; state: 'ok' | 'error'; error?: string;
     created: number; updated: number; unchanged: number; missing: number; conflicts: number }>;
 }

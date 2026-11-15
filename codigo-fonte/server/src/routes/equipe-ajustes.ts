@@ -15,7 +15,7 @@ import type { Raciocinio } from '../services/hermes.ts';
 import { audit, type Bus } from '../services/bus.ts';
 import { ORIENTAR_NAO_ANDANDO, STEER_MAX, type RunExecutor } from '../services/runs.ts';
 
-export interface AjustesRoutesDeps {
+interface AjustesRoutesDeps {
   db: Db; bus: Bus; executor: RunExecutor;
   /** sessão válida (qualquer membro) */ auth: (req: FastifyRequest) => AuthContext;
   /** sessão do dono do workspace */ owner: (req: FastifyRequest) => AuthContext;

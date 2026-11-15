@@ -71,7 +71,7 @@ function install(): void {
   }, true);
 }
 
-export interface SurfaceOptions {
+interface SurfaceOptions {
   /** fechar: a superfície decide (gravar antes, perguntar); why diz o que pediu */
   onClose: (why: CloseWhy) => void;
   modal?: boolean;

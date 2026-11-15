@@ -26,15 +26,15 @@ import { junto, reconhecer, tx, type Codigo, type Texto, type Valor } from '../l
 /** O nome do componente da IA na Saúde (o id continua "motor": é dado, não aparece). */
 const EQUIPE = 'Equipe de IA';
 
-export type Saude = 'operacional' | 'limitado' | 'atencao' | 'indisponivel';
-export const SAUDE_LABEL: Record<Saude, string> = { operacional: 'Operacional', limitado: 'Operacional com limitações', atencao: 'Necessita atenção', indisponivel: 'Indisponível' };
+type Saude = 'operacional' | 'limitado' | 'atencao' | 'indisponivel';
+const SAUDE_LABEL: Record<Saude, string> = { operacional: 'Operacional', limitado: 'Operacional com limitações', atencao: 'Necessita atenção', indisponivel: 'Indisponível' };
 const ORDER: Saude[] = ['operacional', 'limitado', 'atencao', 'indisponivel'];
 const worst = (a: Saude, b: Saude) => (ORDER.indexOf(a) >= ORDER.indexOf(b) ? a : b);
 
 /** nome_t, detalhe_t: o mesmo texto com código (lib/textos.ts), para a tela traduzir; sem eles, vale o português */
-export interface Componente { id: string; nome: string; estado: Saude; detalhe: string; nome_t?: Texto; detalhe_t?: Valor }
+interface Componente { id: string; nome: string; estado: Saude; detalhe: string; nome_t?: Texto; detalhe_t?: Valor }
 /** O aviso da cópia antiga (sem jargão): por que ela não saiu sozinha, e que quem decide é a pessoa. */
-export function textoDadosAntigos(porque: PorqueDadosAntigos, mantida = false): string {
+function textoDadosAntigos(porque: PorqueDadosAntigos, mantida = false): string {
   const pq = porque === 'sem-copia' ? 'o cofre cifrado da equipe foi criado sem ela, então o que estiver nela só existe ali'
     : porque === 'sem-cofre' ? 'ela nunca foi para um cofre cifrado da equipe, então o que estiver nela só existe ali'
       : 'o cofre cifrado da equipe não confirmou que recebeu esta cópia';
@@ -43,9 +43,9 @@ export function textoDadosAntigos(porque: PorqueDadosAntigos, mantida = false): 
 }
 
 /** espaco: um motor por pessoa (gerente de motores): o que a limpeza liberou e os cofres de contas que já não existem */
-export interface PainelSaude { estado: Saude; rotulo: string; resumo: string; componentes: Componente[]; geradoEm: string; espaco?: EspacoMotores | null; rotulo_t?: Texto; resumo_t?: Valor }
+interface PainelSaude { estado: Saude; rotulo: string; resumo: string; componentes: Componente[]; geradoEm: string; espaco?: EspacoMotores | null; rotulo_t?: Texto; resumo_t?: Valor }
 
-export interface HealthDeps {
+interface HealthDeps {
   db: Db; cfg: Config; vault: Vault; hermes: HermesClient | null;
   executorMode: () => 'real' | 'simulated';
   motorVault: () => { state: string; lastError: string | null };

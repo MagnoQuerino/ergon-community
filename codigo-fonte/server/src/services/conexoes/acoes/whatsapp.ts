@@ -15,7 +15,7 @@ import { neutral } from '../../operations.ts';
 import { jidDeConversa, type MensagemGuardada } from '../../whatsapp.ts';
 import { ErroAcao, num, precisa, txt, type Acao, type Args } from '../tipos.ts';
 
-export interface WhatsAppDasAcoes {
+interface WhatsAppDasAcoes {
   /** conta: qual dos números do WhatsApp ('' ou ausente = o principal) */
   enviar(ws: string, jid: string, texto: string, conta?: string): Promise<string>;
   /** só as conversas fora das exceções (o leitor já tira) */

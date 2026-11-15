@@ -26,9 +26,9 @@ export interface Loc { b: string | null; level: number }
 /** k: tamanho; v: variante (forma da pedra, inclinação do pinheiro) */
 export interface DecorProp { kind: DecorKind; x: number; z: number; k: number; v?: number }
 /** Trecho de rua entre dois cruzamentos da grade, com o traçado sinuoso já calculado (pontos no mundo) e a largura. */
-export interface Road { a: [number, number]; b: [number, number]; pts: Vec2[]; w: number }
+interface Road { a: [number, number]; b: [number, number]; pts: Vec2[]; w: number }
 /** Cruzamento ou ponta de rua: um largo redondo que junta os trechos sem quina. */
-export interface Junction { x: number; z: number; r: number; degree: number }
+interface Junction { x: number; z: number; r: number; degree: number }
 
 const AGENT_R = 0.15;
 const OUT_R = 0.2;

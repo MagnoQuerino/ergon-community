@@ -28,7 +28,7 @@ const MAX_ROWS = 5000; const MAX_COLS = 60;
 const PDF_INFLATE_TOTAL = 120 * 1024 * 1024; const PDF_INFLATE_STREAM = 30 * 1024 * 1024;
 /** tabela de fontes (ToUnicode): o espaço de códigos tem no máximo 65.536 posições por fonte */
 const CMAP_MAX = 70_000;
-export class DocLimitError extends Error {}
+class DocLimitError extends Error {}
 const ext = (name: string) => name.toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1] ?? '';
 
 /** Entidades XML (&amp; &#225; &#xE1;). */

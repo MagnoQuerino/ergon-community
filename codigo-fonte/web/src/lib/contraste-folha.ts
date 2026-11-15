@@ -82,7 +82,7 @@ export function ajustadosNoEscuro(rs: Regra[]): Set<string> {
     .flatMap((s) => { const m = s.match(/^:is\((.*)\)$/); return m ? splitTop(m[1], ',').map((x) => x.trim()) : [s]; }));
 }
 
-export const emKeyframes = (r: Regra) => r.at.some((a) => /^@(-webkit-)?keyframes/.test(a));
+const emKeyframes = (r: Regra) => r.at.some((a) => /^@(-webkit-)?keyframes/.test(a));
 export const valor = (r: Regra, prop: string) => { let v: string | undefined; for (const d of r.decls) if (d.prop === prop) v = d.value; return v; };
 
 /** Os blocos de cores de cada tema: só eles podem ter cor escrita (hex, rgb, nome). */

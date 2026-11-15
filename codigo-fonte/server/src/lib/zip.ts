@@ -12,7 +12,7 @@ const MAX_ENTRIES = 4000;
 const MAX_ENTRY = 40 * 1024 * 1024; const MAX_TOTAL = 120 * 1024 * 1024;
 
 /** `dosDate`/`dosTime`: a data gravada na entrada (formato do MS-DOS, hora de parede) */
-export interface ZipEntry { name: string; size: number; dosDate: number; dosTime: number; read: () => Buffer }
+interface ZipEntry { name: string; size: number; dosDate: number; dosTime: number; read: () => Buffer }
 
 /** Lista as entradas de um ZIP; o conteúdo só é descompactado quando pedido. */
 export function readZip(buf: Buffer): Map<string, ZipEntry> {
@@ -62,7 +62,7 @@ export function readZip(buf: Buffer): Map<string, ZipEntry> {
  * do arquivo (sem ela, 01/01/1980 fixo: o mesmo conteúdo gera o mesmo arquivo); `tz`: o fuso em que essa data é escrita
  * (o ZIP guarda a hora "de parede", sem fuso; sem `tz`, a do computador).
  */
-export interface ZipInput { name: string; data: Buffer | string; store?: boolean; mtime?: Date; tz?: string }
+interface ZipInput { name: string; data: Buffer | string; store?: boolean; mtime?: Date; tz?: string }
 
 /** Limites do formato sem ZIP64: até 65.535 entradas e 4 GB (quem chama limita bem antes). */
 export const ZIP_MAX_ENTRIES = 65_535;

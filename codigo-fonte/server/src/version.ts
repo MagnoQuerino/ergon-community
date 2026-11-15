@@ -8,7 +8,7 @@ const pkg = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta
 export const VERSION: string = pkg.version;
 export const BUILD: string = /^[\w.-]{1,40}$/.test(process.env.ERGON_BUILD ?? '') ? process.env.ERGON_BUILD! : 'dev';
 
-export interface Release { version: string; notes: string | null; url: string | null; publishedAt: string | null }
+interface Release { version: string; notes: string | null; url: string | null; publishedAt: string | null }
 
 /** Compara versões x.y.z (pré-lançamento "-beta.n" conta como anterior à final). */
 export function newer(a: string, b: string): boolean {
@@ -39,10 +39,10 @@ export const VOLTA_MINIMA = '1.1.0-rc.27';
  * anterior à VOLTA_MINIMA; 'sem-pacote': saiu sem o pacote assinado do canal (só pelo instalador da página dela).
  * Quem decide de verdade é o aplicativo, que confere o pacote assinado antes de trocar.
  */
-export type Rollback = 'pode' | 'antiga' | 'sem-pacote';
+type Rollback = 'pode' | 'antiga' | 'sem-pacote';
 
 /** Uma versão publicada, para a lista de Configurações › Atualizações (voltar para uma anterior). */
-export interface ReleaseItem { version: string; url: string | null; publishedAt: string | null; prerelease: boolean; rollback: Rollback }
+interface ReleaseItem { version: string; url: string | null; publishedAt: string | null; prerelease: boolean; rollback: Rollback }
 
 /** O que a lista diz sobre voltar a uma versão (função pura: testável). */
 export function rollbackOf(version: string, assets: string[], channel: 'teste' | 'estavel'): Rollback {
@@ -60,7 +60,7 @@ export const LISTA_ANTERIORES = 12;
 /** Quantas versões o manifesto do canal carrega em "recentes" (scripts/distribuicao/manifesto.mjs, RECENTES). */
 export const RECENTES_DO_CANAL = 12;
 /** O que a lista diz sobre voltar: o Rollback, ou 'instalada-fora' (a instalada já não está entre as publicadas recentemente). */
-export type RollbackNaLista = Rollback | 'instalada-fora';
+type RollbackNaLista = Rollback | 'instalada-fora';
 const maisNovaPrimeiro = (a: { version: string }, b: { version: string }) => (newer(a.version, b.version) ? -1 : newer(b.version, a.version) ? 1 : 0);
 /**
  * As versões anteriores à instalada, a mais nova primeiro (função pura: testável). Se a instalada já não está entre as
@@ -74,7 +74,7 @@ export function anterioresParaVoltar<T extends { version: string; rollback?: Rol
   return ordenadas.filter((x) => newer(atual, x.version)).slice(0, LISTA_ANTERIORES)
     .map((x) => (fora && x.rollback === 'pode' ? { ...x, rollback: 'instalada-fora' as const } : x));
 }
-export interface UpdateState { latest: Release | null; releases: ReleaseItem[]; checkedAt: string | null }
+interface UpdateState { latest: Release | null; releases: ReleaseItem[]; checkedAt: string | null }
 
 const VERSION_TAG = /^v?\d+\.\d+\.\d+(-[\w.]+)?$/;
 

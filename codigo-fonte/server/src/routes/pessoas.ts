@@ -20,9 +20,9 @@ import { sessionDays, setInstanceSetting, type SecurityDeps } from '../services/
 const str = (max: number, min = 0) => ({ type: 'string', minLength: min, maxLength: max });
 
 /** arquivos de "Baixar meus dados" montando (ou descendo) ao mesmo tempo na instalação inteira */
-export const EXPORTAR_AO_MESMO_TEMPO = 2;
+const EXPORTAR_AO_MESMO_TEMPO = 2;
 
-export interface PeopleRouteDeps extends SecurityDeps {
+interface PeopleRouteDeps extends SecurityDeps {
   upkeep: (userId: string) => void;
   removeMotor: (userId: string) => Promise<void>;
   routines: Routines;

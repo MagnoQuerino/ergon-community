@@ -20,7 +20,7 @@ import { sheetText } from './doc-text.ts';
 export interface AttachmentInfo { id: string; filename: string; mime: string; size: number }
 
 /** imagens que a visão dos modelos aceita */
-export const VISION_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const VISION_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;

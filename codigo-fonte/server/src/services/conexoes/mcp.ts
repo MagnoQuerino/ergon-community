@@ -22,11 +22,11 @@ import { ProviderError } from '../mirror.ts';
 import { neutral } from '../operations.ts';
 import { ErroAcao, type Http, type Risco } from './tipos.ts';
 
-export const MCP_VERSAO = '2025-06-18';
+const MCP_VERSAO = '2025-06-18';
 
 export interface FerramentaMcp { name: string; description?: string; inputSchema?: { type?: string; properties?: Record<string, any>; required?: string[] } }
 
-export interface ServidorMcp {
+interface ServidorMcp {
   /** endereço fixo do servidor (nunca vem da pessoa nem do modelo) */
   url: string;
   /** cabeçalhos de cada pedido: a credencial e, quando o serviço pede, a conta (ex.: locationId) */
@@ -121,7 +121,7 @@ async function naSessao(s: ServidorMcp, metodo: string, params: unknown, kind: '
   throw new ProviderError('unavailable', `o ${s.nome} perdeu a sessão duas vezes seguidas; tente daqui a pouco`);
 }
 
-export async function ferramentasMcp(s: ServidorMcp): Promise<FerramentaMcp[]> {
+async function ferramentasMcp(s: ServidorMcp): Promise<FerramentaMcp[]> {
   const sessao = await abrir(s);
   if (sessao.ferramentas) return sessao.ferramentas;
   const todas: FerramentaMcp[] = [];
@@ -139,7 +139,7 @@ export async function ferramentasMcp(s: ServidorMcp): Promise<FerramentaMcp[]> {
 }
 
 /** O que a ferramenta devolveu: o conteúdo estruturado, o JSON do texto, ou o texto. Erro da ferramenta vira erro da ação. */
-export function resultadoMcp(r: any, nome: string): any {
+function resultadoMcp(r: any, nome: string): any {
   const textos = (Array.isArray(r?.content) ? r.content : []).filter((c: any) => c?.type === 'text' && typeof c.text === 'string').map((c: any) => c.text as string);
   if (r?.isError) throw new ErroAcao(`a ferramenta "${nome}" recusou: ${neutral(clip(textos.join(' ') || 'sem motivo', 300), 310)}`);
   if (r?.structuredContent && typeof r.structuredContent === 'object') return r.structuredContent;

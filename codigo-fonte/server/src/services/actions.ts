@@ -40,7 +40,7 @@ export function routeTeamTask(db: Db, bus: Bus, workspaceId: string, actor: Acto
   return { id: t.id, number: Number(t.number), routed: resp?.note ?? null };
 }
 
-export interface ActionResult {
+interface ActionResult {
   summary: string;
   taskId: string | null;
   taskNumber: number | null;

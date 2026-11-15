@@ -39,8 +39,8 @@ export interface ManagerConfig {
 
 const UID = /^usr_[a-f0-9]{32}$/;
 /** Sobe quando o jeito de calcular a marca da especificação muda (recria todos os motores, de propósito). */
-export const SPEC_SCHEMA = '1';
-export const LABEL = {
+const SPEC_SCHEMA = '1';
+const LABEL = {
   uid: 'ergon.motor',
   volume: 'ergon.motor.volume',
   spec: 'ergon.motor.spec',
@@ -65,13 +65,13 @@ function canon(v: unknown): string {
  * Marca da especificação: HMAC do JSON canônico sem os rótulos e sem a imagem. A imagem é conferida à parte, pelo ID
  * (a mesma imagem pode ter outro nome, e a volta para a imagem anterior não pode parecer "especificação mudou").
  */
-export function specHash(c: ManagerConfig, spec: Record<string, unknown>): string {
+function specHash(c: ManagerConfig, spec: Record<string, unknown>): string {
   const { Labels: _labels, Image: _image, ...rest } = spec;
   return crypto.createHmac('sha256', c.master).update(`ergon/motor-spec/${SPEC_SCHEMA}\n${canon(rest)}`).digest('hex');
 }
 
 /** O contêiner do motor de uma pessoa: o mesmo do docker-compose.yml (serviço do motor), com o cofre e os tokens dela. */
-export function motorSpec(c: ManagerConfig, uid: string, volume: string, opts: { image?: string; labels?: Record<string, string> } = {}): Record<string, unknown> {
+function motorSpec(c: ManagerConfig, uid: string, volume: string, opts: { image?: string; labels?: Record<string, string> } = {}): Record<string, unknown> {
   const image = opts.image ?? c.image;
   const spec: Record<string, unknown> = {
     Image: image,
@@ -116,7 +116,7 @@ export function pullQuery(ref: string): string {
 }
 
 /** Repositório de uma referência ('ghcr.io/x/y:tag', 'y@sha256:…'), sem os prefixos que o Docker e o Podman põem sozinhos. */
-export function repoOf(ref: string): string {
+function repoOf(ref: string): string {
   let r = ref.trim().toLowerCase();
   const at = r.indexOf('@'); if (at >= 0) r = r.slice(0, at);
   const colon = r.lastIndexOf(':'); if (colon > r.lastIndexOf('/')) r = r.slice(0, colon);
@@ -150,14 +150,14 @@ export function selfContainerIds(read: (path: string) => string = (p) => { try {
 
 class ManagerError extends Error { readonly status: number; constructor(status: number, msg: string) { super(msg); this.status = status; } }
 
-export interface EnsureOptions { adoptLegacy?: boolean; idle?: boolean; start?: boolean }
+interface EnsureOptions { adoptLegacy?: boolean; idle?: boolean; start?: boolean }
 /**
  * Por que um motor desatualizado não foi renovado agora (stale sem recreated): 'ocupado' = ligado e o Ergon não disse que
  * está livre (renova quando ficar); 'sem-imagem' = a imagem nova não está neste computador e não baixou (segue o de antes,
  * ligado); 'nao-parou' = o motor não parou a tempo, ou voltou a ligar no meio (segue o de antes).
  */
-export type MotivoAdiado = 'ocupado' | 'sem-imagem' | 'nao-parou';
-export interface EnsureResult {
+type MotivoAdiado = 'ocupado' | 'sem-imagem' | 'nao-parou';
+interface EnsureResult {
   adopted: boolean; created: boolean; recreated: boolean; stale: boolean;
   /** só com stale e sem recreated: por que não renovou agora */
   motivo: MotivoAdiado | null;
@@ -170,8 +170,8 @@ export interface EnsureResult {
   state: string;
 }
 /** estimar: só a conta do que a limpeza liberaria (rota própria, /v1/maintenance/estimate), sem apagar nada */
-export interface CleanRequest { users?: string[]; pendentes?: string[]; volumesOrfaos?: string[]; manterNucleoAnterior?: boolean; estimar?: boolean }
-export interface CleanResult {
+interface CleanRequest { users?: string[]; pendentes?: string[]; volumesOrfaos?: string[]; manterNucleoAnterior?: boolean; estimar?: boolean }
+interface CleanResult {
   removidas: { id: string; bytes: number }[];
   /**
    * bytes liberados de fato no disco: a diferença do LayersSize do /system/df, que o Docker e o Podman 5.x devolvem (o
@@ -825,7 +825,7 @@ export function dockerOver(socketPath: string | null, baseUrl: string | null): D
 }
 
 /** Maior corpo aceito: a lista de até 1.000 pessoas da limpeza cabe com folga. */
-export const MAX_BODY = 64 * 1024;
+const MAX_BODY = 64 * 1024;
 
 /** Servidor HTTP do gerente (rede interna do Ergon). Ao ligar, recria (sem ligar) os motores parados e desatualizados. */
 export function serveManager(c: ManagerConfig, docker: DockerCall, port: number, host = '0.0.0.0', onReconciled?: (uids: string[]) => void): http.Server {

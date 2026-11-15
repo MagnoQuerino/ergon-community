@@ -30,8 +30,8 @@ export interface ArtItem { sprite: Sprite; px: number; py: number; box: AABB; hi
 export interface HitPoly { kind: 'board' | 'shelf' | 'conselho'; poly: P2[] }
 /** Andar para hover e clique: as faces visíveis (frente e direita; o topo só no último andar). */
 export interface Band { level: number; faces: P2[][] }
-export interface WinQuad { level: number; poly: P2[] }
-export interface ClosedArt { layer: Layer; bands: Band[]; windows: WinQuad[]; rect: Rect; top: number }
+interface WinQuad { level: number; poly: P2[] }
+interface ClosedArt { layer: Layer; bands: Band[]; windows: WinQuad[]; rect: Rect; top: number }
 export interface OpenArt {
   level: number;
   lower: Layer; back: Layer; front: Layer; ghost: Layer | null;
@@ -425,7 +425,7 @@ export function reserveClosed(n: number): void { closedCache.reserve(n); }
 /** Já está pronta (sem custo de desenho)? */
 export function hasClosed(b: BuildingInst, t: Theme): boolean { return closedCache.has(keyOf(b, t)); }
 
-export interface SmallArt { layer: Layer; windows: WinQuad[]; bands: Band[]; top: number }
+interface SmallArt { layer: Layer; windows: WinQuad[]; bands: Band[]; top: number }
 const smallCache = new Lru<SmallArt>(120);
 /** Cópia reduzida da arte fechada (zoom afastado): a mesma imagem com menos memória; janelas e faixas iguais. */
 export function closedSmall(b: BuildingInst, t: Theme, s: number): SmallArt {

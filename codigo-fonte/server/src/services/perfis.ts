@@ -28,19 +28,19 @@ import { almaDoAgente } from './runs.ts';
 export function nomeDoPerfil(workspaceId: string, agentId: string): string {
   return `erg-${crypto.createHash('sha256').update(`ergon/perfil/${workspaceId}/${agentId}`).digest('hex').slice(0, 20)}`;
 }
-export const resumo = (s: string): string => crypto.createHash('sha256').update(s).digest('hex');
+const resumo = (s: string): string => crypto.createHash('sha256').update(s).digest('hex');
 
 /**
  * Ajudantes temporários (subagentes do motor): ligados por padrão e com o máximo do próprio motor ao mesmo tempo (regra do
  * dono, 12/11: a experiência máxima de cara; cada ajudante é uma conversa a mais com a IA, e a pessoa reduz ou desliga em
  * Configurações para economizar). Ausente = ligado: só o desligado gravado pela pessoa desliga.
  */
-export const AJUDANTES_SETTING = 'ajudantes.v1';
+const AJUDANTES_SETTING = 'ajudantes.v1';
 /** o teto e o padrão são os do motor (delegation.max_concurrent_children: 10; AJUDANTES_MAX no plugin, um teste confere) */
 export const AJUDANTES_MAX = 10;
 export const AJUDANTES_PADRAO = { ligado: true, max: AJUDANTES_MAX };
 export const AJUDANTES_MIN = 1;
-export interface Ajudantes { ligado: boolean; max: number }
+interface Ajudantes { ligado: boolean; max: number }
 export function ajudantesDo(db: Db, workspaceId: string): Ajudantes {
   try {
     const v = JSON.parse(getSetting(db, workspaceId, AJUDANTES_SETTING) ?? '{}') as Partial<Ajudantes>;
@@ -85,7 +85,7 @@ export function pedidoDoPerfil(db: Db, workspaceId: string, agentId: string): Pe
   };
 }
 
-export type EstadoDoPerfil = 'pendente' | 'pronto' | 'falhou' | 'sem-suporte';
+type EstadoDoPerfil = 'pendente' | 'pronto' | 'falhou' | 'sem-suporte';
 interface Linha { agent_id: string; workspace_id: string; profile: string; state: EstadoDoPerfil; fingerprint: string | null; alma_hash: string | null; synced_at: string | null; tries: number }
 
 /** Depois de quanto tempo um perfil em dia é mandado de novo mesmo sem mudança (a configuração da equipe no motor muda). */

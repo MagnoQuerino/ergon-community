@@ -12,7 +12,7 @@ import { reviewerFor } from './team-query.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { getTask } from './tasks.ts';
 
-export interface ReviewRow {
+interface ReviewRow {
   id: string; workspace_id: string; task_id: string; reviewer_id: string; producer_id: string;
   status: 'open' | 'approved' | 'limit' | 'stopped'; round: number; max_rounds: number; verdict: string | null; created_at: string; finished_at: string | null;
 }

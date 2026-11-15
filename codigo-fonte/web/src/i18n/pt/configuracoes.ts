@@ -261,7 +261,6 @@ const configuracoes = {
   // ——— rc.27: ajustes da equipe de IA (plano B, privacidade, competências sem uso, pausa, limites da conta, orientar) ———
   'ajustes.depois': 'A equipe ainda não recebeu a mudança: ela recebe assim que estiver ligada.',
   'ajustes.atualizacao': 'Chega com a próxima atualização da equipe (veja em Saúde); a sua escolha fica guardada.',
-  'ajustes.compartilhado': { one: 'Vale também para o seu outro workspace.', other: 'Vale também para os seus outros {n} workspaces.' },
   'ajustes.reserva.titulo': 'Plano B: modelos reserva',
   'ajustes.reserva.texto': 'Quando o modelo principal falha ou a conta chega ao limite, a equipe continua o trabalho com um modelo reserva, na ordem da lista.',
   'ajustes.reserva.modo': 'Modelos reserva',

@@ -44,7 +44,7 @@ export const TEXTO_DA_TAREFA = {
   background_review: { nome: 'conexoes.tarefa.background_review.nome', oque: 'conexoes.tarefa.background_review.oque' },
   delegation: { nome: 'conexoes.tarefa.delegation.nome', oque: 'conexoes.tarefa.delegation.oque' },
 } as const satisfies Record<string, { nome: Chave; oque: Chave }>;
-export type TarefaConhecida = keyof typeof TEXTO_DA_TAREFA;
+type TarefaConhecida = keyof typeof TEXTO_DA_TAREFA;
 const conhecida = (task: string): task is TarefaConhecida => Object.prototype.hasOwnProperty.call(TEXTO_DA_TAREFA, task);
 
 /**

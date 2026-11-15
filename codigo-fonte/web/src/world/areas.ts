@@ -11,7 +11,7 @@ import type { Chave } from '../i18n/index.ts';
 export type ChaveDoLugar = Extract<Chave, `cidade.lugar.${string}`>;
 
 export type AreaKind = 'agora' | 'teatro' | 'termas' | 'ginasio' | 'bairro';
-export type AreaPropKind = 'olive' | 'cypress' | 'fountain' | 'mural' | 'bench' | 'brazier' | 'house' | 'herm' | 'amphora' | 'plant' | 'bush';
+type AreaPropKind = 'olive' | 'cypress' | 'fountain' | 'mural' | 'bench' | 'brazier' | 'house' | 'herm' | 'amphora' | 'plant' | 'bush';
 export interface AreaProp { kind: AreaPropKind; x: number; z: number; k?: number; w?: number; d?: number; h?: number; variant?: number }
 export interface Seat { spot: Vec2; y: number; mirror: boolean }
 export interface House { id: number; x0: number; z0: number; x1: number; z1: number; h: number; door: Vec2; street: Vec2 }

@@ -1,7 +1,7 @@
 import type { TeamAgent } from './teamData.ts';
 import { t, type Chave } from '../i18n/index.ts';
 
-export interface Floor { id: string; building_id: string; level: number; name: string; slots: number; active: number; origin: 'base' | 'simulated' | 'entitlement' }
+interface Floor { id: string; building_id: string; level: number; name: string; slots: number; active: number; origin: 'base' | 'simulated' | 'entitlement' }
 /** Andar com as contagens do servidor (agentes ativos por status de trabalho): janelas, selo e mapa sem carregar ninguém. */
 export interface StructureFloor extends Omit<Floor, 'building_id'> { working: number; waiting: number; queued: number }
 /** Estrutura da cidade (prédio, praça, área de lazer ou bairro) no lote (i, j) do mapa. */

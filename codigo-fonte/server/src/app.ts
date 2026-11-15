@@ -1140,7 +1140,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const counts = db.get<{ running: number; queued: number; waiting: number; processes: number }>(
       `SELECT SUM(status = 'running') AS running, SUM(status = 'queued') AS queued, SUM(status = 'waiting_user') AS waiting,
               SUM(status = 'running' AND ${PROCESS_SQL}) AS processes
-         FROM runs WHERE workspace_id = ?`, a.workspaceId);
+         FROM runs WHERE workspace_id = ? AND status IN ('running', 'queued', 'waiting_user')`, a.workspaceId);
     return {
       // a equipe sem a lista: totais, o Coordenador, quem revisa e os primeiros nomes (dicas e exemplos da Ajuda)
       workspace: ws, capacity: capacityTotals(db, a.workspaceId, cfg.maxFloors), team: teamInfo(db, a.workspaceId),

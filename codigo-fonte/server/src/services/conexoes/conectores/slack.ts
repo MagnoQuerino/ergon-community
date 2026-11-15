@@ -39,7 +39,7 @@ const linkDoApp = (m: unknown): string => `https://api.slack.com/apps?new_app=1&
 export const MANIFESTO_SLACK = manifesto();
 const MANIFESTO_TEXTO = JSON.stringify(MANIFESTO_SLACK);
 /** Opção: também o token de usuário, com os mesmos escopos e a busca. Com ele, os agentes agem em nome da pessoa. */
-export const MANIFESTO_SLACK_COM_BUSCA = manifesto([...ESCOPOS, 'search:read']);
+const MANIFESTO_SLACK_COM_BUSCA = manifesto([...ESCOPOS, 'search:read']);
 
 /** O motor manda "application/json"; aqui vai também a codificação, para acentos chegarem certos. */
 const JSON_UTF8 = { 'Content-Type': 'application/json; charset=utf-8' };

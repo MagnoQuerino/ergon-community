@@ -9,7 +9,7 @@ import { chavePeloNome, marcarColunas } from './colunas.ts';
 
 export type TaskOrigin = 'manual' | 'chat' | 'teams' | 'whatsapp' | 'mirror' | 'demo';
 
-export interface TaskRow {
+interface TaskRow {
   id: string; number: number; workspace_id: string; board_id: string; column_id: string; agent_id: string | null;
   title: string; description: string; completed: number; completed_at: string | null; completed_by: string | null;
   /** fila da equipe: marcado como prioridade; posição dada por você (null = ordem de chegada) */
@@ -102,7 +102,7 @@ function firstColumn(db: Db, workspaceId: string, boardId: string): string {
   return c.id;
 }
 
-export interface CreateTaskInput {
+interface CreateTaskInput {
   title: string; description?: string; boardId?: string; columnId?: string; agentId?: string | null;
   origin: TaskOrigin; sourceEventId?: string | null; isFixture?: boolean;
   /** prazo AAAA-MM-DD */
@@ -162,7 +162,7 @@ export function createTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
   return task;
 }
 
-export interface UpdateTaskInput {
+interface UpdateTaskInput {
   title?: string; description?: string; columnId?: string; agentId?: string | null; completed?: boolean; archived?: boolean;
   /** prazo AAAA-MM-DD; null tira o prazo */
   dueOn?: string | null;
@@ -293,11 +293,11 @@ const STOP = new Set(['a', 'o', 'as', 'os', 'de', 'da', 'do', 'das', 'dos', 'e',
   // inglês
   'the', 'and', 'for', 'with', 'please', 'need', 'task', 'to', 'of', 'in', 'on', 'an']);
 
-export function tokens(s: string): Set<string> {
+function tokens(s: string): Set<string> {
   return new Set(fold(s).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.has(w)));
 }
 
-export function similarity(a: string, b: string): number {
+function similarity(a: string, b: string): number {
   const ta = tokens(a); const tb = tokens(b);
   if (ta.size === 0 || tb.size === 0) return 0;
   let inter = 0;

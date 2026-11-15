@@ -9,7 +9,7 @@ const EN = new Set(['the', 'to', 'and', 'of', 'is', 'are', 'was', 'were', 'my', 
 const PT = new Set(['o', 'os', 'de', 'da', 'dos', 'das', 'que', 'e', 'para', 'pra', 'com', 'na', 'nos', 'nas', 'em', 'um', 'uma', 'por', 'meu', 'minha',
   'meus', 'minhas', 'voce', 'voces', 'se', 'nao', 'ao', 'aos', 'pelo', 'pela', 'esse', 'essa', 'isso', 'este', 'esta', 'eu', 'ele', 'ela', 'sobre', 'mais', 'foi']);
 
-export type Idioma = 'pt' | 'en' | null;
+type Idioma = 'pt' | 'en' | null;
 
 export function idioma(texto: string): Idioma {
   let en = 0; let pt = 0;

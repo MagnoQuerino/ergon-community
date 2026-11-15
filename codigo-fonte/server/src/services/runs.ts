@@ -23,7 +23,7 @@ import { PROCESS_SQL, isConversationKey, processLimit, runningProcesses, type Pr
 /** o texto do pedido na fila enquanto a equipe está em pausa */
 export const EQUIPE_EM_PAUSA = 'equipe em pausa: o pedido começa quando você retomar';
 export const ORIENTAR_NAO_ANDANDO = 'Este trabalho não está em andamento agora: não há o que orientar.';
-export const ORIENTAR_NAO_ACEITOU = 'A equipe não recebeu a orientação agora. Tente de novo em instantes.';
+const ORIENTAR_NAO_ACEITOU = 'A equipe não recebeu a orientação agora. Tente de novo em instantes.';
 export const STEER_MAX = 4000;
 export type RunStatus = 'queued' | 'running' | 'waiting_user' | 'succeeded' | 'failed' | 'cancelled';
 const TERMINAL: RunStatus[] = ['succeeded', 'failed', 'cancelled'];
@@ -48,9 +48,9 @@ const TOOL_PHRASE: Array<[RegExp, string]> = [
  * card reconhece por ele: não é falha do trabalho, então não abre o ciclo de persistência (a nova rodada esperaria a
  * mesma equipe fora do ar) e vai direto para a pessoa com "Tentar de novo".
  */
-export const MOTOR_GIVE_UP = 'a equipe não está respondendo';
+const MOTOR_GIVE_UP = 'a equipe não está respondendo';
 export const motorGaveUp = (error: string | null | undefined): boolean => typeof error === 'string' && error.startsWith(MOTOR_GIVE_UP);
-export function toolPhrase(tool: string | undefined, preview?: string): string {
+function toolPhrase(tool: string | undefined, preview?: string): string {
   const t = (tool ?? '').toLowerCase();
   const base = TOOL_PHRASE.find(([re]) => re.test(t))?.[1] ?? 'trabalhando nisso';
   const q = t === 'web_search' && preview ? preview.replace(/\s+/g, ' ').trim() : '';
@@ -58,7 +58,7 @@ export function toolPhrase(tool: string | undefined, preview?: string): string {
 }
 
 /** Resposta chegando (motor real): o texto até aqui e o que o colega faz agora. Só na memória, nunca no banco. */
-export interface LiveRun { text: string; activity: string | null }
+interface LiveRun { text: string; activity: string | null }
 
 export interface RunRow {
   id: string; workspace_id: string; agent_id: string; conversation_id: string | null; task_id: string | null;
@@ -76,7 +76,7 @@ export interface RunRow {
 /** A execução de uma sessão do motor. juntas: outras ativas na mesma sessão (não se sabe qual delas chamou a ponte). */
 export type RunDaSessao = RunRow & { juntas?: RunRow[] };
 
-export interface EnqueueInput {
+interface EnqueueInput {
   workspaceId: string; agentId: string; conversationId?: string | null; taskId?: string | null;
   kind: 'chat' | 'subtask'; input: string; instructions: string; idempotencyKey: string;
   reviewId?: string | null; reviewStep?: 'questions' | 'answers' | null;
@@ -86,7 +86,7 @@ export interface EnqueueInput {
   via?: 'conselho' | null;
 }
 /** O conselho de modelos do motor: o provedor virtual do Hermes ("moa") e o nome do conselho que a tela monta. */
-export const CONSELHO = { provider: 'moa', model: 'default' } as const;
+const CONSELHO = { provider: 'moa', model: 'default' } as const;
 
 export function sessionKeyFor(r: Pick<RunRow, 'workspace_id' | 'agent_id' | 'conversation_id' | 'task_id'> & { id?: string }): string {
   // Sessão isolada por workspace + agente + conversa (ou tarefa). Nunca só pelo nome do personagem.
@@ -100,13 +100,13 @@ export const CONVERSA_MUDA_MS = 2 * 86_400_000;
 /** o pedido espera o perfil do agente (criado agora, cofre recriado, mudança chegando): o texto da espera na tela */
 const PREPARANDO_AGENTE = 'aguardando a equipe (preparando o agente; o pedido segue sozinho)';
 /** quantas vezes uma execução continua depois dos ajudantes (cada continuação pode chamar outros) */
-export const AJUDANTES_RODADAS = 3;
+const AJUDANTES_RODADAS = 3;
 const RECAP_MENSAGENS = 12;
 const RECAP_CHARS = 6000;
 const resumoAlma = (s: string): string => crypto.createHash('sha256').update(s).digest('hex');
 
 /** As últimas mensagens da conversa, para o agente continuar no perfil dele sem perder o fio (só quando a conversa muda de perfil). */
-export function recapDaConversa(db: Db, workspaceId: string, conversationId: string, exceptRunId: string): string {
+function recapDaConversa(db: Db, workspaceId: string, conversationId: string, exceptRunId: string): string {
   const ms = db.all<{ role: string; content: string }>(
     `SELECT role, content FROM messages WHERE workspace_id = ? AND conversation_id = ? AND role IN ('user', 'agent') AND (run_id IS NULL OR run_id <> ?)
       ORDER BY created_at DESC, rowid DESC LIMIT ?`, workspaceId, conversationId, exceptRunId, RECAP_MENSAGENS + 1).reverse();
@@ -885,7 +885,7 @@ export function isCoordinator(a: { coordinator: number | boolean | null }): bool
 }
 
 /** Retrato atual da equipe por setor (agentes ativos), para quem coordena. */
-export function teamSummaryFor(db: Db, workspaceId: string): string {
+function teamSummaryFor(db: Db, workspaceId: string): string {
   const rows = db.all<{ name: string; role: string; sector: string; coordinator: number }>(
     `SELECT a.name, a.role, p.name AS sector, a.coordinator FROM agents a JOIN profiles p ON p.id = a.profile_id
       WHERE a.workspace_id = ? AND a.status = 'active' ORDER BY p.position, a.created_at, a.rowid`, workspaceId);
@@ -905,9 +905,9 @@ export function teamSummaryFor(db: Db, workspaceId: string): string {
  */
 export const EQUIPE_GRANDE = 12;
 /** quantos nomes, no resumo, dos agentes mais ligados ao pedido */
-export const RELEVANTES_MAX = 8;
+const RELEVANTES_MAX = 8;
 /** as ferramentas sensíveis: no resumo, sempre dito quem tem (todos os nomes, ou "todos menos …") */
-export const FERRAMENTAS_SENSIVEIS = ['contas', 'terminal', 'calculo'] as const;
+const FERRAMENTAS_SENSIVEIS = ['contas', 'terminal', 'calculo'] as const;
 const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** os nomes das ferramentas, para "libere o Terminal para…" / "tire as Conexões do Auxiliar" */
 const ROTULOS = Object.values(TOOLS).map((t) => escRe(fold(t.label))).join('|');
@@ -961,7 +961,7 @@ const PROPOSTAS_DA_EQUIPE = ['sector', 'create_agent', 'tools', 'edit_agent', 'd
  * e o texto da pessoa (só para saber se o pedido é sobre a equipe toda). `equipeInteira`: o canal sempre precisa da lista
  * inteira (a recomendação de rotinas escolhe o agente pelo nome).
  */
-export interface FocoDoPedido { taskId?: string | null; conversationId?: string | null; texto?: string | null; equipeInteira?: boolean }
+interface FocoDoPedido { taskId?: string | null; conversationId?: string | null; texto?: string | null; equipeInteira?: boolean }
 
 type Ativo = { id: string; name: string; role: string; sector: string; profile_id: string; coordinator: number };
 
@@ -1039,7 +1039,7 @@ function relevantesAoPedido(db: Db, workspaceId: string, ativos: Ativo[], foco: 
  * ferramenta, quantos a têm — com os nomes de quem tem as sensíveis (Conexões, Terminal, Executar código). O resto da
  * equipe se chama pelo assunto: numa etapa sem nome conhecido, o sistema escolhe quem faz pela tarefa (purpose.ts).
  */
-export function teamDigestFor(db: Db, workspaceId: string, holders: Map<string, string[]>, foco: FocoDoPedido = {}): string {
+function teamDigestFor(db: Db, workspaceId: string, holders: Map<string, string[]>, foco: FocoDoPedido = {}): string {
   const ativos = db.all<Ativo>(
     `SELECT a.id, a.name, a.role, p.name AS sector, a.profile_id, a.coordinator FROM agents a JOIN profiles p ON p.id = a.profile_id
       WHERE a.workspace_id = ? AND a.status = 'active' ORDER BY p.position, a.created_at, a.rowid`, workspaceId);
@@ -1078,7 +1078,7 @@ export function teamDigestFor(db: Db, workspaceId: string, holders: Map<string, 
 }
 
 /** A equipe é grande para a lista inteira (e o pedido não é sobre a equipe toda)? */
-export function usaResumoDaEquipe(db: Db, workspaceId: string, foco: FocoDoPedido = {}): boolean {
+function usaResumoDaEquipe(db: Db, workspaceId: string, foco: FocoDoPedido = {}): boolean {
   const n = Number(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId)?.n ?? 0);
   return n > EQUIPE_GRANDE && !pedeEquipeInteira(db, workspaceId, foco);
 }
@@ -1087,7 +1087,7 @@ export function usaResumoDaEquipe(db: Db, workspaceId: string, foco: FocoDoPedid
  * Os cards abertos (da equipe e do usuário), para quem coordena achar o card que o usuário cita pelo assunto
  * ("cancele a de levantar preços"). Antes, a coordenação só via a equipe e não conseguia cancelar sem o número.
  */
-export function openCardsFor(db: Db, workspaceId: string, max = 40): string {
+function openCardsFor(db: Db, workspaceId: string, max = 40): string {
   const rows = db.all<{ number: number; title: string; who: string | null; audience: string; col: string | null; src: string | null }>(
     `SELECT t.number, t.title, a.name AS who, b.audience, c.name AS col, t.title_source AS src FROM tasks t JOIN boards b ON b.id = t.board_id
        LEFT JOIN agents a ON a.id = t.agent_id LEFT JOIN columns c ON c.id = t.column_id
@@ -1123,25 +1123,25 @@ export const PROPOSAL_HELP = [
   'Para trocar tudo de uma vez (um tema, como outra época ou um livro), escreva uma linha por agente e por setor; para você mesmo, só nome, bio e instruções (o seu foco). Encaminhar demandas é só seu: não dê essa ferramenta a ninguém. Antes das linhas, mostre ao usuário em poucas linhas como a equipe vai ficar.',
 ].join('\n');
 
-export const PERMISSION_HOW = 'Se o pedido exigir executar código ou comandos e você não tiver a ferramenta (Executar código ou Terminal), não finja que executou nem invente resultado: diga em uma frase o que precisa executar e por quê, e escreva uma linha assim: [[pedir-permissao ferramenta="calculo" motivo="o que vai executar"]] (use ferramenta="terminal" para comandos). O usuário autoriza com a senha ali mesmo na conversa e você continua sozinho.';
+const PERMISSION_HOW = 'Se o pedido exigir executar código ou comandos e você não tiver a ferramenta (Executar código ou Terminal), não finja que executou nem invente resultado: diga em uma frase o que precisa executar e por quê, e escreva uma linha assim: [[pedir-permissao ferramenta="calculo" motivo="o que vai executar"]] (use ferramenta="terminal" para comandos). O usuário autoriza com a senha ali mesmo na conversa e você continua sozinho.';
 /** Lembretes com data (ferramenta do Ergon): viram tarefa sua com prazo, aprovada na conversa. */
-export const REMINDER_HOW = 'Quando o usuário pedir um lembrete ou for preciso lembrar algo numa data, escreva uma linha assim: [[propor-tarefa titulo="Lembrete: o que lembrar" responsavel="você" prazo="AAAA-MM-DD" detalhe="contexto"]] (calcule a data a partir de hoje). O usuário aprova ali na conversa e o lembrete entra em Suas tarefas com o prazo. Diga isso em uma frase, sem prometer aviso em hora marcada.';
+const REMINDER_HOW = 'Quando o usuário pedir um lembrete ou for preciso lembrar algo numa data, escreva uma linha assim: [[propor-tarefa titulo="Lembrete: o que lembrar" responsavel="você" prazo="AAAA-MM-DD" detalhe="contexto"]] (calcule a data a partir de hoje). O usuário aprova ali na conversa e o lembrete entra em Suas tarefas com o prazo. Diga isso em uma frase, sem prometer aviso em hora marcada.';
 /**
  * Ligar Executar código ou Terminal conversando: quem não é a coordenação passa o pedido a ela (a senha é pedida na
  * conversa com o Coordenador); a coordenação pede direto.
  */
-export const RELEASE_HOW = 'Se o usuário pedir para ligar ou liberar Executar código ou Terminal (para você, para um colega ou para a equipe), não diga que ligou: escreva uma linha assim: [[liberar-ferramenta ferramenta="terminal" agente="Nome de quem vai usar" motivo="para que"]] (ferramenta="calculo" para Executar código; agente="equipe" se não for para alguém em particular). O pedido vai para a coordenação, e o usuário confirma com a senha na conversa com ela. Diga isso em uma frase.';
-export const RELEASE_HOW_COORD = 'Se o usuário pedir para ligar ou liberar Executar código ou Terminal, escreva [[liberar-ferramenta ferramenta="terminal" agente="Nome de quem vai usar" motivo="para que"]] (ferramenta="calculo" para Executar código; agente="equipe" para só ligar para a equipe). Aparece para ele aqui mesmo um pedido com a senha; até ele confirmar, nada muda.';
+const RELEASE_HOW = 'Se o usuário pedir para ligar ou liberar Executar código ou Terminal (para você, para um colega ou para a equipe), não diga que ligou: escreva uma linha assim: [[liberar-ferramenta ferramenta="terminal" agente="Nome de quem vai usar" motivo="para que"]] (ferramenta="calculo" para Executar código; agente="equipe" se não for para alguém em particular). O pedido vai para a coordenação, e o usuário confirma com a senha na conversa com ela. Diga isso em uma frase.';
+const RELEASE_HOW_COORD = 'Se o usuário pedir para ligar ou liberar Executar código ou Terminal, escreva [[liberar-ferramenta ferramenta="terminal" agente="Nome de quem vai usar" motivo="para que"]] (ferramenta="calculo" para Executar código; agente="equipe" para só ligar para a equipe). Aparece para ele aqui mesmo um pedido com a senha; até ele confirmar, nada muda.';
 /** Para quem tem a Análise de dados: o Ergon calcula; o agente pede e comenta (nunca estima números). */
-export const PROCESS_HOW = 'Planilhas anexadas ao card são analisadas pelo sistema, não por você: quando o card já trouxer o resultado da análise, use exatamente aqueles números; se não trouxer, peça numa linha assim: [[processar operacao="analise-desempenho" arquivo="nome-do-arquivo.csv" referencia="AAAA-MM-DD"]]. Nunca calcule de cabeça nem estime um número que pode ser contado no arquivo.';
+const PROCESS_HOW = 'Planilhas anexadas ao card são analisadas pelo sistema, não por você: quando o card já trouxer o resultado da análise, use exatamente aqueles números; se não trouxer, peça numa linha assim: [[processar operacao="analise-desempenho" arquivo="nome-do-arquivo.csv" referencia="AAAA-MM-DD"]]. Nunca calcule de cabeça nem estime um número que pode ser contado no arquivo.';
 /**
  * O que existe nos Arquivos do Ergon, para quem tem a ferramenta Arquivos (só nome, tipo, tamanho, data e card; o
  * conteúdo, só dos anexados ao card). Sem isto, pedida a "localizar nos arquivos a versão mais recente
  * do plano", a Hipátia — responsável pelos Arquivos — não via nem a lista, e pediu o Terminal, que também não vê.
  */
 /** Como trabalhar com os Arquivos do Ergon (fica entre as instruções; a lista, dado de agora, vem de filesCatalog). */
-export const FILES_HOW = 'Arquivos do Ergon: a lista (nome, tipo e data) está na situação do workspace, abaixo; o texto de um documento você recebe quando ele está anexado ao card em que você trabalha (planilha CSV: pela Análise de dados) — para trabalhar sobre um deles, peça que seja anexado ao card. Terminal e Executar código rodam fora do Ergon e não enxergam estes arquivos.';
-export function filesCatalog(db: Db, workspaceId: string, max = 25): string {
+const FILES_HOW = 'Arquivos do Ergon: a lista (nome, tipo e data) está na situação do workspace, abaixo; o texto de um documento você recebe quando ele está anexado ao card em que você trabalha (planilha CSV: pela Análise de dados) — para trabalhar sobre um deles, peça que seja anexado ao card. Terminal e Executar código rodam fora do Ergon e não enxergam estes arquivos.';
+function filesCatalog(db: Db, workspaceId: string, max = 25): string {
   const rows = db.all<{ filename: string; mime: string; size: number; created_at: string; number: number | null }>(
     `SELECT a.filename, a.mime, a.size, a.created_at, t.number FROM artifacts a LEFT JOIN tasks t ON t.id = a.task_id
       WHERE a.workspace_id = ? ORDER BY a.created_at DESC LIMIT ?`, workspaceId, max);
@@ -1152,18 +1152,18 @@ export function filesCatalog(db: Db, workspaceId: string, max = 25): string {
   return `${head}:\n${rows.map((r) => `- "${neutral(r.filename, 120)}" (${r.mime.split('/').pop()}, ${Math.max(1, Math.round(r.size / 1024))} KB, ${day(r.created_at)}${r.number ? `, card #${r.number}` : ''})`).join('\n')}`;
 }
 
-export const HELP_HOW ='Para pedir ajuda a um colega, escreva uma linha assim: [[pedir-ajuda agente="Nome" pedido="o que você precisa, com o contexto necessário"]]. Num card, o colega entra como uma etapa do mesmo card, antes da sua, e você continua depois, com o que ele entregou; na conversa, o pedido vira um card só, com os colegas como etapas, e você entrega aqui. Uma entrega, um card: não peça a mesma coisa a vários colegas nem devolva a ajuda a quem pediu. Diga ao usuário, em uma frase, que pediu ajuda e a quem.';
+const HELP_HOW ='Para pedir ajuda a um colega, escreva uma linha assim: [[pedir-ajuda agente="Nome" pedido="o que você precisa, com o contexto necessário"]]. Num card, o colega entra como uma etapa do mesmo card, antes da sua, e você continua depois, com o que ele entregou; na conversa, o pedido vira um card só, com os colegas como etapas, e você entrega aqui. Uma entrega, um card: não peça a mesma coisa a vários colegas nem devolva a ajuda a quem pediu. Diga ao usuário, em uma frase, que pediu ajuda e a quem.';
 /**
  * Competências (skills) pela conversa: a coordenação põe um agente para estudar um tema (o Treinar, trainings.ts); a
  * competência só passa a valer depois que o usuário aprova a proposta que o agente escreve.
  */
-export const TRAIN_HOW_COORD = 'Quando o usuário pedir que a equipe aprenda algo (um jeito de fazer, um modelo de documento, as regras de um assunto) ou quando um tipo de trabalho voltar sempre, crie uma competência: escreva [[treinar agente="Nome" competencia="nome curto" pedido="o que ele deve aprender, com o material e o contexto" links="https://... https://..."]] (links opcionais). Escolha quem vai usar a competência; se for de uso geral, quem tem o modelo mais forte. O agente estuda e escreve a competência; ela só vale depois que o usuário aprova no perfil do agente (aba Treinar). Diga isso em uma frase.';
+const TRAIN_HOW_COORD = 'Quando o usuário pedir que a equipe aprenda algo (um jeito de fazer, um modelo de documento, as regras de um assunto) ou quando um tipo de trabalho voltar sempre, crie uma competência: escreva [[treinar agente="Nome" competencia="nome curto" pedido="o que ele deve aprender, com o material e o contexto" links="https://... https://..."]] (links opcionais). Escolha quem vai usar a competência; se for de uso geral, quem tem o modelo mais forte. O agente estuda e escreve a competência; ela só vale depois que o usuário aprova no perfil do agente (aba Treinar). Diga isso em uma frase.';
 
 /**
  * Gestão pelo coordenador (rc.29, services/gestao.ts): tudo o que a pessoa gerencia pelas telas ele também faz, pelas
  * ferramentas de gestão do complemento do motor. Para a pessoa, nada de termo técnico.
  */
-export const GESTAO_HOW = 'Você gerencia e configura o Ergon inteiro por ela, conversando: cards e quadros, equipe e agentes, memória dos agentes, competências (loja, Treinar e o texto de uma SKILL.md), modelos e contas de IA, Conexões e as regras de envio, aplicativos prontos e conexões próprias, rotinas, ajustes da equipe, canais (Telegram, Discord), workspaces, a cidade, documentos, consumo e a versão. '
+const GESTAO_HOW = 'Você gerencia e configura o Ergon inteiro por ela, conversando: cards e quadros, equipe e agentes, memória dos agentes, competências (loja, Treinar e o texto de uma SKILL.md), modelos e contas de IA, Conexões e as regras de envio, aplicativos prontos e conexões próprias, rotinas, ajustes da equipe, canais (Telegram, Discord), workspaces, a cidade, documentos, consumo e a versão. '
   + 'Use gestao_listar (sem área: as áreas; com area: as ações, os identificadores e os campos de cada uma) e gestao_executar (acao e parametros, com os identificadores que as ações de ver trazem). '
   + 'Ver, criar e mover cards e pôr a equipe para trabalhar é direto, como hoje. O que muda configuração, gasta, apaga, dá acesso ou envia em nome da pessoa abre um cartão para ela aplicar: diga em uma frase o que pediu e que nada muda até ela aplicar; o resultado volta para você. '
   + 'Competência pronta (uma SKILL.md ou uma pasta .zip que a pessoa mandou ou colou): competencia.enviar, com o arquivo (o identificador do arquivo que ela mandou) ou o texto inteiro, e o destino (um agente ou a equipe); passa pela mesma verificação de segurança da tela e o cartão mostra o que ela achou. Para ensinar algo novo a partir de material (não uma SKILL.md pronta): treinar.comecar no agente, com o pedido e os arquivos em fileIds; vale quando a pessoa aprova o que o treinamento escreveu. '
@@ -1172,7 +1172,7 @@ export const GESTAO_HOW = 'Você gerencia e configura o Ergon inteiro por ela, c
   + 'Com a pessoa, fale do que muda com o nome das coisas (o agente, a rotina, a conexão), nunca de ação, campo, identificador ou sistema.';
 
 /** Na conversa: quem recebe o pedido entrega (agentes como células). */
-export const CELL_HOW = 'Pedido da sua especialidade: faça você mesmo e entregue aqui, pronto para usar. Se precisar de um colega, peça ajuda (a resposta volta para você aqui e você entrega). Se precisar de várias pessoas, peça ao Coordenador, que planeja e devolve o resultado.';
+const CELL_HOW = 'Pedido da sua especialidade: faça você mesmo e entregue aqui, pronto para usar. Se precisar de um colega, peça ajuda (a resposta volta para você aqui e você entrega). Se precisar de várias pessoas, peça ao Coordenador, que planeja e devolve o resultado.';
 
 /** Quem tem cada ferramenta usável (agentes ativos): base para pedir ajuda e para a coordenação. */
 export function toolHolders(db: Db, workspaceId: string): Map<string, string[]> {
@@ -1195,7 +1195,7 @@ export function toolHolders(db: Db, workspaceId: string): Map<string, string[]> 
  * caminho para as contas e diz à pessoa que o pedido segue. Vale para qualquer agente com Conexões, em qualquer
  * instalação (as instruções gravadas de cada agente não mudam).
  */
-export const CONEXOES_UPDATING = 'As Conexões (as contas e os aplicativos que a pessoa conectou) estão sendo atualizadas neste computador e voltam sozinhas quando a atualização da equipe terminar. Até lá, não use outro caminho para as contas: nada de skills de e-mail (como himalaya), terminal ou programas, e não diga que enviou ou leu. Diga à pessoa, em uma frase, que a parte do pedido que precisa das contas segue quando a atualização terminar, e faça agora o resto.';
+const CONEXOES_UPDATING = 'As Conexões (as contas e os aplicativos que a pessoa conectou) estão sendo atualizadas neste computador e voltam sozinhas quando a atualização da equipe terminar. Até lá, não use outro caminho para as contas: nada de skills de e-mail (como himalaya), terminal ou programas, e não diga que enviou ou leu. Diga à pessoa, em uma frase, que a parte do pedido que precisa das contas segue quando a atualização terminar, e faça agora o resto.';
 
 /** O motivo verdadeiro de uma ferramenta que o agente tem, mas ainda não pode usar. */
 function whyMissing(t: ToolDef): string {

@@ -29,7 +29,7 @@ import { cadeiaDe, lidoEm, marcarEm } from './conexoes/marca.ts';
 import { workspaceTz } from './routine-proposals.ts';
 import { colunaPorChave, type ChaveColuna } from './colunas.ts';
 
-export interface HelpRequest { agent: string; request: string }
+interface HelpRequest { agent: string; request: string }
 /** uma rodada do ciclo de persistência (task.persist) e a decisão dela (task.persist_decision) */
 interface PersistRound { round: number; kind: string; by: string; stuck: string; motivo: string; refazer?: string; decision?: string; detail?: string }
 /** o que travou um card e volta para a equipe (conexao: a conferência de entrega mostra o que faltou fazer na conta) */
@@ -49,7 +49,7 @@ export function parseHelpRequests(text: string | null, max = HELP_MAX.agent): He
   return out;
 }
 
-export interface ProcessRequest { op: string; file: string | null; referencia: string | null }
+interface ProcessRequest { op: string; file: string | null; referencia: string | null }
 
 /** [[processar operacao="analise-desempenho" arquivo="tarefas.csv" referencia="2026-10-24"]] (no máximo 2 por resposta). */
 export function parseProcessRequests(text: string | null): ProcessRequest[] {
@@ -104,7 +104,7 @@ const CLOSING: Record<string, string> = {
  * A última linha da entrega, para a pessoa (resumo-tarefa.ts): ela abre o card, lê só essa frase e decide. A linha sai do
  * texto da entrega (não aparece duas vezes); sem ela, a tela usa só o que o sistema registrou.
  */
-export const PARA_VOCE = 'Termine com UMA última linha para a pessoa, sozinha, sem marcador de lista, em linguagem simples, com os números, nomes e destinos de verdade: "Para você decidir: …" quando ela precisa aprovar ou escolher algo antes de seguir (diga exatamente o que ela decide), ou "Feito: …" quando nada depende dela (o que foi feito, onde e para quem). Aprovar o card não envia, não cria e não paga nada: o que sai por uma conta conectada pede o cartão de confirmação das Conexões; nunca escreva que aprovar fará isso. Exemplos: "Para você decidir: escolher entre o plano A (R$ 50 por mês) e o B (R$ 80 por mês)." · "Para você decidir: aprovar o texto do orçamento revisado para Ana e Bruno." · "Feito: criei no Planner as tarefas Revisar contrato, Pagar fornecedor e Agendar visita." Só essa linha; não repita a entrega nela. Escreva-a no idioma da conversa com a pessoa; em inglês, comece exatamente com "For you to decide: …" ou "Done: …".';
+const PARA_VOCE = 'Termine com UMA última linha para a pessoa, sozinha, sem marcador de lista, em linguagem simples, com os números, nomes e destinos de verdade: "Para você decidir: …" quando ela precisa aprovar ou escolher algo antes de seguir (diga exatamente o que ela decide), ou "Feito: …" quando nada depende dela (o que foi feito, onde e para quem). Aprovar o card não envia, não cria e não paga nada: o que sai por uma conta conectada pede o cartão de confirmação das Conexões; nunca escreva que aprovar fará isso. Exemplos: "Para você decidir: escolher entre o plano A (R$ 50 por mês) e o B (R$ 80 por mês)." · "Para você decidir: aprovar o texto do orçamento revisado para Ana e Bruno." · "Feito: criei no Planner as tarefas Revisar contrato, Pagar fornecedor e Agendar visita." Só essa linha; não repita a entrega nela. Escreva-a no idioma da conversa com a pessoa; em inglês, comece exatamente com "For you to decide: …" ou "Done: …".';
 /** etapa do meio de um plano: a entrega é para a próxima etapa, não para o usuário */
 const STEP_CLOSING = 'Entregue o resultado completo da sua etapa, em texto, pronto para a próxima etapa usar. Não diga apenas que terminou.';
 /**
@@ -120,9 +120,9 @@ const PLAN_BUDGET = 240_000;
 const STEP_FILE_CHARS = 1500;
 /** ciclo de persistência: rodadas por card em 24 h — 2 com a coordenação, 2 com o reforço; depois, a pessoa fica sabendo */
 export const PERSIST_ROUNDS = 4;
-export const PERSIST_KEY = 'triagem-';
+const PERSIST_KEY = 'triagem-';
 /** etapas de ajuda que um card pode ganhar; além disso, o ciclo de persistência decide outra saída */
-export const HELP_STEPS_MAX = 4;
+const HELP_STEPS_MAX = 4;
 /** modelos que a equipe trata como os mais fortes (pelo nome escolhido para o agente) */
 const STRONG_MODEL = /opus|gpt-5(?![\w.-]*(mini|nano))|(^|[^a-z0-9])o3([^a-z0-9]|$)|gemini-[\d.]+-pro|grok-4|deepseek-r1|qwen3-max|405b|[^a-z]large/i;
 

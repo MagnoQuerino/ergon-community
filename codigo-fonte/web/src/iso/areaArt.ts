@@ -198,25 +198,62 @@ function waterAt(town: Town, t: Theme, x: number, z: number): number {
 }
 
 /** Desenha o chão de um bloco (rect em pixels do mundo) num canvas de CHUNK × CHUNK, na escala `s` (1, 1/2 ou 1/4). */
+// manchas do chão: a mesma regra nos dois caminhos (ladrilho a ladrilho perto, pixel a pixel longe)
+const NONE = 0; const GREEN = 1; const DRY = 2; const WATER_SHALLOW = 3; const WATER_MID = 4; const WATER_DEEP = 5;
+function patchColor(town: Town, t: Theme, x: number, z: number): number {
+  const wet = waterAt(town, t, x, z);
+  if (wet > 0) return wet > 0.14 ? WATER_DEEP : wet > 0.04 ? WATER_MID : WATER_SHALLOW;
+  const n = groundAt(x, z);
+  return n < 0.37 ? GREEN : n > 0.65 ? DRY : NONE;
+}
+const waterTone = (t: Theme, c: number) => (c === WATER_DEEP ? mix(t.water[1], t.water[2], 0.45) : c === WATER_MID ? t.water[1] : t.water[0]);
+const rgb = (c: string): [number, number, number] => { const n = parseInt(c.slice(1, 7), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+
+/**
+ * Bloco de chão longe (s < 1): cada pixel do bloco recebe a cor do ladrilho em que o centro dele cai — o mesmo critério
+ * da varredura de linhas de perto —, escrita direto na imagem. Antes cada ladrilho (até 170 mil por bloco) era uma
+ * varredura em pixels do mundo, encolhida depois: o bloco afastado custava até 16 vezes o de perto e travava o zoom.
+ */
+function groundPatchesPixels(g: CanvasRenderingContext2D, town: Town, t: Theme, r: Rect, s: number, TILE: number): void {
+  const W = g.canvas.width; const H = g.canvas.height;
+  const pal = [t.bg, t.ground[0], t.ground[1], waterTone(t, WATER_SHALLOW), waterTone(t, WATER_MID), waterTone(t, WATER_DEEP)].map(rgb);
+  const img = g.createImageData(W, H); const d = img.data;
+  let lastI = NaN; let lastJ = NaN; let col = NONE;
+  for (let py = 0, o = 0; py < H; py++) {
+    const sy = r.y0 + (py + 0.5) / s;
+    for (let px = 0; px < W; px++, o += 4) {
+      const sx = r.x0 + (px + 0.5) / s;
+      const a = sx / KX; const b = sy / KY; // x − z e x + z (unproject no chão)
+      const ti = Math.floor((a + b) / 2 / TILE); const tj = Math.floor((b - a) / 2 / TILE);
+      if (ti !== lastI || tj !== lastJ) { lastI = ti; lastJ = tj; col = patchColor(town, t, (ti + 0.5) * TILE, (tj + 0.5) * TILE); }
+      const c = pal[col]; d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+}
+
 export function drawGroundChunk(g: CanvasRenderingContext2D, town: Town, t: Theme, r: Rect, ci: number, cj: number, s = 1): void {
   g.setTransform(s, 0, 0, s, 0, 0);
   const P = projector(-r.x0, -r.y0);
   const w = r.x1 - r.x0; const h = r.y1 - r.y0;
-  g.fillStyle = t.bg; g.fillRect(0, 0, w, h);
-  // manchas do chão (verde, seco) em ladrilhos de meia unidade: bordas em degrau, como o resto da pixel art
-  const corners = [unproject(r.x0, r.y0), unproject(r.x1, r.y0), unproject(r.x0, r.y1), unproject(r.x1, r.y1)];
   const TILE = 0.5;
-  const xa = Math.floor(Math.min(...corners.map((c) => c[0])) / TILE) * TILE - TILE; const xb = Math.max(...corners.map((c) => c[0])) + TILE;
-  const za = Math.floor(Math.min(...corners.map((c) => c[1])) / TILE) * TILE - TILE; const zb = Math.max(...corners.map((c) => c[1])) + TILE;
-  for (let x = xa; x < xb; x += TILE) for (let z = za; z < zb; z += TILE) {
-    const [px, py] = project(x + TILE / 2, 0, z + TILE / 2);
-    if (px < r.x0 - KX || px > r.x1 + KX || py < r.y0 - KY || py > r.y1 + KY) continue;
-    const n = groundAt(x + TILE / 2, z + TILE / 2);
-    const wet = waterAt(town, t, x + TILE / 2, z + TILE / 2);
-    if (wet > 0) { flatQuad(g, P, 0, x - 0.03, z - 0.03, x + TILE + 0.03, z + TILE + 0.03, wet > 0.14 ? mix(t.water[1], t.water[2], 0.45) : wet > 0.04 ? t.water[1] : t.water[0]); continue; }
-    if (n < 0.37) flatQuad(g, P, 0, x, z, x + TILE, z + TILE, t.ground[0]);
-    else if (n > 0.65) flatQuad(g, P, 0, x, z, x + TILE, z + TILE, t.ground[1]);
+  // manchas do chão (verde, seco) em ladrilhos de meia unidade: bordas em degrau, como o resto da pixel art
+  if (s < 1) groundPatchesPixels(g, town, t, r, s, TILE);
+  else {
+    g.fillStyle = t.bg; g.fillRect(0, 0, w, h);
+    const corners = [unproject(r.x0, r.y0), unproject(r.x1, r.y0), unproject(r.x0, r.y1), unproject(r.x1, r.y1)];
+    const xa = Math.floor(Math.min(...corners.map((c) => c[0])) / TILE) * TILE - TILE; const xb = Math.max(...corners.map((c) => c[0])) + TILE;
+    const za = Math.floor(Math.min(...corners.map((c) => c[1])) / TILE) * TILE - TILE; const zb = Math.max(...corners.map((c) => c[1])) + TILE;
+    for (let x = xa; x < xb; x += TILE) for (let z = za; z < zb; z += TILE) {
+      const [px, py] = project(x + TILE / 2, 0, z + TILE / 2);
+      if (px < r.x0 - KX || px > r.x1 + KX || py < r.y0 - KY || py > r.y1 + KY) continue;
+      const c = patchColor(town, t, x + TILE / 2, z + TILE / 2);
+      if (c === WATER_DEEP || c === WATER_MID || c === WATER_SHALLOW) { flatQuad(g, P, 0, x - 0.03, z - 0.03, x + TILE + 0.03, z + TILE + 0.03, waterTone(t, c)); continue; }
+      if (c === GREEN) flatQuad(g, P, 0, x, z, x + TILE, z + TILE, t.ground[0]);
+      else if (c === DRY) flatQuad(g, P, 0, x, z, x + TILE, z + TILE, t.ground[1]);
+    }
   }
+  g.setTransform(s, 0, 0, s, 0, 0);
   const R = rnd(ci * 7919 + cj * 104729 + 17);
   const at = (sx: number, sy: number) => { const [x, z] = unproject(sx + r.x0, sy + r.y0); return groundAt(x, z); };
   // pedrinhas (às vezes uma maior, com luz em cima)

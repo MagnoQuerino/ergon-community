@@ -10,7 +10,7 @@ import { ProviderError, type BoardSnapshot, type ExternalBoard, type ExternalTas
 import { dueOf } from './due.ts';
 import { NetworkFailure, fetchWithPolicy, retryHint, type HttpKind } from '../lib/http.ts';
 
-export const MAX_TASKS = 500;
+const MAX_TASKS = 500;
 type Json = any; // respostas externas: lidas campo a campo, com String()/Number() na saída
 
 /** Recusa por causa do pedido: repetir não muda a resposta, e quem corrige é a pessoa ou o agente. */
