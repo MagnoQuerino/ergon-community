@@ -1297,7 +1297,9 @@ export class IsoEngine {
     this.chunks.reserve((c1 - c0 + 1) * (r1 - r0 + 1) * 1.5);
     for (let cj = r0; cj <= r1; cj++) for (let ci = c0; ci <= c1; ci++) {
       const key = `${lod}|${ci},${cj}`; let c = this.chunks.get(key);
-      if (!c && big && newChunks > 0 && performance.now() - t0 > 10) { this.chunkPending = true; continue; }
+      // sem tempo neste quadro: o mesmo chão de outra escala (zoom recém-trocado) ou, na cidade grande, o próximo quadro.
+      // Na troca de escala isso evita gerar a tela inteira de blocos de uma vez (o quadro travado no zoom).
+      if (!c && newChunks > 0 && performance.now() - t0 > 8 && (this.groundFallback(g, lod, ci, cj, span, k) || big)) { this.chunkPending = true; continue; }
       if (!c) {
         newChunks++;
         c = document.createElement('canvas'); c.width = CHUNK; c.height = CHUNK;
@@ -1478,6 +1480,29 @@ export class IsoEngine {
     const g = this.g; const th = this.theme; const f = b.foot; const h = Math.max(1, this.scanTop(b) - 3);
     const sil = [project(f.x0, h, f.z0), project(f.x1, h, f.z0), project(f.x1, 0, f.z0), project(f.x1, 0, f.z1), project(f.x0, 0, f.z1), project(f.x0, h, f.z1)];
     g.save(); g.globalAlpha = 0.85; g.fillStyle = th.stone[1]; g.beginPath(); g.moveTo(sil[0][0], sil[0][1]); for (const [x, y] of sil.slice(1)) g.lineTo(x, y); g.closePath(); g.fill(); g.restore();
+  }
+
+  /**
+   * O bloco de chão (lod, ci, cj) ainda não existe: desenha o mesmo pedaço com os blocos prontos de outra escala (mais
+   * fina ou mais grossa). false se falta algum: aí o bloco é gerado agora, como antes.
+   */
+  private groundFallback(g: CanvasRenderingContext2D, lod: number, ci: number, cj: number, span: number, k: number): boolean {
+    const x0 = ci * span; const y0 = cj * span; const x1 = x0 + span; const y1 = y0 + span;
+    for (const ol of [0.5, 1, 0.25]) {
+      if (ol === lod) continue;
+      const os = CHUNK / ol;
+      const i0 = Math.floor(x0 / os); const i1 = Math.floor((x1 - 1e-6) / os); const j0 = Math.floor(y0 / os); const j1 = Math.floor((y1 - 1e-6) / os);
+      const parts: Array<[HTMLCanvasElement, number, number]> = [];
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const c = this.chunks.get(`${ol}|${i},${j}`); if (c) parts.push([c, i, j]); }
+      if (parts.length !== (i1 - i0 + 1) * (j1 - j0 + 1)) continue;
+      const o = 1 / k;
+      for (const [c, i, j] of parts) {
+        const ax = Math.max(x0, i * os); const ay = Math.max(y0, j * os); const bx = Math.min(x1, (i + 1) * os); const by = Math.min(y1, (j + 1) * os);
+        g.drawImage(c, (ax - i * os) * ol, (ay - j * os) * ol, (bx - ax) * ol, (by - ay) * ol, ax, ay, bx - ax + o, by - ay + o);
+      }
+      return true;
+    }
+    return false;
   }
 
   /** Escala da arte dos prédios para o zoom: perto, resolução cheia; longe, cópias reduzidas. */
