@@ -757,6 +757,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       compactacaoNosMotores();
       // os perfis dos agentes (criar os que faltam, atualizar os que mudaram): só nos motores abertos, poucos por vez
       void perfis.volta(motors.openAis().flatMap((x) => workspacesDoEscopo(x.scope))).catch(() => undefined);
+      for (const x of motors.openAis()) void perfis.podar(workspacesDoEscopo(x.scope)).catch(() => undefined);
       // as rotinas com horário no agendador do motor (criar, atualizar, conferir a próxima execução; migração da rc.26)
       void rotinasMotor.volta(motors.openAis().flatMap((x) => workspacesDoEscopo(x.scope))).catch(() => undefined);
       ajustesNosMotores();
@@ -799,6 +800,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (state === 'aberto') {
       // o que mudou nos agentes enquanto o motor estava fora (fechado, ligando, renovando) chega aos perfis agora
       for (const ws of owners.owned(userId)) perfis.motorAbriu(ws);
+      // perfis de workspaces apagados saem do motor (uma vez por abertura)
+      void perfis.podar(owners.owned(userId)).catch(() => undefined);
       void motors.limparSePronto().catch(() => undefined);
       void motors.apagarDadosAntigos(userId).catch(() => undefined);
     }
@@ -1132,6 +1135,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // conta que outro workspace usa emprestada fica com ele: só depois das conferências da exclusão, logo antes de este sumir
     const r = deleteWorkspace(db, cfg, a.userId, wsId, (req.body as { confirmName: string }).confirmName, () => integrations.promoverTudo(wsId));
     owners.forget();
+    // os perfis dos agentes dele saem do motor (antes ficavam, e o motor os carregava a cada reinício)
+    void perfis.podar(workspacesDoMotor(r.next), true).catch(() => undefined);
     audit(db, bus, { workspaceId: r.next, actorType: 'user', actorId: a.userId, action: 'workspace.delete', evidence: { name: r.name }, result: 'workspace excluído (dados, arquivos e chave)' });
     return { ok: true, workspaceId: r.next };
   });

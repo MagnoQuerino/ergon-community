@@ -68,6 +68,8 @@ interface AiStatus {
   executor: 'real' | 'simulated';
   /** a ponte de controle responde (contas, modelo padrão, skills) */
   available: boolean;
+  /** o motor não respondeu a tempo (sem memória, ocupado): a tela mostra o que sabe e confere de novo */
+  ocupado?: boolean;
   accounts: Array<AccountDef & { connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
   /** chave própria: quais provedores estão ligados (o valor da chave nunca sai do motor) */
@@ -255,23 +257,32 @@ export class AiService {
   /** último modelo padrão lido (sem rede): o executor registra em cada execução sem modelo próprio */
   cachedDefault(): string | null { return this.def?.model ?? null; }
 
-  async status(): Promise<AiStatus> {
+  /**
+   * O estado da conta de IA para a tela. Cada consulta ao motor tem prazo curto e elas correm juntas: com o motor sem
+   * memória (QA 16/11: 11 workspaces de teste), as quatro em fila esperavam até 25 s cada e o cadastro travava em "Abrindo
+   * as portas…". Sem resposta a tempo, a tela recebe ocupado = true e mostra o que já sabe.
+   */
+  async status(prazoMs = 6000): Promise<AiStatus> {
     const executor = this.cfg.executor === 'hermes' ? 'real' as const : 'simulated' as const;
-    const available = this.control ? await this.control.health() : false;
-    let accounts = ACCOUNTS.map((a) => ({ ...a, connected: false, detail: available ? 'não conectada' : 'indisponível nesta instalação' }));
-    if (available) {
-      try {
-        const st = await this.control!.accounts();
-        accounts = ACCOUNTS.map((a) => {
-          const s = st.find((x) => x.id === a.id);
-          const detail = !s?.connected ? 'não conectada' : s.freeTier ? 'conectada (plano gratuito)' : s.tier ? `conectada (plano ${s.tier})` : 'conectada';
-          return { ...a, connected: !!s?.connected, detail };
-        });
-      } catch { /* mantém "não conectada" */ }
-    }
-    const d = await this.defaultModel(true);
-    const cat: ByokCatalog = available && this.control?.byok ? await this.control.byok().catch(() => ({ providers: [], custom: [] })) : { providers: [], custom: [] };
-    return { executor, available, accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) },
+    let ocupado = false;
+    const comPrazo = <T,>(p: Promise<T>, fallback: T): Promise<T> => new Promise((ok) => {
+      const t = setTimeout(() => { ocupado = true; ok(fallback); }, prazoMs);
+      p.then((v) => { clearTimeout(t); ok(v); }, () => { clearTimeout(t); ok(fallback); });
+    });
+    const available = this.control ? await comPrazo(this.control.health(), false) : false;
+    const [st, d, cat] = await Promise.all([
+      available ? comPrazo(this.control!.accounts(), null) : Promise.resolve(null),
+      comPrazo(this.defaultModel(true), this.def ? { provider: this.def.provider, model: this.def.model } : { provider: null, model: null }),
+      available && this.control?.byok ? comPrazo(this.control.byok(), { providers: [], custom: [] } as ByokCatalog) : Promise.resolve({ providers: [], custom: [] } as ByokCatalog),
+    ]);
+    const accounts = ACCOUNTS.map((a) => {
+      const s = st?.find((x) => x.id === a.id);
+      const detail = !available ? (ocupado ? 'a equipe de IA está ocupada: confira de novo em instantes' : 'indisponível nesta instalação')
+        : !st ? (ocupado ? 'a equipe de IA está ocupada: confira de novo em instantes' : 'não conectada')
+        : !s?.connected ? 'não conectada' : s.freeTier ? 'conectada (plano gratuito)' : s.tier ? `conectada (plano ${s.tier})` : 'conectada';
+      return { ...a, connected: !!s?.connected, detail };
+    });
+    return { executor, available, ...(ocupado ? { ocupado: true } : {}), accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) },
       byok: cat.providers, byokCustom: cat.custom };
   }
 

@@ -144,5 +144,25 @@ check("ponte: só gravar e apagar o endpoint ergon-ai passam",
       passa("POST", "/api/providers/custom-endpoints") and passa("DELETE", "/api/providers/custom-endpoints/ergon-ai")
       and not passa("GET", "/api/providers/custom-endpoints") and not passa("POST", "/api/providers/custom-endpoints/ergon-ai/activate"))
 
+# poda dos perfis (QA 16/11): o que o Ergon não tem mais sai da pasta ativa, para perfis-removidos/ (nada é apagado)
+_root = os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "profiles")
+for _n in ("erg-aaaaaaaaaaaaaaaaaaaa", "erg-bbbbbbbbbbbbbbbbbbbb", "erg-cccccccccccccccccccc"):
+    os.makedirs(os.path.join(_root, _n, "memories"), exist_ok=True)
+    open(os.path.join(_root, _n, "memories", "nota.md"), "w").write("lembrar")
+_r = b.perfis_podar(["erg-aaaaaaaaaaaaaaaaaaaa"])
+check("poda: só o que o Ergon mantém fica na pasta ativa", "erg-aaaaaaaaaaaaaaaaaaaa" in b.perfis_listar() and not {"erg-bbbbbbbbbbbbbbbbbbbb", "erg-cccccccccccccccccccc"} & set(b.perfis_listar()), str(_r))
+check("poda: o que saiu foi movido com a memória, não apagado",
+      os.path.isfile(os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "perfis-removidos", "erg-bbbbbbbbbbbbbbbbbbbb", "memories", "nota.md")))
+try:
+    b.perfis_podar([]); _vazia = False
+except ValueError:
+    _vazia = True
+check("poda: lista vazia não esvazia o motor", _vazia and "erg-aaaaaaaaaaaaaaaaaaaa" in b.perfis_listar())
+try:
+    b.perfis_podar(["../../etc"]); _ruim = False
+except ValueError:
+    _ruim = True
+check("poda: nome fora do formato é recusado", _ruim)
+
 print("TUDO OK" if ok else "HOUVE FALHA")
 sys.exit(0 if ok else 1)

@@ -237,6 +237,8 @@ export interface ModelEntry { id: string; label: string; vendor: string; input: 
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
   executor: 'real' | 'simulated'; available: boolean;
+  /** o motor não respondeu a tempo (sem memória, ocupado): mostra o que se sabe e confere de novo */
+  ocupado?: boolean;
   /** motor de IA da pessoa: conta nova fica "ligando" por até ~1 min */
   motor?: { state: 'desligado' | 'ligando' | 'renovando' | 'aberto' | 'erro'; error: string | null } | null;
   /** chave própria (BYOK): provedores que aceitam a chave de API da pessoa; o valor nunca volta */

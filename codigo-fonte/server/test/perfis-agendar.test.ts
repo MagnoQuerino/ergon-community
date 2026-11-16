@@ -26,6 +26,7 @@ class Motor implements HermesClient {
   runs = new Map<string, RemoteRun>();
   perfis = new Map<string, PedidoDePerfil>();
   envios: string[] = [];
+  podas: string[][] = [];
   /** quantos envios de perfil seguidos falham (503) */
   falhar = 0;
   /** segura os envios de perfil até soltar */
@@ -55,6 +56,12 @@ class Motor implements HermesClient {
         const criado = !self.perfis.has(nome);
         self.perfis.set(nome, pedido);
         return { criado, mudou: criado ? ['criado'] : ['alma'] };
+      },
+      async podarPerfis(manter: string[]) {
+        self.podas.push(manter);
+        const movidos = [...self.perfis.keys()].filter((n) => !manter.includes(n));
+        for (const n of movidos) self.perfis.delete(n);
+        return { movidos, ficaram: self.perfis.size };
       },
     } as unknown as HermesControlClient;
   }
@@ -174,5 +181,27 @@ describe('a mudança no agente chega ao perfil antes do próximo pedido', () => 
     assert.ok(String(daAntiga.instructions).startsWith(almaDoAgente(h.db, s.workspaceId, ag.id)), 'e leva a identidade nova nas instruções (o perfil ainda tem a de antes)');
     motor.segurar = null; soltar();
     await h.close();
+  });
+});
+
+
+describe('perfis de workspace apagado saem do motor (QA 16/11: 121 órfãos enchiam a memória a cada reinício)', () => {
+  test('apagar o workspace poda os perfis dele; os do workspace que fica continuam', async () => {
+    const { h, s, motor } = await montar();
+    try {
+      const outro = (await req(h, 'POST', '/api/workspaces', s, { name: 'Teste QA' })).json.workspaceId as string;
+      await h.perfis.emDia(outro, 100);
+      const doOutro = h.db.all<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ?', outro).map((a) => nomeDoPerfil(outro, a.id));
+      const doPrincipal = h.db.all<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ?', s.workspaceId).map((a) => nomeDoPerfil(s.workspaceId, a.id));
+      assert.ok(doOutro.some((n) => motor.perfis.has(n)), 'o workspace de teste tinha perfis no motor');
+      const sess = { ...s, workspaceId: outro };
+      const del = await req(h, 'DELETE', `/api/workspaces/${outro}`, sess, { confirmName: 'Teste QA' });
+      assert.equal(del.status, 200, JSON.stringify(del.json));
+      for (let i = 0; i < 20 && !motor.podas.length; i++) await new Promise((ok) => setTimeout(ok, 10));
+      const manter = motor.podas.at(-1)!;
+      assert.ok(manter.length > 0);
+      assert.ok(doPrincipal.every((n) => manter.includes(n)), 'os perfis do workspace que fica estão na lista');
+      assert.ok(doOutro.every((n) => !manter.includes(n) && !motor.perfis.has(n)), 'os do apagado saíram');
+    } finally { await h.close(); }
   });
 });
