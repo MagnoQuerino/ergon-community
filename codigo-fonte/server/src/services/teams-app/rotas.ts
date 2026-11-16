@@ -12,6 +12,8 @@ interface TeamsAppRoutesDeps {
   teamsApp: TeamsApp;
   owner: (req: FastifyRequest) => AuthContext;
   admin: (req: FastifyRequest) => AuthContext;
+  /** qualquer membro do workspace (os bots oficiais: cada conta ligada é de um membro e age como ele); padrão: owner */
+  member?: (req: FastifyRequest) => AuthContext;
   /** a verificação de /api/proposals/:id/authorize (secApi.verify) */
   verify: (req: FastifyRequest, ctx: AuthContext, body: { password?: string; code?: string; key?: string; response?: Record<string, unknown> }) => Promise<void>;
 }
@@ -21,6 +23,24 @@ const claimId = { type: 'string', pattern: '^clm_[A-Za-z0-9_-]{8,40}$' };
 
 export function registerTeamsAppRoutes(app: FastifyInstance, d: TeamsAppRoutesDeps): void {
   const { teamsApp: t, owner, admin, verify } = d;
+  const member = d.member ?? owner;
+  // bots oficiais (Telegram, Discord): cada membro liga as próprias contas, com um clique, e desliga quando quiser
+  const platParams = { type: 'object', required: ['plat'], properties: { plat: { type: 'string', enum: ['telegram', 'discord'] } } };
+  const platVinculo = { type: 'object', required: ['plat', 'id'], properties: { plat: platParams.properties.plat, id: vinculoParams.properties.id } };
+  app.get('/api/canais-oficiais/:plat', { schema: { params: platParams } }, async (req) => {
+    const a = member(req);
+    return t.estadoBot(a.userId, (req.params as { plat: 'telegram' | 'discord' }).plat);
+  });
+  app.post('/api/canais-oficiais/:plat/start', { schema: { params: platParams } }, async (req) => {
+    const a = member(req);
+    return t.iniciarBot(a.userId, a.workspaceId, (req.params as { plat: 'telegram' | 'discord' }).plat, a.displayName || a.username);
+  });
+  app.delete('/api/canais-oficiais/:plat/accounts/:id', { schema: { params: platVinculo } }, async (req) => {
+    const a = member(req);
+    const p = req.params as { plat: 'telegram' | 'discord'; id: string };
+    await t.revogarBot(a.userId, p.plat, p.id);
+    return {};
+  });
   app.get('/api/teams-app', async (req) => {
     const a = owner(req);
     return { ...t.estado(a.userId), ...(isAdminSafe(admin, req) ? { relay: { fromEnv: t.enderecoDoAmbiente(), url: t.base() } } : {}) };

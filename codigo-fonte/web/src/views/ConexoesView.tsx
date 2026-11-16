@@ -1,6 +1,7 @@
 import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
 import { OutroAplicativo } from '../components/OutroAplicativo.tsx';
 import { CanalDaEquipeWhatsApp } from '../components/CanalDaEquipeWhatsApp.tsx';
+import { contasLigadas, mostraBotao, telaDoBot, type EstadoBotOficial } from '../lib/botOficial.ts';
 import { Fragment, lazy, Suspense, useEffect, useState, type ChangeEvent, type ComponentType, type ReactNode } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -116,6 +117,8 @@ export function ConexoesView() {
   const irAte = (kind: string) => { setOpen(kind); window.setTimeout(() => document.getElementById(`conn-${kind}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 40); };
   const estadoDe = (kind: string): EstadoDe => ({ eu: cx.data?.ligadas.find((x) => x.kind === kind) ?? null, pronto: !!cx.data, reload: cx.reload });
   const canais = useResource<Record<NomeCanal, EstadoCanal>>('/api/canais', ['canais.changed']);
+  // os bots oficiais do Ergon (pelo relé): disponíveis quando o serviço diz que a plataforma está ligada
+  const oficiais = { telegram: useResource<EstadoBotOficial>('/api/canais-oficiais/telegram', ['teams.changed']), discord: useResource<EstadoBotOficial>('/api/canais-oficiais/discord', ['teams.changed']) };
   const teams = useResource<EstadoTeams>('/api/teams-app', ['teams.changed']);
   // Esc (de qualquer lugar da tela) fecha o cartão aberto e devolve o foco ao bloco dele
   const fechar = () => { const k = open; setOpen(null); if (k) window.setTimeout(() => document.getElementById(`tile-${k}`)?.focus(), 0); };
@@ -140,7 +143,7 @@ export function ConexoesView() {
     { kind: 'equipe-teams', logo: 'teams', name: 'Teams', contas: ligadosTeams, soon: teams.data ? !teams.data.available : false,
       selo: !teams.data ? ['…', ''] : !teams.data.available ? [t('conexoes.estado.indisponivel'), ''] : ligadosTeams ? [t('conexoes.estado.connected'), 'badge--ok'] : [t('conexoes.estado.off'), ''],
       corpo: () => <TeamsConversa onClose={fechar} /> },
-    ...(['telegram', 'discord'] as const).map((c): Bloco => ({ kind: `equipe-${c}`, logo: c, name: c === 'telegram' ? 'Telegram' : 'Discord', selo: seloCanal(canais.data?.[c]), soon: !!canais.data && !canais.data[c].disponivel,
+    ...(['telegram', 'discord'] as const).map((c): Bloco => ({ kind: `equipe-${c}`, logo: c, name: c === 'telegram' ? 'Telegram' : 'Discord', selo: oficiais[c].data?.accounts.some((a) => a.status !== 'revoked') ? [t('conexoes.estado.connected'), 'badge--ok'] : oficiais[c].data?.available && !canais.data?.[c].ligado ? [t('conexoes.estado.off'), ''] : seloCanal(canais.data?.[c]), soon: !!canais.data && !canais.data[c].disponivel && !oficiais[c].data?.available,
       corpo: () => (canais.data ? <ConversaPorCanal canal={c} estado={canais.data[c]} reload={canais.reload} onClose={fechar} /> : null) })),
   ];
   return (
@@ -1097,6 +1100,9 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
     <article id={`conn-equipe-${canal}`} className={`card conn conn-detail ${e.ligado ? 'feature--on' : ''}`}>
       <header className="row"><BrandLogo kind={canal} name={nome} size={32} /><strong>{titulo}</strong>
         {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}</header>
+      <BotOficial canal={canal} />
+      {/* o bot próprio (privacidade máxima): para quem prefere, atrás do "Avançado" */}
+      <details className="conn-secao conn-secao--avancado" open={!!e.ligado || undefined}><summary>{t('conexoes.bot.avancado')}</summary>
       <p className="muted">{t('conexoes.canal.intro')}</p>
       {!e.disponivel ? <p className="hint">{e.motivo === 'versao' ? t('conexoes.canal.indisponivel.versao') : t('conexoes.canal.indisponivel.motor')}</p> : <>
         {e.ligado ? <>
@@ -1129,6 +1135,7 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
             : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(true)}>{t('conexoes.canal.desligar')}</button>}
         </div>}
       </>}
+      </details>
       {/* as letras miúdas: onde o código fica, o que acontece com o Ergon fechado, e a diferença para as conexões de conta */}
       <details className="conn-secao conn-secao--detalhes"><summary>{t('conexoes.detalhes')}</summary>
         <ul className="small conn-detalhes">
@@ -1138,6 +1145,57 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
         </ul>
       </details>
     </article>
+  );
+}
+
+/** GET /api/canais-oficiais/:canal: o bot oficial do Ergon no Telegram ou no Discord (pelo relé, sem criar bot). */
+/**
+ * O bot oficial: um clique ("Abrir no Telegram" / "Adicionar ao Discord") abre a plataforma com um link de uso único
+ * (10 min) e a conta fica ligada a quem está aqui, sem código. Várias contas por pessoa; cada uma com Desligar. Antes de o
+ * serviço ter a plataforma ligada, "ainda não disponível".
+ */
+export function BotOficial({ canal }: { canal: NomeCanal }) {
+  const t = useT();
+  const st = useResource<EstadoBotOficial>(`/api/canais-oficiais/${canal}`, ['teams.changed']);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [aberto, setAberto] = useState(false);
+  const e = st.data;
+  if (!e) return null;
+  const ligadas = contasLigadas(e);
+  const abrir = async () => {
+    setErr(null); setBusy(true);
+    // a aba abre já no clique (bloqueador de pop-up), e o endereço chega depois
+    const w = window.open('about:blank', '_blank');
+    try {
+      const r = await api.post<{ url: string }>(`/api/canais-oficiais/${canal}/start`, {});
+      if (w) { w.opener = null; w.location.href = r.url; } else window.location.assign(r.url);
+      setAberto(true);
+    } catch (x) { w?.close(); setErr(errMsg(x)); } finally { setBusy(false); }
+  };
+  const desligar = async (id: string) => {
+    setErr(null); setBusy(true);
+    try { await api.del(`/api/canais-oficiais/${canal}/accounts/${id}`); st.reload(); } catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
+  };
+  return (
+    <section className="conn-secao conn-bot-oficial" data-estado={telaDoBot(e)}>
+      <p className="muted">{canal === 'telegram' ? t('conexoes.bot.intro.telegram') : t('conexoes.bot.intro.discord')}</p>
+      {!mostraBotao(e)
+        ? <p className="hint" role="status">{t('conexoes.bot.indisponivel')}</p>
+        : <div className="row row--wrap">
+            <button className="btn btn--primary" disabled={busy} onClick={() => void abrir()}>{canal === 'telegram' ? t('conexoes.bot.abrirTelegram') : t('conexoes.bot.adicionarDiscord')}</button>
+            {aberto && !ligadas.length && <span className="small muted" role="status">{canal === 'telegram' ? t('conexoes.bot.esperando.telegram') : t('conexoes.bot.esperando.discord')}</span>}
+          </div>}
+      {ligadas.length > 0 && <ul className="conn-contas">
+        {ligadas.map((a) => <li key={a.id} className="row row--wrap">
+          <span className={`badge ${a.status === 'active' ? 'badge--ok' : ''}`}>{a.status === 'active' ? t('conexoes.bot.ligada') : t('conexoes.bot.pausada')}</span>
+          <strong>{a.name || t('conexoes.canal.contaSemNome')}</strong>
+          <span className="small muted">{t('conexoes.bot.desde', { quando: fmtDataHora(a.linkedAt) })}</span>
+          <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void desligar(a.id)}>{t('conexoes.canal.desligar')}</button>
+        </li>)}
+      </ul>}
+      {err && <p className="err" role="alert">{err}</p>}
+    </section>
   );
 }
 

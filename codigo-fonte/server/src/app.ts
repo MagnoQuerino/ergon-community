@@ -532,7 +532,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // o número da equipe no WhatsApp: um número pareado por QR vira canal, pelo mesmo caminho (entregue pela sessão do app)
   const whatsappEquipe = new WhatsAppEquipe({ db, bus, canais, whatsapp });
   // pedido por canal externo (canais/externo.ts): escrita numa conta sempre confirma; papel de leitura não escreve
-  conexoes.canalExterno = (conv, risco) => { const x = canais.externos.daConversa(conv); return x ? canais.externos.decisaoDaAcao(x.papel, risco) : null; };
+  // o Teams e os bots oficiais (Telegram, Discord) pelo relé usam a mesma camada: cada conta ligada age como o membro dela
+  teamsApp.usarCamadaComum(canais.externos);
+  conexoes.canalExterno = (conv, risco) => { const x = canais.externos.daConversa(conv) ?? teamsApp.daConversa(conv); return x ? canais.externos.decisaoDaAcao(x.papel, risco) : null; };
   chatHooks.channelNote = (conv, msg) => {
     try { return teamsApp.notaDoCanal(conv, msg) ?? canais.notaDoCanal(conv, msg); } catch { return null; }
   };
@@ -1114,7 +1116,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
   const secApi = registerSecurityRoutes(app, sec);
-  registerTeamsAppRoutes(app, { teamsApp, owner, admin, verify: secApi.verify });
+  registerTeamsAppRoutes(app, { teamsApp, owner, admin, member: auth, verify: secApi.verify });
   registerPeopleRoutes(app, { ...sec, upkeep: personOpened, routines, removeMotor: async (u) => { await teamsApp.pessoaRemovida(u).catch(() => undefined); canais.pessoaRemovida(u); await motors.remove(u); } });
 
   app.post('/api/session/workspace', {

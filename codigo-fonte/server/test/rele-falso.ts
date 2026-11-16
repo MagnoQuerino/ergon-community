@@ -12,13 +12,13 @@ const GUID_WS = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const ALFABETO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const rid = (p: string) => `${p}_${crypto.randomBytes(9).toString('base64url')}`;
 
-interface Entrega { id: string; seq: number; type: 'activity' | 'card.action' | 'link.revoked'; bindingId: string; personRef: string; quadro: Record<string, unknown>; state: 'pending' | 'held' | 'inflight'; r4: boolean }
-export interface Vinculo { bindingId: string; installationId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName: string; label: string; linkedAt: string; claimId?: string }
+interface Entrega { id: string; seq: number; type: 'activity' | 'card.action' | 'link.revoked' | 'link.added'; bindingId: string; personRef: string; quadro: Record<string, unknown>; state: 'pending' | 'held' | 'inflight'; r4: boolean }
+export interface Vinculo { platform?: 'telegram' | 'discord'; bindingId: string; installationId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName: string; label: string; linkedAt: string; claimId?: string }
 /** A conta do Teams que pediu o código (contrato 12.1): o relé conhece o locatário e o objeto da conta. */
 export interface ContaTeams { tenantId: string; aadObjectId: string }
 /** O mesmo cálculo do relé, feito aqui à parte do código do Ergon. */
 export const hashComoRele = (c: ContaTeams) => crypto.createHash('sha256').update(`ergon-teams/account/v1|${c.tenantId.toLowerCase()}|${c.aadObjectId.toLowerCase()}`).digest('base64url');
-export interface Enviado { id: string; bindingId: string; purpose: string; text?: string; card?: any; summary?: string; activityId: string }
+export interface Enviado { id: string; bindingId: string; purpose: string; text?: string; card?: any; buttons?: any[]; summary?: string; activityId: string }
 
 /** Sela como o relé (contrato, 2.6), com código independente do Ergon. */
 export function selarComoRele(boxPublicKey: string, valor: unknown, aad: string): Record<string, unknown> {
@@ -74,6 +74,10 @@ export class ReleFalso {
   tentativasDeRegistro = 0;
   /** /healthz responde ok (false: 503, como o relé fora do ar) e quantas vezes foi consultada */
   saudavel = true;
+  /** as plataformas de bot que este serviço diz ter ligadas (saúde e /v1/info) */
+  plataformas: { telegram: boolean; discord: boolean } = { telegram: false, discord: false };
+  /** links de uso único pedidos (link.start) */
+  links = new Map<string, { personRef: string; installationId: string; platform: 'telegram' | 'discord'; label: string }>();
   consultasDeSaude = 0;
   fila: Entrega[] = [];
   seq = 0;
@@ -106,8 +110,8 @@ export class ReleFalso {
     const chunks: Buffer[] = []; for await (const c of req) chunks.push(c as Buffer);
     const json = (st: number, v: unknown) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
     // saúde (o serviço oficial só é oferecido depois que ela responde)
-    if (req.method === 'GET' && req.url === '/healthz') { this.consultasDeSaude++; return this.saudavel ? json(200, { ok: true }) : json(503, { ok: false }); }
-    if (req.method === 'GET' && req.url === '/v1/info') return json(200, { protocol: [1], teamsAppId: '11111111-2222-3333-4444-555555555555' });
+    if (req.method === 'GET' && req.url === '/healthz') { this.consultasDeSaude++; return this.saudavel ? json(200, { ok: true, platforms: { teams: true, ...this.plataformas } }) : json(503, { ok: false }); }
+    if (req.method === 'GET' && req.url === '/v1/info') return json(200, { protocol: [1], teamsAppId: '11111111-2222-3333-4444-555555555555', platforms: { teams: true, ...this.plataformas } });
     if (req.method === 'POST' && req.url === '/v1/installations') {
       const b = JSON.parse(Buffer.concat(chunks).toString() || '{}');
       const msg = `ergon-teams-relay|register|v1|${b.signPublicKey}|${b.boxPublicKey}|${b.ts}`;
@@ -175,7 +179,7 @@ export class ReleFalso {
       c.installationId = f.installationId; this.conexao = c;
       for (const p of f.persons ?? []) this.abertas.set(p.personRef, !!p.open);
       const meus = [...this.vinculos.values()].filter((v) => v.installationId === c.installationId);
-      c.enviar({ type: 'ready', sessionId: rid('ses'), queued: this.fila.length, bindings: meus.map((v) => ({ bindingId: v.bindingId, personRef: v.personRef, status: v.status, notices: v.notices, teamsName: v.teamsName, linkedAt: v.linkedAt, ...(v.claimId ? { claimId: v.claimId } : {}) })) });
+      c.enviar({ type: 'ready', sessionId: rid('ses'), queued: this.fila.length, bindings: meus.map((v) => ({ bindingId: v.bindingId, ...(v.platform ? { platform: v.platform } : {}), personRef: v.personRef, status: v.status, notices: v.notices, teamsName: v.teamsName, linkedAt: v.linkedAt, ...(v.claimId ? { claimId: v.claimId } : {}) })) });
       this.entregar(true);
       return;
     }
@@ -219,6 +223,13 @@ export class ReleFalso {
         return ack({ bindingId: v.bindingId, teamsName: v.teamsName, linkedAt: v.linkedAt });
       }
       case 'link.cancel': this.claims.delete(f.claimId); return ack({});
+      case 'link.start': {
+        if (!this.plataformas[f.platform as 'telegram' | 'discord']) return erro('unavailable');
+        const code = crypto.randomBytes(18).toString('base64url');
+        this.links.set(code, { personRef: f.personRef, installationId: c.installationId!, platform: f.platform, label: f.label });
+        const url = f.platform === 'telegram' ? `https://t.me/ErgonTesteBot?start=${code}` : `https://discord.com/oauth2/authorize?client_id=1&state=${code}&integration_type=1`;
+        return ack({ code, url, expiresAt: new Date(Date.now() + 600_000).toISOString() });
+      }
       case 'link.revoke': {
         if (!this.vinculos.delete(f.bindingId)) return erro('not_found');
         this.fila = this.fila.filter((x) => x.bindingId !== f.bindingId);
@@ -239,11 +250,11 @@ export class ReleFalso {
         if (!v) return erro('not_linked');
         if (v.status === 'paused') return erro('paused');
         if (this.proximoErroDeEnvio) { const e = this.proximoErroDeEnvio; this.proximoErroDeEnvio = null; return c.enviar({ type: 'ack', id: f.id, ok: false, error: { code: e }, retryAfterMs: 30 }); }
-        const e: Enviado = { id: f.id, bindingId: f.bindingId, purpose: f.purpose, text: f.text, card: f.card, summary: f.summary, activityId: `act-${this.enviados.length + 1}` };
+        const e: Enviado = { id: f.id, bindingId: f.bindingId, purpose: f.purpose, text: f.text, card: f.card, buttons: f.buttons, summary: f.summary, activityId: `act-${this.enviados.length + 1}` };
         this.enviados.push(e);
         return ack({ activityId: e.activityId });
       }
-      case 'card.update': this.atualizados.push({ id: f.id, bindingId: f.bindingId, activityId: f.activityId, card: f.card }); return ack({ activityId: f.activityId });
+      case 'card.update': this.atualizados.push({ id: f.id, bindingId: f.bindingId, activityId: f.activityId, card: f.card ?? { text: f.text, buttons: f.buttons } }); return ack({ activityId: f.activityId });
       case 'typing': this.digitando.push({ bindingId: f.bindingId, on: !!f.on }); return;
       case 'person.state': this.abertas.set(f.personRef, !!f.open); if (f.open) { for (const e of this.fila) if (e.personRef === f.personRef && e.state === 'held') e.state = 'pending'; this.entregar(false); } return;
       default: c.enviar({ type: 'error', code: 'unknown_type', ref: f.id ?? null });
@@ -308,6 +319,17 @@ export class ReleFalso {
   estranho(installationId: string, text: string): string {
     const v: Vinculo = { bindingId: 'bnd_desconhecido01', installationId, personRef: 'ref-de-ninguem-000000', status: 'active', notices: true, teamsName: 'Fulano', label: 'x', linkedAt: new Date().toISOString() };
     return this.novaEntrega('activity', v, { text, teamsMessageId: rid('msg'), timestamp: new Date().toISOString(), locale: 'pt-BR', fromName: 'Fulano' }).id;
+  }
+  /** A pessoa abre o link (t.me/…?start= ou o OAuth2 do Discord): a conta fica ligada e o Ergon recebe link.added. */
+  abreLink(url: string, nome = 'Maria Souza'): string {
+    const code = /(?:start|state)=([A-Za-z0-9_-]+)/.exec(url)?.[1] ?? '';
+    const l = this.links.get(code);
+    if (!l) throw new Error('link desconhecido ou já usado');
+    this.links.delete(code);
+    const v: Vinculo = { platform: l.platform, bindingId: rid('bnd'), installationId: l.installationId, personRef: l.personRef, status: 'active', notices: true, teamsName: nome, label: l.label, linkedAt: new Date().toISOString() };
+    this.vinculos.set(v.bindingId, v);
+    this.novaEntrega('link.added', v, null, { platform: l.platform, teamsName: nome, status: 'active', notices: true, linkedAt: v.linkedAt });
+    return v.bindingId;
   }
   derrubar(code = 1001): void { this.conexao?.fechar(code); }
   conectado(): boolean { return !!this.conexao?.installationId && !this.conexao.fechada; }

@@ -649,6 +649,18 @@ const conexoes = {
   'outro.tipo.envio': 'Envia em seu nome',
   'outro.tipo.sugestao': 'sugestão: {tipo}',
   'outro.tipo.rotulo': 'O que {nome} faz',
+  // o bot oficial do Ergon no Telegram e no Discord (pelo relé, sem criar bot)
+  'bot.intro.telegram': 'Converse com a sua equipe pelo bot oficial do Ergon no Telegram: toque no botão, o Telegram abre e a sua conta fica ligada. Sem criar bot e sem código.',
+  'bot.intro.discord': 'Converse com a sua equipe pelo app oficial do Ergon no Discord: toque no botão, autorize no Discord e a sua conta fica ligada. As conversas são na mensagem direta com o Ergon.',
+  'bot.abrirTelegram': 'Abrir no Telegram',
+  'bot.adicionarDiscord': 'Adicionar ao Discord',
+  'bot.indisponivel': 'Bot oficial ainda não disponível. Enquanto isso, dá para usar o seu próprio bot, em "Avançado".',
+  'bot.esperando.telegram': 'No Telegram, toque em Iniciar. A conta aparece aqui assim que ligar.',
+  'bot.esperando.discord': 'No Discord, toque em Autorizar. A conta aparece aqui assim que ligar.',
+  'bot.ligada': 'Ligada',
+  'bot.pausada': 'Pausada',
+  'bot.desde': 'desde {quando}',
+  'bot.avancado': 'Avançado: usar o seu próprio bot',
 } as const satisfies Area;
 
 export default conexoes;

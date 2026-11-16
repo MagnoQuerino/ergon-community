@@ -135,3 +135,35 @@ export function partesDoResumo(summary: string): { titulo: string; texto: string
   const i = s.indexOf('\n');
   return i < 0 ? { titulo: corta(s, 200), texto: '' } : { titulo: corta(s.slice(0, i), 200), texto: s.slice(i + 1).trim() };
 }
+
+/** Um botão dos bots oficiais (Telegram, Discord): o relé guarda o `data` e põe no botão só uma chave curta. */
+export interface BotaoBot { label: string; style: 'positive' | 'destructive'; data: { p: string; d: 'apply' | 'reject'; t: string } }
+
+/**
+ * O mesmo cartão em texto simples, para o Telegram e o Discord: os títulos, o texto e, nas decisões abertas, os botões
+ * Aprovar/Recusar (no máximo 2 decisões com botão por mensagem: as plataformas limitam a fileira; as demais pedem o Ergon).
+ */
+export function montarTexto(d: DesenhoCartao, estados: Map<string, EstadoDecisao>, bindingId: string, chaves: Pick<ChavesInstalacao, 'hmac'>, tz: string, max = 1800): { text: string; buttons: BotaoBot[] } {
+  const linhas: string[] = [corta(d.titulo, 200)];
+  const buttons: BotaoBot[] = [];
+  const decisoesAbertas = d.itens.filter((it) => it.tipo === 'decisao' && (!estados.get(it.p) || (estados.get(it.p)!.status === 'proposed' && !estados.get(it.p)!.jaDecidido))).length;
+  for (const it of d.itens) {
+    linhas.push('', corta(textoParaTeams(it.titulo, 400).replace(/\*\*/g, ''), 200));
+    if (it.texto) linhas.push(corta(textoParaTeams(it.texto, max * 2).replace(/\*\*/g, ''), max));
+    if (it.tipo === 'aviso') {
+      const ea = it.p ? estados.get(it.p) : undefined;
+      linhas.push(ea && ea.status !== 'proposed' ? linhaFinal({ ...ea, status: ea.status === 'applied' ? 'decidido' : ea.status }, tz) : it.abrir);
+      continue;
+    }
+    const e = estados.get(it.p);
+    if (it.inteiro && it.texto && !apareceInteiro(it.texto, max) && (!e || e.status === 'proposed')) { linhas.push(ABRIR_LONGO); continue; }
+    if (!e || (e.status === 'proposed' && !e.jaDecidido)) {
+      // uma decisão por mensagem leva botões; com várias, o Ergon decide (a fileira de botões não diz qual é qual)
+      if (decisoesAbertas === 1) {
+        const t = tokenCartao(chaves, it.p, bindingId);
+        buttons.push({ label: 'Aprovar', style: 'positive', data: { p: it.p, d: 'apply', t } }, { label: 'Recusar', style: 'destructive', data: { p: it.p, d: 'reject', t } });
+      } else linhas.push('Abra o Ergon para decidir.');
+    } else linhas.push(linhaFinal(e, tz));
+  }
+  return { text: corta(linhas.join('\n'), 3800), buttons };
+}

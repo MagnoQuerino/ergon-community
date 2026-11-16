@@ -645,6 +645,18 @@ const conexoes: Traducao<typeof pt> = {
   'outro.tipo.envio': 'Sends on your behalf',
   'outro.tipo.sugestao': 'suggestion: {tipo}',
   'outro.tipo.rotulo': 'What {nome} does',
+  // the official Ergon bot on Telegram and Discord (through the relay, no bot to create)
+  'bot.intro.telegram': 'Talk to your team through the official Ergon bot on Telegram: tap the button, Telegram opens and your account is linked. No bot to create, no code.',
+  'bot.intro.discord': 'Talk to your team through the official Ergon app on Discord: tap the button, authorize on Discord and your account is linked. Conversations happen in the direct message with Ergon.',
+  'bot.abrirTelegram': 'Open in Telegram',
+  'bot.adicionarDiscord': 'Add to Discord',
+  'bot.indisponivel': 'Official bot not available yet. Meanwhile, you can use your own bot under "Advanced".',
+  'bot.esperando.telegram': 'In Telegram, tap Start. The account shows up here as soon as it is linked.',
+  'bot.esperando.discord': 'In Discord, tap Authorize. The account shows up here as soon as it is linked.',
+  'bot.ligada': 'Linked',
+  'bot.pausada': 'Paused',
+  'bot.desde': 'since {quando}',
+  'bot.avancado': 'Advanced: use your own bot',
 };
 
 export default conexoes;
