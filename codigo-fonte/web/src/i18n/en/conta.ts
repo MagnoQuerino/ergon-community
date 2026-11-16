@@ -254,8 +254,15 @@ const conta: Traducao<typeof pt> = {
   'npc.aria': 'Show {nome} in the city',
 
   // ——— o workspace atual ———
+  'ws.todos': 'Your workspaces',
+  'ws.todosTexto': 'Each one with its own team, city and boards. Open, rename or take one of them to Ergon World.',
+  'ws.abrir': 'Open',
+  'ws.nomeDe': 'New name for {nome}',
+  'ws.levarWorld': 'Take to Ergon World',
+  'ws.gerenciarWorld': 'Ergon World',
+  'ws.este': 'This workspace: {nome}',
   'ws.titulo': 'Workspace',
-  'ws.explica': 'Each workspace has its own team, city, boards, conversations and routines. To switch or create another one, use the button with its name in the top bar.',
+  'ws.explica': 'Settings that apply only to this workspace.',
   'ws.nome': 'Workspace name',
   'ws.renomear': 'Rename',
   'ws.soDona': 'Only the workspace owner can change its name.',

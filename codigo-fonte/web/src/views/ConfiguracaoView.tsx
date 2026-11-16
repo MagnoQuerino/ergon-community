@@ -36,7 +36,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
     : location.hash.includes('saude') && admin ? 'saude' : location.hash.includes('pessoas') && admin ? 'pessoas' : 'ia'));
   // o menu da conta abre Configurações › Minha conta (ou Workspace) mesmo com Configurações já aberta
   useEffect(() => {
-    const ver = () => { if (location.hash.includes('?conta')) setTab('conta'); else if (location.hash.includes('?workspace')) setTab('workspace'); else if (location.hash.includes('?atualizacoes')) setTab('atualizacoes'); };
+    const ver = () => { if (location.hash.includes('?conta')) setTab('conta'); else if (location.hash.includes('?workspace')) setTab('workspace'); else if (location.hash.includes('?atualizacoes')) setTab('atualizacoes'); else if (location.hash.includes('?world') && WorldPanel) setTab('world'); };
     window.addEventListener('hashchange', ver);
     return () => window.removeEventListener('hashchange', ver);
   }, []);

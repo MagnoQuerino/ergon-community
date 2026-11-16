@@ -88,6 +88,9 @@ const geral = {
   'ws.nomeNovo': 'Nome do workspace novo (uma empresa, um projeto, a vida pessoal…)',
   'ws.exemplo': 'Ex.: Loja da Ana',
   'ws.criar': 'Criar e entrar',
+  'ws.noWorld': 'No Ergon World',
+  'ws.local': 'Neste computador',
+  'ws.gerenciar': 'Gerenciar',
   'ws.nasce': 'Ele nasce com a equipe e a cidade iniciais e passa pelas boas-vindas, como uma conta nova.',
 
   // ——— o avatar (menu da conta) ———
@@ -120,6 +123,7 @@ const geral = {
   'nav.documentos': 'Documentos',
   'nav.atividade': 'Atividade',
   'nav.conexoes': 'Conexões',
+  'nav.world': 'Ergon World',
   'nav.configuracoes': 'Configurações',
   'nav.ajuda': 'Ajuda',
   'nav.aria': 'Navegação',

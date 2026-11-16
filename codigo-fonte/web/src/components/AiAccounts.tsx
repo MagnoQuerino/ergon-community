@@ -65,7 +65,7 @@ export function AcordandoIa({ desde, erro, onRetry, renovando }: { desde: number
  * assina; a chave própria (BYOK) só fora das boas-vindas. O mesmo componente nas boas-vindas, em Conexões e em
  * Configurações.
  */
-export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch?: boolean }) {
+export function AiAccounts({ onChanged, pitch, destaque = true }: { onChanged?: () => void; pitch?: boolean; destaque?: boolean }) {
   const t = useT();
   const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
   const [login, setLogin] = useState<Login | null>(null);
@@ -133,15 +133,15 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
       {s.executor === 'simulated' && <p className="hint warn">{t('configuracoes.contas.instalacaoSemContas')}</p>}
       {!s.available && <p className="hint">{t('configuracoes.contas.indisponivel')}</p>}
       {nous && (
-        <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''}`} aria-label={t('configuracoes.contas.nousAria')}>
-          <span className="ai-best__ribbon"><Icon name="check" size={12} /> {t('configuracoes.contas.melhorEscolha')}</span>
+        <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''} ${destaque ? '' : 'ai-best--calmo'}`} aria-label={t('configuracoes.contas.nousAria')}>
+          {destaque && <span className="ai-best__ribbon"><Icon name="check" size={12} /> {t('configuracoes.contas.melhorEscolha')}</span>}
           <header className="ai-best__head">
             <BrandLogo kind={nous.id} name={nous.name} size={44} />
             <div>
               <h4>{t('configuracoes.contas.assinatura', { nome: nous.name })}</h4>
               <p>{t('configuracoes.contas.nousExperiencia')}</p>
             </div>
-            <span className={`badge ${nous.connected ? 'badge--ok' : 'badge--rec'}`}>{nous.connected ? t('configuracoes.comum.conectada') : t('configuracoes.contas.recomendada')}</span>
+            {(nous.connected || destaque) && <span className={`badge ${nous.connected ? 'badge--ok' : 'badge--rec'}`}>{nous.connected ? t('configuracoes.comum.conectada') : t('configuracoes.contas.recomendada')}</span>}
           </header>
           <ul className="ai-best__why">{NOUS_WHY.map((w) => <li key={w}><Icon name="check" size={14} /> {t(w)}</li>)}</ul>
           {nous.connected

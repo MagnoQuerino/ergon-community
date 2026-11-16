@@ -6,7 +6,7 @@ import type { NomeDaArea } from './pt/index.ts';
 export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // a barra de cima, o menu, o avatar, a música, o workspace, o tema e as peças comuns
   geral: [
-    'App.tsx', 'components/CommandPalette.tsx', 'components/MusicButton.tsx', 'components/AccountMenu.tsx', 'components/Workspaces.tsx',
+    'App.tsx', 'components/CommandPalette.tsx', 'components/WsCard.tsx', 'components/MusicButton.tsx', 'components/AccountMenu.tsx', 'components/Workspaces.tsx',
     'components/SeletorIdioma.tsx', 'components/ConfirmPopup.tsx', 'components/VirtualGrid.tsx', 'components/TextoLongo.tsx', 'components/Markdown.tsx',
     'components/FileViewer.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
   ],
@@ -34,7 +34,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
     'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
-    'views/world/AlaNuvem.tsx',
+    'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts',
   ],
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [

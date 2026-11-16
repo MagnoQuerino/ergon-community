@@ -81,6 +81,9 @@ const geral: Traducao<typeof pt> = {
   'ws.nomeNovo': 'Name of the new workspace (a company, a project, your personal life…)',
   'ws.exemplo': 'E.g.: Ana’s Shop',
   'ws.criar': 'Create and enter',
+  'ws.noWorld': 'On Ergon World',
+  'ws.local': 'On this computer',
+  'ws.gerenciar': 'Manage',
   'ws.nasce': 'It starts with the initial team and city and goes through the welcome, like a new account.',
 
   'conta.aria': 'Account: {nome}',
@@ -109,6 +112,7 @@ const geral: Traducao<typeof pt> = {
   'nav.documentos': 'Documents',
   'nav.atividade': 'Activity',
   'nav.conexoes': 'Connections',
+  'nav.world': 'Ergon World',
   'nav.configuracoes': 'Settings',
   'nav.ajuda': 'Help',
   'nav.aria': 'Navigation',

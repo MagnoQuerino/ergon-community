@@ -1,6 +1,6 @@
 import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
 import { OutroAplicativo } from '../components/OutroAplicativo.tsx';
-import { Fragment, useEffect, useState, type ChangeEvent } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useState, type ChangeEvent, type ComponentType } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { escolhaConsciente, linhaDoEstado, nomeEscolhido, previaDaConta, problemaDoTeams, soOSeuCodigo, type ContaDoTeams } from '../lib/teams-app.ts';
@@ -9,6 +9,9 @@ import { acoesDaLinha, comConta, comoAdicionar, nomeNaTela, podeAdicionar, temVa
 import { AVISO_APROVAR_SEM_CARTAO, ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, erroDaConexao, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, textoDaVolta } from '../lib/textos-tela.ts';
 import { fmtData, fmtDataHora, fmtLista, t as tr, tn, useT } from '../i18n/index.ts';
 import { AiAccounts } from '../components/AiAccounts.tsx';
+// o Ergon AI em destaque (módulo do Ergon World, se estiver nesta instalação)
+const eaiMod = Object.values(import.meta.glob<{ default: ComponentType<{ onRecomendado?: (sim: boolean) => void }> }>('./world/ErgonAiConexoes.tsx'))[0];
+const ErgonAi = eaiMod ? lazy(eaiMod) : null;
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -67,6 +70,7 @@ export function ConexoesView() {
   const [q, setQ] = useState('');
   const [onlyOn, setOnlyOn] = useState(false);
   const [risks, setRisks] = useState(false);
+  const [eaiRecomendado, setEaiRecomendado] = useState(false);
   useEffect(() => {
     const m = location.hash.match(/(microsoft|google)=([a-z-]+)/);
     if (m) {
@@ -122,7 +126,8 @@ export function ConexoesView() {
         <h3>{t('conexoes.ia.titulo')}</h3>
         <p className="muted small">{t('conexoes.ia.texto')}</p>
         <ModeloPadrao />
-        <AiAccounts />
+        {ErgonAi && <Suspense fallback={null}><ErgonAi onRecomendado={setEaiRecomendado} /></Suspense>}
+        <AiAccounts destaque={!eaiRecomendado} />
       </section>
 
       {wa && (
