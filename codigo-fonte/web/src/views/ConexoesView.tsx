@@ -155,8 +155,9 @@ export function ConexoesView() {
       )}
 
       <section className="conn-group conn-group--feature" id="conn-teams-app">
-        <h3>Teams</h3>
-        <TeamsConversa />
+        <h3>{t('conexoes.equipe.titulo')}</h3>
+        <p className="muted small">{t('conexoes.equipe.texto')}</p>
+        <ConversaComEquipe />
       </section>
 
       <ConversaPorCanais />
@@ -1103,27 +1104,58 @@ function ConversaPorCanais() {
   );
 }
 
-/** GET /api/teams-app: conversar com a equipe pelo Teams (o app público, ligado por código). */
-interface TeamsVinculo { id: string; teamsName: string | null; linkedAt: string; notices: boolean; status: 'active' | 'paused' | 'revoked'; revokedBy?: string }
+/** GET /api/teams-app: conversar com a equipe pelo Teams (o app público) e pelo bot do Ergon no Discord, ligados por código. */
+type CanalServico = 'teams' | 'discord';
+interface TeamsVinculo { id: string; canal?: CanalServico; teamsName: string | null; linkedAt: string; notices: boolean; status: 'active' | 'paused' | 'revoked'; revokedBy?: string }
 interface EstadoTeams {
   available: boolean; reason?: string; connection: 'connected' | 'connecting' | 'offline'; enabled: boolean; bindings: TeamsVinculo[];
   teamsAppUrl?: string; problem?: string; relay?: { fromEnv: boolean; url: string | null };
+  canais?: { teams: { available: boolean; enabled: boolean }; discord: { available: boolean; enabled: boolean; installUrl?: string; botName?: string } };
 }
-interface PreviaTeams { claimId: string; teamsName: string; conta?: ContaDoTeams; organizacao?: string | null }
-/** Por que a conta do Teams caiu: o código que vem do servidor → a chave do texto. */
-const DESLIGADA_POR: Record<string, `conexoes.teams.desligadaPor.${'teams' | 'uninstall' | 'blocked' | 'relay'}`> = {
-  teams: 'conexoes.teams.desligadaPor.teams', uninstall: 'conexoes.teams.desligadaPor.uninstall', blocked: 'conexoes.teams.desligadaPor.blocked', relay: 'conexoes.teams.desligadaPor.relay',
+interface PreviaTeams { claimId: string; teamsName: string; conta?: ContaDoTeams; organizacao?: string | null; canal?: CanalServico }
+/** Por que a conta caiu: o código que vem do servidor → a chave do texto. */
+const DESLIGADA_POR: Record<string, `conexoes.teams.desligadaPor.${'teams' | 'discord' | 'uninstall' | 'blocked' | 'relay'}`> = {
+  teams: 'conexoes.teams.desligadaPor.teams', discord: 'conexoes.teams.desligadaPor.discord', uninstall: 'conexoes.teams.desligadaPor.uninstall', blocked: 'conexoes.teams.desligadaPor.blocked', relay: 'conexoes.teams.desligadaPor.relay',
 };
 const dataCurta = (iso: string) => fmtData(iso, { day: '2-digit', month: '2-digit', year: 'numeric' });
+/** Os textos de cada plataforma (o Teams com as chaves de antes). */
+const TEXTOS = {
+  teams: {
+    titulo: 'conexoes.teams.titulo', intro: 'conexoes.teams.intro', emBreve: 'conexoes.teams.emBreve', conversar: 'conexoes.teams.conversarPeloTeams', conta: 'conexoes.teams.contaDoTeams',
+    avisar: 'conexoes.teams.avisar', desligarPergunta: 'conexoes.teams.desligarPergunta', caida: 'conexoes.teams.caida', pronto: 'conexoes.teams.pronto', preparando: 'conexoes.teams.preparando',
+    soDireta: 'conexoes.teams.soDireta', passo3: 'conexoes.teams.passo3',
+  },
+  discord: {
+    titulo: 'conexoes.discordBot.titulo', intro: 'conexoes.discordBot.intro', emBreve: 'conexoes.discordBot.emBreve', conversar: 'conexoes.discordBot.conversarPeloDiscord', conta: 'conexoes.discordBot.contaDoDiscord',
+    avisar: 'conexoes.discordBot.avisar', desligarPergunta: 'conexoes.discordBot.desligarPergunta', caida: 'conexoes.discordBot.caida', pronto: 'conexoes.discordBot.pronto', preparando: 'conexoes.discordBot.preparando',
+    soDireta: 'conexoes.discordBot.soDireta', passo3: 'conexoes.discordBot.passo3',
+  },
+} as const;
 
 /**
- * Conexões › Teams › "Conversar com a equipe pelo Teams": a pessoa fala com o app no Teams, o app mostra um código, ela
- * digita aqui, vê de quem é a conta e confirma com a senha. Daí em diante, o que ela escreve lá vai para a equipe e a
- * resposta volta lá; o que precisa dela também avisa lá (ligado por padrão).
+ * Conexões › "Conversar com a equipe": o bot do Ergon no Discord (primeiro: ninguém precisa criar bot) e o app do Teams,
+ * pelo mesmo serviço. Uma resposta só (vem na pré-carga) para as duas.
  */
-function TeamsConversa() {
-  const t = useT();
+function ConversaComEquipe() {
   const st = useResource<EstadoTeams>('/api/teams-app', ['teams.changed']);
+  const d = st.data;
+  return (
+    <div className="feature-grid">
+      {d
+        ? (['discord', 'teams'] as const).map((c) => <ConversaPeloServico key={c} canal={c} d={d} reload={st.reload} />)
+        : <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><p className="muted">…</p></article>}
+    </div>
+  );
+}
+
+/**
+ * Uma plataforma: a pessoa fala com o app (Teams) ou com o bot (Discord), recebe um código, digita aqui, vê de quem é a
+ * conta e confirma com a senha. Daí em diante, o que ela escreve lá vai para a equipe e a resposta volta lá; o que
+ * precisa dela também avisa lá (ligado por padrão).
+ */
+function ConversaPeloServico({ canal, d, reload }: { canal: CanalServico; d: EstadoTeams; reload: () => void }) {
+  const t = useT();
+  const X = TEXTOS[canal];
   const [codigo, setCodigo] = useState('');
   const [previa, setPrevia] = useState<PreviaTeams | null>(null);
   const [senha, setSenha] = useState('');
@@ -1134,46 +1166,53 @@ function TeamsConversa() {
   const [desligar, setDesligar] = useState<string | null>(null);
   // o serviço ainda prepara esta instalação (acabou de se registrar): a tela tenta de novo sozinha, sem erro
   const [preparando, setPreparando] = useState<number>(0);
-  const d = st.data;
   const agir = async (fn: () => Promise<unknown>) => {
     setErr(null); setBusy(true);
-    try { await fn(); st.reload(); } catch (x) { setErr(x instanceof ApiError && x.code === 'invalid_login' ? t('conexoes.teams.senhaIncorreta') : errMsg(x)); } finally { setBusy(false); }
+    try { await fn(); reload(); } catch (x) { setErr(x instanceof ApiError && x.code === 'invalid_login' ? t('conexoes.teams.senhaIncorreta') : errMsg(x)); } finally { setBusy(false); }
   };
   const pedirPrevia = async (tentativa = 0): Promise<void> => {
     setErr(null); setBusy(true); setPronto(null);
     try {
-      setPrevia(await api.post<PreviaTeams>('/api/teams-app/claim', { code: codigo })); setCiente(false); setPreparando(0);
+      setPrevia(await api.post<PreviaTeams>('/api/teams-app/claim', { code: codigo, canal })); setCiente(false); setPreparando(0);
     } catch (x) {
       // até uns 3 minutos esperando o serviço ficar pronto; depois, o aviso normal
       if (x instanceof ApiError && x.code === 'not_ready' && tentativa < 18) { setPreparando(tentativa + 1); setTimeout(() => void pedirPrevia(tentativa + 1), 10_000); return; }
       setPreparando(0); setErr(errMsg(x));
     } finally { setBusy(false); }
   };
-  // enquanto a resposta não chega (quase nunca: vem na pré-carga), a seção só guarda o lugar
-  if (!d) return <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><strong>{t('conexoes.teams.titulo')}</strong><p className="muted">…</p></article>;
-  const ligados = d.bindings.filter((b) => b.status !== 'revoked');
-  const caidos = d.bindings.filter((b) => b.status === 'revoked');
+  const plataforma = d.canais?.[canal];
+  const disponivel = plataforma ? plataforma.available : canal === 'teams' && d.available;
+  const ligadoAqui = plataforma ? plataforma.enabled : d.enabled;
+  const doCanal = d.bindings.filter((b) => (b.canal ?? 'teams') === canal);
+  const ligados = doCanal.filter((b) => b.status !== 'revoked');
+  const caidos = doCanal.filter((b) => b.status === 'revoked');
   const problema = problemaDoTeams(d.problem);
   const linha = linhaDoEstado(d.connection, d.problem);
+  const nome = canal === 'discord' ? 'Discord' : 'Teams';
+  const installUrl = canal === 'discord' ? d.canais?.discord.installUrl : undefined;
+  const motivo = (b: TeamsVinculo) => (canal === 'discord' && b.revokedBy === 'blocked' ? t('conexoes.discordBot.desligadaPor.blocked')
+    : DESLIGADA_POR[b.revokedBy ?? ''] ? t(DESLIGADA_POR[b.revokedBy ?? '']) : t('conexoes.teams.desligada'));
+  const nomeEscolhidoAqui = canal === 'discord' ? t('conexoes.discordBot.nomeEscolhido') : nomeEscolhido();
+  const soOSeuCodigoAqui = canal === 'discord' ? t('conexoes.discordBot.soOSeuCodigo') : soOSeuCodigo();
   return (
     <article className={`card conn feature ${ligados.length ? 'feature--on' : ''}`}>
-      <header className="row"><BrandLogo kind="teams" name="Teams" size={36} /><strong>{t('conexoes.teams.titulo')}</strong>
-        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? t('conexoes.estado.connected') : t('conexoes.estado.semConexao')}</span> : <span className="badge badge--soon">{t('conexoes.estado.soon')}</span>}</header>
-      <p className="muted">{t('conexoes.teams.intro')}</p>
-      {!d.available ? <p className="hint">{t('conexoes.teams.emBreve')}</p> : <>
+      <header className="row"><BrandLogo kind={canal} name={nome} size={36} /><strong>{t(X.titulo)}</strong>
+        {disponivel ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? t('conexoes.estado.connected') : t('conexoes.estado.semConexao')}</span> : <span className="badge badge--soon">{t('conexoes.estado.soon')}</span>}</header>
+      <p className="muted">{t(X.intro)}</p>
+      {!disponivel ? <p className="hint">{t(X.emBreve)}</p> : <>
         {problema && <p className="warn">{problema}</p>}
         {linha && <p className="small">{linha}</p>}
         {(ligados.length > 0 || caidos.length > 0) && (
-          <label className="check"><input type="checkbox" checked={d.enabled} disabled={busy} onChange={(e) => void agir(() => api.post('/api/teams-app/enabled', { enabled: e.target.checked }))} /> {t('conexoes.teams.conversarPeloTeams')}</label>
+          <label className="check"><input type="checkbox" checked={ligadoAqui} disabled={busy} onChange={(e) => void agir(() => api.post('/api/teams-app/enabled', { enabled: e.target.checked, canal }))} /> {t(X.conversar)}</label>
         )}
         {ligados.length > 0 && (
           <ul className="conn-teams-lista">
             {ligados.map((b) => (
               <li key={b.id}>
-                <div>{tn('conexoes.teams.ligadoEm', { nome: <b>{b.teamsName ?? t('conexoes.teams.contaDoTeams')}</b>, data: dataCurta(b.linkedAt) })}{b.status === 'paused' ? <span className="muted small"> {t('conexoes.teams.conversaDesligada')}</span> : null}</div>
-                <label className="check"><input type="checkbox" checked={b.notices} disabled={busy} onChange={(e) => void agir(() => api.patch(`/api/teams-app/bindings/${b.id}`, { notices: e.target.checked }))} /> {t('conexoes.teams.avisar')}</label>
+                <div>{tn('conexoes.teams.ligadoEm', { nome: <b>{b.teamsName ?? t(X.conta)}</b>, data: dataCurta(b.linkedAt) })}{b.status === 'paused' ? <span className="muted small"> {t('conexoes.teams.conversaDesligada')}</span> : null}</div>
+                <label className="check"><input type="checkbox" checked={b.notices} disabled={busy} onChange={(e) => void agir(() => api.patch(`/api/teams-app/bindings/${b.id}`, { notices: e.target.checked }))} /> {t(X.avisar)}</label>
                 {desligar === b.id
-                  ? <div className="confirm">{t('conexoes.teams.desligarPergunta')}
+                  ? <div className="confirm">{t(X.desligarPergunta)}
                       <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void agir(async () => { await api.del(`/api/teams-app/bindings/${b.id}`); setDesligar(null); })}>{t('conexoes.teams.desligar')}</button>
                       <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(null)}>{t('conexoes.acao.cancelar')}</button></div>
                   : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(b.id)}>{t('conexoes.teams.desligar')}</button>}
@@ -1182,27 +1221,30 @@ function TeamsConversa() {
           </ul>
         )}
         {caidos.map((b) => (
-          <p key={b.id} className="warn">{t('conexoes.teams.caida', { nome: b.teamsName ?? t('conexoes.teams.contaDoTeams'), motivo: DESLIGADA_POR[b.revokedBy ?? ''] ? t(DESLIGADA_POR[b.revokedBy ?? '']) : t('conexoes.teams.desligada') })}{' '}
+          <p key={b.id} className="warn">{t(X.caida, { nome: b.teamsName ?? t(X.conta), motivo: motivo(b) })}{' '}
             <button className="link link--inline" disabled={busy} onClick={() => void agir(() => api.del(`/api/teams-app/bindings/${b.id}`))}>{t('conexoes.teams.tirarDaLista')}</button></p>
         ))}
         {pronto && <p className="ok" role="status">{pronto}</p>}
         {previa ? (() => {
-          // o nome não prova nada (é a própria conta do Teams que escolhe): a prévia diz de quem a conta é, conferida com a
-          // conta Microsoft ligada a este Ergon, e o que não é a dela pede a escolha consciente antes do Ligar
-          const pv = previaDaConta(previa.conta, previa.teamsName, previa.organizacao);
+          // o nome não prova nada (é a própria conta que escolhe): a prévia diz de quem a conta é (no Teams, conferida com a
+          // conta Microsoft ligada a este Ergon; no Discord não há como conferir), e o que não é a dela pede a escolha
+          // consciente antes do Ligar
+          const pv = canal === 'discord'
+            ? { pergunta: t('conexoes.discordBot.previa', { nome: previa.teamsName }), aviso: t('conexoes.discordBot.previaAviso'), forte: true, exigeEscolha: true }
+            : previaDaConta(previa.conta, previa.teamsName, previa.organizacao);
           return (
             <form className="confirm" onSubmit={(e) => {
               e.preventDefault();
               void agir(async () => {
                 await api.post('/api/teams-app/confirm', { claimId: previa.claimId, password: senha, ...(pv.exigeEscolha ? { ciente } : {}) });
-                setPronto(t('conexoes.teams.pronto', { nome: previa.teamsName }));
+                setPronto(t(X.pronto, { nome: previa.teamsName }));
                 setPrevia(null); setSenha(''); setCodigo(''); setCiente(false);
               });
             }}>
               <p><b>{pv.pergunta}</b></p>
-              <p className="hint">{nomeEscolhido()} {soOSeuCodigo()}</p>
+              <p className="hint">{nomeEscolhidoAqui} {soOSeuCodigoAqui}</p>
               {pv.aviso && <p className={pv.forte ? 'error' : 'warn'} role="alert">{pv.aviso}</p>}
-              {pv.exigeEscolha && <label className="check"><input type="checkbox" checked={ciente} disabled={busy} onChange={(e) => setCiente(e.target.checked)} /> {escolhaConsciente()}</label>}
+              {pv.exigeEscolha && <label className="check"><input type="checkbox" checked={ciente} disabled={busy} onChange={(e) => setCiente(e.target.checked)} /> {canal === 'discord' ? t('conexoes.discordBot.escolhaConsciente') : escolhaConsciente()}</label>}
               <p className="hint">{t('conexoes.teams.quemEscreve')}</p>
               <div className="row row--wrap">
                 <input type="password" autoComplete="current-password" required placeholder={t('conexoes.teams.suaSenha')} aria-label={t('conexoes.teams.suaSenha')} value={senha} onChange={(e) => setSenha(e.target.value)} />
@@ -1213,23 +1255,31 @@ function TeamsConversa() {
           );
         })() : (
           <form onSubmit={(e) => { e.preventDefault(); if (!preparando) void pedirPrevia(); }}>
+            {canal === 'discord' && installUrl && ligados.length === 0 && (
+              <p><a className="btn btn--primary" href={installUrl} target="_blank" rel="noreferrer noopener">{t('conexoes.discordBot.adicionar')}</a></p>
+            )}
             <ol className="small conn-passos">
-              <li>{tn('conexoes.teams.passo1', { ergon: <b>Ergon</b> })}{d.teamsAppUrl && <> <a href={d.teamsAppUrl} target="_blank" rel="noreferrer noopener">{t('conexoes.teams.abrirNoTeams')}</a></>}</li>
-              <li>{t('conexoes.teams.passo2')}</li>
-              <li>{t('conexoes.teams.passo3')}</li>
+              {canal === 'discord' ? <>
+                <li>{t('conexoes.discordBot.passo1')}{installUrl && ligados.length > 0 && <> <a href={installUrl} target="_blank" rel="noreferrer noopener">{t('conexoes.discordBot.adicionar')}</a></>}</li>
+                <li>{tn('conexoes.discordBot.passo2', { bot: <b>{d.canais?.discord.botName || 'Ergon'}</b> })}</li>
+              </> : <>
+                <li>{tn('conexoes.teams.passo1', { ergon: <b>Ergon</b> })}{d.teamsAppUrl && <> <a href={d.teamsAppUrl} target="_blank" rel="noreferrer noopener">{t('conexoes.teams.abrirNoTeams')}</a></>}</li>
+                <li>{t('conexoes.teams.passo2')}</li>
+              </>}
+              <li>{t(X.passo3)}</li>
             </ol>
-            <p className="hint">{soOSeuCodigo()}</p>
+            <p className="hint">{soOSeuCodigoAqui}</p>
             <div className="row row--wrap">
               <label className="field">{t('conexoes.teams.codigo')}<input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder={t('conexoes.teams.codigoExemplo')} autoComplete="off" spellCheck={false} maxLength={20} /></label>
               <button className="btn btn--sm btn--primary" disabled={busy || preparando > 0 || codigo.replace(/[\s-]/g, '').length < 8}>{busy || preparando ? t('conexoes.acao.conferindo') : t('conexoes.teams.confirmar')}</button>
             </div>
-            {preparando > 0 && <p className="small" role="status">{t('conexoes.teams.preparando')}</p>}
+            {preparando > 0 && <p className="small" role="status">{t(X.preparando)}</p>}
           </form>
         )}
-        <p className="hint">{t('conexoes.teams.soDireta')}</p>
+        <p className="hint">{t(X.soDireta)}</p>
       </>}
       {err && <p className="error" role="alert">{err}</p>}
-      {d.relay && !d.relay.fromEnv && <EnderecoTeams atual={d.relay.url} reload={st.reload} />}
+      {canal === 'teams' && d.relay && !d.relay.fromEnv && <EnderecoTeams atual={d.relay.url} reload={reload} />}
     </article>
   );
 }

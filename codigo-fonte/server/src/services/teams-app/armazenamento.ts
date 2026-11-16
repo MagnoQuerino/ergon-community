@@ -40,7 +40,22 @@ const MIGRACOES: Array<[string, string]> = [
     ALTER TABLE teams_bindings ADD COLUMN first_message_at TEXT;
     ALTER TABLE teams_people ADD COLUMN notice_window TEXT;
   `],
+  // o bot do Ergon no Discord pelo mesmo serviço: cada vínculo sabe a plataforma (o que já existia é do Teams), e cada
+  // pessoa tem UMA conversa com o coordenador por plataforma. A do Teams continua em teams_people (sem mudar nada do que
+  // já está gravado); as das outras plataformas ficam em teams_conversas, com as mesmas colunas
+  ['t0003_canais', `
+    ALTER TABLE teams_bindings ADD COLUMN canal TEXT NOT NULL DEFAULT 'teams';
+    CREATE TABLE IF NOT EXISTS teams_conversas (
+      user_id TEXT NOT NULL, canal TEXT NOT NULL, workspace_id TEXT NOT NULL, conversation_id TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+      reply_binding TEXT, cursor_rowid INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (user_id, canal));
+    CREATE INDEX IF NOT EXISTS teams_conversas_conv ON teams_conversas(conversation_id);
+  `],
 ];
+
+/** As plataformas do serviço de conversa (o relé): o Teams (o de antes) e o bot do Ergon no Discord. */
+export type Canal = 'teams' | 'discord';
+export const CANAIS: readonly Canal[] = ['teams', 'discord'];
+export const canalDe = (v: unknown): Canal => (v === 'discord' ? 'discord' : 'teams');
 
 export function migrarTeamsApp(db: Db): string[] {
   db.raw.exec('CREATE TABLE IF NOT EXISTS teams_app_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
@@ -57,7 +72,9 @@ export function migrarTeamsApp(db: Db): string[] {
 export interface VinculoRow {
   binding_id: string; user_id: string; workspace_id: string; person_ref: string; teams_name: string | null;
   status: 'active' | 'paused' | 'revoking' | 'revoked'; notices: number; revoked_by: string | null; created_at: string; updated_at: string;
-  first_message_at: string | null;
+  first_message_at: string | null; canal: string;
 }
+/** A conversa da pessoa numa plataforma (Teams: teams_people; as outras: teams_conversas). */
+export interface ConversaRow { user_id: string; workspace_id: string; conversation_id: string | null; enabled: number; reply_binding: string | null; cursor_rowid: number; updated_at: string }
 export interface PessoaRow { user_id: string; workspace_id: string; conversation_id: string | null; enabled: number; reply_binding: string | null; cursor_rowid: number; updated_at: string; notice_window: string | null }
 export interface SaidaRow { id: string; binding_id: string; workspace_id: string; kind: 'send' | 'card.update'; payload: string; purpose: string | null; attempts: number; next_at: string; status: string; activity_id: string | null; created_at: string }

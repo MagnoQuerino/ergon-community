@@ -102,8 +102,9 @@ export interface Config {
   /** total de arquivos por workspace: só na nuvem, conforme o plano (0 = sem limite) */
   maxStorageBytes: number;
   /**
-   * Conversar com a equipe pelo Teams (app público): endereço https do serviço do Teams (ERGON_TEAMS_RELAY_URL). Tem
-   * prioridade sobre o ajuste da instalação; sem nenhum dos dois, o recurso fica indisponível (services/teams-app).
+   * Conversar com a equipe pelo Teams e pelo bot do Ergon no Discord: endereço https do serviço (ERGON_TEAMS_RELAY_URL). Tem
+   * prioridade sobre o ajuste da instalação; sem nenhum dos dois, vale o da nuvem do Ergon (services/teams-app,
+   * RELE_PADRAO). "off" desliga o recurso.
    */
   teamsRelayUrl: string | null;
   simulatedDelayMs: number;

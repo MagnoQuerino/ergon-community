@@ -1,11 +1,12 @@
 /**
- * Rotas de Conexões › Teams › "Conversar com a equipe pelo Teams" (contrato, 7.2). Todas da própria pessoa (dona do
+ * Rotas de Conexões › "Conversar com a equipe" pelo Teams e pelo bot do Ergon no Discord (contrato, 7.2). Todas da própria pessoa (dona do
  * workspace). Ligar uma conta do Teams equivale a cadastrar um aparelho novo que manda na equipe: confirmar pede a
  * mesma verificação de identidade das autorizações (senha; passkey também serve).
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { S } from '../../lib/schemas.ts';
 import type { AuthContext } from '../auth.ts';
+import type { Canal } from './armazenamento.ts';
 import type { TeamsApp } from './servico.ts';
 
 interface TeamsAppRoutesDeps {
@@ -18,6 +19,8 @@ interface TeamsAppRoutesDeps {
 
 const vinculoParams = { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^bnd_[A-Za-z0-9_-]{8,40}$' } } };
 const claimId = { type: 'string', pattern: '^clm_[A-Za-z0-9_-]{8,40}$' };
+/** A plataforma de onde a pessoa liga (só muda os textos de erro: quem decide é a conta que pediu o código). */
+const canal = { type: 'string', enum: ['teams', 'discord'] };
 
 export function registerTeamsAppRoutes(app: FastifyInstance, d: TeamsAppRoutesDeps): void {
   const { teamsApp: t, owner, admin, verify } = d;
@@ -26,11 +29,11 @@ export function registerTeamsAppRoutes(app: FastifyInstance, d: TeamsAppRoutesDe
     return { ...t.estado(a.userId), ...(isAdminSafe(admin, req) ? { relay: { fromEnv: t.enderecoDoAmbiente(), url: t.base() } } : {}) };
   });
   app.post('/api/teams-app/enabled', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } } },
-  }, async (req) => { const a = owner(req); return t.setEnabled(a.userId, a.workspaceId, (req.body as { enabled: boolean }).enabled); });
+    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' }, canal } } },
+  }, async (req) => { const a = owner(req); const b = req.body as { enabled: boolean; canal?: Canal }; return t.setEnabled(a.userId, a.workspaceId, b.enabled, b.canal ?? 'teams'); });
   app.post('/api/teams-app/claim', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['code'], properties: { code: S.str(20, 1) } } },
-  }, async (req) => { const a = owner(req); return t.claim(a.userId, a.workspaceId, (req.body as { code: string }).code); });
+    schema: { body: { type: 'object', additionalProperties: false, required: ['code'], properties: { code: S.str(20, 1), canal } } },
+  }, async (req) => { const a = owner(req); const b = req.body as { code: string; canal?: Canal }; return t.claim(a.userId, a.workspaceId, b.code, b.canal ?? 'teams'); });
   app.post('/api/teams-app/confirm', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['claimId'], properties: {
       claimId, password: S.str(200, 1), code: S.str(10, 6), key: S.str(80, 6), response: { type: 'object' }, ciente: { type: 'boolean' } } } },
