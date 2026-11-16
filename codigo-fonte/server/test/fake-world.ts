@@ -9,13 +9,39 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { wrapForDevice } from '../src/world/sync-crypto.ts';
 
+/** a mesma conferência de world/src/hermes-task.ts (pacote do adaptador hermes_task), escrita à parte */
+function checkHermesTask(s: Record<string, unknown>): string | null {
+  if (typeof s.instructions !== 'string' || !s.instructions.trim()) return 'hermes_task: faltam as instruções';
+  if (s.instructions.length > 20_000) return 'hermes_task: instruções longas demais';
+  if (s.context !== undefined && (typeof s.context !== 'string' || s.context.length > 100_000)) return 'hermes_task: contexto longo demais';
+  if (s.model !== undefined && s.model !== null) {
+    if (typeof s.model === 'string') { if (!/^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/.test(s.model)) return 'hermes_task: modelo inválido'; }
+    else if (typeof s.model === 'object' && !Array.isArray(s.model)) {
+      const o = s.model as Record<string, unknown>;
+      if (Object.keys(o).some((k) => k !== 'provider' && k !== 'id')) return 'hermes_task: modelo inválido';
+      if (typeof o.provider !== 'string' || !/^[a-z0-9][a-z0-9-]{1,29}$/.test(o.provider)) return 'hermes_task: provedor do modelo inválido';
+      if (typeof o.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/.test(o.id)) return 'hermes_task: modelo inválido';
+    } else return 'hermes_task: modelo inválido';
+  }
+  if (s.maxOutputTokens !== undefined && (!Number.isInteger(s.maxOutputTokens) || (s.maxOutputTokens as number) < 1 || (s.maxOutputTokens as number) > 32_768)) return 'hermes_task: limite de saída inválido';
+  if (s.profile !== undefined) {
+    if (!s.profile || typeof s.profile !== 'object' || Array.isArray(s.profile)) return 'hermes_task: perfil inválido';
+    const p = s.profile as Record<string, unknown>;
+    if (Object.keys(p).some((k) => k !== 'name' && k !== 'systemPrompt')) return 'hermes_task: perfil inválido';
+    if (p.name !== undefined && (typeof p.name !== 'string' || p.name.length > 80)) return 'hermes_task: nome do perfil inválido';
+    if (p.systemPrompt !== undefined && (typeof p.systemPrompt !== 'string' || p.systemPrompt.length > 8_000)) return 'hermes_task: instruções do perfil longas demais';
+  }
+  return null;
+}
+
 interface Account { id: string; email: string; password: string; displayName: string; emailVerified: boolean }
 interface Device { id: string; accountId: string; name: string; publicKey: string; syncPublicKey: string; challenge: string; status: 'pending' | 'active' | 'revoked'; session: string | null; lastSeenAt: string }
 interface Workspace { id: string; owner: string; label: string | null; plan: string | null; head: number; changes: Array<Record<string, unknown>>; envelopes: Map<string, { keyVersion: number; wrapped: string }>; recovery: { keyVersion: number; wrapped: string } | null }
 
 interface Owner { holder: 'local' | 'world'; deviceId: string | null; generation: number; leaseUntil: number; jobId: string | null }
 interface Handoff { id: string; ws: string; card: string; accountId: string; deviceId: string; intent: string; status: 'preparing' | 'staged' | 'committed' | 'rejected' | 'expired'; generation: number; adapter: string; routineRef: string; cardState: string; jobId: string | null; reason: string | null; checksum: string | null; pkg: unknown; expiresAt: number }
-interface HJob { id: string; ws: string; accountId: string; state: string; reason: string | null; result: string | null; routineRef: string; spec: unknown; queuedAt: string }
+interface HJob { id: string; ws: string; accountId: string; state: string; reason: string | null; result: string | null; routineRef: string; spec: unknown; queuedAt: string;
+  adapter: string; handoffId: string | null; modelFallback: unknown; recoveryOf: string | null; recoveryRound: number; recoveryLog: Array<{ round: number; reason: string; at: string }>; recoveredBy: string | null; runAfter: string | null }
 
 const hex = (n: number) => crypto.randomBytes(n).toString('hex');
 /** JSON canônico, escrito à parte (como no World): o cliente tem de chegar ao mesmo sha256 sem copiar daqui */
@@ -40,7 +66,19 @@ export class FakeWorld {
   handoffs = new Map<string, Handoff>();
   hjobs = new Map<string, HJob>();
   effects = new Set<string>();
-  adapters = ['web_feed'];
+  adapters = ['web_feed', 'hermes_task'];
+  /** o que GET /v1/compat anuncia */
+  features = ['web_feed', 'hermes_task', 'model_grant', 'recovery', 'job_policy'];
+  /** chaves delegadas do modelo (por transferência; passam ao Job no aceite e às rodadas de recuperação) */
+  grants = new Map<string, { provider: string; model: string; apiKey: string }>();
+  /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
+  delegated = ['openai', 'anthropic', 'deepseek', 'openrouter'];
+  /** protocolo de recuperação por workspace (ausente = ligado) */
+  policies = new Map<string, boolean>();
+  /** papel da conta no workspace (ausente = owner, o dono) */
+  roles = new Map<string, string>();
+  /** os próximos N pedidos com sessão recebem 429 rate_limited com Retry-After */
+  rateLimitNext = 0;
   leaseMs = 90_000;
   /** o próximo pedido que casar é processado, mas a resposta se perde (a conexão cai) */
   dropResponse: RegExp | null = null;
@@ -69,15 +107,42 @@ export class FakeWorld {
   /** Simula o pagamento confirmado (o webhook do Stripe no World de verdade). */
   activate(ws: string, plan = 'world_pro'): void { this.workspaces.get(ws)!.plan = plan; }
   /** O executor do World: o Job passa a rodar (ou termina, com o resultado cifrado para os aparelhos da pessoa). */
-  runJob(jobId: string, state: 'running' | 'succeeded' | 'failed', result?: unknown): void {
+  runJob(jobId: string, state: 'running' | 'succeeded' | 'failed', result?: unknown, reason = 'a fonte não respondeu'): string | null {
     const j = this.hjobs.get(jobId)!; j.state = state;
-    if (state === 'failed') j.reason = 'a fonte não respondeu';
-    if (state !== 'succeeded') return;
+    if (state === 'failed') { j.reason = reason; return this.recover(j, reason); }
+    if (state !== 'succeeded') return null;
+    let out = result ?? {};
+    if (j.adapter === 'hermes_task') {
+      // como o world-runner: o modelo pedido, com a chave delegada viva; sem ela (ou provedor não aceito), o Ergon AI
+      const spec = (j.spec ?? {}) as { model?: { provider: string; id: string } };
+      const asked = spec.model ?? null;
+      const g = j.handoffId ? this.grants.get(j.handoffId) : undefined;
+      const allowed = !!asked && this.delegated.includes(asked.provider);
+      let model = { provider: 'ergon-ai', id: 'deepseek-flash' };
+      if (asked && asked.provider !== 'ergon-ai') {
+        if (g && allowed && g.provider === asked.provider) model = { provider: g.provider, id: g.model };
+        else j.modelFallback = { from: asked, to: model, reason: !allowed ? 'provedor não aceito na nuvem' : g ? 'chave de outro provedor' : 'sem chave do provedor para a nuvem' };
+      }
+      out = { kind: 'hermes_task', output: typeof result === 'string' ? result : String((result as { output?: unknown })?.output ?? ''), model, modelFallback: j.modelFallback ?? null, usage: null, finishedAt: new Date().toISOString() };
+      if (j.handoffId) this.grants.delete(j.handoffId); // a chave some no fim do Job
+    }
     const key = crypto.randomBytes(32); const n = crypto.randomBytes(12);
     const c = crypto.createCipheriv('aes-256-gcm', key, n); c.setAAD(Buffer.from(`ergon/job-result/v1|${jobId}`));
-    const ct = Buffer.concat([c.update(JSON.stringify(result ?? {})), c.final(), c.getAuthTag()]);
+    const ct = Buffer.concat([c.update(JSON.stringify(out)), c.final(), c.getAuthTag()]);
     const devs = [...this.devices.values()].filter((d) => d.accountId === j.accountId && d.status === 'active');
     j.result = JSON.stringify({ v: 1, nonce: n.toString('base64'), ct: ct.toString('base64'), keys: Object.fromEntries(devs.map((d) => [d.id, wrapForDevice(key, d.syncPublicKey, `job:${jobId}`, 1)])) });
+    return null;
+  }
+  /** Protocolo de recuperação (world/src/jobs.ts, recoverTx): falhou → rodada nova (até 3), o cartão passa para ela. */
+  private recover(j: HJob, reason: string): string | null {
+    if (j.recoveryRound >= 3 || /saldo|plano do world|cancelad|pacote inv[aá]lido|job_spec/i.test(reason) || this.policies.get(j.ws) === false) return null;
+    const round = j.recoveryRound + 1;
+    const n: HJob = { ...j, id: `job_${hex(16)}`, state: 'queued', reason: null, result: null, queuedAt: new Date().toISOString(), recoveryOf: j.recoveryOf ?? j.id, recoveryRound: round,
+      recoveryLog: [...j.recoveryLog, { round: j.recoveryRound, reason: reason.slice(0, 300), at: new Date().toISOString() }], recoveredBy: null, runAfter: new Date(Date.now() + 60_000).toISOString() };
+    this.hjobs.set(n.id, n);
+    j.recoveredBy = n.id;
+    for (const o of this.owners.values()) if (o.holder === 'world' && o.jobId === j.id) o.jobId = n.id;
+    return n.id;
   }
   /** Outro computador assume o cartão (a posse local deste venceu): o próximo aceite daqui é recusado. */
   takeOver(ws: string, card: string): void { const o = this.owners.get(`${ws}|${card}`)!; o.deviceId = `dev_${hex(16)}`; o.generation += 1; o.leaseUntil = Date.now() + this.leaseMs; }
@@ -92,7 +157,8 @@ export class FakeWorld {
     const u = new URL(req.url ?? '/', 'http://x');
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '') || null;
     this.log.push({ method: req.method ?? 'GET', path: u.pathname + u.search, body, auth: bearer });
-    const send = (status: number, j: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
+    const send = (status: number, j: unknown, headers: Record<string, string> = {}) => { res.writeHead(status, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(j)); };
+    if (bearer && this.rateLimitNext > 0) { this.rateLimitNext--; send(429, { error: 'rate_limited', message: 'slow down' }, { 'retry-after': '120' }); return; }
     const fail = (status: number, error: string, extra: Record<string, unknown> = {}) => send(status, { error, message: error, ...extra });
     try {
       const out = this.route(req.method ?? 'GET', u, body, bearer);
@@ -162,6 +228,7 @@ export class FakeWorld {
     }
     // daqui em diante, só com a sessão de um aparelho
     const dev = this.session(bearer);
+    if (key === 'GET /v1/compat') return { json: { api: 'v1', version: 'fake', features: this.features, extra: { ignored: true } } };
     if (key === 'GET /v1/catalog') return { json: { dracmaIssue: '1', items: [{ sku: 'world_pro', kind: 'plan', name: 'Pro', priceCents: '4900', sellable: true, tier: 'pro', interval: 'month', people: 3, jobSlots: 5, monthlyDracmas: '1000' }] } };
     if (!dev) return { fail: [401, 'unauthenticated'] };
     dev.lastSeenAt = new Date().toISOString();
@@ -169,7 +236,7 @@ export class FakeWorld {
     const mine = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && w.owner === acc.id ? w : null; };
     if (key === 'POST /v1/bindings') { this.bindings.push({ accountId: acc.id, localPersonId: b.localPersonId }); return { json: { ok: true } }; }
     if (key === 'POST /v1/authorize') {
-      const workspaces = [...this.workspaces.values()].filter((w) => w.owner === acc.id).map((w) => ({ workspaceId: w.id, label: w.label, role: 'owner', status: w.plan ? 'active' : 'none', plan_sku: w.plan }));
+      const workspaces = [...this.workspaces.values()].filter((w) => w.owner === acc.id).map((w) => ({ workspaceId: w.id, label: w.label, role: this.roles.get(acc.id) ?? 'owner', status: w.plan ? 'active' : 'none', plan_sku: w.plan }));
       return { json: { authorizedUntil: new Date(Date.now() + 900_000).toISOString(), account: { email: acc.email }, workspaces } };
     }
     if (key === 'GET /v1/devices') return { json: [...this.devices.values()].filter((d) => d.accountId === acc.id && d.status !== 'pending').map((d) => ({ id: d.id, name: d.name, status: d.status, current: d === dev, connected: !!d.session, lastSeenAt: d.lastSeenAt })) };
@@ -191,6 +258,17 @@ export class FakeWorld {
       const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
       const jobs = [...this.hjobs.values()].filter((j) => j.ws === w.id && !TERMINAL.includes(j.state)).map((j) => ({ id: j.id, state: j.state, routineRef: j.routineRef, queuedAt: j.queuedAt, startedAt: null, mine: j.accountId === acc.id }));
       return { json: { slots: w.plan ? 5 : 0, running: jobs.filter((j) => j.state === 'running').length, jobs } };
+    }
+    m = /^\/v1\/workspaces\/(sws_[a-f0-9]{32})\/job-policy$/.exec(p);
+    if (m) {
+      const w = mine(m[1]); if (!w) return { fail: [404, 'sync_workspace'] };
+      if (method === 'GET') return { json: { recovery: this.policies.get(w.id) ?? true, recoveryRounds: 3 } };
+      if (method === 'PUT') {
+        if (typeof b.recovery !== 'boolean') return { fail: [400, 'policy'] };
+        if (!['owner', 'admin'].includes(this.roles.get(acc.id) ?? 'owner')) return { fail: [403, 'sync_forbidden'] };
+        this.policies.set(w.id, b.recovery);
+        return { json: { recovery: b.recovery, recoveryRounds: 3 } };
+      }
     }
     const handoff = this.handoffRoutes(method, p, u, b, dev, acc.id, mine);
     if (handoff) return handoff;
@@ -262,8 +340,10 @@ export class FakeWorld {
       return { ok: false, generation: o.generation, holder: o.holder === 'world' ? 'world' : 'other_device', jobId: o.jobId };
     };
     const view = (h: Handoff) => {
-      const o = owner(h.ws, h.card); const j = h.jobId ? this.hjobs.get(h.jobId) : null;
-      return { handoffId: h.id, workspaceId: h.ws, cardRef: h.card, status: h.status, reason: h.reason, jobId: h.jobId, jobState: j?.state ?? null, owner: o ? { holder: o.holder, generation: o.generation } : null };
+      const o = owner(h.ws, h.card);
+      // com o protocolo de recuperação, segue a rodada mais recente
+      const jobId = (o?.holder === 'world' && o.jobId) || h.jobId; const j = jobId ? this.hjobs.get(jobId) : null;
+      return { handoffId: h.id, workspaceId: h.ws, cardRef: h.card, status: h.status, reason: h.reason, jobId, jobState: j?.state ?? null, recoveryRound: j?.recoveryRound ?? 0, owner: o ? { holder: o.holder, generation: o.generation } : null, futureField: 'ignorado' };
     };
     const mineH = (id: string) => { const h = this.handoffs.get(id); return h && h.accountId === accountId ? h : null; };
     if (method === 'POST' && p === '/v1/jobs/handoffs/prepare') {
@@ -284,7 +364,7 @@ export class FakeWorld {
       this.handoffs.set(h.id, h);
       return { json: view(h) };
     }
-    let m = /^\/v1\/jobs\/handoffs\/(hof_[a-f0-9]{32})(?:\/(stage|commit))?$/.exec(p);
+    let m = /^\/v1\/jobs\/handoffs\/(hof_[a-f0-9]{32})(?:\/(stage|commit|model-grant))?$/.exec(p);
     if (m) {
       const h = mineH(m[1]); if (!h) return { fail: [404, 'handoff'] };
       if (method === 'GET' && !m[2]) return { json: view(h) };
@@ -293,11 +373,31 @@ export class FakeWorld {
         if (h.expiresAt < Date.now()) return { fail: [410, 'handoff_expired'] };
         if (b.sequence !== 1 || typeof b.stageId !== 'string' || !b.stageId) return { fail: [400, 'stage'] };
         if (checksumOf(b.package) !== b.checksum) return { fail: [400, 'checksum'] };
-        const urls = b.package?.urls;
-        if (!Array.isArray(urls) || !urls.length || urls.length > 10 || urls.some((x: unknown) => typeof x !== 'string' || !x.startsWith('https://'))) return { fail: [400, 'job_spec'] };
+        let pkg: Record<string, unknown> = b.package;
+        if (h.adapter === 'hermes_task') {
+          // world/src/hermes-task.ts: campos desconhecidos são descartados (o World guarda só os conhecidos); o resto é conferido
+          pkg = Object.fromEntries(Object.entries(pkg ?? {}).filter(([k]) => ['instructions', 'context', 'model', 'maxOutputTokens', 'profile'].includes(k)));
+          const bad = checkHermesTask(pkg);
+          if (bad) return { fail: [400, 'job_spec', { detail: bad }] };
+        } else {
+          const urls = b.package?.urls;
+          if (!Array.isArray(urls) || !urls.length || urls.length > 10 || urls.some((x: unknown) => typeof x !== 'string' || !x.startsWith('https://'))) return { fail: [400, 'job_spec'] };
+        }
         if (h.checksum && h.checksum !== b.checksum) return { fail: [409, 'checkpoint_conflict'] };
-        h.status = 'staged'; h.checksum = b.checksum; h.pkg = b.package;
+        h.status = 'staged'; h.checksum = b.checksum; h.pkg = pkg;
         return { json: view(h) };
+      }
+      if (method === 'POST' && m[2] === 'model-grant') {
+        if (h.deviceId !== dev.id) return { fail: [403, 'not_card_device'] };
+        if (h.status !== 'preparing' && h.status !== 'staged') return { fail: [409, 'handoff_state'] };
+        if (h.adapter !== 'hermes_task') return { fail: [400, 'adapter'] };
+        if (typeof b.provider !== 'string' || !this.delegated.includes(b.provider)) return { fail: [400, 'provider_not_allowed'] };
+        if (typeof b.model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/.test(b.model)) return { fail: [400, 'model'] };
+        if (typeof b.apiKey !== 'string' || !/^[\x21-\x7e]{8,500}$/.test(b.apiKey)) return { fail: [400, 'api_key'] };
+        const o = owner(h.ws, h.card);
+        if (!o || o.holder !== 'local' || o.deviceId !== dev.id) return { fail: [409, 'fenced'] };
+        this.grants.set(h.id, { provider: b.provider, model: b.model, apiKey: b.apiKey });
+        return { json: { handoffId: h.id, provider: b.provider, model: b.model, expiresAt: new Date(Date.now() + 30 * 60_000).toISOString() } };
       }
       if (method === 'POST' && m[2] === 'commit') {
         if (h.status === 'committed') return { json: view(h) };
@@ -309,7 +409,8 @@ export class FakeWorld {
           h.status = 'rejected'; h.reason = 'posse do cartão mudou';
           return { fail: [409, 'fenced'] };
         }
-        const j: HJob = { id: `job_${hex(16)}`, ws: h.ws, accountId, state: 'queued', reason: null, result: null, routineRef: h.routineRef, spec: h.pkg, queuedAt: new Date().toISOString() };
+        const j: HJob = { id: `job_${hex(16)}`, ws: h.ws, accountId, state: 'queued', reason: null, result: null, routineRef: h.routineRef, spec: h.pkg, queuedAt: new Date().toISOString(),
+          adapter: h.adapter, handoffId: h.id, modelFallback: null, recoveryOf: null, recoveryRound: 0, recoveryLog: [], recoveredBy: null, runAfter: null };
         this.hjobs.set(j.id, j);
         o.holder = 'world'; o.deviceId = null; o.leaseUntil = 0; o.jobId = j.id; o.generation += 1;
         h.status = 'committed'; h.jobId = j.id;
@@ -343,13 +444,14 @@ export class FakeWorld {
       const w = plan(u.searchParams.get('workspace')); if (isOut(w)) return w;
       return { json: [...this.owners.entries()].filter(([k]) => k.startsWith(`${w.id}|`)).map(([k, o]) => {
         const j = o.jobId ? this.hjobs.get(o.jobId) : null;
-        return { cardRef: k.slice(w.id.length + 1), holder: o.holder === 'world' ? 'world' : o.deviceId === dev.id ? 'this_device' : 'other_device', generation: o.generation, active: o.holder === 'world' ? !TERMINAL.includes(j?.state ?? '') : o.leaseUntil > Date.now(), jobId: o.jobId, jobState: j?.state ?? null };
+        return { cardRef: k.slice(w.id.length + 1), holder: o.holder === 'world' ? 'world' : o.deviceId === dev.id ? 'this_device' : 'other_device', generation: o.generation, active: o.holder === 'world' ? !TERMINAL.includes(j?.state ?? '') : o.leaseUntil > Date.now(), jobId: o.jobId, jobState: j?.state ?? null, recoveryRound: j?.recoveryRound ?? 0 };
       }) };
     }
     m = /^\/v1\/jobs\/(job_[a-f0-9]{32})$/.exec(p);
     if (m && method === 'GET') {
       const j = this.hjobs.get(m[1]); if (!j || j.accountId !== accountId) return { fail: [404, 'job'] };
-      return { json: { id: j.id, state: j.state, reason: j.reason, adapter: 'web_feed', result: j.result } };
+      return { json: { id: j.id, state: j.state, reason: j.reason, adapter: j.adapter, result: j.result, modelFallback: j.modelFallback ?? null,
+        recovery: { round: j.recoveryRound, of: j.recoveryOf, next: j.recoveredBy, runAfter: j.runAfter, log: j.recoveryLog } } };
     }
     return null;
   }

@@ -484,6 +484,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
     {err && <p className="error" role="alert">{err}</p>}
     {ok && <p className="ok" role="status">{ok}</p>}
     {nuvem.aviso && <p className="hint" role="status">{nuvem.aviso}</p>}
+    {nuvem.nota && <p className="hint">{nuvem.nota}</p>}
+    {!!nuvem.historico?.length && <details className="hint"><summary>{nuvem.historicoTitulo}</summary><ul className="small">{nuvem.historico.map((x, i) => <li key={i}>{x}</li>)}</ul></details>}
   </>;
   const reenviar = async () => { try { await api.post(`/api/tasks/${tk.id}/reenviar`); d.reload(); } catch (e) { setErr(errMsg(e)); } };
 

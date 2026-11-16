@@ -37,7 +37,7 @@ describe('JSON canônico e pacote (o mesmo sha256 do World)', () => {
     assert.ok(p.urls[0].startsWith('https://news.google.com/rss/search?q=cromatografia'));
     assert.equal(p.urls[1], 'https://blog.exemplo.com/feed');
     assert.equal(feedPackage(['web.noticias'], {}), null);
-    assert.deepEqual(['queued', 'admitted', 'waiting_balance', 'running', 'succeeded', 'failed'].map(badgeOf), ['na_fila', 'na_fila', 'na_fila', 'trabalhando', 'concluido', 'falhou']);
+    assert.deepEqual(['queued', 'admitted', 'waiting_balance', 'running', 'succeeded', 'failed'].map((x) => badgeOf(x)), ['na_fila', 'na_fila', 'na_fila', 'trabalhando', 'concluido', 'falhou']);
   });
 });
 
@@ -89,7 +89,7 @@ describe('Rodar na nuvem', () => {
     const tref = `card:${t.json.id}`;
     const n0 = handoffCalls();
     const c = await card(tref);
-    assert.deepEqual([c.where, c.canSend, c.reason], ['local', false, 'Este tipo de trabalho ainda não roda na nuvem.']);
+    assert.deepEqual([c.where, c.canSend, c.reason], ['local', false, 'Só cards do quadro da equipe vão para a nuvem.'], 'tarefa sua (não da equipe) fica aqui');
     assert.deepEqual([(await send(tref)).status, (await send(tref)).json.error], [409, 'not_portable']);
     const brief = await req(h, 'POST', '/api/routines', s, { template: 'briefing-diario' });
     const b = await card(`rotina:${brief.json.id}`);

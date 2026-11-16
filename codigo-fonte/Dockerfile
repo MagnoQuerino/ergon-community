@@ -34,6 +34,8 @@ COPY fixtures fixtures
 # versão): os testes conferem os dois lados. Só no alvo de testes; a imagem publicada não leva nada do aplicativo.
 COPY desktop/ui desktop/ui
 COPY desktop/src-tauri/src desktop/src-tauri/src
+# as regras da varredura de segredos: o teste dos relatos confere que a limpeza cobre todas
+COPY scripts/scan-segredos.mjs scripts/scan-segredos.mjs
 RUN npm test -w server && npm test -w web
 
 FROM ${NODE_IMAGE} AS runtime

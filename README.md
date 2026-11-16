@@ -15,7 +15,8 @@ e entregam.
 - **Uma equipe que aprende com você:** cada agente tem memória própria, lembra o seu jeito de trabalhar e chama
   ajudantes para dividir os trabalhos grandes.
 - **Seus dados ficam com você:** tudo roda na sua máquina, cifrado com a sua senha. Sem conta no projeto, sem
-  servidor nosso no meio. A IA usa a conta de IA que **você** conectar.
+  servidor nosso no meio. A IA usa a conta de IA que **você** conectar. O Ergon World (sincronizar e continuar
+  trabalhos na nuvem) é opcional; o que ele recebe está em [docs/SEGURANCA.md](docs/SEGURANCA.md).
 
 > 🇬🇧 **In English:** Ergon is a team of AI agents that works on your own computer: twelve historical characters,
 > led by Aristotle, who plan, split and deliver your tasks while you watch them in a pixel-art city. Each agent has its

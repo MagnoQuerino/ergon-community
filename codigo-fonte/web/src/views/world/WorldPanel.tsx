@@ -229,8 +229,28 @@ function Linked({ onMsg, mine }: { onMsg: Msg; mine: WorkspaceRef[] }) {
         <label className="check"><input type="checkbox" checked={aiDefault} onChange={(ev) => setAiDefault(ev.target.checked)} /> {t('ia.padrao')}</label>
         <button className="btn btn--primary" disabled={busy} onClick={() => void go(() => api.post('/api/world/ai/connect', { makeDefault: aiDefault }), t('ia.ligado'))}>{t('ia.usar')}</button>
       </section>
+      <RecoveryCard onMsg={onMsg} />
       <SyncCard onMsg={onMsg} />
     </>
+  );
+}
+
+interface Policy { available: boolean; recovery: boolean; rounds?: number; canEdit: boolean }
+/** Protocolo de recuperação do workspace na nuvem (vem ligado): quem administra liga e desliga; os outros só veem. */
+function RecoveryCard({ onMsg }: { onMsg: Msg }) {
+  const t = useTw();
+  const p = useResource<Policy>('/api/world/job-policy', []);
+  const [busy, setBusy] = useState(false);
+  if (!p.data?.available) return null;
+  const set = async (on: boolean) => {
+    onMsg(null); setBusy(true);
+    try { await api.put('/api/world/job-policy', { recovery: on }); onMsg({ kind: 'ok', text: t(on ? 'recuperacao.ligada' : 'recuperacao.desligada') }); } catch (e) { onMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); p.reload(); }
+  };
+  return (
+    <section className="card">
+      <label className="check"><input type="checkbox" checked={p.data.recovery} disabled={busy || !p.data.canEdit} onChange={(ev) => void set(ev.target.checked)} /> {t('recuperacao.rotulo')}</label>
+      <p className="muted small">{t('recuperacao.texto', { n: p.data.rounds ?? 3 })}{p.data.canEdit ? '' : ` ${t('recuperacao.soAdmin')}`}</p>
+    </section>
   );
 }
 

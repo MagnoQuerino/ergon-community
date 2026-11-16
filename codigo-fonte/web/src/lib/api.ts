@@ -2,6 +2,7 @@
 // O idioma da tela vai em X-Ergon-Lang (o que o servidor gera na hora segue ele) e os textos que o servidor manda com
 // código (campo_t) chegam já no idioma da tela (lib/textos-tela.ts: traduzirResposta).
 import { idiomaAtual, t } from '../i18n/index.ts';
+import { anotarCodigoErro } from './relato.ts';
 import { traduzirResposta } from './textos-tela.ts';
 let csrf = '';
 export function setCsrf(t: string) { csrf = t; }
@@ -31,6 +32,8 @@ async function call<T>(method: string, url: string, body?: unknown, headers: Rec
   if (!res.ok) {
     const j = (json ?? {}) as { error?: string; message?: string };
     const code = j.error ?? 'erro'; // i18n-ok: código interno do erro, não aparece na tela
+    // só o código (ex.: world_offline), para os dados técnicos de "Relatar um problema" (lib/relato.ts)
+    anotarCodigoErro(code);
     if (guard && !retried && ((res.status === 423 && code === 'locked') || (res.status === 401 && code === 'reauth'))) {
       if (await guard(code)) return call<T>(method, url, body, headers, true);
     } else if (guard && (res.status === 428 || (res.status === 401 && code === 'unauthenticated') || (res.status === 423 && (code === 'sealed' || code === 'person_sealed')))) void guard(code);

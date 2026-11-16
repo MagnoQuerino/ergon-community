@@ -376,6 +376,8 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
       </div>
       {err && <p className="error" role="alert">{err}</p>}
       {nuvem.aviso && <p className="hint" role="status">{nuvem.aviso}</p>}
+      {nuvem.nota && <p className="hint">{nuvem.nota}</p>}
+      {!!nuvem.historico?.length && <details className="hint"><summary>{nuvem.historicoTitulo}</summary><ul className="small">{nuvem.historico.map((x, i) => <li key={i}>{x}</li>)}</ul></details>}
       {ask && r.input && <RunDialog r={r} spec={r.input} onClose={() => setAsk(false)} onDone={() => { setAsk(false); reload(); }} />}
     </article>
   );
