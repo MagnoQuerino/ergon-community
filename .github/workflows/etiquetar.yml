@@ -1,0 +1,32 @@
+# Etiquetar: cria a etiqueta vX.Y.Z da versão do package.json no main e dispara o Lançamento nela.
+# Alternativa a "git tag && git push" para quem publica pelo navegador ou por uma sessão sem permissão de etiqueta.
+name: Etiquetar
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # criar a etiqueta
+  actions: write    # disparar o Lançamento
+
+jobs:
+  etiquetar:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Cria a etiqueta e dispara o Lançamento
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          V=$(node -p "require('./codigo-fonte/package.json').version")
+          T="v$V"
+          if git rev-parse -q --verify "refs/tags/$T" > /dev/null; then echo "::error::a etiqueta $T já existe"; exit 1; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$T" -m "Ergon Community $V"
+          git push origin "refs/tags/$T"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$T"
+          echo "etiqueta $T em $(git rev-parse --short HEAD); Lançamento disparado"
