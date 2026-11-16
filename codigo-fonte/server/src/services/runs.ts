@@ -85,6 +85,11 @@ interface EnqueueInput {
   /** 'conselho': a execução vai ao conselho de modelos (vários opinam, um junta), não ao modelo do agente */
   via?: 'conselho' | null;
 }
+/** Uma execução feita na nuvem (RunExecutor.recordExternal): o card, o agente, o pedido e como terminou. */
+export interface CloudTaskRun {
+  workspaceId: string; agentId: string; taskId: string; input: string; idempotencyKey: string;
+  status: 'succeeded' | 'failed'; output: string | null; error: string | null; model: string | null;
+}
 /** O conselho de modelos do motor: o provedor virtual do Hermes ("moa") e o nome do conselho que a tela monta. */
 const CONSELHO = { provider: 'moa', model: 'default' } as const;
 
@@ -238,6 +243,24 @@ export class RunExecutor {
       runId, e.workspaceId, e.agentId, e.conversationId ?? null, e.taskId ?? null, e.kind, this.mode, this.db.seal(e.workspaceId, e.input), this.db.seal(e.workspaceId, e.instructions),
       e.idempotencyKey, this.cfg.maxRunAttempts, now(), e.reviewId ?? null, e.reviewStep ?? null, e.via ?? null);
     this.bus.publish(e.workspaceId, 'runs.changed', { id: runId, agentId: e.agentId, status: 'queued' });
+    return this.get(e.workspaceId, runId);
+  }
+
+  /**
+   * Uma execução que aconteceu fora deste computador (o agente rodou na nuvem do Ergon World) entra como as daqui: a
+   * linha da execução, já terminada, e o mesmo fim (a conversa, o card, a auditoria, quem escuta o fim). Mesma chave
+   * idempotente: devolve a que já existe, sem terminar de novo. `before`: logo depois de criada, antes do fim.
+   */
+  recordExternal(e: CloudTaskRun, before?: (runId: string) => void): RunRow {
+    const existing = this.db.get<RunRow>('SELECT * FROM runs WHERE idempotency_key = ?', e.idempotencyKey);
+    if (existing) return existing;
+    const runId = id('run'); const at = now();
+    this.db.run(
+      `INSERT INTO runs (id, workspace_id, agent_id, conversation_id, task_id, kind, status, mode, input, instructions, idempotency_key, max_attempts, created_at, started_at, attempts, model)
+       VALUES (?, ?, ?, NULL, ?, 'subtask', 'running', 'real', ?, ?, ?, 1, ?, ?, 1, ?)`,
+      runId, e.workspaceId, e.agentId, e.taskId, this.db.seal(e.workspaceId, e.input), this.db.seal(e.workspaceId, ''), e.idempotencyKey, at, at, e.model);
+    before?.(runId);
+    this.finish(this.get(e.workspaceId, runId), e.status, e.status === 'succeeded' ? e.output : null, e.status === 'succeeded' ? null : (e.error ?? 'não deu certo na nuvem'));
     return this.get(e.workspaceId, runId);
   }
 

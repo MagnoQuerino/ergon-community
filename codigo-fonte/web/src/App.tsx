@@ -22,6 +22,9 @@ import { abrirBalao, useBalao } from './lib/balao.ts';
 // cliente do Ergon World (views/world): conectar de qualquer tela quando um recurso do World pede a conta
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
+/** "Enquanto você esteve fora" (módulo do Ergon World, se estiver nesta instalação): uma linha, ao abrir */
+const resumoForaMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/ResumoFora.tsx'))[0];
+const ResumoFora = resumoForaMod ? lazy(resumoForaMod) : null;
 import { useSurface } from './lib/surface.ts';
 
 // As outras áreas chegam sob demanda (a Cidade, a primeira tela, já vem no pacote principal): o app abre mais leve, e
@@ -409,6 +412,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       )}
 
       <main className="main" tabIndex={-1}>
+        {ResumoFora && <Suspense fallback={null}><ResumoFora /></Suspense>}
         {/* a cidade fica sempre montada: em outra área, oculta e viva em segundo plano */}
         <div className="keep" hidden={focus || view !== 'ambiente'}>
           <AmbienteView state={s} onNavigate={setView} selectedId={selected} onSelect={setSelected} reload={st.reload} active={!focus && view === 'ambiente'} />

@@ -7,7 +7,12 @@ export interface NuvemNoCartao {
   selo: { texto: string; tom: 'info' | 'ok' | 'warn' } | null;
   /** o que aconteceu no último clique (ou o erro) */
   aviso: string | null;
+  /** aviso curto depois do trabalho na nuvem ("Rodou no Ergon AI: …") */
+  nota?: string | null;
+  /** falhou na nuvem: o que falhou em cada rodada (o título vem em `historicoTitulo`) */
+  historico?: string[];
+  historicoTitulo?: string;
 }
-export const SEM_NUVEM: NuvemNoCartao = { item: null, selo: null, aviso: null };
+export const SEM_NUVEM: NuvemNoCartao = { item: null, selo: null, aviso: null, nota: null, historico: [] };
 /** sem o módulo do World: nenhum hook, nada na tela */
 export const semNuvem = (_ref: string | null): NuvemNoCartao => SEM_NUVEM;

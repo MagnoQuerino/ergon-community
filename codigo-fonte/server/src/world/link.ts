@@ -37,11 +37,24 @@ export function migrateWorldLocal(db: Db, dir = path.join(import.meta.dirname, '
 export class WorldClient {
   readonly cfg: WorldConfig;
   readonly fetchImpl: typeof fetch;
+  /** limite de pedidos do World (429 rate_limited): até quando esta credencial espera, sem chamar de novo */
+  private backoff = new Map<string, number>();
   constructor(cfg: WorldConfig, fetchImpl: typeof fetch = fetch) { this.cfg = cfg; this.fetchImpl = fetchImpl; }
 
-  /** Chamada ao World. Sem rede → 503 world_offline (nada foi alterado). */
+  private static limited(untilMs: number): HttpError {
+    return Object.assign(new HttpError(429, 'rate_limited', 'O Ergon World pediu uma pausa. Tente de novo em instantes.'), { retryAfter: Math.max(1, Math.ceil((untilMs - Date.now()) / 1000)) });
+  }
+
+  /**
+   * Chamada ao World. Sem rede → 503 world_offline (nada foi alterado). Limite de pedidos (429): espera o Retry-After
+   * (no máximo 10 min) sem chamar de novo com a mesma credencial; nunca insiste em seguida.
+   */
   async call<T = Record<string, unknown>>(method: string, p: string, body?: unknown, session?: string | null): Promise<T> {
     if (!this.cfg.url) throw new HttpError(503, 'world_unconfigured', 'O Ergon World não está configurado nesta instalação.');
+    const cred = session ?? '';
+    const wait = this.backoff.get(cred);
+    if (wait && wait > Date.now()) throw WorldClient.limited(wait);
+    if (wait) this.backoff.delete(cred);
     let r: Response;
     try {
       r = await this.fetchImpl(`${this.cfg.url}${p}`, {
@@ -50,6 +63,12 @@ export class WorldClient {
       });
     } catch { throw new HttpError(503, 'world_offline', 'Sem conexão com o Ergon World agora. Tente de novo.'); }
     const j = await r.json().catch(() => ({})) as { error?: string; message?: string };
+    if (r.status === 429) {
+      const ra = Number.parseInt(r.headers.get('retry-after') ?? '', 10);
+      const until = Date.now() + Math.min(600, Number.isFinite(ra) && ra > 0 ? ra : 30) * 1000;
+      this.backoff.set(cred, until);
+      throw WorldClient.limited(until);
+    }
     if (!r.ok) throw Object.assign(new HttpError(r.status === 401 ? 401 : r.status >= 500 ? 503 : r.status, j.error ?? 'world_error', j.message ?? `World respondeu ${r.status}`), { detail: j });
     return j as T;
   }
@@ -196,7 +215,7 @@ export class WorldLinks {
 
 /** Tira do workspace local o que o ligava ao World (o id do workspace World, o estado do Sync e dos cartões na nuvem). Dados locais ficam. */
 export function forgetWorkspace(db: Db, ws: string): void {
-  for (const t of ['world_sync_conflicts', 'world_sync_records', 'world_sync', 'world_workspace_ids', 'world_cards']) db.run(`DELETE FROM ${t} WHERE workspace_id = ?`, ws);
+  for (const t of ['world_sync_conflicts', 'world_sync_records', 'world_sync', 'world_workspace_ids', 'world_cards', 'world_cloud_results']) db.run(`DELETE FROM ${t} WHERE workspace_id = ?`, ws);
   // sem o World, nada fica preso "na nuvem": os cartões voltam a ser deste computador
   db.run("DELETE FROM remote_work WHERE workspace_id = ? AND holder = 'world'", ws);
 }

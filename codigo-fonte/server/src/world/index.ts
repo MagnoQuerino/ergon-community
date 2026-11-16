@@ -226,7 +226,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       // Cartão que nunca foi à nuvem não fala com o World. A leitura do World (estado do Job, resultado) é no máximo a
       // cada 20 s por workspace, e só enquanto houver cartão na nuvem.
       const minMs = Number.parseInt(env.ERGON_WORLD_CARDS_MIN_MS ?? '', 10);
-      const cards = new CloudCards({ db, client, links: L(), routines: h.routines, bus: h.bus, worldId: (ws) => sync.worldId(ws), minMs: Number.isFinite(minMs) && minMs >= 0 ? minMs : 20_000 });
+      const cards = new CloudCards({ db, client, links: L(), routines: h.routines, bus: h.bus, worldId: (ws) => sync.worldId(ws), minMs: Number.isFinite(minMs) && minMs >= 0 ? minMs : 20_000, tasks: h.tasks ?? null });
       const cardRef = (v: unknown): string => {
         if (typeof v !== 'string' || !CARD_REF.test(v)) throw new HttpError(400, 'invalid', 'cartão inválido');
         return v;
@@ -238,6 +238,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         // só o workspace ligado ao World, com a conta conectada, oferece a nuvem; nos outros, nada muda
         if (!worldWs(a) || !links?.session(a.userId)) return { offer: false, stale: false, cards: [] };
         let stale = false;
+        await cards.features();
         await cards.refresh(a.userId, a.workspaceId).catch(() => { stale = true; });
         return { offer: true, stale, cards: ref ? [cards.view(a.workspaceId, cardRef(ref))] : cards.list(a.workspaceId) };
       });
@@ -248,6 +249,48 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       app.post('/api/world/cards/claim', { schema: refBody, config: { gestao: { id: 'nuvem.trazer', area: 'rotinas', rotulo: 'Trazer para este computador um cartão que terminou na nuvem', aprova: true } } }, async (req) => {
         const a = h.owner(req); const ref = cardRef((req.body as { ref?: unknown } | undefined)?.ref);
         return cards.claim(a.userId, boundWs(a), ref);
+      });
+
+      // "Enquanto você esteve fora": o que chegou da nuvem desde a última vez (números e, sob pedido, cada um)
+      app.get('/api/world/cards/summary', async (req) => {
+        const a = h.auth(req);
+        if (!worldWs(a) || !links?.session(a.userId)) return { counts: { concluidos: 0, recuperados: 0, falharam: 0, ergonAi: 0 }, items: [] };
+        await cards.refresh(a.userId, a.workspaceId).catch(() => undefined);
+        const sm = cards.summary(a.userId, a.workspaceId);
+        // o nome de cada card ou rotina, para o detalhe
+        const nome = (ref: string) => ref.startsWith('card:')
+          ? db.get<{ title: string }>('SELECT title FROM tasks WHERE id = ? AND workspace_id = ?', ref.slice(5), a.workspaceId)?.title ?? null
+          : db.get<{ name: string }>('SELECT name FROM routines WHERE id = ? AND workspace_id = ?', ref.slice(7), a.workspaceId)?.name ?? null;
+        return { ...sm, items: sm.items.map((x) => ({ ...x, title: nome(x.ref) })) };
+      });
+      app.post('/api/world/cards/summary/seen', async (req) => { const a = h.auth(req); cards.seen(a.userId, a.workspaceId); return { ok: true }; });
+      // protocolo de recuperação do workspace World (vem ligado): quem administra o workspace lá muda; os outros só veem
+      const roleIn = (userId: string, w: string): string | null => {
+        try { return (JSON.parse(links?.get(userId)?.entitlement ?? '[]') as Array<{ workspaceId?: string; role?: string }>).find((x) => x.workspaceId === w)?.role ?? null; } catch { return null; }
+      };
+      app.get('/api/world/job-policy', async (req) => {
+        const a = h.auth(req); const w = worldWs(a);
+        if (!w || !links?.session(a.userId)) return { available: false, recovery: true, canEdit: false };
+        if (!(await cards.features()).has('job_policy')) return { available: false, recovery: true, canEdit: false };
+        let role = roleIn(a.userId, w);
+        // workspace ligado depois da última leitura do plano: o papel chega com a renovação
+        if (!role) { await L().renew(a.userId).catch(() => undefined); role = roleIn(a.userId, w); }
+        try {
+          const p = await client.call<{ recovery?: unknown; recoveryRounds?: unknown }>('GET', `/v1/workspaces/${w}/job-policy`, undefined, sessionOf(a.userId));
+          return { available: true, recovery: p.recovery !== false, rounds: Number(p.recoveryRounds) || 3, canEdit: role === 'owner' || role === 'admin' };
+        } catch (e) {
+          if ((e as HttpError).code === 'world_offline' || (e as HttpError).status === 429) return { available: true, stale: true, recovery: true, canEdit: false };
+          throw e;
+        }
+      });
+      app.put('/api/world/job-policy', { schema: { body: { type: 'object', additionalProperties: false, required: ['recovery'], properties: { recovery: { type: 'boolean' } } } } }, async (req) => {
+        const a = h.auth(req); const w = needWorld(a);
+        const recovery = (req.body as { recovery: boolean }).recovery;
+        const r = await client.call<{ recovery?: unknown }>('PUT', `/v1/workspaces/${w}/job-policy`, { recovery }, sessionOf(a.userId)).catch((e: HttpError) => {
+          if (e.status === 403) throw new HttpError(403, 'sync_forbidden', 'Só quem administra o workspace muda isso.');
+          throw e;
+        });
+        return { recovery: r.recovery !== false };
       });
 
       // créditos (só do workspace), extrato, recarga automática (o dono), teto por pessoa (o gestor) e transferência

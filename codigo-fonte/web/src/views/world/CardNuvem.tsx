@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, errMsg } from '../../lib/api.ts';
 import { useResource } from '../../lib/live.ts';
 import { SEM_NUVEM, type NuvemNoCartao } from '../../lib/nuvem-cartao.ts';
-import { acompanhar, estadoDoCartao, SELO, TOM, type CartaoNuvem } from './nuvem-cartao.ts';
+import { acompanhar, avisoDoModelo, estadoDoCartao, historicoDaFalha, textoDoSelo, TOM, type CartaoNuvem } from './nuvem-cartao.ts';
 import { useTw } from './textos.ts';
 
 interface Status { configured: boolean; link: { currentIsBound: boolean } | null }
@@ -39,5 +39,5 @@ export function useNuvemNoCartao(ref: string | null): NuvemNoCartao {
     : e.acao === 'trazer'
       ? { label: busy ? t('cartao.trazendo') : t('cartao.trazer'), icon: 'download', disabled: busy, onClick: () => void go('/api/world/cards/claim', t('cartao.trazido')) }
       : null;
-  return { item, selo: e.selo ? { texto: t(SELO[e.selo]), tom: TOM[e.selo] } : null, aviso };
+  return { item, selo: e.selo ? { texto: textoDoSelo(c, e.selo, t), tom: TOM[e.selo] } : null, aviso, nota: avisoDoModelo(c, t), historico: historicoDaFalha(c, t), historicoTitulo: t('cartao.historico') };
 }

@@ -7,13 +7,18 @@
  *   3. commit   → CAS na geração do dono local; só com este aceite o cartão deixa de rodar aqui
  *   4. GET      → resposta perdida: consulta a transferência e segue o estado dela (nunca abre outra intenção)
  *
- * Local primeiro: cartão que nunca foi à nuvem não fala com o World (nem para pedir licença). Hoje vão as rotinas de
- * radar (fontes públicas: o adaptador web_feed do World); os outros cartões mostram o motivo.
+ * Local primeiro: cartão que nunca foi à nuvem não fala com o World (nem para pedir licença). Vão as rotinas de radar
+ * (fontes públicas: o adaptador web_feed do World) e os cards do quadro da equipe esperando em "A fazer" (o adaptador
+ * hermes_task: o mesmo pedido que o agente receberia aqui, com o modelo dele; a chave própria do provedor vai junto, e
+ * sem ela o World roda no Ergon AI e avisa). O protocolo de recuperação do World pode criar rodadas novas de um Job que
+ * falhou: o cartão segue a rodada mais recente (`recovery.next`) até o fim. O que o World oferece vem de /v1/compat.
  */
 import crypto from 'node:crypto';
 import type { Db } from '../db/db.ts';
 import { HttpError, now } from '../lib/util.ts';
 import type { Bus } from '../services/bus.ts';
+import type { CloudTaskBrief } from '../services/teamwork.ts';
+import type { CloudTasksHost } from '../world-hook.ts';
 import { setRemoteHolder } from '../services/remote-work.ts';
 import type { ParamValues, SourceId } from '../services/routine-catalog.ts';
 import { webQueries } from '../services/routine-sources.ts';
@@ -36,13 +41,53 @@ export const HANDOFF_STATES = ['queued_local', 'waiting_external', 'waiting_user
 const TERMINAL = ['succeeded', 'failed', 'cancelled', 'rejected'];
 export const CARD_REF = /^(rotina:rtn_[a-f0-9]{32}|card:tsk_[a-f0-9]{32})$/;
 
-export type Badge = 'na_fila' | 'trabalhando' | 'concluido' | 'falhou';
-/** o estado do Job do World → o selo discreto do cartão */
-export function badgeOf(jobState: string | null): Badge {
+export type Badge = 'na_fila' | 'trabalhando' | 'concluido' | 'falhou' | 'recuperando';
+/** o estado do Job do World → o selo discreto do cartão (rodada de recuperação em andamento: "recuperando") */
+export function badgeOf(jobState: string | null, recoveryRound = 0): Badge {
   if (jobState === 'succeeded') return 'concluido';
   if (jobState && ['failed', 'cancelled', 'rejected'].includes(jobState)) return 'falhou';
+  if (recoveryRound > 0) return 'recuperando';
   if (jobState === 'running' || jobState === 'cancel_requested') return 'trabalhando';
   return 'na_fila';
+}
+
+/** limites do pacote hermes_task (world/src/hermes-task.ts) */
+export const TASK_LIMITS = { instructions: 20_000, context: 100_000, systemPrompt: 8_000, profileName: 80 };
+const PROVIDER_RE = /^[a-z0-9][a-z0-9-]{1,29}$/;
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/;
+/** provedores com chave de API que o World aceita por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
+export const DELEGATED = ['openai', 'anthropic', 'deepseek', 'openrouter'];
+const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
+
+/**
+ * O modelo do agente no formato do World: { provider, id }. Sem modelo nem provedor: null (o World escolhe no Ergon AI).
+ * Provedor que o World não reconhece vai com um nome neutro: lá ele cai no Ergon AI e diz por quê.
+ */
+export function taskModel(provider: string | null | undefined, model: string | null | undefined): { provider: string; id: string } | null {
+  if (!provider && !model) return null;
+  const p = (provider ?? '').toLowerCase();
+  const id = (model ?? '').replace(/[^A-Za-z0-9._:/@-]/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, 100) || 'padrao';
+  return { provider: PROVIDER_RE.test(p) ? p : 'local', id: MODEL_RE.test(id) ? id : 'padrao' };
+}
+
+/** Pacote do adaptador hermes_task a partir do card: só texto (nada de caminho deste computador), nos limites do World. */
+export function taskPackage(b: CloudTaskBrief, fallback: { provider: string | null; model: string | null }): Record<string, unknown> {
+  const pkg: Record<string, unknown> = { instructions: cut(b.input ?? '', TASK_LIMITS.instructions) };
+  if (b.context) pkg.context = cut(b.context, TASK_LIMITS.context);
+  const m = b.model?.provider || b.model?.model ? taskModel(b.model.provider, b.model.model) : taskModel(fallback.provider, fallback.model);
+  if (m) pkg.model = m;
+  const profile: Record<string, string> = {};
+  if (b.agentName?.trim()) profile.name = cut(b.agentName.trim(), TASK_LIMITS.profileName);
+  if (b.soul?.trim()) profile.systemPrompt = cut(b.soul.trim(), TASK_LIMITS.systemPrompt);
+  if (Object.keys(profile).length) pkg.profile = profile;
+  return pkg;
+}
+
+/** O motivo da troca para o Ergon AI, curto, para o aviso ("Rodou no Ergon AI: …"). */
+export function fallbackReason(fb: unknown): string | null {
+  if (!fb || typeof fb !== 'object') return null;
+  const r = String((fb as { reason?: unknown }).reason ?? '').trim();
+  return cut(r || 'sem o modelo do agente na nuvem', 120);
 }
 
 /** O que o World responde, em frases curtas (a dele pode vir em outro idioma). keep: a intenção segue aberta. */
@@ -58,18 +103,30 @@ const ERRORS: Record<string, [number, string, boolean?]> = {
   handoff_open: [409, 'Já há um envio em andamento para este cartão.', true],
   remote_running: [409, 'Ainda rodando na nuvem. Volta quando terminar.', true],
   checksum: [400, 'O pacote chegou diferente. Tente de novo.'],
+  rate_limited: [429, 'O Ergon World pediu uma pausa. Tente de novo em instantes.', true],
 };
 const OFFLINE = 'Sem conexão com o Ergon World. O cartão continua aqui.';
 
-interface Row { workspace_id: string; card_ref: string; user_id: string; status: 'preparing' | 'remote' | 'local'; intent_key: string; handoff_id: string | null; generation: number | null; job_id: string | null; job_state: string | null; result_at: string | null; checked_at: string | null }
-interface HandoffView { handoffId: string; status: string; reason: string | null; jobId: string | null; jobState: string | null; owner: { holder: string; generation: number } | null }
-interface WorldCard { cardRef: string; holder: 'world' | 'this_device' | 'other_device'; generation: number; active: boolean; jobId: string | null; jobState: string | null }
+interface Row { workspace_id: string; card_ref: string; user_id: string; status: 'preparing' | 'remote' | 'local'; intent_key: string; handoff_id: string | null; generation: number | null; job_id: string | null; job_state: string | null; result_at: string | null; checked_at: string | null;
+  agent_id?: string | null; task_input?: string | null; recovery_round?: number; recovery_log?: string | null; model_fallback?: string | null }
+interface HandoffView { handoffId: string; status: string; reason: string | null; jobId: string | null; jobState: string | null; recoveryRound?: number; owner: { holder: string; generation: number } | null }
+interface WorldCard { cardRef: string; holder: 'world' | 'this_device' | 'other_device'; generation: number; active: boolean; jobId: string | null; jobState: string | null; recoveryRound?: number }
+interface JobView { state: string; reason: string | null; result: string | null; modelFallback?: unknown; recovery?: { round?: number; next?: string | null; log?: Array<{ round: number; reason: string; at?: string }> } | null }
+/** uma rodada que falhou (o que o World registrou) */
+export interface RoundFailure { round: number; reason: string }
 type RoutineView = ReturnType<Routines['get']>;
 
 /** O que o cartão é aqui: em que estado está e se pode ir agora (com o motivo, se não). */
-export interface CardWork { ref: string; state: string | null; eligible: boolean; reason: string | null; adapter: string | null; pkg: Record<string, unknown> | null; routineId: string | null }
-/** O que a tela mostra do cartão. */
-export interface CardView { ref: string; where: 'local' | 'preparing' | 'remote'; badge: Badge | null; jobState: string | null; canSend: boolean; reason: string | null; canClaim: boolean }
+export interface CardWork { ref: string; state: string | null; eligible: boolean; reason: string | null; adapter: string | null; pkg: Record<string, unknown> | null; routineId: string | null; agentId?: string | null }
+/**
+ * O que a tela mostra do cartão. recovery: a rodada de recuperação (0 = a original) e quantas cabem; history: o que
+ * falhou em cada rodada (no fim que falhou); fallback: o motivo curto quando rodou no Ergon AI.
+ */
+export interface CardView { ref: string; where: 'local' | 'preparing' | 'remote'; badge: Badge | null; jobState: string | null; canSend: boolean; reason: string | null; canClaim: boolean;
+  recovery: { round: number; of: number }; history: RoundFailure[]; fallback: string | null }
+/** rodadas de recuperação do World (RECOVERY_ROUNDS) */
+export const RECOVERY_ROUNDS = 3;
+const NO_CLOUD_TASK = 'Este tipo de trabalho ainda não roda na nuvem.';
 
 /** Pacote do adaptador web_feed: as buscas e os feeds que a rotina lê aqui, os mesmos endereços (até 10). */
 export function feedPackage(sources: readonly string[], params: ParamValues): { urls: string[] } | null {
@@ -106,19 +163,44 @@ export class CloudCards {
   readonly worldId: (ws: string) => string | null;
   /** leitura do World no máximo a cada tanto, por workspace (e só com cartão na nuvem) */
   readonly minMs: number;
+  /** cards do quadro (o agente com o modelo da pessoa); ausente: só as rotinas */
+  readonly tasks: CloudTasksHost | null;
   private lastAt = new Map<string, number>();
+  /** o que o World oferece (/v1/compat), por um tempo; null = ainda não se sabe */
+  private compat: { at: number; features: Set<string> } | null = null;
 
-  constructor(d: { db: Db; client: WorldClient; links: WorldLinks; routines: Routines; bus: Bus; worldId: (ws: string) => string | null; minMs?: number }) {
-    this.db = d.db; this.client = d.client; this.links = d.links; this.routines = d.routines; this.bus = d.bus; this.worldId = d.worldId; this.minMs = d.minMs ?? 20_000;
+  constructor(d: { db: Db; client: WorldClient; links: WorldLinks; routines: Routines; bus: Bus; worldId: (ws: string) => string | null; minMs?: number; tasks?: CloudTasksHost | null }) {
+    this.db = d.db; this.client = d.client; this.links = d.links; this.routines = d.routines; this.bus = d.bus; this.worldId = d.worldId; this.minMs = d.minMs ?? 20_000; this.tasks = d.tasks ?? null;
   }
+
+  /**
+   * O que o World oferece (GET /v1/compat, guardado por 10 min). World antigo, sem a rota: nada além das rotinas.
+   * Sem rede: o que se soube por último (ou nada).
+   */
+  async features(): Promise<Set<string>> {
+    if (this.compat && Date.now() - this.compat.at < 600_000) return this.compat.features;
+    try {
+      const c = await this.client.call<{ features?: unknown }>('GET', '/v1/compat');
+      const features = new Set(Array.isArray(c.features) ? c.features.filter((x): x is string => typeof x === 'string') : []);
+      this.compat = { at: Date.now(), features };
+    } catch (e) {
+      const st = (e as HttpError).status;
+      if (st === 404 || st === 400) this.compat = { at: Date.now(), features: new Set() };
+      else return this.compat?.features ?? new Set();
+    }
+    return this.compat.features;
+  }
+  /** o recurso está no World (sem a leitura ainda: não) */
+  has(feature: string): boolean { return !!this.compat?.features.has(feature); }
 
   row(ws: string, ref: string): Row | null { return this.db.get<Row>('SELECT * FROM world_cards WHERE workspace_id = ? AND card_ref = ?', ws, ref) ?? null; }
   private save(ws: string, ref: string, userId: string, x: Partial<Omit<Row, 'workspace_id' | 'card_ref' | 'user_id'>> & { status: Row['status']; intent_key: string }): void {
-    this.db.run(`INSERT INTO world_cards (workspace_id, card_ref, user_id, status, intent_key, handoff_id, generation, job_id, job_state, result_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    this.db.run(`INSERT INTO world_cards (workspace_id, card_ref, user_id, status, intent_key, handoff_id, generation, job_id, job_state, result_at, agent_id, task_input, recovery_round, recovery_log, model_fallback, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)
       ON CONFLICT (workspace_id, card_ref) DO UPDATE SET user_id = excluded.user_id, status = excluded.status, intent_key = excluded.intent_key, handoff_id = excluded.handoff_id,
-        generation = excluded.generation, job_id = excluded.job_id, job_state = excluded.job_state, result_at = excluded.result_at, updated_at = excluded.updated_at`,
-    ws, ref, userId, x.status, x.intent_key, x.handoff_id ?? null, x.generation ?? null, x.job_id ?? null, x.job_state ?? null, x.result_at ?? null, now());
+        generation = excluded.generation, job_id = excluded.job_id, job_state = excluded.job_state, result_at = excluded.result_at, agent_id = excluded.agent_id, task_input = excluded.task_input,
+        recovery_round = 0, recovery_log = NULL, model_fallback = NULL, updated_at = excluded.updated_at`,
+    ws, ref, userId, x.status, x.intent_key, x.handoff_id ?? null, x.generation ?? null, x.job_id ?? null, x.job_state ?? null, x.result_at ?? null, x.agent_id ?? null, this.db.seal(ws, x.task_input ?? null), now());
   }
   private patch(ws: string, ref: string, x: Partial<Row>): void {
     const keys = Object.keys(x) as Array<keyof Row>;
@@ -140,13 +222,13 @@ export class CloudCards {
     const base = { ref, adapter: null, pkg: null, routineId: null };
     if (!CARD_REF.test(ref)) return { ...base, state: null, eligible: false, reason: 'Cartão inválido.' };
     if (ref.startsWith('card:')) {
-      const t = this.db.get<{ completed: number; archived: number }>('SELECT completed, archived FROM tasks WHERE id = ? AND workspace_id = ?', ref.slice(5), ws);
-      if (!t || Number(t.archived)) return { ...base, state: null, eligible: false, reason: 'Cartão não encontrado.' };
-      if (Number(t.completed)) return { ...base, state: 'completed', eligible: false, reason: 'Já concluído.' };
-      const run = this.db.get<{ status: string }>("SELECT status FROM runs WHERE task_id = ? AND status IN ('queued', 'running', 'waiting_user') ORDER BY created_at DESC LIMIT 1", ref.slice(5));
-      const state = run?.status === 'running' ? 'running_local' : run?.status === 'waiting_user' ? 'waiting_user' : 'queued_local';
-      // o trabalho de um card é do agente (o motor de IA deste computador): ainda não tem executor na nuvem
-      return { ...base, state, eligible: false, reason: state === 'running_local' ? 'Espere esta etapa terminar.' : 'Este tipo de trabalho ainda não roda na nuvem.' };
+      const taskId = ref.slice(5);
+      if (!this.tasks) return this.legacyCard(ws, taskId);
+      const b = this.tasks.brief(ws, taskId);
+      const state = b.state === 'completed' ? 'completed' : b.state;
+      if (b.reason || !b.agentId) return { ...base, state, eligible: false, reason: b.reason ?? 'Cartão não encontrado.' };
+      if (!this.has('hermes_task')) return { ...base, state, eligible: false, reason: NO_CLOUD_TASK };
+      return { ref, routineId: null, agentId: b.agentId, state, eligible: true, reason: null, adapter: 'hermes_task', pkg: taskPackage(b, this.tasks.defaultModel(ws)) };
     }
     const routineId = ref.slice(7);
     let r: RoutineView;
@@ -164,11 +246,27 @@ export class CloudCards {
     return { ref, routineId, state, eligible: true, reason: null, adapter: el.adapter, pkg };
   }
 
+  /** Sem os cards do quadro na nuvem (instalação antiga): o motivo de sempre. */
+  private legacyCard(ws: string, taskId: string): CardWork {
+    const base = { ref: `card:${taskId}`, adapter: null, pkg: null, routineId: null };
+    const t = this.db.get<{ completed: number; archived: number }>('SELECT completed, archived FROM tasks WHERE id = ? AND workspace_id = ?', taskId, ws);
+    if (!t || Number(t.archived)) return { ...base, state: null, eligible: false, reason: 'Cartão não encontrado.' };
+    if (Number(t.completed)) return { ...base, state: 'completed', eligible: false, reason: 'Já concluído.' };
+    const run = this.db.get<{ status: string }>("SELECT status FROM runs WHERE task_id = ? AND status IN ('queued', 'running', 'waiting_user') ORDER BY created_at DESC LIMIT 1", taskId);
+    const state = run?.status === 'running' ? 'running_local' : run?.status === 'waiting_user' ? 'waiting_user' : 'queued_local';
+    return { ...base, state, eligible: false, reason: state === 'running_local' ? 'Espere esta etapa terminar.' : NO_CLOUD_TASK };
+  }
+
+  private history(row: Row | null): RoundFailure[] {
+    try { return (JSON.parse(row?.recovery_log ?? '[]') as RoundFailure[]).filter((x) => x && typeof x.reason === 'string').map((x) => ({ round: Number(x.round) || 0, reason: cut(x.reason, 300) })); } catch { return []; }
+  }
+
   view(ws: string, ref: string, routine?: RoutineView): CardView {
     const row = this.row(ws, ref);
-    if (row?.status === 'remote') return { ref, where: 'remote', badge: badgeOf(row.job_state), jobState: row.job_state, canSend: false, reason: null, canClaim: !!row.job_state && TERMINAL.includes(row.job_state) };
+    const extra = { recovery: { round: Number(row?.recovery_round ?? 0), of: RECOVERY_ROUNDS }, history: row?.status === 'remote' && row.job_state && TERMINAL.includes(row.job_state) && row.job_state !== 'succeeded' ? this.history(row) : [], fallback: row?.model_fallback ?? null };
+    if (row?.status === 'remote') return { ref, where: 'remote', badge: badgeOf(row.job_state, Number(row.recovery_round ?? 0)), jobState: row.job_state, canSend: false, reason: null, canClaim: !!row.job_state && TERMINAL.includes(row.job_state), ...extra };
     const w = this.work(ws, ref, routine);
-    return { ref, where: row?.status === 'preparing' ? 'preparing' : 'local', badge: null, jobState: null, canSend: w.eligible, reason: w.reason, canClaim: false };
+    return { ref, where: row?.status === 'preparing' ? 'preparing' : 'local', badge: null, jobState: null, canSend: w.eligible, reason: w.reason, canClaim: false, ...extra, history: [] };
   }
 
   /** As rotinas do workspace (cada uma, um cartão) e os cards que já foram à nuvem. */
@@ -192,9 +290,10 @@ export class CloudCards {
 
   /** Aceito pelo World: daqui em diante o cartão é dele; a fila e o agendador daqui o pulam. */
   private accepted(ws: string, ref: string, v: HandoffView): CardView {
-    this.patch(ws, ref, { status: 'remote', handoff_id: v.handoffId, job_id: v.jobId, job_state: v.jobState ?? 'queued', generation: v.owner?.generation ?? null, result_at: null });
+    this.patch(ws, ref, { status: 'remote', handoff_id: v.handoffId, job_id: v.jobId, job_state: v.jobState ?? 'queued', generation: v.owner?.generation ?? null, result_at: null, recovery_round: Number(v.recoveryRound ?? 0) });
     setRemoteHolder(this.db, ws, ref, 'world');
     if (ref.startsWith('rotina:')) this.routines.handedOff(ws, ref.slice(7));
+    else if (ref.startsWith('card:')) this.tasks?.handedOff(ws, ref.slice(5));
     return this.view(ws, ref);
   }
 
@@ -203,6 +302,7 @@ export class CloudCards {
     const c = this.ctx(userId, ws);
     let row = this.row(ws, ref);
     if (row?.status === 'remote') throw new HttpError(409, 'already_remote', ERRORS.already_remote[1]);
+    if (ref.startsWith('card:') && this.tasks) await this.features();
     // cartão que não pode ir: diz o motivo sem falar com o World
     const w = this.work(ws, ref);
     if (!w.eligible || !w.adapter || !w.pkg) throw new HttpError(409, 'not_portable', w.reason ?? ERRORS.not_portable[1]);
@@ -215,9 +315,10 @@ export class CloudCards {
       if (h.status !== 'preparing' && h.status !== 'staged') { this.drop(ws, ref); row = null; h = null; }
     }
     if (!row || row.status !== 'preparing') {
-      row = { workspace_id: ws, card_ref: ref, user_id: userId, status: 'preparing', intent_key: `int-${crypto.randomBytes(12).toString('hex')}`, handoff_id: null, generation: null, job_id: null, job_state: null, result_at: null, checked_at: null };
+      row = { workspace_id: ws, card_ref: ref, user_id: userId, status: 'preparing', intent_key: `int-${crypto.randomBytes(12).toString('hex')}`, handoff_id: null, generation: null, job_id: null, job_state: null, result_at: null, checked_at: null,
+        agent_id: w.agentId ?? null, task_input: typeof w.pkg.instructions === 'string' ? w.pkg.instructions : null };
       this.save(ws, ref, userId, row); // gravada antes de sair: depois de uma queda, a mesma intenção
-    }
+    } else if (w.agentId) this.patch(ws, ref, { agent_id: w.agentId, task_input: this.db.seal(ws, typeof w.pkg.instructions === 'string' ? w.pkg.instructions : null) });
     if (!h) {
       h = await call<HandoffView>('POST', '/v1/jobs/handoffs/prepare', { workspaceId: c.sws, cardRef: ref, cardState: w.state, adapter: w.adapter, routineRef: w.routineId ? `rotina:${w.routineId}` : ref, intentKey: row.intent_key })
         .catch((e) => this.fail(ws, ref, e));
@@ -225,6 +326,8 @@ export class CloudCards {
       if (h.status === 'committed') return this.accepted(ws, ref, h);
       if (h.status !== 'preparing' && h.status !== 'staged') { this.drop(ws, ref); throw new HttpError(410, 'handoff_expired', ERRORS.handoff_expired[1]); }
     }
+    // o agente com o modelo da pessoa: a chave própria do provedor vai logo depois do prepare (lida aqui, só no servidor)
+    if (w.adapter === 'hermes_task') await this.grant(ws, h.handoffId, w.pkg, call).catch((e) => this.fail(ws, ref, e));
     if (h.status === 'preparing') {
       await call('POST', `/v1/jobs/handoffs/${h.handoffId}/stage`, { sequence: 1, stageId: `${ref}:inicio`, safeToRetry: true, nextAction: 'rodar a rotina', package: w.pkg, checksum: packageChecksum(w.pkg) })
         .catch((e) => this.fail(ws, ref, e));
@@ -243,6 +346,22 @@ export class CloudCards {
       throw new HttpError(503, 'world_offline', OFFLINE);
     }
     return this.accepted(ws, ref, done);
+  }
+
+  /**
+   * Chave do provedor do agente para a tarefa rodar com o modelo dele (POST …/model-grant). Só provedor de chave de API
+   * guardada neste computador; login por assinatura nunca vai. Sem chave, ou recusada: nada — o World roda no Ergon AI e
+   * avisa. A chave não entra em log nem em resposta.
+   */
+  private async grant(ws: string, handoffId: string, pkg: Record<string, unknown>, call: <T>(method: string, p: string, body?: unknown) => Promise<T>): Promise<void> {
+    const m = pkg.model as { provider?: string; id?: string } | undefined;
+    if (!m?.provider || !m.id || !DELEGATED.includes(m.provider) || !this.tasks || !this.has('model_grant')) return;
+    const apiKey = this.tasks.providerKey(ws, m.provider);
+    if (!apiKey) return;
+    await call('POST', `/v1/jobs/handoffs/${handoffId}/model-grant`, { provider: m.provider, model: m.id, apiKey }).catch((e: HttpError) => {
+      // posse perdida, envio vencido, pausa pedida: o envio para; o resto (provedor ou chave recusados) só troca de modelo
+      if (['fenced', 'handoff_expired', 'world_offline', 'rate_limited', 'handoff_state'].includes(e.code)) throw e;
+    });
   }
 
   /** Cartões deste workspace que precisam de leitura do World (na nuvem ainda sem resultado, ou com envio aberto). */
@@ -278,29 +397,85 @@ export class CloudCards {
       const w = cards.find((x) => x.cardRef === r.card_ref);
       if (!w) continue;
       if (w.holder === 'world') {
-        if (w.jobState !== r.job_state || w.generation !== r.generation) { this.patch(ws, r.card_ref, { job_state: w.jobState, job_id: w.jobId ?? r.job_id, generation: w.generation, checked_at: now() }); changed = true; }
-        if (w.jobState && TERMINAL.includes(w.jobState) && !r.result_at) { await this.attach(userId, ws, { ...r, job_id: w.jobId ?? r.job_id, job_state: w.jobState }); changed = true; }
+        const round = Number(w.recoveryRound ?? r.recovery_round ?? 0);
+        if (w.jobState !== r.job_state || w.generation !== r.generation || round !== Number(r.recovery_round ?? 0)) { this.patch(ws, r.card_ref, { job_state: w.jobState, job_id: w.jobId ?? r.job_id, generation: w.generation, recovery_round: round, checked_at: now() }); changed = true; }
+        if (w.jobState && TERMINAL.includes(w.jobState) && !r.result_at) { await this.attach(userId, ws, { ...this.row(ws, r.card_ref)!, job_id: w.jobId ?? r.job_id, job_state: w.jobState }); changed = true; }
       }
     }
-    if (changed) this.bus.publish(ws, 'routines.changed', {});
+    if (changed) { this.bus.publish(ws, 'routines.changed', {}); this.bus.publish(ws, 'tasks.changed', {}); }
   }
 
-  /** O resultado do Job (cifrado para os aparelhos da pessoa) entra no mesmo cartão. */
+  /**
+   * O fim do Job. Falhou com rodada de recuperação criada (`recovery.next`): não é o fim — o cartão segue a rodada nova.
+   * Terminou: o resultado (cifrado para os aparelhos da pessoa) entra no mesmo cartão. Card do quadro: volta a este
+   * computador e a resposta entra como a de uma execução daqui (o card anda como andaria). Falha final: o cartão fica
+   * "Falhou na nuvem", com o que falhou em cada rodada.
+   */
   private async attach(userId: string, ws: string, r: Row): Promise<void> {
     if (!r.job_id) return;
     const c = this.ctx(userId, ws);
-    const j = await this.client.call<{ state: string; reason: string | null; result: string | null }>('GET', `/v1/jobs/${r.job_id}`, undefined, c.session);
-    let text: { summary: string; output: string };
-    if (j.state === 'succeeded') {
-      let opened: unknown = null;
-      try { opened = j.result ? openJobResult(r.job_id, j.result, c.deviceId, c.keys.x25519) : null; } catch { opened = null; }
-      text = opened ? feedResultText(opened) : { summary: 'Concluído na nuvem', output: 'O resultado foi cifrado para outro aparelho seu.' };
-    } else text = { summary: 'Falhou na nuvem', output: j.reason ? `Motivo: ${String(j.reason).slice(0, 300)}` : '' };
-    if (r.card_ref.startsWith('rotina:')) {
-      try { this.routines.recordRemote(ws, r.card_ref.slice(7), { key: r.job_id, status: j.state === 'succeeded' ? 'succeeded' : 'failed', ...text }); } catch { /* rotina removida: o estado fica no cartão */ }
+    const get = (id: string) => this.client.call<JobView>('GET', `/v1/jobs/${id}`, undefined, c.session);
+    let jobId = r.job_id; let j = await get(jobId);
+    for (let i = 0; i < 6 && j.state === 'failed' && typeof j.recovery?.next === 'string' && j.recovery.next; i++) {
+      jobId = j.recovery.next;
+      j = await get(jobId);
     }
-    this.patch(ws, r.card_ref, { result_at: now(), job_state: j.state });
+    const round = Number(j.recovery?.round ?? r.recovery_round ?? 0);
+    const log = Array.isArray(j.recovery?.log) ? j.recovery!.log.map((x) => ({ round: Number(x.round) || 0, reason: cut(String(x.reason ?? ''), 300) })) : this.history(r);
+    if (!TERMINAL.includes(j.state)) {
+      // uma rodada de recuperação nova, esperando ou rodando: o selo mostra a rodada
+      this.patch(ws, r.card_ref, { job_id: jobId, job_state: j.state, recovery_round: round, recovery_log: JSON.stringify(log), checked_at: now() });
+      return;
+    }
+    const fb = fallbackReason(j.modelFallback);
+    let opened: unknown = null;
+    if (j.state === 'succeeded') { try { opened = j.result ? openJobResult(jobId, j.result, c.deviceId, c.keys.x25519) : null; } catch { opened = null; } }
+    const failures = j.state === 'succeeded' ? log : [...log, { round, reason: cut(String(j.reason ?? 'sem motivo informado'), 300) }];
+    const fbText = fb ?? fallbackReason((opened as { modelFallback?: unknown } | null)?.modelFallback);
+    const record = () => this.db.run(`INSERT OR IGNORE INTO world_cloud_results (job_id, workspace_id, user_id, card_ref, outcome, recovered, fallback, reason, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      jobId, ws, userId, r.card_ref, j.state === 'succeeded' ? 'concluido' : 'falhou', j.state === 'succeeded' && round > 0 ? 1 : 0, fbText, j.state === 'succeeded' ? null : cut(String(j.reason ?? ''), 300), now());
+    if (r.card_ref.startsWith('card:') && this.tasks) {
+      const taskId = r.card_ref.slice(5);
+      if (fbText && r.model_fallback !== fbText) this.tasks.note(ws, taskId, 'task.cloud_fallback', `Rodou no Ergon AI: ${fbText}`);
+      if (j.state === 'succeeded' && opened) {
+        // volta a este computador primeiro (o Job terminou); sem isso a resposta espera a próxima leitura
+        const back = await this.client.call<{ holder: string; generation: number }>('POST', '/v1/jobs/cards/claim', { workspaceId: c.sws, cardRef: r.card_ref, expectedGeneration: r.generation }, c.session).catch(() => null);
+        if (!back) { this.patch(ws, r.card_ref, { job_id: jobId, job_state: j.state, recovery_round: round, model_fallback: fbText }); return; }
+        this.patch(ws, r.card_ref, { status: 'local', generation: back.generation, job_id: jobId, job_state: j.state, result_at: now(), recovery_round: round, recovery_log: JSON.stringify(log), model_fallback: fbText });
+        setRemoteHolder(this.db, ws, r.card_ref, null);
+        const out = opened as { output?: unknown; model?: { provider?: string; id?: string } };
+        const model = out.model?.provider && out.model.id ? `${out.model.provider}/${out.model.id}` : null;
+        record();
+        this.tasks.finished(ws, taskId, { key: jobId, agentId: r.agent_id ?? '', input: r.task_input ?? '', status: 'succeeded', output: typeof out.output === 'string' ? out.output : '', error: null, model });
+        return;
+      }
+      if (j.state !== 'succeeded') this.tasks.note(ws, taskId, 'task.cloud_failed', `Falhou na nuvem: ${cut(String(j.reason ?? 'sem motivo informado'), 200)}`);
+    } else if (r.card_ref.startsWith('rotina:')) {
+      const text = j.state === 'succeeded'
+        ? (opened ? feedResultText(opened) : { summary: 'Concluído na nuvem', output: 'O resultado foi cifrado para outro aparelho seu.' })
+        : { summary: 'Falhou na nuvem', output: j.reason ? `Motivo: ${String(j.reason).slice(0, 300)}` : '' };
+      try { this.routines.recordRemote(ws, r.card_ref.slice(7), { key: jobId, status: j.state === 'succeeded' ? 'succeeded' : 'failed', ...text }); } catch { /* rotina removida: o estado fica no cartão */ }
+    }
+    record();
+    this.patch(ws, r.card_ref, { result_at: now(), job_id: jobId, job_state: j.state, recovery_round: round, recovery_log: JSON.stringify(failures), model_fallback: fbText });
   }
+
+  /**
+   * "Enquanto você esteve fora": o que chegou da nuvem desde a última vez que a pessoa viu o resumo, em números, e o
+   * detalhe de cada um (sob pedido, na tela). seen: marca tudo como visto.
+   */
+  summary(userId: string, ws: string): { counts: { concluidos: number; recuperados: number; falharam: number; ergonAi: number }; items: Array<{ ref: string; outcome: string; recovered: boolean; fallback: string | null; reason: string | null; at: string }> } {
+    const rows = this.db.all<{ card_ref: string; outcome: string; recovered: number; fallback: string | null; reason: string | null; at: string }>(
+      'SELECT card_ref, outcome, recovered, fallback, reason, at FROM world_cloud_results WHERE user_id = ? AND workspace_id = ? AND seen = 0 ORDER BY at DESC LIMIT 200', userId, ws);
+    return {
+      counts: {
+        concluidos: rows.filter((x) => x.outcome === 'concluido').length, recuperados: rows.filter((x) => Number(x.recovered)).length,
+        falharam: rows.filter((x) => x.outcome === 'falhou').length, ergonAi: rows.filter((x) => x.fallback).length,
+      },
+      items: rows.map((x) => ({ ref: x.card_ref, outcome: x.outcome, recovered: !!Number(x.recovered), fallback: x.fallback, reason: x.reason, at: x.at })),
+    };
+  }
+  seen(userId: string, ws: string): void { this.db.run('UPDATE world_cloud_results SET seen = 1 WHERE user_id = ? AND workspace_id = ? AND seen = 0', userId, ws); }
 
   /** "Trazer para este computador": só com o Job do World terminado; o cartão volta a ser local (nada volta sozinho). */
   async claim(userId: string, ws: string, ref: string): Promise<CardView> {

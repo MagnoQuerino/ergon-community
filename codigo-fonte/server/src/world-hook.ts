@@ -14,6 +14,23 @@ import type { Vault } from './security/keys.ts';
 import type { HermesControlClient } from './services/hermes.ts';
 import type { AgentLimits } from './services/capacity.ts';
 import type { Routines } from './services/routines.ts';
+import type { CloudTaskBrief } from './services/teamwork.ts';
+
+/**
+ * Cards do quadro que rodam na nuvem (agente com o modelo da pessoa): o que o card mandaria ao agente, o aceite, a
+ * resposta de volta no mesmo card e a chave do provedor do agente (lida só aqui no servidor; nunca vai à tela nem ao log).
+ */
+export interface CloudTasksHost {
+  brief(workspaceId: string, taskId: string): CloudTaskBrief;
+  handedOff(workspaceId: string, taskId: string): void;
+  finished(workspaceId: string, taskId: string, r: { key: string; agentId: string; input: string; status: 'succeeded' | 'failed'; output: string | null; error: string | null; model: string | null }): void;
+  /** a chave própria do provedor (OpenAI, Anthropic, DeepSeek, OpenRouter) guardada neste computador; null: não há */
+  providerKey(workspaceId: string, provider: string): string | null;
+  /** o modelo padrão da equipe (para o agente sem modelo próprio) */
+  defaultModel(workspaceId: string): { provider: string | null; model: string | null };
+  /** uma linha curta no histórico do card */
+  note(workspaceId: string, taskId: string, action: string, text: string): void;
+}
 
 export interface WorldStatus {
   /** o módulo opcional está nesta instalação */
@@ -37,6 +54,8 @@ export interface WorldHost {
   controlFor(workspaceId: string): HermesControlClient | null;
   routines: Routines;
   limits: AgentLimits;
+  /** cards do quadro na nuvem; ausente = só as rotinas vão */
+  tasks?: CloudTasksHost;
 }
 
 export interface WorldModule {

@@ -95,7 +95,8 @@ import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PA
 import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard, ensureBoards, getTask, taskLog, updateTask, userBoard } from './services/tasks.ts';
 import { chaveDaColuna } from './services/colunas.ts';
 import { USER_COLUMNS } from './services/seed.ts';
-import { loadWorld } from './world-hook.ts';
+import { loadWorld, type CloudTasksHost } from './world-hook.ts';
+import { providerKeyOf, saveProviderKey } from './services/provider-keys.ts';
 import { exportBlueprint } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
@@ -1492,6 +1493,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = owner(req);
     const p = (req.params as { provider: string }).provider;
     const r = await aiOf(a.workspaceId).setByok(p, (req.body as { key: string }).key);
+    // a chave dos provedores aceitos na nuvem também fica aqui, cifrada no cofre do workspace: o trabalho que vai para o
+    // Ergon World continua com o modelo da pessoa (Termos de uso); nunca vai à tela nem ao registro
+    saveProviderKey(integrations, a.workspaceId, p, (req.body as { key: string }).key);
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok', evidence: { provider: p, verified: r.verified }, result: 'chave própria conectada' });
     return r;
   });
@@ -1518,6 +1522,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = owner(req);
     const p = (req.params as { provider: string }).provider;
     await aiOf(a.workspaceId).removeByok(p);
+    saveProviderKey(integrations, a.workspaceId, p, null);
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.byok_remove', evidence: { provider: p }, result: 'chave própria removida' });
     return { ok: true };
   });
@@ -3062,7 +3067,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   // cliente do Ergon World (server/src/world): sem o endereço do World, só o estado -----------------------------
   app.get('/api/distribution', async () => ({ distribution: cfg.distribution, world: world?.status() ?? { available: false } }));
-  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits });
+  // cards do quadro na nuvem: o mesmo pedido que o agente receberia aqui, e a resposta de volta pelo mesmo caminho
+  const cloudTasks: CloudTasksHost = {
+    brief: (ws, taskId) => teamwork.cloudBrief(ws, taskId),
+    handedOff: (ws, taskId) => teamwork.cloudHandedOff(ws, taskId),
+    finished: (ws, taskId, r) => { teamwork.cloudFinished(ws, taskId, r); },
+    providerKey: (ws, provider) => providerKeyOf(integrations, ws, provider),
+    defaultModel: (ws) => ({ provider: aiOf(ws).cachedDefaultProvider(), model: aiOf(ws).cachedDefault() }),
+    note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
+  };
+  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks });
 
   // Frontend compilado --------------------------------------------------------------------------------------
   if (cfg.webDir && fs.existsSync(path.join(cfg.webDir, 'index.html'))) {
