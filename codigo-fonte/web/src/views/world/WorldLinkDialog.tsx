@@ -8,7 +8,7 @@ export interface ConnectedDevice { id: string; name: string; lastSeenAt: string 
 export interface LoginLimit { kind: 'session_limit' | 'device_limit'; devices: ConnectedDevice[]; canRetry: boolean }
 
 const ERROS = ['invalid_credentials', 'email_in_use', 'invalid_request', 'too_many_attempts', 'account_locked', 'email_unconfigured', 'invalid_code',
-  'invalid_local_password', 'password_short', 'invalid_email', 'world_login_again', 'world_offline'] as const;
+  'invalid_local_password', 'password_short', 'invalid_email', 'world_login_again', 'world_offline', 'invite', 'seats', 'sync_forbidden', 'owner', 'payer', 'has_subscription'] as const;
 /** O erro das contas no idioma da tela (o código vem do servidor); os outros, como vieram. */
 export function erroConta(e: unknown, t: ReturnType<typeof useTw>): string {
   const code = e instanceof ApiError ? e.code : '';

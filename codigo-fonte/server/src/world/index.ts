@@ -329,13 +329,78 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return client.call('PUT', `/v1/workspaces/${w}/budgets/${acc}`, { capDracmas: cap }, sessionOf(a.userId));
       });
       app.post('/api/world/billing/checkout', async (req) => {
-        const b = req.body as { sku?: string; idempotencyKey?: string };
-        if (typeof b?.sku !== 'string' || typeof b.idempotencyKey !== 'string') throw new HttpError(400, 'invalid', 'sku e chave da intenção obrigatórios');
+        const b = (req.body ?? {}) as { sku?: unknown; seats?: unknown; jobPacks?: unknown; idempotencyKey?: unknown };
+        if (typeof b.sku !== 'string' || !/^[a-z0-9_]{2,40}$/.test(b.sku) || typeof b.idempotencyKey !== 'string') throw new HttpError(400, 'invalid', 'sku e chave da intenção obrigatórios');
+        // o carrinho: com um plano, vagas adicionais e pacotes de Jobs vão na mesma assinatura (o World confere)
+        const qty = (v: unknown, nome: string): number | undefined => {
+          if (v === undefined || v === null || v === 0) return undefined;
+          if (!Number.isInteger(v) || (v as number) < 0 || (v as number) > 1000) throw new HttpError(400, 'invalid', `${nome}: quantidade inválida`);
+          return v as number;
+        };
+        const seats = qty(b.seats, 'pessoas adicionais'); const jobPacks = qty(b.jobPacks, 'pacotes de Jobs');
         const back = `${cfg.publicUrl}/?world=`;
         // plano ou recarga: são do workspace ligado ao World; quem compra é a pessoa dona
         const a = h.owner(req);
-        const body = { sku: b.sku, idempotencyKey: b.idempotencyKey, successUrl: `${back}pago`, cancelUrl: `${back}cancelado`, workspaceId: needWorld(a) };
+        const body = { sku: b.sku, ...(seats ? { seats } : {}), ...(jobPacks ? { jobPacks } : {}), idempotencyKey: b.idempotencyKey, successUrl: `${back}pago`, cancelUrl: `${back}cancelado`, workspaceId: needWorld(a) };
         return client.call('POST', '/v1/billing/checkout', body, sessionOf(a.userId));
+      });
+
+      // ---------------------------------------------------------------- pessoas no workspace World ligado
+      // o World decide quem pode o quê (dono, admin, editor, leitor); aqui só passa adiante, com a sessão da pessoa
+      const ROLE = (v: unknown): 'admin' | 'editor' | 'viewer' => {
+        if (v !== 'admin' && v !== 'editor' && v !== 'viewer') throw new HttpError(400, 'invalid', 'papel inválido (admin, editor ou viewer)');
+        return v;
+      };
+      const ACC = (v: unknown): string => { const s = String(v ?? ''); if (!/^acc_[a-f0-9]{32}$/.test(s)) throw new HttpError(400, 'invalid', 'pessoa inválida'); return s; };
+      app.get('/api/world/members', async (req) => {
+        const a = h.auth(req); const w = worldWs(a);
+        if (!w) return { myRole: null, seats: 0, members: [], invites: [], awaitingKey: [] };
+        const s = sessionOf(a.userId);
+        const r = await client.call<{ myRole: string; members: Array<{ accountId: string }> }>('GET', `/v1/sync/workspaces/${w}/members`, undefined, s);
+        // quem entrou e ainda espera a chave do workspace (só quem administra entrega, de um computador que a tem)
+        let awaitingKey: string[] = [];
+        if (['owner', 'admin'].includes(r.myRole) && sync.status(a.workspaceId).enabled) {
+          const need = await client.call<{ devices: Array<{ accountId?: string }> }>('GET', `/v1/sync/workspaces/${w}/devices-needing-key`, undefined, s).catch(() => ({ devices: [] }));
+          awaitingKey = [...new Set(need.devices.map((d) => d.accountId).filter((x): x is string => !!x && r.members.some((m) => m.accountId === x)))];
+        }
+        return { ...r, awaitingKey };
+      });
+      app.post('/api/world/members/invites', async (req) => {
+        const a = h.auth(req); const w = needWorld(a);
+        return client.call('POST', `/v1/sync/workspaces/${w}/invites`, { role: ROLE((req.body as { role?: unknown } | undefined)?.role) }, sessionOf(a.userId));
+      });
+      app.delete('/api/world/members/invites/:id', async (req) => {
+        const a = h.auth(req); const w = needWorld(a); const id = String((req.params as { id: string }).id);
+        if (!/^inv_[a-f0-9]{32}$/.test(id)) throw new HttpError(400, 'invalid', 'convite inválido');
+        return client.call('DELETE', `/v1/sync/workspaces/${w}/invites/${id}`, undefined, sessionOf(a.userId));
+      });
+      app.put('/api/world/members/:account/role', async (req) => {
+        const a = h.auth(req); const w = needWorld(a);
+        return client.call('PUT', `/v1/sync/workspaces/${w}/members/${ACC((req.params as { account: string }).account)}/role`, { role: ROLE((req.body as { role?: unknown } | undefined)?.role) }, sessionOf(a.userId));
+      });
+      /**
+       * Tirar alguém do workspace: o acesso dele cai na hora e o World exige girar a chave antes de novas mudanças.
+       * Este aplicativo ainda não gira a chave (ver o relatório): a resposta avisa, e o envio do Sync recusa até lá.
+       */
+      app.delete('/api/world/members/:account', async (req) => {
+        const a = h.auth(req); const w = needWorld(a);
+        await client.call('DELETE', `/v1/sync/workspaces/${w}/members/${ACC((req.params as { account: string }).account)}`, undefined, sessionOf(a.userId));
+        return { ok: true, rotationRequired: true };
+      });
+      app.post('/api/world/members/transfer', async (req) => {
+        const a = h.auth(req); const w = needWorld(a);
+        await client.call('POST', `/v1/sync/workspaces/${w}/transfer`, { toAccountId: ACC((req.body as { toAccountId?: unknown } | undefined)?.toAccountId) }, sessionOf(a.userId));
+        await L().renew(a.userId).catch(() => undefined);
+        return { ok: true };
+      });
+      /** Aceitar um convite: o workspace World entra na lista da conta; depois, liga-se um workspace daqui a ele. */
+      app.post('/api/world/invites/accept', async (req) => {
+        const a = h.auth(req);
+        const token = String((req.body as { token?: unknown } | undefined)?.token ?? '').trim();
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(token)) throw new HttpError(400, 'invalid', 'Código de convite inválido.');
+        const r = await client.call<{ workspaceId: string; role: string }>('POST', '/v1/sync/invites/accept', { token }, sessionOf(a.userId));
+        await L().renew(a.userId).catch(() => undefined);
+        return r;
       });
       app.post('/api/world/billing/portal', async (req) => client.call('POST', '/v1/billing/portal', { returnUrl: `${cfg.publicUrl}/?world=portal` }, sessionOf(h.auth(req).userId)));
       const change = (path: string) => async (req: FastifyRequest) => {

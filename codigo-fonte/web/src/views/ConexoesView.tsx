@@ -54,7 +54,7 @@ interface EstadoConexoes { liberarTudo: boolean; aprovarDepoisDeLer?: boolean; a
 interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => void }
 
 /**
- * Conexões, nesta ordem: as contas de IA (recomendando a Nous), o WhatsApp e as contas Microsoft 365 e Google em
+ * Conexões, nesta ordem: as contas de IA (o Ergon AI como a melhor escolha), o WhatsApp e as contas Microsoft 365 e Google em
  * destaque, e depois os aplicativos de tarefas e quadros, na ordem de fama no Brasil. "Conectado" só depois de
  * conferir com o serviço; "em breve" diz o que falta.
  */
@@ -70,7 +70,6 @@ export function ConexoesView() {
   const [q, setQ] = useState('');
   const [onlyOn, setOnlyOn] = useState(false);
   const [risks, setRisks] = useState(false);
-  const [eaiRecomendado, setEaiRecomendado] = useState(false);
   useEffect(() => {
     const m = location.hash.match(/(microsoft|google)=([a-z-]+)/);
     if (m) {
@@ -126,8 +125,9 @@ export function ConexoesView() {
         <h3>{t('conexoes.ia.titulo')}</h3>
         <p className="muted small">{t('conexoes.ia.texto')}</p>
         <ModeloPadrao />
-        {ErgonAi && <Suspense fallback={null}><ErgonAi onRecomendado={setEaiRecomendado} /></Suspense>}
-        <AiAccounts destaque={!eaiRecomendado} />
+        {ErgonAi && <Suspense fallback={null}><ErgonAi /></Suspense>}
+        {/* o Ergon AI é a melhor escolha: a Nous fica sem destaque (decisão do dono) */}
+        <AiAccounts destaque={false} />
       </section>
 
       {wa && (

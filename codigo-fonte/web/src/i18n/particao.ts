@@ -34,7 +34,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
     'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
-    'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts',
+    'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts', 'views/world/Gestao.tsx', 'views/world/pessoas.ts', 'views/world/carrinho.ts',
   ],
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [

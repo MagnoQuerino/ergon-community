@@ -8,8 +8,9 @@ import { linhaDoResumo, type ResumoFora } from './nuvem-cartao.ts';
 import { figura, predio, type Imagem, type Personagem } from './arte.ts';
 import { tw, twn, useTw } from './textos.ts';
 import type { Gesture } from '../../iso/figures.ts';
+import { AceitarConvite, CarrinhoPainel, DracmasPainel, EquipeFaixa, ErgonAiPainel, NuvemPainel, PessoasPainel, PlanoPainel, WorkspacesPainel, type BillingWorld, type CatalogoWorld } from './Gestao.tsx';
 
-interface Status { configured: boolean; me: { displayName: string }; deviceLimit: LoginLimit | null; link: { boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean } | null }
+interface Status { configured: boolean; me: { displayName: string }; deviceLimit: LoginLimit | null; link: { boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean; workspaces?: Array<{ workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }> } | null }
 interface Item { sku: string; kind: string; name: string; priceCents: string | null; sellable: boolean; tier?: string | null; interval?: 'month' | 'year'; people?: number; jobSlots?: number; monthlyDracmas?: string; seatSku?: string }
 interface Catalog { items: Item[] }
 interface Billing { workspaceId: string | null; role: string; entitlement: { status: string; plan_sku: string | null; tier: string | null; people: number; job_slots: number; effective_until: string | null }; seatsUsed: number }
@@ -23,7 +24,9 @@ const brl = (c: string | number | null | undefined) => (c == null ? tw('preco.aD
 const dr = (v: string | number) => fmtDracmas(Number(v));
 // i18n-ok: o fuso de Salvador (o dos créditos), não é texto de tela
 const dia = (iso: string | null) => (iso ? fmtData(iso, { dateStyle: 'short', timeZone: 'America/Bahia' }) : '—');
-const irConfig = () => { location.hash = '#configuracao?world'; };
+const calmoRolar = () => (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+/** Leva a uma seção da página (o painel do membro ou os workspaces do visitante conectado). */
+const irPara = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: calmoRolar(), block: 'start' });
 const calmo = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
@@ -35,7 +38,7 @@ const calmo = () => typeof matchMedia === 'function' && matchMedia('(prefers-red
 export default function MundoView() {
   const t = useTw();
   useIdioma();
-  const st = useResource<Status>('/api/world/status', []);
+  const st = useResource<Status>('/api/world/status', ['world.changed']);
   const s = st.data;
   const on = !!s?.configured;
   const bound = !!s?.link?.currentIsBound;
@@ -45,6 +48,7 @@ export default function MundoView() {
   const resumo = useResource<ResumoFora>(bound ? '/api/world/cards/summary' : null, []);
   const policy = useResource<Policy>(bound ? '/api/world/job-policy' : null, []);
   const [anual, setAnual] = useState(false);
+  const [planoCarrinho, setPlanoCarrinho] = useState<string | null>(null);
   const [conectar, setConectar] = useState(false);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState('');
@@ -83,8 +87,8 @@ export default function MundoView() {
     const cls = `btn btn--gold mundo-cta${grande ? ' mundo-cta--grande' : ''}`;
     if (!s) return null;
     if (!s.link) return <button className={cls} disabled={!on} onClick={() => setConectar(true)}><Icon name="compass" size={18} /> {t('pagina.entrar')}</button>;
-    if (!bound) return <button className={cls} onClick={irConfig}><Icon name="layers" size={18} /> {t('pagina.ligarWs')}</button>;
-    if (membro) return <button className={cls} onClick={irConfig}><Icon name="gear" size={18} /> {t('pagina.gerenciar')}</button>;
+    if (!bound) return <button className={cls} onClick={() => irPara('mundo-workspaces')}><Icon name="layers" size={18} /> {t('pagina.ligarWs')}</button>;
+    if (membro) return <button className={cls} onClick={() => irPara('painel-plano')}><Icon name="gear" size={18} /> {t('pagina.gerenciar')}</button>;
     return <button className={cls} onClick={verPlanos}><Icon name="check" size={18} /> {t('pagina.escolher')}</button>;
   };
 
@@ -93,9 +97,9 @@ export default function MundoView() {
     const cls = `btn ${destaque ? 'btn--gold' : 'btn--primary'} mundo-plano__cta`;
     const nome = nomeDe(p);
     if (!s?.link) return <button className={cls} disabled={!on} onClick={() => setConectar(true)}>{t('pagina.entrar')}</button>;
-    if (!bound) return <button className={cls} onClick={irConfig}>{t('pagina.ligarWs')}</button>;
+    if (!bound) return <button className={cls} onClick={() => irPara('mundo-workspaces')}>{t('pagina.ligarWs')}</button>;
     if (membro) return atual?.sku === p.sku ? <span className="mundo-plano__seu"><Icon name="check" size={16} /> {t('pagina.planos.seu')}</span>
-      : <button className={`btn ${destaque ? 'btn--gold' : ''} mundo-plano__cta`} onClick={irConfig}>{t('pagina.planos.mudar', { plano: nome })}</button>;
+      : <button className={`btn ${destaque ? 'btn--gold' : ''} mundo-plano__cta`} onClick={() => { setPlanoCarrinho(p.sku); irPara('painel-plano'); }}>{t('pagina.planos.mudar', { plano: nome })}</button>;
     if (!dono) return <p className="small mundo-plano__nota">{t('plano.quemCuida')}</p>;
     return <button className={cls} disabled={busy || !p.sellable} onClick={() => void checkout(p.sku)}>{t('pagina.planos.assinar', { plano: nome })}</button>;
   };
@@ -120,6 +124,7 @@ export default function MundoView() {
                 <div><dt>{t('pagina.membro.jobs')}</dt><dd>{e.job_slots}</dd></div>
                 <div className="mundo-numeros__largo"><dt>{t('pagina.membro.nuvem')}</dt><dd>{linhaDoResumo(resumo.data, t) ?? t('pagina.membro.emDia')}</dd></div>
               </dl>
+              <EquipeFaixa onGerenciar={() => irPara('painel-pessoas')} />
               <div className="mundo-heroi__acoes">{principal()}</div>
             </>
           ) : (
@@ -144,8 +149,20 @@ export default function MundoView() {
         <Viagem />
       </section>
 
+      {membro && <Painel nomeWorkspace={s?.link?.boundWorkspaceName ?? null} planoCarrinho={planoCarrinho} mine={(s?.link?.workspaces ?? []).filter((w) => w.role === 'owner')} />}
+
+      {/* ---------- conectado sem plano: o workspace que vai para o mundo e o convite recebido ---------- */}
+      {!membro && s?.link && (
+        <section className="mundo-secao mundo-painel__secao mundo-revela" id="mundo-workspaces" aria-labelledby="mundo-workspaces-titulo">
+          <header className="mundo-painel__cab"><span className="mundo-painel__icone" aria-hidden="true"><Icon name="layers" size={20} /></span>
+            <div><h2 id="mundo-workspaces-titulo">{t('painel.workspaces')}</h2><p>{t('painel.workspaces.texto')}</p></div></header>
+          <WorkspacesPainel />
+          <AceitarConvite compacto onDone={st.reload} />
+        </section>
+      )}
+
       {/* ---------- os benefícios ---------- */}
-      <section className="mundo-secao" aria-labelledby="mundo-beneficios">
+      {!membro && <section className="mundo-secao" aria-labelledby="mundo-beneficios">
         <header className="mundo-secao__cab mundo-revela">
           <h2 id="mundo-beneficios">{membro ? t('pagina.membro.beneficios') : t('pagina.beneficios.titulo')}</h2>
           {!membro && <p>{t('pagina.beneficios.sub')}</p>}
@@ -158,7 +175,7 @@ export default function MundoView() {
           <Beneficio arte={<ArteEquipe />} titulo={t('pagina.b.equipe.titulo')} texto={t('pagina.b.equipe.texto')} />
           <Beneficio arte={<ArteDracmas />} titulo={t('pagina.b.dracmas.titulo')} texto={t('pagina.b.dracmas.texto')} />
         </div>
-      </section>
+      </section>}
 
       {/* ---------- o convite para crescer (membro) ---------- */}
       {membro && proximo && dono && (
@@ -173,7 +190,7 @@ export default function MundoView() {
       )}
 
       {/* ---------- os planos (do catálogo do World) ---------- */}
-      {on && (
+      {on && !membro && (
         <section className="mundo-secao mundo-secao--planos" id="mundo-planos" aria-labelledby="mundo-planos-titulo">
           <header className="mundo-secao__cab mundo-revela">
             <h2 id="mundo-planos-titulo">{t('pagina.planos.titulo')}</h2>
@@ -211,11 +228,18 @@ export default function MundoView() {
               })}
             </div>
           )}
+          {bound && dono && cat.data && bill.data && (
+            <div className="mundo-painel__cartao mundo-carrinho-visitante mundo-revela">
+              <h3><Icon name="plus" size={16} /> {t('carrinho.titulo')}</h3>
+              <p className="muted small">{t('painel.plano.texto')}</p>
+              <CarrinhoPainel cat={cat.data as CatalogoWorld} bill={bill.data as unknown as BillingWorld} onMsg={(m) => setErro(m?.kind === 'error' ? m.text : '')} onDone={() => bill.reload()} />
+            </div>
+          )}
         </section>
       )}
 
       {/* ---------- perguntas rápidas ---------- */}
-      <section className="mundo-secao mundo-faq mundo-revela" aria-labelledby="mundo-faq">
+      {!membro && <section className="mundo-secao mundo-faq mundo-revela" aria-labelledby="mundo-faq">
         <h2 id="mundo-faq">{t('pagina.faq.titulo')}</h2>
         {(['privacidade', 'cancelar', 'local', 'dracmas'] as const).map((k) => (
           <details key={k}>
@@ -223,7 +247,7 @@ export default function MundoView() {
             <p>{t(`pagina.faq.${k}.r`)}</p>
           </details>
         ))}
-      </section>
+      </section>}
 
       {/* ---------- o convite final ---------- */}
       <section className="mundo-final mundo-revela" aria-labelledby="mundo-final">
@@ -241,6 +265,52 @@ export default function MundoView() {
       {conectar && s && <Conectar s={s} onClose={() => setConectar(false)} onDone={() => { setConectar(false); st.reload(); }} />}
     </div>
   );
+}
+
+const SECOES = [
+  { id: 'painel-plano', icone: 'check', titulo: 'painel.plano', texto: 'painel.plano.texto' },
+  { id: 'painel-pessoas', icone: 'users', titulo: 'painel.pessoas', texto: 'pessoas.texto' },
+  { id: 'painel-workspaces', icone: 'layers', titulo: 'painel.workspaces', texto: 'painel.workspaces.texto' },
+  { id: 'painel-dracmas', icone: 'coins', titulo: 'painel.dracmas', texto: 'creditos.titulo' },
+  { id: 'painel-nuvem', icone: 'cloud', titulo: 'painel.nuvem', texto: 'painel.nuvem.texto' },
+  { id: 'painel-ia', icone: 'globe', titulo: 'painel.ia', texto: 'painel.ia.texto' },
+] as const;
+
+/**
+ * O painel do membro (plano ativo): as seções da gestão do workspace no World, com a mesma cara da página — Plano (com
+ * o carrinho), Pessoas e papéis, Workspaces (e a sincronia), Dracmas, Nuvem e Ergon AI. A conta fica em Configurações.
+ */
+function Painel({ nomeWorkspace, planoCarrinho, mine }: { nomeWorkspace: string | null; planoCarrinho: string | null; mine: Array<{ workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }> }) {
+  const t = useTw();
+  const corpo: Record<(typeof SECOES)[number]['id'], ReactNode> = {
+    'painel-plano': <PlanoComCarrinho plano={planoCarrinho} />,
+    'painel-pessoas': <PessoasPainel nomeWorkspace={nomeWorkspace} />,
+    'painel-workspaces': <WorkspacesPainel comSync />,
+    'painel-dracmas': <DracmasPainel mine={mine} />,
+    'painel-nuvem': <NuvemPainel />,
+    'painel-ia': <ErgonAiPainel />,
+  };
+  return (
+    <div className="mundo-painel">
+      <nav className="mundo-painel__nav" aria-label={t('painel.nav')}>
+        {SECOES.map((x) => <a key={x.id} href={`#world`} onClick={(ev) => { ev.preventDefault(); irPara(x.id); }}><Icon name={x.icone} size={15} /> {t(x.titulo)}</a>)}
+      </nav>
+      {SECOES.map((x) => (
+        <section key={x.id} id={x.id} className="mundo-painel__secao mundo-revela" aria-labelledby={`${x.id}-t`}>
+          <header className="mundo-painel__cab">
+            <span className="mundo-painel__icone" aria-hidden="true"><Icon name={x.icone} size={20} /></span>
+            <div><h2 id={`${x.id}-t`}>{t(x.titulo)}</h2><p>{t(x.texto)}</p></div>
+          </header>
+          {corpo[x.id]}
+        </section>
+      ))}
+      <p className="muted small center">{t('painel.conta')} <a href="#configuracao?world">{t('pagina.gerenciar')}</a></p>
+    </div>
+  );
+}
+/** O plano do painel; o plano escolhido nos cartões ("Mudar para…") entra no carrinho. */
+function PlanoComCarrinho({ plano }: { plano: string | null }) {
+  return <PlanoPainel planoInicial={plano} />;
 }
 
 /** Conectar ao Ergon World, por cima da página: o mesmo formulário de Configurações. */

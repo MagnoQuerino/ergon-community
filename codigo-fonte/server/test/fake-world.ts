@@ -36,7 +36,21 @@ function checkHermesTask(s: Record<string, unknown>): string | null {
 
 interface Account { id: string; email: string; password: string; displayName: string; emailVerified: boolean }
 interface Device { id: string; accountId: string; name: string; publicKey: string; syncPublicKey: string; challenge: string; status: 'pending' | 'active' | 'revoked'; session: string | null; lastSeenAt: string }
-interface Workspace { id: string; owner: string; label: string | null; plan: string | null; head: number; changes: Array<Record<string, unknown>>; envelopes: Map<string, { keyVersion: number; wrapped: string }>; recovery: { keyVersion: number; wrapped: string } | null }
+interface Workspace { id: string; owner: string; label: string | null; plan: string | null; head: number; changes: Array<Record<string, unknown>>; envelopes: Map<string, { keyVersion: number; wrapped: string }>; recovery: { keyVersion: number; wrapped: string } | null;
+  /** quem entrou por convite (o dono fica em owner); papel e desde quando (world/src/sync.ts) */
+  members?: Map<string, { role: 'admin' | 'editor' | 'viewer'; since: string }>;
+  invites?: Array<{ id: string; role: string; tokenHash: string; expiresAt: number; createdAt: string; accepted: boolean }>;
+  /** vagas do plano (padrão: 3 com plano, 0 sem) */
+  seats?: number;
+  /** alguém saiu: a chave precisa girar antes de novas mudanças */
+  rotationRequired?: boolean;
+  /** a assinatura (itens do Stripe) e a recarga automática */
+  sub?: { items: Array<{ sku: string; quantity: number }> } | null;
+  autotopup?: Record<string, unknown> | null;
+  budgets?: Map<string, string | null> }
+type Role = 'owner' | 'admin' | 'editor' | 'viewer';
+const RANK: Record<string, number> = { viewer: 1, editor: 2, admin: 3, owner: 4 };
+const sha = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
 
 interface Owner { holder: 'local' | 'world'; deviceId: string | null; generation: number; leaseUntil: number; jobId: string | null }
 interface Handoff { id: string; ws: string; card: string; accountId: string; deviceId: string; intent: string; status: 'preparing' | 'staged' | 'committed' | 'rejected' | 'expired'; generation: number; adapter: string; routineRef: string; cardState: string; jobId: string | null; reason: string | null; checksum: string | null; pkg: unknown; expiresAt: number }
@@ -71,6 +85,8 @@ export class FakeWorld {
   features = ['web_feed', 'hermes_task', 'model_grant', 'recovery', 'job_policy'];
   /** chaves delegadas do modelo (por transferência; passam ao Job no aceite e às rodadas de recuperação) */
   grants = new Map<string, { provider: string; model: string; apiKey: string }>();
+  /** cada checkout pedido (workspace e itens), para os testes conferirem o carrinho */
+  checkouts: Array<{ ws: string; items: Array<{ sku: string; quantity: number }> }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
   delegated = ['openai', 'anthropic', 'deepseek', 'openrouter'];
   /** protocolo de recuperação por workspace (ausente = ligado) */
@@ -105,7 +121,7 @@ export class FakeWorld {
   }
 
   /** Simula o pagamento confirmado (o webhook do Stripe no World de verdade). */
-  activate(ws: string, plan = 'world_pro'): void { this.workspaces.get(ws)!.plan = plan; }
+  activate(ws: string, plan = 'world_pro', seats?: number): void { const w = this.workspaces.get(ws)!; w.plan = plan; w.sub ??= { items: [{ sku: plan, quantity: 1 }] }; if (seats !== undefined) w.seats = seats; }
   /** O executor do World: o Job passa a rodar (ou termina, com o resultado cifrado para os aparelhos da pessoa). */
   runJob(jobId: string, state: 'running' | 'succeeded' | 'failed', result?: unknown, reason = 'a fonte não respondeu'): string | null {
     const j = this.hjobs.get(jobId)!; j.state = state;
@@ -233,10 +249,13 @@ export class FakeWorld {
     if (!dev) return { fail: [401, 'unauthenticated'] };
     dev.lastSeenAt = new Date().toISOString();
     const acc = this.accounts.get(dev.accountId)!;
-    const mine = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && w.owner === acc.id ? w : null; };
+    /** o papel da conta no workspace (o dono pode ter o papel trocado nos testes por roles) */
+    const roleIn = (w: Workspace, accountId: string): Role | null => (w.owner === accountId ? (this.roles.get(accountId) as Role | undefined) ?? 'owner' : w.members?.get(accountId)?.role ?? null);
+    const mine = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && roleIn(w, acc.id) ? w : null; };
+    const owned = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && w.owner === acc.id ? w : null; };
     if (key === 'POST /v1/bindings') { this.bindings.push({ accountId: acc.id, localPersonId: b.localPersonId }); return { json: { ok: true } }; }
     if (key === 'POST /v1/authorize') {
-      const workspaces = [...this.workspaces.values()].filter((w) => w.owner === acc.id).map((w) => ({ workspaceId: w.id, label: w.label, role: this.roles.get(acc.id) ?? 'owner', status: w.plan ? 'active' : 'none', plan_sku: w.plan }));
+      const workspaces = [...this.workspaces.values()].filter((w) => roleIn(w, acc.id)).map((w) => ({ workspaceId: w.id, label: w.label, role: roleIn(w, acc.id), status: w.plan ? 'active' : 'none', plan_sku: w.plan }));
       return { json: { authorizedUntil: new Date(Date.now() + 900_000).toISOString(), account: { email: acc.email }, workspaces } };
     }
     if (key === 'GET /v1/devices') return { json: [...this.devices.values()].filter((d) => d.accountId === acc.id && d.status !== 'pending').map((d) => ({ id: d.id, name: d.name, status: d.status, current: d === dev, connected: !!d.session, lastSeenAt: d.lastSeenAt })) };
@@ -247,11 +266,56 @@ export class FakeWorld {
     // ---------------------------------------------------------------- plano, créditos e Jobs (respostas do servidor)
     if (key === 'GET /v1/billing/state') {
       const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
-      return { json: { workspaceId: w.id, role: 'owner', entitlement: { status: w.plan ? 'active' : 'none', plan_sku: w.plan, tier: w.plan ? 'pro' : null, people: w.plan ? 3 : 0, job_slots: w.plan ? 5 : 0, effective_until: null, grace_until: null }, seatsUsed: 1, subscription: null, items: [], invoices: [] } };
+      const role = roleIn(w, acc.id); const own = w.owner === acc.id;
+      return { json: { workspaceId: w.id, role: own ? 'owner' : role, entitlement: { status: w.plan ? 'active' : 'none', plan_sku: w.plan, tier: w.plan ? 'pro' : null, people: this.seatsOf(w), job_slots: w.plan ? 5 : 0, effective_until: null, grace_until: null }, seatsUsed: this.used(w),
+        subscription: own && w.sub ? { status: 'active', plan: w.plan, periodEnd: null, cancelAt: null } : null, items: own ? w.sub?.items ?? [] : [], invoices: [] } };
     }
     if (key === 'POST /v1/billing/checkout') {
-      const w = mine(b.workspaceId); if (!w) return { fail: [404, 'not_found'] };
-      return { json: { url: `https://checkout.stripe.com/c/pay/cs_test_${hex(8)}?ws=${w.id}&sku=${b.sku}` } };
+      const w = owned(b.workspaceId); if (!w) return { fail: [404, 'not_found'] };
+      // plano com vagas adicionais (seats) e pacotes de Jobs (jobPacks) numa assinatura só; recarga é pagamento à parte
+      const sku = String(b.sku ?? ''); const extra = [b.seats, b.jobPacks].filter((x) => x !== undefined && x !== null);
+      if (extra.some((x) => !Number.isInteger(x) || x < 0 || x > 1000)) return { fail: [400, 'addon'] };
+      if (!sku.startsWith('world_') && extra.some((x) => x > 0)) return { fail: [400, 'addon', { message: 'pessoas e Jobs vão junto de um plano' }] };
+      if (sku.startsWith('world_') && w.sub) return { fail: [409, 'has_subscription'] };
+      const tier = sku.replace(/^world_/, '').replace(/_annual$/, '');
+      const items = [{ sku, quantity: 1 }, ...(b.seats ? [{ sku: `addon_seat_${tier}`, quantity: b.seats as number }] : []), ...(b.jobPacks ? [{ sku: 'addon_jobs_5', quantity: b.jobPacks as number }] : [])];
+      this.checkouts.push({ ws: w.id, items });
+      return { json: { url: `https://checkout.stripe.com/c/pay/cs_test_${hex(8)}?ws=${w.id}&sku=${items.map((i) => `${i.sku}x${i.quantity}`).join(',')}` } };
+    }
+    if (key === 'POST /v1/billing/change/preview' || key === 'POST /v1/billing/change/confirm') {
+      const w = owned(b.workspaceId); if (!w) return { fail: [404, 'sync_workspace'] };
+      if (!w.sub) return { fail: [409, 'no_subscription'] };
+      const cur = (pre: string) => w.sub!.items.find((i) => i.sku.startsWith(pre))?.quantity ?? 0;
+      const plan = typeof b.plan === 'string' ? b.plan : w.plan; const seats = b.seats ?? cur('addon_seat_'); const jobPacks = b.jobPacks ?? cur('addon_jobs_5');
+      if (plan === w.plan && seats === cur('addon_seat_') && jobPacks === cur('addon_jobs_5')) return { fail: [400, 'no_change'] };
+      const upgrade = plan !== w.plan || seats > cur('addon_seat_') || jobPacks > cur('addon_jobs_5');
+      if (key.endsWith('preview')) return { json: { upgrade, prorationDate: 1_700_000_000, amountDueCents: upgrade ? '2490' : '0', currency: 'brl', effective: upgrade ? 'agora, depois do pagamento confirmado' : 'no próximo ciclo (o período atual já foi pago)' } };
+      if (typeof b.idempotencyKey !== 'string' || !Number.isInteger(b.prorationDate)) return { fail: [400, 'invalid'] };
+      const tier = String(plan).replace(/^world_/, '').replace(/_annual$/, '');
+      w.plan = plan; w.sub.items = [{ sku: String(plan), quantity: 1 }, ...(seats ? [{ sku: `addon_seat_${tier}`, quantity: seats }] : []), ...(jobPacks ? [{ sku: 'addon_jobs_5', quantity: jobPacks }] : [])];
+      w.seats = 3 + seats;
+      return { json: { upgrade, status: 'active', pendingUpdate: false } };
+    }
+    if (key === 'PUT /v1/wallet/autotopup') {
+      const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
+      if (roleIn(w, acc.id) !== 'owner') return { fail: [403, 'not_owner'] };
+      if (typeof b.enabled !== 'boolean') return { fail: [400, 'invalid'] };
+      if (b.enabled && (!b.topupSku || !(b.monthlyCapCents >= 1990) || !(b.thresholdDracmas >= 1))) return { fail: [400, 'recharge_policy'] };
+      w.autotopup = { ...b }; return { json: { ok: true } };
+    }
+    m = /^\/v1\/workspaces\/(sws_[a-f0-9]{32})\/budgets(?:\/(acc_[a-f0-9]{32}))?$/.exec(p);
+    if (m) {
+      const w = mine(m[1]); if (!w) return { fail: [404, 'sync_workspace'] };
+      const manager = RANK[roleIn(w, acc.id)!] >= RANK.admin; w.budgets ??= new Map();
+      if (method === 'GET') {
+        const all = [[w.owner, 'owner'] as const, ...[...(w.members ?? new Map()).entries()].map(([id, x]) => [id, x.role] as const)].filter(([id]) => manager || id === acc.id);
+        return { json: { manager, period: 'mês-calendário (horário de Salvador)', members: all.map(([id, role]) => ({ accountId: id, role, name: this.accounts.get(id)?.displayName || null, email: this.accounts.get(id)?.email ?? null, me: id === acc.id, cap: w.budgets!.get(id) ?? null, used: '0.000000' })) } };
+      }
+      if (method === 'PUT' && m[2]) {
+        if (!manager) return { fail: [403, 'sync_forbidden'] };
+        if (!roleIn(w, m[2])) return { fail: [404, 'sync_workspace'] };
+        w.budgets.set(m[2], b.capDracmas === null ? null : `${Number(b.capDracmas).toFixed(6)}`); return { json: { ok: true, cap: w.budgets.get(m[2]) } };
+      }
     }
     if (key === 'GET /v1/wallet') { const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] }; return { json: { available: w.plan ? '1000.000000' : '0.000000', reserved: '0.000000', lots: [] } }; }
     if (key === 'GET /v1/jobs') {
@@ -285,12 +349,20 @@ export class FakeWorld {
       if (typeof b.label !== 'string' || !b.label.trim() || b.label.trim().length > 60) return { fail: [400, 'label'] };
       w.label = b.label.trim(); return { json: { label: w.label } };
     }
+    const members = this.memberRoutes(method, p, b, acc.id, roleIn);
+    if (members) return members;
     m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/(envelopes|envelope|devices-needing-key|changes)$/.exec(p);
     if (m) {
       const w = mine(m[1]); if (!w) return { fail: [404, 'not_found'] };
+      const role = roleIn(w, acc.id)!;
       if (m[2] === 'envelopes' && method === 'PUT') {
         if (b.kind === 'recovery') w.recovery = { keyVersion: b.keyVersion, wrapped: b.wrapped };
-        else { const d = this.devices.get(b.deviceId); if (!d || d.accountId !== acc.id) return { fail: [400, 'invalid_device'] }; w.envelopes.set(d.id, { keyVersion: b.keyVersion, wrapped: b.wrapped }); }
+        else {
+          const d = this.devices.get(b.deviceId); if (!d || d.status !== 'active') return { fail: [400, 'invalid_device'] };
+          // para aparelho de outra pessoa: só quem administra, e só para membro atual
+          if (d.accountId !== acc.id && (RANK[role] < RANK.admin || !roleIn(w, d.accountId))) return { fail: [403, 'sync_forbidden'] };
+          w.envelopes.set(d.id, { keyVersion: b.keyVersion, wrapped: b.wrapped });
+        }
         return { json: { ok: true } };
       }
       if (m[2] === 'envelope') {
@@ -298,11 +370,14 @@ export class FakeWorld {
         return e ? { json: e } : { fail: [404, 'no_envelope'] };
       }
       if (m[2] === 'devices-needing-key') {
-        const devices = [...this.devices.values()].filter((d) => d.accountId === acc.id && d.status === 'active' && !w.envelopes.has(d.id)).map((d) => ({ deviceId: d.id, syncPublicKey: d.syncPublicKey }));
+        const admin = RANK[role] >= RANK.admin;
+        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && !w.envelopes.has(d.id)).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey }));
         return { json: { keyVersion: 1, devices } };
       }
       if (m[2] === 'changes' && method === 'POST') {
         if (!w.plan) return { fail: [402, 'world_inactive'] };
+        if (RANK[role] < RANK[b.kind === 'rotation' ? 'admin' : 'editor']) return { fail: [403, 'sync_forbidden'] };
+        if (w.rotationRequired && b.kind !== 'rotation') return { fail: [409, 'rotation_required'] };
         if (b.expectedVersion !== w.head) return { fail: [409, 'version_conflict'] };
         // o World confere quem assinou (o envelope canônico), sem conseguir abrir o conteúdo
         const canon = `ergon-sync-v1|${w.id}|${b.expectedVersion}|${b.operationId}|${b.schemaVersion}|${b.keyVersion}|${b.kind}|${b.sha256}`;
@@ -317,6 +392,73 @@ export class FakeWorld {
         const since = Number(u.searchParams.get('since') ?? 0);
         return { json: { head: w.head, changes: w.changes.filter((c) => (c.version as number) > since).slice(0, 50) } };
       }
+    }
+    return { fail: [404, 'not_found'] };
+  }
+
+  private seatsOf(w: Workspace): number { return w.plan ? w.seats ?? 3 : 0; }
+  private pending(w: Workspace) { return (w.invites ?? []).filter((i) => !i.accepted && i.expiresAt > Date.now()); }
+  private used(w: Workspace): number { return 1 + (w.members?.size ?? 0) + this.pending(w).length; }
+
+  // ---------------------------------------------------------------- pessoas no workspace (mesmas regras de world/src/sync.ts)
+  private memberRoutes(method: string, p: string, b: any, me: string, roleIn: (w: Workspace, a: string) => Role | null): { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] } | null {
+    if (method === 'POST' && p === '/v1/sync/invites/accept') {
+      const t = typeof b.token === 'string' ? sha(b.token) : '';
+      const w = [...this.workspaces.values()].find((x) => this.pending(x).some((i) => i.tokenHash === t));
+      const inv = w && this.pending(w).find((i) => i.tokenHash === t);
+      if (!w || !inv) return { fail: [404, 'invite'] };
+      if (!w.plan) return { fail: [402, 'world_inactive'] };
+      if (1 + (w.members?.size ?? 0) >= this.seatsOf(w) && !roleIn(w, me)) return { fail: [409, 'seats'] };
+      inv.accepted = true;
+      if (w.owner !== me) (w.members ??= new Map()).set(me, { role: inv.role as 'editor', since: new Date().toISOString() });
+      return { json: { workspaceId: w.id, role: inv.role } };
+    }
+    const m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/(members|invites|transfer)(?:\/([A-Za-z0-9_]+))?(\/role)?$/.exec(p);
+    if (!m) return null;
+    const w = this.workspaces.get(m[1]); const my = w ? roleIn(w, me) : null;
+    if (!w || !my) return { fail: [404, 'sync_workspace'] };
+    const admin = RANK[my] >= RANK.admin; const sub = m[3];
+    if (m[2] === 'members' && method === 'GET' && !sub) {
+      const rows = [{ id: w.owner, role: 'owner', since: '2026-01-01T00:00:00.000Z' }, ...[...(w.members ?? new Map()).entries()].map(([id, x]) => ({ id, role: x.role, since: x.since }))];
+      return { json: { myRole: my, seats: this.seatsOf(w),
+        members: rows.map((r) => ({ accountId: r.id, name: this.accounts.get(r.id)?.displayName || null, email: admin || r.id === me ? this.accounts.get(r.id)?.email ?? null : null, role: r.role, since: r.since, me: r.id === me })),
+        invites: admin ? this.pending(w).map((i) => ({ id: i.id, role: i.role, expiresAt: new Date(i.expiresAt).toISOString(), createdAt: i.createdAt })) : [] } };
+    }
+    if (m[2] === 'invites' && method === 'POST' && !sub) {
+      if (!admin) return { fail: [403, 'sync_forbidden'] };
+      if (!w.plan) return { fail: [402, 'world_inactive'] };
+      if (this.used(w) >= this.seatsOf(w)) return { fail: [409, 'seats'] };
+      const role = ['admin', 'editor', 'viewer'].includes(b.role) ? b.role : 'editor';
+      const token = crypto.randomBytes(24).toString('base64url'); const expiresAt = Date.now() + 7 * 86_400_000;
+      (w.invites ??= []).push({ id: `inv_${hex(16)}`, role, tokenHash: sha(token), expiresAt, createdAt: new Date().toISOString(), accepted: false });
+      return { json: { token, expiresAt: new Date(expiresAt).toISOString() } };
+    }
+    if (m[2] === 'invites' && method === 'DELETE' && sub) {
+      if (!admin) return { fail: [403, 'sync_forbidden'] };
+      const i = this.pending(w).find((x) => x.id === sub); if (!i) return { fail: [404, 'invite'] };
+      i.expiresAt = Date.now() - 1; return { json: { ok: true } };
+    }
+    if (m[2] === 'members' && sub && m[4] && method === 'PUT') {
+      if (!['admin', 'editor', 'viewer'].includes(b.role)) return { fail: [400, 'role'] };
+      if (!admin) return { fail: [403, 'sync_forbidden'] };
+      const target = roleIn(w, sub); if (!target) return { fail: [404, 'sync_workspace'] };
+      if (target === 'owner' || sub === w.owner) return { fail: [409, 'owner'] };
+      if (my !== 'owner' && (target === 'admin' || b.role === 'admin')) return { fail: [403, 'sync_forbidden'] };
+      w.members!.get(sub)!.role = b.role; return { json: { role: b.role } };
+    }
+    if (m[2] === 'members' && sub && !m[4] && method === 'DELETE') {
+      if (!admin) return { fail: [403, 'sync_forbidden'] };
+      if (sub === w.owner) return { fail: [409, 'owner'] };
+      if (!roleIn(w, sub)) return { fail: [404, 'sync_workspace'] };
+      w.members!.delete(sub);
+      for (const d of this.devices.values()) if (d.accountId === sub) w.envelopes.delete(d.id);
+      w.rotationRequired = true; return { json: { ok: true } };
+    }
+    if (m[2] === 'transfer' && !sub && method === 'POST') {
+      if (my !== 'owner' || w.owner !== me) return { fail: [403, 'sync_forbidden'] };
+      const to = String(b.toAccountId ?? ''); if (!w.members?.has(to)) return { fail: [404, 'sync_workspace'] };
+      w.members.delete(to); w.members.set(me, { role: 'admin', since: new Date().toISOString() }); w.owner = to;
+      return { json: { ok: true } };
     }
     return { fail: [404, 'not_found'] };
   }
