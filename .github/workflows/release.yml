@@ -5,6 +5,8 @@ name: Lançamento
 on:
   push:
     tags: ['v*.*.*']
+  # a etiqueta criada pelo workflow Etiquetar (o token do Actions não dispara push de etiqueta): roda na própria etiqueta
+  workflow_dispatch:
 
 permissions:
   contents: write   # criar a versão e anexar o pacote
