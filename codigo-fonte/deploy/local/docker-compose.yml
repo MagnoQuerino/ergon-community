@@ -22,7 +22,7 @@ services:
       ERGON_MOTOR_MANAGER_URL: http://motores:8645   # um motor de IA por pessoa
       ERGON_UPDATE_URL: ${ERGON_UPDATE_URL:-https://github.com/__REPO__/releases/latest/download/latest.json}
       ERGON_MAX_CONCURRENT_RUNS: ${ERGON_MAX_CONCURRENT_RUNS:-}
-      ERGON_DAILY_RUN_LIMIT: ${ERGON_DAILY_RUN_LIMIT:-0}   # 0 = sem limite; a pessoa limita em Configurações
+      ERGON_DAILY_RUN_LIMIT: ${ERGON_DAILY_RUN_LIMIT:-}   # vazio = sem limite; a pessoa limita em Configurações (0 quebraria as imagens de antes, que pedem 1..100000)
       ERGON_RUN_TIMEOUT_SECONDS: ${ERGON_RUN_TIMEOUT_SECONDS:-180}
       ERGON_LONG_RUN_TIMEOUT_SECONDS: ${ERGON_LONG_RUN_TIMEOUT_SECONDS:-600}   # quem pesquisa na web ou executa código
       ERGON_ALLOWED_ORIGINS: http://localhost:${ERGON_PORT:-8787},http://127.0.0.1:${ERGON_PORT:-8787}

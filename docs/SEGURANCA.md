@@ -51,7 +51,7 @@ sem trancamento (unlock.key) ─────┘                                 
 - **Inatividade**: desligada por padrão; ligada em Configurações › Segurança, a tela tranca depois do tempo que você escolher (1 min a 24 h; só mouse/teclado contam); nada fica visível atrás. Os agentes
   continuam. Destranca com a senha ou a passkey — o autenticador fica só para o login.
 - **Confirmação de identidade** (5 min): frase nova, autenticador, passkeys, destrancar sozinho, ferramentas que executam código — com a senha ou a passkey.
-- **2º fator** opcional neste computador (autenticador TOTP, passkeys WebAuthn), pedido no login; obrigatório na nuvem. Depois de entrar, destrancar a tela e confirmar ações pedem só a senha ou a passkey (pedido do fundador: o código a cada trava era incômodo demais).
+- **2º fator** opcional neste computador (autenticador TOTP, passkeys WebAuthn), pedido no login; obrigatório na nuvem. Depois de entrar, destrancar a tela e confirmar ações pedem só a senha ou a passkey.
 - **Freio de tentativas**: 5 erros → espera crescente (30 s, 1 min, … até 1 h).
 - Passkeys valem para `localhost` (quem abre por `127.0.0.1` é levado para `localhost`).
 
