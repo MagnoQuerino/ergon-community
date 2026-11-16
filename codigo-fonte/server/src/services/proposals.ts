@@ -47,7 +47,7 @@ export type Proposal =
   /** tarefa proposta por uma rotina (planejador, secretário, radar de compromissos…): só entra no quadro aprovada */
   | { kind: 'task'; title: string; detail: string; assignee: string | null; due: string | null; origin: string; routine: string }
   /** lançamentos lidos dos documentos pelo Ergon e classificados pelo agente: só ficam registrados aprovados */
-  | { kind: 'ledger'; routine: string; items: LedgerItem[] }
+  | { kind: 'ledger'; routine: string; items: LedgerItem[]; duplicados?: Array<{ n: number; de: number }> }
   /** tirar um card do quadro da equipe: o coordenador propõe (ou você pede na conversa); só sai com a sua aprovação */
   | { kind: 'delete_task'; number: number; reason: string }
   /** lote grande de cards (mais de 8 numa resposta): abre só com o seu "Abrir todos" */
@@ -281,7 +281,8 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   if (p.kind === 'ledger') {
     const ent = p.items.filter((i) => i.valor > 0).reduce((x, i) => x + i.valor, 0); const sai = p.items.filter((i) => i.valor < 0).reduce((x, i) => x + i.valor, 0);
     const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    return `Registrar ${p.items.length} lançamento(s) lidos pela rotina ${p.routine}: entradas ${brl(ent)}, saídas ${brl(Math.abs(sai))}${p.items.some((i) => i.confianca === 'baixa') ? ' (há lançamentos lidos de PDF: confira antes)' : ''}`;
+    const dup = p.duplicados?.length ? ` (${p.duplicados.map((d) => `L${d.n} é o mesmo gasto de L${d.de}`).join('; ')}: entra uma vez só)` : '';
+    return `Registrar ${p.items.length} lançamento(s) lidos pela rotina ${p.routine}: entradas ${brl(ent)}, saídas ${brl(Math.abs(sai))}${dup}${p.items.some((i) => i.confianca === 'baixa') ? ' (há lançamentos lidos de PDF: confira antes)' : ''}`;
   }
   if (p.kind === 'sector') {
     const s = sectorByName(db, workspaceId, p.sector);

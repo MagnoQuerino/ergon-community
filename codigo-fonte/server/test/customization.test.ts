@@ -235,6 +235,21 @@ describe('boas-vindas: a escolha define a equipe de partida', () => {
     assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tasks t JOIN boards b ON b.id = t.board_id WHERE t.workspace_id = ? AND b.audience = 'user' AND t.origin = 'manual' AND t.archived = 0", s.workspaceId)!.n, 4);
   });
 
+  test('"Outra área" com o texto digitado: engenharia, RH e mercadinho ganham a equipe deles (antes, a geral)', async () => {
+    let r = await req(h, 'POST', '/api/onboarding', s, { use: 'projetos', niche: 'outro', nicheOther: 'engenharia civil e obras de reforma' });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.preset.key, 'construcao');
+    assert.equal(byChar(h, s.workspaceId, 'hipodamo').role, 'Cronogramas e planejamento de obra');
+    assert.equal(byChar(h, s.workspaceId, 'arquimedes').role, 'Orçamentos, quantitativos e custos');
+    r = await req(h, 'POST', '/api/onboarding', s, { use: 'projetos', niche: 'outro', nicheOther: 'recursos humanos e departamento pessoal' });
+    assert.equal(r.json.preset.key, 'rh');
+    r = await req(h, 'POST', '/api/onboarding', s, { use: 'empresario', niche: 'varejo' });
+    assert.equal(r.json.preset.key, 'varejo', 'e também pela área nova da lista');
+    assert.equal(byChar(h, s.workspaceId, 'arquimedes').role, 'Estoque, preços, margens e caixa');
+    r = await req(h, 'POST', '/api/onboarding', s, { use: 'projetos', niche: 'outro', nicheOther: 'colecionador de selos' });
+    assert.equal(r.json.preset.key, 'geral', 'texto que não casa com nenhuma: equipe geral, como antes');
+  });
+
   test('preferências: dicas dispensadas, desligar e trazer de volta; pular as perguntas', async () => {
     assert.deepEqual((await req(h, 'PUT', '/api/me/prefs', s, { dismiss: ['agentes.intro'] })).json.dismissed, ['agentes.intro']);
     const p = (await req(h, 'PUT', '/api/me/prefs', s, { tips: false, tourDone: true })).json;

@@ -36,6 +36,7 @@ import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from '
 import { remoteHolder, routineCard } from './remote-work.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { stripControl } from './teamwork.ts';
+import { duplicadosEntreDocumentos } from './fin-parse.ts';
 
 /** Os personagens de estudo das frases de espera do preparo, na ordem da tela (RotinasView.tsx, STUDY_CHAR). */
 const STUDY_CAST = ['aristoteles', 'hipatia', 'socrates', 'arquimedes', 'diogenes', 'euclides', 'herodoto'];
@@ -1280,8 +1281,11 @@ export class Routines {
     if (t?.proposes === 'tarefas') return parseTaskProposals(output, r.name);
     if (t?.proposes === 'lancamentos' && data?.lancamentos.length) {
       const cats = parseCategories(output);
-      const items: LedgerItem[] = data.lancamentos.slice(0, 500).map((l) => ({ n: l.n, data: l.data, descricao: l.descricao, valor: l.valor, documento: l.documento, categoria: cats.get(l.n)?.categoria ?? '', centro: cats.get(l.n)?.centro ?? '', confianca: l.confianca }));
-      return [{ kind: 'ledger', routine: r.name, items }];
+      // o mesmo gasto na nota e no extrato entra uma vez só (fica a nota; o cartão diz qual saiu)
+      const duplicados = duplicadosEntreDocumentos(data.lancamentos);
+      const fora = new Set(duplicados.map((d) => d.n));
+      const items: LedgerItem[] = data.lancamentos.filter((l) => !fora.has(l.n)).slice(0, 500).map((l) => ({ n: l.n, data: l.data, descricao: l.descricao, valor: l.valor, documento: l.documento, categoria: cats.get(l.n)?.categoria ?? '', centro: cats.get(l.n)?.centro ?? '', confianca: l.confianca }));
+      return [{ kind: 'ledger', routine: r.name, items, ...(duplicados.length ? { duplicados } : {}) }];
     }
     return [];
   }
