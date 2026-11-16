@@ -28,6 +28,9 @@ export interface Config {
   hermesVaultUrl: string | null;
   /** manifesto da versão publicada (aviso de atualização); vazio = não consulta */
   updateUrl: string | null;
+  /** receptor de "Relatar um problema"; sem o campo, ERGON_RELATOS_URL (services/relatos.ts). Testes: o receptor falso */
+  relatosUrl?: string | null;
+  relatosTimeoutMs?: number;
   host: string;
   port: number;
   dataDir: string;

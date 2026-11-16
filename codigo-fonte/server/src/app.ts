@@ -36,6 +36,7 @@ import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } 
 import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
 import { registerRecursosRoutes } from './routes/recursos.ts';
 import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
+import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
 import { throttle } from './security/factors.ts';
@@ -2584,6 +2585,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const recursos = new Recursos({ db, bus, control: (ws) => motors.control(ws), scope: (ws) => motorScope(ws), modelos: (ws) => aiOf(ws).opcoesDeReserva(),
     aoMudarCompetencias: (ws) => aiOf(ws).esquecerCompetencias() });
   registerRecursosRoutes(app, { db, bus, recursos, executor, cfg, auth, owner });
+  // "Relatar um problema" (Ajuda): prévia limpa e envio só no clique, sem conta nem World: services/relatos.ts
+  registerRelatosRoutes(app, { db, cfg, auth, url: cfg.relatosUrl, timeoutMs: cfg.relatosTimeoutMs });
   // aplicativos conectados pela pessoa (servidor MCP que o catálogo não traz, rc.29): routes/mcp-proprio.ts
   const appsProprios = new McpProprios({ db, bus, recursos });
   registerMcpProprioRoutes(app, { apps: appsProprios, auth, owner });

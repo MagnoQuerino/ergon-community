@@ -44,7 +44,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // Entrar, Segurança, Minha conta e Pessoas
   conta: ['components/AuthFlow.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],
   // a Ajuda, as dicas, o tour e as boas-vindas
-  ajuda: ['views/AjudaView.tsx', 'components/Tips.tsx', 'components/Tour.tsx', 'components/Onboarding.tsx'],
+  ajuda: ['views/AjudaView.tsx', 'components/Tips.tsx', 'components/Tour.tsx', 'components/Onboarding.tsx', 'components/RelatarProblema.tsx', 'lib/relato.ts'],
   // "Aguardando você", a Atividade e o que vem do servidor (lib/textos-tela.ts: ver COMO-TRADUZIR.md)
   servidor: ['components/DecisionsPanel.tsx', 'views/OtherViews.tsx', 'lib/atividade.ts', 'lib/textos-tela.ts', 'lib/types.ts'],
 };
