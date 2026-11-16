@@ -18,7 +18,7 @@ import type { Db } from '../../db/db.ts';
 import { HttpError, id as novoId, now } from '../../lib/util.ts';
 import { log } from '../../lib/log.ts';
 import { CLOSED_VALUE } from '../../security/fields.ts';
-import type { Bus, BusEvent } from '../bus.ts';
+import { audit, type Bus, type BusEvent } from '../bus.ts';
 import { createConversation, sendMessage } from '../chat.ts';
 import { CanalErro, type CanalNoMotor, type HermesControlClient, type NomeCanal } from '../hermes.ts';
 import type { WorkspaceOwners } from '../people.ts';
@@ -179,6 +179,10 @@ export class Canais {
   /** o que os canais locais guardam da pessoa (canais/whatsapp.ts) */
   aoRemoverPessoa: ((userId: string) => void) | null = null;
   pessoaRemovida(userId: string): void {
+    // a pessoa saiu do Ergon: os canais dela caem agora, com registro em cada workspace em que estavam ligados
+    for (const r of this.d.db.all<{ w: string }>('SELECT DISTINCT workspace_id AS w FROM canais_vinculos WHERE user_id = ?', userId)) {
+      try { audit(this.d.db, this.d.bus, { workspaceId: r.w, actorType: 'system', actorId: 'ergon', action: 'canal.externo.revogado', targetType: 'user', targetId: userId, evidence: { membro: userId, motivo: 'pessoa removida do Ergon' }, result: 'canais externos revogados: pessoa removida do Ergon' }); } catch { /* o workspace já saiu junto */ }
+    }
     this.aoRemoverPessoa?.(userId);
     for (const t of ['canais_vinculos', 'canais_bots', 'canais_saida', 'canais_cartoes', 'canais_avisados', 'canais_entrada']) this.d.db.run(`DELETE FROM ${t} WHERE user_id = ?`, userId);
   }

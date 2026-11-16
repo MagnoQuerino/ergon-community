@@ -21,8 +21,13 @@
  *
  * O que vale, para todo canal externo:
  * - Só membro do workspace (memberships). Saiu do workspace: os números e vínculos dele somem (removerMembro).
- * - O papel é o do membro: dono → 'owner'; 'member' local → o papel no Ergon World (papelWorld: admin, editor ou viewer)
- *   ou, sem saber, 'viewer' (o mais restrito). Papel de leitura só consulta.
+ * - O papel é o do membro: dono → 'owner'; 'member' local → o papel dele no workspace do Ergon World (owner, admin, editor
+ *   ou viewer), pela conta do World ligada à pessoa local (world_links.account_id; a mesma conta em duas pessoas é
+ *   ambíguo: leitura) e pela lista de membros que o app já busca (GET /v1/sync/workspaces/:id/members). O papel fica
+ *   guardado (canais_externo_papeis) e é buscado de novo depois de 5 minutos; sem o World, vale o último conhecido por
+ *   24 h e depois 'viewer'. Sem nada disso, 'viewer' (o mais restrito). Papel de leitura só consulta.
+ * - Membro tirado do workspace (no World, ou a pessoa removida do Ergon): os números e vínculos dele caem na hora, com
+ *   registro (canal.externo.revogado).
  * - Pedidos de risco pelo texto (classificar): exportar dados em massa, mandar a terceiros, apagar, mudar configurações,
  *   conexões, permissões ou a lista de números: não vão à equipe direto; ficam num cartão no app, que o dono ou um admin
  *   aprova lá (não um "1" do mesmo celular). Revelar senha, chave ou código: nunca.
@@ -89,7 +94,13 @@ const MIGRACAO = `
     motivo TEXT NOT NULL, avisado INTEGER NOT NULL DEFAULT 0, proposal_id TEXT, PRIMARY KEY (workspace_id, user_id, canal));
   CREATE TABLE IF NOT EXISTS canais_externo_volume (workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, canal TEXT NOT NULL, at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS canais_externo_volume_quem ON canais_externo_volume(workspace_id, user_id, canal, at);
+  CREATE TABLE IF NOT EXISTS canais_externo_papeis (workspace_id TEXT NOT NULL, account_id TEXT NOT NULL, papel TEXT NOT NULL, at TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, account_id));
 `;
+/** O papel do World guardado é buscado de novo depois disto; sem o World, vale até PAPEL_VALE (depois, leitura). */
+const PAPEL_FRESCO_MS = 5 * 60_000;
+const PAPEL_VALE_MS = 24 * 3_600_000;
+export type MembroDoWorld = { accountId: string; role: string };
 
 export class CanaisExternos {
   readonly d: Deps;
@@ -101,6 +112,9 @@ export class CanaisExternos {
   avisarNoCanal: ((p: { channel: string; memberId: string; texto: string }) => void) | null = null;
   /** quem guarda números ou vínculos de um membro (o número da equipe no WhatsApp): esquece quando ele sai do workspace */
   private aoRemover: Array<(ws: string, userId: string) => void> = [];
+  /** a lista de membros do workspace no World (world/index.ts liga; null: World fora ou workspace não ligado) */
+  buscarMembros: ((ws: string) => Promise<MembroDoWorld[] | null>) | null = null;
+  private buscando = new Set<string>();
 
   constructor(d: Deps) { this.d = d; d.db.raw.exec(MIGRACAO); }
 
@@ -111,8 +125,63 @@ export class CanaisExternos {
     const m = this.d.db.get<{ role: string }>('SELECT role FROM memberships WHERE workspace_id = ? AND user_id = ?', ws, userId);
     if (!m) return null;
     if (m.role === 'owner') return 'owner';
-    const w = this.d.papelWorld?.(userId, ws) ?? null;
+    const w = this.d.papelWorld?.(userId, ws) ?? this.papelNoWorld(ws, userId);
+    if (w === 'removido') return null;
     return w === 'owner' || w === 'admin' || w === 'editor' || w === 'viewer' ? w : 'viewer';
+  }
+
+  /** A conta do World da pessoa local; null sem conta ou quando a mesma conta está em mais de uma pessoa (ambíguo). */
+  private contaWorld(userId: string): string | null {
+    try {
+      const r = this.d.db.get<{ account_id: string }>("SELECT account_id FROM world_links WHERE user_id = ? AND status = 'active'", userId);
+      if (!r) return null;
+      const n = Number(this.d.db.get<{ n: number }>("SELECT COUNT(DISTINCT user_id) AS n FROM world_links WHERE account_id = ? AND status = 'active'", r.account_id)?.n ?? 0);
+      return n === 1 ? r.account_id : null;
+    } catch { return null; } // sem o World nesta instalação (a tabela nem existe)
+  }
+  /** O papel guardado do World (owner/admin/editor/viewer, ou 'removido'); vencido ou sem saber: null (vira leitura). */
+  private papelNoWorld(ws: string, userId: string): string | null {
+    const conta = this.contaWorld(userId);
+    if (!conta) return null;
+    const r = this.d.db.get<{ papel: string; at: string }>('SELECT papel, at FROM canais_externo_papeis WHERE workspace_id = ? AND account_id = ?', ws, conta);
+    const idade = r ? this.agora() - Date.parse(r.at) : Infinity;
+    if (idade > PAPEL_FRESCO_MS) this.atualizarPapeis(ws);
+    if (!r) return null;
+    if (r.papel === 'removido') return 'removido';
+    return idade > PAPEL_VALE_MS ? null : r.papel;
+  }
+  /** Busca a lista de membros no World em segundo plano (uma busca por vez por workspace). Falhou: fica o que se sabia. */
+  atualizarPapeis(ws: string): Promise<void> {
+    if (!this.buscarMembros || this.buscando.has(ws)) return Promise.resolve();
+    this.buscando.add(ws);
+    return this.buscarMembros(ws).then((m) => { if (m) this.membrosDoWorld(ws, m); }).catch(() => undefined).finally(() => { this.buscando.delete(ws); });
+  }
+  /** A lista de membros do World (a tela de membros e a renovação a trazem): guarda os papéis; quem sumiu dela saiu. */
+  membrosDoWorld(ws: string, membros: MembroDoWorld[]): void {
+    const ok = membros.filter((m) => typeof m?.accountId === 'string' && ['owner', 'admin', 'editor', 'viewer'].includes(String(m.role)));
+    if (!ok.length) return; // lista vazia ou estranha: não tira ninguém por isso
+    const antes = this.d.db.all<{ account_id: string; papel: string }>('SELECT account_id, papel FROM canais_externo_papeis WHERE workspace_id = ?', ws);
+    const agora = new Date(this.agora()).toISOString();
+    this.d.db.tx(() => {
+      for (const m of ok) this.d.db.run('INSERT INTO canais_externo_papeis (workspace_id, account_id, papel, at) VALUES (?, ?, ?, ?) ON CONFLICT (workspace_id, account_id) DO UPDATE SET papel = excluded.papel, at = excluded.at', ws, m.accountId, m.role, agora);
+    });
+    for (const a of antes) if (a.papel !== 'removido' && !ok.some((m) => m.accountId === a.account_id)) this.membroSaiu(ws, a.account_id);
+  }
+  /** Tirado do workspace no World: o papel vira 'removido' e os canais das pessoas locais com essa conta caem na hora. */
+  membroSaiu(ws: string, accountId: string): void {
+    this.d.db.run("INSERT INTO canais_externo_papeis (workspace_id, account_id, papel, at) VALUES (?, ?, 'removido', ?) ON CONFLICT (workspace_id, account_id) DO UPDATE SET papel = 'removido', at = excluded.at",
+      ws, accountId, new Date(this.agora()).toISOString());
+    let locais: Array<{ user_id: string }> = [];
+    try { locais = this.d.db.all<{ user_id: string }>("SELECT user_id FROM world_links WHERE account_id = ? AND status = 'active'", accountId); } catch { /* sem o World aqui */ }
+    for (const l of locais) {
+      if (this.d.db.get<{ role: string }>('SELECT role FROM memberships WHERE workspace_id = ? AND user_id = ?', ws, l.user_id)?.role === 'owner') continue; // o dono local segue dono
+      this.revogarMembro(ws, l.user_id, 'tirado do workspace no Ergon World');
+    }
+  }
+  /** Revoga na hora os canais do membro neste workspace, com registro. */
+  revogarMembro(ws: string, userId: string, motivo: string): void {
+    audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'canal.externo.revogado', targetType: 'user', targetId: userId, evidence: { membro: userId, motivo }, result: `canais externos de ${this.nomeDe(userId)} revogados: ${motivo}` });
+    this.removerMembro(ws, userId);
   }
   /** Os membros do workspace (para a lista do canal), com o papel de cada um. */
   membros(ws: string): Array<{ userId: string; nome: string; papel: Papel }> {
@@ -137,7 +206,7 @@ export class CanaisExternos {
     });
     if (!papel) {
       // saiu do workspace: o que ligava o canal a ele some agora
-      this.removerMembro(p.workspaceId, p.memberId);
+      this.revogarMembro(p.workspaceId, p.memberId, 'não é mais membro do workspace');
       registrar('comum', 'não é membro');
       return { ok: false, motivo: 'nao_membro', resposta: '' };
     }

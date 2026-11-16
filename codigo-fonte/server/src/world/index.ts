@@ -384,7 +384,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const a = h.auth(req); const w = worldWs(a);
         if (!w) return { myRole: null, seats: 0, members: [], invites: [], awaitingKey: [] };
         const s = sessionOf(a.userId);
-        const r = await client.call<{ myRole: string; members: Array<{ accountId: string }> }>('GET', `/v1/sync/workspaces/${w}/members`, undefined, s);
+        const r = await client.call<{ myRole: string; members: Array<{ accountId: string; role: string }> }>('GET', `/v1/sync/workspaces/${w}/members`, undefined, s);
+        h.canais?.membros(a.workspaceId, r.members); // o papel de quem fala pelos canais externos
         // quem entrou e ainda espera a chave do workspace (só quem administra entrega, de um computador que a tem)
         let awaitingKey: string[] = [];
         if (['owner', 'admin'].includes(r.myRole) && sync.status(a.workspaceId).enabled) {
@@ -414,6 +415,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       app.delete('/api/world/members/:account', async (req) => {
         const a = h.auth(req); const w = needWorld(a);
         await client.call('DELETE', `/v1/sync/workspaces/${w}/members/${ACC((req.params as { account: string }).account)}`, undefined, sessionOf(a.userId));
+        h.canais?.saiu(a.workspaceId, ACC((req.params as { account: string }).account)); // os canais externos dele caem agora
         if (!sync.status(a.workspaceId).enabled) return { ok: true, rotationRequired: true, reason: 'no_key' };
         db.run('UPDATE world_sync SET rotation_pending = 1 WHERE workspace_id = ?', a.workspaceId);
         try { return { ok: true, rotationRequired: false, ...(await sync.rotate(a.userId, a.workspaceId)) }; }
@@ -498,6 +500,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       const renovar = async (userId: string): Promise<string | null> => {
         const r = await L().renew(userId);
         void atualizarErgonAi(userId).catch(() => undefined);
+        const ligado = links?.bound(userId);
+        if (ligado) h.canais?.atualizar(ligado); // os papéis dos membros, para os canais externos
         return r;
       };
       // ao abrir o aplicativo (sem pressa: o motor pode estar acordando)
@@ -565,6 +569,13 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       app.addHook('onError', async (req, _reply, err) => {
         if ((err as HttpError).code !== 'email_unverified') return;
         try { L().setEmailVerified(h.auth(req).userId, false); } catch { /* sem sessão local: nada a marcar */ }
+      });
+      // os canais externos (services/canais/externo.ts): a lista de membros do workspace ligado, pela sessão de quem o ligou
+      h.canais?.ligar(async (ws) => {
+        const dono = db.get<{ user_id: string }>("SELECT user_id FROM world_links WHERE bound_workspace_id = ? AND status = 'active'", ws);
+        const w = dono ? sync.worldId(ws) : null; const s = dono ? links?.session(dono.user_id) : null;
+        if (!w || !s) return null;
+        return (await client.call<{ members: Array<{ accountId: string; role: string }> }>('GET', `/v1/sync/workspaces/${w}/members`, undefined, s)).members;
       });
       // renomear o workspace ligado aqui renomeia o do World (o nome que aparece no lugar do código)
       app.addHook('onResponse', async (req, reply) => {

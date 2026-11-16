@@ -3182,6 +3182,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
   if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks,
+    // o papel de cada membro no World vale para o que ele pede pelos canais externos (canais/externo.ts)
+    canais: { ligar: (f) => { canais.externos.buscarMembros = f; }, membros: (ws, m) => canais.externos.membrosDoWorld(ws, m), saiu: (ws, acc) => canais.externos.membroSaiu(ws, acc), atualizar: (ws) => { void canais.externos.atualizarPapeis(ws); } },
     packages: { keys: officialKeys, preview: (ws, buf) => packages.preview(ws, buf), install: (ws, userId, buf) => packages.install(ws, userId, buf) },
     ergonAi: {
       modelos: (ws) => aiOf(ws).modelosErgonAi(),

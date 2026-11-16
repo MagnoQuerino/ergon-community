@@ -60,6 +60,20 @@ export interface WorldHost {
   packages?: PackagesHost;
   /** o Ergon AI guardado no motor do workspace: conferir a conexão e migrar as escolhas de modelo antigas */
   ergonAi?: ErgonAiHost;
+  /** os canais externos (services/canais/externo.ts): o papel de cada membro e quem saiu do workspace no World */
+  canais?: CanaisWorldHost;
+}
+
+/** Os canais externos, vistos pelo World: quem fala pelo WhatsApp/Telegram/Discord fala com o papel que tem no World. */
+export interface CanaisWorldHost {
+  /** o World entrega a busca da lista de membros de um workspace local ligado (null: não ligado ou sem conexão) */
+  ligar(buscarMembros: (workspaceId: string) => Promise<Array<{ accountId: string; role: string }> | null>): void;
+  /** a lista de membros que o app acabou de buscar (tela de membros, renovação) */
+  membros(workspaceId: string, membros: Array<{ accountId: string; role: string }>): void;
+  /** alguém foi tirado do workspace no World: os canais dele caem na hora */
+  saiu(workspaceId: string, accountId: string): void;
+  /** a renovação da autorização: busca os papéis de novo */
+  atualizar(workspaceId: string): void;
 }
 
 /** O Ergon AI do workspace, visto pelo World (services/ai.ts). */
