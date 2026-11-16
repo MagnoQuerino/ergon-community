@@ -324,4 +324,17 @@ describe('conversa com a equipe: colegas, ao vivo, arquivos, iniciativa e Docume
     const back = h.db.get<{ folder_id: string }>('SELECT folder_id FROM artifacts WHERE id = ?', file.id)!.folder_id;
     assert.deepEqual((await req(h, 'GET', `/api/documents?folder=${back}`, s)).json.path.map((x: { name: string }) => x.name), ['Clientes', 'ACME'], 'desfeito: voltou');
   });
+
+  test('mover pelo caminho "Pasta/arquivo" acha o arquivo; o que falha é dito, apesar do "movi" do agente', async () => {
+    const c = await conv('aristoteles');
+    motor.reply = () => 'Prontinho, movi! [[mover-arquivo arquivo="Clientes/ACME/contrato-acme.txt" para="Arquivo morto"]] [[mover-arquivo arquivo="Entregas/nao-existe.docx" para="Arquivo morto"]]';
+    await say(c, 'move o contrato da ACME e o outro para Arquivo morto'); await drain(h, 3);
+    motor.reply = () => 'Feito.';
+    const file = h.db.get<{ folder_id: string }>("SELECT folder_id FROM artifacts WHERE filename = 'contrato-acme.txt'")!;
+    assert.deepEqual((await req(h, 'GET', `/api/documents?folder=${file.folder_id}`, s)).json.path.map((x: { name: string }) => x.name), ['Arquivo morto']);
+    const sys = (await msgs(c)).filter((m) => m.role === 'system');
+    const aviso = sys.find((m) => m.content.startsWith('Sistema — atenção: isto não foi feito'));
+    assert.ok(aviso, sys.map((m) => m.content).join('\n'));
+    assert.match(aviso!.content, /nao-existe\.docx/);
+  });
 });

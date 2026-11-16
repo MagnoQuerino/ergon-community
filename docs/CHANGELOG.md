@@ -14,6 +14,24 @@
 - **Relatar um problema**, em Ajuda: você vê exatamente o que vai sair antes de enviar; e-mails, chaves e pastas
   pessoais saem como [removido]; dados técnicos só se você marcar.
 - **Segurança:** o que sai deste computador com o Ergon World está em docs/SEGURANCA.md.
+- **Planilha, apresentação, PDF e Word de verdade.** Peça "crie uma planilha" (ou apresentação, PDF, Word) e o
+  arquivo sai pronto em Documentos e no card: tabelas viram abas com números e fórmulas (SOMA, SOMASE), títulos viram
+  slides. Não precisa ligar Executar código.
+- **Os agentes não dizem que fizeram o que não fizeram.** Lembrete pedido ao coordenador vira o cartão para você
+  aprovar; mover arquivo informado como "Pasta/arquivo" funciona, e o que falha é dito na conversa; cálculo de planilha
+  na conversa sai na hora; o agente não cita conferência de colega que não aconteceu; rotina de e-mail sem conta
+  conectada pede para conectar em vez de "validar" sem ler nada.
+- **Imagens geradas aparecem na conversa e em Documentos**, e a sua resposta digitada fecha as perguntas do agente.
+- **Termos de uso**, aceitos na conta nova (ou uma vez, para quem já usa). Depois do aceite, Executar código e Terminal
+  vêm ligados na equipe (desligue em Configurações › Ferramentas da equipe), e ler as suas contas não pede mais
+  confirmação a cada leitura; criar, enviar e apagar continuam pedindo.
+- **Arquivos executáveis recebidos ficam em quarentena:** guardados, nunca abertos; baixar mostra um aviso com a
+  impressão digital (SHA-256).
+- **Mais leve e mais estável:** o coordenador deixa as ferramentas pesadas com os especialistas (chamadas menores);
+  o motor mantém no máximo 24 agentes carregados e solta os parados; perfis de workspaces apagados saem do motor; o
+  cadastro não trava mais com o motor ocupado; execuções por dia sem limite (limite opcional em Configurações).
+- **Equipes de partida para obras e engenharia, RH e comércio**, e "Outra área" escolhe a equipe pelo que você
+  escreve. Lançamento repetido na nota e no extrato entra uma vez só. `ergon update` passa a achar a próxima pré-versão.
 
 ## 1.1.0-rc.29 (pré-versão de teste)
 

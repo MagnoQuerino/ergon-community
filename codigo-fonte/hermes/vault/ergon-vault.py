@@ -247,6 +247,14 @@ MIGRACOES: tuple[tuple[int, str, dict], ...] = (
         ["known_plugin_toolsets.teams", ["ergon_gestao"], []],
         ["known_plugin_toolsets.whatsapp", ["ergon_gestao"], []],
     ]}),
+    # 12 (rc.30, QA de 16/11): memória do motor. Cada conversa de cada agente de cada workspace deixa um agente do Hermes
+    # carregado (gateway/run.py: até 128, soltos só depois de 1 h parados). Com 11 workspaces de uma pessoa, o motor
+    # chegou ao teto de 2 GB e travou o cadastro e as respostas em todos. Agora: até 24 carregados e soltos depois de
+    # 15 min parados (o próximo pedido reconstrói pela sessão gravada). Só onde a pessoa não escolheu outro valor.
+    (12, "memória do motor", {"se_ausente": [
+        ["agent.agent_cache.max_size", "24"],
+        ["agent.agent_cache.idle_ttl_secs", "900"],
+    ]}),
 )
 CONFIG_VERSION = MIGRACOES[-1][0]
 # Travas de segurança: valem em TODA abertura, além das migrações (reaplicar uma migração desfaria escolhas da

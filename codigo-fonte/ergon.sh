@@ -254,6 +254,20 @@ desfazer_restauracao() {
 
 # Atualizar: backup antes; só versão mais nova; a atual fica guardada; se a nova não responder, volta sozinho. O banco
 # não volta sozinho (a nova pode ter migrado): se nem a anterior responder, diz qual backup restaurar.
+# Manifesto da versão a instalar. Canal de teste (a instalada é uma pré-versão, ex.: 1.1.0-rc.29): a pré-versão mais nova
+# da lista de versões do GitHub, como a tela do Ergon já faz (version.ts). Antes, só o latest.json do "latest" do GitHub,
+# que ignora pré-versões: quem estava numa rc nunca recebia a próxima pelo terminal. Sem a lista, o manifesto de sempre.
+manifesto_do_canal() {
+  local atual; atual="$(head -1 "$RAIZ/VERSAO" 2>/dev/null || true)"
+  if [[ "$atual" == *-* && "$MANIFESTO" =~ ^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/releases/ ]]; then
+    local dono="${BASH_REMATCH[1]}" repo="${BASH_REMATCH[2]}" tag
+    tag="$(curl -fsSL --max-time 20 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$dono/$repo/releases?per_page=30" 2>/dev/null \
+      | grep -o '"tag_name": *"v[0-9][0-9.]*\(-rc\.[0-9]*\)\{0,1\}"' | sed 's/.*"v\([^"]*\)"/\1/' | sort -V | tail -1)"
+    if [[ -n "$tag" ]]; then printf '%s' "https://github.com/$dono/$repo/releases/download/v$tag/latest.json"; return; fi
+  fi
+  printf '%s' "$MANIFESTO"
+}
+
 atualizar() {
   local antes; antes="$(ls -1 "$BACKUPS" 2>/dev/null || true)"
   if ! backup; then confirmar "$(txt 'Continuar sem backup?' 'Continue without a backup?')" || exit 1; fi
@@ -268,7 +282,7 @@ atualizar() {
     fail "A versão nova não respondeu. Para voltar: git checkout $rev e ./ergon.sh start; se ainda assim não subir, $voltar" "The new version did not respond. To go back: git checkout $rev and ./ergon.sh start; if it still does not start, $voltar"
   fi
   local m ver bundle sha atual tmp
-  m="$(curl -fsSL --max-time 20 "${ERGON_UPDATE_URL:-$MANIFESTO}")" || fail 'Não consegui ler a versão publicada.' 'Could not read the published version.'
+  m="$(curl -fsSL --max-time 20 "${ERGON_UPDATE_URL:-$(manifesto_do_canal)}")" || fail 'Não consegui ler a versão publicada.' 'Could not read the published version.'
   ver="$(field version <<<"$m")"; bundle="$(field bundle <<<"$m")"; sha="$(field sha256 <<<"$m")"
   atual="$(head -1 "$RAIZ/VERSAO" 2>/dev/null || true)"
   mais_nova "$ver" "$atual" || { say "Já está na versão $atual (publicada: $ver)." "Already on version $atual (published: $ver)."; return; }

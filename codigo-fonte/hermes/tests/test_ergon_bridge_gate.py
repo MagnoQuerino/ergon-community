@@ -61,6 +61,16 @@ check("link simbólico para fora: não", b._media_file(link) is None)
 check("outro tipo de arquivo: não", b._media_file(os.path.join(gen, "nota.txt")) is None)
 check("imagem vazia: não", b._media_file(os.path.join(gen, "vazia.png")) is None)
 check("caminho vazio ou com byte nulo: não", b._media_file("") is None and b._media_file(png + "\x00") is None)
+# rc.27: cada agente é um perfil; a imagem que ele gera fica na pasta do perfil
+pgen = os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "profiles", "erg-0123456789abcdef0123", "cache", "generated", "images")
+os.makedirs(pgen, exist_ok=True)
+ppng = os.path.join(pgen, "krea_perfil.png")
+open(ppng, "wb").write(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+hit = b._media_file(ppng)
+check("imagem gerada no perfil do agente é servida", hit is not None and hit[1] == "image/png", str(hit))
+psec = os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "profiles", "erg-0123456789abcdef0123", "auth.png")
+open(psec, "wb").write(b"segredo")
+check("arquivo do perfil fora das geradas: não", b._media_file(psec) is None)
 
 # Chave própria (BYOK): só os três provedores, chave no formato deles, validada antes de gravar; o valor nunca volta
 import json  # noqa: E402
@@ -133,6 +143,26 @@ passa = lambda m, p: any(mm == m and rx.fullmatch(p) for mm, rx, _q in b._ROUTES
 check("ponte: só gravar e apagar o endpoint ergon-ai passam",
       passa("POST", "/api/providers/custom-endpoints") and passa("DELETE", "/api/providers/custom-endpoints/ergon-ai")
       and not passa("GET", "/api/providers/custom-endpoints") and not passa("POST", "/api/providers/custom-endpoints/ergon-ai/activate"))
+
+# poda dos perfis (QA 16/11): o que o Ergon não tem mais sai da pasta ativa, para perfis-removidos/ (nada é apagado)
+_root = os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "profiles")
+for _n in ("erg-aaaaaaaaaaaaaaaaaaaa", "erg-bbbbbbbbbbbbbbbbbbbb", "erg-cccccccccccccccccccc"):
+    os.makedirs(os.path.join(_root, _n, "memories"), exist_ok=True)
+    open(os.path.join(_root, _n, "memories", "nota.md"), "w").write("lembrar")
+_r = b.perfis_podar(["erg-aaaaaaaaaaaaaaaaaaaa"])
+check("poda: só o que o Ergon mantém fica na pasta ativa", "erg-aaaaaaaaaaaaaaaaaaaa" in b.perfis_listar() and not {"erg-bbbbbbbbbbbbbbbbbbbb", "erg-cccccccccccccccccccc"} & set(b.perfis_listar()), str(_r))
+check("poda: o que saiu foi movido com a memória, não apagado",
+      os.path.isfile(os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "perfis-removidos", "erg-bbbbbbbbbbbbbbbbbbbb", "memories", "nota.md")))
+try:
+    b.perfis_podar([]); _vazia = False
+except ValueError:
+    _vazia = True
+check("poda: lista vazia não esvazia o motor", _vazia and "erg-aaaaaaaaaaaaaaaaaaaa" in b.perfis_listar())
+try:
+    b.perfis_podar(["../../etc"]); _ruim = False
+except ValueError:
+    _ruim = True
+check("poda: nome fora do formato é recusado", _ruim)
 
 print("TUDO OK" if ok else "HOUVE FALHA")
 sys.exit(0 if ok else 1)

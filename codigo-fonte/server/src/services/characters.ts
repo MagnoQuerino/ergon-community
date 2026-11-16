@@ -77,6 +77,29 @@ export const BENEFICIOS_NOVOS: readonly string[] = ['leitura', 'navegador', 'vid
  * web/src/components/CompetenciasProntas.tsx.)
  */
 export const COMPETENCIAS_PRONTAS: readonly string[] = ['docx', 'xlsx', 'pdf', 'powerpoint', 'meeting-action-items', 'weekly-review-planning', 'document-to-action-items', 'excel-author', 'pptx-author'];
+/**
+ * O Coordenador encaminha e acompanha; quem faz o trabalho são os especialistas. As ferramentas pesadas (a descrição de
+ * cada uma vai em toda chamada ao modelo) ficam com eles, não com ele (decisão do dono, 16/11: cada mensagem ao
+ * Aristóteles custava ~17 mil tokens, metade só com a descrição das ferramentas). A pessoa pode devolver no perfil dele.
+ */
+export const PESADAS_FORA_DO_COORDENADOR: readonly string[] = ['navegador', 'video', 'videogen', 'imagens', 'voz', 'xbusca', 'conectores', 'calculo', 'terminal', 'leitura'];
+export const semPesadas = (tools: readonly string[]): string[] => tools.filter((t) => !PESADAS_FORA_DO_COORDENADOR.includes(t));
+
+/** Uma vez por agente que coordena: tira as ferramentas pesadas (se a pessoa devolver depois, ficam). */
+export function enxugarCoordenador(db: Db, workspaceId: string, agentId: string): void {
+  const a = db.get<{ tools: string | null; coordinator: number }>('SELECT tools, coordinator FROM agents WHERE id = ? AND workspace_id = ?', agentId, workspaceId);
+  if (!a || !Number(a.coordinator)) return;
+  const marca = `coord.enxuto:${agentId}`;
+  if (db.get("SELECT 1 AS x FROM workspace_settings WHERE workspace_id = ? AND key = ?", workspaceId, marca)) return;
+  let tools: string[] = [];
+  try { const x = JSON.parse(a.tools ?? '[]'); if (Array.isArray(x)) tools = x.map(String); } catch { /* ilegível: começa vazia */ }
+  const fica = semPesadas(tools);
+  db.tx(() => {
+    if (fica.length !== tools.length) db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(fica), agentId);
+    db.run("INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)", workspaceId, marca, now(), now());
+  });
+}
+
 /** As ferramentas de um agente com os benefícios (sem repetir, na ordem: as dele primeiro). */
 export const comBeneficios = (tools: readonly string[]): string[] => [...new Set([...tools, ...BENEFICIOS])].filter((t) => TOOLS[t] && !TOOLS[t].guarded);
 /**
@@ -89,7 +112,7 @@ export const BENEFICIOS_DA_PLATAFORMA: readonly string[] = ['contas', 'leitura',
 export function ferramentasDesligadas(db: Db, workspaceIds: string[] | null): Set<string> {
   const rows = db.all<{ workspace_id: string; key: string }>("SELECT workspace_id, key FROM workspace_settings WHERE key LIKE 'ferramentas.%' AND value = 'desligado'");
   const ids = workspaceIds ? new Set(workspaceIds) : null;
-  return new Set(rows.filter((r) => !ids || ids.has(r.workspace_id)).map((r) => r.key.slice('ferramentas.'.length)).filter((id) => TOOLS[id]?.safe));
+  return new Set(rows.filter((r) => !ids || ids.has(r.workspace_id)).map((r) => r.key.slice('ferramentas.'.length)).filter((id) => TOOLS[id]?.safe || TOOLS[id]?.guarded));
 }
 
 /**
@@ -321,7 +344,7 @@ export function routeDemand(text: string): { key: string; words: string[] } | nu
 
 // ---------------- equipe de demonstração: criação e atualização ----------------
 export function characterColumns(c: Character) {
-  return { char_key: c.key, bio: c.bio, charter: c.charter, skills: JSON.stringify(c.skills), tools: JSON.stringify(comBeneficios(c.tools)), model_hint: c.modelHint,
+  return { char_key: c.key, bio: c.bio, charter: c.charter, skills: JSON.stringify(c.skills), tools: JSON.stringify(c.key === 'aristoteles' ? semPesadas(comBeneficios(c.tools)) : comBeneficios(c.tools)), model_hint: c.modelHint,
     hermes_skills: JSON.stringify(COMPETENCIAS_PRONTAS) };
 }
 
@@ -469,9 +492,9 @@ export function grantBenefitTools(db: Db, bus: Bus | null, workspaceId: string):
   const lista = (v: string | null): string[] => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
   let n = 0;
   db.tx(() => {
-    for (const a of db.all<{ id: string; tools: string | null; hermes_skills: string | null }>("SELECT id, tools, hermes_skills FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId)) {
+    for (const a of db.all<{ id: string; tools: string | null; hermes_skills: string | null; coordinator: number }>("SELECT id, tools, hermes_skills, coordinator FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId)) {
       const tools = lista(a.tools);
-      const somar = (editados.has(a.id) ? BENEFICIOS_NOVOS : BENEFICIOS).filter((t) => !tools.includes(t));
+      const somar = (editados.has(a.id) ? BENEFICIOS_NOVOS : BENEFICIOS).filter((t) => !tools.includes(t) && !(Number(a.coordinator) && PESADAS_FORA_DO_COORDENADOR.includes(t)));
       // as competências prontas: só em quem está sem nenhuma e nunca teve a lista mudada pela pessoa
       const competencias = !lista(a.hermes_skills).length && !competenciasEscolhidas.has(a.id) ? COMPETENCIAS_PRONTAS : [];
       if (!somar.length && !competencias.length) continue;

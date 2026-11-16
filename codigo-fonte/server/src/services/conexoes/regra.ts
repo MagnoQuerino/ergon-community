@@ -41,8 +41,10 @@ export function decidir(x: { risco: Risco; origem: Origem; leuDeFora: boolean; l
   if (x.liberarTudo) return 'direto';
   // a regra que ela aprovou (o serviço já conferiu tipo, conexão e alcance)
   if (x.regra && x.risco !== 'ler') return 'direto';
-  if (x.codigoLigado) return 'confirmar';
+  // ler vai direto mesmo com código ligado (16/11: Executar código vem ligado por padrão, com o aviso nos termos de uso; antes,
+  // toda leitura pedia confirmação e uma rotina de e-mail pedia 27 cliques). Criar, enviar e apagar seguem confirmando.
   if (x.risco === 'ler') return 'direto';
+  if (x.codigoLigado) return 'confirmar';
   if (x.risco === 'apagar' || x.origem === 'fora') return 'confirmar';
   return x.risco === 'enviar' && x.leuDeFora ? 'confirmar' : 'direto';
 }

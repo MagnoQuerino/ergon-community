@@ -52,6 +52,13 @@ const conta = {
   'entrar.esqueci': 'Esqueci a senha',
   'entrar.primeiraVez': 'Primeira vez neste computador? {criar}',
   'entrar.criarMinha': 'Criar a minha conta',
+  'termos.link': 'termos de uso',
+  'termos.aceitoNaConta': 'Li e aceito os {termos} (inclui: os agentes podem executar programas num ambiente isolado; dá para desligar em Configurações).',
+  'termos.fechar': 'Fechar',
+  'termos.novosTitulo': 'Termos de uso do Ergon',
+  'termos.novosSub': 'Antes de seguir: leia os termos de uso. Com o aceite, Executar código e Terminal passam a vir ligados na equipe (dá para desligar em Configurações › Ferramentas da equipe).',
+  'termos.liAceito': 'Li e aceito os termos de uso',
+  'termos.aceitar': 'Aceitar e continuar',
   'entrar.setupEmSeguida': 'Em seguida: uma frase de 24 palavras (a chave reserva dos seus dados, mostrada uma única vez), duas perguntas sobre como você trabalha e a conexão da sua conta de IA. A equipe chega montada para o seu caso.',
   'entrar.trancadoDica': 'Passkey e autenticador não abrem os dados depois de reiniciar (eles não guardam a chave); a senha ou a frase, sim.',
 

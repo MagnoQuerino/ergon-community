@@ -72,7 +72,8 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
   // boas-vindas abrem, um carregamento esconde a espera ANTES das perguntas, para a conexão ter os botões prontos.
   // Uma vez pronto, segue pronto (o carregamento não volta no meio das perguntas).
   const [aiPronta, setAiPronta] = useState(!!redo);
-  useEffect(() => { if (ai && (ai.available || !ai.motor)) setAiPronta(true); }, [ai]);
+  // motor ligado mas ocupado (sem memória): segue para as perguntas; a etapa da IA diz que está ocupada (antes, travava aqui)
+  useEffect(() => { if (ai && (ai.available || !ai.motor || ai.ocupado)) setAiPronta(true); }, [ai]);
   const aiAcordando = !aiPronta;
   const acordandoDesde = useRef(Date.now());
   // conectou a conta na etapa da IA: monta a equipe e entra. Conectar continua sendo escolha: "Conectar depois" segue.

@@ -234,3 +234,23 @@ export const obrigacaoLine = (o: Obrigacao, today: string) => {
   const when = d < 0 ? `passou há ${-d} dia(s)` : d === 0 ? 'HOJE' : `em ${d} dia(s)`;
   return `${o.code} · ${o.contrato} · ${TIPO_LABEL[o.tipo]}: ${brd(o.data)} (${when})${o.derivada ? ` · calculado: ${o.derivada}` : ''} · trecho: "${o.trecho}"`;
 };
+
+/**
+ * O mesmo gasto lido em dois documentos: a nota fiscal (NF-e/NFS-e) e a linha do extrato (OFX) com a data perto (até 3 dias
+ * da emissão ou do vencimento), o mesmo valor e o mesmo fornecedor (uma palavra de 4+ letras em comum). Fica a nota (tem o documento fiscal); a linha do extrato
+ * sai da proposta, com o motivo. Antes, a rotina avisava no texto e a proposta registrava os dois (QA 15/11: R$ 1.250 a mais).
+ */
+export function duplicadosEntreDocumentos(L: readonly Lancamento[]): Array<{ n: number; de: number }> {
+  const fiscal = (l: Lancamento) => l.origem === 'nfe' || l.origem === 'nfse';
+  const palavras = (t: string) => new Set(t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !['ltda', 'eireli', 'pagamento', 'pagto', 'compra', 'debito', 'credito', 'nota', 'fiscal'].includes(w)));
+  const fora = new Set<number>(); const out: Array<{ n: number; de: number }> = [];
+  for (const nf of L.filter(fiscal)) {
+    const pw = palavras(`${nf.descricao} ${nf.parte ?? ''}`);
+    // a data do extrato perto (até 3 dias) da emissão ou do vencimento da parcela
+    const perto = (a: string, b: string | undefined) => !!a && !!b && Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) <= 3 * 86_400_000;
+    const par = L.find((x) => x.origem === 'ofx' && !fora.has(x.n) && (perto(x.data, nf.data) || perto(x.data, nf.vencimento)) && Math.abs(Math.abs(x.valor) - Math.abs(nf.valor)) < 0.005
+      && [...palavras(`${x.descricao} ${x.parte ?? ''}`)].some((w) => pw.has(w)));
+    if (par) { fora.add(par.n); out.push({ n: par.n, de: nf.n }); }
+  }
+  return out;
+}
