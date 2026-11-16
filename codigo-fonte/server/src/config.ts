@@ -1,8 +1,16 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { KDF_STRONG, KDF_TEST, type KdfParams } from './security/crypto.ts';
 
 /** App público do Ergon no Microsoft Entra (todas as contas; docs/MICROSOFT.md). */
 export const ERGON_MS_APP = 'a5c42f25-1caa-45db-9220-79708764914e';
+/**
+ * App público do Ergon no Google Cloud (cliente "App para computador"; docs/GOOGLE.md). O Google trata o segredo de app
+ * instalado como não confidencial, mas a proteção de push do GitHub o barra no repositório: ele entra na imagem pela
+ * esteira de lançamento (segredo de build "google_app" → /app/google-app.secret). Sem o arquivo (build local), o Google
+ * fica sem app até a pessoa pôr o próprio cliente no ergon.env.
+ */
+export const ERGON_GOOGLE_APP = '304894299343-mo6gc70hoodtkvk7bqsj63n0nl9i2okt.apps.googleusercontent.com';
 
 export type ExecutorMode = 'simulated' | 'hermes';
 /**
@@ -63,7 +71,7 @@ export interface Config {
   motorWaitMinutes: number;
   /** login com a conta (SSO parametrizado, sso.ts). Microsoft: app público no Entra (PKCE, sem segredo). */
   msClientId: string | null;
-  /** Google: cliente OAuth "Aplicativo da Web" no Google Cloud (PKCE + segredo, que fica em ergon.env) */
+  /** Google: app público do Ergon embutido na imagem, ou cliente próprio no ergon.env (PKCE + segredo) */
   googleClientId: string | null;
   googleClientSecret: string | null;
   /** app do Google em modo de teste (o normal numa instalação própria): a autorização vale 7 dias */
@@ -132,6 +140,26 @@ function secret(v: string | undefined, minLen: number, name: string): string | n
   return v;
 }
 
+function segredoEmbutido(arquivo: string): string | null {
+  try { const v = readFileSync(arquivo, 'utf8').trim(); return v.length >= 16 ? v : null; } catch { return null; }
+}
+
+/**
+ * Google: cliente próprio (ERGON_GOOGLE_CLIENT_ID + ERGON_GOOGLE_CLIENT_SECRET; em teste a autorização vale 7 dias) ou o
+ * app público do Ergon embutido na imagem (publicado: sem prazo; ERGON_GOOGLE_TESTING=1 volta ao aviso dos 7 dias).
+ * Desligar: ERGON_GOOGLE_CLIENT_ID=off.
+ */
+function google(env: NodeJS.ProcessEnv): Pick<Config, 'googleClientId' | 'googleClientSecret' | 'googleTesting'> {
+  const id = env.ERGON_GOOGLE_CLIENT_ID;
+  if (id === 'off') return { googleClientId: null, googleClientSecret: null, googleTesting: false };
+  if (id && /^[\w-]+\.apps\.googleusercontent\.com$/.test(id)) {
+    return { googleClientId: id, googleClientSecret: secret(env.ERGON_GOOGLE_CLIENT_SECRET, 16, 'ERGON_GOOGLE_CLIENT_SECRET'), googleTesting: env.ERGON_GOOGLE_TESTING !== '0' };
+  }
+  const embutido = segredoEmbutido(env.ERGON_GOOGLE_APP_SECRET_FILE ?? '/app/google-app.secret');
+  if (embutido) return { googleClientId: ERGON_GOOGLE_APP, googleClientSecret: embutido, googleTesting: env.ERGON_GOOGLE_TESTING === '1' };
+  return { googleClientId: null, googleClientSecret: null, googleTesting: env.ERGON_GOOGLE_TESTING !== '0' };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Partial<Config> = {}): Config {
   const dataDir = path.resolve(env.ERGON_DATA_DIR ?? './.data');
   const port = int(env.ERGON_PORT, 8787, 1, 65535);
@@ -172,9 +200,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     // o app público do Ergon no Entra (qualquer conta Microsoft, pessoal ou de empresa) já vem embutido: identificador
     // de app público não é segredo (PKCE, sem senha). Outro app: ERGON_MS_CLIENT_ID=<id>; desligar: ERGON_MS_CLIENT_ID=off
     msClientId: env.ERGON_MS_CLIENT_ID === 'off' ? null : env.ERGON_MS_CLIENT_ID && /^[0-9a-f-]{36}$/i.test(env.ERGON_MS_CLIENT_ID) ? env.ERGON_MS_CLIENT_ID : ERGON_MS_APP,
-    googleClientId: env.ERGON_GOOGLE_CLIENT_ID && /^[\w-]+\.apps\.googleusercontent\.com$/.test(env.ERGON_GOOGLE_CLIENT_ID) ? env.ERGON_GOOGLE_CLIENT_ID : null,
-    googleClientSecret: secret(env.ERGON_GOOGLE_CLIENT_SECRET, 16, 'ERGON_GOOGLE_CLIENT_SECRET'),
-    googleTesting: env.ERGON_GOOGLE_TESTING !== '0',
+    ...google(env),
     oauthRedirectBase: env.ERGON_OAUTH_REDIRECT_BASE && /^https?:\/\/[\w.:-]+$/.test(env.ERGON_OAUTH_REDIRECT_BASE) ? env.ERGON_OAUTH_REDIRECT_BASE : null,
     bridgeToken: secret(env.ERGON_BRIDGE_TOKEN, 24, 'ERGON_BRIDGE_TOKEN'),
     agentToken: secret(env.ERGON_AGENT_TOKEN, 24, 'ERGON_AGENT_TOKEN'),
