@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { KDF_STRONG, KDF_TEST, type KdfParams } from './security/crypto.ts';
+import { DEFAULT_TEAMS_RELAY_URL } from './world/config.ts';
 
 /** App público do Ergon no Microsoft Entra (todas as contas; docs/MICROSOFT.md). */
 export const ERGON_MS_APP = 'a5c42f25-1caa-45db-9220-79708764914e';
@@ -103,9 +104,11 @@ export interface Config {
   maxStorageBytes: number;
   /**
    * Conversar com a equipe pelo Teams (app público): endereço https do serviço do Teams (ERGON_TEAMS_RELAY_URL). Tem
-   * prioridade sobre o ajuste da instalação; sem nenhum dos dois, o recurso fica indisponível (services/teams-app).
+   * prioridade sobre o ajuste da instalação; sem nenhum dos dois, vale o serviço oficial (teamsRelayOficial).
    */
   teamsRelayUrl: string | null;
+  /** o serviço oficial do Teams (DEFAULT_TEAMS_RELAY_URL) quando ERGON_TEAMS_RELAY_URL não existe; vazia = nenhum */
+  teamsRelayOficial: string | null;
   simulatedDelayMs: number;
   workerTickMs: number;
   leaseSeconds: number;
@@ -197,6 +200,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     maxUploadBytes: int(env.ERGON_MAX_UPLOAD_BYTES, 50 * 1024 * 1024, 1024, 500 * 1024 * 1024),
     maxStorageBytes: int(env.ERGON_MAX_STORAGE_MB, 0, 0, 10_000_000) * 1024 * 1024,
     teamsRelayUrl: env.ERGON_TEAMS_RELAY_URL?.trim() || null,
+    teamsRelayOficial: env.ERGON_TEAMS_RELAY_URL === undefined ? DEFAULT_TEAMS_RELAY_URL : null,
     simulatedDelayMs: int(env.ERGON_SIMULATED_DELAY_MS, 1200, 0, 60000),
     workerTickMs: int(env.ERGON_WORKER_TICK_MS, 500, 20, 60000),
     leaseSeconds: int(env.ERGON_LEASE_SECONDS, 30, 2, 600),

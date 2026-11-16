@@ -20,6 +20,7 @@ const conexoes = {
   'estado.connected': 'conectado',
   'estado.error': 'com problema',
   'estado.soon': 'em breve',
+  'estado.indisponivel': 'ainda não disponível',
   'estado.semConexao': 'sem conexão',
   'detalhes': 'Detalhes',
 
@@ -276,7 +277,6 @@ const conexoes = {
   // ——— conversar com a equipe pelo Teams ———
   'teams.titulo': 'Conversar com a equipe pelo Teams',
   'teams.intro': 'Mande pedidos à sua equipe numa conversa com o app Ergon no Teams e receba as respostas ali mesmo. As confirmações chegam como cartões com Aprovar e Recusar, e o que precisa de você também avisa no Teams.',
-  'teams.emBreve': 'Em breve: conversar com a equipe pelo Teams, pelo WhatsApp e por outros aplicativos de conversa.',
   'teams.senhaIncorreta': 'Senha incorreta.',
   'teams.conversarPeloTeams': 'Conversar pelo Teams',
   'teams.contaDoTeams': 'Conta do Teams',

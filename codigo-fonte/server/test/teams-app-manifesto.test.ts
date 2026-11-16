@@ -55,3 +55,56 @@ test('o validador recusa escopo de grupo ou canal no perfil público, domínio c
   const msg = structuredClone(m); msg.permissions = ['identity', 'messageTeamMembers'];
   assert.ok(mod.validateManifest(msg, { allowPlaceholders: false, publico: true }).some((e) => /messageTeamMembers/.test(e)));
 });
+
+test('--build só com o App ID do bot: o pacote oficial (Ergon, ergonworld.com, privacidade, termos), pt-BR + en e os ícones da marca', SEM_SCRIPT, async () => {
+  const out = tmpDir();
+  const saida = rodar('--build', '--bot-id', BOT.toUpperCase(), '--out', out);
+  const zipPath = path.join(out, 'ergon-teams-app.zip');
+  assert.match(saida, new RegExp(`Pacote gerado: ${zipPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  const m = JSON.parse(fs.readFileSync(path.join(out, 'manifest.json'), 'utf8'));
+  assert.equal(m.id, BOT, 'sem --app-id, o id do app no Teams é o próprio App ID do bot (o relé informa esse id ao Ergon)');
+  assert.equal(m.bots[0].botId, BOT);
+  assert.deepEqual(m.developer, { name: 'Ergon', websiteUrl: 'https://ergonworld.com', privacyUrl: 'https://ergonworld.com/privacidade', termsOfUseUrl: 'https://ergonworld.com/termos' });
+  assert.deepEqual(m.validDomains, ['ergonworld.com', 'teams.ergonworld.com']);
+  assert.equal(m.name.short, 'Ergon');
+  assert.deepEqual(m.bots[0].scopes, ['personal']); assert.equal(m.bots[0].supportsFiles, false); assert.equal(m.bots[0].isNotificationOnly, false);
+  assert.deepEqual(m.localizationInfo, { defaultLanguageTag: 'pt-br', additionalLanguages: [{ languageTag: 'en', file: 'en.json' }] });
+  const en = JSON.parse(fs.readFileSync(path.join(out, 'en.json'), 'utf8'));
+  assert.equal(en['name.short'], 'Ergon');
+  assert.equal(en['description.short'], 'Chat with your Ergon team right from Teams.');
+  assert.ok(en['description.short'].length <= 80 && en['description.full'].length <= 4000);
+  assert.match(en['description.full'], /one-on-one chat/); assert.match(en['description.full'], /7 days/); assert.match(en['description.full'], /does not read other chats/);
+  // o zip: os quatro arquivos na raiz (sem pasta), cada um igual ao gravado ao lado
+  const zip = fs.readFileSync(zipPath);
+  const nomes: string[] = [];
+  for (let o = zip.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])); o >= 0; o = zip.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), o + 4)) nomes.push(zip.toString('utf8', o + 46, o + 46 + zip.readUInt16LE(o + 28)));
+  assert.deepEqual(nomes, ['manifest.json', 'en.json', 'color.png', 'outline.png']);
+  for (const n of nomes) assert.ok(zip.includes(fs.readFileSync(path.join(out, n))), `${n} no zip`);
+  const mod = await import(pathToFileURL(SCRIPT).href) as { lerPng: (b: Buffer) => { w: number; h: number }; ZIP_PADRAO: string };
+  assert.deepEqual([mod.lerPng(fs.readFileSync(path.join(out, 'color.png'))).w, mod.lerPng(fs.readFileSync(path.join(out, 'color.png'))).h], [192, 192]);
+  assert.deepEqual([mod.lerPng(fs.readFileSync(path.join(out, 'outline.png'))).w, mod.lerPng(fs.readFileSync(path.join(out, 'outline.png'))).h], [32, 32]);
+  assert.match(mod.ZIP_PADRAO, /connectors[\\/]teams[\\/]build[\\/]ergon-teams-app\.zip$/, 'sem --out: o caminho conhecido (fora do Git)');
+});
+
+test('--build sem o App ID do bot não gera nada; tradução e ícones fora das regras são recusados', SEM_SCRIPT, async () => {
+  const out = tmpDir();
+  assert.throws(() => rodar('--build', '--out', out), /GUID real/);
+  assert.ok(!fs.existsSync(path.join(out, 'ergon-teams-app.zip')));
+  const mod = await import(pathToFileURL(SCRIPT).href) as {
+    template: () => any; traducoes: () => Record<string, any>; preencher: (t: any, o: any) => any; validateLocalizacao: (l: any, m: any, n?: string) => string[]; validateIcones: (c: Buffer, o: Buffer) => string[];
+  };
+  const m = mod.preencher(mod.template(), { botId: BOT });
+  const en = mod.traducoes()['en.json'];
+  assert.deepEqual(mod.validateLocalizacao(en, m, 'en.json'), []);
+  assert.ok(mod.validateLocalizacao({ ...en, 'description.short': 'x'.repeat(81) }, m).some((e) => /description\.short/.test(e)));
+  assert.ok(mod.validateLocalizacao({ ...en, 'bots[0].commandLists[0].commands[5].title': 'help' }, m).some((e) => /sem comando/.test(e)));
+  assert.ok(mod.validateLocalizacao({ ...en, 'developer.name': 'Outro' }, m).some((e) => /chave desconhecida/.test(e)));
+  const { png } = await import(pathToFileURL(path.resolve(import.meta.dirname, '..', '..', 'scripts', 'png.mjs')).href) as { png: (w: number, h: number, rgba: Buffer) => Buffer };
+  const cor = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'connectors', 'teams', 'appPackage', 'color.png'));
+  const contorno = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'connectors', 'teams', 'appPackage', 'outline.png'));
+  assert.deepEqual(mod.validateIcones(cor, contorno), []);
+  const azul = Buffer.alloc(32 * 32 * 4); for (let i = 0; i < 32 * 32; i++) if (i % 2) azul.writeUInt32BE(0x1d184bff, i * 4);
+  assert.ok(mod.validateIcones(cor, png(32, 32, azul)).some((e) => /só branco/.test(e)), 'contorno colorido');
+  assert.ok(mod.validateIcones(png(96, 96, Buffer.alloc(96 * 96 * 4, 255)), contorno).some((e) => /192×192/.test(e)));
+  assert.ok(mod.validateIcones(cor, png(32, 32, Buffer.alloc(32 * 32 * 4, 255))).some((e) => /transparente/.test(e)), 'contorno sem transparência');
+});

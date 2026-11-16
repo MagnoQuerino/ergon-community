@@ -4,7 +4,9 @@
  * o coordenador: a mensagem dela entra como mensagem dela (a mesma regra do app: o que ela pede vai direto, o resto pede
  * cartão), a resposta do coordenador volta ao Teams, as confirmações viram cartões com Aprovar/Recusar (o clique decide
  * pela MESMA função da tela) e o que precisa dela em "Com você" vira aviso no Teams (ligado por padrão).
- * Nada daqui depende do módulo opcional da nuvem: funciona igual na edição Community. Sem endereço do serviço, nada liga.
+ * Nada daqui depende do módulo opcional da nuvem: funciona igual na edição Community. O endereço do serviço vem do
+ * ambiente (ERGON_TEAMS_RELAY_URL), do "Ajuste da instalação" ou, sem nenhum dos dois, é o serviço oficial
+ * (DEFAULT_TEAMS_RELAY_URL): esse só é oferecido depois que a saúde dele responde. Sem endereço, nada liga.
  */
 import type { Config } from '../../config.ts';
 import type { Db } from '../../db/db.ts';
@@ -88,6 +90,8 @@ interface TeamsAppDeps {
 /** Ajustes de tempo (os testes encurtam). */
 interface AjustesTeams {
   avisosMs: number; saidaMs: number; digitandoMs: number; atrasoMs: number;
+  /** o serviço oficial ainda não respondeu à saúde: de quanto em quanto tempo confere de novo (1 h; a tela aberta confere a cada minuto) */
+  saudeMs?: number;
   /** prazo dos pedidos da tela ao serviço (ligar/desligar, avisos): o estado daqui já foi gravado, a conexão seguinte confere */
   pedidoMs?: number;
   /** primeira espera depois de um registro recusado (dobra a cada falha, até 1 h) */
@@ -127,6 +131,10 @@ export class TeamsApp {
   private ligado = false;
   private iniciando = false;
   private varreduraTimer: NodeJS.Timeout | null = null;
+  /** O serviço oficial respondeu à saúde (e quando foi conferido). Endereço escolhido à mão não passa por isso. */
+  private saudeOficial: { ok: boolean; em: number } | null = null;
+  private conferindoSaude: Promise<boolean> | null = null;
+  private saudeTimer: NodeJS.Timeout | null = null;
 
   constructor(d: TeamsAppDeps) {
     this.d = d;
@@ -134,15 +142,55 @@ export class TeamsApp {
   }
 
   // ------------------------------------------------------------------------------------------------ configuração
-  /** O endereço do serviço do Teams: o do ambiente (prioridade) ou o ajuste da instalação. null = indisponível. */
-  base(): string | null { return enderecoDoRele(this.d.cfg.teamsRelayUrl) ?? enderecoDoRele(instanceSetting(this.d.db, 'teams_relay_url')); }
+  /** O endereço do serviço do Teams: o do ambiente (prioridade), o ajuste da instalação ou o oficial. null = nenhum. */
+  base(): string | null { return this.escolhido() ?? enderecoDoRele(this.d.cfg.teamsRelayOficial); }
+  /** O endereço escolhido de propósito (ambiente ou ajuste): vale sem conferir a saúde. */
+  private escolhido(): string | null { return enderecoDoRele(this.d.cfg.teamsRelayUrl) ?? enderecoDoRele(instanceSetting(this.d.db, 'teams_relay_url')); }
+  /** O endereço em uso é o serviço oficial (nada escolhido no ambiente nem no ajuste). */
+  oficial(): boolean { return !this.escolhido() && !!enderecoDoRele(this.d.cfg.teamsRelayOficial); }
+  /**
+   * Oferecido na tela: há endereço e, se é o oficial, a saúde dele já respondeu alguma vez (ou esta instalação já está
+   * registrada nele: relé fora do ar depois disso é só "sem conexão", e as contas ligadas continuam na tela).
+   */
+  disponivel(): boolean { return !!this.base() && (!this.oficial() || this.saudeOficial?.ok === true || !!this.instalacao()); }
   enderecoDoAmbiente(): boolean { return !!this.d.cfg.teamsRelayUrl; }
-  /** Ajuste da instalação (pessoa administradora), só quando o ambiente não define. */
+  /** Ajuste da instalação (pessoa administradora), só quando o ambiente não define. O próprio oficial (ou vazio) volta ao padrão. */
   definirEndereco(url: string | null): void {
     if (this.enderecoDoAmbiente()) throw new HttpError(409, 'env', 'O endereço já vem definido na instalação e não muda por aqui.');
     if (url && !enderecoDoRele(url)) throw new HttpError(400, 'url', 'Use um endereço https.');
-    setInstanceSetting(this.d.db, 'teams_relay_url', url ? enderecoDoRele(url)! : '');
+    const novo = url ? enderecoDoRele(url)! : '';
+    setInstanceSetting(this.d.db, 'teams_relay_url', novo === enderecoDoRele(this.d.cfg.teamsRelayOficial) ? '' : novo);
+    this.saudeOficial = null;
     void this.reiniciar();
+  }
+
+  /**
+   * Confere a saúde do serviço oficial (GET /healthz → {"ok":true}). Antes de responder (o relé ainda não está no ar),
+   * a tela mostra "ainda não disponível" e este Ergon não registra nada nem gera chaves.
+   */
+  conferirSaude(): Promise<boolean> {
+    const base = this.base();
+    if (!base || !this.oficial()) return Promise.resolve(!!base);
+    if (!this.conferindoSaude) {
+      this.conferindoSaude = (async () => {
+        let ok = false;
+        try {
+          const r = await (this.d.fetch ?? fetch)(`${base}/healthz`, { signal: AbortSignal.timeout(10_000) });
+          ok = r.ok && (await r.json().catch(() => null) as { ok?: unknown } | null)?.ok === true;
+        } catch { ok = false; }
+        const antes = this.saudeOficial?.ok === true;
+        this.saudeOficial = { ok, em: this.agora() };
+        if (ok !== antes) this.avisarTela(null);
+        return ok;
+      })().finally(() => { this.conferindoSaude = null; });
+    }
+    return this.conferindoSaude;
+  }
+  /** Sem resposta do oficial: confere de novo mais tarde (um só agendamento por vez). */
+  private conferirDepois(): void {
+    if (this.saudeTimer || !this.ligado) return;
+    this.saudeTimer = setTimeout(() => { this.saudeTimer = null; if (this.ligado) void this.start(); }, this.ajustes.saudeMs ?? 3600_000);
+    this.saudeTimer.unref?.();
   }
 
   /** A chave do cofre que cifra as credenciais (null: instalação sem proteção, o mesmo nível dos demais segredos dela). */
@@ -182,6 +230,11 @@ export class TeamsApp {
     for (const ws of new Set(this.d.db.all<{ w: string }>("SELECT DISTINCT workspace_id AS w FROM teams_bindings WHERE status IN ('active', 'paused')").map((r) => r.w))) this.assinar(ws);
     const base = this.base();
     if (!base || this.d.vault.state() !== 'open' || this.cliente || this.iniciando) return;
+    if (this.oficial() && this.saudeOficial?.ok !== true && !this.instalacao()) {
+      // o serviço oficial ainda não respondeu: nada de registro nem de chaves até a saúde responder
+      if (!(await this.conferirSaude())) { this.conferirDepois(); return; }
+      if (!this.ligado || this.cliente || this.iniciando) return;
+    }
     this.iniciando = true;
     try {
       if (!this.instalacao()) await this.registrar(base);
@@ -213,6 +266,7 @@ export class TeamsApp {
     this.cliente?.encerrar(); this.cliente = null;
     for (const t of this.timers.splice(0)) clearTimeout(t);
     if (this.varreduraTimer) { clearInterval(this.varreduraTimer); this.varreduraTimer = null; }
+    if (this.saudeTimer) { clearTimeout(this.saudeTimer); this.saudeTimer = null; }
     for (const t of this.agendados.values()) clearTimeout(t); this.agendados.clear();
     for (const t of this.avisosTimers.values()) clearTimeout(t); this.avisosTimers.clear();
     for (const x of this.digitando.values()) clearInterval(x.timer); this.digitando.clear();
@@ -893,7 +947,8 @@ export class TeamsApp {
 
   // ------------------------------------------------------------------------------------------------ tela (rotas)
   private exigirConexao(): ClienteRele {
-    if (!this.base()) throw new HttpError(409, 'unconfigured', 'Em breve.');
+    if (!this.base()) throw new HttpError(409, 'unconfigured', 'Ainda não disponível.');
+    if (!this.disponivel()) throw new HttpError(409, 'unavailable', 'Ainda não disponível.');
     const c = this.cliente;
     if (!c || c.estado !== 'connected') throw erroDaTela('offline');
     return c;
@@ -929,12 +984,17 @@ export class TeamsApp {
   /** GET /api/teams-app (contrato, 7.2). */
   estado(userId: string): Record<string, unknown> {
     const base = this.base();
+    const disponivel = this.disponivel();
+    // a tela aberta confere de novo o serviço oficial (no máximo uma vez por minuto); respondeu, este Ergon conecta
+    if (base && !disponivel && this.ligado && !this.conferindoSaude && (!this.saudeOficial || this.agora() - this.saudeOficial.em >= 60_000)) {
+      void this.conferirSaude().then((ok) => { if (ok && this.ligado && !this.cliente) void this.start(); });
+    }
     const bindings = this.vinculosDe(userId, ['active', 'paused', 'revoked']).map((b) => ({
       id: b.binding_id, teamsName: b.teams_name && b.teams_name !== CLOSED_VALUE ? b.teams_name : null, linkedAt: b.created_at, notices: Number(b.notices) === 1, status: b.status,
       ...(b.status === 'revoked' ? { revokedBy: b.revoked_by } : {}),
     }));
     return {
-      available: !!base, ...(base ? {} : { reason: 'unconfigured' }), connection: this.estadoConexao(), enabled: this.ligadoPara(userId), bindings,
+      available: disponivel, ...(disponivel ? {} : { reason: base ? 'unavailable' : 'unconfigured' }), connection: this.estadoConexao(), enabled: this.ligadoPara(userId), bindings,
       ...(this.teamsAppUrl ? { teamsAppUrl: this.teamsAppUrl } : {}), ...(this.problema ? { problem: this.problema } : {}),
     };
   }

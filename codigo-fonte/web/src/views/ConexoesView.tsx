@@ -137,7 +137,7 @@ export function ConexoesView() {
   const conversar: Bloco[] = [
     // "equipe-": o Telegram e o Discord também existem como conexão de conta (em Conversas); o bloco daqui é outro
     { kind: 'equipe-teams', logo: 'teams', name: 'Teams', contas: ligadosTeams, soon: teams.data ? !teams.data.available : false,
-      selo: !teams.data ? ['…', ''] : !teams.data.available ? [t('conexoes.estado.soon'), 'badge--soon'] : ligadosTeams ? [t('conexoes.estado.connected'), 'badge--ok'] : [t('conexoes.estado.off'), ''],
+      selo: !teams.data ? ['…', ''] : !teams.data.available ? [t('conexoes.estado.indisponivel'), ''] : ligadosTeams ? [t('conexoes.estado.connected'), 'badge--ok'] : [t('conexoes.estado.off'), ''],
       corpo: () => <TeamsConversa onClose={fechar} /> },
     ...(['telegram', 'discord'] as const).map((c): Bloco => ({ kind: `equipe-${c}`, logo: c, name: c === 'telegram' ? 'Telegram' : 'Discord', selo: seloCanal(canais.data?.[c]), soon: !!canais.data && !canais.data[c].disponivel,
       corpo: () => (canais.data ? <ConversaPorCanal canal={c} estado={canais.data[c]} reload={canais.reload} onClose={fechar} /> : null) })),
@@ -1194,10 +1194,11 @@ function TeamsConversa({ onClose }: { onClose?: () => void }) {
   return (
     <article id="conn-equipe-teams" className={`card conn conn-detail ${ligados.length ? 'feature--on' : ''}`}>
       <header className="row"><BrandLogo kind="teams" name="Teams" size={32} /><strong>{t('conexoes.teams.titulo')}</strong>
-        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? t('conexoes.estado.connected') : t('conexoes.estado.semConexao')}</span> : <span className="badge badge--soon">{t('conexoes.estado.soon')}</span>}
+        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? t('conexoes.estado.connected') : t('conexoes.estado.semConexao')}</span> : <span className="badge">{t('conexoes.estado.indisponivel')}</span>}
         {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}</header>
       <p className="muted">{t('conexoes.teams.intro')}</p>
-      {!d.available ? <p className="hint">{t('conexoes.teams.emBreve')}</p> : <>
+      {/* serviço do Teams ainda sem resposta (ou sem endereço): só o selo neutro, sem aviso */}
+      {d.available && <>
         {problema && <p className="warn">{problema}</p>}
         {linha && <p className="small">{linha}</p>}
         {(ligados.length > 0 || caidos.length > 0) && (

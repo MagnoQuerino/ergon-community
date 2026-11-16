@@ -72,6 +72,9 @@ export class ReleFalso {
   /** testes: todo registro é recusado (assinatura errada de verdade) */
   recusarRegistro = false;
   tentativasDeRegistro = 0;
+  /** /healthz responde ok (false: 503, como o relé fora do ar) e quantas vezes foi consultada */
+  saudavel = true;
+  consultasDeSaude = 0;
   fila: Entrega[] = [];
   seq = 0;
   enviados: Enviado[] = [];
@@ -102,6 +105,8 @@ export class ReleFalso {
   private async http(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const chunks: Buffer[] = []; for await (const c of req) chunks.push(c as Buffer);
     const json = (st: number, v: unknown) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
+    // saúde (o serviço oficial só é oferecido depois que ela responde)
+    if (req.method === 'GET' && req.url === '/healthz') { this.consultasDeSaude++; return this.saudavel ? json(200, { ok: true }) : json(503, { ok: false }); }
     if (req.method === 'GET' && req.url === '/v1/info') return json(200, { protocol: [1], teamsAppId: '11111111-2222-3333-4444-555555555555' });
     if (req.method === 'POST' && req.url === '/v1/installations') {
       const b = JSON.parse(Buffer.concat(chunks).toString() || '{}');

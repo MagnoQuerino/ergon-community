@@ -21,6 +21,7 @@ const conexoes: Traducao<typeof pt> = {
   'estado.connected': 'connected',
   'estado.error': 'needs attention',
   'estado.soon': 'coming soon',
+  'estado.indisponivel': 'not available yet',
   'estado.semConexao': 'offline',
   'detalhes': 'Details',
 
@@ -277,7 +278,6 @@ const conexoes: Traducao<typeof pt> = {
   // ——— conversar com a equipe pelo Teams ———
   'teams.titulo': 'Chat with the team on Teams',
   'teams.intro': 'Send requests to your team in a chat with the Ergon app on Teams and get the replies right there. Confirmations arrive as cards with Approve and Decline, and anything that needs you is also flagged on Teams.',
-  'teams.emBreve': 'Coming soon: chat with the team on Teams, WhatsApp and other messaging apps.',
   'teams.senhaIncorreta': 'Wrong password.',
   'teams.conversarPeloTeams': 'Chat on Teams',
   'teams.contaDoTeams': 'Teams account',
