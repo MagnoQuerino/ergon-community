@@ -144,6 +144,22 @@ describe('a planilha pedida sai como planilha', () => {
     assert.ok(notes.some((n: string) => /pediu um cálculo que só roda num card, e ele não foi feito aqui/.test(n)), notes.join('\n'));
   });
 
+  test('conversa direta: "conferência do Euclides" sem o Euclides ter participado é desmentida na conversa', async () => {
+    const c = (await req(h, 'POST', '/api/conversations', s, { agentId: agentId('arquimedes') })).json.id as string;
+    motor.reply = () => 'Entradas R$ 10.480,00, saídas R$ 4.850,00, saldo R$ 5.630,00. Confirmei com a conferência do Euclides: tudo certo.';
+    await req(h, 'POST', `/api/conversations/${c}/messages`, s, { text: 'Monte a prestação de contas de outubro', clientRequestId: 'req-conf-0001' });
+    await drain(h, 4);
+    const notes = (await req(h, 'GET', `/api/conversations/${c}/messages`, s)).json.filter((m: { role: string }) => m.role === 'system').map((m: { content: string }) => m.content);
+    assert.ok(notes.some((n: string) => /Euclides não participou desta resposta/.test(n)), notes.join('\n'));
+    assert.match(motor.started.at(-1)!.instructions, /Nunca diga que um colega conferiu, revisou ou validou/);
+    const c2 = (await req(h, 'POST', '/api/conversations', s, { agentId: agentId('arquimedes') })).json.id as string;
+    motor.reply = () => 'Conferi as somas duas vezes: entradas R$ 10.480,00 e saídas R$ 4.850,00.';
+    await req(h, 'POST', `/api/conversations/${c2}/messages`, s, { text: 'Some de novo', clientRequestId: 'req-conf-0002' });
+    await drain(h, 4);
+    const n2 = (await req(h, 'GET', `/api/conversations/${c2}/messages`, s)).json.filter((m: { role: string; content: string }) => m.role === 'system' && /não participou/.test(m.content));
+    assert.equal(n2.length, 0, 'o que o próprio agente conferiu não é desmentido');
+  });
+
   test('no card: "crie uma planilha" não pede anexo e a entrega vem também em .xlsx', async () => {
     const t = (await req(h, 'POST', '/api/tasks', s, { title: 'Crie uma planilha de controle de despesas mensais com categorias, valores e total por categoria. Quero o arquivo Excel.', description: '', agentId: agentId('arquimedes') })).json;
     motor.reply = () => `Segue a planilha de controle de despesas mensais, com as categorias, os valores lançados e o total por categoria calculado por fórmula.\n\n${PLANILHA}`;

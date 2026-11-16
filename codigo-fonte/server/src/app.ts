@@ -79,7 +79,7 @@ import { NICHES, PRESETS, USES, applyOnboarding, onboardingChoice, onboardingOpt
 import { createOwnWorkspace, deleteWorkspace, listWorkspaces, renameWorkspace } from './services/workspaces.ts';
 import { IDIOMAS, readPrefs, writePrefs, type Idioma } from './services/prefs.ts';
 import { isSource } from './services/routine-catalog.ts';
-import { Teamwork, parseProcessRequests, parseTrainRequests } from './services/teamwork.ts';
+import { Teamwork, parseHelpRequests, parseProcessRequests, parseTrainRequests } from './services/teamwork.ts';
 import { CATEGORIES as AMBIENT_CATEGORIES, readAmbient, type Category as AmbientCategory } from './services/ambient.ts';
 import { MAX_CHOICE, PROCESS_SQL, SETTING as PROCESS_SETTING } from './services/concurrency.ts';
 import { AccountReader } from './services/account-reader.ts';
@@ -598,6 +598,19 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         const falhas = done.filter((d) => !d.undo && /^(Não |Não deu)/.test(d.text));
         if (falhas.length) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Sistema — atenção: ${falhas.length === 1 ? 'isto não foi feito' : 'estas ações não foram feitas'}, apesar do que ${ag.name} escreveu acima: ${falhas.map((d) => d.text).join(' ')}`);
       }
+    }
+    // conversa direta: o agente não pode atribuir a um colega uma conferência ou revisão que não aconteceu (QA 16/11,
+    // persona 9: "confirmei com a conferência do Euclides", sem o Euclides ter feito nada). Sem pedido de ajuda nesta
+    // resposta e sem card, a conversa diz que o colega não participou.
+    // (conversa com card ligado: o colega pode ter feito uma etapa de verdade, e a trava fica quieta)
+    if (ag && !r.task_id && !parseHelpRequests(output).length && !db.get('SELECT 1 AS x FROM tasks WHERE conversation_id = ? LIMIT 1', r.conversation_id)) {
+      const texto = fold(output ?? '');
+      const colegas = db.all<{ name: string }>("SELECT name FROM agents WHERE workspace_id = ? AND status = 'active' AND id <> ?", r.workspace_id, r.agent_id);
+      const citados = colegas.filter((c) => {
+        const n = fold(c.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(conferencia|revisao|validacao|checagem|aprovacao)[^.\\n]{0,40}\\b${n}\\b|\\b${n}\\b[^.\\n]{0,40}(conferiu|revisou|validou|checou|aprovou|confirmou)`).test(texto);
+      });
+      if (citados.length) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Sistema — ${citados.map((c) => c.name).join(' e ')} não participou desta resposta: nenhuma conferência ou revisão de colega foi feita aqui. Para ter uma, peça "pede para ${citados[0].name} conferir" ou use "Pedir revisão crítica" num card.`);
     }
     // [[processar]] é de card: na conversa não roda. A pessoa fica sabendo, em vez de esperar um resultado que não vem
     if (ag && parseProcessRequests(output).length) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Sistema — ${ag.name} pediu um cálculo que só roda num card, e ele não foi feito aqui. Peça de novo: "faça a conta aqui na conversa", ou use "Enviar à equipe".`);
