@@ -4,6 +4,9 @@ import { savePrefs, usePrefs } from '../lib/prefs.ts';
 import { coordLabel, examplesOf } from '../lib/team.ts';
 import type { AppState, View } from '../lib/types.ts';
 import { Icon } from '../components/Icon.tsx';
+import { RelatarProblema } from '../components/RelatarProblema.tsx';
+import { categoriaDoEndereco } from '../lib/relato.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 /**
  * Ajuda: manuais curtos de como fazer as coisas, mais "problemas comuns e como contornar". A coordenação também
@@ -183,9 +186,10 @@ export function AjudaView({ state, onGo, onTour, onRedo }: { state: AppState; on
 
   return (
     <div className="page help">
-      <header className="page__head">
+      <header className="page__head cena-cab">
         <h2>{t('ajuda.titulo')}</h2>
         <p className="muted">{t('ajuda.pagina.intro', { nome: ctx.coord })}</p>
+        <CenaCabecalho tema="ajuda" />
       </header>
       <div className="help__actions">
         <button className="btn" onClick={onTour}><Icon name="compass" size={15} /> {t('ajuda.pagina.refazerTour')}</button>
@@ -209,9 +213,15 @@ export function AjudaView({ state, onGo, onTour, onRedo }: { state: AppState; on
             </button>
           ))}
           <button className={`help__item ${open === 'problemas' ? 'is-on' : ''}`} onClick={() => pick('problemas')}><Icon name="help" size={16} /> {t('ajuda.pagina.problemas', { n: probs.length })}</button>
+          <button className={`help__item ${open === 'relatar' ? 'is-on' : ''}`} onClick={() => pick('relatar')}><Icon name="flag" size={16} /> {t('ajuda.relato.titulo')}</button>
         </nav>
         <article className="help__body card">
-          {open === 'problemas' || (!current && term) ? (
+          {open === 'relatar' ? (
+            <>
+              <h3><Icon name="flag" size={18} /> {t('ajuda.relato.titulo')}</h3>
+              <RelatarProblema categoria={categoriaDoEndereco(location.hash)} />
+            </>
+          ) : open === 'problemas' || (!current && term) ? (
             <>
               <h3>{t('ajuda.pagina.problemasTitulo')}</h3>
               {probs.length ? probs.map((p) => (

@@ -8,7 +8,7 @@ import type { Db } from '../db/db.ts';
 import { S, idParams } from '../lib/schemas.ts';
 import { HttpError, notFound } from '../lib/util.ts';
 import { updateAgent } from '../services/capacity.ts';
-import { NOME_COMPETENCIA, pacoteDoPedido } from '../services/competencias.ts';
+import { marcarDeTerceiros, NOME_COMPETENCIA, pacoteDoPedido } from '../services/competencias.ts';
 import { openArtifact } from '../services/artifacts.ts';
 import type { AuthContext } from '../services/auth.ts';
 import type { Bus } from '../services/bus.ts';
@@ -106,17 +106,19 @@ export function registerRecursosRoutes(app: FastifyInstance, d: RecursosRoutesDe
   });
   app.post('/api/recursos/competencias/instalar', {
     bodyLimit: ENVIO,
-    schema: { body: { type: 'object', additionalProperties: false, required: ['destino'], properties: { ...PACOTE, destino: { enum: ['agente', 'equipe'] }, agente: S.id('agt'), riscoAceito: { type: 'boolean' } } } },
+    schema: { body: { type: 'object', additionalProperties: false, required: ['destino'], properties: { ...PACOTE, destino: { enum: ['agente', 'equipe'] }, agente: S.id('agt'), riscoAceito: { type: 'boolean' }, origemLoja: { type: 'string', pattern: '^itm_[A-Za-z0-9]{8,64}$' } } } },
   }, async (req) => {
     const a = owner(req);
-    const b = req.body as Pedido & { destino: 'agente' | 'equipe'; agente?: string; riscoAceito?: boolean };
+    const b = req.body as Pedido & { destino: 'agente' | 'equipe'; agente?: string; riscoAceito?: boolean; origemLoja?: string };
     const ativos = db.all<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at", a.workspaceId).map((x) => x.id);
     if (b.destino === 'agente' && (!b.agente || !ativos.includes(b.agente))) throw new HttpError(400, 'agente', 'escolha um agente ativo desta equipe');
     const p = pacoteDoPedido(b);
     const r = await recursos.enviar(a.workspaceId, a.userId, p, b.riscoAceito === true);
     const alvos = b.destino === 'equipe' ? ativos : [b.agente!];
     nosAgentes(a.workspaceId, a.userId, alvos, p.nome, true);
-    return { ok: true, nome: p.nome, atualizada: r?.atualizada === true, agentes: alvos.length };
+    // da Loja (de terceiros): só neste computador, marcada "não verificada"; enviada pela própria pessoa, sem a marca
+    marcarDeTerceiros(db, a.workspaceId, p.nome, b.origemLoja ?? null);
+    return { ok: true, nome: p.nome, atualizada: r?.atualizada === true, agentes: alvos.length, naoVerificada: !!b.origemLoja };
   });
   app.get('/api/recursos/competencias/conteudo', { schema: { querystring: { type: 'object', required: ['nome'], properties: { nome: { type: 'string', pattern: NOME_COMPETENCIA.source } } } } },
     async (req) => recursos.conteudo(auth(req).workspaceId, (req.query as { nome: string }).nome));

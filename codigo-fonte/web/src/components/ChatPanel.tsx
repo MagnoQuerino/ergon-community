@@ -19,6 +19,7 @@ import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
 import { RECURSOS, audiosParaTranscrever, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
 import { letterStyle } from '../lib/contraste.ts';
+import { CenaVazio } from '../arte/Cena.tsx';
 
 /** Rascunhos das conversas (por agente), só na memória da aba: nada de conteúdo da conversa em disco ou na URL. */
 const DRAFTS = new Map<string, string>();
@@ -174,11 +175,17 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   // abrir a conversa (ou trocar de conversa) já deixa o cursor no campo: é só escrever
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { const h = window.setTimeout(() => input.current?.focus({ preventScroll: true }), 60); return () => window.clearTimeout(h); }, [convId, agent.id]);
-  // o campo cresce com o texto (até um limite) e volta ao tamanho de uma linha depois de enviar
+  // o campo cresce com o texto até 4 linhas; dali em diante rola por dentro (sem barra à vista) e volta a uma linha
+  // depois de enviar
   useLayoutEffect(() => {
     const el = input.current; if (!el) return;
+    const cs = getComputedStyle(el);
+    const linha = Number.parseFloat(cs.lineHeight) || 21;
+    const extra = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((n, k) => n + (Number.parseFloat(cs[k as 'paddingTop']) || 0), 0);
+    const max = Math.round(linha * 4 + extra);
     el.style.height = 'auto';
-    el.style.height = `${Math.min(220, Math.max(42, el.scrollHeight))}px`;
+    el.style.height = `${Math.min(max, Math.max(42, el.scrollHeight))}px`;
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
   }, [text]);
 
   // sem nenhum provedor de IA conectado, os agentes não conversam: em toda tentativa, o aviso com "Conectar agora"
@@ -462,7 +469,6 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const lastMsg = list[list.length - 1];
 
   const keyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Escape' && working) { e.preventDefault(); e.stopPropagation(); void stop(); return; }
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
     if (e.shiftKey) return;
     e.preventDefault(); void send();
@@ -529,7 +535,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       <div className="chat__msgs" role="log" aria-live="polite" ref={box} onScroll={onScroll}>
         {!list.length && !shownOptimistic.length && (
           <div className="chat__empty">
-            <p>{t('conversas.conversa.vazia', { nome: agent.name })}</p>
+            <CenaVazio figs={['hipatia', 'aristoteles']}><p>{t('conversas.conversa.vazia', { nome: agent.name })}</p></CenaVazio>
             <div className="chat__suggest">
               {suggestionsFor(agent).map((k) => { const s = t(k); return <button key={k} type="button" className="chip" onClick={() => { setText(s); input.current?.focus(); }}>{s.trim()}</button>; })}
             </div>

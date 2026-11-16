@@ -201,7 +201,7 @@ const equipe = {
   'faixa.ponta': 'ponta',
 
   // ——— efeitos dos Pacotes (components/EffectPicker.tsx) ———
-  'efeitos.nenhum': 'Nenhum efeito instalado. Efeitos vêm dos Pacotes (Configurações › Pacotes); o agente funciona igual sem eles.',
+  'efeitos.nenhum': 'Nenhum efeito instalado. Efeitos vêm da Loja; o agente funciona igual sem eles.',
   'efeitos.grupo': 'Efeitos dos seus Pacotes',
   'efeitos.padrao': 'Padrão da cidade',
   'efeitos.padraoDica': 'O que os pacotes instalados já aplicam a ele',

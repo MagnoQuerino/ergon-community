@@ -7,6 +7,7 @@ import { cardClick } from '../lib/cardClick.ts';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { fmtData, useIdioma, useT } from '../i18n/index.ts';
+import { CenaVazio } from '../arte/Cena.tsx';
 
 interface Folder { id: string; parent_id: string | null; name: string; system_key: string | null }
 interface FileItem { id: string; filename: string; mime: string; size: number; created_at: string; deleted_at?: string | null }
@@ -297,7 +298,7 @@ export function DocumentosView({ coord }: { coord: string }) {
               </li>
             ))}
             {!items.folders.length && !items.files.length && (
-              <li className="docs__empty muted">{trash ? t('documentos.vazio.lixeira') : t('documentos.vazio.pasta')}</li>
+              <li className="docs__empty muted"><CenaVazio figs={['hipatia', 'euclides']}><span>{trash ? t('documentos.vazio.lixeira') : t('documentos.vazio.pasta')}</span></CenaVazio></li>
             )}
           </ul>
         )}

@@ -16,14 +16,8 @@ const BILLING = {
   api: 'configuracoes.contas.billingApi',
   none: 'configuracoes.contas.billingNenhuma',
 } as const satisfies Record<string, Chave>;
-/** A melhor escolha para o Ergon: uma assinatura, os principais modelos do mercado e um modelo por agente. */
+/** A Nous aparece primeiro entre as contas de IA (a melhor escolha é o Ergon AI, no cartão do Ergon World). */
 const RECOMMENDED = 'nous';
-const NOUS_WHY = [
-  'configuracoes.contas.nousPorque1',
-  'configuracoes.contas.nousPorque2',
-  'configuracoes.contas.nousPorque3',
-  'configuracoes.contas.nousPorque4',
-] as const satisfies readonly Chave[];
 /** Enquanto a IA da conta acorda, os cartões não aparecem (nada de botão esperando): um carregamento com uma frase
  *  só, sorteada destas; quando ela responde, os cartões chegam prontos para conectar. */
 const ACORDANDO_IA = [
@@ -60,10 +54,9 @@ export function AcordandoIa({ desde, erro, onRetry, renovando }: { desde: number
 }
 
 /**
- * Contas de IA (a conta que paga os modelos dos agentes): login por código, no navegador da pessoa. A Nous aparece
- * sempre em destaque, como a melhor escolha (versatilidade e custo); o ChatGPT fica como alternativa para quem já
- * assina; a chave própria (BYOK) só fora das boas-vindas. O mesmo componente nas boas-vindas, em Conexões e em
- * Configurações.
+ * Contas de IA (a conta que paga os modelos dos agentes): login por código, no navegador da pessoa. A Nous e o ChatGPT
+ * são opções comuns, sem destaque (a melhor escolha é o Ergon AI, no cartão do Ergon World); a chave própria (BYOK) só
+ * fora das boas-vindas. O mesmo componente nas boas-vindas, em Conexões e em Configurações.
  */
 export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch?: boolean }) {
   const t = useT();
@@ -133,20 +126,18 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
       {s.executor === 'simulated' && <p className="hint warn">{t('configuracoes.contas.instalacaoSemContas')}</p>}
       {!s.available && <p className="hint">{t('configuracoes.contas.indisponivel')}</p>}
       {nous && (
-        <article className={`ai-best ${nous.connected ? 'ai-best--on' : ''}`} aria-label={t('configuracoes.contas.nousAria')}>
-          <span className="ai-best__ribbon"><Icon name="check" size={12} /> {t('configuracoes.contas.melhorEscolha')}</span>
+        <article className={`ai-best ai-best--calmo ${nous.connected ? 'ai-best--on' : ''}`} aria-label={t('configuracoes.contas.nousAria')}>
           <header className="ai-best__head">
             <BrandLogo kind={nous.id} name={nous.name} size={44} />
             <div>
               <h4>{t('configuracoes.contas.assinatura', { nome: nous.name })}</h4>
               <p>{t('configuracoes.contas.nousExperiencia')}</p>
             </div>
-            <span className={`badge ${nous.connected ? 'badge--ok' : 'badge--rec'}`}>{nous.connected ? t('configuracoes.comum.conectada') : t('configuracoes.contas.recomendada')}</span>
+            {nous.connected && <span className="badge badge--ok">{t('configuracoes.comum.conectada')}</span>}
           </header>
-          <ul className="ai-best__why">{NOUS_WHY.map((w) => <li key={w}><Icon name="check" size={14} /> {t(w)}</li>)}</ul>
           {nous.connected
             ? <div className="row"><span className="ok-inline"><Icon name="check" size={14} /> {t('configuracoes.contas.nousConectada')}</span><span className="grow" /><button className="btn btn--sm btn--ghost" onClick={() => disconnect(nous.id)}>{t('configuracoes.comum.desconectar')}</button></div>
-            : login?.provider !== nous.id && <button className="btn btn--gold ai-best__cta" disabled={!s.available || !!login} onClick={() => start(nous.id)}>{otherOn ? t('configuracoes.contas.conectarNousTambem') : t('configuracoes.contas.conectarNous')}</button>}
+            : login?.provider !== nous.id && <button className="btn ai-best__cta" disabled={!s.available || !!login} onClick={() => start(nous.id)}>{otherOn ? t('configuracoes.contas.conectarNousTambem') : t('configuracoes.contas.conectarNous')}</button>}
           {codigo(nous.id)}
           {!nous.connected && otherOn && <p className="hint">{t('configuracoes.contas.nousOutraLigada')}</p>}
         </article>

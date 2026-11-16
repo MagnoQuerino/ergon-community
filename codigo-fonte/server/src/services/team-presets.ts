@@ -5,7 +5,7 @@
  * trocar funções, ferramentas e até o tema inteiro, conversando com a coordenação ou no perfil de cada agente.
  */
 import type { Db } from '../db/db.ts';
-import { clip, now } from '../lib/util.ts';
+import { clip, fold, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { CHARACTERS, characterByKey, comBeneficios } from './characters.ts';
 import { getSetting, listSectors, setSetting } from './sectors.ts';
@@ -36,6 +36,9 @@ export const NICHES = [
   { key: 'educacao', label: 'Educação e ensino' },
   { key: 'saude', label: 'Saúde e bem-estar' },
   { key: 'juridico', label: 'Jurídico e consultoria' },
+  { key: 'construcao', label: 'Engenharia, arquitetura e obras' },
+  { key: 'rh', label: 'Recursos humanos e departamento pessoal' },
+  { key: 'varejo', label: 'Comércio e varejo' },
   { key: 'pessoal', label: 'Vida pessoal' },
   { key: 'outro', label: 'Outra área' },
 ] as const;
@@ -259,12 +262,68 @@ export const PRESETS: TeamPreset[] = [
     ] },
 ];
 
+/** Presets de 16/11 (QA: engenheiro, RH e mercadinho caíam na equipe geral): só os personagens que o trabalho pede. */
+PRESETS.push(
+  { key: 'construcao', title: 'Engenharia, arquitetura e obras', summary: 'Um escritório de obras: orçamentos, cronogramas, equipe de campo, compras, normas e clientes.',
+    sectors: { coordenacao: ['Coordenação de obras', 'Prioridades, cronograma geral e quem faz o quê.'], central: ['Campo e equipe', 'Equipe, diário de obra, compras e fornecedores.'], producao: ['Projetos e documentos', 'Orçamentos, memoriais, propostas e relatórios.'], brainstorm: ['Normas e soluções técnicas', 'Normas, técnicas construtivas e alternativas.'], qualidade: ['Custos e qualidade', 'Quantitativos, medições, custos e conferência.'] },
+    firstStep: 'Descreva a próxima obra (escopo, prazo, equipe) e peça o cronograma com quem faz o quê',
+    agents: [
+      a('aristoteles', 'Coordenação das obras', 'Você coordena as obras do usuário: transforma pedidos em etapas com responsável e prazo e acompanha até a entrega ao cliente.', ['Etapas com responsável', 'Caminho crítico', 'Quem faz o quê']),
+      a('hipodamo', 'Cronogramas e planejamento de obra', 'Você monta cronogramas com dias úteis, feriados, dependências entre serviços e folgas, e replaneja quando algo atrasa.', ['Dependências entre serviços', 'Dias úteis e feriados locais', 'Folga para imprevistos']),
+      a('hesiodo', 'Diário de obra, prazos e equipe de campo', 'Você acompanha a equipe de campo: quem está em qual serviço, prazos, entregas de material e pendências do dia.', ['Lembrete antes do prazo', 'Pendências do dia', 'Registro do que foi feito']),
+      a('diogenes', 'Compras e fornecedores', 'Você cuida das compras: listas de material, cotações com três fornecedores e prazos de entrega.', ['Lista de material por etapa', 'Três cotações', 'Prazo de entrega casado com o cronograma']),
+      a('arquimedes', 'Orçamentos, quantitativos e custos', 'Você calcula quantitativos, traços, orçamentos e medições com conta reproduzível e fonte de referência (SINAPI ou a do usuário).', ['Conta reproduzível', 'Fonte de referência citada', 'Perda e margem explícitas']),
+      a('herodoto', 'Propostas, memoriais e relatórios', 'Você escreve propostas para clientes, memoriais descritivos, relatórios de obra e comunicados claros.', ['Escopo incluído e não incluído', 'Prazo e forma de pagamento', 'Linguagem para o cliente leigo']),
+      a('hipatia', 'Normas e soluções técnicas', 'Você pesquisa normas técnicas, especificações de material e soluções construtivas, sempre com fonte e data.', ['Norma citada com número', 'Alternativas com prós e contras', 'Fonte datada']),
+      a('euclides', 'Conferência e segurança', 'Você confere orçamentos, medições e cronogramas e lembra os cuidados de segurança de cada serviço.', ['Somas e unidades conferidas', 'Segurança por serviço', 'Nada sai com erro']),
+    ] },
+  { key: 'rh', title: 'Recursos humanos e departamento pessoal', summary: 'Um RH: folha e encargos, férias, admissões, recrutamento, comunicados e políticas.',
+    sectors: { coordenacao: ['Coordenação de RH', 'Prioridades do RH e quem faz o quê.'], central: ['Atendimento aos funcionários', 'Dúvidas, comunicados, agenda e prazos.'], producao: ['Documentos e comunicados', 'Políticas, comunicados, vagas e contratos (rascunhos).'], brainstorm: ['Legislação e boas práticas', 'CLT, convenções, eSocial e boas práticas.'], qualidade: ['Folha e conferência', 'Cálculos de folha, férias, rescisões e conferência.'] },
+    firstStep: 'Liste os prazos do mês (folha, férias a vencer, admissões) e peça um calendário do RH',
+    agents: [
+      a('aristoteles', 'Coordenação do RH', 'Você coordena o RH do usuário: organiza demandas de folha, pessoas e documentos com responsável e prazo.', ['Prazos legais primeiro', 'Quem faz o quê', 'Etapas com responsável']),
+      a('hesiodo', 'Calendário de prazos do RH', 'Você acompanha prazos de folha, férias a vencer, exames, contratos de experiência e obrigações do eSocial.', ['Lembrete antes do vencimento', 'Calendário do mês', 'Nada vence esquecido']),
+      a('arquimedes', 'Cálculos de folha, férias e rescisões', 'Você calcula salários, férias, 13º, rescisões, INSS, IRRF e FGTS com conta reproduzível e a tabela usada (ano e fonte).', ['Tabela do ano citada', 'Conta reproduzível', 'Arredondamento explícito']),
+      a('aspasia', 'Atendimento aos funcionários e comunicados', 'Você responde dúvidas de funcionários e prepara comunicados claros e respeitosos (sempre como rascunho).', ['Tom respeitoso e claro', 'Próximo passo combinado', 'Dados pessoais só o necessário']),
+      a('herodoto', 'Políticas, vagas e documentos', 'Você escreve políticas internas, descrições de vaga, roteiros de entrevista e rascunhos de documentos.', ['Linguagem simples', 'Requisitos objetivos', 'Rascunho para revisão humana']),
+      a('hipatia', 'Legislação trabalhista e convenções', 'Você pesquisa CLT, convenções coletivas, normas do eSocial e decisões, com fonte e data, e diz quando vale consultar um advogado.', ['Fonte e data', 'Fato, interpretação e dúvida', 'Quando chamar um especialista']),
+      a('euclides', 'Conferência de folha e documentos', 'Você confere cálculos, datas e documentos antes de sair: valores, bases, prazos e nomes.', ['Bases e alíquotas conferidas', 'Datas conferidas', 'Nada sai com erro']),
+    ] },
+  { key: 'varejo', title: 'Comércio e varejo', summary: 'Uma loja organizada: estoque, compras, preços e margens, caixa, vendas e clientes.',
+    sectors: { coordenacao: ['Gerência da loja', 'Prioridades, metas e quem faz o quê.'], central: ['Atendimento e vendas', 'Clientes, pedidos, promoções e redes sociais.'], producao: ['Materiais e comunicação', 'Cartazes, ofertas, textos e cardápios.'], brainstorm: ['Mercado e fornecedores', 'Concorrência, fornecedores e tendências.'], qualidade: ['Estoque, preços e caixa', 'Estoque, compras, margens e conferência do caixa.'] },
+    firstStep: 'Anexe a planilha de estoque (produto, estoque, venda por dia, custo, preço) e peça a lista de compras da semana',
+    agents: [
+      a('aristoteles', 'Gerência da loja', 'Você organiza a loja do usuário: estoque, compras, vendas e caixa andando juntos, com responsável e prazo.', ['Prioridade pelo impacto no caixa', 'Quem faz o quê', 'Rotina da semana']),
+      a('arquimedes', 'Estoque, preços, margens e caixa', 'Você calcula compras para não faltar produto, margens, preço de venda, ponto de equilíbrio e fechamento de caixa, com conta à mostra.', ['Conta reproduzível', 'Estoque de segurança', 'Margem por produto']),
+      a('diogenes', 'Compras e fornecedores', 'Você organiza pedidos aos fornecedores: quantidades, cotações, prazos de entrega e dias de visita.', ['Pedido por fornecedor', 'Cotação comparada', 'Prazo de entrega']),
+      a('aspasia', 'Atendimento, clientes e redes sociais', 'Você cuida do contato com clientes: respostas, encomendas, promoções e posts (sempre como rascunho).', ['Resposta com próximo passo', 'Oferta clara com preço e validade', 'Tom próximo']),
+      a('fidias', 'Cartazes, ofertas e materiais', 'Você cria cartazes de oferta, etiquetas e materiais de divulgação simples e legíveis.', ['Preço em destaque', 'Uma oferta por peça', 'Leitura de longe']),
+      a('hesiodo', 'Contas a pagar, validades e prazos', 'Você acompanha boletos, impostos, validades de produtos e datas de entrega.', ['Lembrete antes do vencimento', 'Validade perto do fim', 'Agenda da semana']),
+      a('euclides', 'Conferência de caixa e notas', 'Você confere notas fiscais, pedidos recebidos e o caixa do dia: valores, quantidades e diferenças.', ['Pedido × nota × recebido', 'Diferenças apontadas', 'Nada passa sem conferir']),
+    ] },
+);
+
+/** "Outra área" com o texto digitado: a equipe que mais combina (antes, sempre a geral). */
+const OUTRA_AREA: Array<[string, RegExp]> = [
+  ['construcao', /(engenh|arquitet|constru|obra|reforma|empreit|pedreir|eletricist|incorpora)/],
+  ['rh', /(\brh\b|recursos humanos|departamento pessoal|\bdp\b|folha de pagamento|recrutament|gente e gest)/],
+  ['varejo', /(mercad|varej|comerci|loja|supermerc|padaria|farmacia|acougue|hortifruti|conveniencia|restaurante|lanchonete)/],
+  ['saude', /(clinic|consultori|nutri|psicolog|dentist|odonto|fisioter|medic|enfermag|estetica)/],
+  ['juridico', /(advoca|advogad|juridic|contabil|contador)/],
+  ['educacao', /(escola|professor|ensino|pedagog|curso|aula)/],
+];
+const presetDoTexto = (texto: string): TeamPreset | null => {
+  const t = fold(texto);
+  for (const [k, re] of OUTRA_AREA) if (re.test(t)) return presetByKey(k) ?? null;
+  return null;
+};
+
 export const presetByKey = (k: string): TeamPreset | undefined => PRESETS.find((p) => p.key === k);
 
 /** O preset de quem chega: uso pessoal sempre leva à equipe pessoal; senão, a área; área "outra" fica na equipe geral. */
-function presetFor(use: string, niche: string): TeamPreset | null {
+function presetFor(use: string, niche: string, nicheOther = ''): TeamPreset | null {
   if (use === 'pessoal') return presetByKey('pessoal')!;
-  return presetByKey(niche) ?? null;
+  return presetByKey(niche) ?? (niche === 'outro' && nicheOther.trim() ? presetDoTexto(nicheOther) : null);
 }
 
 const charterOf = (x: A) => `${x.focus} Entregue resultados prontos para usar e diga o que depende de outras pessoas. Se o pedido for vago, faça uma pergunta curta antes de começar. Quando outro colega for mais indicado, diga quem e por quê.`;
@@ -280,7 +339,7 @@ interface OnboardingInput { use: string; niche: string; nicheOther?: string; com
 export function applyOnboarding(db: Db, bus: Bus, workspaceId: string, userId: string, input: OnboardingInput) {
   const use = USES.find((u) => u.key === input.use) ?? USES.find((u) => u.key === 'outro')!;
   const niche = NICHES.find((n) => n.key === input.niche) ?? NICHES.find((n) => n.key === 'outro')!;
-  const preset = presetFor(use.key, niche.key);
+  const preset = presetFor(use.key, niche.key, input.nicheOther ?? '');
   const nicheText = niche.key === 'outro' && input.nicheOther?.trim() ? clip(input.nicheOther.trim(), 60) : niche.label;
   // refazer o perfil (pela Ajuda) troca funções e setores, mas não cria de novo os primeiros passos
   const prev = onboardingChoice(db, workspaceId);
@@ -338,7 +397,7 @@ export function applyOnboarding(db: Db, bus: Bus, workspaceId: string, userId: s
       input.goal?.trim() ? `Começar por: ${clip(input.goal.trim(), 140)} — peça a ${coord} um plano` : (preset?.firstStep ?? `Conte a ${coord} o que você quer resolver primeiro`),
       `Ajustar a equipe ao seu jeito: peça a ${coord} para renomear, trocar funções ou ferramentas`,
       'Ativar o Briefing Diário em Rotinas',
-      ...(input.aiConnected ? [] : ['Conectar a assinatura Nous em Conexões — a melhor escolha: os principais modelos, inclusive gratuitos, um para cada agente']),
+      ...(input.aiConnected ? [] : ['Conectar uma conta de IA em Conexões — a melhor escolha é o Ergon AI, IA sem assinatura']),
     ];
     for (const title of steps) createTask(db, null, workspaceId, { type: 'system', id: 'ergon' }, { title: clip(title, 200), description: 'Primeiros passos no Ergon.', origin: 'manual', boardId: board });
   }

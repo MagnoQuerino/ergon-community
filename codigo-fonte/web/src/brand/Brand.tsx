@@ -24,6 +24,11 @@ function ErgonMark({ size = 24, onDark, mono, animated, loopOnly, title, classNa
   );
 }
 
+/** O emblema do Ergon sozinho, para títulos e cartões (Ergon AI, Ergon World). Enfeite, sem texto. */
+export function ErgonMarca({ size = 24, onDark, className }: { size?: number; onDark?: boolean; className?: string }) {
+  return <ErgonMark size={size} onDark={onDark} className={className} />;
+}
+
 /** Marca completa: horizontal (topo, cartões) ou empilhada. `animated`: o emblema faz a onda (trabalhando). */
 export function ErgonLogo({ kind = 'horizontal', height = 28, onDark, mono, animated, className }: {
   kind?: LockupKind; height?: number; onDark?: boolean; mono?: string; animated?: boolean; className?: string;

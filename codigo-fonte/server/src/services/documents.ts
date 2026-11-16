@@ -10,6 +10,9 @@ import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import { openArtifact, removeArtifact, safeFilename, saveArtifact } from './artifacts.ts';
 import { markdownToDocx } from '../lib/docx.ts';
+import { markdownToCsv, markdownToXlsx } from '../lib/xlsx.ts';
+import { markdownToPdf } from '../lib/pdf.ts';
+import { buildPptx, slidesFromMarkdown } from './pptx.ts';
 import { audit, type Bus } from './bus.ts';
 import { readDocument } from './doc-isolated.ts';
 
@@ -326,12 +329,73 @@ export function parseDocCommands(text: string | null): DocCommand[] {
 }
 
 /** O arquivo citado pelo nome (o mais recente com esse nome) ou pelo id. */
+/**
+ * O arquivo que o agente nomeou: pelo id, pelo nome (com ou sem extensão) ou pelo caminho "Pasta/Sub/arquivo.docx" —
+ * o agente vê os arquivos com a pasta ao lado e costuma escrever assim (antes, o caminho não achava nada e o mover
+ * falhava em silêncio).
+ */
 function fileByName(db: Db, workspaceId: string, name: string): { id: string; filename: string } | null {
   if (/^art_[a-f0-9]{32}$/.test(name)) return db.get('SELECT id, filename FROM artifacts WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL', name, workspaceId) ?? null;
-  const n = fold(name);
-  const all = db.all<{ id: string; filename: string }>('SELECT id, filename FROM artifacts WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 3000', workspaceId);
-  return all.find((a) => fold(a.filename) === n) ?? all.find((a) => fold(a.filename.replace(/\.[^.]+$/, '')) === n) ?? all.find((a) => fold(a.filename).includes(n)) ?? null;
+  const all = db.all<{ id: string; filename: string; folder_id: string | null }>('SELECT id, filename, folder_id FROM artifacts WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 3000', workspaceId);
+  const pick = (list: typeof all, n: string) => list.find((a) => fold(a.filename) === n) ?? list.find((a) => fold(a.filename.replace(/\.[^.]+$/, '')) === n) ?? list.find((a) => fold(a.filename).includes(n)) ?? null;
+  const direct = pick(all, fold(name));
+  if (direct || !name.includes('/')) return direct;
+  const parts = name.split('/').map((p) => p.trim()).filter(Boolean);
+  const base = fold(parts.pop() ?? '');
+  if (!base) return null;
+  const dir = parts.length ? folderByPath(db, workspaceId, parts.join('/'), false) : null;
+  const inDir = dir ? pick(all.filter((a) => a.folder_id === dir), base) : null;
+  return inDir ?? pick(all, base);
 }
+
+/** Os formatos que o Ergon gera a partir do texto do agente (sem precisar de Executar código). */
+export type FormatoDocumento = 'docx' | 'md' | 'txt' | 'xlsx' | 'csv' | 'pptx' | 'pdf';
+export const FORMATOS_TEXTO = 'docx (Word), xlsx (Excel), csv, pptx (PowerPoint), pdf, md e txt';
+export function formatoDoDocumento(raw: string): FormatoDocumento | null {
+  const f = fold(raw || '').replace(/^\./, '').trim();
+  if (!f || /^(docx?|word)$/.test(f)) return 'docx';
+  if (/^(md|markdown)$/.test(f)) return 'md';
+  if (/^(txt|texto)$/.test(f)) return 'txt';
+  if (/^(xlsx?|excel|planilha)$/.test(f)) return 'xlsx';
+  if (f === 'csv') return 'csv';
+  if (/^(pptx?|powerpoint|apresentacao|slides?)$/.test(f)) return 'pptx';
+  if (f === 'pdf') return 'pdf';
+  return null;
+}
+const MIME_DOC: Record<FormatoDocumento, string> = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv: 'text/csv',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf: 'application/pdf',
+};
+/** O arquivo no formato pedido, a partir do Markdown que o agente escreveu (tabelas viram planilha; títulos, slides). */
+export function gerarDocumento(fmt: FormatoDocumento, body: string, title: string): { data: Buffer; mime: string } {
+  const data = fmt === 'docx' ? markdownToDocx(body, title)
+    : fmt === 'xlsx' ? markdownToXlsx(body, title)
+    : fmt === 'csv' ? markdownToCsv(body, title)
+    : fmt === 'pdf' ? markdownToPdf(body, title)
+    : fmt === 'pptx' ? (() => { const d = slidesFromMarkdown(body); return buildPptx({ title: d.title || title, subtitle: 'Ergon', slides: d.slides }); })()
+    : Buffer.from(body, 'utf8');
+  return { data, mime: MIME_DOC[fmt] };
+}
+
+/** O pedido é para PRODUZIR um arquivo ("crie uma planilha", "monte a apresentação", "quero o PDF")? */
+const VERBO_CRIAR = /(^|[^a-z])(cri[ae]|criar|crie|mont[ae]|montar|ger[ae]|gerar|fa[cz]a|fazer|faz|elabor[ae]|elaborar|prepar[ae]|preparar|produz[ae]?|produzir|desenvolv[ae]|construa|construir|transform[ae]|transformar|export[ae]|exportar|salv[ae]|salvar|quero|preciso de|me (de|mande|envie|entregue)|entregue|make|create|build|generate|prepare|export|save|i want|i need)([^a-z]|$)/;
+const LER_ARQUIVO = /(anexad|em anexo|anexo|esta (tabela|planilha)|este arquivo|neste arquivo|nesse arquivo|desse arquivo|deste arquivo|dessa planilha|desta planilha|nesta planilha|na planilha que|attached|the attachment|this (table|file|spreadsheet)|in this file|from this file|analis|revis|confir|leia|ler a)/;
+const FORMATO_PEDIDO: Array<[FormatoDocumento, RegExp]> = [
+  ['xlsx', /(^|[^a-z])(planilh\w*|excel|xlsx|spreadsheet)/],
+  ['csv', /(^|[^a-z])csv([^a-z]|$)/],
+  ['pptx', /(^|[^a-z])(apresenta(c|ç)(a|ã)o|slides?|powerpoint|pptx|deck)([^a-z]|$)/],
+  ['pdf', /(^|[^a-z])pdf([^a-z]|$)/],
+  ['docx', /(^|[^a-z])(word|docx)([^a-z]|$)/],
+];
+/** Os formatos de arquivo que o pedido quer receber (vazio: nenhum, ou o pedido é ler um arquivo, não produzir). */
+export function formatosPedidos(text: string): FormatoDocumento[] {
+  const t = fold(text);
+  if (!VERBO_CRIAR.test(t)) return [];
+  return FORMATO_PEDIDO.filter(([, re]) => re.test(t)).map(([f]) => f);
+}
+/** Pedido de produzir um arquivo, sem falar de ler um que a pessoa mandou: não espera anexo. */
+export const pedeParaCriarArquivo = (text: string): boolean => formatosPedidos(text).length > 0 && !LER_ARQUIVO.test(fold(text));
 
 /** Aplica o que a coordenação pediu; devolve as linhas para a conversa (cada uma com o desfazer). */
 /** O que só a pessoa confirma: apagar de vez (arquivos, pastas inteiras ou a lixeira). null = nada pedido. */
@@ -352,7 +416,7 @@ export function purgeRequest(db: Db, workspaceId: string, cmds: DocCommand[], ag
 }
 
 export function applyDocCommands(db: Db, bus: Bus, workspaceId: string, agentId: string, cmds: DocCommand[],
-  ctx: { output?: string | null; userId?: string | null; filesDir?: string; maxBytes?: number } = {}): Array<{ text: string; undo: string | null }> {
+  ctx: { output?: string | null; userId?: string | null; filesDir?: string; maxBytes?: number; taskId?: string | null } = {}): Array<{ text: string; undo: string | null }> {
   const actor: DocActor = { type: 'agent', id: agentId };
   const out: Array<{ text: string; undo: string | null }> = [];
   for (const c of cmds) {
@@ -393,12 +457,12 @@ export function applyDocCommands(db: Db, bus: Bus, workspaceId: string, agentId:
         // o texto desta resposta (sem as linhas de controle) vira um documento na pasta pedida
         const body = (ctx.output ?? '').replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, '').trim();
         if (!body || !ctx.userId || !ctx.filesDir) { out.push({ text: 'Não havia texto para salvar como documento.', undo: null }); continue; }
-        const fmt = /^(md|markdown)$/i.test(c.formato) ? 'md' : /^(txt|texto)$/i.test(c.formato) ? 'txt' : 'docx';
-        const base = (c.nome || 'documento').replace(/\.(docx?|md|txt|pdf)$/i, '');
-        const to = c.pasta || c.para ? folderByPath(db, workspaceId, c.pasta || c.para, true) : null;
-        const data = fmt === 'docx' ? markdownToDocx(body, base) : Buffer.from(body, 'utf8');
-        const mime = fmt === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : fmt === 'md' ? 'text/markdown' : 'text/plain';
-        const saved = saveArtifact(db, bus, ctx.filesDir, ctx.maxBytes ?? 50 * 1024 * 1024, workspaceId, ctx.userId, { filename: `${base}.${fmt}`, mime, data, folderId: to });
+        const fmt = formatoDoDocumento(c.formato || (c.nome.match(/\.([a-z0-9]{2,5})$/i)?.[1] ?? ''));
+        if (!fmt) { out.push({ text: `Não sei salvar no formato “${c.formato}”: os formatos são ${FORMATOS_TEXTO}.`, undo: null }); continue; }
+        const base = (c.nome || 'documento').replace(/\.(docx?|md|txt|pdf|xlsx?|csv|pptx?)$/i, '');
+        const to = c.pasta || c.para ? folderByPath(db, workspaceId, c.pasta || c.para, true) : ctx.taskId ? folderForTask(db, workspaceId, ctx.taskId) : null;
+        const { data, mime } = gerarDocumento(fmt, body, base);
+        const saved = saveArtifact(db, bus, ctx.filesDir, ctx.maxBytes ?? 50 * 1024 * 1024, workspaceId, ctx.userId, { filename: `${base}.${fmt}`, mime, data, folderId: to, taskId: ctx.taskId ?? null });
         const undo = logOp(db, bus, workspaceId, actor, 'file.trash', saved.id, { op: 'file.trash', artifactId: saved.id, at: now() }, `documento “${saved.filename}” salvo`);
         out.push({ text: `Documento “${saved.filename}” salvo em ${c.pasta || c.para ? `“${c.pasta || c.para}”` : 'Documentos'}.`, undo });
       } else if (c.op === 'apagar' || c.op === 'esvaziar-lixeira') {
@@ -429,8 +493,9 @@ export function applyDocCommands(db: Db, bus: Bus, workspaceId: string, agentId:
 export const DOCUMENTS_HOW = [
   'Documentos do workspace (você gere pela conversa quando a pessoa pedir; aplica na hora e ela pode desfazer; as pastas e os arquivos de agora estão na situação do workspace, abaixo):',
   `- criar pasta: [[pasta caminho="Clientes/ACME"]] · mover: [[mover-arquivo arquivo="contrato.pdf" para="Clientes/ACME"]] · copiar: [[copiar-arquivo arquivo="..." para="..."]] · renomear: [[renomear-arquivo arquivo="..." nome="..."]] ou [[renomear-pasta pasta="..." nome="..."]]`,
-  `- salvar o texto desta sua resposta como documento: [[salvar-documento nome="Contrato ACME" formato="docx" pasta="Clientes/ACME"]] (docx = Word; também md ou txt) — escreva o documento inteiro na resposta`,
-  `- lixeira (dá para restaurar): [[lixeira arquivo="..."]] ou [[lixeira pasta="..."]] · apagar de vez: [[apagar arquivo="..."]], [[apagar pasta="..."]] ou [[esvaziar-lixeira]] — só acontece depois que a pessoa confirma no cartão; diga isso.`,
+  `- salvar o texto desta sua resposta como arquivo: [[salvar-documento nome="Contrato ACME" formato="docx" pasta="Clientes/ACME"]] — escreva o conteúdo inteiro na resposta e o sistema gera o arquivo. Formatos: docx (Word), xlsx (Excel: cada tabela Markdown | a | b | vira uma aba; números como R$ 1.250,00 viram números; fórmulas como =SOMA(C2:C9) ou =SOMASE(B2:B9;"Aluguel";C2:C9) funcionam), csv, pptx (PowerPoint: cada título ## vira um slide, com os tópicos abaixo), pdf, md e txt. Para planilha, apresentação, PDF ou Word use isto: não precisa de Executar código nem de Terminal, e nunca prometa um arquivo sem esta linha`,
+  `- o sistema aplica estas linhas DEPOIS da sua resposta e confirma na conversa: escreva "vou criar/mover…", nunca "criei/movi"; para um arquivo, use o nome que aparece na lista (com ou sem a pasta: "Entregas/contrato.docx")`,
+  `- lixeira (dá para restaurar): [[lixeira arquivo="..."]] ou [[lixeira pasta="..."]] · apagar de vez: [[apagar arquivo="..."]], [[apagar pasta="..."]] ou [[esvaziar-lixeira]] — só acontece depois que a pessoa confirma no cartão; diga isso. Quando a pessoa pede "apague", "exclua" ou "tire", use a lixeira; apagar de vez só quando ela disser "de vez", "definitivamente" ou "para sempre".`,
 ].join('\n');
 
 /** As pastas e os arquivos de Documentos agora: dado de agora (os comandos estão em DOCUMENTS_HOW). */

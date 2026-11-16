@@ -5,6 +5,7 @@ import { useSurface } from '../lib/surface.ts';
 import { useBalao } from '../lib/balao.ts';
 import { useT } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
+import { WsFoto } from './WsCard.tsx';
 
 interface Workspace { id: string; name: string; role: string; current: boolean; agents: number; openTasks: number; working: number; waiting: number }
 
@@ -32,6 +33,9 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, outside: true });
   const res = useResource<Workspace[]>('/api/workspaces', ['tasks.changed', 'runs.changed', 'agents.changed']);
+  // qual está no Ergon World (quando a instalação tem o World; sem ele, a resposta não tem conta e nenhum ganha o selo)
+  const world = useResource<{ link: { boundWorkspaceId: string | null } | null }>('/api/world/status', []);
+  const noWorld = world.data?.link?.boundWorkspaceId ?? null;
   const list = res.data;
   const [err, setErr] = useState<string | null>(null);
   const [novo, setNovo] = useState<string | null>(null);
@@ -55,16 +59,24 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
             <li key={w.id}>
               <button className={`ws-item ${w.current ? 'is-current' : ''}`} disabled={busy} onClick={() => void entrar(w)}
                 aria-current={w.current ? 'true' : undefined} title={w.current ? t('geral.ws.atual') : t('geral.ws.entrarEm', { nome: w.name })}>
-                <span className="ws-item__head">
-                  <b className="ws-item__name">{w.name}</b>
-                  {w.current && <span className="chip chip--stat">{t('geral.ws.atualChip')}</span>}
-                  <span className="ws-item__grow" />
-                  {!w.current && <Icon name="chevron-right" size={14} />}
-                </span>
-                <span className="ws-item__nums muted small">
-                  {t('geral.ws.agentes', { n: w.agents })} · {t('geral.ws.tarefasAbertas', { n: w.openTasks })}
-                  {w.working > 0 && <> · <span className="ws-item__on">{t('geral.ws.trabalhando', { n: w.working })}</span></>}
-                  {w.waiting > 0 && <> · <b>{t('geral.ws.aguardando', { n: w.waiting })}</b></>}
+                <WsFoto id={w.id} w={84} h={52} className="ws-item__foto" />
+                <span className="ws-item__txt">
+                  <span className="ws-item__head">
+                    <b className="ws-item__name">{w.name}</b>
+                    <span className="ws-item__grow" />
+                    {!w.current && <Icon name="chevron-right" size={14} />}
+                  </span>
+                  <span className="ws-item__selos">
+                    {w.current && <span className="badge badge--atual">{t('geral.ws.atualChip')}</span>}
+                    {world.data?.link && (noWorld === w.id
+                      ? <span className="badge badge--world"><Icon name="globe" size={11} /> {t('geral.ws.noWorld')}</span>
+                      : <span className="badge">{t('geral.ws.local')}</span>)}
+                  </span>
+                  <span className="ws-item__nums muted small">
+                    {t('geral.ws.agentes', { n: w.agents })} · {t('geral.ws.tarefasAbertas', { n: w.openTasks })}
+                    {w.working > 0 && <> · <span className="ws-item__on">{t('geral.ws.trabalhando', { n: w.working })}</span></>}
+                    {w.waiting > 0 && <> · <b>{t('geral.ws.aguardando', { n: w.waiting })}</b></>}
+                  </span>
                 </span>
               </button>
             </li>
@@ -72,7 +84,10 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
         </ul>
       )}
       {novo === null ? (
-        <button className="btn btn--ghost ws-new" onClick={() => setNovo('')}><Icon name="plus" size={14} /> {t('geral.ws.novo')}</button>
+        <div className="ws-pop__pe">
+          <button className="btn btn--ghost ws-new" onClick={() => setNovo('')}><Icon name="plus" size={14} /> {t('geral.ws.novo')}</button>
+          <a className="btn btn--ghost" href="#configuracao?workspace" onClick={onClose}><Icon name="gear" size={14} /> {t('geral.ws.gerenciar')}</a>
+        </div>
       ) : (
         <form className="ws-new__form" onSubmit={(e) => { e.preventDefault(); void criar(); }}>
           <label className="small" htmlFor="ws-novo">{t('geral.ws.nomeNovo')}</label>

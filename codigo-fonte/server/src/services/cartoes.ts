@@ -188,6 +188,12 @@ export class Cartoes {
     return { entregue: 'continuacao' };
   }
 
+  /** As perguntas do agente ainda abertas nesta conversa (cartões que esperam a pessoa), da mais antiga para a mais nova. */
+  perguntasAbertas(workspaceId: string, conversationId: string): string[] {
+    return this.db.all<{ id: string }>(`SELECT p.id FROM agent_proposals p JOIN runs r ON r.id = p.run_id
+      WHERE p.workspace_id = ? AND r.conversation_id = ? AND p.kind = 'question' AND p.status = 'proposed' ORDER BY p.created_at, p.rowid`, workspaceId, conversationId).map((x) => x.id);
+  }
+
   /** A pessoa respondeu a uma pergunta do agente (uma opção, várias, ou texto livre). */
   responderPergunta(workspaceId: string, userId: string, proposalId: string, resposta: string | string[]): { entregue: 'agora' | 'continuacao' | 'falta' } {
     const { p, l, run } = this.carregar(workspaceId, proposalId, 'question');

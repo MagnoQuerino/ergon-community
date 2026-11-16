@@ -144,6 +144,22 @@ describe('perguntar de volta: a pergunta do agente vira cartão e a resposta vol
     assert.deepEqual(aud.map((a) => a.action), ['cartao.pergunta.pedido', 'question.answer']);
   });
 
+  test('a pessoa responde DIGITANDO na conversa: a mensagem aparece, fecha os cartões e vai para a ferramenta (sem pedido novo na fila)', async () => {
+    const { sessao, conv, run } = await pedir('monte o cronograma da reforma');
+    const pedido = novo();
+    await pergunta(sessao, pedido, [{ pergunta: 'Qual o escopo?' }, { pergunta: 'Em que cidade?' }]);
+    const r = await req(h, 'POST', `/api/conversations/${conv}/messages`, s, { text: 'Banheiro completo, em Salvador', clientRequestId: 'resp-digitada-0001' });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.json.respondeu, 2); assert.equal(r.json.queued, false); assert.equal(r.json.runId, null);
+    assert.ok((await propostas(conv)).filter((p) => p.kind === 'question').every((p) => p.status === 'applied'), 'os dois cartões fecham');
+    assert.deepEqual(await ponte('cartao/estado', { pedido }), { estado: 'respondida', respostas: { q0: 'Banheiro completo, em Salvador', q1: 'Banheiro completo, em Salvador' } });
+    assert.ok(mensagens(conv).some((m) => m.role === 'user' && m.content === 'Banheiro completo, em Salvador'), 'o que ela escreveu fica na conversa');
+    assert.equal(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM runs WHERE conversation_id = ?', conv)!.n, 1, 'nenhuma execução nova');
+    assert.equal(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND queued = 1', conv)!.n, 0, 'nada esperando na fila');
+    assert.equal(h.db.get<{ status: string }>('SELECT status FROM runs WHERE id = ?', run)!.status, 'running');
+    assert.equal((await req(h, 'POST', `/api/conversations/${conv}/messages`, s, { text: 'Banheiro completo, em Salvador', clientRequestId: 'resp-digitada-0001' })).json.replayed, true);
+  });
+
   test('várias perguntas e várias opções: a resposta só segue com todas respondidas', async () => {
     const { sessao, conv } = await pedir('organize o evento');
     const pedido = novo();

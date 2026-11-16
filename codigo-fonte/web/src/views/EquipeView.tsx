@@ -8,6 +8,7 @@ import type { AppState, BoardSummary, BoardView } from '../lib/types.ts';
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
 import { useT } from '../i18n/index.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 /**
  * Fluxos da equipe: o quadro dos agentes. Eles registram as demandas, pegam a próxima da fila, pedem ajuda uns
@@ -53,9 +54,10 @@ export function EquipeView({ state, compact, onAskCoordinator, reload }: { state
   return (
     <div className={`page page--board ${compact ? 'page--compact' : ''}`}>
       {!compact && (
-        <header className="page__head">
+        <header className="page__head cena-cab">
           <h2>{t('quadro.equipe.titulo')}</h2>
           <p className="muted">{t('quadro.equipe.sub')}</p>
+          <CenaCabecalho tema="fluxos" />
         </header>
       )}
       <div className="toolbar">

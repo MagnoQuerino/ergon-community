@@ -248,6 +248,8 @@ const agente: Traducao<typeof pt> = {
   'comp.todasOrigens': 'All',
   'comp.origem.equipe': 'Comes with the team',
   'comp.origem.loja': 'From the store',
+  'comp.terceira': 'From the Store · unverified',
+  'comp.terceiraDica': 'Someone else’s skill, from the Store: it stays on this computer and never goes to the cloud.',
   'comp.origem.enviada': 'Added by you',
   'comp.origem.criada': 'Created by the team',
   'comp.origem.treinar': 'Taught in Train',

@@ -1,5 +1,52 @@
 # Novidades
 
+## 1.1.0-rc.30 (pré-versão de teste)
+
+- **Ergon World, opcional.** Em Configurações › Ergon World, "Conectar ao Ergon World" cria a sua conta (ou entra
+  numa existente), com a opção de usar as mesmas credenciais do Ergon. Você liga **um** workspace: só ele recebe o
+  plano, os créditos e a sincronização cifrada. Os outros continuam só neste computador, como sempre. Sem rede, nada
+  trava: só os recursos do World esperam a conexão voltar.
+- **Rodar na nuvem.** Cards do quadro da equipe e rotinas de radar na fila ou em espera vão para a nuvem e continuam
+  com o modelo que o agente já usa (com a sua chave de API) ou, sem chave, no Ergon AI, com um aviso. O resultado volta
+  para o mesmo card. "Trazer para este computador" quando a nuvem termina.
+- **Recuperação automática na nuvem**, ligada por padrão: trabalho que falha lá é investigado e tentado de novo até
+  3 vezes. Ao abrir o Ergon, um resumo diz o que foi concluído, recuperado ou falhou enquanto você esteve fora.
+- **Relatar um problema**, em Ajuda: você vê exatamente o que vai sair antes de enviar; e-mails, chaves e pastas
+  pessoais saem como [removido]; dados técnicos só se você marcar.
+- **Segurança:** o que sai deste computador com o Ergon World está em docs/SEGURANCA.md.
+- **Planilha, apresentação, PDF e Word de verdade.** Peça "crie uma planilha" (ou apresentação, PDF, Word) e o
+  arquivo sai pronto em Documentos e no card: tabelas viram abas com números e fórmulas (SOMA, SOMASE), títulos viram
+  slides. Não precisa ligar Executar código.
+- **Os agentes não dizem que fizeram o que não fizeram.** Lembrete pedido ao coordenador vira o cartão para você
+  aprovar; mover arquivo informado como "Pasta/arquivo" funciona, e o que falha é dito na conversa; cálculo de planilha
+  na conversa sai na hora; o agente não cita conferência de colega que não aconteceu; rotina de e-mail sem conta
+  conectada pede para conectar em vez de "validar" sem ler nada.
+- **Imagens geradas aparecem na conversa e em Documentos**, e a sua resposta digitada fecha as perguntas do agente.
+- **Termos de uso**, aceitos na conta nova (ou uma vez, para quem já usa). Depois do aceite, Executar código e Terminal
+  vêm ligados na equipe (desligue em Configurações › Ferramentas da equipe), e ler as suas contas não pede mais
+  confirmação a cada leitura; criar, enviar e apagar continuam pedindo.
+- **Arquivos executáveis recebidos ficam em quarentena:** guardados, nunca abertos; baixar mostra um aviso com a
+  impressão digital (SHA-256).
+- **Mais leve e mais estável:** o coordenador deixa as ferramentas pesadas com os especialistas (chamadas menores);
+  o motor mantém no máximo 24 agentes carregados e solta os parados; perfis de workspaces apagados saem do motor; o
+  cadastro não trava mais com o motor ocupado; execuções por dia sem limite (limite opcional em Configurações).
+- **Equipes de partida para obras e engenharia, RH e comércio**, e "Outra área" escolhe a equipe pelo que você
+  escreve. Lançamento repetido na nota e no extrato entra uma vez só. `ergon update` passa a achar a próxima pré-versão.
+- **Página do Ergon World no menu**, com o painel de quem assina: plano e carrinho com um pagamento só (vagas e Jobs
+  além do plano, mensal ou anual), Pessoas e papéis (convite por código, Dono, Admin, Edita, Só vê, transferir a
+  titularidade), workspaces, Dracmas com recarga automática e a nuvem. Configurações › Ergon World fica com a conta e a
+  segurança.
+- **Tirar alguém do workspace troca a chave** sozinho: quem ficou segue sincronizando e quem saiu não lê o que vem
+  depois.
+- **Ergon AI é a melhor escolha:** IA sem assinatura, em um clique, paga pelo uso e integrada à nuvem.
+- **Loja**, no menu: explorar, instalar e publicar visuais, equipes e competências, tudo grátis. Selos "Oficial" e
+  "Comunidade"; competência de terceiros só instala depois de você ler o texto inteiro, fica neste computador e nunca
+  vai para a nuvem.
+- **Primeiro acesso com conta Ergon World:** entre com a conta e só ajuste a frase de recuperação e a IA.
+- **Plano cortesia** aparece como "Cortesia", sem ações de cobrança.
+- **Visual novo em todo o app:** ilustrações nos cabeçalhos e nas telas vazias, telas largas em colunas, fonte mínima
+  de 12 e caixa da conversa que cresce até 4 linhas.
+
 ## 1.1.0-rc.29 (pré-versão de teste)
 
 - **Várias contas por aplicativo.** Ligue dois ou mais e-mails, números de WhatsApp (cada um com o seu pareamento) e

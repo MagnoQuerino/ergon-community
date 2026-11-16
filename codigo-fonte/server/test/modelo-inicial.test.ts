@@ -102,3 +102,21 @@ describe('modelo para começar ao conectar a conta de IA', () => {
     assert.equal(controle.chaves.anthropic, undefined);
   });
 });
+
+describe('motor ocupado (QA 16/11: sem memória, o cadastro travava em "Abrindo as portas…")', () => {
+  test('o estado da conta de IA responde em poucos segundos, com ocupado, mesmo com o motor sem responder', async () => {
+    const motor = new Motor();
+    const controle = new Controle(motor);
+    const nunca = <T,>() => new Promise<T>(() => undefined);
+    controle.accounts = () => nunca(); controle.byok = () => nunca(); controle.modelInfo = () => nunca();
+    const h: Harness = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123', bridgeToken: 'token-da-ponte-de-teste-0123456789' }, { hermes: motor, control: controle });
+    try {
+      const s = await setupOwner(h);
+      const t0 = Date.now();
+      const st = (await req(h, 'GET', '/api/ai/status', s)).json;
+      assert.ok(Date.now() - t0 < 9000, `respondeu em ${Date.now() - t0} ms`);
+      assert.equal(st.ocupado, true);
+      assert.match(st.accounts[0].detail, /ocupada/);
+    } finally { await h.close(); }
+  });
+});

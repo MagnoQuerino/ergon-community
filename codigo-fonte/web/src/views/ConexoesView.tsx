@@ -1,6 +1,6 @@
 import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
 import { OutroAplicativo } from '../components/OutroAplicativo.tsx';
-import { Fragment, useEffect, useState, type ChangeEvent } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useState, type ChangeEvent, type ComponentType } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { escolhaConsciente, linhaDoEstado, nomeEscolhido, previaDaConta, problemaDoTeams, soOSeuCodigo, type ContaDoTeams } from '../lib/teams-app.ts';
@@ -9,6 +9,9 @@ import { acoesDaLinha, comConta, comoAdicionar, nomeNaTela, podeAdicionar, temVa
 import { AVISO_APROVAR_SEM_CARTAO, ROTULO_APROVAR_DEPOIS_DE_LER, ROTULO_CONFIRMAR_ORGANIZAR, erroDaConexao, motivoDoLogin, oQuePedirAoAdministrador, proximoPassoTarefas, textoDaVolta } from '../lib/textos-tela.ts';
 import { fmtData, fmtDataHora, fmtLista, t as tr, tn, useT } from '../i18n/index.ts';
 import { AiAccounts } from '../components/AiAccounts.tsx';
+// o Ergon AI em destaque (módulo do Ergon World, se estiver nesta instalação)
+const eaiMod = Object.values(import.meta.glob<{ default: ComponentType<{ onRecomendado?: (sim: boolean) => void }> }>('./world/ErgonAiConexoes.tsx'))[0];
+const ErgonAi = eaiMod ? lazy(eaiMod) : null;
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -18,6 +21,7 @@ import { Selo } from '../components/Selo.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { useEnvioPorItem } from '../lib/envio.ts';
 import { noIdioma } from '../lib/textos-de-app.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 /** O selo de cada estado: a chave do texto (traduzida na hora de mostrar) e a classe. */
 const STATE: Record<Integration['state'], [`conexoes.estado.${Integration['state']}`, string]> = {
@@ -51,7 +55,7 @@ interface EstadoConexoes { liberarTudo: boolean; aprovarDepoisDeLer?: boolean; a
 interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => void }
 
 /**
- * Conexões, nesta ordem: as contas de IA (recomendando a Nous), o WhatsApp e as contas Microsoft 365 e Google em
+ * Conexões, nesta ordem: as contas de IA (o Ergon AI como a melhor escolha), o WhatsApp e as contas Microsoft 365 e Google em
  * destaque, e depois os aplicativos de tarefas e quadros, na ordem de fama no Brasil. "Conectado" só depois de
  * conferir com o serviço; "em breve" diz o que falta.
  */
@@ -111,9 +115,10 @@ export function ConexoesView() {
   const estadoDe = (kind: string): EstadoDe => ({ eu: cx.data?.ligadas.find((x) => x.kind === kind) ?? null, pronto: !!cx.data, reload: cx.reload });
   return (
     <div className="page">
-      <header className="page__head">
+      <header className="page__head cena-cab">
         <h2>{t('conexoes.titulo')}</h2>
         <p className="muted">{t('conexoes.intro')}</p>
+        <CenaCabecalho tema="conexoes" />
       </header>
       {volta && list.data && <p className="ok" role="status">{textoDaVolta(volta.kind, volta.status, all.find((i) => i.kind === volta.kind)?.state === 'connected')}</p>}
       {list.error && <p className="error">{list.error}</p>}
@@ -122,6 +127,8 @@ export function ConexoesView() {
         <h3>{t('conexoes.ia.titulo')}</h3>
         <p className="muted small">{t('conexoes.ia.texto')}</p>
         <ModeloPadrao />
+        {ErgonAi && <Suspense fallback={null}><ErgonAi /></Suspense>}
+        {/* o Ergon AI é a melhor escolha: a Nous fica sem destaque (decisão do dono) */}
         <AiAccounts />
       </section>
 

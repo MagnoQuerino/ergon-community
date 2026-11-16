@@ -113,7 +113,7 @@ export interface AppState {
   /** personagens da equipe de partida com nome ou história de outro tema (0 = tema padrão) */
   themed: number;
   /** processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele */
-  runs: { running: number; queued: number; waiting: number; processes: number; limit: ProcessLimit; cardsWaiting: number };
+  runs: { running: number; queued: number; waiting: number; processes: number; limit: ProcessLimit; daily?: DailyLimit; cardsWaiting: number };
   decisionsPending: number;
   executor: { mode: 'real' | 'simulated'; label: string };
   serverTime: string;
@@ -129,6 +129,8 @@ export interface Me {
   /** boas-vindas: 'pending' = conta nova ainda sem as perguntas iniciais */
   onboarding: 'pending' | 'done';
   prefs: Prefs;
+  /** termos de uso: a versão atual e se a pessoa já aceitou (sem aceite, o aviso aparece uma vez) */
+  termos?: { versao: string; aceitos: boolean; aceitosEm: string | null };
 }
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
 /** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
@@ -151,7 +153,9 @@ export interface VersionInfo { version: string; build: string; mode: 'local' | '
 /** Estado público da entrada (antes do login). sealed: reiniciado e trancado, só senha ou frase abrem os dados. */
 export interface AuthState { needsSetup: boolean; authenticated: boolean; locked: boolean; sealed: boolean; protected: boolean; mode: 'local' | 'cloud'; rpId: string; publicUrl: string; setupTokenRequired: boolean;
   /** conta nova neste computador: qualquer pessoa ('aberto'), só com convite ('convite'), ou não se aplica (null) */
-  signup?: 'aberto' | 'convite' | null }
+  signup?: 'aberto' | 'convite' | null;
+  /** a versão dos termos de uso que a conta nova aceita */
+  termosVersao?: string }
 export interface SecurityStatus {
   mode: 'local' | 'cloud'; protected: boolean; recovery: boolean; autoUnlock: Array<{ id: string; label: string; createdAt: string }>;
   /** trancamento: desligado = abre sozinho ao reiniciar (a proteção é a do computador); na nuvem é sempre ligado */
@@ -172,6 +176,8 @@ export interface BoardSummary { id: string; name: string; origin: 'native' | 'mi
 /** system_key: o código fixo das colunas do sistema (todo, doing, with_you, done); null nas colunas de quadros espelhados */
 export interface Column { id: string; name: string; position: number; system_key?: 'todo' | 'doing' | 'with_you' | 'done' | null }
 /** Trabalhos ao mesmo tempo: a sua escolha (ou o padrão da máquina), sob o teto do plano. limit null = sem limite. */
+/** execuções por dia: limit 0 = sem limite */
+export interface DailyLimit { limit: number; choice: number | null; used: number; freesAt: string | null }
 export interface ProcessLimit {
   limit: number | null; choice: 'auto' | 'ilimitado' | number; machine: number; cap: number | null; memoryGb: number; cpus: number;
 }
@@ -231,6 +237,8 @@ export interface ModelEntry { id: string; label: string; vendor: string; input: 
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
   executor: 'real' | 'simulated'; available: boolean;
+  /** o motor não respondeu a tempo (sem memória, ocupado): mostra o que se sabe e confere de novo */
+  ocupado?: boolean;
   /** motor de IA da pessoa: conta nova fica "ligando" por até ~1 min */
   motor?: { state: 'desligado' | 'ligando' | 'renovando' | 'aberto' | 'erro'; error: string | null } | null;
   /** chave própria (BYOK): provedores que aceitam a chave de API da pessoa; o valor nunca volta */
@@ -282,7 +290,7 @@ export interface EtapaConsentimento {
   estado: 'ok' | 'falta' | 'pedido' | 'bloqueado' | 'aprovado';
   opcional: boolean; administrador: boolean; link: string | null; erro: string | null;
 }
-export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
+export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda' | 'world' | 'loja';
 
 // i18n-ok: nomes de produto (marcas), não se traduzem
 export const SOURCE_LABEL: Record<string, string> = {
@@ -322,6 +330,7 @@ export interface Routine {
   id: string; name: string; template: string | null; templateName: string | null; category: string; categoryLabel: string;
   status: 'setup' | 'active' | 'paused'; version: number; conversationId: string | null; agentId: string | null; agentName: string | null; hasSetup: boolean;
   trigger: RoutineTrigger; schedule: string; nextRunAt: string | null; lastRunAt: string | null; running: boolean;
+  /** na nuvem (Ergon World): este computador não roda a rotina até ela voltar */ remote?: boolean;
   last: { id: string; status: RoutineRunStatus; summary: string | null; finished_at: string | null; created_at: string; error: string | null } | null;
   config: { sources: string[]; sourceLabels: string[]; condition: 'sempre' | 'novidades' | 'sinal'; instruction: string; extra: string; deliver: string[]; staleDays: number; params: ParamValues;
     /** as contas que a rotina lê, quando há mais de uma do mesmo aplicativo (vazio = todas) */ contas?: string[] };

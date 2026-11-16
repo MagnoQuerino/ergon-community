@@ -20,7 +20,7 @@ export function useFxOptions(): FxOption[] {
 
 /**
  * Efeitos dos Pacotes instalados para um agente: herdar o padrão da cidade, nenhum, ou um escolhido. Só lista o que
- * está instalado; comprar ou instalar fica na loja (Configurações › Pacotes). Sem pacotes, só diz isso.
+ * está instalado; comprar ou instalar fica na loja (a Loja, no menu da esquerda). Sem pacotes, só diz isso.
  */
 export function EffectPicker({ value, onChange, options }: { value: FxChoice; onChange: (c: FxChoice) => void; options: FxOption[] }) {
   const t = useT();

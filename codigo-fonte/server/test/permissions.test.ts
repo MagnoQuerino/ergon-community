@@ -180,4 +180,16 @@ describe('ligar código ou terminal conversando: o pedido vai para a coordenaç�
     const tools = (await req(h, 'GET', '/api/ai/tools', s)).json as Array<{ id: string; status: string }>;
     assert.equal(tools.find((t) => t.id === 'agenda')!.status, 'disponível', 'lembretes com data não ficam mais bloqueados');
   });
+
+  test('lembrete pedido ao Coordenador: ele mesmo propõe na conversa (antes ia para um card de colega e virava confirmação sem tarefa)', async () => {
+    const coord = h.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND coordinator = 1", s.workspaceId)!;
+    const c3 = (await req(h, 'POST', '/api/conversations', s, { agentId: coord.id })).json.id;
+    motor.reply = () => 'Deixo o lembrete para você aprovar.\n[[propor-tarefa titulo="Lembrete: pagar o boleto" responsavel="você" prazo="2030-03-15"]]';
+    await req(h, 'POST', `/api/conversations/${c3}/messages`, s, { text: 'Me lembre de pagar o boleto sexta às 10h', clientRequestId: 'lem-coord-0001' });
+    for (let i = 0; i < 4; i++) await h.executor.tick();
+    assert.match(motor.started.at(-1)!.instructions, /é com você, nesta conversa: escreva a linha \[\[propor-tarefa/);
+    const p = ((await req(h, 'GET', `/api/proposals?conversationId=${c3}`, s)).json as Array<{ id: string; kind: string }>).find((x) => x.kind === 'task');
+    assert.ok(p, 'o cartão do lembrete aparece na conversa com o Coordenador');
+    assert.equal((await req(h, 'POST', `/api/proposals/${p!.id}`, s, { decision: 'apply' })).json.status, 'applied');
+  });
 });

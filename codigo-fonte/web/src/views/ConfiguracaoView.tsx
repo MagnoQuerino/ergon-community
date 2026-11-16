@@ -2,7 +2,7 @@ import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, ProcessLimit, Usage } from '../lib/types.ts';
+import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, DailyLimit, ProcessLimit, Usage } from '../lib/types.ts';
 import { PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, compactarAjuda, compactarAtualizacao, compactarDepois, compactarRotulo, composicaoEstimada, composicaoIntro, composicaoNota, composicaoVazia, detalhe, fatias, passosAjuda, passosCompartilhado, passosDepois, tamanhoMedio } from '../lib/custo.ts';
 import { fmtMoeda, fmtNumero, tn, useT } from '../i18n/index.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
@@ -16,13 +16,13 @@ import { SaudePanel } from './SaudePanel.tsx';
 import { CapacidadesPanel } from '../components/CapacidadesPanel.tsx';
 import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
-import { PacotesPanel } from './PacotesPanel.tsx';
 import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
 import { MusicCreditsBlock } from '../components/MusicButton.tsx';
 import { ArrumarField, CotaLinhas, MemoriaField, PausaControle, RaciocinioField, ReservaCard, useAjustes } from '../components/AjustesEquipe.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
-// módulo opcional (views/world): a Community não traz essa pasta
+// cliente do Ergon World (views/world), carregado sob demanda
 const worldMod = Object.values(import.meta.glob<{ default: ComponentType }>('./world/WorldPanel.tsx'))[0];
 const WorldPanel = worldMod ? lazy(worldMod) : null;
 
@@ -32,31 +32,34 @@ const WorldPanel = worldMod ? lazy(worldMod) : null;
 export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: AppState; me: Me; onMeChanged: () => void; reload: () => void }) {
   const t = useT();
   const admin = me.admin;
-  const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'seguranca' | 'saude' | 'pessoas' | 'pacotes' | 'world' | 'atualizacoes'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('atualizacoes') ? 'atualizacoes' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world' : location.hash.includes('pacotes') ? 'pacotes'
+  const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'seguranca' | 'saude' | 'pessoas' | 'world' | 'atualizacoes'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('atualizacoes') ? 'atualizacoes' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world'
     : location.hash.includes('saude') && admin ? 'saude' : location.hash.includes('pessoas') && admin ? 'pessoas' : 'ia'));
   // o menu da conta abre Configurações › Minha conta (ou Workspace) mesmo com Configurações já aberta
   useEffect(() => {
-    const ver = () => { if (location.hash.includes('?conta')) setTab('conta'); else if (location.hash.includes('?workspace')) setTab('workspace'); else if (location.hash.includes('?atualizacoes')) setTab('atualizacoes'); };
+    const ver = () => { if (location.hash.includes('?conta')) setTab('conta'); else if (location.hash.includes('?workspace')) setTab('workspace'); else if (location.hash.includes('?atualizacoes')) setTab('atualizacoes'); else if (location.hash.includes('?world') && WorldPanel) setTab('world'); };
     window.addEventListener('hashchange', ver);
     return () => window.removeEventListener('hashchange', ver);
   }, []);
   return (
-    <div className="page">
-      <header className="page__head">
+    <div className="page page--larga">
+      <header className="page__head cena-cab">
         <h2>{t('configuracoes.titulo')}</h2>
+        <CenaCabecalho tema="configuracoes" />
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>{t('configuracoes.abas.ferramentas')}</button>
           <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>{t('configuracoes.abas.conta')}</button>
           <button role="tab" aria-selected={tab === 'workspace'} className={`tab ${tab === 'workspace' ? 'tab--on' : ''}`} onClick={() => setTab('workspace')}>{t('configuracoes.abas.workspace')}</button>
           <button role="tab" aria-selected={tab === 'seguranca'} className={`tab ${tab === 'seguranca' ? 'tab--on' : ''}`} onClick={() => setTab('seguranca')}>{t('configuracoes.abas.seguranca')}</button>
           {admin && me.mode === 'local' && <button role="tab" aria-selected={tab === 'pessoas'} className={`tab ${tab === 'pessoas' ? 'tab--on' : ''}`} onClick={() => setTab('pessoas')}>{t('configuracoes.abas.pessoas')}</button>}
-          <button role="tab" aria-selected={tab === 'pacotes'} className={`tab ${tab === 'pacotes' ? 'tab--on' : ''}`} onClick={() => setTab('pacotes')}>{t('configuracoes.abas.pacotes')}</button>
           {WorldPanel && <button role="tab" aria-selected={tab === 'world'} className={`tab ${tab === 'world' ? 'tab--on' : ''}`} onClick={() => setTab('world')}>{t('configuracoes.abas.contaErgon')}</button>}
           {me.mode === 'local' && <button role="tab" aria-selected={tab === 'atualizacoes'} className={`tab ${tab === 'atualizacoes' ? 'tab--on' : ''}`} onClick={() => setTab('atualizacoes')}>{t('configuracoes.abas.atualizacoes')}</button>}
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>{t('configuracoes.abas.saude')}</button>}
         </div>
       </header>
-      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> : tab === 'pacotes' ? <PacotesPanel agent={state.team.coordinator} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+      {/* em tela larga, os cartões em duas colunas (cada um com a largura de ler; os botões perto do que fazem) */}
+      <div className={`cfg-corpo cfg-corpo--${tab}`}>
+  {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+      </div>
       <VersionCard onOpen={() => setTab('atualizacoes')} />
       <MusicCreditsBlock />
     </div>
@@ -173,6 +176,7 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
         <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
           {t('configuracoes.andamento.iniciativa')}</label>
         <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+        {state.runs.daily && <DailyLimitField daily={state.runs.daily} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />}
         <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <RaciocinioField a={ajustes.a} salvar={ajustes.salvar} />
         <AjudantesField valor={state.teamAjudantes ?? { ligado: true, max: AJUDANTES_MAX }} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
@@ -327,6 +331,28 @@ function ComposicaoLinha({ a, geral }: { a: ComposicaoAgente; geral: boolean }) 
         {partes.map((p) => <li key={p.id}><i className={`custo--${p.id}`} aria-hidden="true" />{p.rotulo} {p.pct}</li>)}
       </ul>
       <p className="hint small">{detalhe(a)}</p>
+    </div>
+  );
+}
+
+/** Execuções por dia: sem limite por padrão; a pessoa limita se quiser (conta conversas, cards e rotinas). */
+function DailyLimitField({ daily, onSaved, onError }: { daily: DailyLimit; onSaved: () => void; onError: (text: string) => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const numbers = [...new Set([50, 100, 200, 400, 800, 1500, 3000, ...(daily.limit ? [daily.limit] : [])])].sort((a, b) => a - b);
+  const save = async (v: string) => {
+    setBusy(true);
+    try { await api.put('/api/runs/daily-limit', { limit: Number(v) }); onSaved(); }
+    catch (x) { onError(errMsg(x)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="field field--limit">
+      <label htmlFor="daily-limit">{t('configuracoes.diario.rotulo')}</label>
+      <select id="daily-limit" value={String(daily.limit)} disabled={busy} onChange={(e) => void save(e.target.value)} aria-describedby="daily-limit-hint">
+        <option value="0">{t('configuracoes.diario.semLimite')}</option>
+        {numbers.map((n) => <option key={n} value={n}>{t('configuracoes.diario.opcao', { n })}</option>)}
+      </select>
+      <small id="daily-limit-hint" className="muted">{t('configuracoes.diario.ajuda', { usadas: daily.used })}</small>
     </div>
   );
 }

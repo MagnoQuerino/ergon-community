@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import { addPerson, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import { instructionsFor } from '../src/services/runs.ts';
 import { setIntegration } from '../src/services/integrations.ts';
 
 const realFetch = globalThis.fetch;
@@ -57,6 +58,16 @@ describe('a mesma conta em mais de um workspace', () => {
     assert.equal(h.integrations.secrets.readOwn(b, 'asana'), null, 'nada foi copiado');
     const item = (await req(h, 'GET', '/api/integrations', s)).json.find((i: { kind: string }) => i.kind === 'asana');
     assert.equal(item.state, 'connected'); assert.equal(item.account, 'Ana Empresa'); assert.ok(item.sharedFrom, 'a tela diz de onde vem');
+  });
+
+  test('o agente fica sabendo que a conta é de outro workspace: regras e assinatura daqui não valem para ela sem confirmar', async () => {
+    assert.equal((await usar()).status, 200);
+    const ag = h.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' LIMIT 1", b)!.id;
+    const nomeA = h.db.get<{ name: string }>('SELECT name FROM workspaces WHERE id = ?', a)!.name;
+    const ins = instructionsFor(h.db, b, ag, '');
+    assert.ok(ins.includes(`Asana (do workspace ${nomeA})`), ins.slice(-1500));
+    assert.match(ins, /as regras, a assinatura e o tom de Pessoal não valem/);
+    assert.doesNotMatch(instructionsFor(h.db, a, h.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' LIMIT 1", a)!.id, ''), /Contas de outro workspace/, 'onde a conta mora, nada muda');
   });
 
   test('a renovação do acesso vale para os dois', async () => {

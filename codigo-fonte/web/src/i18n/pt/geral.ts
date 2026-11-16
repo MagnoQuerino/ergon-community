@@ -40,7 +40,7 @@ const geral = {
 
   // ——— avisos que pedem ação ———
   'alerta.semIa': 'SEM CONTA DE IA',
-  'alerta.semIaDica': 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é a assinatura Nous. Veja Configurações.',
+  'alerta.semIaDica': 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é o Ergon AI, IA sem assinatura. Veja Conexões.',
   'alerta.novaVersao': 'NOVA VERSÃO · RECARREGAR',
   'alerta.novaVersaoDica': 'O Ergon foi atualizado para a versão {nova}. Esta aba ainda está com a {atual}.',
 
@@ -88,6 +88,9 @@ const geral = {
   'ws.nomeNovo': 'Nome do workspace novo (uma empresa, um projeto, a vida pessoal…)',
   'ws.exemplo': 'Ex.: Loja da Ana',
   'ws.criar': 'Criar e entrar',
+  'ws.noWorld': 'No Ergon World',
+  'ws.local': 'Neste computador',
+  'ws.gerenciar': 'Gerenciar',
   'ws.nasce': 'Ele nasce com a equipe e a cidade iniciais e passa pelas boas-vindas, como uma conta nova.',
 
   // ——— o avatar (menu da conta) ———
@@ -120,6 +123,8 @@ const geral = {
   'nav.documentos': 'Documentos',
   'nav.atividade': 'Atividade',
   'nav.conexoes': 'Conexões',
+  'nav.loja': 'Loja',
+  'nav.world': 'Ergon World',
   'nav.configuracoes': 'Configurações',
   'nav.ajuda': 'Ajuda',
   'nav.aria': 'Navegação',

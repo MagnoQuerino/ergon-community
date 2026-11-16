@@ -13,6 +13,7 @@ import type { Db } from '../db/db.ts';
 import { sincronizarCompactacao, sincronizarPassos } from './custo.ts';
 import { sincronizarAjustes, sincronizarPausa } from './ajustes-motor.ts';
 import type { AjustesMotor, CotaConta } from './hermes.ts';
+import { CODIGO_PADRAO } from './termos.ts';
 
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
@@ -20,7 +21,7 @@ interface AccountDef { id: string; name: string; billing: Billing; about: string
 /** Contas que o usuário conecta pelo Ergon (login por código, no navegador dele). */
 const ACCOUNTS: AccountDef[] = [
   { id: 'nous', name: 'Nous Portal', billing: 'credits', site: 'https://portal.nousresearch.com',
-    about: 'A melhor escolha para o Ergon: uma assinatura com os principais modelos do mercado (Claude, GPT, Gemini, DeepSeek…), plano grátis com modelos gratuitos e um modelo por agente — o mais forte para quem pensa, o mais econômico para quem organiza. O consumo sai dos créditos da assinatura.' },
+    about: 'Assinatura de IA com um modelo para cada agente. O consumo sai dos créditos da assinatura.' },
   { id: 'openai-codex', name: 'ChatGPT (assinatura)', billing: 'subscription', site: 'https://chatgpt.com',
     about: 'Usa a assinatura do ChatGPT que você já paga (Plus, Pro ou Business): sem custo por token, valem a mensalidade e os limites do plano.' },
 ];
@@ -67,6 +68,8 @@ interface AiStatus {
   executor: 'real' | 'simulated';
   /** a ponte de controle responde (contas, modelo padrão, skills) */
   available: boolean;
+  /** o motor não respondeu a tempo (sem memória, ocupado): a tela mostra o que sabe e confere de novo */
+  ocupado?: boolean;
   accounts: Array<AccountDef & { connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
   /** chave própria: quais provedores estão ligados (o valor da chave nunca sai do motor) */
@@ -170,12 +173,15 @@ export class AiService {
    * do cofre) volta a ficar desligado. Os que executam código nunca entram aqui. Devolve os conjuntos que mudaram, ou null
    * (sem a ponte de controle).
    */
-  async ensureBeneficios(desligadosPelaPessoa: ReadonlySet<string>, ids: readonly string[] = BENEFICIOS_DA_PLATAFORMA): Promise<{ ligou: string[]; desligou: string[] } | null> {
+  async ensureBeneficios(desligadosPelaPessoa: ReadonlySet<string>, ids: readonly string[] = BENEFICIOS_DA_PLATAFORMA, opts: { codigo?: boolean } = {}): Promise<{ ligou: string[]; desligou: string[] } | null> {
     if (!this.control) return null;
     const cur = await this.control.apiToolsets();
-    const conjunto = (id: string) => (TOOLS[id]?.safe ? TOOLS[id].toolset : undefined);
+    // os que executam código só entram com os termos aceitos (opts.codigo: termos.ts); desligados pela pessoa, saem
+    const conjunto = (id: string) => (TOOLS[id]?.safe || TOOLS[id]?.guarded ? TOOLS[id].toolset : undefined);
+    const alvo = opts.codigo ? [...ids, ...CODIGO_PADRAO] : ids.filter((id) => !TOOLS[id]?.guarded);
     const tirar = [...desligadosPelaPessoa].map(conjunto).filter((t): t is string => !!t && cur.enabled.includes(t));
-    const por = ids.filter((id) => !desligadosPelaPessoa.has(id)).map(conjunto).filter((t): t is string => !!t && cur.safe.includes(t) && !cur.enabled.includes(t));
+    const aceitos = new Set([...cur.safe, ...(cur.guarded ?? [])]);
+    const por = alvo.filter((id) => !desligadosPelaPessoa.has(id)).map(conjunto).filter((t): t is string => !!t && aceitos.has(t) && !cur.enabled.includes(t));
     if (!tirar.length && !por.length) return { ligou: [], desligou: [] };
     const enabled = await this.control.setApiToolsets([...new Set([...cur.enabled.filter((t) => !tirar.includes(t)), ...por])]);
     setPlatformToolsets(enabled, this.scope);
@@ -251,23 +257,32 @@ export class AiService {
   /** último modelo padrão lido (sem rede): o executor registra em cada execução sem modelo próprio */
   cachedDefault(): string | null { return this.def?.model ?? null; }
 
-  async status(): Promise<AiStatus> {
+  /**
+   * O estado da conta de IA para a tela. Cada consulta ao motor tem prazo curto e elas correm juntas: com o motor sem
+   * memória (QA 16/11: 11 workspaces de teste), as quatro em fila esperavam até 25 s cada e o cadastro travava em "Abrindo
+   * as portas…". Sem resposta a tempo, a tela recebe ocupado = true e mostra o que já sabe.
+   */
+  async status(prazoMs = 6000): Promise<AiStatus> {
     const executor = this.cfg.executor === 'hermes' ? 'real' as const : 'simulated' as const;
-    const available = this.control ? await this.control.health() : false;
-    let accounts = ACCOUNTS.map((a) => ({ ...a, connected: false, detail: available ? 'não conectada' : 'indisponível nesta instalação' }));
-    if (available) {
-      try {
-        const st = await this.control!.accounts();
-        accounts = ACCOUNTS.map((a) => {
-          const s = st.find((x) => x.id === a.id);
-          const detail = !s?.connected ? 'não conectada' : s.freeTier ? 'conectada (plano gratuito)' : s.tier ? `conectada (plano ${s.tier})` : 'conectada';
-          return { ...a, connected: !!s?.connected, detail };
-        });
-      } catch { /* mantém "não conectada" */ }
-    }
-    const d = await this.defaultModel(true);
-    const cat: ByokCatalog = available && this.control?.byok ? await this.control.byok().catch(() => ({ providers: [], custom: [] })) : { providers: [], custom: [] };
-    return { executor, available, accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) },
+    let ocupado = false;
+    const comPrazo = <T,>(p: Promise<T>, fallback: T): Promise<T> => new Promise((ok) => {
+      const t = setTimeout(() => { ocupado = true; ok(fallback); }, prazoMs);
+      p.then((v) => { clearTimeout(t); ok(v); }, () => { clearTimeout(t); ok(fallback); });
+    });
+    const available = this.control ? await comPrazo(this.control.health(), false) : false;
+    const [st, d, cat] = await Promise.all([
+      available ? comPrazo(this.control!.accounts(), null) : Promise.resolve(null),
+      comPrazo(this.defaultModel(true), this.def ? { provider: this.def.provider, model: this.def.model } : { provider: null, model: null }),
+      available && this.control?.byok ? comPrazo(this.control.byok(), { providers: [], custom: [] } as ByokCatalog) : Promise.resolve({ providers: [], custom: [] } as ByokCatalog),
+    ]);
+    const accounts = ACCOUNTS.map((a) => {
+      const s = st?.find((x) => x.id === a.id);
+      const detail = !available ? (ocupado ? 'a equipe de IA está ocupada: confira de novo em instantes' : 'indisponível nesta instalação')
+        : !st ? (ocupado ? 'a equipe de IA está ocupada: confira de novo em instantes' : 'não conectada')
+        : !s?.connected ? 'não conectada' : s.freeTier ? 'conectada (plano gratuito)' : s.tier ? `conectada (plano ${s.tier})` : 'conectada';
+      return { ...a, connected: !!s?.connected, detail };
+    });
+    return { executor, available, ...(ocupado ? { ocupado: true } : {}), accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) },
       byok: cat.providers, byokCustom: cat.custom };
   }
 

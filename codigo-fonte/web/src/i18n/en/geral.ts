@@ -36,7 +36,7 @@ const geral: Traducao<typeof pt> = {
   'decisoes.aguardando': { zero: 'Nothing waiting for you', other: '{n} waiting for you' },
 
   'alerta.semIa': 'NO AI ACCOUNT',
-  'alerta.semIaDica': 'The team only works on requests with an AI account connected — the best choice is the Nous subscription. See Settings.',
+  'alerta.semIaDica': 'The team only works on requests with an AI account connected — the best choice is Ergon AI, AI with no subscription. See Connections.',
   'alerta.novaVersao': 'NEW VERSION · RELOAD',
   'alerta.novaVersaoDica': 'Ergon was updated to version {nova}. This tab is still on {atual}.',
 
@@ -81,6 +81,9 @@ const geral: Traducao<typeof pt> = {
   'ws.nomeNovo': 'Name of the new workspace (a company, a project, your personal life…)',
   'ws.exemplo': 'E.g.: Ana’s Shop',
   'ws.criar': 'Create and enter',
+  'ws.noWorld': 'On Ergon World',
+  'ws.local': 'On this computer',
+  'ws.gerenciar': 'Manage',
   'ws.nasce': 'It starts with the initial team and city and goes through the welcome, like a new account.',
 
   'conta.aria': 'Account: {nome}',
@@ -109,6 +112,8 @@ const geral: Traducao<typeof pt> = {
   'nav.documentos': 'Documents',
   'nav.atividade': 'Activity',
   'nav.conexoes': 'Connections',
+  'nav.loja': 'Store',
+  'nav.world': 'Ergon World',
   'nav.configuracoes': 'Settings',
   'nav.ajuda': 'Help',
   'nav.aria': 'Navigation',

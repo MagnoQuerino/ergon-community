@@ -8,6 +8,7 @@ import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
 import { fmtHora, tn, useT } from '../i18n/index.ts';
 import { comConta, nomeNaTela, temVariasContas } from '../lib/contas.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } };
@@ -82,9 +83,10 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
 
   return (
     <div className="page page--board">
-      <header className="page__head">
+      <header className="page__head cena-cab">
         <h2>{t('quadro.tarefas.titulo')}</h2>
         <p className="muted">{t('quadro.tarefas.sub')}</p>
+        <CenaCabecalho tema="tarefas" />
       </header>
       <div className="toolbar">
         <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v.startsWith('+')) { const [k, c] = v.slice(1).split('|'); void pick(k, c ?? ''); } else { setBoardId(v); setOpenTask(null); } }} aria-label={t('quadro.tarefas.lista')}>

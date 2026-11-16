@@ -70,7 +70,7 @@ test('o tom das telas nas duas línguas: sem o nome do motor e o Ergon não é u
 
 test('glossário: os termos conferidos aparecem traduzidos do jeito fixo, e a moeda do World nunca é traduzida', async () => {
   const erros: string[] = [];
-  // o nome da moeda está na lista do módulo do World (só na distribuição proprietária)
+  // o nome da moeda está na lista do módulo do World
   const moeda = new URL('../views/world/glossario-moeda.ts', import.meta.url);
   const termos = [...GLOSSARIO, ...(fs.existsSync(moeda) ? (await import(moeda.href) as { GLOSSARIO_MOEDA: typeof GLOSSARIO }).GLOSSARIO_MOEDA : [])];
   for (const { chave, m } of todas(PT)) {
@@ -105,8 +105,7 @@ test('partição: as mesmas áreas do dicionário e cada arquivo numa área só'
     assert.ok(!dono.has(f), `${f} em duas áreas: ${dono.get(f)} e ${a}`);
     dono.set(f, a);
     assert.ok(!FORA_DA_VARREDURA.includes(f), `${f} está fora da varredura e numa área`);
-    // views/world só existe na distribuição proprietária
-    if (!f.startsWith('views/world/')) assert.ok(existe(f), `${f} (área ${a}) não existe`);
+    assert.ok(existe(f), `${f} (área ${a}) não existe`);
     assert.match(f, /^[\w/.-]+\.tsx?$/, `caminho a partir de web/src: ${f}`);
   }
   // cada área tem o seu arquivo nos dois idiomas

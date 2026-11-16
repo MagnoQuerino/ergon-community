@@ -52,6 +52,13 @@ const conta = {
   'entrar.esqueci': 'Esqueci a senha',
   'entrar.primeiraVez': 'Primeira vez neste computador? {criar}',
   'entrar.criarMinha': 'Criar a minha conta',
+  'termos.link': 'termos de uso',
+  'termos.aceitoNaConta': 'Li e aceito os {termos} (inclui: os agentes podem executar programas num ambiente isolado; dá para desligar em Configurações).',
+  'termos.fechar': 'Fechar',
+  'termos.novosTitulo': 'Termos de uso do Ergon',
+  'termos.novosSub': 'Antes de seguir: leia os termos de uso. Com o aceite, Executar código e Terminal passam a vir ligados na equipe (dá para desligar em Configurações › Ferramentas da equipe).',
+  'termos.liAceito': 'Li e aceito os termos de uso',
+  'termos.aceitar': 'Aceitar e continuar',
   'entrar.setupEmSeguida': 'Em seguida: uma frase de 24 palavras (a chave reserva dos seus dados, mostrada uma única vez), duas perguntas sobre como você trabalha e a conexão da sua conta de IA. A equipe chega montada para o seu caso.',
   'entrar.trancadoDica': 'Passkey e autenticador não abrem os dados depois de reiniciar (eles não guardam a chave); a senha ou a frase, sim.',
 
@@ -253,8 +260,15 @@ const conta = {
   'npc.aria': 'Exibir {nome} na cidade',
 
   // ——— o workspace atual ———
+  'ws.todos': 'Seus workspaces',
+  'ws.todosTexto': 'Cada um com a sua equipe, cidade e quadros. Abra, renomeie ou leve um deles ao Ergon World.',
+  'ws.abrir': 'Abrir',
+  'ws.nomeDe': 'Novo nome de {nome}',
+  'ws.levarWorld': 'Levar ao Ergon World',
+  'ws.gerenciarWorld': 'Ergon World',
+  'ws.este': 'Este workspace: {nome}',
   'ws.titulo': 'Workspace',
-  'ws.explica': 'Cada workspace tem a sua equipe, cidade, quadros, conversas e rotinas. Para trocar ou criar outro, use o botão com o nome dele, na barra de cima.',
+  'ws.explica': 'Ajustes que valem só para este workspace.',
   'ws.nome': 'Nome deste workspace',
   'ws.renomear': 'Renomear',
   'ws.soDona': 'Só quem é dona do workspace muda o nome.',
@@ -329,6 +343,18 @@ const conta = {
   'chaves.apagarTitulo': "Apagar a chave {nome}?",
   'chaves.apagarSudoTitulo': "Apagar a senha de administrador?",
   'chaves.apagarCorpo': "Ela sai do cofre da equipe. Se um agente precisar dela de novo, ele pede num cartão.",
+  // primeiro acesso com a conta do Ergon World (components/AuthFlow.tsx)
+  'world.jaTenho': 'Já tenho conta Ergon World',
+  'world.titulo': 'Entrar com a conta Ergon World',
+  'world.sub': 'A conta deste computador nasce da sua conta do Ergon World.',
+  'world.email': 'E-mail da conta Ergon World',
+  'world.senha': 'Senha do Ergon World',
+  'world.mesmaSenha': 'Usar a mesma senha neste computador',
+  'world.senhaLocal': 'Senha deste computador',
+  'world.entrar': 'Entrar',
+  'world.conferindo': 'Conferindo no Ergon World…',
+  'world.criarAqui': 'Criar uma conta só neste computador',
+  'world.emSeguida': 'Em seguida: a frase de recuperação e a conta de IA.',
 } as const satisfies Area;
 
 export default conta;

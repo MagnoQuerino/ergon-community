@@ -279,9 +279,9 @@ test('nenhuma letra abaixo de 12 px em controle (botão, campo, tecla de atalho)
   assert.deepEqual(letraPequenaEmControle(css, 12, LETRA_OK), []);
 });
 
-test('texto nunca menor que 11,5 px (legibilidade); o selo numérico da barra (10 px em negrito) é a exceção', () => {
-  const small = RS.filter((r) => !r.at.some((a) => /keyframes/.test(a))).flatMap((r) => { const px = letraDe(r); return px !== undefined && px < 11.5 ? [`${r.sel} ${px}px`] : []; });
-  assert.deepEqual(small, ['.tb-badge 10px']);
+test('texto nunca menor que 12 px em lugar nenhum (legibilidade), nem o selo numérico da barra', () => {
+  const small = RS.filter((r) => !r.at.some((a) => /keyframes/.test(a))).flatMap((r) => { const px = letraDe(r); return px !== undefined && px < 12 ? [`${r.sel} ${px}px`] : []; });
+  assert.deepEqual(small, []);
 });
 
 test('o leitor da folha pega cada defeito (prova com folhas de mentira)', () => {

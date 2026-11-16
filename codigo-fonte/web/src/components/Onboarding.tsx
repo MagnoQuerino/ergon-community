@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react';
 import { t, tn, useT, type Chave } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
@@ -6,11 +6,14 @@ import type { AiStatus, OnboardingOptions, OnboardingResult } from '../lib/types
 import { ErgonLogo, Loading, PhraseLoader } from '../brand/Brand.tsx';
 import { AcordandoIa, AiAccounts, sortear } from './AiAccounts.tsx';
 import { Icon } from './Icon.tsx';
+// o Ergon AI, a melhor escolha (módulo do Ergon World, se estiver nesta instalação)
+const eaiMod = Object.values(import.meta.glob<{ default: ComponentType }>('../views/world/ErgonAiConexoes.tsx'))[0];
+const ErgonAi = eaiMod ? lazy(eaiMod) : null;
 
 /**
  * Boas-vindas: depois de criar a conta (senha hoje; login com Google ou Microsoft depois, pelo mesmo caminho), três
  * perguntas rápidas definem em silêncio a equipe de partida — setores e funções para o jeito de trabalhar da
- * pessoa — e a conta de IA é conectada ali mesmo (Nous recomendada; ChatGPT aproveita a assinatura). Tudo continua
+ * pessoa — e a conta de IA é conectada ali mesmo (Ergon AI como a melhor escolha; Nous e ChatGPT como opções). Tudo continua
  * editável: a tela final convida a personalizar (conversando com a coordenação).
  */
 
@@ -60,6 +63,12 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
   const [opts, setOpts] = useState<OnboardingOptions | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('use');
+  // entrou com a conta do Ergon World no primeiro acesso: só os detalhes daqui (a IA); a equipe fica a que já veio
+  const [soDetalhes, setSoDetalhes] = useState(false);
+  useEffect(() => {
+    if (redo) return;
+    api.get<{ link: object | null }>('/api/world/status').then((s) => { if (s.link) { setSoDetalhes(true); setStep('ia'); } }).catch(() => {});
+  }, [redo]);
   // i18n-ok: 'Ergon Local' é o nome padrão que o servidor dá ao workspace (comparação, não aparece na tela)
   const [f, setF] = useState({ use: '', niche: '', nicheOther: '', company: workspaceName && workspaceName !== 'Ergon Local' ? workspaceName : '', goal: '' });
   const [result, setResult] = useState<OnboardingResult | null>(null);
@@ -72,11 +81,12 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
   // boas-vindas abrem, um carregamento esconde a espera ANTES das perguntas, para a conexão ter os botões prontos.
   // Uma vez pronto, segue pronto (o carregamento não volta no meio das perguntas).
   const [aiPronta, setAiPronta] = useState(!!redo);
-  useEffect(() => { if (ai && (ai.available || !ai.motor)) setAiPronta(true); }, [ai]);
+  // motor ligado mas ocupado (sem memória): segue para as perguntas; a etapa da IA diz que está ocupada (antes, travava aqui)
+  useEffect(() => { if (ai && (ai.available || !ai.motor || ai.ocupado)) setAiPronta(true); }, [ai]);
   const aiAcordando = !aiPronta;
   const acordandoDesde = useRef(Date.now());
   // conectou a conta na etapa da IA: monta a equipe e entra. Conectar continua sendo escolha: "Conectar depois" segue.
-  useEffect(() => { if (step === 'ia' && aiConnected) void build(); }, [step, aiConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (step === 'ia' && aiConnected) void (soDetalhes ? skip() : build()); }, [step, aiConnected]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!aiAcordando) return;
     const t = window.setTimeout(loadAi, 3000);
@@ -178,12 +188,13 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
           <section>
             <h2 id="onb-title" className="onb__title">{t('ajuda.onb.iaTitulo')}</h2>
             <p className="muted">{tn('ajuda.onb.iaIntro', { nous: <b>{t('ajuda.onb.iaNous')}</b> })}</p>
+            {ErgonAi && <Suspense fallback={null}><ErgonAi /></Suspense>}
             <AiAccounts pitch onChanged={loadAi} />
             {!aiConnected && <p className="hint">{t('ajuda.onb.iaSemConta')}</p>}
             {err && <p className="error" role="alert">{err}</p>}
             <div className="onb__nav">
-              <button className="btn" onClick={() => setStep('more')}>{t('ajuda.onb.voltar')}</button>
-              {!aiConnected && <button className="btn btn--ghost" onClick={build}>{t('ajuda.onb.conectarDepois')}</button>}
+              {!soDetalhes && <button className="btn" onClick={() => setStep('more')}>{t('ajuda.onb.voltar')}</button>}
+              {!aiConnected && <button className="btn btn--ghost" onClick={() => void (soDetalhes ? skip() : build())}>{t('ajuda.onb.conectarDepois')}</button>}
             </div>
           </section>
         ) : step === 'building' ? (

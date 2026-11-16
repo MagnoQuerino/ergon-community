@@ -245,6 +245,8 @@ const agente = {
   'comp.todasOrigens': 'Todas',
   'comp.origem.equipe': 'Já vem com a equipe',
   'comp.origem.loja': 'Da loja',
+  'comp.terceira': 'Da Loja · não verificada',
+  'comp.terceiraDica': 'Competência de outra pessoa, da Loja: fica só neste computador e nunca vai para a nuvem.',
   'comp.origem.enviada': 'Enviada por você',
   'comp.origem.criada': 'Criada pela equipe',
   'comp.origem.treinar': 'Ensinada no Treinar',

@@ -15,6 +15,7 @@ import { NewGroupDialog } from '../components/NewGroupDialog.tsx';
 import { VirtualGrid } from '../components/VirtualGrid.tsx';
 import { cardClick } from '../lib/cardClick.ts';
 import { tipoComum } from '../lib/team.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 const RUN_LABEL = { running: 'equipe.rodando.trabalhando', queued: 'equipe.rodando.naFila', waiting_user: 'equipe.rodando.aguardaVoce' } as const;
 const CARD_H = 132; const CARD_MIN = 280;
@@ -111,6 +112,7 @@ export function AgentesView({ state, onOpen }: { state: AppState; onOpen: OpenAg
           <h2>{t('equipe.titulo')}</h2>
           <p className="muted">{t('equipe.contagem', { n: total })} · {mode === 'setor' ? t('equipe.subtituloSetor') : t('equipe.subtituloLugar')}</p>
         </div>
+        <CenaCabecalho tema="equipe" />
         <div className="equipe__actions">
           <div className="equipe__more">
               <button className="icon-btn" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)} aria-label={t('equipe.maisAcoes')} title={t('equipe.maisAcoes')}><Icon name="dots" /></button>

@@ -8,7 +8,7 @@ import { AgentAvatar } from './AgentAvatar.tsx';
 import { Icon } from './Icon.tsx';
 import { fmtHora, fmtNumero, tn, useT, type Chave } from '../i18n/index.ts';
 
-/** Ala da nuvem (só na edição com o World; a Community não traz o arquivo e a ala simplesmente não aparece). */
+/** Ala da nuvem (cliente do Ergon World): só aparece no workspace ligado ao World. */
 const nuvemMod = Object.values(import.meta.glob<{ default: ComponentType }>('../views/world/AlaNuvem.tsx'))[0];
 const AlaNuvem = nuvemMod ? lazy(nuvemMod) : null;
 
@@ -147,7 +147,7 @@ function Trabalho({ ops, onBoard }: { ops: AmbientOps; onBoard: () => void }) {
 }
 
 /**
- * Ala da nuvem: com o trabalho na nuvem ligado, a leitura dos Jobs (edição com o World); sem ele, o posto aparece
+ * Ala da nuvem: com o Ergon World configurado, a leitura dos Jobs do workspace ligado; sem ele, o posto aparece
  * coberto com lona — está lá, reservado, mas sem uso nesta versão (nada para clicar, nada prometido).
  */
 function Nuvem() {

@@ -51,6 +51,13 @@ describe('rotinas das fases 1 a 5', () => {
     const r = await req(h, 'POST', `/api/routines/${id}/run`, s, { clientRequestId: `pedido-${String(++n).padStart(4, '0')}`, ...(input ? { input } : {}) });
     if (r.status !== 202) return { status: r.status, error: r.json } as const;
     await settle();
+    // a leitura dos documentos roda num processo à parte: numa máquina ocupada, 150 ms não bastavam e a conferência vinha
+    // vazia (o teste falhava às vezes, também sem mudança nenhuma). Espera a execução terminar de verdade (até ~6 s)
+    for (let i = 0; i < 200; i++) {
+      const st = h.db.get<{ status: string }>('SELECT status FROM routine_runs WHERE id = ?', r.json.id)?.status;
+      if (st && !['queued', 'gathering', 'running'].includes(st)) break;
+      await new Promise((ok) => setTimeout(ok, 30)); await h.executor.tick();
+    }
     return { status: 202, ...(await req(h, 'GET', `/api/routine-runs/${r.json.id}`, s)).json };
   };
   const upload = async (name: string, data: Buffer | string, type = 'application/octet-stream') => {

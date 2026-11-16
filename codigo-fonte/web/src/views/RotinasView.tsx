@@ -12,6 +12,12 @@ import { alternarConta, contaMarcada, gruposDaRotina, nomeNaTela } from '../lib/
 import { pushRecent } from '../lib/recents.ts';
 import { cardClick } from '../lib/cardClick.ts';
 import { fmtData, fmtLista, fmtNumero, t, tn, useIdioma, useT, type Chave } from '../i18n/index.ts';
+import { semNuvem, type NuvemNoCartao } from '../lib/nuvem-cartao.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
+
+/** "Rodar na nuvem" (módulo do Ergon World, se estiver nesta instalação): o botão e o selo de cada rotina */
+const nuvemMod = Object.values(import.meta.glob<{ useNuvemNoCartao: (ref: string | null) => NuvemNoCartao }>('./world/CardNuvem.tsx', { eager: true }))[0];
+const useNuvemNoCartao = nuvemMod?.useNuvemNoCartao ?? semNuvem;
 
 /**
  * Rotinas: trabalhos que a equipe já sabe fazer. Biblioteca (o que dá para delegar), Minhas rotinas (o que está
@@ -61,11 +67,12 @@ export function RotinasView({ coord, onOpenAgent, onGo }: { coord: { id: string;
 
   return (
     <div className="page rt-page">
-      <header className="page__head rt-head">
+      <header className="page__head rt-head cena-cab--flex">
         <div>
           <h2>{t('rotinas.titulo')}</h2>
           <p className="muted">{t('rotinas.cabeca.explica')}</p>
         </div>
+        <CenaCabecalho tema="rotinas" />
         <button className="btn btn--primary" onClick={createWithCoord} disabled={!coord} title={coord ? t('rotinas.cabeca.criarDica', { nome: coord.name }) : t('rotinas.cabeca.criarSemCoord')}>
           <Icon name="chat" size={16} /> {t('rotinas.cabeca.criarCom', { nome: coordName })}
         </button>
@@ -330,6 +337,7 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); setErr(null); try { await fn(); reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); } };
   const st = r.last ? STATUS[r.last.status] : null;
   const [ask, setAsk] = useState(false);
+  const nuvem = useNuvemNoCartao(`rotina:${r.id}`);
   const runNow = () => (r.input ? setAsk(true) : act(() => api.post(`/api/routines/${r.id}/run`, { clientRequestId: requestId() })));
   const linha = [
     r.status === 'active' && r.nextRunAt ? `${r.schedule} · ${t('rotinas.cartao.proxima', { quando: when(r.nextRunAt) })}` : r.schedule,
@@ -346,6 +354,7 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
             <Icon name="clock" size={12} /> {linha}
           </p>
         </div>
+        {nuvem.selo && <span className={`badge ${nuvem.selo.tom === 'info' ? '' : `badge--${nuvem.selo.tom}`}`}>{nuvem.selo.texto}</span>}
         <span className={`badge ${r.status === 'active' ? 'badge--ok' : r.status === 'setup' ? 'badge--warn' : ''}`}>{r.status === 'active' ? t('rotinas.estado.ativa') : r.status === 'setup' ? t('rotinas.estado.emPreparo') : t('rotinas.estado.pausada')}</span>
       </header>
       <p className="rt-item__last">
@@ -358,8 +367,9 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
       {r.proposes && <p className="hint">{r.proposes === 'tarefas' ? t('rotinas.cartao.propoeTarefas') : t('rotinas.cartao.propoeLancamentos')}</p>}
       <div className="row row--wrap">
         {r.status === 'setup' && <button className="btn btn--sm btn--primary" onClick={onSetup}><Icon name="auto" size={13} /> {t('rotinas.cartao.verPreparo')}</button>}
-        {r.status !== 'setup' && <button className="btn btn--sm btn--primary" disabled={busy || r.running} onClick={() => void runNow()}><Icon name="send" size={13} /> {t('rotinas.cartao.executarAgora')}</button>}
+        {r.status !== 'setup' && <button className="btn btn--sm btn--primary" disabled={busy || r.running || !!r.remote} onClick={() => void runNow()}><Icon name="send" size={13} /> {t('rotinas.cartao.executarAgora')}</button>}
         {r.status !== 'setup' && <button className="btn btn--sm" disabled={busy} onClick={() => act(() => api.patch(`/api/routines/${r.id}`, { status: r.status === 'active' ? 'paused' : 'active', tz: TZ }))}>{r.status === 'active' ? t('rotinas.cartao.pausar') : t('rotinas.cartao.retomar')}</button>}
+        {nuvem.item && <button className="btn btn--sm" disabled={nuvem.item.disabled} title={nuvem.item.motivo} onClick={nuvem.item.onClick}><Icon name={nuvem.item.icon} size={13} /> {nuvem.item.label}</button>}
         <button className="btn btn--sm" onClick={onEdit}><Icon name="edit" size={13} /> {t('rotinas.cartao.editar')}</button>
         {r.conversationId && r.agentId && <button className="btn btn--sm" onClick={() => onOpenAgent(r.agentId!, 'conversa', null, r.conversationId)}><Icon name="chat" size={13} /> {t('rotinas.cartao.conversa')}</button>}
         {coord && <button className="btn btn--sm btn--ghost" onClick={() => (r.hasSetup ? onSetup() : onOpenAgent(coord.id, 'conversa', t('rotinas.rascunho.ajustar', { nome: r.name })))}>{t('rotinas.cartao.ajustarCom', { nome: coord.name })}</button>}
@@ -367,6 +377,9 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
         <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => { if (confirm(t('rotinas.cartao.removerConfirma', { nome: r.name }))) void act(() => api.del(`/api/routines/${r.id}`)); }}><Icon name="trash" size={13} /> {t('rotinas.cartao.remover')}</button>
       </div>
       {err && <p className="error" role="alert">{err}</p>}
+      {nuvem.aviso && <p className="hint" role="status">{nuvem.aviso}</p>}
+      {nuvem.nota && <p className="hint">{nuvem.nota}</p>}
+      {!!nuvem.historico?.length && <details className="hint"><summary>{nuvem.historicoTitulo}</summary><ul className="small">{nuvem.historico.map((x, i) => <li key={i}>{x}</li>)}</ul></details>}
       {ask && r.input && <RunDialog r={r} spec={r.input} onClose={() => setAsk(false)} onDone={() => { setAsk(false); reload(); }} />}
     </article>
   );

@@ -6,6 +6,7 @@ import { useResource } from '../lib/live.ts';
 import type { PainelSaude, Saude } from '../lib/types.ts';
 import { CONFIRMAR_DADOS_ANTIGOS, rotuloDoCofre, tamanho, TEXTO_CONFIRMAR_DADOS_ANTIGOS, TEXTO_MANTIDOS_DADOS_ANTIGOS, textoConfirmarLiberar, textoDoLiberado, textoUltimaLimpeza } from '../lib/textos-tela.ts';
 import { useT, type Chave } from '../i18n/index.ts';
+import { enderecoDoRelato } from '../lib/relato.ts';
 
 const CLS: Record<Saude, string> = { operacional: 'badge--ok', limitado: 'badge--warn', atencao: 'badge--err', indisponivel: 'badge--err' };
 const LABEL = { operacional: 'configuracoes.saude.operacional', limitado: 'configuracoes.saude.limitado', atencao: 'configuracoes.saude.atencao', indisponivel: 'configuracoes.saude.indisponivel' } as const satisfies Record<Saude, Chave>;
@@ -89,6 +90,8 @@ export function SaudePanel() {
           <span className={`badge ${CLS[data.estado]}`}>{data.rotulo}</span>
         </div>
         <p className="muted">{data.resumo}</p>
+        {/* i18n-ok: 'erro' é o código da categoria do relato */}
+        {(data.estado === 'atencao' || data.estado === 'indisponivel') && <p><a className="link" href={enderecoDoRelato('erro')}>{t('ajuda.relato.titulo')}</a></p>}
         {error && <p className="error" role="alert">{t('configuracoes.saude.erroAoConferir', { erro: error })}</p>}
         <ul className="sec-rows" aria-label={t('configuracoes.saude.partes')}>
           {data.componentes.map((c) => (

@@ -1,13 +1,12 @@
 // A partição da tela em áreas, para várias equipes traduzirem ao mesmo tempo sem pisar umas nas outras: cada arquivo de
 // tela pertence a UMA área, e a equipe da área só mexe nos arquivos dela, em pt/<area>.ts e en/<area>.ts. Os caminhos
-// são a partir de web/src. Arquivos de views/world só existem na distribuição
-// proprietária (a Community não os traz): os testes pulam o que não existir.
+// são a partir de web/src.
 import type { NomeDaArea } from './pt/index.ts';
 
 export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // a barra de cima, o menu, o avatar, a música, o workspace, o tema e as peças comuns
   geral: [
-    'App.tsx', 'components/CommandPalette.tsx', 'components/MusicButton.tsx', 'components/AccountMenu.tsx', 'components/Workspaces.tsx',
+    'App.tsx', 'components/CommandPalette.tsx', 'components/WsCard.tsx', 'components/MusicButton.tsx', 'components/AccountMenu.tsx', 'components/Workspaces.tsx',
     'components/SeletorIdioma.tsx', 'components/ConfirmPopup.tsx', 'components/VirtualGrid.tsx', 'components/TextoLongo.tsx', 'components/Markdown.tsx',
     'components/FileViewer.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
   ],
@@ -34,8 +33,8 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts'],
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
-    'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
-    'views/world/AlaNuvem.tsx',
+    'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'views/LojaView.tsx', 'views/LojaPublicar.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
+    'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts', 'arte/figuras.ts', 'arte/Cena.tsx', 'views/world/Gestao.tsx', 'views/world/pessoas.ts', 'views/world/carrinho.ts',
   ],
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [
@@ -43,9 +42,9 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
     'components/AjustesEquipe.tsx', 'lib/ajustes.ts',
   ],
   // Entrar, Segurança, Minha conta e Pessoas
-  conta: ['components/AuthFlow.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],
+  conta: ['components/AuthFlow.tsx', 'components/TermosDeUso.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],
   // a Ajuda, as dicas, o tour e as boas-vindas
-  ajuda: ['views/AjudaView.tsx', 'components/Tips.tsx', 'components/Tour.tsx', 'components/Onboarding.tsx'],
+  ajuda: ['views/AjudaView.tsx', 'components/Tips.tsx', 'components/Tour.tsx', 'components/Onboarding.tsx', 'components/RelatarProblema.tsx', 'lib/relato.ts'],
   // "Aguardando você", a Atividade e o que vem do servidor (lib/textos-tela.ts: ver COMO-TRADUZIR.md)
   servidor: ['components/DecisionsPanel.tsx', 'views/OtherViews.tsx', 'lib/atividade.ts', 'lib/textos-tela.ts', 'lib/types.ts'],
 };
@@ -54,7 +53,8 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
 export const FORA_DA_VARREDURA: readonly string[] = [
   'components/simple-icons.ts', // gerado do Simple Icons: só os nomes das marcas, que não se traduzem
   'views/world/glossario-moeda.ts', // a lista do glossário (a moeda escrita nas duas línguas), não texto de tela
-  'views/world/textos.ts', // o dicionário do World nas duas línguas (fica no módulo do World: a Community não o traz)
+  'views/world/textos.ts', // o dicionário do World nas duas línguas (fica no módulo do World, com as conferências dele)
+  'legal/termos.ts', // os termos de uso nas duas línguas (texto legal com versão própria: services/termos.ts no servidor)
   // a galeria dos cartões (rc.28): página só de desenvolvimento (web/galeria.html), com dados de exemplo; não vai para a versão publicada
   'galeria/Galeria.tsx',
   'galeria/main.tsx',

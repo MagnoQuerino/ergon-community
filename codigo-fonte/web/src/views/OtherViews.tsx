@@ -5,6 +5,7 @@ import { openCard, openConversation } from '../lib/open.ts';
 import { cardClick, cardKey } from '../lib/cardClick.ts';
 import { destinoDaExecucao, destinoDoEvento, destinoDoRegistro, rotuloDaLinha, rotuloDoDestino, type Destino } from '../lib/atividade.ts';
 import { fmtData, fmtMoeda, tn, useT } from '../i18n/index.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 // Atividade ----------------------------------------------------------------------------------------
 const diaIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -85,7 +86,7 @@ export function AtividadeView({ onOpenAgent }: { onOpenAgent: (id: string, tab: 
 
   return (
     <div className="page">
-      <header className="page__head"><h2>{t('servidor.atividade.titulo')}</h2><p className="muted">{t('servidor.atividade.subtitulo')}</p></header>
+      <header className="page__head cena-cab"><h2>{t('servidor.atividade.titulo')}</h2><p className="muted">{t('servidor.atividade.subtitulo')}</p><CenaCabecalho tema="atividade" /></header>
       <ExportarRelatorio />
       <div className="tabs" role="tablist">
         {TABS.map((k) => (

@@ -1,3 +1,4 @@
+import { AceiteDosTermos } from './components/TermosDeUso.tsx';
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { api, setCsrf, setGuard } from './lib/api.ts';
 import { startActivity } from './lib/activity.ts';
@@ -12,6 +13,7 @@ import { PausaControle } from './components/AjustesEquipe.tsx';
 import { fraseCurtaDaCota } from './lib/ajustes.ts';
 import type { AgentHead } from './components/AgentWindow.tsx';
 import { AmbienteView } from './views/AmbienteView.tsx';
+import { LojaView } from './views/LojaView.tsx';
 import { Onboarding } from './components/Onboarding.tsx';
 import { Tour, type TourStep } from './components/Tour.tsx';
 import { ViewTip } from './components/Tips.tsx';
@@ -19,9 +21,15 @@ import { initPrefs, savePrefs, usePrefs } from './lib/prefs.ts';
 import { music } from './lib/music.ts';
 import { MusicButton } from './components/MusicButton.tsx';
 import { abrirBalao, useBalao } from './lib/balao.ts';
-// só na distribuição proprietária (a Community não traz views/world): entrar com a Conta Ergon de qualquer tela
+// cliente do Ergon World (views/world): conectar de qualquer tela quando um recurso do World pede a conta
 const worldLinkMod = Object.values(import.meta.glob<{ default: ComponentType<{ onClose: () => void }> }>('./views/world/WorldLinkDialog.tsx'))[0];
 const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
+/** "Enquanto você esteve fora" (módulo do Ergon World, se estiver nesta instalação): uma linha, ao abrir */
+const resumoForaMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/ResumoFora.tsx'))[0];
+const ResumoFora = resumoForaMod ? lazy(resumoForaMod) : null;
+/** a página do Ergon World (módulo do World, se estiver nesta instalação): ganha um item no menu */
+const mundoMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/MundoView.tsx'))[0];
+const MundoView = mundoMod ? lazy(mundoMod) : null;
 import { useSurface } from './lib/surface.ts';
 
 // As outras áreas chegam sob demanda (a Cidade, a primeira tela, já vem no pacote principal): o app abre mais leve, e
@@ -127,7 +135,8 @@ export function App() {
     <>
       {!locked && <Shell me={me} onLogout={logout} onIdle={() => setLocked(true)} onMeChanged={check} onOverlay={setOverlay} />}
       {locked && <LockOverlay name={me.user.displayName} factors={me.factors} rpId={me.rpId} onLogout={logout} onUnlocked={() => { setLocked(false); release(lockWaiters, true); }} />}
-      {me.autoUnlockPrompt && !locked && !reauth && !overlay && me.onboarding !== 'pending' && <AutoUnlockPrompt onDone={check} />}
+      {me.autoUnlockPrompt && !locked && !reauth && !overlay && me.onboarding !== 'pending' && !(me.termos && !me.termos.aceitos) && <AutoUnlockPrompt onDone={check} />}
+      {me.termos && !me.termos.aceitos && !locked && !reauth && <AceiteDosTermos versao={me.termos.versao} onDone={check} />}
       {worldLink && !locked && WorldLinkDialog && <Suspense fallback={null}><WorldLinkDialog onClose={() => setWorldLink(false)} /></Suspense>}
       {reauth && !locked && <ReauthDialog factors={me.factors} rpId={me.rpId} onDone={() => { setReauth(false); release(reauthWaiters, true); }} onCancel={() => { setReauth(false); release(reauthWaiters, false); }} />}
     </>
@@ -135,7 +144,7 @@ export function App() {
 }
 
 // os nomes ficam como chave e são traduzidos na hora de mostrar (a troca de idioma redesenha o menu)
-type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'configuracoes' | 'ajuda'}`;
+type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'loja' | 'world' | 'configuracoes' | 'ajuda'}`;
 const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
   { id: 'ambiente', label: 'geral.nav.cidade', icon: 'temple' },
   { id: 'agentes', label: 'geral.nav.equipe', icon: 'users' },
@@ -145,6 +154,8 @@ const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
   { id: 'documentos', label: 'geral.nav.documentos', icon: 'folder' },
   { id: 'atividade', label: 'geral.nav.atividade', icon: 'activity' },
   { id: 'conexoes', label: 'geral.nav.conexoes', icon: 'plug' },
+  { id: 'loja', label: 'geral.nav.loja', icon: 'store' },
+  ...(MundoView ? [{ id: 'world' as const, label: 'geral.nav.world' as const, icon: 'globe' }] : []),
   { id: 'configuracao', label: 'geral.nav.configuracoes', icon: 'gear' },
 ];
 /** no pé do menu: manuais, dicas e contornos */
@@ -409,6 +420,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       )}
 
       <main className="main" tabIndex={-1}>
+        {ResumoFora && <Suspense fallback={null}><ResumoFora /></Suspense>}
         {/* a cidade fica sempre montada: em outra área, oculta e viva em segundo plano */}
         <div className="keep" hidden={focus || view !== 'ambiente'}>
           <AmbienteView state={s} onNavigate={setView} selectedId={selected} onSelect={setSelected} reload={st.reload} active={!focus && view === 'ambiente'} />
@@ -429,6 +441,10 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <DocumentosView coord={coordLabel} />
         ) : view === 'conexoes' ? (
           <ConexoesView />
+        ) : view === 'loja' ? (
+          <LojaView agent={coordinator} />
+        ) : view === 'world' && MundoView ? (
+          <MundoView />
         ) : view === 'ajuda' ? (
           <AjudaView state={s} onGo={setView} onTour={startTour} onRedo={me.role === 'owner' ? () => setOnb('redo') : undefined} />
         ) : view === 'configuracao' ? (

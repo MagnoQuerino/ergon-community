@@ -1,3 +1,4 @@
+import { TermosDialog } from './TermosDeUso.tsx';
 import { useEffect, useState } from 'react';
 import { ApiError, api, errMsg, setCsrf } from '../lib/api.ts';
 import { passkeyLogin, passkeyUnlock, passkeysHere } from '../lib/passkey.ts';
@@ -54,7 +55,14 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
   const t = useT();
   const mode: 'setup' | 'unseal' | 'login' = st.needsSetup ? 'setup' : st.sealed ? 'unseal' : 'login';
   const [f, setF] = useState({ username: '', password: '', confirm: '', displayName: '', setupToken: '', phrase: '', code: '', invite: '' });
-  const [step, setStep] = useState<{ k: 'form' } | { k: 'recover' } | { k: 'register' } | { k: '2fa'; challenge: string; methods: { totp: boolean; passkey: boolean } } | { k: 'phrase'; r: Recovery }>({ k: 'form' });
+  const [step, setStep] = useState<{ k: 'form' } | { k: 'world' } | { k: 'recover' } | { k: 'register' } | { k: '2fa'; challenge: string; methods: { totp: boolean; passkey: boolean } } | { k: 'phrase'; r: Recovery }>({ k: 'form' });
+  // "Já tenho conta Ergon World" no primeiro acesso: só com o Ergon World nesta instalação
+  const [comWorld, setComWorld] = useState(false);
+  const [w, setW] = useState({ email: '', password: '', mesma: true, local: '', localConfirm: '' });
+  useEffect(() => {
+    if (mode !== 'setup') return;
+    void api.get<{ world?: { configured?: boolean } }>('/api/distribution').then((d) => setComWorld(!!d.world?.configured)).catch(() => {});
+  }, [mode]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // instalação antiga (ainda sem proteção): não há frase nem passkeys para usar
@@ -86,16 +94,34 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
   const submit = () => run(mode === 'unseal' ? t('conta.entrar.abrindo') : mode === 'setup' ? t('conta.entrar.criandoProtegendo') : t('conta.entrar.entrando'), async () => {
     if (mode === 'setup') {
       if (f.password !== f.confirm) throw new Error(t('conta.senha.diferentes'));
-      const r = await api.post<LoginResult>('/api/auth/setup', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.setupTokenRequired ? { setupToken: f.setupToken } : {}) });
+      const r = await api.post<LoginResult>('/api/auth/setup', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.setupTokenRequired ? { setupToken: f.setupToken } : {}), ...(st.termosVersao ? { termos: st.termosVersao } : {}) });
       return after(r, false);
     }
     if (mode === 'unseal') return after(await api.post<LoginResult>('/api/unseal', { username: f.username, password: f.password }), true);
     return after(await api.post<LoginResult>('/api/auth/login', { username: f.username, password: f.password }), false);
   });
+  /**
+   * Primeiro acesso com a conta do Ergon World: o World confere e-mail e senha ANTES de criar a conta deste computador
+   * (o usuário local sai do e-mail; a senha é a mesma, ou outra, se a pessoa preferir); depois o aparelho entra na
+   * conta do World e só faltam os detalhes daqui: a frase de recuperação e a IA.
+   */
+  const entrarComWorld = () => run(t('conta.world.conferindo'), async () => {
+    const email = w.email.trim().toLowerCase();
+    if (!w.mesma && w.local !== w.localConfirm) throw new Error(t('conta.senha.diferentes'));
+    await api.post('/api/world/setup/check', { email, password: w.password });
+    const base = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 32);
+    const username = base.length >= 3 ? base : `${base}-ergon`.slice(0, 32);
+    const r = await api.post<LoginResult>('/api/auth/setup', { username, password: w.mesma ? w.password : w.local, displayName: base || username, ...(st.termosVersao ? { termos: st.termosVersao } : {}) });
+    setCsrf((await api.get<Me>('/api/me')).csrf);
+    // o aparelho entra na conta do World (se não der agora, a página do Ergon World conecta depois)
+    await api.post('/api/world/connect', { mode: 'login', email, password: w.password }).catch(() => undefined);
+    setW({ email: '', password: '', mesma: true, local: '', localConfirm: '' });
+    return after(r, false);
+  });
   // conta nova neste computador: workspace, chave e frase próprios (as boas-vindas vêm em seguida)
   const register = () => run(t('conta.entrar.criandoConta'), async () => {
     if (f.password !== f.confirm) throw new Error(t('conta.senha.diferentes'));
-    const r = await api.post<LoginResult>('/api/auth/register', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.signup === 'convite' ? { invite: f.invite } : {}) });
+    const r = await api.post<LoginResult>('/api/auth/register', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.signup === 'convite' ? { invite: f.invite } : {}), ...(st.termosVersao ? { termos: st.termosVersao } : {}) });
     return after(r, false);
   });
   const recover = () => run(t('conta.entrar.conferindoFrase'), async () => {
@@ -108,6 +134,24 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
 
   if (step.k === 'phrase') return <Card steps={mode === 'setup' || st.signup ? 1 : undefined}><RecoveryReveal r={step.r} onDone={onDone} /></Card>;
 
+  if (step.k === 'world') {
+    return (
+      <Card busy={!!busy} steps={0} title={t('conta.world.titulo')} sub={t('conta.world.sub')}>
+        <form onSubmit={(e) => { e.preventDefault(); void entrarComWorld(); }}>
+          <label className="field">{t('conta.world.email')}<input required autoFocus type="email" autoComplete="username" value={w.email} onChange={(e) => setW({ ...w, email: e.target.value })} maxLength={254} /></label>
+          <label className="field">{t('conta.world.senha')}<input required type="password" autoComplete="current-password" value={w.password} onChange={(e) => setW({ ...w, password: e.target.value })} minLength={10} /></label>
+          <label className="check"><input type="checkbox" checked={w.mesma} onChange={(e) => setW({ ...w, mesma: e.target.checked })} /> {t('conta.world.mesmaSenha')}</label>
+          {!w.mesma && <NewPassword label={t('conta.world.senhaLocal')} value={w.local} confirm={w.localConfirm} onChange={(local, localConfirm) => setW({ ...w, local, localConfirm })} />}
+          <AceitoTermos />
+          {err && <p className="error" role="alert">{err}</p>}
+          <button className="btn btn--primary btn--block" type="submit" disabled={!!busy}>{busy ?? t('conta.world.entrar')}</button>
+        </form>
+        <button className="link" onClick={() => { setErr(null); setW({ ...w, password: '', local: '', localConfirm: '' }); setStep({ k: 'form' }); }}>{t('conta.world.criarAqui')}</button>
+        <p className="hint">{t('conta.world.emSeguida')}</p>
+      </Card>
+    );
+  }
+
   if (step.k === 'register') {
     return (
       <Card busy={!!busy} steps={0} title={t('conta.registro.titulo')} sub={t('conta.registro.sub')}>
@@ -117,6 +161,7 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
           <NewPassword value={f.password} confirm={f.confirm} onChange={(password, confirm) => setF({ ...f, password, confirm })} />
           {st.signup === 'convite' && <label className="field">{t('conta.registro.convite')}<input required autoComplete="off" spellCheck={false} placeholder="ABCD-2345" value={f.invite} onChange={(e) => setF({ ...f, invite: e.target.value.toUpperCase() })} maxLength={20} /></label>}
           {st.signup === 'convite' && <p className="hint">{t('conta.registro.conviteDica')}</p>}
+          <AceitoTermos />
           {err && <p className="error" role="alert">{err}</p>}
           <button className="btn btn--primary btn--block" disabled={!!busy}>{busy ?? t('conta.entrar.criarProteger')}</button>
         </form>
@@ -174,6 +219,7 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
           ? <NewPassword value={f.password} confirm={f.confirm} onChange={(password, confirm) => setF({ ...f, password, confirm })} />
           : <label className="field">{t('conta.senha.rotulo')}<input required type="password" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>}
         {mode === 'setup' && st.setupTokenRequired && <label className="field">{t('conta.entrar.codigoConfiguracao')}<input required value={f.setupToken} onChange={(e) => setF({ ...f, setupToken: e.target.value })} /></label>}
+        {mode === 'setup' && <AceitoTermos />}
         {err && <p className="error" role="alert">{err}</p>}
         <button className="btn btn--primary btn--block" type="submit" disabled={!!busy}>{busy ?? (mode === 'setup' ? t('conta.entrar.criarProteger') : mode === 'unseal' ? t('conta.entrar.abrir') : t('conta.entrar.entrar'))}</button>
       </form>
@@ -186,9 +232,26 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
           criar: <button className="link" onClick={() => { setErr(null); setF({ ...f, password: '', confirm: '' }); setStep({ k: 'register' }); }}>{t('conta.entrar.criarMinha')}</button>,
         })}</p>
       )}
+      {mode === 'setup' && comWorld && (
+        <button className="btn btn--block auth__alt" disabled={!!busy} onClick={() => { setErr(null); setStep({ k: 'world' }); }}><Icon name="globe" size={16} /> {t('conta.world.jaTenho')}</button>
+      )}
       {mode === 'setup' && <p className="hint">{t('conta.entrar.setupEmSeguida')}</p>}
       {mode === 'unseal' && <p className="hint">{t('conta.entrar.trancadoDica')}</p>}
     </Card>
+  );
+}
+
+/** "Li e aceito os termos de uso" (obrigatório na conta nova), com o texto num clique. */
+function AceitoTermos() {
+  const t = useT();
+  const [ver, setVer] = useState(false);
+  return (
+    <>
+      <label className="check termos__aceite"><input type="checkbox" required /> {tn('conta.termos.aceitoNaConta', {
+        termos: <button type="button" className="link" onClick={() => setVer(true)}>{t('conta.termos.link')}</button>,
+      })}</label>
+      {ver && <TermosDialog onClose={() => setVer(false)} />}
+    </>
   );
 }
 

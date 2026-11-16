@@ -31,6 +31,7 @@
  *
  * Sem gerente configurado (ERGON_MOTOR_MANAGER_URL vazio): um motor só para todos, como antes.
  */
+import { aceitouTermos } from './termos.ts';
 import crypto from 'node:crypto';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/db.ts';
@@ -698,7 +699,7 @@ export class Motors {
     // ausente = ligado (regra do dono, 12/11): as Conexões e as ferramentas da equipe que são benefício ligam sozinhas, a menos
     // que a pessoa as tenha desligado; o que ela desligou fica desligado também num motor recriado
     try {
-      const mudou = await ai.ensureBeneficios(this.ferramentasDesligadas(userId));
+      const mudou = await ai.ensureBeneficios(this.ferramentasDesligadas(userId), undefined, { codigo: aceitouTermos(this.d.db, userId) });
       if (mudou?.ligou.length) this.auditar(userId, 'ai.tools', mudou.ligou.includes('ergon_conexoes') && mudou.ligou.length === 1
         ? 'Conexões ligadas para a equipe (padrão: ligadas, a menos que você desligue)'
         : 'ferramentas da equipe ligadas (padrão: ligadas, a menos que você desligue em Configurações › Ferramentas)', { add: mudou.ligou });

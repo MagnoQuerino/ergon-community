@@ -1,13 +1,13 @@
 {
   "name": "@ergon/server",
-  "version": "1.1.0-rc.29",
+  "version": "1.1.0-rc.30",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test --test-concurrency=1 test/*.test.ts"
+    "test": "node --test --test-concurrency=1 --import ./test/setup.ts test/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
@@ -21,10 +21,12 @@
     "ajv": "8.20.0",
     "better-sqlite3-multiple-ciphers": "13.0.3",
     "fastify": "5.12.5",
+    "pdfkit": "0.19.1",
     "qrcode": "1.5.4"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "@types/pdfkit": "0.17.7",
     "@types/qrcode": "1.5.6",
     "typescript": "5.9.3"
   }

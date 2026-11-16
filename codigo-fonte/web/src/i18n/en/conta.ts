@@ -53,6 +53,13 @@ const conta: Traducao<typeof pt> = {
   'entrar.esqueci': 'Forgot password',
   'entrar.primeiraVez': 'First time on this computer? {criar}',
   'entrar.criarMinha': 'Create my account',
+  'termos.link': 'terms of use',
+  'termos.aceitoNaConta': 'I have read and accept the {termos} (including: agents can run programs in an isolated environment; you can turn this off in Settings).',
+  'termos.fechar': 'Close',
+  'termos.novosTitulo': 'Ergon terms of use',
+  'termos.novosSub': 'Before you continue: read the terms of use. Once you accept, Run code and Terminal come on for the team (you can turn them off in Settings › Team tools).',
+  'termos.liAceito': 'I have read and accept the terms of use',
+  'termos.aceitar': 'Accept and continue',
   'entrar.setupEmSeguida': 'Next: a 24-word phrase (the backup key to your data, shown only once), two questions about how you work, and connecting your AI account. The team arrives set up for your needs.',
   'entrar.trancadoDica': "After a restart, a passkey or the authenticator can't open your data (they don't hold the key); your password or phrase can.",
 
@@ -254,8 +261,15 @@ const conta: Traducao<typeof pt> = {
   'npc.aria': 'Show {nome} in the city',
 
   // ——— o workspace atual ———
+  'ws.todos': 'Your workspaces',
+  'ws.todosTexto': 'Each one with its own team, city and boards. Open, rename or take one of them to Ergon World.',
+  'ws.abrir': 'Open',
+  'ws.nomeDe': 'New name for {nome}',
+  'ws.levarWorld': 'Take to Ergon World',
+  'ws.gerenciarWorld': 'Ergon World',
+  'ws.este': 'This workspace: {nome}',
   'ws.titulo': 'Workspace',
-  'ws.explica': 'Each workspace has its own team, city, boards, conversations and routines. To switch or create another one, use the button with its name in the top bar.',
+  'ws.explica': 'Settings that apply only to this workspace.',
   'ws.nome': 'Workspace name',
   'ws.renomear': 'Rename',
   'ws.soDona': 'Only the workspace owner can change its name.',
@@ -330,6 +344,18 @@ const conta: Traducao<typeof pt> = {
   'chaves.apagarTitulo': "Delete the key {nome}?",
   'chaves.apagarSudoTitulo': "Delete the administrator password?",
   'chaves.apagarCorpo': "It leaves the team's vault. If an agent needs it again, it will ask in a card.",
+  // primeiro acesso com a conta do Ergon World (components/AuthFlow.tsx)
+  'world.jaTenho': 'I already have an Ergon World account',
+  'world.titulo': 'Sign in with your Ergon World account',
+  'world.sub': 'This computer’s account is created from your Ergon World account.',
+  'world.email': 'Ergon World account email',
+  'world.senha': 'Ergon World password',
+  'world.mesmaSenha': 'Use the same password on this computer',
+  'world.senhaLocal': 'Password for this computer',
+  'world.entrar': 'Sign in',
+  'world.conferindo': 'Checking with Ergon World…',
+  'world.criarAqui': 'Create an account on this computer only',
+  'world.emSeguida': 'Next: the recovery phrase and the AI account.',
 };
 
 export default conta;
