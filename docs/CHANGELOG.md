@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.31 (pré-versão de teste)
+
+- **Workspace criado no site ou dado de cortesia:** ao ligar no app, quem é dono liga a sincronia com um clique (a chave é criada neste computador).
+- **Confirme o seu e-mail:** o Ergon World pede o e-mail confirmado para assinar, criar workspace, convidar e publicar na Loja. O app avisa e leva direto ao código; confirmar pelo link do e-mail vale sem entrar de novo.
+- **E-mails no seu idioma**, com o visual do Ergon World.
+- **A página do Ergon World** usa a marca nos títulos.
+
 ## 1.1.0-rc.30 (pré-versão de teste)
 
 - **Ergon World, opcional.** Em Configurações › Ergon World, "Conectar ao Ergon World" cria a sua conta (ou entra
