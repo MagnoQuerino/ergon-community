@@ -15,7 +15,7 @@ import { taskModel, taskPackage, TASK_LIMITS } from '../src/world/cards.ts';
 import { FakeWorld } from './fake-world.ts';
 import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
-const CHAVE = 'sk-chave-propria-de-teste-0123456789';
+const CHAVE = 'chave-propria-de-teste';
 let world: FakeWorld;
 before(async () => {
   world = await new FakeWorld().start();
