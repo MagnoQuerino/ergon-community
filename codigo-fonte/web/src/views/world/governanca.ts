@@ -10,7 +10,7 @@ export function acessoGovernanca(bound: boolean, b: EstadoPlano | null): AcessoG
   return comPlano(b) && nivelDe(b.entitlement.plan_sku, b.entitlement.tier) === 'team' ? 'aberto' : 'trancado';
 }
 
-export interface Atividade { id: string; at: string; action: string; actor: { accountId: string; name: string | null } | null; target: { accountId: string; name: string | null } | null; detail?: Record<string, string> | null }
+export interface Atividade { id: string; at: string; action: string; actor: { accountId: string | null; name: string | null } | null; target: { accountId: string; name: string | null } | null; detail?: Record<string, string> | null }
 const PAPEL: Record<string, Extract<ChaveWorld, `papel.${string}`>> = { owner: 'papel.owner', admin: 'papel.admin', editor: 'papel.editor', viewer: 'papel.viewer' };
 
 /** A frase de uma linha do registro ("Ana mudou o papel de Bia para Admin"); ação desconhecida: o código, curto. */
@@ -28,6 +28,10 @@ export function linhaDaAtividade(a: Atividade, t: typeof tw, dracmas: (v: string
     case 'wallet.upgrade': return t('gov.acao.subiu');
     case 'card.handoff': return t('gov.acao.nuvem', { quem });
     case 'jobs.recovery': return t('gov.acao.recuperou');
+    case 'plan.courtesy': return t('gov.acao.cortesia');
+    case 'plan.courtesy.revoke': return t('gov.acao.cortesiaFim');
+    case 'wallet.courtesy': return t('gov.acao.cortesiaDracmas');
+    case 'wallet.courtesy.reverse': return t('gov.acao.cortesiaEstorno');
     case 'sync.transfer': return t('gov.acao.titularidade', { quem, alvo });
     default: return t('gov.acao.outra', { quem, acao: a.action.slice(0, 40) });
   }
