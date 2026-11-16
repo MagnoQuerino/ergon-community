@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { api, errMsg } from '../../lib/api.ts';
+import { useEffect, useRef, useState } from 'react';
+import { api, EMAIL_PEDIDO, errMsg, tomarFocoEmail } from '../../lib/api.ts';
 import { useResource } from '../../lib/live.ts';
 import { ErgonMarca, Loading } from '../../brand/Brand.tsx';
 import { ConnectForm, DeviceLimit, erroConta, type LoginLimit } from './WorldLinkDialog.tsx';
@@ -26,6 +26,13 @@ export default function WorldPanel() {
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(false);
+  const [pedido, setPedido] = useState(0); const reload = st.reload;
+  // o World pediu o e-mail confirmado (em qualquer tela): relê o vínculo e chama a caixa do código
+  useEffect(() => {
+    const f = () => { setPedido((n) => n + 1); reload(); };
+    window.addEventListener(EMAIL_PEDIDO, f);
+    return () => window.removeEventListener(EMAIL_PEDIDO, f);
+  }, [reload]);
   const act = async (fn: () => Promise<unknown>, ok?: string) => {
     setMsg(null); setBusy(true);
     try { await fn(); if (ok) setMsg({ kind: 'ok', text: ok }); st.reload(); } catch (e) { setMsg({ kind: 'error', text: erroConta(e, t) }); } finally { setBusy(false); }
@@ -56,7 +63,7 @@ export default function WorldPanel() {
       <section className="card">
         <h3 className="mundo-titulo-marca"><ErgonMarca size={22} /> {t('mundo.titulo')}</h3>
         <p>{twn('conta.conectado', { email: <b>{l.accountEmail ?? t('conta.suaConta')}</b> })}</p>
-        {!l.emailVerified && <VerifyEmail onMsg={setMsg} onDone={st.reload} />}
+        {!l.emailVerified && <VerifyEmail onMsg={setMsg} onDone={st.reload} pedido={pedido} />}
         <Devices onMsg={setMsg} />
         <button className="btn btn--ghost" disabled={busy} onClick={() => void act(() => api.post('/api/world/unlink'), t('conta.desconectada'))}>{t('conta.desconectar')}</button>
       </section>
@@ -72,19 +79,28 @@ export default function WorldPanel() {
 }
 
 /** Confirmar o e-mail da conta com o código que o World enviou. */
-function VerifyEmail({ onMsg, onDone }: { onMsg: Msg; onDone: () => void }) {
+function VerifyEmail({ onMsg, onDone, pedido }: { onMsg: Msg; onDone: () => void; pedido: number }) {
   const t = useTw();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pedida, setPedida] = useState(false);
+  const campo = useRef<HTMLInputElement>(null);
+  // veio de uma recusa do World (criar ou comprar sem o e-mail confirmado): diz o porquê e põe o foco no código
+  useEffect(() => {
+    if (!tomarFocoEmail() && !pedido) return;
+    setPedida(true);
+    campo.current?.scrollIntoView?.({ block: 'center' }); campo.current?.focus();
+  }, [pedido]);
   const go = async (fn: () => Promise<unknown>, ok: string) => {
     onMsg(null); setBusy(true);
     try { await fn(); onMsg({ kind: 'ok', text: ok }); onDone(); } catch (e) { onMsg({ kind: 'error', text: erroConta(e, t) }); } finally { setBusy(false); }
   };
   return (
     <div className="card card--inner">
+      {pedida && <p className="hint warn" role="status">{t('erro.email_unverified')}</p>}
       <p className="small">{t('email.confirmar')}</p>
       <div className="row row--wrap">
-        <label className="field">{t('senha.codigo')}<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(ev) => setCode(ev.target.value)} /></label>
+        <label className="field">{t('senha.codigo')}<input ref={campo} inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(ev) => setCode(ev.target.value)} /></label>
       </div>
       <div className="row row--wrap">
         <button className="btn btn--sm" disabled={busy || !code.trim()} onClick={() => void go(() => api.post('/api/world/account/email/verify', { code: code.trim() }), t('email.confirmado'))}>{t('email.botao')}</button>

@@ -665,7 +665,7 @@ function Transfer({ others, busy, go }: { others: WorkspaceRef[]; busy: boolean;
 }
 
 
-interface SyncStatus { bound: boolean; enabled: boolean; syncWorkspaceId?: string | null; origin?: 'created' | 'joined' | null; lastVersion?: number; conflicts?: number; keyVersion?: number; rotationPending?: boolean; recoveryOutdated?: boolean }
+interface SyncStatus { bound: boolean; enabled: boolean; syncWorkspaceId?: string | null; origin?: 'created' | 'joined' | null; keyState?: 'mine' | 'first' | 'handover' | null; lastVersion?: number; conflicts?: number; keyVersion?: number; rotationPending?: boolean; recoveryOutdated?: boolean }
 interface Tirada { ok: boolean; rotated?: boolean; rotationRequired?: boolean; reason?: string; shared?: number }
 interface Side { title: string; column?: string; agent?: string | null; completed?: boolean; dueOn?: string | null }
 interface Conflict { id: string; kind: 'task' | 'conversation'; since: string; mine: Side | null; theirs: Side | null }
@@ -702,15 +702,18 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
   if (!st.data) return <Loading error={st.error} />;
   const s = st.data;
   const n = pulled?.incoming; const team = pulled?.preview?.agents?.length ?? 0;
+  // adotado de outro computador: entra com a chave que já existe; criado no servidor e sem chave ainda (primeiro
+  // checkout do site, cortesia): para quem administra, é como um workspace novo, a chave nasce aqui num clique
+  const entrar = s.origin === 'joined' && s.keyState !== 'first';
   return (
     <section className="card">
       <h3>{t('sync.titulo')}</h3>
       {!s.enabled ? (
         <>
-          <p className="muted">{s.origin === 'joined' ? t('sync.entrarTexto') : t('sync.texto')}</p>
+          <p className="muted">{entrar ? t('sync.entrarTexto') : t('sync.texto')}</p>
           <label className="field">{t('sync.frase')}<input type="password" autoComplete="new-password" value={phrase} onChange={(ev) => setPhrase(ev.target.value)} /></label>
-          {s.origin !== 'joined' && <p className="muted small">{t('sync.fraseTexto')}</p>}
-          {s.origin === 'joined'
+          {!entrar && <p className="muted small">{t('sync.fraseTexto')}</p>}
+          {entrar
             ? <button className="btn btn--primary" disabled={busy || (phrase.length > 0 && phrase.trim().length < 20)} onClick={() => void go(async () => { await api.post('/api/world/sync/join', withPhrase()); return t('sync.entrou'); })}>{t('sync.entrar')}</button>
             : <button className="btn btn--primary" disabled={busy || (phrase.length > 0 && phrase.trim().length < 20)} onClick={() => void go(async () => { await api.post('/api/world/sync/enable', withPhrase()); return t('sync.ligadaMsg'); })}>{t('sync.ligar')}</button>}
         </>

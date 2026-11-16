@@ -210,6 +210,7 @@ const documentos: Traducao<typeof pt> = {
   'loja.pub.namespaceExemplo': 'ana-souza',
   'loja.pub.nomeNaLoja': 'Name in the Store',
   'loja.pub.criarPerfil': 'Create profile',
+  'loja.pub.emailPendente': 'Confirm your email to continue.',
   'loja.pub.titulo': 'Publish to the Store',
   'loja.pub.texto': 'Publishing as {nome}. Free, for everyone.',
   'loja.pub.oQue': 'What to publish',

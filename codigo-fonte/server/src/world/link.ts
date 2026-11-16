@@ -69,6 +69,8 @@ export class WorldClient {
       this.backoff.set(cred, until);
       throw WorldClient.limited(until);
     }
+    // e-mail da conta ainda não confirmado (criar ou comprar no World): a mesma frase curta em toda rota
+    if (j.error === 'email_unverified') throw Object.assign(new HttpError(403, 'email_unverified', EMAIL_UNVERIFIED), { detail: j });
     if (!r.ok) throw Object.assign(new HttpError(r.status === 401 ? 401 : r.status >= 500 ? 503 : r.status, j.error ?? 'world_error', j.message ?? `World respondeu ${r.status}`), { detail: j });
     return j as T;
   }
@@ -93,9 +95,28 @@ function installationId(db: Db): string {
   return v;
 }
 
+/** A frase do erro `email_unverified` do World (403), igual em toda rota que cria ou compra. */
+export const EMAIL_UNVERIFIED = 'Confirme o seu e-mail para continuar.';
+
 export interface ConnectedDevice { id: string; name: string; lastSeenAt: string | null }
 /** a conta do World: nova (com o nome) ou que já existe */
-export interface AccountInput { kind: 'signup' | 'login'; email: string; password: string; displayName?: string }
+export interface AccountInput { kind: 'signup' | 'login'; email: string; password: string; displayName?: string; locale?: WorldLocale }
+/** Idiomas dos e-mails da conta no World (POST /v1/accounts aceita `locale`; padrão português). */
+export type WorldLocale = 'pt' | 'en' | 'es' | 'fr' | 'de' | 'hi' | 'zh';
+const LOCALES: readonly WorldLocale[] = ['pt', 'en', 'es', 'fr', 'de', 'hi', 'zh'];
+/**
+ * O idioma da tela (ou do Accept-Language) no formato do World: 'pt-BR' → pt, 'en-US' → en, 'zh-Hant' → zh. Lista de
+ * preferências: vale o primeiro que o World conhece. Sem nenhum conhecido: undefined (o World usa português).
+ */
+export function worldLocale(...prefs: Array<string | null | undefined>): WorldLocale | undefined {
+  for (const p of prefs) {
+    for (const part of String(p ?? '').split(',')) {
+      const base = part.split(';')[0].trim().toLowerCase().split(/[-_]/)[0];
+      if ((LOCALES as readonly string[]).includes(base)) return base as WorldLocale;
+    }
+  }
+  return undefined;
+}
 /** aparelho a liberar quando a conta já está no limite (2 com sessão / 4 cadastrados) */
 export interface DeviceChoice { endSessionsOf?: string; replaceDeviceId?: string }
 interface AccountReply { accountId: string; idToken: string; emailVerified: boolean }
@@ -137,7 +158,9 @@ export class WorldLinks {
   async connect(userId: string, sealWs: string, account: AccountInput, choice: DeviceChoice = {}): Promise<LinkRow> {
     checkAccountInput(account);
     const email = account.email.trim().toLowerCase();
-    const body = account.kind === 'signup' ? { email, password: account.password, displayName: account.displayName!.trim().slice(0, 80) } : { email, password: account.password };
+    const body = account.kind === 'signup'
+      ? { email, password: account.password, displayName: account.displayName!.trim().slice(0, 80), ...(account.locale ? { locale: account.locale } : {}) }
+      : { email, password: account.password };
     const r = await this.client.call<AccountReply>('POST', account.kind === 'signup' ? '/v1/accounts' : '/v1/accounts/login', body);
     return this.registerDevice(userId, sealWs, { idToken: r.idToken, email, emailVerified: r.emailVerified === true }, choice);
   }
@@ -174,14 +197,16 @@ export class WorldLinks {
     }
     this.limits.delete(userId); this.pending.delete(userId);
     await this.client.call('POST', '/v1/bindings', { localPersonId: userId }, conf.sessionToken);
-    const au = await this.client.call<{ authorizedUntil: string; account?: { email: string | null }; workspaces?: unknown[] }>('POST', '/v1/authorize', {}, conf.sessionToken);
+    const au = await this.client.call<{ authorizedUntil: string; account?: { email: string | null; emailVerified?: unknown }; workspaces?: unknown[] }>('POST', '/v1/authorize', {}, conf.sessionToken);
+    // o authorize diz (aditivo) se o e-mail está confirmado; sem o campo, vale o que o cadastro ou o login disse
+    const verified = typeof au.account?.emailVerified === 'boolean' ? au.account.emailVerified : acc.emailVerified;
     const keys = JSON.stringify({ ed25519: priv(ed.privateKey), x25519: priv(x.privateKey), ed25519Public: pub(ed.publicKey), x25519Public: pub(x.publicKey) });
     this.db.run(`INSERT INTO world_links (user_id, workspace_id, account_id, device_id, account_email, email_verified, device_keys, session_token, authorized_until, entitlement, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
       ON CONFLICT (user_id) DO UPDATE SET workspace_id = excluded.workspace_id, account_id = excluded.account_id, device_id = excluded.device_id, account_email = excluded.account_email,
         email_verified = excluded.email_verified, device_keys = excluded.device_keys, session_token = excluded.session_token, authorized_until = excluded.authorized_until,
         entitlement = excluded.entitlement, bound_workspace_id = NULL, status = 'active', updated_at = excluded.updated_at`,
-    userId, sealWs, reg.accountId, reg.deviceId, au.account?.email ?? acc.email, acc.emailVerified ? 1 : 0, this.db.seal(sealWs, keys), this.db.seal(sealWs, conf.sessionToken), au.authorizedUntil,
+    userId, sealWs, reg.accountId, reg.deviceId, au.account?.email ?? acc.email, verified ? 1 : 0, this.db.seal(sealWs, keys), this.db.seal(sealWs, conf.sessionToken), au.authorizedUntil,
     JSON.stringify(au.workspaces ?? []), nowIso(), nowIso());
     return this.get(userId)!;
   }
@@ -196,15 +221,18 @@ export class WorldLinks {
   /** O workspace local ligado ao World desta pessoa (só ele tem o plano e sincroniza), ou null. */
   bound(userId: string): string | null { return this.get(userId)?.bound_workspace_id ?? null; }
   setBound(userId: string, ws: string | null): void { this.db.run('UPDATE world_links SET bound_workspace_id = ?, updated_at = ? WHERE user_id = ?', ws, nowIso(), userId); }
-  markEmailVerified(userId: string): void { this.db.run('UPDATE world_links SET email_verified = 1, updated_at = ? WHERE user_id = ?', nowIso(), userId); }
+  markEmailVerified(userId: string): void { this.setEmailVerified(userId, true); }
+  setEmailVerified(userId: string, v: boolean): void { this.db.run('UPDATE world_links SET email_verified = ?, updated_at = ? WHERE user_id = ?', v ? 1 : 0, nowIso(), userId); }
 
   /** Renova o resumo do plano com o World (só leitura); aparelho revogado no World → vínculo local cai. */
   async renew(userId: string): Promise<string | null> {
     const s = this.session(userId);
     if (!s) return null;
     try {
-      const au = await this.client.call<{ authorizedUntil: string; workspaces?: unknown[] }>('POST', '/v1/authorize', {}, s);
+      const au = await this.client.call<{ authorizedUntil: string; account?: { emailVerified?: unknown }; workspaces?: unknown[] }>('POST', '/v1/authorize', {}, s);
       this.db.run('UPDATE world_links SET authorized_until = ?, entitlement = ?, updated_at = ? WHERE user_id = ?', au.authorizedUntil, JSON.stringify(au.workspaces ?? []), nowIso(), userId);
+      // confirmou pelo link do e-mail (ou o World voltou a pedir): o aplicativo segue o World, sem novo login
+      if (typeof au.account?.emailVerified === 'boolean') this.setEmailVerified(userId, au.account.emailVerified);
       return au.authorizedUntil;
     } catch (e) {
       if ((e as HttpError).status === 401) this.db.run("UPDATE world_links SET status = 'revoked', authorized_until = NULL, updated_at = ? WHERE user_id = ?", nowIso(), userId);

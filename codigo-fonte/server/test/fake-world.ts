@@ -35,7 +35,7 @@ function checkHermesTask(s: Record<string, unknown>): string | null {
   return null;
 }
 
-interface Account { id: string; email: string; password: string; displayName: string; emailVerified: boolean }
+interface Account { id: string; email: string; password: string; displayName: string; emailVerified: boolean; locale?: string }
 interface Device { id: string; accountId: string; name: string; publicKey: string; syncPublicKey: string; challenge: string; status: 'pending' | 'active' | 'revoked'; session: string | null; lastSeenAt: string }
 interface Workspace { id: string; owner: string; label: string | null; plan: string | null; head: number; changes: Array<Record<string, unknown>>; envelopes: Map<string, { keyVersion: number; wrapped: string }>; recovery: { keyVersion: number; wrapped: string } | null;
   /** quem entrou por convite (o dono fica em owner); papel e desde quando (world/src/sync.ts) */
@@ -127,6 +127,12 @@ export class FakeWorld {
   /** papel da conta no workspace (ausente = owner, o dono) */
   roles = new Map<string, string>();
   /** os próximos N pedidos com sessão recebem 429 rate_limited com Retry-After */
+  /** o World recusa criar ou comprar sem o e-mail confirmado (403 email_unverified); desligado nos testes antigos */
+  requireVerifiedEmail = false;
+  /** credenciais do Ergon AI emitidas (POST /v1/ai/credentials) */
+  aiTokens = new Set<string>();
+  /** Confirma o e-mail da conta por fora do aplicativo (o link de um clique do e-mail, no site). */
+  confirmEmail(email: string): void { [...this.accounts.values()].find((a) => a.email === email)!.emailVerified = true; }
   rateLimitNext = 0;
   leaseMs = 90_000;
   /** o próximo pedido que casar é processado, mas a resposta se perde (a conexão cai) */
@@ -155,6 +161,18 @@ export class FakeWorld {
 
   /** Simula o pagamento confirmado (o webhook do Stripe no World de verdade). */
   activate(ws: string, plan = 'world_pro', seats?: number): void { const w = this.workspaces.get(ws)!; w.plan = plan; w.sub ??= { items: [{ sku: plan, quantity: 1 }] }; if (seats !== undefined) w.seats = seats; }
+  /**
+   * Workspace criado do lado do servidor, antes de qualquer computador (world/src/web.ts no primeiro checkout do site;
+   * admin/cortesia.ts em "Criar workspace e conceder"): a conta é a dona, sem aparelho principal, sem envelope de chave
+   * nenhum, nada enviado (head 0) e a chave na versão 1. Com source 'cortesia', o plano vem concedido.
+   */
+  serverWorkspace(accountId: string, o: { plan?: string; source?: 'stripe' | 'cortesia'; label?: string } = {}): string {
+    const w: Workspace = { id: `sws_${hex(16)}`, owner: accountId, label: o.label ?? 'Meu workspace', plan: null, head: 0, changes: [], envelopes: new Map(), recovery: null };
+    this.workspaces.set(w.id, w);
+    if (o.source === 'cortesia') this.cortesia(w.id, o.plan ?? 'world_pro');
+    else if (o.plan) this.activate(w.id, o.plan);
+    return w.id;
+  }
   /** Plano cortesia (painel interno do World): ativo, sem assinatura; o crédito entra no extrato como 'cortesia'. */
   cortesia(ws: string, plan = 'world_pro', creditos = '500.000000'): void {
     const w = this.workspaces.get(ws)!; w.plan = plan; w.source = 'cortesia'; w.sub = null;
@@ -235,7 +253,9 @@ export class FakeWorld {
     if (key === 'POST /v1/accounts') {
       if (typeof b.email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(b.email) || typeof b.password !== 'string' || b.password.length < 10) return { fail: [400, 'invalid_request'] };
       if ([...this.accounts.values()].some((a) => a.email === b.email)) return { fail: [409, 'email_in_use'] };
-      const a: Account = { id: `acc_${hex(16)}`, email: b.email, password: b.password, displayName: String(b.displayName ?? ''), emailVerified: false };
+      // idioma dos e-mails da conta (aditivo; fora da lista, o World recusa o pedido)
+      if (b.locale !== undefined && !['pt', 'en', 'es', 'fr', 'de', 'hi', 'zh'].includes(b.locale)) return { fail: [400, 'invalid_request'] };
+      const a: Account = { id: `acc_${hex(16)}`, email: b.email, password: b.password, displayName: String(b.displayName ?? ''), emailVerified: false, ...(b.locale ? { locale: b.locale } : {}) };
       this.accounts.set(a.id, a);
       return { status: 201, json: { accountId: a.id, idToken: this.token(a.id), emailVerified: false } };
     }
@@ -299,6 +319,8 @@ export class FakeWorld {
       if (!i || !v || i.status !== 'published' || v.status !== 'approved' || !this.licenses.has(`${accountId}|${itemId}`)) return { fail: [404, 'item'] };
       return { raw: v.artifact, headers: { 'x-sha256': v.sha256 } };
     }
+    // Ergon AI: a credencial curta abre só a lista de modelos (o proxy de verdade é outro serviço)
+    if (key === 'GET /v1/ai/models' && bearer && this.aiTokens.has(bearer)) return { json: { data: [{ id: 'ergon-ai' }] } };
     if (!dev) return { fail: [401, 'unauthenticated'] };
     dev.lastSeenAt = new Date().toISOString();
     const acc = this.accounts.get(dev.accountId)!;
@@ -306,10 +328,23 @@ export class FakeWorld {
     const roleIn = (w: Workspace, accountId: string): Role | null => (w.owner === accountId ? (this.roles.get(accountId) as Role | undefined) ?? 'owner' : w.members?.get(accountId)?.role ?? null);
     const mine = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && roleIn(w, acc.id) ? w : null; };
     const owned = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && w.owner === acc.id ? w : null; };
+    // e-mail confirmado antes de criar ou comprar (docs/CONTRATO_PUBLICO.md); ligado nos testes que pedem
+    if (this.requireVerifiedEmail && !acc.emailVerified && method === 'POST') {
+      const criar = ['/v1/billing/checkout', '/v1/sync/workspaces', '/v1/sync/invites/accept', '/v1/marketplace/creators', '/v1/marketplace/items'].includes(p)
+        || /^\/v1\/sync\/workspaces\/sws_[a-f0-9]{32}\/invites$/.test(p) || /^\/v1\/marketplace\/items\/[^/]+\/submit$/.test(p);
+      // usar: dispensa quem já é membro de um workspace com plano vigente
+      const usar = p === '/v1/ai/credentials' && ![...this.workspaces.values()].some((w) => w.plan && roleIn(w, acc.id));
+      if (criar || usar) return { fail: [403, 'email_unverified', { message: 'Confirme o seu e-mail para continuar.' }] };
+    }
+    if (key === 'POST /v1/ai/credentials') {
+      if (!mine(b.workspaceId)) return { fail: [404, 'sync_workspace'] };
+      const token = `eai_${hex(16)}`; this.aiTokens.add(token);
+      return { json: { token, expiresAt: new Date(Date.now() + 3_600_000).toISOString() } };
+    }
     if (key === 'POST /v1/bindings') { this.bindings.push({ accountId: acc.id, localPersonId: b.localPersonId }); return { json: { ok: true } }; }
     if (key === 'POST /v1/authorize') {
       const workspaces = [...this.workspaces.values()].filter((w) => roleIn(w, acc.id)).map((w) => ({ workspaceId: w.id, label: w.label, role: roleIn(w, acc.id), status: w.plan ? 'active' : 'none', plan_sku: w.plan, source: w.plan ? w.source ?? 'stripe' : null }));
-      return { json: { authorizedUntil: new Date(Date.now() + 900_000).toISOString(), account: { email: acc.email }, workspaces } };
+      return { json: { authorizedUntil: new Date(Date.now() + 900_000).toISOString(), account: { email: acc.email, emailVerified: acc.emailVerified }, workspaces } };
     }
     if (key === 'GET /v1/devices') return { json: [...this.devices.values()].filter((d) => d.accountId === acc.id && d.status !== 'pending').map((d) => ({ id: d.id, name: d.name, status: d.status, current: d === dev, connected: !!d.session, lastSeenAt: d.lastSeenAt })) };
     let m = /^\/v1\/devices\/(dev_[a-f0-9]{32})$/.exec(p);

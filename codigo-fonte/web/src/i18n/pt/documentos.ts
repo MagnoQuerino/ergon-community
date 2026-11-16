@@ -222,6 +222,7 @@ const documentos = {
   'loja.pub.namespaceExemplo': 'ana-souza',
   'loja.pub.nomeNaLoja': 'Nome na Loja',
   'loja.pub.criarPerfil': 'Criar o perfil',
+  'loja.pub.emailPendente': 'Confirme o seu e-mail para continuar.',
   'loja.pub.titulo': 'Publicar na Loja',
   'loja.pub.texto': 'Publicando como {nome}. Grátis, para todos.',
   'loja.pub.oQue': 'O que publicar',
