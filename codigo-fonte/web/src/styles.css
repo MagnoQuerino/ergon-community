@@ -589,10 +589,10 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 /* Rotinas --------------------------------------------------------------------------------------------------- */
 .rt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .rt-head > div { flex: 1; min-width: 260px; }
-.rt-head p { max-width: 760px; }
+.rt-head p { max-width: min(760px, var(--texto-max)); }
 .rt-rec header { justify-content: space-between; margin: 0; }
 .rt-rec h3 { display: flex; align-items: center; gap: 6px; margin: 0; }
-.rt-rec p { margin: 6px 0; max-width: 900px; }
+.rt-rec p { margin: 6px 0; max-width: min(900px, var(--texto-max)); }
 .rt-filter { justify-content: space-between; }
 .rt-group { margin: 14px 0 6px; }
 .rt-group__title { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
@@ -1279,6 +1279,12 @@ body:has(.cdock) .tip { right: 100px; }
 }
 @media (max-width: 440px) {
   .brand { display: none; } /* o logo vai para a gaveta (o primeiro item do menu é a Cidade) */
+  /* rc.33: com o plano e as Dracmas na barra, a conta saía da tela no celular: a pílula do World fica só com o saldo e o
+     Modo Foco segue com o nome */
+  .tb-world__plano, .tb-world__sep { display: none; }
+  /* o workspace vai para a gaveta já aqui ("Workspace: nome"; o balão continua abrindo), como abaixo de 360 px */
+  .topbar__wswrap { display: contents; }
+  .topbar__ws { display: none; }
 }
 @media (max-width: 360px) {
   /* workspace: o botão vai para a gaveta ("Workspace: nome"), o balão continua abrindo (fixo nessa largura) */
@@ -3028,8 +3034,8 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
    web/e2e/layout.mjs mede os cartões numa janela de 1920 px. */
 :root { --texto-max: 80ch; --cartao-min: 320px; --cartao-max: 760px; --cartao-rolagem: min(60vh, 520px); }
 small { font-size: max(12px, .83em); }
-:where(.page) :where(p, li:not([class]), dd, blockquote, .hint, .muted:not(span)) { max-width: var(--texto-max); }
-:where(.page) :where(.row, .card-acts, .conn-tools, .tabs, .feature-grid, .grade-cartoes) { max-width: none; }
+:where(.main) :where(p, li:not([class]), dd, blockquote, .hint, .muted:not(span)) { max-width: var(--texto-max); }
+:where(.main) :where(.row, .card-acts, .conn-tools, .tabs, .feature-grid, .grade-cartoes) { max-width: none; }
 .grade-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(var(--cartao-min), 100%), 1fr)); gap: 12px; align-items: start; }
 .grade-cartoes > * { min-width: 0; max-width: var(--cartao-max); }
 /* Microsoft 365 e Google: os dois ocupam a linha (sem a terceira coluna vazia), cada um com a sua altura */
@@ -3069,3 +3075,6 @@ small { font-size: max(12px, .83em); }
 .conn-secao--detalhes { margin-top: 10px; }
 .conn-detail .conn-passos, .conn-detail ol.small { padding-left: 20px; display: grid; gap: 4px; }
 .conn-secoes + .conn-secao--detalhes { border-top: 0; margin-top: 0; }
+.tools-fora { margin-top: 10px; } .tools-fora > .tools-grid { margin-top: 6px; }
+/* celular: a lista das ferramentas (15 opções com explicação) rola por dentro, último recurso; o cartão cabe na tela */
+@media (max-width: 600px) { .tools-grid { max-height: 70vh; overflow-y: auto; padding-right: 2px; } }

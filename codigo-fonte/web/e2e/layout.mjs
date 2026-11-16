@@ -9,7 +9,7 @@ const LIMITE = 1.5; const TEXTO_MAX = 84; // 80ch, com folga para a medida do "0
 const TELAS = ['ambiente', 'equipe', 'agentes', 'rotinas', 'tarefas', 'documentos', 'atividade', 'conexoes', 'loja', 'world', 'governanca', 'ajuda', 'configuracao'];
 
 let chromium;
-try { ({ chromium } = await import(process.env.PLAYWRIGHT ?? 'playwright')); } catch {
+try { const pw = await import(process.env.PLAYWRIGHT ?? 'playwright'); chromium = pw.chromium ?? pw.default?.chromium; if (!chromium) throw new Error('sem chromium'); } catch {
   console.log('Playwright não encontrado: instale-o (npm i -g playwright) ou aponte PLAYWRIGHT para ele. Nada conferido.');
   process.exit(0);
 }

@@ -44,6 +44,7 @@ const configuracoes = {
   'ia.introConexoes': 'Conexões',
   'ferr.texto': 'O que fica ligado para os agentes. Cada agente usa só as que tem no perfil; quem não tem pede ajuda a um colega (a coordenação controla essas travas).',
   'ferr.protegidas': 'As que executam código ficam protegidas: ligar pede a sua senha. Também dá para pedir conversando com qualquer agente (“liga o Terminal para a Hipátia”): o pedido vai para a coordenação, e você confirma com a senha na conversa com ela.',
+  'ferr.foraDaqui': { one: '{n} ferramenta que não dá para ligar aqui', other: '{n} ferramentas que não dá para ligar aqui' },
   'ferr.sempreLigadaDica': 'Ferramenta do próprio Ergon: sempre ligada',
   'ferr.ligada': 'ligada',
   'ferr.protegida': 'protegida',
@@ -53,6 +54,7 @@ const configuracoes = {
 
   // ——— Andamento da equipe ———
   'andamento.titulo': 'Andamento da equipe',
+  'andamento.avancado': 'Ajustes finos: passos, raciocínio, ajudantes, compactação e memória',
   'andamento.autorun': 'A equipe pega sozinha as tarefas de “A fazer”, de cima para baixo',
   'andamento.iniciativa': 'A equipe puxa conversa quando você chega (boas-vindas com o resumo e quem precisa de você)',
   'ajudantes.rotulo': 'Ajudantes temporários: cada agente pode dividir um trabalho grande em partes que rodam ao mesmo tempo',

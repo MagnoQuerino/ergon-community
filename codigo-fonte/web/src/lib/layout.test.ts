@@ -16,7 +16,7 @@ const ultima = (sel: string, prop: string): string | null => {
 
 test('texto corrido com ~80 caracteres por linha no máximo; a letra nunca abaixo de 12 px', () => {
   assert.match(css, /--texto-max:\s*80ch/);
-  assert.ok(rules.some(([sels, body]) => sels.some((s) => s.startsWith(':where(.page)') && /\bp\b/.test(s)) && /max-width:\s*var\(--texto-max\)/.test(body)));
+  assert.ok(rules.some(([sels, body]) => sels.some((s) => s.startsWith(':where(.main)') && /\bp\b/.test(s)) && /max-width:\s*var\(--texto-max\)/.test(body)));
   for (const m of css.matchAll(/font-size:\s*([\d.]+)px/g)) assert.ok(Number(m[1]) >= 12, `font-size ${m[1]}px`);
   assert.match(ultima('small', 'font-size') ?? '', /max\(12px/);
 });

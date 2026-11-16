@@ -45,6 +45,7 @@ const configuracoes: Traducao<typeof pt> = {
   'ia.introConexoes': 'Connections',
   'ferr.texto': 'What is turned on for the agents. Each agent uses only the tools in its profile; an agent without one asks a teammate for help (coordination manages these locks).',
   'ferr.protegidas': 'Tools that run code are protected: turning one on asks for your password. You can also ask in a conversation with any agent ("turn on Terminal for Hipátia"): the request goes to coordination, and you confirm with your password in that conversation.',
+  'ferr.foraDaqui': { one: '{n} tool that cannot be turned on here', other: '{n} tools that cannot be turned on here' },
   'ferr.sempreLigadaDica': 'Built into Ergon: always on',
   'ferr.ligada': 'on',
   'ferr.protegida': 'protected',
@@ -54,6 +55,7 @@ const configuracoes: Traducao<typeof pt> = {
 
   // ——— Andamento da equipe ———
   'andamento.titulo': 'How the team works',
+  'andamento.avancado': 'Fine-tuning: steps, reasoning, helpers, compaction and memory',
   'andamento.autorun': 'The team picks up tasks from "To do" on its own, top to bottom',
   'andamento.iniciativa': 'The team starts a conversation when you arrive (a welcome with a summary and who needs you)',
   'ajudantes.rotulo': 'Temporary helpers: each agent can split a big job into parts that run at the same time',

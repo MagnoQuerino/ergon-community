@@ -61,7 +61,10 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
   useEffect(() => {
     if (sob || !abriu.current) return;
     const el = abriu.current; abriu.current = null;
-    requestAnimationFrame(() => { if (el.isConnected) el.focus({ preventScroll: false }); });
+    // a lista acabou de sair de baixo do card (estava escondida e inerte): tenta por alguns quadros até o foco pegar
+    let n = 0;
+    const tentar = () => { if (!el.isConnected) return; el.focus({ preventScroll: true }); if (document.activeElement !== el && ++n < 12) requestAnimationFrame(tentar); };
+    requestAnimationFrame(tentar);
   }, [sob]);
   const d = useResource<Decisions>('/api/decisions', ['proposals.changed', 'runs.changed', 'rules.changed', 'tasks.changed']);
   // rc.28: a trava é por item — o botão fica ativo dizendo o que está indo (aria-busy), o segundo clique no MESMO item

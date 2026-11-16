@@ -142,9 +142,11 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
         <h3>{t('configuracoes.abas.ferramentas')}</h3>
         <p className="muted small">{t('configuracoes.ferr.texto')}</p>
         <p className="hint"><Icon name="lock" size={12} /> {t('configuracoes.ferr.protegidas')}</p>
-        <div className="tools-grid">
-          {/* conectores prontos não ligam aqui: instalam em Conexões › Mais aplicativos (a seção Capacidades da equipe explica) */}
-          {(tools.data ?? []).filter((f) => (f.kind === 'ia' && f.id !== 'conectores') || f.id === 'agenda').map((f) => f.kind === 'ergon' ? (
+        {/* rc.33: as que não dá para ligar aqui ficam recolhidas: o cartão não passa da altura da tela */}
+        {(() => {
+          const lista = (tools.data ?? []).filter((f) => (f.kind === 'ia' && f.id !== 'conectores') || f.id === 'agenda');
+          const fora = (f: (typeof lista)[number]) => f.kind === 'ia' && !f.safe && !f.guarded;
+          const opcao = (f: (typeof lista)[number]) => f.kind === 'ergon' ? (
             // do próprio Ergon: sempre ligada (vale para quem a tem no perfil)
             <label key={f.id} className="tool-opt tool-opt--on">
               <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title={t('configuracoes.ferr.sempreLigadaDica')} />
@@ -160,8 +162,13 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
                 {f.aviso && <span className="badge badge--warn" title={f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custoDica') : t('configuracoes.ferr.aviso.riscoDica')}>{f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custo') : t('configuracoes.ferr.aviso.risco')}</span>}
                 <span className="muted small">{holdersText(f.holders)}</span></span>
             </label>
-          ))}
-        </div>
+          );
+          const presas = lista.filter(fora);
+          return (<>
+            <div className="tools-grid">{lista.filter((f) => !fora(f)).map(opcao)}</div>
+            {presas.length > 0 && <details className="secao-recolhida tools-fora"><summary>{t('configuracoes.ferr.foraDaqui', { n: presas.length })}</summary><div className="tools-grid">{presas.map(opcao)}</div></details>}
+          </>);
+        })()}
       </section>
 
       <ReservaCard a={ajustes.a} salvar={ajustes.salvar} aviso={ajustes.aviso} />
@@ -177,12 +184,16 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
           {t('configuracoes.andamento.iniciativa')}</label>
         <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         {state.runs.daily && <DailyLimitField daily={state.runs.daily} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />}
-        <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-        <RaciocinioField a={ajustes.a} salvar={ajustes.salvar} />
-        <AjudantesField valor={state.teamAjudantes ?? { ligado: true, max: AJUDANTES_MAX }} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-        <CompactacaoField ligada={state.teamCompactacao !== false} pendente={state.teamCompactacaoPendente === true} atualizacao={state.teamCompactacaoAtualizacao === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-        <MemoriaField a={ajustes.a} salvar={ajustes.salvar} />
-        <ArrumarField a={ajustes.a} salvar={ajustes.salvar} />
+        {/* rc.33: o dia a dia à vista; o fino (passos, raciocínio, ajudantes, compactação, memória) recolhido */}
+        <details className="secao-recolhida">
+          <summary>{t('configuracoes.andamento.avancado')}</summary>
+          <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+          <RaciocinioField a={ajustes.a} salvar={ajustes.salvar} />
+          <AjudantesField valor={state.teamAjudantes ?? { ligado: true, max: AJUDANTES_MAX }} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+          <CompactacaoField ligada={state.teamCompactacao !== false} pendente={state.teamCompactacaoPendente === true} atualizacao={state.teamCompactacaoAtualizacao === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+          <MemoriaField a={ajustes.a} salvar={ajustes.salvar} />
+          <ArrumarField a={ajustes.a} salvar={ajustes.salvar} />
+        </details>
         <p className="hint">{t('configuracoes.andamento.dica')}</p>
       </section>
 
