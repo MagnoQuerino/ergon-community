@@ -19,6 +19,7 @@ import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
 import { RECURSOS, audiosParaTranscrever, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
 import { letterStyle } from '../lib/contraste.ts';
+import { CenaVazio } from '../arte/Cena.tsx';
 
 /** Rascunhos das conversas (por agente), só na memória da aba: nada de conteúdo da conversa em disco ou na URL. */
 const DRAFTS = new Map<string, string>();
@@ -534,7 +535,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       <div className="chat__msgs" role="log" aria-live="polite" ref={box} onScroll={onScroll}>
         {!list.length && !shownOptimistic.length && (
           <div className="chat__empty">
-            <p>{t('conversas.conversa.vazia', { nome: agent.name })}</p>
+            <CenaVazio figs={['hipatia', 'aristoteles']}><p>{t('conversas.conversa.vazia', { nome: agent.name })}</p></CenaVazio>
             <div className="chat__suggest">
               {suggestionsFor(agent).map((k) => { const s = t(k); return <button key={k} type="button" className="chip" onClick={() => { setText(s); input.current?.focus(); }}>{s.trim()}</button>; })}
             </div>

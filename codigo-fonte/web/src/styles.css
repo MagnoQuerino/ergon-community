@@ -2783,6 +2783,10 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
   .conn-group--feature { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; align-items: start; }
   .conn-group--feature > * { grid-column: 1 / -1; min-width: 0; }
   .conn-group--feature > .ai-best { grid-column: auto; margin-top: 18px; }
+  /* os dois cartões juntos, lado a lado; os avisos das contas vêm logo abaixo deles */
+  .conn-group--feature > * { order: 2; }
+  .conn-group--feature > :is(h3, h3 + *, h3 + * + *):not(.ai-best) { order: 0; }
+  .conn-group--feature > .ai-best { order: 1; }
 }
 /* painéis laterais em tela larga: um pouco mais largos, para o texto (12 px ou mais) respirar sem cortar */
 @media (min-width: 1500px) {
@@ -2790,3 +2794,69 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
   body:has(.drawer) .cdock { right: calc(min(500px, 100%) + 18px); }
 }
 .badge--cortesia { background: var(--dourado-suave); color: var(--dourado-texto); border-color: var(--dourado-borda); margin-left: 6px; }
+
+/* ---------- cabeçalhos ilustrados (arte/Cena.tsx › CenaCabecalho): um céu pequeno no canto direito do título ----------
+   Fora da área de trabalho, tamanho fixo (sem pular a página), some em tela estreita. O céu é o do Ergon World nos dois
+   temas; o texto da página não fica em cima dele. */
+.cena-cab { display: flex; align-items: center; gap: 20px; }
+.cena-cab > :first-child { flex: 1; min-width: 0; }
+.page__head.cena-cab { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 1fr; column-gap: 20px; align-items: start; }
+.page__head.cena-cab > :not(.cena-arte) { grid-column: 1; }
+.page__head.cena-cab > .cena-arte { grid-column: 2; grid-row: 1 / span 2; }
+.cena-arte { position: relative; flex: none; width: 240px; height: 92px; overflow: hidden; border-radius: 16px; container-type: inline-size;
+  background: radial-gradient(120% 120% at 80% 0%, color-mix(in srgb, var(--inversa) 70%, var(--marca-borda-forte)) 0%, transparent 60%),
+    linear-gradient(180deg, var(--inversa-2) 0%, var(--inversa) 70%, color-mix(in srgb, var(--inversa) 72%, var(--teal)) 100%);
+  box-shadow: 0 10px 26px rgba(20, 12, 52, .18); }
+.cena-arte .cena-fig { position: absolute; bottom: 12px; height: 44px; width: auto; filter: drop-shadow(0 3px 4px rgba(10, 6, 30, .35)); }
+.cena-arte__nuvem { width: 64px; left: 10px; top: 8px; opacity: .85; animation: cena-deriva 16s ease-in-out infinite alternate; }
+@keyframes cena-deriva { from { transform: translateX(-8px); } to { transform: translateX(10px); } }
+.cena-arte__esq { left: 26px; }
+.cena-arte__dir { right: 22px; }
+.cena-arte__centro { left: 50%; margin-left: -12px; }
+.cena-ilha { position: absolute; }
+.cena-ilha__grama { fill: color-mix(in srgb, var(--teal) 70%, var(--inversa-sucesso)); }
+.cena-ilha__pedra { fill: color-mix(in srgb, var(--terracotta) 52%, var(--inversa-2)); }
+.cena-arte__chao { left: 26px; right: 26px; bottom: -4px; width: calc(100% - 52px); }
+.cena-arte__fila { position: absolute; left: 0; right: 0; bottom: 12px; display: flex; justify-content: center; gap: 6px; }
+.cena-arte__fila .cena-fig { position: static; }
+.cena-arte__arco { position: absolute; left: 20px; right: 20px; top: 14px; width: calc(100% - 40px); fill: none; stroke: color-mix(in srgb, var(--dourado-vivo) 70%, transparent); stroke-width: 2; stroke-dasharray: 4 5; }
+.cena-arte__rolo { position: absolute; left: calc(50% - 9px); top: 18px; width: 18px; height: 10px; border-radius: 6px; background: color-mix(in srgb, var(--texto-inverso) 85%, var(--dourado-vivo)); animation: cena-flutua 4s ease-in-out infinite; }
+.cena-arte__tabua { position: absolute; right: 30px; top: 12px; width: 56px; fill: color-mix(in srgb, var(--texto-inverso) 86%, var(--dourado-vivo)); }
+.cena-arte__tabua path { fill: none; stroke: var(--teal); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.cena-arte__linha { fill: color-mix(in srgb, var(--inversa) 50%, var(--texto-inverso)); }
+.cena-arte__sol { position: absolute; left: 34px; top: 22px; width: 18px; height: 18px; border-radius: 50%; background: var(--dourado-vivo); box-shadow: 0 0 14px 4px color-mix(in srgb, var(--dourado-vivo) 50%, transparent); }
+.cena-arte__lua { position: absolute; right: 34px; top: 22px; width: 16px; height: 16px; border-radius: 50%; box-shadow: inset -5px -2px 0 0 var(--texto-inverso); }
+.cena-arte__estante { position: absolute; left: 18px; bottom: 8px; width: 120px; }
+.cena-arte__madeira { fill: color-mix(in srgb, var(--terracotta) 60%, var(--inversa-2)); }
+.cena-arte__pergaminho--0 { fill: color-mix(in srgb, var(--texto-inverso) 85%, var(--dourado-vivo)); }
+.cena-arte__pergaminho--1 { fill: color-mix(in srgb, var(--teal) 60%, var(--texto-inverso)); }
+.cena-arte__pergaminho--2 { fill: color-mix(in srgb, var(--terracotta) 60%, var(--texto-inverso)); }
+.cena-arte__farol { position: absolute; left: 30px; bottom: 4px; width: 30px; }
+.cena-arte__torre { fill: color-mix(in srgb, var(--texto-inverso) 82%, var(--inversa)); }
+.cena-arte__luz { fill: var(--dourado-vivo); }
+.cena-arte__teto { fill: color-mix(in srgb, var(--terracotta) 70%, var(--inversa-2)); }
+.cena-arte__facho { position: absolute; left: 44px; top: 18px; width: 150px; height: 26px; transform-origin: 0 50%; transform: rotate(-12deg);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--dourado-vivo) 55%, transparent), transparent); clip-path: polygon(0 40%, 100% 0, 100% 100%, 0 60%); animation: cena-varre 7s ease-in-out infinite alternate; }
+@keyframes cena-varre { from { transform: rotate(-16deg); } to { transform: rotate(4deg); } }
+.cena-arte__ilha-a { left: 8px; bottom: 4px; width: 80px; }
+.cena-arte__ilha-b { right: 8px; bottom: 4px; width: 80px; }
+.cena-arte__ponte { position: absolute; left: 70px; right: 70px; bottom: 22px; width: calc(100% - 140px); fill: none; stroke: color-mix(in srgb, var(--dourado-vivo) 60%, var(--terracotta)); stroke-width: 1.6; }
+.cena-arte__barco { width: 54px; left: calc(50% - 27px); top: 10px; animation: cena-flutua 5s ease-in-out infinite; }
+.cena-arte--conexoes .cena-fig { bottom: 16px; height: 38px; }
+.cena-engrenagem { position: absolute; fill: color-mix(in srgb, var(--texto-inverso) 70%, var(--teal)); }
+.cena-engrenagem__furo { fill: var(--inversa); }
+.cena-arte__eng-a { right: 54px; top: 14px; width: 54px; animation: cena-gira 14s linear infinite; }
+.cena-arte__eng-b { right: 18px; top: 46px; width: 36px; fill: color-mix(in srgb, var(--dourado-vivo) 80%, var(--texto-inverso)); animation: cena-gira 10s linear infinite reverse; }
+@keyframes cena-gira { to { transform: rotate(360deg); } }
+.cena-arte__constelacao { position: absolute; right: 16px; top: 14px; width: 130px; fill: var(--dourado-vivo); stroke: color-mix(in srgb, var(--dourado-vivo) 60%, transparent); stroke-width: 1.2; }
+.cena-arte--rotinas .cena-arte__centro { bottom: 8px; }
+@media (max-width: 900px) {
+  .cena-arte { display: none; }
+  .page__head.cena-cab { display: block; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cena-arte *, .cena-arte *::before, .cena-arte *::after { animation: none !important; }
+}
+/* estado vazio da conversa: a equipe, discreta, em cima da frase */
+.chat__empty .cena-vazio { padding: 8px 0 0; }
+.chat__empty .cena-vazio__figs .cena-fig { height: 52px; }

@@ -20,6 +20,7 @@ import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
 import { MusicCreditsBlock } from '../components/MusicButton.tsx';
 import { ArrumarField, CotaLinhas, MemoriaField, PausaControle, RaciocinioField, ReservaCard, useAjustes } from '../components/AjustesEquipe.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 // cliente do Ergon World (views/world), carregado sob demanda
 const worldMod = Object.values(import.meta.glob<{ default: ComponentType }>('./world/WorldPanel.tsx'))[0];
@@ -41,8 +42,9 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
   }, []);
   return (
     <div className="page page--larga">
-      <header className="page__head">
+      <header className="page__head cena-cab">
         <h2>{t('configuracoes.titulo')}</h2>
+        <CenaCabecalho tema="configuracoes" />
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>{t('configuracoes.abas.ferramentas')}</button>
           <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>{t('configuracoes.abas.conta')}</button>

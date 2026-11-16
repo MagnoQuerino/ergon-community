@@ -13,6 +13,7 @@ import { pushRecent } from '../lib/recents.ts';
 import { cardClick } from '../lib/cardClick.ts';
 import { fmtData, fmtLista, fmtNumero, t, tn, useIdioma, useT, type Chave } from '../i18n/index.ts';
 import { semNuvem, type NuvemNoCartao } from '../lib/nuvem-cartao.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 /** "Rodar na nuvem" (módulo do Ergon World, se estiver nesta instalação): o botão e o selo de cada rotina */
 const nuvemMod = Object.values(import.meta.glob<{ useNuvemNoCartao: (ref: string | null) => NuvemNoCartao }>('./world/CardNuvem.tsx', { eager: true }))[0];
@@ -66,11 +67,12 @@ export function RotinasView({ coord, onOpenAgent, onGo }: { coord: { id: string;
 
   return (
     <div className="page rt-page">
-      <header className="page__head rt-head">
+      <header className="page__head rt-head cena-cab--flex">
         <div>
           <h2>{t('rotinas.titulo')}</h2>
           <p className="muted">{t('rotinas.cabeca.explica')}</p>
         </div>
+        <CenaCabecalho tema="rotinas" />
         <button className="btn btn--primary" onClick={createWithCoord} disabled={!coord} title={coord ? t('rotinas.cabeca.criarDica', { nome: coord.name }) : t('rotinas.cabeca.criarSemCoord')}>
           <Icon name="chat" size={16} /> {t('rotinas.cabeca.criarCom', { nome: coordName })}
         </button>

@@ -21,6 +21,7 @@ import { Selo } from '../components/Selo.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { useEnvioPorItem } from '../lib/envio.ts';
 import { noIdioma } from '../lib/textos-de-app.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 /** O selo de cada estado: a chave do texto (traduzida na hora de mostrar) e a classe. */
 const STATE: Record<Integration['state'], [`conexoes.estado.${Integration['state']}`, string]> = {
@@ -114,9 +115,10 @@ export function ConexoesView() {
   const estadoDe = (kind: string): EstadoDe => ({ eu: cx.data?.ligadas.find((x) => x.kind === kind) ?? null, pronto: !!cx.data, reload: cx.reload });
   return (
     <div className="page">
-      <header className="page__head">
+      <header className="page__head cena-cab">
         <h2>{t('conexoes.titulo')}</h2>
         <p className="muted">{t('conexoes.intro')}</p>
+        <CenaCabecalho tema="conexoes" />
       </header>
       {volta && list.data && <p className="ok" role="status">{textoDaVolta(volta.kind, volta.status, all.find((i) => i.kind === volta.kind)?.state === 'connected')}</p>}
       {list.error && <p className="error">{list.error}</p>}

@@ -6,6 +6,7 @@ import type { AppState, View } from '../lib/types.ts';
 import { Icon } from '../components/Icon.tsx';
 import { RelatarProblema } from '../components/RelatarProblema.tsx';
 import { categoriaDoEndereco } from '../lib/relato.ts';
+import { CenaCabecalho } from '../arte/Cena.tsx';
 
 /**
  * Ajuda: manuais curtos de como fazer as coisas, mais "problemas comuns e como contornar". A coordenação também
@@ -185,9 +186,10 @@ export function AjudaView({ state, onGo, onTour, onRedo }: { state: AppState; on
 
   return (
     <div className="page help">
-      <header className="page__head">
+      <header className="page__head cena-cab">
         <h2>{t('ajuda.titulo')}</h2>
         <p className="muted">{t('ajuda.pagina.intro', { nome: ctx.coord })}</p>
+        <CenaCabecalho tema="ajuda" />
       </header>
       <div className="help__actions">
         <button className="btn" onClick={onTour}><Icon name="compass" size={15} /> {t('ajuda.pagina.refazerTour')}</button>
