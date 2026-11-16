@@ -2278,3 +2278,11 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .app-outro__ferr-txt code { font-size: 12px; color: var(--ink); }
 .app-outro__ferr-tipo { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
 @media (max-width: 640px) { .app-outro__topo { grid-template-columns: 1fr; } .app-outro__topo .brand-logo { margin-top: 0; } .app-outro__ferr { flex-direction: column; align-items: stretch; } .app-outro__ferr-tipo { align-items: flex-start; } }
+
+/* Termos de uso (conta nova e aviso de versão nova) */
+.termos__card { width: min(640px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.termos { font-size: 0.92rem; line-height: 1.5; }
+.termos h3 { font-size: 0.98rem; margin: 14px 0 4px; }
+.termos p { margin: 0 0 8px; }
+.termos__resumo { font-weight: 600; }
+.termos__aceite { align-items: flex-start; font-size: 0.88rem; }

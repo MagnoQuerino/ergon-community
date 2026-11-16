@@ -83,24 +83,26 @@ describe('regra de execução de código, por agente', () => {
     assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_proposals WHERE kind = 'conexao'")!.n, 0, 'nenhum cartão');
   });
 
-  test('agente com Terminal e Executar código: continua confirmando tudo, inclusive ler', async () => {
-    const { sessao } = await pedir(comCodigo, 'liste minhas tarefas do Asana');
-    const r = await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' });
+  test('agente com Terminal e Executar código: ler vai direto (16/11, código ligado por padrão); criar continua confirmando', async () => {
+    const { sessao } = await pedir(comCodigo, 'liste minhas tarefas do Asana e crie uma para revisar a proposta');
+    assert.equal((await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'feita', 'ler vai direto mesmo com código ligado');
+    const r = await executar(sessao, 'tarefa.criar', { titulo: 'Revisar a proposta', quadro: 'Vendas' });
     assert.equal(r.status, 'aguardando_confirmacao');
     const card = h.db.get<{ summary: string }>("SELECT summary FROM agent_proposals WHERE kind = 'conexao'")!;
-    assert.match(card.summary, /execução de código/);
+    assert.match(card.summary, /Executar código ou Terminal está ligado na equipe.*desligue em Configurações › Ferramentas da equipe/);
   });
 
-  test('outro trabalho do mesmo motor com um agente que roda programas, ou programa que já rodou: confirma', async () => {
-    const a = await pedir(semCodigo, 'liste minhas tarefas do Asana');
+  test('outro trabalho do mesmo motor com um agente que roda programas, ou programa que já rodou: criar confirma', async () => {
+    const a = await pedir(semCodigo, 'crie as tarefas no Asana');
     const b = await pedir(comCodigo, 'calcule a planilha');
-    assert.equal((await executar(a.sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'aguardando_confirmacao', 'o programa do colega poderia se passar por esta sessão');
+    assert.equal((await executar(a.sessao, 'tarefa.criar', { titulo: 'Tarefa A', quadro: 'Vendas' })).status, 'aguardando_confirmacao', 'o programa do colega poderia se passar por esta sessão');
+    assert.equal((await executar(a.sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'feita', 'ler vai direto');
     // o colega terminou sem rodar programa nenhum: volta a ir direto
     h.db.run("UPDATE runs SET status = 'succeeded' WHERE id = ?", b.run);
-    assert.equal((await executar(a.sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'feita');
-    // um programa rodou neste motor (pode ter ficado um processo em segundo plano): confirma até o motor reiniciar
+    assert.equal((await executar(a.sessao, 'tarefa.criar', { titulo: 'Tarefa B', quadro: 'Vendas' })).status, 'feita');
+    // um programa rodou neste motor (pode ter ficado um processo em segundo plano): criar confirma até o motor reiniciar
     h.db.run("INSERT INTO run_tools (workspace_id, run_id, seq, tool, preview, started_at) VALUES (?, ?, 0, 'terminal', NULL, ?)", s.workspaceId, b.run, new Date().toISOString());
-    assert.equal((await executar(a.sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'aguardando_confirmacao');
+    assert.equal((await executar(a.sessao, 'tarefa.criar', { titulo: 'Tarefa C', quadro: 'Vendas' })).status, 'aguardando_confirmacao');
   });
 
   test('a proteção depois de ler vem desligada, e a rede de segurança do Terminal continua de pé', async () => {
@@ -109,9 +111,9 @@ describe('regra de execução de código, por agente', () => {
     assert.equal((await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'feita');
     const pol = (await req(h, 'POST', '/internal/bridge/v1/tool-policy', null, { session_id: sessao }, { 'x-ergon-bridge-token': TOKEN })).json as { bloqueadas: string[] };
     assert.deepEqual(pol.bloqueadas, [], 'depois de ler as contas, o Terminal não é barrado (proteção desligada por padrão)');
-    // um programa rodou: as ações nas contas confirmam, mesmo sem a proteção depois de ler
+    // um programa rodou: criar, enviar e apagar nas contas confirmam, mesmo sem a proteção depois de ler (ler segue direto)
     h.db.run("INSERT INTO run_tools (workspace_id, run_id, seq, tool, preview, started_at) VALUES (?, ?, 0, 'terminal', NULL, ?)", s.workspaceId, run, new Date().toISOString());
-    assert.equal((await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'aguardando_confirmacao');
+    assert.equal((await executar(sessao, 'tarefa.listar', { quadro: 'Vendas' })).status, 'feita');
     assert.equal((await executar(sessao, 'tarefa.criar', { titulo: 'x', quadro: 'Vendas' })).status, 'aguardando_confirmacao');
     assert.equal(escritas, 0);
   });

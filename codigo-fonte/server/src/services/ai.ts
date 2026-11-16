@@ -13,6 +13,7 @@ import type { Db } from '../db/db.ts';
 import { sincronizarCompactacao, sincronizarPassos } from './custo.ts';
 import { sincronizarAjustes, sincronizarPausa } from './ajustes-motor.ts';
 import type { AjustesMotor, CotaConta } from './hermes.ts';
+import { CODIGO_PADRAO } from './termos.ts';
 
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
@@ -170,12 +171,15 @@ export class AiService {
    * do cofre) volta a ficar desligado. Os que executam código nunca entram aqui. Devolve os conjuntos que mudaram, ou null
    * (sem a ponte de controle).
    */
-  async ensureBeneficios(desligadosPelaPessoa: ReadonlySet<string>, ids: readonly string[] = BENEFICIOS_DA_PLATAFORMA): Promise<{ ligou: string[]; desligou: string[] } | null> {
+  async ensureBeneficios(desligadosPelaPessoa: ReadonlySet<string>, ids: readonly string[] = BENEFICIOS_DA_PLATAFORMA, opts: { codigo?: boolean } = {}): Promise<{ ligou: string[]; desligou: string[] } | null> {
     if (!this.control) return null;
     const cur = await this.control.apiToolsets();
-    const conjunto = (id: string) => (TOOLS[id]?.safe ? TOOLS[id].toolset : undefined);
+    // os que executam código só entram com os termos aceitos (opts.codigo: termos.ts); desligados pela pessoa, saem
+    const conjunto = (id: string) => (TOOLS[id]?.safe || TOOLS[id]?.guarded ? TOOLS[id].toolset : undefined);
+    const alvo = opts.codigo ? [...ids, ...CODIGO_PADRAO] : ids.filter((id) => !TOOLS[id]?.guarded);
     const tirar = [...desligadosPelaPessoa].map(conjunto).filter((t): t is string => !!t && cur.enabled.includes(t));
-    const por = ids.filter((id) => !desligadosPelaPessoa.has(id)).map(conjunto).filter((t): t is string => !!t && cur.safe.includes(t) && !cur.enabled.includes(t));
+    const aceitos = new Set([...cur.safe, ...(cur.guarded ?? [])]);
+    const por = alvo.filter((id) => !desligadosPelaPessoa.has(id)).map(conjunto).filter((t): t is string => !!t && aceitos.has(t) && !cur.enabled.includes(t));
     if (!tirar.length && !por.length) return { ligou: [], desligou: [] };
     const enabled = await this.control.setApiToolsets([...new Set([...cur.enabled.filter((t) => !tirar.includes(t)), ...por])]);
     setPlatformToolsets(enabled, this.scope);

@@ -113,7 +113,7 @@ export interface AppState {
   /** personagens da equipe de partida com nome ou história de outro tema (0 = tema padrão) */
   themed: number;
   /** processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele */
-  runs: { running: number; queued: number; waiting: number; processes: number; limit: ProcessLimit; cardsWaiting: number };
+  runs: { running: number; queued: number; waiting: number; processes: number; limit: ProcessLimit; daily?: DailyLimit; cardsWaiting: number };
   decisionsPending: number;
   executor: { mode: 'real' | 'simulated'; label: string };
   serverTime: string;
@@ -129,6 +129,8 @@ export interface Me {
   /** boas-vindas: 'pending' = conta nova ainda sem as perguntas iniciais */
   onboarding: 'pending' | 'done';
   prefs: Prefs;
+  /** termos de uso: a versão atual e se a pessoa já aceitou (sem aceite, o aviso aparece uma vez) */
+  termos?: { versao: string; aceitos: boolean; aceitosEm: string | null };
 }
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
 /** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
@@ -151,7 +153,9 @@ export interface VersionInfo { version: string; build: string; mode: 'local' | '
 /** Estado público da entrada (antes do login). sealed: reiniciado e trancado, só senha ou frase abrem os dados. */
 export interface AuthState { needsSetup: boolean; authenticated: boolean; locked: boolean; sealed: boolean; protected: boolean; mode: 'local' | 'cloud'; rpId: string; publicUrl: string; setupTokenRequired: boolean;
   /** conta nova neste computador: qualquer pessoa ('aberto'), só com convite ('convite'), ou não se aplica (null) */
-  signup?: 'aberto' | 'convite' | null }
+  signup?: 'aberto' | 'convite' | null;
+  /** a versão dos termos de uso que a conta nova aceita */
+  termosVersao?: string }
 export interface SecurityStatus {
   mode: 'local' | 'cloud'; protected: boolean; recovery: boolean; autoUnlock: Array<{ id: string; label: string; createdAt: string }>;
   /** trancamento: desligado = abre sozinho ao reiniciar (a proteção é a do computador); na nuvem é sempre ligado */
@@ -172,6 +176,8 @@ export interface BoardSummary { id: string; name: string; origin: 'native' | 'mi
 /** system_key: o código fixo das colunas do sistema (todo, doing, with_you, done); null nas colunas de quadros espelhados */
 export interface Column { id: string; name: string; position: number; system_key?: 'todo' | 'doing' | 'with_you' | 'done' | null }
 /** Trabalhos ao mesmo tempo: a sua escolha (ou o padrão da máquina), sob o teto do plano. limit null = sem limite. */
+/** execuções por dia: limit 0 = sem limite */
+export interface DailyLimit { limit: number; choice: number | null; used: number; freesAt: string | null }
 export interface ProcessLimit {
   limit: number | null; choice: 'auto' | 'ilimitado' | number; machine: number; cap: number | null; memoryGb: number; cpus: number;
 }

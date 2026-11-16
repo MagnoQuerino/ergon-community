@@ -420,7 +420,7 @@ export interface HermesControlClient {
   modelInfo(): Promise<{ model: string | null; provider: string | null }>;
   setDefaultModel(provider: string, model: string, confirm: boolean): Promise<{ ok: boolean; confirmMessage: string | null }>;
   skills(): Promise<SkillInfo[]>;
-  apiToolsets(): Promise<{ enabled: string[]; safe: string[] }>;
+  apiToolsets(): Promise<{ enabled: string[]; safe: string[]; guarded?: string[] }>;
   setApiToolsets(enabled: string[]): Promise<string[]>;
   /** imagem gerada pelo motor (só da pasta das geradas; a ponte confere) */
   media?(path: string): Promise<{ data: Buffer; mime: string }>;
@@ -760,7 +760,7 @@ export class HttpHermesControl implements HermesControlClient {
     return (Array.isArray(j) ? j : []).map((s: any) => ({ name: String(s.name), description: String(s.description ?? ''), category: String(s.category ?? 'outras'), enabled: s.enabled !== false, origem: origemDe(s.provenance, String(s.category ?? '')) }));
   }
 
-  async apiToolsets() { const j = await this.call('GET', '/ergon/v1/api-toolsets'); return { enabled: (j.enabled ?? []).map(String), safe: (j.safe ?? []).map(String) }; }
+  async apiToolsets() { const j = await this.call('GET', '/ergon/v1/api-toolsets'); return { enabled: (j.enabled ?? []).map(String), safe: (j.safe ?? []).map(String), guarded: (j.guarded ?? []).map(String) }; }
   async ergonAi(c: { baseUrl: string; apiKey: string; models: string[]; makeDefault: boolean }) {
     await this.call('POST', '/api/providers/custom-endpoints', { base_url: c.baseUrl, api_key: c.apiKey, model: c.models[0], models: c.models, make_default: c.makeDefault });
   }

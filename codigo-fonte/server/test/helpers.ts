@@ -87,7 +87,7 @@ export async function req(h: ErgonApp, method: string, url: string, s?: Session 
   return { status: res.statusCode, json, res };
 }
 
-async function sessionFrom(h: ErgonApp, setCookie: string | string[] | undefined): Promise<Session> {
+export async function sessionFrom(h: ErgonApp, setCookie: string | string[] | undefined): Promise<Session> {
   const raw = Array.isArray(setCookie) ? setCookie[0] : setCookie;
   if (!raw) throw new Error('sem cookie de sessão');
   const cookie = raw.split(';')[0];

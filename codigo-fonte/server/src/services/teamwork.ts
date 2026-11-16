@@ -22,7 +22,8 @@ import { activeTeam, coordinatorOf, type Member } from './team.ts';
 import { filesBrief, referenceFrom, summaryText, taskFiles, type Operations } from './operations.ts';
 import { classifyTask, type ResultRow, type Results } from './results.ts';
 import { BATCH_CONFIRM, DELIVERY_KEY, DELIVERY_KEY_SQL, READY_SQL, Purpose, currentStep, parsePlans, questionIn, stepsOf, type Plan, type StepRow } from './purpose.ts';
-import { recordProposals } from './proposals.ts';
+import { pedeParaCriarArquivo } from './documents.ts';
+import { parseTaskProposals, recordProposals } from './proposals.ts';
 import { parseDue } from './due.ts';
 import { parseRenames, renameCard } from './card-title.ts';
 import { cadeiaDe, lidoEm, marcarEm } from './conexoes/marca.ts';
@@ -279,6 +280,15 @@ export class Teamwork {
       // entrega que espera a sua aprovação: o cartão com Aprovar e Pedir ajustes vem logo depois dela
       this.purpose.afterDelivery(r);
       this.bus.publish(ws, 'tasks.changed', {});
+    }
+    // lembrete proposto dentro de um card (o Hesíodo numa etapa): vira o cartão de aprovação na conversa de origem —
+    // antes, só a conversa lia [[propor-tarefa]], e no card a linha sumia e a etapa saía vazia
+    if (status === 'succeeded' && r.task_id && /\[\[\s*propor-tarefa\b/i.test(output ?? '')) {
+      const quem = this.db.get<{ name: string; tools: string | null; coordinator: number }>('SELECT name, tools, coordinator FROM agents WHERE id = ?', r.agent_id);
+      const conv = this.db.get<{ c: string | null }>('SELECT conversation_id AS c FROM tasks WHERE id = ?', r.task_id)?.c ?? null;
+      if (quem && (Number(quem.coordinator) || (JSON.parse(quem.tools ?? '[]') as string[]).includes('agenda'))) {
+        recordProposals(this.db, this.bus, ws, { conversationId: conv, runId: r.id }, parseTaskProposals(output, `card de ${quem.name}`));
+      }
     }
     if (!queue || !r.task_id) return;
     // o agente pediu um processamento ao Ergon: executa (com as permissões conferidas) antes de avaliar
@@ -853,7 +863,8 @@ export class Teamwork {
     // pedido que fala de planilha/arquivo, sem arquivo nenhum: pergunta antes de gastar o modelo. Qualquer anexo conta —
     // antes só o CSV contava, e "revisar a proposta anexada" com um PDF ou Word anexado parava aqui
     const anyFile = taskFiles(this.db, workspaceId, taskId).some((f) => f.role === 'entrada');
-    if (!anyFile && MENTIONS_FILE.test(fold(text)) && !this.results.pendingInstruction(workspaceId, taskId)) {
+    // "crie uma planilha" é a saída que a pessoa quer, não um arquivo que faltou anexar (antes, o card parava aqui)
+    if (!anyFile && MENTIONS_FILE.test(fold(text)) && !pedeParaCriarArquivo(text) && !this.results.pendingInstruction(workspaceId, taskId)) {
       const res = this.results.needInput(workspaceId, taskId, kind, 'O pedido fala de uma planilha ou arquivo, mas nada foi anexado ao card. Anexe o arquivo no card e ponha para trabalhar.', 'aguardando_info', null, actor.id);
       this.purpose.relay(workspaceId, taskId, res, null, agentId); // card de uma conversa: o pedido do arquivo aparece lá
       return null;

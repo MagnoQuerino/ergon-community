@@ -89,7 +89,7 @@ export const BENEFICIOS_DA_PLATAFORMA: readonly string[] = ['contas', 'leitura',
 export function ferramentasDesligadas(db: Db, workspaceIds: string[] | null): Set<string> {
   const rows = db.all<{ workspace_id: string; key: string }>("SELECT workspace_id, key FROM workspace_settings WHERE key LIKE 'ferramentas.%' AND value = 'desligado'");
   const ids = workspaceIds ? new Set(workspaceIds) : null;
-  return new Set(rows.filter((r) => !ids || ids.has(r.workspace_id)).map((r) => r.key.slice('ferramentas.'.length)).filter((id) => TOOLS[id]?.safe));
+  return new Set(rows.filter((r) => !ids || ids.has(r.workspace_id)).map((r) => r.key.slice('ferramentas.'.length)).filter((id) => TOOLS[id]?.safe || TOOLS[id]?.guarded));
 }
 
 /**

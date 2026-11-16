@@ -462,7 +462,6 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const lastMsg = list[list.length - 1];
 
   const keyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Escape' && working) { e.preventDefault(); e.stopPropagation(); void stop(); return; }
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
     if (e.shiftKey) return;
     e.preventDefault(); void send();

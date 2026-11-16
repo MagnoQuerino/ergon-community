@@ -20,7 +20,7 @@ services:
       ERGON_HERMES_URL: http://hermes:8642
       ERGON_HERMES_CONTROL_URL: http://hermes:8643   # ponte de controle do plugin (rede interna, token da ponte)
       ERGON_MAX_CONCURRENT_RUNS: ${ERGON_MAX_CONCURRENT_RUNS:-}   # vazio = sem teto: vale Configurações › Trabalhos ao mesmo tempo
-      ERGON_DAILY_RUN_LIMIT: ${ERGON_DAILY_RUN_LIMIT:-100}
+      ERGON_DAILY_RUN_LIMIT: ${ERGON_DAILY_RUN_LIMIT:-0}   # 0 = sem limite; a pessoa limita em Configurações
       ERGON_RUN_TIMEOUT_SECONDS: ${ERGON_RUN_TIMEOUT_SECONDS:-180}
       ERGON_LONG_RUN_TIMEOUT_SECONDS: ${ERGON_LONG_RUN_TIMEOUT_SECONDS:-600}   # quem pesquisa na web ou executa código
       ERGON_SLOTS_PER_FLOOR: ${ERGON_SLOTS_PER_FLOOR:-6}

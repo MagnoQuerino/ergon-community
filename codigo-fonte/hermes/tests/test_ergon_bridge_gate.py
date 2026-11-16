@@ -61,6 +61,16 @@ check("link simbólico para fora: não", b._media_file(link) is None)
 check("outro tipo de arquivo: não", b._media_file(os.path.join(gen, "nota.txt")) is None)
 check("imagem vazia: não", b._media_file(os.path.join(gen, "vazia.png")) is None)
 check("caminho vazio ou com byte nulo: não", b._media_file("") is None and b._media_file(png + "\x00") is None)
+# rc.27: cada agente é um perfil; a imagem que ele gera fica na pasta do perfil
+pgen = os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "profiles", "erg-0123456789abcdef0123", "cache", "generated", "images")
+os.makedirs(pgen, exist_ok=True)
+ppng = os.path.join(pgen, "krea_perfil.png")
+open(ppng, "wb").write(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+hit = b._media_file(ppng)
+check("imagem gerada no perfil do agente é servida", hit is not None and hit[1] == "image/png", str(hit))
+psec = os.path.join(os.environ.get("HERMES_HOME", "/tmp/h"), "profiles", "erg-0123456789abcdef0123", "auth.png")
+open(psec, "wb").write(b"segredo")
+check("arquivo do perfil fora das geradas: não", b._media_file(psec) is None)
 
 # Chave própria (BYOK): só os três provedores, chave no formato deles, validada antes de gravar; o valor nunca volta
 import json  # noqa: E402

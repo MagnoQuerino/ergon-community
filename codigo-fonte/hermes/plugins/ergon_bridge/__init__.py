@@ -2989,15 +2989,28 @@ def _media_dir() -> str:
     return os.path.realpath(os.path.join(os.environ.get("HERMES_HOME", "/opt/data"), "cache", "generated"))
 
 
+def _media_dirs() -> list[str]:
+    """As pastas das geradas: a do motor e a de cada perfil de agente (rc.27: cada agente é um perfil, e o que ele gera
+    fica em profiles/<perfil>/cache/generated)."""
+    home = os.environ.get("HERMES_HOME", "/opt/data")
+    dirs = [_media_dir()]
+    try:
+        for nome in os.listdir(os.path.join(home, "profiles")):
+            if re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", nome):
+                dirs.append(os.path.realpath(os.path.join(home, "profiles", nome, "cache", "generated")))
+    except OSError:
+        pass
+    return dirs
+
+
 def _media_file(raw: str) -> tuple[str, str] | None:
     """(caminho real, tipo) de uma imagem gerada, ou None: fora da pasta das geradas (também por link), outro tipo,
     vazia ou grande demais."""
     if not raw or "\x00" in raw or len(raw) > 512:
         return None
     real = os.path.realpath(raw)
-    base = _media_dir()
     mime = _MEDIA_TYPES.get(os.path.splitext(real)[1].lower())
-    if not mime or os.path.commonpath([real, base]) != base or not os.path.isfile(real):
+    if not mime or not any(os.path.commonpath([real, base]) == base for base in _media_dirs()) or not os.path.isfile(real):
         return None
     size = os.path.getsize(real)
     return (real, mime) if 0 < size <= _MEDIA_MAX else None

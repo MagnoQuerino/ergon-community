@@ -46,7 +46,7 @@ export const KIND_REGRA = 'regra';
  */
 const PORQUE = {
   fora: 'o pedido não partiu de você', leu: 'esta conversa leu conteúdo de fora antes', apagar: 'apagar sempre pede confirmação',
-  codigo: 'há execução de código ligada', juntas: 'dois trabalhos rodam nesta conversa ao mesmo tempo, e não dá para saber qual deles pediu',
+  codigo: 'Executar código ou Terminal está ligado na equipe, e um programa poderia levar para fora o que foi lido; para ler sem confirmar, desligue em Configurações › Ferramentas da equipe', juntas: 'dois trabalhos rodam nesta conversa ao mesmo tempo, e não dá para saber qual deles pediu',
 } as const;
 const PRAZO_TEXTO: Record<PrazoDepoisDeLer, string> = { '1h': 'por 1 hora', '8h': 'por 8 horas', '72h': 'por 72 horas', sempre: 'sempre' };
 const DEDUPE_MS = 15 * 60_000;
@@ -807,7 +807,7 @@ export class Conexoes {
   private pedirConfirmacao(b: Base, dedupe: string | null): RespostaAcao {
     const rowId = this.registrar(b, dedupe, 'pendente');
     const ajuste = this.ajuste(b.ws, b.kind, b.acao, b.args, b.conta);
-    const porque = ajuste === 'confirmar' ? 'você pediu confirmação para esta ação' : b.porque ?? (b.origem === 'fora' ? PORQUE.fora : b.risco === 'apagar' ? PORQUE.apagar : b.leuDeFora && b.risco === 'enviar' ? PORQUE.leu : PORQUE.codigo);
+    const porque = ajuste === 'confirmar' ? 'você pediu confirmação para esta ação' : b.porque ?? (b.risco === 'ler' ? PORQUE.codigo : b.origem === 'fora' ? PORQUE.fora : b.risco === 'apagar' ? PORQUE.apagar : b.leuDeFora && b.risco === 'enviar' ? PORQUE.leu : PORQUE.codigo);
     // o cartão mostra tudo: conta, destino real e motivo antes do texto, e o texto inteiro (proposals.ts)
     recordProposals(this.db, this.d.bus, b.ws, { conversationId: b.run?.conversation_id ?? null, runId: b.run?.id ?? null },
       [{ kind: 'conexao', acaoId: rowId, conexao: integrationDef(b.kind)!.name, conta: this.rotuloDaConta(b.ws, b.kind, b.conta), ...(b.detalhe ? { detalhe: b.detalhe } : {}), resumo: b.acao.resumo(b.mostrar ?? b.args), porque }]);

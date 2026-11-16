@@ -53,6 +53,13 @@ const conta: Traducao<typeof pt> = {
   'entrar.esqueci': 'Forgot password',
   'entrar.primeiraVez': 'First time on this computer? {criar}',
   'entrar.criarMinha': 'Create my account',
+  'termos.link': 'terms of use',
+  'termos.aceitoNaConta': 'I have read and accept the {termos} (including: agents can run programs in an isolated environment; you can turn this off in Settings).',
+  'termos.fechar': 'Close',
+  'termos.novosTitulo': 'Ergon terms of use',
+  'termos.novosSub': 'Before you continue: read the terms of use. Once you accept, Run code and Terminal come on for the team (you can turn them off in Settings › Team tools).',
+  'termos.liAceito': 'I have read and accept the terms of use',
+  'termos.aceitar': 'Accept and continue',
   'entrar.setupEmSeguida': 'Next: a 24-word phrase (the backup key to your data, shown only once), two questions about how you work, and connecting your AI account. The team arrives set up for your needs.',
   'entrar.trancadoDica': "After a restart, a passkey or the authenticator can't open your data (they don't hold the key); your password or phrase can.",
 

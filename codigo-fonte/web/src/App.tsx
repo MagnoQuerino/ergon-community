@@ -1,3 +1,4 @@
+import { AceiteDosTermos } from './components/TermosDeUso.tsx';
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { api, setCsrf, setGuard } from './lib/api.ts';
 import { startActivity } from './lib/activity.ts';
@@ -127,7 +128,8 @@ export function App() {
     <>
       {!locked && <Shell me={me} onLogout={logout} onIdle={() => setLocked(true)} onMeChanged={check} onOverlay={setOverlay} />}
       {locked && <LockOverlay name={me.user.displayName} factors={me.factors} rpId={me.rpId} onLogout={logout} onUnlocked={() => { setLocked(false); release(lockWaiters, true); }} />}
-      {me.autoUnlockPrompt && !locked && !reauth && !overlay && me.onboarding !== 'pending' && <AutoUnlockPrompt onDone={check} />}
+      {me.autoUnlockPrompt && !locked && !reauth && !overlay && me.onboarding !== 'pending' && !(me.termos && !me.termos.aceitos) && <AutoUnlockPrompt onDone={check} />}
+      {me.termos && !me.termos.aceitos && !locked && !reauth && <AceiteDosTermos versao={me.termos.versao} onDone={check} />}
       {worldLink && !locked && WorldLinkDialog && <Suspense fallback={null}><WorldLinkDialog onClose={() => setWorldLink(false)} /></Suspense>}
       {reauth && !locked && <ReauthDialog factors={me.factors} rpId={me.rpId} onDone={() => { setReauth(false); release(reauthWaiters, true); }} onCancel={() => { setReauth(false); release(reauthWaiters, false); }} />}
     </>

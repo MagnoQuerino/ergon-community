@@ -50,9 +50,11 @@ import {
 import { CITY_LIMITS, cityAgents, cityOverview, idList } from './services/city.ts';
 import { cityActivity } from './services/city-activity.ts';
 import { getSetting } from './services/sectors.ts';
+import { executavel, sha256 } from './lib/executavel.ts';
+import { TERMOS_VERSAO, aceitarTermos, codigoPorPadrao, estadoDosTermos, sincronizarCodigoDaEquipe } from './services/termos.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
-import { activeCardsOf, channelNoteFor, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
+import { activeCardsOf, channelNoteFor, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, registrarRespostaDigitada, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
 import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
 import { Initiative } from './services/initiative.ts';
 import { forkFrom, marksOf, mediaOf, searchAll, setMark, updateConversation, type SearchKind } from './services/conversation-tools.ts';
@@ -77,7 +79,7 @@ import { NICHES, PRESETS, USES, applyOnboarding, onboardingChoice, onboardingOpt
 import { createOwnWorkspace, deleteWorkspace, listWorkspaces, renameWorkspace } from './services/workspaces.ts';
 import { IDIOMAS, readPrefs, writePrefs, type Idioma } from './services/prefs.ts';
 import { isSource } from './services/routine-catalog.ts';
-import { Teamwork, parseTrainRequests } from './services/teamwork.ts';
+import { Teamwork, parseProcessRequests, parseTrainRequests } from './services/teamwork.ts';
 import { CATEGORIES as AMBIENT_CATEGORIES, readAmbient, type Category as AmbientCategory } from './services/ambient.ts';
 import { MAX_CHOICE, PROCESS_SQL, SETTING as PROCESS_SETTING } from './services/concurrency.ts';
 import { AccountReader } from './services/account-reader.ts';
@@ -591,12 +593,20 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         const purge = purgeRequest(db, r.workspace_id, cmds, ag.name);
         if (purge) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, [purge]);
         for (const d of done) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Documentos — ${d.text}${d.undo ? ` {{desfazer:${d.undo}}}` : ''}`);
+        // o agente escreve a resposta antes de o sistema aplicar: o que falhou é dito com todas as letras, para o
+        // "Prontinho, movi" dele não ficar valendo
+        const falhas = done.filter((d) => !d.undo && /^(Não |Não deu)/.test(d.text));
+        if (falhas.length) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Sistema — atenção: ${falhas.length === 1 ? 'isto não foi feito' : 'estas ações não foram feitas'}, apesar do que ${ag.name} escreveu acima: ${falhas.map((d) => d.text).join(' ')}`);
       }
     }
+    // [[processar]] é de card: na conversa não roda. A pessoa fica sabendo, em vez de esperar um resultado que não vem
+    if (ag && parseProcessRequests(output).length) teamwork.purpose.note(r.workspace_id, r.conversation_id, `Sistema — ${ag.name} pediu um cálculo que só roda num card, e ele não foi feito aqui. Peça de novo: "faça a conta aqui na conversa", ou use "Enviar à equipe".`);
     // qualquer agente pode pedir uma ferramenta que executa código: vira cartão na conversa, autorizado com a senha
     if (ag) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parsePermissionRequests(output, ag.name));
     // lembretes com data: quem tem a ferramenta propõe a tarefa sua com prazo; entra aprovada por você
-    if (ag && (JSON.parse(ag.tools ?? '[]') as string[]).includes('agenda')) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseTaskProposals(output, `conversa com ${ag.name}`));
+    // (o Coordenador também: "me lembre de…" pedido a ele ia para um card de colega, que não registra lembrete, e acabava
+    // numa confirmação sem tarefa nenhuma)
+    if (ag && (Number(ag.coordinator) || (JSON.parse(ag.tools ?? '[]') as string[]).includes('agenda'))) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseTaskProposals(output, `conversa com ${ag.name}`));
     // "liga o Terminal" pedido conversando: a coordenação pede a senha ali mesmo; outro agente passa o pedido à
     // coordenação, numa conversa com ela, e avisa aqui com o caminho
     const release = ag ? parseToolRelease(output) : null;
@@ -691,7 +701,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   let conexoesPadrao = false;
   const conexoesNoMotorUnico = async () => {
     if (motors.perPerson || conexoesPadrao || !control) return;
-    const mudou = await ai.ensureBeneficios(ferramentasDesligadas(db, null));
+    // termos aceitos por quem é dono de algum workspace: Executar código e Terminal ligam por padrão (termos.ts)
+    const codigo = db.all<{ workspace_id: string }>('SELECT id AS workspace_id FROM workspaces').some((w) => codigoPorPadrao(db, w.workspace_id));
+    const mudou = await ai.ensureBeneficios(ferramentasDesligadas(db, null), undefined, { codigo });
     conexoesPadrao = true;
     if (mudou && (mudou.ligou.length || mudou.desligou.length)) await ai.refreshToolsets();
   };
@@ -931,6 +943,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       setupTokenRequired: !!cfg.setupToken,
       // conta nova neste computador (local, Ergon aberto, já com a primeira conta): 'aberto' ou 'convite'
       signup: cfg.mode === 'local' && !!personKeys() && !needsSetup(db) ? signupPolicy(db) : null,
+      termosVersao: TERMOS_VERSAO,
     };
   });
 
@@ -938,13 +951,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // de recuperação UMA vez (só vale depois de confirmada).
   app.post('/api/auth/setup', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['username', 'password'], properties: {
-      username: S.str(32, 3), password: S.str(200, 1), displayName: S.str(60), setupToken: S.str(200) } } },
+      username: S.str(32, 3), password: S.str(200, 1), displayName: S.str(60), setupToken: S.str(200), termos: S.str(20) } } },
   }, async (req, reply) => {
-    const b = req.body as { username: string; password: string; displayName?: string; setupToken?: string };
+    const b = req.body as { username: string; password: string; displayName?: string; setupToken?: string; termos?: string };
     if (cfg.setupToken && !safeEqual(b.setupToken ?? '', cfg.setupToken)) throw new HttpError(403, 'setup_token', 'token de configuração inválido');
     const r = await setupOwner(db, { username: b.username, password: b.password, displayName: b.displayName ?? b.username }, cfg.slotsPerFloor, cfg.kdf);
     const recovery = await protectInstance(db, vault, cfg, { id: r.userId, username: b.username }, b.password, owners.of);
     applyLockChoice(db, vault, cfg, bus); // padrão no computador: sem trancamento (Configurações › Segurança liga)
+    // os termos de uso aceitos na tela da conta nova (a versão que a tela mostrou)
+    if (b.termos) aceitarTermos(db, bus, r.userId, b.termos, r.workspaceId);
     personOpened(r.userId);
     const out = finishPasswordLogin(sec, req, reply, r) as { ok: boolean };
     if (cfg.mode === 'cloud') return { ...out, recovery };
@@ -999,7 +1014,24 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       recovery: personKeys() ? vault.personHasRecovery(a.userId) : vault.info().recovery,
       admin: cfg.mode === 'local' ? isAdmin(db, a.userId) : a.role === 'owner', personSealed: personSealed(a), people: vault.peopleInfo().length,
       autoUnlockPrompt: isAdmin(db, a.userId) && secApi.autoUnlockPrompt(),
-      onboarding: onboardingState(db, a.workspaceId), prefs: readPrefs(db, a.workspaceId, a.userId) };
+      onboarding: onboardingState(db, a.workspaceId), prefs: readPrefs(db, a.workspaceId, a.userId), termos: estadoDosTermos(db, a.userId) };
+  });
+
+  // Termos de uso: aceitar a versão atual (a conta nova aceita na criação; quem já usava, no aviso depois da atualização).
+  // Com o aceite, Executar código e Terminal ligam por padrão na equipe (termos.ts), a menos que a pessoa desligue.
+  app.post('/api/me/termos', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['versao'], properties: { versao: S.str(20, 1) } } },
+  }, async (req) => {
+    const a = auth(req);
+    const v = (req.body as { versao: string }).versao;
+    if (!aceitarTermos(db, bus, a.userId, v, a.workspaceId)) throw new HttpError(409, 'termos_versao', 'Os termos mudaram desde que a tela abriu: recarregue e leia a versão atual.');
+    for (const w of db.all<{ workspace_id: string }>("SELECT workspace_id FROM memberships WHERE user_id = ? AND role = 'owner'", a.userId)) {
+      sincronizarCodigoDaEquipe(db, w.workspace_id);
+      bus.publish(w.workspace_id, 'agents.changed', {});
+    }
+    // o motor liga os conjuntos agora (sem esperar a próxima abertura); falhou, a próxima abertura liga
+    try { await aiOf(a.workspaceId).ensureBeneficios(ferramentasDesligadas(db, [a.workspaceId]), undefined, { codigo: true }); await aiOf(a.workspaceId).refreshToolsets(); } catch { /* motor fora: liga na próxima abertura */ }
+    return estadoDosTermos(db, a.userId);
   });
 
   // Minha conta: nome de exibição e foto de perfil (imagem pequena, só PNG/JPEG/WebP)
@@ -1146,7 +1178,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       workspace: ws, capacity: capacityTotals(db, a.workspaceId, cfg.maxFloors), team: teamInfo(db, a.workspaceId),
       // processos (cards, rotinas, revisões) seguem o limite; conversas não entram nele
       runs: { running: Number(counts?.running ?? 0), queued: Number(counts?.queued ?? 0), waiting: Number(counts?.waiting ?? 0),
-        processes: Number(counts?.processes ?? 0), limit: executor.processLimit(a.workspaceId), cardsWaiting: teamwork.queue(a.workspaceId).length },
+        processes: Number(counts?.processes ?? 0), limit: executor.processLimit(a.workspaceId), daily: executor.dailyLimit(a.workspaceId), cardsWaiting: teamwork.queue(a.workspaceId).length },
       // o mesmo que a lista de "aguardando você" (propostas, cards esperando você, perguntas, vínculos e regras)
       decisionsPending: pendingCount(db, a.workspaceId),
       executor: { mode: executor.mode, label: executor.mode === 'real' ? 'modelo de IA real' : 'SIMULAÇÃO — sem modelo de IA' },
@@ -1539,7 +1571,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // a escolha da pessoa sobre cada ferramenta da equipe fica gravada: desligada por ela, o motor não liga de novo sozinho,
     // nem recriado (ausente = ligado; regra do dono, 12/11). Só o que mudou agora é gravado.
     for (const t of Object.values(TOOLS)) {
-      if (!t.safe || !t.toolset) continue;
+      if (!(t.safe || t.guarded) || !t.toolset) continue;
       if (on.has(t.toolset) && !wanted.includes(t.id)) setSetting(db, a.workspaceId, `ferramentas.${t.id}`, 'desligado');
       else if (wanted.includes(t.id) && (!on.has(t.toolset) || getSetting(db, a.workspaceId, `ferramentas.${t.id}`) === 'desligado')) setSetting(db, a.workspaceId, `ferramentas.${t.id}`, 'ligado');
     }
@@ -1865,6 +1897,17 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
 
   // Trabalhos ao mesmo tempo: automático (pela memória da máquina), um número ou sem limite; conversas não entram
+  // execuções por dia: 0 = sem limite (o padrão)
+  app.put('/api/runs/daily-limit', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['limit'], properties: { limit: { type: 'integer', minimum: 0, maximum: 100000 } } } },
+  }, async (req) => {
+    const a = owner(req);
+    const limit = (req.body as { limit: number }).limit;
+    setSetting(db, a.workspaceId, 'runs.limite_diario', String(limit));
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'runs.daily_limit', evidence: { limit },
+      result: limit ? `até ${limit} execuções por dia` : 'execuções por dia sem limite' });
+    return executor.dailyLimit(a.workspaceId);
+  });
   app.put('/api/runs/limit', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['choice'], properties: {
       choice: { anyOf: [{ enum: ['auto', 'ilimitado'] }, { type: 'integer', minimum: 1, maximum: MAX_CHOICE }] } } } },
@@ -2320,6 +2363,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       const m = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, atalho.texto, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, replyTo: b.replyTo ?? null });
       return reply.status(m.replayed ? 200 : 201).send({ ...m, comando: r });
     }
+    // pergunta do agente aberta nesta conversa: o que a pessoa digitou é a resposta (fecha os cartões e o agente segue
+    // com ela), não um pedido novo na fila
+    const abertas = !b.attachments?.length && b.text.trim() ? cartoes.perguntasAbertas(a.workspaceId, convId) : [];
+    if (abertas.length) {
+      const m = registrarRespostaDigitada(db, bus, a.workspaceId, a.userId, convId, b.text, b.clientRequestId);
+      if (!m.replayed) for (const pid of abertas) { try { cartoes.responderPergunta(a.workspaceId, a.userId, pid, b.text.trim()); } catch { /* respondida no meio tempo */ } }
+      return reply.status(m.replayed ? 200 : 201).send({ messageId: m.messageId, runId: null, summary: 'resposta à pergunta do agente', replayed: m.replayed, queued: false, respondeu: abertas.length });
+    }
     // queue: com o agente ainda respondendo, a mensagem espera na fila da conversa (Ctrl+Enter) em vez de ser recusada
     const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, attachments: b.attachments ?? [], replyTo: b.replyTo ?? null });
     return reply.status(r.replayed ? 200 : 201).send(r);
@@ -2659,9 +2710,26 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.get('/api/artifacts/:id/download', { schema: { params: idParams('art') } }, async (req, reply) => {
     const a = auth(req);
     const f = openArtifact(db, cfg.filesDir, a.workspaceId, (req.params as { id: string }).id);
+    // executável (programa, script, atalho, instalador, também renomeado ou dentro de um .zip): o Ergon nunca abre; baixar
+    // só depois do aviso, com a impressão digital para conferir (termos de uso, seção 5)
+    const exe = executavel(f.filename, f.data);
+    if (exe && (req.query as { confirmo?: string }).confirmo !== '1') {
+      const id = (req.params as { id: string }).id;
+      const h = (x: string) => x.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+      reply.header('Content-Type', 'text/html; charset=utf-8');
+      reply.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'");
+      reply.header('Cache-Control', 'private, no-store');
+      return reply.send(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arquivo executável</title>
+<body style="font-family:system-ui,sans-serif;max-width:560px;margin:40px auto;padding:0 16px;line-height:1.5;color:#1b1f24;background:#fff">
+<h1 style="font-size:1.3rem">⚠ Este arquivo é um executável</h1>
+<p><b>${h(f.filename)}</b> (${h(exe)}, ${Math.max(1, Math.round(f.data.length / 1024))} KB) pode rodar programas no seu computador. O Ergon guarda, mas nunca abre nem entrega a um agente arquivos assim.</p>
+<p>Só baixe se você conhece e confia em quem mandou. Para conferir com quem enviou, a impressão digital (SHA-256) é:<br><code style="word-break:break-all">${sha256(f.data)}</code></p>
+<p><a href="/api/artifacts/${h(id)}/download?confirmo=1" rel="noopener" style="display:inline-block;padding:8px 14px;border:1px solid #b42318;border-radius:8px;color:#b42318;text-decoration:none">Baixar mesmo assim</a></p>
+<p style="color:#555;font-size:.9rem">No Windows, o SmartScreen e o antivírus ainda conferem o arquivo depois de baixado.</p></body></html>`);
+    }
     // prévia só de imagem comum e PDF (?inline=1), num documento isolado; todo o resto sempre baixa como anexo
-    const inline = (req.query as { inline?: string }).inline === '1' && INLINE_MIME.has(f.mime);
-    reply.header('Content-Type', INLINE_MIME.has(f.mime) ? f.mime : 'application/octet-stream');
+    const inline = !exe && (req.query as { inline?: string }).inline === '1' && INLINE_MIME.has(f.mime);
+    reply.header('Content-Type', !exe && INLINE_MIME.has(f.mime) ? f.mime : 'application/octet-stream');
     reply.header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.filename)}`);
     if (inline && f.mime.startsWith('image/')) reply.header('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'; frame-ancestors 'none'");
     // PDF na prévia "Ver" do card: dentro da própria tela do Ergon (mesma origem), nunca numa página de outro endereço.

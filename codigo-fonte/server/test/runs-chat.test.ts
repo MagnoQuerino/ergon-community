@@ -62,6 +62,26 @@ describe('fila de execuções com concorrência limitada', () => {
     await drain(h2);
     const r = await req(h2, 'POST', `/api/conversations/${c}/messages`, s2, { text: 'dois', clientRequestId: 'req-limit-0002' });
     assert.equal(r.status, 429);
+    assert.match(r.json.message, /Configurações › Andamento › Execuções por dia/);
+    await h2.close();
+  });
+
+  test('execuções por dia: sem limite por padrão; a pessoa limita e tira em Configurações', async () => {
+    const h2 = await harness();
+    assert.equal(h2.cfg.dailyRunLimit, 0);
+    const s2 = await setupOwner(h2);
+    const c = await newConv(h2, s2);
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await req(h2, 'POST', `/api/conversations/${c}/messages`, s2, { text: `m${i}`, clientRequestId: `req-dia-000${i}` })).status, 201);
+      await drain(h2);
+    }
+    const st = (await req(h2, 'GET', '/api/state', s2)).json;
+    assert.equal(st.runs.daily.limit, 0); assert.ok(st.runs.daily.used >= 3);
+    const set = await req(h2, 'PUT', '/api/runs/daily-limit', s2, { limit: 3 });
+    assert.equal(set.status, 200); assert.equal(set.json.limit, 3);
+    assert.equal((await req(h2, 'POST', `/api/conversations/${c}/messages`, s2, { text: 'barrada', clientRequestId: 'req-dia-0009' })).status, 429);
+    assert.equal((await req(h2, 'PUT', '/api/runs/daily-limit', s2, { limit: 0 })).status, 200);
+    assert.equal((await req(h2, 'POST', `/api/conversations/${c}/messages`, s2, { text: 'liberada', clientRequestId: 'req-dia-0010' })).status, 201);
     await h2.close();
   });
 });
@@ -260,9 +280,9 @@ describe('executor Hermes (cliente falso que segue o contrato documentado)', () 
     await h.executor.tick(); await h.executor.tick();
     const remote = [...fake.runs.values()][0];
     remote.status = 'completed';
-    remote.output = 'Pronto, uma imagem.\n\nMEDIA:/opt/data/cache/generated/images/krea_logo.png\n\nOutra: MEDIA:/opt/data/cache/generated/images/quebrada.png\nE fora da pasta: MEDIA:/opt/data/auth.json';
+    remote.output = 'Pronto, uma imagem.\n\nMEDIA:/opt/data/cache/generated/images/krea_logo.png\n\nOutra: MEDIA:/opt/data/cache/generated/images/quebrada.png\nDo perfil: MEDIA:/opt/data/profiles/erg-0123456789abcdef0123/cache/generated/images/krea_perfil.png\nE fora da pasta: MEDIA:/opt/data/auth.json';
     await h.executor.tick();
-    assert.deepEqual(asked, ['/opt/data/cache/generated/images/krea_logo.png', '/opt/data/cache/generated/images/quebrada.png'], 'só imagens da pasta das geradas');
+    assert.deepEqual(asked, ['/opt/data/cache/generated/images/krea_logo.png', '/opt/data/cache/generated/images/quebrada.png', '/opt/data/profiles/erg-0123456789abcdef0123/cache/generated/images/krea_perfil.png'], 'só imagens das pastas das geradas (a do motor e a do perfil do agente)');
     const msg = (await req(h, 'GET', `/api/conversations/${c}/messages`, s)).json.find((m: { role: string }) => m.role === 'agent').content as string;
     const id = msg.match(/\[imagem: (art_[a-f0-9]{32})\]/)?.[1];
     assert.ok(id, msg);
