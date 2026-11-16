@@ -290,7 +290,7 @@ export interface EtapaConsentimento {
   estado: 'ok' | 'falta' | 'pedido' | 'bloqueado' | 'aprovado';
   opcional: boolean; administrador: boolean; link: string | null; erro: string | null;
 }
-export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda';
+export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda' | 'world';
 
 // i18n-ok: nomes de produto (marcas), não se traduzem
 export const SOURCE_LABEL: Record<string, string> = {

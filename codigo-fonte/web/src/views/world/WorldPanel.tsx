@@ -6,6 +6,7 @@ import { ConnectForm, DeviceLimit, erroConta, type LoginLimit } from './WorldLin
 import { fmtData, fmtDataHora, fmtDracmas, fmtLista, fmtMoeda, fmtNumero } from '../../i18n/index.ts';
 import { tw, twn, useTw, type ChaveWorld } from './textos.ts';
 import { nomeDoWorkspace } from './nuvem-cartao.ts';
+import { WsCard } from '../../components/WsCard.tsx';
 
 interface WorkspaceRef { workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }
 /** o nome do workspace do World; o código curto só quando ele não tem nome */
@@ -112,45 +113,63 @@ function VerifyEmail({ onMsg, onDone }: { onMsg: Msg; onDone: () => void }) {
 }
 
 /**
- * Qual workspace local é o do World: um só. Ligado a um workspace novo no World ou a um que a conta já tem (criado em
- * outro computador: a sincronização dele entra depois, com a chave).
+ * Qual workspace local é o do World: um só, escolhido entre os cartões dos workspaces deste computador (a cidade de
+ * cada um, onde está, plano e sincronia). Ligado a um workspace novo no World ou a um que a conta já tem (criado em outro
+ * computador: a sincronização dele entra depois, com a chave).
  */
 function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn: () => Promise<unknown>, ok?: string) => Promise<void> }) {
   const t = useTw();
   const l = s.link!;
-  const cur = s.localWorkspaces.find((w) => w.current) ?? s.localWorkspaces[0];
-  const [local, setLocal] = useState(cur?.id ?? '');
+  const [escolhido, setEscolhido] = useState<string | null>(null);
   const [remote, setRemote] = useState('');
   const remotes = (l.workspaces ?? []).filter((w) => w.role === 'owner');
-  if (l.boundWorkspaceId) {
-    return (
-      <section className="card">
-        <h3>{t('vinculo.titulo')}</h3>
-        <p>{twn('vinculo.ligado', { nome: <b>{l.boundWorkspaceName ?? l.boundWorkspaceId}</b> })}</p>
-        {!l.currentIsBound && <p className="muted small">{t('vinculo.abrir', { nome: l.boundWorkspaceName ?? l.boundWorkspaceId })}</p>}
-        <button className="btn btn--ghost" disabled={busy} onClick={() => void act(() => api.del('/api/world/bind'), t('vinculo.desligado'))}>{t('vinculo.desligar')}</button>
-      </section>
-    );
-  }
+  const bill = useResource<{ entitlement: { status: string; plan_sku: string | null } }>(l.currentIsBound ? '/api/world/billing' : null, []);
+  const sync = useResource<SyncStatus>(l.currentIsBound ? '/api/world/sync' : null, []);
+  const cat = useResource<Catalog>(l.currentIsBound ? '/api/world/catalog' : null, []);
+  const plano = bill.data?.entitlement.plan_sku && ['active', 'grace'].includes(bill.data.entitlement.status)
+    ? cat.data?.items.find((i) => i.sku === bill.data!.entitlement.plan_sku)?.name ?? bill.data.entitlement.plan_sku : null;
+  const ligar = (id: string, syncWorkspaceId: string | null) => act(() => api.post('/api/world/bind', { workspaceId: id, syncWorkspaceId }), t('vinculo.ligadoMsg'));
+  const abrir = (id: string) => act(async () => { await api.post('/api/session/workspace', { workspaceId: id }); window.location.reload(); });
   return (
     <section className="card">
       <h3>{t('vinculo.titulo')}</h3>
-      <p className="muted small">{t('vinculo.texto')}</p>
+      <p className="muted small">{l.boundWorkspaceId ? t('vinculo.texto') : t('vinculo.escolher')}</p>
+      {l.boundWorkspaceId && !l.currentIsBound && <p className="muted small">{t('vinculo.abrir', { nome: l.boundWorkspaceName ?? l.boundWorkspaceId })}</p>}
       {!s.localWorkspaces.length ? <p className="muted small">{t('vinculo.semWorkspace')}</p> : (
-        <>
-          <div className="row row--wrap">
-            <label className="field">{t('vinculo.local')}
-              <select value={local} onChange={(ev) => setLocal(ev.target.value)}>{s.localWorkspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
-            </label>
-            <label className="field">{t('vinculo.world')}
-              <select value={remote} onChange={(ev) => setRemote(ev.target.value)}>
-                <option value="">{t('vinculo.novo')}</option>
-                {remotes.map((w) => <option key={w.workspaceId} value={w.workspaceId}>{nomeWs(w)}{w.plan_sku ? ` · ${w.plan_sku.replace('world_', '')}` : ''}</option>)}
-              </select>
-            </label>
-          </div>
-          <button className="btn btn--primary" disabled={busy || !local} onClick={() => void act(() => api.post('/api/world/bind', { workspaceId: local, syncWorkspaceId: remote || null }), t('vinculo.ligadoMsg'))}>{t('vinculo.ligar')}</button>
-        </>
+        <div className="ws-cards">
+          {s.localWorkspaces.map((w) => {
+            const ligado = l.boundWorkspaceId === w.id;
+            return (
+              <WsCard key={w.id} id={w.id} nome={w.name} atual={w.current} escolhido={escolhido === w.id}
+                selos={<>
+                  {w.current && <span className="badge badge--atual">{t('vinculo.aberto')}</span>}
+                  {ligado ? <span className="badge badge--world">{t('vinculo.seloWorld')}</span> : <span className="badge">{t('vinculo.seloLocal')}</span>}
+                  {ligado && w.current && bill.data && <span className={`badge ${plano ? 'badge--ok' : ''}`}>{plano ?? t('vinculo.semPlano')}</span>}
+                  {ligado && w.current && sync.data && <span className="badge">{sync.data.enabled ? t('vinculo.syncLigada') : t('vinculo.syncDesligada')}</span>}
+                </>}
+                acoes={escolhido === w.id ? null : <>
+                  {!w.current && <button className="btn btn--sm" disabled={busy} onClick={() => void abrir(w.id)}>{t('vinculo.abrirWs')}</button>}
+                  {ligado && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void act(() => api.del('/api/world/bind'), t('vinculo.desligado'))}>{t('vinculo.desligar')}</button>}
+                  {!l.boundWorkspaceId && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => (remotes.length ? (setEscolhido(w.id), setRemote('')) : void ligar(w.id, null))}>{t('vinculo.ligarEste')}</button>}
+                </>}>
+                {escolhido === w.id && (
+                  <div className="ws-card__destino" role="radiogroup" aria-label={t('vinculo.destino')}>
+                    <span className="small muted">{t('vinculo.destino')}</span>
+                    <label className="ws-card__opcao"><input type="radio" name={`destino-${w.id}`} checked={remote === ''} onChange={() => setRemote('')} /> {t('vinculo.novo')}</label>
+                    {remotes.map((r) => (
+                      <label key={r.workspaceId} className="ws-card__opcao"><input type="radio" name={`destino-${w.id}`} checked={remote === r.workspaceId} onChange={() => setRemote(r.workspaceId)} />
+                        {nomeWs(r)} <span className={`badge ${r.plan_sku ? 'badge--ok' : ''}`}>{r.plan_sku ? r.plan_sku.replace('world_', '') : t('vinculo.semPlano')}</span></label>
+                    ))}
+                    <div className="ws-card__acoes">
+                      <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void ligar(w.id, remote || null).then(() => setEscolhido(null))}>{t('vinculo.ligar')}</button>
+                      <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setEscolhido(null)}>{t('vinculo.cancelar')}</button>
+                    </div>
+                  </div>
+                )}
+              </WsCard>
+            );
+          })}
+        </div>
       )}
     </section>
   );

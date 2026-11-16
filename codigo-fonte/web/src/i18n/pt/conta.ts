@@ -260,8 +260,15 @@ const conta = {
   'npc.aria': 'Exibir {nome} na cidade',
 
   // ——— o workspace atual ———
+  'ws.todos': 'Seus workspaces',
+  'ws.todosTexto': 'Cada um com a sua equipe, cidade e quadros. Abra, renomeie ou leve um deles ao Ergon World.',
+  'ws.abrir': 'Abrir',
+  'ws.nomeDe': 'Novo nome de {nome}',
+  'ws.levarWorld': 'Levar ao Ergon World',
+  'ws.gerenciarWorld': 'Ergon World',
+  'ws.este': 'Este workspace: {nome}',
   'ws.titulo': 'Workspace',
-  'ws.explica': 'Cada workspace tem a sua equipe, cidade, quadros, conversas e rotinas. Para trocar ou criar outro, use o botão com o nome dele, na barra de cima.',
+  'ws.explica': 'Ajustes que valem só para este workspace.',
   'ws.nome': 'Nome deste workspace',
   'ws.renomear': 'Renomear',
   'ws.soDona': 'Só quem é dona do workspace muda o nome.',

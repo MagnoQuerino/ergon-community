@@ -19,6 +19,20 @@ function building(kind: string, t: Theme): HTMLCanvasElement | null {
   return b ? trim(closedArt(b, t).layer.canvas) : null;
 }
 
+const predios = new Map<string, { url: string; w: number; h: number } | null>();
+/**
+ * Um prédio da cidade sozinho, recortado, como imagem (data URL): o mesmo desenho da Cidade, para ilustrações fora
+ * dela (a página do Ergon World). Um por tipo e tema, em cache.
+ */
+export function predioUrl(kind: string, t: Theme, themeKey = 'dia'): { url: string; w: number; h: number } | null {
+  const key = `${kind}|${themeKey}`;
+  if (predios.has(key)) return predios.get(key) ?? null;
+  let out: { url: string; w: number; h: number } | null = null;
+  try { const c = building(kind, t); if (c) out = { url: c.toDataURL('image/png'), w: c.width, h: c.height }; } catch { out = null; }
+  predios.set(key, out);
+  return out;
+}
+
 /** Recorta a margem transparente do desenho (a arte do prédio vem com folga para sombra e telhado). */
 function trim(src: HTMLCanvasElement): HTMLCanvasElement {
   const g = src.getContext('2d');

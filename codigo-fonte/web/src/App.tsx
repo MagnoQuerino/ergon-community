@@ -26,6 +26,9 @@ const WorldLinkDialog = worldLinkMod ? lazy(worldLinkMod) : null;
 /** "Enquanto você esteve fora" (módulo do Ergon World, se estiver nesta instalação): uma linha, ao abrir */
 const resumoForaMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/ResumoFora.tsx'))[0];
 const ResumoFora = resumoForaMod ? lazy(resumoForaMod) : null;
+/** a página do Ergon World (módulo do World, se estiver nesta instalação): ganha um item no menu */
+const mundoMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/MundoView.tsx'))[0];
+const MundoView = mundoMod ? lazy(mundoMod) : null;
 import { useSurface } from './lib/surface.ts';
 
 // As outras áreas chegam sob demanda (a Cidade, a primeira tela, já vem no pacote principal): o app abre mais leve, e
@@ -140,7 +143,7 @@ export function App() {
 }
 
 // os nomes ficam como chave e são traduzidos na hora de mostrar (a troca de idioma redesenha o menu)
-type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'configuracoes' | 'ajuda'}`;
+type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'world' | 'configuracoes' | 'ajuda'}`;
 const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
   { id: 'ambiente', label: 'geral.nav.cidade', icon: 'temple' },
   { id: 'agentes', label: 'geral.nav.equipe', icon: 'users' },
@@ -150,6 +153,7 @@ const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
   { id: 'documentos', label: 'geral.nav.documentos', icon: 'folder' },
   { id: 'atividade', label: 'geral.nav.atividade', icon: 'activity' },
   { id: 'conexoes', label: 'geral.nav.conexoes', icon: 'plug' },
+  ...(MundoView ? [{ id: 'world' as const, label: 'geral.nav.world' as const, icon: 'globe' }] : []),
   { id: 'configuracao', label: 'geral.nav.configuracoes', icon: 'gear' },
 ];
 /** no pé do menu: manuais, dicas e contornos */
@@ -435,6 +439,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <DocumentosView coord={coordLabel} />
         ) : view === 'conexoes' ? (
           <ConexoesView />
+        ) : view === 'world' && MundoView ? (
+          <MundoView />
         ) : view === 'ajuda' ? (
           <AjudaView state={s} onGo={setView} onTour={startTour} onRedo={me.role === 'owner' ? () => setOnb('redo') : undefined} />
         ) : view === 'configuracao' ? (
