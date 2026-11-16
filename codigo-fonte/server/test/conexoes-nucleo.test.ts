@@ -92,9 +92,10 @@ describe('regra de confirmação', () => {
     assert.equal(decidir({ risco: 'organizar', origem: 'pessoa', leuDeFora: false, liberarTudo: true, ajuste: 'confirmar' }), 'confirmar');
     assert.equal(decidir({ risco: 'organizar', origem: 'pessoa', leuDeFora: false, liberarTudo: false, ajuste: 'regra' }), 'direto');
   });
-  test('liberar tudo tira as confirmações; código ligado confirma até leitura', () => {
+  test('liberar tudo tira as confirmações; código ligado confirma o que não é leitura (16/11: ler vai direto)', () => {
     assert.equal(r('apagar', 'fora', true, { liberarTudo: true }), 'direto');
-    assert.equal(r('ler', 'pessoa', false, { codigoLigado: true }), 'confirmar');
+    assert.equal(r('ler', 'pessoa', false, { codigoLigado: true }), 'direto');
+    assert.equal(r('organizar', 'pessoa', false, { codigoLigado: true }), 'confirmar');
     assert.equal(r('ler', 'pessoa', false, { codigoLigado: true, liberarTudo: true }), 'direto');
   });
 });

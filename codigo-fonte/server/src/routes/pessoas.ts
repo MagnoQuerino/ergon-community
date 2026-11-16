@@ -3,6 +3,7 @@
  * convites para quem administra, e remover conta (a pessoa, ou quem administra). Quem administra não lê os dados de
  * ninguém: vê só quem tem conta, quando entrou e se a frase pessoal já foi gerada.
  */
+import { aceitarTermos } from '../services/termos.ts';
 import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { log, scrub } from '../lib/log.ts';
@@ -41,9 +42,9 @@ export function registerPeopleRoutes(app: FastifyInstance, d: PeopleRouteDeps): 
   // Conta nova neste computador (tela de entrada). Devolve a frase da pessoa (mostrada uma vez; vale depois de confirmada).
   app.post('/api/auth/register', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['username', 'password'], properties: {
-      username: str(32, 3), password: str(200, 1), displayName: str(60), invite: str(20) } } },
+      username: str(32, 3), password: str(200, 1), displayName: str(60), invite: str(20), termos: str(20) } } },
   }, async (req, reply) => {
-    const b = req.body as { username: string; password: string; displayName?: string; invite?: string };
+    const b = req.body as { username: string; password: string; displayName?: string; invite?: string; termos?: string };
     const keys = d.people.keys();
     if (cfg.mode !== 'local' || !keys) throw new HttpError(404, 'not_found', 'rota não encontrada');
     throttle.check(`register:${req.ip}`);
@@ -52,6 +53,7 @@ export function registerPeopleRoutes(app: FastifyInstance, d: PeopleRouteDeps): 
       r = await registerPerson({ db, vault, keys, owners: d.people.owners, cfg }, { username: b.username, password: b.password, displayName: (b.displayName ?? '').trim() || b.username, invite: b.invite });
     } catch (e) { if ((e as HttpError).code === 'invite') throttle.fail(`register:${req.ip}`); throw e; }
     throttle.ok(`register:${req.ip}`);
+    if (b.termos) aceitarTermos(db, d.bus, r.userId, b.termos, r.workspaceId);
     d.upkeep(r.userId);
     audit(db, d.bus, { workspaceId: r.workspaceId, actorType: 'user', actorId: r.userId, action: 'people.register', evidence: { policy: signupPolicy(db) }, result: 'conta criada neste computador (chave pessoal própria)' });
     const days = sessionDays(cfg, vault);

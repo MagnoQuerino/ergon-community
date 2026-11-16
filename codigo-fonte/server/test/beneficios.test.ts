@@ -11,7 +11,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { BENEFICIOS, BENEFICIOS_NOVOS, COMPETENCIAS_PRONTAS, TOOLS, ferramentasDesligadas, grantBenefitTools } from '../src/services/characters.ts';
+import { BENEFICIOS, BENEFICIOS_NOVOS, COMPETENCIAS_PRONTAS, TOOLS, ferramentasDesligadas, grantBenefitTools, PESADAS_FORA_DO_COORDENADOR } from '../src/services/characters.ts';
 import { RODADAS_PADRAO } from '../src/services/comandos.ts';
 import { AJUDANTES_PADRAO } from '../src/services/perfis.ts';
 import type { HermesControlClient } from '../src/services/hermes.ts';
@@ -35,11 +35,14 @@ describe('benefícios ligados por padrão', () => {
   test('a equipe nova nasce com as ferramentas-benefício e as competências prontas; nada que executa código', async () => {
     const h = await harness();
     const s = await setupOwner(h);
-    const ags = h.db.all<{ name: string; tools: string; hermes_skills: string | null }>("SELECT name, tools, hermes_skills FROM agents WHERE workspace_id = ? AND status = 'active'", s.workspaceId);
+    const ags = h.db.all<{ name: string; tools: string; hermes_skills: string | null; coordinator: number }>("SELECT name, tools, hermes_skills, coordinator FROM agents WHERE workspace_id = ? AND status = 'active'", s.workspaceId);
     assert.ok(ags.length >= 10);
     for (const a of ags) {
       const t = lista(a.tools);
-      assert.ok(BENEFICIOS.every((b) => t.includes(b)), `${a.name}: ${t.join(',')}`);
+      // o Coordenador encaminha: as pesadas ficam com os especialistas (decisão do dono, 16/11: custo por mensagem)
+      const esperadas = Number(a.coordinator) ? BENEFICIOS.filter((b) => !PESADAS_FORA_DO_COORDENADOR.includes(b)) : BENEFICIOS;
+      assert.ok(esperadas.every((b) => t.includes(b)), `${a.name}: ${t.join(',')}`);
+      if (Number(a.coordinator)) assert.ok(!t.some((x) => PESADAS_FORA_DO_COORDENADOR.includes(x)), `${a.name} sem as pesadas: ${t.join(',')}`);
       assert.ok(!t.some((x) => TOOLS[x]?.guarded), `${a.name}: nada que executa código vem de graça`);
       assert.deepEqual(lista(a.hermes_skills), [...COMPETENCIAS_PRONTAS], a.name);
     }

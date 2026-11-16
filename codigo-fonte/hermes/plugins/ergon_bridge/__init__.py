@@ -1296,6 +1296,30 @@ def perfis_listar() -> list[str]:
     return sorted(x.name for x in p.iterdir() if x.is_dir() and _PERFIL_NOME.fullmatch(x.name)) if p.is_dir() else []
 
 
+def perfis_podar(manter: list[str]) -> dict[str, Any]:
+    """Tira da pasta ativa os perfis de agentes que o Ergon não tem mais (workspace apagado: QA 16/11, 121 perfis
+    órfãos voltavam a cada reinício pelo reconcile e enchiam a memória). Move para perfis-removidos/ (fora de profiles/,
+    o gateway não os acha), nunca apaga. Lista vazia não poda nada (um Ergon com o banco ilegível não esvazia o motor)."""
+    if not manter or len(manter) > 20_000 or not all(isinstance(x, str) and _PERFIL_NOME.fullmatch(x) for x in manter):
+        raise ValueError("lista de perfis a manter inválida ou vazia")
+    import shutil
+    fica = set(manter)
+    destino = _raiz() / "perfis-removidos"
+    movidos: list[str] = []
+    for nome in perfis_listar():
+        if nome in fica:
+            continue
+        destino.mkdir(parents=True, exist_ok=True)
+        alvo = destino / nome
+        n = 1
+        while alvo.exists():
+            n += 1
+            alvo = destino / f"{nome}.{n}"
+        shutil.move(str(_raiz() / "profiles" / nome), str(alvo))
+        movidos.append(nome)
+    return {"movidos": movidos, "ficaram": len(perfis_listar())}
+
+
 def _ler_curto(path: Path, limite: int = 20_000) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="replace")[:limite]
@@ -2989,15 +3013,28 @@ def _media_dir() -> str:
     return os.path.realpath(os.path.join(os.environ.get("HERMES_HOME", "/opt/data"), "cache", "generated"))
 
 
+def _media_dirs() -> list[str]:
+    """As pastas das geradas: a do motor e a de cada perfil de agente (rc.27: cada agente é um perfil, e o que ele gera
+    fica em profiles/<perfil>/cache/generated)."""
+    home = os.environ.get("HERMES_HOME", "/opt/data")
+    dirs = [_media_dir()]
+    try:
+        for nome in os.listdir(os.path.join(home, "profiles")):
+            if re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", nome):
+                dirs.append(os.path.realpath(os.path.join(home, "profiles", nome, "cache", "generated")))
+    except OSError:
+        pass
+    return dirs
+
+
 def _media_file(raw: str) -> tuple[str, str] | None:
     """(caminho real, tipo) de uma imagem gerada, ou None: fora da pasta das geradas (também por link), outro tipo,
     vazia ou grande demais."""
     if not raw or "\x00" in raw or len(raw) > 512:
         return None
     real = os.path.realpath(raw)
-    base = _media_dir()
     mime = _MEDIA_TYPES.get(os.path.splitext(real)[1].lower())
-    if not mime or os.path.commonpath([real, base]) != base or not os.path.isfile(real):
+    if not mime or not any(os.path.commonpath([real, base]) == base for base in _media_dirs()) or not os.path.isfile(real):
         return None
     size = os.path.getsize(real)
     return (real, mime) if 0 < size <= _MEDIA_MAX else None
@@ -4164,11 +4201,15 @@ class _ControlHandler(BaseHTTPRequestHandler):
         return
 
     def _send(self, status: int, data: bytes) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        # o Ergon pode ter desistido de esperar (motor ocupado) e fechado a conexão: não é erro deste lado
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def _json(self, status: int, obj: Any) -> None:
         self._send(status, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
@@ -4590,6 +4631,9 @@ class _ControlHandler(BaseHTTPRequestHandler):
         """Equipe nativa: PUT /ergon/v1/perfis/<nome> (cria ou atualiza); GET …/<nome>/memoria;
         POST …/<nome>/memoria/pendentes {id, aprovar}."""
         try:
+            if path == "/ergon/v1/perfis/podar" and method == "POST":
+                manter = body.get("manter")
+                return self._json(200, perfis_podar(manter if isinstance(manter, list) else []))
             m = re.fullmatch(r"/ergon/v1/perfis/(erg-[0-9a-f]{20})(/memoria(/pendentes)?)?", path)
             if not m:
                 return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
@@ -4779,11 +4823,14 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "imagem não encontrada"})
         with open(hit[0], "rb") as f:
             data = f.read(_MEDIA_MAX + 1)
-        self.send_response(200)
-        self.send_header("Content-Type", hit[1])
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", hit[1])
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def _health(self) -> None:
         """Contrato com o servidor: versão do plugin, migração de configuração do cofre e o que este motor sabe fazer."""

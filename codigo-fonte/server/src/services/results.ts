@@ -18,6 +18,7 @@ import { emPt, tx } from '../lib/textos.ts';
 import { idioma, semNomeComum } from '../lib/idioma.ts';
 import { audit, type Bus } from './bus.ts';
 import { saveArtifact } from './artifacts.ts';
+import { folderForTask, formatoDoDocumento, formatosPedidos, gerarDocumento, parseDocCommands, pedeParaCriarArquivo, type FormatoDocumento } from './documents.ts';
 import { TOOLS, motorScope, platformToolsets, toolStatus } from './characters.ts';
 import { acoesDe, acoesLigadas, ajusteDe, RISCOS } from './conexoes/catalogo.ts';
 import type { Risco } from './conexoes/tipos.ts';
@@ -99,7 +100,9 @@ export function classifyTask(text: string, hasCsvInput: boolean): ResultKind {
   const t = fe(text);
   if (hasCsvInput && has(t, DATA)) return 'dados';
   if (externoDeFato(t)) return 'externo';
-  if (has(t, DOCUMENT)) return 'documental';
+  // "crie uma planilha", "monte a apresentação": a entrega é um arquivo (antes, sem as palavras de documento, virava
+  // "informativo" e nenhum arquivo saía)
+  if (has(t, DOCUMENT) || pedeParaCriarArquivo(text)) return 'documental';
   return 'informativo';
 }
 
@@ -731,7 +734,9 @@ export class Results {
       const pelaConta = coberta && kind === 'externo';
       c.push({ id: 'modelo', label: 'Escrito pelo agente com a conta de IA', ok: !simulated, detail: simulated ? 'sem conta de IA conectada: não conta como trabalho feito' : (r.model ?? undefined) });
       const n = words(entrega) + (plan?.words ?? 0);
-      c.push({ id: 'conteudo', label: `Conteúdo com pelo menos ${MIN_WORDS[kind]} palavras`, ok: pelaConta || n >= MIN_WORDS[kind], detail: pelaConta ? 'a entrega é a ação na conta, confirmada pelo serviço' : plan ? `${n} palavras, somando as etapas` : `${n} palavras` });
+      // planilha pedida e entregue em tabela: o tamanho de um texto corrido não vale (uma tabela curta é a entrega)
+      const minimo = kind === 'documental' && /^\s*\|.*\|\s*$/m.test(output ?? '') && formatosPedidos(`${task.title} ${task.description ?? ''}`).some((f) => f === 'xlsx' || f === 'csv') ? MIN_WORDS.informativo : MIN_WORDS[kind];
+      c.push({ id: 'conteudo', label: `Conteúdo com pelo menos ${minimo} palavras`, ok: pelaConta || n >= minimo, detail: pelaConta ? 'a entrega é a ação na conta, confirmada pelo serviço' : plan ? `${n} palavras, somando as etapas` : `${n} palavras` });
       c.push({ id: 'alegacao', label: 'Não é só uma declaração de "concluído"', ok: pelaConta || (!CLAIM.test(entrega) && n > 3) });
       c.push({ id: 'pendencias', label: 'Sem pergunta ou pedido de ajuda pendente', ok: !asked && !help, detail: asked ? 'o agente fez uma pergunta' : help ? 'esperando um colega' : undefined });
       const quem = this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', r.agent_id)?.name ?? 'O agente';
@@ -896,8 +901,35 @@ export class Results {
       const art = saveArtifact(this.db, this.bus, this.cfg.filesDir, this.cfg.maxUploadBytes, ws, owner,
         { filename: name, mime: 'text/markdown', data: Buffer.from(body, 'utf8'), source: { kind: 'operation', id: runId } }, this.cfg.storageQuota);
       linkFile(this.db, ws, taskId, art.id, 'entregavel');
+      if (prefix === 'resultado') this.saveFormats(ws, taskId, number, runId, body, raw, owner);
       return art;
     } catch { return null; }
+  }
+
+  /**
+   * A entrega também no formato que a pessoa pediu: planilha, apresentação, PDF ou Word (pelo [[salvar-documento]] do
+   * agente ou pelas palavras do pedido: "crie uma planilha…"). Antes, todo card entregava só um .md, e o pedido de
+   * planilha terminava em "Aprovar" um texto.
+   */
+  private saveFormats(ws: string, taskId: string, number: number, runId: string, body: string, raw: string, owner: string): void {
+    const t = getTask(this.db, ws, taskId);
+    const tags = parseDocCommands(raw).filter((c) => c.op === 'salvar-documento');
+    const pedidos = new Set<FormatoDocumento>([
+      ...tags.map((c) => formatoDoDocumento(c.formato || (c.nome.match(/\.([a-z0-9]{2,5})$/i)?.[1] ?? ''))).filter((f): f is FormatoDocumento => !!f && f !== 'md'),
+      ...(pedeParaCriarArquivo(`${t.title} ${t.description ?? ''}`) ? formatosPedidos(`${t.title} ${t.description ?? ''}`) : []).filter((f) => f !== 'md'),
+    ]);
+    const nome = (tags.find((c) => c.nome)?.nome || clip(t.title, 60) || `entrega-T${number}`).replace(/\.(docx?|md|txt|pdf|xlsx?|csv|pptx?)$/i, '').replace(/[\\/:*?"<>|]/g, ' ').trim() || `entrega-T${number}`;
+    const texto = body.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, '').trim();
+    for (const fmt of [...pedidos].slice(0, 4)) {
+      const filename = `${nome}.${fmt}`;
+      if (taskFiles(this.db, ws, taskId).some((f) => f.filename === filename)) continue;
+      try {
+        const { data, mime } = gerarDocumento(fmt, texto, nome);
+        const art = saveArtifact(this.db, this.bus, this.cfg.filesDir, this.cfg.maxUploadBytes, ws, owner,
+          { filename, mime, data, folderId: folderForTask(this.db, ws, taskId), source: { kind: 'operation', id: runId } }, this.cfg.storageQuota);
+        linkFile(this.db, ws, taskId, art.id, 'entregavel');
+      } catch { /* sem espaço, arquivo grande demais: fica o .md */ }
+    }
   }
 
   /**

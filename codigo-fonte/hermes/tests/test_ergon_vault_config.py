@@ -72,6 +72,7 @@ PUBLICADAS = {
     9: "9d03eb25994ce91d2c287bf9efa1c11775c881317a4910e6736b3e130d36af0b",  # aprovações nativas: o modo manual (sem a chamada a mais ao modelo) e o prazo de 5 min
     10: "58919bde6cadbd978b1d7fc84ae6bca03c1991262a9e343cae91a8fb90740083",  # experiência completa: passos 20→90, raciocínio low→high, aviso antes do teto, leitura de páginas, navegador/vídeo/arquivos/voz
     11: "6bb6880828d7a1ad1ed7c464029d5c0557f4476ba822cf01aa9bcfd09fcf7680",  # gestão pelo coordenador: ergon_gestao conhecido (desligado) fora do perfil dele
+    12: "4ab6d793eebe5979aa618037aa5213cc6403e4cffde5bc4558be155278355e9b",  # memória do motor: até 24 agentes carregados, soltos depois de 15 min parados
 }
 
 
@@ -526,7 +527,7 @@ ESCOLHIDO = {"platform_toolsets": {"api_server": DELE + ["ergon_cartoes"]},
              "checkpoints": {"enabled": False}, "platforms": {"telegram": {"extra": {"drop_pending_on_cold_boot": True}}},
              "approvals": {"mode": "smart", "timeout": 120},
              "skills": {"creation_nudge_interval": 5},
-             "agent": {"max_turns": 33, "reasoning_effort": "medium", "budget_warning_ratio": 0.5}, "web": {"extract_backend": "firecrawl"}}
+             "agent": {"max_turns": 33, "reasoning_effort": "medium", "budget_warning_ratio": 0.5, "agent_cache": {"max_size": 40, "idle_ttl_secs": 600}}, "web": {"extract_backend": "firecrawl"}}
 reset(ESCOLHIDO, migracoes='{"versao": 3}')
 calls.clear()
 check("rc.27, tudo já escolhido: só a chave da equipe nativa, os plugins das proteções e a união das ferramentas novas",

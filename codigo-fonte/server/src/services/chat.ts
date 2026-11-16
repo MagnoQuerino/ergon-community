@@ -124,6 +124,24 @@ const CHANNEL_NOTE = 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do
  */
 interface SendOptions { /** Revisão em conselho: a resposta vem do conselho de modelos */ conselho?: boolean; note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null }
 
+/**
+ * A pessoa respondeu digitando a uma pergunta do agente (cartão aberto na conversa): a mensagem fica na conversa, para
+ * ela ver o que escreveu, mas não vira um pedido novo — o texto vai para os cartões (Cartoes.responderPergunta), e o
+ * agente segue com ele. Antes, a mensagem esperava na fila, o agente terminava com "fico no aguardo" e os cartões
+ * continuavam abertos (QA 15/11, testes 12 e 21).
+ */
+export function registrarRespostaDigitada(db: Db, bus: Bus, workspaceId: string, userId: string, conversationId: string, content: string, clientRequestId: string): { messageId: string; replayed: boolean } {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(clientRequestId)) throw new HttpError(400, 'client_request_id', 'identificador de pedido inválido');
+  getConversation(db, workspaceId, userId, conversationId);
+  const dup = db.get<{ id: string }>('SELECT id FROM messages WHERE conversation_id = ? AND client_request_id = ?', conversationId, clientRequestId);
+  if (dup) return { messageId: dup.id, replayed: true };
+  const messageId = id('msg');
+  db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, author_user_id, content, mode, client_request_id, created_at)
+          VALUES (?, ?, ?, 'user', ?, ?, 'local', ?, ?)`, messageId, workspaceId, conversationId, userId, db.seal(workspaceId, content), clientRequestId, now());
+  bus.publish(workspaceId, 'messages.changed', { conversationId });
+  return { messageId, replayed: false };
+}
+
 export function sendMessage(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, userId: string, conversationId: string,
   text: string, clientRequestId: string, maxMessages: number, maxChars: number, opts: SendOptions = {}) {
   const content = text.trim();

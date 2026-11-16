@@ -149,6 +149,36 @@ export class Perfis {
   /** O motor do workspace abriu (ligou, renovou, voltou de um erro): o que mudou enquanto ele estava fora vai agora. */
   motorAbriu(workspaceId: string): void { this.agendar(workspaceId, 0); }
 
+  /** motores já podados nesta execução do servidor (a poda roda uma vez por abertura; a exclusão de workspace força) */
+  private podados = new Set<string>();
+  /**
+   * Perfis de agentes que o Ergon não tem mais (workspace apagado) saem da pasta ativa do motor: o reconcile do motor
+   * registrava todos a cada reinício e a memória enchia (QA 16/11: 121 perfis órfãos). A lista é a de TODOS os agentes
+   * dos workspaces deste motor (ativos ou não: o desativado pode voltar). Sem workspace ou sem agente, nada é podado.
+   */
+  async podar(workspaceIds: string[], forcar = false): Promise<number> {
+    if (!workspaceIds.length) return 0;
+    const control = this.control(workspaceIds[0]);
+    const escopo = this.scope(workspaceIds[0]);
+    if (!control?.podarPerfis || !this.pronto(workspaceIds[0]) || (!forcar && this.podados.has(escopo))) return 0;
+    const marks = workspaceIds.map(() => '?').join(', ');
+    const manter = [...new Set([
+      ...this.db.all<{ id: string; workspace_id: string }>(`SELECT id, workspace_id FROM agents WHERE workspace_id IN (${marks})`, ...workspaceIds).map((a) => nomeDoPerfil(a.workspace_id, a.id)),
+      ...this.db.all<{ profile: string | null }>(`SELECT profile FROM agent_profiles WHERE workspace_id IN (${marks}) AND profile IS NOT NULL`, ...workspaceIds).map((x) => x.profile!),
+    ])];
+    if (!manter.length) return 0;
+    try {
+      const r = await control.podarPerfis(manter);
+      this.podados.add(escopo);
+      if (r.movidos.length) log.info({ escopo, movidos: r.movidos.length, ficaram: r.ficaram }, 'perfis de agentes que não existem mais saíram do motor (guardados em perfis-removidos)');
+      return r.movidos.length;
+    } catch (err) {
+      // motor de antes (sem a rota) ou fora: tenta na próxima abertura
+      if (!(err instanceof HermesError && err.status === 404)) log.warn({ escopo, erro: clip(err instanceof Error ? err.message : String(err), 200) }, 'poda dos perfis: o motor não respondeu (tenta de novo depois)');
+      return 0;
+    }
+  }
+
   private async seguir(workspaceId: string): Promise<void> {
     // sem motor que receba agora: motorAbriu manda quando ele abrir (e a volta, de todo jeito)
     if (!this.control(workspaceId)?.perfil || !this.pronto(workspaceId)) return;

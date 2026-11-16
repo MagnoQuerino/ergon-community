@@ -202,6 +202,16 @@ describe('rotinas com o modelo de IA', () => {
     assert.ok(msgs.some((m: { role: string; content: string }) => m.role === 'agent' && /Prioridades: destravar/.test(m.content)));
   });
 
+  test('rotina que lê e-mail, sem conta conectada: não roda nem "valida" com nada lido; diz o que conectar', async () => {
+    const before = motor.started.length;
+    const rt = (await req(h, 'POST', '/api/routines', s, { template: 'caixa-inteligente', tz: SP })).json;
+    const r = await req(h, 'POST', `/api/routines/${rt.id}/run`, s, { clientRequestId: 'rotina-sem-conta-1' });
+    assert.equal(r.status, 409); assert.equal(r.json.code ?? r.json.error, 'needs_account');
+    assert.match(r.json.message, /E-mail \(Microsoft 365 ou Google\).*Conexões/);
+    assert.equal(motor.started.length, before, 'nenhuma chamada ao modelo');
+    assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = ? AND status = 'succeeded'", rt.id)!.n, 0);
+  });
+
   test('condição "sinal": sem tarefa parada não gasta modelo; com tarefa parada, chama o agente', async () => {
     const rt = (await req(h, 'POST', '/api/routines', s, { template: 'supervisor-projetos', tz: SP })).json;
     h.db.run('UPDATE tasks SET updated_at = ?, agent_id = COALESCE(agent_id, ?) WHERE workspace_id = ?', new Date().toISOString(), coord, s.workspaceId);

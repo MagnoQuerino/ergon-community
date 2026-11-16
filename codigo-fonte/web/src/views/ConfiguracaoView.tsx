@@ -2,7 +2,7 @@ import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
-import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, ProcessLimit, Usage } from '../lib/types.ts';
+import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, DailyLimit, ProcessLimit, Usage } from '../lib/types.ts';
 import { PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, compactarAjuda, compactarAtualizacao, compactarDepois, compactarRotulo, composicaoEstimada, composicaoIntro, composicaoNota, composicaoVazia, detalhe, fatias, passosAjuda, passosCompartilhado, passosDepois, tamanhoMedio } from '../lib/custo.ts';
 import { fmtMoeda, fmtNumero, tn, useT } from '../i18n/index.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
@@ -173,6 +173,7 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
         <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
           {t('configuracoes.andamento.iniciativa')}</label>
         <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+        {state.runs.daily && <DailyLimitField daily={state.runs.daily} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />}
         <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
         <RaciocinioField a={ajustes.a} salvar={ajustes.salvar} />
         <AjudantesField valor={state.teamAjudantes ?? { ligado: true, max: AJUDANTES_MAX }} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
@@ -327,6 +328,28 @@ function ComposicaoLinha({ a, geral }: { a: ComposicaoAgente; geral: boolean }) 
         {partes.map((p) => <li key={p.id}><i className={`custo--${p.id}`} aria-hidden="true" />{p.rotulo} {p.pct}</li>)}
       </ul>
       <p className="hint small">{detalhe(a)}</p>
+    </div>
+  );
+}
+
+/** Execuções por dia: sem limite por padrão; a pessoa limita se quiser (conta conversas, cards e rotinas). */
+function DailyLimitField({ daily, onSaved, onError }: { daily: DailyLimit; onSaved: () => void; onError: (text: string) => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const numbers = [...new Set([50, 100, 200, 400, 800, 1500, 3000, ...(daily.limit ? [daily.limit] : [])])].sort((a, b) => a - b);
+  const save = async (v: string) => {
+    setBusy(true);
+    try { await api.put('/api/runs/daily-limit', { limit: Number(v) }); onSaved(); }
+    catch (x) { onError(errMsg(x)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="field field--limit">
+      <label htmlFor="daily-limit">{t('configuracoes.diario.rotulo')}</label>
+      <select id="daily-limit" value={String(daily.limit)} disabled={busy} onChange={(e) => void save(e.target.value)} aria-describedby="daily-limit-hint">
+        <option value="0">{t('configuracoes.diario.semLimite')}</option>
+        {numbers.map((n) => <option key={n} value={n}>{t('configuracoes.diario.opcao', { n })}</option>)}
+      </select>
+      <small id="daily-limit-hint" className="muted">{t('configuracoes.diario.ajuda', { usadas: daily.used })}</small>
     </div>
   );
 }

@@ -420,7 +420,7 @@ export interface HermesControlClient {
   modelInfo(): Promise<{ model: string | null; provider: string | null }>;
   setDefaultModel(provider: string, model: string, confirm: boolean): Promise<{ ok: boolean; confirmMessage: string | null }>;
   skills(): Promise<SkillInfo[]>;
-  apiToolsets(): Promise<{ enabled: string[]; safe: string[] }>;
+  apiToolsets(): Promise<{ enabled: string[]; safe: string[]; guarded?: string[] }>;
   setApiToolsets(enabled: string[]): Promise<string[]>;
   /** imagem gerada pelo motor (só da pasta das geradas; a ponte confere) */
   media?(path: string): Promise<{ data: Buffer; mime: string }>;
@@ -463,6 +463,8 @@ export interface HermesControlClient {
   skillsDe?(perfil: string): SkillControl;
   /** Equipe nativa (rc.27): cria ou atualiza o perfil de um agente no motor (idempotente); ausente = motor sem perfis */
   perfil?(nome: string, pedido: PedidoDePerfil): Promise<{ criado: boolean; mudou: string[] }>;
+  /** Tira da pasta ativa do motor os perfis que não estão na lista (workspace apagado); ausente = motor de antes */
+  podarPerfis?(manter: string[]): Promise<{ movidos: string[]; ficaram: number }>;
   /** Rotinas no agendador do motor (rc.27, capacidade "rotinas"): o job da rotina no perfil do agente (idempotente), tirar,
    *  rodar agora (no próximo tique do agendador) e os jobs de um perfil. Ausente = motor sem a capacidade. */
   rotina?(id: string, pedido: PedidoDeRotina): Promise<JobDaRotina>;
@@ -760,7 +762,7 @@ export class HttpHermesControl implements HermesControlClient {
     return (Array.isArray(j) ? j : []).map((s: any) => ({ name: String(s.name), description: String(s.description ?? ''), category: String(s.category ?? 'outras'), enabled: s.enabled !== false, origem: origemDe(s.provenance, String(s.category ?? '')) }));
   }
 
-  async apiToolsets() { const j = await this.call('GET', '/ergon/v1/api-toolsets'); return { enabled: (j.enabled ?? []).map(String), safe: (j.safe ?? []).map(String) }; }
+  async apiToolsets() { const j = await this.call('GET', '/ergon/v1/api-toolsets'); return { enabled: (j.enabled ?? []).map(String), safe: (j.safe ?? []).map(String), guarded: (j.guarded ?? []).map(String) }; }
   async ergonAi(c: { baseUrl: string; apiKey: string; models: string[]; makeDefault: boolean }) {
     await this.call('POST', '/api/providers/custom-endpoints', { base_url: c.baseUrl, api_key: c.apiKey, model: c.models[0], models: c.models, make_default: c.makeDefault });
   }
@@ -781,6 +783,11 @@ export class HttpHermesControl implements HermesControlClient {
   }
   readonly skills_: SkillControl = this.skillsCom(null);
   skillsDe(perfil: string): SkillControl { return this.skillsCom(perfil); }
+
+  async podarPerfis(manter: string[]): Promise<{ movidos: string[]; ficaram: number }> {
+    const j = await this.call('POST', '/ergon/v1/perfis/podar', { manter }, 60000);
+    return { movidos: Array.isArray(j.movidos) ? j.movidos.map(String) : [], ficaram: Number(j.ficaram ?? 0) };
+  }
 
   async perfil(nome: string, pedido: PedidoDePerfil): Promise<{ criado: boolean; mudou: string[] }> {
     if (!PERFIL_NOME.test(nome)) throw new HermesError(400, 'perfil inválido');

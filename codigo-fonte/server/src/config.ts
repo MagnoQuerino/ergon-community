@@ -183,7 +183,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     runTimeoutSeconds: int(env.ERGON_RUN_TIMEOUT_SECONDS, 180, 5, 3600),
     longRunTimeoutSeconds: int(env.ERGON_LONG_RUN_TIMEOUT_SECONDS, 600, 5, 3600),
     maxRunAttempts: int(env.ERGON_MAX_RUN_ATTEMPTS, 2, 1, 5),
-    dailyRunLimit: int(env.ERGON_DAILY_RUN_LIMIT, 100, 1, 100000),
+    // 0 = sem limite (padrão: roda na máquina da pessoa; ela limita em Configurações se quiser)
+    dailyRunLimit: int(env.ERGON_DAILY_RUN_LIMIT, 0, 0, 100000),
     maxInputChars: int(env.ERGON_MAX_INPUT_CHARS, 200_000, 100, 4_000_000),
     maxContextChars: int(env.ERGON_MAX_CONTEXT_CHARS, 200_000, 1000, 4_000_000),
     maxDocumentChars: int(env.ERGON_MAX_DOCUMENT_CHARS, 400_000, 4000, 8_000_000),

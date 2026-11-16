@@ -11,7 +11,7 @@ import { readZip, writeZip } from '../src/lib/zip.ts';
 import { docx, p, pdf, xlsx } from './doc-fixtures.ts';
 import { withoutQuoted } from '../src/services/account-reader.ts';
 import { extractDoc } from '../src/services/doc-text.ts';
-import { conferir, lancamentosOf, obrigacoesOf, sheetLancamentos } from '../src/services/fin-parse.ts';
+import { conferir, duplicadosEntreDocumentos, lancamentosOf, obrigacoesOf, sheetLancamentos } from '../src/services/fin-parse.ts';
 import { buildPptx, slidesFromMarkdown } from '../src/services/pptx.ts';
 import { parseCategories, parseTaskProposals } from '../src/services/proposals.ts';
 import { searchTerms } from '../src/services/routine-sources.ts';
@@ -124,6 +124,16 @@ describe('financeiro: lançamentos, conferência e contratos', () => {
     assert.deepEqual(b.map((l) => [l.n, l.data, l.valor]), [[3, '2026-10-21', -1250], [4, '2026-10-22', 3400], [5, '2026-10-23', -35.9]]);
     const c = sheetLancamentos({ name: 'controle', rows: [['Data', 'Histórico', 'Débito', 'Crédito'], ['21/10/2026', 'Fornecedor Alfa', '1.250,00', ''], ['22/10/2026', 'Cliente Beta', '', '3.040,00']] }, 'controle.csv');
     assert.deepEqual(c.map((l) => [l.data, l.valor, l.descricao]), [['2026-10-21', -1250, 'Fornecedor Alfa'], ['2026-10-22', 3040, 'Cliente Beta']]);
+  });
+
+  test('a mesma despesa na NF-e e no extrato entra uma vez só (fica a nota); outro fornecedor ou outro valor, não', () => {
+    const a = lancamentosOf(extractDoc('nfe.xml', 'application/xml', Buffer.from(nfe)));
+    const b = lancamentosOf(extractDoc('extrato.ofx', '', Buffer.from(ofx)), a.length + 1);
+    assert.deepEqual(duplicadosEntreDocumentos([...a, ...b]), [{ n: 3, de: 1 }], 'o boleto do Fornecedor Alfa no extrato é a parcela 1 da nota');
+    const outro = b.map((l) => (l.n === 3 ? { ...l, descricao: 'PAG BOLETO CONDOMINIO' } : l));
+    assert.deepEqual(duplicadosEntreDocumentos([...a, ...outro]), [], 'mesmo valor, outro fornecedor: não é duplicado');
+    const valor = b.map((l) => (l.n === 3 ? { ...l, valor: -1200 } : l));
+    assert.deepEqual(duplicadosEntreDocumentos([...a, ...valor]), []);
   });
 
   test('conferência: casa por valor e data (±3 dias), separa o que só existe numa fonte e os valores diferentes', () => {

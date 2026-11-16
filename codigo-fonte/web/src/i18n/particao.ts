@@ -42,7 +42,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
     'components/AjustesEquipe.tsx', 'lib/ajustes.ts',
   ],
   // Entrar, Segurança, Minha conta e Pessoas
-  conta: ['components/AuthFlow.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],
+  conta: ['components/AuthFlow.tsx', 'components/TermosDeUso.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],
   // a Ajuda, as dicas, o tour e as boas-vindas
   ajuda: ['views/AjudaView.tsx', 'components/Tips.tsx', 'components/Tour.tsx', 'components/Onboarding.tsx', 'components/RelatarProblema.tsx', 'lib/relato.ts'],
   // "Aguardando você", a Atividade e o que vem do servidor (lib/textos-tela.ts: ver COMO-TRADUZIR.md)
@@ -54,6 +54,7 @@ export const FORA_DA_VARREDURA: readonly string[] = [
   'components/simple-icons.ts', // gerado do Simple Icons: só os nomes das marcas, que não se traduzem
   'views/world/glossario-moeda.ts', // a lista do glossário (a moeda escrita nas duas línguas), não texto de tela
   'views/world/textos.ts', // o dicionário do World nas duas línguas (fica no módulo do World, com as conferências dele)
+  'legal/termos.ts', // os termos de uso nas duas línguas (texto legal com versão própria: services/termos.ts no servidor)
   // a galeria dos cartões (rc.28): página só de desenvolvimento (web/galeria.html), com dados de exemplo; não vai para a versão publicada
   'galeria/Galeria.tsx',
   'galeria/main.tsx',

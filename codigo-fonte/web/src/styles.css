@@ -2562,3 +2562,11 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .ws-card__novo:hover { color: var(--ink); }
 /* a barra de cima na janela de 390 px: um pouco menos de espaço entre os botões (sem rolagem de lado) */
 @media (max-width: 420px) { .topbar { gap: 4px; } .topbar__icons { gap: 2px; } }
+
+/* Termos de uso (conta nova e aviso de versão nova) */
+.termos__card { width: min(640px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.termos { font-size: 0.92rem; line-height: 1.5; }
+.termos h3 { font-size: 0.98rem; margin: 14px 0 4px; }
+.termos p { margin: 0 0 8px; }
+.termos__resumo { font-weight: 600; }
+.termos__aceite { align-items: flex-start; font-size: 0.88rem; }

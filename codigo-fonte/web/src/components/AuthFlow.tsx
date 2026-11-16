@@ -1,3 +1,4 @@
+import { TermosDialog } from './TermosDeUso.tsx';
 import { useEffect, useState } from 'react';
 import { ApiError, api, errMsg, setCsrf } from '../lib/api.ts';
 import { passkeyLogin, passkeyUnlock, passkeysHere } from '../lib/passkey.ts';
@@ -86,7 +87,7 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
   const submit = () => run(mode === 'unseal' ? t('conta.entrar.abrindo') : mode === 'setup' ? t('conta.entrar.criandoProtegendo') : t('conta.entrar.entrando'), async () => {
     if (mode === 'setup') {
       if (f.password !== f.confirm) throw new Error(t('conta.senha.diferentes'));
-      const r = await api.post<LoginResult>('/api/auth/setup', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.setupTokenRequired ? { setupToken: f.setupToken } : {}) });
+      const r = await api.post<LoginResult>('/api/auth/setup', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.setupTokenRequired ? { setupToken: f.setupToken } : {}), ...(st.termosVersao ? { termos: st.termosVersao } : {}) });
       return after(r, false);
     }
     if (mode === 'unseal') return after(await api.post<LoginResult>('/api/unseal', { username: f.username, password: f.password }), true);
@@ -95,7 +96,7 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
   // conta nova neste computador: workspace, chave e frase próprios (as boas-vindas vêm em seguida)
   const register = () => run(t('conta.entrar.criandoConta'), async () => {
     if (f.password !== f.confirm) throw new Error(t('conta.senha.diferentes'));
-    const r = await api.post<LoginResult>('/api/auth/register', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.signup === 'convite' ? { invite: f.invite } : {}) });
+    const r = await api.post<LoginResult>('/api/auth/register', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.signup === 'convite' ? { invite: f.invite } : {}), ...(st.termosVersao ? { termos: st.termosVersao } : {}) });
     return after(r, false);
   });
   const recover = () => run(t('conta.entrar.conferindoFrase'), async () => {
@@ -117,6 +118,7 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
           <NewPassword value={f.password} confirm={f.confirm} onChange={(password, confirm) => setF({ ...f, password, confirm })} />
           {st.signup === 'convite' && <label className="field">{t('conta.registro.convite')}<input required autoComplete="off" spellCheck={false} placeholder="ABCD-2345" value={f.invite} onChange={(e) => setF({ ...f, invite: e.target.value.toUpperCase() })} maxLength={20} /></label>}
           {st.signup === 'convite' && <p className="hint">{t('conta.registro.conviteDica')}</p>}
+          <AceitoTermos />
           {err && <p className="error" role="alert">{err}</p>}
           <button className="btn btn--primary btn--block" disabled={!!busy}>{busy ?? t('conta.entrar.criarProteger')}</button>
         </form>
@@ -174,6 +176,7 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
           ? <NewPassword value={f.password} confirm={f.confirm} onChange={(password, confirm) => setF({ ...f, password, confirm })} />
           : <label className="field">{t('conta.senha.rotulo')}<input required type="password" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>}
         {mode === 'setup' && st.setupTokenRequired && <label className="field">{t('conta.entrar.codigoConfiguracao')}<input required value={f.setupToken} onChange={(e) => setF({ ...f, setupToken: e.target.value })} /></label>}
+        {mode === 'setup' && <AceitoTermos />}
         {err && <p className="error" role="alert">{err}</p>}
         <button className="btn btn--primary btn--block" type="submit" disabled={!!busy}>{busy ?? (mode === 'setup' ? t('conta.entrar.criarProteger') : mode === 'unseal' ? t('conta.entrar.abrir') : t('conta.entrar.entrar'))}</button>
       </form>
@@ -189,6 +192,20 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
       {mode === 'setup' && <p className="hint">{t('conta.entrar.setupEmSeguida')}</p>}
       {mode === 'unseal' && <p className="hint">{t('conta.entrar.trancadoDica')}</p>}
     </Card>
+  );
+}
+
+/** "Li e aceito os termos de uso" (obrigatório na conta nova), com o texto num clique. */
+function AceitoTermos() {
+  const t = useT();
+  const [ver, setVer] = useState(false);
+  return (
+    <>
+      <label className="check termos__aceite"><input type="checkbox" required /> {tn('conta.termos.aceitoNaConta', {
+        termos: <button type="button" className="link" onClick={() => setVer(true)}>{t('conta.termos.link')}</button>,
+      })}</label>
+      {ver && <TermosDialog onClose={() => setVer(false)} />}
+    </>
   );
 }
 
