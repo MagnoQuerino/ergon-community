@@ -114,9 +114,12 @@ describe('a soma do que foi dado e a renovação', () => {
     const t = new URL(String((await voltar(`state=${base.searchParams.get('state')}&code=c1`)).headers.location));
     // a Microsoft devolve, na etapa do Teams, só o que ela pediu de novo: o de antes não pode se perder
     respostaToken = (b, n) => json({ access_token: `acesso-${n}`, refresh_token: `renova-${n}`, expires_in: 3599, scope: ESCOPOS_MICROSOFT.trabalho.join(' '), id_token: idToken({ tid, preferred_username: 'ana@empresa.com' }) });
-    const leitura = new URL(String((await voltar(`state=${t.searchParams.get('state')}&code=c2`)).headers.location));
-    assert.match(leitura.searchParams.get('scope') ?? '', /Mail\.Read/, 'segue para a leitura');
+    // conta de trabalho: o primeiro login para no básico; a leitura é a pessoa quem pede ("Liberar leitura")
+    assert.equal(String((await voltar(`state=${t.searchParams.get('state')}&code=c2`)).headers.location), '/#conexoes?microsoft=basico');
     assert.deepEqual(new Set(lower(escoposDoPedido(cred().granted))), new Set(lower(A_TRABALHO)), 'a soma das etapas A');
+    respostaToken = padrao;
+    const leitura = await comecar({ etapa: 'leitura' });
+    assert.match(leitura.searchParams.get('scope') ?? '', /Mail\.Read/, 'a leitura, pedida de propósito');
     // a empresa exige o administrador: a pessoa volta sem dar a leitura
     const nao = await voltar(`state=${leitura.searchParams.get('state')}&error=access_denied&error_description=AADSTS90094%3A+The+grant+requires+admin+permission.`);
     assert.match(String(nao.headers.location), /microsoft=sem-leitura/);

@@ -99,8 +99,11 @@ import { ESCOPOS_MICROSOFT } from './conexoes/acoes/microsoft.ts';
 // ------------------------------------------------------------------------------------------------- etapas da Microsoft
 /**
  * A: base (qualquer conta) e trabalho (Teams, conta de trabalho ou escola); B: leitura; C: canais (opcional, sempre o
- * administrador). O login encadeado segue base → trabalho → leitura → canais de uma vez, sem a pessoa voltar para clicar de novo;
- * os canais só entram no encadeamento quando se sabe que a conta é de quem aprova pela empresa (as funções de diretório no token);
+ * administrador). O login encadeado segue base → trabalho → leitura → canais de uma vez, sem a pessoa voltar para clicar de novo.
+ * Em conta de trabalho, a leitura só entra no encadeamento quando a conta aprova pela empresa ou o administrador já aprovou (na
+ * política padrão da Microsoft ela exige o administrador): sem isso, o primeiro login termina com o básico e a tela oferece
+ * "Liberar leitura" e o pedido ao administrador. Nunca `prompt=admin_consent` nem `/.default` no login da pessoa.
+ * Os canais só entram no encadeamento quando se sabe que a conta é de quem aprova pela empresa (as funções de diretório no token);
  * sem saber, sabendo que não, ou se eles já voltaram sem ser dados, a tela oferece o pedido ao administrador, sem mandar a pessoa
  * a uma página da Microsoft sem saída.
  */
@@ -192,19 +195,31 @@ export function podeAprovarPelaEmpresa(...tokens: Array<string | undefined>): bo
  * `semCanais`: o encadeamento terminou antes dos canais porque eles precisam do administrador e não se sabe que a conta é a de
  * quem aprova pela empresa (ou eles já voltaram sem ser dados): a tela oferece o pedido.
  */
-interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; /** qual das contas deste aplicativo ('' = a principal) */ conta: string; next?: string; proxima?: Etapa; semCanais?: boolean }
+/**
+ * `basico`: conta de trabalho ou escola conectada só com o que a própria pessoa autoriza (enviar e-mail, criar arquivos, o
+ * Teams). A leitura não entra sozinha no primeiro login: na política padrão da Microsoft ela exige o administrador, e a pessoa
+ * ia parar numa página "Precisa da aprovação do administrador" logo depois de conectar. A tela oferece "Liberar leitura" (passa
+ * quando a empresa deixa) e o pedido ao administrador pronto.
+ */
+interface FimDoLogin { workspaceId: string; userId: string; account: string; etapa: Etapa; /** qual das contas deste aplicativo ('' = a principal) */ conta: string; next?: string; proxima?: Etapa; semCanais?: boolean; basico?: boolean }
 
 export class SsoAuth {
   private readonly cfg: Config;
   private readonly secrets: SecretStore;
-  private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number; etapa: Etapa; scopes: string; conta: string }>();
+  /** origem: a etapa que a pessoa pediu ao clicar (o encadeamento passa adiante a do primeiro login) */
+  private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number; etapa: Etapa; origem: Etapa; scopes: string; conta: string }>();
   private readonly refreshing = new Map<string, Promise<string>>();
   /** login com outra conta neste workspace: quem usava a antiga em outros workspaces fica com ela */
   private readonly aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string, slot: string) => void;
   /** a etapa já foi pedida a esta mesma conta e voltou sem ser dada (ou não voltou): o encadeamento não insiste (integrations.ts) */
   private readonly jaRecusada: (workspaceId: string, etapa: Etapa, slot: string) => boolean;
+  /** o administrador já aprovou a etapa pela empresa (o pedido pelo link voltou aprovado): o encadeamento pode levar a ela */
+  private readonly aprovadaPelaEmpresa: (workspaceId: string, etapa: Etapa, slot: string) => boolean;
   constructor(cfg: Config, secrets: SecretStore, aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string, slot: string) => void = () => undefined,
-    jaRecusada: (workspaceId: string, etapa: Etapa, slot: string) => boolean = () => false) { this.aoTrocarConta = aoTrocarConta; this.jaRecusada = jaRecusada; this.cfg = cfg; this.secrets = secrets; }
+    jaRecusada: (workspaceId: string, etapa: Etapa, slot: string) => boolean = () => false,
+    aprovadaPelaEmpresa: (workspaceId: string, etapa: Etapa, slot: string) => boolean = () => false) {
+    this.aoTrocarConta = aoTrocarConta; this.jaRecusada = jaRecusada; this.aprovadaPelaEmpresa = aprovadaPelaEmpresa; this.cfg = cfg; this.secrets = secrets;
+  }
 
   /** O botão só funciona com o app registrado no provedor (identificador e, no Google, o segredo). */
   configured(kind: SsoKind): boolean {
@@ -226,7 +241,7 @@ export class SsoAuth {
    * Endereço do login. Microsoft: `etapa` diz o que pedir (a base escolhe a conta; as outras seguem com a mesma, sem escolher de
    * novo, e mostram só o consentimento do que falta). `trabalho`: conta de trabalho ou escola (sem dizer, vale a credencial guardada).
    */
-  start(kind: SsoKind, workspaceId: string, userId: string, opts: { etapa?: Etapa; loginHint?: string; trabalho?: boolean; conta?: string } = {}): string {
+  start(kind: SsoKind, workspaceId: string, userId: string, opts: { etapa?: Etapa; loginHint?: string; trabalho?: boolean; conta?: string; origem?: Etapa } = {}): string {
     const conta = opts.conta ?? '';
     const p = SSO[kind];
     if (!this.configured(kind)) throw new HttpError(409, 'sso_not_configured', `Falta registrar o aplicativo Ergon ${p.place}: é um passo único de quem instala o Ergon (veja ${p.doc}).`);
@@ -244,7 +259,7 @@ export class SsoAuth {
       const hint = opts.loginHint ?? (t?.account?.includes('@') ? t.account : undefined);
       extra = { response_mode: 'query', ...(hint ? { login_hint: hint } : {}) };
     }
-    this.pending.set(state, { kind, workspaceId, userId, verifier, at: Date.now(), etapa, scopes, conta });
+    this.pending.set(state, { kind, workspaceId, userId, verifier, at: Date.now(), etapa, origem: opts.origem ?? etapa, scopes, conta });
     const q = new URLSearchParams({
       client_id: p.clientId(this.cfg)!, response_type: 'code', redirect_uri: this.redirectUri(kind), scope: scopes,
       state, code_challenge: challenge, code_challenge_method: 'S256', ...extra,
@@ -255,16 +270,18 @@ export class SsoAuth {
   /**
    * A próxima etapa do login encadeado: pula a que a conta já deu e segue até os canais (conta pessoal não tem Teams: para ela, a
    * lista acaba na leitura). `canais` false: não se sabe que a conta aprova pela empresa; o encadeamento termina e diz isso
-   * (semCanais), em vez de mandar a pessoa a uma página da Microsoft sem saída.
+   * (semCanais), em vez de mandar a pessoa a uma página da Microsoft sem saída. `leitura` false (conta de trabalho que não se sabe
+   * aprovar pela empresa, sem aprovação do administrador): o encadeamento termina antes dela (basico), pelo mesmo motivo.
    */
-  private proximaEtapa(etapa: Etapa, trabalho: boolean, dadas: string[], canais: boolean): { proxima: Etapa | null; semCanais: boolean } {
+  private proximaEtapa(etapa: Etapa, trabalho: boolean, dadas: string[], leitura: boolean, canais: boolean): { proxima: Etapa | null; semCanais: boolean; basico: boolean } {
     const tem = new Set(dadas.map((e) => e.toLowerCase()));
     for (const e of ETAPAS.slice(ETAPAS.indexOf(etapa) + 1)) {
       if (!proprioDaEtapa(e, trabalho).some((x) => !tem.has(x.toLowerCase()))) continue;
-      if (e === 'canais' && !canais) return { proxima: null, semCanais: true };
-      return { proxima: e, semCanais: false };
+      if (e === 'leitura' && !leitura) return { proxima: null, semCanais: false, basico: true };
+      if (e === 'canais' && !canais) return { proxima: null, semCanais: true, basico: false };
+      return { proxima: e, semCanais: false, basico: false };
     }
-    return { proxima: null, semCanais: false };
+    return { proxima: null, semCanais: false, basico: false };
   }
 
   /** Volta do login: o `state` (aleatório, uso único) é a prova de quem começou o fluxo — e de qual provedor. */
@@ -310,12 +327,19 @@ export class SsoAuth {
       // pedido ao administrador (sem mandar a pessoa a uma página da Microsoft sem saída)
       const aprova = trabalho ? podeAprovarPelaEmpresa(idToken, keep.access_token) : null;
       const canais = aprova === true && !(mesma && this.jaRecusada(s.workspaceId, 'canais', conta));
-      const { proxima, semCanais } = this.proximaEtapa(s.etapa, trabalho, listaDeEscopos(granted), canais);
+      // a leitura (Mail.Read, Calendars.*, Tasks.ReadWrite, Files.Read.All, People.Read, Chat.Read) está na lista do que a política
+      // padrão gerenciada pela Microsoft NÃO deixa o usuário comum autorizar (FORA_DO_CONSENTIMENTO_DO_USUARIO): em conta de
+      // trabalho, o primeiro login ("Entrar com a Microsoft") só leva a ela quando a conta aprova pela empresa ou o administrador já
+      // aprovou. Se a empresa já tiver aprovado tudo, o token da etapa base volta com ela e o encadeamento nem precisa pedir. Uma etapa
+      // pedida de propósito no cartão (o Teams de novo, depois do administrador) segue como antes. Conta pessoal sempre autoriza
+      const leitura = !trabalho || s.origem !== 'base' || aprova === true || this.aprovadaPelaEmpresa(s.workspaceId, 'leitura', conta);
+      const { proxima, semCanais, basico } = this.proximaEtapa(s.etapa, trabalho, listaDeEscopos(granted), leitura, canais);
       if (proxima) {
         const hint = typeof claims.preferred_username === 'string' ? claims.preferred_username : undefined;
-        return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta, proxima, next: this.start(kind, s.workspaceId, s.userId, { etapa: proxima, loginHint: hint, trabalho, conta }) };
+        return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta, proxima, next: this.start(kind, s.workspaceId, s.userId, { etapa: proxima, loginHint: hint, trabalho, conta, origem: s.origem }) };
       }
       if (semCanais) return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta, semCanais: true };
+      if (basico) return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta, basico: true };
     }
     return { workspaceId: s.workspaceId, userId: s.userId, account, etapa: s.etapa, conta };
   }

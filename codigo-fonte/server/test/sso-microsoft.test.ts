@@ -56,7 +56,7 @@ describe('Microsoft: o app público vem pronto e o login serve para conta pessoa
     assert.doesNotMatch(tokenCalls.at(-1)!.scope, /Chat\./);
   });
 
-  test('conta de trabalho: base, Teams e leitura em sequência; recusar uma etapa mantém as anteriores', async () => {
+  test('conta de trabalho: base e Teams em sequência; a leitura só quando a pessoa libera; recusar uma etapa mantém as anteriores', async () => {
     tid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const u = await begin();
     const r = await voltar(u.searchParams.get('state'), 'code=c2');
@@ -70,17 +70,18 @@ describe('Microsoft: o app público vem pronto e o login serve para conta pessoa
     const no = await voltar(teams.searchParams.get('state'), 'error=access_denied');
     assert.match(String(no.headers.location), /microsoft=parcial/, 'recusar o Teams não desfaz a conexão, e a tela diz o que ficou de fora');
     assert.equal(await estado(), 'connected');
-    // aceitando: segue para a leitura; recusá-la (a empresa exige o administrador) deixa o resto valendo
+    // aceitando: o primeiro login para aí (a leitura, na política padrão da Microsoft, exige o administrador numa empresa)
     const u2 = await begin();
     const t2 = new URL(String((await voltar(u2.searchParams.get('state'), 'code=c3')).headers.location));
-    const l2 = new URL(String((await voltar(t2.searchParams.get('state'), 'code=c4')).headers.location));
+    assert.equal(String((await voltar(t2.searchParams.get('state'), 'code=c4')).headers.location), '/#conexoes?microsoft=basico');
+    // "Liberar leitura": a leitura, pedida de propósito; recusá-la (a empresa exige o administrador) deixa o resto valendo
+    const liberar = async () => new URL((await req(h, 'POST', '/api/integrations/microsoft/start', s, { etapa: 'leitura' })).json.url);
+    const l2 = await liberar();
     assert.ok((l2.searchParams.get('scope') ?? '').split(' ').includes('Chat.Read')); assert.match(l2.searchParams.get('scope') ?? '', /Mail\.Read/);
     assert.match(String((await voltar(l2.searchParams.get('state'), 'error=access_denied')).headers.location), /microsoft=sem-leitura/);
     assert.equal(await estado(), 'connected');
-    // de novo, agora liberando tudo
-    const u3 = await begin();
-    const t3 = new URL(String((await voltar(u3.searchParams.get('state'), 'code=c5')).headers.location));
-    const l3 = new URL(String((await voltar(t3.searchParams.get('state'), 'code=c6')).headers.location));
+    // de novo, agora liberando
+    const l3 = await liberar();
     // e termina aí: sem saber se a conta aprova pela empresa, não leva aos canais (a tela oferece o pedido ao administrador)
     assert.match(String((await voltar(l3.searchParams.get('state'), 'code=c7')).headers.location), /microsoft=sem-canais$/);
     assert.ok(tokenCalls.at(-1)!.scope.split(' ').includes('Chat.Read'));

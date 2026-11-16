@@ -166,7 +166,7 @@ const NOME: Record<Provedor, string> = { microsoft: 'Microsoft', google: 'Google
 const frase = (s0: string) => comPonto(maiusc(s0.trim()));
 
 /** a empresa exige o administrador (Microsoft: AADSTS90094/90095/65001; Google: admin_policy_enforced) */
-const PRECISA_ADMIN = /AADSTS(?:90094|90095|65001)\b|\bconsent_required\b|\badmin_policy_enforced\b/i;
+const PRECISA_ADMIN = /AADSTS(?:90094|90095|65001)\b|\bconsent_required\b|\badmin_policy_enforced\b|^A (?:sua )?empresa exige\b/i; // i18n-ok: reconhece também o texto que o servidor grava
 /** a própria pessoa recusou na página da conta */
 const RECUSOU = /AADSTS65004\b|\baccess_denied\b/i;
 const CODIGO_MS = /\b(AADSTS\d+)\b/;
@@ -183,7 +183,8 @@ export function motivoDoLogin(erro: string | null | undefined, provedor: Provedo
   const s = (erro ?? '').trim();
   if (!s) return null;
   if (ADMIN_NAO_APROVOU.test(s)) return t('servidor.tela.login.adminNaoAprovou');
-  if (PRECISA_ADMIN.test(s)) return t('servidor.tela.login.exigeAdmin');
+  // Microsoft (AADSTS65001/90094/90095): a regra é do locatário; a tela tem o pedido ao administrador pronto, e o básico já vale
+  if (PRECISA_ADMIN.test(s)) return provedor === 'google' ? t('servidor.tela.login.exigeAdmin') : t('servidor.tela.login.exigeAdminMicrosoft');
   if (RECUSOU.test(s)) return provedor === 'google' ? t('servidor.tela.login.recusadaGoogle') : t('servidor.tela.login.recusadaMicrosoft');
   const codigo = CODIGO_MS.exec(s)?.[1] ?? CRU_OAUTH.exec(s)?.[1];
   if (codigo) return provedor === 'google' ? t('servidor.tela.login.naoConcluiuGoogle', { codigo }) : t('servidor.tela.login.naoConcluiuMicrosoft', { codigo });
@@ -210,6 +211,8 @@ export function textoDaVolta(kind: Provedor, status: string, conectada: boolean)
     case 'conectado': return t('servidor.tela.volta.conectado', { nome });
     case 'parcial': return t('servidor.tela.volta.parcial', { nome });
     case 'sem-leitura': return t('servidor.tela.volta.semLeitura', { nome });
+    // conta de trabalho: o primeiro login para no que a própria pessoa autoriza; a leitura é o passo seguinte, no cartão
+    case 'basico': return t('servidor.tela.volta.basico', { nome });
     // o Teams que a empresa só libera com o administrador: o que a pessoa já deu continua valendo
     case 'precisa-admin': return t('servidor.tela.volta.precisaAdmin', { nome });
     // o login seguiu sozinho até o fim: só os canais (opcionais) esperam o administrador
