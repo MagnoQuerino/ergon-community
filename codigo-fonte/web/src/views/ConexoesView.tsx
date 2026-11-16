@@ -111,10 +111,39 @@ export function ConexoesView() {
   const achadosNoDestaque = term || onlyOn ? destaques.filter(casa) : [];
   const connected = [...apps, ...destaques].filter((i) => i.state === 'connected').length;
   const ready = [...apps, ...destaques].filter((i) => i.auth !== 'soon').length;
-  const irAte = (kind: string) => document.getElementById(`conn-${kind}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // um cartão aberto por vez, em toda a tela; a busca que acha um destaque abre o bloco dele
+  const irAte = (kind: string) => { setOpen(kind); window.setTimeout(() => document.getElementById(`conn-${kind}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 40); };
   const estadoDe = (kind: string): EstadoDe => ({ eu: cx.data?.ligadas.find((x) => x.kind === kind) ?? null, pronto: !!cx.data, reload: cx.reload });
+  const canais = useResource<Record<NomeCanal, EstadoCanal>>('/api/canais', ['canais.changed']);
+  const teams = useResource<EstadoTeams>('/api/teams-app', ['teams.changed']);
+  // Esc (de qualquer lugar da tela) fecha o cartão aberto e devolve o foco ao bloco dele
+  const fechar = () => { const k = open; setOpen(null); if (k) window.setTimeout(() => document.getElementById(`tile-${k}`)?.focus(), 0); };
+  const blocoDe = (i: Integration, extra?: { detalhes?: ReactNode; topo?: ReactNode }): Bloco => ({
+    kind: i.kind, name: i.name, selo: badgeOf(i), soon: i.auth === 'soon', contas: (i.contas ?? []).filter((c) => c.state === 'connected').length,
+    corpo: () => <Detail i={i} reload={list.reload} estado={estadoDe(i.kind)} onClose={fechar} detalhes={extra?.detalhes} topo={extra?.topo} />,
+  });
+  const contas: Bloco[] = [
+    ...accounts.map((i) => blocoDe(i, i.kind === 'microsoft' ? {
+      // duas coisas diferentes que o nome "Teams" junta: a conta (aqui) e conversar com a equipe por lá (em "Conversar com a equipe")
+      detalhes: <ul className="conn-explica small"><li><b>{t('conexoes.contas.m365Titulo')}</b> {t('conexoes.contas.m365Texto')}</li><li><b>{t('conexoes.contas.teamsTitulo')}</b> {t('conexoes.contas.teamsTexto')}</li></ul>,
+    } : undefined)),
+    ...(wa ? [blocoDe(wa, {
+      topo: <p className="small"><span className="badge badge--exp">{t('conexoes.wa.experimental')}</span> <button className="link link--inline" onClick={() => setRisks(true)}>{t('conexoes.wa.verRiscos')}</button></p>,
+      detalhes: <p className="small">{t('conexoes.wa.intro')}</p>,
+    })] : []),
+  ];
+  const ligadosTeams = teams.data?.bindings.filter((b) => b.status !== 'revoked').length ?? 0;
+  const seloCanal = (e: EstadoCanal | undefined): [string, string] => (!e ? ['…', ''] : e.ligado ? [t('conexoes.estado.connected'), 'badge--ok'] : !e.disponivel ? [t('conexoes.estado.soon'), 'badge--soon'] : [t('conexoes.estado.off'), '']);
+  const conversar: Bloco[] = [
+    // "equipe-": o Telegram e o Discord também existem como conexão de conta (em Conversas); o bloco daqui é outro
+    { kind: 'equipe-teams', logo: 'teams', name: 'Teams', contas: ligadosTeams, soon: teams.data ? !teams.data.available : false,
+      selo: !teams.data ? ['…', ''] : !teams.data.available ? [t('conexoes.estado.soon'), 'badge--soon'] : ligadosTeams ? [t('conexoes.estado.connected'), 'badge--ok'] : [t('conexoes.estado.off'), ''],
+      corpo: () => <TeamsConversa onClose={fechar} /> },
+    ...(['telegram', 'discord'] as const).map((c): Bloco => ({ kind: `equipe-${c}`, logo: c, name: c === 'telegram' ? 'Telegram' : 'Discord', selo: seloCanal(canais.data?.[c]), soon: !!canais.data && !canais.data[c].disponivel,
+      corpo: () => (canais.data ? <ConversaPorCanal canal={c} estado={canais.data[c]} reload={canais.reload} onClose={fechar} /> : null) })),
+  ];
   return (
-    <div className="page">
+    <div className="page" onKeyDown={(e) => { if (e.key === 'Escape' && open && !e.defaultPrevented) { e.preventDefault(); fechar(); } }}>
       <header className="page__head cena-cab">
         <h2>{t('conexoes.titulo')}</h2>
         <p className="muted">{t('conexoes.intro')}</p>
@@ -132,34 +161,21 @@ export function ConexoesView() {
         <AiAccounts />
       </section>
 
-      {wa && (
-        <section className="conn-group conn-group--feature">
-          <h3>WhatsApp <span className="badge badge--exp">{t('conexoes.wa.experimental')}</span></h3>
-          <p className="muted small">{t('conexoes.wa.intro')} <button className="link link--inline" onClick={() => setRisks(true)}>{t('conexoes.wa.verRiscos')}</button></p>
-          <Detail i={wa} reload={list.reload} estado={estadoDe(wa.kind)} feature />
+      {/* rc.33: cada conexão é um bloco (logo, nome, estado); clicar abre o cartão dela, um por vez, ocupando a linha */}
+      {contas.length > 0 && (
+        <section className="conn-group" id="conn-contas">
+          <h3>{t('conexoes.contas.tituloGrupo')}</h3>
+          <p className="muted small">{t('conexoes.contas.curto')}</p>
+          <GradeDeBlocos blocos={contas} aberto={open} abrir={setOpen} />
           {risks && <WhatsAppRisks onClose={() => setRisks(false)} />}
         </section>
       )}
 
-      {accounts.length > 0 && (
-        <section className="conn-group conn-group--feature">
-          <h3>{t('conexoes.contas.titulo')}</h3>
-          <p className="muted small">{t('conexoes.contas.texto')}</p>
-          {/* duas coisas diferentes que o nome "Teams" junta: a conta (agora) e conversar com o coordenador por lá (depois) */}
-          <ul className="conn-explica small">
-            <li><b>{t('conexoes.contas.m365Titulo')}</b> {t('conexoes.contas.m365Texto')}</li>
-            <li><b>{t('conexoes.contas.teamsTitulo')}</b> {t('conexoes.contas.teamsTexto')}</li>
-          </ul>
-          <div className="feature-grid">{accounts.map((i) => <Detail key={i.kind} i={i} reload={list.reload} estado={estadoDe(i.kind)} feature />)}</div>
-        </section>
-      )}
-
-      <section className="conn-group conn-group--feature" id="conn-teams-app">
-        <h3>Teams</h3>
-        <TeamsConversa />
+      <section className="conn-group" id="conn-canais">
+        <h3>{t('conexoes.canal.grupoTitulo')}</h3>
+        <p className="muted small">{t('conexoes.canal.grupoTexto')}</p>
+        <GradeDeBlocos blocos={conversar} aberto={open} abrir={setOpen} />
       </section>
-
-      <ConversaPorCanais />
 
       <LiberarTudo estado={cx} />
       <Regras />
@@ -176,20 +192,7 @@ export function ConexoesView() {
           <section className="conn-group" key={sec.titulo}>
             <h3>{t(sec.titulo)}</h3>
             <p className="muted small">{t(sec.texto)}</p>
-            <div className="conn-tiles">
-              {nela.map((i) => {
-                const [label, cls] = badgeOf(i);
-                return (
-                  <Fragment key={i.kind}>
-                    <button className={`conn-tile ${open === i.kind ? 'conn-tile--on' : ''} ${i.auth === 'soon' ? 'conn-tile--soon' : ''}`} onClick={() => setOpen(open === i.kind ? null : i.kind)} aria-expanded={open === i.kind}>
-                      <BrandLogo kind={i.kind} name={i.name} />
-                      <span className="conn-tile__txt"><b>{i.name}</b><span className={`badge ${cls}`}>{label}</span></span>
-                    </button>
-                    {open === i.kind && <Detail i={i} reload={list.reload} estado={estadoDe(i.kind)} onClose={() => setOpen(null)} />}
-                  </Fragment>
-                );
-              })}
-            </div>
+            <GradeDeBlocos blocos={nela.map((i) => blocoDe(i))} aberto={open} abrir={setOpen} />
           </section>
         );
       })}
@@ -199,6 +202,32 @@ export function ConexoesView() {
         <p className="muted">{tn('conexoes.busca.emDestaque', { lista: achadosNoDestaque.map((i, n) => <Fragment key={i.kind}>{n ? ', ' : ''}<button className="link link--inline" onClick={() => irAte(i.kind)}>{i.name}</button></Fragment>) })}</p>
       )}
       {list.data && !shown.length && !achadosNoDestaque.length && <p className="muted">{term ? t('conexoes.busca.nadaPara', { q }) : t('conexoes.busca.nada')}</p>}
+    </div>
+  );
+}
+
+/** Um bloco da grade: o que se vê fechado (logo, nome, estado, quantas contas) e o cartão que abre ao clicar. */
+interface Bloco { kind: string; /** o logo, quando não é o do kind */ logo?: string; name: string; selo: [string, string]; soon?: boolean; contas?: number; corpo: () => ReactNode }
+/**
+ * A grade de blocos de mesmo tamanho (rc.33): o cartão aberto entra logo depois do bloco, ocupando a linha inteira; os
+ * outros blocos completam a linha de cima. Só um aberto por vez (o estado é da tela); o X e o Esc fecham.
+ */
+function GradeDeBlocos({ blocos, aberto, abrir }: { blocos: Bloco[]; aberto: string | null; abrir: (k: string | null) => void }) {
+  const t = useT();
+  return (
+    <div className="conn-tiles">
+      {blocos.map((b) => (
+        <Fragment key={b.kind}>
+          <button id={`tile-${b.kind}`} type="button" className={`conn-tile ${aberto === b.kind ? 'conn-tile--on' : ''} ${b.soon ? 'conn-tile--soon' : ''}`}
+            onClick={() => abrir(aberto === b.kind ? null : b.kind)} aria-expanded={aberto === b.kind} aria-controls={aberto === b.kind ? `conn-${b.kind}` : undefined}>
+            <BrandLogo kind={b.logo ?? b.kind} name={b.name} />
+            <span className="conn-tile__txt"><b>{b.name}</b>
+              <span className="conn-tile__selos"><span className={`badge ${b.selo[1]}`}>{b.selo[0]}</span>{(b.contas ?? 0) > 1 && <span className="muted small">{t('conexoes.multi.nContas', { n: b.contas! })}</span>}</span>
+            </span>
+          </button>
+          {aberto === b.kind && b.corpo()}
+        </Fragment>
+      ))}
     </div>
   );
 }
@@ -221,7 +250,8 @@ function ComLinkTarefas({ texto }: { texto: string }) {
   return <>{antes}{depois.length > 0 && <><a href="#tarefas">{palavra}</a>{depois.join(palavra)}</>}</>;
 }
 
-function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reload: () => void; estado: EstadoDe; onClose?: () => void; feature?: boolean }) {
+function Detail({ i, reload, estado, onClose, detalhes, topo }: { i: Integration; reload: () => void; estado: EstadoDe; onClose?: () => void;
+  /** as letras miúdas do cartão, atrás de "Detalhes"; topo: logo abaixo do cabeçalho (o selo experimental do WhatsApp) */ detalhes?: ReactNode; topo?: ReactNode }) {
   const t = useT();
   const [label, cls] = badgeOf(i);
   // o teste apontou permissão que falta ("use o botão Autorizar de novo, acima"): o botão aparece, mesmo sem problema gravado
@@ -232,12 +262,13 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
   // na Microsoft, escolher a lista depende da leitura: o passo só depois de saber o que a conta liberou (sem trocar de texto na tela)
   const passo = i.state === 'connected' && i.tasks && (i.kind !== 'microsoft' || estado.pronto) ? proximoPassoTarefas(i.kind, estado.eu?.etapas ?? []) : null;
   return (
-    <article id={`conn-${i.kind}`} className={`card conn ${feature ? 'feature' : 'conn-detail'} ${feature && i.state === 'connected' ? 'feature--on' : ''}`}>
+    <article id={`conn-${i.kind}`} className={`card conn conn-detail ${i.state === 'connected' ? 'feature--on' : ''}`}>
       <header className="row">
-        <BrandLogo kind={i.kind} name={i.name} size={feature ? 36 : 32} />
+        <BrandLogo kind={i.kind} name={i.name} size={32} />
         <strong>{i.name}</strong><span className={`badge ${cls}`}>{label}</span>
-        {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}
+        {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}
       </header>
+      {topo}
       {/* conectada, o cartão é o resumo (conta, estado, ações); o texto de apresentação fica para antes de conectar */}
       {i.state !== 'connected' && <p className="muted">{i.about}</p>}
       {i.state === 'connected' && i.sharedFrom && <p className="hint">{tn('conexoes.detalhe.compartilhada', { workspace: <b>{i.sharedFrom}</b> })}</p>}
@@ -264,6 +295,7 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
           </details>
         </div>
       )}
+      {detalhes && <details className="conn-secao conn-secao--detalhes"><summary>{t('conexoes.detalhes')}</summary>{detalhes}</details>}
     </article>
   );
 }
@@ -1018,7 +1050,7 @@ const ERRO_CANAL: Record<string, `conexoes.canal.erro.${'formato' | 'codigo' | '
  * equipe dela, protegido), manda uma mensagem ao bot, digita o código que ele responde e confirma com a senha. Daí em
  * diante, o que ela escreve ao bot vai para a equipe, e as respostas, os cartões e os avisos voltam por lá.
  */
-function ConversaPorCanal({ canal, estado, reload }: { canal: NomeCanal; estado: EstadoCanal; reload: () => void }) {
+function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal; estado: EstadoCanal; reload: () => void; onClose?: () => void }) {
   const t = useT();
   const [token, setToken] = useState('');
   const [codigo, setCodigo] = useState('');
@@ -1060,8 +1092,9 @@ function ConversaPorCanal({ canal, estado, reload }: { canal: NomeCanal; estado:
     </form>
   );
   return (
-    <article className={`card conn feature ${e.ligado ? 'feature--on' : ''}`}>
-      <header className="row"><BrandLogo kind={canal} name={nome} size={36} /><strong>{titulo}</strong></header>
+    <article id={`conn-equipe-${canal}`} className={`card conn conn-detail ${e.ligado ? 'feature--on' : ''}`}>
+      <header className="row"><BrandLogo kind={canal} name={nome} size={32} /><strong>{titulo}</strong>
+        {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}</header>
       <p className="muted">{t('conexoes.canal.intro')}</p>
       {!e.disponivel ? <p className="hint">{e.motivo === 'versao' ? t('conexoes.canal.indisponivel.versao') : t('conexoes.canal.indisponivel.motor')}</p> : <>
         {e.ligado ? <>
@@ -1073,7 +1106,6 @@ function ConversaPorCanal({ canal, estado, reload }: { canal: NomeCanal; estado:
         </> : !e.bot || trocar ? <>
           {passos}
           {formBot}
-          <p className="hint">{t('conexoes.canal.guardado')}</p>
         </> : <>
           {conexao && <p className="small" role="status">{conexao}</p>}
           {e.codigoRecusado && <p className="warn">{t('conexoes.canal.codigoRecusado', { canal: nome })}</p>}
@@ -1094,26 +1126,16 @@ function ConversaPorCanal({ canal, estado, reload }: { canal: NomeCanal; estado:
                 <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(false)}>{t('conexoes.canal.cancelar')}</button></div>
             : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(true)}>{t('conexoes.canal.desligar')}</button>}
         </div>}
-        <p className="hint">{canal === 'telegram' ? t('conexoes.canal.fechado.telegram') : t('conexoes.canal.fechado.discord')} {t('conexoes.canal.soDireta')}</p>
       </>}
+      {/* as letras miúdas: onde o código fica, o que acontece com o Ergon fechado, e a diferença para as conexões de conta */}
+      <details className="conn-secao conn-secao--detalhes"><summary>{t('conexoes.detalhes')}</summary>
+        <ul className="small conn-detalhes">
+          <li>{t('conexoes.canal.guardado')}</li>
+          <li>{canal === 'telegram' ? t('conexoes.canal.fechado.telegram') : t('conexoes.canal.fechado.discord')} {t('conexoes.canal.soDireta')}</li>
+          <li>{t('conexoes.canal.secaoTexto')}</li>
+        </ul>
+      </details>
     </article>
-  );
-}
-
-/** A seção dos dois canais (o lugar fica reservado até a resposta, que vem na pré-carga). */
-function ConversaPorCanais() {
-  const t = useT();
-  const st = useResource<Record<NomeCanal, EstadoCanal>>('/api/canais', ['canais.changed']);
-  return (
-    <section className="conn-group conn-group--feature" id="conn-canais">
-      <h3>{t('conexoes.canal.secaoTitulo')}</h3>
-      <p className="muted small">{t('conexoes.canal.secaoTexto')}</p>
-      <div className="feature-grid">
-        {st.data
-          ? (['telegram', 'discord'] as const).map((c) => <ConversaPorCanal key={c} canal={c} estado={st.data![c]} reload={st.reload} />)
-          : <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><p className="muted">…</p></article>}
-      </div>
-    </section>
   );
 }
 
@@ -1135,7 +1157,7 @@ const dataCurta = (iso: string) => fmtData(iso, { day: '2-digit', month: '2-digi
  * digita aqui, vê de quem é a conta e confirma com a senha. Daí em diante, o que ela escreve lá vai para a equipe e a
  * resposta volta lá; o que precisa dela também avisa lá (ligado por padrão).
  */
-function TeamsConversa() {
+function TeamsConversa({ onClose }: { onClose?: () => void }) {
   const t = useT();
   const st = useResource<EstadoTeams>('/api/teams-app', ['teams.changed']);
   const [codigo, setCodigo] = useState('');
@@ -1164,15 +1186,16 @@ function TeamsConversa() {
     } finally { setBusy(false); }
   };
   // enquanto a resposta não chega (quase nunca: vem na pré-carga), a seção só guarda o lugar
-  if (!d) return <article className="card conn feature" aria-hidden="true" style={{ visibility: 'hidden' }}><strong>{t('conexoes.teams.titulo')}</strong><p className="muted">…</p></article>;
+  if (!d) return null;
   const ligados = d.bindings.filter((b) => b.status !== 'revoked');
   const caidos = d.bindings.filter((b) => b.status === 'revoked');
   const problema = problemaDoTeams(d.problem);
   const linha = linhaDoEstado(d.connection, d.problem);
   return (
-    <article className={`card conn feature ${ligados.length ? 'feature--on' : ''}`}>
-      <header className="row"><BrandLogo kind="teams" name="Teams" size={36} /><strong>{t('conexoes.teams.titulo')}</strong>
-        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? t('conexoes.estado.connected') : t('conexoes.estado.semConexao')}</span> : <span className="badge badge--soon">{t('conexoes.estado.soon')}</span>}</header>
+    <article id="conn-equipe-teams" className={`card conn conn-detail ${ligados.length ? 'feature--on' : ''}`}>
+      <header className="row"><BrandLogo kind="teams" name="Teams" size={32} /><strong>{t('conexoes.teams.titulo')}</strong>
+        {d.available ? <span className={`badge ${d.connection === 'connected' ? 'badge--ok' : 'badge--warn'}`}>{d.connection === 'connected' ? t('conexoes.estado.connected') : t('conexoes.estado.semConexao')}</span> : <span className="badge badge--soon">{t('conexoes.estado.soon')}</span>}
+        {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}</header>
       <p className="muted">{t('conexoes.teams.intro')}</p>
       {!d.available ? <p className="hint">{t('conexoes.teams.emBreve')}</p> : <>
         {problema && <p className="warn">{problema}</p>}
@@ -1232,7 +1255,6 @@ function TeamsConversa() {
               <li>{t('conexoes.teams.passo2')}</li>
               <li>{t('conexoes.teams.passo3')}</li>
             </ol>
-            <p className="hint">{soOSeuCodigo()}</p>
             <div className="row row--wrap">
               <label className="field">{t('conexoes.teams.codigo')}<input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder={t('conexoes.teams.codigoExemplo')} autoComplete="off" spellCheck={false} maxLength={20} /></label>
               <button className="btn btn--sm btn--primary" disabled={busy || preparando > 0 || codigo.replace(/[\s-]/g, '').length < 8}>{busy || preparando ? t('conexoes.acao.conferindo') : t('conexoes.teams.confirmar')}</button>
@@ -1240,10 +1262,16 @@ function TeamsConversa() {
             {preparando > 0 && <p className="small" role="status">{t('conexoes.teams.preparando')}</p>}
           </form>
         )}
-        <p className="hint">{t('conexoes.teams.soDireta')}</p>
       </>}
       {err && <p className="error" role="alert">{err}</p>}
-      {d.relay && !d.relay.fromEnv && <EnderecoTeams atual={d.relay.url} reload={st.reload} />}
+      <details className="conn-secao conn-secao--detalhes"><summary>{t('conexoes.detalhes')}</summary>
+        <ul className="small conn-detalhes">
+          {d.available && <li>{soOSeuCodigo()}</li>}
+          {d.available && <li>{t('conexoes.teams.soDireta')}</li>}
+          <li><b>{t('conexoes.contas.teamsTitulo')}</b> {t('conexoes.contas.teamsTexto')}</li>
+        </ul>
+        {d.relay && !d.relay.fromEnv && <EnderecoTeams atual={d.relay.url} reload={st.reload} />}
+      </details>
     </article>
   );
 }

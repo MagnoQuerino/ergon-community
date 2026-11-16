@@ -3054,3 +3054,18 @@ small { font-size: max(12px, .83em); }
 .conn-etapas__lista > li { padding: 4px 0; }
 /* cabeçalho dos cartões em destaque: o nome junto do ícone; só o selo vai para a direita (sem selo, o título não salta) */
 .conn.feature > header { justify-content: flex-start; }
+
+/* ---------- Conexões em blocos (rc.33): fechado, só o logo, o nome e o estado; aberto, o cartão ocupa a linha ---------- */
+.conn-tiles { grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); align-items: stretch; }
+@media (max-width: 600px) { .conn-tiles { grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); } .conn-tile .brand-logo { width: 32px; height: 32px; } }
+.conn-tile { min-height: 64px; }
+.conn-tile:focus-visible { outline: var(--foco-largura, 2px) solid var(--navy); outline-offset: 2px; }
+.conn-tile__selos { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.conn-detail { max-width: none; }
+.conn-detail.feature--on { border-left: 4px solid var(--ok); }
+.conn-detail > header strong { min-width: 0; }
+.conn-detail > :not(header):not(.conn-secoes):not(.conn-secao) { max-width: var(--texto-max); }
+.conn-detalhes { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 6px; color: var(--muted); }
+.conn-secao--detalhes { margin-top: 10px; }
+.conn-detail .conn-passos, .conn-detail ol.small { padding-left: 20px; display: grid; gap: 4px; }
+.conn-secoes + .conn-secao--detalhes { border-top: 0; margin-top: 0; }

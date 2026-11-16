@@ -21,18 +21,19 @@ const conexoes = {
   'estado.error': 'com problema',
   'estado.soon': 'em breve',
   'estado.semConexao': 'sem conexão',
+  'detalhes': 'Detalhes',
 
   // ——— os grupos de aplicativos ———
   'secao.tarefas.titulo': 'Tarefas e quadros',
-  'secao.tarefas.texto': 'Depois de conectar, escolha a lista ou o quadro em Tarefas: fica ligado nos dois sentidos, e os agentes também criam e movem tarefas lá. A conta precisa ter permissão para alterar as tarefas.',
+  'secao.tarefas.texto': 'Escolha a lista ou o quadro em Tarefas: fica ligado nos dois sentidos.',
   'secao.conversas.titulo': 'Conversas e equipes',
-  'secao.conversas.texto': 'Os agentes leem o que a conta ou o bot conectado alcança (cada aplicativo diz qual é o alcance) e respondem quando você pede.',
+  'secao.conversas.texto': 'Os agentes leem o que a conta alcança e respondem quando você pede.',
   'secao.vendas.titulo': 'Vendas e atendimento',
-  'secao.vendas.texto': 'Os agentes consultam clientes, negócios e chamados, registram o que combinarem com você e respondem quando você pede.',
+  'secao.vendas.texto': 'Clientes, negócios e chamados: os agentes consultam e registram o que você combinar.',
   'secao.documentos.titulo': 'Documentos, código e agenda',
-  'secao.documentos.texto': 'Os agentes procuram, leem e escrevem nas páginas, repositórios e compromissos que a credencial alcança.',
+  'secao.documentos.texto': 'Páginas, repositórios e agenda que a credencial alcança.',
   'secao.financeiro.titulo': 'Financeiro',
-  'secao.financeiro.texto': 'Os agentes consultam cobranças e contas e, quando você pede, cadastram clientes e criam cobranças e contas a receber. Nada é pago, transferido, estornado ou cancelado por aqui. Para só consultar, marque "Só leitura" na conexão.',
+  'secao.financeiro.texto': 'Consultas, clientes e cobranças quando você pede. Nada é pago nem transferido por aqui.',
 
   // ——— os destaques do topo ———
   'ia.titulo': 'Contas de IA',
@@ -42,10 +43,12 @@ const conexoes = {
   'wa.verRiscos': 'Ver informações e riscos',
   'contas.titulo': 'Microsoft 365 e Google',
   'contas.texto': 'Entre com a conta, sem digitar senha no Ergon. Microsoft: Planner, To Do, Teams, e-mail, agenda e arquivos. Google: Tasks, Agenda, Gmail e Drive. Os agentes consultam e agem por você, com a regra de confirmação abaixo.',
+  'contas.tituloGrupo': 'Suas contas',
+  'contas.curto': 'Microsoft 365, Google e WhatsApp: os agentes agem nelas por você, com a sua regra de confirmação.',
   'contas.m365Titulo': 'Microsoft 365: a equipe age na sua conta.',
   'contas.m365Texto': 'Com o seu login, os agentes leem e respondem por você no e-mail, na agenda, nos arquivos, nas tarefas e no Teams, quando você pede ou numa rotina. Ninguém fica olhando a conta o tempo todo.',
   'contas.teamsTitulo': 'Conversar com a equipe pelo Teams: é outra coisa.',
-  'contas.teamsTexto': 'Você manda pedidos à equipe de dentro do Teams, como se ela fosse um colega lá, e recebe as respostas ali. Fica logo abaixo, em Teams (em breve).',
+  'contas.teamsTexto': 'Você manda pedidos à equipe de dentro do Teams, como se ela fosse um colega lá, e recebe as respostas ali. Fica em Conversar com a equipe › Teams.',
 
   // ——— procurar ———
   'busca.placeholder': 'Procurar (ex.: Slack, Trello, HubSpot)',
@@ -329,6 +332,8 @@ const conexoes = {
 // ——— Telegram e Discord: conversar com a equipe pelo bot da pessoa (views/ConexoesView.tsx, ConversaPorCanal) ———
   'canal.secaoTitulo': 'Telegram e Discord',
   'canal.secaoTexto': 'Converse com a sua equipe por um bot seu, no Telegram ou no Discord. É diferente das conexões Telegram e Discord em Conversas, que deixam a equipe ler e mandar mensagens pela sua conta: aqui é você que fala com a equipe, e só a sua conta consegue falar com o bot.',
+  'canal.grupoTitulo': 'Conversar com a equipe',
+  'canal.grupoTexto': 'Fale com a equipe pelo Teams, pelo Telegram ou pelo Discord.',
   'canal.titulo.telegram': 'Conversar com a equipe pelo Telegram',
   'canal.titulo.discord': 'Conversar com a equipe pelo Discord',
   'canal.intro': 'Mande pedidos à equipe numa conversa direta com o seu bot e receba as respostas ali. As confirmações chegam com os botões Aprovar e Recusar, e o que precisa de você também avisa por lá.',
@@ -499,6 +504,7 @@ const conexoes = {
   'multi.renomear': 'Dar um nome',
   'multi.salvando': 'Salvando…',
   'multi.adicionar': 'Adicionar outra conta',
+  'multi.nContas': { one: '{n} conta', other: '{n} contas' },
   'multi.adicionarNumero': 'Adicionar outro número',
   'multi.adicionarCredencial': 'Cole a credencial da outra conta. Ela fica ao lado desta, com a própria permissão de escrita.',
   'multi.adicionarLogin': 'Na página que abrir, escolha a outra conta (ou entre com ela).',

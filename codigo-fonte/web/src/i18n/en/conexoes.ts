@@ -22,18 +22,19 @@ const conexoes: Traducao<typeof pt> = {
   'estado.error': 'needs attention',
   'estado.soon': 'coming soon',
   'estado.semConexao': 'offline',
+  'detalhes': 'Details',
 
   // ——— os grupos de aplicativos ———
   'secao.tarefas.titulo': 'Tasks and boards',
-  'secao.tarefas.texto': 'After connecting, pick the list or board in Tasks: it stays in sync both ways, and the agents also create and move tasks there. The account needs permission to change tasks.',
+  'secao.tarefas.texto': 'Pick the list or board in Tasks: it stays in sync both ways.',
   'secao.conversas.titulo': 'Chat and teams',
-  'secao.conversas.texto': 'The agents read whatever the connected account or bot can reach (each app says what that covers) and reply when you ask.',
+  'secao.conversas.texto': 'The agents read what the account can reach and reply when you ask.',
   'secao.vendas.titulo': 'Sales and support',
-  'secao.vendas.texto': 'The agents look up customers, deals and tickets, record what you agree on and reply when you ask.',
+  'secao.vendas.texto': 'Customers, deals and tickets: the agents look them up and record what you agree on.',
   'secao.documentos.titulo': 'Documents, code and calendar',
-  'secao.documentos.texto': 'The agents search, read and write in the pages, repositories and events the credential can reach.',
+  'secao.documentos.texto': 'Pages, repositories and calendars the credential can reach.',
   'secao.financeiro.titulo': 'Finance',
-  'secao.financeiro.texto': 'The agents look up charges and accounts and, when you ask, add customers and create charges and receivables. Nothing is paid, transferred, refunded or canceled from here. To only look things up, check "Read only" on the connection.',
+  'secao.financeiro.texto': 'Lookups, customers and charges when you ask. Nothing is paid or transferred from here.',
 
   // ——— os destaques do topo ———
   'ia.titulo': 'AI accounts',
@@ -43,10 +44,12 @@ const conexoes: Traducao<typeof pt> = {
   'wa.verRiscos': 'See details and risks',
   'contas.titulo': 'Microsoft 365 and Google',
   'contas.texto': 'Sign in with your account, without typing a password into Ergon. Microsoft: Planner, To Do, Teams, email, calendar and files. Google: Tasks, Calendar, Gmail and Drive. The agents look things up and act for you, following the confirmation rule below.',
+  'contas.tituloGrupo': 'Your accounts',
+  'contas.curto': 'Microsoft 365, Google and WhatsApp: the agents act in them for you, under your confirmation rule.',
   'contas.m365Titulo': 'Microsoft 365: the team acts in your account.',
   'contas.m365Texto': 'With your sign-in, the agents read and reply for you in email, calendar, files, tasks and Teams, when you ask or in a routine. Nobody watches the account all the time.',
   'contas.teamsTitulo': 'Chatting with the team on Teams: a different thing.',
-  'contas.teamsTexto': 'You send requests to the team from inside Teams, as if it were a coworker there, and get the replies right there. It is just below, under Teams (coming soon).',
+  'contas.teamsTexto': 'You send requests to the team from inside Teams, as if it were a colleague there, and get the answers there. It is under Talk to the team › Teams.',
 
   // ——— procurar ———
   'busca.placeholder': 'Search (e.g. Slack, Trello, HubSpot)',
@@ -351,6 +354,8 @@ const conexoes: Traducao<typeof pt> = {
 // ——— Telegram e Discord: conversar com a equipe pelo bot da pessoa (views/ConexoesView.tsx, ConversaPorCanal) ———
   'canal.secaoTitulo': 'Telegram and Discord',
   'canal.secaoTexto': 'Talk to your team through a bot of your own, on Telegram or Discord. This is different from the Telegram and Discord connections under Chats, which let the team read and send messages from your account: here you talk to the team, and only your account can talk to the bot.',
+  'canal.grupoTitulo': 'Talk to the team',
+  'canal.grupoTexto': 'Talk to the team on Teams, Telegram or Discord.',
   'canal.titulo.telegram': 'Talk to the team on Telegram',
   'canal.titulo.discord': 'Talk to the team on Discord',
   'canal.intro': 'Send requests to the team in a direct chat with your bot and get the answers there. Confirmations come with Approve and Decline buttons, and whatever needs you is announced there too.',
@@ -498,6 +503,7 @@ const conexoes: Traducao<typeof pt> = {
   'multi.renomear': 'Name it',
   'multi.salvando': 'Saving…',
   'multi.adicionar': 'Add another account',
+  'multi.nContas': { one: '{n} account', other: '{n} accounts' },
   'multi.adicionarNumero': 'Add another number',
   'multi.adicionarCredencial': 'Paste the other account\'s credential. It sits next to this one, with its own permission to write.',
   'multi.adicionarLogin': 'On the page that opens, pick the other account (or sign in with it).',
