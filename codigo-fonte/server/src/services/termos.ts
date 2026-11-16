@@ -45,8 +45,8 @@ export function sincronizarCodigoDoAgente(db: Db, workspaceId: string, agentId: 
   if (!codigoPorPadrao(db, workspaceId)) return;
   const marca = `codigo.padrao:${agentId}`;
   if (getSetting(db, workspaceId, marca)) return;
-  const row = db.get<{ tools: string | null }>("SELECT tools FROM agents WHERE id = ? AND workspace_id = ? AND status = 'active'", agentId, workspaceId);
-  if (!row) return;
+  const row = db.get<{ tools: string | null; coordinator: number }>("SELECT tools, coordinator FROM agents WHERE id = ? AND workspace_id = ? AND status = 'active'", agentId, workspaceId);
+  if (!row || Number(row.coordinator)) return; // o Coordenador encaminha; o código fica com os especialistas
   let tools: string[] = [];
   try { const x = JSON.parse(row.tools ?? '[]'); if (Array.isArray(x)) tools = x.map(String); } catch { /* ilegível: começa vazia */ }
   const somar = CODIGO_PADRAO.filter((t) => !tools.includes(t) && getSetting(db, workspaceId, `ferramentas.${t}`) !== 'desligado');

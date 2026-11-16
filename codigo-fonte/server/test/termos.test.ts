@@ -63,6 +63,22 @@ describe('termos de uso e Executar código por padrão', () => {
     } finally { await h.close(); }
   });
 
+  test('o Coordenador de quem já usava perde as ferramentas pesadas uma vez; o que a pessoa devolver, fica', async () => {
+    const h = await harness();
+    try {
+      const s = await setupOwner(h);
+      const coord = h.db.get<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ? AND coordinator = 1', s.workspaceId)!.id;
+      h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(['quadro', 'encaminhar', 'navegador', 'video', 'imagens', 'web', 'contas']), coord);
+      await req(h, 'POST', '/api/me/termos', s, { versao: TERMOS_VERSAO });
+      instructionsFor(h.db, s.workspaceId, coord, '');
+      const t = JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', coord)!.tools) as string[];
+      assert.deepEqual(t, ['quadro', 'encaminhar', 'web', 'contas'], 'sem navegador, vídeo, imagens nem código');
+      h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify([...t, 'navegador']), coord);
+      instructionsFor(h.db, s.workspaceId, coord, '');
+      assert.ok((JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', coord)!.tools) as string[]).includes('navegador'), 'devolvido pela pessoa, fica');
+    } finally { await h.close(); }
+  });
+
   test('com código ligado, ler vai direto; criar, enviar e apagar continuam confirmando', () => {
     const base = { origem: 'pessoa' as const, leuDeFora: false, liberarTudo: false, codigoLigado: true };
     assert.equal(decidir({ ...base, risco: 'ler' }), 'direto');
