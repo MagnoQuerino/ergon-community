@@ -128,6 +128,21 @@ export function requestId(): string {
   return crypto.randomUUID();
 }
 
+/** Evento da tela: o World pediu o e-mail confirmado; Configurações › Ergon World abre a caixa do código. */
+export const EMAIL_PEDIDO = 'ergon:world-email-unverified';
+let focoEmail = false;
+/**
+ * O World recusou (403 email_unverified: criar ou comprar sem o e-mail da conta confirmado): leva a pessoa à caixa de
+ * confirmação (código e "reenviar") em Configurações › Ergon World, já com o campo do código em foco.
+ */
+export function pedirConfirmacaoEmail(): void {
+  focoEmail = true;
+  window.dispatchEvent(new Event(EMAIL_PEDIDO));
+  if (!location.hash.startsWith('#configuracao?world')) location.hash = '#configuracao?world';
+}
+/** A caixa de confirmação pergunta, ao aparecer, se veio de um pedido (e então toma o foco); vale uma vez. */
+export function tomarFocoEmail(): boolean { const v = focoEmail; focoEmail = false; return v; }
+
 export function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

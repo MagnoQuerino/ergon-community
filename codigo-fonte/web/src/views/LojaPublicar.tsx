@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { api, errMsg } from '../lib/api.ts';
+import { api, ApiError, errMsg, pedirConfirmacaoEmail } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { Skill } from '../lib/types.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { Fig } from '../arte/Cena.tsx';
 import { PreviaPacote, tipoDe, type CatalogPreview, type PreviewAgent } from './PacotesPanel.tsx';
-import { fmtData, useT, type Chave, type ValoresDe } from '../i18n/index.ts';
+import { fmtData, t as tr, useT, type Chave, type ValoresDe } from '../i18n/index.ts';
 
 type Rotulo = { [K in Chave]: keyof ValoresDe<K> extends never ? K : never }[Chave];
 
@@ -31,6 +31,12 @@ const proxima = (v: string | null | undefined) => { const m = /^(\d+)\.(\d+)\.(\
 const lerBase64 = (f: File) => new Promise<string>((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] ?? ''); r.onerror = () => no(r.error); r.readAsDataURL(f); });
 
 /** A conta do Ergon World para publicar (grátis): sem ela, um convite; sem o World nesta instalação, uma linha. */
+/** O erro da Loja como veio, salvo o e-mail não confirmado no World: frase curta e a caixa do código aberta. */
+function erroLoja(e: unknown): string {
+  if (e instanceof ApiError && e.code === 'email_unverified') { pedirConfirmacaoEmail(); return tr('documentos.loja.pub.emailPendente'); }
+  return errMsg(e);
+}
+
 function useConta() {
   const st = useResource<WorldStatus>('/api/world/status', ['world.changed']);
   const ligado = !!st.data?.configured && !!st.data.link;
@@ -64,7 +70,7 @@ function Perfil({ onFeito }: { onFeito: () => void }) {
         <label className="field">{t('documentos.loja.pub.nomeNaLoja')}<input value={nome} maxLength={60} onChange={(e) => setNome(e.target.value)} /></label>
       </div>
       {erro && <p className="error" role="alert">{erro}</p>}
-      <button className="btn btn--primary" disabled={ns.length < 2 || !nome.trim()} onClick={() => void api.post('/api/loja/criador', { namespace: ns, nome }).then(onFeito).catch((e) => setErro(errMsg(e)))}>{t('documentos.loja.pub.criarPerfil')}</button>
+      <button className="btn btn--primary" disabled={ns.length < 2 || !nome.trim()} onClick={() => void api.post('/api/loja/criador', { namespace: ns, nome }).then(onFeito).catch((e) => setErro(erroLoja(e)))}>{t('documentos.loja.pub.criarPerfil')}</button>
     </section>
   );
 }
@@ -98,7 +104,7 @@ export function Publicar({ rascunho, agent, onPublicado }: { rascunho: Rascunho 
   const minhasSkills = (skills.data ?? []).filter((s) => (s.origem === 'enviada' || s.origem === 'criada') && !s.terceiro);
   const corpo = () => ({ fonte, namespace: ns, titulo, resumo, versao, nome: nome || undefined, ...(fonte === 'arquivo' ? { arquivo: arquivo?.b64 } : fonte === 'competencia' ? { texto } : {}) });
   const pronto = titulo.trim() && resumo.trim().length >= 10 && (fonte !== 'arquivo' || arquivo) && (fonte !== 'competencia' || texto.trim());
-  const agir = async (fn: () => Promise<void>) => { setErro(null); setIndo(true); try { await fn(); } catch (e) { setErro(errMsg(e)); } finally { setIndo(false); } };
+  const agir = async (fn: () => Promise<void>) => { setErro(null); setIndo(true); try { await fn(); } catch (e) { setErro(erroLoja(e)); } finally { setIndo(false); } };
   return (
     <section className="card">
       <h3>{t('documentos.loja.pub.titulo')}</h3>

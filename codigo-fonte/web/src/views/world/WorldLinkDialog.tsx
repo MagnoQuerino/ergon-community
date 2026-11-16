@@ -1,17 +1,20 @@
 import { useState } from 'react';
-import { api, ApiError, errMsg } from '../../lib/api.ts';
+import { api, ApiError, errMsg, pedirConfirmacaoEmail } from '../../lib/api.ts';
 import { useResource } from '../../lib/live.ts';
-import { useTw, type ChaveWorld } from './textos.ts';
+import { tw, useTw, type ChaveWorld } from './textos.ts';
+import { idiomaAtual } from '../../i18n/index.ts';
 
 export interface ConnectedDevice { id: string; name: string; lastSeenAt: string | null }
 /** login recusado: 2 aparelhos já com sessão (session_limit) ou 4 já cadastrados (device_limit) */
 export interface LoginLimit { kind: 'session_limit' | 'device_limit'; devices: ConnectedDevice[]; canRetry: boolean }
 
 const ERROS = ['invalid_credentials', 'email_in_use', 'invalid_request', 'too_many_attempts', 'account_locked', 'email_unconfigured', 'invalid_code',
-  'invalid_local_password', 'password_short', 'invalid_email', 'world_login_again', 'world_offline', 'invite', 'seats', 'sync_forbidden', 'owner', 'payer', 'has_subscription'] as const;
+  'invalid_local_password', 'password_short', 'invalid_email', 'world_login_again', 'world_offline', 'invite', 'seats', 'sync_forbidden', 'owner', 'payer', 'has_subscription', 'email_unverified'] as const;
+
 /** O erro das contas no idioma da tela (o código vem do servidor); os outros, como vieram. */
-export function erroConta(e: unknown, t: ReturnType<typeof useTw>): string {
+export function erroConta(e: unknown, t: ReturnType<typeof useTw> = tw): string {
   const code = e instanceof ApiError ? e.code : '';
+  if (code === 'email_unverified') pedirConfirmacaoEmail();
   return (ERROS as readonly string[]).includes(code) ? t(`erro.${code}` as Extract<ChaveWorld, `erro.${string}`>) : errMsg(e);
 }
 
@@ -73,7 +76,8 @@ export function ConnectForm({ displayName, onDone, onCancel }: { displayName: st
   const conectar = () => run(async () => {
     const body = aba === 'entrar' ? { mode: 'login', email, password: senha }
       : mesmas ? { mode: 'local', email, localPassword: senha } : { mode: 'signup', email, password: senha, displayName: nome };
-    await api.post('/api/world/connect', body);
+    // os e-mails da conta saem no idioma da tela (o servidor converte para o formato do World)
+    await api.post('/api/world/connect', { ...body, locale: idiomaAtual() });
     onDone();
   });
   if (limit) return <DeviceLimit limit={limit} onDone={onDone} />;

@@ -84,20 +84,67 @@ export class LocalSync {
       ON CONFLICT (workspace_id) DO UPDATE SET sync_workspace_id = excluded.sync_workspace_id, origin = 'joined'`, ws, syncWorkspaceId, now());
   }
 
-  /** Liga o Sync neste workspace (World ativo exigido no servidor). Frase opcional = envelope de recuperação. */
+  /**
+   * Em que pé está a chave de um workspace World que este computador adotou (criado em outro lugar):
+   * - 'mine': este aparelho já tem envelope (alguém entregou a chave): é só entrar;
+   * - 'first': ninguém tem chave ainda (o workspace nasceu no servidor: primeiro checkout do site ou cortesia concedida
+   *   pela equipe) e a pessoa é dona ou admin: a chave nasce aqui, como num workspace criado por este computador;
+   * - 'handover': a chave já existe em outro aparelho: espera a entrega (ou usa a frase de recuperação). Também para quem
+   *   não administra: só dono ou admin cria a primeira chave, e de fora não dá para saber se outra pessoa já a criou.
+   * O World não diz "há envelopes" com todas as letras; sem chave ainda é: nenhum envelope deste aparelho, nenhum de
+   * recuperação, nada enviado (head 0), a chave na versão 1 (nunca girou) e nenhum outro aparelho ativo da pessoa com
+   * envelope (devices-needing-key). Na dúvida (erro do World), vale 'handover': nunca nasce uma segunda chave.
+   */
+  async keyState(userId: string, syncWorkspaceId: string): Promise<'mine' | 'first' | 'handover'> {
+    const c = this.ctx(userId); const base = `/v1/sync/workspaces/${syncWorkspaceId}`;
+    const missing = (p: Promise<unknown>) => p.then(() => false, (e: HttpError) => { if (e.status === 404) return true; throw e; });
+    try {
+      if (!(await missing(this.client.call('GET', `${base}/envelope`, undefined, c.session)))) return 'mine';
+      if (!(await missing(this.client.call('GET', `${base}/envelope?kind=recovery`, undefined, c.session)))) return 'handover';
+      const p = await this.client.call<{ head: number; keyVersion?: number }>('GET', `${base}/changes?since=0`, undefined, c.session);
+      if (p.head !== 0 || (p.keyVersion ?? 1) !== 1) return 'handover';
+      const m = await this.client.call<{ myRole?: string }>('GET', `${base}/members`, undefined, c.session);
+      if (m.myRole !== 'owner' && m.myRole !== 'admin') return 'handover';
+      // outro computador da pessoa pode ter ligado sem enviar nada nem guardar frase: aparelho ativo dela que não está
+      // na lista "precisa da chave" já tem envelope (o aplicativo sempre registra o aparelho com chave de Sync)
+      const need = await this.client.call<{ devices: Array<{ deviceId: string }> }>('GET', `${base}/devices-needing-key`, undefined, c.session);
+      const mineAll = await this.client.call<Array<{ id: string; status: string }>>('GET', '/v1/devices', undefined, c.session);
+      const needing = new Set(need.devices.map((d) => d.deviceId));
+      return mineAll.some((d) => d.status === 'active' && d.id !== c.deviceId && !needing.has(d.id)) ? 'handover' : 'first';
+    } catch (e) {
+      if ((e as HttpError).code === 'world_offline') throw e;
+      return 'handover';
+    }
+  }
+
+  /** Cria a chave do workspace (versão dada) e grava o primeiro envelope deste aparelho (e o de recuperação, com a frase). */
+  private async createKey(userId: string, ws: string, syncWorkspaceId: string, keyVersion: number, recoveryPhrase?: string) {
+    const c = this.ctx(userId); const dek = newWorkspaceKey();
+    await this.client.call('PUT', `/v1/sync/workspaces/${syncWorkspaceId}/envelopes`, { kind: 'device', deviceId: c.deviceId, keyVersion, wrapped: wrapForDevice(dek, c.keys.x25519Public, syncWorkspaceId, keyVersion) }, c.session);
+    if (recoveryPhrase) await this.client.call('PUT', `/v1/sync/workspaces/${syncWorkspaceId}/envelopes`, { kind: 'recovery', keyVersion, wrapped: wrapForRecovery(dek, recoveryPhrase, syncWorkspaceId, keyVersion) }, c.session);
+    this.db.run('INSERT INTO world_sync (workspace_id, user_id, sync_workspace_id, key_version, sync_key, last_version, updated_at, recovery_key_version) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+      ws, userId, syncWorkspaceId, keyVersion, this.db.seal(ws, dek.toString('base64')), now(), recoveryPhrase ? keyVersion : null);
+    return this.status(ws);
+  }
+
+  /**
+   * Liga o Sync neste workspace (World ativo exigido no servidor). Frase opcional = envelope de recuperação.
+   * Num workspace adotado (criado em outro computador ou no servidor), a chave só nasce aqui se ainda não existir e a
+   * pessoa administrar o workspace; se já existir, entra com ela (este aparelho já a recebeu) ou espera a entrega.
+   */
   async enable(userId: string, ws: string, recoveryPhrase?: string) {
     if (this.row(ws)) return this.status(ws);
     const c = this.ctx(userId);
-    const origin = this.db.get<{ origin: string }>('SELECT origin FROM world_workspace_ids WHERE workspace_id = ?', ws)?.origin;
-    if (origin === 'joined') throw new HttpError(409, 'sync_join', 'Este workspace já sincroniza em outro computador: entre nele com a frase de recuperação ou autorize por lá.');
+    const joined = this.db.get<{ origin: string; sync_workspace_id: string }>('SELECT origin, sync_workspace_id FROM world_workspace_ids WHERE workspace_id = ?', ws);
+    if (joined?.origin === 'joined') {
+      const st = await this.keyState(userId, joined.sync_workspace_id);
+      if (st === 'first') return this.createKey(userId, ws, joined.sync_workspace_id, 1, recoveryPhrase);
+      if (st === 'mine') return this.join(userId, ws, joined.sync_workspace_id, recoveryPhrase);
+      throw new HttpError(409, 'sync_join', 'Este workspace já sincroniza em outro computador: entre nele com a frase de recuperação ou autorize por lá.');
+    }
     const known = this.worldId(ws); // já existe (créditos/plano antes da sincronização): a chave nasce agora, versão 1
     const w = known ? { workspaceId: known, keyVersion: 1 } : await this.client.call<{ workspaceId: string; keyVersion: number }>('POST', '/v1/sync/workspaces', this.labelOf(ws), c.session);
-    const dek = newWorkspaceKey();
-    await this.client.call('PUT', `/v1/sync/workspaces/${w.workspaceId}/envelopes`, { kind: 'device', deviceId: c.deviceId, keyVersion: w.keyVersion, wrapped: wrapForDevice(dek, c.keys.x25519Public, w.workspaceId, w.keyVersion) }, c.session);
-    if (recoveryPhrase) await this.client.call('PUT', `/v1/sync/workspaces/${w.workspaceId}/envelopes`, { kind: 'recovery', keyVersion: w.keyVersion, wrapped: wrapForRecovery(dek, recoveryPhrase, w.workspaceId, w.keyVersion) }, c.session);
-    this.db.run('INSERT INTO world_sync (workspace_id, user_id, sync_workspace_id, key_version, sync_key, last_version, updated_at, recovery_key_version) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
-      ws, userId, w.workspaceId, w.keyVersion, this.db.seal(ws, dek.toString('base64')), now(), recoveryPhrase ? w.keyVersion : null);
-    return this.status(ws);
+    return this.createKey(userId, ws, w.workspaceId, w.keyVersion, recoveryPhrase);
   }
 
   /** Neste aparelho (outro computador da pessoa): entra num workspace World que já existe, pegando a chave. */
@@ -108,7 +155,13 @@ export class LocalSync {
       env = await this.client.call('GET', `/v1/sync/workspaces/${syncWorkspaceId}/envelope`, undefined, c.session);
       dek = unwrapForDevice(env.wrapped, c.keys.x25519, syncWorkspaceId, env.keyVersion);
     } catch (e) {
-      if (!recoveryPhrase || (e as HttpError).status !== 404) throw e;
+      if ((e as HttpError).status !== 404) throw e;
+      // ninguém tem a chave ainda (workspace criado no servidor): quem administra cria aqui, num clique
+      if (this.worldId(ws) === syncWorkspaceId && !this.row(ws)) {
+        const st = await this.keyState(userId, syncWorkspaceId);
+        if (st === 'first') return this.createKey(userId, ws, syncWorkspaceId, 1, recoveryPhrase);
+      }
+      if (!recoveryPhrase) throw e;
       env = await this.client.call('GET', `/v1/sync/workspaces/${syncWorkspaceId}/envelope?kind=recovery`, undefined, c.session);
       try { dek = unwrapForRecovery(env.wrapped, recoveryPhrase, syncWorkspaceId, env.keyVersion); } catch { throw new HttpError(400, 'recovery', 'frase de recuperação não abre a chave deste workspace'); }
       viaRecovery = true;

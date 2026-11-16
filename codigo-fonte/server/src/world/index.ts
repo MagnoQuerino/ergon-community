@@ -14,7 +14,7 @@ import { throttle } from '../security/factors.ts';
 import { checkCredentials, defaultWorkspace, needsSetup } from '../services/auth.ts';
 import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
 import { loadWorldConfig, type WorldConfig } from './config.ts';
-import { checkAccountInput, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, type AccountInput, type DeviceChoice } from './link.ts';
+import { checkAccountInput, EMAIL_UNVERIFIED, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, worldLocale, type AccountInput, type DeviceChoice } from './link.ts';
 import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
@@ -31,6 +31,7 @@ const ACCOUNT_ERRORS: Record<string, [number, string]> = {
   invalid_code: [400, 'Código inválido ou vencido.'],
   session_limit: [409, 'Sua conta já está conectada em 2 aparelhos. Escolha um para encerrar a sessão.'],
   device_limit: [409, 'Sua conta já tem 4 aparelhos cadastrados. Escolha um para remover.'],
+  email_unverified: [403, EMAIL_UNVERIFIED],
 };
 /** Erro do World nas rotas de conta, sem 401 (a tela local trataria como sessão local encerrada). */
 function accountError(e: unknown): never {
@@ -120,6 +121,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const mode = b.mode; const email = str(b.email, 254)?.trim() ?? '';
         const choice: DeviceChoice = { endSessionsOf: str(b.endSessionsOf, 40), replaceDeviceId: str(b.replaceDeviceId, 40) };
         let account: AccountInput;
+        // os e-mails da conta saem no idioma da tela (ou no do navegador)
+        const locale = worldLocale(str(b.locale, 35), str(req.headers['accept-language'], 200));
         if (mode === 'local') {
           const pw = str(b.localPassword, 1024) ?? '';
           throttle.check(`world-local:${a.userId}`);
@@ -127,8 +130,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
           catch { throttle.fail(`world-local:${a.userId}`); throw new HttpError(400, 'invalid_local_password', 'Senha do Ergon incorreta.'); }
           throttle.ok(`world-local:${a.userId}`);
           if (pw.length < 10) throw new HttpError(400, 'password_short', 'A senha do Ergon tem menos de 10 caracteres. Crie uma conta com outra senha.');
-          account = { kind: 'signup', email, password: pw, displayName: a.displayName };
-        } else if (mode === 'signup') account = { kind: 'signup', email, password: str(b.password, 1024) ?? '', displayName: str(b.displayName, 80) ?? '' };
+          account = { kind: 'signup', email, password: pw, displayName: a.displayName, locale };
+        } else if (mode === 'signup') account = { kind: 'signup', email, password: str(b.password, 1024) ?? '', displayName: str(b.displayName, 80) ?? '', locale };
         else if (mode === 'login') account = { kind: 'login', email, password: str(b.password, 1024) ?? '' };
         else throw new HttpError(400, 'invalid', 'Escolha criar uma conta ou entrar.');
         if (L().get(a.userId)) throw new HttpError(409, 'world_already_linked', 'Este perfil já está conectado ao Ergon World.');
@@ -483,7 +486,15 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       const phrase = (req: FastifyRequest) => { const v = (req.body as { recoveryPhrase?: unknown } | undefined)?.recoveryPhrase; return typeof v === 'string' && v.trim().length >= 20 ? v.trim() : undefined; };
       app.get('/api/world/sync', async (req) => {
         const a = h.auth(req);
-        return links?.bound(a.userId) === a.workspaceId ? { bound: true, ...sync.status(a.workspaceId) } : { bound: false, enabled: false };
+        if (links?.bound(a.userId) !== a.workspaceId) return { bound: false, enabled: false };
+        const st = sync.status(a.workspaceId);
+        // workspace adotado ainda sem sincronia: a tela precisa saber se a chave nasce aqui (workspace criado no servidor,
+        // pessoa dona ou admin), se espera quem administra ou se espera a entrega por outro computador
+        if (!st.enabled && st.origin === 'joined' && st.syncWorkspaceId) {
+          const keyState = await sync.keyState(a.userId, st.syncWorkspaceId).catch(() => null);
+          return { bound: true, ...st, keyState };
+        }
+        return { bound: true, ...st };
       });
       app.post('/api/world/sync/enable', async (req) => { const a = h.owner(req); return sync.enable(a.userId, boundWs(a), phrase(req)); });
       app.post('/api/world/sync/join', async (req) => {
@@ -519,6 +530,11 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       }, 20_000);
       cardsTimer.unref();
       app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); });
+      // o World disse que o e-mail não está confirmado: o aviso com o código volta a aparecer (mesmo se aqui achávamos que sim)
+      app.addHook('onError', async (req, _reply, err) => {
+        if ((err as HttpError).code !== 'email_unverified') return;
+        try { L().setEmailVerified(h.auth(req).userId, false); } catch { /* sem sessão local: nada a marcar */ }
+      });
       // renomear o workspace ligado aqui renomeia o do World (o nome que aparece no lugar do código)
       app.addHook('onResponse', async (req, reply) => {
         if (req.method !== 'PATCH' || req.routeOptions.url !== '/api/workspaces/:id' || reply.statusCode !== 200) return;
