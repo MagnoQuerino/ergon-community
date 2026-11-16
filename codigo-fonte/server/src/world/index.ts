@@ -19,6 +19,7 @@ import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
 import { registerLoja } from './loja.ts';
+import { registerEstado } from './estado.ts';
 
 /** O que o World responde nas contas, em frases curtas (a mensagem dele pode vir em outro idioma). */
 const ACCOUNT_ERRORS: Record<string, [number, string]> = {
@@ -287,6 +288,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
           : db.get<{ name: string }>('SELECT name FROM routines WHERE id = ? AND workspace_id = ?', ref.slice(7), a.workspaceId)?.name ?? null;
         return { ...sm, items: sm.items.map((x) => ({ ...x, title: nome(x.ref) })) };
       });
+      // o Estado do Ergon, a etiqueta da barra e a Governança: consumo do mês, últimos resultados e registro (estado.ts)
+      registerEstado({ app, db, client, auth: (r) => h.auth(r), worldWs, session: (userId) => links?.session(userId) ?? null });
       app.post('/api/world/cards/summary/seen', async (req) => { const a = h.auth(req); cards.seen(a.userId, a.workspaceId); return { ok: true }; });
       // protocolo de recuperação do workspace World (vem ligado): quem administra o workspace lá muda; os outros só veem
       const roleIn = (userId: string, w: string): string | null => {

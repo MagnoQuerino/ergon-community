@@ -245,6 +245,7 @@ export interface AiStatus {
   byok?: Array<{ id: string; name: string; url: string | null; connected: boolean }>;
   /** endpoints próprios (OpenAI-compatível, LM Studio, Ollama) ligados */
   byokCustom?: Array<{ id: string; name: string; baseUrl: string; model: string }>;
+  ergonAi?: boolean;
   accounts: Array<{ id: string; name: string; billing: Billing; about: string; site: string; connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
 }
@@ -290,7 +291,7 @@ export interface EtapaConsentimento {
   estado: 'ok' | 'falta' | 'pedido' | 'bloqueado' | 'aprovado';
   opcional: boolean; administrador: boolean; link: string | null; erro: string | null;
 }
-export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda' | 'world' | 'loja';
+export type View = 'ambiente' | 'agentes' | 'tarefas' | 'equipe' | 'rotinas' | 'documentos' | 'conexoes' | 'configuracao' | 'atividade' | 'ajuda' | 'world' | 'governanca' | 'loja';
 
 // i18n-ok: nomes de produto (marcas), não se traduzem
 export const SOURCE_LABEL: Record<string, string> = {

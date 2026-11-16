@@ -30,6 +30,15 @@ const ResumoFora = resumoForaMod ? lazy(resumoForaMod) : null;
 /** a página do Ergon World (módulo do World, se estiver nesta instalação): ganha um item no menu */
 const mundoMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/MundoView.tsx'))[0];
 const MundoView = mundoMod ? lazy(mundoMod) : null;
+/** a etiqueta do plano e dos Dracmas na barra de cima, a seção do World no Estado e a Governança (World Team) */
+const seloMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/SeloWorld.tsx'))[0];
+const SeloWorld = seloMod ? lazy(seloMod) : null;
+const estadoWorldMod = Object.values(import.meta.glob<{ default: ComponentType<{ onGo?: () => void }> }>('./views/world/EstadoWorld.tsx'))[0];
+const EstadoWorld = estadoWorldMod ? lazy(estadoWorldMod) : null;
+const govMod = Object.values(import.meta.glob<{ default: ComponentType }>('./views/world/Governanca.tsx'))[0];
+const Governanca = govMod ? lazy(govMod) : null;
+const govNavMod = Object.values(import.meta.glob<{ useGovernancaNav: () => 'aberto' | 'trancado' | null }>('./views/world/governanca-nav.ts', { eager: true }))[0];
+const useGovernancaNav = govNavMod?.useGovernancaNav ?? ((): 'aberto' | 'trancado' | null => null);
 import { useSurface } from './lib/surface.ts';
 
 // As outras áreas chegam sob demanda (a Cidade, a primeira tela, já vem no pacote principal): o app abre mais leve, e
@@ -144,7 +153,7 @@ export function App() {
 }
 
 // os nomes ficam como chave e são traduzidos na hora de mostrar (a troca de idioma redesenha o menu)
-type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'loja' | 'world' | 'configuracoes' | 'ajuda'}`;
+type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'loja' | 'world' | 'governanca' | 'configuracoes' | 'ajuda'}`;
 const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
   { id: 'ambiente', label: 'geral.nav.cidade', icon: 'temple' },
   { id: 'agentes', label: 'geral.nav.equipe', icon: 'users' },
@@ -160,6 +169,13 @@ const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
 ];
 /** no pé do menu: manuais, dicas e contornos */
 const HELP_NAV: { id: View; label: ChaveNav; icon: string } = { id: 'ajuda', label: 'geral.nav.ajuda', icon: 'help' };
+/** Governança (World Team, para quem administra): logo depois do Ergon World; trancada nos outros planos */
+const GOV_NAV: { id: View; label: ChaveNav; icon: string } = { id: 'governanca', label: 'geral.nav.governanca', icon: 'shield' };
+const comGovernanca = (gov: 'aberto' | 'trancado' | null) => {
+  if (!gov || !Governanca) return NAV;
+  const i = NAV.findIndex((n) => n.id === 'world');
+  return [...NAV.slice(0, i + 1), GOV_NAV, ...NAV.slice(i + 1)];
+};
 
 /** Tour inicial: um passo por área (os textos usam o nome de quem coordena hoje). Montado na hora, no idioma atual. */
 const tourSteps = (t: ReturnType<typeof useT>, coord: string): TourStep[] => [
@@ -222,6 +238,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
     return () => mq.removeEventListener('change', on);
   }, []);
   const [statusOpen, setStatusOpen] = useBalao('estado');
+  const gov = useGovernancaNav();
+  const nav = comGovernanca(gov);
   // busca rápida: Ctrl+K (Cmd+K no Mac) de qualquer lugar, ou a lupa do cabeçalho
   const [palette, setPalette] = useState(false);
   useEffect(() => {
@@ -249,7 +267,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   useEffect(() => startActivity(me.idleMinutes, onIdle), [me.idleMinutes]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // ir para uma área (pelo endereço) fecha a conversa ou a janela de agente aberta por cima
-    const onHash = () => { const h = location.hash.slice(1).split('?')[0] as View; if ([...NAV, HELP_NAV].some((n) => n.id === h)) { setView(h); setWin(null); setConvs(null); } };
+    const onHash = () => { const h = location.hash.slice(1).split('?')[0] as View; if ([...NAV, HELP_NAV, GOV_NAV].some((n) => n.id === h)) { setView(h); setWin(null); setConvs(null); } };
     addEventListener('hashchange', onHash);
     return () => removeEventListener('hashchange', onHash);
   }, []);
@@ -311,16 +329,20 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       { key: 'a-seguranca', label: t('geral.busca.seguranca'), sub: t('geral.busca.segurancaSub'), icon: 'shield', keywords: t('geral.busca.segurancaPalavras'), run: () => goHash('#configuracao?seguranca') },
       { key: 'a-tour', label: t('geral.busca.tour'), sub: t('geral.busca.tourSub'), icon: 'compass', keywords: t('geral.busca.tourPalavras'), run: () => startTour() },
     ],
-    areas: [...NAV, HELP_NAV].map((n) => ({ key: `v-${n.id}`, label: t(n.label), icon: n.icon, run: () => go(n.id) })),
+    areas: [...nav, HELP_NAV].map((n) => ({ key: `v-${n.id}`, label: t(n.label), icon: n.icon, run: () => go(n.id) })),
   };
   const navItems = (inDrawer: boolean) => (
     <>
-      {[...NAV, HELP_NAV].map((n) => (
-        <button key={n.id} data-tour={inDrawer ? undefined : `nav-${n.id}`} data-autofocus={inDrawer && view === n.id ? '' : undefined} className={`nav ${n.id === HELP_NAV.id ? 'nav--foot' : ''} ${view === n.id && !focus ? 'nav--on' : ''}`}
-          onClick={() => { go(n.id); if (inDrawer) setNavOpen(false); }} aria-current={view === n.id && !focus ? 'page' : undefined} title={navCompact && !inDrawer ? t(n.label) : undefined}>
-          <Icon name={n.icon} /> <span className="nav__label">{t(n.label)}</span>
-        </button>
-      ))}
+      {[...nav, HELP_NAV].map((n) => {
+        const trancada = n.id === GOV_NAV.id && gov === 'trancado';
+        return (
+          <button key={n.id} data-tour={inDrawer ? undefined : `nav-${n.id}`} data-autofocus={inDrawer && view === n.id ? '' : undefined} className={`nav ${n.id === HELP_NAV.id ? 'nav--foot' : ''} ${trancada ? 'nav--trancada' : ''} ${view === n.id && !focus ? 'nav--on' : ''}`}
+            onClick={() => { go(n.id); if (inDrawer) setNavOpen(false); }} aria-current={view === n.id && !focus ? 'page' : undefined}
+            title={trancada ? t('geral.nav.governancaTrancada') : navCompact && !inDrawer ? t(n.label) : undefined}>
+            <Icon name={n.icon} /> <span className="nav__label">{t(n.label)}</span>{trancada && <span className="nav__cadeado" aria-hidden="true"><Icon name="lock" size={13} /></span>}
+          </button>
+        );
+      })}
     </>
   );
   const running = s.runs.running; const queued = s.runs.queued; const pending = s.decisionsPending;
@@ -365,6 +387,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           </button>
         )}
         <span className="topbar__icons">
+          {/* o plano e os Dracmas do workspace no Ergon World (módulo do World): ao lado do Estado */}
+          {SeloWorld && <Suspense fallback={null}><SeloWorld /></Suspense>}
           <span className="topbar__statuswrap">
             <button className={`tb-icon ${statusOpen ? 'is-on' : ''}`} data-keep-surface onClick={() => setStatusOpen((v) => !v)} aria-expanded={statusOpen}
               aria-label={`${t('geral.estado.rotulo')}: ${[t('geral.estado.emExecucao', { n: running }), queued ? t('geral.estado.naFila', { n: queued }) : ''].filter(Boolean).join(', ')}${alerts.length ? `; ${t('geral.estado.avisos', { n: alerts.length })}: ${alerts.map((a) => a.label).join(', ')}` : ''}`}
@@ -445,6 +469,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <LojaView agent={coordinator} />
         ) : view === 'world' && MundoView ? (
           <MundoView />
+        ) : view === 'governanca' && Governanca ? (
+          <Governanca />
         ) : view === 'ajuda' ? (
           <AjudaView state={s} onGo={setView} onTour={startTour} onRedo={me.role === 'owner' ? () => setOnb('redo') : undefined} />
         ) : view === 'configuracao' ? (
@@ -553,6 +579,8 @@ function StatusPanel({ onClose, live, runs, capacity, usage, alerts, onAct, paus
         <PausaControle pausa={pausa} onMudou={onPausa} onError={setErroPausa} />
         {erroPausa && <p className="error" role="alert">{erroPausa}</p>}
       </section>
+      {/* o workspace no Ergon World, numa olhada (módulo do World; só no workspace ligado) */}
+      {EstadoWorld && <Suspense fallback={null}><EstadoWorld onGo={onClose} /></Suspense>}
       <section className="block">
         <h4>{t('geral.consumo.titulo')}</h4>
         <div className="row row--wrap"><UsageChips usage={usage} /></div>

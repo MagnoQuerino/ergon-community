@@ -48,7 +48,14 @@ interface Workspace { id: string; owner: string; label: string | null; plan: str
   /** de onde vem o plano: 'stripe' (pago) ou 'cortesia' (dado pela equipe, sem assinatura); null sem plano */
   source?: 'stripe' | 'cortesia' | null;
   /** extrato de Dracmas (GET /v1/wallet/statement) */
-  statement?: Array<{ id: string; kind: string; delta: string; amount: string; createdAt: string }>;
+  statement?: Array<{ id: string; kind: string; delta: string; amount: string; createdAt: string; meta?: Record<string, unknown> }>;
+  /** saldo disponível (padrão: ₯ 1.000 com plano, 0 sem) */
+  balance?: string;
+  /** moeda da assinatura (padrão brl) e quando chega a próxima franquia mensal (aditivo pedido ao World: next_grant_at) */
+  currency?: 'brl' | 'usd' | 'eur';
+  nextGrantAt?: string | null;
+  /** registro do que aconteceu no workspace (aditivo pedido ao World: GET /v1/workspaces/:id/activity), mais velho primeiro */
+  activity?: Array<{ id: string; at: string; action: string; actor: string | null; target: string | null; detail: Record<string, string> }>;
   /** versão atual da chave (padrão 1); sobe a cada giro (mudança kind 'rotation') */
   keyVersion?: number;
   /** envelopes de recuperação por conta (o primeiro também em recovery, como antes) */
@@ -59,6 +66,8 @@ interface Workspace { id: string; owner: string; label: string | null; plan: str
   budgets?: Map<string, string | null> }
 type Role = 'owner' | 'admin' | 'editor' | 'viewer';
 const RANK: Record<string, number> = { viewer: 1, editor: 2, admin: 3, owner: 4 };
+/** Jobs ao mesmo tempo por nível (world/src/catalog.ts) */
+const SLOTS: Record<string, number> = { sync: 2, pro: 5, team: 12 };
 const sha = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
 
 interface Owner { holder: 'local' | 'world'; deviceId: string | null; generation: number; leaseUntil: number; jobId: string | null }
@@ -172,6 +181,10 @@ export class FakeWorld {
     if (o.source === 'cortesia') this.cortesia(w.id, o.plan ?? 'world_pro');
     else if (o.plan) this.activate(w.id, o.plan);
     return w.id;
+  }
+  /** Uma linha no registro do workspace (o World grava em audit_log; aqui, só o que a rota de atividade devolve). */
+  registrar(ws: string, action: string, actor: string | null, target: string | null = null, detail: Record<string, string> = {}): void {
+    (this.workspaces.get(ws)!.activity ??= []).push({ id: `act_${hex(6)}`, at: new Date().toISOString(), action, actor, target, detail });
   }
   /** Plano cortesia (painel interno do World): ativo, sem assinatura; o crédito entra no extrato como 'cortesia'. */
   cortesia(ws: string, plan = 'world_pro', creditos = '500.000000'): void {
@@ -355,12 +368,18 @@ export class FakeWorld {
     if (key === 'GET /v1/billing/state') {
       const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
       const role = roleIn(w, acc.id); const own = w.owner === acc.id;
-      return { json: { workspaceId: w.id, role: own ? 'owner' : role, entitlement: { status: w.plan ? 'active' : 'none', plan_sku: w.plan, tier: w.plan ? 'pro' : null, people: this.seatsOf(w), job_slots: w.plan ? 5 : 0, effective_until: null, grace_until: null, source: w.plan ? w.source ?? 'stripe' : null }, seatsUsed: this.used(w),
-        subscription: own && w.sub ? { status: 'active', plan: w.plan, periodEnd: null, cancelAt: null } : null, items: own ? w.sub?.items ?? [] : [], invoices: [] } };
+      const tier = w.plan ? w.plan.replace(/^world_/, '').replace(/_annual$/, '') : null;
+      return { json: { workspaceId: w.id, role: own ? 'owner' : role, entitlement: { status: w.plan ? 'active' : 'none', plan_sku: w.plan, tier, people: this.seatsOf(w), job_slots: w.plan ? SLOTS[tier!] ?? 5 : 0, effective_until: null, grace_until: null, source: w.plan ? w.source ?? 'stripe' : null,
+        ...(w.nextGrantAt !== undefined ? { next_grant_at: w.nextGrantAt } : {}) }, seatsUsed: this.used(w),
+        subscription: own && w.sub ? { status: 'active', plan: w.plan, periodEnd: null, cancelAt: null, currency: w.currency ?? 'brl' } : null, items: own ? w.sub?.items ?? [] : [], invoices: [] } };
     }
     if (key === 'GET /v1/wallet/statement') {
       const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
-      return { json: { next: null, entries: [...(w.statement ?? [])].reverse() } };
+      // páginas como no World: ?limit= (até 200) e ?cursor= (o id da última linha da página anterior)
+      const all = [...(w.statement ?? [])].reverse(); const lim = Math.min(Math.max(Number(u.searchParams.get('limit') ?? 50) || 50, 1), 200);
+      const cur = u.searchParams.get('cursor'); const from = cur ? all.findIndex((x) => x.id === cur) + 1 : 0;
+      const page = all.slice(from, from + lim);
+      return { json: { next: from + lim < all.length ? page.at(-1)!.id : null, entries: page } };
     }
     if (key === 'POST /v1/billing/checkout') {
       const w = owned(b.workspaceId); if (!w) return { fail: [404, 'not_found'] };
@@ -405,10 +424,29 @@ export class FakeWorld {
       if (method === 'PUT' && m[2]) {
         if (!manager) return { fail: [403, 'sync_forbidden'] };
         if (!roleIn(w, m[2])) return { fail: [404, 'sync_workspace'] };
-        w.budgets.set(m[2], b.capDracmas === null ? null : `${Number(b.capDracmas).toFixed(6)}`); return { json: { ok: true, cap: w.budgets.get(m[2]) } };
+        w.budgets.set(m[2], b.capDracmas === null ? null : `${Number(b.capDracmas).toFixed(6)}`);
+        this.registrar(w.id, 'budget.set', acc.id, m[2], { cap: w.budgets.get(m[2]) ?? 'livre' });
+        return { json: { ok: true, cap: w.budgets.get(m[2]) } };
       }
     }
-    if (key === 'GET /v1/wallet') { const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] }; return { json: { available: w.plan ? '1000.000000' : '0.000000', reserved: '0.000000', lots: [] } }; }
+    if (key === 'GET /v1/wallet') { const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] }; return { json: { available: w.balance ?? (w.plan ? '1000.000000' : '0.000000'), reserved: '0.000000', lots: [] } }; }
+    // os Jobs do mês no workspace (aditivo pedido ao World): quantos, quantos terminaram bem, falharam e foram recuperados
+    if (key === 'GET /v1/jobs/stats') {
+      const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'sync_workspace'] };
+      const since = Date.parse(u.searchParams.get('since') ?? '') || 0;
+      const js = [...this.hjobs.values()].filter((j) => j.ws === w.id && Date.parse(j.queuedAt) >= since && !j.recoveryOf);
+      const fim = (j: HJob): HJob => { let x = j; while (x.recoveredBy && this.hjobs.get(x.recoveredBy)) x = this.hjobs.get(x.recoveredBy)!; return x; };
+      return { json: { since: new Date(since).toISOString(), total: js.length, succeeded: js.filter((j) => fim(j).state === 'succeeded').length, failed: js.filter((j) => fim(j).state === 'failed').length, recovered: js.filter((j) => !!j.recoveredBy && fim(j).state === 'succeeded').length } };
+    }
+    // o registro do workspace (aditivo pedido ao World): só quem administra; nomes das pessoas, nunca e-mails de quem não é membro
+    m = /^\/v1\/workspaces\/(sws_[a-f0-9]{32})\/activity$/.exec(p);
+    if (m && method === 'GET') {
+      const w = mine(m[1]); if (!w) return { fail: [404, 'sync_workspace'] };
+      if (RANK[roleIn(w, acc.id)!] < RANK.admin) return { fail: [403, 'sync_forbidden'] };
+      const lim = Math.min(Math.max(Number(u.searchParams.get('limit') ?? 50) || 50, 1), 100);
+      const quem = (id: string | null) => (id ? { accountId: id, name: this.accounts.get(id)?.displayName || null } : null);
+      return { json: { entries: [...(w.activity ?? [])].reverse().slice(0, lim).map((x) => ({ id: x.id, at: x.at, action: x.action, actor: quem(x.actor), target: quem(x.target), detail: x.detail })) } };
+    }
     if (key === 'GET /v1/jobs') {
       const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
       const jobs = [...this.hjobs.values()].filter((j) => j.ws === w.id && !TERMINAL.includes(j.state)).map((j) => ({ id: j.id, state: j.state, routineRef: j.routineRef, queuedAt: j.queuedAt, startedAt: null, mine: j.accountId === acc.id }));
@@ -422,6 +460,7 @@ export class FakeWorld {
         if (typeof b.recovery !== 'boolean') return { fail: [400, 'policy'] };
         if (!['owner', 'admin'].includes(this.roles.get(acc.id) ?? 'owner')) return { fail: [403, 'sync_forbidden'] };
         this.policies.set(w.id, b.recovery);
+        this.registrar(w.id, 'jobs.policy', acc.id, null, { recovery: String(b.recovery) });
         return { json: { recovery: b.recovery, recoveryRounds: 3 } };
       }
     }
@@ -554,6 +593,7 @@ export class FakeWorld {
       if (1 + (w.members?.size ?? 0) >= this.seatsOf(w) && !roleIn(w, me)) return { fail: [409, 'seats'] };
       inv.accepted = true;
       if (w.owner !== me) (w.members ??= new Map()).set(me, { role: inv.role as 'editor', since: new Date().toISOString() });
+      this.registrar(w.id, 'sync.member.join', me, null, { role: inv.role });
       return { json: { workspaceId: w.id, role: inv.role } };
     }
     const m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/(members|invites|transfer)(?:\/([A-Za-z0-9_]+))?(\/role)?$/.exec(p);
@@ -587,7 +627,7 @@ export class FakeWorld {
       const target = roleIn(w, sub); if (!target) return { fail: [404, 'sync_workspace'] };
       if (target === 'owner' || sub === w.owner) return { fail: [409, 'owner'] };
       if (my !== 'owner' && (target === 'admin' || b.role === 'admin')) return { fail: [403, 'sync_forbidden'] };
-      w.members!.get(sub)!.role = b.role; return { json: { role: b.role } };
+      w.members!.get(sub)!.role = b.role; this.registrar(w.id, 'sync.member.role', me, sub, { role: b.role }); return { json: { role: b.role } };
     }
     if (m[2] === 'members' && sub && !m[4] && method === 'DELETE') {
       if (!admin) return { fail: [403, 'sync_forbidden'] };
@@ -596,6 +636,7 @@ export class FakeWorld {
       w.members!.delete(sub);
       for (const d of this.devices.values()) if (d.accountId === sub) w.envelopes.delete(d.id);
       w.recoveries?.delete(sub);
+      this.registrar(w.id, 'sync.member.remove', me, sub);
       w.rotationRequired = true; return { json: { ok: true } };
     }
     if (m[2] === 'transfer' && !sub && method === 'POST') {

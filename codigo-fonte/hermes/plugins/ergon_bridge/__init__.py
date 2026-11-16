@@ -4578,6 +4578,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
                     "providers": [{"id": p, "name": c["name"], "url": c["url"], "connected": c["set"]} for p, c in sorted(cat.items(), key=lambda x: x[1]["name"].lower())],
                     "custom": [{"id": str(e.get("id")), "name": str(e.get("name") or e.get("id")), "baseUrl": str(e.get("base_url") or ""), "model": str(e.get("model") or "")}
                                for e in eps if _BYOK_CUSTOM_ID.fullmatch(str(e.get("id") or ""))],
+                    # o Ergon AI (id fixo "ergon-ai") fica fora da lista de endpoints próprios, mas o app precisa saber se está ligado
+                    "ergonAi": any(str(e.get("id") or "") == "ergon-ai" for e in eps),
                 })
             if method == "PUT" and path == "/ergon/v1/byok":
                 var, key = _sanitize_byok(body)

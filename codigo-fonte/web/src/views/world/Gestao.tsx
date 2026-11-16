@@ -50,13 +50,13 @@ const LIVE = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete'];
 export type { Status as StatusWorld, Billing as BillingWorld, Catalog as CatalogoWorld, Item as ItemWorld };
 
 /** A mensagem de cada seção (ok ou erro), no topo dela. */
-function useMsg() {
+export function useMsg() {
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const el = msg ? <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p> : null;
   return [setMsg as Msg, el] as const;
 }
 /** Executa uma ação com ocupado, mensagem de sucesso e o erro no idioma da tela. */
-function useAcao(onMsg: Msg, depois?: () => void) {
+export function useAcao(onMsg: Msg, depois?: () => void) {
   const [busy, setBusy] = useState(false);
   const t = useTw();
   const go = async (fn: () => Promise<unknown>, ok?: string) => {
@@ -547,7 +547,7 @@ export function DracmasPainel({ mine }: { mine: WorkspaceRef[] }) {
  * Recarga automática (só o dono, é o cartão dele): gatilho em Dracmas, o pacote da recarga e o teto do mês em reais
  * (mínimo R$ 19,90). O World ainda não devolve a regra salva para mostrar aqui: salvar substitui a anterior (dito na tela).
  */
-function AutoRecarga({ dono, topups, onMsg }: { dono: boolean; topups: Item[]; onMsg: Msg }) {
+export function AutoRecarga({ dono, topups, onMsg }: { dono: boolean; topups: Item[]; onMsg: Msg }) {
   const t = useTw();
   const [busy, go] = useAcao(onMsg);
   const [gatilho, setGatilho] = useState('200');
@@ -611,7 +611,7 @@ export function ErgonAiPainel() {
   const [onMsg, msgEl] = useMsg();
   const [busy, go] = useAcao(onMsg, () => { ai.reload(); emitLocal('ai.changed'); });
   const [padrao, setPadrao] = useState(false);
-  const ligado = (ai.data?.byokCustom ?? []).some((c) => /ergon-ai/i.test(`${c.id} ${c.name}`));
+  const ligado = ai.data?.ergonAi === true || (ai.data?.byokCustom ?? []).some((c) => /ergon-ai/i.test(`${c.id} ${c.name}`));
   return (
     <div className="painel-ia">
       {msgEl}
@@ -627,7 +627,7 @@ export function ErgonAiPainel() {
 
 interface Policy { available: boolean; recovery: boolean; rounds?: number; canEdit: boolean }
 /** Protocolo de recuperação do workspace na nuvem (vem ligado): quem administra liga e desliga; os outros só veem. */
-function RecoveryCard({ onMsg }: { onMsg: Msg }) {
+export function RecoveryCard({ onMsg }: { onMsg: Msg }) {
   const t = useTw();
   const p = useResource<Policy>('/api/world/job-policy', []);
   const [busy, setBusy] = useState(false);

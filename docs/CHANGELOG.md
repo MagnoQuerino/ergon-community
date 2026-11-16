@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.32 (pré-versão de teste)
+
+- **Plano e Dracmas sempre à vista:** no topo, ao lado do Estado do Ergon ("Pro | ₯ 4.202"). Um clique abre a recarga, mais pessoas, mais Jobs ou o próximo plano, direto para o pagamento.
+- **Estado do Ergon com o Ergon World:** plano, vagas, Jobs na nuvem, Dracmas gastos no mês, sincronia, recuperação e os últimos resultados da nuvem.
+- **Governança** no menu, para quem é dono ou admin no plano Team: pessoas e papéis, tetos de Dracmas por pessoa, regras da nuvem, quem compra e o registro do que aconteceu no workspace.
+- **Ergon AI:** depois de ligado, o app reconhece e o botão de ativar some.
+
 ## 1.1.0-rc.31 (pré-versão de teste)
 
 - **Workspace criado no site ou dado de cortesia:** ao ligar no app, quem é dono liga a sincronia com um clique (a chave é criada neste computador).

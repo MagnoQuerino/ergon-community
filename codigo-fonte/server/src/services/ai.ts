@@ -76,6 +76,8 @@ interface AiStatus {
   byok: ByokCatalog['providers'];
   /** endpoints próprios (OpenAI-compatível, LM Studio, Ollama) ligados */
   byokCustom: ByokCatalog['custom'];
+  /** o Ergon AI está ligado nesta equipe */
+  ergonAi: boolean;
 }
 
 /** A chave da linha dos ajudantes temporários em "Modelos por tarefa" (no motor, delegation.provider/model). */
@@ -283,7 +285,7 @@ export class AiService {
       return { ...a, connected: !!s?.connected, detail };
     });
     return { executor, available, ...(ocupado ? { ocupado: true } : {}), accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) },
-      byok: cat.providers, byokCustom: cat.custom };
+      byok: cat.providers, byokCustom: cat.custom, ergonAi: cat.ergonAi === true };
   }
 
   private async modelOptions(refresh = false): Promise<ModelOptions> {

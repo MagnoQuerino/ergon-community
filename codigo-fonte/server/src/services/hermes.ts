@@ -634,6 +634,8 @@ export function parseCota(j: unknown): CotaConta[] {
 export interface ByokCatalog {
   providers: Array<{ id: string; name: string; url: string | null; connected: boolean }>;
   custom: Array<{ id: string; name: string; baseUrl: string; model: string }>;
+  /** o Ergon AI (endpoint próprio "ergon-ai", fora da lista acima) está ligado */
+  ergonAi?: boolean;
 }
 export interface ByokCustomInput { kind: 'outro' | 'lmstudio' | 'ollama'; name: string; baseUrl: string; key?: string }
 
@@ -743,7 +745,7 @@ export class HttpHermesControl implements HermesControlClient {
   async cancelLogin(sessionId: string) { await this.call('DELETE', `/api/providers/oauth/sessions/${encodeURIComponent(sessionId)}`); }
   async disconnect(provider: string) { await this.call('DELETE', `/api/providers/oauth/${encodeURIComponent(provider)}`); }
 
-  async byok(): Promise<ByokCatalog> { const j = await this.call('GET', '/ergon/v1/byok'); return { providers: Array.isArray(j.providers) ? j.providers : [], custom: Array.isArray(j.custom) ? j.custom : [] }; }
+  async byok(): Promise<ByokCatalog> { const j = await this.call('GET', '/ergon/v1/byok'); return { providers: Array.isArray(j.providers) ? j.providers : [], custom: Array.isArray(j.custom) ? j.custom : [], ergonAi: j.ergonAi === true }; }
   async addByokCustom(c: ByokCustomInput) { const j = await this.call('POST', '/ergon/v1/byok/custom', c, 60000); return { id: String(j.id), models: Number(j.models) || 0 }; }
   async removeByokCustom(id: string) { await this.call('DELETE', '/ergon/v1/byok/custom/' + encodeURIComponent(id)); }
   async setByok(provider: string, key: string) { const j = await this.call('PUT', '/ergon/v1/byok', { provider, key }); return { verified: j.verified === true }; }

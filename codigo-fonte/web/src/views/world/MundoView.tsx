@@ -6,9 +6,9 @@ import { ErgonMarca } from '../../brand/Brand.tsx';
 import { fmtData, fmtDracmas, fmtMoeda, useIdioma } from '../../i18n/index.ts';
 import { ConnectForm, DeviceLimit, erroConta, type LoginLimit } from './WorldLinkDialog.tsx';
 import { linhaDoResumo, type ResumoFora } from './nuvem-cartao.ts';
-import { figura, predio, type Imagem, type Personagem } from './arte.ts';
+import { predio, type Personagem } from './arte.ts';
+import { Estrelas, Fig } from './Enfeites.tsx';
 import { tw, twn, useTw } from './textos.ts';
-import type { Gesture } from '../../iso/figures.ts';
 import { AceitarConvite, CarrinhoPainel, DracmasPainel, EquipeFaixa, ErgonAiPainel, NuvemPainel, PessoasPainel, PlanoPainel, WorkspacesPainel, type BillingWorld, type CatalogoWorld } from './Gestao.tsx';
 
 interface Status { configured: boolean; me: { displayName: string }; deviceLimit: LoginLimit | null; link: { boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean; workspaces?: Array<{ workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }> } | null }
@@ -342,26 +342,6 @@ function Beneficio({ arte, titulo, texto }: { arte: ReactNode; titulo: string; t
       <h3>{titulo}</h3>
       <p>{texto}</p>
     </article>
-  );
-}
-
-/** Um personagem da equipe, em pixel art (enfeite: sem texto alternativo). */
-function Fig({ k, gesture = 'none', scale = 3, className = '', facing = 'front' }: { k: Personagem; gesture?: Gesture; scale?: number; className?: string; facing?: 'front' | 'back' }) {
-  const img = useMemo<Imagem | null>(() => figura(k, gesture, facing, scale), [k, gesture, facing, scale]);
-  if (!img) return null;
-  return <img className={`mundo-fig ${className}`} src={img.url} width={img.w / 2} height={img.h / 2} alt="" draggable={false} />;
-}
-
-/** Estrelas espalhadas (posições fixas, sorteadas por uma semente: a mesma tela a cada visita). */
-function Estrelas({ n }: { n: number }) {
-  const pontos = useMemo(() => {
-    let x = 7 * n + 3; const r = () => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; };
-    return Array.from({ length: n }, (_, i) => ({ l: r() * 100, t: r() * 92, s: r() < 0.18 ? 3 : r() < 0.5 ? 2 : 1, d: (r() * 4).toFixed(2), i }));
-  }, [n]);
-  return (
-    <div className="mundo-estrelas" aria-hidden="true">
-      {pontos.map((p) => <i key={p.i} className={`mundo-estrela mundo-estrela--${p.s}`} style={{ left: `${p.l}%`, top: `${p.t}%`, animationDelay: `${p.d}s` }} />)}
-    </div>
   );
 }
 
