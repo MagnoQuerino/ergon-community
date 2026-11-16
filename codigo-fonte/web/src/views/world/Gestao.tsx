@@ -10,7 +10,7 @@ import { detalheDoResumo, linhaDoResumo, nomeDoWorkspace, type ResumoFora } from
 import { WsCard } from '../../components/WsCard.tsx';
 import type { AiStatus } from '../../lib/types.ts';
 import { administra, codigoValido, inicial, limparCodigo, papeisDoConvite, papeisPara, podeTirar, podeTransferir, vagas, type Membros, type Papel, type Pessoa } from './pessoas.ts';
-import { atualDe, CHAVE_PENDENTE, passos, somaDoCatalogo, vagaDe, VAZIO, vazio, type Carrinho as Cesta, type Passo } from './carrinho.ts';
+import { anualDe, atualDe, CHAVE_PENDENTE, jobsDe, passos, somaDoCatalogo, vagaDe, VAZIO, vazio, type Carrinho as Cesta, type Passo } from './carrinho.ts';
 import AlaNuvem from './AlaNuvem.tsx';
 
 /*
@@ -397,7 +397,8 @@ export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat
   const plano = c.plano ?? a.plano;
   const cur = plans.find((p) => p.sku === a.plano);
   const vaga = vagaDe(cat.items, plano);
-  const jobs = cat.items.find((i) => i.sku === 'addon_jobs_5');
+  const jobs = jobsDe(cat.items, plano);
+  const periodo = anualDe(cat.items, plano) ? t('pagina.planos.porAno') : t('pagina.planos.porMes');
   const r = passos(c, a);
   const soma = somaDoCatalogo(cat.items, c, a);
   const nome = (sku: string | null | undefined) => cat.items.find((i) => i.sku === sku)?.name ?? sku ?? '';
@@ -452,8 +453,8 @@ export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat
             {plans.filter((p) => p.sku !== a.plano && p.sellable && !(cur?.interval === 'year' && p.interval === 'month')).map((p) => <option key={p.sku} value={p.sku}>{p.interval === 'year' ? t('plano.opcaoAno', { nome: p.name, preco: brl(p.priceCents) }) : t('plano.opcaoMes', { nome: p.name, preco: brl(p.priceCents) })}</option>)}
           </select>
         </label>
-        {contador(t('carrinho.pessoas'), c.pessoas, (n) => mudar({ pessoas: n }), vaga ? ` · ${brl(vaga.priceCents)}${t('pagina.planos.porMes')}` : '', a.assinatura ? a.pessoas : null)}
-        {contador(t('carrinho.jobs'), c.jobs, (n) => mudar({ jobs: n }), jobs ? ` · ${brl(jobs.priceCents)}${t('pagina.planos.porMes')}` : '', a.assinatura ? a.jobs : null)}
+        {contador(t('carrinho.pessoas'), c.pessoas, (n) => mudar({ pessoas: n }), vaga ? ` · ${brl(vaga.priceCents)}${periodo}` : '', a.assinatura ? a.pessoas : null)}
+        {contador(t('carrinho.jobs'), c.jobs, (n) => mudar({ jobs: n }), jobs ? ` · ${brl(jobs.priceCents)}${periodo}` : '', a.assinatura ? a.jobs : null)}
         <label className="carrinho__linha">
           <span className="carrinho__rotulo">{t('carrinho.recarga')}</span>
           <select value={c.recarga ?? ''} onChange={(ev) => mudar({ recarga: ev.target.value || null })}>

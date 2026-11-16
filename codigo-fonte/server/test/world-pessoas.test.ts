@@ -106,6 +106,8 @@ describe('Pessoas no World: convite, papéis, saída e titularidade', () => {
     assert.equal((await req(pc2, 'POST', '/api/world/billing/checkout', bia, { sku: 'world_pro', seats: 2, jobPacks: 1, idempotencyKey: 'carrinho-1' })).status, 200);
     assert.deepEqual(world.checkouts.at(-1), { ws: meu, items: [{ sku: 'world_pro', quantity: 1 }, { sku: 'addon_seat_pro', quantity: 2 }, { sku: 'addon_jobs_5', quantity: 1 }] });
     assert.equal((await req(pc2, 'POST', '/api/world/billing/checkout', bia, { sku: 'world_pro', seats: -1, idempotencyKey: 'carrinho-2' })).status, 400);
+    assert.equal((await req(pc2, 'POST', '/api/world/billing/checkout', bia, { sku: 'world_pro_annual', seats: 1, jobPacks: 2, idempotencyKey: 'carrinho-anual' })).status, 200);
+    assert.deepEqual(world.checkouts.at(-1)!.items, [{ sku: 'world_pro_annual', quantity: 1 }, { sku: 'addon_seat_pro_annual', quantity: 1 }, { sku: 'addon_jobs_5_annual', quantity: 2 }], 'no anual, os adicionais são anuais');
     assert.equal((await req(pc2, 'POST', '/api/world/billing/checkout', bia, { sku: 'topup_1000', seats: 1, idempotencyKey: 'carrinho-3' })).status, 400, 'pessoas e Jobs vão junto de um plano');
     assert.equal((await req(pc2, 'POST', '/api/world/billing/checkout', bia, { sku: 'topup_1000', idempotencyKey: 'carrinho-4' })).status, 200, 'recarga: pagamento à parte');
     // a Ana já assina: prévia e confirmação

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { administra, codigoValido, inicial, limparCodigo, papeisDoConvite, papeisPara, podeTirar, podeTransferir, vagas, type Pessoa } from './pessoas.ts';
-import { atualDe, passos, somaDoCatalogo, VAZIO, type ItemCat } from './carrinho.ts';
+import { atualDe, jobsDe, passos, somaDoCatalogo, vagaDe, VAZIO, type ItemCat } from './carrinho.ts';
 
 const p = (role: Pessoa['role'], me = false): Pessoa => ({ accountId: `acc_${role}${me ? 'eu' : ''}`, name: role, email: null, role, since: '2026-01-01', me });
 
@@ -55,6 +55,9 @@ const CAT: ItemCat[] = [
   { sku: 'addon_seat_pro', kind: 'addon', name: 'Pessoa', priceCents: '1490', sellable: true },
   { sku: 'addon_seat_team', kind: 'addon', name: 'Pessoa', priceCents: '1290', sellable: true },
   { sku: 'addon_jobs_5', kind: 'addon', name: 'Jobs', priceCents: '2900', sellable: true },
+  { sku: 'world_pro_annual', kind: 'plan', name: 'Pro', priceCents: '52920', sellable: true, tier: 'pro', interval: 'year', seatSku: 'addon_seat_pro_annual' },
+  { sku: 'addon_seat_pro_annual', kind: 'addon', name: 'Pessoa', priceCents: '21492', sellable: true, interval: 'year' },
+  { sku: 'addon_jobs_5_annual', kind: 'addon', name: 'Jobs', priceCents: '21492', sellable: true, interval: 'year' },
   { sku: 'topup_1000', kind: 'topup', name: '₯ 1.000', priceCents: '1990', sellable: true },
   { sku: 'topup_x', kind: 'topup', name: 'sem preço', priceCents: null, sellable: false },
 ];
@@ -81,4 +84,14 @@ test('a soma do catálogo (só para mostrar): plano novo, vagas do nível certo,
   assert.equal(somaDoCatalogo(CAT, { ...VAZIO, pessoas: 1 }, a), 1490, 'a vaga do plano atual');
   assert.equal(somaDoCatalogo(CAT, { ...VAZIO, recarga: 'topup_x' }, a), null);
   assert.equal(somaDoCatalogo(CAT, VAZIO, a), null);
+});
+
+test('carrinho no plano anual: vaga e pacote anuais, nunca misturados com os mensais', () => {
+  assert.equal(vagaDe(CAT, 'world_pro_annual')?.sku, 'addon_seat_pro_annual');
+  assert.equal(jobsDe(CAT, 'world_pro_annual')?.sku, 'addon_jobs_5_annual');
+  assert.equal(jobsDe(CAT, 'world_pro')?.sku, 'addon_jobs_5');
+  const a = atualDe('world_pro_annual', true, [{ sku: 'world_pro_annual', quantity: 1 }, { sku: 'addon_jobs_5_annual', quantity: 2 }]);
+  assert.equal(a.jobs, 2);
+  assert.equal(somaDoCatalogo(CAT, { ...VAZIO, pessoas: 1, jobs: 1 }, a), 21492 * 2);
+  assert.equal(somaDoCatalogo(CAT, { plano: 'world_pro_annual', pessoas: 1, jobs: 0, recarga: null }, atualDe('world_pro', true, [])), 52920 + 21492, 'mensal → anual: a vaga já sai anual');
 });

@@ -277,8 +277,7 @@ export class FakeWorld {
       if (extra.some((x) => !Number.isInteger(x) || x < 0 || x > 1000)) return { fail: [400, 'addon'] };
       if (!sku.startsWith('world_') && extra.some((x) => x > 0)) return { fail: [400, 'addon', { message: 'pessoas e Jobs vão junto de um plano' }] };
       if (sku.startsWith('world_') && w.sub) return { fail: [409, 'has_subscription'] };
-      const tier = sku.replace(/^world_/, '').replace(/_annual$/, '');
-      const items = [{ sku, quantity: 1 }, ...(b.seats ? [{ sku: `addon_seat_${tier}`, quantity: b.seats as number }] : []), ...(b.jobPacks ? [{ sku: 'addon_jobs_5', quantity: b.jobPacks as number }] : [])];
+      const items = [{ sku, quantity: 1 }, ...this.addons(sku, b.seats ?? 0, b.jobPacks ?? 0)];
       this.checkouts.push({ ws: w.id, items });
       return { json: { url: `https://checkout.stripe.com/c/pay/cs_test_${hex(8)}?ws=${w.id}&sku=${items.map((i) => `${i.sku}x${i.quantity}`).join(',')}` } };
     }
@@ -291,8 +290,8 @@ export class FakeWorld {
       const upgrade = plan !== w.plan || seats > cur('addon_seat_') || jobPacks > cur('addon_jobs_5');
       if (key.endsWith('preview')) return { json: { upgrade, prorationDate: 1_700_000_000, amountDueCents: upgrade ? '2490' : '0', currency: 'brl', effective: upgrade ? 'agora, depois do pagamento confirmado' : 'no próximo ciclo (o período atual já foi pago)' } };
       if (typeof b.idempotencyKey !== 'string' || !Number.isInteger(b.prorationDate)) return { fail: [400, 'invalid'] };
-      const tier = String(plan).replace(/^world_/, '').replace(/_annual$/, '');
-      w.plan = plan; w.sub.items = [{ sku: String(plan), quantity: 1 }, ...(seats ? [{ sku: `addon_seat_${tier}`, quantity: seats }] : []), ...(jobPacks ? [{ sku: 'addon_jobs_5', quantity: jobPacks }] : [])];
+      // os adicionais acompanham o período do plano (mensal ou anual), como no World
+      w.plan = plan; w.sub.items = [{ sku: String(plan), quantity: 1 }, ...this.addons(String(plan), seats, jobPacks)];
       w.seats = 3 + seats;
       return { json: { upgrade, status: 'active', pendingUpdate: false } };
     }
@@ -396,6 +395,11 @@ export class FakeWorld {
     return { fail: [404, 'not_found'] };
   }
 
+  /** vagas e pacotes de Jobs no período do plano: no anual, os skus _annual (world/src/catalog.ts) */
+  private addons(plan: string, seats: number, jobPacks: number): Array<{ sku: string; quantity: number }> {
+    const annual = plan.endsWith('_annual'); const tier = plan.replace(/^world_/, '').replace(/_annual$/, ''); const sfx = annual ? '_annual' : '';
+    return [...(seats ? [{ sku: `addon_seat_${tier}${sfx}`, quantity: seats }] : []), ...(jobPacks ? [{ sku: `addon_jobs_5${sfx}`, quantity: jobPacks }] : [])];
+  }
   private seatsOf(w: Workspace): number { return w.plan ? w.seats ?? 3 : 0; }
   private pending(w: Workspace) { return (w.invites ?? []).filter((i) => !i.accepted && i.expiresAt > Date.now()); }
   private used(w: Workspace): number { return 1 + (w.members?.size ?? 0) + this.pending(w).length; }

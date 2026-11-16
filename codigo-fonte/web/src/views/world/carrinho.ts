@@ -11,7 +11,7 @@ export interface Atual { plano: string | null; assinatura: boolean; pessoas: num
 export const atualDe = (planSku: string | null, assinatura: boolean, items: Array<{ sku: string; quantity: number }>): Atual => ({
   plano: planSku, assinatura,
   pessoas: items.filter((i) => i.sku.startsWith('addon_seat_')).reduce((n, i) => n + i.quantity, 0),
-  jobs: items.filter((i) => i.sku === 'addon_jobs_5').reduce((n, i) => n + i.quantity, 0),
+  jobs: items.filter((i) => i.sku.startsWith('addon_jobs_5')).reduce((n, i) => n + i.quantity, 0),
 });
 
 export const vazio = (c: Carrinho): boolean => !c.plano && !c.pessoas && !c.jobs && !c.recarga;
@@ -47,9 +47,14 @@ export const vagaDe = (cat: ItemCat[], planoSku: string | null): ItemCat | undef
   return cat.find((i) => i.sku === (p?.seatSku ?? `addon_seat_${tierDe(planoSku)}`));
 };
 
+/** O plano é anual? (as vagas e os pacotes acompanham o período do plano: nunca se misturam) */
+export const anualDe = (cat: ItemCat[], planoSku: string | null): boolean => (cat.find((i) => i.sku === planoSku)?.interval ?? (planoSku?.endsWith('_annual') ? 'year' : 'month')) === 'year';
+/** O pacote de +5 Jobs no período do plano. */
+export const jobsDe = (cat: ItemCat[], planoSku: string | null): ItemCat | undefined => cat.find((i) => i.sku === (anualDe(cat, planoSku) ? 'addon_jobs_5_annual' : 'addon_jobs_5'));
+
 /**
  * Soma pelo catálogo (centavos), só para mostrar antes da prévia: o plano novo (preço cheio do período), as vagas e os
- * pacotes por mês, e a recarga. null quando falta preço de algum item.
+ * pacotes no período do plano (por mês ou por ano), e a recarga. null quando falta preço de algum item.
  */
 export function somaDoCatalogo(cat: ItemCat[], c: Carrinho, a: Atual): number | null {
   const preco = (sku: string | null | undefined, q = 1) => { const i = cat.find((x) => x.sku === sku); return i && i.priceCents != null ? Number(i.priceCents) * q : null; };
@@ -57,7 +62,7 @@ export function somaDoCatalogo(cat: ItemCat[], c: Carrinho, a: Atual): number | 
   const plano = c.plano && c.plano !== a.plano ? c.plano : null;
   if (plano) partes.push(preco(plano));
   if (c.pessoas) partes.push(preco(vagaDe(cat, c.plano ?? a.plano)?.sku, c.pessoas));
-  if (c.jobs) partes.push(preco('addon_jobs_5', c.jobs));
+  if (c.jobs) partes.push(preco(jobsDe(cat, c.plano ?? a.plano)?.sku, c.jobs));
   if (c.recarga) partes.push(preco(c.recarga));
   if (!partes.length || partes.some((x) => x === null)) return null;
   return (partes as number[]).reduce((s, x) => s + x, 0);
