@@ -410,10 +410,26 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         await L().renew(a.userId).catch(() => undefined);
         return r;
       });
-      app.post('/api/world/billing/portal', async (req) => client.call('POST', '/v1/billing/portal', { returnUrl: `${cfg.publicUrl}/?world=portal` }, sessionOf(h.auth(req).userId)));
+      /**
+       * Plano cortesia (entitlement.source = 'cortesia'): ativo, sem assinatura paga. Gerenciar a assinatura, o portal de
+       * pagamento, cancelar e trocar o período (mensal/anual) não se aplicam; subir de plano pelo carrinho continua.
+       */
+      const fonteDoPlano = async (userId: string, w: string): Promise<{ source: string | null; plan: string | null }> => {
+        const st = await client.call<{ entitlement?: { source?: string | null; plan_sku?: string | null } }>('GET', `/v1/billing/state?workspace=${w}`, undefined, sessionOf(userId));
+        return { source: st.entitlement?.source ?? null, plan: st.entitlement?.plan_sku ?? null };
+      };
+      const CORTESIA = 'Plano cortesia: não há assinatura paga para gerenciar.';
+      app.post('/api/world/billing/portal', async (req) => {
+        const a = h.auth(req); const w = worldWs(a);
+        if (w && (await fonteDoPlano(a.userId, w)).source === 'cortesia') throw new HttpError(409, 'cortesia', CORTESIA);
+        return client.call('POST', '/v1/billing/portal', { returnUrl: `${cfg.publicUrl}/?world=portal` }, sessionOf(a.userId));
+      });
+      const anual = (sku: unknown) => typeof sku === 'string' && sku.endsWith('_annual');
       const change = (path: string) => async (req: FastifyRequest) => {
         const a = h.owner(req); const w = needWorld(a);
         const b = (req.body ?? {}) as Record<string, unknown>;
+        const f = await fonteDoPlano(a.userId, w);
+        if (f.source === 'cortesia' && (path.endsWith('/cancel') || (b.plan !== undefined && anual(b.plan) !== anual(f.plan)))) throw new HttpError(409, 'cortesia', CORTESIA);
         const pick = Object.fromEntries(['plan', 'seats', 'jobPacks', 'prorationDate', 'idempotencyKey'].filter((k) => b[k] !== undefined).map((k) => [k, b[k]]));
         return client.call('POST', path, { ...pick, workspaceId: w }, sessionOf(a.userId));
       };

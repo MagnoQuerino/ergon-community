@@ -14,7 +14,7 @@ import { AceitarConvite, CarrinhoPainel, DracmasPainel, EquipeFaixa, ErgonAiPain
 interface Status { configured: boolean; me: { displayName: string }; deviceLimit: LoginLimit | null; link: { boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean; workspaces?: Array<{ workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }> } | null }
 interface Item { sku: string; kind: string; name: string; priceCents: string | null; sellable: boolean; tier?: string | null; interval?: 'month' | 'year'; people?: number; jobSlots?: number; monthlyDracmas?: string; seatSku?: string }
 interface Catalog { items: Item[] }
-interface Billing { workspaceId: string | null; role: string; entitlement: { status: string; plan_sku: string | null; tier: string | null; people: number; job_slots: number; effective_until: string | null }; seatsUsed: number }
+interface Billing { workspaceId: string | null; role: string; entitlement: { status: string; plan_sku: string | null; tier: string | null; people: number; job_slots: number; effective_until: string | null; source?: string | null }; seatsUsed: number }
 interface Wallet { available: string }
 interface Policy { available: boolean; rounds?: number }
 
@@ -119,7 +119,7 @@ export default function MundoView() {
               <h1 id="mundo-titulo" className="mundo-heroi__titulo">{t('pagina.membro.titulo', { nome: s?.me.displayName ?? '' })}</h1>
               <p className="mundo-heroi__sub">{twn('pagina.membro.sub', { plano: <b>{nomeDe(atual)}</b>, workspace: <b>{s?.link?.boundWorkspaceName ?? ''}</b> })}</p>
               <dl className="mundo-numeros">
-                <div><dt>{t('pagina.membro.plano')}</dt><dd>{nomeDe(atual)}<small>{t('plano.pagoAte', { dia: dia(e.effective_until) })}</small></dd></div>
+                <div><dt>{t('pagina.membro.plano')}</dt><dd>{nomeDe(atual)}<small>{e.source === 'cortesia' ? (e.effective_until ? t('plano.cortesiaAte', { dia: dia(e.effective_until) }) : t('plano.cortesia')) : t('plano.pagoAte', { dia: dia(e.effective_until) })}</small></dd></div>
                 <div><dt>{t('pagina.membro.creditos')}</dt><dd>{wallet.data ? dr(wallet.data.available) : '…'}</dd></div>
                 <div><dt>{t('pagina.membro.pessoas')}</dt><dd>{t('pagina.membro.pessoasValor', { usadas: bill.data?.seatsUsed ?? 0, n: e.people })}</dd></div>
                 <div><dt>{t('pagina.membro.jobs')}</dt><dd>{e.job_slots}</dd></div>

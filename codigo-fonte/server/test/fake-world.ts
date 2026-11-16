@@ -45,6 +45,10 @@ interface Workspace { id: string; owner: string; label: string | null; plan: str
   seats?: number;
   /** alguém saiu: a chave precisa girar antes de novas mudanças */
   rotationRequired?: boolean;
+  /** de onde vem o plano: 'stripe' (pago) ou 'cortesia' (dado pela equipe, sem assinatura); null sem plano */
+  source?: 'stripe' | 'cortesia' | null;
+  /** extrato de Dracmas (GET /v1/wallet/statement) */
+  statement?: Array<{ id: string; kind: string; delta: string; amount: string; createdAt: string }>;
   /** versão atual da chave (padrão 1); sobe a cada giro (mudança kind 'rotation') */
   keyVersion?: number;
   /** envelopes de recuperação por conta (o primeiro também em recovery, como antes) */
@@ -151,6 +155,11 @@ export class FakeWorld {
 
   /** Simula o pagamento confirmado (o webhook do Stripe no World de verdade). */
   activate(ws: string, plan = 'world_pro', seats?: number): void { const w = this.workspaces.get(ws)!; w.plan = plan; w.sub ??= { items: [{ sku: plan, quantity: 1 }] }; if (seats !== undefined) w.seats = seats; }
+  /** Plano cortesia (painel interno do World): ativo, sem assinatura; o crédito entra no extrato como 'cortesia'. */
+  cortesia(ws: string, plan = 'world_pro', creditos = '500.000000'): void {
+    const w = this.workspaces.get(ws)!; w.plan = plan; w.source = 'cortesia'; w.sub = null;
+    (w.statement ??= []).push({ id: `led_${hex(6)}`, kind: 'cortesia', delta: creditos, amount: creditos, createdAt: new Date().toISOString() });
+  }
   /** O executor do World: o Job passa a rodar (ou termina, com o resultado cifrado para os aparelhos da pessoa). */
   runJob(jobId: string, state: 'running' | 'succeeded' | 'failed', result?: unknown, reason = 'a fonte não respondeu'): string | null {
     const j = this.hjobs.get(jobId)!; j.state = state;
@@ -299,7 +308,7 @@ export class FakeWorld {
     const owned = (id: string | null) => { const w = id ? this.workspaces.get(id) : undefined; return w && w.owner === acc.id ? w : null; };
     if (key === 'POST /v1/bindings') { this.bindings.push({ accountId: acc.id, localPersonId: b.localPersonId }); return { json: { ok: true } }; }
     if (key === 'POST /v1/authorize') {
-      const workspaces = [...this.workspaces.values()].filter((w) => roleIn(w, acc.id)).map((w) => ({ workspaceId: w.id, label: w.label, role: roleIn(w, acc.id), status: w.plan ? 'active' : 'none', plan_sku: w.plan }));
+      const workspaces = [...this.workspaces.values()].filter((w) => roleIn(w, acc.id)).map((w) => ({ workspaceId: w.id, label: w.label, role: roleIn(w, acc.id), status: w.plan ? 'active' : 'none', plan_sku: w.plan, source: w.plan ? w.source ?? 'stripe' : null }));
       return { json: { authorizedUntil: new Date(Date.now() + 900_000).toISOString(), account: { email: acc.email }, workspaces } };
     }
     if (key === 'GET /v1/devices') return { json: [...this.devices.values()].filter((d) => d.accountId === acc.id && d.status !== 'pending').map((d) => ({ id: d.id, name: d.name, status: d.status, current: d === dev, connected: !!d.session, lastSeenAt: d.lastSeenAt })) };
@@ -311,8 +320,12 @@ export class FakeWorld {
     if (key === 'GET /v1/billing/state') {
       const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
       const role = roleIn(w, acc.id); const own = w.owner === acc.id;
-      return { json: { workspaceId: w.id, role: own ? 'owner' : role, entitlement: { status: w.plan ? 'active' : 'none', plan_sku: w.plan, tier: w.plan ? 'pro' : null, people: this.seatsOf(w), job_slots: w.plan ? 5 : 0, effective_until: null, grace_until: null }, seatsUsed: this.used(w),
+      return { json: { workspaceId: w.id, role: own ? 'owner' : role, entitlement: { status: w.plan ? 'active' : 'none', plan_sku: w.plan, tier: w.plan ? 'pro' : null, people: this.seatsOf(w), job_slots: w.plan ? 5 : 0, effective_until: null, grace_until: null, source: w.plan ? w.source ?? 'stripe' : null }, seatsUsed: this.used(w),
         subscription: own && w.sub ? { status: 'active', plan: w.plan, periodEnd: null, cancelAt: null } : null, items: own ? w.sub?.items ?? [] : [], invoices: [] } };
+    }
+    if (key === 'GET /v1/wallet/statement') {
+      const w = mine(u.searchParams.get('workspace')); if (!w) return { fail: [404, 'not_found'] };
+      return { json: { next: null, entries: [...(w.statement ?? [])].reverse() } };
     }
     if (key === 'POST /v1/billing/checkout') {
       const w = owned(b.workspaceId); if (!w) return { fail: [404, 'not_found'] };

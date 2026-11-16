@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { administra, codigoValido, inicial, limparCodigo, papeisDoConvite, papeisPara, podeTirar, podeTransferir, vagas, type Pessoa } from './pessoas.ts';
-import { atualDe, jobsDe, passos, somaDoCatalogo, vagaDe, VAZIO, type ItemCat } from './carrinho.ts';
+import { atualDe, jobsDe, passos, planosDoCarrinho, somaDoCatalogo, vagaDe, VAZIO, type ItemCat } from './carrinho.ts';
 
 const p = (role: Pessoa['role'], me = false): Pessoa => ({ accountId: `acc_${role}${me ? 'eu' : ''}`, name: role, email: null, role, since: '2026-01-01', me });
 
@@ -94,4 +94,13 @@ test('carrinho no plano anual: vaga e pacote anuais, nunca misturados com os men
   assert.equal(a.jobs, 2);
   assert.equal(somaDoCatalogo(CAT, { ...VAZIO, pessoas: 1, jobs: 1 }, a), 21492 * 2);
   assert.equal(somaDoCatalogo(CAT, { plano: 'world_pro_annual', pessoas: 1, jobs: 0, recarga: null }, atualDe('world_pro', true, [])), 52920 + 21492, 'mensal → anual: a vaga já sai anual');
+});
+
+test('plano cortesia: o carrinho sobe de plano no mesmo período, sem trocar mensal por anual', () => {
+  const p = (sku: string, interval: 'month' | 'year'): ItemCat => ({ sku, kind: 'plan', name: sku, priceCents: '100', sellable: true, interval });
+  const planos = [p('world_sync', 'month'), p('world_pro', 'month'), p('world_team', 'month'), p('world_pro_annual', 'year'), p('world_team_annual', 'year')];
+  const pro = planos[1];
+  assert.deepEqual(planosDoCarrinho(planos, pro, true).map((x) => x.sku), ['world_sync', 'world_team']);
+  assert.deepEqual(planosDoCarrinho(planos, pro, false).map((x) => x.sku), ['world_sync', 'world_team', 'world_pro_annual', 'world_team_annual'], 'pago: pode ir para o anual');
+  assert.deepEqual(planosDoCarrinho(planos, planos[3], false).map((x) => x.sku), ['world_team_annual'], 'do anual não volta ao mensal');
 });

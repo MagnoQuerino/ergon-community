@@ -70,3 +70,13 @@ export function somaDoCatalogo(cat: ItemCat[], c: Carrinho, a: Atual): number | 
 
 /** O passo 2 de 2 que fica guardado quando o 1 leva ao pagamento (o retorno do Stripe continua daqui). */
 export const CHAVE_PENDENTE = 'ergon.world.carrinho.recarga';
+
+/**
+ * Os planos que o carrinho oferece: os à venda, menos o atual; do anual não se volta ao mensal; e no plano cortesia
+ * (sem assinatura paga) não se troca o período, só se sobe de plano no mesmo período.
+ */
+export function planosDoCarrinho(planos: ItemCat[], atual: ItemCat | undefined, cortesia: boolean): ItemCat[] {
+  return planos.filter((p) => p.kind === 'plan' && p.sku !== atual?.sku && p.sellable
+    && !(atual?.interval === 'year' && p.interval === 'month')
+    && !(cortesia && atual && p.interval !== atual.interval));
+}

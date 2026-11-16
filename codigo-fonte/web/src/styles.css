@@ -2789,3 +2789,4 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
   .drawer { width: min(500px, 100%); }
   body:has(.drawer) .cdock { right: calc(min(500px, 100%) + 18px); }
 }
+.badge--cortesia { background: var(--dourado-suave); color: var(--dourado-texto); border-color: var(--dourado-borda); margin-left: 6px; }

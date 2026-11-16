@@ -178,6 +178,8 @@ const pt = {
   'mov.chargeback': 'disputa',
   'mov.adjustment': 'ajuste',
   'mov.transfer': 'transferência',
+  'mov.cortesia': 'Crédito cortesia',
+  'mov.cortesiaEstorno': 'Estorno de cortesia',
 
   // Ergon AI
   'ia.titulo': 'Ergon AI',
@@ -216,6 +218,8 @@ const pt = {
   'plano.mudancaAgendada': 'Mudança agendada para o próximo ciclo; até lá, segue o que já foi pago.',
   'plano.recusado': 'O pagamento da renovação foi recusado. O plano continua até {dia} (tolerância de 7 dias), sem créditos novos. Atualize o cartão em "Cartão e faturas".',
   'plano.pagoAte': 'pago até {dia}',
+  'plano.cortesia': 'Cortesia',
+  'plano.cortesiaAte': 'Cortesia até {dia}',
   'plano.emTolerancia': 'em tolerância',
   'plano.vagas': { one: '{usadas} de {n} vaga usada', other: '{usadas} de {n} vagas usadas' },
   'plano.contandoDono': '(contando quem é dono)',
@@ -688,6 +692,8 @@ const en: Traducao<typeof pt> = {
   'mov.chargeback': 'dispute',
   'mov.adjustment': 'adjustment',
   'mov.transfer': 'transfer',
+  'mov.cortesia': 'Courtesy credit',
+  'mov.cortesiaEstorno': 'Courtesy reversal',
 
   'ia.titulo': 'Ergon AI',
   'ia.texto': 'Quality AI in one click, paid for what you use with this workspace’s Dracmas. Your own AI account stays as it is.',
@@ -722,6 +728,8 @@ const en: Traducao<typeof pt> = {
   'plano.mudancaAgendada': 'Change scheduled for the next billing cycle; until then, what you’ve paid for stays as it is.',
   'plano.recusado': 'The renewal payment was declined. The plan continues until {dia} (7-day grace period), with no new credits. Update your card in "Card and invoices".',
   'plano.pagoAte': 'paid until {dia}',
+  'plano.cortesia': 'Courtesy',
+  'plano.cortesiaAte': 'Courtesy until {dia}',
   'plano.emTolerancia': 'in grace period',
   'plano.vagas': { one: '{usadas} of {n} seat used', other: '{usadas} of {n} seats used' },
   'plano.contandoDono': '(including the owner)',

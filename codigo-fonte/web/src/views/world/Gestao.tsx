@@ -10,7 +10,7 @@ import { detalheDoResumo, linhaDoResumo, nomeDoWorkspace, type ResumoFora } from
 import { WsCard } from '../../components/WsCard.tsx';
 import type { AiStatus } from '../../lib/types.ts';
 import { administra, codigoValido, inicial, limparCodigo, papeisDoConvite, papeisPara, podeTirar, podeTransferir, vagas, type Membros, type Papel, type Pessoa } from './pessoas.ts';
-import { anualDe, atualDe, CHAVE_PENDENTE, jobsDe, passos, somaDoCatalogo, vagaDe, VAZIO, vazio, type Carrinho as Cesta, type Passo } from './carrinho.ts';
+import { anualDe, atualDe, CHAVE_PENDENTE, jobsDe, passos, somaDoCatalogo, vagaDe, VAZIO, vazio, type Carrinho as Cesta, type Passo, planosDoCarrinho } from './carrinho.ts';
 import AlaNuvem from './AlaNuvem.tsx';
 
 /*
@@ -20,7 +20,7 @@ import AlaNuvem from './AlaNuvem.tsx';
  * aparelhos ficam em Configurações › Ergon World (WorldPanel). Preços e saldo vêm do World; o navegador nunca decide valor.
  */
 
-interface WorkspaceRef { workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }
+interface WorkspaceRef { workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null; source?: string | null }
 /** o nome do workspace do World; o código curto só quando ele não tem nome */
 const nomeWs = (w: WorkspaceRef): string => { const n = nomeDoWorkspace(w); return 'nome' in n ? n.nome : tw('vinculo.existente', { codigo: n.codigo }); };
 interface LocalWs { id: string; name: string; current: boolean }
@@ -30,7 +30,7 @@ interface Wallet { available: string; reserved: string; lots: Array<{ id: string
 interface Statement { entries: Array<{ id: string; kind: string; delta: string; amount: string; createdAt: string }> }
 interface Item { sku: string; kind: string; name: string; priceCents: string | null; sellable: boolean; tier?: string | null; interval?: 'month' | 'year'; people?: number; jobSlots?: number; monthlyDracmas?: string; seatSku?: string; dracmas?: string | null; pending?: string[] }
 interface Catalog { dracmaIssue: string; items: Item[] }
-interface Ent { status: string; plan_sku: string | null; tier: string | null; people: number; job_slots: number; effective_until: string | null; grace_until: string | null }
+interface Ent { status: string; plan_sku: string | null; tier: string | null; people: number; job_slots: number; effective_until: string | null; grace_until: string | null; source?: 'stripe' | 'cortesia' | null }
 interface Billing { workspaceId: string | null; role: string; entitlement: Ent; seatsUsed: number; subscription: { status: string; plan: string | null; periodEnd: string | null; cancelAt: string | null } | null; items: Array<{ sku: string; quantity: number }> }
 interface Preview { upgrade: boolean; prorationDate: number; amountDueCents: string; effective: string }
 interface Budgets { manager: boolean; period: string | null; members: Array<{ accountId: string; role: string; name: string | null; email: string | null; me: boolean; cap: string | null; used: string }> }
@@ -44,7 +44,7 @@ const day = (iso: string | null) => (iso ? fmtData(iso, { dateStyle: 'short', ti
 const LOT: Record<string, Extract<ChaveWorld, `lote.${string}`>> = { monthly: 'lote.monthly', purchased: 'lote.purchased', promo: 'lote.promo', refund: 'lote.refund', adjustment: 'lote.adjustment' };
 const KIND: Record<string, Extract<ChaveWorld, `mov.${string}`>> = {
   grant: 'mov.grant', purchase: 'mov.purchase', hold: 'mov.hold', release: 'mov.release', capture: 'mov.capture', expiry: 'mov.expiry', refund: 'mov.refund',
-  chargeback: 'mov.chargeback', adjustment: 'mov.adjustment', transfer: 'mov.transfer',
+  chargeback: 'mov.chargeback', adjustment: 'mov.adjustment', transfer: 'mov.transfer', cortesia: 'mov.cortesia', cortesia_estorno: 'mov.cortesiaEstorno',
 };
 const LIVE = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete'];
 export type { Status as StatusWorld, Billing as BillingWorld, Catalog as CatalogoWorld, Item as ItemWorld };
@@ -113,7 +113,7 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
                     <label className="ws-card__opcao"><input type="radio" name={`destino-${w.id}`} checked={remote === ''} onChange={() => setRemote('')} /> {t('vinculo.novo')}</label>
                     {remotes.map((r) => (
                       <label key={r.workspaceId} className="ws-card__opcao"><input type="radio" name={`destino-${w.id}`} checked={remote === r.workspaceId} onChange={() => setRemote(r.workspaceId)} />
-                        {nomeWs(r)} <span className={`badge ${r.plan_sku ? 'badge--ok' : ''}`}>{r.plan_sku ? r.plan_sku.replace('world_', '') : t('vinculo.semPlano')}</span></label>
+                        {nomeWs(r)} <span className={`badge ${r.plan_sku ? 'badge--ok' : ''}`}>{r.plan_sku ? r.plan_sku.replace('world_', '') : t('vinculo.semPlano')}</span>{r.source === 'cortesia' && <span className="badge badge--cortesia">{t('plano.cortesia')}</span>}</label>
                     ))}
                     <div className="ws-card__acoes">
                       <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void ligar(w.id, remote || null).then(() => setEscolhido(null))}>{t('vinculo.ligar')}</button>
@@ -354,7 +354,9 @@ export function PlanoPainel({ planoInicial }: { planoInicial?: string | null } =
   const addon = (sku: string | undefined) => cat.data!.items.find((i) => i.sku === sku);
   const cur = plans.find((p) => p.sku === e.plan_sku);
   const dono = bill.data.role === 'owner';
-  const live = !!sub && LIVE.includes(sub.status) && dono;
+  // cortesia: ativo, sem assinatura paga (sem portal, cancelar nem troca de período); subir de plano continua
+  const cortesia = e.source === 'cortesia';
+  const live = !!sub && LIVE.includes(sub.status) && dono && !cortesia;
   return (
     <div className="painel-plano">
       {msgEl}
@@ -362,8 +364,9 @@ export function PlanoPainel({ planoInicial }: { planoInicial?: string | null } =
       {cur && ['active', 'grace'].includes(e.status) ? (
         <div className="painel-plano__atual">
           <span className="mundo-selo mundo-selo--claro"><Icon name="check" size={13} /> {cur.name}</span>
+          {cortesia && <span className="badge badge--cortesia">{t('plano.cortesia')}</span>}
           <ul className="painel-plano__fatos">
-            <li><Icon name="clock" size={15} /> {e.status === 'active' ? t('plano.pagoAte', { dia: day(e.effective_until) }) : t('plano.emTolerancia')}</li>
+            <li><Icon name="clock" size={15} /> {cortesia ? (e.effective_until ? t('plano.cortesiaAte', { dia: day(e.effective_until) }) : t('plano.cortesia')) : e.status === 'active' ? t('plano.pagoAte', { dia: day(e.effective_until) }) : t('plano.emTolerancia')}</li>
             <li><Icon name="users" size={15} /> {t('plano.vagas', { n: e.people, usadas: bill.data.seatsUsed })} {t('plano.contandoDono')}</li>
             <li><Icon name="cloud" size={15} /> {t('plano.jobsAoMesmoTempo', { n: e.job_slots })}</li>
             <li><Icon name="coins" size={15} /> {t('plano.porMes', { valor: dr(cur.monthlyDracmas ?? '0') })}</li>
@@ -460,7 +463,7 @@ export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat
           <span className="carrinho__rotulo">{t('carrinho.plano')}</span>
           <select value={c.plano ?? ''} onChange={(ev) => mudar({ plano: ev.target.value || null })}>
             <option value="">{a.plano ? t('carrinho.manter') : t('carrinho.escolher')}</option>
-            {plans.filter((p) => p.sku !== a.plano && p.sellable && !(cur?.interval === 'year' && p.interval === 'month')).map((p) => <option key={p.sku} value={p.sku}>{p.interval === 'year' ? t('plano.opcaoAno', { nome: p.name, preco: brl(p.priceCents) }) : t('plano.opcaoMes', { nome: p.name, preco: brl(p.priceCents) })}</option>)}
+            {planosDoCarrinho(plans, cur, bill.entitlement.source === 'cortesia').map((p) => <option key={p.sku} value={p.sku}>{p.interval === 'year' ? t('plano.opcaoAno', { nome: p.name, preco: brl(p.priceCents) }) : t('plano.opcaoMes', { nome: p.name, preco: brl(p.priceCents) })}</option>)}
           </select>
         </label>
         {contador(t('carrinho.pessoas'), c.pessoas, (n) => mudar({ pessoas: n }), vaga ? ` · ${brl(vaga.priceCents)}${periodo}` : '', a.assinatura ? a.pessoas : null)}
