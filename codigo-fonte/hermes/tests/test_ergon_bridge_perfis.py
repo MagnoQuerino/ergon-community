@@ -356,7 +356,9 @@ try:
     r0 = subprocess.run(["/opt/hermes/.venv/bin/hermes", "config", "set", "platform_toolsets.api_server", '["todo","web","skills","ergon_conexoes","terminal"]'], env=env, capture_output=True, timeout=120)
     st, r = ponte("PUT", f"/ergon/v1/perfis/{HIP}", pedido)
     cfg = yaml.safe_load(open(os.path.join(D, "config.yaml"), encoding="utf-8").read())
-    check("mudança na configuração da equipe chega ao perfil", r0.returncode == 0 and r.get("mudou") == ["config"] and "terminal" in cfg["platform_toolsets"]["api_server"], str((r, cfg["platform_toolsets"])))
+    # o acompanhamento de fundo (a cada 5 s) pode refazer o perfil antes deste PUT: aí o PUT já não vê mudança, e o que
+    # importa é o perfil ter acompanhado a equipe
+    check("mudança na configuração da equipe chega ao perfil", r0.returncode == 0 and r.get("mudou") in (["config"], []) and "terminal" in cfg["platform_toolsets"]["api_server"], str((r, cfg["platform_toolsets"])))
     check("o perfil refeito mantém os modelos por tarefa do agente (ver imagens e ajudantes)",
           (cfg.get("auxiliary") or {}).get("vision", {}).get("model") == "modelo-de-visao" and (cfg.get("auxiliary") or {}).get("vision", {}).get("provider") == "custom"
           and (cfg.get("delegation") or {}).get("model") == "modelo-dos-ajudantes" and (cfg.get("delegation") or {}).get("max_spawn_depth") == 1, str((cfg.get("auxiliary"), cfg.get("delegation"))))
