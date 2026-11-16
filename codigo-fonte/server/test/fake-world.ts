@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { wrapForDevice } from '../src/world/sync-crypto.ts';
+import { validatePackage } from '../src/services/ergon-package.ts';
 
 /** a mesma conferência de world/src/hermes-task.ts (pacote do adaptador hermes_task), escrita à parte */
 function checkHermesTask(s: Record<string, unknown>): string | null {
@@ -91,6 +92,28 @@ export class FakeWorld {
   grants = new Map<string, { provider: string; model: string; apiKey: string }>();
   /** cada checkout pedido (workspace e itens), para os testes conferirem o carrinho */
   checkouts: Array<{ ws: string; items: Array<{ sku: string; quantity: number }> }> = [];
+  /**
+   * Loja colaborativa (world/src/marketplace.ts): criadores, itens com versões, licenças grátis. Só grátis: preço
+   * diferente de zero é recusado. GET /v1/marketplace/mine é PROPOSTO (o World ainda não tem): as publicações da conta.
+   */
+  creators = new Map<string, { namespace: string; displayName: string; official: boolean }>();
+  mkItems = new Map<string, { id: string; packageId: string; kind: string; title: string; summary: string; creator: string; status: string; latest: string | null;
+    versions: Array<{ version: string; artifact: Buffer; sha256: string; verified: boolean; status: string; createdAt: string; reason?: string }> }>();
+  licenses = new Set<string>();
+  /** a moderação decide (aprovar publica a última versão) */
+  moderate(itemId: string, decision: 'approve' | 'reject', reason = 'ok'): void {
+    const i = this.mkItems.get(itemId)!; const v = i.versions.at(-1)!;
+    if (decision === 'approve') { v.status = 'approved'; i.status = 'published'; i.latest = v.version; }
+    else { v.status = 'rejected'; v.reason = reason; i.status = i.latest ? 'published' : 'rejected'; }
+  }
+  /** um item OFICIAL publicado pela equipe (painel interno), já na vitrine */
+  publishOfficial(artifact: Buffer): string {
+    const p = validatePackage(artifact);
+    const id = `itm_${hex(12)}`;
+    this.mkItems.set(id, { id, packageId: p.manifest.package_id, kind: p.manifest.kind, title: p.manifest.title, summary: p.manifest.summary, creator: 'oficial', status: 'published', latest: p.manifest.version,
+      versions: [{ version: p.manifest.version, artifact, sha256: p.sha256, verified: true, status: 'approved', createdAt: new Date().toISOString() }] });
+    return id;
+  }
   /** giros de chave recebidos (mudança kind rotation): de qual workspace, para que versão, por quem */
   rotations: Array<{ ws: string; keyVersion: number; by: string }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
@@ -186,6 +209,7 @@ export class FakeWorld {
       const out = this.route(req.method ?? 'GET', u, body, bearer);
       if (this.dropResponse?.test(`${req.method} ${u.pathname}`)) { this.dropResponse = null; res.destroy(); return; }
       if ('fail' in out) fail(out.fail[0], out.fail[1], out.fail[2]);
+      else if ('raw' in out) { res.writeHead(200, { 'content-type': 'application/x-ergon', ...out.headers }); res.end(out.raw); }
       else send(out.status ?? 200, out.json);
     } catch (e) { fail(500, 'internal', { detail: String(e) }); }
   }
@@ -195,7 +219,7 @@ export class FakeWorld {
   }
   private connected(accountId: string): Device[] { return [...this.devices.values()].filter((d) => d.accountId === accountId && d.status === 'active' && d.session); }
 
-  private route(method: string, u: URL, b: any, bearer: string | null): { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] } {
+  private route(method: string, u: URL, b: any, bearer: string | null): { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] } | { raw: Buffer; headers: Record<string, string> } {
     const p = u.pathname;
     const key = `${method} ${p}`;
     // ---------------------------------------------------------------- contas
@@ -252,6 +276,20 @@ export class FakeWorld {
     const dev = this.session(bearer);
     if (key === 'GET /v1/compat') return { json: { api: 'v1', version: 'fake', features: this.features, extra: { ignored: true } } };
     if (key === 'GET /v1/catalog') return { json: { dracmaIssue: '1', items: [{ sku: 'world_pro', kind: 'plan', name: 'Pro', priceCents: '4900', sellable: true, tier: 'pro', interval: 'month', people: 3, jobSlots: 5, monthlyDracmas: '1000' }] } };
+    if (key === 'GET /v1/marketplace/items') {
+      const q = (u.searchParams.get('search') ?? '').toLowerCase(); const kind = u.searchParams.get('kind');
+      const list = [...this.mkItems.values()].filter((i) => i.status === 'published' && (!kind || i.kind === kind) && (!q || `${i.title} ${i.summary}`.toLowerCase().includes(q)));
+      return { json: list.map((i) => { const c = this.creators.get(i.creator); const off = i.creator === 'oficial' || !!c?.official;
+        return { id: i.id, packageId: i.packageId, kind: i.kind, title: i.title, summary: i.summary, priceCents: '0', version: i.latest, creator: off ? 'Ergon' : c?.displayName ?? '', official: off, badge: off ? 'Oficial' : 'Comunidade',
+          verified: !!i.versions.find((v) => v.version === i.latest)?.verified }; }) };
+    }
+    if (key === 'GET /v1/marketplace/download') {
+      const [itemId, version, accountId, exp] = Buffer.from(u.searchParams.get('token') ?? '', 'base64url').toString('utf8').split('|');
+      if (Number(exp) < Date.now() / 1000) return { fail: [401, 'token'] };
+      const i = this.mkItems.get(itemId); const v = i?.versions.find((x) => x.version === version);
+      if (!i || !v || i.status !== 'published' || v.status !== 'approved' || !this.licenses.has(`${accountId}|${itemId}`)) return { fail: [404, 'item'] };
+      return { raw: v.artifact, headers: { 'x-sha256': v.sha256 } };
+    }
     if (!dev) return { fail: [401, 'unauthenticated'] };
     dev.lastSeenAt = new Date().toISOString();
     const acc = this.accounts.get(dev.accountId)!;
@@ -339,6 +377,8 @@ export class FakeWorld {
         return { json: { recovery: b.recovery, recoveryRounds: 3 } };
       }
     }
+    const mk = this.marketRoutes(method, p, b, acc.id);
+    if (mk) return mk;
     const handoff = this.handoffRoutes(method, p, u, b, dev, acc.id, mine);
     if (handoff) return handoff;
     // ---------------------------------------------------------------- Sync: o World guarda envelopes e mudanças cifradas
@@ -406,6 +446,44 @@ export class FakeWorld {
       }
     }
     return { fail: [404, 'not_found'] };
+  }
+
+  private marketRoutes(method: string, p: string, b: any, me: string): { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] } | null {
+    if (method === 'POST' && p === '/v1/marketplace/creators') {
+      if (!/^[a-z0-9][a-z0-9-]{1,30}$/.test(String(b.namespace)) || b.namespace === 'oficial') return { fail: [400, 'namespace'] };
+      if ([...this.creators.entries()].some(([a, c]) => a !== me && c.namespace === b.namespace)) return { fail: [409, 'namespace_taken'] };
+      this.creators.set(me, { namespace: b.namespace, displayName: String(b.displayName ?? '').slice(0, 60), official: false });
+      return { json: { namespace: b.namespace } };
+    }
+    if (method === 'GET' && p === '/v1/marketplace/mine') {
+      const c = this.creators.get(me);
+      return { json: { creator: c ? { namespace: c.namespace, displayName: c.displayName } : null, items: [...this.mkItems.values()].filter((i) => i.creator === me).map((i) => ({
+        id: i.id, packageId: i.packageId, kind: i.kind, title: i.title, summary: i.summary, status: i.status, latestVersion: i.latest,
+        versions: i.versions.map((v) => ({ version: v.version, status: v.status, verified: v.verified, createdAt: v.createdAt, ...(v.reason ? { reason: v.reason } : {}) })) })) } };
+    }
+    if (method === 'POST' && p === '/v1/marketplace/items') {
+      if (![undefined, null, 0, '0'].includes(b.priceCents)) return { fail: [400, 'free_only'] };
+      const c = this.creators.get(me); if (!c) return { fail: [403, 'creator'] };
+      let pk; try { pk = validatePackage(Buffer.from(String(b.artifactB64 ?? ''), 'base64')); } catch (e) { return { fail: [400, 'package_invalid', { detail: String(e) }] }; }
+      if (!pk.manifest.package_id.startsWith(`comunidade.${c.namespace}.`)) return { fail: [400, 'package_id'] };
+      let i = [...this.mkItems.values()].find((x) => x.packageId === pk.manifest.package_id);
+      if (i && i.creator !== me) return { fail: [403, 'package_owner'] };
+      if (!i) { i = { id: `itm_${hex(12)}`, packageId: pk.manifest.package_id, kind: pk.manifest.kind, title: pk.manifest.title, summary: pk.manifest.summary, creator: me, status: 'draft', latest: null, versions: [] }; this.mkItems.set(i.id, i); }
+      if (i.versions.some((v) => v.version === pk.manifest.version)) return { fail: [409, 'version_exists'] };
+      i.versions.push({ version: pk.manifest.version, artifact: Buffer.from(String(b.artifactB64), 'base64'), sha256: pk.sha256, verified: pk.verified, status: 'pending', createdAt: new Date().toISOString() });
+      return { json: { itemId: i.id, version: pk.manifest.version, verified: pk.verified } };
+    }
+    const m = /^\/v1\/marketplace\/items\/(itm_[A-Za-z0-9]+)\/(submit|acquire|download-token)$/.exec(p);
+    if (m && method === 'POST') {
+      const i = this.mkItems.get(m[1]); if (!i) return { fail: [404, 'item'] };
+      if (m[2] === 'submit') { if (i.creator !== me) return { fail: [404, 'item'] }; i.status = 'in_review'; return { json: { status: 'in_review' } }; }
+      if (i.status !== 'published') return { fail: [404, 'item'] };
+      if (m[2] === 'acquire') { this.licenses.add(`${me}|${i.id}`); return { json: { licensed: true, checkoutUrl: null } }; }
+      if (!this.licenses.has(`${me}|${i.id}`)) return { fail: [403, 'license'] };
+      const exp = Math.floor(Date.now() / 1000) + 300;
+      return { json: { token: Buffer.from(`${i.id}|${i.latest}|${me}|${exp}`).toString('base64url'), expiresAt: new Date(exp * 1000).toISOString() } };
+    }
+    return null;
   }
 
   /** vagas e pacotes de Jobs no período do plano: no anual, os skus _annual (world/src/catalog.ts) */

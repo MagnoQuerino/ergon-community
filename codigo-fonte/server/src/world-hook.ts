@@ -56,6 +56,15 @@ export interface WorldHost {
   limits: AgentLimits;
   /** cards do quadro na nuvem; ausente = só as rotinas vão */
   tasks?: CloudTasksHost;
+  /** pacotes .ergon (a Loja do World instala pelo mesmo caminho e com a mesma validação) */
+  packages?: PackagesHost;
+}
+
+/** O que a Loja do World usa dos pacotes locais: as chaves oficiais, a prévia e a instalação de sempre. */
+export interface PackagesHost {
+  keys: Record<string, string>;
+  preview(workspaceId: string, buf: Buffer): unknown;
+  install(workspaceId: string, userId: string, buf: Buffer): unknown;
 }
 
 export interface WorldModule {

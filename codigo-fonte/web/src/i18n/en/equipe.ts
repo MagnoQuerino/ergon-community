@@ -196,7 +196,7 @@ const equipe: Traducao<typeof pt> = {
   'faixa.ponta': 'premium',
 
   // ——— effects from Packages ———
-  'efeitos.nenhum': 'No effects installed. Effects come from Packages (Settings › Packages); the agent works the same without them.',
+  'efeitos.nenhum': 'No effects installed. Effects come from the Store; the agent works the same without them.',
   'efeitos.grupo': 'Effects from your Packages',
   'efeitos.padrao': 'City default',
   'efeitos.padraoDica': 'What your installed packages already apply to this agent',

@@ -8,6 +8,7 @@
  * texto em Markdown — e, se quiser, arquivos de apoio (references/, templates/, scripts/ …). Só arquivos de texto.
  */
 import path from 'node:path';
+import { getSetting, setSetting } from './sectors.ts';
 import { HttpError, clip, fold } from '../lib/util.ts';
 import { readZip } from '../lib/zip.ts';
 
@@ -147,3 +148,21 @@ export function pacoteDoPedido(b: { texto?: string; zip?: string; nomeArquivo?: 
   if (b.zip) return pacoteDeZip(Buffer.from(b.zip, 'base64'), b.nomeArquivo ?? '');
   return pacoteDeTexto(b.texto ?? '', b.nomeArquivo ?? '');
 }
+
+/**
+ * Competências de terceiros instaladas pela Loja: ficam só neste computador e aparecem "não verificada". A lista guarda
+ * o nome de cada uma (e o item da Loja de onde veio).
+ */
+export const TERCEIROS = 'loja.competencias.terceiros';
+export function competenciasDeTerceiros(db: import('../db/db.ts').Db, ws: string): Map<string, string> {
+  try {
+    const v = JSON.parse(getSetting(db, ws, TERCEIROS) ?? '{}') as Record<string, unknown>;
+    return new Map(Object.entries(v).filter(([, x]) => typeof x === 'string') as Array<[string, string]>);
+  } catch { return new Map(); }
+}
+export function marcarDeTerceiros(db: import('../db/db.ts').Db, ws: string, nome: string, item: string | null): void {
+  const m = competenciasDeTerceiros(db, ws);
+  if (item) m.set(nome, item); else m.delete(nome);
+  setSetting(db, ws, TERCEIROS, JSON.stringify(Object.fromEntries([...m].slice(-500))));
+}
+

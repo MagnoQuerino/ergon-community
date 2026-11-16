@@ -2669,3 +2669,100 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .termos p { margin: 0 0 8px; }
 .termos__resumo { font-weight: 600; }
 .termos__aceite { align-items: flex-start; font-size: 0.88rem; }
+
+/* ---------- a arte das telas (arte/Cena.tsx): o céu, as nuvens, o barco e a equipe do Ergon World, em pequenas doses ----------
+   Cabeçalhos ilustrados e estados vazios; nunca atrás de conteúdo denso. Sem movimento pedido pelo sistema, tudo parado. */
+.cena-heroi { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: center; gap: 8px;
+  min-height: 260px; padding: 28px 0 24px 32px; margin: 0 0 18px; border-radius: 22px; color: var(--texto-inverso);
+  background: radial-gradient(110% 90% at 80% 20%, color-mix(in srgb, var(--inversa) 70%, var(--marca-borda-forte)) 0%, transparent 60%),
+    linear-gradient(180deg, var(--inversa-2) 0%, var(--inversa) 66%, color-mix(in srgb, var(--inversa) 72%, var(--teal)) 100%);
+  box-shadow: 0 18px 44px rgba(20, 12, 52, .22); }
+.cena-heroi__txt { position: relative; z-index: 2; min-width: 0; }
+.cena-heroi__selo { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; letter-spacing: .04em;
+  color: var(--texto-inverso); background: color-mix(in srgb, var(--inversa) 80%, var(--texto-inverso)); border: 1px solid var(--inversa-linha); }
+.cena-heroi__selo svg { color: var(--dourado-vivo); }
+.cena-heroi__titulo { margin: 14px 0 10px; font-size: clamp(26px, 3.4vw, 40px); line-height: 1.08; letter-spacing: -.02em; font-weight: 800; color: var(--texto-inverso); text-wrap: balance; }
+.cena-heroi__sub { margin: 0; max-width: 34em; font-size: 16px; line-height: 1.55; color: var(--texto-inverso-2); }
+.cena-heroi__chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 18px 0 0; padding: 0; font-size: 13px; color: var(--texto-inverso-2); }
+.cena-heroi__chips li { display: inline-flex; align-items: center; gap: 6px; }
+.cena-heroi__chips svg { color: var(--inversa-sucesso); }
+.cena-heroi :focus-visible { outline-color: var(--texto-inverso); }
+.cena-estrelas { position: absolute; inset: 0; pointer-events: none; }
+.cena-estrela { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: var(--texto-inverso); animation: mundo-brilho 3.8s ease-in-out infinite; }
+.cena-estrela--2 { width: 3px; height: 3px; }
+.cena-estrela--3 { width: 4px; height: 4px; background: var(--dourado-vivo); box-shadow: 0 0 8px 2px rgba(255, 220, 120, .55); }
+.cena-fig { display: block; image-rendering: pixelated; height: auto; }
+.cena-nuvem { position: absolute; fill: color-mix(in srgb, var(--texto-inverso) 88%, transparent); filter: drop-shadow(0 6px 10px rgba(10, 6, 30, .25)); }
+.cena-barco { position: absolute; }
+.cena-barco__tripulacao { position: absolute; left: 30%; right: 30%; bottom: 52%; display: flex; justify-content: center; gap: 2px; }
+.cena-barco__tripulacao .cena-fig { height: 30px; width: auto; }
+.cena-barco__casco { display: block; width: 100%; overflow: visible; }
+.cena-barco__vela { fill: var(--texto-inverso); opacity: .92; }
+.cena-barco__vela--2 { fill: color-mix(in srgb, var(--texto-inverso) 78%, var(--dourado-vivo)); }
+.cena-barco__mastro { fill: color-mix(in srgb, var(--terracotta) 50%, var(--inversa-2)); }
+.cena-barco__madeira { fill: color-mix(in srgb, var(--terracotta) 58%, var(--inversa-2)); }
+.cena-barco__faixa { fill: var(--dourado-vivo); }
+.cena-barco__asa { fill: color-mix(in srgb, var(--texto-inverso) 70%, var(--teal)); }
+@keyframes cena-flutua { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes cena-cruza { from { transform: translateX(0); } to { transform: translateX(-22px); } }
+
+/* a banca da Loja */
+.cena-banca { position: relative; z-index: 1; width: 100%; max-width: 460px; justify-self: end; aspect-ratio: 460 / 290; container-type: inline-size; }
+.cena-banca__lua { position: absolute; right: 6%; top: 2%; width: 30cqw; aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--dourado-vivo) 55%, var(--texto-inverso)) 0%, color-mix(in srgb, var(--dourado-vivo) 26%, transparent) 36%, transparent 68%); }
+.cena-banca .cena-nuvem--a { width: 22cqw; left: 4%; top: 8%; animation: mundo-deriva 18s ease-in-out infinite alternate; }
+.cena-banca .cena-nuvem--b { width: 16cqw; right: 34%; top: 22%; animation: mundo-deriva 14s ease-in-out infinite alternate-reverse; }
+.cena-banca__barco { width: 24cqw; right: 4%; top: 18%; animation: cena-flutua 6s ease-in-out infinite; }
+.cena-banca__barraca { position: absolute; left: 4%; bottom: 0; width: 70cqw; overflow: visible; }
+.cena-banca__poste { fill: color-mix(in srgb, var(--terracotta) 50%, var(--inversa-2)); }
+.cena-banca__toldo { fill: var(--texto-inverso); }
+.cena-banca__listra { fill: var(--terracotta); }
+.cena-banca__franja { fill: var(--texto-inverso); stroke: var(--terracotta); stroke-width: 2; }
+.cena-banca__balcao { fill: color-mix(in srgb, var(--terracotta) 70%, var(--dourado-vivo)); }
+.cena-banca__frente { fill: color-mix(in srgb, var(--terracotta) 58%, var(--inversa-2)); }
+.cena-banca__rolo { fill: color-mix(in srgb, var(--texto-inverso) 82%, var(--dourado-vivo)); stroke: color-mix(in srgb, var(--dourado-vivo) 70%, var(--inversa-2)); stroke-width: 2; }
+.cena-banca__rolo--2 { fill: color-mix(in srgb, var(--texto-inverso) 90%, var(--dourado-vivo)); }
+.cena-banca__paleta { fill: color-mix(in srgb, var(--texto-inverso) 70%, var(--dourado-vivo)); stroke: color-mix(in srgb, var(--terracotta) 70%, var(--dourado-vivo)); stroke-width: 2; }
+.cena-banca__tinta--1 { fill: var(--teal); } .cena-banca__tinta--2 { fill: var(--dourado-vivo); } .cena-banca__tinta--3 { fill: color-mix(in srgb, var(--terracotta) 60%, var(--inversa)); }
+.cena-banca__caixa { fill: var(--gold); stroke: color-mix(in srgb, var(--gold) 50%, var(--inversa-2)); stroke-width: 2; }
+.cena-banca__caixa--2 { fill: color-mix(in srgb, var(--teal) 50%, var(--inversa)); stroke: var(--inversa); }
+.cena-banca__vaso { fill: var(--terracotta); }
+.cena-banca__equipe { position: absolute; left: 13%; bottom: 13cqw; display: flex; gap: 8cqw; align-items: flex-end; }
+.cena-banca__equipe .cena-fig { height: 15cqw; width: auto; filter: drop-shadow(0 4px 6px rgba(10, 6, 30, .35)); }
+@media (max-width: 760px) {
+  .cena-heroi { grid-template-columns: 1fr; padding: 22px 20px 0; min-height: 0; }
+  .cena-banca { justify-self: center; max-width: 340px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cena-heroi *, .cena-heroi *::before, .cena-heroi *::after, .cena-vazio * { animation: none !important; transition: none !important; }
+}
+
+/* a Loja (views/LojaView.tsx): abas, vitrine, competência para ler, publicar e minhas publicações */
+.loja-pagina { max-width: 1180px; margin: 0 auto; padding: 18px 22px 56px; }
+.loja-abas { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); width: fit-content; max-width: 100%; }
+.loja-abas button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.loja-abas button[aria-selected='true'] { background: var(--marca-cheio); color: var(--marca-sobre); }
+.loja-abas button:hover:not([aria-selected='true']) { background: var(--panel-2); }
+.loja-selo { display: inline-flex; align-items: center; gap: 4px; }
+.badge--oficial { background: var(--marca-cheio); color: var(--marca-sobre); border-color: var(--marca-cheio); }
+.badge--comunidade { background: var(--dourado-suave); color: var(--dourado-texto); border-color: var(--dourado-borda); }
+.loja-card__selos { display: flex; flex-wrap: wrap; gap: 4px; }
+.loja-skill__texto { max-height: 46vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); }
+.loja-colunas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); gap: 18px; align-items: start; }
+.loja-colunas > * { min-width: 0; }
+@media (max-width: 980px) { .loja-colunas { grid-template-columns: 1fr; } }
+.loja-fonte { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); gap: 10px; margin: 6px 0 14px; }
+.loja-fonte label { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); cursor: pointer; }
+.loja-fonte label:has(input:checked) { border-color: var(--navy); box-shadow: 0 0 0 1px var(--navy) inset; background: var(--marca-suave-2); }
+.loja-fonte input { position: absolute; opacity: 0; pointer-events: none; }
+.loja-fonte label:has(input:focus-visible) { outline: var(--foco-largura) solid var(--navy); outline-offset: 2px; }
+.loja-fonte b { display: inline-flex; align-items: center; gap: 6px; }
+.loja-pub { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.loja-pub > li { padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.loja-pub__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.loja-pub__topo b { margin-right: auto; }
+.loja-pub__versoes { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.loja-pub__versoes li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cena-vazio { display: grid; justify-items: center; gap: 8px; padding: 26px 16px; text-align: center; color: var(--muted); }
+.cena-vazio__figs { display: flex; gap: 10px; align-items: flex-end; }
+.cena-vazio__figs .cena-fig { height: 64px; width: auto; }

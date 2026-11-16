@@ -1,6 +1,6 @@
 /**
  * Cosméticos de pacote (.ergon): efeitos em volta do boneco e pets. O mesmo desenho serve à cidade (engine.ts) e à
- * prévia do editor em Configurações › Pacotes, para o que se vê ao criar ser o que aparece na cidade.
+ * prévia do editor na Loja, para o que se vê ao criar ser o que aparece na cidade.
  * Só pixels: não mexem em decisão, processo ou dado do agente.
  */
 import { RES } from './projection.ts';

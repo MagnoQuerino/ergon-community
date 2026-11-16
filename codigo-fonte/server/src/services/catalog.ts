@@ -107,6 +107,31 @@ export class Catalog {
     });
   }
 
+  /**
+   * Modelos da comunidade que já vêm com o Ergon (server/catalogo/comunidade, os exemplos do catálogo público): sem
+   * internet e sem assinatura ("não verificado"). O catálogo público continua sendo lido só quando a pessoa pede.
+   */
+  private bundledFiles(): Array<{ buf: Buffer; v: ValidatedPackage }> {
+    const dir = path.resolve(this.dir, '..', 'comunidade');
+    if (!fs.existsSync(dir)) return [];
+    const out = [];
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.ergon')).sort()) {
+      const buf = fs.readFileSync(path.join(dir, f));
+      try { const v = validatePackage(buf, this.keys); if (v.manifest.package_id.startsWith('comunidade.')) out.push({ buf, v }); } catch { /* pacote corrompido não aparece */ }
+    }
+    return out;
+  }
+  bundled(ws: string): CatalogItem[] {
+    const inst = this.installed(ws);
+    return this.bundledFiles().map(({ v }) => ({ id: v.manifest.package_id, version: v.manifest.version, title: v.manifest.title, summary: v.manifest.summary, kind: v.manifest.kind,
+      author: v.manifest.package_id.split('.')[1], verified: v.verified, installed: inst.has(v.manifest.package_id), preview: previewOf(v) }));
+  }
+  installBundled(ws: string, userId: string, id: string) {
+    const f = this.bundledFiles().find((x) => x.v.manifest.package_id === id);
+    if (!f) throw new HttpError(404, 'not_found', 'modelo da comunidade não encontrado nesta versão');
+    return this.packages.install(ws, userId, f.buf);
+  }
+
   /** Imagem de prévia n de um pacote oficial (só PNG/WebP de dentro do pacote validado). */
   officialPreview(id: string, n: number): { bytes: Buffer; type: string } {
     const f = this.officialFiles().find((x) => x.id === id);

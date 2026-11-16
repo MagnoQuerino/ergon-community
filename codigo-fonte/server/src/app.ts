@@ -102,6 +102,7 @@ import { loadWorld, type CloudTasksHost } from './world-hook.ts';
 import { providerKeyOf, saveProviderKey } from './services/provider-keys.ts';
 import { exportBlueprint } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
+import { competenciasDeTerceiros } from './services/competencias.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
 import { TeamsApp, registerTeamsAppRoutes } from './services/teams-app/index.ts';
 import { Canais, registerCanaisRoutes } from './services/canais/index.ts';
@@ -1603,7 +1604,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     bus.publish(a.workspaceId, 'agents.changed', {});
     return { enabled };
   });
-  app.get('/api/ai/skills', async (req) => aiOf(auth(req).workspaceId).skills());
+  app.get('/api/ai/skills', async (req) => {
+    const ws = auth(req).workspaceId; const terceiros = competenciasDeTerceiros(db, ws);
+    const lista = await aiOf(ws).skills();
+    // da Loja, de terceiros: "não verificada" (só neste computador)
+    return Array.isArray(lista) && terceiros.size ? lista.map((x) => (terceiros.has(x.name) ? { ...x, terceiro: true } : x)) : lista;
+  });
 
   // Propostas da coordenação ----------------------------------------------------------------------------------
   /**
@@ -3140,6 +3146,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   app.post('/api/packages/catalog/official/install', { schema: { body: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: S.str(110, 5) } } } },
     async (req) => { const a = owner(req); return catalog.installOfficial(a.workspaceId, a.userId, (req.body as { id: string }).id); });
+  app.get('/api/packages/catalog/bundled', async (req) => catalog.bundled(auth(req).workspaceId));
+  app.post('/api/packages/catalog/bundled/install', { schema: { body: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: S.str(110, 5) } } } },
+    async (req) => { const a = owner(req); return catalog.installBundled(a.workspaceId, a.userId, (req.body as { id: string }).id); });
   app.get('/api/packages/catalog/community', async (req) => catalog.community(auth(req).workspaceId, (req.query as { atualizar?: string }).atualizar === '1'));
   app.post('/api/packages/catalog/community/install', { schema: { body: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: S.str(110, 5) } } } },
     async (req) => { const a = owner(req); return catalog.installCommunity(a.workspaceId, a.userId, (req.body as { id: string }).id); });
@@ -3165,7 +3174,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     defaultModel: (ws) => ({ provider: aiOf(ws).cachedDefaultProvider(), model: aiOf(ws).cachedDefault() }),
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
-  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks });
+  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks,
+    packages: { keys: officialKeys, preview: (ws, buf) => packages.preview(ws, buf), install: (ws, userId, buf) => packages.install(ws, userId, buf) } });
 
   // Frontend compilado --------------------------------------------------------------------------------------
   if (cfg.webDir && fs.existsSync(path.join(cfg.webDir, 'index.html'))) {

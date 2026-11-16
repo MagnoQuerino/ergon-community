@@ -71,7 +71,9 @@ export function CompetenciasInstaladas({ agent, treinadas, reload, onAtualizar, 
   detalheTreino: (s: AgentSkill) => ReactNode;
 }) {
   const t = useT();
-  const lib = useResource<Skill[]>(SKILLS, ['agents.changed']);
+  const lib = useResource<Array<Skill & { terceiro?: boolean }>>(SKILLS, ['agents.changed']);
+  // da Loja, de outra pessoa: "não verificada" (fica só neste computador)
+  const terceiras = new Set((lib.data ?? []).filter((x) => x.terceiro).map((x) => x.name));
   const [busca, setBusca] = useState('');
   const [de, setDe] = useState<'agente' | 'equipe'>('agente');
   const [origem, setOrigem] = useState<Origem | 'todas'>('todas');
@@ -123,7 +125,7 @@ export function CompetenciasInstaladas({ agent, treinadas, reload, onAtualizar, 
                 </div>
                 {i.descricao && <p className="comp-card__desc">{i.descricao}</p>}
                 <div className="comp-card__pe">
-                  <span className="comp-origem">{t(ORIGEM[i.origem])}</span>
+                  {terceiras.has(i.nome) ? <span className="badge badge--warn" title={t('agente.comp.terceiraDica')}>{t('agente.comp.terceira')}</span> : <span className="comp-origem">{t(ORIGEM[i.origem])}</span>}
                   <span className="grow" />
                   <button className="btn btn--sm btn--ghost" aria-expanded={ver === i.chave} onClick={() => setVer(ver === i.chave ? null : i.chave)}>{t('agente.comp.ver')}</button>
                   <button className={`btn btn--sm ${i.ligada ? '' : 'btn--primary'}`} onClick={() => void alternar(i)}>

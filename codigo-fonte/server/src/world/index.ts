@@ -18,6 +18,7 @@ import { forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, type Accou
 import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
+import { registerLoja } from './loja.ts';
 
 /** O que o World responde nas contas, em frases curtas (a mensagem dele pode vir em outro idioma). */
 const ACCOUNT_ERRORS: Record<string, [number, string]> = {
@@ -87,6 +88,9 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         };
       });
       if (!wcfg.url) return; // sem World: nada além do estado
+
+      // ---------------------------------------------------------------- Loja (colaborativa e grátis): loja.ts
+      if (h.packages) registerLoja({ app, db, client, routines: h.routines, packages: h.packages, auth: h.auth, owner: h.owner, sessionOf });
 
       // ---------------------------------------------------------------- conta do World
       /**

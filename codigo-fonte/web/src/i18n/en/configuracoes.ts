@@ -22,7 +22,6 @@ const configuracoes: Traducao<typeof pt> = {
   'abas.workspace': 'Workspace',
   'abas.seguranca': 'Security',
   'abas.pessoas': 'People',
-  'abas.pacotes': 'Packages',
   'abas.contaErgon': 'Ergon World',
   'abas.atualizacoes': 'Updates',
   'abas.saude': 'Health',

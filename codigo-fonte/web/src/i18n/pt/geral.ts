@@ -123,6 +123,7 @@ const geral = {
   'nav.documentos': 'Documentos',
   'nav.atividade': 'Atividade',
   'nav.conexoes': 'Conexões',
+  'nav.loja': 'Loja',
   'nav.world': 'Ergon World',
   'nav.configuracoes': 'Configurações',
   'nav.ajuda': 'Ajuda',

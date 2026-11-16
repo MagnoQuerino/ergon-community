@@ -72,6 +72,18 @@ export class WorldClient {
     if (!r.ok) throw Object.assign(new HttpError(r.status === 401 ? 401 : r.status >= 500 ? 503 : r.status, j.error ?? 'world_error', j.message ?? `World respondeu ${r.status}`), { detail: j });
     return j as T;
   }
+
+  /** Baixa um arquivo do World (o pacote da Loja), com teto de tamanho; devolve os bytes e o SHA-256 que ele declarou. */
+  async raw(p: string, max: number): Promise<{ bytes: Buffer; sha256: string | null }> {
+    if (!this.cfg.url) throw new HttpError(503, 'world_unconfigured', 'O Ergon World não está configurado nesta instalação.');
+    let r: Response;
+    try { r = await this.fetchImpl(`${this.cfg.url}${p}`, { redirect: 'error', signal: AbortSignal.timeout(30_000) }); }
+    catch { throw new HttpError(503, 'world_offline', 'Sem conexão com o Ergon World agora. Tente de novo.'); }
+    if (!r.ok) { const j = await r.json().catch(() => ({})) as { error?: string; message?: string }; throw new HttpError(r.status >= 500 ? 503 : r.status === 401 ? 400 : r.status, j.error ?? 'world_error', j.message ?? `World respondeu ${r.status}`); }
+    const bytes = Buffer.from(await r.arrayBuffer());
+    if (bytes.length > max) throw new HttpError(413, 'too_large', 'pacote grande demais');
+    return { bytes, sha256: r.headers.get('x-sha256') };
+  }
 }
 
 /** Identificador desta instalação (aleatório, sem dados da máquina). */

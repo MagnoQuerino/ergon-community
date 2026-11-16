@@ -21,7 +21,6 @@ const configuracoes = {
   'abas.workspace': 'Workspace',
   'abas.seguranca': 'Segurança',
   'abas.pessoas': 'Pessoas',
-  'abas.pacotes': 'Pacotes',
   'abas.contaErgon': 'Ergon World',
   'abas.atualizacoes': 'Atualizações',
   'abas.saude': 'Saúde',

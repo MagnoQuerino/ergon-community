@@ -112,6 +112,7 @@ const geral: Traducao<typeof pt> = {
   'nav.documentos': 'Documents',
   'nav.atividade': 'Activity',
   'nav.conexoes': 'Connections',
+  'nav.loja': 'Store',
   'nav.world': 'Ergon World',
   'nav.configuracoes': 'Settings',
   'nav.ajuda': 'Help',

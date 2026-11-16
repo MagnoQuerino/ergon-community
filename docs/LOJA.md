@@ -18,19 +18,27 @@ Cada skin muda a cidade de dia e de noite, os prédios, as roupas e a paisagem q
 até 10 agentes com personagens próprios (nome e bio). A função de cada agente não muda. Uma skin por vez; desfazer
 devolve os nomes e a cidade de antes. O formato está em [FORMATOS_ERGON.md](../codigo-fonte/docs/FORMATOS_ERGON.md).
 
-## Na loja (Configurações › Pacotes)
+## Na Loja (menu da esquerda)
+
+A Loja é colaborativa e grátis: ninguém compra nem vende, e qualquer pessoa publica de graça. O selo diz quem fez:
+**Oficial** (a equipe do Ergon) ou **Comunidade**.
 
 - **Oficiais.** Vêm junto com o Ergon, assinados (selo "verificado") e funcionam sem internet.
 - **Modelos da comunidade.** Enviados por quem usa o Ergon, listados em [`catalogo/index.json`](../catalogo/index.json)
-  deste repositório. A lista só é lida quando você abre a aba; nada sai do computador sozinho. Cada pacote baixado
+  deste repositório. Os exemplos do repositório já vêm com o Ergon; o catálogo público só é lido quando você pede
+  ("Ler o catálogo público"): nada sai do computador sozinho. Cada pacote baixado
   precisa ter o tamanho e o SHA-256 do catálogo e passa pela mesma validação de qualquer `.ergon`. Aparece como
   "não verificado": é um pacote de dados (cores, efeitos, pets, equipes), sem código.
 - **Sem internet.** A aba da comunidade avisa que não há conexão; tudo o que já está instalado continua igual.
-- **Desfazer.** Cada instalação pode ser desfeita em Configurações › Pacotes; conversas, tarefas e rotinas não são
+- **Loja do Ergon World.** Aparece junto, lida ao abrir a Loja (sem conta). Competências de outras pessoas mostram o
+  texto inteiro antes de instalar, ficam marcadas "não verificada", só neste computador, e nunca vão para a nuvem.
+- **Desfazer.** Cada instalação pode ser desfeita em Loja › Instalados; conversas, tarefas e rotinas não são
   tocadas.
 
 Também dá para instalar um `.ergon` recebido de alguém (botão "Escolher arquivo .ergon") e criar o seu no editor
-(Configurações › Pacotes › Criar), com prévia num agente de verdade.
+(Loja › Publicar), com prévia. Para publicar na Loja do Ergon World, entre com a sua conta: escolha um visual
+(.ergon), a equipe do workspace ou uma competência, dê título, resumo e versão, veja a prévia e publique. A publicação
+passa por uma revisão antes de aparecer; em Minhas publicações ficam o estado e as versões de cada uma.
 
 ## Enviar um modelo para a comunidade
 

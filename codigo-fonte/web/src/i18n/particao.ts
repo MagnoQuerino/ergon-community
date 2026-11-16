@@ -33,8 +33,8 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts'],
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
-    'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
-    'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts', 'views/world/Gestao.tsx', 'views/world/pessoas.ts', 'views/world/carrinho.ts',
+    'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'views/LojaView.tsx', 'views/LojaPublicar.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
+    'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts', 'arte/figuras.ts', 'arte/Cena.tsx', 'views/world/Gestao.tsx', 'views/world/pessoas.ts', 'views/world/carrinho.ts',
   ],
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [

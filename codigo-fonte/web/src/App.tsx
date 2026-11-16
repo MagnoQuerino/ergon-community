@@ -13,6 +13,7 @@ import { PausaControle } from './components/AjustesEquipe.tsx';
 import { fraseCurtaDaCota } from './lib/ajustes.ts';
 import type { AgentHead } from './components/AgentWindow.tsx';
 import { AmbienteView } from './views/AmbienteView.tsx';
+import { LojaView } from './views/LojaView.tsx';
 import { Onboarding } from './components/Onboarding.tsx';
 import { Tour, type TourStep } from './components/Tour.tsx';
 import { ViewTip } from './components/Tips.tsx';
@@ -143,7 +144,7 @@ export function App() {
 }
 
 // os nomes ficam como chave e são traduzidos na hora de mostrar (a troca de idioma redesenha o menu)
-type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'world' | 'configuracoes' | 'ajuda'}`;
+type ChaveNav = `geral.nav.${'cidade' | 'equipe' | 'rotinas' | 'fluxos' | 'tarefas' | 'documentos' | 'atividade' | 'conexoes' | 'loja' | 'world' | 'configuracoes' | 'ajuda'}`;
 const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
   { id: 'ambiente', label: 'geral.nav.cidade', icon: 'temple' },
   { id: 'agentes', label: 'geral.nav.equipe', icon: 'users' },
@@ -153,6 +154,7 @@ const NAV: Array<{ id: View; label: ChaveNav; icon: string }> = [
   { id: 'documentos', label: 'geral.nav.documentos', icon: 'folder' },
   { id: 'atividade', label: 'geral.nav.atividade', icon: 'activity' },
   { id: 'conexoes', label: 'geral.nav.conexoes', icon: 'plug' },
+  { id: 'loja', label: 'geral.nav.loja', icon: 'store' },
   ...(MundoView ? [{ id: 'world' as const, label: 'geral.nav.world' as const, icon: 'globe' }] : []),
   { id: 'configuracao', label: 'geral.nav.configuracoes', icon: 'gear' },
 ];
@@ -439,6 +441,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <DocumentosView coord={coordLabel} />
         ) : view === 'conexoes' ? (
           <ConexoesView />
+        ) : view === 'loja' ? (
+          <LojaView agent={coordinator} />
         ) : view === 'world' && MundoView ? (
           <MundoView />
         ) : view === 'ajuda' ? (
