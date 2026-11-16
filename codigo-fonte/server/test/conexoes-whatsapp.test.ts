@@ -131,7 +131,11 @@ describe('WhatsAppReader: envio pelo socket vivo', () => {
     assert.equal(fake.enviadas.length, 0);
     assert.equal(fake.sock.leituras, 0); assert.equal(fake.sock.presencas, 0);
     const src = fs.readFileSync(path.resolve(import.meta.dirname, '../src/services/whatsapp.ts'), 'utf8');
-    assert.equal(src.match(/\.sendMessage\(/g)?.length, 1, 'só em enviar()');
+    assert.equal(src.match(/\.sendMessage\(/g)?.length, 1, 'só em mandar(): enviar() e enviarCanal()');
+    // o número da equipe (canais/whatsapp.ts) responde pelo mesmo ponto, só a telefones liberados; ninguém mais chama enviarCanal
+    const usos = fs.readdirSync(path.resolve(import.meta.dirname, '../src/services'), { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.ts'))
+      .filter((f) => fs.readFileSync(path.resolve(import.meta.dirname, '../src/services', f), 'utf8').includes('.enviarCanal(')).map((f) => f.replace(/\\/g, '/'));
+    assert.deepEqual(usos, ['canais/whatsapp.ts']);
     assert.ok(!/readMessages\(|sendPresenceUpdate\(/.test(src), 'a leitura não marca como lido nem mexe na presença');
     assert.match(src, /markOnlineOnConnect: false/);
   });

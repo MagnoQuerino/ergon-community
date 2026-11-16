@@ -105,7 +105,7 @@ import { Packages } from './services/packages.ts';
 import { competenciasDeTerceiros } from './services/competencias.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
 import { TeamsApp, registerTeamsAppRoutes } from './services/teams-app/index.ts';
-import { Canais, registerCanaisRoutes } from './services/canais/index.ts';
+import { Canais, WhatsAppEquipe, registerCanaisRoutes, registerWhatsAppEquipeRoutes } from './services/canais/index.ts';
 import { Bilhetes, Gestao, KIND_GESTAO, TOOLSET_GESTAO, type AcaoGestao } from './services/gestao.ts';
 import { gestaoServicos } from './services/gestao-servicos.ts';
 import { resumirEsquema } from './services/gestao-esquema.ts';
@@ -529,6 +529,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       return caps;
     },
     decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao) });
+  // o número da equipe no WhatsApp: um número pareado por QR vira canal, pelo mesmo caminho (entregue pela sessão do app)
+  const whatsappEquipe = new WhatsAppEquipe({ db, bus, canais, whatsapp });
+  // pedido por canal externo (canais/externo.ts): escrita numa conta sempre confirma; papel de leitura não escreve
+  conexoes.canalExterno = (conv, risco) => { const x = canais.externos.daConversa(conv); return x ? canais.externos.decisaoDaAcao(x.papel, risco) : null; };
   chatHooks.channelNote = (conv, msg) => {
     try { return teamsApp.notaDoCanal(conv, msg) ?? canais.notaDoCanal(conv, msg); } catch { return null; }
   };
@@ -1618,6 +1622,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
    */
   // a mesma decisão para o app e para o Teams (o cartão no Teams chama esta função; alcance e prazo só vêm da tela)
   const decidirProposta = async (ws: string, userId: string, pid: string, decision: 'apply' | 'reject', o: { alcance?: Alcance; prazo?: PrazoDepoisDeLer } = {}): Promise<{ status: string; result: string; result_t?: Texto }> => {
+    // canal externo (canais/externo.ts): o pedido de risco que espera o app e o aviso de canal pausado
+    if (canais.externos.ehCartao(ws, pid)) return canais.externos.decidir(ws, userId, pid, decision);
     if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, ws)) return conexoes.decidirProposta(ws, userId, pid, decision);
     // uma mudança de configuração pedida pelo coordenador (gestão, rc.29): roda a rota da tela com a sessão de quem clicou
     if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_GESTAO)) return gestao.decidir(ws, userId, pid, decision);
@@ -2923,6 +2929,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // é pelo app com relé (services/teams-app), o WhatsApp pelo leitor por QR (services/whatsapp.ts) e o Telegram e o
   // Discord pelas rotas dos canais. Um plugin antigo que ainda mande evento para cá recebe 404 e não responde ninguém.
   registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
+  registerWhatsAppEquipeRoutes(app, { equipe: whatsappEquipe, owner, verify: secApi.verify });
 
   // Plugin do Ergon no motor: antes de cada ferramenta, pergunta de qual agente é a sessão e o que ele pode usar.
   // Resposta mínima (nome do agente, conjuntos liberados e quem tem cada um, para o agente pedir ajuda).

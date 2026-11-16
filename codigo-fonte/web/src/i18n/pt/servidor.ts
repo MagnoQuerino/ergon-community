@@ -149,6 +149,7 @@ const servidor = {
   'tipo.regra': 'regra',
   'tipo.segredo': 'chave',
   'tipo.gestao': 'mudança nos ajustes',
+  'tipo.canal_externo': 'canal externo (celular)',
 
   // ——— frases que a tela monta a partir do que o servidor manda (lib/textos-tela.ts)
   'tela.login.adminNaoAprovou': 'O administrador não aprovou o pedido.',

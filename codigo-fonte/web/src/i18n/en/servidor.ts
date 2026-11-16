@@ -145,6 +145,7 @@ const servidor: Traducao<typeof pt> = {
   'tipo.regra': 'rule',
   'tipo.segredo': 'key',
   'tipo.gestao': 'settings change',
+  'tipo.canal_externo': 'external channel (phone)',
 
   // ——— sentences the screen builds from what the server sends
   'tela.login.adminNaoAprovou': 'The administrator did not approve the request.',

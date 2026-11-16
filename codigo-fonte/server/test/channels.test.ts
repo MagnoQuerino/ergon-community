@@ -85,7 +85,11 @@ describe('WhatsApp por QR: leitura com filtros; nada sai sozinho', () => {
     assert.equal((await req(h, 'GET', '/api/integrations/whatsapp', s)).json.riscosAceitos, true, 'mudar os filtros não apaga o aceite');
 
     const src = fs.readFileSync(path.resolve(import.meta.dirname, '../src/services/whatsapp.ts'), 'utf8');
-    assert.equal(src.match(/\.sendMessage\(/g)?.length, 1, 'um ponto de envio só: enviar(), a pedido (conexoes/acoes/whatsapp.ts, sob conexoes/regra.ts)');
+    assert.equal(src.match(/\.sendMessage\(/g)?.length, 1, 'um ponto de envio só (mandar): enviar(), a pedido (conexoes/acoes/whatsapp.ts, sob conexoes/regra.ts), e enviarCanal (o número da equipe)');
+    // o número da equipe (canais/whatsapp.ts) responde pelo mesmo ponto, só a telefones liberados; ninguém mais chama enviarCanal
+    const usos = fs.readdirSync(path.resolve(import.meta.dirname, '../src/services'), { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.ts'))
+      .filter((f) => fs.readFileSync(path.resolve(import.meta.dirname, '../src/services', f), 'utf8').includes('.enviarCanal(')).map((f) => f.replace(/\\/g, '/'));
+    assert.deepEqual(usos, ['canais/whatsapp.ts']);
     assert.ok(!/readMessages\(|sendPresenceUpdate\(/.test(src), 'a leitura não marca como lido nem mexe na presença');
     assert.equal((await req(h, 'DELETE', '/api/integrations/whatsapp', s)).status, 200);
     assert.equal(((await req(h, 'GET', '/api/integrations', s)).json as Array<{ kind: string; state: string }>).find((i) => i.kind === 'whatsapp')!.state, 'off');

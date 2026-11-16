@@ -1,5 +1,6 @@
 import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
 import { OutroAplicativo } from '../components/OutroAplicativo.tsx';
+import { CanalDaEquipeWhatsApp } from '../components/CanalDaEquipeWhatsApp.tsx';
 import { Fragment, lazy, Suspense, useEffect, useState, type ChangeEvent, type ComponentType, type ReactNode } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -953,6 +954,7 @@ function WhatsApp({ i, reload, conta = '' }: { i: Integration; reload: () => voi
           <label className="check"><input type="checkbox" checked={f.cards} onChange={(e) => void setF({ cards: e.target.checked })} /> {t('conexoes.wa.cards')}</label>
           <ListEditor label={t('conexoes.wa.etiquetas')} values={f.labels} suggestions={st.data!.labels} onChange={(labels) => void setF({ labels })} placeholder={t('conexoes.wa.etiquetasExemplo')} />
           <ListEditor label={t('conexoes.wa.nuncaLer')} values={f.exceptions} suggestions={st.data!.chats.map((c) => c.name)} onChange={(exceptions) => void setF({ exceptions })} placeholder={t('conexoes.wa.nuncaLerExemplo')} />
+          <CanalDaEquipeWhatsApp conta={conta} />
           <Disconnect i={i} reload={() => { st.reload(); reload(); }} label={conta ? t('conexoes.multi.desconectarNumero') : t('conexoes.wa.desconectar')} conta={conta} />
         </div>
       )}

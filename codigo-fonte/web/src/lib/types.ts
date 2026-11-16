@@ -219,7 +219,7 @@ export interface RecentConversation {
 }
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
 const TIPOS = ['question', 'routine', 'routine_edit', 'sector', 'create_agent', 'tools', 'permission', 'handoff', 'edit_agent', 'deactivate_agent', 'reactivate_agent', 'sector_edit',
-  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra', 'segredo', 'aprovacao', 'gestao'] as const;
+  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra', 'segredo', 'aprovacao', 'gestao', 'canal_externo'] as const;
 /** Uma tabela de rótulos lida na hora de mostrar: cada chave pelo dicionário, no idioma atual (a tela redesenha ao trocar). */
 const rotulo = t as (chave: Chave) => string;
 function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record<string, string> {
@@ -232,7 +232,7 @@ function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record
   });
 }
 export const PROPOSAL_KIND: Record<string, string> = rotulos(TIPOS, (k) => `servidor.tipo.${k}` as Chave);
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo' | 'canal_externo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null; /** curta, do World (os modelos do Ergon AI) */ description?: string }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {

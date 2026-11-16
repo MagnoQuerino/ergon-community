@@ -111,6 +111,11 @@ export class Conexoes {
   private readonly d: ConexoesDeps;
   /** as regras que a pessoa aprovou (regras.ts): valem na decisão de cada ação */
   readonly regras: RegrasConexoes;
+  /**
+   * Pedido que veio de um canal externo (WhatsApp, Telegram, Discord, Teams: canais/externo.ts, decisaoDaAcao): leitura
+   * segue a regra; escrita sempre confirma (acima de "Liberar tudo" e das regras); papel de leitura não escreve.
+   */
+  canalExterno: ((conversationId: string | null, risco: Risco) => 'recusar' | 'confirmar' | null) | null = null;
   constructor(d: ConexoesDeps) {
     this.d = d;
     this.regras = new RegrasConexoes(d.db, d.bus);
@@ -636,6 +641,9 @@ export class Conexoes {
     const regra = liberar ? null : this.regras.cobre(ws, [run, ...(run.juntas ?? [])], kind, acao.id, risco, codigo);
     let decisao = decidir({ risco, origem, leuDeFora, liberarTudo: liberar, codigoLigado: codigo, ajuste: this.ajuste(ws, kind, acao, args, conta), confirmarOrganizar, regra: !!regra, sempreConfirma: !!acao.sempreConfirma });
     if (obriga && decisao === 'direto' && !liberar) decisao = 'confirmar';
+    const externo = decisao === 'recusar' ? null : this.canalExterno?.(run.conversation_id ?? null, risco) ?? null;
+    if (externo === 'recusar') return { ok: false, status: 'falhou', texto: 'Este pedido chegou por um canal externo de quem tem papel de leitura neste workspace: nada foi feito. Conte isso à pessoa; não tente outro caminho.', desligada: true, marca: { risco } };
+    if (externo === 'confirmar') { decisao = 'confirmar'; obriga = obriga ?? 'o pedido chegou por um canal externo (celular): confirme aqui no Ergon'; }
     // o cartão mostra o que o agente pediu onde o preparar fixou o id do alvo (o detalhe diz o alvo lido); o clique usa o id
     const mostrar = fixou.length ? { ...args, ...Object.fromEntries(fixou.map((n) => [n, bruto[n]])) } : undefined;
     let porque = obriga ?? (run.juntas?.length ? PORQUE.juntas
