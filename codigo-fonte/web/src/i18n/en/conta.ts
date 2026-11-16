@@ -344,6 +344,18 @@ const conta: Traducao<typeof pt> = {
   'chaves.apagarTitulo': "Delete the key {nome}?",
   'chaves.apagarSudoTitulo': "Delete the administrator password?",
   'chaves.apagarCorpo': "It leaves the team's vault. If an agent needs it again, it will ask in a card.",
+  // primeiro acesso com a conta do Ergon World (components/AuthFlow.tsx)
+  'world.jaTenho': 'I already have an Ergon World account',
+  'world.titulo': 'Sign in with your Ergon World account',
+  'world.sub': 'This computer’s account is created from your Ergon World account.',
+  'world.email': 'Ergon World account email',
+  'world.senha': 'Ergon World password',
+  'world.mesmaSenha': 'Use the same password on this computer',
+  'world.senhaLocal': 'Password for this computer',
+  'world.entrar': 'Sign in',
+  'world.conferindo': 'Checking with Ergon World…',
+  'world.criarAqui': 'Create an account on this computer only',
+  'world.emSeguida': 'Next: the recovery phrase and the AI account.',
 };
 
 export default conta;

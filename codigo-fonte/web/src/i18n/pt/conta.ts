@@ -343,6 +343,18 @@ const conta = {
   'chaves.apagarTitulo': "Apagar a chave {nome}?",
   'chaves.apagarSudoTitulo': "Apagar a senha de administrador?",
   'chaves.apagarCorpo': "Ela sai do cofre da equipe. Se um agente precisar dela de novo, ele pede num cartão.",
+  // primeiro acesso com a conta do Ergon World (components/AuthFlow.tsx)
+  'world.jaTenho': 'Já tenho conta Ergon World',
+  'world.titulo': 'Entrar com a conta Ergon World',
+  'world.sub': 'A conta deste computador nasce da sua conta do Ergon World.',
+  'world.email': 'E-mail da conta Ergon World',
+  'world.senha': 'Senha do Ergon World',
+  'world.mesmaSenha': 'Usar a mesma senha neste computador',
+  'world.senhaLocal': 'Senha deste computador',
+  'world.entrar': 'Entrar',
+  'world.conferindo': 'Conferindo no Ergon World…',
+  'world.criarAqui': 'Criar uma conta só neste computador',
+  'world.emSeguida': 'Em seguida: a frase de recuperação e a conta de IA.',
 } as const satisfies Area;
 
 export default conta;

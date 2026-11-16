@@ -11,10 +11,10 @@ import type { FastifyRequest } from 'fastify';
 import type { Config } from '../config.ts';
 import { HttpError } from '../lib/util.ts';
 import { throttle } from '../security/factors.ts';
-import { checkCredentials, defaultWorkspace } from '../services/auth.ts';
+import { checkCredentials, defaultWorkspace, needsSetup } from '../services/auth.ts';
 import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
 import { loadWorldConfig, type WorldConfig } from './config.ts';
-import { forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, type AccountInput, type DeviceChoice } from './link.ts';
+import { checkAccountInput, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, type AccountInput, type DeviceChoice } from './link.ts';
 import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
@@ -88,6 +88,23 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         };
       });
       if (!wcfg.url) return; // sem World: nada além do estado
+
+      // ---------------------------------------------------------------- primeiro acesso com a conta do Ergon World
+      /**
+       * "Já tenho conta Ergon World", antes de existir qualquer conta neste computador: confere o e-mail e a senha no
+       * World ANTES de criar a conta local (senha errada não deixa uma conta local pela metade). Só vale com o
+       * aplicativo ainda vazio; o vínculo do aparelho vem depois, já com a sessão local (/api/world/connect).
+       */
+      h.publicRoutes.add('/api/world/setup/check');
+      app.post('/api/world/setup/check', async (req) => {
+        if (!needsSetup(db)) throw new HttpError(409, 'already_setup', 'Este computador já tem uma conta.');
+        const b = (req.body ?? {}) as Record<string, unknown>;
+        const email = str(b.email, 254)?.trim().toLowerCase() ?? ''; const password = str(b.password, 200) ?? '';
+        checkAccountInput({ kind: 'login', email, password });
+        throttle.check(`world-setup:${req.ip}`);
+        try { const r = await client.call<{ emailVerified?: boolean }>('POST', '/v1/accounts/login', { email, password }); throttle.ok(`world-setup:${req.ip}`); return { ok: true, emailVerified: !!r.emailVerified }; }
+        catch (e) { if ((e as HttpError).code === 'invalid_credentials') throttle.fail(`world-setup:${req.ip}`); return accountError(e); }
+      });
 
       // ---------------------------------------------------------------- Loja (colaborativa e grátis): loja.ts
       if (h.packages) registerLoja({ app, db, client, routines: h.routines, packages: h.packages, auth: h.auth, owner: h.owner, sessionOf });

@@ -63,6 +63,12 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
   const [opts, setOpts] = useState<OnboardingOptions | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('use');
+  // entrou com a conta do Ergon World no primeiro acesso: só os detalhes daqui (a IA); a equipe fica a que já veio
+  const [soDetalhes, setSoDetalhes] = useState(false);
+  useEffect(() => {
+    if (redo) return;
+    api.get<{ link: object | null }>('/api/world/status').then((s) => { if (s.link) { setSoDetalhes(true); setStep('ia'); } }).catch(() => {});
+  }, [redo]);
   // i18n-ok: 'Ergon Local' é o nome padrão que o servidor dá ao workspace (comparação, não aparece na tela)
   const [f, setF] = useState({ use: '', niche: '', nicheOther: '', company: workspaceName && workspaceName !== 'Ergon Local' ? workspaceName : '', goal: '' });
   const [result, setResult] = useState<OnboardingResult | null>(null);
@@ -80,7 +86,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
   const aiAcordando = !aiPronta;
   const acordandoDesde = useRef(Date.now());
   // conectou a conta na etapa da IA: monta a equipe e entra. Conectar continua sendo escolha: "Conectar depois" segue.
-  useEffect(() => { if (step === 'ia' && aiConnected) void build(); }, [step, aiConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (step === 'ia' && aiConnected) void (soDetalhes ? skip() : build()); }, [step, aiConnected]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!aiAcordando) return;
     const t = window.setTimeout(loadAi, 3000);
@@ -187,8 +193,8 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
             {!aiConnected && <p className="hint">{t('ajuda.onb.iaSemConta')}</p>}
             {err && <p className="error" role="alert">{err}</p>}
             <div className="onb__nav">
-              <button className="btn" onClick={() => setStep('more')}>{t('ajuda.onb.voltar')}</button>
-              {!aiConnected && <button className="btn btn--ghost" onClick={build}>{t('ajuda.onb.conectarDepois')}</button>}
+              {!soDetalhes && <button className="btn" onClick={() => setStep('more')}>{t('ajuda.onb.voltar')}</button>}
+              {!aiConnected && <button className="btn btn--ghost" onClick={() => void (soDetalhes ? skip() : build())}>{t('ajuda.onb.conectarDepois')}</button>}
             </div>
           </section>
         ) : step === 'building' ? (
