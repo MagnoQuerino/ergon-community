@@ -13,6 +13,7 @@ import { HttpError } from '../lib/util.ts';
 import { throttle } from '../security/factors.ts';
 import { checkCredentials, defaultWorkspace, needsSetup } from '../services/auth.ts';
 import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
+import { precisaReconectarErgonAi, registrarModelosErgonAi } from '../services/ai.ts';
 import { loadWorldConfig, type WorldConfig } from './config.ts';
 import { checkAccountInput, EMAIL_UNVERIFIED, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, worldLocale, type AccountInput, type DeviceChoice } from './link.ts';
 import { LocalSync } from './sync-local.ts';
@@ -178,7 +179,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return { ok: true };
       });
       app.post('/api/world/unlink', async (req) => { await L().unlink(h.auth(req).userId); return { ok: true }; });
-      app.post('/api/world/refresh', async (req) => ({ refreshedAt: await L().renew(h.auth(req).userId) }));
+      app.post('/api/world/refresh', async (req) => ({ refreshedAt: await renovar(h.auth(req).userId) }));
 
       // ---------------------------------------------------------------- qual workspace local é o do World
       const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: h.limits });
@@ -464,19 +465,46 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       // credencial do World (por aparelho+pessoa) → endpoint próprio "ergon-ai" na equipe de IA DA PRÓPRIA PESSOA; a
       // conta de IA que ela já tenha continua lá (o Ergon AI entra ao lado; "como padrão" só se ela escolher)
       const aiBase = (env.ERGON_WORLD_AI_URL || `${wcfg.url}/v1/ai`).replace(/\/+$/, '');
-      app.post('/api/world/ai/connect', async (req) => {
-        const a = h.auth(req);
-        const makeDefault = (req.body as { makeDefault?: unknown } | undefined)?.makeDefault === true;
+      // o World publica só modelos com a marca Ergon (id, nome e descrição): o nome e a descrição ficam para a tela
+      const conectarErgonAi = async (a: { userId: string; workspaceId: string }, makeDefault: boolean) => {
         const w = needWorld(a);
         const control = h.controlFor(a.workspaceId);
         if (!control?.ergonAi) throw new HttpError(503, 'motor_unavailable', 'A sua equipe de IA não está ligada agora; tente de novo em instantes.');
         const cred = await client.call<{ token: string; expiresAt: string }>('POST', '/v1/ai/credentials', { localPersonId: a.userId, workspaceId: w }, sessionOf(a.userId));
-        const list = await client.call<{ data: Array<{ id: string }> }>('GET', '/v1/ai/models', undefined, cred.token);
+        const list = await client.call<{ data: Array<{ id: string; name?: string; description?: string }> }>('GET', '/v1/ai/models', undefined, cred.token);
         const models = list.data.map((m) => m.id);
         if (!models.length) throw new HttpError(503, 'ergon_ai_unavailable', 'Nenhum modelo do Ergon AI disponível agora.');
+        registrarModelosErgonAi(list.data);
         await control.ergonAi({ baseUrl: aiBase, apiKey: cred.token, models, makeDefault });
         return { ok: true, models, default: makeDefault, expiresAt: cred.expiresAt };
-      });
+      };
+      app.post('/api/world/ai/connect', async (req) => conectarErgonAi(h.auth(req), (req.body as { makeDefault?: unknown } | undefined)?.makeDefault === true));
+      /**
+       * Instalações de antes nunca conectam de novo: o endpoint guardado ainda lista os ids antigos (deepseek-*). Ao abrir o
+       * aplicativo e ao renovar com o World, conecta de novo em silêncio (com o mesmo "como padrão") e passa as escolhas
+       * gravadas para os apelidos da marca. `migrar`: migra mesmo sem precisar conectar (ao abrir).
+       */
+      const atualizarErgonAi = async (userId: string, migrar = false): Promise<void> => {
+        const ws = links?.bound(userId);
+        if (!ws || !h.ergonAi || !h.controlFor(ws)?.ergonAi) return;
+        const modelos = await h.ergonAi.modelos(ws).catch(() => null);
+        if (!modelos?.length) return; // o Ergon AI não está ligado aqui
+        if (precisaReconectarErgonAi(modelos)) {
+          await conectarErgonAi({ userId, workspaceId: ws }, await h.ergonAi.ehPadrao(ws));
+          migrar = true;
+        }
+        if (migrar) await h.ergonAi.migrar(ws);
+      };
+      const renovar = async (userId: string): Promise<string | null> => {
+        const r = await L().renew(userId);
+        void atualizarErgonAi(userId).catch(() => undefined);
+        return r;
+      };
+      // ao abrir o aplicativo (sem pressa: o motor pode estar acordando)
+      const aoAbrir = setTimeout(() => {
+        for (const r of db.all<{ user_id: string }>("SELECT user_id FROM world_links WHERE status = 'active'")) void atualizarErgonAi(r.user_id, true).catch(() => undefined);
+      }, 15_000);
+      aoAbrir.unref();
       app.delete('/api/world/ai', async (req) => {
         const a = h.auth(req);
         await h.controlFor(a.workspaceId)?.removeErgonAi?.().catch(() => undefined);
@@ -524,7 +552,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
 
       // renova sozinha o resumo do plano de quem está conectado (uma pessoa por vez, sem pressa); sem rede, só espera
       const timer = setInterval(() => {
-        for (const r of db.all<{ user_id: string }>("SELECT user_id FROM world_links WHERE status = 'active'")) void L().renew(r.user_id).catch(() => undefined);
+        for (const r of db.all<{ user_id: string }>("SELECT user_id FROM world_links WHERE status = 'active'")) void renovar(r.user_id).catch(() => undefined);
       }, wcfg.refreshSeconds * 1000);
       timer.unref();
       // cartões na nuvem: o estado do Job e o resultado chegam mesmo com a tela fechada (só enquanto houver algum)
@@ -532,7 +560,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         for (const w of cards.watched()) void cards.refresh(w.user_id, w.workspace_id).catch(() => undefined);
       }, 20_000);
       cardsTimer.unref();
-      app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); });
+      app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); clearTimeout(aoAbrir); });
       // o World disse que o e-mail não está confirmado: o aviso com o código volta a aparecer (mesmo se aqui achávamos que sim)
       app.addHook('onError', async (req, _reply, err) => {
         if ((err as HttpError).code !== 'email_unverified') return;

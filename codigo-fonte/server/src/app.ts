@@ -63,7 +63,7 @@ import { applyDocCommands, createFolder, emptyTrash, purgeFiles, purgeRequest, f
 import { personalityOf, setPersonality } from './services/voices.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HermesError, HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
-import { CONEXOES, type AiService } from './services/ai.ts';
+import { CONEXOES, migrarAgentesErgonAi, type AiService } from './services/ai.ts';
 import { equipeNaSaude, Motors } from './services/motors.ts';
 import { Integrations, contasDe, integrationRow, nomeDaConta, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { contaDoPedido, contaSchema } from './routes/integracoes.ts';
@@ -3175,7 +3175,19 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
   if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks,
-    packages: { keys: officialKeys, preview: (ws, buf) => packages.preview(ws, buf), install: (ws, userId, buf) => packages.install(ws, userId, buf) } });
+    packages: { keys: officialKeys, preview: (ws, buf) => packages.preview(ws, buf), install: (ws, userId, buf) => packages.install(ws, userId, buf) },
+    ergonAi: {
+      modelos: (ws) => aiOf(ws).modelosErgonAi(),
+      ehPadrao: (ws) => aiOf(ws).ergonAiEhPadrao(),
+      migrar: async (ws) => {
+        const agentes = migrarAgentesErgonAi(db, ws);
+        if (agentes) bus.publish(ws, 'agents.changed', {}); // o perfil de cada agente no motor segue o modelo novo
+        const ativos = db.all<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active'", ws).map((a) => perfis.perfilPronto(ws, a.id)?.nome ?? null).filter((x): x is string => !!x);
+        const r = await aiOf(ws).migrarErgonAi([null, ...new Set(ativos)]);
+        if (r.padrao || r.tarefas) bus.publish(ws, 'ai.changed', {});
+        return { ...r, agentes };
+      },
+    } });
 
   // Frontend compilado --------------------------------------------------------------------------------------
   if (cfg.webDir && fs.existsSync(path.join(cfg.webDir, 'index.html'))) {

@@ -20,9 +20,12 @@ const TIER_LABEL = {
 } as const satisfies Record<NonNullable<ModelEntry['tier']>, string>;
 
 /** Nome curto de um modelo ("anthropic/claude-sonnet-5.5" → "Claude Sonnet 5.5"), igual ao do servidor. */
-export function modelName(id: string | null, catalog?: ModelCatalog | null): string {
+export function modelName(id: string | null, catalog?: ModelCatalog | null, provider?: string | null): string {
   if (!id) return t('equipe.modelo.padraoDaConta');
   for (const p of catalog?.providers ?? []) { const m = p.models.find((x) => x.id === id); if (m) return m.label; }
+  // o Ergon AI tem nome de marca: os apelidos e os ids antigos (deepseek-*, gravados antes da rc.33) nunca aparecem crus
+  if (id === 'ergon-ai-sinapse') return 'Ergon AI Sinapse'; // i18n-ok: nome de produto
+  if (/^ergon-ai(\/|$)/.test(id) || (!!provider && /^(custom:)?ergon-ai$/.test(provider))) return 'Ergon AI'; // i18n-ok: nome de produto
   const base = id.split(':')[0];
   return (base.includes('/') ? base.split('/').slice(1).join('/') : base).split(/[-_]/).filter(Boolean)
     .map((w) => (/^gpt$/i.test(w) ? 'GPT' : w[0].toUpperCase() + w.slice(1))).join(' ');
@@ -81,11 +84,11 @@ export function ModelSelect({ catalog, value, provider, onChange, allowDefault =
       {catalog?.providers.map((p) => (
         <optgroup key={p.id} label={p.billing === 'subscription' ? t('equipe.modelo.assinatura', { nome: p.name }) : p.name}>
           {p.models.map((m) => (
-            <option key={m.id} value={`${p.id}::${m.id}`}>{m.label}{m.vendor ? ` · ${m.vendor}` : ''}{m.tier ? ` · ${tier(m.tier)}` : ''}{price(m) ? ` · ${price(m)}` : ''}</option>
+            <option key={m.id} value={`${p.id}::${m.id}`}>{m.label}{m.description ? ` — ${m.description}` : ''}{m.vendor ? ` · ${m.vendor}` : ''}{m.tier ? ` · ${tier(m.tier)}` : ''}{price(m) ? ` · ${price(m)}` : ''}</option>
           ))}
         </optgroup>
       ))}
-      {value && !catalog?.providers.some((p) => p.models.some((m) => m.id === value)) && <option value={key}>{t('equipe.modelo.naoConectada', { modelo: modelName(value) })}</option>}
+      {value && !catalog?.providers.some((p) => p.models.some((m) => m.id === value)) && <option value={key}>{t('equipe.modelo.naoConectada', { modelo: modelName(value, null, provider) })}</option>}
     </select>
   );
 }

@@ -58,6 +58,18 @@ export interface WorldHost {
   tasks?: CloudTasksHost;
   /** pacotes .ergon (a Loja do World instala pelo mesmo caminho e com a mesma validação) */
   packages?: PackagesHost;
+  /** o Ergon AI guardado no motor do workspace: conferir a conexão e migrar as escolhas de modelo antigas */
+  ergonAi?: ErgonAiHost;
+}
+
+/** O Ergon AI do workspace, visto pelo World (services/ai.ts). */
+export interface ErgonAiHost {
+  /** os modelos que o endpoint guardado lista; null: o Ergon AI não está ligado */
+  modelos(workspaceId: string): Promise<string[] | null>;
+  /** o Ergon AI é o modelo padrão da equipe */
+  ehPadrao(workspaceId: string): Promise<boolean>;
+  /** ids antigos (deepseek-*) → apelidos da marca: o padrão, os modelos por tarefa e o modelo próprio de cada agente */
+  migrar(workspaceId: string): Promise<{ padrao: boolean; tarefas: number; agentes: number }>;
 }
 
 /** O que a Loja do World usa dos pacotes locais: as chaves oficiais, a prévia e a instalação de sempre. */

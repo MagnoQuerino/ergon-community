@@ -233,7 +233,7 @@ function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record
 }
 export const PROPOSAL_KIND: Record<string, string> = rotulos(TIPOS, (k) => `servidor.tipo.${k}` as Chave);
 export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
-export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
+export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null; /** curta, do World (os modelos do Ergon AI) */ description?: string }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
   executor: 'real' | 'simulated'; available: boolean;
