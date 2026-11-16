@@ -89,14 +89,13 @@ describe('Pessoas no World: convite, papéis, saída e titularidade', () => {
     world.workspaces.get(sws)!.seats = 8;
   });
 
-  test('tirar alguém: o acesso dele cai na hora e o World pede para girar a chave antes de novos envios', async () => {
+  test('tirar alguém: o acesso dele cai na hora e a chave do workspace gira sozinha neste computador', async () => {
     const r = await req(pc1, 'DELETE', `/api/world/members/${biaAcc}`, ana);
-    assert.deepEqual(r.json, { ok: true, rotationRequired: true });
+    assert.deepEqual([r.json.ok, r.json.rotationRequired, r.json.rotated, r.json.keyVersion], [true, false, true, 2]);
     assert.equal((await req(pc2, 'GET', '/api/world/members', bia)).status, 404, 'a Bia não vê mais o workspace');
     assert.equal((await req(pc2, 'POST', '/api/world/sync/pull', bia, {})).status, 404);
     assert.equal((await req(pc1, 'POST', '/api/agents', ana, { name: 'Sam', role: 'Jardinagem' })).status, 201);
-    const push = await req(pc1, 'POST', '/api/world/sync/push', ana, {});
-    assert.equal(push.status, 409); assert.equal(push.json.error, 'rotation_required');
+    assert.equal((await req(pc1, 'POST', '/api/world/sync/push', ana, {})).status, 200, 'com a chave girada, os envios voltam');
   });
 
   test('carrinho: plano, pessoas e Jobs num checkout só; com assinatura, prévia e confirmação; recarga à parte', async () => {

@@ -379,13 +379,17 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return client.call('PUT', `/v1/sync/workspaces/${w}/members/${ACC((req.params as { account: string }).account)}/role`, { role: ROLE((req.body as { role?: unknown } | undefined)?.role) }, sessionOf(a.userId));
       });
       /**
-       * Tirar alguém do workspace: o acesso dele cai na hora e o World exige girar a chave antes de novas mudanças.
-       * Este aplicativo ainda não gira a chave (ver o relatório): a resposta avisa, e o envio do Sync recusa até lá.
+       * Tirar alguém do workspace: o acesso dele cai na hora e o World exige girar a chave antes de novas mudanças. Com a
+       * chave neste computador, o giro sai na hora (e a chave nova vai para quem ficou); sem ela, a resposta avisa e o
+       * giro é feito no computador que sincroniza.
        */
       app.delete('/api/world/members/:account', async (req) => {
         const a = h.auth(req); const w = needWorld(a);
         await client.call('DELETE', `/v1/sync/workspaces/${w}/members/${ACC((req.params as { account: string }).account)}`, undefined, sessionOf(a.userId));
-        return { ok: true, rotationRequired: true };
+        if (!sync.status(a.workspaceId).enabled) return { ok: true, rotationRequired: true, reason: 'no_key' };
+        db.run('UPDATE world_sync SET rotation_pending = 1 WHERE workspace_id = ?', a.workspaceId);
+        try { return { ok: true, rotationRequired: false, ...(await sync.rotate(a.userId, a.workspaceId)) }; }
+        catch (e) { return { ok: true, rotationRequired: true, reason: (e as HttpError).code ?? 'world_error' }; }
       });
       app.post('/api/world/members/transfer', async (req) => {
         const a = h.auth(req); const w = needWorld(a);
@@ -453,6 +457,12 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       });
       app.post('/api/world/sync/share', async (req) => { const a = h.owner(req); return sync.share(a.userId, boundWs(a)); });
       app.post('/api/world/sync/push', async (req) => { const a = h.owner(req); return sync.push(a.userId, boundWs(a)); });
+      app.post('/api/world/sync/rotate', async (req) => { const a = h.owner(req); return sync.rotate(a.userId, boundWs(a), phrase(req)); });
+      app.post('/api/world/sync/recovery', async (req) => {
+        const a = h.owner(req); const p = phrase(req);
+        if (!p) throw new HttpError(400, 'invalid', 'Digite a frase de recuperação.');
+        return sync.setRecovery(a.userId, boundWs(a), p);
+      });
       app.post('/api/world/sync/pull', async (req) => { const a = h.owner(req); return sync.pull(a.userId, boundWs(a), (req.body as { apply?: unknown } | undefined)?.apply === true); });
       app.get('/api/world/sync/conflicts', async (req) => { const a = h.owner(req); return links?.bound(a.userId) === a.workspaceId ? sync.conflicts(a.userId, a.workspaceId) : []; });
       app.post('/api/world/sync/conflicts/:id', async (req) => {

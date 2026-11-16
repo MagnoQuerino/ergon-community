@@ -634,6 +634,7 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 .rt-days { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .rt-days .chip { cursor: pointer; font: inherit; font-size: 12px; padding: 3px 9px; }
 .hint.warn { color: var(--warn); }
+.hint.ok { color: var(--ok); }
 .rt-mine { display: grid; gap: 0; }
 .rt-item { margin: 8px 0; }
 .rt-item--paused { border-style: dashed; background: var(--panel-2); box-shadow: none; }

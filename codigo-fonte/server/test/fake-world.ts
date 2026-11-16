@@ -44,6 +44,10 @@ interface Workspace { id: string; owner: string; label: string | null; plan: str
   seats?: number;
   /** alguém saiu: a chave precisa girar antes de novas mudanças */
   rotationRequired?: boolean;
+  /** versão atual da chave (padrão 1); sobe a cada giro (mudança kind 'rotation') */
+  keyVersion?: number;
+  /** envelopes de recuperação por conta (o primeiro também em recovery, como antes) */
+  recoveries?: Map<string, { keyVersion: number; wrapped: string }>;
   /** a assinatura (itens do Stripe) e a recarga automática */
   sub?: { items: Array<{ sku: string; quantity: number }> } | null;
   autotopup?: Record<string, unknown> | null;
@@ -87,6 +91,8 @@ export class FakeWorld {
   grants = new Map<string, { provider: string; model: string; apiKey: string }>();
   /** cada checkout pedido (workspace e itens), para os testes conferirem o carrinho */
   checkouts: Array<{ ws: string; items: Array<{ sku: string; quantity: number }> }> = [];
+  /** giros de chave recebidos (mudança kind rotation): de qual workspace, para que versão, por quem */
+  rotations: Array<{ ws: string; keyVersion: number; by: string }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
   delegated = ['openai', 'anthropic', 'deepseek', 'openrouter'];
   /** protocolo de recuperação por workspace (ausente = ligado) */
@@ -353,9 +359,10 @@ export class FakeWorld {
     m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/(envelopes|envelope|devices-needing-key|changes)$/.exec(p);
     if (m) {
       const w = mine(m[1]); if (!w) return { fail: [404, 'not_found'] };
-      const role = roleIn(w, acc.id)!;
+      const role = roleIn(w, acc.id)!; const kv = w.keyVersion ?? 1;
       if (m[2] === 'envelopes' && method === 'PUT') {
-        if (b.kind === 'recovery') w.recovery = { keyVersion: b.keyVersion, wrapped: b.wrapped };
+        if (b.keyVersion !== kv) return { fail: [409, 'key_version'] };
+        if (b.kind === 'recovery') { w.recovery = { keyVersion: b.keyVersion, wrapped: b.wrapped }; (w.recoveries ??= new Map()).set(acc.id, w.recovery); }
         else {
           const d = this.devices.get(b.deviceId); if (!d || d.status !== 'active') return { fail: [400, 'invalid_device'] };
           // para aparelho de outra pessoa: só quem administra, e só para membro atual
@@ -365,18 +372,23 @@ export class FakeWorld {
         return { json: { ok: true } };
       }
       if (m[2] === 'envelope') {
-        const e = u.searchParams.get('kind') === 'recovery' ? w.recovery : w.envelopes.get(dev.id);
-        return e ? { json: e } : { fail: [404, 'no_envelope'] };
+        // só a versão atual da chave (world/src/sync.ts myEnvelope): depois de um giro, o envelope velho não serve
+        const e = u.searchParams.get('kind') === 'recovery' ? (w.recoveries?.get(acc.id) ?? (w.owner === acc.id ? w.recovery : null)) : w.envelopes.get(dev.id);
+        return e && e.keyVersion === kv ? { json: e } : { fail: [404, 'no_envelope'] };
       }
       if (m[2] === 'devices-needing-key') {
         const admin = RANK[role] >= RANK.admin;
-        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && !w.envelopes.has(d.id)).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey }));
-        return { json: { keyVersion: 1, devices } };
+        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== kv).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey }));
+        return { json: { keyVersion: kv, devices } };
       }
       if (m[2] === 'changes' && method === 'POST') {
         if (!w.plan) return { fail: [402, 'world_inactive'] };
         if (RANK[role] < RANK[b.kind === 'rotation' ? 'admin' : 'editor']) return { fail: [403, 'sync_forbidden'] };
-        if (w.rotationRequired && b.kind !== 'rotation') return { fail: [409, 'rotation_required'] };
+        if (b.kind === 'rotation') { if (b.keyVersion !== kv + 1) return { fail: [409, 'key_version'] }; }
+        else {
+          if (w.rotationRequired) return { fail: [409, 'rotation_required'] };
+          if (b.keyVersion !== kv) return { fail: [409, 'key_version'] };
+        }
         if (b.expectedVersion !== w.head) return { fail: [409, 'version_conflict'] };
         // o World confere quem assinou (o envelope canônico), sem conseguir abrir o conteúdo
         const canon = `ergon-sync-v1|${w.id}|${b.expectedVersion}|${b.operationId}|${b.schemaVersion}|${b.keyVersion}|${b.kind}|${b.sha256}`;
@@ -385,11 +397,12 @@ export class FakeWorld {
         if (crypto.createHash('sha256').update(Buffer.from(b.ciphertext, 'base64')).digest('hex') !== b.sha256) return { fail: [400, 'bad_hash'] };
         w.head += 1;
         w.changes.push({ version: w.head, operationId: b.operationId, keyVersion: b.keyVersion, schemaVersion: b.schemaVersion, kind: b.kind, ciphertext: b.ciphertext, nonce: b.nonce, deviceId: dev.id });
+        if (b.kind === 'rotation') { w.keyVersion = b.keyVersion; w.rotationRequired = false; this.rotations.push({ ws: w.id, keyVersion: b.keyVersion, by: acc.id }); }
         return { json: { version: w.head } };
       }
       if (m[2] === 'changes' && method === 'GET') {
         const since = Number(u.searchParams.get('since') ?? 0);
-        return { json: { head: w.head, changes: w.changes.filter((c) => (c.version as number) > since).slice(0, 50) } };
+        return { json: { head: w.head, keyVersion: kv, changes: w.changes.filter((c) => (c.version as number) > since).slice(0, 50) } };
       }
     }
     return { fail: [404, 'not_found'] };
@@ -456,6 +469,7 @@ export class FakeWorld {
       if (!roleIn(w, sub)) return { fail: [404, 'sync_workspace'] };
       w.members!.delete(sub);
       for (const d of this.devices.values()) if (d.accountId === sub) w.envelopes.delete(d.id);
+      w.recoveries?.delete(sub);
       w.rotationRequired = true; return { json: { ok: true } };
     }
     if (m[2] === 'transfer' && !sub && method === 'POST') {

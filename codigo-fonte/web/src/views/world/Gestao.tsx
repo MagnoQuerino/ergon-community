@@ -146,11 +146,11 @@ export function PessoasPainel({ nomeWorkspace }: { nomeWorkspace?: string | null
   const b = useResource<Budgets>('/api/world/budgets', []);
   const sync = useResource<SyncStatus>('/api/world/sync', []);
   const [onMsg, msgEl] = useMsg();
-  const [busy, go] = useAcao(onMsg, () => { m.reload(); b.reload(); });
+  const [busy, go] = useAcao(onMsg, () => { m.reload(); b.reload(); sync.reload(); });
   const [papelNovo, setPapelNovo] = useState<Papel>('editor');
   const [codigo, setCodigo] = useState<{ token: string; expiresAt: string } | null>(null);
   const [tirando, setTirando] = useState<string | null>(null);
-  const [saiu, setSaiu] = useState(false);
+  const [saiu, setSaiu] = useState<Tirada | null>(null);
   const [teto, setTeto] = useState<Record<string, string>>({});
   if (!m.data) return <Loading error={m.error} />;
   const d = m.data; const eu = d.myRole;
@@ -211,7 +211,7 @@ export function PessoasPainel({ nomeWorkspace }: { nomeWorkspace?: string | null
                     {podeTirar(eu, p) && (tirando === p.accountId ? (
                       <span className="pessoa__confirma" role="group">
                         <small>{t('pessoas.tirarConfirma', { nome: nomeDe(p) })}</small>
-                        <button className="btn btn--sm btn--danger" disabled={busy} onClick={() => void go(async () => { await api.del(`/api/world/members/${p.accountId}`); setTirando(null); setSaiu(true); }, t('pessoas.tirado', { nome: nomeDe(p) }))}>{t('pessoas.tirarSim')}</button>
+                        <button className="btn btn--sm btn--danger" disabled={busy} onClick={() => void go(async () => { setSaiu(await api.del<Tirada>(`/api/world/members/${p.accountId}`)); setTirando(null); }, t('pessoas.tirado', { nome: nomeDe(p) }))}>{t('pessoas.tirarSim')}</button>
                         <button className="btn btn--sm btn--ghost" onClick={() => setTirando(null)}>{t('vinculo.cancelar')}</button>
                       </span>
                     ) : <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setTirando(p.accountId)}><Icon name="trash" size={13} /> {t('pessoas.tirar')}</button>)}
@@ -222,7 +222,17 @@ export function PessoasPainel({ nomeWorkspace }: { nomeWorkspace?: string | null
           );
         })}
       </ul>
-      {saiu && <p className="hint warn">{t('pessoas.chaveAviso')}</p>}
+      {saiu?.rotated && <p className="hint ok"><Icon name="key" size={13} /> {t('pessoas.chaveTrocada')}</p>}
+      {(saiu?.rotationRequired || (!saiu?.rotated && sync.data?.rotationPending)) && (
+        saiu?.reason === 'no_key'
+          ? <p className="hint warn">{t('pessoas.chaveOutroPc')}</p>
+          : (
+            <p className="hint warn row row--wrap">
+              <span>{t('pessoas.chavePendente')}</span>
+              {adm && sync.data?.enabled && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void go(async () => { await api.post('/api/world/sync/rotate'); setSaiu({ ok: true, rotated: true }); })}><Icon name="key" size={13} /> {t('pessoas.trocarChave')}</button>}
+            </p>
+          )
+      )}
       {adm && d.invites.length > 0 && (
         <div className="pessoas__convites">
           <b className="small">{t('convite.pendentes')}</b>
@@ -652,7 +662,8 @@ function Transfer({ others, busy, go }: { others: WorkspaceRef[]; busy: boolean;
 }
 
 
-interface SyncStatus { bound: boolean; enabled: boolean; syncWorkspaceId?: string | null; origin?: 'created' | 'joined' | null; lastVersion?: number; conflicts?: number }
+interface SyncStatus { bound: boolean; enabled: boolean; syncWorkspaceId?: string | null; origin?: 'created' | 'joined' | null; lastVersion?: number; conflicts?: number; keyVersion?: number; rotationPending?: boolean; recoveryOutdated?: boolean }
+interface Tirada { ok: boolean; rotated?: boolean; rotationRequired?: boolean; reason?: string; shared?: number }
 interface Side { title: string; column?: string; agent?: string | null; completed?: boolean; dueOn?: string | null }
 interface Conflict { id: string; kind: 'task' | 'conversation'; since: string; mine: Side | null; theirs: Side | null }
 interface Pulled { preview: { agents?: Array<{ name: string }>; coordinator?: { from: string; to: string } | null } | null; incoming: { tasks: number; conversations: number; messages: number } }
@@ -704,6 +715,16 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
         <>
           <p>{t('sync.ligada')} <span className="muted small">{twn('sync.codigoVersao', { codigo: <code>{s.syncWorkspaceId}</code>, versao: s.lastVersion ?? 0 })}</span></p>
           <p className="muted small">{t('sync.tarefaChega')}</p>
+          {s.rotationPending && <p className="hint warn row row--wrap"><span>{t('pessoas.chavePendente')}</span><button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void go(async () => { await api.post('/api/world/sync/rotate'); return t('pessoas.chaveTrocada'); })}><Icon name="key" size={13} /> {t('pessoas.trocarChave')}</button></p>}
+          {s.recoveryOutdated && (
+            <div className="hint warn">
+              <span>{t('sync.fraseVelha')}</span>
+              <div className="row row--wrap">
+                <input type="password" autoComplete="off" aria-label={t('sync.fraseNome')} placeholder={t('sync.fraseNome')} value={phrase} onChange={(ev) => setPhrase(ev.target.value)} />
+                <button className="btn btn--sm" disabled={busy || phrase.trim().length < 20} onClick={() => void go(async () => { await api.post('/api/world/sync/recovery', withPhrase()); setPhrase(''); return t('sync.fraseAtualizada'); })}>{t('sync.atualizarFrase')}</button>
+              </div>
+            </div>
+          )}
           <div className="row row--wrap">
             <button className="btn" disabled={busy} onClick={() => void go(async () => { const r = await api.post<Pulled>('/api/world/sync/pull', {}); setPulled(r); if (!r.preview && !r.incoming.tasks && !r.incoming.conversations && !r.incoming.messages) return t('sync.nadaNovo'); })}>{t('sync.verChegou')}</button>
             <button className="btn btn--primary" disabled={busy} onClick={() => void go(async () => {
