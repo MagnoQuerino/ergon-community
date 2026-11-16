@@ -18,7 +18,7 @@ import { type Applied, type ContentBody, ContentSync, parseContent } from './syn
 import { newWorkspaceKey, openChange, sealChange, unwrapForDevice, unwrapForRecovery, wrapForDevice, wrapForRecovery } from './sync-crypto.ts';
 
 interface Keys { ed25519: string; x25519: string; x25519Public: string }
-interface SyncRow { sync_workspace_id: string; key_version: number; sync_key: string; last_version: number; blueprint_hash: string | null; old_keys: string | null; rotation_pending: number; recovery_key_version: number | null }
+interface SyncRow { sync_workspace_id: string; key_version: number; sync_key: string; last_version: number; blueprint_hash: string | null; old_keys: string | null; rotation_pending: number; recovery_key_version: number | null; updated_at: string | null }
 type Change = { version: number; operationId: string; keyVersion: number; schemaVersion: number; kind: string; ciphertext: string; nonce: string; deviceId: string };
 
 export class LocalSync {
@@ -49,7 +49,9 @@ export class LocalSync {
     const r = this.row(ws);
     if (r) {
       return { enabled: true, syncWorkspaceId: r.sync_workspace_id, keyVersion: r.key_version, lastVersion: r.last_version, conflicts: this.content.openConflicts(ws),
-        rotationPending: !!r.rotation_pending, recoveryOutdated: r.recovery_key_version != null && r.recovery_key_version < r.key_version };
+        rotationPending: !!r.rotation_pending, recoveryOutdated: r.recovery_key_version != null && r.recovery_key_version < r.key_version,
+        // a última vez que este computador enviou ou recebeu (para o Estado do Ergon)
+        lastSyncAt: r.updated_at ?? null };
     }
     const w = this.db.get<{ sync_workspace_id: string; origin: 'created' | 'joined' }>('SELECT sync_workspace_id, origin FROM world_workspace_ids WHERE workspace_id = ?', ws);
     return { enabled: false, syncWorkspaceId: w?.sync_workspace_id ?? null, origin: w?.origin ?? null };

@@ -114,6 +114,8 @@ const geral: Traducao<typeof pt> = {
   'nav.conexoes': 'Connections',
   'nav.loja': 'Store',
   'nav.world': 'Ergon World',
+  'nav.governanca': 'Governance',
+  'nav.governancaTrancada': 'Governance · comes with World Team',
   'nav.configuracoes': 'Settings',
   'nav.ajuda': 'Help',
   'nav.aria': 'Navigation',

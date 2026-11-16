@@ -125,6 +125,8 @@ const geral = {
   'nav.conexoes': 'Conexões',
   'nav.loja': 'Loja',
   'nav.world': 'Ergon World',
+  'nav.governanca': 'Governança',
+  'nav.governancaTrancada': 'Governança · vem com o World Team',
   'nav.configuracoes': 'Configurações',
   'nav.ajuda': 'Ajuda',
   'nav.aria': 'Navegação',

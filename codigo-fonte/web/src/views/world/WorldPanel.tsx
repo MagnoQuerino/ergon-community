@@ -79,7 +79,7 @@ export default function WorldPanel() {
 }
 
 /** Confirmar o e-mail da conta com o código que o World enviou. */
-function VerifyEmail({ onMsg, onDone, pedido }: { onMsg: Msg; onDone: () => void; pedido: number }) {
+export function VerifyEmail({ onMsg, onDone, pedido }: { onMsg: Msg; onDone: () => void; pedido: number }) {
   const t = useTw();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);

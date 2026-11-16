@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test src/world/*.test.ts src/iso/*.test.ts src/brand/*.test.ts src/lib/*.test.ts src/i18n/*.test.ts"
+    "test": "node --test src/world/*.test.ts src/iso/*.test.ts src/brand/*.test.ts src/lib/*.test.ts src/i18n/*.test.ts src/views/world/*.test.ts"
   },
   "devDependencies": {
     "@simplewebauthn/browser": "14.0.0",

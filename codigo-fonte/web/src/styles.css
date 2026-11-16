@@ -2860,3 +2860,149 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 /* estado vazio da conversa: a equipe, discreta, em cima da frase */
 .chat__empty .cena-vazio { padding: 8px 0 0; }
 .chat__empty .cena-vazio__figs .cena-fig { height: 52px; }
+
+/* ——— Ergon World: a etiqueta do plano na barra de cima ("Pro | ₯ 4.202") e a compra em um clique ——— */
+.topbar__worldwrap { position: relative; display: inline-flex; margin-right: 2px; }
+.tb-world { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 11px 0 5px; border-radius: 9px; border: 1px solid var(--inversa-linha);
+  background: var(--inversa-veu); color: var(--texto-inverso); font: 600 13px/1 var(--font); white-space: nowrap; cursor: pointer; text-decoration: none; font-variant-numeric: tabular-nums; }
+.tb-world:hover, .tb-world.is-on { background: var(--inversa-ativo); border-color: var(--inversa-linha-forte); }
+.tb-world:focus-visible { outline: var(--foco-largura) solid var(--navy); outline-offset: 2px; box-shadow: 0 0 0 2px var(--texto-inverso); }
+.tb-world__plano { position: relative; display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; letter-spacing: .02em;
+  background: color-mix(in srgb, var(--inversa) 82%, var(--texto-inverso)); color: var(--texto-inverso); }
+.tb-world--sync .tb-world__plano { color: var(--inversa-agua); }
+.tb-world--pro .tb-world__plano { color: var(--dourado-vivo); }
+.tb-world--team .tb-world__plano { background: linear-gradient(135deg, var(--dourado-vivo), var(--dourado-cheio)); color: var(--dourado-sobre); }
+.tb-world--sem .tb-world__plano { background: none; padding: 0 2px 0 6px; font-weight: 500; }
+.tb-world__cortesia { width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--dourado-vivo); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dourado-vivo) 35%, transparent); }
+.tb-world--team .tb-world__cortesia { background: var(--dourado-sobre); box-shadow: none; }
+.tb-world__sep { width: 1px; height: 16px; background: var(--inversa-linha-forte); }
+.tb-world__saldo { color: var(--texto-inverso); }
+.tb-world--chamada { padding: 0 11px; gap: 6px; border-style: dashed; color: var(--texto-inverso-2); font-weight: 500; }
+.tb-world--chamada .tb-world__plano { background: none; padding: 0; height: auto; color: inherit; }
+.tb-world--chamada:hover { color: var(--texto-inverso); }
+@media (max-width: 760px) { .tb-world--chamada { display: none; } }
+@media (max-width: 600px) { .tb-world:not(.tb-world--chamada) .tb-world__plano, .tb-world__sep { display: none; } .tb-world { padding: 0 9px; } }
+.compra-pop { width: min(380px, calc(100vw - 24px)); right: -60px; }
+.compra-pop::before { right: 80px; }
+@media (max-width: 900px) { .compra-pop { right: 8px; } }
+.compra-pop__heroi { position: relative; overflow: hidden; display: grid; gap: 4px; margin: 10px 0 12px; padding: 14px 16px; border-radius: 14px; color: var(--texto-inverso);
+  background: radial-gradient(120% 120% at 90% 0%, color-mix(in srgb, var(--inversa) 62%, var(--marca-borda-forte)) 0%, transparent 60%), linear-gradient(170deg, var(--inversa-2), var(--inversa)); }
+.compra-pop__heroi--team { box-shadow: inset 0 0 0 1px var(--dourado-cheio); }
+.compra-pop__plano { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 15px; }
+.compra-pop__plano .badge--cortesia { margin-left: 2px; }
+.compra-pop__renova { font-size: 12px; color: var(--texto-inverso-2); }
+.compra-pop__saldo { margin-top: 6px; font-variant-numeric: tabular-nums; }
+.compra-pop__saldo b { font-size: 26px; letter-spacing: -.01em; color: var(--dourado-vivo); }
+.compra-pop__saldo small { font-size: 12px; color: var(--texto-inverso-2); }
+.compra-pop__bloco { margin: 0 0 12px; }
+.compra-pop__bloco h4 { margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.compra-pop__recargas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.compra-pop__pacote { display: grid; gap: 2px; justify-items: start; padding: 9px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; transition: border-color .15s, background .15s; }
+.compra-pop__pacote b { display: inline-flex; align-items: center; gap: 5px; font-size: 15px; }
+.compra-pop__pacote small { font-size: 12px; color: var(--muted); }
+.compra-pop__pacote:hover:not(:disabled) { border-color: var(--dourado-cheio); background: var(--dourado-suave-2); }
+.compra-pop__pacote:disabled { opacity: .6; cursor: default; }
+.compra-pop__pacote--largo { width: 100%; }
+.compra-pop__dois { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.compra-pop__up { display: grid; gap: 10px; padding: 12px 14px; border-radius: 14px; border: 2px solid var(--dourado-cheio); background: linear-gradient(160deg, var(--dourado-suave-2), var(--panel)); }
+.compra-pop__up-txt { display: grid; gap: 2px; }
+.compra-pop__up-txt b { font-size: 16px; }
+.compra-pop__up-preco { font-weight: 700; color: var(--gold-ink); font-variant-numeric: tabular-nums; }
+.compra-pop__up-txt small { font-size: 12px; color: var(--muted); }
+.compra-pop__up .btn { justify-content: center; }
+.compra-pop__previa { display: grid; gap: 8px; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--dourado-borda); background: var(--dourado-suave-2); }
+.compra-pop__previa p { margin: 0; }
+.compra-pop__peca { display: flex; align-items: center; gap: 6px; }
+.compra-pop__tudo { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 0 2px; border-top: 1px solid var(--line); font-size: 13px; color: var(--link); text-decoration: none; }
+.compra-pop__tudo:hover { text-decoration: underline; }
+
+/* ——— Ergon World no Estado do Ergon ——— */
+.estado-world__titulo { display: flex; align-items: center; gap: 6px; }
+.estado-world__kv b { font-weight: 600; }
+.estado-world__sub { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+.estado-world__rot { margin: 10px 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.estado-world__res { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.estado-world__res li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.estado-world__nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.estado-world__ponto { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.estado-world__ponto--ok { background: var(--sucesso-ponto); }
+.estado-world__ponto--falhou { background: var(--atencao-ponto); }
+.estado-world__abrir { gap: 6px; }
+
+/* ——— Governança (World Team) ——— */
+.nav__cadeado { display: inline-flex; margin-left: auto; color: var(--dourado-vivo); }
+.shell--compact .nav__cadeado { display: none; }
+.gov { max-width: 1180px; margin: 0 auto; padding: 18px 22px 56px; }
+.gov-heroi { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: center; gap: 12px; min-height: 380px;
+  padding: 40px 0 34px 46px; border-radius: 24px; color: var(--texto-inverso);
+  background: radial-gradient(110% 90% at 80% 20%, color-mix(in srgb, var(--inversa) 66%, var(--marca-borda-forte)) 0%, transparent 62%),
+    linear-gradient(180deg, var(--inversa-2) 0%, var(--inversa) 66%, color-mix(in srgb, var(--inversa) 74%, var(--dourado-cheio)) 100%);
+  box-shadow: 0 24px 60px rgba(20, 12, 52, .28); }
+.gov-heroi__txt { position: relative; z-index: 2; }
+.gov-heroi__titulo { margin: 16px 0 10px; font-size: clamp(30px, 4vw, 46px); line-height: 1.06; letter-spacing: -.02em; font-weight: 800; color: var(--texto-inverso); }
+.gov-heroi__sub { margin: 0 0 22px; max-width: 34em; font-size: 16px; line-height: 1.55; color: var(--texto-inverso-2); }
+.gov-heroi__sub b { color: var(--texto-inverso); }
+.gov-heroi__nota { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--texto-inverso-2); }
+.gov-heroi :focus-visible { outline-color: var(--texto-inverso); box-shadow: 0 0 0 4px var(--inversa-2); }
+.gov-heroi__cena { position: relative; align-self: end; height: 300px; display: grid; place-items: end center; }
+.gov-heroi__aura { position: absolute; left: 50%; bottom: 40px; width: 360px; height: 220px; translate: -50% 0; border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--dourado-vivo) 34%, transparent), transparent); filter: blur(6px); }
+.gov-heroi__casa { position: absolute; left: 50%; bottom: 56px; translate: -50% 0; width: min(300px, 78%); height: auto; image-rendering: pixelated; filter: drop-shadow(0 12px 18px rgba(0, 0, 0, .35)); }
+.gov-heroi__conselho { position: relative; display: flex; gap: 18px; align-items: flex-end; margin-bottom: 18px; }
+.gov-heroi__conselho .mundo-fig { height: 84px; width: auto; animation: gov-flutua 3.6s ease-in-out infinite; }
+@keyframes gov-flutua { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.gov-heroi__conselho .mundo-fig:nth-child(even) { animation-delay: -1.8s; }
+.gov-heroi--trancada .gov-heroi__casa, .gov-heroi--trancada .gov-heroi__conselho { filter: grayscale(.5) brightness(.75); }
+.gov-heroi__cadeado { position: absolute; left: 50%; top: 42%; translate: -50% -50%; display: grid; place-items: center; width: 74px; height: 74px; border-radius: 50%;
+  color: var(--dourado-sobre); background: linear-gradient(160deg, var(--dourado-vivo), var(--dourado-cheio)); box-shadow: 0 0 0 8px color-mix(in srgb, var(--dourado-vivo) 22%, transparent), 0 14px 30px rgba(0, 0, 0, .35); }
+.gov-numeros { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 600px; margin: 0; }
+.gov-nav { margin-top: 22px; }
+.gov-secoes { margin-top: 18px; }
+.gov--anima .mundo-revela { transition: opacity .7s ease, translate .7s cubic-bezier(.2, .7, .2, 1); }
+.gov--anima .mundo-revela:not(.is-in) { opacity: 0; translate: 0 26px; }
+.gov-tetos { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.gov-teto { display: grid; grid-template-columns: 32px 180px minmax(0, 1fr) 190px; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.gov-teto__nome { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gov-teto__barra { position: relative; height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.gov-teto__barra i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--teal), var(--sucesso-cheio)); }
+.gov-teto__barra--atencao i { background: linear-gradient(90deg, var(--dourado-cheio), var(--atencao-cheio)); }
+.gov-teto__barra--cheio i { background: var(--perigo-cheio); }
+.gov-teto__barra--livre i { background: linear-gradient(90deg, var(--marca-borda-forte), var(--marca-cheio)); }
+.gov-teto__valor { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.gov-nuvem__rodadas { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; color: var(--muted); }
+.gov-matriz { display: grid; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.gov-matriz__linha { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, 84px); align-items: center; border-top: 1px solid var(--line); }
+.gov-matriz__linha:first-child { border-top: 0; }
+.gov-matriz__linha > span { padding: 10px 12px; font-size: 14px; }
+.gov-matriz__linha > span:not(:first-child) { display: flex; justify-content: center; }
+.gov-matriz__cab { background: var(--panel-2); }
+.gov-matriz__sim { color: var(--sucesso-texto); }
+.gov-matriz__nao { color: var(--muted); }
+.gov-matriz__linha:not(.gov-matriz__cab):hover { background: var(--dourado-suave-2); }
+.gov-compras__paga { display: flex; align-items: center; gap: 6px; margin: 12px 0; }
+.gov-registro { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; gap: 0; }
+.gov-registro__item { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line-suave); }
+.gov-registro__item::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 2px; background: var(--line); z-index: 0; }
+.gov-registro__item:first-child::before { top: 50%; }
+.gov-registro__item:last-child::before { bottom: 50%; }
+.gov-registro__icone { position: relative; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--dourado-vivo); background: linear-gradient(160deg, var(--inversa-2), var(--inversa)); }
+.gov-registro__txt { font-size: 14px; }
+.gov-registro__quando { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gov-previa { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 22px; }
+.gov-previa__item { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-radius: 18px; background: var(--panel); border: 1px dashed var(--borda-forte); color: var(--muted); }
+.gov-previa__item b { flex: 1; color: var(--ink); }
+@media (max-width: 900px) {
+  .gov-heroi { grid-template-columns: 1fr; padding: 30px 22px 6px; min-height: 0; }
+  .gov-heroi__cena { height: 220px; }
+  .gov-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .gov { padding: 12px 12px 40px; }
+  .gov-teto { grid-template-columns: 32px minmax(0, 1fr); }
+  .gov-teto__barra, .gov-teto__valor { grid-column: 2; }
+  .gov-matriz__linha { grid-template-columns: minmax(0, 1fr) repeat(4, 44px); }
+  .gov-matriz__linha > span { padding: 8px 6px; font-size: 13px; }
+  .gov-matriz__cab .badge { font-size: 12px; padding: 1px 4px; }
+}
+@media (prefers-reduced-motion: reduce) { .gov-heroi__conselho .mundo-fig { animation: none; } }
