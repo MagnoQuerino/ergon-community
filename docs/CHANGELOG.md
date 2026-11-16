@@ -1,5 +1,20 @@
 # Novidades
 
+## 1.1.0-rc.30 (pré-versão de teste)
+
+- **Ergon World, opcional.** Em Configurações › Ergon World, "Conectar ao Ergon World" cria a sua conta (ou entra
+  numa existente), com a opção de usar as mesmas credenciais do Ergon. Você liga **um** workspace: só ele recebe o
+  plano, os créditos e a sincronização cifrada. Os outros continuam só neste computador, como sempre. Sem rede, nada
+  trava: só os recursos do World esperam a conexão voltar.
+- **Rodar na nuvem.** Cards do quadro da equipe e rotinas de radar na fila ou em espera vão para a nuvem e continuam
+  com o modelo que o agente já usa (com a sua chave de API) ou, sem chave, no Ergon AI, com um aviso. O resultado volta
+  para o mesmo card. "Trazer para este computador" quando a nuvem termina.
+- **Recuperação automática na nuvem**, ligada por padrão: trabalho que falha lá é investigado e tentado de novo até
+  3 vezes. Ao abrir o Ergon, um resumo diz o que foi concluído, recuperado ou falhou enquanto você esteve fora.
+- **Relatar um problema**, em Ajuda: você vê exatamente o que vai sair antes de enviar; e-mails, chaves e pastas
+  pessoais saem como [removido]; dados técnicos só se você marcar.
+- **Segurança:** o que sai deste computador com o Ergon World está em docs/SEGURANCA.md.
+
 ## 1.1.0-rc.29 (pré-versão de teste)
 
 - **Várias contas por aplicativo.** Ligue dois ou mais e-mails, números de WhatsApp (cada um com o seu pareamento) e
