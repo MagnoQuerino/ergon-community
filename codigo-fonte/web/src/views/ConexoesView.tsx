@@ -1,6 +1,6 @@
 import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
 import { OutroAplicativo } from '../components/OutroAplicativo.tsx';
-import { Fragment, lazy, Suspense, useEffect, useState, type ChangeEvent, type ComponentType } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useState, type ChangeEvent, type ComponentType, type ReactNode } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { escolhaConsciente, linhaDoEstado, nomeEscolhido, previaDaConta, problemaDoTeams, soOSeuCodigo, type ContaDoTeams } from '../lib/teams-app.ts';
@@ -238,7 +238,8 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
         <strong>{i.name}</strong><span className={`badge ${cls}`}>{label}</span>
         {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}
       </header>
-      <p className="muted">{i.about}</p>
+      {/* conectada, o cartão é o resumo (conta, estado, ações); o texto de apresentação fica para antes de conectar */}
+      {i.state !== 'connected' && <p className="muted">{i.about}</p>}
       {i.state === 'connected' && i.sharedFrom && <p className="hint">{tn('conexoes.detalhe.compartilhada', { workspace: <b>{i.sharedFrom}</b> })}</p>}
       {i.state !== 'connected' && i.auth !== 'soon' && <UsarDeOutroWorkspace i={i} reload={reload} />}
       {i.state === 'connected' && i.account && <p>{tn('conexoes.detalhe.conta', { conta: <strong>{i.account}</strong> })}{i.lastSyncAt ? <span className="muted small"> {t('conexoes.detalhe.ultimaLeitura', { quando: fmtDataHora(i.lastSyncAt) })}</span> : null}</p>}
@@ -249,11 +250,20 @@ function Detail({ i, reload, estado, onClose, feature }: { i: Integration; reloa
       {i.auth === 'soon' ? <p className="hint">{i.soon ?? t('conexoes.detalhe.emPreparo')}</p>
         : i.kind === 'whatsapp' ? <WhatsApp i={i} reload={reload} />
         : i.auth === 'token' ? <TokenConnect i={i} reload={reload} autorizar={faltouNoTeste} />
-        : <Sso i={i} reload={reload} faltam={estado.eu?.faltam ?? []} etapas={estado.eu?.etapas ?? []} recarregar={estado.reload} autorizar={faltouNoTeste} />}
+        : <Sso i={i} reload={reload} faltam={estado.eu?.faltam ?? []} autorizar={faltouNoTeste} />}
       {i.auth !== 'soon' && <ContasDoApp i={i} reload={reload} estado={estado} />}
       {passo && <p className="hint">{passo.link ? <ComLinkTarefas texto={passo.texto} /> : passo.texto}</p>}
-      {i.state === 'connected' && <AcoesDaConexao i={i} estado={estado} />}
-      {i.state === 'connected' && <TestarConexao i={i} reload={reload} onFaltou={setFaltouNoTeste} />}
+      {/* o que não é o resumo fica recolhido: o cartão não cresce além da tela (rc.33) */}
+      {i.state === 'connected' && (
+        <div className="conn-secoes">
+          {i.kind === 'microsoft' && i.auth === 'oauth' && !!estado.eu?.etapas?.length && <EtapasMicrosoft etapas={estado.eu.etapas} recarregar={estado.reload} />}
+          <AcoesDaConexao i={i} estado={estado} />
+          <details className="conn-secao">
+            <summary>{t('conexoes.teste.titulo')}</summary>
+            <TestarConexao i={i} reload={reload} onFaltou={setFaltouNoTeste} />
+          </details>
+        </div>
+      )}
     </article>
   );
 }
@@ -321,23 +331,23 @@ function AcoesDaConexao({ i, estado }: { i: Integration; estado: EstadoDe }) {
   const [errSoLeitura, setErrSoLeitura] = useState<string | null>(null);
   const eu = estado.eu;
   // ainda chegando: o título já ocupa o lugar, para nada abaixo pular quando a lista chegar
-  if (!eu) return estado.pronto ? null : <details className="conn-acoes"><summary>{t('conexoes.acoes.titulo')}</summary></details>;
+  if (!eu) return estado.pronto ? null : <details className="conn-acoes conn-secao"><summary>{t('conexoes.acoes.titulo')}</summary></details>;
   const salvar = async (p: Permissoes) => { setErr(null); try { await api.put(`/api/conexoes/${i.kind}/permissoes`, { permissoes: p }); estado.reload(); } catch (e) { setErr(errMsg(e)); } };
   const tipos = Object.keys(RISCO_ROTULO).filter((r) => eu.acoes.some((a) => a.risco === r));
   const soLeitura = async (on: boolean) => { setErrSoLeitura(null); try { await api.put(`/api/conexoes/${i.kind}/so-leitura`, { on }); estado.reload(); } catch (e) { setErrSoLeitura(errMsg(e)); } };
   const opcoes = AJUSTE_ROTULO.map(([v, l]) => <option key={v} value={v}>{t(l)}</option>);
   return (
-    <>
-    {/* um clique: tudo o que escreve nesta conexão fica desligado; desmarcar devolve o ajuste de escrita de antes */}
-    {eu.escreve && (
-      <div className="conn-so-leitura">
-        <label className="check"><input type="checkbox" checked={!!eu.soLeitura} onChange={(e) => void soLeitura(e.target.checked)} /> {t('conexoes.soLeitura.rotulo')}</label>
-        <span className="muted small"> {eu.soLeitura ? t('conexoes.soLeitura.ligada') : t('conexoes.soLeitura.desligada')}</span>
-        {errSoLeitura && <p className="error" role="alert">{errSoLeitura}</p>}
-      </div>
-    )}
-    <details className="conn-acoes">
-      <summary>{t('conexoes.acoes.tituloN', { n: eu.acoes.length })}</summary>
+    // o erro do atalho abre a seção: ele fica junto da caixa, à vista
+    <details className="conn-acoes conn-secao" open={!!errSoLeitura || undefined}>
+      <summary>{t('conexoes.acoes.tituloN', { n: eu.acoes.length })}{eu.escreve && eu.soLeitura && <span className="badge">{t('conexoes.soLeitura.selo')}</span>}</summary>
+      {/* um clique: tudo o que escreve nesta conexão fica desligado; desmarcar devolve o ajuste de escrita de antes */}
+      {eu.escreve && (
+        <div className="conn-so-leitura">
+          <label className="check"><input type="checkbox" checked={!!eu.soLeitura} onChange={(e) => void soLeitura(e.target.checked)} /> {t('conexoes.soLeitura.rotulo')}</label>
+          <span className="muted small"> {eu.soLeitura ? t('conexoes.soLeitura.ligada') : t('conexoes.soLeitura.desligada')}</span>
+          {errSoLeitura && <p className="error" role="alert">{errSoLeitura}</p>}
+        </div>
+      )}
       {/* o envio dos quadros ligados confere o mesmo ajuste: só o desligado o barra */}
       {i.tasks && <p className="hint">{t('conexoes.acoes.quadrosLigados')}</p>}
       <div className="conn-acoes__tipos">
@@ -357,7 +367,6 @@ function AcoesDaConexao({ i, estado }: { i: Integration; estado: EstadoDe }) {
       </ul>
       {err && <p className="error">{err}</p>}
     </details>
-    </>
   );
 }
 
@@ -590,22 +599,19 @@ function CopiarTexto({ rotulo, texto }: { rotulo: string; texto: string }) {
 
 /** Textos de cada login com a conta (o mecanismo é um só no servidor: sso.ts): as chaves do dicionário. */
 type Provedor = 'microsoft' | 'google';
-const SSO_TEXT: Record<string, { button: `conexoes.sso.${Provedor}.botao`; what: `conexoes.sso.${Provedor}.oQue`; connected: `conexoes.sso.${Provedor}.conectado` }> = {
-  microsoft: { button: 'conexoes.sso.microsoft.botao', what: 'conexoes.sso.microsoft.oQue', connected: 'conexoes.sso.microsoft.conectado' },
-  google: { button: 'conexoes.sso.google.botao', what: 'conexoes.sso.google.oQue', connected: 'conexoes.sso.google.conectado' },
+const SSO_TEXT: Record<string, { button: `conexoes.sso.${Provedor}.botao`; what: `conexoes.sso.${Provedor}.oQue` }> = {
+  microsoft: { button: 'conexoes.sso.microsoft.botao', what: 'conexoes.sso.microsoft.oQue' },
+  google: { button: 'conexoes.sso.google.botao', what: 'conexoes.sso.google.oQue' },
 };
 
-function Sso({ i, reload, faltam, etapas, recarregar, autorizar }: { i: Integration; reload: () => void; faltam: string[]; etapas: EtapaConsentimento[]; recarregar: () => void; autorizar: boolean }) {
+function Sso({ i, reload, faltam, autorizar }: { i: Integration; reload: () => void; faltam: string[]; autorizar: boolean }) {
   const t = useT();
   const [err, setErr] = useState<string | null>(null);
   const chaves = SSO_TEXT[i.kind];
-  const txt = chaves ? { button: t(chaves.button), what: t(chaves.what), connected: t(chaves.connected) } : { button: t('conexoes.sso.entrarCom', { nome: i.name }), what: '', connected: '' };
+  const txt = chaves ? { button: t(chaves.button), what: t(chaves.what) } : { button: t('conexoes.sso.entrarCom', { nome: i.name }), what: '' };
   const entrar = async () => { setErr(null); try { const r = await api.post<{ url: string }>(`/api/integrations/${i.kind}/start`); location.href = r.url; } catch (e) { setErr(errMsg(e)); } };
   if (i.state === 'connected') return (
     <>
-      {txt.connected && <p className="hint">{txt.connected}</p>}
-      {i.kind === 'microsoft' && etapas.length > 0 && <EtapasMicrosoft etapas={etapas} recarregar={recarregar} />}
-      <p><button className="btn btn--sm btn--ghost" onClick={() => void entrar()}>{t('conexoes.acao.outraConta')}</button></p>
       {/* faltou permissão (conta antiga, ou o serviço recusou uma ação): o botão que o agente e o teste apontam */}
       {(faltam.length > 0 || !!i.error || autorizar) && (
         <div className="conn-reautorizar">
@@ -613,8 +619,11 @@ function Sso({ i, reload, faltam, etapas, recarregar, autorizar }: { i: Integrat
           <button className="btn btn--primary" onClick={() => void entrar()}>{t('conexoes.acao.autorizarDeNovo')}</button>
         </div>
       )}
+      <div className="row row--wrap conn-principais">
+        <button className="btn btn--sm btn--ghost" onClick={() => void entrar()}>{t('conexoes.acao.outraConta')}</button>
+        <Disconnect i={i} reload={reload} />
+      </div>
       {err && <p className="error">{err}</p>}
-      <Disconnect i={i} reload={reload} />
     </>
   );
   if (!i.ready) return <p className="hint">{t('conexoes.sso.naoRegistrado', { lugar: i.setup?.place ?? t('conexoes.sso.noProvedor'), doc: i.setup?.doc ?? t('conexoes.sso.aDocumentacao'), botao: txt.button })}</p>;
@@ -626,7 +635,7 @@ function Sso({ i, reload, faltam, etapas, recarregar, autorizar }: { i: Integrat
         <h4>{t('conexoes.admin.empresaPrecisa')}</h4>
         <p className="small">{t('conexoes.admin.empresaTexto')}</p>
         {/* o primeiro acesso pede tudo de uma vez: a mensagem ao administrador diz tudo o que o link pede */}
-        <PedirAoAdministrador link={i.adminBase.link} etapa="base" depois={t('conexoes.admin.jaAprovaramEntrar')} />
+        <PedirAoAdministrador link={i.adminBase.link} etapa="base" depois={t('conexoes.admin.jaAprovaramEntrar')} aberto />
         <p className="row row--wrap"><button className="btn btn--primary" onClick={() => void comecar()}>{t('conexoes.admin.jaAprovaramEntrar')}</button></p>
       </div>
       {err && <p className="error">{err}</p>}
@@ -661,12 +670,14 @@ function EtapasMicrosoft({ etapas, recarregar }: { etapas: EtapaConsentimento[];
     // a etapa base é o login inteiro (escolhe a conta e segue sozinho pelas outras)
     try { const r = await api.post<{ url: string }>('/api/integrations/microsoft/start', etapa === 'base' ? {} : { etapa }); location.href = r.url; } catch (e) { setErr(errMsg(e)); recarregar(); }
   };
+  const liberadas = etapas.filter((e) => e.estado === 'ok').length;
+  const falta = etapas.some((e) => e.estado !== 'ok' && !e.opcional);
   return (
-    <div className="conn-etapas conn-reautorizar">
-      <h4>{t('conexoes.etapas.titulo')}</h4>
+    <details className="conn-secao conn-etapas" open={falta || !!err || undefined}>
+      <summary>{t('conexoes.etapas.titulo')} <span className={`badge ${falta ? 'badge--warn' : 'badge--ok'}`}>{t('conexoes.etapas.resumo', { n: liberadas, total: etapas.length })}</span></summary>
       <ul className="conn-teste__lista conn-etapas__lista">{etapas.map((e) => <EtapaLinha key={e.id} e={e} pedir={() => void pedir(e.id)} />)}</ul>
       {err && <p className="error">{err}</p>}
-    </div>
+    </details>
   );
 }
 
@@ -691,9 +702,10 @@ function EtapaLinha({ e, pedir }: { e: EtapaConsentimento; pedir: () => void }) 
   // envia é a pessoa. Os canais são opcionais e o login segue até eles sozinho: voltar sem eles é esperado, nada em vermelho
   if (e.administrador && e.link && (e.estado === 'bloqueado' || e.opcional)) return (
     <li><span className={`badge ${e.estado === 'bloqueado' && !e.opcional ? 'badge--err' : ''}`}>{t('conexoes.etapa.precisaAdmin')}</span> {titulo}
-      <p className="small">{e.opcional ? t('conexoes.etapa.opcionalCanais') : t('conexoes.etapa.precisaAprovacao')}{motivo ? <span className="muted"> {motivo}</span> : null}</p>
-      <PedirAoAdministrador link={e.link} etapa={e.id} />
-      <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>{t('conexoes.admin.jaAprovaramConectar')}</button></p>
+      {motivo && <p className="muted small">{motivo}</p>}
+      <PedirAoAdministrador link={e.link} etapa={e.id} aberto={!e.opcional}>
+        <p className="row row--wrap"><button className="btn btn--sm btn--primary" onClick={pedir}>{t('conexoes.admin.jaAprovaramConectar')}</button></p>
+      </PedirAoAdministrador>
     </li>
   );
   return (
@@ -704,7 +716,7 @@ function EtapaLinha({ e, pedir }: { e: EtapaConsentimento; pedir: () => void }) 
         {e.administrador && <span className="muted small">{t('conexoes.etapa.costumaAdmin')}</span>}
       </p>
       {/* quem já sabe que a empresa exige o administrador vai direto ao pedido, sem passar pela página da Microsoft */}
-      {e.administrador && e.link && <details><summary className="small">{t('conexoes.admin.pedir')}</summary><PedirAoAdministrador link={e.link} etapa={e.id} /></details>}
+      {e.administrador && e.link && <PedirAoAdministrador link={e.link} etapa={e.id} />}
     </li>
   );
 }
@@ -714,16 +726,18 @@ function EtapaLinha({ e, pedir }: { e: EtapaConsentimento; pedir: () => void }) 
  * copia e envia ela mesma; nada sai daqui sozinho. Quem aprova abre noutro computador, e a página final tenta voltar para este:
  * lá ela pode mostrar um erro, e isso é esperado.
  */
-function PedirAoAdministrador({ link, etapa, depois }: { link: string; etapa: EtapaConsentimento['id']; depois?: string }) {
+function PedirAoAdministrador({ link, etapa, depois, aberto, children }: { link: string; etapa: EtapaConsentimento['id']; depois?: string; aberto?: boolean; children?: ReactNode }) {
   const t = useT();
   const oQue = oQuePedirAoAdministrador(etapa);
   const mensagem = t('conexoes.admin.mensagem', { oQue, link });
+  // recolhido quando é opcional (os canais do Teams): o pedido fica a um clique, sem ocupar o cartão
   return (
-    <div className="conn-admin conn-reautorizar">
-      <p className="small"><b>{t('conexoes.admin.pedir')}</b></p>
+    <details className="conn-admin conn-secao conn-secao--sub" open={aberto || undefined}>
+      <summary>{t('conexoes.admin.pedir')}</summary>
       <p className="hint">{t('conexoes.admin.instrucoes', { depois: depois ?? t('conexoes.admin.jaAprovaramConectar') })}</p>
       <p className="row row--wrap"><CopiarTexto rotulo={t('conexoes.admin.copiarLink')} texto={link} /><CopiarTexto rotulo={t('conexoes.admin.copiarMensagem')} texto={mensagem} /></p>
-    </div>
+      {children}
+    </details>
   );
 }
 

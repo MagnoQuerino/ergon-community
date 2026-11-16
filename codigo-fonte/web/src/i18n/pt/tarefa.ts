@@ -20,6 +20,8 @@ const tarefa = {
   // ——— o topo do card ———
   'carregando': 'Carregando a tarefa',
   'fechar': 'Fechar (Esc)',
+  'fecharVoltar': 'Fechar e voltar à lista (Esc)',
+  'voltarLista': 'Voltar a Aguardando você',
   'salvo': 'Salvo',
   'maisAcoes': 'Mais ações',
   'renomear': 'Dar outro nome ao card',

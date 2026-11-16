@@ -81,7 +81,7 @@ import type { CardHit, PaletteItem } from './components/CommandPalette.tsx';
 import { ConversationDock, ConversationsDialog } from './components/ConversationDock.tsx';
 import { WorkspaceSwitcher } from './components/Workspaces.tsx';
 import { AccountMenu } from './components/AccountMenu.tsx';
-import { onOpenCard, onOpenConversation, onOpenDecisions } from './lib/open.ts';
+import { onOpenCard, onOpenConversation, onOpenDecisions, type OrigemDoCard } from './lib/open.ts';
 import { clearRecents, pushRecent, removeRecent, type Recent } from './lib/recents.ts';
 
 type Auth = { state: 'loading' } | { state: 'out'; st: AuthState } | { state: 'in'; me: Me };
@@ -252,8 +252,10 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const [selected, setSelected] = useState<string | null>(null);
   // card aberto por cima de qualquer tela (de "aguardando você", de uma conversa) e o diálogo das conversas
   const [card, setCard] = useState<string | null>(null);
+  // de onde o card abriu: de "Aguardando você", a lista fica embaixo (escondida) e o card ganha "Voltar" — uma pilha
+  const [cardDe, setCardDe] = useState<OrigemDoCard | null>(null);
   const [convs, setConvs] = useState<{ agentId: string | null; conversationId: string | null } | null>(null);
-  useEffect(() => onOpenCard((id) => { setDecisions(false); setCard(id); }), []);
+  useEffect(() => onOpenCard((id, de) => { if (de !== 'decisoes') setDecisions(false); setCardDe(de); setCard(id); }), []);
   useEffect(() => onOpenConversation((agentId, conversationId) => { setDecisions(false); setWin(null); setConvs({ agentId, conversationId }); }), []);
   useEffect(() => onOpenDecisions(() => { setCard(null); setDecisions(true); }), []);
   // primeiro acesso (perguntas de boas-vindas) ou refazer pela Ajuda; tour inicial; objetivo contado nas perguntas
@@ -508,8 +510,11 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       {palette && (
         <CommandPalette base={paletteBase} onAgent={(a) => openAgent(a.id, 'conversa', null, null, a)} onCard={openCard} onRoutine={openRoutine} onRecent={openRecent} onClose={() => setPalette(false)} />
       )}
-      {decisions && <DecisionsPanel onClose={() => setDecisions(false)} onOpenAgent={(...a) => { setDecisions(false); openAgent(...a); }} onGo={(v) => { setDecisions(false); setView(v); }} />}
-      {card && <TaskDetail key={card} taskId={card} mode="auto" over onClose={() => setCard(null)} onAskCoordinator={(t) => { setCard(null); setConvs(null); askCoordinator(t); }} />}
+      {decisions && <DecisionsPanel sob={!!card && cardDe === 'decisoes'} onClose={() => setDecisions(false)} onOpenAgent={(...a) => { setDecisions(false); openAgent(...a); }} onGo={(v) => { setDecisions(false); setView(v); }} />}
+      {/* aberto de "Aguardando você": Voltar, o X e o Esc voltam à lista; o clique fora fecha os dois */}
+      {card && <TaskDetail key={card} taskId={card} mode="auto" over onClose={() => { setCard(null); if (cardDe === 'decisoes') setDecisions(false); setCardDe(null); }}
+        onBack={cardDe === 'decisoes' && decisions ? () => { setCard(null); setCardDe(null); } : undefined}
+        onAskCoordinator={(t) => { setCard(null); setCardDe(null); setConvs(null); askCoordinator(t); }} />}
       </Suspense>
       <ConversationDock coordinator={coordinator} hidden={!!convs || !!win || focus || tour || !!onb} />
 

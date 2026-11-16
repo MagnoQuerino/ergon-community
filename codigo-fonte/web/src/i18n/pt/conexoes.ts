@@ -72,6 +72,7 @@ const conexoes = {
   // ——— testar a conexão ———
   'teste.testando': 'Testando…',
   'teste.testar': 'Testar conexão',
+  'teste.titulo': 'Testar a conexão',
   'teste.criarTarefa': 'Criar a tarefa de teste',
   'teste.testarEscrita': 'Testar escrita',
   'teste.soLe': 'Aqui o teste só lê; a escrita aparece no primeiro uso.',
@@ -98,8 +99,9 @@ const conexoes = {
   'acoes.quadrosLigados': 'Desligar uma ação também impede que o que você faz nos quadros ligados chegue ao aplicativo. "Sempre pedir confirmação" vale só para os agentes.',
   'acoes.ajusteDe': 'Ajuste de {acao}',
   'soLeitura.rotulo': 'Só leitura',
-  'soLeitura.ligada': 'Os agentes só consultam aqui: nada é criado, mudado, enviado ou apagado. Desmarcar devolve o ajuste de antes.',
-  'soLeitura.desligada': 'Marque para os agentes só consultarem aqui, sem criar, mudar, enviar ou apagar nada.',
+  'soLeitura.selo': 'só leitura',
+  'soLeitura.ligada': 'Os agentes só consultam aqui. Desmarcar devolve o ajuste de antes.',
+  'soLeitura.desligada': 'Os agentes só consultam, sem criar, mudar, enviar ou apagar.',
 
   // ——— a conta de outro workspace ———
   'reusar.texto': 'Já conectada em outro workspace seu. Use a mesma conta aqui, sem conectar de novo:',
@@ -165,10 +167,8 @@ const conexoes = {
   // ——— entrar com a conta (Microsoft e Google) ———
   'sso.microsoft.botao': 'Entrar com a Microsoft',
   'sso.microsoft.oQue': 'Você entra na página da Microsoft e autoriza o aplicativo Ergon a usar, em seu nome: tarefas (Planner e To Do), e-mail, agenda, arquivos e, em conta de trabalho, o Teams. Os agentes consultam e agem quando você pede; o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões. A autorização vem em partes: primeiro enviar e-mail, criar arquivos e o Teams, que qualquer conta autoriza; depois a leitura (e-mail, agenda, arquivos, tarefas), que numa empresa costuma precisar da aprovação do administrador. Se precisar, a tela mostra o pedido pronto para você enviar a ele.',
-  'sso.microsoft.conectado': 'Tarefas: escolha um plano do Planner ou uma lista do To Do em Tarefas (depois de liberada a leitura). Em conta de trabalho, os agentes também mandam mensagens no Teams e, com a leitura liberada, leem as conversas.',
   'sso.google.botao': 'Entrar com o Google',
   'sso.google.oQue': 'Você entra na página do Google e autoriza o aplicativo Ergon a usar, em seu nome: Google Tasks, Agenda, Gmail e Drive. Os agentes consultam e agem quando você pede; o que não partiu de você pede a sua confirmação, a menos que você ligue "Liberar tudo" em Conexões.',
-  'sso.google.conectado': 'Tarefas: escolha uma lista do Google Tasks em Tarefas. Ela fica ligada nos dois sentidos: dar check, mover ou editar aqui muda lá.',
   'sso.entrarCom': 'Entrar com {nome}',
   'sso.antesDasAcoes': 'Esta conta foi conectada antes de os agentes poderem agir nela. Autorize de novo para liberar as ações novas (a conexão atual continua funcionando enquanto isso).',
   'sso.naoRegistrado': 'Para entrar com a conta, o aplicativo Ergon precisa estar registrado {lugar} (passo único de quem instala o Ergon; veja {doc}). Depois, é só clicar em "{botao}".',
@@ -182,12 +182,13 @@ const conexoes = {
   'admin.jaAprovaramConectar': 'Já aprovaram? Conectar de novo',
   'admin.pedir': 'Pedir ao administrador',
   'admin.mensagem': 'Olá! Uso o Ergon com a minha conta Microsoft da empresa e preciso que você aprove o aplicativo Ergon para {oQue} em meu nome. É só abrir este link com a sua conta de administrador e aceitar: {link}\nNo fim, a página pode mostrar um erro de conexão: é esperado, porque ela tenta voltar para o meu computador. Obrigado!',
-  'admin.instrucoes': 'Copie o link e envie você mesmo a quem administra a conta Microsoft da sua empresa: nada sai daqui sozinho. A pessoa abre o link, entra com a conta de administrador e aprova. No fim, a página pode mostrar um erro de "não foi possível acessar": é esperado, porque ela tenta voltar para este computador. Depois que aprovarem, clique em "{depois}".',
+  'admin.instrucoes': 'Copie o link e envie a quem administra a conta Microsoft da empresa: nada sai daqui sozinho. Depois da aprovação, clique em "{depois}".',
   'admin.copiarLink': 'Copiar o link do pedido',
   'admin.copiarMensagem': 'Copiar uma mensagem pronta',
 
   // ——— as etapas da Microsoft ———
   'etapas.titulo': 'O que esta conta já liberou',
+  'etapas.resumo': '{n} de {total}',
   'etapa.base.titulo': 'Enviar e-mail e criar arquivos',
   'etapa.base.oQue': 'enviar e-mail em seu nome e criar arquivos no OneDrive',
   'etapa.trabalho.titulo': 'Teams: conversas e mensagens',
@@ -204,8 +205,6 @@ const conexoes = {
   'etapa.paginaAberta': 'A página da Microsoft está aberta. Se você a fechou, abra de novo.',
   'etapa.abrirDeNovo': 'Abrir de novo',
   'etapa.precisaAdmin': 'precisa do administrador',
-  'etapa.opcionalCanais': 'Opcional. Ler os canais sempre precisa da aprovação do administrador da empresa.',
-  'etapa.precisaAprovacao': 'Precisa da aprovação do administrador da empresa.',
   'etapa.naoLiberado': 'não liberado',
   'etapa.faltaLiberar': 'falta liberar',
   'etapa.tentarDeNovo': 'Tentar de novo',

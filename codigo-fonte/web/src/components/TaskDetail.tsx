@@ -3,6 +3,7 @@ import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { openConversation } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
+import type { CloseWhy } from '../lib/surface-stack.ts';
 import { SOURCE_LABEL, type Column, type Need } from '../lib/types.ts';
 import { linhaDoHistorico, tomDe, type ChaveSimples, type LogRow } from '../lib/tarefa-tela.ts';
 import { DICA_NOME_PROVISORIO, motivoDaFalha } from '../lib/textos-tela.ts';
@@ -173,9 +174,10 @@ function Pedido({ texto }: { texto: string }) {
  * 'user': suas tarefas locais — edita e envia à equipe. 'mirror': ligada a um aplicativo — o que muda aqui reflete lá.
  */
 /** over: aberto por cima de qualquer tela (de uma conversa, de "aguardando você"): fica acima das janelas */
-export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source: askedSource, onClose, onAskCoordinator, over }: {
+export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source: askedSource, onClose, onBack, onAskCoordinator, over }: {
   taskId: string; columns?: Column[]; mode: 'team' | 'user' | 'mirror' | 'auto'; source?: string | null;
-  onClose: () => void; onAskCoordinator?: (text: string) => void; over?: boolean;
+  /** onBack: o card foi aberto de uma lista (Aguardando você): Voltar, o X e o Esc voltam a ela; o clique fora fecha tudo (onClose) */
+  onClose: () => void; onBack?: () => void; onAskCoordinator?: (text: string) => void; over?: boolean;
 }) {
   const t = useT();
   const d = useResource<Detail>(`/api/tasks/${taskId}`, ['tasks.changed', 'runs.changed', 'proposals.changed']);
@@ -241,14 +243,19 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
     return queue.current;
   };
   /** Fechar (X, Esc, clique fora): grava o que estiver pendente antes; se não gravar, o card fica aberto com o erro. */
-  const requestClose = async () => {
+  // aberto de uma lista: o X e o Esc voltam a ela (a pilha); o clique fora fecha tudo
+  const requestClose = async (why?: CloseWhy) => {
     const id = taskId;
     if (!(await saveText())) return;
-    if (idRef.current === id) onClose(); // enquanto gravava, outro card foi aberto: esse fica
+    if (idRef.current !== id) return; // enquanto gravava, outro card foi aberto: esse fica
+    if (onBack && why !== 'outside') onBack(); else onClose();
   };
-  useSurface(ref, { onClose: () => void requestClose(), outside: true, passThrough: true });
+  useSurface(ref, { onClose: (why) => void requestClose(why), outside: true, passThrough: true });
+  /** "← Voltar" no topo, quando o card veio de uma lista */
+  const voltar = onBack ? <button type="button" className="btn btn--sm btn--ghost tdet__voltar" onClick={() => void requestClose('button')} aria-label={t('tarefa.voltarLista')} title={t('tarefa.voltarLista')}><Icon name="chevron-left" size={15} /> {t('tarefa.voltar')}</button> : null;
+  const fechar = <button className="icon-btn" onClick={() => void requestClose('button')} aria-label={onBack ? t('tarefa.fecharVoltar') : t('tarefa.fechar')} title={onBack ? t('tarefa.fecharVoltar') : t('tarefa.fechar')}><Icon name="x" /></button>;
 
-  if (!d.data) return <aside ref={ref} className={`drawer ${over ? 'drawer--over' : ''}`} role="dialog" aria-label={t('tarefa.carregando')}><Loading error={d.error} /></aside>;
+  if (!d.data) return <aside ref={ref} className={`drawer ${over ? 'drawer--over' : ''}`} role="dialog" aria-label={t('tarefa.carregando')}>{onBack && <header className="drawer__head">{voltar}{fechar}</header>}<Loading error={d.error} /></aside>;
   const data = d.data;
   const tk = data.task;
   // ligada a um aplicativo: o que você muda aqui vai para lá
@@ -494,10 +501,11 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
       {editable ? (
         <>
           <header className="drawer__head">
+            {voltar}
             <span className="muted" id={`task-title-${tk.id}`}>{t('tarefa.editavel.titulo', { numero: tk.number })}</span>
             <span className="badge">{mode === 'mirror' ? (SOURCE_LABEL[source ?? ''] ?? t('tarefa.origem.mirror')) : origemDoCard}</span>
             <span className="drawer__saved" role="status">{savedNow ? <><Icon name="check" size={12} /> {t('tarefa.salvo')}</> : ''}</span>
-            <button className="icon-btn" onClick={() => void requestClose()} aria-label={t('tarefa.fechar')} title={t('tarefa.fechar')}><Icon name="x" /></button>
+            {fechar}
           </header>
           <label className="field">{t('tarefa.editavel.campoTitulo')}<input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => void saveText()} maxLength={200} /></label>
           {cortada ? (
@@ -541,6 +549,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
       ) : (
         <>
           {/* 1. título e número */}
+          {voltar && <div className="tdet__nav">{voltar}</div>}
           <header className="tdet__head">
             <div className="tdet__titlebox">
               <span className="tdet__num">#{tk.number}</span>
@@ -557,10 +566,11 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
                   <button type="button" className="icon-btn" aria-label={t('tarefa.renomear')} title={t('tarefa.renomear')} onClick={() => setNaming(tk.title)}><Icon name="edit" size={15} /></button>
                 )}</h2>
               )}
+              {/* a dica fica embaixo do título, na mesma coluna: ao lado, ela tomava a largura e o título virava uma letra por linha */}
+              {mode === 'team' && naming === null && tk.title_source === 'provisorio' && <p className="hint tdet__hint">{DICA_NOME_PROVISORIO}</p>}
             </div>
-            {mode === 'team' && naming === null && tk.title_source === 'provisorio' && <p className="hint tdet__hint">{DICA_NOME_PROVISORIO}</p>}
             {mode === 'team' && <MaisAcoes items={menu} />}
-            <button className="icon-btn" onClick={() => void requestClose()} aria-label={t('tarefa.fechar')} title={t('tarefa.fechar')}><Icon name="x" /></button>
+            {fechar}
           </header>
           {/* 2. a situação em uma palavra, com cor */}
           <div className="tdet__status">

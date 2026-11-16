@@ -661,6 +661,12 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 .topbar button.chip--btn { cursor: pointer; font: inherit; font-size: 13px; }
 .topbar button.chip--btn:hover { background: var(--inversa-ativo); }
 .dec-panel { width: min(480px, 100%); z-index: 15; }
+/* um card aberto da lista está por cima: a lista fica guardada (a rolagem e o que foi digitado) e volta com "Voltar" */
+.dec-panel--sob { visibility: hidden; }
+/* palavras longas (links, e-mails) nos painéis laterais quebram em vez de empurrar a largura. break-word, não anywhere:
+   anywhere também encolhe a largura mínima e, num item flexível sem base, deixa o texto uma letra por linha */
+.drawer { overflow-wrap: break-word; }
+.drawer :is(.dec-card, .dec-card__txt, .dec-card__link, .tlog__t) { min-width: 0; }
 .dec-panel .drawer__title { margin: 0; }
 .dec-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 8px 0; background: var(--panel); }
 .dec-card--routine { border-left: 4px solid var(--gold); background: var(--dourado-suave-2); }
@@ -1967,10 +1973,17 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .custo-linha .hint { margin: 4px 0 0; }
 
 /* ---- Detalhes da tarefa: bateu o olho, decidiu (TaskDetail.tsx) ---- */
-.tdet__head { display: flex; align-items: flex-start; gap: 4px; }
-.tdet__titlebox { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.tdet__head { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+/* o título fica com a largura que sobra (base 0, cresce); os botões ao lado não encolhem. Sem isto, um vizinho de texto
+   longo tomava a linha e o título virava uma coluna de uma letra (rc.33) */
+.tdet__titlebox { flex: 1 1 0; min-width: min(12rem, 100%); display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.tdet__head > :not(.tdet__titlebox) { flex: none; }
 .tdet__num { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tdet__title { margin: 0; font-size: 19px; line-height: 1.25; overflow-wrap: anywhere; }
+.tdet__title { margin: 0; font-size: 19px; line-height: 1.25; min-width: 0; overflow-wrap: anywhere; }
+.tdet__hint { margin: 2px 0 0; min-width: 0; overflow-wrap: anywhere; }
+/* a pilha do painel: "← Voltar" acima do título, quando o card veio de "Aguardando você" */
+.tdet__nav { display: flex; margin: -4px 0 6px -6px; }
+.tdet__voltar { gap: 4px; }
 .tdet__status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 8px; }
 .tdet__sit { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; padding: 3px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
 .tdet__sit::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
@@ -2070,7 +2083,7 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .step__txt { min-width: 0; overflow-wrap: anywhere; }
 .tdet__clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .tdet__pedido .drawer__desc { font-size: 13.5px; color: var(--muted); }
-.tlog { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 2px; font-size: 13px; }
+.tlog { list-style: none; padding: 0; margin: 6px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; font-size: 13px; }
 .tlog__item { padding: 4px 0; border-bottom: 1px dashed color-mix(in srgb, var(--line) 70%, transparent); }
 .tlog__item:last-child { border-bottom: 0; }
 .tlog__row { display: flex; align-items: baseline; gap: 8px; }
@@ -3006,3 +3019,38 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
   .gov-matriz__cab .badge { font-size: 12px; padding: 1px 4px; }
 }
 @media (prefers-reduced-motion: reduce) { .gov-heroi__conselho .mundo-fig { animation: none; } }
+
+/* ---------- Limites de layout (rc.33): nenhum cartão esticado, em nenhuma tela ----------
+   1. colunas de texto com ~80 caracteres no máximo (só o texto corrido; fileiras de botões e grades não contam);
+   2. grades de cartões com minmax() e auto-fit: as colunas vazias somem e cada cartão tem uma largura de ler;
+   3. cartão longo recolhe o que é secundário (.secao-recolhida, <details>); 4. rolagem interna só em último caso
+   (.rolagem-interna). A letra nunca fica abaixo de 12 px. O teste web/src/lib/layout.test.ts confere estas regras, e
+   web/e2e/layout.mjs mede os cartões numa janela de 1920 px. */
+:root { --texto-max: 80ch; --cartao-min: 320px; --cartao-max: 760px; --cartao-rolagem: min(60vh, 520px); }
+small { font-size: max(12px, .83em); }
+:where(.page) :where(p, li:not([class]), dd, blockquote, .hint, .muted:not(span)) { max-width: var(--texto-max); }
+:where(.page) :where(.row, .card-acts, .conn-tools, .tabs, .feature-grid, .grade-cartoes) { max-width: none; }
+.grade-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(var(--cartao-min), 100%), 1fr)); gap: 12px; align-items: start; }
+.grade-cartoes > * { min-width: 0; max-width: var(--cartao-max); }
+/* Microsoft 365 e Google: os dois ocupam a linha (sem a terceira coluna vazia), cada um com a sua altura */
+.feature-grid { grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); align-items: start; }
+.feature-grid > * { min-width: 0; }
+/* a seção recolhida de um cartão: o título é a linha que abre, com a seta e o resumo (um selo) à direita */
+:is(.secao-recolhida, .conn-secao) { border-top: 1px solid var(--line); padding: 2px 0; margin: 0; }
+:is(.secao-recolhida, .conn-secao) > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 13px; font-weight: 600; list-style: none; }
+:is(.secao-recolhida, .conn-secao) > summary::-webkit-details-marker { display: none; }
+:is(.secao-recolhida, .conn-secao) > summary::before { content: ''; flex: none; width: 7px; height: 7px; margin: 0 3px 0 2px; border: solid currentColor; border-width: 0 1.8px 1.8px 0; transform: rotate(-45deg); transition: transform .15s ease; color: var(--muted); }
+:is(.secao-recolhida, .conn-secao)[open] > summary::before { transform: rotate(45deg); }
+:is(.secao-recolhida, .conn-secao) > summary .badge { margin-left: auto; font-weight: 500; }
+:is(.secao-recolhida, .conn-secao)[open] { padding-bottom: 10px; }
+.rolagem-interna, .conn-acoes__lista { max-height: var(--cartao-rolagem); overflow-y: auto; }
+.conn-secoes { margin-top: 12px; border-bottom: 1px solid var(--line); }
+.conn-secao.conn-acoes, .conn-secao.conn-etapas { margin: 0; }
+.conn-secao--sub { border-top: 0; margin-top: 4px; }
+.conn-secao--sub > summary { min-height: 30px; font-size: 12px; }
+.conn-principais { margin: 8px 0 0; gap: 8px; }
+.conn-principais > .confirm { flex-basis: 100%; }
+.conn-acoes__lista { padding-right: 4px; }
+.conn-etapas__lista > li { padding: 4px 0; }
+/* cabeçalho dos cartões em destaque: o nome junto do ícone; só o selo vai para a direita (sem selo, o título não salta) */
+.conn.feature > header { justify-content: flex-start; }

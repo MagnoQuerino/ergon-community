@@ -264,10 +264,11 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.match(codigo, /\/> \{t\('conexoes\.soLeitura\.rotulo'\)\}<\/label>/, 'o atalho é uma caixa de marcar, nunca um botão apagado');
     assert.match(tela, /'soLeitura\.rotulo': 'Só leitura'/);
     assert.match(tela, /Reconectar do novo jeito/);
-    // o erro do atalho aparece junto da caixa, e não dentro da lista que vem fechada
-    const caixa = codigo.indexOf("/> {t('conexoes.soLeitura.rotulo')}</label>"); const lista = codigo.indexOf('<details className="conn-acoes">', caixa);
+    // rc.33: a caixa fica na seção recolhida das ações; o erro aparece junto dela, e a seção abre sozinha com o erro
+    const caixa = codigo.indexOf("/> {t('conexoes.soLeitura.rotulo')}</label>"); const lista = codigo.indexOf('<ul className="conn-acoes__lista">', caixa);
     const erroDoAtalho = codigo.indexOf('{errSoLeitura && <p className="error"', caixa);
-    assert.ok(erroDoAtalho > caixa && erroDoAtalho < lista, 'o erro do "Só leitura" fica fora da lista fechada');
+    assert.ok(erroDoAtalho > caixa && erroDoAtalho < lista, 'o erro do "Só leitura" fica junto da caixa, antes da lista');
+    assert.match(codigo, /<details className="conn-acoes conn-secao" open=\{!!errSoLeitura \|\| undefined\}>/, 'com o erro, a seção abre');
     assert.match(tela, /api\.put\(`\/api\/conexoes\/\$\{i\.kind\}\/so-leitura`, \{ on \}\); estado\.reload\(\); \} catch \(e\) \{ setErrSoLeitura\(errMsg\(e\)\)/);
   });
 

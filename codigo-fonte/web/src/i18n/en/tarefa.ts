@@ -21,6 +21,8 @@ const tarefa: Traducao<typeof pt> = {
   // ——— the top of the card ———
   'carregando': 'Loading the task',
   'fechar': 'Close (Esc)',
+  'fecharVoltar': 'Close and go back to the list (Esc)',
+  'voltarLista': 'Back to Waiting for you',
   'salvo': 'Saved',
   'maisAcoes': 'More actions',
   'renomear': 'Rename the card',

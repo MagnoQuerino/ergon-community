@@ -73,6 +73,7 @@ const conexoes: Traducao<typeof pt> = {
   // ——— testar a conexão ———
   'teste.testando': 'Testing…',
   'teste.testar': 'Test connection',
+  'teste.titulo': 'Test the connection',
   'teste.criarTarefa': 'Create the test task',
   'teste.testarEscrita': 'Test writing',
   'teste.soLe': 'Here the test only reads; writing shows up on first use.',
@@ -99,8 +100,9 @@ const conexoes: Traducao<typeof pt> = {
   'acoes.quadrosLigados': 'Turning an action off also stops what you do on synced boards from reaching the app. "Always ask for confirmation" applies to the agents only.',
   'acoes.ajusteDe': 'Setting for {acao}',
   'soLeitura.rotulo': 'Read only',
-  'soLeitura.ligada': 'The agents only look things up here: nothing is created, changed, sent or deleted. Unchecking restores your previous setting.',
-  'soLeitura.desligada': 'Check this so the agents only look things up here, without creating, changing, sending or deleting anything.',
+  'soLeitura.selo': 'read only',
+  'soLeitura.ligada': 'The agents only look things up here. Unchecking restores your previous setting.',
+  'soLeitura.desligada': 'The agents only look things up, without creating, changing, sending or deleting.',
 
   // ——— a conta de outro workspace ———
   'reusar.texto': 'Already connected in another of your workspaces. Use the same account here, without connecting again:',
@@ -166,10 +168,8 @@ const conexoes: Traducao<typeof pt> = {
   // ——— entrar com a conta (Microsoft e Google) ———
   'sso.microsoft.botao': 'Sign in with Microsoft',
   'sso.microsoft.oQue': 'You sign in on the Microsoft page and authorize the Ergon app to use, on your behalf: tasks (Planner and To Do), email, calendar, files and, on a work account, Teams. The agents look things up and act when you ask; what did not come from you asks for your confirmation, unless you turn on "Allow everything" in Connections. Authorization comes in parts: first sending email, creating files and Teams, which any account can authorize; then reading (email, calendar, files, tasks), which at a company usually needs the administrator’s approval. If needed, the screen shows a ready-made request for you to send them.',
-  'sso.microsoft.conectado': 'Tasks: pick a Planner plan or a To Do list in Tasks (once reading is allowed). On a work account, the agents also send messages on Teams and, with reading allowed, read the chats.',
   'sso.google.botao': 'Sign in with Google',
   'sso.google.oQue': 'You sign in on the Google page and authorize the Ergon app to use, on your behalf: Google Tasks, Calendar, Gmail and Drive. The agents look things up and act when you ask; what did not come from you asks for your confirmation, unless you turn on "Allow everything" in Connections.',
-  'sso.google.conectado': 'Tasks: pick a Google Tasks list in Tasks. It stays in sync both ways: checking off, moving or editing here changes it there.',
   'sso.entrarCom': 'Sign in with {nome}',
   'sso.antesDasAcoes': 'This account was connected before the agents could act in it. Authorize again to allow the new actions (the current connection keeps working meanwhile).',
   'sso.naoRegistrado': 'To sign in with the account, the Ergon app must be registered {lugar} (a one-time step for whoever installs Ergon; see {doc}). After that, just click "{botao}".',
@@ -183,12 +183,13 @@ const conexoes: Traducao<typeof pt> = {
   'admin.jaAprovaramConectar': 'Already approved? Connect again',
   'admin.pedir': 'Ask the administrator',
   'admin.mensagem': 'Hi! I use Ergon with my company Microsoft account and I need you to approve the Ergon app to {oQue} on my behalf. Just open this link with your administrator account and accept: {link}\nAt the end, the page may show a connection error: that is expected, because it tries to go back to my computer. Thanks!',
-  'admin.instrucoes': 'Copy the link and send it yourself to whoever manages your company’s Microsoft account: nothing is sent from here on its own. They open the link, sign in with the administrator account and approve. At the end, the page may show a "can’t reach this page" error: that is expected, because it tries to go back to this computer. Once they approve, click "{depois}".',
+  'admin.instrucoes': 'Copy the link and send it to whoever manages your company’s Microsoft account: nothing is sent from here on its own. Once they approve, click "{depois}".',
   'admin.copiarLink': 'Copy the request link',
   'admin.copiarMensagem': 'Copy a ready-made message',
 
   // ——— as etapas da Microsoft ———
   'etapas.titulo': 'What this account has already allowed',
+  'etapas.resumo': '{n} of {total}',
   'etapa.base.titulo': 'Send email and create files',
   'etapa.base.oQue': 'send email on your behalf and create files in OneDrive',
   'etapa.trabalho.titulo': 'Teams: chats and messages',
@@ -205,8 +206,6 @@ const conexoes: Traducao<typeof pt> = {
   'etapa.paginaAberta': 'The Microsoft page is open. If you closed it, open it again.',
   'etapa.abrirDeNovo': 'Open again',
   'etapa.precisaAdmin': 'needs the administrator',
-  'etapa.opcionalCanais': 'Optional. Reading channels always needs approval from the company administrator.',
-  'etapa.precisaAprovacao': 'Needs approval from the company administrator.',
   'etapa.naoLiberado': 'not allowed',
   'etapa.faltaLiberar': 'not allowed yet',
   'etapa.tentarDeNovo': 'Try again',

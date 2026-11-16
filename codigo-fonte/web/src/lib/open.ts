@@ -5,8 +5,10 @@
 const CARD = 'ergon:abrir-card';
 const CONVERSA = 'ergon:abrir-conversa';
 
-export function openCard(taskId: string): void {
-  window.dispatchEvent(new CustomEvent(CARD, { detail: { taskId } }));
+/** de: a lista de onde o card foi aberto ('decisoes' = Aguardando você): o card ganha "Voltar" e o X volta à lista */
+export type OrigemDoCard = 'decisoes';
+export function openCard(taskId: string, de?: OrigemDoCard): void {
+  window.dispatchEvent(new CustomEvent(CARD, { detail: { taskId, de: de ?? null } }));
 }
 
 /** Abre o diálogo das conversas nesta (ou na última que você ativou, sem argumentos). */
@@ -14,8 +16,8 @@ export function openConversation(agentId?: string | null, conversationId?: strin
   window.dispatchEvent(new CustomEvent(CONVERSA, { detail: { agentId: agentId ?? null, conversationId: conversationId ?? null } }));
 }
 
-export function onOpenCard(fn: (taskId: string) => void): () => void {
-  const h = (e: Event) => { const id = (e as CustomEvent<{ taskId: string }>).detail?.taskId; if (id) fn(id); };
+export function onOpenCard(fn: (taskId: string, de: OrigemDoCard | null) => void): () => void {
+  const h = (e: Event) => { const d = (e as CustomEvent<{ taskId: string; de?: OrigemDoCard | null }>).detail; if (d?.taskId) fn(d.taskId, d.de ?? null); };
   window.addEventListener(CARD, h);
   return () => window.removeEventListener(CARD, h);
 }
