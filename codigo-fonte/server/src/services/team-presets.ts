@@ -397,7 +397,7 @@ export function applyOnboarding(db: Db, bus: Bus, workspaceId: string, userId: s
       input.goal?.trim() ? `Começar por: ${clip(input.goal.trim(), 140)} — peça a ${coord} um plano` : (preset?.firstStep ?? `Conte a ${coord} o que você quer resolver primeiro`),
       `Ajustar a equipe ao seu jeito: peça a ${coord} para renomear, trocar funções ou ferramentas`,
       'Ativar o Briefing Diário em Rotinas',
-      ...(input.aiConnected ? [] : ['Conectar a assinatura Nous em Conexões — a melhor escolha: os principais modelos, inclusive gratuitos, um para cada agente']),
+      ...(input.aiConnected ? [] : ['Conectar uma conta de IA em Conexões — a melhor escolha é o Ergon AI, IA sem assinatura']),
     ];
     for (const title of steps) createTask(db, null, workspaceId, { type: 'system', id: 'ergon' }, { title: clip(title, 200), description: 'Primeiros passos no Ergon.', origin: 'manual', boardId: board });
   }

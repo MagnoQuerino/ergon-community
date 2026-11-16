@@ -40,7 +40,7 @@ const geral = {
 
   // ——— avisos que pedem ação ———
   'alerta.semIa': 'SEM CONTA DE IA',
-  'alerta.semIaDica': 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é a assinatura Nous. Veja Configurações.',
+  'alerta.semIaDica': 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é o Ergon AI, IA sem assinatura. Veja Conexões.',
   'alerta.novaVersao': 'NOVA VERSÃO · RECARREGAR',
   'alerta.novaVersaoDica': 'O Ergon foi atualizado para a versão {nova}. Esta aba ainda está com a {atual}.',
 

@@ -21,7 +21,7 @@ interface AccountDef { id: string; name: string; billing: Billing; about: string
 /** Contas que o usuário conecta pelo Ergon (login por código, no navegador dele). */
 const ACCOUNTS: AccountDef[] = [
   { id: 'nous', name: 'Nous Portal', billing: 'credits', site: 'https://portal.nousresearch.com',
-    about: 'A melhor escolha para o Ergon: uma assinatura com os principais modelos do mercado (Claude, GPT, Gemini, DeepSeek…), plano grátis com modelos gratuitos e um modelo por agente — o mais forte para quem pensa, o mais econômico para quem organiza. O consumo sai dos créditos da assinatura.' },
+    about: 'Assinatura de IA com um modelo para cada agente. O consumo sai dos créditos da assinatura.' },
   { id: 'openai-codex', name: 'ChatGPT (assinatura)', billing: 'subscription', site: 'https://chatgpt.com',
     about: 'Usa a assinatura do ChatGPT que você já paga (Plus, Pro ou Business): sem custo por token, valem a mensalidade e os limites do plano.' },
 ];

@@ -36,7 +36,7 @@ const geral: Traducao<typeof pt> = {
   'decisoes.aguardando': { zero: 'Nothing waiting for you', other: '{n} waiting for you' },
 
   'alerta.semIa': 'NO AI ACCOUNT',
-  'alerta.semIaDica': 'The team only works on requests with an AI account connected — the best choice is the Nous subscription. See Settings.',
+  'alerta.semIaDica': 'The team only works on requests with an AI account connected — the best choice is Ergon AI, AI with no subscription. See Connections.',
   'alerta.novaVersao': 'NEW VERSION · RELOAD',
   'alerta.novaVersaoDica': 'Ergon was updated to version {nova}. This tab is still on {atual}.',
 

@@ -127,7 +127,7 @@ export function ConexoesView() {
         <ModeloPadrao />
         {ErgonAi && <Suspense fallback={null}><ErgonAi /></Suspense>}
         {/* o Ergon AI é a melhor escolha: a Nous fica sem destaque (decisão do dono) */}
-        <AiAccounts destaque={false} />
+        <AiAccounts />
       </section>
 
       {wa && (
