@@ -40,7 +40,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
     return () => window.removeEventListener('hashchange', ver);
   }, []);
   return (
-    <div className="page">
+    <div className="page page--larga">
       <header className="page__head">
         <h2>{t('configuracoes.titulo')}</h2>
         <div className="tabs" role="tablist">
@@ -54,7 +54,10 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>{t('configuracoes.abas.saude')}</button>}
         </div>
       </header>
-      {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+      {/* em tela larga, os cartões em duas colunas (cada um com a largura de ler; os botões perto do que fazem) */}
+      <div className={`cfg-corpo cfg-corpo--${tab}`}>
+  {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+      </div>
       <VersionCard onOpen={() => setTab('atualizacoes')} />
       <MusicCreditsBlock />
     </div>

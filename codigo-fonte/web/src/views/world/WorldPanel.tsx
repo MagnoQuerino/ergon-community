@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, errMsg } from '../../lib/api.ts';
 import { useResource } from '../../lib/live.ts';
-import { Loading } from '../../brand/Brand.tsx';
+import { ErgonMarca, Loading } from '../../brand/Brand.tsx';
 import { ConnectForm, DeviceLimit, erroConta, type LoginLimit } from './WorldLinkDialog.tsx';
 import { fmtDataHora } from '../../i18n/index.ts';
 import { twn, useTw } from './textos.ts';
@@ -35,7 +35,7 @@ export default function WorldPanel() {
   if (!s.link) {
     return (
       <section className="card">
-        <h3>{t('mundo.titulo')}</h3>
+        <h3 className="mundo-titulo-marca"><ErgonMarca size={22} /> {t('mundo.titulo')}</h3>
         {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
         <p className="muted">{t('mundo.texto')}</p>
         {s.deviceLimit ? <DeviceLimit limit={s.deviceLimit} onDone={() => { setMsg({ kind: 'ok', text: t('conta.conectada') }); st.reload(); }} />
@@ -54,7 +54,7 @@ export default function WorldPanel() {
     <>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       <section className="card">
-        <h3>{t('mundo.titulo')}</h3>
+        <h3 className="mundo-titulo-marca"><ErgonMarca size={22} /> {t('mundo.titulo')}</h3>
         <p>{twn('conta.conectado', { email: <b>{l.accountEmail ?? t('conta.suaConta')}</b> })}</p>
         {!l.emailVerified && <VerifyEmail onMsg={setMsg} onDone={st.reload} />}
         <Devices onMsg={setMsg} />

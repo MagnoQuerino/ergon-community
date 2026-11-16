@@ -4,7 +4,7 @@ import { emitLocal, useResource } from '../../lib/live.ts';
 import { Icon } from '../../components/Icon.tsx';
 import type { AiStatus } from '../../lib/types.ts';
 import { erroConta } from './WorldLinkDialog.tsx';
-import { figura } from './arte.ts';
+import { ErgonMarca } from '../../brand/Brand.tsx';
 import { useTw } from './textos.ts';
 
 interface Status { configured: boolean; link: { currentIsBound: boolean } | null }
@@ -31,7 +31,6 @@ export default function ErgonAiConexoes({ onRecomendado }: { onRecomendado?: (si
   if (!configurado) return null;
   if (bound && !bill.data) return null;
   const ligado = (ai.data?.byokCustom ?? []).some((c) => /ergon-ai/i.test(`${c.id} ${c.name}`));
-  const fig = figura('platao', 'joy', 'front', 2);
   const usar = async () => {
     setBusy(true); setMsg(null);
     try { await api.post('/api/world/ai/connect', { makeDefault: padrao }); setMsg({ kind: 'ok', text: t('ia.ligado') }); ai.reload(); emitLocal('ai.changed'); }
@@ -41,7 +40,7 @@ export default function ErgonAiConexoes({ onRecomendado }: { onRecomendado?: (si
     <article className={`ai-best eai ${ligado ? 'ai-best--on' : ''}`} aria-labelledby="eai-titulo">
       <span className="ai-best__ribbon"><Icon name="check" size={12} /> {t('conexoes.melhorEscolha')}</span>
       <header className="ai-best__head">
-        {fig ? <img className="eai__fig" src={fig.url} width={fig.w / 2} height={fig.h / 2} alt="" draggable={false} /> : <span className="eai__marca" aria-hidden="true"><Icon name="globe" size={26} /></span>}
+        <span className="eai__marca" aria-hidden="true"><ErgonMarca size={34} onDark /></span>
         <div>
           <h4 id="eai-titulo">{t('conexoes.titulo')}</h4>
           <p>{t('conexoes.texto')}</p>

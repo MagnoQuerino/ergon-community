@@ -174,11 +174,17 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   // abrir a conversa (ou trocar de conversa) já deixa o cursor no campo: é só escrever
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { const h = window.setTimeout(() => input.current?.focus({ preventScroll: true }), 60); return () => window.clearTimeout(h); }, [convId, agent.id]);
-  // o campo cresce com o texto (até um limite) e volta ao tamanho de uma linha depois de enviar
+  // o campo cresce com o texto até 4 linhas; dali em diante rola por dentro (sem barra à vista) e volta a uma linha
+  // depois de enviar
   useLayoutEffect(() => {
     const el = input.current; if (!el) return;
+    const cs = getComputedStyle(el);
+    const linha = Number.parseFloat(cs.lineHeight) || 21;
+    const extra = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((n, k) => n + (Number.parseFloat(cs[k as 'paddingTop']) || 0), 0);
+    const max = Math.round(linha * 4 + extra);
     el.style.height = 'auto';
-    el.style.height = `${Math.min(220, Math.max(42, el.scrollHeight))}px`;
+    el.style.height = `${Math.min(max, Math.max(42, el.scrollHeight))}px`;
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
   }, [text]);
 
   // sem nenhum provedor de IA conectado, os agentes não conversam: em toda tentativa, o aviso com "Conectar agora"

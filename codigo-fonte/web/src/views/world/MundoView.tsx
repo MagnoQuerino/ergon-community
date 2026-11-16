@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, requestId } from '../../lib/api.ts';
 import { useResource } from '../../lib/live.ts';
 import { Icon } from '../../components/Icon.tsx';
+import { ErgonMarca } from '../../brand/Brand.tsx';
 import { fmtData, fmtDracmas, fmtMoeda, useIdioma } from '../../i18n/index.ts';
 import { ConnectForm, DeviceLimit, erroConta, type LoginLimit } from './WorldLinkDialog.tsx';
 import { linhaDoResumo, type ResumoFora } from './nuvem-cartao.ts';
@@ -112,7 +113,7 @@ export default function MundoView() {
       <section className="mundo-heroi" aria-labelledby="mundo-titulo">
         <Estrelas n={46} />
         <div className="mundo-heroi__txt">
-          <span className="mundo-selo"><Icon name="compass" size={14} /> {membro ? t('pagina.membro.selo') : t('pagina.selo')}</span>
+          <span className="mundo-selo"><ErgonMarca size={18} onDark /> {membro ? t('pagina.membro.selo') : t('pagina.selo')}</span>
           {membro && atual && e ? (
             <>
               <h1 id="mundo-titulo" className="mundo-heroi__titulo">{t('pagina.membro.titulo', { nome: s?.me.displayName ?? '' })}</h1>
@@ -298,7 +299,7 @@ function Painel({ nomeWorkspace, planoCarrinho, mine }: { nomeWorkspace: string 
       {SECOES.map((x) => (
         <section key={x.id} id={x.id} className="mundo-painel__secao mundo-revela" aria-labelledby={`${x.id}-t`}>
           <header className="mundo-painel__cab">
-            <span className="mundo-painel__icone" aria-hidden="true"><Icon name={x.icone} size={20} /></span>
+            <span className="mundo-painel__icone" aria-hidden="true">{x.id === 'painel-ia' ? <ErgonMarca size={24} onDark /> : <Icon name={x.icone} size={20} />}</span>
             <div><h2 id={`${x.id}-t`}>{t(x.titulo)}</h2><p>{t(x.texto)}</p></div>
           </header>
           {corpo[x.id]}
@@ -484,11 +485,10 @@ function ArteRecupera() {
 function ArteIa() {
   return (
     <>
-      <div className="v-orbe" />
+      <div className="v-orbe"><ErgonMarca size={64} onDark className="v-orbe__marca" /></div>
       <svg className="v-constelacao" viewBox="0 0 200 110">
         <path d="M20 80 L56 40 L98 58 L140 22 L178 50" /><circle cx="20" cy="80" r="3" /><circle cx="56" cy="40" r="3" /><circle cx="98" cy="58" r="3" /><circle cx="140" cy="22" r="3" /><circle cx="178" cy="50" r="3" />
       </svg>
-      <Fig k="platao" gesture="joy" scale={2} className="v-centro v-flutua" />
     </>
   );
 }
