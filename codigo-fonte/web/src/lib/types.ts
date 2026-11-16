@@ -245,6 +245,7 @@ export interface AiStatus {
   byok?: Array<{ id: string; name: string; url: string | null; connected: boolean }>;
   /** endpoints próprios (OpenAI-compatível, LM Studio, Ollama) ligados */
   byokCustom?: Array<{ id: string; name: string; baseUrl: string; model: string }>;
+  ergonAi?: boolean;
   accounts: Array<{ id: string; name: string; billing: Billing; about: string; site: string; connected: boolean; detail: string }>;
   default: { provider: string | null; model: string | null; label: string; billing: Billing };
 }

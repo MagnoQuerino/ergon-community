@@ -106,6 +106,7 @@ check("consulta: o catálogo do Hermes (sem login por código, sem outras variá
       sorted(ids) == ["anthropic", "gemini", "openrouter", "xai"] and next(p for p in st[1]["providers"] if p["id"] == "openrouter")["connected"]
       and "sk-" not in json.dumps(st[1]), str(st))
 check("consulta: só os endpoints próprios de chave própria", [c["id"] for c in st[1]["custom"]] == ["byok-lm-studio"], str(st))
+check("consulta: diz se o Ergon AI está ligado (fora da lista de endpoints próprios)", st[1].get("ergonAi") is True, str(st))
 chamadas.clear()
 st = byok("PUT", "/ergon/v1/byok", {"provider": "anthropic", "key": "sk-ant-api03-" + "x" * 40})
 check("gravar: confere no provedor e grava só a variável dele", st == (200, {"ok": True, "verified": True})

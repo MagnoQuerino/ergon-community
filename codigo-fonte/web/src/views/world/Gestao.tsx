@@ -611,7 +611,7 @@ export function ErgonAiPainel() {
   const [onMsg, msgEl] = useMsg();
   const [busy, go] = useAcao(onMsg, () => { ai.reload(); emitLocal('ai.changed'); });
   const [padrao, setPadrao] = useState(false);
-  const ligado = (ai.data?.byokCustom ?? []).some((c) => /ergon-ai/i.test(`${c.id} ${c.name}`));
+  const ligado = ai.data?.ergonAi === true || (ai.data?.byokCustom ?? []).some((c) => /ergon-ai/i.test(`${c.id} ${c.name}`));
   return (
     <div className="painel-ia">
       {msgEl}

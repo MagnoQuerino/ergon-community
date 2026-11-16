@@ -30,7 +30,7 @@ export default function ErgonAiConexoes({ onRecomendado }: { onRecomendado?: (si
   useEffect(() => { onRecomendado?.(configurado); }, [configurado]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!configurado) return null;
   if (bound && !bill.data) return null;
-  const ligado = (ai.data?.byokCustom ?? []).some((c) => /ergon-ai/i.test(`${c.id} ${c.name}`));
+  const ligado = ai.data?.ergonAi === true || (ai.data?.byokCustom ?? []).some((c) => /ergon-ai/i.test(`${c.id} ${c.name}`));
   const usar = async () => {
     setBusy(true); setMsg(null);
     try { await api.post('/api/world/ai/connect', { makeDefault: padrao }); setMsg({ kind: 'ok', text: t('ia.ligado') }); ai.reload(); emitLocal('ai.changed'); }
@@ -48,7 +48,7 @@ export default function ErgonAiConexoes({ onRecomendado }: { onRecomendado?: (si
         {ligado && <span className="badge badge--ok">{t('conexoes.ligado')}</span>}
       </header>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
-      {ativo ? (
+      {ativo && ligado ? null : ativo ? (
         <div className="row row--wrap eai__acoes">
           <button className="btn btn--gold ai-best__cta" disabled={busy} onClick={() => void usar()}>{t('ia.usar')}</button>
           <label className="check"><input type="checkbox" checked={padrao} onChange={(ev) => setPadrao(ev.target.checked)} /> {t('ia.padrao')}</label>
