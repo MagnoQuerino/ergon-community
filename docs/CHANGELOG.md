@@ -32,6 +32,20 @@
   cadastro não trava mais com o motor ocupado; execuções por dia sem limite (limite opcional em Configurações).
 - **Equipes de partida para obras e engenharia, RH e comércio**, e "Outra área" escolhe a equipe pelo que você
   escreve. Lançamento repetido na nota e no extrato entra uma vez só. `ergon update` passa a achar a próxima pré-versão.
+- **Página do Ergon World no menu**, com o painel de quem assina: plano e carrinho com um pagamento só (vagas e Jobs
+  além do plano, mensal ou anual), Pessoas e papéis (convite por código, Dono, Admin, Edita, Só vê, transferir a
+  titularidade), workspaces, Dracmas com recarga automática e a nuvem. Configurações › Ergon World fica com a conta e a
+  segurança.
+- **Tirar alguém do workspace troca a chave** sozinho: quem ficou segue sincronizando e quem saiu não lê o que vem
+  depois.
+- **Ergon AI é a melhor escolha:** IA sem assinatura, em um clique, paga pelo uso e integrada à nuvem.
+- **Loja**, no menu: explorar, instalar e publicar visuais, equipes e competências, tudo grátis. Selos "Oficial" e
+  "Comunidade"; competência de terceiros só instala depois de você ler o texto inteiro, fica neste computador e nunca
+  vai para a nuvem.
+- **Primeiro acesso com conta Ergon World:** entre com a conta e só ajuste a frase de recuperação e a IA.
+- **Plano cortesia** aparece como "Cortesia", sem ações de cobrança.
+- **Visual novo em todo o app:** ilustrações nos cabeçalhos e nas telas vazias, telas largas em colunas, fonte mínima
+  de 12 e caixa da conversa que cresce até 4 linhas.
 
 ## 1.1.0-rc.29 (pré-versão de teste)
 

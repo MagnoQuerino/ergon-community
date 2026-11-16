@@ -98,7 +98,7 @@ export class FakeWorld {
   checkouts: Array<{ ws: string; items: Array<{ sku: string; quantity: number }> }> = [];
   /**
    * Loja colaborativa (world/src/marketplace.ts): criadores, itens com versões, licenças grátis. Só grátis: preço
-   * diferente de zero é recusado. GET /v1/marketplace/mine é PROPOSTO (o World ainda não tem): as publicações da conta.
+   * diferente de zero é recusado. GET /v1/marketplace/mine: as publicações da conta.
    */
   creators = new Map<string, { namespace: string; displayName: string; official: boolean }>();
   mkItems = new Map<string, { id: string; packageId: string; kind: string; title: string; summary: string; creator: string; status: string; latest: string | null;

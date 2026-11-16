@@ -113,8 +113,8 @@ export function registerLoja(d: Deps): void {
 
   // ---------------------------------------------------------------- quem publica
   /**
-   * As publicações da pessoa e as versões de cada uma. O World ainda não tem esta consulta (GET /v1/marketplace/mine
-   * não existe em world/src/marketplace.ts): enquanto não tiver, a tela diz que a lista não está disponível.
+   * As publicações da pessoa e as versões de cada uma (GET /v1/marketplace/mine). Um World antigo, sem a consulta,
+   * responde 404: a tela diz que a lista não está disponível.
    */
   app.get('/api/loja/minhas', async (req) => {
     const a = auth(req);
