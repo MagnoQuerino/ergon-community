@@ -9,7 +9,7 @@ import type { Db } from './db/db.ts';
 import { PAGE_CSP } from './lib/protecao-pagina.ts';
 import { HttpError, fold, id as newId, notFound, now, redactUrl, safeEqual } from './lib/util.ts';
 import { comTextoDoResultado, reconhecer, tx, type Texto } from './lib/textos.ts';
-import { INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
+import { AUDIO_INLINE, INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
 import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
 import { activityReport, reportPeriod } from './services/activity-report.ts';
@@ -39,6 +39,7 @@ import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
+import { TETO_TEXTO, Transcricoes, ehAudio, foraDoTeto } from './services/transcricoes.ts';
 import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, anterioresParaVoltar, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
@@ -2667,7 +2668,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // e voz, pela ponte de controle do motor: routes/recursos.ts
   const recursos = new Recursos({ db, bus, control: (ws) => motors.control(ws), scope: (ws) => motorScope(ws), modelos: (ws) => aiOf(ws).opcoesDeReserva(),
     aoMudarCompetencias: (ws) => aiOf(ws).esquecerCompetencias() });
-  registerRecursosRoutes(app, { db, bus, recursos, executor, cfg, auth, owner });
+  // mensagem de áudio (rc.33): a transcrição em segundo plano, gravada ligada ao arquivo; o pedido da conversa espera por ela
+  const transcricoes = new Transcricoes({ db, bus, filesDir: cfg.filesDir, transcrever: (ws, audio, nome) => recursos.transcrever(ws, audio, nome),
+    vaiPreparar: async (ws) => { const e = await recursos.estado(ws); return e.voz.preparar.transcrever; } });
+  const audiosDaExecucao = (r: { workspace_id: string; id: string }) => attachmentsOfRun(db, r.workspace_id, r.id).filter((f) => ehAudio(f.mime, f.filename)).map((f) => f.id);
+  executor.anexosPendentes = (r) => { const ids = audiosDaExecucao(r); return ids.length > 0 && transcricoes.pendentes(r.workspace_id, ids); };
+  executor.esperaAnexos = (r) => (r.kind === 'chat' ? transcricoes.esperaMs(r.workspace_id, audiosDaExecucao(r), r.started_at) : 0);
+  registerRecursosRoutes(app, { db, bus, recursos, transcricoes, executor, cfg, auth, owner });
   // "Relatar um problema" (Ajuda): prévia limpa e envio só no clique, sem conta nem World: services/relatos.ts
   registerRelatosRoutes(app, { db, cfg, auth, url: cfg.relatosUrl, timeoutMs: cfg.relatosTimeoutMs });
   // aplicativos conectados pela pessoa (servidor MCP que o catálogo não traz, rc.29): routes/mcp-proprio.ts
@@ -2691,7 +2698,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (folderHdr && !/^fld_[a-f0-9]{32}$/.test(folderHdr)) throw new HttpError(400, 'folder', 'pasta inválida');
     if (convId) getConversation(db, a.workspaceId, a.userId, convId);
     const folderId = folderHdr ?? (convId ? folderForConversation(db, a.workspaceId, convId) : taskId ? folderForTask(db, a.workspaceId, taskId) : null);
-    return reply.status(201).send(saveArtifact(db, bus, cfg.filesDir, cfg.maxUploadBytes, a.workspaceId, a.userId, { filename, mime, data: req.body, taskId, folderId }, storageQuota));
+    // áudio na conversa (rc.33): até 10 minutos (a tela para em 10:00; aqui confere), e a transcrição já começa
+    const audio = !!convId && ehAudio(mime, filename);
+    if (audio) { const teto = foraDoTeto(req.body); if (teto) throw new HttpError(400, teto.motivo === 'longo' ? 'audio_longo' : 'audio_grande', TETO_TEXTO[teto.motivo]); }
+    const salvo = saveArtifact(db, bus, cfg.filesDir, cfg.maxUploadBytes, a.workspaceId, a.userId, { filename, mime, data: req.body, taskId, folderId }, storageQuota);
+    if (audio) void transcricoes.iniciar(a.workspaceId, salvo.id);
+    return reply.status(201).send(salvo);
   });
   // Documentos: pastas, mover, renomear, lixeira, prévia, busca e desfazer ------------------------------------------
   const user = (req: FastifyRequest) => { const a = auth(req); return { a, actor: { type: 'user' as const, id: a.userId } }; };
@@ -2767,11 +2779,24 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 <p><a href="/api/artifacts/${h(id)}/download?confirmo=1" rel="noopener" style="display:inline-block;padding:8px 14px;border:1px solid #b42318;border-radius:8px;color:#b42318;text-decoration:none">Baixar mesmo assim</a></p>
 <p style="color:#555;font-size:.9rem">No Windows, o SmartScreen e o antivírus ainda conferem o arquivo depois de baixado.</p></body></html>`);
     }
-    // prévia só de imagem comum e PDF (?inline=1), num documento isolado; todo o resto sempre baixa como anexo
+    // prévia só de imagem comum, PDF e áudio (?inline=1), num documento isolado; todo o resto sempre baixa como anexo
     const inline = !exe && (req.query as { inline?: string }).inline === '1' && INLINE_MIME.has(f.mime);
     reply.header('Content-Type', !exe && INLINE_MIME.has(f.mime) ? f.mime : 'application/octet-stream');
     reply.header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.filename)}`);
     if (inline && f.mime.startsWith('image/')) reply.header('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'; frame-ancestors 'none'");
+    // áudio (rc.33): o player da conversa (<audio>) pede pedaços para pular no tempo; aberto sozinho, num documento isolado
+    if (inline && AUDIO_INLINE.has(f.mime)) {
+      reply.header('Content-Security-Policy', "sandbox; default-src 'none'; media-src 'self'; frame-ancestors 'none'");
+      reply.header('Accept-Ranges', 'bytes').header('Cache-Control', 'private, no-store');
+      const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+      if (m && (m[1] || m[2])) {
+        const total = f.data.length;
+        const ini = m[1] ? Number(m[1]) : Math.max(0, total - Number(m[2]));
+        const fim = m[1] && m[2] ? Math.min(Number(m[2]), total - 1) : total - 1;
+        if (ini >= total || ini > fim) return reply.status(416).header('Content-Range', `bytes */${total}`).send();
+        return reply.status(206).header('Content-Range', `bytes ${ini}-${fim}/${total}`).send(f.data.subarray(ini, fim + 1));
+      }
+    }
     // PDF na prévia "Ver" do card: dentro da própria tela do Ergon (mesma origem), nunca numa página de outro endereço.
     // Sem sandbox: o leitor de PDF do navegador não abre num documento isolado; o PDF não roda nada nesta origem
     if (inline && f.mime === 'application/pdf') { reply.header('X-Frame-Options', 'SAMEORIGIN'); reply.header('Content-Security-Policy', "default-src 'none'; object-src 'self'; frame-ancestors 'self'"); }

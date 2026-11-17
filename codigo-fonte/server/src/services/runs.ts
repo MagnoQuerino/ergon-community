@@ -121,6 +121,8 @@ export function sessionKeyFor(r: Pick<RunRow, 'workspace_id' | 'agent_id' | 'con
 export const CONVERSA_MUDA_MS = 2 * 86_400_000;
 /** o pedido espera o perfil do agente (criado agora, cofre recriado, mudança chegando): o texto da espera na tela */
 const PREPARANDO_AGENTE = 'aguardando a equipe (preparando o agente; o pedido segue sozinho)';
+/** o pedido espera a transcrição do áudio da mensagem (rc.33) */
+export const TRANSCREVENDO_AUDIO = 'transcrevendo o áudio (o pedido segue sozinho quando terminar)';
 /** quantas vezes uma execução continua depois dos ajudantes (cada continuação pode chamar outros) */
 const AJUDANTES_RODADAS = 3;
 const RECAP_MENSAGENS = 12;
@@ -219,6 +221,10 @@ export class RunExecutor {
   private ajudantes = new Map<string, { abertos: Set<string>; resultados: string[]; rodadas: number }>();
   /** quanto tempo (ms) esta execução ficou parada esperando a pessoa responder a um cartão pedido pelo agente (cartoes.ts) */
   esperaHumana: (runId: string) => number = () => 0;
+  /** rc.33: algum áudio da mensagem ainda está sendo transcrito (o pedido espera, sem ir ao motor) */
+  anexosPendentes: ((r: RunRow) => boolean) | null = null;
+  /** quanto tempo (ms) a execução esperou a transcrição dos áudios: não conta no tempo limite */
+  esperaAnexos: (r: RunRow) => number = () => 0;
   /**
    * Aprovações nativas (rc.27, aprovacoes.ts): o motor parou o turno pedindo aprovação (approval.request) ou avisou que o
    * pedido foi resolvido (approval.responded). Vem do fluxo de eventos ao vivo, em toda execução (conversa e card).
@@ -479,7 +485,7 @@ export class RunExecutor {
     if (!hermes) return this.finish(r, 'failed', null, 'a equipe de IA não está ligada nesta instalação');
     const limit = this.timeoutSeconds(r);
     // o tempo parado esperando a pessoa responder a um cartão (pergunta, chave) não conta no limite
-    if (elapsed - this.esperaHumana(r.id) > limit * 1000 && !r.cancel_requested) {
+    if (elapsed - this.esperaHumana(r.id) - this.esperaAnexos(r) > limit * 1000 && !r.cancel_requested) {
       if (r.hermes_run_id) await this.sendStop(r);
       return this.finish(r, 'failed', null, `tempo limite de ${limit}s; parada pedida à equipe de IA (efeitos já realizados permanecem)`);
     }
@@ -509,6 +515,14 @@ export class RunExecutor {
         }
         log.warn({ runId: r.id, agentId: r.agent_id, perfil: onde.perfil, continua: onde.continua, esperouMs: esperou }, 'perfil do agente: a mudança não chegou a tempo; o pedido segue');
         if (!onde.continua) onde = { perfil: null, instructions: r.instructions ?? '', continua: false };
+      }
+      // mensagem de áudio: o pedido vai com a transcrição, então espera ela terminar (a tela mostra "transcrevendo…")
+      if (r.kind === 'chat' && this.anexosPendentes?.(r)) {
+        if (r.error !== TRANSCREVENDO_AUDIO) {
+          this.db.run('UPDATE runs SET error = ? WHERE id = ?', TRANSCREVENDO_AUDIO, r.id);
+          this.bus.publish(r.workspace_id, 'runs.changed', { id: r.id, agentId: r.agent_id, status: r.status });
+        }
+        return;
       }
       let input = r.input;
       if (this.contextFor) {

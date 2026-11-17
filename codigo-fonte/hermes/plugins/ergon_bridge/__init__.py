@@ -1771,8 +1771,16 @@ COMPACTAR_LIMITE = 150000
 #    (intervalo 0: a trava do Treinar barraria tudo, e ela só gastaria chamadas);
 #  - raciocinio (agent.reasoning_effort): a profundidade do raciocínio do modelo. "high" por padrão (migração 10); "" é o
 #    padrão do próprio modelo. O Hermes ajusta ao que cada provedor aceita;
-#  - idioma (display.language): as mensagens fixas do motor no idioma da pessoa.
+#  - idioma (display.language): as mensagens fixas do motor no idioma da pessoa;
+#  - voz (rc.33): voz_falar (tts.provider: "piper", a voz local e padrão do Ergon, ou "edge", a online), voz_modelo
+#    (stt.local.model: "base", padrão, ou "small") e voz_idioma (stt.local.language, para o Whisper não detectar sozinho e
+#    errar em áudios curtos, mais a voz do Piper e a do edge-tts nesse idioma).
 RESERVA_MAX = 5
+VOZES_FALAR = ("piper", "edge")
+MODELOS_FALA = ("base", "small")
+# as vozes de cada idioma: Piper (baixada no 1º uso para HERMES_HOME/cache/piper-voices) e edge-tts (a reserva online)
+VOZ_PIPER = {"pt": "pt_BR-faber-medium", "en": "en_US-lessac-medium"}
+VOZ_EDGE = {"pt": "pt-BR-FranciscaNeural", "en": "en-US-AriaNeural"}
 _IDIOMAS_MOTOR = ("pt", "en")
 # o que a tela oferece (VALID_REASONING_EFFORTS do Hermes tem mais níveis; os extremos ficam fora) e o padrão do Ergon
 RACIOCINIO_NIVEIS = ("", "low", "medium", "high")
@@ -1836,6 +1844,10 @@ def ajustes_ler(cfg: Any) -> dict[str, Any]:
         "anotar_memoria": revisao.get("enabled", True) not in _FALSO and lembrete > 0,
         "raciocinio": str(sec("agent").get("reasoning_effort") or "").strip().lower()[:12],
         "idioma": str(sec("display").get("language") or "en")[:12],
+        # o que o Hermes usa quando nada está gravado: edge e base; o idioma vazio = detectado sozinho
+        "voz_falar": str(sec("tts").get("provider") or "edge").strip().lower()[:20],
+        "voz_modelo": str((sec("stt").get("local") if isinstance(sec("stt").get("local"), dict) else {}).get("model") or "base")[:20],
+        "voz_idioma": str((sec("stt").get("local") if isinstance(sec("stt").get("local"), dict) else {}).get("language") or "")[:12],
     }
 
 
@@ -1879,6 +1891,23 @@ def ajustes_config(body: dict[str, Any]) -> dict[str, Any]:
         if body["idioma"] not in _IDIOMAS_MOTOR:
             raise ValueError("idioma inválido")
         out["display"] = {"language": body["idioma"]}
+    if "voz_falar" in body:
+        if body["voz_falar"] not in VOZES_FALAR:
+            raise ValueError("voz inválida")
+        out["tts"] = {"provider": body["voz_falar"]}
+    if "voz_modelo" in body:
+        if body["voz_modelo"] not in MODELOS_FALA:
+            raise ValueError("modelo de transcrição inválido")
+        out["stt"] = {"provider": "local", "local": {"model": body["voz_modelo"]}}
+    if "voz_idioma" in body:
+        lingua = body["voz_idioma"]
+        if lingua not in _IDIOMAS_MOTOR:
+            raise ValueError("idioma da voz inválido")
+        stt = out.setdefault("stt", {})
+        stt.setdefault("local", {})["language"] = lingua
+        tts = out.setdefault("tts", {})
+        tts["piper"] = {"voice": VOZ_PIPER[lingua]}
+        tts["edge"] = {"voice": VOZ_EDGE[lingua]}
     if not out:
         raise ValueError("nada para gravar")
     return out
@@ -3835,25 +3864,80 @@ def _conectores_ligados(cfg: dict[str, Any]) -> list[str]:
     return sorted(str(k) for k, c in s.items() if isinstance(c, dict) and _ligado(c.get("enabled"), True)) if isinstance(s, dict) else []
 
 
+def _piper_instalado() -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec("piper") is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _edge_instalado() -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec("edge_tts") is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _whisper_baixado(modelo: str) -> bool | None:
+    """O modelo do Whisper já está no cache (o 1º uso baixa ~150 MB do base, ~500 MB do small)? None = não deu para saber."""
+    try:
+        from faster_whisper.utils import download_model  # pacote da imagem
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        download_model(modelo, local_files_only=True)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _piper_voz_baixada(tts_cfg: dict[str, Any]) -> bool | None:
+    """A voz do Piper escolhida já está na pasta do motor (o 1º uso baixa uns 60 MB)? None = não deu para saber."""
+    try:
+        from tools.tts_tool_local import DEFAULT_PIPER_VOICE, _get_piper_voices_dir  # módulo do Hermes
+        pc = tts_cfg.get("piper") if isinstance(tts_cfg.get("piper"), dict) else {}
+        voz = str(pc.get("voice") or DEFAULT_PIPER_VOICE)
+        if voz.lower().endswith(".onnx"):
+            return os.path.isfile(voz)
+        pasta = Path(pc.get("voices_dir") or _get_piper_voices_dir()).expanduser()
+        return (pasta / f"{voz}.onnx").is_file() and (pasta / f"{voz}.onnx.json").is_file()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _voz_estado() -> dict[str, Any]:
     """O que este motor consegue fazer com voz agora. transcrever: o provedor que o Hermes escolheria (local, se a imagem
-    traz o Whisper; um provedor com chave; ou None). falar: o provedor configurado, se o Hermes diz que dá."""
-    out: dict[str, Any] = {"transcrever": None, "falar": None}
+    traz o Whisper; um provedor com chave; ou None). falar: o provedor que vai falar de fato (o Piper sem o pacote, ou sem
+    a voz, cai para o edge-tts, se houver). preparar: o que ainda vai ser baixado no 1º uso (a tela avisa)."""
+    out: dict[str, Any] = {"transcrever": None, "falar": None, "preparar": {"transcrever": False, "falar": False}, "modelo": None}
     try:
         from tools.transcription_tools import _get_provider, _load_stt_config  # módulos do Hermes
-        p = _get_provider(_load_stt_config())
+        stt = _load_stt_config()
+        p = _get_provider(stt)
         out["transcrever"] = str(p)[:30] if p and p != "none" else None
+        if out["transcrever"] == "local":
+            local = stt.get("local") if isinstance(stt.get("local"), dict) else {}
+            out["modelo"] = str(local.get("model") or "base")[:20]
+            out["preparar"]["transcrever"] = _whisper_baixado(out["modelo"]) is False
     except Exception:  # noqa: BLE001
         pass
     try:
         from tools.tts_tool import _get_provider as _tts_provider, _load_tts_config, check_tts_requirements
-        if check_tts_requirements():
-            prov: str | None = str(_tts_provider(_load_tts_config()))[:30]
-            # o Edge (padrão, grátis) precisa do pacote edge_tts na imagem; sem ele, o Hermes diz que dá e falha na hora
-            if prov == "edge":
-                import importlib.util
-                prov = prov if importlib.util.find_spec("edge_tts") else None
-            out["falar"] = prov
+        cfg = _load_tts_config()
+        prov: str | None = str(_tts_provider(cfg))[:30]
+        if prov == "piper" and not _piper_instalado():
+            prov = "edge" if _edge_instalado() else None  # sem o pacote do Piper na imagem: a voz online, se houver
+        elif prov == "piper":
+            out["preparar"]["falar"] = _piper_voz_baixada(cfg) is False
+        elif check_tts_requirements():
+            # o Edge (grátis) precisa do pacote edge_tts na imagem; sem ele, o Hermes diz que dá e falha na hora
+            if prov == "edge" and not _edge_instalado():
+                prov = None
+        else:
+            prov = None
+        out["falar"] = prov
     except Exception:  # noqa: BLE001
         pass
     return out
@@ -4185,26 +4269,59 @@ def voz_transcrever(audio: bytes, nome: str) -> dict[str, Any]:
     return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "")[:300] if isinstance(r, dict) else ""}
 
 
+def _falar_edge(texto: str, saida: str) -> bool:
+    """A voz online (edge-tts), como reserva quando o Piper falha: o mesmo gerador do Hermes, com a voz do idioma."""
+    if not _edge_instalado():
+        return False
+    try:
+        from tools.tts_tool import _load_tts_config, _run_edge_tts  # módulos do Hermes
+        _run_edge_tts(texto, saida, _load_tts_config())
+        return os.path.isfile(saida) and os.path.getsize(saida) > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def voz_falar(texto: str) -> dict[str, Any]:
-    """Um texto vira áudio pelo Hermes (o provedor de voz configurado; o padrão, Edge, é grátis e usa a internet)."""
-    if not _voz_estado()["falar"]:
+    """Um texto vira áudio pelo Hermes. A voz do Ergon é o Piper (no próprio computador, sem internet; a voz é baixada no
+    1º uso); se ele falhar, a resposta sai pela voz online (edge-tts) e a resposta diz que foi a reserva."""
+    estado = _voz_estado()
+    if not estado["falar"]:
         return {"ok": False, "motivo": "componente"}
     import base64
     pasta = os.path.realpath(_voz_pasta())
     saida = os.path.join(pasta, f"f-{hashlib.sha256(texto.encode('utf-8', 'replace')).hexdigest()[:24]}.mp3")
     feitos = [saida]
+    reserva = False
     try:
-        from tools.tts_tool import text_to_speech_tool  # módulo do Hermes
-        r = json.loads(text_to_speech_tool(texto, output_path=saida))
-        r = r if isinstance(r, dict) else {}
-        real = os.path.realpath(str(r.get("file_path") or saida))
-        feitos.append(real)
-        if not r.get("success") or os.path.commonpath([real, pasta]) != pasta or not os.path.isfile(real) or not 0 < os.path.getsize(real) <= _VOZ_MAX:
-            return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "")[:300]}
+        try:
+            from tools.tts_tool import _get_provider as _tts_provider, _load_tts_config  # módulos do Hermes
+            configurado = str(_tts_provider(_load_tts_config()))
+        except Exception:  # noqa: BLE001
+            configurado = ""
+        r: dict[str, Any] = {}
+        real = saida
+        if configurado == "piper" and estado["falar"] == "edge":
+            reserva = True  # o Piper não está na imagem: direto para a voz online
+        else:
+            from tools.tts_tool import text_to_speech_tool  # módulo do Hermes
+            r = json.loads(text_to_speech_tool(texto, output_path=saida))
+            r = r if isinstance(r, dict) else {}
+            real = os.path.realpath(str(r.get("file_path") or saida))
+            feitos.append(real)
+            ok = r.get("success") and os.path.commonpath([real, pasta]) == pasta and os.path.isfile(real) and 0 < os.path.getsize(real) <= _VOZ_MAX
+            if not ok and configurado == "piper":
+                logger.warning("ergon_bridge: a voz local (Piper) falhou (%s); a resposta vai pela voz online", str(r.get("error") or "")[:120])
+                reserva = True
+            elif not ok:
+                return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "")[:300]}
+        if reserva:
+            real = saida
+            if not _falar_edge(texto, saida):
+                return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "a voz local falhou e a online não respondeu")[:300]}
         with open(real, "rb") as f:
             dados = f.read()
         tipo = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav"}.get(os.path.splitext(real)[1].lower(), "audio/mpeg")
-        return {"ok": True, "audio": base64.b64encode(dados).decode("ascii"), "tipo": tipo}
+        return {"ok": True, "audio": base64.b64encode(dados).decode("ascii"), "tipo": tipo, "provedor": "edge" if reserva else (configurado or "")[:30], "reserva": reserva}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "motivo": "falhou", "detalhe": type(exc).__name__}
     finally:
@@ -4214,6 +4331,56 @@ def voz_falar(texto: str) -> dict[str, Any]:
                     os.remove(p)
             except (OSError, ValueError):
                 pass
+
+
+# Transcrição em segundo plano (rc.33): até 10 minutos de áudio, mais o modelo de fala baixado no 1º uso, passam do prazo
+# de uma chamada. O Ergon manda o áudio, recebe a tarefa e consulta até sair o resultado (que é entregue uma vez só).
+_VOZ_TAREFAS: dict[str, dict[str, Any]] = {}
+_VOZ_TAREFAS_LOCK = threading.Lock()
+_VOZ_TAREFAS_MAX = 8
+_VOZ_TAREFA_GUARDA_S = 3600
+
+
+def voz_transcrever_tarefa(audio: bytes, nome: str) -> dict[str, Any]:
+    """Começa a transcrição numa linha de execução própria e devolve a tarefa. O que já dá para recusar na hora (formato,
+    tamanho, sem transcritor) volta direto, sem tarefa."""
+    ext = os.path.splitext(nome or "")[1].lower()
+    if ext not in _AUDIO_EXT:
+        return {"ok": False, "motivo": "formato"}
+    if not audio or len(audio) > _VOZ_MAX:
+        return {"ok": False, "motivo": "tamanho"}
+    agora = time.time()
+    with _VOZ_TAREFAS_LOCK:
+        for k in [k for k, v in _VOZ_TAREFAS.items() if agora - v["quando"] > _VOZ_TAREFA_GUARDA_S]:
+            _VOZ_TAREFAS.pop(k, None)
+        if sum(1 for v in _VOZ_TAREFAS.values() if v["fim"] is None) >= _VOZ_TAREFAS_MAX:
+            return {"ok": False, "motivo": "falhou", "detalhe": "transcrições demais ao mesmo tempo"}
+        tarefa = hashlib.sha256(os.urandom(16) + audio[:64]).hexdigest()[:32]
+        _VOZ_TAREFAS[tarefa] = {"quando": agora, "fim": None}
+
+    def trabalhar() -> None:
+        try:
+            r = voz_transcrever(audio, nome)
+        except Exception as exc:  # noqa: BLE001
+            r = {"ok": False, "motivo": "falhou", "detalhe": type(exc).__name__}
+        with _VOZ_TAREFAS_LOCK:
+            if tarefa in _VOZ_TAREFAS:
+                _VOZ_TAREFAS[tarefa]["fim"] = r
+
+    threading.Thread(target=trabalhar, name="ergon-voz-transcrever", daemon=True).start()
+    return {"ok": True, "tarefa": tarefa}
+
+
+def voz_transcrever_resultado(tarefa: str) -> dict[str, Any]:
+    """O resultado da tarefa (uma vez só: depois de entregue, some), ou {"andando": True}. Tarefa desconhecida: falhou."""
+    with _VOZ_TAREFAS_LOCK:
+        t = _VOZ_TAREFAS.get(tarefa)
+        if t is None:
+            return {"ok": False, "motivo": "falhou", "detalhe": "tarefa desconhecida (o motor reiniciou?)"}
+        if t["fim"] is None:
+            return {"andando": True}
+        _VOZ_TAREFAS.pop(tarefa, None)
+        return t["fim"]
 
 
 def checkpoints_listar() -> list[dict[str, Any]]:
@@ -4606,7 +4773,15 @@ class _ControlHandler(BaseHTTPRequestHandler):
                 audio = base64.b64decode(str(body.get("audio") or ""), validate=True)
             except Exception:  # noqa: BLE001
                 raise ValueError("áudio inválido") from None
-            return self._json(200, voz_transcrever(audio, str(body.get("nome") or "")[:200]))
+            nome = str(body.get("nome") or "")[:200]
+            if body.get("segundo_plano") is True:
+                return self._json(200, voz_transcrever_tarefa(audio, nome))
+            return self._json(200, voz_transcrever(audio, nome))
+        if sub == "voz/transcrever" and method == "GET":
+            tarefa = str(q.get("tarefa") or "")
+            if not re.fullmatch(r"[a-f0-9]{32}", tarefa):
+                raise ValueError("tarefa inválida")
+            return self._json(200, voz_transcrever_resultado(tarefa))
         if sub == "voz/falar" and method == "POST":
             texto = str(body.get("texto") or "").strip()
             if not texto or len(texto) > 12000:

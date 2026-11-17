@@ -5,7 +5,9 @@
  * - planilha: os números calculados pelo sistema (nenhum estimado) + as primeiras linhas;
  * - imagem: vai para a visão do modelo (o modelo vê a imagem);
  * - zip: a lista do que tem dentro e o texto do que dá para ler, com limites;
- * - o resto (áudio, vídeo, executável…): guardado, e o colega diz que recebeu e não abre esse tipo.
+ * - áudio (rc.33): a transcrição gravada (services/transcricoes.ts); sem ela, o colega sabe que há um áudio que o sistema
+ *   não transcreveu e diz isso, sem inventar o conteúdo;
+ * - o resto (vídeo, executável…): guardado, e o colega diz que recebeu e não abre esse tipo.
  */
 import type { Config } from '../config.ts';
 import type { Db } from '../db/db.ts';
@@ -16,8 +18,10 @@ import { readDocument } from './doc-isolated.ts';
 import type { DocText } from './doc-text.ts';
 import { analyzeSheet, statsLines } from './table-stats.ts';
 import { sheetText } from './doc-text.ts';
+import { ehAudio } from './transcricoes.ts';
 
-export interface AttachmentInfo { id: string; filename: string; mime: string; size: number }
+interface TranscricaoNaTela { estado: 'transcrevendo' | 'preparando' | 'pronta' | 'falhou'; texto: string | null; motivo: string | null; duracao: number | null }
+export interface AttachmentInfo { id: string; filename: string; mime: string; size: number; transcricao?: TranscricaoNaTela }
 
 /** imagens que a visão dos modelos aceita */
 const VISION_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -53,10 +57,16 @@ export function attachmentsOf(db: Db, workspaceId: string, messageIds: string[])
   if (!messageIds.length) return by;
   for (let i = 0; i < messageIds.length; i += 400) {
     const part = messageIds.slice(i, i + 400);
-    const rows = db.all<AttachmentInfo & { message_id: string }>(
-      `SELECT ma.message_id, a.id, a.filename, a.mime, a.size FROM message_attachments ma JOIN artifacts a ON a.id = ma.artifact_id
+    const rows = db.all<AttachmentInfo & { message_id: string; t_estado: string | null; t_texto: string | null; t_motivo: string | null; t_duracao: number | null }>(
+      `SELECT ma.message_id, a.id, a.filename, a.mime, a.size, t.estado AS t_estado, t.texto AS t_texto, t.motivo AS t_motivo, t.duracao_s AS t_duracao
+         FROM message_attachments ma JOIN artifacts a ON a.id = ma.artifact_id LEFT JOIN audio_transcricoes t ON t.artifact_id = a.id
         WHERE ma.workspace_id = ? AND ma.message_id IN (${part.map(() => '?').join(', ')}) ORDER BY a.created_at, a.id`, workspaceId, ...part);
-    for (const r of rows) { const { message_id, ...a } = r; by.set(message_id, [...(by.get(message_id) ?? []), a]); }
+    for (const r of rows) {
+      const { message_id, t_estado, t_texto, t_motivo, t_duracao, ...a } = r;
+      // áudio (rc.33): a transcrição gravada vai junto, para a tela mostrar embaixo do player
+      const out: AttachmentInfo = t_estado ? { ...a, transcricao: { estado: t_estado as TranscricaoNaTela['estado'], texto: t_texto, motivo: t_motivo, duracao: t_duracao } } : a;
+      by.set(message_id, [...(by.get(message_id) ?? []), out]);
+    }
   }
   return by;
 }
@@ -109,6 +119,22 @@ export async function attachmentContext(db: Db, cfg: Pick<Config, 'filesDir'>, w
   let left = budget;
   for (const f of files) {
     const head = `### Arquivo anexado: "${clip(f.filename, 160)}" (${f.mime}, ${kb(f.size)})`;
+    if (ehAudio(f.mime, f.filename)) {
+      const tr = db.get<{ estado: string; texto: string | null; motivo: string | null }>('SELECT estado, texto, motivo FROM audio_transcricoes WHERE artifact_id = ? AND workspace_id = ?', f.id, workspaceId);
+      if (tr?.estado === 'pronta' && tr.texto?.trim()) {
+        const texto = clip(tr.texto.trim(), Math.max(500, left));
+        lines.push(head, `Áudio da pessoa (transcrição): ${defuse(texto)}`, 'A transcrição é automática e pode ter erros de palavras: entenda pelo sentido; se algo importante ficou ambíguo, pergunte.');
+        left -= texto.length;
+        reads.push(`${f.id}/audio/${texto.length}`);
+      } else if (tr?.estado === 'pronta') {
+        lines.push(head, 'Áudio da pessoa: a transcrição não achou fala (silêncio ou ruído). Diga isso em uma frase e peça que ela grave de novo ou escreva.');
+        reads.push(`${f.id}/audio-vazio`);
+      } else {
+        lines.push(head, `Há um áudio da pessoa que o sistema não conseguiu transcrever${tr?.motivo === 'longo' ? ' (passa de 10 minutos)' : ''}. Diga isso em uma frase, sem inventar o conteúdo: ela pode tocar "tentar de novo" embaixo do áudio ou escrever o que disse.`);
+        reads.push(`${f.id}/audio-sem-transcricao/${tr?.motivo ?? 'nenhuma'}`);
+      }
+      continue;
+    }
     let data: Buffer;
     try { data = openArtifact(db, cfg.filesDir, workspaceId, f.id).data; } catch { lines.push(head, 'O sistema não conseguiu abrir este arquivo agora.'); reads.push(`${f.id}/erro`); continue; }
     if (isImage(f)) {
@@ -150,7 +176,7 @@ export async function attachmentContext(db: Db, cfg: Pick<Config, 'filesDir'>, w
       lines.push(head, `O sistema não leu o conteúdo (${got.note}). Diga isso à pessoa em uma frase; o arquivo ficou guardado em Documentos.`);
       reads.push(`${f.id}/${got.note}`);
     } else {
-      lines.push(head, 'Tipo que o sistema não abre (áudio, vídeo, programa ou outro): diga à pessoa, em uma frase, que recebeu e guardou em Documentos, mas não consegue abrir esse tipo. Não invente o conteúdo.');
+      lines.push(head, 'Tipo que o sistema não abre (vídeo, programa ou outro): diga à pessoa, em uma frase, que recebeu e guardou em Documentos, mas não consegue abrir esse tipo. Não invente o conteúdo.');
       reads.push(`${f.id}/nao-abre`);
     }
   }

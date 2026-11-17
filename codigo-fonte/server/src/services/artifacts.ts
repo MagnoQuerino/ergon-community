@@ -16,9 +16,12 @@ const ALLOWED_MIME = new Set(['text/plain', 'text/markdown', 'text/csv', 'applic
   DOCX, XLSX, PPTX, 'application/xml', 'text/xml', 'application/x-ofx', 'text/vtt']);
 /** Tipo pela extensão quando o navegador manda um tipo genérico (o Windows envia CSV como "application/vnd.ms-excel"). */
 const BY_EXT: Record<string, string> = { csv: 'text/csv', md: 'text/markdown', txt: 'text/plain', json: 'application/json', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
-  docx: DOCX, xlsx: XLSX, pptx: PPTX, xml: 'application/xml', ofx: 'application/x-ofx', vtt: 'text/vtt', srt: 'text/plain' };
-/** prévia na tela (imagem comum e PDF); todo o resto só baixa */
-export const INLINE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf']);
+  docx: DOCX, xlsx: XLSX, pptx: PPTX, xml: 'application/xml', ofx: 'application/x-ofx', vtt: 'text/vtt', srt: 'text/plain',
+  ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav' };
+/** áudio que toca na própria conversa (rc.33: o player da mensagem de áudio) */
+export const AUDIO_INLINE = new Set(['audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac']);
+/** prévia na tela (imagem comum, PDF e áudio); todo o resto só baixa */
+export const INLINE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf', ...AUDIO_INLINE]);
 const GENERIC = new Set(['', 'application/octet-stream', 'application/vnd.ms-excel', 'text/comma-separated-values', 'application/csv', 'text/x-csv', 'text/x-markdown', 'application/zip', 'application/x-zip-compressed', 'application/x-subrip']);
 
 /** Nome exibido: sem separadores de caminho, controles ou nomes reservados. Nunca usado como caminho. */

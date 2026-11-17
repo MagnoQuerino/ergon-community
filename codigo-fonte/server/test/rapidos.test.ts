@@ -46,7 +46,7 @@ describe('as contas puras', () => {
       [{ provider: 'openrouter', model: 'openai/gpt-5-mini' }]);
   });
   test('o que falta mandar ao motor: os padrões do Ergon sobre os padrões do motor', () => {
-    const padroes = { reserva: { modo: 'auto' as const, lista: [] }, naoTreinar: true, buscaPrivada: false, arrumarCompetencias: false, anotarMemoria: true, raciocinio: 'high' as const };
+    const padroes = { reserva: { modo: 'auto' as const, lista: [] }, naoTreinar: true, buscaPrivada: false, arrumarCompetencias: false, anotarMemoria: true, raciocinio: 'high' as const, vozFalar: 'piper' as const, vozModelo: 'base' as const };
     assert.deepEqual(patchDosAjustes(padroes, MOTOR_PADRAO, { opcoes: OPCOES, idioma: 'pt' }),
       { reserva: reservaAutomatica(OPCOES), naoTreinar: true, arrumarCompetencias: false, idioma: 'pt' });
     const igual: AjustesMotor = { ...MOTOR_PADRAO, reserva: reservaAutomatica(OPCOES), naoTreinar: true, arrumarCompetencias: false, idioma: 'pt' };
@@ -64,8 +64,18 @@ describe('as contas puras', () => {
     assert.deepEqual(patchDosAjustes({ ...padroes, raciocinio: 'medium' }, { ...motor, anotarMemoria: true, raciocinio: 'high' }, { opcoes: null }), { raciocinio: 'medium' });
     assert.deepEqual(patchDosAjustes(padroes, MOTOR_PADRAO, { opcoes: null }), { naoTreinar: true, arrumarCompetencias: false }, 'motor que não diz esses dois (de antes): não manda');
   });
+  test('voz (rc.33): Piper e o modelo base por padrão; o idioma da transcrição é o da pessoa; motor de antes não recebe', () => {
+    const padroes = escolhasDaEquipe({ get: () => undefined } as never, []);
+    assert.deepEqual([padroes.vozFalar, padroes.vozModelo], ['piper', 'base']);
+    const motorVoz: AjustesMotor = { ...MOTOR_PADRAO, naoTreinar: true, arrumarCompetencias: false, vozFalar: 'edge', vozModelo: 'base', vozIdioma: '' };
+    assert.deepEqual(patchDosAjustes(padroes, motorVoz, { opcoes: null, idioma: 'en' }), { vozFalar: 'piper', vozIdioma: 'en' },
+      'a voz padrão vira o Piper; a transcrição no idioma da pessoa (sem detectar sozinha)');
+    assert.deepEqual(patchDosAjustes(padroes, motorVoz, { opcoes: null }), { vozFalar: 'piper', vozIdioma: 'pt' }, 'sem idioma escolhido: português');
+    assert.deepEqual(patchDosAjustes({ ...padroes, vozFalar: 'edge', vozModelo: 'small' }, { ...motorVoz, vozIdioma: 'pt' }, { opcoes: null }), { vozModelo: 'small' });
+    assert.deepEqual(patchDosAjustes(padroes, { ...MOTOR_PADRAO, naoTreinar: true, arrumarCompetencias: false }, { opcoes: null }), {}, 'motor de antes (sem a voz nos ajustes): não manda');
+  });
   test('busca privada: num motor sem a busca direta não é mandada (a equipe não fica sem busca); desligar sempre vai', () => {
-    const quer = { reserva: { modo: 'desligado' as const, lista: [] }, naoTreinar: false, buscaPrivada: true, arrumarCompetencias: true, anotarMemoria: true, raciocinio: 'high' as const };
+    const quer = { reserva: { modo: 'desligado' as const, lista: [] }, naoTreinar: false, buscaPrivada: true, arrumarCompetencias: true, anotarMemoria: true, raciocinio: 'high' as const, vozFalar: 'piper' as const, vozModelo: 'base' as const };
     assert.deepEqual(patchDosAjustes(quer, MOTOR_PADRAO, { opcoes: null }), {});
     assert.deepEqual(patchDosAjustes(quer, { ...MOTOR_PADRAO, buscaPrivadaDisponivel: true }, { opcoes: null }), { buscaPrivada: true });
     assert.deepEqual(patchDosAjustes({ ...quer, buscaPrivada: false }, { ...MOTOR_PADRAO, buscaPrivada: true }, { opcoes: null }), { buscaPrivada: false });
@@ -208,7 +218,7 @@ describe('1, 2, 5, 7) ajustes da equipe no motor', () => {
     r = await req(h, 'PUT', '/api/team/ajustes', s, { reserva: { modo: 'desligado' }, naoTreinar: false, arrumarCompetencias: true });
     assert.equal(r.status, 200);
     assert.deepEqual([p.st.ajustes.reserva, p.st.ajustes.naoTreinar, p.st.ajustes.arrumarCompetencias], [[], false, true]);
-    assert.deepEqual(escolhasDaEquipe(h.db, [s.workspaceId]), { reserva: { modo: 'desligado', lista: [] }, naoTreinar: false, buscaPrivada: false, arrumarCompetencias: true, anotarMemoria: true, raciocinio: 'high' });
+    assert.deepEqual(escolhasDaEquipe(h.db, [s.workspaceId]), { reserva: { modo: 'desligado', lista: [] }, naoTreinar: false, buscaPrivada: false, arrumarCompetencias: true, anotarMemoria: true, raciocinio: 'high', vozFalar: 'piper', vozModelo: 'base' });
     // reduzir para economizar: a anotação de memória desligada e o raciocínio do modelo
     p.st.ajustes = { ...p.st.ajustes, anotarMemoria: true, raciocinio: 'high' };
     r = await req(h, 'PUT', '/api/team/ajustes', s, { anotarMemoria: false, raciocinio: 'low' });

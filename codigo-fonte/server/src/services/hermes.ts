@@ -600,10 +600,14 @@ export interface AjustesMotor {
   anotarMemoria?: boolean;
   /** a profundidade do raciocínio gravada no motor (agent.reasoning_effort; '' = a do modelo); undefined = motor de antes */
   raciocinio?: string;
+  /** rc.33: a voz do "Ouvir" (tts.provider: piper ou edge), o modelo da transcrição (stt.local.model) e o idioma da voz e da
+   *  transcrição (stt.local.language). undefined = motor de antes */
+  vozFalar?: string; vozModelo?: string; vozIdioma?: string;
 }
 /** A profundidade do raciocínio que a tela oferece ('modelo' = a do próprio modelo; no motor, ''). */
 export type Raciocinio = 'high' | 'medium' | 'low' | 'modelo';
-export interface AjustesPatch { reserva?: ModeloReserva[]; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio; idioma?: 'pt' | 'en' }
+export interface AjustesPatch { reserva?: ModeloReserva[]; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio; idioma?: 'pt' | 'en';
+  vozFalar?: 'piper' | 'edge'; vozModelo?: 'base' | 'small'; vozIdioma?: 'pt' | 'en' }
 export function parseAjustes(j: unknown): AjustesMotor | null {
   if (!j || typeof j !== 'object') return null;
   const o = j as Record<string, unknown>;
@@ -613,7 +617,10 @@ export function parseAjustes(j: unknown): AjustesMotor | null {
   return { reserva, naoTreinar: o.nao_treinar, buscaPrivada: o.busca_privada === true, buscaPrivadaDisponivel: o.busca_privada_disponivel === true,
     arrumarCompetencias: o.arrumar_competencias === true, idioma: typeof o.idioma === 'string' ? o.idioma.slice(0, 12) : 'en',
     ...(typeof o.anotar_memoria === 'boolean' ? { anotarMemoria: o.anotar_memoria } : {}),
-    ...(typeof o.raciocinio === 'string' ? { raciocinio: o.raciocinio.slice(0, 12) } : {}) };
+    ...(typeof o.raciocinio === 'string' ? { raciocinio: o.raciocinio.slice(0, 12) } : {}),
+    ...(typeof o.voz_falar === 'string' ? { vozFalar: o.voz_falar.slice(0, 20) } : {}),
+    ...(typeof o.voz_modelo === 'string' ? { vozModelo: o.voz_modelo.slice(0, 20) } : {}),
+    ...(typeof o.voz_idioma === 'string' ? { vozIdioma: o.voz_idioma.slice(0, 12) } : {}) };
 }
 /** Uma janela de limite da conta: quanto já foi usado (0 a 100) e quando renova. */
 export interface CotaJanela { tipo: 'sessao' | 'semana' | 'semana_modelo' | 'assinatura' | 'chave' | 'outro'; rotulo: string; usado: number; renovaEm: string | null; escopo: 'conta' | 'modelo' }
@@ -896,7 +903,8 @@ export class HttpHermesControl implements HermesControlClient {
     const body = { ...(p.reserva ? { reserva: p.reserva } : {}), ...(p.naoTreinar !== undefined ? { nao_treinar: p.naoTreinar } : {}),
       ...(p.buscaPrivada !== undefined ? { busca_privada: p.buscaPrivada } : {}), ...(p.arrumarCompetencias !== undefined ? { arrumar_competencias: p.arrumarCompetencias } : {}),
       ...(p.anotarMemoria !== undefined ? { anotar_memoria: p.anotarMemoria } : {}), ...(p.raciocinio ? { raciocinio: p.raciocinio === 'modelo' ? '' : p.raciocinio } : {}),
-      ...(p.idioma ? { idioma: p.idioma } : {}) };
+      ...(p.idioma ? { idioma: p.idioma } : {}), ...(p.vozFalar ? { voz_falar: p.vozFalar } : {}), ...(p.vozModelo ? { voz_modelo: p.vozModelo } : {}),
+      ...(p.vozIdioma ? { voz_idioma: p.vozIdioma } : {}) };
     return this.ouNull(async () => parseAjustes(await this.call('PUT', '/ergon/v1/ajustes', body, 20000)));
   }
   async cota(atualizar = false): Promise<CotaConta[] | null> { return this.ouNull(async () => parseCota(await this.call('GET', `/ergon/v1/cota${atualizar ? '?atualizar=1' : ''}`, undefined, 40000))); }

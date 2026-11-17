@@ -21,6 +21,15 @@ Destaques:
   e o texto da licença acompanha o pacote (node_modules/libsignal). Quem não quiser esse componente pode montar a
   imagem sem a dependência do WhatsApp; o recurso então informa que o componente não está instalado.
 
+- Piper (piper-tts 1.8.0, projeto piper1-gpl da Open Home Foundation), licença GPL-3.0-or-later, com o espeak-ng
+  (GPL-3.0-or-later) embutido no pacote: a voz local do "Ouvir" (texto em fala no próprio computador). Vai sem alterações
+  só na imagem do motor de IA (hermes/Dockerfile), instalado no ambiente Python do Hermes e carregado pelo processo do
+  motor; o Ergon (servidor e interface) não o inclui nem o importa, e fala com o motor pela ponte HTTP. O código-fonte
+  está em https://github.com/OHF-Voice/piper1-gpl (versão 1.8.0) e o texto da licença acompanha o pacote (COPYING). As
+  vozes (pt_BR-faber-medium, en_US-lessac-medium) são baixadas no primeiro uso de https://huggingface.co/rhasspy/piper-voices,
+  cada uma com a licença do próprio cartão (MODEL_CARD). Quem não quiser esse componente pode montar a imagem sem o
+  piper-tts: o "Ouvir" usa então a voz online (edge-tts).
+
 - sharp (Lovell Fuller), licença Apache-2.0, com libvips sob LGPL-3.0-or-later (binários pré-compilados,
   carregados dinamicamente). https://github.com/lovell/sharp e https://github.com/libvips/libvips
 

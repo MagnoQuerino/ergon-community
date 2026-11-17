@@ -12,7 +12,9 @@
  * automática (as outras contas de IA conectadas, na ordem; sem outra conta, nenhuma); não treinar: LIGADO (proteção); busca
  * privada: desligada (ligada, a equipe perde a leitura de páginas: é menos poder); arrumar competências sem uso: DESLIGADO
  * (é economia, não benefício: só arquiva); anotar na memória depois da conversa: LIGADO; profundidade do raciocínio: ALTA;
- * pausa: solta.
+ * pausa: solta. Voz (rc.33): o "Ouvir" pela voz local (Piper, no computador, sem internet), com a online (edge-tts) como
+ * escolha e como reserva se o Piper falhar; a transcrição com o modelo base (rápido), com o small (mais preciso) como escolha;
+ * o idioma da transcrição e da voz é o da pessoa (stt.local.language: a detecção sozinha erra em áudios curtos).
  */
 import type { Db } from '../db/db.ts';
 import { HermesError, type AjustesMotor, type AjustesPatch, type HermesControlClient, type ModeloReserva, type ModelOptions, type Raciocinio } from './hermes.ts';
@@ -25,6 +27,12 @@ const ARRUMAR_SETTING = 'team.arrumarCompetencias';
 const PAUSA_SETTING = 'team.pausa';
 const ANOTAR_MEMORIA_SETTING = 'team.anotarMemoria';
 const RACIOCINIO_SETTING = 'team.raciocinio';
+const VOZ_FALAR_SETTING = 'team.voz.falar';
+const VOZ_MODELO_SETTING = 'team.voz.modelo';
+export const VOZES = ['piper', 'edge'] as const;
+export type VozFalar = (typeof VOZES)[number];
+export const MODELOS_FALA = ['base', 'small'] as const;
+export type ModeloFala = (typeof MODELOS_FALA)[number];
 export const RACIOCINIOS: readonly Raciocinio[] = ['high', 'medium', 'low', 'modelo'];
 /** o padrão (migração 10 do cofre: o "low" que ninguém escolheu vira "high"; RACIOCINIO_PADRAO no plugin) */
 const RACIOCINIO_PADRAO: Raciocinio = 'high';
@@ -42,7 +50,7 @@ export const AJUSTES_RECONFERE_MS = 10 * 60_000;
 
 export type ReservaModo = 'auto' | 'lista' | 'desligado';
 interface ReservaEscolha { modo: ReservaModo; lista: ModeloReserva[] }
-interface EscolhasDaEquipe { reserva: ReservaEscolha; naoTreinar: boolean; buscaPrivada: boolean; arrumarCompetencias: boolean; anotarMemoria: boolean; raciocinio: Raciocinio }
+interface EscolhasDaEquipe { reserva: ReservaEscolha; naoTreinar: boolean; buscaPrivada: boolean; arrumarCompetencias: boolean; anotarMemoria: boolean; raciocinio: Raciocinio; vozFalar: VozFalar; vozModelo: ModeloFala }
 
 function ultimaEntre(db: Db, key: string, ids: string[]): string | undefined {
   if (!ids.length) return undefined;
@@ -83,6 +91,8 @@ export function escolhasDaEquipe(db: Db, ids: string[]): EscolhasDaEquipe {
     arrumarCompetencias: ligado(ultimaEntre(db, ARRUMAR_SETTING, ids), false),
     anotarMemoria: ligado(ultimaEntre(db, ANOTAR_MEMORIA_SETTING, ids), true),
     raciocinio: ((v) => (RACIOCINIOS as readonly string[]).includes(v ?? '') ? v as Raciocinio : RACIOCINIO_PADRAO)(ultimaEntre(db, RACIOCINIO_SETTING, ids)),
+    vozFalar: ultimaEntre(db, VOZ_FALAR_SETTING, ids) === 'edge' ? 'edge' : 'piper',
+    vozModelo: ultimaEntre(db, VOZ_MODELO_SETTING, ids) === 'small' ? 'small' : 'base',
   };
 }
 
@@ -132,6 +142,12 @@ export function patchDosAjustes(e: EscolhasDaEquipe, atual: AjustesMotor, ctx: C
   if (atual.anotarMemoria !== undefined && e.anotarMemoria !== atual.anotarMemoria) p.anotarMemoria = e.anotarMemoria;
   if (atual.raciocinio !== undefined && noMotor(e.raciocinio) !== atual.raciocinio) p.raciocinio = e.raciocinio;
   if (ctx.idioma && ctx.idioma !== atual.idioma) p.idioma = ctx.idioma;
+  // voz (rc.33): motor de antes (o plugin não diz) não recebe. O idioma da transcrição e das vozes é o da pessoa; sem
+  // escolha, o português (o Ergon nasce em português)
+  if (atual.vozFalar !== undefined && e.vozFalar !== atual.vozFalar) p.vozFalar = e.vozFalar;
+  if (atual.vozModelo !== undefined && e.vozModelo !== atual.vozModelo) p.vozModelo = e.vozModelo;
+  const vozIdioma = ctx.idioma ?? 'pt';
+  if (atual.vozIdioma !== undefined && vozIdioma !== atual.vozIdioma) p.vozIdioma = vozIdioma;
   return p;
 }
 
@@ -178,6 +194,8 @@ interface AjustesDaEquipe {
   arrumarCompetencias: boolean;
   anotarMemoria: boolean;
   raciocinio: Raciocinio;
+  /** a voz do "Ouvir" e o modelo da transcrição (rc.33) */
+  vozFalar: VozFalar; vozModelo: ModeloFala;
   /** alguma escolha ainda não chegou ao motor (ele estava fora): chega quando ligar */
   pendente: boolean;
   /** o motor é de antes dos ajustes: as escolhas ficam guardadas e chegam com a próxima atualização da equipe */
@@ -189,18 +207,20 @@ export function ajustesDaEquipe(db: Db, ids: string[]): AjustesDaEquipe {
   const e = escolhasDaEquipe(db, ids);
   const motor = ajustesNoMotor(db, ids);
   const base = { reserva: { modo: e.reserva.modo, lista: e.reserva.lista, emUso: [] as ModeloReserva[] }, naoTreinar: e.naoTreinar, buscaPrivada: e.buscaPrivada,
-    buscaPrivadaAguarda: false, arrumarCompetencias: e.arrumarCompetencias, anotarMemoria: e.anotarMemoria, raciocinio: e.raciocinio };
+    buscaPrivadaAguarda: false, arrumarCompetencias: e.arrumarCompetencias, anotarMemoria: e.anotarMemoria, raciocinio: e.raciocinio,
+    vozFalar: e.vozFalar, vozModelo: e.vozModelo };
   if (motor === 'sem') return { ...base, pendente: false, atualizacao: true };
   if (!motor) return { ...base, pendente: false, atualizacao: false }; // ainda não lido (motor nunca aberto desde a atualização): sem aviso
   const aguarda = e.buscaPrivada && !motor.buscaPrivada && !motor.buscaPrivadaDisponivel;
   const pendente = e.naoTreinar !== motor.naoTreinar || e.arrumarCompetencias !== motor.arrumarCompetencias || (e.buscaPrivada !== motor.buscaPrivada && !aguarda)
     || (e.reserva.modo === 'desligado' && motor.reserva.length > 0)
-    || (motor.anotarMemoria !== undefined && e.anotarMemoria !== motor.anotarMemoria) || (motor.raciocinio !== undefined && noMotor(e.raciocinio) !== motor.raciocinio);
+    || (motor.anotarMemoria !== undefined && e.anotarMemoria !== motor.anotarMemoria) || (motor.raciocinio !== undefined && noMotor(e.raciocinio) !== motor.raciocinio)
+    || (motor.vozFalar !== undefined && e.vozFalar !== motor.vozFalar) || (motor.vozModelo !== undefined && e.vozModelo !== motor.vozModelo);
   return { ...base, reserva: { ...base.reserva, emUso: motor.reserva }, buscaPrivadaAguarda: aguarda, pendente, atualizacao: false };
 }
 
 /** Grava as escolhas que vieram (no workspace de quem escolheu; valem para os workspaces do mesmo motor). */
-export function gravarEscolhas(db: Db, workspaceId: string, p: { reserva?: { modo: ReservaModo; lista?: unknown }; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio }): void {
+export function gravarEscolhas(db: Db, workspaceId: string, p: { reserva?: { modo: ReservaModo; lista?: unknown }; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio; vozFalar?: VozFalar; vozModelo?: ModeloFala }): void {
   const txt = (b: boolean) => (b ? 'ligado' : 'desligado');
   if (p.reserva) setSetting(db, workspaceId, RESERVA_SETTING, JSON.stringify({ modo: p.reserva.modo, lista: p.reserva.modo === 'lista' ? reservaLimpa(p.reserva.lista) : [] }));
   if (p.naoTreinar !== undefined) setSetting(db, workspaceId, NAO_TREINAR_SETTING, txt(p.naoTreinar));
@@ -208,6 +228,8 @@ export function gravarEscolhas(db: Db, workspaceId: string, p: { reserva?: { mod
   if (p.arrumarCompetencias !== undefined) setSetting(db, workspaceId, ARRUMAR_SETTING, txt(p.arrumarCompetencias));
   if (p.anotarMemoria !== undefined) setSetting(db, workspaceId, ANOTAR_MEMORIA_SETTING, txt(p.anotarMemoria));
   if (p.raciocinio !== undefined && RACIOCINIOS.includes(p.raciocinio)) setSetting(db, workspaceId, RACIOCINIO_SETTING, p.raciocinio);
+  if (p.vozFalar !== undefined && VOZES.includes(p.vozFalar)) setSetting(db, workspaceId, VOZ_FALAR_SETTING, p.vozFalar);
+  if (p.vozModelo !== undefined && MODELOS_FALA.includes(p.vozModelo)) setSetting(db, workspaceId, VOZ_MODELO_SETTING, p.vozModelo);
 }
 
 // ---------------------------------------------------------------- o modelo reserva foi usado?

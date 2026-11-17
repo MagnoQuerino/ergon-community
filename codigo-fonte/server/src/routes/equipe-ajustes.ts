@@ -10,7 +10,7 @@ import { idParams } from '../lib/schemas.ts';
 import { HttpError, now } from '../lib/util.ts';
 import type { AiService } from '../services/ai.ts';
 import type { AuthContext } from '../services/auth.ts';
-import { ajustesDaEquipe, gravarEscolhas, gravarPausa, pausaDaEquipe, RACIOCINIOS, RESERVA_MAX, type ReservaModo } from '../services/ajustes-motor.ts';
+import { ajustesDaEquipe, gravarEscolhas, gravarPausa, MODELOS_FALA, pausaDaEquipe, RACIOCINIOS, RESERVA_MAX, VOZES, type ModeloFala, type ReservaModo, type VozFalar } from '../services/ajustes-motor.ts';
 import type { Raciocinio } from '../services/hermes.ts';
 import { audit, type Bus } from '../services/bus.ts';
 import { ORIENTAR_NAO_ANDANDO, STEER_MAX, type RunExecutor } from '../services/runs.ts';
@@ -47,10 +47,10 @@ export function registerAjustesRoutes(app: FastifyInstance, d: AjustesRoutesDeps
     schema: { body: { type: 'object', additionalProperties: false, minProperties: 1, properties: {
       reserva: { type: 'object', additionalProperties: false, required: ['modo'], properties: { modo: { enum: ['auto', 'lista', 'desligado'] }, lista: { type: 'array', maxItems: RESERVA_MAX, items: modelo } } },
       naoTreinar: { type: 'boolean' }, buscaPrivada: { type: 'boolean' }, arrumarCompetencias: { type: 'boolean' },
-      anotarMemoria: { type: 'boolean' }, raciocinio: { enum: [...RACIOCINIOS] } } } },
+      anotarMemoria: { type: 'boolean' }, raciocinio: { enum: [...RACIOCINIOS] }, vozFalar: { enum: [...VOZES] }, vozModelo: { enum: [...MODELOS_FALA] } } } },
   }, async (req) => {
     const a = owner(req);
-    const b = req.body as { reserva?: { modo: ReservaModo; lista?: Array<{ provider: string; model: string }> }; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio };
+    const b = req.body as { reserva?: { modo: ReservaModo; lista?: Array<{ provider: string; model: string }> }; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio; vozFalar?: VozFalar; vozModelo?: ModeloFala };
     const ai = aiOf(a.workspaceId);
     if (b.reserva?.modo === 'lista') {
       // só modelos de contas que a pessoa conectou (a lista vem da tela, mas quem confere é o servidor)
@@ -70,12 +70,15 @@ export function registerAjustesRoutes(app: FastifyInstance, d: AjustesRoutesDeps
       b.arrumarCompetencias === undefined ? '' : b.arrumarCompetencias ? 'arrumar competências sem uso: ligado' : 'arrumar competências sem uso: desligado',
       b.anotarMemoria === undefined ? '' : b.anotarMemoria ? 'anotar na memória depois da conversa: ligado' : 'anotar na memória depois da conversa: desligado',
       b.raciocinio === undefined ? '' : `profundidade do raciocínio: ${({ high: 'alta', medium: 'média', low: 'baixa', modelo: 'a do modelo' } as const)[b.raciocinio]}`,
+      b.vozFalar === undefined ? '' : b.vozFalar === 'piper' ? 'voz do Ouvir: Piper (no computador)' : 'voz do Ouvir: edge-tts (online)',
+      b.vozModelo === undefined ? '' : b.vozModelo === 'small' ? 'transcrição: modelo small (mais preciso)' : 'transcrição: modelo base (mais rápido)',
     ].filter(Boolean);
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'team.ajustes',
       evidence: { ...(b.reserva ? { reserva: b.reserva.modo, modelos: (b.reserva.lista ?? []).map((x) => `${x.provider}:${x.model}`) } : {}),
         ...(b.naoTreinar !== undefined ? { naoTreinar: b.naoTreinar } : {}), ...(b.buscaPrivada !== undefined ? { buscaPrivada: b.buscaPrivada } : {}),
         ...(b.arrumarCompetencias !== undefined ? { arrumarCompetencias: b.arrumarCompetencias } : {}),
-        ...(b.anotarMemoria !== undefined ? { anotarMemoria: b.anotarMemoria } : {}), ...(b.raciocinio !== undefined ? { raciocinio: b.raciocinio } : {}), applied },
+        ...(b.anotarMemoria !== undefined ? { anotarMemoria: b.anotarMemoria } : {}), ...(b.raciocinio !== undefined ? { raciocinio: b.raciocinio } : {}),
+        ...(b.vozFalar !== undefined ? { vozFalar: b.vozFalar } : {}), ...(b.vozModelo !== undefined ? { vozModelo: b.vozModelo } : {}), applied },
       result: `${partes.join('; ')}${applied ? '' : e.atualizacao ? ' (chega com a próxima atualização da equipe)' : ' (a equipe recebe quando estiver ligada)'}` });
     for (const ws of ids) bus.publish(ws, 'agents.changed', {});
     return { ...e, applied };
