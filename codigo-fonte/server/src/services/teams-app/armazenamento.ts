@@ -1,6 +1,6 @@
 /**
  * Tabelas do recurso "Conversar com a equipe pelo Teams" (migração própria, registrada em teams_app_migrations):
- * vínculos, entregas já recebidas (8 dias), saída para o Teams (sobrevive a reinício, 7 dias), cartões enviados e o
+ * vínculos, entregas já recebidas (61 dias: mais que os 60 que o relé guarda), saída para o Teams (sobrevive a reinício, 7 dias), cartões enviados e o
  * estado por pessoa (conversa "Teams", chave geral, até onde as respostas já foram).
  */
 import type { Db } from '../../db/db.ts';

@@ -329,7 +329,7 @@ const conexoes: Traducao<typeof pt> = {
   'teams.codigoExemplo': 'ABCD-EFGH',
   'teams.confirmar': 'Confirm',
   'teams.preparando': 'Preparing the connection with Teams…',
-  'teams.soDireta': 'For now, only a direct chat with the app works (not groups, channels or files yet). With Ergon closed, the app replies right away that it got the request and keeps it, encrypted, for up to 7 days.',
+  'teams.soDireta': 'For now, only a direct chat with the app works (not groups, channels or files yet). With Ergon closed, the app replies right away that it got the request and keeps it, encrypted, for up to 60 days.',
   'teams.ajusteInstalacao': 'Installation setting',
   'teams.endereco': 'Teams service address',
 
@@ -352,7 +352,7 @@ const conexoes: Traducao<typeof pt> = {
   'teams.problema.registro': 'Could not connect this Ergon to the Teams service just now. It keeps trying on its own, waiting longer each time; if it keeps happening, check that this computer’s date and time are correct.',
   'teams.problema.religar': 'The Teams service was restarted and the linked accounts were removed. To link again, send a message to the app on Teams and type the code below.',
   'teams.estado.conectado': 'Connected.',
-  'teams.estado.offline': 'Offline right now. Requests are kept for up to 7 days and arrive when the connection is back.',
+  'teams.estado.offline': 'Offline right now. Requests are kept for up to 60 days and arrive when the connection is back.',
 
   // ——— chat with the team through the Ergon bot on Discord (same service as Teams; ConversaComEquipe) ———
   'equipe.titulo': 'Chat with the team',
@@ -373,7 +373,7 @@ const conexoes: Traducao<typeof pt> = {
   'discordBot.caida': '{nome}: {motivo}. To link it again, send a message to the Ergon bot on Discord and type the code below.',
   'discordBot.pronto': 'Done: the Discord account "{nome}" is linked. Write to the bot on Discord, and the request goes to your team.',
   'discordBot.preparando': 'Preparing the connection with Discord…',
-  'discordBot.soDireta': 'Only the direct chat with the bot works for now (servers, groups and files not yet). With Ergon closed, the bot answers right away that it got the request and keeps it, encrypted, for up to 7 days.',
+  'discordBot.soDireta': 'Only the direct chat with the bot works for now (servers, groups and files not yet). With Ergon closed, the bot answers right away that it got the request and keeps it, encrypted, for up to 60 days.',
   'discordBot.nomeEscolhido': 'The name is the one the Discord account chose for itself.',
   'discordBot.soOSeuCodigo': 'Only type a code that just showed up in YOUR Discord, in your chat with the bot. Nobody from support asks for this code.',
   'discordBot.escolhaConsciente': 'I asked for this code just now, in my own Discord.',

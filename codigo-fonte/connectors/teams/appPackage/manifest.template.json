@@ -15,7 +15,7 @@
   },
   "description": {
     "short": "Converse com a sua equipe do Ergon direto pelo Teams.",
-    "full": "Converse com a sua equipe do Ergon direto pelo Teams. O app funciona só na conversa direta com ele: não entra em grupos nem em canais. Para usar, é preciso ter o Ergon instalado e ligar a sua conta do Teams a ele por um código: o app mostra o código nesta conversa e você o digita no Ergon, em Conexões › Teams. Depois disso, o que você escreve aqui vai para a sua própria equipe no Ergon, e as respostas, as confirmações (com Aprovar e Recusar) e os avisos do que precisa de você chegam nesta conversa. Com o Ergon fechado, o app responde na hora que recebeu e guarda o pedido, cifrado, por até 7 dias, até o Ergon abrir. O app não lê outros chats, e-mails nem arquivos do Microsoft 365: recebe somente as mensagens enviadas a ele. Para desligar a conta do Ergon, escreva \"desligar\"."
+    "full": "Converse com a sua equipe do Ergon direto pelo Teams. O app funciona só na conversa direta com ele: não entra em grupos nem em canais. Para usar, é preciso ter o Ergon instalado e ligar a sua conta do Teams a ele por um código: o app mostra o código nesta conversa e você o digita no Ergon, em Conexões › Teams. Depois disso, o que você escreve aqui vai para a sua própria equipe no Ergon, e as respostas, as confirmações (com Aprovar e Recusar) e os avisos do que precisa de você chegam nesta conversa. Com o Ergon fechado, o app responde na hora que recebeu e guarda o pedido, cifrado, por até 60 dias, até o Ergon abrir. O app não lê outros chats, e-mails nem arquivos do Microsoft 365: recebe somente as mensagens enviadas a ele. Para desligar a conta do Ergon, escreva \"desligar\"."
   },
   "localizationInfo": {
     "defaultLanguageTag": "pt-br",

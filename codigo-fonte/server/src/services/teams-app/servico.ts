@@ -70,6 +70,8 @@ const notaDeAtraso = (quando: string, plat: Plataforma = 'teams') => `Pedido env
 const ATRASO_MS = 10 * 60_000;
 
 const DIA = 86_400_000;
+/** O relé guarda o pedido até 60 dias, até o Ergon abrir: o id das entregas já recebidas fica um dia a mais (sem repetir). */
+const ENTRADA_VALE_MS = 61 * DIA;
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** "Locatário" das contas pessoais da Microsoft: não é uma organização. */
 const MSA_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
@@ -1120,7 +1122,7 @@ export class TeamsApp {
     this.d.db.run(`DELETE FROM teams_outbox WHERE created_at < ? AND NOT (status = 'sent' AND created_at >= ?
       AND id IN (SELECT outbox_id FROM teams_cards WHERE state = 'open' AND outbox_id IS NOT NULL))`, ago(7 * DIA), ago(30 * DIA));
     this.d.db.run('DELETE FROM teams_cards WHERE outbox_id IS NOT NULL AND outbox_id NOT IN (SELECT id FROM teams_outbox)');
-    this.d.db.run('DELETE FROM teams_inbound WHERE received_at < ?', ago(8 * DIA));
+    this.d.db.run('DELETE FROM teams_inbound WHERE received_at < ?', ago(ENTRADA_VALE_MS));
     this.d.db.run("DELETE FROM teams_noticed WHERE sent <> 0 AND at < ?", ago(30 * DIA));
     for (const [id, c] of this.claims) if (c.expiresAt < this.agora()) this.claims.delete(id);
     for (const [id, c] of this.confirmando) if (c.ate < this.agora()) this.confirmando.delete(id);

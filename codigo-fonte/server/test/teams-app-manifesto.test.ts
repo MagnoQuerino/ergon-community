@@ -34,7 +34,7 @@ test('--build --publico: o id do app de antes, só conversa pessoal, comandos aj
   assert.ok(!m.permissions.includes('messageTeamMembers'));
   assert.deepEqual(m.validDomains, ['ergon.exemplo.com']);
   assert.equal(m.description.short, 'Converse com a sua equipe do Ergon direto pelo Teams.');
-  assert.match(m.description.full, /conversa direta/); assert.match(m.description.full, /código/); assert.match(m.description.full, /7 dias/); assert.match(m.description.full, /não lê outros chats/);
+  assert.match(m.description.full, /conversa direta/); assert.match(m.description.full, /código/); assert.match(m.description.full, /60 dias/); assert.match(m.description.full, /não lê outros chats/);
   assert.ok(fs.statSync(path.join(out, 'ergon-teams-app.zip')).size > 200);
   const sem = tmpDir();
   rodar('--build', '--publico', '--app-id', APP, '--bot-id', BOT, '--developer-name', 'Ergon', '--website', 'https://ergon.exemplo.com', '--privacy', 'https://ergon.exemplo.com/p', '--terms', 'https://ergon.exemplo.com/t', '--sem-permissoes', '--out', sem);
@@ -73,7 +73,7 @@ test('--build só com o App ID do bot: o pacote oficial (Ergon, ergonworld.com, 
   assert.equal(en['name.short'], 'Ergon');
   assert.equal(en['description.short'], 'Chat with your Ergon team right from Teams.');
   assert.ok(en['description.short'].length <= 80 && en['description.full'].length <= 4000);
-  assert.match(en['description.full'], /one-on-one chat/); assert.match(en['description.full'], /7 days/); assert.match(en['description.full'], /does not read other chats/);
+  assert.match(en['description.full'], /one-on-one chat/); assert.match(en['description.full'], /60 days/); assert.match(en['description.full'], /does not read other chats/);
   // o zip: os quatro arquivos na raiz (sem pasta), cada um igual ao gravado ao lado
   const zip = fs.readFileSync(zipPath);
   const nomes: string[] = [];

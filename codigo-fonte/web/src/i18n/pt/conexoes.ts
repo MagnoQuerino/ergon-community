@@ -328,7 +328,7 @@ const conexoes = {
   'teams.codigoExemplo': 'ABCD-EFGH',
   'teams.confirmar': 'Confirmar',
   'teams.preparando': 'Preparando a conexão com o Teams…',
-  'teams.soDireta': 'Só a conversa direta com o app funciona por enquanto (grupos, canais e arquivos ainda não). Com o Ergon fechado, o app responde na hora que recebeu e guarda o pedido, cifrado, por até 7 dias.',
+  'teams.soDireta': 'Só a conversa direta com o app funciona por enquanto (grupos, canais e arquivos ainda não). Com o Ergon fechado, o app responde na hora que recebeu e guarda o pedido, cifrado, por até 60 dias.',
   'teams.ajusteInstalacao': 'Ajuste da instalação',
   'teams.endereco': 'Endereço do serviço do Teams',
 
@@ -351,7 +351,7 @@ const conexoes = {
   'teams.problema.registro': 'Não deu para ligar este Ergon ao serviço do Teams agora. Novas tentativas acontecem sozinhas, com intervalos cada vez maiores; se continuar, confira se a data e a hora deste computador estão certas.',
   'teams.problema.religar': 'O serviço do Teams foi reiniciado e as contas ligadas foram desfeitas. Para ligar de novo, mande uma mensagem ao app no Teams e digite o código abaixo.',
   'teams.estado.conectado': 'Conectado.',
-  'teams.estado.offline': 'Sem conexão agora. Os pedidos ficam guardados por até 7 dias e chegam quando a conexão voltar.',
+  'teams.estado.offline': 'Sem conexão agora. Os pedidos ficam guardados por até 60 dias e chegam quando a conexão voltar.',
 
   // ——— conversar com a equipe pelo bot do Ergon no Discord (mesmo serviço do Teams; ConversaComEquipe) ———
   'equipe.titulo': 'Conversar com a equipe',
@@ -372,7 +372,7 @@ const conexoes = {
   'discordBot.caida': '{nome}: {motivo}. Para ligar de novo, mande uma mensagem ao bot Ergon no Discord e digite o código abaixo.',
   'discordBot.pronto': 'Pronto: a conta do Discord "{nome}" está ligada. Escreva para o bot no Discord, e o pedido vai para a sua equipe.',
   'discordBot.preparando': 'Preparando a conexão com o Discord…',
-  'discordBot.soDireta': 'Só a conversa direta com o bot funciona por enquanto (servidores, grupos e arquivos ainda não). Com o Ergon fechado, o bot responde na hora que recebeu e guarda o pedido, cifrado, por até 7 dias.',
+  'discordBot.soDireta': 'Só a conversa direta com o bot funciona por enquanto (servidores, grupos e arquivos ainda não). Com o Ergon fechado, o bot responde na hora que recebeu e guarda o pedido, cifrado, por até 60 dias.',
   'discordBot.nomeEscolhido': 'O nome é o que a conta do Discord escolheu para si.',
   'discordBot.soOSeuCodigo': 'Só digite um código que apareceu agora no SEU Discord, na sua conversa com o bot. Ninguém do suporte pede este código.',
   'discordBot.escolhaConsciente': 'Fui eu que pedi este código agora, no meu próprio Discord.',
