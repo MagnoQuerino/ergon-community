@@ -27,7 +27,8 @@ test('Telegram e Discord: a tela guarda o código do bot, liga pelo código do b
   assert.match(view, /api\.post\(`\/api\/canais\/\$\{canal\}\/parear`, \{ codigo, password: senha \}\)/);
   assert.match(view, /useResource<Record<NomeCanal, EstadoCanal>>\('\/api\/canais', \['canais\.changed'\]\)/);
   assert.match(view, /\(\['telegram', 'discord'\] as const\)\.map/);
-  assert.match(view, /<ConversaPorCanais \/>/);
+  // rc.33: os dois canais são blocos da grade "Conversar com a equipe", ao lado do Teams
+  assert.match(view, /<ConversaPorCanal canal=\{c\} estado=\{canais\.data\[c\]\} reload=\{canais\.reload\} onClose=\{fechar\} \/>/);
   // o campo do código do bot não mostra o que foi colado
   assert.match(view, /t\('conexoes\.canal\.codigoDoBot'\)\}<input type="password"/);
   for (const c of ['formato', 'codigo', 'tentativas', 'motor']) assert.ok(pt[`canal.erro.${c}` as keyof typeof pt], c);

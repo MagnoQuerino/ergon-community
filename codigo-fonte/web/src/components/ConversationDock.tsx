@@ -181,9 +181,11 @@ function TeamRest({ scope, shown, currentId, onOpen }: { scope: string; shown: R
  * do colega aberto aparecem embaixo dele (os 5 primeiros e "ver todos"), com renomear, fixar, não lida e arquivar.
  * A busca do topo acha tudo: contatos, assuntos, mensagens, arquivos e links — e leva direto à mensagem.
  */
-export function ConversationsDialog({ coordinator, scope, initial, onClose, onOpenAgent }: {
+export function ConversationsDialog({ coordinator, scope, initial, onClose, onOpenAgent, onFoco }: {
   coordinator: TeamAgent | null; scope: string; initial: { agentId: string | null; conversationId: string | null }; onClose: () => void;
   onOpenAgent: (id: string, tab?: 'conversa' | 'perfil' | 'atividade', lite?: AgentLite | null) => void;
+  /** rc.33: tela cheia — o Modo Foco já nesta conversa (Esc e o X de lá voltam para cá) */
+  onFoco?: (agentId: string, conversationId: string | null) => void;
 }) {
   const t = useT();
   // agents.changed: nome e rosto novos de um colega aparecem na lista sem fechar e abrir de novo
@@ -238,7 +240,10 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
         <aside className="convs__list" aria-label={t('conversas.lista.suas')}>
           <div className="convs__head">
             <b>{t('conversas.titulo')}</b>
-            <button className="icon-btn" onClick={onClose} aria-label={t('conversas.lista.fechar')} title={t('conversas.lista.fechar')}><Icon name="x" /></button>
+            <span className="convs__head-acoes">
+              {onFoco && agent && <button className="icon-btn" onClick={() => onFoco(agent.id, current.conversationId)} aria-label={t('conversas.lista.telaCheia')} title={t('conversas.lista.telaCheiaDica')}><Icon name="focus" /></button>}
+              <button className="icon-btn" onClick={onClose} aria-label={t('conversas.lista.fechar')} title={t('conversas.lista.fechar')}><Icon name="x" /></button>
+            </span>
           </div>
           <label className="foco__search"><Icon name="search" size={14} /><input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('conversas.busca.campo')} aria-label={t('conversas.busca.aria')}
             onKeyDown={(e) => { if (e.key === 'Escape' && q) { e.preventDefault(); e.stopPropagation(); setQ(''); } }} /></label>

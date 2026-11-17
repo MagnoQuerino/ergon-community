@@ -224,10 +224,18 @@ describe('conversa com a equipe: colegas, ao vivo, arquivos, iniciativa e Docume
     await say(c, 'o que tem nesta foto?', { attachments: [img.json.id] }); await drain(h, 3);
     p = motor.started.at(-1)!;
     assert.equal(p.images?.length, 1); assert.equal(p.images?.[0].mime, 'image/png');
-    // áudio: guardado, e o colega avisa que não abre
+    // áudio (rc.33): guardado e mandado à transcrição; sem o transcritor do motor, o colega sabe que há um áudio que o
+    // sistema não transcreveu (e não inventa o conteúdo)
     const mp3 = await upload(Buffer.from([0x49, 0x44, 0x33, 0, 0, 0, 1, 2]), 'reuniao.mp3', 'audio/mpeg', { 'x-conversation-id': c });
     assert.equal(mp3.status, 201);
-    await say(c, 'ouve a reunião', { attachments: [mp3.json.id] }); await drain(h, 3);
+    await say(c, 'ouve a reunião', { attachments: [mp3.json.id] });
+    for (let i = 0; i < 50 && !['pronta', 'falhou'].includes(h.db.get<{ e: string }>('SELECT estado AS e FROM audio_transcricoes WHERE artifact_id = ?', mp3.json.id)?.e ?? ''); i++) await new Promise((ok) => setTimeout(ok, 10));
+    await drain(h, 3);
+    assert.match(motor.started.at(-1)!.input, /Há um áudio da pessoa que o sistema não conseguiu transcrever/);
+    // vídeo: guardado, e o colega avisa que não abre
+    const mp4 = await upload(Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]), 'reuniao.mp4', 'video/mp4', { 'x-conversation-id': c });
+    assert.equal(mp4.status, 201);
+    await say(c, 'e o vídeo?', { attachments: [mp4.json.id] }); await drain(h, 3);
     assert.match(motor.started.at(-1)!.input, /Tipo que o sistema não abre/);
     // arquivo de outra pessoa ou inexistente não entra
     assert.equal((await say(c, 'e esse?', { attachments: ['art_00000000000000000000000000000000'] })).status, 404);

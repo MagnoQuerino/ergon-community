@@ -4,6 +4,7 @@ import { useResource } from '../lib/live.ts';
 import type { ModelCatalog } from '../lib/types.ts';
 import { RECURSOS, type Conselho, type PontoDeVolta, type RecursosEstado, type Vaga } from '../lib/recursos.ts';
 import { Icon } from './Icon.tsx';
+import { useAjustes } from './AjustesEquipe.tsx';
 import { fmtDataHora, useT } from '../i18n/index.ts';
 
 /**
@@ -53,11 +54,12 @@ export function CapacidadesPanel({ dono }: { dono: boolean }) {
         <p className="hint warn"><Icon name="alert" size={12} /> {t('configuracoes.cap.navegador.risco')}</p>
         <p className="muted small">{t('configuracoes.cap.navegador.cofre')}</p>
 
-        <h4><Icon name="music" size={14} /> {t('configuracoes.cap.voz.titulo')}</h4>
+        <h4 id="voz"><Icon name="mic" size={14} /> {t('configuracoes.cap.voz.titulo')}</h4>
         <ul className="plain small">
           <li>{s.voz.transcrever ? t('configuracoes.cap.voz.transcreverPronto') : t('configuracoes.cap.voz.transcreverFalta')}</li>
           <li>{s.voz.falar ? t('configuracoes.cap.voz.falarPronto') : t('configuracoes.cap.voz.falarFalta')}</li>
         </ul>
+        <VozEscolhas dono={dono} onErro={(x) => setMsg({ kind: 'error', text: x })} />
 
         <h4><Icon name="plug" size={14} /> {t('configuracoes.cap.conectores.titulo')}</h4>
         <p className="muted small">{s.conectores.length ? t('configuracoes.cap.conectores.ligados', { n: s.conectores.length }) : t('configuracoes.cap.conectores.nenhum')}{' '}
@@ -72,6 +74,33 @@ export function CapacidadesPanel({ dono }: { dono: boolean }) {
       </section>
       <ConselhoCard dono={dono} />
     </>
+  );
+}
+
+/** Configurações › Voz (rc.33): a voz do "Ouvir" (Piper, padrão, ou edge-tts) e o modelo da transcrição (base ou small). */
+function VozEscolhas({ dono, onErro }: { dono: boolean; onErro: (texto: string) => void }) {
+  const t = useT();
+  const { a, salvar, aviso } = useAjustes(onErro);
+  if (!a || a.vozFalar === undefined) return null; // servidor de antes: sem a escolha
+  return (
+    <div className="block voz-escolhas">
+      <fieldset className="plain" disabled={!dono}>
+        <legend className="small"><b>{t('configuracoes.cap.voz.falarTitulo')}</b></legend>
+        <label className="check"><input type="radio" name="voz-falar" checked={a.vozFalar === 'piper'} onChange={() => void salvar({ vozFalar: 'piper' })} />
+          <span><b>{t('configuracoes.cap.voz.piper')}</b> <small className="muted">{t('configuracoes.cap.voz.piperDica')}</small></span></label>
+        <label className="check"><input type="radio" name="voz-falar" checked={a.vozFalar === 'edge'} onChange={() => void salvar({ vozFalar: 'edge' })} />
+          <span><b>{t('configuracoes.cap.voz.edge')}</b> <small className="muted">{t('configuracoes.cap.voz.edgeDica')}</small></span></label>
+      </fieldset>
+      <fieldset className="plain" disabled={!dono}>
+        <legend className="small"><b>{t('configuracoes.cap.voz.modeloTitulo')}</b></legend>
+        <label className="check"><input type="radio" name="voz-modelo" checked={a.vozModelo === 'base'} onChange={() => void salvar({ vozModelo: 'base' })} />
+          <span><b>{t('configuracoes.cap.voz.base')}</b> <small className="muted">{t('configuracoes.cap.voz.baseDica')}</small></span></label>
+        <label className="check"><input type="radio" name="voz-modelo" checked={a.vozModelo === 'small'} onChange={() => void salvar({ vozModelo: 'small' })} />
+          <span><b>{t('configuracoes.cap.voz.small')}</b> <small className="muted">{t('configuracoes.cap.voz.smallDica')}</small></span></label>
+      </fieldset>
+      <p className="hint">{t('configuracoes.cap.voz.idioma')}</p>
+      {aviso && <p className="hint">{aviso}</p>}
+    </div>
   );
 }
 

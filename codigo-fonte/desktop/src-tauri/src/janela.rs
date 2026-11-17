@@ -1,6 +1,7 @@
 //! A janela do Ergon e a política de navegação. Dentro da janela só carregam a tela de abertura (conteúdo do
 //! próprio aplicativo) e o Ergon local na porta confirmada; qualquer outro endereço da web abre no navegador do
-//! sistema, e esquemas estranhos (file:, data:, javascript: …) são recusados. Downloads vão para a pasta Downloads.
+//! sistema, e esquemas estranhos (file:, data:, javascript: …) são recusados. Downloads vão para a pasta de downloads do
+//! Ergon (rc.33: a pessoa escolhe em Configurações; sem escolha, a Downloads do sistema), e a página recebe o aviso.
 
 use crate::Estado;
 use std::path::{Path, PathBuf};
@@ -69,6 +70,12 @@ fn navegar(app: &AppHandle, url: &Url) -> bool {
         std::thread::spawn(move || abrir_atualizacoes(&a));
         return false;
     }
+    // downloads (rc.33): a pasta do Ergon e o aviso do download; a página só pede
+    if d == Destino::Ergon && url.path().starts_with(PREFIXO_DOWNLOADS) {
+        let (a, u) = (app.clone(), url.clone());
+        std::thread::spawn(move || pedido_de_downloads(&a, &u));
+        return false;
+    }
     // "Voltar para esta versão": a página só pede; quem confere, avisa, pede a confirmação e volta é a tela de abertura
     if d == Destino::Ergon && url.path() == PEDIDO_VOLTAR {
         let a = app.clone();
@@ -125,7 +132,142 @@ fn nome_livre(alvo: PathBuf) -> PathBuf {
     (1..1000).map(|i| pasta.join(format!("{base} ({i}){ext}"))).find(|p| !p.exists()).unwrap_or(alvo)
 }
 
-fn baixar(app: &AppHandle, evento: DownloadEvent<'_>) -> bool {
+/// Onde fica guardada a pasta escolhida em Configurações › "Pasta de downloads do Ergon" (texto puro, um caminho).
+fn arquivo_da_pasta(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("pasta-downloads.txt"))
+}
+
+/// A pasta escolhida, se ainda existe (pasta apagada ou disco removido: volta ao padrão).
+fn pasta_escolhida(app: &AppHandle) -> Option<PathBuf> {
+    let texto = std::fs::read_to_string(arquivo_da_pasta(app)?).ok()?;
+    pasta_valida(texto.trim())
+}
+
+/// Só caminho absoluto de uma pasta que existe.
+pub fn pasta_valida(texto: &str) -> Option<PathBuf> {
+    let p = PathBuf::from(texto);
+    (!texto.is_empty() && p.is_absolute() && p.is_dir()).then_some(p)
+}
+
+/// A pasta padrão: a Downloads do sistema (instância de teste: a pasta do aplicativo, não a da pessoa).
+fn pasta_padrao(app: &AppHandle) -> Option<PathBuf> {
+    if crate::instalacao::localizar().teste {
+        app.path().app_local_data_dir().ok().map(|d| d.join("downloads-teste"))
+    } else {
+        app.path().download_dir().ok()
+    }
+}
+
+pub fn pasta_downloads(app: &AppHandle) -> Option<PathBuf> {
+    pasta_escolhida(app).or_else(|| pasta_padrao(app))
+}
+
+/// Grava a escolha (None = volta ao padrão).
+fn gravar_pasta(app: &AppHandle, pasta: Option<&Path>) {
+    let Some(arq) = arquivo_da_pasta(app) else { return };
+    match pasta {
+        Some(p) => {
+            if let Some(d) = arq.parent() {
+                std::fs::create_dir_all(d).ok();
+            }
+            if let Err(e) = std::fs::write(&arq, p.to_string_lossy().as_bytes()) {
+                log::warn!("não gravou a pasta de downloads: {e}");
+            }
+        }
+        None => {
+            std::fs::remove_file(&arq).ok();
+        }
+    }
+}
+
+/// Texto JSON seguro para ir dentro de um script na página (serde_json escapa aspas, barras e quebras; "<" e os
+/// separadores de linha do JavaScript também saem escapados).
+fn json_para_script(v: &serde_json::Value) -> String {
+    serde_json::to_string(v).unwrap_or_else(|_| "null".into()).replace('<', "\\u003c").replace('\u{2028}', "\\u2028").replace('\u{2029}', "\\u2029")
+}
+
+/// Avisa a página (um evento no window, nada além): o download que terminou, ou a pasta atual.
+fn avisar_pagina(w: &tauri::Webview<Wry>, evento: &str, detalhe: serde_json::Value) {
+    let js = format!("window.dispatchEvent(new CustomEvent({}, {{ detail: {} }}))", json_para_script(&serde_json::Value::from(evento)), json_para_script(&detalhe));
+    if let Err(e) = w.eval(js) {
+        log::warn!("não avisou a página: {e}");
+    }
+}
+
+fn avisar_principal(app: &AppHandle, evento: &str, detalhe: serde_json::Value) {
+    if let Some(w) = app.get_webview_window(PRINCIPAL) {
+        let js = format!("window.dispatchEvent(new CustomEvent({}, {{ detail: {} }}))", json_para_script(&serde_json::Value::from(evento)), json_para_script(&detalhe));
+        let _ = w.eval(js);
+    }
+}
+
+fn detalhe_da_pasta(app: &AppHandle) -> serde_json::Value {
+    serde_json::json!({
+        "pasta": pasta_downloads(app).map(|p| p.display().to_string()).unwrap_or_default(),
+        "padrao": pasta_escolhida(app).is_none(),
+    })
+}
+
+/// Os downloads desta sessão (o id que a página recebe é a posição aqui): "Abrir pasta" e "Mostrar arquivo" só valem
+/// para um arquivo que o próprio aplicativo baixou, nunca para um caminho que a página mande.
+fn guardar_download(app: &AppHandle, p: &Path) -> usize {
+    let e = app.state::<Estado>();
+    let mut lista = e.downloads.lock().unwrap_or_else(|x| x.into_inner());
+    lista.push(p.to_path_buf());
+    lista.len() - 1
+}
+
+fn download_de(app: &AppHandle, url: &Url) -> Option<PathBuf> {
+    let id: usize = url.query_pairs().find(|(k, _)| &**k == "id")?.1.parse().ok()?;
+    let e = app.state::<Estado>();
+    let lista = e.downloads.lock().unwrap_or_else(|x| x.into_inner());
+    lista.get(id).cloned()
+}
+
+/// Pedidos da página sobre downloads ("/__desktop/downloads/…"), como o de atualizações: a página não ganha nenhuma
+/// permissão; o aplicativo decide e responde por evento. Abrir é sempre a PASTA (ou mostrar o arquivo nela), nunca
+/// executar o arquivo: um executável baixado continua só um arquivo na pasta.
+fn pedido_de_downloads(app: &AppHandle, url: &Url) {
+    match url.path() {
+        PEDIDO_DL_PASTA => avisar_principal(app, "ergon:downloads-pasta", detalhe_da_pasta(app)),
+        PEDIDO_DL_ESCOLHER => {
+            use tauri_plugin_dialog::DialogExt;
+            let a = app.clone();
+            let mut d = app.dialog().file().set_title("Pasta de downloads do Ergon");
+            if let Some(p) = pasta_downloads(app) {
+                d = d.set_directory(p);
+            }
+            d.pick_folder(move |escolha| {
+                if let Some(p) = escolha.and_then(|f| f.into_path().ok()).and_then(|p| pasta_valida(&p.to_string_lossy())) {
+                    gravar_pasta(&a, Some(&p));
+                    log::info!("pasta de downloads escolhida");
+                }
+                avisar_principal(&a, "ergon:downloads-pasta", detalhe_da_pasta(&a));
+            });
+        }
+        PEDIDO_DL_PADRAO => {
+            gravar_pasta(app, None);
+            avisar_principal(app, "ergon:downloads-pasta", detalhe_da_pasta(app));
+        }
+        PEDIDO_DL_ABRIR_PASTA => {
+            if let Some(pasta) = download_de(app, url).and_then(|p| p.parent().map(Path::to_path_buf)) {
+                if let Err(e) = tauri_plugin_opener::open_path(&pasta, None::<&str>) {
+                    log::warn!("não abriu a pasta: {e}");
+                }
+            }
+        }
+        PEDIDO_DL_MOSTRAR => {
+            if let Some(p) = download_de(app, url) {
+                if let Err(e) = tauri_plugin_opener::reveal_item_in_dir(&p) {
+                    log::warn!("não mostrou o arquivo: {e}");
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn baixar(app: &AppHandle, webview: &tauri::Webview<Wry>, evento: DownloadEvent<'_>) -> bool {
     match evento {
         DownloadEvent::Requested { url, destination } => {
             // só baixa do Ergon (a navegação já não deixa chegar a outro lugar; aqui é a segunda trava)
@@ -134,13 +276,7 @@ fn baixar(app: &AppHandle, evento: DownloadEvent<'_>) -> bool {
                 return false;
             }
             let nome = destination.file_name().map(|n| n.to_owned()).filter(|n| !n.is_empty());
-            // instância de teste: os arquivos vão para a pasta do aplicativo, não para os Downloads da pessoa
-            let pasta = if crate::instalacao::localizar().teste {
-                app.path().app_local_data_dir().map(|d| d.join("downloads-teste"))
-            } else {
-                app.path().download_dir()
-            };
-            if let (Ok(pasta), Some(nome)) = (pasta, nome) {
+            if let (Some(pasta), Some(nome)) = (pasta_downloads(app), nome) {
                 std::fs::create_dir_all(&pasta).ok();
                 *destination = nome_livre(pasta.join(nome));
             }
@@ -150,7 +286,12 @@ fn baixar(app: &AppHandle, evento: DownloadEvent<'_>) -> bool {
             if success {
                 if let Some(p) = path {
                     log::info!("download concluído");
-                    avisar_download(app, &p);
+                    let id = guardar_download(app, &p);
+                    avisar_pagina(webview, "ergon:download", serde_json::json!({
+                        "id": id,
+                        "nome": p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                        "pasta": p.parent().map(|d| d.display().to_string()).unwrap_or_default(),
+                    }));
                 }
             } else {
                 log::warn!("download não concluído");
@@ -161,23 +302,12 @@ fn baixar(app: &AppHandle, evento: DownloadEvent<'_>) -> bool {
     }
 }
 
-/// No Windows o próprio WebView2 mostra o download; no Linux, um aviso diz onde o arquivo ficou.
-fn avisar_download(app: &AppHandle, caminho: &Path) {
-    #[cfg(target_os = "linux")]
-    {
-        use tauri_plugin_dialog::DialogExt;
-        app.dialog().message(format!("Arquivo salvo em:\n{}", caminho.display())).title("Download concluído").show(|_| {});
-    }
-    #[cfg(not(target_os = "linux"))]
-    let _ = (app, caminho);
-}
-
 /// Aplica a política de navegação, janelas novas e downloads a uma janela.
 fn politica<'a>(app: &AppHandle, b: WebviewWindowBuilder<'a, Wry, AppHandle>) -> WebviewWindowBuilder<'a, Wry, AppHandle> {
     let (a1, a2, a3) = (app.clone(), app.clone(), app.clone());
     b.on_navigation(move |url| navegar(&a1, url))
         .on_new_window(move |url, features| nova_janela(&a2, url, features))
-        .on_download(move |_webview, evento| baixar(&a3, evento))
+        .on_download(move |webview, evento| baixar(&a3, &webview, evento))
         .zoom_hotkeys_enabled(true)
 }
 
@@ -223,6 +353,14 @@ pub fn mostrar(app: &AppHandle) {
 
 /// Endereço que a página do Ergon usa para pedir a tela de atualizações (nunca chega ao servidor).
 pub const PEDIDO_ATUALIZACOES: &str = "/__desktop/atualizacoes";
+/// Pedidos da página sobre downloads (nunca chegam ao servidor): a pasta atual, escolher outra, voltar ao padrão, e
+/// abrir a pasta ou mostrar um arquivo baixado nesta sessão ("?id=N").
+pub const PREFIXO_DOWNLOADS: &str = "/__desktop/downloads/";
+pub const PEDIDO_DL_PASTA: &str = "/__desktop/downloads/pasta";
+pub const PEDIDO_DL_ESCOLHER: &str = "/__desktop/downloads/escolher";
+pub const PEDIDO_DL_PADRAO: &str = "/__desktop/downloads/padrao";
+pub const PEDIDO_DL_ABRIR_PASTA: &str = "/__desktop/downloads/abrir-pasta";
+pub const PEDIDO_DL_MOSTRAR: &str = "/__desktop/downloads/mostrar";
 /// Endereço que a página do Ergon usa para pedir a volta a uma versão anterior ("?versao=X"; nunca chega ao servidor).
 pub const PEDIDO_VOLTAR: &str = "/__desktop/voltar";
 
@@ -250,11 +388,12 @@ pub fn abrir_ergon(app: &AppHandle, porta: u16) -> tauri::Result<()> {
 }
 
 /// Endereço da página do Ergon no aplicativo. "app=desktop": a página sabe que está no aplicativo (o botão de
-/// atualizações leva à tela dele). "volta=1": voltar de versão pelo aplicativo vale aqui (Windows com o ambiente
+/// atualizações leva à tela dele). "downloads=1": este aplicativo atende os pedidos de downloads (rc.33: a pasta do
+/// Ergon e o aviso com "Abrir pasta"); sem ele (aplicativo de antes), a página não os faz. "volta=1": voltar de versão pelo aplicativo vale aqui (Windows com o ambiente
 /// próprio, como em atualizacao.rs); sem ele (Linux, ou Windows sem o ambiente), a página mostra só a página de cada
 /// versão.
 pub fn endereco_do_ergon(porta: u16, volta: bool) -> String {
-    format!("http://localhost:{porta}/?app=desktop{}", if volta { "&volta=1" } else { "" })
+    format!("http://localhost:{porta}/?app=desktop&downloads=1{}", if volta { "&volta=1" } else { "" })
 }
 
 /// Tela de atualizações do aplicativo (a de abertura, em "#atualizacoes"): verifica e, se a pessoa pedir, atualiza.
@@ -310,8 +449,8 @@ mod testes {
 
     #[test]
     fn pagina_do_ergon_sabe_se_a_volta_vale_aqui() {
-        assert_eq!(endereco_do_ergon(8787, true), "http://localhost:8787/?app=desktop&volta=1");
-        assert_eq!(endereco_do_ergon(8787, false), "http://localhost:8787/?app=desktop", "Linux ou sem o ambiente: sem o botão");
+        assert_eq!(endereco_do_ergon(8787, true), "http://localhost:8787/?app=desktop&downloads=1&volta=1");
+        assert_eq!(endereco_do_ergon(8787, false), "http://localhost:8787/?app=desktop&downloads=1", "Linux ou sem o ambiente: sem o botão");
         assert!(Url::parse(&endereco_do_ergon(18787, true)).is_ok());
     }
 
@@ -331,6 +470,36 @@ mod testes {
         ] {
             assert_eq!(v(u), None, "{u}");
         }
+    }
+
+    #[test]
+    fn pedidos_de_downloads_ficam_no_aplicativo() {
+        for u in ["/__desktop/downloads/pasta", "/__desktop/downloads/escolher", "/__desktop/downloads/abrir-pasta?id=0"] {
+            let url = Url::parse(&format!("http://localhost:8787{u}")).unwrap();
+            assert_eq!(destino(&url, 8787), Destino::Ergon);
+            assert!(url.path().starts_with(PREFIXO_DOWNLOADS), "{u}");
+        }
+    }
+
+    #[test]
+    fn pasta_de_downloads_so_absoluta_e_existente() {
+        let pasta = std::env::temp_dir().join(format!("ergon-desktop-pasta-{}", std::process::id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        assert_eq!(pasta_valida(&pasta.to_string_lossy()), Some(pasta.clone()));
+        assert_eq!(pasta_valida(""), None);
+        assert_eq!(pasta_valida("relativa/pasta"), None);
+        assert_eq!(pasta_valida(&pasta.join("nao-existe").to_string_lossy()), None);
+        let arquivo = pasta.join("a.txt");
+        std::fs::write(&arquivo, "x").unwrap();
+        assert_eq!(pasta_valida(&arquivo.to_string_lossy()), None, "arquivo não é pasta");
+        std::fs::remove_dir_all(&pasta).ok();
+    }
+
+    #[test]
+    fn aviso_para_a_pagina_nao_quebra_o_script() {
+        let s = json_para_script(&serde_json::json!({ "nome": "a\"</script><b>\u{2028}.txt" }));
+        assert!(!s.contains('<') && !s.contains('\u{2028}'), "{s}");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&s).unwrap()["nome"], "a\"</script><b>\u{2028}.txt");
     }
 
     #[test]

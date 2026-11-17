@@ -90,61 +90,38 @@ async function terminar(runId: string, output: string): Promise<void> {
   await ate(() => h.db.get<{ status: string }>('SELECT status FROM runs WHERE id = ?', runId)!.status === 'succeeded');
 }
 
-test('pedido da pessoa pelo Teams vai direto; o que não partiu dela vira cartão no Teams, e Aprovar lá executa pela mesma função', async () => {
+test('pedido pelo Teams (canal externo): escrever numa conta sempre confirma; organizar se aprova no Teams pela mesma função', async () => {
   const b = await ligar();
   const um = await noTeams(b, 'cria a tarefa "Revisar contrato" no Asana, em Vendas');
-  const direto = (await executar(um.sessao, 'tarefa.criar', { titulo: 'Revisar contrato', quadro: 'Vendas' })).json;
-  assert.equal(direto.status, 'feita', 'pedido dela (pela conta do Teams ligada): sem cartão');
-  assert.equal(chamadas.length, 1);
-  await terminar(um.run, 'Criei a tarefa "Revisar contrato" em Vendas.');
-  await ate(() => rele.enviados.some((e) => e.purpose === 'reply' && /Revisar contrato/.test(e.text ?? '')), 'a resposta não voltou');
-  assert.ok(!rele.enviados.some((e) => e.card), 'nenhum cartão');
-
-  // a mesma sessão, agora como se uma rotina tivesse pedido: não partiu da pessoa → cartão
-  const dois = await noTeams(b, 'e organiza o resto');
-  h.db.run('UPDATE runs SET idempotency_key = ? WHERE id = ?', 'routine-teste-0001', dois.run);
-  const espera = (await executar(dois.sessao, 'tarefa.criar', { titulo: 'Da rotina', quadro: 'Vendas' })).json;
-  assert.equal(espera.status, 'aguardando_confirmacao');
-  assert.equal(chamadas.length, 1, 'nada saiu ainda');
-  await ate(() => rele.enviados.some((e) => e.card), 'o cartão não foi ao Teams');
+  const espera = (await executar(um.sessao, 'tarefa.criar', { titulo: 'Revisar contrato', quadro: 'Vendas' })).json;
+  assert.equal(espera.status, 'aguardando_confirmacao', 'pedido por canal externo: a escrita confirma no app (camada comum)');
+  assert.equal(chamadas.length, 0, 'nada saiu ainda');
+  await ate(() => rele.enviados.some((e) => e.card), 'o aviso não foi ao Teams');
   const env = rele.enviados.find((e) => e.card)!;
-  const texto = env.card.body.filter((x: any) => x.type === 'TextBlock').map((x: any) => x.text).join('\n');
-  assert.match(texto, /Asana · pela conta Ana/); assert.match(texto, /não partiu de você/);
+  // organizar (criar tarefa) é do tipo que a camada comum deixa decidir pelo canal: Aprovar no Teams executa
   const aprovar = env.card.body.find((x: any) => x.type === 'ActionSet').actions[0];
   rele.clica(b, aprovar.data, env.activityId);
-  await ate(() => chamadas.length === 2, 'a ação não saiu pelo clique no Teams');
-  const prop = h.db.get<{ status: string; kind: string }>('SELECT status, kind FROM agent_proposals WHERE id = ?', aprovar.data.p)!;
-  assert.equal(prop.kind, 'conexao'); assert.equal(prop.status, 'applied');
+  await ate(() => chamadas.length === 1, 'Aprovar no Teams não executou');
   assert.ok(h.db.get("SELECT 1 AS x FROM conexao_acoes WHERE workspace_id = ? AND status = 'feita' AND decisao = 'confirmar'", s.workspaceId), 'o mesmo registro da ação confirmada na tela');
-  await ate(() => rele.atualizados.length === 1, 'o cartão não ficou com a linha final');
-  // clicar de novo não repete
-  rele.clica(b, aprovar.data, env.activityId);
-  await ate(() => rele.atualizados.length === 2);
-  assert.equal(chamadas.length, 2, 'o clique repetido não executa de novo');
+  await terminar(um.run, 'Criei a tarefa "Revisar contrato" em Vendas.');
+  await ate(() => rele.enviados.some((e) => e.purpose === 'reply' && /Revisar contrato/.test(e.text ?? '')), 'a resposta não voltou');
 });
 
-test('apagar pedido pela própria pessoa no Teams: sempre cartão no Teams; com "Liberar tudo" (escolha dela no app), vai direto, igual ao app', async () => {
+test('pedido de apagar pelo Teams: não vai à equipe direto; fica num cartão no app, e só depois de aprovado lá a equipe começa', async () => {
   h.integrations.secrets.write(s.workspaceId, 'slack', { token: ['xoxb', '1234', '5678', 'abcdefgh'].join('-') });
   setIntegration(h.db, s.workspaceId, 'slack', { state: 'connected', account_label: 'Acme', connected_at: new Date().toISOString() });
   const b = await ligar();
-  const um = await noTeams(b, 'apaga aquela mensagem antiga do #geral');
-  const espera = (await req(h, 'POST', '/internal/bridge/v1/conexoes', null, { op: 'executar', session_id: um.sessao, conexao: 'slack', acao: 'slack.apagar', parametros: { canal: 'C012AB3CD', mensagem: '1503435956.000247' } }, { 'x-ergon-bridge-token': TOKEN })).json;
-  assert.equal(espera.status, 'aguardando_confirmacao', 'apagar sempre pede cartão, mesmo pedido pela pessoa');
-  assert.ok(!chamadas.some((c) => c.path === '/api/chat.delete'), 'nada apagado ainda');
-  await ate(() => rele.enviados.some((e) => e.card), 'o cartão de apagar não foi ao Teams');
-  const env = rele.enviados.find((e) => e.card)!;
-  const recusar = env.card.body.find((x: any) => x.type === 'ActionSet').actions[1];
-  assert.equal(recusar.data.d, 'reject');
-  rele.clica(b, recusar.data, env.activityId);
-  await ate(() => h.db.get<{ status: string }>('SELECT status FROM agent_proposals WHERE id = ?', recusar.data.p)?.status === 'rejected', 'Recusar no Teams não recusou');
-  assert.ok(!chamadas.some((c) => c.path === '/api/chat.delete'), 'recusado: nada apagado');
-  await terminar(um.run, 'Ok, não apaguei.');
-
-  // "Liberar tudo" ligado no app (escolha consciente): a mesma regra vale pelo Teams, sem cartão
+  const antes = h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM runs')!.n;
+  rele.diz(b, 'apaga aquela mensagem antiga do #geral');
+  await ate(() => rele.enviados.some((e) => e.purpose === 'system' && /aprovação no app/.test(e.text ?? '')), 'o Teams não soube que precisa aprovar no app');
+  assert.equal(h.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM runs')!.n, antes, 'nada rodou');
+  const pid = h.db.get<{ id: string }>("SELECT id FROM agent_proposals WHERE kind = 'canal_externo' AND status = 'proposed'")!.id;
+  assert.equal((await req(h, 'POST', `/api/proposals/${pid}`, s, { decision: 'apply' })).status, 200);
+  await ate(() => !!h.db.get('SELECT 1 AS x FROM runs WHERE hermes_session_id IS NOT NULL AND rowid > ?', antes), 'aprovado no app, a equipe não começou');
+  const r = h.db.get<{ id: string; hermes_session_id: string }>('SELECT id, hermes_session_id FROM runs ORDER BY rowid DESC LIMIT 1')!;
+  // e a ação de apagar, mesmo com "Liberar tudo", confirma no app (pedido por canal externo)
   assert.equal((await req(h, 'PUT', '/api/conexoes/liberar-tudo', s, { on: true })).status, 200);
-  const dois = await noTeams(b, 'agora pode apagar');
-  const direto = (await req(h, 'POST', '/internal/bridge/v1/conexoes', null, { op: 'executar', session_id: dois.sessao, conexao: 'slack', acao: 'slack.apagar', parametros: { canal: 'C012AB3CD', mensagem: '1503435956.000247' } }, { 'x-ergon-bridge-token': TOKEN })).json;
-  assert.equal(direto.status, 'feita', JSON.stringify(direto));
-  assert.equal(chamadas.filter((c) => c.path === '/api/chat.delete').length, 1);
-  assert.equal(rele.enviados.filter((e) => e.card).length, 1, 'nenhum cartão novo');
+  const espera = (await req(h, 'POST', '/internal/bridge/v1/conexoes', null, { op: 'executar', session_id: r.hermes_session_id, conexao: 'slack', acao: 'slack.apagar', parametros: { canal: 'C012AB3CD', mensagem: '1503435956.000247' } }, { 'x-ergon-bridge-token': TOKEN })).json;
+  assert.equal(espera.status, 'aguardando_confirmacao', JSON.stringify(espera));
+  assert.ok(!chamadas.some((c) => c.path === '/api/chat.delete'), 'nada apagado sem a confirmação no app');
 });

@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { textoCurto, useEnvioPorItem } from '../lib/envio.ts';
 import { ApiError, api, errMsg } from '../lib/api.ts';
@@ -11,6 +11,7 @@ import { useT } from '../i18n/index.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
+import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
 import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { Selo } from './Selo.tsx';
 
@@ -51,9 +52,21 @@ function Item({ badge, icone = 'flag', onOpen, openLabel, children, actions, avi
  * e regras. Cada item tem Aprovar e Recusar (ou Responder) ali mesmo; clicar no item abre o card (ou a conversa) por
  * cima da tela, sem trocar de área. Antes, os cards que esperavam você nem entravam na conta.
  */
-/** inline: dentro de outra tela (modo foco), sem gaveta nem botão de fechar */
-export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOpenAgent?: OpenAgent; onGo?: (v: View) => void; inline?: boolean }) {
+/** inline: dentro de outra tela (modo foco), sem gaveta nem botão de fechar. sob: um card aberto daqui está por cima (a lista fica guardada, escondida) */
+export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void; onOpenAgent?: OpenAgent; onGo?: (v: View) => void; inline?: boolean; sob?: boolean }) {
   const t = useT();
+  // na gaveta, o card abre por cima desta lista (uma pilha): "Voltar", o X e o Esc do card voltam aqui
+  // o item que abriu o card: ao voltar, o foco volta a ele (a lista esteve inerte, e o foco se perdeu)
+  const abriu = useRef<HTMLElement | null>(null);
+  const abrirCard = (id: string) => { abriu.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; openCard(id, inline ? undefined : 'decisoes'); };
+  useEffect(() => {
+    if (sob || !abriu.current) return;
+    const el = abriu.current; abriu.current = null;
+    // a lista acabou de sair de baixo do card (estava escondida e inerte): tenta por alguns quadros até o foco pegar
+    let n = 0;
+    const tentar = () => { if (!el.isConnected) return; el.focus({ preventScroll: true }); if (document.activeElement !== el && ++n < 12) requestAnimationFrame(tentar); };
+    requestAnimationFrame(tentar);
+  }, [sob]);
   const d = useResource<Decisions>('/api/decisions', ['proposals.changed', 'runs.changed', 'rules.changed', 'tasks.changed']);
   // rc.28: a trava é por item — o botão fica ativo dizendo o que está indo (aria-busy), o segundo clique no MESMO item
   // não manda de novo, e o clique noutro cartão enquanto um vai é enviado de verdade (como na rc.27)
@@ -88,7 +101,7 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
   const empty = x && !x.total;
   const conv = (p: { agent_id: string | null; conversation_id: string | null }) => (p.agent_id && p.conversation_id ? () => openConversation(p.agent_id, p.conversation_id) : undefined);
   return (
-    <aside ref={ref} className={inline ? 'dec-inline' : 'drawer dec-panel'} role={inline ? undefined : 'dialog'} aria-labelledby={inline ? undefined : 'dec-title'} aria-label={inline ? t('servidor.decisoes.titulo') : undefined}>
+    <aside ref={ref} className={inline ? 'dec-inline' : `drawer dec-panel ${sob ? 'dec-panel--sob' : ''}`} inert={sob || undefined} aria-hidden={sob || undefined} role={inline ? undefined : 'dialog'} aria-labelledby={inline ? undefined : 'dec-title'} aria-label={inline ? t('servidor.decisoes.titulo') : undefined}>
       {!inline && <div className="drawer__head"><h3 className="drawer__title" id="dec-title">{t('servidor.decisoes.titulo')}</h3><button className="icon-btn" onClick={onClose} aria-label={t('servidor.decisoes.fechar')} title={t('servidor.decisoes.fechar')}><Icon name="x" /></button></div>}
       {!x ? <Loading error={d.error} /> : (
         <>
@@ -100,7 +113,7 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
           {x.cards.map((c) => {
             const v = text[c.id] ?? '';
             return (
-              <Item key={c.id} icone={NEED_ICON[c.need]} badge={t('servidor.decisoes.badgeCard', { numero: c.number, precisa: t(NEED_LABEL[c.need]) })} onOpen={() => openCard(c.id)} openLabel={t('servidor.decisoes.abrirCard', { numero: c.number })} aviso={aviso?.id === c.id ? aviso.texto : null}
+              <Item key={c.id} icone={NEED_ICON[c.need]} badge={t('servidor.decisoes.badgeCard', { numero: c.number, precisa: t(NEED_LABEL[c.need]) })} onOpen={() => abrirCard(c.id)} openLabel={t('servidor.decisoes.abrirCard', { numero: c.number })} aviso={aviso?.id === c.id ? aviso.texto : null}
                 actions={c.need === 'info' ? (
                   <form className={`dec-answer ${FILEIRA}`} onSubmit={(e) => { e.preventDefault(); if (textoCurto(v)) { setAviso({ id: c.id, texto: t('tarefa.escrevaResposta') }); return; } void respond(c.id, 'answer', v.trim()); }}>
                     <input required value={v} maxLength={1500} onChange={(e) => { semAviso(c.id); setText((t) => ({ ...t, [c.id]: e.target.value })); }} placeholder={t('servidor.decisoes.suaResposta')} aria-label={t('servidor.decisoes.respostaPara', { numero: c.number })} />
@@ -151,12 +164,12 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
             <article key={p.id} className="dec-card">
               <div className="dec-card__top">
                 <Selo icone={p.kind === 'regra' || p.kind === 'gestao' ? 'shield-check' : 'plug'}>{KIND[p.kind]}</Selo>
-                {p.task_id ? <button type="button" className={ACAO.leve} onClick={() => openCard(p.task_id!)} title={t('servidor.decisoes.abrirCard', { numero: p.task_number ?? '' })}>#{p.task_number}{p.agent_name ? t('servidor.decisoes.deQuem', { nome: p.agent_name }) : ''}</button>
+                {p.task_id ? <button type="button" className={ACAO.leve} onClick={() => abrirCard(p.task_id!)} title={t('servidor.decisoes.abrirCard', { numero: p.task_number ?? '' })}>#{p.task_number}{p.agent_name ? t('servidor.decisoes.deQuem', { nome: p.agent_name }) : ''}</button>
                   : conv(p) ? <button type="button" className={ACAO.leve} onClick={conv(p)} title={t('servidor.decisoes.abrirConversa')}>{p.agent_name ?? t('servidor.decisoes.aConversa')}</button>
                   : p.agent_name && <span className="muted small">{p.agent_name}</span>}
               </div>
               {/* o resumo é escrito pelo servidor e ainda vem só em português (próximo passo: server/src/lib/textos.ts, no começo) */}
-              <div className="dec-card__txt"><TextoLongo texto={p.summary} /></div>
+              <div className="dec-card__txt">{p.kind === 'aprovacao' ? <TextoDaAprovacao resumo={p.summary} risco={p.risco} detalhe={p.detalhe} /> : <TextoLongo texto={p.summary} />}</div>
               <div className={`${FILEIRA} dec-card__acts`}>
                 {p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} ocupado={ocupadoDe(p.id)} onEscolher={(alcance) => void proposal(p.id, 'apply', { alcance })} onRecusar={() => void proposal(p.id, 'reject')} />
                   : p.kind === 'depois_de_ler' ? <BotoesPrazo ocupado={ocupadoDe(p.id)} onEscolher={(prazo) => void proposal(p.id, 'apply', { prazo })} onRecusar={() => void proposal(p.id, 'reject')} />
@@ -169,7 +182,7 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
           ) : (
             <Item key={p.id} icone={p.kind === 'question' ? 'help' : p.kind === 'segredo' || p.kind === 'permission' ? 'key' : 'flag'} badge={p.agent_name ? t('servidor.decisoes.tipoDeQuem', { tipo: KIND[p.kind] ?? p.kind, nome: p.agent_name }) : KIND[p.kind] ?? p.kind} onOpen={conv(p)} openLabel={t('servidor.decisoes.abrirConversa')}
               actions={p.kind === 'question' || p.kind === 'segredo'
-                ? (conv(p) ?? (p.task_id ? () => openCard(p.task_id!) : null)) && <button className={ACAO.principal} onClick={conv(p) ?? (() => openCard(p.task_id!))}>
+                ? (conv(p) ?? (p.task_id ? () => abrirCard(p.task_id!) : null)) && <button className={ACAO.principal} onClick={conv(p) ?? (() => abrirCard(p.task_id!))}>
                   <Icon name={p.kind === 'segredo' ? 'key' : 'chat'} size={13} /> {p.kind === 'segredo' ? t('servidor.decisoes.informar') : t('servidor.decisoes.responder')}</button>
                 : p.kind === 'permission'
                 ? conv(p) && <button className={ACAO.principal} onClick={conv(p)}><Icon name="key" size={13} /> {t('servidor.decisoes.autorizar')}</button>
@@ -192,7 +205,7 @@ export function DecisionsPanel({ onClose, inline }: { onClose?: () => void; onOp
 
           {(x.linkList.length > 0 || x.ruleList.length > 0) && <h4 className="rt-sub">{t('servidor.decisoes.paraConferir')}</h4>}
           {x.linkList.map((l) => (
-            <Item key={l.id} icone="layers" badge={t('servidor.decisoes.vinculo')} onOpen={() => openCard(l.task_id)} openLabel={t('servidor.decisoes.abrirCard', { numero: l.number })}
+            <Item key={l.id} icone="layers" badge={t('servidor.decisoes.vinculo')} onOpen={() => abrirCard(l.task_id)} openLabel={t('servidor.decisoes.abrirCard', { numero: l.number })}
               actions={<>
                 <button className={ACAO.principal} aria-busy={vai(l.id, 'apply')} onClick={() => decidirItem(l.id, 'apply', () => api.post(`/api/link-proposals/${l.id}`, { decision: 'confirmed' }))}>{vai(l.id, 'apply') ? t('servidor.decisoes.aprovando') : t('servidor.decisoes.aprovar')}</button>
                 <button className={ACAO.secundario} aria-busy={vai(l.id, 'reject')} onClick={() => decidirItem(l.id, 'reject', () => api.post(`/api/link-proposals/${l.id}`, { decision: 'rejected' }))}>{vai(l.id, 'reject') ? t('servidor.decisoes.recusando') : t('servidor.decisoes.recusar')}</button>

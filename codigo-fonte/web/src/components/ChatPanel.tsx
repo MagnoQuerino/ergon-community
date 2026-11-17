@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { fmtDataHora, fmtHora, tn, useT } from '../i18n/index.ts';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
 import { dragHasFiles, inlinePreview, isImage, kindOf, size } from '../lib/files.ts';
@@ -12,12 +12,14 @@ import { ComandosBar, DicaDeAtalhos, useFraseDoComando, type ResultadoComando } 
 import { Icon } from './Icon.tsx';
 import { OrientarCampo } from './AjustesEquipe.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
+import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
 import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { Selo } from './Selo.tsx';
 import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
-import { RECURSOS, audiosParaTranscrever, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
+import { RECURSOS, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
+import { GravadorDeVoz } from './GravadorDeVoz.tsx';
 import { letterStyle } from '../lib/contraste.ts';
 import { CenaVazio } from '../arte/Cena.tsx';
 
@@ -90,6 +92,43 @@ function FileChip({ f, progress, error, onRemove }: { f: { filename: string; mim
       {href ? <a className="fchip__main" href={href} target="_blank" rel="noreferrer" title={t('conversas.arquivo.abrir')}>{body}</a> : <span className="fchip__main">{body}</span>}
       {onRemove && <button type="button" className="fchip__x" onClick={onRemove} aria-label={t('conversas.arquivo.tirar', { nome: f.filename })}><Icon name="x" size={12} /></button>}
     </span>
+  );
+}
+
+/**
+ * Áudio da mensagem (rc.33): o player (pela rota de sempre do arquivo) e, embaixo, a transcrição gravada no servidor —
+ * "transcrevendo…", "preparando (primeira vez)…", o texto recolhido, ou a falha com "tentar de novo".
+ */
+function AudioDaMensagem({ f, onTentar, podeTranscrever }: { f: Attachment; onTentar: (f: Attachment) => void; /** áudio de antes, sem transcrição: o botão */ podeTranscrever: boolean }) {
+  const t = useT();
+  const tr = f.transcricao;
+  // o WebM do gravador não traz a duração no cabeçalho: o navegador só sabe depois de ir até o fim (sem isso, a barra
+  // do player fica sem tamanho)
+  const duracao = (ev: SyntheticEvent<HTMLAudioElement>) => {
+    const a = ev.currentTarget;
+    if (a.duration !== Infinity) return;
+    const volta = () => { a.removeEventListener('timeupdate', volta); a.currentTime = 0; };
+    a.addEventListener('timeupdate', volta);
+    a.currentTime = 1e7;
+  };
+  return (
+    <div className="msg__audio">
+      <audio controls preload="metadata" src={`/api/artifacts/${f.id}/download?inline=1`} onLoadedMetadata={duracao} aria-label={t('conversas.audio.player', { nome: f.filename })} />
+      {!tr ? (podeTranscrever ? <button type="button" className="linkish small" onClick={() => onTentar(f)}><Icon name="file" size={12} /> {t('conversas.audio.transcrever')}</button> : null)
+        : tr.estado === 'transcrevendo' ? <span className="muted small msg__transcricao">{t('conversas.audio.transcrevendo')}</span>
+        : tr.estado === 'preparando' ? <span className="muted small msg__transcricao">{t('conversas.audio.preparando')}</span>
+        : tr.estado === 'falhou' ? (
+          <span className="small msg__transcricao msg__transcricao--falhou">
+            {tr.motivo === 'longo' ? t('conversas.audio.falhouLongo') : tr.motivo === 'componente' ? t('conversas.audio.falhouComponente') : tr.motivo === 'sem_motor' ? t('conversas.audio.falhouSemMotor') : t('conversas.audio.falhou')}
+            {tr.motivo !== 'longo' && <> <button type="button" className="linkish" onClick={() => onTentar(f)}><Icon name="repeat" size={12} /> {t('conversas.audio.tentar')}</button></>}
+          </span>
+        ) : (
+          <details className="msg__transcricao">
+            <summary>{t('conversas.audio.transcricao')}</summary>
+            <p>{tr.texto?.trim() ? tr.texto : <span className="muted">{t('conversas.recursos.semFala')}</span>}</p>
+          </details>
+        )}
+    </div>
   );
 }
 
@@ -232,9 +271,24 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   }, [msgs.data]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (atEnd && (live?.text || busy)) box.current?.scrollTo({ top: box.current.scrollHeight }); }, [live?.text, busy]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (atEnd) box.current?.scrollTo({ top: box.current.scrollHeight, behavior: 'smooth' }); }, [props.data?.length, shownOptimistic.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // rc.33: a lista encolhe quando a barra "Orientar sem interromper" aparece (e cresce quando ela some): quem estava no
+  // fim continua vendo a última mensagem, em vez de ela ficar escondida debaixo da barra
+  const fimRef = useRef(true);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let altura = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      if (el.clientHeight !== altura && fimRef.current) el.scrollTop = el.scrollHeight;
+      altura = el.clientHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [convId]);
   const onScroll = () => {
     const el = box.current; if (!el) return;
     const end = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    fimRef.current = end;
     setAtEnd(end);
     if (end) setFresh(0);
   };
@@ -371,34 +425,33 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const ouvir = async (m: Message) => {
     if (tocando === m.id) { audioRef.current?.pause(); setTocando(null); return; }
     setTocando(m.id);
+    // 1º uso do Piper: a voz é baixada agora (uns 60 MB); a pessoa sabe por que demora
+    if (rec.data?.voz.preparar?.falar) setHint(t('conversas.recursos.preparandoVoz'));
     try {
-      const blob = await api.postBlob(`${RECURSOS}/voz/falar`, { mensagem: m.id });
+      let reserva = false;
+      const blob = await api.postBlob(`${RECURSOS}/voz/falar`, { mensagem: m.id }, (h) => { reserva = h.get('X-Ergon-Voz') === 'reserva'; });
+      setHint(reserva ? t('conversas.recursos.vozReserva') : null);
+      if (rec.data?.voz.preparar?.falar) rec.reload();
       audioRef.current?.pause();
       const a = new Audio(URL.createObjectURL(blob));
       audioRef.current = a;
       a.onended = () => { setTocando(null); URL.revokeObjectURL(a.src); };
       await a.play();
-    } catch (e) { setTocando(null); setErr(errMsg(e)); }
+    } catch (e) { setTocando(null); setHint(null); setErr(errMsg(e)); }
   };
-  const [transcricoes, setTranscricoes] = useState<Record<string, string>>({});
-  const transcrever = async (f: Attachment) => {
-    setTranscricoes((x) => ({ ...x, [f.id]: '' }));
-    try { const r = await api.post<{ texto: string }>(`${RECURSOS}/voz/transcrever`, { arquivo: f.id }); setTranscricoes((x) => ({ ...x, [f.id]: r.texto || t('conversas.recursos.semFala') })); }
-    catch (e) { setTranscricoes((x) => { const n = { ...x }; delete n[f.id]; return n; }); setErr(errMsg(e)); }
+  // a transcrição é do servidor (gravada ligada ao áudio, e vai ao agente); aqui só o "tentar de novo"
+  // o pedido responde quando a transcrição termina (pode levar minutos); a mensagem já mostra "transcrevendo…" pelo aviso ao vivo
+  const tentarTranscrever = (f: Attachment) => {
+    void api.post(`${RECURSOS}/voz/transcrever`, { arquivo: f.id }).catch((e) => setErr(errMsg(e))).finally(() => msgs.reload());
+    window.setTimeout(() => msgs.reload(), 400);
   };
-  // o áudio que a pessoa manda agora vira texto sozinho quando a equipe transcreve neste computador (no próprio computador,
-  // sem custo de IA; regra do dono, 12/11: pronto para usar); os de antes ficam com o botão "Transcrever"
-  const aberturaRef = useRef(Date.now());
-  // cada áudio é tentado sozinho uma vez: se falhar, fica o botão (sem repetir o pedido e o erro a cada mudança da conversa)
-  const tentadosRef = useRef(new Set<string>());
-  useEffect(() => {
-    // só o transcritor local (sem custo); com uma conta de voz paga, fica o botão
-    if (!String(rec.data?.voz.transcrever ?? '').startsWith('local')) return;
-    for (const f of audiosParaTranscrever(list, aberturaRef.current - 60_000, tentadosRef.current)) {
-      tentadosRef.current.add(f.id);
-      if (!(f.id in transcricoes)) void transcrever(f);
-    }
-  }, [list, rec.data?.voz.transcrever]); // eslint-disable-line react-hooks/exhaustive-deps
+  // gravar um áudio (rc.33): sobe pelo anexo de sempre; "enviar" manda a mensagem assim que o arquivo terminar de subir
+  const [gravando, setGravando] = useState(false);
+  const gravado = async (f: File, motivo: 'enviar' | 'limite') => {
+    await addFiles([f]);
+    if (motivo === 'enviar') setSendWhenReady(true);
+    else setHint(t('conversas.gravador.limite'));
+  };
   const [conselho, setConselho] = useState(false);
   const pedirConselho = async () => {
     setConselho(false);
@@ -577,9 +630,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
                 {body && <div className="msg__body">{m.role === 'agent' ? <Markdown text={body} /> : body}</div>}
                 {!!m.attachments?.length && <div className="msg__files">{m.attachments.map((f) => (
                   <Fragment key={f.id}>
-                    <FileChip f={f} />
-                    {rec.data?.voz.transcrever && ehAudio(f) && !(f.id in transcricoes) && <button type="button" className="linkish" onClick={() => void transcrever(f)}><Icon name="file" size={12} /> {t('conversas.recursos.transcrever')}</button>}
-                    {f.id in transcricoes && <div className="msg__transcricao">{transcricoes[f.id] ? <><b>{t('conversas.recursos.transcricao')}</b> {transcricoes[f.id]}</> : <span className="muted">{t('conversas.recursos.transcrevendo')}</span>}</div>}
+                    {ehAudio(f) ? <AudioDaMensagem f={f} onTentar={tentarTranscrever} podeTranscrever={!!rec.data?.voz.transcrever} /> : <FileChip f={f} />}
                   </Fragment>
                 ))}</div>}
                 <div className="msg__foot">
@@ -631,7 +682,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             : (
               <div key={p.id} className={`proposal-card proposal-card--${p.status}`}>
                 <Selo icone={p.kind === 'purge' || p.kind === 'delete_task' ? 'trash' : p.kind === 'routine' || p.kind === 'routine_edit' ? 'repeat' : p.kind === 'conexao' ? 'plug' : p.kind === 'regra' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'permission' || p.kind === 'gestao' ? 'shield-check' : 'flag'}>{PROPOSAL_KIND[p.kind] ?? p.kind}</Selo>
-                <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' || p.kind === 'gestao' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
+                <span className="proposal-card__txt">{p.kind === 'aprovacao' ? <TextoDaAprovacao resumo={p.summary} risco={p.risco} detalhe={p.detalhe} /> : p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' || p.kind === 'gestao' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
                 {p.status === 'proposed' && p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} ocupado={deciding[p.id] === 'reject' ? 'recusar' : deciding[p.id] ? 'aplicar' : false} onEscolher={(alcance) => void decide(p.id, 'apply', { alcance })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' && p.kind === 'depois_de_ler' ? <BotoesPrazo ocupado={deciding[p.id] === 'reject' ? 'recusar' : deciding[p.id] ? 'aplicar' : false} onEscolher={(prazo) => void decide(p.id, 'apply', { prazo })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' ? (
@@ -709,14 +760,15 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         <div className="chat__row">
           <button type="button" className="icon-btn chat__clip" onClick={() => picker.current?.click()} aria-label={t('conversas.campo.anexar')} title={t('conversas.campo.anexarDica')}><Icon name="clip" /></button>
           <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ''; }} />
-          <textarea ref={input} data-autofocus data-esc-own={working ? '' : undefined} value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} rows={1}
+          <GravadorDeVoz onGravado={(f, motivo) => void gravado(f, motivo)} onAtivo={setGravando} />
+          <textarea hidden={gravando} ref={input} data-autofocus data-esc-own={working ? '' : undefined} value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} rows={1}
             placeholder={busy ? t('conversas.campo.proxima', { nome: agent.name }) : t('conversas.campo.falarCom', { nome: agent.name })}
             onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); void addFiles(e.clipboardData.files); } }}
             // Enter envia (com o colega trabalhando, entra na fila) · Shift+Enter quebra a linha · Esc para a resposta
             onKeyDown={keyDown} aria-label={t('conversas.campo.mensagem')} aria-describedby={`chat-keys-${agent.id}`} />
           <span id={`chat-keys-${agent.id}`} hidden>{t('conversas.campo.teclas')}</span>
           {working && <button type="button" className="btn chat__stop" onClick={() => void stop()} aria-label={t('conversas.campo.parar')} title={t('conversas.campo.pararDica')}><Icon name="stop" /></button>}
-          {(!busy || text.trim() || files.length > 0) && (
+          {!gravando && (!busy || text.trim() || files.length > 0) && (
             <button className="btn btn--primary chat__send" type="submit" aria-label={busy ? t('conversas.campo.porNaFila') : t('conversas.campo.enviar')} title={busy ? t('conversas.campo.porNaFilaDica') : t('conversas.campo.enviar')}>
               <Icon name={busy ? 'clock' : 'send'} />
             </button>

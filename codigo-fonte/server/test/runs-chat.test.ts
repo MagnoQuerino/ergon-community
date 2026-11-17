@@ -4,6 +4,7 @@ import { Db } from '../src/db/db.ts';
 import { Bus } from '../src/services/bus.ts';
 import { HermesError, type HermesClient, type RemoteRun } from '../src/services/hermes.ts';
 import { RunExecutor } from '../src/services/runs.ts';
+import { nomeDoPerfil } from '../src/services/perfis.ts';
 import { allAgents, drain, harness, req, setupOwner, testConfig, type Harness, type Session } from './helpers.ts';
 
 async function newConv(h: Harness, s: Session, agentIndex = 0): Promise<string> {
@@ -286,13 +287,45 @@ describe('executor Hermes (cliente falso que segue o contrato documentado)', () 
     const msg = (await req(h, 'GET', `/api/conversations/${c}/messages`, s)).json.find((m: { role: string }) => m.role === 'agent').content as string;
     const id = msg.match(/\[imagem: (art_[a-f0-9]{32})\]/)?.[1];
     assert.ok(id, msg);
-    assert.match(msg, /imagem gerada pela equipe, mas o sistema não conseguiu trazê-la/, 'a que falhou é dita, não some');
+    // rc.33: a referência que não pôde ser trazida sai (a linha some, o texto fica); o caminho nunca aparece
+    assert.doesNotMatch(msg, /MEDIA:|\/opt\/data|quebrada|auth\.json|erg-/, msg);
+    assert.match(msg, /^Pronto, uma imagem\./); assert.match(msg, /E fora da pasta:/, 'o texto em volta fica');
     assert.doesNotMatch(msg, /\bmotor\b/i, 'a conversa fala da equipe, não do motor');
-    assert.match(msg, /MEDIA:\/opt\/data\/auth\.json/, 'o que não é imagem gerada não é buscado');
     const art = h.db.get<{ filename: string; mime: string }>('SELECT filename, mime FROM artifacts WHERE id = ?', id)!;
     assert.match(art.filename, /^imagem-fidias-\d{4}-\d{2}-\d{2}-1\.png$/); assert.equal(art.mime, 'image/png');
     const dl = await req(h, 'GET', `/api/artifacts/${id}/download`, s);
     assert.equal(dl.status, 200); assert.equal(dl.res.headers['content-type'], 'image/png');
+    assert.equal(h.db.get<{ status: string }>('SELECT status FROM runs WHERE id = ?', sent.runId)!.status, 'succeeded');
+    await h.close();
+  });
+
+  test('rc.33: captura de tela do navegador dentro do perfil do agente vira imagem na conversa; nenhum caminho do motor aparece', async () => {
+    const fake = new FakeHermes();
+    const h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123' }, { hermes: fake });
+    const s = await setupOwner(h);
+    const ws = h.db.get<{ id: string }>('SELECT id FROM workspaces LIMIT 1')!.id;
+    const hip = h.db.get<{ id: string }>("SELECT id FROM agents WHERE char_key = 'hipatia'")!.id;
+    const perfil = nomeDoPerfil(ws, hip);
+    const outro = nomeDoPerfil(ws, h.db.get<{ id: string }>("SELECT id FROM agents WHERE char_key = 'fidias'")!.id);
+    const c = (await req(h, 'POST', '/api/conversations', s, { agentId: hip })).json.id as string;
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(80, 2)]);
+    const asked: Array<[string, string | null | undefined]> = [];
+    h.executor.media = async (p, _ws, pf) => { asked.push([p, pf]); return { data: png, mime: 'image/png' }; };
+    // um arquivo que está em Documentos, citado pelo caminho de dentro do motor
+    const doc = (await req(h, 'POST', '/api/artifacts', s, Buffer.from('%PDF-1.4 x'), { 'content-type': 'application/octet-stream', 'x-filename': 'relatorio-vendas.pdf', 'x-file-type': 'application/pdf' })).json;
+    const sent = (await req(h, 'POST', `/api/conversations/${c}/messages`, s, { text: 'quero ver ao vivo', clientRequestId: 'req-shot-0001' })).json;
+    await h.executor.tick(); await h.executor.tick();
+    const remote = [...fake.runs.values()][0];
+    remote.status = 'completed';
+    const shot = `/opt/data/profiles/${perfil}/home/.config/browser-harness/tmp/shot.png`;
+    remote.output = `Aí está: a tela do navegador agora, Google aberto.\nMEDIA:${shot}\nDe outro agente: MEDIA:/opt/data/profiles/${outro}/home/x.png\nO relatório está em /opt/data/profiles/${perfil}/home/relatorio-vendas.pdf e o rascunho em /tmp/rascunho.md.\nUsei \`$HERMES_HOME/skills\` no perfil ${perfil}.`;
+    await h.executor.tick();
+    assert.deepEqual(asked, [[shot, perfil]], 'só a captura do perfil do próprio agente é pedida, com o perfil dele');
+    const msg = (await req(h, 'GET', `/api/conversations/${c}/messages`, s)).json.find((m: { role: string }) => m.role === 'agent').content as string;
+    assert.match(msg, /^Aí está: a tela do navegador agora, Google aberto\.\n\[imagem: art_[a-f0-9]{32}\]/, msg);
+    assert.doesNotMatch(msg, /MEDIA:|\/opt\/|\/tmp\/|HERMES_HOME|erg-[a-f0-9]/, msg);
+    assert.ok(msg.includes(`[documento: ${doc.id} relatorio-vendas.pdf]`), `o arquivo de Documentos vira o link dele: ${msg}`);
+    assert.match(msg, /rascunho em \(arquivo interno\)\./, msg);
     assert.equal(h.db.get<{ status: string }>('SELECT status FROM runs WHERE id = ?', sent.runId)!.status, 'succeeded');
     await h.close();
   });

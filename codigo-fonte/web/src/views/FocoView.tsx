@@ -35,9 +35,11 @@ function fromProfile(id: string): Who | null {
  * setor por partes); a busca procura no servidor. No centro a conversa com quem você escolheu, à direita o que espera
  * você e o quadro da equipe. A cidade não para: fica oculta e viva em segundo plano. Esc (fora de um campo) volta.
  */
-export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordinator, onExit, onGo }: {
+export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordinator, onExit, onGo, conversa }: {
   state: AppState; selectedId: string | null; onSelect: (id: string) => void; onOpenAgent: OpenAgent;
   onAskCoordinator: (text: string) => void; onExit: () => void; onGo: (v: View) => void;
+  /** rc.33: aberto pela tela cheia das Conversas: já neste assunto (enquanto o colega escolhido for o dele) */
+  conversa?: { agentId: string; conversationId: string | null } | null;
 }) {
   const t = useT();
   const runLabel = (k: string | null | undefined) => { const r = k ? RUN[k] : undefined; return r ? t(r.label) : undefined; };
@@ -181,7 +183,9 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
               <div className="foco__chat-who"><b>{agent.name}</b><small>{agent.role} · {agent.sector_name}{run && runLabel(run) ? ` · ${runLabel(run)}` : ''}</small></div>
               <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', null, null, agent)}><Icon name="edit" size={13} /> {t('cidade.foco.perfil')}</button>
             </header>
-            <ChatPanel key={agent.id} agent={agent} embedded />
+            {conversa && conversa.agentId === agent.id
+              ? <ChatPanel key={`${agent.id}-${conversa.conversationId ?? 'ultima'}`} agent={agent} embedded conversationId={conversa.conversationId} />
+              : <ChatPanel key={agent.id} agent={agent} embedded />}
           </>
         ) : waiting ? null : <p className="muted center">{t('cidade.foco.nenhumAgente')}</p>}
       </section>}

@@ -1,3 +1,4 @@
+import { limparCaminhos } from '../../../shared/caminhos.ts';
 import type { TeamAgent } from './teamData.ts';
 import { t, type Chave } from '../i18n/index.ts';
 
@@ -43,6 +44,8 @@ export interface AjustesDaEquipe {
   naoTreinar: boolean; buscaPrivada: boolean; buscaPrivadaAguarda: boolean; arrumarCompetencias: boolean;
   /** anotar na memória depois da conversa (ligado por padrão) e a profundidade do raciocínio (alta por padrão) */
   anotarMemoria: boolean; raciocinio: Raciocinio;
+  /** a voz do "Ouvir" (Piper por padrão) e o modelo da transcrição (base por padrão), rc.33; ausente = servidor de antes */
+  vozFalar?: 'piper' | 'edge'; vozModelo?: 'base' | 'small';
   pendente: boolean; atualizacao: boolean; outros: number;
   pausa: { pausada: boolean; desde: string | null };
   opcoes?: { principal: { provider: string | null; model: string | null }; contas: Array<{ id: string; name: string; billing: Billing; models: Array<{ id: string; label: string }> }> };
@@ -199,7 +202,9 @@ export interface TaskCard {
 }
 export interface BoardView { board: BoardSummary; columns: Column[]; tasks: TaskCard[] }
 /** queued: 1 = na fila da conversa (Ctrl+Enter); vai para o agente quando ele terminar */
-export interface Attachment { id: string; filename: string; mime: string; size: number }
+/** A transcrição de um áudio da conversa (rc.33), gravada no servidor; motivo da falha: código (a tela tem os textos). */
+export interface Transcricao { estado: 'transcrevendo' | 'preparando' | 'pronta' | 'falhou'; texto: string | null; motivo: string | null; duracao: number | null }
+export interface Attachment { id: string; filename: string; mime: string; size: number; transcricao?: Transcricao }
 export interface Message { id: string; role: 'user' | 'agent' | 'system'; content: string; mode: 'real' | 'simulated' | 'local'; run_id: string | null; created_at: string; run_status: string | null; queued?: number; attachments?: Attachment[];
   /** responde citando esta mensagem */ reply_to?: string | null;
   /** entrega de cards: os cards dela (estado e rodada), para Revisar ali mesmo */ cards?: Array<{ id: string; number: number; title: string; completed: number; work_state: string | null; review_round: number }>;
@@ -219,7 +224,7 @@ export interface RecentConversation {
 }
 /** Rótulo curto de cada tipo de proposta (cartões da conversa e "aguardando você"). */
 const TIPOS = ['question', 'routine', 'routine_edit', 'sector', 'create_agent', 'tools', 'permission', 'handoff', 'edit_agent', 'deactivate_agent', 'reactivate_agent', 'sector_edit',
-  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra', 'segredo', 'aprovacao', 'gestao'] as const;
+  'sector_new', 'task', 'ledger', 'delete_task', 'info_request', 'batch', 'purge', 'conexao', 'depois_de_ler', 'regra', 'segredo', 'aprovacao', 'gestao', 'canal_externo'] as const;
 /** Uma tabela de rótulos lida na hora de mostrar: cada chave pelo dicionário, no idioma atual (a tela redesenha ao trocar). */
 const rotulo = t as (chave: Chave) => string;
 function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record<string, string> {
@@ -232,8 +237,10 @@ function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record
   });
 }
 export const PROPOSAL_KIND: Record<string, string> = rotulos(TIPOS, (k) => `servidor.tipo.${k}` as Chave);
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
-export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo' | 'canal_externo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null;
+  /** comando para aprovar (rc.33): o comando, só para "Ver detalhes técnicos", e a etiqueta do risco */
+  detalhe?: string | null; risco?: string | null }
+export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null; /** curta, do World (os modelos do Ergon AI) */ description?: string }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
   executor: 'real' | 'simulated'; available: boolean;
@@ -303,7 +310,8 @@ export const SOURCE_LABEL: Record<string, string> = {
  * Remove as linhas de controle ([[...]]) que os agentes escrevem para o Ergon aplicar — as conhecidas e qualquer outra
  * no mesmo formato (nome e atributos="…"): uma linha que o modelo inventou nunca aparece crua na conversa.
  */
-export const stripControl = (s: string): string => s
+/** O texto do agente para a tela: sem as linhas de controle e sem caminho do motor (rc.33, shared/caminhos.ts). */
+export const stripControl = (s: string): string => limparCaminhos(s)
   .replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|prioridade|pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|treinar|assumir|copiar-arquivo|salvar-documento|apagar|esvaziar-lixeira|card|tarefa|titulo|título|renomear-card)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '')
   .replace(/\[\[\s*[a-zà-ú][\wà-ú-]*(?:\s+[\wà-ú-]+\s*=\s*"[^"]*")+\s*\]\]\s*/gi, '')
   .trim();
@@ -376,7 +384,7 @@ export type Need = 'info' | 'approval' | 'review' | 'retry';
 export interface RequestPayload { taskId: string; number: number; title: string; need: Need; agent: string; question: string | null; excerpt: string | null; review?: boolean; round?: number }
 export interface Decisions {
   /** task_id e task_number: ação numa conta pedida num card da equipe (o item leva ao card) */
-  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; payload?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
+  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; payload?: string | null; detalhe?: string | null; risco?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
   waiting: Array<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>;
   /** cards da equipe parados à espera de você */
   cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null }>;

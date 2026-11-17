@@ -18,6 +18,7 @@ import { createTask, defaultBoard, userBoard } from './tasks.ts';
 import type { Plan } from './purpose.ts';
 import { cardTitle } from './card-title.ts';
 import { mesmaRegra, parseRegras, resumoDaProposta, type PropostaRegra } from './conexoes/regras.ts';
+import { vistaDaAprovacao } from './aprovacao-cartao.ts';
 
 export type Proposal =
   | { kind: 'sector'; agent: string; sector: string }
@@ -74,7 +75,7 @@ export type Proposal =
    * aprovação nativa (rc.27, aprovacoes.ts): o motor parou o turno pedindo a sua aprovação para um comando de risco
    * (approval.request); pedido = o id do pedido no motor
    */
-  | { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string }
+  | { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string; contexto?: string | null; envio?: true }
   /**
    * gestão pelo coordenador (rc.29, gestao.ts): uma mudança de configuração que ele pediu pela ferramenta de gestão. O
    * clique roda a MESMA rota da tela, com a sessão de quem clicou; resumo: o que muda, em linguagem simples
@@ -376,8 +377,8 @@ const SEM_FALHA = "COALESCE((SELECT y.state FROM task_results y WHERE y.task_id 
  */
 export function pendingDecisions(db: Db, workspaceId: string) {
   // ação numa conta pedida num card da equipe: o card (#N, com link) e quem pediu vêm da execução
-  const proposals = comResumoT(db.all<{ id: string; kind: string; summary: string; payload: string | null; gestao_payload?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id: string | null; task_number: number | null }>(
-    `SELECT p.id, p.kind, p.summary, CASE WHEN p.kind IN ('regra', 'segredo') OR (p.kind = 'question' AND p.conversation_id IS NULL) THEN p.payload END AS payload, CASE WHEN p.kind = 'gestao' THEN p.payload END AS gestao_payload, p.created_at, p.conversation_id, c.agent_id, COALESCE(a.name, ra.name) AS agent_name, c.purpose, t.id AS task_id, t.number AS task_number
+  const proposals = comResumoT(db.all<{ id: string; kind: string; summary: string; payload: string | null; gestao_payload?: string | null; aprovacao_payload?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id: string | null; task_number: number | null }>(
+    `SELECT p.id, p.kind, p.summary, CASE WHEN p.kind IN ('regra', 'segredo') OR (p.kind = 'question' AND p.conversation_id IS NULL) THEN p.payload END AS payload, CASE WHEN p.kind = 'gestao' THEN p.payload END AS gestao_payload, CASE WHEN p.kind = 'aprovacao' THEN p.payload END AS aprovacao_payload, p.created_at, p.conversation_id, c.agent_id, COALESCE(a.name, ra.name) AS agent_name, c.purpose, t.id AS task_id, t.number AS task_number
        FROM agent_proposals p LEFT JOIN conversations c ON c.id = p.conversation_id LEFT JOIN agents a ON a.id = c.agent_id
        LEFT JOIN runs r ON r.id = p.run_id AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao', 'segredo', 'question', 'gestao') LEFT JOIN agents ra ON ra.id = r.agent_id LEFT JOIN tasks t ON t.id = r.task_id
       WHERE p.workspace_id = ? AND p.status = 'proposed' AND p.kind <> 'info_request' ORDER BY p.created_at DESC LIMIT 50`, workspaceId));
@@ -448,17 +449,25 @@ export function answerQuestion(db: Db, bus: Bus, workspaceId: string, userId: st
 /**
  * O cartão da gestão do coordenador leva o resumo em código (summary_t, do payload): a tela em outro idioma o monta no
  * idioma dela (lib/textos-tela.ts: traduzirResposta), e o português de sempre fica em summary. O pedido não vai junto.
+ *
+ * O cartão de um comando para aprovar (rc.33, aprovacao-cartao.ts) também: a frase simples (summary e summary_t, refeita
+ * do payload, então o cartão gravado antes desta versão também perde o comando do texto), a etiqueta do risco (risco,
+ * risco_t) e o comando sem os caminhos internos só em `detalhe` (a tela o mostra recolhido, em "Ver detalhes técnicos").
  */
-function comResumoT<T extends { gestao_payload?: string | null }>(rows: T[]): Array<Omit<T, 'gestao_payload'> & { summary_t?: unknown }> {
-  return rows.map(({ gestao_payload, ...x }) => {
+function comResumoT<T extends { gestao_payload?: string | null; aprovacao_payload?: string | null }>(rows: T[]): Array<Omit<T, 'gestao_payload' | 'aprovacao_payload'> & { summary_t?: unknown }> {
+  return rows.map(({ gestao_payload, aprovacao_payload, ...x }) => {
+    if (aprovacao_payload) {
+      const v = vistaDaAprovacao(aprovacao_payload);
+      return v ? { ...x, summary: v.resumo, summary_t: v.resumo_t, detalhe: v.detalhe, ...(v.risco ? { risco: v.risco, risco_t: v.risco_t } : {}) } : x;
+    }
     if (!gestao_payload) return x;
     try { const t = (JSON.parse(gestao_payload) as { resumo_t?: unknown }).resumo_t; return t ? { ...x, summary_t: t } : x; } catch { return x; }
   });
 }
 
 export function listProposals(db: Db, workspaceId: string, conversationId?: string | null) {
-  return comResumoT(db.all<{ gestao_payload?: string | null }>(
-    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff', 'regra', 'segredo') THEN payload END AS payload, CASE WHEN kind = 'gestao' THEN payload END AS gestao_payload FROM agent_proposals
+  return comResumoT(db.all<{ gestao_payload?: string | null; aprovacao_payload?: string | null }>(
+    `SELECT id, conversation_id, run_id, kind, summary, status, result, created_at, decided_at, CASE WHEN kind IN ('question', 'info_request', 'handoff', 'regra', 'segredo') THEN payload END AS payload, CASE WHEN kind = 'gestao' THEN payload END AS gestao_payload, CASE WHEN kind = 'aprovacao' THEN payload END AS aprovacao_payload FROM agent_proposals
       WHERE workspace_id = ? ${conversationId ? 'AND (conversation_id = ? OR id IN (SELECT proposal_id FROM proposal_links WHERE conversation_id = ?))' : ''} ORDER BY created_at DESC LIMIT 50`,
     ...(conversationId ? [workspaceId, conversationId, conversationId] : [workspaceId])));
 }

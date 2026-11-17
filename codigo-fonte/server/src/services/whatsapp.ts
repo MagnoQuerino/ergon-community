@@ -7,7 +7,11 @@
  * As mensagens entram pelo mesmo caminho dos outros canais (ingest.ts: deduplicação → interpretação → card).
  * Vários números (rc.29): cada conta do WhatsApp tem o seu pareamento, a sua sessão e os seus filtros; o que chega guarda
  * por qual número veio (source_events.integracao_id).
+ * "Número da equipe" (canais/whatsapp.ts): um número pareado pode virar o canal da equipe. As diretas de telefones
+ * liberados (e confirmados por código) vão ao coordenador pelo gancho `equipe`, e a resposta sai deste número pelo
+ * `enviarCanal`. Mensagem do próprio número nunca chega ao gancho.
  */
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from '../db/db.ts';
@@ -58,11 +62,11 @@ const MAX_QR = 6; // ~2 minutos de QR sem leitura: para (nada fica tentando sozi
 const MAX_ALTS = 4000;
 
 /** O número de um jid, sem aparelho nem servidor ("5511...:12@s.whatsapp.net" → "5511..."). */
-const numeroDoJid = (jid: string): string => jid.split('@')[0].split(':')[0];
+export const numeroDoJid = (jid: string): string => jid.split('@')[0].split(':')[0];
 /** Exceção escrita como número, do jeito que o WhatsApp mostra: "+55 (11) 98888-0000". */
 const ehNumero = (s: string): boolean => /^\+?[\d\s().-]{8,}$/.test(s.trim());
 /** Brasil: o mesmo celular existe com e sem o nono dígito (conta antiga ficou sem ele no jid). */
-const comNono = (n: string): string[] => (/^55\d{2}9\d{8}$/.test(n) ? [n, `${n.slice(0, 4)}${n.slice(5)}`] : /^55\d{10}$/.test(n) ? [n, `${n.slice(0, 4)}9${n.slice(4)}`] : [n]);
+export const comNono = (n: string): string[] => (/^55\d{2}9\d{8}$/.test(n) ? [n, `${n.slice(0, 4)}${n.slice(5)}`] : /^55\d{10}$/.test(n) ? [n, `${n.slice(0, 4)}9${n.slice(4)}`] : [n]);
 
 /** Decide se uma mensagem passa pelos filtros (função pura, testada à parte). `chatAlt`: o outro endereço da conversa, o número de quem chega por LID. */
 export function passes(f: WaFilters, m: { chatId: string; isGroup: boolean; chatName: string | null; labels: string[]; chatAlt?: string | null }): boolean {
@@ -110,12 +114,27 @@ const chave = (ws: string, conta: string) => `${ws}|${conta}`;
 
 export interface MensagemGuardada { autor: string | null; texto: string; em: string }
 
+/** O gancho do "Número da equipe": devolve true quando a mensagem foi dele (não segue para a leitura de sempre). */
+export interface GanchoEquipe { mensagem(ws: string, conta: string, msg: any, tipo: string): Promise<boolean> }
+
 export class WhatsAppReader {
   private readonly db: Db; private readonly bus: Bus; private readonly ints: Integrations;
   private live = new Map<string, Live>();
   /** para testes: troca o carregamento do Baileys */
   loader: () => Promise<any> = () => import('@whiskeysockets/baileys');
   qrLoader: () => Promise<any> = () => import('qrcode');
+  /** "Número da equipe" (canais/whatsapp.ts); sem ele, nada além da leitura de sempre */
+  equipe: GanchoEquipe | null = null;
+  /** ids do que saiu por este leitor, escolhidos antes de mandar: o eco de uma mensagem enviada nunca é pedido */
+  private proprias = new Set<string>();
+  /** Um id de mensagem no formato do Baileys, guardado antes do envio. */
+  novoIdProprio(): string {
+    const id = `3EB0${randomBytes(9).toString('hex').toUpperCase()}`;
+    this.proprias.add(id);
+    if (this.proprias.size > 2000) this.proprias.delete(this.proprias.values().next().value!);
+    return id;
+  }
+  enviadaPorAqui(id: string): boolean { return this.proprias.has(id); }
 
   constructor(db: Db, bus: Bus, ints: Integrations) {
     this.db = db; this.bus = bus; this.ints = ints;
@@ -250,11 +269,44 @@ export class WhatsAppReader {
     if (!l?.sock || l.status !== 'connected') throw new ErroAcao(`${conta ? 'este número do WhatsApp' : 'o WhatsApp'} não está conectado agora. A pessoa pode conectar em Conexões › WhatsApp`);
     if (!risksAccepted(settingsOf(integrationRow(this.db, workspaceId, 'whatsapp', conta)))) throw new ErroAcao('antes do primeiro envio, a pessoa precisa aceitar os riscos em Conexões › WhatsApp: nada foi enviado');
     await this.barrarExcecao(workspaceId, jid, conta);
+    return this.mandar(l, jid, texto, this.novoIdProprio(), 'Confira no celular se ela saiu antes de tentar de novo');
+  }
+
+  /** O único ponto que manda pelo socket: `enviar` (a pedido, sob as regras) e `enviarCanal` (o número da equipe). */
+  private async mandar(l: Live, jid: string, texto: string, id: string, dica = ''): Promise<string> {
+    this.proprias.add(id);
     let enviada: any;
-    try { enviada = await l.sock.sendMessage(jid, { text: texto, linkPreview: null }); } catch (e) {
-      throw new ErroAcao(`o WhatsApp não aceitou a mensagem (${clip(e instanceof Error ? e.message : String(e), 200)}). Confira no celular se ela saiu antes de tentar de novo`);
+    try { enviada = await l.sock.sendMessage(jid, { text: texto, linkPreview: null }, { messageId: id }); } catch (e) {
+      throw new ErroAcao(`o WhatsApp não aceitou a mensagem (${clip(e instanceof Error ? e.message : String(e), 200)}).${dica ? ` ${dica}` : ''}`);
     }
-    return String(enviada?.key?.id ?? '');
+    return String(enviada?.key?.id ?? id);
+  }
+
+  /** O telefone deste número (null: desconectado). */
+  numeroConectado(workspaceId: string, conta = ''): string | null {
+    const l = this.live.get(chave(workspaceId, conta));
+    return l?.sock && l.status === 'connected' ? /^\d{6,20}/.exec(String(l.sock.user?.id ?? ''))?.[0] ?? null : null;
+  }
+
+  /**
+   * O envio do "Número da equipe": a uma conversa individual (número ou LID), com o id escolhido por quem chama (`id`,
+   * de novoIdProprio). Quem chama confere que o destino é um telefone liberado; aqui, só conversa individual passa.
+   */
+  async enviarCanal(workspaceId: string, conta: string, jid: string, texto: string, id: string): Promise<string> {
+    if (!/^\d{5,32}@(s\.whatsapp\.net|lid)$/.test(jid)) throw new ErroAcao('o canal da equipe só responde em conversa individual');
+    const l = this.live.get(chave(workspaceId, conta));
+    if (!l?.sock || l.status !== 'connected') throw new ErroAcao('este número do WhatsApp não está conectado agora');
+    return this.mandar(l, jid, texto, id);
+  }
+
+  /** O telefone de quem escreveu numa conversa individual: o do jid, o alternativo, ou o do mapa LID → número do Baileys. */
+  async telefoneDe(workspaceId: string, conta: string, key: any): Promise<string | null> {
+    const jids = [key?.remoteJid, key?.remoteJidAlt, key?.senderPn].map((j) => String(j ?? ''));
+    const pn = jids.find((j) => /^\d{5,32}@s\.whatsapp\.net$/.test(j));
+    if (pn) return numeroDoJid(pn);
+    const lid = jids.find((j) => j.endsWith('@lid'));
+    const alt = lid ? await this.outroJid(workspaceId, lid, conta) : null;
+    return alt ? numeroDoJid(alt) : null;
   }
 
   private emit(workspaceId: string) { this.bus.publish(workspaceId, 'integrations.changed', { kind: 'whatsapp' }); }
@@ -352,9 +404,15 @@ export class WhatsAppReader {
     sock.ev.on('contacts.upsert', (cs: any[]) => { for (const c of cs ?? []) { remember(c.id, c.name ?? c.notify); if (c.id && c.name) l.salvos.add(c.id); } });
     sock.ev.on('groups.upsert', (gs: any[]) => { for (const g of gs ?? []) remember(g.id, g.subject); });
     sock.ev.on('messages.upsert', async (up: any) => {
-      if (up?.type !== 'notify') return; // só mensagens novas (nada de histórico)
-      for (const msg of up.messages ?? []) {
-        try { await this.onMessage(workspaceId, conta, l, msg); } catch { /* uma mensagem ruim não derruba o leitor */ }
+      const tipo = String(up?.type ?? '');
+      for (const msg of up?.messages ?? []) {
+        try {
+          // o número da equipe: só o que chegou de outra pessoa (com o Ergon fechado, o que chegou vem como 'append');
+          // o que este número mandou (fromMe, inclusive o eco do envio) nunca chega ao gancho
+          const k = msg?.key ?? {};
+          if (this.equipe && !l.stopping && !k.fromMe && !this.proprias.has(String(k.id ?? '')) && await this.equipe.mensagem(workspaceId, conta, msg, tipo)) continue;
+          if (tipo === 'notify') await this.onMessage(workspaceId, conta, l, msg); // só mensagens novas (nada de histórico)
+        } catch { /* uma mensagem ruim não derruba o leitor */ }
       }
     });
   }

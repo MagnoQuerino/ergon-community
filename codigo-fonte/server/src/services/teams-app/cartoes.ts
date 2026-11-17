@@ -3,6 +3,7 @@
  * cartões (Adaptive Card 1.4) com Aprovar/Recusar dentro de um ActionSet no corpo, Action.Execute com reserva
  * Action.Submit (contrato, 3.5). O mesmo desenho serve ao cartão de uma confirmação na conversa e ao aviso de "Com você".
  */
+import { docsComoTexto, limparCaminhos } from '../../../../shared/caminhos.ts';
 import { MAX_CARTAO, MAX_TEXTO_SAIDA, tokenCartao, type ChavesInstalacao } from './protocolo.ts';
 
 const NOME_DO_MOTOR = new RegExp('\\bHer' + 'mes\\b', 'gi');
@@ -23,11 +24,12 @@ export function linksPorExtenso(s: string): string {
 }
 
 /**
- * Resposta do agente como texto do Teams: sem [[controle]], sem {{marcas}}, sem HTML, sem o nome do motor, e com os
- * links por extenso.
+ * Resposta do agente como texto do Teams: sem [[controle]], sem {{marcas}}, sem HTML, sem o nome do motor, sem caminho
+ * de arquivo do motor (rc.33: vira "(arquivo interno)"; o arquivo de Documentos vai pelo nome), e com os links por
+ * extenso. Serve também ao Telegram, ao Discord e ao WhatsApp da equipe (canais/servico.ts).
  */
 export function textoParaTeams(t: string, max = MAX_TEXTO_SAIDA): string {
-  let s = linksPorExtenso(String(t ?? '')
+  let s = linksPorExtenso(docsComoTexto(limparCaminhos(String(t ?? '')))
     .replace(/\[\[[^\]]*(?:\][^\]]+)*\]\]/g, ''))
     .replace(/\{\{[^}\n]{0,200}\}\}/g, '')
     .replace(/<\/?[a-zA-Z][^>\n]{0,200}>/g, '')
@@ -104,10 +106,12 @@ function botoes(p: string, t: string) {
 
 /**
  * O cartão para um vínculo. Decisões ainda abertas levam os botões (com o `t` deste vínculo); as decididas, a linha final.
- * O texto encolhe até caber em 28 KiB.
+ * O texto encolhe até caber em 28 KiB. `limite` (Discord, onde o cartão vira um embed): os tamanhos tentados e o
+ * máximo de texto somado do cartão.
  */
-export function montarCartao(d: DesenhoCartao, estados: Map<string, EstadoDecisao>, bindingId: string, chaves: Pick<ChavesInstalacao, 'hmac'>, tz: string): Record<string, unknown> {
-  for (const max of [6000, 2500, 1200, 500, 200]) {
+export function montarCartao(d: DesenhoCartao, estados: Map<string, EstadoDecisao>, bindingId: string, chaves: Pick<ChavesInstalacao, 'hmac'>, tz: string,
+  limite?: { maxes?: number[]; maxTexto?: number }): Record<string, unknown> {
+  for (const max of limite?.maxes ?? [6000, 2500, 1200, 500, 200]) {
     const body: unknown[] = [bloco(corta(d.titulo, 200), { weight: 'Bolder', size: 'Medium' })];
     for (const it of d.itens) {
       body.push(bloco(corta(textoParaTeams(it.titulo, 400), 200), { weight: 'Bolder', spacing: 'Medium' }));
@@ -124,7 +128,8 @@ export function montarCartao(d: DesenhoCartao, estados: Map<string, EstadoDecisa
       else body.push(bloco(linhaFinal(e, tz), { weight: 'Bolder', color: e.status === 'applied' ? 'Good' : e.status === 'failed' ? 'Attention' : 'Default' }));
     }
     const card = { type: 'AdaptiveCard', $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', version: '1.4', body, actions: [] };
-    if (Buffer.byteLength(JSON.stringify(card)) <= MAX_CARTAO) return card;
+    const texto = body.reduce<number>((n, b) => n + (typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text.length + 2 : 0), 0);
+    if (Buffer.byteLength(JSON.stringify(card)) <= MAX_CARTAO && (!limite?.maxTexto || texto <= limite.maxTexto)) return card;
   }
   return { type: 'AdaptiveCard', $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', version: '1.4', body: [bloco(corta(d.titulo, 200), { weight: 'Bolder' }), bloco('Abra o Ergon para ver os detalhes.')], actions: [] };
 }
@@ -134,4 +139,36 @@ export function partesDoResumo(summary: string): { titulo: string; texto: string
   const s = String(summary ?? '').trim();
   const i = s.indexOf('\n');
   return i < 0 ? { titulo: corta(s, 200), texto: '' } : { titulo: corta(s.slice(0, i), 200), texto: s.slice(i + 1).trim() };
+}
+
+/** Um botão dos bots oficiais (Telegram, Discord): o relé guarda o `data` e põe no botão só uma chave curta. */
+export interface BotaoBot { label: string; style: 'positive' | 'destructive'; data: { p: string; d: 'apply' | 'reject'; t: string } }
+
+/**
+ * O mesmo cartão em texto simples, para o Telegram e o Discord: os títulos, o texto e, nas decisões abertas, os botões
+ * Aprovar/Recusar (no máximo 2 decisões com botão por mensagem: as plataformas limitam a fileira; as demais pedem o Ergon).
+ */
+export function montarTexto(d: DesenhoCartao, estados: Map<string, EstadoDecisao>, bindingId: string, chaves: Pick<ChavesInstalacao, 'hmac'>, tz: string, max = 1800): { text: string; buttons: BotaoBot[] } {
+  const linhas: string[] = [corta(d.titulo, 200)];
+  const buttons: BotaoBot[] = [];
+  const decisoesAbertas = d.itens.filter((it) => it.tipo === 'decisao' && (!estados.get(it.p) || (estados.get(it.p)!.status === 'proposed' && !estados.get(it.p)!.jaDecidido))).length;
+  for (const it of d.itens) {
+    linhas.push('', corta(textoParaTeams(it.titulo, 400).replace(/\*\*/g, ''), 200));
+    if (it.texto) linhas.push(corta(textoParaTeams(it.texto, max * 2).replace(/\*\*/g, ''), max));
+    if (it.tipo === 'aviso') {
+      const ea = it.p ? estados.get(it.p) : undefined;
+      linhas.push(ea && ea.status !== 'proposed' ? linhaFinal({ ...ea, status: ea.status === 'applied' ? 'decidido' : ea.status }, tz) : it.abrir);
+      continue;
+    }
+    const e = estados.get(it.p);
+    if (it.inteiro && it.texto && !apareceInteiro(it.texto, max) && (!e || e.status === 'proposed')) { linhas.push(ABRIR_LONGO); continue; }
+    if (!e || (e.status === 'proposed' && !e.jaDecidido)) {
+      // uma decisão por mensagem leva botões; com várias, o Ergon decide (a fileira de botões não diz qual é qual)
+      if (decisoesAbertas === 1) {
+        const t = tokenCartao(chaves, it.p, bindingId);
+        buttons.push({ label: 'Aprovar', style: 'positive', data: { p: it.p, d: 'apply', t } }, { label: 'Recusar', style: 'destructive', data: { p: it.p, d: 'reject', t } });
+      } else linhas.push('Abra o Ergon para decidir.');
+    } else linhas.push(linhaFinal(e, tz));
+  }
+  return { text: corta(linhas.join('\n'), 3800), buttons };
 }

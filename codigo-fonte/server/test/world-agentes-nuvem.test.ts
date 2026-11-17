@@ -137,7 +137,7 @@ describe('Cards do quadro na nuvem', () => {
     const v = await card(c.ref);
     assert.equal(v.fallback, 'provedor não aceito na nuvem');
     assert.deepEqual(notas(c.id, 'task.cloud_fallback'), ['Rodou no Ergon AI: provedor não aceito na nuvem']);
-    assert.equal(h.db.get<{ model: string }>('SELECT model FROM runs WHERE task_id = ?', c.id)!.model, 'ergon-ai/deepseek-flash');
+    assert.equal(h.db.get<{ model: string }>('SELECT model FROM runs WHERE task_id = ?', c.id)!.model, 'ergon-ai/ergon-ai');
   });
 
   test('provedor com chave, mas sem chave guardada: sem grant; o World troca e avisa', async () => {

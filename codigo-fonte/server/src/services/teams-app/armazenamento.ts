@@ -40,6 +40,19 @@ const MIGRACOES: Array<[string, string]> = [
     ALTER TABLE teams_bindings ADD COLUMN first_message_at TEXT;
     ALTER TABLE teams_people ADD COLUMN notice_window TEXT;
   `],
+  // bots oficiais de Telegram e Discord pelo mesmo serviço: cada vínculo diz a plataforma, e cada pessoa tem UMA conversa
+  // por plataforma (a do Teams continua a de antes).
+  ['t0003_canais_oficiais', `
+    ALTER TABLE teams_bindings ADD COLUMN platform TEXT NOT NULL DEFAULT 'teams';
+    CREATE TABLE teams_people_v3 (
+      user_id TEXT NOT NULL, platform TEXT NOT NULL DEFAULT 'teams', workspace_id TEXT NOT NULL, conversation_id TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+      reply_binding TEXT, cursor_rowid INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, notice_window TEXT, PRIMARY KEY (user_id, platform));
+    INSERT INTO teams_people_v3 (user_id, platform, workspace_id, conversation_id, enabled, reply_binding, cursor_rowid, updated_at, notice_window)
+      SELECT user_id, 'teams', workspace_id, conversation_id, enabled, reply_binding, cursor_rowid, updated_at, notice_window FROM teams_people;
+    DROP TABLE teams_people;
+    ALTER TABLE teams_people_v3 RENAME TO teams_people;
+    CREATE INDEX IF NOT EXISTS teams_people_conv ON teams_people(conversation_id);
+  `],
 ];
 
 export function migrarTeamsApp(db: Db): string[] {
@@ -57,7 +70,8 @@ export function migrarTeamsApp(db: Db): string[] {
 export interface VinculoRow {
   binding_id: string; user_id: string; workspace_id: string; person_ref: string; teams_name: string | null;
   status: 'active' | 'paused' | 'revoking' | 'revoked'; notices: number; revoked_by: string | null; created_at: string; updated_at: string;
-  first_message_at: string | null;
+  first_message_at: string | null; platform: Plataforma;
 }
-export interface PessoaRow { user_id: string; workspace_id: string; conversation_id: string | null; enabled: number; reply_binding: string | null; cursor_rowid: number; updated_at: string; notice_window: string | null }
+export type Plataforma = 'teams' | 'telegram' | 'discord';
+export interface PessoaRow { platform: Plataforma; user_id: string; workspace_id: string; conversation_id: string | null; enabled: number; reply_binding: string | null; cursor_rowid: number; updated_at: string; notice_window: string | null }
 export interface SaidaRow { id: string; binding_id: string; workspace_id: string; kind: 'send' | 'card.update'; payload: string; purpose: string | null; attempts: number; next_at: string; status: string; activity_id: string | null; created_at: string }

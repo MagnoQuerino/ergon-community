@@ -140,6 +140,11 @@ export class FakeWorld {
   requireVerifiedEmail = false;
   /** credenciais do Ergon AI emitidas (POST /v1/ai/credentials) */
   aiTokens = new Set<string>();
+  /** GET /v1/ai/models: só modelos da marca Ergon (id, nome, descrição); um teste troca para simular o catálogo de antes */
+  aiModels: Array<{ id: string; name?: string; description?: string }> = [
+    { id: 'ergon-ai', name: 'Ergon AI', description: 'Rápido, para o dia a dia' },
+    { id: 'ergon-ai-sinapse', name: 'Ergon AI Sinapse', description: 'Pensa antes de responder' },
+  ];
   /** Confirma o e-mail da conta por fora do aplicativo (o link de um clique do e-mail, no site). */
   confirmEmail(email: string): void { [...this.accounts.values()].find((a) => a.email === email)!.emailVerified = true; }
   rateLimitNext = 0;
@@ -203,7 +208,7 @@ export class FakeWorld {
       const asked = spec.model ?? null;
       const g = j.handoffId ? this.grants.get(j.handoffId) : undefined;
       const allowed = !!asked && this.delegated.includes(asked.provider);
-      let model = { provider: 'ergon-ai', id: 'deepseek-flash' };
+      let model = { provider: 'ergon-ai', id: 'ergon-ai' };
       if (asked && asked.provider !== 'ergon-ai') {
         if (g && allowed && g.provider === asked.provider) model = { provider: g.provider, id: g.model };
         else j.modelFallback = { from: asked, to: model, reason: !allowed ? 'provedor não aceito na nuvem' : g ? 'chave de outro provedor' : 'sem chave do provedor para a nuvem' };
@@ -333,7 +338,7 @@ export class FakeWorld {
       return { raw: v.artifact, headers: { 'x-sha256': v.sha256 } };
     }
     // Ergon AI: a credencial curta abre só a lista de modelos (o proxy de verdade é outro serviço)
-    if (key === 'GET /v1/ai/models' && bearer && this.aiTokens.has(bearer)) return { json: { data: [{ id: 'ergon-ai' }] } };
+    if (key === 'GET /v1/ai/models' && bearer && this.aiTokens.has(bearer)) return { json: { data: this.aiModels } };
     if (!dev) return { fail: [401, 'unauthenticated'] };
     dev.lastSeenAt = new Date().toISOString();
     const acc = this.accounts.get(dev.accountId)!;

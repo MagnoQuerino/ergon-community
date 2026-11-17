@@ -1,6 +1,7 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
 import { parseMarkdown, type Block, type Inline } from '../lib/markdown.ts';
 import { t, useIdioma } from '../i18n/index.ts';
+import { Icon } from './Icon.tsx';
 
 /** Inline → elementos (o texto sempre como texto: o React escapa). */
 function inl(c: Inline[], key = ''): ReactNode[] {
@@ -17,6 +18,12 @@ function inl(c: Inline[], key = ''): ReactNode[] {
       case 'img': return (
         <a key={k} className="msg__img" href={`/api/artifacts/${x.id}/download?inline=1`} target="_blank" rel="noreferrer" title={t('geral.arquivo.abrirImagem')}>
           <img src={`/api/artifacts/${x.id}/download?inline=1`} alt={t('geral.arquivo.imagemDoAgente')} loading="lazy" />
+        </a>
+      );
+      // arquivo de Documentos citado pelo agente (no lugar do caminho dentro do motor): baixa pelo Ergon
+      case 'doc': return (
+        <a key={k} className="msg__doc" href={`/api/artifacts/${x.id}/download`} title={t('geral.arquivo.abrirDocumento', { nome: x.nome })}>
+          <Icon name="file" size={12} /> {x.nome}
         </a>
       );
     }

@@ -1,3 +1,4 @@
+import { docsComoTexto } from '../../../shared/caminhos.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, id, notFound, now } from '../lib/util.ts';
 import { applyDecision } from './actions.ts';
@@ -43,7 +44,7 @@ export function createConversation(db: Db, workspaceId: string, userId: string, 
 
 /** Título a partir de um texto: uma linha, até ~60 caracteres, cortado em palavra, com "…" quando corta. */
 export function titleFrom(text: string, max = 60): string {
-  const line = text.replace(/\[imagem: [^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+  const line = docsComoTexto(text).replace(/\[imagem: [^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
   if (line.length <= max) return line;
   const space = line[max] === ' ' ? max : line.lastIndexOf(' ', max);
   // palavra longa demais (um endereço, por exemplo): corta no limite mesmo
@@ -283,7 +284,7 @@ export function recentConversations(db: Db, workspaceId: string, userId: string,
       ORDER BY COALESCE(last_at, c.created_at) DESC LIMIT ?`, workspaceId, userId, max);
   // a última fala, curta e sem as linhas de controle dos agentes; o colega leve (retrato e nome, sem a lista da equipe)
   return rows.map(({ last_files, ag_name, ag_role, ag_color, ag_char_key, ag_look_seed, ag_sector_name, ...r }) => {
-    const said = r.last_text ? clip(r.last_text.replace(/\[\[[^\]]*(?:\][^\]]+)*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, '🖼').replace(/[*#_`>|]/g, '').replace(/\s+/g, ' ').trim(), 90) : '';
+    const said = r.last_text ? clip(docsComoTexto(r.last_text).replace(/\[\[[^\]]*(?:\][^\]]+)*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, '🖼').replace(/[*#_`>|]/g, '').replace(/\s+/g, ' ').trim(), 90) : '';
     const files = Number(last_files) ? `📎 ${Number(last_files) === 1 ? '1 arquivo' : `${last_files} arquivos`}` : '';
     const agent = { id: r.agent_id, name: ag_name, role: ag_role, color: ag_color, char_key: ag_char_key, look_seed: ag_look_seed === null ? null : Number(ag_look_seed), sector_name: ag_sector_name };
     return { ...r, unread: Number(r.unread), waiting: Number(r.waiting), last_text: said || files || null, agent };

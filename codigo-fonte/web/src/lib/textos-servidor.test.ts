@@ -126,7 +126,13 @@ describe('em inglês', () => {
   });
 
   test('as frases da tela (textos-tela.ts) em inglês, inclusive as constantes importadas antes da troca', () => {
-    assert.equal(tela.motivoDoLogin('consent_required'), 'Your company requires the administrator\'s approval.');
+    const exige = 'Your company requires the administrator\'s approval. The rule comes from your company\'s Microsoft account, not from Ergon: use "Ask the administrator" to send the ready-made link, or continue with just the basics.';
+    assert.equal(tela.motivoDoLogin('consent_required'), exige);
+    assert.equal(tela.motivoDoLogin('access_denied (AADSTS90094: Admin consent is required)'), exige);
+    assert.equal(tela.motivoDoLogin('invalid_client (AADSTS65001: The user or administrator has not consented)'), exige);
+    assert.equal(tela.motivoDoLogin('A empresa exige a aprovação do administrador.'), exige);
+    assert.equal(tela.motivoDoLogin('A conta não concluiu o login: admin_policy_enforced', 'google'), 'Your company requires the administrator\'s approval.');
+    assert.match(tela.textoDaVolta('microsoft', 'basico', true), /^Microsoft account connected with the basics: .*"Allow reading"/);
     assert.equal(tela.motivoDoLogin('A conta não concluiu o login: access_denied', 'google'), 'Authorization was declined on the Google page.');
     assert.equal(tela.motivoDoLogin('A conta não concluiu o login: invalid_request (AADSTS50020: x)'), 'Microsoft did not finish the authorization (code AADSTS50020, for support).');
     assert.equal(tela.textoDaVolta('microsoft', 'recusado', false), 'Microsoft sign-in canceled.');

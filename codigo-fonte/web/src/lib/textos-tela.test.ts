@@ -16,9 +16,13 @@ const PROIBIDAS = new RegExp(["Her" + "mes", "M" + "G3", "am" + "agno", "fund" +
 
 test('T1: o erro da Microsoft vira texto em português (o código fica só para o suporte)', () => {
   const adminBase = 'access_denied (AADSTS90094: Admin consent is required for the permissions requested by this application. An admin consent request may be sent to the admin. )';
-  assert.equal(motivoDoLogin(adminBase), 'A empresa exige a aprovação do administrador.');
-  assert.equal(motivoDoLogin('consent_required'), 'A empresa exige a aprovação do administrador.');
-  assert.equal(motivoDoLogin('access_denied (AADSTS65001: The user or administrator has not consented)'), 'A empresa exige a aprovação do administrador.');
+  // AADSTS90094 e AADSTS65001: a explicação (a regra é da empresa) e a saída (o pedido pronto ou só o básico)
+  const exige = 'A empresa exige a aprovação do administrador. A regra é da conta Microsoft da empresa, não do Ergon: use "Pedir ao administrador" para enviar o link pronto, ou siga só com o básico.';
+  assert.equal(motivoDoLogin(adminBase), exige);
+  assert.equal(motivoDoLogin('consent_required'), exige);
+  assert.equal(motivoDoLogin('access_denied (AADSTS65001: The user or administrator has not consented)'), exige);
+  // o motivo que o servidor grava em português (marca da etapa) dá na mesma explicação
+  assert.equal(motivoDoLogin('A empresa exige a aprovação do administrador.'), exige);
   const recusou = 'A conta não concluiu o login: access_denied (AADSTS65004: User declined to consent to access the app.)';
   assert.equal(motivoDoLogin(recusou), 'A autorização foi recusada na página da Microsoft.');
   assert.equal(motivoDoLogin('O administrador não aprovou: access_denied (AADSTS65004: User declined to consent)'), 'O administrador não aprovou o pedido.');
@@ -29,7 +33,7 @@ test('T1: o erro da Microsoft vira texto em português (o código fica só para 
   assert.match(motivoDoLogin('A conta não concluiu o login: admin_policy_enforced', 'google') ?? '', /aprovação do administrador/);
   // o que já vem em português do servidor passa como está (com a primeira letra maiúscula e ponto final)
   assert.equal(motivoDoLogin('A autorização foi recusada na página da conta.'), 'A autorização foi recusada na página da conta.');
-  assert.equal(motivoDoLogin('a empresa exige a aprovação do administrador'), 'A empresa exige a aprovação do administrador.');
+  assert.equal(motivoDoLogin('a empresa exige a aprovação do administrador'), exige, 'e o motivo da empresa ganha a explicação');
   assert.equal(motivoDoLogin(null), null);
   assert.equal(motivoDoLogin(''), null);
   for (const t of [adminBase, recusou]) assert.doesNotMatch(motivoDoLogin(t) ?? '', CRU);
@@ -61,7 +65,9 @@ test('T2: a volta da aprovação do administrador cita o botão que existe na te
   // conectado, e o aviso diz isso antes do que ficou de fora
   assert.match(textoDaVolta('microsoft', 'sem-canais', true), /^Conta Microsoft conectada\. Só a leitura dos canais do Teams \(opcional\)/);
   assert.match(textoDaVolta('microsoft', 'precisa-admin', true), /^Conta Microsoft conectada: enviar e-mail e criar arquivos já funcionam\. .*administrador/);
-  for (const s of ['conectado', 'parcial', 'precisa-admin', 'sem-leitura', 'sem-canais', 'admin-aprovou', 'admin-recusou', 'admin-aprovou-outro', 'admin-recusou-outro', 'admin-base', 'admin-aprovou-base', 'erro']) {
+  // conta de trabalho: o primeiro login para no básico, e o aviso diz o próximo passo sem mandar ninguém a uma página sem saída
+  assert.match(textoDaVolta('microsoft', 'basico', true), /^Conta Microsoft conectada com o básico: .*"Liberar leitura".*administrador/);
+  for (const s of ['conectado', 'basico', 'parcial', 'precisa-admin', 'sem-leitura', 'sem-canais', 'admin-aprovou', 'admin-recusou', 'admin-aprovou-outro', 'admin-recusou-outro', 'admin-base', 'admin-aprovou-base', 'erro']) {
     for (const c of [true, false]) assert.doesNotMatch(textoDaVolta('microsoft', s, c), PROIBIDAS);
   }
 });

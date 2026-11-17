@@ -8,13 +8,17 @@
  * Aprovar/Recusar (botões de verdade nos dois) e os avisos de "Com você" saem por uma fila daqui, que o plugin busca com
  * espera longa e manda pelo adaptador vivo do gateway (canais_saida: sobrevive a reinício).
  * O desenho é o mesmo do Teams (teams-app/servico.ts), sem o serviço intermediário: os textos (cartoes.ts) são os mesmos.
+ * O número da equipe no WhatsApp (canais/whatsapp.ts: um número pareado por QR, usado como canal) segue este mesmo caminho
+ * como canal LOCAL, sem motor: um por remetente liberado (`whatsapp:<workspace>:<conta>:<telefone>`). A mensagem entra por
+ * `receberLocal` e a fila de saída é entregue aqui mesmo, pelo `entregadorLocal` (a sessão do Baileys do próprio app), em
+ * vez de ir ao plugin.
  */
 import type { Config } from '../../config.ts';
 import type { Db } from '../../db/db.ts';
 import { HttpError, id as novoId, now } from '../../lib/util.ts';
 import { log } from '../../lib/log.ts';
 import { CLOSED_VALUE } from '../../security/fields.ts';
-import type { Bus, BusEvent } from '../bus.ts';
+import { audit, type Bus, type BusEvent } from '../bus.ts';
 import { createConversation, sendMessage } from '../chat.ts';
 import { CanalErro, type CanalNoMotor, type HermesControlClient, type NomeCanal } from '../hermes.ts';
 import type { WorkspaceOwners } from '../people.ts';
@@ -22,10 +26,21 @@ import { pendingDecisions } from '../proposals.ts';
 import { workspaceTz } from '../routine-proposals.ts';
 import type { RunExecutor } from '../runs.ts';
 import { coordinatorFor } from '../team-query.ts';
+import { CanaisExternos, KIND_EXTERNO } from './externo.ts';
+import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
 const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
 const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord' };
+/** Canal local (sem motor): um remetente liberado do número da equipe, `whatsapp:<workspace>:<conta>:<telefone>`. */
+export type CanalLocal = `whatsapp:${string}`;
+export type CanalId = NomeCanal | CanalLocal;
+export const ehCanalLocal = (c: string): c is CanalLocal => c.startsWith('whatsapp:');
+const nomeDoCanal = (c: CanalId): string => (ehCanalLocal(c) ? 'WhatsApp' : NOME_CANAL[c]);
+/** O que sai por um canal local: o entregador manda e diz se saiu (`esperarMs`: limite de envio, tenta depois sem contar falha). */
+export interface ItemLocal { id: string; tipo: 'texto' | 'cartao' | 'editar'; texto: string; botoes: Array<[string, string]>; origem?: string }
+export interface ResultadoLocal { ok: boolean; message_id?: string; erro?: string; passageiro?: boolean; esperarMs?: number }
+export type EntregadorLocal = (v: { userId: string; canal: CanalLocal; workspaceId: string; chatId: string }, item: ItemLocal) => Promise<ResultadoLocal>;
 /** O formato do código de cada bot (o mesmo do plugin): o que não tem esse jeito nem vai ao motor. */
 const FORMATO_TOKEN: Record<NomeCanal, RegExp> = {
   telegram: /^\d{5,14}:[A-Za-z0-9_-]{30,64}$/,
@@ -33,11 +48,13 @@ const FORMATO_TOKEN: Record<NomeCanal, RegExp> = {
 };
 const CAPACIDADE_CANAIS = 'canais';
 /** A instrução do canal para chat.ts (chatHooks.channelNote). */
-export const notaCanal = (c: NomeCanal) => `Canal: conversa pelo ${NOME_CANAL[c]}. Quem escreve é a pessoa dona do workspace, pela conta do ${NOME_CANAL[c]} ligada por código. A resposta vai para o ${NOME_CANAL[c]}: texto simples, sem tabelas largas.`;
-const notaDeAtrasoCanal = (c: NomeCanal, quando: string) => `Pedido enviado pelo ${NOME_CANAL[c]} em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
+export const notaCanal = (c: CanalId) => (ehCanalLocal(c)
+  ? 'Canal: conversa pelo WhatsApp. Quem escreve, do WhatsApp dele, para o número da equipe (pareado neste Ergon) é um telefone liberado e confirmado por código pela pessoa dona do workspace. A resposta sai do número da equipe para ele: texto simples, sem tabelas largas; confirmações vão como opções numeradas.'
+  : `Canal: conversa pelo ${NOME_CANAL[c]}. Quem escreve é a pessoa dona do workspace, pela conta do ${NOME_CANAL[c]} ligada por código. A resposta vai para o ${NOME_CANAL[c]}: texto simples, sem tabelas largas.`);
+const notaDeAtrasoCanal = (c: CanalId, quando: string) => `Pedido enviado pelo ${nomeDoCanal(c)} em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
 const ATRASO_MS = 10 * 60_000;
 /** O que só se responde no Ergon: autorização com senha, pergunta, pedido de chave ou senha (o valor nunca passa pelo canal). */
-const SO_NO_ERGON = ['permission', 'question', 'segredo', 'info_request', 'handoff'];
+const SO_NO_ERGON = ['permission', 'question', 'segredo', 'info_request', 'handoff', KIND_EXTERNO];
 const DIA = 86_400_000;
 /** Textos que o bot manda de imediato (nas duas línguas: a pessoa pode usar o Ergon em qualquer uma). */
 export const RESPOSTA = {
@@ -50,10 +67,10 @@ export const RESPOSTA = {
 };
 
 interface VinculoRow {
-  user_id: string; canal: NomeCanal; workspace_id: string; externo_id: string; chat_id: string; nome: string | null; avisos: number;
+  user_id: string; canal: CanalId; workspace_id: string; externo_id: string; chat_id: string; nome: string | null; avisos: number;
   conversation_id: string | null; cursor_rowid: number; aviso_janela: string | null; primeira_em: string | null; created_at: string;
 }
-interface SaidaRow { id: string; user_id: string; canal: NomeCanal; workspace_id: string; tipo: 'texto' | 'cartao' | 'editar'; payload: string; status: string; tentativas: number; proximo_em: string; message_id: string | null; created_at: string }
+interface SaidaRow { id: string; user_id: string; canal: CanalId; workspace_id: string; tipo: 'texto' | 'cartao' | 'editar'; payload: string; status: string; tentativas: number; proximo_em: string; message_id: string | null; created_at: string }
 interface ItemSaida { id: string; canal: NomeCanal; tipo: 'texto' | 'cartao' | 'editar' | 'digitando'; chat_id: string; user_id: string; texto?: string; botoes?: Array<[string, string]>; message_id?: string }
 
 const MIGRACOES: Array<[string, string]> = [
@@ -96,6 +113,8 @@ interface CanaisDeps {
   permite: (motor: string, ws: string) => boolean;
   /** a mesma decisão de POST /api/proposals/:id */
   decidir: (ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject') => Promise<{ status: string; result: string }>;
+  /** o papel do membro no Ergon World (admin, editor, viewer), quando o workspace é sincronizado; sem ele, 'member' é leitura */
+  papelWorld?: (userId: string, ws: string) => string | null;
 }
 
 /** Ajustes de tempo (os testes encurtam). */
@@ -113,8 +132,26 @@ export class Canais {
   private timer: NodeJS.Timeout | null = null;
   private ligado = false;
   private decidindo = new Set<string>();
+  /** quem entrega a fila dos canais locais (o WhatsApp pareado); sem ele, o que é local espera */
+  entregadorLocal: EntregadorLocal | null = null;
+  private drenando = false;
+  private drenarDeNovo = false;
+  private drenoTimer: NodeJS.Timeout | null = null;
 
-  constructor(d: CanaisDeps) { this.d = d; migrarCanais(d.db); }
+  /** a camada comum dos canais externos: membro, papel, volume, pedidos de risco e auditoria (externo.ts) */
+  readonly externos: CanaisExternos;
+
+  constructor(d: CanaisDeps) {
+    this.d = d; migrarCanais(d.db);
+    this.externos = new CanaisExternos({ db: d.db, bus: d.bus, papelWorld: d.papelWorld ?? null });
+    this.externos.entregarAprovado = (p) => this.entregarAprovado(p);
+    this.externos.avisarNoCanal = (p) => { const v = this.vinculo(p.memberId, p.channel as CanalId); if (v) this.enfileirar(v, 'texto', { texto: p.texto }); };
+    // saiu do workspace: os canais dele ali somem
+    this.externos.aoRemoverMembro((ws, u) => {
+      for (const v of this.d.db.all<{ canal: CanalId }>('SELECT canal FROM canais_vinculos WHERE workspace_id = ? AND user_id = ?', ws, u)) this.esquecer(u, v.canal);
+      this.avisarTela(u);
+    });
+  }
 
   // ------------------------------------------------------------------------------------------------ ciclo de vida
   start(): void {
@@ -131,6 +168,7 @@ export class Canais {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     for (const t of this.agendados.values()) clearTimeout(t); this.agendados.clear();
     for (const t of this.avisosTimers.values()) clearTimeout(t); this.avisosTimers.clear();
+    if (this.drenoTimer) { clearTimeout(this.drenoTimer); this.drenoTimer = null; }
     for (const u of this.assinaturas.values()) u(); this.assinaturas.clear();
     this.acordar();
   }
@@ -139,7 +177,14 @@ export class Canais {
     for (const ws of new Set(this.vinculosDe(userId).map((v) => v.workspace_id))) this.agendar(`ws:${ws}`, () => this.atualizarWorkspace(ws));
     this.acordar();
   }
+  /** o que os canais locais guardam da pessoa (canais/whatsapp.ts) */
+  aoRemoverPessoa: ((userId: string) => void) | null = null;
   pessoaRemovida(userId: string): void {
+    // a pessoa saiu do Ergon: os canais dela caem agora, com registro em cada workspace em que estavam ligados
+    for (const r of this.d.db.all<{ w: string }>('SELECT DISTINCT workspace_id AS w FROM canais_vinculos WHERE user_id = ?', userId)) {
+      try { audit(this.d.db, this.d.bus, { workspaceId: r.w, actorType: 'system', actorId: 'ergon', action: 'canal.externo.revogado', targetType: 'user', targetId: userId, evidence: { membro: userId, motivo: 'pessoa removida do Ergon' }, result: 'canais externos revogados: pessoa removida do Ergon' }); } catch { /* o workspace já saiu junto */ }
+    }
+    this.aoRemoverPessoa?.(userId);
     for (const t of ['canais_vinculos', 'canais_bots', 'canais_saida', 'canais_cartoes', 'canais_avisados', 'canais_entrada']) this.d.db.run(`DELETE FROM ${t} WHERE user_id = ?`, userId);
   }
 
@@ -160,7 +205,7 @@ export class Canais {
   private avisarTela(userId: string): void { for (const ws of new Set(this.d.owners.owned(userId))) this.d.bus.publish(ws, 'canais.changed', {}); }
 
   // ------------------------------------------------------------------------------------------------ vínculos e conversa
-  private vinculo(userId: string, canal: NomeCanal): VinculoRow | null { return this.d.db.get<VinculoRow>('SELECT * FROM canais_vinculos WHERE user_id = ? AND canal = ?', userId, canal) ?? null; }
+  private vinculo(userId: string, canal: CanalId): VinculoRow | null { return this.d.db.get<VinculoRow>('SELECT * FROM canais_vinculos WHERE user_id = ? AND canal = ?', userId, canal) ?? null; }
   private vinculosDe(userId: string): VinculoRow[] { return this.d.db.all<VinculoRow>('SELECT * FROM canais_vinculos WHERE user_id = ? ORDER BY canal', userId); }
   private doCanal(motor: string, canal: NomeCanal, externo: string): VinculoRow | null {
     return this.d.db.all<VinculoRow>('SELECT * FROM canais_vinculos WHERE canal = ? AND externo_id = ? ORDER BY created_at', canal, externo).find((v) => this.d.permite(motor, v.workspace_id)) ?? null;
@@ -175,7 +220,8 @@ export class Canais {
     }
     const agente = coordinatorFor(this.d.db, v.workspace_id) ?? this.d.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at LIMIT 1", v.workspace_id)?.id;
     if (!agente) throw new HttpError(409, 'no_agent', 'sem ninguém ativo na equipe');
-    const conv = createConversation(this.d.db, v.workspace_id, v.user_id, agente, NOME_CANAL[v.canal]);
+    const conv = createConversation(this.d.db, v.workspace_id, v.user_id, agente,
+      ehCanalLocal(v.canal) && v.nome && v.nome !== CLOSED_VALUE ? `WhatsApp · ${v.nome}`.slice(0, 120) : nomeDoCanal(v.canal));
     const cursor = Number(this.d.db.get<{ r: number }>('SELECT COALESCE(MAX(rowid), 0) AS r FROM messages')?.r ?? 0);
     this.d.db.run('UPDATE canais_vinculos SET conversation_id = ?, cursor_rowid = ?, updated_at = ? WHERE user_id = ? AND canal = ?', conv.id, cursor, now(), v.user_id, v.canal);
     v.conversation_id = conv.id; v.cursor_rowid = cursor;
@@ -186,11 +232,12 @@ export class Canais {
   notaDoCanal(conversationId: string, messageId?: string | null): string | null {
     const v = this.vinculoDaConversa(conversationId);
     if (!v) return null;
-    if (!messageId) return notaCanal(v.canal);
+    const ext = `\n${this.externos.nota(this.externos.papel(v.workspace_id, v.user_id) ?? 'viewer', v.canal)}`;
+    if (!messageId) return notaCanal(v.canal) + ext;
     const r = this.d.db.get<{ sent_at: string | null; atrasada: number }>(
       `SELECT e.sent_at, e.atrasada FROM messages m JOIN canais_entrada e ON e.request_id = m.client_request_id WHERE m.id = ? AND m.conversation_id = ? AND e.tipo = 'mensagem'`, messageId, conversationId);
-    if (!r || !Number(r.atrasada) || !r.sent_at) return notaCanal(v.canal);
-    return `${notaCanal(v.canal)}\n${notaDeAtrasoCanal(v.canal, dataHora(r.sent_at, workspaceTz(this.d.db, v.workspace_id)))}`;
+    if (!r || !Number(r.atrasada) || !r.sent_at) return notaCanal(v.canal) + ext;
+    return `${notaCanal(v.canal)}${ext}\n${notaDeAtrasoCanal(v.canal, dataHora(r.sent_at, workspaceTz(this.d.db, v.workspace_id)))}`;
   }
   private notaNaConversa(ws: string, conv: string, texto: string): void {
     this.d.db.run(`INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, run_id, created_at) VALUES (?, ?, ?, 'system', ?, 'local', NULL, ?)`,
@@ -205,14 +252,69 @@ export class Canais {
     if (!v) return { ok: false, reply: RESPOSTA.semVinculo };
     if (!this.d.db.workspaceOpen(v.workspace_id)) return { ok: false, reply: RESPOSTA.trancado };
     if (b.tipo === 'clique') return this.clique(v, String(b.dado ?? ''), String(b.evento ?? b.message_id ?? ''));
+    return this.receber(v, b);
+  }
+
+  /**
+   * Mensagem de um canal local (o WhatsApp pareado): quem chama já conferiu que veio da própria pessoa, na conversa
+   * consigo mesma, ou de um contato que ela liberou. Daqui em diante é o mesmo caminho do Telegram e do Discord.
+   */
+  receberLocal(userId: string, canal: CanalLocal, b: { message_id: string; text: string; sent_at?: string | null }): { ok: boolean; reply?: string } {
+    const v = this.vinculo(userId, canal);
+    if (!v) return { ok: false };
+    if (!this.d.db.workspaceOpen(v.workspace_id)) return { ok: false, reply: RESPOSTA.trancado };
+    return this.receber(v, { canal, user_id: v.externo_id, chat_id: v.chat_id, message_id: b.message_id, text: b.text, sent_at: b.sent_at ?? undefined });
+  }
+  /** A resposta numerada a um cartão num canal local: decide pela mesma função do botão (e da tela). */
+  decidirLocal(userId: string, canal: CanalLocal, dado: string, evento: string): { ok: boolean; reply?: string } {
+    const v = this.vinculo(userId, canal);
+    if (!v) return { ok: false };
+    if (!this.d.db.workspaceOpen(v.workspace_id)) return { ok: false, reply: RESPOSTA.trancado };
+    return this.clique(v, dado, evento);
+  }
+  /** Um texto do Ergon (não da equipe) para um canal local: o aviso de atraso, a resposta a um número que não confere. */
+  avisarLocal(userId: string, canal: CanalLocal, texto: string): void {
+    const v = this.vinculo(userId, canal);
+    if (v) this.enfileirar(v, 'texto', { texto });
+  }
+
+  private receber(v: VinculoRow, b: { canal: CanalId; user_id: string; chat_id: string; message_id?: string; text?: string; sent_at?: string }): { ok: boolean; reply?: string; digitando?: boolean } {
     const chave = `${b.canal}:${b.user_id}:${String(b.message_id ?? '')}`.slice(0, 300);
     if (b.message_id && this.d.db.get('SELECT 1 AS x FROM canais_entrada WHERE chave = ?', chave)) return { ok: true }; // entregue de novo: já está na conversa
     const texto = String(b.text ?? '').trim();
     if (!texto) return { ok: true, reply: RESPOSTA.soTexto };
+    // a camada comum dos canais externos (externo.ts): o membro, o papel dele, o volume e os pedidos de risco
+    const ext = this.externos.externalRequest({ channel: v.canal, workspaceId: v.workspace_id, memberId: v.user_id, text: texto, conversationId: v.conversation_id });
+    if (!ext.ok) {
+      this.d.db.run('INSERT OR IGNORE INTO canais_entrada (chave, user_id, canal, tipo, request_id, recebida_em) VALUES (?, ?, ?, ?, ?, ?)', chave, v.user_id, v.canal, `retido:${ext.motivo}`, ext.proposalId ?? null, now());
+      return { ok: true, ...(ext.resposta ? { reply: ext.resposta } : {}) };
+    }
+    const r = this.entregarNaConversa(v, texto, chave, b.sent_at ?? null, b.chat_id);
+    if (r) return r;
+    if (ehCanalLocal(v.canal)) return { ok: true };
+    this.digitar.add(`${v.user_id}|${v.canal}`);
+    return { ok: true, digitando: true };
+  }
+
+  /** O pedido aprovado no app (externo.ts): vai à conversa do canal como pedido do membro, com a aprovação à vista. */
+  private entregarAprovado(p: { channel: string; memberId: string; text: string; proposalId: string; aprovadoPor: string }): void {
+    const v = this.vinculo(p.memberId, p.channel as CanalId);
+    if (!v || !this.d.db.workspaceOpen(v.workspace_id)) return;
+    const conv = this.conversa(v);
+    const quem = this.d.db.get<{ nome: string | null; username: string }>('SELECT display_name AS nome, username FROM users WHERE id = ?', p.aprovadoPor);
+    this.notaNaConversa(v.workspace_id, conv, `Sistema — o pedido abaixo chegou pelo ${nomeDoCanal(v.canal)} e foi aprovado no app por ${quem ? quem.nome || quem.username : 'quem administra o workspace'}.`);
+    if (this.entregarNaConversa(v, p.text, `aprovado:${p.proposalId}`, null, null)) return;
+    this.enfileirar(v, 'texto', { texto: 'Aprovado no Ergon: a equipe começou o seu pedido.' });
+    if (!ehCanalLocal(v.canal)) this.digitar.add(`${v.user_id}|${v.canal}`);
+  }
+
+  /** A mensagem vira mensagem do membro na conversa do canal (o mesmo caminho do app). null = entregue; senão, a resposta. */
+  private entregarNaConversa(v: VinculoRow, texto: string, chave: string, sentAt: string | null, chatId: string | null | undefined): { ok: boolean; reply?: string } | null {
     const conv = this.conversa(v);
     const crid = `canal-${novoId('m').replace(/[^A-Za-z0-9-]/g, '-')}`.slice(0, 64);
-    const quando = b.sent_at && Number.isFinite(Date.parse(b.sent_at)) ? new Date(Date.parse(b.sent_at)).toISOString() : null;
+    const quando = sentAt && Number.isFinite(Date.parse(sentAt)) ? new Date(Date.parse(sentAt)).toISOString() : null;
     const atrasada = !!quando && this.agora() - Date.parse(quando) > ATRASO_MS;
+    const b = { chat_id: chatId };
     try {
       this.d.db.tx(() => {
         this.d.db.run('INSERT INTO canais_entrada (chave, user_id, canal, tipo, request_id, sent_at, atrasada, recebida_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -221,7 +323,9 @@ export class Canais {
         if (!v.primeira_em) {
           this.d.db.run('UPDATE canais_vinculos SET primeira_em = ? WHERE user_id = ? AND canal = ?', now(), v.user_id, v.canal);
           const nome = v.nome && v.nome !== CLOSED_VALUE ? v.nome : 'sem nome';
-          this.notaNaConversa(v.workspace_id, conv, `Sistema — primeira mensagem pela conta do ${NOME_CANAL[v.canal]} "${nome}", ligada em ${dataHora(v.created_at, workspaceTz(this.d.db, v.workspace_id))}. Se não foi você que ligou esta conta, desligue em Conexões › ${NOME_CANAL[v.canal]}.`);
+          this.notaNaConversa(v.workspace_id, conv, ehCanalLocal(v.canal)
+            ? `Sistema — primeira mensagem pelo número da equipe no WhatsApp, de ${nome} (liberado em ${dataHora(v.created_at, workspaceTz(this.d.db, v.workspace_id))}). Se não foi você que liberou este telefone, tire em Conexões › WhatsApp.`
+            : `Sistema — primeira mensagem pela conta do ${NOME_CANAL[v.canal as NomeCanal]} "${nome}", ligada em ${dataHora(v.created_at, workspaceTz(this.d.db, v.workspace_id))}. Se não foi você que ligou esta conta, desligue em Conexões › ${NOME_CANAL[v.canal as NomeCanal]}.`);
         }
         sendMessage(this.d.db, this.d.bus, this.d.executor, v.workspace_id, v.user_id, conv, texto.slice(0, this.d.cfg.maxInputChars), crid,
           this.d.cfg.maxConversationMessages, this.d.cfg.maxInputChars, { queue: true });
@@ -231,8 +335,7 @@ export class Canais {
       if (err instanceof HttpError && err.status < 500) return { ok: false, reply: RESPOSTA.naoDeu.replace('{motivo}', err.message) };
       throw err;
     }
-    this.digitar.add(`${v.user_id}|${v.canal}`);
-    return { ok: true, digitando: true };
+    return null;
   }
 
   /** Clique em Aprovar/Recusar: decide pela mesma função da tela, fora do pedido (pode chamar outro app e demorar). */
@@ -244,6 +347,8 @@ export class Canais {
     if (!prop) return { ok: false, reply: RESPOSTA.jaDecidido };
     // um botão antigo de um pedido que não cabe inteiro no canal também não decide
     if (SO_NO_ERGON.includes(prop.kind) || !cabeNoCanal(prop.kind, prop.summary, LIMITE_CANAL)) return { ok: true, reply: RESPOSTA.noErgon };
+    // por canal externo, só o que é seguro decidir de um celular, e por quem pode (externo.ts)
+    if (!this.externos.podeDecidirPeloCanal(v.workspace_id, v.user_id, pid)) return { ok: true, reply: RESPOSTA.noErgon };
     if (prop.status !== 'proposed') { this.atualizarCartoes(v.workspace_id); return { ok: true, reply: RESPOSTA.jaDecidido }; }
     const chave = `${v.canal}:${v.user_id}:clique:${evento || pid}`.slice(0, 300);
     if (this.d.db.run('INSERT OR IGNORE INTO canais_entrada (chave, user_id, canal, tipo, request_id, recebida_em) VALUES (?, ?, ?, ?, ?, ?)', chave, v.user_id, v.canal, 'clique', pid, now()).changes === 0) return { ok: true };
@@ -263,7 +368,7 @@ export class Canais {
     this.acordar();
     return idSaida;
   }
-  private acordar(): void { const w = [...this.esperando]; this.esperando.clear(); for (const f of w) f(); }
+  private acordar(): void { const w = [...this.esperando]; this.esperando.clear(); for (const f of w) f(); this.drenarLocal(); }
 
   private atualizarWorkspace(ws: string): void {
     if (!this.d.db.workspaceOpen(ws)) return;
@@ -306,10 +411,12 @@ export class Canais {
     const { titulo: t, texto } = partesDoResumo(summary);
     return [titulo, textoParaTeams(t, 300), texto ? textoParaTeams(texto, LIMITE_CANAL) : ''].filter(Boolean).join('\n\n');
   }
-  private cartao(v: VinculoRow, p: { id: string; kind: string; summary: string }, titulo: string): void {
+  private cartao(v: VinculoRow, dela: { id: string; kind: string; summary: string }, titulo: string): void {
+    // o comando para aprovar vai só com a frase simples (o cartão gravado antes da rc.33 levava o comando no texto)
+    const p = dela.kind === 'aprovacao' ? { ...dela, summary: resumoVisivelDaAprovacao(dela.summary) } : dela;
     // a pessoa aprova exatamente o que lê: o pedido que não cabe inteiro no canal se decide no Ergon
     const cabe = cabeNoCanal(p.kind, p.summary, LIMITE_CANAL);
-    const decide = !SO_NO_ERGON.includes(p.kind) && cabe;
+    const decide = !SO_NO_ERGON.includes(p.kind) && cabe && this.externos.podeDecidirPeloCanal(v.workspace_id, v.user_id, p.id);
     const texto = this.textoDoCartao(titulo, p.summary) + (decide ? '' : `\n\n${!cabe ? ABRIR_LONGO : p.kind === 'permission' ? 'Abra o Ergon para autorizar (pede a sua senha).'
       : p.kind === 'segredo' ? 'Abra o Ergon para informar: o valor nunca passa por aqui.' : 'Abra o Ergon para responder.'}`);
     const botoes: Array<[string, string]> = decide ? [['Aprovar', `a:${p.id}`], ['Recusar', `r:${p.id}`]] : [];
@@ -338,7 +445,7 @@ export class Canais {
   /** Decidido em qualquer lugar: o cartão enviado fica com a linha final, sem os botões. */
   private atualizarCartoes(ws: string): void {
     if (!this.d.db.workspaceOpen(ws)) return;
-    const rows = this.d.db.all<{ proposal_id: string; user_id: string; canal: NomeCanal; saida_id: string | null; status: string | null; result: string | null; decided_at: string | null }>(
+    const rows = this.d.db.all<{ proposal_id: string; user_id: string; canal: CanalId; saida_id: string | null; status: string | null; result: string | null; decided_at: string | null }>(
       `SELECT c.proposal_id, c.user_id, c.canal, c.saida_id, p.status, p.result, p.decided_at FROM canais_cartoes c JOIN canais_vinculos v ON v.user_id = c.user_id AND v.canal = c.canal
          LEFT JOIN agent_proposals p ON p.id = c.proposal_id
         WHERE c.estado = 'open' AND v.workspace_id = ? AND (p.id IS NULL OR p.status <> 'proposed')`, ws);
@@ -365,7 +472,8 @@ export class Canais {
     // o que nasceu numa conversa de canal já foi como cartão por lá
     const doCanal = new Set(this.d.db.all<{ c: string }>('SELECT conversation_id AS c FROM canais_vinculos WHERE user_id = ? AND conversation_id IS NOT NULL', v.user_id).map((r) => r.c));
     const out: Array<{ chave: string; texto: string; proposta?: { id: string; kind: string; summary: string } }> = [];
-    for (const p of d.proposals) { if (!(p.conversation_id && doCanal.has(p.conversation_id))) out.push({ chave: `p:${p.id}`, texto: partesDoResumo(p.summary).titulo, proposta: p }); }
+    // os cartões dos canais externos (pausa, pedido de risco) ficam no app: um celular roubado não os vê
+    for (const p of d.proposals) { if (p.kind !== KIND_EXTERNO && !(p.conversation_id && doCanal.has(p.conversation_id))) out.push({ chave: `p:${p.id}`, texto: partesDoResumo(p.summary).titulo, proposta: p }); }
     for (const w of d.waiting) { if (!(w.conversation_id && doCanal.has(w.conversation_id))) out.push({ chave: `w:${w.id}`, texto: `${w.agent_name} espera uma resposta sua` }); }
     const precisa: Record<string, string> = { info: 'precisa de uma informação sua', review: 'está pronto para você revisar', approval: 'espera a sua aprovação' };
     for (const c of d.cards) out.push({ chave: `c:${c.id}:${c.work_state}`, texto: `Card #${c.number}: ${c.title} — ${c.agent_name ? `${c.agent_name}: ` : ''}${precisa[c.need] ?? 'espera você'}${c.question ? ` (${c.question})` : ''}` });
@@ -385,9 +493,9 @@ export class Canais {
     if (novos) this.armarAvisos(v.user_id, v.canal, this.ajustes.avisosMs);
   }
   private rearmarAvisos(): void {
-    for (const r of this.d.db.all<{ user_id: string; canal: NomeCanal }>('SELECT DISTINCT user_id, canal FROM canais_avisados WHERE sent = 0')) this.armarAvisos(r.user_id, r.canal, this.ajustes.avisosMs);
+    for (const r of this.d.db.all<{ user_id: string; canal: CanalId }>('SELECT DISTINCT user_id, canal FROM canais_avisados WHERE sent = 0')) this.armarAvisos(r.user_id, r.canal, this.ajustes.avisosMs);
   }
-  private armarAvisos(userId: string, canal: NomeCanal, ms: number): void {
+  private armarAvisos(userId: string, canal: CanalId, ms: number): void {
     const k = `${userId}|${canal}`;
     if (this.avisosTimers.has(k)) return;
     const t = setTimeout(() => { this.avisosTimers.delete(k); try { this.enviarAvisos(userId, canal); } catch (err) { log.warn({ erro: (err as Error).message.slice(0, 120) }, 'canais: aviso não saiu'); } }, ms);
@@ -395,7 +503,7 @@ export class Canais {
     this.avisosTimers.set(k, t);
   }
   /** O que surgiu no último minuto vai junto; no máximo 20 avisos por hora por canal. Decisões vão como cartões. */
-  private enviarAvisos(userId: string, canal: NomeCanal): void {
+  private enviarAvisos(userId: string, canal: CanalId): void {
     const v = this.vinculo(userId, canal);
     if (!v || !this.d.db.workspaceOpen(v.workspace_id)) return;
     const pend = this.d.db.all<{ item: string }>('SELECT item FROM canais_avisados WHERE user_id = ? AND canal = ? AND sent = 0', userId, canal).map((r) => r.item);
@@ -437,9 +545,10 @@ export class Canais {
     }
     return { itens };
   }
-  private confirmar(motor: string, a: { id?: string; ok?: boolean; message_id?: string; erro?: string; passageiro?: boolean }): void {
+  /** `motor` null: a entrega local (o WhatsApp pareado), aqui mesmo; o plugin nunca confirma um item local. */
+  private confirmar(motor: string | null, a: { id?: string; ok?: boolean; message_id?: string; erro?: string; passageiro?: boolean }): void {
     const row = typeof a.id === 'string' ? this.d.db.get<SaidaRow>('SELECT * FROM canais_saida WHERE id = ?', a.id) : null;
-    if (!row || !this.d.permite(motor, row.workspace_id) || row.status === 'sent' || row.status === 'failed') return;
+    if (!row || (motor !== null ? !this.d.permite(motor, row.workspace_id) || ehCanalLocal(row.canal) : !ehCanalLocal(row.canal)) || row.status === 'sent' || row.status === 'failed') return;
     if (a.ok) {
       this.d.db.run("UPDATE canais_saida SET status = 'sent', message_id = ?, tentativas = tentativas + 1 WHERE id = ?", typeof a.message_id === 'string' ? a.message_id.slice(0, 64) : null, row.id);
       if (row.tipo === 'cartao') this.atualizarCartoes(row.workspace_id); // decidido enquanto o cartão ia
@@ -465,16 +574,16 @@ export class Canais {
       out.push({ id: `typ_${novoId('x')}`, canal: c, tipo: 'digitando', chat_id: v.chat_id, user_id: v.externo_id });
     }
     const rows = this.d.db.all<SaidaRow>(
-      `SELECT * FROM canais_saida WHERE (status = 'pending' OR (status = 'em_voo' AND message_id IS NULL)) AND proximo_em <= ? ORDER BY created_at, rowid LIMIT 200`, agoraIso);
+      `SELECT * FROM canais_saida WHERE (status = 'pending' OR (status = 'em_voo' AND message_id IS NULL)) AND proximo_em <= ? AND canal NOT LIKE 'whatsapp:%' ORDER BY created_at, rowid LIMIT 200`, agoraIso);
     const parado = new Set<string>(); // o mais antigo de cada canal vai primeiro: o seguinte não passa à frente
     for (const row of rows) {
       const k = `${row.user_id}|${row.canal}`;
       if (out.length >= 20 || parado.has(k)) continue;
-      if (!vivos.has(row.canal) || !this.d.permite(motor, row.workspace_id) || !this.d.db.workspaceOpen(row.workspace_id)) { parado.add(k); continue; }
+      if (ehCanalLocal(row.canal) || !vivos.has(row.canal) || !this.d.permite(motor, row.workspace_id) || !this.d.db.workspaceOpen(row.workspace_id)) { parado.add(k); continue; }
       const v = this.vinculo(row.user_id, row.canal);
       if (!v || row.payload === CLOSED_VALUE) { this.d.db.run("UPDATE canais_saida SET status = 'failed', erro = 'sem_vinculo' WHERE id = ?", row.id); continue; }
       const pl = JSON.parse(row.payload) as { texto?: string; botoes?: Array<[string, string]>; origem?: string };
-      const item: ItemSaida = { id: row.id, canal: row.canal, tipo: row.tipo, chat_id: v.chat_id, user_id: v.externo_id, texto: String(pl.texto ?? '') };
+      const item: ItemSaida = { id: row.id, canal: row.canal as NomeCanal, tipo: row.tipo, chat_id: v.chat_id, user_id: v.externo_id, texto: String(pl.texto ?? '') };
       if (row.tipo === 'cartao') item.botoes = (pl.botoes ?? []).slice(0, 4);
       if (row.tipo === 'editar') {
         const origem = pl.origem ? this.d.db.get<{ message_id: string | null; status: string }>('SELECT message_id, status FROM canais_saida WHERE id = ?', pl.origem) : null;
@@ -487,8 +596,76 @@ export class Canais {
     }
     return out;
   }
+  /** A fila dos canais locais, entregue aqui mesmo: um por vez, na ordem; o mais antigo de cada canal vai primeiro. */
+  private drenarLocal(): void {
+    if (!this.entregadorLocal || !this.ligado) return;
+    if (this.drenando) { this.drenarDeNovo = true; return; }
+    this.drenando = true;
+    void this.drenar().catch((err: unknown) => log.warn({ erro: (err as Error).message.slice(0, 120) }, 'canais: entrega local falhou'))
+      .finally(() => { this.drenando = false; if (this.drenarDeNovo) { this.drenarDeNovo = false; this.drenarLocal(); } });
+  }
+  private async drenar(): Promise<void> {
+    const entregar = this.entregadorLocal;
+    if (!entregar) return;
+    const agoraIso = new Date(this.agora()).toISOString();
+    const rows = this.d.db.all<SaidaRow>(
+      `SELECT * FROM canais_saida WHERE (status = 'pending' OR (status = 'em_voo' AND message_id IS NULL)) AND proximo_em <= ? AND canal LIKE 'whatsapp:%' ORDER BY created_at, rowid LIMIT 50`, agoraIso);
+    const parado = new Set<string>();
+    for (const row of rows) {
+      const k = `${row.user_id}|${row.canal}`;
+      if (!this.ligado || parado.has(k)) continue;
+      if (!this.d.db.workspaceOpen(row.workspace_id)) { parado.add(k); continue; }
+      const v = this.vinculo(row.user_id, row.canal);
+      if (!v || row.payload === CLOSED_VALUE) { this.d.db.run("UPDATE canais_saida SET status = 'failed', erro = 'sem_vinculo' WHERE id = ?", row.id); continue; }
+      const pl = JSON.parse(row.payload) as { texto?: string; botoes?: Array<[string, string]>; origem?: string };
+      const item: ItemLocal = { id: row.id, tipo: row.tipo, texto: String(pl.texto ?? ''), botoes: row.tipo === 'cartao' ? (pl.botoes ?? []).slice(0, 4) : [] };
+      if (row.tipo === 'editar') {
+        const origem = pl.origem ? this.d.db.get<{ status: string }>('SELECT status FROM canais_saida WHERE id = ?', pl.origem) : null;
+        if (!origem || origem.status === 'failed') { this.d.db.run("UPDATE canais_saida SET status = 'failed', erro = 'sem_origem' WHERE id = ?", row.id); continue; }
+        if (origem.status !== 'sent') { parado.add(k); continue; }
+        item.origem = pl.origem;
+      }
+      this.d.db.run("UPDATE canais_saida SET status = 'em_voo', proximo_em = ? WHERE id = ?", new Date(this.agora() + this.ajustes.arrendamentoMs).toISOString(), row.id);
+      const r: ResultadoLocal = await entregar({ userId: v.user_id, canal: v.canal as CanalLocal, workspaceId: v.workspace_id, chatId: v.chat_id }, item)
+        .catch((e: unknown) => ({ ok: false, passageiro: true, erro: (e as Error).message.slice(0, 80) }));
+      if (!r.ok && r.esperarMs) {
+        // limite de envio: volta à fila sem contar como falha
+        this.d.db.run("UPDATE canais_saida SET status = 'pending', proximo_em = ? WHERE id = ?", new Date(this.agora() + r.esperarMs).toISOString(), row.id);
+        parado.add(k);
+        this.armarDreno(r.esperarMs);
+        continue;
+      }
+      this.confirmar(null, { id: row.id, ok: r.ok, message_id: r.message_id, erro: r.erro, passageiro: r.passageiro });
+      if (!r.ok) { parado.add(k); this.armarDreno(2000); }
+    }
+  }
+  private armarDreno(ms: number): void {
+    if (this.drenoTimer || !this.ligado) return;
+    this.drenoTimer = setTimeout(() => { this.drenoTimer = null; this.drenarLocal(); }, Math.max(50, ms));
+    this.drenoTimer.unref?.();
+  }
+
+  // ------------------------------------------------------------------------------------------------ canais locais (tela)
+  /** Liga um canal local à pessoa (a conversa com o coordenador nasce na primeira mensagem). */
+  ligarLocal(userId: string, ws: string, canal: CanalLocal, externo: string, chat: string, nome: string): void {
+    this.d.db.tx(() => {
+      this.esquecer(userId, canal);
+      this.d.db.run(`INSERT INTO canais_vinculos (user_id, canal, workspace_id, externo_id, chat_id, nome, avisos, cursor_rowid, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+        userId, canal, ws, externo.slice(0, 64), chat.slice(0, 64), this.d.db.seal(ws, nome.slice(0, 120)), Number(this.d.db.get<{ r: number }>('SELECT COALESCE(MAX(rowid), 0) AS r FROM messages')?.r ?? 0), now(), now());
+    });
+    this.linhaDeBase(this.vinculo(userId, canal)!);
+    this.assinar(ws);
+    this.avisarTela(userId);
+  }
+  desligarLocal(userId: string, canal: CanalLocal): void { this.esquecer(userId, canal); this.avisarTela(userId); }
+  ligadoLocal(userId: string, canal: CanalLocal): { desde: string; avisos: boolean; conversationId: string | null } | null {
+    const v = this.vinculo(userId, canal);
+    return v ? { desde: v.created_at, avisos: Number(v.avisos) === 1, conversationId: v.conversation_id } : null;
+  }
+
   /** A cada poucos segundos: o "digitando" de quem ainda espera, e a limpeza do que venceu. */
   private passo(): void {
+    this.drenarLocal();
     for (const k of [...this.digitar]) {
       const [u, c] = k.split('|') as [string, NomeCanal];
       const v = this.vinculo(u, c);
@@ -566,7 +743,7 @@ export class Canais {
     this.assinar(ws);
     this.avisarTela(userId);
   }
-  setAvisos(userId: string, canal: NomeCanal, avisos: boolean): void {
+  setAvisos(userId: string, canal: CanalId, avisos: boolean): void {
     const v = this.vinculo(userId, canal);
     if (!v) throw new HttpError(404, 'not_found', 'conversa não ligada');
     this.d.db.run('UPDATE canais_vinculos SET avisos = ?, updated_at = ? WHERE user_id = ? AND canal = ?', avisos ? 1 : 0, now(), userId, canal);
@@ -583,7 +760,7 @@ export class Canais {
     });
     this.avisarTela(userId);
   }
-  private esquecer(userId: string, canal: NomeCanal): void {
+  private esquecer(userId: string, canal: CanalId): void {
     for (const t of ['canais_vinculos', 'canais_saida', 'canais_cartoes', 'canais_avisados']) this.d.db.run(`DELETE FROM ${t} WHERE user_id = ? AND canal = ?`, userId, canal);
     this.digitar.delete(`${userId}|${canal}`);
   }

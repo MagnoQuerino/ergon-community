@@ -10,6 +10,7 @@
  * equipe cujo título a pessoa não escolheu. Título que a pessoa escolheu (criou a tarefa, editou o nome, pediu
  * "renomeie o #12 para …") fica: title_source = 'pessoa'. Cada troca fica no histórico do card.
  */
+import { docsComoTexto } from '../../../shared/caminhos.ts';
 import type { Db } from '../db/db.ts';
 import { clip, fold, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
@@ -89,7 +90,7 @@ const firstSentence = (s: string): string => s.trim().split(/(?<=[.!?])\s+|\n/)[
 
 /** Uma linha, até max caracteres, cortada em palavra (com "…" quando corta), sem pontuação solta no fim. */
 export function cutTitle(text: string, max = 90): string {
-  const line = text.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim()
+  const line = docsComoTexto(text).replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim()
     .replace(/^(?:oi|ola|olá|bom dia|boa tarde|boa noite|hi|hello|hey|good morning|good afternoon|good evening)[,!.\s]+/i, '');
   const short = line.length <= max ? line : (() => {
     const space = line[max] === ' ' ? max : line.lastIndexOf(' ', max);

@@ -92,6 +92,9 @@ const geral = {
   'ws.local': 'Neste computador',
   'ws.gerenciar': 'Gerenciar',
   'ws.nasce': 'Ele nasce com a equipe e a cidade iniciais e passa pelas boas-vindas, como uma conta nova.',
+  'ws.buscar': 'Buscar workspace',
+  'ws.buscarAria': 'Buscar workspace pelo nome',
+  'ws.nenhum': 'Nenhum workspace com esse nome.',
 
   // ——— o avatar (menu da conta) ———
   'conta.aria': 'Conta: {nome}',
@@ -262,12 +265,28 @@ const geral = {
   'arquivo.semPreviaDetalhe': 'Sem prévia para este arquivo ({detalhe}). Use Baixar.',
   'arquivo.baixar': 'Baixar ({tamanho})',
   'arquivo.abrirImagem': 'Abrir a imagem (também em Documentos)',
+  'arquivo.abrirDocumento': 'Baixar {nome} (está em Documentos)',
+  'download.arquivo': 'Arquivo baixado',
+  'download.noNavegador': 'Baixando: o navegador guarda na pasta de downloads dele.',
+  'download.salvoEm': 'Salvo em {pasta}',
+  'download.salvo': 'Download concluído',
+  'download.abrirPasta': 'Abrir pasta',
+  'download.mostrarArquivo': 'Mostrar arquivo',
+  'download.fechar': 'Fechar o aviso',
+  'download.pastaTitulo': 'Pasta de downloads do Ergon',
+  'download.pastaNavegador': 'No navegador, quem escolhe a pasta é o próprio navegador (nas configurações dele); no Ergon Desktop, você escolhe aqui.',
+  'download.pastaAtualizar': 'Atualize o Ergon Desktop para escolher aqui a pasta dos downloads.',
+  'download.pastaPadrao': '(a Downloads do sistema)',
+  'download.escolher': 'Escolher pasta…',
+  'download.usarPadrao': 'Usar a Downloads do sistema',
+  'download.pastaDica': 'Os arquivos que você baixa do Ergon vão para esta pasta neste computador.',
   'arquivo.imagemDoAgente': 'Imagem gerada pelo agente',
   'arquivo.conexaoCaiu': 'a conexão caiu no meio do envio',
   'arquivo.envioCancelado': 'envio cancelado',
 
   // ——— o texto longo (recolhido) ———
   'texto.recolher': 'Recolher o texto',
+  'detalhesTecnicos': 'Ver detalhes técnicos',
   'texto.verInteiro': { one: 'Ver o texto inteiro ({n} caractere)', other: 'Ver o texto inteiro ({n} caracteres)' },
 } as const satisfies Area;
 

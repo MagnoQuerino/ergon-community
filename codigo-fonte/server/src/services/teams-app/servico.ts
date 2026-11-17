@@ -4,7 +4,14 @@
  * o coordenador: a mensagem dela entra como mensagem dela (a mesma regra do app: o que ela pede vai direto, o resto pede
  * cartão), a resposta do coordenador volta ao Teams, as confirmações viram cartões com Aprovar/Recusar (o clique decide
  * pela MESMA função da tela) e o que precisa dela em "Com você" vira aviso no Teams (ligado por padrão).
- * Nada daqui depende do módulo opcional da nuvem: funciona igual na edição Community. Sem endereço do serviço, nada liga.
+ * O mesmo serviço leva os bots do Ergon no Discord e no Telegram (zero configuração para a pessoa): cada vínculo sabe a
+ * plataforma, e cada pessoa tem UMA conversa com o coordenador por plataforma, com a nota do canal dela; respostas,
+ * "digitando", cartões e avisos vão para a plataforma da conversa. A conta do Discord liga pelo código (como o Teams) ou
+ * pelo "Adicionar ao Discord" (link de uso único, quando o serviço oferece); a do Telegram, pelo link de uso único.
+ * Nada daqui depende do módulo opcional da nuvem: funciona igual na edição Community. O endereço do serviço vem do
+ * ambiente (ERGON_TEAMS_RELAY_URL), do "Ajuste da instalação" ou, sem nenhum dos dois, é o serviço oficial
+ * (RELE_PADRAO, https://api.ergonworld.com/canais): esse só é oferecido depois que a saúde dele responde. "off" no
+ * ambiente ou no ajuste desliga. Sem endereço, nada liga.
  */
 import type { Config } from '../../config.ts';
 import type { Db } from '../../db/db.ts';
@@ -21,8 +28,10 @@ import { workspaceTz } from '../routine-proposals.ts';
 import type { RunExecutor } from '../runs.ts';
 import { instanceSetting, setInstanceSetting } from '../security.ts';
 import { coordinatorFor } from '../team-query.ts';
-import { migrarTeamsApp, type PessoaRow, type SaidaRow, type VinculoRow } from './armazenamento.ts';
-import { ABRIR_LONGO, KINDS_INTEIROS, LIMITE_TEAMS, cabeNoCanal, dataHora, montarCartao, partesDoResumo, resumoParaTeams, textoParaTeams, type DesenhoCartao, type EstadoDecisao, type ItemCartao } from './cartoes.ts';
+import { migrarTeamsApp, type PessoaRow, type Plataforma, type SaidaRow, type VinculoRow } from './armazenamento.ts';
+import type { CanaisExternos, PedidoExterno } from '../canais/externo.ts';
+import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
+import { ABRIR_LONGO, KINDS_INTEIROS, LIMITE_TEAMS, cabeNoCanal, dataHora, montarCartao, montarTexto, partesDoResumo, resumoParaTeams, textoParaTeams, type DesenhoCartao, type EstadoDecisao, type ItemCartao } from './cartoes.ts';
 import { ClienteRele, ErroDoRele, type Ack, type EstadoConexao, type Quadro } from './cliente.ts';
 import {
   ID_CLAIM, ID_INSTALACAO, ID_VINCULO, PROTOCOLO, abrirSelado, aadDoSelo, assinar, enderecoDoRele, gerarChaves, hashDaConta, mensagemRegistro, normalizarCodigo,
@@ -32,9 +41,31 @@ import {
 /** A instrução do canal (contrato, 7.2 item 1): quem escreve e por onde. */
 export const NOTA_TEAMS = 'Canal: conversa pelo Teams. Quem escreve é a pessoa dona do workspace, pela conta do Teams ligada por código. A resposta vai para o Teams: texto simples, sem tabelas largas.';
 const TITULO_CONVERSA = 'Teams';
+/** O serviço de conversa da nuvem do Ergon (Teams, Discord, Telegram): ninguém precisa configurar nada. */
+export const RELE_PADRAO = 'https://api.ergonworld.com/canais';
+/** Os bots oficiais (Telegram, Discord) pelo mesmo serviço: nome, título da conversa e instrução do canal. */
+export type PlataformaBot = 'telegram' | 'discord';
+export const PLATAFORMAS_BOT: readonly PlataformaBot[] = ['telegram', 'discord'];
+const NOME_PLAT: Record<Plataforma, string> = { teams: 'Teams', telegram: 'Telegram', discord: 'Discord' };
+/** A instrução do canal no Discord: mensagens de até 2000 caracteres, markdown simples. */
+export const NOTA_DISCORD = 'Canal: conversa pelo Discord (bot oficial do Ergon). Quem escreve é o membro do workspace dono da conta do Discord ligada (por código ou pelo "Adicionar ao Discord"). A resposta vai para o Discord: texto curto em markdown simples, sem tabelas (cada mensagem do Discord tem até 2000 caracteres).';
+export const NOTA_TELEGRAM = 'Canal: conversa pelo Telegram (bot oficial do Ergon). Quem escreve é o membro do workspace dono da conta do Telegram ligada pelo link de uso único. A resposta vai para o Telegram: texto simples, sem tabelas largas.';
+const notaDe = (plat: Plataforma) => (plat === 'teams' ? NOTA_TEAMS : plat === 'discord' ? NOTA_DISCORD : NOTA_TELEGRAM);
+/** A resposta do agente no Discord: até umas 3 mensagens (o resto continua no Ergon). */
+const MAX_RESPOSTA: Record<Plataforma, number | undefined> = { teams: undefined, telegram: undefined, discord: 6000 };
+/** O que o serviço oferece (GET /v1/info), guardado na instalação: sem rede, a tela já sabe o que mostrar. */
+interface InfoDoRele {
+  base: string; teams: boolean; teamsAppId: string | null;
+  /** o bot do Ergon no Discord: o link de adicionar é montado aqui pelo id; `linkStart` = o serviço faz o "Adicionar ao Discord" com state */
+  discord: { applicationId: string; installUrl: string; botName: string; linkStart: boolean } | null;
+  telegram: { botUsername: string | null } | null;
+  at: number;
+}
+/** O que só se aprova dentro do app: decisão nascida de um pedido de risco vindo de fora. */
+const SO_NO_APP = 'Por segurança, isto só se decide dentro do app do Ergon: abra o Ergon para aprovar ou recusar.';
 
 /** Para o agente, quando o pedido chegou com atraso (a fila do serviço guardou enquanto este Ergon estava fechado). */
-const notaDeAtraso = (quando: string) => `Pedido enviado pelo Teams em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
+const notaDeAtraso = (quando: string, plat: Plataforma = 'teams') => `Pedido enviado pelo ${NOME_PLAT[plat]} em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
 /** Mais velho que isto (ou vindo da fila do serviço), o pedido é tratado como atrasado. */
 const ATRASO_MS = 10 * 60_000;
 
@@ -46,20 +77,27 @@ const MSA_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
 const ERROS_POR_PESSOA = 3;
 const JANELA_ERROS_MS = 15 * 60_000;
 class ConteudoInvalido extends Error { constructor() { super('conteúdo inválido'); } }
-/** Erros do serviço do Teams na tela (contrato, 7.2). */
-const ERROS: Record<string, [number, string]> = {
-  code_invalid: [400, 'Código não encontrado. Confira e tente de novo.'],
-  code_expired: [400, 'Este código venceu. Mande qualquer mensagem ao app no Teams para receber outro.'],
-  too_many_attempts: [429, 'Muitas tentativas. Espere 15 minutos.'],
-  already_linked: [409, 'Esta conta do Teams já está ligada a outro Ergon. No Teams, mande "desligar" e peça um código novo.'],
-  limit_reached: [409, 'Você já ligou 3 contas do Teams. Desligue uma para ligar outra.'],
-  claim_expired: [400, 'A confirmação demorou demais. Digite o código de novo.'],
-  // a instalação acabou de se registrar no serviço (contrato 12.2): a tela espera e tenta de novo sozinha
-  not_ready: [503, 'Preparando a conexão com o Teams…'],
-  offline: [503, 'Sem conexão com o serviço do Teams agora. Tente de novo em instantes.'],
-  timeout: [503, 'O serviço do Teams não respondeu a tempo. Tente de novo em instantes.'],
+/** Erros do serviço de conversa na tela (contrato, 7.2), na voz da plataforma. */
+const ERROS = (plat: Plataforma): Record<string, [number, string]> => {
+  const n = NOME_PLAT[plat];
+  return {
+    code_invalid: [400, 'Código não encontrado. Confira e tente de novo.'],
+    code_expired: [400, `Este código venceu. Mande qualquer mensagem ${plat === 'teams' ? 'ao app no Teams' : `ao bot Ergon no ${n}`} para receber outro.`],
+    too_many_attempts: [429, 'Muitas tentativas. Espere 15 minutos.'],
+    already_linked: [409, `Esta conta do ${n} já está ligada a outro Ergon. No ${n}, mande "desligar" e peça um código novo.`],
+    limit_reached: [409, `Você já ligou 3 contas do ${n}. Desligue uma para ligar outra.`],
+    claim_expired: [400, 'A confirmação demorou demais. Digite o código de novo.'],
+    // a instalação acabou de se registrar no serviço (contrato 12.2): a tela espera e tenta de novo sozinha
+    not_ready: [503, `Preparando a conexão com o ${n}…`],
+    offline: [503, `Sem conexão com o serviço do ${n} agora. Tente de novo em instantes.`],
+    timeout: [503, `O serviço do ${n} não respondeu a tempo. Tente de novo em instantes.`],
+  };
 };
-const erroDaTela = (code: string) => { const [s, m] = ERROS[code] ?? [502, 'O serviço do Teams não aceitou agora. Tente de novo em instantes.']; return new HttpError(s, code in ERROS ? code : 'teams_relay', m); };
+const erroDaTela = (code: string, plat: Plataforma = 'teams') => {
+  const E = ERROS(plat);
+  const [s, m] = E[code] ?? [502, `O serviço do ${NOME_PLAT[plat]} não aceitou agora. Tente de novo em instantes.`];
+  return new HttpError(s, code in E ? code : 'teams_relay', m);
+};
 
 type Problema = 'assinatura' | 'revogada' | 'versao' | 'substituida' | 'religar' | 'registro' | null;
 
@@ -88,6 +126,8 @@ interface TeamsAppDeps {
 /** Ajustes de tempo (os testes encurtam). */
 interface AjustesTeams {
   avisosMs: number; saidaMs: number; digitandoMs: number; atrasoMs: number;
+  /** o serviço oficial ainda não respondeu à saúde: de quanto em quanto tempo confere de novo (1 h; a tela aberta confere a cada minuto) */
+  saudeMs?: number;
   /** prazo dos pedidos da tela ao serviço (ligar/desligar, avisos): o estado daqui já foi gravado, a conexão seguinte confere */
   pedidoMs?: number;
   /** primeira espera depois de um registro recusado (dobra a cada falha, até 1 h) */
@@ -95,8 +135,10 @@ interface AjustesTeams {
   cliente?: { baseMs?: number; tetoMs?: number; reenvioMs?: number; semPingMs?: number; zerarAposMs?: number };
 }
 
-interface BindingDoRele { bindingId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName?: string; linkedAt?: string; claimId?: string }
-interface ClaimLocal { userId: string; ws: string; teamsName: string; expiresAt: number; conta: ContaDoTeams }
+interface BindingDoRele { bindingId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName?: string; linkedAt?: string; claimId?: string; canal?: string; platform?: string }
+interface ClaimLocal { userId: string; ws: string; teamsName: string; expiresAt: number; conta: ContaDoTeams; plat: Plataforma }
+/** A plataforma que o serviço informou (`canal` ou `platform`, os dois nomes que ele manda); sem nenhum, Teams. */
+const platDe = (v: unknown): Plataforma => (v === 'discord' || v === 'telegram' ? v : 'teams');
 
 export class TeamsApp {
   readonly d: TeamsAppDeps;
@@ -104,6 +146,8 @@ export class TeamsApp {
   cliente: ClienteRele | null = null;
   problema: Problema = null;
   teamsAppUrl: string | null = null;
+  /** o que o serviço oferece (GET /v1/info), guardado: a tela não espera a rede para saber o que mostrar */
+  info: InfoDoRele | null = null;
   private registradoDeNovo = false;
   private fila: Promise<void> = Promise.resolve();
   /** o relógio deste computador (os testes adiantam ou atrasam) */
@@ -127,22 +171,137 @@ export class TeamsApp {
   private ligado = false;
   private iniciando = false;
   private varreduraTimer: NodeJS.Timeout | null = null;
+  /** O serviço oficial respondeu à saúde (e quando foi conferido). Endereço escolhido à mão não passa por isso. */
+  private saudeOficial: { ok: boolean; em: number } | null = null;
+  private conferindoSaude: Promise<boolean> | null = null;
+  private saudeTimer: NodeJS.Timeout | null = null;
+  /** as plataformas de bot que o serviço tem ligadas (saúde ou /v1/info) */
+  plataformasDoRele: Record<PlataformaBot, boolean> = { telegram: false, discord: false };
+  /** links de uso único pedidos há pouco (por personRef): a reconciliação adota o vínculo cujo link.added se perdeu */
+  private iniciados = new Map<string, { userId: string; ws: string; ate: number }>();
+  /**
+   * A camada comum dos canais externos (services/canais/externo.ts): cada conta ligada é de um membro e o pedido age como
+   * ele, com o papel dele; risco vai a um cartão no app; volume incomum pausa; tudo na auditoria. O app liga com
+   * `usarCamadaComum` (sem ela, como antes: só a pessoa dona liga contas).
+   */
+  externos: CanaisExternos | null = null;
 
   constructor(d: TeamsAppDeps) {
     this.d = d;
     migrarTeamsApp(d.db);
+    try {
+      const v = JSON.parse(instanceSetting(d.db, 'teams_relay_info') ?? 'null') as InfoDoRele | null;
+      if (v && typeof v.base === 'string') { this.info = v; this.teamsAppUrl = v.teamsAppId ? `https://teams.microsoft.com/l/app/${v.teamsAppId}` : null; }
+    } catch { this.info = null; }
+  }
+
+  /** O id do canal na camada comum: `teams:oficial`, `telegram:oficial`, `discord:oficial` (o bot próprio é `telegram`). */
+  static canalDe(plat: Plataforma): string { return `${plat}:oficial`; }
+  private platDoCanal(channel: string): Plataforma | null {
+    const m = /^(teams|telegram|discord):oficial$/.exec(channel);
+    return m ? m[1] as Plataforma : null;
+  }
+  usarCamadaComum(ext: CanaisExternos): void {
+    this.externos = ext;
+    const entregar = ext.entregarAprovado, avisar = ext.avisarNoCanal;
+    ext.entregarAprovado = (p) => { if (this.platDoCanal(p.channel)) this.entregarAprovado(p); else entregar?.(p); };
+    ext.avisarNoCanal = (p) => {
+      const plat = this.platDoCanal(p.channel);
+      if (!plat) { avisar?.(p); return; }
+      const b = this.vinculoDeResposta(p.memberId, plat);
+      if (b) this.enfileirar(b, 'send', { text: p.texto, summary: resumoParaTeams(p.texto) }, 'system');
+    };
+    // saiu do workspace: as contas dele (Teams e bots) são desligadas
+    ext.aoRemoverMembro((ws, u) => { for (const b of this.vinculosDe(u, ['active', 'paused']).filter((x) => x.workspace_id === ws)) void this.revoke(u, b.binding_id).catch(() => undefined); });
+  }
+  /** O papel do membro (o da camada comum; sem ela, o da tabela de membros). */
+  papel(ws: string, userId: string): string | null {
+    return this.externos ? this.externos.papel(ws, userId) : this.d.db.get<{ role: string }>('SELECT role FROM memberships WHERE workspace_id = ? AND user_id = ?', ws, userId)?.role ?? null;
+  }
+  /** A conversa é de um canal oficial? (para a regra da execução: escrita confirma no app, papel de leitura não escreve) */
+  daConversa(conversationId: string | null | undefined): { channel: string; memberId: string; papel: 'owner' | 'admin' | 'editor' | 'viewer' } | null {
+    if (!conversationId || !this.externos) return null;
+    const p = this.conversaTeams(conversationId);
+    if (!p) return null;
+    return { channel: TeamsApp.canalDe(p.platform ?? 'teams'), memberId: p.user_id, papel: this.externos.papel(p.workspace_id, p.user_id) ?? 'viewer' };
+  }
+  /** O pedido aprovado no app (camada comum): vai à conversa da plataforma como pedido do membro. */
+  private entregarAprovado(p: PedidoExterno & { proposalId: string; aprovadoPor: string }): void {
+    const plat = this.platDoCanal(p.channel);
+    const b = plat ? this.vinculoDeResposta(p.memberId, plat) : null;
+    if (!b || !plat || b.workspace_id !== p.workspaceId || !this.d.db.workspaceOpen(b.workspace_id)) return;
+    const conv = this.conversa(b.user_id, b.workspace_id, plat);
+    const quem = this.d.db.get<{ nome: string | null; username: string }>('SELECT display_name AS nome, username FROM users WHERE id = ?', p.aprovadoPor);
+    this.notaNaConversa(b.workspace_id, conv, `Sistema — o pedido abaixo chegou pelo ${NOME_PLAT[plat]} e foi aprovado no app por ${quem ? quem.nome || quem.username : 'quem administra o workspace'}.`);
+    const crid = `aprovado-${p.proposalId}`.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 64);
+    try {
+      sendMessage(this.d.db, this.d.bus, this.d.executor, b.workspace_id, b.user_id, conv, p.text.slice(0, this.d.cfg.maxInputChars), crid, this.d.cfg.maxConversationMessages, this.d.cfg.maxInputChars, { queue: true });
+      this.enfileirar(b, 'send', { text: 'Aprovado no Ergon: a equipe começou o seu pedido.', summary: 'Aprovado no Ergon' }, 'system');
+    } catch (err) { log.warn({ erro: (err as Error).message.slice(0, 120) }, 'canal oficial: pedido aprovado não entrou na conversa'); }
   }
 
   // ------------------------------------------------------------------------------------------------ configuração
-  /** O endereço do serviço do Teams: o do ambiente (prioridade) ou o ajuste da instalação. null = indisponível. */
-  base(): string | null { return enderecoDoRele(this.d.cfg.teamsRelayUrl) ?? enderecoDoRele(instanceSetting(this.d.db, 'teams_relay_url')); }
+  /** O endereço do serviço do Teams: o do ambiente (prioridade), o ajuste da instalação ou o oficial. null = nenhum. */
+  base(): string | null { return this.desligadoNoAjuste() ? null : this.escolhido() ?? enderecoDoRele(this.d.cfg.teamsRelayOficial); }
+  /** "off" no ajuste da instalação (sem endereço no ambiente): o recurso fica desligado. ("off" no ambiente: config.ts.) */
+  private desligadoNoAjuste(): boolean { return !this.d.cfg.teamsRelayUrl && /^off$/i.test(instanceSetting(this.d.db, 'teams_relay_url')?.trim() ?? ''); }
+  /** O endereço escolhido de propósito (ambiente ou ajuste): vale sem conferir a saúde. */
+  private escolhido(): string | null { return enderecoDoRele(this.d.cfg.teamsRelayUrl) ?? enderecoDoRele(instanceSetting(this.d.db, 'teams_relay_url')); }
+  /** O que o serviço oferece, se a resposta guardada é deste endereço. */
+  private infoAtual(): InfoDoRele | null { const b = this.base(); return b && this.info?.base === b ? this.info : null; }
+  /** O endereço em uso é o serviço oficial (nada escolhido no ambiente nem no ajuste). */
+  oficial(): boolean { return !this.escolhido() && !this.desligadoNoAjuste() && !!enderecoDoRele(this.d.cfg.teamsRelayOficial); }
+  /**
+   * Oferecido na tela: há endereço e, se é o oficial, a saúde dele já respondeu alguma vez (ou esta instalação já está
+   * registrada nele: relé fora do ar depois disso é só "sem conexão", e as contas ligadas continuam na tela).
+   */
+  disponivel(): boolean { return !!this.base() && (!this.oficial() || this.saudeOficial?.ok === true || !!this.instalacao()); }
   enderecoDoAmbiente(): boolean { return !!this.d.cfg.teamsRelayUrl; }
-  /** Ajuste da instalação (pessoa administradora), só quando o ambiente não define. */
+  /** Ajuste da instalação (pessoa administradora), só quando o ambiente não define. O próprio oficial (ou vazio) volta ao padrão. */
   definirEndereco(url: string | null): void {
     if (this.enderecoDoAmbiente()) throw new HttpError(409, 'env', 'O endereço já vem definido na instalação e não muda por aqui.');
-    if (url && !enderecoDoRele(url)) throw new HttpError(400, 'url', 'Use um endereço https.');
-    setInstanceSetting(this.d.db, 'teams_relay_url', url ? enderecoDoRele(url)! : '');
+    const off = !!url && /^off$/i.test(url.trim());
+    if (url && !off && !enderecoDoRele(url)) throw new HttpError(400, 'url', 'Use um endereço https (ou "off" para desligar).');
+    const novo = off ? 'off' : url ? enderecoDoRele(url)! : '';
+    setInstanceSetting(this.d.db, 'teams_relay_url', novo === enderecoDoRele(this.d.cfg.teamsRelayOficial) ? '' : novo);
+    this.saudeOficial = null;
     void this.reiniciar();
+  }
+
+  /**
+   * Confere a saúde do serviço oficial (GET /healthz → {"ok":true}). Antes de responder (o relé ainda não está no ar),
+   * a tela mostra "ainda não disponível" e este Ergon não registra nada nem gera chaves.
+   */
+  conferirSaude(): Promise<boolean> {
+    const base = this.base();
+    if (!base || !this.oficial()) return Promise.resolve(!!base);
+    if (!this.conferindoSaude) {
+      this.conferindoSaude = (async () => {
+        let ok = false;
+        try {
+          const r = await (this.d.fetch ?? fetch)(`${base}/healthz`, { signal: AbortSignal.timeout(10_000) });
+          const j = r.ok ? await r.json().catch(() => null) as { ok?: unknown; platforms?: Record<string, unknown> } | null : null;
+          ok = j?.ok === true;
+          // relé de antes, sem `platforms` na saúde: o /v1/info diz
+          if (ok && j?.platforms) this.lerPlataformas(j.platforms);
+        } catch { ok = false; }
+        const antes = this.saudeOficial?.ok === true;
+        this.saudeOficial = { ok, em: this.agora() };
+        if (ok !== antes) this.avisarTela(null);
+        return ok;
+      })().finally(() => { this.conferindoSaude = null; });
+    }
+    return this.conferindoSaude;
+  }
+  private lerPlataformas(p: Record<string, unknown> | null | undefined): void {
+    const novo = { telegram: p?.telegram === true, discord: p?.discord === true };
+    if (novo.telegram !== this.plataformasDoRele.telegram || novo.discord !== this.plataformasDoRele.discord) { this.plataformasDoRele = novo; this.avisarTela(null); }
+  }
+  /** Sem resposta do oficial: confere de novo mais tarde (um só agendamento por vez). */
+  private conferirDepois(): void {
+    if (this.saudeTimer || !this.ligado) return;
+    this.saudeTimer = setTimeout(() => { this.saudeTimer = null; if (this.ligado) void this.start(); }, this.ajustes.saudeMs ?? 3600_000);
+    this.saudeTimer.unref?.();
   }
 
   /** A chave do cofre que cifra as credenciais (null: instalação sem proteção, o mesmo nível dos demais segredos dela). */
@@ -182,6 +341,11 @@ export class TeamsApp {
     for (const ws of new Set(this.d.db.all<{ w: string }>("SELECT DISTINCT workspace_id AS w FROM teams_bindings WHERE status IN ('active', 'paused')").map((r) => r.w))) this.assinar(ws);
     const base = this.base();
     if (!base || this.d.vault.state() !== 'open' || this.cliente || this.iniciando) return;
+    if (this.oficial() && this.saudeOficial?.ok !== true && !this.instalacao()) {
+      // o serviço oficial ainda não respondeu: nada de registro nem de chaves até a saúde responder
+      if (!(await this.conferirSaude())) { this.conferirDepois(); return; }
+      if (!this.ligado || this.cliente || this.iniciando) return;
+    }
     this.iniciando = true;
     try {
       if (!this.instalacao()) await this.registrar(base);
@@ -213,6 +377,7 @@ export class TeamsApp {
     this.cliente?.encerrar(); this.cliente = null;
     for (const t of this.timers.splice(0)) clearTimeout(t);
     if (this.varreduraTimer) { clearInterval(this.varreduraTimer); this.varreduraTimer = null; }
+    if (this.saudeTimer) { clearTimeout(this.saudeTimer); this.saudeTimer = null; }
     for (const t of this.agendados.values()) clearTimeout(t); this.agendados.clear();
     for (const t of this.avisosTimers.values()) clearTimeout(t); this.avisosTimers.clear();
     for (const x of this.digitando.values()) clearInterval(x.timer); this.digitando.clear();
@@ -245,12 +410,36 @@ export class TeamsApp {
     setInstanceSetting(this.d.db, 'teams_relay_installation_id', j.installationId);
     setInstanceSetting(this.d.db, 'teams_relay_installation_base', base);
   }
+  /**
+   * O que o serviço oferece (Teams, Discord, Telegram), guardado na instalação. O link de adicionar o bot do Discord é
+   * montado aqui, com o id do app que o serviço informou (só números). Serviço de antes, sem `platforms`: vale o que os
+   * campos `discord` e `telegram` dizem; sem `teams`, era só do Teams.
+   */
   private async buscarInfo(base: string): Promise<void> {
     try {
       const r = await (this.d.fetch ?? fetch)(`${base}/v1/info`, { signal: AbortSignal.timeout(10_000) });
-      const j = await r.json() as { teamsAppId?: string | null };
-      this.teamsAppUrl = j.teamsAppId && /^[0-9a-f-]{36}$/i.test(j.teamsAppId) ? `https://teams.microsoft.com/l/app/${j.teamsAppId}` : null;
-    } catch { /* sem o atalho "Abrir no Teams" */ }
+      if (!r.ok) return;
+      const j = await r.json() as {
+        teams?: unknown; teamsAppId?: unknown; platforms?: Record<string, unknown>;
+        discord?: { applicationId?: unknown; botName?: unknown; linkStart?: unknown } | null; telegram?: { botUsername?: unknown } | null;
+      };
+      const teamsAppId = typeof j.teamsAppId === 'string' && /^[0-9a-f-]{36}$/i.test(j.teamsAppId) ? j.teamsAppId : null;
+      const app = j.discord && typeof j.discord === 'object' && typeof j.discord.applicationId === 'string' && /^\d{15,25}$/.test(j.discord.applicationId) ? j.discord.applicationId : null;
+      const nome = typeof j.discord?.botName === 'string' ? j.discord.botName.replace(/[\r\n<>]/g, '').trim().slice(0, 40) : '';
+      const tg = j.telegram && typeof j.telegram === 'object' ? j.telegram : null;
+      const info: InfoDoRele = {
+        base, teams: typeof j.teams === 'boolean' ? j.teams : true, teamsAppId,
+        discord: app ? { applicationId: app, installUrl: `https://discord.com/oauth2/authorize?client_id=${app}`, botName: nome || 'Ergon', linkStart: j.discord?.linkStart === true } : null,
+        telegram: tg ? { botUsername: typeof tg.botUsername === 'string' && /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(tg.botUsername) ? tg.botUsername : null } : null,
+        at: this.agora(),
+      };
+      const mudou = JSON.stringify({ ...this.info, at: 0 }) !== JSON.stringify({ ...info, at: 0 });
+      this.info = info;
+      this.teamsAppUrl = teamsAppId ? `https://teams.microsoft.com/l/app/${teamsAppId}` : null;
+      setInstanceSetting(this.d.db, 'teams_relay_info', JSON.stringify(info));
+      this.lerPlataformas(j.platforms ?? { discord: !!info.discord, telegram: !!info.telegram });
+      if (mudou) this.avisarTela(null);
+    } catch { /* fica o que estava guardado */ }
   }
 
   /** A conexão parou por um motivo que não é só reconectar (contrato, 2.2). */
@@ -274,16 +463,18 @@ export class TeamsApp {
 
   // ------------------------------------------------------------------------------------------------ pessoas e vínculos
   private vinculo(bindingId: string): VinculoRow | null { return this.d.db.get<VinculoRow>('SELECT * FROM teams_bindings WHERE binding_id = ?', bindingId) ?? null; }
-  private vinculosDe(userId: string, estados = ['active', 'paused']): VinculoRow[] {
-    return this.d.db.all<VinculoRow>(`SELECT * FROM teams_bindings WHERE user_id = ? AND status IN (${estados.map(() => '?').join(', ')}) ORDER BY created_at, rowid`, userId, ...estados);
+  private vinculosDe(userId: string, estados = ['active', 'paused'], plat?: Plataforma): VinculoRow[] {
+    return this.d.db.all<VinculoRow>(`SELECT * FROM teams_bindings WHERE user_id = ? AND status IN (${estados.map(() => '?').join(', ')})${plat ? ' AND platform = ?' : ''} ORDER BY created_at, rowid`, userId, ...estados, ...(plat ? [plat] : []));
   }
-  private pessoa(userId: string): PessoaRow | null { return this.d.db.get<PessoaRow>('SELECT * FROM teams_people WHERE user_id = ?', userId) ?? null; }
-  private garantirPessoa(userId: string, ws: string): PessoaRow {
-    this.d.db.run('INSERT INTO teams_people (user_id, workspace_id, updated_at) VALUES (?, ?, ?) ON CONFLICT (user_id) DO NOTHING', userId, ws, now());
-    return this.pessoa(userId)!;
+  private pessoa(userId: string, plat: Plataforma = 'teams'): PessoaRow | null { return this.d.db.get<PessoaRow>('SELECT * FROM teams_people WHERE user_id = ? AND platform = ?', userId, plat) ?? null; }
+  private garantirPessoa(userId: string, ws: string, plat: Plataforma = 'teams'): PessoaRow {
+    this.d.db.run('INSERT INTO teams_people (user_id, platform, workspace_id, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, platform) DO NOTHING', userId, plat, ws, now());
+    return this.pessoa(userId, plat)!;
   }
-  /** "Conversar pelo Teams" (chave geral da pessoa): ausente = ligado. */
-  ligadoPara(userId: string): boolean { return Number(this.pessoa(userId)?.enabled ?? 1) === 1; }
+  /** As plataformas em que a pessoa tem conversa (a do Teams e as dos bots). */
+  private plataformasDe(userId: string): Plataforma[] { return this.d.db.all<{ platform: Plataforma }>('SELECT platform FROM teams_people WHERE user_id = ?', userId).map((r) => r.platform); }
+  /** "Conversar pelo Teams" (chave geral da pessoa, por plataforma): ausente = ligado. */
+  ligadoPara(userId: string, plat: Plataforma = 'teams'): boolean { return Number(this.pessoa(userId, plat)?.enabled ?? 1) === 1; }
   private pessoasLigadas(): Array<{ personRef: string; open: boolean }> {
     const k = this.chaves();
     if (!k) return [];
@@ -299,17 +490,21 @@ export class TeamsApp {
   notaDoCanal(conversationId: string, messageId?: string | null): string | null {
     const p = this.conversaTeams(conversationId);
     if (!p) return null;
-    if (!messageId) return NOTA_TEAMS;
+    const plat = p.platform ?? 'teams';
+    if (!messageId) return notaDe(plat);
     const r = this.d.db.get<{ sent_at: string | null; delayed: number }>(
       `SELECT i.sent_at, i.delayed FROM messages m JOIN teams_inbound i ON i.request_id = m.client_request_id
         WHERE m.id = ? AND m.conversation_id = ? AND i.kind = 'activity'`, messageId, conversationId);
-    if (!r || !Number(r.delayed) || !r.sent_at) return NOTA_TEAMS;
-    return `${NOTA_TEAMS}\n${notaDeAtraso(dataHora(r.sent_at, workspaceTz(this.d.db, p.workspace_id)))}`;
+    // pedido de fora: o agente fica sabendo de quem é (o papel do membro), e que prefira resumos (camada externa)
+    const papel = this.externos?.papel(p.workspace_id, p.user_id);
+    const nota = this.externos && papel ? `${notaDe(plat)}\n${this.externos.nota(papel, TeamsApp.canalDe(plat))}` : notaDe(plat);
+    if (!r || !Number(r.delayed) || !r.sent_at) return nota;
+    return `${nota}\n${notaDeAtraso(dataHora(r.sent_at, workspaceTz(this.d.db, p.workspace_id)), plat)}`;
   }
 
   /** A conversa da pessoa com o coordenador (uma por pessoa); nova se a de antes sumiu, foi arquivada ou encheu. */
-  private conversa(userId: string, ws: string): string {
-    const p = this.garantirPessoa(userId, ws);
+  private conversa(userId: string, ws: string, plat: Plataforma = 'teams'): string {
+    const p = this.garantirPessoa(userId, ws, plat);
     if (p.conversation_id && p.workspace_id === ws) {
       const c = this.d.db.get<{ id: string; n: number }>(
         `SELECT c.id, (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS n FROM conversations c JOIN agents a ON a.id = c.agent_id
@@ -318,9 +513,9 @@ export class TeamsApp {
     }
     const agente = coordinatorFor(this.d.db, ws) ?? this.d.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at LIMIT 1", ws)?.id;
     if (!agente) throw new HttpError(409, 'no_agent', 'sem ninguém ativo na equipe');
-    const conv = createConversation(this.d.db, ws, userId, agente, TITULO_CONVERSA);
+    const conv = createConversation(this.d.db, ws, userId, agente, plat === 'teams' ? TITULO_CONVERSA : NOME_PLAT[plat]);
     const cursor = Number(this.d.db.get<{ r: number }>('SELECT COALESCE(MAX(rowid), 0) AS r FROM messages')?.r ?? 0);
-    this.d.db.run('UPDATE teams_people SET conversation_id = ?, workspace_id = ?, cursor_rowid = ?, updated_at = ? WHERE user_id = ?', conv.id, ws, cursor, now(), userId);
+    this.d.db.run('UPDATE teams_people SET conversation_id = ?, workspace_id = ?, cursor_rowid = ?, updated_at = ? WHERE user_id = ? AND platform = ?', conv.id, ws, cursor, now(), userId, plat);
     return conv.id;
   }
 
@@ -366,7 +561,7 @@ export class TeamsApp {
 
   private avisarTela(userId: string | null): void {
     // sem pessoa: o estado da conexão mudou, e a tela de qualquer um mostra isso
-    const wss = userId ? this.d.owners.owned(userId) : this.d.db.all<{ w: string }>('SELECT id AS w FROM workspaces').map((r) => r.w);
+    const wss = userId ? [...this.d.owners.owned(userId), ...this.vinculosDe(userId, ['active', 'paused', 'revoking', 'revoked']).map((b) => b.workspace_id)] : this.d.db.all<{ w: string }>('SELECT id AS w FROM workspaces').map((r) => r.w);
     for (const ws of new Set(wss)) this.d.bus.publish(ws, 'teams.changed', {});
   }
 
@@ -389,11 +584,11 @@ export class TeamsApp {
     const c = this.cliente;
     if (!c) return;
     switch (f.type) {
-      case 'activity': case 'card.action': case 'link.revoked': {
+      case 'activity': case 'card.action': case 'link.revoked': case 'link.added': {
         if (typeof f.id !== 'string' || !/^dlv_[A-Za-z0-9_-]{8,40}$/.test(f.id)) return;
         let ack: Record<string, unknown>;
         this.depoisDoAck = [];
-        try { ack = f.type === 'activity' ? this.mensagem(f) : f.type === 'card.action' ? this.clique(f) : this.revogado(f); }
+        try { ack = f.type === 'activity' ? this.mensagem(f) : f.type === 'card.action' ? this.clique(f) : f.type === 'link.added' ? await this.adicionado(f) : this.revogado(f); }
         catch (err) {
           // erros definitivos viram recusa (o serviço apaga e responde à pessoa no Teams, contrato 12.7): conteúdo que não
           // abre, ninguém ativo na equipe, ou o que a conversa recusou (cheia, longa demais). Problema passageiro daqui (base
@@ -437,12 +632,21 @@ export class TeamsApp {
     const b = this.vinculoDaEntrega(f);
     if (!b) return { ok: false, status: 'rejected', error: { code: 'unknown_person' } };
     if (this.jaRecebida(String(f.id))) return { ok: true, status: 'accepted' };
-    if (b.status === 'paused' || !this.ligadoPara(b.user_id)) return { ok: false, status: 'rejected', error: { code: 'disabled' } };
+    const plat = b.platform ?? 'teams';
+    if (b.status === 'paused' || !this.ligadoPara(b.user_id, plat)) return { ok: false, status: 'rejected', error: { code: 'disabled' } };
     if (!this.d.db.workspaceOpen(b.workspace_id)) return { ok: true, status: 'person_locked' };
     const v = this.abrir(f);
     const texto = typeof v.text === 'string' ? v.text.trim() : '';
     if (!texto) return { ok: false, status: 'rejected', error: { code: 'invalid' } };
-    const conv = this.conversa(b.user_id, b.workspace_id);
+    const conv = this.conversa(b.user_id, b.workspace_id, plat);
+    // a camada comum dos canais externos: age como ESTE membro, com o papel dele; o que ela segura não chega à equipe
+    // (recusado, ou guardado num cartão que só se aprova no app)
+    const ext = this.externos?.externalRequest({ channel: TeamsApp.canalDe(plat), workspaceId: b.workspace_id, memberId: b.user_id, text: texto, conversationId: conv });
+    if (ext && !ext.ok) {
+      this.d.db.run('INSERT INTO teams_inbound (delivery_id, user_id, kind, message_id, received_at, binding_id, state) VALUES (?, ?, ?, NULL, ?, ?, ?)', String(f.id), b.user_id, 'activity', now(), b.binding_id, `externo:${ext.motivo}`);
+      if (ext.resposta) this.enfileirar(b, 'send', { text: ext.resposta, summary: resumoParaTeams(ext.resposta) }, 'system');
+      return { ok: true, status: 'accepted' };
+    }
     const crid = `teams-${String(f.id).replace(/[^A-Za-z0-9-]/g, '-')}`.slice(0, 64);
     // quando a pessoa escreveu: o horário do Teams (ou o de quando o serviço recebeu). Da fila, ou velho, é atrasado
     const quando = [v.timestamp, f.receivedAt].find((x): x is string => typeof x === 'string' && Number.isFinite(Date.parse(x))) ?? null;
@@ -454,12 +658,12 @@ export class TeamsApp {
       if (!b.first_message_at) {
         this.d.db.run('UPDATE teams_bindings SET first_message_at = ? WHERE binding_id = ?', now(), b.binding_id);
         const nome = b.teams_name && b.teams_name !== CLOSED_VALUE ? b.teams_name : 'sem nome';
-        this.notaNaConversa(b.workspace_id, conv, `Sistema — primeira mensagem pela conta do Teams "${nome}", ligada em ${dataHora(b.created_at, workspaceTz(this.d.db, b.workspace_id))}. Se não foi você que ligou esta conta, desligue em Conexões › Teams.`);
+        this.notaNaConversa(b.workspace_id, conv, `Sistema — primeira mensagem pela conta do ${NOME_PLAT[plat]} "${nome}", ligada em ${dataHora(b.created_at, workspaceTz(this.d.db, b.workspace_id))}. Se não foi você que ligou esta conta, desligue em Conexões › ${NOME_PLAT[plat]}.`);
       }
       const r = sendMessage(this.d.db, this.d.bus, this.d.executor, b.workspace_id, b.user_id, conv, texto.slice(0, this.d.cfg.maxInputChars), crid,
         this.d.cfg.maxConversationMessages, this.d.cfg.maxInputChars, { queue: true });
       this.d.db.run('UPDATE teams_inbound SET message_id = ? WHERE delivery_id = ?', r.messageId, String(f.id));
-      this.d.db.run('UPDATE teams_people SET reply_binding = ?, updated_at = ? WHERE user_id = ?', b.binding_id, now(), b.user_id);
+      this.d.db.run('UPDATE teams_people SET reply_binding = ?, updated_at = ? WHERE user_id = ? AND platform = ?', b.binding_id, now(), b.user_id, plat);
     });
     this.depoisDoAck.push(() => this.digitar(b.user_id, b.binding_id, true));
     return { ok: true, status: 'accepted' };
@@ -482,7 +686,7 @@ export class TeamsApp {
     const b = this.vinculoDaEntrega(f);
     if (!b) return { ok: false, status: 'rejected', error: { code: 'unknown_person' } };
     if (this.jaRecebida(String(f.id))) return { ok: true, status: 'accepted' };
-    if (b.status === 'paused' || !this.ligadoPara(b.user_id)) return { ok: false, status: 'rejected', error: { code: 'disabled' } };
+    if (b.status === 'paused' || !this.ligadoPara(b.user_id, b.platform ?? 'teams')) return { ok: false, status: 'rejected', error: { code: 'disabled' } };
     if (!this.d.db.workspaceOpen(b.workspace_id)) return { ok: true, status: 'person_locked' };
     const v = this.abrir(f);
     const data = (v.data ?? {}) as { p?: unknown; d?: unknown; t?: unknown };
@@ -495,7 +699,7 @@ export class TeamsApp {
     const registrar = (estado: 'feito' | 'decidindo') => this.d.db.run(
       'INSERT OR IGNORE INTO teams_inbound (delivery_id, user_id, kind, message_id, received_at, state, decision, binding_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       String(f.id), b.user_id, 'card.action', p, now(), estado, decisao, b.binding_id);
-    if (prop.status !== 'proposed' || ['permission', 'question', 'segredo', 'info_request', 'handoff'].includes(prop.kind) || !cabeNoCanal(prop.kind, prop.summary, LIMITE_TEAMS)) {
+    if (prop.status !== 'proposed' || ['permission', 'question', 'segredo', 'info_request', 'handoff'].includes(prop.kind) || !cabeNoCanal(prop.kind, prop.summary, LIMITE_TEAMS) || !this.decidePeloCanal(b, p)) {
       // já decidido (no Ergon ou noutro cartão), ou é do tipo que só se responde no Ergon: o cartão diz isso
       this.atualizarCartaoDe(p, b, typeof v.cardActivityId === 'string' ? v.cardActivityId : null, true);
       registrar('feito');
@@ -573,7 +777,14 @@ export class TeamsApp {
       const meu = typeof r.claimId === 'string' ? this.confirmando.get(r.claimId) : undefined;
       if (meu && r.personRef === this.personRef(meu.userId)) {
         this.confirmando.delete(r.claimId!);
-        void this.gravarVinculo(meu, id, typeof r.teamsName === 'string' && r.teamsName ? r.teamsName.slice(0, 120) : meu.teamsName, r.status === 'paused');
+        void this.gravarVinculo(meu, id, typeof r.teamsName === 'string' && r.teamsName ? r.teamsName.slice(0, 120) : meu.teamsName, r.status === 'paused', platDe(r.canal ?? r.platform ?? meu.plat));
+        continue;
+      }
+      // conta de bot ligada por um link pedido daqui, cujo link.added se perdeu: adotada
+      const ini = this.iniciados.get(r.personRef);
+      const plat = r.platform ?? r.canal;
+      if (ini && ini.ate >= this.agora() && (plat === 'telegram' || plat === 'discord')) {
+        void this.gravarVinculo(ini, id, typeof r.teamsName === 'string' ? r.teamsName.slice(0, 120) : '', r.status === 'paused', plat);
         continue;
       }
       if (this.confirmando.size) continue;
@@ -581,6 +792,9 @@ export class TeamsApp {
     }
     this.avisarTela(null);
     for (const ws of new Set(locais.map((b) => b.workspace_id))) this.agendar(`ws:${ws}`, () => this.atualizarWorkspace(ws));
+    // o que o serviço oferece pode ter mudado (Discord ou Telegram ligados depois, por exemplo): confere de tempos em tempos
+    const base = this.base();
+    if (base && (!this.infoAtual() || this.agora() - (this.info?.at ?? 0) > 6 * 3600_000)) void this.buscarInfo(base);
     // o que ficou para trás num reinício: avisos de "Com você" agrupados que não saíram, e cliques ainda por decidir
     this.rearmarAvisos();
     this.retomarDecisoes();
@@ -613,18 +827,19 @@ export class TeamsApp {
   }
 
   /** Para onde vai a resposta: o vínculo que mandou a última mensagem, ou o primeiro ativo da pessoa. */
-  private vinculoDeResposta(userId: string): VinculoRow | null {
-    const p = this.pessoa(userId);
+  private vinculoDeResposta(userId: string, plat: Plataforma = 'teams'): VinculoRow | null {
+    const p = this.pessoa(userId, plat);
     const r = p?.reply_binding ? this.vinculo(p.reply_binding) : null;
-    if (r && r.status === 'active') return r;
-    return this.vinculosDe(userId, ['active'])[0] ?? null;
+    if (r && r.status === 'active' && (r.platform ?? 'teams') === plat) return r;
+    return this.vinculosDe(userId, ['active'], plat)[0] ?? null;
   }
 
   /** Toda resposta nova do coordenador na conversa "Teams" volta ao Teams (contrato, 7.2 item 2). */
-  private encaminharRespostas(userId: string): void {
-    const p = this.pessoa(userId);
+  private encaminharRespostas(userId: string): void { for (const plat of this.plataformasDe(userId)) this.encaminharRespostasDe(userId, plat); }
+  private encaminharRespostasDe(userId: string, plat: Plataforma): void {
+    const p = this.pessoa(userId, plat);
     if (!p?.conversation_id || !this.d.db.workspaceOpen(p.workspace_id)) return;
-    const b = this.ligadoPara(userId) ? this.vinculoDeResposta(userId) : null;
+    const b = this.ligadoPara(userId, plat) ? this.vinculoDeResposta(userId, plat) : null;
     const msgs = this.d.db.all<{ rid: number; role: string; content: string; run_id: string | null; agente: string | null }>(
       `SELECT m.rowid AS rid, m.role, m.content, m.run_id, COALESCE(ra.name, ca.name) AS agente FROM messages m
          JOIN conversations c ON c.id = m.conversation_id LEFT JOIN agents ca ON ca.id = c.agent_id
@@ -635,19 +850,27 @@ export class TeamsApp {
       if (m.content === CLOSED_VALUE) break;
       ultimo = Number(m.rid);
       if (!b || !(m.role === 'agent' || (m.role === 'system' && m.run_id))) continue;
-      const texto = textoParaTeams(m.content);
+      const texto = textoParaTeams(m.content, MAX_RESPOSTA[plat]);
       // quem fala vai à frente (o nome do agente, ou "Sistema"), como na tela do Ergon: o que o agente escreve não se
       // confunde com as frases do próprio app no Teams (o serviço não põe nome nas dele)
       const quem = m.role === 'agent' && m.agente && m.agente !== CLOSED_VALUE ? m.agente.replace(/[*_`[\]\n]/g, '').trim().slice(0, 60) : 'Sistema';
-      if (texto) this.enfileirar(b, 'send', { text: `**${quem}:** ${texto}`, summary: resumoParaTeams(`${quem}: ${texto}`) }, 'reply');
+      // o Telegram mostra o texto como veio (sem markdown): o nome vai sem os asteriscos
+      if (texto) this.enfileirar(b, 'send', { text: plat === 'telegram' ? `${quem}: ${texto}` : `**${quem}:** ${texto}`, summary: resumoParaTeams(`${quem}: ${texto}`) }, 'reply');
     }
-    if (ultimo !== Number(p.cursor_rowid)) this.d.db.run('UPDATE teams_people SET cursor_rowid = ?, updated_at = ? WHERE user_id = ?', ultimo, now(), userId);
+    if (ultimo !== Number(p.cursor_rowid)) this.d.db.run('UPDATE teams_people SET cursor_rowid = ?, updated_at = ? WHERE user_id = ? AND platform = ?', ultimo, now(), userId, plat);
     if (!this.trabalhando(p.conversation_id) && this.digitando.has(userId)) this.digitar(userId, this.digitando.get(userId)!.bindingId, false);
   }
 
   /** Um item do cartão para uma proposta: decisão (Aprovar/Recusar) ou aviso que se responde no Ergon. */
-  private itemDe(p: { id: string; kind: string; summary: string }): ItemCartao {
+  /** O botão do canal pode decidir este cartão? (camada comum: configuração, apagar, mandar e afins, só no app) */
+  private decidePeloCanal(b: VinculoRow, proposalId: string): boolean {
+    return !this.externos || this.externos.podeDecidirPeloCanal(b.workspace_id, b.user_id, proposalId);
+  }
+  private itemDe(dela: { id: string; kind: string; summary: string }, b?: VinculoRow | null): ItemCartao {
+    // o comando para aprovar vai só com a frase simples (o cartão gravado antes da rc.33 levava o comando no texto)
+    const p = dela.kind === 'aprovacao' ? { ...dela, summary: resumoVisivelDaAprovacao(dela.summary) } : dela;
     const { titulo, texto } = partesDoResumo(p.summary);
+    if (b && !this.decidePeloCanal(b, p.id)) return { tipo: 'aviso', p: p.id, titulo, texto, abrir: SO_NO_APP };
     if (p.kind === 'permission') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para autorizar (pede a sua senha).' };
     if (p.kind === 'question') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para responder.' };
     // pedido de chave ou senha: o valor só se digita no Ergon (nunca passa pelo Teams)
@@ -658,10 +881,11 @@ export class TeamsApp {
   }
 
   /** As confirmações pedidas na conversa "Teams" viram cartões no Teams (contrato, 7.2 item 3). */
-  private cartoesDaConversa(userId: string): void {
-    const p = this.pessoa(userId);
-    if (!p?.conversation_id || !this.ligadoPara(userId) || !this.d.db.workspaceOpen(p.workspace_id)) return;
-    const b = this.vinculoDeResposta(userId);
+  private cartoesDaConversa(userId: string): void { for (const plat of this.plataformasDe(userId)) this.cartoesDaConversaDe(userId, plat); }
+  private cartoesDaConversaDe(userId: string, plat: Plataforma): void {
+    const p = this.pessoa(userId, plat);
+    if (!p?.conversation_id || !this.ligadoPara(userId, plat) || !this.d.db.workspaceOpen(p.workspace_id)) return;
+    const b = this.vinculoDeResposta(userId, plat);
     if (!b) return;
     const props = this.d.db.all<{ id: string; kind: string; summary: string }>(
       `SELECT id, kind, summary FROM agent_proposals WHERE workspace_id = ? AND status = 'proposed' AND kind NOT IN ('info_request', 'handoff') AND created_at >= ?
@@ -669,7 +893,7 @@ export class TeamsApp {
           AND NOT EXISTS (SELECT 1 FROM teams_cards c WHERE c.proposal_id = agent_proposals.id AND c.binding_id = ?)
         ORDER BY created_at, rowid LIMIT 20`, p.workspace_id, b.created_at, p.conversation_id, p.conversation_id, b.binding_id);
     for (const x of props) {
-      const out = this.enfileirar(b, 'send', { desenho: { titulo: 'Precisa de você', itens: [this.itemDe(x)] } satisfies DesenhoCartao, summary: resumoParaTeams(`Precisa de você: ${partesDoResumo(x.summary).titulo}`) }, 'card');
+      const out = this.enfileirar(b, 'send', { desenho: { titulo: 'Precisa de você', itens: [this.itemDe(x, b)] } satisfies DesenhoCartao, summary: resumoParaTeams(`Precisa de você: ${partesDoResumo(x.kind === 'aprovacao' ? resumoVisivelDaAprovacao(x.summary) : x.summary).titulo}`) }, 'card');
       this.d.db.run("INSERT OR IGNORE INTO teams_cards (proposal_id, binding_id, activity_id, state, outbox_id) VALUES (?, ?, NULL, 'open', ?)", x.id, b.binding_id, out);
     }
     // o agente parou esperando uma resposta dela (waiting_user): o Teams fica sabendo, uma vez por execução, mesmo com os
@@ -678,7 +902,7 @@ export class TeamsApp {
       "SELECT r.id, a.name AS agente FROM runs r JOIN agents a ON a.id = r.agent_id WHERE r.conversation_id = ? AND r.status = 'waiting_user' AND r.created_at >= ? ORDER BY r.created_at LIMIT 5",
       p.conversation_id, b.created_at);
     for (const w of esperando) {
-      if (!this.d.db.run('INSERT INTO teams_noticed (user_id, item, at, sent) VALUES (?, ?, ?, 1) ON CONFLICT (user_id, item) DO NOTHING', userId, `w:${w.id}`, now()).changes) continue;
+      if (!this.d.db.run('INSERT INTO teams_noticed (user_id, item, at, sent) VALUES (?, ?, ?, 1) ON CONFLICT (user_id, item) DO NOTHING', userId, plat === 'teams' ? `w:${w.id}` : `w:${plat}:${w.id}`, now()).changes) continue;
       const nome = w.agente && w.agente !== CLOSED_VALUE ? w.agente : 'A equipe';
       this.enfileirar(b, 'send', { desenho: { titulo: 'Precisa de você', itens: [{ tipo: 'aviso', titulo: `${nome} espera uma resposta sua`, texto: '', abrir: 'Abra o Ergon para responder.' }] } satisfies DesenhoCartao,
         summary: resumoParaTeams(`${nome} espera uma resposta sua`) }, 'card');
@@ -724,14 +948,15 @@ export class TeamsApp {
   /** O que está em "Com você" agora, com uma chave por item (o mesmo critério de pendingDecisions). */
   private comVoce(userId: string, ws: string): Array<{ chave: string; item: ItemCartao }> {
     const d = pendingDecisions(this.d.db, ws);
-    const teamsConv = this.pessoa(userId)?.conversation_id ?? null;
+    // as conversas da pessoa pelos canais (Teams e bots): o que nasceu nelas já foi como cartão
+    const convs = new Set(this.d.db.all<{ c: string | null }>('SELECT conversation_id AS c FROM teams_people WHERE user_id = ?', userId).map((r) => r.c).filter(Boolean));
     const out: Array<{ chave: string; item: ItemCartao }> = [];
     for (const p of d.proposals) {
-      if (teamsConv && p.conversation_id === teamsConv) continue; // nasceu na conversa do Teams: já foi como cartão
+      if (p.conversation_id && convs.has(p.conversation_id)) continue;
       out.push({ chave: `p:${p.id}`, item: this.itemDe(p) });
     }
     for (const w of d.waiting) {
-      if (teamsConv && w.conversation_id === teamsConv) continue;
+      if (w.conversation_id && convs.has(w.conversation_id)) continue;
       out.push({ chave: `w:${w.id}`, item: { tipo: 'aviso', titulo: `${w.agent_name} espera uma resposta sua`, texto: '', abrir: 'Abra o Ergon para responder.' } });
     }
     const precisa: Record<string, string> = { info: 'precisa de uma informação sua', review: 'está pronto para você revisar', approval: 'espera a sua aprovação' };
@@ -747,7 +972,7 @@ export class TeamsApp {
     for (const x of this.comVoce(userId, ws)) this.d.db.run('INSERT INTO teams_noticed (user_id, item, at, sent) VALUES (?, ?, ?, 1) ON CONFLICT (user_id, item) DO NOTHING', userId, x.chave, at);
   }
   private varrerAvisos(userId: string, ws: string): void {
-    if (!this.ligadoPara(userId) || !this.vinculosDe(userId, ['active']).some((b) => Number(b.notices) === 1 && b.workspace_id === ws)) return;
+    if (!this.vinculosDe(userId, ['active']).some((b) => Number(b.notices) === 1 && b.workspace_id === ws && this.ligadoPara(userId, b.platform ?? 'teams'))) return;
     let novos = 0;
     for (const x of this.comVoce(userId, ws)) novos += this.d.db.run('INSERT INTO teams_noticed (user_id, item, at, sent) VALUES (?, ?, ?, 0) ON CONFLICT (user_id, item) DO NOTHING', userId, x.chave, now()).changes;
     if (novos && !this.avisosTimers.has(userId)) this.armarAvisos(userId, ws, this.ajustes.avisosMs);
@@ -781,7 +1006,7 @@ export class TeamsApp {
     if (!vivos.length) return;
     const janela = this.janelaDeAvisos(userId);
     if (janela.length >= 20) { this.armarAvisos(userId, ws, Math.max(1000, 3600_000 - (this.agora() - Math.min(...janela)))); return; }
-    const bs = this.ligadoPara(userId) ? this.vinculosDe(userId, ['active']).filter((b) => Number(b.notices) === 1 && b.workspace_id === ws) : [];
+    const bs = this.vinculosDe(userId, ['active']).filter((b) => Number(b.notices) === 1 && b.workspace_id === ws && this.ligadoPara(userId, b.platform ?? 'teams'));
     const mostrar = vivos.slice(0, 10).map((k) => agora.get(k)!);
     if (vivos.length > 10) mostrar.push({ tipo: 'aviso', titulo: `E mais ${vivos.length - 10} no Ergon`, texto: '', abrir: 'Abra o Ergon para ver tudo.' });
     const desenho: DesenhoCartao = { titulo: vivos.length === 1 ? 'Precisa de você no Ergon' : `Precisa de você no Ergon (${vivos.length})`, itens: mostrar };
@@ -813,10 +1038,22 @@ export class TeamsApp {
     if (!k) return null;
     const pl = JSON.parse(row.payload) as { text?: string; summary?: string; desenho?: DesenhoCartao; origem?: string; activityId?: string; ja?: string[] };
     const tz = workspaceTz(this.d.db, row.workspace_id);
-    const cartao = (desenho: DesenhoCartao, ja: string[] = []) => {
-      const ids = desenho.itens.flatMap((it) => (it.tipo === 'decisao' ? [it.p] : it.p ? [it.p] : []));
-      return montarCartao(desenho, this.estados(row.workspace_id, ids, ja), row.binding_id, k, tz);
-    };
+    const ids = (desenho: DesenhoCartao) => desenho.itens.flatMap((it) => (it.tipo === 'decisao' ? [it.p] : it.p ? [it.p] : []));
+    const cartao = (desenho: DesenhoCartao, ja: string[] = []) => montarCartao(desenho, this.estados(row.workspace_id, ids(desenho), ja), row.binding_id, k, tz);
+    // Telegram e Discord: texto simples e botões (o serviço põe no botão só uma chave curta)
+    const plat = this.vinculo(row.binding_id)?.platform ?? 'teams';
+    if (plat !== 'teams') {
+      const texto = (desenho: DesenhoCartao, ja: string[] = []) => montarTexto(desenho, this.estados(row.workspace_id, ids(desenho), ja), row.binding_id, k, tz);
+      if (row.kind === 'send') {
+        return pl.desenho
+          ? { type: 'send', id: row.id, bindingId: row.binding_id, purpose: row.purpose ?? 'card', ...texto(pl.desenho) }
+          : { type: 'send', id: row.id, bindingId: row.binding_id, purpose: row.purpose ?? 'reply', text: (pl.text ?? '').replace(/\*\*/g, ''), buttons: [] };
+      }
+      const orig = pl.origem ? this.d.db.get<{ payload: string }>('SELECT payload FROM teams_outbox WHERE id = ?', pl.origem) : null;
+      if (!orig || orig.payload === CLOSED_VALUE || !pl.activityId) return null;
+      const d0 = (JSON.parse(orig.payload) as { desenho?: DesenhoCartao }).desenho;
+      return d0 ? { type: 'card.update', id: row.id, bindingId: row.binding_id, activityId: pl.activityId, ...texto(d0, pl.ja ?? []) } : null;
+    }
     if (row.kind === 'send') {
       return pl.desenho
         ? { type: 'send', id: row.id, bindingId: row.binding_id, purpose: row.purpose ?? 'card', card: cartao(pl.desenho), summary: pl.summary ?? 'Ergon' }
@@ -893,16 +1130,17 @@ export class TeamsApp {
 
   // ------------------------------------------------------------------------------------------------ tela (rotas)
   private exigirConexao(): ClienteRele {
-    if (!this.base()) throw new HttpError(409, 'unconfigured', 'Em breve.');
+    if (!this.base()) throw new HttpError(409, 'unconfigured', 'Ainda não disponível.');
+    if (!this.disponivel()) throw new HttpError(409, 'unavailable', 'Ainda não disponível.');
     const c = this.cliente;
     if (!c || c.estado !== 'connected') throw erroDaTela('offline');
     return c;
   }
-  private async pedir(f: Quadro & { id: string }): Promise<Ack> {
+  private async pedir(f: Quadro & { id: string }, plat: Plataforma = 'teams'): Promise<Ack> {
     const c = this.exigirConexao();
     let ack: Ack;
-    try { ack = await c.pedir(f, 15_000); } catch (e) { throw erroDaTela(e instanceof ErroDoRele ? e.code : 'offline'); }
-    if (!ack.ok) throw erroDaTela(ack.error?.code ?? 'teams_relay');
+    try { ack = await c.pedir(f, 15_000); } catch (e) { throw erroDaTela(e instanceof ErroDoRele ? e.code : 'offline', plat); }
+    if (!ack.ok) throw erroDaTela(ack.error?.code ?? 'teams_relay', plat);
     return ack;
   }
   /** O estado daqui já foi gravado: com prazo, a tela não fica esperando (sem resposta, a próxima conexão confere). */
@@ -929,20 +1167,26 @@ export class TeamsApp {
   /** GET /api/teams-app (contrato, 7.2). */
   estado(userId: string): Record<string, unknown> {
     const base = this.base();
-    const bindings = this.vinculosDe(userId, ['active', 'paused', 'revoked']).map((b) => ({
+    const disponivel = this.disponivel();
+    // a tela aberta confere de novo o serviço oficial (no máximo uma vez por minuto); respondeu, este Ergon conecta
+    if (base && !disponivel && this.ligado && !this.conferindoSaude && (!this.saudeOficial || this.agora() - this.saudeOficial.em >= 60_000)) {
+      void this.conferirSaude().then((ok) => { if (ok && this.ligado && !this.cliente) void this.start(); });
+    }
+    const bindings = this.vinculosDe(userId, ['active', 'paused', 'revoked'], 'teams').map((b) => ({
       id: b.binding_id, teamsName: b.teams_name && b.teams_name !== CLOSED_VALUE ? b.teams_name : null, linkedAt: b.created_at, notices: Number(b.notices) === 1, status: b.status,
       ...(b.status === 'revoked' ? { revokedBy: b.revoked_by } : {}),
     }));
     return {
-      available: !!base, ...(base ? {} : { reason: 'unconfigured' }), connection: this.estadoConexao(), enabled: this.ligadoPara(userId), bindings,
+      available: disponivel, ...(disponivel ? {} : { reason: base ? 'unavailable' : 'unconfigured' }), connection: this.estadoConexao(), enabled: this.ligadoPara(userId), bindings,
       ...(this.teamsAppUrl ? { teamsAppUrl: this.teamsAppUrl } : {}), ...(this.problema ? { problem: this.problema } : {}),
     };
   }
 
-  async setEnabled(userId: string, ws: string, enabled: boolean): Promise<Record<string, unknown>> {
-    this.garantirPessoa(userId, ws);
-    this.d.db.run('UPDATE teams_people SET enabled = ?, updated_at = ? WHERE user_id = ?', enabled ? 1 : 0, now(), userId);
-    const bs = this.vinculosDe(userId);
+  /** "Conversar pelo Teams" / "pelo Discord" / "pelo Telegram": a chave da pessoa em cada plataforma (as outras não mudam). */
+  async setEnabled(userId: string, ws: string, enabled: boolean, plat: Plataforma = 'teams'): Promise<Record<string, unknown>> {
+    this.garantirPessoa(userId, ws, plat);
+    this.d.db.run('UPDATE teams_people SET enabled = ?, updated_at = ? WHERE user_id = ? AND platform = ?', enabled ? 1 : 0, now(), userId, plat);
+    const bs = this.vinculosDe(userId, ['active', 'paused'], plat);
     for (const b of bs) this.d.db.run('UPDATE teams_bindings SET status = ?, updated_at = ? WHERE binding_id = ?', enabled ? 'active' : 'paused', now(), b.binding_id);
     // sem conexão (ou sem resposta no prazo): a próxima conexão confere e manda (pronto)
     await Promise.all(bs.map((b) => this.pedirAtualizar(b.binding_id, { paused: !enabled }).catch(() => undefined)));
@@ -957,30 +1201,33 @@ export class TeamsApp {
    * Microsoft 365 ligada a este workspace (contrato 12.1): o nome mostrado não prova nada, porque é a própria conta do
    * Teams que escolhe; só a conta conferida como a dela dispensa a escolha consciente na tela.
    */
-  async claim(userId: string, ws: string, entrada: string): Promise<{ claimId: string; teamsName: string; expiresAt: string; conta: ContaDoTeams; organizacao: string | null }> {
+  async claim(userId: string, ws: string, entrada: string, tela: Plataforma = 'teams'): Promise<{ claimId: string; teamsName: string; expiresAt: string; conta: ContaDoTeams; organizacao: string | null; canal: Plataforma }> {
     this.exigirConexao();
     const code = normalizarCodigo(entrada);
-    if (!code) throw erroDaTela('code_invalid');
+    if (!code) throw erroDaTela('code_invalid', tela);
     const ref = this.personRef(userId);
-    if (!ref) throw erroDaTela('offline');
+    if (!ref) throw erroDaTela('offline', tela);
     const erros = (this.errosDeCodigo.get(userId) ?? []).filter((t) => this.agora() - t < JANELA_ERROS_MS);
     this.errosDeCodigo.set(userId, erros);
-    if (erros.length >= ERROS_POR_PESSOA) throw erroDaTela('too_many_attempts');
+    if (erros.length >= ERROS_POR_PESSOA) throw erroDaTela('too_many_attempts', tela);
     let ack: Ack;
-    try { ack = await this.pedir({ type: 'link.claim', id: novoId('req'), code, personRef: ref }); }
+    try { ack = await this.pedir({ type: 'link.claim', id: novoId('req'), code, personRef: ref }, tela); }
     catch (e) {
       if (e instanceof HttpError && (e.code === 'code_invalid' || e.code === 'code_expired')) erros.push(this.agora());
       throw e;
     }
     const claimId = String(ack.claimId ?? '');
-    if (!ID_CLAIM.test(claimId)) throw erroDaTela('teams_relay');
+    if (!ID_CLAIM.test(claimId)) throw erroDaTela('teams_relay', tela);
     const teamsName = String(ack.teamsName ?? '').slice(0, 120);
-    const { conta, organizacao } = this.conferirConta(ws, ack);
+    // quem decide a plataforma é a conta que pediu o código (o serviço diz); a tela só muda os textos
+    const plat = platDe(ack.canal ?? ack.platform);
+    // conta do Discord (ou do Telegram): sem organização nem conta Microsoft para conferir, pede a escolha consciente
+    const { conta, organizacao } = plat === 'teams' ? this.conferirConta(ws, ack) : { conta: 'sem_conferir' as const, organizacao: null };
     // o prazo é medido só pelo relógio daqui (o serviço confere o dele): com o relógio do computador adiantado, a prévia
     // não nasce vencida
     const exp = this.agora() + 120_000;
-    this.claims.set(claimId, { userId, ws, teamsName, expiresAt: exp, conta });
-    return { claimId, teamsName, expiresAt: new Date(exp).toISOString(), conta, organizacao };
+    this.claims.set(claimId, { userId, ws, teamsName, expiresAt: exp, conta, plat });
+    return { claimId, teamsName, expiresAt: new Date(exp).toISOString(), conta, organizacao, canal: plat };
   }
 
   /** De quem é a conta do Teams do claim, pelo locatário e pela conta que o serviço informou (contrato 12.1). */
@@ -1003,23 +1250,25 @@ export class TeamsApp {
     return /^[a-z0-9.-]{3,120}$/.test(dominio) ? dominio : null;
   }
 
+  /** A plataforma da prévia (claim) em andamento; sem prévia, Teams (a rota pede a pessoa dona). */
+  platDoClaim(claimId: string): Plataforma { return this.claims.get(claimId)?.plat ?? 'teams'; }
   /** Conta do Teams não conferida como a da pessoa: ligar pede a escolha consciente ("fui eu que pedi este código"). */
   exigirCiente(userId: string, claimId: string, ciente: boolean | undefined): void {
     const c = this.claims.get(claimId);
     if (c && c.userId === userId && c.conta !== 'sua' && ciente !== true) {
-      throw new HttpError(400, 'ciente', 'Marque que foi você que pediu este código agora, no seu próprio Teams.');
+      throw new HttpError(400, 'ciente', `Marque que foi você que pediu este código agora, no seu próprio ${NOME_PLAT[c.plat]}.`);
     }
   }
 
   async confirm(userId: string, ws: string, claimId: string, nomeDaPessoa: string, ciente?: boolean): Promise<Record<string, unknown>> {
     const c = this.claims.get(claimId);
-    if (!c || c.userId !== userId || c.expiresAt < this.agora()) { this.claims.delete(claimId); throw erroDaTela('claim_expired'); }
+    if (!c || c.userId !== userId || c.expiresAt < this.agora()) { this.claims.delete(claimId); throw erroDaTela('claim_expired', c?.plat); }
     this.exigirCiente(userId, claimId, ciente);
     const label = (nomeDaPessoa.trim().split(/\s+/)[0] || 'você').slice(0, 40);
     // enquanto o link.confirm espera resposta (e por 10 min se a conexão cair sem ela), a reconciliação adota o vínculo
     this.confirmando.set(claimId, { ...c, ate: this.agora() + 10 * 60_000 });
     let ack: Ack;
-    try { ack = await this.pedir({ type: 'link.confirm', id: novoId('req'), claimId, label, notices: true }); }
+    try { ack = await this.pedir({ type: 'link.confirm', id: novoId('req'), claimId, label, notices: true }, c.plat); }
     catch (e) {
       if (!(e instanceof HttpError && (e.code === 'offline' || e.code === 'timeout'))) this.confirmando.delete(claimId);
       throw e;
@@ -1027,25 +1276,28 @@ export class TeamsApp {
     this.claims.delete(claimId);
     this.confirmando.delete(claimId);
     const bindingId = String(ack.bindingId ?? '');
-    if (!ID_VINCULO.test(bindingId)) throw erroDaTela('teams_relay');
+    if (!ID_VINCULO.test(bindingId)) throw erroDaTela('teams_relay', c.plat);
     const teamsName = String(ack.teamsName ?? c.teamsName).slice(0, 120);
-    await this.gravarVinculo(c, bindingId, teamsName);
-    return { binding: (this.estado(userId).bindings as Array<{ id: string }>).find((b) => b.id === bindingId) };
+    const plat = platDe(ack.canal ?? ack.platform ?? c.plat);
+    await this.gravarVinculo(c, bindingId, teamsName, false, plat);
+    const lista = plat === 'teams' ? this.estado(userId).bindings : this.estadoBot(userId, plat).accounts;
+    const binding = (lista as Array<{ id: string }>).find((b) => b.id === bindingId);
+    return { binding: binding ? { ...binding, canal: plat } : undefined };
   }
 
   /** Grava o vínculo confirmado (pela resposta do link.confirm, ou adotado na reconciliação). */
-  private async gravarVinculo(c: { userId: string; ws: string }, bindingId: string, teamsName: string, pausadoNoRele = false): Promise<void> {
+  private async gravarVinculo(c: { userId: string; ws: string }, bindingId: string, teamsName: string, pausadoNoRele = false, plat: Plataforma = 'teams'): Promise<void> {
     const { userId, ws } = c;
-    const pausado = !this.ligadoPara(userId);
+    const pausado = !this.ligadoPara(userId, plat);
     this.d.db.tx(() => {
-      this.d.db.run(`INSERT INTO teams_bindings (binding_id, user_id, workspace_id, person_ref, teams_name, status, notices, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+      this.d.db.run(`INSERT INTO teams_bindings (binding_id, user_id, workspace_id, person_ref, teams_name, status, notices, created_at, updated_at, platform) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
         ON CONFLICT (binding_id) DO UPDATE SET user_id = excluded.user_id, workspace_id = excluded.workspace_id, status = excluded.status, teams_name = excluded.teams_name, revoked_by = NULL, updated_at = excluded.updated_at`,
-      bindingId, userId, ws, this.personRef(userId)!, this.d.db.seal(ws, teamsName), pausado ? 'paused' : 'active', now(), now());
-      const p = this.garantirPessoa(userId, ws);
+      bindingId, userId, ws, this.personRef(userId)!, this.d.db.seal(ws, teamsName), pausado ? 'paused' : 'active', now(), now(), plat);
+      const p = this.garantirPessoa(userId, ws, plat);
       // conversa que já existia: as respostas de antes não vão ao Teams, só as de agora em diante
       const cursor = Number(this.d.db.get<{ r: number }>('SELECT COALESCE(MAX(rowid), 0) AS r FROM messages')?.r ?? 0);
-      if (p.workspace_id !== ws) this.d.db.run('UPDATE teams_people SET workspace_id = ?, conversation_id = NULL WHERE user_id = ?', ws, userId);
-      this.d.db.run('UPDATE teams_people SET cursor_rowid = MAX(cursor_rowid, ?), reply_binding = COALESCE(reply_binding, ?), updated_at = ? WHERE user_id = ?', cursor, bindingId, now(), userId);
+      if (p.workspace_id !== ws) this.d.db.run('UPDATE teams_people SET workspace_id = ?, conversation_id = NULL WHERE user_id = ? AND platform = ?', ws, userId, plat);
+      this.d.db.run('UPDATE teams_people SET cursor_rowid = MAX(cursor_rowid, ?), reply_binding = COALESCE(reply_binding, ?), updated_at = ? WHERE user_id = ? AND platform = ?', cursor, bindingId, now(), userId, plat);
     });
     if (pausado !== pausadoNoRele) await this.pedirAtualizar(bindingId, { paused: pausado }).catch(() => undefined);
     this.linhaDeBase(userId, ws);
@@ -1085,5 +1337,68 @@ export class TeamsApp {
       } catch { /* fica "desligando": a próxima conexão termina */ }
     }
     this.avisarTela(userId);
+  }
+
+  // ------------------------------------------------------------------------------------------------ bots oficiais
+  /** A conta de bot ligada pelo link de uso único (o serviço avisa com link.added): grava o vínculo daqui. */
+  private async adicionado(f: Quadro): Promise<Record<string, unknown>> {
+    const id = typeof f.bindingId === 'string' && ID_VINCULO.test(f.bindingId) ? f.bindingId : null;
+    const plat = f.platform === 'telegram' || f.platform === 'discord' ? f.platform : null;
+    if (!id || !plat) return { ok: false, status: 'rejected', error: { code: 'invalid' } };
+    if (this.vinculo(id)) return { ok: true, status: 'accepted' };
+    const ini = typeof f.personRef === 'string' ? this.iniciados.get(f.personRef) : undefined;
+    // o personRef é de alguém daqui? (o link vale 10 min; depois disso, quem pediu ainda é procurado entre as pessoas)
+    const userId = ini?.userId ?? this.d.db.all<{ id: string }>('SELECT id FROM users').map((u) => u.id).find((u) => this.personRef(u) === f.personRef);
+    if (!userId) return { ok: false, status: 'rejected', error: { code: 'unknown_person' } };
+    const ws = ini?.ws ?? this.d.db.get<{ w: string }>('SELECT workspace_id AS w FROM memberships WHERE user_id = ? ORDER BY CASE role WHEN \'owner\' THEN 0 ELSE 1 END, created_at LIMIT 1', userId)?.w;
+    if (!ws) return { ok: false, status: 'rejected', error: { code: 'unknown_person' } };
+    await this.gravarVinculo({ userId, ws }, id, typeof f.teamsName === 'string' ? f.teamsName.slice(0, 120) : '', f.status === 'paused', plat);
+    return { ok: true, status: 'accepted' };
+  }
+
+  /** A plataforma de bot está oferecida na tela? (o serviço respondeu e diz que ela está ligada) */
+  disponivelBot(plat: PlataformaBot): boolean { return this.disponivel() && this.plataformasDoRele[plat]; }
+
+  /** GET /api/canais-oficiais/:plat: as contas ligadas daquela plataforma e se o bot oficial está disponível. */
+  estadoBot(userId: string, plat: PlataformaBot): Record<string, unknown> {
+    const disponivel = this.disponivelBot(plat);
+    if (!disponivel && this.base() && this.ligado && !this.conferindoSaude && (!this.saudeOficial || this.agora() - this.saudeOficial.em >= 60_000)) {
+      void this.conferirSaude().then((ok) => { if (ok && this.ligado && !this.cliente) void this.start(); });
+    }
+    const accounts = this.vinculosDe(userId, ['active', 'paused', 'revoked'], plat).map((b) => ({
+      id: b.binding_id, name: b.teams_name && b.teams_name !== CLOSED_VALUE ? b.teams_name : null, linkedAt: b.created_at, notices: Number(b.notices) === 1, status: b.status,
+      ...(b.status === 'revoked' ? { revokedBy: b.revoked_by } : {}),
+    }));
+    // Discord: o "Adicionar ao Discord" com state só quando o serviço oferece (linkStart); senão, liga pelo código, com o
+    // link de adicionar o bot (montado pelo id do app que o serviço informou)
+    const i = this.infoAtual();
+    const extra = plat === 'discord'
+      ? { linkStart: !!i?.discord?.linkStart, ...(i?.discord ? { installUrl: i.discord.installUrl, botName: i.discord.botName } : {}) }
+      : { linkStart: true, ...(i?.telegram?.botUsername ? { botUsername: i.telegram.botUsername } : {}) };
+    return { platform: plat, available: disponivel, connection: this.estadoConexao(), enabled: this.ligadoPara(userId, plat), accounts, ...extra, ...(this.problema ? { problem: this.problema } : {}) };
+  }
+
+  /** "Abrir no Telegram" / "Adicionar ao Discord": o serviço gera um link de uso único (10 min) ligado a esta pessoa. */
+  async iniciarBot(userId: string, ws: string, plat: PlataformaBot, nomeDaPessoa: string): Promise<{ url: string; expiresAt: string }> {
+    if (!this.disponivelBot(plat)) throw new HttpError(409, 'unavailable', 'Ainda não disponível.');
+    // serviço sem o "Adicionar ao Discord" com state: a conta liga pelo código (a tela mostra o link do bot e o campo)
+    if (plat === 'discord' && this.infoAtual() && !this.infoAtual()!.discord?.linkStart) throw new HttpError(409, 'code_only', 'Adicione o bot Ergon no Discord, mande "oi" na conversa com ele e digite aqui o código que ele responder.');
+    if (!this.papel(ws, userId)) throw new HttpError(403, 'forbidden', 'sem acesso a este workspace');
+    const ref = this.personRef(userId);
+    if (!ref) throw erroDaTela('offline');
+    const label = (nomeDaPessoa.trim().split(/\s+/)[0] || 'você').slice(0, 40);
+    this.iniciados.set(ref, { userId, ws, ate: this.agora() + 24 * 3600_000 });
+    const ack = await this.pedir({ type: 'link.start', id: novoId('req'), personRef: ref, platform: plat, label, notices: true }, plat);
+    const url = typeof ack.url === 'string' ? ack.url : '';
+    const ok = plat === 'telegram' ? /^https:\/\/t\.me\/[A-Za-z0-9_]{4,32}\?start=[A-Za-z0-9_-]{1,64}$/.test(url) : /^https:\/\/discord\.com\/oauth2\/authorize\?/.test(url);
+    if (!ok) throw erroDaTela('teams_relay');
+    return { url, expiresAt: typeof ack.expiresAt === 'string' ? ack.expiresAt : new Date(this.agora() + 600_000).toISOString() };
+  }
+
+  /** Desligar uma conta de bot (o mesmo caminho do Teams: o serviço apaga e avisa no chat). */
+  async revogarBot(userId: string, plat: PlataformaBot, bindingId: string): Promise<void> {
+    const b = this.vinculo(bindingId);
+    if (!b || b.user_id !== userId || (b.platform ?? 'teams') !== plat) throw new HttpError(404, 'not_found', 'conta não encontrada');
+    await this.revoke(userId, bindingId);
   }
 }

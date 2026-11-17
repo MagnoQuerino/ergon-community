@@ -38,7 +38,8 @@ export function tmpDir(): string {
 }
 
 export function testConfig(dataDir: string, over: Partial<Config> = {}): Config {
-  return loadConfig({ ERGON_DATA_DIR: dataDir, ERGON_SIMULATED_DELAY_MS: '0', ERGON_KDF: 'test', ERGON_MAX_CONCURRENT_RUNS: '1' } as NodeJS.ProcessEnv, over);
+  // ERGON_TEAMS_RELAY_URL vazia: sem o serviço oficial do Teams (como ERGON_WORLD_URL em setup.ts); quem testa o Teams passa o falso
+  return loadConfig({ ERGON_DATA_DIR: dataDir, ERGON_SIMULATED_DELAY_MS: '0', ERGON_KDF: 'test', ERGON_MAX_CONCURRENT_RUNS: '1', ERGON_TEAMS_RELAY_URL: '' } as NodeJS.ProcessEnv, over);
 }
 
 export interface Harness extends ErgonApp {

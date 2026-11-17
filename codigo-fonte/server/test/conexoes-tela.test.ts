@@ -264,10 +264,11 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     assert.match(codigo, /\/> \{t\('conexoes\.soLeitura\.rotulo'\)\}<\/label>/, 'o atalho é uma caixa de marcar, nunca um botão apagado');
     assert.match(tela, /'soLeitura\.rotulo': 'Só leitura'/);
     assert.match(tela, /Reconectar do novo jeito/);
-    // o erro do atalho aparece junto da caixa, e não dentro da lista que vem fechada
-    const caixa = codigo.indexOf("/> {t('conexoes.soLeitura.rotulo')}</label>"); const lista = codigo.indexOf('<details className="conn-acoes">', caixa);
+    // rc.33: a caixa fica na seção recolhida das ações; o erro aparece junto dela, e a seção abre sozinha com o erro
+    const caixa = codigo.indexOf("/> {t('conexoes.soLeitura.rotulo')}</label>"); const lista = codigo.indexOf('<ul className="conn-acoes__lista">', caixa);
     const erroDoAtalho = codigo.indexOf('{errSoLeitura && <p className="error"', caixa);
-    assert.ok(erroDoAtalho > caixa && erroDoAtalho < lista, 'o erro do "Só leitura" fica fora da lista fechada');
+    assert.ok(erroDoAtalho > caixa && erroDoAtalho < lista, 'o erro do "Só leitura" fica junto da caixa, antes da lista');
+    assert.match(codigo, /<details className="conn-acoes conn-secao" open=\{!!errSoLeitura \|\| undefined\}>/, 'com o erro, a seção abre');
     assert.match(tela, /api\.put\(`\/api\/conexoes\/\$\{i\.kind\}\/so-leitura`, \{ on \}\); estado\.reload\(\); \} catch \(e\) \{ setErrSoLeitura\(errMsg\(e\)\)/);
   });
 
@@ -277,7 +278,9 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     // conversar pelo Teams deixou de ser "em breve" (rc.26: o app público, ligado por código), e segue separado da conta
     assert.match(tela, /Conversar com a equipe pelo Teams: é outra coisa\./);
     assert.doesNotMatch(tela, /pelo Teams: em breve/);
-    assert.ok(tela.includes('function TeamsConversa') && tela.includes('Em breve: conversar com a equipe pelo Teams'));
+    // sem o serviço do Teams no ar: só o selo neutro "ainda não disponível", sem o aviso de "em breve"
+    assert.ok(tela.includes('function TeamsConversa') && tela.includes("'estado.indisponivel': 'ainda não disponível'"));
+    assert.ok(!tela.includes('Em breve: conversar com a equipe pelo Teams'));
     for (const t of ['Liberar leitura', 'Pedir ao administrador', 'Já aprovaram? Conectar de novo', 'Autorizar agora', 'é esperado']) assert.ok(tela.includes(t), t);
     const etapas = tela.slice(tela.indexOf('function EtapasMicrosoft'), tela.indexOf('interface WaState'));
     assert.ok(etapas.length > 1000);

@@ -1,5 +1,21 @@
 # Novidades
 
+## 1.1.0-rc.33 (pré-versão de teste)
+
+- **Ergon AI e Ergon AI Sinapse:** a IA do Ergon com nomes próprios, um rápido para o dia a dia e um que pensa antes de responder.
+- **Mensagem de áudio:** grave até 10 minutos pelo microfone; a equipe recebe a transcrição. O "Ouvir" usa a voz Piper, no seu computador.
+- **Conexões em blocos:** logo, nome e situação; um clique abre os detalhes. Telas não esticam mais, em nenhum tamanho.
+- **Aguardando você:** botão Voltar; o X fecha só a tarefa aberta.
+- **Aprovações em linguagem simples:** o card diz o que o agente quer fazer; o código fica em "Ver detalhes técnicos".
+- **Sem caminhos do sistema:** os agentes falam dos arquivos pelos nomes dos Documentos; a tela do navegador aparece na conversa.
+- **Conversa maior**, com tela cheia (Modo Foco) e a barra de orientação sem cobrir a sua mensagem.
+- **Downloads:** aviso com a pasta e pasta configurável no app de desktop.
+- **Microsoft 365 de empresa** conecta o básico sem o administrador; a leitura é liberada à parte.
+- **WhatsApp como canal da equipe:** um número seu atende os membros da lista, cada um com as suas permissões.
+- **Bots oficiais do Ergon** no Teams, no Telegram e no Discord, ligados com um clique (entram no ar à medida que forem ativados).
+- **Canais externos seguros:** cada pedido age como o membro; exportar, enviar a terceiros, apagar e mudar configurações pedem aprovação no app.
+- **Busca de workspaces** em Configurações e no seletor do topo.
+
 ## 1.1.0-rc.32 (pré-versão de teste)
 
 - **Plano e Dracmas sempre à vista:** no topo, ao lado do Estado do Ergon ("Pro | ₯ 4.202"). Um clique abre a recarga, mais pessoas, mais Jobs ou o próximo plano, direto para o pagamento.

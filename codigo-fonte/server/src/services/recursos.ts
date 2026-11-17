@@ -85,7 +85,12 @@ export class Recursos {
     return {
       checkpoints: e.checkpoints === true, codigoInseguro: e.codigo_inseguro === true, limpeza: e.limpeza === true,
       buscaFerramentas: e.busca_ferramentas === true, conectores,
-      voz: { transcrever: typeof e.voz?.transcrever === 'string' ? e.voz.transcrever : null, falar: typeof e.voz?.falar === 'string' ? e.voz.falar : null },
+      voz: {
+        transcrever: typeof e.voz?.transcrever === 'string' ? e.voz.transcrever : null, falar: typeof e.voz?.falar === 'string' ? e.voz.falar : null,
+        // rc.33: o que ainda vai ser baixado no 1º uso (o modelo de fala; a voz do Piper), para a tela avisar
+        preparar: { transcrever: e.voz?.preparar?.transcrever === true, falar: e.voz?.preparar?.falar === true },
+        modelo: typeof e.voz?.modelo === 'string' ? e.voz.modelo.slice(0, 20) : null,
+      },
       navegador: { chromium: e.navegador?.chromium === true, pronto: e.navegador?.pronto === true },
       escrita: this.escrita(ws),
     };
@@ -209,11 +214,28 @@ export class Recursos {
       result: r.ok ? `pasta ${pasta} de volta ao ponto ${id.slice(0, 8)}` : `não voltou: ${String(r.motivo ?? '')}` });
     return r;
   }
-  async transcrever(ws: string, audio: Buffer, nome: string) { return this.ponte(ws, 'POST', 'voz/transcrever', { audio: audio.toString('base64'), nome }); }
+  /**
+   * Um áudio vira texto pelo motor. Em segundo plano na ponte (rc.33: até 10 min de áudio, e o modelo de fala baixado no 1º
+   * uso, passam do prazo de uma chamada): a ponte devolve a tarefa e o resultado sai na consulta seguinte. A ponte de antes
+   * responde direto, com o resultado.
+   */
+  async transcrever(ws: string, audio: Buffer, nome: string, o: { intervaloMs?: number; prazoMs?: number } = {}) {
+    let r = await this.ponte(ws, 'POST', 'voz/transcrever', { audio: audio.toString('base64'), nome, segundo_plano: true });
+    const tarefa = typeof r?.tarefa === 'string' && /^[a-f0-9]{16,64}$/.test(r.tarefa) ? r.tarefa : null;
+    if (!tarefa) return r;
+    const ate = Date.now() + (o.prazoMs ?? 20 * 60_000);
+    while (Date.now() < ate) {
+      await new Promise((ok) => setTimeout(ok, o.intervaloMs ?? 2000));
+      try { r = await this.ponte(ws, 'GET', 'voz/transcrever', undefined, { tarefa }); }
+      catch (err) { if (err instanceof HttpError && err.status === 503) continue; throw err; } // o motor piscou: tenta na próxima volta
+      if (r?.andando !== true) return r;
+    }
+    return { ok: false, motivo: 'tempo' };
+  }
   async falar(ws: string, texto: string) { return this.ponte(ws, 'POST', 'voz/falar', { texto }); }
 }
 
 /** Revisão em conselho: o pedido que vai ao conselho de modelos (na conversa, como mensagem da pessoa). */
 export const PEDIDO_CONSELHO = 'Revisão em conselho: revise criticamente a sua última resposta nesta conversa. Aponte erros, lacunas e premissas não declaradas, diga o que mudaria e entregue a versão revisada.';
 /** Um áudio que dá para transcrever (o tipo do arquivo anexado). */
-export const ehAudio = (mime: string, nome: string): boolean => /^audio\//.test(mime) || /\.(ogg|oga|opus|mp3|m4a|wav|webm|flac|aac)$/i.test(nome);
+export { ehAudio } from './transcricoes.ts';

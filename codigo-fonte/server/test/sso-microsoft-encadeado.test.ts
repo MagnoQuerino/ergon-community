@@ -1,6 +1,7 @@
 /**
- * Microsoft "de vez": ao conectar, o login emenda sozinho todas as etapas (base → Teams → leitura → canais), sem a pessoa voltar
- * para clicar de novo. A etapa que a empresa só libera com o administrador não trava a conexão: o que já foi dado continua
+ * Microsoft "de vez": ao conectar, o login emenda sozinho as etapas (base → Teams → leitura → canais), sem a pessoa voltar
+ * para clicar de novo. Em conta de trabalho, a leitura só entra sozinha para quem aprova pela empresa (ou depois da aprovação do
+ * administrador): para os outros, o primeiro login termina no básico e a leitura é pedida em "Liberar leitura". A etapa que a empresa só libera com o administrador não trava a conexão: o que já foi dado continua
  * valendo e a tela oferece o pedido pronto. Conta pessoal não tem Teams: pula as etapas dele. Os canais (sempre o administrador)
  * só entram no encadeamento quando se sabe que a conta aprova pela empresa (as funções de diretório no token, decisão de
  * 09/11); sem saber, a tela oferece o pedido. Sem rede: o login e o Graph simulados no formato documentado.
@@ -10,6 +11,7 @@ import { after, afterEach, before, beforeEach, describe, test } from 'node:test'
 import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 import { ESCOPOS_MICROSOFT } from '../src/services/conexoes/acoes/microsoft.ts';
 import { FUNCOES_QUE_APROVAM, podeAprovarPelaEmpresa } from '../src/services/sso.ts';
+import { FORA_DO_CONSENTIMENTO_DO_USUARIO } from '../src/services/conexoes/acoes/microsoft.ts';
 import { setHttpClock } from '../src/lib/http.ts';
 import { consentimentoDe, integrationRow, setIntegration, settingsOf } from '../src/services/integrations.ts';
 
@@ -24,6 +26,17 @@ const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { sta
 const escopos = (s: string | null | undefined) => (s ?? '').split(/\s+/).filter(Boolean);
 const ADMIN_EXIGIDO = `error=access_denied&error_description=${encodeURIComponent('AADSTS90094: Admin consent is required for the permissions requested by this application.')}`;
 const ADMIN_EXIGIDO_65001 = `error=invalid_client&error_description=${encodeURIComponent('AADSTS65001: The user or administrator has not consented to use the application.')}`;
+
+/**
+ * Tudo o que o primeiro login ("Entrar com a Microsoft") pode pedir numa conta de trabalho, fixado aqui: uma permissão nova nesta
+ * lista é uma decisão, não um acidente. Nada de "precisa de administrador" na tabela oficial (permissions-reference) nem na lista
+ * da política padrão gerenciada pela Microsoft (FORA_DO_CONSENTIMENTO_DO_USUARIO).
+ */
+const PRIMEIRO_LOGIN = ['openid', 'profile', 'offline_access', 'User.Read', 'Mail.Send', 'Files.ReadWrite',
+  'Chat.ReadBasic', 'Chat.Create', 'ChatMessage.Send', 'Team.ReadBasic.All', 'Channel.ReadBasic.All', 'ChannelMessage.Send'];
+/** nunca no primeiro login: "Admin consent required: Yes" (permissions-reference), barradas pela política padrão ou de alcance da empresa inteira */
+const ADMIN_SEMPRE = ['ChannelMessage.Read.All', 'Group.Read.All', 'Group.ReadWrite.All', 'Sites.Read.All', 'Sites.ReadWrite.All', 'Directory.Read.All',
+  'Directory.ReadWrite.All', 'User.Read.All', 'User.ReadBasic.All', 'TeamMember.Read.All', 'ChannelMember.Read.All', 'Files.Read.All', 'Files.ReadWrite.All', 'Mail.Read.Shared'];
 
 type Token = Record<string, string>;
 const tokenCalls: Token[] = [];
@@ -108,7 +121,9 @@ describe('conta de trabalho: tudo de uma vez', () => {
 
   test('leitura negada pela política da empresa: o envio continua conectado e a tela oferece o pedido ao administrador', async () => {
     const t = pagina(await aceitar(await comecar(), 'c1'));
-    const l = pagina(await aceitar(t, 'c2'));
+    assert.equal(await aceitar(t, 'c2'), '/#conexoes?microsoft=basico', 'o primeiro login para no que a pessoa autoriza sozinha');
+    assert.equal((await etapa('leitura')).estado, 'falta');
+    const l = await comecar({ etapa: 'leitura' });
     const r = await voltar(l.searchParams.get('state'), ADMIN_EXIGIDO);
     assert.equal(String(r.headers.location), '/#conexoes?microsoft=sem-leitura', 'não vai para os canais, que dariam no mesmo');
     assert.equal(await estado(), 'connected');
@@ -122,11 +137,13 @@ describe('conta de trabalho: tudo de uma vez', () => {
     // o que já foi dado segue funcionando
     const dadas = new Set(escopos(cred().granted).map((x) => x.toLowerCase()));
     for (const e of [...ESCOPOS_MICROSOFT.base, ...ESCOPOS_MICROSOFT.trabalho]) assert.ok(dadas.has(e.toLowerCase()), e);
-    // entrar de novo depois: tenta a leitura outra vez (o administrador pode ter aprovado); os canais não entram, porque não se
-    // sabe que esta conta aprova pela empresa: o pedido ao administrador fica na tela
+    // entrar de novo depois: o primeiro login não leva de novo à página do administrador (a marca é "bloqueado", não "aprovado")
     // (a simulação devolve só o que cada etapa pede: a base recomeça do que a conta tem e passa pelo Teams de novo)
     const t2 = pagina(await aceitar(await comecar(), 'c3'));
-    const l3 = pagina(await aceitar(t2, 'c4'));
+    assert.equal(await aceitar(t2, 'c4'), '/#conexoes?microsoft=basico');
+    // "Tentar de novo" na linha da leitura (o administrador pode ter aprovado); os canais não entram, porque não se sabe que esta
+    // conta aprova pela empresa: o pedido ao administrador fica na tela
+    const l3 = await comecar({ etapa: 'leitura' });
     assert.ok(escopos(l3.searchParams.get('scope')).includes('Mail.Read'), 'tenta a leitura de novo');
     assert.equal(await aceitar(l3, 'c5'), '/#conexoes?microsoft=sem-canais');
     assert.equal((await etapa('leitura')).estado, 'ok');
@@ -224,6 +241,37 @@ describe('conta de trabalho: tudo de uma vez', () => {
     assert.equal(teams.administrador, false); assert.equal(teams.link, null);
   });
 
+  test('o primeiro login de quem não aprova pela empresa nunca pede o que só o administrador libera; a leitura é incremental', async () => {
+    const fora = new Set(FORA_DO_CONSENTIMENTO_DO_USUARIO.map((e) => e.toLowerCase()));
+    const base = await comecar();
+    // tudo o que o primeiro login manda à Microsoft, etapa por etapa, até voltar à tela
+    const pedidos: URL[] = [base];
+    let x: URL | string = await aceitar(base, 'c1');
+    while (x instanceof URL) { pedidos.push(x); x = await aceitar(x, `c${pedidos.length + 1}`); }
+    assert.equal(x, '/#conexoes?microsoft=basico');
+    for (const u of pedidos) {
+      const esc = escopos(u.searchParams.get('scope'));
+      assert.deepEqual(esc.filter((e) => fora.has(e.toLowerCase()) || ADMIN_SEMPRE.includes(e) || /\.default$|^https?:/i.test(e)), [], u.href);
+      assert.deepEqual(esc.filter((e) => !PRIMEIRO_LOGIN.includes(e)), [], 'só o que está fixado aqui');
+      assert.notEqual(u.searchParams.get('prompt'), 'admin_consent');
+      assert.equal(u.pathname, '/common/oauth2/v2.0/authorize', 'locatário common: conta pessoal e de trabalho');
+    }
+    // a leitura só sai quando a pessoa clica em "Liberar leitura"
+    const l = await comecar({ etapa: 'leitura' });
+    for (const e of ['Mail.Read', 'Calendars.ReadWrite', 'Tasks.ReadWrite', 'Chat.Read']) assert.ok(escopos(l.searchParams.get('scope')).includes(e), e);
+    assert.ok(!escopos(l.searchParams.get('scope')).includes('ChannelMessage.Read.All'), 'os canais são outro pedido');
+    // e os canais, só na linha deles
+    assert.ok(escopos((await comecar({ etapa: 'canais' })).searchParams.get('scope')).includes('ChannelMessage.Read.All'));
+  });
+
+  test('o administrador já aprovou a leitura pelo link: o primeiro login segue até ela', async () => {
+    assert.equal(await aceitar(pagina(await aceitar(await comecar(), 'c1')), 'c2'), '/#conexoes?microsoft=basico');
+    const state = new URL((await etapa('leitura')).link!).searchParams.get('state')!;
+    assert.match(String((await voltar(state, 'admin_consent=True')).headers.location), /microsoft=admin-aprovou$/);
+    const l = pagina(await aceitar(pagina(await aceitar(await comecar(), 'c3')), 'c4'));
+    assert.ok(escopos(l.searchParams.get('scope')).includes('Mail.Read'));
+  });
+
   test('canais negados no fim do encadeamento: tudo o resto fica valendo, sem nada em vermelho na conexão', async () => {
     extraId = { wids: [ADMIN_GLOBAL] };
     const l = pagina(await aceitar(pagina(await aceitar(await comecar(), 'c1')), 'c2'));
@@ -250,7 +298,8 @@ describe('quem aprova pela empresa', () => {
 
   test('conta que sabidamente não aprova: o encadeamento termina na leitura, sem a página sem saída dos canais', async () => {
     extraId = { wids: [USUARIO_COMUM] };
-    const l = pagina(await aceitar(pagina(await aceitar(await comecar(), 'c1')), 'c2'));
+    assert.equal(await aceitar(pagina(await aceitar(await comecar(), 'c1')), 'c2'), '/#conexoes?microsoft=basico');
+    const l = await comecar({ etapa: 'leitura' });
     assert.equal(await aceitar(l, 'c3'), '/#conexoes?microsoft=sem-canais');
     const c = await etapa('canais');
     assert.equal(c.estado, 'falta'); assert.ok(c.link, 'o pedido ao administrador já pronto');
@@ -258,7 +307,8 @@ describe('quem aprova pela empresa', () => {
   });
 
   test('sem saber se a conta aprova pela empresa (o token sem as funções de diretório): não leva aos canais; oferece o pedido', async () => {
-    const l = pagina(await aceitar(pagina(await aceitar(await comecar(), 'c1')), 'c2'));
+    assert.equal(await aceitar(pagina(await aceitar(await comecar(), 'c1')), 'c2'), '/#conexoes?microsoft=basico');
+    const l = await comecar({ etapa: 'leitura' });
     assert.equal(await aceitar(l, 'c3'), '/#conexoes?microsoft=sem-canais');
     const c = await etapa('canais');
     assert.equal(c.estado, 'falta'); assert.ok(c.link, 'o pedido ao administrador já pronto');

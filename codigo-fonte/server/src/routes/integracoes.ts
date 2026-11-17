@@ -187,7 +187,8 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
       if (kind === 'microsoft' && r.etapa !== 'base') marcarEtapa(db, r.workspaceId, r.etapa, null, r.conta);
       if (r.next && r.proxima) { marcarEtapa(db, r.workspaceId, r.proxima, { estado: 'pedido' }, r.conta); return reply.redirect(r.next); }
       // tudo o que a pessoa pode dar já foi dado; os canais (opcionais) esperam o administrador, e a tela mostra o pedido pronto
-      return back(r.semCanais ? 'sem-canais' : 'conectado');
+      // conta de trabalho com o básico: a leitura espera "Liberar leitura" ou o administrador (sso.ts, FimDoLogin.basico)
+      return back(r.semCanais ? 'sem-canais' : r.basico ? 'basico' : 'conectado');
     } catch (e) {
       // o erro da troca do código (rede, código do provedor) só passa se já for para a pessoa
       const m = paraTela(e instanceof Error ? e.message : null);

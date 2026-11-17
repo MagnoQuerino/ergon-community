@@ -4,6 +4,7 @@
  * assuntos, mensagens, arquivos e links —, e os arquivos e links de uma conversa. As mensagens são cifradas: a busca
  * abre e procura aqui no servidor, sem índice em claro.
  */
+import { docsComoTexto } from '../../../shared/caminhos.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import type { Bus } from './bus.ts';
@@ -47,7 +48,7 @@ export function setMark(db: Db, bus: Bus, workspaceId: string, userId: string, m
   bus.publish(workspaceId, 'messages.changed', { conversationId: m.conversation_id });
 }
 
-const plainOf = (s: string) => s.replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, '[imagem]').replace(/\s+/g, ' ').trim();
+const plainOf = (s: string) => docsComoTexto(s).replace(/\[\[(?:[^\]]|\](?!\]))*\]\]/g, ' ').replace(/\[imagem: [^\]]*\]/g, '[imagem]').replace(/\s+/g, ' ').trim();
 
 /** As mensagens marcadas de uma conversa (a mais nova primeiro). */
 export function marksOf(db: Db, workspaceId: string, userId: string, conversationId: string) {

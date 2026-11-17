@@ -63,7 +63,7 @@ describe('Conversar pelo Teams: sem o endereço do serviço', () => {
     assert.equal(h.teamsApp.cliente, null, 'nenhuma conexão');
     assert.equal(h.db.get("SELECT value FROM instance_settings WHERE key = 'teams_relay_keys'"), undefined, 'nem chaves geradas');
     const c = await req(h, 'POST', '/api/teams-app/claim', s, { code: 'ABCD-EFGH' });
-    assert.equal(c.status, 409); assert.equal(c.json.message, 'Em breve.');
+    assert.equal(c.status, 409); assert.equal(c.json.message, 'Ainda não disponível.');
   });
 });
 

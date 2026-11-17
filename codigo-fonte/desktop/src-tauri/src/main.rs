@@ -31,6 +31,8 @@ pub struct Estado {
     pub porta: AtomicU16,
     /// um "subir" por vez
     pub subindo: AtomicBool,
+    /// os arquivos baixados nesta sessão (janela::baixar): "Abrir pasta" e "Mostrar arquivo" só valem para eles
+    pub downloads: Mutex<Vec<std::path::PathBuf>>,
 }
 
 fn main() {
@@ -49,7 +51,7 @@ fn main() {
     if std::env::args().any(|a| a == "--atualizar-sem-janela") {
         std::process::exit(atualizar_sem_janela());
     }
-    let estado = Estado { ultimo: Mutex::new(None), porta: AtomicU16::new(instalacao::localizar().porta), subindo: AtomicBool::new(false) };
+    let estado = Estado { ultimo: Mutex::new(None), porta: AtomicU16::new(instalacao::localizar().porta), subindo: AtomicBool::new(false), downloads: Mutex::new(Vec::new()) };
     tauri::Builder::default()
         // abrir de novo (menu, atalho) traz a janela que já está aberta, em vez de uma segunda cópia
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| janela::mostrar(app)))

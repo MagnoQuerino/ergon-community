@@ -9,7 +9,7 @@ import type { Db } from './db/db.ts';
 import { PAGE_CSP } from './lib/protecao-pagina.ts';
 import { HttpError, fold, id as newId, notFound, now, redactUrl, safeEqual } from './lib/util.ts';
 import { comTextoDoResultado, reconhecer, tx, type Texto } from './lib/textos.ts';
-import { INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
+import { AUDIO_INLINE, INLINE_MIME, listArtifacts, openArtifact, saveArtifact } from './services/artifacts.ts';
 import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
 import { activityReport, reportPeriod } from './services/activity-report.ts';
@@ -39,6 +39,7 @@ import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
+import { TETO_TEXTO, Transcricoes, ehAudio, foraDoTeto } from './services/transcricoes.ts';
 import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, anterioresParaVoltar, newer } from './version.ts';
 import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
@@ -63,11 +64,12 @@ import { applyDocCommands, createFolder, emptyTrash, purgeFiles, purgeRequest, f
 import { personalityOf, setPersonality } from './services/voices.ts';
 import { routeTeamTask } from './services/actions.ts';
 import { HermesError, HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
-import { CONEXOES, type AiService } from './services/ai.ts';
+import { CONEXOES, migrarAgentesErgonAi, type AiService } from './services/ai.ts';
 import { equipeNaSaude, Motors } from './services/motors.ts';
 import { Integrations, contasDe, integrationRow, nomeDaConta, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { contaDoPedido, contaSchema } from './routes/integracoes.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
+import { vistaDaAprovacao } from './services/aprovacao-cartao.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
 import { etapaCurta, resumoDaTarefa, semLinhaParaVoce } from './services/resumo-tarefa.ts';
@@ -105,7 +107,7 @@ import { Packages } from './services/packages.ts';
 import { competenciasDeTerceiros } from './services/competencias.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
 import { TeamsApp, registerTeamsAppRoutes } from './services/teams-app/index.ts';
-import { Canais, registerCanaisRoutes } from './services/canais/index.ts';
+import { Canais, WhatsAppEquipe, registerCanaisRoutes, registerWhatsAppEquipeRoutes } from './services/canais/index.ts';
 import { Bilhetes, Gestao, KIND_GESTAO, TOOLSET_GESTAO, type AcaoGestao } from './services/gestao.ts';
 import { gestaoServicos } from './services/gestao-servicos.ts';
 import { resumirEsquema } from './services/gestao-esquema.ts';
@@ -331,10 +333,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     control: (ws) => motors.control(ws), hermes: (ws) => motors.hermes(ws),
   });
   // imagens geradas pelos agentes chegam ao Ergon pela ponte de controle (ver RunExecutor.withMedia)
-  executor.media = motors.perPerson || control?.media ? async (p, ws) => {
+  executor.media = motors.perPerson || control?.media ? async (p, ws, perfil) => {
     const c = motors.control(ws);
     if (!c?.media) throw new Error('sem ponte');
-    return c.media(p);
+    return c.media(p, perfil);
   } : null;
   // quem tem Mensagens dos canais, perguntado sobre e-mail ou mensagens numa conversa ou num card, recebe o que chegou
   // (lido agora). No card também: o pedido escrito na conversa vira card e a fila o executa — sem isso, ali a Aspásia
@@ -529,6 +531,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       return caps;
     },
     decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao) });
+  // o número da equipe no WhatsApp: um número pareado por QR vira canal, pelo mesmo caminho (entregue pela sessão do app)
+  const whatsappEquipe = new WhatsAppEquipe({ db, bus, canais, whatsapp });
+  // pedido por canal externo (canais/externo.ts): escrita numa conta sempre confirma; papel de leitura não escreve
+  // o Teams e os bots oficiais (Telegram, Discord) pelo relé usam a mesma camada: cada conta ligada age como o membro dela
+  teamsApp.usarCamadaComum(canais.externos);
+  conexoes.canalExterno = (conv, risco) => { const x = canais.externos.daConversa(conv) ?? teamsApp.daConversa(conv); return x ? canais.externos.decisaoDaAcao(x.papel, risco) : null; };
   chatHooks.channelNote = (conv, msg) => {
     try { return teamsApp.notaDoCanal(conv, msg) ?? canais.notaDoCanal(conv, msg); } catch { return null; }
   };
@@ -1110,7 +1118,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
   const secApi = registerSecurityRoutes(app, sec);
-  registerTeamsAppRoutes(app, { teamsApp, owner, admin, verify: secApi.verify });
+  registerTeamsAppRoutes(app, { teamsApp, owner, admin, member: auth, verify: secApi.verify });
   registerPeopleRoutes(app, { ...sec, upkeep: personOpened, routines, removeMotor: async (u) => { await teamsApp.pessoaRemovida(u).catch(() => undefined); canais.pessoaRemovida(u); await motors.remove(u); } });
 
   app.post('/api/session/workspace', {
@@ -1618,6 +1626,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
    */
   // a mesma decisão para o app e para o Teams (o cartão no Teams chama esta função; alcance e prazo só vêm da tela)
   const decidirProposta = async (ws: string, userId: string, pid: string, decision: 'apply' | 'reject', o: { alcance?: Alcance; prazo?: PrazoDepoisDeLer } = {}): Promise<{ status: string; result: string; result_t?: Texto }> => {
+    // canal externo (canais/externo.ts): o pedido de risco que espera o app e o aviso de canal pausado
+    if (canais.externos.ehCartao(ws, pid)) return canais.externos.decidir(ws, userId, pid, decision);
     if (db.get("SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = 'conexao'", pid, ws)) return conexoes.decidirProposta(ws, userId, pid, decision);
     // uma mudança de configuração pedida pelo coordenador (gestão, rc.29): roda a rota da tela com a sessão de quem clicou
     if (db.get('SELECT 1 AS x FROM agent_proposals WHERE id = ? AND workspace_id = ? AND kind = ?', pid, ws, KIND_GESTAO)) return gestao.decidir(ws, userId, pid, decision);
@@ -2129,8 +2139,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       // cards que nasceram deste (ajuda pedida, o card enviado à equipe): cancelar este leva junto, e a tela avisa antes
       children: db.all<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE parent_task_id = ? AND archived = 0 ORDER BY number', taskId),
       // ações numa conta pedidas neste card, esperando o seu clique (o mesmo cartão da conversa e de "aguardando você")
-      conexoes: db.all<{ id: string; kind: string; summary: string; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
-        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao', 'gestao') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
+      // o comando para aprovar: a frase simples, o risco e o comando só em `detalhe` (aprovacao-cartao.ts)
+      conexoes: db.all<{ id: string; kind: string; summary: string; payload?: string | null; created_at: string }>(`SELECT p.id, p.kind, p.summary, CASE WHEN p.kind = 'aprovacao' THEN p.payload END AS payload, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
+        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao', 'gestao') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId)
+        .map(({ payload, ...c }) => {
+          const v = payload ? vistaDaAprovacao(payload) : null;
+          return v ? { ...c, summary: v.resumo, summary_t: v.resumo_t, detalhe: v.detalhe, ...(v.risco ? { risco: v.risco, risco_t: v.risco_t } : {}) } : c;
+        }),
       // perguntas do agente e pedidos de chave ou senha feitos neste card (cartoes.ts), esperando você: o mesmo cartão da conversa
       cartoes: db.all<{ id: string; kind: string; summary: string; payload: string; status: string; result: string | null; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.payload, p.status, p.result, p.created_at
         FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('question', 'segredo') AND p.status = 'proposed' ORDER BY p.created_at, p.rowid`, taskId, a.workspaceId),
@@ -2659,7 +2674,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // e voz, pela ponte de controle do motor: routes/recursos.ts
   const recursos = new Recursos({ db, bus, control: (ws) => motors.control(ws), scope: (ws) => motorScope(ws), modelos: (ws) => aiOf(ws).opcoesDeReserva(),
     aoMudarCompetencias: (ws) => aiOf(ws).esquecerCompetencias() });
-  registerRecursosRoutes(app, { db, bus, recursos, executor, cfg, auth, owner });
+  // mensagem de áudio (rc.33): a transcrição em segundo plano, gravada ligada ao arquivo; o pedido da conversa espera por ela
+  const transcricoes = new Transcricoes({ db, bus, filesDir: cfg.filesDir, transcrever: (ws, audio, nome) => recursos.transcrever(ws, audio, nome),
+    vaiPreparar: async (ws) => { const e = await recursos.estado(ws); return e.voz.preparar.transcrever; } });
+  const audiosDaExecucao = (r: { workspace_id: string; id: string }) => attachmentsOfRun(db, r.workspace_id, r.id).filter((f) => ehAudio(f.mime, f.filename)).map((f) => f.id);
+  executor.anexosPendentes = (r) => { const ids = audiosDaExecucao(r); return ids.length > 0 && transcricoes.pendentes(r.workspace_id, ids); };
+  executor.esperaAnexos = (r) => (r.kind === 'chat' ? transcricoes.esperaMs(r.workspace_id, audiosDaExecucao(r), r.started_at) : 0);
+  registerRecursosRoutes(app, { db, bus, recursos, transcricoes, executor, cfg, auth, owner });
   // "Relatar um problema" (Ajuda): prévia limpa e envio só no clique, sem conta nem World: services/relatos.ts
   registerRelatosRoutes(app, { db, cfg, auth, url: cfg.relatosUrl, timeoutMs: cfg.relatosTimeoutMs });
   // aplicativos conectados pela pessoa (servidor MCP que o catálogo não traz, rc.29): routes/mcp-proprio.ts
@@ -2683,7 +2704,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (folderHdr && !/^fld_[a-f0-9]{32}$/.test(folderHdr)) throw new HttpError(400, 'folder', 'pasta inválida');
     if (convId) getConversation(db, a.workspaceId, a.userId, convId);
     const folderId = folderHdr ?? (convId ? folderForConversation(db, a.workspaceId, convId) : taskId ? folderForTask(db, a.workspaceId, taskId) : null);
-    return reply.status(201).send(saveArtifact(db, bus, cfg.filesDir, cfg.maxUploadBytes, a.workspaceId, a.userId, { filename, mime, data: req.body, taskId, folderId }, storageQuota));
+    // áudio na conversa (rc.33): até 10 minutos (a tela para em 10:00; aqui confere), e a transcrição já começa
+    const audio = !!convId && ehAudio(mime, filename);
+    if (audio) { const teto = foraDoTeto(req.body); if (teto) throw new HttpError(400, teto.motivo === 'longo' ? 'audio_longo' : 'audio_grande', TETO_TEXTO[teto.motivo]); }
+    const salvo = saveArtifact(db, bus, cfg.filesDir, cfg.maxUploadBytes, a.workspaceId, a.userId, { filename, mime, data: req.body, taskId, folderId }, storageQuota);
+    if (audio) void transcricoes.iniciar(a.workspaceId, salvo.id);
+    return reply.status(201).send(salvo);
   });
   // Documentos: pastas, mover, renomear, lixeira, prévia, busca e desfazer ------------------------------------------
   const user = (req: FastifyRequest) => { const a = auth(req); return { a, actor: { type: 'user' as const, id: a.userId } }; };
@@ -2759,11 +2785,24 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 <p><a href="/api/artifacts/${h(id)}/download?confirmo=1" rel="noopener" style="display:inline-block;padding:8px 14px;border:1px solid #b42318;border-radius:8px;color:#b42318;text-decoration:none">Baixar mesmo assim</a></p>
 <p style="color:#555;font-size:.9rem">No Windows, o SmartScreen e o antivírus ainda conferem o arquivo depois de baixado.</p></body></html>`);
     }
-    // prévia só de imagem comum e PDF (?inline=1), num documento isolado; todo o resto sempre baixa como anexo
+    // prévia só de imagem comum, PDF e áudio (?inline=1), num documento isolado; todo o resto sempre baixa como anexo
     const inline = !exe && (req.query as { inline?: string }).inline === '1' && INLINE_MIME.has(f.mime);
     reply.header('Content-Type', !exe && INLINE_MIME.has(f.mime) ? f.mime : 'application/octet-stream');
     reply.header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.filename)}`);
     if (inline && f.mime.startsWith('image/')) reply.header('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'; frame-ancestors 'none'");
+    // áudio (rc.33): o player da conversa (<audio>) pede pedaços para pular no tempo; aberto sozinho, num documento isolado
+    if (inline && AUDIO_INLINE.has(f.mime)) {
+      reply.header('Content-Security-Policy', "sandbox; default-src 'none'; media-src 'self'; frame-ancestors 'none'");
+      reply.header('Accept-Ranges', 'bytes').header('Cache-Control', 'private, no-store');
+      const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+      if (m && (m[1] || m[2])) {
+        const total = f.data.length;
+        const ini = m[1] ? Number(m[1]) : Math.max(0, total - Number(m[2]));
+        const fim = m[1] && m[2] ? Math.min(Number(m[2]), total - 1) : total - 1;
+        if (ini >= total || ini > fim) return reply.status(416).header('Content-Range', `bytes */${total}`).send();
+        return reply.status(206).header('Content-Range', `bytes ${ini}-${fim}/${total}`).send(f.data.subarray(ini, fim + 1));
+      }
+    }
     // PDF na prévia "Ver" do card: dentro da própria tela do Ergon (mesma origem), nunca numa página de outro endereço.
     // Sem sandbox: o leitor de PDF do navegador não abre num documento isolado; o PDF não roda nada nesta origem
     if (inline && f.mime === 'application/pdf') { reply.header('X-Frame-Options', 'SAMEORIGIN'); reply.header('Content-Security-Policy', "default-src 'none'; object-src 'self'; frame-ancestors 'self'"); }
@@ -2923,6 +2962,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // é pelo app com relé (services/teams-app), o WhatsApp pelo leitor por QR (services/whatsapp.ts) e o Telegram e o
   // Discord pelas rotas dos canais. Um plugin antigo que ainda mande evento para cá recebe 404 e não responde ninguém.
   registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
+  registerWhatsAppEquipeRoutes(app, { equipe: whatsappEquipe, owner, verify: secApi.verify });
 
   // Plugin do Ergon no motor: antes de cada ferramenta, pergunta de qual agente é a sessão e o que ele pode usar.
   // Resposta mínima (nome do agente, conjuntos liberados e quem tem cada um, para o agente pedir ajuda).
@@ -3175,7 +3215,21 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
   if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks,
-    packages: { keys: officialKeys, preview: (ws, buf) => packages.preview(ws, buf), install: (ws, userId, buf) => packages.install(ws, userId, buf) } });
+    // o papel de cada membro no World vale para o que ele pede pelos canais externos (canais/externo.ts)
+    canais: { ligar: (f) => { canais.externos.buscarMembros = f; }, membros: (ws, m) => canais.externos.membrosDoWorld(ws, m), saiu: (ws, acc) => canais.externos.membroSaiu(ws, acc), atualizar: (ws) => { void canais.externos.atualizarPapeis(ws); } },
+    packages: { keys: officialKeys, preview: (ws, buf) => packages.preview(ws, buf), install: (ws, userId, buf) => packages.install(ws, userId, buf) },
+    ergonAi: {
+      modelos: (ws) => aiOf(ws).modelosErgonAi(),
+      ehPadrao: (ws) => aiOf(ws).ergonAiEhPadrao(),
+      migrar: async (ws) => {
+        const agentes = migrarAgentesErgonAi(db, ws);
+        if (agentes) bus.publish(ws, 'agents.changed', {}); // o perfil de cada agente no motor segue o modelo novo
+        const ativos = db.all<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active'", ws).map((a) => perfis.perfilPronto(ws, a.id)?.nome ?? null).filter((x): x is string => !!x);
+        const r = await aiOf(ws).migrarErgonAi([null, ...new Set(ativos)]);
+        if (r.padrao || r.tarefas) bus.publish(ws, 'ai.changed', {});
+        return { ...r, agentes };
+      },
+    } });
 
   // Frontend compilado --------------------------------------------------------------------------------------
   if (cfg.webDir && fs.existsSync(path.join(cfg.webDir, 'index.html'))) {

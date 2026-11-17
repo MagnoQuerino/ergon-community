@@ -2,12 +2,14 @@ import { useRef, useState } from 'react';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { Avatar } from '../components/AccountMenu.tsx';
 import { BaixarMeusDados } from '../components/BaixarMeusDados.tsx';
+import { PastaDeDownloads } from '../components/AvisoDeDownload.tsx';
 import { SeletorIdioma } from '../components/SeletorIdioma.tsx';
 import { t as tr, tn, useT } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { Icon } from '../components/Icon.tsx';
 import { WsCard } from '../components/WsCard.tsx';
+import { filtrarWorkspaces, mostraBuscaWs } from '../lib/busca-ws.ts';
 import type { AppState, Me } from '../lib/types.ts';
 
 const LADO = 256;
@@ -67,6 +69,7 @@ export function MinhaContaPanel({ me, onChanged }: { me: Me; onChanged: () => vo
         <h4>{t('conta.minha.baixarTitulo')}</h4>
         <BaixarMeusDados />
       </div>
+      <PastaDeDownloads />
     </section>
   );
 }
@@ -103,7 +106,10 @@ function SeusWorkspaces() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [criando, setCriando] = useState<string | null>(null);
+  const [busca, setBusca] = useState('');
   const noWorld = world.data?.link?.boundWorkspaceId ?? null;
+  const comBusca = !!res.data && mostraBuscaWs(res.data.length);
+  const vistos = res.data ? (comBusca ? filtrarWorkspaces(res.data, busca) : res.data) : [];
   const criar = async () => {
     if (!criando?.trim()) return;
     setBusy(true); setErr(null);
@@ -125,9 +131,15 @@ function SeusWorkspaces() {
       <h3>{t('conta.ws.todos')}</h3>
       <p className="muted small">{t('conta.ws.todosTexto')}</p>
       {err && <p className="error" role="alert">{err}</p>}
+      {comBusca && (
+        <label className="help__search ws-busca ws-busca--cartoes"><Icon name="search" size={15} />
+          <input type="search" value={busca} placeholder={t('geral.ws.buscar')} aria-label={t('geral.ws.buscarAria')} onChange={(e) => setBusca(e.target.value)} />
+        </label>
+      )}
+      {comBusca && !vistos.length && <p className="muted small" role="status">{t('geral.ws.nenhum')}</p>}
       {!res.data ? <p className="muted small">{t('geral.comum.carregando')}</p> : (
         <div className="ws-cards">
-          {res.data.map((w) => {
+          {vistos.map((w) => {
             const dona = w.role === 'owner';
             return (
               <WsCard key={w.id} id={w.id} nome={w.name} atual={w.current}

@@ -1,11 +1,19 @@
 # Conta Google no Ergon (login com a conta)
 
-O usuário clica em **Conexões › Google › Entrar com o Google**, escolhe a conta e autoriza. Para esse botão
-funcionar, o aplicativo Ergon precisa existir uma vez no Google Cloud (é o que dá ao Ergon um identificador e
-um segredo de cliente). Isso é feito por quem instala o Ergon — numa versão em nuvem, pelo fornecedor, uma vez
-para todos os clientes. O mecanismo é o mesmo da Microsoft (SSO parametrizado, `server/src/services/sso.ts`).
+O usuário clica em **Conexões › Google › Entrar com o Google**, escolhe a conta e autoriza. Nada a registrar: as
+versões publicadas já trazem o **app público do Ergon** no Google Cloud (cliente "App para computador",
+`ERGON_GOOGLE_APP` em `server/src/config.ts`), publicado e com a política em <https://ergonworld.com/privacidade>.
+O identificador fica no código; o segredo do cliente (que o Google trata como não confidencial em app instalado)
+entra na imagem pela esteira de lançamento, porque a proteção de push do GitHub não o aceita no repositório.
+O mecanismo é o mesmo da Microsoft (SSO parametrizado, `server/src/services/sso.ts`).
 
-## Registrar o aplicativo (uma vez, ~10 minutos)
+Enquanto a verificação do Google não termina, quem entra vê o aviso "o Google não verificou este app"
+(*Avançado › Acessar Ergon*) e o app aceita até 100 pessoas no total. Depois da verificação, o aviso some.
+
+Para usar **o seu próprio** cliente (builds locais, que não têm o segredo, ou quem prefere o próprio projeto), siga
+os passos abaixo; o cliente do `.env` vence o embutido. `ERGON_GOOGLE_CLIENT_ID=off` desliga o Google.
+
+## Registrar o seu próprio aplicativo (opcional, ~10 minutos)
 
 1. Em <https://console.cloud.google.com>, crie um projeto (ex.: `Ergon`).
 2. **APIs e serviços › Biblioteca**: ative a **Google Tasks API**.
@@ -19,10 +27,9 @@ para todos os clientes. O mecanismo é o mesmo da Microsoft (SSO parametrizado, 
      `gmail.modify` e `drive.readonly` (a lista exata está em `server/src/services/conexoes/acoes/google.ts`). Ative também as
      APIs de Agenda, Gmail, Drive e People em **Biblioteca**. Escopos restritos com o app **Em teste** valem só para os usuários de
      teste e o acesso vence a cada 7 dias; para outras pessoas o Google exige uma auditoria de segurança paga.
-4. **Clientes › Criar cliente** (credenciais OAuth): tipo **Aplicativo da Web**.
-   **URI de redirecionamento autorizado:** `http://localhost:8787/api/integrations/google/callback`
-   (se o Ergon usar outra porta, troque `8787`; se for aberto por outro endereço, use esse endereço e defina
-   `ERGON_OAUTH_REDIRECT_BASE` no `.env`).
+4. **Clientes › Criar cliente** (credenciais OAuth): tipo **App para computador** (aceita qualquer porta em
+   `localhost`, sem cadastrar endereço). Se o Ergon for aberto por outro endereço que não `localhost`, use o tipo
+   **Aplicativo da Web** com o URI `<endereço>/api/integrations/google/callback` e defina `ERGON_OAUTH_REDIRECT_BASE` no `.env`.
 5. Copie o **ID do cliente** para o `.env` do projeto:
 
    ```

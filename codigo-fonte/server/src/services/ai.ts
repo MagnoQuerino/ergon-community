@@ -38,9 +38,58 @@ const VENDORS: Record<string, string> = {
   reflection: 'Reflection', ornith: 'Ornith', stealth: 'Experimental',
 };
 
+// ---------------- Ergon AI: só a marca Ergon na tela ----------------
+/** a conta do Ergon AI no motor (o endpoint próprio "ergon-ai") */
+export const ERGON_AI = 'ergon-ai';
+export const ehErgonAi = (provider: string | null | undefined): boolean => !!provider && /^(custom:)?ergon-ai$/.test(provider);
+/** Os modelos do Ergon AI que o World publica (/v1/ai/models: id, nome e descrição). Os nomes daqui valem até a primeira
+ *  leitura do World; o World manda os dele ao conectar (registrarModelosErgonAi). */
+const MODELOS_ERGON_AI = new Map<string, { name: string; description: string | null }>([
+  ['ergon-ai', { name: 'Ergon AI', description: null }],
+  ['ergon-ai-sinapse', { name: 'Ergon AI Sinapse', description: null }],
+]);
+export const APELIDOS_ERGON_AI = ['ergon-ai', 'ergon-ai-sinapse'] as const;
+export function registrarModelosErgonAi(lista: Array<{ id: string; name?: unknown; description?: unknown }>): void {
+  for (const m of lista) {
+    if (!/^ergon-ai(-[a-z0-9]+)*$/.test(m.id)) continue; // só os ids da marca; o resto (ids antigos) nunca vira nome na tela
+    const name = typeof m.name === 'string' && m.name.trim() ? m.name.trim().slice(0, 60) : MODELOS_ERGON_AI.get(m.id)?.name ?? 'Ergon AI';
+    const description = typeof m.description === 'string' && m.description.trim() ? m.description.trim().slice(0, 160) : MODELOS_ERGON_AI.get(m.id)?.description ?? null;
+    MODELOS_ERGON_AI.set(m.id, { name, description });
+  }
+}
+/** id antigo do gateway (deepseek-*) → o apelido Ergon de hoje; o apelido fica; outro id: null (nada a migrar) */
+export function apelidoErgonAi(model: string | null | undefined): string | null {
+  if (!model) return null;
+  if (MODELOS_ERGON_AI.has(model)) return model;
+  if (model === 'deepseek-reasoner') return 'ergon-ai-sinapse';
+  if (/^deepseek-(flash|chat|v4-flash)$/.test(model)) return 'ergon-ai';
+  return null;
+}
+/** o nome na tela de um modelo do Ergon AI: o do World; qualquer outro id (deepseek-*, antigos) aparece como "Ergon AI" */
+export const rotuloErgonAi = (model: string | null | undefined): string => (model && MODELOS_ERGON_AI.get(model)?.name) || 'Ergon AI';
+export const descricaoErgonAi = (model: string | null | undefined): string | null => (model && MODELOS_ERGON_AI.get(model)?.description) || null;
+/** o endpoint guardado lista algum id que não é apelido da marca (conexão de antes): conectar de novo */
+export const precisaReconectarErgonAi = (models: string[]): boolean => models.some((m) => !MODELOS_ERGON_AI.has(m));
+
+/** O modelo próprio de cada agente no Ergon AI, gravado com um id antigo, passa para o apelido da marca. */
+export function migrarAgentesErgonAi(db: Db, workspaceId: string): number {
+  let n = 0;
+  for (const a of db.all<{ id: string; model: string }>("SELECT id, model FROM agents WHERE workspace_id = ? AND provider IN ('ergon-ai', 'custom:ergon-ai') AND model IS NOT NULL", workspaceId)) {
+    const novo = apelidoErgonAi(a.model);
+    if (novo && novo !== a.model) { db.run('UPDATE agents SET model = ? WHERE id = ?', novo, a.id); n++; }
+  }
+  return n;
+}
+
+/** O nome de um modelo sabendo a conta: no Ergon AI, sempre o nome da marca. */
+export const labelFor = (provider: string | null | undefined, model: string | null | undefined): string => (ehErgonAi(provider) ? rotuloErgonAi(model) : modelLabel(model));
+
 /** "anthropic/claude-sonnet-5.5" → "Claude Sonnet 5.5"; "openai/gpt-6-luna:free" → "GPT 6 Luna (grátis)". */
 export function modelLabel(id: string | null | undefined): string {
   if (!id) return 'modelo padrão';
+  // o Ergon AI tem nome de marca: "ergon-ai-sinapse" → "Ergon AI Sinapse"; "ergon-ai/deepseek-flash" (execução na nuvem) → "Ergon AI"
+  if (MODELOS_ERGON_AI.has(id)) return rotuloErgonAi(id);
+  if (/^(custom:)?ergon-ai\//.test(id)) return rotuloErgonAi(id.slice(id.indexOf('/') + 1));
   const [base, tag] = id.split(':');
   const name = (base.includes('/') ? base.split('/').slice(1).join('/') : base)
     .split(/[-_]/).filter(Boolean)
@@ -59,7 +108,7 @@ export function tierOf(inputPerM: number | null, free: boolean): 'grátis' | 'ec
   return inputPerM <= 0.5 ? 'econômico' : inputPerM <= 3 ? 'intermediário' : 'ponta';
 }
 
-interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: ReturnType<typeof tierOf> }
+interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: ReturnType<typeof tierOf>; /** curta, do World (Ergon AI) */ description?: string }
 interface ModelCatalog {
   default: { provider: string | null; model: string | null; label: string };
   providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }>;
@@ -237,7 +286,7 @@ export class AiService {
       principal: { provider: o?.provider ?? null, model: o?.model ?? null },
       contas: (o?.providers ?? []).filter((x) => x.authenticated && x.models.length).map((x) => ({
         id: x.slug, name: ACCOUNTS.find((a) => a.id === x.slug)?.name ?? x.name, billing: billingOf(x.slug),
-        models: x.models.slice(0, 400).map((m) => ({ id: m, label: modelLabel(m) })) })),
+        models: x.models.slice(0, 400).map((m) => ({ id: m, label: labelFor(x.slug, m) })) })),
     };
   }
   /** conta do modelo padrão já lida (sem rede) */
@@ -284,7 +333,7 @@ export class AiService {
         : !s?.connected ? 'não conectada' : s.freeTier ? 'conectada (plano gratuito)' : s.tier ? `conectada (plano ${s.tier})` : 'conectada';
       return { ...a, connected: !!s?.connected, detail };
     });
-    return { executor, available, ...(ocupado ? { ocupado: true } : {}), accounts, default: { ...d, label: modelLabel(d.model), billing: billingOf(d.provider) },
+    return { executor, available, ...(ocupado ? { ocupado: true } : {}), accounts, default: { ...d, label: labelFor(d.provider, d.model), billing: billingOf(d.provider) },
       byok: cat.providers, byokCustom: cat.custom, ergonAi: cat.ergonAi === true };
   }
 
@@ -310,10 +359,11 @@ export class AiService {
         const pr = p.pricing[m] ?? {};
         const input = price(pr.input); const output = price(pr.output);
         const free = pr.free === true || m.endsWith(':free');
+        if (ehErgonAi(p.slug)) { const description = descricaoErgonAi(m); return { id: m, label: rotuloErgonAi(m), vendor: '', input, output, tier: tierOf(input, free), ...(description ? { description } : {}) }; }
         return { id: m, label: modelLabel(m), vendor: vendorOf(m), input, output, tier: tierOf(input, free) };
       }),
     }));
-    return { default: { provider: o.provider, model: o.model, label: modelLabel(o.model) }, providers };
+    return { default: { provider: o.provider, model: o.model, label: labelFor(o.provider, o.model) }, providers };
   }
 
   /** Confere se um modelo existe numa conta conectada (antes de gravar no agente). */
@@ -329,6 +379,40 @@ export class AiService {
     const r = await this.need().setDefaultModel(provider, model, confirm);
     if (r.ok) { this.def = null; this.models = null; await this.defaultModel(true); }
     return r;
+  }
+
+  // ---------------- Ergon AI: dos ids antigos (deepseek-*) para os apelidos da marca ----------------
+  /** os modelos que o endpoint do Ergon AI guardado no motor lista; null: o Ergon AI não está ligado */
+  async modelosErgonAi(): Promise<string[] | null> {
+    const o = await this.modelOptions(true).catch(() => null);
+    const p = o?.providers.find((x) => ehErgonAi(x.slug));
+    return p ? [...p.models] : null;
+  }
+  async ergonAiEhPadrao(): Promise<boolean> { return ehErgonAi((await this.defaultModel(true)).provider); }
+  /**
+   * As escolhas gravadas no Ergon AI com um id antigo passam para o apelido da marca: o modelo padrão e os modelos por tarefa
+   * (de cada perfil; null = o do motor) e os ajudantes. O World ainda aceita os ids antigos; a tela é que não mostra mais.
+   */
+  async migrarErgonAi(perfis: Array<string | null>): Promise<{ padrao: boolean; tarefas: number }> {
+    const c = this.control;
+    if (!c) return { padrao: false, tarefas: 0 };
+    let padrao = false; let tarefas = 0;
+    const d = await this.defaultModel(true);
+    const novo = ehErgonAi(d.provider) ? apelidoErgonAi(d.model) : null;
+    if (d.provider && novo && novo !== d.model) padrao = (await c.setDefaultModel(d.provider, novo, true).catch(() => ({ ok: false }))).ok;
+    for (const pf of perfis) {
+      const aux = c.auxModels ? await c.auxModels(pf).catch(() => null) : null;
+      for (const t of aux?.tasks ?? []) {
+        if (t.task === TAREFA_AJUDANTES || !t.provider || !ehErgonAi(t.provider)) continue;
+        const n = apelidoErgonAi(t.model);
+        if (n && n !== t.model && c.setAuxModel && (await c.setAuxModel(t.task, t.provider, n, true, pf).catch(() => ({ ok: false }))).ok) tarefas++;
+      }
+      const del = c.delegacao ? await c.delegacao(pf).catch(() => null) : null;
+      const n = del?.provider && ehErgonAi(del.provider) ? apelidoErgonAi(del.model) : null;
+      if (del?.provider && n && n !== del.model && c.setDelegacao && await c.setDelegacao(del.provider, n, pf).catch(() => null)) tarefas++;
+    }
+    if (padrao || tarefas) { this.def = null; this.models = null; }
+    return { padrao, tarefas };
   }
 
   // ---------------- modelos por tarefa (tarefas de apoio do motor e ajudantes temporários) ----------------
@@ -363,14 +447,14 @@ export class AiService {
     const cat = await this.catalog().catch(() => null);
     const semRecurso = async (): Promise<TaskModels> => {
       const d = await this.defaultModel();
-      return { supported: false, main: { ...d, label: modelLabel(d.model), account: this.conta(cat, d.provider) }, tasks: [] };
+      return { supported: false, main: { ...d, label: labelFor(d.provider, d.model), account: this.conta(cat, d.provider) }, tasks: [] };
     };
     if (!c?.auxModels) return semRecurso();
     const aux: AuxModels | null = await this.noMotor(() => c.auxModels!(pf));
     if (!aux) return semRecurso();
-    const main = { ...aux.main, label: modelLabel(aux.main.model), account: this.conta(cat, aux.main.provider) };
+    const main = { ...aux.main, label: labelFor(aux.main.provider, aux.main.model), account: this.conta(cat, aux.main.provider) };
     const roda = (provider: string | null, model: string | null): TaskModelRow['runs'] =>
-      (provider && model ? { provider, model, label: modelLabel(model), account: this.conta(cat, provider) } : { provider: main.provider, model: main.model, label: main.label, account: main.account });
+      (provider && model ? { provider, model, label: labelFor(provider, model), account: this.conta(cat, provider) } : { provider: main.provider, model: main.model, label: main.label, account: main.account });
     const tasks: TaskModelRow[] = aux.tasks.filter((t) => t.task !== TAREFA_AJUDANTES).map((t) => ({
       task: t.task, kind: 'apoio' as const, provider: t.provider, model: t.model,
       // tarefa de complemento que segue outra e não tem modelo próprio: roda onde a outra roda

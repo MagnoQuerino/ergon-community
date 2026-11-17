@@ -9,15 +9,17 @@ import { S, idParams } from '../lib/schemas.ts';
 import { HttpError, notFound } from '../lib/util.ts';
 import { updateAgent } from '../services/capacity.ts';
 import { marcarDeTerceiros, NOME_COMPETENCIA, pacoteDoPedido } from '../services/competencias.ts';
-import { openArtifact } from '../services/artifacts.ts';
 import type { AuthContext } from '../services/auth.ts';
 import type { Bus } from '../services/bus.ts';
 import { getConversation, sendMessage } from '../services/chat.ts';
 import { PEDIDO_CONSELHO, ehAudio, type Recursos } from '../services/recursos.ts';
 import type { RunExecutor } from '../services/runs.ts';
+import type { Transcricoes } from '../services/transcricoes.ts';
 
 interface RecursosRoutesDeps {
   db: Db; bus: Bus; recursos: Recursos; executor: RunExecutor;
+  /** mensagem de áudio (rc.33): a transcrição gravada ligada ao arquivo */
+  transcricoes: Transcricoes;
   cfg: { filesDir: string; maxConversationMessages: number; maxInputChars: number; publicUrl?: string | null };
   auth: (req: FastifyRequest) => AuthContext;
   owner: (req: FastifyRequest) => AuthContext;
@@ -36,7 +38,7 @@ const paginaRetorno = (ok: boolean) => `<!doctype html><html lang="pt-BR"><meta 
 <script>try{window.opener&&window.opener.postMessage({ergonConector:${ok ? 'true' : 'false'}},location.origin)}catch(e){}</script></body></html>`;
 
 export function registerRecursosRoutes(app: FastifyInstance, d: RecursosRoutesDeps): void {
-  const { db, bus, recursos, executor, cfg, auth, owner } = d;
+  const { db, bus, recursos, transcricoes, executor, cfg, auth, owner } = d;
 
   app.get('/api/recursos', async (req) => recursos.estado(auth(req).workspaceId));
   app.put('/api/recursos', {
@@ -193,19 +195,23 @@ export function registerRecursosRoutes(app: FastifyInstance, d: RecursosRoutesDe
     schema: { body: { type: 'object', additionalProperties: false, required: ['pasta', 'id'], properties: { pasta: S.str(300, 1), id: { type: 'string', pattern: '^[0-9a-f]{7,64}$' } } } },
   }, async (req) => { const a = owner(req); const b = req.body as { pasta: string; id: string }; return recursos.voltar(a.workspaceId, a.userId, b.pasta, b.id); });
 
-  // ---- voz: o áudio anexado vira texto; a resposta vira áudio ("Ouvir")
+  // ---- voz: o áudio anexado vira texto (gravado ligado ao arquivo; "tentar de novo" na tela); a resposta vira áudio ("Ouvir")
   app.post('/api/recursos/voz/transcrever', { schema: { body: { type: 'object', additionalProperties: false, required: ['arquivo'], properties: { arquivo: S.id('art') } } } }, async (req) => {
     const a = auth(req);
-    const f = openArtifact(db, cfg.filesDir, a.workspaceId, (req.body as { arquivo: string }).arquivo);
+    const f = db.get<{ id: string; filename: string; mime: string }>('SELECT id, filename, mime FROM artifacts WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL', (req.body as { arquivo: string }).arquivo, a.workspaceId);
+    if (!f) throw notFound('arquivo');
     if (!ehAudio(f.mime, f.filename)) throw new HttpError(400, 'nao_e_audio', 'este arquivo não é um áudio');
-    const r = await recursos.transcrever(a.workspaceId, f.data, f.filename);
-    if (r.ok !== true) {
-      if (r.motivo === 'componente') throw new HttpError(409, 'voz_componente', 'transcrever áudios precisa de um componente adicional na equipe de IA (o transcritor local) ou de uma conta de voz ligada');
-      if (r.motivo === 'formato') throw new HttpError(400, 'formato', 'formato de áudio não aceito');
-      if (r.motivo === 'tamanho') throw new HttpError(400, 'tamanho', 'áudio grande demais para transcrever');
+    await transcricoes.iniciar(a.workspaceId, f.id, true);
+    const r = transcricoes.de(a.workspaceId, f.id);
+    if (r?.estado !== 'pronta') {
+      if (r?.motivo === 'componente') throw new HttpError(409, 'voz_componente', 'transcrever áudios precisa de um componente adicional na equipe de IA (o transcritor local) ou de uma conta de voz ligada');
+      if (r?.motivo === 'formato') throw new HttpError(400, 'formato', 'formato de áudio não aceito');
+      if (r?.motivo === 'tamanho') throw new HttpError(400, 'tamanho', 'áudio grande demais para transcrever');
+      if (r?.motivo === 'longo') throw new HttpError(400, 'audio_longo', 'áudio com mais de 10 minutos: grave em partes menores');
+      if (r?.motivo === 'sem_motor') throw new HttpError(503, 'recursos_indisponivel', 'a equipe de IA não está ligada agora: tente de novo quando ela estiver');
       throw new HttpError(502, 'voz_falhou', 'não consegui transcrever este áudio agora');
     }
-    return { texto: String(r.texto ?? ''), arquivo: f.filename };
+    return { texto: r.texto ?? '', arquivo: f.filename, estado: r.estado };
   });
   app.post('/api/recursos/voz/falar', { schema: { body: { type: 'object', additionalProperties: false, required: ['mensagem'], properties: { mensagem: S.id('msg') } } } }, async (req, reply) => {
     const a = auth(req);
@@ -217,10 +223,12 @@ export function registerRecursosRoutes(app: FastifyInstance, d: RecursosRoutesDe
     const r = await recursos.falar(a.workspaceId, texto);
     if (r.ok !== true) {
       if (r.motivo === 'componente') throw new HttpError(409, 'voz_componente', 'responder em áudio precisa de um componente adicional na equipe de IA (a voz) ou de uma conta de voz ligada');
-      throw new HttpError(502, 'voz_falhou', 'não consegui gerar o áudio agora (a voz padrão precisa de internet)');
+      throw new HttpError(502, 'voz_falhou', 'não consegui gerar o áudio agora');
     }
     const tipo = /^audio\/(mpeg|ogg|wav)$/.test(String(r.tipo)) ? String(r.tipo) : 'audio/mpeg';
     reply.header('Content-Type', tipo).header('Cache-Control', 'private, no-store');
+    // a voz local (Piper) falhou e a resposta saiu pela voz online (edge-tts): a tela avisa
+    if (r.reserva === true) reply.header('X-Ergon-Voz', 'reserva');
     return reply.send(Buffer.from(String(r.audio ?? ''), 'base64'));
   });
 }

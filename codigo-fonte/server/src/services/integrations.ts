@@ -350,6 +350,10 @@ export function etapaJaRecusada(db: Db, workspaceId: string, etapa: Etapa, conta
   const m = consentimentoDe(integrationRow(db, workspaceId, 'microsoft', conta)).etapas?.[etapa];
   return (m?.estado === 'bloqueado' && m.herdada !== true) || (m?.estado === 'pedido' && Date.now() - Date.parse(m.em) > STATE_TTL);
 }
+/** O administrador aprovou a etapa pelo link (a marca "aprovado"): o login encadeado pode levar a ela (sso.ts). */
+export function etapaAprovadaPelaEmpresa(db: Db, workspaceId: string, etapa: Etapa, conta = ''): boolean {
+  try { return consentimentoDe(integrationRow(db, workspaceId, 'microsoft', conta)).etapas?.[etapa]?.estado === 'aprovado'; } catch { return false; }
+}
 /** De quem é um `state` de link do administrador (a volta da Microsoft não traz a sessão de ninguém). */
 export function workspaceDoEstadoAdmin(db: Db, estado: string): string | null {
   if (!/^[A-Za-z0-9_-]{20,64}$/.test(estado)) return null;
@@ -663,7 +667,8 @@ export class Integrations {
       const r = db.get<{ o: string | null; oc: string | null }>('SELECT origem_workspace_id AS o, origem_conta AS oc FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ?', ws, kind, conta);
       return r?.o ? { ws: r.o, conta: r.oc ?? '' } : { ws, conta };
     };
-    this.sso = new SsoAuth(cfg, this.secrets, (ws, kind, antes, conta, slot) => { if (antes !== conta) this.promover(ws, kind, slot); }, (ws, etapa, slot) => etapaJaRecusada(db, ws, etapa, slot));  this.googleTesting = cfg.googleTesting; }
+    this.sso = new SsoAuth(cfg, this.secrets, (ws, kind, antes, conta, slot) => { if (antes !== conta) this.promover(ws, kind, slot); }, (ws, etapa, slot) => etapaJaRecusada(db, ws, etapa, slot),
+      (ws, etapa, slot) => etapaAprovadaPelaEmpresa(db, ws, etapa, slot));  this.googleTesting = cfg.googleTesting; }
 
   /**
    * Login com a conta que não voltou em 10 minutos (o `state` já venceu): sai do "conectando…" e diz por quê. Com a credencial de
