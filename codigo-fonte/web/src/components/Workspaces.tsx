@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { useSurface } from '../lib/surface.ts';
@@ -6,6 +6,7 @@ import { useBalao } from '../lib/balao.ts';
 import { useT } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
 import { WsFoto } from './WsCard.tsx';
+import { filtrarWorkspaces, mostraBuscaWs, moverAtivo } from '../lib/busca-ws.ts';
 
 interface Workspace { id: string; name: string; role: string; current: boolean; agents: number; openTasks: number; working: number; waiting: number }
 
@@ -40,6 +41,14 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [novo, setNovo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // busca pelo nome, com muitos workspaces: setas e Enter escolhem, Esc limpa e depois fecha
+  const [busca, setBusca] = useState('');
+  const [ativo, setAtivo] = useState(0);
+  const comBusca = !!list && mostraBuscaWs(list.length);
+  const vistos = list ? (comBusca ? filtrarWorkspaces(list, busca) : list) : [];
+  const ativoReal = comBusca && vistos.length ? Math.min(ativo, vistos.length - 1) : -1;
+  const idAtivo = ativoReal >= 0 ? vistos[ativoReal].id : null;
+  useEffect(() => { if (idAtivo) document.getElementById(`ws-op-${idAtivo}`)?.scrollIntoView?.({ block: 'nearest' }); }, [idAtivo]);
 
   const act = async (fn: () => Promise<unknown>, depois: () => void) => {
     setBusy(true); setErr(null);
@@ -47,17 +56,29 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
   };
   const entrar = (w: Workspace) => (w.current ? onClose() : act(() => api.post('/api/session/workspace', { workspaceId: w.id }), recarregar));
   const criar = () => novo?.trim() && act(() => api.post('/api/workspaces', { name: novo }), recarregar);
+  const teclaBusca = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setAtivo(moverAtivo(ativoReal, vistos.length, e.key === 'ArrowDown' ? 1 : -1)); }
+    else if (e.key === 'Enter') { e.preventDefault(); const w = vistos[ativoReal]; if (w && !busy) void entrar(w); }
+    else if (e.key === 'Escape') { e.preventDefault(); if (busca) { setBusca(''); setAtivo(0); } else onClose(); }
+  };
 
   return (
     <aside ref={ref} className="status-pop ws-pop" role="dialog" aria-labelledby="ws-title">
       <div className="drawer__head"><h3 className="drawer__title" id="ws-title">{t('geral.ws.titulo')}</h3><button className="icon-btn" onClick={onClose} aria-label={t('geral.comum.fechar')} title={t('geral.comum.fechar')}><Icon name="x" /></button></div>
       <p className="muted small">{t('geral.ws.explica')}</p>
       {err && <p className="error" role="alert">{err}</p>}
-      {!list ? <p className="muted small">{t('geral.comum.carregando')}</p> : (
-        <ul className="ws-list">
-          {list.map((w) => (
+      {comBusca && (
+        <label className="help__search ws-busca" data-esc-own><Icon name="search" size={15} />
+          <input type="search" value={busca} autoFocus data-autofocus placeholder={t('geral.ws.buscar')} aria-label={t('geral.ws.buscarAria')}
+            aria-controls="ws-lista" aria-activedescendant={idAtivo ? `ws-op-${idAtivo}` : undefined}
+            onChange={(e) => { setBusca(e.target.value); setAtivo(0); }} onKeyDown={teclaBusca} />
+        </label>
+      )}
+      {!list ? <p className="muted small">{t('geral.comum.carregando')}</p> : comBusca && !vistos.length ? <p className="muted small" role="status">{t('geral.ws.nenhum')}</p> : (
+        <ul className="ws-list" id="ws-lista">
+          {vistos.map((w, i) => (
             <li key={w.id}>
-              <button className={`ws-item ${w.current ? 'is-current' : ''}`} disabled={busy} onClick={() => void entrar(w)}
+              <button id={`ws-op-${w.id}`} className={`ws-item ${w.current ? 'is-current' : ''} ${i === ativoReal ? 'is-active' : ''}`} disabled={busy} onClick={() => void entrar(w)}
                 aria-current={w.current ? 'true' : undefined} title={w.current ? t('geral.ws.atual') : t('geral.ws.entrarEm', { nome: w.name })}>
                 <WsFoto id={w.id} w={84} h={52} className="ws-item__foto" />
                 <span className="ws-item__txt">

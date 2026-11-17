@@ -92,6 +92,9 @@ const geral = {
   'ws.local': 'Neste computador',
   'ws.gerenciar': 'Gerenciar',
   'ws.nasce': 'Ele nasce com a equipe e a cidade iniciais e passa pelas boas-vindas, como uma conta nova.',
+  'ws.buscar': 'Buscar workspace',
+  'ws.buscarAria': 'Buscar workspace pelo nome',
+  'ws.nenhum': 'Nenhum workspace com esse nome.',
 
   // ——— o avatar (menu da conta) ———
   'conta.aria': 'Conta: {nome}',

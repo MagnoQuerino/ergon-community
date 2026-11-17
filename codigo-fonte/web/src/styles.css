@@ -1140,6 +1140,11 @@ body:has(.cdock) .tip { right: 100px; }
 .ws-item:focus-visible { outline: var(--foco-largura) solid var(--navy); outline-offset: 2px; }
 .ws-item:disabled { cursor: progress; opacity: .7; }
 .ws-item.is-current { border-color: var(--dourado-cheio); }
+.ws-item.is-active { border-color: var(--navy); background: var(--panel); box-shadow: inset 3px 0 0 var(--navy); }
+/* busca de workspace (com mais de 5): no balão da barra e em Configurações › Workspace */
+.ws-busca { margin: 8px 0 0; }
+.ws-busca input { font-size: 14px; }
+.ws-busca--cartoes { max-width: 320px; margin-top: 10px; }
 .ws-item { display: flex; gap: 12px; align-items: center; }
 .ws-item__foto { flex: none; border-radius: 8px; border: 1px solid var(--line); }
 .ws-item__txt { flex: 1; min-width: 0; display: block; }
