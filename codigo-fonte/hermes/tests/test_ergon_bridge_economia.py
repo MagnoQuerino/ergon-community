@@ -1,4 +1,4 @@
-"""rc.35: menos custo por chamada.
+"""rc.36: menos custo por chamada.
 - As instruções marcadas do Ergon saem do prompt de sistema e vão para o fim do pedido (cache do DeepSeek/Ergon AI pega o
   começo fixo: base, ferramentas e histórico), só nos fornecedores com esse cache; o resto do pedido não muda.
 - O comando do terminal passa pelo RTK (`rtk rewrite`); sem equivalente, sem rtk, em erro ou desligado: roda como veio.

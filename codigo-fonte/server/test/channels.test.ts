@@ -71,7 +71,7 @@ describe('WhatsApp por QR: leitura com filtros; nada sai sozinho', () => {
     fake.bus.emit('messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '5511888880000@s.whatsapp.net', id: 'WA3', fromMe: true }, message: { conversation: 'minha resposta' } }] }); await wait();
     const evs = (await req(h, 'GET', '/api/source-events', s)).json as Array<{ external_id: string; status: string; task_id: string | null }>;
     assert.deepEqual(evs.map((e) => e.external_id), ['WA1'], 'grupo (desligado) e mensagens minhas não entram');
-    assert.equal(evs[0].task_id, null, 'ler não cria card: a opção de cards vem desligada (rc.35)');
+    assert.equal(evs[0].task_id, null, 'ler não cria card: a opção de cards vem desligada (rc.36)');
     assert.equal((await req(h, 'GET', '/api/integrations/whatsapp', s)).json.filters.cards, false);
     // ligada de propósito: o pedido identificado vira card para a triagem da equipe
     await req(h, 'PUT', '/api/integrations/whatsapp/filters', s, { cards: true });

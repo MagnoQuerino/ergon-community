@@ -31,7 +31,7 @@ interface WaFilters {
   labels: string[];
   /** conversas nunca lidas (nome ou número, como aparece no WhatsApp) */
   exceptions: string[];
-  /** pedidos identificados viram card para a triagem da equipe (desligado por padrão desde a rc.35: ler não cria card) */
+  /** pedidos identificados viram card para a triagem da equipe (desligado por padrão desde a rc.36: ler não cria card) */
   cards: boolean;
 }
 

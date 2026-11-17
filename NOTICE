@@ -51,7 +51,7 @@ Destaques:
   do Windows (pacote do Alpine) e no pacote .deb do Linux (/usr/lib/ergon/podman-compose, com a licença em
   /usr/share/doc/ergon); o código-fonte está em https://github.com/containers/podman-compose (versão 1.4.1).
 
-Economia de tokens no motor (rc.35)
+Economia de tokens no motor (rc.36)
 -----------------------------------
 
 - RTK 1.2.0, edição OSS (https://github.com/rtk-ai/rtk), licença Apache-2.0: comprime a saída de comandos do terminal
