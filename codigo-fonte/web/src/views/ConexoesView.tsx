@@ -1,7 +1,7 @@
 import { ConectoresProntos } from '../components/ConectoresProntos.tsx';
 import { OutroAplicativo } from '../components/OutroAplicativo.tsx';
 import { CanalDaEquipeWhatsApp } from '../components/CanalDaEquipeWhatsApp.tsx';
-import { contasLigadas, mostraBotao, telaDoBot, type EstadoBotOficial } from '../lib/botOficial.ts';
+import { contasLigadas, mostraBotao, peloCodigo, telaDoBot, type EstadoBotOficial } from '../lib/botOficial.ts';
 import { Fragment, lazy, Suspense, useEffect, useState, type ChangeEvent, type ComponentType, type ReactNode } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -1182,7 +1182,9 @@ export function BotOficial({ canal }: { canal: NomeCanal }) {
       <p className="muted">{canal === 'telegram' ? t('conexoes.bot.intro.telegram') : t('conexoes.bot.intro.discord')}</p>
       {!mostraBotao(e)
         ? <p className="hint" role="status">{t('conexoes.bot.indisponivel')}</p>
-        : <div className="row row--wrap">
+        : peloCodigo(e)
+          ? <DiscordPeloCodigo e={e} reload={st.reload} />
+          : <div className="row row--wrap">
             <button className="btn btn--primary" disabled={busy} onClick={() => void abrir()}>{canal === 'telegram' ? t('conexoes.bot.abrirTelegram') : t('conexoes.bot.adicionarDiscord')}</button>
             {aberto && !ligadas.length && <span className="small muted" role="status">{canal === 'telegram' ? t('conexoes.bot.esperando.telegram') : t('conexoes.bot.esperando.discord')}</span>}
           </div>}
@@ -1196,6 +1198,69 @@ export function BotOficial({ canal }: { canal: NomeCanal }) {
       </ul>}
       {err && <p className="err" role="alert">{err}</p>}
     </section>
+  );
+}
+
+/**
+ * O bot do Ergon no Discord pelo código (o caminho do bot no ar, quando o serviço não faz o "Adicionar ao Discord" com
+ * state): adicionar o app à conta, mandar "oi" ao bot, digitar aqui o código que ele responde, conferir e ligar com a
+ * senha. Uma conta do Discord não tem organização para conferir: ligar pede a escolha consciente.
+ */
+function DiscordPeloCodigo({ e, reload }: { e: EstadoBotOficial; reload: () => void }) {
+  const t = useT();
+  const [codigo, setCodigo] = useState('');
+  const [previa, setPrevia] = useState<PreviaTeams | null>(null);
+  const [senha, setSenha] = useState('');
+  const [ciente, setCiente] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [pronto, setPronto] = useState<string | null>(null);
+  const pedir = async () => {
+    setErr(null); setBusy(true); setPronto(null);
+    try { setPrevia(await api.post<PreviaTeams>('/api/teams-app/claim', { code: codigo, canal: 'discord' })); setCiente(false); }
+    catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
+  };
+  const ligar = async () => {
+    if (!previa) return;
+    setErr(null); setBusy(true);
+    try {
+      await api.post('/api/teams-app/confirm', { claimId: previa.claimId, password: senha, ciente });
+      setPronto(t('conexoes.discordBot.pronto', { nome: previa.teamsName }));
+      setPrevia(null); setSenha(''); setCodigo(''); setCiente(false); reload();
+    } catch (x) { setErr(x instanceof ApiError && x.code === 'invalid_login' ? t('conexoes.teams.senhaIncorreta') : errMsg(x)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="conn-discord-codigo">
+      {pronto && <p className="ok" role="status">{pronto}</p>}
+      {previa ? (
+        <form className="confirm" onSubmit={(ev) => { ev.preventDefault(); void ligar(); }}>
+          <p><b>{t('conexoes.discordBot.previa', { nome: previa.teamsName })}</b></p>
+          <p className="hint">{t('conexoes.discordBot.nomeEscolhido')} {t('conexoes.discordBot.soOSeuCodigo')}</p>
+          <p className="warn" role="alert">{t('conexoes.discordBot.previaAviso')}</p>
+          <label className="check"><input type="checkbox" checked={ciente} disabled={busy} onChange={(ev) => setCiente(ev.target.checked)} /> {t('conexoes.discordBot.escolhaConsciente')}</label>
+          <div className="row row--wrap">
+            <input type="password" autoComplete="current-password" required placeholder={t('conexoes.teams.suaSenha')} aria-label={t('conexoes.teams.suaSenha')} value={senha} onChange={(ev) => setSenha(ev.target.value)} />
+            <button className="btn btn--sm btn--primary" disabled={busy || !senha || !ciente}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.teams.ligar')}</button>
+            <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => { const c = previa; setPrevia(null); setSenha(''); setCiente(false); void api.post('/api/teams-app/cancel', { claimId: c.claimId }).catch(() => undefined); }}>{t('conexoes.acao.cancelar')}</button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={(ev) => { ev.preventDefault(); void pedir(); }}>
+          {e.installUrl && <p><a className="btn btn--primary" href={e.installUrl} target="_blank" rel="noreferrer noopener">{t('conexoes.discordBot.adicionar')}</a></p>}
+          <ol className="small conn-passos">
+            <li>{t('conexoes.discordBot.passo1')}</li>
+            <li>{tn('conexoes.discordBot.passo2', { bot: <b>{e.botName || 'Ergon'}</b> })}</li>
+            <li>{t('conexoes.discordBot.passo3')}</li>
+          </ol>
+          <div className="row row--wrap">
+            <label className="field">{t('conexoes.teams.codigo')}<input value={codigo} onChange={(ev) => setCodigo(ev.target.value)} placeholder={t('conexoes.teams.codigoExemplo')} autoComplete="off" spellCheck={false} maxLength={20} /></label>
+            <button className="btn btn--sm btn--primary" disabled={busy || codigo.replace(/[\s-]/g, '').length < 8}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.teams.confirmar')}</button>
+          </div>
+          <p className="hint">{t('conexoes.discordBot.soDireta')}</p>
+        </form>
+      )}
+      {err && <p className="err" role="alert">{err}</p>}
+    </div>
   );
 }
 

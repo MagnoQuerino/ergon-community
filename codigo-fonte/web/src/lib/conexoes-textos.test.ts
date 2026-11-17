@@ -11,6 +11,7 @@ test('Teams: a pergunta diz "Unlink" e os dois botões da conta também (não o 
   assert.equal(conexoesEn['teams.desligar'], 'Unlink');
   assert.equal(conexoesPt['teams.desligar'], 'Desligar');
   assert.match(String(conexoesEn['teams.desligarPergunta']), /^Unlink /);
+  assert.match(String(conexoesEn['discordBot.desligarPergunta']), /^Unlink /);
   const src = fs.readFileSync(VIEW, 'utf8');
   const inicio = src.indexOf("t('conexoes.teams.desligarPergunta')");
   assert.ok(inicio > 0);

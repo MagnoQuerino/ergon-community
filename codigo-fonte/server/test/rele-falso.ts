@@ -59,8 +59,12 @@ export class ReleFalso {
   conexao: Conexao | null = null;
   conexoes = 0;
   vinculos = new Map<string, Vinculo>();
-  codigos = new Map<string, { teamsName: string; conta?: ContaTeams }>();
-  claims = new Map<string, { code: string; personRef: string; installationId: string; teamsName: string }>();
+  codigos = new Map<string, { teamsName: string; conta?: ContaTeams; platform?: 'discord' }>();
+  claims = new Map<string, { code: string; personRef: string; installationId: string; teamsName: string; platform?: 'discord' }>();
+  /** testes: o que o serviço oferece em /v1/info além de `platforms` (null: o formato do relé unificado, montado aqui) */
+  info: Record<string, unknown> | null = null;
+  /** testes: o relé faz o "Adicionar ao Discord" com state (o relé no ar, sem o Client Secret, não faz: só o código) */
+  discordLinkStart = true;
   /** link.confirm já feitos (claimId → vínculo): o mesmo claimId devolve o mesmo vínculo (contrato 12.10) */
   confirmados = new Map<string, string>();
   /** testes: os próximos N link.claim recebem not_ready (a instalação acabou de se registrar, contrato 12.2) */
@@ -111,7 +115,13 @@ export class ReleFalso {
     const json = (st: number, v: unknown) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
     // saúde (o serviço oficial só é oferecido depois que ela responde)
     if (req.method === 'GET' && req.url === '/healthz') { this.consultasDeSaude++; return this.saudavel ? json(200, { ok: true, platforms: { teams: true, ...this.plataformas } }) : json(503, { ok: false }); }
-    if (req.method === 'GET' && req.url === '/v1/info') return json(200, { protocol: [1], teamsAppId: '11111111-2222-3333-4444-555555555555', platforms: { teams: true, ...this.plataformas } });
+    if (req.method === 'GET' && req.url === '/v1/info') {
+      return json(200, this.info ?? {
+        protocol: [1], teams: true, teamsAppId: '11111111-2222-3333-4444-555555555555', platforms: { teams: true, ...this.plataformas },
+        discord: this.plataformas.discord ? { applicationId: '1562060832806936576', installUrl: 'https://discord.com/oauth2/authorize?client_id=1562060832806936576', botName: 'Ergon', linkStart: this.discordLinkStart } : null,
+        telegram: this.plataformas.telegram ? { botUsername: 'ErgonTesteBot' } : null,
+      });
+    }
     if (req.method === 'POST' && req.url === '/v1/installations') {
       const b = JSON.parse(Buffer.concat(chunks).toString() || '{}');
       const msg = `ergon-teams-relay|register|v1|${b.signPublicKey}|${b.boxPublicKey}|${b.ts}`;
@@ -179,7 +189,7 @@ export class ReleFalso {
       c.installationId = f.installationId; this.conexao = c;
       for (const p of f.persons ?? []) this.abertas.set(p.personRef, !!p.open);
       const meus = [...this.vinculos.values()].filter((v) => v.installationId === c.installationId);
-      c.enviar({ type: 'ready', sessionId: rid('ses'), queued: this.fila.length, bindings: meus.map((v) => ({ bindingId: v.bindingId, ...(v.platform ? { platform: v.platform } : {}), personRef: v.personRef, status: v.status, notices: v.notices, teamsName: v.teamsName, linkedAt: v.linkedAt, ...(v.claimId ? { claimId: v.claimId } : {}) })) });
+      c.enviar({ type: 'ready', sessionId: rid('ses'), queued: this.fila.length, bindings: meus.map((v) => ({ bindingId: v.bindingId, ...(v.platform ? { platform: v.platform, canal: v.platform } : { canal: 'teams' }), personRef: v.personRef, status: v.status, notices: v.notices, teamsName: v.teamsName, linkedAt: v.linkedAt, ...(v.claimId ? { claimId: v.claimId } : {}) })) });
       this.entregar(true);
       return;
     }
@@ -204,27 +214,27 @@ export class ReleFalso {
         const v = this.codigos.get(f.code);
         if (!v) return erro('code_invalid');
         const id = rid('clm');
-        this.claims.set(id, { code: f.code, personRef: f.personRef, installationId: c.installationId, teamsName: v.teamsName });
-        return ack({ claimId: id, teamsName: v.teamsName, expiresAt: new Date(Date.now() + 120_000).toISOString(),
+        this.claims.set(id, { code: f.code, personRef: f.personRef, installationId: c.installationId, teamsName: v.teamsName, platform: v.platform });
+        return ack({ claimId: id, teamsName: v.teamsName, canal: v.platform ?? 'teams', expiresAt: new Date(Date.now() + 120_000).toISOString(),
           ...(v.conta ? { tenantId: v.conta.tenantId.toLowerCase(), accountHash: hashComoRele(v.conta) } : {}) });
       }
       case 'link.confirm': {
         const ja = this.confirmados.get(f.claimId);
         const jv = ja ? this.vinculos.get(ja) : undefined;
-        if (jv) return ack({ bindingId: jv.bindingId, teamsName: jv.teamsName, linkedAt: jv.linkedAt });
+        if (jv) return ack({ bindingId: jv.bindingId, teamsName: jv.teamsName, canal: jv.platform ?? 'teams', linkedAt: jv.linkedAt });
         const cl = this.claims.get(f.claimId);
         if (!cl) return erro('claim_expired');
         this.claims.delete(f.claimId); this.codigos.delete(cl.code);
-        const v: Vinculo = { bindingId: rid('bnd'), installationId: cl.installationId, personRef: cl.personRef, status: 'active', notices: f.notices !== false, teamsName: cl.teamsName, label: f.label, linkedAt: new Date().toISOString(), claimId: f.claimId };
+        const v: Vinculo = { ...(cl.platform ? { platform: cl.platform } : {}), bindingId: rid('bnd'), installationId: cl.installationId, personRef: cl.personRef, status: 'active', notices: f.notices !== false, teamsName: cl.teamsName, label: f.label, linkedAt: new Date().toISOString(), claimId: f.claimId };
         this.vinculos.set(v.bindingId, v);
         this.confirmados.set(f.claimId, v.bindingId);
         this.automaticas.push({ bindingId: v.bindingId, texto: `Pronto: esta conta está ligada ao Ergon de **${f.label}**.` });
         if (this.perderAckDoConfirm) { this.perderAckDoConfirm = false; setTimeout(() => c.fechar(1001), 20).unref(); return; }
-        return ack({ bindingId: v.bindingId, teamsName: v.teamsName, linkedAt: v.linkedAt });
+        return ack({ bindingId: v.bindingId, teamsName: v.teamsName, canal: v.platform ?? 'teams', linkedAt: v.linkedAt });
       }
       case 'link.cancel': this.claims.delete(f.claimId); return ack({});
       case 'link.start': {
-        if (!this.plataformas[f.platform as 'telegram' | 'discord']) return erro('unavailable');
+        if (!this.plataformas[f.platform as 'telegram' | 'discord'] || (f.platform === 'discord' && !this.discordLinkStart)) return erro('unavailable');
         const code = crypto.randomBytes(18).toString('base64url');
         this.links.set(code, { personRef: f.personRef, installationId: c.installationId!, platform: f.platform, label: f.label });
         const url = f.platform === 'telegram' ? `https://t.me/ErgonTesteBot?start=${code}` : `https://discord.com/oauth2/authorize?client_id=1&state=${code}&integration_type=1`;
@@ -292,15 +302,18 @@ export class ReleFalso {
 
   // ------------------------------------------------------------------------------------------------ o que a pessoa faz no Teams
   /** O bot mostra um código para esta conta do Teams (formato ABCD-EFGH). */
-  codigoPara(teamsName: string, conta?: ContaTeams): string {
+  /** O bot do Ergon no Discord mostra um código para esta conta do Discord (o caminho do bot no ar). */
+  codigoDiscord(nome: string): string { return this.codigoPara(nome, undefined, 'discord'); }
+  codigoPara(teamsName: string, conta?: ContaTeams, platform?: 'discord'): string {
     let c = ''; for (let i = 0; i < 8; i++) c += ALFABETO[crypto.randomInt(ALFABETO.length)];
-    this.codigos.set(c, { teamsName, conta });
+    this.codigos.set(c, { teamsName, conta, platform });
     return `${c.slice(0, 4)}-${c.slice(4)}`;
   }
   diz(bindingId: string, text: string, timestamp = new Date().toISOString()): string {
     const v = this.vinculos.get(bindingId);
     if (!v) throw new Error('sem vínculo');
-    return this.novaEntrega('activity', v, { text, teamsMessageId: rid('msg'), timestamp, locale: 'pt-BR', fromName: v.teamsName }).id;
+    const extra = v.platform ? { canal: v.platform, [`${v.platform}MessageId`]: String(crypto.randomInt(1e9)) } : { teamsMessageId: rid('msg') };
+    return this.novaEntrega('activity', v, { text, ...extra, timestamp, locale: 'pt-BR', fromName: v.teamsName }).id;
   }
   clica(bindingId: string, data: Record<string, unknown>, cardActivityId = 'act-x', via: 'execute' | 'submit' = 'execute'): string {
     const v = this.vinculos.get(bindingId);

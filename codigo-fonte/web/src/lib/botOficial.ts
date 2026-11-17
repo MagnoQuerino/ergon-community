@@ -5,7 +5,17 @@
  * - ligado: uma ou mais contas ligadas (cada uma com Desligar; o botão continua para ligar outra).
  */
 export interface ContaBotOficial { id: string; name: string | null; linkedAt: string; status: 'active' | 'paused' | 'revoked'; revokedBy?: string }
-export interface EstadoBotOficial { platform: 'telegram' | 'discord'; available: boolean; connection: 'connected' | 'connecting' | 'offline'; accounts: ContaBotOficial[] }
+export interface EstadoBotOficial {
+  platform: 'telegram' | 'discord'; available: boolean; connection: 'connected' | 'connecting' | 'offline'; accounts: ContaBotOficial[];
+  /** "Conversar pelo Discord/Telegram" (a chave da pessoa nesta plataforma) */
+  enabled?: boolean;
+  /** o serviço liga a conta por um link de uso único ("Abrir no Telegram", "Adicionar ao Discord" com state); false = pelo código */
+  linkStart?: boolean;
+  /** Discord: o link de adicionar o bot do Ergon (montado pelo id do app) e o nome dele */
+  installUrl?: string; botName?: string;
+}
+/** A conta liga pelo código (o bot manda o código na conversa e a pessoa digita aqui): o Discord sem o "Adicionar" com state. */
+export const peloCodigo = (e: EstadoBotOficial): boolean => e.platform === 'discord' && e.available && e.linkStart === false;
 export type TelaBotOficial = 'indisponivel' | 'livre' | 'ligado';
 
 export const contasLigadas = (e: EstadoBotOficial): ContaBotOficial[] => e.accounts.filter((a) => a.status !== 'revoked');

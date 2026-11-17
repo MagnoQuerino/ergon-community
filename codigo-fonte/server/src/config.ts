@@ -111,8 +111,9 @@ export interface Config {
   /** total de arquivos por workspace: só na nuvem, conforme o plano (0 = sem limite) */
   maxStorageBytes: number;
   /**
-   * Conversar com a equipe pelo Teams (app público): endereço https do serviço do Teams (ERGON_TEAMS_RELAY_URL). Tem
-   * prioridade sobre o ajuste da instalação; sem nenhum dos dois, vale o serviço oficial (teamsRelayOficial).
+   * Conversar com a equipe pelo Teams e pelos bots do Ergon no Discord e no Telegram: endereço https do serviço
+   * (ERGON_TEAMS_RELAY_URL). Tem prioridade sobre o ajuste da instalação; sem nenhum dos dois, vale o serviço oficial
+   * (teamsRelayOficial, api.ergonworld.com/canais). Vazia ou "off" desliga o recurso.
    */
   teamsRelayUrl: string | null;
   /** o serviço oficial do Teams (DEFAULT_TEAMS_RELAY_URL) quando ERGON_TEAMS_RELAY_URL não existe; vazia = nenhum */

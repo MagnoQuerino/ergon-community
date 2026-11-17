@@ -24,8 +24,8 @@ function rapido(x: Harness, saudeMs = 60_000) {
 }
 
 describe('serviço oficial do Teams: o endereço embutido e quem vence', () => {
-  test('o padrão é https://teams.ergonworld.com, ao lado do World; ERGON_TEAMS_RELAY_URL troca ou (vazia) desliga', () => {
-    assert.equal(DEFAULT_TEAMS_RELAY_URL, 'https://teams.ergonworld.com');
+  test('o padrão é https://api.ergonworld.com/canais, o relé dos canais no ar; ERGON_TEAMS_RELAY_URL troca ou (vazia) desliga', () => {
+    assert.equal(DEFAULT_TEAMS_RELAY_URL, 'https://api.ergonworld.com/canais');
     assert.equal(DEFAULT_WORLD_URL, 'https://api.ergonworld.com');
     const padrao = loadConfig({} as NodeJS.ProcessEnv);
     assert.equal(padrao.teamsRelayOficial, DEFAULT_TEAMS_RELAY_URL);
@@ -101,7 +101,7 @@ describe('serviço oficial do Teams: saúde antes de oferecer', () => {
   test('endereço escolhido vence o oficial e vale sem conferir a saúde; o ajuste vazio (ou igual ao oficial) volta ao padrão', async () => {
     rele = await ReleFalso.iniciar();
     rele.saudavel = false; // o relé escolhido nem precisa de /healthz
-    h = await harness({ teamsRelayOficial: 'https://teams.ergonworld.com' });
+    h = await harness({ teamsRelayOficial: 'https://api.ergonworld.com/canais' });
     rapido(h);
     s = await setupOwner(h);
     // sem iniciar: o oficial não é conferido (nem pela tela), então fica indisponível
@@ -114,14 +114,14 @@ describe('serviço oficial do Teams: saúde antes de oferecer', () => {
     assert.equal(g.json.available, true); assert.equal(g.json.relay.url, rele.base);
     assert.equal(rele.consultasDeSaude, 0, 'endereço escolhido: sem conferir a saúde');
     assert.equal(h.teamsApp.oficial(), false);
-    await req(h, 'PUT', '/api/teams-app/relay-url', s, { url: 'https://teams.ergonworld.com/' });
+    await req(h, 'PUT', '/api/teams-app/relay-url', s, { url: 'https://api.ergonworld.com/canais/' });
     assert.equal(h.db.get<{ value: string }>("SELECT value FROM instance_settings WHERE key = 'teams_relay_url'")?.value, '', 'o próprio oficial não fica gravado como escolha');
     assert.equal(h.teamsApp.oficial(), true);
-    assert.equal(h.teamsApp.base(), 'https://teams.ergonworld.com');
+    assert.equal(h.teamsApp.base(), 'https://api.ergonworld.com/canais');
   });
 
   test('ERGON_TEAMS_RELAY_URL vence o ajuste e o oficial; vazia (como nos testes), sem endereço nenhum', async () => {
-    h = await harness({ teamsRelayUrl: 'https://rele.exemplo.com', teamsRelayOficial: 'https://teams.ergonworld.com' });
+    h = await harness({ teamsRelayUrl: 'https://rele.exemplo.com', teamsRelayOficial: 'https://api.ergonworld.com/canais' });
     assert.equal(h.teamsApp.base(), 'https://rele.exemplo.com'); assert.equal(h.teamsApp.oficial(), false); assert.equal(h.teamsApp.disponivel(), true);
     await h.close();
     h = await harness();

@@ -65,7 +65,7 @@ test('--build só com o App ID do bot: o pacote oficial (Ergon, ergonworld.com, 
   assert.equal(m.id, BOT, 'sem --app-id, o id do app no Teams é o próprio App ID do bot (o relé informa esse id ao Ergon)');
   assert.equal(m.bots[0].botId, BOT);
   assert.deepEqual(m.developer, { name: 'Ergon', websiteUrl: 'https://ergonworld.com', privacyUrl: 'https://ergonworld.com/privacidade', termsOfUseUrl: 'https://ergonworld.com/termos' });
-  assert.deepEqual(m.validDomains, ['ergonworld.com', 'teams.ergonworld.com']);
+  assert.deepEqual(m.validDomains, ['ergonworld.com', 'api.ergonworld.com']);
   assert.equal(m.name.short, 'Ergon');
   assert.deepEqual(m.bots[0].scopes, ['personal']); assert.equal(m.bots[0].supportsFiles, false); assert.equal(m.bots[0].isNotificationOnly, false);
   assert.deepEqual(m.localizationInfo, { defaultLanguageTag: 'pt-br', additionalLanguages: [{ languageTag: 'en', file: 'en.json' }] });

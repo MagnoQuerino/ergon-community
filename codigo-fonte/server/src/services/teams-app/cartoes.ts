@@ -106,10 +106,12 @@ function botoes(p: string, t: string) {
 
 /**
  * O cartão para um vínculo. Decisões ainda abertas levam os botões (com o `t` deste vínculo); as decididas, a linha final.
- * O texto encolhe até caber em 28 KiB.
+ * O texto encolhe até caber em 28 KiB. `limite` (Discord, onde o cartão vira um embed): os tamanhos tentados e o
+ * máximo de texto somado do cartão.
  */
-export function montarCartao(d: DesenhoCartao, estados: Map<string, EstadoDecisao>, bindingId: string, chaves: Pick<ChavesInstalacao, 'hmac'>, tz: string): Record<string, unknown> {
-  for (const max of [6000, 2500, 1200, 500, 200]) {
+export function montarCartao(d: DesenhoCartao, estados: Map<string, EstadoDecisao>, bindingId: string, chaves: Pick<ChavesInstalacao, 'hmac'>, tz: string,
+  limite?: { maxes?: number[]; maxTexto?: number }): Record<string, unknown> {
+  for (const max of limite?.maxes ?? [6000, 2500, 1200, 500, 200]) {
     const body: unknown[] = [bloco(corta(d.titulo, 200), { weight: 'Bolder', size: 'Medium' })];
     for (const it of d.itens) {
       body.push(bloco(corta(textoParaTeams(it.titulo, 400), 200), { weight: 'Bolder', spacing: 'Medium' }));
@@ -126,7 +128,8 @@ export function montarCartao(d: DesenhoCartao, estados: Map<string, EstadoDecisa
       else body.push(bloco(linhaFinal(e, tz), { weight: 'Bolder', color: e.status === 'applied' ? 'Good' : e.status === 'failed' ? 'Attention' : 'Default' }));
     }
     const card = { type: 'AdaptiveCard', $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', version: '1.4', body, actions: [] };
-    if (Buffer.byteLength(JSON.stringify(card)) <= MAX_CARTAO) return card;
+    const texto = body.reduce<number>((n, b) => n + (typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text.length + 2 : 0), 0);
+    if (Buffer.byteLength(JSON.stringify(card)) <= MAX_CARTAO && (!limite?.maxTexto || texto <= limite.maxTexto)) return card;
   }
   return { type: 'AdaptiveCard', $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', version: '1.4', body: [bloco(corta(d.titulo, 200), { weight: 'Bolder' }), bloco('Abra o Ergon para ver os detalhes.')], actions: [] };
 }

@@ -33,7 +33,7 @@ export const OFICIAL = Object.freeze({
   website: 'https://ergonworld.com',
   privacy: 'https://ergonworld.com/privacidade',
   terms: 'https://ergonworld.com/termos',
-  validDomains: Object.freeze(['ergonworld.com', 'teams.ergonworld.com']),
+  validDomains: Object.freeze(['ergonworld.com', 'api.ergonworld.com']),
 });
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

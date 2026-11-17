@@ -4,9 +4,14 @@
  * o coordenador: a mensagem dela entra como mensagem dela (a mesma regra do app: o que ela pede vai direto, o resto pede
  * cartão), a resposta do coordenador volta ao Teams, as confirmações viram cartões com Aprovar/Recusar (o clique decide
  * pela MESMA função da tela) e o que precisa dela em "Com você" vira aviso no Teams (ligado por padrão).
+ * O mesmo serviço leva os bots do Ergon no Discord e no Telegram (zero configuração para a pessoa): cada vínculo sabe a
+ * plataforma, e cada pessoa tem UMA conversa com o coordenador por plataforma, com a nota do canal dela; respostas,
+ * "digitando", cartões e avisos vão para a plataforma da conversa. A conta do Discord liga pelo código (como o Teams) ou
+ * pelo "Adicionar ao Discord" (link de uso único, quando o serviço oferece); a do Telegram, pelo link de uso único.
  * Nada daqui depende do módulo opcional da nuvem: funciona igual na edição Community. O endereço do serviço vem do
  * ambiente (ERGON_TEAMS_RELAY_URL), do "Ajuste da instalação" ou, sem nenhum dos dois, é o serviço oficial
- * (DEFAULT_TEAMS_RELAY_URL): esse só é oferecido depois que a saúde dele responde. Sem endereço, nada liga.
+ * (RELE_PADRAO, https://api.ergonworld.com/canais): esse só é oferecido depois que a saúde dele responde. "off" no
+ * ambiente ou no ajuste desliga. Sem endereço, nada liga.
  */
 import type { Config } from '../../config.ts';
 import type { Db } from '../../db/db.ts';
@@ -35,16 +40,31 @@ import {
 /** A instrução do canal (contrato, 7.2 item 1): quem escreve e por onde. */
 export const NOTA_TEAMS = 'Canal: conversa pelo Teams. Quem escreve é a pessoa dona do workspace, pela conta do Teams ligada por código. A resposta vai para o Teams: texto simples, sem tabelas largas.';
 const TITULO_CONVERSA = 'Teams';
+/** O serviço de conversa da nuvem do Ergon (Teams, Discord, Telegram): ninguém precisa configurar nada. */
+export const RELE_PADRAO = 'https://api.ergonworld.com/canais';
 /** Os bots oficiais (Telegram, Discord) pelo mesmo serviço: nome, título da conversa e instrução do canal. */
 export type PlataformaBot = 'telegram' | 'discord';
 export const PLATAFORMAS_BOT: readonly PlataformaBot[] = ['telegram', 'discord'];
 const NOME_PLAT: Record<Plataforma, string> = { teams: 'Teams', telegram: 'Telegram', discord: 'Discord' };
-const notaDe = (plat: Plataforma) => (plat === 'teams' ? NOTA_TEAMS : `Canal: conversa pelo ${NOME_PLAT[plat]} (bot oficial do Ergon). Quem escreve é o membro do workspace dono da conta do ${NOME_PLAT[plat]} ligada pelo link de uso único. A resposta vai para o ${NOME_PLAT[plat]}: texto simples, sem tabelas largas.`);
+/** A instrução do canal no Discord: mensagens de até 2000 caracteres, markdown simples. */
+export const NOTA_DISCORD = 'Canal: conversa pelo Discord (bot oficial do Ergon). Quem escreve é o membro do workspace dono da conta do Discord ligada (por código ou pelo "Adicionar ao Discord"). A resposta vai para o Discord: texto curto em markdown simples, sem tabelas (cada mensagem do Discord tem até 2000 caracteres).';
+export const NOTA_TELEGRAM = 'Canal: conversa pelo Telegram (bot oficial do Ergon). Quem escreve é o membro do workspace dono da conta do Telegram ligada pelo link de uso único. A resposta vai para o Telegram: texto simples, sem tabelas largas.';
+const notaDe = (plat: Plataforma) => (plat === 'teams' ? NOTA_TEAMS : plat === 'discord' ? NOTA_DISCORD : NOTA_TELEGRAM);
+/** A resposta do agente no Discord: até umas 3 mensagens (o resto continua no Ergon). */
+const MAX_RESPOSTA: Record<Plataforma, number | undefined> = { teams: undefined, telegram: undefined, discord: 6000 };
+/** O que o serviço oferece (GET /v1/info), guardado na instalação: sem rede, a tela já sabe o que mostrar. */
+interface InfoDoRele {
+  base: string; teams: boolean; teamsAppId: string | null;
+  /** o bot do Ergon no Discord: o link de adicionar é montado aqui pelo id; `linkStart` = o serviço faz o "Adicionar ao Discord" com state */
+  discord: { applicationId: string; installUrl: string; botName: string; linkStart: boolean } | null;
+  telegram: { botUsername: string | null } | null;
+  at: number;
+}
 /** O que só se aprova dentro do app: decisão nascida de um pedido de risco vindo de fora. */
 const SO_NO_APP = 'Por segurança, isto só se decide dentro do app do Ergon: abra o Ergon para aprovar ou recusar.';
 
 /** Para o agente, quando o pedido chegou com atraso (a fila do serviço guardou enquanto este Ergon estava fechado). */
-const notaDeAtraso = (quando: string) => `Pedido enviado pelo Teams em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
+const notaDeAtraso = (quando: string, plat: Plataforma = 'teams') => `Pedido enviado pelo ${NOME_PLAT[plat]} em ${quando}, entregue agora com atraso (este Ergon estava fechado). Antes de agir no que depende de data ou hora, confirme com a pessoa.`;
 /** Mais velho que isto (ou vindo da fila do serviço), o pedido é tratado como atrasado. */
 const ATRASO_MS = 10 * 60_000;
 
@@ -56,20 +76,27 @@ const MSA_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
 const ERROS_POR_PESSOA = 3;
 const JANELA_ERROS_MS = 15 * 60_000;
 class ConteudoInvalido extends Error { constructor() { super('conteúdo inválido'); } }
-/** Erros do serviço do Teams na tela (contrato, 7.2). */
-const ERROS: Record<string, [number, string]> = {
-  code_invalid: [400, 'Código não encontrado. Confira e tente de novo.'],
-  code_expired: [400, 'Este código venceu. Mande qualquer mensagem ao app no Teams para receber outro.'],
-  too_many_attempts: [429, 'Muitas tentativas. Espere 15 minutos.'],
-  already_linked: [409, 'Esta conta do Teams já está ligada a outro Ergon. No Teams, mande "desligar" e peça um código novo.'],
-  limit_reached: [409, 'Você já ligou 3 contas do Teams. Desligue uma para ligar outra.'],
-  claim_expired: [400, 'A confirmação demorou demais. Digite o código de novo.'],
-  // a instalação acabou de se registrar no serviço (contrato 12.2): a tela espera e tenta de novo sozinha
-  not_ready: [503, 'Preparando a conexão com o Teams…'],
-  offline: [503, 'Sem conexão com o serviço do Teams agora. Tente de novo em instantes.'],
-  timeout: [503, 'O serviço do Teams não respondeu a tempo. Tente de novo em instantes.'],
+/** Erros do serviço de conversa na tela (contrato, 7.2), na voz da plataforma. */
+const ERROS = (plat: Plataforma): Record<string, [number, string]> => {
+  const n = NOME_PLAT[plat];
+  return {
+    code_invalid: [400, 'Código não encontrado. Confira e tente de novo.'],
+    code_expired: [400, `Este código venceu. Mande qualquer mensagem ${plat === 'teams' ? 'ao app no Teams' : `ao bot Ergon no ${n}`} para receber outro.`],
+    too_many_attempts: [429, 'Muitas tentativas. Espere 15 minutos.'],
+    already_linked: [409, `Esta conta do ${n} já está ligada a outro Ergon. No ${n}, mande "desligar" e peça um código novo.`],
+    limit_reached: [409, `Você já ligou 3 contas do ${n}. Desligue uma para ligar outra.`],
+    claim_expired: [400, 'A confirmação demorou demais. Digite o código de novo.'],
+    // a instalação acabou de se registrar no serviço (contrato 12.2): a tela espera e tenta de novo sozinha
+    not_ready: [503, `Preparando a conexão com o ${n}…`],
+    offline: [503, `Sem conexão com o serviço do ${n} agora. Tente de novo em instantes.`],
+    timeout: [503, `O serviço do ${n} não respondeu a tempo. Tente de novo em instantes.`],
+  };
 };
-const erroDaTela = (code: string) => { const [s, m] = ERROS[code] ?? [502, 'O serviço do Teams não aceitou agora. Tente de novo em instantes.']; return new HttpError(s, code in ERROS ? code : 'teams_relay', m); };
+const erroDaTela = (code: string, plat: Plataforma = 'teams') => {
+  const E = ERROS(plat);
+  const [s, m] = E[code] ?? [502, `O serviço do ${NOME_PLAT[plat]} não aceitou agora. Tente de novo em instantes.`];
+  return new HttpError(s, code in E ? code : 'teams_relay', m);
+};
 
 type Problema = 'assinatura' | 'revogada' | 'versao' | 'substituida' | 'religar' | 'registro' | null;
 
@@ -107,8 +134,10 @@ interface AjustesTeams {
   cliente?: { baseMs?: number; tetoMs?: number; reenvioMs?: number; semPingMs?: number; zerarAposMs?: number };
 }
 
-interface BindingDoRele { bindingId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName?: string; linkedAt?: string; claimId?: string }
-interface ClaimLocal { userId: string; ws: string; teamsName: string; expiresAt: number; conta: ContaDoTeams }
+interface BindingDoRele { bindingId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName?: string; linkedAt?: string; claimId?: string; canal?: string; platform?: string }
+interface ClaimLocal { userId: string; ws: string; teamsName: string; expiresAt: number; conta: ContaDoTeams; plat: Plataforma }
+/** A plataforma que o serviço informou (`canal` ou `platform`, os dois nomes que ele manda); sem nenhum, Teams. */
+const platDe = (v: unknown): Plataforma => (v === 'discord' || v === 'telegram' ? v : 'teams');
 
 export class TeamsApp {
   readonly d: TeamsAppDeps;
@@ -116,6 +145,8 @@ export class TeamsApp {
   cliente: ClienteRele | null = null;
   problema: Problema = null;
   teamsAppUrl: string | null = null;
+  /** o que o serviço oferece (GET /v1/info), guardado: a tela não espera a rede para saber o que mostrar */
+  info: InfoDoRele | null = null;
   private registradoDeNovo = false;
   private fila: Promise<void> = Promise.resolve();
   /** o relógio deste computador (os testes adiantam ou atrasam) */
@@ -157,6 +188,10 @@ export class TeamsApp {
   constructor(d: TeamsAppDeps) {
     this.d = d;
     migrarTeamsApp(d.db);
+    try {
+      const v = JSON.parse(instanceSetting(d.db, 'teams_relay_info') ?? 'null') as InfoDoRele | null;
+      if (v && typeof v.base === 'string') { this.info = v; this.teamsAppUrl = v.teamsAppId ? `https://teams.microsoft.com/l/app/${v.teamsAppId}` : null; }
+    } catch { this.info = null; }
   }
 
   /** O id do canal na camada comum: `teams:oficial`, `telegram:oficial`, `discord:oficial` (o bot próprio é `telegram`). */
@@ -206,11 +241,15 @@ export class TeamsApp {
 
   // ------------------------------------------------------------------------------------------------ configuração
   /** O endereço do serviço do Teams: o do ambiente (prioridade), o ajuste da instalação ou o oficial. null = nenhum. */
-  base(): string | null { return this.escolhido() ?? enderecoDoRele(this.d.cfg.teamsRelayOficial); }
+  base(): string | null { return this.desligadoNoAjuste() ? null : this.escolhido() ?? enderecoDoRele(this.d.cfg.teamsRelayOficial); }
+  /** "off" no ajuste da instalação (sem endereço no ambiente): o recurso fica desligado. ("off" no ambiente: config.ts.) */
+  private desligadoNoAjuste(): boolean { return !this.d.cfg.teamsRelayUrl && /^off$/i.test(instanceSetting(this.d.db, 'teams_relay_url')?.trim() ?? ''); }
   /** O endereço escolhido de propósito (ambiente ou ajuste): vale sem conferir a saúde. */
   private escolhido(): string | null { return enderecoDoRele(this.d.cfg.teamsRelayUrl) ?? enderecoDoRele(instanceSetting(this.d.db, 'teams_relay_url')); }
+  /** O que o serviço oferece, se a resposta guardada é deste endereço. */
+  private infoAtual(): InfoDoRele | null { const b = this.base(); return b && this.info?.base === b ? this.info : null; }
   /** O endereço em uso é o serviço oficial (nada escolhido no ambiente nem no ajuste). */
-  oficial(): boolean { return !this.escolhido() && !!enderecoDoRele(this.d.cfg.teamsRelayOficial); }
+  oficial(): boolean { return !this.escolhido() && !this.desligadoNoAjuste() && !!enderecoDoRele(this.d.cfg.teamsRelayOficial); }
   /**
    * Oferecido na tela: há endereço e, se é o oficial, a saúde dele já respondeu alguma vez (ou esta instalação já está
    * registrada nele: relé fora do ar depois disso é só "sem conexão", e as contas ligadas continuam na tela).
@@ -220,8 +259,9 @@ export class TeamsApp {
   /** Ajuste da instalação (pessoa administradora), só quando o ambiente não define. O próprio oficial (ou vazio) volta ao padrão. */
   definirEndereco(url: string | null): void {
     if (this.enderecoDoAmbiente()) throw new HttpError(409, 'env', 'O endereço já vem definido na instalação e não muda por aqui.');
-    if (url && !enderecoDoRele(url)) throw new HttpError(400, 'url', 'Use um endereço https.');
-    const novo = url ? enderecoDoRele(url)! : '';
+    const off = !!url && /^off$/i.test(url.trim());
+    if (url && !off && !enderecoDoRele(url)) throw new HttpError(400, 'url', 'Use um endereço https (ou "off" para desligar).');
+    const novo = off ? 'off' : url ? enderecoDoRele(url)! : '';
     setInstanceSetting(this.d.db, 'teams_relay_url', novo === enderecoDoRele(this.d.cfg.teamsRelayOficial) ? '' : novo);
     this.saudeOficial = null;
     void this.reiniciar();
@@ -241,7 +281,8 @@ export class TeamsApp {
           const r = await (this.d.fetch ?? fetch)(`${base}/healthz`, { signal: AbortSignal.timeout(10_000) });
           const j = r.ok ? await r.json().catch(() => null) as { ok?: unknown; platforms?: Record<string, unknown> } | null : null;
           ok = j?.ok === true;
-          if (ok) this.lerPlataformas(j?.platforms);
+          // relé de antes, sem `platforms` na saúde: o /v1/info diz
+          if (ok && j?.platforms) this.lerPlataformas(j.platforms);
         } catch { ok = false; }
         const antes = this.saudeOficial?.ok === true;
         this.saudeOficial = { ok, em: this.agora() };
@@ -368,13 +409,36 @@ export class TeamsApp {
     setInstanceSetting(this.d.db, 'teams_relay_installation_id', j.installationId);
     setInstanceSetting(this.d.db, 'teams_relay_installation_base', base);
   }
+  /**
+   * O que o serviço oferece (Teams, Discord, Telegram), guardado na instalação. O link de adicionar o bot do Discord é
+   * montado aqui, com o id do app que o serviço informou (só números). Serviço de antes, sem `platforms`: vale o que os
+   * campos `discord` e `telegram` dizem; sem `teams`, era só do Teams.
+   */
   private async buscarInfo(base: string): Promise<void> {
     try {
       const r = await (this.d.fetch ?? fetch)(`${base}/v1/info`, { signal: AbortSignal.timeout(10_000) });
-      const j = await r.json() as { teamsAppId?: string | null; platforms?: Record<string, unknown> };
-      this.lerPlataformas(j.platforms);
-      this.teamsAppUrl = j.teamsAppId && /^[0-9a-f-]{36}$/i.test(j.teamsAppId) ? `https://teams.microsoft.com/l/app/${j.teamsAppId}` : null;
-    } catch { /* sem o atalho "Abrir no Teams" */ }
+      if (!r.ok) return;
+      const j = await r.json() as {
+        teams?: unknown; teamsAppId?: unknown; platforms?: Record<string, unknown>;
+        discord?: { applicationId?: unknown; botName?: unknown; linkStart?: unknown } | null; telegram?: { botUsername?: unknown } | null;
+      };
+      const teamsAppId = typeof j.teamsAppId === 'string' && /^[0-9a-f-]{36}$/i.test(j.teamsAppId) ? j.teamsAppId : null;
+      const app = j.discord && typeof j.discord === 'object' && typeof j.discord.applicationId === 'string' && /^\d{15,25}$/.test(j.discord.applicationId) ? j.discord.applicationId : null;
+      const nome = typeof j.discord?.botName === 'string' ? j.discord.botName.replace(/[\r\n<>]/g, '').trim().slice(0, 40) : '';
+      const tg = j.telegram && typeof j.telegram === 'object' ? j.telegram : null;
+      const info: InfoDoRele = {
+        base, teams: typeof j.teams === 'boolean' ? j.teams : true, teamsAppId,
+        discord: app ? { applicationId: app, installUrl: `https://discord.com/oauth2/authorize?client_id=${app}`, botName: nome || 'Ergon', linkStart: j.discord?.linkStart === true } : null,
+        telegram: tg ? { botUsername: typeof tg.botUsername === 'string' && /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(tg.botUsername) ? tg.botUsername : null } : null,
+        at: this.agora(),
+      };
+      const mudou = JSON.stringify({ ...this.info, at: 0 }) !== JSON.stringify({ ...info, at: 0 });
+      this.info = info;
+      this.teamsAppUrl = teamsAppId ? `https://teams.microsoft.com/l/app/${teamsAppId}` : null;
+      setInstanceSetting(this.d.db, 'teams_relay_info', JSON.stringify(info));
+      this.lerPlataformas(j.platforms ?? { discord: !!info.discord, telegram: !!info.telegram });
+      if (mudou) this.avisarTela(null);
+    } catch { /* fica o que estava guardado */ }
   }
 
   /** A conexão parou por um motivo que não é só reconectar (contrato, 2.2). */
@@ -434,7 +498,7 @@ export class TeamsApp {
     const papel = this.externos?.papel(p.workspace_id, p.user_id);
     const nota = this.externos && papel ? `${notaDe(plat)}\n${this.externos.nota(papel, TeamsApp.canalDe(plat))}` : notaDe(plat);
     if (!r || !Number(r.delayed) || !r.sent_at) return nota;
-    return `${nota}\n${notaDeAtraso(dataHora(r.sent_at, workspaceTz(this.d.db, p.workspace_id))).replace('pelo Teams', `pelo ${NOME_PLAT[plat]}`)}`;
+    return `${nota}\n${notaDeAtraso(dataHora(r.sent_at, workspaceTz(this.d.db, p.workspace_id)), plat)}`;
   }
 
   /** A conversa da pessoa com o coordenador (uma por pessoa); nova se a de antes sumiu, foi arquivada ou encheu. */
@@ -712,12 +776,12 @@ export class TeamsApp {
       const meu = typeof r.claimId === 'string' ? this.confirmando.get(r.claimId) : undefined;
       if (meu && r.personRef === this.personRef(meu.userId)) {
         this.confirmando.delete(r.claimId!);
-        void this.gravarVinculo(meu, id, typeof r.teamsName === 'string' && r.teamsName ? r.teamsName.slice(0, 120) : meu.teamsName, r.status === 'paused');
+        void this.gravarVinculo(meu, id, typeof r.teamsName === 'string' && r.teamsName ? r.teamsName.slice(0, 120) : meu.teamsName, r.status === 'paused', platDe(r.canal ?? r.platform ?? meu.plat));
         continue;
       }
       // conta de bot ligada por um link pedido daqui, cujo link.added se perdeu: adotada
       const ini = this.iniciados.get(r.personRef);
-      const plat = (r as BindingDoRele & { platform?: string }).platform;
+      const plat = r.platform ?? r.canal;
       if (ini && ini.ate >= this.agora() && (plat === 'telegram' || plat === 'discord')) {
         void this.gravarVinculo(ini, id, typeof r.teamsName === 'string' ? r.teamsName.slice(0, 120) : '', r.status === 'paused', plat);
         continue;
@@ -727,6 +791,9 @@ export class TeamsApp {
     }
     this.avisarTela(null);
     for (const ws of new Set(locais.map((b) => b.workspace_id))) this.agendar(`ws:${ws}`, () => this.atualizarWorkspace(ws));
+    // o que o serviço oferece pode ter mudado (Discord ou Telegram ligados depois, por exemplo): confere de tempos em tempos
+    const base = this.base();
+    if (base && (!this.infoAtual() || this.agora() - (this.info?.at ?? 0) > 6 * 3600_000)) void this.buscarInfo(base);
     // o que ficou para trás num reinício: avisos de "Com você" agrupados que não saíram, e cliques ainda por decidir
     this.rearmarAvisos();
     this.retomarDecisoes();
@@ -782,11 +849,12 @@ export class TeamsApp {
       if (m.content === CLOSED_VALUE) break;
       ultimo = Number(m.rid);
       if (!b || !(m.role === 'agent' || (m.role === 'system' && m.run_id))) continue;
-      const texto = textoParaTeams(m.content);
+      const texto = textoParaTeams(m.content, MAX_RESPOSTA[plat]);
       // quem fala vai à frente (o nome do agente, ou "Sistema"), como na tela do Ergon: o que o agente escreve não se
       // confunde com as frases do próprio app no Teams (o serviço não põe nome nas dele)
       const quem = m.role === 'agent' && m.agente && m.agente !== CLOSED_VALUE ? m.agente.replace(/[*_`[\]\n]/g, '').trim().slice(0, 60) : 'Sistema';
-      if (texto) this.enfileirar(b, 'send', { text: `**${quem}:** ${texto}`, summary: resumoParaTeams(`${quem}: ${texto}`) }, 'reply');
+      // o Telegram mostra o texto como veio (sem markdown): o nome vai sem os asteriscos
+      if (texto) this.enfileirar(b, 'send', { text: plat === 'telegram' ? `${quem}: ${texto}` : `**${quem}:** ${texto}`, summary: resumoParaTeams(`${quem}: ${texto}`) }, 'reply');
     }
     if (ultimo !== Number(p.cursor_rowid)) this.d.db.run('UPDATE teams_people SET cursor_rowid = ?, updated_at = ? WHERE user_id = ? AND platform = ?', ultimo, now(), userId, plat);
     if (!this.trabalhando(p.conversation_id) && this.digitando.has(userId)) this.digitar(userId, this.digitando.get(userId)!.bindingId, false);
@@ -1065,11 +1133,11 @@ export class TeamsApp {
     if (!c || c.estado !== 'connected') throw erroDaTela('offline');
     return c;
   }
-  private async pedir(f: Quadro & { id: string }): Promise<Ack> {
+  private async pedir(f: Quadro & { id: string }, plat: Plataforma = 'teams'): Promise<Ack> {
     const c = this.exigirConexao();
     let ack: Ack;
-    try { ack = await c.pedir(f, 15_000); } catch (e) { throw erroDaTela(e instanceof ErroDoRele ? e.code : 'offline'); }
-    if (!ack.ok) throw erroDaTela(ack.error?.code ?? 'teams_relay');
+    try { ack = await c.pedir(f, 15_000); } catch (e) { throw erroDaTela(e instanceof ErroDoRele ? e.code : 'offline', plat); }
+    if (!ack.ok) throw erroDaTela(ack.error?.code ?? 'teams_relay', plat);
     return ack;
   }
   /** O estado daqui já foi gravado: com prazo, a tela não fica esperando (sem resposta, a próxima conexão confere). */
@@ -1111,10 +1179,11 @@ export class TeamsApp {
     };
   }
 
-  async setEnabled(userId: string, ws: string, enabled: boolean): Promise<Record<string, unknown>> {
-    this.garantirPessoa(userId, ws);
-    this.d.db.run("UPDATE teams_people SET enabled = ?, updated_at = ? WHERE user_id = ? AND platform = 'teams'", enabled ? 1 : 0, now(), userId);
-    const bs = this.vinculosDe(userId, ['active', 'paused'], 'teams');
+  /** "Conversar pelo Teams" / "pelo Discord" / "pelo Telegram": a chave da pessoa em cada plataforma (as outras não mudam). */
+  async setEnabled(userId: string, ws: string, enabled: boolean, plat: Plataforma = 'teams'): Promise<Record<string, unknown>> {
+    this.garantirPessoa(userId, ws, plat);
+    this.d.db.run('UPDATE teams_people SET enabled = ?, updated_at = ? WHERE user_id = ? AND platform = ?', enabled ? 1 : 0, now(), userId, plat);
+    const bs = this.vinculosDe(userId, ['active', 'paused'], plat);
     for (const b of bs) this.d.db.run('UPDATE teams_bindings SET status = ?, updated_at = ? WHERE binding_id = ?', enabled ? 'active' : 'paused', now(), b.binding_id);
     // sem conexão (ou sem resposta no prazo): a próxima conexão confere e manda (pronto)
     await Promise.all(bs.map((b) => this.pedirAtualizar(b.binding_id, { paused: !enabled }).catch(() => undefined)));
@@ -1129,30 +1198,33 @@ export class TeamsApp {
    * Microsoft 365 ligada a este workspace (contrato 12.1): o nome mostrado não prova nada, porque é a própria conta do
    * Teams que escolhe; só a conta conferida como a dela dispensa a escolha consciente na tela.
    */
-  async claim(userId: string, ws: string, entrada: string): Promise<{ claimId: string; teamsName: string; expiresAt: string; conta: ContaDoTeams; organizacao: string | null }> {
+  async claim(userId: string, ws: string, entrada: string, tela: Plataforma = 'teams'): Promise<{ claimId: string; teamsName: string; expiresAt: string; conta: ContaDoTeams; organizacao: string | null; canal: Plataforma }> {
     this.exigirConexao();
     const code = normalizarCodigo(entrada);
-    if (!code) throw erroDaTela('code_invalid');
+    if (!code) throw erroDaTela('code_invalid', tela);
     const ref = this.personRef(userId);
-    if (!ref) throw erroDaTela('offline');
+    if (!ref) throw erroDaTela('offline', tela);
     const erros = (this.errosDeCodigo.get(userId) ?? []).filter((t) => this.agora() - t < JANELA_ERROS_MS);
     this.errosDeCodigo.set(userId, erros);
-    if (erros.length >= ERROS_POR_PESSOA) throw erroDaTela('too_many_attempts');
+    if (erros.length >= ERROS_POR_PESSOA) throw erroDaTela('too_many_attempts', tela);
     let ack: Ack;
-    try { ack = await this.pedir({ type: 'link.claim', id: novoId('req'), code, personRef: ref }); }
+    try { ack = await this.pedir({ type: 'link.claim', id: novoId('req'), code, personRef: ref }, tela); }
     catch (e) {
       if (e instanceof HttpError && (e.code === 'code_invalid' || e.code === 'code_expired')) erros.push(this.agora());
       throw e;
     }
     const claimId = String(ack.claimId ?? '');
-    if (!ID_CLAIM.test(claimId)) throw erroDaTela('teams_relay');
+    if (!ID_CLAIM.test(claimId)) throw erroDaTela('teams_relay', tela);
     const teamsName = String(ack.teamsName ?? '').slice(0, 120);
-    const { conta, organizacao } = this.conferirConta(ws, ack);
+    // quem decide a plataforma é a conta que pediu o código (o serviço diz); a tela só muda os textos
+    const plat = platDe(ack.canal ?? ack.platform);
+    // conta do Discord (ou do Telegram): sem organização nem conta Microsoft para conferir, pede a escolha consciente
+    const { conta, organizacao } = plat === 'teams' ? this.conferirConta(ws, ack) : { conta: 'sem_conferir' as const, organizacao: null };
     // o prazo é medido só pelo relógio daqui (o serviço confere o dele): com o relógio do computador adiantado, a prévia
     // não nasce vencida
     const exp = this.agora() + 120_000;
-    this.claims.set(claimId, { userId, ws, teamsName, expiresAt: exp, conta });
-    return { claimId, teamsName, expiresAt: new Date(exp).toISOString(), conta, organizacao };
+    this.claims.set(claimId, { userId, ws, teamsName, expiresAt: exp, conta, plat });
+    return { claimId, teamsName, expiresAt: new Date(exp).toISOString(), conta, organizacao, canal: plat };
   }
 
   /** De quem é a conta do Teams do claim, pelo locatário e pela conta que o serviço informou (contrato 12.1). */
@@ -1175,23 +1247,25 @@ export class TeamsApp {
     return /^[a-z0-9.-]{3,120}$/.test(dominio) ? dominio : null;
   }
 
+  /** A plataforma da prévia (claim) em andamento; sem prévia, Teams (a rota pede a pessoa dona). */
+  platDoClaim(claimId: string): Plataforma { return this.claims.get(claimId)?.plat ?? 'teams'; }
   /** Conta do Teams não conferida como a da pessoa: ligar pede a escolha consciente ("fui eu que pedi este código"). */
   exigirCiente(userId: string, claimId: string, ciente: boolean | undefined): void {
     const c = this.claims.get(claimId);
     if (c && c.userId === userId && c.conta !== 'sua' && ciente !== true) {
-      throw new HttpError(400, 'ciente', 'Marque que foi você que pediu este código agora, no seu próprio Teams.');
+      throw new HttpError(400, 'ciente', `Marque que foi você que pediu este código agora, no seu próprio ${NOME_PLAT[c.plat]}.`);
     }
   }
 
   async confirm(userId: string, ws: string, claimId: string, nomeDaPessoa: string, ciente?: boolean): Promise<Record<string, unknown>> {
     const c = this.claims.get(claimId);
-    if (!c || c.userId !== userId || c.expiresAt < this.agora()) { this.claims.delete(claimId); throw erroDaTela('claim_expired'); }
+    if (!c || c.userId !== userId || c.expiresAt < this.agora()) { this.claims.delete(claimId); throw erroDaTela('claim_expired', c?.plat); }
     this.exigirCiente(userId, claimId, ciente);
     const label = (nomeDaPessoa.trim().split(/\s+/)[0] || 'você').slice(0, 40);
     // enquanto o link.confirm espera resposta (e por 10 min se a conexão cair sem ela), a reconciliação adota o vínculo
     this.confirmando.set(claimId, { ...c, ate: this.agora() + 10 * 60_000 });
     let ack: Ack;
-    try { ack = await this.pedir({ type: 'link.confirm', id: novoId('req'), claimId, label, notices: true }); }
+    try { ack = await this.pedir({ type: 'link.confirm', id: novoId('req'), claimId, label, notices: true }, c.plat); }
     catch (e) {
       if (!(e instanceof HttpError && (e.code === 'offline' || e.code === 'timeout'))) this.confirmando.delete(claimId);
       throw e;
@@ -1199,10 +1273,13 @@ export class TeamsApp {
     this.claims.delete(claimId);
     this.confirmando.delete(claimId);
     const bindingId = String(ack.bindingId ?? '');
-    if (!ID_VINCULO.test(bindingId)) throw erroDaTela('teams_relay');
+    if (!ID_VINCULO.test(bindingId)) throw erroDaTela('teams_relay', c.plat);
     const teamsName = String(ack.teamsName ?? c.teamsName).slice(0, 120);
-    await this.gravarVinculo(c, bindingId, teamsName);
-    return { binding: (this.estado(userId).bindings as Array<{ id: string }>).find((b) => b.id === bindingId) };
+    const plat = platDe(ack.canal ?? ack.platform ?? c.plat);
+    await this.gravarVinculo(c, bindingId, teamsName, false, plat);
+    const lista = plat === 'teams' ? this.estado(userId).bindings : this.estadoBot(userId, plat).accounts;
+    const binding = (lista as Array<{ id: string }>).find((b) => b.id === bindingId);
+    return { binding: binding ? { ...binding, canal: plat } : undefined };
   }
 
   /** Grava o vínculo confirmado (pela resposta do link.confirm, ou adotado na reconciliação). */
@@ -1289,18 +1366,26 @@ export class TeamsApp {
       id: b.binding_id, name: b.teams_name && b.teams_name !== CLOSED_VALUE ? b.teams_name : null, linkedAt: b.created_at, notices: Number(b.notices) === 1, status: b.status,
       ...(b.status === 'revoked' ? { revokedBy: b.revoked_by } : {}),
     }));
-    return { platform: plat, available: disponivel, connection: this.estadoConexao(), accounts, ...(this.problema ? { problem: this.problema } : {}) };
+    // Discord: o "Adicionar ao Discord" com state só quando o serviço oferece (linkStart); senão, liga pelo código, com o
+    // link de adicionar o bot (montado pelo id do app que o serviço informou)
+    const i = this.infoAtual();
+    const extra = plat === 'discord'
+      ? { linkStart: !!i?.discord?.linkStart, ...(i?.discord ? { installUrl: i.discord.installUrl, botName: i.discord.botName } : {}) }
+      : { linkStart: true, ...(i?.telegram?.botUsername ? { botUsername: i.telegram.botUsername } : {}) };
+    return { platform: plat, available: disponivel, connection: this.estadoConexao(), enabled: this.ligadoPara(userId, plat), accounts, ...extra, ...(this.problema ? { problem: this.problema } : {}) };
   }
 
   /** "Abrir no Telegram" / "Adicionar ao Discord": o serviço gera um link de uso único (10 min) ligado a esta pessoa. */
   async iniciarBot(userId: string, ws: string, plat: PlataformaBot, nomeDaPessoa: string): Promise<{ url: string; expiresAt: string }> {
     if (!this.disponivelBot(plat)) throw new HttpError(409, 'unavailable', 'Ainda não disponível.');
+    // serviço sem o "Adicionar ao Discord" com state: a conta liga pelo código (a tela mostra o link do bot e o campo)
+    if (plat === 'discord' && this.infoAtual() && !this.infoAtual()!.discord?.linkStart) throw new HttpError(409, 'code_only', 'Adicione o bot Ergon no Discord, mande "oi" na conversa com ele e digite aqui o código que ele responder.');
     if (!this.papel(ws, userId)) throw new HttpError(403, 'forbidden', 'sem acesso a este workspace');
     const ref = this.personRef(userId);
     if (!ref) throw erroDaTela('offline');
     const label = (nomeDaPessoa.trim().split(/\s+/)[0] || 'você').slice(0, 40);
     this.iniciados.set(ref, { userId, ws, ate: this.agora() + 24 * 3600_000 });
-    const ack = await this.pedir({ type: 'link.start', id: novoId('req'), personRef: ref, platform: plat, label, notices: true });
+    const ack = await this.pedir({ type: 'link.start', id: novoId('req'), personRef: ref, platform: plat, label, notices: true }, plat);
     const url = typeof ack.url === 'string' ? ack.url : '';
     const ok = plat === 'telegram' ? /^https:\/\/t\.me\/[A-Za-z0-9_]{4,32}\?start=[A-Za-z0-9_-]{1,64}$/.test(url) : /^https:\/\/discord\.com\/oauth2\/authorize\?/.test(url);
     if (!ok) throw erroDaTela('teams_relay');

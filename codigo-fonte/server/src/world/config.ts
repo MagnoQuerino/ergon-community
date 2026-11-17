@@ -1,9 +1,10 @@
 export const DEFAULT_WORLD_URL = 'https://api.ergonworld.com';
 /**
- * O serviço oficial do app do Ergon no Teams (relé). Vale sem ERGON_TEAMS_RELAY_URL e sem o "Ajuste da instalação";
- * ERGON_TEAMS_RELAY_URL vazia desliga. A tela só o oferece depois que a saúde dele responde (services/teams-app).
+ * O serviço oficial de conversa do Ergon (relé dos canais: bot do Ergon no Discord e no Telegram, app do Teams), no ar em
+ * api.ergonworld.com/canais. Vale sem ERGON_TEAMS_RELAY_URL e sem o "Ajuste da instalação"; ERGON_TEAMS_RELAY_URL vazia
+ * ou "off" desliga. A tela só o oferece depois que a saúde dele responde (services/teams-app).
  */
-export const DEFAULT_TEAMS_RELAY_URL = 'https://teams.ergonworld.com';
+export const DEFAULT_TEAMS_RELAY_URL = 'https://api.ergonworld.com/canais';
 
 export interface WorldConfig {
   /** serviço do Ergon World (https; http só para teste local). Vazio = World desligado nesta instalação */
