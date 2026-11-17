@@ -71,7 +71,14 @@ describe('WhatsApp por QR: leitura com filtros; nada sai sozinho', () => {
     fake.bus.emit('messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '5511888880000@s.whatsapp.net', id: 'WA3', fromMe: true }, message: { conversation: 'minha resposta' } }] }); await wait();
     const evs = (await req(h, 'GET', '/api/source-events', s)).json as Array<{ external_id: string; status: string; task_id: string | null }>;
     assert.deepEqual(evs.map((e) => e.external_id), ['WA1'], 'grupo (desligado) e mensagens minhas não entram');
-    assert.ok(evs[0].task_id, 'pedido identificado vira card para a triagem da equipe');
+    assert.equal(evs[0].task_id, null, 'ler não cria card: a opção de cards vem desligada (rc.36)');
+    assert.equal((await req(h, 'GET', '/api/integrations/whatsapp', s)).json.filters.cards, false);
+    // ligada de propósito: o pedido identificado vira card para a triagem da equipe
+    await req(h, 'PUT', '/api/integrations/whatsapp/filters', s, { cards: true });
+    fake.bus.emit('messages.upsert', msg('5511888880000@s.whatsapp.net', 'Preciso que alguém revise a proposta até sexta', 'WA1b')); await wait();
+    const comCards = (await req(h, 'GET', '/api/source-events', s)).json as Array<{ external_id: string; task_id: string | null }>;
+    assert.ok(comCards.find((e) => e.external_id === 'WA1b')?.task_id, 'com a opção ligada, vira card');
+    await req(h, 'PUT', '/api/integrations/whatsapp/filters', s, { cards: false });
     const out = (await req(h, 'GET', '/api/outbox', s)).json as unknown[];
     assert.equal(out.length, 0, 'nada vai para a saída');
 

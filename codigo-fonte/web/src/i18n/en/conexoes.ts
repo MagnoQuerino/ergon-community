@@ -238,7 +238,7 @@ const conexoes: Traducao<typeof pt> = {
   'wa.oQueELido': 'What gets read',
   'wa.individuais': 'One-on-one chats',
   'wa.grupos': 'Groups',
-  'wa.cards': 'Identified requests become cards for the team (triage)',
+  'wa.cards': 'Also create a card on the team board when a message looks like a request (off: read only; routines read the chats the same way)',
   'wa.etiquetas': 'Only chats with these labels (WhatsApp Business; empty = all)',
   'wa.etiquetasExemplo': 'e.g. Customers',
   'wa.nuncaLer': 'Never read (exceptions: name or number)',

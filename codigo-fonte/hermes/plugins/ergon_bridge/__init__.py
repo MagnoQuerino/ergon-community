@@ -50,6 +50,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -67,7 +68,7 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.7.0"
+PLUGIN_VERSION = "0.8.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
@@ -403,7 +404,43 @@ def _who_has(tool_name: str, holders: dict[str, list[str]]) -> list[str]:
     return names
 
 
-def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", session_id: str = "", **_: Any) -> dict[str, Any] | None:
+def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", session_id: str = "", **kw: Any) -> dict[str, Any] | None:
+    """As travas do Ergon e, se o comando do terminal passou por elas, a reescrita pelo RTK (saída compacta)."""
+    r = _pre_tool_call_travas(tool_name=tool_name, args=args, task_id=task_id, session_id=session_id, **kw)
+    if r is None and tool_name == "terminal":
+        _rtk_reescrever(args)
+    return r
+
+
+# ---------------------------------------------------------------- RTK (rc.36): saída do terminal compacta
+# A mesma lógica do adaptador oficial do RTK para o Hermes (rtk init --agent hermes): `rtk rewrite <comando>` diz o
+# equivalente compacto (git status → rtk git status); 0 e 3 = reescrito, 1 e 2 = roda como veio. O Hermes executa o
+# próprio dicionário de argumentos, então trocar o comando nele vale. Falhou, demorou ou não há rtk: o comando segue igual.
+# Vem depois das travas: a aprovação e as regras olham o comando que o agente escreveu. ERGON_RTK=0 desliga.
+_RTK_OK = {0, 3}
+_rtk_bin: list[Any] = []
+
+
+def _rtk_reescrever(args: Any) -> None:
+    try:
+        if os.environ.get("ERGON_RTK", "1") == "0" or not isinstance(args, dict):
+            return
+        cmd = args.get("command")
+        if not isinstance(cmd, str) or not cmd.strip() or len(cmd) > 4000 or cmd.lstrip().startswith("rtk "):
+            return
+        if not _rtk_bin:
+            _rtk_bin.append(shutil.which("rtk"))
+        if not _rtk_bin[0]:
+            return
+        r = subprocess.run([_rtk_bin[0], "rewrite", cmd], shell=False, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3)
+        novo = (r.stdout or "").strip()
+        if r.returncode in _RTK_OK and novo and novo != cmd:
+            args["command"] = novo
+    except Exception:  # noqa: BLE001 - na dúvida, o comando roda como o agente escreveu
+        return
+
+
+def _pre_tool_call_travas(tool_name: str = "", args: Any = None, task_id: str = "", session_id: str = "", **_: Any) -> dict[str, Any] | None:
     """Trava por agente (definida pela coordenação no Ergon). A recusa diz quem tem a ferramenta, para o
     agente pedir ajuda em vez de improvisar."""
     try:
@@ -1966,7 +2003,104 @@ def _nao_treinar() -> bool:
     return v
 
 
-def on_llm_request(request: Any = None, base_url: Any = "", **_: Any) -> dict[str, Any] | None:
+# ---------------------------------------------------------------- cache do fornecedor (rc.36)
+# O DeepSeek (e o Ergon AI, que usa o DeepSeek) só cobra como cache o começo do pedido que é idêntico ao anterior. As
+# instruções que o Ergon manda a cada pedido (cards abertos, retrato da equipe: mudam toda vez) iam no fim do prompt de
+# sistema, ANTES do histórico: o histórico inteiro saía sem cache, 10× mais caro. O Ergon marca as instruções dele; aqui,
+# só na chamada ao fornecedor (o histórico guardado não muda), elas saem do prompt de sistema e vão como a última
+# mensagem de sistema. Fica fixo o começo (base da equipe, ferramentas, histórico) e o cache pega quase tudo.
+ERGON_INSTR_INI = "\u27e6ergon-instrucoes\u27e7"
+ERGON_INSTR_FIM = "\u27e6/ergon-instrucoes\u27e7"
+_CACHE_HOSTS = ("ergonworld", "deepseek")
+
+
+# Economia embutida (rc.36): as regras das competências token-efficiency (rohitg00/pro-workflow, MIT, a partir de
+# drona23/claude-token-efficient) e research-summarizer (alirezarezvani/claude-skills, MIT), condensadas e adaptadas à
+# equipe. Os originais e as licenças ficam em competencias/. Vão no começo fixo do prompt de sistema: no cache, custam
+# quase nada por chamada, e valem para todo agente do Ergon (cada agente só vê as competências dele, então uma competência
+# da biblioteca não chegaria a todos).
+ECONOMIA = """Economia (vale sempre; o que a pessoa pedir vem antes):
+- Responda direto: sem abertura ("Claro!", "Ótima pergunta"), sem repetir o pedido, sem fecho ("qualquer coisa, me avise"), sem sugestões não pedidas.
+- Use poucas chamadas de ferramenta: pedido simples, até ~15; tarefa média, até ~30; chegando no limite, entregue o que tem e diga o que falta.
+- Leia antes de escrever; não leia de novo o que já leu e não mudou. Faça numa passada; se falhar, corrija uma vez e, na segunda falha, mude a abordagem.
+- Documento, página ou relatório longo: leia uma vez e escreva um resumo estruturado (achados principais, números com unidade, citações com a fonte e a página/seção) e trabalhe a partir dele. Não cole nem leia de novo o texto inteiro; volte à fonte só para o trecho exato que faltar.
+- Vários documentos: compare pelos resumos, em tabela (fonte, achado, evidência, limitações). Nunca invente dado, número ou citação; se não estiver na fonte, diga que não está."""
+
+
+def _com_economia(texto: str) -> str:
+    return texto if "Economia (vale sempre" in texto else (texto.rstrip() + "\n\n" + ECONOMIA).strip()
+
+
+def _tirar_instrucoes(texto: str) -> tuple[str, str] | None:
+    i = texto.find(ERGON_INSTR_INI)
+    j = texto.find(ERGON_INSTR_FIM, i + 1) if i >= 0 else -1
+    if i < 0 or j < 0:
+        return None
+    bloco = texto[i + len(ERGON_INSTR_INI):j].strip()
+    resto = (texto[:i].rstrip() + "\n\n" + texto[j + len(ERGON_INSTR_FIM):].lstrip()).strip()
+    return resto, bloco
+
+
+def instrucoes_no_fim(messages: Any) -> list[Any] | None:
+    """As instruções marcadas do Ergon saem do prompt de sistema e vão para o fim da lista. None = nada a mudar."""
+    if not isinstance(messages, list) or not messages:
+        return None
+    out = list(messages)
+    for k, m in enumerate(out):
+        if not isinstance(m, dict) or m.get("role") != "system":
+            continue
+        c = m.get("content")
+        if isinstance(c, str):
+            t = _tirar_instrucoes(c)
+            if not t:
+                continue
+            out[k] = {**m, "content": _com_economia(t[0])}
+        elif isinstance(c, list):
+            achou = None
+            partes = []
+            for p in c:
+                if achou is None and isinstance(p, dict) and isinstance(p.get("text"), str):
+                    t = _tirar_instrucoes(p["text"])
+                    if t:
+                        achou = t[1]
+                        if t[0]:
+                            partes.append({**p, "text": t[0]})
+                        continue
+                partes.append(p)
+            if achou is None:
+                continue
+            partes.append({"type": "text", "text": ECONOMIA})
+            t = ("", achou)
+            out[k] = {**m, "content": partes}
+        else:
+            continue
+        if not t[1]:
+            return out
+        out.append({"role": "system", "content": "Instruções do Ergon para este pedido (valem como as do início):\n\n" + t[1]})
+        return out
+    return None
+
+
+def on_llm_request(request: Any = None, base_url: Any = "", **kw: Any) -> dict[str, Any] | None:
+    """Intermediário de requisição: as instruções do Ergon vão para o fim (cache do fornecedor) e, no OpenRouter, o
+    pedido de não treinar. Nunca lança exceção; sem mudança devolve None."""
+    try:
+        req = request
+        mudou = []
+        if isinstance(req, dict) and any(h in str(base_url or "").lower() for h in _CACHE_HOSTS):
+            novas = instrucoes_no_fim(req.get("messages"))
+            if novas is not None:
+                req = {**req, "messages": novas}
+                mudou.append("cache")
+        r = _nao_treinar_pedido(req, base_url)
+        if r is not None:
+            return {**r, "reason": "+".join(mudou + ["data_collection"])}
+        return {"request": req, "source": "ergon_bridge", "reason": "+".join(mudou)} if mudou else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _nao_treinar_pedido(request: Any = None, base_url: Any = "", **_: Any) -> dict[str, Any] | None:
     """Intermediário de requisição do Hermes (llm_request): em chamadas pelo OpenRouter, com a escolha ligada, acrescenta
     provider.data_collection = "deny" ao corpo (o mesmo lugar em que o Hermes põe as preferências de provedor:
     extra_body.provider). Outros provedores não têm esse pedido: nada muda. Nunca lança exceção; sem mudança devolve None."""

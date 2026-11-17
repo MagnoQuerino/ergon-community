@@ -5,6 +5,9 @@
  * GET /api/model/options. A chave fica só no servidor Ergon; o navegador nunca a recebe.
  * Contas, modelo padrão e skills passam pela ponte de controle do plugin (HttpHermesControl, abaixo).
  */
+/** As marcas das instruções do Ergon no pedido (as mesmas do plugin: ERGON_INSTR_INI/FIM em ergon_bridge). */
+export const ERGON_INSTR_INI = '\u27e6ergon-instrucoes\u27e7';
+export const ERGON_INSTR_FIM = '\u27e6/ergon-instrucoes\u27e7';
 export interface RemoteRun {
   status: string;
   output: string | null;
@@ -170,7 +173,9 @@ export class HttpHermesClient implements HermesClient {
   }
 
   async startRun(p: StartRun) {
-    const body: Record<string, unknown> = { input: p.input, instructions: p.instructions };
+    // rc.36: as instruções do Ergon vão marcadas; o plugin do motor as leva para o fim do pedido ao fornecedor (o começo
+    // fica fixo e o cache do DeepSeek/Ergon AI pega o histórico). Motor de antes: as marcas ficam no texto, sem efeito.
+    const body: Record<string, unknown> = { input: p.input, instructions: p.instructions ? `${ERGON_INSTR_INI}\n${p.instructions}\n${ERGON_INSTR_FIM}` : p.instructions };
     // com imagem: a mensagem vai em partes (texto + image_url), o formato de visão que o motor entende
     if (p.images?.length) {
       body.input = [{ role: 'user', content: [{ type: 'text', text: p.input },

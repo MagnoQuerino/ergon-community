@@ -237,7 +237,7 @@ const conexoes = {
   'wa.oQueELido': 'O que é lido',
   'wa.individuais': 'Conversas individuais',
   'wa.grupos': 'Grupos',
-  'wa.cards': 'Pedidos identificados viram card para a equipe (triagem)',
+  'wa.cards': 'Também criar card no quadro da equipe quando a mensagem parecer um pedido (desligado: só leitura; as rotinas leem as conversas do mesmo jeito)',
   'wa.etiquetas': 'Só conversas com estas etiquetas (WhatsApp Business; vazio = todas)',
   'wa.etiquetasExemplo': 'ex.: Clientes',
   'wa.nuncaLer': 'Nunca ler (exceções: nome ou número)',

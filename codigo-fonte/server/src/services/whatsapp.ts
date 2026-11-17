@@ -31,7 +31,7 @@ interface WaFilters {
   labels: string[];
   /** conversas nunca lidas (nome ou número, como aparece no WhatsApp) */
   exceptions: string[];
-  /** pedidos identificados viram card para a triagem da equipe */
+  /** pedidos identificados viram card para a triagem da equipe (desligado por padrão desde a rc.36: ler não cria card) */
   cards: boolean;
 }
 
@@ -45,7 +45,7 @@ export function filtersOf(raw: Record<string, unknown>): WaFilters {
   const arr = (v: unknown) => (Array.isArray(v) ? v.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 100) : []);
   return {
     direct: raw.direct !== false, groups: raw.groups === true,
-    labels: arr(raw.labels), exceptions: arr(raw.exceptions), cards: raw.cards !== false,
+    labels: arr(raw.labels), exceptions: arr(raw.exceptions), cards: raw.cards === true,
   };
 }
 
