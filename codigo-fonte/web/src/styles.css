@@ -674,6 +674,15 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 .dec-card--muted { background: var(--panel-2); }
 .dec-card__txt { white-space: pre-line; margin: 6px 0 8px; font-size: 13px; line-height: 1.45; }
 .dec-card .row { margin: 0; }
+/* comando para aprovar (rc.33): a frase simples, a etiqueta do risco e o comando recolhido em "Ver detalhes técnicos"
+   (letra fixa, rolagem, no máximo umas 12 linhas) */
+.aprov { display: block; min-width: 0; white-space: normal; }
+.aprov__risco { margin-right: 6px; vertical-align: 1px; }
+.aprov__detalhes { margin-top: 6px; }
+.aprov__detalhes > summary { cursor: pointer; font-size: 12.5px; color: var(--muted); width: fit-content; }
+.aprov__detalhes[open] > summary { color: var(--ink); margin-bottom: 4px; }
+.aprov__codigo { margin: 0; padding: 8px 10px; max-height: calc(12 * 1.45em + 16px); overflow: auto; white-space: pre; overflow-wrap: normal; word-break: normal;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--codigo-fundo); color: var(--codigo-texto); border-radius: 8px; max-width: 100%; }
 /* Conexões › Regras: uma linha por regra aprovada, com Desfazer ao lado (no celular, o botão desce) */
 .regra-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .regra-linha__txt { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }

@@ -102,9 +102,18 @@ describe('aprovações nativas: comando de risco do Terminal', () => {
     await pedir(c.remoto, { requestId: 'req-1', command: 'rm -rf /tmp/pasta', description: 'delete in root path', patternKey: 'delete in root path' });
     const [k] = cartoes();
     assert.ok(k && k.status === 'proposed' && k.conversation_id === c.conv && k.run_id === c.run, 'o cartão está na conversa, da execução');
-    assert.match(k.summary, /rm -rf \/tmp\/pasta/, 'o cartão mostra o comando inteiro');
+    // rc.33: o texto do cartão é a frase simples; o comando só nos detalhes técnicos, e a regra do motor nunca aparece
+    assert.match(k.summary, /quer apagar arquivos\.$/);
+    assert.ok(!k.summary.includes('rm -rf') && !k.summary.includes('delete in root path'), `sem código nem a regra do motor: ${k.summary}`);
     const dec = (await req(h, 'GET', '/api/decisions', s)).json;
     assert.ok(dec.proposals.some((p: { id: string; agent_name: string | null }) => p.id === k.id && p.agent_name), '"Aguardando você" mostra, com quem pediu');
+    const vista = dec.proposals.find((p: { id: string }) => p.id === k.id);
+    assert.equal(vista.detalhe, 'rm -rf (arquivo interno)', 'o comando, só em "Ver detalhes técnicos", sem o caminho interno do motor');
+    assert.equal(vista.risco, 'apaga');
+    assert.equal(vista.summary_t.codigo, 'proposta.aprovacao.quer', 'a tela em inglês traduz pela frase em código');
+    assert.ok(!vista.summary.includes('rm -rf'));
+    const naConversa = (await req(h, 'GET', `/api/proposals?conversationId=${c.conv}`, s)).json.find((p: { id: string }) => p.id === k.id);
+    assert.ok(naConversa.detalhe === 'rm -rf (arquivo interno)' && !naConversa.summary.includes('rm -rf'), 'na conversa também');
     // o motor fica "esperando aprovação": a execução espera a pessoa, e "Aguardando você" mostra só o cartão (sem item repetido)
     motor.runs.set(c.remoto, { status: 'waiting_for_approval', output: null, error: null, sessionId: `sessao-${c.remoto}`, usage: null, model: null });
     await tick();
@@ -161,8 +170,14 @@ describe('aprovações nativas: comando de risco do Terminal', () => {
     await req(h, 'POST', `/api/tasks/${t.id}/work`, s);
     await tick();
     const r = h.db.get<{ id: string; hermes_run_id: string }>('SELECT id, hermes_run_id FROM runs WHERE task_id = ? ORDER BY created_at DESC LIMIT 1', t.id)!;
-    await pedir(r.hermes_run_id, { requestId: 'req-6', command: 'rm -rf /srv/relatorios' });
-    assert.equal((await req(h, 'GET', `/api/tasks/${t.id}`, s)).json.conexoes.filter((c: { kind: string }) => c.kind === 'aprovacao').length, 1, 'o card mostra o cartão');
+    await pedir(r.hermes_run_id, { requestId: 'req-6', command: 'rm -rf /srv/relatorios', description: 'recursive delete' });
+    const noCard = (await req(h, 'GET', `/api/tasks/${t.id}`, s)).json.conexoes.filter((c: { kind: string }) => c.kind === 'aprovacao');
+    assert.equal(noCard.length, 1, 'o card mostra o cartão');
+    // rc.33: a frase diz para quê (o card) e o comando fica só nos detalhes
+    assert.match(noCard[0].summary, /quer apagar arquivos, no trabalho “Limpar a pasta de relatórios”\.$/);
+    assert.ok(!noCard[0].summary.includes('rm -rf') && !noCard[0].summary.includes('recursive delete'));
+    assert.equal(noCard[0].detalhe, 'rm -rf /srv/relatorios');
+    assert.equal(noCard[0].risco, 'apaga');
     h.aprovacoes.setClock(() => Date.now() + PRAZO_DO_MOTOR_MS + 60_000);
     motor.runs.set(r.hermes_run_id, { status: 'completed', output: 'Pedi a aprovação do comando; quando a pessoa decidir, sigo.', error: null, sessionId: 's', usage: null, model: null });
     await tick();

@@ -69,6 +69,7 @@ import { equipeNaSaude, Motors } from './services/motors.ts';
 import { Integrations, contasDe, integrationRow, nomeDaConta, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { contaDoPedido, contaSchema } from './routes/integracoes.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
+import { vistaDaAprovacao } from './services/aprovacao-cartao.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
 import { etapaCurta, resumoDaTarefa, semLinhaParaVoce } from './services/resumo-tarefa.ts';
@@ -2138,8 +2139,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       // cards que nasceram deste (ajuda pedida, o card enviado à equipe): cancelar este leva junto, e a tela avisa antes
       children: db.all<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE parent_task_id = ? AND archived = 0 ORDER BY number', taskId),
       // ações numa conta pedidas neste card, esperando o seu clique (o mesmo cartão da conversa e de "aguardando você")
-      conexoes: db.all<{ id: string; kind: string; summary: string; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
-        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao', 'gestao') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId),
+      // o comando para aprovar: a frase simples, o risco e o comando só em `detalhe` (aprovacao-cartao.ts)
+      conexoes: db.all<{ id: string; kind: string; summary: string; payload?: string | null; created_at: string }>(`SELECT p.id, p.kind, p.summary, CASE WHEN p.kind = 'aprovacao' THEN p.payload END AS payload, p.created_at FROM agent_proposals p JOIN runs r ON r.id = p.run_id
+        WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('conexao', 'depois_de_ler', 'aprovacao', 'gestao') AND p.status = 'proposed' ORDER BY p.created_at`, taskId, a.workspaceId)
+        .map(({ payload, ...c }) => {
+          const v = payload ? vistaDaAprovacao(payload) : null;
+          return v ? { ...c, summary: v.resumo, summary_t: v.resumo_t, detalhe: v.detalhe, ...(v.risco ? { risco: v.risco, risco_t: v.risco_t } : {}) } : c;
+        }),
       // perguntas do agente e pedidos de chave ou senha feitos neste card (cartoes.ts), esperando você: o mesmo cartão da conversa
       cartoes: db.all<{ id: string; kind: string; summary: string; payload: string; status: string; result: string | null; created_at: string }>(`SELECT p.id, p.kind, p.summary, p.payload, p.status, p.result, p.created_at
         FROM agent_proposals p JOIN runs r ON r.id = p.run_id WHERE r.task_id = ? AND p.workspace_id = ? AND p.kind IN ('question', 'segredo') AND p.status = 'proposed' ORDER BY p.created_at, p.rowid`, taskId, a.workspaceId),

@@ -14,6 +14,7 @@ import { Icon } from './Icon.tsx';
 import { OrientarCampo } from './AjustesEquipe.tsx';
 import { DueChip } from './Board.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
+import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
 import { BotoesPrazo, type Prazo } from './CartaoRegra.tsx';
 import { ACAO, ACAO_GRANDE, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { ActionBar, IconAction, TaskFiles, TechDetails, type TaskFile, type WorkInfo } from './TaskWork.tsx';
@@ -60,7 +61,7 @@ interface Detail {
   /** quem faria a revisão crítica deste card: a mesma escolha do servidor que começa a revisão (nunca o próprio autor) */
   reviewer?: { id: string; name: string } | null;
   /** ações numa conta pedidas neste card, esperando o seu clique */
-  conexoes?: Array<{ id: string; kind?: string; summary: string; created_at: string }>;
+  conexoes?: Array<{ id: string; kind?: string; summary: string; created_at: string; detalhe?: string | null; risco?: string | null }>;
   /** perguntas do agente e pedidos de chave ou senha feitos neste card, esperando você */
   cartoes?: Proposal[];
 }
@@ -608,7 +609,8 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
               <h4>{conexoes.length > 1 ? t('tarefa.cartoes.tituloN', { n: conexoes.length }) : t('tarefa.cartoes.titulo')}</h4>
               {conexoes.map((c) => (
                 <div key={c.id} className="tdet__cartao" role="group" aria-label={c.kind === 'depois_de_ler' || c.kind === 'aprovacao' ? t('tarefa.cartoes.esperandoAprovacao') : t('tarefa.cartoes.esperandoConfirmacao')}>
-                  <p className="pre"><TextoLongo texto={c.summary} /></p>
+                  {c.kind === 'aprovacao' ? <div className="tdet__aprov"><TextoDaAprovacao resumo={c.summary} risco={c.risco} detalhe={c.detalhe} /></div>
+                    : <p className="pre"><TextoLongo texto={c.summary} /></p>}
                   {!(lote.length === 1 && lote[0].id === c.id) && (c.kind === 'depois_de_ler' ? (
                     <BotoesPrazo ocupado={ocupadoDe(c.id)} onEscolher={(prazo) => void decidir(c.id, 'apply', prazo)} onRecusar={() => void decidir(c.id, 'reject')} />
                   ) : (

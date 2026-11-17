@@ -286,6 +286,7 @@ const geral = {
 
   // ——— o texto longo (recolhido) ———
   'texto.recolher': 'Recolher o texto',
+  'detalhesTecnicos': 'Ver detalhes técnicos',
   'texto.verInteiro': { one: 'Ver o texto inteiro ({n} caractere)', other: 'Ver o texto inteiro ({n} caracteres)' },
 } as const satisfies Area;
 

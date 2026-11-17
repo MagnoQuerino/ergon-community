@@ -277,3 +277,20 @@ test('cartão de gestão longo demais para o canal: sem Aprovar/Recusar (decide 
   assert.equal(r.json.reply, RESPOSTA.noErgon);
   assert.equal(h.db.get<{ status: string }>('SELECT status FROM agent_proposals WHERE id = ?', pid)!.status, 'proposed');
 });
+
+test('comando para aprovar no canal (rc.33): só a frase simples, sem o comando nem a regra do motor (também o cartão gravado antes)', async () => {
+  recebidos.length = 0;
+  await ligar();
+  await entrada({ tipo: 'mensagem', user_id: '111222333', chat_id: '111222333', message_id: '1', text: 'veja as datas de março' });
+  await ate(() => motor.pedidos.length === 1);
+  await terminar('Vou calcular.');
+  await ateSair((x) => x.tipo === 'texto', 'a resposta não saiu');
+  const comando = 'python3 -c "import calendar, datetime\nprint(calendar.month(2026,3))"';
+  // o formato de antes: a regra do motor e o comando inteiro no resumo
+  const antigo = `Hipátia quer rodar um comando que pede a sua aprovação (script execution via -e/-c flag):\n${comando}`;
+  recordProposals(h.db, h.bus, s.workspaceId, { conversationId: conversa()!, runId: null },
+    [{ kind: 'aprovacao', pedido: 'req-x', agente: 'Hipátia', comando, descricao: 'script execution via -e/-c flag', resumo: antigo }]);
+  const cartao = await ateSair((x) => x.tipo === 'cartao', 'o cartão não saiu');
+  assert.match(cartao.texto, /Hipátia quer rodar um pequeno programa em Python para calcular datas\./);
+  for (const proibido of ['script execution', '-e/-c', 'python3', 'import calendar', 'print(']) assert.ok(!cartao.texto.includes(proibido), `sem "${proibido}" no canal: ${cartao.texto}`);
+});
