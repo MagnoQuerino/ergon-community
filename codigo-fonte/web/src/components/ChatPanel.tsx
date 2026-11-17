@@ -232,9 +232,24 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   }, [msgs.data]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (atEnd && (live?.text || busy)) box.current?.scrollTo({ top: box.current.scrollHeight }); }, [live?.text, busy]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (atEnd) box.current?.scrollTo({ top: box.current.scrollHeight, behavior: 'smooth' }); }, [props.data?.length, shownOptimistic.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // rc.33: a lista encolhe quando a barra "Orientar sem interromper" aparece (e cresce quando ela some): quem estava no
+  // fim continua vendo a última mensagem, em vez de ela ficar escondida debaixo da barra
+  const fimRef = useRef(true);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let altura = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      if (el.clientHeight !== altura && fimRef.current) el.scrollTop = el.scrollHeight;
+      altura = el.clientHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [convId]);
   const onScroll = () => {
     const el = box.current; if (!el) return;
     const end = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    fimRef.current = end;
     setAtEnd(end);
     if (end) setFresh(0);
   };

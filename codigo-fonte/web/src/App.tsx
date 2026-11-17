@@ -79,6 +79,7 @@ function buscarAreas(): void {
 }
 import type { CardHit, PaletteItem } from './components/CommandPalette.tsx';
 import { ConversationDock, ConversationsDialog } from './components/ConversationDock.tsx';
+import { AvisoDeDownload } from './components/AvisoDeDownload.tsx';
 import { WorkspaceSwitcher } from './components/Workspaces.tsx';
 import { AccountMenu } from './components/AccountMenu.tsx';
 import { onOpenCard, onOpenConversation, onOpenDecisions, type OrigemDoCard } from './lib/open.ts';
@@ -226,6 +227,9 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   // os balões da barra (Estado, Aguardando você, Workspace, Música, Conta): um aberto por vez (lib/balao.ts)
   const [decisions, setDecisions] = useBalao('decisoes');
   const [focus, setFocus] = useState(false);
+  // rc.33: o Modo Foco aberto pela tela cheia das Conversas: já naquele assunto, e sair (Esc, X) volta para as Conversas
+  const [focoConversa, setFocoConversa] = useState<{ agentId: string; conversationId: string | null } | null>(null);
+  useEffect(() => { if (!focus) setFocoConversa(null); }, [focus]);
   // navegação: gaveta com o menu inteiro na janela estreita; menu lateral recolhível (só ícones) na larga
   const [navOpen, setNavOpen] = useState(false);
   const [navCompact, setNavCompact] = useState(() => localPref('ergon.nav.compact') === '1');
@@ -454,7 +458,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         <Suspense fallback={<Loading />}>
         {focus ? (
           <FocoView state={s} selectedId={selected} onSelect={setSelected} onOpenAgent={openAgent} onAskCoordinator={askCoordinator}
-            onExit={() => setFocus(false)} onGo={(v) => { setFocus(false); setView(v); }} />
+            conversa={focoConversa}
+            onExit={() => { const volta = focoConversa; setFocus(false); if (volta) setConvs(volta); }} onGo={(v) => { setFocus(false); setView(v); }} />
         ) : view === 'ambiente' ? null : view === 'agentes' ? (
           <AgentesView state={s} onOpen={(id, tab, lite) => openAgent(id, tab, null, null, lite ?? null)} />
         ) : view === 'equipe' ? (
@@ -483,7 +488,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         </Suspense>
       </main>
       {/* conversas por baixo; o perfil aberto dali vem por cima e, ao fechar, volta para a conversa */}
-      {convs && <ConversationsDialog coordinator={coordinator} scope={s.workspace.id} initial={convs} onClose={() => setConvs(null)} onOpenAgent={(id, tab, lite) => openAgent(id, tab, null, null, lite ?? null)} />}
+      {convs && <ConversationsDialog coordinator={coordinator} scope={s.workspace.id} initial={convs} onClose={() => setConvs(null)} onOpenAgent={(id, tab, lite) => openAgent(id, tab, null, null, lite ?? null)}
+        onFoco={(agentId, conversationId) => { setConvs(null); setSelected(agentId); setFocoConversa({ agentId, conversationId }); setFocus(true); }} />}
       <Suspense fallback={null}>
       {win && <AgentWindow key={`${win.id}-${win.conversationId ?? ''}`} agentId={win.id} initial={win.lite} coordName={coordLabel} sectors={s.sectors} initialTab={win.tab} draft={win.draft} conversationId={win.conversationId}
         onClose={() => setWin(null)} onGone={() => { removeRecent('agente', win.id); setWin(null); }} />}
@@ -517,6 +523,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         onAskCoordinator={(t) => { setCard(null); setCardDe(null); setConvs(null); askCoordinator(t); }} />}
       </Suspense>
       <ConversationDock coordinator={coordinator} hidden={!!convs || !!win || focus || tour || !!onb} />
+      <AvisoDeDownload />
 
     </div>
   );

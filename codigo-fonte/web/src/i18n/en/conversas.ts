@@ -33,6 +33,8 @@ const conversas: Traducao<typeof pt> = {
   'secao.equipe': 'Team',
   'lista.suas': 'Your conversations',
   'lista.fechar': 'Close (Esc)',
+  'lista.telaCheia': 'Full screen',
+  'lista.telaCheiaDica': 'Full screen: opens this conversation in Focus Mode (Esc comes back here)',
   'lista.voceDisse': 'You: {texto}',
   'lista.pedidosEsperando': { one: '{n} request waiting for you', other: '{n} requests waiting for you' },
   'lista.assuntosCom': 'Topics with {nome}',

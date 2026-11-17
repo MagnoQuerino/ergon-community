@@ -36,6 +36,8 @@ const conversas = {
   'secao.equipe': 'Equipe',
   'lista.suas': 'Suas conversas',
   'lista.fechar': 'Fechar (Esc)',
+  'lista.telaCheia': 'Tela cheia',
+  'lista.telaCheiaDica': 'Tela cheia: abre esta conversa no Modo Foco (Esc volta para cá)',
   'lista.voceDisse': 'Você: {texto}',
   'lista.pedidosEsperando': { one: '{n} pedido esperando você', other: '{n} pedidos esperando você' },
   'lista.assuntosCom': 'Assuntos com {nome}',

@@ -423,7 +423,8 @@ export interface HermesControlClient {
   apiToolsets(): Promise<{ enabled: string[]; safe: string[]; guarded?: string[] }>;
   setApiToolsets(enabled: string[]): Promise<string[]>;
   /** imagem gerada pelo motor (só da pasta das geradas; a ponte confere) */
-  media?(path: string): Promise<{ data: Buffer; mime: string }>;
+  /** perfil: o do agente que mostrou a imagem (a ponte também serve o que está dentro do perfil dele, rc.33) */
+  media?(path: string, perfil?: string | null): Promise<{ data: Buffer; mime: string }>;
   /** Custo: as chamadas ao modelo de uma sessão do motor, desde um instante (ms desde 1970), com o tamanho de cada parte
    *  e o total informado pelo provedor, e o relógio do motor na resposta (plugin 0.4.0+; ausente ou 404 = sem a medição) */
   medicao?(sessao: string, desdeMs: number): Promise<MedicaoSessao>;
@@ -951,11 +952,11 @@ export class HttpHermesControl implements HermesControlClient {
   }
   async removerCanal(canal: NomeCanal) { await this.canal('DELETE', `/ergon/v1/canais/${canal}`); }
 
-  async media(path: string): Promise<{ data: Buffer; mime: string }> {
+  async media(path: string, perfil?: string | null): Promise<{ data: Buffer; mime: string }> {
     if (!this.token) throw new HermesError(503, 'a configuração da equipe de IA não está disponível nesta instalação');
     let res: Response;
     try {
-      res = await fetchPonte(`${this.baseUrl}/ergon/v1/media?path=${encodeURIComponent(path)}`, { headers: { 'X-Ergon-Bridge-Token': this.token }, signal: AbortSignal.timeout(20000) });
+      res = await fetchPonte(`${this.baseUrl}/ergon/v1/media?path=${encodeURIComponent(path)}${perfil ? `&perfil=${encodeURIComponent(perfil)}` : ''}`, { headers: { 'X-Ergon-Bridge-Token': this.token }, signal: AbortSignal.timeout(20000) });
     } catch { throw new HermesError(503, 'a equipe de IA não entregou a imagem a tempo'); }
     const mime = (res.headers.get('content-type') ?? '').split(';')[0].trim();
     if (!res.ok || !/^image\/(png|jpeg|webp)$/.test(mime)) throw new HermesError(res.ok ? 502 : res.status, 'a equipe de IA não encontrou a imagem gerada');

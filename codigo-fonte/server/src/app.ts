@@ -331,10 +331,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     control: (ws) => motors.control(ws), hermes: (ws) => motors.hermes(ws),
   });
   // imagens geradas pelos agentes chegam ao Ergon pela ponte de controle (ver RunExecutor.withMedia)
-  executor.media = motors.perPerson || control?.media ? async (p, ws) => {
+  executor.media = motors.perPerson || control?.media ? async (p, ws, perfil) => {
     const c = motors.control(ws);
     if (!c?.media) throw new Error('sem ponte');
-    return c.media(p);
+    return c.media(p, perfil);
   } : null;
   // quem tem Mensagens dos canais, perguntado sobre e-mail ou mensagens numa conversa ou num card, recebe o que chegou
   // (lido agora). No card também: o pedido escrito na conversa vira card e a fila o executa — sem isso, ali a Aspásia

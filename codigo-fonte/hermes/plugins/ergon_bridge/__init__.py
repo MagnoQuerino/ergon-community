@@ -3027,17 +3027,65 @@ def _media_dirs() -> list[str]:
     return dirs
 
 
-def _media_file(raw: str) -> tuple[str, str] | None:
-    """(caminho real, tipo) de uma imagem gerada, ou None: fora da pasta das geradas (também por link), outro tipo,
-    vazia ou grande demais."""
+_PERFIL_NOME = re.compile(r"erg-[a-f0-9]{8,64}")
+
+
+def _perfil_dir(perfil: str) -> str | None:
+    """A pasta (real) do perfil de um agente, se o nome é de perfil do Ergon e ela existe."""
+    if not perfil or not _PERFIL_NOME.fullmatch(perfil):
+        return None
+    d = os.path.realpath(os.path.join(os.environ.get("HERMES_HOME", "/opt/data"), "profiles", perfil))
+    return d if os.path.isdir(d) else None
+
+
+def _dentro(real: str, base: str) -> bool:
+    try:
+        return os.path.commonpath([real, base]) == base
+    except ValueError:
+        return False
+
+
+def _media_file(raw: str, perfil: str = "") -> tuple[str, str] | None:
+    """(caminho real, tipo) de uma imagem que o agente mostrou, ou None. Vale a das pastas das geradas (a do motor e a de
+    cada perfil) e, com `perfil`, qualquer imagem dentro do perfil desse agente (rc.33: a captura de tela do navegador
+    fica em profiles/<perfil>/home/.config/browser-harness/tmp/). Sempre pelo caminho real (um link para fora não
+    passa), só imagem, nem vazia nem grande demais."""
     if not raw or "\x00" in raw or len(raw) > 512:
         return None
     real = os.path.realpath(raw)
     mime = _MEDIA_TYPES.get(os.path.splitext(real)[1].lower())
-    if not mime or not any(os.path.commonpath([real, base]) == base for base in _media_dirs()) or not os.path.isfile(real):
+    bases = _media_dirs()
+    pd = _perfil_dir(perfil)
+    if pd:
+        bases.append(pd)
+    if not mime or not any(_dentro(real, base) for base in bases) or not os.path.isfile(real):
         return None
     size = os.path.getsize(real)
     return (real, mime) if 0 < size <= _MEDIA_MAX else None
+
+
+def _media_guardar(real: str, perfil: str) -> str:
+    """A imagem de fora das geradas (a captura de tela, que a próxima sobrescreve) vira uma cópia na pasta das geradas do
+    perfil, com nome pelo conteúdo, quando o Ergon a busca no fim do pedido. Devolve o caminho de onde servir."""
+    pd = _perfil_dir(perfil)
+    if not pd or any(_dentro(real, base) for base in _media_dirs()):
+        return real
+    try:
+        with open(real, "rb") as f:
+            data = f.read(_MEDIA_MAX + 1)
+        if not data or len(data) > _MEDIA_MAX:
+            return real
+        destino_dir = os.path.join(pd, "cache", "generated", "capturas")
+        os.makedirs(destino_dir, exist_ok=True)
+        destino = os.path.join(destino_dir, "tela-" + hashlib.sha256(data).hexdigest()[:16] + os.path.splitext(real)[1].lower())
+        if not os.path.exists(destino):
+            tmp = destino + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, destino)
+        return destino
+    except OSError:
+        return real
 
 
 def _sanitize_ergon_ai(body: dict[str, Any]) -> dict[str, Any]:
@@ -4290,7 +4338,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
         if path == "/ergon/v1/pausa" and method == "PUT":
             return self._pausa_put(body or {})
         if path == "/ergon/v1/media" and method == "GET":
-            return self._media_get(dict(urllib.parse.parse_qsl(parts.query)).get("path", ""))
+            q = dict(urllib.parse.parse_qsl(parts.query))
+            return self._media_get(q.get("path", ""), q.get("perfil", ""))
         if path == "/ergon/v1/canais" or path.startswith("/ergon/v1/canais/"):
             return self._canais(method, path, body or {})
         if path == "/ergon/v1/byok" or path.startswith("/ergon/v1/byok/"):
@@ -4819,11 +4868,12 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._json(500, {"error": f"falha no treinamento ({type(exc).__name__})"})
         return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
 
-    def _media_get(self, raw: str) -> None:
-        hit = _media_file(raw)
+    def _media_get(self, raw: str, perfil: str = "") -> None:
+        hit = _media_file(raw, perfil)
         if not hit:
             return self._json(404, {"error": "imagem não encontrada"})
-        with open(hit[0], "rb") as f:
+        servir = _media_guardar(hit[0], perfil) if perfil else hit[0]
+        with open(servir, "rb") as f:
             data = f.read(_MEDIA_MAX + 1)
         try:
             self.send_response(200)

@@ -1,3 +1,4 @@
+import { limparCaminhos } from '../../../shared/caminhos.ts';
 import type { TeamAgent } from './teamData.ts';
 import { t, type Chave } from '../i18n/index.ts';
 
@@ -303,7 +304,8 @@ export const SOURCE_LABEL: Record<string, string> = {
  * Remove as linhas de controle ([[...]]) que os agentes escrevem para o Ergon aplicar — as conhecidas e qualquer outra
  * no mesmo formato (nome e atributos="…"): uma linha que o modelo inventou nunca aparece crua na conversa.
  */
-export const stripControl = (s: string): string => s
+/** O texto do agente para a tela: sem as linhas de controle e sem caminho do motor (rc.33, shared/caminhos.ts). */
+export const stripControl = (s: string): string => limparCaminhos(s)
   .replace(/\[\[\s*(pedir-ajuda|pedir-permissao|liberar-ferramenta|mover|novo-agente|ferramenta|propor-rotina|sugerir-rotina|ajustar-rotina|reapresentar-rotina|configurar-rotina|perguntar|editar-agente|desativar-agente|reativar-agente|editar-setor|novo-setor|propor-tarefa|categoria|plano|etapa|apagar-card|cancelar-card|prioridade|pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|treinar|assumir|copiar-arquivo|salvar-documento|apagar|esvaziar-lixeira|card|tarefa|titulo|título|renomear-card)\b(?:[^\]]|\](?!\]))*\]\]\s*/gi, '')
   .replace(/\[\[\s*[a-zà-ú][\wà-ú-]*(?:\s+[\wà-ú-]+\s*=\s*"[^"]*")+\s*\]\]\s*/gi, '')
   .trim();

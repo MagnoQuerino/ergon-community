@@ -3,6 +3,7 @@
  * cartões (Adaptive Card 1.4) com Aprovar/Recusar dentro de um ActionSet no corpo, Action.Execute com reserva
  * Action.Submit (contrato, 3.5). O mesmo desenho serve ao cartão de uma confirmação na conversa e ao aviso de "Com você".
  */
+import { docsComoTexto, limparCaminhos } from '../../../../shared/caminhos.ts';
 import { MAX_CARTAO, MAX_TEXTO_SAIDA, tokenCartao, type ChavesInstalacao } from './protocolo.ts';
 
 const NOME_DO_MOTOR = new RegExp('\\bHer' + 'mes\\b', 'gi');
@@ -23,11 +24,12 @@ export function linksPorExtenso(s: string): string {
 }
 
 /**
- * Resposta do agente como texto do Teams: sem [[controle]], sem {{marcas}}, sem HTML, sem o nome do motor, e com os
- * links por extenso.
+ * Resposta do agente como texto do Teams: sem [[controle]], sem {{marcas}}, sem HTML, sem o nome do motor, sem caminho
+ * de arquivo do motor (rc.33: vira "(arquivo interno)"; o arquivo de Documentos vai pelo nome), e com os links por
+ * extenso. Serve também ao Telegram, ao Discord e ao WhatsApp da equipe (canais/servico.ts).
  */
 export function textoParaTeams(t: string, max = MAX_TEXTO_SAIDA): string {
-  let s = linksPorExtenso(String(t ?? '')
+  let s = linksPorExtenso(docsComoTexto(limparCaminhos(String(t ?? '')))
     .replace(/\[\[[^\]]*(?:\][^\]]+)*\]\]/g, ''))
     .replace(/\{\{[^}\n]{0,200}\}\}/g, '')
     .replace(/<\/?[a-zA-Z][^>\n]{0,200}>/g, '')

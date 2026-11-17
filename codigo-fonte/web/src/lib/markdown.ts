@@ -10,7 +10,8 @@ export type Inline =
   | { t: 'b' | 'i' | 's'; c: Inline[] }
   | { t: 'code'; v: string }
   | { t: 'a'; href: string; c: Inline[] }
-  | { t: 'img'; id: string };
+  | { t: 'img'; id: string }
+  | { t: 'doc'; id: string; nome: string };
 
 export type Block =
   | { t: 'p'; c: Inline[] }
@@ -32,6 +33,7 @@ const INLINE = new RegExp([
   /\[imagem: (art_[a-f0-9]{32})\]/.source, // 8 imagem guardada em Documentos
   /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/.source, // 9-10 link
   /(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"”’])/.source, // 11 endereço solto
+  /\[documento: (art_[a-f0-9]{32}) ([^\]\n]{1,200})\]/.source, // 12-13 arquivo de Documentos (shared/caminhos.ts)
 ].join('|'), 'gu');
 
 export function parseInline(src: string): Inline[] {
@@ -48,6 +50,7 @@ export function parseInline(src: string): Inline[] {
     else if (m[8] !== undefined) out.push({ t: 'img', id: m[8] });
     else if (m[9] !== undefined) out.push({ t: 'a', href: m[10], c: parseInline(m[9]) });
     else if (m[11] !== undefined) out.push({ t: 'a', href: m[11], c: [{ t: 'text', v: m[11] }] });
+    else if (m[12] !== undefined) out.push({ t: 'doc', id: m[12], nome: m[13] });
   }
   text(src.slice(at));
   return out;
@@ -147,6 +150,7 @@ export function toWordHtml(src: string, title: string): string {
       case 'code': return `<code>${esc(x.v)}</code>`;
       case 'a': return `<a href="${esc(x.href)}">${inl(x.c)}</a>`;
       case 'img': return '[imagem]';
+      case 'doc': return esc(x.nome);
     }
   }).join('');
   const blk = (b: Block): string => {
@@ -166,7 +170,7 @@ export function toWordHtml(src: string, title: string): string {
 
 /** Texto puro (para copiar sem os símbolos, contar, prévia). */
 export function plainText(src: string): string {
-  const inl = (c: Inline[]): string => c.map((x) => (x.t === 'text' ? x.v : x.t === 'br' ? '\n' : x.t === 'code' ? x.v : x.t === 'img' ? '[imagem]' : inl(x.c))).join('');
+  const inl = (c: Inline[]): string => c.map((x) => (x.t === 'text' ? x.v : x.t === 'br' ? '\n' : x.t === 'code' ? x.v : x.t === 'img' ? '[imagem]' : x.t === 'doc' ? x.nome : inl(x.c))).join('');
   return parseMarkdown(src).map((b) => {
     switch (b.t) {
       case 'p': case 'h': return inl(b.c);

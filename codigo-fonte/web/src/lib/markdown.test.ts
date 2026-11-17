@@ -52,3 +52,14 @@ test('HTML fica texto (nunca vira código na página)', () => {
 test('texto puro para copiar', () => {
   assert.equal(plainText('**Oi**, tudo bem?\n\n- um\n- dois'), 'Oi, tudo bem?\n\n• um\n• dois');
 });
+
+test('rc.33: o arquivo de Documentos citado pelo agente vira link; caminho do motor nunca aparece na tela', async () => {
+  const id = `art_${'b'.repeat(32)}`;
+  assert.deepEqual(parseInline(`Pronto: [documento: ${id} relatorio de vendas.pdf].`), [
+    { t: 'text', v: 'Pronto: ' }, { t: 'doc', id, nome: 'relatorio de vendas.pdf' }, { t: 'text', v: '.' },
+  ]);
+  assert.equal(plainText(`Veja [documento: ${id} a.pdf]`), 'Veja a.pdf');
+  const { stripControl } = await import('./types.ts');
+  const tela = stripControl('Aí está a tela.\nMEDIA:/opt/data/profiles/erg-cc4d086464da8211f507/home/.config/browser-harness/tmp/shot.png\nO rascunho: /tmp/x.md');
+  assert.equal(tela, 'Aí está a tela.\nO rascunho: (arquivo interno)');
+});
