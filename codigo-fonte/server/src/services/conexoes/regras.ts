@@ -441,6 +441,8 @@ export class RegrasConexoes {
     const regras = this.ativas(ws).map((r) => ({
       id: r.id, tipo: r.tipo, texto: this.texto(r), alcance: r.alcance, alcanceTexto: descreverAlcance(r), expiraEm: r.expira_em, criadaEm: r.created_at,
       apagar: r.tipo === 'acao' && r.oque.includes('apagar'),
+      // aditivo (rc.34): para o botão "sem pedir aprovação" de cada conexão saber se já está ligado
+      oque: r.oque, conexoes: r.conexoes,
       usos: Number(this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM conexao_acoes WHERE regra_id = ? AND status = 'feita'", r.id)?.n ?? 0),
     }));
     const texto = this.db.all<{ id: string; text: string; created_at: string; decided_at: string | null }>("SELECT id, text, created_at, decided_at FROM rules WHERE workspace_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 50", ws);

@@ -293,6 +293,7 @@ function Detail({ i, reload, estado, onClose, detalhes, topo }: { i: Integration
         <div className="conn-secoes">
           {i.kind === 'microsoft' && i.auth === 'oauth' && !!estado.eu?.etapas?.length && <EtapasMicrosoft etapas={estado.eu.etapas} recarregar={estado.reload} />}
           <AcoesDaConexao i={i} estado={estado} />
+          {i.state === 'connected' && <SemAprovacao kind={i.kind} />}
           <details className="conn-secao">
             <summary>{t('conexoes.teste.titulo')}</summary>
             <TestarConexao i={i} reload={reload} onFaltou={setFaltouNoTeste} />
@@ -429,8 +430,31 @@ function UsarDeOutroWorkspace({ i, reload }: { i: Integration; reload: () => voi
  * sites ou rodar programas depois de ler as contas, e (escolha consciente) tirar as confirmações.
  */
 /** GET /api/conexoes/regras (server/src/services/conexoes/regras.ts, tela) */
+/**
+ * "Criar e organizar sem pedir aprovação" nesta conexão (rc.34): uma regra de sempre, que vale também em rotinas e cards da
+ * equipe. Antes só existia pedindo na conversa. Enviar em seu nome e apagar continuam pedindo o seu sim.
+ */
+function SemAprovacao({ kind }: { kind: string }) {
+  const t = useT();
+  const r = useResource<TelaRegras>('/api/conexoes/regras', ['rules.changed']);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
+  const regra = r.data?.regras.find((x) => x.tipo === 'acao' && x.alcance === 'sempre' && (x.oque ?? []).includes('organizar') && (x.conexoes ?? []).includes(kind));
+  const trocar = async (on: boolean) => {
+    setBusy(true); setErr(null);
+    try { if (on) await api.post('/api/conexoes/regras', { kind }); else if (regra) await api.post(`/api/conexoes/regras/${regra.id}/desfazer`, {}); }
+    catch (e) { setErr(errMsg(e)); } finally { setBusy(false); r.reload(); }
+  };
+  return (
+    <div className="conn-sem-aprovacao">
+      <label className="check"><input type="checkbox" checked={!!regra} disabled={busy || !r.data} onChange={(e) => void trocar(e.target.checked)} /> {t('conexoes.semAprovacao.rotulo')}</label>
+      <p className="muted small">{t('conexoes.semAprovacao.dica')}</p>
+      {err && <p className="error" role="alert">{err}</p>}
+    </div>
+  );
+}
+
 interface TelaRegras {
-  regras: Array<{ id: string; tipo: 'acao' | 'depois_de_ler'; texto: string; alcance: 'pedido' | '24h' | 'sempre'; alcanceTexto: string; criadaEm: string; apagar: boolean; usos: number }>;
+  regras: Array<{ id: string; tipo: 'acao' | 'depois_de_ler'; oque?: string[]; conexoes?: string[]; texto: string; alcance: 'pedido' | '24h' | 'sempre'; alcanceTexto: string; criadaEm: string; apagar: boolean; usos: number }>;
   texto: Array<{ id: string; text: string; created_at: string }>;
   propostas: { texto: Array<{ id: string; text: string; created_at: string }>; cartoes: Array<{ id: string; summary: string; alcance: Alcance; agent_name: string | null; created_at: string }> };
 }

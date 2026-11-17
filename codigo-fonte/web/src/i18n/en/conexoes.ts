@@ -114,6 +114,8 @@ const conexoes: Traducao<typeof pt> = {
   'reusar.usarSemNome': 'Use the account from {workspace}',
 
   // ——— Regras ———
+  'semAprovacao.rotulo': 'Create and organize without asking for my approval',
+  'semAprovacao.dica': 'Creating tasks, events, folders and drafts in this account goes straight through, also in routines and team cards. Sending on your behalf and deleting still ask for your yes. Undo here or in Rules.',
   'regras.titulo': 'Rules',
   'regras.texto': 'To give the team more autonomy, ask in the chat, for example: “you can send the emails without asking me first”. A card appears so you can choose how long it applies: just that request, for 24 hours, or always. Deleting is only included when you mention deleting. Safety is your call: what you allow here also applies when the team works on its own and after reading messages from other people. Undo takes effect right away.',
   'regras.vazio': 'No rules yet: everything follows the settings above.',
