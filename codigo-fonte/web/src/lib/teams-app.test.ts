@@ -23,7 +23,7 @@ test('problemas da conexão têm texto leigo; com problema, a linha "os pedidos 
   assert.equal(problemaDoTeams('toString'), null, 'só os códigos da lista');
   assert.doesNotMatch(PROBLEMAS_DO_TEAMS.map(problemaDoTeams).join(' '), /Hermes|4401|4403|token|assinatura Ed25519|relé/i);
   assert.equal(linhaDoEstado('offline', 'registro'), null);
-  assert.match(linhaDoEstado('offline', undefined)!, /guardados por até 7 dias/);
+  assert.match(linhaDoEstado('offline', undefined)!, /guardados por até 60 dias/);
   assert.equal(linhaDoEstado('connected', undefined), 'Conectado.');
 });
 

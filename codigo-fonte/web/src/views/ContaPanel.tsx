@@ -93,7 +93,7 @@ function NpcToggle({ dona }: { dona: boolean }) {
 }
 
 interface WsResumo { id: string; name: string; role: string; current: boolean; agents: number; openTasks: number; working: number; waiting: number }
-interface WorldResumo { configured: boolean; link: { boundWorkspaceId: string | null } | null }
+interface WorldResumo { configured: boolean; link: { boundWorkspaceId: string | null; boundWorkspaceIds?: string[] } | null }
 
 /** Os workspaces da pessoa em cartões: a cidade de cada um, onde está (neste computador ou no Ergon World) e as ações. */
 function SeusWorkspaces() {
@@ -107,7 +107,7 @@ function SeusWorkspaces() {
   const [err, setErr] = useState<string | null>(null);
   const [criando, setCriando] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
-  const noWorld = world.data?.link?.boundWorkspaceId ?? null;
+  const ligadosWorld = world.data?.link?.boundWorkspaceIds ?? (world.data?.link?.boundWorkspaceId ? [world.data.link.boundWorkspaceId] : []);
   const comBusca = !!res.data && mostraBuscaWs(res.data.length);
   const vistos = res.data ? (comBusca ? filtrarWorkspaces(res.data, busca) : res.data) : [];
   const criar = async () => {
@@ -145,13 +145,13 @@ function SeusWorkspaces() {
               <WsCard key={w.id} id={w.id} nome={w.name} atual={w.current}
                 selos={<>
                   {w.current && <span className="badge badge--atual">{t('geral.ws.atualChip')}</span>}
-                  {comWorld && noWorld === w.id ? <span className="badge badge--world"><Icon name="globe" size={11} /> {t('geral.ws.noWorld')}</span> : <span className="badge">{t('geral.ws.local')}</span>}
+                  {comWorld && ligadosWorld.includes(w.id) ? <span className="badge badge--world"><Icon name="globe" size={11} /> {t('geral.ws.noWorld')}</span> : <span className="badge">{t('geral.ws.local')}</span>}
                 </>}
                 numeros={<>{t('geral.ws.agentes', { n: w.agents })} · {t('geral.ws.tarefasAbertas', { n: w.openTasks })}{w.working > 0 ? ` · ${t('geral.ws.trabalhando', { n: w.working })}` : ''}</>}
                 acoes={editando === w.id ? null : <>
                   {!w.current && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void abrir(w)}>{t('conta.ws.abrir')}</button>}
                   {dona && <button className="btn btn--sm" disabled={busy} onClick={() => { setEditando(w.id); setNome(w.name); }}><Icon name="edit" size={13} /> {t('conta.ws.renomear')}</button>}
-                  {comWorld && w.current && <a className="btn btn--sm btn--ghost" href="#configuracao?world"><Icon name="globe" size={13} /> {noWorld === w.id ? t('conta.ws.gerenciarWorld') : t('conta.ws.levarWorld')}</a>}
+                  {comWorld && w.current && <a className="btn btn--sm btn--ghost" href="#configuracao?world"><Icon name="globe" size={13} /> {ligadosWorld.includes(w.id) ? t('conta.ws.gerenciarWorld') : t('conta.ws.levarWorld')}</a>}
                 </>}>
                 {editando === w.id && (
                   <form className="ws-renomear" onSubmit={(e) => { e.preventDefault(); if (novo && novo !== w.name) setConfirmar(w); }}>

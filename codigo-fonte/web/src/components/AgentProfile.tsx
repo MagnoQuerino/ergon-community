@@ -84,7 +84,8 @@ export function ModelSelect({ catalog, value, provider, onChange, allowDefault =
       {catalog?.providers.map((p) => (
         <optgroup key={p.id} label={p.billing === 'subscription' ? t('equipe.modelo.assinatura', { nome: p.name }) : p.name}>
           {p.models.map((m) => (
-            <option key={m.id} value={`${p.id}::${m.id}`}>{m.label}{m.description ? ` — ${m.description}` : ''}{m.vendor ? ` · ${m.vendor}` : ''}{m.tier ? ` · ${tier(m.tier)}` : ''}{price(m) ? ` · ${price(m)}` : ''}</option>
+            // i18n-ok: 'grátis' é o código da faixa que o servidor manda (o preço já diz "grátis" uma vez), não texto de tela
+            <option key={m.id} value={`${p.id}::${m.id}`}>{m.label}{m.description ? ` — ${m.description}` : ''}{m.vendor ? ` · ${m.vendor}` : ''}{m.tier && m.tier !== 'grátis' ? ` · ${tier(m.tier)}` : ''}{price(m) ? ` · ${price(m)}` : ''}</option>
           ))}
         </optgroup>
       ))}

@@ -62,6 +62,8 @@ export interface WorldHost {
   ergonAi?: ErgonAiHost;
   /** os canais externos (services/canais/externo.ts): o papel de cada membro e quem saiu do workspace no World */
   canais?: CanaisWorldHost;
+  /** cria um workspace local da pessoa (baixar para este computador um workspace que está no World) */
+  createWorkspace?: (userId: string, name: string) => string;
 }
 
 /** Os canais externos, vistos pelo World: quem fala pelo WhatsApp/Telegram/Discord fala com o papel que tem no World. */

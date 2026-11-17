@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import type { AuxModels, HermesClient, HermesControlClient, ModelOptions } from '../src/services/hermes.ts';
-import { apelidoErgonAi, labelFor, modelLabel, precisaReconectarErgonAi, rotuloErgonAi } from '../src/services/ai.ts';
+import { apelidoErgonAi, labelFor, modelLabel, modelosVisiveisErgonAi, precisaReconectarErgonAi, rotuloErgonAi } from '../src/services/ai.ts';
 import { FakeWorld } from './fake-world.ts';
 import { harness, req, setupOwner, type Harness } from './helpers.ts';
 
@@ -15,7 +15,8 @@ describe('Ergon AI: os nomes na tela', () => {
     assert.equal(modelLabel('ergon-ai'), 'Ergon AI');
     assert.equal(modelLabel('ergon-ai-sinapse'), 'Ergon AI Sinapse');
     assert.equal(modelLabel('ergon-ai/deepseek-flash'), 'Ergon AI', 'execução na nuvem gravada como conta/modelo');
-    for (const id of ['deepseek-flash', 'deepseek-chat', 'deepseek-v4-flash', 'deepseek-reasoner', 'outro-qualquer']) {
+    assert.equal(labelFor('ergon-ai', 'deepseek-reasoner'), 'Ergon AI Sinapse', 'id antigo: o nome do apelido dele');
+    for (const id of ['deepseek-flash', 'deepseek-chat', 'deepseek-v4-flash', 'outro-qualquer']) {
       assert.equal(labelFor('ergon-ai', id), 'Ergon AI', id);
       assert.doesNotMatch(labelFor('ergon-ai', id), /deepseek/i);
     }
@@ -75,7 +76,9 @@ describe('Ergon AI: a instalação de antes migra sozinha', () => {
     // antes: a tela já mostra a marca, mesmo com os ids antigos guardados
     const antes = (await req(h, 'GET', '/api/ai/models', s)).json as { default: { label: string }; providers: Array<{ models: Array<{ label: string }> }> };
     assert.equal(antes.default.label, 'Ergon AI');
-    assert.ok(antes.providers[0].models.every((m) => m.label === 'Ergon AI'));
+    const nomes = antes.providers[0].models.map((m) => m.label);
+    assert.ok(nomes.every((n) => /^Ergon AI( Sinapse)?$/.test(n)), nomes.join());
+    assert.equal(new Set(nomes).size, nomes.length, `sem nome repetido: ${nomes.join()}`);
     assert.doesNotMatch(JSON.stringify(antes), /DeepSeek|Deepseek/);
 
     assert.equal((await req(h, 'POST', '/api/world/refresh', s)).status, 200);
@@ -100,4 +103,10 @@ describe('Ergon AI: a instalação de antes migra sozinha', () => {
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(motor.conexoes.length, 1);
   });
+});
+
+test('a lista do Ergon AI na tela: um modelo por nome (ids antigos do endpoint não repetem "Ergon AI")', () => {
+  assert.deepEqual(modelosVisiveisErgonAi(['deepseek-v4-flash', 'ergon-ai', 'ergon-ai-sinapse']), ['ergon-ai', 'ergon-ai-sinapse']);
+  assert.deepEqual(modelosVisiveisErgonAi(['deepseek-flash', 'deepseek-reasoner']), ['deepseek-flash', 'deepseek-reasoner']);
+  assert.deepEqual(modelosVisiveisErgonAi(['ergon-ai', 'deepseek-chat', 'ergon-ai-sinapse', 'deepseek-reasoner']), ['ergon-ai', 'ergon-ai-sinapse']);
 });

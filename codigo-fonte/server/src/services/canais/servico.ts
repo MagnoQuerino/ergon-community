@@ -56,6 +56,8 @@ const ATRASO_MS = 10 * 60_000;
 /** O que só se responde no Ergon: autorização com senha, pergunta, pedido de chave ou senha (o valor nunca passa pelo canal). */
 const SO_NO_ERGON = ['permission', 'question', 'segredo', 'info_request', 'handoff', KIND_EXTERNO];
 const DIA = 86_400_000;
+/** O relé guarda o pedido até 60 dias, até o Ergon abrir: o id das entregas já recebidas fica um dia a mais (sem repetir). */
+const ENTRADA_VALE_MS = 61 * DIA;
 /** Textos que o bot manda de imediato (nas duas línguas: a pessoa pode usar o Ergon em qualquer uma). */
 export const RESPOSTA = {
   semVinculo: 'Esta conversa não está ligada a ninguém neste Ergon. Para ligar, abra Conexões no Ergon.\nThis chat is not linked to anyone in this Ergon. To link it, open Connections in Ergon.',
@@ -675,7 +677,7 @@ export class Canais {
     const ago = (ms: number) => new Date(this.agora() - ms).toISOString();
     this.d.db.run(`DELETE FROM canais_saida WHERE created_at < ? AND NOT (status = 'sent' AND created_at >= ? AND id IN (SELECT saida_id FROM canais_cartoes WHERE estado = 'open'))`, ago(7 * DIA), ago(30 * DIA));
     this.d.db.run('DELETE FROM canais_cartoes WHERE saida_id IS NOT NULL AND saida_id NOT IN (SELECT id FROM canais_saida)');
-    this.d.db.run('DELETE FROM canais_entrada WHERE recebida_em < ?', ago(8 * DIA));
+    this.d.db.run('DELETE FROM canais_entrada WHERE recebida_em < ?', ago(ENTRADA_VALE_MS));
     this.d.db.run('DELETE FROM canais_avisados WHERE sent <> 0 AND at < ?', ago(30 * DIA));
   }
 

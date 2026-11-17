@@ -1,3 +1,4 @@
+import { usePolitica } from './politica.ts';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, errMsg, requestId } from '../../lib/api.ts';
 import { emitLocal, useResource } from '../../lib/live.ts';
@@ -24,7 +25,7 @@ interface WorkspaceRef { workspaceId: string; label?: string | null; role: strin
 /** o nome do workspace do World; o código curto só quando ele não tem nome */
 const nomeWs = (w: WorkspaceRef): string => { const n = nomeDoWorkspace(w); return 'nome' in n ? n.nome : tw('vinculo.existente', { codigo: n.codigo }); };
 interface LocalWs { id: string; name: string; current: boolean }
-interface Link { accountEmail: string | null; emailVerified: boolean; deviceId: string; workspaces?: WorkspaceRef[]; boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean }
+interface Link { accountEmail: string | null; emailVerified: boolean; deviceId: string; workspaces?: WorkspaceRef[]; boundWorkspaceId: string | null; boundWorkspaceIds?: string[]; localSyncWorkspaceIds?: string[]; boundWorkspaceName: string | null; currentIsBound: boolean }
 interface Status { configured: boolean; service: string | null; me: { displayName: string }; deviceLimit: LoginLimit | null; link: Link | null; localWorkspaces: LocalWs[] }
 interface Wallet { available: string; reserved: string; lots: Array<{ id: string; source: string; remaining: string; expiresAt: string | null; status: string }> }
 interface Statement { entries: Array<{ id: string; kind: string; delta: string; amount: string; createdAt: string }> }
@@ -84,16 +85,34 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
   const cat = useResource<Catalog>(l.currentIsBound ? '/api/world/catalog' : null, []);
   const plano = bill.data?.entitlement.plan_sku && ['active', 'grace'].includes(bill.data.entitlement.status)
     ? cat.data?.items.find((i) => i.sku === bill.data!.entitlement.plan_sku)?.name ?? bill.data.entitlement.plan_sku : null;
+  const ligados = l.boundWorkspaceIds ?? (l.boundWorkspaceId ? [l.boundWorkspaceId] : []);
+  // links por conta: cada plano da conta vale em N workspaces (ligar e desligar não mexe na assinatura)
+  const planos = useResource<{ plans: Array<{ holderWorkspaceId: string; plan_sku: string | null; links: number; used: number }> }>('/api/world/plans', [ligados.join(',')]);
+  // os do World que ainda não estão neste computador (notebook novo): baixar cria o workspace aqui e liga a ele
+  const aqui = new Set(l.localSyncWorkspaceIds ?? []);
+  const paraBaixar = l.localSyncWorkspaceIds ? remotes.filter((r) => !aqui.has(r.workspaceId)) : [];
+  const baixar = (sws: string) => act(() => api.post('/api/world/download', { syncWorkspaceId: sws }), t('vinculo.baixadoMsg'));
   const ligar = (id: string, syncWorkspaceId: string | null) => act(() => api.post('/api/world/bind', { workspaceId: id, syncWorkspaceId }), t('vinculo.ligadoMsg'));
   const abrir = (id: string) => act(async () => { await api.post('/api/session/workspace', { workspaceId: id }); window.location.reload(); });
   return (
     <div className="painel-ws">
-      {!l.boundWorkspaceId && <p className="muted small">{t('vinculo.escolher')}</p>}
-      {l.boundWorkspaceId && !l.currentIsBound && <p className="muted small">{t('vinculo.abrir', { nome: l.boundWorkspaceName ?? l.boundWorkspaceId })}</p>}
+      {(planos.data?.plans ?? []).map((p) => (
+        <p key={p.holderWorkspaceId} className="small"><strong>{t('vinculo.links', { plano: cat.data?.items.find((i) => i.sku === p.plan_sku)?.name ?? (p.plan_sku ?? '').replace('world_', ''), usados: p.used, total: p.links })}</strong></p>
+      ))}
+      {!ligados.length && <p className="muted small">{t('vinculo.escolher')}</p>}
+      {ligados.length > 0 && !l.currentIsBound && <p className="muted small">{t('vinculo.abrir', { nome: l.boundWorkspaceName ?? ligados[0] })}</p>}
+      {paraBaixar.length > 0 && (
+        <div className="small">
+          <p className="muted">{t('vinculo.baixarTitulo')}</p>
+          {paraBaixar.map((r) => (
+            <p key={r.workspaceId}>{nomeWs(r)} <button className="btn btn--sm" disabled={busy} onClick={() => void baixar(r.workspaceId)}>{t('vinculo.baixar')}</button></p>
+          ))}
+        </div>
+      )}
       {!s.localWorkspaces.length ? <p className="muted small">{t('vinculo.semWorkspace')}</p> : (
         <div className="ws-cards">
           {s.localWorkspaces.map((w) => {
-            const ligado = l.boundWorkspaceId === w.id;
+            const ligado = (l.boundWorkspaceIds ?? (l.boundWorkspaceId ? [l.boundWorkspaceId] : [])).includes(w.id);
             return (
               <WsCard key={w.id} id={w.id} nome={w.name} atual={w.current} escolhido={escolhido === w.id}
                 selos={<>
@@ -104,8 +123,8 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
                 </>}
                 acoes={escolhido === w.id ? null : <>
                   {!w.current && <button className="btn btn--sm" disabled={busy} onClick={() => void abrir(w.id)}>{t('vinculo.abrirWs')}</button>}
-                  {ligado && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void act(() => api.del('/api/world/bind'), t('vinculo.desligado'))}>{t('vinculo.desligar')}</button>}
-                  {!l.boundWorkspaceId && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => (remotes.length ? (setEscolhido(w.id), setRemote('')) : void ligar(w.id, null))}>{t('vinculo.ligarEste')}</button>}
+                  {ligado && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void act(() => api.del(`/api/world/bind?workspaceId=${encodeURIComponent(w.id)}`), t('vinculo.desligado'))}>{t('vinculo.desligar')}</button>}
+                  {!ligado && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => (remotes.length ? (setEscolhido(w.id), setRemote('')) : void ligar(w.id, null))}>{t('vinculo.ligarEste')}</button>}
                 </>}>
                 {escolhido === w.id && (
                   <div className="ws-card__destino" role="radiogroup" aria-label={t('vinculo.destino')}>
@@ -343,7 +362,7 @@ export function AceitarConvite({ onDone, compacto }: { onDone?: () => void; comp
  * só para a assinatura e a recarga como passo à parte), o cartão e as faturas e o cancelamento no fim do período.
  */
 export function PlanoPainel({ planoInicial }: { planoInicial?: string | null } = {}) {
-  const t = useTw();
+  const t = useTw(); const pol = usePolitica();
   const cat = useResource<Catalog>('/api/world/catalog', []);
   const bill = useResource<Billing>('/api/world/billing', []);
   const [onMsg, msgEl] = useMsg();
@@ -360,7 +379,7 @@ export function PlanoPainel({ planoInicial }: { planoInicial?: string | null } =
   return (
     <div className="painel-plano">
       {msgEl}
-      {e.status === 'grace' && <p className="error" role="alert">{t('plano.recusado', { dia: day(e.grace_until) })}</p>}
+      {e.status === 'grace' && <p className="error" role="alert">{t('plano.recusado', { dia: day(e.grace_until), dias: pol.graceDays })}</p>}
       {cur && ['active', 'grace'].includes(e.status) ? (
         <div className="painel-plano__atual">
           <span className="mundo-selo mundo-selo--claro"><Icon name="check" size={13} /> {cur.name}</span>
@@ -372,7 +391,7 @@ export function PlanoPainel({ planoInicial }: { planoInicial?: string | null } =
             <li><Icon name="coins" size={15} /> {t('plano.porMes', { valor: dr(cur.monthlyDracmas ?? '0') })}</li>
           </ul>
         </div>
-      ) : e.status === 'expired' ? <p className="muted">{t('plano.terminou')}</p> : null}
+      ) : e.status === 'expired' ? <p className="muted">{t('plano.terminou', { dias: pol.retentionDays })}</p> : null}
       {cur && ['active', 'grace'].includes(e.status) && dono && <UpgradeTip ws={bill.data.workspaceId ?? ''} cur={cur} people={Math.max(e.people, bill.data.seatsUsed)} plans={plans} addon={addon} />}
       {!dono ? <p className="muted small">{t('plano.quemCuida')}</p> : <CarrinhoPainel cat={cat.data} bill={bill.data} onMsg={onMsg} onDone={() => bill.reload()} planoInicial={planoInicial} />}
       {live && (
@@ -396,7 +415,7 @@ const gravar = (k: string, v: string | null) => { try { if (v === null) localSto
  * do pagamento. Antes da prévia, só a soma do catálogo, rotulada assim.
  */
 export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat: Catalog; bill: Billing; onMsg: Msg; onDone: () => void; planoInicial?: string | null }) {
-  const t = useTw();
+  const t = useTw(); const polC = usePolitica();
   const plans = cat.items.filter((i) => i.kind === 'plan');
   const topups = cat.items.filter((i) => i.kind === 'topup');
   const sub = bill.subscription;
@@ -467,7 +486,7 @@ export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat
           </select>
         </label>
         {contador(t('carrinho.pessoas'), c.pessoas, (n) => mudar({ pessoas: n }), vaga ? ` · ${brl(vaga.priceCents)}${periodo}` : '', a.assinatura ? a.pessoas : null)}
-        {contador(t('carrinho.jobs'), c.jobs, (n) => mudar({ jobs: n }), jobs ? ` · ${brl(jobs.priceCents)}${periodo}` : '', a.assinatura ? a.jobs : null)}
+        {contador(t('carrinho.jobs', { n: polC.jobPackSize }), c.jobs, (n) => mudar({ jobs: n }), jobs ? ` · ${brl(jobs.priceCents)}${periodo}` : '', a.assinatura ? a.jobs : null)}
         <label className="carrinho__linha">
           <span className="carrinho__rotulo">{t('carrinho.recarga')}</span>
           <select value={c.recarga ?? ''} onChange={(ev) => mudar({ recarga: ev.target.value || null })}>

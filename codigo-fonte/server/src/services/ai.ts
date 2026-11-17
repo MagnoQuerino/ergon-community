@@ -65,10 +65,23 @@ export function apelidoErgonAi(model: string | null | undefined): string | null 
   if (/^deepseek-(flash|chat|v4-flash)$/.test(model)) return 'ergon-ai';
   return null;
 }
-/** o nome na tela de um modelo do Ergon AI: o do World; qualquer outro id (deepseek-*, antigos) aparece como "Ergon AI" */
-export const rotuloErgonAi = (model: string | null | undefined): string => (model && MODELOS_ERGON_AI.get(model)?.name) || 'Ergon AI';
+/** o nome na tela de um modelo do Ergon AI: o do World (id antigo: o do apelido dele); qualquer outro id aparece como "Ergon AI" */
+export const rotuloErgonAi = (model: string | null | undefined): string =>
+  (model && (MODELOS_ERGON_AI.get(model)?.name ?? MODELOS_ERGON_AI.get(apelidoErgonAi(model) ?? '')?.name)) || 'Ergon AI';
 export const descricaoErgonAi = (model: string | null | undefined): string | null => (model && MODELOS_ERGON_AI.get(model)?.description) || null;
 /** o endpoint guardado lista algum id que não é apelido da marca (conexão de antes): conectar de novo */
+/** A lista de modelos do Ergon AI na tela: um por nome (o endpoint de antes lista ids antigos, que viram o mesmo
+ *  "Ergon AI" do apelido); fica o apelido da marca quando ele está na lista, senão o primeiro id que dá aquele nome. */
+export function modelosVisiveisErgonAi(models: string[]): string[] {
+  const porApelido = new Map<string, string>();
+  for (const m of models) {
+    const chave = apelidoErgonAi(m) ?? m;
+    const ja = porApelido.get(chave);
+    if (!ja || (!MODELOS_ERGON_AI.has(ja) && MODELOS_ERGON_AI.has(m))) porApelido.set(chave, m);
+  }
+  const vistos = new Set<string>();
+  return [...porApelido.values()].filter((m) => { const n = rotuloErgonAi(m); if (vistos.has(n)) return false; vistos.add(n); return true; });
+}
 export const precisaReconectarErgonAi = (models: string[]): boolean => models.some((m) => !MODELOS_ERGON_AI.has(m));
 
 /** O modelo próprio de cada agente no Ergon AI, gravado com um id antigo, passa para o apelido da marca. */
@@ -286,7 +299,7 @@ export class AiService {
       principal: { provider: o?.provider ?? null, model: o?.model ?? null },
       contas: (o?.providers ?? []).filter((x) => x.authenticated && x.models.length).map((x) => ({
         id: x.slug, name: ACCOUNTS.find((a) => a.id === x.slug)?.name ?? x.name, billing: billingOf(x.slug),
-        models: x.models.slice(0, 400).map((m) => ({ id: m, label: labelFor(x.slug, m) })) })),
+        models: (ehErgonAi(x.slug) ? modelosVisiveisErgonAi(x.models) : x.models).slice(0, 400).map((m) => ({ id: m, label: labelFor(x.slug, m) })) })),
     };
   }
   /** conta do modelo padrão já lida (sem rede) */
@@ -355,12 +368,13 @@ export class AiService {
     const o = await this.modelOptions(refresh);
     const providers = o.providers.filter((p) => p.authenticated && p.models.length).map((p) => ({
       id: p.slug, name: ACCOUNTS.find((a) => a.id === p.slug)?.name ?? p.name, billing: billingOf(p.slug),
-      models: p.models.map((m) => {
+      models: (ehErgonAi(p.slug) ? modelosVisiveisErgonAi(p.models) : p.models).map((m) => {
         const pr = p.pricing[m] ?? {};
         const input = price(pr.input); const output = price(pr.output);
         const free = pr.free === true || m.endsWith(':free');
         if (ehErgonAi(p.slug)) { const description = descricaoErgonAi(m); return { id: m, label: rotuloErgonAi(m), vendor: '', input, output, tier: tierOf(input, free), ...(description ? { description } : {}) }; }
-        return { id: m, label: modelLabel(m), vendor: vendorOf(m), input, output, tier: tierOf(input, free) };
+        // o "grátis" vem uma vez só, pela faixa (o rótulo sem o ":free", que viraria "(grátis) · grátis")
+        return { id: m, label: modelLabel(free ? m.replace(/:free$/, '') : m), vendor: vendorOf(m), input, output, tier: tierOf(input, free) };
       }),
     }));
     return { default: { provider: o.provider, model: o.model, label: labelFor(o.provider, o.model) }, providers };

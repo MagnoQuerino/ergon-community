@@ -104,6 +104,8 @@ export class FakeWorld {
   /** chaves delegadas do modelo (por transferência; passam ao Job no aceite e às rodadas de recuperação) */
   grants = new Map<string, { provider: string; model: string; apiKey: string }>();
   /** cada checkout pedido (workspace e itens), para os testes conferirem o carrinho */
+  /** workspaces desativados pelo app (apagados no computador) */
+  deactivated = new Set<string>();
   checkouts: Array<{ ws: string; items: Array<{ sku: string; quantity: number }> }> = [];
   /**
    * Loja colaborativa (world/src/marketplace.ts): criadores, itens com versões, licenças grátis. Só grátis: preço
@@ -480,6 +482,9 @@ export class FakeWorld {
       this.workspaces.set(w.id, w);
       return { json: { workspaceId: w.id, keyVersion: 1 } };
     }
+    if (key === 'GET /v1/plans') return { json: { plans: [] } };
+    m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/deactivate$/.exec(p);
+    if (m && method === 'POST') { const w = mine(m[1]); if (!w) return { fail: [404, 'sync_workspace'] }; this.deactivated.add(w.id); return { json: { ok: true } }; }
     m = /^\/v1\/sync\/workspaces\/(sws_[a-f0-9]{32})\/label$/.exec(p);
     if (m && method === 'PUT') {
       const w = mine(m[1]); if (!w) return { fail: [404, 'sync_workspace'] };

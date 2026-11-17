@@ -69,13 +69,29 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return s;
       };
       /** os workspaces locais de que a pessoa é dona: só um deles pode ser ligado ao World */
+      /**
+       * Workspace local apagado (ou ligação a um que não existe mais): sai das ligações deste computador e o World o
+       * desativa (libera o link do plano, some das listas). Sem rede, fica para a próxima vez que a tela abrir.
+       */
+      const desativarNoWorld = async (userId: string, ws: string, conhecido?: string | null): Promise<void> => {
+        const w = conhecido ?? sync.worldId(ws);
+        const s = links?.session(userId) ?? null;
+        if (w && s) {
+          try { await client.call('POST', `/v1/sync/workspaces/${w}/deactivate`, {}, s); }
+          catch (e) { if ((e as { code?: string }).code === 'world_offline') return; }
+        } else if (w && !s) return;
+        forgetWorkspace(db, ws); links?.setBound(userId, ws, false);
+      };
       const ownWorkspaces = (userId: string) => db.all<{ id: string; name: string }>(
         "SELECT w.id, w.name FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? AND m.role = 'owner' ORDER BY w.created_at", userId);
 
       app.get('/api/world/status', async (req) => {
         const a = h.auth(req);
         const l = links?.get(a.userId) ?? null;
-        const bound = l?.bound_workspace_id ?? null;
+        // o app é a fonte da verdade: ligação a um workspace que não existe mais aqui some (e o World o desativa)
+        if (l && links) for (const ws of links.boundList(a.userId)) if (!db.get('SELECT 1 FROM workspaces WHERE id = ?', ws)) await desativarNoWorld(a.userId, ws);
+        const lista = links?.boundList(a.userId) ?? [];
+        const bound = lista.includes(a.workspaceId) ? a.workspaceId : lista[0] ?? null;
         return {
           available: true, configured: !!wcfg.url, service: wcfg.url ? new URL(wcfg.url).origin : null,
           me: { displayName: a.displayName },
@@ -83,7 +99,10 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
             accountEmail: l.account_email, emailVerified: !!l.email_verified, deviceId: l.device_id, refreshedAt: l.authorized_until,
             workspaces: l.entitlement ? JSON.parse(l.entitlement) : [],
             boundWorkspaceId: bound, boundWorkspaceName: bound ? db.get<{ name: string }>('SELECT name FROM workspaces WHERE id = ?', bound)?.name ?? null : null,
-            currentIsBound: !!bound && bound === a.workspaceId,
+            currentIsBound: lista.includes(a.workspaceId),
+            boundWorkspaceIds: lista,
+            // os workspaces do World que já estão neste computador (os outros podem ser baixados)
+            localSyncWorkspaceIds: db.all<{ s: string }>('SELECT i.sync_workspace_id AS s FROM world_workspace_ids i JOIN workspaces w ON w.id = i.workspace_id').map((r) => r.s),
           } : null,
           localWorkspaces: ownWorkspaces(a.userId).map((w) => ({ ...w, current: w.id === a.workspaceId })),
           // login recusado pelo limite de aparelhos: quais estão conectados (para escolher qual encerrar)
@@ -191,26 +210,80 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const a = h.auth(req); const b = (req.body ?? {}) as Record<string, unknown>;
         const ws = str(b.workspaceId, 64) ?? a.workspaceId; const sws = b.syncWorkspaceId;
         if (!ownWorkspaces(a.userId).some((w) => w.id === ws)) throw new HttpError(403, 'not_owner', 'Só um workspace seu pode ser ligado ao Ergon World.');
-        const cur = L().bound(a.userId);
-        if (cur && cur !== ws) throw new HttpError(409, 'already_bound', 'Outro workspace seu já está ligado ao Ergon World. Desligue-o antes.');
         if (sws !== undefined && sws !== null && (typeof sws !== 'string' || !SWS.test(sws))) throw new HttpError(400, 'invalid', 'workspace do World inválido');
         sessionOf(a.userId);
         const known = sync.worldId(ws);
         if (typeof sws === 'string' && sws !== known) { forgetWorkspace(db, ws); sync.adopt(ws, sws); }
         else if (!known) await sync.ensureWorld(a.userId, ws);
         L().setBound(a.userId, ws);
-        return { boundWorkspaceId: ws, syncWorkspaceId: sync.worldId(ws) };
+        const plano = await ligarAoPlano(a.userId, ws).catch(() => null);
+        return { boundWorkspaceId: ws, syncWorkspaceId: sync.worldId(ws), planHolder: plano };
       });
+      /**
+       * Links por conta: o workspace recém-ligado entra no primeiro plano da conta com link livre (sem Stripe). Já tem
+       * plano próprio ou está num plano: nada a fazer. Sem link livre: fica ligado, sem plano, até liberar um.
+       */
+      const ligarAoPlano = async (userId: string, ws: string): Promise<string | null> => {
+        const w = sync.worldId(ws); const s = links?.session(userId);
+        if (!w || !s) return null;
+        const { plans } = await client.call<{ plans: Array<{ holderWorkspaceId: string; links: number; used: number; workspaces: Array<{ workspaceId: string }> }> }>('GET', '/v1/plans', undefined, s);
+        const ja = plans.find((p) => p.workspaces.some((x) => x.workspaceId === w));
+        if (ja) return ja.holderWorkspaceId;
+        for (const p of plans) {
+          if (p.used >= p.links) continue;
+          try { await client.call('POST', `/v1/plans/${p.holderWorkspaceId}/links`, { workspaceId: w }, s); return p.holderWorkspaceId; }
+          catch (e) { if (['own_plan', 'is_holder'].includes(String((e as { code?: string }).code))) return null; }
+        }
+        return null;
+      };
+      /** Baixa para este computador um workspace que está no World (notebook novo): cria o local e liga a ele. */
+      app.post('/api/world/download', async (req) => {
+        const a = h.auth(req); const sws = (req.body as { syncWorkspaceId?: unknown } | undefined)?.syncWorkspaceId;
+        if (typeof sws !== 'string' || !SWS.test(sws)) throw new HttpError(400, 'invalid', 'workspace do World inválido');
+        if (!h.createWorkspace) throw new HttpError(503, 'unavailable', 'Indisponível nesta versão.');
+        sessionOf(a.userId);
+        const ja = db.get<{ workspace_id: string }>('SELECT workspace_id FROM world_workspace_ids WHERE sync_workspace_id = ?', sws);
+        if (ja && db.get('SELECT 1 FROM workspaces WHERE id = ?', ja.workspace_id)) throw new HttpError(409, 'already_here', 'Este workspace já está neste computador.');
+        const ref = (JSON.parse(L().get(a.userId)?.entitlement ?? '[]') as Array<{ workspaceId: string; label?: string | null }>).find((x) => x.workspaceId === sws);
+        const ws = h.createWorkspace(a.userId, (ref?.label ?? '').trim().slice(0, 60) || 'Workspace do World');
+        sync.adopt(ws, sws);
+        L().setBound(a.userId, ws);
+        await ligarAoPlano(a.userId, ws).catch(() => null);
+        return { workspaceId: ws, syncWorkspaceId: sws };
+      });
+      /** Os planos da conta com os links usados (para a tela "Links do Ergon World: 2 de 3"). */
+      app.get('/api/world/plans', async (req) => client.call('GET', '/v1/plans', undefined, sessionOf(h.auth(req).userId)));
       /** Desliga o workspace do World neste computador: ele volta a ser só local (os dados ficam; o World guarda o dele). */
       app.delete('/api/world/bind', async (req) => {
-        const a = h.auth(req); const ws = L().bound(a.userId);
-        if (ws) { forgetWorkspace(db, ws); L().setBound(a.userId, null); }
+        const a = h.auth(req); const lista = L().boundList(a.userId);
+        const pedido = str((req.query as { workspaceId?: unknown }).workspaceId, 64);
+        const ws = pedido ?? (lista.includes(a.workspaceId) ? a.workspaceId : lista.length === 1 ? lista[0] : null);
+        if (!ws || !lista.includes(ws)) return { ok: true };
+        // o link do plano fica livre para outro workspace (nada muda na assinatura)
+        const w = sync.worldId(ws); const s = links?.session(a.userId);
+        if (w && s) {
+          const { plans } = await client.call<{ plans: Array<{ holderWorkspaceId: string; workspaces: Array<{ workspaceId: string }> }> }>('GET', '/v1/plans', undefined, s).catch(() => ({ plans: [] }));
+          const p = plans.find((x) => x.workspaces.some((y) => y.workspaceId === w));
+          if (p) await client.call('DELETE', `/v1/plans/${p.holderWorkspaceId}/links/${w}`, undefined, s).catch(() => undefined);
+        }
+        forgetWorkspace(db, ws); L().setBound(a.userId, ws, false);
         return { ok: true };
       });
+      // workspace apagado no app: o World o desativa (o id do World é lido antes de o workspace sumir)
+      app.addHook('preHandler', async (req) => {
+        if (req.method !== 'DELETE' || req.routeOptions.url !== '/api/workspaces/:id') return;
+        const ws = String((req.params as { id?: string }).id ?? '');
+        const dono = links?.ownerOfBound(ws);
+        if (dono) (req as { apagando?: unknown }).apagando = { ws, dono, w: sync.worldId(ws) };
+      });
+      app.addHook('onResponse', async (req, reply) => {
+        const x = (req as { apagando?: { ws: string; dono: string; w: string | null } }).apagando;
+        if (x && reply.statusCode === 200) void desativarNoWorld(x.dono, x.ws, x.w).catch(() => undefined);
+      });
       /** O workspace World do workspace atual, só se ele for o ligado ao World pela pessoa (os outros ficam locais). */
-      const worldWs = (a: { userId: string; workspaceId: string }): string | null => (links?.bound(a.userId) === a.workspaceId ? sync.worldId(a.workspaceId) : null);
+      const worldWs = (a: { userId: string; workspaceId: string }): string | null => (links?.isBound(a.userId, a.workspaceId) ? sync.worldId(a.workspaceId) : null);
       const boundWs = (a: { userId: string; workspaceId: string }): string => {
-        if (links?.bound(a.userId) !== a.workspaceId) throw new HttpError(409, 'world_not_bound', 'Este workspace não está ligado ao Ergon World.');
+        if (!links?.isBound(a.userId, a.workspaceId)) throw new HttpError(409, 'world_not_bound', 'Este workspace não está ligado ao Ergon World.');
         return a.workspaceId;
       };
 
@@ -500,8 +573,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       const renovar = async (userId: string): Promise<string | null> => {
         const r = await L().renew(userId);
         void atualizarErgonAi(userId).catch(() => undefined);
-        const ligado = links?.bound(userId);
-        if (ligado) h.canais?.atualizar(ligado); // os papéis dos membros, para os canais externos
+        for (const ligado of links?.boundList(userId) ?? []) h.canais?.atualizar(ligado); // os papéis dos membros, para os canais externos
         return r;
       };
       // ao abrir o aplicativo (sem pressa: o motor pode estar acordando)
@@ -521,7 +593,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       const phrase = (req: FastifyRequest) => { const v = (req.body as { recoveryPhrase?: unknown } | undefined)?.recoveryPhrase; return typeof v === 'string' && v.trim().length >= 20 ? v.trim() : undefined; };
       app.get('/api/world/sync', async (req) => {
         const a = h.auth(req);
-        if (links?.bound(a.userId) !== a.workspaceId) return { bound: false, enabled: false };
+        if (!links?.isBound(a.userId, a.workspaceId)) return { bound: false, enabled: false };
         const st = sync.status(a.workspaceId);
         // workspace adotado ainda sem sincronia: a tela precisa saber se a chave nasce aqui (workspace criado no servidor,
         // pessoa dona ou admin), se espera quem administra ou se espera a entrega por outro computador
@@ -547,7 +619,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return sync.setRecovery(a.userId, boundWs(a), p);
       });
       app.post('/api/world/sync/pull', async (req) => { const a = h.owner(req); return sync.pull(a.userId, boundWs(a), (req.body as { apply?: unknown } | undefined)?.apply === true); });
-      app.get('/api/world/sync/conflicts', async (req) => { const a = h.owner(req); return links?.bound(a.userId) === a.workspaceId ? sync.conflicts(a.userId, a.workspaceId) : []; });
+      app.get('/api/world/sync/conflicts', async (req) => { const a = h.owner(req); return links?.isBound(a.userId, a.workspaceId) ? sync.conflicts(a.userId, a.workspaceId) : []; });
       app.post('/api/world/sync/conflicts/:id', async (req) => {
         const a = h.owner(req); const keep = (req.body as { keep?: unknown } | undefined)?.keep;
         if (keep !== 'mine' && keep !== 'theirs') throw new HttpError(400, 'invalid', 'escolha manter a sua versão ou ficar com a do outro aparelho');
@@ -572,8 +644,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       });
       // os canais externos (services/canais/externo.ts): a lista de membros do workspace ligado, pela sessão de quem o ligou
       h.canais?.ligar(async (ws) => {
-        const dono = db.get<{ user_id: string }>("SELECT user_id FROM world_links WHERE bound_workspace_id = ? AND status = 'active'", ws);
-        const w = dono ? sync.worldId(ws) : null; const s = dono ? links?.session(dono.user_id) : null;
+        const dono = links?.ownerOfBound(ws) ?? null;
+        const w = dono ? sync.worldId(ws) : null; const s = dono ? links?.session(dono) : null;
         if (!w || !s) return null;
         return (await client.call<{ members: Array<{ accountId: string; role: string }> }>('GET', `/v1/sync/workspaces/${w}/members`, undefined, s)).members;
       });
@@ -581,8 +653,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       app.addHook('onResponse', async (req, reply) => {
         if (req.method !== 'PATCH' || req.routeOptions.url !== '/api/workspaces/:id' || reply.statusCode !== 200) return;
         const ws = String((req.params as { id?: string }).id ?? '');
-        const owner = db.get<{ user_id: string }>("SELECT user_id FROM world_links WHERE bound_workspace_id = ? AND status = 'active'", ws);
-        const w = owner ? sync.worldId(ws) : null; const s = owner ? links?.session(owner.user_id) : null;
+        const owner = links?.ownerOfBound(ws) ?? null;
+        const w = owner ? sync.worldId(ws) : null; const s = owner ? links?.session(owner) : null;
         const label = sync.labelOf(ws).label;
         if (w && s && label) void client.call('PUT', `/v1/sync/workspaces/${w}/label`, { label }, s).catch(() => undefined);
       });
