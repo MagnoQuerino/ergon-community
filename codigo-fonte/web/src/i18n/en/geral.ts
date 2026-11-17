@@ -85,6 +85,9 @@ const geral: Traducao<typeof pt> = {
   'ws.local': 'On this computer',
   'ws.gerenciar': 'Manage',
   'ws.nasce': 'It starts with the initial team and city and goes through the welcome, like a new account.',
+  'ws.buscar': 'Search workspaces',
+  'ws.buscarAria': 'Search workspaces by name',
+  'ws.nenhum': 'No workspace with that name.',
 
   'conta.aria': 'Account: {nome}',
   'conta.menu': 'Account',
