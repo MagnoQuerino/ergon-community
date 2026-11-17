@@ -237,7 +237,9 @@ function rotulos(chaves: readonly string[], chave: (k: string) => Chave): Record
   });
 }
 export const PROPOSAL_KIND: Record<string, string> = rotulos(TIPOS, (k) => `servidor.tipo.${k}` as Chave);
-export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo' | 'canal_externo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null }
+export interface Proposal { id: string; conversation_id: string | null; run_id: string | null; kind: 'conexao' | 'depois_de_ler' | 'aprovacao' | 'regra' | 'gestao' | 'sector' | 'create_agent' | 'tools' | 'permission' | 'routine' | 'routine_edit' | 'question' | 'edit_agent' | 'deactivate_agent' | 'reactivate_agent' | 'sector_edit' | 'sector_new' | 'task' | 'ledger' | 'delete_task' | 'info_request' | 'handoff' | 'batch' | 'purge' | 'segredo' | 'canal_externo'; summary: string; status: 'proposed' | 'applied' | 'rejected' | 'failed'; result: string | null; created_at: string; payload?: string | null;
+  /** comando para aprovar (rc.33): o comando, só para "Ver detalhes técnicos", e a etiqueta do risco */
+  detalhe?: string | null; risco?: string | null }
 export interface ModelEntry { id: string; label: string; vendor: string; input: number | null; output: number | null; tier: 'grátis' | 'econômico' | 'intermediário' | 'ponta' | null; /** curta, do World (os modelos do Ergon AI) */ description?: string }
 export interface ModelCatalog { default: { provider: string | null; model: string | null; label: string }; providers: Array<{ id: string; name: string; billing: Billing; models: ModelEntry[] }> }
 export interface AiStatus {
@@ -382,7 +384,7 @@ export type Need = 'info' | 'approval' | 'review' | 'retry';
 export interface RequestPayload { taskId: string; number: number; title: string; need: Need; agent: string; question: string | null; excerpt: string | null; review?: boolean; round?: number }
 export interface Decisions {
   /** task_id e task_number: ação numa conta pedida num card da equipe (o item leva ao card) */
-  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; payload?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
+  proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; payload?: string | null; detalhe?: string | null; risco?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
   waiting: Array<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>;
   /** cards da equipe parados à espera de você */
   cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null }>;

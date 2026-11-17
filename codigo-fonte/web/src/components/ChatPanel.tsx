@@ -12,6 +12,7 @@ import { ComandosBar, DicaDeAtalhos, useFraseDoComando, type ResultadoComando } 
 import { Icon } from './Icon.tsx';
 import { OrientarCampo } from './AjustesEquipe.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
+import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
 import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { Selo } from './Selo.tsx';
@@ -681,7 +682,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             : (
               <div key={p.id} className={`proposal-card proposal-card--${p.status}`}>
                 <Selo icone={p.kind === 'purge' || p.kind === 'delete_task' ? 'trash' : p.kind === 'routine' || p.kind === 'routine_edit' ? 'repeat' : p.kind === 'conexao' ? 'plug' : p.kind === 'regra' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'permission' || p.kind === 'gestao' ? 'shield-check' : 'flag'}>{PROPOSAL_KIND[p.kind] ?? p.kind}</Selo>
-                <span className="proposal-card__txt">{p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'aprovacao' || p.kind === 'regra' || p.kind === 'gestao' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
+                <span className="proposal-card__txt">{p.kind === 'aprovacao' ? <TextoDaAprovacao resumo={p.summary} risco={p.risco} detalhe={p.detalhe} /> : p.kind === 'conexao' || p.kind === 'depois_de_ler' || p.kind === 'regra' || p.kind === 'gestao' ? <TextoLongo texto={p.summary} /> : p.summary}{p.result && p.status !== 'proposed' ? <span className="muted"> — {p.result}</span> : null}</span>
                 {p.status === 'proposed' && p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} ocupado={deciding[p.id] === 'reject' ? 'recusar' : deciding[p.id] ? 'aplicar' : false} onEscolher={(alcance) => void decide(p.id, 'apply', { alcance })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' && p.kind === 'depois_de_ler' ? <BotoesPrazo ocupado={deciding[p.id] === 'reject' ? 'recusar' : deciding[p.id] ? 'aplicar' : false} onEscolher={(prazo) => void decide(p.id, 'apply', { prazo })} onRecusar={() => void decide(p.id, 'reject')} />
                 : p.status === 'proposed' ? (

@@ -500,6 +500,44 @@ const GESTAO = {
   'proposta.gestao.acao.copia.agora': 'Fazer uma cópia de segurança agora',
 } as const;
 
+/**
+ * O cartão de um comando para aprovar (aprovacao-cartao.ts): a frase em linguagem simples, o que o comando faz, para quê
+ * e a etiqueta do risco. O comando em si nunca entra na frase (fica em "Ver detalhes técnicos").
+ */
+const APROVACAO = {
+  'proposta.aprovacao.quer': '{agente} quer {acao}.',
+  'proposta.aprovacao.querPara': '{agente} quer {acao} para {objetivo}.',
+  'proposta.aprovacao.querNoTrabalho': '{agente} quer {acao}, no trabalho “{contexto}”.',
+  'proposta.aprovacao.querParaNoTrabalho': '{agente} quer {acao} para {objetivo}, no trabalho “{contexto}”.',
+  'proposta.aprovacao.acao.programa': 'rodar um pequeno programa no computador',
+  'proposta.aprovacao.acao.programaEm': 'rodar um pequeno programa em {linguagem}',
+  'proposta.aprovacao.acao.comandos': 'rodar uma sequência de comandos no computador',
+  'proposta.aprovacao.acao.apagar': 'apagar arquivos',
+  'proposta.aprovacao.acao.apagarDados': 'apagar dados de um banco de dados',
+  'proposta.aprovacao.acao.desinstalar': 'desinstalar um programa',
+  'proposta.aprovacao.acao.descartar': 'descartar mudanças feitas em arquivos',
+  'proposta.aprovacao.acao.formatar': 'apagar um disco inteiro ou cópias de segurança',
+  'proposta.aprovacao.acao.internetRodar': 'baixar um programa da internet e rodá-lo',
+  'proposta.aprovacao.acao.publicarForcado': 'substituir o histórico de um projeto guardado na internet',
+  'proposta.aprovacao.acao.configuracao': 'mudar arquivos de configuração do computador',
+  'proposta.aprovacao.acao.parar': 'parar ou reiniciar programas que estão rodando',
+  'proposta.aprovacao.acao.administrador': 'rodar um comando como administrador',
+  'proposta.aprovacao.acao.senhas': 'mexer em senhas ou chaves de acesso',
+  'proposta.aprovacao.acao.disfarcado': 'rodar um comando difícil de conferir',
+  'proposta.aprovacao.acao.instalar': 'instalar um programa',
+  'proposta.aprovacao.acao.baixar': 'acessar a internet',
+  'proposta.aprovacao.acao.comando': 'rodar um comando no computador',
+  'proposta.aprovacao.obj.datas': 'calcular datas',
+  'proposta.aprovacao.obj.tamanho': 'conferir o tamanho de textos',
+  'proposta.aprovacao.obj.dados': 'organizar dados',
+  'proposta.aprovacao.obj.contas': 'fazer contas',
+  'proposta.aprovacao.obj.calculo': 'fazer um cálculo e mostrar o resultado',
+  'proposta.aprovacao.risco.calcula': 'só calcula',
+  'proposta.aprovacao.risco.arquivos': 'mexe em arquivos',
+  'proposta.aprovacao.risco.internet': 'usa a internet',
+  'proposta.aprovacao.risco.apaga': 'apaga',
+} as const satisfies Record<string, Msg>;
+
 const SAUDE = {
   'saude.estado.operacional': 'Operacional',
   'saude.estado.limitado': 'Operacional com limitações',
@@ -546,8 +584,8 @@ const SAUDE = {
   'saude.gbLivres': '{gb} GB livres',
 } as const satisfies Record<string, Msg>;
 
-export const TEXTOS: Readonly<Record<string, Msg>> = { ...ERROS, ...HISTORICO, ...RESUMO, ...PROPOSTA, ...GESTAO, ...SAUDE };
-export type Codigo = keyof typeof ERROS | keyof typeof HISTORICO | keyof typeof RESUMO | keyof typeof PROPOSTA | keyof typeof GESTAO | keyof typeof SAUDE;
+export const TEXTOS: Readonly<Record<string, Msg>> = { ...ERROS, ...HISTORICO, ...RESUMO, ...PROPOSTA, ...GESTAO, ...APROVACAO, ...SAUDE };
+export type Codigo = keyof typeof ERROS | keyof typeof HISTORICO | keyof typeof RESUMO | keyof typeof PROPOSTA | keyof typeof GESTAO | keyof typeof APROVACAO | keyof typeof SAUDE;
 
 /** Um texto do sistema: o código e os valores dos marcadores. */
 export function tx(codigo: Codigo, valores?: Readonly<Record<string, Valor>>, forma?: Texto['forma']): Texto {
@@ -616,7 +654,7 @@ function numeroPt(s: string): Valor {
   return casas ? decimalTx(v, casas.length) : v;
 }
 for (const [codigo, m] of Object.entries(TEXTOS)) {
-  if (SO_MONTAR.has(codigo) || codigo.startsWith('proposta.gestao.') || !/^(erro|historico|proposta|saude)\./.test(codigo)) continue;
+  if (SO_MONTAR.has(codigo) || codigo.startsWith('proposta.gestao.') || codigo.startsWith('proposta.aprovacao.') || !/^(erro|historico|proposta|saude)\./.test(codigo)) continue;
   for (const forma of typeof m === 'string' ? [m] : Object.values(m).filter((x): x is string => typeof x === 'string')) {
     const nomes = [...forma.matchAll(/\{(\w+)\}/g)].map((x) => x[1]);
     if (!nomes.length) { if (!exatos.has(forma)) exatos.set(forma, codigo); continue; }

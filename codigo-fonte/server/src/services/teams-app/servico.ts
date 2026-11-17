@@ -25,6 +25,7 @@ import { instanceSetting, setInstanceSetting } from '../security.ts';
 import { coordinatorFor } from '../team-query.ts';
 import { migrarTeamsApp, type PessoaRow, type Plataforma, type SaidaRow, type VinculoRow } from './armazenamento.ts';
 import type { CanaisExternos, PedidoExterno } from '../canais/externo.ts';
+import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
 import { ABRIR_LONGO, KINDS_INTEIROS, LIMITE_TEAMS, cabeNoCanal, dataHora, montarCartao, montarTexto, partesDoResumo, resumoParaTeams, textoParaTeams, type DesenhoCartao, type EstadoDecisao, type ItemCartao } from './cartoes.ts';
 import { ClienteRele, ErroDoRele, type Ack, type EstadoConexao, type Quadro } from './cliente.ts';
 import {
@@ -797,7 +798,9 @@ export class TeamsApp {
   private decidePeloCanal(b: VinculoRow, proposalId: string): boolean {
     return !this.externos || this.externos.podeDecidirPeloCanal(b.workspace_id, b.user_id, proposalId);
   }
-  private itemDe(p: { id: string; kind: string; summary: string }, b?: VinculoRow | null): ItemCartao {
+  private itemDe(dela: { id: string; kind: string; summary: string }, b?: VinculoRow | null): ItemCartao {
+    // o comando para aprovar vai só com a frase simples (o cartão gravado antes da rc.33 levava o comando no texto)
+    const p = dela.kind === 'aprovacao' ? { ...dela, summary: resumoVisivelDaAprovacao(dela.summary) } : dela;
     const { titulo, texto } = partesDoResumo(p.summary);
     if (b && !this.decidePeloCanal(b, p.id)) return { tipo: 'aviso', p: p.id, titulo, texto, abrir: SO_NO_APP };
     if (p.kind === 'permission') return { tipo: 'aviso', p: p.id, titulo, texto, abrir: 'Abra o Ergon para autorizar (pede a sua senha).' };
@@ -822,7 +825,7 @@ export class TeamsApp {
           AND NOT EXISTS (SELECT 1 FROM teams_cards c WHERE c.proposal_id = agent_proposals.id AND c.binding_id = ?)
         ORDER BY created_at, rowid LIMIT 20`, p.workspace_id, b.created_at, p.conversation_id, p.conversation_id, b.binding_id);
     for (const x of props) {
-      const out = this.enfileirar(b, 'send', { desenho: { titulo: 'Precisa de você', itens: [this.itemDe(x, b)] } satisfies DesenhoCartao, summary: resumoParaTeams(`Precisa de você: ${partesDoResumo(x.summary).titulo}`) }, 'card');
+      const out = this.enfileirar(b, 'send', { desenho: { titulo: 'Precisa de você', itens: [this.itemDe(x, b)] } satisfies DesenhoCartao, summary: resumoParaTeams(`Precisa de você: ${partesDoResumo(x.kind === 'aprovacao' ? resumoVisivelDaAprovacao(x.summary) : x.summary).titulo}`) }, 'card');
       this.d.db.run("INSERT OR IGNORE INTO teams_cards (proposal_id, binding_id, activity_id, state, outbox_id) VALUES (?, ?, NULL, 'open', ?)", x.id, b.binding_id, out);
     }
     // o agente parou esperando uma resposta dela (waiting_user): o Teams fica sabendo, uma vez por execução, mesmo com os

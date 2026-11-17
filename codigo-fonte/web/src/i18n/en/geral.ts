@@ -265,6 +265,7 @@ const geral: Traducao<typeof pt> = {
   'arquivo.envioCancelado': 'upload canceled',
 
   'texto.recolher': 'Show less',
+  'detalhesTecnicos': 'See technical details',
   'texto.verInteiro': { one: 'Show the full text ({n} character)', other: 'Show the full text ({n} characters)' },
 };
 

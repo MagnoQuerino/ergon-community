@@ -11,6 +11,7 @@ import { useT } from '../i18n/index.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
+import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
 import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { Selo } from './Selo.tsx';
 
@@ -168,7 +169,7 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
                   : p.agent_name && <span className="muted small">{p.agent_name}</span>}
               </div>
               {/* o resumo é escrito pelo servidor e ainda vem só em português (próximo passo: server/src/lib/textos.ts, no começo) */}
-              <div className="dec-card__txt"><TextoLongo texto={p.summary} /></div>
+              <div className="dec-card__txt">{p.kind === 'aprovacao' ? <TextoDaAprovacao resumo={p.summary} risco={p.risco} detalhe={p.detalhe} /> : <TextoLongo texto={p.summary} />}</div>
               <div className={`${FILEIRA} dec-card__acts`}>
                 {p.kind === 'regra' ? <BotoesRegra sugerido={alcanceSugerido(p.payload)} ocupado={ocupadoDe(p.id)} onEscolher={(alcance) => void proposal(p.id, 'apply', { alcance })} onRecusar={() => void proposal(p.id, 'reject')} />
                   : p.kind === 'depois_de_ler' ? <BotoesPrazo ocupado={ocupadoDe(p.id)} onEscolher={(prazo) => void proposal(p.id, 'apply', { prazo })} onRecusar={() => void proposal(p.id, 'reject')} />

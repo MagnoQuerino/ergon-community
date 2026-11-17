@@ -22,6 +22,7 @@ import { HttpError, clip, id, notFound, now } from '../lib/util.ts';
 import { log } from '../lib/log.ts';
 import { audit, type Bus } from './bus.ts';
 import type { HermesClient, RunEvent } from './hermes.ts';
+import { cartaoDeAprovacao } from './aprovacao-cartao.ts';
 import { recordProposals } from './proposals.ts';
 import { sessionKeyFor, type RunRow } from './runs.ts';
 
@@ -42,7 +43,11 @@ interface Linha {
   run_id: string; request_id: string; workspace_id: string; proposal_id: string | null; tipo: 'motor' | 'cartao'; comando: string | null; padrao: string | null;
   estado: 'esperando' | 'respondida' | 'expirou'; espera_ms: number; created_at: string; decided_at: string | null;
 }
-interface PedidoDeAprovacao { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string; envio?: true }
+/**
+ * descricao: a regra de perigo do motor (em inglês, só para classificar: nunca aparece); contexto: a etapa ou o card em que
+ * a execução estava (a frase do cartão diz para quê); resumo: a frase em linguagem simples, sem o comando (aprovacao-cartao.ts)
+ */
+interface PedidoDeAprovacao { kind: 'aprovacao'; pedido: string; agente: string; comando: string; descricao: string; resumo: string; contexto?: string | null; envio?: true }
 
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
@@ -95,16 +100,26 @@ export class Aprovacoes {
     }
     const agente = this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', run.agent_id)?.name ?? 'O agente';
     const descricao = envio ? '' : clip((e.description ?? '').replace(/\s+/g, ' ').trim(), 300);
+    // a etapa (ou o card) em que a execução está: é para isso que o comando serve
+    const contexto = envio ? null : this.contexto(run);
+    // o comando nunca vai no texto do cartão (nem nos canais): a frase diz o que é e para quê, e o comando fica nos detalhes
     const resumo = envio
       ? `${agente} quer enviar algo em seu nome por um aplicativo conectado. Confira antes de aprovar (vale só para este envio):\n${clip(comando || '(sem o pedido)', 3000)}`
-      : `${agente} quer rodar um comando que pede a sua aprovação${descricao ? ` (${descricao})` : ''}:\n${clip(comando || '(sem o texto do comando)', 3000)}`;
-    const payload: PedidoDeAprovacao = { kind: 'aprovacao', pedido: requestId, agente, comando, descricao, resumo, ...(envio ? { envio: true as const } : {}) };
+      : cartaoDeAprovacao({ agente, comando, descricao, contexto }).resumo;
+    const payload: PedidoDeAprovacao = { kind: 'aprovacao', pedido: requestId, agente, comando, descricao, resumo, ...(contexto ? { contexto } : {}), ...(envio ? { envio: true as const } : {}) };
     recordProposals(this.db, this.bus, run.workspace_id, { conversationId: run.conversation_id ?? null, runId: run.id }, [payload]);
     const pid = this.db.get<{ id: string }>("SELECT id FROM agent_proposals WHERE workspace_id = ? AND run_id = ? AND kind = 'aprovacao' ORDER BY created_at DESC, rowid DESC LIMIT 1", run.workspace_id, run.id)?.id ?? null;
     this.db.run('UPDATE aprovacoes_motor SET proposal_id = ? WHERE run_id = ? AND request_id = ?', pid, run.id, requestId);
     audit(this.db, this.bus, { workspaceId: run.workspace_id, actorType: 'agent', actorId: run.agent_id, action: 'aprovacao.motor.pedido', targetType: 'run', targetId: run.id,
-      evidence: { run: run.id, padrao: e.patternKey ?? null }, result: `${agente} pediu aprovação para um comando${descricao ? ` (${descricao})` : ''}` });
+      evidence: { run: run.id, padrao: e.patternKey ?? null }, result: envio ? `${agente} pediu aprovação para um envio` : `pediu aprovação: ${resumo}` });
     this.avisar(run);
+  }
+
+  /** A etapa do card que esta execução faz ou, sem etapa, o título do card (null numa conversa). */
+  private contexto(run: RunRow): string | null {
+    if (!run.task_id) return null;
+    const etapa = this.db.get<{ title: string }>('SELECT title FROM task_steps WHERE run_id = ? ORDER BY position DESC LIMIT 1', run.id)?.title;
+    return clip((etapa ?? this.db.get<{ title: string }>('SELECT title FROM tasks WHERE id = ?', run.task_id)?.title ?? '').replace(/\s+/g, ' ').trim(), 200) || null;
   }
 
   /** O motor avisou que o pedido foi resolvido (approval.responded): por nós, ou pelo prazo dele. */

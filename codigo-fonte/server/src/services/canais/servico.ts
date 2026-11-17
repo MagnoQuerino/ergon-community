@@ -27,6 +27,7 @@ import { workspaceTz } from '../routine-proposals.ts';
 import type { RunExecutor } from '../runs.ts';
 import { coordinatorFor } from '../team-query.ts';
 import { CanaisExternos, KIND_EXTERNO } from './externo.ts';
+import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
 const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
@@ -410,7 +411,9 @@ export class Canais {
     const { titulo: t, texto } = partesDoResumo(summary);
     return [titulo, textoParaTeams(t, 300), texto ? textoParaTeams(texto, LIMITE_CANAL) : ''].filter(Boolean).join('\n\n');
   }
-  private cartao(v: VinculoRow, p: { id: string; kind: string; summary: string }, titulo: string): void {
+  private cartao(v: VinculoRow, dela: { id: string; kind: string; summary: string }, titulo: string): void {
+    // o comando para aprovar vai só com a frase simples (o cartão gravado antes da rc.33 levava o comando no texto)
+    const p = dela.kind === 'aprovacao' ? { ...dela, summary: resumoVisivelDaAprovacao(dela.summary) } : dela;
     // a pessoa aprova exatamente o que lê: o pedido que não cabe inteiro no canal se decide no Ergon
     const cabe = cabeNoCanal(p.kind, p.summary, LIMITE_CANAL);
     const decide = !SO_NO_ERGON.includes(p.kind) && cabe && this.externos.podeDecidirPeloCanal(v.workspace_id, v.user_id, p.id);

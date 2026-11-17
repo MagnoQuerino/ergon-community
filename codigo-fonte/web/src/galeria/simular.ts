@@ -8,6 +8,13 @@ const carga = (o: unknown) => JSON.stringify(o);
 
 export const AGENTE = { id: 'ag1', name: 'Aristóteles', role: 'Coordenação', color: '#1F5B6B', sector_name: 'Coordenação', char_key: null };
 
+// o comando para aprovar (rc.33): a frase simples, o risco e o comando só em "Ver detalhes técnicos"
+const CALENDARIO = 'python3 -c "\nimport calendar, datetime\nprint(calendar.month(2026,3))\nprint(\'---\')\nd=datetime.date(2026,3,31)\nwhile d.weekday()>4: d-=datetime.timedelta(days=1)\nprint(\'último dia útil:\', d)\n"';
+const LEGENDAS = 'python3 << \'EOF\'\nlegendas = {\n' + Array.from({ length: 8 }, (_, i) => `${i + 1}:"Legenda ${i + 1} de dezembro: um sorriso, uma história e um convite para agendar a sua avaliação. Chame no direct.",`).join('\n') + '\n}\nfor k,v in legendas.items():\n    print(k, len(v), [c for c in v if ord(c)>0x2100])\nEOF';
+const APROV_CONVERSA = { summary: 'Hipátia quer rodar um pequeno programa em Python para calcular datas.', risco: 'só calcula', detalhe: CALENDARIO };
+const APROV_LEGENDAS = { summary: 'Hipátia quer rodar um pequeno programa em Python para conferir o tamanho de textos, no trabalho “Legendas de dezembro para o Instagram”.', risco: 'só calcula', detalhe: LEGENDAS };
+const APROV_APAGAR = { summary: 'Hipátia quer apagar arquivos, no trabalho “Limpar os rascunhos”.', risco: 'apaga', detalhe: 'rm -rf rascunhos/antigos' };
+
 const LONGO = 'Enviar o e-mail "Proposta revisada" para compras@exemplo.com pela conta do Outlook, com o anexo proposta-v3.pdf e a tabela de prazos no corpo da mensagem.';
 
 const proposta = (id: string, kind: Proposal['kind'], summary: string, min: number, extra: Partial<Proposal> = {}): Proposal =>
@@ -33,7 +40,7 @@ const PROPOSTAS: Proposal[] = [
   proposta('perm-ok', 'permission', 'Rodar programas neste computador.', 41, { status: 'applied', result: null }),
   proposta('repasse', 'handoff', 'Hipátia pediu uma ferramenta protegida; a coordenação decide.', 42, { payload: carga({ coordinatorId: 'ag1', coordinator: 'Aristóteles', conversationId: 'c1' }) }),
   proposta('conexao', 'conexao', LONGO, 50),
-  proposta('aprovacao', 'aprovacao', 'Rodar o comando que apaga a pasta de rascunhos antigos.', 51),
+  proposta('aprovacao', 'aprovacao', APROV_CONVERSA.summary, 51, { risco: APROV_CONVERSA.risco, detalhe: APROV_CONVERSA.detalhe }),
   proposta('prazo', 'depois_de_ler', 'Depois de ler a sua caixa de entrada, abrir o site do fornecedor.', 52),
   proposta('regra', 'regra', 'Podem mandar os e-mails de cobrança sem me pedir aprovação.', 53, { payload: carga({ alcance: '24h' }) }),
   proposta('setor', 'sector_new', 'Criar o setor "Atendimento" com Hipátia e Euclides.', 54),
@@ -75,7 +82,7 @@ const DECISOES: Decisions = {
   proposals: [
     { id: 'd-rotina', kind: 'routine', summary: 'Vi que você pede o resumo toda segunda.\nRotina nova: resumo das vendas toda segunda às 9 h.', created_at: em(1), conversation_id: 'c1', agent_id: 'ag1', agent_name: 'Aristóteles', purpose: 'routine-recommend' },
     { id: 'd-conexao', kind: 'conexao', summary: LONGO, created_at: em(2), conversation_id: 'c1', agent_id: 'ag2', agent_name: 'Hipátia', purpose: null, task_id: 't-contas', task_number: 96 },
-    { id: 'd-aprovacao', kind: 'aprovacao', summary: 'Rodar o comando que apaga a pasta de rascunhos antigos.', created_at: em(3), conversation_id: 'c1', agent_id: 'ag2', agent_name: 'Hipátia', purpose: null },
+    { id: 'd-aprovacao', kind: 'aprovacao', ...APROV_LEGENDAS, created_at: em(3), conversation_id: 'c1', agent_id: 'ag2', agent_name: 'Hipátia', purpose: null, task_id: 't-comando', task_number: 3 },
     { id: 'd-prazo', kind: 'depois_de_ler', summary: 'Depois de ler a sua caixa de entrada, abrir o site do fornecedor.', created_at: em(4), conversation_id: 'c1', agent_id: 'ag2', agent_name: 'Hipátia', purpose: null },
     { id: 'd-regra', kind: 'regra', summary: 'Podem mandar os e-mails de cobrança sem me pedir aprovação.', payload: carga({ alcance: 'sempre' }), created_at: em(5), conversation_id: null, agent_id: null, agent_name: 'Hipátia', purpose: null },
     { id: 'd-pergunta', kind: 'question', summary: 'Em que formato você quer a entrega?', created_at: em(6), conversation_id: 'c1', agent_id: 'ag2', agent_name: 'Hipátia', purpose: null },
@@ -123,7 +130,7 @@ export const CARDS: Record<string, Ficha> = {
   }),
   't-comando': card('t-comando', 98, 'Limpar os rascunhos', {
     work: trabalho('aguardando_aprovacao'), resumo: faixa('decidir', 'Com você', 'Para você decidir', 'Rodar o comando que apaga a pasta de rascunhos antigos?'),
-    conexoes: [{ id: 'cx5', kind: 'aprovacao', summary: 'Rodar o comando que apaga a pasta de rascunhos antigos.', created_at: em(1) }],
+    conexoes: [{ id: 'cx5', kind: 'aprovacao', ...APROV_APAGAR, created_at: em(1) }],
   }),
 };
 
