@@ -51,7 +51,7 @@ RUN set -eu; cd /opt/hermes; \
     HERMES_HOME=/tmp/ergon-confere /opt/hermes/.venv/bin/python -c "from tools.browser_tool_install import _find_agent_browser; p = _find_agent_browser(validate=False); assert p == '/usr/local/bin/agent-browser', p; print('o Hermes acha', p)"; \
     rm -rf /tmp/ergon-confere
 
-# rc.36: RTK (Rust Token Killer, github.com/rtk-ai/rtk), edição OSS (só Apache-2.0; a edição padrão traz o rtk-engine sob
+# rc.35: RTK (Rust Token Killer, github.com/rtk-ai/rtk), edição OSS (só Apache-2.0; a edição padrão traz o rtk-engine sob
 # BUSL-1.1, que não redistribuímos). Comprime a saída de comandos do terminal (git, ls, grep, testes, docker…) antes de
 # ela ir ao modelo: o plugin do Ergon passa cada comando do terminal por `rtk rewrite` (a mesma lógica do adaptador
 # oficial do RTK para o Hermes) e, sem equivalente ou em qualquer falha, o comando roda como veio. Versão e SHA-256

@@ -412,7 +412,7 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
     return r
 
 
-# ---------------------------------------------------------------- RTK (rc.36): saída do terminal compacta
+# ---------------------------------------------------------------- RTK (rc.35): saída do terminal compacta
 # A mesma lógica do adaptador oficial do RTK para o Hermes (rtk init --agent hermes): `rtk rewrite <comando>` diz o
 # equivalente compacto (git status → rtk git status); 0 e 3 = reescrito, 1 e 2 = roda como veio. O Hermes executa o
 # próprio dicionário de argumentos, então trocar o comando nele vale. Falhou, demorou ou não há rtk: o comando segue igual.
@@ -2003,7 +2003,7 @@ def _nao_treinar() -> bool:
     return v
 
 
-# ---------------------------------------------------------------- cache do fornecedor (rc.36)
+# ---------------------------------------------------------------- cache do fornecedor (rc.35)
 # O DeepSeek (e o Ergon AI, que usa o DeepSeek) só cobra como cache o começo do pedido que é idêntico ao anterior. As
 # instruções que o Ergon manda a cada pedido (cards abertos, retrato da equipe: mudam toda vez) iam no fim do prompt de
 # sistema, ANTES do histórico: o histórico inteiro saía sem cache, 10× mais caro. O Ergon marca as instruções dele; aqui,
@@ -2014,7 +2014,7 @@ ERGON_INSTR_FIM = "\u27e6/ergon-instrucoes\u27e7"
 _CACHE_HOSTS = ("ergonworld", "deepseek")
 
 
-# Economia embutida (rc.36): as regras das competências token-efficiency (rohitg00/pro-workflow, MIT, a partir de
+# Economia embutida (rc.35): as regras das competências token-efficiency (rohitg00/pro-workflow, MIT, a partir de
 # drona23/claude-token-efficient) e research-summarizer (alirezarezvani/claude-skills, MIT), condensadas e adaptadas à
 # equipe. Os originais e as licenças ficam em competencias/. Vão no começo fixo do prompt de sistema: no cache, custam
 # quase nada por chamada, e valem para todo agente do Ergon (cada agente só vê as competências dele, então uma competência

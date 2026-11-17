@@ -173,7 +173,7 @@ export class HttpHermesClient implements HermesClient {
   }
 
   async startRun(p: StartRun) {
-    // rc.36: as instruções do Ergon vão marcadas; o plugin do motor as leva para o fim do pedido ao fornecedor (o começo
+    // rc.35: as instruções do Ergon vão marcadas; o plugin do motor as leva para o fim do pedido ao fornecedor (o começo
     // fica fixo e o cache do DeepSeek/Ergon AI pega o histórico). Motor de antes: as marcas ficam no texto, sem efeito.
     const body: Record<string, unknown> = { input: p.input, instructions: p.instructions ? `${ERGON_INSTR_INI}\n${p.instructions}\n${ERGON_INSTR_FIM}` : p.instructions };
     // com imagem: a mensagem vai em partes (texto + image_url), o formato de visão que o motor entende
