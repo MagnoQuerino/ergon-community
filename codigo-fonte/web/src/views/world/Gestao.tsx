@@ -84,12 +84,16 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
   const cat = useResource<Catalog>(l.currentIsBound ? '/api/world/catalog' : null, []);
   const plano = bill.data?.entitlement.plan_sku && ['active', 'grace'].includes(bill.data.entitlement.status)
     ? cat.data?.items.find((i) => i.sku === bill.data!.entitlement.plan_sku)?.name ?? bill.data.entitlement.plan_sku : null;
+  // a ligação aponta para um workspace que não existe mais neste computador (apagado): conta como sem ligação
+  const orfa = !!l.boundWorkspaceId && !s.localWorkspaces.some((w) => w.id === l.boundWorkspaceId);
+  const ligadoId = orfa ? null : l.boundWorkspaceId;
   const ligar = (id: string, syncWorkspaceId: string | null) => act(() => api.post('/api/world/bind', { workspaceId: id, syncWorkspaceId }), t('vinculo.ligadoMsg'));
   const abrir = (id: string) => act(async () => { await api.post('/api/session/workspace', { workspaceId: id }); window.location.reload(); });
   return (
     <div className="painel-ws">
-      {!l.boundWorkspaceId && <p className="muted small">{t('vinculo.escolher')}</p>}
-      {l.boundWorkspaceId && !l.currentIsBound && <p className="muted small">{t('vinculo.abrir', { nome: l.boundWorkspaceName ?? l.boundWorkspaceId })}</p>}
+      {orfa && <p className="muted small">{t('vinculo.orfa')} <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void act(() => api.del('/api/world/bind'), t('vinculo.desligado'))}>{t('vinculo.desligar')}</button></p>}
+      {!ligadoId && !orfa && <p className="muted small">{t('vinculo.escolher')}</p>}
+      {ligadoId && !l.currentIsBound && <p className="muted small">{t('vinculo.abrir', { nome: l.boundWorkspaceName ?? ligadoId ?? '' })}</p>}
       {!s.localWorkspaces.length ? <p className="muted small">{t('vinculo.semWorkspace')}</p> : (
         <div className="ws-cards">
           {s.localWorkspaces.map((w) => {
@@ -105,7 +109,7 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
                 acoes={escolhido === w.id ? null : <>
                   {!w.current && <button className="btn btn--sm" disabled={busy} onClick={() => void abrir(w.id)}>{t('vinculo.abrirWs')}</button>}
                   {ligado && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void act(() => api.del('/api/world/bind'), t('vinculo.desligado'))}>{t('vinculo.desligar')}</button>}
-                  {!l.boundWorkspaceId && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => (remotes.length ? (setEscolhido(w.id), setRemote('')) : void ligar(w.id, null))}>{t('vinculo.ligarEste')}</button>}
+                  {!ligadoId && !orfa && <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => (remotes.length ? (setEscolhido(w.id), setRemote('')) : void ligar(w.id, null))}>{t('vinculo.ligarEste')}</button>}
                 </>}>
                 {escolhido === w.id && (
                   <div className="ws-card__destino" role="radiogroup" aria-label={t('vinculo.destino')}>
