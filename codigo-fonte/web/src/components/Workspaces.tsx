@@ -35,8 +35,8 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
   useSurface(ref, { onClose, outside: true });
   const res = useResource<Workspace[]>('/api/workspaces', ['tasks.changed', 'runs.changed', 'agents.changed']);
   // qual está no Ergon World (quando a instalação tem o World; sem ele, a resposta não tem conta e nenhum ganha o selo)
-  const world = useResource<{ link: { boundWorkspaceId: string | null } | null }>('/api/world/status', []);
-  const noWorld = world.data?.link?.boundWorkspaceId ?? null;
+  const world = useResource<{ link: { boundWorkspaceId: string | null; boundWorkspaceIds?: string[] } | null }>('/api/world/status', []);
+  const ligadosWorld = world.data?.link?.boundWorkspaceIds ?? (world.data?.link?.boundWorkspaceId ? [world.data.link.boundWorkspaceId] : []);
   const list = res.data;
   const [err, setErr] = useState<string | null>(null);
   const [novo, setNovo] = useState<string | null>(null);
@@ -89,7 +89,7 @@ function WorkspacesPanel({ onClose }: { onClose: () => void }) {
                   </span>
                   <span className="ws-item__selos">
                     {w.current && <span className="badge badge--atual">{t('geral.ws.atualChip')}</span>}
-                    {world.data?.link && (noWorld === w.id
+                    {world.data?.link && (ligadosWorld.includes(w.id)
                       ? <span className="badge badge--world"><Icon name="globe" size={11} /> {t('geral.ws.noWorld')}</span>
                       : <span className="badge">{t('geral.ws.local')}</span>)}
                   </span>

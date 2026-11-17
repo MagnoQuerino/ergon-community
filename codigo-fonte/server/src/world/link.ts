@@ -208,6 +208,7 @@ export class WorldLinks {
         entitlement = excluded.entitlement, bound_workspace_id = NULL, status = 'active', updated_at = excluded.updated_at`,
     userId, sealWs, reg.accountId, reg.deviceId, au.account?.email ?? acc.email, verified ? 1 : 0, this.db.seal(sealWs, keys), this.db.seal(sealWs, conf.sessionToken), au.authorizedUntil,
     JSON.stringify(au.workspaces ?? []), nowIso(), nowIso());
+    this.db.run('DELETE FROM world_bound WHERE user_id = ?', userId); // conectar de novo zera as ligações antigas
     return this.get(userId)!;
   }
 
@@ -219,8 +220,19 @@ export class WorldLinks {
   }
 
   /** O workspace local ligado ao World desta pessoa (só ele tem o plano e sincroniza), ou null. */
-  bound(userId: string): string | null { return this.get(userId)?.bound_workspace_id ?? null; }
-  setBound(userId: string, ws: string | null): void { this.db.run('UPDATE world_links SET bound_workspace_id = ?, updated_at = ? WHERE user_id = ?', ws, nowIso(), userId); }
+  /** Os workspaces locais da pessoa ligados ao World (links por conta: quantos quiser; o plano diz quantos têm direito). */
+  boundList(userId: string): string[] { return this.db.all<{ workspace_id: string }>('SELECT workspace_id FROM world_bound WHERE user_id = ? ORDER BY created_at, workspace_id', userId).map((r) => r.workspace_id); }
+  /** O primeiro ligado (para o que é da pessoa e não de um workspace, como o Ergon AI no motor). */
+  bound(userId: string): string | null { return this.boundList(userId)[0] ?? null; }
+  isBound(userId: string, ws: string): boolean { return !!this.db.get('SELECT 1 FROM world_bound WHERE user_id = ? AND workspace_id = ?', userId, ws); }
+  setBound(userId: string, ws: string, on = true): void {
+    if (on) this.db.run('INSERT OR IGNORE INTO world_bound (user_id, workspace_id, created_at) VALUES (?, ?, ?)', userId, ws, nowIso());
+    else this.db.run('DELETE FROM world_bound WHERE user_id = ? AND workspace_id = ?', userId, ws);
+  }
+  /** A pessoa local dona da ligação de um workspace (para os canais e o nome no World). */
+  ownerOfBound(ws: string): string | null {
+    return this.db.get<{ user_id: string }>("SELECT b.user_id FROM world_bound b JOIN world_links l ON l.user_id = b.user_id AND l.status = 'active' WHERE b.workspace_id = ? LIMIT 1", ws)?.user_id ?? null;
+  }
   markEmailVerified(userId: string): void { this.setEmailVerified(userId, true); }
   setEmailVerified(userId: string, v: boolean): void { this.db.run('UPDATE world_links SET email_verified = ?, updated_at = ? WHERE user_id = ?', v ? 1 : 0, nowIso(), userId); }
 
@@ -247,7 +259,8 @@ export class WorldLinks {
   async unlink(userId: string): Promise<void> {
     const l = this.db.get<LinkRow>('SELECT * FROM world_links WHERE user_id = ?', userId); const s = this.session(userId);
     if (l && s && l.status === 'active') await this.client.call('DELETE', `/v1/devices/${l.device_id}`, undefined, s).catch(() => undefined); // offline: o aparelho fica para revogar no outro aparelho
-    if (l?.bound_workspace_id) forgetWorkspace(this.db, l.bound_workspace_id);
+    for (const ws of this.boundList(userId)) forgetWorkspace(this.db, ws);
+    this.db.run('DELETE FROM world_bound WHERE user_id = ?', userId);
     this.db.run('DELETE FROM world_links WHERE user_id = ?', userId);
     this.limits.delete(userId); this.pending.delete(userId);
   }

@@ -22,7 +22,7 @@ export interface WalletVivo { available: string; reserved: string }
 export interface Vivo { bill: BillingVivo | null; wallet: WalletVivo | null }
 
 export const POLL_MS = 60_000;
-const EVENTO_MIN_MS = 20_000;
+const EVENTO_MIN_MS = 5_000; // carteira quase em tempo real: cada turno da equipe atualiza custo e saldo
 
 let dados: Vivo = { bill: null, wallet: null };
 const subs = new Set<() => void>();
@@ -31,8 +31,13 @@ let buscando = false;
 let timer: number | null = null;
 
 /** Lê o plano e o saldo (uma leitura por vez; `minMs` = intervalo mínimo desde a última). */
+let depois: number | null = null;
 function ler(minMs = 0): void {
-  if (buscando || Date.now() - ultimo < minMs) return;
+  // dentro do intervalo mínimo: lê uma vez no fim dele (o último turno de uma sequência nunca fica de fora)
+  if (buscando || Date.now() - ultimo < minMs) {
+    if (minMs && depois === null && typeof window !== 'undefined') depois = window.setTimeout(() => { depois = null; ler(); }, Math.max(500, minMs - (Date.now() - ultimo)));
+    return;
+  }
   buscando = true; ultimo = Date.now();
   Promise.all([api.get<BillingVivo>('/api/world/billing'), api.get<WalletVivo>('/api/world/wallet')])
     .then(([bill, wallet]) => { dados = { bill, wallet }; subs.forEach((f) => f()); })
@@ -60,6 +65,8 @@ export function useWorldVivo() {
   useLiveEvent('world.changed', () => { if (bound) ler(); });
   useLiveEvent('runs.changed', () => { if (bound) ler(EVENTO_MIN_MS); });
   useLiveEvent('routines.changed', () => { if (bound) ler(EVENTO_MIN_MS); });
+  // cada resposta da equipe (conversa, canais) gasta Dracmas: o saldo e o custo do mês acompanham, sem precisar atualizar
+  useLiveEvent('messages.changed', () => { if (bound) ler(EVENTO_MIN_MS); });
   // voltou à janela (outra aba, o pagamento): relê se já faz um tempo
   useEffect(() => {
     if (!bound) return;

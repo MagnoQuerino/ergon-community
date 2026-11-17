@@ -115,7 +115,12 @@ describe('cliente do Ergon World', () => {
     assert.equal(bind.status, 200, JSON.stringify(bind.json));
     const sws = bind.json.syncWorkspaceId as string;
     assert.match(sws, /^sws_[a-f0-9]{32}$/);
-    assert.equal((await req(pc1, 'POST', '/api/world/bind', a1, { workspaceId: casa })).json.error, 'already_bound', 'um workspace só');
+    // links por conta: um segundo workspace também liga (o plano diz quantos têm direito); desligar é por workspace
+    const b2 = await req(pc1, 'POST', '/api/world/bind', a1, { workspaceId: casa });
+    assert.equal(b2.status, 200, JSON.stringify(b2.json));
+    assert.deepEqual((await req(pc1, 'GET', '/api/world/status', a1)).json.link.boundWorkspaceIds, [trabalho, casa]);
+    assert.equal((await req(pc1, 'DELETE', `/api/world/bind?workspaceId=${casa}`, a1)).status, 200);
+    assert.deepEqual((await req(pc1, 'GET', '/api/world/status', a1)).json.link.boundWorkspaceIds, [trabalho]);
 
     // no workspace "Casa" (aberto agora), nada do World
     const st = (await req(pc1, 'GET', '/api/world/status', a1)).json;
@@ -146,7 +151,7 @@ describe('cliente do Ergon World', () => {
     assert.equal((await req(pc1, 'POST', '/api/tasks', a1, { title: 'Comprar pão em casa' })).status, 201);
     await abrir(pc1, a1, trabalho);
     assert.equal((await req(pc1, 'POST', '/api/world/sync/push', a1, {})).json.sent.tasks, 0, 'nada novo no Trabalho');
-    assert.deepEqual([...world.workspaces.keys()].filter((k) => world.workspaces.get(k)!.owner === dev1Account()), [sws], 'um workspace World só');
+    assert.equal([...world.workspaces.keys()].filter((k) => world.workspaces.get(k)!.owner === dev1Account()).length, 2, 'o do Trabalho e o da Casa (ligado e desligado acima)');
     const tudo = JSON.stringify([...world.workspaces.values()].map((w) => w.changes));
     for (const x of ['Mordor', 'Comprar pão', 'Trabalho']) assert.ok(!tudo.includes(x), `o World guarda sem ler: ${x}`);
   });
@@ -158,7 +163,7 @@ describe('cliente do Ergon World', () => {
     assert.equal(r.status, 200, JSON.stringify(r.json));
     const st = (await req(pc2, 'GET', '/api/world/status', a2)).json;
     const sws = st.link.workspaces[0].workspaceId as string;
-    assert.equal(st.link.workspaces.length, 1);
+    assert.equal(st.link.workspaces.length, 2);
     assert.equal((await req(pc2, 'POST', '/api/world/bind', a2, { workspaceId: a2.workspaceId, syncWorkspaceId: sws })).status, 200);
     const s0 = (await req(pc2, 'GET', '/api/world/sync', a2)).json;
     assert.deepEqual([s0.bound, s0.enabled, s0.origin, s0.syncWorkspaceId], [true, false, 'joined', sws]);

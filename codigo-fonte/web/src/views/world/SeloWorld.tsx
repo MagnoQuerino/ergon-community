@@ -1,3 +1,4 @@
+import { usePolitica } from './politica.ts';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError, requestId } from '../../lib/api.ts';
 import { emitLocal, useResource } from '../../lib/live.ts';
@@ -75,7 +76,7 @@ type Fase = null | { acao: Acao; passo: Passo; pv: Preview; rotulo: string };
  * confirmar; sem ela, vão ao pagamento. Só o dono compra; e-mail sem confirmar abre a caixa do código aqui mesmo.
  */
 function CompraRapida({ st, bill, wallet, alvo, onClose }: { st: StatusVivo; bill: BillingVivo; wallet: WalletVivo | null; alvo?: Nivel; onClose: () => void }) {
-  const t = useTw(); const tg = useT();
+  const t = useTw(); const tg = useT(); const pol = usePolitica();
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, outside: true });
   const cat = useResource<Catalog>('/api/world/catalog', []);
@@ -170,8 +171,8 @@ function CompraRapida({ st, bill, wallet, alvo, onClose }: { st: StatusVivo; bil
               {o.jobs && (
                 <div>
                   <h4>{t('rapida.maisJobs')}</h4>
-                  <button className="compra-pop__pacote compra-pop__pacote--largo" disabled={busy} onClick={() => void fazer({ tipo: 'jobs' }, t('rapida.jobs'))}>
-                    <b><Icon name="cloud" size={14} /> {t('rapida.jobs')}</b><small>{sufixo(o.jobs, o.moeda)}</small>
+                  <button className="compra-pop__pacote compra-pop__pacote--largo" disabled={busy} onClick={() => void fazer({ tipo: 'jobs' }, t('rapida.jobs', { n: pol.jobPackSize }))}>
+                    <b><Icon name="cloud" size={14} /> {t('rapida.jobs', { n: pol.jobPackSize })}</b><small>{sufixo(o.jobs, o.moeda)}</small>
                   </button>
                 </div>
               )}
