@@ -23,12 +23,20 @@ Destaques:
 
 - Piper (piper-tts 1.8.0, projeto piper1-gpl da Open Home Foundation), licença GPL-3.0-or-later, com o espeak-ng
   (GPL-3.0-or-later) embutido no pacote: a voz local do "Ouvir" (texto em fala no próprio computador). Vai sem alterações
-  só na imagem do motor de IA (hermes/Dockerfile), instalado no ambiente Python do Hermes e carregado pelo processo do
-  motor; o Ergon (servidor e interface) não o inclui nem o importa, e fala com o motor pela ponte HTTP. O código-fonte
-  está em https://github.com/OHF-Voice/piper1-gpl (versão 1.8.0) e o texto da licença acompanha o pacote (COPYING). As
-  vozes (pt_BR-faber-medium, en_US-lessac-medium) são baixadas no primeiro uso de https://huggingface.co/rhasspy/piper-voices,
-  cada uma com a licença do próprio cartão (MODEL_CARD). Quem não quiser esse componente pode montar a imagem sem o
-  piper-tts: o "Ouvir" usa então a voz online (edge-tts).
+  só na imagem do motor de IA (hermes/Dockerfile), instalado no ambiente Python do Hermes, e roda sempre como programa
+  separado: o plugin do Ergon chama a linha de comando do Piper (python -m piper) num processo próprio, manda o texto pela
+  entrada padrão e recebe o áudio (WAV); nenhum código do Ergon (servidor, interface ou plugin do motor) importa o Piper.
+  Quem não quiser esse componente pode montar a imagem sem o piper-tts: o "Ouvir" usa então a voz online (edge-tts).
+  As vozes são baixadas no primeiro uso de https://huggingface.co/rhasspy/piper-voices, cada uma com a licença do próprio
+  cartão (MODEL_CARD):
+    - pt_BR-cadu-medium (português): base de dados com licença CC0 (https://github.com/OHF-Voice/voice-datasets), afinada
+      sobre o modelo rdh, também CC0. Escolhida por ser a voz pt_BR de licença mais livre. A pt_BR-faber-medium usa a mesma
+      base CC0, mas é afinada sobre o modelo hifi_tts_92 (Hi-Fi TTS, CC BY 4.0, com atribuição).
+    - en_US-ljspeech-medium (inglês): base LJ Speech, em domínio público (https://keithito.com/LJ-Speech-Dataset/).
+    A CONFERIR antes de distribuir: as licenças acima foram lidas do MODEL_CARD espelhado em
+    https://github.com/rhasspy/piper-samples (samples/pt/pt_BR/cadu/medium e samples/en/en_US/ljspeech/medium); confirme
+    no MODEL_CARD de https://huggingface.co/rhasspy/piper-voices e no repositório OHF-Voice/voice-datasets (a licença da
+    base "cadu" e a do modelo rdh), e que o próprio arquivo do modelo (.onnx) não tem termos além dos da base.
 
 - sharp (Lovell Fuller), licença Apache-2.0, com libvips sob LGPL-3.0-or-later (binários pré-compilados,
   carregados dinamicamente). https://github.com/lovell/sharp e https://github.com/libvips/libvips
@@ -42,6 +50,20 @@ Destaques:
 - podman-compose (Containers), licença GPL-2.0: sobe os serviços do compose no Podman. Vai sem alterações no ambiente
   do Windows (pacote do Alpine) e no pacote .deb do Linux (/usr/lib/ergon/podman-compose, com a licença em
   /usr/share/doc/ergon); o código-fonte está em https://github.com/containers/podman-compose (versão 1.4.1).
+
+Componentes GPL e onde obter o código
+-------------------------------------
+
+A imagem do motor de IA redistribui, sem alterações, estes programas sob a GPL-3.0-or-later. O código-fonte
+correspondente de cada versão está nos endereços abaixo:
+
+- piper-tts 1.8.0 (piper1-gpl): https://github.com/OHF-Voice/piper1-gpl (versão 1.8.0) e o pacote-fonte em
+  https://pypi.org/project/piper-tts/1.8.0/#files (piper_tts-1.8.0.tar.gz). Licença no arquivo COPYING do pacote.
+- espeak-ng (embutido no piper-tts 1.8.0, compilado em piper/espeakbridge.so, com os dados em piper/espeak-ng-data):
+  https://github.com/espeak-ng/espeak-ng (a versão usada pelo piper1-gpl 1.8.0 está indicada no código dele). Licença
+  GPL-3.0-or-later.
+
+Os demais componentes GPL estão descritos acima (libsignal-node, GPL-3.0; podman-compose, GPL-2.0).
 
 Marcas citadas (WhatsApp, Microsoft, Google, Trello, Jira, Asana, monday.com, ClickUp, Notion, Todoist, GitHub,
 Docker e outras) pertencem aos respectivos donos e aparecem apenas para identificar as integrações.

@@ -2,8 +2,13 @@
 com as mesmas funções que o plugin chama).
 
 Confere:
-  - os ajustes da voz gravam o config.yaml do Hermes: o Piper como voz do "Ouvir" (tts.provider), o modelo da transcrição
-    (stt.local.model) e o idioma da pessoa na transcrição (stt.local.language) e nas vozes (tts.piper.voice, tts.edge.voice);
+  - os ajustes da voz gravam o config.yaml do Hermes: o Piper como voz do "Ouvir", pelo provedor de comando do Ergon
+    (tts.providers.ergon-piper, processo próprio, nunca o "piper" do Hermes, que importa o pacote GPL no motor), o modelo
+    da transcrição (stt.local.model) e o idioma da pessoa na transcrição (stt.local.language) e nas vozes (cadu e ljspeech,
+    de bases livres; tts.edge.voice);
+  - piper_processo.py: baixa a voz e fala pela linha de comando do Piper em processos filhos (um Python falso aqui), com o
+    texto pela entrada padrão; voz com nome estranho, recusada;
+  - nada do pacote piper é importado no processo do plugin;
     valor fora da lista: recusado; a leitura dos ajustes diz como está (motor sem nada gravado: edge, base, sem idioma);
   - o estado da voz: o Piper sem o pacote cai para a voz online; a voz do Piper e o modelo do Whisper ainda não baixados
     aparecem em "preparar" (a tela avisa "primeira vez");
@@ -17,6 +22,7 @@ Confere:
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -72,8 +78,7 @@ def tts_provider(cfg):
 
 
 def text_to_speech_tool(texto, output_path=None):
-    if tts_provider(CFG["tts"]) == "piper" and ST["falhar_piper"]:
-        return json.dumps({"success": False, "error": "Piper voice download failed for 'pt_BR-faber-medium'"})
+    ST["hermes_falou"] = ST.get("hermes_falou", 0) + 1
     with open(output_path, "wb") as f:
         f.write(b"ID3-piper")
     return json.dumps({"success": True, "file_path": output_path, "provider": tts_provider(CFG["tts"])})
@@ -92,6 +97,19 @@ spec = importlib.util.spec_from_file_location("ergon_bridge_teste_voz", os.path.
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
 PACOTES = {"piper": True, "edge": True}
+CHAMADAS_PIPER = []
+
+
+def falar_piper_falso(texto, saida, cfg):
+    CHAMADAS_PIPER.append((texto, bridge._piper_voz(cfg)))
+    if ST["falhar_piper"]:
+        return False, "não consegui baixar a voz"
+    with open(saida, "wb") as f:
+        f.write(b"RIFF\x00\x00\x00\x00WAVEfmt piper")
+    return True, ""
+
+
+bridge._falar_piper = falar_piper_falso
 bridge._piper_instalado = lambda: PACOTES["piper"]
 bridge._edge_instalado = lambda: PACOTES["edge"]
 
@@ -114,7 +132,12 @@ def recusa(body):
 
 # 1. os ajustes da voz no config.yaml
 c = bridge.ajustes_config({"voz_falar": "piper"})
-check("voz do Ouvir: o Piper em tts.provider", c == {"tts": {"provider": "piper"}}, str(c))
+pc = c["tts"]["providers"]["ergon-piper"]
+check("voz do Ouvir: o Piper pelo provedor de comando do Ergon (nunca o \"piper\" do Hermes, no processo)",
+      c["tts"]["provider"] == "ergon-piper" and pc["type"] == "command" and pc["output_format"] == "mp3", str(c))
+check("o comando roda piper_processo.py com o Python do motor e a pasta das vozes",
+      "piper_processo.py" in pc["command"] and sys.executable in pc["command"] and VOZES in pc["command"]
+      and "{voice}" in pc["command"] and "{input_path}" in pc["command"] and "{output_path}" in pc["command"], pc["command"])
 check("voz do Ouvir: a online também é escolha", bridge.ajustes_config({"voz_falar": "edge"}) == {"tts": {"provider": "edge"}})
 check("voz desconhecida: recusada", recusa({"voz_falar": "kokoro"}))
 c = bridge.ajustes_config({"voz_modelo": "small"})
@@ -122,22 +145,26 @@ check("modelo da transcrição: small, no transcritor local", c == {"stt": {"pro
 check("modelo fora da lista: recusado", recusa({"voz_modelo": "large-v3"}))
 c = bridge.ajustes_config({"voz_idioma": "pt"})
 check("idioma da transcrição: o da pessoa (stt.local.language)", c["stt"] == {"local": {"language": "pt"}}, str(c))
-check("idioma: a voz do Piper em português do Brasil", c["tts"]["piper"] == {"voice": "pt_BR-faber-medium"}, str(c))
+check("idioma: a voz do Piper em português do Brasil (cadu: base CC0)", c["tts"]["providers"]["ergon-piper"] == {"voice": "pt_BR-cadu-medium"}, str(c))
 check("idioma: a voz online em português do Brasil", c["tts"]["edge"] == {"voice": "pt-BR-FranciscaNeural"}, str(c))
 c = bridge.ajustes_config({"voz_idioma": "en", "voz_falar": "piper", "voz_modelo": "base"})
-check("juntos: inglês, Piper e base, sem um apagar o outro",
-      c == {"tts": {"provider": "piper", "piper": {"voice": "en_US-lessac-medium"}, "edge": {"voice": "en-US-AriaNeural"}},
-            "stt": {"provider": "local", "local": {"model": "base", "language": "en"}}}, json.dumps(c))
+check("juntos: inglês (ljspeech, domínio público), Piper e base, sem um apagar o outro",
+      c["tts"]["provider"] == "ergon-piper" and c["tts"]["providers"]["ergon-piper"]["voice"] == "en_US-ljspeech-medium"
+      and "command" in c["tts"]["providers"]["ergon-piper"] and c["tts"]["edge"] == {"voice": "en-US-AriaNeural"}
+      and c["stt"] == {"provider": "local", "local": {"model": "base", "language": "en"}}, json.dumps(c))
+check("nenhuma voz de base com restrição (lessac) nem o provedor piper do Hermes", "lessac" not in json.dumps(c) and '"piper": {' not in json.dumps(c))
 check("idioma fora da lista: recusado", recusa({"voz_idioma": "es"}))
 lido = bridge.ajustes_ler({})
 check("motor sem nada gravado: edge, base, sem idioma (o Ergon manda o Piper e o idioma)",
       (lido["voz_falar"], lido["voz_modelo"], lido["voz_idioma"]) == ("edge", "base", ""), str(lido))
-lido = bridge.ajustes_ler({"tts": {"provider": "piper"}, "stt": {"local": {"model": "small", "language": "pt"}}})
+lido = bridge.ajustes_ler({"tts": bridge.ajustes_config({"voz_falar": "piper"})["tts"], "stt": {"local": {"model": "small", "language": "pt"}}})
 check("leitura dos ajustes: como está gravado", (lido["voz_falar"], lido["voz_modelo"], lido["voz_idioma"]) == ("piper", "small", "pt"), str(lido))
+lido = bridge.ajustes_ler({"tts": {"provider": "piper"}})
+check("o \"piper\" do Hermes (no processo do motor) não conta como a escolha: o Ergon manda trocar", lido["voz_falar"] == "piper-no-processo", str(lido))
 check("a capacidade dos ajustes continua no contrato", "ajustes" in bridge.CAPACIDADES and "recursos" in bridge.CAPACIDADES)
 
 # 2. o estado da voz
-CFG["tts"] = {"provider": "piper", "piper": {"voice": "pt_BR-faber-medium"}}
+CFG["tts"] = {"provider": "ergon-piper", "providers": {"ergon-piper": {**bridge._piper_comando(), "voice": "pt_BR-cadu-medium"}}}
 CFG["stt"] = {"local": {"model": "base", "language": "pt"}}
 e = bridge._voz_estado()
 check("Piper configurado e instalado: fala pelo Piper", e["falar"] == "piper", str(e))
@@ -145,7 +172,7 @@ check("voz do Piper ainda não baixada: preparar.falar", e["preparar"]["falar"] 
 check("modelo do Whisper ainda não baixado: preparar.transcrever", e["transcrever"] == "local" and e["modelo"] == "base" and e["preparar"]["transcrever"] is True, str(e))
 os.makedirs(VOZES, exist_ok=True)
 for ext in (".onnx", ".onnx.json"):
-    open(os.path.join(VOZES, "pt_BR-faber-medium" + ext), "wb").close()
+    open(os.path.join(VOZES, "pt_BR-cadu-medium" + ext), "wb").close()
 ST["whisper_baixado"] = True
 e = bridge._voz_estado()
 check("voz e modelo já baixados: nada a preparar", e["preparar"] == {"transcrever": False, "falar": False}, str(e))
@@ -157,7 +184,13 @@ PACOTES.update(piper=True, edge=True)
 
 # 3. falar, com a reserva
 r = bridge.voz_falar("Bom dia.")
-check("falar pelo Piper", r.get("ok") is True and r.get("reserva") is False and r.get("provedor") == "piper", str({k: v for k, v in r.items() if k != "audio"}))
+check("falar pelo Piper, num processo próprio (não pelo provedor do Hermes)", r.get("ok") is True and r.get("reserva") is False and r.get("provedor") == "piper"
+      and CHAMADAS_PIPER[-1] == ("Bom dia.", "pt_BR-cadu-medium") and not ST.get("hermes_falou"), str({k: v for k, v in r.items() if k != "audio"}))
+check("o WAV do Piper vai como audio/wav (pelos bytes, não pelo nome)", r.get("tipo") == "audio/wav", str(r.get("tipo")))
+CFG["tts"] = {"provider": "piper"}
+r = bridge.voz_falar("Bom dia.")
+check("config antiga com o \"piper\" do Hermes: o Ouvir também vai pelo processo próprio", r.get("ok") is True and len(CHAMADAS_PIPER) == 2 and not ST.get("hermes_falou"))
+CFG["tts"] = {"provider": "ergon-piper", "providers": {"ergon-piper": {**bridge._piper_comando(), "voice": "pt_BR-cadu-medium"}}}
 ST["falhar_piper"] = True
 r = bridge.voz_falar("Bom dia.")
 import base64  # noqa: E402
@@ -231,6 +264,39 @@ check("rota GET: o resultado", g.status == 200 and g.json.get("texto") == "pela 
 check("rota GET: tarefa malformada recusada", rota("GET", q={"tarefa": "../x"}).status == 400)
 r = rota("POST", {"audio": base64.b64encode(b"OggS").decode(), "nome": "a.ogg"})
 check("rota POST sem segundo plano: como antes (o resultado direto)", r.status == 200 and r.json.get("texto") == "pela rota", str(r.json))
+
+# 6. piper_processo.py: a linha de comando do Piper em processos filhos (um "python" falso faz o papel do pacote)
+import subprocess  # noqa: E402
+FALSO = os.path.join(HOME, "python-falso")
+LOG = os.path.join(HOME, "python-falso.log")
+with open(FALSO, "w") as f:
+    f.write(f"""#!/bin/sh
+echo "$@" >> {LOG}
+if [ "$2" = "piper.download_voices" ]; then : > "$5/$3.onnx"; : > "$5/$3.onnx.json"; exit 0; fi
+if [ "$2" = "piper" ]; then cat > {LOG}.texto; printf 'RIFF0000WAVEfmt dados-do-piper-com-mais-de-44-bytes-de-cabecalho-e-som' > "$8"; exit 0; fi
+exit 9
+""")
+os.chmod(FALSO, 0o755)
+HELPER = os.path.join(PLUGINS, "ergon_bridge", "piper_processo.py")
+entrada = os.path.join(HOME, "entrada.txt")
+with open(entrada, "w", encoding="utf-8") as f:
+    f.write("Olá, tudo bem?\nSegunda linha.")
+saida = os.path.join(HOME, "saida", "fala.wav")
+pasta = os.path.join(HOME, "vozes-novas")
+r = subprocess.run([sys.executable, "-I", HELPER, "--voz", "pt_BR-cadu-medium", "--pasta", pasta, "--texto", entrada, "--saida", saida, "--python", FALSO],
+                   capture_output=True, timeout=60)
+log = open(LOG).read()
+check("processo próprio: baixa a voz no 1º uso pela linha de comando do Piper", r.returncode == 0 and "-m piper.download_voices pt_BR-cadu-medium --download-dir" in log, r.stderr.decode()[-300:] + log)
+check("processo próprio: fala pela linha de comando, com o texto pela entrada padrão", "-m piper -m pt_BR-cadu-medium --data-dir" in log
+      and open(LOG + ".texto", encoding="utf-8").read() == "Olá, tudo bem?\nSegunda linha.", log)
+check("processo próprio: o WAV chega na saída", open(saida, "rb").read().startswith(b"RIFF"))
+open(LOG, "w").close()
+r = subprocess.run([sys.executable, "-I", HELPER, "--voz", "pt_BR-cadu-medium", "--pasta", pasta, "--texto", entrada, "--saida", saida, "--python", FALSO], capture_output=True, timeout=60)
+check("processo próprio: voz já baixada não baixa de novo", r.returncode == 0 and "download_voices" not in open(LOG).read())
+r = subprocess.run([sys.executable, "-I", HELPER, "--voz", "../../etc/passwd", "--pasta", pasta, "--texto", entrada, "--saida", saida, "--python", FALSO], capture_output=True, timeout=60)
+check("processo próprio: voz com nome estranho, recusada", r.returncode == 2)
+src = open(os.path.join(PLUGINS, "ergon_bridge", "__init__.py"), encoding="utf-8").read() + open(HELPER, encoding="utf-8").read()
+check("nada do pacote piper é importado no processo do plugin", "piper" not in sys.modules and not re.search(r"^\s*(from piper|import piper)", src, re.M))
 
 shutil.rmtree(HOME, ignore_errors=True)
 print("TUDO OK" if ok else "HÁ FALHAS")

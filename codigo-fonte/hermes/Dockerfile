@@ -20,16 +20,19 @@ RUN apt-get update \
 #    é baixado no primeiro uso (precisa de rede uma vez);
 #  - piper-tts (rc.33: a voz padrão do "Ouvir", no próprio computador e sem internet), extra "piper". LICENÇA: o
 #    piper-tts 1.3+ vem do projeto piper1-gpl (OHF-Voice) e é GPL-3.0-or-later (o wheel embute o espeak-ng, também
-#    GPL-3.0); o antigo rhasspy/piper (piper-tts 1.2.0) era MIT. Vai sem alterações, só dentro desta imagem do motor, num
-#    processo separado do Ergon (que fala com ele pela ponte HTTP); ver o NOTICE. A voz (pt_BR-faber-medium,
-#    en_US-lessac-medium) é baixada no primeiro uso, como o modelo do Whisper.
+#    GPL-3.0); o antigo rhasspy/piper (piper-tts 1.2.0) era MIT. Vai sem alterações, só nesta imagem, e roda sempre num
+#    processo próprio: o motor usa o provedor de comando do Ergon (plugins/ergon_bridge/piper_processo.py chama
+#    `python -m piper`, com o texto pela entrada padrão e o WAV de volta), nunca o provedor "piper" do Hermes, que
+#    importaria o pacote no processo do motor. Ver o NOTICE ("Componentes GPL e onde obter o código"). As vozes
+#    (pt_BR-cadu-medium, en_US-ljspeech-medium) são baixadas no primeiro uso, como o modelo do Whisper.
 # O ambiente do Hermes não traz o pip: entra só para esta instalação e sai em seguida. A última linha confere que os
 # pacotes ficaram importáveis pela mesma conferência do Hermes (pm/extras.py, available): se não, a imagem não é
 # construída. Sem eles, cada opção aparece no Ergon e diz que chega com a próxima atualização da equipe.
 RUN /opt/hermes/.venv/bin/python -m ensurepip \
  && /opt/hermes/.venv/bin/python -m pip install --no-cache-dir "ddgs==9.16.0" "edge-tts==7.2.7" "faster-whisper==1.2.1" "piper-tts==1.8.0" \
  && /opt/hermes/.venv/bin/python -m pip uninstall -y pip \
- && cd /opt/hermes && /opt/hermes/.venv/bin/python -c "import ddgs, edge_tts, faster_whisper; from piper import PiperVoice; from pm.extras import available; assert all(available(x) for x in ('ddgs', 'edge-tts', 'stt-whisper', 'piper'))"
+ && cd /opt/hermes && /opt/hermes/.venv/bin/python -c "import ddgs, edge_tts, faster_whisper; from pm.extras import available; assert all(available(x) for x in ('ddgs', 'edge-tts', 'stt-whisper', 'piper'))" \
+ && /opt/hermes/.venv/bin/python -m piper --help > /dev/null
 
 # rc.27: o navegador dos agentes (ferramentas browser_*). O Hermes acha o agent-browser no depósito do pm ou no PATH
 # (tools/browser_tool_install.py, _find_agent_browser), e a imagem oficial traz só o Chromium (pm ensure de uv, chromium,

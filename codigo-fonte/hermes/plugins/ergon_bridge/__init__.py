@@ -51,6 +51,8 @@ import logging
 import os
 import re
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -1772,14 +1774,21 @@ COMPACTAR_LIMITE = 150000
 #  - raciocinio (agent.reasoning_effort): a profundidade do raciocínio do modelo. "high" por padrão (migração 10); "" é o
 #    padrão do próprio modelo. O Hermes ajusta ao que cada provedor aceita;
 #  - idioma (display.language): as mensagens fixas do motor no idioma da pessoa;
-#  - voz (rc.33): voz_falar (tts.provider: "piper", a voz local e padrão do Ergon, ou "edge", a online), voz_modelo
+#  - voz (rc.33): voz_falar ("piper", a voz local e padrão do Ergon, ou "edge", a online), voz_modelo
 #    (stt.local.model: "base", padrão, ou "small") e voz_idioma (stt.local.language, para o Whisper não detectar sozinho e
-#    errar em áudios curtos, mais a voz do Piper e a do edge-tts nesse idioma).
+#    errar em áudios curtos, mais a voz do Piper e a do edge-tts nesse idioma). O Piper é GPL-3.0 (piper1-gpl, com o
+#    espeak-ng dentro): o motor nunca usa o provedor "piper" do Hermes, que importa o pacote no próprio processo; usa o
+#    provedor de comando "ergon-piper" (tts.providers.ergon-piper, type: command), que roda piper_processo.py, e ele só
+#    chama a linha de comando do Piper em processos filhos (o texto pela entrada padrão, o WAV de volta).
 RESERVA_MAX = 5
 VOZES_FALAR = ("piper", "edge")
 MODELOS_FALA = ("base", "small")
-# as vozes de cada idioma: Piper (baixada no 1º uso para HERMES_HOME/cache/piper-voices) e edge-tts (a reserva online)
-VOZ_PIPER = {"pt": "pt_BR-faber-medium", "en": "en_US-lessac-medium"}
+PIPER_PROVEDOR = "ergon-piper"
+# as vozes de cada idioma: Piper (baixada no 1º uso para HERMES_HOME/cache/piper-voices) e edge-tts (a reserva online).
+# Licenças (o MODEL_CARD de cada voz): pt_BR-cadu-medium, base de dados CC0 e afinada sobre o modelo rdh (CC0); a faber,
+# também CC0, sai da base hifi_tts_92 (Hi-Fi TTS, CC BY 4.0), por isso a cadu. en_US-ljspeech-medium: LJ Speech, domínio
+# público (a lessac, padrão do Hermes, vem do Blizzard 2013, com licença própria e restrições de uso).
+VOZ_PIPER = {"pt": "pt_BR-cadu-medium", "en": "en_US-ljspeech-medium"}
 VOZ_EDGE = {"pt": "pt-BR-FranciscaNeural", "en": "en-US-AriaNeural"}
 _IDIOMAS_MOTOR = ("pt", "en")
 # o que a tela oferece (VALID_REASONING_EFFORTS do Hermes tem mais níveis; os extremos ficam fora) e o padrão do Ergon
@@ -1818,6 +1827,31 @@ def busca_privada_backend() -> str | None:
     return "searxng" if os.environ.get("SEARXNG_URL", "").strip() else None
 
 
+def _piper_pasta() -> str:
+    """Onde ficam as vozes do Piper (a mesma pasta que o Hermes usaria: HERMES_HOME/cache/piper-voices)."""
+    return os.path.join(os.environ.get("HERMES_HOME", "/opt/data"), "cache", "piper-voices")
+
+
+def _piper_comando() -> dict[str, Any]:
+    """O provedor de comando do Hermes que fala pelo Piper num processo próprio (piper_processo.py, ao lado deste
+    arquivo, rodado pelo mesmo Python do motor, que tem o pacote). {voice}, {input_path} e {output_path} são do Hermes."""
+    import shlex
+    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "piper_processo.py")
+    cmd = (f"{shlex.quote(sys.executable)} {shlex.quote(helper)} --voz {{voice}} --pasta {shlex.quote(_piper_pasta())} "
+           "--texto {input_path} --saida {output_path}")
+    return {"type": "command", "command": cmd, "output_format": "mp3", "timeout": 360}
+
+
+def _voz_falar_lida(tts: dict[str, Any]) -> str:
+    """A voz do Ouvir como o Ergon a vê: "piper" só pelo provedor de comando do Ergon (processo próprio); o "piper" do
+    Hermes (no processo do motor) volta como "piper-no-processo", e o Ergon manda trocar."""
+    prov = str(tts.get("provider") or "edge").strip().lower()[:30]
+    if prov == PIPER_PROVEDOR:
+        pc = (tts.get("providers") or {}).get(PIPER_PROVEDOR) if isinstance(tts.get("providers"), dict) else None
+        return "piper" if isinstance(pc, dict) and "piper_processo.py" in str(pc.get("command") or "") else "piper-incompleto"
+    return "piper-no-processo" if prov == "piper" else prov
+
+
 def ajustes_ler(cfg: Any) -> dict[str, Any]:
     """O que está valendo no motor (config.yaml com os padrões do Hermes)."""
     cfg = cfg if isinstance(cfg, dict) else {}
@@ -1845,7 +1879,7 @@ def ajustes_ler(cfg: Any) -> dict[str, Any]:
         "raciocinio": str(sec("agent").get("reasoning_effort") or "").strip().lower()[:12],
         "idioma": str(sec("display").get("language") or "en")[:12],
         # o que o Hermes usa quando nada está gravado: edge e base; o idioma vazio = detectado sozinho
-        "voz_falar": str(sec("tts").get("provider") or "edge").strip().lower()[:20],
+        "voz_falar": _voz_falar_lida(sec("tts")),
         "voz_modelo": str((sec("stt").get("local") if isinstance(sec("stt").get("local"), dict) else {}).get("model") or "base")[:20],
         "voz_idioma": str((sec("stt").get("local") if isinstance(sec("stt").get("local"), dict) else {}).get("language") or "")[:12],
     }
@@ -1894,7 +1928,7 @@ def ajustes_config(body: dict[str, Any]) -> dict[str, Any]:
     if "voz_falar" in body:
         if body["voz_falar"] not in VOZES_FALAR:
             raise ValueError("voz inválida")
-        out["tts"] = {"provider": body["voz_falar"]}
+        out["tts"] = {"provider": "edge"} if body["voz_falar"] == "edge" else {"provider": PIPER_PROVEDOR, "providers": {PIPER_PROVEDOR: _piper_comando()}}
     if "voz_modelo" in body:
         if body["voz_modelo"] not in MODELOS_FALA:
             raise ValueError("modelo de transcrição inválido")
@@ -1906,7 +1940,7 @@ def ajustes_config(body: dict[str, Any]) -> dict[str, Any]:
         stt = out.setdefault("stt", {})
         stt.setdefault("local", {})["language"] = lingua
         tts = out.setdefault("tts", {})
-        tts["piper"] = {"voice": VOZ_PIPER[lingua]}
+        tts.setdefault("providers", {}).setdefault(PIPER_PROVEDOR, {})["voice"] = VOZ_PIPER[lingua]
         tts["edge"] = {"voice": VOZ_EDGE[lingua]}
     if not out:
         raise ValueError("nada para gravar")
@@ -3893,18 +3927,19 @@ def _whisper_baixado(modelo: str) -> bool | None:
         return False
 
 
-def _piper_voz_baixada(tts_cfg: dict[str, Any]) -> bool | None:
-    """A voz do Piper escolhida já está na pasta do motor (o 1º uso baixa uns 60 MB)? None = não deu para saber."""
-    try:
-        from tools.tts_tool_local import DEFAULT_PIPER_VOICE, _get_piper_voices_dir  # módulo do Hermes
-        pc = tts_cfg.get("piper") if isinstance(tts_cfg.get("piper"), dict) else {}
-        voz = str(pc.get("voice") or DEFAULT_PIPER_VOICE)
-        if voz.lower().endswith(".onnx"):
-            return os.path.isfile(voz)
-        pasta = Path(pc.get("voices_dir") or _get_piper_voices_dir()).expanduser()
-        return (pasta / f"{voz}.onnx").is_file() and (pasta / f"{voz}.onnx.json").is_file()
-    except Exception:  # noqa: BLE001
-        return None
+def _piper_voz(tts_cfg: dict[str, Any]) -> str:
+    """A voz do Piper escolhida (a do provedor do Ergon; sem ela, a do português)."""
+    prov = tts_cfg.get("providers") if isinstance(tts_cfg.get("providers"), dict) else {}
+    pc = prov.get(PIPER_PROVEDOR) if isinstance(prov.get(PIPER_PROVEDOR), dict) else {}
+    voz = str(pc.get("voice") or "")
+    return voz if voz in VOZ_PIPER.values() or re.fullmatch(r"[a-z]{2,3}_[A-Z]{2}-[a-z0-9_]{1,40}-(x_low|low|medium|high)", voz) else VOZ_PIPER["pt"]
+
+
+def _piper_voz_baixada(tts_cfg: dict[str, Any]) -> bool:
+    """A voz do Piper escolhida já está na pasta do motor (o 1º uso baixa uns 60 MB)?"""
+    voz = _piper_voz(tts_cfg)
+    pasta = Path(_piper_pasta())
+    return (pasta / f"{voz}.onnx").is_file() and (pasta / f"{voz}.onnx.json").is_file()
 
 
 def _voz_estado() -> dict[str, Any]:
@@ -3927,10 +3962,12 @@ def _voz_estado() -> dict[str, Any]:
         from tools.tts_tool import _get_provider as _tts_provider, _load_tts_config, check_tts_requirements
         cfg = _load_tts_config()
         prov: str | None = str(_tts_provider(cfg))[:30]
-        if prov == "piper" and not _piper_instalado():
+        if prov in ("piper", PIPER_PROVEDOR) and not _piper_instalado():
             prov = "edge" if _edge_instalado() else None  # sem o pacote do Piper na imagem: a voz online, se houver
-        elif prov == "piper":
-            out["preparar"]["falar"] = _piper_voz_baixada(cfg) is False
+        elif prov in ("piper", PIPER_PROVEDOR):
+            # a do Hermes (no processo do motor) também conta como Piper: o "Ouvir" do Ergon fala sempre pelo processo próprio
+            prov = "piper"
+            out["preparar"]["falar"] = not _piper_voz_baixada(cfg)
         elif check_tts_requirements():
             # o Edge (grátis) precisa do pacote edge_tts na imagem; sem ele, o Hermes diz que dá e falha na hora
             if prov == "edge" and not _edge_instalado():
@@ -4281,9 +4318,43 @@ def _falar_edge(texto: str, saida: str) -> bool:
         return False
 
 
+def _falar_piper(texto: str, saida: str, tts_cfg: dict[str, Any]) -> tuple[bool, str]:
+    """O Piper num processo próprio (piper_processo.py chama a linha de comando do Piper): nada do pacote, que é GPL,
+    entra no processo do motor. A voz é baixada no 1º uso."""
+    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "piper_processo.py")
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", dir=os.path.dirname(saida), delete=False) as f:
+        f.write(texto)
+        entrada = f.name
+    try:
+        r = subprocess.run([sys.executable, helper, "--voz", _piper_voz(tts_cfg), "--pasta", _piper_pasta(), "--texto", entrada, "--saida", saida],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=620, check=False)
+        if r.returncode == 0 and os.path.isfile(saida) and os.path.getsize(saida) > 0:
+            return True, ""
+        return False, r.stderr.decode("utf-8", "replace").strip()[-200:]
+    except subprocess.TimeoutExpired:
+        return False, "o Piper passou do prazo"
+    finally:
+        try:
+            os.remove(entrada)
+        except OSError:
+            pass
+
+
+def _tipo_do_audio(dados: bytes, caminho: str) -> str:
+    """Pelos bytes (o Piper sem ffmpeg entrega WAV mesmo com o nome .mp3), depois pela extensão."""
+    if dados[:4] == b"RIFF" and dados[8:12] == b"WAVE":
+        return "audio/wav"
+    if dados[:4] == b"OggS":
+        return "audio/ogg"
+    if dados[:3] == b"ID3" or dados[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio/mpeg"
+    return {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav"}.get(os.path.splitext(caminho)[1].lower(), "audio/mpeg")
+
+
 def voz_falar(texto: str) -> dict[str, Any]:
-    """Um texto vira áudio pelo Hermes. A voz do Ergon é o Piper (no próprio computador, sem internet; a voz é baixada no
-    1º uso); se ele falhar, a resposta sai pela voz online (edge-tts) e a resposta diz que foi a reserva."""
+    """Um texto vira áudio. A voz do Ergon é o Piper, no próprio computador e sem internet (a voz é baixada no 1º uso),
+    sempre num processo próprio; se ele falhar, a resposta sai pela voz online (edge-tts) e a resposta diz que foi a
+    reserva. Outros provedores (edge, um com chave): pelo Hermes, como antes."""
     estado = _voz_estado()
     if not estado["falar"]:
         return {"ok": False, "motivo": "componente"}
@@ -4292,15 +4363,22 @@ def voz_falar(texto: str) -> dict[str, Any]:
     saida = os.path.join(pasta, f"f-{hashlib.sha256(texto.encode('utf-8', 'replace')).hexdigest()[:24]}.mp3")
     feitos = [saida]
     reserva = False
+    detalhe = ""
     try:
         try:
             from tools.tts_tool import _get_provider as _tts_provider, _load_tts_config  # módulos do Hermes
-            configurado = str(_tts_provider(_load_tts_config()))
+            cfg = _load_tts_config()
+            configurado = str(_tts_provider(cfg))
         except Exception:  # noqa: BLE001
-            configurado = ""
-        r: dict[str, Any] = {}
+            cfg, configurado = {}, ""
+        piper = configurado in ("piper", PIPER_PROVEDOR)
         real = saida
-        if configurado == "piper" and estado["falar"] == "edge":
+        if piper and estado["falar"] == "piper":
+            ok, detalhe = _falar_piper(texto, saida, cfg)
+            if not ok:
+                logger.warning("ergon_bridge: a voz local (Piper) falhou (%s); a resposta vai pela voz online", detalhe[:120])
+                reserva = True
+        elif piper:
             reserva = True  # o Piper não está na imagem: direto para a voz online
         else:
             from tools.tts_tool import text_to_speech_tool  # módulo do Hermes
@@ -4308,20 +4386,18 @@ def voz_falar(texto: str) -> dict[str, Any]:
             r = r if isinstance(r, dict) else {}
             real = os.path.realpath(str(r.get("file_path") or saida))
             feitos.append(real)
-            ok = r.get("success") and os.path.commonpath([real, pasta]) == pasta and os.path.isfile(real) and 0 < os.path.getsize(real) <= _VOZ_MAX
-            if not ok and configurado == "piper":
-                logger.warning("ergon_bridge: a voz local (Piper) falhou (%s); a resposta vai pela voz online", str(r.get("error") or "")[:120])
-                reserva = True
-            elif not ok:
+            if not (r.get("success") and os.path.commonpath([real, pasta]) == pasta and os.path.isfile(real) and 0 < os.path.getsize(real) <= _VOZ_MAX):
                 return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "")[:300]}
         if reserva:
             real = saida
             if not _falar_edge(texto, saida):
-                return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "a voz local falhou e a online não respondeu")[:300]}
+                return {"ok": False, "motivo": "falhou", "detalhe": (detalhe or "a voz local falhou e a online não respondeu")[:300]}
+        if not 0 < os.path.getsize(real) <= _VOZ_MAX:
+            return {"ok": False, "motivo": "falhou", "detalhe": "áudio vazio ou grande demais"}
         with open(real, "rb") as f:
             dados = f.read()
-        tipo = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav"}.get(os.path.splitext(real)[1].lower(), "audio/mpeg")
-        return {"ok": True, "audio": base64.b64encode(dados).decode("ascii"), "tipo": tipo, "provedor": "edge" if reserva else (configurado or "")[:30], "reserva": reserva}
+        return {"ok": True, "audio": base64.b64encode(dados).decode("ascii"), "tipo": _tipo_do_audio(dados, real),
+                "provedor": "edge" if reserva else ("piper" if piper else configurado[:30]), "reserva": reserva}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "motivo": "falhou", "detalhe": type(exc).__name__}
     finally:
