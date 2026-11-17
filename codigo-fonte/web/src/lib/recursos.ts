@@ -1,7 +1,8 @@
 // Capacidades da equipe (rc.27): o que GET /api/recursos e as rotas vizinhas devolvem. Só tipos e caminhos, sem texto.
 export interface RecursosEstado {
   checkpoints: boolean; codigoInseguro: boolean; limpeza: boolean; buscaFerramentas: boolean; conectores: string[];
-  voz: { transcrever: string | null; falar: string | null };
+  /** preparar (rc.33): o que ainda vai ser baixado no 1º uso (o modelo de fala, a voz do Piper); modelo: base ou small */
+  voz: { transcrever: string | null; falar: string | null; preparar?: { transcrever: boolean; falar: boolean }; modelo?: string | null };
   navegador: { chromium: boolean; pronto: boolean };
   escrita: string[];
 }
@@ -32,19 +33,6 @@ export interface AppConectado {
 
 export const RECURSOS = '/api/recursos';
 
-interface Anexo { id: string; filename: string; mime: string }
+/** Um áudio (o player e a transcrição na conversa, rc.33). */
 export const ehAudio = (f: { filename: string; mime: string }): boolean =>
   f.mime.startsWith('audio/') || /\.(ogg|oga|opus|mp3|m4a|wav|webm|flac|aac)$/i.test(f.filename);
-/**
- * Os áudios que a pessoa mandou desde `desde` (ms) e ainda não foram tentados pela transcrição automática. Cada áudio é
- * tentado sozinho uma vez só: se falhar, fica o botão "Transcrever" (sem isso, cada mudança na conversa tentava de novo e
- * repetia o erro na tela).
- */
-export function audiosParaTranscrever<A extends Anexo>(list: ReadonlyArray<{ role: string; created_at: string; attachments?: A[] }>, desde: number, tentados: ReadonlySet<string>): A[] {
-  const out: A[] = [];
-  for (const m of list) {
-    if (m.role !== 'user' || !(Date.parse(m.created_at) >= desde)) continue;
-    for (const f of m.attachments ?? []) if (ehAudio(f) && !tentados.has(f.id) && !out.some((x) => x.id === f.id)) out.push(f);
-  }
-  return out;
-}

@@ -2198,6 +2198,28 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .conn-prontos { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .msg__transcricao { flex-basis: 100%; font-size: .9em; padding: 4px 8px; border-left: 3px solid var(--teal); white-space: pre-wrap; }
 
+/* ——— Mensagem de áudio (rc.33): o microfone e o gravador no campo, o player e a transcrição na conversa ——— */
+.chat__mic { align-self: center; color: var(--muted); }
+.chat__mic:hover { color: var(--navy); }
+.gravador { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 42px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.gravador__ponto { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.gravador__ponto.is-on { background: var(--err); }
+@media (prefers-reduced-motion: no-preference) { .gravador__ponto.is-on { animation: pulse 1.2s ease-in-out infinite; } }
+.gravador__txt { font-size: 13px; }
+.gravador__relogio { font-variant-numeric: tabular-nums; font-weight: 600; }
+.gravador__relogio small { color: var(--muted); font-weight: 400; }
+.gravador__barra { flex: 1 1 80px; min-width: 60px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.gravador__barra i { display: block; height: 100%; background: var(--teal); }
+.gravador__aviso { display: inline-flex; align-items: center; gap: 4px; align-self: center; max-width: 36ch; font-size: 12px; color: var(--err); }
+.msg__audio { display: flex; flex-direction: column; gap: 4px; flex-basis: 100%; max-width: min(100%, 420px); }
+.msg__audio audio { width: 100%; height: 36px; }
+.msg__audio .msg__transcricao { white-space: normal; }
+.msg__audio details.msg__transcricao summary { cursor: pointer; color: var(--muted); }
+.msg__audio details.msg__transcricao p { margin: 4px 0 0; white-space: pre-wrap; max-width: 80ch; }
+.msg__transcricao--falhou { border-left-color: var(--err); }
+.voz-escolhas fieldset { border: 0; padding: 0; margin: 6px 0; }
+.voz-escolhas .check { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; max-width: 80ch; }
+
 /* ——— Treinar (rc.29): as três coisas que dá para fazer, competências instaladas, adicionar uma pronta e a loja em vitrine.
    Só cores das variáveis do tema (claro e escuro). */
 .train__pergunta { margin: 2px 0 4px; font-size: 15px; }

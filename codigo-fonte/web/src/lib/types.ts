@@ -44,6 +44,8 @@ export interface AjustesDaEquipe {
   naoTreinar: boolean; buscaPrivada: boolean; buscaPrivadaAguarda: boolean; arrumarCompetencias: boolean;
   /** anotar na memória depois da conversa (ligado por padrão) e a profundidade do raciocínio (alta por padrão) */
   anotarMemoria: boolean; raciocinio: Raciocinio;
+  /** a voz do "Ouvir" (Piper por padrão) e o modelo da transcrição (base por padrão), rc.33; ausente = servidor de antes */
+  vozFalar?: 'piper' | 'edge'; vozModelo?: 'base' | 'small';
   pendente: boolean; atualizacao: boolean; outros: number;
   pausa: { pausada: boolean; desde: string | null };
   opcoes?: { principal: { provider: string | null; model: string | null }; contas: Array<{ id: string; name: string; billing: Billing; models: Array<{ id: string; label: string }> }> };
@@ -200,7 +202,9 @@ export interface TaskCard {
 }
 export interface BoardView { board: BoardSummary; columns: Column[]; tasks: TaskCard[] }
 /** queued: 1 = na fila da conversa (Ctrl+Enter); vai para o agente quando ele terminar */
-export interface Attachment { id: string; filename: string; mime: string; size: number }
+/** A transcrição de um áudio da conversa (rc.33), gravada no servidor; motivo da falha: código (a tela tem os textos). */
+export interface Transcricao { estado: 'transcrevendo' | 'preparando' | 'pronta' | 'falhou'; texto: string | null; motivo: string | null; duracao: number | null }
+export interface Attachment { id: string; filename: string; mime: string; size: number; transcricao?: Transcricao }
 export interface Message { id: string; role: 'user' | 'agent' | 'system'; content: string; mode: 'real' | 'simulated' | 'local'; run_id: string | null; created_at: string; run_status: string | null; queued?: number; attachments?: Attachment[];
   /** responde citando esta mensagem */ reply_to?: string | null;
   /** entrega de cards: os cards dela (estado e rodada), para Revisar ali mesmo */ cards?: Array<{ id: string; number: number; title: string; completed: number; work_state: string | null; review_round: number }>;
