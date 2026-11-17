@@ -58,7 +58,11 @@ COPY shared shared
 COPY server/src server/src
 COPY server/catalogo server/catalogo
 COPY --from=build /app/web/dist web/dist
-RUN mkdir -p /data && chown node:node /data
+# segredo do app público do Ergon no Google (cliente de app instalado; config.ts ERGON_GOOGLE_APP): só a esteira de
+# lançamento o tem (segredo de build "google_app"); build local sai sem ele e o Google fica sem app embutido
+RUN --mount=type=secret,id=google_app \
+    if [ -s /run/secrets/google_app ]; then cp /run/secrets/google_app /app/google-app.secret && chmod 444 /app/google-app.secret; fi; \
+    mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

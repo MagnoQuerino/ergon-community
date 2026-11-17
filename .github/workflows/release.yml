@@ -81,6 +81,8 @@ jobs:
           target: runtime
           platforms: linux/amd64,linux/arm64
           build-args: ERGON_BUILD=${{ env.BUILD }}
+          # segredo do app público do Google (cliente de app instalado): vira /app/google-app.secret na imagem
+          secrets: google_app=${{ secrets.ERGON_GOOGLE_APP_SECRET }}
           # cache entre versões: camada que não mudou sai com o MESMO digest e quem atualiza não baixa de novo
           cache-from: type=gha,scope=ergon
           cache-to: type=gha,scope=ergon,mode=max
