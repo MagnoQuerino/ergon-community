@@ -345,6 +345,23 @@ describe('aplicar: a regra vale de verdade', () => {
     assert.equal(h.conexoes.regras.ativas(s.workspaceId).length, 2);
   });
 
+  test('"Criar e organizar sem pedir a minha aprovação" na conexão: regra de sempre, cobre organizar com código ligado e em rotina; enviar e apagar não; desmarcar desfaz', async () => {
+    for (const x of h.conexoes.regras.ativas(s.workspaceId)) h.conexoes.regras.desfazer(s.workspaceId, s.userId, x.id);
+    const r = await req(h, 'POST', '/api/conexoes/regras', s, { kind: 'microsoft' });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const tela = (await req(h, 'GET', '/api/conexoes/regras', s)).json.regras as Array<{ id: string; oque: string[]; conexoes: string[]; alcance: string }>;
+    const regra = tela.find((x) => x.id === r.json.id)!;
+    assert.deepEqual([regra.oque, regra.conexoes, regra.alcance], [['organizar'], ['microsoft'], 'sempre']);
+    const R = h.conexoes.regras;
+    assert.ok(R.cobre(s.workspaceId, [], 'microsoft', 'tarefas.criar', 'organizar', true), 'organizar, com Executar código ligado');
+    assert.equal(R.cobre(s.workspaceId, [], 'microsoft', 'email.enviar', 'enviar', true), null);
+    assert.equal(R.cobre(s.workspaceId, [], 'microsoft', 'tarefas.apagar', 'apagar', false), null);
+    assert.equal(R.cobre(s.workspaceId, [], 'google', 'tarefas.criar', 'organizar', false), null, 'só nesta conexão');
+    assert.equal(decidir({ risco: 'organizar', origem: 'fora', leuDeFora: true, liberarTudo: false, codigoLigado: true, regra: true }), 'direto', 'rotina, depois de ler, com código ligado');
+    assert.equal((await req(h, 'POST', '/api/conexoes/regras', s, { kind: 'nao-existe' })).status, 400);
+    assert.equal((await req(h, 'POST', `/api/conexoes/regras/${r.json.id}/desfazer`, s)).status, 200);
+    assert.equal(R.cobre(s.workspaceId, [], 'microsoft', 'tarefas.criar', 'organizar', true), null);
+  });
   test('o pedido de uma execução: o card, o card pai, a execução que abriu o card e as continuações', () => {
     const agora = new Date().toISOString();
     const ins = (id: string, task: string | null, k: string) => h.db.run(`INSERT INTO runs (id, workspace_id, agent_id, conversation_id, task_id, kind, status, mode, input, idempotency_key, created_at)

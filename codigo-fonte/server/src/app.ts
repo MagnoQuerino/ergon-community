@@ -66,7 +66,7 @@ import { routeTeamTask } from './services/actions.ts';
 import { HermesError, HttpHermesClient, HttpHermesControl, type HermesClient, type HermesControlClient } from './services/hermes.ts';
 import { CONEXOES, migrarAgentesErgonAi, type AiService } from './services/ai.ts';
 import { equipeNaSaude, Motors } from './services/motors.ts';
-import { Integrations, contasDe, integrationRow, nomeDaConta, setIntegration, type IntegrationKind } from './services/integrations.ts';
+import { INTEGRATIONS, Integrations, contasDe, integrationRow, nomeDaConta, setIntegration, type IntegrationKind } from './services/integrations.ts';
 import { contaDoPedido, contaSchema } from './routes/integracoes.ts';
 import { WhatsAppReader } from './services/whatsapp.ts';
 import { vistaDaAprovacao } from './services/aprovacao-cartao.ts';
@@ -2548,6 +2548,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   // Conexões › Regras: as regras aprovadas (as que liberam ações sem confirmação e as de texto ativas) e as propostas esperando
   app.get('/api/conexoes/regras', async (req) => conexoes.regras.tela(auth(req).workspaceId));
+  // rc.34: "Criar e organizar sem pedir aprovação" direto na conexão (antes, só pedindo na conversa): uma regra de sempre,
+  // daquela conexão, que vale também em rotinas e cards da equipe; desfaz em Regras ou desmarcando
+  app.post('/api/conexoes/regras', { schema: { body: { type: 'object', additionalProperties: false, required: ['kind'], properties: { kind: S.str(40, 1) } } } }, async (req) => {
+    const a = owner(req); const kind = (req.body as { kind: string }).kind;
+    if (!INTEGRATIONS.some((x) => x.kind === kind)) throw new HttpError(400, 'invalid', 'conexão desconhecida');
+    const r = conexoes.regras.aplicar(a.workspaceId, a.userId, { id: `tela:${kind}`, conversationId: null, runId: null,
+      proposta: { kind: 'regra', riscos: ['organizar'], conexoes: [kind], so: null, alcance: 'sempre' } }, 'sempre');
+    return { id: r.id, status: r.status };
+  });
   app.post('/api/conexoes/regras/:id/desfazer', { schema: { params: idParams('rgc') } }, async (req) => {
     const a = owner(req);
     const r = conexoes.regras.desfazer(a.workspaceId, a.userId, (req.params as { id: string }).id);

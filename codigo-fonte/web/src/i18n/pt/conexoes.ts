@@ -113,6 +113,8 @@ const conexoes = {
   'reusar.usarSemNome': 'Usar a conta de {workspace}',
 
   // ——— Regras ———
+  'semAprovacao.rotulo': 'Criar e organizar sem pedir a minha aprovação',
+  'semAprovacao.dica': 'Criar tarefas, eventos, pastas e rascunhos nesta conta vai direto, também nas rotinas e nos cards da equipe. Enviar em seu nome e apagar continuam pedindo o seu sim. Desfaz aqui ou em Regras.',
   'regras.titulo': 'Regras',
   'regras.texto': 'Para dar mais autonomia à equipe, peça na conversa, por exemplo: “podem mandar os e-mails sem me pedir aprovação”. Aparece um cartão para você escolher até quando vale: só naquele pedido, por 24 h ou sempre. Apagar só entra quando você fala em apagar. A segurança fica por sua conta: o que você libera aqui vale também quando a equipe trabalha sozinha e depois de ler mensagens de outras pessoas. Desfazer vale na hora.',
   'regras.vazio': 'Nenhuma regra por enquanto: tudo segue o que está acima.',
