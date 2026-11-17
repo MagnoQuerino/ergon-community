@@ -1,5 +1,11 @@
 # Novidades
 
+## 1.1.0-rc.36 (pré-versão de teste)
+
+- **Conversas bem mais baratas no Ergon AI:** o começo de cada pedido ao modelo (a base da equipe, as ferramentas e o histórico da conversa) fica sempre igual, e as instruções que mudam a cada mensagem vão para o fim. Assim o cache do modelo, cobrado a 10% do preço, passa a cobrir quase todo o pedido.
+- **Saída do terminal compacta (RTK):** comandos como git, ls, grep e testes devolvem à equipe só o essencial (60 a 90% menos texto). Sem equivalente ou em qualquer falha, o comando roda como veio.
+- **Equipe mais econômica por padrão:** respostas diretas, menos chamadas de ferramenta e, em documentos e pesquisas longas, um resumo estruturado com citações em vez de ler o texto inteiro de novo (competências token-efficiency e research-summarizer, embutidas).
+
 ## 1.1.0-rc.35 (pré-versão de teste)
 
 - **"Criar e organizar sem pedir a minha aprovação"** em cada conta conectada: com a caixa marcada, criar tarefas, eventos, pastas e rascunhos naquela conta vai direto, também nas rotinas e com Executar código ligado. Enviar em seu nome e apagar continuam pedindo o seu sim. Desmarcar volta a pedir na hora.

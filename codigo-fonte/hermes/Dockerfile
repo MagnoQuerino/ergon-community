@@ -6,7 +6,7 @@ FROM ${HERMES_IMAGE}
 
 # versão do plugin do Ergon nesta imagem: a mesma do plugin.yaml e de PLUGIN_VERSION (um teste confere); o gerente e o
 # diagnóstico leem sem abrir o motor
-LABEL ergon.plugin.version="0.7.0"
+LABEL ergon.plugin.version="0.8.0"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gocryptfs fuse3 \
@@ -50,6 +50,25 @@ RUN set -eu; cd /opt/hermes; \
     agent-browser --version; \
     HERMES_HOME=/tmp/ergon-confere /opt/hermes/.venv/bin/python -c "from tools.browser_tool_install import _find_agent_browser; p = _find_agent_browser(validate=False); assert p == '/usr/local/bin/agent-browser', p; print('o Hermes acha', p)"; \
     rm -rf /tmp/ergon-confere
+
+# rc.36: RTK (Rust Token Killer, github.com/rtk-ai/rtk), edição OSS (só Apache-2.0; a edição padrão traz o rtk-engine sob
+# BUSL-1.1, que não redistribuímos). Comprime a saída de comandos do terminal (git, ls, grep, testes, docker…) antes de
+# ela ir ao modelo: o plugin do Ergon passa cada comando do terminal por `rtk rewrite` (a mesma lógica do adaptador
+# oficial do RTK para o Hermes) e, sem equivalente ou em qualquer falha, o comando roda como veio. Versão e SHA-256
+# fixados (checksums.txt da versão); a imagem não é construída se o arquivo não conferir.
+ARG TARGETARCH
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) alvo=x86_64; soma=a28407dc13038bdc9c2a1f5a047b0c636e0c1d495b15523576e2adb992a06a17 ;; \
+      arm64) alvo=aarch64; soma=9786c61dbbea704e1468ee7060930d3b45b67f79ba2babfb73463e85340628d9 ;; \
+      *) echo "arquitetura sem RTK: ${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    /opt/hermes/.venv/bin/python -c "import urllib.request,sys; urllib.request.urlretrieve(sys.argv[1], '/tmp/rtk.tgz')" \
+      "https://github.com/rtk-ai/rtk/releases/download/v1.2.0/rtk-oss-${alvo}-unknown-linux-musl.tar.gz"; \
+    echo "${soma}  /tmp/rtk.tgz" | sha256sum -c -; \
+    mkdir -p /opt/ergon/tools/rtk; tar xzf /tmp/rtk.tgz -C /opt/ergon/tools/rtk rtk LICENSE; rm /tmp/rtk.tgz; \
+    chmod -R a+rX /opt/ergon/tools/rtk; ln -s /opt/ergon/tools/rtk/rtk /usr/local/bin/rtk; \
+    rtk --version; test "$(rtk rewrite 'git status')" = "rtk git status"
 
 COPY vault/ergon-vault.py /usr/local/lib/ergon/ergon-vault.py
 # plugin do Ergon dentro da imagem (a instalação não depende de arquivos do projeto)

@@ -51,6 +51,17 @@ Destaques:
   do Windows (pacote do Alpine) e no pacote .deb do Linux (/usr/lib/ergon/podman-compose, com a licença em
   /usr/share/doc/ergon); o código-fonte está em https://github.com/containers/podman-compose (versão 1.4.1).
 
+Economia de tokens no motor (rc.36)
+-----------------------------------
+
+- RTK 1.2.0, edição OSS (https://github.com/rtk-ai/rtk), licença Apache-2.0: comprime a saída de comandos do terminal
+  dos agentes. Vai sem alterações na imagem do motor (/opt/ergon/tools/rtk, com a licença ao lado). A edição padrão,
+  que inclui o rtk-engine sob BUSL-1.1, não é redistribuída.
+- Competência token-efficiency (https://github.com/rohitg00/pro-workflow), licença MIT, adaptada de
+  drona23/claude-token-efficient (MIT); e competência research-summarizer
+  (https://github.com/alirezarezvani/claude-skills, Copyright (c) 2025 Alireza Rezvani), licença MIT. Os originais e
+  as licenças estão em hermes/plugins/ergon_bridge/competencias/; o plugin usa uma versão condensada e traduzida.
+
 Componentes GPL e onde obter o código
 -------------------------------------
 
