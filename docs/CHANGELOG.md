@@ -1,5 +1,9 @@
 # Novidades
 
+## 1.1.0-rc.35 (pré-versão de teste)
+
+- **"Criar e organizar sem pedir a minha aprovação"** em cada conta conectada: com a caixa marcada, criar tarefas, eventos, pastas e rascunhos naquela conta vai direto, também nas rotinas e com Executar código ligado. Enviar em seu nome e apagar continuam pedindo o seu sim. Desmarcar volta a pedir na hora.
+
 ## 1.1.0-rc.34 (pré-versão de teste)
 
 - **Links com o Ergon World:** o plano vale em mais de um workspace seu (Sync 1, Pro 3, Team 10). Ligue e desligue workspaces quando quiser, sem mexer na assinatura. Os ligados usam os Dracmas do plano.
