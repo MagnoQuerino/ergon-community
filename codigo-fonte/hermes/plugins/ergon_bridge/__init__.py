@@ -3093,7 +3093,7 @@ def _media_dirs() -> list[str]:
 _PERFIL_NOME = re.compile(r"erg-[a-f0-9]{8,64}")
 
 
-def _perfil_dir(perfil: str) -> str | None:
+def _perfil_dir_real(perfil: str) -> str | None:
     """A pasta (real) do perfil de um agente, se o nome é de perfil do Ergon e ela existe."""
     if not perfil or not _PERFIL_NOME.fullmatch(perfil):
         return None
@@ -3118,7 +3118,7 @@ def _media_file(raw: str, perfil: str = "") -> tuple[str, str] | None:
     real = os.path.realpath(raw)
     mime = _MEDIA_TYPES.get(os.path.splitext(real)[1].lower())
     bases = _media_dirs()
-    pd = _perfil_dir(perfil)
+    pd = _perfil_dir_real(perfil)
     if pd:
         bases.append(pd)
     if not mime or not any(_dentro(real, base) for base in bases) or not os.path.isfile(real):
@@ -3130,7 +3130,7 @@ def _media_file(raw: str, perfil: str = "") -> tuple[str, str] | None:
 def _media_guardar(real: str, perfil: str) -> str:
     """A imagem de fora das geradas (a captura de tela, que a próxima sobrescreve) vira uma cópia na pasta das geradas do
     perfil, com nome pelo conteúdo, quando o Ergon a busca no fim do pedido. Devolve o caminho de onde servir."""
-    pd = _perfil_dir(perfil)
+    pd = _perfil_dir_real(perfil)
     if not pd or any(_dentro(real, base) for base in _media_dirs()):
         return real
     try:
