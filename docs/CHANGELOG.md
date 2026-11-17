@@ -1,5 +1,15 @@
 # Novidades
 
+## 1.1.0-rc.34 (pré-versão de teste)
+
+- **Links com o Ergon World:** o plano vale em mais de um workspace seu (Sync 1, Pro 3, Team 10). Ligue e desligue workspaces quando quiser, sem mexer na assinatura. Os ligados usam os Dracmas do plano.
+- **Workspace apagado no app** sai do Ergon World: libera o link do plano e não aparece mais nas listas de plano e crédito. A página do World não trava mais quando o workspace ligado some.
+- **Computador novo:** os workspaces que estão no Ergon World aparecem com "Baixar para este computador".
+- **Pedidos pelos canais** (Teams, Telegram, Discord) ficam guardados por até 60 dias esperando o Ergon abrir (eram 7).
+- **Saldo de Dracmas ao vivo:** o custo e o saldo acompanham cada resposta da equipe, sem atualizar a tela.
+- **Regras do plano vindas do servidor:** tolerância, desconto anual e pacotes aparecem como o Ergon World define.
+- **Lista de modelos do Ergon AI** sem nomes repetidos, e "grátis" aparece uma vez só.
+
 ## 1.1.0-rc.33 (pré-versão de teste)
 
 - **Ergon AI e Ergon AI Sinapse:** a IA do Ergon com nomes próprios, um rápido para o dia a dia e um que pensa antes de responder.
