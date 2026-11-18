@@ -301,6 +301,18 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const a = h.auth(req); const w = worldWs(a);
         return w ? client.call('GET', `/v1/billing/state?workspace=${w}`, undefined, sessionOf(a.userId)) : NONE;
       });
+      // "Subir o WS para o World": o workspace RODA na nuvem com os PCs desligados (não é a sincronia nem a colaboração).
+      // World sem a rota (versão antiga) ou sem workspace ligado: nada oferecido, e a tela some.
+      const SEM_NUVEM = { offered: false, active: false };
+      app.get('/api/world/cloud', async (req) => {
+        const a = h.auth(req); const w = worldWs(a);
+        if (!w) return SEM_NUVEM;
+        return client.call('GET', `/v1/cloud?workspace=${w}`, undefined, sessionOf(a.userId)).catch(() => SEM_NUVEM);
+      });
+      app.post('/api/world/cloud/trial', async (req) => {
+        const a = h.owner(req); const w = needWorld(a);
+        return client.call('POST', '/v1/cloud/trial', { workspaceId: w }, sessionOf(a.userId));
+      });
       // Central de Trabalho, ala "Na nuvem": os Jobs do workspace no World, lidos aqui (a sessão não vai à tela), com
       // frescor próprio e no máximo uma leitura a cada 20 s por pessoa e workspace; falha não vira zero
       const jobsCache = new Map<string, { at: number; pool: RemotePool }>();
@@ -529,7 +541,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const b = (req.body ?? {}) as Record<string, unknown>;
         const f = await fonteDoPlano(a.userId, w);
         if (f.source === 'cortesia' && (path.endsWith('/cancel') || (b.plan !== undefined && anual(b.plan) !== anual(f.plan)))) throw new HttpError(409, 'cortesia', CORTESIA);
-        const pick = Object.fromEntries(['plan', 'seats', 'jobPacks', 'prorationDate', 'idempotencyKey'].filter((k) => b[k] !== undefined).map((k) => [k, b[k]]));
+        const pick = Object.fromEntries(['plan', 'seats', 'jobPacks', 'cloud', 'prorationDate', 'idempotencyKey'].filter((k) => b[k] !== undefined).map((k) => [k, b[k]]));
         return client.call('POST', path, { ...pick, workspaceId: w }, sessionOf(a.userId));
       };
       app.post('/api/world/billing/change/preview', change('/v1/billing/change/preview'));

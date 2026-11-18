@@ -1,5 +1,9 @@
 # Novidades
 
+## 1.1.0-rc.37 (pré-versão de teste)
+
+- **Subir o WS para o World (em breve):** um adicional novo que deixa o workspace trabalhando no Ergon World com todos os computadores desligados (canais, rotinas, cards e acesso pelo celular). Não é a sincronia nem a colaboração, que continuam iguais e com o mesmo preço. Em Configurações › Ergon World aparece o estado, o disco e o teste de 7 dias grátis, assim que a venda abrir. Quem já recebeu como cortesia já vê o quadro.
+
 ## 1.1.0-rc.36 (pré-versão de teste)
 
 - **Conversas bem mais baratas no Ergon AI:** o começo de cada pedido ao modelo (a base da equipe, as ferramentas e o histórico da conversa) fica sempre igual, e as instruções que mudam a cada mensagem vão para o fim. Assim o cache do modelo, cobrado a 10% do preço, passa a cobrir quase todo o pedido.
