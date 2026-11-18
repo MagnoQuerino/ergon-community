@@ -7,6 +7,7 @@ import { fmtDataHora } from '../../i18n/index.ts';
 import { twn, useTw } from './textos.ts';
 import { Icon } from '../../components/Icon.tsx';
 import { AceitarConvite } from './Gestao.tsx';
+import NuvemWs from './NuvemWs.tsx';
 
 interface WorkspaceRef { workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }
 interface Link { accountEmail: string | null; emailVerified: boolean; deviceId: string; workspaces?: WorkspaceRef[]; boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean }
@@ -74,6 +75,7 @@ export default function WorldPanel() {
         <p className="muted small">{t('painel.contaGestao')}</p>
         <a className="btn btn--primary" href="#world"><Icon name="globe" size={14} /> {t('painel.abrirPagina')}</a>
       </section>
+      <NuvemWs />
     </>
   );
 }
