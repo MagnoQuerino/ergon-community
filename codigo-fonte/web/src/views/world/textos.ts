@@ -684,6 +684,8 @@ const pt = {
   'ws.espera': 'Você está na lista de espera. Avisamos quando abrir vaga.',
   'ws.feito': 'Pronto: o workspace está no World.',
   'ws.soDono': 'Só quem é dono do workspace contrata.',
+  'ws.combo': 'combo: {pct}% a menos',
+  'ws.comboTexto': 'Junto com um plano do World, o combo sai com {pct}% a menos.',
   'gov.trancado.peca': 'Peça ao dono do workspace para subir para o World Team.',
 } as const satisfies Area;
 
@@ -1331,6 +1333,8 @@ const en: Traducao<typeof pt> = {
   'ws.espera': 'You are on the waiting list. We will let you know when a spot opens.',
   'ws.feito': 'Done: the workspace is in the World.',
   'ws.soDono': 'Only the workspace owner can subscribe.',
+  'ws.combo': 'bundle: {pct}% off',
+  'ws.comboTexto': 'Together with an Ergon World plan, the bundle is {pct}% off.',
   'gov.trancado.peca': 'Ask the workspace owner to move up to World Team.',
 };
 

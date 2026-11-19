@@ -5,7 +5,7 @@ import { fmtData, fmtMoeda } from '../../i18n/index.ts';
 import { useTw } from './textos.ts';
 
 interface Nuvem {
-  offered: boolean; active: boolean; forSale?: boolean; planActive?: boolean; owner?: boolean; source?: 'stripe' | 'cortesia' | 'teste' | null;
+  offered: boolean; comboPercent?: number; active: boolean; forSale?: boolean; planActive?: boolean; owner?: boolean; source?: 'stripe' | 'cortesia' | 'teste' | null;
   until?: string | null; runtime?: 'parado' | 'dormindo' | 'rodando' | 'fila' | 'pausado' | null; diskUsedBytes?: string; diskQuotaBytes?: string;
   trialAvailable?: boolean; waitlisted?: boolean;
 }
@@ -17,9 +17,11 @@ const gb = (b?: string) => `${(Number(b ?? 0) / 1024 ** 3).toFixed(1)} GB`;
  * escondido enquanto o World não oferece (a venda abre só com o executor pronto); quem já tem (cortesia) vê o estado.
  * Sempre deixa claro que não é a sincronia nem a colaboração.
  */
-export default function NuvemWs() {
+export const useNuvemWs = (): Nuvem | null => useResource<Nuvem>('/api/world/cloud', ['world.cloud']).data ?? null;
+
+export default function NuvemWs({ semTitulo = false }: { semTitulo?: boolean }) {
   const t = useTw();
-  const r = useResource<Nuvem>('/api/world/cloud', []);
+  const r = useResource<Nuvem>('/api/world/cloud', ['world.cloud']);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [pv, setPv] = useState<Preview | null>(null);
@@ -36,9 +38,9 @@ export default function NuvemWs() {
     await go(() => api.post('/api/world/billing/change/confirm', { cloud: 1, prorationDate: pv.prorationDate, idempotencyKey: requestId() }), t('ws.feito'));
   };
   return (
-    <section className="card">
-      <h3>{t('ws.titulo')}</h3>
-      <p>{t('ws.oque')}</p>
+    <section className={semTitulo ? 'ws-nuvem' : 'card'}>
+      {!semTitulo && <h3>{t('ws.titulo')}</h3>}
+      {!semTitulo && <p>{t('ws.oque')}</p>}
       <p className="muted small">{t('ws.diferenca')}</p>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       {d.active ? (
@@ -49,7 +51,7 @@ export default function NuvemWs() {
         </>
       ) : (
         <>
-          <p className="small">{t('ws.preco')}</p>
+          <p className="small">{t('ws.preco')}{d.comboPercent ? ` ${t('ws.comboTexto', { pct: d.comboPercent })}` : ''}</p>
           {d.waitlisted && <p className="muted small" role="status">{t('ws.espera')}</p>}
           {!d.planActive ? <p className="muted small">{t('ws.precisaPlano')}</p> : !d.owner ? <p className="muted small">{t('ws.soDono')}</p> : (
             <p>

@@ -468,7 +468,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return client.call('PUT', `/v1/workspaces/${w}/budgets/${acc}`, { capDracmas: cap }, sessionOf(a.userId));
       });
       app.post('/api/world/billing/checkout', async (req) => {
-        const b = (req.body ?? {}) as { sku?: unknown; seats?: unknown; jobPacks?: unknown; idempotencyKey?: unknown };
+        const b = (req.body ?? {}) as { sku?: unknown; seats?: unknown; jobPacks?: unknown; cloud?: unknown; idempotencyKey?: unknown };
         if (typeof b.sku !== 'string' || !/^[a-z0-9_]{2,40}$/.test(b.sku) || typeof b.idempotencyKey !== 'string') throw new HttpError(400, 'invalid', 'sku e chave da intenção obrigatórios');
         // o carrinho: com um plano, vagas adicionais e pacotes de Jobs vão na mesma assinatura (o World confere)
         const qty = (v: unknown, nome: string): number | undefined => {
@@ -480,7 +480,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const back = `${cfg.publicUrl}/?world=`;
         // plano ou recarga: são do workspace ligado ao World; quem compra é a pessoa dona
         const a = h.owner(req);
-        const body = { sku: b.sku, ...(seats ? { seats } : {}), ...(jobPacks ? { jobPacks } : {}), idempotencyKey: b.idempotencyKey, successUrl: `${back}pago`, cancelUrl: `${back}cancelado`, workspaceId: needWorld(a) };
+        const body = { sku: b.sku, ...(seats ? { seats } : {}), ...(jobPacks ? { jobPacks } : {}), ...(b.cloud === 1 ? { cloud: 1 } : {}), idempotencyKey: b.idempotencyKey, successUrl: `${back}pago`, cancelUrl: `${back}cancelado`, workspaceId: needWorld(a) };
         return client.call('POST', '/v1/billing/checkout', body, sessionOf(a.userId));
       });
 

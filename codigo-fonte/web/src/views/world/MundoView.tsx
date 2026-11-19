@@ -9,6 +9,7 @@ import { linhaDoResumo, type ResumoFora } from './nuvem-cartao.ts';
 import { predio, type Personagem } from './arte.ts';
 import { Estrelas, Fig } from './Enfeites.tsx';
 import { tw, twn, useTw } from './textos.ts';
+import NuvemWs, { useNuvemWs } from './NuvemWs.tsx';
 import { AceitarConvite, CarrinhoPainel, DracmasPainel, EquipeFaixa, ErgonAiPainel, NuvemPainel, PessoasPainel, PlanoPainel, WorkspacesPainel, type BillingWorld, type CatalogoWorld } from './Gestao.tsx';
 
 interface Status { configured: boolean; me: { displayName: string }; deviceLimit: LoginLimit | null; link: { boundWorkspaceId: string | null; boundWorkspaceName: string | null; currentIsBound: boolean; workspaces?: Array<{ workspaceId: string; label?: string | null; role: string; status: string; plan_sku: string | null }> } | null }
@@ -239,6 +240,18 @@ export default function MundoView() {
         </section>
       )}
 
+      {/* ---------- Subir o WS para o World: só com o sinal do servidor (venda aberta) ---------- */}
+      {on && !membro && (cat.data as { cloud?: { open: boolean; comboPercent: number } | null } | undefined)?.cloud?.open && (
+        <section className="mundo-secao mundo-revela" id="mundo-ws-nuvem" aria-labelledby="mundo-ws-nuvem-t">
+          <header className="mundo-secao__cab">
+            <h2 id="mundo-ws-nuvem-t">{t('ws.titulo')}</h2>
+            <p>{t('ws.oque')}</p>
+          </header>
+          <p className="center">{t('ws.diferenca')}</p>
+          <p className="center"><b>{t('ws.preco')}</b>{(cat.data as { cloud?: { comboPercent: number } }).cloud!.comboPercent > 0 && <> {t('ws.comboTexto', { pct: (cat.data as { cloud?: { comboPercent: number } }).cloud!.comboPercent })}</>}</p>
+        </section>
+      )}
+
       {/* ---------- perguntas rápidas ---------- */}
       {!membro && <section className="mundo-secao mundo-faq mundo-revela" aria-labelledby="mundo-faq">
         <h2 id="mundo-faq">{t('pagina.faq.titulo')}</h2>
@@ -305,6 +318,7 @@ function Painel({ nomeWorkspace, planoCarrinho, mine }: { nomeWorkspace: string 
           {corpo[x.id]}
         </section>
       ))}
+      <NuvemWsSecao />
       <p className="muted small center">{t('painel.conta')} <a href="#configuracao?world">{t('pagina.gerenciar')}</a></p>
     </div>
   );
@@ -492,5 +506,21 @@ function ArteDracmas() {
       <div className="v-moeda v-gira-y"><span>₯</span></div>
       <Fig k="fidias" gesture="offer" scale={2} className="v-direita" />
     </>
+  );
+}
+
+/** "Subir o WS para o World" como seção própria do painel: aparece só com o sinal do servidor (ou com o adicional ativo). */
+function NuvemWsSecao() {
+  const t = useTw();
+  const d = useNuvemWs();
+  if (!d || (!d.offered && !d.active)) return null;
+  return (
+    <section id="painel-ws-nuvem" className="mundo-painel__secao mundo-revela" aria-labelledby="painel-ws-nuvem-t">
+      <header className="mundo-painel__cab">
+        <span className="mundo-painel__icone" aria-hidden="true"><Icon name="cloud" size={20} /></span>
+        <div><h2 id="painel-ws-nuvem-t">{t('ws.titulo')}</h2><p>{t('ws.oque')}</p></div>
+      </header>
+      <NuvemWs semTitulo />
+    </section>
   );
 }

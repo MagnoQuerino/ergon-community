@@ -11,7 +11,7 @@ import { detalheDoResumo, linhaDoResumo, nomeDoWorkspace, type ResumoFora } from
 import { WsCard } from '../../components/WsCard.tsx';
 import type { AiStatus } from '../../lib/types.ts';
 import { administra, codigoValido, inicial, limparCodigo, papeisDoConvite, papeisPara, podeTirar, podeTransferir, vagas, type Membros, type Papel, type Pessoa } from './pessoas.ts';
-import { anualDe, atualDe, CHAVE_PENDENTE, jobsDe, passos, somaDoCatalogo, vagaDe, VAZIO, vazio, type Carrinho as Cesta, type Passo, planosDoCarrinho } from './carrinho.ts';
+import { anualDe, atualDe, CHAVE_PENDENTE, jobsDe, nuvemDe, passos, somaDoCatalogo, vagaDe, VAZIO, vazio, type Carrinho as Cesta, type Passo, planosDoCarrinho } from './carrinho.ts';
 import AlaNuvem from './AlaNuvem.tsx';
 
 /*
@@ -30,7 +30,7 @@ interface Status { configured: boolean; service: string | null; me: { displayNam
 interface Wallet { available: string; reserved: string; lots: Array<{ id: string; source: string; remaining: string; expiresAt: string | null; status: string }> }
 interface Statement { entries: Array<{ id: string; kind: string; delta: string; amount: string; createdAt: string }> }
 interface Item { sku: string; kind: string; name: string; priceCents: string | null; sellable: boolean; tier?: string | null; interval?: 'month' | 'year'; people?: number; jobSlots?: number; monthlyDracmas?: string; seatSku?: string; dracmas?: string | null; pending?: string[] }
-interface Catalog { dracmaIssue: string; items: Item[] }
+interface Catalog { dracmaIssue: string; items: Item[]; cloud?: { open: boolean; comboPercent: number } | null }
 interface Ent { status: string; plan_sku: string | null; tier: string | null; people: number; job_slots: number; effective_until: string | null; grace_until: string | null; source?: 'stripe' | 'cortesia' | null }
 interface Billing { workspaceId: string | null; role: string; entitlement: Ent; seatsUsed: number; subscription: { status: string; plan: string | null; periodEnd: string | null; cancelAt: string | null } | null; items: Array<{ sku: string; quantity: number }> }
 interface Preview { upgrade: boolean; prorationDate: number; amountDueCents: string; effective: string }
@@ -437,7 +437,9 @@ export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat
   const jobs = jobsDe(cat.items, plano);
   const periodo = anualDe(cat.items, plano) ? t('pagina.planos.porAno') : t('pagina.planos.porMes');
   const r = passos(c, a);
-  const soma = somaDoCatalogo(cat.items, c, a);
+  const oferta = cat.cloud?.open ? cat.cloud : null;
+  const nuvemItem = oferta ? nuvemDe(cat.items, plano) : undefined;
+  const soma = somaDoCatalogo(cat.items, c, a, oferta?.comboPercent ?? 0);
   const nome = (sku: string | null | undefined) => cat.items.find((i) => i.sku === sku)?.name ?? sku ?? '';
   const total = r.passos.length;
   const itens = (p: Passo) => fmtLista([
@@ -445,6 +447,7 @@ export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat
     ...(p.tipo === 'mudanca' && p.corpo.plan ? [t('carrinho.itemPlano', { nome: nome(p.corpo.plan) })] : []),
     ...(c.pessoas ? [t('carrinho.itemPessoas', { n: c.pessoas })] : []),
     ...(c.jobs ? [t('carrinho.itemJobs', { n: c.jobs })] : []),
+    ...(c.nuvem && !a.nuvem ? [t('ws.titulo')] : []),
   ]);
   const recarga = (sku: string) => go(async () => { const x = await api.post<{ url: string }>('/api/world/billing/checkout', { sku, idempotencyKey: requestId() }); gravar(CHAVE_PENDENTE, null); location.assign(x.url); });
   const pagar = (p: Passo, i: number) => {
@@ -492,6 +495,13 @@ export function CarrinhoPainel({ cat, bill, onMsg, onDone, planoInicial }: { cat
         </label>
         {contador(t('carrinho.pessoas'), c.pessoas, (n) => mudar({ pessoas: n }), vaga ? ` · ${brl(vaga.priceCents)}${periodo}` : '', a.assinatura ? a.pessoas : null)}
         {contador(t('carrinho.jobs', { n: polC.jobPackSize }), c.jobs, (n) => mudar({ jobs: n }), jobs ? ` · ${brl(jobs.priceCents)}${periodo}` : '', a.assinatura ? a.jobs : null)}
+        {nuvemItem?.sellable && !a.nuvem && (
+          <label className="carrinho__linha check">
+            <input type="checkbox" checked={!!c.nuvem} onChange={(ev) => mudar({ nuvem: ev.target.checked })} />
+            <span className="carrinho__rotulo">{t('ws.titulo')} <small className="muted">{` · ${brl(nuvemItem.priceCents)}${periodo}`}</small>
+              {oferta!.comboPercent > 0 && <small className="badge badge--ok">{t('ws.combo', { pct: oferta!.comboPercent })}</small>}</span>
+          </label>
+        )}
         <label className="carrinho__linha">
           <span className="carrinho__rotulo">{t('carrinho.recarga')}</span>
           <select value={c.recarga ?? ''} onChange={(ev) => mudar({ recarga: ev.target.value || null })}>
