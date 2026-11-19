@@ -81,7 +81,18 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
           catch (e) { if ((e as { code?: string }).code === 'world_offline') return; }
         } else if (w && !s) return;
         forgetWorkspace(db, ws); links?.setBound(userId, ws, false);
+        // a lista dos workspaces do World (guardada no vínculo) é lida de novo: o apagado some de "baixar" na hora
+        await links?.renew(userId).catch(() => null);
       };
+      /**
+       * Conectar ao World já liga a sincronia (é o mínimo de estar conectado): sem frase, em silêncio. Se este workspace
+       * já sincroniza em outro computador e este ainda não recebeu a chave, fica para autorizar por lá (a tela explica).
+       */
+      const sincronizarAoConectar = async (userId: string, ws: string): Promise<boolean> => {
+        if (sync.status(ws).enabled) return true;
+        try { await sync.enable(userId, ws); return true; } catch { return false; }
+      };
+
       const ownWorkspaces = (userId: string) => db.all<{ id: string; name: string }>(
         "SELECT w.id, w.name FROM memberships m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ? AND m.role = 'owner' ORDER BY w.created_at", userId);
 
@@ -209,7 +220,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       app.post('/api/world/bind', async (req) => {
         const a = h.auth(req); const b = (req.body ?? {}) as Record<string, unknown>;
         const ws = str(b.workspaceId, 64) ?? a.workspaceId; const sws = b.syncWorkspaceId;
-        if (!ownWorkspaces(a.userId).some((w) => w.id === ws)) throw new HttpError(403, 'not_owner', 'Só um workspace seu pode ser ligado ao Ergon World.');
+        if (!ownWorkspaces(a.userId).some((w) => w.id === ws)) throw new HttpError(403, 'not_owner', 'Só um workspace seu pode ser conectado ao Ergon World.');
         if (sws !== undefined && sws !== null && (typeof sws !== 'string' || !SWS.test(sws))) throw new HttpError(400, 'invalid', 'workspace do World inválido');
         sessionOf(a.userId);
         const known = sync.worldId(ws);
@@ -217,7 +228,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         else if (!known) await sync.ensureWorld(a.userId, ws);
         L().setBound(a.userId, ws);
         const plano = await ligarAoPlano(a.userId, ws).catch(() => null);
-        return { boundWorkspaceId: ws, syncWorkspaceId: sync.worldId(ws), planHolder: plano };
+        const syncEnabled = await sincronizarAoConectar(a.userId, ws);
+        return { boundWorkspaceId: ws, syncWorkspaceId: sync.worldId(ws), planHolder: plano, syncEnabled };
       });
       /**
        * Links por conta: o workspace recém-ligado entra no primeiro plano da conta com link livre (sem Stripe). Já tem
@@ -249,7 +261,21 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         sync.adopt(ws, sws);
         L().setBound(a.userId, ws);
         await ligarAoPlano(a.userId, ws).catch(() => null);
-        return { workspaceId: ws, syncWorkspaceId: sws };
+        const syncEnabled = await sincronizarAoConectar(a.userId, ws);
+        return { workspaceId: ws, syncWorkspaceId: sws, syncEnabled };
+      });
+      /**
+       * Apagar do Ergon World um workspace que está lá e não neste computador (por exemplo, apagado num computador
+       * antigo antes de o World saber): o World o desativa (some das listas, libera o link; o cifrado fica 30 dias).
+       */
+      app.post('/api/world/remote/remove', async (req) => {
+        const a = h.auth(req); const sws = (req.body as { syncWorkspaceId?: unknown } | undefined)?.syncWorkspaceId;
+        if (typeof sws !== 'string' || !SWS.test(sws)) throw new HttpError(400, 'invalid', 'workspace do World inválido');
+        const ja = db.get<{ workspace_id: string }>('SELECT workspace_id FROM world_workspace_ids WHERE sync_workspace_id = ?', sws);
+        if (ja && db.get('SELECT 1 FROM workspaces WHERE id = ?', ja.workspace_id)) throw new HttpError(409, 'already_here', 'Este workspace está neste computador: apague-o aqui, em Workspaces.');
+        await client.call('POST', `/v1/sync/workspaces/${sws}/deactivate`, {}, sessionOf(a.userId));
+        await L().renew(a.userId).catch(() => null);
+        return { ok: true };
       });
       /** Os planos da conta com os links usados (para a tela "Links do Ergon World: 2 de 3"). */
       app.get('/api/world/plans', async (req) => client.call('GET', '/v1/plans', undefined, sessionOf(h.auth(req).userId)));
@@ -283,7 +309,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       /** O workspace World do workspace atual, só se ele for o ligado ao World pela pessoa (os outros ficam locais). */
       const worldWs = (a: { userId: string; workspaceId: string }): string | null => (links?.isBound(a.userId, a.workspaceId) ? sync.worldId(a.workspaceId) : null);
       const boundWs = (a: { userId: string; workspaceId: string }): string => {
-        if (!links?.isBound(a.userId, a.workspaceId)) throw new HttpError(409, 'world_not_bound', 'Este workspace não está ligado ao Ergon World.');
+        if (!links?.isBound(a.userId, a.workspaceId)) throw new HttpError(409, 'world_not_bound', 'Este workspace não está conectado ao Ergon World.');
         return a.workspaceId;
       };
 
@@ -321,7 +347,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         if (hit && Date.now() - hit.at < 20_000) return hit.pool;
         const last = hit ? { ...hit.pool, stale: true } : null;
         const w = worldWs(a);
-        if (!w) return { available: false, reason: 'sem_workspace', message: 'Este workspace não está ligado ao Ergon World.', last: null };
+        if (!w) return { available: false, reason: 'sem_workspace', message: 'Este workspace não está conectado ao Ergon World.', last: null };
         let session: string;
         try { session = sessionOf(a.userId); } catch { return { available: false, reason: 'sem_conta', message: 'Conecte ao Ergon World para ver os Jobs.', last }; }
         try {
@@ -417,7 +443,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       });
       const needWorld = (a: { userId: string; workspaceId: string }): string => {
         const w = worldWs(a);
-        if (!w) throw new HttpError(409, 'world_not_bound', 'Este workspace não está ligado ao Ergon World.');
+        if (!w) throw new HttpError(409, 'world_not_bound', 'Este workspace não está conectado ao Ergon World.');
         return w;
       };
       app.put('/api/world/wallet/autotopup', async (req) => {
@@ -442,7 +468,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return client.call('PUT', `/v1/workspaces/${w}/budgets/${acc}`, { capDracmas: cap }, sessionOf(a.userId));
       });
       app.post('/api/world/billing/checkout', async (req) => {
-        const b = (req.body ?? {}) as { sku?: unknown; seats?: unknown; jobPacks?: unknown; idempotencyKey?: unknown };
+        const b = (req.body ?? {}) as { sku?: unknown; seats?: unknown; jobPacks?: unknown; cloud?: unknown; idempotencyKey?: unknown };
         if (typeof b.sku !== 'string' || !/^[a-z0-9_]{2,40}$/.test(b.sku) || typeof b.idempotencyKey !== 'string') throw new HttpError(400, 'invalid', 'sku e chave da intenção obrigatórios');
         // o carrinho: com um plano, vagas adicionais e pacotes de Jobs vão na mesma assinatura (o World confere)
         const qty = (v: unknown, nome: string): number | undefined => {
@@ -454,7 +480,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const back = `${cfg.publicUrl}/?world=`;
         // plano ou recarga: são do workspace ligado ao World; quem compra é a pessoa dona
         const a = h.owner(req);
-        const body = { sku: b.sku, ...(seats ? { seats } : {}), ...(jobPacks ? { jobPacks } : {}), idempotencyKey: b.idempotencyKey, successUrl: `${back}pago`, cancelUrl: `${back}cancelado`, workspaceId: needWorld(a) };
+        const body = { sku: b.sku, ...(seats ? { seats } : {}), ...(jobPacks ? { jobPacks } : {}), ...(b.cloud === 1 ? { cloud: 1 } : {}), idempotencyKey: b.idempotencyKey, successUrl: `${back}pago`, cancelUrl: `${back}cancelado`, workspaceId: needWorld(a) };
         return client.call('POST', '/v1/billing/checkout', body, sessionOf(a.userId));
       });
 
@@ -620,6 +646,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         const a = h.owner(req); const ws = boundWs(a);
         const id = String((req.body as { syncWorkspaceId?: string })?.syncWorkspaceId ?? sync.worldId(ws) ?? '');
         if (!SWS.test(id)) throw new HttpError(400, 'invalid', 'workspace do World inválido');
+        // já sincroniza (conectar liga sozinho): o botão antigo só guarda a frase de recuperação, se veio
+        if (sync.status(ws).enabled && sync.worldId(ws) === id) return sync.enable(a.userId, ws, phrase(req));
         return sync.join(a.userId, ws, id, phrase(req));
       });
       app.post('/api/world/sync/share', async (req) => { const a = h.owner(req); return sync.share(a.userId, boundWs(a)); });

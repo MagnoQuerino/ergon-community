@@ -72,7 +72,7 @@ test('carrinho sem assinatura: plano + pessoas + Jobs num checkout; recarga é o
 
 test('carrinho com assinatura: mudança com o total desejado (atual + o que entrou); só recarga não mexe na assinatura', () => {
   const a = atualDe('world_pro', true, [{ sku: 'world_pro', quantity: 1 }, { sku: 'addon_seat_pro', quantity: 2 }, { sku: 'addon_jobs_5', quantity: 1 }]);
-  assert.deepEqual(a, { plano: 'world_pro', assinatura: true, pessoas: 2, jobs: 1 });
+  assert.deepEqual(a, { plano: 'world_pro', assinatura: true, pessoas: 2, jobs: 1, nuvem: false });
   assert.deepEqual(passos({ plano: 'world_team', pessoas: 1, jobs: 0, recarga: null }, a).passos, [{ tipo: 'mudanca', corpo: { plan: 'world_team', seats: 3 } }]);
   assert.deepEqual(passos({ plano: 'world_pro', pessoas: 0, jobs: 0, recarga: 'topup_1000' }, a).passos, [{ tipo: 'recarga', corpo: { sku: 'topup_1000' } }], 'o mesmo plano não é mudança');
   assert.deepEqual(passos({ ...VAZIO, jobs: 2, recarga: 'topup_1000' }, a).passos.map((x) => x.tipo), ['mudanca', 'recarga']);
@@ -103,4 +103,17 @@ test('plano cortesia: o carrinho sobe de plano no mesmo período, sem trocar men
   assert.deepEqual(planosDoCarrinho(planos, pro, true).map((x) => x.sku), ['world_sync', 'world_team']);
   assert.deepEqual(planosDoCarrinho(planos, pro, false).map((x) => x.sku), ['world_sync', 'world_team', 'world_pro_annual', 'world_team_annual'], 'pago: pode ir para o anual');
   assert.deepEqual(planosDoCarrinho(planos, planos[3], false).map((x) => x.sku), ['world_team_annual'], 'do anual não volta ao mensal');
+});
+
+test('combo Plano + nuvem: entra no checkout com o plano; na assinatura, vira mudança só se ainda não tem; a soma mostra o desconto', () => {
+  const sem = atualDe(null, false, []);
+  assert.deepEqual(passos({ ...VAZIO, nuvem: true }, sem), { passos: [], erro: 'semPlano' }, 'a nuvem vai junto de um plano');
+  assert.deepEqual(passos({ ...VAZIO, plano: 'world_pro', nuvem: true }, sem).passos, [{ tipo: 'checkout', corpo: { sku: 'world_pro', cloud: 1 } }]);
+  const com = atualDe('world_pro', true, [{ sku: 'world_pro', quantity: 1 }]);
+  assert.deepEqual(passos({ ...VAZIO, nuvem: true }, com).passos, [{ tipo: 'mudanca', corpo: { cloud: 1 } }]);
+  const ja = atualDe('world_pro', true, [{ sku: 'world_pro', quantity: 1 }, { sku: 'addon_cloud', quantity: 1 }]);
+  assert.equal(ja.nuvem, true); assert.deepEqual(passos({ ...VAZIO, nuvem: true }, ja).passos, []);
+  const cat = [{ sku: 'world_pro', kind: 'plan', name: 'Pro', priceCents: '5489', sellable: true, interval: 'month' as const }, { sku: 'addon_cloud', kind: 'addon', name: 'Nuvem', priceCents: '5990', sellable: true, interval: 'month' as const }];
+  assert.equal(somaDoCatalogo(cat, { ...VAZIO, plano: 'world_pro', nuvem: true }, sem, 5), 11479 - Math.round(11479 * 0.05));
+  assert.equal(somaDoCatalogo(cat, { ...VAZIO, plano: 'world_pro', nuvem: true }, sem, 0), 11479);
 });

@@ -363,7 +363,7 @@ export class FakeWorld {
     }
     if (key === 'POST /v1/bindings') { this.bindings.push({ accountId: acc.id, localPersonId: b.localPersonId }); return { json: { ok: true } }; }
     if (key === 'POST /v1/authorize') {
-      const workspaces = [...this.workspaces.values()].filter((w) => roleIn(w, acc.id)).map((w) => ({ workspaceId: w.id, label: w.label, role: roleIn(w, acc.id), status: w.plan ? 'active' : 'none', plan_sku: w.plan, source: w.plan ? w.source ?? 'stripe' : null }));
+      const workspaces = [...this.workspaces.values()].filter((w) => roleIn(w, acc.id) && !this.deactivated.has(w.id)).map((w) => ({ workspaceId: w.id, label: w.label, role: roleIn(w, acc.id), status: w.plan ? 'active' : 'none', plan_sku: w.plan, source: w.plan ? w.source ?? 'stripe' : null }));
       return { json: { authorizedUntil: new Date(Date.now() + 900_000).toISOString(), account: { email: acc.email, emailVerified: acc.emailVerified }, workspaces } };
     }
     if (key === 'GET /v1/devices') return { json: [...this.devices.values()].filter((d) => d.accountId === acc.id && d.status !== 'pending').map((d) => ({ id: d.id, name: d.name, status: d.status, current: d === dev, connected: !!d.session, lastSeenAt: d.lastSeenAt })) };

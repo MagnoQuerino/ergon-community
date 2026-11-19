@@ -948,7 +948,7 @@ export class Routines {
     return rid;
   }
 
-  /** Executar agora (botão ou pedido na conversa). Uma por vez; limite por dia. */
+  /** Executar agora (botão ou pedido na conversa). Uma por vez, sem limite de rodadas (o Teams, só uma leitura por dia). */
   runNow(workspaceId: string, userId: string, routineId: string, requestId: string, rawInput?: unknown) {
     const r = this.row(workspaceId, routineId);
     const c = parseJson<RoutineConfig>(r.config, {} as RoutineConfig);
@@ -961,11 +961,9 @@ export class Routines {
     if (remoteHolder(this.db, workspaceId, routineCard(r.id))) throw new HttpError(409, 'remote', 'Esta rotina está na nuvem. Traga para este computador para rodar aqui.');
     const semConta = this.contasQueFaltam(workspaceId, tpl);
     if (semConta.length) throw new HttpError(409, 'needs_account', `Esta rotina lê ${semConta.join(' e ')}: conecte a conta em Conexões antes de rodar.`);
-    const today = this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM routine_runs WHERE routine_id = ? AND created_at >= ? AND status != 'missed'", r.id, new Date(Date.now() - 86_400_000).toISOString());
-    if (Number(today?.n ?? 0) >= (c.maxPerDay ?? 6)) {
-      throw new HttpError(429, 'routine_limit', (c.maxPerDay ?? 6) === 1 ? 'Esta rotina já rodou nas últimas 24 horas (uma rodada por dia).' : `Limite de ${c.maxPerDay ?? 6} execuções desta rotina em 24 horas.`);
-    }
-    if (this.teamsLidoHoje(r)) throw new HttpError(429, 'routine_limit', 'O Teams já foi lido nas últimas 24 horas por outra rotina (uma leitura por dia). Tente de novo amanhã.');
+    // "Executar agora" não tem limite de rodadas: roda quantas vezes a pessoa quiser (uma de cada vez). A exceção é o
+    // Teams, pela regra da Microsoft (uma leitura por dia).
+    if (this.teamsLidoHoje(r)) throw new HttpError(429, 'routine_limit', 'Esta rotina lê o Teams, e a Microsoft só permite uma leitura do Teams por dia: ele já foi lido nas últimas 24 horas. Tente de novo amanhã.');
     const input = this.cleanInput(workspaceId, tpl, rawInput, c);
     const lacking = missingParams(tpl, c.params).filter(() => !input.files?.length);
     if (lacking.length) throw new HttpError(409, 'params_required', `Configure antes: ${lacking.join(', ')} (Editar rotina).`);

@@ -306,7 +306,7 @@ const servidor: Traducao<typeof pt> = {
   'erro.limiteDiario': 'Limit of {limite} runs in 24 h reached (you can change it).',
   'erro.rotinaUmaPorDia': 'This routine already ran in the last 24 hours (once a day).',
   'erro.rotinaLimite': 'Limit of {limite} runs of this routine in 24 hours.',
-  'erro.teamsLidoHoje': 'Teams was already read in the last 24 hours by another routine (once a day). Try again tomorrow.',
+  'erro.teamsLidoHoje': 'This routine reads Teams, and Microsoft only allows one Teams read per day: it was already read in the last 24 hours. Try again tomorrow.',
   'erro.exportandoOutra': 'Someone else is downloading their data right now. Try again in a few minutes.',
   'erro.conflitoRevisao': 'The task changed since you last loaded it; reload before saving.',
   'erro.recomendacaoSemIa': 'Recommendations need a connected AI account (Connections).',

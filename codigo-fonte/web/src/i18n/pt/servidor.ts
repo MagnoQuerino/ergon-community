@@ -310,7 +310,7 @@ const servidor = {
   'erro.limiteDiario': 'Limite de {limite} execuções em 24 h atingido (configurável).',
   'erro.rotinaUmaPorDia': 'Esta rotina já rodou nas últimas 24 horas (uma rodada por dia).',
   'erro.rotinaLimite': 'Limite de {limite} execuções desta rotina em 24 horas.',
-  'erro.teamsLidoHoje': 'O Teams já foi lido nas últimas 24 horas por outra rotina (uma leitura por dia). Tente de novo amanhã.',
+  'erro.teamsLidoHoje': 'Esta rotina lê o Teams, e a Microsoft só permite uma leitura do Teams por dia: ele já foi lido nas últimas 24 horas. Tente de novo amanhã.',
   'erro.exportandoOutra': 'Outra pessoa está baixando os dados agora. Tente de novo em alguns minutos.',
   'erro.conflitoRevisao': 'A tarefa mudou desde a última leitura; recarregue antes de salvar.',
   'erro.recomendacaoSemIa': 'A recomendação precisa de uma conta de IA conectada (Conexões).',

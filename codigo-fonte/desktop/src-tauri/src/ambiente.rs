@@ -802,8 +802,12 @@ mod elevado {
     impl Coletor {
         pub fn novo(n: usize) -> Result<Coletor, u32> {
             use std::sync::atomic::{AtomicUsize, Ordering};
+            // o relógio do Windows anda em passos de ~1 ms: dois coletores ao mesmo tempo no mesmo processo teriam o mesmo
+            // nome (e o segundo receberia "acesso negado" do FIRST_PIPE_INSTANCE); o contador desempata
+            static SEQ: AtomicUsize = AtomicUsize::new(0);
+            let seq = SEQ.fetch_add(1, Ordering::SeqCst);
             let unico = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-            let nome = format!(r"\\.\pipe\ergon-ativar-wsl-{}-{unico}", std::process::id());
+            let nome = format!(r"\\.\pipe\ergon-ativar-wsl-{}-{unico}-{seq}", std::process::id());
             let largo = larga(nome.as_ref());
             let partes: Partes = Default::default();
             let ordem = std::sync::Arc::new(AtomicUsize::new(0));

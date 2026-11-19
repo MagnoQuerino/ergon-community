@@ -1,5 +1,13 @@
 # Novidades
 
+## 1.1.0-rc.38 (pré-versão de teste)
+
+- **"Conectar" ao Ergon World, e a sincronia vem junto:** conectar um workspace ao World já liga a sincronia, sem outro passo. Os botões passam a dizer "Conectar" e "Desconectar". A frase de recuperação continua opcional e pode ser guardada depois.
+- **Workspaces apagados somem do World:** apagar um workspace atualiza a lista na hora, e a lista "No Ergon World e ainda não neste computador" ganhou "Apagar do Ergon World" para os que ficaram lá de antes.
+- **Subir o WS para o World pronto para vender:** seção própria na página do Ergon World e opção no carrinho do plano, com 5% a menos no combo Plano + nuvem. Tudo aparece sozinho quando o Ergon World abrir a venda, sem precisar de outra versão.
+- **Rotinas sem limite de rodadas:** "Executar agora" roda quantas vezes você quiser (uma de cada vez). A única exceção é ler o Teams: a Microsoft só permite uma leitura por dia, e o aviso agora diz isso com clareza.
+- **Ergon AI na página do World:** depois de ativado, o botão "Usar Ergon AI" some e fica só o aviso de que está ligado.
+
 ## 1.1.0-rc.37 (pré-versão de teste)
 
 - **Subir o WS para o World (em breve):** um adicional novo que deixa o workspace trabalhando no Ergon World com todos os computadores desligados (canais, rotinas, cards e acesso pelo celular). Não é a sincronia nem a colaboração, que continuam iguais e com o mesmo preço. Em Configurações › Ergon World aparece o estado, o disco e o teste de 7 dias grátis, assim que a venda abrir. Quem já recebeu como cortesia já vê o quadro.

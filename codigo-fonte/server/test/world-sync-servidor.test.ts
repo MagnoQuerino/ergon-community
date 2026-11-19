@@ -30,10 +30,7 @@ describe('World Sync num workspace criado no servidor', () => {
     await req(ana1.h, 'POST', '/api/world/refresh', ana1.s);
     assert.ok((await req(ana1.h, 'GET', '/api/world/status', ana1.s)).json.link.workspaces.some((w: { workspaceId: string }) => w.workspaceId === sws), 'aparece na lista da conta');
     assert.equal((await req(ana1.h, 'POST', '/api/world/bind', ana1.s, { syncWorkspaceId: sws })).status, 200);
-    const s0 = (await req(ana1.h, 'GET', '/api/world/sync', ana1.s)).json;
-    assert.deepEqual([s0.enabled, s0.origin, s0.syncWorkspaceId, s0.keyState], [false, 'joined', sws, 'first'], 'a tela oferece ligar, sem esperar chave');
-    assert.equal(world.workspaces.get(sws)!.envelopes.size, 0);
-
+    // conectar ao World já liga a sincronia: a chave nasce aqui, sem outro clique ("Sincronizar agora" fica idempotente)
     const en = await req(ana1.h, 'POST', '/api/world/sync/enable', ana1.s, {});
     assert.equal(en.status, 200, JSON.stringify(en.json));
     assert.deepEqual([en.json.enabled, en.json.syncWorkspaceId, en.json.keyVersion], [true, sws, 1]);
