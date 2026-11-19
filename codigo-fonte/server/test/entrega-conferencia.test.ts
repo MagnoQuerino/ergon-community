@@ -328,7 +328,7 @@ describe('R6: a leitura do Teams é uma por dia no workspace, em todas as entrad
     await esperar(a.json.id);
     const rb = await req(h, 'POST', `/api/routines/${b.json.id}/run`, s, { clientRequestId: 'dupla-b-1' });
     assert.equal(rb.status, 429, JSON.stringify(rb.json));
-    assert.equal(rb.json.message, 'O Teams já foi lido nas últimas 24 horas por outra rotina (uma leitura por dia). Tente de novo amanhã.');
+    assert.equal(rb.json.message, 'Esta rotina lê o Teams, e a Microsoft só permite uma leitura do Teams por dia: ele já foi lido nas últimas 24 horas. Tente de novo amanhã.');
     // e o horário da segunda também fica de fora
     h.db.run('UPDATE routines SET next_run_at = ? WHERE id = ?', new Date(Date.now() - 1000).toISOString(), b.json.id);
     await h.routines.tick();

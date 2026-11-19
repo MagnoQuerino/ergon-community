@@ -340,7 +340,7 @@ describe('rotina "Teams + e-mail → tarefas": uma rodada por dia, conferida pel
       assert.ok(!ativa(), 'a primeira rodada terminou');
       const de_novo = await req(hh, 'POST', `/api/routines/${r.json.id}/run`, ss, { clientRequestId: 'teams-dia-2' });
       assert.equal(de_novo.status, 429, JSON.stringify(de_novo.json));
-      assert.equal(de_novo.json.message, 'Esta rotina já rodou nas últimas 24 horas (uma rodada por dia).');
+      assert.equal(de_novo.json.message, 'Esta rotina lê o Teams, e a Microsoft só permite uma leitura do Teams por dia: ele já foi lido nas últimas 24 horas. Tente de novo amanhã.');
     } finally { await hh.close(); }
   });
 });
