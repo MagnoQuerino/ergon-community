@@ -211,7 +211,7 @@ export class CloudCards {
 
   private ctx(userId: string, ws: string) {
     const sws = this.worldId(ws);
-    if (!sws) throw new HttpError(409, 'world_not_bound', 'Este workspace não está ligado ao Ergon World.');
+    if (!sws) throw new HttpError(409, 'world_not_bound', 'Este workspace não está conectado ao Ergon World.');
     const session = this.links.session(userId); const l = this.links.get(userId);
     if (!session || !l) throw new HttpError(428, 'world_link_required', 'Conecte ao Ergon World para usar este recurso.');
     return { sws, session, deviceId: l.device_id, keys: JSON.parse(l.device_keys) as { x25519: string } };

@@ -92,6 +92,10 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
   const aqui = new Set(l.localSyncWorkspaceIds ?? []);
   const paraBaixar = l.localSyncWorkspaceIds ? remotes.filter((r) => !aqui.has(r.workspaceId)) : [];
   const baixar = (sws: string) => act(() => api.post('/api/world/download', { syncWorkspaceId: sws }), t('vinculo.baixadoMsg'));
+  const apagarDoWorld = (sws: string, nome: string) => {
+    if (!window.confirm(t('vinculo.apagarConfirma', { nome }))) return;
+    void act(() => api.post('/api/world/remote/remove', { syncWorkspaceId: sws }), t('vinculo.apagadoMsg'));
+  };
   const ligar = (id: string, syncWorkspaceId: string | null) => act(() => api.post('/api/world/bind', { workspaceId: id, syncWorkspaceId }), t('vinculo.ligadoMsg'));
   const abrir = (id: string) => act(async () => { await api.post('/api/session/workspace', { workspaceId: id }); window.location.reload(); });
   return (
@@ -105,7 +109,8 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
         <div className="small">
           <p className="muted">{t('vinculo.baixarTitulo')}</p>
           {paraBaixar.map((r) => (
-            <p key={r.workspaceId}>{nomeWs(r)} <button className="btn btn--sm" disabled={busy} onClick={() => void baixar(r.workspaceId)}>{t('vinculo.baixar')}</button></p>
+            <p key={r.workspaceId}>{nomeWs(r)} <button className="btn btn--sm" disabled={busy} onClick={() => void baixar(r.workspaceId)}>{t('vinculo.baixar')}</button>
+              {r.role === 'owner' && <> <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => apagarDoWorld(r.workspaceId, String(nomeWs(r)))}>{t('vinculo.apagarWorld')}</button></>}</p>
           ))}
         </div>
       )}
@@ -635,11 +640,12 @@ export function ErgonAiPainel() {
     <div className="painel-ia">
       {msgEl}
       {ligado && <p className="ok-inline"><Icon name="check" size={14} /> {t('conexoes.ligado')}</p>}
-      <div className="row row--wrap">
+      {!ligado && <div className="row row--wrap">
         <button className="btn btn--gold" disabled={busy} onClick={() => void go(() => api.post('/api/world/ai/connect', { makeDefault: padrao }), t('ia.ligado'))}>{t('ia.usar')}</button>
         <label className="check"><input type="checkbox" checked={padrao} onChange={(ev) => setPadrao(ev.target.checked)} /> {t('ia.padrao')}</label>
         <a className="btn btn--sm btn--ghost" href="#conexoes">{t('painel.ia.conexoes')}</a>
-      </div>
+      </div>}
+      {ligado && <a className="btn btn--sm btn--ghost" href="#conexoes">{t('painel.ia.conexoes')}</a>}
     </div>
   );
 }

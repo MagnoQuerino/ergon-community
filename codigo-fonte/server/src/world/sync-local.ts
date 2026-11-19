@@ -135,7 +135,8 @@ export class LocalSync {
    * pessoa administrar o workspace; se já existir, entra com ela (este aparelho já a recebeu) ou espera a entrega.
    */
   async enable(userId: string, ws: string, recoveryPhrase?: string) {
-    if (this.row(ws)) return this.status(ws);
+    // já sincroniza (conectar ao World liga a sincronia sozinho): a frase dada agora vira a de recuperação
+    if (this.row(ws)) { if (recoveryPhrase) await this.setRecovery(userId, ws, recoveryPhrase); return this.status(ws); }
     const c = this.ctx(userId);
     const joined = this.db.get<{ origin: string; sync_workspace_id: string }>('SELECT origin, sync_workspace_id FROM world_workspace_ids WHERE workspace_id = ?', ws);
     if (joined?.origin === 'joined') {
