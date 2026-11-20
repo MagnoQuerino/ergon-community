@@ -1255,13 +1255,14 @@ export class TeamsApp {
    */
   sincronizadas(ws: string, messageIds: string[]): void {
     if (!messageIds.length) return;
+    // na nuvem, a conversa do canal pode ter acabado de chegar: adota antes (o que já está nela não vai ao canal)
+    if (this.nuvem?.workspaceId === ws) for (const p of this.d.db.all<{ platform: Plataforma }>('SELECT platform FROM teams_people WHERE user_id = ? AND conversation_id IS NULL', this.nuvem.userId)) this.adotarConversa(this.nuvem.userId, ws, p.platform);
     const convs = new Set(this.d.db.all<{ c: string }>('SELECT conversation_id AS c FROM teams_people WHERE workspace_id = ? AND conversation_id IS NOT NULL', ws).map((r) => r.c));
     const at = now();
     this.d.db.tx(() => {
       for (const id of messageIds) {
         const m = this.d.db.get<{ c: string }>('SELECT conversation_id AS c FROM messages WHERE id = ? AND workspace_id = ?', id, ws);
-        // na nuvem, antes de adotar a conversa, tudo o que chega é do computador
-        if (m && (convs.has(m.c) || (this.d.cfg.mode === 'cloud' && !convs.size))) this.d.db.run('INSERT OR IGNORE INTO teams_synced (message_id, at) VALUES (?, ?)', id, at);
+        if (m && convs.has(m.c)) this.d.db.run('INSERT OR IGNORE INTO teams_synced (message_id, at) VALUES (?, ?)', id, at);
       }
     });
   }

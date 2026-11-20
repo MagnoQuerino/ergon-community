@@ -64,8 +64,24 @@ export interface WorldHost {
   canais?: CanaisWorldHost;
   /** cria um workspace local da pessoa (baixar para este computador um workspace que está no World) */
   createWorkspace?: (userId: string, name: string) => string;
+  /** os canais (Discord, Telegram, Teams) com a nuvem do Ergon World: a nuvem responde com o computador fechado */
+  canaisNuvem?: CanaisNuvemHost;
   /** nuvem do Ergon World: o contêiner terminou de se preparar (workspace recebido, modelo ligado) */
   nuvemPronta?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
+}
+
+/** Os canais oficiais (services/teams-app) vistos pela nuvem do Ergon World. */
+export interface CanaisNuvemHost {
+  /** no computador: declara (ou tira, com null) a nuvem como quem responde pelas contas ligadas neste workspace */
+  reserva(workspaceId: string, x: { installationId: string; syncWorkspaceId: string } | null): void;
+  /** na nuvem: o workspace está pronto; as contas ligadas no computador passam a ser atendidas aqui */
+  atender(x: { userId: string; workspaceId: string; syncWorkspaceId: string }): void;
+  /** a instalação deste Ergon no serviço dos canais (null: ainda não ligada) */
+  instalacao(): string | null;
+  /** mensagens recebidas pela sincronia (outro aparelho já respondeu por elas no canal) */
+  sincronizadas(workspaceId: string, messageIds: string[]): void;
+  /** a equipe está atendendo alguém por um canal agora */
+  ocupado(): boolean;
 }
 
 /** Os canais externos, vistos pelo World: quem fala pelo WhatsApp/Telegram/Discord fala com o papel que tem no World. */

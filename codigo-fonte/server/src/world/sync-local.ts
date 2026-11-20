@@ -25,6 +25,9 @@ export class LocalSync {
   readonly db: Db; readonly links: WorldLinks; readonly client: WorldClient; readonly routines: Routines; readonly bus: Bus; readonly limits: AgentLimits; readonly content: ContentSync;
   constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits }) { this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); }
 
+  /** mensagens novas vindas de outro aparelho (antes de a tela ser avisada): os canais não as mandam de novo */
+  aoReceberMensagens: ((ws: string, messageIds: string[]) => void) | null = null;
+
   private ctx(userId: string) {
     const l = this.links.get(userId); const s = this.links.session(userId);
     if (!l || !s) throw new HttpError(428, 'world_link_required', 'Conecte ao Ergon World para sincronizar.');
@@ -260,12 +263,15 @@ export class LocalSync {
     if (!apply) return { head, preview: plan, incoming, applied: false };
     if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws)), ws);
     const total: Applied = { added: 0, updated: 0, conflicts: 0, skipped: 0 };
+    // antes de aplicar e de avisar a tela: quem leva respostas a um canal fica sabendo que estas vieram de outro aparelho
+    const novas = contents.flatMap((b) => b.messages.map((m) => m.id)).filter((id) => !this.db.get('SELECT 1 AS x FROM messages WHERE id = ?', id));
     for (const [i, body] of contents.entries()) {
       const origin = others.filter((y) => y.kind === 'change')[i].deviceId;
       const n = this.content.apply(ws, userId, body, origin);
       for (const k of Object.keys(total) as Array<keyof Applied>) total[k] += n[k];
     }
     this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', head, now(), ws);
+    try { this.aoReceberMensagens?.(ws, novas); } catch { /* os canais não seguram a sincronia */ }
     if (incoming.tasks) this.bus.publish(ws, 'tasks.changed', {});
     if (incoming.messages || incoming.conversations) this.bus.publish(ws, 'messages.changed', {});
     return { head, preview: plan, incoming, applied: true, result: total, conflicts: this.content.openConflicts(ws) };

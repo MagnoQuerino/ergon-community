@@ -83,6 +83,10 @@ export class ReleFalso {
   /** links de uso único pedidos (link.start) */
   links = new Map<string, { personRef: string; installationId: string; platform: 'telegram' | 'discord'; label: string }>();
   consultasDeSaude = 0;
+  /** reserva (nuvem do Ergon World): os standby.set recebidos, a reserva que o serviço tem desta instalação e os vínculos de OUTRA instalação que a conectada atende */
+  reservas: any[] = [];
+  reserva: { installationId: string; workspaceId: string; personRefs: string[] } | null = null;
+  daReserva: Array<{ primary: string; workspaceId: string }> = [];
   fila: Entrega[] = [];
   seq = 0;
   enviados: Enviado[] = [];
@@ -189,7 +193,8 @@ export class ReleFalso {
       c.installationId = f.installationId; this.conexao = c;
       for (const p of f.persons ?? []) this.abertas.set(p.personRef, !!p.open);
       const meus = [...this.vinculos.values()].filter((v) => v.installationId === c.installationId);
-      c.enviar({ type: 'ready', sessionId: rid('ses'), queued: this.fila.length, bindings: meus.map((v) => ({ bindingId: v.bindingId, ...(v.platform ? { platform: v.platform, canal: v.platform } : { canal: 'teams' }), personRef: v.personRef, status: v.status, notices: v.notices, teamsName: v.teamsName, linkedAt: v.linkedAt, ...(v.claimId ? { claimId: v.claimId } : {}) })) });
+      c.enviar({ type: 'ready', sessionId: rid('ses'), queued: this.fila.length, bindings: meus.map((v) => ({ bindingId: v.bindingId, ...(v.platform ? { platform: v.platform, canal: v.platform } : { canal: 'teams' }), personRef: v.personRef, status: v.status, notices: v.notices, teamsName: v.teamsName, linkedAt: v.linkedAt, ...(v.claimId ? { claimId: v.claimId } : {}) })),
+        ...(this.reserva ? { standby: this.reserva } : {}), ...(this.daReserva.length ? { standbyBindings: this.quadroDaReserva() } : {}) });
       this.entregar(true);
       return;
     }
@@ -265,6 +270,10 @@ export class ReleFalso {
         return ack({ activityId: e.activityId });
       }
       case 'card.update': this.atualizados.push({ id: f.id, bindingId: f.bindingId, activityId: f.activityId, card: f.card ?? { text: f.text, buttons: f.buttons } }); return ack({ activityId: f.activityId });
+      case 'standby.set':
+        this.reservas.push(f);
+        this.reserva = f.installationId === null ? null : { installationId: f.installationId, workspaceId: f.workspaceId, personRefs: f.personRefs };
+        return ack({ standby: f.installationId });
       case 'typing': this.digitando.push({ bindingId: f.bindingId, on: !!f.on }); return;
       case 'person.state': this.abertas.set(f.personRef, !!f.open); if (f.open) { for (const e of this.fila) if (e.personRef === f.personRef && e.state === 'held') e.state = 'pending'; this.entregar(false); } return;
       default: c.enviar({ type: 'error', code: 'unknown_type', ref: f.id ?? null });
@@ -343,6 +352,30 @@ export class ReleFalso {
     this.vinculos.set(v.bindingId, v);
     this.novaEntrega('link.added', v, null, { platform: l.platform, teamsName: nome, status: 'active', notices: true, linkedAt: v.linkedAt });
     return v.bindingId;
+  }
+  // ------------------------------------------------------------------------------------------------ reserva (a nuvem)
+  private quadroDaReserva() {
+    return this.daReserva.flatMap((r) => [...this.vinculos.values()].filter((v) => v.installationId === r.primary).map((v) => (
+      { bindingId: v.bindingId, personRef: v.personRef, status: v.status, notices: v.notices, teamsName: v.teamsName, canal: v.platform ?? 'teams', platform: v.platform ?? 'teams', linkedAt: v.linkedAt, primary: r.primary, workspaceId: r.workspaceId })));
+  }
+  /** Uma conta ligada noutra instalação (o computador), que a instalação conectada (a nuvem) atende como reserva. */
+  contaDoComputador(primary: string, workspaceId: string, platform: 'telegram' | 'discord', nome = 'Maria Souza'): string {
+    if (!this.daReserva.some((r) => r.primary === primary)) this.daReserva.push({ primary, workspaceId });
+    const v: Vinculo = { platform, bindingId: rid('bnd'), installationId: primary, personRef: 'ref-da-maria-no-computador', status: 'active', notices: true, teamsName: nome, label: 'x', linkedAt: new Date().toISOString() };
+    this.vinculos.set(v.bindingId, v);
+    this.conexao?.enviar({ type: 'standby.bindings', standbyBindings: this.quadroDaReserva() });
+    return v.bindingId;
+  }
+  /** A pessoa escreve com o computador fechado: a entrega vai selada para a instalação conectada (a reserva). */
+  dizNaReserva(bindingId: string, text: string): string {
+    const v = this.vinculos.get(bindingId);
+    if (!v || !this.conexao?.installationId) throw new Error('sem vínculo ou sem a reserva conectada');
+    const id = rid('dlv'); const para = this.conexao.installationId;
+    const q: Record<string, unknown> = { type: 'activity', id, seq: ++this.seq, bindingId: v.bindingId, personRef: v.personRef, receivedAt: new Date().toISOString(), fromQueue: false, standby: true,
+      sealed: selarComoRele(this.instalacoes.get(para)!.box, { text, canal: v.platform, timestamp: new Date().toISOString(), locale: 'pt-BR', fromName: v.teamsName }, `${id}|${para}|activity`) };
+    this.fila.push({ id, seq: this.seq, type: 'activity', bindingId: v.bindingId, personRef: v.personRef, quadro: q, state: 'pending', r4: false });
+    this.entregar(false);
+    return id;
   }
   derrubar(code = 1001): void { this.conexao?.fechar(code); }
   conectado(): boolean { return !!this.conexao?.installationId && !this.conexao.fechada; }

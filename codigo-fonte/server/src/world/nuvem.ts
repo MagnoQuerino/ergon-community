@@ -28,6 +28,7 @@ import type { Vault } from '../security/keys.ts';
 import { needsSetup } from '../services/auth.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import type { LocalSync } from './sync-local.ts';
+import type { CanaisNuvemHost } from '../world-hook.ts';
 
 export const USUARIO_NUVEM = 'nuvem';
 const SWS = /^sws_[a-f0-9]{32}$/;
@@ -63,6 +64,8 @@ export interface NuvemDeps {
   motorPronto: (workspaceId: string) => Promise<boolean>;
   /** os canais: liga a ponte desta instalação com o relé (passo seguinte da partida), se houver */
   aoPronto?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
+  /** os canais (Discord, Telegram, Teams): com o workspace pronto, este contêiner atende as contas ligadas no computador */
+  canais?: CanaisNuvemHost;
   log: Log;
   ajustes?: { passoMs?: number; cicloMs?: number };
 }
@@ -80,8 +83,11 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     if (chave === contado && e !== 'pronto') return;
     contado = chave;
     const s = sessao();
+    // pronto: a cada ciclo conta também a instalação daqui no serviço dos canais (o computador a declara como reserva
+    // dele) e se a equipe está atendendo alguém agora (o World não põe para dormir no meio de uma conversa)
+    const canais = e === 'pronto' && d.canais ? { ...(d.canais.instalacao() ? { relayInstallationId: d.canais.instalacao() } : {}), active: d.canais.ocupado() } : {};
     try {
-      if (s) await d.client.call('POST', '/v1/cloud/app-state', { state: e, detail: det }, s);
+      if (s) await d.client.call('POST', '/v1/cloud/app-state', { state: e, detail: det, ...canais }, s);
       else await d.client.call('POST', '/v1/cloud/boot/state', { bootToken, state: e, detail: det });
     } catch { contado = ''; /* o World fora do ar ou o token de partida vencido: conta de novo no próximo passo */ }
   };
@@ -135,6 +141,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
       catch (e) { await contar('preparando', `ligando o modelo da equipe: ${String((e as Error).message).slice(0, 160)}`); return false; }
       await d.aoPronto?.({ userId, workspaceId: ws, syncWorkspaceId: sws });
     }
+    d.canais?.atender({ userId, workspaceId: ws, syncWorkspaceId: sws });
     await contar('pronto');
     return true;
   }
@@ -166,7 +173,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
 // ---------------------------------------------------------------------------------------------------------------------
 // No computador: sincronia automática e posse, só para o workspace com a nuvem ativa
 
-export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; sync: LocalSync; log: Log; ajustes?: { cicloMs?: number; estadoMs?: number } }
+export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; sync: LocalSync; canais?: CanaisNuvemHost; log: Log; ajustes?: { cicloMs?: number; estadoMs?: number } }
 
 /**
  * A cada minuto, para cada workspace ligado ao World com a nuvem ATIVA: avisa que este computador está com ele aberto
@@ -174,21 +181,29 @@ export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; 
  * Esqueleto novo vindo de outro computador não é aplicado sozinho (fica para a pessoa ver, como sempre).
  */
 export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; parar: () => Promise<void> } {
-  const ativa = new Map<string, { at: number; on: boolean }>();
+  const ativa = new Map<string, { at: number; on: boolean; rele: string | null }>();
   let parado = false; let rodando: Promise<void> | null = null;
   const alvos = () => d.db.all<{ user_id: string; workspace_id: string; sws: string }>(`SELECT b.user_id, b.workspace_id, i.sync_workspace_id AS sws FROM world_bound b
     JOIN world_links l ON l.user_id = b.user_id AND l.status = 'active' JOIN world_workspace_ids i ON i.workspace_id = b.workspace_id`);
   const temNuvem = async (sws: string, s: string): Promise<boolean> => {
     const c = ativa.get(sws);
     // "tem" vale por 5 min; "não tem" só por 1 (quem acabou de contratar não espera)
-    if (c && Date.now() - c.at < (c.on ? d.ajustes?.estadoMs ?? 5 * 60_000 : 60_000)) return c.on;
-    try { const r = await d.client.call<{ active?: boolean }>('GET', `/v1/cloud?workspace=${sws}`, undefined, s); ativa.set(sws, { at: Date.now(), on: r.active === true }); return r.active === true; }
+    if (c && Date.now() - c.at < (c.on && c.rele ? d.ajustes?.estadoMs ?? 5 * 60_000 : 60_000)) return c.on;
+    try { const r = await d.client.call<{ active?: boolean; relayStandby?: string | null }>('GET', `/v1/cloud?workspace=${sws}`, undefined, s); ativa.set(sws, { at: Date.now(), on: r.active === true, rele: r.active === true && typeof r.relayStandby === 'string' ? r.relayStandby : null }); return r.active === true; }
     catch { return c?.on ?? false; }
   };
   const uma = async (open: boolean) => {
     for (const a of alvos()) {
       const s = d.links.session(a.user_id);
-      if (!s || !(await temNuvem(a.sws, s))) continue;
+      if (!s) continue;
+      if (!(await temNuvem(a.sws, s))) {
+        // a nuvem acabou (ou nunca houve): se era ela a reserva dos canais deste workspace, deixa de ser
+        if (ativa.has(a.sws)) try { d.canais?.reserva(a.workspace_id, null); } catch { /* segue */ }
+        continue;
+      }
+      // os canais: com este computador fechado, a nuvem responde pelas contas ligadas (declarado ao serviço dos canais)
+      const rele = ativa.get(a.sws)?.rele;
+      if (rele) try { d.canais?.reserva(a.workspace_id, { installationId: rele, syncWorkspaceId: a.sws }); } catch { /* segue */ }
       try {
         await d.client.call('POST', '/v1/cloud/presence', { workspaceId: a.sws, open }, s);
         if (!d.sync.status(a.workspace_id).enabled) continue;

@@ -3225,6 +3225,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   };
   if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks,
     createWorkspace: (userId, name) => createOwnWorkspace(db, personKeys(), userId, name, cfg.slotsPerFloor),
+    // os canais com a nuvem do Ergon World: o contêiner responde pelas contas ligadas enquanto o computador está fechado
+    canaisNuvem: { reserva: (ws, x) => teamsApp.reserva(ws, x), atender: (x) => teamsApp.atender(x), instalacao: () => teamsApp.instalacaoNoRele(), sincronizadas: (ws, ids) => teamsApp.sincronizadas(ws, ids), ocupado: () => teamsApp.ocupado() },
     // o papel de cada membro no World vale para o que ele pede pelos canais externos (canais/externo.ts)
     canais: { ligar: (f) => { canais.externos.buscarMembros = f; }, membros: (ws, m) => canais.externos.membrosDoWorld(ws, m), saiu: (ws, acc) => canais.externos.membroSaiu(ws, acc), atualizar: (ws) => { void canais.externos.atualizarPapeis(ws); } },
     packages: { keys: officialKeys, preview: (ws, buf) => packages.preview(ws, buf), install: (ws, userId, buf) => packages.install(ws, userId, buf) },

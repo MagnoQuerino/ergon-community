@@ -683,15 +683,16 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       // e a posse do workspace que tem a nuvem ativa
       const log = (o: Record<string, unknown>, msg: string) => app.log.info(o, msg);
       let nuvem: { parar: () => Promise<void> } | null = null;
+      if (h.canaisNuvem) sync.aoReceberMensagens = (w, ids) => h.canaisNuvem!.sincronizadas(w, ids);
       if (wcfg.url) {
         if (modoNuvem(cfg, env)) {
           app.addHook('onReady', async () => {
             nuvem = iniciarNuvem({ app, db, cfg, env, client, links: L(), sync, createWorkspace: (u, n) => { if (!h.createWorkspace) throw new HttpError(503, 'unavailable', 'Indisponível nesta versão.'); return h.createWorkspace(u, n); },
-              conectarErgonAi, aoPronto: h.nuvemPronta, log,
+              conectarErgonAi, aoPronto: h.nuvemPronta, canais: h.canaisNuvem, log,
               motorPronto: async (w) => { const c = h.controlFor(w); if (!c?.ergonAi || !c.byok) return false; await c.byok(); return true; } });
           });
         } else if (cfg.mode === 'local' && env.ERGON_WORLD_AUTOSYNC !== '0') {
-          app.addHook('onReady', async () => { nuvem = iniciarAutoSync({ db, client, links: L(), sync, log }); });
+          app.addHook('onReady', async () => { nuvem = iniciarAutoSync({ db, client, links: L(), sync, canais: h.canaisNuvem, log }); });
         }
       }
       app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); clearTimeout(aoAbrir); await nuvem?.parar(); });
