@@ -26,6 +26,7 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/db.ts';
 import type { Vault } from '../security/keys.ts';
 import { needsSetup } from '../services/auth.ts';
+import { instanceSetting, setInstanceSetting } from '../services/security.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import type { LocalSync } from './sync-local.ts';
 import type { CanaisNuvemHost } from '../world-hook.ts';
@@ -67,14 +68,14 @@ export interface NuvemDeps {
   /** os canais (Discord, Telegram, Teams): com o workspace pronto, este contêiner atende as contas ligadas no computador */
   canais?: CanaisNuvemHost;
   log: Log;
-  ajustes?: { passoMs?: number; cicloMs?: number };
+  ajustes?: { passoMs?: number; cicloMs?: number; canaisMs?: number };
 }
 
 /** A partida do contêiner e o ciclo de sincronia dele. `parar()` envia o que falta (SIGTERM do orquestrador = dormir). */
 export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado: () => { estado: EstadoNuvem; detalhe: string | null } } {
   const sws = d.env.ERGON_WORLD_WORKSPACE!; const bootToken = d.env.ERGON_CLOUD_BOOT_TOKEN ?? '';
   let estado: EstadoNuvem = 'preparando'; let detalhe: string | null = null; let parado = false; let timer: NodeJS.Timeout | null = null;
-  let userId: string | null = null; let ws: string | null = null; let ia = false; let contado = ''; let rodando: Promise<void> | null = null;
+  let userId: string | null = null; let ws: string | null = null; let ia = false; let canaisDesde: number | null = null; let contado = ''; let rodando: Promise<void> | null = null;
 
   const sessao = () => (userId ? d.links.session(userId) : null);
   const contar = async (e: EstadoNuvem, det: string | null = null) => {
@@ -135,13 +136,27 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     await d.sync.pull(userId, ws, true);
     await d.sync.push(userId, ws, { contentOnly: true }).catch((e) => { if (!['version_conflict', 'key_version'].includes(String((e as { code?: string }).code))) throw e; });
     // 7. o Ergon AI como modelo da equipe (o motor pode estar acordando: tenta de novo no próximo passo)
+    // Ligado numa partida anterior e com a credencial longe de vencer (ela fica no disco do motor): nada a refazer ao
+    // acordar, e os canais atendem já (o pedido espera o motor terminar de subir). Perto de vencer: liga de novo.
+    const iaAte = Date.parse(instanceSetting(d.db, 'nuvem_ergon_ai_ate') ?? '');
+    if (!ia && Number.isFinite(iaAte) && iaAte - Date.now() > 5 * 86_400_000) ia = true;
     if (!ia) {
       if (!(await d.motorPronto(ws).catch(() => false))) { await contar('preparando', 'ligando a equipe de IA (a primeira vez leva alguns minutos)'); return false; }
-      try { await d.conectarErgonAi({ userId, workspaceId: ws }, true); ia = true; d.log({}, 'nuvem: Ergon AI ligado como modelo da equipe'); }
+      try {
+        const r = await d.conectarErgonAi({ userId, workspaceId: ws }, true) as { expiresAt?: string } | undefined;
+        ia = true; d.log({}, 'nuvem: Ergon AI ligado como modelo da equipe');
+        if (r?.expiresAt && Number.isFinite(Date.parse(r.expiresAt))) setInstanceSetting(d.db, 'nuvem_ergon_ai_ate', r.expiresAt);
+      }
       catch (e) { await contar('preparando', `ligando o modelo da equipe: ${String((e as Error).message).slice(0, 160)}`); return false; }
       await d.aoPronto?.({ userId, workspaceId: ws, syncWorkspaceId: sws });
     }
     d.canais?.atender({ userId, workspaceId: ws, syncWorkspaceId: sws });
+    // os canais: "pronto" só depois de esta instalação existir no serviço dos canais (o World a entrega ao computador,
+    // que a declara como reserva). Serviço desligado ou fora do ar: segue sem ele depois de 90 s
+    if (d.canais && !d.canais.instalacao()) {
+      canaisDesde ??= Date.now();
+      if (Date.now() - canaisDesde < (d.ajustes?.canaisMs ?? 90_000)) { await contar('preparando', 'ligando os canais (Telegram, Discord, Teams)'); return false; }
+    }
     await contar('pronto');
     return true;
   }
@@ -155,7 +170,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
       d.log({ err: m }, 'nuvem: passo falhou');
       await contar('erro', m);
     }
-    if (!parado) { timer = setTimeout(() => { rodando = ciclo(); }, ok ? d.ajustes?.cicloMs ?? 30_000 : d.ajustes?.passoMs ?? 15_000); timer.unref(); }
+    if (!parado) { timer = setTimeout(() => { rodando = ciclo(); }, ok ? d.ajustes?.cicloMs ?? 30_000 : d.ajustes?.passoMs ?? 5_000); timer.unref(); }
   };
   rodando = ciclo();
 

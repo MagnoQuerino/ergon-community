@@ -104,4 +104,11 @@ COPY vault/ergon-vault.py /usr/local/lib/ergon/ergon-vault.py
 # plugin do Ergon dentro da imagem (a instalação não depende de arquivos do projeto)
 COPY plugins/ergon_bridge /opt/ergon/plugins/ergon_bridge
 
+# rc.39: o código do Hermes vem sem os .pyc (só as bibliotecas trazem) e com PYTHONDONTWRITEBYTECODE=1: cada partida do
+# motor, e cada "hermes config set", recompilava tudo o que importava. Compilado aqui uma vez (conferência por conteúdo,
+# sem depender da data do arquivo): a partida fica segundos mais curta em qualquer computador, e bem mais na nuvem.
+RUN /opt/hermes/.venv/bin/python -m compileall -q -j 0 --invalidation-mode unchecked-hash -x "(/\\.venv/|/node_modules/|/tests?/)" \
+      /opt/hermes /opt/ergon/plugins /usr/local/lib/ergon > /dev/null || true; \
+    test "$(find /opt/hermes/gateway /opt/hermes/agent -name '*.pyc' | wc -l)" -gt 50
+
 ENTRYPOINT ["/opt/hermes/.venv/bin/python", "/usr/local/lib/ergon/ergon-vault.py"]
