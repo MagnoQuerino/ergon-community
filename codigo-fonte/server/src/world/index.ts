@@ -16,6 +16,7 @@ import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
 import { precisaReconectarErgonAi, registrarModelosErgonAi } from '../services/ai.ts';
 import { loadWorldConfig, type WorldConfig } from './config.ts';
 import { checkAccountInput, EMAIL_UNVERIFIED, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, worldLocale, type AccountInput, type DeviceChoice } from './link.ts';
+import { iniciarAutoSync, iniciarNuvem, modoNuvem, prepararCofre } from './nuvem.ts';
 import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
@@ -56,6 +57,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
     status(): WorldStatus {
       return { available: true, configured: !!wcfg.url };
     },
+    /** nuvem do Ergon World: abre o cofre do contêiner com a chave que o World guarda, antes do banco (world/nuvem.ts) */
+    async prepare(vault) { if (wcfg.url) await prepararCofre(cfg, vault, env, client); },
     async register(h: WorldHost) {
       const { app, db } = h;
       if (wcfg.url) {
@@ -676,7 +679,21 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         for (const w of cards.watched()) void cards.refresh(w.user_id, w.workspace_id).catch(() => undefined);
       }, 20_000);
       cardsTimer.unref();
-      app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); clearTimeout(aoAbrir); });
+      // nuvem do Ergon World: neste contêiner, a partida sem ninguém (world/nuvem.ts); no computador, a sincronia automática
+      // e a posse do workspace que tem a nuvem ativa
+      const log = (o: Record<string, unknown>, msg: string) => app.log.info(o, msg);
+      let nuvem: { parar: () => Promise<void> } | null = null;
+      if (wcfg.url) {
+        if (modoNuvem(cfg, env)) {
+          app.addHook('onReady', async () => {
+            nuvem = iniciarNuvem({ app, db, cfg, env, client, links: L(), sync, createWorkspace: (u, n) => { if (!h.createWorkspace) throw new HttpError(503, 'unavailable', 'Indisponível nesta versão.'); return h.createWorkspace(u, n); },
+              conectarErgonAi, aoPronto: h.nuvemPronta, log });
+          });
+        } else if (cfg.mode === 'local' && env.ERGON_WORLD_AUTOSYNC !== '0') {
+          app.addHook('onReady', async () => { nuvem = iniciarAutoSync({ db, client, links: L(), sync, log }); });
+        }
+      }
+      app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); clearTimeout(aoAbrir); await nuvem?.parar(); });
       // o World disse que o e-mail não está confirmado: o aviso com o código volta a aparecer (mesmo se aqui achávamos que sim)
       app.addHook('onError', async (req, _reply, err) => {
         if ((err as HttpError).code !== 'email_unverified') return;

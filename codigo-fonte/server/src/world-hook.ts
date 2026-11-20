@@ -64,6 +64,8 @@ export interface WorldHost {
   canais?: CanaisWorldHost;
   /** cria um workspace local da pessoa (baixar para este computador um workspace que está no World) */
   createWorkspace?: (userId: string, name: string) => string;
+  /** nuvem do Ergon World: o contêiner terminou de se preparar (workspace recebido, modelo ligado) */
+  nuvemPronta?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
 }
 
 /** Os canais externos, vistos pelo World: quem fala pelo WhatsApp/Telegram/Discord fala com o papel que tem no World. */
@@ -97,6 +99,8 @@ export interface PackagesHost {
 
 export interface WorldModule {
   status(): WorldStatus;
+  /** antes de abrir o banco (nuvem do Ergon World: o cofre do contêiner abre com a chave guardada no World) */
+  prepare?(vault: Vault): Promise<void>;
   register(host: WorldHost): Promise<void>;
 }
 

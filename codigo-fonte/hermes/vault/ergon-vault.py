@@ -10,7 +10,8 @@ rc.29: nenhuma versão que ainda atualiza pelo app monta esse volume). Depois mo
 migrações de configuração do Ergon que ainda faltam (MIGRACOES) e passa a vez ao ponto de entrada original do Hermes
 (s6), mantendo o processo 1. Assim a instalação não precisa de nenhum passo manual no motor.
 
-Sem ERGON_VAULT=1, só passa a vez (comportamento original).
+Sem ERGON_VAULT=1, só passa a vez (comportamento original). ERGON_VAULT=plano (nuvem do Ergon World): sem gocryptfs,
+/opt/data é o disco do próprio cliente; o resto (plugin, configuração, travas) é igual.
 """
 
 from __future__ import annotations
@@ -352,6 +353,12 @@ def open_vault(key: str, previous: str | None = None) -> None:
         raise RuntimeError("chave do cofre não confere" if code == 12 else f"falha ao montar: {msg}")
     os.chown(PLAIN, HERMES_UID, HERMES_UID)
     os.chmod(PLAIN, 0o700)
+    prepare()
+
+
+def prepare() -> None:
+    """Com /opt/data pronto (cofre montado, ou o disco do próprio cliente na nuvem): marca, plugin do Ergon, chave da API,
+    migrações de configuração e travas de segurança."""
     marker = os.path.join(PLAIN, MARKER)
     if not os.path.exists(marker):
         # a marca diz se a cópia antiga entrou no cofre (o plugin a lê em dados_antigos): nos cofres criados agora, não
@@ -713,6 +720,17 @@ def drop_mount_privilege() -> None:
 
 
 def main() -> None:
+    if os.environ.get("ERGON_VAULT") == "plano":
+        # Nuvem do Ergon World: /opt/data já é o disco só deste cliente (um volume por workspace, isolado no gVisor), sem
+        # FUSE e sem privilégio de montar. Mesmo plugin, mesma configuração e mesmas travas do cofre; o motor roda como o
+        # usuário dele, sem o s6 (que exige raiz).
+        os.makedirs(PLAIN, exist_ok=True)
+        prepare()
+        log("motor de IA em disco próprio (nuvem): iniciando")
+        if os.getuid() == 0:
+            os.execv(ENTRY[0], ENTRY)
+        os.environ["HOME"] = PLAIN
+        os.execv(HERMES_CLI, [HERMES_CLI, *(sys.argv[1:] or ["gateway", "run"])])
     if os.environ.get("ERGON_VAULT") != "1":
         os.execv(ENTRY[0], ENTRY)
     port = int(os.environ.get("ERGON_VAULT_PORT", "8644"))

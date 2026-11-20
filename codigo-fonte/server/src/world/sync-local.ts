@@ -193,7 +193,7 @@ export class LocalSync {
    * Envia o que mudou aqui: o esqueleto (só se a equipe mudou) e o conteúdo novo ou alterado, em mudanças cifradas e
    * assinadas, cada uma presa à versão anterior. Outro aparelho enviou antes: recusa, para receber e decidir primeiro.
    */
-  async push(userId: string, ws: string) {
+  async push(userId: string, ws: string, opts: { /** só o conteúdo (a nuvem não manda o esqueleto da equipe: quem define a equipe é o computador) */ contentOnly?: boolean } = {}) {
     const r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId); const dek = Buffer.from(r.sync_key, 'base64');
     let version = r.last_version; const sent = { tasks: 0, conversations: 0, messages: 0 };
@@ -213,7 +213,7 @@ export class LocalSync {
       this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', version, now(), ws);
     };
     const bp = exportBlueprint(this.db, this.routines, ws); const bh = blueprintHash(bp);
-    if (bh !== r.blueprint_hash) { await send({ type: 'blueprint', blueprint: bp }, 'snapshot', 'bp'); this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); }
+    if (!opts.contentOnly && bh !== r.blueprint_hash) { await send({ type: 'blueprint', blueprint: bp }, 'snapshot', 'bp'); this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); }
     for (const part of this.content.chunks(this.content.pending(ws, userId))) {
       await send(part.body, 'change', 'ct');
       this.content.sent(ws, part.items);
@@ -227,7 +227,7 @@ export class LocalSync {
    * rotinas pausadas) e o conteúdo (com apply, une mensagens e concilia tarefas e conversas; o que mudou dos dois lados
    * vira conflito para a pessoa decidir). Formato inesperado depois de decifrar é recusado, sem aplicar nada.
    */
-  async pull(userId: string, ws: string, apply: boolean) {
+  async pull(userId: string, ws: string, apply: boolean, opts: { /** sincronia automática no computador: com esqueleto novo de outro aparelho, não aplica nada (fica para a pessoa ver e decidir) */ holdOnBlueprint?: boolean } = {}) {
     let r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId);
     const changes: Change[] = []; let head = r.last_version; let since = r.last_version; let worldKey = r.key_version;
@@ -255,6 +255,7 @@ export class LocalSync {
     }
     const incoming = { tasks: contents.reduce((n, b) => n + b.tasks.length, 0), conversations: contents.reduce((n, b) => n + b.conversations.length, 0), messages: contents.reduce((n, b) => n + b.messages.length, 0) };
     let plan: unknown = null;
+    if (apply && last && opts.holdOnBlueprint) return { head, preview: null as unknown, incoming, applied: false, held: true };
     if (last) plan = importBlueprint(this.db, this.bus, this.routines, ws, userId, open<{ type: string; blueprint: unknown }>(last).blueprint, apply, this.limits);
     if (!apply) return { head, preview: plan, incoming, applied: false };
     if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws)), ws);
