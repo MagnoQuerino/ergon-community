@@ -11,6 +11,7 @@ import { erroConta } from './WorldLinkDialog.tsx';
 import { VerifyEmail } from './WorldPanel.tsx';
 import { twn, useTw } from './textos.ts';
 import { comPlano, ehCortesia, nivelDe, nomeCurto, nomeDoPlano, ofertas, passoDe, precoEm, type Acao, type ItemC, type Moeda, type Nivel } from './compra-rapida.ts';
+import { Sincronia } from './Sincronia.tsx';
 import { useWorldVivo, type BillingVivo, type StatusVivo, type WalletVivo } from './vivo.ts';
 import type { Passo } from './carrinho.ts';
 
@@ -56,6 +57,8 @@ export default function SeloWorld() {
   const saldo = wallet ? saldoCurto(wallet.available) : '₯ …';
   return (
     <span className="topbar__worldwrap">
+      {/* a sincronia com o World: o sinal na barra e o fechamento seguro do aplicativo */}
+      <Sincronia />
       <button type="button" data-keep-surface className={`tb-world${nivel ? ` tb-world--${nivel}` : ' tb-world--sem'}${cortesia ? ' tb-world--cortesia' : ''}${aberto ? ' is-on' : ''}`}
         onClick={() => { setAlvo(undefined); setAberto((v) => !v); }} aria-expanded={aberto} aria-haspopup="dialog"
         aria-label={t('selo.aria', { plano: cortesia ? `${nome} (${t('selo.cortesia')})` : nome, saldo })} title={cortesia ? `${nome} · ${t('selo.cortesia')}` : nome}>

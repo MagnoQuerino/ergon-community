@@ -47,7 +47,12 @@ pub fn criar(app: &AppHandle) -> tauri::Result<()> {
                 let porta = app.state::<crate::Estado>().porta.load(std::sync::atomic::Ordering::SeqCst);
                 let _ = tauri_plugin_opener::open_url(format!("http://localhost:{porta}/"), None::<&str>);
             }
-            "sair" => app.exit(0),
+            // com a página do Ergon aberta, pergunta a ela antes (a sincronia em andamento avisa e pausa com segurança)
+            "sair" => {
+                if !crate::fechar::perguntar(app) {
+                    app.exit(0)
+                }
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, ev| {

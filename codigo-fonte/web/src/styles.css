@@ -2920,6 +2920,17 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 
 /* ——— Ergon World: a etiqueta do plano na barra de cima ("Pro | ₯ 4.202") e a compra em um clique ——— */
 .topbar__worldwrap { position: relative; display: inline-flex; margin-right: 2px; }
+/* rc.40: a sincronia com o World em andamento (só quando há dados indo ou vindo): um giro discreto ao lado do plano */
+.tb-sync { flex: none; display: grid; place-items: center; width: 26px; height: 34px; color: var(--texto-inverso-2); opacity: .85; }
+.tb-sync__giro { display: inline-grid; place-items: center; vertical-align: -2px; }
+@media (prefers-reduced-motion: no-preference) { .tb-sync__giro, .encerrando__giro { animation: spin 1.4s linear infinite; } }
+@media (prefers-reduced-motion: reduce) { .tb-sync { animation: pulse 1.6s ease-in-out infinite; } }
+/* a tela "Encerrando": por cima de tudo, enquanto a sincronia pausa num ponto seguro e o aplicativo fecha */
+.encerrando { position: fixed; inset: 0; z-index: 1000; display: grid; place-content: center; justify-items: center; gap: 14px; padding: 16px; text-align: center;
+  background: var(--inversa-2); color: var(--texto-inverso); animation: dropin .2s ease; }
+.encerrando h2 { margin: 6px 0 0; font-size: 22px; font-weight: 600; }
+.encerrando p { margin: 0; max-width: 420px; color: var(--texto-inverso-2); font-size: 14px; }
+.encerrando__giro { display: inline-grid; place-items: center; color: var(--texto-inverso-2); margin-top: 10px; }
 .tb-world { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 11px 0 5px; border-radius: 9px; border: 1px solid var(--inversa-linha);
   background: var(--inversa-veu); color: var(--texto-inverso); font: 600 13px/1 var(--font); white-space: nowrap; cursor: pointer; text-decoration: none; font-variant-numeric: tabular-nums; }
 .tb-world:hover, .tb-world.is-on { background: var(--inversa-ativo); border-color: var(--inversa-linha-forte); }

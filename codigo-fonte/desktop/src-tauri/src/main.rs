@@ -11,6 +11,7 @@ mod bandeja;
 mod confianca;
 mod diag;
 mod docker;
+mod fechar;
 mod http;
 mod instalacao;
 mod janela;

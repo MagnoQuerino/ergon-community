@@ -663,6 +663,10 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         return sync.setRecovery(a.userId, boundWs(a), p);
       });
       app.post('/api/world/sync/pull', async (req) => { const a = h.owner(req); return sync.pull(a.userId, boundWs(a), (req.body as { apply?: unknown } | undefined)?.apply === true); });
+      // a sincronia mexendo em dados agora (o sinal da barra de cima e o aviso ao fechar) e a pausa pedida ao fechar
+      app.get('/api/world/sync/atividade', async (req) => { const a = h.auth(req); return { ...sync.atividade.estado(a.workspaceId), algum: sync.atividade.algumAtivo() }; });
+      app.post('/api/world/sync/pausar', async (req) => { h.auth(req); return sync.atividade.pausar(); });
+      app.post('/api/world/sync/retomar', async (req) => { h.auth(req); sync.atividade.retomar(); return { ok: true }; });
       app.get('/api/world/sync/conflicts', async (req) => { const a = h.owner(req); return links?.isBound(a.userId, a.workspaceId) ? sync.conflicts(a.userId, a.workspaceId) : []; });
       app.post('/api/world/sync/conflicts/:id', async (req) => {
         const a = h.owner(req); const keep = (req.body as { keep?: unknown } | undefined)?.keep;

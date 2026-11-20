@@ -15,6 +15,7 @@ import type { AgentLimits } from '../services/capacity.ts';
 import type { Routines } from '../services/routines.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import { type Applied, type ContentBody, ContentSync, parseContent } from './sync-content.ts';
+import { SyncAtividade } from './sync-atividade.ts';
 import { newWorkspaceKey, openChange, sealChange, unwrapForDevice, unwrapForRecovery, wrapForDevice, wrapForRecovery } from './sync-crypto.ts';
 
 interface Keys { ed25519: string; x25519: string; x25519Public: string }
@@ -23,7 +24,9 @@ type Change = { version: number; operationId: string; keyVersion: number; schema
 
 export class LocalSync {
   readonly db: Db; readonly links: WorldLinks; readonly client: WorldClient; readonly routines: Routines; readonly bus: Bus; readonly limits: AgentLimits; readonly content: ContentSync;
-  constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits }) { this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); }
+  /** dados indo ou vindo agora (o sinal da barra de cima) e a pausa pedida ao fechar o aplicativo */
+  readonly atividade: SyncAtividade;
+  constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits }) { this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); this.atividade = new SyncAtividade(d.bus); }
 
   /** mensagens novas vindas de outro aparelho (antes de a tela ser avisada): os canais não as mandam de novo */
   aoReceberMensagens: ((ws: string, messageIds: string[]) => void) | null = null;
@@ -216,13 +219,20 @@ export class LocalSync {
       this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', version, now(), ws);
     };
     const bp = exportBlueprint(this.db, this.routines, ws); const bh = blueprintHash(bp);
-    if (!opts.contentOnly && bh !== r.blueprint_hash) { await send({ type: 'blueprint', blueprint: bp }, 'snapshot', 'bp'); this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); }
-    for (const part of this.content.chunks(this.content.pending(ws, userId))) {
-      await send(part.body, 'change', 'ct');
-      this.content.sent(ws, part.items);
-      sent.tasks += part.body.tasks.length; sent.conversations += part.body.conversations.length; sent.messages += part.body.messages.length;
-    }
-    return { version, sent };
+    const mandarEquipe = !opts.contentOnly && bh !== r.blueprint_hash;
+    const partes = this.content.chunks(this.content.pending(ws, userId));
+    if (!mandarEquipe && !partes.length) return { version, sent }; // nada a enviar: a barra de cima nem pisca
+    // cada parte enviada é um ponto seguro (a versão e o "já foi" ficam gravados); cortado no meio, o que faltou vai na
+    // próxima vez (o que já tinha chegado ao World e não foi marcado aqui vai de novo, e aplicar duas vezes dá no mesmo)
+    return this.atividade.envolver(ws, 'enviando', async () => {
+      if (mandarEquipe) { await send({ type: 'blueprint', blueprint: bp }, 'snapshot', 'bp'); this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); }
+      for (const part of partes) {
+        await send(part.body, 'change', 'ct');
+        this.content.sent(ws, part.items);
+        sent.tasks += part.body.tasks.length; sent.conversations += part.body.conversations.length; sent.messages += part.body.messages.length;
+      }
+      return { version, sent };
+    });
   }
 
   /**
@@ -231,7 +241,7 @@ export class LocalSync {
    * vira conflito para a pessoa decidir). Formato inesperado depois de decifrar é recusado, sem aplicar nada.
    */
   async pull(userId: string, ws: string, apply: boolean, opts: { /** sincronia automática no computador: com esqueleto novo de outro aparelho, não aplica nada (fica para a pessoa ver e decidir) */ holdOnBlueprint?: boolean } = {}) {
-    let r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
+    const r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId);
     const changes: Change[] = []; let head = r.last_version; let since = r.last_version; let worldKey = r.key_version;
     for (let i = 0; i < 1000; i++) { // o World entrega em páginas
@@ -240,6 +250,13 @@ export class LocalSync {
       if (!p.changes.length || p.changes[p.changes.length - 1].version >= p.head) break;
       since = p.changes[p.changes.length - 1].version;
     }
+    const others = changes.filter((x) => x.deviceId !== c.deviceId);
+    const resto = () => this.receber(userId, ws, r, changes, others, head, worldKey, apply, opts);
+    // dados de outro aparelho para aplicar: a barra de cima mostra a sincronia em andamento
+    return apply && others.length ? this.atividade.envolver(ws, 'recebendo', resto) : resto();
+  }
+
+  private async receber(userId: string, ws: string, r: SyncRow, changes: Change[], others: Change[], head: number, worldKey: number, apply: boolean, opts: { holdOnBlueprint?: boolean }) {
     // a chave girou (alguém saiu): pega a nova no envelope deste aparelho e, nos giros, as anteriores
     if (Math.max(worldKey, ...changes.map((x) => x.keyVersion)) > r.key_version) { await this.refreshKey(userId, ws); r = this.row(ws)!; }
     const ring = this.learnKeys(ws, r, changes);
@@ -248,7 +265,6 @@ export class LocalSync {
       if (!k) throw new HttpError(409, 'key_pending', 'A chave nova do workspace ainda não chegou a este computador.');
       return openChange<T>(k, r.sync_workspace_id, x);
     };
-    const others = changes.filter((x) => x.deviceId !== c.deviceId);
     const last = [...others].reverse().find((x) => x.kind === 'snapshot');
     const contents: ContentBody[] = [];
     for (const x of others.filter((y) => y.kind === 'change')) {
@@ -263,15 +279,21 @@ export class LocalSync {
     if (!apply) return { head, preview: plan, incoming, applied: false };
     if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws)), ws);
     const total: Applied = { added: 0, updated: 0, conflicts: 0, skipped: 0 };
-    // antes de aplicar e de avisar a tela: quem leva respostas a um canal fica sabendo que estas vieram de outro aparelho
-    const novas = contents.flatMap((b) => b.messages.map((m) => m.id)).filter((id) => !this.db.get('SELECT 1 AS x FROM messages WHERE id = ?', id));
+    const deOutros = others.filter((y) => y.kind === 'change');
+    // cada mudança aplicada é um ponto seguro: aplicar, marcar as mensagens que vieram de outro aparelho (os canais não
+    // as mandam de novo) e avançar a versão vão juntos, numa transação. Cortado no meio (aplicativo fechado à força, falta
+    // de luz), a próxima vez retoma da mudança seguinte, sem repetir nada no canal
     for (const [i, body] of contents.entries()) {
-      const origin = others.filter((y) => y.kind === 'change')[i].deviceId;
-      const n = this.content.apply(ws, userId, body, origin);
-      for (const k of Object.keys(total) as Array<keyof Applied>) total[k] += n[k];
+      const x = deOutros[i];
+      this.db.tx(() => {
+        const novas = body.messages.map((m) => m.id).filter((id) => !this.db.get('SELECT 1 AS x FROM messages WHERE id = ?', id));
+        const n = this.content.apply(ws, userId, body, x.deviceId);
+        for (const k of Object.keys(total) as Array<keyof Applied>) total[k] += n[k];
+        try { if (novas.length) this.aoReceberMensagens?.(ws, novas); } catch { /* os canais não seguram a sincronia */ }
+        this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ? AND last_version < ?', x.version, now(), ws, x.version);
+      });
     }
     this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', head, now(), ws);
-    try { this.aoReceberMensagens?.(ws, novas); } catch { /* os canais não seguram a sincronia */ }
     if (incoming.tasks) this.bus.publish(ws, 'tasks.changed', {});
     if (incoming.messages || incoming.conversations) this.bus.publish(ws, 'messages.changed', {});
     return { head, preview: plan, incoming, applied: true, result: total, conflicts: this.content.openConflicts(ws) };
