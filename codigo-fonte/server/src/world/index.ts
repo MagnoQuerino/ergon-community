@@ -687,7 +687,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         if (modoNuvem(cfg, env)) {
           app.addHook('onReady', async () => {
             nuvem = iniciarNuvem({ app, db, cfg, env, client, links: L(), sync, createWorkspace: (u, n) => { if (!h.createWorkspace) throw new HttpError(503, 'unavailable', 'Indisponível nesta versão.'); return h.createWorkspace(u, n); },
-              conectarErgonAi, aoPronto: h.nuvemPronta, log });
+              conectarErgonAi, aoPronto: h.nuvemPronta, log,
+              motorPronto: async (w) => { const c = h.controlFor(w); if (!c?.ergonAi || !c.byok) return false; await c.byok(); return true; } });
           });
         } else if (cfg.mode === 'local' && env.ERGON_WORLD_AUTOSYNC !== '0') {
           app.addHook('onReady', async () => { nuvem = iniciarAutoSync({ db, client, links: L(), sync, log }); });

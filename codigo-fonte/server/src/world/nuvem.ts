@@ -59,6 +59,8 @@ export interface NuvemDeps {
   app: FastifyInstance; db: Db; cfg: Config; env: NodeJS.ProcessEnv; client: WorldClient; links: WorldLinks; sync: LocalSync;
   createWorkspace: (userId: string, name: string) => string;
   conectarErgonAi: (a: { userId: string; workspaceId: string }, makeDefault: boolean) => Promise<unknown>;
+  /** o motor de IA do workspace já responde (antes disso não se pede credencial ao World: cada pedido cria uma) */
+  motorPronto: (workspaceId: string) => Promise<boolean>;
   /** os canais: liga a ponte desta instalação com o relé (passo seguinte da partida), se houver */
   aoPronto?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
   log: Log;
@@ -128,6 +130,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     await d.sync.push(userId, ws, { contentOnly: true }).catch((e) => { if (!['version_conflict', 'key_version'].includes(String((e as { code?: string }).code))) throw e; });
     // 7. o Ergon AI como modelo da equipe (o motor pode estar acordando: tenta de novo no próximo passo)
     if (!ia) {
+      if (!(await d.motorPronto(ws).catch(() => false))) { await contar('preparando', 'ligando a equipe de IA (a primeira vez leva alguns minutos)'); return false; }
       try { await d.conectarErgonAi({ userId, workspaceId: ws }, true); ia = true; d.log({}, 'nuvem: Ergon AI ligado como modelo da equipe'); }
       catch (e) { await contar('preparando', `ligando o modelo da equipe: ${String((e as Error).message).slice(0, 160)}`); return false; }
       await d.aoPronto?.({ userId, workspaceId: ws, syncWorkspaceId: sws });

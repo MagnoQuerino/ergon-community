@@ -719,6 +719,42 @@ def drop_mount_privilege() -> None:
     log("privilégio de montagem solto: o motor e o que ele executar não montam nada")
 
 
+def run_plain(args: list[str]) -> None:
+    """Sem o s6 (que exige raiz): o motor e, se pedido (HERMES_DASHBOARD), o painel interno dele, os dois como o usuário
+    do motor. Um dos dois saiu: o outro é encerrado e o contêiner sai com o código dele (quem religa é o orquestrador)."""
+    import signal
+    import time
+
+    os.chdir(PLAIN)
+    procs = [subprocess.Popen([HERMES_CLI, *args])]
+    if os.environ.get("HERMES_DASHBOARD", "").lower() in ("1", "true", "yes"):
+        host = os.environ.get("HERMES_DASHBOARD_HOST", "127.0.0.1")
+        port = os.environ.get("HERMES_DASHBOARD_PORT", "9119")
+        procs.append(subprocess.Popen([HERMES_CLI, "dashboard", "--host", host, "--port", port, "--no-open"]))
+
+    def encerrar(*_a) -> None:
+        for p in procs:
+            if p.poll() is None:
+                p.terminate()
+
+    signal.signal(signal.SIGTERM, encerrar)
+    signal.signal(signal.SIGINT, encerrar)
+    code = 0
+    while True:
+        saiu = [p for p in procs if p.poll() is not None]
+        if saiu:
+            code = saiu[0].returncode or 0
+            encerrar()
+            break
+        time.sleep(1)
+    for p in procs:
+        try:
+            p.wait(timeout=25)
+        except subprocess.TimeoutExpired:
+            p.kill()
+    sys.exit(code if code >= 0 else 128 - code)
+
+
 def main() -> None:
     if os.environ.get("ERGON_VAULT") == "plano":
         # Nuvem do Ergon World: /opt/data já é o disco só deste cliente (um volume por workspace, isolado no gVisor), sem
@@ -730,7 +766,7 @@ def main() -> None:
         if os.getuid() == 0:
             os.execv(ENTRY[0], ENTRY)
         os.environ["HOME"] = PLAIN
-        os.execv(HERMES_CLI, [HERMES_CLI, *(sys.argv[1:] or ["gateway", "run"])])
+        run_plain(sys.argv[1:] or ["gateway", "run"])
     if os.environ.get("ERGON_VAULT") != "1":
         os.execv(ENTRY[0], ENTRY)
     port = int(os.environ.get("ERGON_VAULT_PORT", "8644"))
