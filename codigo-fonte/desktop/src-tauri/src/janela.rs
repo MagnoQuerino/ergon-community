@@ -76,6 +76,10 @@ fn navegar(app: &AppHandle, url: &Url) -> bool {
         std::thread::spawn(move || pedido_de_downloads(&a, &u));
         return false;
     }
+    // fechar a janela (rc.40): a resposta da página à pergunta do aplicativo (fechar.rs)
+    if d == Destino::Ergon && crate::fechar::resposta(app, url.path()) {
+        return false;
+    }
     // "Voltar para esta versão": a página só pede; quem confere, avisa, pede a confirmação e volta é a tela de abertura
     if d == Destino::Ergon && url.path() == PEDIDO_VOLTAR {
         let a = app.clone();
@@ -338,6 +342,15 @@ pub fn criar_principal(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .build()?;
     // tamanho, posição e "maximizada" da última vez (o plugin descarta posição de monitor que não existe mais)
     let _ = w.restore_state(StateFlags::all() & !StateFlags::VISIBLE);
+    // fechar com a página do Ergon aberta: pergunta a ela antes (fechar.rs)
+    let a = app.clone();
+    w.on_window_event(move |ev| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+            if crate::fechar::perguntar(&a) {
+                api.prevent_close();
+            }
+        }
+    });
     w.show()?;
     Ok(w)
 }
@@ -388,12 +401,12 @@ pub fn abrir_ergon(app: &AppHandle, porta: u16) -> tauri::Result<()> {
 }
 
 /// Endereço da página do Ergon no aplicativo. "app=desktop": a página sabe que está no aplicativo (o botão de
-/// atualizações leva à tela dele). "downloads=1": este aplicativo atende os pedidos de downloads (rc.33: a pasta do
+/// atualizações leva à tela dele). "fechar=1" (rc.40): fechar a janela pergunta à página antes (fechar.rs). "downloads=1": este aplicativo atende os pedidos de downloads (rc.33: a pasta do
 /// Ergon e o aviso com "Abrir pasta"); sem ele (aplicativo de antes), a página não os faz. "volta=1": voltar de versão pelo aplicativo vale aqui (Windows com o ambiente
 /// próprio, como em atualizacao.rs); sem ele (Linux, ou Windows sem o ambiente), a página mostra só a página de cada
 /// versão.
 pub fn endereco_do_ergon(porta: u16, volta: bool) -> String {
-    format!("http://localhost:{porta}/?app=desktop&downloads=1{}", if volta { "&volta=1" } else { "" })
+    format!("http://localhost:{porta}/?app=desktop&downloads=1&fechar=1{}", if volta { "&volta=1" } else { "" })
 }
 
 /// Tela de atualizações do aplicativo (a de abertura, em "#atualizacoes"): verifica e, se a pessoa pedir, atualiza.
@@ -449,8 +462,8 @@ mod testes {
 
     #[test]
     fn pagina_do_ergon_sabe_se_a_volta_vale_aqui() {
-        assert_eq!(endereco_do_ergon(8787, true), "http://localhost:8787/?app=desktop&downloads=1&volta=1");
-        assert_eq!(endereco_do_ergon(8787, false), "http://localhost:8787/?app=desktop&downloads=1", "Linux ou sem o ambiente: sem o botão");
+        assert_eq!(endereco_do_ergon(8787, true), "http://localhost:8787/?app=desktop&downloads=1&fechar=1&volta=1");
+        assert_eq!(endereco_do_ergon(8787, false), "http://localhost:8787/?app=desktop&downloads=1&fechar=1", "Linux ou sem o ambiente: sem o botão");
         assert!(Url::parse(&endereco_do_ergon(18787, true)).is_ok());
     }
 

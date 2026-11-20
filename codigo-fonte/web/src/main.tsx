@@ -5,6 +5,7 @@ import { App } from './App.tsx';
 import './styles.css';
 import { installElastic } from './lib/elastic.ts';
 import { rememberDesktopApp } from './lib/desktop.ts';
+import { instalarFechar } from './lib/fechar.ts';
 import { prepararIdioma } from './i18n/index.ts';
 
 // Ergon atualizado com a aba aberta: as partes antigas da interface somem do servidor. Recarrega uma vez para
@@ -19,6 +20,8 @@ addEventListener('vite:preloadError', (ev) => {
 });
 
 rememberDesktopApp();
+// no aplicativo: fechar a janela pergunta à página antes (a sincronia em andamento avisa e pausa com segurança)
+instalarFechar();
 installElastic();
 // tema claro ou escuro antes de desenhar (também no login), com o relógio do automático
 startTheme();

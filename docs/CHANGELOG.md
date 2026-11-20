@@ -1,5 +1,11 @@
 # Novidades
 
+## 1.1.0-rc.40 (pré-versão de teste)
+
+- **Sincronia à vista:** enquanto há dados indo ou vindo do Ergon World, um ícone discreto gira na barra de cima, ao lado do plano. A conferência de cada minuto, sem nada novo, não acende nada.
+- **Fechar no meio da sincronia é seguro:** no aplicativo, fechar a janela durante a sincronia mostra um aviso. Se você insistir, aparece a tela "Encerrando": o Ergon termina o passo em andamento, pausa a sincronia num ponto seguro e só então fecha. No navegador, o próprio navegador avisa antes de fechar a aba.
+- **Retoma de onde parou:** se o Ergon for fechado à força ou o computador desligar no meio da sincronia, na próxima vez ela continua da última mudança gravada, sem repetir nada e sem mandar de novo ao Telegram, ao Discord ou ao Teams uma resposta que já tinha ido.
+
 ## 1.1.0-rc.39 (pré-versão de teste)
 
 - **Subir o WS para o World atende os canais com o computador fechado:** com o adicional ativo, fechar o Ergon passa as contas do Telegram, do Discord e do Teams que o dono do workspace ligou para a equipe na nuvem. Ela já sobe ao fechar e responde em segundos; se estava dormindo, a pessoa recebe o aviso de que a mensagem foi encaminhada à equipe no Ergon World e a resposta chega em cerca de um minuto. Ao abrir o Ergon de novo, o computador reassume e a conversa do canal mostra o que foi perguntado e respondido, sem repetir nada no canal. Pedidos de risco (apagar, exportar, mudar configurações) continuam só com aprovação no app.
