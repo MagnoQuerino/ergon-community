@@ -15,7 +15,8 @@ import { harness, req, setupOwner, type Harness, type Session } from './helpers.
 import { ReleFalso } from './rele-falso.ts';
 
 let rele: ReleFalso; let h: Harness; let s: Session;
-const SWS = `sws_${'a'.repeat(32)}`; const NUVEM = `ins_${'b'.repeat(26)}`; const PC = `ins_${'c'.repeat(26)}`;
+const SWS = `sws_${'a'.repeat(32)}`;
+const TICKET = () => ({ exp: Math.floor(Date.now() / 1000) + 600, mac: 'a'.repeat(64) }); const NUVEM = `ins_${'b'.repeat(26)}`; const PC = `ins_${'c'.repeat(26)}`;
 async function ate(pred: () => boolean, msg = 'não aconteceu a tempo', ms = 15_000): Promise<void> {
   const fim = Date.now() + ms;
   while (Date.now() < fim) { if (pred()) return; await h.executor.tick().catch(() => undefined); await new Promise((r) => setTimeout(r, 15)); }
@@ -29,7 +30,7 @@ async function abrir(over: Record<string, unknown> = {}): Promise<void> {
   h.teamsApp.ajustes = { avisosMs: 120, saidaMs: 40, digitandoMs: 5000, atrasoMs: 10, pedidoMs: 2000, cliente: { baseMs: 20, tetoMs: 150, reenvioMs: 400, semPingMs: 60_000 } };
   s = await setupOwner(h);
 }
-afterEach(async () => { await h?.close(); await rele?.parar(); });
+afterEach(async () => { await h?.close(); await rele?.parar(); delete process.env.ERGON_WORLD_WORKSPACE; });
 const ws = () => h.db.get<{ workspace_id: string }>("SELECT workspace_id FROM memberships WHERE user_id = ? AND role = 'owner'", s.userId)!.workspace_id;
 const mensagens = (conv: string) => h.db.all<{ role: string; content: string }>('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY rowid', conv);
 /** uma mensagem como a sincronia grava (vinda de outro aparelho): sem execução */
@@ -44,31 +45,48 @@ test('computador: declara a nuvem como reserva das contas do dono; repete só qu
   await h.teamsApp.start();
   await ate(() => rele.conectado());
   // sem conta ligada ainda: a reserva vale, com a lista vazia
-  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS });
+  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS, ticket: TICKET() });
   await ate(() => rele.reservas.length === 1);
   assert.deepEqual(rele.reservas[0].personRefs, []);
   // liga o Telegram: a pessoa entra na lista (na próxima conferência de cada minuto)
   const r = await req(h, 'POST', '/api/canais-oficiais/telegram/start', s, {});
   const b = rele.abreLink(r.json.url);
   await ate(() => (h.teamsApp.estadoBot(s.userId, 'telegram').accounts as unknown[]).length > 0);
-  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS });
+  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS, ticket: TICKET() });
   await ate(() => rele.reservas.length === 2);
   assert.equal(rele.reservas[1].installationId, NUVEM); assert.equal(rele.reservas[1].workspaceId, SWS);
+  assert.equal(rele.reservas[1].ticket.mac, 'a'.repeat(64), 'o comprovante do World vai junto');
   assert.deepEqual(rele.reservas[1].personRefs, [rele.vinculos.get(b)!.personRef]);
   // nada mudou: não pede de novo (nem depois de reconectar, porque o serviço já tem a mesma)
-  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS });
+  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS, ticket: TICKET() });
   rele.derrubar(); await ate(() => rele.conexoes >= 2 && rele.conectado());
-  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS });
+  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS, ticket: TICKET() });
   await pausa(150);
   assert.equal(rele.reservas.length, 2);
   // outro workspace não toma o lugar; a nuvem deste acabou: tira
-  h.teamsApp.reserva('ws_outro', { installationId: `ins_${'d'.repeat(26)}`, syncWorkspaceId: SWS });
+  h.teamsApp.reserva('ws_outro', { installationId: `ins_${'d'.repeat(26)}`, syncWorkspaceId: SWS, ticket: TICKET() });
   h.teamsApp.reserva('ws_outro', null);
   await pausa(100);
   assert.equal(rele.reservas.length, 2);
   h.teamsApp.reserva(ws(), null);
   await ate(() => rele.reservas.length === 3);
   assert.equal(rele.reservas[2].installationId, null);
+});
+
+test('instalação "cloud" comum (sem ser a nuvem do Ergon World): os canais ligam como sempre', async () => {
+  await abrir({ mode: 'cloud' });
+  await h.teamsApp.start();
+  await ate(() => rele.conectado(), 'uma instalação cloud própria tem de conectar sem esperar workspace do World');
+});
+
+test('computador: sem o comprovante do World (não é o dono, ou vencido), não declara a reserva', async () => {
+  await abrir();
+  await h.teamsApp.start();
+  await ate(() => rele.conectado());
+  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS });
+  h.teamsApp.reserva(ws(), { installationId: NUVEM, syncWorkspaceId: SWS, ticket: { exp: Math.floor(Date.now() / 1000) + 5, mac: 'a'.repeat(64) } });
+  await pausa(200);
+  assert.equal(rele.reservas.length, 0);
 });
 
 test('computador: o que a nuvem respondeu chega pela sincronia e NÃO vai de novo ao canal; o que nasce aqui continua indo', async () => {
@@ -94,6 +112,7 @@ test('computador: o que a nuvem respondeu chega pela sincronia e NÃO vai de nov
 });
 
 test('nuvem: só liga com o workspace pronto; atende a conta do computador na mesma conversa, sem reenviar o que já estava nela', async () => {
+  process.env.ERGON_WORLD_WORKSPACE = SWS; // o contêiner da nuvem do Ergon World (não uma instalação "cloud" comum)
   await abrir({ mode: 'cloud' });
   await h.teamsApp.start();
   await pausa(150);
@@ -123,6 +142,14 @@ test('nuvem: só liga com o workspace pronto; atende a conta do computador na me
   h.bus.publish(ws(), 'messages.changed', {});
   await pausa(250);
   assert.equal(rele.enviados.length, antes);
+  // o contêiner reiniciou: antes de o serviço mandar a lista desta conexão, nada é apagado (nem as respostas na saída)
+  const tA = h.teamsApp as unknown as { reservaRecebida: boolean; daReserva: unknown[] };
+  h.db.run("INSERT INTO teams_outbox (id, binding_id, workspace_id, kind, payload, purpose, attempts, next_at, status, created_at) VALUES ('out_teste_reinicio', ?, ?, 'send', '{}', 'reply', 0, ?, 'failed', ?)", b, ws(), now(), now());
+  tA.reservaRecebida = false; tA.daReserva = [];
+  h.teamsApp.atender({ userId: s.userId, workspaceId: ws(), syncWorkspaceId: SWS });
+  assert.ok(h.db.get('SELECT 1 AS x FROM teams_bindings WHERE binding_id = ?', b), 'o vínculo continua até a lista do serviço chegar');
+  assert.ok(h.db.get("SELECT 1 AS x FROM teams_outbox WHERE id = 'out_teste_reinicio'"), 'e a saída dele também');
+  h.db.run("DELETE FROM teams_outbox WHERE id = 'out_teste_reinicio'");
   // reconectar não desfaz nada; o computador tirou a reserva: a conta sai daqui
   rele.derrubar(); await ate(() => rele.conexoes >= 2 && rele.conectado());
   await pausa(100);
@@ -133,6 +160,7 @@ test('nuvem: só liga com o workspace pronto; atende a conta do computador na me
 });
 
 test('nuvem: pedido de risco pelo canal não fica preso num cartão que ninguém vê: pede para abrir o Ergon', async () => {
+  process.env.ERGON_WORLD_WORKSPACE = SWS; // o contêiner da nuvem do Ergon World (não uma instalação "cloud" comum)
   await abrir({ mode: 'cloud' });
   const b = rele.contaDoComputador(PC, SWS, 'telegram');
   await h.teamsApp.start();

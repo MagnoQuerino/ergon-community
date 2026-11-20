@@ -12,11 +12,13 @@ USER root
 COPY --from=app /usr/local/bin/node /usr/local/bin/node
 COPY --from=app /app /app
 COPY partida.py /usr/local/lib/ergon/partida.py
-# a imagem não é construída se o Node não rodar na base do motor ou faltar o app
+# a imagem não é construída se o Node não rodar na base do motor ou faltar o app. O segredo do app do Google (se a
+# imagem do Ergon o trouxer) fica só para o usuário do app: o motor e os agentes não o leem
 RUN node --version \
  && test -f /app/server/src/index.ts && test -d /app/web/dist && test -d /app/node_modules \
  && /opt/hermes/.venv/bin/python -c "import ast; ast.parse(open('/usr/local/lib/ergon/partida.py').read())" \
- && mkdir -p /data && chown 1000:1000 /data && chmod 700 /data
+ && mkdir -p /data && chown 1000:1000 /data && chmod 700 /data \
+ && if [ -e /app/google-app.secret ]; then chown 1000:1000 /app/google-app.secret && chmod 400 /app/google-app.secret; fi
 ENV NODE_ENV=production ERGON_BUILD=${ERGON_BUILD} ERGON_HOST=0.0.0.0 ERGON_PORT=8787 ERGON_DATA_DIR=/data ERGON_WEB_DIR=/app/web/dist
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -177,11 +177,13 @@ export class WorldLinks {
    * aparelho "nuvem", com o token de partida que o World deu ao orquestrador (sem e-mail e sem senha de ninguém). As
    * chaves nascem aqui e ficam no disco deste workspace, cifradas pelo cofre, como num computador.
    */
-  async connectCloud(userId: string, sealWs: string, bootToken: string): Promise<{ link: LinkRow; syncWorkspaceId: string; label: string | null }> {
+  async connectCloud(userId: string, sealWs: string, bootToken: string, expectedWs?: string): Promise<{ link: LinkRow; syncWorkspaceId: string; label: string | null }> {
     const ed = crypto.generateKeyPairSync('ed25519'); const x = crypto.generateKeyPairSync('x25519');
     const pub = (k: crypto.KeyObject) => k.export({ format: 'der', type: 'spki' }).toString('base64');
     const reg = await this.client.call<{ deviceId: string; challenge: string; accountId: string; workspaceId: string; label: string | null; accountEmail: string | null }>('POST', '/v1/cloud/boot',
       { bootToken, installationId: installationId(this.db), publicKey: pub(ed.publicKey), syncPublicKey: pub(x.publicKey) });
+    // o token de partida tem de ser deste contêiner (o workspace dele): conferido ANTES de guardar o aparelho
+    if (expectedWs && reg.workspaceId !== expectedWs) throw new HttpError(409, 'boot_ws', 'o token de partida é de outro workspace');
     const conf = await this.client.call<{ sessionToken: string }>('POST', '/v1/devices/confirm', { deviceId: reg.deviceId, signature: crypto.sign(null, Buffer.from(reg.challenge), ed.privateKey).toString('base64') });
     const link = await this.finishDevice(userId, sealWs, reg, conf.sessionToken, { ed, x }, { email: reg.accountEmail ?? '', emailVerified: true });
     return { link, syncWorkspaceId: reg.workspaceId, label: reg.label };

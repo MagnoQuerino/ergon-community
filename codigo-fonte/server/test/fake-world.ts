@@ -384,7 +384,9 @@ export class FakeWorld {
     if (key === 'GET /v1/cloud') {
       const sws = u.searchParams.get('workspace'); const cl = sws ? this.clouds.get(sws) : undefined;
       if (!mine(sws)) return { fail: [404, 'not_found'] };
-      return { json: { active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null } };
+      const dono = this.workspaces.get(sws!)!.owner === acc.id;
+      return { json: { active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null,
+        relayTicket: cl?.relay && dono ? { exp: Math.floor(Date.now() / 1000) + 900, mac: crypto.createHash('sha256').update(`${sws}|${cl.relay}`).digest('hex') } : null } };
     }
     if (key === 'POST /v1/cloud/presence') {
       const cl = this.clouds.get(b.workspaceId);

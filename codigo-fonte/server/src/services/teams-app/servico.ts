@@ -199,6 +199,12 @@ export class TeamsApp {
   /** o que o serviço tem como reserva desta instalação (a chave do último standby.set aceito ou do `ready`) */
   private reservaNoRele: string | null = null;
   private pedindoReserva = false;
+  /** o comprovante do World para declarar a reserva (curto; renovado a cada consulta de GET /v1/cloud) */
+  private comprovante: { exp: number; mac: string } | null = null;
+  /** o serviço já disse, nesta conexão, quais vínculos esta instalação atende como reserva (antes disso não se apaga nada) */
+  private reservaRecebida = false;
+  /** este Ergon é o contêiner da nuvem do Ergon World (e não uma instalação "cloud" comum, hospedada pela pessoa) */
+  private nuvemWorld(): boolean { return this.d.cfg.mode === 'cloud' && /^sws_[a-f0-9]{32}$/.test(process.env.ERGON_WORLD_WORKSPACE ?? ''); }
 
   constructor(d: TeamsAppDeps) {
     this.d = d;
@@ -356,7 +362,7 @@ export class TeamsApp {
     const base = this.base();
     if (!base || this.d.vault.state() !== 'open' || this.cliente || this.iniciando) return;
     // na nuvem, só depois de o workspace chegar pela sincronia (antes disso não há a quem entregar)
-    if (this.d.cfg.mode === 'cloud' && !this.nuvem) return;
+    if (this.nuvemWorld() && !this.nuvem) return;
     if (this.oficial() && this.saudeOficial?.ok !== true && !this.instalacao()) {
       // o serviço oficial ainda não respondeu: nada de registro nem de chaves até a saúde responder
       if (!(await this.conferirSaude())) { this.conferirDepois(); return; }
@@ -1164,8 +1170,9 @@ export class TeamsApp {
    * com null). Vale para as contas ligadas pela pessoa DONA do workspace (na nuvem, a equipe age com o papel de dono).
    * Uma reserva por instalação: o primeiro workspace com a nuvem fica. Chamado a cada minuto (confere e repete se preciso).
    */
-  reserva(ws: string, x: { installationId: string; syncWorkspaceId: string } | null): void {
-    if (this.d.cfg.mode === 'cloud') return;
+  reserva(ws: string, x: { installationId: string; syncWorkspaceId: string; ticket?: { exp: number; mac: string } | null } | null): void {
+    if (this.nuvemWorld()) return;
+    if (x?.ticket) this.comprovante = x.ticket;
     const atual = this.reservaDesejada();
     if (!x) { if (atual?.ws === ws) setInstanceSetting(this.d.db, 'teams_relay_standby', ''); else return; }
     else if (atual && atual.ws !== ws) return;
@@ -1182,14 +1189,16 @@ export class TeamsApp {
   /** Manda o `standby.set` se o que o serviço tem difere do que este Ergon quer (contas ligadas ou desligadas mudam a lista). */
   private aplicarReserva(): void {
     const c = this.cliente; const k = this.chaves();
-    if (this.d.cfg.mode === 'cloud' || !c || c.estado !== 'connected' || !k || this.reservaNoRele === null || this.pedindoReserva) return;
+    if (this.nuvemWorld() || !c || c.estado !== 'connected' || !k || this.reservaNoRele === null || this.pedindoReserva) return;
     const r = this.reservaDesejada();
+    // declarar pede o comprovante do World (só o dono o recebe, em GET /v1/cloud); tirar, não
+    if (r && (!this.comprovante || this.comprovante.exp * 1000 < Date.now() + 30_000)) return;
     const pessoas = r ? [...new Set(this.d.db.all<{ user_id: string }>("SELECT DISTINCT user_id FROM teams_bindings WHERE workspace_id = ? AND status IN ('active', 'paused') AND standby_of IS NULL", r.ws)
       .filter((p) => this.papel(r.ws, p.user_id) === 'owner').map((p) => personRefDe(k, p.user_id)))].sort() : [];
     const quero = r ? chaveDaReserva(r.installationId, r.sws, pessoas) : '';
     if (quero === this.reservaNoRele) return;
     this.pedindoReserva = true;
-    void c.pedir(r ? { type: 'standby.set', id: novoId('req'), installationId: r.installationId, workspaceId: r.sws, personRefs: pessoas } : { type: 'standby.set', id: novoId('req'), installationId: null }, this.ajustes.pedidoMs ?? 15_000)
+    void c.pedir(r ? { type: 'standby.set', id: novoId('req'), installationId: r.installationId, workspaceId: r.sws, personRefs: pessoas, ticket: this.comprovante } : { type: 'standby.set', id: novoId('req'), installationId: null }, this.ajustes.pedidoMs ?? 15_000)
       .then((ack) => {
         if (ack.ok) { this.reservaNoRele = quero; log.info({ pessoas: pessoas.length, ligada: !!r }, 'canais: reserva na nuvem declarada ao serviço'); }
         else log.warn({ codigo: ack.error?.code }, 'canais: o serviço não aceitou a reserva na nuvem');
@@ -1204,10 +1213,12 @@ export class TeamsApp {
     const era = this.nuvem;
     this.nuvem = x;
     if (!era) { this.assinar(x.workspaceId); if (this.ligado) void this.start(); }
-    this.importarReserva(this.daReserva);
+    // só com a lista que o serviço mandou nesta conexão (antes dela, daReserva está vazia e apagaria tudo)
+    if (this.reservaRecebida) this.importarReserva(this.daReserva);
   }
   /** Os vínculos do computador que esta instalação atende: entram (ou saem) daqui conforme o serviço diz. */
   private importarReserva(lista: unknown): void {
+    this.reservaRecebida = true;
     this.daReserva = Array.isArray(lista) ? (lista as BindingDoRele[]).filter((x) => x && typeof x.bindingId === 'string' && ID_VINCULO.test(x.bindingId) && typeof x.personRef === 'string') : [];
     const n = this.nuvem;
     if (!n) return;

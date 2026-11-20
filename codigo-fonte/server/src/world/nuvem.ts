@@ -75,7 +75,7 @@ export interface NuvemDeps {
 export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado: () => { estado: EstadoNuvem; detalhe: string | null } } {
   const sws = d.env.ERGON_WORLD_WORKSPACE!; const bootToken = d.env.ERGON_CLOUD_BOOT_TOKEN ?? '';
   let estado: EstadoNuvem = 'preparando'; let detalhe: string | null = null; let parado = false; let timer: NodeJS.Timeout | null = null;
-  let userId: string | null = null; let ws: string | null = null; let ia = false; let canaisDesde: number | null = null; let contado = ''; let rodando: Promise<void> | null = null;
+  let userId: string | null = null; let ws: string | null = null; let ia = false; let iaFalhas = 0; let iaProxima = 0; let canaisDesde: number | null = null; let contado = ''; let rodando: Promise<void> | null = null;
 
   const sessao = () => (userId ? d.links.session(userId) : null);
   const contar = async (e: EstadoNuvem, det: string | null = null) => {
@@ -111,8 +111,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     if (!d.links.get(userId) || !d.links.session(userId)) {
       const base = d.db.get<{ workspace_id: string }>("SELECT workspace_id FROM memberships WHERE user_id = ? AND role = 'owner' ORDER BY created_at LIMIT 1", userId)?.workspace_id;
       if (!base) throw new Error('conta local sem workspace');
-      const r = await d.links.connectCloud(userId, base, bootToken);
-      if (r.syncWorkspaceId !== sws) throw new Error('o token de partida é de outro workspace');
+      const r = await d.links.connectCloud(userId, base, bootToken, sws);
       d.log({ device: r.link.device_id }, 'nuvem: aparelho registrado na conta do dono');
     }
     // 4. o workspace local, ligado ao do World
@@ -143,12 +142,18 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     if (!ia && Number.isFinite(iaAte) && iaAte - Date.now() > 5 * 86_400_000) ia = true;
     if (!ia) {
       if (!(await d.motorPronto(ws).catch(() => false))) { await contar('preparando', 'ligando a equipe de IA (a primeira vez leva alguns minutos)'); return false; }
+      // cada tentativa cria uma credencial no World: depois de uma falha, espera (30 s, 1 min, 2 min… até 15 min)
+      if (Date.now() < iaProxima) { await contar('preparando', 'ligando o modelo da equipe (nova tentativa em instantes)'); return false; }
       try {
         const r = await d.conectarErgonAi({ userId, workspaceId: ws }, true) as { expiresAt?: string } | undefined;
+        iaFalhas = 0;
         ia = true; d.log({}, 'nuvem: Ergon AI ligado como modelo da equipe');
         if (r?.expiresAt && Number.isFinite(Date.parse(r.expiresAt))) setInstanceSetting(d.db, 'nuvem_ergon_ai_ate', r.expiresAt);
       }
-      catch (e) { await contar('preparando', `ligando o modelo da equipe: ${String((e as Error).message).slice(0, 160)}`); return false; }
+      catch (e) {
+        iaProxima = Date.now() + Math.min(15 * 60_000, 30_000 * 2 ** Math.min(iaFalhas++, 5));
+        await contar('preparando', `ligando o modelo da equipe: ${String((e as Error).message).slice(0, 160)}`); return false;
+      }
       await d.aoPronto?.({ userId, workspaceId: ws, syncWorkspaceId: sws });
     }
     d.canais?.atender({ userId, workspaceId: ws, syncWorkspaceId: sws });
@@ -197,15 +202,20 @@ export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; 
  * Esqueleto novo vindo de outro computador não é aplicado sozinho (fica para a pessoa ver, como sempre).
  */
 export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; parar: () => Promise<void> } {
-  const ativa = new Map<string, { at: number; on: boolean; rele: string | null }>();
+  const ativa = new Map<string, { at: number; on: boolean; rele: string | null; ticket: { exp: number; mac: string } | null }>();
   let parado = false; let rodando: Promise<void> | null = null;
   const alvos = () => d.db.all<{ user_id: string; workspace_id: string; sws: string }>(`SELECT b.user_id, b.workspace_id, i.sync_workspace_id AS sws FROM world_bound b
     JOIN world_links l ON l.user_id = b.user_id AND l.status = 'active' JOIN world_workspace_ids i ON i.workspace_id = b.workspace_id`);
   const temNuvem = async (sws: string, s: string): Promise<boolean> => {
     const c = ativa.get(sws);
-    // "tem" vale por 5 min; "não tem" só por 1 (quem acabou de contratar não espera)
+    // "tem" vale por 5 min; "não tem" só por 1 (quem acabou de contratar não espera). O comprovante da reserva vale 15
     if (c && Date.now() - c.at < (c.on && c.rele ? d.ajustes?.estadoMs ?? 5 * 60_000 : Math.min(60_000, d.ajustes?.cicloMs ?? 60_000))) return c.on;
-    try { const r = await d.client.call<{ active?: boolean; relayStandby?: string | null }>('GET', `/v1/cloud?workspace=${sws}`, undefined, s); ativa.set(sws, { at: Date.now(), on: r.active === true, rele: r.active === true && typeof r.relayStandby === 'string' ? r.relayStandby : null }); return r.active === true; }
+    try {
+      const r = await d.client.call<{ active?: boolean; relayStandby?: string | null; relayTicket?: { exp: number; mac: string } | null }>('GET', `/v1/cloud?workspace=${sws}`, undefined, s);
+      const on = r.active === true;
+      ativa.set(sws, { at: Date.now(), on, rele: on && typeof r.relayStandby === 'string' ? r.relayStandby : null, ticket: on && r.relayTicket && typeof r.relayTicket.mac === 'string' ? r.relayTicket : null });
+      return on;
+    }
     catch { return c?.on ?? false; }
   };
   const uma = async (open: boolean) => {
@@ -218,8 +228,8 @@ export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; 
         continue;
       }
       // os canais: com este computador fechado, a nuvem responde pelas contas ligadas (declarado ao serviço dos canais)
-      const rele = ativa.get(a.sws)?.rele;
-      if (rele) try { d.canais?.reserva(a.workspace_id, { installationId: rele, syncWorkspaceId: a.sws }); } catch { /* segue */ }
+      const at = ativa.get(a.sws);
+      if (at?.rele) try { d.canais?.reserva(a.workspace_id, { installationId: at.rele, syncWorkspaceId: a.sws, ticket: at.ticket }); } catch { /* segue */ }
       try {
         await d.client.call('POST', '/v1/cloud/presence', { workspaceId: a.sws, open }, s);
         if (!d.sync.status(a.workspace_id).enabled) continue;

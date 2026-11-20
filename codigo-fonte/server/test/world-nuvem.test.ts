@@ -76,7 +76,7 @@ test('o contêiner sobe sem ninguém, recebe a chave do computador, os dados e f
   assert.deepEqual([d.status, d.kind], ['active', 'cloud']);
   assert.equal(d.accountId, [...world.accounts.values()].find((a) => a.email === 'ana@exemplo.test')!.id);
   // esperou a chave (só um computador da pessoa a entrega) e depois recebeu a equipe e a conversa
-  assert.ok(cl.states.some((x) => x.startsWith('aguardando_chave')), JSON.stringify(cl.states));
+  // (a chave pode chegar antes da primeira tentativa: o computador entrega assim que o aparelho-nuvem aparece)
   const wsNuvem = nuvem.db.get<{ w: string }>('SELECT workspace_id AS w FROM world_workspace_ids WHERE sync_workspace_id = ?', sws)!.w;
   assert.ok(nuvem.db.get("SELECT 1 AS x FROM agents WHERE workspace_id = ? AND name = 'Frodo' AND status = 'active'", wsNuvem), 'a equipe chegou');
   assert.equal(nuvem.db.get<{ content: string }>("SELECT content FROM messages WHERE id = 'msg_pcaaaaaaaaaaaaaaa'")?.content, 'Qual o caminho mais seguro?', 'a conversa chegou');

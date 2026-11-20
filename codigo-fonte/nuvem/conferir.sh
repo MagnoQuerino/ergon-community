@@ -18,6 +18,8 @@ i=0; until docker exec "$N" sh -c 'ps -eo user,args | grep -q "^1000 .*node serv
 [ "$(docker exec "$N" stat -c %a /opt/data)" = 700 ] || falha "o disco do motor não ficou fechado (700)"
 docker exec -u 10000:10000 "$N" cat /data/teste >/dev/null 2>&1 && falha "o motor lê o disco do app"
 docker exec -u 1000:1000 "$N" ls /opt/data >/dev/null 2>&1 && falha "o app lê o disco do motor"
+# nada do app legível pelo motor fora do disco dele: o segredo do Google e qualquer arquivo de /app só de dono
+docker exec -u 10000:10000 "$N" sh -c 'test ! -e /app/google-app.secret || ! cat /app/google-app.secret >/dev/null 2>&1' || falha "o motor lê o segredo do app do Google"
 p=$(docker exec "$N" sh -c 'ps -eo pid,user,args | awk "\$2==\"hermes\" && /ergon-vault/ {print \$1; exit}"')
 amb=$(docker exec -u 10000:10000 "$N" sh -c "tr '\\0' '\\n' < /proc/$p/environ") || falha "não consegui ler o ambiente do motor"
 echo "$amb" | grep -q '^HERMES_HOME=/opt/data$' || falha "o motor não recebeu as variáveis dele (MOTOR__)"

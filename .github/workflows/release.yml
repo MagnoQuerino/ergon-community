@@ -118,6 +118,13 @@ jobs:
           tags: |
             ghcr.io/${{ env.DONO }}/ergon-community-nuvem:${{ env.VERSAO }}
 
+      # a imagem única publicada conferida como o orquestrador a sobe (usuários, discos, ambiente, segredo do Google)
+      - name: Imagem única publicada conferida
+        working-directory: codigo-fonte
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/${{ env.DONO }}/ergon-community-nuvem:${{ env.VERSAO }}
+          sh nuvem/conferir.sh ghcr.io/${{ env.DONO }}/ergon-community-nuvem:${{ env.VERSAO }}
+
       # o que as pessoas vão baixar, antes do pacote e do manifesto: falhou, a versão não sai
       - name: Motor publicado conferido (o mesmo plugin, com as Conexões)
         run: |

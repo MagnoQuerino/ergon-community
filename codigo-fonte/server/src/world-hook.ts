@@ -73,7 +73,7 @@ export interface WorldHost {
 /** Os canais oficiais (services/teams-app) vistos pela nuvem do Ergon World. */
 export interface CanaisNuvemHost {
   /** no computador: declara (ou tira, com null) a nuvem como quem responde pelas contas ligadas neste workspace */
-  reserva(workspaceId: string, x: { installationId: string; syncWorkspaceId: string } | null): void;
+  reserva(workspaceId: string, x: { installationId: string; syncWorkspaceId: string; /** o comprovante do World (só o dono recebe) */ ticket?: { exp: number; mac: string } | null } | null): void;
   /** na nuvem: o workspace está pronto; as contas ligadas no computador passam a ser atendidas aqui */
   atender(x: { userId: string; workspaceId: string; syncWorkspaceId: string }): void;
   /** há um serviço de canais configurado nesta instalação (sem ele, ninguém espera a instalação) */
