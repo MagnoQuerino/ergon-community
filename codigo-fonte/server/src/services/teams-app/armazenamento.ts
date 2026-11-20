@@ -53,6 +53,13 @@ const MIGRACOES: Array<[string, string]> = [
     ALTER TABLE teams_people_v3 RENAME TO teams_people;
     CREATE INDEX IF NOT EXISTS teams_people_conv ON teams_people(conversation_id);
   `],
+  // nuvem do Ergon World: o contêiner atende as contas ligadas no computador enquanto ele está fechado (reserva).
+  // standby_of = a instalação dona do vínculo (o computador); teams_synced = mensagens que vieram pela sincronia (o
+  // outro aparelho já respondeu por elas no canal: não vão de novo)
+  ['t0004_reserva_na_nuvem', `
+    ALTER TABLE teams_bindings ADD COLUMN standby_of TEXT;
+    CREATE TABLE IF NOT EXISTS teams_synced (message_id TEXT PRIMARY KEY, at TEXT NOT NULL);
+  `],
 ];
 
 export function migrarTeamsApp(db: Db): string[] {
@@ -70,7 +77,7 @@ export function migrarTeamsApp(db: Db): string[] {
 export interface VinculoRow {
   binding_id: string; user_id: string; workspace_id: string; person_ref: string; teams_name: string | null;
   status: 'active' | 'paused' | 'revoking' | 'revoked'; notices: number; revoked_by: string | null; created_at: string; updated_at: string;
-  first_message_at: string | null; platform: Plataforma;
+  first_message_at: string | null; platform: Plataforma; standby_of: string | null;
 }
 export type Plataforma = 'teams' | 'telegram' | 'discord';
 export interface PessoaRow { platform: Plataforma; user_id: string; workspace_id: string; conversation_id: string | null; enabled: number; reply_binding: string | null; cursor_rowid: number; updated_at: string; notice_window: string | null }
