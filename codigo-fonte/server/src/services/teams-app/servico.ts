@@ -101,6 +101,9 @@ const erroDaTela = (code: string, plat: Plataforma = 'teams') => {
   return new HttpError(s, code in E ? code : 'teams_relay', m);
 };
 
+/** O que identifica uma reserva declarada (para saber se o serviço já tem a mesma). */
+const chaveDaReserva = (installationId: string, sws: string, pessoas: string[]) => `${installationId}|${sws}|${[...pessoas].sort().join(',')}`;
+
 type Problema = 'assinatura' | 'revogada' | 'versao' | 'substituida' | 'religar' | 'registro' | null;
 
 /**
@@ -137,7 +140,9 @@ interface AjustesTeams {
   cliente?: { baseMs?: number; tetoMs?: number; reenvioMs?: number; semPingMs?: number; zerarAposMs?: number };
 }
 
-interface BindingDoRele { bindingId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName?: string; linkedAt?: string; claimId?: string; canal?: string; platform?: string }
+/** A reserva declarada no serviço (o computador) e quem atende (a nuvem). */
+interface ReservaDesejada { ws: string; installationId: string; sws: string }
+interface BindingDoRele { primary?: string; workspaceId?: string; bindingId: string; personRef: string; status: 'active' | 'paused'; notices: boolean; teamsName?: string; linkedAt?: string; claimId?: string; canal?: string; platform?: string }
 interface ClaimLocal { userId: string; ws: string; teamsName: string; expiresAt: number; conta: ContaDoTeams; plat: Plataforma }
 /** A plataforma que o serviço informou (`canal` ou `platform`, os dois nomes que ele manda); sem nenhum, Teams. */
 const platDe = (v: unknown): Plataforma => (v === 'discord' || v === 'telegram' ? v : 'teams');
@@ -187,6 +192,19 @@ export class TeamsApp {
    * `usarCamadaComum` (sem ela, como antes: só a pessoa dona liga contas).
    */
   externos: CanaisExternos | null = null;
+  /** nuvem do Ergon World: quem atende aqui (a conta e o workspace locais do contêiner) as contas ligadas no computador */
+  private nuvem: { userId: string; workspaceId: string; syncWorkspaceId: string } | null = null;
+  /** os vínculos do computador que o serviço disse que esta instalação atende como reserva (o último `ready`) */
+  private daReserva: BindingDoRele[] = [];
+  /** o que o serviço tem como reserva desta instalação (a chave do último standby.set aceito ou do `ready`) */
+  private reservaNoRele: string | null = null;
+  private pedindoReserva = false;
+  /** o comprovante do World para declarar a reserva (curto; renovado a cada consulta de GET /v1/cloud) */
+  private comprovante: { exp: number; mac: string } | null = null;
+  /** o serviço já disse, nesta conexão, quais vínculos esta instalação atende como reserva (antes disso não se apaga nada) */
+  private reservaRecebida = false;
+  /** este Ergon é o contêiner da nuvem do Ergon World (e não uma instalação "cloud" comum, hospedada pela pessoa) */
+  private nuvemWorld(): boolean { return this.d.cfg.mode === 'cloud' && /^sws_[a-f0-9]{32}$/.test(process.env.ERGON_WORLD_WORKSPACE ?? ''); }
 
   constructor(d: TeamsAppDeps) {
     this.d = d;
@@ -343,6 +361,8 @@ export class TeamsApp {
     for (const ws of new Set(this.d.db.all<{ w: string }>("SELECT DISTINCT workspace_id AS w FROM teams_bindings WHERE status IN ('active', 'paused')").map((r) => r.w))) this.assinar(ws);
     const base = this.base();
     if (!base || this.d.vault.state() !== 'open' || this.cliente || this.iniciando) return;
+    // na nuvem, só depois de o workspace chegar pela sincronia (antes disso não há a quem entregar)
+    if (this.nuvemWorld() && !this.nuvem) return;
     if (this.oficial() && this.saudeOficial?.ok !== true && !this.instalacao()) {
       // o serviço oficial ainda não respondeu: nada de registro nem de chaves até a saúde responder
       if (!(await this.conferirSaude())) { this.conferirDepois(); return; }
@@ -480,7 +500,7 @@ export class TeamsApp {
   private pessoasLigadas(): Array<{ personRef: string; open: boolean }> {
     const k = this.chaves();
     if (!k) return [];
-    return this.d.db.all<{ user_id: string; w: string }>("SELECT user_id, MIN(workspace_id) AS w FROM teams_bindings WHERE status IN ('active', 'paused', 'revoking') GROUP BY user_id")
+    return this.d.db.all<{ user_id: string; w: string }>("SELECT user_id, MIN(workspace_id) AS w FROM teams_bindings WHERE status IN ('active', 'paused', 'revoking') AND standby_of IS NULL GROUP BY user_id")
       .map((r) => ({ personRef: personRefDe(k, r.user_id), open: this.d.db.workspaceOpen(r.w) }));
   }
   /** A conversa "Teams" com o coordenador, para esta conversa: é dela? */
@@ -606,6 +626,7 @@ export class TeamsApp {
         if (ack.status === 'accepted') for (const fn of depois) { try { fn(); } catch (err) { log.warn({ erro: (err as Error).message.slice(0, 120) }, 'teams: depois do ack'); } }
         return;
       }
+      case 'standby.bindings': this.importarReserva(f.standbyBindings); return; // a reserva mudou com esta instalação conectada
       case 'queue.begin': case 'queue.end': return; // o começo e o fim do que ficou guardado no serviço: as entregas vêm no meio
       case 'error': return;
       case 'ack': return; // confirmação que chegou depois do prazo do pedido: nada a fazer
@@ -646,7 +667,9 @@ export class TeamsApp {
     const ext = this.externos?.externalRequest({ channel: TeamsApp.canalDe(plat), workspaceId: b.workspace_id, memberId: b.user_id, text: texto, conversationId: conv });
     if (ext && !ext.ok) {
       this.d.db.run('INSERT INTO teams_inbound (delivery_id, user_id, kind, message_id, received_at, binding_id, state) VALUES (?, ?, ?, NULL, ?, ?, ?)', String(f.id), b.user_id, 'activity', now(), b.binding_id, `externo:${ext.motivo}`);
-      if (ext.resposta) this.enfileirar(b, 'send', { text: ext.resposta, summary: resumoParaTeams(ext.resposta) }, 'system');
+      // na nuvem não há tela para aprovar: o pedido de risco espera o computador
+      const resposta = b.standby_of && ext.motivo === 'aprovar_no_app' ? 'Este pedido precisa de aprovação dentro do app do Ergon, por segurança. O seu Ergon está fechado: abra o Ergon no computador e peça de novo por lá.' : ext.resposta;
+      if (resposta) this.enfileirar(b, 'send', { text: resposta, summary: resumoParaTeams(resposta) }, 'system');
       return { ok: true, status: 'accepted' };
     }
     const crid = `teams-${String(f.id).replace(/[^A-Za-z0-9-]/g, '-')}`.slice(0, 64);
@@ -756,7 +779,7 @@ export class TeamsApp {
     this.problema = null; this.registradoDeNovo = false;
     const doRele = new Map<string, BindingDoRele>();
     for (const x of Array.isArray(f.bindings) ? f.bindings as BindingDoRele[] : []) if (x && typeof x.bindingId === 'string') doRele.set(x.bindingId, x);
-    const locais = this.d.db.all<VinculoRow>("SELECT * FROM teams_bindings WHERE status IN ('active', 'paused', 'revoking')");
+    const locais = this.d.db.all<VinculoRow>("SELECT * FROM teams_bindings WHERE status IN ('active', 'paused', 'revoking') AND standby_of IS NULL");
     const conhecidos = new Set(locais.map((b) => b.binding_id));
     for (const b of locais) {
       const r = doRele.get(b.binding_id);
@@ -792,6 +815,11 @@ export class TeamsApp {
       if (this.confirmando.size) continue;
       void this.cliente?.pedir({ type: 'link.revoke', id: novoId('req'), bindingId: id }).catch(() => undefined);
     }
+    // reserva: o que o serviço tem declarado por esta instalação (computador) e os vínculos que ela atende (nuvem)
+    const sb = f.standby as { installationId?: unknown; workspaceId?: unknown; personRefs?: unknown } | undefined;
+    this.reservaNoRele = sb && typeof sb.installationId === 'string' ? chaveDaReserva(sb.installationId, String(sb.workspaceId ?? ''), Array.isArray(sb.personRefs) ? sb.personRefs.map(String) : []) : '';
+    this.importarReserva(f.standbyBindings);
+    this.aplicarReserva();
     this.avisarTela(null);
     for (const ws of new Set(locais.map((b) => b.workspace_id))) this.agendar(`ws:${ws}`, () => this.atualizarWorkspace(ws));
     // o que o serviço oferece pode ter mudado (Discord ou Telegram ligados depois, por exemplo): confere de tempos em tempos
@@ -842,8 +870,9 @@ export class TeamsApp {
     const p = this.pessoa(userId, plat);
     if (!p?.conversation_id || !this.d.db.workspaceOpen(p.workspace_id)) return;
     const b = this.ligadoPara(userId, plat) ? this.vinculoDeResposta(userId, plat) : null;
-    const msgs = this.d.db.all<{ rid: number; role: string; content: string; run_id: string | null; agente: string | null }>(
-      `SELECT m.rowid AS rid, m.role, m.content, m.run_id, COALESCE(ra.name, ca.name) AS agente FROM messages m
+    const msgs = this.d.db.all<{ rid: number; role: string; content: string; run_id: string | null; agente: string | null; sincronizada: number }>(
+      `SELECT m.rowid AS rid, m.role, m.content, m.run_id, COALESCE(ra.name, ca.name) AS agente,
+              EXISTS (SELECT 1 FROM teams_synced y WHERE y.message_id = m.id) AS sincronizada FROM messages m
          JOIN conversations c ON c.id = m.conversation_id LEFT JOIN agents ca ON ca.id = c.agent_id
          LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN agents ra ON ra.id = r.agent_id
         WHERE m.conversation_id = ? AND m.rowid > ? ORDER BY m.rowid LIMIT 50`, p.conversation_id, Number(p.cursor_rowid));
@@ -851,7 +880,7 @@ export class TeamsApp {
     for (const m of msgs) {
       if (m.content === CLOSED_VALUE) break;
       ultimo = Number(m.rid);
-      if (!b || !(m.role === 'agent' || (m.role === 'system' && m.run_id))) continue;
+      if (!b || !(m.role === 'agent' || (m.role === 'system' && m.run_id)) || m.sincronizada) continue;
       const texto = textoParaTeams(m.content, MAX_RESPOSTA[plat]);
       // quem fala vai à frente (o nome do agente, ou "Sistema"), como na tela do Ergon: o que o agente escreve não se
       // confunde com as frases do próprio app no Teams (o serviço não põe nome nas dele)
@@ -974,6 +1003,7 @@ export class TeamsApp {
     for (const x of this.comVoce(userId, ws)) this.d.db.run('INSERT INTO teams_noticed (user_id, item, at, sent) VALUES (?, ?, ?, 1) ON CONFLICT (user_id, item) DO NOTHING', userId, x.chave, at);
   }
   private varrerAvisos(userId: string, ws: string): void {
+    if (this.nuvem) return; // os avisos de "Com você" saem do computador (a nuvem só responde ao que perguntam)
     if (!this.vinculosDe(userId, ['active']).some((b) => Number(b.notices) === 1 && b.workspace_id === ws && this.ligadoPara(userId, b.platform ?? 'teams'))) return;
     let novos = 0;
     for (const x of this.comVoce(userId, ws)) novos += this.d.db.run('INSERT INTO teams_noticed (user_id, item, at, sent) VALUES (?, ?, ?, 0) ON CONFLICT (user_id, item) DO NOTHING', userId, x.chave, now()).changes;
@@ -1124,10 +1154,134 @@ export class TeamsApp {
     this.d.db.run('DELETE FROM teams_cards WHERE outbox_id IS NOT NULL AND outbox_id NOT IN (SELECT id FROM teams_outbox)');
     this.d.db.run('DELETE FROM teams_inbound WHERE received_at < ?', ago(ENTRADA_VALE_MS));
     this.d.db.run("DELETE FROM teams_noticed WHERE sent <> 0 AND at < ?", ago(30 * DIA));
+    this.d.db.run('DELETE FROM teams_synced WHERE at < ?', ago(30 * DIA));
     for (const [id, c] of this.claims) if (c.expiresAt < this.agora()) this.claims.delete(id);
     for (const [id, c] of this.confirmando) if (c.ate < this.agora()) this.confirmando.delete(id);
     for (const [u, e] of this.errosDeCodigo) if (!e.some((t) => this.agora() - t < JANELA_ERROS_MS)) this.errosDeCodigo.delete(u);
     this.esvaziarSaida();
+  }
+
+  // ------------------------------------------------------------------------------------------------ nuvem (reserva)
+  /** A instalação deste Ergon no serviço dos canais (o contêiner da nuvem conta a dele ao World). */
+  instalacaoNoRele(): string | null { return this.cliente ? this.instalacao() : null; }
+
+  /**
+   * No computador: declara ao serviço que, com este Ergon fechado, a nuvem do workspace responde no lugar dele (ou tira,
+   * com null). Vale para as contas ligadas pela pessoa DONA do workspace (na nuvem, a equipe age com o papel de dono).
+   * Uma reserva por instalação: o primeiro workspace com a nuvem fica. Chamado a cada minuto (confere e repete se preciso).
+   */
+  reserva(ws: string, x: { installationId: string; syncWorkspaceId: string; ticket?: { exp: number; mac: string } | null } | null): void {
+    if (this.nuvemWorld()) return;
+    if (x?.ticket) this.comprovante = x.ticket;
+    const atual = this.reservaDesejada();
+    if (!x) { if (atual?.ws === ws) setInstanceSetting(this.d.db, 'teams_relay_standby', ''); else return; }
+    else if (atual && atual.ws !== ws) return;
+    else if (!ID_INSTALACAO.test(x.installationId) || !/^sws_[a-f0-9]{32}$/.test(x.syncWorkspaceId)) return;
+    else if (atual?.installationId !== x.installationId || atual.sws !== x.syncWorkspaceId) setInstanceSetting(this.d.db, 'teams_relay_standby', JSON.stringify({ ws, installationId: x.installationId, sws: x.syncWorkspaceId }));
+    this.aplicarReserva();
+  }
+  private reservaDesejada(): ReservaDesejada | null {
+    try {
+      const v = JSON.parse(instanceSetting(this.d.db, 'teams_relay_standby') || 'null') as ReservaDesejada | null;
+      return v && typeof v.ws === 'string' && typeof v.installationId === 'string' && typeof v.sws === 'string' ? v : null;
+    } catch { return null; }
+  }
+  /** Manda o `standby.set` se o que o serviço tem difere do que este Ergon quer (contas ligadas ou desligadas mudam a lista). */
+  private aplicarReserva(): void {
+    const c = this.cliente; const k = this.chaves();
+    if (this.nuvemWorld() || !c || c.estado !== 'connected' || !k || this.reservaNoRele === null || this.pedindoReserva) return;
+    const r = this.reservaDesejada();
+    // declarar pede o comprovante do World (só o dono o recebe, em GET /v1/cloud); tirar, não
+    if (r && (!this.comprovante || this.comprovante.exp * 1000 < Date.now() + 30_000)) return;
+    const pessoas = r ? [...new Set(this.d.db.all<{ user_id: string }>("SELECT DISTINCT user_id FROM teams_bindings WHERE workspace_id = ? AND status IN ('active', 'paused') AND standby_of IS NULL", r.ws)
+      .filter((p) => this.papel(r.ws, p.user_id) === 'owner').map((p) => personRefDe(k, p.user_id)))].sort() : [];
+    const quero = r ? chaveDaReserva(r.installationId, r.sws, pessoas) : '';
+    if (quero === this.reservaNoRele) return;
+    this.pedindoReserva = true;
+    void c.pedir(r ? { type: 'standby.set', id: novoId('req'), installationId: r.installationId, workspaceId: r.sws, personRefs: pessoas, ticket: this.comprovante } : { type: 'standby.set', id: novoId('req'), installationId: null }, this.ajustes.pedidoMs ?? 15_000)
+      .then((ack) => {
+        if (ack.ok) { this.reservaNoRele = quero; log.info({ pessoas: pessoas.length, ligada: !!r }, 'canais: reserva na nuvem declarada ao serviço'); }
+        else log.warn({ codigo: ack.error?.code }, 'canais: o serviço não aceitou a reserva na nuvem');
+      }).catch(() => undefined).finally(() => { this.pedindoReserva = false; });
+  }
+
+  /**
+   * Na nuvem: o workspace chegou pela sincronia e a equipe está pronta. A conexão com o serviço liga agora, e as contas
+   * que o computador ligou (as que o serviço disser) passam a ser atendidas aqui, pela conta local do contêiner.
+   */
+  atender(x: { userId: string; workspaceId: string; syncWorkspaceId: string }): void {
+    const era = this.nuvem;
+    this.nuvem = x;
+    if (!era) { this.assinar(x.workspaceId); if (this.ligado) void this.start(); }
+    // só com a lista que o serviço mandou nesta conexão (antes dela, daReserva está vazia e apagaria tudo)
+    if (this.reservaRecebida) this.importarReserva(this.daReserva);
+  }
+  /** Os vínculos do computador que esta instalação atende: entram (ou saem) daqui conforme o serviço diz. */
+  private importarReserva(lista: unknown): void {
+    this.reservaRecebida = true;
+    this.daReserva = Array.isArray(lista) ? (lista as BindingDoRele[]).filter((x) => x && typeof x.bindingId === 'string' && ID_VINCULO.test(x.bindingId) && typeof x.personRef === 'string') : [];
+    const n = this.nuvem;
+    if (!n) return;
+    const meus = this.daReserva.filter((x) => x.workspaceId === n.syncWorkspaceId && typeof x.primary === 'string' && ID_INSTALACAO.test(x.primary));
+    const ids = new Set(meus.map((x) => x.bindingId));
+    for (const b of this.d.db.all<VinculoRow>('SELECT * FROM teams_bindings WHERE standby_of IS NOT NULL')) if (!ids.has(b.binding_id)) this.apagarVinculo(b.binding_id);
+    if (!this.d.db.workspaceOpen(n.workspaceId)) return;
+    for (const x of meus) {
+      const plat = platDe(x.platform ?? x.canal);
+      const estado = x.status === 'paused' ? 'paused' : 'active';
+      const nome = this.d.db.seal(n.workspaceId, (typeof x.teamsName === 'string' ? x.teamsName : '').slice(0, 120));
+      const quando = typeof x.linkedAt === 'string' && Number.isFinite(Date.parse(x.linkedAt)) ? new Date(Date.parse(x.linkedAt)).toISOString() : now();
+      // first_message_at preenchido: a nota de "primeira mensagem por esta conta" é do computador, onde ela foi ligada
+      this.d.db.run(`INSERT INTO teams_bindings (binding_id, user_id, workspace_id, person_ref, teams_name, status, notices, created_at, updated_at, platform, standby_of, first_message_at)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+        ON CONFLICT (binding_id) DO UPDATE SET user_id = excluded.user_id, workspace_id = excluded.workspace_id, person_ref = excluded.person_ref, teams_name = excluded.teams_name,
+          status = excluded.status, platform = excluded.platform, standby_of = excluded.standby_of, updated_at = excluded.updated_at`,
+      x.bindingId, n.userId, n.workspaceId, x.personRef, nome, estado, quando, now(), plat, x.primary!, quando);
+      this.adotarConversa(n.userId, n.workspaceId, plat);
+    }
+    if (meus.length) { log.info({ contas: meus.length }, 'canais: a nuvem atende as contas ligadas no computador'); this.agendar(`ws:${n.workspaceId}`, () => this.atualizarWorkspace(n.workspaceId)); }
+  }
+  /**
+   * A conversa do canal que o computador já usa (veio pela sincronia, com o nome da plataforma): a nuvem continua nela,
+   * e o computador vê as mensagens e as respostas no mesmo lugar. O que já estava nela não é mandado de novo ao canal.
+   */
+  private adotarConversa(userId: string, ws: string, plat: Plataforma): void {
+    const p = this.garantirPessoa(userId, ws, plat);
+    const viva = (id: string) => !!this.d.db.get('SELECT 1 AS x FROM conversations WHERE id = ? AND workspace_id = ? AND owner_user_id = ? AND archived_at IS NULL', id, ws, userId);
+    if (p.conversation_id && p.workspace_id === ws && viva(p.conversation_id)) return;
+    const titulo = plat === 'teams' ? TITULO_CONVERSA : NOME_PLAT[plat];
+    const coord = coordinatorFor(this.d.db, ws);
+    const achada = this.d.db.all<{ id: string; title: string; agent_id: string }>(
+      `SELECT c.id, c.title, c.agent_id FROM conversations c JOIN agents a ON a.id = c.agent_id AND a.status = 'active'
+        WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.archived_at IS NULL
+        ORDER BY (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) DESC, c.created_at DESC LIMIT 200`, ws, userId)
+      .find((c) => c.title === titulo && (!coord || c.agent_id === coord));
+    if (!achada) return; // nenhuma ainda: a primeira mensagem cria (e ela vai ao computador pela sincronia)
+    const cursor = Number(this.d.db.get<{ r: number }>('SELECT COALESCE(MAX(rowid), 0) AS r FROM messages')?.r ?? 0);
+    this.d.db.run('UPDATE teams_people SET conversation_id = ?, workspace_id = ?, cursor_rowid = ?, updated_at = ? WHERE user_id = ? AND platform = ?', achada.id, ws, cursor, now(), userId, plat);
+  }
+  /**
+   * Mensagens que chegaram pela sincronia (escritas noutro aparelho: o computador, ou a nuvem enquanto ele estava
+   * fechado). Quem as escreveu já respondeu no canal: aqui elas só aparecem na conversa, sem ir ao canal de novo.
+   */
+  sincronizadas(ws: string, messageIds: string[]): void {
+    if (!messageIds.length) return;
+    // na nuvem, a conversa do canal pode ter acabado de chegar: adota antes (o que já está nela não vai ao canal)
+    if (this.nuvem?.workspaceId === ws) for (const p of this.d.db.all<{ platform: Plataforma }>('SELECT platform FROM teams_people WHERE user_id = ? AND conversation_id IS NULL', this.nuvem.userId)) this.adotarConversa(this.nuvem.userId, ws, p.platform);
+    const convs = new Set(this.d.db.all<{ c: string }>('SELECT conversation_id AS c FROM teams_people WHERE workspace_id = ? AND conversation_id IS NOT NULL', ws).map((r) => r.c));
+    const at = now();
+    this.d.db.tx(() => {
+      for (const id of messageIds) {
+        const m = this.d.db.get<{ c: string }>('SELECT conversation_id AS c FROM messages WHERE id = ? AND workspace_id = ?', id, ws);
+        if (m && convs.has(m.c)) this.d.db.run('INSERT OR IGNORE INTO teams_synced (message_id, at) VALUES (?, ?)', id, at);
+      }
+    });
+  }
+  /** A equipe está atendendo alguém por um canal agora (a nuvem não dorme no meio de uma conversa)? */
+  ocupado(): boolean {
+    if (this.d.db.get("SELECT 1 AS x FROM teams_outbox WHERE status = 'pending' LIMIT 1")) return true;
+    if (this.d.db.get('SELECT 1 AS x FROM teams_inbound WHERE received_at > ? LIMIT 1', new Date(Date.now() - 5 * 60_000).toISOString())) return true;
+    return this.d.db.all<{ c: string }>('SELECT conversation_id AS c FROM teams_people WHERE conversation_id IS NOT NULL').some((r) => this.trabalhando(r.c));
   }
 
   // ------------------------------------------------------------------------------------------------ tela (rotas)

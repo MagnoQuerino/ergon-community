@@ -172,11 +172,27 @@ export class WorldLinks {
     return this.registerDevice(userId, p.sealWs, p, choice);
   }
 
+  /**
+   * Nuvem do Ergon World (ERGON_MODE=cloud, world/nuvem.ts): este contêiner entra na conta do dono do workspace como o
+   * aparelho "nuvem", com o token de partida que o World deu ao orquestrador (sem e-mail e sem senha de ninguém). As
+   * chaves nascem aqui e ficam no disco deste workspace, cifradas pelo cofre, como num computador.
+   */
+  async connectCloud(userId: string, sealWs: string, bootToken: string, expectedWs?: string): Promise<{ link: LinkRow; syncWorkspaceId: string; label: string | null }> {
+    const ed = crypto.generateKeyPairSync('ed25519'); const x = crypto.generateKeyPairSync('x25519');
+    const pub = (k: crypto.KeyObject) => k.export({ format: 'der', type: 'spki' }).toString('base64');
+    const reg = await this.client.call<{ deviceId: string; challenge: string; accountId: string; workspaceId: string; label: string | null; accountEmail: string | null }>('POST', '/v1/cloud/boot',
+      { bootToken, installationId: installationId(this.db), publicKey: pub(ed.publicKey), syncPublicKey: pub(x.publicKey) });
+    // o token de partida tem de ser deste contêiner (o workspace dele): conferido ANTES de guardar o aparelho
+    if (expectedWs && reg.workspaceId !== expectedWs) throw new HttpError(409, 'boot_ws', 'o token de partida é de outro workspace');
+    const conf = await this.client.call<{ sessionToken: string }>('POST', '/v1/devices/confirm', { deviceId: reg.deviceId, signature: crypto.sign(null, Buffer.from(reg.challenge), ed.privateKey).toString('base64') });
+    const link = await this.finishDevice(userId, sealWs, reg, conf.sessionToken, { ed, x }, { email: reg.accountEmail ?? '', emailVerified: true });
+    return { link, syncWorkspaceId: reg.workspaceId, label: reg.label };
+  }
+
   private async registerDevice(userId: string, sealWs: string, acc: { idToken: string; email: string; emailVerified: boolean }, choice: DeviceChoice): Promise<LinkRow> {
     for (const d of [choice.endSessionsOf, choice.replaceDeviceId]) if (d !== undefined && !/^dev_[a-f0-9]{32}$/.test(d)) throw new HttpError(400, 'invalid', 'aparelho inválido');
     const ed = crypto.generateKeyPairSync('ed25519'); const x = crypto.generateKeyPairSync('x25519');
     const pub = (k: crypto.KeyObject) => k.export({ format: 'der', type: 'spki' }).toString('base64');
-    const priv = (k: crypto.KeyObject) => k.export({ format: 'der', type: 'pkcs8' }).toString('base64');
     let reg: { deviceId: string; challenge: string; accountId: string };
     let conf: { sessionToken: string };
     try {
@@ -196,6 +212,15 @@ export class WorldLinks {
       throw e;
     }
     this.limits.delete(userId); this.pending.delete(userId);
+    return this.finishDevice(userId, sealWs, reg, conf.sessionToken, { ed, x }, acc);
+  }
+
+  /** Aparelho confirmado: liga a pessoa local, lê o plano e grava o vínculo (chaves e sessão cifradas com a chave dela). */
+  private async finishDevice(userId: string, sealWs: string, reg: { deviceId: string; accountId: string }, sessionToken: string, k: { ed: crypto.KeyPairKeyObjectResult; x: crypto.KeyPairKeyObjectResult },
+    acc: { email: string; emailVerified: boolean }): Promise<LinkRow> {
+    const { ed, x } = k; const conf = { sessionToken };
+    const pub = (key: crypto.KeyObject) => key.export({ format: 'der', type: 'spki' }).toString('base64');
+    const priv = (key: crypto.KeyObject) => key.export({ format: 'der', type: 'pkcs8' }).toString('base64');
     await this.client.call('POST', '/v1/bindings', { localPersonId: userId }, conf.sessionToken);
     const au = await this.client.call<{ authorizedUntil: string; account?: { email: string | null; emailVerified?: unknown }; workspaces?: unknown[] }>('POST', '/v1/authorize', {}, conf.sessionToken);
     // o authorize diz (aditivo) se o e-mail está confirmado; sem o campo, vale o que o cadastro ou o login disse

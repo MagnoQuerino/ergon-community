@@ -103,6 +103,28 @@ jobs:
             ghcr.io/${{ env.DONO }}/ergon-community-hermes:${{ env.VERSAO }}
             ${{ !contains(github.ref_name, '-') && format('ghcr.io/{0}/ergon-community-hermes:latest', env.DONO) || '' }}
 
+      # Nuvem do Ergon World, opcional: o app e o motor numa imagem só (um contêiner e um gVisor por cliente). Montada
+      # das duas imagens desta versão, sem compilar nada (codigo-fonte/nuvem/Dockerfile)
+      - name: Imagem única da nuvem (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: codigo-fonte/nuvem
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            APP_IMAGE=ghcr.io/${{ env.DONO }}/ergon-community:${{ env.VERSAO }}
+            MOTOR_IMAGE=ghcr.io/${{ env.DONO }}/ergon-community-hermes:${{ env.VERSAO }}
+            ERGON_BUILD=${{ env.BUILD }}
+          outputs: type=image,push=true,rewrite-timestamp=true
+          tags: |
+            ghcr.io/${{ env.DONO }}/ergon-community-nuvem:${{ env.VERSAO }}
+
+      # a imagem única publicada conferida como o orquestrador a sobe (usuários, discos, ambiente, segredo do Google)
+      - name: Imagem única publicada conferida
+        working-directory: codigo-fonte
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/${{ env.DONO }}/ergon-community-nuvem:${{ env.VERSAO }}
+          sh nuvem/conferir.sh ghcr.io/${{ env.DONO }}/ergon-community-nuvem:${{ env.VERSAO }}
+
       # o que as pessoas vão baixar, antes do pacote e do manifesto: falhou, a versão não sai
       - name: Motor publicado conferido (o mesmo plugin, com as Conexões)
         run: |

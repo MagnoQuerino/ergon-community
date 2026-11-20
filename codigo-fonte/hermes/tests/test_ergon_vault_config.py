@@ -685,6 +685,15 @@ def com_conector(ligado, busca_agora):
 
 
 com_conector(True, "on")
+# as travas já valem: a abertura seguinte não chama o Hermes nenhuma vez (cada chamada custa segundos); mexeram: regrava
+chamadas = []
+antes_das_travas = v.as_hermes  # o teste já pode ter posto um registrador: ele volta depois
+v.as_hermes = lambda args: (chamadas.append(args), REAL_AS_HERMES(args))[1]
+check("travas: já valendo, a abertura seguinte não chama o Hermes", v.enforce_safety() is True and chamadas == [], str(chamadas))
+REAL_AS_HERMES(["config", "set", "skills.write_approval", "false"])
+check("travas: alguém desligou a aprovação de competências: a abertura religa", v.enforce_safety() is True and [c[2] for c in chamadas] == ["skills.write_approval"]
+      and v._pegar(v.ler_config(), "skills.write_approval") in (True, "true"), str(chamadas))
+v.as_hermes = antes_das_travas
 check("travas: com um conector pronto ligado, a busca fica como a pessoa deixou (ligada)", v.enforce_safety() is True and busca() in ("on", "true"), busca())
 com_conector(False, "on")
 check("travas: conector desligado, a busca volta a desligar na abertura", v.enforce_safety() is True and busca() in ("off", "false"), busca())

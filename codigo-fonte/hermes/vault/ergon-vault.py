@@ -10,7 +10,8 @@ rc.29: nenhuma versão que ainda atualiza pelo app monta esse volume). Depois mo
 migrações de configuração do Ergon que ainda faltam (MIGRACOES) e passa a vez ao ponto de entrada original do Hermes
 (s6), mantendo o processo 1. Assim a instalação não precisa de nenhum passo manual no motor.
 
-Sem ERGON_VAULT=1, só passa a vez (comportamento original).
+Sem ERGON_VAULT=1, só passa a vez (comportamento original). ERGON_VAULT=plano (nuvem do Ergon World): sem gocryptfs,
+/opt/data é o disco do próprio cliente; o resto (plugin, configuração, travas) é igual.
 """
 
 from __future__ import annotations
@@ -352,6 +353,12 @@ def open_vault(key: str, previous: str | None = None) -> None:
         raise RuntimeError("chave do cofre não confere" if code == 12 else f"falha ao montar: {msg}")
     os.chown(PLAIN, HERMES_UID, HERMES_UID)
     os.chmod(PLAIN, 0o700)
+    prepare()
+
+
+def prepare() -> None:
+    """Com /opt/data pronto (cofre montado, ou o disco do próprio cliente na nuvem): marca, plugin do Ergon, chave da API,
+    migrações de configuração e travas de segurança."""
     marker = os.path.join(PLAIN, MARKER)
     if not os.path.exists(marker):
         # a marca diz se a cópia antiga entrou no cofre (o plugin a lê em dados_antigos): nos cofres criados agora, não
@@ -413,9 +420,27 @@ def _conectores_ligados() -> bool:
     return any(isinstance(c, dict) and c.get("enabled", True) not in (False, "false", "off", "no", 0) for c in servidores.values())
 
 
+def _ja_vale(cfg: dict | None, passo: list[str]) -> bool:
+    """A trava já está no config.yaml com o valor pedido? Cada "hermes config set" é um processo inteiro do Hermes
+    (segundos por abertura, e mais ainda no gVisor da nuvem): com o valor já lá, não há o que gravar. Na dúvida
+    (config ilegível, chave ausente, outro valor, outro comando), não vale: o passo roda como sempre."""
+    if cfg is None or len(passo) != 4 or passo[:2] != ["config", "set"]:
+        return False
+    atual = _pegar(cfg, passo[2])
+    if atual is None or isinstance(atual, (dict, list)):
+        return False
+    igual = {"on": "true", "yes": "true", "off": "false", "no": "false"}
+    a, b = _texto(atual).lower(), str(passo[3]).strip().lower()
+    return igual.get(a, a) == igual.get(b, b)
+
+
 def enforce_safety() -> bool:
     passos = list(ENFORCED_STEPS) + ([] if _conectores_ligados() else [BUSCA_DESLIGADA])
-    failed = [" ".join(step[:3]) for step in passos if as_hermes(step).returncode != 0]
+    try:
+        cfg = ler_config()
+    except Exception:  # noqa: BLE001 - ilegível: todos os passos rodam
+        cfg = None
+    failed = [" ".join(step[:3]) for step in passos if not _ja_vale(cfg, step) and as_hermes(step).returncode != 0]
     if failed:
         # sem a trava, o Treinar não grava nada (o Ergon só aplica escrita em espera); avisa e segue
         log(f"trava de segurança não aplicada ({', '.join(failed)}); nova tentativa na próxima abertura")
@@ -712,7 +737,71 @@ def drop_mount_privilege() -> None:
     log("privilégio de montagem solto: o motor e o que ele executar não montam nada")
 
 
+def run_plain(args: list[str]) -> None:
+    """Sem o s6 (que exige raiz): o motor e, se pedido (HERMES_DASHBOARD), o painel interno dele, os dois como o usuário
+    do motor. Um dos dois saiu: o outro é encerrado e o contêiner sai com o código dele (quem religa é o orquestrador)."""
+    import signal
+    import time
+
+    os.chdir(PLAIN)
+    procs = [subprocess.Popen([HERMES_CLI, *args])]
+    # O painel interno sobe DEPOIS de o motor atender (ou 3 min): os dois de uma vez dividem a CPU do contêiner e o motor,
+    # que é quem responde à pessoa, demorava quase o dobro para ficar pronto ao acordar.
+    painel = os.environ.get("HERMES_DASHBOARD", "").lower() in ("1", "true", "yes")
+    api = int(os.environ.get("API_SERVER_PORT", "8642") or 8642)
+    desde = time.monotonic()
+
+    def motor_atende() -> bool:
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", api), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
+    def ligar_painel() -> None:
+        host = os.environ.get("HERMES_DASHBOARD_HOST", "127.0.0.1")
+        port = os.environ.get("HERMES_DASHBOARD_PORT", "9119")
+        procs.append(subprocess.Popen([HERMES_CLI, "dashboard", "--host", host, "--port", port, "--no-open"]))
+
+    def encerrar(*_a) -> None:
+        for p in procs:
+            if p.poll() is None:
+                p.terminate()
+
+    signal.signal(signal.SIGTERM, encerrar)
+    signal.signal(signal.SIGINT, encerrar)
+    code = 0
+    while True:
+        saiu = [p for p in procs if p.poll() is not None]
+        if saiu:
+            code = saiu[0].returncode or 0
+            encerrar()
+            break
+        if painel and (motor_atende() or time.monotonic() - desde > 180):
+            painel = False
+            ligar_painel()
+        time.sleep(1)
+    for p in procs:
+        try:
+            p.wait(timeout=25)
+        except subprocess.TimeoutExpired:
+            p.kill()
+    sys.exit(code if code >= 0 else 128 - code)
+
+
 def main() -> None:
+    if os.environ.get("ERGON_VAULT") == "plano":
+        # Nuvem do Ergon World: /opt/data já é o disco só deste cliente (um volume por workspace, isolado no gVisor), sem
+        # FUSE e sem privilégio de montar. Mesmo plugin, mesma configuração e mesmas travas do cofre; o motor roda como o
+        # usuário dele, sem o s6 (que exige raiz).
+        os.makedirs(PLAIN, exist_ok=True)
+        prepare()
+        log("motor de IA em disco próprio (nuvem): iniciando")
+        if os.getuid() == 0:
+            os.execv(ENTRY[0], ENTRY)
+        os.environ["HOME"] = PLAIN
+        run_plain(sys.argv[1:] or ["gateway", "run"])
     if os.environ.get("ERGON_VAULT") != "1":
         os.execv(ENTRY[0], ENTRY)
     port = int(os.environ.get("ERGON_VAULT_PORT", "8644"))

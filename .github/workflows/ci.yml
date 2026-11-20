@@ -47,6 +47,12 @@ jobs:
             ergon-hermes:ci /t/test_ergon_bridge_conexoes_modelo.py
       - name: Cofre do motor sob gravação em paralelo (cofre antigo aberto pela imagem nova, sem erros, isolado)
         run: bash hermes/tests/cofre-paralelo.sh ergon-hermes:ci
+      # a imagem única da nuvem (app + motor num contêiner só), montada destas duas como a publicação monta
+      - name: Imagem única da nuvem (usuários, discos e ambiente separados)
+        run: |
+          docker build -q --target runtime -t ergon-app:ci .
+          docker build -q --build-arg APP_IMAGE=ergon-app:ci --build-arg MOTOR_IMAGE=ergon-hermes:ci -t ergon-nuvem:ci ./nuvem
+          sh nuvem/conferir.sh ergon-nuvem:ci
 
   auditoria:
     runs-on: ubuntu-24.04

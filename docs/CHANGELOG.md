@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.39 (pré-versão de teste)
+
+- **Subir o WS para o World atende os canais com o computador fechado:** com o adicional ativo, fechar o Ergon passa as contas do Telegram, do Discord e do Teams que o dono do workspace ligou para a equipe na nuvem. Ela já sobe ao fechar e responde em segundos; se estava dormindo, a pessoa recebe o aviso de que a mensagem foi encaminhada à equipe no Ergon World e a resposta chega em cerca de um minuto. Ao abrir o Ergon de novo, o computador reassume e a conversa do canal mostra o que foi perguntado e respondido, sem repetir nada no canal. Pedidos de risco (apagar, exportar, mudar configurações) continuam só com aprovação no app.
+- **Sincronia automática com a nuvem ativa:** o workspace que está na nuvem envia e recebe sozinho a cada minuto, e o computador entrega a chave da sincronia à nuvem na primeira vez (abra o Ergon uma vez depois de ativar).
+- **Equipe de IA liga mais rápido:** a partida do motor ficou segundos mais curta em qualquer computador (o código dele vem pronto na imagem e as travas de segurança só regravam o que mudou).
+- **Mais competências na biblioteca:** 23 competências de engenharia de software (revisão de código, depuração, planejamento, segurança, desempenho, documentação e outras), além de "task-brief" e "paired-agent-eval". Ficam desligadas até você ligar num agente; só entrou o que passou na varredura de segurança da equipe de IA.
+
 ## 1.1.0-rc.38 (pré-versão de teste)
 
 - **"Conectar" ao Ergon World, e a sincronia vem junto:** conectar um workspace ao World já liga a sincronia, sem outro passo. Os botões passam a dizer "Conectar" e "Desconectar". A frase de recuperação continua opcional e pode ser guardada depois.

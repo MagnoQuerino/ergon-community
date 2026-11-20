@@ -5,6 +5,7 @@ import { Db } from './db/db.ts';
 import { runGate } from './gate.ts';
 import { Vault } from './security/keys.ts';
 import { unfinishedRestore } from './services/backup.ts';
+import { loadWorld } from './world-hook.ts';
 
 const cfg = loadConfig();
 const halfway = unfinishedRestore(cfg.backupsDir);
@@ -33,6 +34,8 @@ function openDb(): Db {
 // Protegido e recém-iniciado: só a tela de destrancar até a senha (ou a frase, ou o cofre do sistema) chegar —
 // a menos que o trancamento esteja desligado (chave ao lado dos dados): aí abre sozinho.
 if (vault.state() === 'sealed' && cfg.mode === 'local') vault.unsealOpenAccess();
+// nuvem do Ergon World (um contêiner por workspace, sem ninguém para digitar senha): o World devolve a chave do cofre
+if (cfg.mode === 'cloud') await (await loadWorld(cfg))?.prepare?.(vault);
 const db = vault.state() === 'sealed' ? await runGate(cfg, vault, openDb) : openDb();
 const applied = db.migrate();
 const { app, executor, startBackground, stopBackground } = await buildApp({ cfg, db, vault });

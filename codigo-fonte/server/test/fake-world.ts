@@ -129,6 +129,13 @@ export class FakeWorld {
       versions: [{ version: p.manifest.version, artifact, sha256: p.sha256, verified: true, status: 'approved', createdAt: new Date().toISOString() }] });
     return id;
   }
+  /**
+   * Nuvem ("Subir o WS para o World", world/src/cloud.ts e cloud-boot.ts): por workspace, o token de partida do
+   * contêiner, a chave do cofre dele, o aparelho-nuvem, o que ele contou (estado, instalação no relé, atividade) e os
+   * sinais do computador (aberto/fechado). `nuvem(sws)` ativa e devolve o token de partida.
+   */
+  clouds = new Map<string, { bootToken: string; vaultKey: string | null; deviceId: string | null; states: string[]; relay: string | null; active: boolean; presence: boolean[] }>();
+  nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [] }); return bootToken; }
   /** giros de chave recebidos (mudança kind rotation): de qual workspace, para que versão, por quem */
   rotations: Array<{ ws: string; keyVersion: number; by: string }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
@@ -264,7 +271,7 @@ export class FakeWorld {
   private session(bearer: string | null): Device | null {
     return [...this.devices.values()].find((d) => d.status === 'active' && d.session && d.session === bearer) ?? null;
   }
-  private connected(accountId: string): Device[] { return [...this.devices.values()].filter((d) => d.accountId === accountId && d.status === 'active' && d.session); }
+  private connected(accountId: string): Device[] { return [...this.devices.values()].filter((d) => d.accountId === accountId && d.status === 'active' && d.session && (d as Device & { kind?: string }).kind !== 'cloud'); }
 
   private route(method: string, u: URL, b: any, bearer: string | null): { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] } | { raw: Buffer; headers: Record<string, string> } {
     const p = u.pathname;
@@ -321,6 +328,23 @@ export class FakeWorld {
       d.status = 'active'; d.session = `ses_${hex(24)}`;
       return { json: { sessionToken: d.session } };
     }
+    // ---------------------------------------------------------------- nuvem: partida do contêiner (token de partida, sem sessão)
+    if (p.startsWith('/v1/cloud/boot') && method === 'POST') {
+      const c = [...this.clouds.entries()].find(([, x]) => x.bootToken === b.bootToken);
+      if (!c) return { fail: [401, 'boot_token'] };
+      const [sws, cl] = c; const w = this.workspaces.get(sws)!;
+      if (p === '/v1/cloud/boot/vault') return { json: { vaultKey: cl.vaultKey } };
+      if (p === '/v1/cloud/boot/key') { if (cl.vaultKey && b.replace !== true) return { fail: [409, 'key_exists'] }; cl.vaultKey = String(b.key); return { json: { ok: true } }; }
+      if (p === '/v1/cloud/boot/state') { cl.states.push(b.detail ? `${b.state}: ${b.detail}` : String(b.state)); return { json: { ok: true } }; }
+      if (p === '/v1/cloud/boot') {
+        crypto.createPublicKey({ key: Buffer.from(b.publicKey, 'base64'), format: 'der', type: 'spki' });
+        // um aparelho-nuvem por workspace: o de antes (disco novo) é revogado
+        if (cl.deviceId) { const antes = this.devices.get(cl.deviceId); if (antes) { antes.status = 'revoked'; antes.session = null; } }
+        const d: Device = { id: `dev_${hex(16)}`, accountId: w.owner, name: 'Ergon World (nuvem)', publicKey: b.publicKey, syncPublicKey: b.syncPublicKey, challenge: hex(24), status: 'pending', session: null, lastSeenAt: new Date().toISOString(), kind: 'cloud', cloudWs: sws } as Device;
+        this.devices.set(d.id, d); cl.deviceId = d.id;
+        return { json: { deviceId: d.id, challenge: d.challenge, accountId: w.owner, workspaceId: sws, label: w.label, accountEmail: this.accounts.get(w.owner)?.email ?? null, vaultKey: cl.vaultKey } };
+      }
+    }
     // daqui em diante, só com a sessão de um aparelho
     const dev = this.session(bearer);
     if (key === 'GET /v1/compat') return { json: { api: 'v1', version: 'fake', features: this.features, extra: { ignored: true } } };
@@ -355,6 +379,27 @@ export class FakeWorld {
       // usar: dispensa quem já é membro de um workspace com plano vigente
       const usar = p === '/v1/ai/credentials' && ![...this.workspaces.values()].some((w) => w.plan && roleIn(w, acc.id));
       if (criar || usar) return { fail: [403, 'email_unverified', { message: 'Confirme o seu e-mail para continuar.' }] };
+    }
+    // ---------------------------------------------------------------- nuvem: estado, posse do computador, o que o contêiner conta
+    if (key === 'GET /v1/cloud') {
+      const sws = u.searchParams.get('workspace'); const cl = sws ? this.clouds.get(sws) : undefined;
+      if (!mine(sws)) return { fail: [404, 'not_found'] };
+      const dono = this.workspaces.get(sws!)!.owner === acc.id;
+      return { json: { active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null,
+        relayTicket: cl?.relay && dono ? { exp: Math.floor(Date.now() / 1000) + 900, mac: crypto.createHash('sha256').update(`${sws}|${cl.relay}`).digest('hex') } : null } };
+    }
+    if (key === 'POST /v1/cloud/presence') {
+      const cl = this.clouds.get(b.workspaceId);
+      if (!mine(b.workspaceId) || !cl) return { fail: [409, 'no_cloud'] };
+      if ((dev as Device & { kind?: string }).kind !== 'cloud') cl.presence.push(b.open !== false);
+      return { json: { ok: true, pcHoldsForSeconds: 120 } };
+    }
+    if (key === 'POST /v1/cloud/app-state') {
+      const d = dev as Device & { kind?: string; cloudWs?: string }; const cl = d.cloudWs ? this.clouds.get(d.cloudWs) : undefined;
+      if (d.kind !== 'cloud' || !cl) return { fail: [403, 'not_cloud'] };
+      cl.states.push(b.detail ? `${b.state}: ${b.detail}` : String(b.state)); cl.active = b.active === true;
+      if (typeof b.relayInstallationId === 'string') cl.relay = b.relayInstallationId;
+      return { json: { ok: true } };
     }
     if (key === 'POST /v1/ai/credentials') {
       if (!mine(b.workspaceId)) return { fail: [404, 'sync_workspace'] };
@@ -515,7 +560,7 @@ export class FakeWorld {
       }
       if (m[2] === 'devices-needing-key') {
         const admin = RANK[role] >= RANK.admin;
-        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== kv).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey }));
+        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== kv && ((d as Device & { kind?: string; cloudWs?: string }).kind !== 'cloud' || (d as Device & { cloudWs?: string }).cloudWs === w.id)).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey }));
         return { json: { keyVersion: kv, devices } };
       }
       if (m[2] === 'changes' && method === 'POST') {

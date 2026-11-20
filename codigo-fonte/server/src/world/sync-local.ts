@@ -25,6 +25,9 @@ export class LocalSync {
   readonly db: Db; readonly links: WorldLinks; readonly client: WorldClient; readonly routines: Routines; readonly bus: Bus; readonly limits: AgentLimits; readonly content: ContentSync;
   constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits }) { this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); }
 
+  /** mensagens novas vindas de outro aparelho (antes de a tela ser avisada): os canais não as mandam de novo */
+  aoReceberMensagens: ((ws: string, messageIds: string[]) => void) | null = null;
+
   private ctx(userId: string) {
     const l = this.links.get(userId); const s = this.links.session(userId);
     if (!l || !s) throw new HttpError(428, 'world_link_required', 'Conecte ao Ergon World para sincronizar.');
@@ -193,7 +196,7 @@ export class LocalSync {
    * Envia o que mudou aqui: o esqueleto (só se a equipe mudou) e o conteúdo novo ou alterado, em mudanças cifradas e
    * assinadas, cada uma presa à versão anterior. Outro aparelho enviou antes: recusa, para receber e decidir primeiro.
    */
-  async push(userId: string, ws: string) {
+  async push(userId: string, ws: string, opts: { /** só o conteúdo (a nuvem não manda o esqueleto da equipe: quem define a equipe é o computador) */ contentOnly?: boolean } = {}) {
     const r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId); const dek = Buffer.from(r.sync_key, 'base64');
     let version = r.last_version; const sent = { tasks: 0, conversations: 0, messages: 0 };
@@ -213,7 +216,7 @@ export class LocalSync {
       this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', version, now(), ws);
     };
     const bp = exportBlueprint(this.db, this.routines, ws); const bh = blueprintHash(bp);
-    if (bh !== r.blueprint_hash) { await send({ type: 'blueprint', blueprint: bp }, 'snapshot', 'bp'); this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); }
+    if (!opts.contentOnly && bh !== r.blueprint_hash) { await send({ type: 'blueprint', blueprint: bp }, 'snapshot', 'bp'); this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); }
     for (const part of this.content.chunks(this.content.pending(ws, userId))) {
       await send(part.body, 'change', 'ct');
       this.content.sent(ws, part.items);
@@ -227,7 +230,7 @@ export class LocalSync {
    * rotinas pausadas) e o conteúdo (com apply, une mensagens e concilia tarefas e conversas; o que mudou dos dois lados
    * vira conflito para a pessoa decidir). Formato inesperado depois de decifrar é recusado, sem aplicar nada.
    */
-  async pull(userId: string, ws: string, apply: boolean) {
+  async pull(userId: string, ws: string, apply: boolean, opts: { /** sincronia automática no computador: com esqueleto novo de outro aparelho, não aplica nada (fica para a pessoa ver e decidir) */ holdOnBlueprint?: boolean } = {}) {
     let r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId);
     const changes: Change[] = []; let head = r.last_version; let since = r.last_version; let worldKey = r.key_version;
@@ -255,16 +258,20 @@ export class LocalSync {
     }
     const incoming = { tasks: contents.reduce((n, b) => n + b.tasks.length, 0), conversations: contents.reduce((n, b) => n + b.conversations.length, 0), messages: contents.reduce((n, b) => n + b.messages.length, 0) };
     let plan: unknown = null;
+    if (apply && last && opts.holdOnBlueprint) return { head, preview: null as unknown, incoming, applied: false, held: true };
     if (last) plan = importBlueprint(this.db, this.bus, this.routines, ws, userId, open<{ type: string; blueprint: unknown }>(last).blueprint, apply, this.limits);
     if (!apply) return { head, preview: plan, incoming, applied: false };
     if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws)), ws);
     const total: Applied = { added: 0, updated: 0, conflicts: 0, skipped: 0 };
+    // antes de aplicar e de avisar a tela: quem leva respostas a um canal fica sabendo que estas vieram de outro aparelho
+    const novas = contents.flatMap((b) => b.messages.map((m) => m.id)).filter((id) => !this.db.get('SELECT 1 AS x FROM messages WHERE id = ?', id));
     for (const [i, body] of contents.entries()) {
       const origin = others.filter((y) => y.kind === 'change')[i].deviceId;
       const n = this.content.apply(ws, userId, body, origin);
       for (const k of Object.keys(total) as Array<keyof Applied>) total[k] += n[k];
     }
     this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', head, now(), ws);
+    try { this.aoReceberMensagens?.(ws, novas); } catch { /* os canais não seguram a sincronia */ }
     if (incoming.tasks) this.bus.publish(ws, 'tasks.changed', {});
     if (incoming.messages || incoming.conversations) this.bus.publish(ws, 'messages.changed', {});
     return { head, preview: plan, incoming, applied: true, result: total, conflicts: this.content.openConflicts(ws) };

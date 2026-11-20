@@ -61,6 +61,11 @@ Economia de tokens no motor (rc.36)
   drona23/claude-token-efficient (MIT); e competência research-summarizer
   (https://github.com/alirezarezvani/claude-skills, Copyright (c) 2025 Alireza Rezvani), licença MIT. Os originais e
   as licenças estão em hermes/plugins/ergon_bridge/competencias/; o plugin usa uma versão condensada e traduzida.
+- Competências de engenharia de software de https://github.com/addyosmani/agent-skills (Copyright (c) Addy Osmani),
+  licença MIT, e as competências task-brief e paired-agent-eval de https://github.com/moonlight-lupin/agent-skills,
+  licença MIT. Vão sem alterações para a biblioteca de competências do motor (desligadas até a pessoa ligar num
+  agente). Origem, commit e licenças: codigo-fonte/hermes/competencias/ORIGEM.md e licencas/ (na imagem, em
+  /opt/ergon/competencias).
 
 Componentes GPL e onde obter o código
 -------------------------------------

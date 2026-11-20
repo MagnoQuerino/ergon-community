@@ -70,8 +70,45 @@ RUN set -eu; \
     chmod -R a+rX /opt/ergon/tools/rtk; ln -s /opt/ergon/tools/rtk/rtk /usr/local/bin/rtk; \
     rtk --version; test "$(rtk rewrite 'git status')" = "rtk git status"
 
+# rc.39: competências de terceiros na biblioteca (competencias/ORIGEM.md: origem, commit e licença de cada uma). Entram
+# ao lado das que o Hermes traz e chegam à biblioteca de cada instalação pela sincronia do próprio motor; nenhum agente
+# as carrega até a pessoa ligar no Ergon. A imagem não é construída com nome repetido na biblioteca (o Ergon acha a
+# competência pelo nome), com cabeçalho sem nome/descrição, ou se a varredura de segurança do próprio motor (a mesma de
+# uma competência enviada pela pessoa) der "dangerous" em alguma das que vieram de fora.
+COPY competencias/software-development /opt/hermes/skills/software-development
+COPY competencias/productivity /opt/hermes/skills/productivity
+COPY competencias/licencas competencias/ORIGEM.md /opt/ergon/competencias/
+RUN chmod -R a+rX /opt/hermes/skills /opt/ergon/competencias \
+ && /opt/hermes/.venv/bin/python - <<'PY'
+import collections, pathlib, re, sys
+nomes = collections.Counter(); ruins = []
+for f in pathlib.Path('/opt/hermes/skills').rglob('SKILL.md'):
+    cab = re.match(r'---\n(.*?)\n---', f.read_text(encoding='utf-8'), re.S)
+    nome = re.search(r'^name:\s*["\']?([^"\'\n]+)', cab.group(1), re.M) if cab else None
+    if not nome or not re.search(r'^description:', cab.group(1), re.M) or nome.group(1).strip() != f.parent.name:
+        ruins.append(str(f))
+    nomes[f.parent.name] += 1
+rep = [n for n, c in nomes.items() if c > 1]
+if ruins or rep:
+    sys.exit(f'competências com cabeçalho ruim: {ruins}; nomes repetidos: {rep}')
+sys.path.insert(0, '/opt/hermes')
+from tools.skills_guard import scan_skill
+fora = [d for d in pathlib.Path('/opt/hermes/skills').glob('*/*') if (d / 'SKILL.md').is_file() and (d / '.ergon-de-fora').exists()]
+perigo = [d.name for d in fora if str(getattr(scan_skill(d, source='community'), 'verdict', '')) == 'dangerous']
+if perigo or not fora:
+    sys.exit(f'varredura de segurança recusou: {perigo} (de fora: {len(fora)})')
+print(f'biblioteca: {len(nomes)} competências, {len(fora)} de fora conferidas')
+PY
+
 COPY vault/ergon-vault.py /usr/local/lib/ergon/ergon-vault.py
 # plugin do Ergon dentro da imagem (a instalação não depende de arquivos do projeto)
 COPY plugins/ergon_bridge /opt/ergon/plugins/ergon_bridge
+
+# rc.39: o código do Hermes vem sem os .pyc (só as bibliotecas trazem) e com PYTHONDONTWRITEBYTECODE=1: cada partida do
+# motor, e cada "hermes config set", recompilava tudo o que importava. Compilado aqui uma vez (conferência por conteúdo,
+# sem depender da data do arquivo): a partida fica segundos mais curta em qualquer computador, e bem mais na nuvem.
+RUN /opt/hermes/.venv/bin/python -m compileall -q -j 0 --invalidation-mode unchecked-hash -x "(/\\.venv/|/node_modules/|/tests?/)" \
+      /opt/hermes /opt/ergon/plugins /usr/local/lib/ergon > /dev/null || true; \
+    test "$(find /opt/hermes/gateway /opt/hermes/agent -name '*.pyc' | wc -l)" -gt 50
 
 ENTRYPOINT ["/opt/hermes/.venv/bin/python", "/usr/local/lib/ergon/ergon-vault.py"]
