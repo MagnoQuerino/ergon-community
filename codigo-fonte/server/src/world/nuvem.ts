@@ -133,7 +133,8 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
       d.log({}, 'nuvem: chave da sincronia recebida');
     }
     // 6. dados: recebe (equipe e conteúdo) e envia o conteúdo daqui
-    await d.sync.pull(userId, ws, true);
+    const recebido = await d.sync.pull(userId, ws, true) as { preview?: { skipped?: string[] } | null };
+    if (recebido.preview?.skipped?.length) d.log({ ficouDeFora: recebido.preview.skipped.slice(0, 10) }, 'nuvem: parte da equipe não coube aqui');
     await d.sync.push(userId, ws, { contentOnly: true }).catch((e) => { if (!['version_conflict', 'key_version'].includes(String((e as { code?: string }).code))) throw e; });
     // 7. o Ergon AI como modelo da equipe (o motor pode estar acordando: tenta de novo no próximo passo)
     // Ligado numa partida anterior e com a credencial longe de vencer (ela fica no disco do motor): nada a refazer ao
@@ -153,7 +154,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     d.canais?.atender({ userId, workspaceId: ws, syncWorkspaceId: sws });
     // os canais: "pronto" só depois de esta instalação existir no serviço dos canais (o World a entrega ao computador,
     // que a declara como reserva). Serviço desligado ou fora do ar: segue sem ele depois de 90 s
-    if (d.canais && !d.canais.instalacao()) {
+    if (d.canais?.ligavel() && !d.canais.instalacao()) {
       canaisDesde ??= Date.now();
       if (Date.now() - canaisDesde < (d.ajustes?.canaisMs ?? 90_000)) { await contar('preparando', 'ligando os canais (Telegram, Discord, Teams)'); return false; }
     }
@@ -203,7 +204,7 @@ export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; 
   const temNuvem = async (sws: string, s: string): Promise<boolean> => {
     const c = ativa.get(sws);
     // "tem" vale por 5 min; "não tem" só por 1 (quem acabou de contratar não espera)
-    if (c && Date.now() - c.at < (c.on && c.rele ? d.ajustes?.estadoMs ?? 5 * 60_000 : 60_000)) return c.on;
+    if (c && Date.now() - c.at < (c.on && c.rele ? d.ajustes?.estadoMs ?? 5 * 60_000 : Math.min(60_000, d.ajustes?.cicloMs ?? 60_000))) return c.on;
     try { const r = await d.client.call<{ active?: boolean; relayStandby?: string | null }>('GET', `/v1/cloud?workspace=${sws}`, undefined, s); ativa.set(sws, { at: Date.now(), on: r.active === true, rele: r.active === true && typeof r.relayStandby === 'string' ? r.relayStandby : null }); return r.active === true; }
     catch { return c?.on ?? false; }
   };
@@ -237,7 +238,7 @@ export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; 
   const agora = () => (rodando ??= uma(true).finally(() => { rodando = null; }));
   const timer = setInterval(() => { if (!parado) void agora(); }, d.ajustes?.cicloMs ?? 60_000);
   timer.unref();
-  const primeiro = setTimeout(() => { if (!parado) void agora(); }, 5_000); primeiro.unref();
+  const primeiro = setTimeout(() => { if (!parado) void agora(); }, Math.min(5_000, d.ajustes?.cicloMs ?? 5_000)); primeiro.unref();
   return {
     agora,
     async parar() { parado = true; clearInterval(timer); clearTimeout(primeiro); await rodando?.catch(() => undefined); await uma(false).catch(() => undefined); },

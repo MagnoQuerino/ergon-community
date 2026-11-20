@@ -76,6 +76,8 @@ export interface CanaisNuvemHost {
   reserva(workspaceId: string, x: { installationId: string; syncWorkspaceId: string } | null): void;
   /** na nuvem: o workspace está pronto; as contas ligadas no computador passam a ser atendidas aqui */
   atender(x: { userId: string; workspaceId: string; syncWorkspaceId: string }): void;
+  /** há um serviço de canais configurado nesta instalação (sem ele, ninguém espera a instalação) */
+  ligavel(): boolean;
   /** a instalação deste Ergon no serviço dos canais (null: ainda não ligada) */
   instalacao(): string | null;
   /** mensagens recebidas pela sincronia (outro aparelho já respondeu por elas no canal) */
