@@ -252,8 +252,10 @@ export class LocalSync {
     }
     const others = changes.filter((x) => x.deviceId !== c.deviceId);
     const resto = () => this.receber(userId, ws, r, changes, others, head, worldKey, apply, opts);
-    // dados de outro aparelho para aplicar: a barra de cima mostra a sincronia em andamento
-    return apply && others.length ? this.atividade.envolver(ws, 'recebendo', resto) : resto();
+    // dados de outro aparelho para aplicar: a barra de cima mostra a sincronia em andamento (a equipe nova que fica
+    // retida para a pessoa ver não aplica nada: não acende)
+    const retida = !!opts.holdOnBlueprint && others.some((x) => x.kind === 'snapshot');
+    return apply && others.length && !retida ? this.atividade.envolver(ws, 'recebendo', resto) : resto();
   }
 
   private async receber(userId: string, ws: string, r: SyncRow, changes: Change[], others: Change[], head: number, worldKey: number, apply: boolean, opts: { holdOnBlueprint?: boolean }) {

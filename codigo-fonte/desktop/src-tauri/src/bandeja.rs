@@ -48,11 +48,7 @@ pub fn criar(app: &AppHandle) -> tauri::Result<()> {
                 let _ = tauri_plugin_opener::open_url(format!("http://localhost:{porta}/"), None::<&str>);
             }
             // com a página do Ergon aberta, pergunta a ela antes (a sincronia em andamento avisa e pausa com segurança)
-            "sair" => {
-                if !crate::fechar::perguntar(app) {
-                    app.exit(0)
-                }
-            }
+            "sair" => crate::fechar::sair_do_aplicativo(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, ev| {

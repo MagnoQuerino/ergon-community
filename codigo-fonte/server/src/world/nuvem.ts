@@ -221,7 +221,7 @@ export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; 
   const uma = async (open: boolean) => {
     // o aplicativo pediu a pausa ao fechar (sync-atividade.ts): nenhum envio ou recebimento novo até a página abrir de
     // novo (ou a pausa vencer). O sinal de "computador aberto" segue: o servidor continua ligado e atende os canais
-    const pausada = open && d.sync.atividade.pausada();
+    const pausada = () => open && d.sync.atividade.pausada();
     for (const a of alvos()) {
       const s = d.links.session(a.user_id);
       if (!s) continue;
@@ -235,11 +235,14 @@ export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; 
       if (at?.rele) try { d.canais?.reserva(a.workspace_id, { installationId: at.rele, syncWorkspaceId: a.sws, ticket: at.ticket }); } catch { /* segue */ }
       try {
         await d.client.call('POST', '/v1/cloud/presence', { workspaceId: a.sws, open }, s);
-        if (pausada || !d.sync.status(a.workspace_id).enabled) continue;
+        // conferida antes de cada passo: a pausa pedida no meio do ciclo vale já para o passo seguinte
+        if (pausada() || !d.sync.status(a.workspace_id).enabled) continue;
         if (open) {
           await d.sync.share(a.user_id, a.workspace_id);
+          if (pausada()) continue;
           const p = await d.sync.pull(a.user_id, a.workspace_id, true, { holdOnBlueprint: true }) as { held?: boolean };
           if (p.held) continue; // equipe nova de outro computador: a pessoa recebe pela tela antes de enviar
+          if (pausada()) continue;
         }
         await d.sync.push(a.user_id, a.workspace_id);
       } catch (e) {

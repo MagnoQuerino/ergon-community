@@ -94,8 +94,20 @@ test('o que a nuvem fez volta ao computador sozinho; fechar o computador avisa o
   const wsNuvem = nuvem.db.get<{ w: string }>('SELECT workspace_id AS w FROM world_workspace_ids WHERE sync_workspace_id = ?', sws)!.w;
   nuvem.db.run("INSERT INTO messages (id, workspace_id, conversation_id, role, author_user_id, content, mode, created_at) VALUES ('msg_nuvembbbbbbbbbbbb', ?, ?, 'agent', NULL, ?, 'real', ?)",
     wsNuvem, conv, nuvem.db.seal(wsNuvem, 'Pelas montanhas, com o computador fechado.'), new Date().toISOString());
-  await ate(() => pc.db.get<{ content: string }>("SELECT content FROM messages WHERE id = 'msg_nuvembbbbbbbbbbbb'")?.content === 'Pelas montanhas, com o computador fechado.', 'a resposta da nuvem não chegou ao computador');
   const cl = world.clouds.get(sws)!;
+  await ate(() => pc.db.get<{ content: string }>("SELECT content FROM messages WHERE id = 'msg_nuvembbbbbbbbbbbb'")?.content === 'Pelas montanhas, com o computador fechado.', 'a resposta da nuvem não chegou ao computador');
+  // fechar a janela do aplicativo pede a pausa: nada mais vem nem vai, mas o computador segue avisando que está aberto
+  // (o servidor continua ligado e atende os canais: a nuvem não pode assumir junto)
+  assert.equal((await req(pc, 'POST', '/api/world/sync/pausar', dono, {})).json.concluida, true);
+  nuvem.db.run("INSERT INTO messages (id, workspace_id, conversation_id, role, author_user_id, content, mode, created_at) VALUES ('msg_nuvemcccccccccccc', ?, ?, 'agent', NULL, ?, 'real', ?)",
+    wsNuvem, conv, nuvem.db.seal(wsNuvem, 'Escrita com a sincronia em pausa.'), new Date().toISOString());
+  const avisos = cl.presence.length;
+  await ate(() => cl.presence.length >= avisos + 3, 'o computador parou de avisar que está aberto');
+  assert.ok(cl.presence.slice(avisos).every((x) => x === true));
+  assert.equal(pc.db.get("SELECT 1 AS x FROM messages WHERE id = 'msg_nuvemcccccccccccc'"), undefined, 'em pausa, nada chega');
+  // a página abriu de novo: retoma, e o que ficou para trás chega
+  assert.equal((await req(pc, 'POST', '/api/world/sync/retomar', dono, {})).status, 200);
+  await ate(() => !!pc.db.get("SELECT 1 AS x FROM messages WHERE id = 'msg_nuvemcccccccccccc'"), 'depois de retomar, não chegou');
   await pc.close();
   assert.equal(cl.presence.at(-1), false, 'ao fechar, o computador avisa (a nuvem assume sem esperar)');
 });

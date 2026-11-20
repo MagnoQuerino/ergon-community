@@ -31,6 +31,8 @@ pub const SEM_RESPOSTA: Duration = Duration::from_secs(4);
 pub const ENCERRANDO_NO_MAXIMO: Duration = Duration::from_secs(60);
 
 static LIBERADO: AtomicBool = AtomicBool::new(false);
+/// "Sair do aplicativo" na bandeja: no fim, encerra o processo (com outras janelas abertas, fechar a principal não bastaria).
+static DA_BANDEJA: AtomicBool = AtomicBool::new(false);
 static ESTADO: AtomicU8 = AtomicU8::new(NADA);
 /// Cada pedido novo invalida os prazos dos anteriores.
 static RODADA: AtomicU64 = AtomicU64::new(0);
@@ -51,15 +53,15 @@ pub fn perguntar(app: &AppHandle) -> bool {
         return false;
     }
     let Some(w) = app.get_webview_window(PRINCIPAL) else { return false };
-    let r = RODADA.fetch_add(1, Ordering::SeqCst) + 1;
-    // com o "Encerrando" na tela, segue o prazo dele; senão (inclusive com o aviso aberto: a pessoa insistindo), a página
-    // tem 4 s para responder de novo, e uma página que travou depois do aviso não prende o aplicativo
+    // com o "Encerrando" na tela, segue o prazo dele (clicar de novo não o renova)
     if ESTADO.load(Ordering::SeqCst) == ENCERRANDO_ {
-        prazo(app, r, ENCERRANDO_, ENCERRANDO_NO_MAXIMO);
-    } else {
-        ESTADO.store(PERGUNTADO, Ordering::SeqCst);
-        prazo(app, r, PERGUNTADO, SEM_RESPOSTA);
+        return true;
     }
+    // senão (inclusive com o aviso aberto: a pessoa insistindo), a página tem 4 s para responder, e uma página que
+    // travou depois do aviso não prende o aplicativo
+    let r = RODADA.fetch_add(1, Ordering::SeqCst) + 1;
+    ESTADO.store(PERGUNTADO, Ordering::SeqCst);
+    prazo(app, r, PERGUNTADO, SEM_RESPOSTA);
     if w.eval(PERGUNTA).is_err() {
         return false;
     }
@@ -91,7 +93,10 @@ pub fn resposta(app: &AppHandle, caminho: &str) -> bool {
             ESTADO.store(ENCERRANDO_, Ordering::SeqCst);
             prazo(app, r, ENCERRANDO_, ENCERRANDO_NO_MAXIMO);
         }
-        CANCELAR => ESTADO.store(NADA, Ordering::SeqCst),
+        CANCELAR => {
+            ESTADO.store(NADA, Ordering::SeqCst);
+            DA_BANDEJA.store(false, Ordering::SeqCst);
+        }
         SAIR => {
             // só quando foi o aplicativo que perguntou: a página sozinha não fecha a janela
             if ESTADO.load(Ordering::SeqCst) != NADA {
@@ -104,10 +109,22 @@ pub fn resposta(app: &AppHandle, caminho: &str) -> bool {
     true
 }
 
-/// Fecha de vez (a janela; sem ela, o aplicativo).
+/// "Sair do aplicativo" (bandeja): pergunta à página como o X e, no fim, encerra o processo inteiro.
+pub fn sair_do_aplicativo(app: &AppHandle) {
+    DA_BANDEJA.store(true, Ordering::SeqCst);
+    if !perguntar(app) {
+        app.exit(0);
+    }
+}
+
+/// Fecha de vez (a janela; sem ela, ou pedido pela bandeja, o aplicativo).
 pub fn sair(app: &AppHandle) {
     LIBERADO.store(true, Ordering::SeqCst);
     ESTADO.store(NADA, Ordering::SeqCst);
+    if DA_BANDEJA.load(Ordering::SeqCst) {
+        app.exit(0);
+        return;
+    }
     match app.get_webview_window(PRINCIPAL) {
         Some(w) => {
             if w.close().is_err() {

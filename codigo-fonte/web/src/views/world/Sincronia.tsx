@@ -26,6 +26,12 @@ const FICA_PELO_MENOS_MS = 1500;
 const ENCERRANDO_PELO_MENOS_MS = 900;
 let retomou = false;
 
+/** Há sincronia mexendo em dados agora (em qualquer workspace)? Sem resposta em 2,5 s: não (nada segura o fechar). */
+async function algoEmAndamento(): Promise<boolean> {
+  const e = await Promise.race([api.get<EstadoSync>(URL_ATIVIDADE).catch(() => null), new Promise<null>((r) => window.setTimeout(() => r(null), 2500))]);
+  return !!(e?.algum || e?.ativo);
+}
+
 /** Liga depois de `depois` ms ligado e, ligado, fica pelo menos `minimo` ms (sem piscar). */
 function useSemPiscar(on: boolean, depois: number, minimo: number): boolean {
   const [vis, setVis] = useState(false);
@@ -66,9 +72,10 @@ export function Sincronia() {
     const f = async () => {
       if (faseRef.current === 'aviso') { void encerrar(); return; } // fechou de novo com o aviso aberto: insistiu
       if (faseRef.current === 'encerrando') return;
+      // decide antes de responder ao aplicativo (que espera 4 s): servidor que não responde em 2,5 s não segura o fechar
+      const agora = await algoEmAndamento();
+      if (!agora) { avisarApp(FECHAR.sair); return; }
       avisarApp(FECHAR.espera);
-      const agora = await api.get<EstadoSync>(URL_ATIVIDADE).catch(() => null);
-      if (!agora?.algum && !agora?.ativo) { avisarApp(FECHAR.sair); return; }
       setFase('aviso');
     };
     const ouvir = () => { void f(); };
@@ -76,8 +83,12 @@ export function Sincronia() {
     return () => { window.removeEventListener(EVENTO_FECHAR, ouvir); sair(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // com o aviso aberto, a sincronia terminou: fecha como a pessoa queria
-  useEffect(() => { if (fase === 'aviso' && e && !e.ativo && !e.algum) void encerrar(); }, [fase, e?.ativo, e?.algum]); // eslint-disable-line react-hooks/exhaustive-deps
+  // com o aviso aberto, a sincronia terminou (deste workspace ou de outro): fecha como a pessoa queria
+  useEffect(() => {
+    if (fase !== 'aviso') return undefined;
+    const t = window.setInterval(() => { void algoEmAndamento().then((x) => { if (!x && faseRef.current === 'aviso') void encerrar(); }); }, 1000);
+    return () => window.clearInterval(t);
+  }, [fase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // no navegador: o aviso do próprio navegador ao fechar a aba no meio da sincronia
   useEffect(() => {
