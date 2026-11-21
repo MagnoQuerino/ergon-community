@@ -123,7 +123,7 @@ const { IDIOMAS, RESERVA } = await import('./idiomas.ts');
 const PARCIAIS: Record<string, Areas> = { 'zh-CN': zhCN as unknown as Areas, hi: hi as unknown as Areas, 'en-IN': enIN as unknown as Areas };
 /** O mínimo de cada área principal (a fatia 1 do plano: entrar e boas-vindas, navegação, conversa e salas, configurações
  *  básicas, tarefas e entregas). Uma área a mais pode entrar a qualquer hora; uma destas não pode encolher. */
-const COBERTURA: Record<string, number> = { geral: 1, quadro: 1, tarefa: 1, visuais: 1, conversas: 0.65, conta: 0.4, ajuda: 0.2, configuracoes: 0.2 };
+const COBERTURA: Record<string, number> = { geral: 1, quadro: 1, tarefa: 1, visuais: 1, conversas: 1, conta: 0.4, ajuda: 0.2, configuracoes: 0.2 };
 
 test('idiomas: cada um tem pasta, e os parciais caem no inglês', () => {
   for (const l of IDIOMAS) assert.ok(existe(`i18n/${l === 'pt-BR' ? 'pt' : l}/index.ts`), `falta i18n/${l}/index.ts`);

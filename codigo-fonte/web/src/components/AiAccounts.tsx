@@ -180,8 +180,8 @@ type Escolha = { tipo: 'chave'; id: string } | { tipo: 'outro' | 'lmstudio' | 'o
  */
 const DA_CHINA: ReadonlyArray<{ id: string; nome: string; regiao: 'cn' | 'intl' | 'auto'; dica?: 'configuracoes.byok.china.qwenDica' | 'configuracoes.byok.china.glmDica' }> = [
   { id: 'deepseek', nome: 'DeepSeek', regiao: 'auto' }, // i18n-ok: nomes de marca, iguais em todas as línguas
-  { id: 'alibaba', nome: 'Qwen · DashScope', regiao: 'auto', dica: 'configuracoes.byok.china.qwenDica' }, // i18n-ok: marca
-  { id: 'alibaba-cn', nome: 'Qwen · DashScope', regiao: 'cn' }, // i18n-ok: marca
+  { id: 'alibaba', nome: 'Qwen', regiao: 'auto', dica: 'configuracoes.byok.china.qwenDica' }, // i18n-ok: marca
+  { id: 'alibaba-cn', nome: 'Qwen', regiao: 'cn' }, // i18n-ok: marca
   { id: 'kimi-coding-cn', nome: 'Kimi · Moonshot', regiao: 'cn' }, // i18n-ok: marca
   { id: 'kimi-coding', nome: 'Kimi · Moonshot', regiao: 'intl' }, // i18n-ok: marca
   { id: 'zai', nome: 'GLM · Zhipu', regiao: 'auto', dica: 'configuracoes.byok.china.glmDica' }, // i18n-ok: marca
