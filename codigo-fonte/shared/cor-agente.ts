@@ -3,7 +3,8 @@
  * agente da equipe tem uma cor só dele dentro do workspace.
  *
  * - Paleta de 16 cores em par (tema claro, tema escuro): no claro, contraste de pelo menos 3:1 com o papel; no escuro, com
- *   o fundo da noite (paleta.test confere). Oito matizes em dois tons, para que as vizinhas não se confundam.
+ *   o fundo da noite (cores-agentes.test confere). Dezesseis matizes, alternando um tom fundo e um mais vivo, para que
+ *   as vizinhas não se confundam.
  * - Derivada do id: cada agente prefere a cor que o id sorteia. Desempate: na ordem de chegada à equipe, quem chega
  *   depois e acharia a cor já tomada (ou parecida demais com uma tomada) fica com a livre mais distante das usadas. A
  *   ordem de chegada não muda, então a cor de ninguém muda quando outro entra ou sai.
@@ -12,10 +13,10 @@
 export interface CorDoAgente { claro: string; escuro: string }
 
 export const PALETA_AGENTES: readonly CorDoAgente[] = [
-  ['#97271b', '#ed7665'], ['#0480c9', '#95cefe'], ['#a36e09', '#feb84d'], ['#5740a1', '#9e8cf4'],
-  ['#09672e', '#4cb86a'], ['#b25196', '#fea7e1'], ['#076262', '#1db4b4'], ['#c35141', '#fcb2a5'],
-  ['#545b04', '#9ca81f'], ['#88296f', '#da76bb'], ['#158b8c', '#12e3e3'], ['#724d0b', '#d28f0e'],
-  ['#075a8e', '#3ba6f5'], ['#1b9247', '#78e292'], ['#7b67cc', '#c6befe'], ['#798205', '#c5d254'],
+  ['#972527', '#ed756e'], ['#0388a5', '#5dd9fd'], ['#764a05', '#d98b09'], ['#5740a1', '#9e8cf4'],
+  ['#09672e', '#4cb86a'], ['#c04d6e', '#fdaebf'], ['#076262', '#1db4b4'], ['#be5a0a', '#fdb48c'],
+  ['#545b04', '#9ca81f'], ['#88296f', '#da76bb'], ['#158e77', '#29e6c2'], ['#4e75d2', '#aec7fc'],
+  ['#90790f', '#e6c540'], ['#075a8e', '#3ba6f5'], ['#508d23', '#9cdd76'], ['#9b5bb6', '#e5affd'],
 ].map(([claro, escuro]) => ({ claro, escuro }));
 
 const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
@@ -27,11 +28,12 @@ function oklab(h: string): [number, number, number] {
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
   return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
 }
-const dist = (a: string, b: string) => { const x = oklab(a), y = oklab(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]); };
+// a claridade pesa menos que o matiz: dois tons do mesmo vermelho, lado a lado num avatar pequeno, parecem a mesma cor
+const dist = (a: string, b: string) => { const x = oklab(a), y = oklab(b); return Math.hypot((x[0] - y[0]) * 0.4, x[1] - y[1], x[2] - y[2]); };
 /** a distância entre duas cores da paleta: a menor das duas (claro e escuro), em OKLab */
 const D: number[][] = PALETA_AGENTES.map((a) => PALETA_AGENTES.map((b) => Math.min(dist(a.claro, b.claro), dist(a.escuro, b.escuro))));
 /** abaixo disto, duas cores lado a lado parecem a mesma */
-export const PARECIDAS = 0.09;
+export const PARECIDAS = 0.08;
 
 /** O sorteio pelo id (FNV-1a): sempre o mesmo índice para o mesmo id. */
 export function indicePreferido(id: string): number {
