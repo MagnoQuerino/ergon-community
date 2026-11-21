@@ -320,8 +320,13 @@ export const PASSAGEIROS = ['version_conflict', 'world_offline', 'rate_limited',
 const SEM_WORLD = ['world_offline', 'rate_limited'];
 /** a nuvem está de pé sem a chave? (World novo diz com todas as letras; no antigo, pelo estado que o contêiner conta) */
 const querChave = (n: Pick<Nuvem, 'on' | 'keyWanted' | 'appState'>): boolean => n.on && (n.keyWanted ?? (n.appState ?? '').startsWith('aguardando_chave'));
-/** em preparo: vale conferir de perto (segundos) até ficar pronta, parar ou dar erro */
-const emPreparo = (n: Nuvem): boolean => n.on && (querChave(n) || (n.runtime === 'rodando' && !/^(pronto|erro)/.test(n.appState ?? '')));
+/**
+ * em preparo: vale conferir de perto (segundos) até ficar pronta, parar ou dar erro. Inclui a nuvem recém-ligada que o
+ * contêiner ainda não contou estado nenhum (appState null, ainda subindo): assim a chave sai segundos depois de ele pedir,
+ * sem esperar o ciclo de um minuto nem alguém olhar o cartão. (Nuvem já preparada que só está dormindo tem appState.)
+ */
+const emPreparo = (n: Nuvem): boolean => n.on && (querChave(n) || (n.runtime === 'rodando' && !/^(pronto|erro)/.test(n.appState ?? ''))
+  || (n.appState === null && n.runtime !== 'erro' && n.runtime !== 'pausado'));
 
 /**
  * A cada minuto, para cada workspace ligado ao World: com a nuvem ATIVA, avisa que este computador está com ele aberto

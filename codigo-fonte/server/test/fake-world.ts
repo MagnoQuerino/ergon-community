@@ -137,7 +137,8 @@ export class FakeWorld {
   clouds = new Map<string, { bootToken: string; vaultKey: string | null; deviceId: string | null; states: string[]; relay: string | null; active: boolean; presence: boolean[];
     /** o próximo horário de rotina contado (nextWakeAt) e por quem: 'pc' ou 'nuvem' */ nextWakeAt?: string | null; wakeLog: Array<{ by: 'pc' | 'nuvem'; at: string | null }>;
     /** a posse (cloud.ts): último sinal de aberto e a hora em que o computador avisou que fechou */ pcSeenAt: number | null; pcLeftAt: number | null; pcSince?: number | null; /** o computador que deu o último sinal de aberto */ pcDevice?: string | null;
-    /** já preparado: trocar a chave do cofre (disco novo) é recusado com key_locked */ preparado?: boolean }>();
+    /** já preparado: trocar a chave do cofre (disco novo) é recusado com key_locked */ preparado?: boolean;
+    /** ligada pelo teste grátis e o orquestrador ainda não subiu o contêiner (runtime 'parado', como no World) */ subindo?: boolean }>();
   nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [], wakeLog: [], pcSeenAt: null, pcLeftAt: null }); return bootToken; }
   /** o último sinal de um computador por workspace (aberto ou fechado): o pcOpen do estado da nuvem; os testes também o mudam */
   pcAberto = new Map<string, boolean>();
@@ -349,6 +350,7 @@ export class FakeWorld {
       const c = [...this.clouds.entries()].find(([, x]) => x.bootToken === b.bootToken);
       if (!c) return { fail: [401, 'boot_token'] };
       const [sws, cl] = c; const w = this.workspaces.get(sws)!;
+      cl.subindo = false; // o contêiner chegou: o orquestrador o subiu
       if (p === '/v1/cloud/boot/vault') return { json: { vaultKey: cl.vaultKey } };
       if (p === '/v1/cloud/boot/key') { if (cl.vaultKey && b.replace !== true) return { fail: [409, 'key_exists'] }; if (cl.vaultKey && cl.preparado) return { fail: [409, 'key_locked'] }; cl.vaultKey = String(b.key); return { json: { ok: true } }; }
       if (p === '/v1/cloud/boot/state') { cl.states.push(b.detail ? `${b.state}: ${b.detail}` : String(b.state)); return { json: { ok: true } }; }
@@ -405,8 +407,17 @@ export class FakeWorld {
       const nv = cl?.deviceId ? this.devices.get(cl.deviceId) : undefined;
       const conexoes = { owner: dono, cloudDevice: dono && nv && nv.status === 'active' ? { deviceId: nv.id, syncPublicKey: nv.syncPublicKey } : null, pcOpen: !!cl && this.pcAberto.get(sws!) === true && (cl.pcSeenAt === null || Date.now() - cl.pcSeenAt < 120_000) };
       // (o sinal vale 2 min, como no World; os testes também mudam pcAberto direto, sem sinal)
-      return { json: { ...conexoes, active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null, ...(this.antigo ? {} : { keyWanted: this.keyWanted(sws!) }),
+      return { json: { ...conexoes, active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? (cl.subindo ? 'parado' : 'rodando') : null, ...(this.antigo ? {} : { keyWanted: this.keyWanted(sws!) }),
         relayTicket: cl?.relay && dono ? { exp: Math.floor(Date.now() / 1000) + 900, mac: crypto.createHash('sha256').update(`${sws}|${cl.relay}`).digest('hex') } : null } };
+    }
+    if (key === 'POST /v1/cloud/trial') {
+      // o teste grátis (world/src/cloud.ts startTrial): só o dono, uma vez; a nuvem fica ativa e "parada" até o orquestrador
+      // subir o contêiner. A resposta é o estado, como GET /v1/cloud
+      if (!mine(b.workspaceId)) return { fail: [404, 'sync_workspace'] };
+      if (this.workspaces.get(b.workspaceId)!.owner !== acc.id) return { fail: [403, 'not_owner'] };
+      if (this.clouds.has(b.workspaceId)) return { fail: [409, 'trial_used'] };
+      this.nuvem(b.workspaceId); this.clouds.get(b.workspaceId)!.subindo = true;
+      return this.route('GET', new URL(`http://x/v1/cloud?workspace=${b.workspaceId}`), {}, bearer);
     }
     if (key === 'POST /v1/cloud/presence') {
       const cl = this.clouds.get(b.workspaceId);

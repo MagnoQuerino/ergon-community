@@ -354,7 +354,10 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       });
       app.post('/api/world/cloud/trial', async (req) => {
         const a = h.owner(req); const w = needWorld(a);
-        return client.call('POST', '/v1/cloud/trial', { workspaceId: w }, sessionOf(a.userId));
+        const r = await client.call('POST', '/v1/cloud/trial', { workspaceId: w }, sessionOf(a.userId));
+        // a nuvem acabou de ligar: este computador passa a conferir de perto e entrega a chave assim que ela pedir
+        if (r) auto?.observar(w, r);
+        return r;
       });
       // Central de Trabalho, ala "Na nuvem": os Jobs do workspace no World, lidos aqui (a sessão não vai à tela), com
       // frescor próprio e no máximo uma leitura a cada 20 s por pessoa e workspace; falha não vira zero
