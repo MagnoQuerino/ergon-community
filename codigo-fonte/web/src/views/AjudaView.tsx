@@ -23,7 +23,7 @@ const Go = ({ c, v, hash, children }: { c: Ctx; v: View; hash?: string; children
 /** o comando do chat: o mesmo nas duas línguas */
 const CMD_PENDENCIAS = '/pendencias';
 const HASH_SEGURANCA = 'configuracao?seguranca';
-/** rc.46: as linhas do .env para instalar e atualizar da China (o endereço é um exemplo; o espelho de verdade vem no guia) */
+/** rc.46: as linhas do .env para instalar e atualizar da China (o endereço é um exemplo; o registro de verdade vem no guia) */
 const LINHA_REGISTRO = 'ERGON_REGISTRY=registry.cn-hangzhou.aliyuncs.com/…';
 const LINHA_MANIFESTO = 'ERGON_MANIFESTO_URL=https://…/latest.json';
 

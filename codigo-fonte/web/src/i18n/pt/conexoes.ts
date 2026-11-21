@@ -422,6 +422,8 @@ const conexoes = {
   'canal.titulo.weixin': "Conversar com a equipe pelo WeChat",
   'canal.app.idWc': "Bot ID",
   'canal.app.segredoWc': "Secret",
+  'canal.wc.console': "painel de administração",
+  'canal.wc.guardado': "O Secret fica guardado com a sua equipe, protegido, e não aparece de novo nesta tela. Nenhum agente pede essa chave pela conversa.",
   'canal.wc.passo1': "No {console} do WeCom, abra Aplicativos › Robô inteligente (智能机器人) e crie um robô.",
   'canal.wc.passo2': "Como forma de receber, escolha a conexão persistente (长连接), não a URL de retorno: assim não precisa de endereço público.",
   'canal.wc.passo3': "Copie o Bot ID e o Secret do robô e cole aqui embaixo.",

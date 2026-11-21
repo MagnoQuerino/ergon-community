@@ -1142,7 +1142,7 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
   const passos = canal === 'weixin' ? null
     : canal === 'wecom'
     ? <ol className="small conn-passos">
-        <li>{tn('conexoes.canal.wc.passo1', { console: consoleDoApp(CONSOLE_DO_APP.wecom) })}</li>
+        <li>{tn('conexoes.canal.wc.passo1', { console: <a href={CONSOLE_DO_APP.wecom} target="_blank" rel="noreferrer noopener">{t('conexoes.canal.wc.console')}</a> })}</li>
         <li>{t('conexoes.canal.wc.passo2')}</li>
         <li>{t('conexoes.canal.wc.passo3')}</li>
       </ol>
@@ -1186,7 +1186,7 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
         <button className="btn btn--sm btn--primary" disabled={busy || appId.trim().length < 8 || token.trim().length < 16}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.canal.guardar')}</button>
         {trocar && <button type="button" className="btn btn--sm btn--ghost" onClick={() => { setTrocar(false); setToken(''); setAppId(''); }}>{t('conexoes.canal.cancelar')}</button>}
       </div>
-      <p className="hint ai-byok__seguro"><Icon name="lock" size={12} /> {t('conexoes.canal.app.guardado')}</p>
+      <p className="hint ai-byok__seguro"><Icon name="lock" size={12} /> {t(canal === 'wecom' ? 'conexoes.canal.wc.guardado' : 'conexoes.canal.app.guardado')}</p>
     </form>
   );
   const formBot = canal === 'weixin' ? <LoginWeChat estado={e} reload={reload} /> : deApp ? formApp : (
@@ -1241,7 +1241,7 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
       {/* as letras miúdas: onde o código fica, o que acontece com o Ergon fechado, e a diferença para as conexões de conta */}
       <details className="conn-secao conn-secao--detalhes"><summary>{t('conexoes.detalhes')}</summary>
         <ul className="small conn-detalhes">
-          <li>{canal === 'weixin' ? t('conexoes.canal.wx.guardado') : deApp ? t('conexoes.canal.app.guardado') : t('conexoes.canal.guardado')}</li>
+          <li>{canal === 'weixin' ? t('conexoes.canal.wx.guardado') : canal === 'wecom' ? t('conexoes.canal.wc.guardado') : deApp ? t('conexoes.canal.app.guardado') : t('conexoes.canal.guardado')}</li>
           <li>{t(`conexoes.canal.fechado.${canal}`)} {deApp ? t('conexoes.canal.app.soDireta') : t('conexoes.canal.soDireta')}</li>
           <li>{t('conexoes.canal.secaoTexto')}</li>
         </ul>
@@ -1277,12 +1277,15 @@ function LoginWeChat({ estado, reload }: { estado: EstadoCanal; reload: () => vo
   const cancelar = async () => { try { setLogin(await api.del<LoginQr>('/api/canais/weixin/qr')); } catch { setLogin(null); } };
   if (vivo && login?.qr) return (
     <div className="qr conn-qr">
+      <p className="warn conn-wx__risco"><Icon name="alert" size={14} /> {t('conexoes.canal.wx.risco')}</p>
       <img src={login.qr} alt={t('conexoes.canal.wx.qrAlt')} width={240} height={240} />
-      <ol className="small">
-        <li>{t('conexoes.canal.wx.passo1')}</li>
-        <li>{t('conexoes.canal.wx.passo2')}</li>
-      </ol>
-      <p className="small" role="status">{login.estado === 'escaneado' ? t('conexoes.canal.wx.escaneado') : t('conexoes.canal.wx.aguardando')}</p>
+      <div>
+        <ol className="small">
+          <li>{t('conexoes.canal.wx.passo1')}</li>
+          <li>{t('conexoes.canal.wx.passo2')}</li>
+        </ol>
+        <p className={`small conn-qr__estado ${login.estado === 'escaneado' ? 'ok' : ''}`} role="status">{login.estado === 'escaneado' ? t('conexoes.canal.wx.escaneado') : t('conexoes.canal.wx.aguardando')}</p>
+      </div>
       <button className="btn btn--sm btn--ghost" onClick={() => void cancelar()}>{t('conexoes.acao.cancelar')}</button>
     </div>
   );

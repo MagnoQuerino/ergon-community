@@ -444,6 +444,8 @@ const conexoes: Traducao<typeof pt> = {
   'canal.titulo.weixin': "Talk to the team on WeChat",
   'canal.app.idWc': "Bot ID",
   'canal.app.segredoWc': "Secret",
+  'canal.wc.console': "admin console",
+  'canal.wc.guardado': "The Secret is stored with your team, protected, and is not shown on this screen again. No agent ever asks for it in a chat.",
   'canal.wc.passo1': "In the WeCom {console}, open Apps › Smart Robot (智能机器人) and create a robot.",
   'canal.wc.passo2': "To receive messages, pick the long connection (长连接), not the callback URL: that way no public address is needed.",
   'canal.wc.passo3': "Copy the robot’s Bot ID and Secret and paste them below.",

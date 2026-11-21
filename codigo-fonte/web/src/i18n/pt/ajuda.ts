@@ -217,11 +217,11 @@ const ajuda = {
   // ——— manual: Temas e personagens ———
   // ——— rc.46: Ergon na China (o guia completo: docs/CHINA.md e docs/CHINA.zh-CN.md) ———
   'china.titulo': "Ergon na China",
-  'china.palavras': "china chinês 中国 espelho registro instalar ghcr deepseek qwen kimi glm minimax wecom 企业微信 wechat 微信 feishu 飞书 lark dingtalk 钉钉 icp pipl",
+  'china.palavras': "china chinês 中国 registro instalar ghcr deepseek qwen kimi glm minimax wecom 企业微信 wechat 微信 feishu 飞书 lark dingtalk 钉钉 icp pipl",
   'china.p1': "Na China, o Ergon é o Community instalado no seu computador, com IA chinesa. A nuvem do Ergon e a cobrança não são oferecidas lá.",
-  'china.h1': "Instalar pelo espelho",
-  'china.i1': "O GitHub, o ghcr.io, o PyPI e o Docker Hub costumam falhar na China. Antes de instalar, ponha no arquivo .env da pasta do Ergon a linha {linha}, com o endereço do espelho.",
-  'china.i2': "Sem essa linha, o Ergon usa sozinho o espelho publicado com a versão quando o ghcr.io não responde.",
+  'china.h1': "Instalar pelo registro da China",
+  'china.i1': "O GitHub, o ghcr.io, o PyPI e o Docker Hub costumam falhar na China. Antes de instalar, ponha no arquivo .env da pasta do Ergon a linha {linha}, com o endereço do registro da China.",
+  'china.i2': "Sem essa linha, o Ergon usa sozinho a cópia da versão no registro da China quando o ghcr.io não responde.",
   'china.i3': "Para atualizar sem o GitHub, a linha {linha} aponta para uma cópia do arquivo da versão num endereço da China.",
   'china.h2': "Escolher a IA",
   'china.i4': "Em {link}, abra {cartao} e entre com a chave de API da sua conta: DeepSeek, Qwen (DashScope), Kimi (Moonshot), GLM (Zhipu) ou MiniMax. Depois, escolha o modelo em Modelo padrão.",

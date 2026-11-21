@@ -379,6 +379,8 @@ const conexoes: TraducaoParcial<typeof pt> = {
   'canal.titulo.weixin': "通过微信与团队对话",
   'canal.app.idWc': "Bot ID",
   'canal.app.segredoWc': "Secret",
+  'canal.wc.console': "管理后台",
+  'canal.wc.guardado': "Secret 受保护地保存在你的团队中，不会再在此页面显示。任何智能体都不会在对话中索要它。",
   'canal.wc.passo1': "在企业微信{console}中，打开 应用管理 › 智能机器人，创建一个机器人。",
   'canal.wc.passo2': "接收方式选择“长连接”，而不是回调 URL：这样不需要公网地址。",
   'canal.wc.passo3': "复制机器人的 Bot ID 和 Secret，粘贴到下面。",
