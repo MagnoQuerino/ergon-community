@@ -313,6 +313,13 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
   const [listaTopicos, setListaTopicos] = useState(false);
   const [novoTopico, setNovoTopico] = useState<{ origem: Msg | null } | null>(null);
   const topicos = useResource<TopicoLinha[]>(painelTopico ? null : `/api/salas/${salaId}/topicos`, EVENTOS);
+  // a lista (ou a folha, no celular) fecha ao tocar fora dela
+  useEffect(() => {
+    if (!listaTopicos) return;
+    const fora = (e: PointerEvent) => { if (!(e.target instanceof Element && e.target.closest('.sala-topicos'))) setListaTopicos(false); };
+    window.addEventListener('pointerdown', fora);
+    return () => window.removeEventListener('pointerdown', fora);
+  }, [listaTopicos]);
   const fim = useRef<HTMLDivElement>(null);
   const arquivo = useRef<HTMLInputElement>(null);
   const lista = msgs.data?.mensagens ?? [];

@@ -3526,4 +3526,12 @@ details.cx[open] > summary { color: var(--ink); }
   .sala-dupla { display: flex; }
   .sala-dupla__topico { position: fixed; inset: 0; z-index: 30; border-left: 0; }
 }
-@media (max-width: 760px) { .sala-topicos__lista { position: fixed; top: 96px; left: 16px; right: 16px; width: auto; } }
+/* no celular, a lista de tópicos é uma folha que sobe de baixo (o polegar alcança; a sala fica à vista atrás) */
+@media (max-width: 760px) {
+  .sala-topicos__lista { position: fixed; top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 70vh; z-index: 31; padding: 8px 8px calc(12px + env(safe-area-inset-bottom));
+    border-radius: 16px 16px 0 0; border-bottom: 0; box-shadow: 0 -12px 40px var(--veu-forte); }
+  .sala-topicos__lista::before { content: ''; align-self: center; width: 40px; height: 4px; border-radius: 999px; background: var(--borda-forte); margin: 2px 0 8px; flex: none; }
+  .sala-topicos__lista button { padding: 10px 8px; }
+}
+@media (max-width: 760px) and (prefers-reduced-motion: no-preference) { .sala-topicos__lista { animation: sala-folha .2s ease-out; } }
+@keyframes sala-folha { from { transform: translateY(24px); opacity: 0; } }
