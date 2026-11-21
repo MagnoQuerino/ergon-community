@@ -8,6 +8,7 @@ const KEY = 'ergon.desktop';
 const KEY_VOLTA = 'ergon.desktop.volta';
 const KEY_DOWNLOADS = 'ergon.desktop.downloads';
 const KEY_FECHAR = 'ergon.desktop.fechar';
+const KEY_PASTAS = 'ergon.desktop.pastas';
 
 export function rememberDesktopApp(): void {
   try {
@@ -20,10 +21,13 @@ export function rememberDesktopApp(): void {
     else sessionStorage.removeItem(KEY_DOWNLOADS);
     if (u.searchParams.get('fechar') === '1') sessionStorage.setItem(KEY_FECHAR, '1');
     else sessionStorage.removeItem(KEY_FECHAR);
+    if (u.searchParams.get('pastas') === '1') sessionStorage.setItem(KEY_PASTAS, '1');
+    else sessionStorage.removeItem(KEY_PASTAS);
     u.searchParams.delete('app');
     u.searchParams.delete('volta');
     u.searchParams.delete('downloads');
     u.searchParams.delete('fechar');
+    u.searchParams.delete('pastas');
     history.replaceState(history.state, '', u.pathname + (u.search === '?' ? '' : u.search) + u.hash);
   } catch { /* sem armazenamento: segue como navegador */ }
 }
@@ -52,3 +56,10 @@ export function downloadsInDesktopApp(): boolean {
 export function fecharInDesktopApp(): boolean {
   try { return inDesktopApp() && sessionStorage.getItem(KEY_FECHAR) === '1'; } catch { return false; }
 }
+
+/** rc.42: o aplicativo abre o seletor de pastas do sistema para Conexões › Pastas do computador ("pastas=1"). */
+export function pastasInDesktopApp(): boolean {
+  try { return inDesktopApp() && sessionStorage.getItem(KEY_PASTAS) === '1'; } catch { return false; }
+}
+export const PEDIDO_ESCOLHER_PASTA = '/__desktop/pastas/escolher';
+export const EVENTO_PASTA_ESCOLHIDA = 'ergon:pasta-escolhida';

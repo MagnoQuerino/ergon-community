@@ -20,7 +20,7 @@ import { log, scrub } from '../lib/log.ts';
 import { clip, now } from '../lib/util.ts';
 import type { Bus } from './bus.ts';
 import { HermesError, PERFIL_NOME, type HermesControlClient, type PedidoDePerfil } from './hermes.ts';
-import { TOOLS } from './characters.ts';
+import { TOOLS, acessoTotalDaEquipe, ferramentasEfetivas } from './characters.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { almaDoAgente } from './runs.ts';
 
@@ -75,7 +75,8 @@ export function pedidoDoPerfil(db: Db, workspaceId: string, agentId: string): Pe
     alma: almaDoAgente(db, workspaceId, agentId),
     // todos os conjuntos que o agente pode chegar a usar (Terminal e Executar código entram no perfil só quando a pessoa
     // liga para a equipe: o plugin cruza com o que está ligado no motor)
-    ferramentas: [...new Set(tools.map((t) => TOOLS[t]).filter((t) => t && t.kind === 'ia' && t.toolset).map((t) => t!.toolset!))].sort(),
+    // (rc.42: as efetivas — os recursos com custo da equipe e, com o acesso total, as protegidas)
+    ferramentas: [...new Set(ferramentasEfetivas(tools, { acessoTotal: acessoTotalDaEquipe(db, workspaceId) }).map((t) => TOOLS[t]).filter((t) => t && t.kind === 'ia' && t.toolset).map((t) => t!.toolset!))].sort(),
     memoria: true, busca: true,
     ajudantes: { ligado: aj.ligado, max: aj.max },
     modelo: a.model ? { provider: a.provider ?? '', model: a.model } : null,

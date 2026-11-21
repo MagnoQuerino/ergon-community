@@ -12,6 +12,7 @@
  * do serviço (conexao_acoes); o que nenhuma conexão faz (pagar um boleto) espera a sua confirmação. "Não consegui" é
  * falha, nunca entrega. Conclusão humana é soberana e nunca é desfeita por aqui.
  */
+import { acharModelo, escolherModelo, pdfDeTexto } from './entregaveis.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, now } from '../lib/util.ts';
 import { emPt, tx } from '../lib/textos.ts';
@@ -879,7 +880,7 @@ export class Results {
     if (forYou && !Number(task.requires_approval) && !pendingReview) {
       this.db.run('UPDATE tasks SET delivered_at = ? WHERE id = ?', now(), task.id);
       return this.record(ws, task.id, r.id, kind, 'aguardando_aprovacao', c, ev,
-        `Entregue a você${Number(task.review_round) > 1 ? ` (versão ${task.review_round})` : ''}: Aprovar conclui; Pedir ajustes faz uma nova versão no mesmo card.`, 'ergon');
+        `Entregue a você${Number(task.review_round) > 1 ? ` (versão ${task.review_round})` : ''}: Aprovar conclui; Devolver com instruções faz uma nova versão no mesmo card.`, 'ergon');
     }
     if (Number(task.requires_approval) || pendingReview) {
       return this.record(ws, task.id, r.id, kind, 'aguardando_aprovacao', c, ev,
@@ -901,6 +902,9 @@ export class Results {
       const art = saveArtifact(this.db, this.bus, this.cfg.filesDir, this.cfg.maxUploadBytes, ws, owner,
         { filename: name, mime: 'text/markdown', data: Buffer.from(body, 'utf8'), source: { kind: 'operation', id: runId } }, this.cfg.storageQuota);
       linkFile(this.db, ws, taskId, art.id, 'entregavel');
+      // "usa o modelo ABNT": o documento entregue guarda a escolha (a tela e o PDF aplicam)
+      const modelo = parseDocCommands(raw).find((c) => c.modelo)?.modelo;
+      if (modelo) { try { escolherModelo(this.db, this.bus, ws, { type: 'system', id: 'ergon' }, art.id, modelo); } catch { /* modelo que não existe: fica o padrão */ } }
       if (prefix === 'resultado') this.saveFormats(ws, taskId, number, runId, body, raw, owner);
       return art;
     } catch { return null; }
@@ -924,7 +928,8 @@ export class Results {
       const filename = `${nome}.${fmt}`;
       if (taskFiles(this.db, ws, taskId).some((f) => f.filename === filename)) continue;
       try {
-        const { data, mime } = gerarDocumento(fmt, texto, nome);
+        const modelo = acharModelo(this.db, ws, tags.find((c) => c.modelo)?.modelo);
+        const { data, mime } = fmt === 'pdf' ? { data: pdfDeTexto(this.db, ws, texto, nome, modelo), mime: 'application/pdf' } : gerarDocumento(fmt, texto, nome);
         const art = saveArtifact(this.db, this.bus, this.cfg.filesDir, this.cfg.maxUploadBytes, ws, owner,
           { filename, mime, data, folderId: folderForTask(this.db, ws, taskId), source: { kind: 'operation', id: runId } }, this.cfg.storageQuota);
         linkFile(this.db, ws, taskId, art.id, 'entregavel');

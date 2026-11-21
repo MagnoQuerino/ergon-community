@@ -35,7 +35,7 @@ interface Gravando { r: MediaRecorder; partes: Blob[]; inicio: number; descartar
  * O microfone só fica aberto com o modo aberto e sem pausa (o indicador no topo diz), e é solto em toda saída: encerrar,
  * erro, pausa e ao desmontar. Sem voz para falar, as respostas aparecem escritas e a escuta segue.
  */
-export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garantirConversa, recarregar, onFechar }: {
+export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garantirConversa, recarregar, onFechar, enviarFala }: {
   agente: Pick<Agent, 'id' | 'name'>;
   /** as mensagens da conversa (a lista de sempre do ChatPanel): é por elas que o modo sabe da transcrição e da resposta */
   mensagens: Message[];
@@ -46,6 +46,8 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   garantirConversa: () => Promise<string>;
   recarregar: () => void;
   onFechar: () => void;
+  /** sala (rc.42): a fala vai pela rota da sala, para o agente escolhido; devolve o id da mensagem */
+  enviarFala?: (arquivoId: string) => Promise<string>;
 }) {
   const t = useT();
   const [e, setE] = useState<EstadoVoz>(() => voz0(!podeFalar));
@@ -59,8 +61,8 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   }, []);
   // o microfone mede num relógio aberto lá atrás: o que vem do ChatPanel é lido daqui, sempre o de agora (a conversa
   // pode ter sido criada no 1º envio; sem isto o 2º trecho abriria outra)
-  const de = useRef({ garantirConversa, recarregar });
-  de.current = { garantirConversa, recarregar };
+  const de = useRef({ garantirConversa, recarregar, enviarFala });
+  de.current = { garantirConversa, recarregar, enviarFala };
   /** as mensagens que já estavam na conversa (ou já tratadas): um texto novo da pessoa, fora delas, é adotado como turno */
   const conhecidas = useRef<Set<string> | null>(null);
   if (conhecidas.current === null) conhecidas.current = new Set(mensagens.map((m) => m.id));
@@ -153,7 +155,8 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
       const corpo = { text: '', clientRequestId: requestId(), attachments: [arq.id], voz: true };
       const mandar = (fila: boolean) => api.post<{ messageId: string }>(`/api/conversations/${conv}/messages`, { ...corpo, ...(fila ? { queue: true } : {}) });
       // o colega ainda respondia (a pessoa falou por cima de uma resposta longa): a fala entra na fila da conversa
-      const r = await mandar(false).catch((err) => { if (err instanceof ApiError && err.code === 'busy') return mandar(true); throw err; });
+      const r = de.current.enviarFala ? { messageId: await de.current.enviarFala(arq.id) }
+        : await mandar(false).catch((err) => { if (err instanceof ApiError && err.code === 'busy') return mandar(true); throw err; });
       turno.current = r.messageId;
       conhecidas.current?.add(r.messageId);
       despachar({ tipo: 'enviado' }); // i18n-ok: código interno do estado

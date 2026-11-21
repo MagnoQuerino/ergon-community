@@ -30,6 +30,9 @@ import { cadeiaDe, lidoEm, marcarEm } from './conexoes/marca.ts';
 import { workspaceTz } from './routine-proposals.ts';
 import { colunaPorChave, type ChaveColuna } from './colunas.ts';
 import { remoteHolder, taskCard } from './remote-work.ts';
+import { MAX_DEVOLUCOES, MAX_RECUSAS, entregaDoAgente, instrucaoEntregar, lerAjustes, minimoSeguro, recusas, registrar, ultimaEntrega } from './modelos-entrega.ts';
+import { separarLinhaParaVoce } from './resumo-tarefa.ts';
+import { motorScope, platformToolsets } from './characters.ts';
 import { openArtifact } from './artifacts.ts';
 
 interface HelpRequest { agent: string; request: string }
@@ -142,6 +145,11 @@ const STEP_FILE_CHARS = 1500;
 /** ciclo de persistência: rodadas por card em 24 h — 2 com a coordenação, 2 com o reforço; depois, a pessoa fica sabendo */
 export const PERSIST_ROUNDS = 4;
 const PERSIST_KEY = 'triagem-';
+/**
+ * A continuação que pede a entrega no modelo (modelos-entrega.ts): o agente terminou a última etapa sem registrar a
+ * entrega com a ferramenta entregar (sem task_id: o card não fica ocupado). pede-entrega-<n>-<id da execução original>; 'entrega-' já é a entrega na conversa.
+ */
+const PEDE_ENTREGA_KEY = 'pede-entrega-';
 /** etapas de ajuda que um card pode ganhar; além disso, o ciclo de persistência decide outra saída */
 const HELP_STEPS_MAX = 4;
 /** modelos que a equipe trata como os mais fortes (pelo nome escolhido para o agente) */
@@ -176,6 +184,11 @@ export class Teamwork {
   private timer: NodeJS.Timeout | null = null;
   /** o fio do pedido: conversa de origem, entrega e pedidos repassados (purpose.ts) */
   readonly purpose: Purpose;
+  /**
+   * Cards cujo fim outro serviço cuida (a revisão de documento, rc.42: o resultado é a versão nova do arquivo, não uma
+   * entrega para aprovar). Esses pulam a conferência, o ciclo de persistência e a entrega.
+   */
+  cuidaDoFim: ((taskId: string) => boolean) | null = null;
   /** conversa livre de novo (o app entrega o que ficou pronto ou manda a próxima mensagem da fila) */
   onIdle: ((workspaceId: string, conversationId: string) => void) | null = null;
 
@@ -273,12 +286,14 @@ export class Teamwork {
 
   private finished(r: RunRow, status: RunStatus, output: string | null): void {
     if (r.idempotency_key.startsWith('training-')) return; // treinamento: quem cuida é o Treinar
+    if (r.task_id && this.cuidaDoFim?.(r.task_id)) return; // revisão de documento: revisao-documento.ts
     // card cancelado enquanto o agente trabalhava: nada continua (próxima etapa, pedido de ajuda, conferência, entrega)
     if (r.task_id && Number(this.db.get<{ archived: number }>('SELECT archived FROM tasks WHERE id = ?', r.task_id)?.archived)) return;
     // a coordenação entendeu melhor do que um card se trata: ele ganha um título novo (o que a pessoa escolheu fica)
     if (status === 'succeeded') this.retitle(r, output);
     // o ciclo de persistência decidiu como o card segue (responder, pôr um colega numa etapa, assumir ou perguntar)
     if (r.idempotency_key.startsWith(PERSIST_KEY)) { this.persisted(r, status, output); return; }
+    if (r.idempotency_key.startsWith(PEDE_ENTREGA_KEY)) { this.entregaPedida(r); return; }
     const ws = r.workspace_id;
     const coord = isCoordinator(this.db.get<{ coordinator: number }>('SELECT coordinator FROM agents WHERE id = ?', r.agent_id) ?? { coordinator: 0 });
     const help = status === 'succeeded' ? parseHelpRequests(output, coord ? HELP_MAX.coordinator : HELP_MAX.agent) : [];
@@ -332,21 +347,108 @@ export class Teamwork {
     this.settle(r, status, output);
   }
 
+  /** É a entrega para a pessoa: execução da fila que terminou bem, sem plano ou na última etapa, sem pergunta. */
+  private entregaFinal(r: RunRow, status: RunStatus, output: string | null): boolean {
+    if (status !== 'succeeded' || !r.task_id || !r.idempotency_key.startsWith('queue-')) return false;
+    if (/\[\[\s*(perguntar|pedir-ajuda)\b/i.test(output ?? '')) return false;
+    const steps = stepsOf(this.db, r.task_id);
+    const cur = currentStep(steps);
+    return !steps.length || !cur || cur.position === steps[steps.length - 1].position;
+  }
+
+  /**
+   * Terminou sem a entrega no modelo: o cartão já mostra o formato mínimo, e uma continuação curta com o mesmo agente
+   * pede para registrar (com o texto que ele entregou e os erros da última recusa); quando ele registra, a entrega dele
+   * toma o lugar do mínimo. A continuação não é do card (task_id nulo, o card vem da chave pede-entrega-<n>-<execução>):
+   * o card não fica "trabalhando" nem sai de "Aguardando você" enquanto isso. Só com o motor de verdade (a ferramenta
+   * existe lá), até MAX_DEVOLUCOES vezes e se a ferramenta ainda não recusou MAX_RECUSAS vezes nesta execução.
+   */
+  private pedirEntrega(orig: RunRow, res: ResultRow, output: string | null, n: number): boolean {
+    if (!['aguardando_aprovacao', 'revisao', 'validado', 'sem_confirmacao'].includes(res.state)) return false;
+    // análise de planilha (núcleo operacional): os números e os entregáveis vêm do Ergon e o modelo só comenta, numa
+    // chamada só; o cartão fica com o formato mínimo, sem outra rodada
+    if (res.kind === 'dados') return false;
+    if (this.executor.mode !== 'real' || n > MAX_DEVOLUCOES || !this.entregaFinal(orig, 'succeeded', output)) return false;
+    const ws = orig.workspace_id; const taskId = orig.task_id!;
+    // o motor já lido e sem o conjunto dos cartões (onde está a ferramenta entregar: versão sem ela, ou motor sem os
+    // conjuntos do plugin): pedir seria uma rodada a mais à toa, e o cartão fica com o formato mínimo
+    const conjuntos = platformToolsets(motorScope(ws));
+    if (conjuntos.at > 0 && !conjuntos.known.includes('ergon_cartoes')) return false;
+    if (entregaDoAgente(this.db, ws, taskId, orig.created_at)) return false;
+    if (recusas(this.db, orig.id) >= MAX_RECUSAS) return false;
+    const t = this.db.get<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE id = ?', taskId);
+    const erros = this.db.get<{ conteudo: string }>("SELECT conteudo FROM entregas WHERE workspace_id = ? AND task_id = ? AND estado = 'recusada' AND created_at >= ? ORDER BY created_at DESC LIMIT 1", ws, taskId, orig.created_at)?.conteudo;
+    const input = [
+      `Você terminou o card #${t?.number ?? ''} (“${clip(t?.title ?? '', 120)}”), mas não registrou a entrega para a pessoa com a ferramenta entregar: o cartão dela fica só com um resumo automático.`,
+      erros ? `A última tentativa voltou com estes erros: ${(() => { try { return (JSON.parse(erros) as string[]).join(' · '); } catch { return ''; } })()}` : '',
+      `O texto que você entregou (use-o; não refaça o trabalho):\n«${clip(stripControl(output ?? ''), 24_000)}»`,
+      instrucaoEntregar(lerAjustes(this.db, ws)),
+      'Chame entregar agora e responda só "ok".',
+    ].filter(Boolean).join('\n\n');
+    try {
+      this.executor.enqueue({
+        workspaceId: ws, agentId: orig.agent_id, taskId: null, kind: 'subtask', input: clip(input, TEXTO_MAX), maxInput: TEXTO_MAX,
+        instructions: instructionsFor(this.db, ws, orig.agent_id, 'Canal: quadro da equipe. Registre a entrega do card com a ferramenta entregar.', { foco: { taskId } }),
+        idempotencyKey: `${PEDE_ENTREGA_KEY}${n}-${orig.id}`,
+      });
+    } catch { return false; } // limite do dia, por exemplo: fica o formato mínimo
+    audit(this.db, null, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'task.entrega_devolvida', targetType: 'task', targetId: taskId,
+      evidence: { runId: orig.id, tentativa: n }, result: `A entrega veio fora do modelo: o agente registra de novo (${n} de ${MAX_DEVOLUCOES})` });
+    return true;
+  }
+
+  /** A continuação que pedia a entrega terminou: sem a entrega, tenta mais uma vez (até o limite); com ela, o cartão já mudou. */
+  private entregaPedida(r: RunRow): void {
+    const m = /^pede-entrega-(\d+)-(.+)$/.exec(r.idempotency_key);
+    const orig = m ? this.db.get<RunRow>('SELECT * FROM runs WHERE id = ?', m[2]) : undefined;
+    const res = orig?.task_id ? this.results.latest(orig.workspace_id, orig.task_id) : null;
+    if (!orig || !res) return;
+    this.pedirEntrega(orig, res, orig.output, Number(m![1]) + 1);
+    this.bus.publish(orig.workspace_id, 'tasks.changed', { id: orig.task_id });
+  }
+
+  /**
+   * Toda entrega que chega à pessoa tem o modelo: a do agente ou, sem ela, o formato mínimo seguro montado aqui (a
+   * linha "Para você decidir" separada em itens curtos, o texto inteiro nos detalhes). Falha e pergunta o resumo monta
+   * pelos fatos (bloqueio, pergunta).
+   */
+  private garantirEntrega(r: RunRow, output: string | null, res: ResultRow): void {
+    if (!r.task_id || ['falha', 'aguardando_info', 'descartado'].includes(res.state)) return;
+    if (!this.entregaFinal(r, 'succeeded', output) && !r.idempotency_key.startsWith(PERSIST_KEY)) return;
+    const ws = r.workspace_id;
+    if (ultimaEntrega(this.db, ws, r.task_id, r.created_at)) return;
+    const t = this.db.get<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE id = ?', r.task_id);
+    const { corpo, linha } = separarLinhaParaVoce(stripControl(output ?? ''));
+    const agente = this.db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', r.agent_id)?.name ?? 'o agente';
+    registrar(this.db, ws, { taskId: r.task_id, runId: r.id, minimo: true,
+      entrega: minimoSeguro({ agente, card: t?.number ?? null, titulo: t?.title ?? '', corpo, linha, aprovar: res.state !== 'validado' }) });
+  }
+
   /**
    * O fim de uma execução de um card: a etapa do meio que entregou passa adiante; a última (ou a que parou) vai para a
    * conferência do card. O que não passou (ou falhou) volta para a equipe pelo ciclo de persistência antes de chegar à
    * pessoa.
    */
   private settle(r: RunRow, status: RunStatus, output: string | null): void {
-    const ws = r.workspace_id;
     if (!r.task_id) return;
     if (this.decidiuDuranteExecucao(r, status)) return;
     const steps = stepsOf(this.db, r.task_id);
     if (steps.length && this.advance(r, status, output, steps)) return;
     // fim de execução não é fim de trabalho: o contrato de resultado decide, com evidência
-    let res = this.results.evaluate(r, status, output, steps.length ? { words: this.planWords(steps) } : null);
+    const res = this.results.evaluate(r, status, output, steps.length ? { words: this.planWords(steps) } : null);
     if (!res) return;
     if (steps.length) this.closeStep(r, steps, res, output);
+    this.seguir(r, status, output, res);
+  }
+
+  /** Depois da conferência: a entrega no modelo (ou o mínimo), a nova tentativa da equipe, a conversa de origem. */
+  private seguir(r: RunRow, status: RunStatus, output: string | null, conferido: ResultRow): void {
+    const ws = r.workspace_id;
+    if (!r.task_id) return;
+    let res = conferido;
+    // a entrega no modelo: a do agente ou, sem ela, o mínimo agora, e o agente é chamado a registrar (sem segurar o card)
+    this.garantirEntrega(r, output, res);
+    this.pedirEntrega(r, res, output, 1);
     // você recusou no cartão o que era o trabalho do card: sem nova tentativa da equipe; o card fica aberto e a conversa
     // pergunta o que mudar (relay, abaixo). Nada sai do quadro sem você pedir.
     // não passou na conferência, a execução falhou (não foi você que parou), o agente disse que não fez, ou a conferência
@@ -1057,7 +1159,7 @@ export class Teamwork {
     const files = filesBrief(this.db, this.filesDir, workspaceId, t.id);
     const plan = this.planBrief(workspaceId, t.id);
     // a última etapa (ou o card sem plano) entrega à pessoa: termina com a linha para ela decidir de relance
-    const closing = plan && !plan.last ? STEP_CLOSING : `${CLOSING[kind] ?? CLOSING.informativo} ${PARA_VOCE}`;
+    const closing = plan && !plan.last ? STEP_CLOSING : `${CLOSING[kind] ?? CLOSING.informativo} ${PARA_VOCE}\n\n${instrucaoEntregar(lerAjustes(this.db, workspaceId))}\n`;
     const input = [
       `Tarefa #${t.number}: ${t.title}`, plan ? plan.text : t.description,
       files ? `\n${files}` : '',

@@ -10,6 +10,7 @@ import { useAgentList, type TeamAgent } from '../lib/teamData.ts';
 import type { AgentLite, RecentConversation } from '../lib/types.ts';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { ChatPanel } from './ChatPanel.tsx';
+import { SalaPanel, SalasSecao } from './Salas.tsx';
 import { Icon } from './Icon.tsx';
 import { VirtualGrid } from './VirtualGrid.tsx';
 
@@ -182,7 +183,7 @@ function TeamRest({ scope, shown, currentId, onOpen }: { scope: string; shown: R
  * A busca do topo acha tudo: contatos, assuntos, mensagens, arquivos e links — e leva direto à mensagem.
  */
 export function ConversationsDialog({ coordinator, scope, initial, onClose, onOpenAgent, onFoco }: {
-  coordinator: TeamAgent | null; scope: string; initial: { agentId: string | null; conversationId: string | null }; onClose: () => void;
+  coordinator: TeamAgent | null; scope: string; initial: { agentId: string | null; conversationId: string | null; salaId?: string | null; foco?: string | null }; onClose: () => void;
   onOpenAgent: (id: string, tab?: 'conversa' | 'perfil' | 'atividade', lite?: AgentLite | null) => void;
   /** rc.33: tela cheia — o Modo Foco já nesta conversa (Esc e o X de lá voltam para cá) */
   onFoco?: (agentId: string, conversationId: string | null) => void;
@@ -195,6 +196,11 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
   // a linha leve de quem foi escolhido sem conversa (seção Equipe, busca): o cabeçalho aparece na hora
   const [sel, setSel] = useState<{ agentId: string | null; conversationId: string | null; messageId?: string | null; lite?: AgentLite | null }>(initial);
   useEffect(() => setSel(initial), [initial.agentId, initial.conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a sala aberta (rc.42): no lugar da conversa com um agente
+  const [sala, setSala] = useState<string | null>(initial.salaId ?? null);
+  const [focoSala, setFocoSala] = useState<string | null>(initial.foco ?? null);
+  const [topicoSala, setTopicoSala] = useState<string | null>(null);
+  useEffect(() => { if (initial.salaId) { setSala(initial.salaId); setFocoSala(initial.foco ?? null); } }, [initial.salaId, initial.foco]);
   const contacts = useMemo(() => contactsOf(list), [list]);
   // sem escolha: quem tem algo para você, ou a última conversa; sem nenhuma, o Coordenador (como o atalho do canto)
   const first = contacts.find((c) => c.unread || c.priority) ?? contacts[0];
@@ -231,7 +237,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
     setErr(null);
     try { const c = await api.post<{ id: string }>('/api/conversations', { agentId }); setSel({ agentId, conversationId: c.id }); recent.reload(); } catch (e) { setErr(errMsg(e)); }
   };
-  const open = (agentId: string, conversationId: string | null, messageId?: string | null, lite?: AgentLite | null) => { setSel({ agentId, conversationId, messageId: messageId ?? null, lite: lite ?? null }); setQ(''); };
+  const open = (agentId: string, conversationId: string | null, messageId?: string | null, lite?: AgentLite | null) => { setSala(null); setSel({ agentId, conversationId, messageId: messageId ?? null, lite: lite ?? null }); setQ(''); };
   const sections = (['fixadas', 'precisa', 'recentes'] as Section[]).map((s) => ({ s, items: contacts.filter((c) => c.section === s) })).filter((x) => x.items.length);
   const inSections = useMemo(() => new Set(lites.keys()), [lites]);
   return (
@@ -271,6 +277,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
             </div>
           ) : (
             <>
+              <SalasSecao atual={sala} onAbrir={(id) => { setSala(id); setFocoSala(null); setTopicoSala(null); setQ(''); }} />
               {sections.map(({ s, items }) => (
                 <div key={s} className="convs__section">
                   <span className="convs__section-name">{t(SECTION_LABEL[s])}</span>
@@ -283,7 +290,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
                       const topics = all ? c.convs : c.convs.slice(0, TOPICS_SHOWN);
                       return (
                         <li key={c.agentId} className={on ? 'is-open' : ''}>
-                          <button className={`convs__item ${on ? 'is-on' : ''} ${c.unread ? 'is-unread' : ''}`} aria-current={on ? 'true' : undefined} onClick={() => open(c.agentId, c.latest.id)}>
+                          <button className={`convs__item ${on && !sala ? 'is-on' : ''} ${c.unread ? 'is-unread' : ''}`} aria-current={on ? 'true' : undefined} onClick={() => open(c.agentId, c.latest.id)}>
                             <span className={`convs__avatar ${c.unread ? 'convs__avatar--new' : ''}`}><AgentAvatar agent={a} size={34} /></span>
                             <span className="convs__txt">
                               <span className="convs__line"><b>{a.name}</b><time className="muted small">{when(c.lastAt)}</time></span>
@@ -321,12 +328,13 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
                   </ul>
                 </div>
               ))}
-              <TeamRest scope={scope} shown={inSections} currentId={current.agentId} onOpen={(a) => open(a.id, null, null, a)} />
+              <TeamRest scope={scope} shown={inSections} currentId={sala ? null : current.agentId} onOpen={(a) => open(a.id, null, null, a)} />
             </>
           )}
         </aside>
         <div className="convs__chat">
-          {agent ? (
+          {sala ? <SalaPanel key={sala} salaId={sala} foco={focoSala} topicoInicial={topicoSala} onSaiu={() => setSala(null)}
+            onIrPara={(pai, topico, foco) => { setSala(pai); setTopicoSala(topico); setFocoSala(foco ?? null); }} /> : agent ? (
             <>
               <header className="foco__chat-head">
                 <AgentAvatar agent={agent} size={36} />

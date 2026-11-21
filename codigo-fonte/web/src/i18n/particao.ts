@@ -8,7 +8,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   geral: [
     'App.tsx', 'components/CommandPalette.tsx', 'components/WsCard.tsx', 'components/MusicButton.tsx', 'components/AccountMenu.tsx', 'components/Workspaces.tsx',
     'components/SeletorIdioma.tsx', 'components/ConfirmPopup.tsx', 'components/VirtualGrid.tsx', 'components/TextoLongo.tsx', 'components/Markdown.tsx',
-    'components/FileViewer.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
+    'components/FileViewer.tsx', 'components/ComputadorControle.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
   ],
   // a Cidade, o Modo Foco, a Central de Trabalho e os rótulos desenhados na cidade
   cidade: [
@@ -19,9 +19,9 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // os quadros (Tarefas e Fluxos da equipe), as colunas e mover cards
   quadro: ['components/Board.tsx', 'components/GerirQuadro.tsx', 'components/CamposDoQuadro.tsx', 'lib/cartao-tela.ts', 'views/TarefasView.tsx', 'views/EquipeView.tsx', 'components/MoveTray.tsx', 'lib/dragMove.ts', 'lib/work.ts'],
   // o card aberto
-  tarefa: ['components/TaskDetail.tsx', 'components/CartaoExtras.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
+  tarefa: ['components/TaskDetail.tsx', 'components/EntregaDetalhes.tsx', 'components/CartaoExtras.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
   // as conversas
-  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts', 'components/GravadorDeVoz.tsx', 'lib/gravador.ts', 'components/ConversaPorVoz.tsx', 'lib/conversa-voz.ts', 'components/NavegadorAoVivo.tsx', 'lib/navegador.ts'],
+  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts', 'components/GravadorDeVoz.tsx', 'lib/gravador.ts', 'components/ConversaPorVoz.tsx', 'lib/conversa-voz.ts', 'components/NavegadorAoVivo.tsx', 'lib/navegador.ts', 'components/Salas.tsx', 'lib/mencoes.ts'],
   // a Equipe e criar agentes
   equipe: [
     'views/AgentesView.tsx', 'components/AgentProfile.tsx', 'components/NewAgentDialog.tsx', 'components/NewGroupDialog.tsx',
@@ -30,17 +30,17 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // a janela do agente e Treinar
   agente: ['components/AgentWindow.tsx', 'components/TrainTab.tsx', 'components/CompetenciasProntas.tsx', 'components/AdicionarCompetencia.tsx', 'lib/competencias-tela.ts'],
   rotinas: ['views/RotinasView.tsx'],
-  conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts', 'views/world/ConexoesNuvem.tsx'],
+  conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModoLiberarTudo.tsx', 'components/PastasDoComputador.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts', 'views/world/ConexoesNuvem.tsx'],
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
-    'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'views/LojaView.tsx', 'views/LojaPublicar.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
+    'views/DocumentosView.tsx', 'components/Documento.tsx', 'components/RevisarDocumento.tsx', 'lib/documento.ts', 'views/PacotesPanel.tsx', 'views/LojaView.tsx', 'views/LojaPublicar.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
     'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts', 'arte/figuras.ts', 'arte/Cena.tsx', 'views/world/Gestao.tsx', 'views/world/pessoas.ts', 'views/world/carrinho.ts',
     'views/world/SeloWorld.tsx', 'views/world/compra-rapida.ts', 'views/world/vivo.ts', 'views/world/EstadoWorld.tsx', 'views/world/Governanca.tsx', 'views/world/governanca.ts', 'views/world/governanca-nav.ts', 'views/world/Enfeites.tsx',
   ],
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [
     'views/ConfiguracaoView.tsx', 'components/AiAccounts.tsx', 'components/CapacidadesPanel.tsx', 'lib/recursos.ts', 'lib/custo.ts', 'views/AtualizacoesPanel.tsx', 'lib/atualizacoes.ts', 'views/SaudePanel.tsx',
-    'components/AjustesEquipe.tsx', 'lib/ajustes.ts',
+    'components/AjustesEquipe.tsx', 'lib/ajustes.ts', 'components/ModelosEntrega.tsx', 'components/ComputadorAjustes.tsx', 'components/IdentidadeDocumentos.tsx',
   ],
   // Entrar, Segurança, Minha conta e Pessoas
   conta: ['components/AuthFlow.tsx', 'components/TermosDeUso.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],

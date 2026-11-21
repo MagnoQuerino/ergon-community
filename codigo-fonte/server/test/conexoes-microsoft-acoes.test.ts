@@ -63,9 +63,14 @@ describe('catálogo', () => {
       'email.enviar_rascunho': 'enviar', 'email.mover': 'organizar', 'email.apagar': 'apagar', 'agenda.calendarios': 'ler', 'agenda.listar': 'ler', 'agenda.cancelar': 'apagar',
       'arquivos.buscar': 'ler', 'arquivos.ler': 'ler', 'arquivos.criar': 'organizar', 'pessoas.buscar': 'ler', 'teams.conversas': 'ler', 'teams.ler': 'ler', 'teams.enviar': 'enviar',
       'teams.nova_conversa': 'enviar', 'teams.times': 'ler', 'teams.canais': 'ler', 'teams.enviar_canal': 'enviar', 'teams.ler_canal': 'ler',
+      // rc.42: o escritório no OneDrive
+      'arquivos.pasta': 'organizar', 'arquivos.mover': 'organizar', 'arquivos.renomear': 'organizar', 'arquivos.copiar': 'organizar', 'planilha.ler': 'ler', 'planilha.editar': 'organizar',
+      'documento.editar': 'organizar', 'arquivos.compartilhar': 'enviar', 'arquivos.apagar': 'apagar', 'arquivos.apagar_de_vez': 'apagar',
     };
     for (const [id, r] of Object.entries(esperado)) assert.equal(riscoDe(id), r, id);
     assert.deepEqual(ACOES_MICROSOFT.map((a) => a.id).sort(), [...Object.keys(esperado), 'agenda.criar', 'agenda.editar'].sort());
+    // apagar de vez é sempre-protegida: nem "Liberar tudo" passa por cima (regra.ts)
+    assert.deepEqual(ACOES_MICROSOFT.filter((a) => a.protegida).map((a) => a.id), ['arquivos.apagar_de_vez']);
   });
   test('convidar é enviar; só organizar a agenda, não', () => {
     assert.equal(riscoDe('agenda.criar', { participantes: ['a@x.com'] }), 'enviar');

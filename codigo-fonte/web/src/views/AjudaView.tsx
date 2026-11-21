@@ -109,6 +109,7 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.conexoes.i2', { apps: <b>{t('ajuda.conexoes.i2Apps')}</b> })}</li>
         <li>{tn('ajuda.conexoes.i3', { quadros: <b>{t('ajuda.conexoes.i3Quadros')}</b> })}</li>
         <li>{tn('ajuda.conexoes.i4', { nuvem: <b>{t('ajuda.conexoes.i4Nuvem')}</b> })}</li>
+        <li>{tn('ajuda.conexoes.i5', { maos: <b>{t('ajuda.conexoes.i5Maos')}</b> })}</li>
       </ul>
       <p>{tn('ajuda.conexoes.p', { link: <Go c={c} v="conexoes">{t('ajuda.lugar.conexoes')}</Go> })}</p>
     </> },
@@ -130,6 +131,8 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.seguranca.i4', { duas: <b>{t('ajuda.seguranca.i4Duas')}</b> })}</li>
         <li>{t('ajuda.seguranca.i5')}</li>
         <li>{tn('ajuda.seguranca.i6', { sincronia: <b>{t('ajuda.seguranca.i6Sincronia')}</b> })}</li>
+        <li>{t('ajuda.seguranca.i7')}</li>
+        <li>{t('ajuda.seguranca.i8')}</li>
       </ul>
     </> },
   { id: 'temas', title: () => t('ajuda.temas.titulo'), icon: 'palette', keywords: () => t('ajuda.temas.palavras'),

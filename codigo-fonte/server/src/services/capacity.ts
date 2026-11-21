@@ -134,7 +134,7 @@ export function createAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
       // ferramentas que executam código nunca vêm de graça: só por autorização com a senha (permissão na conversa ou perfil);
       // encaminhar as demandas é só do Coordenador. Sem lista pedida: as do setor mais os benefícios (regra do dono, 12/11:
       // vem tudo ligado; a pessoa tira de quem não precisa)
-      const tools = [...new Set([...(input.tools?.length ? cleanList(input.tools, 20, 30).filter((t) => TOOLS[t]) : comBeneficios(sector.tools)), 'contas'])]
+      const tools = [...new Set([...(input.tools?.length ? cleanList(input.tools, 60, 30).filter((t) => TOOLS[t]) : comBeneficios(sector.tools)), 'contas'])]
         .filter((t) => !TOOLS[t]?.guarded && !COORDINATOR_ONLY.includes(t));
       const skills = input.skills?.length ? cleanList(input.skills, 12, 80) : sector.skills.slice(0, 3);
       const charter = input.charter?.trim() ? input.charter.trim().slice(0, 4000) : defaultCharter(role, sector.name, sector.description);
@@ -194,7 +194,7 @@ export function updateAgent(db: Db, bus: Bus, workspaceId: string, actorUserId: 
       if (p.sectorKey !== undefined) set('profile_id', sectorByKey(db, workspaceId, p.sectorKey).id, 'setor');
       if (p.charter !== undefined) set('charter', db.seal(workspaceId, p.charter.trim().slice(0, 4000) || null), 'instruções');
       if (p.skills !== undefined) set('skills', JSON.stringify(cleanList(p.skills, 12, 80)), 'métodos');
-      if (p.tools !== undefined) set('tools', JSON.stringify(cleanList(p.tools, 20, 30).filter((t) => TOOLS[t])), 'ferramentas');
+      if (p.tools !== undefined) set('tools', JSON.stringify(cleanList(p.tools, 60, 30).filter((t) => TOOLS[t])), 'ferramentas');
       if (p.hermesSkills !== undefined) set('hermes_skills', JSON.stringify(cleanList(p.hermesSkills, 200, 80)), 'skills');
       if (p.model !== undefined) { set('model', p.model || null, 'modelo'); set('provider', p.model ? p.provider ?? null : null, 'conta do modelo'); }
       if (p.color !== undefined && /^#[0-9a-f]{6}$/i.test(p.color)) set('color', p.color, 'cor');

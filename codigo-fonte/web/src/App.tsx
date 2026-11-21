@@ -40,6 +40,7 @@ const Governanca = govMod ? lazy(govMod) : null;
 const govNavMod = Object.values(import.meta.glob<{ useGovernancaNav: () => 'aberto' | 'trancado' | null }>('./views/world/governanca-nav.ts', { eager: true }))[0];
 const useGovernancaNav = govNavMod?.useGovernancaNav ?? ((): 'aberto' | 'trancado' | null => null);
 import { useSurface } from './lib/surface.ts';
+import { CartoesComputador, SeloComputador, useComputador } from './components/ComputadorControle.tsx';
 
 // As outras áreas chegam sob demanda (a Cidade, a primeira tela, já vem no pacote principal): o app abre mais leve, e
 // logo depois de abrir, com o navegador ocioso, todas são buscadas em segundo plano para a troca de área ser imediata.
@@ -258,9 +259,9 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const [card, setCard] = useState<string | null>(null);
   // de onde o card abriu: de "Aguardando você", a lista fica embaixo (escondida) e o card ganha "Voltar" — uma pilha
   const [cardDe, setCardDe] = useState<OrigemDoCard | null>(null);
-  const [convs, setConvs] = useState<{ agentId: string | null; conversationId: string | null } | null>(null);
+  const [convs, setConvs] = useState<{ agentId: string | null; conversationId: string | null; salaId?: string | null; foco?: string | null } | null>(null);
   useEffect(() => onOpenCard((id, de) => { if (de !== 'decisoes') setDecisions(false); setCardDe(de); setCard(id); }), []);
-  useEffect(() => onOpenConversation((agentId, conversationId) => { setDecisions(false); setWin(null); setConvs({ agentId, conversationId }); }), []);
+  useEffect(() => onOpenConversation((agentId, conversationId, salaId, foco) => { setDecisions(false); setWin(null); setConvs({ agentId, conversationId, salaId: salaId ?? null, foco: foco ?? null }); }), []);
   useEffect(() => onOpenDecisions(() => { setCard(null); setDecisions(true); }), []);
   // primeiro acesso (perguntas de boas-vindas) ou refazer pela Ajuda; tour inicial; objetivo contado nas perguntas
   const [onb, setOnb] = useState<'first' | 'redo' | null>(() => (me.onboarding === 'pending' && me.role === 'owner' ? 'first' : null));
@@ -268,6 +269,8 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const [goal, setGoal] = useState('');
   useEffect(() => onOverlay(!!onb || tour), [onb, tour]); // eslint-disable-line react-hooks/exhaustive-deps
   const live = useLiveStatus();
+  // rc.42: o controle do computador (selo na barra, cartões por cima de qualquer tela)
+  const pc = useComputador();
   useEffect(() => startLive(), []);
   const theme = useTheme();
   useEffect(() => startActivity(me.idleMinutes, onIdle), [me.idleMinutes]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -302,6 +305,10 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   // avisos que pedem ação: nunca somem por falta de espaço (na janela estreita viram um contador que abre o Estado)
   const alerts: Alert[] = [
     ...(sim ? [{ id: 'sem-ia', label: t('geral.alerta.semIa'), tone: 'warn' as const, title: t('geral.alerta.semIaDica'), act: () => setView('configuracao') }] : []),
+    // rc.42: sem nenhuma recuperação (a pessoa escolheu "decidir depois") ou a do World a refazer: um lembrete discreto
+    ...(me.protected && me.mode === 'local' && (!me.recovery || me.recoveryWorldStale) ? [me.recoveryWorldStale
+      ? { id: 'recuperacao', label: t('geral.alerta.recuperacaoMudou'), tone: 'warn' as const, title: t('geral.alerta.recuperacaoMudouDica'), act: () => goHash('#configuracao?seguranca') }
+      : { id: 'recuperacao', label: t('geral.alerta.semRecuperacao'), tone: 'warn' as const, title: t('geral.alerta.semRecuperacaoDica'), act: () => goHash('#configuracao?seguranca') }] : []),
     ...(ver.data && ver.data.version !== __ERGON_VERSION__ ? [{ id: 'reload', label: t('geral.alerta.novaVersao'), tone: 'warn' as const, title: t('geral.alerta.novaVersaoDica', { nova: ver.data.version, atual: __ERGON_VERSION__ }), act: () => location.reload() }] : []),
   ];
   // trocar de área limpa o endereço antes (o card aberto numa área não reabre na outra: o painel não fecha mais antes do clique)
@@ -395,6 +402,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
         <span className="topbar__icons">
           {/* o plano e os Dracmas do workspace no Ergon World (módulo do World): ao lado do Estado */}
           {SeloWorld && <Suspense fallback={null}><SeloWorld /></Suspense>}
+          <SeloComputador e={pc.data} onMudou={pc.reload} />
           <span className="topbar__statuswrap">
             <button className={`tb-icon ${statusOpen ? 'is-on' : ''}`} data-keep-surface onClick={() => setStatusOpen((v) => !v)} aria-expanded={statusOpen}
               aria-label={`${t('geral.estado.rotulo')}: ${[t('geral.estado.emExecucao', { n: running }), queued ? t('geral.estado.naFila', { n: queued }) : ''].filter(Boolean).join(', ')}${alerts.length ? `; ${t('geral.estado.avisos', { n: alerts.length })}: ${alerts.map((a) => a.label).join(', ')}` : ''}`}
@@ -524,6 +532,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
       </Suspense>
       <ConversationDock coordinator={coordinator} hidden={!!convs || !!win || focus || tour || !!onb} />
       <AvisoDeDownload />
+      <CartoesComputador e={pc.data} onMudou={pc.reload} />
 
     </div>
   );

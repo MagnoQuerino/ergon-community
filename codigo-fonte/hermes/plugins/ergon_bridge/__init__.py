@@ -76,7 +76,7 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.8.0"
+PLUGIN_VERSION = "0.9.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
@@ -101,9 +101,12 @@ PLUGIN_VERSION = "0.8.0"
 # gestao (rc.29): o coordenador gerencia e configura o Ergon pelas ferramentas gestao_listar e gestao_executar (conjunto
 # ergon_gestao, só no perfil dele), que repassam ao Ergon (/internal/bridge/v1/gestao)
 # navegador (rc.41): a pessoa vê o navegador do agente ao vivo e assume o controle (/ergon/v1/navegador, navegador.py)
+# git (rc.42): o acesso de código de curta duração das Conexões vai só ao git (credential helper), nunca ao modelo
+# computador (rc.42): o controle do computador da pessoa (computer_use pelo provedor "ergon", que manda cada ação ao Ergon e
+# dali ao Ergon Desktop), a administração do Discord (discord_admin) e o diagnóstico para quem programa (debugging)
 CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao",
                "perfis", "memoria", "ajudantes", "modelos_tarefa", "ajustes", "cota", "pausa", "nao_treinar", "cartoes", "comandos",
-               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador")
+               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "git", "computador")
 _TS_CONEXOES = "ergon_conexoes"
 # Os conjuntos de ferramentas que este plugin registra ficam em _ERGON_PLUGIN_TOOLSETS, mais abaixo (o mesmo de
 # ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
@@ -413,11 +416,79 @@ def _who_has(tool_name: str, holders: dict[str, list[str]]) -> list[str]:
     return names
 
 
+# ---------------------------------------------------------------- protegidas no Terminal (rc.42)
+# Com o acesso total (ou "Liberar tudo"), o Terminal roda sem perguntar — menos o que apaga de vez: o comando que se
+# parece com isso pede o clique da pessoa a cada vez, num cartão (perguntar), como as ações protegidas das Conexões. Vale
+# para as pastas do computador (/pastas) e para o resto. Lista alinhada à do controle do computador (computador.ts).
+_APAGAR_DE_VEZ = [re.compile(p, re.I) for p in (
+    r"\brm\s+(?:-[a-z]*[rf][a-z]*\s+)+", r"\bfind\b[^\n]*\s-delete\b", r"\bgit\s+push\b[^\n]*(?:--force\b|\s-f\b|--delete\b|\s:[\w./-]+)",
+    r"\bgit\s+clean\s+-[a-z]*f", r"\bgit\s+reset\s+--hard\b", r"\bgit\s+branch\s+-D\b", r"\bgh\s+repo\s+delete\b", r"\bglab\s+repo\s+delete\b",
+    r"\bshred\b", r"\bmkfs(?:\.\w+)?\b", r"\bdd\s+[^\n]*of=/dev/", r"\bDROP\s+(?:TABLE|DATABASE|SCHEMA)\b", r"\bTRUNCATE\s+TABLE\b",
+    r"shutil\.rmtree", r"\bos\.(?:remove|unlink|rmdir)\b", r"\bPath\([^)]*\)\.unlink\b")]
+_PROTEGIDAS_TOOLS = frozenset({"terminal", "execute_code", "process_manage"})
+_PERMITIR = "Permitir desta vez"
+
+
+def _comando_de(tool_name: str, args: Any) -> str:
+    if not isinstance(args, dict):
+        return ""
+    return str(args.get("command") or args.get("code") or args.get("cmd") or "")[:4000]
+
+
+def apaga_de_vez(comando: str) -> bool:
+    return any(p.search(comando or "") for p in _APAGAR_DE_VEZ)
+
+
+def _motor_ja_pergunta(tool_name: str, cmd: str) -> bool:
+    """O portão do próprio Hermes vai parar o turno e pedir à pessoa este comando (aprovações nativas, rc.27: approvals.mode
+    manual, o que o cofre deixa, e um /v1/runs que responde ao approval.request pelo cartão do Ergon)? Aí o plugin não
+    pergunta de novo: a pessoa veria dois cartões para o mesmo rm -rf. Fora disso (o motor não acha perigoso, sem ninguém
+    para responder, modo "off"/yolo ou "smart"), quem pergunta é o plugin. Na dúvida (módulo do Hermes mudou), pergunta."""
+    if tool_name != "terminal":
+        return False
+    try:
+        from tools import approval, approval_context  # módulos do Hermes
+        from tools.approval_detection import detect_dangerous_command
+        if approval.is_approval_bypass_active() or approval_context._get_approval_mode() != "manual":
+            return False
+        if not detect_dangerous_command(cmd)[0]:
+            return False
+        _cb, is_cli, is_gateway, is_ask = approval._presence(None)
+        return bool(is_cli or is_gateway or is_ask)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _protegida_no_terminal(tool_name: str, args: Any, task_id: str, session_id: str) -> dict[str, Any] | None:
+    if tool_name not in _PROTEGIDAS_TOOLS:
+        return None
+    cmd = _comando_de(tool_name, args)
+    if not apaga_de_vez(cmd) or _motor_ja_pergunta(tool_name, cmd):
+        return None
+    s, t = _sessao_do_pedido(session_id, task_id)
+    r = _cartao("pergunta", {"perguntas": [{"qid": "q1", "pergunta": f"Apagar de vez? O agente quer rodar:\n{cmd[:1500]}", "opcoes": [_PERMITIR, "Não permitir"], "varias": False}]}, s, t)
+    respostas = r.get("respostas") if isinstance(r.get("respostas"), dict) else {}
+    escolha = respostas.get("q1")
+    escolha = escolha[0] if isinstance(escolha, list) and escolha else escolha
+    if r.get("estado") == "respondida" and str(escolha or "") == _PERMITIR:
+        return None
+    return {"action": "block", "message": "Este comando apaga de vez: a pessoa não permitiu (ou não respondeu). Não tente outro jeito de apagar; siga sem ele e diga o que ficou de fora."}
+
+
 def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", session_id: str = "", **kw: Any) -> dict[str, Any] | None:
     """As travas do Ergon e, se o comando do terminal passou por elas, a reescrita pelo RTK (saída compacta)."""
     r = _pre_tool_call_travas(tool_name=tool_name, args=args, task_id=task_id, session_id=session_id, **kw)
+    if r is None:
+        try:
+            r = _protegida_no_terminal(str(tool_name or ""), args, str(task_id or ""), str(session_id or ""))
+        except Exception:  # noqa: BLE001 - na dúvida, não deixa apagar de vez
+            r = {"action": "block", "message": "Este comando apaga de vez e não deu para pedir a aprovação da pessoa agora. Siga sem ele."}
     if r is None and tool_name == "terminal":
         _rtk_reescrever(args)
+    if r is None and tool_name == "computer_use":
+        r = _computador_antes(args, str(session_id or ""), str(task_id or ""))
+    if r is None and tool_name == "discord_admin":
+        r = _discord_antes(args)
     if r is None and str(tool_name or "").startswith("browser"):
         # a pessoa assumiu o navegador deste trabalho (navegador.py): a ferramenta espera ela devolver
         try:
@@ -426,6 +497,65 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
         except Exception:  # noqa: BLE001 - a espera é de apoio: uma falha aqui não barra a ferramenta
             r = None
     return r
+
+
+# ---------------------------------------------------------------- controle do computador e Discord (rc.42)
+# computer_use: quem decide cada ação é o Ergon (o provedor "ergon", hermes/plugins/computer_use_ergon, manda a ação pela
+# ponte; o Ergon confere se está ligado, bloqueado, se é protegida, se a pessoa assumiu, e pergunta no cartão). Aqui:
+# - na nuvem do workspace não há área de trabalho (o supervisor da nuvem marca ERGON_SEM_AREA_DE_TRABALHO): recusa com a frase;
+# - a sessão e o card da chamada vão para o provedor (o lugar comum "ergon_computador_contexto", na mesma linha de execução);
+# - o portão de aprovação do próprio Hermes para cada clique fica aprovado nesta sessão: o portão que vale é o do Ergon
+#   (sem isto, cada clique viraria também um cartão genérico do motor).
+COMPUTADOR_BACKEND = "ergon"
+_COMPUTADOR_CONTEXTO = "ergon_computador_contexto"
+_COMPUTADOR_NUVEM = ("Na nuvem não há área de trabalho: o controle do computador só funciona com o Ergon Desktop aberto no computador "
+                     "da pessoa. Faça o trabalho por outro caminho (Conexões, navegador) ou diga em uma frase que isso precisa ser feito "
+                     "no computador dela.")
+_CUA_ACOES = ("click", "double_click", "right_click", "middle_click", "drag", "scroll", "type", "key", "set_value", "focus_app", "bring_to_front")
+
+
+def _computador_contexto(session_id: str, task_id: str) -> None:
+    import types
+    m = sys.modules.get(_COMPUTADOR_CONTEXTO)
+    if m is None:
+        m = types.ModuleType(_COMPUTADOR_CONTEXTO)
+        m.local = threading.local()  # type: ignore[attr-defined]
+        sys.modules[_COMPUTADOR_CONTEXTO] = m
+    m.local.sessao = (session_id[:200], task_id[:200])  # type: ignore[attr-defined]
+    m.ultimo = m.local.sessao  # type: ignore[attr-defined]
+
+
+def _computador_antes(args: Any, session_id: str, task_id: str) -> dict[str, Any] | None:
+    if os.environ.get("ERGON_SEM_AREA_DE_TRABALHO") == "1":
+        return {"action": "block", "message": _COMPUTADOR_NUVEM}
+    s, t = _sessao_do_pedido(session_id, task_id)
+    _computador_contexto(s, t)
+    try:
+        from tools.approval import approve_session  # módulo do Hermes
+        from tools.approval_context import get_current_session_key
+        chave = get_current_session_key()
+        for acao in _CUA_ACOES:
+            for modo in ("background", "foreground"):
+                approve_session(chave, f"cua:{acao}:{modo}")
+    except Exception:  # noqa: BLE001 - sem o portão do motor: o do Ergon continua valendo
+        pass
+    return None
+
+
+# discord_admin: apagar uma mensagem é para sempre — sempre o cartão da pessoa (o portão de aprovação do motor, que o Ergon
+# mostra), um por mensagem. O resto (listar, fixar, cargos) segue: a pessoa ligou a ferramenta para isso.
+_DISCORD_ID = re.compile(r"\d{5,25}")
+
+
+def _discord_antes(args: Any) -> dict[str, Any] | None:
+    a = args if isinstance(args, dict) else {}
+    if str(a.get("action") or "") != "delete_message":
+        return None
+    canal = str(a.get("channel_id") or "")
+    msg = str(a.get("message_id") or "")
+    canal, msg = (canal if _DISCORD_ID.fullmatch(canal) else "?"), (msg if _DISCORD_ID.fullmatch(msg) else "?")
+    return {"action": "approve", "rule_key": f"ergon_discord_delete_{hashlib.sha256(f'{canal}:{msg}'.encode()).hexdigest()[:24]}",
+            "message": f"Delete a Discord message for good (channel {canal}, message {msg})"}
 
 
 # ---------------------------------------------------------------- RTK (rc.36): saída do terminal compacta
@@ -544,12 +674,118 @@ def _lembrar_web(session_id: str, task_id: str) -> None:
         _web_lida[f"{session_id}|{task_id}"] = time.time()
 
 
+# ---------------------------------------------------------------- código: o acesso de git de curta duração (rc.42)
+# codigo.preparar (Conexões) devolve, além do texto, um acesso de UM repositório e UM trabalho: o caminho no Ergon
+# (/internal/git/v1/<app>/<repo>.git) e uma senha de uso curto. Aqui a senha vai só para o arquivo que o credential helper
+# (git_credencial.py) lê — 0600, na pasta do motor — e sai da resposta antes de ela chegar ao modelo. O git do Terminal
+# acha o helper pela configuração do sistema (ou, sem permissão, a de cada casa de perfil), só para o endereço do Ergon:
+# nada vai ao .git/config do repositório nem ao ambiente do agente. O token da conexão nunca passa por aqui.
+_git_lock = threading.Lock()
+_git_senhas: set[str] = set()
+_GIT_ARQUIVO = "credenciais.json"
+
+
+def _git_pasta() -> Path:
+    return _raiz() / "ergon_bridge" / "git"
+
+
+def _git_prefixo() -> str:
+    u = urllib.parse.urlsplit(_url())
+    return f"{u.scheme}://{u.netloc}/internal/git/"
+
+
+def _git_ler() -> dict[str, Any]:
+    try:
+        d = json.loads((_git_pasta() / _GIT_ARQUIVO).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _git_gravar(d: dict[str, Any]) -> None:
+    pasta = _git_pasta()
+    pasta.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        os.chmod(pasta, 0o700)
+    tmp = pasta / f".{_GIT_ARQUIVO}.{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+    os.replace(tmp, pasta / _GIT_ARQUIVO)
+
+
+def _git_configurar() -> None:
+    """O git do Terminal usa o helper só para o endereço do Ergon (credential.<url>.helper, com useHttpPath: cada
+    repositório tem a sua senha). Primeiro a configuração do sistema; sem permissão, a de cada casa de perfil."""
+    prefixo = _git_prefixo()
+    helper = f'!"{sys.executable}" "{Path(__file__).with_name("git_credencial.py")}" "{_git_pasta()}"'
+    entradas = ((f"credential.{prefixo}.helper", helper), (f"credential.{prefixo}.useHttpPath", "true"))
+
+    def gravar(alvo: list[str]) -> bool:
+        try:
+            for k, v in entradas:
+                subprocess.run(["git", "config", *alvo, "--replace-all", k, v], check=True, capture_output=True, timeout=10)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    gravar(["--system"])
+    # as casas dos perfis também (o Terminal de um perfil tem HOME própria no contêiner): vale se o sistema não deixou
+    casas = {_raiz() / "home", Path.home(), *(_raiz() / "profiles").glob("*/home")}
+    for casa in casas:
+        with contextlib.suppress(Exception):
+            if casa.is_dir():
+                gravar(["--file", str(casa / ".gitconfig")])
+
+
+def _git_guardar(acesso: dict[str, Any], dono: str) -> str:
+    """Guarda a senha para o git e devolve o endereço (sem senha) que o agente usa no git clone."""
+    url = _url_for(str(acesso.get("caminho") or ""))
+    senha = str(acesso.get("senha") or "")
+    try:
+        from datetime import datetime
+        expira = datetime.fromisoformat(str(acesso.get("expira") or "").replace("Z", "+00:00")).timestamp()
+    except Exception:  # noqa: BLE001
+        expira = time.time() + 3600
+    with _git_lock:
+        d = {k: v for k, v in _git_ler().items() if isinstance(v, dict) and float(v.get("expira", 0)) > time.time()}
+        d[url] = {"usuario": str(acesso.get("usuario") or "ergon"), "senha": senha, "expira": expira, "dono": dono}
+        _git_gravar(d)
+        _git_senhas.add(senha)
+    _git_configurar()
+    with contextlib.suppress(Exception):
+        from agent.redact import register_vault_redaction_value  # módulo do Hermes
+        register_vault_redaction_value(senha)
+    return url
+
+
+def _git_esquecer(dono: str) -> None:
+    """O acesso acabou (codigo.encerrar): o git deste pedido não tem mais a senha (o Ergon já a recusa)."""
+    with _git_lock:
+        d = {k: v for k, v in _git_ler().items() if isinstance(v, dict) and v.get("dono") != dono and float(v.get("expira", 0)) > time.time()}
+        _git_gravar(d)
+
+
+def _git_da_resposta(data: dict[str, Any], key: str) -> None:
+    acesso = data.pop("git", None)
+    fim = data.pop("gitFim", None)
+    if isinstance(acesso, dict) and acesso.get("senha"):
+        try:
+            url = _git_guardar(acesso, key)
+            data["texto"] = str(data.get("texto") or "").replace("{{git_url}}", url)
+        except Exception:  # noqa: BLE001 - sem onde guardar: o agente fica sabendo, e nada da senha vai ao modelo
+            logger.warning("ergon_bridge: acesso de git não guardado", exc_info=False)
+            data["texto"] = "O acesso ao código foi aberto, mas o motor não conseguiu entregá-lo ao git. Diga isso à pessoa."
+    if fim:
+        _git_esquecer(key)
+
+
 def _conexoes(payload: dict[str, Any], session_id: str, task_id: str) -> str:
     session_id, task_id = _sessao_do_pedido(session_id, task_id)
     key = f"{session_id}|{task_id}"
     base = {"session_id": session_id[:200], "task_id": task_id[:200]}
     try:
-        data = _post_to(_url_for("/internal/bridge/v1/conexoes"), {**payload, **base, "leu_web": key in _web_lida}, timeout=_CONEXOES_TIMEOUT)
+        data = _post_to(_url_for("/internal/bridge/v1/conexoes"), {**payload, **base, "leu_web": key in _web_lida, "git": True}, timeout=_CONEXOES_TIMEOUT)
     except Exception:  # noqa: BLE001 - a resposta ao modelo diz o que houve; ele não pode fingir que fez
         # sem o nome da exceção: o modelo tende a repetir a frase à pessoa
         return json.dumps({"ok": False, "status": "falhou", "texto": "O sistema não respondeu. Não sei se a ação foi feita: diga isso à pessoa."}, ensure_ascii=False)
@@ -568,6 +804,8 @@ def _conexoes(payload: dict[str, Any], session_id: str, task_id: str) -> str:
                 data = depois
         except Exception:  # noqa: BLE001 - fica o "espera a confirmação" de antes: a resposta segue depois
             pass
+    # o acesso de git (codigo.preparar) vai ao git, nunca ao modelo
+    _git_da_resposta(data, key)
     # esta sessão pode ter acabado de ler conteúdo privado: a próxima ferramenta confere a política de novo
     with _policy_lock:
         _policy_cache.pop(key, None)
@@ -1047,6 +1285,10 @@ def _config_do_perfil(base: dict[str, Any], e: dict[str, Any]) -> dict[str, Any]
         nav = dict(cfg.get("browser")) if isinstance(cfg.get("browser"), dict) else {}
         nav["backend"] = "off"
         cfg["browser"] = nav
+    # controle do computador (rc.42): sempre o provedor do Ergon (o cua-driver controlaria a tela do próprio contêiner)
+    cu = dict(cfg.get("computer_use")) if isinstance(cfg.get("computer_use"), dict) else {}
+    cu["backend"] = COMPUTADOR_BACKEND
+    cfg["computer_use"] = cu
     kn = cfg.get("known_plugin_toolsets") if isinstance(cfg.get("known_plugin_toolsets"), dict) else {}
     conhecidos = sorted(set(_lista_cfg(kn.get("api_server"))) | set(_ERGON_PLUGIN_TOOLSETS))
     cfg["known_plugin_toolsets"] = {**kn, "api_server": list(conhecidos), "cli": list(conhecidos), "cron": list(conhecidos)}
@@ -2268,7 +2510,7 @@ def cota(forcar: bool = False) -> dict[str, Any]:
 # (tools/terminal_tool_sudo.py, por sessão: na API, a sessão é a própria execução) e não é gravada em lugar nenhum.
 _TS_CARTOES = "ergon_cartoes"
 _ERGON_PLUGIN_TOOLSETS = (_TS_CONEXOES, _TS_CARTOES, _TS_GESTAO)
-_CARTOES_TOOLS = frozenset({"perguntar", "pedir_chave", "pedir_senha_admin"})
+_CARTOES_TOOLS = frozenset({"perguntar", "pedir_chave", "pedir_senha_admin", "entregar"})
 _CARTAO_ESPERA = float(os.environ.get("ERGON_CARTAO_ESPERA_S", "240"))
 _CARTAO_PASSO = float(os.environ.get("ERGON_CARTAO_PASSO_S", "2"))
 _CHAVE_NOME = re.compile(r"[A-Z][A-Z0-9_]{2,60}")
@@ -2426,6 +2668,8 @@ def _valores_guardados() -> list[str]:
     vistos = {os.environ.get(n) or "" for n in nomes} | {env.get(n) or "" for n in nomes}
     with _chaves_lock:
         vistos |= set(_sudo_valores)
+    # as senhas de uso curto do acesso de git (rc.42): um `cat` do arquivo do helper não as leva ao modelo
+    vistos |= set(_git_senhas)
     # as chaves dos aplicativos conectados pela pessoa (rc.29), guardadas no .env do cofre: nunca voltam ao modelo. Só as
     # de 8 caracteres ou mais (um valor curto, como "1", trocaria pedaços de qualquer texto)
     vistos |= {v for n, v in env.items() if n.startswith(_MCP_ENV_PREFIXO) and isinstance(v, str) and len(v) >= 8}
@@ -2721,6 +2965,41 @@ def _perguntar_schema() -> dict[str, Any]:
                 + " The question is shown to the user as a card in Ergon and the answer comes back here; if the user has not answered yet, end your turn and wait."}
     except Exception:  # noqa: BLE001
         return _PERGUNTAR_PADRAO
+
+
+# ---------------------------------------------------------------- entregar: a entrega no modelo (rc.42)
+# O cartão da pessoa mostra só o que vem por aqui (o tipo e os itens curtos; o detalhe atrás de "Ver detalhes"). O Ergon
+# valida o modelo (services/modelos-entrega.ts) e devolve os erros quando não passa: o modelo corrige e chama de novo.
+def tool_entregar(args: dict[str, Any], task_id: str = "", session_id: str = "", **_: Any) -> str:
+    session_id, task_id = _sessao_do_pedido(str(session_id or ""), str(task_id or ""))
+    entrega = {k: v for k, v in (args or {}).items()} if isinstance(args, dict) else {}
+    try:
+        data = _post_to(_url_for("/internal/bridge/v1/entrega"), {"session_id": session_id[:200], "task_id": task_id[:200], "entrega": entrega}, timeout=20)
+    except Exception:  # noqa: BLE001 - sem o nome da exceção: o modelo tende a repetir a frase à pessoa
+        return json.dumps({"ok": False, "status": "falhou", "texto": "O sistema não respondeu: termine com o texto da entrega."}, ensure_ascii=False)
+    return json.dumps(data if isinstance(data, dict) else {"ok": False, "status": "falhou"}, ensure_ascii=False)
+
+
+_ENTREGAR = {
+    "name": "entregar",
+    "description": ("Registra a entrega para a pessoa no modelo do Ergon (obrigatório ao terminar um card): o cartão dela mostra só isto. "
+                    "tipo decisao (itens: titulo até 60, contexto, objeto, riscos {prazo, inacao, em_jogo}), entrega (resumo, arquivos, atencao, detalhes), "
+                    "relatorio (resumo, pontos, detalhes), pergunta (pergunta, opcoes, porque) ou bloqueio (motivo, precisa, tentado, detalhes). "
+                    "Se voltar com erros, corrija e chame de novo."),
+    "parameters": {"type": "object", "required": ["tipo"], "properties": {
+        "tipo": {"type": "string", "enum": ["decisao", "entrega", "relatorio", "pergunta", "bloqueio"]},
+        "itens": {"type": "array", "maxItems": 8, "items": {"type": "object", "properties": {
+            "titulo": {"type": "string"}, "acao": {"type": "string"}, "contexto": {"type": "string"}, "objeto": {"type": "string"},
+            "riscos": {"type": "object", "properties": {"prazo": {"type": "string"}, "inacao": {"type": "string"}, "em_jogo": {"type": "string"}}},
+            "extras": {"type": "object"}}}},
+        "resumo": {"type": "string"}, "detalhes": {"type": "string"},
+        "arquivos": {"type": "array", "items": {"type": "string"}}, "atencao": {"type": "array", "items": {"type": "string"}},
+        "pontos": {"type": "array", "items": {"type": "string"}},
+        "pergunta": {"type": "string"}, "opcoes": {"type": "array", "items": {"type": "string"}}, "porque": {"type": "string"},
+        "motivo": {"type": "string"}, "precisa": {"type": "string"}, "tentado": {"type": "array", "items": {"type": "string"}},
+        "extras": {"type": "object", "description": "os campos a mais que a pessoa pediu (veja as instruções do card)"},
+    }},
+}
 
 
 _PEDIR_CHAVE = {
@@ -3189,12 +3468,15 @@ _ROUTES: list[tuple[str, re.Pattern[str], tuple[str, ...]]] = [
 # rc.27: navegador, vídeo (ver e criar), busca no X, leitura de arquivos e voz entram na lista do que a pessoa pode ligar.
 # Regra do dono (12/11): o navegador, ver vídeos, ler arquivos e a voz vêm ligados (migração 10 do cofre), com o aviso de
 # custo ou de risco na tela; busca no X e criar vídeos precisam da chave de outro serviço e ligam quando a pessoa a tiver.
+# rc.42: o controle do computador (computer_use: o provedor "ergon" manda cada ação ao Ergon, que decide, pergunta à pessoa e
+# registra; ligar o conjunto só entrega a ferramenta) e a administração do Discord (discord_admin, com o bot da conversa pelo
+# Discord; apagar mensagem pede o cartão). O diagnóstico (debugging: terminal, processos, arquivos, web) executa código: guardado.
 _SAFE_TOOLSETS = frozenset({"todo", "web", "vision", "image_gen", "skills", "ergon_conexoes", "ergon_cartoes", "browser", "video",
-                            "video_gen", "x_search", "file", "tts"})
+                            "video_gen", "x_search", "file", "tts", "computer_use", "discord_admin"})
 # sempre ligados na API, qualquer que seja a lista pedida: a lista de passos e os cartões (sem eles o agente não tem como
 # perguntar nem pedir uma chave com segurança; quem pode usar é decidido a cada chamada, na trava)
 _SEMPRE_TOOLSETS = frozenset({"todo", _TS_CARTOES})
-_GUARDED_TOOLSETS = frozenset({"code_execution", "terminal"})
+_GUARDED_TOOLSETS = frozenset({"code_execution", "terminal", "debugging"})
 _MAX_BODY = 16 * 1024
 _ROTAS_GRANDES = ("/ergon/v1/meta/julgar", "/ergon/v1/revisao/pedido")
 _control_started = False
@@ -5557,6 +5839,7 @@ def register(ctx) -> None:
     ctx.register_hook("transform_tool_result", on_transform_tool_result)
     ctx.register_hook("post_llm_call", on_post_llm_call)
     ctx.register_tool(name="perguntar", toolset=_TS_CARTOES, schema=_perguntar_schema(), handler=tool_perguntar)
+    ctx.register_tool(name="entregar", toolset=_TS_CARTOES, schema=_ENTREGAR, handler=tool_entregar)
     ctx.register_tool(name="pedir_chave", toolset=_TS_CARTOES, schema=_PEDIR_CHAVE, handler=tool_pedir_chave)
     ctx.register_tool(name="pedir_senha_admin", toolset=_TS_CARTOES, schema=_PEDIR_SENHA_ADMIN, handler=tool_pedir_senha_admin)
     _mascarar_guardadas()

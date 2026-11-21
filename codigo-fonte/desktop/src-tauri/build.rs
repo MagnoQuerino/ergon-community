@@ -14,6 +14,10 @@ fn main() {
             "atualizar_ergon",
             "avaliar_volta",
             "voltar_versao",
+            // rc.42: só o selo do controle do computador (capabilities/computador.json)
+            "computador_assumir",
+            "computador_conceder",
+            "computador_estado",
         ]),
     ))
     .expect("falha ao preparar o Tauri");

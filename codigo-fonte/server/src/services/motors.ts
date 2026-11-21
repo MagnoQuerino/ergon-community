@@ -34,6 +34,7 @@
 import { aceitouTermos } from './termos.ts';
 import crypto from 'node:crypto';
 import type { Config } from '../config.ts';
+import type { PastaMontada } from '../lib/pastas-seguras.ts';
 import type { Db } from '../db/db.ts';
 import { clip, safeEqual } from '../lib/util.ts';
 import { log, scrub } from '../lib/log.ts';
@@ -79,6 +80,8 @@ interface EnsureResp {
   ok?: boolean; adopted?: boolean; created?: boolean; recreated?: boolean; stale?: boolean; motivo?: 'ocupado' | 'sem-imagem' | 'nao-parou' | null; image?: string | null; prevImage?: string | null;
   /** o motor está travado na versão anterior porque a configurada foi recusada numa volta atrás (o gerente de antes não manda) */
   held?: boolean;
+  /** rc.42: as pastas do computador montadas agora (o gerente de antes não manda) */
+  pastas?: PastaMontada[];
 }
 /**
  * O gerente não respondeu a tempo (ex.: baixando a imagem nova, de vários GB): ele continua o trabalho, e o Ergon pergunta
@@ -203,12 +206,18 @@ interface MotorDeps {
   /** testes: no lugar do fetch (gerente e receptor do cofre) */
   fetch?: typeof fetch;
 }
+/** rc.42: as pastas do computador concedidas por pessoa (services/pastas.ts); ligado depois de criar, como as outras peças */
+/** null = a pessoa nunca concedeu pasta nenhuma (o pedido ao gerente vai como antes, sem o campo) */
+export type PastasDoMotor = (userId: string) => PastaMontada[] | null;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class Motors {
   readonly perPerson: boolean;
   private readonly d: MotorDeps;
+  /** rc.42: as pastas que cada pessoa concedeu (vão ao gerente em todo ensure) e o que ele montou por último */
+  pastasDe: PastasDoMotor | null = null;
+  private readonly montadas = new Map<string, PastaMontada[]>();
   private readonly master: string;
   private readonly people = new Map<string, MotorClients & { ai: AiService }>();
   private readonly legacyAi: AiService;
@@ -512,6 +521,21 @@ export class Motors {
     return p;
   }
 
+  private pastasDoPedido(userId: string): { pastas?: PastaMontada[] } {
+    const p = this.pastasDe?.(userId) ?? null;
+    return p ? { pastas: p } : {};
+  }
+  /** As pastas do computador montadas agora no motor da pessoa (null = o gerente ainda não disse). */
+  pastasMontadas(userId: string): PastaMontada[] | null { return this.montadas.get(userId) ?? null; }
+  /**
+   * A pessoa concedeu ou revogou uma pasta (rc.42): o motor dela é refeito com o mesmo cofre. Livre agora, já; com
+   * trabalho em andamento, o gerente responde "ocupado" e a renovação de sempre espera o trabalho terminar.
+   */
+  aplicarPastas(userId: string): void {
+    if (!this.perPerson || !this.d.vault.personOpen(userId)) return;
+    void this.ensure(userId).catch(() => undefined);
+  }
+
   /** Nenhuma execução da pessoa está no motor agora (running/waiting_user já enviadas): dá para recriar o contêiner. */
   idle(userId: string): boolean {
     return !this.d.db.get(`SELECT 1 AS x FROM runs r JOIN memberships m ON m.workspace_id = r.workspace_id AND m.role = 'owner'
@@ -586,7 +610,8 @@ export class Motors {
       let falhou = this.falha(userId);
       // depois de uma renovação que voltou atrás, o motor ligado fica como está (nada de recriar de novo em seguida)
       const idle = !falhou && this.idle(userId);
-      const r = await this.manager('POST', `/v1/motors/${userId}/ensure`, { adoptLegacy: this.adoptLegacy(userId), idle, start: true }) as EnsureResp;
+      const r = await this.manager('POST', `/v1/motors/${userId}/ensure`, { adoptLegacy: this.adoptLegacy(userId), idle, start: true, ...this.pastasDoPedido(userId) }) as EnsureResp;
+      if (Array.isArray(r.pastas)) this.montadas.set(userId, r.pastas);
       if (r.adopted && legacyOwner !== userId) setInstanceSetting(db, 'motor_legacy_owner', userId);
       // a trava do gerente (rótulo no contêiner) e a falha gravada aqui contam a mesma história: travado na versão anterior
       // sem a falha gravada (banco de antes desta marca) é falha; a trava que saiu (a imagem configurada mudou) apaga a falha
@@ -800,7 +825,7 @@ export class Motors {
       if (m.stale !== true || !uid || this.pending.has(uid) || this.d.vault.personOpen(uid)) continue;
       if (!this.d.db.get('SELECT 1 AS x FROM users WHERE id = ?', uid) || !this.idle(uid)) continue;
       try {
-        const r = await this.manager('POST', `/v1/motors/${uid}/ensure`, { adoptLegacy: this.adoptLegacy(uid), idle: true, start: false }) as EnsureResp;
+        const r = await this.manager('POST', `/v1/motors/${uid}/ensure`, { adoptLegacy: this.adoptLegacy(uid), idle: true, start: false, ...this.pastasDoPedido(uid) }) as EnsureResp;
         if (r.recreated === true) setInstanceSetting(this.d.db, recriado(uid), String(r.image ?? ''));
         n++;
       } catch { /* tenta quando a pessoa entrar */ }

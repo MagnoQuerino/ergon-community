@@ -35,7 +35,7 @@ test('"Carregando…" das peças comuns vem do dicionário: o Loading, a tela de
   const brand = ler('../brand/Brand.tsx');
   assert.match(brand, /label \?\? t\('geral\.comum\.carregando'\)/);
   assert.doesNotMatch(brand, /label = '/);
-  const logo = ler('../brand/logo.ts');
+  const logo = ler('../../../shared/logo-ergon.ts');
   assert.match(logo, /export function splashHtml\(label: string\): string/, 'a legenda vem de quem chama, no idioma da tela');
   assert.doesNotMatch(logo, /'Carregando/);
   assert.match(ler('../../vite.config.ts'), /splashHtml\(geral\['comum\.carregando'\]\)/);

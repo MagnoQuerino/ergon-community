@@ -24,6 +24,7 @@ import type { Bus, BusEvent } from '../bus.ts';
 import { createConversation, sendMessage } from '../chat.ts';
 import type { WorkspaceOwners } from '../people.ts';
 import { pendingDecisions } from '../proposals.ts';
+import { avisoDoCard } from '../resumo-tarefa.ts';
 import { workspaceTz } from '../routine-proposals.ts';
 import type { RunExecutor } from '../runs.ts';
 import { instanceSetting, setInstanceSetting } from '../security.ts';
@@ -530,7 +531,7 @@ export class TeamsApp {
     if (p.conversation_id && p.workspace_id === ws) {
       const c = this.d.db.get<{ id: string; n: number }>(
         `SELECT c.id, (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS n FROM conversations c JOIN agents a ON a.id = c.agent_id
-          WHERE c.id = ? AND c.workspace_id = ? AND c.owner_user_id = ? AND c.archived_at IS NULL AND a.status = 'active'`, p.conversation_id, ws, userId);
+          WHERE c.id = ? AND c.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0 AND c.archived_at IS NULL AND a.status = 'active'`, p.conversation_id, ws, userId);
       if (c && Number(c.n) < this.d.cfg.maxConversationMessages - 4) return c.id;
     }
     const agente = coordinatorFor(this.d.db, ws) ?? this.d.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at LIMIT 1", ws)?.id;
@@ -991,7 +992,13 @@ export class TeamsApp {
       out.push({ chave: `w:${w.id}`, item: { tipo: 'aviso', titulo: `${w.agent_name} espera uma resposta sua`, texto: '', abrir: 'Abra o Ergon para responder.' } });
     }
     const precisa: Record<string, string> = { info: 'precisa de uma informação sua', review: 'está pronto para você revisar', approval: 'espera a sua aprovação' };
-    for (const c of d.cards) out.push({ chave: `c:${c.id}:${c.work_state}`, item: { tipo: 'aviso', titulo: `Card #${c.number}: ${c.title}`, texto: `${c.agent_name ? `${c.agent_name}: ` : ''}${precisa[c.need] ?? 'espera você'}${c.question ? ` — ${c.question}` : ''}`, abrir: 'Abra o Ergon para responder.' } });
+    for (const c of d.cards) {
+      // com a entrega no modelo: o tipo e os itens curtos do cartão, e o link dos detalhes no Ergon
+      const a = avisoDoCard(this.d.db, ws, c.id, this.d.cfg.publicUrl);
+      out.push({ chave: `c:${c.id}:${c.work_state}`, item: a
+        ? { tipo: 'aviso', titulo: `Card #${c.number} — ${a.titulo}`, texto: a.linhas.join('\n'), abrir: `Ver detalhes: ${a.link}` }
+        : { tipo: 'aviso', titulo: `Card #${c.number}: ${c.title}`, texto: `${c.agent_name ? `${c.agent_name}: ` : ''}${precisa[c.need] ?? 'espera você'}${c.question ? ` — ${c.question}` : ''}`, abrir: 'Abra o Ergon para responder.' } });
+    }
     for (const l of d.linkList) out.push({ chave: `l:${l.id}`, item: { tipo: 'aviso', titulo: `Ligar o card #${l.number} ao #${l.related_number}?`, texto: l.reason ?? '', abrir: 'Abra o Ergon para responder.' } });
     for (const r of d.ruleList) out.push({ chave: `r:${r.id}`, item: { tipo: 'aviso', titulo: 'Regra sugerida', texto: r.text, abrir: 'Abra o Ergon para responder.' } });
     return out;
@@ -1247,13 +1254,13 @@ export class TeamsApp {
    */
   private adotarConversa(userId: string, ws: string, plat: Plataforma): void {
     const p = this.garantirPessoa(userId, ws, plat);
-    const viva = (id: string) => !!this.d.db.get('SELECT 1 AS x FROM conversations WHERE id = ? AND workspace_id = ? AND owner_user_id = ? AND archived_at IS NULL', id, ws, userId);
+    const viva = (id: string) => !!this.d.db.get('SELECT 1 AS x FROM conversations WHERE id = ? AND workspace_id = ? AND owner_user_id = ? AND sala = 0 AND archived_at IS NULL', id, ws, userId);
     if (p.conversation_id && p.workspace_id === ws && viva(p.conversation_id)) return;
     const titulo = plat === 'teams' ? TITULO_CONVERSA : NOME_PLAT[plat];
     const coord = coordinatorFor(this.d.db, ws);
     const achada = this.d.db.all<{ id: string; title: string; agent_id: string }>(
       `SELECT c.id, c.title, c.agent_id FROM conversations c JOIN agents a ON a.id = c.agent_id AND a.status = 'active'
-        WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.archived_at IS NULL
+        WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0 AND c.archived_at IS NULL
         ORDER BY (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) DESC, c.created_at DESC LIMIT 200`, ws, userId)
       .find((c) => c.title === titulo && (!coord || c.agent_id === coord));
     if (!achada) return; // nenhuma ainda: a primeira mensagem cria (e ela vai ao computador pela sincronia)

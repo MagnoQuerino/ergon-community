@@ -28,6 +28,7 @@ services:
       ERGON_ALLOWED_ORIGINS: http://localhost:${ERGON_PORT:-8787},http://127.0.0.1:${ERGON_PORT:-8787}
       ERGON_MS_CLIENT_ID: ${ERGON_MS_CLIENT_ID:-}   # app público do Ergon no Microsoft Entra (login com a conta Microsoft)
       ERGON_GOOGLE_CLIENT_ID: ${ERGON_GOOGLE_CLIENT_ID:-}   # cliente OAuth do Ergon no Google Cloud; o segredo fica em ergon.env (secrets)
+      ERGON_HOST_HOME: ${HOME:-}   # rc.42: a casa da pessoa no computador nunca é concedida inteira (Pastas do computador)
       ERGON_OAUTH_REDIRECT_BASE: ${ERGON_OAUTH_REDIRECT_BASE:-}   # só se o Ergon for aberto por outro endereço que não localhost
       ERGON_MODE: local
       ERGON_PUBLIC_URL: http://localhost:${ERGON_PORT:-8787}
@@ -80,6 +81,7 @@ services:
       ERGON_MOTOR_VOLUME_PREFIX: ergon_motor-
       HERMES_MEM_LIMIT: ${HERMES_MEM_LIMIT:-2g}
       HERMES_CPUS: ${HERMES_CPUS:-2.0}
+      ERGON_HOST_HOME: ${HOME:-}   # rc.42: o gerente confere de novo as pastas concedidas (nunca a casa inteira)
     volumes:
       - ${ERGON_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     networks: [ergon-gerente]

@@ -443,7 +443,7 @@ export class Purpose {
         purpose ? `Pedido do usuário: “${clip(purpose, 8000)}”` : '',
         '', parts.join('\n\n'), '',
         round > 1 ? `Esta é a versão ${round}, refeita com os ajustes que a pessoa pediu${(() => { const n = this.lastAdjust(cards.map((c) => c.id)); return n ? `: “${clip(n, 2000)}”` : ''; })()}. Entregue a versão nova completa e diga em uma frase o que mudou.` : '',
-        forYou ? 'Depois da sua mensagem aparecem para a pessoa os botões Aprovar e Pedir ajustes: diga em uma frase, no seu jeito, que fica esperando a aprovação dela (ou os ajustes) para fechar o card.' : '',
+        forYou ? 'Depois da sua mensagem aparecem para a pessoa os botões Aprovar e Devolver com instruções: diga em uma frase, no seu jeito, que fica esperando a aprovação dela (ou os ajustes) para fechar o card.' : '',
         'Agora entregue ao usuário, aqui, exatamente o que ele pediu — no formato e no tamanho pedidos. Se ele pediu um documento (contrato, texto, relatório), entregue a versão final completa, inteira e pronta para usar, já com as correções das revisões. Não descreva o processo e não peça confirmação para entregar. Campos sem dado ficam como [PREENCHER]; se faltar algo, liste em uma frase no fim.',
       ].filter((x) => x !== '').join('\n');
       try {

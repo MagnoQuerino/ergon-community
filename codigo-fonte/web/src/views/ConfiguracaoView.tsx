@@ -4,6 +4,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, DailyLimit, ProcessLimit, Usage } from '../lib/types.ts';
 import { PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, compactarAjuda, compactarAtualizacao, compactarDepois, compactarRotulo, composicaoEstimada, composicaoIntro, composicaoNota, composicaoVazia, detalhe, fatias, passosAjuda, passosCompartilhado, passosDepois, tamanhoMedio } from '../lib/custo.ts';
+import { ComputadorAjustes } from '../components/ComputadorAjustes.tsx';
 import { fmtMoeda, fmtNumero, tn, useT } from '../i18n/index.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -14,9 +15,11 @@ import type { Me, VersionInfo } from '../lib/types.ts';
 type ToolWithHolders = AgentTool & { holders?: { count: number; sample: string[] } };
 import { SaudePanel } from './SaudePanel.tsx';
 import { CapacidadesPanel } from '../components/CapacidadesPanel.tsx';
+import { ModelosEntrega } from '../components/ModelosEntrega.tsx';
 import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
 import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
+import { IdentidadeDocumentos } from '../components/IdentidadeDocumentos.tsx';
 import { MusicCreditsBlock } from '../components/MusicButton.tsx';
 import { ArrumarField, CotaLinhas, MemoriaField, PausaControle, RaciocinioField, ReservaCard, useAjustes } from '../components/AjustesEquipe.tsx';
 import { lazy, Suspense, type ComponentType } from 'react';
@@ -32,7 +35,7 @@ const WorldPanel = worldMod ? lazy(worldMod) : null;
 export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: AppState; me: Me; onMeChanged: () => void; reload: () => void }) {
   const t = useT();
   const admin = me.admin;
-  const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'seguranca' | 'saude' | 'pessoas' | 'world' | 'atualizacoes'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('atualizacoes') ? 'atualizacoes' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world'
+  const [tab, setTab] = useState<'ia' | 'conta' | 'workspace' | 'documentos' | 'seguranca' | 'saude' | 'pessoas' | 'world' | 'atualizacoes'>(() => (location.hash.includes('?conta') ? 'conta' : location.hash.includes('?documentos') ? 'documentos' : location.hash.includes('atualizacoes') ? 'atualizacoes' : location.hash.includes('?workspace') ? 'workspace' : location.hash.includes('seguranca') ? 'seguranca' : location.hash.includes('world') && WorldPanel ? 'world'
     : location.hash.includes('saude') && admin ? 'saude' : location.hash.includes('pessoas') && admin ? 'pessoas' : 'ia'));
   // o menu da conta abre Configurações › Minha conta (ou Workspace) mesmo com Configurações já aberta
   useEffect(() => {
@@ -49,6 +52,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>{t('configuracoes.abas.ferramentas')}</button>
           <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>{t('configuracoes.abas.conta')}</button>
           <button role="tab" aria-selected={tab === 'workspace'} className={`tab ${tab === 'workspace' ? 'tab--on' : ''}`} onClick={() => setTab('workspace')}>{t('configuracoes.abas.workspace')}</button>
+          <button role="tab" aria-selected={tab === 'documentos'} className={`tab ${tab === 'documentos' ? 'tab--on' : ''}`} onClick={() => setTab('documentos')}>{t('configuracoes.abas.documentos')}</button>
           <button role="tab" aria-selected={tab === 'seguranca'} className={`tab ${tab === 'seguranca' ? 'tab--on' : ''}`} onClick={() => setTab('seguranca')}>{t('configuracoes.abas.seguranca')}</button>
           {admin && me.mode === 'local' && <button role="tab" aria-selected={tab === 'pessoas'} className={`tab ${tab === 'pessoas' ? 'tab--on' : ''}`} onClick={() => setTab('pessoas')}>{t('configuracoes.abas.pessoas')}</button>}
           {WorldPanel && <button role="tab" aria-selected={tab === 'world'} className={`tab ${tab === 'world' ? 'tab--on' : ''}`} onClick={() => setTab('world')}>{t('configuracoes.abas.contaErgon')}</button>}
@@ -58,7 +62,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
       </header>
       {/* em tela larga, os cartões em duas colunas (cada um com a largura de ler; os botões perto do que fazem) */}
       <div className={`cfg-corpo cfg-corpo--${tab}`}>
-  {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
+  {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'documentos' ? <IdentidadeDocumentos dono={me.role === 'owner'} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
       </div>
       <VersionCard onOpen={() => setTab('atualizacoes')} />
       <MusicCreditsBlock />
@@ -171,9 +175,13 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
         })()}
       </section>
 
+      <ComputadorAjustes />
+
       <ReservaCard a={ajustes.a} salvar={ajustes.salvar} aviso={ajustes.aviso} />
 
       <CapacidadesPanel dono={dono} />
+
+      <ModelosEntrega dono={dono} />
 
       <section className="card">
         <h3>{t('configuracoes.andamento.titulo')}</h3>

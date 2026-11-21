@@ -14,6 +14,8 @@ import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
 import { activityReport, reportPeriod } from './services/activity-report.ts';
 import { Conexoes, KIND_DEPOIS_DE_LER, KIND_REGRA } from './services/conexoes/servico.ts';
+import { ConcessoesGit, registrarProxyGit } from './services/conexoes/codigo.ts';
+import { Pastas } from './services/pastas.ts';
 import { ALCANCES, PRAZOS_DEPOIS_DE_LER, sugestaoDoAgente, type Alcance, type PrazoDepoisDeLer } from './services/conexoes/regras.ts';
 import type { Permissoes } from './services/conexoes/catalogo.ts';
 import { EspelhoEscrita } from './services/conexoes/espelho.ts';
@@ -37,6 +39,8 @@ import { registerCartaoRoutes } from './routes/cartao.ts';
 import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } from './services/ajustes-motor.ts';
 import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
 import { registerRecursosRoutes } from './routes/recursos.ts';
+import { registerEntregaveisRoutes } from './routes/entregaveis.ts';
+import { RevisaoDocumento } from './services/revisao-documento.ts';
 import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
@@ -44,7 +48,7 @@ import { Recursos } from './services/recursos.ts';
 import { TETO_TEXTO, Transcricoes, ehAudio, foraDoTeto } from './services/transcricoes.ts';
 import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, anterioresParaVoltar, newer } from './version.ts';
-import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
+import { HermesVaultKeeper, type WorldRecoveryHooks, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
 import { Bus, audit } from './services/bus.ts';
 import { archiveAgent, capacityInfo, capacityTotals, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
 import {
@@ -58,7 +62,7 @@ import { executavel, sha256 } from './lib/executavel.ts';
 import { TERMOS_VERSAO, aceitarTermos, codigoPorPadrao, estadoDosTermos, sincronizarCodigoDaEquipe } from './services/termos.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
-import { activeCardsOf, channelNoteFor, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, registrarRespostaDigitada, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
+import { activeCardsOf, channelNoteFor, chatHooks, createConversation, ehSala, registrarSalas, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, registrarRespostaDigitada, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
 import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
 import { Initiative } from './services/initiative.ts';
 import { forkFrom, marksOf, mediaOf, searchAll, setMark, updateConversation, type SearchKind } from './services/conversation-tools.ts';
@@ -74,7 +78,8 @@ import { WhatsAppReader } from './services/whatsapp.ts';
 import { vistaDaAprovacao } from './services/aprovacao-cartao.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
-import { etapaCurta, resumoDaTarefa, semLinhaParaVoce } from './services/resumo-tarefa.ts';
+import { etapaCurta, modeloDaTarefa, resumoDaTarefa, semLinhaParaVoce } from './services/resumo-tarefa.ts';
+import { MAX_RECUSAS, TIPOS, cardDaExecucao, ajustarModelo, lerAjustes, marcarDecisao, modelosAtivos, registrar, registrarRecusa, restaurarModelos, ultimaEntrega, validarEntrega, type PedidoAjuste, type TipoEntrega } from './services/modelos-entrega.ts';
 import { Routines, upgradeBriefingSources } from './services/routines.ts';
 import { parseDue } from './services/due.ts';
 import { workspaceTz } from './services/routine-proposals.ts';
@@ -94,9 +99,10 @@ import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setS
 import { importBoards } from './services/mirror.ts';
 import { RunExecutor, almaDoAgente, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
 import { Navegador } from './services/navegador.ts';
+import { Computador, MODOS, type Escolha, type Modo } from './services/computador.ts';
 import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
 import { ReviewService } from './services/review.ts';
-import { GUARDED_TOOLSETS, TOOLS, ferramentasDesligadas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
+import { COM_CUSTO, GUARDED_TOOLSETS, PROTEGIDAS, TOOLS, abrirFerramentas, acessoTotalDaEquipe, ferramentasDesligadas, ferramentasEfetivas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, setDiscordLigado, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PASSOS_SETTING, compactacaoDaEquipe, medirExecucao, passosDaEquipe, resumoComposicao } from './services/custo.ts';
@@ -104,6 +110,8 @@ import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard,
 import { chaveDaColuna } from './services/colunas.ts';
 import { USER_COLUMNS } from './services/seed.ts';
 import { loadWorld, type CloudTasksHost } from './world-hook.ts';
+import { Salas } from './services/salas/servico.ts';
+import { registerSalasRoutes } from './services/salas/rotas.ts';
 import { providerKeyOf, saveProviderKey } from './services/provider-keys.ts';
 import { exportBlueprint, guardadasPendentes, limparGuardadas, setAoMudarFerramentasDaEquipe } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
@@ -137,6 +145,8 @@ export interface AppDeps {
 export interface ErgonApp {
   app: FastifyInstance;
   executor: RunExecutor;
+  /** Salas (rc.42): conversa em grupo com pessoas e agentes */
+  salas: Salas;
   cartoes: Cartoes;
   aprovacoes: Aprovacoes;
   /** aplicativos conectados pela pessoa (servidor MCP próprio), uma conta por conexão */
@@ -170,11 +180,13 @@ export interface ErgonApp {
   stopBackground(): Promise<void>;
   /** navegador ao vivo (rc.41) */
   navegador: Navegador;
+  /** controle do computador (rc.42) */
+  computador: Computador;
 }
 
 // volta do login com a conta (Microsoft, Google): o navegador chega sem o cookie (SameSite=Strict); o "state" de uso único autentica
 const PUBLIC_API = new Set(['/api/health', '/api/distribution', '/api/auth/state', '/api/auth/setup', '/api/auth/login', '/api/auth/register', '/api/integrations/microsoft/callback', '/api/integrations/google/callback',
-  '/api/auth/login/totp', '/api/auth/passkey/options', '/api/auth/passkey', '/api/auth/recover', '/api/agent/hello', '/api/agent/auto-unlock/claim', '/api/agent/open']);
+  '/api/auth/login/totp', '/api/auth/passkey/options', '/api/auth/passkey', '/api/auth/recover', '/api/auth/recover/world', '/api/agent/hello', '/api/agent/auto-unlock/claim', '/api/agent/open']);
 // com a tela trancada por inatividade, só isto responde (o resto devolve 423 até destrancar)
 const LOCKED_OK = new Set(['/api/me', '/api/session/unlock', '/api/session/reauth/options', '/api/session/activity', '/api/auth/logout', '/api/events']);
 // nuvem: quem ainda não tem 2º fator só cadastra autenticador ou passkey (428 enroll_2fa). A interface abre por trás
@@ -254,12 +266,16 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   }
   // as Conexões de um agente ficam "atualizando" (não "desligadas") quando há conta ligada e o motor ainda não as tem
   setContasConectadas((ws) => !!db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND state = 'connected' LIMIT 1", ws));
+  // administrar o Discord (rc.42) usa o bot da conversa pelo Discord, guardado no motor de quem é deste workspace
+  setDiscordLigado((ws) => !!db.get("SELECT 1 AS x FROM canais_bots b JOIN memberships m ON m.user_id = b.user_id WHERE m.workspace_id = ? AND b.canal = 'discord' LIMIT 1", ws));
   const reviews = new ReviewService(db, bus, executor, cfg);
   // núcleo operacional: análise determinística de arquivos e conclusão de cards só com evidência
   const opsCfg = { filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes, storageQuota: cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0 };
   const operations = new Operations(db, bus, opsCfg);
   const results = new Results(db, bus, operations, opsCfg);
   const teamwork = new Teamwork(db, bus, executor, results, operations, cfg.filesDir);
+  // "Revisar com o coordenador" (rc.42): frentes por trecho, cada uma um card com prioridade, o texto chegando ao vivo
+  const revisaoDoc = new RevisaoDocumento(db, bus, cfg.filesDir, executor, teamwork);
   // a equipe puxa conversa quando a pessoa chega; o colega que puxou recebe o que precisa explicar quando ela responde
   const initiative = new Initiative(db, bus, executor);
   chatHooks.replyContext = (ws, userId, agentId, convId, messageId) => initiative.replyContext(ws, userId, agentId, convId, messageId);
@@ -425,7 +441,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     let list: string[] = [];
     try { const x = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', agentId)?.tools ?? '[]'); if (Array.isArray(x)) list = x.map(String); } catch { /* sem ferramentas legíveis */ }
     const on = platformToolsets(motorScope(ws)).enabled;
-    return toolsetsFor(list, { workspaceId: ws }).some((t) => CODIGO.has(t) && on.includes(t));
+    return toolsetsFor(ferramentasEfetivas(list, { acessoTotal: acessoTotalDaEquipe(db, ws) }), { workspaceId: ws }).some((t) => CODIGO.has(t) && on.includes(t));
   };
   const codigoLigado = (ws: string, run?: Pick<RunRow, 'id' | 'agent_id' | 'workspace_id'>): boolean => {
     const p = platformToolsets(motorScope(ws));
@@ -445,7 +461,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return !!db.get(`SELECT 1 AS x FROM run_tools WHERE workspace_id IN (${marks}) AND tool IN (${FERRAMENTAS_DE_CODIGO.map(() => '?').join(', ')}) AND started_at >= ? LIMIT 1`,
       ...wss, ...FERRAMENTAS_DE_CODIGO, desde);
   };
-  const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado,
+  // rc.42: as pastas do computador concedidas (montadas pelo gerente de motores) e o "acesso total" que outras peças seguem
+  const pastas = new Pastas({ db, bus, nuvem: cfg.mode === 'cloud', aplicar: (u) => motors.aplicarPastas(u), montadas: (u) => motors.pastasMontadas(u) });
+  motors.pastasDe = (u) => (cfg.mode === 'cloud' ? null : pastas.paraOMotor(u));
+  const aoAtivarAcessoTotal: Array<(a: AuthContext) => void> = [];
+  // rc.42: o acesso de git de curta duração (conexoes/codigo.ts): o agente clona e envia ramos sem ver o token
+  const concessoesGit = new ConcessoesGit(db, bus);
+  const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado, git: concessoesGit, documentos: { filesDir: cfg.filesDir, maxBytes: cfg.maxUploadBytes },
     // aprovações nativas (rc.27): o turno de quem pediu espera no portão do motor; a decisão volta à ferramenta
     nativa: { aoVivo: (ws, pid) => aprovacoes.aoVivo(ws, pid), responder: (ws, pid, ok) => aprovacoes.responder(ws, pid, ok) },
     // confirmou no cartão: o agente recebe o resultado e continua o pedido na mesma conversa
@@ -501,7 +523,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       if (l?.deFora) conexoes.marcar({ ...run, task_id: taskId }, { privado: l.privado, motivo: 'gestao/card' });
     },
     // links do Treinar abertos sem clique: como o [[treinar]] (o pedido partiu da pessoa e nada de fora, nem privado, foi lido)
-    linksLivres: (run) => { if (conexoes.liberarTudo(run.workspace_id)) return true; const l = conexoes.leu(run); return conexoes.origem(run) === 'pessoa' && !l.deFora && !l.privado; },
+    linksLivres: (run) => { if (conexoes.liberarTudo(run.workspace_id, conexoes.quemPediu(run))) return true; const l = conexoes.leu(run); return conexoes.origem(run) === 'pessoa' && !l.deFora && !l.privado; },
     // ligada aos serviços das outras frentes (contas por apelido, conexão própria, competência enviada): gestao-servicos.ts
     ...gestaoServicos({ db, filesDir: cfg.filesDir, apps: () => appsProprios, recursos: () => recursos,
       memoria: async (ws, agentId) => { const { perfil, c } = memoriaDo(ws, agentId); return perfil && c ? await c.memoria!(perfil) : null; } }),
@@ -542,6 +564,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // o Teams e os bots oficiais (Telegram, Discord) pelo relé usam a mesma camada: cada conta ligada age como o membro dela
   teamsApp.usarCamadaComum(canais.externos);
   conexoes.canalExterno = (conv, risco) => { const x = canais.externos.daConversa(conv) ?? teamsApp.daConversa(conv); return x ? canais.externos.decisaoDaAcao(x.papel, risco) : null; };
+  // Salas (rc.42, services/salas): conversa em grupo; quem vê é quem está nela, e o agente usa as conexões de quem pediu
+  const salas = new Salas({ db, bus, executor, maxChars: cfg.maxInputChars, filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes });
+  salas.nuvem = cfg.mode === 'cloud';
+  salas.papelDaConta = (ws, conta) => { try { return db.get<{ p: string }>('SELECT papel AS p FROM canais_externo_papeis WHERE workspace_id = ? AND account_id = ?', ws, conta)?.p ?? null; } catch { return null; } };
+  registrarSalas(db, (ws, userId, conv) => salas.ehMembro(ws, userId, conv));
+  conexoes.salaGuarda = (run, risco, conexao, acao) => salas.guardaConexao(run, risco, conexao, acao);
+  executor.onFinish((r, status, output) => { try { salas.aoTerminar(r, status, output); } catch (e) { log.warn({ err: { message: (e as Error).message } }, 'sala: fim da execução não tratado'); } });
   chatHooks.channelNote = (conv, msg) => {
     try { return teamsApp.notaDoCanal(conv, msg) ?? canais.notaDoCanal(conv, msg); } catch { return null; }
   };
@@ -560,6 +589,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     grantDataTool(db, bus, ws); // instalações antigas: quem cuida de números recebe a Análise de dados (uma vez)
     grantConnectionsTool(db, bus, ws); // instalações antigas: a equipe passa a usar as Conexões (uma vez)
     grantBenefitTools(db, bus, ws); // rc.27: cada agente recebe os benefícios que faltam (uma vez; regra do dono, 12/11)
+    abrirFerramentas(db, bus, ws); // rc.42: recursos livres, não separados por agente (uma vez; o que a pessoa restringiu fica)
     upgradeBriefingSources(db, bus, ws); // Briefing já instalado passa a ler as contas conectadas (uma vez)
   };
   for (const w of db.all<{ id: string }>('SELECT id FROM workspaces')) upkeep(w.id);
@@ -594,7 +624,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         // estudar um link abre o endereço sem clique: só quando a pessoa pediu na conversa e nada de fora chegou antes
         // (o endereço podia ter vindo de um e-mail, de uma rotina ou de uma iniciativa do agente)
         const deVoce = conexoes.origem(r) === 'pessoa';
-        if (t.links?.length && !conexoes.liberarTudo(r.workspace_id) && (!deVoce || conexoes.leu(r).deFora)) { teamwork.purpose.note(r.workspace_id, conv, `Sistema — por segurança, ${who.name} não estudou os links: ${deVoce ? 'esta conversa leu conteúdo de fora' : 'o pedido não partiu de você'}. Se os links são seus, peça numa conversa nova.`); continue; }
+        if (t.links?.length && !conexoes.liberarTudo(r.workspace_id, conexoes.quemPediu(r)) && (!deVoce || conexoes.leu(r).deFora)) { teamwork.purpose.note(r.workspace_id, conv, `Sistema — por segurança, ${who.name} não estudou os links: ${deVoce ? 'esta conversa leu conteúdo de fora' : 'o pedido não partiu de você'}. Se os links são seus, peça numa conversa nova.`); continue; }
         void trainings.start(r.workspace_id, owner!, who.id, { request: t.request, title: t.title || undefined, links: t.links })
           .then(() => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} começou a estudar “${t.title || t.request.slice(0, 80)}”. A competência aparece no perfil dele (aba Treinar) para você aprovar; até lá, nada muda.`))
           .catch((e: unknown) => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} não pôde estudar agora: ${e instanceof Error ? e.message : 'erro'}`));
@@ -635,7 +665,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // lembretes com data: quem tem a ferramenta propõe a tarefa sua com prazo; entra aprovada por você
     // (o Coordenador também: "me lembre de…" pedido a ele ia para um card de colega, que não registra lembrete, e acabava
     // numa confirmação sem tarefa nenhuma)
-    if (ag && (Number(ag.coordinator) || (JSON.parse(ag.tools ?? '[]') as string[]).includes('agenda'))) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseTaskProposals(output, `conversa com ${ag.name}`));
+    // (a execução de uma rotina registra as propostas dela pela própria rotina, routines.ts: aqui não repete — com a
+    // Agenda em todo agente, rc.42, a rotina de qualquer um passaria por aqui também)
+    if (ag && !r.idempotency_key.startsWith('routine-') && (Number(ag.coordinator) || (JSON.parse(ag.tools ?? '[]') as string[]).includes('agenda'))) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseTaskProposals(output, `conversa com ${ag.name}`));
     // "liga o Terminal" pedido conversando: a coordenação pede a senha ali mesmo; outro agente passa o pedido à
     // coordenação, numa conversa com ela, e avisa aqui com o caminho
     const release = ag ? parseToolRelease(output) : null;
@@ -989,6 +1021,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       // conta nova neste computador (local, Ergon aberto, já com a primeira conta): 'aberto' ou 'convite'
       signup: cfg.mode === 'local' && !!personKeys() && !needsSetup(db) ? signupPolicy(db) : null,
       termosVersao: TERMOS_VERSAO,
+      // "Esqueci a senha" mostra a opção do Ergon World só se alguém aqui a escolheu
+      worldRecovery: !!worldRecovery.check && vault.anyWorld(),
     };
   });
 
@@ -1057,6 +1091,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       factors: userFactors(db, a.userId), mode: cfg.mode, rpId: rpConfig(cfg).rpID,
       // frase de recuperação da pessoa (várias pessoas: cada uma tem a sua)
       recovery: personKeys() ? vault.personHasRecovery(a.userId) : vault.info().recovery,
+      // a reserva pela senha do World deixou de abrir (a senha mudou lá): o lembrete pede uma nova escolha
+      recoveryWorldStale: !!personKeys() && !!vault.personWorld(a.userId)?.stale,
       admin: cfg.mode === 'local' ? isAdmin(db, a.userId) : a.role === 'owner', personSealed: personSealed(a), people: vault.peopleInfo().length,
       autoUnlockPrompt: isAdmin(db, a.userId) && secApi.autoUnlockPrompt(),
       onboarding: onboardingState(db, a.workspaceId), prefs: readPrefs(db, a.workspaceId, a.userId), termos: estadoDosTermos(db, a.userId) };
@@ -1134,7 +1170,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { ok: true };
   });
 
-  const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
+  // a recuperação pela senha do Ergon World: o módulo do World preenche (ele registra depois destas rotas)
+  const worldRecovery: WorldRecoveryHooks = {};
+  const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, world: worldRecovery, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
   const secApi = registerSecurityRoutes(app, sec);
   registerTeamsAppRoutes(app, { teamsApp, owner, admin, member: auth, verify: secApi.verify });
   registerPeopleRoutes(app, { ...sec, upkeep: personOpened, routines, removeMotor: async (u) => { await teamsApp.pessoaRemovida(u).catch(() => undefined); canais.pessoaRemovida(u); await motors.remove(u); } });
@@ -1227,7 +1265,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       runs: { running: Number(counts?.running ?? 0), queued: Number(counts?.queued ?? 0), waiting: Number(counts?.waiting ?? 0),
         processes: Number(counts?.processes ?? 0), limit: executor.processLimit(a.workspaceId), daily: executor.dailyLimit(a.workspaceId), cardsWaiting: teamwork.queue(a.workspaceId).length },
       // o mesmo que a lista de "aguardando você" (propostas, cards esperando você, perguntas, vínculos e regras)
-      decisionsPending: pendingCount(db, a.workspaceId),
+      decisionsPending: pendingCount(db, a.workspaceId) + salas.contarAvisos(a.workspaceId, a.userId),
       executor: { mode: executor.mode, label: executor.mode === 'real' ? 'modelo de IA real' : 'SIMULAÇÃO — sem modelo de IA' },
       sectors: listSectors(db, a.workspaceId).map(({ instructions: _i, ...s }) => s),
       teamAutorun: teamwork.autorun(a.workspaceId),
@@ -1392,7 +1430,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.post('/api/agents', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['name', 'role'], properties: {
       name: S.str(40, 1), role: S.str(80, 1), sectorKey: { anyOf: [{ const: 'auto' }, sectorKey] }, profileKey: sectorKey,
-      structureId: S.id('bld'), floorId: S.id('flr'), color: S.str(7), charter: S.str(4000), skills: strList(12, 80), tools: strList(20, 30),
+      structureId: S.id('bld'), floorId: S.id('flr'), color: S.str(7), charter: S.str(4000), skills: strList(12, 80), tools: strList(60, 30),
       hermesSkills: strList(200, 80), model: modelId, provider: providerId,
       lookSeed: { type: 'integer', minimum: 1, maximum: 2147483647 }, fx: fxChoiceSchema } } },
   }, async (req, reply) => {
@@ -1405,7 +1443,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   app.patch('/api/agents/:id', {
     schema: { params: idParams('agt'), body: { type: 'object', additionalProperties: false, minProperties: 1, properties: {
-      name: S.str(40, 1), role: S.str(80, 1), sectorKey, charter: S.str(4000), skills: strList(12, 80), tools: strList(20, 30), bio: S.str(600),
+      name: S.str(40, 1), role: S.str(80, 1), sectorKey, charter: S.str(4000), skills: strList(12, 80), tools: strList(60, 30), bio: S.str(600),
       hermesSkills: strList(200, 80), model: modelId, provider: providerId, color: S.str(7), structureId: S.id('bld'),
       lookSeed: { anyOf: [{ type: 'integer', minimum: 1, maximum: 2147483647 }, { type: 'null' }] } } } },
   }, async (req) => {
@@ -1608,10 +1646,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.get('/api/ai/tools', async (req) => {
     const a = auth(req);
     const holders = toolHolders(db, a.workspaceId);
-    return aiOf(a.workspaceId).tools({ channels: integrations.connectedChannels(a.workspaceId) }).map((t) => ({ ...t, holders: holders.get(t.id) ?? { count: 0, sample: [] } }));
+    // escopo 'equipe': os recursos com custo (interruptor da equipe) e as protegidas (acesso total da equipe) não são
+    // escolhidos por agente; acessoTotal: o estado do acesso total, que a tela mostra junto delas
+    const acessoTotal = acessoTotalDaEquipe(db, a.workspaceId);
+    return aiOf(a.workspaceId).tools({ channels: integrations.connectedChannels(a.workspaceId) }).map((t) => ({ ...t, holders: holders.get(t.id) ?? { count: 0, sample: [] },
+      ...(COM_CUSTO.includes(t.id) || PROTEGIDAS.includes(t.id) ? { escopo: 'equipe' as const } : {}), ...(PROTEGIDAS.includes(t.id) ? { acessoTotal } : {}) }));
   });
   app.put('/api/ai/tools', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: strList(20, 30) } } },
+    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: strList(40, 30) } } },
   }, async (req) => {
     const a = owner(req);
     const wanted = (req.body as { enabled: string[] }).enabled;
@@ -2178,6 +2220,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { task, log, envio, link: link ?? null, proposals, source, runs, review,
       // o que a pessoa vê de cara: a situação e a frase exata do que decide (ou do que foi feito), pelos fatos registrados
       resumo: team ? resumoDaTarefa(db, a.workspaceId, taskId, { queue }) : null,
+      // a entrega no modelo (modelos-entrega.ts): o topo do painel (tipo e itens curtos) e o diálogo "Ver detalhes"
+      modelo: team ? modeloDaTarefa(db, a.workspaceId, taskId) : null,
       agents, reviewer: reviewerFor(db, a.workspaceId, task.agent_id),
       files: { inputs: files.filter((x) => x.role === 'entrada'), deliverables: files.filter((x) => x.role === 'entregavel') }, operations: ops, work,
       queue,
@@ -2270,6 +2314,73 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (boardAudience(db, a.workspaceId, getTask(db, a.workspaceId, taskId).board_id) !== 'team') throw new HttpError(409, 'not_team', 'Nas suas tarefas, conclua pelo próprio card.');
     const b = req.body as { action: 'answer' | 'approve' | 'return' | 'retry' | 'dismiss'; text?: string };
     return teamwork.respond(a.workspaceId, a.userId, taskId, b.action, b.text ?? null);
+  });
+
+  // A decisão item a item no diálogo "Ver detalhes" (modelos-entrega.ts): aprovar marca o item (todos aprovados num card
+  // que espera a aprovação: aprova o card, a mesma resposta do "Aprovar"); devolver leva a instrução ao agente pelo mesmo
+  // caminho de "Devolver com instruções" (ou de revisar, num card concluído), dizendo de qual item se trata e o que já foi aprovado.
+  app.post('/api/tasks/:id/entrega/decidir', {
+    schema: { params: idParams('tsk'), body: { type: 'object', additionalProperties: false, required: ['entregaId', 'indice', 'decisao'], properties: {
+      entregaId: { type: 'string', pattern: '^ent_[A-Za-z0-9_-]{8,64}$' }, indice: { type: 'integer', minimum: 0, maximum: 7 },
+      decisao: { enum: ['aprovado', 'devolvido'] }, instrucao: S.str(2000) } } },
+  }, async (req) => {
+    const a = auth(req);
+    const taskId = (req.params as { id: string }).id;
+    const task = getTask(db, a.workspaceId, taskId);
+    if (boardAudience(db, a.workspaceId, task.board_id) !== 'team') throw new HttpError(409, 'not_team', 'Só os cards da equipe têm entrega.');
+    const b = req.body as { entregaId: string; indice: number; decisao: 'aprovado' | 'devolvido'; instrucao?: string };
+    const reg = ultimaEntrega(db, a.workspaceId, taskId);
+    if (!reg || reg.id !== b.entregaId) throw new HttpError(409, 'mudou', 'A entrega mudou: abra de novo.');
+    if (reg.entrega.tipo !== 'decisao' || b.indice >= reg.entrega.itens.length) throw new HttpError(400, 'indice', 'Item desconhecido.');
+    const itens = reg.entrega.itens;
+    const instrucao = (b.instrucao ?? '').trim();
+    if (b.decisao === 'devolvido' && instrucao.length < 3) throw new HttpError(400, 'instrucao', 'Diga o que ajustar.');
+    const decisoes = marcarDecisao(db, a.workspaceId, reg.id, b.indice, b.decisao);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'task.entrega_item', targetType: 'task', targetId: taskId,
+      evidence: { indice: b.indice, decisao: b.decisao }, result: `${b.decisao === 'aprovado' ? 'Aprovado' : 'Devolvido'}: ${itens[b.indice].titulo}` });
+    let result: string | null = null;
+    if (b.decisao === 'devolvido') {
+      const ja = itens.filter((_, i) => decisoes[String(i)] === 'aprovado').map((x) => `“${x.titulo}”`);
+      const texto = `Sobre o item “${itens[b.indice].titulo}”: ${instrucao}${ja.length ? `\nJá aprovado pela pessoa (mantenha): ${ja.join(', ')}.` : ''}`;
+      result = Number(task.completed) ? teamwork.revise(a.workspaceId, a.userId, taskId, texto).result : teamwork.respond(a.workspaceId, a.userId, taskId, 'return', texto).result;
+    } else if (itens.every((_, i) => decisoes[String(i)] === 'aprovado') && !Number(task.completed) && ['aguardando_aprovacao', 'revisao'].includes(task.work_state ?? '')) {
+      result = teamwork.respond(a.workspaceId, a.userId, taskId, 'approve', null).result;
+    }
+    bus.publish(a.workspaceId, 'tasks.changed', { id: taskId });
+    return { decisoes, result };
+  });
+
+  // Modelos de entrega (modelos-entrega.ts): os ativos, ajustar as partes livres e voltar aos originais. As mesmas rotas
+  // servem à tela de Configurações e ao coordenador (config.gestao: entram no catálogo da gestão sozinhas). Ajustar
+  // muda o que a equipe entrega: pede o cartão da pessoa; restaurar é voltar ao seguro de fábrica, vai direto.
+  app.get('/api/modelos-entrega', { config: { gestao: { id: 'modelos-entrega.ver', area: 'ajustes', rotulo: 'Ver os modelos de entrega (o formato do que a equipe entrega à pessoa) e o que foi personalizado', aprova: false } } },
+    async (req) => modelosAtivos(db, auth(req).workspaceId));
+  app.put('/api/modelos-entrega', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['tipo'], properties: {
+      tipo: { enum: [...TIPOS] }, tom: S.str(200), instrucao: S.str(400),
+      campos: { type: 'array', maxItems: 4, items: { type: 'object', additionalProperties: false, required: ['chave', 'rotulo'], properties: { chave: S.str(31, 2), rotulo: S.str(80, 2), obrigatorio: { type: 'boolean' } } } },
+      remover: { type: 'array', maxItems: 10, items: S.str(31, 1) } } } },
+    config: { gestao: { id: 'modelos-entrega.ajustar', area: 'ajustes', rotulo: 'Ajustar as partes livres de um modelo de entrega (tipo: decisao, entrega, relatorio, pergunta ou bloqueio): campos a mais (ex.: valor em R$), o tom, uma instrução curta. O essencial é travado', aprova: true } },
+  }, async (req) => {
+    const a = owner(req);
+    const b = req.body as PedidoAjuste;
+    ajustarModelo(db, a.workspaceId, b);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'entrega.modelo_ajustado', targetType: 'workspace', targetId: a.workspaceId,
+      evidence: { tipo: b.tipo, campos: (b.campos ?? []).map((c) => c.chave), remover: b.remover ?? [], tom: !!b.tom, instrucao: !!b.instrucao }, result: `modelo de entrega “${b.tipo}” ajustado` });
+    bus.publish(a.workspaceId, 'settings.changed', {});
+    return modelosAtivos(db, a.workspaceId);
+  });
+  app.post('/api/modelos-entrega/restaurar', {
+    schema: { body: { type: 'object', additionalProperties: false, properties: { tipo: { enum: [...TIPOS] } } } },
+    config: { gestao: { id: 'modelos-entrega.restaurar', area: 'ajustes', rotulo: 'Voltar aos modelos de entrega originais (todos, ou só um tipo)', aprova: false } },
+  }, async (req) => {
+    const a = owner(req);
+    const tipo = (req.body as { tipo?: TipoEntrega } | undefined)?.tipo;
+    restaurarModelos(db, a.workspaceId, tipo);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'entrega.modelos_restaurados', targetType: 'workspace', targetId: a.workspaceId,
+      evidence: { tipo: tipo ?? 'todos' }, result: tipo ? `modelo de entrega “${tipo}” de volta ao original` : 'modelos de entrega de volta aos originais' });
+    bus.publish(a.workspaceId, 'settings.changed', {});
+    return modelosAtivos(db, a.workspaceId);
   });
 
   // exigir a sua aprovação antes de concluir (mesmo com o resultado validado)
@@ -2450,6 +2561,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const b = req.body as { text: string; clientRequestId: string; queue?: boolean; attachments?: string[]; replyTo?: string; voz?: boolean };
     // na conversa de preparo de uma rotina, a coordenação recebe o contexto do preparo (e a mensagem não vira tarefa)
     const convId = (req.params as { id: string }).id;
+    // sala (rc.42): tem a rota dela (menções e cessões que a tela formou); por aqui, nem comando nem mensagem
+    getConversation(db, a.workspaceId, a.userId, convId);
+    if (ehSala(db, convId)) throw new HttpError(409, 'sala', 'Esta conversa é uma sala: escreva por ela.');
     const note = routines.channelFor(convId);
     // atalho digitado (/meta, /repetir, /checagem, /comentar, /revisao e os nomes originais /goal, /loop, /heartbeat, /btw,
     // /review, em qualquer idioma): vira o comando, não uma mensagem para o agente
@@ -2590,11 +2704,51 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     podeVer: (a, r) => { if (r.conversation_id) getConversation(db, a.workspaceId, a.userId, r.conversation_id); else if (!r.task_id) throw notFound('execução'); },
   });
   executor.onFinish((r) => navegador.execucaoTerminou(r.id));
+  // Controle do computador (rc.42, services/computador.ts): o Ergon Desktop liga daqui com a sessão da pessoa; o motor pede
+  // cada ação pela ponte (/internal/bridge/v1/computador)
+  const computador = new Computador({
+    db, bus, origens: cfg.allowedOrigins, sessao: sessaoDoCookie, nuvem: cfg.mode === 'cloud',
+    // o mesmo interruptor de "Liberar tudo" das Conexões (com a rc.42 "mãos na massa": o do workspace ou o da pessoa)
+    liberarTudo: (ws) => conexoes.liberarTudo(ws),
+    donoDe: (r) => (r.conversation_id ? db.get<{ owner_user_id: string }>('SELECT owner_user_id FROM conversations WHERE id = ?', r.conversation_id)?.owner_user_id ?? null : null),
+    membro: (ws, userId) => !!db.get('SELECT 1 AS x FROM memberships WHERE workspace_id = ? AND user_id = ?', ws, userId),
+    nomeDoAgente: (r) => db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', r.agent_id)?.name ?? 'O agente',
+  });
+  executor.onFinish((r) => computador.execucaoTerminou(r.id));
+  aoAtivarAcessoTotal.push((a) => computador.aoAtivarAcessoTotal(a));
   app.server.on('upgrade', (rq, socket, head) => {
     if (Navegador.caminho(rq.url)) navegador.upgrade(rq, socket, head);
+    else if (Computador.caminho(rq.url)) computador.upgrade(rq, socket, head);
     else socket.destroy();
   });
-  app.addHook('onClose', async () => navegador.fechar());
+  app.addHook('onClose', async () => { navegador.fechar(); computador.fechar(); });
+  app.get('/api/computador', async (req) => computador.estado(auth(req)));
+  app.put('/api/computador/modo', { schema: { body: { type: 'object', additionalProperties: false, required: ['modo'], properties: { modo: { enum: [...MODOS] }, naoPerguntar: { type: 'boolean' } } } } }, async (req) => {
+    const a = auth(req);
+    const b = req.body as { modo: Modo; naoPerguntar?: boolean };
+    computador.definirModo(a, b.modo, b.naoPerguntar);
+    return computador.estado(a);
+  });
+  app.put('/api/computador/bloqueio', { schema: { body: { type: 'object', additionalProperties: false, required: ['bloqueado'], properties: { bloqueado: { type: 'boolean' } } } } }, async (req) => {
+    const a = auth(req);
+    computador.definirBloqueio(a, (req.body as { bloqueado: boolean }).bloqueado);
+    return computador.estado(a);
+  });
+  app.post('/api/computador/pedidos/:id', {
+    schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^cmp_[a-f0-9]{32}$' } } },
+      body: { type: 'object', additionalProperties: false, required: ['escolha'], properties: { escolha: { enum: ['ativar', 'uma_vez', 'agora_nao', 'permitir', 'recusar'] }, naoPerguntar: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = auth(req);
+    const b = req.body as { escolha: Escolha; naoPerguntar?: boolean };
+    computador.responder(a, (req.params as { id: string }).id, b.escolha, b.naoPerguntar === true);
+    return computador.estado(a);
+  });
+  // "Assumir o controle" / "Conceder o controle" (também pelo selo da área de trabalho e pela tecla de pânico, no aparelho)
+  app.post('/api/computador/controle', { schema: { body: { type: 'object', additionalProperties: false, required: ['pessoa'], properties: { pessoa: { type: 'boolean' } } } } }, async (req) => {
+    const a = auth(req);
+    if ((req.body as { pessoa: boolean }).pessoa) computador.assumir(a.userId, 'botao'); else computador.conceder(a.userId);
+    return computador.estado(a);
+  });
   const runDoNavegador = (req: FastifyRequest) => {
     const a = auth(req);
     const r = executor.get(a.workspaceId, (req.params as { id: string }).id);
@@ -2636,16 +2790,80 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Conexões: o que falta autorizar, a escolha de liberar tudo, testar com a conta real e a ação da própria pessoa
   app.get('/api/conexoes', async (req) => {
     const a = auth(req);
-    return { liberarTudo: conexoes.liberarTudo(a.workspaceId), aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId), aprovarDepoisDeLerBarra: motors.barraSemAprovar(a.workspaceId), confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind),
+    return { liberarTudo: conexoes.liberarTudoDoWorkspace(a.workspaceId), liberarTudoMeu: conexoes.liberarTudoDaPessoa(a.workspaceId, a.userId), liberarTudoProibido: conexoes.liberarTudoProibido(a.workspaceId),
+      liberarTudoSemAviso: conexoes.liberarTudoSemAviso(a.workspaceId, a.userId), administra: a.role === 'owner', aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId), aprovarDepoisDeLerBarra: motors.barraSemAprovar(a.workspaceId), confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind),
       // cada conta tem a sua escrita liberada (ou não) e o seu ajuste por ação; com uma só, a tela é a de antes
       contas: contasDe(db, a.workspaceId, kind).filter((c) => c.state === 'connected').map((c) => ({ conta: c.conta, nome: nomeDaConta(c), principal: c.conta === '', ativa: c.ativa !== 0, faltam: conexoes.faltamTudo(a.workspaceId, kind, c.conta), comErro: c.last_error, ...conexoes.catalogoDe(a.workspaceId, kind, c.conta) })) })) };
   });
-  app.put('/api/conexoes/liberar-tudo', { schema: { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
-    const a = owner(req);
-    conexoes.setLiberarTudo(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
+  // "Liberar tudo" (rc.42): do workspace (quem administra) ou só nos meus pedidos (cada pessoa), com o "Não perguntar
+  // novamente" do aviso; quem administra pode proibir o modo no workspace inteiro
+  const liberarCorpo = { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' }, semAviso: { type: 'boolean' } } } };
+  const estadoLiberar = (a: { workspaceId: string; userId: string }) => ({ liberarTudo: conexoes.liberarTudoDoWorkspace(a.workspaceId), liberarTudoMeu: conexoes.liberarTudoDaPessoa(a.workspaceId, a.userId),
+    liberarTudoProibido: conexoes.liberarTudoProibido(a.workspaceId), liberarTudoSemAviso: conexoes.liberarTudoSemAviso(a.workspaceId, a.userId) });
+  app.put('/api/conexoes/liberar-tudo', { schema: liberarCorpo }, async (req) => {
+    const a = owner(req); const b = req.body as { on: boolean; semAviso?: boolean };
+    conexoes.setLiberarTudo(a.workspaceId, a.userId, b.on, { semAviso: b.semAviso });
     bus.publish(a.workspaceId, 'integrations.changed', {});
-    return { liberarTudo: conexoes.liberarTudo(a.workspaceId) };
+    return estadoLiberar(a);
   });
+  app.put('/api/conexoes/liberar-tudo/meu', { schema: liberarCorpo }, async (req) => {
+    const a = auth(req); const b = req.body as { on: boolean; semAviso?: boolean };
+    conexoes.setLiberarTudo(a.workspaceId, a.userId, b.on, { pessoa: true, semAviso: b.semAviso });
+    bus.publish(a.workspaceId, 'integrations.changed', {});
+    return estadoLiberar(a);
+  });
+  app.put('/api/conexoes/liberar-tudo/proibir', { schema: { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req);
+    conexoes.setLiberarTudoProibido(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
+    bus.publish(a.workspaceId, 'integrations.changed', {});
+    return estadoLiberar(a);
+  });
+  // rc.42: Pastas do computador (services/pastas.ts): concedidas ao motor da pessoa, montadas pelo gerente num momento seguro
+  app.get('/api/pastas', async (req) => { const a = auth(req); return { disponivel: cfg.mode !== 'cloud', pastas: cfg.mode === 'cloud' ? [] : pastas.listar(a.userId, a.workspaceId) }; });
+  app.post('/api/pastas', { schema: { body: { type: 'object', additionalProperties: false, required: ['caminho'], properties: { caminho: S.str(1000, 1), modo: { enum: ['rw', 'ro'] } } } } }, async (req) => {
+    const a = auth(req); const b = req.body as { caminho: string; modo?: 'rw' | 'ro' };
+    return pastas.conceder(a.userId, a.workspaceId, b.caminho, b.modo ?? 'rw');
+  });
+  app.delete('/api/pastas/:id', { schema: { params: idParams('pst') } }, async (req) => {
+    const a = auth(req); pastas.revogar(a.userId, a.workspaceId, (req.params as { id: string }).id); return { ok: true };
+  });
+
+  // rc.42: "Ativar acesso total?" — um cartão só, para a equipe inteira (regra do dono: recursos livres, não separados por
+  // agente). A senha de administrador (confirmada antes, em /api/session/unlock, no mesmo cartão) uma vez, e todo agente,
+  // inclusive os que vierem depois, passa a ter as protegidas (characters.ts, PROTEGIDAS: Terminal, Executar código,
+  // Diagnóstico, controle do computador, Discord); o "Liberar tudo" de quem ativou liga junto. As ações protegidas
+  // continuam pedindo, e proibir o "Liberar tudo" (Governança) desliga o acesso total. Ponto de integração do controle do
+  // computador: aoAtivarAcessoTotal recebe a mesma ativação para pôr o computador em "total".
+  app.get('/api/acesso-total', async (req) => {
+    const a = auth(req);
+    return { ativo: acessoTotalDaEquipe(db, a.workspaceId), proibido: conexoes.liberarTudoProibido(a.workspaceId), administra: a.role === 'owner' };
+  });
+  app.post('/api/acesso-total', { schema: { body: { type: 'object', additionalProperties: false, properties: { semAviso: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req); const b = (req.body ?? {}) as { semAviso?: boolean };
+    requireRecentAuth(a); // a senha veio no mesmo cartão, um instante antes
+    if (conexoes.liberarTudoProibido(a.workspaceId)) throw new HttpError(409, 'proibido', 'quem administra o workspace desligou o "Liberar tudo"');
+    // as protegidas ligadas na equipe (o motor pode estar desligado agora: a escolha fica gravada)
+    const on = new Set(platformToolsets(motorScope(a.workspaceId)).enabled);
+    const wanted = [...new Set([...Object.values(TOOLS).filter((t) => (t.safe || t.guarded) && t.toolset && on.has(t.toolset)).map((t) => t.id), ...PROTEGIDAS])];
+    await aiOf(a.workspaceId).setPlatformTools(wanted).catch((e) => { if ((e as HttpError).status !== 503) throw e; });
+    for (const t of PROTEGIDAS) setSetting(db, a.workspaceId, `ferramentas.${t}`, 'ligado');
+    setSetting(db, a.workspaceId, 'acesso_total', new Date().toISOString());
+    conexoes.setLiberarTudo(a.workspaceId, a.userId, true, { pessoa: true, semAviso: b.semAviso });
+    const n = Number(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND status = 'active'", a.workspaceId)?.n ?? 0);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { equipe: true, agentes: n },
+      result: `acesso total ativado com a senha para a equipe inteira (${n} agente(s)): Terminal, Executar código, Diagnóstico, computador e Discord, sem perguntar (as protegidas ainda perguntam)` });
+    for (const f of aoAtivarAcessoTotal) f(a);
+    bus.publish(a.workspaceId, 'agents.changed', {}); bus.publish(a.workspaceId, 'integrations.changed', {});
+    return { ok: true };
+  });
+  app.delete('/api/acesso-total', async (req) => {
+    const a = owner(req);
+    db.run("DELETE FROM workspace_settings WHERE workspace_id = ? AND key = 'acesso_total'", a.workspaceId);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { equipe: true, on: false }, result: 'acesso total desligado para a equipe' });
+    bus.publish(a.workspaceId, 'agents.changed', {}); bus.publish(a.workspaceId, 'integrations.changed', {});
+    return { ok: true };
+  });
+
   // Conexões › Regras: as regras aprovadas (as que liberam ações sem confirmação e as de texto ativas) e as propostas esperando
   app.get('/api/conexoes/regras', async (req) => conexoes.regras.tela(auth(req).workspaceId));
   // rc.34: "Criar e organizar sem pedir aprovação" direto na conexão (antes, só pedindo na conversa): uma regra de sempre,
@@ -2790,6 +3008,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   executor.anexosPendentes = (r) => { const ids = audiosDaExecucao(r); return ids.length > 0 && transcricoes.pendentes(r.workspace_id, ids); };
   executor.esperaAnexos = (r) => (r.kind === 'chat' ? transcricoes.esperaMs(r.workspace_id, audiosDaExecucao(r), r.started_at) : 0);
   registerRecursosRoutes(app, { db, bus, recursos, transcricoes, executor, cfg, auth, owner });
+  // entregáveis (rc.42): documento formatado, PDF com modelo, identidade, modelos e revisão com o coordenador
+  registerEntregaveisRoutes(app, { db, bus, revisao: revisaoDoc, cfg, auth, owner });
   // "Relatar um problema" (Ajuda): prévia limpa e envio só no clique, sem conta nem World: services/relatos.ts
   registerRelatosRoutes(app, { db, cfg, auth, url: cfg.relatosUrl, timeoutMs: cfg.relatosTimeoutMs });
   // aplicativos conectados pela pessoa (servidor MCP que o catálogo não traz, rc.29): routes/mcp-proprio.ts
@@ -3071,6 +3291,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // é pelo app com relé (services/teams-app), o WhatsApp pelo leitor por QR (services/whatsapp.ts) e o Telegram e o
   // Discord pelas rotas dos canais. Um plugin antigo que ainda mande evento para cá recebe 404 e não responde ninguém.
   registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
+  registerSalasRoutes(app, { db, bus, salas, auth, maxChars: cfg.maxInputChars });
   registerWhatsAppEquipeRoutes(app, { equipe: whatsappEquipe, owner, verify: secApi.verify });
 
   // Plugin do Ergon no motor: antes de cada ferramenta, pergunta de qual agente é a sessão e o que ele pode usar.
@@ -3088,9 +3309,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const ag = agentId ? db.get<{ name: string; tools: string | null; workspace_id: string }>("SELECT name, tools, workspace_id FROM agents WHERE id = ? AND status = 'active'", agentId) : undefined;
     if (!ag) return { known: false };
     const list = (v: string | null): string[] => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
+    // o que cada agente tem de fato: a lista dele, os recursos com custo (interruptor da equipe) e, com o acesso total da
+    // equipe, as protegidas (characters.ts, ferramentasEfetivas)
+    const acessoTotal = acessoTotalDaEquipe(db, ag.workspace_id);
+    const efetivas = (v: string | null) => ferramentasEfetivas(list(v), { acessoTotal });
     const holders: Record<string, string[]> = {};
     for (const o of db.all<{ name: string; tools: string | null }>("SELECT name, tools FROM agents WHERE workspace_id = ? AND status = 'active'", ag.workspace_id)) {
-      for (const ts of toolsetsFor(list(o.tools), { workspaceId: ag.workspace_id })) holders[ts] = [...(holders[ts] ?? []), o.name];
+      for (const ts of toolsetsFor(efetivas(o.tools), { workspaceId: ag.workspace_id })) holders[ts] = [...(holders[ts] ?? []), o.name];
     }
     // guarded: ferramentas que executam código (o plugin orienta o agente a pedir permissão, não a improvisar)
     // competências: o agente carrega só as dele (aprendidas no Treinar + as da biblioteca atribuídas, se tem Skills)
@@ -3105,7 +3330,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const conectores = { ligado: list(ag.tools).includes('conectores'), escrita: recursos.escrita(ag.workspace_id), ...(Object.keys(tipos).length ? { tipos } : {}) };
     // a gestão do Ergon (rc.29): só o coordenador, fora de um treinamento
     const daGestao = !training && gestao.ehCoordenador({ agent_id: agentId!, workspace_id: ag.workspace_id }) ? [TOOLSET_GESTAO] : [];
-    return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil, ...daGestao], holders, guarded: GUARDED_TOOLSETS, skills, training };
+    return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(efetivas(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil, ...daGestao], holders, guarded: GUARDED_TOOLSETS, skills, training };
   });
 
   // Navegador ao vivo (rc.41): o plugin avisa que o navegador de um trabalho abriu, fechou ou voltou sozinho ao agente.
@@ -3119,6 +3344,19 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // a sessão de outra pessoa é desconhecida para este motor
     if (found && motors.allows(motor, found.workspace_id)) navegador.aviso(found, b.evento, b.motivo);
     return { ok: true };
+  });
+
+  // Controle do computador (rc.42): cada ação da ferramenta do motor passa por aqui (decisão, cartão, registro) até o aparelho.
+  // A resposta pode esperar a pessoa decidir no cartão (até 240 s); a captura de tela volta inteira, só para o agente.
+  app.post('/internal/bridge/v1/computador', {
+    bodyLimit: 64 * 1024,
+    schema: { body: { type: 'object', required: ['acao'], properties: { acao: S.str(30, 1), args: { type: 'object' }, session_id: S.str(200), task_id: S.str(200) } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { acao: string; args?: Record<string, unknown>; session_id?: string; task_id?: string };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    if (!found || !motors.allows(motor, found.workspace_id)) return { ok: false, code: 'sem_trabalho', error: 'Esta conversa não é de um trabalho do Ergon: o controle do computador só vale para os agentes do Ergon.' };
+    return computador.doMotor(found, b.acao, b.args ?? {});
   });
 
   // Ajudantes temporários (subagentes do motor): o plugin avisa o começo e o fim (com o resultado). A execução do Ergon
@@ -3183,14 +3421,27 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return conexoes.pedirAprovacao(run, b.ferramenta, b.alvo ?? '');
   });
 
+  // rc.42: o git do Terminal do motor passa por aqui com a senha da concessão; o token da conexão só sai daqui ao serviço
+  registrarProxyGit(app, { db, bus, concessoes: concessoesGit,
+    credencial: (ws, kind, conta) => integrations.secrets.read<Record<string, string>>(ws, kind, conta),
+    liberarTudo: (ws, runId) => { const r = db.get<{ idempotency_key: string; conversation_id: string | null; workspace_id: string }>('SELECT idempotency_key, conversation_id, workspace_id FROM runs WHERE id = ?', runId);
+      return !!r && conexoes.liberarTudo(ws, conexoes.conexaoEfetiva(r).userId); } });
+
   // Ferramentas de conexão no motor: o plugin só repassa; a regra, as credenciais e o registro ficam aqui
   app.post('/internal/bridge/v1/conexoes', {
     bodyLimit: 256 * 1024,
     schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar', 'cartao'] }, session_id: S.str(200), task_id: S.str(200), conexao: S.str(40), conta: S.str(120), acao: S.str(80), parametros: { type: 'object' }, leu_web: { type: 'boolean' },
-      cartao: { type: 'string', pattern: '^apr_[0-9a-f]{32}$' } } } },
+      cartao: { type: 'string', pattern: '^apr_[0-9a-f]{32}$' }, git: { type: 'boolean' } } } },
   }, async (req) => {
     const motor = bridgeMotor(req);
-    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; conexao?: string; conta?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean; cartao?: string };
+    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; conexao?: string; conta?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean; cartao?: string; git?: boolean };
+    // rc.42: o acesso de git só vai ao plugin que sabe entregá-lo ao git e tirá-lo da resposta (git: true no pedido); o de
+    // antes devolveria a resposta inteira ao modelo
+    const semGitAntigo = <T extends { git?: unknown; texto: string; gitFim?: boolean }>(r: T): T => {
+      if (b.git || !r.git) { if (!b.git) delete r.gitFim; return r; }
+      const { git: _fora, ...resto } = r;
+      return { ...resto, texto: 'O acesso ao código precisa da versão nova da equipe neste computador: diga à pessoa para atualizar a equipe (Configurações). Nada foi clonado.' } as T;
+    };
     const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
     const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
     if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
@@ -3198,13 +3449,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!tools.includes('contas')) return { ok: false, status: 'falhou', texto: 'As Conexões não estão liberadas para este agente: peça a um colega que tenha, ou diga à pessoa.' };
     if (b.op === 'listar') return { ok: true, status: 'feita', texto: conexoes.listar(run.workspace_id, b.conexao) };
     // a ferramenta segurou o turno no portão de aprovação do motor e a pessoa decidiu (ou o prazo acabou): o que vale é o daqui
-    if (b.op === 'cartao') return b.cartao ? conexoes.resultadoDoCartao(run, b.cartao) : { ok: false, status: 'falhou', texto: 'Cartão desconhecido.' };
+    if (b.op === 'cartao') return b.cartao ? semGitAntigo(conexoes.resultadoDoCartao(run, b.cartao)) : { ok: false, status: 'falhou', texto: 'Cartão desconhecido.' };
     if (!b.conexao || !b.acao) return { ok: false, status: 'falhou', texto: 'Diga a conexão e a ação (veja conexoes_listar).' };
     if (!platformToolsets(motorScope(run.workspace_id)).at) await aiOf(run.workspace_id).refreshToolsets(); // codigoLigado precisa da leitura
     // a regra de execução de código olha o agente desta execução (codigoLigado lê daqui)
     const conexao = b.conexao; const acao = b.acao;
     // conta: qual das contas do aplicativo (o apelido, o e-mail ou o número); sem dizer, a principal
-    return runAtual.run(run, () => conexoes.executar(run, conexao, acao, b.parametros ?? {}, { leuWeb: b.leu_web, conta: b.conta }));
+    return semGitAntigo(await runAtual.run(run, () => conexoes.executar(run, conexao, acao, b.parametros ?? {}, { leuWeb: b.leu_web, conta: b.conta })));
   });
 
   // Gestão pelo coordenador (rc.29): o plugin só repassa; a regra, a sessão da pessoa e o registro ficam aqui (gestao.ts)
@@ -3246,6 +3497,40 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!tr) return { ok: false };
     trainings.event(tr, { tool: String(b.tool ?? ''), pending_id: b.pending_id, staged: b.staged, reads: b.reads });
     return { ok: true };
+  });
+
+  // A entrega no modelo (ferramenta entregar do plugin; modelos-entrega.ts): valida e registra para o card da execução.
+  // Fora do modelo, os erros voltam ao agente, que refaz no mesmo turno; depois de MAX_RECUSAS, segue sem (o Ergon monta
+  // o formato mínimo seguro ao fim). A entrega só vale para o card da execução que chamou (a sessão diz qual).
+  app.post('/internal/bridge/v1/entrega', {
+    bodyLimit: 128 * 1024,
+    schema: { body: { type: 'object', required: ['entrega'], properties: { session_id: S.str(200), task_id: S.str(200), entrega: { type: 'object' } } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { session_id?: string; task_id?: string; entrega: unknown };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
+    if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
+    // fora de um card (uma conversa), a entrega vai como texto: nada a registrar
+    const taskId = cardDaExecucao(db, run);
+    if (!taskId) return { ok: true, status: 'sem_card', texto: 'Fora de um card a entrega vai no texto da conversa: siga.' };
+    // a conferência das referências: id interno só deste workspace; link só dos aplicativos das Conexões (e do próprio
+    // Ergon); citar é obrigatório quando o trabalho leu objetos das contas (o registro do serviço diz)
+    const origem = /^pede-entrega-\d+-(.+)$/.exec(run.idempotency_key)?.[1] ?? run.id;
+    const tabela: Record<string, string> = { art: 'artifacts', tsk: 'tasks', cnv: 'conversations' };
+    const v = validarEntrega(b.entrega, lerAjustes(db, run.workspace_id), {
+      idValido: (rid) => { const t = tabela[rid.slice(0, 3)]; return !!t && !!db.get(`SELECT 1 AS x FROM ${t} WHERE id = ? AND workspace_id = ?`, rid, run.workspace_id); },
+      exigirReferencias: !!db.get("SELECT 1 AS x FROM conexao_acoes WHERE run_id IN (?, ?) AND risco = 'ler' AND status = 'feita' LIMIT 1", run.id, origem),
+      dominios: [new URL(cfg.publicUrl).hostname],
+    });
+    if (!v.ok) {
+      const n = registrarRecusa(db, run.workspace_id, { taskId, runId: run.id, erros: v.erros });
+      if (n >= MAX_RECUSAS) return { ok: true, status: 'minimo', texto: `A entrega não passou em ${n} tentativas: o Ergon monta o formato mínimo com o seu texto. Siga e termine.` };
+      return { ok: false, status: 'recusada', erros: v.erros, restam: MAX_RECUSAS - n, texto: `A entrega não está no modelo. Corrija e chame entregar de novo: ${v.erros.join(' · ')}` };
+    }
+    registrar(db, run.workspace_id, { taskId, runId: run.id, entrega: v.entrega });
+    bus.publish(run.workspace_id, 'tasks.changed', { id: taskId });
+    return { ok: true, status: 'registrada', texto: 'Entrega registrada: o cartão da pessoa mostra este resumo. Termine com o texto da entrega.' };
   });
 
   // Cartões pedidos pelo agente (ferramentas perguntar, pedir_chave e pedir_senha_admin do plugin): abrir e consultar. A
@@ -3336,7 +3621,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     defaultModel: (ws) => ({ provider: aiOf(ws).cachedDefaultProvider(), model: aiOf(ws).cachedDefault() }),
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
-  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks, integrations,
+  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, recovery: worldRecovery, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks, integrations, salas,
     createWorkspace: (userId, name) => createOwnWorkspace(db, personKeys(), userId, name, cfg.slotsPerFloor),
     // os canais com a nuvem do Ergon World: o contêiner responde pelas contas ligadas enquanto o computador está fechado
     canaisNuvem: { reserva: (ws, x) => teamsApp.reserva(ws, x), atender: (x) => teamsApp.atender(x), ligavel: () => !!teamsApp.base(), instalacao: () => teamsApp.instalacaoNoRele(), sincronizadas: (ws, ids) => teamsApp.sincronizadas(ws, ids), ocupado: () => teamsApp.ocupado() },
@@ -3376,6 +3661,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, navegador, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
+  return { app, salas, navegador, computador, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
 }
 

@@ -56,6 +56,15 @@ export const TOOLS: Record<string, ToolDef> = {
   videogen: { id: 'videogen', label: 'Criar vídeos', kind: 'ia', toolset: 'video_gen', status: 'desligada', aviso: 'custo', note: 'gera vídeos curtos a partir de uma descrição ou de uma imagem. Precisa de uma conta de vídeo ligada (chave própria, em Conexões › Chave própria); cada vídeo é cobrado por ela', safe: true },
   xbusca: { id: 'xbusca', label: 'Busca no X', kind: 'ia', toolset: 'x_search', status: 'desligada', aviso: 'custo', note: 'pesquisa publicações públicas do X (Twitter). Precisa de uma conta da xAI ligada (chave própria, em Conexões › Chave própria); cada busca é cobrada por ela', safe: true },
   voz: { id: 'voz', label: 'Responder em áudio', kind: 'ia', toolset: 'tts', status: 'desligada', aviso: 'custo', note: 'grava a resposta em áudio quando você pede. A voz padrão é grátis e usa a internet; outras vozes são cobradas pela conta delas', safe: true },
+  // rc.42: o agente usa a área de trabalho da pessoa (mouse, teclado, programas) pelo Ergon Desktop. Desligada por padrão (fora
+  // de BENEFICIOS); ligar a ferramenta só a entrega ao agente: usar o computador ainda pede a pessoa ("Ativar acesso total?",
+  // services/computador.ts), e quem administra bloqueia para o workspace. Na nuvem não há área de trabalho.
+  computador: { id: 'computador', label: 'Controle do computador', kind: 'ia', toolset: 'computer_use', status: 'desligada', aviso: 'risco', note: 'usa o seu computador como você: vê a tela, move o mouse, clica, digita e abre programas, pelo Ergon Desktop. Você assume o controle a qualquer momento; senhas, pagamentos e apagar de vez sempre pedem a sua confirmação', safe: true },
+  // rc.42: administração do servidor do Discord ligado em Conexões (o mesmo bot da conversa pelo Discord). Desligada por padrão.
+  discord: { id: 'discord', label: 'Administrar o Discord', kind: 'ia', toolset: 'discord_admin', status: 'desligada', aviso: 'risco', note: 'no servidor do Discord ligado à equipe: lista canais e cargos, fixa mensagens, cria tópicos e dá ou tira cargos; apagar uma mensagem sempre pede a sua confirmação', safe: true },
+  // rc.42: o conjunto de diagnóstico do motor (Terminal, processos, leitura de arquivos e pesquisa), para quem programa. Roda
+  // comandos: a mesma trava do Terminal (senha).
+  diagnostico: { id: 'diagnostico', label: 'Diagnóstico', kind: 'ia', toolset: 'debugging', status: 'bloqueada', note: 'investiga e corrige erros em programas: roda comandos, acompanha processos, lê arquivos e pesquisa a mensagem de erro, no ambiente isolado da equipe', guarded: true },
   // conectores prontos do motor: um conjunto por conector instalado (Conexões › Mais aplicativos); o plugin barra a escrita
   // onde a pessoa não liberou
   conectores: { id: 'conectores', label: 'Conectores prontos', kind: 'ia', status: 'desligada', aviso: 'risco', note: 'usa os aplicativos instalados em Conexões › Mais aplicativos: consulta à vontade; mudar dados só no aplicativo em que você liberou a escrita', safe: true },
@@ -78,30 +87,35 @@ export const BENEFICIOS_NOVOS: readonly string[] = ['leitura', 'navegador', 'vid
  */
 export const COMPETENCIAS_PRONTAS: readonly string[] = ['docx', 'xlsx', 'pdf', 'powerpoint', 'meeting-action-items', 'weekly-review-planning', 'document-to-action-items', 'excel-author', 'pptx-author'];
 /**
- * O Coordenador encaminha e acompanha; quem faz o trabalho são os especialistas. As ferramentas pesadas (a descrição de
- * cada uma vai em toda chamada ao modelo) ficam com eles, não com ele (decisão do dono, 16/11: cada mensagem ao
- * Aristóteles custava ~17 mil tokens, metade só com a descrição das ferramentas). A pessoa pode devolver no perfil dele.
+ * Regra do dono (rc.42): os recursos não são separados por agente. Todo agente (o novo, o do modelo de equipe, o que a
+ * pessoa cria, o Coordenador) tem por padrão tudo o que não é protegido; a especialidade é orientação no prompt (área
+ * natural), não trava. A pessoa ainda pode tirar algo de um agente, se quiser.
+ * - COM_CUSTO: um interruptor da equipe (Configurações › Ferramentas), que vale para todos — nunca um item por agente.
+ * - PROTEGIDAS: executam código ou mexem no computador e no Discord da pessoa. Vêm com o "Ativar acesso total?", para a
+ *   equipe inteira, com a senha uma vez; as ações protegidas continuam pedindo, e a Governança pode proibir.
  */
-export const PESADAS_FORA_DO_COORDENADOR: readonly string[] = ['navegador', 'video', 'videogen', 'imagens', 'voz', 'xbusca', 'conectores', 'calculo', 'terminal', 'leitura'];
-export const semPesadas = (tools: readonly string[]): string[] => tools.filter((t) => !PESADAS_FORA_DO_COORDENADOR.includes(t));
-
-/** Uma vez por agente que coordena: tira as ferramentas pesadas (se a pessoa devolver depois, ficam). */
-export function enxugarCoordenador(db: Db, workspaceId: string, agentId: string): void {
-  const a = db.get<{ tools: string | null; coordinator: number }>('SELECT tools, coordinator FROM agents WHERE id = ? AND workspace_id = ?', agentId, workspaceId);
-  if (!a || !Number(a.coordinator)) return;
-  const marca = `coord.enxuto:${agentId}`;
-  if (db.get("SELECT 1 AS x FROM workspace_settings WHERE workspace_id = ? AND key = ?", workspaceId, marca)) return;
-  let tools: string[] = [];
-  try { const x = JSON.parse(a.tools ?? '[]'); if (Array.isArray(x)) tools = x.map(String); } catch { /* ilegível: começa vazia */ }
-  const fica = semPesadas(tools);
-  db.tx(() => {
-    if (fica.length !== tools.length) db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(fica), agentId);
-    db.run("INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)", workspaceId, marca, now(), now());
-  });
+export const COM_CUSTO: readonly string[] = ['imagens', 'video', 'videogen', 'xbusca'];
+export const PROTEGIDAS: readonly string[] = ['terminal', 'calculo', 'diagnostico', 'computador', 'discord'];
+/**
+ * Papéis da divisão de trabalho sugerida, não ferramentas: encaminhar é o cargo do Coordenador (fixo) e a Revisão socrática
+ * marca quem a equipe chama para revisar (a escolha do revisor, team.ts). Ficam com quem a equipe padrão sugere; a pessoa
+ * dá a quem quiser. Nada do que um agente faz depende delas.
+ */
+export const PAPEIS: readonly string[] = ['encaminhar', 'revisao'];
+/** O padrão aberto de um agente: todas as ferramentas do catálogo, menos as protegidas e os papéis (PAPEIS). */
+export const ferramentasAbertas = (coordinator = false): string[] =>
+  Object.keys(TOOLS).filter((t) => !PROTEGIDAS.includes(t) && !TOOLS[t].guarded && (!PAPEIS.includes(t) || (coordinator && t === 'encaminhar')));
+/** O que o agente tem de fato: a lista dele, os recursos com custo (interruptor da equipe) e, com o acesso total, as protegidas. */
+export const ferramentasEfetivas = (tools: readonly string[], opts: { acessoTotal?: boolean } = {}): string[] =>
+  [...new Set([...tools, ...COM_CUSTO, ...(opts.acessoTotal ? PROTEGIDAS : [])])].filter((t) => TOOLS[t]);
+/** O acesso total da equipe está ligado ("Ativar acesso total?", app.ts) e quem administra não proibiu. */
+export function acessoTotalDaEquipe(db: Db, workspaceId: string): boolean {
+  const get = (k: string) => db.get<{ value: string }>('SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ?', workspaceId, k)?.value;
+  return !!get('acesso_total') && get('conexoes.liberar_tudo_proibido') !== '1';
 }
 
 /** As ferramentas de um agente com os benefícios (sem repetir, na ordem: as dele primeiro). */
-export const comBeneficios = (tools: readonly string[]): string[] => [...new Set([...tools, ...BENEFICIOS])].filter((t) => TOOLS[t] && !TOOLS[t].guarded);
+export const comBeneficios = (tools: readonly string[], coordinator = false): string[] => [...new Set([...tools, ...ferramentasAbertas(coordinator)])].filter((t) => TOOLS[t] && !TOOLS[t].guarded && !PROTEGIDAS.includes(t));
 /**
  * Os conjuntos-benefício da plataforma que o Ergon liga sozinho quando faltam (ausente = ligado; só o desligado gravado pela
  * pessoa, 'ferramentas.<id>' = 'desligado', fica): as Conexões e os que a imagem da rc.27 traz. Os de antes (pesquisa,
@@ -132,6 +146,9 @@ export const motorScope = (workspaceId: string | null | undefined): string => sc
 /** O workspace tem alguma conta ou aplicativo conectado? (o app registra a consulta ao banco) */
 let contasOf: (workspaceId: string) => boolean = () => false;
 export function setContasConectadas(fn: (workspaceId: string) => boolean): void { contasOf = fn; }
+/** O Discord da equipe está ligado neste workspace (Conexões › Conversar com a equipe pelo Discord)? (o app registra a consulta) */
+let discordOf: (workspaceId: string) => boolean = () => true;
+export function setDiscordLigado(fn: (workspaceId: string) => boolean): void { discordOf = fn; }
 /** A renovação do motor deste escopo voltou atrás nesta versão (motors.ts): o que falta nele só volta com a próxima versão. */
 let renovacaoFalhou: (scope: string) => boolean = () => false;
 export function setRenovacaoFalhou(fn: (scope: string) => boolean): void { renovacaoFalhou = fn; }
@@ -167,6 +184,8 @@ export function toolStatus(t: ToolDef, ctx: ToolCtx = {}): ToolDef {
         : { ...t, status: 'bloqueada', note: `${t.note} — bloqueada: precisa da sua autorização (senha)` };
     }
     if (!t.safe) return { ...t, status: 'bloqueada' };
+    // administrar o Discord usa o bot da conversa pelo Discord: sem ele ligado, não há o que administrar
+    if (t.id === 'discord' && ctx.workspaceId && !discordOf(ctx.workspaceId)) return { ...t, status: 'desligada', note: `${t.note} — ligue antes o Discord em Conexões › Conversar com a equipe pelo Discord` };
     if (on.has(t.toolset ?? '')) return { ...t, status: 'disponível' };
     // Conexões com conta ligada, num motor que ainda não tem o conjunto: a renovação do motor traz (nada a ligar)
     const contas = ctx.contas ?? (ctx.workspaceId ? contasOf(ctx.workspaceId) : false);
@@ -344,7 +363,7 @@ export function routeDemand(text: string): { key: string; words: string[] } | nu
 
 // ---------------- equipe de demonstração: criação e atualização ----------------
 export function characterColumns(c: Character) {
-  return { char_key: c.key, bio: c.bio, charter: c.charter, skills: JSON.stringify(c.skills), tools: JSON.stringify(c.key === 'aristoteles' ? semPesadas(comBeneficios(c.tools)) : comBeneficios(c.tools)), model_hint: c.modelHint,
+  return { char_key: c.key, bio: c.bio, charter: c.charter, skills: JSON.stringify(c.skills), tools: JSON.stringify(comBeneficios(c.tools, c.key === 'aristoteles')), model_hint: c.modelHint,
     hermes_skills: JSON.stringify(COMPETENCIAS_PRONTAS) };
 }
 
@@ -494,7 +513,7 @@ export function grantBenefitTools(db: Db, bus: Bus | null, workspaceId: string):
   db.tx(() => {
     for (const a of db.all<{ id: string; tools: string | null; hermes_skills: string | null; coordinator: number }>("SELECT id, tools, hermes_skills, coordinator FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId)) {
       const tools = lista(a.tools);
-      const somar = (editados.has(a.id) ? BENEFICIOS_NOVOS : BENEFICIOS).filter((t) => !tools.includes(t) && !(Number(a.coordinator) && PESADAS_FORA_DO_COORDENADOR.includes(t)));
+      const somar = (editados.has(a.id) ? BENEFICIOS_NOVOS : BENEFICIOS).filter((t) => !tools.includes(t));
       // as competências prontas: só em quem está sem nenhuma e nunca teve a lista mudada pela pessoa
       const competencias = !lista(a.hermes_skills).length && !competenciasEscolhidas.has(a.id) ? COMPETENCIAS_PRONTAS : [];
       if (!somar.length && !competencias.length) continue;
@@ -505,6 +524,37 @@ export function grantBenefitTools(db: Db, bus: Bus | null, workspaceId: string):
     db.run("INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, 'tools.rc27', ?, ?)", workspaceId, now(), now());
     if (n) audit(db, null, { workspaceId, actorType: 'system', actorId: 'ergon', action: 'agent.tools', evidence: { add: 'beneficios', agentes: n },
       result: `${n} agente(s) passaram a ter todas as ferramentas da equipe (tire de quem não precisa, para economizar)` });
+  });
+  if (n) bus?.publish(workspaceId, 'agents.changed', {});
+  return n;
+}
+
+/**
+ * rc.42 (regra do dono: recursos livres, não separados por agente), uma vez por workspace (marca 'tools.aberto'): cada
+ * agente ativo passa ao padrão aberto (ferramentasAbertas), inclusive o Coordenador, que antes perdia as "pesadas"
+ * (enxugarCoordenador, que saiu). Quem a pessoa editou de propósito (agent.update com "ferramentas", pela pessoa) fica como
+ * ela deixou: são as restrições que ela escolheu. Nada é tirado.
+ */
+export function abrirFerramentas(db: Db, bus: Bus | null, workspaceId: string): number {
+  if (db.get("SELECT 1 AS x FROM workspace_settings WHERE workspace_id = ? AND key = 'tools.aberto'", workspaceId)) return 0;
+  const editados = new Set<string>();
+  for (const e of db.all<{ target_id: string | null; evidence: string | null }>("SELECT target_id, evidence FROM audit_events WHERE workspace_id = ? AND action = 'agent.update' AND actor_type = 'user'", workspaceId)) {
+    try { if (e.target_id && ((JSON.parse(e.evidence ?? '{}') as { changed?: string[] }).changed ?? []).includes('ferramentas')) editados.add(e.target_id); } catch { /* ilegível: não conta */ }
+  }
+  const lista = (v: string | null): string[] => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
+  let n = 0;
+  db.tx(() => {
+    for (const a of db.all<{ id: string; tools: string | null; coordinator: number }>("SELECT id, tools, coordinator FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId)) {
+      if (editados.has(a.id)) continue;
+      const tools = lista(a.tools);
+      const somar = ferramentasAbertas(Number(a.coordinator) === 1).filter((t) => !tools.includes(t));
+      if (!somar.length) continue;
+      db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify([...tools, ...somar]), a.id);
+      n++;
+    }
+    db.run("INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, 'tools.aberto', ?, ?)", workspaceId, now(), now());
+    if (n) audit(db, null, { workspaceId, actorType: 'system', actorId: 'ergon', action: 'agent.tools', evidence: { add: 'padrao_aberto', agentes: n },
+      result: `${n} agente(s) passaram a ter todas as ferramentas da equipe` });
   });
   if (n) bus?.publish(workspaceId, 'agents.changed', {});
   return n;

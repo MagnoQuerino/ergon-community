@@ -19,10 +19,13 @@ const cnMod = Object.values(import.meta.glob<{ default: ComponentType }>('./worl
 const ConexoesNuvem = cnMod ? lazy(cnMod) : null;
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
+import { CessoesNasSalas } from '../components/Salas.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { TextoLongo } from '../components/TextoLongo.tsx';
 import { BotoesRegra, type Alcance } from '../components/CartaoRegra.tsx';
 import { Selo } from '../components/Selo.tsx';
+import { ModoLiberarTudo, type EstadoLiberar } from '../components/ModoLiberarTudo.tsx';
+import { PastasDoComputador } from '../components/PastasDoComputador.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { useEnvioPorItem } from '../lib/envio.ts';
 import { noIdioma } from '../lib/textos-de-app.ts';
@@ -55,7 +58,7 @@ interface Permissoes { tipos: Record<string, string>; acoes: Record<string, stri
 interface EstadoConexao { kind: string; faltam: string[]; comErro: string | null; permissoes: Permissoes; acoes: Array<{ id: string; rotulo: string; risco: string }>; soLeitura?: boolean; escreve?: boolean; etapas?: EtapaConsentimento[];
   /** cada conta conectada deste aplicativo, com a escrita dela (rc.29) */
   contas?: Array<{ conta: string; nome: string; principal: boolean; ativa: boolean; soLeitura?: boolean; escreve?: boolean }> }
-interface EstadoConexoes { liberarTudo: boolean; aprovarDepoisDeLer?: boolean; aprovarDepoisDeLerBarra?: boolean; confirmarOrganizar?: boolean; ligadas: EstadoConexao[] }
+interface EstadoConexoes extends EstadoLiberar { liberarTudo: boolean; aprovarDepoisDeLer?: boolean; aprovarDepoisDeLerBarra?: boolean; confirmarOrganizar?: boolean; ligadas: EstadoConexao[] }
 /** O estado de uma conexão; pronto = a resposta já chegou (antes disso, as seções guardam o lugar). */
 interface EstadoDe { eu: EstadoConexao | null; pronto: boolean; reload: () => void }
 
@@ -190,8 +193,11 @@ export function ConexoesView() {
         <GradeDeBlocos blocos={conversar} aberto={open} abrir={setOpen} />
       </section>
 
+      <PastasDoComputador />
       <LiberarTudo estado={cx} />
       <Regras />
+      {/* rc.42: as conexões cedidas nas salas, com Retirar (só aparece quando há) */}
+      <CessoesNasSalas />
 
       <div className="row row--wrap conn-tools">
         <label className="conn-search"><Icon name="focus" size={14} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('conexoes.busca.placeholder')} aria-label={t('conexoes.busca.aria')} /></label>
@@ -474,6 +480,8 @@ const dia = (iso: string) => fmtData(iso, { day: '2-digit', month: '2-digit' });
  */
 function Regras() {
   const t = useT();
+  // rc.42: o "Liberar tudo" mora aqui, no topo das Regras (a mesma leitura de /api/conexoes da tela)
+  const cx = useResource<EstadoLiberar>('/api/conexoes', ['integrations.changed']);
   const r = useResource<TelaRegras>('/api/conexoes/regras', ['rules.changed', 'proposals.changed']);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -491,6 +499,7 @@ function Regras() {
     <section className="conn-group" id="conn-regras">
       <h3>{t('conexoes.regras.titulo')}</h3>
       <p className="muted small">{t('conexoes.regras.texto')}</p>
+      <ModoLiberarTudo estado={cx.data} onMudou={cx.reload} />
       {err && <p className="error" role="alert">{err}</p>}
       {ok && <p className="ok" role="status">{ok}</p>}
       {!d && r.error && <p className="error">{r.error}</p>}
@@ -555,8 +564,6 @@ function LiberarTudo({ estado: st }: { estado: { data: EstadoConexoes | null; re
       {opcao(st.data?.aprovarDepoisDeLer, '/api/conexoes/aprovar-depois-de-ler', ROTULO_APROVAR_DEPOIS_DE_LER)}
       <p className="muted small">{t('conexoes.cuidado.depoisDeLer')}</p>
       {st.data?.aprovarDepoisDeLerBarra && <p className="warn">{AVISO_APROVAR_SEM_CARTAO}</p>}
-      {opcao(st.data?.liberarTudo, '/api/conexoes/liberar-tudo', t('conexoes.cuidado.liberarTudo'))}
-      {st.data?.liberarTudo && <p className="warn">{t('conexoes.cuidado.liberarTudoAviso')}</p>}
       {err && <p className="error">{err}</p>}
     </section>
   );

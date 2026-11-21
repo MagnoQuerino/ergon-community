@@ -16,11 +16,13 @@ import type { Routines } from '../services/routines.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import { type Applied, type ContentBody, ContentSync, parseContent } from './sync-content.ts';
 import { SyncAtividade } from './sync-atividade.ts';
+import type { SalasSync } from './sync-salas.ts';
 import { conferirNuvem } from './nuvem-fixa.ts';
-import { newWorkspaceKey, openChange, openForDevice, sealChange, unwrapForDevice, unwrapForRecovery, wrapForDevice, wrapForRecovery } from './sync-crypto.ts';
+import { newWorkspaceKey, openChange, openForDevice, recoveryKindOf, sealChange, unwrapForDevice, unwrapForRecovery, unwrapForRecoveryWorld, wrapForDevice, wrapForRecovery, wrapForRecoveryWorld } from './sync-crypto.ts';
+import { KDF_STRONG, type KdfParams } from '../security/crypto.ts';
 
 interface Keys { ed25519: string; x25519: string; x25519Public: string }
-interface SyncRow { sync_workspace_id: string; key_version: number; sync_key: string; last_version: number; blueprint_hash: string | null; old_keys: string | null; rotation_pending: number; recovery_key_version: number | null; updated_at: string | null; envio_pendente: string | null; giro_candidato: string | null; dono_conta: string | null }
+interface SyncRow { sync_workspace_id: string; key_version: number; sync_key: string; last_version: number; blueprint_hash: string | null; old_keys: string | null; rotation_pending: number; recovery_key_version: number | null; recovery_kind: string | null; updated_at: string | null; envio_pendente: string | null; giro_candidato: string | null; dono_conta: string | null }
 /** a parte em envio (w0011): `chegou` = a mudança apareceu no World ao receber, sem a resposta ter chegado aqui */
 interface EnvioPendente { op: string; resumo: string; chegou?: number }
 interface GiroCandidato { v: number; chave: string; op: string }
@@ -29,6 +31,12 @@ export type LogSync = (o: Record<string, unknown>, msg: string) => void;
 interface Precisa { deviceId: string; accountId?: string; syncPublicKey?: string | null; kind?: string }
 export interface Entrega { shared: number; failed: number; needed: number; cloud: 'entregue' | 'falhou' | 'nao_pedia'; falhas: Array<{ deviceId: string; code: string }> }
 const sha = (x: string) => crypto.createHash('sha256').update(x).digest('hex');
+/**
+ * Com o que se recupera a chave do workspace num aparelho novo: a frase (texto; formato de sempre) ou a senha do Ergon
+ * World (`{ world }`, rc.42). A senha do World já foi conferida no World por quem chama.
+ */
+export type RecoveryInput = string | { world: string };
+const kindOf = (rec: RecoveryInput): 'phrase' | 'world' => (typeof rec === 'string' ? 'phrase' : 'world');
 const codigoDe = (e: unknown): string => String((e as { code?: unknown }).code ?? ((e as { status?: unknown }).status ? `http_${(e as { status?: unknown }).status}` : 'erro'));
 /** `accountId`/`deviceKind`: quem mandou, como o World registrou o aparelho que assinou (world/src/sync.ts COLS) */
 type Change = { version: number; operationId: string; keyVersion: number; schemaVersion: number; kind: string; ciphertext: string; nonce: string; deviceId: string; accountId?: string; deviceKind?: string };
@@ -41,7 +49,11 @@ export class LocalSync {
   log: LogSync;
   /** este Ergon é a nuvem do World: o esqueleto recebido espelha a equipe do computador (services/blueprint.ts) */
   private readonly nuvem: boolean;
-  constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits; log?: LogSync; nuvem?: boolean }) { this.nuvem = d.nuvem === true; this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); this.atividade = new SyncAtividade(d.bus); this.log = d.log ?? (() => undefined); }
+  /** derivação do envelope pela senha do World (a mesma força da senha local) */
+  private readonly kdf: KdfParams;
+  /** as Salas entre os colaboradores (sync-salas.ts); sem o serviço, nada das salas vai nem vem */
+  salas: SalasSync | null = null;
+  constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits; log?: LogSync; nuvem?: boolean; kdf?: KdfParams }) { this.nuvem = d.nuvem === true; this.kdf = d.kdf ?? KDF_STRONG; this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); this.atividade = new SyncAtividade(d.bus); this.log = d.log ?? (() => undefined); }
 
   /** mensagens novas vindas de outro aparelho (antes de a tela ser avisada): os canais não as mandam de novo */
   aoReceberMensagens: ((ws: string, messageIds: string[]) => void) | null = null;
@@ -146,6 +158,8 @@ export class LocalSync {
     if (r) {
       return { enabled: true, syncWorkspaceId: r.sync_workspace_id, keyVersion: r.key_version, lastVersion: r.last_version, conflicts: this.content.openConflicts(ws),
         rotationPending: !!r.rotation_pending, recoveryOutdated: r.recovery_key_version != null && r.recovery_key_version < r.key_version,
+        // com o que o envelope de recuperação desta conta abre (a tela pede a senha do World ou a frase)
+        recoveryKind: r.recovery_key_version == null ? null : (r.recovery_kind === 'world' ? 'world' : 'phrase'),
         // a última vez que este computador enviou ou recebeu (para o Estado do Ergon)
         lastSyncAt: r.updated_at ?? null };
     }
@@ -216,13 +230,31 @@ export class LocalSync {
   }
 
   /** Cria a chave do workspace (versão dada) e grava o primeiro envelope deste aparelho (e o de recuperação, com a frase). */
-  private async createKey(userId: string, ws: string, syncWorkspaceId: string, keyVersion: number, recoveryPhrase?: string) {
+  private async createKey(userId: string, ws: string, syncWorkspaceId: string, keyVersion: number, recoveryPhrase?: RecoveryInput) {
     const c = this.ctx(userId); const dek = newWorkspaceKey();
     await this.client.call('PUT', `/v1/sync/workspaces/${syncWorkspaceId}/envelopes`, { kind: 'device', deviceId: c.deviceId, keyVersion, wrapped: wrapForDevice(dek, c.keys.x25519Public, syncWorkspaceId, keyVersion) }, c.session);
-    if (recoveryPhrase) await this.client.call('PUT', `/v1/sync/workspaces/${syncWorkspaceId}/envelopes`, { kind: 'recovery', keyVersion, wrapped: wrapForRecovery(dek, recoveryPhrase, syncWorkspaceId, keyVersion) }, c.session);
-    this.db.run('INSERT INTO world_sync (workspace_id, user_id, sync_workspace_id, key_version, sync_key, last_version, updated_at, recovery_key_version) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
-      ws, userId, syncWorkspaceId, keyVersion, this.db.seal(ws, dek.toString('base64')), now(), recoveryPhrase ? keyVersion : null);
+    if (recoveryPhrase) await this.client.call('PUT', `/v1/sync/workspaces/${syncWorkspaceId}/envelopes`, { kind: 'recovery', keyVersion, wrapped: await this.wrapRecovery(dek, recoveryPhrase, syncWorkspaceId, keyVersion) }, c.session);
+    this.db.run('INSERT INTO world_sync (workspace_id, user_id, sync_workspace_id, key_version, sync_key, last_version, updated_at, recovery_key_version, recovery_kind) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)',
+      ws, userId, syncWorkspaceId, keyVersion, this.db.seal(ws, dek.toString('base64')), now(), recoveryPhrase ? keyVersion : null, recoveryPhrase ? kindOf(recoveryPhrase) : null);
     return this.status(ws);
+  }
+  /** O envelope de recuperação: pela frase (scrypt, formato de sempre) ou pela senha do World (Argon2id, formato v2). */
+  private wrapRecovery(dek: Buffer, rec: RecoveryInput, sws: string, kv: number): Promise<string> {
+    return typeof rec === 'string' ? Promise.resolve(wrapForRecovery(dek, rec, sws, kv)) : wrapForRecoveryWorld(dek, rec.world, sws, kv, this.kdf);
+  }
+  /** Abre o envelope de recuperação com o que a pessoa digitou; o tipo errado diz qual usar (sem gastar a derivação). */
+  private async unwrapRecovery(wrapped: string, rec: RecoveryInput, sws: string, kv: number): Promise<Buffer> {
+    const kind = recoveryKindOf(wrapped);
+    if (kind !== kindOf(rec)) {
+      throw new HttpError(400, 'recovery_kind', kind === 'world' ? 'Este workspace se recupera com a senha do Ergon World.' : 'Este workspace se recupera com a frase de recuperação.');
+    }
+    try { return typeof rec === 'string' ? unwrapForRecovery(wrapped, rec, sws, kv) : await unwrapForRecoveryWorld(wrapped, rec.world, sws, kv); }
+    catch {
+      throw typeof rec === 'string'
+        ? new HttpError(400, 'recovery', 'frase de recuperação não abre a chave deste workspace')
+        // a senha já foi aceita pelo World: o envelope é de uma senha anterior (trocada ou redefinida lá)
+        : new HttpError(409, 'recovery_world_stale', 'A senha do Ergon World mudou depois que a recuperação foi gravada: ela não abre mais a chave. Abra o Ergon em um computador que já sincroniza.');
+    }
   }
 
   /**
@@ -230,7 +262,7 @@ export class LocalSync {
    * Num workspace adotado (criado em outro computador ou no servidor), a chave só nasce aqui se ainda não existir e a
    * pessoa administrar o workspace; se já existir, entra com ela (este aparelho já a recebeu) ou espera a entrega.
    */
-  async enable(userId: string, ws: string, recoveryPhrase?: string) {
+  async enable(userId: string, ws: string, recoveryPhrase?: RecoveryInput) {
     // já sincroniza (conectar ao World liga a sincronia sozinho): a frase dada agora vira a de recuperação
     if (this.row(ws)) { if (recoveryPhrase) await this.setRecovery(userId, ws, recoveryPhrase); return this.status(ws); }
     const c = this.ctx(userId);
@@ -247,7 +279,7 @@ export class LocalSync {
   }
 
   /** Neste aparelho (outro computador da pessoa): entra num workspace World que já existe, pegando a chave. */
-  async join(userId: string, ws: string, syncWorkspaceId: string, recoveryPhrase?: string) {
+  async join(userId: string, ws: string, syncWorkspaceId: string, recoveryPhrase?: RecoveryInput) {
     const c = this.ctx(userId);
     let env: { keyVersion: number; wrapped: string }; let dek: Buffer; let viaRecovery = false;
     try {
@@ -262,14 +294,14 @@ export class LocalSync {
       }
       if (!recoveryPhrase) throw e;
       env = await this.client.call('GET', `/v1/sync/workspaces/${syncWorkspaceId}/envelope?kind=recovery`, undefined, c.session);
-      try { dek = unwrapForRecovery(env.wrapped, recoveryPhrase, syncWorkspaceId, env.keyVersion); } catch { throw new HttpError(400, 'recovery', 'frase de recuperação não abre a chave deste workspace'); }
+      dek = await this.unwrapRecovery(env.wrapped, recoveryPhrase, syncWorkspaceId, env.keyVersion);
       viaRecovery = true;
       await this.client.call('PUT', `/v1/sync/workspaces/${syncWorkspaceId}/envelopes`, { kind: 'device', deviceId: c.deviceId, keyVersion: env.keyVersion, wrapped: wrapForDevice(dek, c.keys.x25519Public, syncWorkspaceId, env.keyVersion) }, c.session);
     }
-    this.db.run(`INSERT INTO world_sync (workspace_id, user_id, sync_workspace_id, key_version, sync_key, last_version, updated_at, recovery_key_version) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+    this.db.run(`INSERT INTO world_sync (workspace_id, user_id, sync_workspace_id, key_version, sync_key, last_version, updated_at, recovery_key_version, recovery_kind) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
       ON CONFLICT (workspace_id) DO UPDATE SET sync_workspace_id = excluded.sync_workspace_id, key_version = excluded.key_version, sync_key = excluded.sync_key, last_version = 0, blueprint_hash = NULL,
-        updated_at = excluded.updated_at, old_keys = NULL, rotation_pending = 0, recovery_key_version = excluded.recovery_key_version, envio_pendente = NULL, giro_candidato = NULL`,
-    ws, userId, syncWorkspaceId, env.keyVersion, this.db.seal(ws, dek.toString('base64')), now(), viaRecovery ? env.keyVersion : null);
+        updated_at = excluded.updated_at, old_keys = NULL, rotation_pending = 0, recovery_key_version = excluded.recovery_key_version, recovery_kind = excluded.recovery_kind, envio_pendente = NULL, giro_candidato = NULL`,
+    ws, userId, syncWorkspaceId, env.keyVersion, this.db.seal(ws, dek.toString('base64')), now(), viaRecovery ? env.keyVersion : null, viaRecovery && recoveryPhrase ? kindOf(recoveryPhrase) : null);
     this.adopt(ws, syncWorkspaceId);
     // outro workspace World: as bases e os conflitos do anterior não valem mais
     this.db.run('DELETE FROM world_sync_records WHERE workspace_id = ?', ws); this.db.run('DELETE FROM world_sync_conflicts WHERE workspace_id = ?', ws);
@@ -374,9 +406,18 @@ export class LocalSync {
     // parte privada: ferramentas, rotinas e a configuração delas) — quem recebe também não aplicaria (receber)
     let mandarEquipe = !opts.contentOnly && bh !== r.blueprint_hash && (await this.donoDe(userId, ws, r)) === (this.links.get(userId)?.account_id ?? '');
     if (mandarEquipe && jaChegou(`bp:${bh}`)) { this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); mandarEquipe = false; esquecer(); }
-    let partes = this.content.chunks(this.content.pending(ws, userId)).map((x) => ({ ...x, resumo: `ct:${sha(JSON.stringify(x.body))}` }));
+    const brutas = this.content.chunks(this.content.pending(ws, userId));
+    const salas = this.salas ? this.salas.saida(ws, r.sync_workspace_id, this.aparelho(userId), brutas.length > 0) : null;
+    // as salas (sync-salas.ts) vão na primeira parte; sem conteúdo nenhum, numa parte só delas
+    // com pacotes (que podem levar partes de anexo), numa parte só deles, depois do conteúdo: cada mudança fica no teto
+    let comSalas: (typeof brutas)[number] | undefined;
+    if (salas) {
+      if (brutas.length && !salas.extra.salas) { Object.assign(brutas[0].body, salas.extra); comSalas = brutas[0]; }
+      else { comSalas = { body: { type: 'content', tasks: [], conversations: [], messages: [], ...salas.extra }, items: [] }; brutas.push(comSalas); }
+    }
+    let partes = brutas.map((x) => ({ ...x, resumo: `ct:${sha(JSON.stringify({ ...x.body, salas: undefined }))}${salas && x === comSalas ? `:${salas.resumo.slice(0, 16)}` : ''}` }));
     const chegada = partes.find((x) => jaChegou(x.resumo));
-    if (chegada) { this.content.sent(ws, chegada.items); partes = partes.filter((x) => x !== chegada); esquecer(); }
+    if (chegada) { this.content.sent(ws, chegada.items); if (salas && chegada.body === comSalas?.body) salas.marcar(); partes = partes.filter((x) => x !== chegada); esquecer(); }
     if (!mandarEquipe && !partes.length) { if (pend?.chegou) esquecer(); return { version, sent }; } // nada a enviar: a barra de cima nem pisca
     // cada parte enviada é um ponto seguro (a versão e o "já foi" ficam gravados); cortado no meio, o que faltou vai na
     // próxima vez (o que já tinha chegado ao World e não foi marcado aqui vai de novo, e aplicar duas vezes dá no mesmo)
@@ -385,6 +426,7 @@ export class LocalSync {
       for (const part of partes) {
         await send(part.body, 'change', 'ct', part.resumo);
         this.content.sent(ws, part.items);
+        if (salas && part.body === comSalas?.body) { salas.marcar(); if (this.salas?.salas.temEnvioDeAnexo(ws)) this.salas.salas.aoMudar?.(ws); }
         sent.tasks += part.body.tasks.length; sent.conversations += part.body.conversations.length; sent.messages += part.body.messages.length;
       }
       return { version, sent };
@@ -460,12 +502,16 @@ export class LocalSync {
       this.db.tx(() => {
         const novas = body.messages.map((m) => m.id).filter((id) => !this.db.get('SELECT 1 AS x FROM messages WHERE id = ?', id));
         const n = this.content.apply(ws, userId, body, x.deviceId);
+        // as salas: anúncio de chave, pacotes selados para este aparelho e a governança (sync-salas.ts)
+        if (this.salas && (body.aparelho || body.salas || body.salasGov)) { try { this.salas.entrada(ws, r.sync_workspace_id, x, body, this.aparelho(userId)); } catch (e) { this.log({ ws, erro: String((e as Error).message ?? e).slice(0, 160) }, 'salas: o que veio não foi aplicado'); } }
         for (const k of Object.keys(total) as Array<keyof Applied>) total[k] += n[k];
         try { if (novas.length) this.aoReceberMensagens?.(ws, novas); } catch { /* os canais não seguram a sincronia */ }
         this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ? AND last_version < ?', x.version, now(), ws, x.version);
       });
     }
     this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', head, now(), ws);
+    // salas: as mensagens que pediram conexões daqui, agora que tudo chegou (a resposta de outro aparelho pode estar junto)
+    try { this.salas?.salas.aposReceber(ws); } catch (e) { this.log({ ws, erro: String((e as Error).message ?? e).slice(0, 160) }, 'salas: pedido de conexões não tratado'); }
     // quadros e itens de cartão (sync-quadros.ts) também mudam a tela de Tarefas: chegando só eles, o aviso vai igual
     if (incoming.tasks || contents.some((b) => b.boards?.length || b.cards?.length)) this.bus.publish(ws, 'tasks.changed', {});
     if (incoming.messages || incoming.conversations) this.bus.publish(ws, 'messages.changed', {});
@@ -533,7 +579,7 @@ export class LocalSync {
    * saiu não recebe a nova); a chave nova é entregue a cada aparelho de quem ficou; o World libera os envios de novo.
    * Com a frase, o envelope de recuperação passa a abrir a chave nova.
    */
-  async rotate(userId: string, ws: string, recoveryPhrase?: string) {
+  async rotate(userId: string, ws: string, recoveryPhrase?: RecoveryInput) {
     const r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId); const ring = this.keyring(r);
     const p = await this.client.call<{ head: number; keyVersion?: number }>('GET', `/v1/sync/workspaces/${r.sync_workspace_id}/changes?since=${r.last_version}`, undefined, c.session);
@@ -569,12 +615,16 @@ export class LocalSync {
   }
 
   /** Envelope de recuperação para a chave atual (depois de um giro, a frase antiga só abria a chave anterior). */
-  async setRecovery(userId: string, ws: string, recoveryPhrase: string) {
+  async setRecovery(userId: string, ws: string, recoveryPhrase: RecoveryInput) {
     const r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId);
-    await this.client.call('PUT', `/v1/sync/workspaces/${r.sync_workspace_id}/envelopes`, { kind: 'recovery', keyVersion: r.key_version, wrapped: wrapForRecovery(this.dek(r), recoveryPhrase, r.sync_workspace_id, r.key_version) }, c.session);
-    this.db.run('UPDATE world_sync SET recovery_key_version = ? WHERE workspace_id = ?', r.key_version, ws);
+    await this.client.call('PUT', `/v1/sync/workspaces/${r.sync_workspace_id}/envelopes`, { kind: 'recovery', keyVersion: r.key_version, wrapped: await this.wrapRecovery(this.dek(r), recoveryPhrase, r.sync_workspace_id, r.key_version) }, c.session);
+    this.db.run('UPDATE world_sync SET recovery_key_version = ?, recovery_kind = ? WHERE workspace_id = ?', r.key_version, kindOf(recoveryPhrase), ws);
     return this.status(ws);
+  }
+  /** Os workspaces desta pessoa cuja recuperação é a senha do World (trocada a senha, o envelope acompanha). */
+  worldRecoveryOf(userId: string): string[] {
+    return this.db.all<{ workspace_id: string }>("SELECT workspace_id FROM world_sync WHERE user_id = ? AND recovery_kind = 'world' AND recovery_key_version IS NOT NULL", userId).map((x) => x.workspace_id);
   }
 
   conflicts(userId: string, ws: string) { return this.content.conflicts(ws, userId); }

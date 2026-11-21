@@ -21,6 +21,7 @@ import { BotoesPrazo, type Prazo } from './CartaoRegra.tsx';
 import { ACAO, ACAO_GRANDE, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { ActionBar, IconAction, TaskFiles, TechDetails, type TaskFile, type WorkInfo } from './TaskWork.tsx';
 import { QuestionCard, SecretCard } from './ChatCards.tsx';
+import { EntregaDetalhes, ModeloTopo, type ModeloDaTarefa, type PodeAgir } from './EntregaDetalhes.tsx';
 import { ComandosBar } from './Comandos.tsx';
 import type { Proposal } from '../lib/types.ts';
 import { semNuvem, type NuvemNoCartao } from '../lib/nuvem-cartao.ts';
@@ -45,6 +46,8 @@ interface Detail {
   files: { inputs: TaskFile[]; deliverables: TaskFile[] };
   work: WorkInfo | null;
   resumo?: Resumo | null;
+  /** a entrega no modelo (o tipo e os itens curtos; o relatório no diálogo "Ver detalhes") */
+  modelo?: ModeloDaTarefa | null;
   /** quadro da equipe: onde o card está na fila de "A fazer" (null = não está esperando ali) */
   queue?: { position: number; total: number } | null;
   column: string | null;
@@ -172,7 +175,7 @@ function Pedido({ texto }: { texto: string }) {
 /**
  * Detalhe do card. 'team': quadro da equipe — de cima para baixo, o que importa para decidir de relance: título e
  * número; a situação em uma palavra, com cor; a FAIXA DE DECISÃO com a frase exata do que se aprova (ou do que foi
- * feito), pelos fatos que o sistema registrou; os botões grandes (Aprovar, Pedir ajuste), e o resto no menu "⋯"; as
+ * feito), pelos fatos que o sistema registrou; os botões grandes (Aprovar, Devolver com instruções), e o resto no menu "⋯"; as
  * etapas numa linha cada; os arquivos com "Ver"; o histórico e "Como foi conferido" recolhidos no fim.
  * 'user': suas tarefas locais — edita e envia à equipe. 'mirror': ligada a um aplicativo — o que muda aqui reflete lá.
  */
@@ -199,9 +202,13 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   const [ok, setOk] = useState<string | null>(null);
   const [savedNow, setSavedNow] = useState(false);
   const [naming, setNaming] = useState<string | null>(null); // card da equipe: "Dar outro nome" aberto (o texto)
-  // "Pedir ajuste": devolver com instrução (card aberto) ou revisar (card concluído reabre numa nova rodada)
+  // "Devolver com instruções": devolver com instrução (card aberto) ou revisar (card concluído reabre numa nova rodada)
   const [ajuste, setAjuste] = useState<{ modo: 'return' | 'revise'; texto: string } | null>(null);
   const [answer, setAnswer] = useState('');
+  // o diálogo guarda a entrega que abriu: depois de agir, o card relê (e pode já estar trabalhando de novo), e o diálogo
+  // continua mostrando o resultado até a pessoa fechar
+  const [detalhes, setDetalhes] = useState<ModeloDaTarefa | null>(null);
+  useEffect(() => setDetalhes(null), [taskId]);
   const [busy, setBusy] = useState<string | null>(null); // o clique em andamento (o botão diz o que está indo; nada fica cinza esperando)
   const indoRef = useRef<string | null>(null); // a mesma trava, já valendo antes de a tela redesenhar (dois cliques seguidos)
   const [confirmCancel, setConfirmCancel] = useState(false); // "Cancelar a tarefa" pede confirmação ali mesmo
@@ -375,6 +382,9 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   const column = data.column ?? columns?.find((c) => c.id === tk.column_id)?.name;
   const children = data.children ?? [];
   const resumo = data.resumo ?? null;
+  const modelo = data.modelo ?? null;
+  // no diálogo: aprovar quando o card espera a aprovação; devolver quando espera você; revisar num card concluído
+  const pode: PodeAgir = mode !== 'team' ? null : tk.completed ? 'revisar' : need === 'approval' || need === 'review' ? 'aprovar' : need ? 'devolver' : null;
   const tom = tomDe(resumo?.situacao.tom ?? (tk.completed ? 'feito' : 'fila')); // i18n-ok: o tom é nome de classe, não texto de tela
   const indo = (what: string, label: string, doing: string) => (busy === what ? doing : label);
   /** o cartão de prazo: qual decisão dele está indo ("Enviando…" no principal, "Recusando…" no Recusar) */
@@ -398,7 +408,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
       </div>
     </div>
   );
-  // "Pedir ajuste": o que precisa mudar vai para o agente (e, num card concluído, ele reabre numa nova rodada)
+  // "Devolver com instruções": o que precisa mudar vai para o agente (e, num card concluído, ele reabre numa nova rodada)
   const ajusteBox = ajuste && (
     <form className="ask-box tdet__ajuste" onSubmit={(e) => {
       e.preventDefault();
@@ -417,7 +427,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
   );
   const pedirAjuste = (modo: 'return' | 'revise') => setAjuste((v) => (v ? null : { modo, texto: '' }));
 
-  // os botões grandes da faixa: a decisão de agora (Aprovar, Pedir ajuste), quando cabe
+  // os botões grandes da faixa: a decisão de agora (Aprovar, Devolver com instruções), quando cabe
   let botoes: ReactNode = null;
   if (mode === 'team' && !tk.completed) {
     if (lote.length === 1 && lote[0].kind === 'depois_de_ler') {
@@ -586,12 +596,16 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
           </div>
           {/* 3. a faixa de decisão: a frase exata do que se aprova (ou do que foi feito); 4. os botões grandes */}
           {resumo && (
-            <section className={`tdet__faixa tdet__faixa--${tom}`} aria-label={resumo.faixa.titulo}>
-              <p className="tdet__faixa-t">{resumo.faixa.titulo}</p>
-              <p className="tdet__frase">{resumo.faixa.frase}</p>
-              {resumo.faixa.itens.length > 0 && <ul className="tdet__itens">{resumo.faixa.itens.map((x, i) => <li key={i}>{x}</li>)}</ul>}
-              {resumo.faixa.doAgente && <p className="tdet__agente">{resumo.faixa.doAgente}</p>}
-              {(conexoes.length > 0 || data.files.deliverables.length > 0) && <p className="tdet__abaixo muted small">{t('tarefa.faixa.detalhesAbaixo')}</p>}
+            <section className={`tdet__faixa tdet__faixa--${tom}`} aria-label={modelo && !conexoes.length ? t(`tarefa.entrega.tipo.${modelo.tipo}`) : resumo.faixa.titulo}>
+              {/* a entrega no modelo: o tipo, os itens curtos e "Ver detalhes" (sem o parágrafo do agente); com ações
+                  numa conta esperando o clique, a frase delas continua sendo o que se aprova */}
+              {modelo && !conexoes.length ? <ModeloTopo modelo={modelo} onDetalhes={() => setDetalhes(modelo)} /> : <>
+                <p className="tdet__faixa-t">{resumo.faixa.titulo}</p>
+                <p className="tdet__frase">{resumo.faixa.frase}</p>
+                {resumo.faixa.itens.length > 0 && <ul className="tdet__itens">{resumo.faixa.itens.map((x, i) => <li key={i}>{x}</li>)}</ul>}
+                {resumo.faixa.doAgente && <p className="tdet__agente">{resumo.faixa.doAgente}</p>}
+                {(conexoes.length > 0 || data.files.deliverables.length > 0) && <p className="tdet__abaixo muted small">{t('tarefa.faixa.detalhesAbaixo')}</p>}
+              </>}
               {need === 'info' && (
                 <textarea className="tdet__resp" data-autofocus value={answer} rows={2} onChange={(e) => setAnswer(e.target.value)} placeholder={t('tarefa.faixa.resposta')}
                   aria-label={t('tarefa.faixa.respostaCampo')} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (answer.trim()) void respond('answer', answer.trim()); } }} />
@@ -705,6 +719,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
             : t('tarefa.conferido.pedidoAEntregar', { nome: nameOf(origin.agentId) ?? t('tarefa.nomes.umAgente'), quem: nameOf(origin.deliverAgentId) ?? t('tarefa.nomes.quemRecebeu') })}{origin.purpose ? `: “${origin.purpose}”` : ''}</p>}
         </>} />
       )}
+      {detalhes && <EntregaDetalhes taskId={tk.id} modelo={detalhes} pode={pode} onClose={() => setDetalhes(null)} onChanged={d.reload} />}
     </aside>
   );
 }

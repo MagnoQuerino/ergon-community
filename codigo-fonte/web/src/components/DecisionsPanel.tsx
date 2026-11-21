@@ -14,6 +14,7 @@ import { TextoLongo } from './TextoLongo.tsx';
 import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
 import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { Selo } from './Selo.tsx';
+import { AvisosDeSalas } from './Salas.tsx';
 
 type OpenAgent = (id: string, tab?: 'conversa' | 'perfil' | 'atividade', draft?: string | null, conversationId?: string | null) => void;
 
@@ -98,7 +99,9 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
   const x = d.data;
   const routines = x?.proposals.filter((p) => p.kind === 'routine' || p.kind === 'routine_edit') ?? [];
   const team = x?.proposals.filter((p) => p.kind !== 'routine' && p.kind !== 'routine_edit') ?? [];
-  const empty = x && !x.total;
+  // as menções e os pedidos de cessão das Salas também contam (o sino soma os dois)
+  const salas = useResource<unknown[]>('/api/salas/avisos', ['salas.changed']);
+  const empty = x && !x.total && !salas.data?.length;
   const conv = (p: { agent_id: string | null; conversation_id: string | null }) => (p.agent_id && p.conversation_id ? () => openConversation(p.agent_id, p.conversation_id) : undefined);
   return (
     <aside ref={ref} className={inline ? 'dec-inline' : `drawer dec-panel ${sob ? 'dec-panel--sob' : ''}`} inert={sob || undefined} aria-hidden={sob || undefined} role={inline ? undefined : 'dialog'} aria-labelledby={inline ? undefined : 'dec-title'} aria-label={inline ? t('servidor.decisoes.titulo') : undefined}>
@@ -108,6 +111,8 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
           {err && <p className="error" role="alert">{err}</p>}
           {done && <p className="ok" role="status">{done}</p>}
           {empty && <p className="muted">{t('servidor.decisoes.vazio')}</p>}
+          {/* Salas (rc.42): menções e pedidos de cessão de conexões, no topo (o sino já conta) */}
+          <AvisosDeSalas />
 
           {x.cards.length > 0 && <h4 className="rt-sub">{t('servidor.decisoes.cards')}</h4>}
           {x.cards.map((c) => {
@@ -136,6 +141,13 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
                 </>)}>
                 <b>{c.title}</b>
                 <span className="muted small">{t('servidor.decisoes.deQuem', { nome: c.agent_name ?? t('servidor.decisoes.aEquipe') })}</span>
+                {/* a entrega no modelo: os itens curtos do cartão; o relatório abre no card ("Ver detalhes") */}
+                {c.modelo && (c.modelo.lead || c.modelo.itens.length > 0) && (
+                  <span className="dec-card__modelo">
+                    {c.modelo.lead && <span>{c.modelo.lead}</span>}
+                    {c.modelo.itens.length > 0 && <ul className="ent-itens ent-itens--mini">{c.modelo.itens.slice(0, 5).map((x, i) => <li key={i}>{x}</li>)}</ul>}
+                  </span>
+                )}
                 {c.need === 'info' && <span className="dec-card__q">{c.question ?? c.justification}</span>}
                 {c.need === 'review' && c.justification && <span className="dec-card__q muted">{c.justification}</span>}
               </Item>

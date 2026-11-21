@@ -1,5 +1,16 @@
 # Novidades
 
+## 1.1.0-rc.42 (pré-versão de teste)
+
+- **Salas e tópicos:** conversas em grupo com as pessoas do workspace e os agentes. "@" chama alguém (o agente responde ali mesmo) e "#" pede as conexões de um colega, que decide se cede e por quanto tempo. Uma mensagem pode virar um tópico, compartilhado ou só seu. Anexos e tudo o mais vão e voltam cifrados entre os computadores de quem está na sala.
+- **Entregas que se leem de relance:** o cartão de uma entrega mostra o tipo e os itens curtos; o relatório inteiro fica em "Ver detalhes", com Aprovar ou Devolver item por item. Os modelos de entrega se ajustam em Configurações.
+- **Documentos de verdade:** o .md entregue abre formatado, com a identidade da sua empresa (nome, cores e logo) e modelos de documento, inclusive ABNT, e sai em PDF. "Revisar" chama o coordenador, que divide o texto entre os agentes; você vê cada um editando o seu trecho ao vivo, e as versões ficam guardadas.
+- **Mãos na massa:** com o GitHub ou o GitLab conectado, a equipe clona, cria um ramo, testa e abre o pull request, sem ver o token. No Drive e no OneDrive, organiza pastas e edita documentos e planilhas. Em Conexões › Pastas do computador, você concede pastas suas, só leitura ou leitura e escrita.
+- **Controle do computador:** com o Ergon Desktop, um agente usa o seu computador como você (tela, mouse, teclado, programas). Um selo na barra de cima avisa enquanto isso acontece, e você assume o controle a qualquer momento. Senhas, pagamentos e apagar de vez sempre pedem você.
+- **Recursos livres e acesso total:** todo agente tem todas as ferramentas; a função de cada um é só uma orientação, e você ainda pode restringir um agente se quiser. O que tem custo liga e desliga para a equipe toda. "Ativar acesso total?" libera Terminal, código, computador e Discord para a equipe inteira, com a senha uma vez; ações protegidas continuam pedindo, e quem administra pode proibir.
+- **Recuperar com o Ergon World:** se esquecer a senha, a senha do Ergon World pode abrir os seus dados e a sincronia, além da frase de 24 palavras. Você escolhe uma das duas, ou as duas.
+- **Também:** a equipe administra o servidor do Discord ligado em Conexões e ganhou o Diagnóstico para investigar erros em programas (com a trava do Terminal). A barra de cima cabe em qualquer largura de tela.
+
 ## 1.1.0-rc.41 (pré-versão de teste)
 
 - **Quadros de tarefas do seu jeito:** crie vários quadros, com colunas livres (criar, renomear, reordenar, apagar sem perder cards). Cada quadro pode ter campos próprios (texto, número, data, lista de opções, etiquetas coloridas, pessoa). No cartão: subtarefas com contador, anexos dos Documentos, links, pessoas do workspace como responsáveis e comentários de até 240 caracteres, seus e da equipe de IA. Tudo vai e volta entre os seus computadores, cada coisa no quadro certo.

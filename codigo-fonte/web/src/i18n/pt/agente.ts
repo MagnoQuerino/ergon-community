@@ -95,9 +95,13 @@ const agente = {
   'perfil.novoMetodo': 'Novo método',
   'perfil.sugestoesSetor': 'Sugestões do setor: {itens}',
   'perfil.ferramentas': 'Ferramentas',
-  'perfil.ferramentasDica': '— cada agente se especializa; quem não tem uma ferramenta pede ajuda a quem tem (a coordenação controla as travas)',
+  'perfil.ferramentasDica': '— desmarque para restringir este agente',
   'perfil.doCargo': 'do cargo',
-  'perfil.recomendada': 'recomendada',
+  'perfil.daEquipe': 'Da equipe toda',
+  'ferramenta.ligadaEquipe': 'Ligada',
+  'ferramenta.desligadaEquipe': 'Desligada',
+  'ferramenta.comAcessoTotal': 'Com o acesso total',
+  'ferramenta.pedeAcessoTotal': 'Pede o acesso total',
   'perfil.competencias': 'Competências da biblioteca',
   'perfil.competenciasDica': '— instruções prontas que o agente consulta quando tem a ferramenta "Competências da biblioteca"',
   'perfil.semFerramentaCompetencias': 'Sem a ferramenta "Competências da biblioteca", o agente só recebe o nome das competências como orientação.',
@@ -215,8 +219,8 @@ const agente = {
   // ——— Competências prontas, loja e avisos das ferramentas (components/CompetenciasProntas.tsx) (rc.27)
   'aviso.custo': 'custo',
   'aviso.risco': 'risco',
-  'aviso.custoDica': "Pode consumir mais da conta de IA ou de uma conta própria: veja o texto da ferramenta. Vem ligada; tire se este agente não precisar, para economizar.",
-  'aviso.riscoDica': "Alcança conteúdo de fora ou arquivos: veja o texto da ferramenta. Vem ligada; acompanhe e tire se este agente não precisar.",
+  'aviso.custoDica': "Pode consumir mais da conta de IA ou de uma conta própria.",
+  'aviso.riscoDica': "Alcança conteúdo de fora ou arquivos.",
   'prontas.lendo': 'Conferindo as competências da equipe…',
 
   // ——— Treinar: as três coisas que dá para fazer (rc.29)

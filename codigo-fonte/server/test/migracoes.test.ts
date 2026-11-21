@@ -20,6 +20,16 @@ const hex = () => crypto.randomBytes(16).toString('hex');
 const STOPS = [...new Set([0, 4, 9, 13, MIGRATIONS.length - 2].map((i) => MIGRATIONS[Math.max(0, Math.min(i, MIGRATIONS.length - 1))]))];
 
 describe('migração a partir de bancos antigos', () => {
+  test('número de migração não se repete (frentes juntas renumeram); as repetidas antigas ficam como foram publicadas', () => {
+    // 0038–0040 saíram repetidas em versões já publicadas: o nome inteiro é a chave em schema_migrations, então elas
+    // ficam como estão (renomear faria rodar de novo). Daqui em diante, um número por migração.
+    const ANTIGAS: Record<string, number> = { '0038': 2, '0039': 3, '0040': 2 };
+    const conta = new Map<string, number>();
+    for (const f of MIGRATIONS) conta.set(f.slice(0, 4), (conta.get(f.slice(0, 4)) ?? 0) + 1);
+    const repetidos = [...conta].filter(([n, k]) => k > (ANTIGAS[n] ?? 1)).map(([n, k]) => `${n} (${k}×)`);
+    assert.deepEqual(repetidos, [], `números repetidos: ${repetidos.join(', ')}`);
+  });
+
   for (const until of STOPS) {
     test(`banco parado em ${until}: o Ergon atual abre, migra o resto e os dados ficam`, async () => {
       const dir = tmpDir();

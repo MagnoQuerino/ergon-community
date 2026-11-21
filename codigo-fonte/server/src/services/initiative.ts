@@ -110,7 +110,7 @@ export class Initiative {
   /** A conversa comum mais recente da pessoa com o agente (ou uma nova). */
   private conversationWith(workspaceId: string, userId: string, agentId: string): string {
     const c = this.db.get<{ id: string }>(
-      `SELECT c.id FROM conversations c WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.agent_id = ? AND c.purpose IS NULL
+      `SELECT c.id FROM conversations c WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.agent_id = ? AND c.purpose IS NULL AND c.sala = 0
         ORDER BY COALESCE((SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id), c.created_at) DESC LIMIT 1`, workspaceId, userId, agentId);
     return c?.id ?? createConversation(this.db, workspaceId, userId, agentId).id;
   }
@@ -288,7 +288,7 @@ export class Initiative {
   private static precisa(c: { need: string; question: string | null }): string {
     return c.need === 'info' ? `precisa de uma informação${c.question ? `: ${clip(c.question, 300)}` : ''}`
       : c.need === 'review' ? 'a revisão não passou; precisa da decisão dela (aprovar assim mesmo ou devolver com instrução)'
-      : 'foi entregue e espera a aprovação dela (Aprovar conclui; Pedir ajustes faz outra versão no mesmo card): pergunte se ela conseguiu ler';
+      : 'foi entregue e espera a aprovação dela (Aprovar conclui; Devolver com instruções faz outra versão no mesmo card): pergunte se ela conseguiu ler';
   }
 
   /** Os cartões dos cards que esperam a pessoa, nesta conversa (responder aqui resolve em todo lugar). */

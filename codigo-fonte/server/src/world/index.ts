@@ -12,13 +12,15 @@ import type { Config } from '../config.ts';
 import { HttpError } from '../lib/util.ts';
 import { throttle } from '../security/factors.ts';
 import { checkCredentials, defaultWorkspace, needsSetup } from '../services/auth.ts';
+import { checkWorldPassword } from '../services/security.ts';
 import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
 import { precisaReconectarErgonAi, registrarModelosErgonAi } from '../services/ai.ts';
 import { loadWorldConfig, type WorldConfig } from './config.ts';
 import { checkAccountInput, EMAIL_UNVERIFIED, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, worldLocale, type AccountInput, type DeviceChoice } from './link.ts';
 import { type AutoSync, EXIT_TOKEN_NOVO, iniciarAutoSync, iniciarNuvem, modoNuvem, prepararCofre } from './nuvem.ts';
 import type { PosseHorario } from '../services/routines.ts';
-import { LocalSync } from './sync-local.ts';
+import { SalasSync } from './sync-salas.ts';
+import { LocalSync, type RecoveryInput } from './sync-local.ts';
 import { ConexoesNuvem } from './sync-conexoes.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
@@ -61,11 +63,19 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
     },
     /** nuvem do Ergon World: abre o cofre do contêiner com a chave que o World guarda, antes do banco (world/nuvem.ts) */
     async prepare(vault) { if (wcfg.url) await prepararCofre(cfg, vault, env, client); },
+    /** Confere e-mail e senha no World (recuperar os dados locais pela senha do World, com o Ergon trancado). */
+    async checkAccount(email, password) { await client.call('POST', '/v1/accounts/login', { email: email.trim().toLowerCase(), password }); },
     async register(h: WorldHost) {
       const { app, db } = h;
       if (wcfg.url) {
         migrateWorldLocal(db);
         links = new WorldLinks(db, wcfg, client);
+        // a recuperação pela senha do World (services/security.ts): conferir no World e o e-mail ligado. Só o login de
+        // sempre vai ao World; o embrulho dos dados locais fica no keyring deste computador.
+        if (h.recovery) {
+          h.recovery.check = async (email, password) => { await client.call('POST', '/v1/accounts/login', { email, password }); };
+          h.recovery.linkEmail = (userId) => links?.get(userId)?.account_email ?? null;
+        }
       }
       const L = (): WorldLinks => { if (!links) throw new HttpError(503, 'world_unconfigured', 'O Ergon World não está configurado nesta instalação.'); return links; };
       const sessionOf = (userId: string): string => {
@@ -93,6 +103,28 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
        * Conectar ao World já liga a sincronia (é o mínimo de estar conectado): sem frase, em silêncio. Se este workspace
        * já sincroniza em outro computador e este ainda não recebeu a chave, fica para autorizar por lá (a tela explica).
        */
+      /**
+       * O World acabou de aceitar esta senha (conectar, ou a senha nova de "esqueci a senha" feita por aqui): as reservas
+       * que dependem da senha do World acompanham. A local (o embrulho no keyring) é refeita se não abrir com ela — a
+       * senha foi trocada lá — e a chave pessoal está aberta; os envelopes de recuperação do World Sync desta pessoa são
+       * refeitos com ela. A mesma senha do Ergon não serve de reserva: a local deixa de contar e a pessoa escolhe de novo.
+       * Sem conseguir agora (sem rede, parte fechada), fica como estava; nada disto impede o que a pessoa pediu.
+       */
+      const renovarReservas = async (a: { userId: string; username: string }, email: string, password: string): Promise<void> => {
+        const v = h.vault; const w = v.personWorld(a.userId);
+        if (w && w.email === email && v.personOpen(a.userId)) {
+          try {
+            let same = true;
+            try { await checkCredentials(db, a.username, password, cfg.kdf); } catch { same = false; }
+            if (same) v.markPersonWorldStale(a.userId);
+            else if (w.stale || !(await v.openPersonWorld(a.userId, password))) await v.setPersonWorld(a.userId, email, password);
+          } catch (e) { app.log.warn({ err: (e as Error).message }, 'recuperação pela senha do World: não refeita agora'); }
+        }
+        if (links?.get(a.userId)?.account_email !== email) return;
+        for (const ws of sync.worldRecoveryOf(a.userId)) {
+          await sync.setRecovery(a.userId, ws, { world: password }).catch((e: Error) => app.log.warn({ err: e.message }, 'recuperação do World Sync: não refeita agora'));
+        }
+      };
       const sincronizarAoConectar = async (userId: string, ws: string): Promise<boolean> => {
         if (sync.status(ws).enabled) return true;
         try { await sync.enable(userId, ws); return true; } catch { return false; }
@@ -173,6 +205,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         else throw new HttpError(400, 'invalid', 'Escolha criar uma conta ou entrar.');
         if (L().get(a.userId)) throw new HttpError(409, 'world_already_linked', 'Este perfil já está conectado ao Ergon World.');
         const l = await L().connect(a.userId, defaultWorkspace(db, a.userId), account, choice).catch(accountError);
+        await renovarReservas(a, account.email.trim().toLowerCase(), account.password);
         return { ok: true, accountEmail: l.account_email, emailVerified: !!l.email_verified };
       });
       /** Conta no limite de aparelhos: tenta de novo liberando o escolhido (sem digitar a senha outra vez). */
@@ -211,6 +244,8 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         if (!email || !code || !password) throw new HttpError(400, 'invalid', 'Informe o e-mail, o código e a senha nova.');
         if (password.length < 10) throw new HttpError(400, 'password_short', 'A senha precisa de 10 caracteres ou mais.');
         await client.call('POST', '/v1/accounts/password/reset', { email, code, password }).catch(accountError);
+        // a senha nova do World já vale lá: as reservas que dependem dela acompanham (a antiga deixou de abrir)
+        await renovarReservas(h.auth(req), email.toLowerCase(), password);
         return { ok: true };
       });
       app.post('/api/world/unlink', async (req) => { await L().unlink(h.auth(req).userId); return { ok: true }; });
@@ -218,10 +253,35 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
 
       // ---------------------------------------------------------------- qual workspace local é o do World
       // na nuvem do Ergon World a equipe é a do computador da pessoa: cresce o que precisar para recebê-la inteira
-      const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: modoNuvem(cfg, env) ? { ...h.limits, autoGrow: true } : h.limits, nuvem: modoNuvem(cfg, env),
+      const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: modoNuvem(cfg, env) ? { ...h.limits, autoGrow: true } : h.limits, nuvem: modoNuvem(cfg, env), kdf: cfg.kdf,
         log: (o, msg) => app.log.info(o, msg) });
       /** a sincronia automática deste computador (world/nuvem.ts); nula no contêiner da nuvem e com ERGON_WORLD_AUTOSYNC=0 */
       let auto: AutoSync | null = null;
+      // as Salas entre os colaboradores (sync-salas.ts): quem é quem pelo World, e um envio logo depois de cada mudança
+      if (h.salas && links) {
+        const salas = h.salas; const ss = new SalasSync(db, salas);
+        ss.log = (o, msg) => app.log.info(o, msg);
+        sync.salas = ss;
+        salas.contaDe = (userId) => links?.get(userId)?.account_id ?? null;
+        salas.compartilhado = (ws) => !!sync.worldId(ws) && !!links?.ownerOfBound(ws);
+        salas.donoConta = (ws) => db.get<{ d: string | null }>('SELECT dono_conta AS d FROM world_sync WHERE workspace_id = ?', ws)?.d ?? null;
+        salas.pessoasDoWorld = async (ws, userId) => {
+          const w = sync.worldId(ws); const s = links?.session(userId);
+          if (!w || !s) return null;
+          const r = await client.call<{ members: Array<{ accountId: string; name: string | null; role: string; me: boolean }> }>('GET', `/v1/sync/workspaces/${w}/members`, undefined, s);
+          h.canais?.membros(ws, r.members); // os papéis guardados valem também para as salas
+          return r.members;
+        };
+        const espera = new Map<string, ReturnType<typeof setTimeout>>();
+        salas.aoMudar = (ws) => {
+          if (!auto || espera.has(ws)) return;
+          const dono = links?.ownerOfBound(ws);
+          if (!dono) return;
+          // junta as mudanças de um instante num envio só (e a tela não espera o ciclo de um minuto)
+          espera.set(ws, setTimeout(() => { espera.delete(ws); void auto?.sincronizar(dono, ws).catch(() => undefined); }, 1500));
+        };
+        app.addHook('onClose', async () => { for (const t of espera.values()) clearTimeout(t); espera.clear(); salas.parar(); });
+      }
       // as conexões do computador (Google, Microsoft, Slack…) na nuvem do workspace, cifradas só para ela (sync-conexoes.ts)
       const msCx = (k: string) => { const n = Number.parseInt(env[k] ?? '', 10); return Number.isFinite(n) && n >= 20 ? n : undefined; };
       const conexoes = h.integrations ? new ConexoesNuvem({ db, cfg, bus: h.bus, client, links: L(), sync, integrations: h.integrations, nuvem: modoNuvem(cfg, env), log: (o, m) => app.log.info(o, m),
@@ -648,7 +708,23 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       app.get('/api/world/ai/usage', async (req) => client.call('GET', '/v1/ai/usage', undefined, sessionOf(h.auth(req).userId)));
 
       // ---------------------------------------------------------------- World Sync: só o workspace ligado
-      const phrase = (req: FastifyRequest) => { const v = (req.body as { recoveryPhrase?: unknown } | undefined)?.recoveryPhrase; return typeof v === 'string' && v.trim().length >= 20 ? v.trim() : undefined; };
+      /**
+       * A recuperação da chave do workspace que veio no pedido: a frase (20 caracteres ou mais) ou a senha do Ergon World
+       * (`worldPassword`), conferida no World ANTES de embrulhar (um erro de digitação deixaria a reserva sem serventia).
+       */
+      const phrase = async (req: FastifyRequest, userId: string): Promise<RecoveryInput | undefined> => {
+        const b = (req.body ?? {}) as { recoveryPhrase?: unknown; worldPassword?: unknown };
+        if (typeof b.worldPassword === 'string' && b.worldPassword.length > 0 && b.worldPassword.length <= 1024) {
+          const email = links?.get(userId)?.account_email;
+          if (!email) throw new HttpError(428, 'world_link_required', 'Conecte ao Ergon World primeiro.');
+          throttle.check(`sync-recovery:${userId}`);
+          try { await checkWorldPassword({ check: async (e, p) => { await client.call('POST', '/v1/accounts/login', { email: e, password: p }); } }, email, b.worldPassword); }
+          catch (e) { if ((e as HttpError).code === 'invalid_world') throttle.fail(`sync-recovery:${userId}`); throw e; }
+          throttle.ok(`sync-recovery:${userId}`);
+          return { world: b.worldPassword };
+        }
+        const v = b.recoveryPhrase; return typeof v === 'string' && v.trim().length >= 20 ? v.trim() : undefined;
+      };
       app.get('/api/world/sync', async (req) => {
         const a = h.auth(req);
         if (!links?.isBound(a.userId, a.workspaceId)) return { bound: false, enabled: false };
@@ -677,21 +753,22 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         if (!p.held) await sync.push(a.userId, ws);
         return { ...sync.status(ws), auto: null, atividade: sync.atividade.estado(ws) };
       });
-      app.post('/api/world/sync/enable', async (req) => { const a = h.owner(req); return sync.enable(a.userId, boundWs(a), phrase(req)); });
+      app.post('/api/world/sync/enable', async (req) => { const a = h.owner(req); return sync.enable(a.userId, boundWs(a), await phrase(req, a.userId)); });
       app.post('/api/world/sync/join', async (req) => {
         const a = h.owner(req); const ws = boundWs(a);
         const id = String((req.body as { syncWorkspaceId?: string })?.syncWorkspaceId ?? sync.worldId(ws) ?? '');
         if (!SWS.test(id)) throw new HttpError(400, 'invalid', 'workspace do World inválido');
         // já sincroniza (conectar liga sozinho): o botão antigo só guarda a frase de recuperação, se veio
-        if (sync.status(ws).enabled && sync.worldId(ws) === id) return sync.enable(a.userId, ws, phrase(req));
-        return sync.join(a.userId, ws, id, phrase(req));
+        const rec = await phrase(req, a.userId);
+        if (sync.status(ws).enabled && sync.worldId(ws) === id) return sync.enable(a.userId, ws, rec);
+        return sync.join(a.userId, ws, id, rec);
       });
       app.post('/api/world/sync/share', async (req) => { const a = h.owner(req); const r = await sync.share(a.userId, boundWs(a), { motivo: 'pedido da pessoa' }); return { shared: r.shared, failed: r.failed, cloud: r.cloud }; });
       app.post('/api/world/sync/push', async (req) => { const a = h.owner(req); return sync.push(a.userId, boundWs(a)); });
-      app.post('/api/world/sync/rotate', async (req) => { const a = h.owner(req); return sync.rotate(a.userId, boundWs(a), phrase(req)); });
+      app.post('/api/world/sync/rotate', async (req) => { const a = h.owner(req); return sync.rotate(a.userId, boundWs(a), await phrase(req, a.userId)); });
       app.post('/api/world/sync/recovery', async (req) => {
-        const a = h.owner(req); const p = phrase(req);
-        if (!p) throw new HttpError(400, 'invalid', 'Digite a frase de recuperação.');
+        const a = h.owner(req); const p = await phrase(req, a.userId);
+        if (!p) throw new HttpError(400, 'invalid', 'Digite a frase de recuperação ou a senha do Ergon World.');
         return sync.setRecovery(a.userId, boundWs(a), p);
       });
       app.post('/api/world/sync/pull', async (req) => { const a = h.owner(req); return sync.pull(a.userId, boundWs(a), (req.body as { apply?: unknown } | undefined)?.apply === true); });
@@ -721,7 +798,11 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       const log = (o: Record<string, unknown>, msg: string) => app.log.info(o, msg);
       let nuvem: { parar: () => Promise<void>; posse: (w: string, slot: string) => PosseHorario } | null = null;
       // de quem é cada horário de rotina (o computador aberto ou a nuvem; nunca os dois): Routines.posse
-      const ligarPosse = () => { h.routines.posse = (w, slot) => nuvem?.posse(w, slot) ?? 'aqui'; };
+      const ligarPosse = () => {
+        h.routines.posse = (w, slot) => nuvem?.posse(w, slot) ?? 'aqui';
+        // salas: a nuvem só responde com as conexões da dona (cedidas) na vez dela — os computadores fechados
+        if (h.salas && modoNuvem(cfg, env)) h.salas.posseNuvem = (w, quando) => nuvem?.posse(w, quando) ?? 'esperar';
+      };
       const proximoHorario = (w: string) => h.routines.proximoHorario(w);
       // os tempos do ciclo (os testes encurtam)
       const ms = (k: string) => { const n = Number.parseInt(env[k] ?? '', 10); return Number.isFinite(n) && n >= 20 ? n : undefined; };

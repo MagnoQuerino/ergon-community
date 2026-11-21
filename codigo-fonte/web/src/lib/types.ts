@@ -67,7 +67,8 @@ export interface Capacity { slots: number; active: number; free: number; floors?
 export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado' | 'atualizando';
 /** Ferramenta do catálogo do Ergon com o estado real ("planejado" nunca aparece como disponível). */
 /** guarded: executa código — bloqueada por padrão, liberada só com a senha */
-export interface AgentTool { id: string; label: string; kind: 'ergon' | 'ia'; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; platform?: boolean; toolset?: string; /** custo ou risco: a tela avisa */ aviso?: 'custo' | 'risco' }
+export interface AgentTool { id: string; label: string; kind: 'ergon' | 'ia'; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; platform?: boolean; toolset?: string; /** custo ou risco: a tela avisa */ aviso?: 'custo' | 'risco';
+  /** rc.42: vale para a equipe toda (interruptor da equipe ou acesso total), não se escolhe por agente */ escopo?: 'equipe'; acessoTotal?: boolean }
 export interface Sector { id: string; key: string; name: string; description: string | null; creates_tasks: 'demands' | 'explicit_only'; tools: string[]; skills: string[]; position: number; custom: number; members: number }
 export interface Agent {
   id: string; name: string; role: string; color: string; status: 'active' | 'archived'; demo: number; floor_id: string; floor_level: number; building_id: string;
@@ -125,6 +126,8 @@ export interface Me {
   user: { id: string; username: string; displayName: string; avatar?: string | null }; workspaceId: string; role: string; csrf: string; workspaces: Array<{ id: string; name: string; role: string }>;
   /** tela trancada por inatividade; instalação já protegida (cifrada); minutos até trancar; 2º fatores da pessoa */
   locked: boolean; protected: boolean; idleMinutes: number; factors: { totp: boolean; passkeys: number }; mode: 'local' | 'cloud'; rpId: string; recovery: boolean;
+  /** a reserva pela senha do Ergon World deixou de abrir (a senha mudou lá): escolher de novo */
+  recoveryWorldStale?: boolean;
   /** primeiro acesso: perguntar se liga o destrancar sozinho (ajudante presente, ainda sem escolha) */
   autoUnlockPrompt: boolean;
   /** várias pessoas no computador: quem administra a instalação; a parte da pessoa ainda fechada (digitar a senha); quantas contas */
@@ -158,9 +161,14 @@ export interface AuthState { needsSetup: boolean; authenticated: boolean; locked
   /** conta nova neste computador: qualquer pessoa ('aberto'), só com convite ('convite'), ou não se aplica (null) */
   signup?: 'aberto' | 'convite' | null;
   /** a versão dos termos de uso que a conta nova aceita */
-  termosVersao?: string }
+  termosVersao?: string;
+  /** "Esqueci a senha" oferece a senha do Ergon World (alguém aqui a escolheu como reserva) */
+  worldRecovery?: boolean }
 export interface SecurityStatus {
-  mode: 'local' | 'cloud'; protected: boolean; recovery: boolean; autoUnlock: Array<{ id: string; label: string; createdAt: string }>;
+  mode: 'local' | 'cloud'; protected: boolean; recovery: boolean;
+  /** as duas reservas: a frase confirmada e a senha do Ergon World (null: não escolhida); se o World está aqui e o e-mail ligado */
+  phrase?: boolean; recoveryWorld?: { email: string; stale: boolean } | null; worldRecovery?: { available: boolean; email: string | null };
+  autoUnlock: Array<{ id: string; label: string; createdAt: string }>;
   /** trancamento: desligado = abre sozinho ao reiniciar (a proteção é a do computador); na nuvem é sempre ligado */
   lock: { enabled: boolean; forced: boolean; sessionDays: number };
   totp: boolean; passkeys: Array<{ id: string; name: string; created_at: string; last_used_at: string | null }>; idleMinutes: number; rpId: string; publicUrl: string; minPassword: number; motorVault: boolean;
@@ -406,7 +414,9 @@ export interface Decisions {
   proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; payload?: string | null; detalhe?: string | null; risco?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
   waiting: Array<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>;
   /** cards da equipe parados à espera de você */
-  cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null }>;
+  cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null;
+    /** a entrega no modelo (o tipo e os itens curtos do cartão) */
+    modelo?: { tipo: 'decisao' | 'entrega' | 'relatorio' | 'pergunta' | 'bloqueio'; lead: string | null; itens: string[] } | null }>;
   linkList: Array<{ id: string; task_id: string; number: number; title: string; related_number: number; related_title: string; reason: string }>;
   ruleList: Array<{ id: string; text: string; created_at: string }>;
   total: number;

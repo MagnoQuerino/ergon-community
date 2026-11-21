@@ -39,6 +39,10 @@ const geral = {
   'decisoes.aguardando': { zero: 'Nada aguardando você', other: '{n} aguardando você' },
 
   // ——— avisos que pedem ação ———
+  'alerta.semRecuperacao': 'Sem recuperação',
+  'alerta.semRecuperacaoDica': 'Escolha como recuperar os dados se esquecer a senha.',
+  'alerta.recuperacaoMudou': 'Recuperação a refazer',
+  'alerta.recuperacaoMudouDica': 'A senha do Ergon World mudou. Escolha de novo como recuperar.',
   'alerta.semIa': 'SEM CONTA DE IA',
   'alerta.semIaDica': 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é o Ergon AI, IA sem assinatura. Veja Conexões.',
   'alerta.novaVersao': 'NOVA VERSÃO · RECARREGAR',
@@ -286,6 +290,31 @@ const geral = {
 
   // ——— o texto longo (recolhido) ———
   'texto.recolher': 'Recolher o texto',
+  // rc.42: controle do computador (selo da barra, cartão "Ativar acesso total?", confirmação de uma ação)
+  'computador.usando': '{nome} usando este computador',
+  'computador.voceNoControle': 'Você está no controle',
+  'computador.assumir': 'Assumir o controle',
+  'computador.conceder': 'Conceder o controle',
+  'computador.assumirCurto': 'Assumir',
+  'computador.concederCurto': 'Conceder',
+  'computador.ativarTitulo': 'Ativar acesso total?',
+  'computador.ativarTexto': '{nome} quer usar este computador.',
+  'computador.ativarTextoAjuste': 'A equipe usa este computador quando precisar.',
+  'computador.ativarGarantia': 'Você assume quando quiser. Senhas, pagamentos e apagar de vez sempre pedem você.',
+  'computador.ativar': 'Ativar',
+  'computador.soDestaVez': 'Só desta vez',
+  'computador.cadaAcao': 'Confirmar cada ação',
+  'computador.agoraNao': 'Agora não',
+  'computador.naoPerguntar': 'Não perguntar novamente',
+  'computador.quer': '{nome} quer',
+  'computador.protegida': 'Sempre pede você.',
+  'computador.permitir': 'Permitir',
+  'computador.recusar': 'Recusar',
+  'computador.passoTitulo': 'Falta um passo:',
+  'computador.passo.macos_acessibilidade': 'Ajustes do Sistema › Privacidade e Segurança › Acessibilidade › ligue o Ergon.',
+  'computador.passo.macos_gravacao': 'Ajustes do Sistema › Privacidade e Segurança › Gravação de Tela › ligue o Ergon.',
+  'computador.passo.linux_wayland': 'saia da sessão e entre na sessão "Xorg" (na tela de entrada, na engrenagem).',
+  'computador.passo.linux_sem_tela': 'abra o Ergon Desktop numa sessão com área de trabalho.',
   'detalhesTecnicos': 'Ver detalhes técnicos',
   'texto.verInteiro': { one: 'Ver o texto inteiro ({n} caractere)', other: 'Ver o texto inteiro ({n} caracteres)' },
 } as const satisfies Area;

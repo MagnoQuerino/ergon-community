@@ -58,6 +58,8 @@ export const api = {
     throw new ApiError(res.status, j.error ?? 'erro', j.message ?? `HTTP ${res.status}`); // i18n-ok: código interno do erro
   },
   del: <T>(url: string, body?: unknown) => call<T>('DELETE', url, body),
+  /** bytes crus (o logo das entregas, já conferido e convertido em PNG na tela) */
+  putBytes: <T>(url: string, data: Blob) => call<T>('PUT', url, data, { 'Content-Type': 'application/octet-stream' }),
   upload: <T>(file: File, taskId?: string) => call<T>('POST', '/api/artifacts', file, {
     'Content-Type': 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name), 'X-File-Type': file.type || 'application/octet-stream',
     ...(taskId ? { 'X-Task-Id': taskId } : {}),
