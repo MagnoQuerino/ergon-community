@@ -19,7 +19,10 @@ set -euo pipefail
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FONTE=0; [[ -f "$RAIZ/Dockerfile" && -d "$RAIZ/server" ]] && FONTE=1
 BACKUPS="${ERGON_BACKUPS_DIR:-$HOME/.ergon/backups}"   # outra pasta: disco externo, por exemplo
-MANIFESTO="https://github.com/MagnoQuerino/ergon-community/releases/latest/download/latest.json"
+# rc.46: ERGON_MANIFESTO_URL troca o endereço da versão publicada (na China o GitHub falha: um latest.json copiado para um
+# endereço de lá, com o pacote ao lado; a soma sha256 do pacote continua conferida)
+MANIFESTO="${ERGON_MANIFESTO_URL:-$( { [[ -f "$RAIZ/.env" ]] && sed -n 's/^ERGON_MANIFESTO_URL=//p' "$RAIZ/.env" | tail -1 | tr -d "\"'"; } || true )}"
+MANIFESTO="${MANIFESTO:-https://github.com/MagnoQuerino/ergon-community/releases/latest/download/latest.json}"
 SO="$(uname -s)"
 
 # ---------------------------------------------------------------- idioma das mensagens
@@ -144,9 +147,62 @@ registrar() {
   printf '{"raiz":"%s","porta":%s,"atualizado":"%s"}\n' "$(esc "$RAIZ")" "$PORTA" "$(date +%Y-%m-%dT%H:%M:%S)" > "$f" || true
 }
 
+# ---------------------------------------------------------------- registro alternativo (instalar da China)
+# rc.46: na China o ghcr.io (como o GitHub, o PyPI e o Docker Hub) falha. ERGON_REGISTRY (no ambiente ou no .env desta
+# pasta, ex.: registry.cn-hangzhou.aliyuncs.com/ergon) escolhe outro registro para as imagens do Ergon: elas vêm de lá e
+# ganham aqui o nome de sempre, então o docker-compose.yml e o gerente de motores seguem iguais. Sem ele, o espelho
+# publicado com a versão (ERGON_REGISTRY_ESPELHO no docker-compose.yml; vazio se a versão não foi espelhada) só entra
+# quando o ghcr.io não responde. ERGON_GHCR_URL e ERGON_GHCR_ESPERA: só nos testes.
+limpo_registro() { printf '%s' "$1" | sed -E 's#^[Hh][Tt][Tt][Pp][Ss]?://##; s#/+$##' | tr 'A-Z' 'a-z'; }
+registro_valido() { [[ "$1" =~ ^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)*$ && "$1" != *..* ]]; }
+registro_escolhido() { limpo_registro "${ERGON_REGISTRY:-$(dotenv ERGON_REGISTRY)}"; }
+espelho_da_versao() {
+  [[ -f "$RAIZ/docker-compose.yml" ]] || return 0
+  limpo_registro "$(sed -nE 's/^[[:space:]]*ERGON_REGISTRY_ESPELHO:[[:space:]]*"?([^"[:space:]#]*)"?.*$/\1/p' "$RAIZ/docker-compose.yml" | head -1)"
+}
+ghcr_responde() {
+  local c; c="$(curl -sS -o /dev/null -m "${ERGON_GHCR_ESPERA:-8}" -w '%{http_code}' "${ERGON_GHCR_URL:-https://ghcr.io/v2/}" 2>/dev/null || true)"
+  [[ "$c" =~ ^[1-4][0-9][0-9]$ ]]
+}
+# o registro de onde baixar agora (vazio: o de sempre)
+registro_para_baixar() {
+  local r; r="$(registro_escolhido)"
+  if [[ -n "$r" ]]; then registro_valido "$r" || fail "ERGON_REGISTRY com formato inesperado: $r" "ERGON_REGISTRY has an unexpected format: $r"; printf '%s' "$r"; return; fi
+  r="$(espelho_da_versao)"
+  [[ -n "$r" ]] && registro_valido "$r" && ! ghcr_responde && printf '%s' "$r"
+  return 0
+}
+# Baixa cada imagem do Ergon (as do docker-compose.yml) do registro $1. Por etiqueta, a cópia ganha o nome de sempre;
+# presa a um digest (o Ergon Desktop prende as do manifesto), o docker-compose.yml passa a citar o registro alternativo
+# com o MESMO digest (o conteúdo conferido é o mesmo; um digest não se põe à mão como nome)
+baixar_do_registro() {
+  local reg="$1" img alt trocas=()
+  while read -r img; do
+    [[ -n "$img" && "${img##*/}" == ergon* ]] || continue
+    alt="$reg/${img##*/}"
+    say "Baixando $alt (registro alternativo)." "Downloading $alt (alternative registry)."
+    "$MOTOR" pull -q "$alt" >/dev/null || return 1
+    if [[ "$img" == *@sha256:* ]]; then trocas+=(-e "s#${img//./\\.}#$alt#g"); else "$MOTOR" tag "$alt" "$img" || return 1; fi
+  done < <(refs_ergon)
+  if (( ${#trocas[@]} )); then
+    sed "${trocas[@]}" "$RAIZ/docker-compose.yml" > "$RAIZ/docker-compose.yml.novo" && mv -f "$RAIZ/docker-compose.yml.novo" "$RAIZ/docker-compose.yml" || return 1
+  fi
+}
+# as imagens publicadas: do registro alternativo, quando houver; senão, do de sempre
+baixar_imagens() {
+  local reg; reg="$(registro_para_baixar)"
+  if [[ -n "$reg" ]]; then
+    baixar_do_registro "$reg" && return 0
+    say "O registro $reg não entregou as imagens; tentando o de sempre." "Registry $reg did not deliver the images; trying the usual one."
+  fi
+  compose pull
+  [[ "$MOTOR" == podman ]] && { "$MOTOR" pull -q "$(imagem_motor)" >/dev/null || fail 'Não consegui baixar a imagem do motor de IA.' 'Could not download the AI engine image.'; }
+  return 0
+}
+
 # up [semfalha]: com "semfalha", não responder devolve 1 em vez de encerrar (quem chama decide o que fazer)
 up() {
-  if (( FONTE )); then ligar_servicos --build; else compose pull; [[ "$MOTOR" == podman ]] && { "$MOTOR" pull -q "$(imagem_motor)" >/dev/null || fail 'Não consegui baixar a imagem do motor de IA.' 'Could not download the AI engine image.'; }; ligar_servicos; fi
+  if (( FONTE )); then ligar_servicos --build; else baixar_imagens; ligar_servicos; fi
   local h; if ! h="$(wait_health 240)"; then [[ "${1:-}" == semfalha ]] && return 1; fail 'O Ergon não respondeu. Veja: ./ergon.sh logs' 'Ergon did not respond. See: ./ergon.sh logs'; fi
   if [[ "$(field sealed <<<"$h")" == true ]]; then say "Ergon no ar e TRANCADO: abra $URL e digite a senha." "Ergon is running and LOCKED: open $URL and type the password."
   else say "Ergon no ar em $URL" "Ergon is running at $URL"; fi

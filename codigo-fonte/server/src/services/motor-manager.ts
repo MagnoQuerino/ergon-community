@@ -38,6 +38,13 @@ export interface ManagerConfig {
   selfIds?: string[];
   /** rc.42: as casas das pessoas neste computador (nunca montadas inteiras, nem o que fica acima delas) */
   casas?: string[];
+  /**
+   * rc.46: registro alternativo escolhido pela pessoa (ERGON_REGISTRY, ex.: um espelho na China, onde o ghcr.io falha):
+   * as imagens do Ergon vêm de lá primeiro, e o de sempre fica de reserva.
+   */
+  registro?: string;
+  /** rc.46: o espelho publicado com esta versão (ERGON_REGISTRY_ESPELHO): só quando o registro de sempre não responde. */
+  espelho?: string;
 }
 
 const UID = /^usr_[a-f0-9]{32}$/;
@@ -139,6 +146,25 @@ function repoOf(ref: string): string {
 /** Só repositórios com nome do Ergon ('…/ergon', '…/ergon-community-hermes', 'ergon-hermes') entram na limpeza. */
 const ergonRepo = (repo: string) => /^ergon[\w.-]*$/.test(repo.split('/').pop() ?? '');
 
+/**
+ * rc.46: a mesma imagem do Ergon num registro alternativo, com a mesma tag ou o mesmo digest (o espelho copia sem mudar
+ * o digest): 'ghcr.io/dono/ergon-community-hermes:1.2.3' → '<registro>/ergon-community-hermes:1.2.3'. Só as imagens do
+ * Ergon; um registro com jeito estranho (esquema, espaço, '..') não vale.
+ */
+export function noRegistro(ref: string, registro: string): string | null {
+  const r = registro.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+  if (!r || r.length > 200 || r.includes('..') || !/^[a-z0-9.-]+(?::\d{1,5})?(?:\/[a-z0-9._-]+)*$/.test(r) || isId(ref)) return null;
+  let nome = ref; let sufixo = '';
+  const at = ref.indexOf('@');
+  if (at >= 0) { nome = ref.slice(0, at); sufixo = ref.slice(at); } else {
+    const colon = ref.lastIndexOf(':'); if (colon > ref.lastIndexOf('/')) { nome = ref.slice(0, colon); sufixo = ref.slice(colon); }
+  }
+  const ultimo = nome.split('/').pop() ?? '';
+  if (!/^ergon[\w.-]*$/.test(ultimo)) return null;
+  const novo = `${r}/${ultimo}${sufixo}`;
+  return novo === ref ? null : novo;
+}
+
 /** O Docker devolve 'sha256:<hex>'; o Podman, conforme a versão, devolve com ou sem o prefixo. Compara só o hex. */
 const hex = (id: unknown): string => typeof id === 'string' ? id.trim().toLowerCase().replace(/^sha256:/, '') : '';
 const sameId = (a: unknown, b: unknown) => !!hex(a) && hex(a) === hex(b);
@@ -238,16 +264,54 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
 
   // ---- imagens
   const idCache = new Map<string, { id: string; at: number }>();
-  async function lookupImage(ref: string): Promise<string | null> {
+  async function lookupDireto(ref: string): Promise<string | null> {
     const r = await docker('GET', `/images/${ref}/json`);
     if (r.status === 404) return null;
     ok(r, 'conferir a imagem do motor');
     return hex(r.json?.Id) || null;
   }
+  /** rc.46: os nomes alternativos da mesma imagem (o registro escolhido, depois o espelho da versão). */
+  const alternativos = (ref: string): string[] => [c.registro, c.espelho].map((r) => (r ? noRegistro(ref, r) : null)).filter((x): x is string => !!x);
+  /** Por tag, a imagem baixada do espelho ganha o nome de sempre; por digest (que não se põe à mão), vale o nome do espelho. */
+  async function lookupImage(ref: string): Promise<string | null> {
+    const id = await lookupDireto(ref);
+    if (id || !DIGEST.test(ref)) return id;
+    for (const alt of alternativos(ref)) { const a = await lookupDireto(alt); if (a) return a; }
+    return null;
+  }
+  /** O nome com que o contêiner é criado: o de sempre, ou o do espelho quando só ele está no disco (imagem por digest). */
+  async function nomeLocal(ref: string): Promise<string> {
+    if (isId(ref) || !alternativos(ref).length || await lookupDireto(ref).catch(() => null)) return ref;
+    for (const alt of alternativos(ref)) if (await lookupDireto(alt).catch(() => null)) return alt;
+    return ref;
+  }
+  /**
+   * Baixa a imagem. rc.46: com um registro escolhido (ERGON_REGISTRY), tenta lá primeiro; o registro de sempre fica de
+   * reserva, e o espelho publicado com a versão (ERGON_REGISTRY_ESPELHO) é a última tentativa, quando o de sempre não
+   * responde (na China, o ghcr.io). A cópia do espelho, por tag, ganha o nome de sempre (o compose e o Ergon acham).
+   */
   async function pull(ref: string) {
     if (isId(ref)) throw new ManagerError(409, 'a imagem pedida não está mais neste computador');
     idCache.delete(ref);
-    ok(await docker('POST', `/images/create?${pullQuery(ref)}`), 'baixar a imagem do motor');
+    const reg = c.registro ? noRegistro(ref, c.registro) : null;
+    const esp = c.espelho ? noRegistro(ref, c.espelho) : null;
+    const fontes = [...new Set([reg, ref, esp].filter((x): x is string => !!x))];
+    let erro: unknown = null;
+    for (const [i, f] of fontes.entries()) {
+      const ultima = i === fontes.length - 1;
+      try {
+        ok(await docker('POST', `/images/create?${pullQuery(f)}`), 'baixar a imagem do motor');
+        if (f === ref) { if (ultima || await lookupDireto(ref)) return; continue; }
+        if (!(await lookupDireto(f))) continue;
+        if (!DIGEST.test(ref)) {
+          const at = ref.lastIndexOf(':');
+          const [repo, tag] = at > ref.lastIndexOf('/') ? [ref.slice(0, at), ref.slice(at + 1)] : [ref, 'latest'];
+          ok(await docker('POST', `/images/${f}/tag?repo=${encodeURIComponent(repo)}&tag=${encodeURIComponent(tag)}`), 'dar o nome de sempre à imagem do espelho');
+        }
+        return;
+      } catch (e) { erro = e; }
+    }
+    if (erro) throw erro;
   }
   /** ID da imagem de uma referência, com cache (por digest não muda; por tag, confere de novo depois de 1 min). Sem ela no disco, baixa. */
   async function imageId(ref: string, download = true): Promise<string | null> {
@@ -293,7 +357,8 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
     return { stale: spec || image, held };
   }
 
-  async function createContainer(name: string, spec: Record<string, unknown>) {
+  async function createContainer(name: string, spec0: Record<string, unknown>) {
+    const spec = { ...spec0, Image: await nomeLocal(String(spec0.Image)) };
     let made = await docker('POST', `/containers/create?name=${name}`, spec);
     if (made.status === 404) {
       // imagem ainda não está neste computador: baixa a publicada e tenta de novo

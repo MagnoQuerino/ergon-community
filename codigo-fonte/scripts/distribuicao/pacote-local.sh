@@ -5,7 +5,7 @@
 set -euo pipefail
 V="$1"; DONO="$2"; REPO="$3"; SAIDA="$4"
 d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
-sed -e "s/__VERSAO__/$V/g" -e "s/__DONO__/$DONO/g" -e "s#__REPO__#$REPO#g" deploy/local/docker-compose.yml > "$d/docker-compose.yml"
+sed -e "s/__VERSAO__/$V/g" -e "s/__DONO__/$DONO/g" -e "s#__ESPELHO__#${ERGON_ESPELHO:-}#g" -e "s#__REPO__#$REPO#g" deploy/local/docker-compose.yml > "$d/docker-compose.yml"
 if grep -q '__[A-Z]*__' "$d/docker-compose.yml"; then echo "compose com marcadores sobrando" >&2; exit 1; fi
 cp ergon.ps1 ergon.cmd ergon.sh "$d/" && chmod +x "$d/ergon.sh"
 # o guia de instalação: docs/ no repositório de desenvolvimento; ../docs/ no público (código em codigo-fonte/)

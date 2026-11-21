@@ -67,6 +67,10 @@ services:
       ERGON_MOTOR_VOLUME_PREFIX: ergon_motor-
       HERMES_MEM_LIMIT: ${HERMES_MEM_LIMIT:-2g}
       HERMES_CPUS: ${HERMES_CPUS:-2.0}
+      # rc.46: instalar da China, onde o ghcr.io falha. ERGON_REGISTRY (no .env desta pasta) escolhe outro registro para as
+      # imagens do Ergon; o espelho publicado com esta versão (vazio quando não há) é a reserva quando o ghcr.io não responde
+      ERGON_REGISTRY: ${ERGON_REGISTRY:-}
+      ERGON_REGISTRY_ESPELHO: "__ESPELHO__"
     volumes:
       - ${ERGON_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     networks: [ergon-gerente]

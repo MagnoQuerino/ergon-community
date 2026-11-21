@@ -131,10 +131,42 @@ jobs:
           n=$(docker run --rm --pull always --platform linux/amd64 --entrypoint grep ghcr.io/${{ env.DONO }}/ergon-community-hermes:${{ env.VERSAO }} -c conexoes_executar /opt/ergon/plugins/ergon_bridge/__init__.py || true)
           [ "${n:-0}" -ge 1 ] || { echo "::error::a imagem publicada do motor não tem as Conexões; a versão não é publicada"; exit 1; }
 
+      # Espelho na China (opcional). O ghcr.io falha na China: com os três segredos CN_REGISTRY (o registro com o
+      # namespace, ex.: registry.cn-hangzhou.aliyuncs.com/ergon), CN_REGISTRY_USER e CN_REGISTRY_TOKEN, as duas imagens
+      # do Ergon local desta versão são copiadas para lá (mesmas plataformas e o MESMO digest: uma cópia, não outra
+      # construção) e o pacote local passa a ter o endereço como reserva (ERGON_REGISTRY_ESPELHO). Sem os segredos, o
+      # passo só avisa e segue; uma falha aqui também não impede a versão (o pacote sai sem o espelho).
+      - name: Espelho na China (opcional, só com os segredos CN_REGISTRY*)
+        continue-on-error: true
+        env:
+          CN_REGISTRY: ${{ secrets.CN_REGISTRY }}
+          CN_REGISTRY_USER: ${{ secrets.CN_REGISTRY_USER }}
+          CN_REGISTRY_TOKEN: ${{ secrets.CN_REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${CN_REGISTRY:-}" ] || [ -z "${CN_REGISTRY_USER:-}" ] || [ -z "${CN_REGISTRY_TOKEN:-}" ]; then
+            echo "::notice::sem CN_REGISTRY, CN_REGISTRY_USER e CN_REGISTRY_TOKEN: as imagens não vão ao espelho na China (nada falhou)"
+            exit 0
+          fi
+          destino=$(printf '%s' "$CN_REGISTRY" | sed -E 's#^https?://##; s#/+$##' | tr 'A-Z' 'a-z')
+          printf '%s' "$destino" | grep -Eq '^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)*$' || { echo "::error::CN_REGISTRY com formato inesperado"; exit 1; }
+          host=${destino%%/*}
+          printf '%s' "$CN_REGISTRY_TOKEN" | docker login "$host" -u "$CN_REGISTRY_USER" --password-stdin
+          for img in ergon-community ergon-community-hermes; do
+            origem="ghcr.io/$DONO/$img:$VERSAO"
+            docker buildx imagetools create --tag "$destino/$img:$VERSAO" "$origem"
+            a=$(docker buildx imagetools inspect "$origem" --format '{{json .Manifest.Digest}}')
+            b=$(docker buildx imagetools inspect "$destino/$img:$VERSAO" --format '{{json .Manifest.Digest}}')
+            [ "$a" = "$b" ] || { echo "::error::$img: o digest no espelho ($b) é diferente do publicado ($a)"; exit 1; }
+            echo "$img:$VERSAO no espelho, digest $a"
+          done
+          docker logout "$host" >/dev/null
+          echo "ERGON_ESPELHO=$destino" >> "$GITHUB_ENV"
+
       - name: Pacote local + manifesto da versão
         run: |
           mkdir -p pacote
-          sed -e "s/__VERSAO__/$VERSAO/g" -e "s/__DONO__/$DONO/g" -e "s#__REPO__#${{ github.repository }}#g" \
+          sed -e "s/__VERSAO__/$VERSAO/g" -e "s/__DONO__/$DONO/g" -e "s#__ESPELHO__#${ERGON_ESPELHO:-}#g" -e "s#__REPO__#${{ github.repository }}#g" \
             deploy/local/docker-compose.yml > pacote/docker-compose.yml
           cp ergon.ps1 ergon.cmd ergon.sh pacote/ && chmod +x pacote/ergon.sh
           cp ../docs/INSTALAR.md pacote/LEIA-ME.md

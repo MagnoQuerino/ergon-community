@@ -72,9 +72,11 @@ jobs:
         run: |
           bash -n ergon.sh
           # a homologação mora em community/publico/scripts aqui e em scripts/ no repositório público
-          for s in scripts/teste-lancador.sh scripts/distribuicao/*.sh $(ls community/publico/scripts/*.sh scripts/homologar-pacote.sh 2>/dev/null); do bash -n "$s"; done
+          for s in scripts/teste-lancador.sh scripts/teste-registro.sh scripts/distribuicao/*.sh $(ls community/publico/scripts/*.sh scripts/homologar-pacote.sh 2>/dev/null); do bash -n "$s"; done
       - name: Limpeza do lançador, diagnóstico do motor, comandos e idiomas (Podman simulado)
         run: bash scripts/teste-lancador.sh
+      - name: Registro alternativo do lançador (instalar da China; Docker e curl simulados)
+        run: bash scripts/teste-registro.sh
 
   lancador-windows:
     runs-on: windows-2022
