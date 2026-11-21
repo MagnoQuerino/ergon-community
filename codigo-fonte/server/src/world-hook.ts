@@ -15,6 +15,7 @@ import type { HermesControlClient } from './services/hermes.ts';
 import type { AgentLimits } from './services/capacity.ts';
 import type { Routines } from './services/routines.ts';
 import type { CloudTaskBrief } from './services/teamwork.ts';
+import type { Integrations } from './services/integrations.ts';
 
 /**
  * Cards do quadro que rodam na nuvem (agente com o modelo da pessoa): o que o card mandaria ao agente, o aceite, a
@@ -66,6 +67,8 @@ export interface WorldHost {
   createWorkspace?: (userId: string, name: string) => string;
   /** os canais (Discord, Telegram, Teams) com a nuvem do Ergon World: a nuvem responde com o computador fechado */
   canaisNuvem?: CanaisNuvemHost;
+  /** as conexões desta instalação: com a nuvem do Ergon World, as que a pessoa escolher vão (cifradas só para ela) ao contêiner */
+  integrations?: Integrations;
   /** nuvem do Ergon World: o contêiner terminou de se preparar (workspace recebido, modelo ligado) */
   nuvemPronta?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
 }

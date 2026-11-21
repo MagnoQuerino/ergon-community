@@ -30,6 +30,7 @@ import { instanceSetting, setInstanceSetting } from '../services/security.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import type { LocalSync } from './sync-local.ts';
 import type { CanaisNuvemHost } from '../world-hook.ts';
+import type { ConexoesNuvem } from './sync-conexoes.ts';
 
 export const USUARIO_NUVEM = 'nuvem';
 const SWS = /^sws_[a-f0-9]{32}$/;
@@ -67,6 +68,8 @@ export interface NuvemDeps {
   aoPronto?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
   /** os canais (Discord, Telegram, Teams): com o workspace pronto, este contêiner atende as contas ligadas no computador */
   canais?: CanaisNuvemHost;
+  /** as conexões do computador (sync-conexoes.ts): a posse da renovação e a devolução do acesso renovado */
+  conexoes?: Pick<ConexoesNuvem, 'passoNuvem'> | null;
   log: Log;
   ajustes?: { passoMs?: number; cicloMs?: number; canaisMs?: number };
 }
@@ -135,6 +138,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     const recebido = await d.sync.pull(userId, ws, true) as { preview?: { skipped?: string[] } | null };
     if (recebido.preview?.skipped?.length) d.log({ ficouDeFora: recebido.preview.skipped.slice(0, 10) }, 'nuvem: parte da equipe não coube aqui');
     await d.sync.push(userId, ws, { contentOnly: true }).catch((e) => { if (!['version_conflict', 'key_version'].includes(String((e as { code?: string }).code))) throw e; });
+    await d.conexoes?.passoNuvem(userId, ws).catch((e) => d.log({ err: String((e as Error).message).slice(0, 120) }, 'nuvem: conexões'));
     // 7. o Ergon AI como modelo da equipe (o motor pode estar acordando: tenta de novo no próximo passo)
     // Ligado numa partida anterior e com a credencial longe de vencer (ela fica no disco do motor): nada a refazer ao
     // acordar, e os canais atendem já (o pedido espera o motor terminar de subir). Perto de vencer: liga de novo.
@@ -186,7 +190,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
       parado = true; if (timer) clearTimeout(timer);
       await rodando?.catch(() => undefined);
       // dormir: o que foi feito aqui vai para o World antes de sair (o computador recebe ao abrir)
-      if (userId && ws && d.sync.status(ws).enabled) await d.sync.push(userId, ws, { contentOnly: true }).catch(() => undefined);
+      if (userId && ws && d.sync.status(ws).enabled) { await d.sync.push(userId, ws, { contentOnly: true }).catch(() => undefined); await d.conexoes?.passoNuvem(userId, ws).catch(() => undefined); }
     },
   };
 }
@@ -194,7 +198,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
 // ---------------------------------------------------------------------------------------------------------------------
 // No computador: sincronia automática e posse, só para o workspace com a nuvem ativa
 
-export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; sync: LocalSync; canais?: CanaisNuvemHost; log: Log; ajustes?: { cicloMs?: number; estadoMs?: number } }
+export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; sync: LocalSync; canais?: CanaisNuvemHost; /** as conexões que a pessoa deixou ir à nuvem (sync-conexoes.ts) */ conexoes?: Pick<ConexoesNuvem, 'passo'> | null; log: Log; ajustes?: { cicloMs?: number; estadoMs?: number } }
 
 /**
  * A cada minuto, para cada workspace ligado ao World com a nuvem ATIVA: avisa que este computador está com ele aberto
@@ -245,6 +249,8 @@ export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; 
           if (pausada()) continue;
         }
         await d.sync.push(a.user_id, a.workspace_id);
+        // as conexões vão logo depois (a versão recebida acabou de ser conferida); ao fechar, o acesso girado vai junto
+        await d.conexoes?.passo(a.user_id, a.workspace_id, open);
       } catch (e) {
         const code = String((e as { code?: string }).code ?? '');
         if (!['version_conflict', 'world_offline', 'rate_limited', 'key_version', 'rotation_required', 'key_pending'].includes(code)) d.log({ err: String((e as Error).message).slice(0, 200), ws: a.workspace_id }, 'sincronia automática falhou');

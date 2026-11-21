@@ -56,7 +56,7 @@ export function unwrapForRecovery(wrapped: string, recoverySecret: string, ws: s
   return ungcm(kek, w.nonce, w.ct, `ergon/sync-recovery/v1|${ws}|${keyVersion}`);
 }
 
-interface SealedChange { operationId: string; expectedVersion: number; schemaVersion: number; keyVersion: number; kind: 'change' | 'snapshot' | 'rotation'; ciphertext: string; nonce: string; sha256: string; signature: string }
+interface SealedChange { operationId: string; expectedVersion: number; schemaVersion: number; keyVersion: number; kind: 'change' | 'snapshot' | 'rotation' | 'conexoes'; ciphertext: string; nonce: string; sha256: string; signature: string }
 
 const canonical = (ws: string, c: Omit<SealedChange, 'ciphertext' | 'nonce' | 'signature'>): string =>
   `ergon-sync-v1|${ws}|${c.expectedVersion}|${c.operationId}|${c.schemaVersion}|${c.keyVersion}|${c.kind}|${c.sha256}`;
@@ -72,4 +72,28 @@ export function sealChange(dek: Buffer, ws: string, body: unknown, meta: { opera
 }
 export function openChange<T = unknown>(dek: Buffer, ws: string, c: { operationId: string; keyVersion: number; schemaVersion: number; ciphertext: string; nonce: string }): T {
   return JSON.parse(ungcm(dek, c.nonce, c.ciphertext, `ergon/sync-change/v1|${ws}|${c.operationId}|${c.keyVersion}|${c.schemaVersion}`).toString('utf8')) as T;
+}
+
+/**
+ * Pacote para UM aparelho, dentro de uma mudança já cifrada com a chave do workspace (as conexões do dono a caminho do
+ * aparelho-nuvem e os acessos renovados de volta ao computador: sync-conexoes.ts). Quem tem a chave do workspace (um
+ * colaborador, outro computador) abre a mudança, mas não este envelope: X25519 efêmera com a chave pública do destino +
+ * HKDF-SHA256 → AES-256-GCM. Os dados associados amarram o workspace, quem envia e para quem: o mesmo envelope copiado
+ * para outro workspace, outro remetente ou outro destino não abre (e a adulteração de qualquer byte também não).
+ */
+const pacoteAad = (c: { ws: string; from: string; to: string }) => `ergon/sync-pacote/v1|${c.ws}|${c.from}|${c.to}`;
+export function sealForDevice(plain: Buffer, devicePublicSpkiB64: string, c: { ws: string; from: string; to: string }): string {
+  const devPub = crypto.createPublicKey({ key: unb64(devicePublicSpkiB64), format: 'der', type: 'spki' });
+  const eph = crypto.generateKeyPairSync('x25519');
+  const ephPub = eph.publicKey.export({ format: 'der', type: 'spki' });
+  const kek = Buffer.from(crypto.hkdfSync('sha256', crypto.diffieHellman({ privateKey: eph.privateKey, publicKey: devPub }), ephPub, pacoteAad(c), 32));
+  return JSON.stringify({ v: 1, kind: 'pacote', eph: b64(ephPub), ...gcm(kek, plain, pacoteAad(c)) });
+}
+export function openForDevice(sealed: string, devicePrivatePkcs8B64: string, c: { ws: string; from: string; to: string }): Buffer {
+  const w = JSON.parse(sealed) as { v?: number; kind?: string; eph: string; nonce: string; ct: string };
+  if (w.v !== 1 || w.kind !== 'pacote' || typeof w.eph !== 'string' || typeof w.nonce !== 'string' || typeof w.ct !== 'string') throw new Error('pacote em formato desconhecido');
+  const priv = crypto.createPrivateKey({ key: unb64(devicePrivatePkcs8B64), format: 'der', type: 'pkcs8' });
+  const ephPub = crypto.createPublicKey({ key: unb64(w.eph), format: 'der', type: 'spki' });
+  const kek = Buffer.from(crypto.hkdfSync('sha256', crypto.diffieHellman({ privateKey: priv, publicKey: ephPub }), unb64(w.eph), pacoteAad(c), 32));
+  return ungcm(kek, w.nonce, w.ct, pacoteAad(c));
 }
