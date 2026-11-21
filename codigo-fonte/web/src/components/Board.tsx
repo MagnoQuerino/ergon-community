@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import type { Column, TaskCard } from '../lib/types.ts';
+import type { CampoQuadro, Column, PessoaWs, TaskCard } from '../lib/types.ts';
+import { ETIQUETAS_NO_CARD, PESSOAS_NO_CARD, camposNoCard, etiquetasDe, iniciais } from '../lib/cartao-tela.ts';
 import { Icon } from './Icon.tsx';
 import { cardClick, cardKey } from '../lib/cardClick.ts';
 import { DISPLAY_BADGE, WORK_LABEL, displayOf, haQuantoTempo, situacaoDe, type WorkState } from '../lib/work.ts';
-import { fmtData, idiomaAtual, t as tx, useT } from '../i18n/index.ts';
+import { fmtData, fmtLista, fmtNumero, idiomaAtual, t as tx, useT } from '../i18n/index.ts';
 import { nomeDaColuna } from '../lib/colunas.ts';
 import { letterStyle } from '../lib/contraste.ts';
 
@@ -53,8 +54,10 @@ type SortKey = 'numero' | 'prazo' | 'responsavel' | 'atualizada';
  * lista). Só muda o que é seu e local. No quadro da equipe, a coluna da fila (queueColumn) se reordena arrastando:
  * os agentes pegam de cima para baixo.
  */
-export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, onToggle, team, queueColumn, onReorder }: {
+export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, onToggle, team, queueColumn, onReorder, fields = [], members = [] }: {
   columns: Column[]; tasks: TaskCard[]; view: 'kanban' | 'lista'; editable: boolean; openId: string | null; team?: boolean;
+  /** quadros da pessoa (rc.41): os campos próprios do quadro e as pessoas do workspace, para o que aparece no card */
+  fields?: CampoQuadro[]; members?: PessoaWs[];
   onOpen: (id: string) => void; onMove?: (taskId: string, columnId: string) => void; onToggle?: (t: TaskCard, done: boolean) => void;
   queueColumn?: string; onReorder?: (taskId: string, beforeId: string | null) => void;
 }) {
@@ -100,6 +103,41 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
       </>
     );
   };
+  /** Data de um campo (AAAA-MM-DD) curta, no idioma. */
+  const fmtCampo = { numero: (n: number) => fmtNumero(n, { maximumFractionDigits: 2 }), data: (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return fmtData(new Date(y, m - 1, d), { day: '2-digit', month: '2-digit', ...(y !== new Date().getFullYear() ? { year: '2-digit' as const } : {}) }); } };
+  /** As etiquetas do card (as primeiras; o resto vira "+N"), coloridas pela paleta do tema. */
+  const labels = (t: TaskCard) => {
+    const todas = etiquetasDe(fields, t.card?.values);
+    if (!todas.length) return null;
+    const resto = todas.length - ETIQUETAS_NO_CARD;
+    return (
+      <div className="task__labels">
+        {todas.slice(0, ETIQUETAS_NO_CARD).map((e) => <span key={e.id} className={`tag tag--${e.color}`}>{e.name}</span>)}
+        {resto > 0 && <span className="tag tag--neutro" title={fmtLista(todas.slice(ETIQUETAS_NO_CARD).map((e) => e.name))}>+{resto}</span>}
+      </div>
+    );
+  };
+  /** O que vai dentro do cartão, em miúdo: campos marcados, subtarefas "2/5", comentários, links e anexos, e as pessoas. */
+  const extras = (t: TaskCard) => {
+    const c = t.card;
+    if (!c) return null;
+    const anexos = c.links + c.files;
+    return (
+      <>
+        {camposNoCard(fields, c.values, members, fmtCampo).map((f) => <span key={f.id} className="task__field" title={`${f.name}: ${f.texto}`}><span className="task__field-n">{f.name}</span> {f.texto}</span>)}
+        {c.sub && <span className={`task__count ${c.sub[0] === c.sub[1] ? 'task__count--ok' : ''}`} title={tr('quadro.card.subtarefas', { feitas: c.sub[0], total: c.sub[1] })}><Icon name="check" size={12} /> {c.sub[0]}/{c.sub[1]}</span>}
+        {c.comments > 0 && <span className="task__count" title={tr('quadro.card.comentarios', { n: c.comments })}><Icon name="chat" size={12} /> {c.comments}</span>}
+        {anexos > 0 && <span className="task__count" title={tr('quadro.card.anexos', { n: anexos })}><Icon name="clip" size={12} /> {anexos}</span>}
+        {c.people.length > 0 && (
+          <span className="task__people" title={tr('quadro.card.pessoas', { nomes: fmtLista(c.people.map((p) => p.name)) })}>
+            {c.people.slice(0, PESSOAS_NO_CARD).map((p) => <span key={p.id} className="avatar avatar--xs" aria-hidden="true">{iniciais(p.name)[0]}</span>)}
+            {c.people.length > PESSOAS_NO_CARD && <span className="task__people-mais">+{c.people.length - PESSOAS_NO_CARD}</span>}
+            <span className="sr-only">{tr('quadro.card.pessoas', { nomes: fmtLista(c.people.map((p) => p.name)) })}</span>
+          </span>
+        )}
+      </>
+    );
+  };
   const chipOf = (ag: { name: string; color?: string }, title?: string) => <span className="who" title={title}><span className="avatar avatar--xs" style={letterStyle(ag.color)}>{ag.name[0]}</span>{ag.name}</span>;
   /** Com quem está: o agente (equipe), quem o aplicativo diz (espelho), o agente que recebeu (enviada à equipe) ou você. */
   const who = (t: TaskCard, inList = false) => {
@@ -134,12 +172,14 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
           {editable && onToggle && <input type="checkbox" checked={!!t.completed} onClick={(e) => e.stopPropagation()} onChange={(e) => onToggle(t, e.target.checked)} aria-label={tr('quadro.card.concluir', { numero: t.number })} />}
           <span className="task__title" title={t.title}>{t.title}</span>
         </div>
+        {labels(t)}
         <div className="task__meta">
           <span className="muted">#{t.number}</span>
           {pos > 0 && <span className="task__pos" title={tr('quadro.card.posicaoDica')}>{tr('quadro.card.posicao', { pos })}</span>}
           <DueChip due={t.due_on} done={!!t.completed} />
           {who(t)}
           {badges(t)}
+          {extras(t)}
         </div>
       </article>
     );
@@ -195,7 +235,7 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
                       <td className="tbl__check"><input type="checkbox" checked={!!t.completed} onClick={(e) => e.stopPropagation()} onChange={(e) => onToggle(t, e.target.checked)} aria-label={tr('quadro.card.concluir', { numero: t.number })} /></td>
                     )}
                     <td className="tbl__num muted">#{t.number}</td>
-                    <td className="tbl__title"><span>{t.title}</span>{t.description && !/^Criada a partir|^Enviada das suas tarefas|^Primeiros passos/.test(t.description) ? <small>{t.description.slice(0, 120)}</small> : null}</td>
+                    <td className="tbl__title"><span>{t.title}</span>{labels(t)}{t.description && !/^Criada a partir|^Enviada das suas tarefas|^Primeiros passos/.test(t.description) ? <small>{t.description.slice(0, 120)}</small> : null}</td>
                     <td className="tbl__col" onClick={(e) => { if (editable && onMove) e.stopPropagation(); }}>
                       {editable && onMove
                         ? <select value={t.column_id} onChange={(e) => onMove(t.id, e.target.value)} aria-label={tr('quadro.linha.situacaoDe', { numero: t.number })}>{columns.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
@@ -203,7 +243,7 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
                     </td>
                     <td className="tbl__who">{who(t, true) ?? <span className="muted">—</span>}</td>
                     <td className="tbl__due">{t.due_on ? <DueChip due={t.due_on} done={!!t.completed} /> : <span className="muted">—</span>}</td>
-                    <td className="tbl__state"><span className="tbl__badges">{badges(t)}</span></td>
+                    <td className="tbl__state"><span className="tbl__badges">{badges(t)}{extras(t)}</span></td>
                     <td className="tbl__upd muted" title={fmtData(t.updated_at, DATA_HORA_SEG)}>{haQuantoTempo(t.updated_at)}</td>
                   </tr>
                 ))}

@@ -52,7 +52,10 @@ export function chaveDaColuna(db: Db, columnId: string | null | undefined): Chav
  */
 export function marcarColunas(db: Db, workspaceId: string): number {
   let n = 0;
-  const quadros = db.all<{ id: string; audience: string }>("SELECT id, audience FROM boards WHERE workspace_id = ? AND origin = 'native'", workspaceId);
+  // o da equipe e o primeiro da pessoa ("Minhas tarefas"); nos outros quadros da pessoa as colunas são livres (rc.41):
+  // uma coluna que ela chame de "Feito" não ganha código
+  const quadros = db.all<{ id: string; audience: string }>(`SELECT id, audience FROM boards WHERE workspace_id = ? AND origin = 'native'
+    AND (audience = 'team' OR id = (SELECT id FROM boards WHERE workspace_id = ? AND origin = 'native' AND audience = 'user' ORDER BY created_at LIMIT 1))`, workspaceId, workspaceId);
   for (const b of quadros) {
     const cols = db.all<{ id: string; name: string; system_key: string | null }>('SELECT id, name, system_key FROM columns WHERE board_id = ? ORDER BY position, rowid', b.id);
     const usadas = new Set(cols.map((c) => c.system_key).filter(Boolean));

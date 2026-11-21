@@ -17,11 +17,11 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
     'world/areas.ts', 'world/buildings.ts', 'world/pack.ts',
   ],
   // os quadros (Tarefas e Fluxos da equipe), as colunas e mover cards
-  quadro: ['components/Board.tsx', 'views/TarefasView.tsx', 'views/EquipeView.tsx', 'components/MoveTray.tsx', 'lib/dragMove.ts', 'lib/work.ts'],
+  quadro: ['components/Board.tsx', 'components/GerirQuadro.tsx', 'components/CamposDoQuadro.tsx', 'lib/cartao-tela.ts', 'views/TarefasView.tsx', 'views/EquipeView.tsx', 'components/MoveTray.tsx', 'lib/dragMove.ts', 'lib/work.ts'],
   // o card aberto
-  tarefa: ['components/TaskDetail.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
+  tarefa: ['components/TaskDetail.tsx', 'components/CartaoExtras.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
   // as conversas
-  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts', 'components/GravadorDeVoz.tsx', 'lib/gravador.ts'],
+  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts', 'components/GravadorDeVoz.tsx', 'lib/gravador.ts', 'components/ConversaPorVoz.tsx', 'lib/conversa-voz.ts', 'components/NavegadorAoVivo.tsx', 'lib/navegador.ts'],
   // a Equipe e criar agentes
   equipe: [
     'views/AgentesView.tsx', 'components/AgentProfile.tsx', 'components/NewAgentDialog.tsx', 'components/NewGroupDialog.tsx',
@@ -30,7 +30,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // a janela do agente e Treinar
   agente: ['components/AgentWindow.tsx', 'components/TrainTab.tsx', 'components/CompetenciasProntas.tsx', 'components/AdicionarCompetencia.tsx', 'lib/competencias-tela.ts'],
   rotinas: ['views/RotinasView.tsx'],
-  conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts'],
+  conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts', 'views/world/ConexoesNuvem.tsx'],
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
     'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'views/LojaView.tsx', 'views/LojaPublicar.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',

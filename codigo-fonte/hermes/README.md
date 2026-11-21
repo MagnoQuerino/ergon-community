@@ -10,6 +10,10 @@ Research), numa imagem estendida por este diretório:
 - **Plugin `ergon_bridge`** (`plugins/ergon_bridge`): liga o motor ao Ergon (eventos dos canais, tarefas) e trava, por
   agente, as ferramentas que ele pode usar. Ferramentas como Terminal e Executar código só são liberadas com a senha
   de quem administra o Ergon.
+- **Navegador ao vivo** (`plugins/ergon_bridge/navegador.py`): enquanto um agente usa o navegador, a pessoa vê a tela
+  dele no Ergon e pode assumir o controle (login, verificação) e devolver. A transmissão é a do próprio agent-browser
+  (só em 127.0.0.1 do contêiner); a ponte de controle a entrega ao Ergon por um túnel, com o token da ponte. Com a
+  pessoa no controle, as ferramentas do navegador do agente esperam.
 - **Sem portas publicadas.** A API do motor só é alcançável pelo Ergon, na rede interna dos contêineres. A chave da API vem
   de `~/.ergon/secrets`, gerada na instalação.
 - **Um motor por pessoa.** Cada conta do Ergon neste computador tem o próprio contêiner do motor, com cofre e conta de

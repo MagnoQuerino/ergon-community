@@ -62,6 +62,9 @@ interface SetupRow {
   profile: string | null; adapted: string | null; first_run_id: string | null; error: string | null; created_at: string; updated_at: string;
 }
 
+/** De quem é um horário de rotina (Routines.posse). */
+export type PosseHorario = 'aqui' | 'esperar' | { outro: string };
+
 /** Atrasada mais que isto (Ergon desligado ou trancado no horário), a execução é registrada como perdida, não feita tarde. */
 const MISSED_MS = 6 * 3600_000;
 const RECOMMEND_EVERY_MS = 7 * 86_400_000;
@@ -620,6 +623,14 @@ export class Routines {
   /** o aviso do horário chegou do motor (o serviço das rotinas no motor confere a próxima) */
   aoDisparar: ((routineId: string) => void) | null = null;
 
+  /**
+   * De quem é cada horário quando o workspace tem a nuvem do Ergon World (world/nuvem.ts): o computador aberto e o
+   * contêiner da nuvem veem as mesmas rotinas, e só um executa cada horário — quem estava com o workspace na hora.
+   * 'aqui' roda; 'esperar' deixa para o próximo tique (a posse ainda não é conhecida); { outro } passa o horário adiante
+   * sem rodar e registra por quê. null = tudo aqui (sem nuvem).
+   */
+  posse: ((workspaceId: string, slot: string) => PosseHorario) | null = null;
+
   constructor(db: Db, bus: Bus, executor: RunExecutor, cfg: Pick<Config, 'filesDir' | 'maxUploadBytes' | 'maxContextChars' | 'maxDocumentChars' | 'mode' | 'maxStorageBytes'>) {
     this.db = db; this.bus = bus; this.executor = executor;
     this.deps = { filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes, maxContextChars: cfg.maxContextChars, maxDocumentChars: cfg.maxDocumentChars, storageQuota: cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0, mode: () => executor.mode };
@@ -814,6 +825,68 @@ export class Routines {
     audit(this.db, this.bus, { workspaceId, actorType: 'user', actorId: userId, action: changed ? 'routine.update' : `routine.${status === 'active' ? 'resume' : 'pause'}`, targetType: 'routine', targetId: r.id, evidence: { version, status, trigger }, result: note });
     this.bus.publish(workspaceId, 'routines.changed', { id: r.id });
     return this.get(workspaceId, r.id);
+  }
+
+  // --- espelho entre os aparelhos da pessoa (esqueleto da sincronia, services/blueprint.ts) ---------------------------
+
+  /** As rotinas como viajam na parte privada do esqueleto (sem as contas escolhidas, que são ids deste aparelho). */
+  paraEspelho(workspaceId: string): Array<{ ref: string; template: string | null; name: string; category: string; trigger: Trigger; status: 'active' | 'paused'; config: Record<string, unknown> }> {
+    return this.db.all<RoutineRow & { sync_ref: string | null }>("SELECT * FROM routines WHERE workspace_id = ? AND status != 'archived' ORDER BY created_at, rowid", workspaceId).slice(0, 60).map((r) => {
+      const { contas: _c, contasApps: _a, ...config } = parseJson<RoutineConfig>(r.config, {} as RoutineConfig);
+      // em preparo (a coordenação ainda estuda): viaja pausada; chega ativa quando ficar pronta aqui
+      return { ref: r.sync_ref ?? r.id, template: r.template_key, name: r.name, category: r.category, trigger: parseJson<Trigger>(r.trigger, { kind: 'manual' }),
+        status: r.status === 'active' ? 'active' as const : 'paused' as const, config: config as unknown as Record<string, unknown> };
+    });
+  }
+
+  /**
+   * A rotina como está no outro aparelho: cria ou atualiza esta, sem tocar nas execuções nem no histórico. `estado`:
+   * 'do_outro' (a nuvem: ativa = ativa), 'pausada' (rotina nova num computador: nada liga sozinho), 'manter' (a daqui
+   * fica como a pessoa deixou). O próximo horário só é recalculado quando o horário ou o estado mudam: o horário que
+   * vence enquanto a posse não é conhecida não se perde a cada esqueleto.
+   */
+  espelhar(workspaceId: string, userId: string, localId: string | null, x: { ref: string; template: string | null; name: string; category: string; trigger: unknown; status: 'active' | 'paused'; config: Record<string, unknown> },
+    o: { estado: 'do_outro' | 'pausada' | 'manter' }): string {
+    const tz = workspaceTz(this.db, workspaceId);
+    const trigger = cleanTrigger(x.trigger, tz);
+    const name = clip(x.name.trim() || 'Rotina', 60);
+    const t = x.template ? templateByKey(x.template) : undefined;
+    const base = (t?.defaults?.config ?? {}) as Partial<RoutineConfig>;
+    const cur = localId ? this.db.get<RoutineRow>("SELECT * FROM routines WHERE id = ? AND workspace_id = ? AND status != 'archived'", localId, workspaceId) : undefined;
+    const antes = cur ? parseJson<RoutineConfig>(cur.config, {} as RoutineConfig) : null;
+    // as contas escolhidas aqui ficam (são deste aparelho); o resto vem do outro
+    const config = { ...base, ...x.config, ...(antes?.contas ? { contas: antes.contas, contasApps: antes.contasApps } : {}) } as RoutineConfig;
+    if (!cur) {
+      const status = o.estado === 'do_outro' ? x.status : 'paused';
+      const r = this.insert(workspaceId, userId, { template: x.template, name, category: x.category, config, trigger, status, note: status === 'active' ? 'como no outro aparelho (sincronia)' : 'do outro aparelho (sincronia; pausada)' });
+      this.db.run('UPDATE routines SET sync_ref = ? WHERE id = ?', r.id === x.ref ? null : x.ref, r.id);
+      return r.id;
+    }
+    if ((cur as RoutineRow & { sync_ref: string | null }).sync_ref !== x.ref && cur.id !== x.ref) this.db.run('UPDATE routines SET sync_ref = ? WHERE id = ?', x.ref, cur.id);
+    const status = o.estado === 'do_outro' ? x.status : cur.status === 'setup' ? 'setup' : cur.status;
+    const mesmoHorario = JSON.stringify(parseJson<Trigger>(cur.trigger, { kind: 'manual' })) === JSON.stringify(trigger);
+    const mudou = cur.name !== name || !mesmoHorario || JSON.stringify(antes) !== JSON.stringify(config);
+    if (!mudou && status === cur.status) return cur.id;
+    const next = status !== 'active' ? null : mesmoHorario && cur.status === 'active' && cur.next_run_at ? cur.next_run_at : nextOccurrence(trigger, new Date());
+    const version = mudou ? cur.version + 1 : cur.version;
+    this.db.tx(() => {
+      this.db.run('UPDATE routines SET name = ?, config = ?, trigger = ?, status = ?, version = ?, next_run_at = ?, updated_at = ? WHERE id = ?',
+        name, this.db.seal(workspaceId, JSON.stringify(config)), JSON.stringify(trigger), status, version, next, now(), cur.id);
+      if (mudou) this.db.run('INSERT INTO routine_versions (id, workspace_id, routine_id, version, name, config, trigger, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        id('rtv'), workspaceId, cur.id, version, name, this.db.seal(workspaceId, JSON.stringify(config)), JSON.stringify(trigger), 'como no outro aparelho (sincronia)', userId, now());
+    });
+    audit(this.db, this.bus, { workspaceId, actorType: 'system', actorId: 'sincronia', action: 'routine.sync', targetType: 'routine', targetId: cur.id, evidence: { version, status, trigger }, result: `${name}: como no outro aparelho` });
+    this.bus.publish(workspaceId, 'routines.changed', { id: cur.id });
+    return cur.id;
+  }
+
+  /**
+   * O próximo horário de rotina do workspace (a nuvem do World acorda nele com os computadores fechados). Uma execução
+   * em andamento conta como "agora": o contêiner não dorme no meio dela. null = nenhuma rotina ativa com horário.
+   */
+  proximoHorario(workspaceId: string): string | null {
+    if (this.db.get("SELECT 1 AS x FROM routine_runs WHERE workspace_id = ? AND status IN ('queued', 'gathering', 'running')", workspaceId)) return now();
+    return this.db.get<{ n: string | null }>("SELECT MIN(next_run_at) AS n FROM routines WHERE workspace_id = ? AND status = 'active' AND next_run_at IS NOT NULL", workspaceId)?.n ?? null;
   }
 
   restore(workspaceId: string, userId: string, routineId: string, version: number) {
@@ -1313,10 +1386,14 @@ export class Routines {
         const slot = r.next_run_at!;
         // no agendador do motor: o aviso dele dispara; o Ergon só roda se o aviso não chegar (motor desligado, falhou)
         if (this.doMotor?.(r.id) && Date.now() - Date.parse(slot) < ESPERA_DO_MOTOR_MS) continue;
-        if (this.doMotor?.(r.id)) log.warn({ routineId: r.id, slot }, 'rotina: o agendador do motor não avisou; o Ergon roda este horário');
+        // a posse (nuvem do World): o horário é do outro aparelho, ou ainda não se sabe de quem é
+        const posse = this.posse?.(r.workspace_id, slot) ?? 'aqui';
+        if (posse === 'esperar' && Date.now() - Date.parse(slot) <= MISSED_MS) continue;
+        if (this.doMotor?.(r.id) && posse === 'aqui') log.warn({ routineId: r.id, slot }, 'rotina: o agendador do motor não avisou; o Ergon roda este horário');
         const trigger = parseJson<Trigger>(r.trigger, { kind: 'manual' });
         this.db.run('UPDATE routines SET next_run_at = ? WHERE id = ?', nextOccurrence(trigger, new Date()), r.id);
         const key = `schedule:${r.id}:${slot}`;
+        if (typeof posse === 'object') { this.createRun(r, 'schedule', key, slot, null, 'skipped', posse.outro); continue; }
         if (Date.now() - Date.parse(slot) > MISSED_MS) {
           this.createRun(r, 'schedule', key, slot, null, 'missed', `Não rodou ${fmtLocal(slot, workspaceTz(this.db, r.workspace_id))}: o Ergon estava desligado ou trancado`);
           continue;
@@ -1375,10 +1452,14 @@ export class Routines {
     // o aviso pode chegar um pouco antes do minuto exato (o tique do agendador): vale o horário até 2 min à frente
     const slot = previousOccurrence(trigger, new Date(quando + 120_000));
     if (!slot) return 'ignorada';
+    // a posse (nuvem do World): sem saber de quem é, o tique do Ergon decide depois (o horário segue marcado)
+    const posse = this.posse?.(workspaceId, slot) ?? 'aqui';
+    if (posse === 'esperar') return 'ignorada';
     this.aoDisparar?.(r.id);
     if (r.next_run_at && r.next_run_at <= slot) this.db.run('UPDATE routines SET next_run_at = ? WHERE id = ?', nextOccurrence(trigger, new Date(Math.max(Date.now(), Date.parse(slot) + 1000))), r.id);
     const key = `schedule:${r.id}:${slot}`;
     if (this.db.get('SELECT 1 AS x FROM routine_runs WHERE idempotency_key = ?', key)) return 'ja';
+    if (typeof posse === 'object') { this.createRun(r, 'schedule', key, slot, null, 'skipped', posse.outro); return 'pulada'; }
     if (Date.now() - Date.parse(slot) > MISSED_MS) {
       this.createRun(r, 'schedule', key, slot, null, 'missed', `Não rodou ${fmtLocal(slot, workspaceTz(this.db, r.workspace_id))}: o Ergon estava desligado ou trancado`);
       return 'perdida';

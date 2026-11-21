@@ -340,6 +340,15 @@ const servidor: Traducao<typeof pt> = {
 
   // ——— historico (card history and Activity rows)
   'historico.comNota': '{situacao} — {nota}',
+  'historico.navegador.assumiu': 'You took control of the agent’s browser',
+  'historico.navegador.devolveu': 'You gave control of the browser back to the agent',
+  'historico.navegador.ocioso': 'The browser went back to the agent: 10 minutes without use',
+  'historico.navegador.teto': 'The browser went back to the agent: the maximum time ran out',
+  'historico.navegador.queda': 'The browser went back to the agent: the screen was closed',
+  'historico.navegador.sessao': 'The browser went back to the agent: the session was locked or ended',
+  'historico.navegador.fim': 'The browser went back to the agent: the work finished',
+  'historico.navegador.prazo': 'The browser went back to the agent: the time ran out',
+  'historico.navegador.fechado': 'The browser went back to the agent: it was closed',
   'historico.situacao.solicitada': 'Requested',
   'historico.situacao.processamento': 'In progress',
   'historico.situacao.resultado': 'Result produced',
@@ -521,6 +530,7 @@ const servidor: Traducao<typeof pt> = {
   'proposta.gestao.acao.tarefa.ver': 'See a card (history, deliverables, pending items)',
   'proposta.gestao.acao.tarefa.criar': 'Create a card',
   'proposta.gestao.acao.tarefa.editar': 'Edit or move a card (name, description, column, owner, due date, complete)',
+  'proposta.gestao.acao.tarefa.comentar': 'Comment on a card (up to 240 characters; the comment carries the agent’s name)',
   'proposta.gestao.acao.tarefa.trabalhar': 'Put the team to work on a card',
   'proposta.gestao.acao.tarefa.cancelar': 'Cancel a card (the work stops and it leaves the board)',
   'proposta.gestao.acao.decisoes.ver': 'See what is waiting for the person ("With you")',

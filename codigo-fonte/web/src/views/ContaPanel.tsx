@@ -81,12 +81,13 @@ function NpcToggle({ dona }: { dona: boolean }) {
   const [err, setErr] = useState<string | null>(null);
   const on = s.data?.npc !== false;
   const set = async (v: boolean) => { setErr(null); try { await api.put('/api/city/settings', { npc: v }); s.reload(); } catch (e) { setErr(errMsg(e)); } };
+  // cosmético: uma linha miúda no canto do cartão (a explicação fica na dica)
   return (
-    <div className="row sec-toggle ws-npc">
-      <div><b>{t('conta.npc.exibir', { nome: NPC })}</b><p className="muted small">{t('conta.npc.texto', { nome: NPC })}</p></div>
-      <button role="switch" aria-checked={on} aria-label={t('conta.npc.aria', { nome: NPC })} className={`switch ${on ? 'switch--on' : ''}`} disabled={!dona || !s.data} onClick={() => void set(!on)}>
-        <span className="switch__knob" /><span className="switch__txt">{on ? t('conta.estado.ligado') : t('conta.estado.desligado')}</span>
-      </button>
+    <div className="ws-npc">
+      <label className="ws-npc__op" title={t('conta.npc.texto', { nome: NPC })}>
+        <input type="checkbox" checked={on} disabled={!dona || !s.data} aria-label={t('conta.npc.aria', { nome: NPC })} onChange={(e) => void set(e.target.checked)} />
+        {t('conta.npc.exibir', { nome: NPC })}
+      </label>
       {err && <p className="error small" role="alert">{err}</p>}
     </div>
   );
@@ -212,7 +213,6 @@ export function WorkspaceConfigPanel({ state, me }: { state: AppState; me: Me })
         <p className="muted small">{t('conta.ws.explica')}</p>
         {err && <p className="error" role="alert">{err}</p>}
         {!dona && <p className="muted small">{t('conta.ws.soDona')}</p>}
-        <NpcToggle dona={dona} />
         {dona && (
           <div className="ws-perigo">
             <div><b>{t('conta.ws.excluirTitulo')}</b><p className="muted small">{unico ? t('conta.ws.unico') : t('conta.ws.excluirExplica')}</p></div>
@@ -226,6 +226,7 @@ export function WorkspaceConfigPanel({ state, me }: { state: AppState; me: Me })
             <input id="ws-excluir" className="input" value={digitado} autoComplete="off" onChange={(e) => setDigitado(e.target.value)} />
           </ConfirmPopup>
         )}
+        <NpcToggle dona={dona} />
       </section>
     </>
   );

@@ -1,3 +1,4 @@
+import { CartaoExtras } from './CartaoExtras.tsx';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError, api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -11,6 +12,7 @@ import { gravarNome } from '../lib/titulo-card.ts';
 import { fmtDataHora, tn, useT } from '../i18n/index.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
+import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
 import { OrientarCampo } from './AjustesEquipe.tsx';
 import { DueChip } from './Board.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
@@ -515,7 +517,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
               <p className="hint">{t('tarefa.editavel.descricaoCortada')}</p>
             </div>
           ) : <label className="field">{t('tarefa.editavel.descricao')}<textarea value={desc} rows={4} onChange={(e) => setDesc(e.target.value)} onBlur={() => void saveText()} /></label>}
-          <div className="row">
+          <div className="row row--wrap">
             <label className="check"><input type="checkbox" checked={!!tk.completed} onChange={(e) => patch({ completed: e.target.checked })} /> {t('tarefa.editavel.concluida')}</label>
             <label className="field field--inline">{t('tarefa.editavel.coluna')}
               <select value={tk.column_id} onChange={(e) => patch({ columnId: e.target.value })}>{(columns ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
@@ -525,12 +527,15 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
               {tk.due_on && <button type="button" className="linkish" onClick={() => patch({ dueOn: null })}>{t('tarefa.editavel.tirarPrazo')}</button>}
             </label>
           </div>
-          {mode === 'mirror' ? (
+          {mode === 'mirror' && (
             <>
               <div className="kv"><span>{t('tarefa.editavel.atribuidaA')}</span><b>{tk.external_assignee ?? '—'}</b></div>
               <p className="hint">{t('tarefa.editavel.ligadaA', { app: SOURCE_LABEL[source ?? ''] ?? t('tarefa.nomes.umAplicativo') })}</p>
             </>
-          ) : (
+          )}
+          {/* etiquetas, pessoas, subtarefas, campos, links, arquivos de Documentos e comentários (no espelhado, só no Ergon) */}
+          <CartaoExtras taskId={tk.id} modo={mode === 'mirror' ? 'mirror' : 'user'} />
+          {mode === 'mirror' ? null : (
             <>
               <TaskFiles taskId={tk.id} inputs={data.files.inputs} deliverables={data.files.deliverables} canAttach onChanged={d.reload}
                 hint={t('tarefa.editavel.dicaPlanilha')} />
@@ -600,6 +605,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
           {!resumo && <>{ajusteBox}{confirmBox}{feedback}</>}
           {/* rc.27: com o trabalho andando, um recado que não interrompe (o agente lê no próximo passo) */}
           {mode === 'team' && active?.status === 'running' && <OrientarCampo rota={`/api/tasks/${tk.id}/steer`} nome={oAgente()} />}
+          {mode === 'team' && <NavegadorAoVivo tarefa={tk.id} agente={oAgente()} />}
           {/* sem o resumo (servidor antigo): o motivo da falha à vista, como antes */}
           {mode === 'team' && need === 'retry' && !resumo && <p className="ask-box ask-box--line" role="status">{motivoDaFalha(work?.result?.justification)}</p>}
 
@@ -669,6 +675,9 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
           {data.link?.conflict && <p className="warn">{data.link.conflict}{data.link.sync_state === 'escrita_falhou' && <> <button type="button" className="linkish" onClick={() => void reenviar()}>{t('tarefa.tentarDeNovo')}</button></>}</p>}
         </>
       )}
+
+      {/* comentários num card da equipe (de pessoas ou de agentes): aparecem quando há */}
+      {mode === 'team' && <CartaoExtras taskId={tk.id} modo="team" />}
 
       {mode !== 'team' && data.source && (
         <section className="block">

@@ -23,6 +23,6 @@ da raiz usam).
 | `deploy/local/` | modelo do pacote local publicado a cada versão |
 | `instalador/` | o pacote local desta versão, usado pelos instaladores da raiz |
 | `scripts/` | backup, restauração, testes do lançador, varredura de segredos, arquivos da marca |
-| `docs/` | formato dos pacotes `.ergon` e arquivos da marca |
+| `docs/` | formato dos pacotes `.ergon`, arquivos da marca e os [princípios de tela](docs/PRINCIPIOS.md) |
 
-Como contribuir: [CONTRIBUTING](../.github/CONTRIBUTING.md).
+Como contribuir: [CONTRIBUTING](../.github/CONTRIBUTING.md). Texto e visual de tela seguem os [princípios de tela](docs/PRINCIPIOS.md).

@@ -9,13 +9,15 @@ import { clip, fold } from '../lib/util.ts';
 export interface Interpretation {
   category: 'informacao' | 'ideia' | 'demanda' | 'resposta' | 'mudanca' | 'conclusao' | 'pergunta' | 'comando';
   evidence: string[];
-  proposed_action: 'nenhuma' | 'criar_tarefa' | 'atualizar_tarefa' | 'concluir_tarefa' | 'listar_pendencias' | 'propor_regra' | 'esclarecer';
+  proposed_action: 'nenhuma' | 'criar_tarefa' | 'atualizar_tarefa' | 'comentar_tarefa' | 'concluir_tarefa' | 'listar_pendencias' | 'propor_regra' | 'esclarecer';
   candidate_subject: string | null;
   needs_clarification: boolean;
   explicit_intent: boolean;
   task_title: string | null;
   target_task_number: number | null;
   interpreter: 'regras' | 'modelo';
+  /** só em comentar_tarefa: o texto do comentário (o serviço confere o limite de 240 caracteres e recusa o que passar) */
+  comment?: string | null;
 }
 
 export const INTERPRETATION_SCHEMA = {
@@ -25,13 +27,14 @@ export const INTERPRETATION_SCHEMA = {
   properties: {
     category: { enum: ['informacao', 'ideia', 'demanda', 'resposta', 'mudanca', 'conclusao', 'pergunta', 'comando'] },
     evidence: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 200 } },
-    proposed_action: { enum: ['nenhuma', 'criar_tarefa', 'atualizar_tarefa', 'concluir_tarefa', 'listar_pendencias', 'propor_regra', 'esclarecer'] },
+    proposed_action: { enum: ['nenhuma', 'criar_tarefa', 'atualizar_tarefa', 'comentar_tarefa', 'concluir_tarefa', 'listar_pendencias', 'propor_regra', 'esclarecer'] },
     candidate_subject: { type: ['string', 'null'], maxLength: 120 },
     needs_clarification: { type: 'boolean' },
     explicit_intent: { type: 'boolean' },
     task_title: { type: ['string', 'null'], maxLength: 200 },
     target_task_number: { type: ['integer', 'null'], minimum: 1 },
     interpreter: { enum: ['regras', 'modelo'] },
+    comment: { type: ['string', 'null'], maxLength: 2000 },
   },
 } as const;
 
@@ -53,6 +56,8 @@ const RX = {
   pendingEn: /^\s*\/?pending\s*$|\b(?:what(?:'s|\s+is|\s+are)\s+(?:still\s+)?(?:pending|open|outstanding)|(?:list|show)\s+(?:me\s+)?(?:the\s+|my\s+|all\s+)?(?:pending|open|outstanding)\s+(?:tasks|items)|what\s+do\s+i\s+(?:still\s+)?have\s+pending)\b/i,
   // "a partir de agora…", "from now on…", "whenever a client writes…" ("whenever you can" é "quando puder", não regra)
   ruleMarker: /\b(?:a\s+partir\s+de\s+agora|daqui\s+(?:pra|para)\s+frente|sempre\s+que|nunca\s+mais|regra\s*:|from\s+now\s+on|going\s+forward|from\s+here\s+on|whenever(?!\s+(?:you\s+can|possible|you\s+get\s+a\s+chance|you're\s+ready|you\s+have\s+time))|every\s+time\s+(?:that\s+)?(?:i|you|someone|a|an|the)\b|never\s+again|rule\s*:)/i,
+  // "/comentar #12 texto", "comente no #12: texto", "comentar no card 12: texto"; "/comment #12 text", "comment on #12: text"
+  comment: /^\s*(?:(?:\/comentar|\/comment)\s+#?|(?:coment(?:e|ar|a)\s+(?:n[oa]\s+|em\s+)?|comment\s+on\s+)(?:#|(?:o\s+|a\s+|the\s+)?(?:card|cartao|tarefa|task)\s+(?:n[o.º°]?\s*)?#?))(\d{1,6})\b\s*[:\-–]?\s*(.+)$/is,
   taskRef: /#(\d{1,6})\b/,
   // só verbo de nome: "renomeie / corrija o #12…", "mude / troque / altere o nome (ou o título) do card 12…". "mude o #12
   // para a Hipátia" ou "mova o card 12 para Em andamento" não é o nome: fica com o agente da conversa (ou a coordenação)
@@ -93,6 +98,12 @@ export function interpretRules(text: string): Interpretation {
   if (m) {
     const title = offsetTitle(m);
     return { ...base, category: 'comando', proposed_action: 'criar_tarefa', explicit_intent: true, task_title: title, candidate_subject: clip(title, 120), evidence: [ev(raw)] };
+  }
+  // comentar num card: o texto vai como a pessoa escreveu (recortado do original, sem dobrar acentos)
+  const cm = t.match(RX.comment);
+  if (cm) {
+    const texto = raw.slice(raw.length - cm[2].length).trim().replace(/^["“]|["”]$/g, '');
+    return { ...base, category: 'comando', proposed_action: 'comentar_tarefa', explicit_intent: true, target_task_number: Number(cm[1]), comment: texto.slice(0, 2000), evidence: [ev(raw)] };
   }
   if (RX.pending.test(t) || RX.pendingEn.test(t)) return { ...base, category: 'comando', proposed_action: 'listar_pendencias', explicit_intent: true, evidence: [ev(raw)] };
 
@@ -149,6 +160,7 @@ export type Decision =
   | { kind: 'none'; reason: string }
   | { kind: 'create_task'; title: string; reason: string }
   | { kind: 'update_task'; number: number; title: string; reason: string }
+  | { kind: 'comment_task'; number: number; text: string; reason: string }
   | { kind: 'complete_task'; number: number; reason: string; requiresConfirmation: boolean }
   | { kind: 'list_pending'; reason: string }
   | { kind: 'propose_rule'; text: string; reason: string }
@@ -171,6 +183,9 @@ export function decide(i: Interpretation, ctx: PolicyContext, text: string): Dec
     case 'atualizar_tarefa':
       if (!ctx.canCommand || i.target_task_number === null || !i.task_title) return { kind: 'none', reason: 'sem permissão ou referência' };
       return { kind: 'update_task', number: i.target_task_number, title: i.task_title, reason: 'correção explícita de card' };
+    case 'comentar_tarefa':
+      if (!ctx.canCommand || i.target_task_number === null || !i.comment) return { kind: 'none', reason: 'sem permissão ou referência' };
+      return { kind: 'comment_task', number: i.target_task_number, text: i.comment, reason: 'comentário pedido num card' };
     case 'concluir_tarefa':
       if (i.target_task_number === null) return { kind: 'clarify', reason: 'sem referência' };
       return { kind: 'complete_task', number: i.target_task_number, reason: 'conclusão informada', requiresConfirmation: !ctx.canCommand || ctx.observeOnly };

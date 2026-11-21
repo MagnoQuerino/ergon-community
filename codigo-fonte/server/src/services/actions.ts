@@ -1,10 +1,11 @@
 import type { Db } from '../db/db.ts';
-import { clip, id, now } from '../lib/util.ts';
+import { clip, HttpError, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import type { Decision } from './interpret.ts';
 import { createTask, getTaskByNumber, proposeSimilarLinks, updateTask, type Actor, type TaskOrigin } from './tasks.ts';
 import { activeTeam, coordinatorOf, routeTo } from './team.ts';
 import { parseDue } from './due.ts';
+import { comentar, type Autor } from './cartao.ts';
 import { workspaceTz } from './routine-proposals.ts';
 
 /**
@@ -75,6 +76,21 @@ export function applyDecision(db: Db, bus: Bus, workspaceId: string, actor: Acto
       if (!t) return { summary: `Tarefa #${d.number} não encontrada.`, taskId: null, taskNumber: null, reply: `Não encontrei a tarefa #${d.number}.` };
       updateTask(db, bus, workspaceId, actor, t.id, { title: d.title });
       return { summary: `Card #${d.number} corrigido (só este card; nenhuma regra futura criada).`, taskId: t.id, taskNumber: d.number, reply: `Tarefa #${d.number} atualizada.` };
+    }
+    case 'comment_task': {
+      const t = getTaskByNumber(db, workspaceId, d.number);
+      if (!t) return { summary: `Tarefa #${d.number} não encontrada.`, taskId: null, taskNumber: null, reply: `Não encontrei a tarefa #${d.number}.` };
+      // quem assina: a pessoa que pediu, ou o agente (o que agiu, ou o da conversa quando o pedido veio de um canal)
+      const autor: Autor | null = actor.type === 'user' && actor.id ? { type: 'user', id: actor.id }
+        : actor.type === 'agent' && actor.id ? { type: 'agent', id: actor.id } : ctx.agentId ? { type: 'agent', id: ctx.agentId } : null;
+      if (!autor) return { summary: `Comentário em #${d.number} sem autor identificado: nada foi gravado.`, taskId: t.id, taskNumber: d.number, reply: null };
+      try { comentar(db, bus, workspaceId, autor, t.id, d.text); }
+      catch (e) {
+        if (!(e instanceof HttpError)) throw e;
+        return { summary: `Comentário em #${d.number} não gravado: ${e.message}`, taskId: t.id, taskNumber: d.number, reply: `Não comentei na tarefa #${d.number}: ${e.message}` };
+      }
+      audit(db, null, { workspaceId, actorType: actor.type, actorId: actor.id, action: 'task.comment', targetType: 'task', targetId: t.id, evidence: { por: autor.type }, result: 'ok' });
+      return { summary: `Comentário registrado no card #${d.number}.`, taskId: t.id, taskNumber: d.number, reply: `Comentei na tarefa #${d.number}.` };
     }
     case 'complete_task': {
       const t = getTaskByNumber(db, workspaceId, d.number);

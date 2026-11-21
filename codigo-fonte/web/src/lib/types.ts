@@ -199,8 +199,27 @@ export interface TaskCard {
   priority?: number;
   /** responsável e agente do card enviado à equipe (nome e cor vindos do servidor; desativados incluídos) */
   agent_name?: string | null; agent_color?: string | null; team_agent_name?: string | null; team_agent_color?: string | null;
+  /** quadros da pessoa (rc.41): o que aparece no card — subtarefas [feitas, total], contadores, pessoas e valores dos campos */
+  card?: ResumoCartao | null;
 }
-export interface BoardView { board: BoardSummary; columns: Column[]; tasks: TaskCard[] }
+/** Campos próprios de um quadro da pessoa (rc.41). A cor de uma opção é uma chave da paleta (lib/cartao-tela.ts). */
+export type TipoCampo = 'text' | 'number' | 'date' | 'select' | 'labels' | 'person';
+export interface OpcaoCampo { id: string; name: string; color: string }
+export interface CampoQuadro { id: string; boardId: string; name: string; type: TipoCampo; options: OpcaoCampo[]; position: number; showOnCard: boolean }
+export type ValorCampo = string | number | string[] | null;
+export interface PessoaWs { id: string; name: string; username?: string }
+export interface ResumoCartao { sub: [number, number] | null; comments: number; links: number; files: number; people: PessoaWs[]; values: Record<string, ValorCampo>; mine: boolean }
+/** O que vai dentro do cartão (GET /api/tasks/:id/card). */
+export interface Cartao {
+  taskId: string; editable: boolean; mirror: boolean; fields: CampoQuadro[]; values: Record<string, ValorCampo>;
+  subtasks: Array<{ id: string; title: string; done: boolean; position: number }>;
+  links: Array<{ id: string; url: string; title: string }>;
+  people: PessoaWs[]; members: PessoaWs[];
+  comments: Array<{ id: string; authorType: 'user' | 'agent'; authorName: string; body: string; createdAt: string; mine: boolean }>;
+  attachments: Array<{ id: string; artifactId: string; filename: string; mime: string | null; size: number | null; available: boolean }>;
+  limits: { comment: number };
+}
+export interface BoardView { board: BoardSummary; columns: Column[]; tasks: TaskCard[]; fields?: CampoQuadro[]; members?: PessoaWs[] }
 /** queued: 1 = na fila da conversa (Ctrl+Enter); vai para o agente quando ele terminar */
 /** A transcrição de um áudio da conversa (rc.33), gravada no servidor; motivo da falha: código (a tela tem os textos). */
 export interface Transcricao { estado: 'transcrevendo' | 'preparando' | 'pronta' | 'falhou'; texto: string | null; motivo: string | null; duracao: number | null }

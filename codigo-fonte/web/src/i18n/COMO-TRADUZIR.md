@@ -4,6 +4,10 @@ A tela fala português e inglês por dicionários: `pt/<area>.ts` é a origem e 
 português. Cada arquivo de tela pertence a uma área (`particao.ts`); a equipe da área só mexe nos arquivos dela, no
 `pt/<area>.ts` e no `en/<area>.ts`. Os índices (`pt/index.ts`, `en/index.ts`) já têm todas as áreas e não mudam.
 
+Antes de escrever um texto novo, leia os [princípios de tela](../../../docs/PRINCIPIOS.md): texto só no que não é
+intuitivo, rótulo curto, estado em uma palavra, o visual guiando antes da frase. O que explica o funcionamento vai
+para a Ajuda (`pt/ajuda.ts`), não para a tela.
+
 ## O passo a passo
 
 1. Abra o arquivo de tela da sua área e troque cada texto escrito por `t('area.chave')`:

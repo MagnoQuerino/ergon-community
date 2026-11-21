@@ -94,7 +94,7 @@ const ajuda = {
 
   // ——— manual: Conversar com a equipe ———
   'conversar.titulo': 'Conversar com a equipe',
-  'conversar.palavras': 'conversa chat mensagem pedido encaminhar demanda card proposta aplicar',
+  'conversar.palavras': 'conversa chat mensagem pedido encaminhar demanda card proposta aplicar voz microfone navegador assumir controle',
   'conversar.p1': 'Clique em qualquer agente (na cidade ou em {link}) para abrir a conversa. Cada agente responde dentro da própria função.',
   'conversar.i1': '{coord} recebe pedidos gerais e diz quem deve fazer (“Encaminhar para: …”). Demandas claras viram card no quadro da equipe.',
   'conversar.i2': 'Quando a coordenação sugere uma mudança (mover alguém de setor, dar uma ferramenta, criar uma rotina), aparece um {cartao}. Nada muda antes do seu clique. Com várias propostas, dá para {todas} de uma vez.',
@@ -103,6 +103,12 @@ const ajuda = {
   'conversar.i3': 'Às vezes um agente pergunta algo com opções: escolha uma e ele segue.',
   'conversar.i4': 'Atalhos: {tarefa} cria um card; {pendencias} lista o que está aberto.',
   'conversar.i4Tarefa': '/tarefa título',
+  'conversar.i5': '{voz}: o ícone de voz ao lado da barra liga e desliga. Fale à vontade: quando você para, a fala vira mensagem de áudio na conversa e a resposta vem em voz alta. Dá para digitar com a voz ligada e falar por cima para interromper. Com a voz desligada, nada é ouvido.',
+  'conversar.i5Voz': 'Conversa por voz',
+  'conversar.i6': '{navegador}: quando um agente usa o navegador, a tela aparece ao vivo na conversa. {assumir} para fazer um login ou resolver um captcha; o que você digita vai direto para a página, nunca ao agente. Ao {conceder}, o que ficou digitado sem enviar é apagado. Sem uso por 10 minutos, o controle volta ao agente.',
+  'conversar.i6Navegador': 'Navegador ao vivo',
+  'conversar.i6Assumir': 'Assumir o controle',
+  'conversar.i6Conceder': 'Conceder o controle',
 
   // ——— manual: Personalizar a equipe ———
   'personalizar.titulo': 'Personalizar a equipe',
@@ -157,6 +163,8 @@ const ajuda = {
   'tarefas.i5Revisao': 'revisão crítica',
   'tarefas.i6': 'O {andamento} vem ligado: a equipe pega as tarefas de “A fazer” sozinha, de cima para baixo, até o limite de trabalhos ao mesmo tempo. Desligue em {link} se preferir que só trabalhem quando você conversa.',
   'tarefas.i6Andamento': 'andamento automático',
+  'tarefas.i7': '{quadros}: crie quantos quiser e, em “Quadro”, mude nome, colunas e os campos dos cartões (texto, número, data, lista, etiquetas, pessoa). Num quadro ligado a outro aplicativo, etiquetas, pessoas, subtarefas, campos, links, anexos e comentários ficam só no Ergon. Anexos vêm de Documentos, sem cópia.',
+  'tarefas.i7Quadros': 'Vários quadros',
 
   // ——— manual: Aguardando você ———
   'decisoes.titulo': 'Aguardando você',
@@ -167,7 +175,7 @@ const ajuda = {
 
   // ——— manual: Conexões ———
   'conexoes.titulo': 'Conexões',
-  'conexoes.palavras': 'conectar conta ia chatgpt whatsapp microsoft google teams email quadros',
+  'conexoes.palavras': 'conectar conta ia chatgpt whatsapp microsoft google teams email quadros nuvem',
   'conexoes.i1': '{contas}: {nous} — IA sem assinatura, que liga com um plano do Ergon World; você paga só o que usar. Também dá para conectar a assinatura Nous ou o ChatGPT que você já paga e escolher o modelo de cada agente.',
   'conexoes.i1Contas': 'Contas de IA',
   'conexoes.i1Nous': 'o Ergon AI é a melhor escolha',
@@ -175,6 +183,8 @@ const ajuda = {
   'conexoes.i2Apps': 'WhatsApp, Microsoft 365 e Google',
   'conexoes.i3': '{quadros}: ligue quadros de outros aplicativos nos dois sentidos: dar check ou mover aqui reflete lá. Os agentes também criam e movem tarefas neles.',
   'conexoes.i3Quadros': 'Tarefas e quadros',
+  'conexoes.i4': '{nuvem}: com o workspace na nuvem do Ergon World, você escolhe as conexões que a equipe usa lá com o computador desligado. Elas vão cifradas só para a nuvem do workspace. As regras de autonomia não vão: lá, tudo volta a pedir aprovação. WhatsApp e endereços da rede local ficam neste computador.',
+  'conexoes.i4Nuvem': 'Conexões na nuvem',
   'conexoes.p': 'Tudo em {link}. Conteúdo de mensagens e documentos é tratado como dado, nunca como instrução.',
 
   // ——— manual: A cidade ———
@@ -187,7 +197,7 @@ const ajuda = {
 
   // ——— manual: Segurança e privacidade ———
   'seguranca.titulo': 'Segurança e privacidade',
-  'seguranca.palavras': 'senha frase recuperação trava inatividade autenticador passkey cifrado backup',
+  'seguranca.palavras': 'senha frase recuperação trava inatividade autenticador passkey cifrado backup sincronia chave',
   'seguranca.i1': 'Os dados ficam {cifrados} neste computador, com a sua senha.',
   'seguranca.i1Cifrados': 'cifrados',
   'seguranca.i2': 'A {frase} (24 palavras) é a única saída se você esquecer a senha. Guarde fora do computador.',
@@ -197,6 +207,8 @@ const ajuda = {
   'seguranca.i4': '{duas}: autenticador ou passkey, no mesmo lugar. O código do autenticador é pedido só ao entrar; para destrancar a tela basta a senha ou a passkey.',
   'seguranca.i4Duas': 'Verificação em duas etapas',
   'seguranca.i5': 'Ferramentas que executam código ficam bloqueadas e pedem a sua senha para liberar.',
+  'seguranca.i6': '{sincronia}: automática e cifrada, a cada minuto. Num computador novo, abra o Ergon no que já sincroniza e a chave chega sozinha; sem ele, use a frase de recuperação. Se a nuvem do workspace mudar de aparelho, nada vai para ela até você confirmar com a senha. Ferramentas que executam código vindas de outro computador só ligam com a sua senha.',
+  'seguranca.i6Sincronia': 'Sincronia entre computadores',
 
   // ——— manual: Temas e personagens ———
   'temas.titulo': 'Temas e personagens',

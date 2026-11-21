@@ -5,7 +5,8 @@ import { emitLocal, useResource } from '../../lib/live.ts';
 import { Loading } from '../../brand/Brand.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { erroConta, type LoginLimit } from './WorldLinkDialog.tsx';
-import { fmtData, fmtDataHora, fmtDracmas, fmtLista, fmtMoeda, fmtNumero } from '../../i18n/index.ts';
+import { fmtData, fmtDataHora, fmtDracmas, fmtHora, fmtLista, fmtMoeda, fmtNumero } from '../../i18n/index.ts';
+import { quadroDaSincronia, type SyncStatus, type Tom } from './sinc-estado.ts';
 import { tw, twn, useTw, type ChaveWorld } from './textos.ts';
 import { detalheDoResumo, linhaDoResumo, nomeDoWorkspace, type ResumoFora } from './nuvem-cartao.ts';
 import { WsCard } from '../../components/WsCard.tsx';
@@ -81,7 +82,7 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
   // os do World em que a pessoa está (dela ou em que entrou por convite), ainda sem workspace deste computador ligado
   const remotes = l.workspaces ?? [];
   const bill = useResource<{ entitlement: { status: string; plan_sku: string | null } }>(l.currentIsBound ? '/api/world/billing' : null, []);
-  const sync = useResource<SyncStatus>(l.currentIsBound ? '/api/world/sync' : null, []);
+  const sync = useSincronia(l.currentIsBound);
   const cat = useResource<Catalog>(l.currentIsBound ? '/api/world/catalog' : null, []);
   const plano = bill.data?.entitlement.plan_sku && ['active', 'grace'].includes(bill.data.entitlement.status)
     ? cat.data?.items.find((i) => i.sku === bill.data!.entitlement.plan_sku)?.name ?? bill.data.entitlement.plan_sku : null;
@@ -124,7 +125,7 @@ export function BindCard({ s, busy, act }: { s: Status; busy: boolean; act: (fn:
                   {w.current && <span className="badge badge--atual">{t('vinculo.aberto')}</span>}
                   {ligado ? <span className="badge badge--world">{t('vinculo.seloWorld')}</span> : <span className="badge">{t('vinculo.seloLocal')}</span>}
                   {ligado && w.current && bill.data && <span className={`badge ${plano ? 'badge--ok' : ''}`}>{plano ?? t('vinculo.semPlano')}</span>}
-                  {ligado && w.current && sync.data && <span className="badge">{sync.data.enabled ? t('vinculo.syncLigada') : t('vinculo.syncDesligada')}</span>}
+                  {ligado && w.current && sync.data && <SeloSincronia s={sync.data} />}
                 </>}
                 acoes={escolhido === w.id ? null : <>
                   {!w.current && <button className="btn btn--sm" disabled={busy} onClick={() => void abrir(w.id)}>{t('vinculo.abrirWs')}</button>}
@@ -700,7 +701,6 @@ function Transfer({ others, busy, go }: { others: WorkspaceRef[]; busy: boolean;
 }
 
 
-interface SyncStatus { bound: boolean; enabled: boolean; syncWorkspaceId?: string | null; origin?: 'created' | 'joined' | null; keyState?: 'mine' | 'first' | 'handover' | null; lastVersion?: number; conflicts?: number; keyVersion?: number; rotationPending?: boolean; recoveryOutdated?: boolean }
 interface Tirada { ok: boolean; rotated?: boolean; rotationRequired?: boolean; reason?: string; shared?: number }
 interface Side { title: string; column?: string; agent?: string | null; completed?: boolean; dueOn?: string | null }
 interface Conflict { id: string; kind: 'task' | 'conversation'; since: string; mine: Side | null; theirs: Side | null }
@@ -718,28 +718,92 @@ const equipeLinha = (novos: number, coord: { from: string; to: string } | null) 
   return coord ? tw('sync.equipeCoordenacao', { resumo, de: coord.from, para: coord.to }) : tw('sync.equipe', { resumo });
 };
 
+const URL_SYNC = '/api/world/sync';
+/**
+ * O estado da sincronia, sempre fresco: relido quando dados começam ou terminam de ir e vir (sync.changed), quando
+ * chegam tarefas ou mensagens e, de qualquer jeito, a cada 15 s enquanto a tela está aberta (a volta automática é de
+ * um minuto e o estado dela não gera evento).
+ */
+function useSincronia(ligado: boolean) {
+  const r = useResource<SyncStatus>(ligado ? URL_SYNC : null, ['sync.changed', 'tasks.changed', 'messages.changed']);
+  const reload = r.reload;
+  // só com a sincronia ligada: desligada, o estado não muda sozinho (e a leitura dele consulta o World várias vezes)
+  const ligada = !!r.data?.enabled;
+  useEffect(() => { if (!ligado || !ligada) return undefined; const t = window.setInterval(() => { if (!document.hidden) reload(); }, 15_000); return () => window.clearInterval(t); }, [ligado, ligada, reload]);
+  return r;
+}
+const FMT = { hora: (d: Date) => fmtHora(d), dia: (d: Date) => fmtData(d) };
+const ICONE: Record<Tom, 'check' | 'repeat' | 'alert'> = { ok: 'check', info: 'repeat', warn: 'alert' };
+
+/** O selo do cartão do workspace: o estado de verdade da sincronia (em dia, sincronizando, pendente, espera você). */
+function SeloSincronia({ s }: { s: SyncStatus }) {
+  const t = useTw();
+  const q = quadroDaSincronia(s, t, FMT);
+  return <span className={`badge ${q.seloTom === 'ok' ? 'badge--ok' : q.seloTom === 'warn' ? 'badge--warn' : ''}`} title={q.pendente ?? q.linha}>{q.selo}</span>;
+}
+
 /**
  * Sincronizar aparelhos (World Sync): a equipe, as tarefas dos quadros do Ergon e as conversas da pessoa vão cifradas
- * para os outros computadores dela. Receber mostra antes o que chegou; o que mudou dos dois lados vira uma escolha.
+ * para os outros computadores dela, sozinhas (o servidor envia, recebe e entrega a chave a cada minuto). O quadro
+ * mostra em que pé está e só o que pede decisão: o que mudou dos dois lados, a equipe nova que outro computador
+ * enviou e a frase de recuperação. "Sincronizar agora" fica como saída de emergência.
  */
+/**
+ * Ferramentas que executam código (Terminal, Executar código) que vieram na equipe da pessoa dona e não ligaram aqui:
+ * neste computador, só com a confirmação da senha (o pedido de senha é o da sessão: api.ts). Deixar desligadas esquece.
+ */
+function GuardadasDaSincronia({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: string } | null) => void }) {
+  const t = useTw();
+  const r = useResource<{ itens: Array<{ tool: string; label: string; agente: string | null; agentId: string | null }> }>('/api/sync/guardadas', ['sync.changed', 'agents.changed']);
+  const [busy, setBusy] = useState(false);
+  const itens = r.data?.itens ?? [];
+  if (!itens.length) return null;
+  const decidir = async (ligar: boolean) => {
+    setBusy(true); onMsg(null);
+    try { await api.post('/api/sync/guardadas', { ligar }); if (ligar) onMsg({ kind: 'ok', text: t('sinc.guardadasLigadas') }); r.reload(); } catch (e) { onMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); }
+  };
+  return (
+    <div className="hint warn" role="status">
+      <b>{t('sinc.guardadasTitulo')}</b>
+      <span className="small">{t('sinc.guardadasTexto')}</span>
+      <ul className="small">
+        {itens.map((x) => <li key={`${x.tool}-${x.agentId ?? 'equipe'}`}>{x.agente ? t('sinc.guardadasAgente', { ferramenta: x.label, agente: x.agente }) : t('sinc.guardadasEquipe', { ferramenta: x.label })}</li>)}
+      </ul>
+      <div className="row row--wrap">
+        <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void decidir(true)}><Icon name="key" size={13} /> {t('sinc.guardadasLigar')}</button>
+        <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void decidir(false)}>{t('sinc.guardadasDeixar')}</button>
+      </div>
+    </div>
+  );
+}
+
 export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: string } | null) => void }) {
   const t = useTw();
-  const st = useResource<SyncStatus>('/api/world/sync', []);
-  const cf = useResource<Conflict[]>('/api/world/sync/conflicts', []);
+  const st = useSincronia(true);
+  const cf = useResource<Conflict[]>('/api/world/sync/conflicts', ['sync.changed', 'tasks.changed']);
   const [phrase, setPhrase] = useState('');
   const [pulled, setPulled] = useState<Pulled | null>(null);
   const [busy, setBusy] = useState(false);
   const go = async (fn: () => Promise<string | void>) => {
     onMsg(null); setBusy(true);
-    try { const ok = await fn(); if (ok) onMsg({ kind: 'ok', text: ok }); st.reload(); cf.reload(); } catch (e) { onMsg({ kind: 'error', text: erroConta(e, t) }); } finally { setBusy(false); }
+    try { const ok = await fn(); if (ok) onMsg({ kind: 'ok', text: ok }); st.reload(); cf.reload(); } catch (e) { onMsg({ kind: 'error', text: erroConta(e, t) }); st.reload(); } finally { setBusy(false); }
   };
   const withPhrase = () => (phrase.trim().length >= 20 ? { recoveryPhrase: phrase.trim() } : {});
+  const retida = !!st.data?.auto?.equipeRetida;
+  // a equipe nova deixou de estar retida (recebida aqui ou por outra tela): a prévia aberta não vale mais
+  useEffect(() => { if (!retida) setPulled(null); }, [retida]);
   if (!st.data) return <Loading error={st.error} />;
   const s = st.data;
   const n = pulled?.incoming; const team = pulled?.preview?.agents?.length ?? 0;
   // adotado de outro computador: entra com a chave que já existe; criado no servidor e sem chave ainda (primeiro
   // checkout do site, cortesia): para quem administra, é como um workspace novo, a chave nasce aqui num clique
   const entrar = s.origin === 'joined' && s.keyState !== 'first';
+  const q = quadroDaSincronia(s, t, FMT);
+  const receber = () => go(async () => {
+    const r = await api.post<{ result?: { added: number; updated: number }; conflicts?: number }>('/api/world/sync/pull', { apply: true }); setPulled(null);
+    const novos = t('sync.novos', { n: r.result?.added ?? 0 }); const atualizados = t('sync.atualizados', { n: r.result?.updated ?? 0 });
+    return r.conflicts ? t('sync.recebidoConflitos', { novos, atualizados, conflitos: fmtNumero(r.conflicts) }) : t('sync.recebido', { novos, atualizados });
+  });
   return (
     <section className="card">
       <h3>{t('sync.titulo')}</h3>
@@ -754,8 +818,37 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
         </>
       ) : (
         <>
-          <p>{t('sync.ligada')} <span className="muted small">{twn('sync.codigoVersao', { codigo: <code>{s.syncWorkspaceId}</code>, versao: s.lastVersion ?? 0 })}</span></p>
-          <p className="muted small">{t('sync.tarefaChega')}</p>
+          <div className={`sinc sinc--${q.tom}`}>
+            <span className={`sinc__icone${q.situacao === 'enviando' || q.situacao === 'recebendo' ? ' sinc__icone--giro' : ''}`} aria-hidden="true"><Icon name={ICONE[q.tom]} size={16} /></span>
+            <div className="sinc__texto" role="status" aria-live="polite">
+              <b>{q.linha}</b>
+              {q.pendente && <span>{q.pendente}</span>}
+            </div>
+            <button className="btn btn--sm btn--ghost sinc__agora" disabled={busy} onClick={() => void go(async () => {
+              const r = await api.post<SyncStatus>('/api/world/sync/now', {});
+              return r.auto?.pendencia || r.auto?.equipeRetida ? t('sinc.agoraPendente') : t('sinc.agoraFeito');
+            })}><Icon name="repeat" size={13} /> {t('sinc.agora')}</button>
+          </div>
+          {retida && (
+            <div className="card card--inner">
+              <b>{t('sinc.equipeTitulo')}</b>
+              {pulled && n ? (
+                <>
+                  <ul className="small">
+                    {pulled.preview && <li>{equipeLinha(team, pulled.preview.coordinator ?? null)}</li>}
+                    {(n.tasks > 0 || n.conversations > 0 || n.messages > 0) && <li>{contagem(n)}</li>}
+                  </ul>
+                  <p className="muted small">{t('sync.nadaMuda')}</p>
+                </>
+              ) : <p className="muted small">{t('sinc.equipeTexto')}</p>}
+              <div className="row row--wrap">
+                {!pulled && <button className="btn" disabled={busy} onClick={() => void go(async () => { setPulled(await api.post<Pulled>('/api/world/sync/pull', {})); })}>{t('sync.verChegou')}</button>}
+                <button className={`btn ${pulled ? 'btn--primary' : ''}`} disabled={busy} onClick={() => void receber()}>{t('sync.receber')}</button>
+                {pulled && <button className="btn btn--ghost" disabled={busy} onClick={() => setPulled(null)}>{t('agoraNao')}</button>}
+              </div>
+            </div>
+          )}
+          <GuardadasDaSincronia onMsg={onMsg} />
           {s.rotationPending && <p className="hint warn row row--wrap"><span>{t('pessoas.chavePendente')}</span><button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void go(async () => { await api.post('/api/world/sync/rotate'); return t('pessoas.chaveTrocada'); })}><Icon name="key" size={13} /> {t('pessoas.trocarChave')}</button></p>}
           {s.recoveryOutdated && (
             <div className="hint warn">
@@ -766,33 +859,6 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
               </div>
             </div>
           )}
-          <div className="row row--wrap">
-            <button className="btn" disabled={busy} onClick={() => void go(async () => { const r = await api.post<Pulled>('/api/world/sync/pull', {}); setPulled(r); if (!r.preview && !r.incoming.tasks && !r.incoming.conversations && !r.incoming.messages) return t('sync.nadaNovo'); })}>{t('sync.verChegou')}</button>
-            <button className="btn btn--primary" disabled={busy} onClick={() => void go(async () => {
-              const r = await api.post<{ version: number; sent: { tasks: number; conversations: number; messages: number } }>('/api/world/sync/push');
-              const total = r.sent.tasks + r.sent.conversations + r.sent.messages;
-              return total ? t('sync.enviado', { itens: contagem(r.sent) }) : t('sync.tudoNoWorld');
-            })}>{t('sync.enviar')}</button>
-            <button className="btn btn--ghost" disabled={busy} title={t('sync.autorizarDica')} onClick={() => void go(async () => { const r = await api.post<{ shared: number }>('/api/world/sync/share'); return r.shared ? t('sync.autorizados', { n: r.shared }) : t('sync.nenhumEsperando'); })}>{t('sync.autorizar')}</button>
-          </div>
-          {pulled && n && (pulled.preview || n.tasks || n.conversations || n.messages) ? (
-            <div className="card card--inner">
-              <b>{t('sync.chegou')}</b>
-              <ul className="small">
-                {pulled.preview && <li>{equipeLinha(team, pulled.preview.coordinator ?? null)}</li>}
-                {(n.tasks > 0 || n.conversations > 0 || n.messages > 0) && <li>{contagem(n)}</li>}
-              </ul>
-              <p className="muted small">{t('sync.nadaMuda')}</p>
-              <div className="row row--wrap">
-                <button className="btn btn--primary" disabled={busy} onClick={() => void go(async () => {
-                  const r = await api.post<{ result?: { added: number; updated: number }; conflicts?: number }>('/api/world/sync/pull', { apply: true }); setPulled(null);
-                  const novos = t('sync.novos', { n: r.result?.added ?? 0 }); const atualizados = t('sync.atualizados', { n: r.result?.updated ?? 0 });
-                  return r.conflicts ? t('sync.recebidoConflitos', { novos, atualizados, conflitos: fmtNumero(r.conflicts) }) : t('sync.recebido', { novos, atualizados });
-                })}>{t('sync.receber')}</button>
-                <button className="btn btn--ghost" disabled={busy} onClick={() => setPulled(null)}>{t('agoraNao')}</button>
-              </div>
-            </div>
-          ) : null}
           {cf.data && cf.data.length > 0 && (
             <div className="card card--inner">
               <b>{t('sync.conflitoTitulo')}</b>
@@ -809,6 +875,11 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
               </ul>
             </div>
           )}
+          <details className="sinc__detalhes">
+            <summary className="muted small">{t('sinc.codigo')}</summary>
+            <p className="muted small">{twn('sync.codigoVersao', { codigo: <code>{s.syncWorkspaceId}</code>, versao: s.lastVersion ?? 0 })}</p>
+            <p className="muted small">{t('sync.tarefaChega')}</p>
+          </details>
         </>
       )}
     </section>

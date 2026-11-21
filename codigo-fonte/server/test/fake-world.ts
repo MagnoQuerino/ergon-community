@@ -134,8 +134,16 @@ export class FakeWorld {
    * contêiner, a chave do cofre dele, o aparelho-nuvem, o que ele contou (estado, instalação no relé, atividade) e os
    * sinais do computador (aberto/fechado). `nuvem(sws)` ativa e devolve o token de partida.
    */
-  clouds = new Map<string, { bootToken: string; vaultKey: string | null; deviceId: string | null; states: string[]; relay: string | null; active: boolean; presence: boolean[] }>();
-  nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [] }); return bootToken; }
+  clouds = new Map<string, { bootToken: string; vaultKey: string | null; deviceId: string | null; states: string[]; relay: string | null; active: boolean; presence: boolean[];
+    /** o próximo horário de rotina contado (nextWakeAt) e por quem: 'pc' ou 'nuvem' */ nextWakeAt?: string | null; wakeLog: Array<{ by: 'pc' | 'nuvem'; at: string | null }>;
+    /** a posse (cloud.ts): último sinal de aberto e a hora em que o computador avisou que fechou */ pcSeenAt: number | null; pcLeftAt: number | null; pcSince?: number | null; /** o computador que deu o último sinal de aberto */ pcDevice?: string | null;
+    /** já preparado: trocar a chave do cofre (disco novo) é recusado com key_locked */ preparado?: boolean;
+    /** ligada pelo teste grátis e o orquestrador ainda não subiu o contêiner (runtime 'parado', como no World) */ subindo?: boolean }>();
+  nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [], wakeLog: [], pcSeenAt: null, pcLeftAt: null }); return bootToken; }
+  /** o último sinal de um computador por workspace (aberto ou fechado): o pcOpen do estado da nuvem; os testes também o mudam */
+  pcAberto = new Map<string, boolean>();
+  /** sinais de computador aberto de quem não é dono: o World registra, mas a posse e o horário não mudam */
+  presencaDeOutros?: Array<{ ws: string; conta: string }>;
   /** giros de chave recebidos (mudança kind rotation): de qual workspace, para que versão, por quem */
   rotations: Array<{ ws: string; keyVersion: number; by: string }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
@@ -158,6 +166,12 @@ export class FakeWorld {
   confirmEmail(email: string): void { [...this.accounts.values()].find((a) => a.email === email)!.emailVerified = true; }
   rateLimitNext = 0;
   leaseMs = 90_000;
+  /** World de antes do aditivo da chave da nuvem: sem keyWanted (estado e sinal de aberto) e sem kind em devices-needing-key */
+  antigo = false;
+  /** gravar o envelope deste aparelho falha assim (aparelho → [status, código]): um aparelho com defeito no meio da entrega */
+  envelopeFail = new Map<string, [number, string]>();
+  /** a ordem de devices-needing-key (o World de verdade põe a nuvem primeiro; aqui dá para forçar o pior caso) */
+  nuvemPorUltimo = false;
   /** o próximo pedido que casar é processado, mas a resposta se perde (a conexão cai) */
   dropResponse: RegExp | null = null;
   /** chamado logo antes de processar um aceite (commit): para mudar a posse no meio, como outro computador faria */
@@ -271,6 +285,11 @@ export class FakeWorld {
   private session(bearer: string | null): Device | null {
     return [...this.devices.values()].find((d) => d.status === 'active' && d.session && d.session === bearer) ?? null;
   }
+  /** o aparelho-nuvem do workspace está ativo e sem o envelope da chave na versão atual (world/src/cloud.ts keyWanted) */
+  keyWanted(sws: string): boolean {
+    const w = this.workspaces.get(sws); const d = this.devices.get(this.clouds.get(sws)?.deviceId ?? '');
+    return !!w && !!d && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== (w.keyVersion ?? 1);
+  }
   private connected(accountId: string): Device[] { return [...this.devices.values()].filter((d) => d.accountId === accountId && d.status === 'active' && d.session && (d as Device & { kind?: string }).kind !== 'cloud'); }
 
   private route(method: string, u: URL, b: any, bearer: string | null): { status?: number; json: unknown } | { fail: [number, string, Record<string, unknown>?] } | { raw: Buffer; headers: Record<string, string> } {
@@ -333,8 +352,9 @@ export class FakeWorld {
       const c = [...this.clouds.entries()].find(([, x]) => x.bootToken === b.bootToken);
       if (!c) return { fail: [401, 'boot_token'] };
       const [sws, cl] = c; const w = this.workspaces.get(sws)!;
+      cl.subindo = false; // o contêiner chegou: o orquestrador o subiu
       if (p === '/v1/cloud/boot/vault') return { json: { vaultKey: cl.vaultKey } };
-      if (p === '/v1/cloud/boot/key') { if (cl.vaultKey && b.replace !== true) return { fail: [409, 'key_exists'] }; cl.vaultKey = String(b.key); return { json: { ok: true } }; }
+      if (p === '/v1/cloud/boot/key') { if (cl.vaultKey && b.replace !== true) return { fail: [409, 'key_exists'] }; if (cl.vaultKey && cl.preparado) return { fail: [409, 'key_locked'] }; cl.vaultKey = String(b.key); return { json: { ok: true } }; }
       if (p === '/v1/cloud/boot/state') { cl.states.push(b.detail ? `${b.state}: ${b.detail}` : String(b.state)); return { json: { ok: true } }; }
       if (p === '/v1/cloud/boot') {
         crypto.createPublicKey({ key: Buffer.from(b.publicKey, 'base64'), format: 'der', type: 'spki' });
@@ -385,21 +405,56 @@ export class FakeWorld {
       const sws = u.searchParams.get('workspace'); const cl = sws ? this.clouds.get(sws) : undefined;
       if (!mine(sws)) return { fail: [404, 'not_found'] };
       const dono = this.workspaces.get(sws!)!.owner === acc.id;
-      return { json: { active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null,
+      // as conexões (world/src/cloud.ts): o aparelho-nuvem com a chave pública só para o dono; um computador aberto é a posse
+      const nv = cl?.deviceId ? this.devices.get(cl.deviceId) : undefined;
+      const conexoes = { owner: dono, cloudDevice: dono && nv && nv.status === 'active' ? { deviceId: nv.id, syncPublicKey: nv.syncPublicKey } : null, pcOpen: !!cl && this.pcAberto.get(sws!) === true && (cl.pcSeenAt === null || Date.now() - cl.pcSeenAt < 120_000) };
+      // (o sinal vale 2 min, como no World; os testes também mudam pcAberto direto, sem sinal)
+      return { json: { ...conexoes, active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? (cl.subindo ? 'parado' : 'rodando') : null, ...(this.antigo ? {} : { keyWanted: this.keyWanted(sws!) }),
         relayTicket: cl?.relay && dono ? { exp: Math.floor(Date.now() / 1000) + 900, mac: crypto.createHash('sha256').update(`${sws}|${cl.relay}`).digest('hex') } : null } };
+    }
+    if (key === 'POST /v1/cloud/trial') {
+      // o teste grátis (world/src/cloud.ts startTrial): só o dono, uma vez; a nuvem fica ativa e "parada" até o orquestrador
+      // subir o contêiner. A resposta é o estado, como GET /v1/cloud
+      if (!mine(b.workspaceId)) return { fail: [404, 'sync_workspace'] };
+      if (this.workspaces.get(b.workspaceId)!.owner !== acc.id) return { fail: [403, 'not_owner'] };
+      if (this.clouds.has(b.workspaceId)) return { fail: [409, 'trial_used'] };
+      this.nuvem(b.workspaceId); this.clouds.get(b.workspaceId)!.subindo = true;
+      return this.route('GET', new URL(`http://x/v1/cloud?workspace=${b.workspaceId}`), {}, bearer);
     }
     if (key === 'POST /v1/cloud/presence') {
       const cl = this.clouds.get(b.workspaceId);
       if (!mine(b.workspaceId) || !cl) return { fail: [409, 'no_cloud'] };
-      if ((dev as Device & { kind?: string }).kind !== 'cloud') cl.presence.push(b.open !== false);
-      return { json: { ok: true, pcHoldsForSeconds: 120 } };
+      // o próprio contêiner da nuvem não é "um computador aberto" (world/src/cloud.ts presence)
+      if ((dev as Device & { kind?: string }).kind === 'cloud') return { json: { ok: true, pcHoldsForSeconds: 0, ...(this.antigo ? {} : { keyWanted: false }) } };
+      cl.presence.push(b.open !== false);
+      // a posse e o próximo horário são da conta dona (world/src/cloud.ts presence): o sinal de um colaborador não muda nada
+      if (this.workspaces.get(b.workspaceId)!.owner !== acc.id) { (this.presencaDeOutros ??= []).push({ ws: b.workspaceId, conta: acc.id }); return { json: { ok: true, pcHoldsForSeconds: 0, ...(this.antigo ? {} : { keyWanted: this.keyWanted(b.workspaceId) }) } }; }
+      const t = Date.now();
+      if (b.open !== false) {
+        this.pcAberto.set(b.workspaceId, true);
+        if (cl.pcSeenAt === null || t - cl.pcSeenAt > 120_000) { if (cl.pcSeenAt !== null) cl.pcLeftAt = Math.max(cl.pcLeftAt ?? 0, cl.pcSeenAt + 120_000); cl.pcSince = t; }
+        cl.pcSeenAt = t; cl.pcDevice = dev.id;
+      } else if (!cl.pcDevice || cl.pcDevice === dev.id) {
+        // só quem deu o último sinal de aberto tira a posse (outro computador que segue aberto continua com ela)
+        this.pcAberto.set(b.workspaceId, false);
+        if (cl.pcSeenAt !== null) cl.pcLeftAt = t;
+        cl.pcSeenAt = null;
+      }
+      if (b.nextWakeAt !== undefined) { cl.nextWakeAt = b.nextWakeAt as string | null; cl.wakeLog.push({ by: 'pc', at: cl.nextWakeAt }); }
+      return { json: { ok: true, pcHoldsForSeconds: 120, ...(this.antigo ? {} : { keyWanted: this.keyWanted(b.workspaceId) }) } };
     }
     if (key === 'POST /v1/cloud/app-state') {
       const d = dev as Device & { kind?: string; cloudWs?: string }; const cl = d.cloudWs ? this.clouds.get(d.cloudWs) : undefined;
       if (d.kind !== 'cloud' || !cl) return { fail: [403, 'not_cloud'] };
       cl.states.push(b.detail ? `${b.state}: ${b.detail}` : String(b.state)); cl.active = b.active === true;
       if (typeof b.relayInstallationId === 'string') cl.relay = b.relayInstallationId;
-      return { json: { ok: true } };
+      if (b.state === 'pronto') cl.preparado = true;
+      if (b.nextWakeAt !== undefined) { cl.nextWakeAt = b.nextWakeAt as string | null; cl.wakeLog.push({ by: 'nuvem', at: cl.nextWakeAt }); }
+      // a posse como o World a vê (PC_HOLD_SECONDS = 120)
+      const aberto = cl.pcSeenAt !== null && Date.now() - cl.pcSeenAt < 120_000;
+      const ate = aberto ? Date.now() : Math.max(cl.pcLeftAt ?? 0, cl.pcSeenAt !== null ? cl.pcSeenAt + 120_000 : 0) || null;
+      const iso = (x: number | null | undefined) => (x ? new Date(x).toISOString() : null);
+      return { json: { ok: true, pcOpen: aberto, pcHeldUntil: iso(ate), pcSince: aberto ? iso(cl.pcSince) : null, pcLeftAt: iso(cl.pcLeftAt) } };
     }
     if (key === 'POST /v1/ai/credentials') {
       if (!mine(b.workspaceId)) return { fail: [404, 'sync_workspace'] };
@@ -547,6 +602,7 @@ export class FakeWorld {
         if (b.kind === 'recovery') { w.recovery = { keyVersion: b.keyVersion, wrapped: b.wrapped }; (w.recoveries ??= new Map()).set(acc.id, w.recovery); }
         else {
           const d = this.devices.get(b.deviceId); if (!d || d.status !== 'active') return { fail: [400, 'invalid_device'] };
+          const defeito = this.envelopeFail.get(d.id); if (defeito) return { fail: defeito };
           // para aparelho de outra pessoa: só quem administra, e só para membro atual
           if (d.accountId !== acc.id && (RANK[role] < RANK.admin || !roleIn(w, d.accountId))) return { fail: [403, 'sync_forbidden'] };
           w.envelopes.set(d.id, { keyVersion: b.keyVersion, wrapped: b.wrapped });
@@ -560,12 +616,21 @@ export class FakeWorld {
       }
       if (m[2] === 'devices-needing-key') {
         const admin = RANK[role] >= RANK.admin;
-        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== kv && ((d as Device & { kind?: string; cloudWs?: string }).kind !== 'cloud' || (d as Device & { cloudWs?: string }).cloudWs === w.id)).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey }));
+        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== kv && ((d as Device & { kind?: string; cloudWs?: string }).kind !== 'cloud' || (d as Device & { cloudWs?: string }).cloudWs === w.id)).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey, ...(this.antigo ? {} : { kind: (d as Device & { kind?: string }).kind === 'cloud' ? 'cloud' : 'app' }) }));
+        // a nuvem primeiro, depois os da própria conta (world/src/sync.ts); `nuvemPorUltimo` força a ordem ruim
+        const peso = (x: { accountId: string; deviceId: string }) => ((this.devices.get(x.deviceId) as Device & { kind?: string }).kind === 'cloud' ? (this.nuvemPorUltimo ? 9 : 0) : x.accountId === acc.id ? 1 : 2);
+        if (!this.antigo || this.nuvemPorUltimo) devices.sort((x, y) => peso(x) - peso(y));
         return { json: { keyVersion: kv, devices } };
       }
       if (m[2] === 'changes' && method === 'POST') {
+        // a mesma operação de novo (a resposta se perdeu): o mesmo recibo, sem gravar outra mudança (world/src/sync.ts push)
+        const repetida = w.changes.find((c) => c.operationId === b.operationId);
+        if (repetida) return { json: { version: repetida.version, duplicate: true } };
         if (!w.plan) return { fail: [402, 'world_inactive'] };
         if (RANK[role] < RANK[b.kind === 'rotation' ? 'admin' : 'editor']) return { fail: [403, 'sync_forbidden'] };
+        // as conexões (world/src/sync.ts): só a conta dona, de um computador dela ou da nuvem DESTE workspace
+        if (!['change', 'snapshot', 'rotation', 'conexoes'].includes(String(b.kind ?? 'change'))) return { fail: [400, 'kind'] };
+        if (b.kind === 'conexoes' && (w.owner !== acc.id || ((dev as Device & { kind?: string; cloudWs?: string }).kind === 'cloud' && (dev as Device & { cloudWs?: string }).cloudWs !== w.id))) return { fail: [403, 'sync_forbidden'] };
         if (b.kind === 'rotation') { if (b.keyVersion !== kv + 1) return { fail: [409, 'key_version'] }; }
         else {
           if (w.rotationRequired) return { fail: [409, 'rotation_required'] };
@@ -578,13 +643,16 @@ export class FakeWorld {
         if (!crypto.verify(null, Buffer.from(canon), pub, Buffer.from(String(b.signature), 'base64'))) return { fail: [400, 'bad_signature'] };
         if (crypto.createHash('sha256').update(Buffer.from(b.ciphertext, 'base64')).digest('hex') !== b.sha256) return { fail: [400, 'bad_hash'] };
         w.head += 1;
-        w.changes.push({ version: w.head, operationId: b.operationId, keyVersion: b.keyVersion, schemaVersion: b.schemaVersion, kind: b.kind, ciphertext: b.ciphertext, nonce: b.nonce, deviceId: dev.id });
+        // o autor (world/src/sync.ts COLS): a conta e o tipo do aparelho que assinou
+        w.changes.push({ version: w.head, operationId: b.operationId, keyVersion: b.keyVersion, schemaVersion: b.schemaVersion, kind: b.kind, ciphertext: b.ciphertext, nonce: b.nonce, deviceId: dev.id,
+          accountId: acc.id, deviceKind: (dev as Device & { kind?: string }).kind === 'cloud' ? 'cloud' : 'app' });
         if (b.kind === 'rotation') { w.keyVersion = b.keyVersion; w.rotationRequired = false; this.rotations.push({ ws: w.id, keyVersion: b.keyVersion, by: acc.id }); }
         return { json: { version: w.head } };
       }
       if (m[2] === 'changes' && method === 'GET') {
         const since = Number(u.searchParams.get('since') ?? 0);
-        return { json: { head: w.head, keyVersion: kv, changes: w.changes.filter((c) => (c.version as number) > since).slice(0, 50) } };
+        // as conexões só para a conta dona: o membro convidado não vê nem o cifrado
+        return { json: { head: w.head, keyVersion: kv, ownerAccountId: w.owner, changes: w.changes.filter((c) => (c.version as number) > since && (c.kind !== 'conexoes' || w.owner === acc.id)).slice(0, 50) } };
       }
     }
     return { fail: [404, 'not_found'] };

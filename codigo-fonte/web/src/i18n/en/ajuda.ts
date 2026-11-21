@@ -91,7 +91,7 @@ const ajuda: Traducao<typeof pt> = {
   'inicio.p2': 'The first steps are also in {link}, so you can check them off.',
 
   'conversar.titulo': 'Talking to the team',
-  'conversar.palavras': 'conversation chat message request route ask card proposal apply',
+  'conversar.palavras': 'conversation chat message request route ask card proposal apply voice microphone browser take control',
   'conversar.p1': 'Click any agent (in the city or in {link}) to open the conversation. Each agent answers within their own role.',
   'conversar.i1': '{coord} takes general requests and says who should handle them (“Route to: …”). Clear requests become a card on the team board.',
   'conversar.i2': 'When the coordinator suggests a change (moving someone to another sector, giving a tool, creating a routine), a {cartao} appears. Nothing changes until you click. With several proposals, you can {todas} at once.',
@@ -100,6 +100,12 @@ const ajuda: Traducao<typeof pt> = {
   'conversar.i3': 'Sometimes an agent asks a question with options: pick one and they carry on.',
   'conversar.i4': 'Shortcuts: {tarefa} creates a card; {pendencias} lists what is open.',
   'conversar.i4Tarefa': '/task title',
+  'conversar.i5': '{voz}: the voice icon next to the message bar turns it on and off. Just talk: when you stop, what you said becomes an audio message in the chat and the reply is spoken out loud. You can type while voice is on, and talk over a reply to interrupt. With voice off, nothing is heard.',
+  'conversar.i5Voz': 'Voice conversation',
+  'conversar.i6': '{navegador}: when an agent uses the browser, its screen shows live in the chat. {assumir} to sign in or solve a captcha; what you type goes straight to the page, never to the agent. When you {conceder}, anything typed but not submitted is erased. After 10 idle minutes, control goes back to the agent.',
+  'conversar.i6Navegador': 'Live browser',
+  'conversar.i6Assumir': 'Take control',
+  'conversar.i6Conceder': 'Give back control',
 
   'personalizar.titulo': 'Customize the team',
   'personalizar.palavras': 'rename name role sector tool instructions methods bio story deactivate reactivate create agent coordinator review theme',
@@ -151,6 +157,8 @@ const ajuda: Traducao<typeof pt> = {
   'tarefas.i5Revisao': 'a critical review',
   'tarefas.i6': '{andamento} is on by default: the team picks up tasks from “To do” on its own, top to bottom, up to the limit of jobs at once. Turn it off in {link} if you’d rather they only work when you talk to them.',
   'tarefas.i6Andamento': 'Automatic progress',
+  'tarefas.i7': '{quadros}: create as many as you like and, under “Board”, change the name, columns and card fields (text, number, date, list, labels, person). On a board linked to another app, labels, people, subtasks, fields, links, attachments and comments stay in Ergon only. Attachments come from Documents, without copies.',
+  'tarefas.i7Quadros': 'Multiple boards',
 
   'decisoes.titulo': 'Waiting for you',
   'decisoes.palavras': 'decision approve waiting proposal question permission recommendation reconsider',
@@ -159,7 +167,7 @@ const ajuda: Traducao<typeof pt> = {
   'decisoes.p2': 'Declined something and changed your mind? Ask the coordinator (“that routine I declined yesterday”) or reconsider it from the panel itself.',
 
   'conexoes.titulo': 'Connections',
-  'conexoes.palavras': 'connect account ai chatgpt whatsapp microsoft google teams email boards',
+  'conexoes.palavras': 'connect account ai chatgpt whatsapp microsoft google teams email boards cloud',
   'conexoes.i1': '{contas}: {nous} — AI with no subscription, turned on with an Ergon World plan; you pay only for what you use. You can also connect the Nous subscription or the ChatGPT you already pay for and pick each agent’s model.',
   'conexoes.i1Contas': 'AI accounts',
   'conexoes.i1Nous': 'Ergon AI is the best choice',
@@ -167,6 +175,8 @@ const ajuda: Traducao<typeof pt> = {
   'conexoes.i2Apps': 'WhatsApp, Microsoft 365 and Google',
   'conexoes.i3': '{quadros}: link boards from other apps both ways: checking off or moving here shows up there. The agents also create and move tasks in them.',
   'conexoes.i3Quadros': 'Tasks and boards',
+  'conexoes.i4': '{nuvem}: with the workspace in the Ergon World cloud, you choose which connections the team uses there while your computer is off. They go encrypted to the workspace cloud only. Autonomy rules do not go: there, everything asks for approval again. WhatsApp and local network addresses stay on this computer.',
+  'conexoes.i4Nuvem': 'Connections in the cloud',
   'conexoes.p': 'All in {link}. The content of messages and documents is treated as data, never as instructions.',
 
   'cidade.titulo': 'The city',
@@ -177,7 +187,7 @@ const ajuda: Traducao<typeof pt> = {
   'cidade.i3': 'The bookshelf opens the delivered files (in Documents › Deliveries).',
 
   'seguranca.titulo': 'Security and privacy',
-  'seguranca.palavras': 'password phrase recovery lock inactivity authenticator passkey encrypted backup',
+  'seguranca.palavras': 'password phrase recovery lock inactivity authenticator passkey encrypted backup sync key',
   'seguranca.i1': 'Your data stays {cifrados} on this computer, with your password.',
   'seguranca.i1Cifrados': 'encrypted',
   'seguranca.i2': 'The {frase} (24 words) is the only way back in if you forget your password. Keep it somewhere off this computer.',
@@ -187,6 +197,8 @@ const ajuda: Traducao<typeof pt> = {
   'seguranca.i4': '{duas}: authenticator app or passkey, in the same place. The authenticator code is only asked for when you sign in; to unlock the screen, your password or passkey is enough.',
   'seguranca.i4Duas': 'Two-step verification',
   'seguranca.i5': 'Tools that run code stay blocked and ask for your password to unlock them.',
+  'seguranca.i6': '{sincronia}: automatic and encrypted, every minute. On a new computer, open Ergon on one that already syncs and the key arrives by itself; without it, use the recovery phrase. If the workspace cloud moves to another device, nothing goes to it until you confirm with your password. Tools that run code coming from another computer only turn on with your password.',
+  'seguranca.i6Sincronia': 'Sync between computers',
 
   'temas.titulo': 'Themes and characters',
   'temas.palavras': 'theme skin mod character name bio greece lord of the rings gandalf community',

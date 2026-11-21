@@ -57,12 +57,21 @@ export default function MundoView() {
   const raiz = useRef<HTMLDivElement>(null);
   const [anima] = useState(() => !calmo() && typeof IntersectionObserver === 'function');
 
-  // as seções aparecem ao entrar na tela (só com movimento; sem ele, tudo já está à vista)
+  // as seções aparecem ao entrar na tela (só com movimento; sem ele, tudo já está à vista). Seção que surge depois, pelos
+  // dados dela (o cartão "Subir o WS para o World" chega quando a rota da nuvem responde, sem esta tela se redesenhar),
+  // também é observada: antes ela ficava invisível (opacidade 0) até outra coisa redesenhar a página
   useEffect(() => {
     if (!anima || !raiz.current) return;
     const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); } }), { threshold: 0.12 });
-    raiz.current.querySelectorAll('.mundo-revela').forEach((el) => io.observe(el));
-    return () => io.disconnect();
+    const observar = (r: ParentNode) => r.querySelectorAll('.mundo-revela:not(.is-in)').forEach((el) => io.observe(el));
+    observar(raiz.current);
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => {
+      if (!(n instanceof HTMLElement)) return;
+      if (n.matches('.mundo-revela:not(.is-in)')) io.observe(n);
+      observar(n);
+    }))) : null;
+    mo?.observe(raiz.current, { childList: true, subtree: true });
+    return () => { io.disconnect(); mo?.disconnect(); };
   });
 
   const planos = (cat.data?.items ?? []).filter((i) => i.kind === 'plan');

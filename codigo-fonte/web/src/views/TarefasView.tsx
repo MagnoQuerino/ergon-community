@@ -6,9 +6,11 @@ import { pushRecent } from '../lib/recents.ts';
 import { SOURCE_LABEL, type BoardSummary, type BoardView, type Integration, type TaskCard } from '../lib/types.ts';
 import { TaskDetail } from '../components/TaskDetail.tsx';
 import { Board, ViewToggle } from '../components/Board.tsx';
+import { GerirQuadro, NovoQuadro } from '../components/GerirQuadro.tsx';
 import { fmtHora, tn, useT } from '../i18n/index.ts';
 import { comConta, nomeNaTela, temVariasContas } from '../lib/contas.ts';
 import { CenaCabecalho } from '../arte/Cena.tsx';
+import { Icon } from '../components/Icon.tsx';
 
 const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } };
@@ -43,6 +45,11 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
   // conta: de qual das contas do aplicativo vem a lista ('' = a principal), quando há mais de uma
   const [picking, setPicking] = useState<{ kind: string; conta: string; lists: Array<{ externalId: string; name: string }> | null; error?: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
+  // rc.41: criar quadro e organizar o atual (nome e colunas)
+  const [novo, setNovo] = useState(false);
+  const [gerir, setGerir] = useState(false);
+  // "minhas": só os cartões atribuídos a quem está vendo (a escolha fica guardada)
+  const [soMinhas, setSoMinhas] = useState(() => pref('ergon.tarefas.minhas', '') === '1');
   const current = mine.find((b) => b.id === boardId);
   const mirror = current?.origin === 'mirror';
   const deTarefas = (ints.data ?? []).filter((i) => i.tasks);
@@ -89,8 +96,9 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
         <CenaCabecalho tema="tarefas" />
       </header>
       <div className="toolbar">
-        <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v.startsWith('+')) { const [k, c] = v.slice(1).split('|'); void pick(k, c ?? ''); } else { setBoardId(v); setOpenTask(null); } }} aria-label={t('quadro.tarefas.lista')}>
-          <optgroup label="Ergon">{mine.filter((b) => b.origin === 'native').map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>
+        <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v === '#novo') { setNovo(true); return; } if (v.startsWith('+')) { const [k, c] = v.slice(1).split('|'); void pick(k, c ?? ''); } else { setBoardId(v); setOpenTask(null); } }} aria-label={t('quadro.tarefas.lista')}>
+          <optgroup label="Ergon">{mine.filter((b) => b.origin === 'native').map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            <option value="#novo">{t('quadro.gerir.novoQuadro')}</option></optgroup>
           {grupos.map((i) => (
             <optgroup key={i.kind} label={i.state === 'connected' ? i.name : t('quadro.tarefas.precisaReconectar', { nome: i.name })}>
               {mine.filter((b) => b.source === i.kind).map((b) => <option key={b.id} value={b.id}>{b.name.replace(/^(Planner|To Do) › /, '$1 › ')}</option>)}
@@ -100,7 +108,25 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
             </optgroup>
           ))}
         </select>
+        {current && (
+          <span className="topbar__statuswrap">
+            {/* quadro do Ergon: nome, colunas e campos; quadro ligado a um aplicativo: só os campos (que ficam no Ergon) */}
+            <button className={`btn btn--sm ${gerir ? 'is-on' : ''}`} data-keep-surface onClick={() => setGerir((v) => !v)} aria-expanded={gerir} title={mirror ? t('quadro.gerir.botaoDicaLigado') : t('quadro.gerir.botaoDica')}>
+              <Icon name="gear" size={14} /> {mirror ? t('quadro.gerir.botaoLigado') : t('quadro.gerir.botao')}
+            </button>
+            {gerir && view.data && (
+              <GerirQuadro key={current.id} quadro={current} entrada={current.id === mine.find((b) => b.origin === 'native')?.id} columns={view.data.columns} campos={view.data.fields ?? []}
+                outros={mine.filter((b) => b.origin === 'native' && b.id !== current.id)}
+                onMudou={() => { boards.reload(); view.reload(); }}
+                onApagado={(destino) => { setGerir(false); boards.reload(); setBoardId(destino); }}
+                onFechar={() => setGerir(false)} />
+            )}
+          </span>
+        )}
         <ViewToggle view={mode} onChange={(v) => { setMode(v); save('ergon.tarefas.view', v); }} />
+        <button className={`chip ${soMinhas ? 'chip--on' : ''}`} aria-pressed={soMinhas} title={t('quadro.tarefas.minhasDica')} onClick={() => { setSoMinhas((v) => { save('ergon.tarefas.minhas', v ? '' : '1'); return !v; }); }}>
+          <Icon name="users" size={13} /> {t('quadro.tarefas.minhas')}
+        </button>
         {mirror && current && (
           <span className={`badge ${current.sync_state === 'error' ? 'badge--err' : ''}`}>
             {current.sync_state === 'error' ? t('quadro.tarefas.falhaAoLer', { erro: current.last_error ?? '' }) : t('quadro.tarefas.ligadaA', { app: SOURCE_LABEL[current.source ?? ''] ?? t('quadro.tarefas.aplicativo'), hora: current.last_synced_at ? fmtHora(current.last_synced_at) : '—' })}
@@ -133,9 +159,11 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
         </section>
       )}
       {err && <p className="error" role="alert">{err}</p>}
+      {novo && <NovoQuadro onFechar={() => setNovo(false)} onCriado={(id) => { setNovo(false); boards.reload(); setBoardId(id); setOpenTask(null); }} />}
+      {view.data && soMinhas && !view.data.tasks.some((x) => x.card?.mine) && <p className="hint" role="status">{t('quadro.tarefas.nenhumaMinha')}</p>}
       {view.data && (
-        <Board columns={view.data.columns} tasks={view.data.tasks} view={mode} editable openId={openTask}
-          onOpen={setOpenTask} onMove={move} onToggle={toggle} />
+        <Board columns={view.data.columns} tasks={soMinhas ? view.data.tasks.filter((x) => x.card?.mine) : view.data.tasks} view={mode} editable openId={openTask}
+          fields={view.data.fields} members={view.data.members} onOpen={setOpenTask} onMove={move} onToggle={toggle} />
       )}
       {openTask && view.data && (
         <TaskDetail taskId={openTask} columns={view.data.columns} mode={mirror ? 'mirror' : 'user'} source={current?.source} onClose={() => setOpenTask(null)} />

@@ -358,7 +358,9 @@ button.chip--stat { font: inherit; font-size: 13px; }
 .music__credits { margin: 4px 0 0; padding-left: 16px; max-height: 180px; overflow: auto; }
 .music-credits { margin-top: 8px; }
 .music-credits summary { cursor: pointer; }
-.ws-npc { align-items: flex-start; gap: 12px; margin-top: 14px; }
+.ws-npc { display: flex; flex-direction: column; align-items: flex-end; margin-top: 10px; }
+.ws-npc__op { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.ws-npc__op input { margin: 0; width: 13px; height: 13px; }
 .picker { position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
 /* Barra de cima da Cidade (components/CityBar.tsx): uma linha só, pílulas iguais — 34 px de altura, raio inteiro, ícone
    de 16 px, texto de 13 px na mesma linha de base. Esquerda: o que se escolhe; meio: o que se acompanha; direita: as
@@ -1298,6 +1300,10 @@ body:has(.cdock) .tip { right: 100px; }
   /* rc.33: com o plano e as Dracmas na barra, a conta saía da tela no celular: a pílula do World fica só com o saldo e o
      Modo Foco segue com o nome */
   .tb-world__plano, .tb-world__sep { display: none; }
+  /* rc.41: com o saldo de quatro dígitos ("Ðp 1.000") a conta ainda passava 7 px da tela em 390: as pílulas (o saldo e
+     o Modo Foco) ficam mais justas, sem perder o nome nem a área de toque */
+  .tb-world { padding: 0 8px 0 5px; gap: 6px; }
+  .tb-pill { padding: 0 9px; gap: 5px; }
   /* o workspace vai para a gaveta já aqui ("Workspace: nome"; o balão continua abrindo), como abaixo de 360 px */
   .topbar__wswrap { display: contents; }
   .topbar__ws { display: none; }
@@ -1970,6 +1976,16 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .conn-contas__lista { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 8px; }
 .conn-conta { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 4px; }
 .conn-conta--off { border-style: dashed; }
+/* as conexões na nuvem do workspace (views/world/ConexoesNuvem.tsx): uma linha por conta, com o interruptor ou o motivo */
+.conn-nuvem__confirma { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin: 6px 0 10px; }
+.conn-nuvem__confirma p { margin: 0 0 6px; }
+.conn-nuvem__lista { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 6px; }
+.conn-nuvem__linha { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.conn-nuvem__linha--fora { border-style: dashed; grid-template-columns: minmax(0, 1fr) auto; }
+.conn-nuvem__nome { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.conn-nuvem__motivo { grid-column: 1 / -1; }
+.conn-nuvem__resumo { margin: 4px 0 0; }
+@media (max-width: 520px) { .conn-nuvem__linha { grid-template-columns: minmax(0, 1fr) auto; } .conn-nuvem__linha .switch { grid-column: 1 / -1; justify-self: start; } }
 .conn-adicionar { margin-top: 8px; }
 
 /* Conexões: ajuste do que os agentes podem fazer */
@@ -2231,6 +2247,63 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .msg__audio details.msg__transcricao summary { cursor: pointer; color: var(--muted); }
 .msg__audio details.msg__transcricao p { margin: 4px 0 0; white-space: pre-wrap; max-width: 80ch; }
 .msg__transcricao--falhou { border-left-color: var(--err); }
+/* ——— Conversa por voz (rc.41): um canal ao lado da barra de digitação (components/ConversaPorVoz.tsx) ———
+   Nada de painel nem frase: o próprio botão diz o estado. Anel em água seguindo o nível da voz (--nivel, 0 a 1, vem do
+   microfone) com você na vez; três pontos com o agente pensando; ondas douradas saindo do botão com ele falando. O ponto
+   vermelho no canto = microfone aberto de verdade. Sem movimento (prefers-reduced-motion): o anel não cresce nem pulsa,
+   só muda de opacidade com a voz. */
+.chat__voz { color: var(--teal); }
+.vozc { --nivel: 0; --tom: var(--teal); position: relative; display: inline-flex; align-items: center; gap: 2px; align-self: center; flex: none; margin-inline: 3px 5px; }
+.vozc--preparando, .vozc--falando { --tom: var(--gold); }
+.vozc--erro { --tom: var(--err); }
+.vozc__botao { position: relative; isolation: isolate; color: var(--tom); background: color-mix(in srgb, var(--tom) calc(10% + var(--nivel) * 22%), transparent); border-radius: 50%; }
+.vozc__botao:hover { background: color-mix(in srgb, var(--tom) 22%, transparent); }
+.vozc__botao > svg { position: relative; z-index: 1; }
+.vozc-anel__fig, .vozc-onda__fig { position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--tom); pointer-events: none; opacity: calc(.45 + var(--nivel) * .55);
+  transform: scale(calc(1 + var(--nivel) * .22)); transition: transform .09s linear, opacity .09s linear, border-color .3s ease; }
+.vozc-onda__fig { inset: -3px; border-width: 1.5px; opacity: calc(var(--nivel) * .6); transform: scale(calc(1 + var(--nivel) * .5)); }
+/* captando: o anel reage mais forte e ganha brilho */
+.vozc--captando .vozc-anel__fig { border-width: 2.5px; transform: scale(calc(1.03 + var(--nivel) * .24)); box-shadow: 0 0 calc(4px + var(--nivel) * 12px) color-mix(in srgb, var(--tom) 55%, transparent); }
+.vozc--captando .vozc-onda__fig { opacity: calc(.2 + var(--nivel) * .7); transform: scale(calc(1.08 + var(--nivel) * .4)); }
+/* esperando (enviando, transcrevendo, pensando: .vozc--espera): anel quieto e três pontos embaixo do ícone */
+.vozc--espera .vozc-anel__fig { border-style: dashed; opacity: .55; transform: none; }
+.vozc__pontos { position: absolute; left: 50%; bottom: 3px; z-index: 1; display: none; gap: 2px; transform: translateX(-50%); }
+.vozc__pontos i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+.vozc--espera .vozc__pontos { display: inline-flex; }
+.vozc--espera .vozc__botao > svg { transform: translateY(-2px); }
+.vozc--pausado .vozc-anel__fig, .vozc--abrindo .vozc-anel__fig { border-style: dotted; opacity: .5; transform: none; }
+.vozc__rec { position: absolute; top: 1px; right: 1px; z-index: 2; width: 8px; height: 8px; border-radius: 50%; background: var(--perigo-cheio); box-shadow: 0 0 0 2px var(--panel); display: none; }
+.vozc[data-microfone="aberto"] .vozc__rec { display: block; }
+.vozc__parar { color: var(--gold-ink); }
+/* a linha curta (aviso ou erro), por cima da barra, sem empurrar nada */
+.vozc__linha { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 5; display: inline-flex; align-items: center; gap: 6px; width: max-content; max-width: min(340px, calc(100vw - 40px));
+  padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.35; color: var(--ink); animation: fadein .18s ease; }
+.vozc__linha > svg { flex: none; color: var(--warn); }
+.vozc__linha--erro { border-color: var(--err); }
+.vozc__linha--erro > svg { color: var(--err); }
+.vozc__linha .linkish { white-space: nowrap; font-weight: 600; }
+@keyframes vozc-onda { from { transform: scale(1); opacity: .8; } to { transform: scale(1.55); opacity: 0; } }
+@keyframes vozc-respira { 50% { transform: scale(1.12); opacity: .25; } }
+@keyframes vozc-ponto { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) {
+  /* ouvindo em silêncio: o anel de fora respira devagar (está vivo, esperando você) */
+  .vozc--ouvindo .vozc-onda__fig { animation: vozc-respira 2.4s ease-in-out infinite; }
+  /* falando: ondas saindo do botão */
+  .vozc--falando .vozc-anel__fig, .vozc--falando .vozc-onda__fig { animation: vozc-onda 1.5s ease-out infinite; }
+  .vozc--falando .vozc-onda__fig { animation-delay: .75s; }
+  .vozc--preparando .vozc-anel__fig { animation: vozc-respira 1.2s ease-in-out infinite; }
+  .vozc__pontos i { animation: vozc-ponto 1.2s ease-in-out infinite; }
+  .vozc__pontos i:nth-child(2) { animation-delay: .2s; }
+  .vozc__pontos i:nth-child(3) { animation-delay: .4s; }
+  .vozc[data-microfone="aberto"] .vozc__rec { animation: pulse 1.4s ease-in-out infinite; }
+}
+/* sem movimento: o anel não cresce nem pulsa (a opacidade segue a voz); falando, as duas ondas ficam paradas e visíveis */
+@media (prefers-reduced-motion: reduce) {
+  .vozc-anel__fig, .vozc-onda__fig, .vozc--captando .vozc-anel__fig, .vozc--captando .vozc-onda__fig { transform: none; transition: opacity .09s linear; }
+  .vozc--falando .vozc-anel__fig { opacity: .9; }
+  .vozc--falando .vozc-onda__fig { opacity: .45; transform: scale(1.3); }
+  .vozc__linha { animation: none; }
+}
 .voz-escolhas fieldset { border: 0; padding: 0; margin: 6px 0; }
 .voz-escolhas .check { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; max-width: 80ch; }
 
@@ -3137,3 +3210,176 @@ small { font-size: max(12px, .83em); }
 .aviso-dl__pasta { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .aviso-dl { flex-wrap: wrap; } .aviso-dl__acoes { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .aviso-dl { animation: none; } }
+
+/* rc.41: organizar o quadro da pessoa (nome, colunas livres, apagar) */
+.gerir-quadro { width: min(380px, calc(100vw - 32px)); left: 0; right: auto; display: flex; flex-direction: column; gap: 10px; }
+.gerir-quadro h4 { margin: 6px 0 0; font-size: 13px; }
+.gerir-quadro__cols { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.gerir-quadro__cols .row { gap: 4px; align-items: center; }
+.gerir-quadro__confirma { padding: 8px 10px; border: 1px solid var(--perigo-borda); border-radius: 10px; background: var(--perigo-suave-3); }
+.gerir-quadro__perigo { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+
+/* ---------- rc.41: o que vai dentro do cartão (campos próprios, etiquetas, subtarefas, links, pessoas, comentários) ----------
+   A paleta das etiquetas é a das cores de função do tema (suave/texto/borda): nenhuma cor nova, e acompanha o tema. */
+.tag { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; font-size: 12px; line-height: 1.5; padding: 0 7px; border-radius: 999px; border: 1px solid var(--neutro-borda); background: var(--neutro-suave); color: var(--neutro-texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.tag--info { background: var(--info-suave); color: var(--info-texto); border-color: var(--info-borda); }
+.tag--agua { background: var(--agua-suave-2); color: var(--agua-texto); border-color: var(--agua-borda); }
+.tag--sucesso { background: var(--sucesso-suave); color: var(--sucesso-texto); border-color: var(--sucesso-borda); }
+.tag--atencao { background: var(--atencao-suave); color: var(--atencao-texto); border-color: var(--atencao-borda); }
+.tag--urgente { background: var(--urgente-suave); color: var(--urgente-texto); border-color: var(--urgente-borda); }
+.tag--perigo { background: var(--perigo-suave); color: var(--perigo-texto); border-color: var(--perigo-borda); }
+.tag--marca { background: var(--marca-suave); color: var(--marca-texto); border-color: var(--marca-borda); }
+.tag--dourado { background: var(--dourado-suave); color: var(--dourado-texto); border-color: var(--dourado-borda); }
+button.tag { cursor: pointer; font: inherit; font-size: 12px; font-weight: 500; }
+/* etiqueta não escolhida: só o contorno; escolhida: cheia, com o contorno na cor do texto (3:1) */
+button.tag.tag--off { background: transparent; border-style: dashed; }
+button.tag.is-on { border-color: currentColor; }
+/* no card do quadro */
+.task__labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; min-width: 0; }
+.tbl__title .task__labels { margin-top: 3px; }
+.task__count, .task__field { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task__count--ok { color: var(--ok); }
+.task__field { color: var(--ink); max-width: 100%; }
+.task__field-n { color: var(--muted); }
+.task__people { display: inline-flex; align-items: center; margin-left: auto; padding-left: 4px; }
+.task__people .avatar { margin-left: -4px; box-shadow: 0 0 0 1.5px var(--panel); }
+.task__people .avatar:first-child { margin-left: 0; }
+.task__people-mais { font-size: 12px; color: var(--muted); margin-left: 3px; }
+/* no detalhe: o essencial em linhas, o resto em seções que recolhem */
+.cx-wrap { margin-top: 10px; }
+.cx__linha { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; align-items: start; margin: 8px 0; }
+.cx__rotulo { font-size: 12px; color: var(--muted); padding-top: 3px; overflow: hidden; text-overflow: ellipsis; }
+.cx__tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-width: 0; }
+.cx__membros { list-style: none; margin: 0 0 8px 92px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow: auto; }
+details.cx > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); padding: 4px 0; display: flex; align-items: center; gap: 8px; list-style: none; }
+details.cx > summary::-webkit-details-marker { display: none; }
+details.cx > summary::before { content: ""; width: 6px; height: 6px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s; flex: none; margin: 0 3px; }
+details.cx[open] > summary::before { transform: rotate(45deg); }
+details.cx[open] > summary { color: var(--ink); }
+.cx__n { font-size: 12px; font-weight: 600; padding: 0 7px; border-radius: 999px; background: var(--neutro-suave); border: 1px solid var(--neutro-borda); color: var(--neutro-texto); }
+.cx__body { padding: 4px 0 2px; }
+.cx__body .input, .cx__seletor .input, .campos .input { min-width: 0; }
+.cx__barra { height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; margin: 2px 0 6px; }
+.cx__barra span { display: block; height: 100%; background: var(--sucesso-ponto); transition: width .2s; }
+.cx__subs, .cx__links, .cx__coments, .cx__docs { list-style: none; margin: 0; padding: 0; }
+.cx__subs li, .cx__links li { display: flex; align-items: center; gap: 8px; min-height: 30px; min-width: 0; }
+.cx__subs input[type="checkbox"] { flex: none; }
+.cx__subnome { flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 3px 0; cursor: text; color: inherit; font: inherit; overflow-wrap: anywhere; }
+.cx__subs li.is-done .cx__subnome { text-decoration: line-through; color: var(--muted); }
+.cx__x { padding: 4px; color: var(--muted); flex: none; }
+.cx__subs .cx__x, .cx__links .cx__x { margin-left: auto; }
+.cx__links li > a, .cx__arq { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--link); }
+.cx__links li > svg { flex: none; color: var(--muted); }
+.cx__novolink { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 6px; margin: 6px 0; }
+.cx__campos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+.cx__campo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cx__campo label { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx__campo .input, .cx__campo select { width: 100%; min-width: 0; }
+.cx__seletor { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); }
+.cx__caminho { font-size: 12px; margin: 2px 0 4px; }
+.cx__docs { max-height: 220px; overflow: auto; }
+.cx__doc { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; padding: 6px 4px; border-radius: 6px; cursor: pointer; color: inherit; font: inherit; text-align: left; min-width: 0; }
+.cx__doc:hover:not(:disabled) { background: var(--realce); }
+.cx__doc:disabled { cursor: default; color: var(--muted); }
+.cx__docnome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx__coment { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; }
+.cx__avatar-ia { background: var(--dourado-cheio); color: var(--dourado-sobre); }
+.cx__coment-corpo { flex: 1; min-width: 0; }
+.cx__coment-quem { margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.cx__coment-quem .cx__x { margin-left: auto; }
+.cx__coment-txt { margin: 2px 0 0; }
+.cx__comentar textarea { width: 100%; resize: vertical; min-height: 54px; }
+.cx__comentar .row { margin: 4px 0 0; }
+.cx__conta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cx__conta--passou { color: var(--err); font-weight: 700; }
+/* em "Organizar o quadro": os campos */
+.campos { border-top: 1px solid var(--line); padding-top: 6px; }
+.campos .hint { margin: 2px 0 6px; }
+.campos__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.campos__item { border: 1px solid var(--line-suave); border-radius: 10px; padding: 6px 8px; background: var(--panel-2); }
+.campos__item .row { gap: 4px; margin: 2px 0; }
+.campos__linha2 { gap: 8px; }
+.campos__opcoes { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.campos__opcoes ul { list-style: none; margin: 0; padding: 0; }
+.campos__cor { width: 22px; height: 22px; padding: 0; flex: none; border-radius: 50%; border: 2px solid currentColor; }
+.campos__cor.is-on { border-color: currentColor; box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px currentColor; }
+.campos__paleta { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 2px 8px; }
+.campos__novo select { flex: none; max-width: 42%; }
+@media (max-width: 480px) {
+  .cx__linha { grid-template-columns: 1fr; gap: 3px; }
+  .cx__membros { margin-left: 0; }
+  .cx__campos { grid-template-columns: 1fr; }
+  .cx__novolink { grid-template-columns: 1fr; }
+}
+/* Navegador ao vivo (rc.41, components/NavegadorAoVivo.tsx): a tela do navegador do agente na conversa e no card, com
+   "Assumir o controle". Com a pessoa no controle a moldura inteira muda (borda grossa de atenção): o visual guia, sem faixa de texto. */
+.navv { align-self: stretch; max-width: 460px; width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.block + .navv, .tdet .navv { margin: 10px 0; }
+.navv--voce { border: 3px solid var(--atencao-cheio); padding: 6px; background: var(--atencao-suave); }
+.navv__barra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.navv__sit { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.navv__sit--voce { background: var(--atencao-cheio); color: var(--atencao-sobre); border-color: var(--atencao-cheio); }
+.navv__sit--outra { background: var(--warn-bg); color: var(--warn); border-color: var(--atencao-borda); }
+.navv__ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--sucesso-cheio); flex: none; animation: navv-pulso 1.6s ease-in-out infinite; }
+.navv__sit--voce .navv__ponto { background: var(--atencao-sobre); }
+.navv__sit--outra .navv__ponto { background: var(--atencao-ponto); animation: none; }
+@keyframes navv-pulso { 50% { opacity: .35; } }
+.navv__end { flex: 1 1 70px; min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line-suave, var(--line)); border-radius: 8px; padding: 4px 8px; }
+.navv__end svg { flex: none; }
+.navv__url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; direction: ltr; }
+.navv__acoes { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.navv__acoes .icon-btn { min-width: 32px; min-height: 32px; justify-content: center; align-items: center; }
+.navv__tela { position: relative; width: 100%; background: var(--inversa-2); border-radius: 8px; overflow: hidden; display: grid; place-items: center; }
+.navv__canvas { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; touch-action: manipulation; }
+.navv__tela--captura .navv__canvas { cursor: default; touch-action: none; }
+.navv__tela--captura { outline: 2px solid var(--atencao-cheio); outline-offset: 0; }
+.navv__vazio { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; text-align: center; color: var(--texto-inverso-2); font-size: 13px; }
+/* o campo escondido que recebe o teclado (fica no canto da tela, sem rolar a página nem aparecer) */
+.navv__campo { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; font-size: 16px; }
+.navv__prazo { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+/* no controle: o botão de ampliar (tela pequena) e a tela ampliada ainda sem o teclado chamam com uma borda que pulsa */
+.navv__chamar { box-shadow: 0 0 0 2px var(--atencao-cheio); }
+.navv__tela--captura.is-digitando { outline-width: 3px; }
+@keyframes navv-chama { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--atencao-cheio) 35%, transparent); } }
+@media (prefers-reduced-motion: no-preference) {
+  .navv__chamar { animation: navv-chama 1.4s ease-in-out infinite; }
+  .navv__tela--captura.is-chamando { animation: navv-chama 1.4s ease-in-out infinite; }
+}
+.navv__nota { margin: 0; font-size: 12.5px; color: var(--muted); }
+.navv__mini-aberta { border: 1px dashed var(--line); background: var(--panel-2); color: var(--muted); border-radius: 8px; padding: 14px 10px; font-size: 12.5px; cursor: pointer; text-align: center; }
+.navv-back { z-index: 46; padding: 12px; }
+.navv--grande { align-self: center; max-width: none; width: min(1340px, 100%); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); padding: 12px; gap: 10px; border-radius: 16px; overflow: auto; }
+.navv--grande.navv--voce { padding: 10px; }
+/* a tela ampliada nunca passa da altura da janela: a largura encolhe junto (a proporção é a do navegador do agente) */
+.navv--grande .navv__tela { max-height: calc(100dvh - 190px); margin: 0 auto; width: auto; max-width: 100%; }
+.navv--grande .navv__sit { font-size: 13.5px; padding: 5px 12px; }
+.navv--grande .navv__nota { font-size: 13.5px; }
+@media (max-width: 560px) {
+  .navv-back { padding: 0; place-items: stretch; }
+  .navv--grande { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
+  .navv--grande .navv__tela { max-height: none; width: 100%; }
+  .navv__acoes { flex: 1 1 100%; margin-left: 0; justify-content: flex-end; }
+  .navv__acoes .btn { flex: 1; justify-content: center; min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) { .navv__ponto { animation: none; } }
+/* Sincronizar aparelhos (rc.41): o estado da sincronia automática numa linha, com a saída de emergência ao lado */
+.sinc { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin: 8px 0; border: 1px solid var(--neutro-borda); border-left-width: 4px; border-radius: 10px; background: var(--neutro-suave); }
+.sinc--ok { border-color: var(--sucesso-borda); border-left-color: var(--ok); background: var(--ok-bg); }
+.sinc--info { border-color: var(--info-borda); border-left-color: var(--info-cheio); background: var(--info-suave); }
+.sinc--warn { border-color: var(--atencao-borda); border-left-color: var(--warn); background: var(--warn-bg); }
+.sinc__icone { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; }
+.sinc--ok .sinc__icone { color: var(--ok); } .sinc--info .sinc__icone { color: var(--info-texto); } .sinc--warn .sinc__icone { color: var(--warn); }
+@media (prefers-reduced-motion: no-preference) { .sinc__icone--giro { animation: spin 1.4s linear infinite; } }
+.sinc__texto { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sinc__texto > b { overflow-wrap: anywhere; }
+.sinc__agora { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.sinc__detalhes { margin-top: 8px; }
+.sinc__detalhes > summary { cursor: pointer; }
+.sinc__detalhes code { overflow-wrap: anywhere; }
+@media (max-width: 520px) { .sinc { flex-wrap: wrap; } .sinc__texto { flex-basis: calc(100% - 32px); } .sinc__agora { margin-left: 32px; } }
+/* Subir o WS para o World: o estado de verdade da nuvem */
+.ws-estado { display: flex; align-items: flex-start; gap: 8px; }
+.ws-estado__ponto { flex: none; width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--info-cheio); }
+.ws-estado--ok .ws-estado__ponto { background: var(--ok); }
+.ws-estado--warn .ws-estado__ponto { background: var(--warn); }
+@media (prefers-reduced-motion: no-preference) { .ws-estado__ponto--vivo { animation: pulse 1.6s ease-in-out infinite; } }

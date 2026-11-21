@@ -10,6 +10,7 @@ import { ConfirmPopup } from './ConfirmPopup.tsx';
 import { HandoffCard, PermissionCard, QuestionCard, RequestCard, SecretCard, SystemNote } from './ChatCards.tsx';
 import { ComandosBar, DicaDeAtalhos, useFraseDoComando, type ResultadoComando } from './Comandos.tsx';
 import { Icon } from './Icon.tsx';
+import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
 import { OrientarCampo } from './AjustesEquipe.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
 import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
@@ -19,6 +20,7 @@ import { Selo } from './Selo.tsx';
 import { AgentProfile, type ProfileFields } from './AgentProfile.tsx';
 import { Markdown } from './Markdown.tsx';
 import { RECURSOS, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
+import { ConversaPorVoz } from './ConversaPorVoz.tsx';
 import { GravadorDeVoz } from './GravadorDeVoz.tsx';
 import { letterStyle } from '../lib/contraste.ts';
 import { CenaVazio } from '../arte/Cena.tsx';
@@ -452,6 +454,8 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     if (motivo === 'enviar') setSendWhenReady(true);
     else setHint(t('conversas.gravador.limite'));
   };
+  // conversa por voz (rc.41): o canal de voz ao lado da barra (components/ConversaPorVoz.tsx); manda e recebe pela conversa de sempre
+  const [vozAberta, setVozAberta] = useState(false);
   const [conselho, setConselho] = useState(false);
   const pedirConselho = async () => {
     setConselho(false);
@@ -712,6 +716,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             </span>
           </div>
         )}
+        {convId && <NavegadorAoVivo conversa={convId} agente={agent.name} />}
         {busy && (live?.text
           ? (
             <div className="msg msg--agent msg--live">
@@ -760,7 +765,14 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         <div className="chat__row">
           <button type="button" className="icon-btn chat__clip" onClick={() => picker.current?.click()} aria-label={t('conversas.campo.anexar')} title={t('conversas.campo.anexarDica')}><Icon name="clip" /></button>
           <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ''; }} />
-          <GravadorDeVoz onGravado={(f, motivo) => void gravado(f, motivo)} onAtivo={setGravando} />
+          {/* com a voz ligada o microfone é dela: o gravador de áudio some até desligar */}
+          {!vozAberta && <GravadorDeVoz onGravado={(f, motivo) => void gravado(f, motivo)} onAtivo={setGravando} />}
+          {/* a voz é um canal ao lado da barra: ligada, o próprio botão mostra o estado e a barra segue livre */}
+          {vozAberta
+            ? <ConversaPorVoz agente={agent} mensagens={list} podeFalar={!!rec.data?.voz.falar} preparaVoz={!!rec.data?.voz.preparar?.falar}
+              garantirConversa={ensureConv} recarregar={() => msgs.reload()} onFechar={() => setVozAberta(false)} />
+            : !gravando && <button type="button" className="icon-btn chat__mic chat__voz" aria-pressed="false" onClick={() => { if (semIa) { setAvisoIa(true); ai.reload(); } else setVozAberta(true); }}
+              aria-label={t('conversas.voz.abrir')} title={t('conversas.voz.abrirDica', { nome: agent.name })}><Icon name="voz" /></button>}
           <textarea hidden={gravando} ref={input} data-autofocus data-esc-own={working ? '' : undefined} value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} rows={1}
             placeholder={busy ? t('conversas.campo.proxima', { nome: agent.name }) : t('conversas.campo.falarCom', { nome: agent.name })}
             onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); void addFiles(e.clipboardData.files); } }}
