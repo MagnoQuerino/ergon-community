@@ -14,6 +14,9 @@ import { AiAccounts } from '../components/AiAccounts.tsx';
 // o Ergon AI em destaque (módulo do Ergon World, se estiver nesta instalação)
 const eaiMod = Object.values(import.meta.glob<{ default: ComponentType<{ onRecomendado?: (sim: boolean) => void }> }>('./world/ErgonAiConexoes.tsx'))[0];
 const ErgonAi = eaiMod ? lazy(eaiMod) : null;
+// as conexões na nuvem do workspace (módulo do Ergon World): o que vai também para a nuvem, conta por conta
+const cnMod = Object.values(import.meta.glob<{ default: ComponentType }>('./world/ConexoesNuvem.tsx'))[0];
+const ConexoesNuvem = cnMod ? lazy(cnMod) : null;
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -82,7 +85,11 @@ export function ConexoesView() {
     }
     // "#conexoes?regras" (de "Aguardando você", do endereço antigo de Atividade): vai direto às Regras
     let t = 0;
-    const irRegras = () => { if (/[?&]regras\b/.test(location.hash)) t = window.setTimeout(() => document.getElementById('conn-regras')?.scrollIntoView({ block: 'start' })); };
+    // "#conexoes?nuvem" (do cartão da nuvem do World): vai direto às conexões na nuvem, quando elas aparecem
+    const irRegras = () => {
+      if (/[?&]regras\b/.test(location.hash)) t = window.setTimeout(() => document.getElementById('conn-regras')?.scrollIntoView({ block: 'start' }));
+      if (/[?&]nuvem\b/.test(location.hash)) t = window.setTimeout(() => document.getElementById('conn-nuvem')?.scrollIntoView({ block: 'start' }), 400);
+    };
     irRegras();
     window.addEventListener('hashchange', irRegras);
     return () => { window.clearTimeout(t); window.removeEventListener('hashchange', irRegras); };
@@ -174,6 +181,8 @@ export function ConexoesView() {
           {risks && <WhatsAppRisks onClose={() => setRisks(false)} />}
         </section>
       )}
+
+      {ConexoesNuvem && <Suspense fallback={null}><ConexoesNuvem /></Suspense>}
 
       <section className="conn-group" id="conn-canais">
         <h3>{t('conexoes.canal.grupoTitulo')}</h3>

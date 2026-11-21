@@ -40,6 +40,7 @@ import type { LocalSync } from './sync-local.ts';
 import { getSetting, setSetting } from '../services/sectors.ts';
 import type { PosseHorario } from '../services/routines.ts';
 import type { CanaisNuvemHost } from '../world-hook.ts';
+import type { ConexoesNuvem } from './sync-conexoes.ts';
 
 export const USUARIO_NUVEM = 'nuvem';
 const SWS = /^sws_[a-f0-9]{32}$/;
@@ -87,6 +88,8 @@ export interface NuvemDeps {
   aoPronto?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
   /** os canais (Discord, Telegram, Teams): com o workspace pronto, este contêiner atende as contas ligadas no computador */
   canais?: CanaisNuvemHost;
+  /** as conexões do computador (sync-conexoes.ts): a posse da renovação e a devolução do acesso renovado */
+  conexoes?: Pick<ConexoesNuvem, 'passoNuvem'> | null;
   log: Log;
   /** o próximo horário de rotina do workspace (Routines.proximoHorario): o World acorda a nuvem nele */
   proximoHorario?: (workspaceId: string) => string | null;
@@ -188,6 +191,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
     if (recebido.preview?.skipped?.length) d.log({ ficouDeFora: recebido.preview.skipped.slice(0, 10) }, 'nuvem: parte da equipe não coube aqui');
     // quem troca a chave é um computador de quem administra: até lá a nuvem segue atendendo (o que fez aqui vai depois)
     await d.sync.push(userId, ws, { contentOnly: true }).catch((e) => { if (!['version_conflict', 'key_version', 'rotation_required'].includes(String((e as { code?: string }).code))) throw e; });
+    await d.conexoes?.passoNuvem(userId, ws).catch((e) => d.log({ err: String((e as Error).message).slice(0, 120) }, 'nuvem: conexões'));
     // 7. o Ergon AI como modelo da equipe (o motor pode estar acordando: tenta de novo no próximo passo)
     // Ligado numa partida anterior e com a credencial longe de vencer (ela fica no disco do motor): nada a refazer ao
     // acordar, e os canais atendem já (o pedido espera o motor terminar de subir). Perto de vencer: liga de novo.
@@ -272,7 +276,7 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
       await rodando?.catch(() => undefined);
       // dormir: o que foi feito aqui vai para o World antes de sair (o computador recebe ao abrir), e o próximo horário
       // de rotina (o orquestrador acorda a nuvem nele)
-      if (userId && ws && d.sync.status(ws).enabled) await d.sync.push(userId, ws, { contentOnly: true }).catch(() => undefined);
+      if (userId && ws && d.sync.status(ws).enabled) { await d.sync.push(userId, ws, { contentOnly: true }).catch(() => undefined); await d.conexoes?.passoNuvem(userId, ws).catch(() => undefined); }
       if (estado === 'pronto') { contado = ''; await contar('pronto'); }
     },
   };
@@ -282,6 +286,8 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
 // No computador: sincronia automática de todo workspace ligado ao World; posse e entrega da chave onde há a nuvem
 
 export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; sync: LocalSync; canais?: CanaisNuvemHost; log: Log;
+  /** as conexões que a pessoa deixou ir à nuvem (sync-conexoes.ts) */
+  conexoes?: Pick<ConexoesNuvem, 'passo'> | null;
   /** o próximo horário de rotina do workspace (contado ao World a cada aviso de aberto e ao fechar) */
   proximoHorario?: (workspaceId: string) => string | null;
   ajustes?: { cicloMs?: number; estadoMs?: number; /** de quanto em quanto tempo confere a nuvem que está em preparo ou esperando a chave */ entregaMs?: number; /** por quanto tempo seguido confere nesse ritmo */ entregaMaxMs?: number } }
@@ -464,6 +470,9 @@ export function iniciarAutoSync(d: AutoSyncDeps): AutoSync {
       if (open && c === 'rotation_required') m.giroAt = 0;
       return;
     }
+    // 6. as conexões vão logo depois (a versão recebida acabou de ser conferida); ao fechar, o acesso girado vai junto.
+    // O passo cuida dos próprios erros (ficam no estado das conexões, que a tela de Conexões mostra)
+    await d.conexoes?.passo(a.user_id, a.workspace_id, open).catch((e) => { d.log({ ws: a.workspace_id, detalhe: String((e as Error)?.message ?? e).slice(0, 200) }, 'conexões: o passo da sincronia falhou'); });
     if (limpo) { m.ultimaOk = Date.now(); m.pendencia = null; }
   };
   const uma = async (open: boolean) => {

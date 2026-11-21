@@ -4,6 +4,7 @@ import { useResource } from '../../lib/live.ts';
 import { fmtData, fmtMoeda } from '../../i18n/index.ts';
 import { useTw } from './textos.ts';
 import { linhaDaNuvem } from './sinc-estado.ts';
+import { ResumoConexoesNuvem } from './ConexoesNuvem.tsx';
 
 interface Nuvem {
   offered: boolean; comboPercent?: number; active: boolean; forSale?: boolean; planActive?: boolean; owner?: boolean; source?: 'stripe' | 'cortesia' | 'teste' | null;
@@ -67,6 +68,7 @@ export default function NuvemWs({ semTitulo = false }: { semTitulo?: boolean }) 
             </p>
           )}
           <p className="muted small">{t('ws.disco', { usado: gb(d.diskUsedBytes), total: gb(d.diskQuotaBytes) })}</p>
+          {d.owner && <ResumoConexoesNuvem />}
         </>
       ) : (
         <>

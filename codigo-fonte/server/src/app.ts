@@ -3305,7 +3305,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     defaultModel: (ws) => ({ provider: aiOf(ws).cachedDefaultProvider(), model: aiOf(ws).cachedDefault() }),
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
-  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks,
+  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks, integrations,
     createWorkspace: (userId, name) => createOwnWorkspace(db, personKeys(), userId, name, cfg.slotsPerFloor),
     // os canais com a nuvem do Ergon World: o contêiner responde pelas contas ligadas enquanto o computador está fechado
     canaisNuvem: { reserva: (ws, x) => teamsApp.reserva(ws, x), atender: (x) => teamsApp.atender(x), ligavel: () => !!teamsApp.base(), instalacao: () => teamsApp.instalacaoNoRele(), sincronizadas: (ws, ids) => teamsApp.sincronizadas(ws, ids), ocupado: () => teamsApp.ocupado() },

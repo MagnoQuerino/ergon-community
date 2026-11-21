@@ -209,6 +209,13 @@ export class SsoAuth {
   /** origem: a etapa que a pessoa pediu ao clicar (o encadeamento passa adiante a do primeiro login) */
   private pending = new Map<string, { kind: SsoKind; workspaceId: string; userId: string; verifier: string; at: number; etapa: Etapa; origem: Etapa; scopes: string; conta: string }>();
   private readonly refreshing = new Map<string, Promise<string>>();
+  /**
+   * A posse da renovação (a nuvem do Ergon World, world/sync-conexoes.ts): com o computador da pessoa aberto, quem renova a
+   * conta que veio dele é o computador (duas renovações do mesmo refresh token, uma derruba a outra onde ele gira). Devolve
+   * o motivo para não renovar aqui agora, ou null. `aoRenovar`: o acesso renovado volta ao computador pelo mesmo canal.
+   */
+  podeRenovar: (workspaceId: string, kind: SsoKind, conta: string) => string | null = () => null;
+  aoRenovar: (workspaceId: string, kind: SsoKind, conta: string) => void = () => undefined;
   /** login com outra conta neste workspace: quem usava a antiga em outros workspaces fica com ela */
   private readonly aoTrocarConta: (workspaceId: string, kind: SsoKind, antes: string, conta: string, slot: string) => void;
   /** a etapa já foi pedida a esta mesma conta e voltou sem ser dada (ou não voltou): o encadeamento não insiste (integrations.ts) */
@@ -401,6 +408,8 @@ export class SsoAuth {
     if (!t) throw new ProviderError('forbidden', `conta ${kind === 'google' ? 'Google' : 'Microsoft'} não conectada`);
     if (!opts.force && t.expires_at - Date.now() > 120_000) return t.access_token;
     if (!t.refresh_token) throw new ProviderError('forbidden', 'o acesso venceu e não há renovação: conecte de novo em Conexões', { reauth: true });
+    const semPosse = this.podeRenovar(workspaceId, kind, conta);
+    if (semPosse) throw new ProviderError('unavailable', semPosse);
     // uma renovação por conta de cada vez: leituras em paralelo esperam a mesma (sem gastar o refresh token duas vezes)
     // workspaces que usam a mesma conta esperam a mesma renovação
     const key = this.chaveRenovacao(workspaceId, kind, conta);
@@ -420,6 +429,7 @@ export class SsoAuth {
       const pessoal = t.pessoal ?? (tid ? tid === MSA_TENANT : undefined);
       this.secrets.write(workspaceId, kind, { ...n, ...(granted !== undefined ? { granted } : {}), account: t.account, ...(t.scopes ? { scopes: t.scopes } : {}),
         ...(pessoal !== undefined ? { pessoal } : {}), ...(tid ? { tid } : {}), ...(oid ? { oid } : {}) }, conta);
+      try { this.aoRenovar(workspaceId, kind, conta); } catch { /* devolver ao computador não segura o acesso daqui */ }
       return n.access_token;
     })().finally(() => { if (this.refreshing.get(key) === p) this.refreshing.delete(key); });
     this.refreshing.set(key, p);

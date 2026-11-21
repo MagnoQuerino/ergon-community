@@ -139,6 +139,8 @@ export class FakeWorld {
     /** a posse (cloud.ts): último sinal de aberto e a hora em que o computador avisou que fechou */ pcSeenAt: number | null; pcLeftAt: number | null; pcSince?: number | null;
     /** já preparado: trocar a chave do cofre (disco novo) é recusado com key_locked */ preparado?: boolean }>();
   nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [], wakeLog: [], pcSeenAt: null, pcLeftAt: null }); return bootToken; }
+  /** o último sinal de um computador por workspace (aberto ou fechado): o pcOpen do estado da nuvem; os testes também o mudam */
+  pcAberto = new Map<string, boolean>();
   /** giros de chave recebidos (mudança kind rotation): de qual workspace, para que versão, por quem */
   rotations: Array<{ ws: string; keyVersion: number; by: string }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
@@ -399,14 +401,17 @@ export class FakeWorld {
       const sws = u.searchParams.get('workspace'); const cl = sws ? this.clouds.get(sws) : undefined;
       if (!mine(sws)) return { fail: [404, 'not_found'] };
       const dono = this.workspaces.get(sws!)!.owner === acc.id;
-      return { json: { active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null, ...(this.antigo ? {} : { keyWanted: this.keyWanted(sws!) }),
+      // as conexões (world/src/cloud.ts): o aparelho-nuvem com a chave pública só para o dono; um computador aberto é a posse
+      const nv = cl?.deviceId ? this.devices.get(cl.deviceId) : undefined;
+      const conexoes = { owner: dono, cloudDevice: dono && nv && nv.status === 'active' ? { deviceId: nv.id, syncPublicKey: nv.syncPublicKey } : null, pcOpen: !!cl && this.pcAberto.get(sws!) === true };
+      return { json: { ...conexoes, active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null, ...(this.antigo ? {} : { keyWanted: this.keyWanted(sws!) }),
         relayTicket: cl?.relay && dono ? { exp: Math.floor(Date.now() / 1000) + 900, mac: crypto.createHash('sha256').update(`${sws}|${cl.relay}`).digest('hex') } : null } };
     }
     if (key === 'POST /v1/cloud/presence') {
       const cl = this.clouds.get(b.workspaceId);
       if (!mine(b.workspaceId) || !cl) return { fail: [409, 'no_cloud'] };
       if ((dev as Device & { kind?: string }).kind !== 'cloud') {
-        cl.presence.push(b.open !== false);
+        cl.presence.push(b.open !== false); this.pcAberto.set(b.workspaceId, b.open !== false);
         const t = Date.now();
         if (b.open !== false) {
           if (cl.pcSeenAt === null || t - cl.pcSeenAt > 120_000) { if (cl.pcSeenAt !== null) cl.pcLeftAt = Math.max(cl.pcLeftAt ?? 0, cl.pcSeenAt + 120_000); cl.pcSince = t; }
@@ -601,6 +606,9 @@ export class FakeWorld {
         if (repetida) return { json: { version: repetida.version, duplicate: true } };
         if (!w.plan) return { fail: [402, 'world_inactive'] };
         if (RANK[role] < RANK[b.kind === 'rotation' ? 'admin' : 'editor']) return { fail: [403, 'sync_forbidden'] };
+        // as conexões (world/src/sync.ts): só a conta dona, de um computador dela ou da nuvem DESTE workspace
+        if (!['change', 'snapshot', 'rotation', 'conexoes'].includes(String(b.kind ?? 'change'))) return { fail: [400, 'kind'] };
+        if (b.kind === 'conexoes' && (w.owner !== acc.id || ((dev as Device & { kind?: string; cloudWs?: string }).kind === 'cloud' && (dev as Device & { cloudWs?: string }).cloudWs !== w.id))) return { fail: [403, 'sync_forbidden'] };
         if (b.kind === 'rotation') { if (b.keyVersion !== kv + 1) return { fail: [409, 'key_version'] }; }
         else {
           if (w.rotationRequired) return { fail: [409, 'rotation_required'] };
@@ -619,7 +627,8 @@ export class FakeWorld {
       }
       if (m[2] === 'changes' && method === 'GET') {
         const since = Number(u.searchParams.get('since') ?? 0);
-        return { json: { head: w.head, keyVersion: kv, changes: w.changes.filter((c) => (c.version as number) > since).slice(0, 50) } };
+        // as conexões só para a conta dona: o membro convidado não vê nem o cifrado
+        return { json: { head: w.head, keyVersion: kv, changes: w.changes.filter((c) => (c.version as number) > since && (c.kind !== 'conexoes' || w.owner === acc.id)).slice(0, 50) } };
       }
     }
     return { fail: [404, 'not_found'] };

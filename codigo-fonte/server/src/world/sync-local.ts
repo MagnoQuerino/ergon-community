@@ -16,7 +16,7 @@ import type { Routines } from '../services/routines.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import { type Applied, type ContentBody, ContentSync, parseContent } from './sync-content.ts';
 import { SyncAtividade } from './sync-atividade.ts';
-import { newWorkspaceKey, openChange, sealChange, unwrapForDevice, unwrapForRecovery, wrapForDevice, wrapForRecovery } from './sync-crypto.ts';
+import { newWorkspaceKey, openChange, openForDevice, sealChange, unwrapForDevice, unwrapForRecovery, wrapForDevice, wrapForRecovery } from './sync-crypto.ts';
 
 interface Keys { ed25519: string; x25519: string; x25519Public: string }
 interface SyncRow { sync_workspace_id: string; key_version: number; sync_key: string; last_version: number; blueprint_hash: string | null; old_keys: string | null; rotation_pending: number; recovery_key_version: number | null; updated_at: string | null; envio_pendente: string | null; giro_candidato: string | null }
@@ -43,6 +43,32 @@ export class LocalSync {
 
   /** mensagens novas vindas de outro aparelho (antes de a tela ser avisada): os canais não as mandam de novo */
   aoReceberMensagens: ((ws: string, messageIds: string[]) => void) | null = null;
+
+  /**
+   * As conexões (sync-conexoes.ts) vindas de outro aparelho da conta dona: o corpo já aberto com a chave do workspace. Quem
+   * recebe confere o destino e abre o envelope de dentro (só o aparelho de destino consegue: aparelho()).
+   */
+  aoReceberConexoes: ((ws: string, x: { deviceId: string; version: number }, corpo: unknown) => void) | null = null;
+
+  /** Este aparelho na sincronia: o id, a chave pública X25519 e abrir um pacote que veio para ele (a chave privada não sai daqui). */
+  aparelho(userId: string) {
+    const c = this.ctx(userId);
+    return { deviceId: c.deviceId, x25519Public: c.keys.x25519Public, abrir: (sealed: string, a: { ws: string; from: string }) => openForDevice(sealed, c.keys.x25519, { ...a, to: c.deviceId }) };
+  }
+
+  /**
+   * Envia UMA mudança de tipo próprio ('conexoes': só a conta dona envia e recebe, o World confere), cifrada com a chave
+   * do workspace e assinada como as outras, presa à última versão recebida aqui: se outro aparelho mandou algo antes, o
+   * World recusa (version_conflict) e ela vai no ciclo seguinte, depois de receber. Aceita, este aparelho avança junto.
+   */
+  async enviarTipo(userId: string, ws: string, kind: 'conexoes', body: unknown): Promise<number> {
+    const r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
+    const c = this.ctx(userId);
+    const sealed = sealChange(Buffer.from(r.sync_key, 'base64'), r.sync_workspace_id, body, { operationId: `cx_${crypto.randomBytes(9).toString('hex')}`, expectedVersion: r.last_version, schemaVersion: 1, keyVersion: r.key_version, kind }, c.keys.ed25519);
+    const v = (await this.client.call<{ version: number }>('POST', `/v1/sync/workspaces/${r.sync_workspace_id}/changes`, sealed, c.session)).version;
+    this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ? AND last_version = ?', v, now(), ws, r.last_version);
+    return v;
+  }
 
   private ctx(userId: string) {
     const l = this.links.get(userId); const s = this.links.session(userId);
@@ -384,6 +410,9 @@ export class LocalSync {
     if (apply && last && opts.holdOnBlueprint) return { head, preview: null as unknown, incoming, applied: false, held: true };
     if (last) plan = importBlueprint(this.db, this.bus, this.routines, ws, userId, open<{ type: string; blueprint: unknown }>(last).blueprint, apply, this.limits, { sync: true, nuvem: this.nuvem });
     if (!apply) return { head, preview: plan, incoming, applied: false };
+    // as conexões vindas de outro aparelho da conta dona (sync-conexoes.ts): quem recebe confere o destino e o envelope;
+    // uma que falhe não segura o resto da sincronia (fica registrada por quem recebe)
+    for (const x of others.filter((y) => y.kind === 'conexoes')) { try { this.aoReceberConexoes?.(ws, x, open(x)); } catch { /* registrado em sync-conexoes.ts */ } }
     if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws, { sync: true })), ws);
     const total: Applied = { added: 0, updated: 0, conflicts: 0, skipped: 0 };
     const deOutros = others.filter((y) => y.kind === 'change');
