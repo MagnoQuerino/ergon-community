@@ -40,7 +40,12 @@ export interface PCard {
   subtasks: Array<{ id: string; title: string; done: boolean; pos: number; at: string }>;
   links: Array<{ id: string; url: string; title: string; at: string }>;
   people: Array<{ id: string; at: string }>;
-  comments: Array<{ id: string; by: 'user' | 'agent'; name: string; me: boolean; body: string; at: string }>;
+  /**
+   * `acc`: a conta World de quem escreveu (de pessoa; null se de agente ou sem conta ligada). Só vira "meu" aqui se for a
+   * MINHA conta. `me` fica no formato por compatibilidade e sai sempre falso: dito por outro aparelho (de outra pessoa,
+   * no workspace compartilhado), ele faria o comentário de alguém virar meu.
+   */
+  comments: Array<{ id: string; by: 'user' | 'agent'; name: string; me: boolean; acc?: string | null; body: string; at: string }>;
   files: Array<{ id: string; artifactId: string; name: string; at: string }>;
   gone: Array<{ id: string; at: string }>;
 }
@@ -91,7 +96,7 @@ export function checkCard(x: Record<string, unknown>): PCard | null {
     && x.subtasks.every((s) => eId(s.id, 'sub') && str(s.title, 400, 1) && typeof s.done === 'boolean' && Number.isInteger(s.pos) && (s.pos as number) >= 0 && (s.pos as number) < 100_000 && data(s.at))
     && x.links.every((l) => eId(l.id, 'url') && urlBoa(l.url) && str(l.title, 240) && data(l.at))
     && x.people.every((p) => ePessoa(p.id) && data(p.at))
-    && x.comments.every((c) => eId(c.id, 'cmt') && (c.by === 'user' || c.by === 'agent') && str(c.name, 200, 1) && typeof c.me === 'boolean' && str(c.body, COMENTARIO_MAX * 4, 1) && [...(c.body as string)].length <= COMENTARIO_MAX && data(c.at))
+    && x.comments.every((c) => eId(c.id, 'cmt') && (c.by === 'user' || c.by === 'agent') && str(c.name, 200, 1) && typeof c.me === 'boolean' && (c.acc === undefined || c.acc === null || (typeof c.acc === 'string' && /^acc_[A-Za-z0-9]{6,64}$/.test(c.acc))) && str(c.body, COMENTARIO_MAX * 4, 1) && [...(c.body as string)].length <= COMENTARIO_MAX && data(c.at))
     && x.files.every((f) => eId(f.id, 'anx') && eId(f.artifactId, 'art') && str(f.name, 400, 1) && data(f.at))
     && x.gone.every((g) => (ePessoa(g.id) || /^(sub|url|cmt|anx)_[a-f0-9]{32}$/.test(String(g.id))) && data(g.at));
   if (!ok) return null;
@@ -101,7 +106,7 @@ export function checkCard(x: Record<string, unknown>): PCard | null {
     subtasks: x.subtasks.map((s) => ({ id: s.id as string, title: s.title as string, done: s.done as boolean, pos: s.pos as number, at: s.at as string })),
     links: x.links.map((l) => ({ id: l.id as string, url: l.url as string, title: l.title as string, at: l.at as string })),
     people: x.people.map((p) => ({ id: p.id as string, at: p.at as string })),
-    comments: x.comments.map((c) => ({ id: c.id as string, by: c.by as 'user' | 'agent', name: c.name as string, me: c.me as boolean, body: c.body as string, at: c.at as string })),
+    comments: x.comments.map((c) => ({ id: c.id as string, by: c.by as 'user' | 'agent', name: c.name as string, me: false, acc: (c.acc as string | null | undefined) ?? null, body: c.body as string, at: c.at as string })),
     files: x.files.map((f) => ({ id: f.id as string, artifactId: f.artifactId as string, name: f.name as string, at: f.at as string })),
     gone: x.gone.map((g) => ({ id: g.id as string, at: g.at as string })),
   };
@@ -327,6 +332,10 @@ export class QuadrosSync {
     if (pid === 'p:me') return eu;
     return this.db.get<{ id: string }>('SELECT u.id FROM users u JOIN memberships m ON m.user_id = u.id WHERE u.username = ? AND m.workspace_id = ?', pid.slice(2), ws)?.id ?? null;
   }
+  /** a conta World de uma pessoa daqui (a ligação dela ao World), ou null */
+  private contaWorld(userId: string | null): string | null {
+    return userId ? this.db.get<{ a: string }>("SELECT account_id AS a FROM world_links WHERE user_id = ? AND account_id IS NOT NULL", userId)?.a ?? null : null;
+  }
   private tipoDoCampo(fieldId: string) { return this.db.get<{ type: string }>('SELECT type FROM board_fields WHERE id = ?', fieldId)?.type ?? null; }
 
   private montarCartao(ws: string, eu: string, taskId: string): PCard {
@@ -348,7 +357,7 @@ export class QuadrosSync {
       if (!c.people.some((x) => x.id === `p:${p.username}`)) c.people.push({ id: `p:${p.username}`, at: p.created_at });
     for (const m of this.db.all<{ id: string; author_type: 'user' | 'agent'; author_user_id: string | null; author_name: string; body: string; created_at: string }>(
       'SELECT id, author_type, author_user_id, author_name, body, created_at FROM task_comments WHERE task_id = ? AND workspace_id = ? ORDER BY created_at, rowid', taskId, ws))
-      c.comments.push({ id: m.id, by: m.author_type, name: m.author_name, me: m.author_type === 'user' && m.author_user_id === eu, body: m.body, at: m.created_at });
+      c.comments.push({ id: m.id, by: m.author_type, name: m.author_name, me: false, acc: m.author_type === 'user' ? this.contaWorld(m.author_user_id) : null, body: m.body, at: m.created_at });
     for (const f of this.db.all<{ id: string; artifact_id: string; filename: string; created_at: string }>('SELECT id, artifact_id, filename, created_at FROM task_attachments WHERE task_id = ? AND workspace_id = ? ORDER BY created_at, rowid', taskId, ws))
       c.files.push({ id: f.id, artifactId: f.artifact_id, name: f.filename, at: f.created_at });
     for (const g of this.db.all<{ item_id: string; deleted_at: string }>('SELECT item_id, deleted_at FROM card_tombstones WHERE task_id = ? AND workspace_id = ?', taskId, ws)) {
@@ -412,6 +421,8 @@ export class QuadrosSync {
     }
     // ---- valores (um por campo; vazio também é um valor)
     for (const v of r.values) {
+      // só campo do quadro desta tarefa (o id de um campo de outro quadro ou workspace é descartado)
+      if (!db.get('SELECT 1 AS x FROM board_fields f JOIN tasks t ON t.board_id = f.board_id AND t.workspace_id = f.workspace_id WHERE f.id = ? AND t.id = ? AND f.workspace_id = ?', v.id, tid, ws)) continue;
       const l = db.get<{ at: string }>('SELECT updated_at AS at FROM task_field_values WHERE task_id = ? AND field_id = ?', tid, v.id);
       if (l && l.at >= v.at) continue;
       let val = v.v;
@@ -440,12 +451,13 @@ export class QuadrosSync {
       if (u) db.run('INSERT INTO task_people (workspace_id, task_id, user_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (task_id, user_id) DO UPDATE SET created_at = excluded.created_at', ws, tid, u, p.at);
       else db.run('INSERT INTO task_people_remote (workspace_id, task_id, username, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (task_id, username) DO UPDATE SET created_at = excluded.created_at', ws, tid, p.id.slice(2), p.at);
     }
+    const minhaConta = this.contaWorld(eu);
     for (const m of r.comments) {
       // comentário não muda depois de escrito: o que já está aqui fica como está
       if (db.get('SELECT 1 AS x FROM task_comments WHERE id = ?', m.id) || !entra(m.id, m.at)) continue;
       const agente = m.by === 'agent' ? db.get<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ? AND name = ?', ws, m.name)?.id ?? null : null;
       db.run('INSERT INTO task_comments (id, workspace_id, task_id, author_type, author_user_id, author_agent_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        m.id, ws, tid, m.by, m.by === 'user' && m.me ? eu : null, agente, db.seal(ws, m.name), db.seal(ws, m.body), m.at);
+        m.id, ws, tid, m.by, m.by === 'user' && !!m.acc && m.acc === minhaConta ? eu : null, agente, db.seal(ws, m.name), db.seal(ws, m.body), m.at);
     }
     for (const f of r.files) {
       if (db.get('SELECT 1 AS x FROM task_attachments WHERE id = ?', f.id) || !entra(f.id, f.at)) continue;

@@ -8,9 +8,13 @@
  *   desligadas e esperam a confirmação com a senha; na nuvem da dona, vêm como no computador dela.
  */
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { after, before, test } from 'node:test';
 import type { HermesControlClient } from '../src/services/hermes.ts';
 import { sealChange } from '../src/world/sync-crypto.ts';
+import { checkCard, QuadrosSync } from '../src/world/sync-quadros.ts';
+import { criarCampo } from '../src/services/campos.ts';
+import { criarQuadro } from '../src/services/quadros.ts';
 import { FakeWorld } from './fake-world.ts';
 import { harness, loginAs, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
@@ -127,4 +131,39 @@ test('um esqueleto forjado pelo colaborador é ignorado no computador da dona e 
   assert.equal(agente(nuvem, wsN, 'Intruso'), undefined, 'o esqueleto do colaborador não manda na nuvem');
   assert.notEqual(nuvem.db.get<{ v: string }>("SELECT value AS v FROM workspace_settings WHERE workspace_id = ? AND key = 'ferramentas.calculo'", wsN)?.v, 'ligado');
   assert.ok(nuvem.db.get("SELECT 1 AS x FROM audit_events WHERE workspace_id = ? AND action = 'team.sync_ignored'", wsN), 'na nuvem, fica na auditoria');
+});
+
+test('comentário de cartão: só vira "meu" se for da MINHA conta World ("me" dito por outro aparelho não vale)', async () => {
+  const t = (await req(pcAna, 'POST', '/api/tasks', ana, { title: 'Cartão com comentários' })).json.id as string;
+  const q = new QuadrosSync(pcAna.db, { resumo: () => null, base: () => null, fixarBase: () => undefined });
+  const at = new Date().toISOString(); const hex = () => crypto.randomBytes(16).toString('hex');
+  const doCaio = `cmt_${hex()}`; const daAna = `cmt_${hex()}`; const antigo = `cmt_${hex()}`;
+  const card = checkCard({ id: t, values: [], subtasks: [], links: [], people: [], files: [], gone: [], comments: [
+    { id: doCaio, by: 'user', name: 'Caio', me: true, acc: acc('caio@exemplo.test'), body: 'Escrevi eu, o Caio', at },
+    { id: daAna, by: 'user', name: 'Ana', me: false, acc: acc('ana@exemplo.test'), body: 'Escrito no outro computador da Ana', at },
+    { id: antigo, by: 'user', name: 'Caio', me: true, body: 'Versão antiga dizendo "meu"', at }] } as never);
+  assert.ok(card);
+  q.applyCard(ana.workspaceId, ana.userId, card!);
+  const autor = (id: string) => pcAna.db.get<{ u: string | null }>('SELECT author_user_id AS u FROM task_comments WHERE id = ?', id)!.u;
+  assert.equal(autor(doCaio), null, 'o "me" do Caio não vira a Ana');
+  assert.equal(autor(antigo), null, 'sem a conta, não é de ninguém daqui');
+  assert.equal(autor(daAna), ana.userId, 'da conta da Ana: é dela');
+  // e na volta, o comentário dela viaja com a conta dela (e "me" sempre falso)
+  const ida = (q as unknown as { montarCartao: (ws: string, eu: string, t: string) => { comments: Array<{ id: string; me: boolean; acc?: string | null }> } }).montarCartao(ana.workspaceId, ana.userId, t).comments.find((c) => c.id === daAna)!;
+  assert.deepEqual([ida.me, ida.acc], [false, acc('ana@exemplo.test')]);
+});
+
+test('valor de campo de cartão: só de campo do quadro da tarefa (o de outro quadro é descartado)', async () => {
+  const t = (await req(pcAna, 'POST', '/api/tasks', ana, { title: 'Cartão com campo' })).json.id as string;
+  const board = pcAna.db.get<{ b: string }>('SELECT board_id AS b FROM tasks WHERE id = ?', t)!.b;
+  const q0 = { userId: ana.userId, workspaceId: ana.workspaceId };
+  const outro = (criarQuadro(pcAna.db, null, q0, 'Outro quadro') as { id: string }).id;
+  const meu = criarCampo(pcAna.db, null, q0, board, { name: 'Fornecedor', type: 'text' }); const alheio = criarCampo(pcAna.db, null, q0, outro, { name: 'Segredo', type: 'text' });
+  const q = new QuadrosSync(pcAna.db, { resumo: () => null, base: () => null, fixarBase: () => undefined });
+  const at = new Date(Date.now() + 1000).toISOString();
+  const card = checkCard({ id: t, values: [{ id: meu.id, v: 'Casa do Tijolo', at }, { id: alheio.id, v: 'não deveria entrar', at }, { id: `cmp_${crypto.randomBytes(16).toString('hex')}`, v: 'campo inexistente', at }],
+    subtasks: [], links: [], people: [], comments: [], files: [], gone: [] } as never);
+  q.applyCard(ana.workspaceId, ana.userId, card!);
+  const campos = pcAna.db.all<{ f: string }>('SELECT field_id AS f FROM task_field_values WHERE task_id = ?', t).map((x) => x.f);
+  assert.deepEqual(campos, [meu.id]);
 });
