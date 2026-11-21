@@ -247,6 +247,8 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       ERGON_MANIFESTO_CHAVE: ${{ secrets.ERGON_MANIFESTO_CHAVE }}
+      # a API do GitHub sem token tem limite por IP (60/h) e o executor é compartilhado: com o token, não falta
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -257,7 +259,7 @@ jobs:
         run: |
           CANAL=$([[ "$GITHUB_REF_NAME" == *-* ]] && echo teste || echo estavel)
           echo "CANAL=$CANAL" >> "$GITHUB_ENV"
-          node scripts/distribuicao/cli.mjs gerar --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" --canal "$CANAL" --saida "manifesto-$CANAL.json"
+          node scripts/distribuicao/cli.mjs gerar --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" --canal "$CANAL" --saida "manifesto-$CANAL.json" --token ambiente
           node scripts/distribuicao/cli.mjs assinar --chave ambiente "manifesto-$CANAL.json"
           node scripts/distribuicao/cli.mjs resolver "manifesto-$CANAL.json" --canal "$CANAL" --edicao "$(jq -r .edicao "manifesto-$CANAL.json")"
       - name: Promover no canal estável (anexa à versão)

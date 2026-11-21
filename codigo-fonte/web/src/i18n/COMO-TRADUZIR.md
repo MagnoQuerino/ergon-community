@@ -93,8 +93,8 @@ frases; o teste dele (`textos-tela.test.ts`) continua conferindo o português.
 - Os ensaios de tela no navegador (`scripts/telas/*.mjs`, Edge headless costuma vir em en-US) procuram textos em
   português como "Modo Foco": fixe o idioma deles (`localStorage 'ergon.idioma' = 'pt-BR'` antes de abrir, ou
   `--lang=pt-BR`) ou faça-os procurar pelas duas línguas.
-- A dica do seletor (`geral.idioma.dica`) só promete o que a tela faz. Se a equipe passar a responder no idioma da
-  pessoa (os textos de instrução no servidor hoje pedem português), aí sim dá para dizer isso na dica.
+- A dica do seletor (`geral.idioma.dica`) só promete o que a tela faz. Desde a rc.45, as instruções do agente dizem o
+  idioma de quem lê (`server/src/services/idioma-motor.ts`, `instrucaoDeIdioma`), e o motor recebe zh e hi.
 
 ## Chinês e hindi (rc.44)
 
@@ -105,6 +105,13 @@ frases; o teste dele (`textos-tela.test.ts`) continua conferindo o português.
   com o mesmo tipo e os mesmos marcadores). Áreas cobertas na rc.44: geral, quadro, tarefa, visuais e conversas (salas
   incluídas) quase inteiras; entrar, recuperar e Minha conta (conta), as boas-vindas e o tour (ajuda), as contas de IA e
   a chave própria (configurações) e os erros mais comuns (servidor). `completude.test.ts` exige esse mínimo.
+  **rc.45**: o chinês ganha as áreas que faltavam inteiras: cidade, equipe, agente, rotinas, documentos, Conexões e
+  Configurações (ficam parciais só conta, ajuda e servidor). O hindi continua na cobertura da rc.44.
+- **Texto de fábrica** (rc.45, `sementes.ts`): as funções da equipe de partida, os setores e os quadros "Minhas tarefas"
+  e "Quadro da equipe" ficam gravados em português no banco (a sincronia e o que a pessoa renomeia não mudam); a tela
+  reconhece o texto EXATO de fábrica com `daSemente()` e mostra a tradução (`equipe.semente.*`). O que a pessoa escreveu
+  aparece como está. `sementes.test.ts` confere que o português é o mesmo do servidor. As equipes de nicho
+  (`server/src/services/team-presets.ts`) ainda ficam em português.
 - **REVISÃO POR NATIVO PENDENTE**: as traduções foram geradas a partir do inglês, com o glossário abaixo, e cada
   arquivo traz `REVISAO_NATIVA_PENDENTE = true`. Ao revisar uma área, troque para `false` e anote quem revisou.
 - **Glossário**: agente 智能体 / एजेंट · Equipe 团队 / टीम · Tarefas 任务 / कार्य · card 卡片 / कार्ड · quadro 看板 /

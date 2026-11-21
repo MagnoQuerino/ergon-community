@@ -742,6 +742,19 @@ const servidor: Traducao<typeof pt> = {
   'saude.googleVence': 'Google expires in less than 2 days (test mode)',
   'saude.nenhumBackup': 'no backup yet',
   'saude.gbLivres': '{gb} GB free',
+  // rc.45: a situação das contas de IA e o recurso que chega com a atualização
+  'iaConta.ocupada': 'the AI team is busy: check again in a moment',
+  'iaConta.indisponivel': 'not available in this installation',
+  'iaConta.naoConectada': 'not connected',
+  'iaConta.conectada': 'connected',
+  'iaConta.conectadaGratis': 'connected (free plan)',
+  'iaConta.conectadaPlano': 'connected ({plano} plan)',
+  'erro.recursosAtualizando': 'this capability arrives with the team\'s next update on this computer',
+  // rc.45: a nota do consumo
+  'consumo.nota.subscription': 'ChatGPT subscription: no per-use cost (the monthly fee covers it). Tokens show how much the team worked.',
+  'consumo.nota.credits': 'Account with credits: the cost shows up when the provider reports the amount charged; the balance is in the account portal.',
+  'consumo.nota.api': 'API key: the cost shows up when the provider reports the amount charged for each run.',
+  'consumo.nota.none': 'No AI account connected: the team does not work on requests, no usage.',
 };
 
 export default servidor;

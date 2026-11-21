@@ -85,6 +85,25 @@ export const MENSAGENS = {
   'canal.ligarCards': { 'pt-BR': 'Ligar o card #{a} ao #{b}?', en: 'Link card #{a} to #{b}?', 'zh-CN': '将卡片 #{a} 关联到 #{b}？', hi: 'कार्ड #{a} को #{b} से जोड़ें?' },
   'canal.regraSugerida': { 'pt-BR': 'Regra sugerida: {texto}', en: 'Suggested rule: {texto}', 'zh-CN': '建议的规则：{texto}', hi: 'सुझाया गया नियम: {texto}' },
   // ——— PDF (lib/pdf-documento.ts): a numeração das páginas ———
+  // rc.45: a nota da primeira mensagem pela conta ligada (fica na conversa do canal, no idioma de quem ligou)
+  'canal.primeiraMensagem': {
+    'pt-BR': 'Sistema — primeira mensagem pela conta do {canal} "{nome}", ligada em {quando}. Se não foi você que ligou esta conta, desligue em Conexões › {canal}.',
+    en: 'System — first message from the {canal} account "{nome}", linked on {quando}. If you did not link this account, turn it off in Connections › {canal}.',
+    'zh-CN': '系统 — 来自 {canal} 账户“{nome}”的第一条消息，该账户于 {quando} 关联。如果不是你关联的，请在“连接 › {canal}”中关闭。',
+    hi: 'सिस्टम — {canal} खाते "{nome}" से पहला संदेश, जो {quando} को जोड़ा गया। अगर यह खाता आपने नहीं जोड़ा, तो कनेक्शन › {canal} में बंद करें।',
+  },
+  // rc.45: a linha final do cartão decidido, no idioma de quem recebe (a hora no formato do idioma)
+  'canal.aprovadoAs': { 'pt-BR': 'Aprovado por você às {hora}.', en: 'Approved by you at {hora}.', 'zh-CN': '你已于 {hora} 批准。', hi: 'आपने {hora} बजे मंज़ूर किया।' },
+  'canal.recusadoAs': { 'pt-BR': 'Recusado por você às {hora}.', en: 'Declined by you at {hora}.', 'zh-CN': '你已于 {hora} 拒绝。', hi: 'आपने {hora} बजे अस्वीकार किया।' },
+  'canal.aprovadoFalhou': { 'pt-BR': 'Aprovado, mas não deu certo: {motivo}', en: 'Approved, but it did not work: {motivo}', 'zh-CN': '已批准，但没有成功：{motivo}', hi: 'मंज़ूर हुआ, पर काम नहीं हुआ: {motivo}' },
+  'canal.jaDecididoLinha': { 'pt-BR': 'Já decidido no Ergon.', en: 'Already decided in Ergon.', 'zh-CN': '已在 Ergon 中决定。', hi: 'Ergon में पहले ही तय हो चुका है।' },
+  // rc.45: Feishu e DingTalk não têm botões pelo gateway: o cartão diz onde decidir
+  'canal.decidaNoApp': {
+    'pt-BR': 'Para aprovar ou recusar, abra o Ergon: neste canal a decisão é no app.',
+    en: 'To approve or decline, open Ergon: on this channel the decision is made in the app.',
+    'zh-CN': '如需批准或拒绝，请打开 Ergon：在此渠道中需在应用内做决定。',
+    hi: 'मंज़ूर या अस्वीकार करने के लिए Ergon खोलें: इस चैनल पर फ़ैसला ऐप में होता है।',
+  },
   'pdf.pagina': { 'pt-BR': '{pagina} / {total}', en: '{pagina} / {total}', 'zh-CN': '第 {pagina} / {total} 页', hi: '{pagina} / {total}' },
 } as const satisfies Record<string, Texto4>;
 
@@ -115,6 +134,9 @@ const espaco = (s: string) => s.replace(/[  ]/g, ' ');
 
 /** Número: 1.250,5 (pt-BR) · 1,250.5 (en) · 12,34,567 (en-IN, hi). */
 export const fmtNumero = (l: Idioma | null | undefined, n: number, o: Intl.NumberFormatOptions = {}): string => espaco(nf(l, o).format(n));
+
+/** Os centavos só quando há (R$ 1.250 · R$ 1.250,5): o jeito dos resumos de lançamentos, que o agente cita e a conferência confere. */
+export const MOEDA_COMO_ANTES: Intl.NumberFormatOptions = { minimumFractionDigits: 0, maximumFractionDigits: 2 };
 
 /** Dinheiro: R$ 1.250,00 · $1,250.00 · ¥1,250.00 · ₹12,34,567.00. */
 export const fmtMoeda = (l: Idioma | null | undefined, v: number, moeda: Moeda, o: Intl.NumberFormatOptions = {}): string =>

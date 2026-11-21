@@ -5,6 +5,7 @@
  */
 import { parseDate, parseNumber, toCsv } from './csv.ts';
 import type { Sheet } from './doc-text.ts';
+import { fmtNumero } from '../lib/i18n.ts';
 
 type ColType = 'numero' | 'data' | 'texto' | 'vazia';
 export interface ColumnStat {
@@ -22,7 +23,7 @@ export interface TableStats {
 }
 
 /** Número no jeito brasileiro (1.234,56), até 2 casas. */
-export const fmt = (n: number, dec = 2) => n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: dec });
+export const fmt = (n: number, dec = 2) => fmtNumero(null, n, { minimumFractionDigits: 0, maximumFractionDigits: dec });
 const pct = (n: number) => `${fmt(n, 1)}%`;
 const VALUE = /valor|value|amount|montante|total|pre[cç]o|receita|despesa|custo|saldo|qtd|quantidade|faturamento|vendas/i;
 const DATE = /data|date|dia|vencimento|pagamento|emiss[aã]o|compet[eê]ncia|m[eê]s|periodo|per[ií]odo/i;

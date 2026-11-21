@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { nomeDaConstrucao } from '../world/buildings.ts';
+import { daSemente, nomeDaFerramenta, notaDaFerramenta } from '../i18n/sementes.ts';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { cachedResource, useLiveEvent, useResource } from '../lib/live.ts';
 import { pushRecent } from '../lib/recents.ts';
@@ -79,7 +81,8 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
   const head: AgentHead | null = r ?? (a ? { ...a, look_seed: a.look_seed ?? null } : seed);
   const status = r?.status ?? a?.status ?? seed?.status ?? 'active';
   const run = r ? r.run_status : a ? a.run_status : seed?.run_status ?? null;
-  const place = r?.building_name ?? seed?.building_name ?? null;
+  const lugar = r?.building_name ?? seed?.building_name ?? null;
+  const place = lugar ? nomeDaConstrucao(lugar) : null;
   // o perfil chegou: entra nos recentes da busca (Ctrl+K) com o nome e o papel de agora
   useEffect(() => { if (a) pushRecent({ kind: 'agente', id: a.id, label: a.name, where: a.role }); }, [a?.id, a?.name, a?.role]); // eslint-disable-line react-hooks/exhaustive-deps
   // não veio: confere se o agente não existe mais (404) ou se foi só a conexão (o próximo recarregar acerta)
@@ -109,7 +112,7 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
               <AgentAvatar agent={head} size={38} />
               <div className="awin__who">
                 <strong id={`awin-${agentId}`}>{head.name}</strong>
-                <span className="muted">{head.role} · {head.sector_name}{place ? ` · ${place}` : ''}</span>
+                <span className="muted">{daSemente(head.role)} · {daSemente(head.sector_name)}{place ? ` · ${place}` : ''}</span>
               </div>
               {a && <span className="chip" title={t('agente.janela.modeloDica')}>{modelName(a.model)}</span>}
               {status !== 'active' && <span className="badge badge--warn">{t('agente.janela.desativado')}</span>}
@@ -182,7 +185,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
   const [confirmOff, setConfirmOff] = useState(false);
   const [offResult, setOffResult] = useState<{ redistributed: Array<{ number: number; title: string; to: string; reason: string }>; tools: Array<{ label: string; to: string }> } | null>(null);
   const sector = sectors.find((s) => s.key === f.sectorKey);
-  const place = row?.building_name ?? null;
+  const place = row?.building_name ? nomeDaConstrucao(row.building_name) : null;
   const dirty = JSON.stringify(f) !== JSON.stringify(init());
   useEffect(() => { onDirty(dirty); return () => onDirty(false); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = agent.status === 'active';
@@ -246,7 +249,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
 
   return (
     <div className="editor">
-      {agent.bio && <p className="profile__bio">{agent.bio}</p>}
+      {agent.bio && <p className="profile__bio">{daSemente(agent.bio)}</p>}
       {!active && agent.deactivation_note && <p className="hint">{t('agente.perfil.desativadoNota', { nota: agent.deactivation_note })}</p>}
       {fixed && <p className="fixed-note"><Icon name="lock" size={13} /> <span><b>{t('agente.perfil.cargoFixoTitulo')}</b> {t('agente.perfil.cargoFixo')}</span></p>}
       {/* aparência: o boneco da cidade, sorteado do pacote gráfico (Grécia Clássica) a cada "Redefinir" */}
@@ -264,7 +267,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
           <EffectPicker value={fxChoice} onChange={(c) => void setFx(c)} options={fxOptions} />
           {active && (
             <div className="row row--wrap look-row__move">
-              <span className="hint"><Icon name="pin" size={12} /> {t('agente.perfil.ondeMora', { lugar: place ?? '—', setor: sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name })}</span>
+              <span className="hint"><Icon name="pin" size={12} /> {t('agente.perfil.ondeMora', { lugar: place ?? '—', setor: daSemente(sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name) })}</span>
               <button type="button" className="btn btn--sm btn--ghost" onClick={() => setTray('structure')}><Icon name="temple" size={13} /> {t('agente.perfil.moverPara')}</button>
             </div>
           )}
@@ -278,9 +281,9 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
         <label className="field">{t(fixed ? 'agente.perfil.papelFixo' : 'agente.perfil.papel')}<input value={f.role} maxLength={80} disabled={fixed} onChange={(e) => setF({ ...f, role: e.target.value })} /></label>
         <label className="field">{t('agente.perfil.setor')}
           <select value={f.sectorKey} disabled={fixed} onChange={(e) => setF({ ...f, sectorKey: e.target.value })}>
-            {sectors.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
+            {sectors.map((s) => <option key={s.key} value={s.key}>{daSemente(s.name)}</option>)}
           </select>
-          {sector?.description && <span className="hint">{sector.description} {t(sector.creates_tasks === 'demands' ? 'agente.perfil.criaCards' : 'agente.perfil.soCardPedido')}</span>}
+          {sector?.description && <span className="hint">{daSemente(sector.description)} {t(sector.creates_tasks === 'demands' ? 'agente.perfil.criaCards' : 'agente.perfil.soCardPedido')}</span>}
         </label>
         {/* a cidade pode ter milhares de construções: escolher é pelo "Mover para…" (com busca e por partes), não num select */}
         <div className="field">{t('agente.perfil.construcao')}
@@ -332,9 +335,9 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
             const locked = fixed && COORDINATOR_TOOLS.includes(tool.id);
             const plena = tool.status === 'disponível'; // i18n-ok: o estado que o servidor manda, não texto de tela
             return (
-              <label key={tool.id} className={`tool-opt ${on ? 'tool-opt--on' : ''} ${blocked ? 'tool-opt--off' : ''}`} title={tool.note}>
+              <label key={tool.id} className={`tool-opt ${on ? 'tool-opt--on' : ''} ${blocked ? 'tool-opt--off' : ''}`} title={notaDaFerramenta(tool.id, tool.note)}>
                 <input type="checkbox" checked={on} disabled={blocked || locked} onChange={(e) => toggleTool(tool.id, e.target.checked)} />
-                <span className="tool-opt__txt"><b>{tool.label}</b></span>
+                <span className="tool-opt__txt"><b>{nomeDaFerramenta(tool.id, tool.label)}</b></span>
                 <span className="tool-opt__tags">
                   {locked && <span className="badge">{t('agente.perfil.doCargo')}</span>}
                   {!plena && <span className={`badge ${TOOL_BADGE[tool.status]}`}>{TOOL_STATUS[tool.status] ? t(TOOL_STATUS[tool.status]) : tool.status}</span>}
@@ -354,8 +357,8 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
             const estado = tool.acessoTotal !== undefined ? (on ? t('agente.ferramenta.comAcessoTotal') : t('agente.ferramenta.pedeAcessoTotal'))
               : (on ? t('agente.ferramenta.ligadaEquipe') : t('agente.ferramenta.desligadaEquipe'));
             return (
-              <div key={tool.id} className={`tool-opt tool-opt--equipe ${on ? 'tool-opt--on' : ''}`} title={tool.note}>
-                <span className="tool-opt__txt"><b>{tool.label}</b></span>
+              <div key={tool.id} className={`tool-opt tool-opt--equipe ${on ? 'tool-opt--on' : ''}`} title={notaDaFerramenta(tool.id, tool.note)}>
+                <span className="tool-opt__txt"><b>{nomeDaFerramenta(tool.id, tool.label)}</b></span>
                 <span className="tool-opt__tags"><span className={`badge ${on ? 'badge--ok' : ''}`}>{estado}</span></span>
               </div>
             );

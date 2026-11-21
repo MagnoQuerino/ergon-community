@@ -9,6 +9,7 @@
 import type { Db } from '../db/db.ts';
 import type { Billing } from './ai.ts';
 import type { CotaConta } from './hermes.ts';
+import { tx, type Texto } from '../lib/textos.ts';
 
 export interface UsagePeriod {
   from: string;
@@ -31,6 +32,8 @@ export interface UsageSummary {
   /** mostrar custo? só quando algum custo cobrado foi informado (nunca estimado) */
   costVisible: boolean;
   note: string;
+  /** rc.45: o código ao lado (a tela escreve no idioma de quem lê) */
+  note_t?: Texto;
 }
 
 /** Uma janela de limite: quanto RESTA (0 a 100) e quando renova. */
@@ -83,6 +86,6 @@ export function usageSummary(db: Db, workspaceId: string, tzOffsetMin: number, n
   return {
     month, year, subscription: null, accounts: contasDeIa(cota), billing,
     costVisible: billing !== 'subscription' && (month.runsWithCost > 0 || year.runsWithCost > 0),
-    note: NOTE[billing],
+    note: NOTE[billing], note_t: tx(`consumo.nota.${billing}`),
   };
 }

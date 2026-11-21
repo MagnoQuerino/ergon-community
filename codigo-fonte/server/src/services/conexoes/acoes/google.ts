@@ -72,6 +72,7 @@ import { ESCOPO_TAREFAS } from '../escrita/google.ts';
 import { ACOES_ESCRITORIO_GOOGLE } from './escritorio-google.ts';
 import { caber, htmlParaTexto, marcaDe, semControle } from '../texto.ts';
 import { ErroAcao, emails, lista, num, precisa, seg, txt, type Acao, type Args, type CtxAcao, type Http, type Param, type Resultado } from '../tipos.ts';
+import { fmtNumero } from '../../../lib/i18n.ts';
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const AGENDA = 'https://www.googleapis.com/calendar/v3';
@@ -686,7 +687,7 @@ export const ACOES_GOOGLE: Acao[] = [
       const v = caber(linhas);
       return lido(`${v.linhas.length ? `${v.linhas.length} e-mail(s):\n${v.linhas.join('\n')}` : 'Nenhum e-mail encontrado.'}${v.nota}${haMais(j)}`);
     } },
-  { id: 'email.ler', risco: 'ler', escopos: LER_EMAIL, descricao: `lê um e-mail: corpo em texto (até ${MAX_EMAIL_LIDO.toLocaleString('pt-BR')} caracteres) e nomes dos anexos`, params: { id: P_ID_EMAIL },
+  { id: 'email.ler', risco: 'ler', escopos: LER_EMAIL, descricao: `lê um e-mail: corpo em texto (até ${fmtNumero(null, MAX_EMAIL_LIDO)} caracteres) e nomes dos anexos`, params: { id: P_ID_EMAIL },
     resumo: (a) => `Ler o e-mail ${s(a, 'id')}`,
     async run(ctx, a) {
       const m = await ctx.http(`${GMAIL}/messages/${seg(precisa(a, 'id', 500))}?format=full`);
@@ -877,7 +878,7 @@ export const ACOES_GOOGLE: Acao[] = [
       ].join(' | ')));
       return lido(`${v.linhas.length ? `${v.linhas.length} arquivo(s):\n${v.linhas.join('\n')}` : 'Nenhum arquivo encontrado.'}${j.incompleteSearch ? '\nO Google avisou que a busca pode não ter olhado tudo.' : ''}${v.nota}${haMais(j)}`);
     } },
-  { id: 'arquivos.ler', risco: 'ler', escopos: LER_DRIVE, descricao: `lê o texto de um arquivo de até 15 MB (documentos do Google, Word, Excel, PowerPoint, PDF com texto, CSV, texto), até ${MAX_DOC.toLocaleString('pt-BR')} caracteres`,
+  { id: 'arquivos.ler', risco: 'ler', escopos: LER_DRIVE, descricao: `lê o texto de um arquivo de até 15 MB (documentos do Google, Word, Excel, PowerPoint, PDF com texto, CSV, texto), até ${fmtNumero(null, MAX_DOC)} caracteres`,
     params: { id: { tipo: 'texto', obrigatorio: true, descricao: 'id do arquivo (vem de arquivos.buscar)' } },
     resumo: (a) => `Ler o arquivo ${s(a, 'id')}`,
     async run(ctx, a) {

@@ -37,7 +37,7 @@ import { registerAjustesRoutes } from './routes/equipe-ajustes.ts';
 import { registerQuadrosRoutes } from './routes/quadros.ts';
 import { registerCartaoRoutes } from './routes/cartao.ts';
 import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } from './services/ajustes-motor.ts';
-import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
+import { idiomaDaInstalacao, idiomaDoMotor, type IdiomaMotor } from './services/idioma-motor.ts';
 import { registerRecursosRoutes } from './routes/recursos.ts';
 import { registerEntregaveisRoutes } from './routes/entregaveis.ts';
 import { RevisaoDocumento } from './services/revisao-documento.ts';
@@ -439,7 +439,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { cadeia: m && m !== 'sem' ? m.reserva : [], padrao: { provider: motors.ai(ws).cachedDefaultProvider(), model: motors.ai(ws).cachedDefault() } };
   };
   /** o idioma das mensagens do motor de um escopo (a pessoa dona dele; num motor só, quem é dono do primeiro workspace) */
-  const idiomaDoEscopo = (escopo: string): 'pt' | 'en' | undefined => (escopo === '_' ? idiomaDaInstalacao(db) : idiomaDoMotor(db, escopo));
+  const idiomaDoEscopo = (escopo: string): IdiomaMotor | undefined => (escopo === '_' ? idiomaDaInstalacao(db) : idiomaDoMotor(db, escopo));
   const agenteExecutaCodigo = (ws: string, agentId: string): boolean => {
     let list: string[] = [];
     try { const x = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', agentId)?.tools ?? '[]'); if (Array.isArray(x)) list = x.map(String); } catch { /* sem ferramentas legíveis */ }

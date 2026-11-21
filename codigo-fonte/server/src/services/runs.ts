@@ -26,6 +26,9 @@ import { sincronizarCodigoDoAgente } from './termos.ts';
 import { integrationDef, type IntegrationKind } from './integrations.ts';
 import { reservaUsada } from './ajustes-motor.ts';
 import { PROCESS_SQL, isConversationKey, processLimit, runningProcesses, type ProcessLimit } from './concurrency.ts';
+import { idiomaDoDono, readLang } from './prefs.ts';
+import { instrucaoDeIdioma } from './idioma-motor.ts';
+import { fmtData } from '../lib/i18n.ts';
 
 /** o texto do pedido na fila enquanto a equipe está em pausa */
 export const EQUIPE_EM_PAUSA = 'equipe em pausa: o pedido começa quando você retomar';
@@ -279,7 +282,7 @@ export class RunExecutor {
     }
     const daily = this.dailyLimit(e.workspaceId);
     if (daily.limit && daily.used >= daily.limit) {
-      const libera = daily.freesAt ? ` Libera às ${new Date(daily.freesAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : '';
+      const libera = daily.freesAt ? ` Libera às ${fmtData(null, daily.freesAt, { hour: '2-digit', minute: '2-digit' })}` : '';
       throw new HttpError(429, 'daily_limit', `Limite de ${daily.limit} execuções em 24 h atingido.${libera}; para mudar ou tirar o limite: Configurações › Andamento › Execuções por dia.`);
     }
     const runId = id('run');
@@ -1473,6 +1476,8 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     contasDeOutroWorkspace(db, workspaceId),
     opts.requests ? REQUESTS_HOW : '',
     opts.userId ? voiceInstructions(db, workspaceId, agentId, opts.userId) : '',
+    // rc.45: o idioma de quem lê (a pessoa da conversa; sem ela, quem é dono do workspace: cards, rotinas e revisões)
+    instrucaoDeIdioma(opts.userId ? readLang(db, opts.userId) : idiomaDoDono(db, workspaceId)),
     // a nota do canal é instrução (o formato da resposta, o trabalho da rotina, as regras do canal): fica fora do bloco de
     // dados, antes dele; é a mesma em todo pedido do mesmo canal, então não atrapalha o reaproveitamento
     channelNote,

@@ -14,7 +14,7 @@
  * e sem cartão esperando, Aprovar só conclui o card (a faixa avisa quando a linha do agente fala em enviar ou pagar).
  */
 import type { Db } from '../db/db.ts';
-import { emPt, tx, type Codigo, type Texto, type Valor } from '../lib/textos.ts';
+import { emPt, moedaTx, tx, type Codigo, type Texto, type Valor } from '../lib/textos.ts';
 import { clip } from '../lib/util.ts';
 import { integrationDef } from './integrations.ts';
 import { taskFiles } from './operations.ts';
@@ -100,7 +100,7 @@ const NOMES_COMO_VERBO = new Set(['Oscar', 'Edgar', 'Baltazar', 'Itamar', 'Omar'
 
 type Grupo = 'apagar' | 'email' | 'resposta' | 'mensagem' | 'cobranca' | 'tarefa' | 'tarefa_mudar' | 'agenda' | 'documento' | 'mover' | 'outro';
 /** copia: quem vai em cópia (o cc de um e-mail), que pesa na decisão tanto quanto o destinatário */
-interface Fato { grupo: Grupo; app: Valor; alvos: string[]; copia?: string[]; nomes: string[]; resumo: string; verbo?: 'criar' | 'atualizar' | 'cancelar'; coisa?: 'email' | 'mensagem' | 'item' }
+interface Fato { grupo: Grupo; app: Valor; alvos: string[]; copia?: string[]; nomes: string[]; valores?: Valor[]; resumo: string; verbo?: 'criar' | 'atualizar' | 'cancelar'; coisa?: 'email' | 'mensagem' | 'item' }
 
 const aspas = (s: string) => `“${s}”`;
 const unicos = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
@@ -143,7 +143,7 @@ export function fatoDaAcao(x: { conexao: string; acao: string; args: string | nu
   }
   if (id === 'email.mover') return { grupo: 'mover', app, alvos: [], nomes: [umValor(a, 'pasta')].filter(Boolean), resumo };
   if (/^email\.(enviar|enviar_rascunho)$/.test(id)) return { grupo: 'email', app, alvos: valores(a, 'para'), copia: valores(a, 'cc'), nomes: [umValor(a, 'assunto')].filter(Boolean), resumo };
-  if (id === 'asaas.criar_cobranca') return { grupo: 'cobranca', app, alvos: [], nomes: [reais(a.valor)].filter(Boolean), resumo };
+  if (id === 'asaas.criar_cobranca') return { grupo: 'cobranca', app, alvos: [], nomes: [], valores: [reais(a.valor)].filter(Boolean), resumo };
   if (id === 'email.responder') return { grupo: 'resposta', app, alvos: [], nomes: [], resumo };
   if (/\.(enviar|direta|responder|enviar_canal|nova_conversa)$/.test(id) || /^(freshdesk|zendesk|intercom)\.responder$/.test(id)) {
     return { grupo: 'mensagem', app, alvos: valores(a, 'para', 'conversa', 'destinatario', 'contato', 'canal'), nomes: [], resumo };
@@ -164,10 +164,10 @@ const juntar = (fatos: Fato[]) => ORDEM.map((g) => fatos.filter((f) => f.grupo =
 const appsDe = (fs: Fato[]): Valor[] => { const vistos = new Set<string>(); return fs.map((f) => f.app).filter((a) => { const k = emPt(a).trim(); if (!k || vistos.has(k)) return false; vistos.add(k); return true; }); };
 const em = (fs: Fato[]): Valor => { const apps = appsDe(fs); return apps.length ? tx('resumo.em', { apps }) : ''; };
 const no = (fs: Fato[]): Valor => { const apps = appsDe(fs); return apps.length ? tx('resumo.no', { apps }) : ''; };
-/** R$ 1.290,50: o valor de uma cobrança, como o parâmetro veio */
-function reais(v: unknown): string {
+/** R$ 1.290,50: o valor de uma cobrança (em reais: Asaas), como o parâmetro veio; a tela escreve no formato do idioma (rc.45) */
+function reais(v: unknown): Valor {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v.replace(',', '.')) : NaN;
-  return Number.isFinite(n) && n > 0 ? `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+  return Number.isFinite(n) && n > 0 ? moedaTx(n, 'BRL') : '';
 }
 const para = (alvos: string[]): Valor => (alvos.length ? tx('resumo.para', { quem: poucos(alvos) }) : '');
 const copiaDe = (fs: Fato[]): Valor => { const cc = unicos(fs.flatMap((f) => f.copia ?? [])); return cc.length ? tx('resumo.comCopia', { quem: poucos(cc) }) : ''; };
@@ -184,7 +184,7 @@ export function textoDoPendente(fatos: Fato[]): Valor[] {
     switch (fs[0].grupo) {
       case 'apagar': { const c = fs[0].coisa ?? 'item'; return tx('resumo.pendente.apagar', { qtd: tx(`resumo.qtd.${c}`, { n }), em: c === 'email' ? '' : em(fs) }); }
       case 'mover': return tx('resumo.pendente.mover', { qtd: tx('resumo.qtd.email', { n }), pasta: nomes.length ? tx('resumo.paraPasta', { n: nomes.length, nomes: poucos(nomes.map(aspas)) }) : '' });
-      case 'cobranca': return tx('resumo.pendente.cobranca', { qtd: tx('resumo.qtd.cobranca', { n }), em: em(fs), valores: nomes.length ? tx('resumo.parenteses', { t: poucos(nomes) }) : '' });
+      case 'cobranca': { const vs = fs.flatMap((f) => f.valores ?? []); return tx('resumo.pendente.cobranca', { qtd: tx('resumo.qtd.cobranca', { n }), em: em(fs), valores: vs.length ? tx('resumo.parenteses', { t: poucos(vs) }) : '' }); }
       case 'email': return tx('resumo.pendente.email', { qtd: tx('resumo.qtd.email', { n }), para: para(alvos), copia: copiaDe(fs), sobre: sobre(nomes) });
       case 'resposta': return tx('resumo.pendente.resposta', { qtd: tx('resumo.qtd.email', { n }) });
       case 'mensagem': return tx('resumo.pendente.mensagem', { qtd: tx('resumo.qtd.mensagem', { n }), para: para(alvos), no: no(fs) });
@@ -207,7 +207,7 @@ export function textosDoFeito(fatos: Fato[]): Texto[] {
     switch (fs[0].grupo) {
       case 'apagar': { const c = fs[0].coisa ?? 'item'; return tx(`resumo.feito.apagar.${c}`, { n, em: c === 'email' ? '' : em(fs) }, 'maiuscula'); }
       case 'mover': return tx('resumo.feito.mover', { n, para: nomes.length ? tx('resumo.para', { quem: poucos(nomes.map(aspas)) }) : '' }, 'maiuscula');
-      case 'cobranca': return tx('resumo.feito.cobranca', { n, em: em(fs), valores: nomes.length ? tx('resumo.parenteses', { t: poucos(nomes) }) : '' }, 'maiuscula');
+      case 'cobranca': { const vs = fs.flatMap((f) => f.valores ?? []); return tx('resumo.feito.cobranca', { n, em: em(fs), valores: vs.length ? tx('resumo.parenteses', { t: poucos(vs) }) : '' }, 'maiuscula'); }
       case 'email': return tx('resumo.feito.email', { n, para: para(alvos), copia: copiaDe(fs), sobre: sobre(nomes) }, 'maiuscula');
       case 'resposta': return tx('resumo.feito.resposta', { n }, 'maiuscula');
       case 'mensagem': return tx('resumo.feito.mensagem', { n, para: para(alvos), no: no(fs) }, 'maiuscula');

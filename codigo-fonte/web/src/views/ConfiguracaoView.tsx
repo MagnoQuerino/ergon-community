@@ -1,4 +1,5 @@
 import { MinhaContaPanel, WorkspaceConfigPanel } from './ContaPanel.tsx';
+import { nomeDaFerramenta, notaDaFerramenta } from '../i18n/sementes.ts';
 import { useEffect, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -154,14 +155,14 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
             // do próprio Ergon: sempre ligada (vale para quem a tem no perfil)
             <label key={f.id} className="tool-opt tool-opt--on">
               <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title={t('configuracoes.ferr.sempreLigadaDica')} />
-              <span className="tool-opt__txt"><b>{f.label}</b><small>{f.note}</small></span>
+              <span className="tool-opt__txt"><b>{nomeDaFerramenta(f.id, f.label)}</b><small>{notaDaFerramenta(f.id, f.note)}</small></span>
               <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{t('configuracoes.ferr.ligada')}</span>
                 <span className="muted small">{holdersText(f.holders)}</span></span>
             </label>
           ) : (
             <label key={f.id} className={`tool-opt ${f.platform ? 'tool-opt--on' : ''} ${!f.safe && !f.guarded ? 'tool-opt--off' : ''}`}>
               <input type="checkbox" checked={!!f.platform} disabled={(!f.safe && !f.guarded) || !s?.available || f.id === 'passos'} onChange={(e) => void toggleTool(f.id, e.target.checked)} />
-              <span className="tool-opt__txt"><b>{f.guarded && <Icon name="lock" size={12} />} {f.label}</b><small>{f.note.replace(/ — (desligada|bloqueada):.*$/, '')}{f.guarded && !f.platform ? ` · ${t('configuracoes.ferr.pedeSenha')}` : ''}</small></span>
+              <span className="tool-opt__txt"><b>{f.guarded && <Icon name="lock" size={12} />} {nomeDaFerramenta(f.id, f.label)}</b><small>{notaDaFerramenta(f.id, f.note.replace(/ — (desligada|bloqueada):.*$/, ''))}{f.guarded && !f.platform ? ` · ${t('configuracoes.ferr.pedeSenha')}` : ''}</small></span>
               <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{f.safe || f.guarded ? (f.platform ? t('configuracoes.ferr.ligada') : f.guarded ? t('configuracoes.ferr.protegida') : t('configuracoes.ferr.desligada')) : t('configuracoes.ferr.bloqueada')}</span>
                 {f.aviso && <span className="badge badge--warn" title={f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custoDica') : t('configuracoes.ferr.aviso.riscoDica')}>{f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custo') : t('configuracoes.ferr.aviso.risco')}</span>}
                 <span className="muted small">{holdersText(f.holders)}</span></span>

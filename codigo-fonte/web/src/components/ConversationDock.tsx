@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { daSemente } from '../i18n/sementes.ts';
 import { fmtData, fmtHora, t, useT } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { SECTION_LABEL, contactsOf, unreadTotal, type Contact, type Section } from '../lib/conversations.ts';
@@ -168,7 +169,7 @@ function TeamRest({ scope, shown, currentId, onOpen }: { scope: string; shown: R
           render={(a) => (
             <button className={`convs__item ${a.id === currentId ? 'is-on' : ''}`} onClick={() => onOpen(a)}>
               <AgentAvatar agent={a} size={34} />
-              <span className="convs__txt"><b>{a.name}</b><small>{a.role}</small></span>
+              <span className="convs__txt"><b>{a.name}</b><small>{daSemente(a.role)}</small></span>
             </button>
           )} />
       </div>
@@ -264,7 +265,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
               {!found.data && <p className="muted small">{t('conversas.busca.procurando')}</p>}
               {!!found.data?.contatos.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.contatos')}</span>
                 {found.data.contatos.map((a) => { const c = contacts.find((x) => x.agentId === a.id); return (
-                  <button key={a.id} type="button" className="convs__item" onClick={() => open(a.id, c?.latest.id ?? null, null, a)}><AgentAvatar agent={a} size={30} /><span className="convs__txt"><b>{a.name}</b><small>{a.role}</small></span></button>); })}</div>}
+                  <button key={a.id} type="button" className="convs__item" onClick={() => open(a.id, c?.latest.id ?? null, null, a)}><AgentAvatar agent={a} size={30} /><span className="convs__txt"><b>{a.name}</b><small>{daSemente(a.role)}</small></span></button>); })}</div>}
               {!!found.data?.assuntos.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.assuntos')}</span>
                 {found.data.assuntos.map((x) => <button key={x.id} type="button" className="convs__result" onClick={() => open(x.agentId, x.id)}><b>{x.title}</b><small>{x.agent}{x.archived ? ` · ${t('conversas.busca.arquivado')}` : ''}</small></button>)}</div>}
               {!!found.data?.mensagens.length && <div className="convs__section"><span className="convs__section-name">{t('conversas.busca.mensagens')}</span>
@@ -338,7 +339,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
             <>
               <header className="foco__chat-head">
                 <AgentAvatar agent={agent} size={36} />
-                <div className="foco__chat-who"><b>{agent.name}</b><small>{agent.role} · {agent.sector_name}</small></div>
+                <div className="foco__chat-who"><b>{agent.name}</b><small>{daSemente(agent.role)} · {daSemente(agent.sector_name)}</small></div>
                 <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', agent)}><Icon name="edit" size={13} /> {t('conversas.lista.perfil')}</button>
               </header>
               <ChatPanel key={`${agent.id}-${current.conversationId ?? 'nova'}`} agent={agent} embedded hidePicker conversationId={current.conversationId}

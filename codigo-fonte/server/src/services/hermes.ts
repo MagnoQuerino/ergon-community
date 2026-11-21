@@ -5,6 +5,7 @@
  * GET /api/model/options. A chave fica só no servidor Ergon; o navegador nunca a recebe.
  * Contas, modelo padrão e skills passam pela ponte de controle do plugin (HttpHermesControl, abaixo).
  */
+import type { IdiomaMotor } from './idioma-motor.ts';
 /** As marcas das instruções do Ergon no pedido (as mesmas do plugin: ERGON_INSTR_INI/FIM em ergon_bridge). */
 export const ERGON_INSTR_INI = '\u27e6ergon-instrucoes\u27e7';
 export const ERGON_INSTR_FIM = '\u27e6/ergon-instrucoes\u27e7';
@@ -117,7 +118,16 @@ export class CanalErro extends Error {
 }
 /** Um canal no motor: o código do bot guardado (nunca o valor), a situação da conexão e quem está ligado. */
 export interface CanalNoMotor { configurado: boolean; estado: string | null; erro: string | null; ligados: Array<{ user_id: string; user_name: string }> }
-export type NomeCanal = 'telegram' | 'discord';
+/** rc.45: Feishu (ou Lark, o internacional) e DingTalk, ao lado do Telegram e do Discord. */
+export type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk';
+export const NOMES_CANAL: readonly NomeCanal[] = ['telegram', 'discord', 'feishu', 'dingtalk'];
+/** Os canais de aplicativo próprio (App ID e App Secret, não o código de um bot): Feishu/Lark e DingTalk. */
+export const CANAIS_DE_APP: readonly NomeCanal[] = ['feishu', 'dingtalk'];
+/**
+ * A credencial que vai ao motor: o código do bot (Telegram, Discord) ou o App ID e o App Secret do aplicativo (Feishu,
+ * DingTalk). No Feishu, `dominio` diz se é o Feishu da China (open.feishu.cn) ou o Lark internacional (open.larksuite.com).
+ */
+export type CredencialCanal = { token: string } | { appId: string; appSecret: string; dominio?: 'feishu' | 'lark' };
 
 const RUN_ID = /^run_[A-Za-z0-9_-]{3,64}$/;
 
@@ -509,7 +519,7 @@ export interface HermesControlClient {
    *  no motor (o gateway reinicia), confirmar o código de pareamento que a pessoa recebeu no canal e desligar. Ausente =
    *  motor sem suporte. */
   canais?(): Promise<Record<NomeCanal, CanalNoMotor>>;
-  setCanal?(canal: NomeCanal, token: string): Promise<void>;
+  setCanal?(canal: NomeCanal, cred: CredencialCanal): Promise<void>;
   parearCanal?(canal: NomeCanal, codigo: string): Promise<{ userId: string; userName: string; chatId: string }>;
   removerCanal?(canal: NomeCanal): Promise<void>;
 }
@@ -613,8 +623,8 @@ export interface AjustesMotor {
 }
 /** A profundidade do raciocínio que a tela oferece ('modelo' = a do próprio modelo; no motor, ''). */
 export type Raciocinio = 'high' | 'medium' | 'low' | 'modelo';
-export interface AjustesPatch { reserva?: ModeloReserva[]; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio; idioma?: 'pt' | 'en';
-  vozFalar?: 'piper' | 'edge'; vozModelo?: 'base' | 'small'; vozIdioma?: 'pt' | 'en' }
+export interface AjustesPatch { reserva?: ModeloReserva[]; naoTreinar?: boolean; buscaPrivada?: boolean; arrumarCompetencias?: boolean; anotarMemoria?: boolean; raciocinio?: Raciocinio; idioma?: IdiomaMotor;
+  vozFalar?: 'piper' | 'edge'; vozModelo?: 'base' | 'small'; vozIdioma?: IdiomaMotor }
 export function parseAjustes(j: unknown): AjustesMotor | null {
   if (!j || typeof j !== 'object') return null;
   const o = j as Record<string, unknown>;
@@ -952,7 +962,7 @@ export class HttpHermesControl implements HermesControlClient {
   private async canal(method: string, path: string, body?: unknown): Promise<any> {
     try { return await this.call(method, path, body, 30000); } catch (e) {
       if (!(e instanceof HermesError)) throw e;
-      if (e.status === 400 && /formato/.test(e.message)) throw new CanalErro('formato', 'Esse não parece o código do bot. Copie de novo, inteiro.');
+      if (e.status === 400 && /formato/.test(e.message)) throw new CanalErro('formato', /app/i.test(e.message) ? 'O App ID ou o App Secret não têm o formato esperado. Copie de novo, inteiros.' : 'Esse não parece o código do bot. Copie de novo, inteiro.');
       if (e.status === 400 || e.status === 404) throw new CanalErro('codigo', 'Código não encontrado ou vencido. Mande uma mensagem nova ao bot para receber outro.');
       if (e.status === 429) throw new CanalErro('tentativas', 'Muitas tentativas com código errado. Espere uma hora e tente de novo.');
       throw new CanalErro('motor', 'A equipe não respondeu agora. Tente de novo em instantes.');
@@ -964,9 +974,13 @@ export class HttpHermesControl implements HermesControlClient {
       configurado: x?.configurado === true, estado: typeof x?.estado === 'string' ? x.estado : null, erro: typeof x?.erro === 'string' ? x.erro : null,
       ligados: Array.isArray(x?.ligados) ? x.ligados.map((l: any) => ({ user_id: String(l?.user_id ?? ''), user_name: String(l?.user_name ?? '') })) : [],
     });
-    return { telegram: um(j?.canais?.telegram), discord: um(j?.canais?.discord) };
+    // motor de antes da rc.45 não fala do Feishu nem do DingTalk: ficam como não configurados
+    return { telegram: um(j?.canais?.telegram), discord: um(j?.canais?.discord), feishu: um(j?.canais?.feishu), dingtalk: um(j?.canais?.dingtalk) };
   }
-  async setCanal(canal: NomeCanal, token: string) { await this.canal('PUT', `/ergon/v1/canais/${canal}`, { token }); }
+  async setCanal(canal: NomeCanal, cred: CredencialCanal) {
+    await this.canal('PUT', `/ergon/v1/canais/${canal}`, 'token' in cred ? { token: cred.token }
+      : { app_id: cred.appId, app_secret: cred.appSecret, ...(cred.dominio ? { dominio: cred.dominio } : {}) });
+  }
   async parearCanal(canal: NomeCanal, codigo: string) {
     const j = await this.canal('POST', `/ergon/v1/canais/${canal}/parear`, { codigo });
     return { userId: String(j.user_id ?? ''), userName: String(j.user_name ?? ''), chatId: String(j.chat_id ?? j.user_id ?? '') };

@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.45 (pré-versão de teste)
+
+- **A equipe no seu idioma:** com a tela em chinês, hindi ou inglês da Índia, os agentes respondem nesse idioma, nas conversas, nos cards e nas rotinas, e as mensagens do próprio motor saem em chinês. A equipe de partida, os setores e os quadros de fábrica também aparecem no idioma da tela.
+- **Feishu, Lark e DingTalk:** em Conexões › Conversar com a equipe, ligue o aplicativo interno da sua empresa (App ID e App Secret, guardados com a equipe) e converse com ela por mensagem direta, com o passo a passo na tela. Vale para o Feishu da China e para o Lark internacional. A conexão sai do seu computador, sem endereço público, e o que precisa de aprovação se decide no app. Tudo já vem instalado, sem baixar nada no primeiro uso.
+- **Chinês em mais telas:** cidade, equipe, perfil do agente, rotinas, documentos, Conexões e Configurações. As traduções ainda passam por revisão de falante nativo.
+- **Também:** valores e horários que o servidor escreve seguem o idioma de quem lê, como a linha final dos cartões nos canais.
+
 ## 1.1.0-rc.44 (pré-versão de teste)
 
 - **简体中文, हिन्दी e English (India):** a tela ganha três idiomas no seletor (menu do avatar e Minha conta). Na primeira vez, o Ergon abre no idioma do sistema ou do navegador. Chinês e hindi cobrem entrar, boas-vindas, navegação, conversa e salas, tarefas, entregas e as contas de IA; o resto aparece em inglês, nunca como código. As traduções ainda passam por revisão de falante nativo.

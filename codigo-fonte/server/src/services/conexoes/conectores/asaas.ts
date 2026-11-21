@@ -33,6 +33,7 @@ import crypto from 'node:crypto';
 import { neutral } from '../../operations.ts';
 import { linhaDe, vazio, type ConectorDef } from './declarativo.ts';
 import { ErroAcao, dia as diaDe, seg, type Acao, type Args, type CtxAcao, type Param, type Resultado } from '../tipos.ts';
+import { fmtMoeda } from '../../../lib/i18n.ts';
 
 type Campos = Array<[rotulo: string, campo: string]>;
 
@@ -61,7 +62,7 @@ const dia = (descricao: string): Param => ({ tipo: 'texto', descricao: `${descri
 const FORMAS = ['UNDEFINED', 'BOLETO', 'PIX', 'CREDIT_CARD'];
 const NOME_FORMA: Record<string, string> = { UNDEFINED: 'o cliente escolhe', BOLETO: 'boleto', PIX: 'Pix', CREDIT_CARD: 'cartão de crédito' };
 /** R$ com vírgula, como a pessoa lê no cartão de confirmação. */
-const reais = (v: unknown) => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
+const reais = (v: unknown) => fmtMoeda(null, Number(v), 'BRL');
 /** Valor positivo e com centavos: o que o cartão mostra é o que vai. */
 const valorOk = (v: unknown, nome = 'valor'): number => {
   const n = Number(v);

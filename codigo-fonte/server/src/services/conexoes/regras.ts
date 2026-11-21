@@ -16,6 +16,7 @@ import { attrs } from '../routine-proposals.ts';
 import { runDeOrigem } from './marca.ts';
 import type { GrupoDepoisDeLer } from './regra.ts';
 import type { Risco } from './tipos.ts';
+import { fmtData } from '../../lib/i18n.ts';
 
 export type Alcance = 'pedido' | '24h' | 'sempre';
 export const ALCANCES: readonly Alcance[] = ['pedido', '24h', 'sempre'];
@@ -67,7 +68,7 @@ export function descreverRegra(r: { riscos: readonly string[]; conexoes: readonl
   return `${lista(oque)} ${onde}`;
 }
 const descreverGrupo = (g: GrupoDepoisDeLer): string => (g === 'sites' ? 'abrir sites depois de ler conteúdo das contas' : 'rodar programas depois de ler conteúdo das contas');
-const quando = (iso: string): string => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const quando = (iso: string): string => fmtData(null, iso, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 export function descreverAlcance(r: Pick<RegraConexao, 'alcance' | 'expira_em'>): string {
   if (r.alcance === 'sempre') return 'sempre';
   if (r.alcance === '24h') return `por 24 h${r.expira_em ? ` (até ${quando(r.expira_em)})` : ''}`;

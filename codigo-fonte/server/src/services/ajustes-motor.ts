@@ -19,6 +19,7 @@
 import type { Db } from '../db/db.ts';
 import { HermesError, type AjustesMotor, type AjustesPatch, type HermesControlClient, type ModeloReserva, type ModelOptions, type Raciocinio } from './hermes.ts';
 import { getSetting, setSetting } from './sectors.ts';
+import { CAPACIDADE_IDIOMAS, type IdiomaMotor } from './idioma-motor.ts';
 
 const RESERVA_SETTING = 'team.reserva';
 const NAO_TREINAR_SETTING = 'team.naoTreinar';
@@ -121,7 +122,9 @@ interface ContextoDosAjustes {
   /** o catálogo de modelos do motor (contas conectadas); null = não deu para ler agora (a reserva não é mexida) */
   opcoes: ModelOptions | null;
   /** o idioma da pessoa dona do motor; undefined = sem escolha (o motor fica como está) */
-  idioma?: 'pt' | 'en';
+  idioma?: IdiomaMotor;
+  /** o motor aceita zh e hi (capacidade idiomas_zh_hi, rc.45); sem ela, chinês e hindi vão como en */
+  idiomasNovos?: boolean;
 }
 
 const mesmaLista = (a: ModeloReserva[], b: ModeloReserva[]) => a.length === b.length && a.every((x, i) => x.provider === b[i].provider && x.model === b[i].model);
@@ -141,12 +144,14 @@ export function patchDosAjustes(e: EscolhasDaEquipe, atual: AjustesMotor, ctx: C
   // motor de antes destes dois (o plugin não diz): não manda (ele recusaria o pedido inteiro)
   if (atual.anotarMemoria !== undefined && e.anotarMemoria !== atual.anotarMemoria) p.anotarMemoria = e.anotarMemoria;
   if (atual.raciocinio !== undefined && noMotor(e.raciocinio) !== atual.raciocinio) p.raciocinio = e.raciocinio;
-  if (ctx.idioma && ctx.idioma !== atual.idioma) p.idioma = ctx.idioma;
+  // motor de antes da rc.45 recusaria zh e hi (e o pedido inteiro com eles): vai o inglês, como antes
+  const idioma = ctx.idioma && (ctx.idioma === 'zh' || ctx.idioma === 'hi') && !ctx.idiomasNovos ? 'en' : ctx.idioma;
+  if (idioma && idioma !== atual.idioma) p.idioma = idioma;
   // voz (rc.33): motor de antes (o plugin não diz) não recebe. O idioma da transcrição e das vozes é o da pessoa; sem
   // escolha, o português (o Ergon nasce em português)
   if (atual.vozFalar !== undefined && e.vozFalar !== atual.vozFalar) p.vozFalar = e.vozFalar;
   if (atual.vozModelo !== undefined && e.vozModelo !== atual.vozModelo) p.vozModelo = e.vozModelo;
-  const vozIdioma = ctx.idioma ?? 'pt';
+  const vozIdioma = idioma ?? 'pt';
   if (atual.vozIdioma !== undefined && vozIdioma !== atual.vozIdioma) p.vozIdioma = vozIdioma;
   return p;
 }
@@ -171,7 +176,7 @@ export async function sincronizarAjustes(db: Db, control: HermesControlClient | 
   if (info?.ok && !(info.capacidades ?? []).includes(CAPACIDADE_AJUSTES)) { gravarMotor(db, ids, SEM_AJUSTES); return null; }
   let atual = await control.ajustes();
   if (atual === null) { gravarMotor(db, ids, SEM_AJUSTES); return null; }
-  const patch = patchDosAjustes(escolhasDaEquipe(db, ids), atual, ctx);
+  const patch = patchDosAjustes(escolhasDaEquipe(db, ids), atual, { ...ctx, idiomasNovos: ctx.idiomasNovos ?? !!info?.capacidades?.includes(CAPACIDADE_IDIOMAS) });
   if (Object.keys(patch).length) {
     try { atual = (await control.setAjustes(patch)) ?? atual; }
     catch (err) {

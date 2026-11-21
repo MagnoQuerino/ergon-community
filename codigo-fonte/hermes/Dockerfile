@@ -6,7 +6,7 @@ FROM ${HERMES_IMAGE}
 
 # versão do plugin do Ergon nesta imagem: a mesma do plugin.yaml e de PLUGIN_VERSION (um teste confere); o gerente e o
 # diagnóstico leem sem abrir o motor
-LABEL ergon.plugin.version="0.10.0"
+LABEL ergon.plugin.version="0.11.0"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gocryptfs fuse3 \
@@ -69,6 +69,24 @@ RUN set -eu; \
     mkdir -p /opt/ergon/tools/rtk; tar xzf /tmp/rtk.tgz -C /opt/ergon/tools/rtk rtk LICENSE; rm /tmp/rtk.tgz; \
     chmod -R a+rX /opt/ergon/tools/rtk; ln -s /opt/ergon/tools/rtk/rtk /usr/local/bin/rtk; \
     rtk --version; test "$(rtk rewrite 'git status')" = "rtk git status"
+
+# rc.45: os pacotes dos canais da China, que o Hermes instalaria no primeiro uso pelo PyPI (e isso falha na China, onde
+# esses canais são usados): lark-oapi (conversar com a equipe pelo Feishu ou pelo Lark, extra "feishu") e dingtalk-stream
+# com o alibabacloud-dingtalk (pelo DingTalk, extra "dingtalk"), mais o qrcode que os dois extras trazem. As versões
+# diretas são as do pyproject.toml do Hermes v0.22.2 e as indiretas, as do uv.lock dele. Nada do que a imagem já tem muda
+# (a lista do ambiente vai como restrição: se um pacote pedisse outra versão de algo instalado, a imagem não seria
+# construída). A conferência final é a do próprio Hermes (pm/extras.py, available) e a importação dos SDKs.
+RUN /opt/hermes/.venv/bin/python -m ensurepip \
+ && /opt/hermes/.venv/bin/python -m pip freeze --exclude pip --exclude setuptools > /tmp/ergon-restricao.txt \
+ && /opt/hermes/.venv/bin/python -m pip install --no-cache-dir -c /tmp/ergon-restricao.txt \
+      "lark-oapi==1.6.8" "dingtalk-stream==0.24.3" "alibabacloud-dingtalk==2.2.42" "qrcode==7.4.2" \
+      "aiofiles==24.1.0" "apscheduler==3.11.3" "requests-toolbelt==1.0.0" "tzlocal==5.4.4" "websocket-client==1.9.0" \
+      "alibabacloud-credentials==1.0.12" "alibabacloud-credentials-api==1.0.1" "alibabacloud-tea==0.4.3" "alibabacloud-tea-openapi==0.4.6" \
+      "alibabacloud-tea-util==0.3.15" "alibabacloud-gateway-spi==0.0.4" "alibabacloud-openapi-util==0.2.4" "alibabacloud-endpoint-util==0.0.4" \
+      "alibabacloud-gateway-dingtalk==1.0.2" "darabonba-core==1.0.8" \
+ && /opt/hermes/.venv/bin/python -m pip uninstall -y pip \
+ && rm -f /tmp/ergon-restricao.txt \
+ && cd /opt/hermes && /opt/hermes/.venv/bin/python -c "from pm.extras import available; assert available('feishu') and available('dingtalk'); import lark_oapi, dingtalk_stream, alibabacloud_dingtalk.robot_1_0.client, websockets; print('Feishu e DingTalk na imagem; websockets', websockets.__version__)"
 
 # rc.39: competências de terceiros na biblioteca (competencias/ORIGEM.md: origem, commit e licença de cada uma). Entram
 # ao lado das que o Hermes traz e chegam à biblioteca de cada instalação pela sincronia do próprio motor; nenhum agente

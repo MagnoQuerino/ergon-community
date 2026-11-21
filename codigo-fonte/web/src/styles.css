@@ -2264,6 +2264,12 @@ body:has(.ent-dlg) .cdock { display: none; }
 .conn-teams-lista { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
 .conn-teams-lista > li { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); }
 .conn-passos { margin: 8px 0; padding-left: 20px; }
+/* rc.45: Feishu/Lark e DingTalk: o App ID e o App Secret (cartão seguro) e a escolha entre Feishu e Lark */
+.conn-app { display: grid; gap: 8px; margin: 8px 0; }
+.conn-app__dominio { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; min-width: 0; }
+.conn-app__dominio legend { padding: 0; margin-bottom: 4px; }
+.conn-app .row { align-items: flex-end; }
+.conn-app .row .field { flex: 1 1 220px; min-width: 0; }
 
 /* rc.27 — ajustes da equipe de IA: plano B (modelos reserva), pausa, limites da conta e orientar sem interromper */
 .reserva { margin: 8px 0 4px; }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { beneficioDaRotina, categoriaDaRotina, horarioDaRotina, nomeDaRotina } from '../i18n/sementes.ts';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { keepTyped, useSurface } from '../lib/surface.ts';
@@ -151,7 +152,7 @@ function Library({ lib, coordName, onGo, onInstalled }: { lib: RoutineLibrary; c
       </div>
       {groups.map((g) => (
         <section key={g.key} className="rt-group">
-          <h3 className="rt-group__title">{g.label}</h3>
+          <h3 className="rt-group__title">{categoriaDaRotina(g.key, g.label)}</h3>
           <div className="rt-grid">
             {g.items.map((tpl) => <TemplateCard key={tpl.key} tpl={tpl} onOpen={() => setOpen(tpl)} />)}
           </div>
@@ -169,13 +170,13 @@ function TemplateCard({ tpl, onOpen }: { tpl: RoutineTemplate; onOpen: () => voi
   return (
     <button className={`rt-card ${active ? 'rt-card--on' : ''}`} onClick={onOpen}>
       <span className="rt-card__head">
-        <b>{tpl.name}</b>
+        <b>{nomeDaRotina(tpl.name, tpl.key)}</b>
         <span className="badge badge--ok">{active ? t('rotinas.estado.ativa') : t('rotinas.estado.pronta')}</span>
       </span>
-      <span className="rt-card__txt">{tpl.benefit}</span>
+      <span className="rt-card__txt">{beneficioDaRotina(tpl.benefit, tpl.key)}</span>
       <span className="rt-card__meta">
         <span className="rt-agents"><Icon name="users" size={12} /> {tpl.agentNames.join(' + ')}</span>
-        {tpl.schedule && <span><Icon name="clock" size={12} /> {tpl.schedule}</span>}
+        {tpl.schedule && <span><Icon name="clock" size={12} /> {horarioDaRotina(tpl.schedule, tpl.defaultTrigger)}</span>}
       </span>
       {(missing.length > 0 || tpl.privateData) && (
         <span className="rt-needs">
@@ -248,8 +249,8 @@ function TemplateDrawer({ tpl, coordName, onClose, onGo, onInstalled }: { tpl: R
         <span className="badge badge--ok">{t('rotinas.estado.pronta')}</span>
         <button className="icon-btn" onClick={close} aria-label={t('geral.comum.fechar')} title={t('geral.comum.fechar')}><Icon name="x" /></button>
       </div>
-      <h3 className="drawer__title">{tpl.name}</h3>
-      <p className="drawer__desc">{tpl.benefit}</p>
+      <h3 className="drawer__title">{nomeDaRotina(tpl.name, tpl.key)}</h3>
+      <p className="drawer__desc">{beneficioDaRotina(tpl.benefit, tpl.key)}</p>
       <dl className="rt-facts">
         <dt>{t('rotinas.ficha.entrega')}</dt><dd>{tpl.produces}</dd>
         <dt>{t('rotinas.ficha.examina')}</dt><dd>{tpl.sources.length > 0 ? <ul>{tpl.sources.map((s) => <li key={s}>{s}</li>)}</ul> : tpl.examines}</dd>
@@ -340,7 +341,7 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
   const nuvem = useNuvemNoCartao(`rotina:${r.id}`);
   const runNow = () => (r.input ? setAsk(true) : act(() => api.post(`/api/routines/${r.id}/run`, { clientRequestId: requestId() })));
   const linha = [
-    r.status === 'active' && r.nextRunAt ? `${r.schedule} · ${t('rotinas.cartao.proxima', { quando: when(r.nextRunAt) })}` : r.schedule,
+    r.status === 'active' && r.nextRunAt ? `${horarioDaRotina(r.schedule, r.trigger)} · ${t('rotinas.cartao.proxima', { quando: when(r.nextRunAt) })}` : horarioDaRotina(r.schedule, r.trigger),
     t('rotinas.cartao.executa', { nome: r.agentName ?? '—' }),
     r.templateName ? '' : t('rotinas.cartao.criadaConversa'),
   ].filter(Boolean).join(' · ');
@@ -349,7 +350,7 @@ function RoutineCard({ r, coord, onOpenAgent, onSetup, onEdit, reload }: { r: Ro
     <article id={`rotina-${r.id}`} className={`card rt-item card-click ${r.status === 'paused' ? 'rt-item--paused' : ''}`} onClick={cardClick(onEdit)}>
       <header className="rt-item__head">
         <div>
-          <h3><button type="button" className="card-open" onClick={onEdit} aria-label={t('rotinas.cartao.verDetalhes', { nome: r.name })}>{r.name}</button></h3>
+          <h3><button type="button" className="card-open" onClick={onEdit} aria-label={t('rotinas.cartao.verDetalhes', { nome: nomeDaRotina(r.name, r.template) })}>{nomeDaRotina(r.name, r.template)}</button></h3>
           <p className="muted">
             <Icon name="clock" size={12} /> {linha}
           </p>
@@ -777,7 +778,7 @@ function RoutineSetup({ id, fresh, onBack, onGo }: { id: string; fresh: boolean;
     <div className="page rt-setup">
       <header className="rt-setup__head">
         <button className="btn btn--ghost btn--sm" onClick={onBack}>{t('rotinas.preparo.voltar')}</button>
-        <h2>{r.name}</h2>
+        <h2>{nomeDaRotina(r.name, r.template)}</h2>
         <span className={`badge ${ready ? 'badge--ok' : 'badge--warn'}`}>{ready ? t('rotinas.estado.ativa') : asking ? t('rotinas.estado.esperandoVoce') : t('rotinas.estado.emPreparo')}</span>
       </header>
       <div className="rt-setup__grid">
@@ -792,7 +793,7 @@ function RoutineSetup({ id, fresh, onBack, onGo }: { id: string; fresh: boolean;
                 <h3><Icon name="auto" size={16} /> {t('rotinas.preparo.prontaAjustada')}</h3>
                 <p>{s.adapted.summary.charAt(0).toUpperCase() + s.adapted.summary.slice(1)}.</p>
                 <div className="rt-setup__chips">
-                  <span className="chip"><Icon name="clock" size={12} /> {r.schedule}</span>
+                  <span className="chip"><Icon name="clock" size={12} /> {horarioDaRotina(r.schedule, r.trigger)}</span>
                   {/* i18n-ok: 'horário' é o começo da frase que o servidor manda (a mudança de horário já está no chip do relógio) */}
                   {s.adapted.changes.filter((c) => !c.startsWith('horário')).map((c) => <span key={c} className="chip">{c}</span>)}
                   <span className="chip">{t('rotinas.cartao.executa', { nome: r.agentName ?? '—' })}</span>
@@ -829,7 +830,7 @@ function RoutineSetup({ id, fresh, onBack, onGo }: { id: string; fresh: boolean;
           {tpl && (
             <div className="card rt-about">
               <h3>{t('rotinas.preparo.sobre')}</h3>
-              <p>{tpl.benefit}</p>
+              <p>{r.template ? beneficioDaRotina(tpl.benefit, r.template) : tpl.benefit}</p>
               <dl className="rt-facts">
                 <dt>{t('rotinas.ficha.entregaCurta')}</dt><dd>{tpl.produces}</dd>
                 <dt>{t('rotinas.ficha.olha')}</dt><dd>{tpl.sources.join('; ')}</dd>

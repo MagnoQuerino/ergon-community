@@ -8,12 +8,13 @@ import type { Config } from '../config.ts';
 import { HttpError } from '../lib/util.ts';
 import { BENEFICIOS_DA_PLATAFORMA, TOOLS, platformToolsets, setPlatformToolsets, toolStatus, type ToolDef } from './characters.ts';
 import { PERFIL_RE, type AuxModels, type ByokCatalog, type ByokCustomInput, type HermesClient, type HermesControlClient, type LoginPoll, type LoginStart, type ModelOptions, type SkillInfo } from './hermes.ts';
-import { tx } from '../lib/textos.ts';
+import { emPt, tx } from '../lib/textos.ts';
 import type { Db } from '../db/db.ts';
 import { sincronizarCompactacao, sincronizarPassos } from './custo.ts';
 import { sincronizarAjustes, sincronizarPausa } from './ajustes-motor.ts';
 import type { AjustesMotor, CotaConta } from './hermes.ts';
 import { CODIGO_PADRAO } from './termos.ts';
+import type { IdiomaMotor } from './idioma-motor.ts';
 
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
@@ -272,7 +273,7 @@ export class AiService {
    * privada, arrumar competências sem uso, e o idioma das mensagens do motor. O motor fica com as escolhas mais recentes
    * dos workspaces dele. Devolve como ficou, ou null se o motor não tem a ponte dos ajustes. Erro de rede sobe.
    */
-  async sincronizarAjustes(db: Db, workspaceIds: string[], idioma?: 'pt' | 'en'): Promise<AjustesMotor | null> {
+  async sincronizarAjustes(db: Db, workspaceIds: string[], idioma?: IdiomaMotor): Promise<AjustesMotor | null> {
     // o catálogo de modelos diz quais contas estão conectadas (a reserva automática sai dele); sem ele, a reserva não é mexida
     const opcoes = await this.modelOptions().catch(() => null);
     return sincronizarAjustes(db, this.control, workspaceIds, { opcoes, idioma });
@@ -341,10 +342,11 @@ export class AiService {
     ]);
     const accounts = ACCOUNTS.map((a) => {
       const s = st?.find((x) => x.id === a.id);
-      const detail = !available ? (ocupado ? 'a equipe de IA está ocupada: confira de novo em instantes' : 'indisponível nesta instalação')
-        : !st ? (ocupado ? 'a equipe de IA está ocupada: confira de novo em instantes' : 'não conectada')
-        : !s?.connected ? 'não conectada' : s.freeTier ? 'conectada (plano gratuito)' : s.tier ? `conectada (plano ${s.tier})` : 'conectada';
-      return { ...a, connected: !!s?.connected, detail };
+      // rc.45: a situação vai com o código ao lado (detail_t): a tela escreve no idioma de quem lê
+      const detalhe = !available ? tx(ocupado ? 'iaConta.ocupada' : 'iaConta.indisponivel')
+        : !st ? tx(ocupado ? 'iaConta.ocupada' : 'iaConta.naoConectada')
+        : !s?.connected ? tx('iaConta.naoConectada') : s.freeTier ? tx('iaConta.conectadaGratis') : s.tier ? tx('iaConta.conectadaPlano', { plano: s.tier }) : tx('iaConta.conectada');
+      return { ...a, connected: !!s?.connected, detail: emPt(detalhe), detail_t: detalhe };
     });
     return { executor, available, ...(ocupado ? { ocupado: true } : {}), accounts, default: { ...d, label: labelFor(d.provider, d.model), billing: billingOf(d.provider) },
       byok: cat.providers, byokCustom: cat.custom, ergonAi: cat.ergonAi === true };

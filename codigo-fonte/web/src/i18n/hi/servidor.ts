@@ -58,6 +58,19 @@ const servidor: TraducaoParcial<typeof pt> = {
   'erro.rotinaExecutando': 'यह रूटीन पहले से चल रहा है: पूरा होने तक प्रतीक्षा करें।',
   'erro.respostaEmAndamento': 'इस बातचीत में अभी एक जवाब जारी है।',
   'erro.respostaEmAndamentoFila': 'इस बातचीत में अभी एक जवाब जारी है: प्रतीक्षा करें, उसे रद्द करें, या अपना संदेश कतार में रखने के लिए Ctrl+Enter दबाएँ।',
+  // rc.45: a situação das contas de IA e o recurso que chega com a atualização
+  'iaConta.ocupada': 'AI टीम व्यस्त है: थोड़ी देर में फिर देखें',
+  'iaConta.indisponivel': 'इस इंस्टॉलेशन में उपलब्ध नहीं',
+  'iaConta.naoConectada': 'कनेक्ट नहीं है',
+  'iaConta.conectada': 'कनेक्ट है',
+  'iaConta.conectadaGratis': 'कनेक्ट है (मुफ़्त प्लान)',
+  'iaConta.conectadaPlano': 'कनेक्ट है ({plano} प्लान)',
+  'erro.recursosAtualizando': 'यह क्षमता इस कंप्यूटर पर टीम के अगले अपडेट के साथ आएगी',
+  // rc.45: a nota do consumo
+  'consumo.nota.subscription': 'ChatGPT सदस्यता: इस्तेमाल पर अलग शुल्क नहीं (मासिक शुल्क में शामिल)। टोकन दिखाते हैं कि टीम ने कितना काम किया।',
+  'consumo.nota.credits': 'क्रेडिट वाला खाता: प्रदाता के बताए शुल्क पर लागत दिखती है; शेष राशि खाते के पोर्टल में है।',
+  'consumo.nota.api': 'API कुंजी: प्रदाता हर रन का शुल्क बताता है तब लागत दिखती है।',
+  'consumo.nota.none': 'कोई AI खाता कनेक्ट नहीं: टीम अनुरोधों पर काम नहीं करती, कोई खपत नहीं।',
 };
 
 export default servidor;

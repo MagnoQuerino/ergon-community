@@ -37,6 +37,7 @@ import { remoteHolder, routineCard } from './remote-work.ts';
 import { getSetting, setSetting } from './sectors.ts';
 import { stripControl } from './teamwork.ts';
 import { duplicadosEntreDocumentos } from './fin-parse.ts';
+import { fmtNumero } from '../lib/i18n.ts';
 
 /** Os personagens de estudo das frases de espera do preparo, na ordem da tela (RotinasView.tsx, STUDY_CHAR). */
 const STUDY_CAST = ['aristoteles', 'hipatia', 'socrates', 'arquimedes', 'diogenes', 'euclides', 'herodoto'];
@@ -150,7 +151,7 @@ function gather(db: Db, workspaceId: string, sources: SourceId[], since: string,
       const ok = rs.filter((r) => r.status === 'succeeded').length;
       const failed = rs.filter((r) => r.status === 'failed');
       const tokens = rs.reduce((s, r) => s + Number(r.tin ?? 0) + Number(r.tout ?? 0), 0);
-      const lines = rs.length ? [`${ok} trabalho(s) concluído(s) pelos agentes${failed.length ? `, ${failed.length} com erro` : ''}${tokens ? ` · ${tokens.toLocaleString('pt-BR')} tokens` : ''}`,
+      const lines = rs.length ? [`${ok} trabalho(s) concluído(s) pelos agentes${failed.length ? `, ${failed.length} com erro` : ''}${tokens ? ` · ${fmtNumero(null, tokens)} tokens` : ''}`,
         ...failed.slice(0, 5).map((f) => `Erro: ${f.name} — ${clip(f.error ?? 'sem detalhe', 100)}`)] : [];
       add(key, rs.length, lines, { news: rs.length > 0, signal: failed.length > 0 });
     } else if (key === 'mensagens') {

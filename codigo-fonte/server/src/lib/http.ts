@@ -10,6 +10,7 @@
  * conexão caída no meio ou 5xx numa escrita = resultado desconhecido, e repetir poderia fazer duas vezes. As ações
  * das conexões e o envio dos quadros escrevem nos serviços: toda escrita declara `kind: 'write'`.
  */
+import { fmtData } from './i18n.ts';
 export type HttpKind = 'read' | 'write';
 interface RetryPolicy {
   kind?: HttpKind;
@@ -94,5 +95,5 @@ export function retryHint(res: Response, tz = 'America/Sao_Paulo'): string {
   if (ms === null) return 'tente daqui a pouco';
   if (ms < 90_000) return `tente de novo em ${Math.max(1, Math.round(ms / 1000))} s`;
   const at = new Date(Date.now() + ms);
-  return `tente de novo depois das ${at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: tz })}`;
+  return `tente de novo depois das ${fmtData(null, at, { hour: '2-digit', minute: '2-digit', timeZone: tz })}`;
 }

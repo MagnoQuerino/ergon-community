@@ -45,7 +45,7 @@ const UNIVERSAIS = new Set(('Ergon Ctrl Cmd Alt Shift Esc Enter Tab K OK Nous Mi
   'Telegram Slack Discord Notion Trello Outlook Gmail Planner PNG JPEG WebP PDF CSV JSON URL ZIP MB KB GB ID API Linux ' +
   'Windows macOS Mac PC Wi-Fi Stripe OpenAI ChatGPT Claude Anthropic Gemini Podman Tauri Pix Jira Asana Todoist ClickUp ' +
   'Linear Airtable Monday SharePoint OneDrive Dropbox Zoom Edge Chrome Firefox Safari Android iOS iPhone iPad Word Excel ' +
-  'PowerPoint Smartsheet Pipefy').split(' '));
+  'PowerPoint Smartsheet Pipefy Feishu Lark DingTalk').split(' '));
 /** Nomes de tecla do navegador (e.key): técnicos, mesmo com maiúscula. */
 const TECLAS = new Set(('Escape ArrowUp ArrowDown ArrowLeft ArrowRight Backspace Delete Home End PageUp PageDown Space ' +
   'Control Meta Insert Spacebar').split(' '));

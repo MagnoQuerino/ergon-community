@@ -37,6 +37,7 @@
 import crypto from 'node:crypto';
 import { linhaDe, vazio, type ConectorDef, type Credenciais } from './declarativo.ts';
 import { ErroAcao, type Args, type CtxAcao, type Param } from '../tipos.ts';
+import { fmtMoeda } from '../../../lib/i18n.ts';
 
 type Chamada = 'ListarEmpresas' | 'ListarContasReceber' | 'ConsultarContaReceber' | 'ListarContasPagar' | 'ConsultarContaPagar' | 'PesquisarLancamentos' | 'ListarClientes' | 'ConsultarCliente'
   | 'ListarCategorias' | 'ListarContasCorrentes' | 'IncluirCliente' | 'IncluirContaReceber';
@@ -130,7 +131,7 @@ const valorOk = (v: unknown): number => {
   if (Math.abs(Math.round(n * 100) - n * 100) > 1e-6) throw new ErroAcao('"valor" tem mais de dois decimais: use reais e centavos (ex.: 129.90)');
   return Math.round(n * 100) / 100;
 };
-const reais = (v: unknown) => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
+const reais = (v: unknown) => fmtMoeda(null, Number(v), 'BRL');
 /** O que a pessoa lê no cartão: cada campo preenchido, por extenso e sem cortar. */
 const detalhes = (a: Args, rotulos: Record<string, string>): string =>
   Object.entries(rotulos).flatMap(([k, r]) => (vazio(a[k]) ? [] : [`${r}: ${k === 'valor' ? reais(a[k]) : String(a[k])}`])).join('\n');

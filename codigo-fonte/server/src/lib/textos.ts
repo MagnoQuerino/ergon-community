@@ -24,6 +24,7 @@
  *    vez em Documentos) e o nome da ferramenta e o motivo do setor que entram nas frases de proposta.*;
  *  - o que ficou gravado antes (linhas antigas do histórico com frase diferente da do catálogo).
  */
+import { fmtMoeda, type Moeda } from './i18n.ts';
 
 export type Valor = string | number | Texto | readonly Valor[];
 export interface Texto {
@@ -35,6 +36,7 @@ type Msg = string | { readonly zero?: string; readonly one?: string; readonly ot
 
 /** Erros das rotas (HttpError): reconhecidos pelo texto, no tratador de erros (app.ts), sem mudar quem os lança. */
 const ERROS = {
+  'erro.recursosAtualizando': 'esta capacidade chega com a próxima atualização da equipe neste computador',
   'erro.facaLogin': 'faça login',
   'erro.paginaDesatualizada': 'A página ficou desatualizada: recarregue e tente de novo.',
   'erro.telaTrancada': 'Tela trancada por inatividade: digite a senha para continuar.',
@@ -549,6 +551,18 @@ const APROVACAO = {
 } as const satisfies Record<string, Msg>;
 
 const SAUDE = {
+  // rc.45: a nota do consumo (services/usage.ts)
+  'consumo.nota.subscription': 'Assinatura do ChatGPT: sem custo por uso (vale a mensalidade). Os tokens mostram quanto a equipe trabalhou.',
+  'consumo.nota.credits': 'Conta com créditos: o custo aparece quando o provedor informa o valor cobrado; o saldo fica no portal da conta.',
+  'consumo.nota.api': 'Chave de API: o custo aparece quando o provedor informa o valor cobrado de cada execução.',
+  'consumo.nota.none': 'Sem conta de IA conectada: a equipe não trabalha nos pedidos, sem consumo.',
+  // rc.45: a situação de cada conta de IA (services/ai.ts, status)
+  'iaConta.ocupada': 'a equipe de IA está ocupada: confira de novo em instantes',
+  'iaConta.indisponivel': 'indisponível nesta instalação',
+  'iaConta.naoConectada': 'não conectada',
+  'iaConta.conectada': 'conectada',
+  'iaConta.conectadaGratis': 'conectada (plano gratuito)',
+  'iaConta.conectadaPlano': 'conectada (plano {plano})',
   'saude.estado.operacional': 'Operacional',
   'saude.estado.limitado': 'Operacional com limitações',
   'saude.estado.atencao': 'Necessita atenção',
@@ -608,6 +622,11 @@ export const junto = (itens: readonly Valor[], sep: string): Texto => ({ codigo:
  * ("51,4" / "51.4"). Em português sai igual a decimal() de texto-tela.ts (vírgula, sem separador de milhar).
  */
 export const decimalTx = (v: number, casas = 1): Texto => ({ codigo: 'decimal', valores: { v, casas } });
+/**
+ * Dinheiro (rc.45): vai como número e moeda, e cada idioma escreve do seu jeito ("R$ 1.290,50" / "R$1,290.50" /
+ * "R$1,290.50" em chinês). Em português sai igual ao que o servidor sempre escreveu (R$ com vírgula).
+ */
+export const moedaTx = (v: number, moeda: 'BRL' | 'USD' | 'EUR' | 'CNY' | 'INR' = 'BRL'): Texto => ({ codigo: 'moeda', valores: { v, moeda } });
 
 const ehTexto = (v: unknown): v is Texto => !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as Texto).codigo === 'string';
 
@@ -635,6 +654,8 @@ export function emPt(v: Valor | null | undefined): string {
     s = itens.map((x) => emPt(x)).join(String(v.valores?.sep ?? ' '));
   } else if (v.codigo === 'decimal') {
     s = Number(v.valores?.v ?? 0).toFixed(Number(v.valores?.casas ?? 1)).replace('.', ',');
+  } else if (v.codigo === 'moeda') {
+    s = fmtMoeda('pt-BR', Number(v.valores?.v ?? 0), String(v.valores?.moeda ?? 'BRL') as Moeda);
   } else {
     const m = TEXTOS[v.codigo];
     if (m === undefined) return '';

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { daSemente } from '../i18n/sementes.ts';
 import { cachedResource, useLiveEvent, useResource } from '../lib/live.ts';
 import { useMinWidth } from '../lib/media.ts';
 import { useSurface } from '../lib/surface.ts';
@@ -109,7 +110,7 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
     return (
       <button key={a.id} className={`foco-agent ${agent?.id === a.id ? 'is-on' : ''}`} onClick={() => { onSelect(a.id); if (size === 'narrow') setPane('conversa'); }} aria-current={agent?.id === a.id ? 'true' : undefined}>
         <AgentAvatar agent={a} size={28} />
-        <span className="foco-agent__txt"><b>{a.name}{fixed && <Icon name="lock" size={11} />}</b><small>{a.role}</small></span>
+        <span className="foco-agent__txt"><b>{a.name}{fixed && <Icon name="lock" size={11} />}</b><small>{daSemente(a.role)}</small></span>
         {m && <Marks unread={a.id === agent?.id ? 0 : m.unread} priority={m.priority ?? (m.waiting ? 'alta' : null)} reason={m.priorityReason ?? (m.waiting ? t('cidade.foco.pedidosEsperando', { n: m.waiting }) : null)} />}
         {run && <span className={`dot ${RUN[run]?.cls ?? ''}`} title={runLabel(run)} />}
       </button>
@@ -156,7 +157,7 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
               if (!shown.length && s.count <= s.sample.length) return null;
               return (
                 <div key={s.key} className="foco__group">
-                  <span className="foco__group-name">{s.name}</span>
+                  <span className="foco__group-name">{daSemente(s.name)}</span>
                   {shown.map((a) => chip(a))}
                   {s.count > s.sample.length && <button className="linkish" onClick={() => setSector({ key: s.key, name: s.name })}>{t('cidade.foco.verTodos', { n: fmtNumero(s.count) })}</button>}
                 </div>
@@ -180,7 +181,7 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
           <>
             <header className="foco__chat-head">
               <AgentAvatar agent={agent} size={36} />
-              <div className="foco__chat-who"><b>{agent.name}</b><small>{agent.role} · {agent.sector_name}{run && runLabel(run) ? ` · ${runLabel(run)}` : ''}</small></div>
+              <div className="foco__chat-who"><b>{agent.name}</b><small>{daSemente(agent.role)} · {daSemente(agent.sector_name)}{run && runLabel(run) ? ` · ${runLabel(run)}` : ''}</small></div>
               <button className="btn btn--sm btn--ghost" onClick={() => onOpenAgent(agent.id, 'perfil', null, null, agent)}><Icon name="edit" size={13} /> {t('cidade.foco.perfil')}</button>
             </header>
             {conversa && conversa.agentId === agent.id

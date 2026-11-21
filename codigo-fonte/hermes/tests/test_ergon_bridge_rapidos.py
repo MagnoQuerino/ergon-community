@@ -289,7 +289,19 @@ st = ponte("PUT", "/ergon/v1/ajustes", {"idioma": "pt"})
 with __import__("contextlib").suppress(Exception):
     i18n.reset_language_cache()
 check("idioma: gravado, e o motor passa a falar português nas mensagens fixas", st[0] == 200 and st[1].get("idioma") == "pt" and i18n.get_language() == "pt", str((st, i18n.get_language())))
-check("idioma: só pt e en", ponte("PUT", "/ergon/v1/ajustes", {"idioma": "xx"})[0] == 400 and ponte("PUT", "/ergon/v1/ajustes", {"idioma": "en"})[0] == 200)
+# rc.45: chinês (o Hermes tem o catálogo zh) e hindi (o Hermes não tem hi: as mensagens fixas caem no inglês, sem erro)
+st = ponte("PUT", "/ergon/v1/ajustes", {"idioma": "zh"})
+with __import__("contextlib").suppress(Exception):
+    i18n.reset_language_cache()
+check("idioma: chinês gravado, e o motor fala chinês nas mensagens fixas", st[0] == 200 and st[1].get("idioma") == "zh" and i18n.get_language() == "zh", str((st, i18n.get_language())))
+st = ponte("PUT", "/ergon/v1/ajustes", {"idioma": "hi"})
+with __import__("contextlib").suppress(Exception):
+    i18n.reset_language_cache()
+check("idioma: hindi gravado; sem catálogo hi no Hermes, as mensagens fixas saem em inglês", st[0] == 200 and st[1].get("idioma") == "hi" and i18n.get_language() == "en"
+      and i18n.t("gateway.goal_cleared") == "✓ Goal cleared.", str((st, i18n.get_language())))
+check("capacidade idiomas_zh_hi anunciada ao Ergon", "idiomas_zh_hi" in bridge.CAPACIDADES)
+check("idioma: só pt, en, zh e hi", ponte("PUT", "/ergon/v1/ajustes", {"idioma": "xx"})[0] == 400 and ponte("PUT", "/ergon/v1/ajustes", {"idioma": "zh-CN"})[0] == 400
+      and ponte("PUT", "/ergon/v1/ajustes", {"idioma": "en"})[0] == 200)
 for ruim in ({}, {"outra": 1}, {"nao_treinar": "sim"}, {"arrumar_competencias": 1}, {"busca_privada": None}):
     check(f"ajustes: {ruim!r} recusado", ponte("PUT", "/ergon/v1/ajustes", ruim)[0] == 400)
 cfg = load_config()

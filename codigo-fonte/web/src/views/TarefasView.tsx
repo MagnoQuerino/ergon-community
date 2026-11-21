@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { daSemente } from '../i18n/sementes.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { useHashParam } from '../lib/route.ts';
@@ -97,7 +98,7 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
       </header>
       <div className="toolbar">
         <select value={boardId ?? ''} onChange={(e) => { const v = e.target.value; if (v === '#novo') { setNovo(true); return; } if (v.startsWith('+')) { const [k, c] = v.slice(1).split('|'); void pick(k, c ?? ''); } else { setBoardId(v); setOpenTask(null); } }} aria-label={t('quadro.tarefas.lista')}>
-          <optgroup label="Ergon">{mine.filter((b) => b.origin === 'native').map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          <optgroup label="Ergon">{mine.filter((b) => b.origin === 'native').map((b) => <option key={b.id} value={b.id}>{daSemente(b.name)}</option>)}
             <option value="#novo">{t('quadro.gerir.novoQuadro')}</option></optgroup>
           {grupos.map((i) => (
             <optgroup key={i.kind} label={i.state === 'connected' ? i.name : t('quadro.tarefas.precisaReconectar', { nome: i.name })}>

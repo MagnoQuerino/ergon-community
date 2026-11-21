@@ -23,6 +23,7 @@ import type { PendingSkillWrite, SkillControl } from './hermes.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from './runs.ts';
 import { stripControl } from './teamwork.ts';
 import { paraTela } from '../lib/texto-tela.ts';
+import { fmtNumero } from '../lib/i18n.ts';
 
 /** O motivo de uma falha da equipe de IA para a tela (": …"), só se ele já for para a pessoa; com peça interna, nada. */
 const porque = (err: unknown): string => {
@@ -167,7 +168,7 @@ export class Trainings {
         if (doc.status === 'ok' && text) {
           const part = text.slice(0, room);
           used += part.length;
-          blocks.push(`=== Documento D${i + 1}: ${a.filename}${part.length < text.length ? ` (cortado: ${part.length.toLocaleString('pt-BR')} de ${text.length.toLocaleString('pt-BR')} caracteres)` : ''} ===\n${part.replace(/\[\s*\[/g, '[ [').replace(/\]\s*\]/g, '] ]')}`);
+          blocks.push(`=== Documento D${i + 1}: ${a.filename}${part.length < text.length ? ` (cortado: ${fmtNumero(null, part.length)} de ${fmtNumero(null, text.length)} caracteres)` : ''} ===\n${part.replace(/\[\s*\[/g, '[ [').replace(/\]\s*\]/g, '] ]')}`);
           files.push({ id: fid, name: a.filename, status: 'lido', chars: part.length, ...(part.length < text.length ? { detail: 'cortado para caber' } : {}) });
         } else {
           files.push({ id: fid, name: a.filename, status: doc.status === 'ok' ? 'sem_texto' : (doc.status as FileSource['status']), chars: 0, detail: doc.detail ?? 'sem texto legível' });
