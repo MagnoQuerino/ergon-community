@@ -16,6 +16,8 @@ import { documentoPdf } from '../lib/pdf-documento.ts';
 import { chaveDaCerca, pngsDasCercas } from './visuais/png.ts';
 import { tituloDoDocumento } from '../../../shared/entregaveis.ts';
 import { getSetting, setSetting } from './sectors.ts';
+import { idiomaDoDono, type Idioma } from './prefs.ts';
+import { escritaDe } from '../lib/pdf-fontes.ts';
 
 export const LOGO_MAX_BYTES = 512 * 1024;
 const LOGO_MAX_PX = 2000;
@@ -181,23 +183,29 @@ function imagemDoWorkspace(db: Db, filesDir: string | null, ws: string) {
   };
 }
 
-/** PDF de um texto Markdown com a identidade do workspace e o modelo pedido (ou o padrão). */
-export function pdfDeTexto(db: Db, ws: string, md: string, titulo: string, modelo: ModeloDoc | null, filesDir: string | null = null, semLogo = false): Buffer {
-  const pngs = pngsDasCercas(md);
+/**
+ * PDF de um texto Markdown com a identidade do workspace e o modelo pedido (ou o padrão). `idioma`: o da data e da
+ * numeração (quem baixa); sem ele, o de quem é dono do workspace (o PDF que um agente gera).
+ */
+export function pdfDeTexto(db: Db, ws: string, md: string, titulo: string, modelo: ModeloDoc | null, filesDir: string | null = null, semLogo = false, idioma: Idioma | null = idiomaDoDono(db, ws) ?? null): Buffer {
+  // um documento escrito em chinês ou hindi formata números, datas e o rodapé dos visuais nessa língua; os outros, na de quem lê
+  const escrita = escritaDe(`${titulo}\n${md}`);
+  const lang: Idioma | null = escrita === 'cjk' ? 'zh-CN' : escrita === 'deva' ? 'hi' : idioma;
+  const pngs = pngsDasCercas(md, 40, lang ?? undefined);
   const todos = modelos(db, ws);
   const m = modelo ?? todos.modelos.find((x) => x.id === todos.padrao) ?? MODELOS_ORIGINAIS[0];
   const id = identidade(db, ws);
   return documentoPdf({ markdown: md, titulo: tituloDoDocumento(md, titulo), identidade: semLogo ? { ...id, mostrarErgon: false } : id, modelo: m,
-    logo: semLogo ? null : logoDe(db, ws)?.data ?? null, imagem: imagemDoWorkspace(db, filesDir, ws), visual: (lang, corpo) => pngs.get(chaveDaCerca(lang, corpo)) ?? null });
+    logo: semLogo ? null : logoDe(db, ws)?.data ?? null, imagem: imagemDoWorkspace(db, filesDir, ws), visual: (cerca, corpo) => pngs.get(chaveDaCerca(cerca, corpo)) ?? null, idioma: lang });
 }
 
 /** PDF de um .md de Documentos: o modelo dele (ou outro, para a prévia). */
-export function pdfDoArquivo(db: Db, filesDir: string, ws: string, artifactId: string, modeloRef?: string | null, semLogo = false): { data: Buffer; filename: string } {
+export function pdfDoArquivo(db: Db, filesDir: string, ws: string, artifactId: string, modeloRef?: string | null, semLogo = false, idioma?: Idioma | null): { data: Buffer; filename: string } {
   const f = openArtifact(db, filesDir, ws, artifactId);
   if (!ehMarkdown(f.filename, f.mime)) throw new HttpError(415, 'nao_markdown', 'Só documentos .md viram PDF por aqui.');
   const m = (modeloRef ? acharModelo(db, ws, modeloRef) : null) ?? modeloDoArquivo(db, ws, artifactId);
   const md = f.data.toString('utf8');
-  return { data: pdfDeTexto(db, ws, md, f.filename, m, filesDir, semLogo), filename: f.filename.replace(/\.(md|markdown)$/i, '') + '.pdf' };
+  return { data: pdfDeTexto(db, ws, md, f.filename, m, filesDir, semLogo, idioma ?? idiomaDoDono(db, ws) ?? null), filename: f.filename.replace(/\.(md|markdown)$/i, '') + '.pdf' };
 }
 
 export const ehMarkdown = (filename: string, mime: string): boolean => mime === 'text/markdown' || /\.(md|markdown)$/i.test(filename);

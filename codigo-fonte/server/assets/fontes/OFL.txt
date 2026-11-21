@@ -1,5 +1,13 @@
 Inter — Copyright 2016-2023 The Inter Project Authors (https://github.com/rsms/inter)
 Subconjunto latino (pyftsubset) usado pelo Ergon para desenhar os blocos visuais em PNG.
+Noto Sans SC — Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+Noto Sans Devanagari — Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)
+Subconjuntos (pyftsubset, rc.44) para o PDF e os PNG em chinês e hindi: Noto Sans SC com os caracteres do GB2312, a
+pontuação CJK e as formas de largura cheia; Noto Sans Devanagari com a faixa devanágari inteira e todas as regras de
+formação (GSUB/GPOS: conjuntos, matras e o ि pré-posto). Regular e Bold. Os mesmos subconjuntos em woff2 estão em
+web/public/fontes, para a tela.
+
+All three fonts are licensed under the SIL Open Font License, Version 1.1, below.
 
 PREAMBLE
 The goals of the Open Font License (OFL) are to stimulate worldwide

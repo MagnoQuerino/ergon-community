@@ -16,6 +16,7 @@ import {
 } from '../services/entregaveis.ts';
 import { PEDIDO_MAX, type RevisaoDocumento } from '../services/revisao-documento.ts';
 import { normalizarModelo } from '../../../shared/entregaveis.ts';
+import { readLang } from '../services/prefs.ts';
 
 interface Deps {
   db: Db; bus: Bus; revisao: RevisaoDocumento;
@@ -67,7 +68,7 @@ export function registerEntregaveisRoutes(app: FastifyInstance, d: Deps): void {
   }, async (req, reply) => {
     const a = auth(req);
     const q = req.query as { modelo?: string; inline?: string; semLogo?: string };
-    const out = pdfDoArquivo(db, cfg.filesDir, a.workspaceId, artId(req), q.modelo ?? null, q.semLogo === '1');
+    const out = pdfDoArquivo(db, cfg.filesDir, a.workspaceId, artId(req), q.modelo ?? null, q.semLogo === '1', readLang(db, a.userId) ?? null);
     return pdfReply(reply, out.data, out.filename, q.inline === '1');
   });
 
@@ -76,7 +77,7 @@ export function registerEntregaveisRoutes(app: FastifyInstance, d: Deps): void {
     const a = auth(req);
     const b = req.body as { modelo: Record<string, unknown>; texto?: string };
     const m = typeof b.modelo.id === 'string' && !Object.keys(b.modelo).some((k) => k !== 'id') ? acharModelo(db, a.workspaceId, b.modelo.id) : normalizarModelo(b.modelo, 'previa');
-    return pdfReply(reply, pdfDeTexto(db, a.workspaceId, b.texto ?? AMOSTRA, 'Amostra', m, cfg.filesDir), 'amostra.pdf', true);
+    return pdfReply(reply, pdfDeTexto(db, a.workspaceId, b.texto ?? AMOSTRA, 'Amostra', m, cfg.filesDir, false, readLang(db, a.userId) ?? null), 'amostra.pdf', true);
   });
 
   // ------------------------------------------------------------------------------------------- identidade
