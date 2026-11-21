@@ -10,6 +10,7 @@ provides_tools:
   - perguntar
   - pedir_chave
   - pedir_senha_admin
+  - visual
   - gestao_listar
   - gestao_executar
 provides_hooks:
