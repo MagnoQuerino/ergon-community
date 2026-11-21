@@ -157,7 +157,8 @@ export function ConexoesView() {
       corpo: () => (canais.data ? <ConversaPorCanal canal={c} estado={canais.data[c]} reload={canais.reload} onClose={fechar} /> : null) })),
     // rc.45: Feishu/Lark e DingTalk, com o aplicativo interno da própria empresa (sem bot oficial do Ergon); os nomes são marcas
     // i18n-ok: nomes de marca
-    ...(['feishu', 'dingtalk'] as const).map((c): Bloco => ({ kind: `equipe-${c}`, logo: c, name: c === 'feishu' ? 'Feishu/Lark' : 'DingTalk',
+    // rc.46: WeCom (o robô inteligente da empresa) e WeChat pessoal (experimental, login por QR aqui na tela)
+    ...(['feishu', 'dingtalk', 'wecom', 'weixin'] as const).map((c): Bloco => ({ kind: `equipe-${c}`, logo: c, name: NOME_DO_CANAL[c],
       selo: seloCanal(canais.data?.[c]), soon: !!canais.data?.[c] && !canais.data[c].disponivel,
       corpo: () => (canais.data?.[c] ? <ConversaPorCanal canal={c} estado={canais.data[c]} reload={canais.reload} onClose={fechar} /> : null) })),
   ];
@@ -1086,19 +1087,23 @@ function ListEditor({ label, values, suggestions, onChange, placeholder }: { lab
 }
 
 /** GET /api/canais: conversar com a equipe pelo Telegram e pelo Discord (o bot da própria pessoa) e, na rc.45, pelo Feishu/Lark e pelo DingTalk (o aplicativo da empresa). */
-type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk';
+type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk' | 'wecom' | 'weixin';
+// i18n-ok: nomes de marca
+const NOME_DO_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk', wecom: 'WeCom', weixin: 'WeChat' };
 type CanalDeBot = 'telegram' | 'discord';
 interface EstadoCanal {
   disponivel: boolean; motivo?: 'motor' | 'versao'; bot: boolean; conexao: 'conectado' | 'conectando' | 'sem_conexao' | null; codigoRecusado?: boolean;
   ligado: { nome: string | null; desde: string; avisos: boolean } | null;
+  /** rc.46: o WeChat pessoal (experimental) e a versão do texto do risco que o consentimento confirma */
+  experimental?: boolean; riscoVersao?: number;
 }
 const ERRO_CANAL: Record<string, `conexoes.canal.erro.${'formato' | 'formato_app' | 'codigo' | 'tentativas' | 'motor'}`> = {
   formato: 'conexoes.canal.erro.formato', formato_app: 'conexoes.canal.erro.formato_app', codigo: 'conexoes.canal.erro.codigo', tentativas: 'conexoes.canal.erro.tentativas', motor: 'conexoes.canal.erro.motor',
 };
 /** O console de desenvolvedores de cada aplicativo (o Lark internacional tem o próprio). */
 // i18n-ok: exemplos do formato do App ID (não é texto de tela)
-const EXEMPLO_APP_ID: Partial<Record<NomeCanal, string>> = { feishu: 'cli_a1b2c3d4e5f6a7b8', dingtalk: 'ding1a2b3c4d5e6f7g8' };
-const CONSOLE_DO_APP = { feishu: 'https://open.feishu.cn/app', lark: 'https://open.larksuite.com/app', dingtalk: 'https://open-dev.dingtalk.com/' } as const;
+const EXEMPLO_APP_ID: Partial<Record<NomeCanal, string>> = { feishu: 'cli_a1b2c3d4e5f6a7b8', dingtalk: 'ding1a2b3c4d5e6f7g8', wecom: 'aibQx7Lm2Np9Rs4Tv' };
+const CONSOLE_DO_APP = { feishu: 'https://open.feishu.cn/app', lark: 'https://open.larksuite.com/app', dingtalk: 'https://open-dev.dingtalk.com/', wecom: 'https://work.weixin.qq.com/wework_admin/frame' } as const;
 
 /**
  * Conexões › "Conversar com a equipe pelo Telegram / pelo Discord": a pessoa cria o bot dela, cola o código (fica com a
@@ -1108,7 +1113,8 @@ const CONSOLE_DO_APP = { feishu: 'https://open.feishu.cn/app', lark: 'https://op
 function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal; estado: EstadoCanal; reload: () => void; onClose?: () => void }) {
   const t = useT();
   // rc.45: o Feishu/Lark e o DingTalk usam o aplicativo interno da empresa (App ID e App Secret), não um bot com código
-  const deApp = canal === 'feishu' || canal === 'dingtalk';
+  // rc.46: o WeCom também (Bot ID e Secret do robô inteligente); o WeChat pessoal liga pelo QR (LoginWeChat)
+  const deApp = canal === 'feishu' || canal === 'dingtalk' || canal === 'wecom' || canal === 'weixin';
   const [appId, setAppId] = useState('');
   const [dominio, setDominio] = useState<'feishu' | 'lark'>('feishu');
   const [token, setToken] = useState('');
@@ -1119,7 +1125,7 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pronto, setPronto] = useState(false);
-  const nome = canal === 'telegram' ? 'Telegram' : canal === 'discord' ? 'Discord' : canal === 'feishu' ? (dominio === 'lark' ? 'Lark' : 'Feishu') : 'DingTalk';
+  const nome = canal === 'feishu' ? (dominio === 'lark' ? 'Lark' : 'Feishu') : NOME_DO_CANAL[canal];
   const agir = async (fn: () => Promise<unknown>, depois?: () => void) => {
     setErr(null); setBusy(true);
     try { await fn(); depois?.(); reload(); } catch (x) {
@@ -1129,12 +1135,18 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
     } finally { setBusy(false); }
   };
   const e = estado;
-  const titulo = canal === 'telegram' ? t('conexoes.canal.titulo.telegram') : canal === 'discord' ? t('conexoes.canal.titulo.discord')
-    : canal === 'feishu' ? t('conexoes.canal.titulo.feishu') : t('conexoes.canal.titulo.dingtalk');
+  const titulo = t(`conexoes.canal.titulo.${canal}`);
   const conexao = e.conexao === 'conectado' ? t('conexoes.canal.conexao.conectado') : e.conexao === 'sem_conexao' ? t(deApp ? 'conexoes.canal.app.semConexao' : 'conexoes.canal.conexao.semConexao')
     : e.conexao === 'conectando' ? t(deApp ? 'conexoes.canal.app.conectando' : 'conexoes.canal.conexao.conectando') : null;
   const consoleDoApp = (url: string) => <a href={url} target="_blank" rel="noreferrer noopener">{t('conexoes.canal.app.console')}</a>;
-  const passos = canal === 'feishu'
+  const passos = canal === 'weixin' ? null
+    : canal === 'wecom'
+    ? <ol className="small conn-passos">
+        <li>{tn('conexoes.canal.wc.passo1', { console: consoleDoApp(CONSOLE_DO_APP.wecom) })}</li>
+        <li>{t('conexoes.canal.wc.passo2')}</li>
+        <li>{t('conexoes.canal.wc.passo3')}</li>
+      </ol>
+    : canal === 'feishu'
     ? <ol className="small conn-passos">
         <li>{tn('conexoes.canal.fs.passo1', { console: consoleDoApp(CONSOLE_DO_APP[dominio]) })}</li>
         <li>{t('conexoes.canal.fs.passo2')}</li>
@@ -1169,15 +1181,15 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
         <label className="check"><input type="radio" name="dominio-feishu" checked={dominio === 'lark'} onChange={() => setDominio('lark')} /> {t('conexoes.canal.app.lark')}</label>
       </fieldset>}
       <div className="row row--wrap">
-        <label className="field">{canal === 'dingtalk' ? t('conexoes.canal.app.idDt') : t('conexoes.canal.app.id')}<input value={appId} onChange={(ev) => setAppId(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={80} placeholder={EXEMPLO_APP_ID[canal]} /></label>
-        <label className="field">{canal === 'dingtalk' ? t('conexoes.canal.app.segredoDt') : t('conexoes.canal.app.segredo')}<input type="password" value={token} onChange={(ev) => setToken(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={200} /></label>
+        <label className="field">{canal === 'dingtalk' ? t('conexoes.canal.app.idDt') : canal === 'wecom' ? t('conexoes.canal.app.idWc') : t('conexoes.canal.app.id')}<input value={appId} onChange={(ev) => setAppId(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={80} placeholder={EXEMPLO_APP_ID[canal]} /></label>
+        <label className="field">{canal === 'dingtalk' ? t('conexoes.canal.app.segredoDt') : canal === 'wecom' ? t('conexoes.canal.app.segredoWc') : t('conexoes.canal.app.segredo')}<input type="password" value={token} onChange={(ev) => setToken(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={200} /></label>
         <button className="btn btn--sm btn--primary" disabled={busy || appId.trim().length < 8 || token.trim().length < 16}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.canal.guardar')}</button>
         {trocar && <button type="button" className="btn btn--sm btn--ghost" onClick={() => { setTrocar(false); setToken(''); setAppId(''); }}>{t('conexoes.canal.cancelar')}</button>}
       </div>
       <p className="hint ai-byok__seguro"><Icon name="lock" size={12} /> {t('conexoes.canal.app.guardado')}</p>
     </form>
   );
-  const formBot = deApp ? formApp : (
+  const formBot = canal === 'weixin' ? <LoginWeChat estado={e} reload={reload} /> : deApp ? formApp : (
     <form className="row row--wrap" onSubmit={(ev) => { ev.preventDefault(); void agir(() => api.put(`/api/canais/${canal}/bot`, { token: token.trim() }), () => { setToken(''); setTrocar(false); }); }}>
       <label className="field">{t('conexoes.canal.codigoDoBot')}<input type="password" value={token} onChange={(ev) => setToken(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={200} /></label>
       <button className="btn btn--sm btn--primary" disabled={busy || token.trim().length < 20}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.canal.guardar')}</button>
@@ -1187,11 +1199,12 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
   return (
     <article id={`conn-equipe-${canal}`} className={`card conn conn-detail ${e.ligado ? 'feature--on' : ''}`}>
       <header className="row"><BrandLogo kind={canal} name={nome} size={32} /><strong>{titulo}</strong>
+        {e.experimental && <span className="badge badge--exp">{t('conexoes.wa.experimental')}</span>}
         {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}</header>
       {!deApp && <BotOficial canal={canal as CanalDeBot} />}
       {/* o bot próprio (privacidade máxima): para quem prefere, atrás do "Avançado"; o Feishu e o DingTalk só têm este caminho */}
       <EnvoltorioDoCanal deApp={deApp} aberto={!!e.ligado} resumo={t('conexoes.bot.avancado')}>
-      <p className="muted">{deApp ? t('conexoes.canal.app.intro') : t('conexoes.canal.intro')}</p>
+      <p className="muted">{canal === 'weixin' ? t('conexoes.canal.wx.intro') : deApp ? t('conexoes.canal.app.intro') : t('conexoes.canal.intro')}</p>
       {!e.disponivel ? <p className="hint">{e.motivo === 'versao' ? t('conexoes.canal.indisponivel.versao') : t('conexoes.canal.indisponivel.motor')}</p> : <>
         {e.ligado ? <>
           <p>{tn('conexoes.canal.ligadoComo', { nome: <b>{e.ligado.nome || t('conexoes.canal.contaSemNome')}</b>, data: fmtData(e.ligado.desde) })}</p>
@@ -1205,8 +1218,8 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
         </> : <>
           {conexao && <p className="small" role="status">{conexao}</p>}
           {e.codigoRecusado && <p className="warn">{t(deApp ? 'conexoes.canal.app.codigoRecusado' : 'conexoes.canal.codigoRecusado', { canal: nome })}</p>}
-          {deApp && <ol className="small conn-passos" start={3}>{canal === 'feishu' ? <><li>{t('conexoes.canal.fs.passo3')}</li><li>{t('conexoes.canal.fs.passo4')}</li></> : <li>{t('conexoes.canal.dt.passo4')}</li>}</ol>}
-          <p>{t(deApp ? 'conexoes.canal.app.parear.passo' : 'conexoes.canal.parear.passo')}</p>
+          {(canal === 'feishu' || canal === 'dingtalk') && <ol className="small conn-passos" start={3}>{canal === 'feishu' ? <><li>{t('conexoes.canal.fs.passo3')}</li><li>{t('conexoes.canal.fs.passo4')}</li></> : <li>{t('conexoes.canal.dt.passo4')}</li>}</ol>}
+          <p>{t(canal === 'weixin' ? 'conexoes.canal.wx.parear' : canal === 'wecom' ? 'conexoes.canal.wc.parear' : deApp ? 'conexoes.canal.app.parear.passo' : 'conexoes.canal.parear.passo')}</p>
           <form className="row row--wrap" onSubmit={(ev) => { ev.preventDefault(); void agir(() => api.post(`/api/canais/${canal}/parear`, { codigo, password: senha }), () => { setCodigo(''); setSenha(''); setPronto(true); }); }}>
             <label className="field">{t(deApp ? 'conexoes.canal.app.parear.codigo' : 'conexoes.canal.parear.codigo')}<input value={codigo} onChange={(ev) => setCodigo(ev.target.value)} placeholder="ABCD2345" autoComplete="off" spellCheck={false} maxLength={20} /></label>
             <input type="password" autoComplete="current-password" placeholder={t('conexoes.canal.suaSenha')} aria-label={t('conexoes.canal.suaSenha')} value={senha} onChange={(ev) => setSenha(ev.target.value)} />
@@ -1216,9 +1229,9 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
         </>}
         {err && <p className="err" role="alert">{err}</p>}
         {(e.bot || e.ligado) && !trocar && <div className="row row--wrap">
-          {!e.ligado && <button className="btn btn--sm btn--ghost" onClick={() => setTrocar(true)}>{t(deApp ? 'conexoes.canal.app.trocar' : 'conexoes.canal.trocarBot')}</button>}
+          {!e.ligado && <button className="btn btn--sm btn--ghost" onClick={() => setTrocar(true)}>{t(canal === 'weixin' ? 'conexoes.canal.wx.outraConta' : deApp ? 'conexoes.canal.app.trocar' : 'conexoes.canal.trocarBot')}</button>}
           {desligar
-            ? <div className="confirm">{t(deApp ? 'conexoes.canal.app.desligarPergunta' : 'conexoes.canal.desligarPergunta')}
+            ? <div className="confirm">{t(canal === 'weixin' ? 'conexoes.canal.wx.desligarPergunta' : deApp ? 'conexoes.canal.app.desligarPergunta' : 'conexoes.canal.desligarPergunta')}
                 <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void agir(() => api.del(`/api/canais/${canal}`), () => { setDesligar(false); setPronto(false); })}>{t('conexoes.canal.desligar')}</button>
                 <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(false)}>{t('conexoes.canal.cancelar')}</button></div>
             : <button className="btn btn--sm btn--ghost" onClick={() => setDesligar(true)}>{t('conexoes.canal.desligar')}</button>}
@@ -1228,12 +1241,62 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
       {/* as letras miúdas: onde o código fica, o que acontece com o Ergon fechado, e a diferença para as conexões de conta */}
       <details className="conn-secao conn-secao--detalhes"><summary>{t('conexoes.detalhes')}</summary>
         <ul className="small conn-detalhes">
-          <li>{deApp ? t('conexoes.canal.app.guardado') : t('conexoes.canal.guardado')}</li>
-          <li>{canal === 'telegram' ? t('conexoes.canal.fechado.telegram') : canal === 'discord' ? t('conexoes.canal.fechado.discord') : canal === 'feishu' ? t('conexoes.canal.fechado.feishu') : t('conexoes.canal.fechado.dingtalk')} {deApp ? t('conexoes.canal.app.soDireta') : t('conexoes.canal.soDireta')}</li>
+          <li>{canal === 'weixin' ? t('conexoes.canal.wx.guardado') : deApp ? t('conexoes.canal.app.guardado') : t('conexoes.canal.guardado')}</li>
+          <li>{t(`conexoes.canal.fechado.${canal}`)} {deApp ? t('conexoes.canal.app.soDireta') : t('conexoes.canal.soDireta')}</li>
           <li>{t('conexoes.canal.secaoTexto')}</li>
         </ul>
       </details>
     </article>
+  );
+}
+
+/**
+ * rc.46: o WeChat pessoal (experimental). Desligado até a pessoa marcar que entendeu o risco (uma linha) e pedir o QR;
+ * o QR aparece aqui (o servidor desenha a imagem a partir do endereço que a Tencent dá) e se renova sozinho enquanto ela
+ * escaneia. Confirmado no celular, a tela segue para o código de pareamento, como nos outros canais.
+ */
+interface LoginQr { estado: 'parado' | 'aguardando' | 'escaneado' | 'confirmado' | 'expirado' | 'erro'; qr: string | null; expiraEm: number; erro: string | null }
+function LoginWeChat({ estado, reload }: { estado: EstadoCanal; reload: () => void }) {
+  const t = useT();
+  const [aceite, setAceite] = useState(false);
+  const [login, setLogin] = useState<LoginQr | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const vivo = login?.estado === 'aguardando' || login?.estado === 'escaneado';
+  useEffect(() => {
+    if (!vivo) return;
+    const id = setInterval(() => {
+      void api.get<LoginQr>('/api/canais/weixin/qr').then((r) => { setLogin(r); if (r.estado === 'confirmado') reload(); }).catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(id);
+  }, [vivo, reload]);
+  const pedir = async () => {
+    setErr(null); setBusy(true);
+    try { setLogin(await api.post<LoginQr>('/api/canais/weixin/qr', { consentimento: { aceito: aceite, versao: estado.riscoVersao ?? 1 } })); } catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
+  };
+  const cancelar = async () => { try { setLogin(await api.del<LoginQr>('/api/canais/weixin/qr')); } catch { setLogin(null); } };
+  if (vivo && login?.qr) return (
+    <div className="qr conn-qr">
+      <img src={login.qr} alt={t('conexoes.canal.wx.qrAlt')} width={240} height={240} />
+      <ol className="small">
+        <li>{t('conexoes.canal.wx.passo1')}</li>
+        <li>{t('conexoes.canal.wx.passo2')}</li>
+      </ol>
+      <p className="small" role="status">{login.estado === 'escaneado' ? t('conexoes.canal.wx.escaneado') : t('conexoes.canal.wx.aguardando')}</p>
+      <button className="btn btn--sm btn--ghost" onClick={() => void cancelar()}>{t('conexoes.acao.cancelar')}</button>
+    </div>
+  );
+  return (
+    <div className="conn-wx">
+      <p className="warn conn-wx__risco"><Icon name="alert" size={14} /> {t('conexoes.canal.wx.risco')}</p>
+      <label className="check"><input type="checkbox" checked={aceite} onChange={(ev) => setAceite(ev.target.checked)} /> {t('conexoes.canal.wx.aceito')}</label>
+      <div className="row row--wrap">
+        <button className="btn btn--sm btn--primary" disabled={!aceite || busy} onClick={() => void pedir()}>{busy ? t('conexoes.canal.wx.preparando') : login?.estado === 'expirado' ? t('conexoes.canal.wx.outroQr') : t('conexoes.canal.wx.mostrarQr')}</button>
+      </div>
+      {login?.estado === 'expirado' && <p className="small" role="status">{t('conexoes.canal.wx.expirado')}</p>}
+      {login?.estado === 'erro' && <p className="err" role="alert">{t('conexoes.canal.wx.semQr')}</p>}
+      {err && <p className="err" role="alert">{err}</p>}
+    </div>
   );
 }
 

@@ -76,7 +76,7 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.11.0"
+PLUGIN_VERSION = "0.12.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
@@ -107,10 +107,12 @@ PLUGIN_VERSION = "0.11.0"
 # visuais (rc.43): a ferramenta visual valida os blocos visuais da conversa (/internal/bridge/v1/visual)
 # idiomas_zh_hi (rc.45): os ajustes aceitam o idioma zh e hi (display.language, a voz e a transcrição); canais_feishu_dingtalk
 # (rc.45): conversar com a equipe pelo Feishu/Lark e pelo DingTalk (o aplicativo da pessoa, com os pacotes na imagem)
+# canais_wecom_weixin (rc.46): pelo WeCom (o robô inteligente, por WebSocket de saída) e pelo WeChat pessoal (iLink, login
+# por QR mostrado no Ergon; experimental)
 CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao",
                "perfis", "memoria", "ajudantes", "modelos_tarefa", "ajustes", "cota", "pausa", "nao_treinar", "cartoes", "comandos",
                "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "git", "computador", "visuais",
-               "idiomas_zh_hi", "canais_feishu_dingtalk")
+               "idiomas_zh_hi", "canais_feishu_dingtalk", "canais_wecom_weixin")
 _TS_CONEXOES = "ergon_conexoes"
 # Os conjuntos de ferramentas que este plugin registra ficam em _ERGON_PLUGIN_TOOLSETS, mais abaixo (o mesmo de
 # ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
@@ -3099,18 +3101,30 @@ def revisao_pedido(mensagens: list[Any], foco: str) -> dict[str, str]:
 # Hermes instalaria no primeiro uso, pelo PyPI, e isso falha na China. Sem botões: o cartão vai como texto e a decisão é
 # no app (o Ergon já manda assim); a edição do cartão, no Feishu, edita a mensagem; no DingTalk, vai uma nova (ele não
 # edita pela sessionWebhook). O DingTalk só responde pela sessionWebhook da última mensagem da pessoa.
-_CANAIS = ("telegram", "discord", "feishu", "dingtalk")
-_CANAIS_DE_APP = ("feishu", "dingtalk")
-_CANAL_ENV = {"telegram": "TELEGRAM_BOT_TOKEN", "discord": "DISCORD_BOT_TOKEN", "feishu": "FEISHU_APP_ID", "dingtalk": "DINGTALK_CLIENT_ID"}
+# rc.46: WeCom (企业微信) pelo robô inteligente (Smart Robot): WebSocket de saída para openws.work.weixin.qq.com com o Bot
+# ID e o Secret do robô, sem endereço público (o modo "app próprio" do Hermes, wecom_callback, precisa de URL pública e
+# fica de fora). WeChat pessoal (微信, weixin) pela API iLink da Tencent: o login é um QR que a ponte pede ao iLink e o
+# Ergon mostra na tela; o iLink devolve o token da conta, que fica no .env do motor. Experimental: a Tencent pode limitar
+# ou bloquear a conta, e o Ergon só liga com o consentimento explícito da pessoa. Nos dois, sem botões e sem edição: o
+# cartão vai como texto e a decisão é no app.
+_CANAIS = ("telegram", "discord", "feishu", "dingtalk", "wecom", "weixin")
+_CANAIS_DE_APP = ("feishu", "dingtalk", "wecom", "weixin")
+_CANAL_ENV = {"telegram": "TELEGRAM_BOT_TOKEN", "discord": "DISCORD_BOT_TOKEN", "feishu": "FEISHU_APP_ID", "dingtalk": "DINGTALK_CLIENT_ID",
+              "wecom": "WECOM_BOT_ID", "weixin": "WEIXIN_TOKEN"}
 # o par do aplicativo (App ID, App Secret) e o domínio do Feishu: o .env que a ponte grava e apaga
-_CANAL_APP_ENV = {"feishu": ("FEISHU_APP_ID", "FEISHU_APP_SECRET"), "dingtalk": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET")}
+_CANAL_APP_ENV = {"feishu": ("FEISHU_APP_ID", "FEISHU_APP_SECRET"), "dingtalk": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET"),
+                  "wecom": ("WECOM_BOT_ID", "WECOM_SECRET")}
+# o WeChat pessoal não tem par para colar: a conta e o token vêm do login por QR
+_CANAL_QR_ENV = {"weixin": ("WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN")}
+_WEIXIN_ENV_TODOS = ("WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN", "WEIXIN_BASE_URL", "WEIXIN_DM_POLICY", "WEIXIN_GROUP_POLICY")
 _CANAL_APP_FORMATO = {
     "feishu": (re.compile(r"cli_[A-Za-z0-9]{8,40}"), re.compile(r"[A-Za-z0-9]{16,64}")),
     "dingtalk": (re.compile(r"[A-Za-z0-9_-]{8,64}"), re.compile(r"[A-Za-z0-9_-]{16,128}")),
+    "wecom": (re.compile(r"[A-Za-z0-9_-]{8,64}"), re.compile(r"[A-Za-z0-9_-]{16,128}")),
 }
-_CANAL_NOME = {"telegram": "Telegram", "discord": "Discord", "feishu": "Feishu/Lark", "dingtalk": "DingTalk"}
+_CANAL_NOME = {"telegram": "Telegram", "discord": "Discord", "feishu": "Feishu/Lark", "dingtalk": "DingTalk", "wecom": "WeCom", "weixin": "WeChat"}
 # o nome do canal na tela do Ergon em chinês (Conexões › 通过 … 与团队对话)
-_CANAL_NOME_ZH = {"feishu": "飞书/Lark", "dingtalk": "钉钉"}
+_CANAL_NOME_ZH = {"feishu": "飞书/Lark", "dingtalk": "钉钉", "wecom": "企业微信", "weixin": "微信"}
 _CANAL_TOKEN = {
     "telegram": re.compile(r"\d{5,14}:[A-Za-z0-9_-]{30,64}"),
     "discord": re.compile(r"[A-Za-z0-9_-]{18,40}\.[A-Za-z0-9_-]{4,12}\.[A-Za-z0-9_-]{20,90}"),
@@ -3127,7 +3141,7 @@ _CANAL_CODIGO_ZH = ("\n\n将此聊天关联到 Ergon 的代码：{code}\n"
 _CANAL_FORA = ("O Ergon não recebeu esta mensagem agora. Mande de novo em instantes.\n"
                "Ergon did not get this message right now. Please send it again in a moment.")
 _CANAL_FORA_ZH = "\nErgon 暂时没有收到这条消息，请稍后再发一次。"
-_CANAL_TEXTO_MAX = {"telegram": 4000, "discord": 1900, "feishu": 8000, "dingtalk": 8000}
+_CANAL_TEXTO_MAX = {"telegram": 4000, "discord": 1900, "feishu": 8000, "dingtalk": 8000, "wecom": 4000, "weixin": 2000}
 
 
 def _canal_codigo(platform: str, code: str) -> str:
@@ -3359,21 +3373,34 @@ def _fabrica_dingtalk(native: Any, adapter: Any) -> None:
     _canal_vivo("dingtalk", native, adapter)
 
 
+def _fabrica_wecom(native: Any, adapter: Any) -> None:
+    """WeCom: só o adaptador vivo (o WebSocket do robô) para a saída; sem botões (a decisão é no app)."""
+    _canal_vivo("wecom", native, adapter)
+
+
+def _fabrica_weixin(native: Any, adapter: Any) -> None:
+    """WeChat pessoal (iLink): só o adaptador vivo (a espera longa do iLink) para a saída; sem botões nem imagem."""
+    _canal_vivo("weixin", native, adapter)
+
+
 async def _canal_app_enviar(platform: str, adapter: Any, item: dict[str, Any], tipo: str, chat_id: str, texto: str) -> dict[str, Any]:
-    """A saída no Feishu e no DingTalk, só pelo adaptador do Hermes (que formata, divide e fala com a API de cada um)."""
+    """A saída no Feishu, no DingTalk, no WeCom e no WeChat, só pelo adaptador do Hermes (que formata, divide e fala com a
+    API de cada um). Só o Feishu edita: nos outros, a linha final do cartão vai como mensagem nova."""
     def resultado(r: Any) -> dict[str, Any]:
         if getattr(r, "success", False):
             return {"ok": True, "message_id": str(getattr(r, "message_id", "") or "")[:120]}
         erro = str(getattr(r, "error", "") or "falhou")
         # DingTalk sem sessionWebhook válida (a pessoa não escreveu na última hora e meia): não adianta tentar de novo
-        sem_sessao = "session_webhook" in erro
+        # (no WeChat pessoal, o mesmo quando o iLink não prepara o envio: a pessoa precisa escrever ao robô antes)
+        sem_sessao = "session_webhook" in erro or "session not ready" in erro
         return {"ok": False, "erro": ("sem_sessao" if sem_sessao else erro)[:200], "passageiro": bool(getattr(r, "retryable", False)) and not sem_sessao}
     if tipo == "digitando":
         await adapter.send_typing(chat_id)
         return {"ok": True}
     if tipo == "imagem":
-        if platform != "feishu":
-            return {"ok": True}  # o DingTalk não sobe imagem pela sessionWebhook (o texto já levou os números)
+        if platform not in ("feishu", "wecom"):
+            # o DingTalk não sobe imagem pela sessionWebhook; no WeChat pessoal, menos envio é menos risco (o texto já levou os números)
+            return {"ok": True}
         import base64
         import tempfile
         try:
@@ -3524,11 +3551,162 @@ def _canal_estado() -> dict[str, Any]:
     for c in _CANAIS:
         p = plats.get(c) if isinstance(plats.get(c), dict) else {}
         out[c] = {
-            "configurado": all(str(env.get(v) or "").strip() for v in _CANAL_APP_ENV.get(c, (_CANAL_ENV[c],))),
+            "configurado": all(str(env.get(v) or "").strip() for v in _CANAL_APP_ENV.get(c) or _CANAL_QR_ENV.get(c) or (_CANAL_ENV[c],)),
             "estado": str(p.get("state") or "")[:40] or None, "erro": str(p.get("error_code") or "")[:60] or None,
             "ligados": [{"user_id": str(a.get("user_id") or ""), "user_name": str(a.get("user_name") or "")[:120]} for a in store.list_approved(c)][:5],
         }
     return out
+
+
+# ---------------------------------------------------------------- 4b. WeChat pessoal: o login por QR (rc.46)
+# O Ergon pede o QR (POST /ergon/v1/canais/weixin/qr) e mostra na tela; esta ponte acompanha o iLink num fio próprio
+# (wait → scaned → confirmed, com o QR renovado se vencer, até 3 vezes) e, confirmado, grava a conta e o token no .env do
+# motor (dentro do cofre) e reinicia o gateway. O endereço do QR (liteapp.weixin.qq.com/…) vai ao Ergon, que desenha o
+# QR; o token nunca sai daqui. Um login de cada vez; um novo pedido cancela o anterior.
+_WEIXIN_QR_SEGUNDOS = 480
+_weixin_qr: dict[str, Any] = {"estado": "parado", "qr": "", "inicio": 0.0, "erro": "", "geracao": 0}
+
+
+def _weixin_mod() -> Any:
+    from gateway.platforms import weixin as wx  # módulo do Hermes (aiohttp e cryptography já vêm na imagem)
+    return wx
+
+
+def _weixin_qr_publico() -> dict[str, Any]:
+    with _lock:
+        q = dict(_weixin_qr)
+    vivo = q["estado"] in ("aguardando", "escaneado")
+    return {"estado": q["estado"], "qr": q["qr"] if vivo else "", "erro": q["erro"][:120] or None,
+            "expira_em": int(max(0, q["inicio"] + _WEIXIN_QR_SEGUNDOS - time.time())) if vivo else 0}
+
+
+def _weixin_qr_estado() -> dict[str, Any]:
+    with _lock:
+        if _weixin_qr["estado"] in ("aguardando", "escaneado") and time.time() > _weixin_qr["inicio"] + _WEIXIN_QR_SEGUNDOS:
+            _weixin_qr.update(estado="expirado", qr="", geracao=_weixin_qr["geracao"] + 1)
+    return _weixin_qr_publico()
+
+
+def _weixin_qr_cancelar() -> dict[str, Any]:
+    with _lock:
+        _weixin_qr.update(estado="parado", qr="", erro="", geracao=_weixin_qr["geracao"] + 1)
+    return _weixin_qr_publico()
+
+
+def _weixin_qr_mudar(geracao: int, **campos: Any) -> bool:
+    """Muda o estado só se este login ainda é o atual (um cancelamento ou um pedido novo vence o fio de antes)."""
+    with _lock:
+        if _weixin_qr["geracao"] != geracao:
+            return False
+        _weixin_qr.update(**campos)
+        return True
+
+
+def _weixin_apagar_conta(account_id: str) -> None:
+    """O arquivo da conta que o Hermes guarda (com o token) e o context_token de cada pessoa saem junto com o canal."""
+    if not re.fullmatch(r"[A-Za-z0-9_@.:-]{1,200}", account_id or ""):
+        return
+    base = Path(os.environ.get("HERMES_HOME", "/opt/data")) / "weixin" / "accounts"
+    for nome in (f"{account_id}.json", f"{account_id}.context-tokens.json", f"{account_id}.sync.json"):
+        with contextlib.suppress(OSError):
+            (base / nome).unlink()
+
+
+def _weixin_confirmado(wx: Any, status: dict[str, Any]) -> str:
+    """Grava a conta que o iLink confirmou: o token no .env do motor (o adaptador lê de lá) e no arquivo do Hermes."""
+    from gateway.pairing import PairingStore  # módulos do Hermes
+    from hermes_cli.config import save_env_value
+    conta = str(status.get("ilink_bot_id") or "").strip()
+    token = str(status.get("bot_token") or "").strip()
+    base = str(status.get("baseurl") or wx.ILINK_BASE_URL).strip().rstrip("/")
+    if not re.fullmatch(r"[A-Za-z0-9_@.:-]{3,200}", conta) or not re.fullmatch(r"[\x21-\x7e]{8,600}", token):
+        return "a conta confirmada veio incompleta"
+    if not re.fullmatch(r"https?://[A-Za-z0-9.:-]{3,120}", base):
+        base = wx.ILINK_BASE_URL
+    save_env_value("WEIXIN_ACCOUNT_ID", conta)
+    save_env_value("WEIXIN_TOKEN", token)
+    save_env_value("WEIXIN_BASE_URL", base)
+    # só a conversa direta, com o pareamento do gateway (o código que a pessoa digita no Ergon); grupos não
+    save_env_value("WEIXIN_DM_POLICY", "pairing")
+    save_env_value("WEIXIN_GROUP_POLICY", "disabled")
+    try:
+        wx.save_weixin_account(os.environ.get("HERMES_HOME", "/opt/data"), account_id=conta, token=token, base_url=base,
+                               user_id=str(status.get("ilink_user_id") or ""))
+    except Exception:  # noqa: BLE001 - o .env já basta para o adaptador
+        logger.warning("ergon_bridge: não gravei o arquivo da conta do WeChat", exc_info=False)
+    store = PairingStore()
+    _canal_limpar(store, "weixin")
+    store.clear_pending("weixin")
+    _canal_zerar_espera(store, "weixin")
+    return ""
+
+
+async def _weixin_qr_acompanhar(geracao: int, qrcode: str) -> None:
+    wx = _weixin_mod()
+    renovados = 0
+    base = wx.ILINK_BASE_URL
+    async with wx._new_session() as sessao:
+        while time.time() < _weixin_qr["inicio"] + _WEIXIN_QR_SEGUNDOS:
+            if _weixin_qr["geracao"] != geracao:
+                return
+            try:
+                st = await wx._api_get(sessao, base_url=base, endpoint=f"{wx.EP_GET_QR_STATUS}?qrcode={urllib.parse.quote(qrcode)}", timeout_ms=wx.QR_TIMEOUT_MS)
+            except Exception:  # noqa: BLE001 - espera longa vencida ou rede: tenta de novo
+                await asyncio.sleep(1)
+                continue
+            status = str(st.get("status") or "wait")
+            if status == "scaned":
+                _weixin_qr_mudar(geracao, estado="escaneado")
+            elif status == "scaned_but_redirect" and re.fullmatch(r"[A-Za-z0-9.-]{3,120}", str(st.get("redirect_host") or "")):
+                base = f"https://{st['redirect_host']}"
+            elif status == "expired":
+                renovados += 1
+                if renovados > 3:
+                    _weixin_qr_mudar(geracao, estado="expirado", qr="")
+                    return
+                try:
+                    qrcode, url = await wx._fetch_qr(sessao, "3")
+                except Exception as exc:  # noqa: BLE001
+                    _weixin_qr_mudar(geracao, estado="erro", qr="", erro=type(exc).__name__)
+                    return
+                _weixin_qr_mudar(geracao, estado="aguardando", qr=url or qrcode)
+            elif status == "confirmed":
+                erro = await asyncio.to_thread(_weixin_confirmado, wx, st)
+                if erro:
+                    _weixin_qr_mudar(geracao, estado="erro", qr="", erro=erro)
+                    return
+                if _weixin_qr_mudar(geracao, estado="confirmado", qr="", erro=""):
+                    _canal_reiniciar()
+                return
+            await asyncio.sleep(1)
+    _weixin_qr_mudar(geracao, estado="expirado", qr="")
+
+
+def _weixin_qr_iniciar() -> dict[str, Any]:
+    """Pede um QR novo ao iLink (de uso único, vale alguns minutos) e acompanha o login em segundo plano."""
+    wx = _weixin_mod()
+    if not wx.check_weixin_requirements():
+        return {"estado": "erro", "qr": "", "erro": "sem_dependencias", "expira_em": 0}
+
+    async def pedir() -> tuple[str, str]:
+        async with wx._new_session() as sessao:
+            return await wx._fetch_qr(sessao, "3")
+    try:
+        qrcode, url = asyncio.run(pedir())
+    except Exception as exc:  # noqa: BLE001 - sem rede até o iLink (ou recusado): a tela diz em uma linha
+        with _lock:
+            _weixin_qr.update(estado="erro", qr="", erro="sem_conexao", geracao=_weixin_qr["geracao"] + 1)
+        logger.warning("ergon_bridge: o iLink não deu o QR (%s)", type(exc).__name__)
+        return _weixin_qr_publico()
+    if not qrcode:
+        with _lock:
+            _weixin_qr.update(estado="erro", qr="", erro="sem_qr", geracao=_weixin_qr["geracao"] + 1)
+        return _weixin_qr_publico()
+    with _lock:
+        geracao = _weixin_qr["geracao"] + 1
+        _weixin_qr.update(estado="aguardando", qr=url or qrcode, inicio=time.time(), erro="", geracao=geracao)
+    threading.Thread(target=lambda: asyncio.run(_weixin_qr_acompanhar(geracao, qrcode)), name="ergon-weixin-qr", daemon=True).start()
+    return _weixin_qr_publico()
 
 
 def _canal_reiniciar() -> bool:
@@ -5628,14 +5806,25 @@ class _ControlHandler(BaseHTTPRequestHandler):
         gateway) e DELETE /<canal> (apaga o código do bot e desfaz as ligações). O código do bot nunca volta por aqui."""
         try:
             from gateway.pairing import PairingStore  # módulos do Hermes
-            from hermes_cli.config import remove_env_value, save_env_value
+            from hermes_cli.config import load_env, remove_env_value, save_env_value
             if method == "GET" and path == "/ergon/v1/canais":
                 return self._json(200, {"canais": _canal_estado()})
-            m = re.fullmatch(r"/ergon/v1/canais/(telegram|discord|feishu|dingtalk)(/parear)?", path)
+            if path == "/ergon/v1/canais/weixin/qr":
+                # rc.46: o login do WeChat pessoal pelo QR (POST pede um novo; GET diz em que pé está). O token nunca volta.
+                if method == "POST":
+                    return self._json(200, _weixin_qr_iniciar())
+                if method == "GET":
+                    return self._json(200, _weixin_qr_estado())
+                if method == "DELETE":
+                    return self._json(200, _weixin_qr_cancelar())
+                return self._json(405, {"error": "método não aceito"})
+            m = re.fullmatch(r"/ergon/v1/canais/(telegram|discord|feishu|dingtalk|wecom|weixin)(/parear)?", path)
             if not m:
                 return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
             canal, parear = m.group(1), bool(m.group(2))
             store = PairingStore()
+            if method == "PUT" and not parear and canal == "weixin":
+                return self._json(400, {"error": "o WeChat pessoal liga pelo QR (POST /ergon/v1/canais/weixin/qr)", "code": "qr"})
             if method == "PUT" and not parear and canal in _CANAIS_DE_APP:
                 # o App ID e o App Secret do aplicativo (Feishu/Lark, DingTalk): no .env do motor; nunca voltam por aqui
                 app_id, segredo = str(body.get("app_id") or "").strip(), str(body.get("app_secret") or "").strip()
@@ -5681,7 +5870,11 @@ class _ControlHandler(BaseHTTPRequestHandler):
                 _canal_limpar(store, canal)
                 store.clear_pending(canal)
                 _canal_zerar_espera(store, canal)
-                for var in _CANAL_APP_ENV.get(canal, (_CANAL_ENV[canal],)) + (("FEISHU_DOMAIN", "FEISHU_CONNECTION_MODE") if canal == "feishu" else ()):
+                if canal == "weixin":
+                    _weixin_qr_cancelar()
+                    _weixin_apagar_conta(str(load_env().get("WEIXIN_ACCOUNT_ID") or ""))
+                extra = {"feishu": ("FEISHU_DOMAIN", "FEISHU_CONNECTION_MODE"), "weixin": _WEIXIN_ENV_TODOS}.get(canal, ())
+                for var in _CANAL_APP_ENV.get(canal, (_CANAL_ENV[canal],)) + extra:
                     remove_env_value(var)
                 return self._json(200, {"ok": True, "reiniciando": _canal_reiniciar()})
         except Exception as exc:  # noqa: BLE001
@@ -5969,7 +6162,7 @@ def register(ctx) -> None:
     ctx.register_hook("pre_gateway_dispatch", on_pre_dispatch)
     # botões dos cartões e o adaptador vivo (só no processo do gateway, quando o canal conecta)
     for _plataforma, _fabrica in (("telegram", _fabrica_telegram), ("discord", _fabrica_discord), ("feishu", _fabrica_feishu),
-                                  ("dingtalk", _fabrica_dingtalk)):
+                                  ("dingtalk", _fabrica_dingtalk), ("wecom", _fabrica_wecom), ("weixin", _fabrica_weixin)):
         try:
             ctx.register_platform_handler(_plataforma, _fabrica)
         except Exception:  # noqa: BLE001 - Hermes sem esse registro: os canais ficam sem botões, o resto segue
