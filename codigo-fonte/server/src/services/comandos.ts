@@ -119,7 +119,8 @@ export class Comandos {
   }
   setClock(fn: (() => number) | null): void { this.agora = fn ?? (() => Date.now()); }
 
-  private lingua(userId: string): Lingua { return this.db.get<{ lang: string | null }>('SELECT lang FROM users WHERE id = ?', userId)?.lang === 'en' ? 'en' : 'pt'; }
+  // os comandos falam português e inglês: chinês, hindi e o inglês da Índia (rc.44) leem o inglês
+  private lingua(userId: string): Lingua { const l = this.db.get<{ lang: string | null }>('SELECT lang FROM users WHERE id = ?', userId)?.lang; return l && l !== 'pt-BR' ? 'en' : 'pt'; }
   private onde(alvo: Alvo): { sql: string; arg: string } { return alvo.conversationId ? { sql: 'conversation_id = ?', arg: alvo.conversationId } : { sql: 'task_id = ?', arg: alvo.taskId! }; }
   private conferirAlvo(ws: string, userId: string, alvo: Alvo): void {
     if (alvo.conversationId) {

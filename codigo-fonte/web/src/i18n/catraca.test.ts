@@ -33,6 +33,17 @@ test('catraca: nenhum arquivo de tela tem texto em português fora do dicionári
   assert.equal(erros.length, 0, `\n${erros.join('\n')}`);
 });
 
+test('catraca: nenhum arquivo de tela tem chinês ou devanágari escrito direto (só nos dicionários de i18n/)', () => {
+  // ideogramas, pontuação CJK e formas de largura cheia; a faixa devanágari
+  const ESCRITA = /[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef\u0900-\u097f]/u;
+  const erros: string[] = [];
+  for (const rel of arquivos()) {
+    const linhas = fs.readFileSync(path.join(SRC, rel), 'utf8').split('\n');
+    linhas.forEach((l, i) => { if (ESCRITA.test(l) && !/i18n-ok/.test(l) && !/i18n-ok/.test(linhas[i - 1] ?? '')) erros.push(`${rel}:${i + 1}: ${l.trim().slice(0, 80)}`); });
+  }
+  assert.deepEqual(erros, [], 'texto em chinês ou hindi fora do dicionário (use t() e i18n/zh-CN|hi/<area>.ts)');
+});
+
 test('a varredura acha o texto de tela e deixa de fora o que é código', () => {
   const achou = (src: string) => varrer(src, 'x.tsx').map((a) => a.texto);
   // texto solto no JSX, acentuado, frase, atributo visível, resultado mostrado no JSX, o pt-BR fixo

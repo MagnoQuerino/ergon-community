@@ -78,4 +78,5 @@ const EN: Termos = {
   ],
 };
 
-export const termosEm = (idioma: Idioma): Termos => (idioma === 'en' ? EN : PT);
+/** Os termos só existem em português e inglês (texto legal com versão própria): os outros idiomas leem o inglês. */
+export const termosEm = (idioma: Idioma): Termos => (idioma === 'pt-BR' ? PT : EN);

@@ -1,7 +1,7 @@
 // O miolo da tradução, sem React e sem a página: escolher a forma do plural, preencher os marcadores {nome} e formatar
 // datas, horas, números e dinheiro pelo Intl no idioma pedido. index.ts liga isto ao idioma atual da tela; os testes
 // usam direto (nucleo.test.ts).
-import type { Idioma } from './idiomas.ts';
+import { LOCALE, type Idioma } from './idiomas.ts';
 import type { Mensagem, Plural } from './tipos.ts';
 
 export type Valores = Readonly<Record<string, string | number | null | undefined>>;
@@ -16,14 +16,22 @@ function intl<T>(tipo: string, idioma: Idioma, opcoes: object | undefined, criar
   return f;
 }
 
+/** o locale do Intl para o idioma (hi → hi-IN; en-IN e hi agrupam em lakh e crore); um idioma desconhecido, como veio */
+const loc = (l: Idioma): string => LOCALE[l] ?? l;
+
+/** As moedas que a tela formata (o Intl põe o símbolo no jeito do idioma: R$, US$, €, ¥ / CN¥, ₹). */
+export const MOEDAS = ['BRL', 'USD', 'EUR', 'CNY', 'INR'] as const;
+export type Moeda = (typeof MOEDAS)[number];
+export const ehMoeda = (v: unknown): v is Moeda => typeof v === 'string' && (MOEDAS as readonly string[]).includes(v);
+
 const comoData = (d: Data): Date | null => {
   const v = d instanceof Date ? d : new Date(d);
   return Number.isNaN(v.getTime()) ? null : v;
 };
 
-/** Número no idioma: 1.250,5 / 1,250.5. */
+/** Número no idioma: 1.250,5 / 1,250.5 / 12,34,567.5 (en-IN e hi: lakh e crore). */
 export function fmtNumero(idioma: Idioma, n: number, opcoes?: Intl.NumberFormatOptions): string {
-  return intl('n', idioma, opcoes, () => new Intl.NumberFormat(idioma, opcoes)).format(n);
+  return intl('n', idioma, opcoes, () => new Intl.NumberFormat(loc(idioma), opcoes)).format(n);
 }
 
 /** Número curto: 1,3 mil · 2,5 mi / 1.3K · 2.5M. */
@@ -31,8 +39,8 @@ export function fmtCompacto(idioma: Idioma, n: number): string {
   return fmtNumero(idioma, n, { notation: 'compact', maximumFractionDigits: 1 });
 }
 
-/** Dinheiro de verdade (real, dólar, euro), com o símbolo no jeito do idioma: US$ 1,50 / $1.50. */
-export function fmtMoeda(idioma: Idioma, valor: number, moeda: 'BRL' | 'USD' | 'EUR', opcoes?: Intl.NumberFormatOptions): string {
+/** Dinheiro de verdade (real, dólar, euro, yuan, rupia), com o símbolo no jeito do idioma: US$ 1,50 / $1.50 / ₹12,34,567.00. */
+export function fmtMoeda(idioma: Idioma, valor: number, moeda: Moeda, opcoes?: Intl.NumberFormatOptions): string {
   return fmtNumero(idioma, valor, { style: 'currency', currency: moeda, ...opcoes });
 }
 
@@ -52,7 +60,7 @@ export function fmtBytes(idioma: Idioma, bytes: number): string {
 /** Data (curta por padrão): 09/11/2026 / 11/9/2026. Data inválida: texto vazio (nunca "Invalid Date"). */
 export function fmtData(idioma: Idioma, d: Data, opcoes: Intl.DateTimeFormatOptions = { dateStyle: 'short' }): string {
   const v = comoData(d);
-  return v ? intl('d', idioma, opcoes, () => new Intl.DateTimeFormat(idioma, opcoes)).format(v) : '';
+  return v ? intl('d', idioma, opcoes, () => new Intl.DateTimeFormat(loc(idioma), opcoes)).format(v) : '';
 }
 /** Hora: 14:05 / 2:05 PM. */
 export const fmtHora = (idioma: Idioma, d: Data) => fmtData(idioma, d, { timeStyle: 'short' });
@@ -68,12 +76,12 @@ export function fmtRelativo(idioma: Idioma, d: Data, agora: number = Date.now())
   const [qtd, unidade]: [number, Intl.RelativeTimeFormatUnit] =
     a < 45 ? [0, 'second'] : a < 3600 ? [s / 60, 'minute'] : a < 86_400 ? [s / 3600, 'hour'] : a < 7 * 86_400 ? [s / 86_400, 'day']
       : a < 30 * 86_400 ? [s / (7 * 86_400), 'week'] : a < 365 * 86_400 ? [s / (30 * 86_400), 'month'] : [s / (365 * 86_400), 'year'];
-  return intl('r', idioma, undefined, () => new Intl.RelativeTimeFormat(idioma, { numeric: 'auto' })).format(Math.round(qtd), unidade);
+  return intl('r', idioma, undefined, () => new Intl.RelativeTimeFormat(loc(idioma), { numeric: 'auto' })).format(Math.round(qtd), unidade);
 }
 
 /** Lista: "a, b e c" / "a, b, and c" (ou "ou" / "or"). */
 export function fmtLista(idioma: Idioma, itens: readonly string[], tipo: 'conjunction' | 'disjunction' = 'conjunction'): string {
-  return intl('l', idioma, { tipo }, () => new Intl.ListFormat(idioma, { type: tipo })).format(itens);
+  return intl('l', idioma, { tipo }, () => new Intl.ListFormat(loc(idioma), { type: tipo })).format(itens);
 }
 
 /**
@@ -83,7 +91,7 @@ export function fmtLista(idioma: Idioma, itens: readonly string[], tipo: 'conjun
  */
 export function formaDoPlural(idioma: Idioma, p: Plural, n: number): string {
   if (n === 0) return p.zero ?? p.other;
-  const caso = intl('p', idioma, undefined, () => new Intl.PluralRules(idioma)).select(n) as keyof Plural;
+  const caso = intl('p', idioma, undefined, () => new Intl.PluralRules(loc(idioma))).select(n) as keyof Plural;
   return p[caso] ?? p.other;
 }
 

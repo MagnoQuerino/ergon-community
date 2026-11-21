@@ -5,13 +5,16 @@
  * cabeçalho e rodapé em todas as páginas, número da página, títulos numerados, citação longa e referências ABNT.
  *
  * Fontes padrão do PDF (Helvetica para "sans", Times para "serif" — as mesmas medidas da Arial e da Times New Roman):
- * os acentos do português entram; o que está fora do WinAnsi é trocado por um equivalente (pdfSafe).
+ * os acentos do português entram; o que está fora do WinAnsi é trocado por um equivalente (pdfSafe). Chinês e hindi
+ * (rc.44): o pedaço com essas escritas vai na Noto Sans SC ou na Noto Sans Devanagari embutidas (lib/pdf-fontes.ts),
+ * com a formação do devanágari feita pelo fontkit; a data e a numeração seguem o idioma pedido.
  */
 import PDFDocument from 'pdfkit';
 import { parseMarkdown, type Block, type Inline } from '../../../shared/markdown.ts';
 import { corDeTitulo, ERGON_CORES, numeracao, preencher, REFERENCIAS, type Identidade, type ModeloDoc } from '../../../shared/entregaveis.ts';
 import { CORE_R, EMBLEM_BOX, figures, palette } from '../../../shared/logo-ergon.ts';
-import { pdfSafe } from './pdf.ts';
+import { escritaDe, fonteDa, metadado, textoDa, type Escrita } from './pdf-fontes.ts';
+import { fmtData, msg, type Idioma } from './i18n.ts';
 import { semAlfa } from './png-opaco.ts';
 
 const CM = 28.3465;
@@ -29,6 +32,8 @@ export interface EntradaPdf {
   /** o bloco visual ```ergon-<tipo> já em PNG (services/visuais/png.ts, pngsDasCercas); sem ele, o código */
   visual?: (lang: string, corpo: string) => Buffer[] | null;
   data?: string;
+  /** o idioma da data e da numeração das páginas (rc.44); sem ele, o português */
+  idioma?: Idioma | null;
 }
 
 const FONTES = {
@@ -36,7 +41,15 @@ const FONTES = {
   serif: { r: 'Times-Roman', b: 'Times-Bold', i: 'Times-Italic', bi: 'Times-BoldItalic' },
 } as const;
 
-interface Seg { text: string; b: boolean; i: boolean; code: boolean; link?: string }
+interface Seg { text: string; b: boolean; i: boolean; code: boolean; link?: string; e?: Escrita }
+
+/**
+ * A escrita do documento em montagem (documentoPdf é síncrono: uma por vez). Num documento em chinês ou hindi, o
+ * pedaço latino ("18,5%", "₹12,34,567", "1.") também vai na Noto da escrita: a mesma linha de base e o ₹ não some.
+ * Num documento em português, só o pedaço com chinês ou hindi muda de fonte.
+ */
+let escritaBase: Escrita = 'latina';
+const efetiva = (t: string): Escrita => { const e = escritaDe(t); return e === 'latina' ? escritaBase : e; };
 
 /** Inline → pedaços de texto com o estilo de cada um (o que o PDF escreve um atrás do outro). */
 function segs(c: Inline[], b = false, i = false, link?: string): Seg[] {
@@ -54,10 +67,11 @@ function segs(c: Inline[], b = false, i = false, link?: string): Seg[] {
       case 'img': break;
     }
   }
-  return out.map((s) => ({ ...s, text: seguro(s.text) })).filter((s) => s.text);
+  // cada pedaço já com a escrita dele: latino pelo pdfSafe, chinês e hindi como vieram (lib/pdf-fontes.ts)
+  return out.map((s) => { const e = efetiva(s.text); return { ...s, e, text: seguro(s.text, e) }; }).filter((s) => s.text);
 }
-/** pdfSafe linha a linha: a quebra de linha fica (pdfSafe tira os controles, e a quebra é um deles) */
-const seguro = (t: string) => t.split('\n').map((l) => pdfSafe(l.replace(/\t/g, '    '))).join('\n');
+/** O texto pronto para a fonte da escrita, linha a linha: a quebra de linha fica (pdfSafe tira os controles, e a quebra é um deles). */
+const seguro = (t: string, e: Escrita = efetiva(t)) => t.split('\n').map((l) => textoDa(e, l.replace(/\t/g, '    '))).join('\n');
 const plain = (c: Inline[]) => segs(c).map((s) => s.text).join('');
 
 /** O emblema do Ergon em vetor (a mesma geometria da tela), com `h` pontos de altura. */
@@ -75,19 +89,26 @@ function emblema(doc: Doc, x: number, y: number, h: number): number {
 }
 
 export function documentoPdf(e: EntradaPdf): Buffer {
+  escritaBase = escritaDe(`${e.titulo}\n${e.markdown}`);
+  try { return montarPdf(e); } finally { escritaBase = 'latina'; }
+}
+
+function montarPdf(e: EntradaPdf): Buffer {
   const m = e.modelo;
   const F = FONTES[m.fonte];
   const id = e.identidade;
   const corTitulo = corDeTitulo(id.corPrimaria);
   const margens = { top: m.margens.topo * CM, right: m.margens.direita * CM, bottom: m.margens.base * CM, left: m.margens.esquerda * CM };
   const doc = new PDFDocument({ size: 'A4', margins: margens, bufferPages: true, autoFirstPage: true,
-    info: { Title: pdfSafe(e.titulo), Creator: 'Ergon', Author: pdfSafe(id.nome || 'Ergon') } });
+    info: { Title: metadado(e.titulo), Creator: 'Ergon', Author: metadado(id.nome || 'Ergon') } });
+  /** Um texto inteiro numa fonte só, a da escrita dele (latino: a fonte padrão pedida); devolve o texto pronto. */
+  const em = (t: string, padrao: string, negrito: boolean): string => { const es = efetiva(t); doc.font(fonteDa(doc, es, padrao, negrito)); return seguro(t, es); };
   const W = () => doc.page.width - margens.left - margens.right;
   const fundo = () => doc.page.height - margens.bottom;
   const size = m.tamanho;
   const gap = (sz: number, entre = m.entrelinha) => Math.max(0, sz * 1.15 * (entre - 1));
   const abnt = m.citacaoAbnt;
-  const data = e.data ?? new Date().toLocaleDateString('pt-BR');
+  const data = e.data ?? fmtData(e.idioma, new Date());
   const vars = { titulo: e.titulo, empresa: id.nome, data };
 
   // ---------------------------------------------------------------------------------------------- capa (opcional)
@@ -100,16 +121,18 @@ export function documentoPdf(e: EntradaPdf): Buffer {
     let y = margens.top;
     if (e.logo) { try { doc.image(semAlfa(e.logo), cx + w / 2 - 60, y, { fit: [120, 60], align: 'center' }); y += 72; } catch { /* imagem que o PDF não lê: sem logo */ } }
     else if (id.mostrarErgon && m.base !== 'abnt') { emblema(doc, cx + w / 2 - 22, y, 44); y += 60; }
-    doc.fillColor(ERGON_CORES.tinta).font(F.b).fontSize(size);
-    if (m.capa.instituicao || id.nome) { doc.text(pdfSafe((m.capa.instituicao || id.nome).toUpperCase()), cx, y, { width: w, align: 'center' }); y = doc.y + size; }
-    if (m.capa.autor) doc.font(F.r).text(pdfSafe(m.capa.autor.toUpperCase()), cx, y + size * 2, { width: w, align: 'center' });
-    doc.font(F.b).fontSize(size + 4).fillColor(abnt ? ERGON_CORES.tinta : corTitulo);
-    const tituloH = doc.heightOfString(pdfSafe(e.titulo.toUpperCase()), { width: w });
-    doc.text(pdfSafe(e.titulo.toUpperCase()), cx, doc.page.height / 2 - tituloH, { width: w, align: 'center' });
-    if (m.capa.subtitulo) doc.font(F.r).fontSize(size + 1).fillColor(ERGON_CORES.tinta).text(pdfSafe(m.capa.subtitulo), cx, doc.y + 6, { width: w, align: 'center' });
-    const fim = [m.capa.local, m.capa.ano || String(new Date().getFullYear())].filter(Boolean).map((x) => pdfSafe(x.toUpperCase()));
-    doc.font(F.b).fontSize(size).fillColor(ERGON_CORES.tinta);
-    doc.text(fim.join('\n'), cx, fundo() - fim.length * size * 1.4, { width: w, align: 'center', lineBreak: true });
+    doc.fillColor(ERGON_CORES.tinta).fontSize(size);
+    if (m.capa.instituicao || id.nome) { doc.text(em((m.capa.instituicao || id.nome).toUpperCase(), F.b, true), cx, y, { width: w, align: 'center' }); y = doc.y + size; }
+    if (m.capa.autor) doc.text(em(m.capa.autor.toUpperCase(), F.r, false), cx, y + size * 2, { width: w, align: 'center' });
+    doc.fontSize(size + 4).fillColor(abnt ? ERGON_CORES.tinta : corTitulo);
+    const tituloCapa = em(e.titulo.toUpperCase(), F.b, true);
+    const tituloH = doc.heightOfString(tituloCapa, { width: w });
+    doc.text(tituloCapa, cx, doc.page.height / 2 - tituloH, { width: w, align: 'center' });
+    if (m.capa.subtitulo) { doc.fontSize(size + 1).fillColor(ERGON_CORES.tinta); doc.text(em(m.capa.subtitulo, F.r, false), cx, doc.y + 6, { width: w, align: 'center' }); }
+    const fim = [m.capa.local, m.capa.ano || String(new Date().getFullYear())].filter(Boolean).map((x) => x.toUpperCase()).join('\n');
+    doc.fontSize(size).fillColor(ERGON_CORES.tinta);
+    const fimTexto = em(fim, F.b, true);
+    doc.text(fimTexto, cx, fundo() - fimTexto.split('\n').length * size * 1.4, { width: w, align: 'center', lineBreak: true });
     doc.addPage();
   }
   const capas = m.capa.ligada ? 1 : 0;
@@ -133,7 +156,8 @@ export function documentoPdf(e: EntradaPdf): Buffer {
     const lg = gap(sz, o.entre);
     ensure(sz * 1.3);
     list.forEach((s, k) => {
-      doc.font(s.code ? 'Courier' : s.b && s.i ? F.bi : s.b ? F.b : s.i ? F.i : F.r).fontSize(s.code ? sz * 0.92 : sz).fillColor(s.link ? '#1F5B6B' : o.cor ?? ERGON_CORES.tinta);
+      const padrao = s.code ? 'Courier' : s.b && s.i ? F.bi : s.b ? F.b : s.i ? F.i : F.r;
+      doc.font(fonteDa(doc, s.e ?? 'latina', padrao, s.b)).fontSize(s.code ? sz * 0.92 : sz).fillColor(s.link ? '#1F5B6B' : o.cor ?? ERGON_CORES.tinta);
       const opt = { width: o.w ?? W() - (x - margens.left), continued: k < list.length - 1, lineGap: lg, align: o.align ?? 'left', indent: k === 0 ? o.indent ?? 0 : 0, link: s.link ?? null, underline: !!s.link };
       if (k === 0) doc.text(s.text, x, doc.y, opt); else doc.text(s.text, opt);
     });
@@ -157,8 +181,9 @@ export function documentoPdf(e: EntradaPdf): Buffer {
     doc.y += b.level === 1 ? 0 : sz * 0.9;
     const caixa = abnt && (b.level <= 2 || ref);
     const label = `${n ? `${n} ` : ''}${caixa ? texto.toUpperCase() : texto}`;
-    doc.font(abnt && b.level >= 4 ? F.i : F.b).fontSize(sz).fillColor(abnt ? ERGON_CORES.tinta : corTitulo)
-      .text(label, margens.left, doc.y, { width: W(), align: abnt && (b.level === 1 || ref) ? 'center' : 'left', lineGap: gap(sz, 1.15) });
+    const italico = abnt && b.level >= 4;
+    doc.fontSize(sz).fillColor(abnt ? ERGON_CORES.tinta : corTitulo)
+      .text(em(label, italico ? F.i : F.b, !italico), margens.left, doc.y, { width: W(), align: abnt && (b.level === 1 || ref) ? 'center' : 'left', lineGap: gap(sz, 1.15) });
     if (b.level === 1 && !abnt) {
       const y = doc.y + 4;
       doc.save().moveTo(margens.left, y).lineTo(margens.left + 48, y).lineWidth(2).strokeColor(id.corDestaque).stroke().restore();
@@ -172,7 +197,8 @@ export function documentoPdf(e: EntradaPdf): Buffer {
       ensure(size * 1.4);
       const mark = b.t === 'ol' ? `${b.start + k}.` : depth % 2 ? '–' : '•';
       const y = doc.y;
-      doc.font(F.r).fontSize(size).fillColor(b.t === 'ul' ? id.corDestaque : ERGON_CORES.tinta).text(mark, ind - 14, y, { width: 14, lineBreak: false });
+      // o marcador na fonte do item (a mesma linha de base do texto, também em chinês e hindi)
+      doc.font(fonteDa(doc, efetiva(plain(it)), F.r, false)).fontSize(size).fillColor(b.t === 'ul' ? id.corDestaque : ERGON_CORES.tinta).text(mark, ind - 14, y, { width: 14, lineBreak: false });
       doc.y = y;
       rich(it, { x: ind, align: m.justificar ? 'justify' : 'left', after: size * 0.25 });
       const sub = b.subs?.[k];
@@ -196,15 +222,18 @@ export function documentoPdf(e: EntradaPdf): Buffer {
   };
 
   const code = (b: Extract<Block, { t: 'code' }>) => {
-    const txt = seguro(b.v);
-    doc.font('Courier').fontSize(size * 0.82);
+    // código com chinês ou hindi: a Noto (sem largura fixa, mas legível); o resto, a Courier de sempre
+    const es = escritaDe(b.v); // o código só sai da Courier quando ele mesmo tem chinês ou hindi
+    const mono = fonteDa(doc, es, 'Courier', false);
+    const txt = seguro(b.v, es);
+    doc.font(mono).fontSize(size * 0.82);
     for (const parte of txt.split('\n').reduce<string[][]>((acc, l) => { const cur = acc[acc.length - 1]; if (cur.length >= 40) acc.push([l]); else cur.push(l); return acc; }, [[]])) {
       const t = parte.join('\n') || ' ';
       const h = doc.heightOfString(t, { width: W() - 16 }) + 12;
       ensure(Math.min(h, fundo() - margens.top));
       const y = doc.y;
       doc.save().roundedRect(margens.left, y, W(), h, 4).fill(ERGON_CORES.fundoTabela).restore();
-      doc.font('Courier').fontSize(size * 0.82).fillColor('#2b2b2b').text(t, margens.left + 8, y + 6, { width: W() - 16 });
+      doc.font(mono).fontSize(size * 0.82).fillColor('#2b2b2b').text(t, margens.left + 8, y + 6, { width: W() - 16 });
       doc.y = y + h + 2;
     }
     doc.x = margens.left; doc.y += size * 0.5;
@@ -218,10 +247,11 @@ export function documentoPdf(e: EntradaPdf): Buffer {
     const tot = peso.reduce((a, x) => a + x, 0);
     const ws = peso.map((p) => (p / tot) * W());
     const row = (cells: Inline[][], head: boolean) => {
-      const texts = cells.map((c) => plain(c));
-      doc.font(head ? F.b : F.r).fontSize(sz);
-      const h = Math.max(...texts.map((t, k) => doc.heightOfString(t || ' ', { width: ws[k] - 10 }))) + 9;
-      return { texts, h };
+      // cada célula na fonte da escrita dela (a altura da linha mede com a fonte certa)
+      doc.fontSize(sz);
+      const celulas = cells.map((c) => { const t = plain(c); const es = efetiva(t); return { t: seguro(t, es), f: fonteDa(doc, es, head ? F.b : F.r, head) }; });
+      const h = Math.max(...celulas.map((c, k) => doc.font(c.f).heightOfString(c.t || ' ', { width: ws[k] - 10 }))) + 9;
+      return { celulas, h };
     };
     const draw = (cells: Inline[][], head: boolean) => {
       const r = row(cells, head);
@@ -229,9 +259,9 @@ export function documentoPdf(e: EntradaPdf): Buffer {
       const y = doc.y;
       if (head) doc.save().rect(margens.left, y, W(), r.h).fill(ERGON_CORES.fundoTabela).restore();
       let x = margens.left;
-      r.texts.forEach((t, k) => {
-        doc.font(head ? F.b : F.r).fontSize(sz).fillColor(head ? (abnt ? ERGON_CORES.tinta : corTitulo) : ERGON_CORES.tinta)
-          .text(t, x + 5, y + 4.5, { width: ws[k] - 10, align: b.align[k] === 'right' ? 'right' : b.align[k] === 'center' ? 'center' : 'left' });
+      r.celulas.forEach((c, k) => {
+        doc.font(c.f).fontSize(sz).fillColor(head ? (abnt ? ERGON_CORES.tinta : corTitulo) : ERGON_CORES.tinta)
+          .text(c.t, x + 5, y + 4.5, { width: ws[k] - 10, align: b.align[k] === 'right' ? 'right' : b.align[k] === 'center' ? 'center' : 'left' });
         x += ws[k];
       });
       doc.save().moveTo(margens.left, y + r.h).lineTo(margens.left + W(), y + r.h).lineWidth(head ? 1 : 0.5).strokeColor(head ? id.corDestaque : ERGON_CORES.linha).stroke().restore();
@@ -311,18 +341,18 @@ export function documentoPdf(e: EntradaPdf): Buffer {
       if (m.cabecalho.logo && e.logo) { try { doc.image(semAlfa(e.logo), x, y, { fit: [90, alto] }); x += 98; } catch { /* sem logo */ } }
       else if (m.cabecalho.logo && id.mostrarErgon) x += emblema(doc, x, y, alto) + 8;
       const texto = preencher(m.cabecalho.texto, vars);
-      if (texto) doc.font(F.b).fontSize(8.5).fillColor(corTitulo).text(pdfSafe(texto), x, y + alto / 2 - 4.5, { width: wTotal - (x - margens.left), lineBreak: false, ellipsis: true });
+      if (texto) { doc.fontSize(8.5).fillColor(corTitulo); doc.text(em(texto, F.b, true), x, y + alto / 2 - 4.5, { width: wTotal - (x - margens.left), lineBreak: false, ellipsis: true }); }
       doc.save().moveTo(margens.left, y + alto + 6).lineTo(margens.left + wTotal, y + alto + 6).lineWidth(0.6).strokeColor(id.corDestaque).stroke().restore();
     }
     const yRod = doc.page.height - margens.bottom + Math.min(26, margens.bottom / 2);
     if (m.rodape.mostrar) {
       const texto = preencher(m.rodape.texto, vars);
-      if (texto) doc.font(F.r).fontSize(8).fillColor(ERGON_CORES.suave).text(pdfSafe(texto), margens.left, yRod, { width: wTotal * 0.7, lineBreak: false, ellipsis: true });
+      if (texto) { doc.fontSize(8).fillColor(ERGON_CORES.suave); doc.text(em(texto, F.r, false), margens.left, yRod, { width: wTotal * 0.7, lineBreak: false, ellipsis: true }); }
     }
     if (m.paginacao !== 'nenhuma' && pagina >= m.numeroDesde) {
       // ABNT: só o número, no alto à direita, a 2 cm da borda; os outros: "3 / 12" no rodapé à direita
       if (m.paginacao === 'topo') doc.font(F.r).fontSize(10).fillColor(ERGON_CORES.tinta).text(String(pagina), margens.left, 2 * CM - 10, { width: wTotal, align: 'right', lineBreak: false });
-      else doc.font(F.r).fontSize(8).fillColor(ERGON_CORES.suave).text(`${pagina} / ${total}`, margens.left, yRod, { width: wTotal, align: 'right', lineBreak: false });
+      else { doc.fontSize(8).fillColor(ERGON_CORES.suave); doc.text(em(msg(e.idioma, 'pdf.pagina', { pagina, total }), F.r, false), margens.left, yRod, { width: wTotal, align: 'right', lineBreak: false }); }
     }
     doc.page.margins = salva;
   }

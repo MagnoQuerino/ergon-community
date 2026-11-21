@@ -11,28 +11,36 @@
 // O TypeScript confere tudo: a chave tem de existir no dicionário e os valores têm de ser os marcadores dela.
 import { createElement, Fragment, useSyncExternalStore, type ReactNode } from 'react';
 import { pt, type Dicionario } from './pt/index.ts';
-import { IDIOMA_PADRAO, ehIdioma, idiomaDoNavegador, type Idioma } from './idiomas.ts';
+import { ESCRITA, IDIOMA_PADRAO, RESERVA, ehIdioma, idiomaDoNavegador, type Idioma } from './idiomas.ts';
+import { carregarFonteDa } from '../lib/fontes.ts';
 import * as N from './nucleo.ts';
 import type { Marcadores, Mensagem, Plural } from './tipos.ts';
 
 export type { Idioma } from './idiomas.ts';
-export { IDIOMAS, NOME_DO_IDIOMA } from './idiomas.ts';
+export { IDIOMAS, NOME_DO_IDIOMA, textoEm } from './idiomas.ts';
+export type { Moeda } from './nucleo.ts';
 
-type Areas = { readonly [area: string]: { readonly [chave: string]: Mensagem } };
-// o português vem junto com a tela; o inglês só é baixado por quem usa (quem fala português não paga nada a mais)
+type Areas = { readonly [area: string]: { readonly [chave: string]: Mensagem } | undefined };
+// o português vem junto com a tela; os outros só são baixados por quem usa (quem fala português não paga nada a mais).
+// Chinês e hindi são parciais: o que falta vem da reserva (RESERVA em idiomas.ts: o inglês), baixada junto.
 const PT: Areas = pt;
 const DICIONARIOS: Partial<Record<Idioma, Areas>> = { [IDIOMA_PADRAO]: PT };
 const CARREGAR: Record<Idioma, () => Promise<Areas>> = {
   'pt-BR': () => Promise.resolve(pt),
   en: () => import('./en/index.ts').then((m) => m.en as Areas),
+  'en-IN': () => import('./en-IN/index.ts').then((m) => m.enIN as Areas),
+  'zh-CN': () => import('./zh-CN/index.ts').then((m) => m.zhCN as Areas),
+  hi: () => import('./hi/index.ts').then((m) => m.hi as Areas),
 };
 const carregando = new Map<Idioma, Promise<void>>();
-/** Baixa o dicionário do idioma (uma vez). Falhou (sem rede no meio da troca): a próxima tentativa baixa de novo. */
+/** Baixa o dicionário do idioma e o da reserva dele (uma vez). Falhou (sem rede no meio da troca): a próxima tentativa baixa de novo. */
 function carregarIdioma(l: Idioma): Promise<void> {
-  if (DICIONARIOS[l]) return Promise.resolve();
+  const reserva = RESERVA[l];
+  const antes = reserva ? carregarIdioma(reserva) : Promise.resolve();
+  if (DICIONARIOS[l]) return antes;
   let p = carregando.get(l);
   if (!p) {
-    p = CARREGAR[l]().then((d) => { DICIONARIOS[l] = d; }).finally(() => carregando.delete(l));
+    p = Promise.all([CARREGAR[l](), antes]).then(([d]) => { DICIONARIOS[l] = d; }).finally(() => carregando.delete(l));
     carregando.set(l, p);
   }
   return p;
@@ -56,8 +64,12 @@ type PedacosDe<K extends Chave> = MensagemDe<K> extends Plural
 function buscar(idioma: Idioma, chave: string): Mensagem | undefined {
   const i = chave.indexOf('.');
   const area = chave.slice(0, i); const nome = chave.slice(i + 1);
-  // sem a tradução (não deveria acontecer: o tipo e o teste de completude não deixam), vale o português
-  return DICIONARIOS[idioma]?.[area]?.[nome] ?? PT[area]?.[nome];
+  // o idioma, depois a reserva dele (o inglês, para chinês e hindi) e, no fim, o português: nunca a chave crua
+  for (let l: Idioma | null = idioma; l; l = RESERVA[l]) {
+    const m = DICIONARIOS[l]?.[area]?.[nome];
+    if (m !== undefined) return m;
+  }
+  return PT[area]?.[nome];
 }
 
 // ——— o idioma atual ———
@@ -75,9 +87,10 @@ const guardarEm = (chave: string, l: Idioma) => { try { localStorage.setItem(cha
 /** quem entrou: a escolha dela também fica neste navegador, separada da de outras contas */
 let pessoa: string | null = null;
 const guardar = (l: Idioma) => { guardarEm(CHAVE_LOCAL, l); if (pessoa) guardarEm(chaveDaPessoa(pessoa), l); };
-const linguaDoNavegador = (): string | undefined => (typeof navigator === 'undefined' ? undefined : navigator.language);
+/** As línguas do sistema ou do navegador, na ordem de preferência (no aplicativo, o WebView segue o sistema). */
+const linguaDoNavegador = (): readonly string[] => (typeof navigator === 'undefined' ? [] : navigator.languages?.length ? navigator.languages : [navigator.language]);
 
-/** Sem escolha nenhuma: o idioma do navegador. */
+/** Sem escolha nenhuma (primeiro uso): o idioma do sistema ou do navegador. */
 const idiomaSemEscolha = (): Idioma => idiomaDoNavegador(linguaDoNavegador());
 /** Ao abrir a página (antes de entrar): a última escolha feita neste navegador; sem ela, a do navegador. */
 export function idiomaInicial(): Idioma { return lerGuardado() ?? idiomaSemEscolha(); }
@@ -100,7 +113,12 @@ let pedido: Idioma = idiomaInicial();
 const subs = new Set<() => void>();
 
 function aplicarNoDocumento() {
-  if (typeof document !== 'undefined') document.documentElement.lang = atual;
+  if (typeof document === 'undefined') return;
+  const raiz = document.documentElement;
+  raiz.lang = atual;
+  // a escrita do idioma (data-escrita no <html>): o CSS acrescenta a fonte CJK ou devanágari, baixada só agora
+  raiz.setAttribute?.('data-escrita', ESCRITA[atual]);
+  carregarFonteDa(ESCRITA[atual]);
 }
 aplicarNoDocumento();
 
@@ -174,7 +192,7 @@ export function useT(): typeof t { useIdioma(); return t; }
 
 export const fmtNumero = (n: number, opcoes?: Intl.NumberFormatOptions) => N.fmtNumero(atual, n, opcoes);
 export const fmtCompacto = (n: number) => N.fmtCompacto(atual, n);
-export const fmtMoeda = (v: number, moeda: 'BRL' | 'USD' | 'EUR', opcoes?: Intl.NumberFormatOptions) => N.fmtMoeda(atual, v, moeda, opcoes);
+export const fmtMoeda = (v: number, moeda: N.Moeda, opcoes?: Intl.NumberFormatOptions) => N.fmtMoeda(atual, v, moeda, opcoes);
 export const fmtDracmas = (v: number) => N.fmtDracmas(atual, v);
 export const fmtBytes = (b: number) => N.fmtBytes(atual, b);
 export const fmtData = (d: N.Data, opcoes?: Intl.DateTimeFormatOptions) => N.fmtData(atual, d, opcoes);

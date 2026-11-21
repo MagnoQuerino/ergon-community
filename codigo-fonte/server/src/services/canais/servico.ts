@@ -32,6 +32,8 @@ import { blocosDe } from '../../../../shared/visuais/cercas.ts';
 import { visualParaPng } from '../visuais/png.ts';
 import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
 import { avisoDoCard } from '../resumo-tarefa.ts';
+import { msg } from '../../lib/i18n.ts';
+import { readLang } from '../prefs.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
 const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
@@ -312,7 +314,7 @@ export class Canais {
     const quem = this.d.db.get<{ nome: string | null; username: string }>('SELECT display_name AS nome, username FROM users WHERE id = ?', p.aprovadoPor);
     this.notaNaConversa(v.workspace_id, conv, `Sistema — o pedido abaixo chegou pelo ${nomeDoCanal(v.canal)} e foi aprovado no app por ${quem ? quem.nome || quem.username : 'quem administra o workspace'}.`);
     if (this.entregarNaConversa(v, p.text, `aprovado:${p.proposalId}`, null, null)) return;
-    this.enfileirar(v, 'texto', { texto: 'Aprovado no Ergon: a equipe começou o seu pedido.' });
+    this.enfileirar(v, 'texto', { texto: msg(readLang(this.d.db, v.user_id), 'canal.aprovado') });
     if (!ehCanalLocal(v.canal)) this.digitar.add(`${v.user_id}|${v.canal}`);
   }
 
@@ -444,13 +446,14 @@ export class Canais {
           AND (conversation_id = ? OR id IN (SELECT proposal_id FROM proposal_links WHERE conversation_id = ?))
           AND NOT EXISTS (SELECT 1 FROM canais_cartoes c WHERE c.proposal_id = agent_proposals.id AND c.user_id = ? AND c.canal = ?)
         ORDER BY created_at, rowid LIMIT 20`, v.workspace_id, v.created_at, v.conversation_id, v.conversation_id, v.user_id, v.canal);
-    for (const p of props) this.cartao(v, p, 'Precisa de você');
+    const lang = readLang(this.d.db, v.user_id);
+    for (const p of props) this.cartao(v, p, msg(lang, 'canal.precisaDeVoce'));
     const esperando = this.d.db.all<{ id: string; agente: string }>(
       "SELECT r.id, a.name AS agente FROM runs r JOIN agents a ON a.id = r.agent_id WHERE r.conversation_id = ? AND r.status = 'waiting_user' AND r.created_at >= ? ORDER BY r.created_at LIMIT 5",
       v.conversation_id, v.created_at);
     for (const w of esperando) {
       if (!this.d.db.run('INSERT INTO canais_avisados (user_id, canal, item, at, sent) VALUES (?, ?, ?, ?, 1) ON CONFLICT DO NOTHING', v.user_id, v.canal, `w:${w.id}`, now()).changes) continue;
-      this.enfileirar(v, 'texto', { texto: `${w.agente && w.agente !== CLOSED_VALUE ? w.agente : 'A equipe'} espera uma resposta sua: responda aqui mesmo.` });
+      this.enfileirar(v, 'texto', { texto: msg(lang, 'canal.esperaRespostaAqui', { quem: w.agente && w.agente !== CLOSED_VALUE ? w.agente : msg(lang, 'canal.aEquipe') }) });
     }
   }
 
@@ -486,17 +489,19 @@ export class Canais {
     const out: Array<{ chave: string; texto: string; bloco?: boolean; proposta?: { id: string; kind: string; summary: string } }> = [];
     // os cartões dos canais externos (pausa, pedido de risco) ficam no app: um celular roubado não os vê
     for (const p of d.proposals) { if (p.kind !== KIND_EXTERNO && !(p.conversation_id && doCanal.has(p.conversation_id))) out.push({ chave: `p:${p.id}`, texto: partesDoResumo(p.summary).titulo, proposta: p }); }
-    for (const w of d.waiting) { if (!(w.conversation_id && doCanal.has(w.conversation_id))) out.push({ chave: `w:${w.id}`, texto: `${w.agent_name} espera uma resposta sua` }); }
-    const precisa: Record<string, string> = { info: 'precisa de uma informação sua', review: 'está pronto para você revisar', approval: 'espera a sua aprovação' };
+    // os avisos no idioma da pessoa (rc.44); sem escolha, o português de sempre
+    const lang = readLang(this.d.db, v.user_id);
+    for (const w of d.waiting) { if (!(w.conversation_id && doCanal.has(w.conversation_id))) out.push({ chave: `w:${w.id}`, texto: msg(lang, 'canal.esperaResposta', { quem: w.agent_name }) }); }
+    const precisa: Record<string, string> = { info: msg(lang, 'canal.card.info'), review: msg(lang, 'canal.card.review'), approval: msg(lang, 'canal.card.approval') };
     for (const c of d.cards) {
       // com a entrega no modelo: o mesmo resumo curto do cartão (o tipo e os itens) e o link dos detalhes no Ergon
       const a = avisoDoCard(this.d.db, v.workspace_id, c.id, this.d.cfg.publicUrl);
       out.push(a
-        ? { chave: `c:${c.id}:${c.work_state}`, texto: [`Card #${c.number} — ${a.titulo}:`, ...a.linhas, `Ver detalhes: ${a.link}`].join('\n'), bloco: true }
-        : { chave: `c:${c.id}:${c.work_state}`, texto: `Card #${c.number}: ${c.title} — ${c.agent_name ? `${c.agent_name}: ` : ''}${precisa[c.need] ?? 'espera você'}${c.question ? ` (${c.question})` : ''}` });
+        ? { chave: `c:${c.id}:${c.work_state}`, texto: [msg(lang, 'canal.card.titulo', { numero: c.number, titulo: a.titulo }), ...a.linhas, msg(lang, 'canal.verDetalhes', { link: a.link })].join('\n'), bloco: true }
+        : { chave: `c:${c.id}:${c.work_state}`, texto: msg(lang, 'canal.card.linha', { numero: c.number, titulo: c.title, resto: `${c.agent_name ? `${c.agent_name}: ` : ''}${precisa[c.need] ?? msg(lang, 'canal.card.esperaVoce')}${c.question ? ` (${c.question})` : ''}` }) });
     }
-    for (const l of d.linkList) out.push({ chave: `l:${l.id}`, texto: `Ligar o card #${l.number} ao #${l.related_number}?` });
-    for (const r of d.ruleList) out.push({ chave: `r:${r.id}`, texto: `Regra sugerida: ${r.text}` });
+    for (const l of d.linkList) out.push({ chave: `l:${l.id}`, texto: msg(lang, 'canal.ligarCards', { a: l.number, b: l.related_number }) });
+    for (const r of d.ruleList) out.push({ chave: `r:${r.id}`, texto: msg(lang, 'canal.regraSugerida', { texto: r.text }) });
     return out;
   }
   /** Ao ligar (ou religar os avisos): o que já está em "Com você" conta como visto; só o que surgir depois vai ao canal. */

@@ -181,6 +181,16 @@ const configuracoes = {
   'byok.chaveSePedir': 'Chave de API (se o serviço pedir)',
   'byok.notaChave': 'A chave é conferida no provedor e guardada no cofre da equipe de IA desta conta, cifrada. Ela não aparece de novo aqui.',
   'byok.notaEndereco': 'O endereço é conferido antes de gravar, e os modelos que ele oferece passam a aparecer na escolha de modelos.',
+  // os provedores de IA da China (rc.44): na China, só modelos registrados lá; a chave entra só por este cartão
+  'byok.china.rotulo': 'Modelos da China',
+  'byok.china.texto': 'Para usar o Ergon na China (ou com modelos chineses): DeepSeek, Qwen, Kimi, GLM, MiniMax e outros, com a chave de API da sua conta no provedor.',
+  'byok.china.regiaoCn': 'China',
+  'byok.china.regiaoIntl': 'internacional',
+  'byok.china.regiaoAuto': 'China e internacional',
+  'byok.china.qwenDica': 'A mesma chave do DashScope serve ao endereço da China e ao internacional: escolha o modelo depois, em Modelo padrão.',
+  'byok.china.glmDica': 'Serve a open.bigmodel.cn (China) e a z.ai: a equipe acha o endereço certo pela chave.',
+  'byok.china.seguro': 'A chave entra só por este cartão: é conferida no provedor e guardada cifrada no cofre da equipe. Nenhum agente pede chave pela conversa; se aparecer um pedido assim, não cole.',
+  'byok.china.indisponivel': 'A equipe de IA deste computador ainda não oferece estes provedores. Atualize em Configurações › Atualizações.',
 
   // ——— Atualizações ———
   'atual.titulo': 'Versão instalada',

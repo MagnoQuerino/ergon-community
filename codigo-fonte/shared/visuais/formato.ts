@@ -4,8 +4,9 @@
  */
 import type { Formato, Moeda } from './esquema.ts';
 
-export type Locale = 'pt-BR' | 'en';
-const LOC: Record<Locale, string> = { 'pt-BR': 'pt-BR', en: 'en-US' };
+export type Locale = 'pt-BR' | 'en' | 'en-IN' | 'zh-CN' | 'hi';
+/** O locale do Intl: en-IN e hi agrupam em lakh e crore (₹12,34,567), zh-CN escreve ¥ (rc.44). */
+const LOC: Record<Locale, string> = { 'pt-BR': 'pt-BR', en: 'en-US', 'en-IN': 'en-IN', 'zh-CN': 'zh-CN', hi: 'hi-IN' };
 const cache = new Map<string, Intl.NumberFormat>();
 const nf = (l: Locale, o: Intl.NumberFormatOptions) => {
   const k = `${l}|${JSON.stringify(o)}`;

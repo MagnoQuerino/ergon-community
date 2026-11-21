@@ -43,6 +43,8 @@
 import type { Db } from '../../db/db.ts';
 import { HttpError, clip, fold, id as novoId, now } from '../../lib/util.ts';
 import { audit, type Bus } from '../bus.ts';
+import { msg, type CodigoServidor } from '../../lib/i18n.ts';
+import { readLang } from '../prefs.ts';
 
 export type Papel = 'owner' | 'admin' | 'editor' | 'viewer';
 export type Categoria = 'comum' | 'exportar' | 'terceiros' | 'apagar' | 'config' | 'segredo';
@@ -211,30 +213,33 @@ export class CanaisExternos {
       return { ok: false, motivo: 'nao_membro', resposta: '' };
     }
     const categoria = classificar(p.text);
+    // a resposta no idioma da pessoa (rc.44); sem escolha, o português de sempre
+    const lang = readLang(this.d.db, p.memberId);
     const pausa = this.d.db.get<{ avisado: number }>('SELECT avisado FROM canais_externo_pausas WHERE workspace_id = ? AND user_id = ? AND canal = ?', p.workspaceId, p.memberId, canal);
     if (pausa) {
       registrar(categoria, 'canal pausado');
       if (Number(pausa.avisado)) return { ok: false, motivo: 'pausado', resposta: '' };
       this.d.db.run('UPDATE canais_externo_pausas SET avisado = 1 WHERE workspace_id = ? AND user_id = ? AND canal = ?', p.workspaceId, p.memberId, canal);
-      return { ok: false, motivo: 'pausado', resposta: 'Este canal está pausado para você. Quem administra o workspace precisa retomar no Ergon.' };
+      return { ok: false, motivo: 'pausado', resposta: msg(lang, 'canal.pausado') };
     }
     if (this.volumeIncomum(p.workspaceId, p.memberId, canal)) {
       this.pausar(p.workspaceId, p.memberId, canal);
       registrar(categoria, 'pausado por volume incomum');
-      return { ok: false, motivo: 'pausado', resposta: 'Muitos pedidos em pouco tempo: este canal foi pausado para você, e o dono do workspace foi avisado no Ergon.' };
+      return { ok: false, motivo: 'pausado', resposta: msg(lang, 'canal.volume') };
     }
     if (categoria === 'segredo') {
       registrar(categoria, 'recusado');
-      return { ok: false, motivo: 'segredo', resposta: 'Senhas, chaves, tokens e códigos nunca passam por aqui. Veja no Ergon.' };
+      return { ok: false, motivo: 'segredo', resposta: msg(lang, 'canal.segredo') };
     }
     if (papel === 'viewer' && categoria !== 'comum' && categoria !== 'exportar') {
       registrar(categoria, 'recusado: papel de leitura');
-      return { ok: false, motivo: 'somente_leitura', resposta: 'O seu papel neste workspace é de leitura: por aqui, só consultas.' };
+      return { ok: false, motivo: 'somente_leitura', resposta: msg(lang, 'canal.somenteLeitura') };
     }
     if (ARRISCADAS.includes(categoria)) {
       const proposalId = this.guardarParaOApp(p, papel, categoria);
       registrar(categoria, 'espera aprovação no app');
-      return { ok: false, motivo: 'aprovar_no_app', proposalId, resposta: `Este pedido (${NOME_DA_CATEGORIA[categoria]}) precisa de aprovação no app do Ergon, por segurança. Assim que for aprovado lá, a equipe começa.` };
+      const nomeCat = msg(lang, `canal.categoria.${categoria}` as CodigoServidor);
+      return { ok: false, motivo: 'aprovar_no_app', proposalId, resposta: msg(lang, 'canal.aprovarNoApp', { categoria: nomeCat }) };
     }
     registrar(categoria, 'entregue');
     return { ok: true, papel, categoria, nota: this.nota(papel, canal) };
@@ -339,7 +344,7 @@ export class CanaisExternos {
       else { this.entregarAprovado?.({ channel: p.channel, workspaceId: ws, memberId: p.memberId, text: String(p.texto ?? ''), conversationId: p.conversationId ?? null, proposalId: pid, aprovadoPor: userId }); result = 'aprovado no app: o pedido foi à equipe'; }
     } else {
       result = 'recusado no app';
-      this.avisarNoCanal?.({ channel: p.channel, memberId: p.memberId, texto: 'O pedido não foi aprovado no Ergon.' });
+      this.avisarNoCanal?.({ channel: p.channel, memberId: p.memberId, texto: msg(readLang(this.d.db, p.memberId), 'canal.naoAprovado') });
     }
     this.d.db.run('UPDATE agent_proposals SET status = ?, result = ?, decided_at = ? WHERE id = ?', status, this.d.db.seal(ws, result), now(), pid);
     audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: `canal.externo.${p.tipo}.${status}`, targetType: 'proposal', targetId: pid, evidence: { canal: tipoDoCanal(p.channel), membro: p.memberId, ...(p.categoria ? { categoria: p.categoria } : {}) }, result });

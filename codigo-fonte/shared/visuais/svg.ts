@@ -12,7 +12,8 @@ import { lockupLayout, logoSvg } from '../logo-ergon.ts';
 import type { Paleta } from './paleta.ts';
 import { visualComoTexto } from './texto.ts';
 
-export const FONTE_SVG = "Inter, 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif";
+// chinês e hindi (rc.44): a Noto (no servidor, as do assets/fontes; na tela, a do sistema ou a do Ergon, lib/fontes.ts)
+export const FONTE_SVG = "Inter, 'Segoe UI', system-ui, -apple-system, Roboto, Arial, 'Noto Sans SC', 'Noto Sans Devanagari', 'Ergon Noto Sans SC', 'Ergon Noto Sans Devanagari', sans-serif";
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -328,11 +329,32 @@ function marcaPosicionada(escuro: boolean, xDireita: number, y: number): { svg: 
 /** o painel é escuro? (a marca vai na versão para fundo escuro) */
 const ehEscuro = (hex: string) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim()); if (!m) return false; const n = parseInt(m[1], 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 128; };
 
-function rodapeFontes(fs: Fonte[] | undefined, estimativa: boolean | undefined, W: number): string {
+/**
+ * A família do cartão: com hindi ou chinês no bloco, a Noto da escrita vem primeiro (rc.44): a Noto tem as letras
+ * latinas e os números, e o cartão sai inteiro numa fonte só, sem trocar de fonte no meio da palavra.
+ */
+function fonteDoCartao(b: Bloco): string {
+  const t = JSON.stringify(b);
+  if (/[\u0900-\u097f]/.test(t)) return `'Noto Sans Devanagari', ${FONTE_SVG}`; // no servidor, o hindi ainda vira curva (server: visuais/curvas.ts)
+  if (/[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]/.test(t)) return `'Noto Sans SC', ${FONTE_SVG}`;
+  return FONTE_SVG;
+}
+
+/** "Fonte(s)" e "Estimativa" no rodapé do cartão, no idioma do cartão (rc.44: também inglês, chinês e hindi). */
+const ROTULO_FONTE: Record<Locale, { um: string; varios: string; estimativa: string }> = {
+  'pt-BR': { um: 'Fonte', varios: 'Fontes', estimativa: 'Estimativa' },
+  en: { um: 'Source', varios: 'Sources', estimativa: 'Estimate' },
+  'en-IN': { um: 'Source', varios: 'Sources', estimativa: 'Estimate' },
+  'zh-CN': { um: '来源', varios: '来源', estimativa: '估算' },
+  hi: { um: 'स्रोत', varios: 'स्रोत', estimativa: 'अनुमान' },
+};
+
+function rodapeFontes(fs: Fonte[] | undefined, estimativa: boolean | undefined, W: number, l: Locale = 'pt-BR'): string {
+  const r = ROTULO_FONTE[l] ?? ROTULO_FONTE['pt-BR'];
   const partes = (fs ?? []).map((f) => `${f.titulo}${f.periodo ? ` · ${f.periodo}` : ''}`);
-  if (estimativa) partes.unshift('Estimativa');
+  if (estimativa) partes.unshift(r.estimativa);
   if (!partes.length) return '';
-  let s = `Fonte${partes.length > 1 ? 's' : ''}: ${partes[0]}`;
+  let s = `${partes.length > 1 ? r.varios : r.um}: ${partes[0]}`;
   for (let i = 1; i < partes.length; i++) {
     const resto = partes.length - i;
     if (medir(`${s} · ${partes[i]}  +${resto - 1}`, 11) > W) return `${caber(s, 11, W - 30)}  +${resto}`;
@@ -393,7 +415,7 @@ export function cartaoSvg(b: Bloco, o: OpcoesCartao): { svg: string; w: number; 
 function montarCartao(b: Bloco, o: OpcoesCartao, W: number): { svg: string; w: number; h: number; alcance: number } {
   const p = o.paleta; const pad = 28; const iw = W - pad * 2; const l = o.locale ?? 'pt-BR';
   const topo: Prim[] = []; let y = pad;
-  const titulo = b.titulo ?? (b.tipo === 'fontes' ? 'Fontes' : undefined);
+  const titulo = b.titulo ?? (b.tipo === 'fontes' ? (ROTULO_FONTE[l] ?? ROTULO_FONTE['pt-BR']).varios : undefined);
   if (titulo) { for (const q of quebrar(titulo, 20, iw, 2, 700)) { y += 24; topo.push(T(0, y - pad, q, 20, 'tinta', 700)); } y += 4; }
   if (b.subtitulo) { for (const q of quebrar(b.subtitulo, 13, iw, 2)) { y += 18; topo.push(T(0, y - pad, q, 13, 'suave')); } }
   if (titulo || b.subtitulo) y += 16;
@@ -416,11 +438,11 @@ function montarCartao(b: Bloco, o: OpcoesCartao, W: number): { svg: string; w: n
   let reservado = 0;
   if (marca?.ergon) { const m = marcaPosicionada(ehEscuro(p.painel), pad + iw, y); marcaSvg = m.svg; reservado = m.w; }
   else if (marca) { pe.push(T(iw, y + 12, marca.texto, 11, 'suave', 600, 'end')); reservado = medir(marca.texto, 11, 600); }
-  const fontes = b.tipo === 'fontes' ? '' : rodapeFontes(b.fontes, b.estimativa, iw - reservado - 16);
+  const fontes = b.tipo === 'fontes' ? '' : rodapeFontes(b.fontes, b.estimativa, iw - reservado - 16, l);
   if (fontes) pe.push(T(0, y + 12, fontes, 11, 'suave'));
   const H = Math.ceil(y + 20 + pad - 6);
   const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${esc(FONTE_SVG)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${esc(fonteDoCartao(b))}">`,
     `<rect width="${W}" height="${H}" rx="18" fill="${p.painel}"/>`,
     primsSvg(topo, p, pad, pad), primsSvg(corpo.prims, p, pad, yCorpo), primsSvg(extra, p, pad, 0), primsSvg(pe, p, pad, 0), marcaSvg,
     '</svg>',

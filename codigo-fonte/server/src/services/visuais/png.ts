@@ -1,6 +1,6 @@
 /**
- * O bloco visual em PNG no servidor (o cartão de shared/visuais/svg.ts, rasterizado em 2x pelo resvg com a Inter que vai
- * junto, em server/assets/fontes): o que o Telegram e o Discord recebem e o que o PDF do relatório leva. Sem o resvg (uma
+ * O bloco visual em PNG no servidor (o cartão de shared/visuais/svg.ts, rasterizado em 2x pelo resvg com a Inter e as
+ * Noto do chinês e do hindi que vão junto, em server/assets/fontes): o que o Telegram e o Discord recebem e o que o PDF do relatório leva. Sem o resvg (uma
  * plataforma sem o binário pronto), devolve null e os canais seguem só com o texto.
  */
 import fs from 'node:fs';
@@ -12,7 +12,9 @@ import type { Bloco } from '../../../../shared/visuais/esquema.ts';
 import { blocosDaCerca, cercasDe, ehCercaVisual } from '../../../../shared/visuais/cercas.ts';
 import { PALETAS } from '../../../../shared/visuais/paleta.ts';
 import { cartaoSvg, type Marca } from '../../../../shared/visuais/svg.ts';
+import type { Locale } from '../../../../shared/visuais/formato.ts';
 import { log } from '../../lib/log.ts';
+import { devanagariEmCurvas } from './curvas.ts';
 
 const FONTES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../assets/fontes');
 type ResvgCtor = new (svg: string, o: unknown) => { render(): { asPng(): Buffer; pixels: Buffer; width: number; height: number } };
@@ -30,15 +32,21 @@ function carregar(): ResvgCtor | null {
   return resvg;
 }
 
-const arquivosDeFonte = () => { try { return fs.readdirSync(FONTES).filter((f) => f.endsWith('.otf')).map((f) => path.join(FONTES, f)); } catch { return []; } };
+// a Inter (latino) e, desde a rc.44, a Noto Sans SC: o resvg acha sozinho a fonte que tem o caractere (um título em
+// chinês não sai em quadradinhos). O hindi vai antes em curvas, já formado pelo fontkit (curvas.ts)
+let lista: string[] | null = null;
+const arquivosDeFonte = () => {
+  if (!lista) { try { lista = fs.readdirSync(FONTES).filter((f) => /\.(otf|ttf)$/.test(f)).sort().map((f) => path.join(FONTES, f)); } catch { return []; } }
+  return lista;
+};
 
-export interface OpcoesPng { tema?: 'claro' | 'escuro'; marca?: Marca | null; largura?: number; escala?: number }
+export interface OpcoesPng { tema?: 'claro' | 'escuro'; marca?: Marca | null; largura?: number; escala?: number; locale?: Locale }
 
 /** SVG → PNG (2x por padrão). */
 export function svgParaPngJa(svg: string, escala = 2): Buffer | null {
   const R = carregar();
   if (!R) return null;
-  const r = new R(svg, { fitTo: { mode: 'zoom', value: escala }, font: { fontFiles: arquivosDeFonte(), loadSystemFonts: false, defaultFontFamily: 'Inter' }, background: 'rgba(0,0,0,0)' });
+  const r = new R(devanagariEmCurvas(svg), { fitTo: { mode: 'zoom', value: escala }, font: { fontFiles: arquivosDeFonte(), loadSystemFonts: false, defaultFontFamily: 'Inter' }, background: 'rgba(0,0,0,0)' });
   return r.render().asPng();
 }
 export async function svgParaPng(svg: string, escala = 2): Promise<Buffer | null> { return svgParaPngJa(svg, escala); }
@@ -47,8 +55,8 @@ export async function svgParaPng(svg: string, escala = 2): Promise<Buffer | null
 export function visualParaPngOpaco(b: Bloco, o: OpcoesPng = {}): Buffer | null {
   const R = carregar();
   if (!R) return null;
-  const c = cartaoSvg(b, { paleta: PALETAS[o.tema ?? 'claro'], largura: o.largura, marca: o.marca });
-  const r = new R(c.svg, { fitTo: { mode: 'zoom', value: o.escala ?? 2 }, font: { fontFiles: arquivosDeFonte(), loadSystemFonts: false, defaultFontFamily: 'Inter' }, background: '#ffffff' }).render();
+  const c = cartaoSvg(b, { paleta: PALETAS[o.tema ?? 'claro'], largura: o.largura, marca: o.marca, locale: o.locale });
+  const r = new R(devanagariEmCurvas(c.svg), { fitTo: { mode: 'zoom', value: o.escala ?? 2 }, font: { fontFiles: arquivosDeFonte(), loadSystemFonts: false, defaultFontFamily: 'Inter' }, background: '#ffffff' }).render();
   return pngRgbDe(r.pixels, r.width, r.height);
 }
 
@@ -69,7 +77,7 @@ export const chaveDaCerca = (lang: string, corpo: string): string => `${lang.toL
  * As cercas ```ergon-<tipo> de um documento já em PNG, para o PDF (lib/pdf-documento.ts, que é síncrono): o cartão no
  * tema claro, sem a marca (o documento já leva a identidade). A cerca que não valida fica de fora e o PDF mostra o código.
  */
-export function pngsDasCercas(markdown: string, max = 40): Map<string, Buffer[]> {
+export function pngsDasCercas(markdown: string, max = 40, locale?: Locale): Map<string, Buffer[]> {
   const out = new Map<string, Buffer[]>();
   for (const c of cercasDe(markdown).filter((x) => x.fechada && ehCercaVisual(x.lang)).slice(0, max)) {
     const chave = chaveDaCerca(c.lang, c.corpo);
@@ -80,7 +88,7 @@ export function pngsDasCercas(markdown: string, max = 40): Map<string, Buffer[]>
     for (const r of rs) {
       if (!r.ok) continue;
       let p: Buffer | null = null;
-      try { p = visualParaPngOpaco(r.bloco, { tema: 'claro', marca: null }); } catch { p = null; }
+      try { p = visualParaPngOpaco(r.bloco, { tema: 'claro', marca: null, locale }); } catch { p = null; }
       if (p) pngs.push(p);
     }
     if (pngs.length) out.set(chave, pngs);

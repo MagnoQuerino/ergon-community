@@ -1,5 +1,13 @@
 # Novidades
 
+## 1.1.0-rc.44 (pré-versão de teste)
+
+- **简体中文, हिन्दी e English (India):** a tela ganha três idiomas no seletor (menu do avatar e Minha conta). Na primeira vez, o Ergon abre no idioma do sistema ou do navegador. Chinês e hindi cobrem entrar, boas-vindas, navegação, conversa e salas, tarefas, entregas e as contas de IA; o resto aparece em inglês, nunca como código. As traduções ainda passam por revisão de falante nativo.
+- **Lakh e crore, yuan e rupia:** em inglês da Índia e em hindi, os números saem como 12,34,567, e os visuais e valores aceitam CNY e INR.
+- **PDF e imagens em chinês e hindi:** o PDF não apaga mais o que não é latino e forma o hindi direito (क्ष, त्र, श्र, o ि antes da letra); os visuais em PNG também. As fontes do chinês e do hindi só são baixadas na tela de quem usa esses idiomas.
+- **Modelos da China:** em Conexões › Contas de IA, DeepSeek, Qwen, Kimi, GLM, MiniMax e outros aparecem num grupo próprio, com a região de cada endereço. A chave entra só pelo cartão seguro; nenhum agente pede chave pela conversa.
+- **Também:** os avisos dos canais (Telegram, Discord, WhatsApp, Teams) chegam no idioma de quem recebe.
+
 ## 1.1.0-rc.43 (pré-versão de teste)
 
 - **Números que viram visual:** os agentes mostram métricas, gráficos, tabelas, comparativos, prazos e enquetes direto na conversa, sempre com a fonte. Cada bloco baixa em PNG. Nas salas, a enquete se vota com um clique. O relatório abre como documento, com Revisar, versões e PDF.

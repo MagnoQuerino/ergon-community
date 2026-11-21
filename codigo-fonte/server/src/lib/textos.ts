@@ -726,5 +726,6 @@ export type IdiomaDoPedido = 'pt-BR' | 'en';
 export function idiomaDoPedido(headers: Readonly<Record<string, string | string[] | undefined>>): IdiomaDoPedido {
   const v = headers['x-ergon-lang'];
   const s = (Array.isArray(v) ? v[0] : v ?? '').trim().toLowerCase();
-  return s === 'en' || s.startsWith('en-') ? 'en' : 'pt-BR';
+  // chinês e hindi (rc.44): o que o servidor gera na hora só existe em português e inglês; eles leem o inglês
+  return s === 'en' || s.startsWith('en-') || s.startsWith('zh') || s === 'hi' || s.startsWith('hi-') ? 'en' : 'pt-BR';
 }

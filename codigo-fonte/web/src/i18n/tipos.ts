@@ -25,3 +25,9 @@ export type Traducao<T extends Area> = { readonly [K in keyof T]: T[K] extends s
 
 /** Os marcadores {nome} de um texto. */
 export type Marcadores<S> = S extends `${string}{${infer N}}${infer R}` ? N | Marcadores<R> : never;
+
+/**
+ * A mesma área num idioma ainda PARCIAL (chinês, hindi, inglês da Índia): só as chaves já traduzidas, com os mesmos
+ * tipos do português; chave que não existe não compila. A que falta vem da reserva do idioma (idiomas.ts: o inglês).
+ */
+export type TraducaoParcial<T extends Area> = { readonly [K in keyof T]?: T[K] extends string ? string : Plural };

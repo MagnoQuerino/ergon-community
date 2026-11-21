@@ -10,8 +10,9 @@ import { en } from './en/index.ts';
 
 const ler = (p: string) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
-test('seletor no menu do avatar e em Minha conta, "Português" / "English", sempre à vista', () => {
-  assert.deepEqual(NOME_DO_IDIOMA, { 'pt-BR': 'Português', en: 'English' }, 'cada idioma escrito nele mesmo');
+test('seletor no menu do avatar e em Minha conta, cada idioma escrito nele mesmo, sempre à vista', () => {
+  assert.deepEqual(NOME_DO_IDIOMA, { 'pt-BR': 'Português', en: 'English', 'en-IN': 'English (India)', 'zh-CN': '简体中文', hi: 'हिन्दी' }, 'cada idioma escrito nele mesmo');
+  assert.deepEqual(Object.keys(NOME_DO_IDIOMA).sort(), [...IDIOMAS].sort(), 'um nome para cada idioma');
   // a chave que escondia o inglês até a rc.26 saiu na rc.29: o seletor não some mais
   assert.equal('IDIOMA_INGLES_LIBERADO' in idiomas, false);
   const seletor = ler('../components/SeletorIdioma.tsx');
