@@ -14,6 +14,7 @@ import { TextoLongo } from './TextoLongo.tsx';
 import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
 import { BotoesPrazo, BotoesRegra, alcanceSugerido } from './CartaoRegra.tsx';
 import { Selo } from './Selo.tsx';
+import { AvisosDeSalas } from './Salas.tsx';
 
 type OpenAgent = (id: string, tab?: 'conversa' | 'perfil' | 'atividade', draft?: string | null, conversationId?: string | null) => void;
 
@@ -108,6 +109,8 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
           {err && <p className="error" role="alert">{err}</p>}
           {done && <p className="ok" role="status">{done}</p>}
           {empty && <p className="muted">{t('servidor.decisoes.vazio')}</p>}
+          {/* Salas (rc.42): menções e pedidos de cessão de conexões, no topo (o sino já conta) */}
+          <AvisosDeSalas />
 
           {x.cards.length > 0 && <h4 className="rt-sub">{t('servidor.decisoes.cards')}</h4>}
           {x.cards.map((c) => {

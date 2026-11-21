@@ -69,7 +69,7 @@ export function editar(c: Campo, texto: string, cursor: number, candidatos: Cand
   while (fa > ini && fb > ini && a[fa - 1] === texto[fb - 1]) { fa--; fb--; }
   const delta = texto.length - a.length;
   const marcas = c.marcas.flatMap((m) => {
-    if (m.fim <= ini && !(m.fim === ini && fa > ini && fa === m.fim && false)) return [m];
+    if (m.fim <= ini) return [m];
     if (m.inicio >= fa) return [{ ...m, inicio: m.inicio + delta, fim: m.fim + delta }];
     return []; // tocada: vira texto cru
   });

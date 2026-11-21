@@ -22,8 +22,13 @@ export function onOpenCard(fn: (taskId: string, de: OrigemDoCard | null) => void
   return () => window.removeEventListener(CARD, h);
 }
 
-export function onOpenConversation(fn: (agentId: string | null, conversationId: string | null) => void): () => void {
-  const h = (e: Event) => { const d = (e as CustomEvent<{ agentId: string | null; conversationId: string | null }>).detail; fn(d?.agentId ?? null, d?.conversationId ?? null); };
+/** Abre o diálogo das conversas numa sala (rc.42: conversa em grupo). */
+export function openSala(salaId: string): void {
+  window.dispatchEvent(new CustomEvent(CONVERSA, { detail: { agentId: null, conversationId: null, salaId } }));
+}
+
+export function onOpenConversation(fn: (agentId: string | null, conversationId: string | null, salaId?: string | null) => void): () => void {
+  const h = (e: Event) => { const d = (e as CustomEvent<{ agentId: string | null; conversationId: string | null; salaId?: string | null }>).detail; fn(d?.agentId ?? null, d?.conversationId ?? null, d?.salaId ?? null); };
   window.addEventListener(CONVERSA, h);
   return () => window.removeEventListener(CONVERSA, h);
 }

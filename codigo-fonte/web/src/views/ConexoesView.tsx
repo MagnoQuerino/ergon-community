@@ -19,6 +19,7 @@ const cnMod = Object.values(import.meta.glob<{ default: ComponentType }>('./worl
 const ConexoesNuvem = cnMod ? lazy(cnMod) : null;
 import { ModeloPadrao } from '../components/ModeloPadrao.tsx';
 import { BrandLogo } from '../components/BrandLogo.tsx';
+import { CessoesNasSalas } from '../components/Salas.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { TextoLongo } from '../components/TextoLongo.tsx';
 import { BotoesRegra, type Alcance } from '../components/CartaoRegra.tsx';
@@ -192,6 +193,8 @@ export function ConexoesView() {
 
       <LiberarTudo estado={cx} />
       <Regras />
+      {/* rc.42: as conexões cedidas nas salas, com Retirar (só aparece quando há) */}
+      <CessoesNasSalas />
 
       <div className="row row--wrap conn-tools">
         <label className="conn-search"><Icon name="focus" size={14} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('conexoes.busca.placeholder')} aria-label={t('conexoes.busca.aria')} /></label>
