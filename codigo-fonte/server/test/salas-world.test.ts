@@ -271,6 +271,31 @@ test('anexo da sala: chega a ficha; baixar traz o arquivo cifrado em partes, igu
   assert.equal(pcRog.salas.receberPedidoDeAnexo(rog.workspaceId, `acc:${acc('caio@exemplo.test')}`, devCaio, { ref: art.id, salaId: sala }), false);
 });
 
+test('tópicos entre computadores: o compartilhado chega a todos da sala; o privado só aos convidados (nem o nome vaza)', async () => {
+  const idAna = `acc:${acc('ana@exemplo.test')}`;
+  const origem = (await req(pcRog, 'POST', `/api/salas/${sala}/mensagens`, rog, { texto: 'Fornecedor de papel: qual escolhemos?', clientRequestId: crid() })).json.messageId as string;
+  const comp = (await req(pcRog, 'POST', `/api/salas/${sala}/topicos`, rog, { visibilidade: 'compartilhado', origem })).json.id as string;
+  const priv = (await req(pcRog, 'POST', `/api/salas/${sala}/topicos`, rog, { nome: 'Salários (confidencial)', visibilidade: 'privado', agentes: [AGENTE] })).json.id as string;
+  const comAna = (await req(pcRog, 'POST', `/api/salas/${sala}/topicos`, rog, { nome: 'Só Rogério e Ana', visibilidade: 'privado', pessoas: [idAna] })).json.id as string;
+  await req(pcRog, 'POST', `/api/salas/${priv}/mensagens`, rog, { texto: 'Números da folha individual', clientRequestId: crid() });
+  await push(pcRog, rog); await pull(pcAna, ana); await pull(pcCaio, caio);
+  const ts = (await req(pcAna, 'GET', `/api/salas/${sala}/topicos`, ana)).json as Array<{ id: string; nome: string }>;
+  assert.deepEqual(ts.map((x) => x.id).sort(), [comp, comAna].sort());
+  assert.ok(!pcAna.db.get('SELECT 1 AS x FROM conversations WHERE id = ?', priv), 'o privado nem existe no computador da Ana');
+  assert.ok(!pcAna.db.all<{ content: string }>('SELECT content FROM messages').some((m) => m.content.includes('Salários') || m.content.includes('folha individual')));
+  const m = (await req(pcAna, 'GET', `/api/salas/${sala}/mensagens`, ana)).json.mensagens.find((x: { id: string }) => x.id === origem);
+  assert.equal(m.topico.id, comp, 'a origem mostra o tópico compartilhado');
+  assert.ok(!pcCaio.db.get('SELECT 1 AS x FROM conversations WHERE id IN (?, ?, ?)', comp, priv, comAna), 'fora da sala: nada');
+  // a Ana responde no compartilhado e menciona o Rogério; volta ao computador dele com o aviso
+  const t = '@Rogério, prefiro o segundo';
+  pcAna.db.run("UPDATE salas_membros SET nome = 'Rogério' WHERE chave = ?", `acc:${acc('rogerio@exemplo.test')}`);
+  await req(pcAna, 'POST', `/api/salas/${comp}/mensagens`, ana, { texto: t, clientRequestId: crid(), marcas: [marca(t, '@Rogério', 'pessoa', `acc:${acc('rogerio@exemplo.test')}`)] });
+  await push(pcAna, ana); await pull(pcRog, rog);
+  assert.ok(pcRog.db.all<{ content: string }>('SELECT content FROM messages WHERE conversation_id = ?', comp).some((x) => x.content === t));
+  assert.ok(((await req(pcRog, 'GET', '/api/salas/avisos', rog)).json as Array<{ conversation_id: string; tipo: string }>).some((v) => v.conversation_id === comp && v.tipo === 'mencao'));
+  assert.ok((await req(pcRog, 'GET', '/api/salas', rog)).json.salas.find((x: { id: string }) => x.id === sala).mencao, 'a menção no tópico acende a sala');
+});
+
 test('tirada da sala, a Ana deixa de receber e não lê mais; as cessões dela na sala caem', async () => {
   const idAna = `acc:${acc('ana@exemplo.test')}`;
   assert.equal((await req(pcRog, 'POST', `/api/salas/${sala}/membros/remover`, rog, { tipo: 'pessoa', chave: idAna })).status, 200);

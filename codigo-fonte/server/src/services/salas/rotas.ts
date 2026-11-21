@@ -76,6 +76,13 @@ export function registerSalasRoutes(app: FastifyInstance, d: Deps): void {
     const r = salas.enviar(a.workspaceId, a.userId, sid(req), req.body as { texto: string; marcas?: unknown; clientRequestId: string; attachments?: string[]; replyTo?: string; vozAgente?: string });
     return reply.status(r.replayed ? 200 : 201).send(r);
   });
+  // tópicos: a lista (só os que a pessoa vê) e abrir um, do zero ou a partir de uma mensagem da sala
+  app.get('/api/salas/:id/topicos', { schema: { params: idParams('cnv') } }, async (req) => { const a = auth(req); salas.detalhe(a.workspaceId, a.userId, sid(req)); return salas.topicosVisiveis(a.workspaceId, a.userId, sid(req)); });
+  app.post('/api/salas/:id/topicos', {
+    schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['visibilidade'], properties: {
+      nome: S.str(80), visibilidade: { enum: ['privado', 'compartilhado'] }, origem: S.id('msg'),
+      pessoas: { type: 'array', maxItems: 60, items: CHAVE }, agentes: { type: 'array', maxItems: 60, items: CHAVE } } } },
+  }, async (req, reply) => { const a = auth(req); return reply.status(201).send(salas.criarTopico(a.workspaceId, a.userId, sid(req), req.body as { nome?: string; visibilidade: 'privado' | 'compartilhado'; origem?: string; pessoas?: string[]; agentes?: string[] })); });
   // baixar um anexo que nasceu em outro computador (vem cifrado pela sincronia, em partes, só para quem está na sala)
   app.post('/api/salas/:id/anexos/:ref/baixar', {
     schema: { params: { type: 'object', required: ['id', 'ref'], properties: { id: S.id('cnv'), ref: S.id('art') } } },

@@ -112,3 +112,12 @@ CREATE INDEX salas_anexos_ref ON salas_anexos(workspace_id, ref);
 CREATE TABLE salas_anexo_partes (workspace_id TEXT NOT NULL, ref TEXT NOT NULL, parte INTEGER NOT NULL, dados TEXT NOT NULL, PRIMARY KEY (workspace_id, ref, parte));
 CREATE TABLE salas_anexo_envios (workspace_id TEXT NOT NULL, ref TEXT NOT NULL, device_id TEXT NOT NULL, proxima INTEGER NOT NULL, total INTEGER NOT NULL, created_at TEXT NOT NULL,
   PRIMARY KEY (workspace_id, ref, device_id));
+
+-- Tópicos (como no Discord): uma conversa paralela dentro de uma sala, a partir de uma mensagem ou do zero. É uma sala
+-- também (menções, cessão, agentes, anexos, voz valem igual), com a sala-mãe (sala_pai) e a mensagem de origem.
+-- Visibilidade: 'compartilhado' (qualquer membro da sala vê e entra: os membros são os da sala) ou 'privado' (só quem foi
+-- convidado, em salas_membros, e que continua na sala). Arquivado continua consultável e pode ser reaberto.
+ALTER TABLE conversations ADD COLUMN sala_pai TEXT;
+ALTER TABLE conversations ADD COLUMN topico_visivel TEXT CHECK (topico_visivel IN ('privado', 'compartilhado'));
+ALTER TABLE conversations ADD COLUMN topico_origem TEXT;
+CREATE INDEX conversations_topicos ON conversations(sala_pai) WHERE sala_pai IS NOT NULL;

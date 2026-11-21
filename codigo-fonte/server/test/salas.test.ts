@@ -148,3 +148,42 @@ test('governança: só quem administra muda; desligada, ninguém além de quem a
   assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM audit_events WHERE workspace_id = ? AND action = 'salas.governanca'", s.workspaceId)!.n, 1);
   await req(h, 'PUT', '/api/salas/governanca', s, { cessao: true, criar: 'todos' });
 });
+
+test('tópicos: compartilhado de uma mensagem (todos da sala veem, a origem mostra nome e respostas); privado só para quem foi convidado', async () => {
+  const [a1, a2] = agentes();
+  const sala = (await req(h, 'POST', '/api/salas', s, { nome: 'Com tópicos', agentes: [a1.name, a2.name] })).json.id as string;
+  const origem = (await req(h, 'POST', `/api/salas/${sala}/mensagens`, s, { texto: 'Precisamos decidir o fornecedor de papel', clientRequestId: crid() })).json.messageId as string;
+  const t = await req(h, 'POST', `/api/salas/${sala}/topicos`, s, { visibilidade: 'compartilhado', origem });
+  assert.equal(t.status, 201, JSON.stringify(t.json));
+  const topico = t.json.id as string;
+  // agente da sala responde no tópico com @ (as regras valem igual), e o tópico não vira sala na lista
+  const texto = `@${a1.name}, compare os três orçamentos`;
+  const r = await req(h, 'POST', `/api/salas/${topico}/mensagens`, s, { texto, clientRequestId: crid(), marcas: [marca(texto, `@${a1.name}`, 'agente', a1.name)] });
+  assert.deepEqual(r.json.agentes, [a1.name]);
+  await drain(h);
+  assert.ok(!(await req(h, 'GET', '/api/salas', s)).json.salas.some((x: { id: string }) => x.id === topico), 'o tópico fica dentro da sala');
+  const lista = (await req(h, 'GET', `/api/salas/${sala}/topicos`, s)).json;
+  assert.deepEqual(lista.map((x: { nome: string; respostas: number; privado: boolean }) => [x.nome, x.respostas, x.privado]), [['Precisamos decidir o fornecedor de papel', 2, false]]);
+  const m = (await req(h, 'GET', `/api/salas/${sala}/mensagens`, s)).json.mensagens.find((x: { id: string }) => x.id === origem);
+  assert.deepEqual([m.topico.id, m.topico.respostas], [topico, 2]);
+  const det = (await req(h, 'GET', `/api/salas/${topico}`, s)).json;
+  assert.deepEqual([det.topico.pai, det.topico.visibilidade, det.membros.length], [sala, 'compartilhado', 3], 'membros: os da sala');
+  // compartilhado: não se põe nem tira gente (é de todos)
+  assert.equal((await req(h, 'POST', `/api/salas/${topico}/membros`, s, { tipo: 'agente', chave: a2.name })).status, 409);
+  // privado: só quem abriu e os convidados da sala; agente de fora da sala não entra
+  const p = (await req(h, 'POST', `/api/salas/${sala}/topicos`, s, { nome: 'Só nós', visibilidade: 'privado', agentes: [a2.name, 'Ninguém'] })).json.id as string;
+  const dp = (await req(h, 'GET', `/api/salas/${p}`, s)).json;
+  assert.deepEqual(dp.membros.map((x: { nome: string }) => x.nome).sort(), [a2.name, 'Alexandre'].sort());
+  // quem não está na sala não vê tópico nenhum
+  assert.equal((await req(h, 'GET', `/api/salas/${topico}`, outra)).status, 404);
+  assert.equal((await req(h, 'GET', `/api/salas/${sala}/topicos`, outra)).status, 404);
+  assert.equal((await req(h, 'POST', `/api/salas/${topico}/topicos`, s, { visibilidade: 'compartilhado', nome: 'x' })).status, 400, 'sem tópico dentro de tópico');
+  // arquivar e reabrir: continua consultável
+  assert.equal((await req(h, 'PATCH', `/api/salas/${topico}`, s, { arquivada: true })).status, 200);
+  assert.equal((await req(h, 'POST', `/api/salas/${topico}/mensagens`, s, { texto: 'oi', clientRequestId: crid() })).status, 409);
+  assert.equal((await req(h, 'GET', `/api/salas/${topico}/mensagens`, s)).status, 200);
+  assert.equal((await req(h, 'GET', `/api/salas/${sala}/topicos`, s)).json.find((x: { id: string }) => x.id === topico).arquivado, true);
+  assert.equal((await req(h, 'PATCH', `/api/salas/${topico}`, s, { arquivada: false })).status, 200);
+  assert.equal((await req(h, 'POST', `/api/salas/${topico}/mensagens`, s, { texto: 'voltei', clientRequestId: crid() })).status, 201);
+  assert.ok(h.db.get("SELECT 1 AS x FROM audit_events WHERE action = 'sala.topico.criado'"));
+});

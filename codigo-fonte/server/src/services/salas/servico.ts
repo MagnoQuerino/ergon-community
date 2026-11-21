@@ -25,12 +25,13 @@ import { openArtifact, saveArtifact } from '../artifacts.ts';
 import { audit, type Bus } from '../bus.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from '../runs.ts';
 import { getSetting, setSetting } from '../sectors.ts';
-import { VOZ_NOTE } from '../chat.ts';
+import { VOZ_NOTE, titleFrom } from '../chat.ts';
 import { chamadaDoAgente, cessaoVale, conferirMarcas, expiraEm, permissaoEfetiva, podeChamarAgente, semControle, type Cessao, type Marca, type Membro, type Papel, type Prazo } from './marcas.ts';
 
 export interface PessoaDoWorkspace { chave: string; nome: string; papel: Papel; eu: boolean }
 /** Uma sala como viaja entre os aparelhos dos membros (world/sync-salas.ts). */
-export interface PSala { id: string; nome: string; arquivada: boolean; at: string; criadaEm: string; membros: Array<{ tipo: 'pessoa' | 'agente'; chave: string; nome: string; admin: boolean }> }
+export interface PSala { id: string; nome: string; arquivada: boolean; at: string; criadaEm: string; membros: Array<{ tipo: 'pessoa' | 'agente'; chave: string; nome: string; admin: boolean }>;
+  /** tópico: a sala-mãe, a visibilidade e a mensagem de origem */ pai?: string; visibilidade?: 'privado' | 'compartilhado'; origem?: string | null }
 export interface PSalaMsg { id: string; salaId: string; role: 'user' | 'agent' | 'system'; autorChave: string; autorNome: string; pedinteChave: string | null; content: string; marcas: unknown; anexos: Array<{ ref?: string; filename: string; mime: string; size: number; sha256?: string }>; createdAt: string }
 
 const NOME_MAX = 80;
@@ -41,6 +42,7 @@ const PAGINA = 200;
 const POR_MINUTO = 30;
 const SALAS_POR_HORA = 30;
 const MEMBROS_MAX = 60;
+const TOPICOS_MAX = 200;
 /** o histórico que vai ao agente: as últimas mensagens, com os autores, até este tamanho */
 const HIST_MSGS = 30;
 const HIST_CHARS = 9000;
@@ -52,8 +54,9 @@ const GOV_CRIAR = 'salas.criar';
 const GOV_AT = 'salas.gov_at';
 
 interface Deps { db: Db; bus: Bus; executor: RunExecutor; maxChars: number; filesDir?: string; maxUploadBytes?: number }
-interface SalaRow { id: string; workspace_id: string; owner_user_id: string; agent_id: string; title: string; archived_at: string | null; created_at: string; sala_at: string | null }
-type Evento = { evento: 'criou' | 'entrou' | 'saiu' | 'tirou' | 'renomeou' | 'cedeu' | 'revogou' | 'recusou' | 'falta' | 'sem_acesso'; nome?: string; alvo?: string; prazo?: Prazo; agente?: string };
+interface SalaRow { id: string; workspace_id: string; owner_user_id: string; agent_id: string; title: string; archived_at: string | null; created_at: string; sala_at: string | null;
+  /** tópico: a sala-mãe, a visibilidade e a mensagem de origem (null numa sala) */ sala_pai: string | null; topico_visivel: 'privado' | 'compartilhado' | null; topico_origem: string | null }
+type Evento = { evento: 'criou' | 'entrou' | 'saiu' | 'tirou' | 'renomeou' | 'cedeu' | 'revogou' | 'recusou' | 'falta' | 'sem_acesso' | 'topico' | 'arquivou' | 'reabriu'; nome?: string; alvo?: string; prazo?: Prazo; agente?: string };
 
 export class Salas {
   readonly db: Db; readonly bus: Bus; readonly executor: RunExecutor; readonly maxChars: number; readonly filesDir: string; readonly maxUploadBytes: number;
@@ -162,11 +165,29 @@ export class Salas {
 
   // ------------------------------------------------------------------------------------------------ acesso
   private row(ws: string, id: string): SalaRow | undefined {
-    return this.db.get<SalaRow>('SELECT id, workspace_id, owner_user_id, agent_id, title, archived_at, created_at, sala_at FROM conversations WHERE id = ? AND workspace_id = ? AND sala = 1', id, ws);
+    return this.db.get<SalaRow>('SELECT id, workspace_id, owner_user_id, agent_id, title, archived_at, created_at, sala_at, sala_pai, topico_visivel, topico_origem FROM conversations WHERE id = ? AND workspace_id = ? AND sala = 1', id, ws);
   }
-  private membroAtivo(convId: string, tipo: 'pessoa' | 'agente', chaves: string[]): { chave: string; admin: number } | undefined {
+  /** O tópico (sala-mãe e visibilidade), ou null quando é uma sala. */
+  private topico(convId: string): { pai: string; vis: 'privado' | 'compartilhado' } | null {
+    const t = this.db.get<{ pai: string | null; vis: 'privado' | 'compartilhado' | null }>('SELECT sala_pai AS pai, topico_visivel AS vis FROM conversations WHERE id = ?', convId);
+    return t?.pai ? { pai: t.pai, vis: t.vis === 'privado' ? 'privado' : 'compartilhado' } : null;
+  }
+  private membroDireto(convId: string, tipo: 'pessoa' | 'agente', chaves: string[]): { chave: string; admin: number } | undefined {
     if (!chaves.length) return undefined;
     return this.db.get<{ chave: string; admin: number }>(`SELECT chave, admin FROM salas_membros WHERE conversation_id = ? AND tipo = ? AND removed_at IS NULL AND chave IN (${chaves.map(() => '?').join(',')})`, convId, tipo, ...chaves);
+  }
+  /**
+   * Está (agora) na sala — ou no tópico: compartilhado, quem está na sala-mãe (quem abriu administra); privado, só quem
+   * foi convidado E continua na sala-mãe (saiu da sala, sai dos tópicos dela).
+   */
+  private membroAtivo(convId: string, tipo: 'pessoa' | 'agente', chaves: string[]): { chave: string; admin: number } | undefined {
+    const tp = this.topico(convId);
+    if (!tp) return this.membroDireto(convId, tipo, chaves);
+    const naSala = this.membroDireto(tp.pai, tipo, chaves);
+    if (!naSala) return undefined;
+    const proprio = this.membroDireto(convId, tipo, chaves);
+    if (tp.vis === 'privado') return proprio;
+    return { chave: naSala.chave, admin: Math.max(Number(naSala.admin), Number(proprio?.admin ?? 0)) };
   }
   /** A pessoa está na sala agora? (o gancho de chat.ts: toda rota de conversa passa por aqui) */
   ehMembro(ws: string, userId: string, convId: string): boolean {
@@ -179,10 +200,19 @@ export class Salas {
     if (!sala || !m) throw new HttpError(404, 'not_found', 'sala não encontrada');
     return { sala, eu: m.chave, admin: !!Number(m.admin) || this.administra(ws, m.chave) };
   }
-  membros(convId: string): Array<Membro & { admin: boolean }> {
+  /** Quem está nas linhas da própria conversa (no tópico compartilhado, só quem o abriu). */
+  private membrosDiretos(convId: string): Array<Membro & { admin: boolean }> {
     return this.db.all<{ tipo: 'pessoa' | 'agente'; chave: string; nome: string; admin: number }>(
       'SELECT tipo, chave, nome, admin FROM salas_membros WHERE conversation_id = ? AND removed_at IS NULL ORDER BY tipo DESC, added_at', convId)
       .map((m) => ({ tipo: m.tipo, chave: m.chave, nome: m.nome, admin: !!Number(m.admin) }));
+  }
+  membros(convId: string): Array<Membro & { admin: boolean }> {
+    const tp = this.topico(convId);
+    if (!tp) return this.membrosDiretos(convId);
+    const daSala = this.membrosDiretos(tp.pai);
+    const diretos = this.membrosDiretos(convId);
+    if (tp.vis === 'compartilhado') return daSala.map((m) => ({ ...m, admin: m.admin || diretos.some((d) => d.tipo === m.tipo && d.chave === m.chave && d.admin) }));
+    return diretos.filter((d) => daSala.some((m) => m.tipo === d.tipo && m.chave === d.chave));
   }
   private agenteAtivo(ws: string, nome: string): { id: string; name: string } | undefined {
     return this.db.get<{ id: string; name: string }>("SELECT id, name FROM agents WHERE workspace_id = ? AND name = ? AND status = 'active'", ws, nome);
@@ -254,7 +284,10 @@ export class Salas {
     if (!admin) throw new HttpError(403, 'forbidden', 'só quem administra a sala põe e tira membros');
     if (sala.archived_at) throw new HttpError(409, 'archived', 'sala arquivada');
     if (this.membros(convId).length >= MEMBROS_MAX) throw new HttpError(400, 'too_many', `no máximo ${MEMBROS_MAX} membros por sala`);
-    const disp = await this.disponiveis(ws, userId);
+    // tópico: o compartilhado é de todos da sala (ninguém se põe nem se tira); no privado, só quem está na sala-mãe
+    const tp = this.topico(convId);
+    if (tp?.vis === 'compartilhado') throw new HttpError(409, 'compartilhado', 'Tópico compartilhado: todos da sala já estão nele.');
+    const disp = tp ? { pessoas: this.membros(tp.pai).filter((m) => m.tipo === 'pessoa'), agentes: this.membros(tp.pai).filter((m) => m.tipo === 'agente') } : await this.disponiveis(ws, userId);
     const alvo = b.tipo === 'pessoa' ? disp.pessoas.find((p) => p.chave === b.chave) : disp.agentes.find((a) => a.chave === b.chave);
     if (!alvo) throw new HttpError(404, 'not_found', b.tipo === 'pessoa' ? 'essa pessoa não está no workspace' : 'agente não encontrado');
     this.db.tx(() => {
@@ -269,6 +302,7 @@ export class Salas {
   /** Tirar alguém (quem administra) ou sair (a própria pessoa). */
   remover(ws: string, userId: string, convId: string, b: { tipo: 'pessoa' | 'agente'; chave: string }): void {
     const { eu, admin } = this.daPessoa(ws, userId, convId);
+    if (this.topico(convId)?.vis === 'compartilhado') throw new HttpError(409, 'compartilhado', 'Tópico compartilhado: todos da sala estão nele.');
     const sair = b.tipo === 'pessoa' && b.chave === eu;
     if (!sair && !admin) throw new HttpError(403, 'forbidden', 'só quem administra a sala põe e tira membros');
     const m = this.db.get<{ nome: string }>('SELECT nome FROM salas_membros WHERE conversation_id = ? AND tipo = ? AND chave = ? AND removed_at IS NULL', convId, b.tipo, b.chave);
@@ -296,13 +330,68 @@ export class Salas {
         if (!nome) throw new HttpError(400, 'empty', 'dê um nome à sala');
         if (nome !== sala.title) { this.db.run('UPDATE conversations SET title = ? WHERE id = ?', this.db.seal(ws, nome), convId); this.evento(ws, convId, { evento: 'renomeou', nome: this.nomeDaChave(ws, convId, this.chaveDe(ws, userId)), alvo: nome }); }
       }
-      if (b.arquivada !== undefined) this.db.run('UPDATE conversations SET archived_at = ? WHERE id = ?', b.arquivada ? now() : null, convId);
+      if (b.arquivada !== undefined && b.arquivada !== !!sala.archived_at) {
+        this.db.run('UPDATE conversations SET archived_at = ? WHERE id = ?', b.arquivada ? now() : null, convId);
+        if (sala.sala_pai) this.evento(ws, convId, { evento: b.arquivada ? 'arquivou' : 'reabriu', nome: this.nomeDaChave(ws, convId, this.chaveDe(ws, userId)) });
+      }
       this.tocar(convId);
     });
     this.mudou(ws, convId, true);
   }
   private nomeDaChave(ws: string, convId: string, chave: string): string {
-    return this.db.get<{ nome: string }>("SELECT nome FROM salas_membros WHERE conversation_id = ? AND tipo = 'pessoa' AND chave = ?", convId, chave)?.nome ?? '—';
+    const tp = this.topico(convId);
+    return this.db.get<{ nome: string }>("SELECT nome FROM salas_membros WHERE conversation_id = ? AND tipo = 'pessoa' AND chave = ?", convId, chave)?.nome
+      ?? (tp ? this.db.get<{ nome: string }>("SELECT nome FROM salas_membros WHERE conversation_id = ? AND tipo = 'pessoa' AND chave = ?", tp.pai, chave)?.nome : undefined) ?? '—';
+  }
+
+  // ------------------------------------------------------------------------------------------------ tópicos
+  /** Os tópicos da sala que a pessoa vê: os compartilhados e os privados em que está. */
+  topicosVisiveis(ws: string, userId: string, salaId: string) {
+    const chaves = this.chavesDe(ws, userId);
+    return this.db.all<{ id: string; title: string; archived_at: string | null; topico_visivel: string | null; topico_origem: string | null; created_at: string; respostas: number; ultima: string | null }>(
+      `SELECT c.id, c.title, c.archived_at, c.topico_visivel, c.topico_origem, c.created_at,
+              (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system') AS respostas,
+              (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system') AS ultima
+         FROM conversations c WHERE c.workspace_id = ? AND c.sala = 1 AND c.sala_pai = ? ORDER BY COALESCE(ultima, c.created_at) DESC LIMIT 200`, ws, salaId)
+      .filter((t) => !!this.membroAtivo(t.id, 'pessoa', chaves))
+      .map((t) => {
+        const desde = this.db.get<{ r: string }>('SELECT read_at AS r FROM salas_leitura WHERE conversation_id = ? AND chave IN (' + chaves.map(() => '?').join(',') + ')', t.id, ...chaves)?.r ?? '';
+        const naoLidas = Number(this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role != 'system' AND created_at > ? AND COALESCE(autor_chave, '') NOT IN (" + chaves.map(() => '?').join(',') + ')', t.id, desde, ...chaves)?.n ?? 0);
+        return { id: t.id, nome: t.title, arquivado: !!t.archived_at, privado: t.topico_visivel === 'privado', origem: t.topico_origem, respostas: Number(t.respostas), ultimaEm: t.ultima, naoLidas };
+      });
+  }
+
+  /**
+   * Abre um tópico na sala: do zero ou a partir de uma mensagem dela. Compartilhado: todos da sala veem e entram. Privado:
+   * quem abriu e os convidados (pessoas e agentes da sala). Na sala-mãe, só o compartilhado deixa rastro (o privado não
+   * vaza nem o nome para quem não foi convidado).
+   */
+  criarTopico(ws: string, userId: string, salaId: string, b: { nome?: string; visibilidade: 'privado' | 'compartilhado'; origem?: string | null; pessoas?: string[]; agentes?: string[] }): { id: string } {
+    const { sala, eu } = this.daPessoa(ws, userId, salaId);
+    if (sala.sala_pai) throw new HttpError(400, 'topico', 'tópico dentro de tópico não existe: abra na sala');
+    if (sala.archived_at) throw new HttpError(409, 'archived', 'sala arquivada');
+    this.limitarFrequencia(`topico:${ws}:${eu}`, SALAS_POR_HORA, 3_600_000);
+    if (Number(this.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM conversations WHERE sala_pai = ?', salaId)?.n ?? 0) >= TOPICOS_MAX) throw new HttpError(409, 'too_many', `no máximo ${TOPICOS_MAX} tópicos por sala`);
+    const origem = b.origem ? this.db.get<{ id: string; content: string }>("SELECT id, content FROM messages WHERE id = ? AND conversation_id = ? AND workspace_id = ? AND role != 'system'", b.origem, salaId, ws) : undefined;
+    if (b.origem && !origem) throw new HttpError(404, 'not_found', 'mensagem não encontrada');
+    const nome = clip((b.nome ?? '').replace(/\s+/g, ' ').trim() || (origem ? titleFrom(semControle(origem.content), 60) : ''), NOME_MAX);
+    if (!nome) throw new HttpError(400, 'empty', 'dê um nome ao tópico');
+    const daSala = this.membros(salaId);
+    const pessoas = b.visibilidade === 'privado' ? [...new Set(b.pessoas ?? [])].map((c) => daSala.find((m) => m.tipo === 'pessoa' && m.chave === c && c !== eu)).filter((m): m is Membro & { admin: boolean } => !!m) : [];
+    const agentes = b.visibilidade === 'privado' ? [...new Set(b.agentes ?? [])].map((c) => daSala.find((m) => m.tipo === 'agente' && m.chave === c)).filter((m): m is Membro & { admin: boolean } => !!m) : [];
+    const convId = id('cnv'); const at = now();
+    this.db.tx(() => {
+      this.db.run('INSERT INTO conversations (id, workspace_id, agent_id, owner_user_id, title, hermes_session_key, created_at, sala, sala_at, read_at, sala_pai, topico_visivel, topico_origem) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)',
+        convId, ws, sala.agent_id, userId, this.db.seal(ws, nome), `ergon:${ws}:sala:${convId}`, at, at, at, salaId, b.visibilidade, origem?.id ?? null);
+      this.db.run("INSERT INTO salas_membros (conversation_id, workspace_id, tipo, chave, nome, admin, added_at) VALUES (?, ?, 'pessoa', ?, ?, 1, ?)", convId, ws, eu, this.nomeDaChave(ws, salaId, eu), at);
+      for (const m of [...pessoas, ...agentes]) this.db.run('INSERT INTO salas_membros (conversation_id, workspace_id, tipo, chave, nome, admin, added_at) VALUES (?, ?, ?, ?, ?, 0, ?)', convId, ws, m.tipo, m.chave, m.nome, at);
+      this.evento(ws, convId, { evento: 'criou', nome: this.nomeDaChave(ws, salaId, eu) });
+      if (b.visibilidade === 'compartilhado') { this.evento(ws, salaId, { evento: 'topico', nome: this.nomeDaChave(ws, salaId, eu), alvo: nome }); this.tocar(salaId); }
+    });
+    audit(this.db, this.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'sala.topico.criado', targetType: 'conversation', targetId: convId,
+      evidence: { sala: salaId, visibilidade: b.visibilidade, pessoas: pessoas.length, agentes: agentes.length, deMensagem: !!origem }, result: 'tópico aberto' });
+    this.mudou(ws, convId, true); this.mudou(ws, salaId, true);
+    return { id: convId };
   }
 
   // ------------------------------------------------------------------------------------------------ listas
@@ -317,13 +406,14 @@ export class Salas {
               (SELECT l.read_at FROM salas_leitura l WHERE l.conversation_id = c.id AND l.chave = ?) AS read_at,
               (SELECT m.content FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_text,
               (SELECT m.autor_nome FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_nome
-         FROM conversations c WHERE c.workspace_id = ? AND c.sala = 1
+         FROM conversations c WHERE c.workspace_id = ? AND c.sala = 1 AND c.sala_pai IS NULL
           AND EXISTS (SELECT 1 FROM salas_membros s WHERE s.conversation_id = c.id AND s.tipo = 'pessoa' AND s.removed_at IS NULL AND s.chave IN (${q}))
         ORDER BY COALESCE(last_at, c.created_at) DESC LIMIT 200`, eu, ws, ...chaves)
       .map((r) => {
         const desde = r.read_at ?? '';
         const naoLidas = Number(this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role != 'system' AND created_at > ? AND COALESCE(autor_chave, '') NOT IN (" + q + ')', r.id, desde, ...chaves)?.n ?? 0);
-        const avisos = this.db.all<{ tipo: string }>(`SELECT tipo FROM salas_avisos WHERE conversation_id = ? AND para_chave IN (${q}) AND status = 'aberto'`, r.id, ...chaves);
+        // a menção num tópico da sala também acende a sala (o aviso só existe para quem está no tópico)
+        const avisos = this.db.all<{ tipo: string }>(`SELECT v.tipo FROM salas_avisos v JOIN conversations c ON c.id = v.conversation_id WHERE (c.id = ? OR c.sala_pai = ?) AND v.para_chave IN (${q}) AND v.status = 'aberto'`, r.id, r.id, ...chaves);
         return { id: r.id, nome: r.title, arquivada: !!r.archived_at, criadaEm: r.created_at, ultimaEm: r.last_at, naoLidas,
           mencao: avisos.some((a) => a.tipo === 'mencao'), cessao: avisos.some((a) => a.tipo === 'cessao'),
           ultima: r.last_text ? { nome: r.last_nome, texto: clip(semControle(r.last_text).replace(/\s+/g, ' '), 90) } : null };
@@ -334,7 +424,9 @@ export class Salas {
   detalhe(ws: string, userId: string, convId: string) {
     const { sala, eu, admin } = this.daPessoa(ws, userId, convId);
     const papel = this.papel(ws, eu);
+    const pai = sala.sala_pai ? this.row(ws, sala.sala_pai) : null;
     return { id: sala.id, nome: sala.title, arquivada: !!sala.archived_at, eu, admin, papel, membros: this.membros(convId),
+      ...(pai ? { topico: { pai: pai.id, paiNome: pai.title, visibilidade: sala.topico_visivel ?? 'compartilhado', origem: sala.topico_origem } } : {}),
       governanca: { cessao: this.governanca(ws).cessao }, cessoes: this.minhasCessoes(ws, userId, convId) };
   }
 
@@ -355,6 +447,9 @@ export class Salas {
       const l = remotos.get(a.message_id) ?? []; remotos.set(a.message_id, l);
       l.push({ ref: a.ref, filename: a.filename, mime: a.mime, size: Number(a.size), estado: Number(a.size) > TETO_ANEXO ? 'grande' : a.pedido_em ? 'baixando' : 'remoto' });
     }
+    // tópicos que nasceram de mensagens desta sala: só os que a pessoa vê (o privado de outros não aparece nem pelo nome)
+    const topicos = new Map<string, { id: string; nome: string; respostas: number; arquivado: boolean; privado: boolean }>();
+    for (const t of this.topicosVisiveis(ws, userId, convId)) if (t.origem) topicos.set(t.origem, { id: t.id, nome: t.nome, respostas: t.respostas, arquivado: t.arquivado, privado: t.privado });
     const fila = this.db.all<{ agent_id: string; status: string; nome: string }>("SELECT f.agent_id, f.status, a.name AS nome FROM salas_fila f JOIN agents a ON a.id = f.agent_id WHERE f.conversation_id = ? AND f.status IN ('esperando', 'rodando') ORDER BY f.created_at", convId);
     return {
       mensagens: rows.map((r) => {
@@ -362,7 +457,7 @@ export class Salas {
         try { marcas = r.marcas ? JSON.parse(r.marcas) : null; } catch { marcas = null; }
         return { id: r.id, role: r.role, content: r.role === 'agent' ? semControle(r.content) : r.content, created_at: r.created_at, autor: { chave: r.autor_chave, nome: r.autor_nome },
           marcas, pedinte: r.pedinte_chave, reply_to: r.reply_to, run_id: r.run_id, run_status: r.run_status, ...(files.has(r.id) ? { attachments: files.get(r.id) } : {}),
-          ...(remotos.has(r.id) ? { remotos: remotos.get(r.id) } : {}) };
+          ...(remotos.has(r.id) ? { remotos: remotos.get(r.id) } : {}), ...(topicos.has(r.id) ? { topico: topicos.get(r.id) } : {}) };
       }),
       // quem está respondendo agora e quem vem depois (a tela mostra "Pensando…" no rosto de quem é a vez)
       respondendo: fila.map((f) => ({ agentId: f.agent_id, nome: f.nome, status: f.status })),
@@ -385,6 +480,7 @@ export class Salas {
       criou: `${e.nome} criou a sala`, entrou: `${e.nome} entrou na sala`, saiu: `${e.nome} saiu da sala`, tirou: `${e.nome} foi tirado da sala`,
       renomeou: `${e.nome} renomeou a sala para “${e.alvo}”`, cedeu: `${e.nome} cedeu as conexões a este pedido de ${e.alvo}`, revogou: `${e.nome} retirou a cessão das conexões`,
       recusou: `${e.nome} não cedeu as conexões`, falta: `Esperando ${e.nome} ceder as conexões`, sem_acesso: `${e.agente ?? 'O agente'} precisa de alguém com acesso às conexões`,
+      topico: `${e.nome} abriu o tópico “${e.alvo}”`, arquivou: `${e.nome} arquivou`, reabriu: `${e.nome} reabriu`,
     };
     const mid = id('msg');
     this.db.run("INSERT INTO messages (id, workspace_id, conversation_id, role, content, mode, created_at, autor_chave, autor_nome, marcas) VALUES (?, ?, ?, 'system', ?, 'local', ?, 'sys', 'Ergon', ?)",
@@ -659,9 +755,11 @@ export class Salas {
   // ------------------------------------------------------------------------------------------------ sincronia (world/sync-salas.ts)
   /** As salas daqui como viajam (todas as que existem neste aparelho, com os membros atuais e os que saíram). */
   salasParaSync(ws: string): PSala[] {
-    return this.db.all<SalaRow>('SELECT id, workspace_id, owner_user_id, agent_id, title, archived_at, created_at, sala_at FROM conversations WHERE workspace_id = ? AND sala = 1', ws).map((s) => ({
+    return this.db.all<SalaRow>('SELECT id, workspace_id, owner_user_id, agent_id, title, archived_at, created_at, sala_at, sala_pai, topico_visivel, topico_origem FROM conversations WHERE workspace_id = ? AND sala = 1 ORDER BY (sala_pai IS NOT NULL), created_at', ws).map((s) => ({
       id: s.id, nome: s.title, arquivada: !!s.archived_at, at: s.sala_at ?? s.created_at, criadaEm: s.created_at,
-      membros: this.membros(s.id).map((m) => ({ tipo: m.tipo, chave: m.chave, nome: m.nome, admin: m.admin })),
+      // num tópico, só as linhas dele (no compartilhado, quem abriu; quem vê vem da sala-mãe)
+      membros: this.membrosDiretos(s.id).map((m) => ({ tipo: m.tipo, chave: m.chave, nome: m.nome, admin: m.admin })),
+      ...(s.sala_pai ? { pai: s.sala_pai, visibilidade: s.topico_visivel ?? 'compartilhado', origem: s.topico_origem } : {}),
     }));
   }
   /** As mensagens que NASCERAM aqui (escritas aqui, ou respostas de agente que rodaram aqui), para os aparelhos dos membros. */
@@ -694,16 +792,26 @@ export class Salas {
       for (const s of p.salas ?? []) {
         const daqui = this.row(ws, s.id);
         const deEsta = s.membros.find((m) => m.tipo === 'pessoa' && m.chave === de);
+        // tópico: a sala-mãe existe aqui, quem manda está nela, e (no privado) eu fui convidado; (no compartilhado) estou na sala
+        if (s.pai) {
+          const mae = this.row(ws, s.pai);
+          if (!mae || mae.sala_pai || !this.membroDireto(s.pai, 'pessoa', [de]) || !this.membroDireto(s.pai, 'pessoa', minhas)) continue;
+          if (daqui && daqui.sala_pai !== s.pai) continue;
+          if (s.visibilidade === 'privado' && !s.membros.some((m) => m.tipo === 'pessoa' && minhas.includes(m.chave))) continue;
+        }
         if (!daqui) {
           if (this.db.get('SELECT 1 AS x FROM conversations WHERE id = ?', s.id)) continue; // o id existe aqui para outra coisa
-          if (!deEsta || !s.membros.some((m) => m.tipo === 'pessoa' && minhas.includes(m.chave))) continue;
+          if (!deEsta || (!s.pai && !s.membros.some((m) => m.tipo === 'pessoa' && minhas.includes(m.chave)))) continue;
           const ref = this.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY coordinator DESC, created_at LIMIT 1", ws)?.id;
           if (!ref) continue;
-          this.db.run('INSERT INTO conversations (id, workspace_id, agent_id, owner_user_id, title, hermes_session_key, created_at, sala, sala_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
-            s.id, ws, ref, u, this.db.seal(ws, s.nome), `ergon:${ws}:sala:${s.id}`, s.criadaEm, s.at, s.arquivada ? s.at : null);
+          const origem = s.pai && s.origem && this.db.get('SELECT 1 AS x FROM messages WHERE id = ? AND conversation_id = ?', s.origem, s.pai) ? s.origem : null;
+          this.db.run('INSERT INTO conversations (id, workspace_id, agent_id, owner_user_id, title, hermes_session_key, created_at, sala, sala_at, archived_at, sala_pai, topico_visivel, topico_origem) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)',
+            s.id, ws, ref, u, this.db.seal(ws, s.nome), `ergon:${ws}:sala:${s.id}`, s.criadaEm, s.at, s.arquivada ? s.at : null, s.pai ?? null, s.pai ? (s.visibilidade === 'privado' ? 'privado' : 'compartilhado') : null, origem);
           this.gravarMembros(ws, s); n.salas++; mexidas.add(s.id); continue;
         }
-        const admin = this.db.get('SELECT 1 AS x FROM salas_membros WHERE conversation_id = ? AND tipo = ? AND chave = ? AND admin = 1 AND removed_at IS NULL', s.id, 'pessoa', de);
+        // muda quem administra a conversa (no tópico, quem o abriu ou quem administra a sala-mãe)
+        const admin = this.db.get('SELECT 1 AS x FROM salas_membros WHERE conversation_id = ? AND tipo = ? AND chave = ? AND admin = 1 AND removed_at IS NULL', s.id, 'pessoa', de)
+          || (s.pai ? this.db.get("SELECT 1 AS x FROM salas_membros WHERE conversation_id = ? AND tipo = 'pessoa' AND chave = ? AND admin = 1 AND removed_at IS NULL", s.pai, de) : undefined);
         if (!admin || (daqui.sala_at ?? '') >= s.at) continue;
         this.db.run('UPDATE conversations SET title = ?, archived_at = ?, sala_at = ? WHERE id = ?', this.db.seal(ws, s.nome), s.arquivada ? (daqui.archived_at ?? s.at) : null, s.at, s.id);
         this.gravarMembros(ws, s); n.salas++; mexidas.add(s.id);
@@ -727,6 +835,8 @@ export class Salas {
         n.mensagens++; mexidas.add(m.salaId);
       }
     });
+    // a mensagem de origem de um tópico pode chegar depois do tópico (no mesmo pacote): liga agora
+    for (const t of (p.salas ?? []).filter((x) => x.pai && x.origem)) this.db.run('UPDATE conversations SET topico_origem = ? WHERE id = ? AND sala_pai = ? AND topico_origem IS NULL AND EXISTS (SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?)', t.origem!, t.id, t.pai!, t.origem!, t.pai!);
     for (const s of mexidas) { this.bus.publish(ws, 'salas.changed', { id: s }); this.bus.publish(ws, 'messages.changed', { conversationId: s }); }
     return n;
   }
@@ -912,7 +1022,7 @@ export class Salas {
         ON CONFLICT (conversation_id, tipo, chave) DO UPDATE SET nome = excluded.nome, admin = excluded.admin, removed_at = NULL`, s.id, ws, m.tipo, clip(m.chave, 200), clip(m.nome, NOME_MAX), m.admin ? 1 : 0, agora);
     }
     const ficam = new Set(s.membros.map((m) => `${m.tipo}:${m.chave}`));
-    for (const m of this.membros(s.id)) if (!ficam.has(`${m.tipo}:${m.chave}`)) this.db.run('UPDATE salas_membros SET removed_at = ? WHERE conversation_id = ? AND tipo = ? AND chave = ?', agora, s.id, m.tipo, m.chave);
+    for (const m of this.membrosDiretos(s.id)) if (!ficam.has(`${m.tipo}:${m.chave}`)) this.db.run('UPDATE salas_membros SET removed_at = ? WHERE conversation_id = ? AND tipo = ? AND chave = ?', agora, s.id, m.tipo, m.chave);
     // fui tirado: as cessões que dei nesta sala caem junto
     const u = this.pessoaLocal(ws);
     if (u && !this.membroAtivo(s.id, 'pessoa', this.chavesDe(ws, u))) this.db.run('UPDATE salas_cessoes SET revogada_em = ? WHERE conversation_id = ? AND revogada_em IS NULL', agora, s.id);

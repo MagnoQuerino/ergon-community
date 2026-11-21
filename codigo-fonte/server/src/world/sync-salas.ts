@@ -73,7 +73,9 @@ function checarSala(x: Record<string, unknown>): PSala | null {
     if (m.tipo === 'pessoa' && !/^acc:acc_[a-f0-9]{8,64}$/.test(m.chave as string)) return null; // entre aparelhos, só contas do World
     membros.push({ tipo: m.tipo, chave: m.chave as string, nome: m.nome as string, admin: m.admin });
   }
-  return { id: x.id as string, nome: x.nome as string, arquivada: x.arquivada, at: x.at as string, criadaEm: x.criadaEm as string, membros };
+  if (x.pai !== undefined && (!isId(x.pai, 'cnv') || !['privado', 'compartilhado'].includes(String(x.visibilidade)) || !(x.origem === null || x.origem === undefined || isId(x.origem, 'msg')))) return null;
+  return { id: x.id as string, nome: x.nome as string, arquivada: x.arquivada, at: x.at as string, criadaEm: x.criadaEm as string, membros,
+    ...(x.pai ? { pai: x.pai as string, visibilidade: x.visibilidade as 'privado' | 'compartilhado', origem: (x.origem as string | null | undefined) ?? null } : {}) };
 }
 function checarMsg(x: Record<string, unknown>): PSalaMsg | null {
   if (!isId(x.id, 'msg') || !isId(x.salaId, 'cnv') || !['user', 'agent', 'system'].includes(String(x.role)) || !str(x.autorChave, 200, 1) || !CHAVE.test(String(x.autorChave))
@@ -133,9 +135,11 @@ export class SalasSync {
       let total = 0;
       const cabe = (n: number) => total + n <= TOTAL_MAX;
       for (const s of this.salas.salasParaSync(ws)) {
-        const ativos = new Set(s.membros.filter((m) => m.tipo === 'pessoa').map((m) => m.chave));
+        // quem recebe: quem está (no tópico compartilhado, todos da sala-mãe; no privado, só os convidados que seguem nela)
+        const ativos = new Set(this.salas.membros(s.id).filter((m) => m.tipo === 'pessoa').map((m) => m.chave));
         // quem saiu recebe só a versão da sala que diz que saiu (nenhuma mensagem)
-        const sairam = new Set(this.db.all<{ chave: string }>("SELECT chave FROM salas_membros WHERE conversation_id = ? AND tipo = 'pessoa' AND removed_at IS NOT NULL", s.id).map((r) => r.chave));
+        const sairam = new Set(this.db.all<{ chave: string }>("SELECT chave FROM salas_membros WHERE conversation_id IN (?, ?) AND tipo = 'pessoa' AND removed_at IS NOT NULL", s.id, s.pai ?? s.id).map((r) => r.chave));
+        if (s.pai && s.visibilidade === 'privado') for (const c of [...sairam]) if (!s.membros.some((m) => m.chave === c)) sairam.delete(c); // o tópico privado não vai a quem nunca foi convidado
         const hs = sha(JSON.stringify(s)); const ts = JSON.stringify(s).length;
         let msgs: PSalaMsg[] | null = null;
         for (const d of aparelhos) {
