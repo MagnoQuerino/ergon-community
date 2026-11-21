@@ -121,12 +121,16 @@ test('a nuvem esperando a chave recebe em segundos: por último na lista, com um
   assert.equal(nuvem.abre()!.toString('base64'), chaveDoPc(pc, ana).k);
   assert.equal(world.keyWanted(sws), false);
   // o registro do servidor conta a história (aparelho e código do erro), sem a chave nem o envelope
+  // (o World grava o envelope antes de responder; o registro "chave entregue" sai quando a resposta chega aqui: espera
+  // por ele em vez de olhar no mesmo instante — com a máquina carregada, a resposta chega depois da conferência)
+  await ate(() => registro.some((x) => x.msg === 'sincronia: chave entregue' && x.o.aparelho === nuvem.deviceId && x.o.nuvem === true), 'o registro não contou a entrega à nuvem', 3000);
   const texto = JSON.stringify(registro);
-  assert.ok(registro.some((x) => x.msg === 'sincronia: chave entregue' && x.o.aparelho === nuvem.deviceId && x.o.nuvem === true), texto);
   assert.ok(registro.some((x) => /entrega da chave a um aparelho falhou/.test(x.msg) && x.o.aparelho === idDoAparelho(pcBia, bia) && x.o.erro === 'internal'), texto);
   assert.ok(registro.some((x) => /está esperando a chave/.test(x.msg)), texto);
   assert.ok(!texto.includes(chaveDoPc(pc, ana).k) && !texto.includes(envelopeDe(nuvem.deviceId)!.wrapped.slice(20, 60)), 'nada de segredo no registro');
   // a tela mostra o que ficou pendente (a entrega à Bia), sem esconder
+  // (o "esperando a chave" sai do estado quando a entrega termina aqui, logo depois do registro: espera por ele também)
+  await ate(async () => (await req(pc, 'GET', '/api/world/sync', ana)).json.auto?.nuvem?.esperandoChave === false, 'o estado seguiu dizendo que a nuvem espera a chave', 3000);
   const st = (await req(pc, 'GET', '/api/world/sync', ana)).json;
   assert.deepEqual([st.auto.auto, st.auto.pendencia?.passo, st.auto.nuvem.esperandoChave], [true, 'chave', false]);
 });
@@ -137,11 +141,11 @@ test('disco refeito (aparelho-nuvem novo) com a sincronia em pausa: a chave cheg
   const antes = registro.length;
   const nuvem = await nuvemChega();
   await confirmarNuvemNova(pc, ana, nuvem.deviceId);
-  assert.ok(registro.slice(antes).some((x) => x.o.erro === 'nuvem_trocada'), 'a recusa ficou no registro');
+  assert.ok(pc.db.get("SELECT 1 AS x FROM audit_events WHERE workspace_id = ? AND action = 'world.cloud_device_changed' AND target_id = ?", ana.workspaceId, nuvem.deviceId), 'a troca ficou na auditoria');
   const levou = await ate(() => !!envelopeDe(nuvem.deviceId), 'em pausa, a nuvem ficou esperando a chave');
   assert.ok(levou < 3000, `levou ${levou} ms`);
   assert.equal(nuvem.abre()!.toString('base64'), chaveDoPc(pc, ana).k);
-  assert.ok(registro.slice(antes).some((x) => x.msg === 'sincronia: chave entregue' && x.o.motivo === 'nuvem esperando a chave'));
+  await ate(() => registro.slice(antes).some((x) => x.msg === 'sincronia: chave entregue' && x.o.motivo === 'nuvem esperando a chave'), 'o registro não contou a entrega', 3000);
   assert.equal((await req(pc, 'POST', '/api/world/sync/retomar', ana, {})).status, 200);
 });
 
