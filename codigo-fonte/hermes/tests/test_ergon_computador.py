@@ -65,11 +65,16 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 os.environ["ERGON_BRIDGE_URL"] = f"http://127.0.0.1:{srv.server_address[1]}/internal/bridge/v1/events"
 os.environ["ERGON_BRIDGE_TOKEN"] = TOKEN
 
-# o provedor como a imagem instala (plugins/computer_use/ergon): aqui, pela pasta de plugins da pessoa, que a descoberta do
-# Hermes também lê; e o cofre fixa computer_use.backend = ergon
+# o provedor: com o código montado (/p = hermes/plugins, rodada local), o do código, pela pasta de plugins da pessoa, que a
+# descoberta do Hermes também lê. No lançamento e na CI, /p é a pasta de plugins DA IMAGEM (/opt/ergon/plugins, só o
+# ergon_bridge): aí vale o provedor que a imagem instala ao lado do cua (/opt/hermes/plugins/computer_use/ergon), o que vai
+# para as pessoas. Em nenhum dos dois casos o teste segue sem provedor. O cofre fixa computer_use.backend = ergon.
 destino = os.path.join(HOME, "plugins", "ergon")
 shutil.rmtree(destino, ignore_errors=True)
-shutil.copytree("/p/computer_use_ergon", destino)
+if os.path.isdir("/p/computer_use_ergon"):
+    shutil.copytree("/p/computer_use_ergon", destino)
+else:
+    check("a imagem traz o provedor do Ergon (plugins/computer_use/ergon)", os.path.isfile("/opt/hermes/plugins/computer_use/ergon/__init__.py"))
 with open(os.path.join(HOME, "config.yaml"), "w", encoding="utf-8") as f:
     f.write("computer_use:\n  backend: ergon\n")
 
@@ -90,7 +95,7 @@ check("o de diagnóstico traz o terminal e os processos", {"terminal", "process"
 check("o de Discord traz discord_admin", "discord_admin" in b._tools_of(["discord_admin"]))
 cfg = b._config_do_perfil({"platform_toolsets": {"api_server": ["computer_use", "todo"]}}, {"ferramentas": ["computer_use"]})
 check("perfil do agente: computer_use ligado e pelo provedor do Ergon", "computer_use" in cfg["platform_toolsets"]["api_server"] and cfg["computer_use"]["backend"] == "ergon", str(cfg.get("computer_use")))
-check("capacidade anunciada ao Ergon", "computador" in b.CAPACIDADES and b.PLUGIN_VERSION == "0.9.0")
+check("capacidade anunciada ao Ergon", "computador" in b.CAPACIDADES and tuple(int(x) for x in b.PLUGIN_VERSION.split(".")) >= (0, 9, 0))
 
 
 def politica(toolsets):

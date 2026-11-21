@@ -26,6 +26,8 @@ import { audit, type Bus } from '../bus.ts';
 import { instructionsFor, type RunExecutor, type RunRow, type RunStatus } from '../runs.ts';
 import { getSetting, setSetting } from '../sectors.ts';
 import { VOZ_NOTE, titleFrom } from '../chat.ts';
+import { visuaisComoTexto } from '../../../../shared/visuais/texto.ts';
+import { votoDe } from '../../../../shared/visuais/cercas.ts';
 import { chamadaDoAgente, cessaoVale, conferirMarcas, expiraEm, permissaoEfetiva, podeChamarAgente, semControle, type Cessao, type Marca, type Membro, type Papel, type Prazo } from './marcas.ts';
 
 export interface PessoaDoWorkspace { chave: string; nome: string; papel: Papel; eu: boolean }
@@ -416,7 +418,7 @@ export class Salas {
         const avisos = this.db.all<{ tipo: string }>(`SELECT v.tipo FROM salas_avisos v JOIN conversations c ON c.id = v.conversation_id WHERE (c.id = ? OR c.sala_pai = ?) AND v.para_chave IN (${q}) AND v.status = 'aberto'`, r.id, r.id, ...chaves);
         return { id: r.id, nome: r.title, arquivada: !!r.archived_at, criadaEm: r.created_at, ultimaEm: r.last_at, naoLidas,
           mencao: avisos.some((a) => a.tipo === 'mencao'), cessao: avisos.some((a) => a.tipo === 'cessao'),
-          ultima: r.last_text ? { nome: r.last_nome, texto: clip(semControle(r.last_text).replace(/\s+/g, ' '), 90) } : null };
+          ultima: r.last_text ? { nome: r.last_nome, texto: votoDe(r.last_text) ? 'votou na enquete' : clip(visuaisComoTexto(semControle(r.last_text), { curto: true }).replace(/\s+/g, ' '), 90) } : null };
       });
   }
 

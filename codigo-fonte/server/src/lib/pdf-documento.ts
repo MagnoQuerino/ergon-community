@@ -12,6 +12,7 @@ import { parseMarkdown, type Block, type Inline } from '../../../shared/markdown
 import { corDeTitulo, ERGON_CORES, numeracao, preencher, REFERENCIAS, type Identidade, type ModeloDoc } from '../../../shared/entregaveis.ts';
 import { CORE_R, EMBLEM_BOX, figures, palette } from '../../../shared/logo-ergon.ts';
 import { pdfSafe } from './pdf.ts';
+import { semAlfa } from './png-opaco.ts';
 
 const CM = 28.3465;
 type Doc = PDFKit.PDFDocument;
@@ -25,6 +26,8 @@ export interface EntradaPdf {
   logo?: Buffer | null;
   /** imagem de Documentos citada no texto (só PNG/JPEG do próprio workspace) */
   imagem?: (id: string) => Buffer | null;
+  /** o bloco visual ```ergon-<tipo> já em PNG (services/visuais/png.ts, pngsDasCercas); sem ele, o código */
+  visual?: (lang: string, corpo: string) => Buffer[] | null;
   data?: string;
 }
 
@@ -95,7 +98,7 @@ export function documentoPdf(e: EntradaPdf): Buffer {
     if (h1 === 0) corpo = blocks.slice(1); // o título vai na capa
     const cx = margens.left, w = W();
     let y = margens.top;
-    if (e.logo) { try { doc.image(e.logo, cx + w / 2 - 60, y, { fit: [120, 60], align: 'center' }); y += 72; } catch { /* imagem que o PDF não lê: sem logo */ } }
+    if (e.logo) { try { doc.image(semAlfa(e.logo), cx + w / 2 - 60, y, { fit: [120, 60], align: 'center' }); y += 72; } catch { /* imagem que o PDF não lê: sem logo */ } }
     else if (id.mostrarErgon && m.base !== 'abnt') { emblema(doc, cx + w / 2 - 22, y, 44); y += 60; }
     doc.fillColor(ERGON_CORES.tinta).font(F.b).fontSize(size);
     if (m.capa.instituicao || id.nome) { doc.text(pdfSafe((m.capa.instituicao || id.nome).toUpperCase()), cx, y, { width: w, align: 'center' }); y = doc.y + size; }
@@ -240,6 +243,18 @@ export function documentoPdf(e: EntradaPdf): Buffer {
     doc.x = margens.left; doc.y += size * 0.9;
   };
 
+  const png = (buf: Buffer, escala = 0.75): boolean => {
+    try {
+      const img = (doc as unknown as { openImage(b: Buffer): { width: number; height: number } }).openImage(buf);
+      const w = Math.min(W(), img.width * escala);
+      const h = Math.min((img.height / img.width) * w, fundo() - margens.top);
+      ensure(h);
+      doc.image(buf, margens.left + (W() - w) / 2, doc.y, { fit: [w, h] });
+      doc.x = margens.left; doc.y += h + size * 0.6;
+      return true;
+    } catch { return false; /* formato que o PDF não abre */ }
+  };
+
   const image = (c: Inline[]) => {
     for (const x of c) {
       if (x.t !== 'img') continue;
@@ -250,7 +265,7 @@ export function documentoPdf(e: EntradaPdf): Buffer {
         const w = Math.min(W(), img.width * 0.75);
         const h = (img.height / img.width) * w;
         ensure(Math.min(h, fundo() - margens.top));
-        doc.image(buf, margens.left + (W() - w) / 2, doc.y, { fit: [w, Math.min(h, fundo() - margens.top)] });
+        doc.image(semAlfa(buf), margens.left + (W() - w) / 2, doc.y, { fit: [w, Math.min(h, fundo() - margens.top)] });
         doc.y += Math.min(h, fundo() - margens.top) + size * 0.6;
       } catch { /* formato que o PDF não abre: fica de fora */ }
     }
@@ -267,7 +282,12 @@ export function documentoPdf(e: EntradaPdf): Buffer {
         break;
       case 'ul': case 'ol': list(b, depth); break;
       case 'quote': quote(b); break;
-      case 'code': code(b); break;
+      case 'code': {
+        // bloco visual: o cartão em PNG (2x: meia escala dá a nitidez da tela); sem ele, o código como sempre
+        const vs = e.visual?.(b.lang, b.v);
+        if (!vs?.length || !vs.map((v) => png(v, 0.5)).some(Boolean)) code(b);
+        break;
+      }
       case 'table': table(b); break;
       case 'hr': { ensure(size * 2); const y = doc.y + size * 0.4; doc.save().moveTo(margens.left, y).lineTo(margens.left + W(), y).lineWidth(0.5).strokeColor(ERGON_CORES.linha).stroke().restore(); doc.y = y + size * 0.8; break; }
     }
@@ -288,7 +308,7 @@ export function documentoPdf(e: EntradaPdf): Buffer {
       const y = Math.max(18, margens.top - 40);
       let x = margens.left;
       const alto = 18;
-      if (m.cabecalho.logo && e.logo) { try { doc.image(e.logo, x, y, { fit: [90, alto] }); x += 98; } catch { /* sem logo */ } }
+      if (m.cabecalho.logo && e.logo) { try { doc.image(semAlfa(e.logo), x, y, { fit: [90, alto] }); x += 98; } catch { /* sem logo */ } }
       else if (m.cabecalho.logo && id.mostrarErgon) x += emblema(doc, x, y, alto) + 8;
       const texto = preencher(m.cabecalho.texto, vars);
       if (texto) doc.font(F.b).fontSize(8.5).fillColor(corTitulo).text(pdfSafe(texto), x, y + alto / 2 - 4.5, { width: wTotal - (x - margens.left), lineBreak: false, ellipsis: true });

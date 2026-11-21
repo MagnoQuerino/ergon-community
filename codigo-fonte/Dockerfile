@@ -60,6 +60,8 @@ COPY web/package.json web/
 COPY shared shared
 COPY server/src server/src
 COPY server/catalogo server/catalogo
+# a fonte (Inter, OFL) que desenha os blocos visuais em PNG para o Telegram e o Discord
+COPY server/assets server/assets
 COPY --from=build /app/web/dist web/dist
 # segredo do app público do Ergon no Google (cliente de app instalado; config.ts ERGON_GOOGLE_APP): só a esteira de
 # lançamento o tem (segredo de build "google_app"); build local sai sem ele e o Google fica sem app embutido

@@ -42,6 +42,9 @@ import { registerRecursosRoutes } from './routes/recursos.ts';
 import { registerEntregaveisRoutes } from './routes/entregaveis.ts';
 import { RevisaoDocumento } from './services/revisao-documento.ts';
 import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
+import { registerVisuaisRoutes } from './routes/visuais.ts';
+import { coresDaEquipe } from './services/cores-agentes.ts';
+import { avisosDevolvidos, marcarDevolvidoVisto } from './services/controle-devolvido.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
@@ -1357,6 +1360,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     q: searchQ, sector: sectorKey, structure: S.id('bld'), status: { enum: ['active', 'archived', 'all'] }, cursor: cursorQ, limit: limitQ } } } }, async (req) => {
     const q = req.query as { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all'; cursor?: string; limit?: string };
     return listTeamAgents(db, auth(req).workspaceId, { ...q, limit: q.limit ? Number(q.limit) : undefined });
+  });
+  // a cor de cada agente (borda do avatar em todas as telas, realce na revisão): distinta dentro da equipe
+  app.get('/api/team/cores', async (req) => {
+    const ws = auth(req).workspaceId;
+    const nomes = new Map(db.all<{ id: string; name: string }>('SELECT id, name FROM agents WHERE workspace_id = ?', ws).map((a) => [a.id, a.name]));
+    return { cores: [...coresDaEquipe(db, ws)].map(([id, c]) => ({ id, nome: nomes.get(id) ?? '', claro: c.claro, escuro: c.escuro })) };
   });
   app.get('/api/team/agents/:id', { schema: { params: idParams('agt') } }, async (req) => {
     const r = teamAgent(db, auth(req).workspaceId, (req.params as { id: string }).id);
@@ -2764,6 +2773,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const r = navegador.ativas(a.workspaceId).filter((x) => (q.conversa ? x.conversation_id === q.conversa : x.task_id === q.tarefa)).pop();
     return r ? navegador.estadoPara(r, a.userId) : { runId: null, ativo: false, controle: 'agente', quem: null, ate: null, motivo: null };
   });
+  // o aviso de "controle devolvido" (rc.43): o navegador ou o computador voltou sozinho ao agente enquanto a pessoa não via
+  app.get('/api/controle/devolvido', async (req) => { const a = auth(req); return { avisos: avisosDevolvidos(db, a.workspaceId, a.userId) }; });
+  app.post('/api/controle/devolvido/visto', async (req) => { const a = auth(req); marcarDevolvidoVisto(db, a.workspaceId, a.userId); return { ok: true }; });
   app.post('/api/runs/:id/navegador/bilhete', { schema: { params: idParams('run') } }, async (req) => {
     const { a, r } = runDoNavegador(req);
     return { bilhete: navegador.bilhete(a, r) };
@@ -3292,6 +3304,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Discord pelas rotas dos canais. Um plugin antigo que ainda mande evento para cá recebe 404 e não responde ninguém.
   registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
   registerSalasRoutes(app, { db, bus, salas, auth, maxChars: cfg.maxInputChars });
+  // blocos visuais (rc.42): a ferramenta `visual` do motor, a prévia de link e de arquivo, o PNG, o voto e o relatório
+  registerVisuaisRoutes(app, { db, bus, cfg, auth, bridgeMotor, busca: cfg.visuaisBusca,
+    workspaceDaSessao: async (motor, sessionId, taskId) => { const r = await executor.runForSession(sessionId, taskId); return r && motors.allows(motor, r.workspace_id) ? r.workspace_id : null; } });
   registerWhatsAppEquipeRoutes(app, { equipe: whatsappEquipe, owner, verify: secApi.verify });
 
   // Plugin do Ergon no motor: antes de cada ferramenta, pergunta de qual agente é a sessão e o que ele pode usar.

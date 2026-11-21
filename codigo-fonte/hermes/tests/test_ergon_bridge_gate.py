@@ -35,6 +35,11 @@ r = b.on_pre_tool_call("image_generate", {"prompt": "x"}, "t", "s")
 check("image_generate barrada para a Hipátia, dizendo que Fídias tem", isinstance(r, dict) and r.get("action") == "block" and "Fídias" in r.get("message", ""), str(r))
 r = b.on_pre_tool_call("execute_code", {"code": "1"}, "t", "s")
 check("execute_code pede a autorização (senha)", isinstance(r, dict) and "pedir-permissao" in r.get("message", ""), str(r))
+# recursos livres (rc.42): os cartões, a entrega e os visuais são de todo agente, qualquer que seja a lista dele
+for nome in ("visual", "entregar", "perguntar"):
+    r = b.on_pre_tool_call(nome, {}, "t", "s")
+    check(f"{nome}: de todo agente (fora da lista estreita da Hipátia)", r is None and nome in b._CARTOES_TOOLS, str(r))
+check("a capacidade dos visuais anunciada ao Ergon", "visuais" in b.CAPACIDADES)
 r = b.on_pre_tool_call("tool_call", {"name": "?"}, "t", "s")
 check("tool_call não desembrulhada continua barrada", isinstance(r, dict) and r.get("action") == "block", str(r))
 r = b.on_pre_tool_call("terminal", {"command": "ls"}, "t", "s")

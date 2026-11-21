@@ -189,17 +189,10 @@ export function modelosAtivos(db: Db, ws: string) {
  * aplicativos que as Conexões usam (nada de javascript:, data:, nem de site qualquer), ou um identificador interno que
  * existe neste workspace.
  */
-export const TIPOS_REF = ['email', 'documento', 'arquivo', 'evento', 'tarefa', 'pr', 'issue', 'mensagem', 'conversa', 'card', 'pagina'] as const;
-export type TipoRef = (typeof TIPOS_REF)[number];
+// os tipos e os domínios das referências moram em shared/visuais/esquema.ts (o bloco ```ergon-referencias usa os mesmos)
+export { TIPOS_REF, DOMINIOS_REF, type TipoRef } from '../../../shared/visuais/esquema.ts';
+import { TIPOS_REF, DOMINIOS_REF, type TipoRef } from '../../../shared/visuais/esquema.ts';
 export interface Referencia { tipo: TipoRef; titulo: string; url: string | null; id: string | null }
-/** os domínios dos aplicativos das Conexões (e os subdomínios: empresa.sharepoint.com, empresa.atlassian.net) */
-export const DOMINIOS_REF = [
-  'outlook.office.com', 'outlook.office365.com', 'outlook.live.com', 'teams.microsoft.com', 'teams.live.com', 'sharepoint.com', 'onedrive.live.com', '1drv.ms', 'planner.cloud.microsoft', 'tasks.office.com', 'to-do.office.com',
-  'mail.google.com', 'docs.google.com', 'drive.google.com', 'calendar.google.com', 'meet.google.com', 'sheets.google.com',
-  'github.com', 'gitlab.com', 'bitbucket.org', 'app.asana.com', 'trello.com', 'notion.so', 'app.clickup.com', 'monday.com', 'atlassian.net', 'linear.app', 'app.pipefy.com',
-  'slack.com', 'discord.com', 'web.whatsapp.com', 'wa.me', 't.me', 'app.hubspot.com', 'asaas.com', 'app.omie.com.br', 'app.smartsheet.com', 'figma.com', 'dropbox.com',
-  'zendesk.com', 'freshdesk.com', 'app.intercom.com', 'app.gohighlevel.com', 'pipedrive.com', 'app.rdstation.com',
-];
 const REF_MAX = { item: 5, topo: 8 };
 /** os identificadores internos que viram link no Ergon: arquivo dos Documentos, card, conversa */
 const ID_INTERNO = /^(art|tsk|cnv)_[A-Za-z0-9_-]{6,64}$/;

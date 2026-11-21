@@ -287,6 +287,7 @@ const conversas = {
   'campo.solte': 'Solte para enviar a {nome}',
   'campo.qualquerTipo': 'qualquer tipo de arquivo',
   'campo.naoCitar': 'Não responder citando',
+  'campo.mais': 'Anexar ou falar',
   'campo.anexar': 'Anexar arquivos',
   'campo.anexarDica': 'Anexar arquivos (ou arraste para a conversa)',
   'campo.proxima': 'Escreva a próxima: vai quando {nome} terminar',
@@ -469,6 +470,17 @@ const conversas = {
   'navegador.voltou.sessao': 'O controle voltou ao agente: sessão trancada.',
   'navegador.voltou.prazo': 'O controle voltou ao agente: tempo esgotado.',
   'navegador.voltou.navegador': 'O controle voltou ao agente: navegador fechado.',
+  // ——— rc.43: o aviso, na próxima abertura, de que o controle voltou sozinho ao agente
+  'navegador.aviso.navegador': '{nome} retomou o navegador',
+  'navegador.aviso.computador': '{nome} retomou o computador',
+  'navegador.aviso.agente': 'O agente',
+  'navegador.aviso.motivo.ocioso': '10 min sem uso, às {hora}.',
+  'navegador.aviso.motivo.teto': 'O tempo acabou, às {hora}.',
+  'navegador.aviso.motivo.queda': 'A aba foi fechada, às {hora}.',
+  'navegador.aviso.motivo.sessao': 'A sessão foi trancada, às {hora}.',
+  'navegador.aviso.motivo.prazo': 'O tempo acabou, às {hora}.',
+  'navegador.aviso.ver': 'Ver',
+  'navegador.aviso.ok': 'Ok',
 
   // ——— Salas (rc.42): conversa em grupo com pessoas e agentes ———
   'sala.secao': 'Salas',
