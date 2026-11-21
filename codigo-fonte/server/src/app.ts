@@ -2599,6 +2599,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // cada ação pela ponte (/internal/bridge/v1/computador)
   const computador = new Computador({
     db, bus, origens: cfg.allowedOrigins, sessao: sessaoDoCookie, nuvem: cfg.mode === 'cloud',
+    // o mesmo interruptor de "Liberar tudo" das Conexões (com a rc.42 "mãos na massa": o do workspace ou o da pessoa)
     liberarTudo: (ws) => conexoes.liberarTudo(ws),
     donoDe: (r) => (r.conversation_id ? db.get<{ owner_user_id: string }>('SELECT owner_user_id FROM conversations WHERE id = ?', r.conversation_id)?.owner_user_id ?? null : null),
     membro: (ws, userId) => !!db.get('SELECT 1 AS x FROM memberships WHERE workspace_id = ? AND user_id = ?', ws, userId),

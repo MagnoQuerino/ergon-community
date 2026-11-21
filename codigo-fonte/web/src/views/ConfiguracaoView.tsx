@@ -4,6 +4,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import type { AgentTool, AiStatus, AppState, ComposicaoAgente, ComposicaoResumo, DailyLimit, ProcessLimit, Usage } from '../lib/types.ts';
 import { PASSOS_OPCOES, PASSOS_PADRAO, chamadasTexto, compactarAjuda, compactarAtualizacao, compactarDepois, compactarRotulo, composicaoEstimada, composicaoIntro, composicaoNota, composicaoVazia, detalhe, fatias, passosAjuda, passosCompartilhado, passosDepois, tamanhoMedio } from '../lib/custo.ts';
+import { ComputadorAjustes } from '../components/ComputadorAjustes.tsx';
 import { fmtMoeda, fmtNumero, tn, useT } from '../i18n/index.ts';
 import { TOOL_BADGE } from '../components/AgentProfile.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -170,6 +171,8 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
           </>);
         })()}
       </section>
+
+      <ComputadorAjustes />
 
       <ReservaCard a={ajustes.a} salvar={ajustes.salvar} aviso={ajustes.aviso} />
 

@@ -8,7 +8,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   geral: [
     'App.tsx', 'components/CommandPalette.tsx', 'components/WsCard.tsx', 'components/MusicButton.tsx', 'components/AccountMenu.tsx', 'components/Workspaces.tsx',
     'components/SeletorIdioma.tsx', 'components/ConfirmPopup.tsx', 'components/VirtualGrid.tsx', 'components/TextoLongo.tsx', 'components/Markdown.tsx',
-    'components/FileViewer.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
+    'components/FileViewer.tsx', 'components/ComputadorControle.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
   ],
   // a Cidade, o Modo Foco, a Central de Trabalho e os rótulos desenhados na cidade
   cidade: [
@@ -40,7 +40,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [
     'views/ConfiguracaoView.tsx', 'components/AiAccounts.tsx', 'components/CapacidadesPanel.tsx', 'lib/recursos.ts', 'lib/custo.ts', 'views/AtualizacoesPanel.tsx', 'lib/atualizacoes.ts', 'views/SaudePanel.tsx',
-    'components/AjustesEquipe.tsx', 'lib/ajustes.ts',
+    'components/AjustesEquipe.tsx', 'lib/ajustes.ts', 'components/ComputadorAjustes.tsx',
   ],
   // Entrar, Segurança, Minha conta e Pessoas
   conta: ['components/AuthFlow.tsx', 'components/TermosDeUso.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],

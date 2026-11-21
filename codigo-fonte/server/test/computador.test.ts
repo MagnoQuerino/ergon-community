@@ -247,7 +247,7 @@ describe('computador: rotas', () => {
     await req(h, 'PUT', '/api/conexoes/liberar-tudo', s, { on: true });
     const p = doMotor({ acao: 'type', args: { text: 'S3nh@Forte!2026' }, session_id: sessao });
     let e: any; for (let i = 0; i < 100 && !(e = await estado()).pedidos.length; i++) await dorme(10);
-    assert.deepEqual(e.pedidos[0], { id: e.pedidos[0].id, tipo: 'confirmar', agente: e.pedidos[0].agente, resumo: 'digitar uma senha ou chave', protegida: 'segredo' });
+    assert.deepEqual(e.pedidos[0], { id: e.pedidos[0].id, tipo: 'confirmar', recurso: 'computador', agente: e.pedidos[0].agente, resumo: 'digitar uma senha ou chave', protegida: 'segredo' });
     assert.ok(!JSON.stringify(e).includes('S3nh@'), 'a tela não mostra a senha');
     await req(h, 'POST', `/api/computador/pedidos/${e.pedidos[0].id}`, s, { escolha: 'recusar' });
     assert.equal((await p).json.code, 'recusou_acao');

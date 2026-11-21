@@ -396,6 +396,19 @@ const configuracoes = {
   'ferr.aviso.risco': 'risco',
   'ferr.aviso.custoDica': "Pode consumir mais da conta de IA ou de uma conta própria: veja o texto da ferramenta. Vem ligada; tire de quem não precisa para economizar.",
   'ferr.aviso.riscoDica': "Alcança conteúdo de fora ou arquivos: veja o texto da ferramenta. Vem ligada; acompanhe e tire de quem não precisa.",
+  // rc.42: Controle do computador
+  'computador.titulo': 'Controle do computador',
+  'computador.nuvem': 'Na nuvem não há área de trabalho: o controle do computador vale no Ergon Desktop.',
+  'computador.conectado': 'Ergon Desktop conectado · {so}',
+  'computador.abraODesktop': 'Abra o Ergon Desktop neste computador',
+  'computador.desligado': 'Desligado',
+  'computador.cadaAcao': 'Confirmar cada ação',
+  'computador.total': 'Acesso total',
+  'computador.perguntar': 'Perguntar quando um agente precisar',
+  'computador.comLiberarTudo': 'Com "Liberar tudo" ligado, as ações seguem sem confirmar.',
+  'computador.sempre': 'Senhas, pagamentos e apagar de vez sempre pedem você.',
+  'computador.bloquear': 'Bloquear neste workspace',
+  'computador.bloqueado': 'Bloqueado por quem administra.',
 } as const satisfies Area;
 
 export default configuracoes;

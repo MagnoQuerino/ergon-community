@@ -276,8 +276,8 @@ export interface DepsComputador {
   sessao: (cookieHeader: string | undefined) => AuthContext | null;
   /** sem área de trabalho (servidor na nuvem) */
   nuvem: boolean;
-  /** "Liberar tudo, por minha conta" (Conexões): também tira a confirmação de cada ação no computador */
-  liberarTudo: (workspaceId: string) => boolean;
+  /** "Liberar tudo, por minha conta" (Conexões; o do workspace ou o da pessoa): também tira a confirmação de cada ação no computador */
+  liberarTudo: (workspaceId: string, userId: string) => boolean;
   /** de quem é a execução (a dona da conversa; num card, null) */
   donoDe: (run: ExecucaoPC) => string | null;
   /** a pessoa é deste workspace? */
@@ -288,10 +288,11 @@ export interface DepsComputador {
 export interface EstadoComputador {
   disponivel: boolean;
   aparelho: { conectado: boolean; so: string | null; permissoes: Permissoes | null };
-  modo: Modo; naoPerguntar: boolean; bloqueado: boolean; liberarTudo: boolean;
+  modo: Modo; naoPerguntar: boolean; bloqueado: boolean; liberarTudo: boolean; administra: boolean;
   controle: 'agente' | 'pessoa'; motivo: string | null;
   emUso: { agente: string; desde: string; resumo: string } | null;
-  pedidos: Array<{ id: string; tipo: 'ativar' | 'confirmar'; agente: string; resumo: string; protegida: string | null }>;
+  /** recurso: do que é o cartão ("computador" aqui; o mesmo cartão "Ativar acesso total?" serve a outros recursos) */
+  pedidos: Array<{ id: string; tipo: 'ativar' | 'confirmar'; recurso: 'computador'; agente: string; resumo: string; protegida: string | null }>;
 }
 
 export class Computador {
@@ -339,10 +340,10 @@ export class Computador {
       disponivel: !this.d.nuvem,
       aparelho: { conectado: !!ap, so: ap?.so ?? null, permissoes: ap?.permissoes ?? null },
       modo: this.modo(a.workspaceId, a.userId), naoPerguntar: this.naoPerguntar(a.workspaceId, a.userId), bloqueado: this.bloqueado(a.workspaceId),
-      liberarTudo: this.d.liberarTudo(a.workspaceId),
+      liberarTudo: this.d.liberarTudo(a.workspaceId, a.userId), administra: a.role === 'owner',
       controle: c?.quem ?? 'agente', motivo: c?.motivo ?? null,
       emUso: uso && uso.workspaceId === a.workspaceId ? { agente: uso.agente, desde: new Date(uso.desde).toISOString(), resumo: uso.resumo } : null,
-      pedidos: [...this.pedidos.values()].filter((p) => p.userId === a.userId && p.workspaceId === a.workspaceId).map((p) => ({ id: p.id, tipo: p.tipo, agente: p.agente, resumo: p.resumo, protegida: p.protegida })),
+      pedidos: [...this.pedidos.values()].filter((p) => p.userId === a.userId && p.workspaceId === a.workspaceId).map((p) => ({ id: p.id, tipo: p.tipo, recurso: 'computador' as const, agente: p.agente, resumo: p.resumo, protegida: p.protegida })),
     };
   }
 
@@ -432,7 +433,7 @@ export class Computador {
     const c = classificar(ped.acao, ped.args);
     const agente = this.d.nomeDoAgente(run);
     const base = { workspaceId: ws, userId, runId: run.id, agente, protegida: c.protegida };
-    const dec = decidir({ bloqueado: false, modo: this.modo(ws, userId), naoPerguntar: this.naoPerguntar(ws, userId), liberarTudo: this.d.liberarTudo(ws), leitura: c.leitura, protegida: !!c.protegida, umaVez: this.umaVez.has(run.id) });
+    const dec = decidir({ bloqueado: false, modo: this.modo(ws, userId), naoPerguntar: this.naoPerguntar(ws, userId), liberarTudo: this.d.liberarTudo(ws, userId), leitura: c.leitura, protegida: !!c.protegida, umaVez: this.umaVez.has(run.id) });
     if (dec === 'recusar') return recusa('desligado', MSG.desligado);
     if (dec === 'ativar') {
       const e = await this.perguntar({ ...base, tipo: 'ativar', resumo: 'usar este computador', protegida: null });
