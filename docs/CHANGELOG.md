@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.46 (pré-versão de teste)
+
+- **WeCom (企业微信):** em Conexões › Conversar com a equipe, ligue o robô inteligente da sua empresa (Bot ID e Secret, guardados com a equipe) e converse com ela por mensagem direta. A conexão sai do seu computador, sem endereço público.
+- **WeChat pessoal (微信), experimental:** o QR aparece na tela do Ergon. Vem desligado e só liga com o seu consentimento, porque a Tencent pode limitar ou bloquear a conta.
+- **Instalar da China:** com `ERGON_REGISTRY` no `.env`, as imagens vêm de um registro alternativo (o espelho na China, com o mesmo conteúdo); sem ele, o Ergon usa o espelho da versão quando o ghcr.io não responde.
+- **Guia "Ergon na China"** na Ajuda e em `docs/CHINA.md` (também em chinês): instalação pelo espelho, IA chinesa, Feishu, DingTalk e WeCom, o que não funciona lá e a nota legal.
+
 ## 1.1.0-rc.45 (pré-versão de teste)
 
 - **A equipe no seu idioma:** com a tela em chinês, hindi ou inglês da Índia, os agentes respondem nesse idioma, nas conversas, nos cards e nas rotinas, e as mensagens do próprio motor saem em chinês. A equipe de partida, os setores e os quadros de fábrica também aparecem no idioma da tela.
