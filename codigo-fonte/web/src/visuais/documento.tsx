@@ -1,11 +1,10 @@
-// O relatório aberto: o visualizador de documentos do Ergon, por cima da conversa. Com os Entregáveis (rc.42), é o
-// <Documento fonte={{ artifactId }} modo="dialogo" revisar /> de components/Documento.tsx (revisão ao vivo, versões,
-// PDF); os blocos ```ergon-<tipo> do .md são desenhados por Visual.tsx (BlocoDoDocumento, registrado em lib/documento.ts).
-// Antes deles, o leitor de arquivos de sempre (FileViewer), que já desenha o .md com os blocos.
-import { FileViewer } from '../components/FileViewer.tsx';
+// O relatório aberto: o documento do Ergon por cima da conversa (components/Documento.tsx), com a revisão ao vivo, as
+// versões e o PDF; os blocos ```ergon-<tipo> do .md são desenhados por Visual.tsx (BlocoDoDocumento, no registro de
+// lib/documento.ts por visuais/registro.ts).
+import { Documento } from '../components/Documento.tsx';
 
 export interface ArquivoDoRelatorio { id: string; nome: string; tamanho: number }
 
 export function DocumentoDoRelatorio({ arquivo, onClose }: { arquivo: ArquivoDoRelatorio; onClose: () => void }) {
-  return <FileViewer file={{ id: arquivo.id, filename: arquivo.nome, mime: 'text/markdown', size: arquivo.tamanho }} onClose={onClose} />;
+  return <Documento fonte={{ artifactId: arquivo.id, tamanho: arquivo.tamanho }} modo="dialogo" revisar onClose={onClose} />;
 }

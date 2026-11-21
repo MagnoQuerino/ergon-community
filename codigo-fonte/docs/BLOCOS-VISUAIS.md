@@ -70,14 +70,19 @@ gráfico traz o texto alternativo e a tabela de dados ("Ver dados" e leitor de t
   redirecionamentos conferidos, 5 s e 512 KB (página) / 6 s e 3 MB (imagem, conferida pelos bytes, sem SVG).
 - IDs internos (`art_`, `tsk_`, `cnv_`) conferidos no workspace; referências só com os domínios das Conexões.
 
-## Na junção com os outros ramos da rc.42
+## Ligação com os outros módulos (rc.43)
 
-- Entregáveis: registrar os tipos no documento — `TIPOS_DO_DOCUMENTO.forEach((t) => registrarBlocoVisual(t,
-  BlocoDoDocumento))` (de `web/src/visuais/Visual.tsx`); em `visuais/documento.tsx`, trocar o `FileViewer` por
-  `<Documento fonte={{ artifactId }} modo="dialogo" revisar />`; no PDF (`lib/pdf-documento.ts`), a cerca
-  `ergon-<tipo>` vira a imagem de `visualParaPng` (`services/visuais/png.ts`). O `Markdown.tsx` dos dois lados desenha
-  os blocos: ficar com o registro.
-- Modelos de entrega: `EntregaDetalhes` mostra `detalhes` com `<Markdown>` em vez de parágrafos simples, e as
-  referências usam `TIPOS_REF`/`DOMINIOS_REF` de `shared/visuais/esquema.ts` (cópia fiel das de `modelos-entrega.ts`).
-- Salas: na lista de mensagens da sala, `ContextoVisuais.Provider` com `votosDe(mensagens, autor)` e `eleitores` =
-  membros; votar manda `cercaVoto(...)` como mensagem da sala; as mensagens que são só voto ficam fora da lista.
+- Documento dos Entregáveis: `web/src/visuais/registro.ts` registra todos os tipos (e a cerca genérica
+  `ergon-visual`) com `registrarBlocoVisual`; `components/Markdown.tsx` e `components/Documento.tsx` desenham pelo
+  registro. "Abrir relatório" abre `<Documento fonte={{ artifactId }} modo="dialogo" revisar />` (revisão ao vivo,
+  versões, PDF).
+- PDF (`lib/pdf-documento.ts`): cada cerca vira o cartão em PNG (`pngsDasCercas`, em `services/visuais/png.ts`), no tema
+  claro e sem a marca. O PDFKit embute na hora só PNG opaco; `lib/png-opaco.ts` tira o alfa (o cartão e o logo com
+  fundo transparente, que antes sumia do PDF).
+- Modelos de entrega: `EntregaDetalhes` mostra `detalhes` com `<Markdown>`; `TIPOS_REF`/`DOMINIOS_REF` moram só em
+  `shared/visuais/esquema.ts` (`services/modelos-entrega.ts` reexporta).
+- Salas: `ContextoVisuais` com os votos (`votosDe`, quem votou é o autor), `eu` e `eleitores` = as pessoas da sala;
+  votar manda `cercaVoto(...)` como mensagem da sala, sem menção (nenhum agente é chamado); as mensagens só de voto
+  ficam fora da lista e a prévia da sala mostra o voto em uma palavra.
+- Recursos livres: `visual` vem com os cartões (conjunto `ergon_cartoes`, sempre ligado), de todo agente, qualquer
+  que seja a lista dele; não é item por agente (recursos-livres.test, test_ergon_bridge_gate).

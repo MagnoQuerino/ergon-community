@@ -17,6 +17,9 @@ import { RECURSOS, type RecursosEstado } from '../lib/recursos.ts';
 import { Icon } from './Icon.tsx';
 import { Markdown } from './Markdown.tsx';
 import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
+import { ContextoVisuais, type VisuaisContexto } from '../visuais/contexto.ts';
+import { votosDe } from '../visuais/conversa.ts';
+import { cercaVoto, votoDe } from '../../../shared/visuais/cercas.ts';
 
 type Prazo = 'vez' | '24h' | '7d' | '30d' | 'sempre';
 const PRAZOS: Prazo[] = ['vez', '24h', '7d', '30d', 'sempre']; // i18n-ok: os códigos dos prazos (o servidor), não texto de tela
@@ -322,7 +325,19 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
   }, [listaTopicos]);
   const fim = useRef<HTMLDivElement>(null);
   const arquivo = useRef<HTMLInputElement>(null);
-  const lista = msgs.data?.mensagens ?? [];
+  const todas = msgs.data?.mensagens ?? [];
+  // blocos visuais: as mensagens que são só o voto de uma enquete ficam fora da lista (contam na enquete)
+  const lista = useMemo(() => todas.filter((m) => !(m.role === 'user' && votoDe(m.content))), [todas]);
+  const visuais = useMemo<VisuaisContexto>(() => ({
+    votos: votosDe(todas, (m) => { const x = m as Msg; return { quem: x.autor.chave ?? '', nome: x.autor.nome ?? '' }; }),
+    eu: det.data?.eu,
+    eleitores: det.data ? det.data.membros.filter((x) => x.tipo === 'pessoa').length : undefined,
+    // o voto é uma mensagem da sala só com a cerca (sem menção: nenhum agente é chamado); vale o último de cada um
+    votar: det.data && !det.data.arquivada ? async (enquete, opcao) => {
+      await api.post(`/api/salas/${salaId}/mensagens`, { texto: cercaVoto({ enquete, opcao }), marcas: [], clientRequestId: requestId() });
+      msgs.reload();
+    } : undefined,
+  }), [todas, det.data, salaId, msgs.reload]); // eslint-disable-line react-hooks/exhaustive-deps
   // abriu (e a cada mensagem nova à vista): lida
   useEffect(() => { if (det.data) void api.post(`/api/salas/${salaId}/lido`).catch(() => undefined); }, [salaId, lista.length, !!det.data]); // eslint-disable-line react-hooks/exhaustive-deps
   // a mensagem em foco (veio do sino): à vista e marcada; senão, o fim da conversa
@@ -406,6 +421,7 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
         </div>
         {painelTopico && onFechar && <button type="button" className="icon-btn" onClick={onFechar} aria-label={t('conversas.sala.topico.fechar')} title={t('conversas.sala.topico.fechar')}><Icon name="x" /></button>}
       </header>
+      <ContextoVisuais.Provider value={visuais}>
       <div className="chat__msgs sala__msgs" aria-live="polite">
         {!lista.some((m) => m.role !== 'system') && <p className="muted center sala__vazia">{t('conversas.sala.vazia')}</p>}
         {lista.map((m, i) => {
@@ -446,6 +462,7 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
         })}
         <div ref={fim} />
       </div>
+      </ContextoVisuais.Provider>
       {vez.find((v) => v.status === 'rodando') && <NavegadorAoVivo conversa={salaId} agente={vez.find((v) => v.status === 'rodando')!.nome} />}
       {meusPedidos.map((p) => <CartaoCessao key={p.id} aviso={p} foco={p.id === foco} onFeito={() => { avisos.reload(); msgs.reload(); }} />)}
       {dica && <p className="chat__hint" role="status" onAnimationEnd={() => setDica(null)}>{dica}</p>}

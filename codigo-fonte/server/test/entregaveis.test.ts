@@ -8,6 +8,9 @@ import { after, before, describe, test } from 'node:test';
 import type { HermesClient, ModelOptions, RemoteRun, RunEvent, StartRun } from '../src/services/hermes.ts';
 import { conferirLogo } from '../src/services/entregaveis.ts';
 import { documentoPdf } from '../src/lib/pdf-documento.ts';
+import { chaveDaCerca, pngsDasCercas, svgParaPngJa } from '../src/services/visuais/png.ts';
+import { cercaVisual } from '../../shared/visuais/cercas.ts';
+import { EXEMPLOS } from '../../shared/visuais/exemplos.ts';
 import { IDENTIDADE_PADRAO, MODELOS_ORIGINAIS, normalizarModelo, numeracao } from '../../shared/entregaveis.ts';
 import { corDoAgente, juntarTrechos, liberadosAPartir, MARCA_FIM, MARCA_INICIO, planejar, textoDaResposta, trechosDe } from '../../shared/revisao.ts';
 import { drain, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
@@ -106,6 +109,24 @@ describe('entregáveis: documento, PDF, identidade, modelos e revisão ao vivo',
       const paginas = (txt.match(/\/Type \/Page\b/g) ?? []).length;
       assert.ok(paginas >= 3, `${modelo.id}: ${paginas} páginas`);
     }
+  });
+
+  test('PDF: o bloco visual ```ergon-<tipo> sai como imagem (o cartão), não como código', () => {
+    const md = `# Relatório\n\nOs gastos do mês:\n\n${cercaVisual(EXEMPLOS.kpi)}\n\n${cercaVisual(EXEMPLOS.barras)}\n\nFim.`;
+    const pngs = pngsDasCercas(md);
+    assert.equal(pngs.size, 2);
+    const com = documentoPdf({ markdown: md, titulo: 'R', identidade: IDENTIDADE_PADRAO, modelo: MODELOS_ORIGINAIS[0], visual: (l, c) => pngs.get(chaveDaCerca(l, c)) ?? null }).toString('latin1');
+    const sem = documentoPdf({ markdown: md, titulo: 'R', identidade: IDENTIDADE_PADRAO, modelo: MODELOS_ORIGINAIS[0] }).toString('latin1');
+    assert.equal((com.match(/\/Subtype \/Image/g) ?? []).length, 2);
+    assert.equal((sem.match(/\/Subtype \/Image/g) ?? []).length, 0);
+  });
+
+  test('PDF: o logo com fundo transparente aparece (o alfa vira o fundo branco)', () => {
+    const logo = svgParaPngJa('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="15" fill="#c33"/></svg>', 1);
+    assert.ok(logo);
+    const capa = MODELOS_ORIGINAIS.find((m) => m.capa.ligada)!;
+    const pdf = documentoPdf({ markdown: '# T\n\nx', titulo: 'T', identidade: { ...IDENTIDADE_PADRAO, nome: 'Acme' }, modelo: capa, logo }).toString('latin1');
+    assert.ok((pdf.match(/\/Subtype \/Image/g) ?? []).length >= 1);
   });
 
   test('logo: só PNG ou JPEG conferido pelos bytes; SVG e disfarce recusados', async () => {

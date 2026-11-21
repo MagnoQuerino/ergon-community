@@ -8,6 +8,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
 import { useT } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
+import { Markdown } from './Markdown.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 
 export type TipoEntrega = 'decisao' | 'entrega' | 'relatorio' | 'pergunta' | 'bloqueio';
@@ -91,6 +92,7 @@ export function ModeloTopo({ modelo, onDetalhes }: { modelo: ModeloDaTarefa; onD
 function Bloco({ rotulo, children }: { rotulo: string; children: ReactNode }) {
   return <div className="ent-bloco"><h5>{rotulo}</h5>{children}</div>;
 }
+/** detalhes: Markdown (listas, tabelas e os blocos visuais ```ergon-<tipo>); os campos curtos em parágrafos */
 const Paragrafos = ({ texto }: { texto: string }) => <>{texto.split(/\n{2,}/).map((p, i) => <p key={i} className="pre">{p}</p>)}</>;
 const Lista = ({ xs }: { xs: string[] }) => (xs.length ? <ul className="ent-lista">{xs.map((x, i) => <li key={i}>{x}</li>)}</ul> : null);
 const Extras = ({ ex }: { ex: Record<string, string> }) => (Object.keys(ex).length ? <dl className="ent-extras">{Object.entries(ex).map(([k, v]) => <div key={k}><dt>{k.replace(/_/g, ' ')}</dt><dd>{v}</dd></div>)}</dl> : null);
@@ -189,14 +191,14 @@ export function EntregaDetalhes({ taskId, modelo, pode, onClose, onChanged }: { 
           <RefChips refs={e.referencias} />
           {e.arquivos.length > 0 && <Bloco rotulo={t('tarefa.entrega.arquivos')}><Lista xs={e.arquivos} /></Bloco>}
           {e.atencao.length > 0 && <Bloco rotulo={t('tarefa.entrega.atencao')}><Lista xs={e.atencao} /></Bloco>}
-          <Bloco rotulo={t('tarefa.entrega.relatorio')}><Paragrafos texto={e.detalhes} /></Bloco>
+          <Bloco rotulo={t('tarefa.entrega.relatorio')}><Markdown className="entrega__md" text={e.detalhes} /></Bloco>
           <Extras ex={e.extras} />
         </>}
         {e.tipo === 'relatorio' && <>
           <p className="ent-lead">{e.resumo}</p>
           <RefChips refs={e.referencias} />
           <Lista xs={e.pontos} />
-          <Bloco rotulo={t('tarefa.entrega.relatorio')}><Paragrafos texto={e.detalhes} /></Bloco>
+          <Bloco rotulo={t('tarefa.entrega.relatorio')}><Markdown className="entrega__md" text={e.detalhes} /></Bloco>
           <Extras ex={e.extras} />
         </>}
         {e.tipo === 'pergunta' && <>
@@ -211,7 +213,7 @@ export function EntregaDetalhes({ taskId, modelo, pode, onClose, onChanged }: { 
           <RefChips refs={e.referencias} />
           {e.precisa && <Bloco rotulo={t('tarefa.entrega.precisa')}><p>{e.precisa}</p></Bloco>}
           {e.tentado.length > 0 && <Bloco rotulo={t('tarefa.entrega.tentado')}><Lista xs={e.tentado} /></Bloco>}
-          {e.detalhes && e.detalhes !== e.motivo && <Bloco rotulo={t('tarefa.entrega.relatorio')}><Paragrafos texto={e.detalhes} /></Bloco>}
+          {e.detalhes && e.detalhes !== e.motivo && <Bloco rotulo={t('tarefa.entrega.relatorio')}><Markdown className="entrega__md" text={e.detalhes} /></Bloco>}
           <Extras ex={e.extras} />
         </>}
 
