@@ -125,7 +125,7 @@ def txt(res):
         res = json.loads(res) if isinstance(res, str) else res
     except ValueError:
         pass
-    return txt(res)
+    return json.dumps(res, ensure_ascii=False)
 
 
 def usar(args, sessao="sessao-1", tarefa="t1"):
