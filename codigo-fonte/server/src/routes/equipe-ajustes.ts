@@ -14,6 +14,7 @@ import { ajustesDaEquipe, gravarEscolhas, gravarPausa, MODELOS_FALA, pausaDaEqui
 import type { Raciocinio } from '../services/hermes.ts';
 import { audit, type Bus } from '../services/bus.ts';
 import { ORIENTAR_NAO_ANDANDO, STEER_MAX, type RunExecutor } from '../services/runs.ts';
+import type { IdiomaMotor } from '../services/idioma-motor.ts';
 
 interface AjustesRoutesDeps {
   db: Db; bus: Bus; executor: RunExecutor;
@@ -23,7 +24,7 @@ interface AjustesRoutesDeps {
   /** os workspaces que dividem o motor deste (os da pessoa; ou todos, com um motor só) */
   workspacesDoMotor: (workspaceId: string) => string[];
   /** o idioma das mensagens do motor do workspace (o da pessoa dona dele) */
-  idiomaDoMotor: (workspaceId: string) => 'pt' | 'en' | undefined;
+  idiomaDoMotor: (workspaceId: string) => IdiomaMotor | undefined;
   /** a conversa é desta pessoa? (lança 404 se não for) */
   conversaDe: (workspaceId: string, userId: string, conversationId: string) => void;
 }

@@ -154,6 +154,13 @@ check("juntos: inglês (ljspeech, domínio público), Piper e base, sem um apaga
       and c["stt"] == {"provider": "local", "local": {"model": "base", "language": "en"}}, json.dumps(c))
 check("nenhuma voz de base com restrição (lessac) nem o provedor piper do Hermes", "lessac" not in json.dumps(c) and '"piper": {' not in json.dumps(c))
 check("idioma fora da lista: recusado", recusa({"voz_idioma": "es"}))
+# rc.45: chinês e hindi na transcrição e nas vozes (Piper e a reserva online)
+c = bridge.ajustes_config({"voz_idioma": "zh"})
+check("chinês: transcrição em zh, Piper huayan e a voz online Xiaoxiao", c["stt"] == {"local": {"language": "zh"}}
+      and c["tts"]["providers"]["ergon-piper"] == {"voice": "zh_CN-huayan-medium"} and c["tts"]["edge"] == {"voice": "zh-CN-XiaoxiaoNeural"}, json.dumps(c))
+c = bridge.ajustes_config({"voz_idioma": "hi"})
+check("hindi: transcrição em hi, Piper pratham e a voz online Swara", c["stt"] == {"local": {"language": "hi"}}
+      and c["tts"]["providers"]["ergon-piper"] == {"voice": "hi_IN-pratham-medium"} and c["tts"]["edge"] == {"voice": "hi-IN-SwaraNeural"}, json.dumps(c))
 lido = bridge.ajustes_ler({})
 check("motor sem nada gravado: edge, base, sem idioma (o Ergon manda o Piper e o idioma)",
       (lido["voz_falar"], lido["voz_modelo"], lido["voz_idioma"]) == ("edge", "base", ""), str(lido))

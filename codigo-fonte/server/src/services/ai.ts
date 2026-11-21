@@ -14,6 +14,7 @@ import { sincronizarCompactacao, sincronizarPassos } from './custo.ts';
 import { sincronizarAjustes, sincronizarPausa } from './ajustes-motor.ts';
 import type { AjustesMotor, CotaConta } from './hermes.ts';
 import { CODIGO_PADRAO } from './termos.ts';
+import type { IdiomaMotor } from './idioma-motor.ts';
 
 export type Billing = 'subscription' | 'credits' | 'api' | 'none';
 interface AccountDef { id: string; name: string; billing: Billing; about: string; site: string }
@@ -272,7 +273,7 @@ export class AiService {
    * privada, arrumar competências sem uso, e o idioma das mensagens do motor. O motor fica com as escolhas mais recentes
    * dos workspaces dele. Devolve como ficou, ou null se o motor não tem a ponte dos ajustes. Erro de rede sobe.
    */
-  async sincronizarAjustes(db: Db, workspaceIds: string[], idioma?: 'pt' | 'en'): Promise<AjustesMotor | null> {
+  async sincronizarAjustes(db: Db, workspaceIds: string[], idioma?: IdiomaMotor): Promise<AjustesMotor | null> {
     // o catálogo de modelos diz quais contas estão conectadas (a reserva automática sai dele); sem ele, a reserva não é mexida
     const opcoes = await this.modelOptions().catch(() => null);
     return sincronizarAjustes(db, this.control, workspaceIds, { opcoes, idioma });
