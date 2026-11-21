@@ -63,19 +63,21 @@ describe('termos de uso e Executar código por padrão', () => {
     } finally { await h.close(); }
   });
 
-  test('o Coordenador de quem já usava perde as ferramentas pesadas uma vez; o que a pessoa devolver, fica', async () => {
+  test('o Coordenador não perde ferramenta pelo papel (rc.42: recursos livres); o que a pessoa tirar dele, fica tirado', async () => {
     const h = await harness();
     try {
       const s = await setupOwner(h);
       const coord = h.db.get<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ? AND coordinator = 1', s.workspaceId)!.id;
-      h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(['quadro', 'encaminhar', 'navegador', 'video', 'imagens', 'web', 'contas']), coord);
+      const antes = ['quadro', 'encaminhar', 'navegador', 'video', 'imagens', 'web', 'contas'];
+      h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify(antes), coord);
       await req(h, 'POST', '/api/me/termos', s, { versao: TERMOS_VERSAO });
       instructionsFor(h.db, s.workspaceId, coord, '');
       const t = JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', coord)!.tools) as string[];
-      assert.deepEqual(t, ['quadro', 'encaminhar', 'web', 'contas'], 'sem navegador, vídeo, imagens nem código');
-      h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify([...t, 'navegador']), coord);
+      for (const x of antes) assert.ok(t.includes(x), `o Coordenador continua com ${x}: ${t.join(',')}`);
+      // a pessoa restringe o Coordenador de propósito: fica como ela deixou
+      assert.equal((await req(h, 'PATCH', `/api/agents/${coord}`, s, { tools: ['quadro', 'encaminhar', 'delegar', 'regras', 'web'] })).status, 200);
       instructionsFor(h.db, s.workspaceId, coord, '');
-      assert.ok((JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', coord)!.tools) as string[]).includes('navegador'), 'devolvido pela pessoa, fica');
+      assert.ok(!(JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', coord)!.tools) as string[]).includes('navegador'), 'tirado pela pessoa, fica tirado');
     } finally { await h.close(); }
   });
 

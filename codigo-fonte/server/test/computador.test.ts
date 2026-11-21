@@ -362,7 +362,7 @@ describe('ligações da rc.42 com o resto do Ergon', () => {
   });
 
   test('catálogo: Administrar o Discord e Diagnóstico opcionais, desligados; Diagnóstico com a trava do Terminal', async () => {
-    const { TOOLS, GUARDED_TOOLSETS, PESADAS_FORA_DO_COORDENADOR } = await import('../src/services/characters.ts');
+    const { TOOLS, GUARDED_TOOLSETS, PROTEGIDAS } = await import('../src/services/characters.ts');
     assert.equal(TOOLS.discord.toolset, 'discord_admin');
     assert.equal(TOOLS.discord.safe, true); assert.equal(TOOLS.discord.status, 'desligada');
     assert.equal(TOOLS.diagnostico.toolset, 'debugging');
@@ -370,7 +370,8 @@ describe('ligações da rc.42 com o resto do Ergon', () => {
     for (const k of ['guarded', 'safe', 'status', 'kind'] as const) assert.equal(TOOLS.diagnostico[k], TOOLS.terminal[k], k);
     assert.equal(GUARDED_TOOLSETS.debugging, 'diagnostico');
     assert.equal(GUARDED_TOOLSETS.terminal, 'terminal');
-    for (const id of ['discord', 'diagnostico', 'computador']) assert.ok(PESADAS_FORA_DO_COORDENADOR.includes(id), id);
+    // protegidas: não vêm no padrão aberto de nenhum agente; só com o "Ativar acesso total?" da equipe (rc.42)
+    for (const id of ['discord', 'diagnostico', 'computador', 'terminal', 'calculo']) assert.ok(PROTEGIDAS.includes(id), id);
     // sem pedir, ninguém tem: o agente novo não recebe nenhuma das duas
     const h = await harness(); const s = await setupOwner(h);
     const tools = h.db.all<{ tools: string | null }>('SELECT tools FROM agents WHERE workspace_id = ?', s.workspaceId).flatMap((x) => JSON.parse(x.tools ?? '[]') as string[]);

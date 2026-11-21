@@ -164,6 +164,8 @@ export class Conexoes {
     if (on) {
       setSetting(this.db, ws, LIBERAR_TUDO, '0');
       this.db.run("UPDATE workspace_settings SET value = '0' WHERE workspace_id = ? AND key LIKE ?", ws, `${LIBERAR_TUDO_PESSOA}%`);
+      // o acesso total da equipe (characters.ts, acessoTotalDaEquipe) cai junto: religar pede a senha de novo
+      this.db.run("DELETE FROM workspace_settings WHERE workspace_id = ? AND key = 'acesso_total'", ws);
     }
     audit(this.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'conexoes.liberar_tudo_proibido', evidence: { on }, result: on ? '"Liberar tudo" proibido no workspace' : '"Liberar tudo" permitido no workspace' });
   }

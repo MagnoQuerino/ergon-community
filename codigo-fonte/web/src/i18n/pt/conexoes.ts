@@ -737,7 +737,7 @@ const conexoes = {
   'liberar.proibir': 'Proibir neste workspace',
   'liberar.proibidoTexto': 'Proibido por quem administra este workspace.',
   'acesso.titulo': "Ativar acesso total?",
-  'acesso.agentes': "Agentes com Terminal, código e contas",
+  'acesso.equipe': 'A equipe toda passa a usar Terminal, código, computador e Discord sem pedir aprovação. Você revisa no fim.',
   'acesso.senha': "Sua senha",
   'acesso.ativar': "Ativar",
   'pastas.titulo': "Pastas do computador",

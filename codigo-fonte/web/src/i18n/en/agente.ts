@@ -96,9 +96,13 @@ const agente: Traducao<typeof pt> = {
   'perfil.novoMetodo': 'New method',
   'perfil.sugestoesSetor': 'Sector suggestions: {itens}',
   'perfil.ferramentas': 'Tools',
-  'perfil.ferramentasDica': '— each agent specializes; an agent without a tool asks a teammate who has it (the Coordinator manages the locks)',
+  'perfil.ferramentasDica': '— all come on; uncheck only to restrict this agent',
   'perfil.doCargo': 'built-in',
-  'perfil.recomendada': 'recommended',
+  'perfil.daEquipe': 'Whole team',
+  'ferramenta.ligadaEquipe': 'On',
+  'ferramenta.desligadaEquipe': 'Off',
+  'ferramenta.comAcessoTotal': 'With full access',
+  'ferramenta.pedeAcessoTotal': 'Needs full access',
   // O rótulo inglês da ferramenta 'habilidades' (TOOLS em server/src/services/characters.ts) precisa ser exatamente
   // "Library skills", para bater com as duas dicas abaixo.
   'perfil.competencias': 'Library skills',
@@ -218,8 +222,8 @@ const agente: Traducao<typeof pt> = {
   // ——— Competências prontas, loja e avisos das ferramentas (components/CompetenciasProntas.tsx) (rc.27)
   'aviso.custo': 'cost',
   'aviso.risco': 'risk',
-  'aviso.custoDica': "May use more of the AI account or of its own account: see the tool's text. It comes on; take it away if this agent does not need it, to save.",
-  'aviso.riscoDica': "Reaches outside content or files: see the tool's text. It comes on; keep an eye on it and take it away if this agent does not need it.",
+  'aviso.custoDica': "May use more of the AI account or of its own account.",
+  'aviso.riscoDica': "Reaches outside content or files.",
   'prontas.lendo': 'Checking the team skills…',
 
   // ——— Train: the three things you can do (rc.29)

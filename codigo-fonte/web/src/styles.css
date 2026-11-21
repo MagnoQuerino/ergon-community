@@ -495,6 +495,8 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 .tool-opt { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: start; border: 1px solid var(--line); border-radius: 9px; padding: 7px 9px; background: var(--panel); cursor: pointer; }
 .tool-opt--on { border-color: var(--sucesso-borda-forte); background: var(--sucesso-suave-2); }
 .tool-opt--off { cursor: not-allowed; border-style: dashed; }
+.tools-equipe__t { margin: 12px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.tool-opt--equipe { grid-template-columns: 1fr; cursor: default; }
 .tool-opt--off .tool-opt__txt b { color: var(--muted); }
 .tool-opt__txt { display: flex; flex-direction: column; min-width: 0; }
 .tool-opt__txt small { color: var(--muted); font-size: 12px; line-height: 1.3; }

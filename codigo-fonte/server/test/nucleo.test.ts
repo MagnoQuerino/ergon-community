@@ -279,11 +279,15 @@ describe('núcleo operacional: cenários integrados (Etapa 9)', () => {
     const est = await teamCard(PEDIDO, 'arquimedes');
     await upload(est.id, SAMPLE);
     h.db.run("UPDATE agents SET tools = '[\"arquivos\",\"passos\"]' WHERE id = ?", agentId('arquimedes'));
+    // rc.42: todos nascem com a Análise de dados; aqui a pessoa tirou de todos (o que antes era só o Arquimedes ter)
+    const antes = h.db.all<{ id: string; tools: string }>("SELECT id, tools FROM agents WHERE workspace_id = ? AND tools LIKE '%\"dados\"%'", s.workspaceId);
+    for (const a of antes) h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify((JSON.parse(a.tools) as string[]).filter((t) => t !== 'dados')), a.id);
     const holder = h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND tools LIKE '%\"dados\"%'", s.workspaceId)!.n;
     assert.equal(holder, 0);
     const r = await work(est.id);
     assert.equal(r.json.runId, null); assert.match(r.json.stopped.justification, /Ninguém na equipe tem a ferramenta "Análise de dados"/);
     h.db.run("UPDATE agents SET tools = '[\"arquivos\",\"dados\",\"passos\"]' WHERE id = ?", agentId('arquimedes'));
+    for (const a of antes) h.db.run('UPDATE agents SET tools = ? WHERE id = ?', a.tools, a.id);
   });
 
   test('ação externa nunca é presumida; aprovação exigida espera você; conclusão humana é preservada', async () => {

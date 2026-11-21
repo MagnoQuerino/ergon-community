@@ -94,25 +94,39 @@ describe('pastas e acesso total pelas rotas', () => {
       assert.throws(() => nuvem.conceder(s.userId, s.workspaceId, '/home/ana/site', 'rw'), /na nuvem/);
     } finally { await h.close(); }
   });
-  test('"Ativar acesso total?": a senha uma vez libera Terminal, código e contas aos escolhidos, com "Liberar tudo"', async () => {
+  test('"Ativar acesso total?": a senha uma vez libera as protegidas à equipe inteira (sem escolher agentes), com "Liberar tudo"', async () => {
     const h = await harness(); const s = await setupOwner(h);
     try {
-      const ag = (await req(h, 'GET', '/api/acesso-total', s)).json.agentes as Array<{ id: string; tem: boolean }>;
-      assert.ok(ag.length >= 1);
+      const { PROTEGIDAS, acessoTotalDaEquipe, ferramentasEfetivas } = await import('../src/services/characters.ts');
+      const efetivas = (id: string) => ferramentasEfetivas(JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', id)!.tools) as string[], { acessoTotal: acessoTotalDaEquipe(h.db, s.workspaceId) });
+      const ativos = () => h.db.all<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active'", s.workspaceId).map((x) => x.id);
+      assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.ativo, false);
+      for (const id of ativos()) assert.ok(!PROTEGIDAS.some((t) => efetivas(id).includes(t)), 'sem o acesso total, ninguém tem as protegidas');
       h.db.run("UPDATE sessions SET auth_at = '2000-01-01T00:00:00.000Z'");
-      assert.equal((await req(h, 'POST', '/api/acesso-total', s, { agentes: [ag[0].id] })).status, 401, 'sem a senha agora, não');
+      assert.equal((await req(h, 'POST', '/api/acesso-total', s, {})).status, 401, 'sem a senha agora, não');
+      assert.equal((await req(h, 'POST', '/api/acesso-total', s, { agentes: [ativos()[0]] })).status, 400, 'não há mais escolha de agentes');
       assert.equal((await req(h, 'POST', '/api/session/unlock', s, { password: 'senha-local-123' })).status, 200);
-      const r = await req(h, 'POST', '/api/acesso-total', s, { agentes: [ag[0].id], semAviso: true });
+      const r = await req(h, 'POST', '/api/acesso-total', s, { semAviso: true });
       assert.equal(r.status, 200, JSON.stringify(r.json));
-      const tools = JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', ag[0].id)!.tools) as string[];
-      assert.ok(['terminal', 'calculo', 'contas'].every((t) => tools.includes(t)), tools.join(','));
+      for (const id of ativos()) assert.ok(PROTEGIDAS.every((t) => efetivas(id).includes(t)), `todo agente tem as protegidas: ${efetivas(id).join(',')}`);
+      // quem chega depois também
+      const novo = await req(h, 'POST', '/api/agents', s, { name: 'Tales', role: 'Pesquisa', sectorKey: 'brainstorm' });
+      assert.equal(novo.status, 201, JSON.stringify(novo.json));
+      assert.ok(PROTEGIDAS.every((t) => efetivas(novo.json.id).includes(t)));
       const e = (await req(h, 'GET', '/api/conexoes', s)).json;
       assert.equal(e.liberarTudoMeu, true); assert.equal(e.liberarTudoSemAviso, true);
-      assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.agentes.find((x: { id: string }) => x.id === ag[0].id).tem, true);
+      assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.ativo, true);
       assert.ok(h.db.get("SELECT 1 AS x FROM audit_events WHERE action = 'acesso_total'"));
-      // quem administra proibiu: não ativa
+      // quem administra proibiu: o acesso total cai e não ativa de novo
       await req(h, 'PUT', '/api/conexoes/liberar-tudo/proibir', s, { on: true });
-      assert.equal((await req(h, 'POST', '/api/acesso-total', s, { agentes: [ag[0].id] })).status, 409);
+      assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.ativo, false);
+      for (const id of ativos()) assert.ok(!PROTEGIDAS.some((t) => efetivas(id).includes(t)), 'proibido: as protegidas saem de todos');
+      assert.equal((await req(h, 'POST', '/api/acesso-total', s, {})).status, 409);
+      // desligar pela tela (quem administra)
+      await req(h, 'PUT', '/api/conexoes/liberar-tudo/proibir', s, { on: false });
+      assert.equal((await req(h, 'POST', '/api/acesso-total', s, {})).status, 200);
+      assert.equal((await req(h, 'DELETE', '/api/acesso-total', s)).status, 200);
+      assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.ativo, false);
     } finally { await h.close(); }
   });
 });

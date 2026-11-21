@@ -215,7 +215,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
         if (!r.done) { window.setTimeout(poll, 1500); return; }
         setDrafting(null);
         if (r.draft) {
-          setF((x) => ({ ...x, charter: r.draft!.charter, skills: r.draft!.methods.length ? r.draft!.methods : x.skills, tools: r.draft!.tools.length ? [...new Set([...r.draft!.tools])] : x.tools }));
+          setF((x) => ({ ...x, charter: r.draft!.charter, skills: r.draft!.methods.length ? r.draft!.methods : x.skills, tools: [...new Set([...x.tools, ...r.draft!.tools])] }));
           setMsg({ kind: 'ok', text: t('agente.perfil.propostaPronta') });
         } else setMsg({ kind: 'error', text: r.error ?? t('agente.perfil.propostaIlegivel') });
       } catch (e) { if (!stop) { setDrafting(null); setMsg({ kind: 'error', text: errMsg(e) }); } }
@@ -235,7 +235,6 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
     try { await api.post(`/api/agents/${agent.id}/reactivate`); setOffResult(null); reload(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
 
-  const recommended = new Set(sector?.tools ?? []);
   // o Coordenador é o único cargo fixo: função, setor e ferramentas de coordenação não mudam; o resto é livre
   const fixed = !!agent.coordinator;
   const toggleTool = (id: string, on: boolean) => setF((x) => ({ ...x, tools: on ? [...new Set([...x.tools, id])] : x.tools.filter((k) => k !== id) }));
@@ -326,7 +325,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
       <div className="block">
         <h4>{t('agente.perfil.ferramentas')} <span className="muted small">{t('agente.perfil.ferramentasDica')}</span></h4>
         <div className="tools-grid">
-          {(tools.data ?? []).filter((tool) => fixed || !COORDINATOR_ONLY.includes(tool.id)).map((tool) => {
+          {(tools.data ?? []).filter((tool) => (fixed || !COORDINATOR_ONLY.includes(tool.id)) && !tool.escopo).map((tool) => {
             const on = f.tools.includes(tool.id);
             // só o que executa código espera a autorização com a senha; o resto se escolhe sempre (o estado aparece ao lado)
             const blocked = tool.status === 'bloqueada' && !!tool.guarded && !on;
@@ -338,11 +337,27 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
                 <span className="tool-opt__txt"><b>{tool.label}</b><small>{tool.note}</small></span>
                 <span className="tool-opt__tags">
                   {locked && <span className="badge">{t('agente.perfil.doCargo')}</span>}
-                  {!locked && recommended.has(tool.id) && <span className="badge">{t('agente.perfil.recomendada')}</span>}
                   {!plena && <span className={`badge ${TOOL_BADGE[tool.status]}`}>{TOOL_STATUS[tool.status] ? t(TOOL_STATUS[tool.status]) : tool.status}</span>}
                   {tool.aviso && <span className="badge badge--warn" title={tool.aviso === 'custo' ? t('agente.aviso.custoDica') : t('agente.aviso.riscoDica')}>{tool.aviso === 'custo' ? t('agente.aviso.custo') : t('agente.aviso.risco')}</span>}
                 </span>
               </label>
+            );
+          })}
+        </div>
+        {/* regra do dono (rc.42): o que custa é um interruptor da equipe, e as protegidas vêm com o acesso total da equipe —
+            nenhuma das duas se escolhe por agente; aqui só aparece o estado */}
+        <h5 className="tools-equipe__t">{t('agente.perfil.daEquipe')}</h5>
+        <div className="tools-grid tools-grid--equipe">
+          {(tools.data ?? []).filter((tool) => tool.escopo === 'equipe').map((tool) => {
+            const plena = tool.status === 'disponível'; // i18n-ok: o estado que o servidor manda, não texto de tela
+            const on = tool.acessoTotal !== undefined ? tool.acessoTotal && plena : plena;
+            const estado = tool.acessoTotal !== undefined ? (on ? t('agente.ferramenta.comAcessoTotal') : t('agente.ferramenta.pedeAcessoTotal'))
+              : (on ? t('agente.ferramenta.ligadaEquipe') : t('agente.ferramenta.desligadaEquipe'));
+            return (
+              <div key={tool.id} className={`tool-opt tool-opt--equipe ${on ? 'tool-opt--on' : ''}`} title={tool.note}>
+                <span className="tool-opt__txt"><b>{tool.label}</b><small>{tool.note}</small></span>
+                <span className="tool-opt__tags"><span className={`badge ${on ? 'badge--ok' : ''}`}>{estado}</span></span>
+              </div>
             );
           })}
         </div>

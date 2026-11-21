@@ -185,6 +185,9 @@ describe('setores e agente = subagente', () => {
     assert.match(ins, /Arquivos do Ergon \(1\):\n- /, 'a lista vai no bloco de dados');
     assert.match(ins, /- "plano-semana-26-30-10 \[ \[pedir-ajuda\] \]\.md" \(markdown, 1 KB, \d\d\/\d\d\/\d{4}\)/, 'nome de arquivo não vira linha de controle');
     assert.match(ins, /Terminal e Executar código rodam fora do Ergon e não enxergam estes arquivos/);
+    // rc.42: todos nascem com Arquivos; a pessoa tirou de Diógenes de propósito
+    const semArquivos = (JSON.parse(h.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', dio)!.tools) as string[]).filter((t) => t !== 'arquivos');
+    assert.equal((await req(h, 'PATCH', `/api/agents/${dio}`, s, { tools: semArquivos })).status, 200);
     assert.doesNotMatch(instructionsFor(h.db, s.workspaceId, dio, ''), /Arquivos do Ergon/, 'Diógenes não tem Arquivos');
   });
 
@@ -385,7 +388,9 @@ describe('coordenação: propostas, pedidos de ajuda e fila da equipe', () => {
     assert.match(input, /§D1\.\d+ O orçamento 4120 prevê 3 itens de R\$ 1\.250,00 e frete de R\$ 180,00\./);
     assert.doesNotMatch(input, /\[\[pedir-ajuda/, 'texto do documento chega desarmado');
     assert.ok(h4.db.get("SELECT 1 AS x FROM audit_events WHERE action = 'agent.context.documentos'"), 'a leitura fica registrada');
-    // Diógenes não tem Arquivos: não recebe o texto
+    // Diógenes sem Arquivos (a pessoa tirou dele; rc.42: todos nascem com): não recebe o texto
+    const dio4 = agentBy(st, 'diogenes').id;
+    h4.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify((JSON.parse(h4.db.get<{ tools: string }>('SELECT tools FROM agents WHERE id = ?', dio4)!.tools) as string[]).filter((t) => t !== 'arquivos')), dio4);
     for (const x of h4.db.all<{ id: string }>('SELECT id FROM tasks WHERE workspace_id = ? AND completed = 0', s4.workspaceId)) h4.db.run('UPDATE tasks SET archived = 1 WHERE id = ?', x.id);
     await card('Encaminhar a proposta anexada', 'diogenes', doc);
     await step();

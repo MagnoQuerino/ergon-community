@@ -41,7 +41,7 @@ export const COORDINATION_PROTOCOL = 'Você é o Coordenador da equipe — o ún
   + 'O sistema numera os cards: nunca escreva número de card que você não viu na lista de cards abertos; '
   + '(4) quando o trabalho voltar para você aqui na conversa, entregue ao usuário exatamente o que ele pediu, no formato pedido — a entrega é sua; '
   + '(5) antes de uma entrega importante, inclua uma etapa de revisão com quem revisa na equipe; (6) acompanhe o que ficou pendente (você recebe a lista dos pedidos em andamento). '
-  + 'Não faça o trabalho dos especialistas: planeje, encaminhe e entregue. Se faltar alguém para um tipo de trabalho, proponha criar ou ajustar um agente.';
+  + 'Prefira passar ao especialista o trabalho longo (pesquisa, documento, análise, ações nas contas): você planeja, encaminha e entrega. Uma consulta rápida que você resolve com as suas ferramentas, faça direto. Se faltar alguém para um tipo de trabalho, proponha criar ou ajustar um agente.';
 
 /** O foco do Coordenador: as instruções guardadas sem o protocolo (versões antigas guardavam os dois juntos). */
 export function coordinatorFocus(charter: string | null | undefined): string {

@@ -67,7 +67,8 @@ export interface Capacity { slots: number; active: number; free: number; floors?
 export type ToolStatus = 'disponível' | 'parcial' | 'desligada' | 'bloqueada' | 'preparado' | 'planejado' | 'atualizando';
 /** Ferramenta do catálogo do Ergon com o estado real ("planejado" nunca aparece como disponível). */
 /** guarded: executa código — bloqueada por padrão, liberada só com a senha */
-export interface AgentTool { id: string; label: string; kind: 'ergon' | 'ia'; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; platform?: boolean; toolset?: string; /** custo ou risco: a tela avisa */ aviso?: 'custo' | 'risco' }
+export interface AgentTool { id: string; label: string; kind: 'ergon' | 'ia'; status: ToolStatus; note: string; safe?: boolean; guarded?: boolean; platform?: boolean; toolset?: string; /** custo ou risco: a tela avisa */ aviso?: 'custo' | 'risco';
+  /** rc.42: vale para a equipe toda (interruptor da equipe ou acesso total), não se escolhe por agente */ escopo?: 'equipe'; acessoTotal?: boolean }
 export interface Sector { id: string; key: string; name: string; description: string | null; creates_tasks: 'demands' | 'explicit_only'; tools: string[]; skills: string[]; position: number; custom: number; members: number }
 export interface Agent {
   id: string; name: string; role: string; color: string; status: 'active' | 'archived'; demo: number; floor_id: string; floor_level: number; building_id: string;

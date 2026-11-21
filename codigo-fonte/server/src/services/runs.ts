@@ -10,7 +10,7 @@ import { nomeDoPerfil } from './perfis.ts';
 import { audit, type Bus } from './bus.ts';
 import { HermesError, friendly, mapRemoteStatus, type HermesClient, type RunEvent } from './hermes.ts';
 import { interpretRules } from './interpret.ts';
-import { BENEFICIOS_NOVOS, CONEXOES_FORA_ATE_A_PROXIMA, TOOLS, enxugarCoordenador, toolStatus, type ToolDef } from './characters.ts';
+import { BENEFICIOS_NOVOS, COM_CUSTO, CONEXOES_FORA_ATE_A_PROXIMA, TOOLS, acessoTotalDaEquipe, ferramentasEfetivas, toolStatus, type ToolDef } from './characters.ts';
 import { neutral } from './operations.ts';
 import { routineContextFor, routineHowFor } from './routine-proposals.ts';
 import { COORDINATION_PROTOCOL, activeTeam, coordinatorFocus, coordinatorOf, routeTo } from './team.ts';
@@ -1147,6 +1147,24 @@ function teamDigestFor(db: Db, workspaceId: string, holders: Map<string, string[
     const amostra = [...names.filter((n) => relNomes.has(n)), ...names.filter((n) => !relNomes.has(n))].slice(0, 3);
     return `${def}: ${names.length} (${amostra.join(', ')}…)`;
   };
+  // rc.42 (recursos livres): muitas ferramentas têm o mesmo grupo de agentes; as comuns com o mesmo grupo vão numa linha só
+  const agruparLinhas = (lista: Array<[string, string[]]>): string[] => {
+    const grupos = new Map<string, string[]>(); const out: Array<string | { chave: string }> = [];
+    for (const [t, names] of lista) {
+      const comum = names.length < total && names.length > 3 && !(FERRAMENTAS_SENSIVEIS as readonly string[]).includes(t);
+      if (!comum) { out.push(linhaFerramenta([t, names])); continue; }
+      const chave = [...names].sort().join('|');
+      if (!grupos.has(chave)) out.push({ chave });
+      grupos.set(chave, [...(grupos.get(chave) ?? []), t]);
+    }
+    return out.map((x) => {
+      if (typeof x === 'string') return x;
+      const ts = grupos.get(x.chave)!; const names = x.chave.split('|');
+      if (ts.length === 1) return linhaFerramenta([ts[0], lista.find(([t]) => t === ts[0])![1]]);
+      const amostra = [...lista.find(([t]) => t === ts[0])![1]].sort((a, b) => Number(relNomes.has(b)) - Number(relNomes.has(a))).slice(0, 3);
+      return `${ts.map((t) => `${TOOLS[t].label} (${t})`).join(', ')}: ${names.length} (${amostra.join(', ')}…)`;
+    });
+  };
   // os mais ligados ao pedido, por setor: "Setor: Nome (função), Nome (função)"
   const relPorSetor = new Map<string, string[]>();
   for (const a of rel) relPorSetor.set(a.sector, [...(relPorSetor.get(a.sector) ?? []), `${a.name} (${a.role})`]);
@@ -1157,7 +1175,7 @@ function teamDigestFor(db: Db, workspaceId: string, holders: Map<string, string[
     off.length ? `- Desativados (dá para reativar): ${off.map((o) => `${o.name} (${o.role})`).join('; ')}` : '',
     rel.length ? `- Mais ligados a este pedido: ${[...relPorSetor].map(([s, n]) => `${s}: ${n.join(', ')}`).join('; ')}` : '',
     '- Quem a pessoa citar pelo nome vai na [[etapa]] com esse nome (o sistema confere na equipe). Para outro trabalho, numa [[etapa]] sem nome desta lista, escreva agente="equipe" e descreva bem o que fazer: o sistema escolhe quem faz pelo assunto.',
-    holders.size ? `Travas de ferramentas (quantos têm; nas sensíveis, quem):\n- ${[...holders].map(linhaFerramenta).join('\n- ')}` : '',
+    holders.size ? `Travas de ferramentas (quantos têm; nas sensíveis, quem):\n- ${agruparLinhas([...holders]).join('\n- ')}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -1266,8 +1284,9 @@ const CELL_HOW = 'Pedido da sua especialidade: faça você mesmo e entregue aqui
 export function toolHolders(db: Db, workspaceId: string): Map<string, string[]> {
   const channels = !!db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND kind IN ('whatsapp', 'microsoft', 'google') AND state = 'connected'", workspaceId);
   const out = new Map<string, string[]>();
+  const acessoTotal = acessoTotalDaEquipe(db, workspaceId);
   for (const a of db.all<{ name: string; tools: string | null }>("SELECT name, tools FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at, rowid", workspaceId)) {
-    for (const t of parseList(a.tools)) {
+    for (const t of ferramentasEfetivas(parseList(a.tools), { acessoTotal })) {
       const def = TOOLS[t];
       if (!def) continue;
       const st = toolStatus(def, { channels, workspaceId }).status;
@@ -1342,6 +1361,8 @@ function almaDe(a: AgenteDaAlma): string {
     `Você é ${a.name}, ${a.role}, no Ergon — setor ${a.sname}.`,
     // o Coordenador: o protocolo do cargo vai sempre; as instruções guardadas são o foco que o usuário escolheu
     coord ? COORDINATION_PROTOCOL : a.charter ?? '',
+    // regra do dono (rc.42): especialidade é orientação, não trava — as ferramentas são as mesmas para toda a equipe
+    coord ? '' : `Sua área natural é ${a.role}: é por onde a equipe costuma te procurar, não um limite. O que chegar direto a você, faça com as ferramentas que tiver.`,
     coord ? TITLE_HOW_COORD : '',
     coord && coordinatorFocus(a.charter) ? `Foco desta coordenação, definido pelo usuário: ${coordinatorFocus(a.charter)}` : '',
     parseList(a.skills).length ? `Seus métodos: ${parseList(a.skills).join('; ')}.` : '',
@@ -1368,21 +1389,21 @@ export function almaDoAgente(db: Db, workspaceId: string, agentId: string): stri
 export function instructionsFor(db: Db, workspaceId: string, agentId: string, channelNote: string, opts: { requests?: boolean; userId?: string | null; foco?: FocoDoPedido } = {}): string {
   // termos aceitos: o agente ganha Executar código e Terminal uma vez (termos.ts); antes de ler as ferramentas dele
   sincronizarCodigoDoAgente(db, workspaceId, agentId);
-  enxugarCoordenador(db, workspaceId, agentId);
   const a = db.get<{ name: string; role: string; instructions: string; sname: string; skey: string; char_key: string | null; charter: string | null; skills: string | null; tools: string | null; hermes_skills: string | null; coordinator: number }>(
     `SELECT a.name, a.role, p.instructions, p.name AS sname, p.key AS skey, a.char_key, a.charter, a.skills, a.tools, a.hermes_skills, a.coordinator
        FROM agents a JOIN profiles p ON p.id = a.profile_id WHERE a.id = ? AND a.workspace_id = ?`, agentId, workspaceId);
   if (!a) throw notFound('agente');
   const channels = !!db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND kind IN ('whatsapp', 'microsoft', 'google') AND state = 'connected'", workspaceId);
-  const tools = parseList(a.tools).map((t) => TOOLS[t]).filter(Boolean).map((t) => toolStatus(t, { channels, workspaceId }));
+  const tools = ferramentasEfetivas(parseList(a.tools), { acessoTotal: acessoTotalDaEquipe(db, workspaceId) }).map((t) => TOOLS[t]).filter(Boolean).map((t) => toolStatus(t, { channels, workspaceId }));
   const ok = (s: string) => s === 'disponível' || s === 'parcial';
   const usable = tools.filter((t) => ok(t.status)).map((t) => `${t.label} (${t.note})`);
   // o que falta vai com o motivo verdadeiro: sem ele, o agente inventava causas ("não habilitadas no workspace") e
   // tentava outro caminho; as Conexões que estão chegando com a renovação do motor têm frase própria
   const updating = tools.filter((t) => t.status === 'atualizando');
-  // as ferramentas extras que vêm ligadas em todo agente (rc.27, BENEFICIOS_NOVOS) e a equipe não tem (sem a chave, sem o
+  // as ferramentas extras que vêm ligadas em todo agente (rc.27, BENEFICIOS_NOVOS; rc.42, as com custo e as do Ergon ainda
+  // em preparo, que agora todo agente tem) e a equipe não tem (sem a chave, sem o
   // aplicativo, desligadas pela pessoa) não entram: o agente não as tem, e a lista só cresceria em toda chamada
-  const missing = tools.filter((t) => !ok(t.status) && t.status !== 'atualizando' && !BENEFICIOS_NOVOS.includes(t.id)).map((t) => `${t.label} (${whyMissing(t)})`);
+  const missing = tools.filter((t) => !ok(t.status) && t.status !== 'atualizando' && !BENEFICIOS_NOVOS.includes(t.id) && !COM_CUSTO.includes(t.id) && !(t.kind === 'ergon' && t.status === 'preparado')).map((t) => `${t.label} (${whyMissing(t)})`);
   const skills = parseList(a.hermes_skills);
   // competências ensinadas pelo Treinar (ativas): só deste agente
   const learned = db.all<{ name: string; title: string; description: string }>("SELECT name, title, description FROM agent_skills WHERE agent_id = ? AND workspace_id = ? AND status = 'ativa' ORDER BY title", agentId, workspaceId);

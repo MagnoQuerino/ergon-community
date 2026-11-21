@@ -102,7 +102,7 @@ import { Navegador } from './services/navegador.ts';
 import { Computador, MODOS, type Escolha, type Modo } from './services/computador.ts';
 import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
 import { ReviewService } from './services/review.ts';
-import { GUARDED_TOOLSETS, TOOLS, ferramentasDesligadas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, setDiscordLigado, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
+import { COM_CUSTO, GUARDED_TOOLSETS, PROTEGIDAS, TOOLS, abrirFerramentas, acessoTotalDaEquipe, ferramentasDesligadas, ferramentasEfetivas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, setDiscordLigado, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PASSOS_SETTING, compactacaoDaEquipe, medirExecucao, passosDaEquipe, resumoComposicao } from './services/custo.ts';
@@ -441,7 +441,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     let list: string[] = [];
     try { const x = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ?', agentId)?.tools ?? '[]'); if (Array.isArray(x)) list = x.map(String); } catch { /* sem ferramentas legíveis */ }
     const on = platformToolsets(motorScope(ws)).enabled;
-    return toolsetsFor(list, { workspaceId: ws }).some((t) => CODIGO.has(t) && on.includes(t));
+    return toolsetsFor(ferramentasEfetivas(list, { acessoTotal: acessoTotalDaEquipe(db, ws) }), { workspaceId: ws }).some((t) => CODIGO.has(t) && on.includes(t));
   };
   const codigoLigado = (ws: string, run?: Pick<RunRow, 'id' | 'agent_id' | 'workspace_id'>): boolean => {
     const p = platformToolsets(motorScope(ws));
@@ -589,6 +589,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     grantDataTool(db, bus, ws); // instalações antigas: quem cuida de números recebe a Análise de dados (uma vez)
     grantConnectionsTool(db, bus, ws); // instalações antigas: a equipe passa a usar as Conexões (uma vez)
     grantBenefitTools(db, bus, ws); // rc.27: cada agente recebe os benefícios que faltam (uma vez; regra do dono, 12/11)
+    abrirFerramentas(db, bus, ws); // rc.42: recursos livres, não separados por agente (uma vez; o que a pessoa restringiu fica)
     upgradeBriefingSources(db, bus, ws); // Briefing já instalado passa a ler as contas conectadas (uma vez)
   };
   for (const w of db.all<{ id: string }>('SELECT id FROM workspaces')) upkeep(w.id);
@@ -664,7 +665,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     // lembretes com data: quem tem a ferramenta propõe a tarefa sua com prazo; entra aprovada por você
     // (o Coordenador também: "me lembre de…" pedido a ele ia para um card de colega, que não registra lembrete, e acabava
     // numa confirmação sem tarefa nenhuma)
-    if (ag && (Number(ag.coordinator) || (JSON.parse(ag.tools ?? '[]') as string[]).includes('agenda'))) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseTaskProposals(output, `conversa com ${ag.name}`));
+    // (a execução de uma rotina registra as propostas dela pela própria rotina, routines.ts: aqui não repete — com a
+    // Agenda em todo agente, rc.42, a rotina de qualquer um passaria por aqui também)
+    if (ag && !r.idempotency_key.startsWith('routine-') && (Number(ag.coordinator) || (JSON.parse(ag.tools ?? '[]') as string[]).includes('agenda'))) recordProposals(db, bus, r.workspace_id, { conversationId: r.conversation_id, runId: r.id }, parseTaskProposals(output, `conversa com ${ag.name}`));
     // "liga o Terminal" pedido conversando: a coordenação pede a senha ali mesmo; outro agente passa o pedido à
     // coordenação, numa conversa com ela, e avisa aqui com o caminho
     const release = ag ? parseToolRelease(output) : null;
@@ -1427,7 +1430,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.post('/api/agents', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['name', 'role'], properties: {
       name: S.str(40, 1), role: S.str(80, 1), sectorKey: { anyOf: [{ const: 'auto' }, sectorKey] }, profileKey: sectorKey,
-      structureId: S.id('bld'), floorId: S.id('flr'), color: S.str(7), charter: S.str(4000), skills: strList(12, 80), tools: strList(20, 30),
+      structureId: S.id('bld'), floorId: S.id('flr'), color: S.str(7), charter: S.str(4000), skills: strList(12, 80), tools: strList(60, 30),
       hermesSkills: strList(200, 80), model: modelId, provider: providerId,
       lookSeed: { type: 'integer', minimum: 1, maximum: 2147483647 }, fx: fxChoiceSchema } } },
   }, async (req, reply) => {
@@ -1440,7 +1443,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
 
   app.patch('/api/agents/:id', {
     schema: { params: idParams('agt'), body: { type: 'object', additionalProperties: false, minProperties: 1, properties: {
-      name: S.str(40, 1), role: S.str(80, 1), sectorKey, charter: S.str(4000), skills: strList(12, 80), tools: strList(20, 30), bio: S.str(600),
+      name: S.str(40, 1), role: S.str(80, 1), sectorKey, charter: S.str(4000), skills: strList(12, 80), tools: strList(60, 30), bio: S.str(600),
       hermesSkills: strList(200, 80), model: modelId, provider: providerId, color: S.str(7), structureId: S.id('bld'),
       lookSeed: { anyOf: [{ type: 'integer', minimum: 1, maximum: 2147483647 }, { type: 'null' }] } } } },
   }, async (req) => {
@@ -1643,10 +1646,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.get('/api/ai/tools', async (req) => {
     const a = auth(req);
     const holders = toolHolders(db, a.workspaceId);
-    return aiOf(a.workspaceId).tools({ channels: integrations.connectedChannels(a.workspaceId) }).map((t) => ({ ...t, holders: holders.get(t.id) ?? { count: 0, sample: [] } }));
+    // escopo 'equipe': os recursos com custo (interruptor da equipe) e as protegidas (acesso total da equipe) não são
+    // escolhidos por agente; acessoTotal: o estado do acesso total, que a tela mostra junto delas
+    const acessoTotal = acessoTotalDaEquipe(db, a.workspaceId);
+    return aiOf(a.workspaceId).tools({ channels: integrations.connectedChannels(a.workspaceId) }).map((t) => ({ ...t, holders: holders.get(t.id) ?? { count: 0, sample: [] },
+      ...(COM_CUSTO.includes(t.id) || PROTEGIDAS.includes(t.id) ? { escopo: 'equipe' as const } : {}), ...(PROTEGIDAS.includes(t.id) ? { acessoTotal } : {}) }));
   });
   app.put('/api/ai/tools', {
-    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: strList(20, 30) } } },
+    schema: { body: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: strList(40, 30) } } },
   }, async (req) => {
     const a = owner(req);
     const wanted = (req.body as { enabled: string[] }).enabled;
@@ -2821,37 +2828,38 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const a = auth(req); pastas.revogar(a.userId, a.workspaceId, (req.params as { id: string }).id); return { ok: true };
   });
 
-  // rc.42: "Ativar acesso total?" — um cartão só: a senha (confirmada antes, em /api/session/unlock, no mesmo cartão) uma vez,
-  // e os agentes escolhidos ganham Terminal, Executar código e as Conexões; o "Liberar tudo" de quem ativou liga junto. Daí
-  // em diante nada mais pergunta, exceto as sempre-protegidas. Ponto de integração do controle do computador
-  // (claude/rc42-computador): aoAtivarAcessoTotal recebe a mesma ativação para pôr o computador em "total".
-  const ACESSO_TOTAL_TOOLS = ['terminal', 'calculo', 'contas'] as const;
+  // rc.42: "Ativar acesso total?" — um cartão só, para a equipe inteira (regra do dono: recursos livres, não separados por
+  // agente). A senha de administrador (confirmada antes, em /api/session/unlock, no mesmo cartão) uma vez, e todo agente,
+  // inclusive os que vierem depois, passa a ter as protegidas (characters.ts, PROTEGIDAS: Terminal, Executar código,
+  // Diagnóstico, controle do computador, Discord); o "Liberar tudo" de quem ativou liga junto. As ações protegidas
+  // continuam pedindo, e proibir o "Liberar tudo" (Governança) desliga o acesso total. Ponto de integração do controle do
+  // computador: aoAtivarAcessoTotal recebe a mesma ativação para pôr o computador em "total".
   app.get('/api/acesso-total', async (req) => {
     const a = auth(req);
-    const agentes = db.all<{ id: string; name: string; tools: string | null }>("SELECT id, name, tools FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY coordinator DESC, name", a.workspaceId)
-      .map((x) => { const t = JSON.parse(x.tools ?? '[]') as string[]; return { id: x.id, nome: x.name, tem: ACESSO_TOTAL_TOOLS.every((k) => t.includes(k)) }; });
-    return { ativo: conexoes.liberarTudoDaPessoa(a.workspaceId, a.userId), proibido: conexoes.liberarTudoProibido(a.workspaceId), administra: a.role === 'owner', agentes };
+    return { ativo: acessoTotalDaEquipe(db, a.workspaceId), proibido: conexoes.liberarTudoProibido(a.workspaceId), administra: a.role === 'owner' };
   });
-  app.post('/api/acesso-total', { schema: { body: { type: 'object', additionalProperties: false, required: ['agentes'], properties: { agentes: { type: 'array', minItems: 1, maxItems: 100, items: S.id('agt') }, semAviso: { type: 'boolean' } } } } }, async (req) => {
-    const a = owner(req); const b = req.body as { agentes: string[]; semAviso?: boolean };
+  app.post('/api/acesso-total', { schema: { body: { type: 'object', additionalProperties: false, properties: { semAviso: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req); const b = (req.body ?? {}) as { semAviso?: boolean };
     requireRecentAuth(a); // a senha veio no mesmo cartão, um instante antes
     if (conexoes.liberarTudoProibido(a.workspaceId)) throw new HttpError(409, 'proibido', 'quem administra o workspace desligou o "Liberar tudo"');
-    const ag = b.agentes.map((x) => db.get<{ id: string; tools: string | null }>("SELECT id, tools FROM agents WHERE id = ? AND workspace_id = ? AND status = 'active'", x, a.workspaceId));
-    if (ag.some((x) => !x)) throw notFound('agente');
-    // as ferramentas que executam código ligadas na equipe (o motor pode estar desligado agora: a escolha fica gravada)
+    // as protegidas ligadas na equipe (o motor pode estar desligado agora: a escolha fica gravada)
     const on = new Set(platformToolsets(motorScope(a.workspaceId)).enabled);
-    const wanted = [...new Set([...Object.values(TOOLS).filter((t) => (t.safe || t.guarded) && t.toolset && on.has(t.toolset)).map((t) => t.id), 'terminal', 'calculo'])];
+    const wanted = [...new Set([...Object.values(TOOLS).filter((t) => (t.safe || t.guarded) && t.toolset && on.has(t.toolset)).map((t) => t.id), ...PROTEGIDAS])];
     await aiOf(a.workspaceId).setPlatformTools(wanted).catch((e) => { if ((e as HttpError).status !== 503) throw e; });
-    for (const t of ['terminal', 'calculo']) setSetting(db, a.workspaceId, `ferramentas.${t}`, 'ligado');
-    for (const x of ag) {
-      const cur = JSON.parse(x!.tools ?? '[]') as string[];
-      const novo = [...new Set([...cur, ...ACESSO_TOTAL_TOOLS])];
-      if (novo.length !== cur.length) updateAgent(db, bus, a.workspaceId, a.userId, x!.id, { tools: novo });
-    }
+    for (const t of PROTEGIDAS) setSetting(db, a.workspaceId, `ferramentas.${t}`, 'ligado');
+    setSetting(db, a.workspaceId, 'acesso_total', new Date().toISOString());
     conexoes.setLiberarTudo(a.workspaceId, a.userId, true, { pessoa: true, semAviso: b.semAviso });
-    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { agentes: b.agentes },
-      result: `acesso total ativado com a senha para ${b.agentes.length} agente(s): Terminal, Executar código e Conexões, sem perguntar (as protegidas ainda perguntam)` });
+    const n = Number(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND status = 'active'", a.workspaceId)?.n ?? 0);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { equipe: true, agentes: n },
+      result: `acesso total ativado com a senha para a equipe inteira (${n} agente(s)): Terminal, Executar código, Diagnóstico, computador e Discord, sem perguntar (as protegidas ainda perguntam)` });
     for (const f of aoAtivarAcessoTotal) f(a);
+    bus.publish(a.workspaceId, 'agents.changed', {}); bus.publish(a.workspaceId, 'integrations.changed', {});
+    return { ok: true };
+  });
+  app.delete('/api/acesso-total', async (req) => {
+    const a = owner(req);
+    db.run("DELETE FROM workspace_settings WHERE workspace_id = ? AND key = 'acesso_total'", a.workspaceId);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { equipe: true, on: false }, result: 'acesso total desligado para a equipe' });
     bus.publish(a.workspaceId, 'agents.changed', {}); bus.publish(a.workspaceId, 'integrations.changed', {});
     return { ok: true };
   });
@@ -3301,9 +3309,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const ag = agentId ? db.get<{ name: string; tools: string | null; workspace_id: string }>("SELECT name, tools, workspace_id FROM agents WHERE id = ? AND status = 'active'", agentId) : undefined;
     if (!ag) return { known: false };
     const list = (v: string | null): string[] => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
+    // o que cada agente tem de fato: a lista dele, os recursos com custo (interruptor da equipe) e, com o acesso total da
+    // equipe, as protegidas (characters.ts, ferramentasEfetivas)
+    const acessoTotal = acessoTotalDaEquipe(db, ag.workspace_id);
+    const efetivas = (v: string | null) => ferramentasEfetivas(list(v), { acessoTotal });
     const holders: Record<string, string[]> = {};
     for (const o of db.all<{ name: string; tools: string | null }>("SELECT name, tools FROM agents WHERE workspace_id = ? AND status = 'active'", ag.workspace_id)) {
-      for (const ts of toolsetsFor(list(o.tools), { workspaceId: ag.workspace_id })) holders[ts] = [...(holders[ts] ?? []), o.name];
+      for (const ts of toolsetsFor(efetivas(o.tools), { workspaceId: ag.workspace_id })) holders[ts] = [...(holders[ts] ?? []), o.name];
     }
     // guarded: ferramentas que executam código (o plugin orienta o agente a pedir permissão, não a improvisar)
     // competências: o agente carrega só as dele (aprendidas no Treinar + as da biblioteca atribuídas, se tem Skills)
@@ -3318,7 +3330,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const conectores = { ligado: list(ag.tools).includes('conectores'), escrita: recursos.escrita(ag.workspace_id), ...(Object.keys(tipos).length ? { tipos } : {}) };
     // a gestão do Ergon (rc.29): só o coordenador, fora de um treinamento
     const daGestao = !training && gestao.ehCoordenador({ agent_id: agentId!, workspace_id: ag.workspace_id }) ? [TOOLSET_GESTAO] : [];
-    return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil, ...daGestao], holders, guarded: GUARDED_TOOLSETS, skills, training };
+    return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(efetivas(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil, ...daGestao], holders, guarded: GUARDED_TOOLSETS, skills, training };
   });
 
   // Navegador ao vivo (rc.41): o plugin avisa que o navegador de um trabalho abriu, fechou ou voltou sozinho ao agente.

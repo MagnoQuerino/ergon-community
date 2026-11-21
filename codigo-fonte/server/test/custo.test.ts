@@ -340,8 +340,10 @@ describe('D) instruções: as partes fixas primeiro, os dados de agora por últi
 
   test('agente sem dados de agora: sem o cabeçalho', async () => {
     const { h, s } = await umMotor();
-    const outro = h.db.get<{ id: string; tools: string }>("SELECT id, tools FROM agents WHERE workspace_id = ? AND coordinator = 0 AND tools NOT LIKE '%arquivos%' LIMIT 1", s.workspaceId);
+    // rc.42: todos nascem com Arquivos (recursos livres); a pessoa tira de um agente de propósito
+    const outro = h.db.get<{ id: string; tools: string }>("SELECT id, tools FROM agents WHERE workspace_id = ? AND coordinator = 0 LIMIT 1", s.workspaceId);
     assert.ok(outro);
+    h.db.run('UPDATE agents SET tools = ? WHERE id = ?', JSON.stringify((JSON.parse(outro.tools) as string[]).filter((t) => t !== 'arquivos')), outro.id);
     const t = instructionsFor(h.db, s.workspaceId, outro.id, 'Canal: quadro da equipe.');
     assert.ok(!t.includes(DADOS_DE_AGORA), t.slice(-400));
     assert.ok(t.endsWith('Canal: quadro da equipe.'));
