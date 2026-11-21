@@ -65,7 +65,7 @@ describe('código: as regras do envio e dos nomes', () => {
 describe('código: clonar, enviar ramo e abrir pull request pela ponte, sem ver o token', () => {
   let h: Harness; let s: Session; let agente: string; let porta: number; let fake: GitFalso; let trabalho: string;
   const antes = globalThis.fetch;
-  const ponte = async (corpo: Record<string, unknown>) => (await req(h, 'POST', '/internal/bridge/v1/conexoes', null, corpo, { 'x-ergon-bridge-token': TOKEN_PONTE })).json;
+  const ponte = async (corpo: Record<string, unknown>) => (await req(h, 'POST', '/internal/bridge/v1/conexoes', null, { git: true, ...corpo }, { 'x-ergon-bridge-token': TOKEN_PONTE })).json;
   async function conversar(texto: string): Promise<string> {
     const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agente })).json;
     await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: texto, clientRequestId: `m-${crypto.randomUUID()}` });
@@ -155,6 +155,12 @@ describe('código: clonar, enviar ramo e abrir pull request pela ponte, sem ver 
     assert.ok(!tudo.includes(r.git.senha) && !tudo.includes(PAT), 'nem a senha nem o token no banco');
   });
 
+  test('plugin de antes (sem "git" no pedido): nada do acesso vai na resposta', async () => {
+    const sessao = await conversar('clone o acme/app');
+    const r = (await req(h, 'POST', '/internal/bridge/v1/conexoes', null, { op: 'executar', session_id: sessao, conexao: 'github', acao: 'codigo.preparar', parametros: { repositorio: 'acme/app' } }, { 'x-ergon-bridge-token': TOKEN_PONTE })).json;
+    assert.equal(r.git, undefined); assert.ok(!JSON.stringify(r).includes('ergit_'));
+    assert.match(r.texto, /versão nova da equipe/);
+  });
   test('a concessão morre com o trabalho; outra pessoa/workspace não usa senha que não é dela', async () => {
     const sessao = await conversar('clone o acme/app');
     const r = await executar(sessao, 'codigo.preparar', { repositorio: 'acme/app' });

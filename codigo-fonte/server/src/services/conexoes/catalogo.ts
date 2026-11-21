@@ -134,11 +134,14 @@ export function textoDasContas(contas: ReadonlyArray<{ nome: string; principal: 
 /** Trecho das instruções do agente: as conexões ligadas agora, o que cada uma faz e como agir. */
 export function promptConexoes(db: Db, workspaceId: string): string {
   const contas = acoesLigadas(db, workspaceId);
-  if (!contas.length) return 'Conexões: nenhuma conta ou aplicativo está conectado agora. Se pedirem algo em outro aplicativo, diga que falta conectar em Conexões; nunca finja que fez.';
+  // rc.42: os Documentos do Ergon (o que a pessoa trouxe do computador) estão sempre à mão, com a mesma ferramenta
+  const docs = 'Documentos do Ergon (conexao="documentos"): documentos.buscar, documentos.ler, documentos.editar_planilha (xlsx/csv), documentos.editar_texto (docx/md/txt). Editar guarda a versão de antes na Lixeira dos Documentos.';
+  if (!contas.length) return `Conexões: nenhuma conta ou aplicativo está conectado agora. Se pedirem algo em outro aplicativo, diga que falta conectar em Conexões; nunca finja que fez.\n${docs} Use com conexoes_executar.`;
   const linhas = contas.map(({ kind: k, ids, contas: cs }) => `- ${integrationDef(k)!.name} (conexao="${k}"): ${ids.join(', ') || 'nada liberado agora'}${textoDasContas(cs)}`);
   return [
     'Conexões: você usa de verdade as contas e aplicativos abaixo, com a ferramenta conexoes_executar (conexao, acao, parametros). Os parâmetros de cada ação vêm em conexoes_listar com conexao="...": use só os nomes de parâmetro que vierem lá. O sistema cuida do acesso: você nunca vê nem pede senha ou token.',
     ...linhas,
+    `- ${docs}`,
     ...(contas.some((c) => c.contas.length > 1) ? ['Mais de uma conta no mesmo aplicativo (dois e-mails, dois números de WhatsApp): sem dizer conta, sai pela principal. Se a pessoa disser por qual conta ("pelo e-mail do trabalho", "pelo outro número"), passe conta com o nome dela. Se não der para saber qual ela quer, pergunte antes de enviar.'] : []),
     'Como agir: pediu algo num desses aplicativos ("joga no Asana", "conclui no Planner", "responde a Ana no Teams", "o que chegou do João este ano"), execute agora com a ação certa. Não diga que não tem acesso sem tentar, não limite a busca a um período que a pessoa não pediu, e só afirme o que a ferramenta devolveu.',
     'Se o pedido não for objetivo (duas pessoas com o mesmo nome, qual quadro, texto da mensagem em aberto), pergunte antes em uma frase. Quando vier status "aguardando_confirmacao", a pessoa decide num cartão: diga isso em uma frase e não repita. Se falhar, conte o motivo com as palavras do resultado e o que a pessoa pode fazer.',

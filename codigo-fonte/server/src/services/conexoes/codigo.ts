@@ -278,7 +278,7 @@ const precisaPonte = (ctx: CtxAcao): PonteGit => {
 const nomeApp = (k: KindCodigo) => (k === 'github' ? 'GitHub' : 'GitLab');
 /** O passo a passo que o agente recebe com o acesso: o endereço sem segredo; a senha o git busca sozinho. */
 const COMO = (url: string, principal: string) => [
-  `Endereço para o git (sem senha: o git já recebe o acesso sozinho): ${url}`,
+  `Endereço para o git: ${url} (sem senha: o git já recebe o acesso sozinho)`,
   `Ramo principal: ${principal}. Não envie a ele: crie um ramo (git switch -c ergon/<assunto>), faça o trabalho, rode os testes, commit e git push -u origin <ramo>; depois abra o pull request com codigo.abrir_pr.`,
   'Nunca escreva usuário, senha ou token no endereço, no .git/config ou em arquivo do repositório. Ao terminar, chame codigo.encerrar e apague a cópia (rm -rf da pasta).',
 ].join('\n');

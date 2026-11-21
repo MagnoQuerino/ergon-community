@@ -448,7 +448,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   };
   // rc.42: o acesso de git de curta duração (conexoes/codigo.ts): o agente clona e envia ramos sem ver o token
   const concessoesGit = new ConcessoesGit(db, bus);
-  const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado, git: concessoesGit,
+  const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado, git: concessoesGit, documentos: { filesDir: cfg.filesDir, maxBytes: cfg.maxUploadBytes },
     // aprovações nativas (rc.27): o turno de quem pediu espera no portão do motor; a decisão volta à ferramenta
     nativa: { aoVivo: (ws, pid) => aprovacoes.aoVivo(ws, pid), responder: (ws, pid, ok) => aprovacoes.responder(ws, pid, ok) },
     // confirmou no cartão: o agente recebe o resultado e continua o pedido na mesma conversa
@@ -3214,10 +3214,17 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.post('/internal/bridge/v1/conexoes', {
     bodyLimit: 256 * 1024,
     schema: { body: { type: 'object', required: ['op'], properties: { op: { enum: ['listar', 'executar', 'cartao'] }, session_id: S.str(200), task_id: S.str(200), conexao: S.str(40), conta: S.str(120), acao: S.str(80), parametros: { type: 'object' }, leu_web: { type: 'boolean' },
-      cartao: { type: 'string', pattern: '^apr_[0-9a-f]{32}$' } } } },
+      cartao: { type: 'string', pattern: '^apr_[0-9a-f]{32}$' }, git: { type: 'boolean' } } } },
   }, async (req) => {
     const motor = bridgeMotor(req);
-    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; conexao?: string; conta?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean; cartao?: string };
+    const b = req.body as { op: 'listar' | 'executar' | 'cartao'; session_id?: string; task_id?: string; conexao?: string; conta?: string; acao?: string; parametros?: Record<string, unknown>; leu_web?: boolean; cartao?: string; git?: boolean };
+    // rc.42: o acesso de git só vai ao plugin que sabe entregá-lo ao git e tirá-lo da resposta (git: true no pedido); o de
+    // antes devolveria a resposta inteira ao modelo
+    const semGitAntigo = <T extends { git?: unknown; texto: string; gitFim?: boolean }>(r: T): T => {
+      if (b.git || !r.git) { if (!b.git) delete r.gitFim; return r; }
+      const { git: _fora, ...resto } = r;
+      return { ...resto, texto: 'O acesso ao código precisa da versão nova da equipe neste computador: diga à pessoa para atualizar a equipe (Configurações). Nada foi clonado.' } as T;
+    };
     const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
     const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
     if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
@@ -3225,13 +3232,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!tools.includes('contas')) return { ok: false, status: 'falhou', texto: 'As Conexões não estão liberadas para este agente: peça a um colega que tenha, ou diga à pessoa.' };
     if (b.op === 'listar') return { ok: true, status: 'feita', texto: conexoes.listar(run.workspace_id, b.conexao) };
     // a ferramenta segurou o turno no portão de aprovação do motor e a pessoa decidiu (ou o prazo acabou): o que vale é o daqui
-    if (b.op === 'cartao') return b.cartao ? conexoes.resultadoDoCartao(run, b.cartao) : { ok: false, status: 'falhou', texto: 'Cartão desconhecido.' };
+    if (b.op === 'cartao') return b.cartao ? semGitAntigo(conexoes.resultadoDoCartao(run, b.cartao)) : { ok: false, status: 'falhou', texto: 'Cartão desconhecido.' };
     if (!b.conexao || !b.acao) return { ok: false, status: 'falhou', texto: 'Diga a conexão e a ação (veja conexoes_listar).' };
     if (!platformToolsets(motorScope(run.workspace_id)).at) await aiOf(run.workspace_id).refreshToolsets(); // codigoLigado precisa da leitura
     // a regra de execução de código olha o agente desta execução (codigoLigado lê daqui)
     const conexao = b.conexao; const acao = b.acao;
     // conta: qual das contas do aplicativo (o apelido, o e-mail ou o número); sem dizer, a principal
-    return runAtual.run(run, () => conexoes.executar(run, conexao, acao, b.parametros ?? {}, { leuWeb: b.leu_web, conta: b.conta }));
+    return semGitAntigo(await runAtual.run(run, () => conexoes.executar(run, conexao, acao, b.parametros ?? {}, { leuWeb: b.leu_web, conta: b.conta })));
   });
 
   // Gestão pelo coordenador (rc.29): o plugin só repassa; a regra, a sessão da pessoa e o registro ficam aqui (gestao.ts)

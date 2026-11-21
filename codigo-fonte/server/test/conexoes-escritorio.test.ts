@@ -325,3 +325,69 @@ describe('escritório pela ponte: a regra de cada ação, com e sem "Liberar tud
     assert.ok(aud.includes('conexoes.liberar_tudo_proibido') && aud.includes('conexoes.liberar_tudo'));
   });
 });
+
+// ------------------------------------------------------------------- os Documentos do Ergon (arquivos do computador)
+describe('Documentos do Ergon: ler e editar planilha e texto, com a versão de antes na Lixeira', () => {
+  const TOKEN = 'token-da-ponte-de-teste-0123456789';
+  class Motor implements HermesClient {
+    n = 0; runs = new Map<string, RemoteRun>();
+    async health() { return { ok: true, detail: 'teste' }; }
+    async startRun(_p: StartRun) { const runId = `run_d${String(++this.n).padStart(6, '0')}`; this.runs.set(runId, { status: 'running', output: null, error: null, sessionId: `sessao-${runId}`, usage: null, model: null }); return { runId, replayed: false }; }
+    async getRun(id: string) { return this.runs.get(id)!; }
+    async stop() { return { accepted: true, detail: 'ok' }; }
+    async toolsets() { return [{ name: 'ergon_conexoes', enabled: true }] as never; }
+    async modelOptions(): Promise<ModelOptions> { return { model: 'nous/teste-1', provider: 'nous', providers: [] }; }
+  }
+  let h: Harness; let s: Session; let agente: string;
+  async function sessao(texto: string): Promise<string> {
+    const conv = (await req(h, 'POST', '/api/conversations', s, { agentId: agente })).json;
+    await req(h, 'POST', `/api/conversations/${conv.id}/messages`, s, { text: texto, clientRequestId: `m-${crypto.randomUUID()}` });
+    for (let i = 0; i < 3; i++) await h.executor.tick();
+    return h.db.get<{ hermes_session_id: string }>('SELECT hermes_session_id FROM runs WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1', conv.id)!.hermes_session_id;
+  }
+  const executar = async (sess: string, acao: string, parametros: Args) => (await req(h, 'POST', '/internal/bridge/v1/conexoes', null, { op: 'executar', session_id: sess, conexao: 'documentos', acao, parametros }, { 'x-ergon-bridge-token': TOKEN })).json;
+  const subir = async (nome: string, mime: string, data: Buffer) => {
+    const { saveArtifact } = await import('../src/services/artifacts.ts');
+    return saveArtifact(h.db, h.bus, h.cfg.filesDir, h.cfg.maxUploadBytes, s.workspaceId, s.userId, { filename: nome, mime, data }).id;
+  };
+  before(async () => {
+    h = await harness({ executor: 'hermes', hermesApiKey: 'chave-de-teste-123', bridgeToken: TOKEN }, { hermes: new Motor() });
+    s = await setupOwner(h);
+    agente = h.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY coordinator LIMIT 1", s.workspaceId)!.id;
+  });
+  after(async () => { await h.close(); });
+
+  test('buscar → ler → editar a planilha → ler de novo; a versão de antes fica na Lixeira', async () => {
+    const id = await subir('Orçamento 2026.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', markdownToXlsx('| Item | Valor |\n|---|---|\n| Aluguel | 1000 |', 'Orçamento'));
+    const sess = await sessao('atualize o orçamento: luz 200');
+    const b = await executar(sess, 'documentos.buscar', { texto: 'orçamento' });
+    assert.match(b.texto, new RegExp(`id=${id}`));
+    const l = await executar(sess, 'documentos.ler', { id });
+    assert.match(l.texto, /Aluguel/);
+    const e = await executar(sess, 'documentos.editar_planilha', { id, celula: 'A3', valores: [['Luz', 200]] });
+    assert.equal(e.status, 'feita', JSON.stringify(e));
+    assert.match(e.url, /^#documentos\?pasta=/);
+    const novo = /Novo id=(art_[0-9a-f]{32})/.exec(e.texto)![1];
+    assert.match((await executar(sess, 'documentos.ler', { id: novo })).texto, /Luz/);
+    assert.ok(h.db.get<{ deleted_at: string | null }>('SELECT deleted_at FROM artifacts WHERE id = ?', id)!.deleted_at, 'a de antes foi para a Lixeira');
+    assert.equal(h.db.get<{ filename: string }>('SELECT filename FROM artifacts WHERE id = ?', novo)!.filename, 'Orçamento 2026.xlsx');
+  });
+  test('texto: docx e md; e o pedido que não partiu da pessoa não edita', async () => {
+    const doc = await subir('Contrato.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', markdownToDocx('Valor: R$ 1.000', 'Contrato'));
+    const md = await subir('notas.md', 'text/markdown', Buffer.from('# Notas\n\n- a\n'));
+    const sess = await sessao('ajuste o contrato e as notas');
+    const r = await executar(sess, 'documentos.editar_texto', { id: doc, procurar: 'R$ 1.000', trocar_por: 'R$ 1.500' });
+    assert.equal(r.status, 'feita', JSON.stringify(r));
+    const novo = /Novo id=(art_[0-9a-f]{32})/.exec(r.texto)![1];
+    assert.match((await executar(sess, 'documentos.ler', { id: novo })).texto, /R\$ 1\.500/);
+    const m = await executar(sess, 'documentos.editar_texto', { id: md, acrescentar: '- b' });
+    assert.equal(m.status, 'feita');
+    assert.equal((await executar(sess, 'documentos.editar_texto', { id: md, procurar: 'x' })).status, 'falhou', 'arquivo já na Lixeira');
+    // uma rotina (pedido de fora): não edita
+    const run = h.db.get<{ id: string }>('SELECT id FROM runs WHERE hermes_session_id = ?', sess)!.id;
+    h.db.run("UPDATE runs SET idempotency_key = 'rotina-x' WHERE id = ?", run);
+    const fora = await executar(sess, 'documentos.editar_texto', { id: novo, acrescentar: 'x' });
+    assert.equal(fora.status, 'falhou'); assert.match(fora.texto, /só quando a própria pessoa pede/);
+    assert.equal((await executar(sess, 'documentos.ler', { id: novo })).status, 'feita', 'ler continua');
+  });
+});
