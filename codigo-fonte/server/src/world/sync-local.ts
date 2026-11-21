@@ -26,7 +26,9 @@ export class LocalSync {
   readonly db: Db; readonly links: WorldLinks; readonly client: WorldClient; readonly routines: Routines; readonly bus: Bus; readonly limits: AgentLimits; readonly content: ContentSync;
   /** dados indo ou vindo agora (o sinal da barra de cima) e a pausa pedida ao fechar o aplicativo */
   readonly atividade: SyncAtividade;
-  constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits }) { this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); this.atividade = new SyncAtividade(d.bus); }
+  /** este Ergon é a nuvem do World: o esqueleto recebido espelha a equipe do computador (services/blueprint.ts) */
+  private readonly nuvem: boolean;
+  constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits; nuvem?: boolean }) { this.nuvem = d.nuvem === true; this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); this.atividade = new SyncAtividade(d.bus); }
 
   /** mensagens novas vindas de outro aparelho (antes de a tela ser avisada): os canais não as mandam de novo */
   aoReceberMensagens: ((ws: string, messageIds: string[]) => void) | null = null;
@@ -218,7 +220,7 @@ export class LocalSync {
       }
       this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', version, now(), ws);
     };
-    const bp = exportBlueprint(this.db, this.routines, ws); const bh = blueprintHash(bp);
+    const bp = exportBlueprint(this.db, this.routines, ws, { sync: true }); const bh = blueprintHash(bp);
     const mandarEquipe = !opts.contentOnly && bh !== r.blueprint_hash;
     const partes = this.content.chunks(this.content.pending(ws, userId));
     if (!mandarEquipe && !partes.length) return { version, sent }; // nada a enviar: a barra de cima nem pisca
@@ -277,9 +279,9 @@ export class LocalSync {
     const incoming = { tasks: contents.reduce((n, b) => n + b.tasks.length, 0), conversations: contents.reduce((n, b) => n + b.conversations.length, 0), messages: contents.reduce((n, b) => n + b.messages.length, 0) };
     let plan: unknown = null;
     if (apply && last && opts.holdOnBlueprint) return { head, preview: null as unknown, incoming, applied: false, held: true };
-    if (last) plan = importBlueprint(this.db, this.bus, this.routines, ws, userId, open<{ type: string; blueprint: unknown }>(last).blueprint, apply, this.limits);
+    if (last) plan = importBlueprint(this.db, this.bus, this.routines, ws, userId, open<{ type: string; blueprint: unknown }>(last).blueprint, apply, this.limits, { sync: true, nuvem: this.nuvem });
     if (!apply) return { head, preview: plan, incoming, applied: false };
-    if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws)), ws);
+    if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws, { sync: true })), ws);
     const total: Applied = { added: 0, updated: 0, conflicts: 0, skipped: 0 };
     const deOutros = others.filter((y) => y.kind === 'change');
     // cada mudança aplicada é um ponto seguro: aplicar, marcar as mensagens que vieram de outro aparelho (os canais não

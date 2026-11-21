@@ -68,6 +68,8 @@ export interface WorldHost {
   canaisNuvem?: CanaisNuvemHost;
   /** nuvem do Ergon World: o contêiner terminou de se preparar (workspace recebido, modelo ligado) */
   nuvemPronta?: (x: { userId: string; workspaceId: string; syncWorkspaceId: string }) => Promise<void> | void;
+  /** nuvem: sair para o orquestrador recriar o contêiner com um token de partida novo (padrão: fechar e sair com 75) */
+  reiniciarNuvem?: () => void;
 }
 
 /** Os canais oficiais (services/teams-app) vistos pela nuvem do Ergon World. */

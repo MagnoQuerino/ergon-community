@@ -16,7 +16,8 @@ import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
 import { precisaReconectarErgonAi, registrarModelosErgonAi } from '../services/ai.ts';
 import { loadWorldConfig, type WorldConfig } from './config.ts';
 import { checkAccountInput, EMAIL_UNVERIFIED, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, worldLocale, type AccountInput, type DeviceChoice } from './link.ts';
-import { iniciarAutoSync, iniciarNuvem, modoNuvem, prepararCofre } from './nuvem.ts';
+import { EXIT_TOKEN_NOVO, iniciarAutoSync, iniciarNuvem, modoNuvem, prepararCofre } from './nuvem.ts';
+import type { PosseHorario } from '../services/routines.ts';
 import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
@@ -216,7 +217,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
 
       // ---------------------------------------------------------------- qual workspace local é o do World
       // na nuvem do Ergon World a equipe é a do computador da pessoa: cresce o que precisar para recebê-la inteira
-      const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: modoNuvem(cfg, env) ? { ...h.limits, autoGrow: true } : h.limits });
+      const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: modoNuvem(cfg, env) ? { ...h.limits, autoGrow: true } : h.limits, nuvem: modoNuvem(cfg, env) });
       /**
        * Liga UM workspace local (de que a pessoa é dona) ao World: a um workspace World novo ou a um que já existe na
        * conta (criado em outro computador; a sincronização dele entra depois, com a chave).
@@ -687,7 +688,10 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       // nuvem do Ergon World: neste contêiner, a partida sem ninguém (world/nuvem.ts); no computador, a sincronia automática
       // e a posse do workspace que tem a nuvem ativa
       const log = (o: Record<string, unknown>, msg: string) => app.log.info(o, msg);
-      let nuvem: { parar: () => Promise<void> } | null = null;
+      let nuvem: { parar: () => Promise<void>; posse: (w: string, slot: string) => PosseHorario } | null = null;
+      // de quem é cada horário de rotina (o computador aberto ou a nuvem; nunca os dois): Routines.posse
+      const ligarPosse = () => { h.routines.posse = (w, slot) => nuvem?.posse(w, slot) ?? 'aqui'; };
+      const proximoHorario = (w: string) => h.routines.proximoHorario(w);
       // os tempos do ciclo (os testes encurtam)
       const ms = (k: string) => { const n = Number.parseInt(env[k] ?? '', 10); return Number.isFinite(n) && n >= 20 ? n : undefined; };
       if (h.canaisNuvem) sync.aoReceberMensagens = (w, ids) => h.canaisNuvem!.sincronizadas(w, ids);
@@ -696,10 +700,14 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
           app.addHook('onReady', async () => {
             nuvem = iniciarNuvem({ app, db, cfg, env, client, links: L(), sync, createWorkspace: (u, n) => { if (!h.createWorkspace) throw new HttpError(503, 'unavailable', 'Indisponível nesta versão.'); return h.createWorkspace(u, n); },
               conectarErgonAi, aoPronto: h.nuvemPronta, canais: h.canaisNuvem, log, ajustes: { passoMs: ms('ERGON_NUVEM_PASSO_MS'), cicloMs: ms('ERGON_NUVEM_CICLO_MS'), canaisMs: ms('ERGON_NUVEM_CANAIS_MS') },
-              motorPronto: async (w) => { const c = h.controlFor(w); if (!c?.ergonAi || !c.byok) return false; await c.byok(); return true; } });
+              motorPronto: async (w) => { const c = h.controlFor(w); if (!c?.ergonAi || !c.byok) return false; await c.byok(); return true; },
+              proximoHorario,
+              // o orquestrador recria o contêiner (com um token de partida novo) quando ele sai com este código
+              reiniciar: h.reiniciarNuvem ?? (() => { void app.close().catch(() => undefined).finally(() => process.exit(EXIT_TOKEN_NOVO)); }) });
+            ligarPosse();
           });
         } else if (cfg.mode === 'local' && env.ERGON_WORLD_AUTOSYNC !== '0') {
-          app.addHook('onReady', async () => { nuvem = iniciarAutoSync({ db, client, links: L(), sync, canais: h.canaisNuvem, log, ajustes: { cicloMs: ms('ERGON_WORLD_AUTOSYNC_MS') } }); });
+          app.addHook('onReady', async () => { nuvem = iniciarAutoSync({ db, client, links: L(), sync, canais: h.canaisNuvem, log, proximoHorario, ajustes: { cicloMs: ms('ERGON_WORLD_AUTOSYNC_MS') } }); ligarPosse(); });
         }
       }
       app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); clearTimeout(aoAbrir); await nuvem?.parar(); });

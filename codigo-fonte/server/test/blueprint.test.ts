@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { validateBlueprint } from '../../shared/blueprint.ts';
-import { importBlueprint } from '../src/services/blueprint.ts';
+import { exportBlueprint, importBlueprint } from '../src/services/blueprint.ts';
 import { limitsFor } from '../src/services/capacity.ts';
 import { addPerson, harness, req, setupOwner } from './helpers.ts';
 
@@ -76,5 +76,53 @@ describe('esqueleto do workspace', () => {
       ['duas coordenações', { ...base, agents: [1, 2].map((n) => ({ name: `C${n}`, role: 'r', sectorKey: 'x', charter: null, bio: null, skills: [], color: '#fff', lookSeed: null, coordinator: true, charKey: null })) }],
     ];
     for (const [nome, v] of casos) assert.equal(validateBlueprint(v).ok, false, nome);
+  });
+  test('a parte privada (sincronia): só na sincronia; aplicar o mesmo arquivo duas vezes não duplica rotinas', async () => {
+    const h = await harness();
+    const a = await setupOwner(h);
+    await req(h, 'POST', '/api/routines', a, { template: 'supervisor-projetos', tz: 'America/Sao_Paulo' });
+    h.db.run(`UPDATE agents SET tools = '["web","terminal"]', model = 'vendor/modelo', provider = 'openai' WHERE workspace_id = ? AND coordinator = 0`, a.workspaceId);
+    const privado = exportBlueprint(h.db, h.routines, a.workspaceId, { sync: true });
+    assert.ok(privado.sync && privado.sync.agents.length === privado.agents.length && privado.sync.routines.length === 1);
+    assert.equal(validateBlueprint(privado).ok, false, 'fora da sincronia, a parte privada é recusada');
+    assert.equal(validateBlueprint(privado, { sync: true }).ok, true);
+    assert.ok(!JSON.stringify(exportBlueprint(h.db, h.routines, a.workspaceId)).includes('terminal'), 'o arquivo continua sem ferramentas');
+    const b = await addPerson(h, 'bruna', 'senha-da-bruna-123');
+    assert.throws(() => importBlueprint(h.db, h.bus, h.routines, b.workspaceId, b.userId, privado, true, limitsFor(h.cfg)), /campo não permitido/);
+    const arquivo = exportBlueprint(h.db, h.routines, a.workspaceId);
+    importBlueprint(h.db, h.bus, h.routines, b.workspaceId, b.userId, arquivo, true, limitsFor(h.cfg));
+    const de2 = importBlueprint(h.db, h.bus, h.routines, b.workspaceId, b.userId, arquivo, true, limitsFor(h.cfg));
+    assert.ok(de2.skipped.some((x) => /já está instalada/.test(x)));
+    assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM routines WHERE workspace_id = ? AND status != 'archived'", b.workspaceId)!.n, 1);
+  });
+
+  test('sincronia entre dois computadores: concilia pela identidade; rotina nova chega pausada, a daqui mantém o estado; o que nasceu aqui fica', async () => {
+    const h = await harness();
+    const a = await setupOwner(h);
+    const r = (await req(h, 'POST', '/api/routines', a, { template: 'supervisor-projetos', tz: 'America/Sao_Paulo' })).json;
+    const frodo = (await req(h, 'POST', '/api/agents', a, { name: 'Frodo', role: 'Pesquisa de campo' })).json.id;
+    await req(h, 'PATCH', `/api/agents/${frodo}`, a, { tools: ['web'], model: null });
+    const b = await addPerson(h, 'bruna', 'senha-da-bruna-123');
+    const meu = (await req(h, 'POST', '/api/agents', b, { name: 'Pippin', role: 'Cozinha' })).json.id;
+    const sync = (apply = true) => importBlueprint(h.db, h.bus, h.routines, b.workspaceId, b.userId, exportBlueprint(h.db, h.routines, a.workspaceId, { sync: true }), apply, limitsFor(h.cfg), { sync: true });
+    sync();
+    const f = () => h.db.get<{ id: string; role: string; tools: string; status: string }>("SELECT id, role, tools, status FROM agents WHERE workspace_id = ? AND sync_ref = ?", b.workspaceId, frodo);
+    assert.equal(f()!.role, 'Pesquisa de campo'); assert.deepEqual(JSON.parse(f()!.tools), ['web']);
+    const rb = () => h.db.all<{ id: string; status: string }>("SELECT id, status FROM routines WHERE workspace_id = ? AND status != 'archived'", b.workspaceId);
+    assert.deepEqual(rb().map((x) => x.status), ['paused'], 'no computador, a rotina nova chega pausada');
+    h.routines.update(b.workspaceId, b.userId, rb()[0].id, { status: 'active' }, 'ligada aqui');
+    await req(h, 'PATCH', `/api/agents/${frodo}`, a, { name: 'Frodo B', role: 'Guia' });
+    const prev = sync(false);
+    assert.deepEqual(prev.updated, ['Frodo B']); assert.equal(prev.agents.length, 0, 'nada novo: o renomeado é o mesmo');
+    sync(); sync();
+    assert.equal(f()!.role, 'Guia');
+    assert.deepEqual(rb().map((x) => x.status), ['active'], 'a escolha daqui fica, sem duplicar');
+    // saiu do outro computador: sai daqui; o que nasceu aqui fica
+    await req(h, 'POST', `/api/agents/${frodo}/deactivate`, a, {});
+    await req(h, 'DELETE', `/api/routines/${r.id}`, a);
+    sync();
+    assert.equal(f()!.status, 'archived');
+    assert.equal(rb().length, 0);
+    assert.equal(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', meu)!.status, 'active');
   });
 });
