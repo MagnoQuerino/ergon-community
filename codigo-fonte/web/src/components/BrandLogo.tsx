@@ -22,6 +22,9 @@ const MONOGRAM: Record<string, { hex: string; letter: string }> = {
   freshdesk: { hex: '#25C16F', letter: 'F' },
   asaas: { hex: '#0030B9', letter: 'a' },
   omie: { hex: '#00A6DD', letter: 'O' },
+  // rc.45: sem logo aberto (Simple Icons não tem): a inicial na cor da marca
+  feishu: { hex: '#3370FF', letter: 'F' },
+  dingtalk: { hex: '#0089FF', letter: 'D' },
 };
 
 export function BrandLogo({ kind, name, size = 40 }: { kind: string; name: string; size?: number }) {

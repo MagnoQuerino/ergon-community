@@ -76,7 +76,7 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.10.0"
+PLUGIN_VERSION = "0.11.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
@@ -105,9 +105,12 @@ PLUGIN_VERSION = "0.10.0"
 # computador (rc.42): o controle do computador da pessoa (computer_use pelo provedor "ergon", que manda cada ação ao Ergon e
 # dali ao Ergon Desktop), a administração do Discord (discord_admin) e o diagnóstico para quem programa (debugging)
 # visuais (rc.43): a ferramenta visual valida os blocos visuais da conversa (/internal/bridge/v1/visual)
+# idiomas_zh_hi (rc.45): os ajustes aceitam o idioma zh e hi (display.language, a voz e a transcrição); canais_feishu_dingtalk
+# (rc.45): conversar com a equipe pelo Feishu/Lark e pelo DingTalk (o aplicativo da pessoa, com os pacotes na imagem)
 CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao",
                "perfis", "memoria", "ajudantes", "modelos_tarefa", "ajustes", "cota", "pausa", "nao_treinar", "cartoes", "comandos",
-               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "git", "computador", "visuais")
+               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "git", "computador", "visuais",
+               "idiomas_zh_hi", "canais_feishu_dingtalk")
 _TS_CONEXOES = "ergon_conexoes"
 # Os conjuntos de ferramentas que este plugin registra ficam em _ERGON_PLUGIN_TOOLSETS, mais abaixo (o mesmo de
 # ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
@@ -2110,9 +2113,13 @@ PIPER_PROVEDOR = "ergon-piper"
 # Licenças (o MODEL_CARD de cada voz): pt_BR-cadu-medium, base de dados CC0 e afinada sobre o modelo rdh (CC0); a faber,
 # também CC0, sai da base hifi_tts_92 (Hi-Fi TTS, CC BY 4.0), por isso a cadu. en_US-ljspeech-medium: LJ Speech, domínio
 # público (a lessac, padrão do Hermes, vem do Blizzard 2013, com licença própria e restrições de uso).
-VOZ_PIPER = {"pt": "pt_BR-cadu-medium", "en": "en_US-ljspeech-medium"}
-VOZ_EDGE = {"pt": "pt-BR-FranciscaNeural", "en": "en-US-AriaNeural"}
-_IDIOMAS_MOTOR = ("pt", "en")
+# rc.45: chinês (zh) e hindi (hi). O Hermes tem o catálogo zh das mensagens fixas, mas não o hi: com display.language=hi ele
+# cai no inglês (agent/i18n.py), e a voz e a transcrição ficam em hindi. Vozes do Piper zh_CN-huayan-medium e
+# hi_IN-pratham-medium (piper-voices): LICENÇA DA BASE DE CADA VOZ A CONFERIR no MODEL_CARD antes da versão final; até lá,
+# a reserva online do edge-tts (zh-CN-XiaoxiaoNeural, hi-IN-SwaraNeural) é a mesma do resto.
+VOZ_PIPER = {"pt": "pt_BR-cadu-medium", "en": "en_US-ljspeech-medium", "zh": "zh_CN-huayan-medium", "hi": "hi_IN-pratham-medium"}
+VOZ_EDGE = {"pt": "pt-BR-FranciscaNeural", "en": "en-US-AriaNeural", "zh": "zh-CN-XiaoxiaoNeural", "hi": "hi-IN-SwaraNeural"}
+_IDIOMAS_MOTOR = ("pt", "en", "zh", "hi")
 # o que a tela oferece (VALID_REASONING_EFFORTS do Hermes tem mais níveis; os extremos ficam fora) e o padrão do Ergon
 RACIOCINIO_NIVEIS = ("", "low", "medium", "high")
 RACIOCINIO_PADRAO = "high"
@@ -3075,8 +3082,8 @@ def revisao_pedido(mensagens: list[Any], foco: str) -> dict[str, str]:
     return {"titulo": str(titulo), "pedido": str(pedido)}
 
 
-# ---------------------------------------------------------------- 4. conversar pelo Telegram e pelo Discord
-# A pessoa cria o próprio bot e fala com a equipe por lá. O gateway do Hermes faz a conexão (de saída: sem endereço
+# ---------------------------------------------------------------- 4. conversar pelo Telegram, pelo Discord, pelo Feishu e pelo DingTalk
+# A pessoa cria o próprio bot (ou, no Feishu/Lark e no DingTalk, o próprio aplicativo interno) e fala com a equipe por lá. O gateway do Hermes faz a conexão (de saída: sem endereço
 # público) e guarda o código do bot no .env do motor (dentro do cofre). Este plugin:
 #  - pre_gateway_dispatch (antes da autorização e dos comandos do Hermes): só conversa direta; quem ainda não foi
 #    ligado recebe um código de pareamento (o pareamento NATIVO do gateway, gateway/pairing.py, com o nosso texto: o do
@@ -3086,9 +3093,24 @@ def revisao_pedido(mensagens: list[Any], foco: str) -> dict[str, str]:
 #    on_interaction só para "erg:") e as referências do adaptador vivo, no processo do gateway.
 #  - a saída (respostas, cartões, avisos) é buscada no Ergon por este processo (espera longa) e mandada pelo adaptador
 #    vivo: a ponte de controle pode estar em outro processo do motor (o painel), que não tem o adaptador.
-_CANAIS = ("telegram", "discord")
-_CANAL_ENV = {"telegram": "TELEGRAM_BOT_TOKEN", "discord": "DISCORD_BOT_TOKEN"}
-_CANAL_NOME = {"telegram": "Telegram", "discord": "Discord"}
+# rc.45: Feishu (open.feishu.cn) ou Lark (open.larksuite.com, FEISHU_DOMAIN=lark) e DingTalk. Os dois conectam por saída
+# (WebSocket do lark-oapi; Stream Mode do dingtalk-stream): sem endereço público. A credencial é o App ID e o App Secret
+# do aplicativo interno da pessoa, no .env do motor (dentro do cofre). Os pacotes vêm na imagem (hermes/Dockerfile): o
+# Hermes instalaria no primeiro uso, pelo PyPI, e isso falha na China. Sem botões: o cartão vai como texto e a decisão é
+# no app (o Ergon já manda assim); a edição do cartão, no Feishu, edita a mensagem; no DingTalk, vai uma nova (ele não
+# edita pela sessionWebhook). O DingTalk só responde pela sessionWebhook da última mensagem da pessoa.
+_CANAIS = ("telegram", "discord", "feishu", "dingtalk")
+_CANAIS_DE_APP = ("feishu", "dingtalk")
+_CANAL_ENV = {"telegram": "TELEGRAM_BOT_TOKEN", "discord": "DISCORD_BOT_TOKEN", "feishu": "FEISHU_APP_ID", "dingtalk": "DINGTALK_CLIENT_ID"}
+# o par do aplicativo (App ID, App Secret) e o domínio do Feishu: o .env que a ponte grava e apaga
+_CANAL_APP_ENV = {"feishu": ("FEISHU_APP_ID", "FEISHU_APP_SECRET"), "dingtalk": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET")}
+_CANAL_APP_FORMATO = {
+    "feishu": (re.compile(r"cli_[A-Za-z0-9]{8,40}"), re.compile(r"[A-Za-z0-9]{16,64}")),
+    "dingtalk": (re.compile(r"[A-Za-z0-9_-]{8,64}"), re.compile(r"[A-Za-z0-9_-]{16,128}")),
+}
+_CANAL_NOME = {"telegram": "Telegram", "discord": "Discord", "feishu": "Feishu/Lark", "dingtalk": "DingTalk"}
+# o nome do canal na tela do Ergon em chinês (Conexões › 通过 … 与团队对话)
+_CANAL_NOME_ZH = {"feishu": "飞书/Lark", "dingtalk": "钉钉"}
 _CANAL_TOKEN = {
     "telegram": re.compile(r"\d{5,14}:[A-Za-z0-9_-]{30,64}"),
     "discord": re.compile(r"[A-Za-z0-9_-]{18,40}\.[A-Za-z0-9_-]{4,12}\.[A-Za-z0-9_-]{20,90}"),
@@ -3099,9 +3121,22 @@ _CANAL_CODIGO = (
     "Code to link this chat to Ergon: {code}\n"
     "In Ergon, open Connections › Talk to the team on {canal} and type this code. It is valid for 1 hour."
 )
+# no Feishu e no DingTalk, também em chinês (quem usa é, quase sempre, uma empresa na China)
+_CANAL_CODIGO_ZH = ("\n\n将此聊天关联到 Ergon 的代码：{code}\n"
+                    "在 Ergon 中打开 连接 › 通过{canal}与团队对话，并输入此代码。代码 1 小时内有效。")
 _CANAL_FORA = ("O Ergon não recebeu esta mensagem agora. Mande de novo em instantes.\n"
                "Ergon did not get this message right now. Please send it again in a moment.")
-_CANAL_TEXTO_MAX = {"telegram": 4000, "discord": 1900}
+_CANAL_FORA_ZH = "\nErgon 暂时没有收到这条消息，请稍后再发一次。"
+_CANAL_TEXTO_MAX = {"telegram": 4000, "discord": 1900, "feishu": 8000, "dingtalk": 8000}
+
+
+def _canal_codigo(platform: str, code: str) -> str:
+    texto = _CANAL_CODIGO.format(code=code, canal=_CANAL_NOME[platform])
+    return texto + _CANAL_CODIGO_ZH.format(code=code, canal=_CANAL_NOME_ZH[platform]) if platform in _CANAL_NOME_ZH else texto
+
+
+def _canal_fora(platform: str) -> str:
+    return _CANAL_FORA + (_CANAL_FORA_ZH if platform in _CANAL_NOME_ZH else "")
 _canal_vivos: dict[str, dict[str, Any]] = {}
 _canal_laco_ligado = False
 
@@ -3190,7 +3225,7 @@ async def _canal_entrada(event: Any, source: Any, platform: str, gateway: Any) -
         code = await asyncio.to_thread(store.generate_code, platform, user_id, user_name)
         if code:
             _canal_lembrar(platform, user_id, chat_id, user_name)
-            await _canal_responder(adapter, chat_id, _CANAL_CODIGO.format(code=code, canal=_CANAL_NOME[platform]))
+            await _canal_responder(adapter, chat_id, _canal_codigo(platform, code))
         return skip("conta ainda não ligada")
     _canal_lembrar(platform, user_id, chat_id, user_name)
     payload = {
@@ -3209,14 +3244,14 @@ async def _canal_entrada(event: Any, source: Any, platform: str, gateway: Any) -
                 pass
     except Exception as exc:  # noqa: BLE001
         logger.warning("ergon_bridge: Ergon indisponível para o canal (%s)", type(exc).__name__)
-        reply = _CANAL_FORA
+        reply = _canal_fora(platform)
     if isinstance(reply, str) and reply.strip():
         await _canal_responder(adapter, chat_id, reply)
     return skip("entregue ao Ergon")
 
 
 async def on_pre_dispatch(event: Any = None, gateway: Any = None, **_: Any) -> dict[str, Any] | None:
-    """Telegram e Discord: nada chega ao agente do Hermes por fora do Ergon. Outras plataformas: como antes."""
+    """Telegram, Discord, Feishu/Lark e DingTalk: nada chega ao agente do Hermes por fora do Ergon. Outras plataformas: como antes."""
     try:
         source = getattr(event, "source", None)
         platform = str(getattr(getattr(source, "platform", None), "value", "") or "")
@@ -3314,6 +3349,53 @@ def _fabrica_discord(native: Any, adapter: Any) -> None:
     _canal_vivo("discord", native, adapter)
 
 
+def _fabrica_feishu(native: Any, adapter: Any) -> None:
+    """Feishu/Lark: só o adaptador vivo (o cliente do lark-oapi) para a saída; sem botões (a decisão é no app)."""
+    _canal_vivo("feishu", native, adapter)
+
+
+def _fabrica_dingtalk(native: Any, adapter: Any) -> None:
+    """DingTalk: só o adaptador vivo (o cliente do Stream Mode) para a saída; sem botões (a decisão é no app)."""
+    _canal_vivo("dingtalk", native, adapter)
+
+
+async def _canal_app_enviar(platform: str, adapter: Any, item: dict[str, Any], tipo: str, chat_id: str, texto: str) -> dict[str, Any]:
+    """A saída no Feishu e no DingTalk, só pelo adaptador do Hermes (que formata, divide e fala com a API de cada um)."""
+    def resultado(r: Any) -> dict[str, Any]:
+        if getattr(r, "success", False):
+            return {"ok": True, "message_id": str(getattr(r, "message_id", "") or "")[:120]}
+        erro = str(getattr(r, "error", "") or "falhou")
+        # DingTalk sem sessionWebhook válida (a pessoa não escreveu na última hora e meia): não adianta tentar de novo
+        sem_sessao = "session_webhook" in erro
+        return {"ok": False, "erro": ("sem_sessao" if sem_sessao else erro)[:200], "passageiro": bool(getattr(r, "retryable", False)) and not sem_sessao}
+    if tipo == "digitando":
+        await adapter.send_typing(chat_id)
+        return {"ok": True}
+    if tipo == "imagem":
+        if platform != "feishu":
+            return {"ok": True}  # o DingTalk não sobe imagem pela sessionWebhook (o texto já levou os números)
+        import base64
+        import tempfile
+        try:
+            png = base64.b64decode(str(item.get("png") or ""), validate=True)
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "erro": "imagem inválida"}
+        if not png or len(png) > 8 * 1024 * 1024 or png[:4] != b"\x89PNG":
+            return {"ok": False, "erro": "imagem inválida"}
+        with tempfile.NamedTemporaryFile(suffix=".png", prefix="ergon-visual-") as f:
+            f.write(png)
+            f.flush()
+            return resultado(await adapter.send_image_file(chat_id, f.name, caption=texto[:1000] or None))
+    if tipo in ("texto", "cartao"):
+        return resultado(await adapter.send(chat_id, texto[:_CANAL_TEXTO_MAX[platform]]))
+    if tipo == "editar":
+        mid = str(item.get("message_id") or "")
+        if platform == "feishu" and mid:
+            return resultado(await adapter.edit_message(chat_id, mid, texto[:_CANAL_TEXTO_MAX[platform]], finalize=True))
+        return resultado(await adapter.send(chat_id, texto[:_CANAL_TEXTO_MAX[platform]]))
+    return {"ok": False, "erro": "tipo desconhecido"}
+
+
 async def _canal_enviar_async(item: dict[str, Any]) -> dict[str, Any]:
     platform = str(item.get("canal") or "")
     vivo = _canal_vivos.get(platform)
@@ -3325,6 +3407,8 @@ async def _canal_enviar_async(item: dict[str, Any]) -> dict[str, Any]:
     texto = str(item.get("texto") or "")
     botoes = [(str(b[0])[:40], str(b[1])[:56]) for b in (item.get("botoes") or []) if isinstance(b, list) and len(b) == 2][:4]
     limite = _CANAL_TEXTO_MAX[platform]
+    if platform in _CANAIS_DE_APP:
+        return await _canal_app_enviar(platform, adapter, item, tipo, chat_id, texto)
     if tipo == "digitando":
         await adapter.send_typing(chat_id)
         return {"ok": True}
@@ -3440,7 +3524,7 @@ def _canal_estado() -> dict[str, Any]:
     for c in _CANAIS:
         p = plats.get(c) if isinstance(plats.get(c), dict) else {}
         out[c] = {
-            "configurado": bool(str(env.get(_CANAL_ENV[c]) or "").strip()),
+            "configurado": all(str(env.get(v) or "").strip() for v in _CANAL_APP_ENV.get(c, (_CANAL_ENV[c],))),
             "estado": str(p.get("state") or "")[:40] or None, "erro": str(p.get("error_code") or "")[:60] or None,
             "ligados": [{"user_id": str(a.get("user_id") or ""), "user_name": str(a.get("user_name") or "")[:120]} for a in store.list_approved(c)][:5],
         }
@@ -5538,7 +5622,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._json(503, {"error": f"o motor não conseguiu agora ({type(exc).__name__})"})
 
     def _canais(self, method: str, path: str, body: dict[str, Any]) -> None:
-        """Conversar pelo Telegram e pelo Discord: GET (situação), PUT /<canal> (guarda o código do bot no .env do motor e
+        """Conversar pelo Telegram, Discord, Feishu/Lark e DingTalk: GET (situação), PUT /<canal> (guarda o código do bot, ou o
+        App ID e o App Secret do aplicativo, no .env do motor e
         reinicia o gateway), POST /<canal>/parear (confirma o código que a pessoa recebeu no canal: o pareamento nativo do
         gateway) e DELETE /<canal> (apaga o código do bot e desfaz as ligações). O código do bot nunca volta por aqui."""
         try:
@@ -5546,11 +5631,28 @@ class _ControlHandler(BaseHTTPRequestHandler):
             from hermes_cli.config import remove_env_value, save_env_value
             if method == "GET" and path == "/ergon/v1/canais":
                 return self._json(200, {"canais": _canal_estado()})
-            m = re.fullmatch(r"/ergon/v1/canais/(telegram|discord)(/parear)?", path)
+            m = re.fullmatch(r"/ergon/v1/canais/(telegram|discord|feishu|dingtalk)(/parear)?", path)
             if not m:
                 return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
             canal, parear = m.group(1), bool(m.group(2))
             store = PairingStore()
+            if method == "PUT" and not parear and canal in _CANAIS_DE_APP:
+                # o App ID e o App Secret do aplicativo (Feishu/Lark, DingTalk): no .env do motor; nunca voltam por aqui
+                app_id, segredo = str(body.get("app_id") or "").strip(), str(body.get("app_secret") or "").strip()
+                f_id, f_seg = _CANAL_APP_FORMATO[canal]
+                if not f_id.fullmatch(app_id) or not f_seg.fullmatch(segredo):
+                    return self._json(400, {"error": "o App ID ou o App Secret não têm o formato esperado (app)", "code": "formato"})
+                v_id, v_seg = _CANAL_APP_ENV[canal]
+                save_env_value(v_id, app_id)
+                save_env_value(v_seg, segredo)
+                if canal == "feishu":
+                    # Feishu da China (open.feishu.cn) ou Lark internacional (open.larksuite.com); por WebSocket, sem endereço público
+                    save_env_value("FEISHU_DOMAIN", "lark" if str(body.get("dominio") or "") == "lark" else "feishu")
+                    save_env_value("FEISHU_CONNECTION_MODE", "websocket")
+                _canal_limpar(store, canal)
+                store.clear_pending(canal)
+                _canal_zerar_espera(store, canal)
+                return self._json(200, {"ok": True, "reiniciando": _canal_reiniciar()})
             if method == "PUT" and not parear:
                 token = str(body.get("token") or "").strip()
                 if not _CANAL_TOKEN[canal].fullmatch(token):
@@ -5579,7 +5681,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
                 _canal_limpar(store, canal)
                 store.clear_pending(canal)
                 _canal_zerar_espera(store, canal)
-                remove_env_value(_CANAL_ENV[canal])
+                for var in _CANAL_APP_ENV.get(canal, (_CANAL_ENV[canal],)) + (("FEISHU_DOMAIN", "FEISHU_CONNECTION_MODE") if canal == "feishu" else ()):
+                    remove_env_value(var)
                 return self._json(200, {"ok": True, "reiniciando": _canal_reiniciar()})
         except Exception as exc:  # noqa: BLE001
             return self._json(503, {"error": f"não consegui mexer nos canais ({type(exc).__name__})"})
@@ -5865,7 +5968,8 @@ def register(ctx) -> None:
     ctx.register_hook("post_gateway_admission", on_admission)
     ctx.register_hook("pre_gateway_dispatch", on_pre_dispatch)
     # botões dos cartões e o adaptador vivo (só no processo do gateway, quando o canal conecta)
-    for _plataforma, _fabrica in (("telegram", _fabrica_telegram), ("discord", _fabrica_discord)):
+    for _plataforma, _fabrica in (("telegram", _fabrica_telegram), ("discord", _fabrica_discord), ("feishu", _fabrica_feishu),
+                                  ("dingtalk", _fabrica_dingtalk)):
         try:
             ctx.register_platform_handler(_plataforma, _fabrica)
         except Exception:  # noqa: BLE001 - Hermes sem esse registro: os canais ficam sem botões, o resto segue

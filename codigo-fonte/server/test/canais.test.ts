@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
-import type { CanalNoMotor, HermesClient, HermesControlClient, ModelOptions, NomeCanal, RemoteRun, StartRun } from '../src/services/hermes.ts';
+import type { CanalNoMotor, CredencialCanal, HermesClient, HermesControlClient, ModelOptions, NomeCanal, RemoteRun, StartRun } from '../src/services/hermes.ts';
 import { CanalErro } from '../src/services/hermes.ts';
 import { recordProposals } from '../src/services/proposals.ts';
 import { coordinatorFor } from '../src/services/team-query.ts';
@@ -54,9 +54,9 @@ class Controle implements HermesControlClient {
   async setApiToolsets(e: string[]) { return e; }
   async canais() {
     const um = (c: NomeCanal): CanalNoMotor => ({ configurado: !!this.bots[c], estado: this.bots[c] ? 'connected' : null, erro: null, ligados: this.pareados[c] ? [{ user_id: this.pareados[c]!, user_name: 'Ana' }] : [] });
-    return { telegram: um('telegram'), discord: um('discord') };
+    return { telegram: um('telegram'), discord: um('discord'), feishu: um('feishu'), dingtalk: um('dingtalk') };
   }
-  async setCanal(c: NomeCanal, t: string) { this.bots[c] = t; delete this.pareados[c]; }
+  async setCanal(c: NomeCanal, cred: CredencialCanal) { this.bots[c] = 'token' in cred ? cred.token : JSON.stringify(cred); delete this.pareados[c]; }
   async parearCanal(c: NomeCanal, codigo: string) {
     const x = this.codigos[codigo];
     if (!x || x.canal !== c) throw new CanalErro('codigo', 'Código não encontrado ou vencido.');

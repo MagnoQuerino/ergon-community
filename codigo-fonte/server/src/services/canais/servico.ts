@@ -20,7 +20,7 @@ import { log } from '../../lib/log.ts';
 import { CLOSED_VALUE } from '../../security/fields.ts';
 import { audit, type Bus, type BusEvent } from '../bus.ts';
 import { createConversation, sendMessage } from '../chat.ts';
-import { CanalErro, type CanalNoMotor, type HermesControlClient, type NomeCanal } from '../hermes.ts';
+import { CANAIS_DE_APP, CanalErro, NOMES_CANAL, type CanalNoMotor, type CredencialCanal, type HermesControlClient, type NomeCanal } from '../hermes.ts';
 import type { WorkspaceOwners } from '../people.ts';
 import { pendingDecisions } from '../proposals.ts';
 import { workspaceTz } from '../routine-proposals.ts';
@@ -36,8 +36,33 @@ import { msg } from '../../lib/i18n.ts';
 import { readLang } from '../prefs.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
-const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
-const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord' };
+const CANAIS: readonly NomeCanal[] = NOMES_CANAL;
+const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk' };
+/**
+ * rc.45: o Feishu/Lark e o DingTalk entram pelo mesmo caminho, com o aplicativo próprio da pessoa (App ID e App Secret no
+ * cofre do motor). Sem botões de verdade pelo gateway: os cartões vão como texto e a decisão é no app do Ergon (como o
+ * pedido de risco da camada externo.ts). O DingTalk só responde pela "sessionWebhook" da última mensagem (vale cerca de
+ * uma hora e meia): aviso mais tarde, sem mensagem nova da pessoa, não sai, e a imagem dos visuais não vai (o texto já leva
+ * os números). O Feishu manda a imagem e edita o cartão.
+ */
+const SEM_BOTOES: ReadonlySet<CanalId> = new Set<CanalId>(CANAIS_DE_APP);
+const SEM_IMAGEM: ReadonlySet<CanalId> = new Set<CanalId>(['dingtalk']);
+/** O id da conta e da conversa no canal: número (Telegram, Discord) ou texto do Feishu (ou_…, oc_…) e do DingTalk ($:LWCP…, cid…). */
+const FORMATO_ID: Record<NomeCanal, RegExp> = {
+  telegram: /^[0-9]{3,30}$/, discord: /^[0-9]{3,30}$/,
+  feishu: /^[A-Za-z0-9_-]{3,100}$/, dingtalk: /^[A-Za-z0-9_$:+/=.-]{3,120}$/,
+};
+const FORMATO_CHAT: Record<NomeCanal, RegExp> = {
+  telegram: /^-?[0-9]{3,30}$/, discord: /^-?[0-9]{3,30}$/,
+  feishu: /^[A-Za-z0-9_-]{3,100}$/, dingtalk: /^[A-Za-z0-9_$:+/=.-]{3,120}$/,
+};
+/** A capacidade do plugin que fala com o Feishu e o DingTalk (rc.45). */
+const CAPACIDADE_CANAIS_APP = 'canais_feishu_dingtalk';
+/** O App ID e o App Secret de cada aplicativo (os mesmos formatos do plugin). */
+const FORMATO_APP: Partial<Record<NomeCanal, { id: RegExp; segredo: RegExp }>> = {
+  feishu: { id: /^cli_[A-Za-z0-9]{8,40}$/, segredo: /^[A-Za-z0-9]{16,64}$/ },
+  dingtalk: { id: /^[A-Za-z0-9_-]{8,64}$/, segredo: /^[A-Za-z0-9_-]{16,128}$/ },
+};
 /** Canal local (sem motor): um remetente liberado do número da equipe, `whatsapp:<workspace>:<conta>:<telefone>`. */
 export type CanalLocal = `whatsapp:${string}`;
 export type CanalId = NomeCanal | CanalLocal;
@@ -48,7 +73,7 @@ export interface ItemLocal { id: string; tipo: 'texto' | 'cartao' | 'editar'; te
 export interface ResultadoLocal { ok: boolean; message_id?: string; erro?: string; passageiro?: boolean; esperarMs?: number }
 export type EntregadorLocal = (v: { userId: string; canal: CanalLocal; workspaceId: string; chatId: string }, item: ItemLocal) => Promise<ResultadoLocal>;
 /** O formato do código de cada bot (o mesmo do plugin): o que não tem esse jeito nem vai ao motor. */
-const FORMATO_TOKEN: Record<NomeCanal, RegExp> = {
+const FORMATO_TOKEN: Partial<Record<NomeCanal, RegExp>> = {
   telegram: /^\d{5,14}:[A-Za-z0-9_-]{30,64}$/,
   discord: /^[A-Za-z0-9_-]{18,40}\.[A-Za-z0-9_-]{4,12}\.[A-Za-z0-9_-]{20,90}$/,
 };
@@ -339,7 +364,7 @@ export class Canais {
         }
         sendMessage(this.d.db, this.d.bus, this.d.executor, v.workspace_id, v.user_id, conv, texto.slice(0, this.d.cfg.maxInputChars), crid,
           this.d.cfg.maxConversationMessages, this.d.cfg.maxInputChars, { queue: true });
-        if (b.chat_id && b.chat_id !== v.chat_id) this.d.db.run('UPDATE canais_vinculos SET chat_id = ? WHERE user_id = ? AND canal = ?', String(b.chat_id).slice(0, 64), v.user_id, v.canal);
+        if (b.chat_id && b.chat_id !== v.chat_id) this.d.db.run('UPDATE canais_vinculos SET chat_id = ? WHERE user_id = ? AND canal = ?', String(b.chat_id).slice(0, 128), v.user_id, v.canal);
       });
     } catch (err) {
       if (err instanceof HttpError && err.status < 500) return { ok: false, reply: RESPOSTA.naoDeu.replace('{motivo}', err.message) };
@@ -352,6 +377,7 @@ export class Canais {
   private clique(v: VinculoRow, dado: string, evento: string): { ok: boolean; reply?: string } {
     const m = /^([ar]):(apr_[a-f0-9]{32})$/.exec(dado);
     if (!m) return { ok: false };
+    if (SEM_BOTOES.has(v.canal)) return { ok: true, reply: RESPOSTA.noErgon }; // canal sem botões: nenhum clique decide
     const pid = m[2]; const decisao = m[1] === 'a' ? 'apply' : 'reject';
     const prop = this.d.db.get<{ status: string; kind: string; summary: string }>('SELECT status, kind, summary FROM agent_proposals WHERE id = ? AND workspace_id = ?', pid, v.workspace_id);
     if (!prop) return { ok: false, reply: RESPOSTA.jaDecidido };
@@ -413,7 +439,7 @@ export class Canais {
       const quem = m.role === 'agent' && m.agente && m.agente !== CLOSED_VALUE ? m.agente.replace(/[*_`[\]\n]/g, '').trim().slice(0, 60) : 'Sistema';
       if (texto) this.enfileirar(v, 'texto', { texto: `**${quem}:** ${texto}` });
       // os blocos visuais vão também como imagem, onde o canal mostra (até 4 por mensagem); o texto já leva os números
-      if (texto && m.role === 'agent' && !ehCanalLocal(v.canal) && m.content.includes(`\`\`\`${PREFIXO}`)) {
+      if (texto && m.role === 'agent' && !ehCanalLocal(v.canal) && !SEM_IMAGEM.has(v.canal) && m.content.includes(`\`\`\`${PREFIXO}`)) {
         for (const b of blocosDe(m.content).filter((x) => VAI_COMO_IMAGEM.has(x.tipo)).slice(0, 4)) this.enfileirar(v, 'imagem', { bloco: b, texto: b.titulo ?? '' });
       }
     }
@@ -431,9 +457,12 @@ export class Canais {
     // a pessoa aprova exatamente o que lê: o pedido que não cabe inteiro no canal se decide no Ergon
     const cabe = cabeNoCanal(p.kind, p.summary, LIMITE_CANAL);
     const decide = !SO_NO_ERGON.includes(p.kind) && cabe && this.externos.podeDecidirPeloCanal(v.workspace_id, v.user_id, p.id);
-    const texto = this.textoDoCartao(titulo, p.summary) + (decide ? '' : `\n\n${!cabe ? ABRIR_LONGO : p.kind === 'permission' ? 'Abra o Ergon para autorizar (pede a sua senha).'
+    // Feishu e DingTalk (rc.45): sem botões, a decisão é no app (no idioma da pessoa)
+    const semBotao = decide && SEM_BOTOES.has(v.canal);
+    const texto = this.textoDoCartao(titulo, p.summary) + (decide && !semBotao ? '' : `\n\n${semBotao ? msg(readLang(this.d.db, v.user_id), 'canal.decidaNoApp')
+      : !cabe ? ABRIR_LONGO : p.kind === 'permission' ? 'Abra o Ergon para autorizar (pede a sua senha).'
       : p.kind === 'segredo' ? 'Abra o Ergon para informar: o valor nunca passa por aqui.' : 'Abra o Ergon para responder.'}`);
-    const botoes: Array<[string, string]> = decide ? [['Aprovar', `a:${p.id}`], ['Recusar', `r:${p.id}`]] : [];
+    const botoes: Array<[string, string]> = decide && !semBotao ? [['Aprovar', `a:${p.id}`], ['Recusar', `r:${p.id}`]] : [];
     const s = this.enfileirar(v, 'cartao', { texto, botoes });
     this.d.db.run("INSERT OR IGNORE INTO canais_cartoes (proposal_id, user_id, canal, saida_id, estado) VALUES (?, ?, ?, ?, 'open')", p.id, v.user_id, v.canal, s);
   }
@@ -732,11 +761,13 @@ export class Canais {
   async estado(userId: string, ws: string): Promise<Record<NomeCanal, Record<string, unknown>>> {
     const caps = await this.d.capacidades(ws).catch(() => null);
     const c = this.d.control(ws);
-    const disponivel = !!caps?.includes(CAPACIDADE_CANAIS) && !!c?.canais;
+    const comCanais = !!caps?.includes(CAPACIDADE_CANAIS) && !!c?.canais;
     let doMotor: Record<NomeCanal, CanalNoMotor> | null = null;
-    if (disponivel) { try { doMotor = await c!.canais!(); } catch { doMotor = null; } }
+    if (comCanais) { try { doMotor = await c!.canais!(); } catch { doMotor = null; } }
     const out = {} as Record<NomeCanal, Record<string, unknown>>;
     for (const canal of CANAIS) {
+      // o Feishu e o DingTalk pedem o plugin da rc.45 (com os pacotes deles na imagem)
+      const disponivel = comCanais && (!CANAIS_DE_APP.includes(canal) || !!caps?.includes(CAPACIDADE_CANAIS_APP));
       const v = this.vinculo(userId, canal);
       const bot = !!this.d.db.get('SELECT 1 AS x FROM canais_bots WHERE user_id = ? AND canal = ?', userId, canal);
       const m = doMotor?.[canal];
@@ -745,18 +776,33 @@ export class Canais {
       const conexao = !m || !m.configurado ? null : m.estado === 'connected' ? 'conectado' : m.estado === 'fatal' ? 'sem_conexao' : 'conectando';
       out[canal] = {
         disponivel, ...(disponivel ? {} : { motivo: caps ? 'versao' : 'motor' }), bot: configurado, conexao,
-        ...(m?.erro === 'telegram_token_invalid' || /unauthorized|invalid_token|login/i.test(m?.erro ?? '') ? { codigoRecusado: true } : {}),
+        ...(m?.erro === 'telegram_token_invalid' || /unauthorized|invalid_token|login|credential|app_secret|auth/i.test(m?.erro ?? '') ? { codigoRecusado: true } : {}),
         ligado: v ? { nome: v.nome && v.nome !== CLOSED_VALUE ? v.nome : null, desde: v.created_at, avisos: Number(v.avisos) === 1 } : null,
       };
     }
     return out;
   }
-  /** Guarda o código do bot no motor (o gateway reinicia). Bot novo: a ligação de antes não vale mais. */
-  async guardarBot(userId: string, ws: string, canal: NomeCanal, token: string): Promise<void> {
-    const t = token.trim();
-    if (!FORMATO_TOKEN[canal].test(t)) throw new HttpError(400, 'formato', 'Esse não parece o código do bot. Copie de novo, inteiro.');
+  /**
+   * Guarda a credencial no motor (o gateway reinicia): o código do bot (Telegram, Discord) ou o App ID e o App Secret do
+   * aplicativo (Feishu/Lark, DingTalk; rc.45). Bot ou aplicativo novo: a ligação de antes não vale mais.
+   */
+  async guardarBot(userId: string, ws: string, canal: NomeCanal, b: { token?: string; appId?: string; appSecret?: string; dominio?: 'feishu' | 'lark' }): Promise<void> {
+    let cred: CredencialCanal;
+    const app = FORMATO_APP[canal];
+    if (app) {
+      const id = String(b.appId ?? '').trim(); const segredo = String(b.appSecret ?? '').trim();
+      if (!app.id.test(id) || !app.segredo.test(segredo)) throw new HttpError(400, 'formato_app', 'O App ID ou o App Secret não têm o formato esperado. Copie de novo, inteiros.');
+      cred = { appId: id, appSecret: segredo, ...(canal === 'feishu' ? { dominio: b.dominio === 'lark' ? 'lark' as const : 'feishu' as const } : {}) };
+    } else {
+      const t = String(b.token ?? '').trim();
+      if (!FORMATO_TOKEN[canal]?.test(t)) throw new HttpError(400, 'formato', 'Esse não parece o código do bot. Copie de novo, inteiro.');
+      cred = { token: t };
+    }
     const c = this.exigirControle(ws);
-    try { await c.setCanal!(canal, t); } catch (e) { this.erroDaTela(e); }
+    if (CANAIS_DE_APP.includes(canal) && !(await this.d.capacidades(ws).catch(() => null))?.includes(CAPACIDADE_CANAIS_APP)) {
+      throw new HttpError(409, 'motor', 'A equipe precisa estar ligada (e atualizada) para isso.');
+    }
+    try { await c.setCanal!(canal, cred); } catch (e) { this.erroDaTela(e); }
     this.d.db.tx(() => {
       this.d.db.run('INSERT INTO canais_bots (user_id, canal, workspace_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, canal) DO UPDATE SET workspace_id = excluded.workspace_id, created_at = excluded.created_at', userId, canal, ws, now());
       this.esquecer(userId, canal);
@@ -770,8 +816,8 @@ export class Canais {
     const c = this.exigirControle(ws);
     let r: { userId: string; userName: string; chatId: string };
     try { r = await c.parearCanal!(canal, cod); } catch (e) { this.erroDaTela(e); }
-    if (!/^[0-9]{3,30}$/.test(r.userId)) throw new HttpError(502, 'motor', 'A equipe não confirmou a conta agora. Tente de novo.');
-    const chat = /^-?[0-9]{3,30}$/.test(r.chatId) ? r.chatId : r.userId;
+    if (!FORMATO_ID[canal].test(r.userId)) throw new HttpError(502, 'motor', 'A equipe não confirmou a conta agora. Tente de novo.');
+    const chat = FORMATO_CHAT[canal].test(r.chatId) ? r.chatId : r.userId;
     this.d.db.tx(() => {
       this.esquecer(userId, canal);
       this.d.db.run(`INSERT INTO canais_vinculos (user_id, canal, workspace_id, externo_id, chat_id, nome, avisos, cursor_rowid, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,

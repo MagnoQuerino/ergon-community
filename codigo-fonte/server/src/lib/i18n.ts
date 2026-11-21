@@ -85,6 +85,13 @@ export const MENSAGENS = {
   'canal.ligarCards': { 'pt-BR': 'Ligar o card #{a} ao #{b}?', en: 'Link card #{a} to #{b}?', 'zh-CN': '将卡片 #{a} 关联到 #{b}？', hi: 'कार्ड #{a} को #{b} से जोड़ें?' },
   'canal.regraSugerida': { 'pt-BR': 'Regra sugerida: {texto}', en: 'Suggested rule: {texto}', 'zh-CN': '建议的规则：{texto}', hi: 'सुझाया गया नियम: {texto}' },
   // ——— PDF (lib/pdf-documento.ts): a numeração das páginas ———
+  // rc.45: Feishu e DingTalk não têm botões pelo gateway: o cartão diz onde decidir
+  'canal.decidaNoApp': {
+    'pt-BR': 'Para aprovar ou recusar, abra o Ergon: neste canal a decisão é no app.',
+    en: 'To approve or decline, open Ergon: on this channel the decision is made in the app.',
+    'zh-CN': '如需批准或拒绝，请打开 Ergon：在此渠道中需在应用内做决定。',
+    hi: 'मंज़ूर या अस्वीकार करने के लिए Ergon खोलें: इस चैनल पर फ़ैसला ऐप में होता है।',
+  },
   'pdf.pagina': { 'pt-BR': '{pagina} / {total}', en: '{pagina} / {total}', 'zh-CN': '第 {pagina} / {total} 页', hi: '{pagina} / {total}' },
 } as const satisfies Record<string, Texto4>;
 

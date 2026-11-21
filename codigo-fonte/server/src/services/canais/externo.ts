@@ -58,7 +58,7 @@ const NOME_DA_CATEGORIA: Record<Categoria, string> = {
 
 /** O nome curto do canal (whatsapp:<ws>:<conta>:<tel> → whatsapp). */
 export const tipoDoCanal = (canal: string): string => canal.split(':')[0];
-const nomeDoCanal = (canal: string): string => ({ whatsapp: 'WhatsApp', telegram: 'Telegram', discord: 'Discord', teams: 'Teams' } as Record<string, string>)[tipoDoCanal(canal)] ?? tipoDoCanal(canal);
+const nomeDoCanal = (canal: string): string => ({ whatsapp: 'WhatsApp', telegram: 'Telegram', discord: 'Discord', teams: 'Teams', feishu: 'Feishu/Lark', dingtalk: 'DingTalk' } as Record<string, string>)[tipoDoCanal(canal)] ?? tipoDoCanal(canal);
 
 const DADOS = /\b(clientes?|contatos?|e-?mails?|arquivos?|documentos?|dados|planilhas?|base|listas?|conversas?|mensagens|contratos?|leads?|vendas|pedidos|fornecedores|funcionarios|clients?|customers?|contacts?|files?|documents?|data|records|database|messages|suppliers|employees)\b/;
 const TUDO = /\b(tod[oa]s?|tudo|inteir[oa]s?|complet[oa]s?|all|every|entire|whole|full)\b/;
