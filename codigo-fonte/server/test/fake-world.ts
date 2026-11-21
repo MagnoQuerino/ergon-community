@@ -134,8 +134,11 @@ export class FakeWorld {
    * contêiner, a chave do cofre dele, o aparelho-nuvem, o que ele contou (estado, instalação no relé, atividade) e os
    * sinais do computador (aberto/fechado). `nuvem(sws)` ativa e devolve o token de partida.
    */
-  clouds = new Map<string, { bootToken: string; vaultKey: string | null; deviceId: string | null; states: string[]; relay: string | null; active: boolean; presence: boolean[] }>();
-  nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [] }); return bootToken; }
+  clouds = new Map<string, { bootToken: string; vaultKey: string | null; deviceId: string | null; states: string[]; relay: string | null; active: boolean; presence: boolean[];
+    /** o próximo horário de rotina contado (nextWakeAt) e por quem: 'pc' ou 'nuvem' */ nextWakeAt?: string | null; wakeLog: Array<{ by: 'pc' | 'nuvem'; at: string | null }>;
+    /** a posse (cloud.ts): último sinal de aberto e a hora em que o computador avisou que fechou */ pcSeenAt: number | null; pcLeftAt: number | null; pcSince?: number | null;
+    /** já preparado: trocar a chave do cofre (disco novo) é recusado com key_locked */ preparado?: boolean }>();
+  nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [], wakeLog: [], pcSeenAt: null, pcLeftAt: null }); return bootToken; }
   /** giros de chave recebidos (mudança kind rotation): de qual workspace, para que versão, por quem */
   rotations: Array<{ ws: string; keyVersion: number; by: string }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
@@ -345,7 +348,7 @@ export class FakeWorld {
       if (!c) return { fail: [401, 'boot_token'] };
       const [sws, cl] = c; const w = this.workspaces.get(sws)!;
       if (p === '/v1/cloud/boot/vault') return { json: { vaultKey: cl.vaultKey } };
-      if (p === '/v1/cloud/boot/key') { if (cl.vaultKey && b.replace !== true) return { fail: [409, 'key_exists'] }; cl.vaultKey = String(b.key); return { json: { ok: true } }; }
+      if (p === '/v1/cloud/boot/key') { if (cl.vaultKey && b.replace !== true) return { fail: [409, 'key_exists'] }; if (cl.vaultKey && cl.preparado) return { fail: [409, 'key_locked'] }; cl.vaultKey = String(b.key); return { json: { ok: true } }; }
       if (p === '/v1/cloud/boot/state') { cl.states.push(b.detail ? `${b.state}: ${b.detail}` : String(b.state)); return { json: { ok: true } }; }
       if (p === '/v1/cloud/boot') {
         crypto.createPublicKey({ key: Buffer.from(b.publicKey, 'base64'), format: 'der', type: 'spki' });
@@ -402,7 +405,15 @@ export class FakeWorld {
     if (key === 'POST /v1/cloud/presence') {
       const cl = this.clouds.get(b.workspaceId);
       if (!mine(b.workspaceId) || !cl) return { fail: [409, 'no_cloud'] };
-      if ((dev as Device & { kind?: string }).kind !== 'cloud') cl.presence.push(b.open !== false);
+      if ((dev as Device & { kind?: string }).kind !== 'cloud') {
+        cl.presence.push(b.open !== false);
+        const t = Date.now();
+        if (b.open !== false) {
+          if (cl.pcSeenAt === null || t - cl.pcSeenAt > 120_000) { if (cl.pcSeenAt !== null) cl.pcLeftAt = Math.max(cl.pcLeftAt ?? 0, cl.pcSeenAt + 120_000); cl.pcSince = t; }
+          cl.pcSeenAt = t;
+        } else { if (cl.pcSeenAt !== null) cl.pcLeftAt = t; cl.pcSeenAt = null; }
+        if (b.nextWakeAt !== undefined) { cl.nextWakeAt = b.nextWakeAt as string | null; cl.wakeLog.push({ by: 'pc', at: cl.nextWakeAt }); }
+      }
       return { json: { ok: true, pcHoldsForSeconds: 120, ...(this.antigo ? {} : { keyWanted: (dev as Device & { kind?: string }).kind !== 'cloud' && this.keyWanted(b.workspaceId) }) } };
     }
     if (key === 'POST /v1/cloud/app-state') {
@@ -410,7 +421,13 @@ export class FakeWorld {
       if (d.kind !== 'cloud' || !cl) return { fail: [403, 'not_cloud'] };
       cl.states.push(b.detail ? `${b.state}: ${b.detail}` : String(b.state)); cl.active = b.active === true;
       if (typeof b.relayInstallationId === 'string') cl.relay = b.relayInstallationId;
-      return { json: { ok: true } };
+      if (b.state === 'pronto') cl.preparado = true;
+      if (b.nextWakeAt !== undefined) { cl.nextWakeAt = b.nextWakeAt as string | null; cl.wakeLog.push({ by: 'nuvem', at: cl.nextWakeAt }); }
+      // a posse como o World a vê (PC_HOLD_SECONDS = 120)
+      const aberto = cl.pcSeenAt !== null && Date.now() - cl.pcSeenAt < 120_000;
+      const ate = aberto ? Date.now() : Math.max(cl.pcLeftAt ?? 0, cl.pcSeenAt !== null ? cl.pcSeenAt + 120_000 : 0) || null;
+      const iso = (x: number | null | undefined) => (x ? new Date(x).toISOString() : null);
+      return { json: { ok: true, pcOpen: aberto, pcHeldUntil: iso(ate), pcSince: aberto ? iso(cl.pcSince) : null, pcLeftAt: iso(cl.pcLeftAt) } };
     }
     if (key === 'POST /v1/ai/credentials') {
       if (!mine(b.workspaceId)) return { fail: [404, 'sync_workspace'] };

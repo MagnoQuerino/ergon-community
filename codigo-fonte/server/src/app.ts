@@ -105,7 +105,7 @@ import { chaveDaColuna } from './services/colunas.ts';
 import { USER_COLUMNS } from './services/seed.ts';
 import { loadWorld, type CloudTasksHost } from './world-hook.ts';
 import { providerKeyOf, saveProviderKey } from './services/provider-keys.ts';
-import { exportBlueprint } from './services/blueprint.ts';
+import { exportBlueprint, setAoMudarFerramentasDaEquipe } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
 import { competenciasDeTerceiros } from './services/competencias.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
@@ -728,10 +728,21 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // um motor só: as Conexões e os benefícios da equipe ligam por padrão uma vez por execução do servidor (ausente = ligado),
   // salvo os que a pessoa desligou
   let conexoesPadrao = false;
+  // na nuvem do World, a equipe é a do computador: Executar código e Terminal ligados lá com a senha (a escolha chega no
+  // esqueleto da sincronia) valem também aqui, onde ninguém aceita os termos (a conta local é a da nuvem)
+  const codigoDaEquipe = (ws: string) => codigoPorPadrao(db, ws) || (cfg.mode === 'cloud' && ['calculo', 'terminal'].some((t) => getSetting(db, ws, `ferramentas.${t}`) === 'ligado'));
+  // um esqueleto recebido mudou as ferramentas da equipe: o motor fica com a escolha já, sem esperar a próxima abertura
+  setAoMudarFerramentasDaEquipe(db, (ws) => {
+    void (async () => {
+      const x = aiOf(ws);
+      const mudou = await x.ensureBeneficios(ferramentasDesligadas(db, [ws]), undefined, { codigo: codigoDaEquipe(ws) });
+      if (mudou && (mudou.ligou.length || mudou.desligou.length)) await x.refreshToolsets();
+    })().catch(() => undefined);
+  });
   const conexoesNoMotorUnico = async () => {
     if (motors.perPerson || conexoesPadrao || !control) return;
     // termos aceitos por quem é dono de algum workspace: Executar código e Terminal ligam por padrão (termos.ts)
-    const codigo = db.all<{ workspace_id: string }>('SELECT id AS workspace_id FROM workspaces').some((w) => codigoPorPadrao(db, w.workspace_id));
+    const codigo = db.all<{ workspace_id: string }>('SELECT id AS workspace_id FROM workspaces').some((w) => codigoDaEquipe(w.workspace_id));
     const mudou = await ai.ensureBeneficios(ferramentasDesligadas(db, null), undefined, { codigo });
     conexoesPadrao = true;
     if (mudou && (mudou.ligou.length || mudou.desligou.length)) await ai.refreshToolsets();
