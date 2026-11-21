@@ -85,6 +85,18 @@ export const MENSAGENS = {
   'canal.ligarCards': { 'pt-BR': 'Ligar o card #{a} ao #{b}?', en: 'Link card #{a} to #{b}?', 'zh-CN': '将卡片 #{a} 关联到 #{b}？', hi: 'कार्ड #{a} को #{b} से जोड़ें?' },
   'canal.regraSugerida': { 'pt-BR': 'Regra sugerida: {texto}', en: 'Suggested rule: {texto}', 'zh-CN': '建议的规则：{texto}', hi: 'सुझाया गया नियम: {texto}' },
   // ——— PDF (lib/pdf-documento.ts): a numeração das páginas ———
+  // rc.45: a nota da primeira mensagem pela conta ligada (fica na conversa do canal, no idioma de quem ligou)
+  'canal.primeiraMensagem': {
+    'pt-BR': 'Sistema — primeira mensagem pela conta do {canal} "{nome}", ligada em {quando}. Se não foi você que ligou esta conta, desligue em Conexões › {canal}.',
+    en: 'System — first message from the {canal} account "{nome}", linked on {quando}. If you did not link this account, turn it off in Connections › {canal}.',
+    'zh-CN': '系统 — 来自 {canal} 账户“{nome}”的第一条消息，该账户于 {quando} 关联。如果不是你关联的，请在“连接 › {canal}”中关闭。',
+    hi: 'सिस्टम — {canal} खाते "{nome}" से पहला संदेश, जो {quando} को जोड़ा गया। अगर यह खाता आपने नहीं जोड़ा, तो कनेक्शन › {canal} में बंद करें।',
+  },
+  // rc.45: a linha final do cartão decidido, no idioma de quem recebe (a hora no formato do idioma)
+  'canal.aprovadoAs': { 'pt-BR': 'Aprovado por você às {hora}.', en: 'Approved by you at {hora}.', 'zh-CN': '你已于 {hora} 批准。', hi: 'आपने {hora} बजे मंज़ूर किया।' },
+  'canal.recusadoAs': { 'pt-BR': 'Recusado por você às {hora}.', en: 'Declined by you at {hora}.', 'zh-CN': '你已于 {hora} 拒绝。', hi: 'आपने {hora} बजे अस्वीकार किया।' },
+  'canal.aprovadoFalhou': { 'pt-BR': 'Aprovado, mas não deu certo: {motivo}', en: 'Approved, but it did not work: {motivo}', 'zh-CN': '已批准，但没有成功：{motivo}', hi: 'मंज़ूर हुआ, पर काम नहीं हुआ: {motivo}' },
+  'canal.jaDecididoLinha': { 'pt-BR': 'Já decidido no Ergon.', en: 'Already decided in Ergon.', 'zh-CN': '已在 Ergon 中决定。', hi: 'Ergon में पहले ही तय हो चुका है।' },
   // rc.45: Feishu e DingTalk não têm botões pelo gateway: o cartão diz onde decidir
   'canal.decidaNoApp': {
     'pt-BR': 'Para aprovar ou recusar, abra o Ergon: neste canal a decisão é no app.',

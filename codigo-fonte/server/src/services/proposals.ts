@@ -20,6 +20,7 @@ import type { Plan } from './purpose.ts';
 import { cardTitle } from './card-title.ts';
 import { mesmaRegra, parseRegras, resumoDaProposta, type PropostaRegra } from './conexoes/regras.ts';
 import { vistaDaAprovacao } from './aprovacao-cartao.ts';
+import { fmtMoeda } from '../lib/i18n.ts';
 
 export type Proposal =
   | { kind: 'sector'; agent: string; sector: string }
@@ -282,7 +283,7 @@ function describe(db: Db, workspaceId: string, p: Proposal): string {
   }
   if (p.kind === 'ledger') {
     const ent = p.items.filter((i) => i.valor > 0).reduce((x, i) => x + i.valor, 0); const sai = p.items.filter((i) => i.valor < 0).reduce((x, i) => x + i.valor, 0);
-    const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const brl = (v: number) => fmtMoeda(null, v, 'BRL');
     const dup = p.duplicados?.length ? ` (${p.duplicados.map((d) => `L${d.n} é o mesmo gasto de L${d.de}`).join('; ')}: entra uma vez só)` : '';
     return `Registrar ${p.items.length} lançamento(s) lidos pela rotina ${p.routine}: entradas ${brl(ent)}, saídas ${brl(Math.abs(sai))}${dup}${p.items.some((i) => i.confianca === 'baixa') ? ' (há lançamentos lidos de PDF: confira antes)' : ''}`;
   }

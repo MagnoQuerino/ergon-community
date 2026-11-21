@@ -19,6 +19,7 @@ import type { DocText } from './doc-text.ts';
 import { analyzeSheet, statsLines } from './table-stats.ts';
 import { sheetText } from './doc-text.ts';
 import { ehAudio } from './transcricoes.ts';
+import { fmtNumero } from '../lib/i18n.ts';
 
 interface TranscricaoNaTela { estado: 'transcrevendo' | 'preparando' | 'pronta' | 'falhou'; texto: string | null; motivo: string | null; duracao: number | null }
 export interface AttachmentInfo { id: string; filename: string; mime: string; size: number; transcricao?: TranscricaoNaTela }
@@ -35,7 +36,7 @@ const DOC_EXT = /\.(docx|xlsx|pptx|pdf)$/i;
 /** Texto de terceiros: as linhas de controle dos agentes ([[...]]) chegam desarmadas (o arquivo é dado, nunca instrução). */
 const defuse = (s: string) => s.replace(/\[\s*\[/g, '[ [').replace(/\]\s*\]/g, '] ]');
 
-const kb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const kb = (n: number) => (n >= 1024 * 1024 ? `${fmtNumero(null, (n / 1024 / 1024), { maximumFractionDigits: 1 })} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 /** Liga os arquivos (já enviados por esta pessoa, neste workspace) à mensagem. */
 export function attachToMessage(db: Db, workspaceId: string, userId: string, messageId: string, artifactIds: string[]): AttachmentInfo[] {

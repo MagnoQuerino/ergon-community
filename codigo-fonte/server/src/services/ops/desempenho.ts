@@ -17,6 +17,7 @@
  * concluída, fora do cumprimento de prazo; aberta com data de conclusão → vale a situação (aberta).
  */
 import { parseDate, toCsv, type CsvTable } from '../csv.ts';
+import { fmtNumero } from '../../lib/i18n.ts';
 
 export const OP_VERSION = 'analise-desempenho v1';
 
@@ -136,7 +137,7 @@ export function analyzePerformance(t: CsvTable, referencia: string): Performance
 }
 
 const br = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
-const pctTxt = (v: number | null) => (v === null ? '—' : `${v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`);
+const pctTxt = (v: number | null) => (v === null ? '—' : `${fmtNumero(null, v, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`);
 const md = (s: string) => s.replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ').replace(/[<>]/g, (c) => (c === '<' ? '&lt;' : '&gt;'));
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
 
@@ -144,7 +145,7 @@ const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.p
 export function indicatorsCsv(p: Performance): string {
   const head = ['escopo', 'responsavel', 'total', 'concluidas', 'abertas', 'abertas_em_atraso', 'alteracoes_de_prazo', 'concluidas_com_data',
     'no_prazo_original', 'pct_prazo_original', 'no_prazo_vigente', 'pct_prazo_vigente', 'data_referencia'];
-  const n = (v: number | null) => (v === null ? '' : v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const n = (v: number | null) => (v === null ? '' : fmtNumero(null, v, { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
   const line = (escopo: string, resp: string, i: Indicators) => [escopo, resp, i.total, i.concluidas, i.abertas, i.abertasEmAtraso, i.alteracoesDePrazo,
     i.concluidasComData, i.noPrazoOriginal, n(i.pctPrazoOriginal), i.noPrazoVigente, n(i.pctPrazoVigente), p.referencia];
   return toCsv([head, line('geral', '', p.geral), ...p.porResponsavel.map((r) => line('responsavel', r.responsavel, r))]);

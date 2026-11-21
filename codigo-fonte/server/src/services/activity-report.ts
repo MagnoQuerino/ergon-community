@@ -9,6 +9,7 @@ import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold } from '../lib/util.ts';
 import { inicioDoDia, localParts } from './routine-time.ts';
 import { VERSION, BUILD } from '../version.ts';
+import { fmtNumero } from '../lib/i18n.ts';
 
 const MAX_TEXT = 6000;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -92,7 +93,7 @@ export function reportPeriod(tz: string, de: unknown, ate: unknown): { de: strin
 const cell = (v: unknown): string => semSegredos(String(v ?? '')).replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 const quote = (s: string): string => semSegredos(s).split(/\r?\n/).map((l) => `> ${l}`).join('\n');
 /** Texto longo: corta com aviso de quanto ficou de fora. */
-const long = (s: string, max = MAX_TEXT): string => (s.length > max ? `${s.slice(0, max)}\n[… cortado aqui: mais ${(s.length - max).toLocaleString('pt-BR')} caracteres]` : s);
+const long = (s: string, max = MAX_TEXT): string => (s.length > max ? `${s.slice(0, max)}\n[… cortado aqui: mais ${fmtNumero(null, (s.length - max))} caracteres]` : s);
 /** Trechos em que o agente diz que não conseguiu (triagem por palavras: pode haver falso positivo). */
 const CANT_PT = /nao (tenho|consigo|consegui|posso|pude)( [a-z]+){0,3} (acesso|acessar|ler|criar|enviar|escrever|salvar|gravar|conectar|consultar|permissao|ferramenta)|sem (acesso|permissao)|nao tenho como|nao e possivel|nao foi possivel|fora do meu alcance/;
 /** o mesmo, quando o agente responde em inglês ("I couldn't access", "I don't have permission", "it wasn't possible") */
@@ -113,7 +114,7 @@ export function activityReport(db: Db, o: ReportOpts): { markdown: string; filen
   const secs = (a: string | null, b: string | null): string => (a && b ? `${Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 1000))} s` : '—');
   const rows = <T,>(label: string, sql: string, ...args: unknown[]): T[] => {
     const r = db.all<T>(`${sql} LIMIT ${MAX_ROWS + 1}`, ...(args as never[]));
-    if (r.length > MAX_ROWS) { cortes.push(`${label}: mostradas as ${MAX_ROWS.toLocaleString('pt-BR')} primeiras do período`); r.length = MAX_ROWS; }
+    if (r.length > MAX_ROWS) { cortes.push(`${label}: mostradas as ${fmtNumero(null, MAX_ROWS)} primeiras do período`); r.length = MAX_ROWS; }
     return r;
   };
 
@@ -330,7 +331,7 @@ export function activityReport(db: Db, o: ReportOpts): { markdown: string; filen
     // só as respostas mais recentes: num período cheio, decifrar e varrer todas travaria o servidor por segundos
     const respostas = db.all<{ agent_id: string; content: string; created_at: string }>(`SELECT c.agent_id, m.content, m.created_at FROM conversations c CROSS JOIN messages m
       WHERE c.workspace_id = ? AND c.owner_user_id = ? AND m.conversation_id = c.id AND m.role = 'agent' AND ${NO_PERIODO} ORDER BY m.created_at DESC, m.rowid DESC LIMIT ${MAX_RESPOSTAS + 1}`, ws, o.userId, from, to);
-    if (respostas.length > MAX_RESPOSTAS) { cortes.push(`Respostas em que o agente diz que não conseguiu: procuradas nas ${MAX_RESPOSTAS.toLocaleString('pt-BR')} respostas mais recentes do período`); respostas.length = MAX_RESPOSTAS; }
+    if (respostas.length > MAX_RESPOSTAS) { cortes.push(`Respostas em que o agente diz que não conseguiu: procuradas nas ${fmtNumero(null, MAX_RESPOSTAS)} respostas mais recentes do período`); respostas.length = MAX_RESPOSTAS; }
     const cant: string[] = [];
     for (const m of respostas.reverse()) {
       const hit = CANT.exec(fold(m.content));

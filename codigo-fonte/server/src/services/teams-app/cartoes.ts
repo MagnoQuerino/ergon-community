@@ -6,6 +6,7 @@
 import { docsComoTexto, limparCaminhos } from '../../../../shared/caminhos.ts';
 import { visuaisComoTexto } from '../../../../shared/visuais/texto.ts';
 import { MAX_CARTAO, MAX_TEXTO_SAIDA, tokenCartao, type ChavesInstalacao } from './protocolo.ts';
+import { fmtData, msg, type Idioma } from '../../lib/i18n.ts';
 
 const NOME_DO_MOTOR = new RegExp('\\bHer' + 'mes\\b', 'gi');
 const corta = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1)).trimEnd()}…`);
@@ -88,8 +89,18 @@ export function dataHora(iso: string, tz: string): string {
   } catch { return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')} às ${hora(iso, tz)}`; }
 }
 
-/** A linha final de uma decisão já tomada. */
-export function linhaFinal(e: EstadoDecisao, tz: string): string {
+/**
+ * A linha final de uma decisão já tomada. Com o idioma de quem recebe (rc.45: os canais Telegram, Discord, Feishu e
+ * DingTalk), no idioma dele e com a hora do jeito dele; sem idioma, o português de sempre ("às 17h02").
+ */
+export function linhaFinal(e: EstadoDecisao, tz: string, lang?: Idioma | null): string {
+  if (lang && lang !== 'pt-BR') {
+    const h = fmtData(lang, e.decidedAt ?? new Date(), { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+    if (e.status === 'applied') return msg(lang, 'canal.aprovadoAs', { hora: h });
+    if (e.status === 'rejected') return msg(lang, 'canal.recusadoAs', { hora: h });
+    if (e.status === 'failed') return msg(lang, 'canal.aprovadoFalhou', { motivo: corta(textoParaTeams(e.result ?? '—', 400), 300) });
+    return msg(lang, 'canal.jaDecididoLinha');
+  }
   if (e.jaDecidido && e.status === 'proposed') return 'Já decidido no Ergon.';
   if (e.status === 'applied') return `Aprovado por você às ${hora(e.decidedAt, tz)}.`;
   if (e.status === 'rejected') return `Recusado por você às ${hora(e.decidedAt, tz)}.`;

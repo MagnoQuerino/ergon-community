@@ -184,7 +184,7 @@ test('a mensagem em chinês pelo Feishu vira pedido na conversa "Feishu/Lark" co
   assert.equal(c.title, 'Feishu/Lark'); assert.equal(c.agent_id, coordinatorFor(h.db, s.workspaceId));
   const msgs = h.db.all<{ role: string; content: string }>('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY rowid', conv);
   assert.ok(msgs.some((m) => m.role === 'user' && m.content === '请整理第四季度的销售报告'));
-  assert.ok(msgs.some((m) => m.role === 'system' && m.content.includes('primeira mensagem pela conta do Feishu/Lark')));
+  assert.ok(msgs.some((m) => m.role === 'system' && m.content.startsWith('系统 — 来自 Feishu/Lark 账户“李娜”的第一条消息')), 'a nota da primeira mensagem no idioma de quem ligou');
   await ate(() => motor.pedidos.length === 1, 'o pedido não foi à equipe');
   const instr = motor.pedidos[0].instructions ?? '';
   assert.ok(instr.includes(notaCanal('feishu')), 'o agente sabe que a conversa é pelo Feishu');

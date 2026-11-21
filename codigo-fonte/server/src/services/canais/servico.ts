@@ -32,7 +32,7 @@ import { blocosDe } from '../../../../shared/visuais/cercas.ts';
 import { visualParaPng } from '../visuais/png.ts';
 import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
 import { avisoDoCard } from '../resumo-tarefa.ts';
-import { msg } from '../../lib/i18n.ts';
+import { fmtData, msg } from '../../lib/i18n.ts';
 import { readLang } from '../prefs.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
@@ -360,7 +360,7 @@ export class Canais {
           const nome = v.nome && v.nome !== CLOSED_VALUE ? v.nome : 'sem nome';
           this.notaNaConversa(v.workspace_id, conv, ehCanalLocal(v.canal)
             ? `Sistema — primeira mensagem pelo número da equipe no WhatsApp, de ${nome} (liberado em ${dataHora(v.created_at, workspaceTz(this.d.db, v.workspace_id))}). Se não foi você que liberou este telefone, tire em Conexões › WhatsApp.`
-            : `Sistema — primeira mensagem pela conta do ${NOME_CANAL[v.canal as NomeCanal]} "${nome}", ligada em ${dataHora(v.created_at, workspaceTz(this.d.db, v.workspace_id))}. Se não foi você que ligou esta conta, desligue em Conexões › ${NOME_CANAL[v.canal as NomeCanal]}.`);
+            : this.notaPrimeira(v, nome));
         }
         sendMessage(this.d.db, this.d.bus, this.d.executor, v.workspace_id, v.user_id, conv, texto.slice(0, this.d.cfg.maxInputChars), crid,
           this.d.cfg.maxConversationMessages, this.d.cfg.maxInputChars, { queue: true });
@@ -371,6 +371,17 @@ export class Canais {
       throw err;
     }
     return null;
+  }
+
+  /** A nota da primeira mensagem pela conta ligada: no idioma de quem ligou (rc.45); em português, a de sempre. */
+  private notaPrimeira(v: VinculoRow, nome: string): string {
+    const tz = workspaceTz(this.d.db, v.workspace_id);
+    const canal = NOME_CANAL[v.canal as NomeCanal];
+    const lang = readLang(this.d.db, v.user_id);
+    if (lang && lang !== 'pt-BR') {
+      return msg(lang, 'canal.primeiraMensagem', { canal, nome, quando: fmtData(lang, v.created_at, { timeZone: tz, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) });
+    }
+    return `Sistema — primeira mensagem pela conta do ${canal} "${nome}", ligada em ${dataHora(v.created_at, tz)}. Se não foi você que ligou esta conta, desligue em Conexões › ${canal}.`;
   }
 
   /** Clique em Aprovar/Recusar: decide pela mesma função da tela, fora do pedido (pode chamar outro app e demorar). */
@@ -499,7 +510,7 @@ export class Canais {
       const v = this.vinculo(r.user_id, r.canal);
       this.d.db.run("UPDATE canais_cartoes SET estado = 'final' WHERE proposal_id = ? AND user_id = ? AND canal = ?", r.proposal_id, r.user_id, r.canal);
       if (!origem || !v || origem.payload === CLOSED_VALUE) continue;
-      const linha = linhaFinal({ status: r.status ?? 'gone', result: r.result, decidedAt: r.decided_at }, tz);
+      const linha = linhaFinal({ status: r.status ?? 'gone', result: r.result, decidedAt: r.decided_at }, tz, readLang(this.d.db, r.user_id));
       const texto = String((JSON.parse(origem.payload) as { texto?: string }).texto ?? '');
       if (origem.status === 'pending' || (origem.status === 'em_voo' && !origem.message_id)) {
         // ainda não saiu: sai já com a linha final, sem botões

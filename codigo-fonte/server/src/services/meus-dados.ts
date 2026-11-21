@@ -29,6 +29,7 @@ import type { WorkspaceOwners } from './people.ts';
 import { workspaceTz } from './routine-proposals.ts';
 import { DEFAULT_TZ } from './routine-time.ts';
 import type { Routines } from './routines.ts';
+import { fmtNumero } from '../lib/i18n.ts';
 
 /** documentos e entregas: até 200 MB por arquivo baixado */
 const MEUS_DADOS_MAX_BYTES = 200 * 1024 * 1024;
@@ -206,7 +207,7 @@ const diaNoFuso = (d: Date, tz: string): string => {
   return `${p.year}-${p.month}-${p.day}`;
 };
 const data = (iso: string | null | undefined): Date | undefined => { if (!iso) return undefined; const d = new Date(iso); return Number.isNaN(d.getTime()) ? undefined : d; };
-const mb = (n: number) => `${(Math.round((n / 1024 / 1024) * 10) / 10).toLocaleString('pt-BR')} MB`;
+const mb = (n: number) => `${fmtNumero(null, (Math.round((n / 1024 / 1024) * 10) / 10))} MB`;
 /** devolve a vez: o servidor atende os outros pedidos antes do próximo item */
 const pausa = () => new Promise<void>((ok) => setImmediate(ok));
 function agrupar<T, K>(lista: T[], chave: (x: T) => K): Map<K, T[]> {

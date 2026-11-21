@@ -5,7 +5,7 @@
 // E o tradutor do que o servidor manda com CÓDIGO + VALORES (server/src/lib/textos.ts): o campo de sempre, em português,
 // e ao lado o mesmo nome com "_t" ({ message, message_t }, { frase, frase_t }). Em outro idioma, a tela troca o texto
 // pelo do dicionário (área "servidor"); sem código, ou com um código que esta tela não conhece, fica o português.
-import { fmtData, fmtLista, fmtNumero, idiomaAtual, onIdioma, t, type Chave } from '../i18n/index.ts';
+import { fmtData, fmtLista, fmtMoeda, fmtNumero, idiomaAtual, onIdioma, t, type Chave, type Moeda } from '../i18n/index.ts';
 import { IDIOMA_PADRAO } from '../i18n/idiomas.ts';
 import { pt } from '../i18n/pt/index.ts';
 import type { Mensagem } from '../i18n/tipos.ts';
@@ -39,6 +39,12 @@ function montar(v: unknown, fundo = 0): string | null {
   if (!ehTexto(v)) return null;
   const vals = v.valores ?? {};
   let s: string;
+  if (v.codigo === 'moeda') {
+    // rc.45: o dinheiro no formato do idioma, com a moeda que veio (R$ 1.290,50 · R$1,290.50)
+    const n = Number(vals.v); const moeda = String(vals.moeda ?? 'BRL');
+    if (!Number.isFinite(n) || !['BRL', 'USD', 'EUR', 'CNY', 'INR'].includes(moeda)) return null;
+    return fmtMoeda(n, moeda as Moeda);
+  }
   if (v.codigo === 'decimal') {
     // o tamanho da Saúde ("51,4 MB"): o número no formato do idioma, com as mesmas casas
     const n = Number(vals.v); const casas = Math.min(6, Math.max(0, Math.trunc(Number(vals.casas ?? 1)) || 0));

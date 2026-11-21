@@ -743,6 +743,19 @@ const servidor = {
   'saude.googleVence': 'Google vence em menos de 2 dias (modo de teste)',
   'saude.nenhumBackup': 'nenhum backup ainda',
   'saude.gbLivres': '{gb} GB livres',
+  // rc.45: a situação das contas de IA e o recurso que chega com a atualização
+  'iaConta.ocupada': 'a equipe de IA está ocupada: confira de novo em instantes',
+  'iaConta.indisponivel': 'indisponível nesta instalação',
+  'iaConta.naoConectada': 'não conectada',
+  'iaConta.conectada': 'conectada',
+  'iaConta.conectadaGratis': 'conectada (plano gratuito)',
+  'iaConta.conectadaPlano': 'conectada (plano {plano})',
+  'erro.recursosAtualizando': 'esta capacidade chega com a próxima atualização da equipe neste computador',
+  // rc.45: a nota do consumo
+  'consumo.nota.subscription': 'Assinatura do ChatGPT: sem custo por uso (vale a mensalidade). Os tokens mostram quanto a equipe trabalhou.',
+  'consumo.nota.credits': 'Conta com créditos: o custo aparece quando o provedor informa o valor cobrado; o saldo fica no portal da conta.',
+  'consumo.nota.api': 'Chave de API: o custo aparece quando o provedor informa o valor cobrado de cada execução.',
+  'consumo.nota.none': 'Sem conta de IA conectada: a equipe não trabalha nos pedidos, sem consumo.',
 } as const satisfies Area;
 
 export default servidor;

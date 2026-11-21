@@ -58,6 +58,19 @@ const servidor: TraducaoParcial<typeof pt> = {
   'erro.rotinaExecutando': '这个例行任务已在运行：请等它完成。',
   'erro.respostaEmAndamento': '这段对话中还有回复正在进行。',
   'erro.respostaEmAndamentoFila': '这段对话中还有回复正在进行：请等待、取消它，或按 Ctrl+Enter 把你的消息排队。',
+  // rc.45: a situação das contas de IA e o recurso que chega com a atualização
+  'iaConta.ocupada': 'AI 团队正忙：请稍后再查看',
+  'iaConta.indisponivel': '此安装中不可用',
+  'iaConta.naoConectada': '未连接',
+  'iaConta.conectada': '已连接',
+  'iaConta.conectadaGratis': '已连接（免费套餐）',
+  'iaConta.conectadaPlano': '已连接（{plano} 套餐）',
+  'erro.recursosAtualizando': '这项能力会随这台电脑上团队的下次更新到来',
+  // rc.45: a nota do consumo
+  'consumo.nota.subscription': 'ChatGPT 订阅：按次使用不收费（月费已包含）。token 数显示团队做了多少工作。',
+  'consumo.nota.credits': '有额度的账户：服务商报告扣费金额时会显示费用；余额在账户门户中查看。',
+  'consumo.nota.api': 'API 密钥：服务商报告每次运行的扣费金额时会显示费用。',
+  'consumo.nota.none': '没有连接 AI 账户：团队不会处理请求，也没有用量。',
 };
 
 export default servidor;

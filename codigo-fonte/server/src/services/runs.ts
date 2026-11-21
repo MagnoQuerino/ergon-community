@@ -28,6 +28,7 @@ import { reservaUsada } from './ajustes-motor.ts';
 import { PROCESS_SQL, isConversationKey, processLimit, runningProcesses, type ProcessLimit } from './concurrency.ts';
 import { idiomaDoDono, readLang } from './prefs.ts';
 import { instrucaoDeIdioma } from './idioma-motor.ts';
+import { fmtData } from '../lib/i18n.ts';
 
 /** o texto do pedido na fila enquanto a equipe está em pausa */
 export const EQUIPE_EM_PAUSA = 'equipe em pausa: o pedido começa quando você retomar';
@@ -281,7 +282,7 @@ export class RunExecutor {
     }
     const daily = this.dailyLimit(e.workspaceId);
     if (daily.limit && daily.used >= daily.limit) {
-      const libera = daily.freesAt ? ` Libera às ${new Date(daily.freesAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : '';
+      const libera = daily.freesAt ? ` Libera às ${fmtData(null, daily.freesAt, { hour: '2-digit', minute: '2-digit' })}` : '';
       throw new HttpError(429, 'daily_limit', `Limite de ${daily.limit} execuções em 24 h atingido.${libera}; para mudar ou tirar o limite: Configurações › Andamento › Execuções por dia.`);
     }
     const runId = id('run');

@@ -18,6 +18,7 @@ import { localParts } from './routine-time.ts';
 import type { Section } from './routines.ts';
 import { analyzeSheet, fmt, statsLines, type TableStats } from './table-stats.ts';
 import { feedLine, newsUrl, readFeeds, type FeedRead } from './web-feeds.ts';
+import { fmtMoeda, fmtNumero } from '../lib/i18n.ts';
 
 /** O que o usuário mandou na execução: o texto do pedido e os arquivos (do Ergon ou da nuvem). */
 export interface RunInput { text?: string; files?: FileRef[] }
@@ -174,7 +175,7 @@ export async function gatherExtra(ctx: ExtraCtx, sources: SourceId[]): Promise<E
         let used = 0; let n = 0;
         for (const p of d.text.split(/\n+/).map((x) => x.trim()).filter(Boolean)) {
           n++; const line = `§${code}.${n} ${defuse(clip(p, 900))}`;
-          if (used + line.length > per) { lines.push(`§${code} … (documento cortado para caber: ${d.text.length.toLocaleString('pt-BR')} caracteres no total)`); break; }
+          if (used + line.length > per) { lines.push(`§${code} … (documento cortado para caber: ${fmtNumero(null, d.text.length)} caracteres no total)`); break; }
           lines.push(line); used += line.length + 1;
         }
       });
@@ -232,7 +233,7 @@ export async function gatherExtra(ctx: ExtraCtx, sources: SourceId[]): Promise<E
       res.data.lancamentos = L;
       const ent = L.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0); const sai = L.filter((l) => l.valor < 0).reduce((s, l) => s + l.valor, 0);
       const low = L.filter((l) => l.confianca === 'baixa').length;
-      const lines = L.length ? [`${L.length} lançamento(s): entradas R$ ${fmt(ent)} · saídas R$ ${fmt(Math.abs(sai))} · saldo R$ ${fmt(ent + sai)}${low ? ` · ${low} lido(s) de PDF/texto para conferir` : ''}`, ...L.slice(0, 120).map((l) => defuse(lancamentoLine(l)))] : ['(nenhum lançamento encontrado nos documentos: envie XML da NF-e, extrato OFX ou planilha com data e valor)'];
+      const lines = L.length ? [`${L.length} lançamento(s): entradas ${fmtMoeda(null, ent, 'BRL')} · saídas ${fmtMoeda(null, Math.abs(sai), 'BRL')} · saldo ${fmtMoeda(null, ent + sai, 'BRL')}${low ? ` · ${low} lido(s) de PDF/texto para conferir` : ''}`, ...L.slice(0, 120).map((l) => defuse(lancamentoLine(l)))] : ['(nenhum lançamento encontrado nos documentos: envie XML da NF-e, extrato OFX ou planilha com data e valor)'];
       add(key, L.length, lines, { news: L.length > 0, signal: L.length > 0 });
     } else if (key === 'financeiro.conferencia') {
       const A: Lancamento[] = []; const B: Lancamento[] = [];
@@ -329,7 +330,7 @@ function weekLines(db: Db, ws: string, since: string, today: string): { count: n
   const lines = [
     `Total: ${tot.done} concluída(s), ${tot.created} criada(s), ${tot.open} aberta(s), ${tot.late} atrasada(s); prazo cumprido em ${p(tot)} das concluídas com prazo (${tot.onTime} de ${tot.withDue})`,
     ...[...by].sort((a, b) => b[1].done - a[1].done).map(([k, x]) => `${k}: ${x.done} concluída(s), ${x.created} criada(s), ${x.open} aberta(s), ${x.late} atrasada(s), prazo cumprido ${p(x)} (${x.onTime} de ${x.withDue})`),
-    `Trabalho dos agentes: ${Number(runs?.ok ?? 0)} execução(ões) concluída(s), ${Number(runs?.fail ?? 0)} com erro, ${Number(runs?.tokens ?? 0).toLocaleString('pt-BR')} tokens`,
+    `Trabalho dos agentes: ${Number(runs?.ok ?? 0)} execução(ões) concluída(s), ${Number(runs?.fail ?? 0)} com erro, ${fmtNumero(null, Number(runs?.tokens ?? 0))} tokens`,
     ...(verdicts.length ? [`Rotinas: ${verdicts.map((v) => `${v.n} ${v.verdict === 'validado' ? 'conferida(s)' : v.verdict === 'parcial' ? 'conferida(s) em parte' : 'não conferida(s)'}`).join(', ')}`] : []),
   ];
   const table: Array<Array<string | number>> = [['Responsável', 'Concluídas', 'Criadas', 'Abertas', 'Atrasadas', 'Concluídas com prazo', 'No prazo', 'Prazo cumprido (%)'],
