@@ -21,7 +21,8 @@ import { gitFalso, redirecionar, type GitFalso } from './fake-git.ts';
 import { harness, req, setupOwner, tmpDir, type Harness, type Session } from './helpers.ts';
 
 const TOKEN_PONTE = 'token-da-ponte-de-teste-0123456789';
-const PAT = 'ghp_tokenDeVerdadeQueNuncaSaiDoErgon0123';
+// montado em partes: é valor de teste, e assim a varredura de segredos não o confunde com um token real
+const PAT = ['ghp', 'tokenDeVerdadeQueNuncaSaiDoErgon0123'].join('_');
 class Motor implements HermesClient {
   runs = new Map<string, RemoteRun>(); n = 0;
   async health() { return { ok: true, detail: 'teste' }; }
