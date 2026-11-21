@@ -233,9 +233,9 @@ function Membros({ sala, onClose }: { sala: Detalhe; onClose: () => void }) {
         </ul>
         {sala.admin && d.data && (
           <>
-            <fieldset className="sala-escolha"><legend>{t('conversas.sala.membros.foraPessoas')}</legend>
+            {d.data.pessoas.some((p) => !dentro.has(`pessoa:${p.chave}`)) && <fieldset className="sala-escolha"><legend>{t('conversas.sala.membros.foraPessoas')}</legend>
               {d.data.pessoas.filter((p) => !dentro.has(`pessoa:${p.chave}`)).map((p) => <button key={p.chave} type="button" className="chip" onClick={() => void fazer(`/api/salas/${sala.id}/membros`, { tipo: 'pessoa', chave: p.chave })}><Icon name="plus" size={12} /><Rosto nome={p.nome} size={18} />{p.nome}</button>)}
-            </fieldset>
+            </fieldset>}
             <fieldset className="sala-escolha"><legend>{t('conversas.sala.membros.foraAgentes')}</legend>
               {d.data.agentes.filter((a) => !dentro.has(`agente:${a.chave}`)).map((a) => <button key={a.chave} type="button" className="chip" onClick={() => void fazer(`/api/salas/${sala.id}/membros`, { tipo: 'agente', chave: a.chave })}><Icon name="plus" size={12} /><AgentAvatar agent={{ ...a, name: a.nome, look_seed: null }} size={18} />{a.nome}</button>)}
             </fieldset>

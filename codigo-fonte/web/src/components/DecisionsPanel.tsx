@@ -99,7 +99,9 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
   const x = d.data;
   const routines = x?.proposals.filter((p) => p.kind === 'routine' || p.kind === 'routine_edit') ?? [];
   const team = x?.proposals.filter((p) => p.kind !== 'routine' && p.kind !== 'routine_edit') ?? [];
-  const empty = x && !x.total;
+  // as menções e os pedidos de cessão das Salas também contam (o sino soma os dois)
+  const salas = useResource<unknown[]>('/api/salas/avisos', ['salas.changed']);
+  const empty = x && !x.total && !salas.data?.length;
   const conv = (p: { agent_id: string | null; conversation_id: string | null }) => (p.agent_id && p.conversation_id ? () => openConversation(p.agent_id, p.conversation_id) : undefined);
   return (
     <aside ref={ref} className={inline ? 'dec-inline' : `drawer dec-panel ${sob ? 'dec-panel--sob' : ''}`} inert={sob || undefined} aria-hidden={sob || undefined} role={inline ? undefined : 'dialog'} aria-labelledby={inline ? undefined : 'dec-title'} aria-label={inline ? t('servidor.decisoes.titulo') : undefined}>
