@@ -1,5 +1,14 @@
 # Novidades
 
+## 1.1.0-rc.41 (pré-versão de teste)
+
+- **Quadros de tarefas do seu jeito:** crie vários quadros, com colunas livres (criar, renomear, reordenar, apagar sem perder cards). Cada quadro pode ter campos próprios (texto, número, data, lista de opções, etiquetas coloridas, pessoa). No cartão: subtarefas com contador, anexos dos Documentos, links, pessoas do workspace como responsáveis e comentários de até 240 caracteres, seus e da equipe de IA. Tudo vai e volta entre os seus computadores, cada coisa no quadro certo.
+- **Conversa por voz:** fale com um agente sem digitar. Ele ouve, responde em voz alta e volta a ouvir; dá para interromper falando por cima. Tudo fica na conversa normal.
+- **Navegador ao vivo:** quando um agente usa o navegador, você vê a tela dele dentro do Ergon e pode "Assumir o controle" (para fazer um login, resolver um captcha) e "Devolver ao agente". O que você digita não chega ao agente. Agentes só com "Navegador automático" (sem Terminal) agora navegam de verdade.
+- **Sincronia automática de verdade:** sem botões. O quadro mostra se está em dia, enviando ou recebendo, e o que está pendente. A chave chega sozinha, em segundos, aos seus computadores e à nuvem. Mais resistente a quedas: nada se duplica nem se perde.
+- **A nuvem como gêmea do seu computador:** edições da equipe, setores, ferramentas liberadas e rotinas chegam à nuvem; com o computador desligado, as rotinas rodam no horário (uma vez só). As conexões (e-mail, agenda, arquivos e outras) podem ir para a nuvem depois do seu aceite, cifradas só para ela. O cartão da nuvem diz em palavras simples o que ela está fazendo.
+- **Discreto:** a opção de exibir Alexandre Magno na cidade virou uma linha miúda no canto do cartão do workspace.
+
 ## 1.1.0-rc.40 (pré-versão de teste)
 
 - **Sincronia à vista:** enquanto há dados indo ou vindo do Ergon World, um ícone discreto gira na barra de cima, ao lado do plano. A conferência de cada minuto, sem nada novo, não acende nada.
