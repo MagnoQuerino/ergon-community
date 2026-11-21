@@ -76,6 +76,13 @@ fn navegar(app: &AppHandle, url: &Url) -> bool {
         std::thread::spawn(move || pedido_de_downloads(&a, &u));
         return false;
     }
+    // pastas do computador (rc.42): a página pede o seletor; o aplicativo devolve o caminho escolhido por evento, e quem
+    // confere e concede é o Ergon (a página não ganha acesso ao disco)
+    if d == Destino::Ergon && url.path() == PEDIDO_PASTA_ESCOLHER {
+        let a = app.clone();
+        std::thread::spawn(move || escolher_pasta_do_computador(&a));
+        return false;
+    }
     // fechar a janela (rc.40): a resposta da página à pergunta do aplicativo (fechar.rs)
     if d == Destino::Ergon && crate::fechar::resposta(app, url.path()) {
         return false;
@@ -271,6 +278,17 @@ fn pedido_de_downloads(app: &AppHandle, url: &Url) {
     }
 }
 
+/// O seletor de pastas do sistema para Conexões › Pastas do computador: só devolve o caminho escolhido à página (evento
+/// "ergon:pasta-escolhida"); cancelar devolve vazio. Conceder é com o Ergon, que confere de novo (lib/pastas-seguras.ts).
+fn escolher_pasta_do_computador(app: &AppHandle) {
+    use tauri_plugin_dialog::DialogExt;
+    let a = app.clone();
+    app.dialog().file().set_title("Pasta para a equipe do Ergon").pick_folder(move |escolha| {
+        let pasta = escolha.and_then(|f| f.into_path().ok()).map(|p| p.display().to_string()).unwrap_or_default();
+        avisar_principal(&a, "ergon:pasta-escolhida", serde_json::json!({ "pasta": pasta }));
+    });
+}
+
 fn baixar(app: &AppHandle, webview: &tauri::Webview<Wry>, evento: DownloadEvent<'_>) -> bool {
     match evento {
         DownloadEvent::Requested { url, destination } => {
@@ -376,6 +394,8 @@ pub const PEDIDO_DL_ABRIR_PASTA: &str = "/__desktop/downloads/abrir-pasta";
 pub const PEDIDO_DL_MOSTRAR: &str = "/__desktop/downloads/mostrar";
 /// Endereço que a página do Ergon usa para pedir a volta a uma versão anterior ("?versao=X"; nunca chega ao servidor).
 pub const PEDIDO_VOLTAR: &str = "/__desktop/voltar";
+/// rc.42: o seletor de pastas do computador (Conexões › Pastas do computador)
+pub const PEDIDO_PASTA_ESCOLHER: &str = "/__desktop/pastas/escolher";
 
 /// A versão pedida em "/__desktop/voltar?versao=X". Só passa uma versão bem formada (x.y.z[-pre], letras, números,
 /// ponto e hífen): ela vai para o endereço da tela de abertura e, depois da confirmação da pessoa, para o endereço do
@@ -401,12 +421,12 @@ pub fn abrir_ergon(app: &AppHandle, porta: u16) -> tauri::Result<()> {
 }
 
 /// Endereço da página do Ergon no aplicativo. "app=desktop": a página sabe que está no aplicativo (o botão de
-/// atualizações leva à tela dele). "fechar=1" (rc.40): fechar a janela pergunta à página antes (fechar.rs). "downloads=1": este aplicativo atende os pedidos de downloads (rc.33: a pasta do
+/// atualizações leva à tela dele). "fechar=1" (rc.40): fechar a janela pergunta à página antes (fechar.rs). "pastas=1" (rc.42): o seletor de pastas do computador. "downloads=1": este aplicativo atende os pedidos de downloads (rc.33: a pasta do
 /// Ergon e o aviso com "Abrir pasta"); sem ele (aplicativo de antes), a página não os faz. "volta=1": voltar de versão pelo aplicativo vale aqui (Windows com o ambiente
 /// próprio, como em atualizacao.rs); sem ele (Linux, ou Windows sem o ambiente), a página mostra só a página de cada
 /// versão.
 pub fn endereco_do_ergon(porta: u16, volta: bool) -> String {
-    format!("http://localhost:{porta}/?app=desktop&downloads=1&fechar=1{}", if volta { "&volta=1" } else { "" })
+    format!("http://localhost:{porta}/?app=desktop&downloads=1&fechar=1&pastas=1{}", if volta { "&volta=1" } else { "" })
 }
 
 /// Tela de atualizações do aplicativo (a de abertura, em "#atualizacoes"): verifica e, se a pessoa pedir, atualiza.
@@ -462,8 +482,8 @@ mod testes {
 
     #[test]
     fn pagina_do_ergon_sabe_se_a_volta_vale_aqui() {
-        assert_eq!(endereco_do_ergon(8787, true), "http://localhost:8787/?app=desktop&downloads=1&fechar=1&volta=1");
-        assert_eq!(endereco_do_ergon(8787, false), "http://localhost:8787/?app=desktop&downloads=1&fechar=1", "Linux ou sem o ambiente: sem o botão");
+        assert_eq!(endereco_do_ergon(8787, true), "http://localhost:8787/?app=desktop&downloads=1&fechar=1&pastas=1&volta=1");
+        assert_eq!(endereco_do_ergon(8787, false), "http://localhost:8787/?app=desktop&downloads=1&fechar=1&pastas=1", "Linux ou sem o ambiente: sem o botão");
         assert!(Url::parse(&endereco_do_ergon(18787, true)).is_ok());
     }
 

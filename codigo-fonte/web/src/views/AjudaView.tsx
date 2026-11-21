@@ -109,6 +109,7 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.conexoes.i2', { apps: <b>{t('ajuda.conexoes.i2Apps')}</b> })}</li>
         <li>{tn('ajuda.conexoes.i3', { quadros: <b>{t('ajuda.conexoes.i3Quadros')}</b> })}</li>
         <li>{tn('ajuda.conexoes.i4', { nuvem: <b>{t('ajuda.conexoes.i4Nuvem')}</b> })}</li>
+        <li>{tn('ajuda.conexoes.i5', { maos: <b>{t('ajuda.conexoes.i5Maos')}</b> })}</li>
       </ul>
       <p>{tn('ajuda.conexoes.p', { link: <Go c={c} v="conexoes">{t('ajuda.lugar.conexoes')}</Go> })}</p>
     </> },

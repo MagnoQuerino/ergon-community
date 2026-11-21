@@ -86,7 +86,7 @@ const ARROBA = new RegExp(/(?<![\\`])(`+)(?!`).*?[^`]\1(?!`)|(^|[^\w\\])((?:\\\\
 const semMencao = (l: string): string => l.replace(ARROBA, (m, crase, antes, barras) => (crase ? m : `${antes}${barras}\\@`));
 const COMANDO = /^\/[\w-]+(\s.*)?$/;
 /** Usado em descrição e comentário. O GitLab apaga \r antes de procurar comandos: "\r/close" viraria comando, por isso sai aqui. */
-const textoParaGitLab = (t: unknown): string => foraDeBlocoDeCodigo(String(t ?? '').replace(/\r/g, ''), (l) => (COMANDO.test(l) ? `\`${l}\`` : semMencao(l)));
+export const textoParaGitLab = (t: unknown): string => foraDeBlocoDeCodigo(String(t ?? '').replace(/\r/g, ''), (l) => (COMANDO.test(l) ? `\`${l}\`` : semMencao(l)));
 
 // ----------------------------------------------------------------------------------------------------- leitura
 const P_PROJETO: Param = { tipo: 'texto', obrigatorio: true, descricao: 'id do projeto ou caminho, como grupo/projeto' };

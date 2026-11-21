@@ -185,6 +185,8 @@ const ajuda = {
   'conexoes.i3Quadros': 'Tarefas e quadros',
   'conexoes.i4': '{nuvem}: com o workspace na nuvem do Ergon World, você escolhe as conexões que a equipe usa lá com o computador desligado. Elas vão cifradas só para a nuvem do workspace. As regras de autonomia não vão: lá, tudo volta a pedir aprovação. WhatsApp e endereços da rede local ficam neste computador.',
   'conexoes.i4Nuvem': 'Conexões na nuvem',
+  'conexoes.i5': '{maos}: com o GitHub ou o GitLab conectado, a equipe clona, cria um ramo, testa, faz commit e abre o pull request; no Drive e no OneDrive, organiza pastas e edita documentos e planilhas; nos Documentos do Ergon, edita planilhas e textos (a versão de antes fica na Lixeira). O token da conta nunca chega ao agente: cada acesso ao código vale para um repositório, um trabalho e pouco tempo. Enviar ao ramo principal, incorporar, apagar e compartilhar para fora pedem a sua aprovação. Com "Liberar tudo" (em Conexões › Regras), nada disso pede: você revisa no fim, pelos links que a equipe devolve. Mesmo assim, apagar de vez, apagar repositório, segredos e pagamentos pedem sempre. Quem administra o workspace pode proibir o "Liberar tudo".',
+  'conexoes.i5Maos': 'Mãos na massa',
   'conexoes.p': 'Tudo em {link}. Conteúdo de mensagens e documentos é tratado como dado, nunca como instrução.',
 
   // ——— manual: A cidade ———

@@ -34,6 +34,7 @@ import crypto from 'node:crypto';
 import { fold } from '../../../lib/util.ts';
 import { NetworkFailure, fetchWithPolicy } from '../../../lib/http.ts';
 import { readDocument } from '../../doc-isolated.ts';
+import { acrescentarNoDocx, celula, ErroEdicao, nomeColuna, trocarNoDocx, valoresDe } from '../../../lib/office-editar.ts';
 import { sheetText } from '../../doc-text.ts';
 import { ProviderError } from '../../mirror.ts';
 import { neutral } from '../../operations.ts';
@@ -926,6 +927,161 @@ const ACOES_ARQUIVOS: Acao[] = [
   },
 ];
 
+// --------------------------------------------------------------------------- escritório no OneDrive (rc.42)
+/*
+ * Organizar (pasta, mover, renomear, copiar), editar Excel (células, pela API de pastas de trabalho) e Word (o .docx é
+ * baixado, editado aqui por lib/office-editar.ts e enviado de volta: o OneDrive guarda a versão anterior), compartilhar,
+ * mandar para a lixeira e apagar de vez. Com Files.ReadWrite (a etapa A, que a pessoa já autoriza sozinha): os arquivos da
+ * própria pessoa. Arquivo compartilhado por outra pessoa (drive_id) precisa de Files.ReadWrite.All, que na empresa costuma
+ * pedir o administrador: a ação diz isso no erro de acesso. Comentários: o Graph não tem API de comentários para arquivos.
+ * Conferido em 21/11/2026: api/driveitem-post-children, api/driveitem-move, api/driveitem-update, api/driveitem-copy
+ * (202 + monitor), api/driveitem-invite, api/driveitem-delete (lixeira), api/driveitem-permanentdelete,
+ * api/range-get e api/range-update (workbook), api/driveitem-put-content e api/driveitem-createuploadsession (substituir).
+ */
+const P_ID_ITEM: Param = { tipo: 'texto', obrigatorio: true, descricao: 'id do arquivo ou pasta (vem de arquivos.buscar)' };
+const P_DRIVE: Param = { tipo: 'texto', descricao: 'drive_id que veio junto, em arquivo compartilhado' };
+const P_PASTA_OD: Param = { tipo: 'texto', descricao: 'id da pasta de destino (vem de arquivos.buscar); "raiz" = a raiz do OneDrive' };
+const baseItem = (a: Args) => { const dr = txt(a, 'drive_id', 500)?.trim(); return `${GRAPH}${dr ? `/drives/${seg(dr)}` : '/me/drive'}`; };
+const item = (c: CtxAcao, a: Args, id = precisa(a, 'id', 1000)) => c.http(`${baseItem(a)}/items/${seg(id)}?${qs({ $select: 'id,name,file,folder,webUrl,parentReference,@microsoft.graph.downloadUrl' })}`);
+const pastaOd = async (c: CtxAcao, a: Args, v: string | undefined): Promise<string> => {
+  if (!v || /^(raiz|root)$/i.test(v.trim())) return (await c.http(`${baseItem(a)}/root?$select=id`)).id;
+  const p = await item(c, a, v.trim());
+  if (!p.folder) throw new ErroAcao(`o destino id=${d(v, 120)} não é uma pasta`);
+  return String(p.id);
+};
+const nomeItem = (a: Args, k: string) => { const n = umaLinha(precisa(a, k, 255)); if (/["*:<>?/\\|\u0000-\u001f]/.test(n) || n === '.' || n === '..') throw new ErroAcao(`"${k}" tem caracteres que o OneDrive não aceita`); return n; };
+const ehDe = (m: any, ext: RegExp) => ext.test(String(m.name ?? ''));
+/** Substitui o conteúdo de um arquivo que já existe (sessão de envio com "replace": o OneDrive guarda a versão anterior). */
+async function substituir(c: CtxAcao, a: Args, id: string, bytes: Buffer): Promise<any> {
+  const sessao = await c.http(`${baseItem(a)}/items/${seg(id)}/createUploadSession`, { method: 'POST', kind: 'write', body: { item: { '@microsoft.graph.conflictBehavior': 'replace' } } });
+  if (typeof sessao.uploadUrl !== 'string') throw new ProviderError('unavailable', 'o serviço não abriu o envio do arquivo');
+  return subir(sessao.uploadUrl, bytes);
+}
+const enderecoExcel = (v: string): string => {
+  const t = v.trim();
+  if (!/^[A-Za-z]{1,3}\d{1,7}(?::[A-Za-z]{1,3}\d{1,7})?$/.test(t)) throw new ErroAcao('"intervalo" inválido: use como A1 ou B2:D10 (a aba vai em "aba")');
+  return t.toUpperCase();
+};
+const abaExcel = async (c: CtxAcao, a: Args, id: string): Promise<string> => {
+  const pedida = txt(a, 'aba', 31)?.trim();
+  const j = await c.http(`${baseItem(a)}/items/${seg(id)}/workbook/worksheets?$select=name`);
+  const nomes = ((j.value ?? []) as any[]).map((x) => String(x.name));
+  const aba = pedida ? nomes.find((n) => n.toLowerCase() === pedida.toLowerCase()) : nomes[0];
+  if (!aba) throw new ErroAcao(pedida ? `a aba "${d(pedida, 40)}" não existe; as abas são: ${nomes.map((n) => d(n, 40)).join(', ')}` : 'a pasta de trabalho não tem abas', nomes);
+  return aba;
+};
+const intervaloExcel = (base: string, id: string, aba: string, end: string) => `${base}/items/${seg(id)}/workbook/worksheets/${enc(aba)}/range(address='${enc(end)}')`;
+
+const ACOES_ESCRITORIO: Acao[] = [
+  { id: 'arquivos.pasta', risco: 'organizar', escopos: ['Files.ReadWrite'], descricao: 'cria uma pasta no OneDrive (dentro de outra, ou na raiz); com nome repetido, cria com outro nome', rotulo: 'cria uma pasta no OneDrive',
+    params: { nome: { tipo: 'texto', obrigatorio: true, descricao: 'nome da pasta' }, dentro: P_PASTA_OD },
+    resumo: (a) => `Criar no OneDrive a pasta "${umaLinha(s(a, 'nome'))}"${a.dentro ? ` dentro da pasta ${s(a, 'dentro')}` : ''}`,
+    async run(c, a) {
+      const pai = await pastaOd(c, a, txt(a, 'dentro', 1000));
+      const j = await c.http(`${GRAPH}/me/drive/items/${seg(pai)}/children`, { method: 'POST', kind: 'write', body: { name: nomeItem(a, 'nome'), folder: {}, '@microsoft.graph.conflictBehavior': 'rename' } });
+      return { texto: `Pasta criada: ${d(j.name)} (id=${d(j.id, 512)}).`, url: j.webUrl ?? null };
+    } },
+  { id: 'arquivos.mover', risco: 'organizar', escopos: ['Files.ReadWrite'], descricao: 'move um arquivo ou pasta para outra pasta do OneDrive', params: { id: P_ID_ITEM, para: { ...P_PASTA_OD, obrigatorio: true }, drive_id: P_DRIVE },
+    resumo: (a) => `Mover no OneDrive o item ${s(a, 'id')} para a pasta ${s(a, 'para')}`,
+    async preparar(c, a) { const m = await item(c, a); return { detalhe: `Arquivo: ${d(m.name)}` }; },
+    async run(c, a) {
+      const para = await pastaOd(c, a, precisa(a, 'para', 1000));
+      const j = await c.http(`${baseItem(a)}/items/${seg(precisa(a, 'id', 1000))}`, { method: 'PATCH', kind: 'write', body: { parentReference: { id: para } } });
+      return { texto: `Movido: ${d(j.name)}.`, url: j.webUrl ?? null };
+    } },
+  { id: 'arquivos.renomear', risco: 'organizar', escopos: ['Files.ReadWrite'], descricao: 'muda o nome de um arquivo ou pasta do OneDrive', params: { id: P_ID_ITEM, nome: { tipo: 'texto', obrigatorio: true, descricao: 'o nome novo, com a extensão' }, drive_id: P_DRIVE },
+    resumo: (a) => `Renomear no OneDrive o item ${s(a, 'id')} para "${umaLinha(s(a, 'nome'))}"`,
+    async preparar(c, a) { const m = await item(c, a); return { detalhe: `Nome atual: ${d(m.name)}` }; },
+    async run(c, a) {
+      const j = await c.http(`${baseItem(a)}/items/${seg(precisa(a, 'id', 1000))}`, { method: 'PATCH', kind: 'write', body: { name: nomeItem(a, 'nome') } });
+      return { texto: `Renomeado para ${d(j.name)}.`, url: j.webUrl ?? null };
+    } },
+  { id: 'arquivos.copiar', risco: 'organizar', escopos: ['Files.ReadWrite'], descricao: 'faz uma cópia de um arquivo ou pasta, com outro nome e/ou em outra pasta (a cópia termina em segundo plano)',
+    params: { id: P_ID_ITEM, nome: { tipo: 'texto', descricao: 'nome da cópia' }, para: P_PASTA_OD, drive_id: P_DRIVE },
+    resumo: (a) => `Copiar no OneDrive o item ${s(a, 'id')}${a.nome ? ` com o nome "${umaLinha(s(a, 'nome'))}"` : ''}${a.para ? ` para a pasta ${s(a, 'para')}` : ''}`,
+    async run(c, a) {
+      const corpo: Record<string, unknown> = { '@microsoft.graph.conflictBehavior': 'rename' };
+      if (txt(a, 'nome')) corpo.name = nomeItem(a, 'nome');
+      if (txt(a, 'para')) corpo.parentReference = { driveId: (await c.http(`${baseItem(a)}?$select=id`)).id, id: await pastaOd(c, a, txt(a, 'para', 1000)) };
+      await c.http(`${baseItem(a)}/items/${seg(precisa(a, 'id', 1000))}/copy`, { method: 'POST', kind: 'write', body: corpo });
+      return { texto: 'Cópia pedida: o OneDrive termina em segundo plano (em geral, em segundos). Procure pelo nome com arquivos.buscar para conferir.' };
+    } },
+  { id: 'planilha.ler', risco: 'ler', escopos: ['Files.Read.All'], descricao: 'lê as células de um intervalo de uma pasta de trabalho do Excel no OneDrive', params: { id: P_ID_ITEM, aba: { tipo: 'texto', descricao: 'nome da aba (padrão: a primeira)' }, intervalo: { tipo: 'texto', obrigatorio: true, descricao: 'como A1:D20' }, drive_id: P_DRIVE },
+    resumo: (a) => `Ler ${s(a, 'intervalo')} da planilha ${s(a, 'id')}`,
+    async run(c, a) {
+      const id = precisa(a, 'id', 1000); const aba = await abaExcel(c, a, id);
+      const j = await c.http(`${intervaloExcel(baseItem(a), id, aba, enderecoExcel(precisa(a, 'intervalo', 40)))}?$select=address,values`);
+      const linhas = ((j.values ?? []) as unknown[][]).slice(0, 500).map((l, i) => `${i + 1}: ${l.map((v) => d(v, 300)).join(' | ')}`);
+      return lido(`Intervalo ${d(j.address ?? '', 100)}:\n${linhas.join('\n') || '(vazio)'}`);
+    } },
+  { id: 'planilha.editar', risco: 'organizar', escopos: ['Files.ReadWrite'], descricao: 'escreve valores em células de uma pasta de trabalho do Excel no OneDrive (fórmulas começam com =); o OneDrive guarda a versão anterior',
+    rotulo: 'escreve valores e fórmulas em células de um Excel no OneDrive',
+    params: { id: P_ID_ITEM, aba: { tipo: 'texto', descricao: 'nome da aba (padrão: a primeira)' }, intervalo: { tipo: 'texto', obrigatorio: true, descricao: 'a célula onde começa, como B2' }, valores: { tipo: 'texto', obrigatorio: true, descricao: 'linhas de células: JSON [["a", 1], ["b", 2]] ou texto com uma linha por linha e | entre as células' }, drive_id: P_DRIVE },
+    resumo: (a) => `Escrever no Excel ${s(a, 'id')}${a.aba ? ` (aba ${s(a, 'aba')})` : ''}, a partir de ${s(a, 'intervalo')}: ${typeof a.valores === 'string' ? a.valores : JSON.stringify(a.valores)}`,
+    async run(c, a) {
+      const id = precisa(a, 'id', 1000); const m = await item(c, a, id);
+      if (!ehDe(m, /\.xls[xm]$/i)) throw new ErroAcao(`o arquivo id=${d(id, 120)} não é uma pasta de trabalho do Excel (.xlsx)`);
+      let vals: string[][];
+      try { vals = valoresDe(a.valores); } catch (e) { throw new ErroAcao(e instanceof Error ? e.message : 'valores inválidos'); }
+      let ini: { col: number; lin: number };
+      try { ini = celula(precisa(a, 'intervalo', 40).split(':')[0]); } catch (e) { throw new ErroAcao(e instanceof Error ? e.message : 'intervalo inválido'); }
+      const fim = `${nomeColuna(ini.col + Math.max(...vals.map((l) => l.length)) - 1)}${ini.lin + vals.length - 1}`;
+      const largura = Math.max(...vals.map((l) => l.length));
+      const aba = await abaExcel(c, a, id);
+      const end = `${nomeColuna(ini.col)}${ini.lin}:${fim}`;
+      await c.http(intervaloExcel(baseItem(a), id, aba, end), { method: 'PATCH', kind: 'write', body: { values: vals.map((l) => [...l, ...Array(largura - l.length).fill('')]) } });
+      return { texto: `Excel ${d(m.name)}: escrito em ${aba}!${end}.`, url: m.webUrl ?? null };
+    } },
+  { id: 'documento.editar', risco: 'organizar', escopos: ['Files.ReadWrite'], descricao: 'edita um documento do Word (.docx) no OneDrive: troca um texto por outro (em todo o documento) e/ou acrescenta parágrafos no fim. O OneDrive guarda a versão anterior',
+    rotulo: 'edita um Word no OneDrive: troca textos e acrescenta no fim',
+    params: { id: P_ID_ITEM, procurar: { tipo: 'texto', descricao: 'o texto a trocar (exatamente como está)' }, trocar_por: { tipo: 'texto', descricao: 'o texto novo (vazio apaga o trecho)' }, acrescentar: { tipo: 'texto', descricao: 'texto para pôr no fim (uma linha = um parágrafo)' }, drive_id: P_DRIVE },
+    resumo: (a) => [`Editar o Word ${s(a, 'id')} no OneDrive:`, ...(a.procurar ? [`trocar "${s(a, 'procurar')}" por "${s(a, 'trocar_por')}"`] : []), ...(a.acrescentar ? [`acrescentar no fim: "${s(a, 'acrescentar')}"`] : [])].join('\n'),
+    async run(c, a) {
+      const id = precisa(a, 'id', 1000); const m = await item(c, a, id);
+      if (!ehDe(m, /\.docx$/i)) throw new ErroAcao(`o arquivo id=${d(id, 120)} não é um documento do Word (.docx)`);
+      const url = m['@microsoft.graph.downloadUrl'];
+      if (typeof url !== 'string') throw new ErroAcao('o arquivo não tem conteúdo para baixar por aqui');
+      const procurar = txt(a, 'procurar', 5000); const acrescentar = txt(a, 'acrescentar', 50_000);
+      if (!procurar && !acrescentar) throw new ErroAcao('diga "procurar" (com "trocar_por") ou "acrescentar"');
+      let bytes = await baixar(url); let vezes = 0;
+      try {
+        if (procurar) { const r = trocarNoDocx(bytes, procurar, txt(a, 'trocar_por', 50_000) ?? ''); bytes = r.data; vezes = r.vezes; }
+        if (procurar && !vezes && !acrescentar) throw new ErroAcao(`o texto "${d(procurar, 80)}" não está no documento: nada mudou (confira com arquivos.ler)`);
+        if (acrescentar) bytes = acrescentarNoDocx(bytes, acrescentar);
+      } catch (e) { if (e instanceof ErroEdicao) throw new ErroAcao(e.message); throw e; }
+      const f = await substituir(c, a, id, bytes);
+      return { texto: `Word ${d(m.name)} editado${procurar ? `: ${vezes} troca(s)` : ''}${acrescentar ? `${procurar ? ' e' : ':'} parágrafos acrescentados no fim` : ''}.`, url: f.webUrl ?? m.webUrl ?? null };
+    } },
+  { id: 'arquivos.compartilhar', risco: 'enviar', escopos: ['Files.ReadWrite'], descricao: 'compartilha um arquivo ou pasta do OneDrive com uma pessoa pelo e-mail (ver ou editar); fora do domínio da conta, pede a aprovação da pessoa',
+    params: { id: P_ID_ITEM, email: { tipo: 'texto', obrigatorio: true, descricao: 'e-mail de quem recebe' }, papel: { tipo: 'texto', descricao: 'o que a pessoa pode', opcoes: ['ver', 'editar'], padrao: 'ver' }, avisar: { tipo: 'booleano', descricao: 'mandar o convite por e-mail (padrão: sim)' }, drive_id: P_DRIVE },
+    resumo: (a) => `Compartilhar o item ${s(a, 'id')} do OneDrive com ${s(a, 'email')}, para ${s(a, 'papel') || 'ver'}`,
+    async preparar(c, a) {
+      const [email] = emails(a, 'email', 1); if (!email) throw new ErroAcao('falta "email"');
+      const [m, eu] = await Promise.all([item(c, a), c.http(`${GRAPH}/me?$select=mail,userPrincipalName`)]);
+      const meu = String(eu?.mail ?? eu?.userPrincipalName ?? '').split('@')[1]?.toLowerCase() ?? '';
+      const dele = email.split('@')[1].toLowerCase();
+      const pessoal = /^(outlook|hotmail|live|msn)\.[a-z.]+$/.test(meu);
+      return { detalhe: `Arquivo: ${d(m.name)}`, ...(!meu || pessoal || meu !== dele ? { confirmar: `compartilhar com alguém de fora do seu domínio (${dele}) pede a sua aprovação` } : {}) };
+    },
+    async run(c, a) {
+      const [email] = emails(a, 'email', 1); if (!email) throw new ErroAcao('falta "email"');
+      const papel = (s(a, 'papel') || 'ver') === 'editar' ? 'write' : 'read';
+      const id = precisa(a, 'id', 1000);
+      await c.http(`${baseItem(a)}/items/${seg(id)}/invite`, { method: 'POST', kind: 'write', body: { recipients: [{ email }], roles: [papel], requireSignIn: true, sendInvitation: a.avisar !== false && a.avisar !== 'false' } });
+      const m = await item(c, a, id);
+      return { texto: `Compartilhado com ${email} (${papel === 'write' ? 'editar' : 'ver'}).`, url: m.webUrl ?? null };
+    } },
+  { id: 'arquivos.apagar', risco: 'apagar', escopos: ['Files.ReadWrite'], descricao: 'manda um arquivo ou pasta para a Lixeira do OneDrive (dá para recuperar de lá)', params: { id: P_ID_ITEM, drive_id: P_DRIVE },
+    resumo: (a) => `Mandar para a Lixeira do OneDrive o item ${s(a, 'id')}`,
+    async preparar(c, a) { const m = await item(c, a); return { detalhe: `${m.folder ? 'Pasta' : 'Arquivo'}: ${d(m.name)}` }; },
+    async run(c, a) { await c.http(`${baseItem(a)}/items/${seg(precisa(a, 'id', 1000))}`, { method: 'DELETE', kind: 'write' }); return { texto: 'Foi para a Lixeira do OneDrive (dá para recuperar).' }; } },
+  { id: 'arquivos.apagar_de_vez', risco: 'apagar', protegida: 'apagar de vez não tem volta: pede a sua aprovação sempre, mesmo com "Liberar tudo"', escopos: ['Files.ReadWrite'],
+    descricao: 'apaga um arquivo do OneDrive DE VEZ, sem Lixeira. Só quando a pessoa pediu com todas as letras', rotulo: 'apaga um arquivo de vez, sem lixeira (sempre pede a sua aprovação)', params: { id: P_ID_ITEM, drive_id: P_DRIVE },
+    resumo: (a) => `APAGAR DE VEZ, sem Lixeira, o item ${s(a, 'id')} do OneDrive`,
+    async preparar(c, a) { const m = await item(c, a); return { detalhe: `${m.folder ? 'Pasta (com tudo dentro)' : 'Arquivo'}: ${d(m.name)}` }; },
+    async run(c, a) { await c.http(`${baseItem(a)}/items/${seg(precisa(a, 'id', 1000))}/permanentDelete`, { method: 'POST', kind: 'write', body: {} }); return { texto: 'Apagado de vez.' }; } },
+];
+
 // ------------------------------------------------------------------------------------------------- pessoas
 const ACOES_PESSOAS: Acao[] = [
   {
@@ -1189,7 +1345,7 @@ const ACOES_TEAMS: Acao[] = [
   },
 ];
 
-export const ACOES_MICROSOFT: Acao[] = [...ACOES_EMAIL, ...ACOES_AGENDA, ...ACOES_ARQUIVOS, ...ACOES_PESSOAS, ...ACOES_TEAMS];
+export const ACOES_MICROSOFT: Acao[] = [...ACOES_EMAIL, ...ACOES_AGENDA, ...ACOES_ARQUIVOS, ...ACOES_ESCRITORIO, ...ACOES_PESSOAS, ...ACOES_TEAMS];
 
 /**
  * Permissões delegadas que cobrem as ações e o espelho de tarefas (Tasks.ReadWrite, escrita/microsoft.ts), pedidas em etapas

@@ -69,6 +69,7 @@ import { ProviderError } from '../../mirror.ts';
 import { neutral } from '../../operations.ts';
 import { localParts, validTz, zonedToUtc } from '../../routine-time.ts';
 import { ESCOPO_TAREFAS } from '../escrita/google.ts';
+import { ACOES_ESCRITORIO_GOOGLE } from './escritorio-google.ts';
 import { caber, htmlParaTexto, marcaDe, semControle } from '../texto.ts';
 import { ErroAcao, emails, lista, num, precisa, seg, txt, type Acao, type Args, type CtxAcao, type Http, type Param, type Resultado } from '../tipos.ts';
 
@@ -944,6 +945,9 @@ export const ACOES_GOOGLE: Acao[] = [
       return lido(`${linhas.length ? linhas.join('\n') : `Ninguém encontrado para "${neutral(texto, 80)}".`}${r.faltou.length ? `\nNão deu para consultar: ${r.faltou.join(', ')}.` : ''}`);
     } },
 ];
+
+// rc.42: o escritório completo no Drive (organizar, editar Documentos e Planilhas, comentar, compartilhar, apagar)
+ACOES_GOOGLE.push(...ACOES_ESCRITORIO_GOOGLE);
 
 /** Tudo o que a conta Google precisa autorizar para as ações e o espelho de tarefas funcionarem (além de openid, email, profile). */
 export const ESCOPOS_GOOGLE: string[] = [...new Set([ESCOPO_TAREFAS, ...ACOES_GOOGLE.flatMap((a) => a.escopos ?? []), ...PESSOAS_OPCIONAIS])];

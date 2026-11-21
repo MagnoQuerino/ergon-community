@@ -20,6 +20,8 @@
  * depois de ler conteúdo de fora e, se a regra é do workspace inteiro, com execução de código ligada). Quem decide se a
  * regra cobre a ação é o serviço (regras.ts, cobre): apagar só pela regra que fala em apagar. Os ajustes por conexão e
  * "sempre pedir confirmação antes de organizar" continuam acima dela.
+ * Sempre-protegidas (Acao.protegida, rc.42): apagar de vez, apagar um repositório, mexer em segredos, pagamentos. Pedem o
+ * cartão sempre, acima de "Liberar tudo" e de qualquer regra; só o ajuste "desligado" da pessoa vale acima (recusa).
  * Origem e leitura são marcadas pelo sistema. Nada que o modelo diga, ou que venha num e-mail, muda este resultado.
  */
 import type { Risco } from './tipos.ts';
@@ -29,10 +31,13 @@ export type Decisao = 'direto' | 'confirmar' | 'recusar';
 /** Ajuste da pessoa, por tipo de ação ou por ação: seguir a regra acima, sempre pedir confirmação, ou desligado. */
 export type Ajuste = 'regra' | 'confirmar' | 'desligado';
 
-export function decidir(x: { risco: Risco; origem: Origem; leuDeFora: boolean; liberarTudo: boolean; codigoLigado?: boolean; ajuste?: Ajuste; confirmarOrganizar?: boolean; regra?: boolean; sempreConfirma?: boolean }): Decisao {
+export function decidir(x: { risco: Risco; origem: Origem; leuDeFora: boolean; liberarTudo: boolean; codigoLigado?: boolean; ajuste?: Ajuste; confirmarOrganizar?: boolean; regra?: boolean; sempreConfirma?: boolean; protegida?: boolean }): Decisao {
   // a escolha da pessoa para esta conexão vale acima de tudo, inclusive de "Liberar tudo"
   if (x.ajuste === 'desligado') return 'recusar';
   if (x.ajuste === 'confirmar') return 'confirmar';
+  // as sempre-protegidas (rc.42: apagar de vez, apagar repositório, segredos, pagamentos): nem "Liberar tudo" nem regra
+  // aprovada passam por cima; só o clique dela no cartão daquela vez
+  if (x.protegida) return 'confirmar';
   // "sempre pedir confirmação antes de organizar", em todas as contas: também é escolha dela, como o ajuste acima
   if (x.confirmarOrganizar && x.risco === 'organizar') return 'confirmar';
   // o cliente é avisado na hora: "Liberar tudo" não libera (decisão de 09/11: sempre); uma regra aprovada que cobre esta

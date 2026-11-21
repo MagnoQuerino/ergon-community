@@ -3457,3 +3457,23 @@ details.cx[open] > summary { color: var(--ink); }
 .sinc__rec .rec-via { align-self: flex-start; margin: 0; }
 details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 @media (max-width: 520px) { .rec-opcao__selo { position: static; margin-top: 2px; } }
+/* rc.42: "Liberar tudo" em Conexões › Regras — o interruptor ligado fica em alerta (a cor e um brilho lento dizem o estado) */
+.liberar { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); margin: 0 0 14px; }
+.liberar--on { border-color: var(--atencao-borda); background: var(--warn-bg); }
+.liberar .sec-toggle { margin: 0; gap: 12px; }
+.liberar__adm { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.switch.switch--alerta { background: var(--atencao-cheio); border-color: var(--atencao-cheio); color: var(--atencao-sobre); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) { .switch--alerta { animation: liberar-brilho 2.4s ease-in-out infinite; } }
+@keyframes liberar-brilho { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 5px var(--warn-bg); } }
+.liberar-dlg { width: min(460px, 100%); gap: 10px; }
+.liberar-dlg p { margin: 0; }
+/* rc.42: Pastas do computador e o cartão "Ativar acesso total?" */
+.pastas { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pastas__item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.pastas__txt { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.pastas__nova { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pastas__campo { flex: 1 1 260px; margin: 0; }
+.pastas__campo input { width: 100%; }
+.acesso { display: flex; flex-direction: column; gap: 10px; }
+.acesso__agentes { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; max-height: 180px; overflow: auto; }
+.acesso__agentes legend { padding: 0 4px; color: var(--muted); }
