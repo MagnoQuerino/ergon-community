@@ -6,6 +6,8 @@ import { getSetting, setSetting } from './sectors.ts';
 import { validDue } from './due.ts';
 import type { TitleSource } from './card-title.ts';
 import { chavePeloNome, marcarColunas } from './colunas.ts';
+import { camposDoQuadro } from './campos.ts';
+import { resumosDoQuadro } from './cartao.ts';
 
 export type TaskOrigin = 'manual' | 'chat' | 'teams' | 'whatsapp' | 'mirror' | 'demo';
 
@@ -277,7 +279,10 @@ export function boardView(db: Db, workspaceId: string, boardId: string) {
             (SELECT x.color FROM tasks c LEFT JOIN agents x ON x.id = c.agent_id WHERE c.parent_task_id = t.id AND c.archived = 0 ORDER BY c.created_at, c.rowid LIMIT 1) AS team_agent_color
        FROM tasks t LEFT JOIN task_links l ON l.task_id = t.id LEFT JOIN agents ag ON ag.id = t.agent_id
       WHERE t.board_id = ? AND t.workspace_id = ? AND t.archived = 0 ORDER BY COALESCE(t.queue_pos, t.number), t.number`, boardId, workspaceId);
-  return { board, columns, tasks };
+  // quadros da pessoa: os campos próprios e, por card, o que aparece nele (subtarefas "2/5", pessoas, etiquetas, contadores)
+  if (board.audience !== 'user') return { board, columns, tasks, fields: [] };
+  const resumos = resumosDoQuadro(db, workspaceId, boardId);
+  return { board, columns, tasks: (tasks as Array<{ id: string }>).map((t) => ({ ...t, card: resumos.get(t.id) ?? null })), fields: camposDoQuadro(db, workspaceId, boardId) };
 }
 
 export function taskLog(db: Db, workspaceId: string, taskId: string) {

@@ -65,6 +65,7 @@ export const ACOES: AcaoGestao[] = [
   { id: 'tarefa.criar', area: 'tarefas', metodo: 'POST', rota: '/api/tasks', rotulo: 'Criar um card', aprova: nao },
   { id: 'tarefa.editar', area: 'tarefas', metodo: 'PATCH', rota: '/api/tasks/:id', rotulo: 'Editar ou mover um card (nome, descrição, coluna, responsável, prazo, concluir)',
     aprova: (p) => p.archived === true },
+  { id: 'tarefa.comentar', area: 'tarefas', metodo: 'POST', rota: '/api/tasks/:id/comments', rotulo: 'Comentar num card (até 240 caracteres; o comentário sai com o nome do agente)', aprova: nao },
   { id: 'tarefa.trabalhar', area: 'tarefas', metodo: 'POST', rota: '/api/tasks/:id/work', rotulo: 'Pôr a equipe para trabalhar num card', aprova: nao },
   { id: 'tarefa.cancelar', area: 'tarefas', metodo: 'POST', rota: '/api/tasks/:id/cancel', rotulo: 'Cancelar um card (o trabalho para e ele sai do quadro)', aprova: sim },
   { id: 'decisoes.ver', area: 'tarefas', metodo: 'GET', rota: '/api/decisions', rotulo: 'Ver o que espera a pessoa ("Com você")', aprova: nao },
@@ -453,7 +454,8 @@ export class Gestao {
     const aprova = (typeof a.aprova === 'function' ? a.aprova(p) : a.aprova) || (comLinks && !(this.d.linksLivres?.(run) ?? false));
     if (!aprova) {
       if (a.id === 'tarefa.trabalhar' && typeof naHora.id === 'string') this.d.herdar?.(run, naHora.id);
-      const r = await this.executarRota(ctx, a, m.url, m.corpo);
+      // comentar num card: a rota vale com a sessão da pessoa, e quem assina o comentário é o agente que pediu
+      const r = await this.executarRota(a.id === 'tarefa.comentar' ? { ...ctx, agenteId: run.agent_id } : ctx, a, m.url, m.corpo);
       const criado = a.id === 'tarefa.criar' && r.ok ? (r.json as { id?: unknown } | null)?.id : undefined;
       if (typeof criado === 'string') this.d.herdar?.(run, criado);
       if (r.ok && a.privado) this.d.marcar?.(run, `gestao/${a.id}`);

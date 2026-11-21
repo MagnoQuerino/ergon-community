@@ -34,7 +34,7 @@ describe('quadros da pessoa', () => {
     await req(h, 'PATCH', `/api/columns/${dois}`, s, { name: 'Dois!', position: 0 });
     assert.deepEqual((await colunas(b)).map((c) => c.name), ['Dois!', 'Zero', 'Um']);
     const t = await req(h, 'POST', '/api/tasks', s, { title: 'Comprar tijolo', boardId: b, columnId: dois });
-    assert.equal(t.status, 201, t.body);
+    assert.equal(t.status, 201, JSON.stringify(t.json));
     const um = (await colunas(b)).find((c) => c.name === 'Um')!.id;
     const apagou = await req(h, 'DELETE', `/api/columns/${dois}`, s, { destino: um });
     assert.deepEqual([apagou.status, apagou.json.movidos], [200, 1]);

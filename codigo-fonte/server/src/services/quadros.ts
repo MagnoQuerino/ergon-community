@@ -6,11 +6,14 @@
  * - O primeiro quadro da pessoa ("Minhas tarefas", userBoard) é o de entrada (o que chega pelo chat e pelos canais) e não
  *   se apaga; os outros apagam levando os cards para outro quadro da pessoa (nada se perde).
  * - Apagar uma coluna leva os cards para outra coluna do mesmo quadro; a última coluna não se apaga.
+ * - Entre aparelhos (world/sync-content.ts): toda mudança marca o quadro (updated_at: vale a mais recente) e o que se
+ *   apaga deixa uma lápide com o destino dos cards, para o outro aparelho fazer o mesmo em vez de devolver o que sumiu.
  */
 import type { Db } from '../db/db.ts';
 import { HttpError, id, now } from '../lib/util.ts';
 import { audit, type Bus } from './bus.ts';
 import { userBoard } from './tasks.ts';
+import { camposDoQuadro, removerCampo, tocarQuadro } from './campos.ts';
 
 export const NOME_QUADRO_MAX = 60;
 export const NOME_COLUNA_MAX = 40;
@@ -48,6 +51,12 @@ function colunaDaPessoa(db: Db, ws: string, columnId: string) {
 function renumerar(db: Db, boardId: string, ordem: string[]) {
   ordem.forEach((cid, i) => db.run('UPDATE columns SET position = ? WHERE id = ? AND board_id = ?', i, cid, boardId));
 }
+/**
+ * Como uma coluna se chama entre aparelhos: o id, ou "k:<código>" nas colunas de fábrica do quadro de entrada (cada
+ * aparelho cria as suas, com ids diferentes; o código é o mesmo).
+ */
+export const refDaColuna = (c: { id: string; system_key?: string | null }) => (c.system_key ? `k:${c.system_key}` : c.id);
+const refPorId = (db: Db, columnId: string) => refDaColuna(db.get<{ id: string; system_key: string | null }>('SELECT id, system_key FROM columns WHERE id = ?', columnId)!);
 const colunasDe = (db: Db, boardId: string) => db.all<{ id: string; name: string }>('SELECT id, name FROM columns WHERE board_id = ? ORDER BY position, rowid', boardId);
 
 export function criarQuadro(db: Db, bus: Bus | null, q: Quem, nome: string, colunas: string[] = COLUNAS_INICIAIS) {
@@ -58,7 +67,8 @@ export function criarQuadro(db: Db, bus: Bus | null, q: Quem, nome: string, colu
   if (!cols.length) throw new HttpError(400, 'invalid', 'Um quadro precisa de pelo menos uma coluna.');
   const bid = id('brd');
   db.tx(() => {
-    db.run("INSERT INTO boards (id, workspace_id, name, origin, audience, created_at) VALUES (?, ?, ?, 'native', 'user', ?)", bid, q.workspaceId, name, now());
+    const ts = now();
+    db.run("INSERT INTO boards (id, workspace_id, name, origin, audience, created_at, updated_at) VALUES (?, ?, ?, 'native', 'user', ?, ?)", bid, q.workspaceId, name, ts, ts);
     cols.forEach((c, i) => db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', id('col'), q.workspaceId, bid, c, i));
     audit(db, null, { workspaceId: q.workspaceId, actorType: 'user', actorId: q.userId, action: 'quadro.criar', targetType: 'board', targetId: bid, result: name });
   });
@@ -69,7 +79,7 @@ export function criarQuadro(db: Db, bus: Bus | null, q: Quem, nome: string, colu
 export function renomearQuadro(db: Db, bus: Bus | null, q: Quem, boardId: string, nome: string) {
   quadroDaPessoa(db, q.workspaceId, boardId);
   const name = limpar(nome, NOME_QUADRO_MAX, 'ao quadro');
-  db.run('UPDATE boards SET name = ? WHERE id = ?', name, boardId);
+  db.run('UPDATE boards SET name = ?, updated_at = ? WHERE id = ?', name, now(), boardId);
   bus?.publish(q.workspaceId, 'tasks.changed', {});
   return { id: boardId, name };
 }
@@ -87,8 +97,13 @@ export function apagarQuadro(db: Db, bus: Bus | null, q: Quem, boardId: string, 
   let movidos = 0;
   db.tx(() => {
     movidos = db.run('UPDATE tasks SET board_id = ?, column_id = ?, revision = revision + 1, updated_at = ? WHERE board_id = ? AND workspace_id = ?', alvo, col.id, now(), boardId, q.workspaceId).changes;
+    // os campos são do quadro: saem com ele (e os valores deles nos cards que mudaram de quadro)
+    for (const c of camposDoQuadro(db, q.workspaceId, boardId)) removerCampo(db, q.workspaceId, c);
+    db.run('DELETE FROM board_tombstones WHERE workspace_id = ? AND board_id = ?', q.workspaceId, boardId);
     db.run('DELETE FROM columns WHERE board_id = ?', boardId);
     db.run('DELETE FROM boards WHERE id = ?', boardId);
+    // destino null = o quadro de entrada (o id dele é diferente em cada aparelho)
+    db.run("INSERT OR REPLACE INTO board_tombstones (workspace_id, kind, ref, board_id, moved_to, deleted_at) VALUES (?, 'board', ?, ?, ?, ?)", q.workspaceId, boardId, boardId, alvo === entrada ? null : alvo, now());
     audit(db, null, { workspaceId: q.workspaceId, actorType: 'user', actorId: q.userId, action: 'quadro.apagar', targetType: 'board', targetId: boardId, evidence: { destino: alvo, cards: movidos }, result: b.name });
   });
   bus?.publish(q.workspaceId, 'tasks.changed', {});
@@ -105,6 +120,7 @@ export function criarColuna(db: Db, bus: Bus | null, q: Quem, boardId: string, n
     db.run('INSERT INTO columns (id, workspace_id, board_id, name, position) VALUES (?, ?, ?, ?, ?)', cid, q.workspaceId, boardId, name, ordem.length);
     const p = posicao === undefined ? ordem.length : Math.max(0, Math.min(ordem.length, Math.trunc(posicao)));
     ordem.splice(p, 0, cid); renumerar(db, boardId, ordem);
+    tocarQuadro(db, boardId);
   });
   bus?.publish(q.workspaceId, 'tasks.changed', {});
   return { id: cid, name, columns: colunasDe(db, boardId) };
@@ -119,6 +135,7 @@ export function mudarColuna(db: Db, bus: Bus | null, q: Quem, columnId: string, 
       ordem.splice(Math.max(0, Math.min(ordem.length, Math.trunc(x.position))), 0, columnId);
       renumerar(db, c.board_id, ordem);
     }
+    tocarQuadro(db, c.board_id);
   });
   bus?.publish(q.workspaceId, 'tasks.changed', {});
   return { columns: colunasDe(db, c.board_id) };
@@ -134,8 +151,11 @@ export function apagarColuna(db: Db, bus: Bus | null, q: Quem, columnId: string,
   if (alvo === columnId || !cols.some((y) => y.id === alvo)) throw new HttpError(400, 'invalid', 'Escolha outra coluna deste quadro para os cards.');
   let movidos = 0;
   db.tx(() => {
+    const ref = refPorId(db, columnId);
     movidos = db.run('UPDATE tasks SET column_id = ?, revision = revision + 1, updated_at = ? WHERE column_id = ? AND workspace_id = ?', alvo, now(), columnId, q.workspaceId).changes;
     db.run('DELETE FROM columns WHERE id = ?', columnId);
+    db.run("INSERT OR REPLACE INTO board_tombstones (workspace_id, kind, ref, board_id, moved_to, deleted_at) VALUES (?, 'column', ?, ?, ?, ?)", q.workspaceId, ref, c.board_id, refPorId(db, alvo), now());
+    tocarQuadro(db, c.board_id);
     renumerar(db, c.board_id, cols.filter((y) => y.id !== columnId).map((y) => y.id));
     audit(db, null, { workspaceId: q.workspaceId, actorType: 'user', actorId: q.userId, action: 'coluna.apagar', targetType: 'board', targetId: c.board_id, evidence: { destino: alvo, cards: movidos }, result: c.name });
   });
