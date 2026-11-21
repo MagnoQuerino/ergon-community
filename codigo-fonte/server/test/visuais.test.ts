@@ -17,6 +17,9 @@ import { textoParaTeams } from '../src/services/teams-app/cartoes.ts';
 import { visualParaPng } from '../src/services/visuais/png.ts';
 import { Recusado, buscarSeguro, conferirUrl, ipPrivado, metadadosDe } from '../src/services/visuais/rede.ts';
 import { harness, req, setupOwner } from './helpers.ts';
+import { almaDoAgente } from '../src/services/runs.ts';
+import { marcaErgonSvg, cartaoSvg as cartao } from '../../shared/visuais/svg.ts';
+import { logoSvg } from '../../shared/logo-ergon.ts';
 
 const FONTE = [{ tipo: 'conexao', titulo: 'Outlook · suporte@', periodo: '1–20/11' }];
 
@@ -234,4 +237,28 @@ test('o relatório vira Markdown com as cercas ```ergon-<tipo> (o documento dos 
   assert.match(md, /^# Gastos de novembro/);
   assert.match(md, /```ergon-linha-do-tempo\n\{"marcos"/);
   assert.equal(blocosDe(md).length, 4);
+});
+
+test('todo agente recebe a regra dos visuais, inclusive o criado pela pessoa (nada preso a um papel)', async () => {
+  const h = await harness();
+  try {
+    const s = await setupOwner(h);
+    const novo = await req(h, 'POST', '/api/agents', s, { name: 'Temístocles', role: 'Vendas e propostas comerciais' });
+    assert.ok(novo.status < 300, JSON.stringify(novo.json));
+    const ids = h.db.all<{ id: string }>('SELECT id FROM agents WHERE workspace_id = ?', s.workspaceId).map((a) => a.id);
+    assert.ok(ids.length > 3);
+    for (const id of ids) assert.ok(almaDoAgente(h.db, s.workspaceId, id).includes(VISUAIS_NO_PROMPT), id);
+  } finally { await h.close(); }
+});
+
+test('a marca no PNG é a oficial (shared/logo-ergon.ts), sem desenho próprio, na versão clara e na escura', () => {
+  assert.equal(marcaErgonSvg(false), logoSvg({ kind: 'horizontal' }));
+  assert.equal(marcaErgonSvg(true), logoSvg({ kind: 'horizontal', onDark: true }));
+  const claro = cartao(EXEMPLOS.kpi, { paleta: PALETAS.claro }).svg;
+  const escuro = cartao(EXEMPLOS.kpi, { paleta: PALETAS.escuro }).svg;
+  // o SVG oficial vai inteiro (só ganha a posição e o tamanho na raiz)
+  const corpo = (x: string) => x.replace(/^<svg [^>]*>/, '');
+  assert.ok(claro.includes(corpo(logoSvg({ kind: 'horizontal' }))), 'claro: a marca oficial');
+  assert.ok(escuro.includes(corpo(logoSvg({ kind: 'horizontal', onDark: true }))), 'escuro: a versão oficial para fundo escuro');
+  assert.ok(!cartao(EXEMPLOS.kpi, { paleta: PALETAS.claro, marca: null }).svg.includes(corpo(logoSvg({ kind: 'horizontal' }))));
 });

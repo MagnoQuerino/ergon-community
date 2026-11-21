@@ -8,6 +8,7 @@ import { anel, cenaDe, FONTE_TAM, GRAFICOS, sparkline, type Cena, type Cor, type
 import { fmtDataIso, fmtValor, fmtVariacao, tomDaVariacao, type Locale } from './formato.ts';
 import { caber, medir, quebrar } from './larguras.ts';
 import { DESENHOS } from './pictogramas.ts';
+import { lockupLayout, logoSvg } from '../logo-ergon.ts';
 import type { Paleta } from './paleta.ts';
 import { visualComoTexto } from './texto.ts';
 
@@ -15,7 +16,7 @@ export const FONTE_SVG = "Inter, 'Segoe UI', system-ui, -apple-system, Roboto, A
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-/** A marca no canto: a do cliente (Entregáveis › identidade) ou a do Ergon; `null` tira. */
+/** A marca no canto: `ergon` = a marca oficial do Ergon; senão o nome do cliente (Entregáveis › identidade); `null` tira. */
 export interface Marca { texto: string; ergon: boolean }
 export interface OpcoesCartao { paleta: Paleta; largura?: number; locale?: Locale; marca?: Marca | null; votos?: number[][] }
 
@@ -293,8 +294,20 @@ function corpoDe(b: Bloco, W: number, l: Locale, votos?: number[][]): Corpo {
   }
 }
 
-/** O emblema do Ergon no canto (as três barras da marca, simplificadas) */
-const EMBLEMA = 'M0 3.5a3.5 3.5 0 0 1 3.5-3.5h9a3.5 3.5 0 0 1 0 7h-9A3.5 3.5 0 0 1 0 3.5Z M0 11.5a3.5 3.5 0 0 1 3.5-3.5h5a3.5 3.5 0 0 1 0 7h-5A3.5 3.5 0 0 1 0 11.5Z M0 19.5a3.5 3.5 0 0 1 3.5-3.5h9a3.5 3.5 0 0 1 0 7h-9A3.5 3.5 0 0 1 0 19.5Z';
+/**
+ * A marca do Ergon no canto: a oficial, em vetor (shared/logo-ergon.ts, a mesma da tela, dos ícones e dos PDFs) — o
+ * emblema e o logotipo ERGON, na versão clara ou escura. Nada redesenhado: o SVG é o de logoSvg, só posicionado.
+ */
+export const marcaErgonSvg = (escuro: boolean): string => logoSvg({ kind: 'horizontal', onDark: escuro });
+const MARCA_ALTURA = 16;
+function marcaPosicionada(escuro: boolean, xDireita: number, y: number): { svg: string; w: number } {
+  const L = lockupLayout('horizontal');
+  const w = (L.w / L.h) * MARCA_ALTURA;
+  const svg = marcaErgonSvg(escuro).replace(/^<svg /, `<svg x="${r1(xDireita - w)}" y="${r1(y)}" width="${r1(w)}" height="${MARCA_ALTURA}" `);
+  return { svg, w };
+}
+/** o painel é escuro? (a marca vai na versão para fundo escuro) */
+const ehEscuro = (hex: string) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim()); if (!m) return false; const n = parseInt(m[1], 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 128; };
 
 function rodapeFontes(fs: Fonte[] | undefined, estimativa: boolean | undefined, W: number): string {
   const partes = (fs ?? []).map((f) => `${f.titulo}${f.periodo ? ` · ${f.periodo}` : ''}`);
@@ -333,10 +346,12 @@ export function cartaoSvg(b: Bloco, o: OpcoesCartao): { svg: string; w: number; 
   if (fontes) pe.push(T(0, y + 12, fontes, 11, 'suave'));
   const marca = o.marca === undefined ? { texto: 'Ergon', ergon: true } : o.marca;
   let marcaSvg = '';
-  if (marca) {
-    const tw = medir(marca.texto, 11, 600);
-    pe.push(T(iw, y + 12, marca.texto, 11, 'suave', 600, 'end'));
-    if (marca.ergon) marcaSvg = `<path transform="translate(${r1(pad + iw - tw - 16)} ${r1(y + 2)}) scale(0.5)" d="${EMBLEMA}" fill="${p.marca}" opacity="0.8"/>`;
+  let reservado = 0;
+  if (marca?.ergon) { const m = marcaPosicionada(ehEscuro(p.painel), pad + iw, y); marcaSvg = m.svg; reservado = m.w; }
+  else if (marca) { pe.push(T(iw, y + 12, marca.texto, 11, 'suave', 600, 'end')); reservado = medir(marca.texto, 11, 600); }
+  if (fontes && medir(fontes, 11) > iw - reservado - 16) {
+    const ult = pe[pe.length - (marca && !marca.ergon ? 2 : 1)];
+    if (ult && ult.t === 'text' && ult.s === fontes) ult.s = caber(fontes, 11, iw - reservado - 16);
   }
   const H = Math.ceil(y + 20 + pad - 6);
   const svg = [

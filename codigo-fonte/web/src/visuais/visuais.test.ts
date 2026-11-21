@@ -48,3 +48,13 @@ test('cada tipo tem a sua cerca ```ergon-<tipo> no padrão do documento (letras,
   assert.equal(tipoDoLang('ergon-voto'), null);
   assert.equal(tipoDoLang('ergon-visual'), '');
 });
+
+test('o "Baixar PNG" leva a marca oficial da tela (brand/logo.ts), nunca um desenho próprio', async () => {
+  const { logoSvg } = await import('../brand/logo.ts');
+  const { cartaoSvg, marcaErgonSvg } = await import('../../../shared/visuais/svg.ts');
+  const { EXEMPLOS } = await import('../../../shared/visuais/exemplos.ts');
+  assert.equal(marcaErgonSvg(false), logoSvg({ kind: 'horizontal' }));
+  assert.equal(marcaErgonSvg(true), logoSvg({ kind: 'horizontal', onDark: true }));
+  const svg = cartaoSvg(EXEMPLOS.barras, { paleta: PALETAS.escuro }).svg;
+  assert.ok(svg.includes(logoSvg({ kind: 'horizontal', onDark: true }).replace(/^<svg [^>]*>/, '')));
+});
