@@ -29,6 +29,9 @@ RUN npm run typecheck -w server && npm run build -w web
 
 # Alvo de testes: docker build --target test .
 FROM build AS test
+# o git de verdade: os testes do código (conexoes-codigo) clonam e enviam para um GitHub/GitLab de mentira
+# (git http-backend). Só no alvo de testes; o servidor publicado não usa o git.
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 COPY fixtures fixtures
 # a tela de abertura do aplicativo do computador e as constantes que o servidor e a página combinam com ele (voltar de
 # versão): os testes conferem os dois lados. Só no alvo de testes; a imagem publicada não leva nada do aplicativo.
