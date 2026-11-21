@@ -588,6 +588,63 @@ if MODO != "classico":
     check("browser_exec abriu outra aba: a pessoa vê e digita na aba em uso (não na anterior)", medidas.get("quadro") and medidas.get("onde") == "?aba=2|zz", str(medidas.get("onde")))
     check("e, devolvido, o agente segue na mesma aba sem o que ela digitou", len(res) >= 4 and "onde=[?aba=2|]" in res[3], res[3][:300] if len(res) >= 4 else str(res)[:400])
 
+# ============ 2c. uma ferramenta do navegador JÁ em curso quando a pessoa assume (lê a página devagar): assumir espera ela
+# terminar antes de dar o controle (a trava só segura as chamadas novas); se não terminar a tempo, a tomada é desfeita
+S4 = "sessao-nav-d"
+medidas.clear()
+LENTO_JS = "(function(){var t=Date.now();while(Date.now()-t<4000){}return 'lento='+document.title})()"
+if MODO == "classico":
+    def lento():
+        return ferramenta("browser_console", {"expression": LENTO_JS})
+else:
+    def lento():
+        return ferramenta("browser_exec", {"code": "# Lendo devagar\nprint(js(" + json.dumps(LENTO_JS) + "))"})
+
+
+def passo_lento():
+    def pessoa():
+        try:
+            esperar(lambda: bool(nav.em_curso(S4)), 5)
+            medidas["em_curso_antes"] = list(nav.em_curso(S4))
+            t0 = time.time()
+            medidas["assumir"] = ponte("PUT", "/ergon/v1/navegador/controle", {"sessao": S4, "pessoa": True, "prazo_s": 60})
+            medidas["assumir_s"] = time.time() - t0
+            medidas["em_curso_ao_assumir"] = list(nav.em_curso(S4))
+            medidas["devolver"] = ponte("PUT", "/ergon/v1/navegador/controle", {"sessao": S4, "pessoa": False})
+        except Exception as exc:  # noqa: BLE001
+            medidas["erro_pessoa"] = repr(exc)
+    threading.Thread(target=pessoa, daemon=True).start()
+    return lento()
+
+
+def passo_nao_termina():
+    # uma chamada que não termina dentro da espera (marca posta à mão, prazo curto): assumir recusa e desfaz. (Antes,
+    # a pessoa do passo anterior devolve: a ferramenta lenta acabou e a tomada dela pode ainda estar terminando agora)
+    esperar(lambda: "devolver" in medidas or "erro_pessoa" in medidas and medidas["erro_pessoa"] is not None, 15)
+    medidas["estado_antes"] = ponte("GET", f"/ergon/v1/navegador?sessao={S4}")[1].get("controle")
+    velho = nav.EM_CURSO_S
+    nav.EM_CURSO_S = 0.6
+    nav._marcar_em_curso(S4, "browser_exec")
+    try:
+        medidas["recusa"] = ponte("PUT", "/ergon/v1/navegador/controle", {"sessao": S4, "pessoa": True, "prazo_s": 60})
+        medidas["estado_recusa"] = ponte("GET", f"/ergon/v1/navegador?sessao={S4}")[1].get("controle")
+    finally:
+        nav._desmarcar_em_curso()
+        nav.EM_CURSO_S = velho
+    medidas["em_curso_fim"] = list(nav.em_curso(S4))
+    return ler()
+
+
+roteiro[:] = [abrir(), passo_lento, passo_nao_termina, fala("Pronto.")]
+r = rodar(S4, "leia a Loja Teste com calma")
+res = resultados()
+check("a ferramenta lenta estava em curso quando a pessoa pediu o controle", bool(medidas.get("em_curso_antes")), str(medidas))
+check("assumir esperou ela terminar (e só então deu o controle)", medidas.get("assumir", (0, {}))[0] == 200 and medidas.get("assumir_s", 0) >= 2.0
+      and medidas.get("em_curso_ao_assumir") == [], str({k: medidas.get(k) for k in ("assumir", "assumir_s", "em_curso_ao_assumir", "erro_pessoa")}))
+check("a leitura em curso terminou normalmente (antes de a pessoa mexer)", len(res) >= 2 and "lento=" in res[1], res[1][:200] if len(res) >= 2 else str(res))
+check("em curso além da espera: assumir recusa (409) e o controle segue com o agente", medidas.get("recusa", (0, {}))[0] == 409
+      and medidas.get("estado_antes") == "agente" and medidas.get("estado_recusa") == "agente" and medidas.get("em_curso_fim") == [], str({k: medidas.get(k) for k in ("recusa", "estado_antes", "estado_recusa", "em_curso_fim")}))
+
 # ============ 3. a máquina de estados, direto no módulo (sem navegador)
 c0 = nav.controle("sessao-solta")
 check("sem nada gravado: com o agente, época 0", c0["pessoa"] is False and c0["epoca"] == 0)
@@ -598,6 +655,11 @@ check("o prazo pedido tem teto (900 s) e a tomada inteira também (1800 s do com
 d1 = nav.devolver("sessao-solta")
 d2 = nav.devolver("sessao-solta")
 check("devolver sobe a época uma vez (devolver de novo não muda)", d1["epoca"] == 1 and d2["epoca"] == 1 and d2["pessoa"] is False)
+nav._marcar_em_curso("sessao-solta", "browser_snapshot")
+check("em curso: a marca da chamada aparece e esperar por ela, sem terminar, devolve o que resta", nav.em_curso("sessao-solta") == ["browser_snapshot"]
+      and nav.esperar_em_curso("sessao-solta", 0.3) == ["browser_snapshot"])
+nav._desmarcar_em_curso()
+check("terminada (post_tool_call), não está mais em curso", nav.em_curso("sessao-solta") == [] and nav.esperar_em_curso("sessao-solta", 0.3) == [])
 check("ferramentas que não são do navegador nunca esperam", nav.antes("terminal", "sessao-solta") is None and nav.antes("web_search", S2) is None)
 modo = oct(os.stat(ESTADO).st_mode & 0o777)
 check("a pasta do estado é só do usuário do motor (0700)", modo == "0o700", modo)

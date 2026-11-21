@@ -20,7 +20,11 @@ temporária só do usuário do motor:
   os eventos de entrada da transmissão NÃO contam como comando, medido), e a pessoa digitando a senha não é "parado";
 - controle (c-*.json): quem está com o navegador (o agente, por padrão, ou a pessoa), até quando, e a "época", que sobe
   a cada devolução. Com a pessoa no controle, toda ferramenta browser_* espera (antes()): não age e não lê a página;
-- presença (v-*): a ponte toca enquanto há um túnel aberto (alguém assistindo).
+- presença (v-*): a ponte toca enquanto há um túnel aberto (alguém assistindo);
+- em curso (e-*): uma marca por chamada de ferramenta do navegador que JÁ passou pela trava (antes()) e ainda não
+  terminou (depois()). A trava só segura as chamadas novas; uma que já começou (um browser_exec longo, um snapshot) leria
+  a página enquanto a pessoa digita. Por isso assumir espera as que estão em curso terminarem (até EM_CURSO_S) antes de
+  dar o controle; se não terminarem, a tomada é desfeita e a pessoa tenta de novo em instantes (409).
 
 Limite conhecido (o mesmo do Hermes na tela do bot): a trava vale para as ferramentas do navegador. Um agente com
 Terminal (ferramenta guardada, liberada só com a senha de quem administra) roda programas com o mesmo usuário do motor.
@@ -52,6 +56,10 @@ PRAZO_MIN_S, PRAZO_MAX_S = 5.0, 900.0
 TETO_S = float(os.environ.get("ERGON_NAVEGADOR_TETO_S", "1800"))
 PRESENCA_S = 20.0          # túnel aberto há menos que isto = alguém assistindo
 VIGIA_PASSO_S = float(os.environ.get("ERGON_NAVEGADOR_VIGIA_S", "3"))
+# quanto assumir espera as ferramentas do navegador que já estavam em curso (abaixo do prazo do pedido do Ergon, 30 s)
+EM_CURSO_S = float(os.environ.get("ERGON_NAVEGADOR_EM_CURSO_S", "10"))
+# uma marca de "em curso" mais velha que isto (ou de um processo que morreu) não conta: a ferramenta caiu sem depois()
+EM_CURSO_MAX_S = 300.0
 TUNEIS_MAX = 6             # túneis abertos ao mesmo tempo neste motor (o Ergon abre um por execução assistida)
 
 # depois que a pessoa devolve, só estas seguem direto (elas releem a página); a primeira das outras é recusada uma vez,
@@ -156,6 +164,80 @@ def _ctl_path(sessao: str) -> str:
 
 def _vis_path(sessao: str) -> str:
     return os.path.join(pasta(), f"v-{_h(sessao)}")
+
+
+_seq = 0
+_marcas: dict[int, list[str]] = {}   # linha de execução → marcas sem o id da chamada (o motor que não o passa)
+
+
+def _nome_da_marca(sessao: str, chamada: str) -> str:
+    return os.path.join(pasta(), f"e-{_h(sessao)}-{_h(chamada)}")
+
+
+def _marcar_em_curso(sessao: str, tool_name: str, chamada: str = "") -> None:
+    """A chamada passou pela trava e vai agir/ler: uma marca só dela (arquivo próprio: processos diferentes não brigam).
+    Pelo id da chamada (tool_call_id, o mesmo no pre e no post, que o motor pode rodar em linhas de execução diferentes);
+    sem ele, pela linha de execução."""
+    global _seq
+    with _lock:
+        if chamada:
+            nome = _nome_da_marca(sessao, f"c:{chamada}")
+        else:
+            _seq += 1
+            nome = _nome_da_marca(sessao, f"t:{os.getpid()}-{threading.get_ident()}-{_seq}")
+            _marcas.setdefault(threading.get_ident(), []).append(nome)
+    try:
+        _gravar(nome, {"pid": os.getpid(), "tool": str(tool_name)[:40], "desde": time.time()})
+    except OSError:
+        pass
+
+
+def _desmarcar_em_curso(chamada: str = "", sessao: str = "") -> None:
+    """A chamada terminou (post_tool_call): pelo id da chamada; sem ele, a mais antiga desta linha de execução."""
+    if chamada:
+        prefixo = f"e-"; fim = f"-{_h(f'c:{chamada}')}"
+        try:
+            for n in os.listdir(pasta()):
+                if n.startswith(prefixo) and n.endswith(fim) and (not sessao or n.startswith(f"e-{_h(sessao)}-")):
+                    _apagar(os.path.join(pasta(), n))
+        except OSError:
+            pass
+        return
+    with _lock:
+        lista = _marcas.get(threading.get_ident()) or []
+        nome = lista.pop(0) if lista else None
+        if not lista:
+            _marcas.pop(threading.get_ident(), None)
+    if nome:
+        _apagar(nome)
+
+
+def em_curso(sessao: str) -> list[str]:
+    """As ferramentas do navegador desta sessão que já começaram e ainda não terminaram (de qualquer processo)."""
+    out: list[str] = []
+    prefixo = f"e-{_h(sessao)}-"
+    try:
+        nomes = [n for n in os.listdir(pasta()) if n.startswith(prefixo) and not n.endswith(".tmp")]
+    except OSError:
+        return out
+    for n in nomes:
+        c = _ler(os.path.join(pasta(), n)) or {}
+        if not _pid_vivo(c.get("pid")) or time.time() - float(c.get("desde") or 0) > EM_CURSO_MAX_S:
+            _apagar(os.path.join(pasta(), n))
+            continue
+        out.append(str(c.get("tool") or "browser"))
+    return out
+
+
+def esperar_em_curso(sessao: str, prazo_s: float | None = None) -> list[str]:
+    """Espera as ferramentas em curso terminarem (até o prazo; padrão EM_CURSO_S). Devolve as que ainda estão (vazio:
+    pode dar o controle)."""
+    fim = time.time() + max(0.0, EM_CURSO_S if prazo_s is None else prazo_s)
+    agora = em_curso(sessao)
+    while agora and time.time() < fim:
+        time.sleep(min(PASSO_S, 0.2))
+        agora = em_curso(sessao)
+    return agora
 
 
 def registro(ident: str) -> dict[str, Any] | None:
@@ -371,7 +453,7 @@ def _espera_do_hermes() -> tuple[Any, Callable[[], None]]:
         return contextlib.nullcontext(), (lambda: None)
 
 
-def antes(tool_name: str, sessao: str, tarefa: str = "") -> dict[str, Any] | None:
+def antes(tool_name: str, sessao: str, tarefa: str = "", chamada: str = "") -> dict[str, Any] | None:
     """pre_tool_call das ferramentas browser_*: com a pessoa no controle, espera; devolveu, pede para reler a página."""
     if not str(tool_name or "").startswith("browser"):
         return None
@@ -392,12 +474,19 @@ def antes(tool_name: str, sessao: str, tarefa: str = "") -> dict[str, Any] | Non
             return {"action": "block", "message": _msg(_MSG_ESPERANDO, tool_name)}
     with _lock:
         vista = _vistas.get(s, 0)
-        if c["epoca"] <= vista:
-            return None
-        # avisado uma vez: a chamada seguinte (a releitura que o aviso pede) já segue
-        _vistas[s] = c["epoca"]
-        if tool_name in _RELEEM:
-            return None
+        segue = c["epoca"] <= vista
+        if not segue:
+            # avisado uma vez: a chamada seguinte (a releitura que o aviso pede) já segue
+            _vistas[s] = c["epoca"]
+            segue = tool_name in _RELEEM
+    if segue:
+        _marcar_em_curso(s, tool_name, chamada)
+        # a pessoa pode ter assumido entre a conferência e a marca: confere de novo (com a marca já posta, quem assume
+        # espera por ela; sem esta segunda olhada, as duas coisas poderiam se cruzar)
+        if controle(s)["pessoa"]:
+            _desmarcar_em_curso(chamada)
+            return {"action": "block", "message": _msg(_MSG_ESPERANDO, tool_name)}
+        return None
     return {"action": "block", "message": _msg(_MSG_PRAZO if c["motivo"] == "prazo" else _MSG_DEVOLVEU, tool_name)}
 
 
@@ -426,11 +515,14 @@ def _sessao_do_hermes(tarefa: str, nomeada: str = "") -> tuple[str, dict[str, An
     return str(chave), {"nome": nome, "dir": os.path.join(bt._socket_safe_tmpdir(), f"agent-browser-{nome}")}
 
 
-def depois(tool_name: str, sessao: str, tarefa: str, tarefa_real: str = "", nomeada: str = "") -> None:
+def depois(tool_name: str, sessao: str, tarefa: str, tarefa_real: str = "", nomeada: str = "", chamada: str = "") -> None:
     """post_tool_call das ferramentas do navegador: registra a sessão do navegador deste trabalho e liga o vigia.
     `sessao`/`tarefa` são os que o Ergon conhece; `tarefa_real` é a do Hermes (a de um ajudante é outra); `nomeada`, o
     nome de sessão que o agente passou ao browser_exec."""
-    if not str(tool_name or "").startswith("browser") or not sessao:
+    if not str(tool_name or "").startswith("browser"):
+        return
+    _desmarcar_em_curso(chamada)   # a chamada terminou: não está mais "em curso" (assumir espera por isto)
+    if not sessao:
         return
     achada = _sessao_do_hermes(tarefa_real or tarefa, nomeada)
     if not achada:
@@ -584,9 +676,19 @@ def rota(handler: Any, method: str, path: str, q: dict[str, str], body: dict[str
                 prazo = float(body.get("prazo_s") or PRAZO_PADRAO_S)
             except (TypeError, ValueError):
                 prazo = PRAZO_PADRAO_S
+            antes_ctl = _ler(_ctl_path(s))
             ja = controle(s)["pessoa"]
+            c = assumir(s, prazo)   # daqui em diante as chamadas novas esperam
+            # as que já tinham começado (leem a página): espera terminarem; não terminando, desfaz a tomada
+            if not ja:
+                restam = esperar_em_curso(s)
+                if restam:
+                    if antes_ctl is None:
+                        _apagar(_ctl_path(s))
+                    else:
+                        _gravar(_ctl_path(s), antes_ctl)
+                    return handler._json(409, {"error": "o agente está terminando uma ação no navegador: tente de novo em instantes", "emCurso": restam[:5]})
             acompanhar_aba(reg)   # o que a pessoa digitar vai para a aba que ela está vendo
-            c = assumir(s, prazo)
             ouvir_digitacao(reg, not ja)
             _ligar_vigia()
             return handler._json(200, {"ok": True, "controle": "pessoa", "epoca": c["epoca"], "ate": c["ate"]})

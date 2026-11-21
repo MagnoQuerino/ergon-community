@@ -422,7 +422,7 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
         # a pessoa assumiu o navegador deste trabalho (navegador.py): a ferramenta espera ela devolver
         try:
             s, t = _sessao_do_pedido(str(session_id or ""), str(task_id or ""))
-            r = navegador.antes(tool_name, s, t)
+            r = navegador.antes(tool_name, s, t, str(kw.get("tool_call_id") or "")[:200])
         except Exception:  # noqa: BLE001 - a espera é de apoio: uma falha aqui não barra a ferramenta
             r = None
     return r
@@ -680,9 +680,12 @@ def on_post_tool_call(tool_name: str = "", args: Any = None, result: Any = None,
         try:
             s, t = _sessao_do_pedido(str(session_id or ""), str(task_id or ""))
             nomeada = str(args.get("session") or "")[:64] if tool_name == "browser_exec" and isinstance(args, dict) else ""
-            navegador.depois(tool_name, s, t, str(task_id or ""), nomeada)
+            navegador.depois(tool_name, s, t, str(task_id or ""), nomeada, str(_.get("tool_call_id") or "")[:200])
         except Exception:  # noqa: BLE001 - observador
-            pass
+            try:
+                navegador._desmarcar_em_curso(str(_.get("tool_call_id") or "")[:200])   # a chamada terminou, mesmo sem registrar a sessão (quem assume espera por isto)
+            except Exception:  # noqa: BLE001
+                pass
         return None
     if tool_name not in ("skill_manage", "web_extract", "skill_view"):
         return None

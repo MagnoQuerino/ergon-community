@@ -409,6 +409,9 @@ export class Navegador {
     const r = await ctl.recursos('PUT', 'navegador/controle', { sessao: run.hermes_session_id, pessoa: true, prazo_s: PRAZO_NO_MOTOR_S });
     if (r.status !== 200 || r.json?.controle !== 'pessoa') {
       if (r.status === 404) { this.encerrar(s, 'navegador'); throw new HttpError(409, 'navegador_fechado', 'O navegador deste trabalho não está aberto agora.'); }
+      // o agente estava no meio de uma ação no navegador (que lê a página) e ela não terminou a tempo: o motor desfez a
+      // tomada, para a pessoa não digitar com uma leitura em curso (navegador.py esperar_em_curso)
+      if (r.status === 409) throw new HttpError(409, 'navegador_agente_agindo', 'O agente está terminando uma ação no navegador. Tente de novo em alguns segundos.');
       throw new HttpError(503, 'navegador_motor', 'A equipe de IA não respondeu agora. Tente de novo.');
     }
     if (s.posse.assumir({ userId: a.userId, nome: a.displayName, ligacao }, this.agora()) !== 'ok') {
