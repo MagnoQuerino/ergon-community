@@ -136,7 +136,7 @@ export class FakeWorld {
    */
   clouds = new Map<string, { bootToken: string; vaultKey: string | null; deviceId: string | null; states: string[]; relay: string | null; active: boolean; presence: boolean[];
     /** o próximo horário de rotina contado (nextWakeAt) e por quem: 'pc' ou 'nuvem' */ nextWakeAt?: string | null; wakeLog: Array<{ by: 'pc' | 'nuvem'; at: string | null }>;
-    /** a posse (cloud.ts): último sinal de aberto e a hora em que o computador avisou que fechou */ pcSeenAt: number | null; pcLeftAt: number | null; pcSince?: number | null;
+    /** a posse (cloud.ts): último sinal de aberto e a hora em que o computador avisou que fechou */ pcSeenAt: number | null; pcLeftAt: number | null; pcSince?: number | null; /** o computador que deu o último sinal de aberto */ pcDevice?: string | null;
     /** já preparado: trocar a chave do cofre (disco novo) é recusado com key_locked */ preparado?: boolean }>();
   nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [], wakeLog: [], pcSeenAt: null, pcLeftAt: null }); return bootToken; }
   /** o último sinal de um computador por workspace (aberto ou fechado): o pcOpen do estado da nuvem; os testes também o mudam */
@@ -403,23 +403,30 @@ export class FakeWorld {
       const dono = this.workspaces.get(sws!)!.owner === acc.id;
       // as conexões (world/src/cloud.ts): o aparelho-nuvem com a chave pública só para o dono; um computador aberto é a posse
       const nv = cl?.deviceId ? this.devices.get(cl.deviceId) : undefined;
-      const conexoes = { owner: dono, cloudDevice: dono && nv && nv.status === 'active' ? { deviceId: nv.id, syncPublicKey: nv.syncPublicKey } : null, pcOpen: !!cl && this.pcAberto.get(sws!) === true };
+      const conexoes = { owner: dono, cloudDevice: dono && nv && nv.status === 'active' ? { deviceId: nv.id, syncPublicKey: nv.syncPublicKey } : null, pcOpen: !!cl && this.pcAberto.get(sws!) === true && (cl.pcSeenAt === null || Date.now() - cl.pcSeenAt < 120_000) };
+      // (o sinal vale 2 min, como no World; os testes também mudam pcAberto direto, sem sinal)
       return { json: { ...conexoes, active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null, ...(this.antigo ? {} : { keyWanted: this.keyWanted(sws!) }),
         relayTicket: cl?.relay && dono ? { exp: Math.floor(Date.now() / 1000) + 900, mac: crypto.createHash('sha256').update(`${sws}|${cl.relay}`).digest('hex') } : null } };
     }
     if (key === 'POST /v1/cloud/presence') {
       const cl = this.clouds.get(b.workspaceId);
       if (!mine(b.workspaceId) || !cl) return { fail: [409, 'no_cloud'] };
-      if ((dev as Device & { kind?: string }).kind !== 'cloud') {
-        cl.presence.push(b.open !== false); this.pcAberto.set(b.workspaceId, b.open !== false);
-        const t = Date.now();
-        if (b.open !== false) {
-          if (cl.pcSeenAt === null || t - cl.pcSeenAt > 120_000) { if (cl.pcSeenAt !== null) cl.pcLeftAt = Math.max(cl.pcLeftAt ?? 0, cl.pcSeenAt + 120_000); cl.pcSince = t; }
-          cl.pcSeenAt = t;
-        } else { if (cl.pcSeenAt !== null) cl.pcLeftAt = t; cl.pcSeenAt = null; }
-        if (b.nextWakeAt !== undefined) { cl.nextWakeAt = b.nextWakeAt as string | null; cl.wakeLog.push({ by: 'pc', at: cl.nextWakeAt }); }
+      // o próprio contêiner da nuvem não é "um computador aberto" (world/src/cloud.ts presence)
+      if ((dev as Device & { kind?: string }).kind === 'cloud') return { json: { ok: true, pcHoldsForSeconds: 0, ...(this.antigo ? {} : { keyWanted: false }) } };
+      cl.presence.push(b.open !== false);
+      const t = Date.now();
+      if (b.open !== false) {
+        this.pcAberto.set(b.workspaceId, true);
+        if (cl.pcSeenAt === null || t - cl.pcSeenAt > 120_000) { if (cl.pcSeenAt !== null) cl.pcLeftAt = Math.max(cl.pcLeftAt ?? 0, cl.pcSeenAt + 120_000); cl.pcSince = t; }
+        cl.pcSeenAt = t; cl.pcDevice = dev.id;
+      } else if (!cl.pcDevice || cl.pcDevice === dev.id) {
+        // só quem deu o último sinal de aberto tira a posse (outro computador que segue aberto continua com ela)
+        this.pcAberto.set(b.workspaceId, false);
+        if (cl.pcSeenAt !== null) cl.pcLeftAt = t;
+        cl.pcSeenAt = null;
       }
-      return { json: { ok: true, pcHoldsForSeconds: 120, ...(this.antigo ? {} : { keyWanted: (dev as Device & { kind?: string }).kind !== 'cloud' && this.keyWanted(b.workspaceId) }) } };
+      if (b.nextWakeAt !== undefined) { cl.nextWakeAt = b.nextWakeAt as string | null; cl.wakeLog.push({ by: 'pc', at: cl.nextWakeAt }); }
+      return { json: { ok: true, pcHoldsForSeconds: 120, ...(this.antigo ? {} : { keyWanted: this.keyWanted(b.workspaceId) }) } };
     }
     if (key === 'POST /v1/cloud/app-state') {
       const d = dev as Device & { kind?: string; cloudWs?: string }; const cl = d.cloudWs ? this.clouds.get(d.cloudWs) : undefined;
