@@ -1,0 +1,6 @@
+name: ergon
+description: >-
+  Ergon Desktop: controla a área de trabalho do computador da pessoa (captura de tela, mouse, teclado, programas) pelo
+  aplicativo dela, com a decisão, os cartões e o registro no Ergon. O motor não tem tela: cada ação vai ao Ergon pela ponte.
+version: 1.0.0
+author: Ergon

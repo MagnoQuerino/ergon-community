@@ -26,6 +26,17 @@ ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std
 sha2 = "=0.10.9"
 base64 = "=0.22.1"
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
+# rc.42, controle do computador (src/computador): mouse e teclado do sistema (enigo: CGEvent no macOS, SendInput no Windows,
+# XTEST no Linux/X11), a ligação com o Ergon local (WebSocket só para 127.0.0.1, sem TLS), a captura de tela em PNG e a tecla
+# de pânico global
+enigo = { version = "=0.6.1" }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
+png = "=0.18.1"
+tauri-plugin-global-shortcut = "=2.4.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# captura da tela e lista de janelas no X11 (a mesma versão que o enigo usa)
+x11rb = { version = "=0.13.2", features = ["randr"] }
 
 [features]
 # só nos testes da instalação: aceita http://127.0.0.1 como origem e um chaveiro/manifesto de teste. Nunca no

@@ -6,7 +6,7 @@ FROM ${HERMES_IMAGE}
 
 # versão do plugin do Ergon nesta imagem: a mesma do plugin.yaml e de PLUGIN_VERSION (um teste confere); o gerente e o
 # diagnóstico leem sem abrir o motor
-LABEL ergon.plugin.version="0.8.0"
+LABEL ergon.plugin.version="0.9.0"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gocryptfs fuse3 \
@@ -103,6 +103,11 @@ PY
 COPY vault/ergon-vault.py /usr/local/lib/ergon/ergon-vault.py
 # plugin do Ergon dentro da imagem (a instalação não depende de arquivos do projeto)
 COPY plugins/ergon_bridge /opt/ergon/plugins/ergon_bridge
+# rc.42: o provedor "ergon" da ferramenta computer_use (o controle do computador da pessoa pelo Ergon Desktop), ao lado do
+# cua embutido; o cofre fixa computer_use.backend = ergon. A imagem não é construída se o Hermes não o achar.
+COPY plugins/computer_use_ergon /opt/hermes/plugins/computer_use/ergon
+RUN chmod -R a+rX /opt/hermes/plugins/computer_use/ergon \
+ && cd /opt/hermes && /opt/hermes/.venv/bin/python -c "from plugins.computer_use import load_computer_use_provider as l; p = l('ergon'); assert p is not None and p.name == 'ergon', p; print('provedor do computador:', p.display_name)"
 
 # rc.39: o código do Hermes vem sem os .pyc (só as bibliotecas trazem) e com PYTHONDONTWRITEBYTECODE=1: cada partida do
 # motor, e cada "hermes config set", recompilava tudo o que importava. Compilado aqui uma vez (conferência por conteúdo,

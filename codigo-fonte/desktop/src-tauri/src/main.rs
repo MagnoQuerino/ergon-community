@@ -6,6 +6,7 @@
 
 mod ambiente;
 mod atualizacao;
+mod computador;
 mod baixar;
 mod bandeja;
 mod confianca;
@@ -52,6 +53,10 @@ fn main() {
     if std::env::args().any(|a| a == "--atualizar-sem-janela") {
         std::process::exit(atualizar_sem_janela());
     }
+    // controle do computador sem janela (rc.42): só com uma instância de teste (o teste sob Xvfb)
+    if std::env::args().any(|a| a == "--computador-sem-janela") {
+        std::process::exit(computador::sem_janela());
+    }
     let estado = Estado { ultimo: Mutex::new(None), porta: AtomicU16::new(instalacao::localizar().porta), subindo: AtomicBool::new(false), downloads: Mutex::new(Vec::new()) };
     tauri::Builder::default()
         // abrir de novo (menu, atalho) traz a janela que já está aberta, em vez de uma segunda cópia
@@ -67,6 +72,8 @@ fn main() {
         // passa pela política (janela::nova_janela): web no navegador do sistema, o resto recusado.
         .plugin(tauri_plugin_opener::Builder::default().open_js_links_on_click(false).build())
         .plugin(tauri_plugin_dialog::init())
+        // a tecla de pânico do controle do computador (registrada só enquanto um agente usa o computador)
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(estado)
         .invoke_handler(tauri::generate_handler![
             diag::diagnosticar,
@@ -80,6 +87,9 @@ fn main() {
             servicos::atualizar_ergon,
             servicos::avaliar_volta,
             servicos::voltar_versao,
+            computador::computador_assumir,
+            computador::computador_conceder,
+            computador::computador_estado,
         ])
         .setup(|app| {
             if let Ok(pasta) = app.path().app_log_dir() {
@@ -90,6 +100,8 @@ fn main() {
             if let Err(e) = bandeja::criar(app.handle()) {
                 log::warn!("bandeja do sistema indisponível: {e}");
             }
+            // controle do computador (rc.42): liga ao Ergon local com a sessão da janela; desligado no Ergon até a pessoa ativar
+            computador::iniciar(app.handle());
             log::info!("Ergon Desktop {} iniciado", env!("CARGO_PKG_VERSION"));
             // com o aplicativo aberto, uma atualização de segurança publicada depois leva à tela de atualização (a cada 6 h)
             let h = app.handle().clone();

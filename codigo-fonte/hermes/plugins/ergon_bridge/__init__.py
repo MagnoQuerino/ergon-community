@@ -76,7 +76,7 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.8.0"
+PLUGIN_VERSION = "0.9.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
@@ -101,9 +101,11 @@ PLUGIN_VERSION = "0.8.0"
 # gestao (rc.29): o coordenador gerencia e configura o Ergon pelas ferramentas gestao_listar e gestao_executar (conjunto
 # ergon_gestao, só no perfil dele), que repassam ao Ergon (/internal/bridge/v1/gestao)
 # navegador (rc.41): a pessoa vê o navegador do agente ao vivo e assume o controle (/ergon/v1/navegador, navegador.py)
+# computador (rc.42): o controle do computador da pessoa (computer_use pelo provedor "ergon", que manda cada ação ao Ergon e
+# dali ao Ergon Desktop), a administração do Discord (discord_admin) e o diagnóstico para quem programa (debugging)
 CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao",
                "perfis", "memoria", "ajudantes", "modelos_tarefa", "ajustes", "cota", "pausa", "nao_treinar", "cartoes", "comandos",
-               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador")
+               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "computador")
 _TS_CONEXOES = "ergon_conexoes"
 # Os conjuntos de ferramentas que este plugin registra ficam em _ERGON_PLUGIN_TOOLSETS, mais abaixo (o mesmo de
 # ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
@@ -418,6 +420,10 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
     r = _pre_tool_call_travas(tool_name=tool_name, args=args, task_id=task_id, session_id=session_id, **kw)
     if r is None and tool_name == "terminal":
         _rtk_reescrever(args)
+    if r is None and tool_name == "computer_use":
+        r = _computador_antes(args, str(session_id or ""), str(task_id or ""))
+    if r is None and tool_name == "discord_admin":
+        r = _discord_antes(args)
     if r is None and str(tool_name or "").startswith("browser"):
         # a pessoa assumiu o navegador deste trabalho (navegador.py): a ferramenta espera ela devolver
         try:
@@ -426,6 +432,65 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
         except Exception:  # noqa: BLE001 - a espera é de apoio: uma falha aqui não barra a ferramenta
             r = None
     return r
+
+
+# ---------------------------------------------------------------- controle do computador e Discord (rc.42)
+# computer_use: quem decide cada ação é o Ergon (o provedor "ergon", hermes/plugins/computer_use_ergon, manda a ação pela
+# ponte; o Ergon confere se está ligado, bloqueado, se é protegida, se a pessoa assumiu, e pergunta no cartão). Aqui:
+# - na nuvem do workspace não há área de trabalho (o supervisor da nuvem marca ERGON_SEM_AREA_DE_TRABALHO): recusa com a frase;
+# - a sessão e o card da chamada vão para o provedor (o lugar comum "ergon_computador_contexto", na mesma linha de execução);
+# - o portão de aprovação do próprio Hermes para cada clique fica aprovado nesta sessão: o portão que vale é o do Ergon
+#   (sem isto, cada clique viraria também um cartão genérico do motor).
+COMPUTADOR_BACKEND = "ergon"
+_COMPUTADOR_CONTEXTO = "ergon_computador_contexto"
+_COMPUTADOR_NUVEM = ("Na nuvem não há área de trabalho: o controle do computador só funciona com o Ergon Desktop aberto no computador "
+                     "da pessoa. Faça o trabalho por outro caminho (Conexões, navegador) ou diga em uma frase que isso precisa ser feito "
+                     "no computador dela.")
+_CUA_ACOES = ("click", "double_click", "right_click", "middle_click", "drag", "scroll", "type", "key", "set_value", "focus_app", "bring_to_front")
+
+
+def _computador_contexto(session_id: str, task_id: str) -> None:
+    import types
+    m = sys.modules.get(_COMPUTADOR_CONTEXTO)
+    if m is None:
+        m = types.ModuleType(_COMPUTADOR_CONTEXTO)
+        m.local = threading.local()  # type: ignore[attr-defined]
+        sys.modules[_COMPUTADOR_CONTEXTO] = m
+    m.local.sessao = (session_id[:200], task_id[:200])  # type: ignore[attr-defined]
+    m.ultimo = m.local.sessao  # type: ignore[attr-defined]
+
+
+def _computador_antes(args: Any, session_id: str, task_id: str) -> dict[str, Any] | None:
+    if os.environ.get("ERGON_SEM_AREA_DE_TRABALHO") == "1":
+        return {"action": "block", "message": _COMPUTADOR_NUVEM}
+    s, t = _sessao_do_pedido(session_id, task_id)
+    _computador_contexto(s, t)
+    try:
+        from tools.approval import approve_session  # módulo do Hermes
+        from tools.approval_context import get_current_session_key
+        chave = get_current_session_key()
+        for acao in _CUA_ACOES:
+            for modo in ("background", "foreground"):
+                approve_session(chave, f"cua:{acao}:{modo}")
+    except Exception:  # noqa: BLE001 - sem o portão do motor: o do Ergon continua valendo
+        pass
+    return None
+
+
+# discord_admin: apagar uma mensagem é para sempre — sempre o cartão da pessoa (o portão de aprovação do motor, que o Ergon
+# mostra), um por mensagem. O resto (listar, fixar, cargos) segue: a pessoa ligou a ferramenta para isso.
+_DISCORD_ID = re.compile(r"\d{5,25}")
+
+
+def _discord_antes(args: Any) -> dict[str, Any] | None:
+    a = args if isinstance(args, dict) else {}
+    if str(a.get("action") or "") != "delete_message":
+        return None
+    canal = str(a.get("channel_id") or "")
+    msg = str(a.get("message_id") or "")
+    canal, msg = (canal if _DISCORD_ID.fullmatch(canal) else "?"), (msg if _DISCORD_ID.fullmatch(msg) else "?")
+    return {"action": "approve", "rule_key": f"ergon_discord_delete_{hashlib.sha256(f'{canal}:{msg}'.encode()).hexdigest()[:24]}",
+            "message": f"Delete a Discord message for good (channel {canal}, message {msg})"}
 
 
 # ---------------------------------------------------------------- RTK (rc.36): saída do terminal compacta
@@ -1047,6 +1112,10 @@ def _config_do_perfil(base: dict[str, Any], e: dict[str, Any]) -> dict[str, Any]
         nav = dict(cfg.get("browser")) if isinstance(cfg.get("browser"), dict) else {}
         nav["backend"] = "off"
         cfg["browser"] = nav
+    # controle do computador (rc.42): sempre o provedor do Ergon (o cua-driver controlaria a tela do próprio contêiner)
+    cu = dict(cfg.get("computer_use")) if isinstance(cfg.get("computer_use"), dict) else {}
+    cu["backend"] = COMPUTADOR_BACKEND
+    cfg["computer_use"] = cu
     kn = cfg.get("known_plugin_toolsets") if isinstance(cfg.get("known_plugin_toolsets"), dict) else {}
     conhecidos = sorted(set(_lista_cfg(kn.get("api_server"))) | set(_ERGON_PLUGIN_TOOLSETS))
     cfg["known_plugin_toolsets"] = {**kn, "api_server": list(conhecidos), "cli": list(conhecidos), "cron": list(conhecidos)}
@@ -3189,12 +3258,15 @@ _ROUTES: list[tuple[str, re.Pattern[str], tuple[str, ...]]] = [
 # rc.27: navegador, vídeo (ver e criar), busca no X, leitura de arquivos e voz entram na lista do que a pessoa pode ligar.
 # Regra do dono (12/11): o navegador, ver vídeos, ler arquivos e a voz vêm ligados (migração 10 do cofre), com o aviso de
 # custo ou de risco na tela; busca no X e criar vídeos precisam da chave de outro serviço e ligam quando a pessoa a tiver.
+# rc.42: o controle do computador (computer_use: o provedor "ergon" manda cada ação ao Ergon, que decide, pergunta à pessoa e
+# registra; ligar o conjunto só entrega a ferramenta) e a administração do Discord (discord_admin, com o bot da conversa pelo
+# Discord; apagar mensagem pede o cartão). O diagnóstico (debugging: terminal, processos, arquivos, web) executa código: guardado.
 _SAFE_TOOLSETS = frozenset({"todo", "web", "vision", "image_gen", "skills", "ergon_conexoes", "ergon_cartoes", "browser", "video",
-                            "video_gen", "x_search", "file", "tts"})
+                            "video_gen", "x_search", "file", "tts", "computer_use", "discord_admin"})
 # sempre ligados na API, qualquer que seja a lista pedida: a lista de passos e os cartões (sem eles o agente não tem como
 # perguntar nem pedir uma chave com segurança; quem pode usar é decidido a cada chamada, na trava)
 _SEMPRE_TOOLSETS = frozenset({"todo", _TS_CARTOES})
-_GUARDED_TOOLSETS = frozenset({"code_execution", "terminal"})
+_GUARDED_TOOLSETS = frozenset({"code_execution", "terminal", "debugging"})
 _MAX_BODY = 16 * 1024
 _ROTAS_GRANDES = ("/ergon/v1/meta/julgar", "/ergon/v1/revisao/pedido")
 _control_started = False

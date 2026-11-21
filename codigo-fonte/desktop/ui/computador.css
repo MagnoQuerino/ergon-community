@@ -1,0 +1,21 @@
+/* Borda e selo do controle do computador (rc.42): as cores da marca; o brilho pulsa devagar e para com
+   prefers-reduced-motion. */
+:root { --navy: #1D184B; --gold: #B88B5B; --gold-2: #E2B77F; --stone: #FDFCF8; --ink: #1d1b2e; --font: system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+.borda { background: linear-gradient(90deg, var(--gold), var(--gold-2), var(--gold)); background-size: 200% 100%; animation: brilho 2.4s ease-in-out infinite; }
+@keyframes brilho { 0%, 100% { background-position: 0 0; opacity: .85; } 50% { background-position: 100% 0; opacity: 1; } }
+.selo-corpo { background: transparent; display: grid; place-items: center; font: 14px/1.3 var(--font); }
+.selo { box-sizing: border-box; width: 100%; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 14px; border-radius: 14px;
+  background: var(--navy); color: var(--stone); border: 2px solid var(--gold); box-shadow: 0 0 0 3px rgba(184,139,91,.25), 0 0 18px rgba(226,183,127,.55); animation: pulso 2.4s ease-in-out infinite; }
+@keyframes pulso { 50% { box-shadow: 0 0 0 5px rgba(184,139,91,.35), 0 0 26px rgba(226,183,127,.8); } }
+.selo__luz { width: 10px; height: 10px; border-radius: 50%; background: var(--gold-2); box-shadow: 0 0 8px var(--gold-2); flex: none; }
+.selo__texto { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.selo__texto strong { color: var(--gold-2); }
+.selo__botao { font: inherit; font-weight: 700; padding: 7px 12px; border-radius: 10px; border: 0; background: var(--gold); color: var(--navy); cursor: pointer; flex: none; }
+.selo__botao:hover, .selo__botao:focus-visible { background: var(--gold-2); outline: 2px solid var(--stone); outline-offset: 1px; }
+.selo__tecla { font: 11px ui-monospace, monospace; color: #c9c3e6; border: 1px solid #4a4380; border-radius: 6px; padding: 2px 5px; flex: none; }
+.selo__tecla[hidden] { display: none; }
+.selo.is-pessoa { border-color: #8fd3a8; box-shadow: 0 0 0 3px rgba(143,211,168,.25); animation: none; }
+.selo.is-pessoa .selo__luz { background: #8fd3a8; box-shadow: none; }
+.selo.is-pessoa strong { color: #8fd3a8; }
+@media (prefers-reduced-motion: reduce) { .borda, .selo { animation: none; } }
