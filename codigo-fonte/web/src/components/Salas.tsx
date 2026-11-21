@@ -17,6 +17,7 @@ import { RECURSOS, type RecursosEstado } from '../lib/recursos.ts';
 import { Icon } from './Icon.tsx';
 import { Markdown } from './Markdown.tsx';
 import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
+import { MaisDoCampo } from './MaisDoCampo.tsx';
 import { ContextoVisuais, type VisuaisContexto } from '../visuais/contexto.ts';
 import { votosDe } from '../visuais/conversa.ts';
 import { cercaVoto, votoDe } from '../../../shared/visuais/cercas.ts';
@@ -127,7 +128,7 @@ function NovaSala({ onClose, onCriada }: { onClose: () => void; onCriada: (id: s
 
 // ------------------------------------------------------------------------------------------------ o campo com @ e #
 /** O campo da sala: a marca só se forma por nome exato ou Tab (lib/mencoes.ts); o espelho atrás pinta as marcas. */
-export function CampoSala({ candidatos, desligado, onEnviar, extra }: { candidatos: Candidato[]; desligado?: boolean; onEnviar: (x: { texto: string; marcas: unknown[] }) => Promise<boolean>; extra?: React.ReactNode }) {
+export function CampoSala({ candidatos, desligado, onEnviar, extra, aoMudar }: { candidatos: Candidato[]; desligado?: boolean; onEnviar: (x: { texto: string; marcas: unknown[] }) => Promise<boolean>; extra?: React.ReactNode; /** o campo ficou vazio (ou deixou de ficar) */ aoMudar?: (vazio: boolean) => void }) {
   const t = useT();
   const [campo, setCampo] = useState<Campo>(vazio());
   const [cursor, setCursor] = useState(0);
@@ -136,6 +137,8 @@ export function CampoSala({ candidatos, desligado, onEnviar, extra }: { candidat
   const ref = useRef<HTMLTextAreaElement>(null);
   const espelho = useRef<HTMLDivElement>(null);
   const token = tokenAtivo(campo, cursor);
+  const vazioAgora = !campo.texto.trim();
+  useEffect(() => { aoMudar?.(vazioAgora); }, [vazioAgora]); // eslint-disable-line react-hooks/exhaustive-deps
   const sug = token && token.inicio !== fechado ? sugestoes(token, candidatos) : [];
   useEffect(() => setSel(0), [token?.inicio, token?.consulta]);
   const colocar = (c: Campo, pos: number) => { setCampo(c); setCursor(pos); requestAnimationFrame(() => { ref.current?.setSelectionRange(pos, pos); }); };
@@ -310,6 +313,7 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
   const rec = useResource<RecursosEstado>(RECURSOS, []);
   const [voz, setVoz] = useState<AgenteDisp | null>(null);
   const [escolhendoVoz, setEscolhendoVoz] = useState(false);
+  const [campoVazio, setCampoVazio] = useState(true);
   // tópicos: o aberto ao lado, a lista e o diálogo de abrir um (do zero ou de uma mensagem)
   const [topico, setTopico] = useState<string | null>(topicoInicial ?? null);
   useEffect(() => { if (topicoInicial) setTopico(topicoInicial); }, [topicoInicial]);
@@ -469,8 +473,13 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
       {err && <p className="error small sala__erro" role="alert">{err}</p>}
       {!!anexos.length && <div className="sala__anexos">{anexos.map((f) => <span key={f.key} className={`fchip ${f.erro ? 'fchip--err' : ''} ${!f.art && !f.erro ? 'fchip--subindo' : ''}`}><Icon name="file" size={13} />{f.nome}<button type="button" className="icon-btn" onClick={() => setAnexos((l) => l.filter((x) => x.key !== f.key))} aria-label={t('conversas.sala.criar.cancelar')}><Icon name="x" size={11} /></button></span>)}</div>}
       {s.arquivada ? <p className="muted center small sala__arquivada">{t('conversas.sala.soLeitura')}</p> : (
-        <div className="sala__barra">
-          <button type="button" className="icon-btn" onClick={() => arquivo.current?.click()} aria-label={t('conversas.sala.anexar')} title={t('conversas.sala.anexar')}><Icon name="clip" size={17} /></button>
+        <div className={`sala__barra ${campoVazio && !pronto.length ? 'sala__barra--vazia' : ''}`}>
+          {/* no celular (rc.43): anexar e a voz no "+", o microfone no lugar do enviar com o campo vazio */}
+          {!voz && <MaisDoCampo itens={[
+            { rotulo: t('conversas.sala.anexar'), icone: 'clip', fazer: () => arquivo.current?.click() },
+            ...agentesDaSala.map((a) => ({ rotulo: t('conversas.voz.abrirDica', { nome: a.nome }), icone: 'voz', fazer: () => setVoz(a) })),
+          ]} />}
+          <button type="button" className="icon-btn chat__extra" onClick={() => arquivo.current?.click()} aria-label={t('conversas.sala.anexar')} title={t('conversas.sala.anexar')}><Icon name="clip" size={17} /></button>
           <input ref={arquivo} type="file" hidden multiple onChange={(e) => { for (const f of e.target.files ?? []) subir(f); e.target.value = ''; }} />
           {!voz && <GravadorDeVoz onGravado={(f) => subir(f)} />}
           {voz ? (
@@ -478,7 +487,7 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
               garantirConversa={async () => salaId} recarregar={() => msgs.reload()} onFechar={() => setVoz(null)}
               enviarFala={async (arq) => (await api.post<{ messageId: string }>(`/api/salas/${salaId}/mensagens`, { texto: '', clientRequestId: requestId(), attachments: [arq], vozAgente: voz.nome })).messageId} />
           ) : agentesDaSala.length > 0 && (
-            <span className="sala-voz">
+            <span className="sala-voz chat__extra">
               <button type="button" className="icon-btn chat__mic chat__voz" aria-pressed="false" aria-expanded={agentesDaSala.length > 1 ? escolhendoVoz : undefined}
                 onClick={() => { if (agentesDaSala.length === 1) setVoz(agentesDaSala[0]); else setEscolhendoVoz((x) => !x); }}
                 aria-label={t('conversas.voz.abrir')} title={agentesDaSala.length === 1 ? t('conversas.voz.abrirDica', { nome: agentesDaSala[0].nome }) : t('conversas.voz.abrir')}><Icon name="voz" /></button>
@@ -489,7 +498,7 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
               )}
             </span>
           )}
-          <CampoSala candidatos={candidatos} onEnviar={enviar} extra={pronto.length ? true : undefined} />
+          <CampoSala candidatos={candidatos} onEnviar={enviar} extra={pronto.length ? true : undefined} aoMudar={setCampoVazio} />
         </div>
       )}
       {membros && <Membros sala={s} onClose={() => { setMembros(false); det.reload(); }} />}

@@ -31,7 +31,7 @@ const dist = (a: string, b: string) => { const x = oklab(a), y = oklab(b); retur
 /** a distância entre duas cores da paleta: a menor das duas (claro e escuro), em OKLab */
 const D: number[][] = PALETA_AGENTES.map((a) => PALETA_AGENTES.map((b) => Math.min(dist(a.claro, b.claro), dist(a.escuro, b.escuro))));
 /** abaixo disto, duas cores lado a lado parecem a mesma */
-export const PARECIDAS = 0.1;
+export const PARECIDAS = 0.09;
 
 /** O sorteio pelo id (FNV-1a): sempre o mesmo índice para o mesmo id. */
 export function indicePreferido(id: string): number {

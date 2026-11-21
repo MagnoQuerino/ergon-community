@@ -24,6 +24,7 @@ import { RECURSOS, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
 import { ConversaPorVoz } from './ConversaPorVoz.tsx';
 import { GravadorDeVoz } from './GravadorDeVoz.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
+import { MaisDoCampo } from './MaisDoCampo.tsx';
 import { CenaVazio } from '../arte/Cena.tsx';
 import { useVisuaisDaConversa } from '../visuais/conversa.ts';
 import { ContextoVisuais } from '../visuais/contexto.ts';
@@ -533,6 +534,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
 
   // blocos visuais (rc.42): os votos das enquetes (mensagens só com o voto, fora da linha do tempo) e votar
   const visuais = useVisuaisDaConversa(list, convId, msgs.reload);
+  const abrirVoz = () => { if (semIa) { setAvisoIa(true); ai.reload(); } else setVozAberta(true); };
   const timeline = useMemo(() => [...list.filter((m) => !(m.role === 'user' && votoDe(m.content))).map((m) => ({ at: m.created_at, m, p: null as Proposal | null })), ...(props.data ?? []).map((p) => ({ at: p.created_at, m: null as Message | null, p }))]
     .sort((a, b) => a.at.localeCompare(b.at)), [list, props.data]);
   const lastMsg = list[list.length - 1];
@@ -776,8 +778,14 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       <form className="chat__input" onSubmit={(e) => { e.preventDefault(); void send(); }}>
         {replying && <div className="chat__replying"><Icon name="undo" size={13} /><span><b>{replying.role === 'user' ? t('conversas.conversa.voce') : agent.name}</b> {quoteOf(replying)}</span><button type="button" className="icon-btn" onClick={() => setReplying(null)} aria-label={t('conversas.campo.naoCitar')}><Icon name="x" size={13} /></button></div>}
         {files.length > 0 && <div className="chat__files">{files.map((f) => <FileChip key={f.key} f={f.art ?? { filename: f.file.name, mime: f.file.type || 'application/octet-stream', size: f.file.size }} progress={f.progress} error={f.error} onRemove={() => removeFile(f.key)} />)}</div>}
-        <div className="chat__row">
-          <button type="button" className="icon-btn chat__clip" onClick={() => picker.current?.click()} aria-label={t('conversas.campo.anexar')} title={t('conversas.campo.anexarDica')}><Icon name="clip" /></button>
+        <div className={`chat__row ${!text.trim() && !files.length ? 'chat__row--vazio' : ''}`}>
+          {/* no celular (rc.43): anexar e a voz num "+" ao lado do campo, e o microfone no lugar do enviar enquanto o campo
+              está vazio — o campo de texto fica com a largura; no computador, tudo à vista como sempre */}
+          {!gravando && !vozAberta && <MaisDoCampo itens={[
+            { rotulo: t('conversas.campo.anexar'), icone: 'clip', fazer: () => picker.current?.click() },
+            { rotulo: t('conversas.voz.abrir'), icone: 'voz', fazer: abrirVoz },
+          ]} />}
+          <button type="button" className="icon-btn chat__clip chat__extra" onClick={() => picker.current?.click()} aria-label={t('conversas.campo.anexar')} title={t('conversas.campo.anexarDica')}><Icon name="clip" /></button>
           <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ''; }} />
           {/* com a voz ligada o microfone é dela: o gravador de áudio some até desligar */}
           {!vozAberta && <GravadorDeVoz onGravado={(f, motivo) => void gravado(f, motivo)} onAtivo={setGravando} />}
@@ -785,7 +793,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           {vozAberta
             ? <ConversaPorVoz agente={agent} mensagens={list} podeFalar={!!rec.data?.voz.falar} preparaVoz={!!rec.data?.voz.preparar?.falar}
               garantirConversa={ensureConv} recarregar={() => msgs.reload()} onFechar={() => setVozAberta(false)} />
-            : !gravando && <button type="button" className="icon-btn chat__mic chat__voz" aria-pressed="false" onClick={() => { if (semIa) { setAvisoIa(true); ai.reload(); } else setVozAberta(true); }}
+            : !gravando && <button type="button" className="icon-btn chat__mic chat__voz chat__extra" aria-pressed="false" onClick={abrirVoz}
               aria-label={t('conversas.voz.abrir')} title={t('conversas.voz.abrirDica', { nome: agent.name })}><Icon name="voz" /></button>}
           <textarea hidden={gravando} ref={input} data-autofocus data-esc-own={working ? '' : undefined} value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} rows={1}
             placeholder={busy ? t('conversas.campo.proxima', { nome: agent.name }) : t('conversas.campo.falarCom', { nome: agent.name })}

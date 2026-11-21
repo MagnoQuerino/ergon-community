@@ -287,6 +287,7 @@ const conversas = {
   'campo.solte': 'Solte para enviar a {nome}',
   'campo.qualquerTipo': 'qualquer tipo de arquivo',
   'campo.naoCitar': 'Não responder citando',
+  'campo.mais': 'Anexar ou falar',
   'campo.anexar': 'Anexar arquivos',
   'campo.anexarDica': 'Anexar arquivos (ou arraste para a conversa)',
   'campo.proxima': 'Escreva a próxima: vai quando {nome} terminar',

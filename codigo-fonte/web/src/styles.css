@@ -3946,3 +3946,22 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
 .aviso-devolvido__txt small { color: var(--muted); }
 @keyframes aviso-devolvido-entra { from { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .aviso-devolvido { animation: none; } }
+
+/* a barra de digitação no celular (rc.43): anexar e voz no "+", o microfone no lugar do enviar com o campo vazio */
+.chat__mais-caixa { position: relative; display: none; align-self: center; }
+.chat__mais-menu { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 20; display: grid; min-width: 200px; padding: 6px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: 0 10px 28px rgba(0, 0, 0, .16); }
+.chat__mais-menu button { display: flex; align-items: center; gap: 10px; padding: 10px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.chat__mais-menu button:hover, .chat__mais-menu button:focus-visible { background: var(--panel-2); }
+.chat__mais.is-on { color: var(--navy); background: var(--panel-2); }
+@media (max-width: 600px) {
+  .chat__mais-caixa { display: inline-flex; }
+  .chat__row .chat__extra, .sala__barra .chat__extra { display: none; }
+  .chat__row { gap: 4px; }
+  .chat__row:not(.chat__row--vazio) > .chat__mic:not(.chat__voz) { display: none; }
+  .chat__row--vazio .chat__send { display: none; }
+  .sala__barra { gap: 2px; padding: 8px 10px; }
+  .sala__barra:not(.sala__barra--vazia) > .chat__mic:not(.chat__voz) { display: none; }
+  .sala__barra--vazia .scampo__enviar { display: none; }
+  .sala__barra .chat__mais-caixa { align-self: flex-end; margin-bottom: 4px; }
+}

@@ -315,7 +315,7 @@ button.vis-enq__op:focus-visible { outline: var(--foco-largura) solid var(--navy
 .vis-rel__resumo { margin: 0 0 4px; font-size: 14px; line-height: 1.5; }
 .vis-rel__dest { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .vis-rel__acoes { margin-top: 12px; gap: 10px; align-items: center; }
-@media (prefers-reduced-motion: no-preference) { 
+@media (prefers-reduced-motion: no-preference) {
 /* animações de entrada */
 .vis-in { animation: vis-entra .45s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 45ms); }
 .vis-cresce { transform-origin: left center; animation: vis-cresce-x .7s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 60ms); }
@@ -330,6 +330,7 @@ button.vis-enq__op:focus-visible { outline: var(--foco-largura) solid var(--navy
 @keyframes vis-surge { from { opacity: 0; transform: scale(.9); } }
 @keyframes vis-traca { to { stroke-dashoffset: 0; } }
 @keyframes vis-pulsa { 50% { opacity: .55; } }
+}
 @media (prefers-reduced-motion: reduce) {
   .vis, .vis-in, .vis-cresce, .vis-a, .vis-vs__barra span, .vis--montando span { animation: none !important; }
   .vis-a--traca { stroke-dasharray: none; stroke-dashoffset: 0; }

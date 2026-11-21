@@ -266,6 +266,7 @@ const conversas: Traducao<typeof pt> = {
   'campo.solte': 'Drop to send to {nome}',
   'campo.qualquerTipo': 'any type of file',
   'campo.naoCitar': 'Stop quoting',
+  'campo.mais': 'Attach or talk',
   'campo.anexar': 'Attach files',
   'campo.anexarDica': 'Attach files (or drag them into the conversation)',
   'campo.proxima': 'Write the next one: it sends when {nome} finishes',
