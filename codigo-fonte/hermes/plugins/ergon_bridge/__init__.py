@@ -1035,6 +1035,15 @@ def _config_do_perfil(base: dict[str, Any], e: dict[str, Any]) -> dict[str, Any]
     # (_SEMPRE_TOOLSETS): sem eles o agente no perfil não teria como perguntar nem pedir uma chave com segurança.
     lista = sorted((ligados & quer & (_SAFE_TOOLSETS | _GUARDED_TOOLSETS)) | extras | _SEMPRE_TOOLSETS)
     cfg["platform_toolsets"] = {**pt, "api_server": list(lista), "cli": list(lista), "cron": list(lista)}   # listas próprias: sem âncoras no YAML
+    # navegador sem Terminal (rc.41): no Hermes 0.22 o navegador padrão é uma ferramenta só (browser_exec), que roda código
+    # no computador do motor e por isso só é entregue a quem também tem o Terminal (model_tools.py, _rewrite_browser_exec):
+    # o agente só com "Navegador automático" ficava sem navegador nenhum. Para ele, as ferramentas browser_* de sempre
+    # (browser.backend: off), que não rodam código. Com Terminal, fica como a equipe está (browser_exec, ou o que a
+    # configuração da equipe disser).
+    if "browser" in lista and "terminal" not in lista:
+        nav = dict(cfg.get("browser")) if isinstance(cfg.get("browser"), dict) else {}
+        nav["backend"] = "off"
+        cfg["browser"] = nav
     kn = cfg.get("known_plugin_toolsets") if isinstance(cfg.get("known_plugin_toolsets"), dict) else {}
     conhecidos = sorted(set(_lista_cfg(kn.get("api_server"))) | set(_ERGON_PLUGIN_TOOLSETS))
     cfg["known_plugin_toolsets"] = {**kn, "api_server": list(conhecidos), "cli": list(conhecidos), "cron": list(conhecidos)}
@@ -1162,8 +1171,13 @@ def _limpar_perfil(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Sobe quando a FORMA de montar a configuração do perfil muda (_config_do_perfil): os perfis que já existem são refeitos
+# sozinhos na partida seguinte do motor (_perfis_acompanhar), sem o Ergon mandar nada. 2 = navegador sem Terminal (rc.41).
+_PERFIL_GERACAO = 2
+
+
 def _carimbo_do_perfil(raiz: Path, pedido: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps([PLUGIN_VERSION, pedido, _assinatura(raiz / "config.yaml"), _assinatura(raiz / ".env")], sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([PLUGIN_VERSION, _PERFIL_GERACAO, pedido, _assinatura(raiz / "config.yaml"), _assinatura(raiz / ".env")], sort_keys=True).encode()).hexdigest()
 
 
 def _refazer_config_do_perfil(raiz: Path, d: Path, e: dict[str, Any]) -> None:

@@ -1,9 +1,12 @@
 """Navegador ao vivo com "Assumir o controle" (rc.41), com o laço de verdade do motor, o agent-browser e o Chromium da
 imagem, um modelo falso e um Ergon simulado (sem rede, HERMES_HOME descartável).
 
-O navegador do motor tem duas formas, conforme a configuração do Hermes, e o teste roda nas duas (a segunda num processo
-novo, NAV_MODO=classico): a padrão do Hermes 0.22 (browser_exec, que roda código no Chromium do agent-browser) e as
-ferramentas browser_* de sempre (browser.backend: off).
+O navegador do motor tem duas formas, e o teste roda nas duas (a segunda num processo novo, NAV_MODO=classico), com a
+configuração que o próprio plugin monta para o perfil do agente (_config_do_perfil):
+- agente com navegador E Terminal: a forma padrão do Hermes 0.22 (browser_exec, que roda código no Chromium do
+  agent-browser e por isso só é entregue a quem tem o Terminal);
+- agente só com navegador: as ferramentas browser_* de sempre (o plugin grava browser.backend: off no perfil dele; sem
+  isso ele ficava sem navegador nenhum).
 
 Confere, dentro da imagem do motor:
 - o agente abre uma página: o Ergon é avisado de que há navegador naquele trabalho; a ponte de controle
@@ -13,7 +16,8 @@ Confere, dentro da imagem do motor:
   browser_snapshot seguinte mostra a página já logada;
 - a senha que a pessoa digitou não aparece em NENHUMA mensagem que foi ao modelo, em nenhum pedido ao Ergon, em nenhum
   registro e em nenhum arquivo do motor;
-- senha digitada e não enviada é apagada na devolução (o agente não a lê depois);
+- o que a pessoa deixou digitado e não enviou (senha, e também um código num campo de texto comum) é apagado na
+  devolução, e o que a página já trazia fica (o agente não lê depois o que ela digitou);
 - a pessoa que não devolve: a ferramenta desiste de esperar com o aviso certo; o prazo acaba: o controle volta sozinho,
   o Ergon é avisado e o agente recebe o aviso do prazo;
 - enquanto a pessoa está no controle, o navegador não é fechado por estar "parado" (a atividade é tocada);
@@ -48,6 +52,7 @@ shutil.copytree("/p/ergon_bridge", os.path.join(HOME, "plugins", "ergon_bridge")
 TOKEN = "token-da-ponte-de-teste-0123456789"
 # a senha de teste, montada por partes (nenhum arquivo do repositório traz um segredo inteiro)
 SENHA = "".join(["s3nh", "@-", "Secr", "eta", "-77"])
+CODIGO = "".join(["77", "88", "99", "-cod"])   # um código de verificação, digitado num campo de texto comum
 ESTADO = f"/tmp/ergon-navegador-teste-{MODO}"
 shutil.rmtree(ESTADO, ignore_errors=True)
 
@@ -118,7 +123,7 @@ def ponte(metodo, caminho, corpo=None, token=TOKEN):
 PAGINA = ("""<!doctype html><html><head><meta charset="utf-8"><title>Entrar - Loja Teste</title>
 <style>body{font:16px sans-serif;margin:0;padding:40px}input{display:block;width:300px;height:40px;margin:0 0 20px;font-size:16px}button{width:120px;height:40px}</style></head><body>
 <h1 id="titulo">Loja Teste</h1>
-<form id="f"><input id="u" name="u" aria-label="Usuário" autocomplete="off"><input id="p" name="p" type="password" aria-label="Senha"><button id="entrar" type="submit">Entrar</button></form>
+<input id="pre" aria-label="Loja" value="mantido"><form id="f"><input id="u" name="u" aria-label="Usuário" autocomplete="off"><input id="p" name="p" type="password" aria-label="Senha"><button id="entrar" type="submit">Entrar</button></form>
 <div id="ok" hidden><h2>Bem-vinda, <span id="quem"></span>!</h2><p>Pedido 4471: entregue.</p></div>
 <script>document.getElementById('f').addEventListener('submit',function(e){e.preventDefault();var u=document.getElementById('u').value,p=document.getElementById('p').value;
 if(u==='ana'&&p==='__SENHA__'){document.getElementById('f').remove();document.getElementById('quem').textContent=u;document.getElementById('ok').hidden=false;document.title='Minha conta';}
@@ -201,24 +206,62 @@ class Modelo(Base):
 
 
 URL_MODELO = f"http://127.0.0.1:{servir(Modelo)}/v1"
+# a configuração é a que o plugin monta para o perfil de um agente com estas ferramentas (a da equipe com o do agente por cima)
+import importlib.util  # noqa: E402
+import yaml  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("ergon_bridge_solto", os.path.join(HOME, "plugins", "ergon_bridge", "__init__.py"))
+solto = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(solto)
+DA_EQUIPE = {"plugins": {"enabled": ["ergon_bridge"]}, "platform_toolsets": {"api_server": ["todo", "browser", "terminal"]},
+             "known_plugin_toolsets": {"api_server": ["ergon_conexoes", "ergon_cartoes"]}, "tools": {"tool_search": {"enabled": "off"}},
+             "agent": {"max_turns": 30}, "model": {"provider": "custom", "base_url": URL_MODELO, "default": "modelo-falso", "api_key": "chave-falsa"}}
+pedido = {"ferramentas": list(CONJUNTOS), "memoria": False, "busca": False, "ajudantes": {"ligado": False}}
+DO_PERFIL = solto._config_do_perfil(DA_EQUIPE, pedido)
 with open(os.path.join(HOME, "config.yaml"), "w", encoding="utf-8") as f:
-    f.write(("browser:\n  backend: \"off\"\n" if MODO == "classico" else "") + f"""plugins:
-  enabled: [ergon_bridge]
-platform_toolsets:
-  api_server: [{", ".join(CONJUNTOS)}]
-known_plugin_toolsets:
-  api_server: [ergon_conexoes, ergon_cartoes]
-tools:
-  tool_search:
-    enabled: "off"
-agent:
-  max_turns: 30
-model:
-  provider: custom
-  base_url: {URL_MODELO}
-  default: modelo-falso
-  api_key: chave-falsa
-""")
+    yaml.safe_dump(DO_PERFIL, f, sort_keys=False, allow_unicode=True)
+if MODO == "classico":
+    check("agente só com navegador: o perfil dele pede as ferramentas browser_* (browser.backend: off)", (DO_PERFIL.get("browser") or {}).get("backend") == "off"
+          and "terminal" not in DO_PERFIL["platform_toolsets"]["api_server"], str(DO_PERFIL.get("browser")))
+else:
+    check("agente com navegador e Terminal: o navegador fica como a equipe está (browser_exec)", "backend" not in (DO_PERFIL.get("browser") or {})
+          and "terminal" in DO_PERFIL["platform_toolsets"]["api_server"], str(DO_PERFIL.get("browser")))
+    escolha = solto._config_do_perfil({**DA_EQUIPE, "browser": {"backend": "off", "engine": "auto"}}, pedido)
+    check("com Terminal, o que a equipe já tinha escolhido para o navegador não muda", escolha["browser"] == {"backend": "off", "engine": "auto"}, str(escolha.get("browser")))
+    sem = solto._config_do_perfil({**DA_EQUIPE, "browser": {"engine": "auto"}}, {**pedido, "ferramentas": ["todo", "browser"]})
+    check("sem Terminal, o resto da configuração do navegador fica", sem["browser"] == {"engine": "auto", "backend": "off"}, str(sem.get("browser")))
+    nenhum = solto._config_do_perfil(DA_EQUIPE, {**pedido, "ferramentas": ["todo"]})
+    check("agente sem navegador: nada muda", "browser" not in nenhum)
+    a, b_ = solto._carimbo_do_perfil(solto.Path(HOME), pedido), None
+    solto._PERFIL_GERACAO += 1
+    b_ = solto._carimbo_do_perfil(solto.Path(HOME), pedido)
+    solto._PERFIL_GERACAO -= 1
+    check("perfis que já existem são refeitos sozinhos: a forma de montar entra no carimbo do perfil", solto._PERFIL_GERACAO >= 2 and a != b_)
+    # migração, como na partida do motor depois de atualizar: um perfil gravado pela versão de antes (sem o backend, com
+    # o carimbo da forma anterior) é refeito sem o Ergon mandar nada
+    NOME = "erg-" + "ab12" * 5
+    corpo = {"alma": "Você é a Aspásia.", "ferramentas": ["todo", "browser"], "memoria": False, "busca": False, "ajudantes": {"ligado": False}}
+    try:
+        solto.perfil_garantir(NOME, corpo)
+        dperfil = solto._perfil_dir(NOME)
+        estado_p = json.loads((dperfil / solto._PERFIL_ESTADO).read_text(encoding="utf-8"))
+        antigo = yaml.safe_load((dperfil / "config.yaml").read_text(encoding="utf-8"))
+        novo_ok = (antigo.get("browser") or {}).get("backend") == "off"
+        antigo.pop("browser", None)
+        (dperfil / "config.yaml").write_text(yaml.safe_dump(antigo, sort_keys=False), encoding="utf-8")
+        solto._PERFIL_GERACAO -= 1
+        estado_p["carimbo"] = solto._carimbo_do_perfil(solto._raiz(), estado_p["pedido"])
+        solto._PERFIL_GERACAO += 1
+        (dperfil / solto._PERFIL_ESTADO).write_text(json.dumps(estado_p), encoding="utf-8")
+        solto._perfis_vistos["sinal"] = ""
+        refeitos = solto._perfis_acompanhar()
+        depois_p = yaml.safe_load((dperfil / "config.yaml").read_text(encoding="utf-8"))
+        check("perfil novo de agente só com navegador: nasce com browser.backend off", novo_ok)
+        check("perfil que já existia: refeito sozinho na partida, agora com as ferramentas browser_*", refeitos == 1 and (depois_p.get("browser") or {}).get("backend") == "off"
+              and solto._perfis_acompanhar() == 0, f"{refeitos} {depois_p.get('browser')}")
+        shutil.rmtree(dperfil, ignore_errors=True)
+    except Exception as exc:  # noqa: BLE001
+        check("migração dos perfis que já existem", False, repr(exc))
 
 # ---------- o motor de verdade
 from hermes_cli.plugins import discover_plugins  # noqa: E402
@@ -358,7 +401,7 @@ if MODO == "classico":
         return ferramenta("browser_click", {"ref": "@e1"})
 
     def ler_senha():
-        return ferramenta("browser_console", {"expression": "document.getElementById('p').value"})
+        return ferramenta("browser_console", {"expression": "'campo=[' + ['u', 'p', 'pre'].map(function (i) { return document.getElementById(i).value; }).join('|') + ']'"})
     RELER = "browser_snapshot"
 else:
     def abrir():
@@ -371,7 +414,7 @@ else:
         return ferramenta("browser_exec", {"code": "# Clicando em Entrar\nprint(js(\"document.getElementById('entrar').click()\"))"})
 
     def ler_senha():
-        return ferramenta("browser_exec", {"code": "# Lendo o campo\nprint('campo=[' + str(js(\"document.getElementById('p').value\")) + ']')"})
+        return ferramenta("browser_exec", {"code": "# Lendo o campo\nprint('campo=[' + str(js(\"['u', 'p', 'pre'].map(function (i) { return document.getElementById(i).value; }).join('|')\")) + ']')"})
     RELER = "browser_exec"
 
 # ============ 1. o agente abre a página; a pessoa assiste; assume; faz o login; devolve; o agente lê a página logada
@@ -432,6 +475,11 @@ roteiro[:] = [abrir(), passo_assistir, passo_assumir, ler, fala("O pedido 4471 f
 n0 = len(chamadas)
 r = rodar(S1, "veja a situação do meu pedido na Loja Teste")
 res = resultados()
+oferecidas = {t.get("function", {}).get("name") for t in chamadas[n0].get("tools", [])}
+if MODO == "classico":
+    check("só com navegador: o modelo recebe as ferramentas browser_* (e não o browser_exec)", {"browser_navigate", "browser_snapshot", "browser_click"} <= oferecidas and "browser_exec" not in oferecidas, str(sorted(x for x in oferecidas if x)))
+else:
+    check("com navegador e Terminal: o modelo recebe o browser_exec, como hoje", "browser_exec" in oferecidas and "browser_navigate" not in oferecidas, str(sorted(x for x in oferecidas if x)))
 check("o agente abriu a página pelo navegador do motor", len(res) >= 1 and "Loja Teste" in res[0], res[0][:300] if res else "")
 check("o Ergon foi avisado de que há navegador neste trabalho (com o token da ponte e a sessão)", medidas.get("ativo")
       and avisos("ativo")[0].get("session_id") == S1 and [p["token"] for p in pedidos if p["path"].endswith("/navegador")][0] == TOKEN, str(pedidos)[:300])
@@ -467,10 +515,14 @@ medidas.clear()
 def passo_senha_sem_enviar():
     ponte("PUT", "/ergon/v1/navegador/controle", {"sessao": S2, "pessoa": True, "prazo_s": 120})
     fl = Fluxo(S2)
+    ux, uy = caixa("#u", S2)
+    fl.clicar(ux, uy)
+    fl.digitar(CODIGO)
     px, py = caixa("#p", S2)
     fl.clicar(px, py)
     fl.digitar(SENHA)
     reg = nav.registro(S2)
+    medidas["codigo"] = ((nav._cli(reg, ["eval", "document.getElementById('u').value"]) or {}).get("data") or {}).get("result")
     medidas["digitada"] = ((nav._cli(reg, ["eval", "document.getElementById('p').value.length"]) or {}).get("data") or {}).get("result")
     fl.fechar()
     medidas["devolver"] = ponte("PUT", "/ergon/v1/navegador/controle", {"sessao": S2, "pessoa": False})
@@ -493,9 +545,10 @@ roteiro[:] = [abrir(), passo_senha_sem_enviar, ler_senha, passo_nao_devolve, pas
 r = rodar(S2, "entre na Loja Teste")
 res = resultados()
 check("a pessoa digitou a senha no campo (pela transmissão)", medidas.get("digitada") == len(SENHA), str(medidas.get("digitada")))
-check("devolveu sem enviar: a ponte diz que apagou 1 senha", medidas.get("devolver", (0, {}))[1].get("senhas") == 1, str(medidas.get("devolver")))
-check("o agente lê o campo depois da devolução: vazio", len(res) >= 3 and SENHA not in res[2] and SENHA not in res[1]
-      and ("campo=[]" in res[2] if MODO != "classico" else True), res[2][:300] if len(res) >= 3 else str(res))
+check("e um código num campo de texto comum", medidas.get("codigo") == CODIGO, str(medidas.get("codigo")))
+check("devolveu sem enviar: a ponte diz que apagou os 2 campos digitados", medidas.get("devolver", (0, {}))[1].get("senhas") == 2, str(medidas.get("devolver")))
+check("o agente lê os campos depois da devolução: vazios, e o que a página já trazia continua lá", len(res) >= 3 and "campo=[||mantido]" in res[2]
+      and not any(x in r_ for x in (SENHA, CODIGO) for r_ in res), res[2][:300] if len(res) >= 3 else str(res))
 check("a pessoa não devolve: a ferramenta desiste de esperar (6 s) com o aviso de que ela ainda está usando",
       len(res) >= 4 and "ainda está" in res[3] and 5 <= medidas.get("espera_1", 0) < 9, f'{medidas.get("espera_1")} {res[3][:200] if len(res) >= 4 else res}')
 check("o prazo acaba: o controle volta sozinho e o agente recebe o aviso do prazo", len(res) >= 5 and "prazo" in res[4], res[4][:300] if len(res) >= 5 else str(res))
@@ -521,6 +574,7 @@ if MODO != "classico":
         fl.clicar(ux, uy)
         fl.digitar("zz")
         medidas["quadro"] = bool(q0)
+        medidas["onde"] = ((nav._cli(reg, ["eval", "location.search + '|' + document.getElementById('u').value"]) or {}).get("data") or {}).get("result")
         fl.fechar()
         ponte("PUT", "/ergon/v1/navegador/controle", {"sessao": S3, "pessoa": False})
         return ler()
@@ -531,8 +585,8 @@ if MODO != "classico":
     roteiro[:] = [abrir(), passo_aba_nova, passo_pessoa_na_aba, passo_onde_digitou, fala("Certo.")]
     r = rodar(S3, "abra a loja em duas abas")
     res = resultados()
-    check("browser_exec abriu outra aba: a pessoa vê e digita na aba em uso (não na anterior)", medidas.get("quadro") and len(res) >= 4 and "onde=[?aba=2|zz]" in res[3],
-          res[3][:300] if len(res) >= 4 else str(res)[:400])
+    check("browser_exec abriu outra aba: a pessoa vê e digita na aba em uso (não na anterior)", medidas.get("quadro") and medidas.get("onde") == "?aba=2|zz", str(medidas.get("onde")))
+    check("e, devolvido, o agente segue na mesma aba sem o que ela digitou", len(res) >= 4 and "onde=[?aba=2|]" in res[3], res[3][:300] if len(res) >= 4 else str(res)[:400])
 
 # ============ 3. a máquina de estados, direto no módulo (sem navegador)
 c0 = nav.controle("sessao-solta")
@@ -551,6 +605,7 @@ check("a pasta do estado é só do usuário do motor (0700)", modo == "0o700", m
 # ============ 4. a senha não ficou em lugar nenhum
 conversa = json.dumps(chamadas, ensure_ascii=False)
 check("a senha não foi ao modelo em nenhuma mensagem", SENHA not in conversa)
+check("nem o código digitado no campo de texto", CODIGO not in conversa)
 check("nem ao Ergon, em nenhum pedido", SENHA not in json.dumps(pedidos, ensure_ascii=False))
 check("nem aos registros do motor", SENHA not in registros.getvalue())
 achados = []

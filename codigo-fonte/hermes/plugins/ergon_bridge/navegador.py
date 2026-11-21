@@ -66,7 +66,8 @@ _MSG_ESPERANDO = ("A pessoa assumiu o controle do navegador (por exemplo, para f
                   "usando. Enquanto isso você não age nem lê a página. Não tente contornar por outro caminho (terminal, outra "
                   "ferramenta, outro navegador). Para continuar esperando, {reler}; ela devolve o controle quando terminar.")
 _MSG_DEVOLVEU = ("A pessoa tinha assumido o controle do navegador e já devolveu. A página pode ter mudado (por exemplo, ela fez o "
-                 "login): {reler} para ver como está agora antes de continuar. Não peça a ela o que digitou.")
+                 "login): {reler} para ver como está agora antes de continuar. O que ela digitou não chega a você (o que ficou sem "
+                 "enviar foi apagado): não peça a ela o que digitou.")
 _MSG_PRAZO = ("A pessoa tinha assumido o controle do navegador e o prazo dela acabou: o controle voltou para você. Para ver como a "
               "página está agora, {reler}; se ainda faltar a parte dela, diga em uma frase o que falta.")
 
@@ -241,13 +242,13 @@ def assumir(sessao: str, prazo_s: float = PRAZO_PADRAO_S) -> dict[str, Any]:
 
 
 def devolver(sessao: str, motivo: str = "pessoa") -> dict[str, Any]:
-    """O controle volta ao agente. Antes, apaga o que ficou digitado em campos de senha e não foi enviado: depois da
-    devolução o agente volta a ler a página, e a senha da pessoa não pode estar nela. Sem estar com a pessoa: não muda."""
+    """O controle volta ao agente. Antes, apaga o que a pessoa deixou digitado e não enviou (senha, código de verificação,
+    qualquer texto): depois da devolução o agente volta a ler a página. Sem estar com a pessoa: não muda."""
     c = _ler(_ctl_path(sessao)) or {}
     if c.get("pessoa") is not True:
         return {"pessoa": False, "epoca": int(c.get("epoca") or 0), "desde": 0.0, "ate": 0.0, "motivo": str(c.get("motivo") or ""), "senhas": 0}
     reg = registro(sessao)
-    senhas = apagar_senhas(reg) if reg else 0
+    senhas = apagar_digitado(reg) if reg else 0
     novo = {"pessoa": False, "epoca": int(c.get("epoca") or 0) + 1, "desde": 0.0, "ate": 0.0, "motivo": str(motivo)[:20], "devolvido": time.time()}
     _gravar(_ctl_path(sessao), novo)
     if motivo != "pessoa" and reg:
@@ -255,16 +256,44 @@ def devolver(sessao: str, motivo: str = "pessoa") -> dict[str, Any]:
     return {**novo, "senhas": senhas}
 
 
-# Campos de senha preenchidos, no documento, nos quadros da mesma origem e dentro de shadow DOM: esvazia pelo "setter"
-# nativo e avisa a página (input/change), para os formulários de React e afins acompanharem. Devolve quantos esvaziou.
-_JS_APAGAR_SENHAS = (
-    "(()=>{let n=0;const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;"
-    "const ver=(r)=>{let els=[];try{els=r.querySelectorAll('*')}catch(e){return}"
-    "for(const el of els){try{if(el instanceof HTMLInputElement&&el.type==='password'&&el.value){set.call(el,'');"
-    "el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));n++}"
-    "if(el.shadowRoot)ver(el.shadowRoot);"
-    "if(el.tagName==='IFRAME'||el.tagName==='FRAME'){const d=el.contentDocument;if(d)ver(d)}}catch(e){}}};"
-    "ver(document);return n})()"
+# O que a pessoa digita enquanto está no controle não pode chegar ao agente: depois da devolução ele volta a ler a página.
+# O que foi ENVIADO já saiu dos campos (o formulário seguiu); o que ficou digitado e não enviado é apagado na devolução:
+# senha, código de verificação num campo de texto comum, qualquer texto. Para saber o que a pessoa digitou (e não apagar
+# o que a página já trazia), um ouvinte é posto em cada documento quando ela assume: guarda o valor que cada campo tinha
+# e marca os campos em que chegou tecla de verdade. Documento aberto DURANTE o controle (ela entrou e a página seguinte
+# pede o código) recebe o ouvinte na volta seguinte do vigia; nele, o valor de partida de todo campo é "vazio". Documento
+# que nem chegou a receber o ouvinte: todo campo de texto preenchido é apagado. Campos de senha: sempre.
+# Alcança o documento, os quadros da mesma origem e o shadow DOM aberto; quadro de outra origem, não (limite conhecido).
+_JS_COMUM = (
+    "const tipos=['text','search','tel','url','email','number','password'];"
+    "const campo=(el)=>(el instanceof el.ownerDocument.defaultView.HTMLInputElement&&tipos.includes(el.type))"
+    "||el instanceof el.ownerDocument.defaultView.HTMLTextAreaElement;"
+    "const andar=(r,f)=>{let els=[];try{els=r.querySelectorAll('*')}catch(e){return}"
+    "for(const el of els){try{f(el);if(el.shadowRoot)andar(el.shadowRoot,f);"
+    "if(el.tagName==='IFRAME'||el.tagName==='FRAME'){const d=el.contentDocument;if(d)doc(d)}}catch(e){}}};"
+)
+# %s: true na hora em que a pessoa assume (os valores de agora são os da página); false nas voltas seguintes
+_JS_OUVIR = (
+    "(()=>{const primeira=%s;let n=0;" + _JS_COMUM +
+    "const doc=(d)=>{const w=d.defaultView;if(!w||w.__ergonNav)return;const base=new WeakMap(),dig=new WeakSet();"
+    "w.__ergonNav={base,dig};n++;"
+    "const marca=(e)=>{if(!e.isTrusted)return;const t=(e.composedPath&&e.composedPath()[0])||e.target;if(t&&t.nodeType===1)dig.add(t)};"
+    "d.addEventListener('input',marca,true);d.addEventListener('keydown',marca,true);"
+    "andar(d,(el)=>{if(campo(el))base.set(el,primeira?el.value:'')})};"
+    "doc(document);return n})()"
+)
+_JS_APAGAR = (
+    "(()=>{let n=0;" + _JS_COMUM +
+    "const doc=(d)=>{const w=d.defaultView;if(!w)return;const nav=w.__ergonNav;"
+    "const si=Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,'value').set,"
+    "st=Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype,'value').set;"
+    "const avisar=(el)=>{el.dispatchEvent(new w.Event('input',{bubbles:true}));el.dispatchEvent(new w.Event('change',{bubbles:true}))};"
+    "andar(d,(el)=>{if(campo(el)){if(!el.value)return;"
+    "const digitado=el.type==='password'||!nav||nav.dig.has(el)||(nav.base.has(el)&&nav.base.get(el)!==el.value);"
+    "if(digitado){(el instanceof w.HTMLTextAreaElement?st:si).call(el,'');avisar(el);n++}}"
+    "else if(nav&&nav.dig.has(el)&&el.isContentEditable&&el.textContent){el.textContent='';avisar(el);n++}});"
+    "try{delete w.__ergonNav}catch(e){}};"
+    "doc(document);return n})()"
 )
 
 
@@ -306,8 +335,14 @@ def acompanhar_aba(reg: dict[str, Any]) -> None:
         _cli(reg, ["tab", ativa], timeout=5)
 
 
-def apagar_senhas(reg: dict[str, Any]) -> int:
-    r = _cli(reg, ["eval", _JS_APAGAR_SENHAS])
+def ouvir_digitacao(reg: dict[str, Any], primeira: bool) -> None:
+    """Põe (uma vez por documento) o ouvinte que marca os campos em que a pessoa digita. Ver _JS_OUVIR."""
+    _cli(reg, ["eval", _JS_OUVIR % ("true" if primeira else "false")], timeout=5)
+
+
+def apagar_digitado(reg: dict[str, Any]) -> int:
+    """Apaga o que a pessoa deixou digitado e não enviou. Devolve quantos campos esvaziou."""
+    r = _cli(reg, ["eval", _JS_APAGAR])
     try:
         return int(((r or {}).get("data") or {}).get("result") or 0)
     except (TypeError, ValueError):
@@ -450,9 +485,12 @@ def _volta_do_vigia() -> None:
         if not isinstance(info, dict) or info.get("session_name") != reg.get("nome") or porta(reg) is None:
             _encerrar(reg)   # o Hermes fechou o navegador (fim do turno, parado demais) ou trocou de sessão
             continue
-        if controle(s)["pessoa"] or _assistindo(s):
+        com_pessoa = controle(s)["pessoa"]
+        if com_pessoa or _assistindo(s):
             ciclo._update_session_activity(chave)
             acompanhar_aba(reg)
+        if com_pessoa:
+            ouvir_digitacao(reg, False)   # a página mudou durante o controle: o documento novo também é ouvido
 
 
 def _encerrar(reg: dict[str, Any]) -> None:
@@ -546,8 +584,10 @@ def rota(handler: Any, method: str, path: str, q: dict[str, str], body: dict[str
                 prazo = float(body.get("prazo_s") or PRAZO_PADRAO_S)
             except (TypeError, ValueError):
                 prazo = PRAZO_PADRAO_S
-            c = assumir(s, prazo)
+            ja = controle(s)["pessoa"]
             acompanhar_aba(reg)   # o que a pessoa digitar vai para a aba que ela está vendo
+            c = assumir(s, prazo)
+            ouvir_digitacao(reg, not ja)
             _ligar_vigia()
             return handler._json(200, {"ok": True, "controle": "pessoa", "epoca": c["epoca"], "ate": c["ate"]})
         c = devolver(s, "pessoa")
