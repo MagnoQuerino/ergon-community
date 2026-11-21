@@ -23,6 +23,11 @@ export interface AuthContext {
   locked: boolean;
   /** última autenticação forte (login, destrancar, confirmação) */
   authAt: number;
+  /**
+   * Só na gestão pelo coordenador (gestao.ts, bilhete de uso único): o agente que pediu a ação. As rotas continuam valendo
+   * com a sessão da pessoa; quem assina o que tem autor (um comentário num card) é o agente.
+   */
+  agenteId?: string;
 }
 
 export function needsSetup(db: Db): boolean {

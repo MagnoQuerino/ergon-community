@@ -36,6 +36,13 @@ const SEALED_COLUMNS: Array<{ table: string; cols: string[] }> = [
   { table: 'agents', cols: ['charter'] },
   { table: 'integrations', cols: ['account_label'] },
   { table: 'folders', cols: ['name'] },
+  // o que vai dentro do cartão (rc.41)
+  { table: 'board_fields', cols: ['name', 'options'] },
+  { table: 'task_field_values', cols: ['value'] },
+  { table: 'task_subtasks', cols: ['title'] },
+  { table: 'task_urls', cols: ['url', 'title'] },
+  { table: 'task_comments', cols: ['author_name', 'body'] },
+  { table: 'task_attachments', cols: ['filename'] },
 ];
 
 /** Cifra o que foi gravado antes da proteção (instalação antiga ou dados de demonstração do 1º uso). */

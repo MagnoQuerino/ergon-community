@@ -521,6 +521,7 @@ const servidor: Traducao<typeof pt> = {
   'proposta.gestao.acao.tarefa.ver': 'See a card (history, deliverables, pending items)',
   'proposta.gestao.acao.tarefa.criar': 'Create a card',
   'proposta.gestao.acao.tarefa.editar': 'Edit or move a card (name, description, column, owner, due date, complete)',
+  'proposta.gestao.acao.tarefa.comentar': 'Comment on a card (up to 240 characters; the comment carries the agent’s name)',
   'proposta.gestao.acao.tarefa.trabalhar': 'Put the team to work on a card',
   'proposta.gestao.acao.tarefa.cancelar': 'Cancel a card (the work stops and it leaves the board)',
   'proposta.gestao.acao.decisoes.ver': 'See what is waiting for the person ("With you")',
