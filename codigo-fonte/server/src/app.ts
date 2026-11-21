@@ -105,7 +105,7 @@ import { chaveDaColuna } from './services/colunas.ts';
 import { USER_COLUMNS } from './services/seed.ts';
 import { loadWorld, type CloudTasksHost } from './world-hook.ts';
 import { providerKeyOf, saveProviderKey } from './services/provider-keys.ts';
-import { exportBlueprint, setAoMudarFerramentasDaEquipe } from './services/blueprint.ts';
+import { exportBlueprint, guardadasPendentes, limparGuardadas, setAoMudarFerramentasDaEquipe } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
 import { competenciasDeTerceiros } from './services/competencias.ts';
 import { Catalog, OFFICIAL_KEYS } from './services/catalog.ts';
@@ -730,6 +730,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   let conexoesPadrao = false;
   // na nuvem do World, a equipe é a do computador: Executar código e Terminal ligados lá com a senha (a escolha chega no
   // esqueleto da sincronia) valem também aqui, onde ninguém aceita os termos (a conta local é a da nuvem)
+  // (o esqueleto só é aplicado vindo da conta dona — world/sync-local.ts — e, na nuvem, o aparelho é dessa conta: o
+  // 'ligado' que chega é a escolha que o dono fez com a senha no computador dele, nunca a de um colaborador)
   const codigoDaEquipe = (ws: string) => codigoPorPadrao(db, ws) || (cfg.mode === 'cloud' && ['calculo', 'terminal'].some((t) => getSetting(db, ws, `ferramentas.${t}`) === 'ligado'));
   // um esqueleto recebido mudou as ferramentas da equipe: o motor fica com a escolha já, sem esperar a próxima abertura
   setAoMudarFerramentasDaEquipe(db, (ws) => {
@@ -1627,6 +1629,35 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.tools', evidence: { enabled }, result: 'ferramentas da equipe atualizadas' });
     bus.publish(a.workspaceId, 'agents.changed', {});
     return { enabled };
+  });
+  /**
+   * As ferramentas que executam código (Terminal, Executar código) que vieram da sincronia e NÃO ligaram aqui (só ligam
+   * sozinhas na nuvem do próprio dono: services/blueprint.ts). Ligar pede a senha, como ligar pela tela; deixar desligado
+   * só esquece o pedido.
+   */
+  app.get('/api/sync/guardadas', async (req) => ({ itens: guardadasPendentes(db, owner(req).workspaceId).itens }));
+  app.post('/api/sync/guardadas', { schema: { body: { type: 'object', additionalProperties: false, required: ['ligar'], properties: { ligar: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req); const { ligar } = req.body as { ligar: boolean };
+    const p = guardadasPendentes(db, a.workspaceId);
+    if (ligar && p.itens.length) {
+      requireRecentAuth(a);
+      if (p.equipe.length) {
+        const on = new Set(platformToolsets(motorScope(a.workspaceId)).enabled);
+        const wanted = [...new Set([...Object.values(TOOLS).filter((t) => (t.safe || t.guarded) && t.toolset && on.has(t.toolset)).map((t) => t.id), ...p.equipe])];
+        // sem o motor agora (desligado, atualizando), a escolha fica gravada e vale na próxima abertura dele
+        await aiOf(a.workspaceId).setPlatformTools(wanted).catch((e) => { if ((e as HttpError).status !== 503) throw e; });
+        for (const t of p.equipe) setSetting(db, a.workspaceId, `ferramentas.${t}`, 'ligado');
+      }
+      for (const x of p.agentes) {
+        const cur = JSON.parse(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ? AND workspace_id = ?', x.agentId, a.workspaceId)?.tools ?? '[]') as string[];
+        if (!cur.includes(x.tool)) updateAgent(db, bus, a.workspaceId, a.userId, x.agentId, { tools: [...cur, x.tool] });
+      }
+      audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'ai.tools', evidence: { equipe: p.equipe, agentes: p.agentes.length }, result: 'ferramentas que executam código vindas da sincronia ligadas com a senha' });
+      bus.publish(a.workspaceId, 'agents.changed', {});
+    }
+    limparGuardadas(db, a.workspaceId);
+    bus.publish(a.workspaceId, 'sync.changed', {});
+    return { itens: [] };
   });
   app.get('/api/ai/skills', async (req) => {
     const ws = auth(req).workspaceId; const terceiros = competenciasDeTerceiros(db, ws);

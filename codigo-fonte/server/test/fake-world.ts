@@ -142,6 +142,8 @@ export class FakeWorld {
   nuvem(sws: string): string { const bootToken = `${sws}.${hex(16)}`; this.clouds.set(sws, { bootToken, vaultKey: null, deviceId: null, states: [], relay: null, active: false, presence: [], wakeLog: [], pcSeenAt: null, pcLeftAt: null }); return bootToken; }
   /** o último sinal de um computador por workspace (aberto ou fechado): o pcOpen do estado da nuvem; os testes também o mudam */
   pcAberto = new Map<string, boolean>();
+  /** sinais de computador aberto de quem não é dono: o World registra, mas a posse e o horário não mudam */
+  presencaDeOutros?: Array<{ ws: string; conta: string }>;
   /** giros de chave recebidos (mudança kind rotation): de qual workspace, para que versão, por quem */
   rotations: Array<{ ws: string; keyVersion: number; by: string }> = [];
   /** provedores aceitos por delegação (WORLD_DELEGATED_PROVIDERS, padrão) */
@@ -425,6 +427,8 @@ export class FakeWorld {
       // o próprio contêiner da nuvem não é "um computador aberto" (world/src/cloud.ts presence)
       if ((dev as Device & { kind?: string }).kind === 'cloud') return { json: { ok: true, pcHoldsForSeconds: 0, ...(this.antigo ? {} : { keyWanted: false }) } };
       cl.presence.push(b.open !== false);
+      // a posse e o próximo horário são da conta dona (world/src/cloud.ts presence): o sinal de um colaborador não muda nada
+      if (this.workspaces.get(b.workspaceId)!.owner !== acc.id) { (this.presencaDeOutros ??= []).push({ ws: b.workspaceId, conta: acc.id }); return { json: { ok: true, pcHoldsForSeconds: 0, ...(this.antigo ? {} : { keyWanted: this.keyWanted(b.workspaceId) }) } }; }
       const t = Date.now();
       if (b.open !== false) {
         this.pcAberto.set(b.workspaceId, true);
@@ -639,14 +643,16 @@ export class FakeWorld {
         if (!crypto.verify(null, Buffer.from(canon), pub, Buffer.from(String(b.signature), 'base64'))) return { fail: [400, 'bad_signature'] };
         if (crypto.createHash('sha256').update(Buffer.from(b.ciphertext, 'base64')).digest('hex') !== b.sha256) return { fail: [400, 'bad_hash'] };
         w.head += 1;
-        w.changes.push({ version: w.head, operationId: b.operationId, keyVersion: b.keyVersion, schemaVersion: b.schemaVersion, kind: b.kind, ciphertext: b.ciphertext, nonce: b.nonce, deviceId: dev.id });
+        // o autor (world/src/sync.ts COLS): a conta e o tipo do aparelho que assinou
+        w.changes.push({ version: w.head, operationId: b.operationId, keyVersion: b.keyVersion, schemaVersion: b.schemaVersion, kind: b.kind, ciphertext: b.ciphertext, nonce: b.nonce, deviceId: dev.id,
+          accountId: acc.id, deviceKind: (dev as Device & { kind?: string }).kind === 'cloud' ? 'cloud' : 'app' });
         if (b.kind === 'rotation') { w.keyVersion = b.keyVersion; w.rotationRequired = false; this.rotations.push({ ws: w.id, keyVersion: b.keyVersion, by: acc.id }); }
         return { json: { version: w.head } };
       }
       if (m[2] === 'changes' && method === 'GET') {
         const since = Number(u.searchParams.get('since') ?? 0);
         // as conexões só para a conta dona: o membro convidado não vê nem o cifrado
-        return { json: { head: w.head, keyVersion: kv, changes: w.changes.filter((c) => (c.version as number) > since && (c.kind !== 'conexoes' || w.owner === acc.id)).slice(0, 50) } };
+        return { json: { head: w.head, keyVersion: kv, ownerAccountId: w.owner, changes: w.changes.filter((c) => (c.version as number) > since && (c.kind !== 'conexoes' || w.owner === acc.id)).slice(0, 50) } };
       }
     }
     return { fail: [404, 'not_found'] };

@@ -9,17 +9,18 @@
 import crypto from 'node:crypto';
 import type { Db } from '../db/db.ts';
 import { HttpError, now } from '../lib/util.ts';
-import type { Bus } from '../services/bus.ts';
+import { audit, type Bus } from '../services/bus.ts';
 import { exportBlueprint, importBlueprint } from '../services/blueprint.ts';
 import type { AgentLimits } from '../services/capacity.ts';
 import type { Routines } from '../services/routines.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import { type Applied, type ContentBody, ContentSync, parseContent } from './sync-content.ts';
 import { SyncAtividade } from './sync-atividade.ts';
+import { conferirNuvem } from './nuvem-fixa.ts';
 import { newWorkspaceKey, openChange, openForDevice, sealChange, unwrapForDevice, unwrapForRecovery, wrapForDevice, wrapForRecovery } from './sync-crypto.ts';
 
 interface Keys { ed25519: string; x25519: string; x25519Public: string }
-interface SyncRow { sync_workspace_id: string; key_version: number; sync_key: string; last_version: number; blueprint_hash: string | null; old_keys: string | null; rotation_pending: number; recovery_key_version: number | null; updated_at: string | null; envio_pendente: string | null; giro_candidato: string | null }
+interface SyncRow { sync_workspace_id: string; key_version: number; sync_key: string; last_version: number; blueprint_hash: string | null; old_keys: string | null; rotation_pending: number; recovery_key_version: number | null; updated_at: string | null; envio_pendente: string | null; giro_candidato: string | null; dono_conta: string | null }
 /** a parte em envio (w0011): `chegou` = a mudança apareceu no World ao receber, sem a resposta ter chegado aqui */
 interface EnvioPendente { op: string; resumo: string; chegou?: number }
 interface GiroCandidato { v: number; chave: string; op: string }
@@ -29,7 +30,8 @@ interface Precisa { deviceId: string; accountId?: string; syncPublicKey?: string
 export interface Entrega { shared: number; failed: number; needed: number; cloud: 'entregue' | 'falhou' | 'nao_pedia'; falhas: Array<{ deviceId: string; code: string }> }
 const sha = (x: string) => crypto.createHash('sha256').update(x).digest('hex');
 const codigoDe = (e: unknown): string => String((e as { code?: unknown }).code ?? ((e as { status?: unknown }).status ? `http_${(e as { status?: unknown }).status}` : 'erro'));
-type Change = { version: number; operationId: string; keyVersion: number; schemaVersion: number; kind: string; ciphertext: string; nonce: string; deviceId: string };
+/** `accountId`/`deviceKind`: quem mandou, como o World registrou o aparelho que assinou (world/src/sync.ts COLS) */
+type Change = { version: number; operationId: string; keyVersion: number; schemaVersion: number; kind: string; ciphertext: string; nonce: string; deviceId: string; accountId?: string; deviceKind?: string };
 
 export class LocalSync {
   readonly db: Db; readonly links: WorldLinks; readonly client: WorldClient; readonly routines: Routines; readonly bus: Bus; readonly limits: AgentLimits; readonly content: ContentSync;
@@ -64,7 +66,7 @@ export class LocalSync {
   async enviarTipo(userId: string, ws: string, kind: 'conexoes', body: unknown): Promise<number> {
     const r = this.row(ws); if (!r) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
     const c = this.ctx(userId);
-    const sealed = sealChange(Buffer.from(r.sync_key, 'base64'), r.sync_workspace_id, body, { operationId: `cx_${crypto.randomBytes(9).toString('hex')}`, expectedVersion: r.last_version, schemaVersion: 1, keyVersion: r.key_version, kind }, c.keys.ed25519);
+    const sealed = sealChange(Buffer.from(r.sync_key, 'base64'), r.sync_workspace_id, body, { operationId: `cx_${crypto.randomBytes(9).toString('hex')}`, expectedVersion: r.last_version, schemaVersion: 1, keyVersion: r.key_version, kind, deviceId: c.deviceId }, c.keys.ed25519);
     const v = (await this.client.call<{ version: number }>('POST', `/v1/sync/workspaces/${r.sync_workspace_id}/changes`, sealed, c.session)).version;
     this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ? AND last_version = ?', v, now(), ws, r.last_version);
     return v;
@@ -97,17 +99,33 @@ export class LocalSync {
     try { const x = JSON.parse(r.giro_candidato) as GiroCandidato; return Number.isInteger(x.v) && typeof x.op === 'string' && Buffer.from(String(x.chave), 'base64').length === 32 ? x : null; } catch { return null; }
   }
   /** As mudanças depois de `since`, juntando as páginas do World. */
-  private async mudancas(session: string, sws: string, since: number): Promise<{ changes: Change[]; head: number; worldKey: number }> {
-    const changes: Change[] = []; let head = since; let worldKey = 0;
+  private async mudancas(session: string, sws: string, since: number): Promise<{ changes: Change[]; head: number; worldKey: number; dono: string | null }> {
+    const changes: Change[] = []; let head = since; let worldKey = 0; let dono: string | null = null;
     for (let i = 0; i < 1000; i++) { // o World entrega em páginas
-      const p = await this.client.call<{ head: number; keyVersion?: number; changes: Change[] }>('GET', `/v1/sync/workspaces/${sws}/changes?since=${since}`, undefined, session);
+      const p = await this.client.call<{ head: number; keyVersion?: number; ownerAccountId?: unknown; changes: Change[] }>('GET', `/v1/sync/workspaces/${sws}/changes?since=${since}`, undefined, session);
       head = p.head; changes.push(...p.changes); worldKey = Math.max(worldKey, p.keyVersion ?? 0);
+      if (typeof p.ownerAccountId === 'string' && p.ownerAccountId) dono = p.ownerAccountId;
       const ultima = p.changes.length ? p.changes[p.changes.length - 1].version : since;
       // página vazia, fim alcançado ou página que não anda (World com defeito): para (nunca gira no mesmo lugar)
       if (!p.changes.length || ultima >= p.head || ultima <= since) break;
       since = ultima;
     }
-    return { changes, head, worldKey };
+    return { changes, head, worldKey, dono };
+  }
+
+  /**
+   * A conta World dona do workspace: a que o World disse no último pull (guardada) ou, sem ela ainda, a da lista de
+   * membros. Sem resposta, null (quem chama trata como "não é o dono": nada da equipe vai nem vem).
+   */
+  private async donoDe(userId: string, ws: string, r: SyncRow): Promise<string | null> {
+    if (r.dono_conta) return r.dono_conta;
+    try {
+      const m = await this.client.call<{ members?: Array<{ accountId?: unknown; role?: unknown }> }>('GET', `/v1/sync/workspaces/${r.sync_workspace_id}/members`, undefined, this.ctx(userId).session);
+      const dono = m.members?.find((x) => x.role === 'owner' && typeof x.accountId === 'string')?.accountId as string | undefined;
+      if (!dono) return null;
+      this.db.run('UPDATE world_sync SET dono_conta = ? WHERE workspace_id = ?', dono, ws);
+      return dono;
+    } catch { return null; }
   }
 
   /** Todas as chaves que este aparelho conhece (a atual e as de antes de cada giro), por versão. */
@@ -294,6 +312,10 @@ export class LocalSync {
     for (const d of ordem) {
       try {
         if (typeof d.deviceId !== 'string' || typeof d.syncPublicKey !== 'string' || !d.syncPublicKey) throw new HttpError(422, 'sem_chave_publica', 'aparelho sem chave pública de sincronia');
+        // a nuvem do workspace: só o aparelho-nuvem fixado na primeira vez (nuvem-fixa.ts); um novo espera a pessoa dona
+        // confirmar com a senha (Conexões › Na nuvem do workspace)
+        if (nuvem(d) && conferirNuvem(this.db, this.bus, ws, { deviceId: d.deviceId, syncPublicKey: d.syncPublicKey }, this.db.get<{ a: string | null }>('SELECT COALESCE(enviado_para, nuvem_aparelho) AS a FROM world_conexoes_nuvem WHERE workspace_id = ?', ws)?.a) === 'trocada')
+          throw new HttpError(409, 'nuvem_trocada', 'a nuvem do workspace mudou de aparelho: espera a confirmação da pessoa dona');
         let wrapped: string;
         try { wrapped = wrapForDevice(dek, d.syncPublicKey, r.sync_workspace_id, need.keyVersion); }
         catch { throw new HttpError(422, 'chave_publica_invalida', 'a chave pública do aparelho não serve'); }
@@ -330,7 +352,7 @@ export class LocalSync {
       // e o World devolve o recibo da primeira vez em vez de gravar outra mudança
       const op = `${prefix}_${sha(`${r.sync_workspace_id}|${version}|${resumo}`).slice(0, 26)}`;
       this.db.run('UPDATE world_sync SET envio_pendente = ? WHERE workspace_id = ?', this.db.seal(ws, JSON.stringify({ op, resumo } satisfies EnvioPendente)), ws);
-      const sealed = sealChange(dek, r.sync_workspace_id, body, { operationId: op, expectedVersion: version, schemaVersion: 1, keyVersion: r.key_version, kind }, c.keys.ed25519);
+      const sealed = sealChange(dek, r.sync_workspace_id, body, { operationId: op, expectedVersion: version, schemaVersion: 1, keyVersion: r.key_version, kind, deviceId: c.deviceId }, c.keys.ed25519);
       try { version = (await this.client.call<{ version: number }>('POST', `/v1/sync/workspaces/${r.sync_workspace_id}/changes`, sealed, c.session)).version; }
       catch (e) {
         const code = (e as HttpError).code;
@@ -348,7 +370,9 @@ export class LocalSync {
     };
     const esquecer = () => { if (pend) { this.db.run('UPDATE world_sync SET envio_pendente = NULL WHERE workspace_id = ?', ws); pend = null; } };
     const bp = exportBlueprint(this.db, this.routines, ws, { sync: true }); const bh = blueprintHash(bp);
-    let mandarEquipe = !opts.contentOnly && bh !== r.blueprint_hash;
+    // Só a conta DONA do workspace define a equipe: o computador de um colaborador nunca manda o esqueleto (que leva a
+    // parte privada: ferramentas, rotinas e a configuração delas) — quem recebe também não aplicaria (receber)
+    let mandarEquipe = !opts.contentOnly && bh !== r.blueprint_hash && (await this.donoDe(userId, ws, r)) === (this.links.get(userId)?.account_id ?? '');
     if (mandarEquipe && jaChegou(`bp:${bh}`)) { this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); mandarEquipe = false; esquecer(); }
     let partes = this.content.chunks(this.content.pending(ws, userId)).map((x) => ({ ...x, resumo: `ct:${sha(JSON.stringify(x.body))}` }));
     const chegada = partes.find((x) => jaChegou(x.resumo));
@@ -377,6 +401,7 @@ export class LocalSync {
     const c = this.ctx(userId);
     const m = await this.mudancas(c.session, r.sync_workspace_id, r.last_version);
     const changes = m.changes; const head = m.head; const worldKey = Math.max(r.key_version, m.worldKey);
+    if (m.dono && m.dono !== r.dono_conta) { this.db.run('UPDATE world_sync SET dono_conta = ? WHERE workspace_id = ?', m.dono, ws); r.dono_conta = m.dono; }
     const others = changes.filter((x) => x.deviceId !== c.deviceId);
     // um envio daqui cuja resposta se perdeu e que está no World: o próximo envio marca como enviado em vez de repetir
     const pend = this.pendente(r);
@@ -385,7 +410,7 @@ export class LocalSync {
     const resto = () => this.receber(userId, ws, r, changes, others, head, worldKey, apply, opts);
     // dados de outro aparelho para aplicar: a barra de cima mostra a sincronia em andamento (a equipe nova que fica
     // retida para a pessoa ver não aplica nada: não acende)
-    const retida = !!opts.holdOnBlueprint && others.some((x) => x.kind === 'snapshot');
+    const retida = !!opts.holdOnBlueprint && others.some((x) => x.kind === 'snapshot' && doDono(r, x));
     return apply && others.length && !retida ? this.atividade.envolver(ws, 'recebendo', resto) : resto();
   }
 
@@ -398,7 +423,16 @@ export class LocalSync {
       if (!k) throw new HttpError(409, 'key_pending', 'A chave nova do workspace ainda não chegou a este computador.');
       return openChange<T>(k, r.sync_workspace_id, x);
     };
-    const last = [...others].reverse().find((x) => x.kind === 'snapshot');
+    // O esqueleto (a equipe, as ferramentas e as rotinas) só vale vindo de um aparelho da conta DONA do workspace: um
+    // colaborador tem a chave do workspace e consegue mandar um, mas não manda na equipe (nem na da nuvem, que tem as
+    // credenciais do dono). O de outra conta é ignorado e fica no registro (na nuvem, também na auditoria)
+    const snaps = others.filter((x) => x.kind === 'snapshot');
+    const last = [...snaps].reverse().find((x) => doDono(r, x));
+    const alheios = snaps.filter((x) => !doDono(r, x));
+    if (alheios.length) {
+      this.log({ ws, versoes: alheios.map((x) => x.version).slice(0, 10), contas: [...new Set(alheios.map((x) => x.accountId ?? '?'))].slice(0, 5), dono: r.dono_conta ?? null, nuvem: this.nuvem }, 'sincronia: esqueleto da equipe vindo de quem não é dono do workspace (ignorado)');
+      if (apply && this.nuvem) audit(this.db, this.bus, { workspaceId: ws, actorType: 'system', actorId: 'sincronia', action: 'team.sync_ignored', evidence: { versoes: alheios.map((x) => x.version).slice(0, 10), contas: [...new Set(alheios.map((x) => x.accountId ?? '?'))].slice(0, 5) }, result: 'equipe de outra conta ignorada: só a conta dona define a equipe da nuvem' });
+    }
     const contents: ContentBody[] = [];
     for (const x of others.filter((y) => y.kind === 'change')) {
       const body = parseContent(open(x));
@@ -408,11 +442,13 @@ export class LocalSync {
     const incoming = { tasks: contents.reduce((n, b) => n + b.tasks.length, 0), conversations: contents.reduce((n, b) => n + b.conversations.length, 0), messages: contents.reduce((n, b) => n + b.messages.length, 0) };
     let plan: unknown = null;
     if (apply && last && opts.holdOnBlueprint) return { head, preview: null as unknown, incoming, applied: false, held: true };
-    if (last) plan = importBlueprint(this.db, this.bus, this.routines, ws, userId, open<{ type: string; blueprint: unknown }>(last).blueprint, apply, this.limits, { sync: true, nuvem: this.nuvem });
+    // ferramentas que executam código só ligam pela sincronia na nuvem do próprio dono (o aparelho-nuvem é da conta dona);
+    // num computador, chegam desligadas e esperam a confirmação com a senha aqui (services/blueprint.ts)
+    if (last) plan = importBlueprint(this.db, this.bus, this.routines, ws, userId, open<{ type: string; blueprint: unknown }>(last).blueprint, apply, this.limits, { sync: true, nuvem: this.nuvem, ligarGuardadas: this.nuvem });
     if (!apply) return { head, preview: plan, incoming, applied: false };
     // as conexões vindas de outro aparelho da conta dona (sync-conexoes.ts): quem recebe confere o destino e o envelope;
     // uma que falhe não segura o resto da sincronia (fica registrada por quem recebe)
-    for (const x of others.filter((y) => y.kind === 'conexoes')) { try { this.aoReceberConexoes?.(ws, x, open(x)); } catch { /* registrado em sync-conexoes.ts */ } }
+    for (const x of others.filter((y) => y.kind === 'conexoes' && doDono(r, y))) { try { this.aoReceberConexoes?.(ws, x, open(x)); } catch { /* registrado em sync-conexoes.ts */ } }
     if (last) this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', blueprintHash(exportBlueprint(this.db, this.routines, ws, { sync: true })), ws);
     const total: Applied = { added: 0, updated: 0, conflicts: 0, skipped: 0 };
     const deOutros = others.filter((y) => y.kind === 'change');
@@ -514,7 +550,7 @@ export class LocalSync {
     if (cand !== antes) this.db.run('UPDATE world_sync SET giro_candidato = ? WHERE workspace_id = ?', this.db.seal(ws, JSON.stringify(cand)), ws);
     const dek = Buffer.from(cand.chave, 'base64');
     const previousKeys = Object.fromEntries([...ring].map(([v, k]) => [String(v), k.toString('base64')]));
-    const sealed = sealChange(dek, r.sync_workspace_id, { type: 'rotation', previousKeys }, { operationId: cand.op, expectedVersion: p.head, schemaVersion: 1, keyVersion: next, kind: 'rotation' }, c.keys.ed25519);
+    const sealed = sealChange(dek, r.sync_workspace_id, { type: 'rotation', previousKeys }, { operationId: cand.op, expectedVersion: p.head, schemaVersion: 1, keyVersion: next, kind: 'rotation', deviceId: c.deviceId }, c.keys.ed25519);
     let version: number;
     try { version = (await this.client.call<{ version: number }>('POST', `/v1/sync/workspaces/${r.sync_workspace_id}/changes`, sealed, c.session)).version; }
     catch (e) {
@@ -548,6 +584,9 @@ export class LocalSync {
     return out;
   }
 }
+
+/** A mudança veio de um aparelho da conta dona do workspace (como o World a registrou). Dono ou autor desconhecido: não. */
+const doDono = (r: SyncRow, x: Change) => !!r.dono_conta && x.accountId === r.dono_conta;
 
 /** A hora em que o esqueleto foi gerado fica fora do resumo: só a equipe em si conta. */
 const blueprintHash = (bp: object) => crypto.createHash('sha256').update(JSON.stringify({ ...bp, createdAt: undefined })).digest('hex');

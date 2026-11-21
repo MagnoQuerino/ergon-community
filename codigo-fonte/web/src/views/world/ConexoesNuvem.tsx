@@ -8,13 +8,39 @@ type EstadoConta = 'na_nuvem' | 'enviando' | 'desligada' | 'aguardando_aceite' |
 type Motivo = 'whatsapp' | 'endereco_local' | 'app_proprio' | 'sem_credencial' | 'nao_conectada';
 interface ContaNaNuvem { id: string; kind: string; app: string; nome: string; estado: EstadoConta; usar: boolean; motivo: Motivo | null }
 interface Tela {
-  modo: 'computador' | 'nuvem'; disponivel: boolean; semAparelho?: boolean; aceite?: { em: string } | null; enviadoEm?: string | null; recebidoEm?: string | null;
+  modo: 'computador' | 'nuvem'; disponivel: boolean; semAparelho?: boolean;
+  /** o aparelho-nuvem mudou desde o primeiro visto (world/nuvem-fixa.ts): nada vai até a pessoa dona confirmar */
+  trocaNuvem?: { desde: string; aparelho: string } | null; aceite?: { em: string } | null; enviadoEm?: string | null; recebidoEm?: string | null;
   erro: string | null; contas: ContaNaNuvem[];
 }
 const SELO: Record<EstadoConta, string> = { na_nuvem: 'badge--ok', enviando: 'badge--warn', desligada: '', aguardando_aceite: '', fora: '', erro: 'badge--err' };
 
 /** As conexões na nuvem do workspace: só aparece com a nuvem ativa ("Subir o WS para o World") e para o dono. */
 export const useConexoesNuvem = () => useResource<Tela>('/api/world/nuvem/conexoes', ['integrations.changed']);
+
+/**
+ * A nuvem do workspace passou a ser outro aparelho (recriada, ou um World mal-intencionado trocando a chave): conexões
+ * e a chave da sincronia não vão até a pessoa dona confirmar, com a senha (o pedido de senha é o da sessão: api.ts).
+ */
+export function TrocaDaNuvem({ d, aoConfirmar }: { d: Tela; aoConfirmar: () => void }) {
+  const t = useT();
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  if (!d.trocaNuvem) return null;
+  const confirmar = async () => {
+    if (ocupado) return;
+    setOcupado(true); setErro(null);
+    try { await api.post('/api/world/nuvem/conexoes/confirmar-nuvem', {}); aoConfirmar(); } catch (e) { setErro(errMsg(e)); } finally { setOcupado(false); }
+  };
+  return (
+    <div className="hint warn conn-nuvem__troca" role="alert">
+      <b>{t('conexoes.nuvem.trocaTitulo')}</b>
+      <span className="small">{t('conexoes.nuvem.trocaTexto', { quando: fmtDataHora(d.trocaNuvem.desde) })}</span>
+      {erro && <span className="error small">{erro}</span>}
+      <p className="row row--wrap"><button className="btn btn--sm btn--primary" disabled={ocupado} onClick={() => void confirmar()}>{t('conexoes.nuvem.trocaConfirmar')}</button></p>
+    </div>
+  );
+}
 
 /**
  * Em Conexões: quais contas vão também para a nuvem do workspace (para a equipe usar com o computador desligado). Nada
@@ -55,6 +81,7 @@ export default function ConexoesNuvem() {
         <>
           <p className="muted small">{t('conexoes.nuvem.intro')}</p>
           <p className="small conn-nuvem__seguranca">{t('conexoes.nuvem.seguranca')}</p>
+          <TrocaDaNuvem d={d} aoConfirmar={r.reload} />
           {d.semAparelho && <p className="muted small" role="status">{t('conexoes.nuvem.semAparelho')}</p>}
           {d.erro && <p className="warn small" role="status">{t('conexoes.nuvem.erro')}</p>}
           {erro && <p className="error" role="alert">{erro}</p>}
@@ -102,12 +129,15 @@ export default function ConexoesNuvem() {
 /** Uma linha no cartão "Subir o WS para o World": quantas conexões estão na nuvem e o caminho para escolher. */
 export function ResumoConexoesNuvem() {
   const t = useT();
-  const d = useConexoesNuvem().data;
+  const r = useConexoesNuvem(); const d = r.data;
   if (!d || !d.disponivel || d.modo !== 'computador') return null;
   const n = d.aceite ? d.contas.filter((c) => c.estado === 'na_nuvem' || c.estado === 'enviando').length : 0;
   return (
-    <p className="small conn-nuvem__resumo">
-      {n ? t('conexoes.nuvem.resumo', { n }) : t('conexoes.nuvem.resumoNenhuma')} · <a href="#conexoes?nuvem" className="link link--inline">{t('conexoes.nuvem.escolher')}</a>
-    </p>
+    <>
+      <TrocaDaNuvem d={d} aoConfirmar={r.reload} />
+      <p className="small conn-nuvem__resumo">
+        {n ? t('conexoes.nuvem.resumo', { n }) : t('conexoes.nuvem.resumoNenhuma')} · <a href="#conexoes?nuvem" className="link link--inline">{t('conexoes.nuvem.escolher')}</a>
+      </p>
+    </>
   );
 }

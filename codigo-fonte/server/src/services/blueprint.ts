@@ -6,7 +6,8 @@
  *   histórico, membros nem direitos comerciais. Aplicar cria agentes SEM ferramentas e sem modelo próprio, mantém a
  *   coordenação no cargo (muda só nome, história, instruções e aparência), pula o agente que já existe e instala as
  *   rotinas PAUSADAS (sem repetir a que já está instalada): nada liga sozinho.
- * - SINCRONIA entre os aparelhos da mesma pessoa (world/sync-local.ts, cifrada de ponta a ponta): leva também a parte
+ * - SINCRONIA do workspace (world/sync-local.ts, cifrada de ponta a ponta), aplicada SÓ quando vem de um aparelho da
+ *   conta DONA do workspace (o World diz o autor de cada mudança; o esqueleto de um colaborador é ignorado): leva também a parte
  *   privada (BlueprintSync) e quem recebe CONCILIA pela identidade estável (`ref`: o id no aparelho de origem, gravado em
  *   agents.sync_ref / routines.sync_ref): cria o que falta, atualiza o que mudou (papel, instruções, competências,
  *   ferramentas, aparência, setor, modelo), arquiva o que saiu — sem duplicar e sem tocar no que é deste aparelho
@@ -116,7 +117,28 @@ export interface ImportOpts {
   sync?: boolean;
   /** este Ergon é a nuvem do World (o gêmeo da equipe do computador): rotinas no estado do computador, sobras arquivadas */
   nuvem?: boolean;
+  /**
+   * as ferramentas que executam código (Terminal, Executar código) podem ligar por este esqueleto: só na nuvem do próprio
+   * dono. Fora dela, a que chega e não está ligada aqui fica desligada, esperando a confirmação com a senha neste aparelho
+   * (guardadasPendentes); desligar continua valendo.
+   */
+  ligarGuardadas?: boolean;
 }
+
+/** As ferramentas que executam código e chegaram pela sincronia sem ligar aqui (esperando a confirmação com a senha). */
+export interface GuardadasPendentes { equipe: string[]; agentes: Array<{ agentId: string; tool: string }> }
+const PENDENTES = 'sincronia.guardadas';
+export function guardadasPendentes(db: Db, ws: string): GuardadasPendentes & { itens: Array<{ tool: string; label: string; agente: string | null; agentId: string | null }> } {
+  let v: GuardadasPendentes = { equipe: [], agentes: [] };
+  try { const x = JSON.parse(getSetting(db, ws, PENDENTES) ?? 'null') as GuardadasPendentes | null; if (x && Array.isArray(x.equipe) && Array.isArray(x.agentes)) v = x; } catch { /* vazio */ }
+  const equipe = v.equipe.filter((t) => TOOLS[t]?.guarded && getSetting(db, ws, `ferramentas.${t}`) !== 'ligado');
+  const agentes = v.agentes.filter((a) => TOOLS[a.tool]?.guarded && db.get("SELECT 1 AS x FROM agents WHERE id = ? AND workspace_id = ? AND status = 'active'", a.agentId, ws)
+    && !list(db.get<{ tools: string | null }>('SELECT tools FROM agents WHERE id = ? AND workspace_id = ?', a.agentId, ws)?.tools ?? null).includes(a.tool));
+  const nome = (id: string) => db.get<{ name: string }>('SELECT name FROM agents WHERE id = ? AND workspace_id = ?', id, ws)?.name ?? null;
+  return { equipe, agentes, itens: [...equipe.map((t) => ({ tool: t, label: TOOLS[t].label, agente: null, agentId: null })), ...agentes.map((a) => ({ tool: a.tool, label: TOOLS[a.tool].label, agente: nome(a.agentId), agentId: a.agentId }))] };
+}
+/** Esquece o que estava esperando (a pessoa decidiu: ligou com a senha ou deixou desligado). */
+export function limparGuardadas(db: Db, ws: string): void { setSetting(db, ws, PENDENTES, JSON.stringify({ equipe: [], agentes: [] })); }
 
 /** Prévia (apply=false) ou aplicação do esqueleto no workspace. Fora da sincronia, nada liga sozinho: rotinas entram pausadas. */
 export function importBlueprint(db: Db, bus: Bus, routines: Routines, workspaceId: string, userId: string, input: unknown, apply: boolean, limits: AgentLimits, opts: ImportOpts = {}): BlueprintPlan & { applied: boolean } {
@@ -124,7 +146,7 @@ export function importBlueprint(db: Db, bus: Bus, routines: Routines, workspaceI
   if (!v.ok) throw new HttpError(400, 'blueprint_invalid', `Esqueleto recusado: ${v.errors.slice(0, 5).join('; ')}`);
   const bp = v.blueprint;
   // da sincronia com a parte privada: concilia. Um computador de versão anterior manda sem ela: vale a regra do arquivo
-  if (opts.sync && bp.sync) return conciliar(db, bus, routines, workspaceId, userId, bp as Blueprint & { sync: BlueprintSync }, apply, limits, opts.nuvem === true);
+  if (opts.sync && bp.sync) return conciliar(db, bus, routines, workspaceId, userId, bp as Blueprint & { sync: BlueprintSync }, apply, limits, opts.nuvem === true, opts.ligarGuardadas === true);
   const sectorKeys = new Set(listSectors(db, workspaceId).map((s) => s.key));
   const existing = new Set(db.all<{ name: string }>("SELECT name FROM agents WHERE workspace_id = ? AND status = 'active'", workspaceId).map((a) => a.name.toLowerCase()));
   const coord = db.get<{ id: string; name: string }>("SELECT id, name FROM agents WHERE workspace_id = ? AND coordinator = 1 AND status = 'active'", workspaceId);
@@ -184,8 +206,11 @@ const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.
  * primeira vez depois da atualização (agentes e rotinas sem referência, de antes), adota pelo nome (agente) ou pelo
  * modelo e nome (rotina), e as duplicatas que a versão anterior deixou saem.
  */
-function conciliar(db: Db, bus: Bus, routines: Routines, ws: string, userId: string, bp: Blueprint & { sync: BlueprintSync }, apply: boolean, limits: AgentLimits, nuvem: boolean): BlueprintPlan & { applied: boolean } {
+function conciliar(db: Db, bus: Bus, routines: Routines, ws: string, userId: string, bp: Blueprint & { sync: BlueprintSync }, apply: boolean, limits: AgentLimits, nuvem: boolean, ligarGuardadas: boolean): BlueprintPlan & { applied: boolean } {
   const plan: BlueprintPlan = { coordinator: null, agents: [], routines: [], structures: [], skipped: [], updated: [], archived: [], sectors: [] };
+  // as ferramentas que executam código: fora da nuvem do dono, a que o agente daqui ainda não tem não chega ligada
+  const pendentes: GuardadasPendentes = { equipe: [], agentes: [] };
+  const semGuardadas = (local: AgentRow | null, x: BlueprintSync['agents'][number]) => (ligarGuardadas ? x : { ...x, tools: x.tools.filter((t) => !TOOLS[t]?.guarded || (local ? list(local.tools).includes(t) : false)) });
   // ---- setores (a chave é a identidade: renomear mantém a chave)
   const sectors = new Map(listSectors(db, ws).map((s) => [s.key, s]));
   const sectorOps: Array<() => void> = [];
@@ -221,7 +246,7 @@ function conciliar(db: Db, bus: Bus, routines: Routines, ws: string, userId: str
     passos.push({ bp: a, ref, local });
     if (!local) plan.agents.push({ name: a.name, role: a.role, sector: sectors.has(a.sectorKey) || bp.sectors.some((s) => s.key === a.sectorKey) ? a.sectorKey : 'auto' });
     else if (a.coordinator && local.name !== a.name) plan.coordinator = { from: local.name, to: a.name };
-    else if (local.status !== 'active' || agentPatch(local, a, extra.get(a.name.toLowerCase())!, nuvem, true)) plan.updated!.push(a.name);
+    else if (local.status !== 'active' || agentPatch(local, a, semGuardadas(local, extra.get(a.name.toLowerCase())!), nuvem, true)) plan.updated!.push(a.name);
   }
   // quem saiu do outro aparelho: na nuvem, todo agente que não está no esqueleto (ela espelha o computador); num
   // computador, só o que veio de outro aparelho (o que nasceu aqui fica)
@@ -267,7 +292,9 @@ function conciliar(db: Db, bus: Bus, routines: Routines, ws: string, userId: str
         if (local.status !== 'active') reactivateAgent(db, bus, ws, userId, local.id, null, limits);
         if (refOf(local) !== p.ref) db.run('UPDATE agents SET sync_ref = ? WHERE id = ? AND workspace_id = ?', local.id === p.ref ? null : p.ref, local.id, ws);
       }
-      const patch = agentPatch(local, p.bp, x, nuvem, setoresAqui.has(p.bp.sectorKey));
+      const x2 = semGuardadas(local, x);
+      for (const t of x.tools) if (!x2.tools.includes(t) && !pendentes.agentes.some((y) => y.agentId === local!.id && y.tool === t)) pendentes.agentes.push({ agentId: local.id, tool: t });
+      const patch = agentPatch(local, p.bp, x2, nuvem, setoresAqui.has(p.bp.sectorKey));
       if (patch) updateAgent(db, bus, ws, userId, local.id, patch);
       if ((local.char_key ?? null) !== p.bp.charKey && !Number(local.coordinator)) db.run('UPDATE agents SET char_key = ? WHERE id = ? AND workspace_id = ?', p.bp.charKey, local.id, ws);
     } catch (e) { plan.skipped.push(`agente "${p.bp.name}": ${(e as Error).message}`); }
@@ -284,8 +311,13 @@ function conciliar(db: Db, bus: Bus, routines: Routines, ws: string, userId: str
   let mudou = false;
   for (const t of bp.sync.teamTools) {
     if (!TEAM_TOOL_IDS.includes(t.id) || getSetting(db, ws, `ferramentas.${t.id}`) === t.state) continue;
+    if (t.state === 'ligado' && TOOLS[t.id]?.guarded && !ligarGuardadas) { pendentes.equipe.push(t.id); continue; }
     setSetting(db, ws, `ferramentas.${t.id}`, t.state); mudou = true;
   }
+  // o que ficou esperando a senha (o esqueleto mais recente decide: o que saiu dele deixa de esperar)
+  setSetting(db, ws, PENDENTES, JSON.stringify(pendentes));
+  if (pendentes.equipe.length || pendentes.agentes.length) audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'sincronia', action: 'ai.tools_pending',
+    evidence: { equipe: pendentes.equipe, agentes: pendentes.agentes.length }, result: 'ferramentas que executam código vieram desligadas da sincronia: ligam só com a confirmação (senha) neste aparelho' });
   if (mudou) {
     audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'sincronia', action: 'ai.tools', evidence: { teamTools: bp.sync.teamTools }, result: 'ferramentas da equipe como no outro aparelho' });
     try { aoMudarFerramentas.get(db)?.(ws); } catch { /* o motor recebe na próxima abertura */ }

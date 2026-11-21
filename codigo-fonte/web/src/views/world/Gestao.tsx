@@ -748,6 +748,35 @@ function SeloSincronia({ s }: { s: SyncStatus }) {
  * mostra em que pé está e só o que pede decisão: o que mudou dos dois lados, a equipe nova que outro computador
  * enviou e a frase de recuperação. "Sincronizar agora" fica como saída de emergência.
  */
+/**
+ * Ferramentas que executam código (Terminal, Executar código) que vieram na equipe da pessoa dona e não ligaram aqui:
+ * neste computador, só com a confirmação da senha (o pedido de senha é o da sessão: api.ts). Deixar desligadas esquece.
+ */
+function GuardadasDaSincronia({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: string } | null) => void }) {
+  const t = useTw();
+  const r = useResource<{ itens: Array<{ tool: string; label: string; agente: string | null; agentId: string | null }> }>('/api/sync/guardadas', ['sync.changed', 'agents.changed']);
+  const [busy, setBusy] = useState(false);
+  const itens = r.data?.itens ?? [];
+  if (!itens.length) return null;
+  const decidir = async (ligar: boolean) => {
+    setBusy(true); onMsg(null);
+    try { await api.post('/api/sync/guardadas', { ligar }); if (ligar) onMsg({ kind: 'ok', text: t('sinc.guardadasLigadas') }); r.reload(); } catch (e) { onMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); }
+  };
+  return (
+    <div className="hint warn" role="status">
+      <b>{t('sinc.guardadasTitulo')}</b>
+      <span className="small">{t('sinc.guardadasTexto')}</span>
+      <ul className="small">
+        {itens.map((x) => <li key={`${x.tool}-${x.agentId ?? 'equipe'}`}>{x.agente ? t('sinc.guardadasAgente', { ferramenta: x.label, agente: x.agente }) : t('sinc.guardadasEquipe', { ferramenta: x.label })}</li>)}
+      </ul>
+      <div className="row row--wrap">
+        <button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void decidir(true)}><Icon name="key" size={13} /> {t('sinc.guardadasLigar')}</button>
+        <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => void decidir(false)}>{t('sinc.guardadasDeixar')}</button>
+      </div>
+    </div>
+  );
+}
+
 export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: string } | null) => void }) {
   const t = useTw();
   const st = useSincronia(true);
@@ -820,6 +849,7 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
               </div>
             </div>
           )}
+          <GuardadasDaSincronia onMsg={onMsg} />
           {s.rotationPending && <p className="hint warn row row--wrap"><span>{t('pessoas.chavePendente')}</span><button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void go(async () => { await api.post('/api/world/sync/rotate'); return t('pessoas.chaveTrocada'); })}><Icon name="key" size={13} /> {t('pessoas.trocarChave')}</button></p>}
           {s.recoveryOutdated && (
             <div className="hint warn">

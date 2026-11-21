@@ -12,7 +12,9 @@ import { after, before, test } from 'node:test';
 import type { HermesControlClient } from '../src/services/hermes.ts';
 import { setIntegration, type IntegrationKind } from '../src/services/integrations.ts';
 import { FakeWorld } from './fake-world.ts';
-import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
+import crypto from 'node:crypto';
+import { openChange, sealChange, sealForDevice } from '../src/world/sync-crypto.ts';
+import { harness, loginAs, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 let world: FakeWorld; let pc: Harness; let dono: Session; let nuvem: Harness; let sws = ''; let wsNuvem = '';
 const ENV = ['ERGON_WORLD_URL', 'ERGON_WORLD_WORKSPACE', 'ERGON_CLOUD_BOOT_TOKEN', 'ERGON_NUVEM_PASSO_MS', 'ERGON_NUVEM_CICLO_MS', 'ERGON_NUVEM_CANAIS_MS', 'ERGON_WORLD_AUTOSYNC_MS'];
@@ -176,3 +178,70 @@ test('nada em claro: nem no World (mudanças e envelopes), nem nos registros, ne
     for (const s of SEGREDOS) assert.ok(!estado.includes(s), `em claro no estado: ${s}`);
   }
 });
+
+// ---------------------------------------------------------------- revisão de segurança (rc.41)
+/** Uma mudança 'conexoes' forjada como se fosse do computador (o World ordena e entrega; quem a assina não importa aqui). */
+function pacoteDoPc(conteudo: unknown) {
+  const w = world.workspaces.get(sws)!; const cl = world.clouds.get(sws)!; const nv = world.devices.get(cl.deviceId!)!;
+  const l = pc.db.get<{ d: string; k: string }>('SELECT device_id AS d, device_keys AS k FROM world_links WHERE user_id = ?', dono.userId)!;
+  const chaves = JSON.parse(l.k) as { ed25519: string; x25519Public: string };
+  const dek = Buffer.from(pc.db.get<{ k: string }>('SELECT sync_key AS k FROM world_sync WHERE workspace_id = ?', dono.workspaceId)!.k, 'base64');
+  const envelope = sealForDevice(Buffer.from(JSON.stringify(conteudo)), nv.syncPublicKey, { ws: sws, from: l.d, to: nv.id });
+  const sealed = sealChange(dek, sws, { type: 'conexoes', v: 1, para: nv.id, dePub: chaves.x25519Public, envelope }, { operationId: `cx_${crypto.randomBytes(9).toString('hex')}`, expectedVersion: w.head, schemaVersion: 1, keyVersion: w.keyVersion ?? 1, kind: 'conexoes', deviceId: l.d }, chaves.ed25519);
+  w.head += 1; w.changes.push({ ...sealed, version: w.head, deviceId: l.d, accountId: w.owner, deviceKind: 'app' });
+  return w.head;
+}
+const recebidoVersao = () => nuvem.db.get<{ v: number }>('SELECT recebido_versao AS v FROM world_conexoes_nuvem WHERE workspace_id = ?', wsNuvem)!.v;
+
+test('retrato antigo reenviado pelo World (versão nova, carimbo velho) não volta a valer na nuvem', async () => {
+  // com o aceite de volta, a Microsoft vai à nuvem; o retrato que a levou fica guardado (como um World malicioso guardaria)
+  assert.equal((await req(pc, 'POST', '/api/world/nuvem/conexoes/aceite', dono, { ligar: true })).status, 200);
+  await ate(() => linhaNuvem('microsoft')?.state === 'connected', 'a Microsoft não voltou à nuvem');
+  const w = world.workspaces.get(sws)!; const pcDev = pc.db.get<{ d: string }>('SELECT device_id AS d FROM world_links WHERE user_id = ?', dono.userId)!.d;
+  const comMs = [...w.changes].reverse().find((c) => c.kind === 'conexoes' && c.deviceId === pcDev)!;
+  // tira o aceite: o retrato vazio apaga tudo na nuvem
+  assert.equal((await req(pc, 'POST', '/api/world/nuvem/conexoes/aceite', dono, { ligar: false })).status, 200);
+  await ate(() => naNuvem('microsoft') === null, 'sem o aceite, a Microsoft não saiu');
+  // o World repete o retrato antigo numa versão nova: a AAD fecha (mesmo aparelho e tipo), mas o carimbo não é mais novo
+  w.head += 1; w.changes.push({ ...comMs, version: w.head });
+  await ate(() => registros.some((x) => x.includes('carimbo de hora não mais novo')), 'a nuvem não recusou o retrato repetido');
+  assert.equal(naNuvem('microsoft'), null, 'a credencial não voltou');
+  // (a reetiqueta do mesmo cifrado como outro tipo nem abre: world-conexoes-cifra.test.ts)
+});
+
+test('a nuvem confere de novo o endereço local/privado antes de gravar (o computador já filtra; um pacote forjado não passa)', async () => {
+  const v = pacoteDoPc({ type: 'conexoes.pacote', v: 1, em: new Date(Date.now() + 60_000).toISOString(), itens: [
+    { kind: 'mattermost', conta: '', account: 'ana', apelido: null, ativa: true, settings: {}, cred: { site: 'http://169.254.169.254/latest', token: 'token-do-mattermost-local-0123456789' } },
+    { kind: 'notion', conta: '', account: 'Notion da Ana', apelido: null, ativa: true, settings: {}, cred: { token: 'secret_notion_da_ana_0123456789abcdef' } }] });
+  await ate(() => recebidoVersao() >= v, 'a nuvem não aplicou o retrato');
+  assert.equal(naNuvem('mattermost'), null, 'endereço privado: não gravado na nuvem');
+  assert.notEqual(linhaNuvem('mattermost')?.state, 'connected');
+  assert.equal(naNuvem('notion')?.token, 'secret_notion_da_ana_0123456789abcdef', 'o resto do retrato vale');
+  assert.ok(registros.some((x) => x.includes('endereço local ou privado no retrato')));
+});
+
+test('o aparelho-nuvem trocado (World mal-intencionado ou nuvem recriada): nada vai até a dona confirmar com a senha', async () => {
+  // o World passa a dizer que a nuvem é outro aparelho (chave pública nova)
+  const cl = world.clouds.get(sws)!; const x = crypto.generateKeyPairSync('x25519');
+  const novo = `dev_${crypto.randomBytes(16).toString('hex')}`;
+  world.devices.set(novo, { id: novo, accountId: world.workspaces.get(sws)!.owner, name: 'nuvem trocada', publicKey: 'x', syncPublicKey: x.publicKey.export({ format: 'der', type: 'spki' }).toString('base64'), challenge: '', status: 'active', session: null, lastSeenAt: new Date().toISOString(), kind: 'cloud', cloudWs: sws } as never);
+  cl.deviceId = novo;
+  const antes = world.workspaces.get(sws)!.changes.length;
+  assert.equal((await req(pc, 'POST', '/api/world/nuvem/conexoes/aceite', dono, { ligar: true })).status, 200);
+  await ate(async () => (await req(pc, 'GET', '/api/world/nuvem/conexoes', dono)).json.trocaNuvem?.aparelho === novo, 'a tela não pediu a confirmação da nuvem nova');
+  await pausa(800); // vários ciclos
+  assert.equal(world.workspaces.get(sws)!.changes.slice(antes).filter((c) => c.kind === 'conexoes').length, 0, 'nenhuma credencial para a chave nova');
+  assert.equal(world.workspaces.get(sws)!.envelopes.get(novo), undefined, 'nem a chave do workspace');
+  assert.ok(pc.db.get("SELECT 1 AS x FROM audit_events WHERE workspace_id = ? AND action = 'world.cloud_device_changed'", dono.workspaceId), 'na auditoria');
+  // confirmar pede a senha
+  pc.db.run("UPDATE sessions SET auth_at = '2020-01-01T00:00:00.000Z'");
+  const sem = await req(pc, 'POST', '/api/world/nuvem/conexoes/confirmar-nuvem', dono, {});
+  assert.deepEqual([sem.status, sem.json.error], [401, 'reauth']);
+  dono = await loginAs(pc, 'ana', 'senha-da-ana-123');
+  const ok = await req(pc, 'POST', '/api/world/nuvem/conexoes/confirmar-nuvem', dono, {});
+  assert.deepEqual([ok.status, ok.json.trocaNuvem], [200, null]);
+  // confirmada: o retrato vai, cifrado para o aparelho novo
+  const dek = Buffer.from(pc.db.get<{ k: string }>('SELECT sync_key AS k FROM world_sync WHERE workspace_id = ?', dono.workspaceId)!.k, 'base64');
+  await ate(() => world.workspaces.get(sws)!.changes.slice(antes).some((c) => c.kind === 'conexoes' && openChange<{ para: string }>(dek, sws, c as never).para === novo), 'confirmada, a nuvem nova não recebeu');
+});
+

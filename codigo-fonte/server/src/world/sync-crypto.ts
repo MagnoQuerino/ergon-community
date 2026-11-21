@@ -5,7 +5,10 @@
  * - Envelope por aparelho: X25519 efêmera + HKDF-SHA256 → AES-256-GCM (amarrado ao workspace e à versão da chave).
  * - Envelope de recuperação: scrypt da frase de recuperação da pessoa → AES-256-GCM (aparelho novo sem nenhum outro
  *   ligado).
- * - Alteração: AES-256-GCM com a DEK; dados associados = workspace, operação, versão da chave e do esquema.
+ * - Alteração: AES-256-GCM com a DEK; dados associados = workspace, operação, versão da chave e do esquema e, no formato
+ *   v2 (rc.41), também o TIPO da mudança e o APARELHO que a mandou: o World (que guarda e entrega) não consegue reetiquetar
+ *   uma mudança como de outro tipo nem como de outro aparelho. O formato v1 ainda abre para os tipos que já existiam
+ *   (mudanças gravadas antes); 'conexoes' só abre no v2.
  * - Assinatura: Ed25519 do aparelho sobre o envelope canônico (o servidor confere quem mandou o quê).
  */
 import crypto from 'node:crypto';
@@ -58,20 +61,36 @@ export function unwrapForRecovery(wrapped: string, recoverySecret: string, ws: s
 
 interface SealedChange { operationId: string; expectedVersion: number; schemaVersion: number; keyVersion: number; kind: 'change' | 'snapshot' | 'rotation' | 'conexoes'; ciphertext: string; nonce: string; sha256: string; signature: string }
 
+const aadV1 = (ws: string, c: { operationId: string; keyVersion: number; schemaVersion: number }) => `ergon/sync-change/v1|${ws}|${c.operationId}|${c.keyVersion}|${c.schemaVersion}`;
+const aadV2 = (ws: string, c: { operationId: string; keyVersion: number; schemaVersion: number; kind: string; deviceId: string }) =>
+  `ergon/sync-change/v2|${ws}|${c.operationId}|${c.keyVersion}|${c.schemaVersion}|${c.kind}|${c.deviceId}`;
+/** os tipos de antes do formato v2: o que foi gravado no formato antigo continua abrindo (os novos só no v2) */
+const KINDS_V1 = new Set(['change', 'snapshot', 'rotation']);
+
 const canonical = (ws: string, c: Omit<SealedChange, 'ciphertext' | 'nonce' | 'signature'>): string =>
   `ergon-sync-v1|${ws}|${c.expectedVersion}|${c.operationId}|${c.schemaVersion}|${c.keyVersion}|${c.kind}|${c.sha256}`;
 
 /** Cifra e assina uma alteração (o aparelho faz isto antes de enviar; o servidor não tem como abrir). */
-export function sealChange(dek: Buffer, ws: string, body: unknown, meta: { operationId: string; expectedVersion: number; schemaVersion: number; keyVersion: number; kind?: SealedChange['kind'] }, signingKeyPkcs8B64: string): SealedChange {
+export function sealChange(dek: Buffer, ws: string, body: unknown, meta: { operationId: string; expectedVersion: number; schemaVersion: number; keyVersion: number; kind?: SealedChange['kind']; /** o aparelho que manda (formato v2) */ deviceId?: string }, signingKeyPkcs8B64: string): SealedChange {
   const kind = meta.kind ?? 'change';
-  const e = gcm(dek, Buffer.from(JSON.stringify(body)), `ergon/sync-change/v1|${ws}|${meta.operationId}|${meta.keyVersion}|${meta.schemaVersion}`);
+  if (!meta.deviceId && !KINDS_V1.has(kind)) throw new Error(`mudança do tipo ${kind} só no formato v2 (com o aparelho)`);
+  const e = gcm(dek, Buffer.from(JSON.stringify(body)), meta.deviceId ? aadV2(ws, { ...meta, kind, deviceId: meta.deviceId }) : aadV1(ws, meta));
   const sha256 = crypto.createHash('sha256').update(unb64(e.ct)).digest('hex');
   const base = { operationId: meta.operationId, expectedVersion: meta.expectedVersion, schemaVersion: meta.schemaVersion, keyVersion: meta.keyVersion, kind, sha256 };
   const priv = crypto.createPrivateKey({ key: unb64(signingKeyPkcs8B64), format: 'der', type: 'pkcs8' });
   return { ...base, ciphertext: e.ct, nonce: e.nonce, signature: b64(crypto.sign(null, Buffer.from(canonical(ws, base)), priv)) };
 }
-export function openChange<T = unknown>(dek: Buffer, ws: string, c: { operationId: string; keyVersion: number; schemaVersion: number; ciphertext: string; nonce: string }): T {
-  return JSON.parse(ungcm(dek, c.nonce, c.ciphertext, `ergon/sync-change/v1|${ws}|${c.operationId}|${c.keyVersion}|${c.schemaVersion}`).toString('utf8')) as T;
+/**
+ * Abre uma mudança. Com o tipo e o aparelho (o que o World entrega em cada mudança), tenta o formato v2 primeiro; o v1
+ * só vale para os tipos que já existiam antes dele.
+ */
+export function openChange<T = unknown>(dek: Buffer, ws: string, c: { operationId: string; keyVersion: number; schemaVersion: number; ciphertext: string; nonce: string; kind?: string; deviceId?: string }): T {
+  const kind = c.kind ?? 'change';
+  if (c.deviceId) {
+    try { return JSON.parse(ungcm(dek, c.nonce, c.ciphertext, aadV2(ws, { ...c, kind, deviceId: c.deviceId })).toString('utf8')) as T; }
+    catch (e) { if (!KINDS_V1.has(kind)) throw e; }
+  } else if (!KINDS_V1.has(kind)) throw new Error(`mudança do tipo ${kind} sem o aparelho que a mandou`);
+  return JSON.parse(ungcm(dek, c.nonce, c.ciphertext, aadV1(ws, c)).toString('utf8')) as T;
 }
 
 /**

@@ -17,6 +17,7 @@ describe('Giro da chave do workspace World depois que alguém sai', () => {
   before(async () => { world = await new FakeWorld().start(); process.env.ERGON_WORLD_URL = world.url; });
   after(async () => { process.env.ERGON_WORLD_URL = ''; for (const h of [pc1, pc2, pc3, pc4]) await h?.close(); await world.stop(); });
   const accOf = (email: string) => [...world.accounts.values()].find((a) => a.email === email)!.id;
+  const temTarefa = async (h: Harness, s: Session, titulo: string) => h.db.all<{ title: string }>('SELECT title FROM tasks WHERE workspace_id = ?', s.workspaceId).some((t) => t.title === titulo);
   const agentes = (h: Harness, s: Session) => h.db.all<{ name: string }>("SELECT name FROM agents WHERE workspace_id = ? AND status = 'active'", s.workspaceId).map((a) => a.name);
   const conectar = async (h: Harness, s: Session, email: string, mode: 'signup' | 'login' = 'signup') =>
     assert.equal((await req(h, 'POST', '/api/world/connect', s, { mode, email, password: 'senha-do-world-123', ...(mode === 'signup' ? { displayName: email.split('@')[0] } : {}) })).status, 200);
@@ -43,8 +44,9 @@ describe('Giro da chave do workspace World depois que alguém sai', () => {
       assert.equal((await req(h, 'POST', '/api/world/sync/pull', s, { apply: true })).status, 200);
       assert.ok(agentes(h, s).includes('Frodo'));
     }
-    // o Caio cria algo antes do giro (cifrado com a chave 1); a Ana ainda não recebeu
-    assert.equal((await req(pc3, 'POST', '/api/agents', caio, { name: 'Sam', role: 'Jardinagem' })).status, 201);
+    // o Caio cria algo antes do giro (cifrado com a chave 1); a Ana ainda não recebeu. (Uma tarefa: a equipe é só do dono
+    // — o esqueleto de um colaborador nem vai nem é aplicado, world/sync-local.ts)
+    assert.equal((await req(pc3, 'POST', '/api/tasks', caio, { title: 'Colher os tomates' })).status, 201);
     assert.equal((await req(pc3, 'POST', '/api/world/sync/push', caio, {})).status, 200);
     assert.equal((await req(pc3, 'GET', '/api/world/sync', caio)).json.keyVersion, 1);
   });
@@ -67,7 +69,7 @@ describe('Giro da chave do workspace World depois que alguém sai', () => {
     assert.equal((await req(pc1, 'POST', '/api/world/sync/recovery', ana, { recoveryPhrase: FRASE })).json.recoveryOutdated, false);
     // a Ana recebe o que o Caio mandou antes do giro (chave 1) e envia com a chave 2
     assert.equal((await req(pc1, 'POST', '/api/world/sync/pull', ana, { apply: true })).status, 200);
-    assert.ok(agentes(pc1, ana).includes('Sam'));
+    assert.ok(await temTarefa(pc1, ana, 'Colher os tomates'), 'o que o Caio mandou com a chave 1 chegou');
     assert.equal((await req(pc1, 'POST', '/api/agents', ana, { name: 'Merry', role: 'Logística' })).status, 201);
     const p = await req(pc1, 'POST', '/api/world/sync/push', ana, {});
     assert.equal(p.status, 200);
@@ -86,13 +88,12 @@ describe('Giro da chave do workspace World depois que alguém sai', () => {
   });
 
   test('o Caio recebe a chave nova sozinho ao receber as mudanças e volta a enviar', async () => {
-    assert.equal((await req(pc3, 'POST', '/api/agents', caio, { name: 'Pippin', role: 'Atendimento' })).status, 201);
+    assert.equal((await req(pc3, 'POST', '/api/tasks', caio, { title: 'Podar a cerca' })).status, 201);
     assert.equal((await req(pc3, 'POST', '/api/world/sync/push', caio, {})).json.error, 'key_version', 'com a chave velha, o World recusa');
     const r = await req(pc3, 'POST', '/api/world/sync/pull', caio, { apply: true });
     assert.equal(r.status, 200);
     assert.ok(agentes(pc3, caio).includes('Merry'));
     assert.equal((await req(pc3, 'GET', '/api/world/sync', caio)).json.keyVersion, 2);
-    assert.equal((await req(pc3, 'POST', '/api/tasks', caio, { title: 'Regar a horta' })).status, 201);
     const p = await req(pc3, 'POST', '/api/world/sync/push', caio, {});
     assert.equal(p.status, 200); assert.ok(p.json.sent.tasks >= 1);
     assert.equal(world.workspaces.get(sws)!.changes.at(-1)!.keyVersion, 2, 'o Caio envia com a chave nova');
@@ -107,7 +108,8 @@ describe('Giro da chave do workspace World depois que alguém sai', () => {
     assert.equal(prev.status, 200, 'abre as mudanças das chaves 1 e 2');
     assert.ok(prev.json.preview.agents.some((x: { name: string }) => x.name === 'Merry'), 'o esqueleto da chave 2 chega');
     assert.equal((await req(pc4, 'POST', '/api/world/sync/pull', ana2, { apply: true })).status, 200);
-    for (const n of ['Frodo', 'Sam', 'Merry']) assert.ok(agentes(pc4, ana2).includes(n), n);
+    for (const n of ['Frodo', 'Merry']) assert.ok(agentes(pc4, ana2).includes(n), n);
+    assert.ok(await temTarefa(pc4, ana2, 'Colher os tomates'), 'o que o Caio mandou com a chave 1');
     const ring = pc4.db.get<{ old_keys: string }>('SELECT old_keys FROM world_sync WHERE workspace_id = ?', ana2.workspaceId)!.old_keys;
     assert.deepEqual(Object.keys(JSON.parse(ring)), ['1'], 'aprendeu a chave 1 pelo giro');
   });

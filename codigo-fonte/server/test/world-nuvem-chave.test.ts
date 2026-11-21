@@ -44,6 +44,20 @@ async function nuvemChega(): Promise<{ deviceId: string; priv: string; abre: () 
   return { deviceId: reg.deviceId, priv, abre: () => { const e = envelopeDe(reg.deviceId); return e ? unwrapForDevice(e.wrapped, priv, sws, e.keyVersion) : null; } };
 }
 
+/**
+ * Disco refeito = aparelho-nuvem novo: este computador fixou o primeiro (world/nuvem-fixa.ts) e não entrega a chave ao
+ * novo sem a pessoa dona confirmar com a senha. Confere que nada foi antes e confirma pela rota da tela.
+ */
+async function confirmarNuvemNova(h: Harness, s: Session, deviceId: string) {
+  await pausa(200);
+  assert.equal(envelopeDe(deviceId), undefined, 'aparelho-nuvem novo: nada antes da confirmação');
+  const tela = (await req(h, 'GET', '/api/world/nuvem/conexoes', s)).json;
+  assert.equal(tela.trocaNuvem?.aparelho, deviceId, 'a tela pede a confirmação');
+  const r = await req(h, 'POST', '/api/world/nuvem/conexoes/confirmar-nuvem', s, {});
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.trocaNuvem, null);
+}
+
 before(async () => {
   world = await new FakeWorld().start();
   // o ciclo de um minuto fica longe (10 min; a primeira volta sai aos 5 s): o que entrega a chave aqui é a conferência de perto
@@ -122,6 +136,8 @@ test('disco refeito (aparelho-nuvem novo) com a sincronia em pausa: a chave cheg
   assert.equal((await req(pc, 'POST', '/api/world/sync/pausar', ana, {})).json.concluida, true);
   const antes = registro.length;
   const nuvem = await nuvemChega();
+  await confirmarNuvemNova(pc, ana, nuvem.deviceId);
+  assert.ok(registro.slice(antes).some((x) => x.o.erro === 'nuvem_trocada'), 'a recusa ficou no registro');
   const levou = await ate(() => !!envelopeDe(nuvem.deviceId), 'em pausa, a nuvem ficou esperando a chave');
   assert.ok(levou < 3000, `levou ${levou} ms`);
   assert.equal(nuvem.abre()!.toString('base64'), chaveDoPc(pc, ana).k);
@@ -136,6 +152,7 @@ test('a tela olhando o cartão da nuvem dispara a entrega na hora (sem conferên
   pc.app.log.info = ((o: unknown, msg?: string) => { if (typeof msg === 'string' && /sincronia|nuvem/.test(msg)) registro.push({ msg, o: o as Record<string, unknown> }); }) as typeof pc.app.log.info;
   await pc.app.ready();
   const nuvem = await nuvemChega();
+  await confirmarNuvemNova(pc, ana, nuvem.deviceId);
   await pausa(300);
   assert.equal(envelopeDe(nuvem.deviceId), undefined, 'ninguém conferiu ainda');
   const c = await req(pc, 'GET', '/api/world/cloud', ana);
@@ -155,6 +172,7 @@ test('instalação antiga (sincronia ligada antes da tabela de ligação) e Worl
   world.antigo = true; world.nuvemPorUltimo = true;
   const voltas = world.clouds.get(sws)!.presence.length;
   await pc.app.ready();
+  // (World antigo não diz o tipo do aparelho: a fixação da nuvem só vale com o kind do World atual)
   const nuvem = await nuvemChega();
   const levou = await ate(() => !!envelopeDe(nuvem.deviceId), 'World antigo: a nuvem ficou esperando a chave');
   assert.ok(levou < 3000, `levou ${levou} ms`);
@@ -175,6 +193,7 @@ test('computador com a chave velha não entrega chave errada: busca a nova antes
   world.envelopeFail.set(idDoAparelho(pc2, ana2), [500, 'internal']);
   assert.equal((await req(pc, 'POST', '/api/world/sync/rotate', ana, {})).json.keyVersion, 3);
   const nuvem = await nuvemChega();
+  await confirmarNuvemNova(pc, ana, nuvem.deviceId);
   world.envelopeFail.clear(); world.envelopeFail.set(idDoAparelho(pcBia, bia), [500, 'internal']);
   // o notebook tenta entregar: o World pede a v3, ele só tem a v2 e ainda não recebeu a nova → não grava envelope nenhum
   const semChave = await req(pc2, 'POST', '/api/world/sync/share', ana2, {});

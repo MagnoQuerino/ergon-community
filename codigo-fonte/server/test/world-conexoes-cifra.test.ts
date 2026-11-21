@@ -23,10 +23,10 @@ test('só o aparelho-nuvem abre; o colaborador, com a chave do workspace, abre a
   const dek = newWorkspaceKey(); // a chave do workspace: o colaborador também a tem
   const envelope = sealForDevice(Buffer.from(CRED), nuvem.pub, { ws: WS, from: PC, to: NUVEM });
   assert.ok(!envelope.includes('secret_token'), 'nada em claro no envelope');
-  const mudanca = sealChange(dek, WS, { type: 'conexoes', v: 1, para: NUVEM, envelope }, { operationId: 'cx_0123456789ab', expectedVersion: 0, schemaVersion: 1, keyVersion: 1, kind: 'conexoes' }, ed());
+  const mudanca = sealChange(dek, WS, { type: 'conexoes', v: 1, para: NUVEM, envelope }, { operationId: 'cx_0123456789ab', expectedVersion: 0, schemaVersion: 1, keyVersion: 1, kind: 'conexoes', deviceId: PC }, ed());
   assert.ok(!JSON.stringify(mudanca).includes('secret_token'));
-  // quem tem a chave do workspace abre a mudança…
-  const corpo = openChange<{ envelope: string }>(dek, WS, mudanca);
+  // quem tem a chave do workspace abre a mudança (com o tipo e o aparelho que o World diz)…
+  const corpo = openChange<{ envelope: string }>(dek, WS, { ...mudanca, deviceId: PC });
   assert.ok(!corpo.envelope.includes('secret_token'));
   // …mas só a nuvem abre o envelope
   assert.equal(openForDevice(corpo.envelope, nuvem.priv, { ws: WS, from: PC, to: NUVEM }).toString(), CRED);
@@ -62,4 +62,20 @@ test('endereço da rede local (a conexão fica fora da nuvem) e endereço públi
     assert.equal(enderecoLocal(v), true, v);
   for (const v of ['empresa.atlassian.net', 'https://gitlab.com', 'chat.empresa.com.br', '8.8.8.8', '172.32.0.1', '', 'https://[2001:db8::1]/'])
     assert.equal(enderecoLocal(v), false, v);
+});
+
+test('a mudança amarra o tipo e o aparelho que a mandou (v2): o World não reetiqueta; conexoes só no formato novo', () => {
+  const dek = newWorkspaceKey();
+  const meta = { operationId: 'ct_0123456789ab', expectedVersion: 0, schemaVersion: 1, keyVersion: 1 };
+  const nova = sealChange(dek, WS, { type: 'x' }, { ...meta, kind: 'change', deviceId: PC }, ed());
+  assert.deepEqual(openChange(dek, WS, { ...nova, deviceId: PC }), { type: 'x' });
+  assert.throws(() => openChange(dek, WS, { ...nova, kind: 'snapshot', deviceId: PC }), 'reetiquetada como outro tipo');
+  assert.throws(() => openChange(dek, WS, { ...nova, deviceId: NUVEM }), 'atribuída a outro aparelho');
+  // o formato antigo (sem o aparelho) ainda abre para os tipos de antes; 'conexoes' não existe nele
+  const antiga = sealChange(dek, WS, { type: 'y' }, { ...meta, kind: 'snapshot' }, ed());
+  assert.deepEqual(openChange(dek, WS, { ...antiga, deviceId: PC }), { type: 'y' });
+  assert.throws(() => sealChange(dek, WS, {}, { ...meta, kind: 'conexoes' }, ed()));
+  const cx = sealChange(dek, WS, { type: 'conexoes' }, { ...meta, kind: 'conexoes', deviceId: PC }, ed());
+  assert.throws(() => openChange(dek, WS, { ...cx, kind: 'conexoes' }), 'sem o aparelho');
+  assert.throws(() => openChange(dek, WS, { ...cx, deviceId: NUVEM }));
 });

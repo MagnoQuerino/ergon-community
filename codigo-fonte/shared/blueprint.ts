@@ -18,8 +18,10 @@ export interface BlueprintStructure { kind: string; name: string; i: number; j: 
 export type BlueprintTrigger = { kind: 'manual' } | { kind: 'schedule'; days: number[]; time: string; tz?: string };
 export interface BlueprintRoutine { template: string; name: string; trigger: BlueprintTrigger; agentName: string | null }
 /**
- * A parte PRIVADA do esqueleto, só na sincronia cifrada entre os aparelhos da mesma pessoa (o computador e a nuvem do
- * World): a identidade estável de cada agente e rotina (`ref`, o id no aparelho de origem) e as escolhas da equipe que
+ * A parte PRIVADA do esqueleto, só na sincronia cifrada do workspace: vai a TODO aparelho que tem a chave do workspace
+ * (os da pessoa dona, a nuvem do World e os dos colaboradores) e só é APLICADA quando vem de um aparelho da conta dona
+ * (world/sync-local.ts: o World diz o autor de cada mudança). Ferramentas que executam código só ligam por ela na nuvem
+ * do próprio dono; nos computadores, esperam a confirmação com a senha (services/blueprint.ts). Leva: a identidade estável de cada agente e rotina (`ref`, o id no aparelho de origem) e as escolhas da equipe que
  * um arquivo exportado nunca leva — ferramentas de cada agente e da equipe, competências, o modelo do agente e as
  * rotinas com a configuração e o estado. Um esqueleto com esta parte é recusado fora da sincronia (validateBlueprint
  * sem `{ sync: true }`): o arquivo da Loja ou de "Exportar" continua sem nada disso.

@@ -307,7 +307,7 @@ export interface EstadoAuto {
 }
 type Passo = 'presenca' | 'chave' | 'giro' | 'receber' | 'enviar';
 interface Alvo { user_id: string; workspace_id: string; sws: string }
-interface Nuvem { at: number; on: boolean; rele: string | null; ticket: { exp: number; mac: string } | null; appState: string | null; runtime: string | null; keyWanted: boolean | null }
+interface Nuvem { at: number; on: boolean; rele: string | null; ticket: { exp: number; mac: string } | null; appState: string | null; runtime: string | null; keyWanted: boolean | null; /** a conta deste computador é a dona do workspace (World antigo: não diz; null) */ dono?: boolean | null }
 interface Marca { ultimaOk: number | null; ultimaTentativa: number | null; pendencia: { codigo: string; passo: Passo; desde: number; vezes: number; logAt: number } | null; equipeRetida: boolean; giroAt: number; semSyncAt: number }
 export interface AutoSync { agora: () => Promise<void>; parar: () => Promise<void>; estado: (ws: string) => EstadoAuto; sincronizar: (userId: string, ws: string) => Promise<EstadoAuto>; observar: (sws: string, estado: unknown) => void;
   /** de quem é o horário de rotina `slot` deste workspace: deste computador, da nuvem, ou esperar (services/routines.ts) */
@@ -386,7 +386,7 @@ export function iniciarAutoSync(d: AutoSyncDeps): AutoSync {
     const n: Nuvem = { at: Date.now(), on, rele: on && typeof r.relayStandby === 'string' ? r.relayStandby : null,
       ticket: on && r.relayTicket && typeof (r.relayTicket as { mac?: unknown }).mac === 'string' ? r.relayTicket as Nuvem['ticket'] : null,
       appState: on && typeof r.appState === 'string' ? r.appState : null, runtime: on && typeof r.runtime === 'string' ? r.runtime : null,
-      keyWanted: on && typeof r.keyWanted === 'boolean' ? r.keyWanted : null };
+      keyWanted: on && typeof r.keyWanted === 'boolean' ? r.keyWanted : null, dono: typeof r.owner === 'boolean' ? r.owner : antes?.dono ?? null };
     ativa.set(sws, n);
     const pediuAgora = querChave(n) && !(antes && querChave(antes));
     if (pediuAgora) { folga.delete(sws); d.log({ sws, estado: (n.appState ?? '').slice(0, 80) }, 'nuvem: está esperando a chave da sincronia; este computador entrega agora'); }
@@ -433,7 +433,9 @@ export function iniciarAutoSync(d: AutoSyncDeps): AutoSync {
       // os canais: com este computador fechado, a nuvem responde pelas contas ligadas (declarado ao serviço dos canais)
       if (n.rele) try { d.canais?.reserva(a.workspace_id, { installationId: n.rele, syncWorkspaceId: a.sws, ticket: n.ticket }); } catch { /* segue */ }
       try {
-        const r = await d.client.call<{ keyWanted?: unknown }>('POST', '/v1/cloud/presence', { workspaceId: a.sws, open, ...proxima(a.workspace_id) }, s);
+        // o próximo horário é o do workspace do DONO (a nuvem roda as rotinas dele): o computador de um colaborador não o
+        // manda (o World também não o aceitaria; world/src/cloud.ts presence)
+        const r = await d.client.call<{ keyWanted?: unknown }>('POST', '/v1/cloud/presence', { workspaceId: a.sws, open, ...(n.dono === false ? {} : proxima(a.workspace_id)) }, s);
         // o World diz na resposta se a nuvem está esperando a chave (aditivo); World antigo: lê o estado dela a cada ciclo
         if (typeof r.keyWanted === 'boolean') { if (r.keyWanted !== n.keyWanted) guardar(a.sws, { active: true, relayStandby: n.rele, relayTicket: n.ticket, appState: n.appState, runtime: n.runtime, keyWanted: r.keyWanted }, n); }
         else if (open) await lerNuvem(a.sws, s, true);

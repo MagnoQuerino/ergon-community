@@ -40,6 +40,8 @@ import type { AuthContext } from '../services/auth.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import type { LocalSync } from './sync-local.ts';
 import { sealForDevice } from './sync-crypto.ts';
+import { confirmarNuvem, conferirNuvem, trocaPendente } from './nuvem-fixa.ts';
+import { requireRecentAuth } from '../services/auth.ts';
 
 /** Por que uma conta não vai para a nuvem (a tela diz com as palavras dela). */
 export type MotivoFora = 'whatsapp' | 'endereco_local' | 'app_proprio' | 'sem_credencial' | 'nao_conectada';
@@ -98,8 +100,10 @@ const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'o
 const KINDS_NUVEM = new Set(INTEGRATIONS.filter((d) => (d.auth === 'token' || d.auth === 'oauth') && d.kind !== 'whatsapp').map((d) => d.kind as string));
 /** Credencial: só texto, número e sim/não (nada de objeto que o SecretStore gravaria sem saber o que é). */
 const credOk = (c: unknown) => obj(c) && Object.keys(c).length <= 40 && Object.entries(c).every(([k, v]) => /^[a-z_][a-z0-9_]{0,40}$/i.test(k) && (str(v, 20_000) || typeof v === 'number' || typeof v === 'boolean'));
+/** O carimbo de hora do pacote: data ISO legível (é com ele que um pacote antigo reenviado é recusado). */
+const emOk = (v: unknown) => str(v, 40) && Number.isFinite(Date.parse(v as string));
 function conferirPacote(b: unknown): Pacote | null {
-  if (!obj(b) || b.type !== 'conexoes.pacote' || b.v !== 1 || !Array.isArray(b.itens) || b.itens.length > MAX_ITENS) return null;
+  if (!obj(b) || b.type !== 'conexoes.pacote' || b.v !== 1 || !emOk(b.em) || !Array.isArray(b.itens) || b.itens.length > MAX_ITENS) return null;
   const vistos = new Set<string>();
   for (const x of b.itens as unknown[]) {
     if (!obj(x) || !str(x.kind, 20) || !KINDS_NUVEM.has(x.kind as string) || typeof x.conta !== 'string' || (x.conta !== '' && !CONTA_RE.test(x.conta))) return null;
@@ -111,7 +115,7 @@ function conferirPacote(b: unknown): Pacote | null {
   return b as unknown as Pacote;
 }
 function conferirDevolucao(b: unknown): Devolucao | null {
-  if (!obj(b) || b.type !== 'conexoes.acessos' || b.v !== 1 || !Array.isArray(b.itens) || b.itens.length > MAX_ITENS) return null;
+  if (!obj(b) || b.type !== 'conexoes.acessos' || b.v !== 1 || !emOk(b.em) || !Array.isArray(b.itens) || b.itens.length > MAX_ITENS) return null;
   for (const x of b.itens as unknown[]) {
     if (!obj(x) || (x.kind !== 'google' && x.kind !== 'microsoft') || typeof x.conta !== 'string' || (x.conta !== '' && !CONTA_RE.test(x.conta)) || !str(x.account, 200) || !obj(x.cred)) return null;
     const c = x.cred;
@@ -223,6 +227,11 @@ export class ConexoesNuvem {
     if (!w?.active || !w.owner) return;
     const destino = w.cloudDevice ?? null;
     if (!destino) { this.erro(ws, 'sem_aparelho_nuvem'); return; }
+    // o aparelho-nuvem fixado na primeira vez (nuvem-fixa.ts): outro, nada vai até a pessoa dona confirmar com a senha
+    if (conferirNuvem(this.d.db, this.d.bus, ws, destino, e.enviado_para ?? e.nuvem_aparelho) === 'trocada') {
+      if (e.erro !== 'nuvem_trocada') { this.erro(ws, 'nuvem_trocada'); this.d.log({ ws, aparelho: destino.deviceId }, 'conexões: o aparelho-nuvem do workspace mudou; nada vai até a pessoa dona confirmar'); }
+      return;
+    }
     if (e.nuvem_aparelho !== destino.deviceId) this.marcar(ws, { nuvem_aparelho: destino.deviceId });
     // uma credencial escolhida que não se lê agora (Ergon trancado, arquivo sumido): o retrato sairia menor e a nuvem
     // apagaria a conta. Espera dar para ler
@@ -233,7 +242,7 @@ export class ConexoesNuvem {
     const mudou = estrutura !== e.enviado_estrutura || destino.deviceId !== e.enviado_para;
     const girou = acessos !== e.enviado_acessos && (!aberto || !e.enviado_em || Date.now() - Date.parse(e.enviado_em) > ACESSOS_A_CADA_MS);
     if (!mudou && !girou) return;
-    const pacote: Pacote = { type: 'conexoes.pacote', v: 1, em: now(), itens };
+    const pacote: Pacote = { type: 'conexoes.pacote', v: 1, em: this.carimbo(), itens };
     try { await this.enviar(userId, ws, sws, destino, pacote); }
     catch (err) {
       const code = String((err as { code?: string }).code ?? 'falha');
@@ -275,13 +284,22 @@ export class ConexoesNuvem {
     if (!p) { this.erro(ws, 'formato'); this.d.log({ ws, versao: x.version }, 'conexões: retrato em formato inesperado (nada aplicado)'); return; }
     const e = this.estado(ws);
     if (x.version <= e.recebido_versao) return; // mais antigo que o já aplicado (repetido ou fora de ordem)
+    // e mais novo que o último DESTE remetente: o World ordena as mudanças, mas não consegue fabricar um carimbo (vai
+    // cifrado); um retrato antigo reenviado numa versão nova não volta a valer
+    if (!this.carimboNovo(ws, x.deviceId, p.em)) { this.d.log({ ws, versao: x.version }, 'conexões: retrato com carimbo de hora não mais novo que o último deste computador (recusado)'); return; }
     const secrets = this.d.integrations.secrets;
     const antes = this.d.db.all<{ kind: string; conta: string }>('SELECT kind, conta FROM world_conexoes_recebidas WHERE workspace_id = ?', ws);
-    const ficam = new Set(p.itens.map((i) => `${i.kind}:${i.conta}`));
-    let aplicadas = 0; let fora = 0;
+    // a mesma regra do computador (motivo 'endereco_local'), conferida de novo aqui: a nuvem não grava conexão que aponta
+    // para endereço local ou privado (com ela, a equipe na nuvem alcançaria a rede interna do World)
+    const locais = new Set(p.itens.filter((i) => (integrationDef(i.kind as IntegrationKind)?.fields ?? []).filter((f) => !f.secret)
+      .some((f) => typeof i.cred[f.name] === 'string' && enderecoLocal(i.cred[f.name] as string))).map((i) => `${i.kind}:${i.conta}`));
+    const ficam = new Set(p.itens.map((i) => `${i.kind}:${i.conta}`).filter((k) => !locais.has(k)));
+    let aplicadas = 0; let fora = locais.size;
+    if (locais.size) this.d.log({ ws, contas: locais.size }, 'conexões: conta com endereço local ou privado no retrato (não gravada na nuvem)');
     this.d.db.tx(() => {
       for (const i of p.itens) {
         const kind = i.kind as IntegrationKind;
+        if (locais.has(`${i.kind}:${i.conta}`)) continue;
         const existente = this.d.db.get<IntegrationRow>('SELECT * FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ?', ws, kind, i.conta);
         // conta que nasceu aqui na nuvem (não veio do computador): não se sobrescreve
         if (existente && existente.state !== 'off' && !this.veioDoComputador(ws, kind, i.conta)) { fora++; continue; }
@@ -311,11 +329,23 @@ export class ConexoesNuvem {
         this.remover(ws, a.kind as IntegrationKind, a.conta);
       }
       this.marcar(ws, { origem_aparelho: x.deviceId, origem_chave: corpo.dePub, recebido_em: now(), recebido_versao: x.version, erro: null, erro_em: null });
+      this.gravarCarimbo(ws, x.deviceId, p.em);
     });
     audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action: 'integration.cloud_received', targetType: 'integration', targetId: 'nuvem',
       evidence: { contas: aplicadas, ...(fora ? { ficaramDeFora: fora } : {}) }, result: `conexões vindas do computador: ${aplicadas}` });
     this.d.log({ ws, contas: aplicadas, fora }, 'conexões: retrato do computador aplicado');
     this.d.bus.publish(ws, 'integrations.changed', {});
+  }
+
+  /** o carimbo de quem envia: sempre crescente (quem recebe recusa um que não seja mais novo que o último daqui) */
+  private ultimoEm = 0;
+  private carimbo(): string { this.ultimoEm = Math.max(Date.now(), this.ultimoEm + 1); return new Date(this.ultimoEm).toISOString(); }
+  private carimboNovo(ws: string, remetente: string, em: string): boolean {
+    const ultimo = this.d.db.get<{ em: string }>('SELECT em FROM world_conexoes_carimbos WHERE workspace_id = ? AND remetente = ?', ws, remetente)?.em;
+    return !ultimo || Date.parse(em) > Date.parse(ultimo);
+  }
+  private gravarCarimbo(ws: string, remetente: string, em: string) {
+    this.d.db.run('INSERT INTO world_conexoes_carimbos (workspace_id, remetente, em) VALUES (?, ?, ?) ON CONFLICT (workspace_id, remetente) DO UPDATE SET em = excluded.em', ws, remetente, em);
   }
 
   private remover(ws: string, kind: IntegrationKind, conta: string) {
@@ -334,6 +364,8 @@ export class ConexoesNuvem {
     if (x.version <= e.devolvido_versao) return;
     const dv = conferirDevolucao(bruto);
     if (!dv) { this.erro(ws, 'formato'); return; }
+    if (!this.carimboNovo(ws, x.deviceId, dv.em)) { this.d.log({ ws, versao: x.version }, 'conexões: devolução com carimbo de hora não mais novo que a última (recusada)'); return; }
+    this.gravarCarimbo(ws, x.deviceId, dv.em);
     const secrets = this.d.integrations.secrets; let n = 0;
     for (const i of dv.itens) {
       const r = this.d.db.get<IntegrationRow>("SELECT * FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ? AND state = 'connected'", ws, i.kind, i.conta);
@@ -364,7 +396,7 @@ export class ConexoesNuvem {
       if (!c || typeof c.refresh_token !== 'string' || !c.refresh_token || typeof c.access_token !== 'string' || typeof c.expires_at !== 'number') continue;
       itens.push({ kind: r.kind, conta: r.conta, account: String(c.account ?? ''), cred: { access_token: c.access_token, refresh_token: c.refresh_token, expires_at: c.expires_at, ...(typeof c.granted === 'string' ? { granted: c.granted } : {}) } });
     }
-    try { await this.enviar(userId, ws, sws, { deviceId: e.origem_aparelho, syncPublicKey: e.origem_chave }, { type: 'conexoes.acessos', v: 1, em: now(), itens }); }
+    try { await this.enviar(userId, ws, sws, { deviceId: e.origem_aparelho, syncPublicKey: e.origem_chave }, { type: 'conexoes.acessos', v: 1, em: this.carimbo(), itens }); }
     catch (err) { const code = String((err as { code?: string }).code ?? 'falha'); if (code !== 'version_conflict') { this.erro(ws, code.slice(0, 40)); this.d.log({ ws, code }, 'conexões: a devolução ao computador falhou'); } return; }
     this.marcar(ws, { devolver: 0 });
     this.d.log({ ws, contas: itens.length }, 'conexões: acesso renovado devolvido ao computador');
@@ -383,13 +415,15 @@ export class ConexoesNuvem {
     }
     const w = sws && this.d.links.session(a.userId) && this.d.sync.status(ws).enabled ? await this.estadoWorld(a.userId, sws, 60_000) : null;
     const disponivel = !!w?.active && !!w.owner;
+    // o aparelho-nuvem que o World diz agora, conferido com o fixado (a tela mostra a troca mesmo antes do próximo ciclo)
+    if (disponivel && w?.cloudDevice) conferirNuvem(this.d.db, this.d.bus, ws, w.cloudDevice, e.enviado_para ?? e.nuvem_aparelho);
     const enviados = e.enviado_para && e.enviado_estrutura ? new Set(this.itensEnviaveis(ws)) : new Set<string>();
     const contas = this.contas(ws).map((r) => {
       const motivo = this.motivo(ws, r); const usar = this.usar(ws, r.id);
       const estado = motivo ? 'fora' : !usar ? 'desligada' : !e.aceite_em ? 'aguardando_aceite' : enviados.has(r.id) ? 'na_nuvem' : 'enviando';
       return { id: r.id, kind: r.kind, app: integrationDef(r.kind)?.name ?? r.kind, nome: nomeDaConta(r), estado, usar, motivo };
     });
-    return { modo: 'computador' as const, disponivel, semAparelho: disponivel && !w?.cloudDevice, aceite: e.aceite_em ? { em: e.aceite_em } : null, enviadoEm: e.enviado_em, erro: e.erro, contas };
+    return { modo: 'computador' as const, disponivel, semAparelho: disponivel && !w?.cloudDevice, trocaNuvem: disponivel ? trocaPendente(this.d.db, ws) : null, aceite: e.aceite_em ? { em: e.aceite_em } : null, enviadoEm: e.enviado_em, erro: e.erro, contas };
   }
   /** As contas que estavam no último retrato enviado (o resumo da estrutura bate com o que vai agora). */
   private itensEnviaveis(ws: string): string[] {
@@ -410,6 +444,16 @@ export class ConexoesNuvem {
       audit(this.d.db, this.d.bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: ligar ? 'integration.cloud_on' : 'integration.cloud_off', targetType: 'integration', targetId: 'nuvem',
         result: ligar ? 'as conexões escolhidas passam a ir, cifradas, para a nuvem do workspace' : 'as conexões saem da nuvem do workspace' });
       this.d.bus.publish(a.workspaceId, 'integrations.changed', {});
+      return this.tela(a);
+    });
+    // a nuvem do workspace mudou de aparelho (recriada; nuvem-fixa.ts): a pessoa dona confirma com a senha que é a dela
+    app.post('/api/world/nuvem/conexoes/confirmar-nuvem', async (req) => {
+      if (this.d.nuvem) throw new HttpError(409, 'nuvem', 'Quem confirma a nuvem nova é o computador da pessoa dona.');
+      const a = owner(req); requireRecentAuth(a);
+      const sws = this.d.sync.worldId(a.workspaceId); if (!sws) throw new HttpError(409, 'sync_off', 'Este workspace não está ligado ao World.');
+      const w = await this.estadoWorld(a.userId, sws, 0);
+      if (!w?.owner || !confirmarNuvem(this.d.db, this.d.bus, a.workspaceId, a.userId, w.cloudDevice ?? null)) throw new HttpError(409, 'nuvem_mudou', 'A nuvem mudou de novo enquanto você confirmava: confira e confirme outra vez.');
+      this.erro(a.workspaceId, null);
       return this.tela(a);
     });
     app.put('/api/world/nuvem/conexoes/:id', { schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^int_[A-Za-z0-9]{8,64}$' } } },
