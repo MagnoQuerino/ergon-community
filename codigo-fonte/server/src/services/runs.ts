@@ -6,6 +6,9 @@ import { saveArtifact } from './artifacts.ts';
 import { log, scrub } from '../lib/log.ts';
 import { paraTela } from '../lib/texto-tela.ts';
 import { limparCaminhos } from '../../../shared/caminhos.ts';
+import { normalizarVisuais } from '../../../shared/visuais/cercas.ts';
+import { VISUAIS_NO_PROMPT } from '../../../shared/visuais/prompt.ts';
+import { conferenciaDo } from './visuais/conferencia.ts';
 import { nomeDoPerfil } from './perfis.ts';
 import { audit, type Bus } from './bus.ts';
 import { HermesError, friendly, mapRemoteStatus, type HermesClient, type RunEvent } from './hermes.ts';
@@ -636,8 +639,12 @@ export class RunExecutor {
       // a linha que era só a referência perdida sai inteira
       out = out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
     }
-    return limparCaminhos(out, (nome) => this.db.get<{ id: string; filename: string }>(
+    const limpo = limparCaminhos(out, (nome) => this.db.get<{ id: string; filename: string }>(
       'SELECT id, filename FROM artifacts WHERE workspace_id = ? AND filename = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1', r.workspace_id, nome) ?? null);
+    // blocos visuais (rc.42): cada cerca validada e gravada na forma normalizada; a que não passa fica como JSON comum
+    const v = normalizarVisuais(limpo, conferenciaDo(this.db, r.workspace_id));
+    if (v.erros.length) log.warn({ runId: r.id, erros: v.erros.slice(0, 3).map((e) => clip(e, 160)) }, 'visuais: bloco fora do formato');
+    return v.texto;
   }
 
   /**
@@ -1345,6 +1352,8 @@ function almaDe(a: AgenteDaAlma): string {
     a.instructions,
     // no SOUL: vale também para o que o motor roda sozinho com o perfil (rotinas do motor, canais), não só para o pedido
     SO_ERGON_E_DOCUMENTOS,
+    // rc.42: números viram visual (métrica, gráfico, tabela), com a fonte sempre (shared/visuais/prompt.ts)
+    VISUAIS_NO_PROMPT,
   ].filter(Boolean).join('\n');
 }
 export function almaDoAgente(db: Db, workspaceId: string, agentId: string): string {

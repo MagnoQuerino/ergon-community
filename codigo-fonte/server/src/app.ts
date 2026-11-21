@@ -38,6 +38,7 @@ import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } 
 import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
 import { registerRecursosRoutes } from './routes/recursos.ts';
 import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
+import { registerVisuaisRoutes } from './routes/visuais.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
@@ -3071,6 +3072,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // é pelo app com relé (services/teams-app), o WhatsApp pelo leitor por QR (services/whatsapp.ts) e o Telegram e o
   // Discord pelas rotas dos canais. Um plugin antigo que ainda mande evento para cá recebe 404 e não responde ninguém.
   registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
+  // blocos visuais (rc.42): a ferramenta `visual` do motor, a prévia de link e de arquivo, o PNG, o voto e o relatório
+  registerVisuaisRoutes(app, { db, bus, cfg, auth, bridgeMotor, busca: cfg.visuaisBusca,
+    workspaceDaSessao: async (motor, sessionId, taskId) => { const r = await executor.runForSession(sessionId, taskId); return r && motors.allows(motor, r.workspace_id) ? r.workspace_id : null; } });
   registerWhatsAppEquipeRoutes(app, { equipe: whatsappEquipe, owner, verify: secApi.verify });
 
   // Plugin do Ergon no motor: antes de cada ferramenta, pergunta de qual agente é a sessão e o que ele pode usar.

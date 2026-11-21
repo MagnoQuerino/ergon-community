@@ -29,6 +29,8 @@ export interface Config {
   catalogDir?: string;
   communityCatalogUrl?: string;
   catalogFetch?: typeof fetch;
+  /** blocos visuais: a busca da prévia de link nos testes (resolver próprio, servidor local aceito) */
+  visuaisBusca?: import('./services/visuais/rede.ts').OpcoesBusca;
   /** endereço pelo qual as pessoas abrem o Ergon (passkeys exigem nome, não IP; padrão http://localhost:<porta>) */
   publicUrl: string;
   /** custo do Argon2id (senhas e frase); testes usam o perfil leve */

@@ -27,6 +27,9 @@ import { workspaceTz } from '../routine-proposals.ts';
 import type { RunExecutor } from '../runs.ts';
 import { coordinatorFor } from '../team-query.ts';
 import { CanaisExternos, KIND_EXTERNO } from './externo.ts';
+import { PREFIXO, validarBloco } from '../../../../shared/visuais/esquema.ts';
+import { blocosDe } from '../../../../shared/visuais/cercas.ts';
+import { visualParaPng } from '../visuais/png.ts';
 import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
@@ -72,8 +75,10 @@ interface VinculoRow {
   user_id: string; canal: CanalId; workspace_id: string; externo_id: string; chat_id: string; nome: string | null; avisos: number;
   conversation_id: string | null; cursor_rowid: number; aviso_janela: string | null; primeira_em: string | null; created_at: string;
 }
-interface SaidaRow { id: string; user_id: string; canal: CanalId; workspace_id: string; tipo: 'texto' | 'cartao' | 'editar'; payload: string; status: string; tentativas: number; proximo_em: string; message_id: string | null; created_at: string }
-interface ItemSaida { id: string; canal: NomeCanal; tipo: 'texto' | 'cartao' | 'editar' | 'digitando'; chat_id: string; user_id: string; texto?: string; botoes?: Array<[string, string]>; message_id?: string }
+interface SaidaRow { id: string; user_id: string; canal: CanalId; workspace_id: string; tipo: 'texto' | 'cartao' | 'editar' | 'imagem'; payload: string; status: string; tentativas: number; proximo_em: string; message_id: string | null; created_at: string }
+interface ItemSaida { id: string; canal: NomeCanal; tipo: 'texto' | 'cartao' | 'editar' | 'digitando' | 'imagem'; chat_id: string; user_id: string; texto?: string; botoes?: Array<[string, string]>; message_id?: string; png?: string; bloco?: unknown }
+/** rc.42: os blocos visuais que também vão como imagem (o Telegram e o Discord mostram o PNG; o texto vai antes) */
+const VAI_COMO_IMAGEM = new Set(['kpi', 'kpis', 'nota', 'barras', 'linhas', 'pizza', 'tabela', 'comparativo', 'versus', 'placar', 'linha_do_tempo', 'progresso', 'status', 'semaforo', 'ficha', 'medidor', 'sparkline', 'icones', 'funil', 'calor', 'matriz', 'enquete', 'decisao', 'checklist']);
 
 const MIGRACOES: Array<[string, string]> = [
   ['c0001_canais', `
@@ -404,6 +409,10 @@ export class Canais {
       const texto = textoParaTeams(m.content, 3500);
       const quem = m.role === 'agent' && m.agente && m.agente !== CLOSED_VALUE ? m.agente.replace(/[*_`[\]\n]/g, '').trim().slice(0, 60) : 'Sistema';
       if (texto) this.enfileirar(v, 'texto', { texto: `**${quem}:** ${texto}` });
+      // os blocos visuais vão também como imagem, onde o canal mostra (até 4 por mensagem); o texto já leva os números
+      if (texto && m.role === 'agent' && !ehCanalLocal(v.canal) && m.content.includes(`\`\`\`${PREFIXO}`)) {
+        for (const b of blocosDe(m.content).filter((x) => VAI_COMO_IMAGEM.has(x.tipo)).slice(0, 4)) this.enfileirar(v, 'imagem', { bloco: b, texto: b.titulo ?? '' });
+      }
     }
     if (ultimo !== Number(v.cursor_rowid)) { this.d.db.run('UPDATE canais_vinculos SET cursor_rowid = ? WHERE user_id = ? AND canal = ?', ultimo, v.user_id, v.canal); v.cursor_rowid = ultimo; }
     if (!this.trabalhando(v.conversation_id)) this.digitar.delete(`${v.user_id}|${v.canal}`);
@@ -545,7 +554,19 @@ export class Canais {
       await new Promise<void>((r) => { const t = setTimeout(() => { this.esperando.delete(f); r(); }, Math.min(esperaS * 1000, this.ajustes.esperaMaxMs)); const f = () => { clearTimeout(t); r(); }; this.esperando.add(f); });
       itens = this.pendentes(motor, canaisVivos);
     }
-    return { itens };
+    return { itens: await this.comImagens(motor, itens) };
+  }
+  /** O PNG de cada bloco visual da saída (gerado na hora de mandar); sem imagem, o item sai da fila (o texto já foi). */
+  private async comImagens(motor: string, itens: ItemSaida[]): Promise<ItemSaida[]> {
+    const out: ItemSaida[] = [];
+    for (const it of itens) {
+      if (it.tipo !== 'imagem') { out.push(it); continue; }
+      const r = validarBloco(it.bloco);
+      const png = r.ok ? await visualParaPng(r.bloco).catch(() => null) : null;
+      if (!png) { this.confirmar(motor, { id: it.id, ok: true }); continue; }
+      out.push({ id: it.id, canal: it.canal, tipo: 'imagem', chat_id: it.chat_id, user_id: it.user_id, texto: (it.texto ?? '').slice(0, 900), png: png.png.toString('base64') });
+    }
+    return out;
   }
   /** `motor` null: a entrega local (o WhatsApp pareado), aqui mesmo; o plugin nunca confirma um item local. */
   private confirmar(motor: string | null, a: { id?: string; ok?: boolean; message_id?: string; erro?: string; passageiro?: boolean }): void {
@@ -584,9 +605,10 @@ export class Canais {
       if (ehCanalLocal(row.canal) || !vivos.has(row.canal) || !this.d.permite(motor, row.workspace_id) || !this.d.db.workspaceOpen(row.workspace_id)) { parado.add(k); continue; }
       const v = this.vinculo(row.user_id, row.canal);
       if (!v || row.payload === CLOSED_VALUE) { this.d.db.run("UPDATE canais_saida SET status = 'failed', erro = 'sem_vinculo' WHERE id = ?", row.id); continue; }
-      const pl = JSON.parse(row.payload) as { texto?: string; botoes?: Array<[string, string]>; origem?: string };
+      const pl = JSON.parse(row.payload) as { texto?: string; botoes?: Array<[string, string]>; origem?: string; bloco?: unknown };
       const item: ItemSaida = { id: row.id, canal: row.canal as NomeCanal, tipo: row.tipo, chat_id: v.chat_id, user_id: v.externo_id, texto: String(pl.texto ?? '') };
       if (row.tipo === 'cartao') item.botoes = (pl.botoes ?? []).slice(0, 4);
+      if (row.tipo === 'imagem') item.bloco = pl.bloco;
       if (row.tipo === 'editar') {
         const origem = pl.origem ? this.d.db.get<{ message_id: string | null; status: string }>('SELECT message_id, status FROM canais_saida WHERE id = ?', pl.origem) : null;
         if (!origem || origem.status === 'failed') { this.d.db.run("UPDATE canais_saida SET status = 'failed', erro = 'sem_origem' WHERE id = ?", row.id); continue; }
@@ -620,7 +642,7 @@ export class Canais {
       const v = this.vinculo(row.user_id, row.canal);
       if (!v || row.payload === CLOSED_VALUE) { this.d.db.run("UPDATE canais_saida SET status = 'failed', erro = 'sem_vinculo' WHERE id = ?", row.id); continue; }
       const pl = JSON.parse(row.payload) as { texto?: string; botoes?: Array<[string, string]>; origem?: string };
-      const item: ItemLocal = { id: row.id, tipo: row.tipo, texto: String(pl.texto ?? ''), botoes: row.tipo === 'cartao' ? (pl.botoes ?? []).slice(0, 4) : [] };
+      const item: ItemLocal = { id: row.id, tipo: row.tipo === 'imagem' ? 'texto' : row.tipo, texto: String(pl.texto ?? ''), botoes: row.tipo === 'cartao' ? (pl.botoes ?? []).slice(0, 4) : [] };
       if (row.tipo === 'editar') {
         const origem = pl.origem ? this.d.db.get<{ status: string }>('SELECT status FROM canais_saida WHERE id = ?', pl.origem) : null;
         if (!origem || origem.status === 'failed') { this.d.db.run("UPDATE canais_saida SET status = 'failed', erro = 'sem_origem' WHERE id = ?", row.id); continue; }

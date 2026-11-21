@@ -12,6 +12,7 @@
   "dependencies": {
     "@fastify/cookie": "11.1.2",
     "@fastify/static": "10.1.5",
+    "@resvg/resvg-js": "2.6.2",
     "@scure/bip39": "2.4.0",
     "@simplewebauthn/server": "14.0.3",
     "@whiskeysockets/baileys": "7.0.0-rc14",
