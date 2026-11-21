@@ -177,6 +177,8 @@ const ajuda: Traducao<typeof pt> = {
   'conexoes.i3Quadros': 'Tasks and boards',
   'conexoes.i4': '{nuvem}: with the workspace in the Ergon World cloud, you choose which connections the team uses there while your computer is off. They go encrypted to the workspace cloud only. Autonomy rules do not go: there, everything asks for approval again. WhatsApp and local network addresses stay on this computer.',
   'conexoes.i4Nuvem': 'Connections in the cloud',
+  'conexoes.i5': '{maos}: with GitHub or GitLab connected, the team clones, creates a branch, tests, commits and opens the pull request; in Drive and OneDrive, it organizes folders and edits documents and spreadsheets; in Ergon Documents, it edits spreadsheets and texts (the previous version stays in the Trash). The account token never reaches the agent: each code access is for one repository, one job and a short time. Pushing to the main branch, merging, deleting and sharing outside ask for your approval. With "Allow everything" (in Connections › Rules), none of that asks: you review at the end, through the links the team returns. Even so, permanent deletes, deleting a repository, secrets and payments always ask. Whoever manages the workspace can forbid "Allow everything".',
+  'conexoes.i5Maos': 'Hands-on work',
   'conexoes.p': 'All in {link}. The content of messages and documents is treated as data, never as instructions.',
 
   'cidade.titulo': 'The city',
