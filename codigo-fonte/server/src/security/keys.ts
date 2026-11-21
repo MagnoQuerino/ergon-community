@@ -19,8 +19,12 @@ import { wordlist } from '@scure/bip39/wordlists/portuguese.js';
 import { HttpError, id, now } from '../lib/util.ts';
 import { KDF_STRONG, argon2id, b64u, decrypt, encrypt, fromB64u, hkdf, randomKey, timingSafeEq, type KdfParams } from './crypto.ts';
 
-/** 'mk': chave pessoal embrulhada pela MK — só enquanto há uma pessoa só na instalação (ver Vault). */
-type WrapType = 'password' | 'recovery' | 'auto' | 'mk';
+/**
+ * 'mk': chave pessoal embrulhada pela MK — só enquanto há uma pessoa só na instalação (ver Vault).
+ * 'world': chave pessoal embrulhada por uma chave derivada da senha do Ergon World (a recuperação que a pessoa pode
+ * escolher no lugar da frase). Fica SÓ neste keyring: o World vê a senha no login, mas nunca recebe o sal nem o embrulho.
+ */
+type WrapType = 'password' | 'recovery' | 'auto' | 'mk' | 'world';
 interface Wrap {
   id: string; type: WrapType;
   /** 'open': embrulho do acesso sem trancamento (chave em unlock.key); sem isto, é o do ajudante do computador */
@@ -28,6 +32,10 @@ interface Wrap {
   /** dono da senha (o banco ainda está fechado quando a senha chega: o usuário fica aqui, sem segredo) */
   userId?: string; username?: string;
   salt?: string; kdf?: KdfParams; blob: string; createdAt: string; label?: string;
+  /** 'world': o e-mail da conta do World (sem segredo; é o que se confere no World ao recuperar) */
+  email?: string;
+  /** 'world': a senha do World mudou e este embrulho não abre mais com a senha atual (a pessoa escolhe de novo) */
+  stale?: boolean;
 }
 /**
  * Parte de uma pessoa no keyring: a chave pessoal (PK) embrulhada pela senha, pela frase e (opcional) pelo cofre do
@@ -49,6 +57,15 @@ export function normalizePhrase(input: string): string | null {
   return words.length === RECOVERY_WORDS && validateMnemonic(phrase, wordlist) ? phrase : null;
 }
 const phraseSecret = (phrase: string) => Buffer.from(mnemonicToEntropy(phrase, wordlist)).toString('hex');
+/**
+ * Segredo da recuperação pela senha do World. O rótulo separa esta derivação de qualquer outra feita com a mesma senha
+ * (o login do World, que recebe a senha em claro por HTTPS e faz a dele lá; a senha do Ergon; o envelope do World Sync):
+ * Argon2id(rótulo ‖ senha, sal aleatório deste embrulho). Sem o sal e o embrulho, que nunca saem daqui, a senha sozinha
+ * não abre nada.
+ */
+export const worldLocalSecret = (password: string) => `ergon/recovery-world-local/v1\n${password}`;
+/** A pessoa tem um jeito de recuperar os dados: a frase, ou a senha do World ainda válida. */
+const hasRecovery = (e: PersonEntry) => e.wraps.some((w) => w.type === 'recovery' || (w.type === 'world' && !w.stale));
 
 /** Arquivo do keyring (volume de dados; legível só pelo servidor). Gravação atômica. */
 class Keyring {
@@ -68,7 +85,7 @@ class Keyring {
 
   // `scope` entra no contexto (AAD): "keyring" para a MK, "person/<usuário>" para a chave de cada pessoa — um
   // embrulho não serve no lugar de outro
-  async wrapSecret(key: Buffer, type: 'password' | 'recovery', secret: string, user?: { id: string; username: string }, scope = 'keyring'): Promise<Wrap> {
+  async wrapSecret(key: Buffer, type: 'password' | 'recovery' | 'world', secret: string, user?: { id: string; username: string }, scope = 'keyring'): Promise<Wrap> {
     const salt = randomKey().subarray(0, 16);
     const kek = await argon2id(secret, salt, this.kdf);
     const wid = id('wrp');
@@ -246,7 +263,8 @@ export class Vault {
   personOpen(userId: string): boolean { return this.pks.has(userId); }
   /** Mais de uma pessoa: as chaves pessoais não se abrem mais pela MK (isolamento entre elas). */
   multiPerson(): boolean { return Object.keys(this.peopleOf()).length > 1; }
-  personHasRecovery(userId: string): boolean { return !!this.peopleOf()[userId]?.wraps.some((w) => w.type === 'recovery'); }
+  /** Frase confirmada ou senha do World ainda válida (qualquer uma das duas recupera). */
+  personHasRecovery(userId: string): boolean { const e = this.peopleOf()[userId]; return !!e && hasRecovery(e); }
   /** Origem das chaves de workspace pela pessoa dona (ver PersonKeySource). */
   personKeySource(ownerOf: (workspaceId: string) => string | null): PersonKeySource { return new PersonKeySource(this, this.need(), ownerOf); }
   /** Chave do cofre do motor de IA da pessoa (gocryptfs), em hexadecimal. */
@@ -263,7 +281,7 @@ export class Vault {
   private mkFromPerson(userId: string, e: PersonEntry, pk: Buffer): Buffer {
     return decrypt(hkdf(pk, 'ergon/person-mk/v1'), fromB64u(e.mk), `${personScope(userId)}/mk`);
   }
-  private async openPersonWrap(userId: string, e: PersonEntry, type: 'password' | 'recovery', secret: string): Promise<Buffer | null> {
+  private async openPersonWrap(userId: string, e: PersonEntry, type: 'password' | 'recovery' | 'world', secret: string): Promise<Buffer | null> {
     for (const w of e.wraps.filter((x) => x.type === type)) {
       const pk = await this.keyring.openSecret(w, secret, personScope(userId));
       if (pk) return pk;
@@ -282,7 +300,7 @@ export class Vault {
     const k = this.keyring.load();
     const others = Object.entries(k.people ?? {});
     if (k.people?.[user.id]) throw new HttpError(409, 'person_exists', 'a pessoa já tem a chave dela');
-    if (others.some(([, e]) => !e.wraps.some((w) => w.type === 'recovery'))) {
+    if (others.some(([, e]) => !hasRecovery(e))) {
       throw new HttpError(409, 'others_without_phrase', 'Quem já usa este computador precisa gerar a frase pessoal antes de outra pessoa criar conta.');
     }
     const pk = randomKey();
@@ -381,6 +399,70 @@ export class Vault {
     return true;
   }
 
+  // ---------- recuperação pela senha do Ergon World (escolha da pessoa, no lugar da frase ou junto dela) ----------
+  /**
+   * Embrulha a chave pessoal (aberta) pela senha do World: um embrulho só por pessoa (o novo substitui o anterior). Quem
+   * chama já conferiu a senha no World e que ela não é a senha do Ergon (a mesma senha não serviria de reserva).
+   */
+  async setPersonWorld(userId: string, email: string, password: string): Promise<void> {
+    const pk = this.pks.get(userId);
+    if (!pk) throw new PersonSealedError(userId);
+    const k = this.keyring.load();
+    const e = k.people?.[userId];
+    if (!e) throw new HttpError(409, 'no_person', 'a pessoa ainda não tem a chave dela');
+    const w = { ...(await this.keyring.wrapSecret(pk, 'world', worldLocalSecret(password), { id: userId, username: e.username }, personScope(userId))), email: email.trim().toLowerCase() };
+    k.people![userId] = { ...e, wraps: [...e.wraps.filter((x) => x.type !== 'world'), w] };
+    this.keyring.save(k);
+  }
+  /** A recuperação pelo World desta pessoa (sem segredo): o e-mail e se ainda vale. */
+  personWorld(userId: string): { email: string; stale: boolean } | null {
+    const w = this.peopleOf()[userId]?.wraps.find((x) => x.type === 'world');
+    return w ? { email: w.email ?? '', stale: !!w.stale } : null;
+  }
+  /** Alguém neste computador recupera pela senha do World (a tela de "Esqueci a senha" mostra a opção). */
+  anyWorld(): boolean { return Object.values(this.peopleOf()).some((e) => e.wraps.some((w) => w.type === 'world' && !w.stale)); }
+  /** As pessoas com esse usuário e embrulho do World (o portão confere a senha no World antes de abrir). */
+  worldOf(username: string): Array<{ userId: string; email: string }> {
+    return Object.entries(this.peopleOf()).filter(([, e]) => e.username === username)
+      .flatMap(([userId, e]) => e.wraps.filter((w) => w.type === 'world').map((w) => ({ userId, email: w.email ?? '' })));
+  }
+  /** Abre a parte da pessoa pela senha do World (já conferida no World). Falhou: o embrulho é de uma senha antiga. */
+  async openPersonWorld(userId: string, password: string): Promise<boolean> {
+    const e = this.peopleOf()[userId];
+    if (!e) return false;
+    const pk = await this.openPersonWrap(userId, e, 'world', worldLocalSecret(password));
+    if (!pk) return false;
+    this.adoptPerson(userId, e, pk);
+    return true;
+  }
+  /** Trancado (portão): a senha do World abre a parte da pessoa e, pela MK guardada nela, a instalação. */
+  async unsealWorld(userId: string, password: string): Promise<boolean> {
+    const e = this.peopleOf(this.keyring.load())[userId];
+    if (!e) return false;
+    const pk = await this.openPersonWrap(userId, e, 'world', worldLocalSecret(password));
+    if (!pk) return false;
+    if (!this.mk) this.adopt(this.mkFromPerson(userId, e, pk));
+    this.adoptPerson(userId, e, pk);
+    this.openPeopleByMk();
+    return true;
+  }
+  /** A senha do World mudou e o embrulho não abre com a atual: deixa de contar como recuperação (a pessoa escolhe de novo). */
+  markPersonWorldStale(userId: string): void {
+    const k = this.keyring.load();
+    const e = k.people?.[userId];
+    if (!e?.wraps.some((w) => w.type === 'world' && !w.stale)) return;
+    k.people![userId] = { ...e, wraps: e.wraps.map((w) => (w.type === 'world' ? { ...w, stale: true } : w)) };
+    this.keyring.save(k);
+  }
+  removePersonWorld(userId: string): boolean {
+    const k = this.keyring.load();
+    const e = k.people?.[userId];
+    if (!e?.wraps.some((w) => w.type === 'world')) return false;
+    k.people![userId] = { ...e, wraps: e.wraps.filter((w) => w.type !== 'world') };
+    this.keyring.save(k);
+    return true;
+  }
+
   /** Abrir a parte sozinha pelo cofre do sistema da conta do computador da pessoa (o ajudante guarda a chave). */
   enrollPersonAuto(userId: string, label: string): { id: string; key: string } {
     const pk = this.pks.get(userId);
@@ -445,9 +527,10 @@ export class Vault {
   }
 
   /** Resumo por pessoa (sem segredo): para a tela e o diagnóstico. */
-  peopleInfo(): Array<{ userId: string; username: string; recovery: boolean; auto: boolean; open: boolean; byMk: boolean }> {
+  peopleInfo(): Array<{ userId: string; username: string; recovery: boolean; phrase: boolean; world: boolean; auto: boolean; open: boolean; byMk: boolean }> {
     return Object.entries(this.peopleOf()).map(([userId, e]) => ({
-      userId, username: e.username, recovery: e.wraps.some((w) => w.type === 'recovery'), auto: e.wraps.some((w) => w.type === 'auto'),
+      userId, username: e.username, recovery: hasRecovery(e), phrase: e.wraps.some((w) => w.type === 'recovery'), world: e.wraps.some((w) => w.type === 'world' && !w.stale),
+      auto: e.wraps.some((w) => w.type === 'auto'),
       open: this.pks.has(userId), byMk: e.wraps.some((w) => w.type === 'mk'),
     }));
   }

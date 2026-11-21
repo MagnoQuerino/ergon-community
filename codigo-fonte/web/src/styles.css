@@ -3383,3 +3383,26 @@ details.cx[open] > summary { color: var(--ink); }
 .ws-estado--ok .ws-estado__ponto { background: var(--ok); }
 .ws-estado--warn .ws-estado__ponto { background: var(--warn); }
 @media (prefers-reduced-motion: no-preference) { .ws-estado__ponto--vivo { animation: pulse 1.6s ease-in-out infinite; } }
+
+/* rc.42: como recuperar se esquecer a senha (a senha do Ergon World ou a frase), num passo só */
+.auth .auth__card:has(.rec-escolha) { width: min(460px, 100%); }
+.rec-opcoes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
+.rec-opcoes--uma { grid-template-columns: 1fr; }
+.rec-opcao { position: relative; flex-direction: column; align-items: flex-start; padding: 12px; min-height: 112px; }
+.rec-opcao:disabled { cursor: not-allowed; opacity: .6; transform: none; box-shadow: none; }
+.rec-opcao--rec { border-color: var(--navy); background: var(--marca-suave); }
+.rec-opcao--rec .onb__ico { background: var(--panel); }
+.rec-opcao__selo { position: absolute; top: 8px; right: 8px; }
+.rec-world { margin-top: 10px; }
+.rec-world__conta, .rec-world__aviso { display: flex; align-items: center; gap: 6px; }
+.rec-via { margin: 4px 0 10px; }
+.rec-via .seg__btn { display: inline-flex; align-items: center; gap: 6px; }
+.sec-rec { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sec-rec > li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.sec-rec__nome { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.sec-rec__texto { flex: 1 1 220px; margin: 0; }
+.sec-rec form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; flex-basis: 100%; }
+.sinc__rec { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.sinc__rec .rec-via { align-self: flex-start; margin: 0; }
+details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+@media (max-width: 520px) { .rec-opcao__selo { position: static; margin-top: 2px; } }

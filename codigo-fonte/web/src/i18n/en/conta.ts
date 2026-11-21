@@ -60,8 +60,8 @@ const conta: Traducao<typeof pt> = {
   'termos.novosSub': 'Before you continue: read the terms of use. Once you accept, Run code and Terminal come on for the team (you can turn them off in Settings › Team tools).',
   'termos.liAceito': 'I have read and accept the terms of use',
   'termos.aceitar': 'Accept and continue',
-  'entrar.setupEmSeguida': 'Next: a 24-word phrase (the backup key to your data, shown only once), two questions about how you work, and connecting your AI account. The team arrives set up for your needs.',
-  'entrar.trancadoDica': "After a restart, a passkey or the authenticator can't open your data (they don't hold the key); your password or phrase can.",
+  'entrar.setupEmSeguida': 'Next: how to recover if you forget the password, two questions about how you work, and your AI account. The team arrives set up for your needs.',
+  'entrar.trancadoDica': "After a restart, a passkey or the authenticator can't open your data (they don't hold the key); your password or recovery can.",
 
   // ——— conta nova neste computador ———
   'registro.titulo': 'Create an account on this computer',
@@ -69,7 +69,7 @@ const conta: Traducao<typeof pt> = {
   'registro.convite': 'Invite code',
   'registro.conviteDica': 'On this computer, a new account needs an invite from whoever manages Ergon (Settings › People).',
   'registro.jaTenho': 'I already have an account',
-  'registro.emSeguida': 'Next: your 24-word phrase (the backup key to your data), two questions about how you work, and connecting your AI account.',
+  'registro.emSeguida': 'Next: how to recover if you forget the password, two questions about how you work, and your AI account.',
 
   // ——— 2º fator e passkey ———
   'verificacao.titulo': 'Two-step verification',
@@ -109,7 +109,7 @@ const conta: Traducao<typeof pt> = {
   // ——— abrir os dados da pessoa, tela trancada, confirmar a identidade ———
   'abrirDados.titulo': 'Open your data',
   'abrirDados.texto': '{nome}, Ergon was restarted. Your data is encrypted with your password: enter it to open. Your agents and routines get back to work right after.',
-  'abrirDados.esqueceu': 'Forgot it? Sign out and use "Forgot password" with your 24-word phrase.',
+  'abrirDados.esqueceu': 'Forgot it? Sign out and use "Forgot password".',
   'trancada.titulo': 'Screen locked',
   'trancada.texto': '{nome}, the screen locked after a period of inactivity. The agents keep working.',
   'trancada.destrancar': 'Unlock',
@@ -355,7 +355,39 @@ const conta: Traducao<typeof pt> = {
   'world.entrar': 'Sign in',
   'world.conferindo': 'Checking with Ergon World…',
   'world.criarAqui': 'Create an account on this computer only',
-  'world.emSeguida': 'Next: the recovery phrase and the AI account.',
+  'world.emSeguida': 'Next: how to recover if you forget the password, and the AI account.',
+
+  // ——— rc.42: how to recover if you forget the password (the phrase or the Ergon World password) ———
+  'rec.titulo': 'If you forget the password',
+  'rec.aria': 'How to recover your data',
+  'rec.world': 'Ergon World password',
+  'rec.worldDica': 'Nothing to write down',
+  'rec.frase': '24-word phrase',
+  'rec.fraseDica': 'Written on paper',
+  'rec.recomendada': 'Recommended',
+  'rec.depois': 'Decide later',
+  'rec.worldIgual': 'Same as your Ergon password: not a backup',
+  'rec.worldAviso': 'Anyone with your World password and this computer can open the data.',
+  'rec.worldUsar': 'Use the World password',
+  'rec.outra': 'Choose the other one',
+  'recuperar.como': 'Recover with',
+  'recuperar.comFrase': 'Phrase',
+  'recuperar.comWorld': 'Ergon World',
+  'recuperar.worldTitulo': 'Recover with Ergon World',
+  'recuperar.worldSub': 'Sign in with your Ergon World e-mail and password and choose a new password.',
+  'seg.recuperacao': 'Recovery',
+  'seg.recuperacaoDica': 'Either one is enough. The phrase does not depend on any service.',
+  'seg.worldEmUso': 'in use',
+  'seg.worldNaoUsada': 'not used',
+  'seg.worldMudou': 'password changed',
+  'seg.worldTexto': 'Opens your data if you forget your Ergon password ({email}).',
+  'seg.worldMudouTexto': 'Your World password changed and no longer opens it. Type the new one to make it work again.',
+  'seg.worldSemTexto': 'Nothing to write down: your Ergon World e-mail and password open the data on this computer.',
+  'seg.worldDesligar': 'Stop using',
+  'seg.worldDesligada': 'Your World password no longer recovers your data.',
+  'seg.worldLigada': 'Done: your Ergon World password recovers your data.',
+  'seg.fraseNenhuma': 'no phrase',
+  'seg.fraseOpcional': 'Optional: 24 words on paper.',
 };
 
 export default conta;

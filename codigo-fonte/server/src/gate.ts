@@ -1,8 +1,9 @@
 /**
  * Portão de destrancar: com o Ergon protegido, depois de reiniciar o processo não tem a chave mestra — o banco
- * cifrado nem abre. Este servidor mínimo serve só a interface (para a tela de destrancar) e três formas de
- * abrir: senha, frase de recuperação (com senha nova) ou a chave do cofre do sistema (o lançador do
- * computador, se a pessoa ligou "destrancar sozinho"). Aberto, ele entrega o banco ao servidor completo.
+ * cifrado nem abre. Este servidor mínimo serve só a interface (para a tela de destrancar) e as formas de
+ * abrir: senha, frase de recuperação ou senha do Ergon World (as duas com senha nova; a do World só para quem a
+ * escolheu como reserva) ou a chave do cofre do sistema (o lançador do computador, se a pessoa ligou "destrancar
+ * sozinho"). Aberto, ele entrega o banco ao servidor completo.
  */
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
@@ -16,11 +17,16 @@ import { HttpError } from './lib/util.ts';
 import { throttle } from './security/factors.ts';
 import type { Vault } from './security/keys.ts';
 import { SESSION_COOKIE, checkCredentials, createSession, defaultWorkspace, setUserPassword, startSecondFactor, userFactors } from './services/auth.ts';
-import { canonicalHostHook, rpConfig, sessionDays } from './services/security.ts';
+import { canonicalHostHook, checkWorldPassword, rpConfig, sessionDays } from './services/security.ts';
 import { VERSION } from './version.ts';
 
 /** Monta o portão (sem escutar): `done` resolve com o banco aberto depois de destrancar. */
-export async function buildGate(cfg: Config, vault: Vault, openDb: () => Db): Promise<{ app: FastifyInstance; done: Promise<Db> }> {
+export interface GateOptions {
+  /** confere e-mail e senha no Ergon World (módulo do World; sem ele, a recuperação pela senha do World não aparece) */
+  worldCheck?: (email: string, password: string) => Promise<void>;
+}
+
+export async function buildGate(cfg: Config, vault: Vault, openDb: () => Db, opts: GateOptions = {}): Promise<{ app: FastifyInstance; done: Promise<Db> }> {
   const app = Fastify({ logger: process.env.NODE_ENV === 'test' ? false : { level: process.env.ERGON_LOG_LEVEL ?? 'info' }, bodyLimit: 16 * 1024 });
   await app.register(fastifyCookie);
   const COOKIE = `${SESSION_COOKIE}_${cfg.port}`;
@@ -66,6 +72,7 @@ export async function buildGate(cfg: Config, vault: Vault, openDb: () => Db): Pr
   app.get('/api/auth/state', async () => ({
     needsSetup: false, authenticated: false, locked: false, sealed: true, protected: true, mode: cfg.mode,
     rpId: rpConfig(cfg).rpID, publicUrl: cfg.publicUrl, recovery: vault.info().recovery, setupTokenRequired: false,
+    worldRecovery: !!opts.worldCheck && vault.anyWorld(),
   }));
 
   const str = (max: number, min = 1) => ({ type: 'string', minLength: min, maxLength: max });
@@ -99,6 +106,34 @@ export async function buildGate(cfg: Config, vault: Vault, openDb: () => Db): Pr
     return out;
   });
 
+  /**
+   * Esqueceu a senha do Ergon, com o Ergon trancado, e escolheu a senha do World como reserva: o World confere e-mail e
+   * senha; a mesma senha, derivada aqui com o sal do embrulho local, abre a chave pessoal e a instalação. Senha do World
+   * trocada depois: o embrulho não abre, deixa de contar como recuperação e a tela avisa.
+   */
+  app.post('/api/unseal/world', { schema: { body: { type: 'object', additionalProperties: false, required: ['username', 'email', 'password', 'newPassword'], properties: { username: str(32), email: str(254, 3), password: str(1024), newPassword: str(200) } } } }, async (req, reply) => {
+    const b = req.body as { username: string; email: string; password: string; newPassword: string };
+    throttle.check(`unseal:${req.ip}`);
+    const fail = () => { throttle.fail(`unseal:${req.ip}`); return new HttpError(401, 'invalid_world', 'E-mail ou senha do Ergon World incorretos.'); };
+    const cand = vault.worldOf(b.username)[0];
+    if (!cand || !opts.worldCheck) throw fail();
+    try { await checkWorldPassword({ check: opts.worldCheck }, b.email.trim().toLowerCase(), b.password); } catch (e) { if ((e as HttpError).code === 'invalid_world') throw fail(); throw e; }
+    if (!(await vault.unsealWorld(cand.userId, b.password))) {
+      vault.markPersonWorldStale(cand.userId);
+      throw new HttpError(409, 'world_recovery_stale', 'A senha do Ergon World mudou depois que você a escolheu para recuperar. Use a frase, se tiver.');
+    }
+    throttle.ok(`unseal:${req.ip}`);
+    const d = open();
+    const u = d.get<{ id: string; username: string; display_name: string }>('SELECT id, username, display_name FROM users WHERE id = ?', cand.userId);
+    if (!u) throw new HttpError(404, 'user', 'usuário não encontrado (o Ergon foi destrancado; entre com outro usuário)');
+    await setUserPassword(d, u.id, b.newPassword, cfg.kdf, [u.username, u.display_name]);
+    await vault.setPersonPassword({ id: u.id, username: u.username }, b.newPassword);
+    d.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    const out = login(req, reply, u.id);
+    handOver();
+    return out;
+  });
+
   // chave do cofre do sistema (lançador do computador): só destranca, não cria sessão
   app.post('/api/unseal/auto', { schema: { body: { type: 'object', additionalProperties: false, required: ['key'], properties: { key: { type: 'string', pattern: '^[0-9a-f]{64}$' } } } } }, async (req) => {
     throttle.check(`unseal-auto:${req.ip}`);
@@ -123,8 +158,8 @@ export async function buildGate(cfg: Config, vault: Vault, openDb: () => Db): Pr
 }
 
 /** Escuta na porta do Ergon até destrancar; devolve o banco aberto ao servidor completo. */
-export async function runGate(cfg: Config, vault: Vault, openDb: () => Db): Promise<Db> {
-  const { app, done } = await buildGate(cfg, vault, openDb);
+export async function runGate(cfg: Config, vault: Vault, openDb: () => Db, opts: GateOptions = {}): Promise<Db> {
+  const { app, done } = await buildGate(cfg, vault, openDb, opts);
   await app.listen({ host: cfg.host, port: cfg.port });
   app.log.info('Ergon trancado: aguardando senha, frase de recuperação ou o destrancar sozinho');
   const out = await done;

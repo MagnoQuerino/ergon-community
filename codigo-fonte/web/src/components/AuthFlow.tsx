@@ -2,7 +2,7 @@ import { TermosDialog } from './TermosDeUso.tsx';
 import { useEffect, useState } from 'react';
 import { ApiError, api, errMsg, setCsrf } from '../lib/api.ts';
 import { passkeyLogin, passkeyUnlock, passkeysHere } from '../lib/passkey.ts';
-import type { AuthState, Me } from '../lib/types.ts';
+import type { AuthState, Me, SecurityStatus } from '../lib/types.ts';
 import { ErgonLogo } from '../brand/Brand.tsx';
 import { t as tr, tn, useT } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
@@ -56,6 +56,10 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
   const mode: 'setup' | 'unseal' | 'login' = st.needsSetup ? 'setup' : st.sealed ? 'unseal' : 'login';
   const [f, setF] = useState({ username: '', password: '', confirm: '', displayName: '', setupToken: '', phrase: '', code: '', invite: '' });
   const [step, setStep] = useState<{ k: 'form' } | { k: 'world' } | { k: 'recover' } | { k: 'register' } | { k: '2fa'; challenge: string; methods: { totp: boolean; passkey: boolean } } | { k: 'phrase'; r: Recovery }>({ k: 'form' });
+  // "Esqueci a senha": com a frase ou com a senha do Ergon World (só se alguém aqui escolheu essa reserva)
+  const [via, setVia] = useState<'frase' | 'world'>('frase');
+  // entrou pelo Ergon World com a mesma senha: ela não serve de reserva dos dados (quem esquece uma esquece a outra)
+  const [mesmaDoWorld, setMesmaDoWorld] = useState(false);
   // "Já tenho conta Ergon World" no primeiro acesso: só com o Ergon World nesta instalação
   const [comWorld, setComWorld] = useState(false);
   const [w, setW] = useState({ email: '', password: '', mesma: true, local: '', localConfirm: '' });
@@ -115,6 +119,7 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
     setCsrf((await api.get<Me>('/api/me')).csrf);
     // o aparelho entra na conta do World (se não der agora, a página do Ergon World conecta depois)
     await api.post('/api/world/connect', { mode: 'login', email, password: w.password }).catch(() => undefined);
+    setMesmaDoWorld(w.mesma);
     setW({ email: '', password: '', mesma: true, local: '', localConfirm: '' });
     return after(r, false);
   });
@@ -124,15 +129,23 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
     const r = await api.post<LoginResult>('/api/auth/register', { username: f.username, password: f.password, displayName: f.displayName || f.username, ...(st.signup === 'convite' ? { invite: f.invite } : {}), ...(st.termosVersao ? { termos: st.termosVersao } : {}) });
     return after(r, false);
   });
-  const recover = () => run(t('conta.entrar.conferindoFrase'), async () => {
+  const recover = () => run(via === 'world' ? t('conta.world.conferindo') : t('conta.entrar.conferindoFrase'), async () => {
     if (f.password !== f.confirm) throw new Error(t('conta.senha.diferentes'));
+    if (via === 'world') {
+      // o World confere o e-mail e a senha; a chave dos dados se abre aqui, com o embrulho deste computador
+      const wb = { username: f.username, email: w.email.trim().toLowerCase(), password: w.password, newPassword: f.password };
+      setW((p) => ({ ...p, password: '' }));
+      if (mode === 'unseal') return after(await api.post<LoginResult>('/api/unseal/world', wb), true);
+      await api.post('/api/auth/recover/world', wb);
+      return onDone();
+    }
     const body = { username: f.username, phrase: f.phrase, newPassword: f.password };
     if (mode === 'unseal') return after(await api.post<LoginResult>('/api/unseal/recovery', body), true);
     await api.post('/api/auth/recover', body);
     onDone();
   });
 
-  if (step.k === 'phrase') return <Card steps={mode === 'setup' || st.signup ? 1 : undefined}><RecoveryReveal r={step.r} onDone={onDone} /></Card>;
+  if (step.k === 'phrase') return <Card steps={mode === 'setup' || st.signup ? 1 : undefined}><RecoveryChoice phrase={step.r} worldSame={mesmaDoWorld} onDone={onDone} /></Card>;
 
   if (step.k === 'world') {
     return (
@@ -190,11 +203,23 @@ export function AuthFlow({ st, onDone }: { st: AuthState; onDone: () => void }) 
   }
 
   if (step.k === 'recover') {
+    const pelaWorld = via === 'world' && !!st.worldRecovery;
     return (
-      <Card busy={!!busy} title={t('conta.recuperar.titulo')} sub={t('conta.recuperar.sub')}>
+      <Card busy={!!busy} title={pelaWorld ? t('conta.recuperar.worldTitulo') : t('conta.recuperar.titulo')} sub={pelaWorld ? t('conta.recuperar.worldSub') : t('conta.recuperar.sub')}>
+        {st.worldRecovery && (
+          <div className="seg rec-via" role="group" aria-label={t('conta.recuperar.como')}>
+            <button type="button" className={`seg__btn ${!pelaWorld ? 'seg__btn--on' : ''}`} aria-pressed={!pelaWorld} onClick={() => { setErr(null); setVia('frase'); }}><Icon name="pen" size={14} /> {t('conta.recuperar.comFrase')}</button>
+            <button type="button" className={`seg__btn ${pelaWorld ? 'seg__btn--on' : ''}`} aria-pressed={pelaWorld} onClick={() => { setErr(null); setVia('world'); }}><Icon name="globe" size={14} /> {t('conta.recuperar.comWorld')}</button>
+          </div>
+        )}
         <form onSubmit={(e) => { e.preventDefault(); void recover(); }}>
           <label className="field">{t('conta.campo.usuario')}<input required autoComplete="username" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.toLowerCase() })} maxLength={32} /></label>
-          <label className="field">{t('conta.frase.titulo')}<textarea required rows={4} spellCheck={false} autoComplete="off" value={f.phrase} onChange={(e) => setF({ ...f, phrase: e.target.value })} /></label>
+          {pelaWorld ? (
+            <>
+              <label className="field">{t('conta.world.email')}<input required type="email" autoComplete="email" value={w.email} onChange={(e) => setW({ ...w, email: e.target.value })} maxLength={254} /></label>
+              <label className="field">{t('conta.world.senha')}<input required type="password" autoComplete="off" value={w.password} onChange={(e) => setW({ ...w, password: e.target.value })} /></label>
+            </>
+          ) : <label className="field">{t('conta.frase.titulo')}<textarea required rows={4} spellCheck={false} autoComplete="off" value={f.phrase} onChange={(e) => setF({ ...f, phrase: e.target.value })} /></label>}
           <NewPassword label={t('conta.senha.nova')} value={f.password} confirm={f.confirm} onChange={(password, confirm) => setF({ ...f, password, confirm })} />
           {err && <p className="error" role="alert">{err}</p>}
           <button className="btn btn--primary btn--block" disabled={!!busy}>{busy ?? t('conta.recuperar.botao')}</button>
@@ -256,6 +281,72 @@ function AceitoTermos() {
 }
 
 /**
+ * Como recuperar se esquecer a senha, num passo só: a senha do Ergon World (recomendada quando o World está nesta
+ * instalação: nada para anotar) ou a frase de 24 palavras, lado a lado; "Decidir depois" vale, e um lembrete discreto
+ * fica no Estado enquanto não houver nenhuma. O aviso da opção do World é uma linha; o detalhe está na Ajuda.
+ * `phrase`: a frase já gerada pelo servidor (primeiro uso); sem ela, é gerada ao escolher.
+ */
+export function RecoveryChoice({ phrase, worldSame, onDone, onWorld }: { phrase: Recovery | null; worldSame?: boolean; onDone: () => void; onWorld?: () => void }) {
+  const t = useT();
+  const [world, setWorld] = useState<{ available: boolean; email: string | null } | null>(null);
+  const [pick, setPick] = useState<'world' | 'frase' | null>(null);
+  const [rec, setRec] = useState<Recovery | null>(phrase);
+  const [f, setF] = useState({ email: '', password: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    void api.get<SecurityStatus>('/api/security/status').then((s) => setWorld(s.worldRecovery ?? { available: false, email: null })).catch(() => setWorld({ available: false, email: null }));
+  }, []);
+  if (pick === 'frase' && rec) return <RecoveryReveal r={rec} onDone={onDone} onCancel={() => setPick(null)} />;
+  const comWorld = !!world?.available;
+  const choose = async (k: 'world' | 'frase') => {
+    setErr(null); setPick(k);
+    if (k === 'frase' && !rec) {
+      setBusy(true);
+      try { setRec(await api.post<Recovery>('/api/security/recovery/new')); } catch (x) { setErr(errMsg(x)); setPick(null); } finally { setBusy(false); }
+    }
+  };
+  const usarWorld = async () => {
+    setErr(null); setBusy(true);
+    try {
+      await api.post('/api/security/recovery/world', { password: f.password, ...(world?.email ? {} : { email: f.email.trim().toLowerCase() }) });
+      setF({ email: '', password: '' });
+      (onWorld ?? onDone)();
+    } catch (x) { setErr(errMsg(x)); } finally { setBusy(false); }
+  };
+  const opcao = (k: 'world' | 'frase', icon: string, label: string, dica: string, recomendada: boolean, off?: string) => (
+    <button type="button" className={`onb__opt rec-opcao ${recomendada ? 'rec-opcao--rec' : ''} ${pick === k ? 'is-on' : ''}`} aria-pressed={pick === k} disabled={busy || !!off} onClick={() => void choose(k)}>
+      <span className="onb__ico"><Icon name={icon} size={20} /></span>
+      <span className="onb__opt-txt"><b>{label}</b><small>{off ?? dica}</small></span>
+      {recomendada && <span className="badge badge--ok rec-opcao__selo">{t('conta.rec.recomendada')}</span>}
+    </button>
+  );
+  return (
+    <div className="recovery rec-escolha">
+      <h2 className="auth__title">{t('conta.rec.titulo')}</h2>
+      {!world ? <p className="muted">{t('conta.acao.conferindo')}</p> : (
+        <div className={`rec-opcoes ${comWorld ? '' : 'rec-opcoes--uma'}`} role="group" aria-label={t('conta.rec.aria')}>
+          {comWorld && opcao('world', 'globe', t('conta.rec.world'), t('conta.rec.worldDica'), !worldSame, worldSame ? t('conta.rec.worldIgual') : undefined)}
+          {opcao('frase', 'pen', t('conta.rec.frase'), t('conta.rec.fraseDica'), !comWorld || !!worldSame)}
+        </div>
+      )}
+      {pick === 'world' && (
+        <form className="rec-world" onSubmit={(e) => { e.preventDefault(); void usarWorld(); }}>
+          {world?.email
+            ? <p className="muted small rec-world__conta"><Icon name="globe" size={13} /> {world.email}</p>
+            : <label className="field">{t('conta.world.email')}<input required autoFocus type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={254} /></label>}
+          <label className="field">{t('conta.world.senha')}<input required autoFocus={!!world?.email} type="password" autoComplete="off" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
+          <p className="hint rec-world__aviso"><Icon name="shield" size={13} /> {t('conta.rec.worldAviso')}</p>
+          <button className="btn btn--primary btn--block" disabled={busy || !f.password}>{busy ? t('conta.world.conferindo') : t('conta.rec.worldUsar')}</button>
+        </form>
+      )}
+      {err && <p className="error" role="alert">{err}</p>}
+      <button type="button" className="link" disabled={busy} onClick={onDone}>{t('conta.rec.depois')}</button>
+    </div>
+  );
+}
+
+/**
  * Frase de recuperação: aparece uma vez, escondida até a pessoa pedir; só passa a valer depois de confirmar 3
  * palavras. Sem botão de copiar (a área de transferência vaza para outros programas).
  */
@@ -308,7 +399,7 @@ export function ProtectScreen({ onDone, onLogout }: { onDone: () => void; onLogo
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [rec, setRec] = useState<Recovery | null>(null);
-  if (rec) return <Card><RecoveryReveal r={rec} onDone={onDone} /></Card>;
+  if (rec) return <Card><RecoveryChoice phrase={rec} onDone={onDone} /></Card>;
   return (
     <Card busy={busy} title={t('conta.proteger.titulo')} sub={t('conta.proteger.sub')}>
       <form onSubmit={async (e) => {

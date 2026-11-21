@@ -13,6 +13,8 @@ export interface SyncAuto {
 export interface SyncStatus {
   bound: boolean; enabled: boolean; syncWorkspaceId?: string | null; origin?: 'created' | 'joined' | null; keyState?: 'mine' | 'first' | 'handover' | null;
   lastVersion?: number; conflicts?: number; keyVersion?: number; rotationPending?: boolean; recoveryOutdated?: boolean; lastSyncAt?: string | null;
+  /** com o que o envelope de recuperação desta conta abre (rc.42); null: nenhum gravado daqui */
+  recoveryKind?: 'phrase' | 'world' | null;
   auto?: SyncAuto | null; atividade?: { ativo: boolean; fase: 'enviando' | 'recebendo' | null; pausada: boolean } | null;
 }
 export type Tom = 'ok' | 'info' | 'warn';

@@ -68,6 +68,37 @@ function LockCard({ s, busy, onSet }: { s: SecurityStatus; busy: boolean; onSet:
   );
 }
 
+/**
+ * A senha do Ergon World como reserva dos dados: em uso (com o e-mail), a refazer (a senha mudou lá) ou não usada. Usar
+ * ou refazer pede só a senha do World (o e-mail é o da conta ligada); o aviso é uma linha, o detalhe fica na Ajuda.
+ */
+function RecWorld({ s, busy, onAct }: { s: SecurityStatus; busy: boolean; onAct: (label: string, fn: () => Promise<unknown>, ok?: string) => void }) {
+  const t = useT();
+  const w = s.recoveryWorld ?? null;
+  const [aberto, setAberto] = useState(false);
+  const [f, setF] = useState({ email: '', password: '' });
+  const email = s.worldRecovery?.email ?? null;
+  const pedir = !!w?.stale || aberto;
+  return (
+    <li>
+      <span className="sec-rec__nome"><Icon name="globe" size={14} /> {t('conta.rec.world')}</span>
+      {w && !w.stale ? <span className="badge badge--ok">{t('conta.seg.worldEmUso')}</span>
+        : w?.stale ? <span className="badge badge--warn">{t('conta.seg.worldMudou')}</span> : <span className="badge">{t('conta.seg.worldNaoUsada')}</span>}
+      <p className="sec-rec__texto muted small">{w && !w.stale ? t('conta.seg.worldTexto', { email: w.email }) : w?.stale ? t('conta.seg.worldMudouTexto') : t('conta.seg.worldSemTexto')}</p>
+      {!w && !aberto && <button className="btn btn--sm" disabled={busy} onClick={() => setAberto(true)}>{t('conta.rec.worldUsar')}</button>}
+      {w && !w.stale && !aberto && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => onAct('rec-world-off', () => api.del('/api/security/recovery/world'), t('conta.seg.worldDesligada'))}>{t('conta.seg.worldDesligar')}</button>}
+      {pedir && (
+        <form onSubmit={(e) => { e.preventDefault(); onAct('rec-world', async () => { await api.post('/api/security/recovery/world', { password: f.password, ...(email ? {} : { email: f.email.trim().toLowerCase() }) }); setF({ email: '', password: '' }); setAberto(false); }, t('conta.seg.worldLigada')); }}>
+          {!email && <label className="field">{t('conta.world.email')}<input required type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={254} /></label>}
+          <label className="field">{t('conta.world.senha')}<input required type="password" autoComplete="off" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
+          <button className="btn btn--sm btn--primary" disabled={busy || !f.password}>{t('conta.rec.worldUsar')}</button>
+          <span className="hint rec-world__aviso"><Icon name="shield" size={13} /> {t('conta.rec.worldAviso')}</span>
+        </form>
+      )}
+    </li>
+  );
+}
+
 /** Configurações › Segurança: senha, trava, frase, autenticador, passkeys, destrancar sozinho e sessões. */
 export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => void }) {
   const t = useT();
@@ -139,15 +170,24 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
 
       <IdleLock minutes={s.idleMinutes} owner busy={busy === 'idle'} onSave={(m, label) => void act('idle', () => api.put('/api/security/idle', { minutes: m }), label)} />
 
+      {/* rc.42: as duas reservas, lado a lado na mesma lista: a frase e a senha do Ergon World (uma basta) */}
       <section className="card">
-        {!rec && <h3>{isolated ? t('conta.seg.suaFrase') : t('conta.frase.titulo')}</h3>}
+        {!rec && <h3>{t('conta.seg.recuperacao')}</h3>}
         {rec ? (
           <div className="sec-reveal"><RecoveryReveal r={rec} onDone={() => { setRec(null); setMsg({ kind: 'ok', text: t('conta.seg.fraseConfirmada') }); st.reload(); onChanged(); }} onCancel={() => setRec(null)} /></div>
         ) : (
           <>
-            <p>{s.recovery ? <><span className="badge badge--ok">{t('conta.seg.confirmada')}</span> {t('conta.seg.comFrase')}</> : <><span className="badge badge--warn">{t('conta.seg.semFrase')}</span> {t('conta.seg.semFraseTexto')}</>}</p>
-            <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('frase', async () => setRec(await api.post('/api/security/recovery/new')))}>{s.recovery ? t('conta.seg.gerarNova') : t('conta.seg.gerar')}</button>
-            <p className="hint">{t('conta.seg.gerarDica')}</p>
+            <ul className="sec-rec">
+              {s.worldRecovery?.available && <RecWorld s={s} busy={!!busy} onAct={(label, fn, ok) => void act(label, fn, ok)} />}
+              <li>
+                <span className="sec-rec__nome"><Icon name="pen" size={14} /> {isolated ? t('conta.seg.suaFrase') : t('conta.frase.titulo')}</span>
+                {(s.phrase ?? s.recovery) ? <span className="badge badge--ok">{t('conta.seg.confirmada')}</span>
+                  : s.recovery ? <span className="badge">{t('conta.seg.fraseNenhuma')}</span> : <span className="badge badge--warn">{t('conta.seg.semFrase')}</span>}
+                <p className="sec-rec__texto muted small">{(s.phrase ?? s.recovery) ? t('conta.seg.comFrase') : s.recovery ? t('conta.seg.fraseOpcional') : t('conta.seg.semFraseTexto')}</p>
+                <button className="btn btn--sm" disabled={!!busy} onClick={() => void act('frase', async () => setRec(await api.post('/api/security/recovery/new')))}>{(s.phrase ?? s.recovery) ? t('conta.seg.gerarNova') : t('conta.seg.gerar')}</button>
+              </li>
+            </ul>
+            <p className="hint">{s.worldRecovery?.available ? t('conta.seg.recuperacaoDica') : t('conta.seg.gerarDica')}</p>
           </>
         )}
       </section>

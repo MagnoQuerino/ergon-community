@@ -130,6 +130,8 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.seguranca.i4', { duas: <b>{t('ajuda.seguranca.i4Duas')}</b> })}</li>
         <li>{t('ajuda.seguranca.i5')}</li>
         <li>{tn('ajuda.seguranca.i6', { sincronia: <b>{t('ajuda.seguranca.i6Sincronia')}</b> })}</li>
+        <li>{t('ajuda.seguranca.i7')}</li>
+        <li>{t('ajuda.seguranca.i8')}</li>
       </ul>
     </> },
   { id: 'temas', title: () => t('ajuda.temas.titulo'), icon: 'palette', keywords: () => t('ajuda.temas.palavras'),

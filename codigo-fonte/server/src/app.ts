@@ -44,7 +44,7 @@ import { Recursos } from './services/recursos.ts';
 import { TETO_TEXTO, Transcricoes, ehAudio, foraDoTeto } from './services/transcricoes.ts';
 import { throttle } from './security/factors.ts';
 import { BUILD, UpdateCheck, VERSION, anterioresParaVoltar, newer } from './version.ts';
-import { HermesVaultKeeper, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
+import { HermesVaultKeeper, type WorldRecoveryHooks, SESSION_DAYS_LOCKED, SESSION_DAYS_OPEN, applyLockChoice, canonicalHostHook, finishPasswordLogin, idleMinutes, protectInstance, registerSecurityRoutes, rpConfig, sessionDays } from './services/security.ts';
 import { Bus, audit } from './services/bus.ts';
 import { archiveAgent, capacityInfo, capacityTotals, createAgent, ensureCoordinator, limitsFor, moveAgent, reactivateAgent, restoreDefaultTheme, themedCharacters, themedSectors, updateAgent } from './services/capacity.ts';
 import {
@@ -174,7 +174,7 @@ export interface ErgonApp {
 
 // volta do login com a conta (Microsoft, Google): o navegador chega sem o cookie (SameSite=Strict); o "state" de uso único autentica
 const PUBLIC_API = new Set(['/api/health', '/api/distribution', '/api/auth/state', '/api/auth/setup', '/api/auth/login', '/api/auth/register', '/api/integrations/microsoft/callback', '/api/integrations/google/callback',
-  '/api/auth/login/totp', '/api/auth/passkey/options', '/api/auth/passkey', '/api/auth/recover', '/api/agent/hello', '/api/agent/auto-unlock/claim', '/api/agent/open']);
+  '/api/auth/login/totp', '/api/auth/passkey/options', '/api/auth/passkey', '/api/auth/recover', '/api/auth/recover/world', '/api/agent/hello', '/api/agent/auto-unlock/claim', '/api/agent/open']);
 // com a tela trancada por inatividade, só isto responde (o resto devolve 423 até destrancar)
 const LOCKED_OK = new Set(['/api/me', '/api/session/unlock', '/api/session/reauth/options', '/api/session/activity', '/api/auth/logout', '/api/events']);
 // nuvem: quem ainda não tem 2º fator só cadastra autenticador ou passkey (428 enroll_2fa). A interface abre por trás
@@ -989,6 +989,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       // conta nova neste computador (local, Ergon aberto, já com a primeira conta): 'aberto' ou 'convite'
       signup: cfg.mode === 'local' && !!personKeys() && !needsSetup(db) ? signupPolicy(db) : null,
       termosVersao: TERMOS_VERSAO,
+      // "Esqueci a senha" mostra a opção do Ergon World só se alguém aqui a escolheu
+      worldRecovery: !!worldRecovery.check && vault.anyWorld(),
     };
   });
 
@@ -1057,6 +1059,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       factors: userFactors(db, a.userId), mode: cfg.mode, rpId: rpConfig(cfg).rpID,
       // frase de recuperação da pessoa (várias pessoas: cada uma tem a sua)
       recovery: personKeys() ? vault.personHasRecovery(a.userId) : vault.info().recovery,
+      // a reserva pela senha do World deixou de abrir (a senha mudou lá): o lembrete pede uma nova escolha
+      recoveryWorldStale: !!personKeys() && !!vault.personWorld(a.userId)?.stale,
       admin: cfg.mode === 'local' ? isAdmin(db, a.userId) : a.role === 'owner', personSealed: personSealed(a), people: vault.peopleInfo().length,
       autoUnlockPrompt: isAdmin(db, a.userId) && secApi.autoUnlockPrompt(),
       onboarding: onboardingState(db, a.workspaceId), prefs: readPrefs(db, a.workspaceId, a.userId), termos: estadoDosTermos(db, a.userId) };
@@ -1134,7 +1138,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { ok: true };
   });
 
-  const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
+  // a recuperação pela senha do Ergon World: o módulo do World preenche (ele registra depois destas rotas)
+  const worldRecovery: WorldRecoveryHooks = {};
+  const sec = { cfg, db, bus, vault, setCookie, auth, owner, admin, world: worldRecovery, people: { keys: personKeys, owners, opened: personOpened, sealed: personSealed } };
   const secApi = registerSecurityRoutes(app, sec);
   registerTeamsAppRoutes(app, { teamsApp, owner, admin, member: auth, verify: secApi.verify });
   registerPeopleRoutes(app, { ...sec, upkeep: personOpened, routines, removeMotor: async (u) => { await teamsApp.pessoaRemovida(u).catch(() => undefined); canais.pessoaRemovida(u); await motors.remove(u); } });
@@ -3336,7 +3342,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     defaultModel: (ws) => ({ provider: aiOf(ws).cachedDefaultProvider(), model: aiOf(ws).cachedDefault() }),
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
-  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks, integrations,
+  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, recovery: worldRecovery, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks, integrations,
     createWorkspace: (userId, name) => createOwnWorkspace(db, personKeys(), userId, name, cfg.slotsPerFloor),
     // os canais com a nuvem do Ergon World: o contêiner responde pelas contas ligadas enquanto o computador está fechado
     canaisNuvem: { reserva: (ws, x) => teamsApp.reserva(ws, x), atender: (x) => teamsApp.atender(x), ligavel: () => !!teamsApp.base(), instalacao: () => teamsApp.instalacaoNoRele(), sincronizadas: (ws, ids) => teamsApp.sincronizadas(ws, ids), ocupado: () => teamsApp.ocupado() },

@@ -302,6 +302,10 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   // avisos que pedem ação: nunca somem por falta de espaço (na janela estreita viram um contador que abre o Estado)
   const alerts: Alert[] = [
     ...(sim ? [{ id: 'sem-ia', label: t('geral.alerta.semIa'), tone: 'warn' as const, title: t('geral.alerta.semIaDica'), act: () => setView('configuracao') }] : []),
+    // rc.42: sem nenhuma recuperação (a pessoa escolheu "decidir depois") ou a do World a refazer: um lembrete discreto
+    ...(me.protected && me.mode === 'local' && (!me.recovery || me.recoveryWorldStale) ? [me.recoveryWorldStale
+      ? { id: 'recuperacao', label: t('geral.alerta.recuperacaoMudou'), tone: 'warn' as const, title: t('geral.alerta.recuperacaoMudouDica'), act: () => goHash('#configuracao?seguranca') }
+      : { id: 'recuperacao', label: t('geral.alerta.semRecuperacao'), tone: 'warn' as const, title: t('geral.alerta.semRecuperacaoDica'), act: () => goHash('#configuracao?seguranca') }] : []),
     ...(ver.data && ver.data.version !== __ERGON_VERSION__ ? [{ id: 'reload', label: t('geral.alerta.novaVersao'), tone: 'warn' as const, title: t('geral.alerta.novaVersaoDica', { nova: ver.data.version, atual: __ERGON_VERSION__ }), act: () => location.reload() }] : []),
   ];
   // trocar de área limpa o endereço antes (o card aberto numa área não reabre na outra: o painel não fecha mais antes do clique)

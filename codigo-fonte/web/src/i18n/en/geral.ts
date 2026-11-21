@@ -35,6 +35,10 @@ const geral: Traducao<typeof pt> = {
 
   'decisoes.aguardando': { zero: 'Nothing waiting for you', other: '{n} waiting for you' },
 
+  'alerta.semRecuperacao': 'No recovery',
+  'alerta.semRecuperacaoDica': 'Choose how to recover your data if you forget the password.',
+  'alerta.recuperacaoMudou': 'Recovery needs a new choice',
+  'alerta.recuperacaoMudouDica': 'Your Ergon World password changed. Choose again how to recover.',
   'alerta.semIa': 'NO AI ACCOUNT',
   'alerta.semIaDica': 'The team only works on requests with an AI account connected — the best choice is Ergon AI, AI with no subscription. See Connections.',
   'alerta.novaVersao': 'NEW VERSION · RELOAD',
