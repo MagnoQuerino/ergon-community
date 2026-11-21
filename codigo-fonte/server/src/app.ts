@@ -92,6 +92,7 @@ import { KIND_LABEL, Results, WORK_LABEL, type WorkState } from './services/resu
 import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setSetting } from './services/sectors.ts';
 import { importBoards } from './services/mirror.ts';
 import { RunExecutor, almaDoAgente, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
+import { Navegador } from './services/navegador.ts';
 import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
 import { ReviewService } from './services/review.ts';
 import { GUARDED_TOOLSETS, TOOLS, ferramentasDesligadas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
@@ -166,6 +167,8 @@ export interface ErgonApp {
   /** liga os trabalhos em segundo plano (ferramentas, espelhos, fila da equipe, WhatsApp, cofre do motor) */
   startBackground(): void;
   stopBackground(): Promise<void>;
+  /** navegador ao vivo (rc.41) */
+  navegador: Navegador;
 }
 
 // volta do login com a conta (Microsoft, Google): o navegador chega sem o cookie (SameSite=Strict); o "state" de uso único autentica
@@ -2525,6 +2528,53 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { text: l?.text ?? '', activity: l?.activity ?? null, status: r.status };
   });
 
+  // Navegador ao vivo (rc.41, services/navegador.ts): a pessoa vê o navegador do agente e assume o controle. O endereço e o
+  // token do motor não saem do servidor; a tela fala só com estas rotas e com o WebSocket aberto por bilhete.
+  const sessaoDoCookie = (cabecalho: string | undefined): AuthContext | null => {
+    const par = (cabecalho ?? '').split(';').map((x) => x.trim()).find((x) => x.startsWith(`${COOKIE}=`));
+    const s = par ? resolveSession(db, decodeURIComponent(par.slice(COOKIE.length + 1)), idleMinutes(db)) : null;
+    return s && !s.locked && !personSealed(s) && vault.state() !== 'unprotected' ? s : null;
+  };
+  const navegador = new Navegador({
+    db, bus, origens: cfg.allowedOrigins, controle: (ws) => motors.control(ws),
+    execucao: (runId) => db.get<RunRow>('SELECT * FROM runs WHERE id = ?', runId) ?? null,
+    sessao: sessaoDoCookie,
+    // numa conversa, só a pessoa dona dela; num card, quem é do workspace (a execução já é do workspace da sessão)
+    podeVer: (a, r) => { if (r.conversation_id) getConversation(db, a.workspaceId, a.userId, r.conversation_id); else if (!r.task_id) throw notFound('execução'); },
+  });
+  executor.onFinish((r) => navegador.execucaoTerminou(r.id));
+  app.server.on('upgrade', (rq, socket, head) => {
+    if (Navegador.caminho(rq.url)) navegador.upgrade(rq, socket, head);
+    else socket.destroy();
+  });
+  app.addHook('onClose', async () => navegador.fechar());
+  const runDoNavegador = (req: FastifyRequest) => {
+    const a = auth(req);
+    const r = executor.get(a.workspaceId, (req.params as { id: string }).id);
+    if (r.conversation_id) getConversation(db, a.workspaceId, a.userId, r.conversation_id); else if (!r.task_id) throw notFound('execução');
+    return { a, r };
+  };
+  // qual execução desta conversa (ou deste card) está com o navegador aberto agora, e com quem ele está
+  app.get('/api/navegador', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { conversa: S.id('cnv'), tarefa: S.id('tsk') } } } }, async (req) => {
+    const a = auth(req);
+    const q = req.query as { conversa?: string; tarefa?: string };
+    if (!q.conversa === !q.tarefa) throw new HttpError(400, 'validation', 'informe a conversa ou o card');
+    if (q.conversa) getConversation(db, a.workspaceId, a.userId, q.conversa);
+    const r = navegador.ativas(a.workspaceId).filter((x) => (q.conversa ? x.conversation_id === q.conversa : x.task_id === q.tarefa)).pop();
+    return r ? navegador.estadoPara(r, a.userId) : { runId: null, ativo: false, controle: 'agente', quem: null, ate: null, motivo: null };
+  });
+  app.post('/api/runs/:id/navegador/bilhete', { schema: { params: idParams('run') } }, async (req) => {
+    const { a, r } = runDoNavegador(req);
+    return { bilhete: navegador.bilhete(a, r) };
+  });
+  app.post('/api/runs/:id/navegador/controle', {
+    schema: { params: idParams('run'), body: { type: 'object', additionalProperties: false, required: ['pessoa'], properties: { pessoa: { type: 'boolean' }, ligacao: S.str(40, 8) } } },
+  }, async (req) => {
+    const { a, r } = runDoNavegador(req);
+    const b = req.body as { pessoa: boolean; ligacao?: string };
+    return b.pessoa ? navegador.assumir(a, r, b.ligacao ?? '') : navegador.devolver(a, r);
+  });
+
   app.post('/api/runs/:id/cancel', { schema: { params: idParams('run') } }, async (req) => {
     const a = auth(req);
     const r = executor.requestCancel(a.workspaceId, (req.params as { id: string }).id, a.userId);
@@ -3011,6 +3061,19 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { known: true, agent: ag.name, conectores, bloqueadas: run ? conexoes.bloqueadas(run) : [], toolsets: training ? ['skills', ...(training.urls.length ? ['web'] : [])] : [...toolsetsFor(list(ag.tools), { workspaceId: ag.workspace_id }), ...doPerfil, ...daGestao], holders, guarded: GUARDED_TOOLSETS, skills, training };
   });
 
+  // Navegador ao vivo (rc.41): o plugin avisa que o navegador de um trabalho abriu, fechou ou voltou sozinho ao agente.
+  app.post('/internal/bridge/v1/navegador', {
+    bodyLimit: 4 * 1024,
+    schema: { body: { type: 'object', required: ['evento'], properties: { evento: { enum: ['ativo', 'fim', 'devolvido'] }, session_id: S.str(200), task_id: S.str(200), motivo: S.str(20) } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { evento: 'ativo' | 'fim' | 'devolvido'; session_id?: string; task_id?: string; motivo?: string };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    // a sessão de outra pessoa é desconhecida para este motor
+    if (found && motors.allows(motor, found.workspace_id)) navegador.aviso(found, b.evento, b.motivo);
+    return { ok: true };
+  });
+
   // Ajudantes temporários (subagentes do motor): o plugin avisa o começo e o fim (com o resultado). A execução do Ergon
   // espera os que faltam e continua com o resultado antes de entregar (RunExecutor.continuarComAjudantes).
   app.post('/internal/bridge/v1/ajudante', {
@@ -3266,6 +3329,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
+  return { app, navegador, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
 }
 

@@ -483,6 +483,8 @@ export interface HermesControlClient {
   /** Capacidades da equipe (rc.27, capacidade "recursos" do plugin): rotas fechadas /ergon/v1/<sub>. Devolve o código e o
    *  corpo como vieram (o 404 de um plugin anterior e o 409 da varredura chegam aqui, não como exceção). */
   recursos?(method: 'GET' | 'PUT' | 'POST' | 'DELETE', sub: string, body?: unknown, query?: Record<string, string>): Promise<{ status: number; json: any }>;
+  /** navegador ao vivo (rc.41): onde abrir o WebSocket da transmissão de uma sessão do motor (endereço interno e token) */
+  fluxoNavegador?(sessao: string): { url: string; headers: Record<string, string> } | null;
   /** Endpoint próprio "ergon-ai" do motor (módulo opcional; sem uso na Community) */
   ergonAi?(c: { baseUrl: string; apiKey: string; models: string[]; makeDefault: boolean }): Promise<void>;
   removeErgonAi?(): Promise<void>;
@@ -722,6 +724,12 @@ export class HttpHermesControl implements HermesControlClient {
     let json: any = {};
     try { json = text ? JSON.parse(text) : {}; } catch { json = {}; }
     return { status: res.status, json };
+  }
+
+  /** O endereço da transmissão do navegador de uma sessão, com o token da ponte (só para o servidor: services/navegador.ts). */
+  fluxoNavegador(sessao: string): { url: string; headers: Record<string, string> } | null {
+    if (!this.token) return null;
+    return { url: `${this.baseUrl.replace(/^http/, 'ws')}/ergon/v1/navegador/fluxo?${new URLSearchParams({ sessao })}`, headers: { 'X-Ergon-Bridge-Token': this.token } };
   }
 
   async health() { return (await this.info()).ok; }
