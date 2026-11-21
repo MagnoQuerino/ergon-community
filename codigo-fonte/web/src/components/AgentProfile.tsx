@@ -1,4 +1,5 @@
 import type { Agent, AgentTool, ModelCatalog, ModelEntry } from '../lib/types.ts';
+import { nomeDaFerramenta, notaDaFerramenta } from '../i18n/sementes.ts';
 import { fmtNumero, t, tn, useT } from '../i18n/index.ts';
 
 export const TOOL_BADGE: Record<AgentTool['status'], string> = {
@@ -52,7 +53,7 @@ export function AgentProfile({ agent, compact }: { agent: ProfileFields; compact
           <span className="profile__label">{t('equipe.perfil.ferramentas')}</span>
           {agent.tools.map((x) => (
             // i18n-ok: 'disponível' é o código do estado que o servidor manda, não texto de tela
-            <span key={x.id} className={`badge ${TOOL_BADGE[x.status]}`} title={`${toolStatusLabel(x.status)}: ${x.note}`}>{x.label}{x.status !== 'disponível' ? ` · ${toolStatusLabel(x.status)}` : ''}</span>
+            <span key={x.id} className={`badge ${TOOL_BADGE[x.status]}`} title={`${toolStatusLabel(x.status)}: ${notaDaFerramenta(x.id, x.note)}`}>{nomeDaFerramenta(x.id, x.label)}{x.status !== 'disponível' ? ` · ${toolStatusLabel(x.status)}` : ''}</span>
           ))}
         </div>
       )}

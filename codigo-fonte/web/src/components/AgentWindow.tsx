@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { daSemente } from '../i18n/sementes.ts';
+import { daSemente, nomeDaFerramenta, notaDaFerramenta } from '../i18n/sementes.ts';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { cachedResource, useLiveEvent, useResource } from '../lib/live.ts';
 import { pushRecent } from '../lib/recents.ts';
@@ -333,9 +333,9 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
             const locked = fixed && COORDINATOR_TOOLS.includes(tool.id);
             const plena = tool.status === 'disponível'; // i18n-ok: o estado que o servidor manda, não texto de tela
             return (
-              <label key={tool.id} className={`tool-opt ${on ? 'tool-opt--on' : ''} ${blocked ? 'tool-opt--off' : ''}`} title={tool.note}>
+              <label key={tool.id} className={`tool-opt ${on ? 'tool-opt--on' : ''} ${blocked ? 'tool-opt--off' : ''}`} title={notaDaFerramenta(tool.id, tool.note)}>
                 <input type="checkbox" checked={on} disabled={blocked || locked} onChange={(e) => toggleTool(tool.id, e.target.checked)} />
-                <span className="tool-opt__txt"><b>{tool.label}</b></span>
+                <span className="tool-opt__txt"><b>{nomeDaFerramenta(tool.id, tool.label)}</b></span>
                 <span className="tool-opt__tags">
                   {locked && <span className="badge">{t('agente.perfil.doCargo')}</span>}
                   {!plena && <span className={`badge ${TOOL_BADGE[tool.status]}`}>{TOOL_STATUS[tool.status] ? t(TOOL_STATUS[tool.status]) : tool.status}</span>}
@@ -355,8 +355,8 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
             const estado = tool.acessoTotal !== undefined ? (on ? t('agente.ferramenta.comAcessoTotal') : t('agente.ferramenta.pedeAcessoTotal'))
               : (on ? t('agente.ferramenta.ligadaEquipe') : t('agente.ferramenta.desligadaEquipe'));
             return (
-              <div key={tool.id} className={`tool-opt tool-opt--equipe ${on ? 'tool-opt--on' : ''}`} title={tool.note}>
-                <span className="tool-opt__txt"><b>{tool.label}</b></span>
+              <div key={tool.id} className={`tool-opt tool-opt--equipe ${on ? 'tool-opt--on' : ''}`} title={notaDaFerramenta(tool.id, tool.note)}>
+                <span className="tool-opt__txt"><b>{nomeDaFerramenta(tool.id, tool.label)}</b></span>
                 <span className="tool-opt__tags"><span className={`badge ${on ? 'badge--ok' : ''}`}>{estado}</span></span>
               </div>
             );

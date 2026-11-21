@@ -3,7 +3,9 @@
 // iguais); aqui só se reconhece o texto EXATO de fábrica e se mostra a tradução. O que a pessoa mudou aparece como ela
 // escreveu. Fonte: server/src/services/characters.ts (funções), sectors.ts (setores) e seed.ts (quadros); o teste
 // sementes.test.ts confere que o português daqui é o mesmo do servidor. As equipes de nicho (team-presets.ts) ainda não.
-import { t, type Chave } from './index.ts';
+import { fmtLista, idiomaAtual, t, type Chave } from './index.ts';
+import { IDIOMA_PADRAO } from './idiomas.ts';
+import { pt as PT_DIC } from './pt/index.ts';
 
 /** O texto de fábrica → a chave da tradução. */
 const SEMENTES: Readonly<Record<string, Chave>> = {
@@ -52,3 +54,55 @@ export function daSemente(texto: string | null | undefined): string | null | und
 
 /** Para o teste: o português de fábrica que esta tabela reconhece. */
 export const TEXTOS_DE_FABRICA: readonly string[] = Object.keys(SEMENTES);
+
+// ——— rc.45: a biblioteca de rotinas (server/src/services/routine-catalog.ts) e o horário delas fora do português ———
+
+const ROT = PT_DIC.rotinas as Record<string, unknown>;
+/** as chaves montadas (catalogo.<modelo>.nome…) não passam pela checagem de tipo do t() */
+const tt = t as unknown as (k: string, v?: Record<string, string | number>) => string;
+/** O nome de uma rotina da biblioteca no idioma da tela; renomeada pela pessoa (ou criada na conversa), como está. */
+export function nomeDaRotina(nome: string, modelo?: string | null): string {
+  const k = modelo ? `catalogo.${modelo}.nome` : Object.keys(ROT).find((x) => x.startsWith('catalogo.') && x.endsWith('.nome') && ROT[x] === nome);
+  return k && ROT[k] === nome ? tt(`rotinas.${k}`) : nome;
+}
+/** O benefício (a frase do cartão) da rotina da biblioteca, se for o texto de fábrica. */
+export function beneficioDaRotina(texto: string, modelo: string): string {
+  const k = `catalogo.${modelo}.beneficio`;
+  return ROT[k] === texto ? tt(`rotinas.${k}`) : texto;
+}
+/** O nome do grupo da biblioteca. */
+export function categoriaDaRotina(chave: string, rotulo: string): string {
+  const k = `catalogo.categoria.${chave}`;
+  return ROT[k] === rotulo ? tt(`rotinas.${k}`) : rotulo;
+}
+const LOCAL: Record<string, string> = { en: 'en-US', 'en-IN': 'en-IN', 'zh-CN': 'zh-CN', hi: 'hi-IN', 'pt-BR': 'pt-BR' };
+/**
+ * O horário de uma rotina ("Seg a sex às 17:30", que o servidor escreve em português) no idioma da tela, a partir do
+ * gatilho; em português, o texto do servidor como sempre.
+ */
+export function horarioDaRotina(texto: string | null, gatilho: { kind: string; days?: number[]; time?: string } | null | undefined): string | null {
+  if (idiomaAtual() === IDIOMA_PADRAO || !gatilho) return texto;
+  if (gatilho.kind !== 'schedule' || !gatilho.days?.length) return tt('rotinas.horario.quandoPedir');
+  const d = [...new Set(gatilho.days)].sort((a, b) => a - b);
+  const chave = d.join(',');
+  const dia = (n: number) => new Intl.DateTimeFormat(LOCAL[idiomaAtual()] ?? 'en-US', { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2023, 0, 1 + n)));
+  const dias = chave === '0,1,2,3,4,5,6' ? tt('rotinas.horario.todosOsDias') : chave === '1,2,3,4,5' ? tt('rotinas.horario.segASex') : fmtLista(d.map(dia));
+  return tt('rotinas.horario.diasHora', { dias, hora: gatilho.time ?? '' });
+}
+
+// ——— rc.45: as ferramentas que o servidor descreve em português (server/src/services/characters.ts, TOOLS e toolStatus) ———
+const CFG = PT_DIC.configuracoes as Record<string, unknown>;
+const SUFIXOS = Object.keys(CFG).filter((k) => k.startsWith('ferramenta.sufixo.'));
+/** O nome de uma ferramenta no idioma da tela (o texto de fábrica; outro, como está). */
+export function nomeDaFerramenta(id: string, nome: string): string {
+  const k = `ferramenta.${id}.nome`;
+  return CFG[k] === nome ? tt(`configuracoes.${k}`) : nome;
+}
+/** A nota de uma ferramenta (o que faz e, depois de " — ", por que está desligada ou bloqueada) no idioma da tela. */
+export function notaDaFerramenta(id: string, nota: string): string {
+  const k = `ferramenta.${id}.nota`; const base = CFG[k];
+  if (typeof base !== 'string' || !nota.startsWith(base)) return nota;
+  const resto = nota.slice(base.length);
+  const suf = resto.startsWith(' — ') ? SUFIXOS.find((s) => CFG[s] === resto.slice(3)) : undefined;
+  return tt(`configuracoes.${k}`) + (!resto ? '' : suf ? ` — ${tt(`configuracoes.${suf}`)}` : resto);
+}

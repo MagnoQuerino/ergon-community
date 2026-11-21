@@ -22,3 +22,28 @@ test('as funções, os setores e os quadros de fábrica têm tradução em en, z
     for (const k of chaves) assert.ok(typeof area[k] === 'string' && (area[k] as string).trim(), `falta em ${nome}: equipe.${k}`);
   }
 });
+
+test('a biblioteca de rotinas: o nome, a frase e o grupo de fábrica são os mesmos do servidor, com tradução em en e zh-CN', async () => {
+  const { CATALOG, CATEGORIES } = await import('../../../server/src/services/routine-catalog.ts');
+  const { pt } = await import('./pt/index.ts');
+  const P = pt.rotinas as Record<string, unknown>; const E = en.rotinas as Record<string, unknown>; const Z = (zhCN.rotinas ?? {}) as Record<string, unknown>;
+  for (const r of CATALOG) {
+    assert.equal(P[`catalogo.${r.key}.nome`], r.name, r.key);
+    assert.equal(P[`catalogo.${r.key}.beneficio`], r.benefit, r.key);
+    for (const d of [E, Z]) assert.ok(d[`catalogo.${r.key}.nome`] && d[`catalogo.${r.key}.beneficio`], r.key);
+  }
+  for (const [k, v] of Object.entries(CATEGORIES)) assert.equal(P[`catalogo.categoria.${k}`], v, k);
+});
+
+test('as ferramentas: o nome, a nota e os motivos de fábrica são os mesmos do servidor, com tradução em en e zh-CN', async () => {
+  const { TOOLS } = await import('../../../server/src/services/characters.ts');
+  const fonte = fs.readFileSync(new URL('../../../server/src/services/characters.ts', import.meta.url), 'utf8');
+  const { pt } = await import('./pt/index.ts');
+  const P = pt.configuracoes as Record<string, unknown>; const E = en.configuracoes as Record<string, unknown>; const Z = (zhCN.configuracoes ?? {}) as Record<string, unknown>;
+  for (const f of Object.values(TOOLS) as Array<{ id: string; label: string; note: string }>) {
+    assert.equal(P[`ferramenta.${f.id}.nome`], f.label, f.id);
+    assert.equal(P[`ferramenta.${f.id}.nota`], f.note, f.id);
+    for (const d of [E, Z]) assert.ok(d[`ferramenta.${f.id}.nome`] && d[`ferramenta.${f.id}.nota`], f.id);
+  }
+  for (const k of Object.keys(P).filter((x) => x.startsWith('ferramenta.sufixo.'))) assert.ok(fonte.includes(String(P[k])), `o servidor não escreve mais: ${String(P[k])}`);
+});
