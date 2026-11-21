@@ -83,7 +83,7 @@ const conversas: Traducao<typeof pt> = {
   'pedido.respostaPara': 'Your reply to {nome}',
   'pedido.instrucao': 'Instructions',
   'pedido.suaResposta': 'Your reply',
-  'pedido.pedirAjustes': 'Ask for changes',
+  'pedido.pedirAjustes': 'Send back with instructions',
   'pedido.devolver': 'Send back',
   'pedido.responder': 'Reply',
   'pedido.seguirSem': 'Go on without it',

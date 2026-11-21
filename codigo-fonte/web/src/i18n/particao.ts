@@ -19,7 +19,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // os quadros (Tarefas e Fluxos da equipe), as colunas e mover cards
   quadro: ['components/Board.tsx', 'components/GerirQuadro.tsx', 'components/CamposDoQuadro.tsx', 'lib/cartao-tela.ts', 'views/TarefasView.tsx', 'views/EquipeView.tsx', 'components/MoveTray.tsx', 'lib/dragMove.ts', 'lib/work.ts'],
   // o card aberto
-  tarefa: ['components/TaskDetail.tsx', 'components/CartaoExtras.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
+  tarefa: ['components/TaskDetail.tsx', 'components/EntregaDetalhes.tsx', 'components/CartaoExtras.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
   // as conversas
   conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts', 'components/GravadorDeVoz.tsx', 'lib/gravador.ts', 'components/ConversaPorVoz.tsx', 'lib/conversa-voz.ts', 'components/NavegadorAoVivo.tsx', 'lib/navegador.ts'],
   // a Equipe e criar agentes
@@ -40,7 +40,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [
     'views/ConfiguracaoView.tsx', 'components/AiAccounts.tsx', 'components/CapacidadesPanel.tsx', 'lib/recursos.ts', 'lib/custo.ts', 'views/AtualizacoesPanel.tsx', 'lib/atualizacoes.ts', 'views/SaudePanel.tsx',
-    'components/AjustesEquipe.tsx', 'lib/ajustes.ts',
+    'components/AjustesEquipe.tsx', 'lib/ajustes.ts', 'components/ModelosEntrega.tsx',
   ],
   // Entrar, Segurança, Minha conta e Pessoas
   conta: ['components/AuthFlow.tsx', 'components/TermosDeUso.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],

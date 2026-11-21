@@ -136,6 +136,13 @@ export function DecisionsPanel({ onClose, inline, sob }: { onClose?: () => void;
                 </>)}>
                 <b>{c.title}</b>
                 <span className="muted small">{t('servidor.decisoes.deQuem', { nome: c.agent_name ?? t('servidor.decisoes.aEquipe') })}</span>
+                {/* a entrega no modelo: os itens curtos do cartão; o relatório abre no card ("Ver detalhes") */}
+                {c.modelo && (c.modelo.lead || c.modelo.itens.length > 0) && (
+                  <span className="dec-card__modelo">
+                    {c.modelo.lead && <span>{c.modelo.lead}</span>}
+                    {c.modelo.itens.length > 0 && <ul className="ent-itens ent-itens--mini">{c.modelo.itens.slice(0, 5).map((x, i) => <li key={i}>{x}</li>)}</ul>}
+                  </span>
+                )}
                 {c.need === 'info' && <span className="dec-card__q">{c.question ?? c.justification}</span>}
                 {c.need === 'review' && c.justification && <span className="dec-card__q muted">{c.justification}</span>}
               </Item>

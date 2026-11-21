@@ -3,6 +3,11 @@ import type pt from '../pt/configuracoes.ts';
 import type { Traducao } from '../tipos.ts';
 
 const configuracoes: Traducao<typeof pt> = {
+  // ——— modelos de entrega (ModelosEntrega.tsx) ———
+  'modelosEntrega.titulo': 'Delivery templates',
+  'modelosEntrega.original': 'Original',
+  'modelosEntrega.tom': 'tone: {tom}',
+  'modelosEntrega.restaurar': 'Restore originals',
   'titulo': 'Settings',
 
   // ——— o que várias partes da área usam ———

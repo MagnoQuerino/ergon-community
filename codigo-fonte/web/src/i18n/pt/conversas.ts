@@ -90,7 +90,7 @@ const conversas = {
   'pedido.respostaPara': 'Sua resposta para {nome}',
   'pedido.instrucao': 'Instrução',
   'pedido.suaResposta': 'Sua resposta',
-  'pedido.pedirAjustes': 'Pedir ajustes',
+  'pedido.pedirAjustes': 'Devolver com instruções',
   'pedido.devolver': 'Devolver',
   'pedido.responder': 'Responder',
   'pedido.seguirSem': 'Seguir sem isso',

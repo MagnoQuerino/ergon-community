@@ -2268,7 +2268,7 @@ def cota(forcar: bool = False) -> dict[str, Any]:
 # (tools/terminal_tool_sudo.py, por sessão: na API, a sessão é a própria execução) e não é gravada em lugar nenhum.
 _TS_CARTOES = "ergon_cartoes"
 _ERGON_PLUGIN_TOOLSETS = (_TS_CONEXOES, _TS_CARTOES, _TS_GESTAO)
-_CARTOES_TOOLS = frozenset({"perguntar", "pedir_chave", "pedir_senha_admin"})
+_CARTOES_TOOLS = frozenset({"perguntar", "pedir_chave", "pedir_senha_admin", "entregar"})
 _CARTAO_ESPERA = float(os.environ.get("ERGON_CARTAO_ESPERA_S", "240"))
 _CARTAO_PASSO = float(os.environ.get("ERGON_CARTAO_PASSO_S", "2"))
 _CHAVE_NOME = re.compile(r"[A-Z][A-Z0-9_]{2,60}")
@@ -2721,6 +2721,41 @@ def _perguntar_schema() -> dict[str, Any]:
                 + " The question is shown to the user as a card in Ergon and the answer comes back here; if the user has not answered yet, end your turn and wait."}
     except Exception:  # noqa: BLE001
         return _PERGUNTAR_PADRAO
+
+
+# ---------------------------------------------------------------- entregar: a entrega no modelo (rc.42)
+# O cartão da pessoa mostra só o que vem por aqui (o tipo e os itens curtos; o detalhe atrás de "Ver detalhes"). O Ergon
+# valida o modelo (services/modelos-entrega.ts) e devolve os erros quando não passa: o modelo corrige e chama de novo.
+def tool_entregar(args: dict[str, Any], task_id: str = "", session_id: str = "", **_: Any) -> str:
+    session_id, task_id = _sessao_do_pedido(str(session_id or ""), str(task_id or ""))
+    entrega = {k: v for k, v in (args or {}).items()} if isinstance(args, dict) else {}
+    try:
+        data = _post_to(_url_for("/internal/bridge/v1/entrega"), {"session_id": session_id[:200], "task_id": task_id[:200], "entrega": entrega}, timeout=20)
+    except Exception:  # noqa: BLE001 - sem o nome da exceção: o modelo tende a repetir a frase à pessoa
+        return json.dumps({"ok": False, "status": "falhou", "texto": "O Ergon não respondeu: termine com o texto da entrega."}, ensure_ascii=False)
+    return json.dumps(data if isinstance(data, dict) else {"ok": False, "status": "falhou"}, ensure_ascii=False)
+
+
+_ENTREGAR = {
+    "name": "entregar",
+    "description": ("Registra a entrega para a pessoa no modelo do Ergon (obrigatório ao terminar um card): o cartão dela mostra só isto. "
+                    "tipo decisao (itens: titulo até 60, contexto, objeto, riscos {prazo, inacao, em_jogo}), entrega (resumo, arquivos, atencao, detalhes), "
+                    "relatorio (resumo, pontos, detalhes), pergunta (pergunta, opcoes, porque) ou bloqueio (motivo, precisa, tentado, detalhes). "
+                    "Se voltar com erros, corrija e chame de novo."),
+    "parameters": {"type": "object", "required": ["tipo"], "properties": {
+        "tipo": {"type": "string", "enum": ["decisao", "entrega", "relatorio", "pergunta", "bloqueio"]},
+        "itens": {"type": "array", "maxItems": 8, "items": {"type": "object", "properties": {
+            "titulo": {"type": "string"}, "acao": {"type": "string"}, "contexto": {"type": "string"}, "objeto": {"type": "string"},
+            "riscos": {"type": "object", "properties": {"prazo": {"type": "string"}, "inacao": {"type": "string"}, "em_jogo": {"type": "string"}}},
+            "extras": {"type": "object"}}}},
+        "resumo": {"type": "string"}, "detalhes": {"type": "string"},
+        "arquivos": {"type": "array", "items": {"type": "string"}}, "atencao": {"type": "array", "items": {"type": "string"}},
+        "pontos": {"type": "array", "items": {"type": "string"}},
+        "pergunta": {"type": "string"}, "opcoes": {"type": "array", "items": {"type": "string"}}, "porque": {"type": "string"},
+        "motivo": {"type": "string"}, "precisa": {"type": "string"}, "tentado": {"type": "array", "items": {"type": "string"}},
+        "extras": {"type": "object", "description": "os campos a mais que a pessoa pediu (veja as instruções do card)"},
+    }},
+}
 
 
 _PEDIR_CHAVE = {
@@ -5557,6 +5592,7 @@ def register(ctx) -> None:
     ctx.register_hook("transform_tool_result", on_transform_tool_result)
     ctx.register_hook("post_llm_call", on_post_llm_call)
     ctx.register_tool(name="perguntar", toolset=_TS_CARTOES, schema=_perguntar_schema(), handler=tool_perguntar)
+    ctx.register_tool(name="entregar", toolset=_TS_CARTOES, schema=_ENTREGAR, handler=tool_entregar)
     ctx.register_tool(name="pedir_chave", toolset=_TS_CARTOES, schema=_PEDIR_CHAVE, handler=tool_pedir_chave)
     ctx.register_tool(name="pedir_senha_admin", toolset=_TS_CARTOES, schema=_PEDIR_SENHA_ADMIN, handler=tool_pedir_senha_admin)
     _mascarar_guardadas()
