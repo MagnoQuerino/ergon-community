@@ -10,6 +10,7 @@ import { ConfirmPopup } from './ConfirmPopup.tsx';
 import { HandoffCard, PermissionCard, QuestionCard, RequestCard, SecretCard, SystemNote } from './ChatCards.tsx';
 import { ComandosBar, DicaDeAtalhos, useFraseDoComando, type ResultadoComando } from './Comandos.tsx';
 import { Icon } from './Icon.tsx';
+import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
 import { OrientarCampo } from './AjustesEquipe.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
 import { TextoDaAprovacao } from './CartaoAprovacao.tsx';
@@ -712,6 +713,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
             </span>
           </div>
         )}
+        {convId && <NavegadorAoVivo conversa={convId} agente={agent.name} />}
         {busy && (live?.text
           ? (
             <div className="msg msg--agent msg--live">

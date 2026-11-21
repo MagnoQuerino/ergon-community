@@ -9,20 +9,29 @@ import http from 'node:http';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import WebSocket, { WebSocketServer } from 'ws';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
-import { Balde, OCIOSO_MS, Posse, QUEDA_MS, TETO_MS, enderecoParaTela, entradaDaPessoa, lerDoMotor } from '../src/services/navegador.ts';
+import { Balde, OCIOSO_MS, Posse, QUEDA_MS, TETO_MS, enderecoParaTela, entradaDaPessoa, lerDoMotor, tamanhoDoJpeg } from '../src/services/navegador.ts';
 import { ORIGIN, addPerson, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const TOKEN = 'token-da-ponte-de-teste-navegador-0123456789';
 const SENHA = ['s3nh', '@-', 'Secreta', '-91'].join('');
-const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 7)]);
-const quadro = (extra: Record<string, unknown> = {}) => JSON.stringify({ type: 'frame', data: JPEG.toString('base64'), metadata: { deviceWidth: 1280, deviceHeight: 720, pageScaleFactor: 1, ...extra } });
+/** um JPEG mínimo com o cabeçalho de tamanho (SOF0): o bastante para o servidor ler largura e altura */
+const jpegDe = (largura: number, altura: number, resto = 200) => {
+  const sof = Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, altura >> 8, altura & 255, largura >> 8, largura & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x4a, 0x46]), sof, Buffer.alloc(resto, 7)]);
+};
+// como na imagem do motor: a transmissão diz 1280×720 (a janela), o quadro é a área da página (1280×577)
+const JPEG = jpegDe(1280, 577);
+const quadro = (jpeg: Buffer = JPEG) => JSON.stringify({ type: 'frame', data: jpeg.toString('base64'), metadata: { deviceWidth: 1280, deviceHeight: 720, pageScaleFactor: 1 } });
 
 // ---------------------------------------------------------------------------------------------- unidade
 describe('navegador: protocolo', () => {
   test('do motor para a tela passa só quadro, tamanho e página; comandos e resultados do agente nunca', () => {
     const q = lerDoMotor(quadro());
-    assert.ok(q && q.tipo === 'quadro' && q.jpeg.equals(JPEG) && q.tela?.largura === 1280 && q.tela.altura === 720);
-    assert.deepEqual(lerDoMotor(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720, engine: 'chrome' })), { tipo: 'tela', tela: { largura: 1280, altura: 720 } });
+    // o tamanho que vale é o do próprio quadro (a área da página), não o que a transmissão diz (o da janela)
+    assert.ok(q && q.tipo === 'quadro' && q.jpeg.equals(JPEG) && q.tela.largura === 1280 && q.tela.altura === 577);
+    assert.deepEqual(tamanhoDoJpeg(jpegDe(390, 844)), { largura: 390, altura: 844 });
+    assert.equal(tamanhoDoJpeg(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 1, 2, 9, 9, 9, 9, 9, 9, 9, 9])), null);
+    assert.equal(lerDoMotor(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720, engine: 'chrome' })), null);
     assert.deepEqual(lerDoMotor(JSON.stringify({ type: 'tabs', tabs: [{ active: false, url: 'https://a.example/', title: 'A' }, { active: true, url: 'https://ana:segredo@loja.example/conta?x=1#topo', title: 'Minha\u0000conta' }] })),
       { tipo: 'pagina', url: 'https://loja.example/conta?x=1', titulo: 'Minha conta' });
     // o que o agente faz e lê também passa pela transmissão do agent-browser: não segue
@@ -32,7 +41,7 @@ describe('navegador: protocolo', () => {
     // quadro que não é JPEG (ou grande demais) não segue
     assert.equal(lerDoMotor(JSON.stringify({ type: 'frame', data: Buffer.from('<svg onload=alert(1)>').toString('base64'), metadata: {} })), null);
     assert.equal(lerDoMotor(JSON.stringify({ type: 'frame', data: '', metadata: {} })), null);
-    assert.equal(lerDoMotor(JSON.stringify({ type: 'status', viewportWidth: 0, viewportHeight: 720 })), null);
+    assert.equal(lerDoMotor(JSON.stringify({ type: 'frame', data: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]).toString('base64'), metadata: {} })), null);
   });
 
   test('o endereço mostrado: sem usuário e senha, sem o trecho depois de #, só http(s)', () => {
@@ -297,7 +306,7 @@ describe('navegador: rotas', () => {
     assert.equal(await abrir(run, { cookie: s.cookie, origin: ORIGIN, bilhete: b }), 403);
     await ate(() => t.quadros.length >= 1 && t.msgs.some((m) => m.t === 'pagina'));
     assert.ok(t.quadros[0].equals(JPEG), 'o quadro chega como JPEG puro (binário)');
-    assert.deepEqual(t.msgs.find((m) => m.t === 'tela'), { t: 'tela', largura: 1280, altura: 720 });
+    assert.deepEqual(t.msgs.find((m) => m.t === 'tela'), { t: 'tela', largura: 1280, altura: 577 });
     assert.deepEqual(t.msgs.find((m) => m.t === 'pagina'), { t: 'pagina', url: 'https://loja.example/entrar', titulo: 'Entrar - Loja' });
     const ola = t.msgs.find((m) => m.t === 'ola');
     assert.ok(ola.ligacao.length >= 12 && ola.ativo === true && ola.controle === 'agente');
@@ -316,9 +325,9 @@ describe('navegador: rotas', () => {
     const { run } = await conversaComNavegador();
     const t = await assistir(run);
     await ate(() => t.quadros.length >= 1);
-    const ultimo = Buffer.concat([JPEG, Buffer.from('fim')]);
+    const ultimo = jpegDe(1280, 577, 333);
     for (let i = 0; i < 60; i++) ponteMotor.mandar(quadro());
-    ponteMotor.mandar(JSON.stringify({ type: 'frame', data: ultimo.toString('base64'), metadata: { deviceWidth: 1280, deviceHeight: 720 } }));
+    ponteMotor.mandar(quadro(ultimo));
     await dorme(500);
     assert.ok(t.quadros.length <= 1 + 8, `chegaram ${t.quadros.length} quadros em meio segundo`);
     assert.ok(t.quadros.at(-1)!.equals(ultimo), 'o último quadro da rajada é o que fica na tela');

@@ -3147,3 +3147,47 @@ small { font-size: max(12px, .83em); }
 .gerir-quadro__cols .row { gap: 4px; align-items: center; }
 .gerir-quadro__confirma { padding: 8px 10px; border: 1px solid var(--perigo-borda); border-radius: 10px; background: var(--perigo-suave-3); }
 .gerir-quadro__perigo { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+
+/* Navegador ao vivo (rc.41, components/NavegadorAoVivo.tsx): a tela do navegador do agente na conversa e no card, com
+   "Assumir o controle". Com a pessoa no controle a moldura inteira muda (borda grossa e faixa de atenção). */
+.navv { align-self: stretch; max-width: 460px; width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.block + .navv, .tdet .navv { margin: 10px 0; }
+.navv--voce { border: 3px solid var(--atencao-cheio); padding: 6px; background: var(--atencao-suave); }
+.navv__barra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.navv__sit { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.navv__sit--voce { background: var(--atencao-cheio); color: var(--atencao-sobre); border-color: var(--atencao-cheio); }
+.navv__sit--outra { background: var(--warn-bg); color: var(--warn); border-color: var(--atencao-borda); }
+.navv__ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--sucesso-cheio); flex: none; animation: navv-pulso 1.6s ease-in-out infinite; }
+.navv__sit--voce .navv__ponto { background: var(--atencao-sobre); }
+.navv__sit--outra .navv__ponto { background: var(--atencao-ponto); animation: none; }
+@keyframes navv-pulso { 50% { opacity: .35; } }
+.navv__end { flex: 1 1 70px; min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line-suave, var(--line)); border-radius: 8px; padding: 4px 8px; }
+.navv__end svg { flex: none; }
+.navv__url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; direction: ltr; }
+.navv__acoes { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.navv__acoes .icon-btn { min-width: 32px; min-height: 32px; justify-content: center; align-items: center; }
+.navv__tela { position: relative; width: 100%; background: var(--inversa-2); border-radius: 8px; overflow: hidden; display: grid; place-items: center; }
+.navv__canvas { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; touch-action: manipulation; }
+.navv__tela--captura .navv__canvas { cursor: default; touch-action: none; }
+.navv__tela--captura { outline: 2px solid var(--atencao-cheio); outline-offset: 0; }
+.navv__vazio { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; text-align: center; color: var(--texto-inverso-2); font-size: 13px; }
+/* o campo escondido que recebe o teclado (fica no canto da tela, sem rolar a página nem aparecer) */
+.navv__campo { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; font-size: 16px; }
+.navv__faixa { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--atencao-texto); }
+.navv__nota { margin: 0; font-size: 12.5px; color: var(--muted); }
+.navv__mini-aberta { border: 1px dashed var(--line); background: var(--panel-2); color: var(--muted); border-radius: 8px; padding: 14px 10px; font-size: 12.5px; cursor: pointer; text-align: center; }
+.navv-back { z-index: 46; padding: 12px; }
+.navv--grande { align-self: center; max-width: none; width: min(1340px, 100%); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); padding: 12px; gap: 10px; border-radius: 16px; overflow: auto; }
+.navv--grande.navv--voce { padding: 10px; }
+/* a tela ampliada nunca passa da altura da janela: a largura encolhe junto (a proporção é a do navegador do agente) */
+.navv--grande .navv__tela { max-height: calc(100dvh - 190px); margin: 0 auto; width: auto; max-width: 100%; }
+.navv--grande .navv__sit { font-size: 13.5px; padding: 5px 12px; }
+.navv--grande .navv__faixa, .navv--grande .navv__nota { font-size: 13.5px; }
+@media (max-width: 560px) {
+  .navv-back { padding: 0; place-items: stretch; }
+  .navv--grande { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
+  .navv--grande .navv__tela { max-height: none; width: 100%; }
+  .navv__acoes { flex: 1 1 100%; margin-left: 0; justify-content: flex-end; }
+  .navv__acoes .btn { flex: 1; justify-content: center; min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) { .navv__ponto { animation: none; } }

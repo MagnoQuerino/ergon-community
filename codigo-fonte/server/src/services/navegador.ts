@@ -36,14 +36,34 @@ import type { HermesControlClient } from './hermes.ts';
 export interface Tela { largura: number; altura: number }
 /** O que a transmissão do motor manda e a tela pode receber. Todo o resto (comandos e resultados do agente) é descartado. */
 export type DoMotor =
-  | { tipo: 'quadro'; jpeg: Buffer; tela: Tela | null }
-  | { tipo: 'tela'; tela: Tela }
+  | { tipo: 'quadro'; jpeg: Buffer; tela: Tela }
   | { tipo: 'pagina'; url: string; titulo: string };
 
 /** Um quadro maior que isto não é um viewport de navegador (1280×720 em JPEG fica em dezenas de KB): descartado. */
 export const QUADRO_MAX_BYTES = 3 * 1024 * 1024;
 const dimensao = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 16 && v <= 8192 ? Math.round(v) : null);
 const telaDe = (l: unknown, a: unknown): Tela | null => { const largura = dimensao(l), altura = dimensao(a); return largura && altura ? { largura, altura } : null; };
+
+/**
+ * O tamanho de um JPEG, lido do cabeçalho dele (o marcador SOF). É o tamanho de verdade do viewport, em pixels da página:
+ * a transmissão diz "1280×720" (o tamanho da janela), mas a área da página é menor (1280×577, medido: a janela do
+ * Chromium conta a moldura), e é nela que os cliques valem. A escala da tela da pessoa sai daqui.
+ */
+export function tamanhoDoJpeg(b: Buffer): Tela | null {
+  if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return null;
+  for (let i = 2; i + 9 < b.length;) {
+    if (b[i] !== 0xff) return null;
+    const m = b[i + 1];
+    if (m === 0xff) { i++; continue; }
+    if (m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01) { i += 2; continue; }
+    const n = b.readUInt16BE(i + 2);
+    if (n < 2) return null;
+    // SOF0..SOF15, menos DHT (C4), JPG (C8) e DAC (CC)
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return telaDe(b.readUInt16BE(i + 7), b.readUInt16BE(i + 5));
+    i += 2 + n;
+  }
+  return null;
+}
 
 /** O endereço que a barra mostra (só leitura): sem usuário e senha embutidos, sem o trecho depois de "#", curto. */
 export function enderecoParaTela(raw: unknown): string {
@@ -62,10 +82,10 @@ export function lerDoMotor(texto: string): DoMotor | null {
   if (m.type === 'frame' && typeof m.data === 'string' && m.data.length > 0 && m.data.length <= QUADRO_MAX_BYTES * 1.4) {
     const jpeg = Buffer.from(m.data, 'base64');
     // só JPEG de verdade segue para a tela (ela desenha como imagem; nada do motor vira HTML)
-    if (jpeg.length < 4 || jpeg.length > QUADRO_MAX_BYTES || jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg[2] !== 0xff) return null;
-    return { tipo: 'quadro', jpeg, tela: telaDe(m.metadata?.deviceWidth, m.metadata?.deviceHeight) };
+    if (jpeg.length > QUADRO_MAX_BYTES) return null;
+    const tela = tamanhoDoJpeg(jpeg);
+    return tela ? { tipo: 'quadro', jpeg, tela } : null;
   }
-  if (m.type === 'status') { const tela = telaDe(m.viewportWidth, m.viewportHeight); return tela ? { tipo: 'tela', tela } : null; }
   if (m.type === 'tabs' && Array.isArray(m.tabs)) {
     const ativa = m.tabs.find((t: any) => t && t.active === true) ?? m.tabs[0];
     if (!ativa || typeof ativa !== 'object') return null;
@@ -570,14 +590,13 @@ export class Navegador {
   private doMotor(s: Sala, texto: string): void {
     const m = lerDoMotor(texto);
     if (!m) return;
-    if (m.tipo === 'tela') { this.mudouTela(s, m.tela); return; }
     if (m.tipo === 'pagina') {
       if (s.pagina && s.pagina.url === m.url && s.pagina.titulo === m.titulo) return;
       s.pagina = { url: m.url, titulo: m.titulo };
       for (const e of s.espectadores.values()) if (this.podeReceberTela(s, e)) this.mandar(e, { t: 'pagina', ...s.pagina });
       return;
     }
-    if (m.tela) this.mudouTela(s, m.tela);
+    this.mudouTela(s, m.tela);
     s.quadro = m.jpeg;
     // no máximo QUADROS_POR_SEGUNDO: o quadro que chega cedo demais espera a vez (o último sempre sai, nunca o do meio)
     const espera = 1000 / QUADROS_POR_SEGUNDO - (Date.now() - s.enviadoEm);
