@@ -39,11 +39,13 @@ export function SeloComputador({ e, onMudou }: { e: EstadoComputador | null; onM
     setOcupado(true);
     try { await api.post('/api/computador/controle', { pessoa: !pessoa }); onMudou(); } catch { /* o estado relido mostra como ficou */ } finally { setOcupado(false); }
   };
+  // a frase some na janela estreita (styles.css): fica no title do selo
+  const frase = pessoa ? t('geral.computador.voceNoControle') : t('geral.computador.usando', { nome: e.emUso?.agente ?? 'Ergon' });
   return (
-    <span className={`tb-computador ${pessoa ? 'tb-computador--pessoa' : ''}`} role="status">
+    <span className={`tb-computador ${pessoa ? 'tb-computador--pessoa' : ''}`} role="status" title={frase}>
       <span className="tb-computador__luz" aria-hidden="true" />
       <Icon name="monitor" size={16} />
-      <span className="tb-computador__txt">{pessoa ? t('geral.computador.voceNoControle') : t('geral.computador.usando', { nome: e.emUso?.agente ?? 'Ergon' })}</span>
+      <span className="tb-computador__txt">{frase}</span>
       {/* na janela estreita o botão fica com a palavra curta (a barra cabe em 390 px com o selo); o nome inteiro fica no aria-label */}
       <button className="tb-computador__btn" onClick={() => void trocar()} disabled={ocupado} aria-busy={ocupado} aria-label={pessoa ? t('geral.computador.conceder') : t('geral.computador.assumir')}>
         <span className="tb-computador__btn-longo">{pessoa ? t('geral.computador.conceder') : t('geral.computador.assumir')}</span>
