@@ -237,17 +237,19 @@ export function cartao(db: Db, q: Quem, taskId: string) {
   };
 }
 
-export interface ResumoCartao { sub: [number, number] | null; comments: number; links: number; files: number; people: Array<{ id: string; name: string }>; values: Record<string, ValorCampo> }
+export interface ResumoCartao { sub: [number, number] | null; comments: number; links: number; files: number; people: Array<{ id: string; name: string }>; values: Record<string, ValorCampo>;
+  /** quem está vendo é uma das pessoas atribuídas (o filtro "minhas") */
+  mine: boolean }
 /** O que o card do quadro mostra de cada tarefa (contadores, pessoas e valores), em poucas consultas para o quadro todo. */
-export function resumosDoQuadro(db: Db, ws: string, boardId: string): Map<string, ResumoCartao> {
+export function resumosDoQuadro(db: Db, ws: string, boardId: string, userId?: string): Map<string, ResumoCartao> {
   const out = new Map<string, ResumoCartao>();
-  const de = (tid: string) => out.get(tid) ?? out.set(tid, { sub: null, comments: 0, links: 0, files: 0, people: [], values: {} }).get(tid)!;
+  const de = (tid: string) => out.get(tid) ?? out.set(tid, { sub: null, comments: 0, links: 0, files: 0, people: [], values: {}, mine: false }).get(tid)!;
   const onde = 'workspace_id = ? AND task_id IN (SELECT id FROM tasks WHERE board_id = ? AND archived = 0)';
   for (const r of db.all<{ task_id: string; feitas: number; total: number }>(`SELECT task_id, SUM(done) AS feitas, COUNT(*) AS total FROM task_subtasks WHERE ${onde} GROUP BY task_id`, ws, boardId)) de(r.task_id).sub = [Number(r.feitas), Number(r.total)];
   for (const [tabela, chave] of [['task_comments', 'comments'], ['task_urls', 'links'], ['task_attachments', 'files']] as const)
     for (const r of db.all<{ task_id: string; n: number }>(`SELECT task_id, COUNT(*) AS n FROM ${tabela} WHERE ${onde} GROUP BY task_id`, ws, boardId)) de(r.task_id)[chave] = Number(r.n);
   for (const r of db.all<{ task_id: string; id: string; name: string }>(
-    `SELECT p.task_id, u.id, u.display_name AS name FROM task_people p JOIN users u ON u.id = p.user_id WHERE p.workspace_id = ? AND p.task_id IN (SELECT id FROM tasks WHERE board_id = ? AND archived = 0) ORDER BY p.created_at`, ws, boardId)) de(r.task_id).people.push({ id: r.id, name: r.name });
+    `SELECT p.task_id, u.id, u.display_name AS name FROM task_people p JOIN users u ON u.id = p.user_id WHERE p.workspace_id = ? AND p.task_id IN (SELECT id FROM tasks WHERE board_id = ? AND archived = 0) ORDER BY p.created_at`, ws, boardId)) { const c = de(r.task_id); c.people.push({ id: r.id, name: r.name }); if (r.id === userId) c.mine = true; }
   const ids = db.all<{ task_id: string }>(`SELECT DISTINCT task_id FROM task_field_values WHERE ${onde}`, ws, boardId).map((r) => r.task_id);
   for (const [tid, v] of valoresDe(db, ws, ids)) de(tid).values = v;
   return out;

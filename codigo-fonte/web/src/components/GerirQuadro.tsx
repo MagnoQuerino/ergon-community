@@ -2,13 +2,16 @@
  * Os quadros da pessoa (rc.41): criar um quadro e organizar o atual (nome, colunas livres: criar, renomear, reordenar e
  * apagar levando os cards; apagar o quadro levando os cards para outro). Só nos quadros criados no Ergon: o da equipe é
  * dos agentes e os espelhados têm as colunas do aplicativo de origem. O servidor confere tudo (routes/quadros.ts).
+ * Os campos próprios dos cartões (CamposDoQuadro) valem também num quadro espelhado, só no Ergon: nele, este painel
+ * mostra só os campos.
  */
 import { useRef, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
 import { useT } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
-import type { BoardSummary, Column } from '../lib/types.ts';
+import { SOURCE_LABEL, type BoardSummary, type CampoQuadro, type Column } from '../lib/types.ts';
+import { CamposDoQuadro } from './CamposDoQuadro.tsx';
 
 export function NovoQuadro({ onCriado, onFechar }: { onCriado: (id: string) => void; onFechar: () => void }) {
   const t = useT();
@@ -46,8 +49,8 @@ export function NovoQuadro({ onCriado, onFechar }: { onCriado: (id: string) => v
   );
 }
 
-export function GerirQuadro({ quadro, entrada, columns, outros, onMudou, onApagado, onFechar }: {
-  quadro: BoardSummary; entrada: boolean; columns: Column[]; outros: BoardSummary[];
+export function GerirQuadro({ quadro, entrada, columns, campos, outros, onMudou, onApagado, onFechar }: {
+  quadro: BoardSummary; entrada: boolean; columns: Column[]; campos: CampoQuadro[]; outros: BoardSummary[];
   onMudou: () => void; onApagado: (destino: string) => void; onFechar: () => void;
 }) {
   const t = useT();
@@ -62,11 +65,24 @@ export function GerirQuadro({ quadro, entrada, columns, outros, onMudou, onApaga
   const [busy, setBusy] = useState(false);
   const fazer = async (f: () => Promise<unknown>) => { setBusy(true); setErr(null); try { await f(); onMudou(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); } };
   const ordem = [...columns].sort((a, b) => a.position - b.position);
+  const espelho = quadro.origin === 'mirror';
+  const cabeca = (
+    <div className="drawer__head"><h3 className="drawer__title" id="gerir-t">{espelho ? t('quadro.campos.titulo') : t('quadro.gerir.titulo')}</h3>
+      <button className="icon-btn" onClick={onFechar} aria-label={t('quadro.gerir.fechar')} title={t('quadro.gerir.fechar')}><Icon name="x" /></button></div>
+  );
+  // quadro espelhado: nome e colunas vêm do aplicativo; aqui, só os campos (que ficam no Ergon)
+  if (espelho) {
+    return (
+      <aside ref={ref} className="status-pop gerir-quadro" role="dialog" aria-labelledby="gerir-t">
+        {cabeca}
+        <CamposDoQuadro quadroId={quadro.id} campos={campos} espelho={SOURCE_LABEL[quadro.source ?? ''] ?? t('quadro.tarefas.aplicativo')} onMudou={onMudou} />
+      </aside>
+    );
+  }
 
   return (
     <aside ref={ref} className="status-pop gerir-quadro" role="dialog" aria-labelledby="gerir-t">
-      <div className="drawer__head"><h3 className="drawer__title" id="gerir-t">{t('quadro.gerir.titulo')}</h3>
-        <button className="icon-btn" onClick={onFechar} aria-label={t('quadro.gerir.fechar')} title={t('quadro.gerir.fechar')}><Icon name="x" /></button></div>
+      {cabeca}
       {err && <p className="error small" role="alert">{err}</p>}
       <form className="row" onSubmit={(e) => { e.preventDefault(); void fazer(() => api.patch(`/api/boards/${quadro.id}`, { name: nome })); }}>
         <input className="input grow" value={nome} maxLength={60} aria-label={t('quadro.gerir.nomeQuadro')} onChange={(e) => setNome(e.target.value)} />
@@ -102,6 +118,8 @@ export function GerirQuadro({ quadro, entrada, columns, outros, onMudou, onApaga
         <input className="input grow" value={nova} maxLength={40} placeholder={t('quadro.gerir.novaColuna')} aria-label={t('quadro.gerir.novaColuna')} onChange={(e) => setNova(e.target.value)} />
         <button className="btn btn--sm" disabled={busy || !nova.trim()}>{t('quadro.gerir.adicionarColuna')}</button>
       </form>
+
+      <CamposDoQuadro quadroId={quadro.id} campos={campos} onMudou={onMudou} />
 
       <div className="gerir-quadro__perigo">
         {entrada ? <p className="muted small">{t('quadro.gerir.entradaFica')}</p> : apagandoQuadro === null ? (

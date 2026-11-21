@@ -523,6 +523,7 @@ const servidor = {
   'proposta.gestao.acao.tarefa.ver': 'Ver um card (histórico, entregas, pendências)',
   'proposta.gestao.acao.tarefa.criar': 'Criar um card',
   'proposta.gestao.acao.tarefa.editar': 'Editar ou mover um card (nome, descrição, coluna, responsável, prazo, concluir)',
+  'proposta.gestao.acao.tarefa.comentar': 'Comentar num card (até 240 caracteres; o comentário sai com o nome do agente)',
   'proposta.gestao.acao.tarefa.trabalhar': 'Pôr a equipe para trabalhar num card',
   'proposta.gestao.acao.tarefa.cancelar': 'Cancelar um card (o trabalho para e ele sai do quadro)',
   'proposta.gestao.acao.decisoes.ver': 'Ver o que espera a pessoa ("Com você")',

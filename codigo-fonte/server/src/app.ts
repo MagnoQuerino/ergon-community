@@ -2034,7 +2034,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
        FROM boards b LEFT JOIN integrations i ON i.id = b.connection_id
       WHERE b.workspace_id = ? ORDER BY b.audience = 'user', b.origin, b.created_at`, auth(req).workspaceId));
 
-  app.get('/api/boards/:id', { schema: { params: idParams('brd') } }, async (req) => boardView(db, auth(req).workspaceId, (req.params as { id: string }).id));
+  app.get('/api/boards/:id', { schema: { params: idParams('brd') } }, async (req) => { const a = auth(req); return boardView(db, a.workspaceId, (req.params as { id: string }).id, a.userId); });
   // os quadros da pessoa: criar, renomear e apagar quadros e colunas (routes/quadros.ts)
   registerQuadrosRoutes(app, { db, bus, auth });
   // o que vai dentro do cartão: campos, subtarefas, links, pessoas, comentários e anexos (routes/cartao.ts)

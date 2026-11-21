@@ -148,7 +148,8 @@ describe('o cartão das tarefas da pessoa', () => {
     const r = await req(h, 'PUT', `/api/tasks/${tarefa}/people`, s, { userIds: [s.userId, colega] });
     assert.deepEqual(r.json.people.map((p: { id: string }) => p.id).sort(), [s.userId, colega].sort());
     assert.equal((await req(h, 'PUT', `/api/tasks/${tarefa}/people`, s, { userIds: [bruna.userId] })).status, 400, 'de outro workspace');
-    assert.deepEqual((await ver()).tasks.find((x) => x.id === tarefa)!.card!.people.map((p) => p.name).sort(), ['Alexandre', 'Carla']);
+    const noQuadro = (await ver()).tasks.find((x) => x.id === tarefa)!.card! as unknown as { people: Array<{ name: string }>; mine: boolean };
+    assert.deepEqual([noQuadro.people.map((p) => p.name).sort(), noQuadro.mine], [['Alexandre', 'Carla'], true], 'com os nomes e a marca de "minha"');
     assert.equal((await req(h, 'PUT', `/api/tasks/${tarefa}/people`, s, { userIds: [colega] })).json.people.length, 1);
     // o agente responsável continua sendo outra coisa
     assert.equal(h.db.get<{ a: string | null }>('SELECT agent_id AS a FROM tasks WHERE id = ?', tarefa)!.a, null);

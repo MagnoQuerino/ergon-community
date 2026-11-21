@@ -7,7 +7,7 @@ import { validDue } from './due.ts';
 import type { TitleSource } from './card-title.ts';
 import { chavePeloNome, marcarColunas } from './colunas.ts';
 import { camposDoQuadro } from './campos.ts';
-import { resumosDoQuadro } from './cartao.ts';
+import { pessoasDoWorkspace, resumosDoQuadro } from './cartao.ts';
 
 export type TaskOrigin = 'manual' | 'chat' | 'teams' | 'whatsapp' | 'mirror' | 'demo';
 
@@ -252,7 +252,7 @@ export function updateTask(db: Db, bus: Bus | null, workspaceId: string, actor: 
   return task;
 }
 
-export function boardView(db: Db, workspaceId: string, boardId: string) {
+export function boardView(db: Db, workspaceId: string, boardId: string, userId?: string) {
   const board = db.get<{ audience: string }>('SELECT * FROM boards WHERE id = ? AND workspace_id = ?', boardId, workspaceId);
   if (!board) throw notFound('quadro');
   const columns = db.all('SELECT id, name, position, external_id, system_key FROM columns WHERE board_id = ? AND workspace_id = ? ORDER BY position', boardId, workspaceId);
@@ -280,9 +280,11 @@ export function boardView(db: Db, workspaceId: string, boardId: string) {
        FROM tasks t LEFT JOIN task_links l ON l.task_id = t.id LEFT JOIN agents ag ON ag.id = t.agent_id
       WHERE t.board_id = ? AND t.workspace_id = ? AND t.archived = 0 ORDER BY COALESCE(t.queue_pos, t.number), t.number`, boardId, workspaceId);
   // quadros da pessoa: os campos próprios e, por card, o que aparece nele (subtarefas "2/5", pessoas, etiquetas, contadores)
-  if (board.audience !== 'user') return { board, columns, tasks, fields: [] };
-  const resumos = resumosDoQuadro(db, workspaceId, boardId);
-  return { board, columns, tasks: (tasks as Array<{ id: string }>).map((t) => ({ ...t, card: resumos.get(t.id) ?? null })), fields: camposDoQuadro(db, workspaceId, boardId) };
+  if (board.audience !== 'user') return { board, columns, tasks, fields: [], members: [] };
+  const resumos = resumosDoQuadro(db, workspaceId, boardId, userId);
+  return { board, columns, tasks: (tasks as Array<{ id: string }>).map((t) => ({ ...t, card: resumos.get(t.id) ?? null })), fields: camposDoQuadro(db, workspaceId, boardId),
+    // quem pode ser atribuído (o cartão mostra o nome no campo de pessoa e a tela filtra "minhas")
+    members: pessoasDoWorkspace(db, workspaceId).map((p) => ({ id: p.id, name: p.name })) };
 }
 
 export function taskLog(db: Db, workspaceId: string, taskId: string) {
