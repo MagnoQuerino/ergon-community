@@ -321,6 +321,15 @@ export class Computador {
     this.avisar(a.workspaceId);
   }
 
+  /**
+   * O "Ativar acesso total?" de Mãos na massa (POST /api/acesso-total, ramo claude/rc42-maos): a mesma ativação põe o
+   * computador da pessoa em "total". Bloqueado por quem administra ou na nuvem: fica como está, sem derrubar a ativação.
+   */
+  aoAtivarAcessoTotal(a: AuthContext): void {
+    if (this.d.nuvem || this.bloqueado(a.workspaceId) || this.modo(a.workspaceId, a.userId) === 'total') return;
+    this.definirModo(a, 'total');
+  }
+
   definirBloqueio(a: AuthContext, bloqueado: boolean): void {
     if (a.role !== 'owner') throw new HttpError(403, 'forbidden', 'Só quem administra o workspace bloqueia o controle do computador.');
     setSetting(this.d.db, a.workspaceId, 'computador.bloqueado', bloqueado ? '1' : '0');

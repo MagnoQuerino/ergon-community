@@ -340,3 +340,41 @@ describe('computador: nuvem', () => {
     } finally { await nuvem.close(); }
   });
 });
+
+describe('ligações da rc.42 com o resto do Ergon', () => {
+  test('"Ativar acesso total?" de Mãos na massa põe o computador em "total" (menos bloqueado ou na nuvem), sem derrubar a ativação', async () => {
+    const { Computador } = await import('../src/services/computador.ts');
+    const h = await harness();
+    const s = await setupOwner(h);
+    const a = { workspaceId: s.workspaceId, userId: h.db.get<{ id: string }>('SELECT id FROM users LIMIT 1')!.id, role: 'owner' } as any;
+    const deps = { db: h.db, bus: h.bus, origens: [], sessao: () => null, liberarTudo: () => false, donoDe: () => null, membro: () => true, nomeDoAgente: () => 'X' } as any;
+    const pc = new Computador({ ...deps, nuvem: false });
+    assert.equal(pc.modo(a.workspaceId, a.userId), 'desligado');
+    pc.aoAtivarAcessoTotal(a);
+    assert.equal(pc.modo(a.workspaceId, a.userId), 'total');
+    pc.definirModo(a, 'cada_acao'); pc.definirBloqueio(a, true);
+    assert.doesNotThrow(() => pc.aoAtivarAcessoTotal(a));
+    assert.equal(pc.modo(a.workspaceId, a.userId), 'cada_acao', 'bloqueado: fica como está');
+    pc.definirBloqueio(a, false);
+    new Computador({ ...deps, nuvem: true }).aoAtivarAcessoTotal(a);
+    assert.equal(pc.modo(a.workspaceId, a.userId), 'cada_acao', 'na nuvem: nada muda');
+    pc.fechar(); await h.close();
+  });
+
+  test('catálogo: Administrar o Discord e Diagnóstico opcionais, desligados; Diagnóstico com a trava do Terminal', async () => {
+    const { TOOLS, GUARDED_TOOLSETS, PESADAS_FORA_DO_COORDENADOR } = await import('../src/services/characters.ts');
+    assert.equal(TOOLS.discord.toolset, 'discord_admin');
+    assert.equal(TOOLS.discord.safe, true); assert.equal(TOOLS.discord.status, 'desligada');
+    assert.equal(TOOLS.diagnostico.toolset, 'debugging');
+    // mesmo portão do Terminal: protegida (senha), bloqueada por padrão, fora das que a pessoa liga livre
+    for (const k of ['guarded', 'safe', 'status', 'kind'] as const) assert.equal(TOOLS.diagnostico[k], TOOLS.terminal[k], k);
+    assert.equal(GUARDED_TOOLSETS.debugging, 'diagnostico');
+    assert.equal(GUARDED_TOOLSETS.terminal, 'terminal');
+    for (const id of ['discord', 'diagnostico', 'computador']) assert.ok(PESADAS_FORA_DO_COORDENADOR.includes(id), id);
+    // sem pedir, ninguém tem: o agente novo não recebe nenhuma das duas
+    const h = await harness(); const s = await setupOwner(h);
+    const tools = h.db.all<{ tools: string | null }>('SELECT tools FROM agents WHERE workspace_id = ?', s.workspaceId).flatMap((x) => JSON.parse(x.tools ?? '[]') as string[]);
+    assert.ok(!tools.includes('discord') && !tools.includes('diagnostico'));
+    await h.close();
+  });
+});

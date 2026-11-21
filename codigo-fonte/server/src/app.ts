@@ -2606,6 +2606,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     nomeDoAgente: (r) => db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', r.agent_id)?.name ?? 'O agente',
   });
   executor.onFinish((r) => computador.execucaoTerminou(r.id));
+  // Integração com Mãos na massa (claude/rc42-maos): lá, POST /api/acesso-total chama cada função de aoAtivarAcessoTotal
+  // depois de ativar. Na fusão, fica a declaração de lá (junto de "const pastas") e esta linha some; o push continua.
+  const aoAtivarAcessoTotal: Array<(a: AuthContext) => void> = [];
+  aoAtivarAcessoTotal.push((a) => computador.aoAtivarAcessoTotal(a));
   app.server.on('upgrade', (rq, socket, head) => {
     if (Navegador.caminho(rq.url)) navegador.upgrade(rq, socket, head);
     else if (Computador.caminho(rq.url)) computador.upgrade(rq, socket, head);
