@@ -16,7 +16,7 @@ import type { WorldHost, WorldModule, WorldStatus } from '../world-hook.ts';
 import { precisaReconectarErgonAi, registrarModelosErgonAi } from '../services/ai.ts';
 import { loadWorldConfig, type WorldConfig } from './config.ts';
 import { checkAccountInput, EMAIL_UNVERIFIED, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, worldLocale, type AccountInput, type DeviceChoice } from './link.ts';
-import { iniciarAutoSync, iniciarNuvem, modoNuvem, prepararCofre } from './nuvem.ts';
+import { type AutoSync, iniciarAutoSync, iniciarNuvem, modoNuvem, prepararCofre } from './nuvem.ts';
 import { LocalSync } from './sync-local.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
 import { CARD_REF, CloudCards } from './cards.ts';
@@ -216,7 +216,10 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
 
       // ---------------------------------------------------------------- qual workspace local é o do World
       // na nuvem do Ergon World a equipe é a do computador da pessoa: cresce o que precisar para recebê-la inteira
-      const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: modoNuvem(cfg, env) ? { ...h.limits, autoGrow: true } : h.limits });
+      const sync = new LocalSync({ db, links: L(), client, routines: h.routines, bus: h.bus, limits: modoNuvem(cfg, env) ? { ...h.limits, autoGrow: true } : h.limits,
+        log: (o, msg) => app.log.info(o, msg) });
+      /** a sincronia automática deste computador (world/nuvem.ts); nula no contêiner da nuvem e com ERGON_WORLD_AUTOSYNC=0 */
+      let auto: AutoSync | null = null;
       /**
        * Liga UM workspace local (de que a pessoa é dona) ao World: a um workspace World novo ou a um que já existe na
        * conta (criado em outro computador; a sincronização dele entra depois, com a chave).
@@ -337,7 +340,10 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       app.get('/api/world/cloud', async (req) => {
         const a = h.auth(req); const w = worldWs(a);
         if (!w) return SEM_NUVEM;
-        return client.call('GET', `/v1/cloud?workspace=${w}`, undefined, sessionOf(a.userId)).catch(() => SEM_NUVEM);
+        const r = await client.call('GET', `/v1/cloud?workspace=${w}`, undefined, sessionOf(a.userId)).catch(() => null);
+        // a nuvem esperando a chave da sincronia: este computador entrega já (não espera o ciclo de um minuto)
+        if (r) auto?.observar(w, r);
+        return r ?? SEM_NUVEM;
       });
       app.post('/api/world/cloud/trial', async (req) => {
         const a = h.owner(req); const w = needWorld(a);
@@ -643,7 +649,23 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
           const keyState = await sync.keyState(a.userId, st.syncWorkspaceId).catch(() => null);
           return { bound: true, ...st, keyState };
         }
-        return { bound: true, ...st };
+        // o estado de verdade da sincronia automática (o que a tela e o selo do cartão mostram) e se há dados indo ou vindo
+        return { bound: true, ...st, auto: auto?.estado(a.workspaceId) ?? null, atividade: sync.atividade.estado(a.workspaceId) };
+      });
+      /**
+       * "Sincronizar agora": a saída de emergência da tela. Faz já o ciclo deste workspace (entrega a chave a quem falta,
+       * recebe e envia), mesmo com a pausa pedida ao fechar. Equipe nova de outro computador continua retida para a
+       * pessoa ver. Devolve o estado depois da tentativa (o que ficou pendente e por quê).
+       */
+      app.post('/api/world/sync/now', async (req) => {
+        const a = h.owner(req); const ws = boundWs(a);
+        if (!sync.status(ws).enabled) throw new HttpError(409, 'sync_off', 'World Sync desligado neste workspace');
+        if (auto) return { ...sync.status(ws), auto: await auto.sincronizar(a.userId, ws), atividade: sync.atividade.estado(ws) };
+        // sem a sincronia automática neste processo: os mesmos passos, na mesma ordem
+        await sync.share(a.userId, ws, { motivo: 'agora' }).catch(() => undefined);
+        const p = await sync.pull(a.userId, ws, true, { holdOnBlueprint: true }) as { held?: boolean };
+        if (!p.held) await sync.push(a.userId, ws);
+        return { ...sync.status(ws), auto: null, atividade: sync.atividade.estado(ws) };
       });
       app.post('/api/world/sync/enable', async (req) => { const a = h.owner(req); return sync.enable(a.userId, boundWs(a), phrase(req)); });
       app.post('/api/world/sync/join', async (req) => {
@@ -654,7 +676,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         if (sync.status(ws).enabled && sync.worldId(ws) === id) return sync.enable(a.userId, ws, phrase(req));
         return sync.join(a.userId, ws, id, phrase(req));
       });
-      app.post('/api/world/sync/share', async (req) => { const a = h.owner(req); return sync.share(a.userId, boundWs(a)); });
+      app.post('/api/world/sync/share', async (req) => { const a = h.owner(req); const r = await sync.share(a.userId, boundWs(a), { motivo: 'pedido da pessoa' }); return { shared: r.shared, failed: r.failed, cloud: r.cloud }; });
       app.post('/api/world/sync/push', async (req) => { const a = h.owner(req); return sync.push(a.userId, boundWs(a)); });
       app.post('/api/world/sync/rotate', async (req) => { const a = h.owner(req); return sync.rotate(a.userId, boundWs(a), phrase(req)); });
       app.post('/api/world/sync/recovery', async (req) => {
@@ -699,7 +721,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
               motorPronto: async (w) => { const c = h.controlFor(w); if (!c?.ergonAi || !c.byok) return false; await c.byok(); return true; } });
           });
         } else if (cfg.mode === 'local' && env.ERGON_WORLD_AUTOSYNC !== '0') {
-          app.addHook('onReady', async () => { nuvem = iniciarAutoSync({ db, client, links: L(), sync, canais: h.canaisNuvem, log, ajustes: { cicloMs: ms('ERGON_WORLD_AUTOSYNC_MS') } }); });
+          app.addHook('onReady', async () => { nuvem = auto = iniciarAutoSync({ db, client, links: L(), sync, canais: h.canaisNuvem, log, ajustes: { cicloMs: ms('ERGON_WORLD_AUTOSYNC_MS'), entregaMs: ms('ERGON_WORLD_ENTREGA_MS') } }); });
         }
       }
       app.addHook('onClose', async () => { clearInterval(timer); clearInterval(cardsTimer); clearTimeout(aoAbrir); await nuvem?.parar(); });

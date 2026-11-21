@@ -158,6 +158,12 @@ export class FakeWorld {
   confirmEmail(email: string): void { [...this.accounts.values()].find((a) => a.email === email)!.emailVerified = true; }
   rateLimitNext = 0;
   leaseMs = 90_000;
+  /** World de antes do aditivo da chave da nuvem: sem keyWanted (estado e sinal de aberto) e sem kind em devices-needing-key */
+  antigo = false;
+  /** gravar o envelope deste aparelho falha assim (aparelho → [status, código]): um aparelho com defeito no meio da entrega */
+  envelopeFail = new Map<string, [number, string]>();
+  /** a ordem de devices-needing-key (o World de verdade põe a nuvem primeiro; aqui dá para forçar o pior caso) */
+  nuvemPorUltimo = false;
   /** o próximo pedido que casar é processado, mas a resposta se perde (a conexão cai) */
   dropResponse: RegExp | null = null;
   /** chamado logo antes de processar um aceite (commit): para mudar a posse no meio, como outro computador faria */
@@ -270,6 +276,11 @@ export class FakeWorld {
 
   private session(bearer: string | null): Device | null {
     return [...this.devices.values()].find((d) => d.status === 'active' && d.session && d.session === bearer) ?? null;
+  }
+  /** o aparelho-nuvem do workspace está ativo e sem o envelope da chave na versão atual (world/src/cloud.ts keyWanted) */
+  keyWanted(sws: string): boolean {
+    const w = this.workspaces.get(sws); const d = this.devices.get(this.clouds.get(sws)?.deviceId ?? '');
+    return !!w && !!d && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== (w.keyVersion ?? 1);
   }
   private connected(accountId: string): Device[] { return [...this.devices.values()].filter((d) => d.accountId === accountId && d.status === 'active' && d.session && (d as Device & { kind?: string }).kind !== 'cloud'); }
 
@@ -385,14 +396,14 @@ export class FakeWorld {
       const sws = u.searchParams.get('workspace'); const cl = sws ? this.clouds.get(sws) : undefined;
       if (!mine(sws)) return { fail: [404, 'not_found'] };
       const dono = this.workspaces.get(sws!)!.owner === acc.id;
-      return { json: { active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null,
+      return { json: { active: !!cl, appState: cl?.states.at(-1) ?? null, relayStandby: cl?.relay ?? null, runtime: cl ? 'rodando' : null, ...(this.antigo ? {} : { keyWanted: this.keyWanted(sws!) }),
         relayTicket: cl?.relay && dono ? { exp: Math.floor(Date.now() / 1000) + 900, mac: crypto.createHash('sha256').update(`${sws}|${cl.relay}`).digest('hex') } : null } };
     }
     if (key === 'POST /v1/cloud/presence') {
       const cl = this.clouds.get(b.workspaceId);
       if (!mine(b.workspaceId) || !cl) return { fail: [409, 'no_cloud'] };
       if ((dev as Device & { kind?: string }).kind !== 'cloud') cl.presence.push(b.open !== false);
-      return { json: { ok: true, pcHoldsForSeconds: 120 } };
+      return { json: { ok: true, pcHoldsForSeconds: 120, ...(this.antigo ? {} : { keyWanted: (dev as Device & { kind?: string }).kind !== 'cloud' && this.keyWanted(b.workspaceId) }) } };
     }
     if (key === 'POST /v1/cloud/app-state') {
       const d = dev as Device & { kind?: string; cloudWs?: string }; const cl = d.cloudWs ? this.clouds.get(d.cloudWs) : undefined;
@@ -547,6 +558,7 @@ export class FakeWorld {
         if (b.kind === 'recovery') { w.recovery = { keyVersion: b.keyVersion, wrapped: b.wrapped }; (w.recoveries ??= new Map()).set(acc.id, w.recovery); }
         else {
           const d = this.devices.get(b.deviceId); if (!d || d.status !== 'active') return { fail: [400, 'invalid_device'] };
+          const defeito = this.envelopeFail.get(d.id); if (defeito) return { fail: defeito };
           // para aparelho de outra pessoa: só quem administra, e só para membro atual
           if (d.accountId !== acc.id && (RANK[role] < RANK.admin || !roleIn(w, d.accountId))) return { fail: [403, 'sync_forbidden'] };
           w.envelopes.set(d.id, { keyVersion: b.keyVersion, wrapped: b.wrapped });
@@ -560,10 +572,16 @@ export class FakeWorld {
       }
       if (m[2] === 'devices-needing-key') {
         const admin = RANK[role] >= RANK.admin;
-        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== kv && ((d as Device & { kind?: string; cloudWs?: string }).kind !== 'cloud' || (d as Device & { cloudWs?: string }).cloudWs === w.id)).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey }));
+        const devices = [...this.devices.values()].filter((d) => (d.accountId === acc.id || (admin && roleIn(w, d.accountId))) && d.status === 'active' && w.envelopes.get(d.id)?.keyVersion !== kv && ((d as Device & { kind?: string; cloudWs?: string }).kind !== 'cloud' || (d as Device & { cloudWs?: string }).cloudWs === w.id)).map((d) => ({ deviceId: d.id, accountId: d.accountId, syncPublicKey: d.syncPublicKey, ...(this.antigo ? {} : { kind: (d as Device & { kind?: string }).kind === 'cloud' ? 'cloud' : 'app' }) }));
+        // a nuvem primeiro, depois os da própria conta (world/src/sync.ts); `nuvemPorUltimo` força a ordem ruim
+        const peso = (x: { accountId: string; deviceId: string }) => ((this.devices.get(x.deviceId) as Device & { kind?: string }).kind === 'cloud' ? (this.nuvemPorUltimo ? 9 : 0) : x.accountId === acc.id ? 1 : 2);
+        if (!this.antigo || this.nuvemPorUltimo) devices.sort((x, y) => peso(x) - peso(y));
         return { json: { keyVersion: kv, devices } };
       }
       if (m[2] === 'changes' && method === 'POST') {
+        // a mesma operação de novo (a resposta se perdeu): o mesmo recibo, sem gravar outra mudança (world/src/sync.ts push)
+        const repetida = w.changes.find((c) => c.operationId === b.operationId);
+        if (repetida) return { json: { version: repetida.version, duplicate: true } };
         if (!w.plan) return { fail: [402, 'world_inactive'] };
         if (RANK[role] < RANK[b.kind === 'rotation' ? 'admin' : 'editor']) return { fail: [403, 'sync_forbidden'] };
         if (b.kind === 'rotation') { if (b.keyVersion !== kv + 1) return { fail: [409, 'key_version'] }; }
