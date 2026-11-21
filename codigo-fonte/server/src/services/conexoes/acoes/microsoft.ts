@@ -325,6 +325,8 @@ function buscaPorTexto(base: string, x: { limite: number; texto?: string; de?: s
 const linhaEmail = (m: any, tz: string): string => [
   `- id=${d(m.id, 512)}`, dataHora(tz, Date.parse(m.receivedDateTime)), `de ${quem(m.from?.emailAddress)}`, `para ${varios(m.toRecipients)}`,
   `assunto: ${d(m.subject, 200)}`, m.isRead === false ? 'não lido' : 'lido', ...(m.hasAttachments ? ['com anexo'] : []), `prévia: ${d(m.bodyPreview, 300)}`,
+  // o link do próprio e-mail: o agente cita na entrega (referencias, modelos-entrega.ts) e a pessoa abre direto
+  ...(m.webLink ? [`link: ${d(m.webLink, 1000)}`] : []),
 ].join(' | ');
 
 /** O mesmo erro, com o aviso do que ficou feito: "sem permissão" continua pedindo nova autorização. */
@@ -703,6 +705,7 @@ const ACOES_AGENDA: Acao[] = [
         `- id=${d(e.id, 512)}`, horarioDe(e, c.tz), d(e.subject, 200),
         ...(e.isCancelled ? ['cancelado'] : []), ...(e.location?.displayName ? [`local: ${d(e.location.displayName, 120)}`] : []), ...(e.isOnlineMeeting ? ['online'] : []),
         `organiza: ${quem(e.organizer?.emailAddress)}`, ...(e.attendees?.length ? [`participantes: ${varios(e.attendees, 12)}`] : []), ...(e.bodyPreview ? [`descrição: ${d(e.bodyPreview, 300)}`] : []),
+        ...(e.webLink ? [`link: ${d(e.webLink, 1000)}`] : []),
       ].join(' | '));
       const cursor = proximo(j, 'agenda');
       const v = caber(linhas);

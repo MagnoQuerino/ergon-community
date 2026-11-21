@@ -879,7 +879,7 @@ export class Results {
     if (forYou && !Number(task.requires_approval) && !pendingReview) {
       this.db.run('UPDATE tasks SET delivered_at = ? WHERE id = ?', now(), task.id);
       return this.record(ws, task.id, r.id, kind, 'aguardando_aprovacao', c, ev,
-        `Entregue a você${Number(task.review_round) > 1 ? ` (versão ${task.review_round})` : ''}: Aprovar conclui; Pedir ajustes faz uma nova versão no mesmo card.`, 'ergon');
+        `Entregue a você${Number(task.review_round) > 1 ? ` (versão ${task.review_round})` : ''}: Aprovar conclui; Devolver com instruções faz uma nova versão no mesmo card.`, 'ergon');
     }
     if (Number(task.requires_approval) || pendingReview) {
       return this.record(ws, task.id, r.id, kind, 'aguardando_aprovacao', c, ev,

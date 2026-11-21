@@ -5,6 +5,7 @@
  *   [[mover agente="Fídias" setor="Comunicação"]]
  *   [[novo-agente nome="Temístocles" papel="Vendas e propostas comerciais" setor="automático"]]
  */
+import { modeloDaTarefa } from './resumo-tarefa.ts';
 import type { Db } from '../db/db.ts';
 import { HttpError, clip, fold, id, notFound, now } from '../lib/util.ts';
 import { emPt, junto, reconhecer, textoDoResultado, tx, type Texto } from '../lib/textos.ts';
@@ -400,7 +401,10 @@ export function pendingDecisions(db: Db, workspaceId: string) {
       let ev: { pergunta?: string | null } = {};
       try { ev = JSON.parse(evidence ?? '{}'); } catch { /* sem evidência legível */ }
       const need = c.work_state === 'aguardando_info' ? 'info' : c.work_state === 'revisao' ? 'review' : 'approval';
-      return { ...c, need, question: need === 'info' ? ev.pergunta ?? null : null, external: c.result_state === 'sem_confirmacao' };
+      // a entrega no modelo: o tipo e os itens curtos, os mesmos do cartão (o relatório fica no card, em "Ver detalhes")
+      const m = modeloDaTarefa(db, workspaceId, c.id);
+      return { ...c, need, question: need === 'info' ? ev.pergunta ?? null : null, external: c.result_state === 'sem_confirmacao',
+        modelo: m ? { tipo: m.tipo, lead: m.lead, itens: m.itens.map((x) => x.titulo) } : null };
     });
   const linkList = db.all<{ id: string; task_id: string; number: number; title: string; related_number: number; related_title: string; reason: string }>(
     `SELECT p.id, p.task_id, t.number, t.title, r.number AS related_number, r.title AS related_title, p.reason

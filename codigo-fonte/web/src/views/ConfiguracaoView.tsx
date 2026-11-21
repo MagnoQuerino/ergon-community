@@ -14,6 +14,7 @@ import type { Me, VersionInfo } from '../lib/types.ts';
 type ToolWithHolders = AgentTool & { holders?: { count: number; sample: string[] } };
 import { SaudePanel } from './SaudePanel.tsx';
 import { CapacidadesPanel } from '../components/CapacidadesPanel.tsx';
+import { ModelosEntrega } from '../components/ModelosEntrega.tsx';
 import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
 import { AtualizacoesPanel } from './AtualizacoesPanel.tsx';
@@ -174,6 +175,8 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
       <ReservaCard a={ajustes.a} salvar={ajustes.salvar} aviso={ajustes.aviso} />
 
       <CapacidadesPanel dono={dono} />
+
+      <ModelosEntrega dono={dono} />
 
       <section className="card">
         <h3>{t('configuracoes.andamento.titulo')}</h3>

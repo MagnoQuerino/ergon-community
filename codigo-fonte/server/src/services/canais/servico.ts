@@ -28,6 +28,7 @@ import type { RunExecutor } from '../runs.ts';
 import { coordinatorFor } from '../team-query.ts';
 import { CanaisExternos, KIND_EXTERNO } from './externo.ts';
 import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
+import { avisoDoCard } from '../resumo-tarefa.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
 const CANAIS: readonly NomeCanal[] = ['telegram', 'discord'];
@@ -469,16 +470,22 @@ export class Canais {
   }
 
   // ------------------------------------------------------------------------------------------------ avisos de "Com você"
-  private comVoce(v: VinculoRow): Array<{ chave: string; texto: string; proposta?: { id: string; kind: string; summary: string } }> {
+  private comVoce(v: VinculoRow): Array<{ chave: string; texto: string; bloco?: boolean; proposta?: { id: string; kind: string; summary: string } }> {
     const d = pendingDecisions(this.d.db, v.workspace_id);
     // o que nasceu numa conversa de canal já foi como cartão por lá
     const doCanal = new Set(this.d.db.all<{ c: string }>('SELECT conversation_id AS c FROM canais_vinculos WHERE user_id = ? AND conversation_id IS NOT NULL', v.user_id).map((r) => r.c));
-    const out: Array<{ chave: string; texto: string; proposta?: { id: string; kind: string; summary: string } }> = [];
+    const out: Array<{ chave: string; texto: string; bloco?: boolean; proposta?: { id: string; kind: string; summary: string } }> = [];
     // os cartões dos canais externos (pausa, pedido de risco) ficam no app: um celular roubado não os vê
     for (const p of d.proposals) { if (p.kind !== KIND_EXTERNO && !(p.conversation_id && doCanal.has(p.conversation_id))) out.push({ chave: `p:${p.id}`, texto: partesDoResumo(p.summary).titulo, proposta: p }); }
     for (const w of d.waiting) { if (!(w.conversation_id && doCanal.has(w.conversation_id))) out.push({ chave: `w:${w.id}`, texto: `${w.agent_name} espera uma resposta sua` }); }
     const precisa: Record<string, string> = { info: 'precisa de uma informação sua', review: 'está pronto para você revisar', approval: 'espera a sua aprovação' };
-    for (const c of d.cards) out.push({ chave: `c:${c.id}:${c.work_state}`, texto: `Card #${c.number}: ${c.title} — ${c.agent_name ? `${c.agent_name}: ` : ''}${precisa[c.need] ?? 'espera você'}${c.question ? ` (${c.question})` : ''}` });
+    for (const c of d.cards) {
+      // com a entrega no modelo: o mesmo resumo curto do cartão (o tipo e os itens) e o link dos detalhes no Ergon
+      const a = avisoDoCard(this.d.db, v.workspace_id, c.id, this.d.cfg.publicUrl);
+      out.push(a
+        ? { chave: `c:${c.id}:${c.work_state}`, texto: [`Card #${c.number} — ${a.titulo}:`, ...a.linhas, `Ver detalhes: ${a.link}`].join('\n'), bloco: true }
+        : { chave: `c:${c.id}:${c.work_state}`, texto: `Card #${c.number}: ${c.title} — ${c.agent_name ? `${c.agent_name}: ` : ''}${precisa[c.need] ?? 'espera você'}${c.question ? ` (${c.question})` : ''}` });
+    }
     for (const l of d.linkList) out.push({ chave: `l:${l.id}`, texto: `Ligar o card #${l.number} ao #${l.related_number}?` });
     for (const r of d.ruleList) out.push({ chave: `r:${r.id}`, texto: `Regra sugerida: ${r.text}` });
     return out;
@@ -519,7 +526,10 @@ export class Canais {
     if (janela.length >= 20) { this.armarAvisos(userId, canal, Math.max(1000, 3600_000 - (this.agora() - Math.min(...janela)))); return; }
     const itens = vivos.map((k) => agora.get(k)!);
     const decisoes = itens.filter((x) => x.proposta && !SO_NO_ERGON.includes(x.proposta.kind)).slice(0, 5);
-    const resto = itens.filter((x) => !decisoes.includes(x));
+    // o card com a entrega no modelo vai numa mensagem própria: o tipo, os itens curtos e o link dos detalhes
+    const blocos = itens.filter((x) => x.bloco && !decisoes.includes(x)).slice(0, 5);
+    for (const b of blocos) this.enfileirar(v, 'texto', { texto: textoParaTeams(b.texto, 1500) });
+    const resto = itens.filter((x) => !decisoes.includes(x) && !blocos.includes(x));
     if (resto.length) {
       const linhas = resto.slice(0, 10).map((x) => `• ${textoParaTeams(x.texto, 300)}`);
       if (resto.length > 10) linhas.push(`• E mais ${resto.length - 10} no Ergon.`);

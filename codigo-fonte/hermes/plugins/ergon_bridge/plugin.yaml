@@ -8,6 +8,7 @@ provides_tools:
   - conexoes_listar
   - conexoes_executar
   - perguntar
+  - entregar
   - pedir_chave
   - pedir_senha_admin
   - gestao_listar

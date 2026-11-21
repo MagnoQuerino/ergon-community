@@ -74,7 +74,8 @@ import { WhatsAppReader } from './services/whatsapp.ts';
 import { vistaDaAprovacao } from './services/aprovacao-cartao.ts';
 import { answerQuestion, decideProposal, grantPermission, listProposals, parsePermissionRequests, parseProposals, parseTaskProposals, parseToolRelease, pendingCount, pendingDecisions, reconsiderProposal, recordProposals, type Proposal } from './services/proposals.ts';
 import { stepsOf, type RequestPayload } from './services/purpose.ts';
-import { etapaCurta, resumoDaTarefa, semLinhaParaVoce } from './services/resumo-tarefa.ts';
+import { etapaCurta, modeloDaTarefa, resumoDaTarefa, semLinhaParaVoce } from './services/resumo-tarefa.ts';
+import { MAX_RECUSAS, TIPOS, cardDaExecucao, ajustarModelo, lerAjustes, marcarDecisao, modelosAtivos, registrar, registrarRecusa, restaurarModelos, ultimaEntrega, validarEntrega, type PedidoAjuste, type TipoEntrega } from './services/modelos-entrega.ts';
 import { Routines, upgradeBriefingSources } from './services/routines.ts';
 import { parseDue } from './services/due.ts';
 import { workspaceTz } from './services/routine-proposals.ts';
@@ -2184,6 +2185,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { task, log, envio, link: link ?? null, proposals, source, runs, review,
       // o que a pessoa vê de cara: a situação e a frase exata do que decide (ou do que foi feito), pelos fatos registrados
       resumo: team ? resumoDaTarefa(db, a.workspaceId, taskId, { queue }) : null,
+      // a entrega no modelo (modelos-entrega.ts): o topo do painel (tipo e itens curtos) e o diálogo "Ver detalhes"
+      modelo: team ? modeloDaTarefa(db, a.workspaceId, taskId) : null,
       agents, reviewer: reviewerFor(db, a.workspaceId, task.agent_id),
       files: { inputs: files.filter((x) => x.role === 'entrada'), deliverables: files.filter((x) => x.role === 'entregavel') }, operations: ops, work,
       queue,
@@ -2276,6 +2279,73 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (boardAudience(db, a.workspaceId, getTask(db, a.workspaceId, taskId).board_id) !== 'team') throw new HttpError(409, 'not_team', 'Nas suas tarefas, conclua pelo próprio card.');
     const b = req.body as { action: 'answer' | 'approve' | 'return' | 'retry' | 'dismiss'; text?: string };
     return teamwork.respond(a.workspaceId, a.userId, taskId, b.action, b.text ?? null);
+  });
+
+  // A decisão item a item no diálogo "Ver detalhes" (modelos-entrega.ts): aprovar marca o item (todos aprovados num card
+  // que espera a aprovação: aprova o card, a mesma resposta do "Aprovar"); devolver leva a instrução ao agente pelo mesmo
+  // caminho de "Devolver com instruções" (ou de revisar, num card concluído), dizendo de qual item se trata e o que já foi aprovado.
+  app.post('/api/tasks/:id/entrega/decidir', {
+    schema: { params: idParams('tsk'), body: { type: 'object', additionalProperties: false, required: ['entregaId', 'indice', 'decisao'], properties: {
+      entregaId: { type: 'string', pattern: '^ent_[A-Za-z0-9_-]{8,64}$' }, indice: { type: 'integer', minimum: 0, maximum: 7 },
+      decisao: { enum: ['aprovado', 'devolvido'] }, instrucao: S.str(2000) } } },
+  }, async (req) => {
+    const a = auth(req);
+    const taskId = (req.params as { id: string }).id;
+    const task = getTask(db, a.workspaceId, taskId);
+    if (boardAudience(db, a.workspaceId, task.board_id) !== 'team') throw new HttpError(409, 'not_team', 'Só os cards da equipe têm entrega.');
+    const b = req.body as { entregaId: string; indice: number; decisao: 'aprovado' | 'devolvido'; instrucao?: string };
+    const reg = ultimaEntrega(db, a.workspaceId, taskId);
+    if (!reg || reg.id !== b.entregaId) throw new HttpError(409, 'mudou', 'A entrega mudou: abra de novo.');
+    if (reg.entrega.tipo !== 'decisao' || b.indice >= reg.entrega.itens.length) throw new HttpError(400, 'indice', 'Item desconhecido.');
+    const itens = reg.entrega.itens;
+    const instrucao = (b.instrucao ?? '').trim();
+    if (b.decisao === 'devolvido' && instrucao.length < 3) throw new HttpError(400, 'instrucao', 'Diga o que ajustar.');
+    const decisoes = marcarDecisao(db, a.workspaceId, reg.id, b.indice, b.decisao);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'task.entrega_item', targetType: 'task', targetId: taskId,
+      evidence: { indice: b.indice, decisao: b.decisao }, result: `${b.decisao === 'aprovado' ? 'Aprovado' : 'Devolvido'}: ${itens[b.indice].titulo}` });
+    let result: string | null = null;
+    if (b.decisao === 'devolvido') {
+      const ja = itens.filter((_, i) => decisoes[String(i)] === 'aprovado').map((x) => `“${x.titulo}”`);
+      const texto = `Sobre o item “${itens[b.indice].titulo}”: ${instrucao}${ja.length ? `\nJá aprovado pela pessoa (mantenha): ${ja.join(', ')}.` : ''}`;
+      result = Number(task.completed) ? teamwork.revise(a.workspaceId, a.userId, taskId, texto).result : teamwork.respond(a.workspaceId, a.userId, taskId, 'return', texto).result;
+    } else if (itens.every((_, i) => decisoes[String(i)] === 'aprovado') && !Number(task.completed) && ['aguardando_aprovacao', 'revisao'].includes(task.work_state ?? '')) {
+      result = teamwork.respond(a.workspaceId, a.userId, taskId, 'approve', null).result;
+    }
+    bus.publish(a.workspaceId, 'tasks.changed', { id: taskId });
+    return { decisoes, result };
+  });
+
+  // Modelos de entrega (modelos-entrega.ts): os ativos, ajustar as partes livres e voltar aos originais. As mesmas rotas
+  // servem à tela de Configurações e ao coordenador (config.gestao: entram no catálogo da gestão sozinhas). Ajustar
+  // muda o que a equipe entrega: pede o cartão da pessoa; restaurar é voltar ao seguro de fábrica, vai direto.
+  app.get('/api/modelos-entrega', { config: { gestao: { id: 'modelos-entrega.ver', area: 'ajustes', rotulo: 'Ver os modelos de entrega (o formato do que a equipe entrega à pessoa) e o que foi personalizado', aprova: false } } },
+    async (req) => modelosAtivos(db, auth(req).workspaceId));
+  app.put('/api/modelos-entrega', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['tipo'], properties: {
+      tipo: { enum: [...TIPOS] }, tom: S.str(200), instrucao: S.str(400),
+      campos: { type: 'array', maxItems: 4, items: { type: 'object', additionalProperties: false, required: ['chave', 'rotulo'], properties: { chave: S.str(31, 2), rotulo: S.str(80, 2), obrigatorio: { type: 'boolean' } } } },
+      remover: { type: 'array', maxItems: 10, items: S.str(31, 1) } } } },
+    config: { gestao: { id: 'modelos-entrega.ajustar', area: 'ajustes', rotulo: 'Ajustar as partes livres de um modelo de entrega (tipo: decisao, entrega, relatorio, pergunta ou bloqueio): campos a mais (ex.: valor em R$), o tom, uma instrução curta. O essencial é travado', aprova: true } },
+  }, async (req) => {
+    const a = owner(req);
+    const b = req.body as PedidoAjuste;
+    ajustarModelo(db, a.workspaceId, b);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'entrega.modelo_ajustado', targetType: 'workspace', targetId: a.workspaceId,
+      evidence: { tipo: b.tipo, campos: (b.campos ?? []).map((c) => c.chave), remover: b.remover ?? [], tom: !!b.tom, instrucao: !!b.instrucao }, result: `modelo de entrega “${b.tipo}” ajustado` });
+    bus.publish(a.workspaceId, 'settings.changed', {});
+    return modelosAtivos(db, a.workspaceId);
+  });
+  app.post('/api/modelos-entrega/restaurar', {
+    schema: { body: { type: 'object', additionalProperties: false, properties: { tipo: { enum: [...TIPOS] } } } },
+    config: { gestao: { id: 'modelos-entrega.restaurar', area: 'ajustes', rotulo: 'Voltar aos modelos de entrega originais (todos, ou só um tipo)', aprova: false } },
+  }, async (req) => {
+    const a = owner(req);
+    const tipo = (req.body as { tipo?: TipoEntrega } | undefined)?.tipo;
+    restaurarModelos(db, a.workspaceId, tipo);
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'entrega.modelos_restaurados', targetType: 'workspace', targetId: a.workspaceId,
+      evidence: { tipo: tipo ?? 'todos' }, result: tipo ? `modelo de entrega “${tipo}” de volta ao original` : 'modelos de entrega de volta aos originais' });
+    bus.publish(a.workspaceId, 'settings.changed', {});
+    return modelosAtivos(db, a.workspaceId);
   });
 
   // exigir a sua aprovação antes de concluir (mesmo com o resultado validado)
@@ -3252,6 +3322,40 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!tr) return { ok: false };
     trainings.event(tr, { tool: String(b.tool ?? ''), pending_id: b.pending_id, staged: b.staged, reads: b.reads });
     return { ok: true };
+  });
+
+  // A entrega no modelo (ferramenta entregar do plugin; modelos-entrega.ts): valida e registra para o card da execução.
+  // Fora do modelo, os erros voltam ao agente, que refaz no mesmo turno; depois de MAX_RECUSAS, segue sem (o Ergon monta
+  // o formato mínimo seguro ao fim). A entrega só vale para o card da execução que chamou (a sessão diz qual).
+  app.post('/internal/bridge/v1/entrega', {
+    bodyLimit: 128 * 1024,
+    schema: { body: { type: 'object', required: ['entrega'], properties: { session_id: S.str(200), task_id: S.str(200), entrega: { type: 'object' } } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { session_id?: string; task_id?: string; entrega: unknown };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    const run = found && motors.allows(motor, found.workspace_id) && (found.status === 'running' || found.status === 'waiting_user') ? found : null;
+    if (!run) return { ok: false, status: 'falhou', texto: 'Esta ferramenta só funciona dentro de um trabalho em andamento no Ergon.' };
+    // fora de um card (uma conversa), a entrega vai como texto: nada a registrar
+    const taskId = cardDaExecucao(db, run);
+    if (!taskId) return { ok: true, status: 'sem_card', texto: 'Fora de um card a entrega vai no texto da conversa: siga.' };
+    // a conferência das referências: id interno só deste workspace; link só dos aplicativos das Conexões (e do próprio
+    // Ergon); citar é obrigatório quando o trabalho leu objetos das contas (o registro do serviço diz)
+    const origem = /^pede-entrega-\d+-(.+)$/.exec(run.idempotency_key)?.[1] ?? run.id;
+    const tabela: Record<string, string> = { art: 'artifacts', tsk: 'tasks', cnv: 'conversations' };
+    const v = validarEntrega(b.entrega, lerAjustes(db, run.workspace_id), {
+      idValido: (rid) => { const t = tabela[rid.slice(0, 3)]; return !!t && !!db.get(`SELECT 1 AS x FROM ${t} WHERE id = ? AND workspace_id = ?`, rid, run.workspace_id); },
+      exigirReferencias: !!db.get("SELECT 1 AS x FROM conexao_acoes WHERE run_id IN (?, ?) AND risco = 'ler' AND status = 'feita' LIMIT 1", run.id, origem),
+      dominios: [new URL(cfg.publicUrl).hostname],
+    });
+    if (!v.ok) {
+      const n = registrarRecusa(db, run.workspace_id, { taskId, runId: run.id, erros: v.erros });
+      if (n >= MAX_RECUSAS) return { ok: true, status: 'minimo', texto: `A entrega não passou em ${n} tentativas: o Ergon monta o formato mínimo com o seu texto. Siga e termine.` };
+      return { ok: false, status: 'recusada', erros: v.erros, restam: MAX_RECUSAS - n, texto: `A entrega não está no modelo. Corrija e chame entregar de novo: ${v.erros.join(' · ')}` };
+    }
+    registrar(db, run.workspace_id, { taskId, runId: run.id, entrega: v.entrega });
+    bus.publish(run.workspace_id, 'tasks.changed', { id: taskId });
+    return { ok: true, status: 'registrada', texto: 'Entrega registrada: o cartão da pessoa mostra este resumo. Termine com o texto da entrega.' };
   });
 
   // Cartões pedidos pelo agente (ferramentas perguntar, pedir_chave e pedir_senha_admin do plugin): abrir e consultar. A

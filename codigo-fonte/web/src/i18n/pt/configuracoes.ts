@@ -2,6 +2,11 @@
 import type { Area } from '../tipos.ts';
 
 const configuracoes = {
+  // ——— modelos de entrega (ModelosEntrega.tsx) ———
+  'modelosEntrega.titulo': 'Modelos de entrega',
+  'modelosEntrega.original': 'Original',
+  'modelosEntrega.tom': 'tom: {tom}',
+  'modelosEntrega.restaurar': 'Restaurar originais',
   'titulo': 'Configurações',
 
   // ——— o que várias partes da área usam ———

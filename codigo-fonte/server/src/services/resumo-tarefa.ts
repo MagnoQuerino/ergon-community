@@ -18,6 +18,7 @@ import { emPt, tx, type Codigo, type Texto, type Valor } from '../lib/textos.ts'
 import { clip } from '../lib/util.ts';
 import { integrationDef } from './integrations.ts';
 import { taskFiles } from './operations.ts';
+import { TITULO_DO_TIPO, itensCurtos, ultimaEntrega, type Entrega } from './modelos-entrega.ts';
 
 // ------------------------------------------------------------------------------------------- a linha do agente
 
@@ -241,7 +242,7 @@ const MOTIVO = new Set(['execucao', 'modelo', 'conteudo', 'alegacao', 'pendencia
 interface Ctx { queue?: { position: number; total: number } | null }
 
 /** Desde quando contam as ações feitas para este resumo: o trabalho que terminou agora (a conclusão de antes fica de fora). */
-function desdeDoResumo(db: Db, ws: string, taskId: string, concluida: boolean): string {
+export function desdeDoResumo(db: Db, ws: string, taskId: string, concluida: boolean): string {
   const rows = db.all<{ state: string; evidence: string; decided_by: string; created_at: string }>(
     "SELECT state, evidence, decided_by, created_at FROM task_results WHERE workspace_id = ? AND task_id = ? AND state IN ('validado', 'confirmado_humano', 'devolvido') ORDER BY created_at DESC, rowid DESC LIMIT 100", ws, taskId);
   let pulou = !concluida;
@@ -413,4 +414,52 @@ export function resumoDaTarefa(db: Db, ws: string, taskId: string, ctx: Ctx = {}
   }
   if (['processamento', 'resultado', 'validacao'].includes(state)) return montar('trabalhando', tx('resumo.situacao.trabalhando'), tx('resumo.titulo.agora'), tx('resumo.frase.trabalhando', { quem }));
   return montar('fila', tx('resumo.situacao.esperandoComecar'), tx('resumo.titulo.agora'), t.agent_id ? tx('resumo.frase.comecaLogo', { quem }) : tx('resumo.frase.coordenacaoVaiEncaminhar'));
+}
+
+// ------------------------------------------------------------------------------------------- o modelo da entrega
+
+/**
+ * O modelo da entrega do card (modelos-entrega.ts) para o topo do painel e o diálogo "Ver detalhes": o que o agente
+ * registrou (ou o formato mínimo) no trabalho atual; a pergunta e o bloqueio, sem registro, saem dos fatos. null: nada
+ * para mostrar agora (na fila, trabalhando).
+ */
+export function modeloDaTarefa(db: Db, ws: string, taskId: string): ModeloDaTarefa | null {
+  const t = db.get<{ completed: number; work_state: string | null }>('SELECT completed, work_state FROM tasks WHERE id = ? AND workspace_id = ?', taskId, ws);
+  if (!t) return null;
+  if (db.get("SELECT 1 AS x FROM runs WHERE task_id = ? AND workspace_id = ? AND status IN ('queued', 'running', 'waiting_user')", taskId, ws)) return null;
+  const concluida = !!Number(t.completed);
+  const state = t.work_state ?? 'solicitada';
+  const reg = ultimaEntrega(db, ws, taskId, desdeDoResumo(db, ws, taskId, concluida));
+  const vista = (e: Entrega, r: typeof reg): ModeloDaTarefa => {
+    const { lead, itens } = itensCurtos(e);
+    return { id: r?.id ?? null, tipo: e.tipo, minimo: r?.minimo ?? true, lead, itens: itens.map((titulo, i) => ({ titulo, decisao: e.tipo === 'decisao' ? r?.decisoes[String(i)] ?? null : null })), entrega: e };
+  };
+  if (reg && (concluida || ['aguardando_aprovacao', 'revisao'].includes(state) || (state === 'aguardando_info' && reg.entrega.tipo === 'pergunta') || (state === 'falha' && reg.entrega.tipo === 'bloqueio'))) return vista(reg.entrega, reg);
+  const res = db.get<{ state: string; justification: string; evidence: string }>('SELECT state, justification, evidence FROM task_results WHERE workspace_id = ? AND task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1', ws, taskId);
+  let ev: { pergunta?: unknown; pessoa?: unknown } = {};
+  try { ev = res ? JSON.parse(res.evidence) : {}; } catch { ev = {}; }
+  if (state === 'aguardando_info' && typeof ev.pergunta === 'string' && ev.pergunta) {
+    return vista({ tipo: 'pergunta', pergunta: clip(ev.pergunta.replace(/\s+/g, ' '), 160), opcoes: [], porque: clip(ev.pergunta, 600), extras: {}, referencias: [] }, null);
+  }
+  if (state === 'falha' && res) {
+    const motivo = res.justification.replace(/^Não foi feito( por inteiro)?:\s*/i, '').replace(/\s*O card (fica|continua) aberto\.?/g, '').trim();
+    const primeira = motivo.split(/(?<=[.!?])\s/)[0] ?? motivo;
+    return vista({ tipo: 'bloqueio', motivo: clip(primeira, 120), precisa: typeof ev.pessoa === 'string' ? clip(ev.pessoa, 160) : '', tentado: [], detalhes: clip(motivo, 4000), extras: {}, referencias: [] }, null);
+  }
+  return null;
+}
+export interface ModeloDaTarefa {
+  id: string | null; tipo: Entrega['tipo']; minimo: boolean; lead: string | null;
+  itens: Array<{ titulo: string; decisao: 'aprovado' | 'devolvido' | null }>; entrega: Entrega;
+}
+
+/**
+ * O aviso de um card para os canais (Telegram, Discord, Teams) e os e-mails de aviso: o mesmo resumo curto do cartão
+ * (o tipo e os itens) e o link dos detalhes no Ergon. null: o card não tem a entrega no modelo agora.
+ */
+export function avisoDoCard(db: Db, ws: string, taskId: string, publicUrl: string): { titulo: string; linhas: string[]; link: string } | null {
+  const m = modeloDaTarefa(db, ws, taskId);
+  if (!m) return null;
+  const linhas = [...(m.lead ? [m.lead] : []), ...m.itens.slice(0, 6).map((x) => `• ${x.titulo}`), ...(m.itens.length > 6 ? [`• + ${m.itens.length - 6}`] : [])];
+  return { titulo: TITULO_DO_TIPO[m.tipo], linhas, link: `${publicUrl.replace(/\/+$/, '')}/#equipe?card=${encodeURIComponent(taskId)}` };
 }

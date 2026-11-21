@@ -679,6 +679,8 @@ export const ACOES_GOOGLE: Acao[] = [
       const linhas = itens.map((m) => [
         `- id=${String(m.id)}`, quando(Number(m.internalDate), ctx.tz), `de ${neutral(cabecalho(m.payload, 'from'), 160)}`, `para ${neutral(cabecalho(m.payload, 'to'), 200)}`, `assunto: ${neutral(cabecalho(m.payload, 'subject'), 200)}`,
         (m.labelIds ?? []).includes('UNREAD') ? 'não lido' : 'lido', `prévia: ${neutral(xmlText(String(m.snippet ?? '')), 300)}`,
+        // o link da conversa no Gmail: o agente cita na entrega (referencias, modelos-entrega.ts) e a pessoa abre direto
+        ...(m.threadId ? [`link: https://mail.google.com/mail/u/0/#all/${encodeURIComponent(String(m.threadId))}`] : []),
       ].join(' | '));
       const v = caber(linhas);
       return lido(`${v.linhas.length ? `${v.linhas.length} e-mail(s):\n${v.linhas.join('\n')}` : 'Nenhum e-mail encontrado.'}${v.nota}${haMais(j)}`);

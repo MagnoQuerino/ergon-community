@@ -413,7 +413,9 @@ export interface Decisions {
   proposals: Array<{ id: string; kind: Proposal['kind']; summary: string; payload?: string | null; detalhe?: string | null; risco?: string | null; created_at: string; conversation_id: string | null; agent_id: string | null; agent_name: string | null; purpose: string | null; task_id?: string | null; task_number?: number | null }>;
   waiting: Array<{ id: string; conversation_id: string | null; agent_id: string; agent_name: string; created_at: string }>;
   /** cards da equipe parados à espera de você */
-  cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null }>;
+  cards: Array<{ id: string; number: number; title: string; work_state: string; agent_id: string | null; agent_name: string | null; updated_at: string; need: Need; question: string | null; external: boolean; justification: string | null;
+    /** a entrega no modelo (o tipo e os itens curtos do cartão) */
+    modelo?: { tipo: 'decisao' | 'entrega' | 'relatorio' | 'pergunta' | 'bloqueio'; lead: string | null; itens: string[] } | null }>;
   linkList: Array<{ id: string; task_id: string; number: number; title: string; related_number: number; related_title: string; reason: string }>;
   ruleList: Array<{ id: string; text: string; created_at: string }>;
   total: number;
