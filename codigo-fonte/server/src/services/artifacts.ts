@@ -113,12 +113,35 @@ export async function openArtifactAsync(db: Db, filesDir: string, workspaceId: s
   return { ...a, data: db.fieldCipher ? db.fieldCipher.openBytes(raw, a.storage_key) : raw };
 }
 
+/**
+ * Grava um conteúdo novo de um arquivo (uma versão, rc.42), cifrado como o original, sob uma chave nova. Quem chama
+ * aponta o arquivo para ela (artifacts.storage_key) e registra a versão.
+ */
+export function gravarConteudo(db: Db, filesDir: string, workspaceId: string, data: Buffer): string {
+  const key = id('art');
+  const file = storagePath(filesDir, workspaceId, key);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, db.fieldCipher ? db.fieldCipher.sealBytes(workspaceId, data, key) : data, { flag: 'wx', mode: 0o600 });
+  return key;
+}
+
+/** O conteúdo guardado sob uma chave (uma versão antiga de um arquivo). */
+export function lerConteudo(db: Db, filesDir: string, workspaceId: string, key: string): Buffer {
+  const file = storagePath(filesDir, workspaceId, key);
+  if (!fs.existsSync(file)) throw notFound('arquivo');
+  const raw = fs.readFileSync(file);
+  return db.fieldCipher ? db.fieldCipher.openBytes(raw, key) : raw;
+}
+
 /** Remove um arquivo que o próprio Ergon acabou de gravar e não chegou a entregar (operação que falhou no meio). */
 export function removeArtifact(db: Db, filesDir: string, workspaceId: string, artifactId: string): void {
   const art = db.get<{ storage_key: string }>('SELECT storage_key FROM artifacts WHERE id = ? AND workspace_id = ?', artifactId, workspaceId);
   if (!art) return;
   db.run('DELETE FROM task_artifacts WHERE artifact_id = ? AND workspace_id = ?', artifactId, workspaceId);
   db.run('DELETE FROM message_attachments WHERE artifact_id = ? AND workspace_id = ?', artifactId, workspaceId);
+  // as versões (rc.42): cada uma tem o conteúdo dela; voltar a uma versão reaproveita a chave
+  const keys = new Set([art.storage_key, ...db.all<{ k: string }>('SELECT storage_key AS k FROM artifact_versoes WHERE artifact_id = ? AND workspace_id = ?', artifactId, workspaceId).map((v) => v.k)]);
+  db.run('DELETE FROM artifact_versoes WHERE artifact_id = ? AND workspace_id = ?', artifactId, workspaceId);
   db.run('DELETE FROM artifacts WHERE id = ? AND workspace_id = ?', artifactId, workspaceId);
-  fs.rmSync(storagePath(filesDir, workspaceId, art.storage_key), { force: true });
+  for (const k of keys) fs.rmSync(storagePath(filesDir, workspaceId, k), { force: true });
 }

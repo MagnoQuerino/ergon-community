@@ -37,6 +37,8 @@ import { registerCartaoRoutes } from './routes/cartao.ts';
 import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } from './services/ajustes-motor.ts';
 import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
 import { registerRecursosRoutes } from './routes/recursos.ts';
+import { registerEntregaveisRoutes } from './routes/entregaveis.ts';
+import { RevisaoDocumento } from './services/revisao-documento.ts';
 import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
@@ -260,6 +262,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const operations = new Operations(db, bus, opsCfg);
   const results = new Results(db, bus, operations, opsCfg);
   const teamwork = new Teamwork(db, bus, executor, results, operations, cfg.filesDir);
+  // "Revisar com o coordenador" (rc.42): frentes por trecho, cada uma um card com prioridade, o texto chegando ao vivo
+  const revisaoDoc = new RevisaoDocumento(db, bus, cfg.filesDir, executor, teamwork);
   // a equipe puxa conversa quando a pessoa chega; o colega que puxou recebe o que precisa explicar quando ela responde
   const initiative = new Initiative(db, bus, executor);
   chatHooks.replyContext = (ws, userId, agentId, convId, messageId) => initiative.replyContext(ws, userId, agentId, convId, messageId);
@@ -2790,6 +2794,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   executor.anexosPendentes = (r) => { const ids = audiosDaExecucao(r); return ids.length > 0 && transcricoes.pendentes(r.workspace_id, ids); };
   executor.esperaAnexos = (r) => (r.kind === 'chat' ? transcricoes.esperaMs(r.workspace_id, audiosDaExecucao(r), r.started_at) : 0);
   registerRecursosRoutes(app, { db, bus, recursos, transcricoes, executor, cfg, auth, owner });
+  // entregáveis (rc.42): documento formatado, PDF com modelo, identidade, modelos e revisão com o coordenador
+  registerEntregaveisRoutes(app, { db, bus, revisao: revisaoDoc, cfg, auth, owner });
   // "Relatar um problema" (Ajuda): prévia limpa e envio só no clique, sem conta nem World: services/relatos.ts
   registerRelatosRoutes(app, { db, cfg, auth, url: cfg.relatosUrl, timeoutMs: cfg.relatosTimeoutMs });
   // aplicativos conectados pela pessoa (servidor MCP que o catálogo não traz, rc.29): routes/mcp-proprio.ts

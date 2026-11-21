@@ -233,6 +233,8 @@ export class RunExecutor {
   aoResolverAprovacao: ((r: RunRow, e: RunEvent) => void) | null = null;
   /** respostas chegando agora (texto ao vivo), por execução */
   private live = new Map<string, LiveRun & { abort: AbortController; pub: number; timer: NodeJS.Timeout | null }>();
+  /** Execução de card cujo texto a tela acompanha chegando (a revisão de documento): o app liga (revisao-documento.ts). */
+  acompanharTexto: ((r: RunRow) => boolean) | null = null;
   liveOf(runId: string): LiveRun | null { const l = this.live.get(runId); return l ? { text: l.text, activity: l.activity } : null; }
   onFinish(fn: (r: RunRow, status: RunStatus, output: string | null) => void): void { this.finishListeners.push(fn); }
 
@@ -745,7 +747,7 @@ export class RunExecutor {
       l.timer = null;
       if (this.live.get(r.id) !== l) return;
       l.pub = Date.now();
-      this.bus.publish(r.workspace_id, 'runs.live', { id: r.id, conversationId: r.conversation_id });
+      this.bus.publish(r.workspace_id, 'runs.live', { id: r.id, conversationId: r.conversation_id, taskId: r.task_id ?? null });
     };
     let seq = 0;
     const on = (e: RunEvent) => {
@@ -758,7 +760,8 @@ export class RunExecutor {
       } else if (e.event === 'approval.responded') {
         try { this.aoResolverAprovacao?.(r, e); } catch { /* idem */ }
       }
-      if (r.kind !== 'chat') return; // card: só o registro das ferramentas (a tela não acompanha o texto chegando)
+      // card: só o registro das ferramentas, salvo o que a tela acompanha ao vivo (a revisão de um documento, rc.42)
+      if (r.kind !== 'chat' && !this.acompanharTexto?.(r)) return;
       if (e.event === 'message.delta' && e.delta) { l.text = clip(l.text + e.delta, 400_000); l.activity = null; }
       else if (e.event === 'tool.started') l.activity = toolPhrase(e.tool, e.preview);
       else if (e.event === 'subagent.start') l.activity = 'chamando reforço';

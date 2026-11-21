@@ -14,6 +14,7 @@ import { markdownToCsv, markdownToXlsx } from '../lib/xlsx.ts';
 import { markdownToPdf } from '../lib/pdf.ts';
 import { buildPptx, slidesFromMarkdown } from './pptx.ts';
 import { audit, type Bus } from './bus.ts';
+import { acharModelo, escolherModelo, nomesDosModelos, pdfDeTexto } from './entregaveis.ts';
 import { readDocument } from './doc-isolated.ts';
 
 interface FolderRow { id: string; parent_id: string | null; name: string; system_key: string | null; created_at: string; deleted_at: string | null }
@@ -318,13 +319,13 @@ export async function preview(db: Db, cfg: Pick<Config, 'filesDir'>, workspaceId
 // Organização pela coordenação ----------------------------------------------------------------------------------------
 
 const attr = (body: string, k: string) => body.match(new RegExp(`${k}\\s*=\\s*"([^"]*)"`, 'i'))?.[1]?.trim() ?? '';
-const TAG = /\[\[\s*(pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|copiar-arquivo|salvar-documento|apagar|esvaziar-lixeira)\b((?:[^\]]|\](?!\]))*)\]\]/gi;
+const TAG = /\[\[\s*(pasta|mover-arquivo|renomear-arquivo|renomear-pasta|lixeira|copiar-arquivo|salvar-documento|usar-modelo|apagar|esvaziar-lixeira)\b((?:[^\]]|\](?!\]))*)\]\]/gi;
 
-interface DocCommand { op: 'pasta' | 'mover-arquivo' | 'renomear-arquivo' | 'renomear-pasta' | 'lixeira' | 'copiar-arquivo' | 'salvar-documento' | 'apagar' | 'esvaziar-lixeira'; caminho: string; arquivo: string; para: string; nome: string; pasta: string; formato: string }
+interface DocCommand { op: 'pasta' | 'mover-arquivo' | 'renomear-arquivo' | 'renomear-pasta' | 'lixeira' | 'copiar-arquivo' | 'salvar-documento' | 'usar-modelo' | 'apagar' | 'esvaziar-lixeira'; caminho: string; arquivo: string; para: string; nome: string; pasta: string; formato: string; modelo: string }
 
 export function parseDocCommands(text: string | null): DocCommand[] {
   return [...(text ?? '').matchAll(TAG)].slice(0, 30).map((m) => ({
-    op: m[1].toLowerCase() as DocCommand['op'], caminho: attr(m[2], 'caminho'), arquivo: attr(m[2], 'arquivo'), para: attr(m[2], 'para'), nome: attr(m[2], 'nome'), pasta: attr(m[2], 'pasta'), formato: attr(m[2], 'formato'),
+    op: m[1].toLowerCase() as DocCommand['op'], caminho: attr(m[2], 'caminho'), arquivo: attr(m[2], 'arquivo'), para: attr(m[2], 'para'), nome: attr(m[2], 'nome'), pasta: attr(m[2], 'pasta'), formato: attr(m[2], 'formato'), modelo: attr(m[2], 'modelo'),
   }));
 }
 
@@ -461,10 +462,19 @@ export function applyDocCommands(db: Db, bus: Bus, workspaceId: string, agentId:
         if (!fmt) { out.push({ text: `Não sei salvar no formato “${c.formato}”: os formatos são ${FORMATOS_TEXTO}.`, undo: null }); continue; }
         const base = (c.nome || 'documento').replace(/\.(docx?|md|txt|pdf|xlsx?|csv|pptx?)$/i, '');
         const to = c.pasta || c.para ? folderByPath(db, workspaceId, c.pasta || c.para, true) : ctx.taskId ? folderForTask(db, workspaceId, ctx.taskId) : null;
-        const { data, mime } = gerarDocumento(fmt, body, base);
+        // "usa o modelo ABNT": o PDF sai no modelo; o .md guarda a escolha (a tela e o PDF dele aplicam)
+        const modelo = c.modelo ? acharModelo(db, workspaceId, c.modelo) : null;
+        if (c.modelo && !modelo) out.push({ text: `Não há modelo “${c.modelo}”: o documento sai no modelo padrão.`, undo: null });
+        const { data, mime } = fmt === 'pdf' ? { data: pdfDeTexto(db, workspaceId, body, base, modelo), mime: MIME_DOC.pdf } : gerarDocumento(fmt, body, base);
         const saved = saveArtifact(db, bus, ctx.filesDir, ctx.maxBytes ?? 50 * 1024 * 1024, workspaceId, ctx.userId, { filename: `${base}.${fmt}`, mime, data, folderId: to, taskId: ctx.taskId ?? null });
+        if (modelo && fmt === 'md') escolherModelo(db, bus, workspaceId, actor, saved.id, modelo.id);
         const undo = logOp(db, bus, workspaceId, actor, 'file.trash', saved.id, { op: 'file.trash', artifactId: saved.id, at: now() }, `documento “${saved.filename}” salvo`);
         out.push({ text: `Documento “${saved.filename}” salvo em ${c.pasta || c.para ? `“${c.pasta || c.para}”` : 'Documentos'}.`, undo });
+      } else if (c.op === 'usar-modelo') {
+        const f = fileByName(db, workspaceId, c.arquivo || c.nome);
+        if (!f) { out.push({ text: `Não achei o arquivo “${c.arquivo || c.nome}”.`, undo: null }); continue; }
+        const m = escolherModelo(db, bus, workspaceId, actor, f.id, c.modelo || null);
+        out.push({ text: `“${f.filename}” agora usa o modelo ${m ? `“${m.nome}”` : 'padrão'}.`, undo: null });
       } else if (c.op === 'apagar' || c.op === 'esvaziar-lixeira') {
         // apagar de vez: só com o clique da pessoa (o cartão aparece na conversa)
         continue;
@@ -494,6 +504,7 @@ export const DOCUMENTS_HOW = [
   'Documentos do workspace (você gere pela conversa quando a pessoa pedir; aplica na hora e ela pode desfazer; as pastas e os arquivos de agora estão na situação do workspace, abaixo):',
   `- criar pasta: [[pasta caminho="Clientes/ACME"]] · mover: [[mover-arquivo arquivo="contrato.pdf" para="Clientes/ACME"]] · copiar: [[copiar-arquivo arquivo="..." para="..."]] · renomear: [[renomear-arquivo arquivo="..." nome="..."]] ou [[renomear-pasta pasta="..." nome="..."]]`,
   `- salvar o texto desta sua resposta como arquivo: [[salvar-documento nome="Contrato ACME" formato="docx" pasta="Clientes/ACME"]] — escreva o conteúdo inteiro na resposta e o sistema gera o arquivo. Formatos: docx (Word), xlsx (Excel: cada tabela Markdown | a | b | vira uma aba; números como R$ 1.250,00 viram números; fórmulas como =SOMA(C2:C9) ou =SOMASE(B2:B9;"Aluguel";C2:C9) funcionam), csv, pptx (PowerPoint: cada título ## vira um slide, com os tópicos abaixo), pdf, md e txt. Para planilha, apresentação, PDF ou Word use isto: não precisa de Executar código nem de Terminal, e nunca prometa um arquivo sem esta linha`,
+  `- documento com modelo (capa, cabeçalho, rodapé, paginação, regras ABNT): acrescente modelo="ABNT" no [[salvar-documento]] (ou outro modelo da lista em Documentos); num arquivo que já existe: [[usar-modelo arquivo="relatorio.md" modelo="ABNT"]]. O texto continua Markdown comum (#, ##, listas, tabelas, > citação, "## Referências" no fim); o modelo cuida da aparência`,
   `- o sistema aplica estas linhas DEPOIS da sua resposta e confirma na conversa: escreva "vou criar/mover…", nunca "criei/movi"; para um arquivo, use o nome que aparece na lista (com ou sem a pasta: "Entregas/contrato.docx")`,
   `- lixeira (dá para restaurar): [[lixeira arquivo="..."]] ou [[lixeira pasta="..."]] · apagar de vez: [[apagar arquivo="..."]], [[apagar pasta="..."]] ou [[esvaziar-lixeira]] — só acontece depois que a pessoa confirma no cartão; diga isso. Quando a pessoa pede "apague", "exclua" ou "tire", use a lixeira; apagar de vez só quando ela disser "de vez", "definitivamente" ou "para sempre".`,
 ].join('\n');
@@ -509,5 +520,6 @@ export function documentsBrief(db: Db, workspaceId: string): string {
   return [
     paths.length ? `Documentos, pastas: ${paths.join(' · ')}` : 'Documentos: ainda não há pastas criadas pela pessoa.',
     files.length ? `Documentos, arquivos recentes: ${files.map((f) => `${clip(f.filename, 80)} (${where(f.folder_id)})`).join('; ')}` : '',
+    `Modelos de documento: ${nomesDosModelos(db, workspaceId)}`,
   ].filter(Boolean).join('\n');
 }

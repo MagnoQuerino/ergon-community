@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Arquivos da marca, todos gerados da mesma geometria (web/src/brand/logo.ts):
+// Arquivos da marca, todos gerados da mesma geometria (shared/logo-ergon.ts):
 //   web/public/        favicon.svg, manifest.webmanifest, icons/*.png (aba do navegador, atalho, app instalado)
 //   docs/brand/svg/    logo empilhada e horizontal (clara/escura), emblema, uma cor, logotipo, carregamento animado
 //   connectors/teams/appPackage/  color.png e outline.png do app do Teams
@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bmp, png } from './png.mjs';
-import { BRAND, CORE_R, EMBLEM_BOX, emblemSvg, emblemViewBox, figures, logoSvg, palette, wordmarkSvg } from '../web/src/brand/logo.ts';
+import { BRAND, CORE_R, EMBLEM_BOX, emblemSvg, emblemViewBox, figures, logoSvg, palette, wordmarkSvg } from '../shared/logo-ergon.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const rad = (d) => (d * Math.PI) / 180;

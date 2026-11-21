@@ -17,7 +17,7 @@ function inl(c: Inline[], key = ''): ReactNode[] {
       case 'a': return <a key={k} href={x.href} target="_blank" rel="noreferrer noopener">{inl(x.c, k)}</a>;
       case 'img': return (
         <a key={k} className="msg__img" href={`/api/artifacts/${x.id}/download?inline=1`} target="_blank" rel="noreferrer" title={t('geral.arquivo.abrirImagem')}>
-          <img src={`/api/artifacts/${x.id}/download?inline=1`} alt={t('geral.arquivo.imagemDoAgente')} loading="lazy" />
+          <img src={`/api/artifacts/${x.id}/download?inline=1`} alt={x.alt || t('geral.arquivo.imagemDoAgente')} loading="lazy" />
         </a>
       );
       // arquivo de Documentos citado pelo agente (no lugar do caminho dentro do motor): baixa pelo Ergon
@@ -33,9 +33,9 @@ function inl(c: Inline[], key = ''): ReactNode[] {
 function block(b: Block, k: string): ReactNode {
   switch (b.t) {
     case 'p': return <p key={k}>{inl(b.c, k)}</p>;
-    case 'h': { const H = (`h${b.level + 2}`) as 'h3' | 'h4' | 'h5'; return <H key={k}>{inl(b.c, k)}</H>; }
-    case 'ul': return <ul key={k}>{b.items.map((x, i) => <li key={i}>{inl(x, `${k}.${i}`)}</li>)}</ul>;
-    case 'ol': return <ol key={k} start={b.start}>{b.items.map((x, i) => <li key={i}>{inl(x, `${k}.${i}`)}</li>)}</ol>;
+    case 'h': { const H = (`h${Math.min(3, b.level) + 2}`) as 'h3' | 'h4' | 'h5'; return <H key={k}>{inl(b.c, k)}</H>; }
+    case 'ul': return <ul key={k}>{b.items.map((x, i) => <li key={i}>{inl(x, `${k}.${i}`)}{b.subs?.[i]?.map((y, j) => block(y, `${k}.${i}.${j}`))}</li>)}</ul>;
+    case 'ol': return <ol key={k} start={b.start}>{b.items.map((x, i) => <li key={i}>{inl(x, `${k}.${i}`)}{b.subs?.[i]?.map((y, j) => block(y, `${k}.${i}.${j}`))}</li>)}</ol>;
     case 'code': return <pre key={k} className="md__code"><code>{b.v}</code></pre>;
     case 'quote': return <blockquote key={k}>{b.c.map((x, i) => block(x, `${k}.${i}`))}</blockquote>;
     case 'hr': return <hr key={k} />;
