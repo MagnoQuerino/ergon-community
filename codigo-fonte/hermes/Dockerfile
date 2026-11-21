@@ -6,7 +6,7 @@ FROM ${HERMES_IMAGE}
 
 # versão do plugin do Ergon nesta imagem: a mesma do plugin.yaml e de PLUGIN_VERSION (um teste confere); o gerente e o
 # diagnóstico leem sem abrir o motor
-LABEL ergon.plugin.version="0.12.0"
+LABEL ergon.plugin.version="0.13.0"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gocryptfs fuse3 \
@@ -91,6 +91,9 @@ RUN /opt/hermes/.venv/bin/python -m ensurepip \
 # rc.46: o WeCom (robô por WebSocket: aiohttp e httpx) e o WeChat pessoal (iLink: aiohttp e cryptography) usam só o que a
 # imagem oficial já traz; a construção para se algum faltar (o primeiro uso, pelo PyPI, falharia na China)
 RUN cd /opt/hermes && /opt/hermes/.venv/bin/python -c "from pm.extras import available; assert available('wecom'); import plugins.platforms.wecom.adapter as w, gateway.platforms.weixin as x; assert w.check_wecom_requirements() and x.check_weixin_requirements(); print('WeCom e WeChat na imagem')"
+
+# rc.47: o WhatsApp oficial (Cloud API da Meta: aiohttp e httpx) também só com o que a imagem oficial já traz
+RUN cd /opt/hermes && /opt/hermes/.venv/bin/python -c "import gateway.platforms.whatsapp_cloud as w; assert w.check_whatsapp_cloud_requirements(); print('WhatsApp Cloud na imagem')"
 
 # rc.39: competências de terceiros na biblioteca (competencias/ORIGEM.md: origem, commit e licença de cada uma). Entram
 # ao lado das que o Hermes traz e chegam à biblioteca de cada instalação pela sincronia do próprio motor; nenhum agente

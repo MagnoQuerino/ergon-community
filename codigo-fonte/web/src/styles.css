@@ -3998,3 +3998,11 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
 /* rc.46: as linhas de configuração da Ajuda (ERGON_REGISTRY=…) quebram no celular em vez de passar da borda */
 .help__body code { overflow-wrap: anywhere; }
 .help__body { min-width: 0; }
+
+/* rc.47: o WhatsApp oficial (Cloud API): os campos do cartão seguro e o que colar no painel da Meta */
+.conn-wac__campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 12px; margin: 8px 0; }
+.conn-wac__campos .field { min-width: 0; }
+.conn-wac__webhook { margin-top: 10px; }
+.conn-wac__linha { display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 6px 0; }
+.conn-wac__valor { overflow-wrap: anywhere; word-break: break-all; padding: 4px 6px; border-radius: 6px; background: var(--panel-2); font-size: 12px; }
+@media (max-width: 520px) { .conn-wac__linha { grid-template-columns: 1fr auto; } .conn-wac__linha > span { grid-column: 1 / -1; } }

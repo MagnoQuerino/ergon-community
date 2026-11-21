@@ -124,6 +124,7 @@ export class ReleFalso {
         protocol: [1], teams: true, teamsAppId: '11111111-2222-3333-4444-555555555555', platforms: { teams: true, ...this.plataformas },
         discord: this.plataformas.discord ? { applicationId: '1562060832806936576', installUrl: 'https://discord.com/oauth2/authorize?client_id=1562060832806936576', botName: 'Ergon', linkStart: this.discordLinkStart } : null,
         telegram: this.plataformas.telegram ? { botUsername: 'ErgonTesteBot' } : null,
+        whatsappCloud: this.whatsapp,
       });
     }
     if (req.method === 'POST' && req.url === '/v1/installations') {
@@ -276,8 +277,32 @@ export class ReleFalso {
         return ack({ standby: f.installationId });
       case 'typing': this.digitando.push({ bindingId: f.bindingId, on: !!f.on }); return;
       case 'person.state': this.abertas.set(f.personRef, !!f.open); if (f.open) { for (const e of this.fila) if (e.personRef === f.personRef && e.state === 'held') e.state = 'pending'; this.entregar(false); } return;
+      // rc.47: o endereço do webhook do WhatsApp oficial
+      case 'whatsapp.route.set': {
+        if (!this.whatsapp) return c.enviar({ type: 'ack', id: f.id, ok: false, error: { code: 'unsupported' } });
+        if (typeof f.verifyToken !== 'string' || !/^[A-Za-z0-9_-]{24,80}$/.test(f.verifyToken)) return c.enviar({ type: 'ack', id: f.id, ok: false, error: { code: 'invalid' } });
+        if (!this.rotaWa || f.renew) this.rotaWa = `wac_${crypto.randomBytes(16).toString('base64url')}`;
+        this.verifyWa = f.verifyToken;
+        return ack({ routeId: this.rotaWa, url: this.urlWa ?? `${this.base.replace('http://', 'https://')}/whatsapp/${this.rotaWa}` });
+      }
+      case 'whatsapp.route.delete': this.rotaWa = null; this.verifyWa = null; return ack({});
       default: c.enviar({ type: 'error', code: 'unknown_type', ref: f.id ?? null });
     }
+  }
+
+  // ------------------------------------------------------------------------------------------------ WhatsApp oficial (rc.47)
+  whatsapp = true; rotaWa: string | null = null; verifyWa: string | null = null;
+  /** testes: um endereço diferente do serviço (o Ergon recusa) */
+  urlWa: string | null = null;
+  /** A Meta mandou uma notificação ao webhook: o relé sela o corpo cru e a assinatura e entrega ao Ergon. */
+  notificacaoWhatsApp(corpo: Buffer, assinatura: string): string {
+    const c = this.conexao;
+    if (!c?.installationId) throw new Error('Ergon desconectado');
+    const inst = this.instalacoes.get(c.installationId)!;
+    const id = rid('dlv');
+    c.enviar({ type: 'whatsapp.webhook', id, routeId: this.rotaWa, receivedAt: new Date().toISOString(),
+      sealed: selarComoRele(inst.box, { v: 1, body: corpo.toString('base64'), signature: assinatura }, `${id}|${c.installationId}|whatsapp.webhook`) });
+    return id;
   }
 
   /** Entrega o que está pendente (em ordem), até 20 sem ack; `inicio`: logo depois do ready (com queue.begin/end). */

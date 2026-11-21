@@ -76,7 +76,7 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.12.0"
+PLUGIN_VERSION = "0.13.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
@@ -109,10 +109,12 @@ PLUGIN_VERSION = "0.12.0"
 # (rc.45): conversar com a equipe pelo Feishu/Lark e pelo DingTalk (o aplicativo da pessoa, com os pacotes na imagem)
 # canais_wecom_weixin (rc.46): pelo WeCom (o robô inteligente, por WebSocket de saída) e pelo WeChat pessoal (iLink, login
 # por QR mostrado no Ergon; experimental)
+# canais_whatsapp_cloud (rc.47): pelo WhatsApp oficial (Cloud API da Meta), com o app e o número da pessoa; as
+# notificações do webhook chegam pelo Ergon (o relé é o endereço público) e a assinatura é conferida aqui
 CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao",
                "perfis", "memoria", "ajudantes", "modelos_tarefa", "ajustes", "cota", "pausa", "nao_treinar", "cartoes", "comandos",
                "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "git", "computador", "visuais",
-               "idiomas_zh_hi", "canais_feishu_dingtalk", "canais_wecom_weixin")
+               "idiomas_zh_hi", "canais_feishu_dingtalk", "canais_wecom_weixin", "canais_whatsapp_cloud")
 _TS_CONEXOES = "ergon_conexoes"
 # Os conjuntos de ferramentas que este plugin registra ficam em _ERGON_PLUGIN_TOOLSETS, mais abaixo (o mesmo de
 # ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
@@ -3107,10 +3109,22 @@ def revisao_pedido(mensagens: list[Any], foco: str) -> dict[str, str]:
 # Ergon mostra na tela; o iLink devolve o token da conta, que fica no .env do motor. Experimental: a Tencent pode limitar
 # ou bloquear a conta, e o Ergon só liga com o consentimento explícito da pessoa. Nos dois, sem botões e sem edição: o
 # cartão vai como texto e a decisão é no app.
-_CANAIS = ("telegram", "discord", "feishu", "dingtalk", "wecom", "weixin")
-_CANAIS_DE_APP = ("feishu", "dingtalk", "wecom", "weixin")
+# rc.47: WhatsApp pela API oficial da Meta (Cloud API, o adaptador whatsapp_cloud do Hermes), com a conta Meta Business,
+# o app e o número da própria pessoa. A saída vai direto a graph.facebook.com (conexão de saída). A entrada (o webhook)
+# precisa de endereço público: ele é o relé de canais do Ergon, que guarda a notificação selada para esta instalação; o
+# Ergon a entrega aqui pela mesma espera longa da saída (tipo "webhook", com o corpo cru e o X-Hub-Signature-256) e é
+# AQUI que a assinatura é conferida com o App Secret (HMAC-SHA256 do corpo cru, pelo próprio adaptador) antes de o
+# adaptador ler a mensagem. O servidor do adaptador escuta só em 127.0.0.1 (nada aberto para fora do contêiner).
+_CANAIS = ("telegram", "discord", "feishu", "dingtalk", "wecom", "weixin", "whatsapp_cloud")
+_CANAIS_DE_APP = ("feishu", "dingtalk", "wecom", "weixin", "whatsapp_cloud")
 _CANAL_ENV = {"telegram": "TELEGRAM_BOT_TOKEN", "discord": "DISCORD_BOT_TOKEN", "feishu": "FEISHU_APP_ID", "dingtalk": "DINGTALK_CLIENT_ID",
-              "wecom": "WECOM_BOT_ID", "weixin": "WEIXIN_TOKEN"}
+              "wecom": "WECOM_BOT_ID", "weixin": "WEIXIN_TOKEN", "whatsapp_cloud": "WHATSAPP_CLOUD_PHONE_NUMBER_ID"}
+# o WhatsApp oficial: o que precisa estar no .env para ligar (os três) e tudo o que a ponte grava e apaga
+_WA_ENV_PRECISA = ("WHATSAPP_CLOUD_PHONE_NUMBER_ID", "WHATSAPP_CLOUD_ACCESS_TOKEN", "WHATSAPP_CLOUD_APP_SECRET")
+_WA_ENV_TODOS = _WA_ENV_PRECISA + ("WHATSAPP_CLOUD_WABA_ID", "WHATSAPP_CLOUD_VERIFY_TOKEN", "WHATSAPP_CLOUD_WEBHOOK_HOST",
+                                   "WHATSAPP_CLOUD_DM_POLICY", "WHATSAPP_CLOUD_GROUP_POLICY")
+_WA_FORMATO = {"numero": re.compile(r"[0-9]{8,20}"), "token": re.compile(r"[A-Za-z0-9_-]{40,600}"), "segredo": re.compile(r"[0-9a-fA-F]{32}"),
+               "verify": re.compile(r"[A-Za-z0-9_-]{24,80}")}
 # o par do aplicativo (App ID, App Secret) e o domínio do Feishu: o .env que a ponte grava e apaga
 _CANAL_APP_ENV = {"feishu": ("FEISHU_APP_ID", "FEISHU_APP_SECRET"), "dingtalk": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET"),
                   "wecom": ("WECOM_BOT_ID", "WECOM_SECRET")}
@@ -3122,7 +3136,8 @@ _CANAL_APP_FORMATO = {
     "dingtalk": (re.compile(r"[A-Za-z0-9_-]{8,64}"), re.compile(r"[A-Za-z0-9_-]{16,128}")),
     "wecom": (re.compile(r"[A-Za-z0-9_-]{8,64}"), re.compile(r"[A-Za-z0-9_-]{16,128}")),
 }
-_CANAL_NOME = {"telegram": "Telegram", "discord": "Discord", "feishu": "Feishu/Lark", "dingtalk": "DingTalk", "wecom": "WeCom", "weixin": "WeChat"}
+_CANAL_NOME = {"telegram": "Telegram", "discord": "Discord", "feishu": "Feishu/Lark", "dingtalk": "DingTalk", "wecom": "WeCom", "weixin": "WeChat",
+               "whatsapp_cloud": "WhatsApp"}
 # o nome do canal na tela do Ergon em chinês (Conexões › 通过 … 与团队对话)
 _CANAL_NOME_ZH = {"feishu": "飞书/Lark", "dingtalk": "钉钉", "wecom": "企业微信", "weixin": "微信"}
 _CANAL_TOKEN = {
@@ -3138,14 +3153,19 @@ _CANAL_CODIGO = (
 # no Feishu e no DingTalk, também em chinês (quem usa é, quase sempre, uma empresa na China)
 _CANAL_CODIGO_ZH = ("\n\n将此聊天关联到 Ergon 的代码：{code}\n"
                     "在 Ergon 中打开 连接 › 通过{canal}与团队对话，并输入此代码。代码 1 小时内有效。")
+# no WhatsApp oficial, também em hindi (o canal entrou para a Índia; quem não lê hindi tem o português e o inglês acima)
+_CANAL_CODIGO_HI = ("\n\nइस चैट को Ergon से जोड़ने का कोड: {code}\n"
+                    "Ergon में कनेक्शन › {canal} पर टीम से बात करें खोलें और यह कोड लिखें। यह 1 घंटे तक मान्य है।")
 _CANAL_FORA = ("O Ergon não recebeu esta mensagem agora. Mande de novo em instantes.\n"
                "Ergon did not get this message right now. Please send it again in a moment.")
 _CANAL_FORA_ZH = "\nErgon 暂时没有收到这条消息，请稍后再发一次。"
-_CANAL_TEXTO_MAX = {"telegram": 4000, "discord": 1900, "feishu": 8000, "dingtalk": 8000, "wecom": 4000, "weixin": 2000}
+_CANAL_TEXTO_MAX = {"telegram": 4000, "discord": 1900, "feishu": 8000, "dingtalk": 8000, "wecom": 4000, "weixin": 2000, "whatsapp_cloud": 4000}
 
 
 def _canal_codigo(platform: str, code: str) -> str:
     texto = _CANAL_CODIGO.format(code=code, canal=_CANAL_NOME[platform])
+    if platform == "whatsapp_cloud":
+        return texto + _CANAL_CODIGO_HI.format(code=code, canal=_CANAL_NOME[platform])
     return texto + _CANAL_CODIGO_ZH.format(code=code, canal=_CANAL_NOME_ZH[platform]) if platform in _CANAL_NOME_ZH else texto
 
 
@@ -3378,6 +3398,36 @@ def _fabrica_wecom(native: Any, adapter: Any) -> None:
     _canal_vivo("wecom", native, adapter)
 
 
+def _fabrica_whatsapp_cloud(native: Any, adapter: Any) -> None:
+    """WhatsApp oficial: só o adaptador vivo (a Graph API para a saída; a assinatura das notificações, na entrada)."""
+    _canal_vivo("whatsapp_cloud", native, adapter)
+
+
+async def _wa_webhook(adapter: Any, item: dict[str, Any]) -> dict[str, Any]:
+    """A notificação da Meta que o Ergon trouxe do relé: confere a assinatura com o App Secret (o próprio adaptador do
+    Hermes, sobre o corpo CRU) e só então entrega ao adaptador, que lê a mensagem e passa pelo on_pre_dispatch."""
+    import base64
+    try:
+        raw = base64.b64decode(str(item.get("corpo") or ""), validate=True)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "erro": "corpo"}
+    assinatura = str(item.get("assinatura") or "")
+    if not raw or len(raw) > 64 * 1024 or not re.fullmatch(r"sha256=[0-9a-f]{64}", assinatura):
+        return {"ok": False, "erro": "corpo"}
+    if not adapter._verify_signature(raw, assinatura):  # sem App Secret, também falha (nada entra sem assinatura)
+        adapter._rejected_signature_count = getattr(adapter, "_rejected_signature_count", 0) + 1
+        logger.warning("ergon_bridge: notificação do WhatsApp com assinatura que não confere (recusada)")
+        return {"ok": False, "erro": "assinatura"}
+    try:
+        payload = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "erro": "corpo"}
+    if not isinstance(payload, dict):
+        return {"ok": False, "erro": "corpo"}
+    await adapter._dispatch_payload(payload)
+    return {"ok": True}
+
+
 def _fabrica_weixin(native: Any, adapter: Any) -> None:
     """WeChat pessoal (iLink): só o adaptador vivo (a espera longa do iLink) para a saída; sem botões nem imagem."""
     _canal_vivo("weixin", native, adapter)
@@ -3392,13 +3442,18 @@ async def _canal_app_enviar(platform: str, adapter: Any, item: dict[str, Any], t
         erro = str(getattr(r, "error", "") or "falhou")
         # DingTalk sem sessionWebhook válida (a pessoa não escreveu na última hora e meia): não adianta tentar de novo
         # (no WeChat pessoal, o mesmo quando o iLink não prepara o envio: a pessoa precisa escrever ao robô antes)
-        sem_sessao = "session_webhook" in erro or "session not ready" in erro
+        # (no WhatsApp oficial, a janela de 24 h da Meta fechou: 131047 "re-engagement"; só modelo aprovado sairia)
+        sem_sessao = "session_webhook" in erro or "session not ready" in erro or "131047" in erro or "re-engagement" in erro.lower()
         return {"ok": False, "erro": ("sem_sessao" if sem_sessao else erro)[:200], "passageiro": bool(getattr(r, "retryable", False)) and not sem_sessao}
+    if tipo == "webhook":
+        if platform != "whatsapp_cloud":
+            return {"ok": False, "erro": "tipo desconhecido"}
+        return await _wa_webhook(adapter, item)
     if tipo == "digitando":
         await adapter.send_typing(chat_id)
         return {"ok": True}
     if tipo == "imagem":
-        if platform not in ("feishu", "wecom"):
+        if platform not in ("feishu", "wecom", "whatsapp_cloud"):
             # o DingTalk não sobe imagem pela sessionWebhook; no WeChat pessoal, menos envio é menos risco (o texto já levou os números)
             return {"ok": True}
         import base64
@@ -3551,7 +3606,7 @@ def _canal_estado() -> dict[str, Any]:
     for c in _CANAIS:
         p = plats.get(c) if isinstance(plats.get(c), dict) else {}
         out[c] = {
-            "configurado": all(str(env.get(v) or "").strip() for v in _CANAL_APP_ENV.get(c) or _CANAL_QR_ENV.get(c) or (_CANAL_ENV[c],)),
+            "configurado": all(str(env.get(v) or "").strip() for v in _CANAL_APP_ENV.get(c) or _CANAL_QR_ENV.get(c) or (_WA_ENV_PRECISA if c == "whatsapp_cloud" else (_CANAL_ENV[c],))),
             "estado": str(p.get("state") or "")[:40] or None, "erro": str(p.get("error_code") or "")[:60] or None,
             "ligados": [{"user_id": str(a.get("user_id") or ""), "user_name": str(a.get("user_name") or "")[:120]} for a in store.list_approved(c)][:5],
         }
@@ -5818,13 +5873,38 @@ class _ControlHandler(BaseHTTPRequestHandler):
                 if method == "DELETE":
                     return self._json(200, _weixin_qr_cancelar())
                 return self._json(405, {"error": "método não aceito"})
-            m = re.fullmatch(r"/ergon/v1/canais/(telegram|discord|feishu|dingtalk|wecom|weixin)(/parear)?", path)
+            m = re.fullmatch(r"/ergon/v1/canais/(telegram|discord|feishu|dingtalk|wecom|weixin|whatsapp_cloud)(/parear)?", path)
             if not m:
                 return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
             canal, parear = m.group(1), bool(m.group(2))
             store = PairingStore()
             if method == "PUT" and not parear and canal == "weixin":
                 return self._json(400, {"error": "o WeChat pessoal liga pelo QR (POST /ergon/v1/canais/weixin/qr)", "code": "qr"})
+            if method == "PUT" and not parear and canal == "whatsapp_cloud":
+                # o WhatsApp oficial: Phone Number ID, token de acesso, App Secret (confere a assinatura das notificações),
+                # WABA ID (opcional) e o verify token que o Ergon gerou; no .env do motor, nunca voltam por aqui
+                campos = {k: str(body.get(k) or "").strip() for k in ("phone_number_id", "access_token", "app_secret", "waba_id", "verify_token")}
+                if not (_WA_FORMATO["numero"].fullmatch(campos["phone_number_id"]) and _WA_FORMATO["token"].fullmatch(campos["access_token"])
+                        and _WA_FORMATO["segredo"].fullmatch(campos["app_secret"]) and _WA_FORMATO["verify"].fullmatch(campos["verify_token"])
+                        and (not campos["waba_id"] or _WA_FORMATO["numero"].fullmatch(campos["waba_id"]))):
+                    return self._json(400, {"error": "algum campo do WhatsApp oficial não tem o formato esperado", "code": "formato"})
+                save_env_value("WHATSAPP_CLOUD_PHONE_NUMBER_ID", campos["phone_number_id"])
+                save_env_value("WHATSAPP_CLOUD_ACCESS_TOKEN", campos["access_token"])
+                save_env_value("WHATSAPP_CLOUD_APP_SECRET", campos["app_secret"])
+                save_env_value("WHATSAPP_CLOUD_VERIFY_TOKEN", campos["verify_token"])
+                # o servidor do adaptador só dentro do contêiner: as notificações chegam pelo Ergon (relé)
+                save_env_value("WHATSAPP_CLOUD_WEBHOOK_HOST", "127.0.0.1")
+                # só conversa direta, com o pareamento (o Ergon decide quem fala); grupo nunca
+                save_env_value("WHATSAPP_CLOUD_DM_POLICY", "pairing")
+                save_env_value("WHATSAPP_CLOUD_GROUP_POLICY", "disabled")
+                if campos["waba_id"]:
+                    save_env_value("WHATSAPP_CLOUD_WABA_ID", campos["waba_id"])
+                else:
+                    remove_env_value("WHATSAPP_CLOUD_WABA_ID")
+                _canal_limpar(store, canal)
+                store.clear_pending(canal)
+                _canal_zerar_espera(store, canal)
+                return self._json(200, {"ok": True, "reiniciando": _canal_reiniciar()})
             if method == "PUT" and not parear and canal in _CANAIS_DE_APP:
                 # o App ID e o App Secret do aplicativo (Feishu/Lark, DingTalk): no .env do motor; nunca voltam por aqui
                 app_id, segredo = str(body.get("app_id") or "").strip(), str(body.get("app_secret") or "").strip()
@@ -5873,7 +5953,7 @@ class _ControlHandler(BaseHTTPRequestHandler):
                 if canal == "weixin":
                     _weixin_qr_cancelar()
                     _weixin_apagar_conta(str(load_env().get("WEIXIN_ACCOUNT_ID") or ""))
-                extra = {"feishu": ("FEISHU_DOMAIN", "FEISHU_CONNECTION_MODE"), "weixin": _WEIXIN_ENV_TODOS}.get(canal, ())
+                extra = {"feishu": ("FEISHU_DOMAIN", "FEISHU_CONNECTION_MODE"), "weixin": _WEIXIN_ENV_TODOS, "whatsapp_cloud": _WA_ENV_TODOS}.get(canal, ())
                 for var in _CANAL_APP_ENV.get(canal, (_CANAL_ENV[canal],)) + extra:
                     remove_env_value(var)
                 return self._json(200, {"ok": True, "reiniciando": _canal_reiniciar()})
@@ -6162,7 +6242,8 @@ def register(ctx) -> None:
     ctx.register_hook("pre_gateway_dispatch", on_pre_dispatch)
     # botões dos cartões e o adaptador vivo (só no processo do gateway, quando o canal conecta)
     for _plataforma, _fabrica in (("telegram", _fabrica_telegram), ("discord", _fabrica_discord), ("feishu", _fabrica_feishu),
-                                  ("dingtalk", _fabrica_dingtalk), ("wecom", _fabrica_wecom), ("weixin", _fabrica_weixin)):
+                                  ("dingtalk", _fabrica_dingtalk), ("wecom", _fabrica_wecom), ("weixin", _fabrica_weixin),
+                                  ("whatsapp_cloud", _fabrica_whatsapp_cloud)):
         try:
             ctx.register_platform_handler(_plataforma, _fabrica)
         except Exception:  # noqa: BLE001 - Hermes sem esse registro: os canais ficam sem botões, o resto segue

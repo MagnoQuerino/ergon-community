@@ -120,19 +120,28 @@ export class CanalErro extends Error {
 export interface CanalNoMotor { configurado: boolean; estado: string | null; erro: string | null; ligados: Array<{ user_id: string; user_name: string }> }
 /** rc.45: Feishu (ou Lark, o internacional) e DingTalk, ao lado do Telegram e do Discord. */
 /** rc.46: WeCom (企业微信, o robô inteligente) e WeChat pessoal (微信, iLink, experimental: login por QR). */
-export type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk' | 'wecom' | 'weixin';
-export const NOMES_CANAL: readonly NomeCanal[] = ['telegram', 'discord', 'feishu', 'dingtalk', 'wecom', 'weixin'];
+/** rc.47: WhatsApp pela API oficial da Meta (Cloud API): o número da conta Meta Business da pessoa, ao lado do pareado por QR. */
+export type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk' | 'wecom' | 'weixin' | 'whatsapp_cloud';
+export const NOMES_CANAL: readonly NomeCanal[] = ['telegram', 'discord', 'feishu', 'dingtalk', 'wecom', 'weixin', 'whatsapp_cloud'];
 /** Os canais de aplicativo próprio (App ID e App Secret, não o código de um bot): Feishu/Lark e DingTalk. */
 export const CANAIS_DE_APP: readonly NomeCanal[] = ['feishu', 'dingtalk', 'wecom'];
 /** Os canais da rc.46 (pedem o plugin com a capacidade canais_wecom_weixin). */
 export const CANAIS_RC46: readonly NomeCanal[] = ['wecom', 'weixin'];
+/** O da rc.47 (pede o plugin com a capacidade canais_whatsapp_cloud). */
+export const CANAIS_RC47: readonly NomeCanal[] = ['whatsapp_cloud'];
 /** O login do WeChat pessoal pelo QR, como a ponte conta: o endereço do QR (para desenhar) só enquanto vale; o token nunca. */
 export interface LoginQrMotor { estado: 'parado' | 'aguardando' | 'escaneado' | 'confirmado' | 'expirado' | 'erro'; qr: string; erro: string | null; expiraEm: number }
 /**
  * A credencial que vai ao motor: o código do bot (Telegram, Discord) ou o App ID e o App Secret do aplicativo (Feishu,
  * DingTalk). No Feishu, `dominio` diz se é o Feishu da China (open.feishu.cn) ou o Lark internacional (open.larksuite.com).
  */
-export type CredencialCanal = { token: string } | { appId: string; appSecret: string; dominio?: 'feishu' | 'lark' };
+export type CredencialCanal = { token: string } | { appId: string; appSecret: string; dominio?: 'feishu' | 'lark' } | CredencialWhatsAppCloud;
+/**
+ * rc.47: o WhatsApp oficial (Cloud API). O Phone Number ID e o token de acesso (de um usuário do sistema, permanente)
+ * para mandar; o App Secret para o motor conferir a assinatura (X-Hub-Signature-256) de cada notificação; o WABA ID
+ * (opcional) amarra a notificação à conta certa; o verify token é o que o Ergon gerou para a verificação do webhook.
+ */
+export interface CredencialWhatsAppCloud { phoneNumberId: string; accessToken: string; appSecret: string; wabaId?: string; verifyToken: string }
 
 const RUN_ID = /^run_[A-Za-z0-9_-]{3,64}$/;
 
@@ -983,10 +992,11 @@ export class HttpHermesControl implements HermesControlClient {
     });
     // motor de antes da rc.45 não fala do Feishu nem do DingTalk: ficam como não configurados
     return { telegram: um(j?.canais?.telegram), discord: um(j?.canais?.discord), feishu: um(j?.canais?.feishu), dingtalk: um(j?.canais?.dingtalk),
-      wecom: um(j?.canais?.wecom), weixin: um(j?.canais?.weixin) };
+      wecom: um(j?.canais?.wecom), weixin: um(j?.canais?.weixin), whatsapp_cloud: um(j?.canais?.whatsapp_cloud) };
   }
   async setCanal(canal: NomeCanal, cred: CredencialCanal) {
     await this.canal('PUT', `/ergon/v1/canais/${canal}`, 'token' in cred ? { token: cred.token }
+      : 'phoneNumberId' in cred ? { phone_number_id: cred.phoneNumberId, access_token: cred.accessToken, app_secret: cred.appSecret, verify_token: cred.verifyToken, ...(cred.wabaId ? { waba_id: cred.wabaId } : {}) }
       : { app_id: cred.appId, app_secret: cred.appSecret, ...(cred.dominio ? { dominio: cred.dominio } : {}) });
   }
   async parearCanal(canal: NomeCanal, codigo: string) {

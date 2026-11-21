@@ -560,7 +560,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       capsCache.set(ws, { at: Date.now(), caps });
       return caps;
     },
-    decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao) });
+    decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao),
+    // rc.47: o WhatsApp oficial usa o serviço de canais (o mesmo relé do Teams) como endereço público do webhook da Meta
+    rele: {
+      disponivel: () => (!teamsApp.disponivel() ? false : teamsApp.conectadoAoServico() ? teamsApp.whatsappNoServico() : null),
+      rota: (vt, renovar) => teamsApp.rotaWhatsApp(vt, renovar),
+      apagar: () => teamsApp.apagarRotaWhatsApp(),
+    } });
+  teamsApp.aoWhatsApp = (w) => canais.receberWebhookWhatsApp(w);
   // o número da equipe no WhatsApp: um número pareado por QR vira canal, pelo mesmo caminho (entregue pela sessão do app)
   const whatsappEquipe = new WhatsAppEquipe({ db, bus, canais, whatsapp });
   // pedido por canal externo (canais/externo.ts): escrita numa conta sempre confirma; papel de leitura não escreve

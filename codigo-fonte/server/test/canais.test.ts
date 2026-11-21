@@ -54,7 +54,7 @@ class Controle implements HermesControlClient {
   async setApiToolsets(e: string[]) { return e; }
   async canais() {
     const um = (c: NomeCanal): CanalNoMotor => ({ configurado: !!this.bots[c], estado: this.bots[c] ? 'connected' : null, erro: null, ligados: this.pareados[c] ? [{ user_id: this.pareados[c]!, user_name: 'Ana' }] : [] });
-    return { telegram: um('telegram'), discord: um('discord'), feishu: um('feishu'), dingtalk: um('dingtalk'), wecom: um('wecom'), weixin: um('weixin') };
+    return { telegram: um('telegram'), discord: um('discord'), feishu: um('feishu'), dingtalk: um('dingtalk'), wecom: um('wecom'), weixin: um('weixin'), whatsapp_cloud: um('whatsapp_cloud') };
   }
   async setCanal(c: NomeCanal, cred: CredencialCanal) { this.bots[c] = 'token' in cred ? cred.token : JSON.stringify(cred); delete this.pareados[c]; }
   async parearCanal(c: NomeCanal, codigo: string) {
