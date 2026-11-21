@@ -20,6 +20,12 @@ const hex = () => crypto.randomBytes(16).toString('hex');
 const STOPS = [...new Set([0, 4, 9, 13, MIGRATIONS.length - 2].map((i) => MIGRATIONS[Math.max(0, Math.min(i, MIGRATIONS.length - 1))]))];
 
 describe('migração a partir de bancos antigos', () => {
+  test('cada número de migração aparece uma vez só (frentes juntas não repetem o número)', () => {
+    const numeros = MIGRATIONS.map((f) => f.slice(0, 4));
+    const repetidos = numeros.filter((n, i) => numeros.indexOf(n) !== i);
+    assert.deepEqual(repetidos, [], `números repetidos: ${repetidos.join(', ')}`);
+  });
+
   for (const until of STOPS) {
     test(`banco parado em ${until}: o Ergon atual abre, migra o resto e os dados ficam`, async () => {
       const dir = tmpDir();

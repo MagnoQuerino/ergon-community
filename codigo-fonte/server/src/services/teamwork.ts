@@ -183,6 +183,11 @@ export class Teamwork {
   private timer: NodeJS.Timeout | null = null;
   /** o fio do pedido: conversa de origem, entrega e pedidos repassados (purpose.ts) */
   readonly purpose: Purpose;
+  /**
+   * Cards cujo fim outro serviço cuida (a revisão de documento, rc.42: o resultado é a versão nova do arquivo, não uma
+   * entrega para aprovar). Esses pulam a conferência, o ciclo de persistência e a entrega.
+   */
+  cuidaDoFim: ((taskId: string) => boolean) | null = null;
   /** conversa livre de novo (o app entrega o que ficou pronto ou manda a próxima mensagem da fila) */
   onIdle: ((workspaceId: string, conversationId: string) => void) | null = null;
 
@@ -280,6 +285,7 @@ export class Teamwork {
 
   private finished(r: RunRow, status: RunStatus, output: string | null): void {
     if (r.idempotency_key.startsWith('training-')) return; // treinamento: quem cuida é o Treinar
+    if (r.task_id && this.cuidaDoFim?.(r.task_id)) return; // revisão de documento: revisao-documento.ts
     // card cancelado enquanto o agente trabalhava: nada continua (próxima etapa, pedido de ajuda, conferência, entrega)
     if (r.task_id && Number(this.db.get<{ archived: number }>('SELECT archived FROM tasks WHERE id = ?', r.task_id)?.archived)) return;
     // a coordenação entendeu melhor do que um card se trata: ele ganha um título novo (o que a pessoa escolheu fica)

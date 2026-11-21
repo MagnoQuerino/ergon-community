@@ -65,11 +65,16 @@ const PARES: Array<[string, string, string]> = [
   ['--atencao-sobre', '--atencao-cheio', 'contador da barra'],
   ['--dourado-sobre', '--dourado-cheio-hover', 'botão dourado (passando o mouse)'],
   ['--texto-inverso', '--legenda-fundo', 'legenda sobre imagem na loja (pior caso: imagem branca)'],
+  ['--doc-tinta', '--doc-fundo', 'texto do documento entregue'],
+  ['--doc-suave', '--doc-fundo', 'rodapé e citação do documento'],
+  ['--doc-link', '--doc-fundo', 'link do documento'],
+  ['--doc-tinta', '--doc-codigo', 'código no documento'],
+  ['--doc-impresso-tinta', '--doc-impresso-fundo', 'documento impresso'],
 ];
 /** Cores sem texto em cima, que não pedem contraste (enfeite, véu, linha divisória, sombra) ou que têm teste próprio. */
 const DECORATIVAS = new Set(['--line', '--line-suave', '--borda-forte', '--capa-1', '--capa-2', '--previa-1', '--previa-2', '--lona-1', '--lona-2',
   '--veu', '--veu-forte', '--realce', '--inversa-veu', '--inversa-hover', '--inversa-ativo', '--inversa-linha', '--inversa-linha-forte', '--gold', '--terracotta',
-  '--cb-line', '--ponto-anel', '--navy-bg', '--navy-2-bg', '--ok', '--ok-bg', '--warn', '--warn-bg', '--err', '--err-bg', '--borda-campo']);
+  '--cb-line', '--ponto-anel', '--doc-linha', '--doc-claro', '--navy-bg', '--navy-2-bg', '--ok', '--ok-bg', '--warn', '--warn-bg', '--err', '--err-bg', '--borda-campo']);
 const minDe = (nome: string) => (nome === 'contraste' ? 7 : MIN_TEXTO);
 
 test('toda cor de função tem lugar na tabela de usos (cor nova sem linha na tabela reprova)', () => {

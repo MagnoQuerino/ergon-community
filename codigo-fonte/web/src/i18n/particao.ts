@@ -33,14 +33,14 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   conexoes: ['views/ConexoesView.tsx', 'components/ConectoresProntos.tsx', 'components/OutroAplicativo.tsx', 'components/CartaoRegra.tsx', 'components/ModoLiberarTudo.tsx', 'components/PastasDoComputador.tsx', 'components/ModeloPadrao.tsx', 'components/ModelosPorTarefa.tsx', 'lib/modelos-tarefa.ts', 'lib/teams-app.ts', 'views/world/ConexoesNuvem.tsx'],
   // Documentos, Pacotes, a loja da Cidade e o World
   documentos: [
-    'views/DocumentosView.tsx', 'views/PacotesPanel.tsx', 'views/LojaView.tsx', 'views/LojaPublicar.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
+    'views/DocumentosView.tsx', 'components/Documento.tsx', 'components/RevisarDocumento.tsx', 'lib/documento.ts', 'views/PacotesPanel.tsx', 'views/LojaView.tsx', 'views/LojaPublicar.tsx', 'iso/StoreDialog.tsx', 'views/world/WorldPanel.tsx', 'views/world/WorldLinkDialog.tsx',
     'views/world/AlaNuvem.tsx', 'views/world/MundoView.tsx', 'views/world/ErgonAiConexoes.tsx', 'views/world/arte.ts', 'arte/figuras.ts', 'arte/Cena.tsx', 'views/world/Gestao.tsx', 'views/world/pessoas.ts', 'views/world/carrinho.ts',
     'views/world/SeloWorld.tsx', 'views/world/compra-rapida.ts', 'views/world/vivo.ts', 'views/world/EstadoWorld.tsx', 'views/world/Governanca.tsx', 'views/world/governanca.ts', 'views/world/governanca-nav.ts', 'views/world/Enfeites.tsx',
   ],
   // Configurações, contas de IA, custo, Atualizações e Saúde
   configuracoes: [
     'views/ConfiguracaoView.tsx', 'components/AiAccounts.tsx', 'components/CapacidadesPanel.tsx', 'lib/recursos.ts', 'lib/custo.ts', 'views/AtualizacoesPanel.tsx', 'lib/atualizacoes.ts', 'views/SaudePanel.tsx',
-    'components/AjustesEquipe.tsx', 'lib/ajustes.ts', 'components/ModelosEntrega.tsx', 'components/ComputadorAjustes.tsx',
+    'components/AjustesEquipe.tsx', 'lib/ajustes.ts', 'components/ModelosEntrega.tsx', 'components/ComputadorAjustes.tsx', 'components/IdentidadeDocumentos.tsx',
   ],
   // Entrar, Segurança, Minha conta e Pessoas
   conta: ['components/AuthFlow.tsx', 'components/TermosDeUso.tsx', 'views/SegurancaPanel.tsx', 'views/ContaPanel.tsx', 'views/PessoasPanel.tsx', 'components/BaixarMeusDados.tsx', 'lib/passkey.ts'],

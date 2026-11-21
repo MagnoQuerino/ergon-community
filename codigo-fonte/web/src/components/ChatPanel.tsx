@@ -1,3 +1,4 @@
+import { Documento } from './Documento.tsx';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { fmtDataHora, fmtHora, tn, useT } from '../i18n/index.ts';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
@@ -82,6 +83,9 @@ function download(name: string, mime: string, body: string) {
 function FileChip({ f, progress, error, onRemove }: { f: { filename: string; mime: string; size: number; id?: string }; progress?: number; error?: string | null; onRemove?: () => void }) {
   const t = useT();
   const href = f.id ? `/api/artifacts/${f.id}/download${inlinePreview(f.mime) ? '?inline=1' : ''}` : undefined;
+  // .md abre como documento formatado (rc.42), não baixa
+  const md = !!f.id && (f.mime === 'text/markdown' || /\.(md|markdown)$/i.test(f.filename));
+  const [doc, setDoc] = useState(false);
   const body = (
     <>
       {f.id && isImage(f.mime) ? <img src={`/api/artifacts/${f.id}/download?inline=1`} alt="" loading="lazy" /> : <span className="fchip__icon"><Icon name={f.mime.startsWith('image/') ? 'image' : 'file'} size={16} /></span>}
@@ -91,7 +95,9 @@ function FileChip({ f, progress, error, onRemove }: { f: { filename: string; mim
   );
   return (
     <span className={`fchip ${error ? 'fchip--err' : ''}`}>
-      {href ? <a className="fchip__main" href={href} target="_blank" rel="noreferrer" title={t('conversas.arquivo.abrir')}>{body}</a> : <span className="fchip__main">{body}</span>}
+      {href ? <a className="fchip__main" href={href} target="_blank" rel="noreferrer" title={t('conversas.arquivo.abrir')}
+        onClick={md ? (e) => { e.preventDefault(); setDoc(true); } : undefined}>{body}</a> : <span className="fchip__main">{body}</span>}
+      {doc && f.id && <Documento fonte={{ artifactId: f.id, tamanho: f.size }} onClose={() => setDoc(false)} />}
       {onRemove && <button type="button" className="fchip__x" onClick={onRemove} aria-label={t('conversas.arquivo.tirar', { nome: f.filename })}><Icon name="x" size={12} /></button>}
     </span>
   );
