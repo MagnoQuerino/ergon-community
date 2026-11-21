@@ -27,7 +27,8 @@ export const LIMITES = { jsonBloco: 24_000, blocosPorMensagem: 8, jsonMensagem: 
 // ------------------------------------------------------------------------------------------------- tipos
 
 export type Formato = 'numero' | 'inteiro' | 'moeda' | 'percentual' | 'compacto' | 'data' | 'texto';
-export type Moeda = 'BRL' | 'USD' | 'EUR';
+/** BRL, USD, EUR e, desde a rc.44, CNY (yuan) e INR (rupia; em en-IN e hi sai em lakh e crore) */
+export type Moeda = 'BRL' | 'USD' | 'EUR' | 'CNY' | 'INR';
 export type Tom = 'bom' | 'ruim' | 'atencao' | 'neutro' | 'marca';
 
 /** De onde veio o dado: uma conexão (com a conta e o período), um documento, um site, um cálculo do agente, a conversa. */
@@ -117,7 +118,7 @@ const DATA = /^\d{4}-\d{2}-\d{2}$/;
 export const ID_INTERNO = /^(art|tsk|cnv)_[A-Za-z0-9_-]{6,64}$/;
 const ID_ARQUIVO = /^art_[A-Za-z0-9_-]{6,64}$/;
 const FORMATOS: readonly Formato[] = ['numero', 'inteiro', 'moeda', 'percentual', 'compacto', 'data', 'texto'];
-const MOEDAS: readonly Moeda[] = ['BRL', 'USD', 'EUR'];
+const MOEDAS: readonly Moeda[] = ['BRL', 'USD', 'EUR', 'CNY', 'INR'];
 const TIPOS_FONTE: readonly TipoFonte[] = ['conexao', 'documento', 'site', 'calculo', 'conversa'];
 
 /** os domínios dos aplicativos das Conexões (os mesmos dos modelos de entrega): só eles viram chip de referência */

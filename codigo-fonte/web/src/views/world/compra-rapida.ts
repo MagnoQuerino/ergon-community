@@ -6,7 +6,8 @@
 //  - Pessoas e Jobs adicionais seguem o período do plano (mensal ou anual); subir de plano também.
 import { anualDe, atualDe, jobsDe, passos, vagaDe, VAZIO, type ItemCat, type Passo } from './carrinho.ts';
 
-export type Moeda = 'BRL' | 'USD' | 'EUR';
+// INR (rc.44): a Índia pode assinar em rúpias quando o World vender nela; na China não há cobrança local
+export type Moeda = 'BRL' | 'USD' | 'EUR' | 'INR';
 export interface ItemC extends ItemCat { prices?: Partial<Record<Moeda, string | null>> | null; dracmas?: string | null; monthlyDracmas?: string }
 export interface EstadoPlano {
   role: string;
@@ -40,7 +41,7 @@ export const assinaturaViva = (b: EstadoPlano): boolean => !!b.subscription && L
 /** A moeda da assinatura (tudo o que entra nela segue essa moeda); sem assinatura, BRL. */
 export function moedaDe(b: EstadoPlano): Moeda {
   const c = String(b.subscription?.currency ?? '').toUpperCase();
-  return c === 'USD' || c === 'EUR' ? c : 'BRL';
+  return c === 'USD' || c === 'EUR' || c === 'INR' ? c : 'BRL';
 }
 /** O preço do item na moeda (centavos, texto); null = não se vende nela. */
 export function precoEm(i: ItemC, m: Moeda): string | null {

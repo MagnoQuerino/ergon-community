@@ -13,7 +13,7 @@ export const VISUAIS_NO_PROMPT = [
 
 /** O catálogo de campos (o agente pede quando precisa: ferramenta visual com catalogo=true). */
 export const CATALOGO_VISUAIS = `Blocos visuais do Ergon: uma cerca \`\`\`ergon-<tipo> com o JSON do bloco (o tipo com hífen: ergon-linha-do-tempo). Comuns a todos: titulo (≤90), subtitulo, nota, fontes[] (obrigatória nos blocos de dado), estimativa (true dispensa fonte), lado {numero, rotulo, linhas[≤3]} (resumo ao lado do mini visual).
-Formatos de número: formato = numero | inteiro | moeda (moeda: BRL|USD|EUR) | percentual (0–100) | compacto | data (AAAA-MM-DD) | texto. Números sempre como número JSON.
+Formatos de número: formato = numero | inteiro | moeda (moeda: BRL|USD|EUR|CNY|INR) | percentual (0–100) | compacto | data (AAAA-MM-DD) | texto. Números sempre como número JSON.
 - kpi: rotulo, valor, formato, unidade, variacao (% vs. antes), comparacao ("vs. out"), bom (alta|baixa: gasto é baixa), meta, serie[]
 - kpis: itens[2..6] de kpi
 - nota: rotulo (CAIXA ALTA curta), valor, escala (10), legenda — cabeçalho de avaliação "8,5/10"
