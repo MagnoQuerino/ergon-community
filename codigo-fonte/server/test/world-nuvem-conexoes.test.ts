@@ -225,12 +225,17 @@ test('o aparelho-nuvem trocado (World mal-intencionado ou nuvem recriada): nada 
   const cl = world.clouds.get(sws)!; const x = crypto.generateKeyPairSync('x25519');
   const novo = `dev_${crypto.randomBytes(16).toString('hex')}`;
   world.devices.set(novo, { id: novo, accountId: world.workspaces.get(sws)!.owner, name: 'nuvem trocada', publicKey: 'x', syncPublicKey: x.publicKey.export({ format: 'der', type: 'spki' }).toString('base64'), challenge: '', status: 'active', session: null, lastSeenAt: new Date().toISOString(), kind: 'cloud', cloudWs: sws } as never);
-  cl.deviceId = novo;
+  const velho = cl.deviceId; cl.deviceId = novo;
   const antes = world.workspaces.get(sws)!.changes.length;
   assert.equal((await req(pc, 'POST', '/api/world/nuvem/conexoes/aceite', dono, { ligar: true })).status, 200);
   await ate(async () => (await req(pc, 'GET', '/api/world/nuvem/conexoes', dono)).json.trocaNuvem?.aparelho === novo, 'a tela não pediu a confirmação da nuvem nova');
   await pausa(800); // vários ciclos
-  assert.equal(world.workspaces.get(sws)!.changes.slice(antes).filter((c) => c.kind === 'conexoes').length, 0, 'nenhuma credencial para a chave nova');
+  // nada cifrado para o aparelho novo. (Um retrato para o aparelho FIXADO pode sair logo depois da troca: o estado da
+  // nuvem que o computador tinha lido instantes antes ainda dizia o de antes — é o aparelho confiável, não uma brecha)
+  const dekPc = Buffer.from(pc.db.get<{ k: string }>('SELECT sync_key AS k FROM world_sync WHERE workspace_id = ?', dono.workspaceId)!.k, 'base64');
+  const paraOnde = world.workspaces.get(sws)!.changes.slice(antes).filter((c) => c.kind === 'conexoes').map((c) => openChange<{ para: string }>(dekPc, sws, c as never).para);
+  assert.ok(!paraOnde.includes(novo), `nenhuma credencial para a chave nova: ${JSON.stringify(paraOnde)}`);
+  assert.ok(paraOnde.every((p) => p === velho), `só para o aparelho fixado: ${JSON.stringify(paraOnde)}`);
   assert.equal(world.workspaces.get(sws)!.envelopes.get(novo), undefined, 'nem a chave do workspace');
   assert.ok(pc.db.get("SELECT 1 AS x FROM audit_events WHERE workspace_id = ? AND action = 'world.cloud_device_changed'", dono.workspaceId), 'na auditoria');
   // confirmar pede a senha

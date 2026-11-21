@@ -46,6 +46,8 @@ test('o segundo computador recebe a chave sozinho; a equipe nova fica retida par
   await pc1.app.ready();
   // sem ninguém clicar em "enviar": o ciclo manda a equipe e o conteúdo
   await ate(() => (world.workspaces.get(sws)?.head ?? 0) >= 2, 'o ciclo automático não enviou');
+  // (o World grava a mudança antes de responder; o ciclo só marca "última vez certa" quando termina: espera por ele)
+  await ate(async () => !!(await estado(pc1, a1)).auto.ultimaOk, 'o ciclo não terminou');
   const st = await estado(pc1, a1);
   assert.deepEqual([st.auto.auto, st.auto.pendencia, st.auto.equipeRetida, st.auto.nuvem?.ativa ?? false], [true, null, false, false]);
   assert.match(st.auto.ultimaOk, /^\d{4}-/);

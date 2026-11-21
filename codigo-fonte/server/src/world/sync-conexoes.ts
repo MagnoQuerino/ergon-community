@@ -256,6 +256,10 @@ export class ConexoesNuvem {
   }
 
   private async enviar(userId: string, ws: string, sws: string, destino: { deviceId: string; syncPublicKey: string }, conteudo: Pacote | Devolucao) {
+    // a fixação do aparelho-nuvem (nuvem-fixa.ts) conferida no ponto final, imediatamente antes de cifrar para a chave:
+    // as credenciais nunca saem para um aparelho-nuvem que não é o fixado, venha o destino de onde vier
+    if (conteudo.type === 'conexoes.pacote' && conferirNuvem(this.d.db, this.d.bus, ws, destino, this.estado(ws).enviado_para ?? this.estado(ws).nuvem_aparelho) !== 'ok')
+      throw new HttpError(409, 'nuvem_trocada', 'o aparelho-nuvem do workspace mudou: espera a confirmação da pessoa dona');
     const eu = this.d.sync.aparelho(userId);
     const envelope = sealForDevice(Buffer.from(JSON.stringify(conteudo), 'utf8'), destino.syncPublicKey, { ws: sws, from: eu.deviceId, to: destino.deviceId });
     const corpo: Corpo = { type: 'conexoes', v: 1, para: destino.deviceId, dePub: eu.x25519Public, envelope };
