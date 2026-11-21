@@ -19,6 +19,7 @@ import { loadWorldConfig, type WorldConfig } from './config.ts';
 import { checkAccountInput, EMAIL_UNVERIFIED, forgetWorkspace, migrateWorldLocal, WorldClient, WorldLinks, worldLocale, type AccountInput, type DeviceChoice } from './link.ts';
 import { type AutoSync, EXIT_TOKEN_NOVO, iniciarAutoSync, iniciarNuvem, modoNuvem, prepararCofre } from './nuvem.ts';
 import type { PosseHorario } from '../services/routines.ts';
+import { SalasSync } from './sync-salas.ts';
 import { LocalSync, type RecoveryInput } from './sync-local.ts';
 import { ConexoesNuvem } from './sync-conexoes.ts';
 import { normalizeJobs, type RemoteJobsRaw, type RemotePool, type RemoteUnavailable } from './jobs-view.ts';
@@ -256,6 +257,31 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
         log: (o, msg) => app.log.info(o, msg) });
       /** a sincronia automática deste computador (world/nuvem.ts); nula no contêiner da nuvem e com ERGON_WORLD_AUTOSYNC=0 */
       let auto: AutoSync | null = null;
+      // as Salas entre os colaboradores (sync-salas.ts): quem é quem pelo World, e um envio logo depois de cada mudança
+      if (h.salas && links) {
+        const salas = h.salas; const ss = new SalasSync(db, salas);
+        ss.log = (o, msg) => app.log.info(o, msg);
+        sync.salas = ss;
+        salas.contaDe = (userId) => links?.get(userId)?.account_id ?? null;
+        salas.compartilhado = (ws) => !!sync.worldId(ws) && !!links?.ownerOfBound(ws);
+        salas.donoConta = (ws) => db.get<{ d: string | null }>('SELECT dono_conta AS d FROM world_sync WHERE workspace_id = ?', ws)?.d ?? null;
+        salas.pessoasDoWorld = async (ws, userId) => {
+          const w = sync.worldId(ws); const s = links?.session(userId);
+          if (!w || !s) return null;
+          const r = await client.call<{ members: Array<{ accountId: string; name: string | null; role: string; me: boolean }> }>('GET', `/v1/sync/workspaces/${w}/members`, undefined, s);
+          h.canais?.membros(ws, r.members); // os papéis guardados valem também para as salas
+          return r.members;
+        };
+        const espera = new Map<string, ReturnType<typeof setTimeout>>();
+        salas.aoMudar = (ws) => {
+          if (!auto || espera.has(ws)) return;
+          const dono = links?.ownerOfBound(ws);
+          if (!dono) return;
+          // junta as mudanças de um instante num envio só (e a tela não espera o ciclo de um minuto)
+          espera.set(ws, setTimeout(() => { espera.delete(ws); void auto?.sincronizar(dono, ws).catch(() => undefined); }, 1500));
+        };
+        app.addHook('onClose', async () => { for (const t of espera.values()) clearTimeout(t); espera.clear(); salas.parar(); });
+      }
       // as conexões do computador (Google, Microsoft, Slack…) na nuvem do workspace, cifradas só para ela (sync-conexoes.ts)
       const msCx = (k: string) => { const n = Number.parseInt(env[k] ?? '', 10); return Number.isFinite(n) && n >= 20 ? n : undefined; };
       const conexoes = h.integrations ? new ConexoesNuvem({ db, cfg, bus: h.bus, client, links: L(), sync, integrations: h.integrations, nuvem: modoNuvem(cfg, env), log: (o, m) => app.log.info(o, m),
@@ -772,7 +798,11 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       const log = (o: Record<string, unknown>, msg: string) => app.log.info(o, msg);
       let nuvem: { parar: () => Promise<void>; posse: (w: string, slot: string) => PosseHorario } | null = null;
       // de quem é cada horário de rotina (o computador aberto ou a nuvem; nunca os dois): Routines.posse
-      const ligarPosse = () => { h.routines.posse = (w, slot) => nuvem?.posse(w, slot) ?? 'aqui'; };
+      const ligarPosse = () => {
+        h.routines.posse = (w, slot) => nuvem?.posse(w, slot) ?? 'aqui';
+        // salas: a nuvem só responde com as conexões da dona (cedidas) na vez dela — os computadores fechados
+        if (h.salas && modoNuvem(cfg, env)) h.salas.posseNuvem = (w, quando) => nuvem?.posse(w, quando) ?? 'esperar';
+      };
       const proximoHorario = (w: string) => h.routines.proximoHorario(w);
       // os tempos do ciclo (os testes encurtam)
       const ms = (k: string) => { const n = Number.parseInt(env[k] ?? '', 10); return Number.isFinite(n) && n >= 20 ? n : undefined; };

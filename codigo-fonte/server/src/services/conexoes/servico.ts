@@ -127,6 +127,8 @@ export class Conexoes {
    * segue a regra; escrita sempre confirma (acima de "Liberar tudo" e das regras); papel de leitura não escreve.
    */
   canalExterno: ((conversationId: string | null, risco: Risco) => 'recusar' | 'confirmar' | null) | null = null;
+  /** a trava das Salas (services/salas): numa execução de sala, as conexões daqui são de quem pediu, ou cedidas a ele */
+  salaGuarda: ((run: RunRow, risco: Risco, conexao: string, acao: string) => { recusar: string } | { seguir: true } | null) | null = null;
   constructor(d: ConexoesDeps) {
     this.d = d;
     this.regras = new RegrasConexoes(d.db, d.bus);
@@ -252,6 +254,14 @@ export class Conexoes {
     // chat.ts: chat-<id da mensagem dela> (e -de-novo-N ao repetir); a mensagem existe, é dela e é desta conversa
     const m = /^chat-(msg_[0-9a-f]{32})(?:-de-novo-\d+)?$/.exec(k);
     if (m) return this.db.get("SELECT 1 AS x FROM messages WHERE id = ? AND conversation_id = ? AND role = 'user' AND author_user_id IS NOT NULL", m[1], r.conversation_id) ? 'pessoa' : 'fora';
+    // sala (services/salas): o pedido de quem escreveu a mensagem NESTE aparelho é da pessoa; o complemento com conexões
+    // cedidas (o pedido veio de outra pessoa) é de fora: ler vai direto, mas o que muda ou envia pela conta de quem cedeu
+    // espera o clique dela
+    const sl = /^sala-(sfl_[0-9a-f]{32})$/.exec(k);
+    if (sl) {
+      const f = this.db.get<{ origem_id: string; cedida: number }>('SELECT origem_id, cedida FROM salas_fila WHERE id = ? AND conversation_id = ?', sl[1], r.conversation_id);
+      return f && !Number(f.cedida) && this.db.get("SELECT 1 AS x FROM messages WHERE id = ? AND conversation_id = ? AND role = 'user' AND author_user_id IS NOT NULL", f.origem_id, r.conversation_id) ? 'pessoa' : 'fora';
+    }
     if (!(k.startsWith('queue-') || k.startsWith('delegate-')) || !r.task_id) return 'fora';
     return this.origemDoCard(r.task_id, fundo + 1);
   }
@@ -712,6 +722,9 @@ export class Conexoes {
     if (desconhecidos.length) return { ok: false, status: 'falhou', texto: `Parâmetro desconhecido: ${desconhecidos.map((n) => `"${clip(n, 40)}"`).join(', ')}. Os válidos em ${acao.id} são: ${Object.keys(acao.params).join(', ') || 'nenhum'}. Nada foi feito.` };
     const origem = this.origem(run);
     const leuDeFora = this.leu(run).deFora;
+    // sala: o agente usa as conexões de quem pediu; as daqui, só se forem dela ou cedidas a ela (a auditoria registra o uso cedido)
+    const sala = this.salaGuarda?.(run, riscoDe(acao, bruto), kind, acao.id) ?? null;
+    if (sala && 'recusar' in sala) return { ok: false, status: 'falhou', texto: sala.recusar, desligada: true, marca: { risco: riscoDe(acao, bruto) } };
     if (this.ajuste(ws, kind, acao, bruto, conta) === 'desligado') return { ok: false, status: 'falhou', texto: `A pessoa desligou esta ação em Conexões › ${integrationDef(kind)!.name}${conta ? ` (conta ${nomeDaConta(daConta)})` : ''}. Conte isso a ela; não tente outro caminho.`, desligada: true, marca: { risco: riscoDe(acao, bruto) } };
     // o que o cartão precisa mostrar, e o alvo fixado: o clique executa exatamente o que a pessoa viu
     let args = bruto; let detalhe: string | undefined; let obriga: string | undefined; let fixou: string[] = [];

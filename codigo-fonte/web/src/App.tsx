@@ -259,9 +259,9 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
   const [card, setCard] = useState<string | null>(null);
   // de onde o card abriu: de "Aguardando você", a lista fica embaixo (escondida) e o card ganha "Voltar" — uma pilha
   const [cardDe, setCardDe] = useState<OrigemDoCard | null>(null);
-  const [convs, setConvs] = useState<{ agentId: string | null; conversationId: string | null } | null>(null);
+  const [convs, setConvs] = useState<{ agentId: string | null; conversationId: string | null; salaId?: string | null; foco?: string | null } | null>(null);
   useEffect(() => onOpenCard((id, de) => { if (de !== 'decisoes') setDecisions(false); setCardDe(de); setCard(id); }), []);
-  useEffect(() => onOpenConversation((agentId, conversationId) => { setDecisions(false); setWin(null); setConvs({ agentId, conversationId }); }), []);
+  useEffect(() => onOpenConversation((agentId, conversationId, salaId, foco) => { setDecisions(false); setWin(null); setConvs({ agentId, conversationId, salaId: salaId ?? null, foco: foco ?? null }); }), []);
   useEffect(() => onOpenDecisions(() => { setCard(null); setDecisions(true); }), []);
   // primeiro acesso (perguntas de boas-vindas) ou refazer pela Ajuda; tour inicial; objetivo contado nas perguntas
   const [onb, setOnb] = useState<'first' | 'redo' | null>(() => (me.onboarding === 'pending' && me.role === 'owner' ? 'first' : null));

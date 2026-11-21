@@ -60,7 +60,7 @@ import { executavel, sha256 } from './lib/executavel.ts';
 import { TERMOS_VERSAO, aceitarTermos, codigoPorPadrao, estadoDosTermos, sincronizarCodigoDaEquipe } from './services/termos.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
-import { activeCardsOf, channelNoteFor, chatHooks, createConversation, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, registrarRespostaDigitada, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
+import { activeCardsOf, channelNoteFor, chatHooks, createConversation, ehSala, registrarSalas, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, registrarRespostaDigitada, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
 import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
 import { Initiative } from './services/initiative.ts';
 import { forkFrom, marksOf, mediaOf, searchAll, setMark, updateConversation, type SearchKind } from './services/conversation-tools.ts';
@@ -108,6 +108,8 @@ import { boardAudience, boardView, createTask, decideLinkProposal, defaultBoard,
 import { chaveDaColuna } from './services/colunas.ts';
 import { USER_COLUMNS } from './services/seed.ts';
 import { loadWorld, type CloudTasksHost } from './world-hook.ts';
+import { Salas } from './services/salas/servico.ts';
+import { registerSalasRoutes } from './services/salas/rotas.ts';
 import { providerKeyOf, saveProviderKey } from './services/provider-keys.ts';
 import { exportBlueprint, guardadasPendentes, limparGuardadas, setAoMudarFerramentasDaEquipe } from './services/blueprint.ts';
 import { Packages } from './services/packages.ts';
@@ -141,6 +143,8 @@ export interface AppDeps {
 export interface ErgonApp {
   app: FastifyInstance;
   executor: RunExecutor;
+  /** Salas (rc.42): conversa em grupo com pessoas e agentes */
+  salas: Salas;
   cartoes: Cartoes;
   aprovacoes: Aprovacoes;
   /** aplicativos conectados pela pessoa (servidor MCP próprio), uma conta por conexão */
@@ -556,6 +560,13 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // o Teams e os bots oficiais (Telegram, Discord) pelo relé usam a mesma camada: cada conta ligada age como o membro dela
   teamsApp.usarCamadaComum(canais.externos);
   conexoes.canalExterno = (conv, risco) => { const x = canais.externos.daConversa(conv) ?? teamsApp.daConversa(conv); return x ? canais.externos.decisaoDaAcao(x.papel, risco) : null; };
+  // Salas (rc.42, services/salas): conversa em grupo; quem vê é quem está nela, e o agente usa as conexões de quem pediu
+  const salas = new Salas({ db, bus, executor, maxChars: cfg.maxInputChars, filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes });
+  salas.nuvem = cfg.mode === 'cloud';
+  salas.papelDaConta = (ws, conta) => { try { return db.get<{ p: string }>('SELECT papel AS p FROM canais_externo_papeis WHERE workspace_id = ? AND account_id = ?', ws, conta)?.p ?? null; } catch { return null; } };
+  registrarSalas(db, (ws, userId, conv) => salas.ehMembro(ws, userId, conv));
+  conexoes.salaGuarda = (run, risco, conexao, acao) => salas.guardaConexao(run, risco, conexao, acao);
+  executor.onFinish((r, status, output) => { try { salas.aoTerminar(r, status, output); } catch (e) { log.warn({ err: { message: (e as Error).message } }, 'sala: fim da execução não tratado'); } });
   chatHooks.channelNote = (conv, msg) => {
     try { return teamsApp.notaDoCanal(conv, msg) ?? canais.notaDoCanal(conv, msg); } catch { return null; }
   };
@@ -1247,7 +1258,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       runs: { running: Number(counts?.running ?? 0), queued: Number(counts?.queued ?? 0), waiting: Number(counts?.waiting ?? 0),
         processes: Number(counts?.processes ?? 0), limit: executor.processLimit(a.workspaceId), daily: executor.dailyLimit(a.workspaceId), cardsWaiting: teamwork.queue(a.workspaceId).length },
       // o mesmo que a lista de "aguardando você" (propostas, cards esperando você, perguntas, vínculos e regras)
-      decisionsPending: pendingCount(db, a.workspaceId),
+      decisionsPending: pendingCount(db, a.workspaceId) + salas.contarAvisos(a.workspaceId, a.userId),
       executor: { mode: executor.mode, label: executor.mode === 'real' ? 'modelo de IA real' : 'SIMULAÇÃO — sem modelo de IA' },
       sectors: listSectors(db, a.workspaceId).map(({ instructions: _i, ...s }) => s),
       teamAutorun: teamwork.autorun(a.workspaceId),
@@ -2539,6 +2550,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const b = req.body as { text: string; clientRequestId: string; queue?: boolean; attachments?: string[]; replyTo?: string; voz?: boolean };
     // na conversa de preparo de uma rotina, a coordenação recebe o contexto do preparo (e a mensagem não vira tarefa)
     const convId = (req.params as { id: string }).id;
+    // sala (rc.42): tem a rota dela (menções e cessões que a tela formou); por aqui, nem comando nem mensagem
+    getConversation(db, a.workspaceId, a.userId, convId);
+    if (ehSala(db, convId)) throw new HttpError(409, 'sala', 'Esta conversa é uma sala: escreva por ela.');
     const note = routines.channelFor(convId);
     // atalho digitado (/meta, /repetir, /checagem, /comentar, /revisao e os nomes originais /goal, /loop, /heartbeat, /btw,
     // /review, em qualquer idioma): vira o comando, não uma mensagem para o agente
@@ -3263,6 +3277,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // é pelo app com relé (services/teams-app), o WhatsApp pelo leitor por QR (services/whatsapp.ts) e o Telegram e o
   // Discord pelas rotas dos canais. Um plugin antigo que ainda mande evento para cá recebe 404 e não responde ninguém.
   registerCanaisRoutes(app, { canais, owner, verify: secApi.verify, bridgeMotor });
+  registerSalasRoutes(app, { db, bus, salas, auth, maxChars: cfg.maxInputChars });
   registerWhatsAppEquipeRoutes(app, { equipe: whatsappEquipe, owner, verify: secApi.verify });
 
   // Plugin do Ergon no motor: antes de cada ferramenta, pergunta de qual agente é a sessão e o que ele pode usar.
@@ -3588,7 +3603,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     defaultModel: (ws) => ({ provider: aiOf(ws).cachedDefaultProvider(), model: aiOf(ws).cachedDefault() }),
     note: (ws, taskId, action, text) => audit(db, bus, { workspaceId: ws, actorType: 'system', actorId: 'ergon', action, targetType: 'task', targetId: taskId, result: text }),
   };
-  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, recovery: worldRecovery, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks, integrations,
+  if (world) await world.register({ app, cfg, db, bus, vault, publicRoutes: PUBLIC_API, auth, owner, admin, recovery: worldRecovery, controlFor: (ws) => motors.control(ws), routines, limits, tasks: cloudTasks, integrations, salas,
     createWorkspace: (userId, name) => createOwnWorkspace(db, personKeys(), userId, name, cfg.slotsPerFloor),
     // os canais com a nuvem do Ergon World: o contêiner responde pelas contas ligadas enquanto o computador está fechado
     canaisNuvem: { reserva: (ws, x) => teamsApp.reserva(ws, x), atender: (x) => teamsApp.atender(x), ligavel: () => !!teamsApp.base(), instalacao: () => teamsApp.instalacaoNoRele(), sincronizadas: (ws, ids) => teamsApp.sincronizadas(ws, ids), ocupado: () => teamsApp.ocupado() },
@@ -3628,6 +3643,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, navegador, computador, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
+  return { app, salas, navegador, computador, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
 }
 

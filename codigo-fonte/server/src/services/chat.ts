@@ -14,18 +14,28 @@ interface ConversationRow {
   id: string; workspace_id: string; agent_id: string; owner_user_id: string; title: string; hermes_session_key: string; created_at: string;
 }
 
-/** Conversa pertence a (workspace, participante, agente). Outro usuário não a lê, mesmo com o ID. */
+/**
+ * Conversa pertence a (workspace, participante, agente). Outro usuário não a lê, mesmo com o ID. A sala (rc.42,
+ * services/salas) é uma conversa de grupo: vale quem está nela AGORA (chatHooks.membroDaSala), não o dono da linha —
+ * quem saiu da sala não lê mais nada dela, nem pelas rotas de conversa (arquivos, execuções, áudio, navegador).
+ */
 export function getConversation(db: Db, workspaceId: string, userId: string, conversationId: string): ConversationRow {
-  const c = db.get<ConversationRow>('SELECT * FROM conversations WHERE id = ? AND workspace_id = ? AND owner_user_id = ?', conversationId, workspaceId, userId);
+  const c = db.get<ConversationRow & { sala: number }>('SELECT * FROM conversations WHERE id = ? AND workspace_id = ?', conversationId, workspaceId);
   if (!c) throw notFound('conversa');
+  if (Number(c.sala)) { if (!membroDaSala.get(db)?.(workspaceId, userId, conversationId)) throw notFound('conversa'); return c; }
+  if (c.owner_user_id !== userId) throw notFound('conversa');
   return c;
 }
+
+/** A conversa é uma sala? As rotas de conversa de uma pessoa com um agente não mandam mensagem para ela (a sala tem as dela). */
+export const ehSala = (db: Db, conversationId: string): boolean => Number(db.get<{ s: number }>('SELECT sala AS s FROM conversations WHERE id = ?', conversationId)?.s ?? 0) === 1;
+const naoNaSala = (db: Db, conversationId: string) => { if (ehSala(db, conversationId)) throw new HttpError(409, 'sala', 'Esta conversa é uma sala: escreva por ela.'); };
 
 export function listConversations(db: Db, workspaceId: string, userId: string, agentId?: string) {
   return db.all(
     `SELECT c.id, c.agent_id, c.title, c.created_at, c.purpose, c.read_at, c.archived_at, c.pinned_at,
             (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_at
-       FROM conversations c WHERE c.workspace_id = ? AND c.owner_user_id = ? ${agentId ? 'AND c.agent_id = ?' : ''}
+       FROM conversations c WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0 ${agentId ? 'AND c.agent_id = ?' : ''}
       ORDER BY COALESCE(last_at, c.created_at) DESC LIMIT 100`,
     ...(agentId ? [workspaceId, userId, agentId] : [workspaceId, userId]));
 }
@@ -110,6 +120,13 @@ export const chatHooks: {
   channelNote?: (conversationId: string, messageId?: string | null) => string | null;
 } = {};
 
+/**
+ * A pessoa está (agora) na sala? (services/salas; sem o serviço, ninguém vê sala nenhuma). Por banco: cada servidor no
+ * mesmo processo (os testes sobem vários computadores) confere no dele.
+ */
+const membroDaSala = new WeakMap<Db, (workspaceId: string, userId: string, conversationId: string) => boolean>();
+export const registrarSalas = (db: Db, fn: (workspaceId: string, userId: string, conversationId: string) => boolean): void => { membroDaSala.set(db, fn); };
+
 /** A instrução de canal desta conversa: a do canal dela (Teams) ou a da tela do Ergon. */
 export const channelNoteFor = (conversationId: string, messageId?: string | null): string => chatHooks.channelNote?.(conversationId, messageId) ?? CHANNEL_NOTE;
 
@@ -140,6 +157,7 @@ interface SendOptions { /** Revisão em conselho: a resposta vem do conselho de 
 export function registrarRespostaDigitada(db: Db, bus: Bus, workspaceId: string, userId: string, conversationId: string, content: string, clientRequestId: string): { messageId: string; replayed: boolean } {
   if (!/^[A-Za-z0-9-]{8,64}$/.test(clientRequestId)) throw new HttpError(400, 'client_request_id', 'identificador de pedido inválido');
   getConversation(db, workspaceId, userId, conversationId);
+  naoNaSala(db, conversationId);
   const dup = db.get<{ id: string }>('SELECT id FROM messages WHERE conversation_id = ? AND client_request_id = ?', conversationId, clientRequestId);
   if (dup) return { messageId: dup.id, replayed: true };
   const messageId = id('msg');
@@ -156,6 +174,7 @@ export function sendMessage(db: Db, bus: Bus, executor: RunExecutor, workspaceId
   if (content.length > maxChars) throw new HttpError(400, 'too_long', `mensagem acima de ${maxChars} caracteres`);
   if (!/^[A-Za-z0-9-]{8,64}$/.test(clientRequestId)) throw new HttpError(400, 'client_request_id', 'identificador de pedido inválido');
   const conv = getConversation(db, workspaceId, userId, conversationId);
+  naoNaSala(db, conversationId);
 
   // reenvio do mesmo pedido (resposta perdida) não duplica mensagem, tarefa nem execução
   const dup = db.get<{ id: string; run_id: string | null; queued: number }>('SELECT id, run_id, queued FROM messages WHERE conversation_id = ? AND client_request_id = ?', conversationId, clientRequestId);
@@ -285,7 +304,7 @@ export function recentConversations(db: Db, workspaceId: string, userId: string,
             (SELECT m.role FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_role,
             (SELECT COUNT(*) FROM message_attachments ma WHERE ma.message_id = (SELECT m.id FROM messages m WHERE m.conversation_id = c.id AND m.role != 'system' ORDER BY m.created_at DESC, m.id DESC LIMIT 1)) AS last_files
        FROM conversations c JOIN agents a ON a.id = c.agent_id JOIN profiles p ON p.id = a.profile_id
-      WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND a.status = 'active' AND c.archived_at IS NULL
+      WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND c.sala = 0 AND a.status = 'active' AND c.archived_at IS NULL
         AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'agent'))
       ORDER BY COALESCE(last_at, c.created_at) DESC LIMIT ?`, workspaceId, userId, max);
   // a última fala, curta e sem as linhas de controle dos agentes; o colega leve (retrato e nome, sem a lista da equipe)
@@ -338,6 +357,7 @@ export function removeQueued(db: Db, bus: Bus, workspaceId: string, userId: stri
  */
 export function retryLast(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, userId: string, conversationId: string) {
   const conv = getConversation(db, workspaceId, userId, conversationId);
+  naoNaSala(db, conversationId);
   if (db.get("SELECT 1 AS x FROM runs WHERE conversation_id = ? AND status IN ('queued', 'running', 'waiting_user') LIMIT 1", conversationId)) {
     throw new HttpError(409, 'busy', 'ainda há uma resposta em andamento nesta conversa');
   }

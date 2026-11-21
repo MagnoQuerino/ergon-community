@@ -75,7 +75,10 @@ export function attachmentsOf(db: Db, workspaceId: string, messageIds: string[])
 export function attachmentsOfRun(db: Db, workspaceId: string, runId: string): AttachmentInfo[] {
   return db.all<AttachmentInfo>(
     `SELECT a.id, a.filename, a.mime, a.size FROM messages m JOIN message_attachments ma ON ma.message_id = m.id JOIN artifacts a ON a.id = ma.artifact_id
-      WHERE m.run_id = ? AND m.workspace_id = ? AND m.role = 'user' ORDER BY a.created_at, a.id`, runId, workspaceId);
+      WHERE m.workspace_id = ? AND m.role = 'user'
+        -- a resposta de um agente numa sala (services/salas): os anexos da mensagem que o chamou
+        AND (m.run_id = ? OR m.id = (SELECT f.origem_id FROM salas_fila f WHERE f.run_id = ?))
+      ORDER BY a.created_at, a.id`, workspaceId, runId, runId);
 }
 
 const isImage = (a: AttachmentInfo) => VISION_MIMES.has(a.mime);

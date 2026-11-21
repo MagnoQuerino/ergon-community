@@ -16,6 +16,7 @@ import type { Routines } from '../services/routines.ts';
 import type { WorldClient, WorldLinks } from './link.ts';
 import { type Applied, type ContentBody, ContentSync, parseContent } from './sync-content.ts';
 import { SyncAtividade } from './sync-atividade.ts';
+import type { SalasSync } from './sync-salas.ts';
 import { conferirNuvem } from './nuvem-fixa.ts';
 import { newWorkspaceKey, openChange, openForDevice, recoveryKindOf, sealChange, unwrapForDevice, unwrapForRecovery, unwrapForRecoveryWorld, wrapForDevice, wrapForRecovery, wrapForRecoveryWorld } from './sync-crypto.ts';
 import { KDF_STRONG, type KdfParams } from '../security/crypto.ts';
@@ -50,6 +51,8 @@ export class LocalSync {
   private readonly nuvem: boolean;
   /** derivação do envelope pela senha do World (a mesma força da senha local) */
   private readonly kdf: KdfParams;
+  /** as Salas entre os colaboradores (sync-salas.ts); sem o serviço, nada das salas vai nem vem */
+  salas: SalasSync | null = null;
   constructor(d: { db: Db; links: WorldLinks; client: WorldClient; routines: Routines; bus: Bus; limits: AgentLimits; log?: LogSync; nuvem?: boolean; kdf?: KdfParams }) { this.nuvem = d.nuvem === true; this.kdf = d.kdf ?? KDF_STRONG; this.db = d.db; this.links = d.links; this.client = d.client; this.routines = d.routines; this.bus = d.bus; this.limits = d.limits; this.content = new ContentSync(d.db); this.atividade = new SyncAtividade(d.bus); this.log = d.log ?? (() => undefined); }
 
   /** mensagens novas vindas de outro aparelho (antes de a tela ser avisada): os canais não as mandam de novo */
@@ -403,9 +406,18 @@ export class LocalSync {
     // parte privada: ferramentas, rotinas e a configuração delas) — quem recebe também não aplicaria (receber)
     let mandarEquipe = !opts.contentOnly && bh !== r.blueprint_hash && (await this.donoDe(userId, ws, r)) === (this.links.get(userId)?.account_id ?? '');
     if (mandarEquipe && jaChegou(`bp:${bh}`)) { this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); mandarEquipe = false; esquecer(); }
-    let partes = this.content.chunks(this.content.pending(ws, userId)).map((x) => ({ ...x, resumo: `ct:${sha(JSON.stringify(x.body))}` }));
+    const brutas = this.content.chunks(this.content.pending(ws, userId));
+    const salas = this.salas ? this.salas.saida(ws, r.sync_workspace_id, this.aparelho(userId), brutas.length > 0) : null;
+    // as salas (sync-salas.ts) vão na primeira parte; sem conteúdo nenhum, numa parte só delas
+    // com pacotes (que podem levar partes de anexo), numa parte só deles, depois do conteúdo: cada mudança fica no teto
+    let comSalas: (typeof brutas)[number] | undefined;
+    if (salas) {
+      if (brutas.length && !salas.extra.salas) { Object.assign(brutas[0].body, salas.extra); comSalas = brutas[0]; }
+      else { comSalas = { body: { type: 'content', tasks: [], conversations: [], messages: [], ...salas.extra }, items: [] }; brutas.push(comSalas); }
+    }
+    let partes = brutas.map((x) => ({ ...x, resumo: `ct:${sha(JSON.stringify({ ...x.body, salas: undefined }))}${salas && x === comSalas ? `:${salas.resumo.slice(0, 16)}` : ''}` }));
     const chegada = partes.find((x) => jaChegou(x.resumo));
-    if (chegada) { this.content.sent(ws, chegada.items); partes = partes.filter((x) => x !== chegada); esquecer(); }
+    if (chegada) { this.content.sent(ws, chegada.items); if (salas && chegada.body === comSalas?.body) salas.marcar(); partes = partes.filter((x) => x !== chegada); esquecer(); }
     if (!mandarEquipe && !partes.length) { if (pend?.chegou) esquecer(); return { version, sent }; } // nada a enviar: a barra de cima nem pisca
     // cada parte enviada é um ponto seguro (a versão e o "já foi" ficam gravados); cortado no meio, o que faltou vai na
     // próxima vez (o que já tinha chegado ao World e não foi marcado aqui vai de novo, e aplicar duas vezes dá no mesmo)
@@ -414,6 +426,7 @@ export class LocalSync {
       for (const part of partes) {
         await send(part.body, 'change', 'ct', part.resumo);
         this.content.sent(ws, part.items);
+        if (salas && part.body === comSalas?.body) { salas.marcar(); if (this.salas?.salas.temEnvioDeAnexo(ws)) this.salas.salas.aoMudar?.(ws); }
         sent.tasks += part.body.tasks.length; sent.conversations += part.body.conversations.length; sent.messages += part.body.messages.length;
       }
       return { version, sent };
@@ -489,12 +502,16 @@ export class LocalSync {
       this.db.tx(() => {
         const novas = body.messages.map((m) => m.id).filter((id) => !this.db.get('SELECT 1 AS x FROM messages WHERE id = ?', id));
         const n = this.content.apply(ws, userId, body, x.deviceId);
+        // as salas: anúncio de chave, pacotes selados para este aparelho e a governança (sync-salas.ts)
+        if (this.salas && (body.aparelho || body.salas || body.salasGov)) { try { this.salas.entrada(ws, r.sync_workspace_id, x, body, this.aparelho(userId)); } catch (e) { this.log({ ws, erro: String((e as Error).message ?? e).slice(0, 160) }, 'salas: o que veio não foi aplicado'); } }
         for (const k of Object.keys(total) as Array<keyof Applied>) total[k] += n[k];
         try { if (novas.length) this.aoReceberMensagens?.(ws, novas); } catch { /* os canais não seguram a sincronia */ }
         this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ? AND last_version < ?', x.version, now(), ws, x.version);
       });
     }
     this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', head, now(), ws);
+    // salas: as mensagens que pediram conexões daqui, agora que tudo chegou (a resposta de outro aparelho pode estar junto)
+    try { this.salas?.salas.aposReceber(ws); } catch (e) { this.log({ ws, erro: String((e as Error).message ?? e).slice(0, 160) }, 'salas: pedido de conexões não tratado'); }
     // quadros e itens de cartão (sync-quadros.ts) também mudam a tela de Tarefas: chegando só eles, o aviso vai igual
     if (incoming.tasks || contents.some((b) => b.boards?.length || b.cards?.length)) this.bus.publish(ws, 'tasks.changed', {});
     if (incoming.messages || incoming.conversations) this.bus.publish(ws, 'messages.changed', {});

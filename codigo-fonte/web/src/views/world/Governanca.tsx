@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useResource } from '../../lib/live.ts';
 import { Icon } from '../../components/Icon.tsx';
+import { SalasGovernanca } from '../../components/Salas.tsx';
 import { ErgonMarca, Loading } from '../../brand/Brand.tsx';
 import { fmtDataHora, fmtDracmas, useIdioma } from '../../i18n/index.ts';
 import { twn, useTw, type ChaveWorld } from './textos.ts';
@@ -28,6 +29,7 @@ const SECOES = [
   { id: 'gov-tetos', icone: 'coins', titulo: 'gov.tetos', texto: 'gov.tetos.texto' },
   { id: 'gov-nuvem', icone: 'cloud', titulo: 'gov.nuvem', texto: 'gov.nuvem.texto' },
   { id: 'gov-compras', icone: 'key', titulo: 'gov.compras', texto: 'gov.compras.texto' },
+  { id: 'gov-salas', icone: 'users', titulo: 'gov.salas', texto: 'gov.salas.texto' },
   { id: 'gov-atividade', icone: 'activity', titulo: 'gov.atividade', texto: 'gov.atividade.texto' },
 ] as const satisfies ReadonlyArray<{ id: string; icone: string; titulo: ChaveWorld; texto: ChaveWorld }>;
 
@@ -112,6 +114,7 @@ function GovAberta({ workspace }: { workspace: string }) {
     'gov-tetos': <Tetos b={b.data} />,
     'gov-nuvem': <Nuvem pol={pol.data} />,
     'gov-compras': <Compras membros={m.data} />,
+    'gov-salas': <SalasGovernanca />,
     'gov-atividade': <Registro />,
   };
   return (

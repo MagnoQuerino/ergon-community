@@ -110,7 +110,7 @@ export class Initiative {
   /** A conversa comum mais recente da pessoa com o agente (ou uma nova). */
   private conversationWith(workspaceId: string, userId: string, agentId: string): string {
     const c = this.db.get<{ id: string }>(
-      `SELECT c.id FROM conversations c WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.agent_id = ? AND c.purpose IS NULL
+      `SELECT c.id FROM conversations c WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.agent_id = ? AND c.purpose IS NULL AND c.sala = 0
         ORDER BY COALESCE((SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id), c.created_at) DESC LIMIT 1`, workspaceId, userId, agentId);
     return c?.id ?? createConversation(this.db, workspaceId, userId, agentId).id;
   }
