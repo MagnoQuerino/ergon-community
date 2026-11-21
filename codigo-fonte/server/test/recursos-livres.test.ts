@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { COM_CUSTO, PROTEGIDAS, TOOLS, abrirFerramentas, ferramentasAbertas, ferramentasEfetivas, toolsetsFor } from '../src/services/characters.ts';
 import { almaDoAgente, instructionsFor } from '../src/services/runs.ts';
+import { VISUAIS_NO_PROMPT } from '../../shared/visuais/prompt.ts';
 import { harness, req, setupOwner } from './helpers.ts';
 
 const lista = (v: string | null): string[] => { try { const x = JSON.parse(v ?? '[]'); return Array.isArray(x) ? x.map(String) : []; } catch { return []; } };
@@ -90,6 +91,10 @@ describe('recursos livres: nenhuma trava por agente', () => {
       for (const t of ferramentasAbertas(true)) assert.ok(de(coord).includes(t), `Coordenador com ${t}`);
       for (const t of ferramentasAbertas()) assert.ok(de(id('diogenes')).includes(t), `Diógenes com ${t}`);
       assert.deepEqual(de(id('platao')), restrito, 'a restrição da pessoa fica');
+      // os blocos visuais não são item da lista: o restrito também mostra os números como visual (a ferramenta visual
+      // vem com os cartões, sempre ligados no motor; a regra vai no SOUL de todos)
+      assert.ok(!('visual' in TOOLS), 'visual não é ferramenta por agente');
+      for (const x of [coord, id('platao'), id('diogenes')]) assert.ok(almaDoAgente(h.db, s.workspaceId, x).includes(VISUAIS_NO_PROMPT), x);
       assert.equal(abrirFerramentas(h.db, null, s.workspaceId), 0, 'uma vez só');
     } finally { await h.close(); }
   });

@@ -76,7 +76,7 @@ logger = logging.getLogger("ergon_bridge")
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
 # imagem (hermes/Dockerfile); um teste confere as três. Capacidade nova = acrescentar aqui (o servidor confere a lista
 # para saber se o motor precisa ser renovado).
-PLUGIN_VERSION = "0.9.0"
+PLUGIN_VERSION = "0.10.0"
 # medicao: do que é feita cada chamada ao modelo (/ergon/v1/medicao); passos: o máximo de passos por pedido que a pessoa
 # escolhe no Ergon (/ergon/v1/passos); aprovar_depois_de_ler: com a proteção ligada, pede a aprovação em vez de barrar;
 # compactacao: resumir as conversas longas mais cedo, ligado ou não, por escolha da pessoa (/ergon/v1/compactacao)
@@ -104,9 +104,10 @@ PLUGIN_VERSION = "0.9.0"
 # git (rc.42): o acesso de código de curta duração das Conexões vai só ao git (credential helper), nunca ao modelo
 # computador (rc.42): o controle do computador da pessoa (computer_use pelo provedor "ergon", que manda cada ação ao Ergon e
 # dali ao Ergon Desktop), a administração do Discord (discord_admin) e o diagnóstico para quem programa (debugging)
+# visuais (rc.43): a ferramenta visual valida os blocos visuais da conversa (/internal/bridge/v1/visual)
 CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao",
                "perfis", "memoria", "ajudantes", "modelos_tarefa", "ajustes", "cota", "pausa", "nao_treinar", "cartoes", "comandos",
-               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "git", "computador")
+               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador", "git", "computador", "visuais")
 _TS_CONEXOES = "ergon_conexoes"
 # Os conjuntos de ferramentas que este plugin registra ficam em _ERGON_PLUGIN_TOOLSETS, mais abaixo (o mesmo de
 # ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
@@ -2510,7 +2511,7 @@ def cota(forcar: bool = False) -> dict[str, Any]:
 # (tools/terminal_tool_sudo.py, por sessão: na API, a sessão é a própria execução) e não é gravada em lugar nenhum.
 _TS_CARTOES = "ergon_cartoes"
 _ERGON_PLUGIN_TOOLSETS = (_TS_CONEXOES, _TS_CARTOES, _TS_GESTAO)
-_CARTOES_TOOLS = frozenset({"perguntar", "pedir_chave", "pedir_senha_admin", "entregar"})
+_CARTOES_TOOLS = frozenset({"perguntar", "pedir_chave", "pedir_senha_admin", "entregar", "visual"})
 _CARTAO_ESPERA = float(os.environ.get("ERGON_CARTAO_ESPERA_S", "240"))
 _CARTAO_PASSO = float(os.environ.get("ERGON_CARTAO_PASSO_S", "2"))
 _CHAVE_NOME = re.compile(r"[A-Z][A-Z0-9_]{2,60}")
@@ -3002,6 +3003,37 @@ _ENTREGAR = {
 }
 
 
+# ---------------------------------------------------------------- visual: os blocos visuais da conversa (rc.42)
+# O agente monta o bloco (métrica, gráfico, tabela, enquete, relatório…) e o Ergon valida (shared/visuais/esquema.ts):
+# volta a cerca pronta para colar na resposta, ou os erros para corrigir e chamar de novo. O Ergon desenha na conversa,
+# nas salas, no detalhe das entregas e nos documentos; o Telegram e o Discord recebem o texto e a imagem.
+def tool_visual(args: dict[str, Any], task_id: str = "", session_id: str = "", **_: Any) -> str:
+    session_id, task_id = _sessao_do_pedido(str(session_id or ""), str(task_id or ""))
+    a = args if isinstance(args, dict) else {}
+    corpo: dict[str, Any] = {"session_id": session_id[:200], "task_id": task_id[:200]}
+    if a.get("catalogo") or not isinstance(a.get("bloco"), (dict, list)):
+        corpo["catalogo"] = True
+    else:
+        corpo["bloco"] = a.get("bloco")
+    try:
+        data = _post_to(_url_for("/internal/bridge/v1/visual"), corpo, timeout=20)
+    except Exception:  # noqa: BLE001 - sem o nome da exceção: o modelo tende a repetir a frase à pessoa
+        return json.dumps({"ok": False, "erros": ["O sistema não respondeu: responda em texto, com os números numa lista curta."]}, ensure_ascii=False)
+    return json.dumps(data if isinstance(data, dict) else {"ok": False}, ensure_ascii=False)
+
+
+_VISUAL = {
+    "name": "visual",
+    "description": ("Valida um bloco visual do Ergon para a conversa (métrica, gráfico, tabela, comparativo, prazos, metas, enquete, "
+                    "relatório…). Devolve a cerca ```ergon-<tipo> pronta para colar na resposta, ou os erros: corrija e chame de novo. "
+                    "Todo bloco de dado leva fontes (de onde veio, com o período) ou estimativa=true. catalogo=true devolve os tipos e campos."),
+    "parameters": {"type": "object", "properties": {
+        "bloco": {"type": "object", "description": "o bloco: {\"tipo\": \"kpi\"|\"barras\"|\"pizza\"|\"tabela\"|…, …, \"fontes\": [...]}"},
+        "catalogo": {"type": "boolean", "description": "true: devolve o catálogo dos tipos e campos"},
+    }},
+}
+
+
 _PEDIR_CHAVE = {
     "name": "pedir_chave",
     "description": ("Pede à pessoa uma chave, senha ou token de um serviço (por exemplo GITHUB_TOKEN) de forma segura: ela digita num cartão protegido, o valor "
@@ -3296,6 +3328,27 @@ async def _canal_enviar_async(item: dict[str, Any]) -> dict[str, Any]:
     if tipo == "digitando":
         await adapter.send_typing(chat_id)
         return {"ok": True}
+    if tipo == "imagem":
+        # rc.42: o bloco visual como PNG (o texto dele já foi antes)
+        import base64
+        import io
+        try:
+            png = base64.b64decode(str(item.get("png") or ""), validate=True)
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "erro": "imagem inválida"}
+        if not png or len(png) > 8 * 1024 * 1024 or png[:4] != b"\x89PNG":
+            return {"ok": False, "erro": "imagem inválida"}
+        if platform == "telegram":
+            m = await native.bot.send_photo(chat_id=int(chat_id), photo=png, caption=texto[:1000] or None)
+            return {"ok": True, "message_id": str(m.message_id)}
+        if platform == "discord":
+            import discord  # a biblioteca que o adaptador do Hermes usa
+            user_id = int(item.get("user_id") or 0)
+            user = native.get_user(user_id) or await native.fetch_user(user_id)
+            canal = user.dm_channel or await user.create_dm()
+            m = await canal.send(content=texto[:limite] or None, file=discord.File(io.BytesIO(png), filename="visual.png"))
+            return {"ok": True, "message_id": str(m.id)}
+        return {"ok": False, "erro": "tipo desconhecido"}
     if tipo == "texto":
         r = await adapter.send(chat_id, texto)  # o adaptador formata e divide o texto longo
         if getattr(r, "success", False):
@@ -5840,6 +5893,7 @@ def register(ctx) -> None:
     ctx.register_hook("post_llm_call", on_post_llm_call)
     ctx.register_tool(name="perguntar", toolset=_TS_CARTOES, schema=_perguntar_schema(), handler=tool_perguntar)
     ctx.register_tool(name="entregar", toolset=_TS_CARTOES, schema=_ENTREGAR, handler=tool_entregar)
+    ctx.register_tool(name="visual", toolset=_TS_CARTOES, schema=_VISUAL, handler=tool_visual)
     ctx.register_tool(name="pedir_chave", toolset=_TS_CARTOES, schema=_PEDIR_CHAVE, handler=tool_pedir_chave)
     ctx.register_tool(name="pedir_senha_admin", toolset=_TS_CARTOES, schema=_PEDIR_SENHA_ADMIN, handler=tool_pedir_senha_admin)
     _mascarar_guardadas()

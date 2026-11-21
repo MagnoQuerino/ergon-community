@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.43 (pré-versão de teste)
+
+- **Números que viram visual:** os agentes mostram métricas, gráficos, tabelas, comparativos, prazos e enquetes direto na conversa, sempre com a fonte. Cada bloco baixa em PNG. Nas salas, a enquete se vota com um clique. O relatório abre como documento, com Revisar, versões e PDF.
+- **Cada agente com a sua cor:** a borda do avatar tem uma cor só daquele agente, a mesma em todas as telas e na revisão ao vivo. Passe o mouse para ver o nome.
+- **Controle devolvido:** se o navegador voltou ao agente enquanto você estava fora (tempo esgotado ou aba fechada), um aviso discreto conta isso na próxima vez que você abrir.
+- **Barra de digitação no celular:** anexar e voz ficam no "+", e o campo de texto ganha a largura.
+
 ## 1.1.0-rc.42 (pré-versão de teste)
 
 - **Salas e tópicos:** conversas em grupo com as pessoas do workspace e os agentes. "@" chama alguém (o agente responde ali mesmo) e "#" pede as conexões de um colega, que decide se cede e por quanto tempo. Uma mensagem pode virar um tópico, compartilhado ou só seu. Anexos e tudo o mais vão e voltam cifrados entre os computadores de quem está na sala.

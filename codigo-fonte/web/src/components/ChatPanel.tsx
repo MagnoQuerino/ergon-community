@@ -23,8 +23,13 @@ import { Markdown } from './Markdown.tsx';
 import { RECURSOS, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
 import { ConversaPorVoz } from './ConversaPorVoz.tsx';
 import { GravadorDeVoz } from './GravadorDeVoz.tsx';
-import { letterStyle } from '../lib/contraste.ts';
+import { AgentAvatar } from './AgentAvatar.tsx';
+import { MaisDoCampo } from './MaisDoCampo.tsx';
 import { CenaVazio } from '../arte/Cena.tsx';
+import { useVisuaisDaConversa } from '../visuais/conversa.ts';
+import { ContextoVisuais } from '../visuais/contexto.ts';
+import { visuaisComoTexto } from '../../../shared/visuais/texto.ts';
+import { votoDe } from '../../../shared/visuais/cercas.ts';
 
 /** Rascunhos das conversas (por agente), só na memória da aba: nada de conteúdo da conversa em disco ou na URL. */
 const DRAFTS = new Map<string, string>();
@@ -470,7 +475,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
 
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (m: Message) => {
-    try { await navigator.clipboard.writeText(plainText(stripControl(m.content))); setCopied(m.id); window.setTimeout(() => setCopied(null), 1600); } catch { setErr(t('conversas.acao.naoCopiou')); }
+    try { await navigator.clipboard.writeText(plainText(visuaisComoTexto(stripControl(m.content)))); setCopied(m.id); window.setTimeout(() => setCopied(null), 1600); } catch { setErr(t('conversas.acao.naoCopiou')); }
   };
   const title = convs.data?.find((c) => c.id === convId)?.title ?? t('conversas.conversa.com', { nome: agent.name });
   const saveDoc = (m: Message) => download(`${title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60).trim() || t('conversas.arquivo.entrega')}.doc`, 'application/msword', toWordHtml(stripControl(m.content), title));
@@ -485,7 +490,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   // responder citando, marcar, bifurcar, revisar uma entrega
   const [replying, setReplying] = useState<Message | null>(null);
   const byId = useMemo(() => new Map(list.map((m) => [m.id, m])), [list]);
-  const quoteOf = (m: Message) => clip1(m.role === 'agent' ? plainText(stripControl(m.content)) : m.content, 160);
+  const quoteOf = (m: Message) => clip1(m.role === 'agent' ? plainText(visuaisComoTexto(stripControl(m.content), { curto: true })) : m.content, 160);
   const toggleMark = async (m: Message) => { try { await api.put(`/api/messages/${m.id}/mark`, { on: !m.marked }); msgs.reload(); marks.reload(); } catch (e) { setErr(errMsg(e)); } };
   const fork = async (m: Message) => {
     try { const r = await api.post<{ id: string; agentId: string }>(`/api/messages/${m.id}/fork`); convs.reload(); if (onOpenConversation) onOpenConversation(r.agentId, r.id); else setConvId(r.id); }
@@ -527,7 +532,10 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
     return () => window.removeEventListener('keydown', on);
   }, []);
 
-  const timeline = useMemo(() => [...list.map((m) => ({ at: m.created_at, m, p: null as Proposal | null })), ...(props.data ?? []).map((p) => ({ at: p.created_at, m: null as Message | null, p }))]
+  // blocos visuais (rc.42): os votos das enquetes (mensagens só com o voto, fora da linha do tempo) e votar
+  const visuais = useVisuaisDaConversa(list, convId, msgs.reload);
+  const abrirVoz = () => { if (semIa) { setAvisoIa(true); ai.reload(); } else setVozAberta(true); };
+  const timeline = useMemo(() => [...list.filter((m) => !(m.role === 'user' && votoDe(m.content))).map((m) => ({ at: m.created_at, m, p: null as Proposal | null })), ...(props.data ?? []).map((p) => ({ at: p.created_at, m: null as Message | null, p }))]
     .sort((a, b) => a.at.localeCompare(b.at)), [list, props.data]);
   const lastMsg = list[list.length - 1];
 
@@ -544,7 +552,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       onDragLeave={() => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDrag(false); }}
       onDrop={(e) => { if (!dragHasFiles(e)) return; e.preventDefault(); dragDepth.current = 0; setDrag(false); void addFiles(e.dataTransfer.files); }}>
       {!embedded && <header className="chat__head">
-        <span className="avatar" style={letterStyle(agent.color)} aria-hidden="true">{agent.name[0]}</span>
+        <AgentAvatar agent={agent} size={34} />
         <div className="chat__who">
           <strong>{agent.name}</strong>
           <span>{busy ? <span className="chat__status">{t('conversas.conversa.trabalhando')}</span> : `${agent.role} · ${agent.sector_name}`}</span>
@@ -595,6 +603,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           {media.data?.links.map((l) => <a key={`${l.message_id}-${l.url}`} className="chat__panel-item" href={l.url} target="_blank" rel="noreferrer noopener"><Icon name="compass" size={13} /><span>{l.url}</span></a>)}
         </div>
       )}
+      <ContextoVisuais.Provider value={visuais}>
       <div className="chat__msgs" role="log" aria-live="polite" ref={box} onScroll={onScroll}>
         {!list.length && !shownOptimistic.length && (
           <div className="chat__empty">
@@ -726,7 +735,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         {busy && (live?.text
           ? (
             <div className="msg msg--agent msg--live">
-              <div className="msg__body"><Markdown text={stripControl(live.text)} /><span className="caret" aria-hidden="true" /></div>
+              <div className="msg__body"><Markdown text={stripControl(live.text)} aoVivo /><span className="caret" aria-hidden="true" /></div>
               {live.activity && <div className="msg__activity"><span className="typing" aria-hidden="true"><i /><i /><i /></span> {t('conversas.aoVivo.atividade', { nome: agent.name, atividade: live.activity })}</div>}
             </div>
           )
@@ -738,6 +747,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           </div>
         )}
       </div>
+      </ContextoVisuais.Provider>
       {/* rc.27: a resposta está sendo feita: um recado que não interrompe (parar continua no botão de sempre) */}
       {busy && lastRun?.run_id && lastRun.run_status === 'running' && <OrientarCampo compacto rota={`/api/runs/${lastRun.run_id}/steer`} nome={agent.name} />}
       {fresh > 0 && <button type="button" className="chat__fresh" onClick={toEnd}>↓ {t('conversas.conversa.mensagensNovas', { n: fresh })}</button>}
@@ -768,8 +778,14 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       <form className="chat__input" onSubmit={(e) => { e.preventDefault(); void send(); }}>
         {replying && <div className="chat__replying"><Icon name="undo" size={13} /><span><b>{replying.role === 'user' ? t('conversas.conversa.voce') : agent.name}</b> {quoteOf(replying)}</span><button type="button" className="icon-btn" onClick={() => setReplying(null)} aria-label={t('conversas.campo.naoCitar')}><Icon name="x" size={13} /></button></div>}
         {files.length > 0 && <div className="chat__files">{files.map((f) => <FileChip key={f.key} f={f.art ?? { filename: f.file.name, mime: f.file.type || 'application/octet-stream', size: f.file.size }} progress={f.progress} error={f.error} onRemove={() => removeFile(f.key)} />)}</div>}
-        <div className="chat__row">
-          <button type="button" className="icon-btn chat__clip" onClick={() => picker.current?.click()} aria-label={t('conversas.campo.anexar')} title={t('conversas.campo.anexarDica')}><Icon name="clip" /></button>
+        <div className={`chat__row ${!text.trim() && !files.length ? 'chat__row--vazio' : ''}`}>
+          {/* no celular (rc.43): anexar e a voz num "+" ao lado do campo, e o microfone no lugar do enviar enquanto o campo
+              está vazio — o campo de texto fica com a largura; no computador, tudo à vista como sempre */}
+          {!gravando && !vozAberta && <MaisDoCampo itens={[
+            { rotulo: t('conversas.campo.anexar'), icone: 'clip', fazer: () => picker.current?.click() },
+            { rotulo: t('conversas.voz.abrir'), icone: 'voz', fazer: abrirVoz },
+          ]} />}
+          <button type="button" className="icon-btn chat__clip chat__extra" onClick={() => picker.current?.click()} aria-label={t('conversas.campo.anexar')} title={t('conversas.campo.anexarDica')}><Icon name="clip" /></button>
           <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ''; }} />
           {/* com a voz ligada o microfone é dela: o gravador de áudio some até desligar */}
           {!vozAberta && <GravadorDeVoz onGravado={(f, motivo) => void gravado(f, motivo)} onAtivo={setGravando} />}
@@ -777,7 +793,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
           {vozAberta
             ? <ConversaPorVoz agente={agent} mensagens={list} podeFalar={!!rec.data?.voz.falar} preparaVoz={!!rec.data?.voz.preparar?.falar}
               garantirConversa={ensureConv} recarregar={() => msgs.reload()} onFechar={() => setVozAberta(false)} />
-            : !gravando && <button type="button" className="icon-btn chat__mic chat__voz" aria-pressed="false" onClick={() => { if (semIa) { setAvisoIa(true); ai.reload(); } else setVozAberta(true); }}
+            : !gravando && <button type="button" className="icon-btn chat__mic chat__voz chat__extra" aria-pressed="false" onClick={abrirVoz}
               aria-label={t('conversas.voz.abrir')} title={t('conversas.voz.abrirDica', { nome: agent.name })}><Icon name="voz" /></button>}
           <textarea hidden={gravando} ref={input} data-autofocus data-esc-own={working ? '' : undefined} value={text} onChange={(e) => { setText(e.target.value); if (hint) setHint(null); }} rows={1}
             placeholder={busy ? t('conversas.campo.proxima', { nome: agent.name }) : t('conversas.campo.falarCom', { nome: agent.name })}

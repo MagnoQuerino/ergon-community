@@ -7,6 +7,7 @@ import { beginDrag, useDragging, type DropTarget } from '../lib/dragMove.ts';
 import { teamUrl, useAgentList, useGroupPages, type Placement, type TeamAgent, type TeamSector, type TeamStructure, type TeamSummary } from '../lib/teamData.ts';
 import type { AppState } from '../lib/types.ts';
 import { AgentFigure } from '../components/AgentFigure.tsx';
+import { useCorDoAgente, varsDaCor } from '../lib/cores-agentes.ts';
 import { Icon } from '../components/Icon.tsx';
 import { MoveTray, type Pick } from '../components/MoveTray.tsx';
 import { NewAgentDialog } from '../components/NewAgentDialog.tsx';
@@ -318,7 +319,7 @@ function AgentCard({ a, pending, onOpen, onDrag, onMove, extra }: {
       title={pending ? t('equipe.card.movendoDica') : t('equipe.card.dica')}
       onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('.tcard__menu, [role="menu"], button:not(.tcard__name)')) onDrag(e, a); }}
       onClick={cardClick(open)}>
-      <span className="tcard__fig"><AgentFigure agent={a} /></span>
+      <FiguraDoCard agent={a} />
       <div className="tcard__body">
         <button className="tcard__name" onClick={open} aria-label={t('equipe.card.abrirPerfilDe', { nome: a.name })}>{a.name}</button>
         <span className="tcard__role">{a.role}</span>
@@ -381,4 +382,10 @@ function DragLayer({ sectors }: { sectors: Array<{ key: string; name: string }> 
       </div>
     </>
   );
+}
+
+/** O boneco no card da equipe, na moldura com a cor do agente (a mesma borda do avatar nas outras telas). */
+function FiguraDoCard({ agent }: { agent: TeamAgent }) {
+  const cor = useCorDoAgente(agent.id, agent.name);
+  return <span className={`tcard__fig${cor ? ' tcard__fig--cor' : ''}`} style={varsDaCor(cor)} title={agent.name}><AgentFigure agent={agent} /></span>;
 }

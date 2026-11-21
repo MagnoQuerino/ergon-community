@@ -67,6 +67,9 @@ function fetchShared<T>(url: string, fresh = false): Promise<T> {
 /** Já buscado antes (para quem quer esperar os dados antes de mostrar a tela). */
 export function cachedResource<T>(url: string): T | undefined { return cache.get(url) as T | undefined; }
 
+/** Ouve os eventos ao vivo fora de um componente (um armazenamento da aba inteira); devolve como parar. */
+export function ouvirEventos(fn: (type: string, data: unknown) => void): () => void { handlers.add(fn); return () => { handlers.delete(fn); }; }
+
 /** Recurso REST recarregado quando chegam eventos dos tipos indicados (com pequena agregação). */
 export function useResource<T>(url: string | null, types: string[]): { data: T | null; error: string | null; reload: () => void; loading: boolean } {
   const [data, setData] = useState<T | null>(() => (url ? (cache.get(url) as T | undefined) ?? null : null));

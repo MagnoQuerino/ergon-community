@@ -1,0 +1,53 @@
+/* Galeria dos blocos visuais (só desenvolvimento): a moldura das cenas. Os blocos usam visuais.css, sem nada daqui. */
+html, body, #root { height: auto; min-height: 100%; }
+body { background: var(--bg); }
+.gv { max-width: 1360px; margin: 0 auto; padding: 28px 28px 80px; }
+.gv__cab h1 { margin: 0; font-size: 26px; letter-spacing: -.01em; }
+.gv__cab p { margin: 4px 0 0; color: var(--muted); }
+.gv__grupo { margin-top: 28px; }
+.gv__grupo > h2 { margin: 0 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.gv__grade { columns: 2 560px; column-gap: 22px; }
+.gv__item { break-inside: avoid; padding-top: 1px; }
+@media (max-width: 560px) { .gv { padding: 16px 16px 60px; } .gv__grade { columns: 1; } }
+
+.gv-chat { max-width: 860px; margin: 0 auto; min-height: 100vh; background: var(--panel); border-inline: 1px solid var(--line-suave); }
+.gv-chat .chat { width: auto; border: 0; height: auto; }
+.gv-chat .chat__msgs { overflow: visible; max-height: none; }
+
+.gv-sala { max-width: 860px; margin: 0 auto; min-height: 100vh; background: var(--panel); border-inline: 1px solid var(--line-suave); }
+.gv-sala__cab { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line-suave); }
+.gv-sala__cab h2 { margin: 0; font-size: 17px; }
+.gv-sala__hash { color: var(--muted); font-weight: 700; font-size: 18px; }
+.gv-sala__membros { margin-left: auto; display: flex; }
+.gv-sala__membros > * { margin-left: -6px; box-shadow: 0 0 0 2px var(--panel); border-radius: 50%; }
+.gv-sala__msgs { padding: 12px 18px 40px; display: grid; gap: 14px; }
+.gv-sala__m { display: grid; grid-template-columns: 34px 1fr; gap: 10px; }
+.gv-sala__av { width: 34px; height: 34px; font-size: 13px; }
+.gv-sala__c { min-width: 0; }
+.gv-sala__quem { margin: 0 0 2px; display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.gv-sala__quem time { color: var(--muted); font-size: 12px; }
+.gv-sala__m .msg__body { font-size: 14.5px; }
+.gv-sala__m.is-eu .msg__body { background: var(--marca-suave-2); border-radius: 12px; padding: 8px 12px; display: inline-block; }
+@media (max-width: 560px) { .gv-sala__msgs { padding: 10px 12px 30px; } .gv-sala__m { grid-template-columns: 1fr; } .gv-sala__m > :first-child { display: none; } }
+
+/* o Discord (só para o print do que o canal recebe) */
+.gv-dc { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; background: #313338; color: #dbdee1; font-family: "gg sans", "Noto Sans", "Segoe UI", system-ui, sans-serif; }
+.gv-dc__lado { background: #2b2d31; padding: 14px 10px; }
+.gv-dc__srv { margin: 0 8px 8px; font-size: 12px; font-weight: 700; color: #949ba4; text-transform: uppercase; }
+.gv-dc__dm { margin: 0; padding: 8px; border-radius: 6px; display: flex; gap: 8px; align-items: center; color: #f2f3f5; }
+.gv-dc__dm.is-on { background: #404249; }
+.gv-dc__bot, .gv-dc__av { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #1D184B; color: #fff; font-weight: 700; flex: none; }
+.gv-dc__av { width: 40px; height: 40px; }
+.gv-dc__av--eu { background: #5865f2; }
+.gv-dc__main { min-width: 0; display: flex; flex-direction: column; }
+.gv-dc__cab { padding: 12px 16px; font-weight: 700; color: #f2f3f5; border-bottom: 1px solid #1f2023; }
+.gv-dc__msgs { padding: 16px; display: grid; gap: 4px; }
+.gv-dc__m { display: grid; grid-template-columns: 40px 1fr; gap: 16px; padding: 6px 0; }
+.gv-dc__m--cont { padding-top: 0; }
+.gv-dc__m p { margin: 0; line-height: 1.375; font-size: 15px; }
+.gv-dc__n { font-weight: 600; color: #f2f3f5; }
+.gv-dc__n time { font-weight: 400; font-size: 12px; color: #949ba4; margin-left: 4px; }
+.gv-dc__tag { font-size: 10px; background: #5865f2; color: #fff; border-radius: 3px; padding: 1px 4px; vertical-align: 2px; }
+.gv-dc__txt p { white-space: pre-wrap; }
+.gv-dc__img { display: block; margin-top: 4px; max-width: min(520px, 100%); border-radius: 8px; }
+@media (max-width: 560px) { .gv-dc { grid-template-columns: 1fr; } .gv-dc__lado { display: none; } .gv-dc__m { grid-template-columns: 32px 1fr; gap: 10px; } .gv-dc__av { width: 32px; height: 32px; } }

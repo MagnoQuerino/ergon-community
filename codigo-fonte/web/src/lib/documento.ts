@@ -61,7 +61,8 @@ export function trechosMudados(antes: readonly string[] | null, depois: readonly
 // ------------------------------------------------------------------------------------------------ blocos visuais
 
 /** Bloco visual embutido no Markdown: ```ergon-<tipo>\n<conteúdo>\n``` → o componente de quem registrou o tipo. */
-export interface BlocoVisualProps { tipo: string; conteudo: string }
+/** aoVivo: a mensagem ainda chega (o último bloco pode estar com a cerca aberta). */
+export interface BlocoVisualProps { tipo: string; conteudo: string; aoVivo?: boolean }
 const blocos = new Map<string, ComponentType<BlocoVisualProps>>();
 
 /** Registra o desenho de um tipo de bloco (ex.: "grafico" para ```ergon-grafico```). Sem registro: aparece como código. */
@@ -77,7 +78,8 @@ export function blocoVisual(lang: string): { tipo: string; Componente: Component
 export interface AgenteNaFrente { id: string; name: string; role: string; color: string; char_key: string | null; look_seed: number | null }
 export interface FrenteAoVivo {
   id: string; acao: 'revisar' | 'reescrever' | 'conferir'; especialidade: string; estado: 'espera' | 'trabalhando' | 'feito' | 'falhou';
-  cor: string; blocos: number[]; conferidoAte: number; aoVivo: string | null; agente: AgenteNaFrente;
+  /** a cor do agente no tema claro e no escuro (shared/cor-agente.ts) */
+  cor: string; corEscuro?: string; blocos: number[]; conferidoAte: number; aoVivo: string | null; agente: AgenteNaFrente;
 }
 export interface EstadoRevisao {
   versao: number;

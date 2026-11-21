@@ -40,6 +40,10 @@
   --dourado-suave: #fbf4e6; --dourado-suave-2: #fffaf0; --dourado-texto: var(--gold-ink); --dourado-borda: #ecd9b4; --dourado-cheio: var(--gold); --dourado-cheio-borda: #9c7448; --dourado-cheio-hover: #c79c6c; --dourado-sobre: #1d1606; --dourado-vivo: #c9a227;
   --marca-suave: #ede4ff; --marca-suave-2: #f5f0fb; --marca-texto: #4b2f8f; --marca-borda: #d5c6f5; --marca-borda-forte: #8b6fc0; --marca-faixa: #8b6fc0; --marca-cheio: #1D184B; --marca-cheio-hover: #140C34; --marca-sobre: #ffffff;
   --agua-suave: #f2f8f9; --agua-suave-2: #e3f2ef; --agua-texto: var(--teal); --agua-borda: #cfe3e7; --agua-borda-forte: #468a80; --agua-cheio: #1F5B6B; --agua-sobre: #ffffff;
+  /* blocos visuais dos agentes (rc.42): as séries dos gráficos, bom/ruim/atenção, o trilho das barras e o texto sobre a cor;
+     o PNG do servidor usa as mesmas (shared/visuais/paleta.ts, conferido por teste) */
+  --vis-1: #1f5b6b; --vis-2: #a9773f; --vis-3: #6b4fb0; --vis-4: #b4603f; --vis-5: #2c774b; --vis-6: #2b5f86;
+  --vis-bom: #237a4a; --vis-ruim: #b23a26; --vis-atencao: #966800; --vis-trilho: #ebe3d4; --vis-sobre: #ffffff;
   --foco-largura: 2px; /* o contorno de foco: azul-marinho (passa em todo fundo); no alto contraste, mais largo */
   --ponto-anel: rgba(29, 42, 51, .55); /* contorno de dentro dos pontinhos (o cinza, o verde e o âmbar não chegam a 3:1 no claro) */
   /* os nomes curtos de sempre, para o código das telas: apontam para as cores de função */
@@ -1709,6 +1713,8 @@ a.fchip__main:hover { background: var(--panel-2); }
   --dourado-suave: #3a301c; --dourado-suave-2: #352c1a; --dourado-borda: #4e4026;
   --marca-suave: #251c39; --marca-suave-2: #271a37; --marca-texto: #c7bae8; --marca-borda: #372955; --marca-borda-forte: #8a74c4; --marca-cheio: #2f2a6b; --marca-cheio-hover: #3a3480;
   --agua-suave: #1a3337; --agua-suave-2: #1e3e38; --agua-borda: #294c53; --agua-borda-forte: #5aa79b; --agua-cheio: #1d5a66;
+  --vis-1: #6cc3d3; --vis-2: #d6a874; --vis-3: #a993e6; --vis-4: #e58b68; --vis-5: #7fd3a1; --vis-6: #8fb8e0;
+  --vis-bom: #5ec58a; --vis-ruim: #ff8a73; --vis-atencao: #f1c96b; --vis-trilho: #2b313b; --vis-sobre: #0e1116;
   --ponto-anel: transparent;
   --cb-line: #343b47;
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .35);
@@ -1741,6 +1747,8 @@ a.fchip__main:hover { background: var(--panel-2); }
   --dourado-suave: #fbf0d9; --dourado-suave-2: #fdf6e6; --dourado-borda: #4a3000; --dourado-cheio: #ffd34d; --dourado-cheio-borda: #000000; --dourado-cheio-hover: #ffe080; --dourado-sobre: #000000; --dourado-vivo: #ffd34d;
   --marca-suave: #f0eaff; --marca-suave-2: #f6f2ff; --marca-texto: #2e1a6e; --marca-borda: #2e1a6e; --marca-borda-forte: #2e1a6e; --marca-faixa: #2e1a6e; --marca-cheio: #000000; --marca-cheio-hover: #333333;
   --agua-suave: #e3f4f4; --agua-suave-2: #d3eeec; --agua-borda: #004652; --agua-borda-forte: #004652; --agua-cheio: #004652;
+  --vis-1: #004652; --vis-2: #6b4400; --vis-3: #2e1a6e; --vis-4: #7a2a10; --vis-5: #0b4a24; --vis-6: #0a3a66;
+  --vis-bom: #0b4a24; --vis-ruim: #7a1500; --vis-atencao: #6b4400; --vis-trilho: #d9d9d9; --vis-sobre: #ffffff;
   --ponto-anel: #000000; --foco-largura: 3px;
   --cb-line: #000000;
   --shadow: none;
@@ -3921,4 +3929,37 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
   .doc-impressao h1, .doc-impressao h2, .doc-impressao h3, .doc-impressao h4 { break-after: avoid; }
   .doc-impressao tr, .doc-impressao .doc__codigo, .doc-impressao blockquote { break-inside: avoid; }
   .doc-impressao a { color: inherit; }
+}
+
+/* a cor de cada agente (rc.43, lib/cores-agentes.ts): o par claro/escuro em variáveis, o tema escolhe; a borda do avatar */
+.avatar--anel { box-sizing: border-box; border: 2px solid var(--agente); }
+.pxavatar.avatar--anel { background: var(--panel); }
+.tcard__fig--cor { box-sizing: border-box; border: 2px solid var(--agente); border-radius: 12px; background: color-mix(in srgb, var(--agente) 7%, transparent); padding-top: 4px; }
+
+/* o controle voltou sozinho ao agente (rc.43): discreto, no canto de baixo, uma vez */
+.aviso-devolvido { position: fixed; left: 16px; bottom: 16px; z-index: 60; display: flex; align-items: center; gap: 10px; max-width: min(380px, calc(100vw - 32px));
+  padding: 10px 10px 10px 14px; border-radius: 12px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+  animation: aviso-devolvido-entra .25s ease-out both; }
+.aviso-devolvido__txt { display: grid; gap: 2px; min-width: 0; flex: 1; font-size: 13px; }
+.aviso-devolvido__txt small { color: var(--muted); }
+@keyframes aviso-devolvido-entra { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .aviso-devolvido { animation: none; } }
+
+/* a barra de digitação no celular (rc.43): anexar e voz no "+", o microfone no lugar do enviar com o campo vazio */
+.chat__mais-caixa { position: relative; display: none; align-self: center; }
+.chat__mais-menu { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 20; display: grid; min-width: 200px; padding: 6px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: 0 10px 28px rgba(0, 0, 0, .16); }
+.chat__mais-menu button { display: flex; align-items: center; gap: 10px; padding: 10px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.chat__mais-menu button:hover, .chat__mais-menu button:focus-visible { background: var(--panel-2); }
+.chat__mais.is-on { color: var(--navy); background: var(--panel-2); }
+@media (max-width: 600px) {
+  .chat__mais-caixa { display: inline-flex; }
+  .chat__row .chat__extra, .sala__barra .chat__extra { display: none; }
+  .chat__row { gap: 4px; }
+  .chat__row:not(.chat__row--vazio) > .chat__mic:not(.chat__voz) { display: none; }
+  .chat__row--vazio .chat__send { display: none; }
+  .sala__barra { gap: 2px; padding: 8px 10px; }
+  .sala__barra:not(.sala__barra--vazia) > .chat__mic:not(.chat__voz) { display: none; }
+  .sala__barra--vazia .scampo__enviar { display: none; }
+  .sala__barra .chat__mais-caixa { align-self: flex-end; margin-bottom: 4px; }
 }

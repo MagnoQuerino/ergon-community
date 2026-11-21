@@ -13,6 +13,7 @@ import { IDENTIDADE_PADRAO, MODELOS_ORIGINAIS, REFERENCIAS, numeracao, preencher
 import { trechosDe } from '../../../shared/revisao.ts';
 import { ErgonMarca } from '../brand/Brand.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
+import { useEscuro, varsDaCor } from '../lib/cores-agentes.ts';
 import { Icon } from './Icon.tsx';
 import { inl } from './Markdown.tsx';
 import { RevisarDocumento } from './RevisarDocumento.tsx';
@@ -190,6 +191,7 @@ function Papel({ trechos, modelo, identidade, titulo, semLogo, impressao, presen
   impressao: boolean; presenca: Map<number, FrenteAoVivo>; novos: Set<number>;
 }) {
   const t = useT();
+  const escuro = useEscuro();
   const blocos = useMemo(() => trechos.map((x) => parseMarkdown(x.texto)), [trechos]);
   // a numeração dos títulos corre o documento inteiro
   const numeros = useMemo(() => {
@@ -227,10 +229,10 @@ function Papel({ trechos, modelo, identidade, titulo, semLogo, impressao, presen
         return (
           <div key={i} data-trecho={i}
             className={`doc__trecho ${quem ? 'doc__trecho--ocupado' : ''} ${x.escrevendo ? 'doc__trecho--escrevendo' : ''} ${novos.has(i) ? 'doc__trecho--novo' : ''}`}
-            style={quem ? ({ '--agente': quem.cor } as CSSProperties) : undefined} title={quem ? quem.agente.name : undefined}>
+            style={quem ? varsDaCor(escuro ? quem.corEscuro ?? quem.cor : quem.cor) : undefined} title={quem ? quem.agente.name : undefined}>
             {quem && primeiro && (
               <>
-                <span className="doc__quem" title={quem.agente.name} aria-label={quem.agente.name}><AgentAvatar agent={quem.agente} size={28} /></span>
+                <span className="doc__quem" title={quem.agente.name} aria-label={quem.agente.name}><AgentAvatar agent={quem.agente} size={28} anel={false} /></span>
                 <span className="doc__acao" aria-live="polite">{t(`documentos.doc.acao.${quem.acao}`)}</span>
               </>
             )}

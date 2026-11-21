@@ -13,6 +13,7 @@ import { cor, IDENTIDADE_PADRAO, MODELOS_ORIGINAIS, normalizarModelo, type Ident
 import { audit, type Bus } from './bus.ts';
 import { openArtifact } from './artifacts.ts';
 import { documentoPdf } from '../lib/pdf-documento.ts';
+import { chaveDaCerca, pngsDasCercas } from './visuais/png.ts';
 import { tituloDoDocumento } from '../../../shared/entregaveis.ts';
 import { getSetting, setSetting } from './sectors.ts';
 
@@ -182,11 +183,12 @@ function imagemDoWorkspace(db: Db, filesDir: string | null, ws: string) {
 
 /** PDF de um texto Markdown com a identidade do workspace e o modelo pedido (ou o padrão). */
 export function pdfDeTexto(db: Db, ws: string, md: string, titulo: string, modelo: ModeloDoc | null, filesDir: string | null = null, semLogo = false): Buffer {
+  const pngs = pngsDasCercas(md);
   const todos = modelos(db, ws);
   const m = modelo ?? todos.modelos.find((x) => x.id === todos.padrao) ?? MODELOS_ORIGINAIS[0];
   const id = identidade(db, ws);
   return documentoPdf({ markdown: md, titulo: tituloDoDocumento(md, titulo), identidade: semLogo ? { ...id, mostrarErgon: false } : id, modelo: m,
-    logo: semLogo ? null : logoDe(db, ws)?.data ?? null, imagem: imagemDoWorkspace(db, filesDir, ws) });
+    logo: semLogo ? null : logoDe(db, ws)?.data ?? null, imagem: imagemDoWorkspace(db, filesDir, ws), visual: (lang, corpo) => pngs.get(chaveDaCerca(lang, corpo)) ?? null });
 }
 
 /** PDF de um .md de Documentos: o modelo dele (ou outro, para a prévia). */
