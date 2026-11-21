@@ -18,7 +18,7 @@ import { localParts } from './routine-time.ts';
 import type { Section } from './routines.ts';
 import { analyzeSheet, fmt, statsLines, type TableStats } from './table-stats.ts';
 import { feedLine, newsUrl, readFeeds, type FeedRead } from './web-feeds.ts';
-import { fmtMoeda, fmtNumero } from '../lib/i18n.ts';
+import { MOEDA_COMO_ANTES, fmtMoeda, fmtNumero } from '../lib/i18n.ts';
 
 /** O que o usuário mandou na execução: o texto do pedido e os arquivos (do Ergon ou da nuvem). */
 export interface RunInput { text?: string; files?: FileRef[] }
@@ -233,7 +233,7 @@ export async function gatherExtra(ctx: ExtraCtx, sources: SourceId[]): Promise<E
       res.data.lancamentos = L;
       const ent = L.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0); const sai = L.filter((l) => l.valor < 0).reduce((s, l) => s + l.valor, 0);
       const low = L.filter((l) => l.confianca === 'baixa').length;
-      const lines = L.length ? [`${L.length} lançamento(s): entradas ${fmtMoeda(null, ent, 'BRL')} · saídas ${fmtMoeda(null, Math.abs(sai), 'BRL')} · saldo ${fmtMoeda(null, ent + sai, 'BRL')}${low ? ` · ${low} lido(s) de PDF/texto para conferir` : ''}`, ...L.slice(0, 120).map((l) => defuse(lancamentoLine(l)))] : ['(nenhum lançamento encontrado nos documentos: envie XML da NF-e, extrato OFX ou planilha com data e valor)'];
+      const lines = L.length ? [`${L.length} lançamento(s): entradas ${fmtMoeda(null, ent, 'BRL', MOEDA_COMO_ANTES)} · saídas ${fmtMoeda(null, Math.abs(sai), 'BRL', MOEDA_COMO_ANTES)} · saldo ${fmtMoeda(null, ent + sai, 'BRL', MOEDA_COMO_ANTES)}${low ? ` · ${low} lido(s) de PDF/texto para conferir` : ''}`, ...L.slice(0, 120).map((l) => defuse(lancamentoLine(l)))] : ['(nenhum lançamento encontrado nos documentos: envie XML da NF-e, extrato OFX ou planilha com data e valor)'];
       add(key, L.length, lines, { news: L.length > 0, signal: L.length > 0 });
     } else if (key === 'financeiro.conferencia') {
       const A: Lancamento[] = []; const B: Lancamento[] = [];

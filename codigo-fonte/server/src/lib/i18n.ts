@@ -135,6 +135,9 @@ const espaco = (s: string) => s.replace(/[  ]/g, ' ');
 /** Número: 1.250,5 (pt-BR) · 1,250.5 (en) · 12,34,567 (en-IN, hi). */
 export const fmtNumero = (l: Idioma | null | undefined, n: number, o: Intl.NumberFormatOptions = {}): string => espaco(nf(l, o).format(n));
 
+/** Os centavos só quando há (R$ 1.250 · R$ 1.250,5): o jeito dos resumos de lançamentos, que o agente cita e a conferência confere. */
+export const MOEDA_COMO_ANTES: Intl.NumberFormatOptions = { minimumFractionDigits: 0, maximumFractionDigits: 2 };
+
 /** Dinheiro: R$ 1.250,00 · $1,250.00 · ¥1,250.00 · ₹12,34,567.00. */
 export const fmtMoeda = (l: Idioma | null | undefined, v: number, moeda: Moeda, o: Intl.NumberFormatOptions = {}): string =>
   espaco(nf(l, { style: 'currency', currency: moeda, ...o }).format(v));

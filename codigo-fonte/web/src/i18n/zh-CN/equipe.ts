@@ -249,6 +249,19 @@ const equipe: TraducaoParcial<typeof pt> = {
   'semente.setorDesc.qualidade': '数字和表格、技术核查以及交付前的批判性审阅。',
   'semente.quadro.minhas': '我的任务',
   'semente.quadro.equipe': '团队看板',
+  // rc.45: a história (bio) dos personagens de fábrica (server/src/services/characters.ts)
+  'semente.bio.aristoteles': '曾是少年亚历山大的老师——至今还在追讨学费。他给所有生物分过类；如今把需求分成“待办”“进行中”和“已完成”。他坚信美德在中间（看板的中间）。',
+  'semente.bio.hesiodo': '比 Ergon 早了近三千年写下《工作与时日》，觉得这个名字该付他版税。他知道每件工作该在哪天做——也会提醒你。',
+  'semente.bio.diogenes': '住在大厅角落的一只木桶里，提着点亮的灯笼四处寻找一个说清楚的请求。他干活不讲排场；会议没用时，开到一半就走。',
+  'semente.bio.aspasia': '据说伯里克利的演讲稿是她写的；她从未承认，也从未否认。她负责与客户和供应商的沟通——你要求的她就发，其余的都要经你确认，除非你开启“全部允许”。',
+  'semente.bio.herodoto': '“历史之父”，批评者说也是“故事之父”。他在 Ergon 撰写报告和方案；苏格拉底负责核查那是历史还是故事。',
+  'semente.bio.fidias': '用黄金和象牙雕出了帕特农神庙的雅典娜；如今和你争论幻灯片的颜色。他相信一切都能靠黄金比例和更少的文字变得更好。',
+  'semente.bio.platao': '他发誓在理念世界里存在你项目的完美版本——眼前这个只是洞穴墙上的影子。所以他要了店里最好的模型。',
+  'semente.bio.socrates': '一行字都没写过，却审阅所有人写的。他只知道自己一无所知——这并不妨碍他在你知道的一切里找出毛病。',
+  'semente.bio.hipatia': '亚历山大的数学家、天文学家和教师，为别人只会引用的经典写过注释。在这里她做研究、注明出处、把文件整理得井井有条——还会委婉地核对阿基米德的计算。',
+  'semente.bio.arquimedes': '光着身子从浴池里跑出来大喊“尤里卡！”。在 Ergon 他用浴场时低调多了，并把每个单元格的公式都摆在明处。给他一张表格和一个支点，他就能撬动预算。',
+  'semente.bio.euclides': '没有证明的东西一概不接受。他逐一核对标准、计算和格式，每次审阅都以一句低调的“证毕”收尾。',
+  'semente.bio.hipodamo': '发明了棋盘式城市，并发誓 Ergon 的街区是他的主意。他留着长发，订着长远的计划——但总有里程碑。',
 };
 
 export default equipe;

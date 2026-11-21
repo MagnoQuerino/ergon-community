@@ -43,12 +43,16 @@ const SEMENTES: Readonly<Record<string, Chave>> = {
   'Quadro da equipe': 'equipe.semente.quadro.equipe', // i18n-ok: o texto que o servidor grava
 };
 
+/** A história (bio) dos personagens de fábrica: o português está no próprio dicionário (equipe.semente.bio.*). */
+const BIOS: ReadonlyMap<string, string> = new Map(Object.entries(PT_DIC.equipe as Record<string, unknown>)
+  .filter(([k, v]) => k.startsWith('semente.bio.') && typeof v === 'string').map(([k, v]) => [v as string, `equipe.${k}`]));
+
 /** O texto no idioma da tela, se for o de fábrica; senão, como está (o que a pessoa escreveu nunca é trocado). */
 export function daSemente(texto: string): string;
 export function daSemente(texto: string | null | undefined): string | null | undefined;
 export function daSemente(texto: string | null | undefined): string | null | undefined {
   if (!texto) return texto;
-  const k = SEMENTES[texto];
+  const k = SEMENTES[texto] ?? BIOS.get(texto);
   return k ? t(k as never) : texto;
 }
 

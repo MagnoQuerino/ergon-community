@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { nomeDaConstrucao } from '../world/buildings.ts';
 import { daSemente } from '../i18n/sementes.ts';
 import { fmtNumero, useT } from '../i18n/index.ts';
 import { api, errMsg, type ApiError } from '../lib/api.ts';
@@ -326,7 +327,7 @@ function AgentCard({ a, pending, onOpen, onDrag, onMove, extra }: {
         <span className="tcard__role">{daSemente(a.role)}</span>
         <span className="tcard__sector">{daSemente(a.sector_name)}</span>
         {a.coordinator && <span className="tcard__meta"><Icon name="lock" size={12} /> {t('equipe.card.cargoFixo')}</span>}
-        <span className="tcard__meta"><Icon name="pin" size={12} /> {a.building_name ?? '—'}</span>
+        <span className="tcard__meta"><Icon name="pin" size={12} /> {a.building_name ? nomeDaConstrucao(a.building_name) : '—'}</span>
         {pending ? <span className="badge">{t('equipe.card.movendo')}</span> : a.run_status ? <span className="badge badge--warn">{t(RUN_LABEL[a.run_status])}</span> : null}
         {a.status !== 'active' && <span className="muted small">{a.deactivation_note ?? t('equipe.card.desativado')}</span>}
         {extra}

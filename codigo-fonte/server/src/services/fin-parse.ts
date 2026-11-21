@@ -7,7 +7,7 @@
 import { parseDate, parseNumber } from './csv.ts';
 import type { DocText, Sheet } from './doc-text.ts';
 import { analyzeSheet } from './table-stats.ts';
-import { fmtMoeda } from '../lib/i18n.ts';
+import { MOEDA_COMO_ANTES, fmtMoeda } from '../lib/i18n.ts';
 
 export interface Lancamento {
   n: number; data: string; descricao: string; valor: number; documento: string;
@@ -99,7 +99,7 @@ export function sheetLancamentos(s: Sheet, documento: string, start = 1): Lancam
   return out;
 }
 
-const brl = (v: number) => `${v < 0 ? '−' : ''}${fmtMoeda(null, Math.abs(v), 'BRL')}`;
+const brl = (v: number) => `${v < 0 ? '−' : ''}${fmtMoeda(null, Math.abs(v), 'BRL', MOEDA_COMO_ANTES)}`;
 const brd = (iso: string) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : 'sem data');
 export const lancamentoLine = (l: Lancamento) =>
   `L${l.n} · ${brd(l.data)} · ${brl(l.valor)} · ${l.descricao}${l.vencimento ? ` · vence ${brd(l.vencimento)}` : ''}${l.numero ? ` · nº ${l.numero}` : ''} · ${l.documento}${l.confianca === 'baixa' ? ' · CONFERIR (lido de PDF/texto)' : ''}`;

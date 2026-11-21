@@ -15,7 +15,7 @@ test('cada texto de fábrica reconhecido está no servidor, entre aspas, do mesm
 });
 
 test('as funções, os setores e os quadros de fábrica têm tradução em en, zh-CN e hi', () => {
-  const chaves = Object.keys(en.equipe).filter((k) => k.startsWith('semente.'));
+  const chaves = Object.keys(en.equipe).filter((k) => k.startsWith('semente.') && !k.startsWith('semente.bio.'));
   assert.equal(chaves.length, TEXTOS_DE_FABRICA.length);
   for (const [nome, d] of [['zh-CN', zhCN], ['hi', hi]] as const) {
     const area = (d.equipe ?? {}) as Record<string, unknown>;
@@ -46,4 +46,14 @@ test('as ferramentas: o nome, a nota e os motivos de fábrica são os mesmos do 
     for (const d of [E, Z]) assert.ok(d[`ferramenta.${f.id}.nome`] && d[`ferramenta.${f.id}.nota`], f.id);
   }
   for (const k of Object.keys(P).filter((x) => x.startsWith('ferramenta.sufixo.'))) assert.ok(fonte.includes(String(P[k])), `o servidor não escreve mais: ${String(P[k])}`);
+});
+
+test('a história (bio) dos personagens de fábrica é a mesma do servidor, com tradução em en e zh-CN (hi lê o inglês)', async () => {
+  const { CHARACTERS, characterColumns } = await import('../../../server/src/services/characters.ts');
+  const { pt } = await import('./pt/index.ts');
+  const P = pt.equipe as Record<string, unknown>; const E = en.equipe as Record<string, unknown>; const Z = (zhCN.equipe ?? {}) as Record<string, unknown>;
+  for (const c of CHARACTERS) {
+    assert.equal(P[`semente.bio.${c.key}`], characterColumns(c).bio, c.key);
+    assert.ok(E[`semente.bio.${c.key}`] && Z[`semente.bio.${c.key}`], c.key);
+  }
 });

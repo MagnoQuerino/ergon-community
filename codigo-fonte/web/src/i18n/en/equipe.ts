@@ -277,6 +277,19 @@ const equipe: Traducao<typeof pt> = {
   'semente.setorDesc.qualidade': 'Numbers and spreadsheets, technical checks and critical review before delivery.',
   'semente.quadro.minhas': 'My tasks',
   'semente.quadro.equipe': 'Team board',
+  // rc.45: a história (bio) dos personagens de fábrica (server/src/services/characters.ts)
+  'semente.bio.aristoteles': 'Tutored the young Alexander — and still bills the tuition. He classified every living thing; now he sorts requests into To do, In progress and Done. He insists virtue lies in the middle (of the board).',
+  'semente.bio.hesiodo': 'Wrote "Works and Days" almost three thousand years before Ergon and thinks the name should earn him royalties. He knows the right day for every job — and reminds you of it.',
+  'semente.bio.diogenes': 'Lives in a barrel in the corner of the hall and walks around with a lit lamp looking for a well-defined request. He gets the job done without ceremony; when a meeting is pointless, he walks out halfway.',
+  'semente.bio.aspasia': 'They say she wrote Pericles\'s speeches; she never confirmed or denied it. She handles the conversations with customers and suppliers — sends what you ask, and the rest goes through your confirmation, unless you turn on "Allow everything".',
+  'semente.bio.herodoto': 'Father of History and, critics say, of well-told stories. He writes reports and proposals at Ergon; Sócrates checks whether it is history or just a story.',
+  'semente.bio.fidias': 'Sculpted the Athena of the Parthenon in gold and ivory; today he debates slide colors with you. He believes everything gets better with the golden ratio and less text.',
+  'semente.bio.platao': 'Swears that in the world of Ideas there is a perfect version of your project — this one is just the shadow on the cave wall. That is why he asked for the best model in the house.',
+  'semente.bio.socrates': 'Never wrote a line and reviews everyone else\'s. He only knows that he knows nothing — which does not stop him from finding a flaw in everything you know.',
+  'semente.bio.hipatia': 'Mathematician, astronomer and teacher in Alexandria, she wrote commentaries on the classics others only quoted. Here she researches, cites the source and keeps the Files in order — and gently double-checks Arquimedes\'s math.',
+  'semente.bio.arquimedes': 'Ran out of the bath naked shouting "Eureka!". At Ergon he uses the baths more discreetly and leaves every cell\'s formula visible. Give him a spreadsheet and a place to stand, and he will move the budget.',
+  'semente.bio.euclides': 'Accepts nothing without proof. He checks criteria, math and formatting one by one and closes every review with a discreet "which was to be demonstrated".',
+  'semente.bio.hipodamo': 'Invented the grid city and swears the Ergon district was his idea. He wears long hair and makes long plans — but always with milestones.',
 };
 
 export default equipe;

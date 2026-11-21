@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { nomeDaConstrucao } from '../world/buildings.ts';
 import { daSemente, nomeDaFerramenta, notaDaFerramenta } from '../i18n/sementes.ts';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { cachedResource, useLiveEvent, useResource } from '../lib/live.ts';
@@ -80,7 +81,8 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
   const head: AgentHead | null = r ?? (a ? { ...a, look_seed: a.look_seed ?? null } : seed);
   const status = r?.status ?? a?.status ?? seed?.status ?? 'active';
   const run = r ? r.run_status : a ? a.run_status : seed?.run_status ?? null;
-  const place = r?.building_name ?? seed?.building_name ?? null;
+  const lugar = r?.building_name ?? seed?.building_name ?? null;
+  const place = lugar ? nomeDaConstrucao(lugar) : null;
   // o perfil chegou: entra nos recentes da busca (Ctrl+K) com o nome e o papel de agora
   useEffect(() => { if (a) pushRecent({ kind: 'agente', id: a.id, label: a.name, where: a.role }); }, [a?.id, a?.name, a?.role]); // eslint-disable-line react-hooks/exhaustive-deps
   // não veio: confere se o agente não existe mais (404) ou se foi só a conexão (o próximo recarregar acerta)
@@ -183,7 +185,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
   const [confirmOff, setConfirmOff] = useState(false);
   const [offResult, setOffResult] = useState<{ redistributed: Array<{ number: number; title: string; to: string; reason: string }>; tools: Array<{ label: string; to: string }> } | null>(null);
   const sector = sectors.find((s) => s.key === f.sectorKey);
-  const place = row?.building_name ?? null;
+  const place = row?.building_name ? nomeDaConstrucao(row.building_name) : null;
   const dirty = JSON.stringify(f) !== JSON.stringify(init());
   useEffect(() => { onDirty(dirty); return () => onDirty(false); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = agent.status === 'active';
@@ -247,7 +249,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
 
   return (
     <div className="editor">
-      {agent.bio && <p className="profile__bio">{agent.bio}</p>}
+      {agent.bio && <p className="profile__bio">{daSemente(agent.bio)}</p>}
       {!active && agent.deactivation_note && <p className="hint">{t('agente.perfil.desativadoNota', { nota: agent.deactivation_note })}</p>}
       {fixed && <p className="fixed-note"><Icon name="lock" size={13} /> <span><b>{t('agente.perfil.cargoFixoTitulo')}</b> {t('agente.perfil.cargoFixo')}</span></p>}
       {/* aparência: o boneco da cidade, sorteado do pacote gráfico (Grécia Clássica) a cada "Redefinir" */}
@@ -265,7 +267,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
           <EffectPicker value={fxChoice} onChange={(c) => void setFx(c)} options={fxOptions} />
           {active && (
             <div className="row row--wrap look-row__move">
-              <span className="hint"><Icon name="pin" size={12} /> {t('agente.perfil.ondeMora', { lugar: place ?? '—', setor: sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name })}</span>
+              <span className="hint"><Icon name="pin" size={12} /> {t('agente.perfil.ondeMora', { lugar: place ?? '—', setor: daSemente(sectors.find((s) => s.key === agent.profile)?.name ?? agent.sector_name) })}</span>
               <button type="button" className="btn btn--sm btn--ghost" onClick={() => setTray('structure')}><Icon name="temple" size={13} /> {t('agente.perfil.moverPara')}</button>
             </div>
           )}
