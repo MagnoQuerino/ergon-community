@@ -62,7 +62,10 @@ before(async () => {
   pcAna = await harness(); ana = await setupOwner(pcAna, 'ana', 'senha-da-ana-1234'); await entrar(pcAna, ana, 'ana@exemplo.test', 'Ana');
   pcCaio = await harness(); caio = await setupOwner(pcCaio, 'caio', 'senha-do-caio-123'); await entrar(pcCaio, caio, 'caio@exemplo.test', 'Caio');
   // os papéis do World (dono, editor) e a chave pública de cada aparelho: cada um envia uma vez e recebe dos outros
-  for (const [h, s] of [[pcRog, rog], [pcAna, ana], [pcCaio, caio]] as const) assert.equal((await req(h, 'GET', '/api/world/members', s)).status, 200);
+  for (const [h, s] of [[pcRog, rog], [pcAna, ana], [pcCaio, caio]] as const) {
+    assert.equal((await req(h, 'GET', '/api/world/members', s)).status, 200);
+    assert.equal((await req(h, 'GET', '/api/salas', s)).status, 200); // abriu as Salas: o aparelho se anuncia
+  }
   for (const [h, s] of [[pcAna, ana], [pcCaio, caio], [pcRog, rog]] as const) await push(h, s);
   for (const [h, s] of [[pcRog, rog], [pcAna, ana], [pcCaio, caio]] as const) await pull(h, s);
   // a conexão falsa da Ana, só no computador dela

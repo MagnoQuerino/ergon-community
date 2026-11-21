@@ -107,10 +107,12 @@ export class SalasSync {
    * aqui) e os pacotes selados para cada aparelho de membro que ainda não tem o que nasceu aqui. `marcar` grava o que foi,
    * depois que o World aceitou.
    */
-  saida(ws: string, sws: string, eu: Eu): { extra: ExtraSalas; marcar: () => void; resumo: string } | null {
+  saida(ws: string, sws: string, eu: Eu, comConteudo: boolean): { extra: ExtraSalas; marcar: () => void; resumo: string } | null {
     const extra: ExtraSalas = {}; const regs: Registro[] = []; const depois: Array<() => void> = [];
     const anuncio = sha(`${eu.deviceId}|${eu.x25519Public}`);
-    if (this.setting(ws, 'salas.anunciado') !== anuncio) { extra.aparelho = { deviceId: eu.deviceId, x25519Public: eu.x25519Public }; depois.push(() => this.set(ws, 'salas.anunciado', anuncio)); }
+    // o anúncio vai junto de um envio que já ia; sozinho, só quando a pessoa usa as Salas aqui (sem isso, quem nunca abriu
+    // as Salas não ganha uma mudança a mais no log a cada aparelho novo)
+    if (this.setting(ws, 'salas.anunciado') !== anuncio && (comConteudo || this.setting(ws, 'salas.usa') === '1')) { extra.aparelho = { deviceId: eu.deviceId, x25519Public: eu.x25519Public }; depois.push(() => this.set(ws, 'salas.anunciado', anuncio)); }
     const g = this.salas.governanca(ws);
     if (g.at && this.setting(ws, 'salas.gov_enviado') !== g.at) { extra.salasGov = { cessao: g.cessao, criar: g.criar, at: g.at }; depois.push(() => this.set(ws, 'salas.gov_enviado', g.at!)); }
     const aparelhos = this.db.all<{ device_id: string; account_id: string; x25519_public: string }>('SELECT device_id, account_id, x25519_public FROM salas_aparelhos WHERE workspace_id = ? AND device_id != ?', ws, eu.deviceId);

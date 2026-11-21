@@ -377,8 +377,8 @@ export class LocalSync {
     // parte privada: ferramentas, rotinas e a configuração delas) — quem recebe também não aplicaria (receber)
     let mandarEquipe = !opts.contentOnly && bh !== r.blueprint_hash && (await this.donoDe(userId, ws, r)) === (this.links.get(userId)?.account_id ?? '');
     if (mandarEquipe && jaChegou(`bp:${bh}`)) { this.db.run('UPDATE world_sync SET blueprint_hash = ? WHERE workspace_id = ?', bh, ws); mandarEquipe = false; esquecer(); }
-    const salas = this.salas ? this.salas.saida(ws, r.sync_workspace_id, this.aparelho(userId)) : null;
     const brutas = this.content.chunks(this.content.pending(ws, userId));
+    const salas = this.salas ? this.salas.saida(ws, r.sync_workspace_id, this.aparelho(userId), brutas.length > 0) : null;
     // as salas (sync-salas.ts) vão na primeira parte; sem conteúdo nenhum, numa parte só delas
     if (salas) { if (brutas.length) Object.assign(brutas[0].body, salas.extra); else brutas.push({ body: { type: 'content', tasks: [], conversations: [], messages: [], ...salas.extra }, items: [] }); }
     const comSalas = brutas[0];

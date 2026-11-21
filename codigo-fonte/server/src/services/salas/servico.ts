@@ -195,7 +195,11 @@ export class Salas {
     if (this.frequencia.size > 5000) for (const [k, v] of this.frequencia) if (!v.some((t) => t > agora - janelaMs)) this.frequencia.delete(k);
   }
 
+  /** A pessoa usa as Salas neste aparelho: a sincronia anuncia a chave dele mesmo sem outro envio (world/sync-salas.ts). */
+  private marcarUso(ws: string): void { if (getSetting(this.db, ws, 'salas.usa') !== '1') { setSetting(this.db, ws, 'salas.usa', '1'); this.aoMudar?.(ws); } }
+
   async criar(ws: string, userId: string, b: { nome: string; pessoas?: string[]; agentes?: string[] }): Promise<{ id: string }> {
+    this.marcarUso(ws);
     if (!this.podeCriar(ws, userId)) throw new HttpError(403, 'forbidden', 'A governança do workspace deixa só quem administra criar salas.');
     const nome = clip(b.nome.replace(/\s+/g, ' ').trim(), NOME_MAX);
     if (!nome) throw new HttpError(400, 'empty', 'dê um nome à sala');
@@ -288,6 +292,7 @@ export class Salas {
   // ------------------------------------------------------------------------------------------------ listas
   /** As salas em que a pessoa está, com não lidas, menção a ela e pedido de cessão esperando. */
   listar(ws: string, userId: string) {
+    this.marcarUso(ws);
     const chaves = this.chavesDe(ws, userId); const eu = this.chaveDe(ws, userId);
     const q = chaves.map(() => '?').join(',');
     return this.db.all<{ id: string; title: string; archived_at: string | null; created_at: string; last_at: string | null; read_at: string | null; last_text: string | null; last_nome: string | null }>(
