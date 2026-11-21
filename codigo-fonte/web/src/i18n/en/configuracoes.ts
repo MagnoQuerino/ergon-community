@@ -182,6 +182,15 @@ const configuracoes: Traducao<typeof pt> = {
   'byok.chaveSePedir': 'API key (if the service asks for one)',
   'byok.notaChave': 'The key is checked with the provider and stored, encrypted, in this account\'s AI team vault. It won\'t be shown here again.',
   'byok.notaEndereco': 'The address is checked before saving, and the models it offers will show up when you choose models.',
+  'byok.china.rotulo': 'Models from China',
+  'byok.china.texto': 'To use Ergon in China (or with Chinese models): DeepSeek, Qwen, Kimi, GLM, MiniMax and others, with the API key from your account with the provider.',
+  'byok.china.regiaoCn': 'China',
+  'byok.china.regiaoIntl': 'international',
+  'byok.china.regiaoAuto': 'China and international',
+  'byok.china.qwenDica': 'The same DashScope key works for the China and the international address: pick the model later, in Default model.',
+  'byok.china.glmDica': 'Works with open.bigmodel.cn (China) and z.ai: the team finds the right address from the key.',
+  'byok.china.seguro': 'The key goes in only through this card: it is checked with the provider and stored encrypted in the team vault. No agent asks for a key in a conversation; if you ever see such a request, do not paste it.',
+  'byok.china.indisponivel': 'The AI team on this computer does not offer these providers yet. Update it in Settings › Updates.',
 
   // ——— Atualizações ———
   'atual.titulo': 'Installed version',

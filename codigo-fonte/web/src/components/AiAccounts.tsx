@@ -7,7 +7,7 @@ import { BrandLogo } from './BrandLogo.tsx';
 import { Icon } from './Icon.tsx';
 import { Typewriter } from './Typewriter.tsx';
 import { FRASE_RENOVANDO, semJargao } from '../lib/textos-tela.ts';
-import { fmtHora, tn, useT, type Chave } from '../i18n/index.ts';
+import { fmtHora, tn, useIdioma, useT, type Chave } from '../i18n/index.ts';
 
 interface Login { provider: string; sessionId: string; userCode: string | null; verificationUrl: string | null; expiresAt: string | null; pollSeconds: number }
 const BILLING = {
@@ -171,6 +171,28 @@ export function AiAccounts({ onChanged, pitch }: { onChanged?: () => void; pitch
 
 
 type Escolha = { tipo: 'chave'; id: string } | { tipo: 'outro' | 'lmstudio' | 'ollama' };
+
+/**
+ * Os provedores de IA da China que a equipe de IA já suporta (rc.44), na ordem do cartão. Na China só valem modelos
+ * registrados lá (Anthropic, OpenAI e Google ficam de fora): o Ergon local com um destes. O id é o do catálogo do motor;
+ * o que ele não oferecer (versão antiga) simplesmente não aparece. Qwen: uma chave do DashScope serve aos dois endereços
+ * (o motor lista só "alibaba"; "alibaba-cn" fica aqui para quando listar). GLM: o motor acha bigmodel.cn ou z.ai pela chave.
+ */
+const DA_CHINA: ReadonlyArray<{ id: string; nome: string; regiao: 'cn' | 'intl' | 'auto'; dica?: 'configuracoes.byok.china.qwenDica' | 'configuracoes.byok.china.glmDica' }> = [
+  { id: 'deepseek', nome: 'DeepSeek', regiao: 'auto' }, // i18n-ok: nomes de marca, iguais em todas as línguas
+  { id: 'alibaba', nome: 'Qwen · DashScope', regiao: 'auto', dica: 'configuracoes.byok.china.qwenDica' }, // i18n-ok: marca
+  { id: 'alibaba-cn', nome: 'Qwen · DashScope', regiao: 'cn' }, // i18n-ok: marca
+  { id: 'kimi-coding-cn', nome: 'Kimi · Moonshot', regiao: 'cn' }, // i18n-ok: marca
+  { id: 'kimi-coding', nome: 'Kimi · Moonshot', regiao: 'intl' }, // i18n-ok: marca
+  { id: 'zai', nome: 'GLM · Zhipu', regiao: 'auto', dica: 'configuracoes.byok.china.glmDica' }, // i18n-ok: marca
+  { id: 'minimax-cn', nome: 'MiniMax', regiao: 'cn' }, // i18n-ok: marca
+  { id: 'minimax', nome: 'MiniMax', regiao: 'intl' }, // i18n-ok: marca
+  { id: 'stepfun', nome: 'StepFun', regiao: 'cn' }, // i18n-ok: marca
+  { id: 'tencent-tokenhub', nome: 'Tencent TokenHub', regiao: 'cn' }, // i18n-ok: marca
+  { id: 'xiaomi', nome: 'Xiaomi MiMo', regiao: 'cn' }, // i18n-ok: marca
+];
+const ID_DA_CHINA = new Set(DA_CHINA.map((c) => c.id));
+const REGIAO = { cn: 'configuracoes.byok.china.regiaoCn', intl: 'configuracoes.byok.china.regiaoIntl', auto: 'configuracoes.byok.china.regiaoAuto' } as const satisfies Record<string, Chave>;
 const LOCAIS = {
   lmstudio: { nome: 'LM Studio', porta: 1234, dica: 'configuracoes.byok.dicaLmstudio' }, // i18n-ok: nome do produto, igual nas duas línguas
   ollama: { nome: 'Ollama', porta: 11434, dica: 'configuracoes.byok.dicaOllama' }, // i18n-ok: nome do produto, igual nas duas línguas
@@ -186,6 +208,7 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
   onDone: (starterModel: string | null) => void; onRemoved: () => void;
 }) {
   const t = useT();
+  const idioma = useIdioma();
   const [busca, setBusca] = useState('');
   const [escolha, setEscolha] = useState<Escolha | null>(null);
   const [chave, setChave] = useState('');
@@ -195,7 +218,10 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
   const [err, setErr] = useState<string | null>(null);
   const ligados = byok.filter((b) => b.connected);
   const q = busca.trim().toLowerCase();
-  const opcoes = byok.filter((b) => !b.connected && (!q || b.name.toLowerCase().includes(q) || b.id.includes(q)));
+  // sem busca, os da China ficam no grupo deles (abaixo, ou no alto em chinês); com busca, aparecem na lista como os outros
+  const opcoes = byok.filter((b) => !b.connected && (q ? b.name.toLowerCase().includes(q) || b.id.includes(q) : !ID_DA_CHINA.has(b.id)));
+  const chineses = DA_CHINA.flatMap((c) => { const b = byok.find((x) => x.id === c.id && !x.connected); return b ? [{ ...c, b }] : []; });
+  const daChina = DA_CHINA.find((c) => c.id === (escolha?.tipo === 'chave' ? escolha.id : ''));
   const escolher = (e: Escolha | null) => {
     setEscolha(e); setChave(''); setErr(null); setNome('');
     setUrl(e && e.tipo !== 'chave' && e.tipo !== 'outro' ? `http://192.168.0.10:${LOCAIS[e.tipo].porta}/v1` : '');
@@ -234,6 +260,7 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
           </div>
         </div>
       ))}
+      {!escolha && idioma === 'zh-CN' && <ModelosDaChina itens={chineses} escolher={(id) => escolher({ tipo: 'chave', id })} />}
       {!escolha ? (
         <div className="ai-byok__pick">
           <input className="input" type="search" placeholder={t('configuracoes.byok.buscar', { n: byok.length })} value={busca} onChange={(e) => setBusca(e.target.value)} aria-label={t('configuracoes.byok.buscarAria')} />
@@ -243,6 +270,7 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
             ))}
             {!opcoes.length && <li className="muted small">{t('configuracoes.byok.nenhum')}</li>}
           </ul>
+          {!q && idioma !== 'zh-CN' && <ModelosDaChina itens={chineses} escolher={(id) => escolher({ tipo: 'chave', id })} />}
           <div className="ai-byok__extras">
             <button className="btn btn--sm" onClick={() => escolher({ tipo: 'outro' })}>{t('configuracoes.byok.outro')}</button>
             <button className="btn btn--sm" onClick={() => escolher({ tipo: 'lmstudio' })}>{t('configuracoes.byok.modeloLocal', { nome: LOCAIS.lmstudio.nome })}</button>
@@ -255,6 +283,8 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
             <>
               <label htmlFor="byok-chave">{t('configuracoes.byok.chaveDe', { nome: prov?.name ?? '' })}{prov?.url && <> <a href={prov.url} target="_blank" rel="noreferrer noopener">{t('configuracoes.byok.criarUma')}</a></>}</label>
               <input id="byok-chave" className="input" type="password" autoComplete="off" spellCheck={false} value={chave} autoFocus onChange={(e) => setChave(e.target.value)} />
+              {daChina?.dica && <p className="muted small">{t(daChina.dica)}</p>}
+              {daChina && <p className="hint ai-byok__seguro"><Icon name="lock" size={13} /> {t('configuracoes.byok.china.seguro')}</p>}
             </>
           ) : (
             <>
@@ -281,5 +311,33 @@ function ChavePropria({ byok, custom, onDone, onRemoved }: {
       )}
       {err && !escolha && <p className="error" role="alert">{err}</p>}
     </div>
+  );
+}
+
+/**
+ * O grupo "Modelos da China" (rc.44): os provedores chineses que o motor oferece, cada um com a região do endereço.
+ * Escolher um abre o mesmo cartão seguro da chave (campo de senha, conferida no provedor, nunca pela conversa).
+ */
+function ModelosDaChina({ itens, escolher }: { itens: ReadonlyArray<(typeof DA_CHINA)[number] & { b: { id: string; name: string } }>; escolher: (id: string) => void }) {
+  const t = useT();
+  return (
+    <section className="ai-china" aria-labelledby="ai-china-titulo">
+      <h5 id="ai-china-titulo" className="ai-alt__label">{t('configuracoes.byok.china.rotulo')}</h5>
+      <p className="muted small">{t('configuracoes.byok.china.texto')}</p>
+      {itens.length ? (
+        <ul className="ai-china__lista">
+          {itens.map((c) => (
+            <li key={c.id}>
+              <button type="button" className="ai-byok__opt ai-china__opt" onClick={() => escolher(c.id)}>
+                <BrandLogo kind={c.id} name={c.nome} size={22} />
+                <span className="ai-china__nome">{c.nome}</span>
+                <span className="badge ai-china__regiao">{t(REGIAO[c.regiao])}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="muted small">{t('configuracoes.byok.china.indisponivel')}</p>}
+      <p className="hint ai-byok__seguro"><Icon name="lock" size={13} /> {t('configuracoes.byok.china.seguro')}</p>
+    </section>
   );
 }
