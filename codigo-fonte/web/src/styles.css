@@ -3383,3 +3383,14 @@ details.cx[open] > summary { color: var(--ink); }
 .ws-estado--ok .ws-estado__ponto { background: var(--ok); }
 .ws-estado--warn .ws-estado__ponto { background: var(--warn); }
 @media (prefers-reduced-motion: no-preference) { .ws-estado__ponto--vivo { animation: pulse 1.6s ease-in-out infinite; } }
+
+/* rc.42: "Liberar tudo" em Conexões › Regras — o interruptor ligado fica em alerta (a cor e um brilho lento dizem o estado) */
+.liberar { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); margin: 0 0 14px; }
+.liberar--on { border-color: var(--atencao-borda); background: var(--warn-bg); }
+.liberar .sec-toggle { margin: 0; gap: 12px; }
+.liberar__adm { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.switch.switch--alerta { background: var(--atencao-cheio); border-color: var(--atencao-cheio); color: var(--atencao-sobre); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) { .switch--alerta { animation: liberar-brilho 2.4s ease-in-out infinite; } }
+@keyframes liberar-brilho { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 5px var(--warn-bg); } }
+.liberar-dlg { width: min(460px, 100%); gap: 10px; }
+.liberar-dlg p { margin: 0; }

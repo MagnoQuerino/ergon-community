@@ -721,6 +721,17 @@ const conexoes: Traducao<typeof pt> = {
   'nuvem.recebidoEm': 'Received on {quando}.',
   'nuvem.resumo': { one: '{n} connection in the cloud', other: '{n} connections in the cloud' },
   'nuvem.resumoNenhuma': 'No connection in the cloud yet',
+  'liberar.titulo': 'Allow everything',
+  'liberar.ligado': 'On',
+  'liberar.desligado': 'Off',
+  'liberar.aviso': 'Agents act without asking for approval. You review at the end.',
+  'liberar.sempre': 'Permanent deletes, deleting a repository, secrets and payments still ask.',
+  'liberar.perguntaTitulo': 'Allow everything?',
+  'liberar.naoPerguntar': "Don't ask again",
+  'liberar.confirmar': 'Allow',
+  'liberar.todos': 'For the whole workspace',
+  'liberar.proibir': 'Forbid in this workspace',
+  'liberar.proibidoTexto': 'Forbidden by whoever manages this workspace.',
   'nuvem.escolher': 'Choose in Connections',
 };
 

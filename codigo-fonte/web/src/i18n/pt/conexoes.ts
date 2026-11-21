@@ -725,6 +725,17 @@ const conexoes = {
   'nuvem.recebidoEm': 'Recebidas em {quando}.',
   'nuvem.resumo': { one: '{n} conexão na nuvem', other: '{n} conexões na nuvem' },
   'nuvem.resumoNenhuma': 'Nenhuma conexão na nuvem ainda',
+  'liberar.titulo': 'Liberar tudo',
+  'liberar.ligado': 'Ligado',
+  'liberar.desligado': 'Desligado',
+  'liberar.aviso': 'Os agentes agem sem pedir aprovação. Você revisa no fim.',
+  'liberar.sempre': 'Apagar de vez, apagar repositório, segredos e pagamentos continuam pedindo.',
+  'liberar.perguntaTitulo': 'Liberar tudo?',
+  'liberar.naoPerguntar': 'Não perguntar novamente',
+  'liberar.confirmar': 'Liberar',
+  'liberar.todos': 'Para todo o workspace',
+  'liberar.proibir': 'Proibir neste workspace',
+  'liberar.proibidoTexto': 'Proibido por quem administra este workspace.',
   'nuvem.escolher': 'Escolher em Conexões',
 } as const satisfies Area;
 
