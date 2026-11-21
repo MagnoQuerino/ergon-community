@@ -215,6 +215,25 @@ const ajuda = {
   'seguranca.i6Sincronia': 'Sincronia entre computadores',
 
   // ——— manual: Temas e personagens ———
+  // ——— rc.46: Ergon na China (o guia completo: docs/CHINA.md e docs/CHINA.zh-CN.md) ———
+  'china.titulo': "Ergon na China",
+  'china.palavras': "china chinês 中国 espelho registro instalar ghcr deepseek qwen kimi glm minimax wecom 企业微信 wechat 微信 feishu 飞书 lark dingtalk 钉钉 icp pipl",
+  'china.p1': "Na China, o Ergon é o Community instalado no seu computador, com IA chinesa. A nuvem do Ergon e a cobrança não são oferecidas lá.",
+  'china.h1': "Instalar pelo espelho",
+  'china.i1': "O GitHub, o ghcr.io, o PyPI e o Docker Hub costumam falhar na China. Antes de instalar, ponha no arquivo .env da pasta do Ergon a linha {linha}, com o endereço do espelho.",
+  'china.i2': "Sem essa linha, o Ergon usa sozinho o espelho publicado com a versão quando o ghcr.io não responde.",
+  'china.i3': "Para atualizar sem o GitHub, a linha {linha} aponta para uma cópia do arquivo da versão num endereço da China.",
+  'china.h2': "Escolher a IA",
+  'china.i4': "Em {link}, abra {cartao} e entre com a chave de API da sua conta: DeepSeek, Qwen (DashScope), Kimi (Moonshot), GLM (Zhipu) ou MiniMax. Depois, escolha o modelo em Modelo padrão.",
+  'china.h3': "Conversar pelo Feishu, pelo DingTalk e pelo WeCom",
+  'china.i5': "Em {link}, em Conversar com a equipe: o Feishu/Lark e o DingTalk usam o aplicativo interno da empresa, e o WeCom, o robô inteligente (Bot ID e Secret). Os três conectam de dentro para fora, sem endereço público.",
+  'china.i6': "O WeChat pessoal é experimental: a Tencent pode limitar ou bloquear a conta. Só liga com o seu consentimento, pelo QR na tela.",
+  'china.h4': "O que não funciona lá",
+  'china.i7': "A nuvem do Ergon e a sincronia com o Ergon World ficam fora da China.",
+  'china.i8': "Anthropic, OpenAI e Google ficam bloqueados ou instáveis, e um serviço de IA aberto ao público na China precisa de um modelo registrado lá.",
+  'china.h5': "Nota legal",
+  'china.i9': "Hospedar ou vender um serviço na China pede a licença ICP, e levar dados pessoais para fora do país segue a PIPL. Consulte um advogado local.",
+
   'temas.titulo': 'Temas e personagens',
   'temas.palavras': 'tema skin mod personagem nome bio grécia senhor dos anéis gandalf comunidade',
   'temas.p1': 'A Grécia clássica é o tema de partida. {forma} Hoje você já pode trocar nomes, funções, histórias e setores de toda a equipe, pedindo a {nome} algo como “transforme a equipe num tema do Senhor dos Anéis, com Gandalf coordenando”.',
