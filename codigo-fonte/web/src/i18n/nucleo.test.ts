@@ -17,12 +17,34 @@ const html = () => (globalThis as unknown as { document: { documentElement: { la
 // o Intl separa número e símbolo com espaço fixo (U+00A0, U+202F): para comparar, espaço comum
 const esp = (s: string) => s.replace(/[  ]/g, ' ');
 
-test('idioma do navegador: português se a língua começa com "pt"; inglês nos outros casos', () => {
+test('idioma do sistema ou do navegador no primeiro uso: pt, zh, hi, en-IN e as línguas da Índia; o resto em inglês', () => {
   for (const l of ['pt-BR', 'pt', 'pt-PT', 'PT-br', ' pt-BR ']) assert.equal(idiomaDoNavegador(l), 'pt-BR', l);
   for (const l of ['en-US', 'en', 'es-ES', 'fr', 'ptx', '', undefined, null]) assert.equal(idiomaDoNavegador(l), 'en', String(l));
-  assert.equal(ehIdioma('pt-BR'), true);
-  assert.equal(ehIdioma('en'), true);
-  for (const v of ['pt', 'es', 'EN', '', null, 1]) assert.equal(ehIdioma(v), false);
+  for (const l of ['zh-CN', 'zh', 'zh-Hans-CN', 'zh-TW', 'ZH-cn']) assert.equal(idiomaDoNavegador(l), 'zh-CN', l);
+  for (const l of ['hi-IN', 'hi']) assert.equal(idiomaDoNavegador(l), 'hi', l);
+  for (const l of ['en-IN', 'bn-IN', 'ta', 'te-IN', 'mr', 'gu']) assert.equal(idiomaDoNavegador(l), 'en-IN', l);
+  // a lista do navegador (navigator.languages): vale a primeira que a tela sabe falar
+  assert.equal(idiomaDoNavegador(['es-ES', 'zh-CN', 'en']), 'zh-CN');
+  assert.equal(idiomaDoNavegador(['fr-FR', 'de']), 'en');
+  assert.equal(idiomaDoNavegador([]), 'en');
+  for (const v of ['pt-BR', 'en', 'en-IN', 'zh-CN', 'hi']) assert.equal(ehIdioma(v), true, v);
+  for (const v of ['pt', 'es', 'EN', 'zh', 'hi-IN', '', null, 1]) assert.equal(ehIdioma(v), false, String(v));
+});
+
+test('lakh e crore no inglês da Índia e no hindi; yuan e rupia', () => {
+  assert.equal(N.fmtNumero('en-IN', 1234567), '12,34,567');
+  assert.equal(N.fmtNumero('hi', 123456789.5), '12,34,56,789.5');
+  assert.equal(N.fmtNumero('zh-CN', 1234567), '1,234,567');
+  assert.equal(esp(N.fmtMoeda('en-IN', 1234567, 'INR')), '₹12,34,567.00');
+  assert.equal(esp(N.fmtMoeda('hi', 1234567, 'INR', { maximumFractionDigits: 0 })), '₹12,34,567');
+  assert.equal(esp(N.fmtMoeda('zh-CN', 1234567.5, 'CNY')), '¥1,234,567.50');
+  assert.equal(esp(N.fmtMoeda('pt-BR', 10, 'CNY')), 'CN¥ 10,00');
+  assert.equal(esp(N.fmtMoeda('en', 1234567, 'INR')), '₹1,234,567.00', 'em en (sem Índia) o agrupamento é o de milhar');
+  assert.equal(N.fmtData('zh-CN', new Date(2026, 10, 9)), '2026/11/9');
+  assert.equal(N.fmtDracmas('en-IN', 1234567), '₯ 12,34,567');
+  // o hindi tem singular e plural; o chinês só a forma "other"
+  assert.equal(N.montar('hi', { one: '{n} एजेंट', other: '{n} एजेंट' }, { n: 100000 }), '1,00,000 एजेंट');
+  assert.equal(N.montar('zh-CN', { other: '{n} 个智能体' }, { n: 1 }), '1 个智能体');
 });
 
 test('plural pelo Intl, com o 0 exato à parte e o "other" de reserva', () => {
@@ -205,5 +227,32 @@ test('ao abrir a página com o inglês escolhido neste navegador: a tela só apa
   assert.equal(J.t('geral.barra.modoFoco'), 'Focus Mode');
   assert.equal(html(), 'en');
   guardado.clear();
+  await I.setIdioma('pt-BR', { guardar: false });
+});
+
+test('chinês e hindi: o que falta cai no inglês, nunca na chave crua; en-IN é o inglês inteiro', async () => {
+  const { pt: P } = await import('./pt/index.ts');
+  for (const l of ['zh-CN', 'hi', 'en-IN'] as const) {
+    await I.setIdioma(l, { guardar: false });
+    assert.equal(I.idiomaAtual(), l);
+    assert.equal(html(), l);
+    const cruas: string[] = [];
+    for (const [a, area] of Object.entries(P)) for (const k of Object.keys(area)) {
+      const v = I.t(`${a}.${k}` as never, { n: 2 } as never);
+      if (v === `${a}.${k}`) cruas.push(v);
+    }
+    assert.deepEqual(cruas, [], `${l}: chave crua na tela`);
+  }
+  await I.setIdioma('zh-CN', { guardar: false });
+  assert.equal(I.t('geral.nav.tarefas'), '任务', 'traduzido');
+  assert.equal(I.t('rotinas.titulo' as never), (en.rotinas as Record<string, string>).titulo, 'a área sem tradução: o inglês');
+  assert.equal(I.fmtNumero(1234567), '1,234,567');
+  await I.setIdioma('hi', { guardar: false });
+  assert.equal(I.t('geral.nav.tarefas'), 'कार्य');
+  assert.equal(I.t('geral.ws.agentes', { n: 1 }), '1 एजेंट');
+  assert.equal(I.fmtNumero(1234567), '12,34,567');
+  await I.setIdioma('en-IN', { guardar: false });
+  assert.equal(I.t('geral.barra.modoFoco'), 'Focus Mode');
+  assert.equal(esp(I.fmtMoeda(1234567, 'INR')), '₹12,34,567.00');
   await I.setIdioma('pt-BR', { guardar: false });
 });

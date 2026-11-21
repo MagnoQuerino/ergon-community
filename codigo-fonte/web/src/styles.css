@@ -54,6 +54,12 @@
   --font: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
   color-scheme: light;
 }
+/* Chinês e hindi (rc.44): as fontes do sistema primeiro (Windows, macOS, Linux com Noto) e, no fim, a Noto do Ergon,
+   que só é baixada se nenhuma delas tiver o caractere (lib/fontes.ts). O <html> diz a escrita: data-escrita. */
+html[data-escrita="cjk"] { --font: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", "Ergon Noto Sans SC", Roboto, "Helvetica Neue", Arial, sans-serif; }
+html[data-escrita="devanagari"] { --font: "Segoe UI", system-ui, -apple-system, "Nirmala UI", "Kohinoor Devanagari", "Devanagari Sangam MN", "Noto Sans Devanagari", "Ergon Noto Sans Devanagari", Roboto, "Helvetica Neue", Arial, sans-serif; }
+/* o devanágari tem matras acima e abaixo da linha: um pouco mais de entrelinha */
+html[data-escrita="devanagari"] body { line-height: 1.6; }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font); }
@@ -1207,6 +1213,12 @@ body:has(.cdock) .tip { right: 100px; }
 .idioma--compacto { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; }
 .idioma .seg__btn { color: var(--ink); }
 .idioma .seg__btn--on { color: var(--marca-sobre); }
+/* cinco idiomas (rc.44): em Minha conta, a fileira quebra; no menu do avatar, duas colunas com o idioma escrito nele mesmo */
+.idioma .seg { flex-wrap: wrap; max-width: 100%; }
+.idioma .seg__btn { white-space: nowrap; }
+.idioma--compacto { flex-direction: column; align-items: stretch; gap: 6px; }
+.idioma--compacto .seg { display: grid; grid-template-columns: 1fr 1fr; }
+.idioma--compacto .seg__btn { padding: 5px 8px; text-align: left; }
 /* Minha conta (Configurações) */
 .conta__foto { display: flex; align-items: center; gap: 16px; margin: 8px 0 16px; flex-wrap: wrap; }
 .conta__foto-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -1380,6 +1392,16 @@ body:has(.cdock) .tip { right: 100px; }
 .ai-byok__opt { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .ai-byok__opt:hover, .ai-byok__opt:focus-visible { background: var(--panel-2); }
 .ai-byok__extras { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Modelos da China (rc.44): o grupo dos provedores chineses, com a região do endereço; a mesma escolha da lista acima */
+.ai-china { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); margin: 4px 0 8px; }
+.ai-china > h5 { margin: 0; }
+.ai-china > p { margin: 0; }
+.ai-china__lista { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
+.ai-china__opt { background: var(--panel); border: 1px solid var(--line); }
+.ai-china__nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-china__regiao { flex: none; }
+.ai-byok__seguro { display: flex; gap: 6px; align-items: flex-start; margin: 2px 0 0; }
+.ai-byok__seguro svg { flex: none; margin-top: 2px; }
 
 /* loja de pacotes em galeria: busca, categorias, cartões com prévia, paginação e detalhe */
 .loja__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

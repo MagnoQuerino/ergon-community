@@ -1,6 +1,6 @@
 import { limparCaminhos } from '../../../shared/caminhos.ts';
 import type { TeamAgent } from './teamData.ts';
-import { t, type Chave } from '../i18n/index.ts';
+import { t, type Chave, type Idioma } from '../i18n/index.ts';
 
 interface Floor { id: string; building_id: string; level: number; name: string; slots: number; active: number; origin: 'base' | 'simulated' | 'entitlement' }
 /** Andar com as contagens do servidor (agentes ativos por status de trabalho): janelas, selo e mapa sem carregar ninguém. */
@@ -141,7 +141,7 @@ export interface Me {
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
 /** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
 /** lang: o idioma escolhido pela pessoa (sem escolha: o do navegador) */
-export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean; cityBarCollapsed?: boolean; lang?: 'pt-BR' | 'en' }
+export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean; cityBarCollapsed?: boolean; lang?: Idioma }
 export interface OnboardingOptions {
   state: 'pending' | 'done'; choice: { use?: string; niche?: string; preset?: string; skipped?: boolean } | null;
   uses: Array<{ key: string; label: string; hint: string }>; niches: Array<{ key: string; label: string }>;

@@ -9,3 +9,6 @@
 *.ergon binary
 *.exe binary
 *.deb binary
+*.ttf binary
+*.otf binary
+*.woff2 binary

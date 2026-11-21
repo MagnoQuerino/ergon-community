@@ -6,7 +6,7 @@
 //   const t = useTw();  t('conta.titulo')  ·  t('plano.vagas', { n, usadas })  ·  twn('conta.conectado', { email: <b>…</b> })
 // A moeda não se traduz (Dracma / Dracmas e ₯, decisão de 09/11). Conferido por textos.test.ts.
 import { createElement, Fragment, type ReactNode } from 'react';
-import { idiomaAtual, useIdioma, type Idioma } from '../../i18n/index.ts';
+import { idiomaAtual, textoEm, useIdioma } from '../../i18n/index.ts';
 import * as N from '../../i18n/nucleo.ts';
 import type { Area, Marcadores, Mensagem, Plural, Traducao } from '../../i18n/tipos.ts';
 
@@ -1488,7 +1488,7 @@ const en: Traducao<typeof pt> = {
 };
 
 /** Os dois idiomas, para o teste (textos.test.ts) conferir. */
-export const TEXTOS_WORLD: Readonly<Record<Idioma, Area>> = { 'pt-BR': pt, en };
+export const TEXTOS_WORLD: Readonly<Record<'pt-BR' | 'en', Area>> = { 'pt-BR': pt, en };
 
 export type ChaveWorld = keyof typeof pt;
 type Msg<K extends ChaveWorld> = (typeof pt)[K];
@@ -1498,7 +1498,8 @@ type Valores<K extends ChaveWorld, V> = Msg<K> extends Plural
   : { readonly [P in Nomes<Msg<K>>]: V };
 type Args<K extends ChaveWorld> = [Nomes<Msg<K>>] extends [never] ? [] : [valores: Valores<K, string | number>];
 
-const buscar = (k: ChaveWorld): Mensagem => (TEXTOS_WORLD[idiomaAtual()] ?? pt)[k] ?? pt[k];
+// o World só tem português e inglês: chinês, hindi e o inglês da Índia leem o inglês (textoEm)
+const buscar = (k: ChaveWorld): Mensagem => (TEXTOS_WORLD[textoEm(idiomaAtual())] ?? pt)[k] ?? pt[k];
 
 /** O texto do World no idioma atual da tela (como o t() de i18n/index.ts). */
 export function tw<K extends ChaveWorld>(chave: K, ...valores: Args<K>): string {

@@ -111,3 +111,65 @@ test('partição: as mesmas áreas do dicionário e cada arquivo numa área só'
   // cada área tem o seu arquivo nos dois idiomas
   for (const a of Object.keys(PT)) for (const l of ['pt', 'en']) assert.ok(existe(`i18n/${l}/${a}.ts`), `falta i18n/${l}/${a}.ts`);
 });
+
+// ——— os idiomas parciais (rc.44): chinês, hindi e o inglês da Índia ———
+// Cada um traz só as chaves já traduzidas; o resto cai na reserva (o inglês), nunca na chave crua. Aqui: as chaves e os
+// tipos batem com o português, os marcadores também, nada vazio nem em português, a marca de revisão por nativo está
+// em cada arquivo e as áreas principais estão cobertas.
+const { zhCN } = await import('./zh-CN/index.ts');
+const { hi } = await import('./hi/index.ts');
+const { enIN } = await import('./en-IN/index.ts');
+const { IDIOMAS, RESERVA } = await import('./idiomas.ts');
+const PARCIAIS: Record<string, Areas> = { 'zh-CN': zhCN as unknown as Areas, hi: hi as unknown as Areas, 'en-IN': enIN as unknown as Areas };
+/** O mínimo de cada área principal (a fatia 1 do plano: entrar e boas-vindas, navegação, conversa e salas, configurações
+ *  básicas, tarefas e entregas). Uma área a mais pode entrar a qualquer hora; uma destas não pode encolher. */
+const COBERTURA: Record<string, number> = { geral: 1, quadro: 1, tarefa: 1, visuais: 1, conversas: 0.65, conta: 0.4, ajuda: 0.2, configuracoes: 0.2 };
+
+test('idiomas: cada um tem pasta, e os parciais caem no inglês', () => {
+  for (const l of IDIOMAS) assert.ok(existe(`i18n/${l === 'pt-BR' ? 'pt' : l}/index.ts`), `falta i18n/${l}/index.ts`);
+  for (const l of Object.keys(PARCIAIS)) assert.equal(RESERVA[l as keyof typeof RESERVA], 'en', `${l} cai no inglês`);
+});
+
+test('idiomas parciais: as mesmas chaves e marcadores do português, nada vazio, nada em português', () => {
+  const erros: string[] = [];
+  for (const [l, d] of Object.entries(PARCIAIS)) for (const [a, area] of Object.entries(d)) {
+    if (!PT[a]) { erros.push(`${l}: área que não existe: ${a}`); continue; }
+    for (const [k, m] of Object.entries(area)) {
+      const p = PT[a][k];
+      if (p === undefined) { erros.push(`${l}: sobra ${a}.${k}`); continue; }
+      if (typeof p !== typeof m) { erros.push(`${l} ${a}.${k}: plural num idioma e texto no outro`); continue; }
+      if (typeof m === 'object' && typeof (m as Plural).other !== 'string') erros.push(`${l} ${a}.${k}: plural sem "other"`);
+      const mp = new Set(formas(p).flatMap((s) => [...marcas(s)])); const ml = new Set(formas(m).flatMap((s) => [...marcas(s)]));
+      if (typeof p === 'object') { mp.add('n'); ml.add('n'); }
+      if ([...mp].sort().join() !== [...ml].sort().join()) erros.push(`${l} ${a}.${k}: marcadores {${[...mp].join(', ')}} em pt e {${[...ml].join(', ')}} em ${l}`);
+      for (const s of formas(m)) {
+        if (!s.trim()) erros.push(`${l} ${a}.${k}: texto vazio`);
+        if (SO_PORTUGUES.test(s)) erros.push(`${l} ${a}.${k}: letra do português: ${s}`);
+        if (PROIBIDAS.test(s)) erros.push(`${l} ${a}.${k}: nome proibido na tela: ${s}`);
+      }
+    }
+  }
+  assert.deepEqual(erros, []);
+});
+
+test('chinês e hindi: cada arquivo marcado para revisão por nativo, e as áreas principais cobertas', () => {
+  const erros: string[] = [];
+  for (const l of ['zh-CN', 'hi']) {
+    for (const [a, min] of Object.entries(COBERTURA)) {
+      const arq = `i18n/${l}/${a}.ts`;
+      if (!existe(arq)) { erros.push(`${l}: falta a área ${a}`); continue; }
+      const src = fs.readFileSync(new URL(arq, SRC), 'utf8');
+      if (!/REVISÃO POR NATIVO PENDENTE/.test(src) || !/export const REVISAO_NATIVA_PENDENTE = true;/.test(src)) erros.push(`${arq}: sem a marca de revisão por nativo`);
+      const feitas = Object.keys(PARCIAIS[l][a] ?? {}).length; const total = Object.keys(PT[a]).length;
+      if (feitas / total < min) erros.push(`${l} ${a}: ${feitas} de ${total} chaves (o mínimo é ${Math.round(min * 100)}%)`);
+    }
+    // o chinês e o hindi escrevem na sua escrita: uma área quase toda em letras latinas é tradução esquecida
+    const ESCRITA = l === 'zh-CN' ? /[一-鿿]/ : /[ऀ-ॿ]/;
+    for (const [a, area] of Object.entries(PARCIAIS[l])) {
+      const textos = Object.values(area).flatMap(formas);
+      const naEscrita = textos.filter((s) => ESCRITA.test(s)).length;
+      if (naEscrita / textos.length < 0.85) erros.push(`${l} ${a}: só ${naEscrita} de ${textos.length} textos na escrita do idioma`);
+    }
+  }
+  assert.deepEqual(erros, []);
+});

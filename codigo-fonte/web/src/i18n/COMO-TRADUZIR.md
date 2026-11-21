@@ -76,8 +76,9 @@ frases; o teste dele (`textos-tela.test.ts`) continua conferindo o português.
 
 ## De onde vem o idioma (uma ordem só, em `index.ts`)
 
-- **Antes de entrar** (tela de entrada): a última escolha feita neste navegador; sem ela, o idioma do navegador
-  (português se `navigator.language` começa com "pt"; inglês nos outros casos).
+- **Antes de entrar** (tela de entrada): a última escolha feita neste navegador; sem ela, o idioma do sistema ou do
+  navegador (`navigator.languages`, a primeira que a tela fala: pt → Português, zh → 简体中文, hi → हिन्दी, en-IN e as
+  outras línguas da Índia → English (India); o resto em inglês). No aplicativo, o WebView segue o sistema.
 - **Depois de entrar:** a escolha da pessoa, gravada no servidor (`users.lang`, a mesma em todos os workspaces dela) >
   a escolha dela guardada neste navegador (`ergon.idioma:<pessoa>`; a gravação no servidor tinha falhado: vai de novo)
   > o idioma do navegador. Na multiconta, a tela de entrada fica na língua de quem entrou por último; ao entrar, a tela
@@ -94,3 +95,33 @@ frases; o teste dele (`textos-tela.test.ts`) continua conferindo o português.
   `--lang=pt-BR`) ou faça-os procurar pelas duas línguas.
 - A dica do seletor (`geral.idioma.dica`) só promete o que a tela faz. Se a equipe passar a responder no idioma da
   pessoa (os textos de instrução no servidor hoje pedem português), aí sim dá para dizer isso na dica.
+
+## Chinês e hindi (rc.44)
+
+- **Cinco idiomas**: `pt-BR` e `en` completos; `zh-CN`, `hi` e `en-IN` parciais (`idiomas.ts`). O que um parcial não
+  tem cai na reserva dele (`RESERVA`: o inglês), baixada junto; nunca aparece a chave crua (`nucleo.test.ts` confere
+  todas as chaves nos três). `en-IN` é o inglês inteiro com número, data e moeda da Índia (lakh e crore: 12,34,567; ₹).
+- **Arquivos**: `zh-CN/<area>.ts` e `hi/<area>.ts`, tipados por `TraducaoParcial` (só chaves que existem no português,
+  com o mesmo tipo e os mesmos marcadores). Áreas cobertas na rc.44: geral, quadro, tarefa, visuais e conversas (salas
+  incluídas) quase inteiras; entrar, recuperar e Minha conta (conta), as boas-vindas e o tour (ajuda), as contas de IA e
+  a chave própria (configurações) e os erros mais comuns (servidor). `completude.test.ts` exige esse mínimo.
+- **REVISÃO POR NATIVO PENDENTE**: as traduções foram geradas a partir do inglês, com o glossário abaixo, e cada
+  arquivo traz `REVISAO_NATIVA_PENDENTE = true`. Ao revisar uma área, troque para `false` e anote quem revisou.
+- **Glossário**: agente 智能体 / एजेंट · Equipe 团队 / टीम · Tarefas 任务 / कार्य · card 卡片 / कार्ड · quadro 看板 /
+  बोर्ड · Rotinas 例行任务 / रूटीन · Conexões 连接 / कनेक्शन · Configurações 设置 / सेटिंग्स · Aguardando você 等你处理 /
+  आपकी प्रतीक्षा में · Salas 协作室 / रूम · entrega 交付 / डिलीवरी · Modo Foco 专注模式 / फ़ोकस मोड. Nomes de produto e
+  dos personagens não se traduzem (Ergon World, Ergon AI, Aristóteles…).
+- **Catraca**: além do português, nenhum arquivo de tela pode ter chinês ou devanágari escrito direto (só aqui).
+- **Fontes na tela** (`lib/fontes.ts`): a Noto Sans SC e a Noto Sans Devanagari (woff2, subconjuntos, em
+  `public/fontes`) só entram em `document.fonts` quando o idioma é chinês ou hindi, e o navegador só as baixa se as do
+  sistema (PingFang, YaHei, Nirmala…) não tiverem o caractere. O bundle não muda.
+- **PDF e PNG** (servidor): o PDFKit embute as Noto de `server/assets/fontes` (subconjuntos TTF, OFL) e forma o
+  devanágari pelo fontkit — conjuntos (क्ष, त्र, श्र), o ि pré-posto, o reph e os matras saem certos, conferidos por
+  `server/test/idiomas-escritas.test.ts`. Por isso o PDF em hindi NÃO precisou do Chromium do contêiner do motor nem do
+  harfbuzz em wasm (avaliados: o Chromium só existe na imagem do motor, que nem sempre está ligada; o harfbuzzjs daria
+  o mesmo resultado com uma dependência a mais). Já o resvg dos PNG perde os espaços e desfaz os conjuntos do hindi:
+  lá o texto em devanágari vira curvas já formadas pelo mesmo fontkit (`services/visuais/curvas.ts`). Limite: no PDF,
+  o texto copiado do hindi sai na ordem visual (o ि antes da consoante), como na maioria dos geradores de PDF.
+- **Servidor**: `server/src/lib/i18n.ts` tem o mínimo que chega à pessoa sem passar pela tela (avisos dos canais,
+  numeração do PDF) nos quatro textos e o formatador por locale (`fmtNumero`, `fmtMoeda`, `fmtData`). O motor de IA
+  recebe `en` para chinês e hindi nesta versão (a ponte só aceita pt e en).

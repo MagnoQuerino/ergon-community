@@ -8,15 +8,23 @@ import { getSetting, setSetting } from './sectors.ts';
 
 /** updateNotice: ao abrir o Ergon, procurar versão nova e mostrar "Atualização disponível" (ligado por padrão) */
 /** cityCalm: cidade em modo calmo; musicVolume/musicShuffle: a música ambiente (nunca liga sozinha: não há "tocando" guardado) */
-/** lang: o idioma da tela escolhido pela pessoa (só 'pt-BR' ou 'en'), o mesmo em todos os workspaces; sem escolha fica de fora */
+/** lang: o idioma da tela escolhido pela pessoa (um de IDIOMAS), o mesmo em todos os workspaces; sem escolha fica de fora */
 /** cityBarCollapsed: a barra de cima da Cidade recolhida (escolha da pessoa, não do navegador: na multiconta não passa de uma para outra) */
 export interface Prefs { tips: boolean; dismissed: string[]; tourDone: boolean; updateNotice: boolean; cityCalm: boolean; musicVolume: number; musicShuffle: boolean; cityBarCollapsed: boolean; lang?: Idioma }
 type PrefsDoWorkspace = Omit<Prefs, 'lang'>;
 const DEFAULT: PrefsDoWorkspace = { tips: true, dismissed: [], tourDone: false, updateNotice: true, cityCalm: false, musicVolume: 0.5, musicShuffle: false, cityBarCollapsed: false };
 const MAX_DISMISSED = 200;
-export type Idioma = 'pt-BR' | 'en';
-export const IDIOMAS: readonly Idioma[] = ['pt-BR', 'en'];
-const ehIdioma = (v: unknown): v is Idioma => v === 'pt-BR' || v === 'en';
+// os mesmos idiomas da tela (web/src/i18n/idiomas.ts; o teste do seletor confere a lista): chinês, hindi e o inglês
+// da Índia entraram na rc.44
+export type Idioma = 'pt-BR' | 'en' | 'en-IN' | 'zh-CN' | 'hi';
+export const IDIOMAS: readonly Idioma[] = ['pt-BR', 'en', 'en-IN', 'zh-CN', 'hi'];
+export const ehIdioma = (v: unknown): v is Idioma => typeof v === 'string' && (IDIOMAS as readonly string[]).includes(v);
+
+/** O idioma de quem é dono do workspace (o PDF que um agente gera sai com a data nesse idioma); sem escolha, undefined. */
+export function idiomaDoDono(db: Db, workspaceId: string): Idioma | undefined {
+  const v = db.get<{ lang: string | null }>("SELECT u.lang FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = ? AND m.role = 'owner' ORDER BY m.created_at LIMIT 1", workspaceId)?.lang;
+  return ehIdioma(v) ? v : undefined;
+}
 
 /** O idioma escolhido pela pessoa (o mesmo em todos os workspaces dela); sem escolha, undefined. */
 export function readLang(db: Db, userId: string): Idioma | undefined {

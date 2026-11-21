@@ -125,7 +125,9 @@ export class Initiative {
   /** Cada colega que precisa da pessoa num card puxa conversa (abertura pronta, no jeito dele, com o assunto de leve). */
   private openers(workspaceId: string, userId: string, cards: ReturnType<typeof pendingDecisions>['cards']): void {
     const tz = workspaceTz(this.db, workspaceId);
-    const lang = readLang(this.db, userId) === 'en' ? 'en' : 'pt';
+    // as aberturas existem em português e inglês: chinês, hindi e o inglês da Índia leem o inglês (rc.44)
+    const escolhido = readLang(this.db, userId);
+    const lang = escolhido && escolhido !== 'pt-BR' ? 'en' : 'pt';
     const coord = this.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND coordinator = 1 AND status = 'active'", workspaceId)?.id;
     const by = new Map<string, typeof cards>();
     for (const c of cards) {
