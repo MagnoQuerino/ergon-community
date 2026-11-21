@@ -1,0 +1,63 @@
+// Área "servidor" em chinês simplificado (zh-CN): PARCIAL (a chave que falta vem do inglês). Tipada pelo português.
+// REVISÃO POR NATIVO PENDENTE: tradução gerada na rc.44 a partir do inglês, com o glossário de ../GLOSSARIO.md;
+// precisa da revisão de um falante nativo antes da versão final (COMO-TRADUZIR.md, "Chinês e hindi").
+import type pt from '../pt/servidor.ts';
+import type { TraducaoParcial } from '../tipos.ts';
+
+export const REVISAO_NATIVA_PENDENTE = true;
+
+const servidor: TraducaoParcial<typeof pt> = {
+  'erro.facaLogin': '请登录。',
+  'erro.paginaDesatualizada': '页面已过期：请刷新后重试。',
+  'erro.telaTrancada': '一段时间未使用，屏幕已锁定：请输入密码继续。',
+  'erro.digiteSenhaDados': '请输入密码以打开你的数据。',
+  'erro.protejaErgon': '请先保护 Ergon（密码和恢复短语）再继续。',
+  'erro.configure2fa': '请先设置验证器应用或通行密钥再继续。',
+  'erro.confirmeIdentidade': '请先确认你的身份再继续。',
+  'erro.somenteProprietario': '只有所有者可以这样做。',
+  'erro.somenteAdmin': '只有在这台电脑上管理 Ergon 的人可以这样做。',
+  'erro.origemNaoPermitida': '这个请求来自不被允许的网站。',
+  'erro.entreSites': '来自其他网站的请求已被阻止。',
+  'erro.loginInvalido': '用户名或密码错误。',
+  'erro.senhaCurta': '请至少使用 {min} 个字符。3 到 4 个词组成的短语好记又难猜。',
+  'erro.senhaLonga': '密码太长（最多 200 个字符）。',
+  'erro.fraseNaoConfere': '恢复短语不匹配。',
+  'erro.fraseOuUsuario': '恢复短语或用户名不匹配。',
+  'erro.fraseOutraConta': '这个短语属于另一个账户。',
+  'erro.passkeyNaoReconhecida': '无法识别该通行密钥。',
+  'erro.passkeyNaoConfirmada': '通行密钥未确认。',
+  'erro.senhaNaoAbriu': '密码正确，但没能打开此账户的数据。请用恢复短语通过“忘记密码”找回。',
+  'erro.reiniciouSenha': 'Ergon 已重启：请输入一次密码以打开你的数据。',
+  'erro.reiniciouSenhaPasskey': 'Ergon 已重启：请用密码登录一次以打开你的数据。之后用通行密钥即可。',
+  'erro.trancadoSenha': 'Ergon 已锁定：请输入密码打开。',
+  'erro.trancadoContas': 'Ergon 已锁定：需要已有账户的人先打开它。',
+  'erro.semWorkspace': '该用户没有工作区。',
+  'erro.workspaceNaoEncontrado': '找不到工作区。',
+  'erro.agenteNaoEncontrado': '找不到智能体。',
+  'erro.naoEncontreAgente': '找不到智能体“{nome}”。',
+  'erro.naoEncontreSetor': '找不到部门“{nome}”。',
+  'erro.cardNaoEncontrado': '看板上找不到这张卡片。',
+  'erro.cardNumeroNaoEncontrado': '看板上找不到卡片 #{numero}。',
+  'erro.tarefaNaoExiste': '这个任务已经不在这里了。',
+  'erro.rotaNaoEncontrada': '找不到页面。',
+  'erro.contaNaoEncontrada': '找不到账户。',
+  'erro.propostaDecidida': '这个提议已经有了决定。',
+  'erro.pedidoDecidido': '这个请求已经有了决定。',
+  'erro.pedidoRespondido': '这个请求已经回复过了。',
+  'erro.perguntaRespondida': '这个问题已经回答过了。',
+  'erro.acaoDecidida': '这个操作已经有了决定。',
+  'erro.nadaEsperando': '这张卡片上没有等你决定的事项。',
+  'erro.jaDecidido': '已在别处决定：这次没有任何改变。',
+  'erro.tarefaConcluida': '这个任务已经完成。',
+  'erro.equipeTrabalhando': '团队仍在处理这张卡片。',
+  'erro.orientarNaoAndando': '这项工作目前没有在进行，所以无需指导。',
+  'erro.orientarNaoAceitou': '团队这次没有收到指导。请稍后重试。',
+  'erro.reservaForaDaConta': '该模型不在已连接的 AI 账户中。',
+  'erro.agenteTrabalhando': '智能体已经在处理这张卡片。',
+  'erro.agenteAindaTrabalhando': '智能体仍在处理这张卡片：请等它完成。',
+  'erro.rotinaExecutando': '这个例行任务已在运行：请等它完成。',
+  'erro.respostaEmAndamento': '这段对话中还有回复正在进行。',
+  'erro.respostaEmAndamentoFila': '这段对话中还有回复正在进行：请等待、取消它，或按 Ctrl+Enter 把你的消息排队。',
+};
+
+export default servidor;

@@ -1,0 +1,63 @@
+// Área "servidor" em hindi (hi): PARCIAL (a chave que falta vem do inglês). Tipada pelo português.
+// REVISÃO POR NATIVO PENDENTE: tradução gerada na rc.44 a partir do inglês, com o glossário de ../GLOSSARIO.md;
+// precisa da revisão de um falante nativo antes da versão final (COMO-TRADUZIR.md, "Chinês e hindi").
+import type pt from '../pt/servidor.ts';
+import type { TraducaoParcial } from '../tipos.ts';
+
+export const REVISAO_NATIVA_PENDENTE = true;
+
+const servidor: TraducaoParcial<typeof pt> = {
+  'erro.facaLogin': 'कृपया साइन इन करें।',
+  'erro.paginaDesatualizada': 'यह पेज पुराना हो गया है: रीलोड करें और फिर से कोशिश करें।',
+  'erro.telaTrancada': 'कुछ देर इस्तेमाल न होने पर स्क्रीन लॉक हो गई: जारी रखने के लिए पासवर्ड डालें।',
+  'erro.digiteSenhaDados': 'अपना डेटा खोलने के लिए पासवर्ड डालें।',
+  'erro.protejaErgon': 'जारी रखने के लिए Ergon को सुरक्षित करें (पासवर्ड और रिकवरी वाक्यांश)।',
+  'erro.configure2fa': 'जारी रखने के लिए ऑथेंटिकेटर ऐप या पासकी सेट करें।',
+  'erro.confirmeIdentidade': 'जारी रखने के लिए अपनी पहचान की पुष्टि करें।',
+  'erro.somenteProprietario': 'यह सिर्फ़ मालिक कर सकता है।',
+  'erro.somenteAdmin': 'यह सिर्फ़ वही कर सकता है जो इस कंप्यूटर पर Ergon का प्रबंधन करता है।',
+  'erro.origemNaoPermitida': 'यह अनुरोध ऐसी साइट से आया है जिसकी अनुमति नहीं है।',
+  'erro.entreSites': 'दूसरी साइट से आने वाले अनुरोध रोके जाते हैं।',
+  'erro.loginInvalido': 'यूज़रनेम या पासवर्ड ग़लत है।',
+  'erro.senhaCurta': 'कम से कम {min} अक्षर इस्तेमाल करें। 3 या 4 शब्दों का वाक्यांश याद रखने में आसान और अनुमान लगाने में कठिन होता है।',
+  'erro.senhaLonga': 'पासवर्ड बहुत लंबा है (अधिकतम 200 अक्षर)।',
+  'erro.fraseNaoConfere': 'रिकवरी वाक्यांश मेल नहीं खाता।',
+  'erro.fraseOuUsuario': 'रिकवरी वाक्यांश या यूज़रनेम मेल नहीं खाता।',
+  'erro.fraseOutraConta': 'यह वाक्यांश किसी दूसरे खाते का है।',
+  'erro.passkeyNaoReconhecida': 'पासकी पहचानी नहीं गई।',
+  'erro.passkeyNaoConfirmada': 'पासकी की पुष्टि नहीं हुई।',
+  'erro.senhaNaoAbriu': 'पासवर्ड सही है, पर इस खाते का डेटा नहीं खुला। अपने रिकवरी वाक्यांश के साथ "पासवर्ड भूल गए" इस्तेमाल करें।',
+  'erro.reiniciouSenha': 'Ergon फिर से शुरू हुआ: अपना डेटा खोलने के लिए एक बार पासवर्ड डालें।',
+  'erro.reiniciouSenhaPasskey': 'Ergon फिर से शुरू हुआ: अपना डेटा खोलने के लिए एक बार पासवर्ड से साइन इन करें। उसके बाद पासकी फिर से काफ़ी है।',
+  'erro.trancadoSenha': 'Ergon लॉक है: खोलने के लिए पासवर्ड डालें।',
+  'erro.trancadoContas': 'Ergon लॉक है: जिसका खाता पहले से है, उसे पहले इसे खोलना होगा।',
+  'erro.semWorkspace': 'इस यूज़र का कोई वर्कस्पेस नहीं है।',
+  'erro.workspaceNaoEncontrado': 'वर्कस्पेस नहीं मिला।',
+  'erro.agenteNaoEncontrado': 'एजेंट नहीं मिला।',
+  'erro.naoEncontreAgente': 'एजेंट "{nome}" नहीं मिला।',
+  'erro.naoEncontreSetor': 'विभाग "{nome}" नहीं मिला।',
+  'erro.cardNaoEncontrado': 'यह कार्ड बोर्ड पर नहीं मिला।',
+  'erro.cardNumeroNaoEncontrado': 'कार्ड #{numero} बोर्ड पर नहीं मिला।',
+  'erro.tarefaNaoExiste': 'यह कार्य अब यहाँ नहीं है।',
+  'erro.rotaNaoEncontrada': 'पेज नहीं मिला।',
+  'erro.contaNaoEncontrada': 'खाता नहीं मिला।',
+  'erro.propostaDecidida': 'इस प्रस्ताव पर पहले ही फ़ैसला हो चुका है।',
+  'erro.pedidoDecidido': 'इस अनुरोध पर पहले ही फ़ैसला हो चुका है।',
+  'erro.pedidoRespondido': 'इस अनुरोध का जवाब पहले ही दिया जा चुका है।',
+  'erro.perguntaRespondida': 'इस सवाल का जवाब पहले ही दिया जा चुका है।',
+  'erro.acaoDecidida': 'इस कार्रवाई पर पहले ही फ़ैसला हो चुका है।',
+  'erro.nadaEsperando': 'इस कार्ड पर कुछ भी आपके फ़ैसले की प्रतीक्षा में नहीं है।',
+  'erro.jaDecidido': 'कहीं और पहले ही तय हो चुका: अभी कुछ नहीं बदला।',
+  'erro.tarefaConcluida': 'यह कार्य पहले ही पूरा हो चुका है।',
+  'erro.equipeTrabalhando': 'टीम अभी भी इस कार्ड पर काम कर रही है।',
+  'erro.orientarNaoAndando': 'यह काम अभी जारी नहीं है, इसलिए मार्गदर्शन के लिए कुछ नहीं है।',
+  'erro.orientarNaoAceitou': 'टीम को अभी मार्गदर्शन नहीं मिला। थोड़ी देर में फिर से कोशिश करें।',
+  'erro.reservaForaDaConta': 'वह मॉडल किसी जुड़े AI खाते में नहीं है।',
+  'erro.agenteTrabalhando': 'एजेंट पहले से इस कार्ड पर काम कर रहा है।',
+  'erro.agenteAindaTrabalhando': 'एजेंट अभी भी इस कार्ड पर काम कर रहा है: पूरा होने तक प्रतीक्षा करें।',
+  'erro.rotinaExecutando': 'यह रूटीन पहले से चल रहा है: पूरा होने तक प्रतीक्षा करें।',
+  'erro.respostaEmAndamento': 'इस बातचीत में अभी एक जवाब जारी है।',
+  'erro.respostaEmAndamentoFila': 'इस बातचीत में अभी एक जवाब जारी है: प्रतीक्षा करें, उसे रद्द करें, या अपना संदेश कतार में रखने के लिए Ctrl+Enter दबाएँ।',
+};
+
+export default servidor;
