@@ -12,6 +12,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { duracaoDoAudio } from '../src/lib/duracao-audio.ts';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
+import { VOZ_NOTE } from '../src/services/chat.ts';
 import { Recursos } from '../src/services/recursos.ts';
 import { TRANSCREVENDO_AUDIO } from '../src/services/runs.ts';
 import { AUDIO_MAX_BYTES, foraDoTeto } from '../src/services/transcricoes.ts';
@@ -169,6 +170,34 @@ describe('mensagem de áudio', () => {
     for (let i = 0; i < 3; i++) await h.executor.tick();
     assert.equal(motor.pedidos.length, 1);
     assert.match(motor.pedidos[0].input, /resume pra mim[\s\S]*Áudio da pessoa \(transcrição\): reunião às três/);
+  });
+
+  test('conversa por voz (rc.41): o sinal "voz" pede resposta curta e falável; a mensagem de áudio comum não muda', async () => {
+    const conv = await conversa();
+    const comum = await subir(conv, ler('nota-3s.ogg'), 'a.ogg', 'audio/ogg');
+    await assentar(comum.json.id);
+    assert.equal((await enviar(conv, comum.json.id)).status, 201);
+    for (let i = 0; i < 3; i++) await h.executor.tick();
+    assert.doesNotMatch(motor.pedidos[0].instructions ?? '', /Conversa por voz/, 'áudio comum: sem a nota da voz');
+    assert.match(motor.pedidos[0].instructions ?? '', /mandou arquivo\(s\) sem escrever nada/, 'áudio comum: a nota de sempre');
+    motor.runs.set('run_audio0000000001', { status: 'completed', output: 'Anotado.', error: null, sessionId: 's1', usage: null, model: null });
+    for (let i = 0; i < 3; i++) await h.executor.tick();
+
+    const falado = await subir(conv, ler('nota-3s-ao-vivo.webm'));
+    await assentar(falado.json.id);
+    const r = await req(h, 'POST', `/api/conversations/${conv}/messages`, s, { text: '', clientRequestId: `m-${crypto.randomUUID()}`, attachments: [falado.json.id], voz: true });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    for (let i = 0; i < 3; i++) await h.executor.tick();
+    assert.equal(motor.pedidos.length, 2);
+    assert.match(motor.pedidos[1].instructions ?? '', new RegExp(VOZ_NOTE.slice(0, 60)));
+    assert.doesNotMatch(motor.pedidos[1].instructions ?? '', /mandou arquivo\(s\) sem escrever nada/, 'no modo voz o áudio é a fala, não um arquivo a descrever');
+    assert.match(motor.pedidos[1].input, /Áudio da pessoa \(transcrição\): reunião às três com a Ana/, 'a transcrição vai como em toda mensagem de áudio');
+    // a mensagem fica na conversa igual a uma comum: o áudio anexado, com a transcrição
+    const minhas = (await mensagens(conv)).filter((x) => x.role === 'user');
+    assert.equal(minhas.length, 2);
+    assert.equal(minhas[1].attachments![0].transcricao!.estado, 'pronta');
+    // o sinal é validado pelo esquema
+    assert.equal((await req(h, 'POST', `/api/conversations/${conv}/messages`, s, { text: 'oi', clientRequestId: `m-${crypto.randomUUID()}`, voz: 'sim' })).status, 400);
   });
 
   test('falha: o agente sabe que há um áudio não transcrito; "tentar de novo" refaz e grava', async () => {

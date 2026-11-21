@@ -21,7 +21,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // o card aberto
   tarefa: ['components/TaskDetail.tsx', 'components/CartaoExtras.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
   // as conversas
-  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts', 'components/GravadorDeVoz.tsx', 'lib/gravador.ts'],
+  conversas: ['components/ChatPanel.tsx', 'components/ChatCards.tsx', 'components/Comandos.tsx', 'components/ConversationDock.tsx', 'lib/conversations.ts', 'components/GravadorDeVoz.tsx', 'lib/gravador.ts', 'components/ConversaPorVoz.tsx', 'lib/conversa-voz.ts'],
   // a Equipe e criar agentes
   equipe: [
     'views/AgentesView.tsx', 'components/AgentProfile.tsx', 'components/NewAgentDialog.tsx', 'components/NewGroupDialog.tsx',

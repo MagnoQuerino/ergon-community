@@ -114,6 +114,11 @@ export const chatHooks: {
 export const channelNoteFor = (conversationId: string, messageId?: string | null): string => chatHooks.channelNote?.(conversationId, messageId) ?? CHANNEL_NOTE;
 
 /** Arquivo sem texto: o colega lê e já devolve algo útil, sem perguntar o que fazer. */
+/**
+ * Conversa por voz (rc.41): o pedido veio do modo mãos livres da tela (a fala da pessoa é o áudio anexo) e a resposta vai
+ * ser lida em voz alta. Só muda a forma da resposta; a mensagem, o áudio e a transcrição são os de uma mensagem de áudio comum.
+ */
+export const VOZ_NOTE = 'Conversa por voz: a pessoa está falando com você de mãos livres e vai OUVIR a sua resposta em voz alta. O áudio anexo é a fala dela: a transcrição é o pedido (não descreva o arquivo). Responda como numa conversa falada: direto e curto (até umas três frases, a não ser que ela peça detalhe), em texto corrido, sem markdown, títulos, listas, tabelas, links, código nem emojis. Se o resultado for longo (um documento, uma tabela, muitos itens), diga em uma ou duas frases o que fez e o principal, e avise que o detalhe ficou escrito na conversa.';
 const FILE_ONLY_NOTE = 'A pessoa mandou arquivo(s) sem escrever nada. Leia e já devolva algo útil: o que é, em uma frase, e o que chama atenção (ou faça o óbvio, se a conversa já pedia isso). Termine dizendo o que você pode fazer com ele, em uma frase, sem cardápio de opções.';
 
 const CHANNEL_NOTE = 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do workspace, autenticada.';
@@ -123,7 +128,8 @@ const CHANNEL_NOTE = 'Canal: conversa no Ergon. Quem escreve é a pessoa dona do
  * nem regra); `queue`: com uma resposta em andamento, a mensagem entra na fila da conversa (Ctrl+Enter) e vai para o
  * agente quando ele terminar, em vez de ser recusada.
  */
-interface SendOptions { /** Revisão em conselho: a resposta vem do conselho de modelos */ conselho?: boolean; note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null }
+interface SendOptions { /** Revisão em conselho: a resposta vem do conselho de modelos */ conselho?: boolean; note?: string | null; plain?: boolean; queue?: boolean; /** arquivos já enviados (Documentos) */ attachments?: string[]; /** responde citando esta mensagem (da mesma conversa) */ replyTo?: string | null;
+  /** conversa por voz (rc.41): a resposta vai ser falada (VOZ_NOTE) */ voz?: boolean }
 
 /**
  * A pessoa respondeu digitando a uma pergunta do agente (cartão aberto na conversa): a mensagem fica na conversa, para
@@ -229,7 +235,7 @@ function handOver(db: Db, bus: Bus, executor: RunExecutor, workspaceId: string, 
     workspaceId, agentId: conv.agent_id, conversationId, kind: 'chat', input: [content, attachmentLine(files)].filter(Boolean).join('\n'),
     // o agente precisa saber o que o sistema já aplicou, para não "propor" de novo um card já criado
     instructions: instructionsFor(db, workspaceId, conv.agent_id,
-      [channelNoteFor(conversationId, messageId), opts.note ?? '', reply ?? '', fork ?? '', quote ?? '', files.length && !content ? FILE_ONLY_NOTE : '', !opts.plain && acted ? `Ação já aplicada pelo sistema para esta mensagem (fato, não repita como proposta): ${result.summary}` : '',
+      [channelNoteFor(conversationId, messageId), opts.note ?? '', reply ?? '', fork ?? '', quote ?? '', opts.voz ? VOZ_NOTE : files.length && !content ? FILE_ONLY_NOTE : '', !opts.plain && acted ? `Ação já aplicada pelo sistema para esta mensagem (fato, não repita como proposta): ${result.summary}` : '',
         regra ? `O sistema já mostrou à pessoa, nesta conversa, um cartão para liberar sem confirmação: ${descreverRegra(regra)}. Ela escolhe ali até quando vale (só neste pedido, por 24 h ou sempre). Não escreva [[regra ...]] para isto e não diga que já está liberado antes de ela escolher; se precisar agir antes, siga como sempre (o que pedir confirmação espera o cartão).` : ''].filter(Boolean).join('\n'),
       { requests: !opts.plain, userId, foco: { conversationId, texto: content } }),
     idempotencyKey: `chat-${messageId}`,
