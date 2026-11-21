@@ -18,12 +18,20 @@ export interface Resultado {
   privado?: boolean;
   /** endereço do que foi criado ou alterado, para o recibo */
   url?: string | null;
+  /** rc.42: o acesso de git de curta duração (codigo.ts) — só para o plugin entregar ao git; nunca vai ao modelo nem ao registro */
+  git?: import('./codigo.ts').AcessoGit;
+  /** rc.42: o acesso de git acabou (o plugin apaga o que guardou para o git) */
+  gitFim?: boolean;
 }
 
 /** Chamada já autenticada com a conta. Escrita precisa dizer `kind: 'write'` (lib/http.ts: não repete às cegas). */
 export type Http = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: unknown; kind?: 'read' | 'write' }) => Promise<any>;
 
-export interface CtxAcao { workspaceId: string; tz: string; http: Http; /** qual das contas do aplicativo ('' = a principal) */ conta?: string; /** conector que manda a credencial no corpo (Omie): nunca vai ao modelo */ creds?: Record<string, string> }
+export interface CtxAcao { workspaceId: string; tz: string; http: Http;
+  /** o trabalho que pediu (rc.42: a concessão de git vale só para ele); ausente no teste da conexão pela pessoa */
+  runId?: string | null;
+  /** a ponte de código (conexoes/codigo.ts): concessões de git de curta duração, só para GitHub e GitLab */
+  git?: import('./codigo.ts').PonteGit; /** qual das contas do aplicativo ('' = a principal) */ conta?: string; /** conector que manda a credencial no corpo (Omie): nunca vai ao modelo */ creds?: Record<string, string> }
 
 export interface Acao {
   /** ex.: 'email.buscar' */
@@ -40,6 +48,11 @@ export interface Acao {
    * tudo" (ou uma regra aprovada explícita pela pessoa) passa por cima.
    */
   sempreConfirma?: string;
+  /**
+   * Sempre-protegida (rc.42): apagar de vez, apagar um repositório, segredos, pagamentos. Pede o cartão toda vez, acima de
+   * "Liberar tudo" e de qualquer regra aprovada (regra.ts). O texto é o motivo que o cartão mostra.
+   */
+  protegida?: string;
   params: Record<string, Param>;
   /** permissões da conta sem as quais a ação não funciona (para pedir a autorização certa) */
   escopos?: string[];

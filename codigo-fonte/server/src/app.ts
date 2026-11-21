@@ -14,6 +14,7 @@ import { createBackup } from './services/backup.ts';
 import { diagnostics, healthPanel } from './services/health.ts';
 import { activityReport, reportPeriod } from './services/activity-report.ts';
 import { Conexoes, KIND_DEPOIS_DE_LER, KIND_REGRA } from './services/conexoes/servico.ts';
+import { ConcessoesGit, registrarProxyGit } from './services/conexoes/codigo.ts';
 import { ALCANCES, PRAZOS_DEPOIS_DE_LER, sugestaoDoAgente, type Alcance, type PrazoDepoisDeLer } from './services/conexoes/regras.ts';
 import type { Permissoes } from './services/conexoes/catalogo.ts';
 import { EspelhoEscrita } from './services/conexoes/espelho.ts';
@@ -445,7 +446,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return !!db.get(`SELECT 1 AS x FROM run_tools WHERE workspace_id IN (${marks}) AND tool IN (${FERRAMENTAS_DE_CODIGO.map(() => '?').join(', ')}) AND started_at >= ? LIMIT 1`,
       ...wss, ...FERRAMENTAS_DE_CODIGO, desde);
   };
-  const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado,
+  // rc.42: o acesso de git de curta duração (conexoes/codigo.ts): o agente clona e envia ramos sem ver o token
+  const concessoesGit = new ConcessoesGit(db, bus);
+  const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado, git: concessoesGit,
     // aprovações nativas (rc.27): o turno de quem pediu espera no portão do motor; a decisão volta à ferramenta
     nativa: { aoVivo: (ws, pid) => aprovacoes.aoVivo(ws, pid), responder: (ws, pid, ok) => aprovacoes.responder(ws, pid, ok) },
     // confirmou no cartão: o agente recebe o resultado e continua o pedido na mesma conversa
@@ -501,7 +504,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       if (l?.deFora) conexoes.marcar({ ...run, task_id: taskId }, { privado: l.privado, motivo: 'gestao/card' });
     },
     // links do Treinar abertos sem clique: como o [[treinar]] (o pedido partiu da pessoa e nada de fora, nem privado, foi lido)
-    linksLivres: (run) => { if (conexoes.liberarTudo(run.workspace_id)) return true; const l = conexoes.leu(run); return conexoes.origem(run) === 'pessoa' && !l.deFora && !l.privado; },
+    linksLivres: (run) => { if (conexoes.liberarTudo(run.workspace_id, conexoes.quemPediu(run))) return true; const l = conexoes.leu(run); return conexoes.origem(run) === 'pessoa' && !l.deFora && !l.privado; },
     // ligada aos serviços das outras frentes (contas por apelido, conexão própria, competência enviada): gestao-servicos.ts
     ...gestaoServicos({ db, filesDir: cfg.filesDir, apps: () => appsProprios, recursos: () => recursos,
       memoria: async (ws, agentId) => { const { perfil, c } = memoriaDo(ws, agentId); return perfil && c ? await c.memoria!(perfil) : null; } }),
@@ -594,7 +597,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
         // estudar um link abre o endereço sem clique: só quando a pessoa pediu na conversa e nada de fora chegou antes
         // (o endereço podia ter vindo de um e-mail, de uma rotina ou de uma iniciativa do agente)
         const deVoce = conexoes.origem(r) === 'pessoa';
-        if (t.links?.length && !conexoes.liberarTudo(r.workspace_id) && (!deVoce || conexoes.leu(r).deFora)) { teamwork.purpose.note(r.workspace_id, conv, `Sistema — por segurança, ${who.name} não estudou os links: ${deVoce ? 'esta conversa leu conteúdo de fora' : 'o pedido não partiu de você'}. Se os links são seus, peça numa conversa nova.`); continue; }
+        if (t.links?.length && !conexoes.liberarTudo(r.workspace_id, conexoes.quemPediu(r)) && (!deVoce || conexoes.leu(r).deFora)) { teamwork.purpose.note(r.workspace_id, conv, `Sistema — por segurança, ${who.name} não estudou os links: ${deVoce ? 'esta conversa leu conteúdo de fora' : 'o pedido não partiu de você'}. Se os links são seus, peça numa conversa nova.`); continue; }
         void trainings.start(r.workspace_id, owner!, who.id, { request: t.request, title: t.title || undefined, links: t.links })
           .then(() => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} começou a estudar “${t.title || t.request.slice(0, 80)}”. A competência aparece no perfil dele (aba Treinar) para você aprovar; até lá, nada muda.`))
           .catch((e: unknown) => teamwork.purpose.note(r.workspace_id, conv, `Sistema — ${who.name} não pôde estudar agora: ${e instanceof Error ? e.message : 'erro'}`));
@@ -2636,15 +2639,33 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // Conexões: o que falta autorizar, a escolha de liberar tudo, testar com a conta real e a ação da própria pessoa
   app.get('/api/conexoes', async (req) => {
     const a = auth(req);
-    return { liberarTudo: conexoes.liberarTudo(a.workspaceId), aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId), aprovarDepoisDeLerBarra: motors.barraSemAprovar(a.workspaceId), confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind),
+    return { liberarTudo: conexoes.liberarTudoDoWorkspace(a.workspaceId), liberarTudoMeu: conexoes.liberarTudoDaPessoa(a.workspaceId, a.userId), liberarTudoProibido: conexoes.liberarTudoProibido(a.workspaceId),
+      liberarTudoSemAviso: conexoes.liberarTudoSemAviso(a.workspaceId, a.userId), administra: a.role === 'owner', aprovarDepoisDeLer: conexoes.aprovarDepoisDeLer(a.workspaceId), aprovarDepoisDeLerBarra: motors.barraSemAprovar(a.workspaceId), confirmarOrganizar: conexoes.confirmarOrganizar(a.workspaceId), ligadas: conexoes.ligadas(a.workspaceId).map((kind) => ({ kind, faltam: conexoes.faltamTudo(a.workspaceId, kind), comErro: integrationRow(db, a.workspaceId, kind).last_error, ...conexoes.catalogoDe(a.workspaceId, kind),
       // cada conta tem a sua escrita liberada (ou não) e o seu ajuste por ação; com uma só, a tela é a de antes
       contas: contasDe(db, a.workspaceId, kind).filter((c) => c.state === 'connected').map((c) => ({ conta: c.conta, nome: nomeDaConta(c), principal: c.conta === '', ativa: c.ativa !== 0, faltam: conexoes.faltamTudo(a.workspaceId, kind, c.conta), comErro: c.last_error, ...conexoes.catalogoDe(a.workspaceId, kind, c.conta) })) })) };
   });
-  app.put('/api/conexoes/liberar-tudo', { schema: { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
-    const a = owner(req);
-    conexoes.setLiberarTudo(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
+  // "Liberar tudo" (rc.42): do workspace (quem administra) ou só nos meus pedidos (cada pessoa), com o "Não perguntar
+  // novamente" do aviso; quem administra pode proibir o modo no workspace inteiro
+  const liberarCorpo = { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' }, semAviso: { type: 'boolean' } } } };
+  const estadoLiberar = (a: { workspaceId: string; userId: string }) => ({ liberarTudo: conexoes.liberarTudoDoWorkspace(a.workspaceId), liberarTudoMeu: conexoes.liberarTudoDaPessoa(a.workspaceId, a.userId),
+    liberarTudoProibido: conexoes.liberarTudoProibido(a.workspaceId), liberarTudoSemAviso: conexoes.liberarTudoSemAviso(a.workspaceId, a.userId) });
+  app.put('/api/conexoes/liberar-tudo', { schema: liberarCorpo }, async (req) => {
+    const a = owner(req); const b = req.body as { on: boolean; semAviso?: boolean };
+    conexoes.setLiberarTudo(a.workspaceId, a.userId, b.on, { semAviso: b.semAviso });
     bus.publish(a.workspaceId, 'integrations.changed', {});
-    return { liberarTudo: conexoes.liberarTudo(a.workspaceId) };
+    return estadoLiberar(a);
+  });
+  app.put('/api/conexoes/liberar-tudo/meu', { schema: liberarCorpo }, async (req) => {
+    const a = auth(req); const b = req.body as { on: boolean; semAviso?: boolean };
+    conexoes.setLiberarTudo(a.workspaceId, a.userId, b.on, { pessoa: true, semAviso: b.semAviso });
+    bus.publish(a.workspaceId, 'integrations.changed', {});
+    return estadoLiberar(a);
+  });
+  app.put('/api/conexoes/liberar-tudo/proibir', { schema: { body: { type: 'object', additionalProperties: false, required: ['on'], properties: { on: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req);
+    conexoes.setLiberarTudoProibido(a.workspaceId, a.userId, (req.body as { on: boolean }).on);
+    bus.publish(a.workspaceId, 'integrations.changed', {});
+    return estadoLiberar(a);
   });
   // Conexões › Regras: as regras aprovadas (as que liberam ações sem confirmação e as de texto ativas) e as propostas esperando
   app.get('/api/conexoes/regras', async (req) => conexoes.regras.tela(auth(req).workspaceId));
@@ -3182,6 +3203,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     if (!run) return { liberada: false, texto: 'Esta ferramenta não funciona agora nesta conversa. Continue sem ela.' };
     return conexoes.pedirAprovacao(run, b.ferramenta, b.alvo ?? '');
   });
+
+  // rc.42: o git do Terminal do motor passa por aqui com a senha da concessão; o token da conexão só sai daqui ao serviço
+  registrarProxyGit(app, { db, bus, concessoes: concessoesGit,
+    credencial: (ws, kind, conta) => integrations.secrets.read<Record<string, string>>(ws, kind, conta),
+    liberarTudo: (ws, runId) => { const r = db.get<{ idempotency_key: string; conversation_id: string | null; workspace_id: string }>('SELECT idempotency_key, conversation_id, workspace_id FROM runs WHERE id = ?', runId);
+      return !!r && conexoes.liberarTudo(ws, conexoes.conexaoEfetiva(r).userId); } });
 
   // Ferramentas de conexão no motor: o plugin só repassa; a regra, as credenciais e o registro ficam aqui
   app.post('/internal/bridge/v1/conexoes', {

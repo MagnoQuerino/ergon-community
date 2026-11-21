@@ -25,7 +25,7 @@ import { ARROBA_ESCRITO, foraDeBlocoDeCodigo, listaPaginada, MAX_ENVIO, MAX_TITU
  * O @ e a letra depois dele também podem vir como referência HTML (&#64;all, @&#97;ll): o Markdown decodifica antes de procurar a menção.
  */
 const ARROBA = new RegExp(/(?<![\\`])(`+)(?!`).*?[^`]\1(?!`)|(^|[^\w])/.source + ARROBA_ESCRITO.source + /(?=[A-Za-z0-9]|&[#\w])/.source, 'g');
-const semMencao = (t: unknown): string => foraDeBlocoDeCodigo(String(t ?? '').replace(/\r/g, ''), (l) => l.replace(ARROBA, (m, crase, antes) => (crase ? m : `${antes}@\u200B`)));
+export const semMencao = (t: unknown): string => foraDeBlocoDeCodigo(String(t ?? '').replace(/\r/g, ''), (l) => l.replace(ARROBA, (m, crase, antes) => (crase ? m : `${antes}@\u200B`)));
 
 const P_DONO: Param = { tipo: 'texto', obrigatorio: true, descricao: 'dono do repositório (pessoa ou organização)' };
 const P_REPO: Param = { tipo: 'texto', obrigatorio: true, descricao: 'nome do repositório' };
