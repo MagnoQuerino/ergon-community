@@ -162,10 +162,14 @@ describe('Google: catálogo', () => {
       'email.buscar': 'ler', 'email.ler': 'ler', 'email.pastas': 'ler', 'email.rascunho': 'organizar', 'email.rascunho_resposta': 'organizar', 'email.enviar': 'enviar', 'email.responder': 'enviar', 'email.enviar_rascunho': 'enviar', 'email.mover': 'organizar', 'email.apagar': 'apagar',
       'agenda.calendarios': 'ler', 'agenda.listar': 'ler', 'agenda.criar': 'organizar', 'agenda.editar': 'organizar', 'agenda.cancelar': 'apagar',
       'arquivos.buscar': 'ler', 'arquivos.ler': 'ler', 'arquivos.criar': 'organizar', 'pessoas.buscar': 'ler',
+      // rc.42: o escritório no Drive
+      'arquivos.pasta': 'organizar', 'arquivos.mover': 'organizar', 'arquivos.renomear': 'organizar', 'arquivos.copiar': 'organizar', 'documento.editar': 'organizar', 'planilha.ler': 'ler',
+      'planilha.editar': 'organizar', 'planilha.acrescentar': 'organizar', 'arquivos.comentar': 'enviar', 'arquivos.compartilhar': 'enviar', 'arquivos.apagar': 'apagar', 'arquivos.apagar_de_vez': 'apagar',
     };
     assert.deepEqual(ACOES_GOOGLE.map((a) => a.id).sort(), Object.keys(riscos).sort());
     for (const [id, r] of Object.entries(riscos)) assert.equal(risco(id), r, id);
     for (const a of ACOES_GOOGLE) assert.equal(typeof a.resumo({}), 'string');
+    assert.deepEqual(ACOES_GOOGLE.filter((a) => a.protegida).map((a) => a.id), ['arquivos.apagar_de_vez'], 'apagar de vez é sempre-protegida');
     assert.equal(acao('email.enviar').resumo({ para: { bad: 1 } }).length > 0, true);
   });
   test('toda ação diz a permissão, e a lista final tem tudo, sem o acesso total ao Gmail', () => {
