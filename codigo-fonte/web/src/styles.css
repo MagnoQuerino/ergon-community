@@ -2070,6 +2070,7 @@ body:has(.ent-dlg) .cdock { display: none; }
 .ent-dlg--precisa { border-top-color: var(--terracotta); }
 .ent-dlg--falhou { border-top-color: var(--err); }
 .ent-dlg.is-aprovado { border-top-color: var(--ok); }
+.ent-dlg .dlg__head { position: sticky; top: -20px; z-index: 1; background: var(--panel); margin: -20px -22px 0; padding: 18px 22px 10px; border-bottom: 1px solid var(--line); }
 .ent-dlg .dlg__head .row { gap: 8px; align-items: center; }
 .ent-lead { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.4; }
 .ent-pontos { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; counter-reset: ponto; }

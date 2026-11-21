@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import type { HermesClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
 import { MAX_DEVOLUCOES, PADRAO, TITULO_MAX, ajustarModelo, avisoCurto, dividirPontos, instrucaoEntregar, lerAjustes, minimoSeguro, restaurarModelos, validarEntrega, type Entrega } from '../src/services/modelos-entrega.ts';
+import { avisoDoCard } from '../src/services/resumo-tarefa.ts';
 import { harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const TOKEN = 'token-da-ponte-de-teste-0123456789';
@@ -185,6 +186,13 @@ describe('modelos de entrega: o agente é obrigado a entregar no modelo', () => 
     assert.deepEqual(d.modelo.itens.map((x: { titulo: string }) => x.titulo), ENTREGA_48.itens.map((x) => x.titulo));
     assert.equal(d.modelo.entrega.itens[0].riscos.em_jogo, ENTREGA_48.itens[0].riscos.em_jogo);
     assert.ok(!h.db.get("SELECT 1 AS x FROM runs WHERE idempotency_key LIKE 'pede-entrega-%'"), 'entregou: nada a pedir de novo');
+    // "Aguardando você" e os avisos dos canais: o mesmo resumo curto e o link dos detalhes
+    const dec = (await req(h, 'GET', '/api/decisions', s)).json.cards.find((x: { id: string }) => x.id === c.task);
+    assert.deepEqual(dec.modelo.itens, ENTREGA_48.itens.map((x) => x.titulo));
+    const aviso = avisoDoCard(h.db, s.workspaceId, c.task, 'https://ergon.test');
+    assert.equal(aviso?.titulo, 'Aguardando sua decisão');
+    assert.equal(aviso?.linhas[0], '• NF27 da Acelen: mandar orientações de reemissão');
+    assert.equal(aviso?.link, `https://ergon.test/#equipe?card=${c.task}`);
     // a sessão de outro motor (token errado) não registra nada
     assert.equal((await req(h, 'POST', '/internal/bridge/v1/entrega', null, { session_id: c.sessao, entrega: ENTREGA_48 }, { 'x-ergon-bridge-token': 'outro-token-0123456789-abcdef' })).status, 401);
   });
