@@ -3,6 +3,7 @@ import { api, errMsg, requestId } from '../../lib/api.ts';
 import { useResource } from '../../lib/live.ts';
 import { fmtData, fmtMoeda } from '../../i18n/index.ts';
 import { useTw } from './textos.ts';
+import { ResumoConexoesNuvem } from './ConexoesNuvem.tsx';
 
 interface Nuvem {
   offered: boolean; comboPercent?: number; active: boolean; forSale?: boolean; planActive?: boolean; owner?: boolean; source?: 'stripe' | 'cortesia' | 'teste' | null;
@@ -48,6 +49,7 @@ export default function NuvemWs({ semTitulo = false }: { semTitulo?: boolean }) 
           <p><b>{t('ws.ativo')}</b>{d.source ? ` · ${t(`ws.origem.${d.source}`)}` : ''}{d.until ? ` · ${t('ws.ate', { data: fmtData(d.until) })}` : ''}</p>
           {d.runtime && <p>{t(`ws.estado.${d.runtime}`)}</p>}
           <p className="muted small">{t('ws.disco', { usado: gb(d.diskUsedBytes), total: gb(d.diskQuotaBytes) })}</p>
+          {d.owner && <ResumoConexoesNuvem />}
         </>
       ) : (
         <>
