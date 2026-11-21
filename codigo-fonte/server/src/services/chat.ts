@@ -22,7 +22,7 @@ interface ConversationRow {
 export function getConversation(db: Db, workspaceId: string, userId: string, conversationId: string): ConversationRow {
   const c = db.get<ConversationRow & { sala: number }>('SELECT * FROM conversations WHERE id = ? AND workspace_id = ?', conversationId, workspaceId);
   if (!c) throw notFound('conversa');
-  if (Number(c.sala)) { if (!chatHooks.membroDaSala?.(workspaceId, userId, conversationId)) throw notFound('conversa'); return c; }
+  if (Number(c.sala)) { if (!membroDaSala.get(db)?.(workspaceId, userId, conversationId)) throw notFound('conversa'); return c; }
   if (c.owner_user_id !== userId) throw notFound('conversa');
   return c;
 }
@@ -118,9 +118,14 @@ export const chatHooks: {
    * mensagem que vai ao agente (o canal pode dizer algo dela, como um pedido que chegou com atraso)
    */
   channelNote?: (conversationId: string, messageId?: string | null) => string | null;
-  /** a pessoa está (agora) na sala? (services/salas; sem o serviço, ninguém vê sala nenhuma) */
-  membroDaSala?: (workspaceId: string, userId: string, conversationId: string) => boolean;
 } = {};
+
+/**
+ * A pessoa está (agora) na sala? (services/salas; sem o serviço, ninguém vê sala nenhuma). Por banco: cada servidor no
+ * mesmo processo (os testes sobem vários computadores) confere no dele.
+ */
+const membroDaSala = new WeakMap<Db, (workspaceId: string, userId: string, conversationId: string) => boolean>();
+export const registrarSalas = (db: Db, fn: (workspaceId: string, userId: string, conversationId: string) => boolean): void => { membroDaSala.set(db, fn); };
 
 /** A instrução de canal desta conversa: a do canal dela (Teams) ou a da tela do Ergon. */
 export const channelNoteFor = (conversationId: string, messageId?: string | null): string => chatHooks.channelNote?.(conversationId, messageId) ?? CHANNEL_NOTE;

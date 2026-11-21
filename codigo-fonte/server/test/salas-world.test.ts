@@ -236,6 +236,41 @@ test('papel de leitura (viewer) pede consulta, mas nada com efeito, nem com as p
   assert.equal((await req(pcRog, 'PUT', `/api/world/members/${idAna}/role`, rog, { role: 'editor' })).status, 200);
 });
 
+test('anexo da sala: chega a ficha; baixar traz o arquivo cifrado em partes, igual, só para quem está na sala', async () => {
+  const bytes = Buffer.alloc(700 * 1024 + 123); for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31) % 251; // 3 partes
+  const art = (await req(pcRog, 'POST', '/api/artifacts', rog, bytes, { 'content-type': 'application/octet-stream', 'x-filename': 'balanco.xlsx', 'x-file-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'x-conversation-id': sala })).json;
+  assert.ok(art.id, JSON.stringify(art));
+  assert.equal((await req(pcRog, 'POST', `/api/salas/${sala}/mensagens`, rog, { texto: 'Segue o balanço.', clientRequestId: crid(), attachments: [art.id] })).status, 201);
+  const grande = (await req(pcRog, 'POST', '/api/artifacts', rog, Buffer.alloc(4 * 1024 * 1024 + 1, 7), { 'content-type': 'application/octet-stream', 'x-filename': 'video.bin', 'x-file-type': 'application/octet-stream', 'x-conversation-id': sala })).json;
+  assert.equal((await req(pcRog, 'POST', `/api/salas/${sala}/mensagens`, rog, { texto: 'E o vídeo.', clientRequestId: crid(), attachments: [grande.id] })).status, 201);
+  await push(pcRog, rog); await pull(pcAna, ana);
+  const msgs = async () => (await req(pcAna, 'GET', `/api/salas/${sala}/mensagens`, ana)).json.mensagens as Array<{ content: string; attachments?: Array<{ id: string; filename: string }>; remotos?: Array<{ ref: string; estado: string; filename: string }> }>;
+  let m = (await msgs()).find((x) => x.content === 'Segue o balanço.')!;
+  assert.deepEqual(m.remotos?.map((r) => [r.filename, r.estado]), [['balanco.xlsx', 'remoto']], 'só a ficha, até alguém pedir');
+  assert.equal(m.attachments, undefined);
+  const v = (await msgs()).find((x) => x.content === 'E o vídeo.')!;
+  assert.equal(v.remotos?.[0].estado, 'grande');
+  assert.equal((await req(pcAna, 'POST', `/api/salas/${sala}/anexos/${grande.id}/baixar`, ana)).status, 413);
+  // quem não está na sala não pede nada
+  assert.equal((await req(pcCaio, 'POST', `/api/salas/${sala}/anexos/${art.id}/baixar`, caio)).status, 404);
+  assert.equal((await req(pcAna, 'POST', `/api/salas/${sala}/anexos/${art.id}/baixar`, ana)).status, 200);
+  assert.equal((await msgs()).find((x) => x.content === 'Segue o balanço.')!.remotos?.[0].estado, 'baixando');
+  await push(pcAna, ana); await pull(pcRog, rog); // o pedido chega ao computador do Rogério
+  for (let i = 0; i < 4; i++) { await push(pcRog, rog); await pull(pcAna, ana); } // as partes vão (até ~650 kB por mudança)
+  m = (await msgs()).find((x) => x.content === 'Segue o balanço.')!;
+  assert.equal(m.remotos, undefined);
+  assert.equal(m.attachments?.[0].filename, 'balanco.xlsx');
+  const baixado = await req(pcAna, 'GET', `/api/artifacts/${m.attachments![0].id}/download`, ana);
+  assert.equal(baixado.status, 200);
+  assert.ok(Buffer.compare(baixado.res.rawPayload, bytes) === 0, 'o arquivo chegou igual');
+  // no World, só cifrado; e nenhum pedaço foi para o Caio
+  const devCaio = pcCaio.db.get<{ d: string }>('SELECT device_id AS d FROM world_links WHERE user_id = ?', caio.userId)!.d;
+  assert.ok(!pcRog.db.get('SELECT 1 AS x FROM salas_anexo_envios WHERE device_id = ?', devCaio));
+  assert.ok(!pcRog.db.get('SELECT 1 AS x FROM salas_anexo_envios'), 'envio concluído');
+  // um pedido forjado (Caio pedindo como se estivesse na sala) não sai: o serviço confere a sala e o membro
+  assert.equal(pcRog.salas.receberPedidoDeAnexo(rog.workspaceId, `acc:${acc('caio@exemplo.test')}`, devCaio, { ref: art.id, salaId: sala }), false);
+});
+
 test('tirada da sala, a Ana deixa de receber e não lê mais; as cessões dela na sala caem', async () => {
   const idAna = `acc:${acc('ana@exemplo.test')}`;
   assert.equal((await req(pcRog, 'POST', `/api/salas/${sala}/membros/remover`, rog, { tipo: 'pessoa', chave: idAna })).status, 200);

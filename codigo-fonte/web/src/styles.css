@@ -3489,3 +3489,12 @@ details.cx[open] > summary { color: var(--ink); }
   .sala__rostos > *:nth-child(n + 4) { display: none; }
   .scampo__sugestoes { min-width: 0; right: 0; }
 }
+.sala-voz { position: relative; display: inline-flex; }
+.sala-voz__lista { display: flex; flex-direction: column; }
+.sala-cessao__abrir { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+.sala-cessao--foco { outline: var(--foco-largura) solid var(--dourado-cheio); outline-offset: 2px; }
+.smsg--foco { background: var(--marca-suave-2); box-shadow: inset 3px 0 0 var(--marca-borda-forte); }
+.sala-remoto { cursor: pointer; font: inherit; color: inherit; }
+.sala-remoto:disabled { cursor: default; }
+.sala-remoto small { margin-left: 4px; }
+@media (prefers-reduced-motion: no-preference) { .sala-remoto--baixando svg { animation: pulse 1.6s ease-in-out infinite; } }

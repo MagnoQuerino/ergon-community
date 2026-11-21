@@ -520,6 +520,9 @@ const conversas: Traducao<typeof pt> = {
   'sala.gov.cessao': 'Connection lending in rooms',
   'sala.gov.criar': 'Who creates rooms',
   'sala.gov.todos': 'Everyone',
+  'sala.anexo.baixar': 'Download {nome}',
+  'sala.anexo.baixando': 'Arriving…',
+  'sala.anexo.grande': 'Stays with the sender',
   'sala.gov.admins': 'Admins',
 };
 

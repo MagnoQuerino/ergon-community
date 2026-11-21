@@ -246,7 +246,7 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
           // junta as mudanças de um instante num envio só (e a tela não espera o ciclo de um minuto)
           espera.set(ws, setTimeout(() => { espera.delete(ws); void auto?.sincronizar(dono, ws).catch(() => undefined); }, 1500));
         };
-        app.addHook('onClose', async () => { for (const t of espera.values()) clearTimeout(t); espera.clear(); });
+        app.addHook('onClose', async () => { for (const t of espera.values()) clearTimeout(t); espera.clear(); salas.parar(); });
       }
       // as conexões do computador (Google, Microsoft, Slack…) na nuvem do workspace, cifradas só para ela (sync-conexoes.ts)
       const msCx = (k: string) => { const n = Number.parseInt(env[k] ?? '', 10); return Number.isFinite(n) && n >= 20 ? n : undefined; };
@@ -747,7 +747,11 @@ export function createWorld(cfg: Config, env: NodeJS.ProcessEnv = process.env, f
       const log = (o: Record<string, unknown>, msg: string) => app.log.info(o, msg);
       let nuvem: { parar: () => Promise<void>; posse: (w: string, slot: string) => PosseHorario } | null = null;
       // de quem é cada horário de rotina (o computador aberto ou a nuvem; nunca os dois): Routines.posse
-      const ligarPosse = () => { h.routines.posse = (w, slot) => nuvem?.posse(w, slot) ?? 'aqui'; };
+      const ligarPosse = () => {
+        h.routines.posse = (w, slot) => nuvem?.posse(w, slot) ?? 'aqui';
+        // salas: a nuvem só responde com as conexões da dona (cedidas) na vez dela — os computadores fechados
+        if (h.salas && modoNuvem(cfg, env)) h.salas.posseNuvem = (w, quando) => nuvem?.posse(w, quando) ?? 'esperar';
+      };
       const proximoHorario = (w: string) => h.routines.proximoHorario(w);
       // os tempos do ciclo (os testes encurtam)
       const ms = (k: string) => { const n = Number.parseInt(env[k] ?? '', 10); return Number.isFinite(n) && n >= 20 ? n : undefined; };

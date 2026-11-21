@@ -542,6 +542,9 @@ const conversas = {
   'sala.gov.cessao': 'Cessão de conexões nas salas',
   'sala.gov.criar': 'Quem cria salas',
   'sala.gov.todos': 'Todos',
+  'sala.anexo.baixar': 'Baixar {nome}',
+  'sala.anexo.baixando': 'Chegando…',
+  'sala.anexo.grande': 'Fica com quem mandou',
   'sala.gov.admins': 'Quem administra',
 } as const satisfies Area;
 

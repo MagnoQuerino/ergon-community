@@ -58,7 +58,7 @@ import { executavel, sha256 } from './lib/executavel.ts';
 import { TERMOS_VERSAO, aceitarTermos, codigoPorPadrao, estadoDosTermos, sincronizarCodigoDaEquipe } from './services/termos.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
-import { activeCardsOf, channelNoteFor, chatHooks, createConversation, ehSala, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, registrarRespostaDigitada, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
+import { activeCardsOf, channelNoteFor, chatHooks, createConversation, ehSala, registrarSalas, editQueued, getConversation, listConversations, listMessages, markRead, recentConversations, removeQueued, registrarRespostaDigitada, retryLast, sendMessage, sendQueued, setPinned } from './services/chat.ts';
 import { attachmentContext, attachmentsOfRun } from './services/attachments.ts';
 import { Initiative } from './services/initiative.ts';
 import { forkFrom, marksOf, mediaOf, searchAll, setMark, updateConversation, type SearchKind } from './services/conversation-tools.ts';
@@ -547,10 +547,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   teamsApp.usarCamadaComum(canais.externos);
   conexoes.canalExterno = (conv, risco) => { const x = canais.externos.daConversa(conv) ?? teamsApp.daConversa(conv); return x ? canais.externos.decisaoDaAcao(x.papel, risco) : null; };
   // Salas (rc.42, services/salas): conversa em grupo; quem vê é quem está nela, e o agente usa as conexões de quem pediu
-  const salas = new Salas({ db, bus, executor, maxChars: cfg.maxInputChars });
+  const salas = new Salas({ db, bus, executor, maxChars: cfg.maxInputChars, filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes });
   salas.nuvem = cfg.mode === 'cloud';
   salas.papelDaConta = (ws, conta) => { try { return db.get<{ p: string }>('SELECT papel AS p FROM canais_externo_papeis WHERE workspace_id = ? AND account_id = ?', ws, conta)?.p ?? null; } catch { return null; } };
-  chatHooks.membroDaSala = (ws, userId, conv) => salas.ehMembro(ws, userId, conv);
+  registrarSalas(db, (ws, userId, conv) => salas.ehMembro(ws, userId, conv));
   conexoes.salaGuarda = (run, risco, conexao, acao) => salas.guardaConexao(run, risco, conexao, acao);
   executor.onFinish((r, status, output) => { try { salas.aoTerminar(r, status, output); } catch (e) { log.warn({ err: { message: (e as Error).message } }, 'sala: fim da execução não tratado'); } });
   chatHooks.channelNote = (conv, msg) => {

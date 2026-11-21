@@ -68,14 +68,18 @@ export function registerSalasRoutes(app: FastifyInstance, d: Deps): void {
     // o corpo inteiro tem teto (o texto, até 40 marcas e 20 anexos)
     bodyLimit: Math.max(64 * 1024, d.maxChars * 4 + 16 * 1024),
     schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['texto', 'clientRequestId'], properties: {
-      texto: S.str(d.maxChars), clientRequestId: S.str(64, 8), replyTo: S.id('msg'), attachments: { type: 'array', maxItems: 20, items: S.id('art') },
+      texto: S.str(d.maxChars), clientRequestId: S.str(64, 8), replyTo: S.id('msg'), attachments: { type: 'array', maxItems: 20, items: S.id('art') }, vozAgente: CHAVE,
       marcas: { type: 'array', maxItems: MAX_MARCAS, items: { type: 'object', additionalProperties: false, required: ['tipo', 'chave', 'inicio', 'fim'], properties: {
         tipo: { enum: ['pessoa', 'agente', 'cessao'] }, chave: CHAVE, inicio: { type: 'integer', minimum: 0, maximum: d.maxChars }, fim: { type: 'integer', minimum: 1, maximum: d.maxChars } } } } } } },
   }, async (req, reply) => {
     const a = auth(req);
-    const r = salas.enviar(a.workspaceId, a.userId, sid(req), req.body as { texto: string; marcas?: unknown; clientRequestId: string; attachments?: string[]; replyTo?: string });
+    const r = salas.enviar(a.workspaceId, a.userId, sid(req), req.body as { texto: string; marcas?: unknown; clientRequestId: string; attachments?: string[]; replyTo?: string; vozAgente?: string });
     return reply.status(r.replayed ? 200 : 201).send(r);
   });
+  // baixar um anexo que nasceu em outro computador (vem cifrado pela sincronia, em partes, só para quem está na sala)
+  app.post('/api/salas/:id/anexos/:ref/baixar', {
+    schema: { params: { type: 'object', required: ['id', 'ref'], properties: { id: S.id('cnv'), ref: S.id('art') } } },
+  }, async (req) => { const a = auth(req); salas.pedirAnexo(a.workspaceId, a.userId, sid(req), (req.params as { ref: string }).ref); return { ok: true }; });
   app.post('/api/salas/:id/lido', { schema: { params: idParams('cnv') } }, async (req) => { const a = auth(req); salas.lido(a.workspaceId, a.userId, sid(req)); return { ok: true }; });
 
   // cartão de tarefa a partir de uma mensagem da sala (vai para Suas tarefas, com o link da sala); leitura não cria

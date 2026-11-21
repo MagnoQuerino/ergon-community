@@ -9,9 +9,11 @@ import { useResource } from '../lib/live.ts';
 import { openSala } from '../lib/open.ts';
 import { useSurface } from '../lib/surface.ts';
 import { aoEnviar, backspace, editar, escolher, esquecerRecem, pedacos, sugestoes, tokenAtivo, vazio, type Campo, type Candidato } from '../lib/mencoes.ts';
-import type { Attachment } from '../lib/types.ts';
+import type { Attachment, Message } from '../lib/types.ts';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { GravadorDeVoz } from './GravadorDeVoz.tsx';
+import { ConversaPorVoz } from './ConversaPorVoz.tsx';
+import { RECURSOS, type RecursosEstado } from '../lib/recursos.ts';
 import { Icon } from './Icon.tsx';
 import { Markdown } from './Markdown.tsx';
 import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
@@ -25,7 +27,8 @@ interface Detalhe { id: string; nome: string; arquivada: boolean; eu: string; ad
 interface AgenteDisp { chave: string; nome: string; id: string; role: string; color: string; char_key: string | null }
 interface Disponiveis { pessoas: Array<{ chave: string; nome: string; papel: string; eu: boolean }>; agentes: AgenteDisp[] }
 interface Evento { evento: string; nome?: string; alvo?: string; prazo?: Prazo; agente?: string }
-interface Msg { id: string; role: 'user' | 'agent' | 'system'; content: string; created_at: string; autor: { chave: string | null; nome: string | null }; marcas: unknown; pedinte: string | null; attachments?: Attachment[] }
+interface Msg { id: string; role: 'user' | 'agent' | 'system'; content: string; created_at: string; autor: { chave: string | null; nome: string | null }; marcas: unknown; pedinte: string | null; attachments?: Attachment[];
+  /** anexos que nasceram em outro computador: a ficha, até alguém baixar */ remotos?: Array<{ ref: string; filename: string; mime: string; size: number; estado: 'remoto' | 'baixando' | 'grande' }> }
 interface Mensagens { mensagens: Msg[]; respondendo: Array<{ agentId: string; nome: string; status: string }> }
 export interface AvisoSala { id: string; conversation_id: string; message_id: string; tipo: 'mencao' | 'cessao'; de_nome: string; agente: string | null; created_at: string; sala: string; texto: string | null }
 
@@ -183,17 +186,27 @@ export function CampoSala({ candidatos, desligado, onEnviar, extra }: { candidat
 
 // ------------------------------------------------------------------------------------------------ cartão de cessão
 /** O pedido de cessão para quem foi marcado com #: um clique escolhe por quanto tempo; "Agora não" recusa. */
-export function CartaoCessao({ aviso, onFeito }: { aviso: AvisoSala; onFeito?: () => void }) {
+/** `onAbrir`: fora da sala (o sino), o cartão leva à sala com ele em foco. `foco`: aberto por esse caminho (brilha e recebe o foco). */
+export function CartaoCessao({ aviso, onFeito, onAbrir, foco }: { aviso: AvisoSala; onFeito?: () => void; onAbrir?: () => void; foco?: boolean }) {
   const t = useT();
   const [err, setErr] = useState<string | null>(null);
   const [indo, setIndo] = useState(false);
+  const ref = useRef<HTMLElement>(null);
+  // veio pelo sino: o cartão aparece à vista e o foco vai ao primeiro prazo (teclado pronto para escolher)
+  useEffect(() => {
+    if (!foco) return;
+    const el = ref.current; if (!el) return;
+    el.scrollIntoView({ block: 'nearest' });
+    el.querySelector<HTMLButtonElement>('.sala-cessao__prazos button')?.focus({ preventScroll: true });
+  }, [foco]);
   const decidir = async (decisao: Prazo | 'recusar') => {
     setIndo(true); setErr(null);
     try { await api.post(`/api/salas/avisos/${aviso.id}`, { decisao }); onFeito?.(); } catch (e) { setErr(errMsg(e)); setIndo(false); }
   };
   return (
-    <article className="sala-cessao" aria-label={t('conversas.sala.cessao.titulo', { nome: aviso.de_nome })}>
-      <div className="sala-cessao__topo"><Icon name="key" size={16} /><b>{t('conversas.sala.cessao.titulo', { nome: aviso.de_nome })}</b></div>
+    <article ref={ref} id={`cessao-${aviso.id}`} tabIndex={-1} className={`sala-cessao ${foco ? 'sala-cessao--foco' : ''}`} aria-label={t('conversas.sala.cessao.titulo', { nome: aviso.de_nome })}>
+      <div className="sala-cessao__topo"><Icon name="key" size={16} /><b>{t('conversas.sala.cessao.titulo', { nome: aviso.de_nome })}</b>
+        {onAbrir && <button type="button" className="btn btn--sm btn--ghost sala-cessao__abrir" onClick={onAbrir}>{t('conversas.sala.aviso.abrir')}<Icon name="chevron-right" size={13} /></button>}</div>
       {aviso.agente && <small className="muted">{t('conversas.sala.cessao.para', { agente: aviso.agente, sala: aviso.sala })}</small>}
       {aviso.texto && <p className="sala-cessao__texto">{aviso.texto}</p>}
       <div className="sala-cessao__prazos" role="group">
@@ -267,7 +280,7 @@ function textoDoEvento(t: ReturnType<typeof useT>, e: Evento, fallback: string):
 
 interface Pendente { key: string; nome: string; art: Attachment | null; erro: boolean }
 
-export function SalaPanel({ salaId, onSaiu }: { salaId: string; onSaiu: () => void }) {
+export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: () => void; /** o pedido de cessão (sav_) ou a mensagem (msg_) em destaque */ foco?: string | null }) {
   const t = useT();
   const det = useResource<Detalhe>(`/api/salas/${salaId}`, ['salas.changed']);
   const msgs = useResource<Mensagens>(`/api/salas/${salaId}/mensagens`, EVENTOS);
@@ -279,12 +292,21 @@ export function SalaPanel({ salaId, onSaiu }: { salaId: string; onSaiu: () => vo
   const [err, setErr] = useState<string | null>(null);
   const [dica, setDica] = useState<string | null>(null);
   const [anexos, setAnexos] = useState<Pendente[]>([]);
+  // o canal de voz (rc.41) na sala: fala com um agente da sala, escolhido aqui; manda e recebe pela própria sala
+  const rec = useResource<RecursosEstado>(RECURSOS, []);
+  const [voz, setVoz] = useState<AgenteDisp | null>(null);
+  const [escolhendoVoz, setEscolhendoVoz] = useState(false);
   const fim = useRef<HTMLDivElement>(null);
   const arquivo = useRef<HTMLInputElement>(null);
   const lista = msgs.data?.mensagens ?? [];
   // abriu (e a cada mensagem nova à vista): lida
   useEffect(() => { if (det.data) void api.post(`/api/salas/${salaId}/lido`).catch(() => undefined); }, [salaId, lista.length, !!det.data]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { fim.current?.scrollIntoView({ block: 'end' }); }, [lista.length, salaId]);
+  // a mensagem em foco (veio do sino): à vista e marcada; senão, o fim da conversa
+  const focoMsg = foco?.startsWith('msg_') ? foco : null;
+  useEffect(() => {
+    const alvo = focoMsg ? document.getElementById(`smsg-${focoMsg}`) : null;
+    if (alvo) alvo.scrollIntoView({ block: 'center' }); else fim.current?.scrollIntoView({ block: 'end' });
+  }, [lista.length, salaId, focoMsg]);
   const s = det.data;
   const candidatos: Candidato[] = useMemo(() => (s?.membros ?? []).filter((m) => m.chave !== s?.eu).map((m) => ({ tipo: m.tipo, chave: m.chave, nome: m.nome })), [s]);
   const agenteDe = (nome: string | null) => disp.data?.agentes.find((a) => a.nome === nome);
@@ -305,8 +327,10 @@ export function SalaPanel({ salaId, onSaiu }: { salaId: string; onSaiu: () => vo
     uploadFile<Attachment>(f, { conversationId: salaId }).then((art) => setAnexos((l) => l.map((x) => (x.key === key ? { ...x, art } : x)))).catch((e) => { setErr(errMsg(e)); setAnexos((l) => l.map((x) => (x.key === key ? { ...x, erro: true } : x))); });
   };
   const patch = async (body: Record<string, unknown>) => { setErr(null); setMenu(false); try { await api.patch(`/api/salas/${salaId}`, body); det.reload(); } catch (e) { setErr(errMsg(e)); } };
+  const baixar = async (ref: string) => { setErr(null); try { await api.post(`/api/salas/${salaId}/anexos/${ref}/baixar`); msgs.reload(); } catch (e) { setErr(errMsg(e)); } };
   const tarefa = async (m: Msg) => { setErr(null); try { const r = await api.post<{ number: number }>(`/api/salas/${salaId}/mensagens/${m.id}/tarefa`); setDica(t('conversas.sala.tarefaCriada', { numero: r.number })); } catch (e) { setErr(errMsg(e)); } };
   const agentesNaSala = s.membros.filter((m) => m.tipo === 'agente');
+  const agentesDaSala = agentesNaSala.map((m) => agenteDe(m.nome)).filter((a): a is AgenteDisp => !!a);
   const pessoasNaSala = s.membros.filter((m) => m.tipo === 'pessoa');
   const vez = msgs.data?.respondendo ?? [];
   const leitura = s.papel === 'viewer';
@@ -352,13 +376,18 @@ export function SalaPanel({ salaId, onSaiu }: { salaId: string; onSaiu: () => vo
           const a = m.role === 'agent' ? agenteDe(m.autor.nome) : undefined;
           const meu = m.autor.chave === s.eu;
           return (
-            <article key={m.id} className={`smsg ${junto ? 'smsg--junto' : ''} ${meu ? 'smsg--meu' : ''} ${m.role === 'agent' ? 'smsg--agente' : ''}`}>
+            <article key={m.id} id={`smsg-${m.id}`} className={`smsg ${m.id === focoMsg ? 'smsg--foco' : ''} ${junto ? 'smsg--junto' : ''} ${meu ? 'smsg--meu' : ''} ${m.role === 'agent' ? 'smsg--agente' : ''}`}>
               <span className="smsg__rosto">{!junto && (a ? <AgentAvatar agent={{ ...a, name: a.nome, look_seed: null }} size={32} /> : <Rosto nome={m.autor.nome ?? '?'} size={32} />)}</span>
               <div className="smsg__corpo">
                 {!junto && <div className="smsg__quem"><b>{m.autor.nome}</b>{m.role === 'agent' && <small className="smsg__tag">{t('conversas.sala.agente')}</small>}<time className="muted small">{fmtHora(new Date(m.created_at))}</time></div>}
                 {m.role === 'agent' ? <Markdown text={m.content} className="msg__body" /> : (
                   <p className="msg__body">{pedacos(m.content, m.marcas).map((p, k) => (p.marca ? <span key={k} className={`mchip mchip--${p.marca.tipo} mchip--fixo`}>{p.texto}</span> : <span key={k}>{p.texto}</span>))}</p>
                 )}
+                {!!m.remotos?.length && <div className="smsg__anexos">{m.remotos.map((f) => (
+                  <button key={f.ref} type="button" className={`fchip sala-remoto sala-remoto--${f.estado}`} disabled={f.estado !== 'remoto'} onClick={() => void baixar(f.ref)}
+                    aria-label={t('conversas.sala.anexo.baixar', { nome: f.filename })} title={f.estado === 'grande' ? t('conversas.sala.anexo.grande') : f.estado === 'baixando' ? t('conversas.sala.anexo.baixando') : t('conversas.sala.anexo.baixar', { nome: f.filename })}>
+                    <Icon name={f.estado === 'remoto' ? 'download' : f.estado === 'baixando' ? 'clock' : 'file'} size={14} />{f.filename}{f.estado !== 'remoto' && <small className="muted">{f.estado === 'grande' ? t('conversas.sala.anexo.grande') : t('conversas.sala.anexo.baixando')}</small>}
+                  </button>))}</div>}
                 {!!m.attachments?.length && <div className="smsg__anexos">{m.attachments.map((f) => <a key={f.id} className="fchip" href={`/api/artifacts/${f.id}/download`} target="_blank" rel="noreferrer"><Icon name="file" size={14} />{f.filename}</a>)}</div>}
                 {!leitura && <button type="button" className="smsg__acao linkish small" onClick={() => void tarefa(m)} title={t('conversas.sala.tarefa')}><Icon name="tasks" size={12} /> {t('conversas.sala.tarefa')}</button>}
               </div>
@@ -372,7 +401,7 @@ export function SalaPanel({ salaId, onSaiu }: { salaId: string; onSaiu: () => vo
         <div ref={fim} />
       </div>
       {vez.find((v) => v.status === 'rodando') && <NavegadorAoVivo conversa={salaId} agente={vez.find((v) => v.status === 'rodando')!.nome} />}
-      {meusPedidos.map((p) => <CartaoCessao key={p.id} aviso={p} onFeito={() => { avisos.reload(); msgs.reload(); }} />)}
+      {meusPedidos.map((p) => <CartaoCessao key={p.id} aviso={p} foco={p.id === foco} onFeito={() => { avisos.reload(); msgs.reload(); }} />)}
       {dica && <p className="chat__hint" role="status" onAnimationEnd={() => setDica(null)}>{dica}</p>}
       {err && <p className="error small sala__erro" role="alert">{err}</p>}
       {!!anexos.length && <div className="sala__anexos">{anexos.map((f) => <span key={f.key} className={`fchip ${f.erro ? 'fchip--err' : ''} ${!f.art && !f.erro ? 'fchip--subindo' : ''}`}><Icon name="file" size={13} />{f.nome}<button type="button" className="icon-btn" onClick={() => setAnexos((l) => l.filter((x) => x.key !== f.key))} aria-label={t('conversas.sala.criar.cancelar')}><Icon name="x" size={11} /></button></span>)}</div>}
@@ -380,7 +409,23 @@ export function SalaPanel({ salaId, onSaiu }: { salaId: string; onSaiu: () => vo
         <div className="sala__barra">
           <button type="button" className="icon-btn" onClick={() => arquivo.current?.click()} aria-label={t('conversas.sala.anexar')} title={t('conversas.sala.anexar')}><Icon name="clip" size={17} /></button>
           <input ref={arquivo} type="file" hidden multiple onChange={(e) => { for (const f of e.target.files ?? []) subir(f); e.target.value = ''; }} />
-          <GravadorDeVoz onGravado={(f) => subir(f)} />
+          {!voz && <GravadorDeVoz onGravado={(f) => subir(f)} />}
+          {voz ? (
+            <ConversaPorVoz agente={{ id: voz.id, name: voz.nome }} mensagens={lista as unknown as Message[]} podeFalar={!!rec.data?.voz.falar} preparaVoz={!!rec.data?.voz.preparar?.falar}
+              garantirConversa={async () => salaId} recarregar={() => msgs.reload()} onFechar={() => setVoz(null)}
+              enviarFala={async (arq) => (await api.post<{ messageId: string }>(`/api/salas/${salaId}/mensagens`, { texto: '', clientRequestId: requestId(), attachments: [arq], vozAgente: voz.nome })).messageId} />
+          ) : agentesDaSala.length > 0 && (
+            <span className="sala-voz">
+              <button type="button" className="icon-btn chat__mic chat__voz" aria-pressed="false" aria-expanded={agentesDaSala.length > 1 ? escolhendoVoz : undefined}
+                onClick={() => { if (agentesDaSala.length === 1) setVoz(agentesDaSala[0]); else setEscolhendoVoz((x) => !x); }}
+                aria-label={t('conversas.voz.abrir')} title={agentesDaSala.length === 1 ? t('conversas.voz.abrirDica', { nome: agentesDaSala[0].nome }) : t('conversas.voz.abrir')}><Icon name="voz" /></button>
+              {escolhendoVoz && (
+                <span className="scampo__sugestoes sala-voz__lista" role="menu">
+                  {agentesDaSala.map((a) => <button key={a.chave} type="button" role="menuitem" onClick={() => { setEscolhendoVoz(false); setVoz(a); }}><AgentAvatar agent={{ ...a, name: a.nome, look_seed: null }} size={20} /><b>{a.nome}</b></button>)}
+                </span>
+              )}
+            </span>
+          )}
           <CampoSala candidatos={candidatos} onEnviar={enviar} extra={pronto.length ? true : undefined} />
         </div>
       )}
@@ -397,8 +442,8 @@ export function AvisosDeSalas() {
   if (!a.data?.length) return null;
   return (
     <div className="sala-avisos">
-      {a.data.map((v) => v.tipo === 'cessao' ? <CartaoCessao key={v.id} aviso={v} onFeito={a.reload} /> : (
-        <button key={v.id} type="button" className="sala-aviso" onClick={() => openSala(v.conversation_id)}>
+      {a.data.map((v) => v.tipo === 'cessao' ? <CartaoCessao key={v.id} aviso={v} onFeito={a.reload} onAbrir={() => openSala(v.conversation_id, v.id)} /> : (
+        <button key={v.id} type="button" className="sala-aviso" onClick={() => openSala(v.conversation_id, v.message_id)}>
           <span className="sala-item__arroba" aria-hidden="true">@</span>
           <span className="sala-aviso__txt"><b>{t('conversas.sala.aviso.mencao', { nome: v.de_nome, sala: v.sala })}</b>{v.texto && <small className="muted">{v.texto}</small>}</span>
           <Icon name="chevron-right" size={14} />

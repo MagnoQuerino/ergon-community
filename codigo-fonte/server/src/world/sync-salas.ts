@@ -28,9 +28,9 @@ export interface GovSalas { cessao: boolean; criar: 'admins' | 'todos'; at: stri
 /** o que vai junto do corpo de uma mudança de conteúdo */
 export interface ExtraSalas { aparelho?: Anuncio; salas?: Pacote[]; salasGov?: GovSalas }
 
-/** Um pacote selado tem teto (o corpo inteiro da mudança tem ~1 MB); o que não coube vai na próxima. */
-const PACOTE_MAX = 400_000;
 const PACOTES_MAX = 40;
+/** teto do que vai selado numa mudança (antes de cifrar): com as duas camadas de base64, fica abaixo dos 2 MB do World */
+const TOTAL_MAX = 650_000;
 const sha = (x: string) => crypto.createHash('sha256').update(x).digest('hex');
 const isDev = (v: unknown) => typeof v === 'string' && /^dev_[A-Za-z0-9]{8,64}$/.test(v);
 const b64 = (v: unknown, max: number) => typeof v === 'string' && v.length > 0 && v.length <= max && /^[A-Za-z0-9+/=]+$/.test(v);
@@ -47,7 +47,7 @@ export function checarExtra(b: Record<string, unknown>): ExtraSalas | null {
     if (!Array.isArray(b.salas) || b.salas.length > 500) return null;
     const ps: Pacote[] = [];
     for (const x of b.salas as Array<Record<string, unknown>>) {
-      if (!x || !isDev(x.para) || typeof x.selado !== 'string' || x.selado.length > PACOTE_MAX * 2) return null;
+      if (!x || !isDev(x.para) || typeof x.selado !== 'string' || x.selado.length > 1_200_000) return null;
       ps.push({ para: x.para as string, selado: x.selado });
     }
     out.salas = ps;
@@ -79,12 +79,18 @@ function checarMsg(x: Record<string, unknown>): PSalaMsg | null {
   if (!isId(x.id, 'msg') || !isId(x.salaId, 'cnv') || !['user', 'agent', 'system'].includes(String(x.role)) || !str(x.autorChave, 200, 1) || !CHAVE.test(String(x.autorChave))
     || !str(x.autorNome, 200) || !(x.pedinteChave === null || str(x.pedinteChave, 200)) || !str(x.content, 400_000) || !date(x.createdAt) || !Array.isArray(x.anexos) || x.anexos.length > 20) return null;
   const anexos: PSalaMsg['anexos'] = [];
-  for (const a of x.anexos as Array<Record<string, unknown>>) { if (!a || !str(a.filename, 300, 1) || !str(a.mime, 200) || !Number.isFinite(a.size)) return null; anexos.push({ filename: a.filename as string, mime: a.mime as string, size: Number(a.size) }); }
+  for (const a of x.anexos as Array<Record<string, unknown>>) {
+    if (!a || !str(a.filename, 300, 1) || !str(a.mime, 200) || !Number.isFinite(a.size) || (a.ref !== undefined && !isId(a.ref, 'art')) || (a.sha256 !== undefined && !(typeof a.sha256 === 'string' && /^[a-f0-9]{64}$/.test(a.sha256)))) return null;
+    anexos.push({ filename: a.filename as string, mime: a.mime as string, size: Number(a.size), ...(a.ref ? { ref: a.ref as string, sha256: a.sha256 as string } : {}) });
+  }
   // as marcas: só a estrutura que a tela forma (o serviço confere de novo o que usa)
   let marcas: unknown = null;
   if (Array.isArray(x.marcas)) marcas = (x.marcas as Array<Record<string, unknown>>).slice(0, 40).filter((m) => m && ['pessoa', 'agente', 'cessao'].includes(String(m.tipo)) && str(m.chave, 200, 1) && Number.isInteger(m.inicio) && Number.isInteger(m.fim))
     .map((m) => ({ tipo: m.tipo, chave: m.chave, inicio: m.inicio, fim: m.fim }));
-  else if (x.marcas && typeof x.marcas === 'object' && x.role === 'system') {
+  else if (x.marcas && typeof x.marcas === 'object' && x.role === 'agent') {
+    const e = x.marcas as Record<string, unknown>;
+    if (isId(e.complemento, 'msg') && str(e.dono, 200, 1)) marcas = { complemento: e.complemento, dono: e.dono };
+  } else if (x.marcas && typeof x.marcas === 'object' && x.role === 'system') {
     const e = x.marcas as Record<string, unknown>;
     if (str(e.evento, 20, 1)) marcas = { evento: e.evento, ...(str(e.nome, 200) ? { nome: e.nome } : {}), ...(str(e.alvo, 200) ? { alvo: e.alvo } : {}), ...(str(e.prazo, 10) ? { prazo: e.prazo } : {}), ...(str(e.agente, 200) ? { agente: e.agente } : {}) };
   }
@@ -92,7 +98,9 @@ function checarMsg(x: Record<string, unknown>): PSalaMsg | null {
 }
 
 interface Eu { deviceId: string; x25519Public: string; abrir: (sealed: string, a: { ws: string; from: string }) => Buffer }
-interface Registro { device: string; kind: 'sala' | 'msg'; id: string; hash: string }
+interface Registro { device: string; kind: 'sala' | 'msg' | 'cessao'; id: string; hash: string }
+/** o que vai dentro de um pacote (aberto só pelo aparelho de destino) */
+interface Corpo { salas: PSala[]; mensagens: PSalaMsg[]; pedidos?: Array<{ ref: string; salaId: string }>; partes?: Array<{ ref: string; parte: number; total: number; dados: string }>; cessoes?: ReturnType<Salas['cessoesParaSync']> }
 
 export class SalasSync {
   readonly db: Db; readonly salas: Salas;
@@ -112,45 +120,69 @@ export class SalasSync {
     const anuncio = sha(`${eu.deviceId}|${eu.x25519Public}`);
     // o anúncio vai junto de um envio que já ia; sozinho, só quando a pessoa usa as Salas aqui (sem isso, quem nunca abriu
     // as Salas não ganha uma mudança a mais no log a cada aparelho novo)
-    if (this.setting(ws, 'salas.anunciado') !== anuncio && (comConteudo || this.setting(ws, 'salas.usa') === '1')) { extra.aparelho = { deviceId: eu.deviceId, x25519Public: eu.x25519Public }; depois.push(() => this.set(ws, 'salas.anunciado', anuncio)); }
+    if (this.setting(ws, 'salas.anunciado') !== anuncio && (comConteudo || this.salas.nuvem || this.setting(ws, 'salas.usa') === '1')) { extra.aparelho = { deviceId: eu.deviceId, x25519Public: eu.x25519Public }; depois.push(() => this.set(ws, 'salas.anunciado', anuncio)); }
     const g = this.salas.governanca(ws);
     if (g.at && this.setting(ws, 'salas.gov_enviado') !== g.at) { extra.salasGov = { cessao: g.cessao, criar: g.criar, at: g.at }; depois.push(() => this.set(ws, 'salas.gov_enviado', g.at!)); }
     const aparelhos = this.db.all<{ device_id: string; account_id: string; x25519_public: string }>('SELECT device_id, account_id, x25519_public FROM salas_aparelhos WHERE workspace_id = ? AND device_id != ?', ws, eu.deviceId);
+    const ao: Array<() => void> = [];
     if (aparelhos.length) {
       const enviados = new Map(this.db.all<{ k: string; h: string }>("SELECT device_id || '|' || kind || '|' || record_id AS k, hash AS h FROM salas_enviados WHERE workspace_id = ? AND device_id != 'recebido'", ws).map((r) => [r.k, r.h]));
-      const porAparelho = new Map<string, { salas: PSala[]; mensagens: PSalaMsg[]; tamanho: number }>();
+      const porAparelho = new Map<string, Corpo & { tamanho: number }>();
+      const pac = (dev: string) => { let x = porAparelho.get(dev); if (!x) { x = { salas: [], mensagens: [], tamanho: 0 }; porAparelho.set(dev, x); } return x; };
+      // o total desta mudança tem teto (o World aceita até ~2 MB cifrados): o que não coube vai na próxima
+      let total = 0;
+      const cabe = (n: number) => total + n <= TOTAL_MAX;
       for (const s of this.salas.salasParaSync(ws)) {
         const ativos = new Set(s.membros.filter((m) => m.tipo === 'pessoa').map((m) => m.chave));
         // quem saiu recebe só a versão da sala que diz que saiu (nenhuma mensagem)
         const sairam = new Set(this.db.all<{ chave: string }>("SELECT chave FROM salas_membros WHERE conversation_id = ? AND tipo = 'pessoa' AND removed_at IS NOT NULL", s.id).map((r) => r.chave));
-        const hs = sha(JSON.stringify(s));
+        const hs = sha(JSON.stringify(s)); const ts = JSON.stringify(s).length;
         let msgs: PSalaMsg[] | null = null;
         for (const d of aparelhos) {
           const conta = `acc:${d.account_id}`;
           if (!ativos.has(conta) && !sairam.has(conta)) continue;
-          const pac = porAparelho.get(d.device_id) ?? { salas: [], mensagens: [], tamanho: 0 };
-          if (enviados.get(`${d.device_id}|sala|${s.id}`) !== hs) { pac.salas.push(s); pac.tamanho += hs.length + JSON.stringify(s).length; regs.push({ device: d.device_id, kind: 'sala', id: s.id, hash: hs }); }
-          if (ativos.has(conta)) {
-            msgs ??= this.salas.mensagensParaSync(ws, s.id);
-            for (const m of msgs) {
-              if (enviados.has(`${d.device_id}|msg|${m.id}`)) continue;
-              const n = JSON.stringify(m).length;
-              if (pac.tamanho + n > PACOTE_MAX) break; // o resto vai na próxima
-              pac.mensagens.push(m); pac.tamanho += n; regs.push({ device: d.device_id, kind: 'msg', id: m.id, hash: '' });
-            }
+          if (enviados.get(`${d.device_id}|sala|${s.id}`) !== hs && cabe(ts)) { const p = pac(d.device_id); p.salas.push(s); p.tamanho += ts; total += ts; regs.push({ device: d.device_id, kind: 'sala', id: s.id, hash: hs }); }
+          if (!ativos.has(conta)) continue;
+          msgs ??= this.salas.mensagensParaSync(ws, s.id);
+          for (const m of msgs) {
+            if (enviados.has(`${d.device_id}|msg|${m.id}`)) continue;
+            const n = JSON.stringify(m).length;
+            if (!cabe(n)) break;
+            const p = pac(d.device_id); p.mensagens.push(m); p.tamanho += n; total += n; regs.push({ device: d.device_id, kind: 'msg', id: m.id, hash: '' });
           }
-          if (pac.salas.length || pac.mensagens.length) porAparelho.set(d.device_id, pac);
         }
       }
+      const minha = this.salas.chaveDaPessoa(ws);
+      for (const d of aparelhos) {
+        // anexos pedidos daqui ao aparelho onde nasceram
+        const pedidos = this.salas.pedidosDeAnexoPara(ws, d.device_id);
+        if (pedidos.length && cabe(300 * pedidos.length)) { pac(d.device_id).pedidos = pedidos; total += 300 * pedidos.length; ao.push(() => { for (const x of pedidos) this.salas.pedidoDeAnexoFoi(ws, x.ref); }); }
+        // as cessões que a pessoa deu, para os outros aparelhos DELA (a nuvem do workspace atende com elas)
+        if (minha && `acc:${d.account_id}` === minha) {
+          const cs = this.salas.cessoesParaSync(ws).filter((c) => enviados.get(`${d.device_id}|cessao|${c.id}`) !== sha(JSON.stringify(c)));
+          if (cs.length && cabe(JSON.stringify(cs).length)) { pac(d.device_id).cessoes = cs; total += JSON.stringify(cs).length; for (const c of cs) regs.push({ device: d.device_id, kind: 'cessao', id: c.id, hash: sha(JSON.stringify(c)) }); }
+        }
+      }
+      // partes de anexo por último (são as maiores): o que sobrou do teto
+      for (const d of aparelhos) {
+        if (total >= TOTAL_MAX) break;
+        const x = this.salas.partesPara(ws, d.device_id, TOTAL_MAX - total);
+        if (!x.partes.length) continue;
+        pac(d.device_id).partes = x.partes; total += x.partes.reduce((n, p) => n + p.dados.length + 100, 0);
+        ao.push(x.marcar);
+      }
       const pacotes: Pacote[] = [];
-      for (const [dev, pac] of [...porAparelho].slice(0, PACOTES_MAX)) {
+      for (const [dev, p] of [...porAparelho].filter(([, p]) => p.salas.length || p.mensagens.length || p.pedidos?.length || p.partes?.length || p.cessoes?.length).slice(0, PACOTES_MAX)) {
         const d = aparelhos.find((x) => x.device_id === dev)!;
-        try { pacotes.push({ para: dev, selado: sealForDevice(Buffer.from(JSON.stringify({ salas: pac.salas, mensagens: pac.mensagens })), d.x25519_public, { ws: sws, from: eu.deviceId, to: dev }) }); }
+        const { tamanho: _t, ...corpo } = p;
+        try { pacotes.push({ para: dev, selado: sealForDevice(Buffer.from(JSON.stringify(corpo)), d.x25519_public, { ws: sws, from: eu.deviceId, to: dev }) }); }
         catch { this.log({ ws, aparelho: dev }, 'salas: a chave pública do aparelho não serve (pacote não selado)'); for (let i = regs.length - 1; i >= 0; i--) if (regs[i].device === dev) regs.splice(i, 1); }
       }
       const foram = new Set(pacotes.map((p) => p.para));
       for (let i = regs.length - 1; i >= 0; i--) if (!foram.has(regs[i].device)) regs.splice(i, 1);
       if (pacotes.length) extra.salas = pacotes;
+      // um aparelho sem pacote (chave estragada) perde as partes/pedidos desta vez: o "marcar" só vale para quem foi
+      if (!pacotes.length) ao.length = 0;
     }
     if (!extra.aparelho && !extra.salas && !extra.salasGov) return null;
     // o resumo é do que vai (não do selado, que muda a cada vez): o mesmo envio repetido tem o mesmo código de operação
@@ -158,6 +190,7 @@ export class SalasSync {
     return { extra, resumo, marcar: () => this.db.tx(() => {
       for (const r of regs) this.db.run('INSERT INTO salas_enviados (workspace_id, device_id, kind, record_id, hash) VALUES (?, ?, ?, ?, ?) ON CONFLICT (workspace_id, device_id, kind, record_id) DO UPDATE SET hash = excluded.hash', ws, r.device, r.kind, r.id, r.hash);
       for (const f of depois) f();
+      for (const f of ao) f();
     }) };
   }
 
@@ -180,14 +213,29 @@ export class SalasSync {
     }
     for (const p of extra.salas ?? []) {
       if (p.para !== eu.deviceId) continue;
-      let corpo: { salas?: unknown; mensagens?: unknown };
+      let corpo: { salas?: unknown; mensagens?: unknown; pedidos?: unknown; partes?: unknown; cessoes?: unknown };
       try { corpo = JSON.parse(eu.abrir(p.selado, { ws: sws, from: x.deviceId }).toString('utf8')) as typeof corpo; }
       catch { this.log({ ws, de: x.deviceId }, 'salas: um pacote para este aparelho não abriu (ignorado)'); continue; }
       const salas = Array.isArray(corpo.salas) ? corpo.salas.map((s) => checarSala(s as Record<string, unknown>)) : [];
       const mensagens = Array.isArray(corpo.mensagens) ? corpo.mensagens.map((m) => checarMsg(m as Record<string, unknown>)) : [];
       if (salas.includes(null) || mensagens.includes(null)) { this.log({ ws, de: x.deviceId }, 'salas: pacote fora do formato (ignorado inteiro)'); continue; }
-      const n = this.salas.aplicarDoSync(ws, `acc:${x.accountId}`, { salas: salas as PSala[], mensagens: mensagens as PSalaMsg[] });
+      const n = this.salas.aplicarDoSync(ws, `acc:${x.accountId}`, { salas: salas as PSala[], mensagens: mensagens as PSalaMsg[] }, x.deviceId);
       if (n.salas || n.mensagens) this.log({ ws, de: x.deviceId, ...n }, 'salas: recebido de outro aparelho');
+      const c = corpo as Record<string, unknown>;
+      // pedidos de anexo: o arquivo daqui vai, em partes, só a quem está na sala (o serviço confere)
+      if (Array.isArray(c.pedidos)) for (const p of c.pedidos.slice(0, 20) as Array<Record<string, unknown>>) {
+        if (p && isId(p.ref, 'art') && isId(p.salaId, 'cnv')) this.salas.receberPedidoDeAnexo(ws, `acc:${x.accountId}`, x.deviceId, { ref: p.ref as string, salaId: p.salaId as string });
+      }
+      if (Array.isArray(c.partes)) for (const p of c.partes.slice(0, 40) as Array<Record<string, unknown>>) {
+        if (p && isId(p.ref, 'art') && Number.isInteger(p.parte) && Number.isInteger(p.total) && b64(p.dados, 600_000)) {
+          try { this.salas.receberParte(ws, x.deviceId, { ref: p.ref as string, parte: p.parte as number, total: p.total as number, dados: p.dados as string }); } catch (e) { this.log({ ws, erro: String((e as Error).message).slice(0, 120) }, 'salas: parte de anexo não guardada'); }
+        }
+      }
+      if (Array.isArray(c.cessoes)) {
+        const ok = (c.cessoes as Array<Record<string, unknown>>).slice(0, 500).filter((v) => v && isId(v.id, 'sce') && isId(v.salaId, 'cnv') && str(v.dono, 200, 1) && str(v.pedinte, 200, 1)
+          && ['vez', '24h', '7d', '30d', 'sempre'].includes(String(v.prazo)) && (v.messageId === null || isId(v.messageId, 'msg')) && (v.expiraEm === null || date(v.expiraEm)) && date(v.createdAt) && (v.revogadaEm === null || date(v.revogadaEm)));
+        this.salas.aplicarCessoes(ws, `acc:${x.accountId}`, ok as unknown as ReturnType<Salas['cessoesParaSync']>);
+      }
     }
   }
 }

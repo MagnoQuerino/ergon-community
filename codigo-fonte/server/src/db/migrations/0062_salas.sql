@@ -83,6 +83,8 @@ CREATE TABLE salas_fila (
   pedido TEXT NOT NULL,
   profundidade INTEGER NOT NULL DEFAULT 0,
   cedida INTEGER NOT NULL DEFAULT 0,
+  -- conversa por voz (o canal de voz da sala): a resposta vai ser falada (curta, sem formatação)
+  voz INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'esperando' CHECK (status IN ('esperando', 'rodando', 'feito')),
   run_id TEXT,
   created_at TEXT NOT NULL
@@ -96,3 +98,17 @@ CREATE TABLE salas_aparelhos (workspace_id TEXT NOT NULL, device_id TEXT NOT NUL
   PRIMARY KEY (workspace_id, device_id));
 CREATE TABLE salas_enviados (workspace_id TEXT NOT NULL, device_id TEXT NOT NULL, kind TEXT NOT NULL, record_id TEXT NOT NULL, hash TEXT NOT NULL,
   PRIMARY KEY (workspace_id, device_id, kind, record_id));
+
+-- Anexos das salas entre aparelhos (world/sync-salas.ts): a mensagem chega com a ficha do arquivo (nome, tipo, tamanho,
+-- resumo); o arquivo só vem quando alguém pede para baixar, em partes seladas para o aparelho que pediu, do aparelho
+-- onde ele nasceu. Acima do teto, fica só a ficha.
+CREATE TABLE salas_anexos (
+  workspace_id TEXT NOT NULL, message_id TEXT NOT NULL, ref TEXT NOT NULL, conversation_id TEXT NOT NULL, de_device TEXT NOT NULL,
+  filename TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+  artifact_id TEXT, pedido_em TEXT, pedido_enviado_em TEXT,
+  PRIMARY KEY (workspace_id, message_id, ref)
+);
+CREATE INDEX salas_anexos_ref ON salas_anexos(workspace_id, ref);
+CREATE TABLE salas_anexo_partes (workspace_id TEXT NOT NULL, ref TEXT NOT NULL, parte INTEGER NOT NULL, dados TEXT NOT NULL, PRIMARY KEY (workspace_id, ref, parte));
+CREATE TABLE salas_anexo_envios (workspace_id TEXT NOT NULL, ref TEXT NOT NULL, device_id TEXT NOT NULL, proxima INTEGER NOT NULL, total INTEGER NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, ref, device_id));

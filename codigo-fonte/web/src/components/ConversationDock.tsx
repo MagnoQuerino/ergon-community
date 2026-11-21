@@ -183,7 +183,7 @@ function TeamRest({ scope, shown, currentId, onOpen }: { scope: string; shown: R
  * A busca do topo acha tudo: contatos, assuntos, mensagens, arquivos e links — e leva direto à mensagem.
  */
 export function ConversationsDialog({ coordinator, scope, initial, onClose, onOpenAgent, onFoco }: {
-  coordinator: TeamAgent | null; scope: string; initial: { agentId: string | null; conversationId: string | null; salaId?: string | null }; onClose: () => void;
+  coordinator: TeamAgent | null; scope: string; initial: { agentId: string | null; conversationId: string | null; salaId?: string | null; foco?: string | null }; onClose: () => void;
   onOpenAgent: (id: string, tab?: 'conversa' | 'perfil' | 'atividade', lite?: AgentLite | null) => void;
   /** rc.33: tela cheia — o Modo Foco já nesta conversa (Esc e o X de lá voltam para cá) */
   onFoco?: (agentId: string, conversationId: string | null) => void;
@@ -198,7 +198,8 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
   useEffect(() => setSel(initial), [initial.agentId, initial.conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
   // a sala aberta (rc.42): no lugar da conversa com um agente
   const [sala, setSala] = useState<string | null>(initial.salaId ?? null);
-  useEffect(() => { if (initial.salaId) setSala(initial.salaId); }, [initial.salaId]);
+  const [focoSala, setFocoSala] = useState<string | null>(initial.foco ?? null);
+  useEffect(() => { if (initial.salaId) { setSala(initial.salaId); setFocoSala(initial.foco ?? null); } }, [initial.salaId, initial.foco]);
   const contacts = useMemo(() => contactsOf(list), [list]);
   // sem escolha: quem tem algo para você, ou a última conversa; sem nenhuma, o Coordenador (como o atalho do canto)
   const first = contacts.find((c) => c.unread || c.priority) ?? contacts[0];
@@ -275,7 +276,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
             </div>
           ) : (
             <>
-              <SalasSecao atual={sala} onAbrir={(id) => { setSala(id); setQ(''); }} />
+              <SalasSecao atual={sala} onAbrir={(id) => { setSala(id); setFocoSala(null); setQ(''); }} />
               {sections.map(({ s, items }) => (
                 <div key={s} className="convs__section">
                   <span className="convs__section-name">{t(SECTION_LABEL[s])}</span>
@@ -331,7 +332,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
           )}
         </aside>
         <div className="convs__chat">
-          {sala ? <SalaPanel key={sala} salaId={sala} onSaiu={() => setSala(null)} /> : agent ? (
+          {sala ? <SalaPanel key={sala} salaId={sala} foco={focoSala} onSaiu={() => setSala(null)} /> : agent ? (
             <>
               <header className="foco__chat-head">
                 <AgentAvatar agent={agent} size={36} />
