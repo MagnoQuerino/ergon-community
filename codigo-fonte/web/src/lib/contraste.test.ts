@@ -17,7 +17,8 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
-const css = fs.readFileSync(path.join(src, 'styles.css'), 'utf8');
+// a folha principal e a dos blocos visuais (rc.42), que só usa as cores de função dos temas de styles.css
+const css = fs.readFileSync(path.join(src, 'styles.css'), 'utf8') + '\n' + fs.readFileSync(path.join(src, 'visuais/visuais.css'), 'utf8');
 const { claro, escuro, contraste } = temas(css);
 const THEMES: Array<[string, Vars]> = [['claro', claro], ['escuro', escuro], ['contraste', contraste]];
 const RS = regras(css);
@@ -71,10 +72,14 @@ const DECORATIVAS = new Set(['--line', '--line-suave', '--borda-forte', '--capa-
   '--veu', '--veu-forte', '--realce', '--inversa-veu', '--inversa-hover', '--inversa-ativo', '--inversa-linha', '--inversa-linha-forte', '--gold', '--terracotta',
   '--cb-line', '--ponto-anel', '--navy-bg', '--navy-2-bg', '--ok', '--ok-bg', '--warn', '--warn-bg', '--err', '--err-bg', '--borda-campo']);
 const minDe = (nome: string) => (nome === 'contraste' ? 7 : MIN_TEXTO);
+/** Os blocos visuais (rc.42): as séries dos gráficos e bom/ruim/atenção são marca gráfica (≥ 3 sobre o painel e o
+ * painel-2, onde os gráficos ficam); o trilho é enfeite; o --vis-sobre é o ícone sobre essas cores. */
+const GRAFICAS = ['--vis-1', '--vis-2', '--vis-3', '--vis-4', '--vis-5', '--vis-6', '--vis-bom', '--vis-ruim', '--vis-atencao'];
+const VIS_DECORATIVAS = ['--vis-trilho', '--vis-sobre'];
 
 test('toda cor de função tem lugar na tabela de usos (cor nova sem linha na tabela reprova)', () => {
   const classificadas = new Set<string>([...SUPERFICIES, ...TEXTOS, ...NA_INVERSA.fundos, ...NA_INVERSA.textos, ...NA_INVERSA.pontos, ...DECORATIVAS,
-    ...PARES.flat().filter((x) => x.startsWith('--')), ...ESTADOS.flatMap((e) => SUFIXOS.map((s) => doEstado(e, s)))]);
+    ...PARES.flat().filter((x) => x.startsWith('--')), ...ESTADOS.flatMap((e) => SUFIXOS.map((s) => doEstado(e, s))), ...GRAFICAS, ...VIS_DECORATIVAS]);
   const cores = Object.keys(claro).filter((k) => { const c = resolveColor(claro[k], claro); return !!c && !('undef' in c); });
   assert.ok(cores.length > 80, `poucas cores lidas: ${cores.length}`);
   assert.deepEqual(cores.filter((k) => !classificadas.has(k)), []);
@@ -377,4 +382,13 @@ test('logos de conexão: o desenho e a inicial usam a tinta que se lê sobre a c
   for (const h of new Set([...icones.matchAll(/hex: '(#[0-9a-f]{6})'/gi), ...logo.matchAll(/hex: '(#[0-9a-f]{6})'/gi)].map((m) => m[1]))) {
     assert.ok(contrast(inkOn(h), h) >= MIN_GRAFICO, `${h}: ${contrast(inkOn(h), h).toFixed(2)}`);
   }
+});
+
+test('blocos visuais: as cores dos gráficos ≥ 3 sobre o painel e o painel-2, e o ícone por cima delas ≥ 3, nos três temas', () => {
+  const bad: string[] = [];
+  for (const [nome, v] of THEMES) {
+    for (const c of GRAFICAS) for (const bg of ['--panel', '--panel-2']) { const r = razao(`var(${c})`, `var(${bg})`, v); if (r < MIN_GRAFICO) bad.push(`${nome}: ${c} sobre ${bg} = ${r.toFixed(2)}`); }
+    for (const c of ['--vis-1', '--vis-bom', '--vis-ruim', '--vis-atencao']) { const r = razao('var(--vis-sobre)', `var(${c})`, v); if (r < MIN_GRAFICO) bad.push(`${nome}: --vis-sobre sobre ${c} = ${r.toFixed(2)}`); }
+  }
+  assert.deepEqual(bad, []);
 });

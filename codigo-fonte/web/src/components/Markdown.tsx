@@ -2,6 +2,8 @@ import { Fragment, useMemo, type ReactNode } from 'react';
 import { parseMarkdown, type Block, type Inline } from '../lib/markdown.ts';
 import { t, useIdioma } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
+import { ehCercaVisual } from '../../../shared/visuais/cercas.ts';
+import { VisualDaCerca } from '../visuais/Visual.tsx';
 
 /** Inline → elementos (o texto sempre como texto: o React escapa). */
 function inl(c: Inline[], key = ''): ReactNode[] {
@@ -30,14 +32,15 @@ function inl(c: Inline[], key = ''): ReactNode[] {
   });
 }
 
-function block(b: Block, k: string): ReactNode {
+function block(b: Block, k: string, aoVivo = false): ReactNode {
   switch (b.t) {
     case 'p': return <p key={k}>{inl(b.c, k)}</p>;
     case 'h': { const H = (`h${b.level + 2}`) as 'h3' | 'h4' | 'h5'; return <H key={k}>{inl(b.c, k)}</H>; }
     case 'ul': return <ul key={k}>{b.items.map((x, i) => <li key={i}>{inl(x, `${k}.${i}`)}</li>)}</ul>;
     case 'ol': return <ol key={k} start={b.start}>{b.items.map((x, i) => <li key={i}>{inl(x, `${k}.${i}`)}</li>)}</ol>;
-    case 'code': return <pre key={k} className="md__code"><code>{b.v}</code></pre>;
-    case 'quote': return <blockquote key={k}>{b.c.map((x, i) => block(x, `${k}.${i}`))}</blockquote>;
+    // bloco visual do agente (rc.42): ```ergon-<tipo> — métrica, gráfico, tabela, enquete, relatório (shared/visuais)
+    case 'code': return ehCercaVisual(b.lang) ? <VisualDaCerca key={k} lang={b.lang} json={b.v} fechada={!aoVivo} /> : <pre key={k} className="md__code"><code>{b.v}</code></pre>;
+    case 'quote': return <blockquote key={k}>{b.c.map((x, i) => block(x, `${k}.${i}`, aoVivo))}</blockquote>;
     case 'hr': return <hr key={k} />;
     case 'table': return (
       <div key={k} className="md__table">
@@ -51,8 +54,8 @@ function block(b: Block, k: string): ReactNode {
 }
 
 /** Texto dos colegas formatado (Markdown seguro, sem HTML). */
-export function Markdown({ text, className }: { text: string; className?: string }) {
+export function Markdown({ text, className, aoVivo = false }: { text: string; className?: string; aoVivo?: boolean }) {
   useIdioma(); // a dica e o texto alternativo da imagem trocam de idioma junto com a tela
   const blocks = useMemo(() => parseMarkdown(text), [text]);
-  return <div className={`md ${className ?? ''}`}>{blocks.map((b, i) => block(b, String(i)))}</div>;
+  return <div className={`md ${className ?? ''}`}>{blocks.map((b, i) => block(b, String(i), aoVivo && i === blocks.length - 1))}</div>;
 }

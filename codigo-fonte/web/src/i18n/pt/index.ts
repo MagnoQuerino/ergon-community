@@ -14,7 +14,8 @@ import configuracoes from './configuracoes.ts';
 import conta from './conta.ts';
 import ajuda from './ajuda.ts';
 import servidor from './servidor.ts';
+import visuais from './visuais.ts';
 
-export const pt = { geral, cidade, quadro, tarefa, conversas, equipe, agente, rotinas, conexoes, documentos, configuracoes, conta, ajuda, servidor } as const;
+export const pt = { geral, cidade, quadro, tarefa, conversas, equipe, agente, rotinas, conexoes, documentos, configuracoes, conta, ajuda, servidor, visuais } as const;
 export type Dicionario = typeof pt;
 export type NomeDaArea = keyof Dicionario;

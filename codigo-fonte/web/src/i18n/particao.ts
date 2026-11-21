@@ -47,6 +47,8 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   // a Ajuda, as dicas, o tour e as boas-vindas
   ajuda: ['views/AjudaView.tsx', 'components/Tips.tsx', 'components/Tour.tsx', 'components/Onboarding.tsx', 'components/RelatarProblema.tsx', 'lib/relato.ts'],
   // "Aguardando você", a Atividade e o que vem do servidor (lib/textos-tela.ts: ver COMO-TRADUZIR.md)
+  // os blocos visuais dos agentes (rc.42): métricas, gráficos, tabelas, enquetes, relatórios
+  visuais: ['visuais/Visual.tsx', 'visuais/blocos.tsx', 'visuais/previas.tsx', 'visuais/Enquete.tsx', 'visuais/Relatorio.tsx', 'visuais/Cena.tsx', 'visuais/contexto.ts', 'visuais/png.ts', 'visuais/realce.ts', 'visuais/conversa.ts', 'visuais/documento.tsx'],
   servidor: ['components/DecisionsPanel.tsx', 'views/OtherViews.tsx', 'lib/atividade.ts', 'lib/textos-tela.ts', 'lib/types.ts'],
 };
 
@@ -60,4 +62,8 @@ export const FORA_DA_VARREDURA: readonly string[] = [
   'galeria/Galeria.tsx',
   'galeria/main.tsx',
   'galeria/simular.ts',
+  // a galeria dos blocos visuais (rc.42): página só de desenvolvimento (web/visuais.html), com dados de exemplo
+  'galeria/visuais/main.tsx',
+  'galeria/visuais/Pagina.tsx',
+  'galeria/visuais/dados.ts',
 ];

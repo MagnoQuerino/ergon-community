@@ -15,5 +15,6 @@ import configuracoes from './configuracoes.ts';
 import conta from './conta.ts';
 import ajuda from './ajuda.ts';
 import servidor from './servidor.ts';
+import visuais from './visuais.ts';
 
-export const en: { readonly [A in keyof Dicionario]: Traducao<Dicionario[A]> } = { geral, cidade, quadro, tarefa, conversas, equipe, agente, rotinas, conexoes, documentos, configuracoes, conta, ajuda, servidor };
+export const en: { readonly [A in keyof Dicionario]: Traducao<Dicionario[A]> } = { geral, cidade, quadro, tarefa, conversas, equipe, agente, rotinas, conexoes, documentos, configuracoes, conta, ajuda, servidor, visuais };
