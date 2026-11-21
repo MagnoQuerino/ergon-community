@@ -61,7 +61,8 @@ export function trechosMudados(antes: readonly string[] | null, depois: readonly
 // ------------------------------------------------------------------------------------------------ blocos visuais
 
 /** Bloco visual embutido no Markdown: ```ergon-<tipo>\n<conteúdo>\n``` → o componente de quem registrou o tipo. */
-export interface BlocoVisualProps { tipo: string; conteudo: string }
+/** aoVivo: a mensagem ainda chega (o último bloco pode estar com a cerca aberta). */
+export interface BlocoVisualProps { tipo: string; conteudo: string; aoVivo?: boolean }
 const blocos = new Map<string, ComponentType<BlocoVisualProps>>();
 
 /** Registra o desenho de um tipo de bloco (ex.: "grafico" para ```ergon-grafico```). Sem registro: aparece como código. */

@@ -90,7 +90,7 @@ check("o de diagnóstico traz o terminal e os processos", {"terminal", "process"
 check("o de Discord traz discord_admin", "discord_admin" in b._tools_of(["discord_admin"]))
 cfg = b._config_do_perfil({"platform_toolsets": {"api_server": ["computer_use", "todo"]}}, {"ferramentas": ["computer_use"]})
 check("perfil do agente: computer_use ligado e pelo provedor do Ergon", "computer_use" in cfg["platform_toolsets"]["api_server"] and cfg["computer_use"]["backend"] == "ergon", str(cfg.get("computer_use")))
-check("capacidade anunciada ao Ergon", "computador" in b.CAPACIDADES and b.PLUGIN_VERSION == "0.9.0")
+check("capacidade anunciada ao Ergon", "computador" in b.CAPACIDADES and tuple(int(x) for x in b.PLUGIN_VERSION.split(".")) >= (0, 9, 0))
 
 
 def politica(toolsets):

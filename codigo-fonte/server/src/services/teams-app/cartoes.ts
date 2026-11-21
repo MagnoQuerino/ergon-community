@@ -4,6 +4,7 @@
  * Action.Submit (contrato, 3.5). O mesmo desenho serve ao cartão de uma confirmação na conversa e ao aviso de "Com você".
  */
 import { docsComoTexto, limparCaminhos } from '../../../../shared/caminhos.ts';
+import { visuaisComoTexto } from '../../../../shared/visuais/texto.ts';
 import { MAX_CARTAO, MAX_TEXTO_SAIDA, tokenCartao, type ChavesInstalacao } from './protocolo.ts';
 
 const NOME_DO_MOTOR = new RegExp('\\bHer' + 'mes\\b', 'gi');
@@ -29,7 +30,8 @@ export function linksPorExtenso(s: string): string {
  * extenso. Serve também ao Telegram, ao Discord e ao WhatsApp da equipe (canais/servico.ts).
  */
 export function textoParaTeams(t: string, max = MAX_TEXTO_SAIDA): string {
-  let s = linksPorExtenso(docsComoTexto(limparCaminhos(String(t ?? '')))
+  // os blocos visuais (rc.42) viram o texto deles: o número, as linhas e a fonte
+  let s = linksPorExtenso(docsComoTexto(limparCaminhos(visuaisComoTexto(String(t ?? ''))))
     .replace(/\[\[[^\]]*(?:\][^\]]+)*\]\]/g, ''))
     .replace(/\{\{[^}\n]{0,200}\}\}/g, '')
     .replace(/<\/?[a-zA-Z][^>\n]{0,200}>/g, '')
