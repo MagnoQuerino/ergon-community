@@ -96,7 +96,7 @@ const agente: Traducao<typeof pt> = {
   'perfil.novoMetodo': 'New method',
   'perfil.sugestoesSetor': 'Sector suggestions: {itens}',
   'perfil.ferramentas': 'Tools',
-  'perfil.ferramentasDica': '— all come on; uncheck only to restrict this agent',
+  'perfil.ferramentasDica': '— uncheck to restrict this agent',
   'perfil.doCargo': 'built-in',
   'perfil.daEquipe': 'Whole team',
   'ferramenta.ligadaEquipe': 'On',

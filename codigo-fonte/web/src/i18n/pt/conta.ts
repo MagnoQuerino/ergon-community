@@ -59,8 +59,8 @@ const conta = {
   'termos.novosSub': 'Antes de seguir: leia os termos de uso. Com o aceite, Executar código e Terminal passam a vir ligados na equipe (dá para desligar em Configurações › Ferramentas da equipe).',
   'termos.liAceito': 'Li e aceito os termos de uso',
   'termos.aceitar': 'Aceitar e continuar',
-  'entrar.setupEmSeguida': 'Em seguida: como recuperar se esquecer a senha, duas perguntas sobre como você trabalha e a sua conta de IA. A equipe chega montada para o seu caso.',
-  'entrar.trancadoDica': 'Passkey e autenticador não abrem os dados depois de reiniciar (eles não guardam a chave); a senha ou a recuperação, sim.',
+  'entrar.setupEmSeguida': 'Em seguida: como recuperar, duas perguntas e a conta de IA.',
+  'entrar.trancadoDica': 'Depois de reiniciar, só a senha ou a recuperação abrem os dados.',
 
   // ——— conta nova neste computador ———
   'registro.titulo': 'Criar conta neste computador',
@@ -68,7 +68,7 @@ const conta = {
   'registro.convite': 'Código do convite',
   'registro.conviteDica': 'Neste computador, conta nova precisa de um convite de quem administra o Ergon (Configurações › Pessoas).',
   'registro.jaTenho': 'Já tenho conta',
-  'registro.emSeguida': 'Em seguida: como recuperar se esquecer a senha, duas perguntas sobre como você trabalha e a sua conta de IA.',
+  'registro.emSeguida': 'Em seguida: como recuperar, duas perguntas e a conta de IA.',
 
   // ——— 2º fator e passkey ———
   'verificacao.titulo': 'Segunda verificação',
@@ -354,7 +354,7 @@ const conta = {
   'world.entrar': 'Entrar',
   'world.conferindo': 'Conferindo no Ergon World…',
   'world.criarAqui': 'Criar uma conta só neste computador',
-  'world.emSeguida': 'Em seguida: como recuperar se esquecer a senha e a conta de IA.',
+  'world.emSeguida': 'Em seguida: como recuperar e a conta de IA.',
 
   // ——— rc.42: como recuperar se esquecer a senha (a frase ou a senha do Ergon World) ———
   'rec.titulo': 'Se esquecer a senha',
@@ -373,15 +373,15 @@ const conta = {
   'recuperar.comFrase': 'Frase',
   'recuperar.comWorld': 'Ergon World',
   'recuperar.worldTitulo': 'Recuperar com o Ergon World',
-  'recuperar.worldSub': 'Entre com o e-mail e a senha do Ergon World e escolha uma senha nova.',
+  'recuperar.worldSub': 'Entre com o Ergon World e escolha uma senha nova.',
   'seg.recuperacao': 'Recuperação',
-  'seg.recuperacaoDica': 'Uma das duas basta. A frase não depende de nenhum serviço.',
+  'seg.recuperacaoDica': 'Uma das duas basta.',
   'seg.worldEmUso': 'em uso',
   'seg.worldNaoUsada': 'não usada',
   'seg.worldMudou': 'senha mudou',
   'seg.worldTexto': 'Abre os seus dados se você esquecer a senha do Ergon ({email}).',
   'seg.worldMudouTexto': 'A senha do World mudou e não abre mais. Digite a nova para voltar a valer.',
-  'seg.worldSemTexto': 'Nada para anotar: o e-mail e a senha do Ergon World abrem os dados neste computador.',
+  'seg.worldSemTexto': 'Nada para anotar.',
   'seg.worldDesligar': 'Deixar de usar',
   'seg.worldDesligada': 'A senha do World deixou de recuperar os seus dados.',
   'seg.worldLigada': 'Pronto: a senha do Ergon World recupera os seus dados.',

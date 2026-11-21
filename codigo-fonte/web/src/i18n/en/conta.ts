@@ -60,8 +60,8 @@ const conta: Traducao<typeof pt> = {
   'termos.novosSub': 'Before you continue: read the terms of use. Once you accept, Run code and Terminal come on for the team (you can turn them off in Settings › Team tools).',
   'termos.liAceito': 'I have read and accept the terms of use',
   'termos.aceitar': 'Accept and continue',
-  'entrar.setupEmSeguida': 'Next: how to recover if you forget the password, two questions about how you work, and your AI account. The team arrives set up for your needs.',
-  'entrar.trancadoDica': "After a restart, a passkey or the authenticator can't open your data (they don't hold the key); your password or recovery can.",
+  'entrar.setupEmSeguida': 'Next: recovery, two questions and the AI account.',
+  'entrar.trancadoDica': 'After a restart, only your password or recovery opens the data.',
 
   // ——— conta nova neste computador ———
   'registro.titulo': 'Create an account on this computer',
@@ -69,7 +69,7 @@ const conta: Traducao<typeof pt> = {
   'registro.convite': 'Invite code',
   'registro.conviteDica': 'On this computer, a new account needs an invite from whoever manages Ergon (Settings › People).',
   'registro.jaTenho': 'I already have an account',
-  'registro.emSeguida': 'Next: how to recover if you forget the password, two questions about how you work, and your AI account.',
+  'registro.emSeguida': 'Next: recovery, two questions and the AI account.',
 
   // ——— 2º fator e passkey ———
   'verificacao.titulo': 'Two-step verification',
@@ -355,7 +355,7 @@ const conta: Traducao<typeof pt> = {
   'world.entrar': 'Sign in',
   'world.conferindo': 'Checking with Ergon World…',
   'world.criarAqui': 'Create an account on this computer only',
-  'world.emSeguida': 'Next: how to recover if you forget the password, and the AI account.',
+  'world.emSeguida': 'Next: recovery and the AI account.',
 
   // ——— rc.42: how to recover if you forget the password (the phrase or the Ergon World password) ———
   'rec.titulo': 'If you forget the password',
@@ -374,15 +374,15 @@ const conta: Traducao<typeof pt> = {
   'recuperar.comFrase': 'Phrase',
   'recuperar.comWorld': 'Ergon World',
   'recuperar.worldTitulo': 'Recover with Ergon World',
-  'recuperar.worldSub': 'Sign in with your Ergon World e-mail and password and choose a new password.',
+  'recuperar.worldSub': 'Sign in with Ergon World and choose a new password.',
   'seg.recuperacao': 'Recovery',
-  'seg.recuperacaoDica': 'Either one is enough. The phrase does not depend on any service.',
+  'seg.recuperacaoDica': 'Either one is enough.',
   'seg.worldEmUso': 'in use',
   'seg.worldNaoUsada': 'not used',
   'seg.worldMudou': 'password changed',
   'seg.worldTexto': 'Opens your data if you forget your Ergon password ({email}).',
   'seg.worldMudouTexto': 'Your World password changed and no longer opens it. Type the new one to make it work again.',
-  'seg.worldSemTexto': 'Nothing to write down: your Ergon World e-mail and password open the data on this computer.',
+  'seg.worldSemTexto': 'Nothing to write down.',
   'seg.worldDesligar': 'Stop using',
   'seg.worldDesligada': 'Your World password no longer recovers your data.',
   'seg.worldLigada': 'Done: your Ergon World password recovers your data.',

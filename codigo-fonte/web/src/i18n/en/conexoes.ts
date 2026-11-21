@@ -733,7 +733,7 @@ const conexoes: Traducao<typeof pt> = {
   'liberar.proibir': 'Forbid in this workspace',
   'liberar.proibidoTexto': 'Forbidden by whoever manages this workspace.',
   'acesso.titulo': "Turn on full access?",
-  'acesso.equipe': 'The whole team can use Terminal, code, computer and Discord without asking. You review at the end.',
+  'acesso.equipe': 'The whole team uses Terminal, code, computer and Discord without asking.',
   'acesso.senha': "Your password",
   'acesso.ativar': "Turn on",
   'pastas.titulo': "Computer folders",

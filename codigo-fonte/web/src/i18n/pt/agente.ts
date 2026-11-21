@@ -95,7 +95,7 @@ const agente = {
   'perfil.novoMetodo': 'Novo método',
   'perfil.sugestoesSetor': 'Sugestões do setor: {itens}',
   'perfil.ferramentas': 'Ferramentas',
-  'perfil.ferramentasDica': '— todas vêm ligadas; desmarque só para restringir este agente',
+  'perfil.ferramentasDica': '— desmarque para restringir este agente',
   'perfil.doCargo': 'do cargo',
   'perfil.daEquipe': 'Da equipe toda',
   'ferramenta.ligadaEquipe': 'Ligada',
