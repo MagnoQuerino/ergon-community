@@ -11,6 +11,7 @@ import type { Db } from './db/db.ts';
 import type { Bus } from './services/bus.ts';
 import type { AuthContext } from './services/auth.ts';
 import type { Vault } from './security/keys.ts';
+import type { WorldRecoveryHooks } from './services/security.ts';
 import type { HermesControlClient } from './services/hermes.ts';
 import type { AgentLimits } from './services/capacity.ts';
 import type { Routines } from './services/routines.ts';
@@ -48,6 +49,8 @@ export interface WorldHost {
   vault: Vault;
   /** rotas sem sessão local */
   publicRoutes: Set<string>;
+  /** a recuperação pela senha do Ergon World (o módulo preenche: conferir a senha no World e o e-mail ligado) */
+  recovery?: WorldRecoveryHooks;
   auth(req: FastifyRequest): AuthContext;
   owner(req: FastifyRequest): AuthContext;
   admin(req: FastifyRequest): AuthContext;
@@ -124,6 +127,8 @@ export interface WorldModule {
   status(): WorldStatus;
   /** antes de abrir o banco (nuvem do Ergon World: o cofre do contêiner abre com a chave guardada no World) */
   prepare?(vault: Vault): Promise<void>;
+  /** confere e-mail e senha no World (o portão de destrancar usa para a recuperação pela senha do World) */
+  checkAccount?(email: string, password: string): Promise<void>;
   register(host: WorldHost): Promise<void>;
 }
 

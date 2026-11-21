@@ -125,6 +125,8 @@ export interface Me {
   user: { id: string; username: string; displayName: string; avatar?: string | null }; workspaceId: string; role: string; csrf: string; workspaces: Array<{ id: string; name: string; role: string }>;
   /** tela trancada por inatividade; instalação já protegida (cifrada); minutos até trancar; 2º fatores da pessoa */
   locked: boolean; protected: boolean; idleMinutes: number; factors: { totp: boolean; passkeys: number }; mode: 'local' | 'cloud'; rpId: string; recovery: boolean;
+  /** a reserva pela senha do Ergon World deixou de abrir (a senha mudou lá): escolher de novo */
+  recoveryWorldStale?: boolean;
   /** primeiro acesso: perguntar se liga o destrancar sozinho (ajudante presente, ainda sem escolha) */
   autoUnlockPrompt: boolean;
   /** várias pessoas no computador: quem administra a instalação; a parte da pessoa ainda fechada (digitar a senha); quantas contas */
@@ -158,9 +160,14 @@ export interface AuthState { needsSetup: boolean; authenticated: boolean; locked
   /** conta nova neste computador: qualquer pessoa ('aberto'), só com convite ('convite'), ou não se aplica (null) */
   signup?: 'aberto' | 'convite' | null;
   /** a versão dos termos de uso que a conta nova aceita */
-  termosVersao?: string }
+  termosVersao?: string;
+  /** "Esqueci a senha" oferece a senha do Ergon World (alguém aqui a escolheu como reserva) */
+  worldRecovery?: boolean }
 export interface SecurityStatus {
-  mode: 'local' | 'cloud'; protected: boolean; recovery: boolean; autoUnlock: Array<{ id: string; label: string; createdAt: string }>;
+  mode: 'local' | 'cloud'; protected: boolean; recovery: boolean;
+  /** as duas reservas: a frase confirmada e a senha do Ergon World (null: não escolhida); se o World está aqui e o e-mail ligado */
+  phrase?: boolean; recoveryWorld?: { email: string; stale: boolean } | null; worldRecovery?: { available: boolean; email: string | null };
+  autoUnlock: Array<{ id: string; label: string; createdAt: string }>;
   /** trancamento: desligado = abre sozinho ao reiniciar (a proteção é a do computador); na nuvem é sempre ligado */
   lock: { enabled: boolean; forced: boolean; sessionDays: number };
   totp: boolean; passkeys: Array<{ id: string; name: string; created_at: string; last_used_at: string | null }>; idleMinutes: number; rpId: string; publicUrl: string; minPassword: number; motorVault: boolean;

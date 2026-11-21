@@ -782,13 +782,27 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
   const st = useSincronia(true);
   const cf = useResource<Conflict[]>('/api/world/sync/conflicts', ['sync.changed', 'tasks.changed']);
   const [phrase, setPhrase] = useState('');
+  // rc.42: a recuperação da chave pela senha do Ergon World (recomendada: nada para anotar) ou pela frase
+  const [via, setVia] = useState<'world' | 'frase'>('world');
   const [pulled, setPulled] = useState<Pulled | null>(null);
   const [busy, setBusy] = useState(false);
   const go = async (fn: () => Promise<string | void>) => {
     onMsg(null); setBusy(true);
     try { const ok = await fn(); if (ok) onMsg({ kind: 'ok', text: ok }); st.reload(); cf.reload(); } catch (e) { onMsg({ kind: 'error', text: erroConta(e, t) }); st.reload(); } finally { setBusy(false); }
   };
-  const withPhrase = () => (phrase.trim().length >= 20 ? { recoveryPhrase: phrase.trim() } : {});
+  const withPhrase = (k: 'world' | 'frase' = via) => (k === 'world' ? (phrase ? { worldPassword: phrase } : {}) : phrase.trim().length >= 20 ? { recoveryPhrase: phrase.trim() } : {});
+  /** pronto para gravar: a senha do World (qualquer tamanho; o World confere) ou a frase de 20 caracteres ou mais */
+  const pronto = (k: 'world' | 'frase' = via) => (k === 'world' ? phrase.length > 0 : phrase.trim().length >= 20);
+  const escolha = (
+    <div className="seg rec-via" role="group" aria-label={t('sync.recComo')}>
+      <button type="button" className={`seg__btn ${via === 'world' ? 'seg__btn--on' : ''}`} aria-pressed={via === 'world'} onClick={() => { setVia('world'); setPhrase(''); }}><Icon name="globe" size={13} /> {t('sync.recWorld')}</button>
+      <button type="button" className={`seg__btn ${via === 'frase' ? 'seg__btn--on' : ''}`} aria-pressed={via === 'frase'} onClick={() => { setVia('frase'); setPhrase(''); }}><Icon name="pen" size={13} /> {t('sync.recFrase')}</button>
+    </div>
+  );
+  const aviso = via === 'world' && <p className="hint rec-world__aviso"><Icon name="shield" size={13} /> {t('sync.recAviso')}</p>;
+  const campo = (
+    <input type="password" autoComplete="off" aria-label={via === 'world' ? t('sync.recWorld') : t('sync.fraseNome')} placeholder={via === 'world' ? t('sync.recWorld') : t('sync.fraseNome')} value={phrase} onChange={(ev) => setPhrase(ev.target.value)} />
+  );
   const retida = !!st.data?.auto?.equipeRetida;
   // a equipe nova deixou de estar retida (recebida aqui ou por outra tela): a prévia aberta não vale mais
   useEffect(() => { if (!retida) setPulled(null); }, [retida]);
@@ -810,11 +824,15 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
       {!s.enabled ? (
         <>
           <p className="muted">{entrar ? t('sync.entrarTexto') : t('sync.texto')}</p>
-          <label className="field">{t('sync.frase')}<input type="password" autoComplete="new-password" value={phrase} onChange={(ev) => setPhrase(ev.target.value)} /></label>
-          {!entrar && <p className="muted small">{t('sync.fraseTexto')}</p>}
+          <div className="sinc__rec">
+            <b className="small">{t('sync.recTitulo')} <span className="muted">{t('sync.recOpcional')}</span></b>
+            {escolha}
+            {campo}
+            {aviso}
+          </div>
           {entrar
-            ? <button className="btn btn--primary" disabled={busy || (phrase.length > 0 && phrase.trim().length < 20)} onClick={() => void go(async () => { await api.post('/api/world/sync/join', withPhrase()); return t('sync.entrou'); })}>{t('sync.entrar')}</button>
-            : <button className="btn btn--primary" disabled={busy || (phrase.length > 0 && phrase.trim().length < 20)} onClick={() => void go(async () => { await api.post('/api/world/sync/enable', withPhrase()); return t('sync.ligadaMsg'); })}>{t('sync.ligar')}</button>}
+            ? <button className="btn btn--primary" disabled={busy || (phrase.length > 0 && !pronto())} onClick={() => void go(async () => { await api.post('/api/world/sync/join', withPhrase()); setPhrase(''); return t('sync.entrou'); })}>{t('sync.entrar')}</button>
+            : <button className="btn btn--primary" disabled={busy || (phrase.length > 0 && !pronto())} onClick={() => void go(async () => { await api.post('/api/world/sync/enable', withPhrase()); setPhrase(''); return t('sync.ligadaMsg'); })}>{t('sync.ligar')}</button>}
         </>
       ) : (
         <>
@@ -853,12 +871,25 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
           {s.rotationPending && <p className="hint warn row row--wrap"><span>{t('pessoas.chavePendente')}</span><button className="btn btn--sm btn--primary" disabled={busy} onClick={() => void go(async () => { await api.post('/api/world/sync/rotate'); return t('pessoas.chaveTrocada'); })}><Icon name="key" size={13} /> {t('pessoas.trocarChave')}</button></p>}
           {s.recoveryOutdated && (
             <div className="hint warn">
-              <span>{t('sync.fraseVelha')}</span>
+              {/* a chave girou: o envelope de recuperação precisa do mesmo segredo de antes (a senha do World ou a frase) */}
+              <span>{s.recoveryKind === 'world' ? t('sync.senhaVelha') : t('sync.fraseVelha')}</span>
               <div className="row row--wrap">
-                <input type="password" autoComplete="off" aria-label={t('sync.fraseNome')} placeholder={t('sync.fraseNome')} value={phrase} onChange={(ev) => setPhrase(ev.target.value)} />
-                <button className="btn btn--sm" disabled={busy || phrase.trim().length < 20} onClick={() => void go(async () => { await api.post('/api/world/sync/recovery', withPhrase()); setPhrase(''); return t('sync.fraseAtualizada'); })}>{t('sync.atualizarFrase')}</button>
+                <input type="password" autoComplete="off" aria-label={s.recoveryKind === 'world' ? t('sync.recWorld') : t('sync.fraseNome')} placeholder={s.recoveryKind === 'world' ? t('sync.recWorld') : t('sync.fraseNome')} value={phrase} onChange={(ev) => setPhrase(ev.target.value)} />
+                <button className="btn btn--sm" disabled={busy || !pronto(s.recoveryKind === 'world' ? 'world' : 'frase')} onClick={() => void go(async () => { await api.post('/api/world/sync/recovery', withPhrase(s.recoveryKind === 'world' ? 'world' : 'frase')); setPhrase(''); return t('sync.fraseAtualizada'); })}>{t('sync.atualizarFrase')}</button>
               </div>
             </div>
+          )}
+          {/* sem nenhuma recuperação gravada daqui (conectar liga a sincronia sem perguntar): a escolha, discreta */}
+          {!s.recoveryOutdated && !s.recoveryKind && (
+            <details className="sinc__detalhes sinc__rec">
+              <summary className="small"><Icon name="key" size={13} /> {t('sync.recTitulo')} · <span className="muted">{t('sync.recNenhuma')}</span></summary>
+              {escolha}
+              <div className="row row--wrap">
+                {campo}
+                <button className="btn btn--sm" disabled={busy || !pronto()} onClick={() => void go(async () => { await api.post('/api/world/sync/recovery', withPhrase()); setPhrase(''); return t('sync.recGravada'); })}>{t('sync.recGravar')}</button>
+              </div>
+              {aviso}
+            </details>
           )}
           {cf.data && cf.data.length > 0 && (
             <div className="card card--inner">

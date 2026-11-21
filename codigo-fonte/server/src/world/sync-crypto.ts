@@ -4,7 +4,9 @@
  *
  * - Envelope por aparelho: X25519 efêmera + HKDF-SHA256 → AES-256-GCM (amarrado ao workspace e à versão da chave).
  * - Envelope de recuperação: scrypt da frase de recuperação da pessoa → AES-256-GCM (aparelho novo sem nenhum outro
- *   ligado).
+ *   ligado). Ou, se a pessoa escolher (rc.42), Argon2id da senha do Ergon World com rótulo e sal próprios → AES-256-GCM
+ *   (formato v2, `by: 'world'`). A troca, dita na tela: o World guarda este envelope E vê a senha no login, então em
+ *   tese conseguiria abri-lo; a frase não tem essa troca. A derivação é separada de qualquer outra feita com a senha.
  * - Alteração: AES-256-GCM com a DEK; dados associados = workspace, operação, versão da chave e do esquema e, no formato
  *   v2 (rc.41), também o TIPO da mudança e o APARELHO que a mandou: o World (que guarda e entrega) não consegue reetiquetar
  *   uma mudança como de outro tipo nem como de outro aparelho. O formato v1 ainda abre para os tipos que já existiam
@@ -12,6 +14,7 @@
  * - Assinatura: Ed25519 do aparelho sobre o envelope canônico (o servidor confere quem mandou o quê).
  */
 import crypto from 'node:crypto';
+import { argon2id, type KdfParams } from '../security/crypto.ts';
 
 const b64 = (b: Buffer) => b.toString('base64');
 const unb64 = (s: string) => Buffer.from(s, 'base64');
@@ -57,6 +60,32 @@ export function unwrapForRecovery(wrapped: string, recoverySecret: string, ws: s
   const w = JSON.parse(wrapped) as { salt: string; nonce: string; ct: string };
   const kek = crypto.scryptSync(recoverySecret.normalize('NFKD'), unb64(w.salt), 32, { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
   return ungcm(kek, w.nonce, w.ct, `ergon/sync-recovery/v1|${ws}|${keyVersion}`);
+}
+
+/** Segredo do envelope pela senha do World: rótulo próprio (nem o do login, nem o da recuperação local). */
+const worldSyncSecret = (password: string) => `ergon/sync-recovery-world/v1\n${password}`;
+const worldAad = (ws: string, keyVersion: number) => `ergon/sync-recovery-world/v1|${ws}|${keyVersion}`;
+/** Com o que um envelope de recuperação abre (o formato antigo, sem `by`, é o da frase). */
+export function recoveryKindOf(wrapped: string): 'phrase' | 'world' {
+  try { return (JSON.parse(wrapped) as { by?: unknown }).by === 'world' ? 'world' : 'phrase'; } catch { return 'phrase'; }
+}
+export async function wrapForRecoveryWorld(dek: Buffer, password: string, ws: string, keyVersion: number, kdf: KdfParams): Promise<string> {
+  const salt = crypto.randomBytes(16);
+  const kek = await argon2id(worldSyncSecret(password), salt, kdf);
+  return JSON.stringify({ v: 2, kind: 'recovery', by: 'world', salt: b64(salt), kdf, ...gcm(kek, dek, worldAad(ws, keyVersion)) });
+}
+/**
+ * Abre o envelope pela senha do World. Os parâmetros do Argon2id vêm do envelope (que o World entrega): só dentro de
+ * limites, para um envelope adulterado não pedir memória ou tempo sem fim a este computador.
+ */
+export async function unwrapForRecoveryWorld(wrapped: string, password: string, ws: string, keyVersion: number): Promise<Buffer> {
+  const w = JSON.parse(wrapped) as { v?: number; by?: string; salt?: string; nonce?: string; ct?: string; kdf?: Partial<KdfParams> };
+  const k = w.kdf ?? {};
+  const ok = (n: unknown, min: number, max: number) => Number.isInteger(n) && (n as number) >= min && (n as number) <= max;
+  if (w.v !== 2 || w.by !== 'world' || typeof w.salt !== 'string' || typeof w.nonce !== 'string' || typeof w.ct !== 'string'
+    || k.alg !== 'argon2id' || !ok(k.memoryKiB, 1024, 1_048_576) || !ok(k.passes, 1, 10) || !ok(k.parallelism, 1, 4)) throw new Error('envelope de recuperação em formato desconhecido');
+  const kek = await argon2id(worldSyncSecret(password), unb64(w.salt), k as KdfParams);
+  return ungcm(kek, w.nonce, w.ct, worldAad(ws, keyVersion));
 }
 
 interface SealedChange { operationId: string; expectedVersion: number; schemaVersion: number; keyVersion: number; kind: 'change' | 'snapshot' | 'rotation' | 'conexoes'; ciphertext: string; nonce: string; sha256: string; signature: string }

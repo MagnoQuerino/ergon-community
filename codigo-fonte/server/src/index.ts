@@ -35,8 +35,11 @@ function openDb(): Db {
 // a menos que o trancamento esteja desligado (chave ao lado dos dados): aí abre sozinho.
 if (vault.state() === 'sealed' && cfg.mode === 'local') vault.unsealOpenAccess();
 // nuvem do Ergon World (um contêiner por workspace, sem ninguém para digitar senha): o World devolve a chave do cofre
-if (cfg.mode === 'cloud') await (await loadWorld(cfg))?.prepare?.(vault);
-const db = vault.state() === 'sealed' ? await runGate(cfg, vault, openDb) : openDb();
+const world = await loadWorld(cfg);
+if (cfg.mode === 'cloud') await world?.prepare?.(vault);
+// trancado: a recuperação pela senha do Ergon World confere a senha no World (só com o módulo e o endereço do World)
+const worldCheck = world?.status().configured && world.checkAccount ? world.checkAccount.bind(world) : undefined;
+const db = vault.state() === 'sealed' ? await runGate(cfg, vault, openDb, { worldCheck }) : openDb();
 const applied = db.migrate();
 const { app, executor, startBackground, stopBackground } = await buildApp({ cfg, db, vault });
 

@@ -125,6 +125,8 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.seguranca.i3', { trava: <b>{t('ajuda.seguranca.i3Trava')}</b>, link: <Go c={c} v="configuracao" hash={HASH_SEGURANCA}>{t('ajuda.lugar.configSeguranca')}</Go> })}</li>
         <li>{tn('ajuda.seguranca.i4', { duas: <b>{t('ajuda.seguranca.i4Duas')}</b> })}</li>
         <li>{t('ajuda.seguranca.i5')}</li>
+        <li>{t('ajuda.seguranca.i6')}</li>
+        <li>{t('ajuda.seguranca.i7')}</li>
       </ul>
     </> },
   { id: 'temas', title: () => t('ajuda.temas.titulo'), icon: 'palette', keywords: () => t('ajuda.temas.palavras'),

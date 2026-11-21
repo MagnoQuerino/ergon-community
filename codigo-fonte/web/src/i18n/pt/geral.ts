@@ -39,6 +39,10 @@ const geral = {
   'decisoes.aguardando': { zero: 'Nada aguardando você', other: '{n} aguardando você' },
 
   // ——— avisos que pedem ação ———
+  'alerta.semRecuperacao': 'Sem recuperação',
+  'alerta.semRecuperacaoDica': 'Escolha como recuperar os dados se esquecer a senha.',
+  'alerta.recuperacaoMudou': 'Recuperação a refazer',
+  'alerta.recuperacaoMudouDica': 'A senha do Ergon World mudou. Escolha de novo como recuperar.',
   'alerta.semIa': 'SEM CONTA DE IA',
   'alerta.semIaDica': 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é o Ergon AI, IA sem assinatura. Veja Conexões.',
   'alerta.novaVersao': 'NOVA VERSÃO · RECARREGAR',

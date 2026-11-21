@@ -195,8 +195,33 @@ export class HermesVaultKeeper {
 }
 
 // ---------------------------------------------------------------- rotas
+/**
+ * O que a recuperação pela senha do Ergon World usa do módulo do World. O módulo preenche ao registrar (ele vem depois
+ * destas rotas); sem World nesta instalação, fica vazio e as rotas respondem que a opção não existe aqui.
+ */
+export interface WorldRecoveryHooks {
+  /** confere e-mail e senha no World (lança o erro do World: 401 invalid_credentials, 503 world_offline, 429…) */
+  check?: (email: string, password: string) => Promise<void>;
+  /** o e-mail da conta do World ligada a esta pessoa (null: não ligada) */
+  linkEmail?: (userId: string) => string | null;
+}
+
+/** Erro do World ao conferir a senha → a frase curta da tela (credencial errada não diz qual dos dois errou). */
+export async function checkWorldPassword(hooks: WorldRecoveryHooks, email: string, password: string): Promise<void> {
+  if (!hooks.check) throw new HttpError(404, 'world_off', 'O Ergon World não está nesta instalação.');
+  try { await hooks.check(email, password); } catch (e) {
+    const x = e as HttpError;
+    if (x.code === 'world_offline' || x.code === 'world_unconfigured') throw new HttpError(503, 'world_offline', 'Sem conexão com o Ergon World agora. Tente de novo.');
+    if (x.status === 429) throw e;
+    // 400, não 401: com sessão local, a tela trataria 401 como sessão encerrada
+    throw new HttpError(400, 'invalid_world', 'E-mail ou senha do Ergon World incorretos.');
+  }
+}
+
 export interface SecurityDeps {
   cfg: Config; db: Db; bus: Bus; vault: Vault;
+  /** recuperação pela senha do Ergon World (preenchido pelo módulo do World) */
+  world: WorldRecoveryHooks;
   setCookie: (reply: FastifyReply, token: string, days?: number) => void;
   auth: (req: FastifyRequest) => AuthContext;
   owner: (req: FastifyRequest) => AuthContext;
@@ -335,6 +360,38 @@ export function registerSecurityRoutes(app: FastifyInstance, d: SecurityDeps): {
     return { ok: true };
   });
 
+  /**
+   * Recuperar com a senha do Ergon World (a pessoa escolheu esta reserva no lugar da frase): o World confere o e-mail e a
+   * senha; a mesma senha, derivada AQUI com o sal do embrulho local, abre a chave pessoal. O World só vê o login de
+   * sempre: o embrulho nunca saiu deste computador. Senha do World trocada depois da escolha: o embrulho não abre, deixa
+   * de contar como recuperação e a pessoa é avisada (a frase, se houver, ainda vale).
+   */
+  app.post('/api/auth/recover/world', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['username', 'email', 'password', 'newPassword'], properties: {
+      username: S.str(32, 3), email: S.str(254, 3), password: S.str(1024, 1), newPassword: S.str(200, 1) } } },
+  }, async (req, reply) => {
+    const b = req.body as { username: string; email: string; password: string; newPassword: string };
+    throttle.check(`recover:${ipOf(req)}`);
+    const u = db.get<{ id: string; username: string; display_name: string }>('SELECT id, username, display_name FROM users WHERE username = ?', b.username);
+    const w = u && d.people.keys() && vault.hasPerson(u.id) ? vault.personWorld(u.id) : null;
+    const fail = () => { throttle.fail(`recover:${ipOf(req)}`); return new HttpError(401, 'invalid_world', 'E-mail ou senha do Ergon World incorretos.'); };
+    if (!u || !w) throw fail();
+    try { await checkWorldPassword(d.world, b.email.trim().toLowerCase(), b.password); } catch (e) { if ((e as HttpError).code === 'invalid_world') throw fail(); throw e; }
+    if (!(await vault.openPersonWorld(u.id, b.password))) {
+      // o World aceitou, mas a senha não é a do embrulho: foi trocada depois (ou redefinida por "esqueci a senha" lá)
+      vault.markPersonWorldStale(u.id);
+      throw new HttpError(409, 'world_recovery_stale', 'A senha do Ergon World mudou depois que você a escolheu para recuperar. Use a frase, se tiver.');
+    }
+    throttle.ok(`recover:${ipOf(req)}`);
+    await setUserPassword(db, u.id, b.newPassword, cfg.kdf, [u.username, u.display_name]);
+    await vault.setPersonPassword({ id: u.id, username: u.username }, b.newPassword);
+    d.people.opened(u.id);
+    db.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+    audit(db, d.bus, { workspaceId: defaultWorkspace(db, u.id), actorType: 'user', actorId: u.id, action: 'security.recover', evidence: { via: 'world' }, result: 'senha redefinida com a senha do Ergon World' });
+    d.setCookie(reply, createSession(db, u.id, defaultWorkspace(db, u.id), meta(req), sessionDays(cfg, vault)).token, sessionDays(cfg, vault));
+    return { ok: true };
+  });
+
   // ---------- sessão: atividade, destrancar, confirmar identidade ----------
   app.post('/api/session/activity', async (req) => { d.auth(req); return { ok: true }; });
 
@@ -381,6 +438,10 @@ export function registerSecurityRoutes(app: FastifyInstance, d: SecurityDeps): {
     const mine = person ? vault.peopleInfo().find((x) => x.userId === ctx.userId) : null;
     return {
       mode: cfg.mode, protected: info.protected, recovery: person ? !!mine?.recovery : info.recovery,
+      // as duas reservas: a frase e (se a pessoa escolheu) a senha do Ergon World; worldAvailable: o World está aqui
+      phrase: person ? !!mine?.phrase : info.recovery,
+      recoveryWorld: person ? vault.personWorld(ctx.userId) : null,
+      worldRecovery: { available: !!d.world.check && person, email: d.world.linkEmail?.(ctx.userId) ?? null },
       autoUnlock: person ? (mine?.auto ? [{ id: vault.personAutoIds(ctx.userId)[0], label: 'cofre do sistema deste computador', createdAt: '' }] : []) : info.auto,
       people: { count: vault.peopleInfo().length, isolated: vault.multiPerson() },
       totp: !!u.totp_enabled, passkeys: db.all('SELECT id, name, created_at, last_used_at FROM passkeys WHERE user_id = ? ORDER BY created_at', ctx.userId),
@@ -429,6 +490,35 @@ export function registerSecurityRoutes(app: FastifyInstance, d: SecurityDeps): {
     const ok = person && vault.hasPerson(ctx.userId) ? await vault.confirmPersonRecovery(ctx.userId, answers) : await vault.confirmRecovery(answers);
     if (!ok) throw new HttpError(400, 'wrong_words', 'As palavras não conferem. Confira a frase anotada.');
     audit(db, d.bus, { workspaceId: ctx.workspaceId, actorType: 'user', actorId: ctx.userId, action: 'security.recovery', result: 'frase de recuperação confirmada (a anterior deixou de valer)' });
+    return { ok: true };
+  });
+
+  /**
+   * Escolher a senha do Ergon World como reserva dos dados (no primeiro uso ou em Segurança). Confere a senha no World
+   * (um erro de digitação aqui deixaria a reserva sem serventia) e recusa a mesma senha do Ergon: quem esquece uma
+   * esquece a outra. O embrulho fica só no keyring deste computador.
+   */
+  app.post('/api/security/recovery/world', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['password'], properties: { email: S.str(254, 3), password: S.str(1024, 1) } } },
+  }, async (req) => {
+    const ctx = d.auth(req); requireRecentAuth(ctx);
+    if (!d.people.keys() || !vault.hasPerson(ctx.userId)) throw new HttpError(409, 'person_key', 'Entre de novo com a senha para criar a sua chave antes.');
+    const b = req.body as { email?: string; password: string };
+    const email = (d.world.linkEmail?.(ctx.userId) ?? b.email ?? '').trim().toLowerCase();
+    if (!email) throw new HttpError(400, 'invalid_email', 'Informe o e-mail do Ergon World.');
+    throttle.check(`recovery-world:${ctx.userId}`);
+    let same = true;
+    try { await checkCredentials(db, ctx.username, b.password, cfg.kdf); } catch { same = false; }
+    if (same) throw new HttpError(409, 'world_same_password', 'É a mesma senha do Ergon: ela não serve de reserva. Use a frase.');
+    try { await checkWorldPassword(d.world, email, b.password); } catch (e) { if ((e as HttpError).code === 'invalid_world') throttle.fail(`recovery-world:${ctx.userId}`); throw e; }
+    throttle.ok(`recovery-world:${ctx.userId}`);
+    await vault.setPersonWorld(ctx.userId, email, b.password);
+    audit(db, d.bus, { workspaceId: ctx.workspaceId, actorType: 'user', actorId: ctx.userId, action: 'security.recovery', evidence: { via: 'world' }, result: 'recuperação pela senha do Ergon World ligada (o embrulho fica só neste computador)' });
+    return { ok: true, recoveryWorld: vault.personWorld(ctx.userId) };
+  });
+  app.delete('/api/security/recovery/world', async (req) => {
+    const ctx = d.auth(req); requireRecentAuth(ctx);
+    if (vault.removePersonWorld(ctx.userId)) audit(db, d.bus, { workspaceId: ctx.workspaceId, actorType: 'user', actorId: ctx.userId, action: 'security.recovery', evidence: { via: 'world' }, result: 'recuperação pela senha do Ergon World desligada' });
     return { ok: true };
   });
 

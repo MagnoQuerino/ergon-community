@@ -187,10 +187,12 @@ const ajuda = {
 
   // ——— manual: Segurança e privacidade ———
   'seguranca.titulo': 'Segurança e privacidade',
-  'seguranca.palavras': 'senha frase recuperação trava inatividade autenticador passkey cifrado backup',
+  'seguranca.palavras': 'senha frase recuperação ergon world trava inatividade autenticador passkey cifrado backup',
   'seguranca.i1': 'Os dados ficam {cifrados} neste computador, com a sua senha.',
   'seguranca.i1Cifrados': 'cifrados',
-  'seguranca.i2': 'A {frase} (24 palavras) é a única saída se você esquecer a senha. Guarde fora do computador.',
+  'seguranca.i2': 'Se esquecer a senha, a {frase} (24 palavras, em papel) ou a senha do Ergon World, se você escolheu, abre os dados.',
+  'seguranca.i6': 'Senha do Ergon World como reserva dos dados: a chave dos dados fica embrulhada por uma chave derivada da senha do World neste computador (Argon2id, com sal próprio). O embrulho nunca sai daqui; o World só confere a senha, no login de sempre. Mesma senha do Ergon não vale. Se a senha do World mudar fora do Ergon, a reserva para de valer e o Ergon avisa.',
+  'seguranca.i7': 'Senha do Ergon World como reserva da sincronia (perdeu todos os aparelhos): a cópia da chave do workspace fica no World, cifrada pela senha do World. Como o World vê essa senha no login, em tese poderia abri-la; a frase não tem essa troca.',
   'seguranca.i2Frase': 'frase de recuperação',
   'seguranca.i3': '{trava}: desligada por padrão. Ligue e escolha o tempo em {link}.',
   'seguranca.i3Trava': 'Trava por inatividade',
@@ -236,7 +238,7 @@ const ajuda = {
   'problema.trancou.a': 'É a trava por inatividade. Desligue ou mude o tempo em {link}.',
   'problema.senha.q': 'Esqueci a senha',
   'problema.senha.palavras': 'senha esqueci recuperar',
-  'problema.senha.a': 'Na tela de entrada, use {esqueci} e digite a frase de recuperação de 24 palavras. Sem a frase, não há como abrir os dados.',
+  'problema.senha.a': 'Na tela de entrada, use {esqueci}: digite a frase de 24 palavras ou, se você escolheu, entre com o e-mail e a senha do Ergon World. Sem nenhuma das duas, não há como abrir os dados.',
   'problema.senha.aEsqueci': 'Esqueci a senha',
   'problema.versao.q': 'Apareceu “{aviso}”',
   'problema.versao.palavras': 'nova versão recarregar atualizar',
@@ -273,7 +275,7 @@ const ajuda = {
   // ——— boas-vindas: a trilha do primeiro uso ———
   'etapas.aria': 'Etapas do primeiro uso',
   'etapas.conta': 'Conta',
-  'etapas.frase': 'Frase de recuperação',
+  'etapas.frase': 'Recuperação',
   'etapas.sobre': 'Sobre você',
   'etapas.ia': 'Conta de IA',
   'etapas.equipe': 'Sua equipe',
