@@ -341,7 +341,7 @@ const servidor: Traducao<typeof pt> = {
   // ——— historico (card history and Activity rows)
   'historico.comNota': '{situacao} — {nota}',
   'historico.navegador.assumiu': 'You took control of the agent’s browser',
-  'historico.navegador.devolveu': 'You handed the browser back to the agent',
+  'historico.navegador.devolveu': 'You gave control of the browser back to the agent',
   'historico.navegador.ocioso': 'The browser went back to the agent: 10 minutes without use',
   'historico.navegador.teto': 'The browser went back to the agent: the maximum time ran out',
   'historico.navegador.queda': 'The browser went back to the agent: the screen was closed',

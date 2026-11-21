@@ -534,7 +534,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
             </>
           )}
           {/* etiquetas, pessoas, subtarefas, campos, links, arquivos de Documentos e comentários (no espelhado, só no Ergon) */}
-          <CartaoExtras taskId={tk.id} modo={mode === 'mirror' ? 'mirror' : 'user'} app={SOURCE_LABEL[source ?? '']} />
+          <CartaoExtras taskId={tk.id} modo={mode === 'mirror' ? 'mirror' : 'user'} />
           {mode === 'mirror' ? null : (
             <>
               <TaskFiles taskId={tk.id} inputs={data.files.inputs} deliverables={data.files.deliverables} canAttach onChanged={d.reload}

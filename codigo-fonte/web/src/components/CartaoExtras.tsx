@@ -2,7 +2,7 @@
  * O que vai dentro do cartão de uma tarefa da pessoa (rc.41): etiquetas e pessoas à vista (o essencial) e, em seções
  * que recolhem, subtarefas, os outros campos do quadro, links, arquivos de Documentos e comentários (de pessoas e de
  * agentes, até 240 caracteres). Cada seção lembra se a pessoa a deixou aberta; vazia, nasce recolhida — o detalhe não
- * vira um formulário comprido. Num quadro espelhado, tudo aqui fica só no Ergon (o aviso diz).
+ * vira um formulário comprido. Num quadro espelhado, tudo aqui fica só no Ergon (a Ajuda explica; a tela não repete).
  * No card da equipe aparece só a seção de comentários, e só quando há algum.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -98,7 +98,7 @@ function SeletorDeDocumento({ jaTem, onEscolher, onFechar }: { jaTem: Set<string
   );
 }
 
-export function CartaoExtras({ taskId, modo, app }: { taskId: string; modo: 'user' | 'mirror' | 'team'; app?: string }) {
+export function CartaoExtras({ taskId, modo }: { taskId: string; modo: 'user' | 'mirror' | 'team' }) {
   const t = useT();
   const c = useResource<Cartao>(`/api/tasks/${taskId}/card`, ['tasks.changed']);
   const [err, setErr] = useState<string | null>(null);
@@ -156,7 +156,6 @@ export function CartaoExtras({ taskId, modo, app }: { taskId: string; modo: 'use
 
   return (
     <div className="cx-wrap">
-      {modo === 'mirror' && <p className="hint cx__so-ergon">{t('tarefa.cartao.soNoErgon', { app: app ?? t('tarefa.nomes.umAplicativo') })}</p>}
       {err && <p className="error small" role="alert">{err}</p>}
 
       {/* o essencial, sempre à vista: etiquetas e pessoas */}
@@ -247,7 +246,6 @@ export function CartaoExtras({ taskId, modo, app }: { taskId: string; modo: 'use
         {escolhendo
           ? <SeletorDeDocumento jaTem={new Set(d.attachments.map((a) => a.artifactId))} onFechar={() => setEscolhendo(false)} onEscolher={(aid) => void fazer(() => api.post(`/api/tasks/${taskId}/attachments`, { artifactId: aid }))} />
           : <button type="button" className="btn btn--sm" onClick={() => setEscolhendo(true)}><Icon name="clip" size={13} /> {t('tarefa.cartao.anexos.escolher')}</button>}
-        <p className="hint">{t('tarefa.cartao.anexos.dica')}</p>
       </Recolhe>
 
       {comentarios}

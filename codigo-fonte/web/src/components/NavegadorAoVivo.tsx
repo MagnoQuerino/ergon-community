@@ -223,7 +223,7 @@ function Painel({ runId, est, setEst, agente, rebuscar }: { runId: string; est: 
   const situacao = euControlo ? t('conversas.navegador.voceNoControle') : est.controle === 'outra' ? t('conversas.navegador.outraNoControle', { nome: est.quem ?? '' }) : t('conversas.navegador.agenteNavegando', { nome: agente });
   const proporcao = tela ? `${tela.largura} / ${tela.altura}` : '16 / 9';
   const visor = (grande: boolean) => (
-    <div className={`navv__tela ${captura && grande ? 'navv__tela--captura' : ''}`} style={{ aspectRatio: proporcao }}>
+    <div className={`navv__tela ${captura && grande ? `navv__tela--captura ${teclado ? 'is-digitando' : 'is-chamando'}` : ''}`} style={{ aspectRatio: proporcao }}>
       {est.controle === 'outra'
         ? <p className="navv__vazio"><Icon name="lock" size={18} /> {t('conversas.navegador.telaComOutra', { nome: est.quem ?? '' })}</p>
         : (
@@ -246,22 +246,17 @@ function Painel({ runId, est, setEst, agente, rebuscar }: { runId: string; est: 
       <span className="navv__end" title={pagina?.url || undefined}><Icon name="globe" size={14} /><span className="navv__url">{pagina?.url || t('conversas.navegador.semEndereco')}</span></span>
       <span className="navv__acoes">
         {est.controle === 'agente' && <button type="button" className="btn btn--primary btn--sm" onClick={() => void assumir()} disabled={ocupado || !ligacao} aria-busy={ocupado}><Icon name="walk" size={14} /> {t('conversas.navegador.assumir')}</button>}
-        {euControlo && <button type="button" className="btn btn--gold btn--sm" onClick={() => void devolver()} disabled={ocupado} aria-busy={ocupado}><Icon name="undo" size={14} /> {t('conversas.navegador.devolver', { nome: agente })}</button>}
+        {euControlo && <button type="button" className="btn btn--gold btn--sm" onClick={() => void devolver()} disabled={ocupado} aria-busy={ocupado}><Icon name="undo" size={14} /> {t('conversas.navegador.devolver')}</button>}
+        {euControlo && min !== null && <span className="navv__prazo" title={t('conversas.navegador.prazoDica', { n: Math.max(1, min) })}><Icon name="clock" size={13} />{t('conversas.navegador.prazo', { n: Math.max(1, min) })}</span>}
         {grande
           ? <button type="button" className="icon-btn" onClick={() => setAmpliado(false)} aria-label={t('conversas.navegador.reduzir')} title={t('conversas.navegador.reduzir')}><Icon name="x" /></button>
-          : <button type="button" className="icon-btn" onClick={() => setAmpliado(true)} aria-label={t('conversas.navegador.ampliar')} title={t('conversas.navegador.ampliar')}><Icon name="focus" size={16} /></button>}
+          : <button type="button" className={`icon-btn ${euControlo ? 'navv__chamar' : ''}`} onClick={() => setAmpliado(true)} aria-label={t('conversas.navegador.ampliar')} title={t('conversas.navegador.ampliar')}><Icon name="focus" size={16} /></button>}
       </span>
     </div>
   );
-  const avisos = (grande: boolean) => (
+  // no controle, a moldura e o botão de ampliar (que pulsa na tela pequena) já dizem o que fazer: sem faixa de instrução
+  const avisos = () => (
     <>
-      {euControlo && (
-        <p className="navv__faixa" role="note">
-          <strong>{t('conversas.navegador.faixaTitulo', { nome: agente })}</strong>{' '}
-          {grande ? (teclado ? t('conversas.navegador.faixaUso') : t('conversas.navegador.faixaClique')) : t('conversas.navegador.faixaAmplie')}{' '}
-          {t('conversas.navegador.faixaSigilo')}{min !== null ? ` ${t('conversas.navegador.faixaPrazo', { n: Math.max(1, min) })}` : ''}
-        </p>
-      )}
       {!euControlo && nota && <p className="navv__nota" role="status">{nota}</p>}
       {erro && <p className="error navv__nota" role="alert">{erro}</p>}
     </>
@@ -271,13 +266,13 @@ function Painel({ runId, est, setEst, agente, rebuscar }: { runId: string; est: 
     <section className={`navv navv--${est.controle}`} aria-label={t('conversas.navegador.titulo', { nome: agente })}>
       {barra(false)}
       {ampliado ? <button type="button" className="navv__mini-aberta" onClick={() => dlg.current?.focus()}>{t('conversas.navegador.abertaAoLado')}</button> : visor(false)}
-      {avisos(false)}
+      {avisos()}
       {ampliado && createPortal(
         <div className="dlg-back navv-back">
           <section ref={dlg} tabIndex={-1} className={`dlg navv navv--grande navv--${est.controle}`} role="dialog" aria-modal="true" aria-label={t('conversas.navegador.titulo', { nome: agente })}>
             {barra(true)}
             {visor(true)}
-            {avisos(true)}
+            {avisos()}
           </section>
         </div>,
         document.body,

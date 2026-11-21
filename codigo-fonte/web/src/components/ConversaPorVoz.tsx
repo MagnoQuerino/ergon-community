@@ -2,14 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '../i18n/index.ts';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
 import {
-  VAD_ESCUTA, VAD_INTERRUPCAO, VAD_PARADO, conversaVoz, microfoneLigado, modoDoVad, nivelNoMedidor, nivelRms, textoFalado, turnoDaMensagem, vad, vadDeNovo, vezDoAgente, voz0,
+  VAD_ESCUTA, VAD_INTERRUPCAO, VAD_PARADO, conversaVoz, microfoneLigado, modoDoVad, nivelNoMedidor, nivelRms, turnoDaMensagem, vad, vadDeNovo, voz0,
   type EstadoVad, type EstadoVoz, type EventoVoz,
 } from '../lib/conversa-voz.ts';
 import { GRAVACAO_BITS, formatoDeGravacao, motivoDoErro, nomeDaGravacao } from '../lib/gravador.ts';
 import { RECURSOS } from '../lib/recursos.ts';
-import { useSurface } from '../lib/surface.ts';
 import type { Agent, Attachment, Message } from '../lib/types.ts';
-import { AgentAvatar } from './AgentAvatar.tsx';
 import { Icon } from './Icon.tsx';
 
 /** de quanto em quanto o nível do microfone é medido (em segundo plano o navegador espaça: o detector conta o tempo, não as medidas) */
@@ -21,15 +19,15 @@ const MEDIDA_MS = 50;
 const SOBRA_ESCUTA_MS = 6000;
 /** com o agente falando, a sobra é menor: quase nada da voz dele entra no trecho de quem fala por cima */
 const SOBRA_INTERRUPCAO_MS = 1500;
-/** colunas do medidor de nível */
-const COLUNAS = 24;
 /** enquanto espera a resposta, confere a conversa de tempos em tempos (se um aviso ao vivo se perder) */
 const CONFERIR_MS = 3000;
 
 interface Gravando { r: MediaRecorder; partes: Blob[]; inicio: number; descartar: boolean }
 
 /**
- * Conversa por voz (rc.41): o modo mãos livres da conversa com um agente. A pessoa fala; quando ela para (silêncio), o
+ * Conversa por voz (rc.41): um canal ao lado da barra de digitação, não uma tela por cima. Ligado, o próprio botão mostra
+ * o estado (o anel segue o nível da voz; pontos com o agente pensando; ondas com ele falando) e a barra de texto continua
+ * livre: dá para digitar e mandar com a voz ligada, e a resposta a esse texto também é falada. A pessoa fala; quando ela para (silêncio), o
  * trecho sobe como uma mensagem de áudio comum (o mesmo anexo e a mesma rota de mensagens), o servidor transcreve, o
  * agente responde e a resposta é lida em voz alta (a rota do "Ouvir"); terminou de falar, volta a ouvir sozinho. Falar
  * por cima ou tocar em "Interromper" para a fala do agente. Tudo fica na conversa de sempre: aqui não há histórico.
@@ -37,8 +35,8 @@ interface Gravando { r: MediaRecorder; partes: Blob[]; inicio: number; descartar
  * O microfone só fica aberto com o modo aberto e sem pausa (o indicador no topo diz), e é solto em toda saída: encerrar,
  * erro, pausa e ao desmontar. Sem voz para falar, as respostas aparecem escritas e a escuta segue.
  */
-export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garantirConversa, recarregar, parar, onFechar }: {
-  agente: Pick<Agent, 'id' | 'name' | 'role' | 'color' | 'char_key'> & { look_seed?: Agent['look_seed'] };
+export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garantirConversa, recarregar, onFechar }: {
+  agente: Pick<Agent, 'id' | 'name'>;
   /** as mensagens da conversa (a lista de sempre do ChatPanel): é por elas que o modo sabe da transcrição e da resposta */
   mensagens: Message[];
   /** há voz para falar neste computador (a mesma condição do botão "Ouvir") */
@@ -47,8 +45,6 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   preparaVoz: boolean;
   garantirConversa: () => Promise<string>;
   recarregar: () => void;
-  /** parar a resposta em andamento (o "Parar" da conversa) */
-  parar: () => void;
   onFechar: () => void;
 }) {
   const t = useT();
@@ -65,13 +61,12 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   // pode ter sido criada no 1º envio; sem isto o 2º trecho abriria outra)
   const de = useRef({ garantirConversa, recarregar });
   de.current = { garantirConversa, recarregar };
-  /** o que a pessoa disse e o que o agente respondeu no turno de agora (a legenda; o histórico é a conversa) */
-  const [legenda, setLegenda] = useState<{ dito: string | null; resposta: string | null }>({ dito: null, resposta: null });
+  /** as mensagens que já estavam na conversa (ou já tratadas): um texto novo da pessoa, fora delas, é adotado como turno */
+  const conhecidas = useRef<Set<string> | null>(null);
+  if (conhecidas.current === null) conhecidas.current = new Set(mensagens.map((m) => m.id));
   const [detalhe, setDetalhe] = useState<string | null>(null);
 
-  const raiz = useRef<HTMLDivElement>(null);
-  const colunas = useRef<HTMLSpanElement>(null);
-  const niveis = useRef<number[]>(Array.from({ length: COLUNAS }, () => 0));
+  const raiz = useRef<HTMLSpanElement>(null);
   const fluxo = useRef<MediaStream | null>(null);
   const contexto = useRef<AudioContext | null>(null);
   const analisador = useRef<AnalyserNode | null>(null);
@@ -86,14 +81,8 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   const turno = useRef<string | null>(null);
   const envio = useRef<AbortController | null>(null);
 
-  // ——— o medidor: direto no DOM (20 medidas por segundo não redesenham a tela) ———
-  const desenhar = (rms: number) => {
-    const v = nivelNoMedidor(rms);
-    raiz.current?.style.setProperty('--nivel', v.toFixed(3));
-    const l = niveis.current; l.push(v); l.shift();
-    const filhos = colunas.current?.children;
-    if (filhos) for (let i = 0; i < filhos.length; i++) (filhos[i] as HTMLElement).style.transform = `scaleY(${Math.max(0.08, l[i]).toFixed(3)})`;
-  };
+  // ——— o nível da voz: direto no DOM, na variável que o anel do microfone lê (20 medidas por segundo não redesenham a tela) ———
+  const desenhar = (rms: number) => { raiz.current?.style.setProperty('--nivel', nivelNoMedidor(rms).toFixed(3)); };
 
   // ——— o gravador ———
   const soltarGravador = () => {
@@ -156,7 +145,6 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
     const ac = new AbortController();
     envio.current = ac;
     setDetalhe(null);
-    setLegenda({ dito: null, resposta: null });
     try {
       const conv = await de.current.garantirConversa();
       const arq = await uploadFile<Attachment>(new File([blob], nomeDaGravacao(new Date(), f.ext), { type: f.tipo }), { conversationId: conv }, undefined, ac.signal);
@@ -167,6 +155,7 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
       // o colega ainda respondia (a pessoa falou por cima de uma resposta longa): a fala entra na fila da conversa
       const r = await mandar(false).catch((err) => { if (err instanceof ApiError && err.code === 'busy') return mandar(true); throw err; });
       turno.current = r.messageId;
+      conhecidas.current?.add(r.messageId);
       despachar({ tipo: 'enviado' }); // i18n-ok: código interno do estado
       de.current.recarregar();
     } catch (err) {
@@ -281,7 +270,6 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
     const id = turno.current;
     if (!id || !esperando) return;
     const tu = turnoDaMensagem(mensagens, id);
-    if (tu.dito !== null) setLegenda((l) => (l.dito === tu.dito ? l : { ...l, dito: tu.dito }));
     // a equipe não transcreve (falta o componente, ou o motor está desligado): sem isso não há conversa por voz
     if (tu.transcricaoFalhou === 'componente' || tu.transcricaoFalhou === 'sem_motor') {
       turno.current = null;
@@ -292,34 +280,41 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
     if (tu.fase === 'pensando') { despachar({ tipo: tu.transcricaoFalhou ? 'transcricao_falhou' : 'transcrito' }); return; }
     turno.current = null;
     if (tu.fase !== 'pronta') { despachar({ tipo: 'sem_resposta', motivo: tu.fase }); return; }
-    setLegenda((l) => ({ ...l, resposta: tu.respostas.map((m) => textoFalado(m.content)).join('\n\n') }));
     const n = despachar({ tipo: 'resposta', falar: podeFalar });
     if (n.fase === 'preparando') void falar(tu.respostas);
   }, [mensagens, esperando]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ——— um texto mandado pela barra com a voz ligada: a resposta dele também é falada ———
+  useEffect(() => {
+    const k = conhecidas.current!;
+    if (e.fase !== 'ouvindo' || turno.current) return;
+    for (const m of mensagens) {
+      if (k.has(m.id) || m.role !== 'user') continue;
+      const tu = turnoDaMensagem(mensagens, m.id);
+      k.add(m.id);
+      // já respondido (chegou enquanto o agente falava outra coisa): fica só escrito
+      if (tu.fase !== 'pensando' && tu.fase !== 'transcrevendo') continue;
+      turno.current = m.id;
+      despachar({ tipo: 'texto' });
+      return;
+    }
+  }, [mensagens, e.fase]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ——— os botões ———
   const encerrar = () => { despachar({ tipo: 'fechar' }); envio.current?.abort(); soltarMicrofone(); pararFala(); onFechar(); };
   const interromper = () => { pararFala(); despachar({ tipo: 'interromper' }); };
-  const pausar = () => {
-    if (e.mudo) { despachar({ tipo: 'retomar' }); return; }
-    despachar({ tipo: 'pausar' });
-    soltarMicrofone(); // na hora, sem esperar o próximo desenho
-  };
-  useSurface(raiz, { onClose: encerrar, modal: true });
+
 
   const nome = agente.name;
   const microfone = ligado && e.fase !== 'abrindo';
-  const titulo = e.fase === 'erro' ? t('conversas.voz.fase.erro')
-    : e.fase === 'pensando' ? t('conversas.voz.fase.pensando', { nome })
-    : e.fase === 'falando' ? t('conversas.voz.fase.falando', { nome })
-    : t(`conversas.voz.fase.${e.fase === 'fechado' ? 'pausado' : e.fase}`);
-  const dica = e.fase === 'erro'
-    ? (e.erro === 'negado' ? t('conversas.gravador.negado') : e.erro === 'sem_microfone' ? t('conversas.gravador.semMicrofone') : e.erro === 'sem_suporte' ? t('conversas.voz.erro.semSuporte')
-      : e.erro === 'sem_transcricao' ? t('conversas.voz.erro.semTranscricao') : e.erro === 'sem_motor' ? t('conversas.voz.erro.semMotor') : t('conversas.voz.erro.falhou'))
-    : e.fase === 'preparando' ? (preparaVoz ? t('conversas.voz.dica.preparandoPrimeira') : t('conversas.voz.dica.preparando'))
-    : e.fase === 'falando' ? (e.mudo ? t('conversas.voz.dica.falandoMudo') : t('conversas.voz.dica.falando'))
-    : e.fase === 'fechado' ? '' : t(`conversas.voz.dica.${e.fase}`);
-  const aviso = e.fase === 'erro' || !e.aviso ? null
+  const falando = e.fase === 'falando' || e.fase === 'preparando';
+  // o estado curto, só para o leitor de tela (a tela mostra no próprio botão); no erro, a linha do erro
+  const estadoCurto = e.fase === 'erro' ? '' : t(`conversas.voz.fase.${e.fase === 'fechado' ? 'pausado' : e.fase}`);
+  const linha = e.fase === 'erro'
+    ? t(e.erro === 'negado' ? 'conversas.voz.erro.negado' : e.erro === 'sem_microfone' ? 'conversas.voz.erro.semMicrofone' : e.erro === 'sem_suporte' ? 'conversas.voz.erro.semSuporte'
+      : e.erro === 'sem_transcricao' ? 'conversas.voz.erro.semTranscricao' : e.erro === 'sem_motor' ? 'conversas.voz.erro.semMotor' : 'conversas.voz.erro.falhou')
+    : e.fase === 'preparando' && preparaVoz ? t('conversas.voz.dica.preparandoPrimeira')
+    : !e.aviso ? null
     : e.aviso === 'sem_voz' ? t('conversas.voz.aviso.semVoz')
     : e.aviso === 'voz_falhou' ? t('conversas.voz.aviso.vozFalhou')
     : e.aviso === 'envio_falhou' ? t('conversas.voz.aviso.envioFalhou', { motivo: detalhe ?? t('conversas.voz.aviso.semDetalhe') })
@@ -328,50 +323,37 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
     : e.aviso === 'resposta_parada' ? t('conversas.voz.aviso.respostaParada')
     : e.aviso === 'espera_voce' ? t('conversas.voz.aviso.esperaVoce', { nome })
     : t('conversas.voz.aviso.limite');
+  // a linha some sozinha depois de um tempo (o erro fica: ele tem o "de novo")
+  const [linhaVista, setLinhaVista] = useState<string | null>(null);
+  useEffect(() => {
+    setLinhaVista(linha);
+    if (!linha || e.fase === 'erro' || e.fase === 'preparando') return;
+    const id = window.setTimeout(() => setLinhaVista(null), 6000);
+    return () => window.clearTimeout(id);
+  }, [linha, e.fase]);
 
   return (
-    <div ref={raiz} className={`vozc vozc--${e.fase}`} role="dialog" aria-modal="true" aria-label={t('conversas.voz.titulo', { nome })} data-fase={e.fase} data-microfone={microfone ? 'aberto' : 'fechado'}>
-      <header className="vozc__topo">
-        <span className={`vozc__mic ${microfone ? 'is-on' : ''}`} role="status">
-          <i aria-hidden="true" />{e.fase === 'abrindo' ? t('conversas.gravador.pedindo') : microfone ? t('conversas.voz.micAberto') : t('conversas.voz.micFechado')}
+    <span ref={raiz} className={`vozc vozc--${e.fase} ${esperando || e.fase === 'enviando' ? 'vozc--espera' : ''}`} data-fase={e.fase} data-microfone={microfone ? 'aberto' : 'fechado'}>
+      <button type="button" className="icon-btn vozc__botao" onClick={encerrar} aria-pressed="true"
+        aria-label={t('conversas.voz.encerrarDica')} title={t('conversas.voz.encerrarDica')}>
+        <i className="vozc-anel__fig" aria-hidden="true" /><i className="vozc-onda__fig" aria-hidden="true" />
+        <Icon name="voz" />
+        <span className="vozc__pontos" aria-hidden="true"><i /><i /><i /></span>
+        {/* o ponto vermelho: o microfone está aberto de verdade */}
+        <i className="vozc__rec" aria-hidden="true" />
+      </button>
+      {falando && (
+        <button type="button" className="icon-btn vozc__parar" onClick={interromper} aria-label={t('conversas.voz.interromperDica', { nome })} title={t('conversas.voz.interromperDica', { nome })}>
+          <Icon name="stop" size={16} />
+        </button>
+      )}
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{estadoCurto}</span>
+      {linhaVista && (
+        <span className={`vozc__linha ${e.fase === 'erro' ? 'vozc__linha--erro' : ''}`} role={e.fase === 'erro' ? 'alert' : 'status'}>
+          <Icon name="alert" size={13} /><span>{linhaVista}</span>
+          {e.fase === 'erro' && <button type="button" className="linkish" onClick={() => despachar({ tipo: 'retomar' })}>{t('conversas.voz.tentar')}</button>}
         </span>
-        <span className="vozc__nome">{t('conversas.voz.nome')}</span>
-        <button type="button" className="icon-btn vozc__x" onClick={encerrar} aria-label={t('conversas.voz.encerrarDica')} title={t('conversas.voz.encerrarDica')}><Icon name="x" /></button>
-      </header>
-
-      <div className="vozc__palco">
-        <div className="vozc__orbe" aria-hidden="true">
-          <i className="vozc__anel vozc__anel--2" /><i className="vozc__anel" />
-          <span className="vozc__rosto"><AgentAvatar agent={{ ...agente, look_seed: agente.look_seed ?? null }} size={96} /></span>
-        </div>
-        <h3 className="vozc__estado" aria-live="polite" aria-atomic="true">{titulo}</h3>
-        <p className="vozc__dica">{dica}</p>
-        <span ref={colunas} className="vozc__nivel" aria-hidden="true">{Array.from({ length: COLUNAS }, (_, i) => <i key={i} />)}</span>
-      </div>
-
-      {/* a legenda do turno: o que você disse e a resposta (lida pelo leitor de tela só quando não há voz) */}
-      <div className="vozc__legenda" aria-live={e.semVoz ? 'polite' : 'off'}>
-        {legenda.dito === null && legenda.resposta === null && !vezDoAgente(e)
-          ? <p className="vozc__vazio">{t('conversas.voz.legendaVazia')}</p>
-          : <>
-            <p className="vozc__fala vozc__fala--voce"><b>{t('conversas.conversa.voce')}</b>{legenda.dito === null ? <span className="vozc__pontos" aria-hidden="true">…</span> : legenda.dito || <em>{t('conversas.voz.semFala')}</em>}</p>
-            {legenda.resposta !== null && <p className="vozc__fala vozc__fala--agente"><b>{nome}</b>{legenda.resposta}</p>}
-          </>}
-      </div>
-      {aviso && <p className="vozc__aviso" role="status"><Icon name="alert" size={15} /> <span>{aviso}</span></p>}
-
-      <footer className="vozc__acoes">
-        {e.fase === 'erro'
-          ? <button type="button" className="btn vozc__btn" data-autofocus onClick={() => despachar({ tipo: 'retomar' })}><Icon name="repeat" size={16} /> {t('conversas.voz.tentar')}</button>
-          : <button type="button" className="btn vozc__btn" aria-pressed={e.mudo} onClick={pausar} title={e.mudo ? t('conversas.voz.retomarDica') : t('conversas.voz.pausarDica')}>
-            <Icon name={e.mudo ? 'mic' : 'pause'} size={16} /> {e.mudo ? t('conversas.voz.retomar') : t('conversas.voz.pausar')}
-          </button>}
-        {(e.fase === 'falando' || e.fase === 'preparando') && <button type="button" className="btn vozc__btn vozc__btn--destaque" onClick={interromper}><Icon name="stop" size={16} /> {e.fase === 'falando' ? t('conversas.voz.interromper') : t('conversas.voz.pular')}</button>}
-        {e.fase === 'captando' && <button type="button" className="btn vozc__btn vozc__btn--destaque" onClick={() => fecharTrecho(false)}><Icon name="send" size={16} /> {t('conversas.voz.enviarAgora')}</button>}
-        {e.fase === 'pensando' && <button type="button" className="btn vozc__btn" onClick={parar}><Icon name="stop" size={16} /> {t('conversas.voz.pararResposta')}</button>}
-        <button type="button" className="btn vozc__btn vozc__btn--sair" onClick={encerrar}><Icon name="x" size={16} /> {t('conversas.voz.encerrar')}</button>
-      </footer>
-      <p className="vozc__nota">{t('conversas.voz.privacidade')}</p>
-    </div>
+      )}
+    </span>
   );
 }

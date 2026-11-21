@@ -823,9 +823,8 @@ export function SyncCard({ onMsg }: { onMsg: (m: { kind: 'ok' | 'error'; text: s
             <div className="sinc__texto" role="status" aria-live="polite">
               <b>{q.linha}</b>
               {q.pendente && <span>{q.pendente}</span>}
-              <span className="muted small">{t('sinc.auto')}</span>
             </div>
-            <button className="btn btn--sm btn--ghost sinc__agora" disabled={busy} title={t('sinc.agoraDica')} onClick={() => void go(async () => {
+            <button className="btn btn--sm btn--ghost sinc__agora" disabled={busy} onClick={() => void go(async () => {
               const r = await api.post<SyncStatus>('/api/world/sync/now', {});
               return r.auto?.pendencia || r.auto?.equipeRetida ? t('sinc.agoraPendente') : t('sinc.agoraFeito');
             })}><Icon name="repeat" size={13} /> {t('sinc.agora')}</button>

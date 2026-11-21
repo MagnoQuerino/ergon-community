@@ -442,7 +442,7 @@ export class Navegador {
     if (!c) return Promise.resolve(0);
     s.motivo = motivo === 'pessoa' ? null : motivo;
     const texto: Record<Motivo, string> = {
-      pessoa: 'Você devolveu o navegador ao agente', ocioso: 'O navegador voltou ao agente: 10 minutos sem uso', teto: 'O navegador voltou ao agente: o tempo máximo acabou',
+      pessoa: 'Você concedeu o controle do navegador ao agente', ocioso: 'O navegador voltou ao agente: 10 minutos sem uso', teto: 'O navegador voltou ao agente: o tempo máximo acabou',
       queda: 'O navegador voltou ao agente: a tela foi fechada', sessao: 'O navegador voltou ao agente: a sessão foi trancada ou encerrada',
       fim: 'O navegador voltou ao agente: o trabalho terminou', prazo: 'O navegador voltou ao agente: o prazo acabou', navegador: 'O navegador voltou ao agente: ele foi fechado',
     };

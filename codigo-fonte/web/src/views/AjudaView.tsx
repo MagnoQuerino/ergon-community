@@ -48,6 +48,8 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.conversar.i2', { cartao: <b>{t('ajuda.conversar.i2Cartao')}</b>, todas: <b>{t('ajuda.conversar.i2Todas')}</b> })}</li>
         <li>{t('ajuda.conversar.i3')}</li>
         <li>{tn('ajuda.conversar.i4', { tarefa: <code>{t('ajuda.conversar.i4Tarefa')}</code>, pendencias: <code>{CMD_PENDENCIAS}</code> })}</li>
+        <li>{tn('ajuda.conversar.i5', { voz: <b>{t('ajuda.conversar.i5Voz')}</b> })}</li>
+        <li>{tn('ajuda.conversar.i6', { navegador: <b>{t('ajuda.conversar.i6Navegador')}</b>, assumir: <b>{t('ajuda.conversar.i6Assumir')}</b>, conceder: <b>{t('ajuda.conversar.i6Conceder')}</b> })}</li>
       </ul>
     </> },
   { id: 'personalizar', title: () => t('ajuda.personalizar.titulo'), icon: 'users', keywords: () => t('ajuda.personalizar.palavras'),
@@ -92,6 +94,7 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.tarefas.i4', { link: <Go c={c} v="equipe">{t('ajuda.lugar.fluxos')}</Go> })}</li>
         <li>{tn('ajuda.tarefas.i5', { revisao: <b>{t('ajuda.tarefas.i5Revisao')}</b>, nome: c.reviewer })}</li>
         <li>{tn('ajuda.tarefas.i6', { andamento: <b>{t('ajuda.tarefas.i6Andamento')}</b>, link: <Go c={c} v="configuracao">{t('ajuda.lugar.configuracoes')}</Go> })}</li>
+        <li>{tn('ajuda.tarefas.i7', { quadros: <b>{t('ajuda.tarefas.i7Quadros')}</b> })}</li>
       </ul>
     </> },
   { id: 'decisoes', title: () => t('ajuda.decisoes.titulo'), icon: 'bulb', keywords: () => t('ajuda.decisoes.palavras'),
@@ -105,6 +108,7 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.conexoes.i1', { contas: <b>{t('ajuda.conexoes.i1Contas')}</b>, nous: <b>{t('ajuda.conexoes.i1Nous')}</b> })}</li>
         <li>{tn('ajuda.conexoes.i2', { apps: <b>{t('ajuda.conexoes.i2Apps')}</b> })}</li>
         <li>{tn('ajuda.conexoes.i3', { quadros: <b>{t('ajuda.conexoes.i3Quadros')}</b> })}</li>
+        <li>{tn('ajuda.conexoes.i4', { nuvem: <b>{t('ajuda.conexoes.i4Nuvem')}</b> })}</li>
       </ul>
       <p>{tn('ajuda.conexoes.p', { link: <Go c={c} v="conexoes">{t('ajuda.lugar.conexoes')}</Go> })}</p>
     </> },
@@ -125,6 +129,7 @@ const ARTICLES: Article[] = [
         <li>{tn('ajuda.seguranca.i3', { trava: <b>{t('ajuda.seguranca.i3Trava')}</b>, link: <Go c={c} v="configuracao" hash={HASH_SEGURANCA}>{t('ajuda.lugar.configSeguranca')}</Go> })}</li>
         <li>{tn('ajuda.seguranca.i4', { duas: <b>{t('ajuda.seguranca.i4Duas')}</b> })}</li>
         <li>{t('ajuda.seguranca.i5')}</li>
+        <li>{tn('ajuda.seguranca.i6', { sincronia: <b>{t('ajuda.seguranca.i6Sincronia')}</b> })}</li>
       </ul>
     </> },
   { id: 'temas', title: () => t('ajuda.temas.titulo'), icon: 'palette', keywords: () => t('ajuda.temas.palavras'),

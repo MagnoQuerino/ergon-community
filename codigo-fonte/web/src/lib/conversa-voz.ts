@@ -162,6 +162,8 @@ export type EventoVoz =
   | { tipo: 'fala_inicio' }
   | { tipo: 'fala_fim'; limite?: boolean }
   | { tipo: 'fala_descartada' }
+  /** a pessoa mandou um texto pela barra com a voz ligada: a resposta dele é a vez do agente (e é falada) */
+  | { tipo: 'texto' }
   | { tipo: 'enviado' }
   | { tipo: 'envio_falhou' }
   | { tipo: 'transcrito' }
@@ -196,8 +198,11 @@ export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
     case 'erro':
       return { ...e, fase: 'erro', erro: ev.motivo }; // i18n-ok: código interno do estado
     case 'fala_inicio':
-      // falar por cima da resposta (ou enquanto a voz é preparada) interrompe e já é o próximo trecho
-      return e.fase === 'ouvindo' || e.fase === 'falando' || e.fase === 'preparando' ? { ...e, fase: 'captando', aviso: e.semVoz ? 'sem_voz' : null } : e;
+      // falar por cima da resposta (ou enquanto a voz é preparada) interrompe e já é o próximo trecho; falar enquanto o
+      // agente pensa também vale (comentar o texto que acabou de mandar): o trecho novo entra na fila da conversa
+      return e.fase === 'ouvindo' || e.fase === 'pensando' || e.fase === 'falando' || e.fase === 'preparando' ? { ...e, fase: 'captando', aviso: e.semVoz ? 'sem_voz' : null } : e;
+    case 'texto':
+      return e.fase === 'ouvindo' ? { ...e, fase: 'pensando' } : e;
     case 'fala_fim':
       return e.fase === 'captando' ? { ...e, fase: 'enviando', aviso: ev.limite ? 'limite' : e.aviso } : e; // i18n-ok: código interno do estado
     case 'fala_descartada':
@@ -216,8 +221,7 @@ export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
       return ev.falar && !e.semVoz ? { ...e, fase: 'preparando', turnos: e.turnos + 1 } : escuta({ ...e, turnos: e.turnos + 1 }, 'sem_voz');
     case 'sem_resposta': {
       if (e.fase !== 'transcrevendo' && e.fase !== 'pensando') return e;
-      // o colega espera uma decisão na conversa escrita: o microfone fecha, para a pessoa olhar a tela
-      if (ev.motivo === 'espera') return { ...e, fase: 'pausado', mudo: true, aviso: 'espera_voce' }; // i18n-ok: código interno do estado
+      // o colega espera uma decisão na conversa escrita: a escuta segue (a barra de texto está ali, ao lado), com o aviso
       return escuta(e, AVISO_SEM_RESPOSTA[ev.motivo] ?? e.aviso);
     }
     case 'tocando':
@@ -243,12 +247,13 @@ export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
 /** O microfone deve estar aberto agora (o componente abre ou solta a faixa quando isto muda). */
 export const microfoneLigado = (e: EstadoVoz): boolean => !e.mudo && e.fase !== 'erro' && e.fase !== 'fechado';
 /**
- * O que o detector de fala faz nesta fase: escutar a pessoa, só vigiar a interrupção (com o agente falando), ou nada
- * (enviando, transcrevendo, pensando: a vez é do agente; nada é gravado).
+ * O que o detector de fala faz nesta fase: escutar a pessoa (também com o agente pensando: a voz é um canal ao lado da
+ * barra de texto, e a pessoa pode comentar o que acabou de mandar), só vigiar a interrupção (com o agente falando), ou
+ * nada (enviando e transcrevendo o trecho: um instante; nada é gravado).
  */
 export function modoDoVad(e: EstadoVoz): 'escuta' | 'interrupcao' | null {
   if (e.mudo) return null;
-  if (e.fase === 'ouvindo' || e.fase === 'captando') return 'escuta';
+  if (e.fase === 'ouvindo' || e.fase === 'captando' || e.fase === 'pensando') return 'escuta';
   if (e.fase === 'falando' || e.fase === 'preparando') return 'interrupcao';
   return null;
 }

@@ -60,7 +60,7 @@ function Opcoes({ campo, busy, salvar }: { campo: CampoQuadro; busy: boolean; sa
   );
 }
 
-export function CamposDoQuadro({ quadroId, campos, espelho, onMudou }: { quadroId: string; campos: CampoQuadro[]; espelho?: string | null; onMudou: () => void }) {
+export function CamposDoQuadro({ quadroId, campos, onMudou }: { quadroId: string; campos: CampoQuadro[]; onMudou: () => void }) {
   const t = useT();
   const [nomes, setNomes] = useState<Record<string, string>>({});
   const [aberto, setAberto] = useState<string | null>(null);
@@ -76,7 +76,6 @@ export function CamposDoQuadro({ quadroId, campos, espelho, onMudou }: { quadroI
   return (
     <section className="campos" aria-labelledby="campos-t">
       <h4 id="campos-t">{t('quadro.campos.titulo')}</h4>
-      <p className="hint">{t('quadro.campos.dica')}{espelho ? ` ${t('quadro.campos.soNoErgon', { app: espelho })}` : ''}</p>
       {err && <p className="error small" role="alert">{err}</p>}
       {!ordem.length && <p className="muted small">{t('quadro.campos.nenhum')}</p>}
       <ul className="campos__lista">

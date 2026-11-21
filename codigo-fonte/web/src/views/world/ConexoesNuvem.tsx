@@ -80,7 +80,6 @@ export default function ConexoesNuvem() {
       ) : (
         <>
           <p className="muted small">{t('conexoes.nuvem.intro')}</p>
-          <p className="small conn-nuvem__seguranca">{t('conexoes.nuvem.seguranca')}</p>
           <TrocaDaNuvem d={d} aoConfirmar={r.reload} />
           {d.semAparelho && <p className="muted small" role="status">{t('conexoes.nuvem.semAparelho')}</p>}
           {d.erro && <p className="warn small" role="status">{t('conexoes.nuvem.erro')}</p>}

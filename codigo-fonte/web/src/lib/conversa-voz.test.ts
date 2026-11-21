@@ -120,12 +120,13 @@ test('o ciclo: ouvir → enviar → transcrever → pensar → falar → ouvir d
   assert.equal(rodar([{ tipo: 'microfone' }, { tipo: 'fala_inicio' }, { tipo: 'fala_fim' }, { tipo: 'enviado' }, { tipo: 'resposta', falar: true }]).fase, 'preparando');
 });
 
-test('o detector segue a fase: escuta a pessoa, só vigia a interrupção com o agente falando, e cala na vez do agente', () => {
+test('o detector segue a fase: escuta a pessoa (também com o agente pensando), só vigia a interrupção com o agente falando, e cala no envio', () => {
   const em = (evs: EventoVoz[]) => modoDoVad(rodar([{ tipo: 'microfone' }, ...evs]));
   assert.equal(modoDoVad(voz0(false)), null, 'pedindo o microfone');
   assert.equal(em([]), 'escuta');
   assert.equal(em(TURNO.slice(0, 1)), 'escuta');
-  for (const n of [2, 3, 4]) assert.equal(em(TURNO.slice(0, n)), null, 'enviando, transcrevendo e pensando: nada é escutado nem gravado');
+  for (const n of [2, 3]) assert.equal(em(TURNO.slice(0, n)), null, 'enviando e transcrevendo: nada é escutado nem gravado');
+  assert.equal(em(TURNO.slice(0, 4)), 'escuta', 'pensando: a pessoa pode comentar o que mandou');
   assert.equal(em(TURNO.slice(0, 5)), 'interrupcao');
   assert.equal(em(TURNO.slice(0, 6)), 'interrupcao');
   assert.equal(em(TURNO), 'escuta');
@@ -156,14 +157,25 @@ test('ruído e falhas de envio voltam a ouvir, sem travar', () => {
   assert.deepEqual([conversaVoz(esperando, { tipo: 'sem_resposta', motivo: 'falhou' }).fase, conversaVoz(esperando, { tipo: 'sem_resposta', motivo: 'falhou' }).aviso], ['ouvindo', 'resposta_falhou']);
   assert.equal(conversaVoz(esperando, { tipo: 'sem_resposta', motivo: 'parada' }).aviso, 'resposta_parada');
   assert.equal(conversaVoz(esperando, { tipo: 'sem_resposta', motivo: 'vazia' }).fase, 'ouvindo');
-  // o colega espera uma decisão na conversa escrita: o microfone fecha
+  // o colega espera uma decisão na conversa escrita: a escuta segue, com o aviso (a barra de texto está ao lado)
   const espera = conversaVoz(esperando, { tipo: 'sem_resposta', motivo: 'espera' });
-  assert.deepEqual([espera.fase, espera.mudo, espera.aviso, microfoneLigado(espera)], ['pausado', true, 'espera_voce', false]);
+  assert.deepEqual([espera.fase, espera.mudo, espera.aviso, microfoneLigado(espera)], ['ouvindo', false, 'espera_voce', true]);
   // transcrição falhou: o pedido segue (o colega sabe do áudio), com o aviso
   const tr = rodar([{ tipo: 'microfone' }, ...TURNO.slice(0, 3), { tipo: 'transcricao_falhou' }]);
   assert.deepEqual([tr.fase, tr.aviso], ['pensando', 'transcricao_falhou']);
   const limite = rodar([{ tipo: 'microfone' }, { tipo: 'fala_inicio' }, { tipo: 'fala_fim', limite: true }]);
   assert.deepEqual([limite.fase, limite.aviso], ['enviando', 'limite']);
+});
+
+test('canal ao lado da barra: um texto mandado com a voz ligada vira a vez do agente; falar enquanto ele pensa abre outro trecho', () => {
+  const ouvindo = rodar([{ tipo: 'microfone' }]);
+  const texto = conversaVoz(ouvindo, { tipo: 'texto' });
+  assert.deepEqual([texto.fase, modoDoVad(texto)], ['pensando', 'escuta']);
+  assert.equal(rodar([{ tipo: 'resposta', falar: true }, { tipo: 'tocando' }], texto).fase, 'falando', 'a resposta ao texto é falada');
+  assert.equal(conversaVoz(texto, { tipo: 'fala_inicio' }).fase, 'captando', 'comentar por voz o texto que mandou');
+  // fora de hora (captando, falando): o texto não muda a fase
+  const captando = conversaVoz(ouvindo, { tipo: 'fala_inicio' });
+  assert.deepEqual(conversaVoz(captando, { tipo: 'texto' }), captando);
 });
 
 test('sem voz para falar: cai para só texto, avisando, e segue ouvindo', () => {

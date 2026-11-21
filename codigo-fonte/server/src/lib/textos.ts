@@ -170,7 +170,7 @@ const ERROS = {
 const HISTORICO = {
   'historico.comNota': '{situacao} — {nota}',
   'historico.navegador.assumiu': 'Você assumiu o controle do navegador do agente',
-  'historico.navegador.devolveu': 'Você devolveu o navegador ao agente',
+  'historico.navegador.devolveu': 'Você concedeu o controle do navegador ao agente',
   'historico.navegador.ocioso': 'O navegador voltou ao agente: 10 minutos sem uso',
   'historico.navegador.teto': 'O navegador voltou ao agente: o tempo máximo acabou',
   'historico.navegador.queda': 'O navegador voltou ao agente: a tela foi fechada',

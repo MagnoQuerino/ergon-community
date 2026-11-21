@@ -10,7 +10,7 @@ import { api, errMsg } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
 import { useT } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
-import { SOURCE_LABEL, type BoardSummary, type CampoQuadro, type Column } from '../lib/types.ts';
+import { type BoardSummary, type CampoQuadro, type Column } from '../lib/types.ts';
 import { CamposDoQuadro } from './CamposDoQuadro.tsx';
 
 export function NovoQuadro({ onCriado, onFechar }: { onCriado: (id: string) => void; onFechar: () => void }) {
@@ -75,7 +75,7 @@ export function GerirQuadro({ quadro, entrada, columns, campos, outros, onMudou,
     return (
       <aside ref={ref} className="status-pop gerir-quadro" role="dialog" aria-labelledby="gerir-t">
         {cabeca}
-        <CamposDoQuadro quadroId={quadro.id} campos={campos} espelho={SOURCE_LABEL[quadro.source ?? ''] ?? t('quadro.tarefas.aplicativo')} onMudou={onMudou} />
+        <CamposDoQuadro quadroId={quadro.id} campos={campos} onMudou={onMudou} />
       </aside>
     );
   }
