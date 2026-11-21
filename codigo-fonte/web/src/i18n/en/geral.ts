@@ -276,6 +276,8 @@ const geral: Traducao<typeof pt> = {
   'computador.voceNoControle': 'You are in control',
   'computador.assumir': 'Take control',
   'computador.conceder': 'Hand back control',
+  'computador.assumirCurto': 'Take over',
+  'computador.concederCurto': 'Hand back',
   'computador.ativarTitulo': 'Turn on full access?',
   'computador.ativarTexto': '{nome} wants to use this computer to do the work for you, start to finish.',
   'computador.ativarTextoAjuste': 'The team uses this computer to do the work for you, start to finish.',

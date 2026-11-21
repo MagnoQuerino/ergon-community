@@ -425,7 +425,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
           <button className="tb-icon topbar__theme" onClick={() => setThemeMode(THEME_NEXT[theme.mode])} aria-label={rotuloDoTema(theme.mode)} title={rotuloDoTema(theme.mode)}>
             <Icon name={THEME_ICON[theme.mode]} size={18} />
           </button>
-          <button className={`tb-pill topbar__focus ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} title={focus ? t('geral.barra.sairDoFoco') : t('geral.barra.modoFocoDica')}>
+          <button className={`tb-pill topbar__focus ${focus ? 'is-on' : ''}`} onClick={() => setFocus((f) => !f)} aria-pressed={focus} aria-label={t('geral.barra.modoFoco')} title={focus ? t('geral.barra.sairDoFoco') : t('geral.barra.modoFocoDica')}>
             <Icon name="focus" size={16} /><span className="topbar__focus-txt">{t('geral.barra.modoFoco')}</span>
           </button>
           <span className="topbar__sep" aria-hidden="true" />

@@ -32,6 +32,7 @@ import { colunaPorChave, type ChaveColuna } from './colunas.ts';
 import { remoteHolder, taskCard } from './remote-work.ts';
 import { MAX_DEVOLUCOES, MAX_RECUSAS, entregaDoAgente, instrucaoEntregar, lerAjustes, minimoSeguro, recusas, registrar, ultimaEntrega } from './modelos-entrega.ts';
 import { separarLinhaParaVoce } from './resumo-tarefa.ts';
+import { motorScope, platformToolsets } from './characters.ts';
 import { openArtifact } from './artifacts.ts';
 
 interface HelpRequest { agent: string; request: string }
@@ -364,8 +365,15 @@ export class Teamwork {
    */
   private pedirEntrega(orig: RunRow, res: ResultRow, output: string | null, n: number): boolean {
     if (!['aguardando_aprovacao', 'revisao', 'validado', 'sem_confirmacao'].includes(res.state)) return false;
+    // análise de planilha (núcleo operacional): os números e os entregáveis vêm do Ergon e o modelo só comenta, numa
+    // chamada só; o cartão fica com o formato mínimo, sem outra rodada
+    if (res.kind === 'dados') return false;
     if (this.executor.mode !== 'real' || n > MAX_DEVOLUCOES || !this.entregaFinal(orig, 'succeeded', output)) return false;
     const ws = orig.workspace_id; const taskId = orig.task_id!;
+    // o motor já lido e sem o conjunto dos cartões (onde está a ferramenta entregar: versão sem ela, ou motor sem os
+    // conjuntos do plugin): pedir seria uma rodada a mais à toa, e o cartão fica com o formato mínimo
+    const conjuntos = platformToolsets(motorScope(ws));
+    if (conjuntos.at > 0 && !conjuntos.known.includes('ergon_cartoes')) return false;
     if (entregaDoAgente(this.db, ws, taskId, orig.created_at)) return false;
     if (recusas(this.db, orig.id) >= MAX_RECUSAS) return false;
     const t = this.db.get<{ number: number; title: string }>('SELECT number, title FROM tasks WHERE id = ?', taskId);

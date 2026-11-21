@@ -244,6 +244,23 @@ describe('modelos de entrega: o agente é obrigado a entregar no modelo', () => 
     assert.ok(d.modelo.itens.every((x: { titulo: string }) => !/Ficou para você decidir|Para você decidir/.test(x.titulo)));
   });
 
+  test('motor sem o conjunto dos cartões (sem a ferramenta entregar): nenhuma rodada a mais; o cartão fica com o mínimo', async () => {
+    motor.toolsets = async () => [{ name: 'todo', enabled: true }] as never;
+    await h.ai.refreshToolsets();
+    try {
+      const c = await card('Pendências da semana');
+      await terminar(c.run, SAIDA);
+      await tick();
+      assert.ok(!h.db.get("SELECT 1 AS x FROM runs WHERE idempotency_key LIKE 'pede-entrega-%'"), 'não pede o que o motor não tem como fazer');
+      const d = await detalhe(c.task);
+      assert.equal(d.task.work_state, 'aguardando_aprovacao'); assert.equal(d.modelo.minimo, true);
+    } finally {
+      // o estado dos conjuntos é do módulo: volta ao motor com os cartões para os testes seguintes
+      motor.toolsets = async () => [{ name: 'ergon_cartoes', enabled: true }] as never;
+      await h.ai.refreshToolsets();
+    }
+  });
+
   test('três recusas no turno: a ferramenta para de insistir e o card segue com o mínimo, sem devolução', async () => {
     const c = await card('Pendências da semana');
     for (let i = 0; i < 2; i++) assert.equal((await ponte({ session_id: c.sessao, entrega: { tipo: 'decisao' } })).status, 'recusada');

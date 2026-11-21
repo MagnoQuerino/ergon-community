@@ -295,6 +295,8 @@ const geral = {
   'computador.voceNoControle': 'Você está no controle',
   'computador.assumir': 'Assumir o controle',
   'computador.conceder': 'Conceder o controle',
+  'computador.assumirCurto': 'Assumir',
+  'computador.concederCurto': 'Conceder',
   'computador.ativarTitulo': 'Ativar acesso total?',
   'computador.ativarTexto': '{nome} quer usar este computador para fazer o trabalho por você, do começo ao fim.',
   'computador.ativarTextoAjuste': 'A equipe usa este computador para fazer o trabalho por você, do começo ao fim.',

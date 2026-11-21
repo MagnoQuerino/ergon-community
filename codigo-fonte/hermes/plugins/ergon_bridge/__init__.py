@@ -439,11 +439,31 @@ def apaga_de_vez(comando: str) -> bool:
     return any(p.search(comando or "") for p in _APAGAR_DE_VEZ)
 
 
+def _motor_ja_pergunta(tool_name: str, cmd: str) -> bool:
+    """O portão do próprio Hermes vai parar o turno e pedir à pessoa este comando (aprovações nativas, rc.27: approvals.mode
+    manual, o que o cofre deixa, e um /v1/runs que responde ao approval.request pelo cartão do Ergon)? Aí o plugin não
+    pergunta de novo: a pessoa veria dois cartões para o mesmo rm -rf. Fora disso (o motor não acha perigoso, sem ninguém
+    para responder, modo "off"/yolo ou "smart"), quem pergunta é o plugin. Na dúvida (módulo do Hermes mudou), pergunta."""
+    if tool_name != "terminal":
+        return False
+    try:
+        from tools import approval, approval_context  # módulos do Hermes
+        from tools.approval_detection import detect_dangerous_command
+        if approval.is_approval_bypass_active() or approval_context._get_approval_mode() != "manual":
+            return False
+        if not detect_dangerous_command(cmd)[0]:
+            return False
+        _cb, is_cli, is_gateway, is_ask = approval._presence(None)
+        return bool(is_cli or is_gateway or is_ask)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _protegida_no_terminal(tool_name: str, args: Any, task_id: str, session_id: str) -> dict[str, Any] | None:
     if tool_name not in _PROTEGIDAS_TOOLS:
         return None
     cmd = _comando_de(tool_name, args)
-    if not apaga_de_vez(cmd):
+    if not apaga_de_vez(cmd) or _motor_ja_pergunta(tool_name, cmd):
         return None
     s, t = _sessao_do_pedido(session_id, task_id)
     r = _cartao("pergunta", {"perguntas": [{"qid": "q1", "pergunta": f"Apagar de vez? O agente quer rodar:\n{cmd[:1500]}", "opcoes": [_PERMITIR, "Não permitir"], "varias": False}]}, s, t)
@@ -2956,7 +2976,7 @@ def tool_entregar(args: dict[str, Any], task_id: str = "", session_id: str = "",
     try:
         data = _post_to(_url_for("/internal/bridge/v1/entrega"), {"session_id": session_id[:200], "task_id": task_id[:200], "entrega": entrega}, timeout=20)
     except Exception:  # noqa: BLE001 - sem o nome da exceção: o modelo tende a repetir a frase à pessoa
-        return json.dumps({"ok": False, "status": "falhou", "texto": "O Ergon não respondeu: termine com o texto da entrega."}, ensure_ascii=False)
+        return json.dumps({"ok": False, "status": "falhou", "texto": "O sistema não respondeu: termine com o texto da entrega."}, ensure_ascii=False)
     return json.dumps(data if isinstance(data, dict) else {"ok": False, "status": "falhou"}, ensure_ascii=False)
 
 

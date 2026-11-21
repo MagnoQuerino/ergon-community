@@ -44,8 +44,10 @@ export function SeloComputador({ e, onMudou }: { e: EstadoComputador | null; onM
       <span className="tb-computador__luz" aria-hidden="true" />
       <Icon name="monitor" size={16} />
       <span className="tb-computador__txt">{pessoa ? t('geral.computador.voceNoControle') : t('geral.computador.usando', { nome: e.emUso?.agente ?? 'Ergon' })}</span>
-      <button className="tb-computador__btn" onClick={() => void trocar()} disabled={ocupado} aria-busy={ocupado}>
-        {pessoa ? t('geral.computador.conceder') : t('geral.computador.assumir')}
+      {/* na janela estreita o botão fica com a palavra curta (a barra cabe em 390 px com o selo); o nome inteiro fica no aria-label */}
+      <button className="tb-computador__btn" onClick={() => void trocar()} disabled={ocupado} aria-busy={ocupado} aria-label={pessoa ? t('geral.computador.conceder') : t('geral.computador.assumir')}>
+        <span className="tb-computador__btn-longo">{pessoa ? t('geral.computador.conceder') : t('geral.computador.assumir')}</span>
+        <span className="tb-computador__btn-curto">{pessoa ? t('geral.computador.concederCurto') : t('geral.computador.assumirCurto')}</span>
       </button>
     </span>
   );

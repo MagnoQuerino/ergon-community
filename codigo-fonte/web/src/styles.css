@@ -3522,6 +3522,17 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
 .pc-modos .pc-modos__total.is-on { background: var(--dourado-cheio); color: var(--dourado-sobre); }
 .pc-bloqueio { margin-top: 6px; }
 @media (prefers-reduced-motion: reduce) { .tb-computador, .pc-cartao__tela { animation: none; } }
+/* integração rc.42: em 390 px a barra com o selo passava 100 px da tela. Até 520 px o selo fica com a luz e a palavra
+   curta ("Assumir"/"Conceder") e, só enquanto ele aparece, o Modo Foco fica só com o ícone (o nome fica no aria-label) */
+.tb-computador__btn-curto { display: none; }
+@media (max-width: 520px) {
+  .tb-computador { gap: 6px; padding-left: 8px; }
+  .tb-computador > svg { display: none; }
+  .tb-computador__btn-longo { display: none; }
+  .tb-computador__btn-curto { display: inline; }
+  .topbar__icons:has(.tb-computador) .topbar__focus-txt { display: none; }
+  .topbar__icons:has(.tb-computador) .topbar__focus { width: 34px; padding: 0; justify-content: center; }
+}
 /* ——— Salas (rc.42): conversa em grupo. O visual guia: a menção pulsa, o pedido de conexões brilha em dourado ——— */
 .sala-secao__head { display: flex; align-items: center; justify-content: space-between; }
 .sala-secao__nova { padding: 3px; }
