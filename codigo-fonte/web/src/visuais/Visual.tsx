@@ -4,7 +4,7 @@
 // validação aparece como os dados em texto.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { TODOS_OS_TIPOS, langDoTipo, type Bloco, type BlocoDe, type Fonte } from '../../../shared/visuais/esquema.ts';
-import { cenaDe, GRAFICOS, type Cena } from '../../../shared/visuais/cena.ts';
+import { cenaDe, GRAFICOS, repeteNoLado, type Cena } from '../../../shared/visuais/cena.ts';
 import { visualComoTexto } from '../../../shared/visuais/texto.ts';
 import { apurar, blocosDaCerca } from '../../../shared/visuais/cercas.ts';
 import { idiomaAtual, useT } from '../i18n/index.ts';
@@ -73,7 +73,8 @@ function Grafico({ b, compacto, verDados }: { b: Bloco; compacto: boolean; verDa
   const [ref, w] = useLargura<HTMLDivElement>();
   const bloco = useMemo<Bloco>(() => (b.tipo === 'matriz' ? { ...b, eixos: b.eixos ?? [t('visuais.matriz.esforco'), t('visuais.matriz.impacto')],
     quadrantes: b.quadrantes ?? [t('visuais.matriz.q1'), t('visuais.matriz.q2'), t('visuais.matriz.q3'), t('visuais.matriz.q4')] } : b), [b, t]);
-  const cena = useMemo(() => cenaDe(bloco, { largura: Math.max(200, w), locale: idiomaAtual(), compacto }), [bloco, w, compacto]);
+  // o resumo ao lado já mostra o número grande: o valor do meio não se repete
+  const cena = useMemo(() => cenaDe(bloco, { largura: Math.max(200, w), locale: idiomaAtual(), compacto, semValor: repeteNoLado(bloco, idiomaAtual()) }), [bloco, w, compacto]);
   return (
     <div ref={ref} className="vis-grafico">
       {cena && <CenaSvg cena={cena} />}

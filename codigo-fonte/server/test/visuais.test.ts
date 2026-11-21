@@ -8,7 +8,7 @@ import { CERCA, TODOS_OS_TIPOS, validarBloco, type Bloco } from '../../shared/vi
 import { apurar, blocosDe, cercaVisual, cercaVoto, normalizarVisuais, votoDe } from '../../shared/visuais/cercas.ts';
 import { EXEMPLOS } from '../../shared/visuais/exemplos.ts';
 import { relatorioComoMarkdown, visuaisComoTexto, visualComoTexto } from '../../shared/visuais/texto.ts';
-import { cenaDe, GRAFICOS } from '../../shared/visuais/cena.ts';
+import { cenaDe, GRAFICOS, repeteNoLado } from '../../shared/visuais/cena.ts';
 import { cartaoSvg } from '../../shared/visuais/svg.ts';
 import { PALETAS } from '../../shared/visuais/paleta.ts';
 import { VISUAIS_NO_PROMPT } from '../../shared/visuais/prompt.ts';
@@ -261,4 +261,26 @@ test('a marca no PNG é a oficial (shared/logo-ergon.ts), sem desenho próprio, 
   assert.ok(claro.includes(corpo(logoSvg({ kind: 'horizontal' }))), 'claro: a marca oficial');
   assert.ok(escuro.includes(corpo(logoSvg({ kind: 'horizontal', onDark: true }))), 'escuro: a versão oficial para fundo escuro');
   assert.ok(!cartao(EXEMPLOS.kpi, { paleta: PALETAS.claro, marca: null }).svg.includes(corpo(logoSvg({ kind: 'horizontal' }))));
+});
+
+test('PNG proporcional: o mini visual com o resumo à direita, o cartão do tamanho do conteúdo e o número grande uma vez só', () => {
+  const conta = (svg: string, t: string) => svg.split(`>${t}<`).length - 1;
+  const med = cartaoSvg(EXEMPLOS.medidor, { paleta: PALETAS.escuro });
+  assert.equal(conta(med.svg, '78%'), 1, 'o medidor não repete o número do resumo');
+  assert.ok(med.w < 560, `o medidor com resumo ao lado não deixa metade vazia (${med.w})`);
+  const piz = cartaoSvg(EXEMPLOS.pizza, { paleta: PALETAS.claro });
+  assert.ok(piz.w < 560 && conta(piz.svg, '152') === 1 && conta(piz.svg, '37%') === 1, `pizza: ${piz.w}`);
+  // o resumo fica à direita do visual, não embaixo
+  const xNumero = Number(/<text x="([\d.]+)" y="[\d.]+" font-size="32"/.exec(piz.svg)?.[1] ?? 0);
+  assert.ok(xNumero > 100, 'o número grande ao lado do anel');
+  for (const t of ['nota', 'icones', 'calor', 'tabela', 'linha_do_tempo', 'checklist', 'pessoa'] as const) {
+    assert.ok(cartaoSvg(EXEMPLOS[t], { paleta: PALETAS.claro }).w < 720, `${t}: o cartão encolhe até o conteúdo`);
+  }
+  for (const b of Object.values(EXEMPLOS)) assert.ok(cartaoSvg(b, { paleta: PALETAS.claro }).w <= 720);
+  // na tela vale o mesmo: com o resumo ao lado, o medidor esconde o valor do meio
+  assert.ok(repeteNoLado(EXEMPLOS.medidor));
+  assert.ok(!cenaDe(EXEMPLOS.medidor, { largura: 300, semValor: true })!.prims.some((p) => p.t === 'text' && p.s === '78%'));
+  assert.ok(cenaDe(EXEMPLOS.medidor, { largura: 300 })!.prims.some((p) => p.t === 'text' && p.s === '78%'));
+  assert.ok(!repeteNoLado({ ...EXEMPLOS.pizza, lado: { numero: '152' } }));
+  assert.ok(repeteNoLado({ ...EXEMPLOS.pizza, lado: { numero: '37%' } }));
 });

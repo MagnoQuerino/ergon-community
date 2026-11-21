@@ -41,7 +41,7 @@ export async function svgParaPng(svg: string, escala = 2): Promise<Buffer | null
 
 /** O cartão do bloco em PNG. */
 export async function visualParaPng(b: Bloco, o: OpcoesPng = {}): Promise<{ png: Buffer; w: number; h: number } | null> {
-  const c = cartaoSvg(b, { paleta: PALETAS[o.tema ?? 'claro'], largura: o.largura ?? 720, marca: o.marca });
+  const c = cartaoSvg(b, { paleta: PALETAS[o.tema ?? 'claro'], largura: o.largura, marca: o.marca });
   const png = await svgParaPng(c.svg, o.escala ?? 2);
   return png ? { png, w: c.w * (o.escala ?? 2), h: c.h * (o.escala ?? 2) } : null;
 }

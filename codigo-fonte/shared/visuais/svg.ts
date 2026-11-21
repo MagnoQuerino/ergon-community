@@ -4,7 +4,7 @@
  * servidor, com a mesma função, gera o PNG que vai ao Telegram e ao Discord. Só SVG: sem HTML, sem script.
  */
 import type { Bloco, Fonte } from './esquema.ts';
-import { anel, cenaDe, FONTE_TAM, GRAFICOS, sparkline, type Cena, type Cor, type Prim } from './cena.ts';
+import { anel, cenaDe, FONTE_TAM, GRAFICOS, repeteNoLado, sparkline, type Cena, type Cor, type Prim } from './cena.ts';
 import { fmtDataIso, fmtValor, fmtVariacao, tomDaVariacao, type Locale } from './formato.ts';
 import { caber, medir, quebrar } from './larguras.ts';
 import { DESENHOS } from './pictogramas.ts';
@@ -183,11 +183,12 @@ function corpoDe(b: Bloco, W: number, l: Locale, votos?: number[][]): Corpo {
       else if (b.totais) tot = cols.map((c, j) => (j === 0 ? 'Total' : b.linhas.every((r) => typeof r[j] === 'number' || r[j] === null) && c.formato !== 'data' ? fmt(b.linhas.reduce((a, r) => a + (Number(r[j]) || 0), 0), j) : ''));
       const larg = cols.map((c, j) => Math.max(medir(c.titulo, 12, 600), ...[...linhas, ...(tot ? [tot] : [])].map((r) => medir(r[j] ?? '', 13))) + 18);
       const k = Math.min(1, W / larg.reduce((a, x) => a + x, 0));
+      const TW = Math.min(W, larg.reduce((a, x) => a + x, 0) * k);
       const xs: number[] = []; let acc = 0; for (const w of larg) { xs.push(acc); acc += w * k; }
       const dir = (j: number) => cols[j].alinhar === 'direita' || (cols[j].alinhar !== 'esquerda' && b.linhas.some((r) => typeof r[j] === 'number'));
       const cel = (s: string, j: number, y: number, cor: Cor, peso: 400 | 600 | 700) => T(dir(j) ? r1(xs[j] + larg[j] * k - 9) : xs[j], y, caber(s, 13, larg[j] * k - 12, peso), 13, cor, peso, dir(j) ? 'end' : 'start');
       cols.forEach((c, j) => prims.push(cel(c.titulo, j, 16, 'suave', 600)));
-      prims.push({ t: 'path', d: `M0 26H${W}`, traco: 'linha', larg: 1 });
+      prims.push({ t: 'path', d: `M0 26H${r1(TW)}`, traco: 'linha', larg: 1 });
       linhas.forEach((r, i) => {
         const y = 26 + (i + 1) * 30;
         r.forEach((s, j) => {
@@ -195,7 +196,7 @@ function corpoDe(b: Bloco, W: number, l: Locale, votos?: number[][]): Corpo {
           if (d) prims.push({ t: 'rect', x: xs[j] + 2, y: y - 20, w: r1(larg[j] * k - 4), h: 26, r: 6, cor: d.tom === 'bom' ? 'bom' : d.tom === 'ruim' ? 'ruim' : d.tom === 'atencao' ? 'atencao' : 'v1', op: 0.16 });
           prims.push(cel(s, j, y - 2, 'tinta', b.negrito?.includes(j) ? 600 : 400));
         });
-        prims.push({ t: 'path', d: `M0 ${y + 8}H${W}`, traco: 'linha', larg: 1, op: 0.6 });
+        prims.push({ t: 'path', d: `M0 ${y + 8}H${r1(TW)}`, traco: 'linha', larg: 1, op: 0.6 });
       });
       let h = 26 + linhas.length * 30 + 10;
       if (tot) { tot.forEach((s, j) => prims.push(cel(s, j, h + 18, 'tinta', 700))); h += 28; }
@@ -225,8 +226,8 @@ function corpoDe(b: Bloco, W: number, l: Locale, votos?: number[][]): Corpo {
         const y = i * 40;
         if (i < b.marcos.length - 1) prims.push({ t: 'rect', x: 6, y: y + 12, w: 2, h: 36, r: 1, cor: 'linha' });
         prims.push({ t: 'circ', cx: 7, cy: y + 10, r: 6, cor: cor[m.estado ?? 'previsto'], traco: 'painel', larg: 2 });
-        prims.push(T(22, y + 14, fmtDataIso(m.data, l, true), 12, 'suave', 600), T(80, y + 14, caber(m.titulo, 14, W - 80, 600), 14, 'tinta', 600));
-        if (m.detalhe) prims.push(T(80, y + 31, caber(m.detalhe, 12, W - 80), 12, 'suave'));
+        prims.push(T(22, y + 14, fmtDataIso(m.data, l, true), 12, 'suave', 600), T(100, y + 14, caber(m.titulo, 14, W - 100, 600), 14, 'tinta', 600));
+        if (m.detalhe) prims.push(T(100, y + 31, caber(m.detalhe, 12, W - 100), 12, 'suave'));
       });
       return { h: b.marcos.length * 40, prims };
     }
@@ -280,6 +281,24 @@ function corpoDe(b: Bloco, W: number, l: Locale, votos?: number[][]): Corpo {
       });
       return { h: 24 + b.linhas.length * 32 + 4, prims };
     }
+    case 'pessoa': {
+      const ini = b.nome.split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0]!.toUpperCase()).join('');
+      prims.push({ t: 'circ', cx: 28, cy: 28, r: 28, cor: 'v3' }, T(28, 34, ini, 18, 'sobre', 700, 'middle'), T(72, 22, caber(b.nome, 17, W - 72, 700), 17, 'tinta', 700));
+      let y = 22;
+      if (b.cargo || b.empresa) { y += 19; prims.push(T(72, y, caber([b.cargo, b.empresa].filter(Boolean).join(' · '), 13, W - 72), 13, 'suave')); }
+      for (const x of [b.email, b.telefone, b.site?.replace(/^https:\/\/(www\.)?/, ''), b.local].filter((v): v is string => !!v)) { y += 19; prims.push(T(72, y, caber(x, 13, W - 72), 13, 'tinta')); }
+      return { h: Math.max(60, y + 8), prims };
+    }
+    case 'arquivo': {
+      prims.push({ t: 'rect', x: 0, y: 0, w: 40, h: 48, r: 6, cor: 'painel2' }, { t: 'rect', x: 8, y: 14, w: 24, h: 3, r: 1.5, cor: 'linha' }, { t: 'rect', x: 8, y: 22, w: 24, h: 3, r: 1.5, cor: 'linha' }, { t: 'rect', x: 8, y: 30, w: 16, h: 3, r: 1.5, cor: 'linha' });
+      // o nome já é o título do cartão: aqui, só onde ele está
+      prims.push(T(54, 30, b.titulo ? 'Nos Documentos do Ergon' : 'Arquivo nos Documentos do Ergon', 13, 'suave'));
+      return { h: 50, prims };
+    }
+    case 'fontes': {
+      b.itens.forEach((f, i) => prims.push(T(0, 18 + i * 22, caber(`• ${f.titulo}${f.periodo ? ` · ${f.periodo}` : ''}`, 14, W), 14, 'tinta')));
+      return { h: b.itens.length * 22 + 6, prims };
+    }
     case 'relatorio': {
       let h = 0;
       if (b.resumo) { const c = linhasDeTexto([b.resumo], W); juntar(prims, c, 0, 0); h = c.h; }
@@ -322,37 +341,83 @@ function rodapeFontes(fs: Fonte[] | undefined, estimativa: boolean | undefined, 
   return caber(s, 11, W);
 }
 
-/** O cartão inteiro em SVG: devolve o texto e o tamanho (em px "1x"; o PNG sai em 2x). */
+/** Até onde o desenho vai à direita (para o cartão não sobrar vazio). */
+function alcance(prims: Prim[]): number {
+  let x = 0;
+  for (const q of prims) {
+    if (q.t === 'rect') x = Math.max(x, q.x + q.w);
+    else if (q.t === 'circ') x = Math.max(x, q.cx + q.r);
+    else if (q.t === 'pict') x = Math.max(x, q.x + q.tam);
+    else if (q.t === 'text') { const w = medir(q.s, q.tam, q.peso ?? 400); x = Math.max(x, q.ancora === 'end' ? q.x : q.ancora === 'middle' ? q.x + w / 2 : q.x + w); }
+    else if (q.t === 'path') for (const m of q.d.matchAll(/[MLH]([\d.-]+)|A[\d.\s-]+?([\d.-]+) [\d.-]+(?=[A-Za-z]|$)/g)) x = Math.max(x, Number(m[1] ?? m[2]));
+  }
+  return x;
+}
+
+/** O mini visual com o resumo à direita (como na conversa): o visual compacto e a coluna do número e dos destaques. */
+function corpoComLado(b: Bloco, l: Locale, larguraMax: number): Corpo | null {
+  if (!b.lado || !GRAFICOS.has(b.tipo) || !(b.lado.numero || b.lado.linhas?.length)) return null;
+  const compacto = b.tipo === 'pizza' || b.tipo === 'medidor';
+  const cena = cenaDe(b, { largura: compacto ? 200 : Math.min(360, larguraMax * 0.55), locale: l, compacto, semValor: repeteNoLado(b, l) }) as Cena;
+  const gap = 28;
+  const textos = [b.lado.numero ? medir(b.lado.numero, 32, 700) : 0, b.lado.rotulo ? medir(b.lado.rotulo, 13) : 0, ...(b.lado.linhas ?? []).map((x) => medir(`• ${x}`, 13) )];
+  const ladoW = Math.max(180, Math.min(300, larguraMax - cena.w - gap, Math.max(...textos)));
+  const col: Prim[] = []; let y = 0;
+  if (b.lado.numero) { y += 32; col.push(T(0, y, b.lado.numero, 32, 'tinta', 700)); }
+  if (b.lado.rotulo) { y += 20; col.push(T(0, y, caber(b.lado.rotulo, 13, ladoW), 13, 'suave')); }
+  if (b.lado.linhas?.length) y += 6;
+  for (const x of b.lado.linhas ?? []) for (const [k, q] of quebrar(x, 13, ladoW - 14, 2).entries()) { y += k ? 17 : 21; if (!k) col.push({ t: 'circ', cx: 3, cy: y - 4.5, r: 3, cor: 'v1' }); col.push(T(14, y, q, 13, 'tinta')); }
+  const h = Math.max(cena.h, y + 4);
+  const prims: Prim[] = [];
+  juntar(prims, cena, 0, (h - cena.h) / 2);
+  juntar(prims, { prims: col }, cena.w + gap, (h - y) / 2);
+  return { h, prims };
+}
+
+/** listas e barras finas ficam proporcionais numa largura menor (a etiqueta perto do valor) */
+const LARGURA_MAX: Partial<Record<Bloco['tipo'], number>> = { status: 560, semaforo: 560, checklist: 560, progresso: 600, placar: 600, sparkline: 480, aviso: 600, decisao: 600, enquete: 600, referencias: 600, link: 600, fontes: 520, pessoa: 520 };
+
+/**
+ * O cartão inteiro em SVG: devolve o texto e o tamanho (em px "1x"; o PNG sai em 2x). A largura acompanha o conteúdo
+ * (até 720): nada de metade vazia; o mini visual leva o resumo à direita, como na conversa.
+ */
 export function cartaoSvg(b: Bloco, o: OpcoesCartao): { svg: string; w: number; h: number } {
-  const p = o.paleta; const W = o.largura ?? 720; const pad = 28; const iw = W - pad * 2; const l = o.locale ?? 'pt-BR';
+  const pad = 28; const MAX = o.largura ?? LARGURA_MAX[b.tipo] ?? 720;
+  const r = montarCartao(b, o, MAX);
+  if (o.largura) return r;
+  // o conteúdo não chega à direita: o cartão encolhe até ele (e o título, numa linha, também cabe)
+  const conteudo = Math.max(r.alcance, b.titulo ? Math.min(medir(b.titulo, 20, 700), MAX - 2 * pad) : 0, b.subtitulo ? Math.min(medir(b.subtitulo, 13), MAX - 2 * pad) : 0, 330);
+  return conteudo < MAX - 2 * pad - 30 ? montarCartao(b, o, Math.ceil(conteudo + 2 * pad)) : r;
+}
+
+function montarCartao(b: Bloco, o: OpcoesCartao, W: number): { svg: string; w: number; h: number; alcance: number } {
+  const p = o.paleta; const pad = 28; const iw = W - pad * 2; const l = o.locale ?? 'pt-BR';
   const topo: Prim[] = []; let y = pad;
-  if (b.titulo) { for (const q of quebrar(b.titulo, 20, iw, 2, 700)) { y += 24; topo.push(T(0, y - pad, q, 20, 'tinta', 700)); } y += 4; }
+  const titulo = b.titulo ?? (b.tipo === 'fontes' ? 'Fontes' : undefined);
+  if (titulo) { for (const q of quebrar(titulo, 20, iw, 2, 700)) { y += 24; topo.push(T(0, y - pad, q, 20, 'tinta', 700)); } y += 4; }
   if (b.subtitulo) { for (const q of quebrar(b.subtitulo, 13, iw, 2)) { y += 18; topo.push(T(0, y - pad, q, 13, 'suave')); } }
-  if (b.titulo || b.subtitulo) y += 16;
-  const corpo = corpoDe(b, iw, l, o.votos);
+  if (titulo || b.subtitulo) y += 16;
+  const comLado = corpoComLado(b, l, iw);
+  const corpo = comLado ?? corpoDe(b, iw, l, o.votos);
   const yCorpo = y; y += corpo.h;
-  // o resumo ao lado (mini visual): embaixo no PNG, como uma linha forte
   const extra: Prim[] = [];
-  if (b.lado && (b.lado.numero || b.lado.linhas?.length)) {
+  // o resumo de um bloco que não é gráfico: embaixo, como uma linha forte
+  if (!comLado && b.lado && (b.lado.numero || b.lado.linhas?.length)) {
     y += 14;
     if (b.lado.numero) { y += 30; extra.push(T(0, y, b.lado.numero, 28, 'tinta', 700)); if (b.lado.rotulo) extra.push(T(medir(b.lado.numero, 28, 700) + 10, y - 4, caber(b.lado.rotulo, 13, iw - 120), 13, 'suave')); }
     for (const q of b.lado.linhas ?? []) { y += 20; extra.push(T(0, y, caber(`• ${q}`, 13, iw), 13, 'tinta')); }
   }
   if (b.nota) { for (const q of quebrar(b.nota, 12, iw, 3)) { y += 18; extra.push(T(0, y, q, 12, 'suave')); } }
   y += 22;
-  const fontes = rodapeFontes(b.tipo === 'fontes' ? b.itens : b.fontes, b.estimativa, iw - 110);
   const pe: Prim[] = [];
   pe.push({ t: 'path', d: `M0 ${y - 8}H${iw}`, traco: 'linha', larg: 1 });
-  if (fontes) pe.push(T(0, y + 12, fontes, 11, 'suave'));
   const marca = o.marca === undefined ? { texto: 'Ergon', ergon: true } : o.marca;
   let marcaSvg = '';
   let reservado = 0;
   if (marca?.ergon) { const m = marcaPosicionada(ehEscuro(p.painel), pad + iw, y); marcaSvg = m.svg; reservado = m.w; }
   else if (marca) { pe.push(T(iw, y + 12, marca.texto, 11, 'suave', 600, 'end')); reservado = medir(marca.texto, 11, 600); }
-  if (fontes && medir(fontes, 11) > iw - reservado - 16) {
-    const ult = pe[pe.length - (marca && !marca.ergon ? 2 : 1)];
-    if (ult && ult.t === 'text' && ult.s === fontes) ult.s = caber(fontes, 11, iw - reservado - 16);
-  }
+  const fontes = b.tipo === 'fontes' ? '' : rodapeFontes(b.fontes, b.estimativa, iw - reservado - 16);
+  if (fontes) pe.push(T(0, y + 12, fontes, 11, 'suave'));
   const H = Math.ceil(y + 20 + pad - 6);
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${esc(FONTE_SVG)}">`,
@@ -360,7 +425,7 @@ export function cartaoSvg(b: Bloco, o: OpcoesCartao): { svg: string; w: number; 
     primsSvg(topo, p, pad, pad), primsSvg(corpo.prims, p, pad, yCorpo), primsSvg(extra, p, pad, 0), primsSvg(pe, p, pad, 0), marcaSvg,
     '</svg>',
   ].join('');
-  return { svg, w: W, h: H };
+  return { svg, w: W, h: H, alcance: Math.max(alcance(corpo.prims), alcance(extra)) };
 }
 
 export { FONTE_TAM };

@@ -31,7 +31,24 @@ interface Fmt { formato?: Formato; moeda?: Moeda; locale: Locale }
 const fv = (v: number | null, f: Fmt, curto = false) => fmtValor(v, { formato: f.formato, moeda: f.moeda, locale: f.locale, curto });
 
 /** O que os gráficos pedem: largura disponível e o idioma dos números. */
-export interface OpcoesCena { largura: number; locale?: Locale; compacto?: boolean }
+export interface OpcoesCena { largura: number; locale?: Locale; compacto?: boolean; semValor?: boolean }
+
+/**
+ * O resumo ao lado já mostra o número grande: o valor do meio do medidor (ou do centro da rosca, quando é o mesmo) não
+ * se repete. Vale na tela e no PNG.
+ */
+export function repeteNoLado(b: Bloco, locale: Locale = 'pt-BR'): boolean {
+  const n = b.lado?.numero?.replace(/\s/g, '');
+  if (!n) return false;
+  if (b.tipo === 'medidor') return true;
+  if (b.tipo === 'pizza') {
+    const total = b.fatias.reduce((a, x) => a + x.valor, 0) || 1;
+    const maior = b.fatias.reduce((m, x) => (x.valor > m.valor ? x : m), b.fatias[0]);
+    const centro = b.centro?.valor ?? fmtValor((maior.valor / total) * 100, { formato: 'percentual', locale });
+    return centro.replace(/\s/g, '') === n;
+  }
+  return false;
+}
 
 /** Os blocos desenhados como cena (os outros são texto com estilo na tela, e um cartão próprio no PNG). */
 export const GRAFICOS = new Set<Bloco['tipo']>(['barras', 'linhas', 'pizza', 'medidor', 'sparkline', 'icones', 'funil', 'calor', 'matriz']);
@@ -43,7 +60,7 @@ export function cenaDe(b: Bloco, o: OpcoesCena): Cena | null {
     case 'linhas': return linhas(b, o, f);
     case 'pizza': return pizza(b, o, f);
     case 'medidor': return b.estilo === 'termometro' ? termometro(b, o, f) : medidor(b, o, f);
-    case 'sparkline': return sparkline(b.serie, o.largura, Math.min(56, Math.round(o.largura / 4)), b.bom ?? 'alta', `${b.rotulo}: ${fv(b.serie.at(-1) ?? 0, f)}`, f);
+    case 'sparkline': return sparkline(b.serie, o.largura, Math.min(o.compacto ? 56 : 96, Math.round(o.largura / 4.5)), b.bom ?? 'alta', `${b.rotulo}: ${fv(b.serie.at(-1) ?? 0, f)}`, f);
     case 'icones': return icones(b, o);
     case 'funil': return funil(b, o, f);
     case 'calor': return calor(b, o, f);
@@ -220,9 +237,10 @@ function pizza(b: BlocoDe<'pizza'>, o: OpcoesCena, f: Fmt): Cena {
   // ao lado da legenda quando cabe; compacto: só o anel (o resumo vai no "lado")
   const lado = o.largura >= 300 && !o.compacto;
   const D = Math.min(o.compacto ? 132 : 184, lado ? o.largura * 0.45 : o.largura);
-  const legW = lado ? o.largura - D - 20 : o.largura;
+  // a legenda fica perto do anel (sem um vão até a borda)
+  const legW = lado ? Math.min(o.largura - D - 20, 340) : o.largura;
   const legH = o.compacto ? 0 : b.fatias.length * 22;
-  const W = Math.max(D, o.largura); const H = lado || o.compacto ? Math.max(D, legH) : D + 14 + legH;
+  const W = lado ? D + 20 + legW : Math.max(D, o.largura); const H = lado || o.compacto ? Math.max(D, legH) : D + 14 + legH;
   const cx = D / 2; const cy = lado || o.compacto ? H / 2 : D / 2; const R = D / 2 - 2; const R0 = rosca ? R * 0.62 : 0;
   const prims: Prim[] = [];
   let a = -Math.PI / 2;
@@ -231,7 +249,7 @@ function pizza(b: BlocoDe<'pizza'>, o: OpcoesCena, f: Fmt): Cena {
     if (x.valor > 0) prims.push({ t: 'path', d: arco(cx, cy, R, R0, a + (b.fatias.length > 1 ? 0.012 : 0), a1 - (b.fatias.length > 1 ? 0.012 : 0)), cor: SERIES[k % 6], anim: 'surge', i: k });
     a = a1;
   });
-  if (rosca) {
+  if (rosca && !o.semValor) {
     const maior = b.fatias.reduce((m, x) => (x.valor > m.valor ? x : m), b.fatias[0]);
     const cv = b.centro?.valor ?? pct(maior.valor); const cr = b.centro?.rotulo ?? (b.centro ? undefined : maior.rotulo);
     const tam = Math.max(14, Math.min(26, (R0 * 1.5) / Math.max(2, cv.length * 0.6)));
@@ -262,7 +280,7 @@ const COR_FAIXA = { ruim: 'ruim', ok: 'atencao', bom: 'bom' } as const;
 
 function medidor(b: BlocoDe<'medidor'>, o: OpcoesCena, f: Fmt): Cena {
   const min = b.min ?? 0; const max = b.max ?? 100;
-  const W = Math.min(o.largura, o.compacto ? 180 : 260); const R = W / 2 - 6; const H = R + 44;
+  const W = Math.min(o.largura, o.compacto ? 180 : 260); const R = W / 2 - 6; const H = R + (o.semValor ? 24 : 44);
   const cx = W / 2; const cy = R + 6; const R0 = R * 0.74;
   const ang = (v: number) => Math.PI + ((v - min) / (max - min)) * Math.PI;
   const faixas = b.faixas ?? FAIXAS_PADRAO(min, max);
@@ -279,7 +297,7 @@ function medidor(b: BlocoDe<'medidor'>, o: OpcoesCena, f: Fmt): Cena {
   prims.push({ t: 'circ', cx, cy, r: 7, cor: 'tinta' });
   prims.push({ t: 'circ', cx, cy, r: 3, cor: 'painel' });
   const valor = fmtValor(b.valor, { formato: b.formato, locale: f.locale });
-  prims.push({ t: 'text', x: cx, y: H - 2, s: valor, tam: 20, peso: 700, cor: 'tinta', ancora: 'middle' });
+  if (!o.semValor) prims.push({ t: 'text', x: cx, y: H - 2, s: valor, tam: 20, peso: 700, cor: 'tinta', ancora: 'middle' });
   prims.push({ t: 'text', x: 4, y: cy + 16, s: fmtValor(min, { formato: b.formato, locale: f.locale, curto: true }), tam: 10, cor: 'suave' });
   prims.push({ t: 'text', x: W - 4, y: cy + 16, s: fmtValor(max, { formato: b.formato, locale: f.locale, curto: true }), tam: 10, cor: 'suave', ancora: 'end' });
   const faixa = faixas.find((x) => b.valor <= x.ate) ?? faixas.at(-1)!;
@@ -305,7 +323,7 @@ function termometro(b: BlocoDe<'medidor'>, o: OpcoesCena, f: Fmt): Cena {
     de = fx.ate;
   }
   const valor = fmtValor(b.valor, { formato: b.formato, locale: f.locale });
-  prims.push({ t: 'text', x: tx + tw + 30, y: H - 10, s: valor, tam: 20, peso: 700, cor: 'tinta' });
+  if (!o.semValor) prims.push({ t: 'text', x: tx + tw + 30, y: H - 10, s: valor, tam: 20, peso: 700, cor: 'tinta' });
   return { w: W, h: H, prims, alt: `${b.rotulo ?? b.titulo ?? ''}: ${valor}, faixa ${faixa.rotulo ?? faixa.tom}.` };
 }
 
