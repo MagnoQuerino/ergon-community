@@ -1300,6 +1300,10 @@ body:has(.cdock) .tip { right: 100px; }
   /* rc.33: com o plano e as Dracmas na barra, a conta saía da tela no celular: a pílula do World fica só com o saldo e o
      Modo Foco segue com o nome */
   .tb-world__plano, .tb-world__sep { display: none; }
+  /* rc.41: com o saldo de quatro dígitos ("Ðp 1.000") a conta ainda passava 7 px da tela em 390: as pílulas (o saldo e
+     o Modo Foco) ficam mais justas, sem perder o nome nem a área de toque */
+  .tb-world { padding: 0 8px 0 5px; gap: 6px; }
+  .tb-pill { padding: 0 9px; gap: 5px; }
   /* o workspace vai para a gaveta já aqui ("Workspace: nome"; o balão continua abrindo), como abaixo de 360 px */
   .topbar__wswrap { display: contents; }
   .topbar__ws { display: none; }
