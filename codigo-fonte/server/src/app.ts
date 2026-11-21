@@ -15,6 +15,7 @@ import { diagnostics, healthPanel } from './services/health.ts';
 import { activityReport, reportPeriod } from './services/activity-report.ts';
 import { Conexoes, KIND_DEPOIS_DE_LER, KIND_REGRA } from './services/conexoes/servico.ts';
 import { ConcessoesGit, registrarProxyGit } from './services/conexoes/codigo.ts';
+import { Pastas } from './services/pastas.ts';
 import { ALCANCES, PRAZOS_DEPOIS_DE_LER, sugestaoDoAgente, type Alcance, type PrazoDepoisDeLer } from './services/conexoes/regras.ts';
 import type { Permissoes } from './services/conexoes/catalogo.ts';
 import { EspelhoEscrita } from './services/conexoes/espelho.ts';
@@ -446,6 +447,10 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return !!db.get(`SELECT 1 AS x FROM run_tools WHERE workspace_id IN (${marks}) AND tool IN (${FERRAMENTAS_DE_CODIGO.map(() => '?').join(', ')}) AND started_at >= ? LIMIT 1`,
       ...wss, ...FERRAMENTAS_DE_CODIGO, desde);
   };
+  // rc.42: as pastas do computador concedidas (montadas pelo gerente de motores) e o "acesso total" que outras peças seguem
+  const pastas = new Pastas({ db, bus, nuvem: cfg.mode === 'cloud', aplicar: (u) => motors.aplicarPastas(u), montadas: (u) => motors.pastasMontadas(u) });
+  motors.pastasDe = (u) => (cfg.mode === 'cloud' ? null : pastas.paraOMotor(u));
+  const aoAtivarAcessoTotal: Array<(a: AuthContext) => void> = [];
   // rc.42: o acesso de git de curta duração (conexoes/codigo.ts): o agente clona e envia ramos sem ver o token
   const concessoesGit = new ConcessoesGit(db, bus);
   const conexoes = new Conexoes({ db, bus, integrations, whatsapp, codigoLigado, git: concessoesGit, documentos: { filesDir: cfg.filesDir, maxBytes: cfg.maxUploadBytes },
@@ -2667,6 +2672,51 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     bus.publish(a.workspaceId, 'integrations.changed', {});
     return estadoLiberar(a);
   });
+  // rc.42: Pastas do computador (services/pastas.ts): concedidas ao motor da pessoa, montadas pelo gerente num momento seguro
+  app.get('/api/pastas', async (req) => { const a = auth(req); return { disponivel: cfg.mode !== 'cloud', pastas: cfg.mode === 'cloud' ? [] : pastas.listar(a.userId, a.workspaceId) }; });
+  app.post('/api/pastas', { schema: { body: { type: 'object', additionalProperties: false, required: ['caminho'], properties: { caminho: S.str(1000, 1), modo: { enum: ['rw', 'ro'] } } } } }, async (req) => {
+    const a = auth(req); const b = req.body as { caminho: string; modo?: 'rw' | 'ro' };
+    return pastas.conceder(a.userId, a.workspaceId, b.caminho, b.modo ?? 'rw');
+  });
+  app.delete('/api/pastas/:id', { schema: { params: idParams('pst') } }, async (req) => {
+    const a = auth(req); pastas.revogar(a.userId, a.workspaceId, (req.params as { id: string }).id); return { ok: true };
+  });
+
+  // rc.42: "Ativar acesso total?" — um cartão só: a senha (confirmada antes, em /api/session/unlock, no mesmo cartão) uma vez,
+  // e os agentes escolhidos ganham Terminal, Executar código e as Conexões; o "Liberar tudo" de quem ativou liga junto. Daí
+  // em diante nada mais pergunta, exceto as sempre-protegidas. Ponto de integração do controle do computador
+  // (claude/rc42-computador): aoAtivarAcessoTotal recebe a mesma ativação para pôr o computador em "total".
+  const ACESSO_TOTAL_TOOLS = ['terminal', 'calculo', 'contas'] as const;
+  app.get('/api/acesso-total', async (req) => {
+    const a = auth(req);
+    const agentes = db.all<{ id: string; name: string; tools: string | null }>("SELECT id, name, tools FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY coordinator DESC, name", a.workspaceId)
+      .map((x) => { const t = JSON.parse(x.tools ?? '[]') as string[]; return { id: x.id, nome: x.name, tem: ACESSO_TOTAL_TOOLS.every((k) => t.includes(k)) }; });
+    return { ativo: conexoes.liberarTudoDaPessoa(a.workspaceId, a.userId), proibido: conexoes.liberarTudoProibido(a.workspaceId), administra: a.role === 'owner', agentes };
+  });
+  app.post('/api/acesso-total', { schema: { body: { type: 'object', additionalProperties: false, required: ['agentes'], properties: { agentes: { type: 'array', minItems: 1, maxItems: 100, items: S.id('agt') }, semAviso: { type: 'boolean' } } } } }, async (req) => {
+    const a = owner(req); const b = req.body as { agentes: string[]; semAviso?: boolean };
+    requireRecentAuth(a); // a senha veio no mesmo cartão, um instante antes
+    if (conexoes.liberarTudoProibido(a.workspaceId)) throw new HttpError(409, 'proibido', 'quem administra o workspace desligou o "Liberar tudo"');
+    const ag = b.agentes.map((x) => db.get<{ id: string; tools: string | null }>("SELECT id, tools FROM agents WHERE id = ? AND workspace_id = ? AND status = 'active'", x, a.workspaceId));
+    if (ag.some((x) => !x)) throw notFound('agente');
+    // as ferramentas que executam código ligadas na equipe (o motor pode estar desligado agora: a escolha fica gravada)
+    const on = new Set(platformToolsets(motorScope(a.workspaceId)).enabled);
+    const wanted = [...new Set([...Object.values(TOOLS).filter((t) => (t.safe || t.guarded) && t.toolset && on.has(t.toolset)).map((t) => t.id), 'terminal', 'calculo'])];
+    await aiOf(a.workspaceId).setPlatformTools(wanted).catch((e) => { if ((e as HttpError).status !== 503) throw e; });
+    for (const t of ['terminal', 'calculo']) setSetting(db, a.workspaceId, `ferramentas.${t}`, 'ligado');
+    for (const x of ag) {
+      const cur = JSON.parse(x!.tools ?? '[]') as string[];
+      const novo = [...new Set([...cur, ...ACESSO_TOTAL_TOOLS])];
+      if (novo.length !== cur.length) updateAgent(db, bus, a.workspaceId, a.userId, x!.id, { tools: novo });
+    }
+    conexoes.setLiberarTudo(a.workspaceId, a.userId, true, { pessoa: true, semAviso: b.semAviso });
+    audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { agentes: b.agentes },
+      result: `acesso total ativado com a senha para ${b.agentes.length} agente(s): Terminal, Executar código e Conexões, sem perguntar (as protegidas ainda perguntam)` });
+    for (const f of aoAtivarAcessoTotal) f(a);
+    bus.publish(a.workspaceId, 'agents.changed', {}); bus.publish(a.workspaceId, 'integrations.changed', {});
+    return { ok: true };
+  });
+
   // Conexões › Regras: as regras aprovadas (as que liberam ações sem confirmação e as de texto ativas) e as propostas esperando
   app.get('/api/conexoes/regras', async (req) => conexoes.regras.tela(auth(req).workspaceId));
   // rc.34: "Criar e organizar sem pedir aprovação" direto na conexão (antes, só pedindo na conversa): uma regra de sempre,

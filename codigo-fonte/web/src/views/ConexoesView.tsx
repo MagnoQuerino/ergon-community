@@ -24,6 +24,7 @@ import { TextoLongo } from '../components/TextoLongo.tsx';
 import { BotoesRegra, type Alcance } from '../components/CartaoRegra.tsx';
 import { Selo } from '../components/Selo.tsx';
 import { ModoLiberarTudo, type EstadoLiberar } from '../components/ModoLiberarTudo.tsx';
+import { PastasDoComputador } from '../components/PastasDoComputador.tsx';
 import { ACAO, FILEIRA } from '../lib/cartoes-acoes.ts';
 import { useEnvioPorItem } from '../lib/envio.ts';
 import { noIdioma } from '../lib/textos-de-app.ts';
@@ -191,6 +192,7 @@ export function ConexoesView() {
         <GradeDeBlocos blocos={conversar} aberto={open} abrir={setOpen} />
       </section>
 
+      <PastasDoComputador />
       <LiberarTudo estado={cx} />
       <Regras />
 

@@ -414,9 +414,53 @@ def _who_has(tool_name: str, holders: dict[str, list[str]]) -> list[str]:
     return names
 
 
+# ---------------------------------------------------------------- protegidas no Terminal (rc.42)
+# Com o acesso total (ou "Liberar tudo"), o Terminal roda sem perguntar — menos o que apaga de vez: o comando que se
+# parece com isso pede o clique da pessoa a cada vez, num cartão (perguntar), como as ações protegidas das Conexões. Vale
+# para as pastas do computador (/pastas) e para o resto. Lista alinhada à do controle do computador (computador.ts).
+_APAGAR_DE_VEZ = [re.compile(p, re.I) for p in (
+    r"\brm\s+(?:-[a-z]*[rf][a-z]*\s+)+", r"\bfind\b[^\n]*\s-delete\b", r"\bgit\s+push\b[^\n]*(?:--force\b|\s-f\b|--delete\b|\s:[\w./-]+)",
+    r"\bgit\s+clean\s+-[a-z]*f", r"\bgit\s+reset\s+--hard\b", r"\bgit\s+branch\s+-D\b", r"\bgh\s+repo\s+delete\b", r"\bglab\s+repo\s+delete\b",
+    r"\bshred\b", r"\bmkfs(?:\.\w+)?\b", r"\bdd\s+[^\n]*of=/dev/", r"\bDROP\s+(?:TABLE|DATABASE|SCHEMA)\b", r"\bTRUNCATE\s+TABLE\b",
+    r"shutil\.rmtree", r"\bos\.(?:remove|unlink|rmdir)\b", r"\bPath\([^)]*\)\.unlink\b")]
+_PROTEGIDAS_TOOLS = frozenset({"terminal", "execute_code", "process_manage"})
+_PERMITIR = "Permitir desta vez"
+
+
+def _comando_de(tool_name: str, args: Any) -> str:
+    if not isinstance(args, dict):
+        return ""
+    return str(args.get("command") or args.get("code") or args.get("cmd") or "")[:4000]
+
+
+def apaga_de_vez(comando: str) -> bool:
+    return any(p.search(comando or "") for p in _APAGAR_DE_VEZ)
+
+
+def _protegida_no_terminal(tool_name: str, args: Any, task_id: str, session_id: str) -> dict[str, Any] | None:
+    if tool_name not in _PROTEGIDAS_TOOLS:
+        return None
+    cmd = _comando_de(tool_name, args)
+    if not apaga_de_vez(cmd):
+        return None
+    s, t = _sessao_do_pedido(session_id, task_id)
+    r = _cartao("pergunta", {"perguntas": [{"qid": "q1", "pergunta": f"Apagar de vez? O agente quer rodar:\n{cmd[:1500]}", "opcoes": [_PERMITIR, "Não permitir"], "varias": False}]}, s, t)
+    respostas = r.get("respostas") if isinstance(r.get("respostas"), dict) else {}
+    escolha = respostas.get("q1")
+    escolha = escolha[0] if isinstance(escolha, list) and escolha else escolha
+    if r.get("estado") == "respondida" and str(escolha or "") == _PERMITIR:
+        return None
+    return {"action": "block", "message": "Este comando apaga de vez: a pessoa não permitiu (ou não respondeu). Não tente outro jeito de apagar; siga sem ele e diga o que ficou de fora."}
+
+
 def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", session_id: str = "", **kw: Any) -> dict[str, Any] | None:
     """As travas do Ergon e, se o comando do terminal passou por elas, a reescrita pelo RTK (saída compacta)."""
     r = _pre_tool_call_travas(tool_name=tool_name, args=args, task_id=task_id, session_id=session_id, **kw)
+    if r is None:
+        try:
+            r = _protegida_no_terminal(str(tool_name or ""), args, str(task_id or ""), str(session_id or ""))
+        except Exception:  # noqa: BLE001 - na dúvida, não deixa apagar de vez
+            r = {"action": "block", "message": "Este comando apaga de vez e não deu para pedir a aprovação da pessoa agora. Siga sem ele."}
     if r is None and tool_name == "terminal":
         _rtk_reescrever(args)
     if r is None and str(tool_name or "").startswith("browser"):

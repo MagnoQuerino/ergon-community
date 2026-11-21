@@ -20,6 +20,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
+import { RAIZ_NO_MOTOR, pastasParaMontar, type PastaMontada } from '../lib/pastas-seguras.ts';
 
 export interface DockerResponse { status: number; json: any }
 export type DockerCall = (method: string, path: string, body?: unknown) => Promise<DockerResponse>;
@@ -35,6 +36,8 @@ export interface ManagerConfig {
   nanoCpus: number;
   /** Possíveis IDs do contêiner do próprio gerente (ver selfContainerIds): por ele se acha a imagem do núcleo. */
   selfIds?: string[];
+  /** rc.42: as casas das pessoas neste computador (nunca montadas inteiras, nem o que fica acima delas) */
+  casas?: string[];
 }
 
 const UID = /^usr_[a-f0-9]{32}$/;
@@ -48,7 +51,14 @@ const LABEL = {
   install: 'ergon.instalacao',
   prev: 'ergon.motor.prev-image',
   hold: 'ergon.motor.hold',
+  /** rc.42: as pastas do computador concedidas pela pessoa (JSON conferido; vira montagem e entra na marca da especificação) */
+  pastas: 'ergon.motor.pastas',
 } as const;
+/** As pastas guardadas no rótulo do contêiner, conferidas de novo (um rótulo mexido à mão não monta nada fora da regra). */
+function pastasDoRotulo(v: string | undefined, casas: readonly string[]): PastaMontada[] {
+  if (!v) return [];
+  try { return pastasParaMontar(JSON.parse(v), casas); } catch { return []; }
+}
 
 export const motorName = (uid: string) => `ergon-motor-${uid.slice(4)}`;
 const secret = (master: string, purpose: string, uid: string) => crypto.createHmac('sha256', master).update(`ergon/motor-${purpose}/${uid}`).digest('hex');
@@ -73,6 +83,8 @@ function specHash(c: ManagerConfig, spec: Record<string, unknown>): string {
 /** O contêiner do motor de uma pessoa: o mesmo do docker-compose.yml (serviço do motor), com o cofre e os tokens dela. */
 function motorSpec(c: ManagerConfig, uid: string, volume: string, opts: { image?: string; labels?: Record<string, string> } = {}): Record<string, unknown> {
   const image = opts.image ?? c.image;
+  // rc.42: só as pastas que a pessoa concedeu, cada uma em /pastas/<nome>, só leitura quando ela escolheu assim
+  const pastas = pastasDoRotulo(opts.labels?.[LABEL.pastas], c.casas ?? []);
   const spec: Record<string, unknown> = {
     Image: image,
     Cmd: ['gateway', 'run'],
@@ -84,7 +96,8 @@ function motorSpec(c: ManagerConfig, uid: string, volume: string, opts: { image?
       'ERGON_VAULT=1', // espera a chave do Ergon (porta 8644, só rede interna)
     ],
     HostConfig: {
-      Mounts: [{ Type: 'volume', Source: volume, Target: '/vault' }], // só o lado cifrado vai para o disco
+      Mounts: [{ Type: 'volume', Source: volume, Target: '/vault' }, // só o lado cifrado vai para o disco
+        ...pastas.map((p) => ({ Type: 'bind', Source: p.origem, Target: `${RAIZ_NO_MOTOR}/${p.nome}`, ReadOnly: p.modo === 'ro', BindOptions: { Propagation: 'rprivate' } }))],
       // a vista decifrada fica só na memória; o cofre do motor entrega a pasta ao usuário dele (uid/gid aqui o Podman recusa)
       Tmpfs: { '/opt/data': 'mode=0700' },
       Devices: [{ PathOnHost: '/dev/fuse', PathInContainer: '/dev/fuse', CgroupPermissions: 'rwm' }],
@@ -94,12 +107,13 @@ function motorSpec(c: ManagerConfig, uid: string, volume: string, opts: { image?
       RestartPolicy: { Name: 'unless-stopped' },
       LogConfig: { Type: 'json-file', Config: { 'max-size': '10m' } }, // só o que o Docker e o Podman aceitam
       NetworkMode: c.network,
-      // sem portas publicadas, sem pastas do computador, sem o socket do Docker
+      // sem portas publicadas, sem o socket do Docker; do computador, só as pastas que a pessoa concedeu (rc.42)
     },
   };
+  const { [LABEL.pastas]: _p, ...outros } = opts.labels ?? {};
   spec.Labels = {
     [LABEL.uid]: uid, [LABEL.volume]: volume, [LABEL.spec]: specHash(c, spec), [LABEL.image]: image, [LABEL.install]: installTag(c.master),
-    ...(opts.labels ?? {}),
+    ...outros, ...(pastas.length ? { [LABEL.pastas]: JSON.stringify(pastas) } : {}),
   };
   return spec;
 }
@@ -150,7 +164,7 @@ export function selfContainerIds(read: (path: string) => string = (p) => { try {
 
 class ManagerError extends Error { readonly status: number; constructor(status: number, msg: string) { super(msg); this.status = status; } }
 
-interface EnsureOptions { adoptLegacy?: boolean; idle?: boolean; start?: boolean }
+interface EnsureOptions { adoptLegacy?: boolean; idle?: boolean; start?: boolean; /** rc.42: as pastas concedidas agora; ausente = as que o motor já tem */ pastas?: PastaMontada[] }
 /**
  * Por que um motor desatualizado não foi renovado agora (stale sem recreated): 'ocupado' = ligado e o Ergon não disse que
  * está livre (renova quando ficar); 'sem-imagem' = a imagem nova não está neste computador e não baixou (segue o de antes,
@@ -163,6 +177,8 @@ interface EnsureResult {
   motivo: MotivoAdiado | null;
   /** ID da imagem do contêiner agora; imageRef = referência com que foi criado; prevImage = imagem de antes da troca. */
   image: string | null; imageRef: string | null; prevImage: string | null;
+  /** rc.42: as pastas do computador montadas neste motor */
+  pastas?: PastaMontada[];
   /** troca ainda sem confirm nem rollback (o que este gerente sabe desde que ligou) */
   pendente: boolean;
   /** travado na versão anterior: a imagem configurada foi recusada numa volta atrás (rótulo hold no contêiner) */
@@ -269,8 +285,9 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
   const volumeOf = (cur: any): string | null => labelsOf(cur)[LABEL.volume] ?? mountedVault(cur);
 
   /** Desatualizado = especificação diferente, ou imagem diferente da configurada (menos a recusada numa volta, enquanto a configurada for ela). */
-  function staleOf(uid: string, L: Labels, curImage: unknown, volume: string, want: string | null) {
-    const spec = L[LABEL.spec] !== specHash(c, motorSpec(c, uid, volume));
+  function staleOf(uid: string, L: Labels, curImage: unknown, volume: string, want: string | null, pastas?: string) {
+    const p = pastas ?? L[LABEL.pastas];
+    const spec = L[LABEL.spec] !== specHash(c, motorSpec(c, uid, volume, p ? { labels: { [LABEL.pastas]: p } } : {}));
     const held = L[LABEL.hold] === c.image;
     const image = !!want && !sameId(curImage, want) && !held;
     return { stale: spec || image, held };
@@ -328,7 +345,7 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
       await createContainer(name, motorSpec(c, uid, volume, { image, labels }));
     } catch (e) {
       // não deixa a pessoa sem motor: refaz com a imagem de antes, no mesmo cofre
-      if (now?.Image) await docker('POST', `/containers/create?name=${name}`, motorSpec(c, uid, volume, { image: String(now.Image) })).catch(() => null);
+      if (now?.Image) await docker('POST', `/containers/create?name=${name}`, motorSpec(c, uid, volume, { image: String(now.Image), labels: labelsOf(now)[LABEL.pastas] ? { [LABEL.pastas]: labelsOf(now)[LABEL.pastas] } : {} })).catch(() => null);
       throw e;
     }
     if (start) await startContainer(name);
@@ -344,6 +361,8 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
       image: fullId(cur?.Image), imageRef: L[LABEL.image] ?? null, prevImage: fullId(L[LABEL.prev]),
       pendente: pendentes.has(uid), held: L[LABEL.hold] === c.image,
       state: cur?.State?.Status ?? (cur?.State?.Running ? 'running' : 'exited'),
+      // rc.42: as pastas do computador montadas agora neste motor
+      pastas: pastasDoRotulo(L[LABEL.pastas], c.casas ?? []),
     };
   }
 
@@ -359,9 +378,12 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
    * que está livre (idle), não mexe e avisa (stale); parado ou livre, recria com o mesmo volume.
    */
   function ensure(uid: string, o: EnsureOptions = {}): Promise<EnsureResult> { return lock(uid, () => doEnsure(uid, o)); }
-  async function doEnsure(uid: string, { adoptLegacy = false, idle = false, start = true }: EnsureOptions): Promise<EnsureResult> {
+  async function doEnsure(uid: string, { adoptLegacy = false, idle = false, start = true, pastas }: EnsureOptions): Promise<EnsureResult> {
     const name = motorName(uid);
     const cur = await inspect(name);
+    // as pastas pedidas agora (conferidas de novo aqui) ou, sem pedido, as que o motor já tem
+    const pedidas = pastas === undefined ? undefined : pastasParaMontar(pastas, c.casas ?? []);
+    const rotuloPastas = (L: Labels): Labels => { const v = pedidas === undefined ? L[LABEL.pastas] : pedidas.length ? JSON.stringify(pedidas) : undefined; return v ? { [LABEL.pastas]: v } : {}; };
     if (!cur) {
       const own = `${c.volumePrefix}${uid.slice(4)}`;
       // a pessoa já tem cofre (ex.: o gerente caiu no meio de uma troca, entre remover o contêiner antigo e criar o novo):
@@ -371,7 +393,7 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
       const volume = adopt ? c.legacyVolume : own;
       await imageId(c.image); // baixa antes, se faltar
       if (!adopt) await createVolume(volume, uid);
-      await createContainer(name, motorSpec(c, uid, volume));
+      await createContainer(name, motorSpec(c, uid, volume, { labels: rotuloPastas({}) }));
       if (start) await startContainer(name);
       return report(uid, await inspect(name), { created: true });
     }
@@ -380,7 +402,7 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
     if (!volume) throw new ManagerError(409, 'não deu para saber qual é o cofre deste motor: nada foi trocado');
     const L = labelsOf(cur);
     const want = await imageId(c.image).catch(() => null); // sem a imagem (sem internet): segue com o motor de antes
-    const st = staleOf(uid, L, cur.Image, volume, want);
+    const st = staleOf(uid, L, cur.Image, volume, want, rotuloPastas(L)[LABEL.pastas] ?? '');
     let motivo: MotivoAdiado | undefined;
     if (st.stale) {
       if (cur.State?.Running && !idle) return report(uid, cur, { stale: true, motivo: 'ocupado' });
@@ -388,7 +410,7 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
       const image = st.held ? String(cur.Image) : want ? c.image : null;
       if (image) {
         const prev = !st.held && !sameId(cur.Image, want) ? String(cur.Image) : null;
-        const labels: Labels = st.held ? { [LABEL.hold]: L[LABEL.hold] } : prev ? { [LABEL.prev]: prev } : {};
+        const labels: Labels = { ...(st.held ? { [LABEL.hold]: L[LABEL.hold] } : prev ? { [LABEL.prev]: prev } : {}), ...rotuloPastas(L) };
         const r = await recreate(uid, cur, volume, image, labels, start);
         if ('now' in r) {
           naPartida.delete(uid);
@@ -445,7 +467,7 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
       if (!(await lookupImage(prev))) throw new ManagerError(409, 'a versão anterior do motor não está mais neste computador');
       const volume = volumeOf(cur);
       if (!volume) throw new ManagerError(409, 'não deu para saber qual é o cofre deste motor: nada foi trocado');
-      const r = await recreate(uid, cur, volume, prev, { [LABEL.hold]: L[LABEL.image] ?? c.image }, start);
+      const r = await recreate(uid, cur, volume, prev, { [LABEL.hold]: L[LABEL.image] ?? c.image, ...(L[LABEL.pastas] ? { [LABEL.pastas]: L[LABEL.pastas] } : {}) }, start);
       if (!('now' in r)) throw new ManagerError(409, r.motivo === 'sem-imagem' ? 'a versão anterior do motor não está mais neste computador' : 'o motor não parou a tempo; tente de novo em instantes');
       pendentes.delete(uid); naPartida.delete(uid);
       return report(uid, r.now, { recreated: true });
@@ -791,7 +813,7 @@ export function createManager(c: ManagerConfig, docker: DockerCall) {
       const r = /^\/v1\/motors\/([^/]+)(?:\/(ensure|stop|confirm|rollback))?$/.exec(url);
       if (!r) throw new ManagerError(404, 'rota desconhecida');
       if (!UID.test(r[1])) throw new ManagerError(400, 'pessoa inválida');
-      if (method === 'POST' && r[2] === 'ensure') return { status: 200, json: { ok: true, ...(await ensure(r[1], { adoptLegacy: b.adoptLegacy === true, idle: b.idle === true, start: b.start !== false })) } };
+      if (method === 'POST' && r[2] === 'ensure') return { status: 200, json: { ok: true, ...(await ensure(r[1], { adoptLegacy: b.adoptLegacy === true, idle: b.idle === true, start: b.start !== false, ...(Array.isArray(b.pastas) ? { pastas: b.pastas as PastaMontada[] } : {}) })) } };
       if (method === 'POST' && r[2] === 'stop') { await stop(r[1]); return { status: 200, json: { ok: true } }; }
       if (method === 'POST' && r[2] === 'confirm') return { status: 200, json: { ok: true, ...(await confirm(r[1], uids(b.pendentes))) } };
       if (method === 'POST' && r[2] === 'rollback') return { status: 200, json: { ok: true, ...(await rollback(r[1], b.start !== false)) } };

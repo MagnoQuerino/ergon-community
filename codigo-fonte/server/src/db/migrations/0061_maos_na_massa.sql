@@ -23,3 +23,18 @@ CREATE TABLE git_concessoes (
   usos INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX git_concessoes_run ON git_concessoes(workspace_id, run_id);
+
+-- Pastas do computador concedidas ao motor da pessoa (services/pastas.ts): o gerente de motores monta cada uma em
+-- /pastas/<nome> no contêiner dela, com leitura e escrita ou só leitura. Revogar desmonta (o motor é refeito num momento
+-- seguro, com o mesmo cofre). O caminho é do computador da pessoa: fica cifrado. Na nuvem não existe.
+CREATE TABLE pastas_computador (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  caminho TEXT NOT NULL,
+  nome TEXT NOT NULL,
+  modo TEXT NOT NULL CHECK (modo IN ('rw', 'ro')),
+  criada_em TEXT NOT NULL,
+  revogada_em TEXT
+);
+CREATE INDEX pastas_computador_user ON pastas_computador(user_id, revogada_em);

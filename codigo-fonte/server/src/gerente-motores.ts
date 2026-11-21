@@ -20,6 +20,8 @@ serveManager({
   nanoCpus: Math.round(Number(env.HERMES_CPUS ?? 2) * 1e9),
   // o próprio contêiner (a imagem do núcleo): a limpeza protege a dele e só mexe nas do repositório dele e do motor
   selfIds: selfContainerIds(),
+  // rc.42: as casas das pessoas neste computador (ERGON_HOST_HOME, separadas por ";"): nunca montadas inteiras
+  casas: (env.ERGON_HOST_HOME ?? '').split(';').map((x) => x.trim()).filter(Boolean),
 }, dockerOver(env.ERGON_DOCKER_URL ? null : (env.ERGON_DOCKER_SOCKET ?? '/var/run/docker.sock'), env.ERGON_DOCKER_URL ?? null), port, '0.0.0.0', (uids) => {
   if (uids.length) console.log(JSON.stringify({ level: 'info', msg: `motores parados renovados para a imagem configurada (sem ligar): ${uids.length}` }));
 });

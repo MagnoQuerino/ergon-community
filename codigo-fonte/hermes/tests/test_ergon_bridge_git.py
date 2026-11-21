@@ -35,6 +35,7 @@ def check(name, cond, detail=""):
 
 
 SENHA = "ergit_" + "a" * 64
+RESPOSTA = {"q1": "Não permitir"}
 seen = []
 
 
@@ -50,6 +51,8 @@ class Ergon(BaseHTTPRequestHandler):
             seen.append(body)
         if self.path.endswith("/tool-policy"):
             pass
+        elif self.path.endswith("/cartao"):
+            out = {"estado": "respondida", "respostas": {"q1": RESPOSTA["q1"]}}
         elif body.get("acao") == "codigo.preparar":
             out = {"ok": True, "status": "feita", "texto": "Acesso pronto.\nEndereço para o git: {{git_url}} (sem senha)",
                    "git": {"caminho": "/internal/git/v1/github/acme/app.git", "usuario": "ergon", "senha": SENHA, "expira": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600))}}
@@ -103,5 +106,15 @@ check("o git acha o helper só para o endereço do Ergon", f"credential.{BASE}/i
 check("nada de senha na configuração do git", SENHA not in cfg)
 model_tools.handle_function_call("conexoes_executar", {"conexao": "github", "acao": "codigo.encerrar", "parametros": {}}, task_id="t1", session_id="s1")
 check("encerrar esquece a senha", SENHA not in open(arq).read() and pede("internal/git/v1/github/acme/app.git") == "")
+# ---------- protegidas no Terminal: o que apaga de vez pede a pessoa toda vez (mesmo com o acesso total)
+check("rm -rf, push --force, reset --hard, rmtree contam como apagar de vez", all(bridge.apaga_de_vez(c) for c in ("rm -rf /pastas/app", "git push --force origin x", "git reset --hard HEAD~1", "python -c 'import shutil; shutil.rmtree(\"x\")'")))
+check("o dia a dia não pergunta", not any(bridge.apaga_de_vez(c) for c in ("git commit -am x", "git push -u origin ergon/x", "pytest -q", "rm arquivo.txt", "ls -la /pastas")))
+cartoes = lambda: [b for b in seen if "perguntas" in b]
+r = bridge._protegida_no_terminal("terminal", {"command": "rm -rf /pastas/app/build"}, "t1", "s1")
+check("a pessoa não permitiu: barrado", isinstance(r, dict) and r.get("action") == "block" and len(cartoes()) == 1, str(r))
+check("o cartão mostra o comando", "rm -rf /pastas/app/build" in cartoes()[-1]["perguntas"][0]["pergunta"])
+RESPOSTA["q1"] = "Permitir desta vez"
+check("permitiu: passa (só esta vez)", bridge._protegida_no_terminal("terminal", {"command": "rm -rf /pastas/app/build"}, "t1", "s1") is None and len(cartoes()) == 2)
+check("comando comum: nem pergunta", bridge._protegida_no_terminal("terminal", {"command": "git status"}, "t1", "s1") is None and len(cartoes()) == 2)
 print("TUDO OK" if ok else "HOUVE FALHA")
 sys.exit(0 if ok else 1)
