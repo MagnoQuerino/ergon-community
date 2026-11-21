@@ -176,7 +176,7 @@ export function activityReport(db: Db, o: ReportOpts): { markdown: string; filen
     'agent.create', 'agent.update', 'agent.reactivate', 'agent.deactivate', 'agent.move', 'agent.sector', 'agent.tools', 'agent.tools.reassign',
     'agent.charter', 'agent.coordinator.ensure', 'agent.personality', 'agent.fx', 'agent.fx.release',
     'team.autorun', 'team.initiative', 'team.upgrade', 'team.sectors', 'team.theme.restore', 'team.distribution.apply', 'team.distribution.undo',
-    'sector.create', 'sector.update', 'runs.limit', 'run.cancel_request',
+    'sector.create', 'sector.update', 'runs.limit', 'run.cancel_request', 'navegador.assumiu', 'navegador.devolveu',
     'task.create', 'task.update', 'task.delegate', 'task.requires_approval', 'task.completion_reported', 'task.queue', 'task.queue_start',
     'task.plan', 'task.delivery', 'task.handoff', 'task.help_step', 'task.help_result', 'task.help_not_done', 'task.step_done', 'task.review_round',
     'task.persist', 'tasks.retire_fixtures',

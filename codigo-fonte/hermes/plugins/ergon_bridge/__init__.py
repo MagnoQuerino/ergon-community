@@ -63,6 +63,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+try:
+    from . import navegador  # o navegador ao vivo (rc.41), ao lado deste arquivo
+except ImportError:  # carregado como arquivo solto (testes só com a biblioteca padrão)
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("ergon_bridge_navegador", os.path.join(os.path.dirname(os.path.abspath(__file__)), "navegador.py"))
+    navegador = _ilu.module_from_spec(_spec)  # type: ignore[arg-type]
+    _spec.loader.exec_module(navegador)  # type: ignore[union-attr]
+
 logger = logging.getLogger("ergon_bridge")
 
 # Contrato com o servidor do Ergon (/ergon/v1/health): a mesma versão do plugin.yaml e do rótulo ergon.plugin.version da
@@ -92,9 +100,10 @@ PLUGIN_VERSION = "0.8.0"
 # turno no portão de aprovação do motor (approval.request, respondido pelo Ergon em POST /v1/runs/{id}/approval)
 # gestao (rc.29): o coordenador gerencia e configura o Ergon pelas ferramentas gestao_listar e gestao_executar (conjunto
 # ergon_gestao, só no perfil dele), que repassam ao Ergon (/internal/bridge/v1/gestao)
+# navegador (rc.41): a pessoa vê o navegador do agente ao vivo e assume o controle (/ergon/v1/navegador, navegador.py)
 CAPACIDADES = ("conexoes", "bloqueio_prefixo", "known_plugin_toolsets", "medicao", "passos", "aprovar_depois_de_ler", "compactacao",
                "perfis", "memoria", "ajudantes", "modelos_tarefa", "ajustes", "cota", "pausa", "nao_treinar", "cartoes", "comandos",
-               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao")
+               "recursos", "canais", "rotinas", "aprovacoes", "mcp_proprio", "gestao", "navegador")
 _TS_CONEXOES = "ergon_conexoes"
 # Os conjuntos de ferramentas que este plugin registra ficam em _ERGON_PLUGIN_TOOLSETS, mais abaixo (o mesmo de
 # ERGON_PLUGIN_TOOLSETS em hermes/vault/ergon-vault.py)
@@ -409,6 +418,13 @@ def on_pre_tool_call(tool_name: str = "", args: Any = None, task_id: str = "", s
     r = _pre_tool_call_travas(tool_name=tool_name, args=args, task_id=task_id, session_id=session_id, **kw)
     if r is None and tool_name == "terminal":
         _rtk_reescrever(args)
+    if r is None and str(tool_name or "").startswith("browser"):
+        # a pessoa assumiu o navegador deste trabalho (navegador.py): a ferramenta espera ela devolver
+        try:
+            s, t = _sessao_do_pedido(str(session_id or ""), str(task_id or ""))
+            r = navegador.antes(tool_name, s, t)
+        except Exception:  # noqa: BLE001 - a espera é de apoio: uma falha aqui não barra a ferramenta
+            r = None
     return r
 
 
@@ -659,6 +675,15 @@ def on_post_tool_call(tool_name: str = "", args: Any = None, result: Any = None,
     (a prova de uso que aparece no perfil). Nunca lança exceção (observador)."""
     if tool_name == "memory":
         return _avisar_memoria(result, str(session_id or ""), str(task_id or ""))
+    if str(tool_name or "").startswith("browser"):
+        # navegador ao vivo: registra qual sessão do navegador serve este trabalho (o Ergon mostra a tela à pessoa)
+        try:
+            s, t = _sessao_do_pedido(str(session_id or ""), str(task_id or ""))
+            nomeada = str(args.get("session") or "")[:64] if tool_name == "browser_exec" and isinstance(args, dict) else ""
+            navegador.depois(tool_name, s, t, str(task_id or ""), nomeada)
+        except Exception:  # noqa: BLE001 - observador
+            pass
+        return None
     if tool_name not in ("skill_manage", "web_extract", "skill_view"):
         return None
     try:
@@ -1010,6 +1035,15 @@ def _config_do_perfil(base: dict[str, Any], e: dict[str, Any]) -> dict[str, Any]
     # (_SEMPRE_TOOLSETS): sem eles o agente no perfil não teria como perguntar nem pedir uma chave com segurança.
     lista = sorted((ligados & quer & (_SAFE_TOOLSETS | _GUARDED_TOOLSETS)) | extras | _SEMPRE_TOOLSETS)
     cfg["platform_toolsets"] = {**pt, "api_server": list(lista), "cli": list(lista), "cron": list(lista)}   # listas próprias: sem âncoras no YAML
+    # navegador sem Terminal (rc.41): no Hermes 0.22 o navegador padrão é uma ferramenta só (browser_exec), que roda código
+    # no computador do motor e por isso só é entregue a quem também tem o Terminal (model_tools.py, _rewrite_browser_exec):
+    # o agente só com "Navegador automático" ficava sem navegador nenhum. Para ele, as ferramentas browser_* de sempre
+    # (browser.backend: off), que não rodam código. Com Terminal, fica como a equipe está (browser_exec, ou o que a
+    # configuração da equipe disser).
+    if "browser" in lista and "terminal" not in lista:
+        nav = dict(cfg.get("browser")) if isinstance(cfg.get("browser"), dict) else {}
+        nav["backend"] = "off"
+        cfg["browser"] = nav
     kn = cfg.get("known_plugin_toolsets") if isinstance(cfg.get("known_plugin_toolsets"), dict) else {}
     conhecidos = sorted(set(_lista_cfg(kn.get("api_server"))) | set(_ERGON_PLUGIN_TOOLSETS))
     cfg["known_plugin_toolsets"] = {**kn, "api_server": list(conhecidos), "cli": list(conhecidos), "cron": list(conhecidos)}
@@ -1137,8 +1171,13 @@ def _limpar_perfil(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Sobe quando a FORMA de montar a configuração do perfil muda (_config_do_perfil): os perfis que já existem são refeitos
+# sozinhos na partida seguinte do motor (_perfis_acompanhar), sem o Ergon mandar nada. 2 = navegador sem Terminal (rc.41).
+_PERFIL_GERACAO = 2
+
+
 def _carimbo_do_perfil(raiz: Path, pedido: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps([PLUGIN_VERSION, pedido, _assinatura(raiz / "config.yaml"), _assinatura(raiz / ".env")], sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([PLUGIN_VERSION, _PERFIL_GERACAO, pedido, _assinatura(raiz / "config.yaml"), _assinatura(raiz / ".env")], sort_keys=True).encode()).hexdigest()
 
 
 def _refazer_config_do_perfil(raiz: Path, d: Path, e: dict[str, Any]) -> None:
@@ -4710,6 +4749,11 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._ajustes_put(body or {})
         if path == "/ergon/v1/cota" and method == "GET":
             return self._cota_get(dict(urllib.parse.parse_qsl(parts.query)))
+        if path == "/ergon/v1/navegador" or path.startswith("/ergon/v1/navegador/"):
+            try:
+                return navegador.rota(self, method, path, dict(urllib.parse.parse_qsl(parts.query)), body or {})
+            except Exception as exc:  # noqa: BLE001 - nunca derruba a ponte
+                return self._json(503, {"error": f"o navegador não respondeu ({type(exc).__name__})"})
         if path == "/ergon/v1/pausa" and method == "GET":
             return self._pausa_get()
         if path == "/ergon/v1/pausa" and method == "PUT":
@@ -5473,7 +5517,13 @@ def _start_control() -> None:
     logger.info("ergon_bridge: ponte de controle na porta %s (rede interna)", port)
 
 
+def _navegador_avisar(ev: dict[str, Any]) -> None:
+    """O navegador de um trabalho abriu, fechou ou voltou sozinho para o agente: o Ergon mostra (ou tira) a tela ao vivo."""
+    _post_to(_url_for("/internal/bridge/v1/navegador"), ev, timeout=4)
+
+
 def register(ctx) -> None:
+    navegador.configurar(_navegador_avisar)
     ctx.register_hook("post_gateway_admission", on_admission)
     ctx.register_hook("pre_gateway_dispatch", on_pre_dispatch)
     # botões dos cartões e o adaptador vivo (só no processo do gateway, quando o canal conecta)

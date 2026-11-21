@@ -12,6 +12,7 @@ import { gravarNome } from '../lib/titulo-card.ts';
 import { fmtDataHora, tn, useT } from '../i18n/index.ts';
 import { Loading } from '../brand/Brand.tsx';
 import { Icon } from './Icon.tsx';
+import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
 import { OrientarCampo } from './AjustesEquipe.tsx';
 import { DueChip } from './Board.tsx';
 import { TextoLongo } from './TextoLongo.tsx';
@@ -604,6 +605,7 @@ export function TaskDetail({ taskId, columns: askedColumns, mode: asked, source:
           {!resumo && <>{ajusteBox}{confirmBox}{feedback}</>}
           {/* rc.27: com o trabalho andando, um recado que não interrompe (o agente lê no próximo passo) */}
           {mode === 'team' && active?.status === 'running' && <OrientarCampo rota={`/api/tasks/${tk.id}/steer`} nome={oAgente()} />}
+          {mode === 'team' && <NavegadorAoVivo tarefa={tk.id} agente={oAgente()} />}
           {/* sem o resumo (servidor antigo): o motivo da falha à vista, como antes */}
           {mode === 'team' && need === 'retry' && !resumo && <p className="ask-box ask-box--line" role="status">{motivoDaFalha(work?.result?.justification)}</p>}
 

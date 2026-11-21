@@ -169,6 +169,15 @@ const ERROS = {
 /** As linhas do histórico (audit_events.result) que são frases fixas do sistema. */
 const HISTORICO = {
   'historico.comNota': '{situacao} — {nota}',
+  'historico.navegador.assumiu': 'Você assumiu o controle do navegador do agente',
+  'historico.navegador.devolveu': 'Você devolveu o navegador ao agente',
+  'historico.navegador.ocioso': 'O navegador voltou ao agente: 10 minutos sem uso',
+  'historico.navegador.teto': 'O navegador voltou ao agente: o tempo máximo acabou',
+  'historico.navegador.queda': 'O navegador voltou ao agente: a tela foi fechada',
+  'historico.navegador.sessao': 'O navegador voltou ao agente: a sessão foi trancada ou encerrada',
+  'historico.navegador.fim': 'O navegador voltou ao agente: o trabalho terminou',
+  'historico.navegador.prazo': 'O navegador voltou ao agente: o prazo acabou',
+  'historico.navegador.fechado': 'O navegador voltou ao agente: ele foi fechado',
   'historico.situacao.solicitada': 'Solicitada',
   'historico.situacao.processamento': 'Em processamento',
   'historico.situacao.resultado': 'Resultado produzido',
