@@ -1312,6 +1312,17 @@ body:has(.cdock) .tip { right: 100px; }
   .topbar__wswrap { display: contents; }
   .topbar__ws { display: none; }
 }
+/* integração rc.42: de 441 a ~740 px a barra rolava para o lado mesmo sem o selo (o logo inteiro, o workspace, o "Pedir"
+   e os ícones não cabiam). Até 740 px fica só o emblema do logo; até 620 px o logo e o workspace vão para a gaveta, como
+   abaixo de 440 px (o primeiro item do menu é a Cidade; "Workspace: nome" continua lá). */
+@media (max-width: 740px) {
+  .brand__home { width: 30px; overflow: hidden; justify-content: flex-start; }
+}
+@media (max-width: 620px) {
+  .brand { display: none; }
+  .topbar__wswrap { display: contents; }
+  .topbar__ws { display: none; }
+}
 @media (max-width: 360px) {
   /* workspace: o botão vai para a gaveta ("Workspace: nome"), o balão continua abrindo (fixo nessa largura) */
   .topbar__wswrap { display: contents; }
