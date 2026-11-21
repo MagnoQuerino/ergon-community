@@ -2394,10 +2394,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.post('/api/conversations/:id/messages', {
     schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['text', 'clientRequestId'], properties: {
       text: S.str(cfg.maxInputChars), clientRequestId: S.str(64, 8), queue: { type: 'boolean' },
-      attachments: { type: 'array', maxItems: 20, items: S.id('art') }, replyTo: S.id('msg') } } },
+      attachments: { type: 'array', maxItems: 20, items: S.id('art') }, replyTo: S.id('msg'),
+      // conversa por voz (rc.41): a tela avisa que a resposta vai ser falada (o agente responde curto e sem formatação)
+      voz: { type: 'boolean' } } } },
   }, async (req, reply) => {
     const a = auth(req);
-    const b = req.body as { text: string; clientRequestId: string; queue?: boolean; attachments?: string[]; replyTo?: string };
+    const b = req.body as { text: string; clientRequestId: string; queue?: boolean; attachments?: string[]; replyTo?: string; voz?: boolean };
     // na conversa de preparo de uma rotina, a coordenação recebe o contexto do preparo (e a mensagem não vira tarefa)
     const convId = (req.params as { id: string }).id;
     const note = routines.channelFor(convId);
@@ -2420,7 +2422,7 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       return reply.status(m.replayed ? 200 : 201).send({ messageId: m.messageId, runId: null, summary: 'resposta à pergunta do agente', replayed: m.replayed, queued: false, respondeu: abertas.length });
     }
     // queue: com o agente ainda respondendo, a mensagem espera na fila da conversa (Ctrl+Enter) em vez de ser recusada
-    const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, attachments: b.attachments ?? [], replyTo: b.replyTo ?? null });
+    const r = sendMessage(db, bus, executor, a.workspaceId, a.userId, convId, b.text, b.clientRequestId, cfg.maxConversationMessages, cfg.maxInputChars, { note, plain: !!note, queue: !!b.queue, attachments: b.attachments ?? [], replyTo: b.replyTo ?? null, voz: b.voz === true });
     return reply.status(r.replayed ? 200 : 201).send(r);
   });
 

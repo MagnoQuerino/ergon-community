@@ -2233,6 +2233,68 @@ button.dest:hover, .dest__main:hover, button.dest:focus-visible, .dest__main:foc
 .msg__audio details.msg__transcricao summary { cursor: pointer; color: var(--muted); }
 .msg__audio details.msg__transcricao p { margin: 4px 0 0; white-space: pre-wrap; max-width: 80ch; }
 .msg__transcricao--falhou { border-left-color: var(--err); }
+/* ——— Conversa por voz (rc.41): o modo mãos livres por cima da conversa (components/ConversaPorVoz.tsx) ———
+   Escuro nos dois temas, como a barra de cima e a tela "Encerrando"; a cor do anel e do medidor (--tom) diz de quem é a vez:
+   água = ouvindo você, dourado = o agente falando, cinza = esperando. --nivel (0 a 1) vem do microfone. */
+.chat__voz { color: var(--teal); }
+.vozc { --nivel: 0; --tom: var(--texto-inverso-3); container: vozc / size; position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 16px 12px; overflow: auto;
+  border-radius: inherit; background: radial-gradient(120% 62% at 50% 0%, var(--inversa) 0%, var(--inversa-2) 78%); color: var(--texto-inverso); animation: fadein .18s ease; }
+.vozc > * { width: 100%; max-width: 520px; flex: none; }
+.vozc--ouvindo, .vozc--captando { --tom: var(--inversa-agua); }
+.vozc--preparando, .vozc--falando { --tom: var(--inversa-aviso); }
+.vozc__topo { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.vozc__nome { flex: 1; min-width: 0; text-align: right; font-size: 12px; color: var(--texto-inverso-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vozc__x { color: var(--texto-inverso-2); }
+.vozc__x:hover { background: var(--inversa-hover); }
+/* o indicador do microfone: vermelho cheio só com ele aberto de verdade */
+.vozc__mic { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px 4px 9px; border-radius: 999px; border: 1px solid var(--inversa-linha); font-size: 12.5px; font-weight: 600; color: var(--texto-inverso-2); white-space: nowrap; }
+.vozc__mic i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.vozc__mic.is-on { background: var(--perigo-cheio); border-color: var(--perigo-cheio); color: var(--perigo-sobre); }
+.vozc__palco { flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 6px 0; text-align: center; }
+.vozc__orbe { position: relative; width: clamp(84px, min(30%, 20vh), 148px); aspect-ratio: 1; display: grid; place-items: center; margin: clamp(10px, 3vh, 26px) 0 clamp(8px, 2vh, 16px); }
+.vozc__rosto { width: 72%; height: 72%; border-radius: 50%; display: grid; place-items: center; overflow: hidden; background: var(--inversa); box-shadow: 0 0 0 3px var(--inversa-2), 0 0 0 5px var(--tom); transition: box-shadow .3s ease; }
+.vozc__rosto > img { width: 100%; height: 100%; }
+.vozc__anel { position: absolute; inset: 4%; border-radius: 50%; border: 2px solid var(--tom); opacity: calc(.25 + var(--nivel) * .6); transform: scale(calc(1 + var(--nivel) * .3)); transition: transform .09s linear, opacity .09s linear, border-color .3s ease; }
+.vozc__anel--2 { inset: -6%; border-width: 1px; opacity: calc(.12 + var(--nivel) * .4); transform: scale(calc(1 + var(--nivel) * .55)); }
+.vozc__estado { margin: 0; font-size: clamp(19px, 2.6vh + 6px, 24px); font-weight: 600; line-height: 1.25; text-wrap: balance; }
+.vozc__dica { margin: 0; max-width: 36ch; min-height: 2.9em; font-size: 13.5px; line-height: 1.45; color: var(--texto-inverso-2); text-wrap: balance; }
+.vozc--erro .vozc__dica { color: var(--inversa-aviso); max-width: 44ch; }
+/* o medidor de nível: as últimas medidas do microfone, da esquerda (antigas) para a direita (agora) */
+.vozc__nivel { display: flex; align-items: center; justify-content: center; gap: 3px; height: 30px; width: min(220px, 70%); }
+.vozc__nivel i { flex: 1; max-width: 4px; height: 100%; border-radius: 2px; background: var(--inversa-linha); transform: scaleY(.08); transition: transform .08s linear, background-color .3s ease; }
+.vozc[data-microfone="aberto"] .vozc__nivel i { background: var(--tom); }
+.vozc__legenda { flex: 0 1 auto; display: flex; flex-direction: column; gap: 8px; max-height: min(34%, 240px); min-height: 56px; overflow: auto; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--inversa-linha); background: var(--inversa-veu); font-size: 14px; line-height: 1.45; }
+.vozc__vazio { margin: auto 0; text-align: center; font-size: 13px; color: var(--texto-inverso-3); }
+.vozc__fala { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vozc__fala b { display: block; margin-bottom: 1px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--texto-inverso-3); }
+.vozc__fala--voce { color: var(--texto-inverso-2); }
+.vozc__fala em { color: var(--texto-inverso-3); }
+.vozc__aviso { display: flex; align-items: flex-start; gap: 7px; margin: 0; font-size: 13px; line-height: 1.4; color: var(--inversa-aviso); }
+.vozc__aviso svg { flex: none; margin-top: 1px; }
+.vozc__acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.vozc__btn { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 8px 14px; border-radius: 10px; background: var(--inversa); border-color: var(--inversa-linha); color: var(--texto-inverso); font-weight: 600; }
+.vozc__btn:hover { background: var(--inversa-hover); }
+.vozc__btn[aria-pressed="true"] { background: var(--inversa-ativo); border-color: var(--inversa-linha-forte); }
+.vozc__btn--destaque { background: var(--dourado-cheio); border-color: var(--dourado-cheio-borda); color: var(--dourado-sobre); }
+.vozc__btn--destaque:hover { background: var(--dourado-cheio-hover); }
+.vozc__btn--sair { flex: 0 1 auto; }
+.vozc :focus-visible { outline: var(--foco-largura) solid var(--texto-inverso); outline-offset: 2px; }
+.vozc__nota { margin: 0; text-align: center; font-size: 12px; line-height: 1.4; color: var(--texto-inverso-3); text-wrap: balance; }
+/* painel baixo (a janela do agente no celular, a conversa encaixada): some a nota e o retrato encolhe, sem rolar */
+@container vozc (max-height: 600px) { .vozc__nota { display: none; } .vozc__dica { min-height: 0; } .vozc__orbe { width: 84px; margin: 8px 0; } .vozc__palco { gap: 6px; padding: 0; } }
+@container vozc (max-height: 430px) { .vozc__orbe, .vozc__nome { display: none; } }
+@keyframes vozc-fala { 0%, 100% { transform: scale(1); opacity: .35; } 50% { transform: scale(1.16); opacity: .8; } }
+@keyframes vozc-pensa { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: no-preference) {
+  .vozc__mic.is-on i { animation: pulse 1.4s ease-in-out infinite; }
+  .vozc--falando .vozc__anel { animation: vozc-fala 1.5s ease-in-out infinite; }
+  .vozc--falando .vozc__anel--2 { animation: vozc-fala 1.5s ease-in-out .35s infinite; }
+  /* esperando (enviando, transcrevendo, pensando, preparando a voz): um arco que gira devagar */
+  .vozc--enviando .vozc__anel, .vozc--transcrevendo .vozc__anel, .vozc--pensando .vozc__anel, .vozc--preparando .vozc__anel { border-color: transparent; border-top-color: var(--tom); opacity: .9; animation: vozc-pensa 1.3s linear infinite; }
+  .vozc__pontos { animation: pulse 1.2s ease-in-out infinite; }
+}
+/* sem animação: o anel não pulsa nem cresce com a voz (o medidor de colunas segue, é a informação do nível) */
+@media (prefers-reduced-motion: reduce) { .vozc { animation: none; } .vozc__anel { transform: none; transition: none; } .vozc__nivel i { transition: none; } }
 .voz-escolhas fieldset { border: 0; padding: 0; margin: 6px 0; }
 .voz-escolhas .check { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; max-width: 80ch; }
 
