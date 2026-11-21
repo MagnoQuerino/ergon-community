@@ -56,6 +56,15 @@ export const TOOLS: Record<string, ToolDef> = {
   videogen: { id: 'videogen', label: 'Criar vídeos', kind: 'ia', toolset: 'video_gen', status: 'desligada', aviso: 'custo', note: 'gera vídeos curtos a partir de uma descrição ou de uma imagem. Precisa de uma conta de vídeo ligada (chave própria, em Conexões › Chave própria); cada vídeo é cobrado por ela', safe: true },
   xbusca: { id: 'xbusca', label: 'Busca no X', kind: 'ia', toolset: 'x_search', status: 'desligada', aviso: 'custo', note: 'pesquisa publicações públicas do X (Twitter). Precisa de uma conta da xAI ligada (chave própria, em Conexões › Chave própria); cada busca é cobrada por ela', safe: true },
   voz: { id: 'voz', label: 'Responder em áudio', kind: 'ia', toolset: 'tts', status: 'desligada', aviso: 'custo', note: 'grava a resposta em áudio quando você pede. A voz padrão é grátis e usa a internet; outras vozes são cobradas pela conta delas', safe: true },
+  // rc.42: o agente usa a área de trabalho da pessoa (mouse, teclado, programas) pelo Ergon Desktop. Desligada por padrão (fora
+  // de BENEFICIOS); ligar a ferramenta só a entrega ao agente: usar o computador ainda pede a pessoa ("Ativar acesso total?",
+  // services/computador.ts), e quem administra bloqueia para o workspace. Na nuvem não há área de trabalho.
+  computador: { id: 'computador', label: 'Controle do computador', kind: 'ia', toolset: 'computer_use', status: 'desligada', aviso: 'risco', note: 'usa o seu computador como você: vê a tela, move o mouse, clica, digita e abre programas, pelo Ergon Desktop. Você assume o controle a qualquer momento; senhas, pagamentos e apagar de vez sempre pedem a sua confirmação', safe: true },
+  // rc.42: administração do servidor do Discord ligado em Conexões (o mesmo bot da conversa pelo Discord). Desligada por padrão.
+  discord: { id: 'discord', label: 'Administrar o Discord', kind: 'ia', toolset: 'discord_admin', status: 'desligada', aviso: 'risco', note: 'no servidor do Discord ligado à equipe: lista canais e cargos, fixa mensagens, cria tópicos e dá ou tira cargos; apagar uma mensagem sempre pede a sua confirmação', safe: true },
+  // rc.42: o conjunto de diagnóstico do motor (Terminal, processos, leitura de arquivos e pesquisa), para quem programa. Roda
+  // comandos: a mesma trava do Terminal (senha).
+  diagnostico: { id: 'diagnostico', label: 'Diagnóstico', kind: 'ia', toolset: 'debugging', status: 'bloqueada', note: 'investiga e corrige erros em programas: roda comandos, acompanha processos, lê arquivos e pesquisa a mensagem de erro, no ambiente isolado da equipe', guarded: true },
   // conectores prontos do motor: um conjunto por conector instalado (Conexões › Mais aplicativos); o plugin barra a escrita
   // onde a pessoa não liberou
   conectores: { id: 'conectores', label: 'Conectores prontos', kind: 'ia', status: 'desligada', aviso: 'risco', note: 'usa os aplicativos instalados em Conexões › Mais aplicativos: consulta à vontade; mudar dados só no aplicativo em que você liberou a escrita', safe: true },
@@ -82,7 +91,7 @@ export const COMPETENCIAS_PRONTAS: readonly string[] = ['docx', 'xlsx', 'pdf', '
  * cada uma vai em toda chamada ao modelo) ficam com eles, não com ele (decisão do dono, 16/11: cada mensagem ao
  * Aristóteles custava ~17 mil tokens, metade só com a descrição das ferramentas). A pessoa pode devolver no perfil dele.
  */
-export const PESADAS_FORA_DO_COORDENADOR: readonly string[] = ['navegador', 'video', 'videogen', 'imagens', 'voz', 'xbusca', 'conectores', 'calculo', 'terminal', 'leitura'];
+export const PESADAS_FORA_DO_COORDENADOR: readonly string[] = ['navegador', 'video', 'videogen', 'imagens', 'voz', 'xbusca', 'conectores', 'calculo', 'terminal', 'leitura', 'computador', 'discord', 'diagnostico'];
 export const semPesadas = (tools: readonly string[]): string[] => tools.filter((t) => !PESADAS_FORA_DO_COORDENADOR.includes(t));
 
 /** Uma vez por agente que coordena: tira as ferramentas pesadas (se a pessoa devolver depois, ficam). */
@@ -132,6 +141,9 @@ export const motorScope = (workspaceId: string | null | undefined): string => sc
 /** O workspace tem alguma conta ou aplicativo conectado? (o app registra a consulta ao banco) */
 let contasOf: (workspaceId: string) => boolean = () => false;
 export function setContasConectadas(fn: (workspaceId: string) => boolean): void { contasOf = fn; }
+/** O Discord da equipe está ligado neste workspace (Conexões › Conversar com a equipe pelo Discord)? (o app registra a consulta) */
+let discordOf: (workspaceId: string) => boolean = () => true;
+export function setDiscordLigado(fn: (workspaceId: string) => boolean): void { discordOf = fn; }
 /** A renovação do motor deste escopo voltou atrás nesta versão (motors.ts): o que falta nele só volta com a próxima versão. */
 let renovacaoFalhou: (scope: string) => boolean = () => false;
 export function setRenovacaoFalhou(fn: (scope: string) => boolean): void { renovacaoFalhou = fn; }
@@ -167,6 +179,8 @@ export function toolStatus(t: ToolDef, ctx: ToolCtx = {}): ToolDef {
         : { ...t, status: 'bloqueada', note: `${t.note} — bloqueada: precisa da sua autorização (senha)` };
     }
     if (!t.safe) return { ...t, status: 'bloqueada' };
+    // administrar o Discord usa o bot da conversa pelo Discord: sem ele ligado, não há o que administrar
+    if (t.id === 'discord' && ctx.workspaceId && !discordOf(ctx.workspaceId)) return { ...t, status: 'desligada', note: `${t.note} — ligue antes o Discord em Conexões › Conversar com a equipe pelo Discord` };
     if (on.has(t.toolset ?? '')) return { ...t, status: 'disponível' };
     // Conexões com conta ligada, num motor que ainda não tem o conjunto: a renovação do motor traz (nada a ligar)
     const contas = ctx.contas ?? (ctx.workspaceId ? contasOf(ctx.workspaceId) : false);

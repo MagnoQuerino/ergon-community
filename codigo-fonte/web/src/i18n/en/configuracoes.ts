@@ -401,6 +401,18 @@ const configuracoes: Traducao<typeof pt> = {
   'ferr.aviso.risco': 'risk',
   'ferr.aviso.custoDica': "May use more of the AI account or of its own account: see the tool's text. It comes on; take it away from anyone who does not need it, to save.",
   'ferr.aviso.riscoDica': "Reaches outside content or files: see the tool's text. It comes on; keep an eye on it and take it away from anyone who does not need it.",
+  'computador.titulo': 'Computer control',
+  'computador.nuvem': 'There is no desktop in the cloud: computer control works in Ergon Desktop.',
+  'computador.conectado': 'Ergon Desktop connected · {so}',
+  'computador.abraODesktop': 'Open Ergon Desktop on this computer',
+  'computador.desligado': 'Off',
+  'computador.cadaAcao': 'Confirm each action',
+  'computador.total': 'Full access',
+  'computador.perguntar': 'Ask when an agent needs it',
+  'computador.comLiberarTudo': 'With "Allow everything" on, actions go ahead without confirming.',
+  'computador.sempre': 'Passwords, payments and permanent deletion always ask you.',
+  'computador.bloquear': 'Block in this workspace',
+  'computador.bloqueado': 'Blocked by the workspace admin.',
 };
 
 export default configuracoes;

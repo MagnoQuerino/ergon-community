@@ -32,6 +32,8 @@ def ambientes(env: dict) -> tuple[dict, dict]:
     motor = {k: v for k, v in env.items() if not k.startswith(PREFIXO) and not k.startswith("ERGON_") and not k.startswith("NODE_")}
     motor.update({k[len(PREFIXO):]: v for k, v in env.items() if k.startswith(PREFIXO)})
     motor.setdefault("HOME", "/opt/data")
+    # na nuvem não há área de trabalho: o controle do computador responde isso ao agente (plugin do Ergon, rc.42)
+    motor["ERGON_SEM_AREA_DE_TRABALHO"] = "1"
     return app, motor
 
 

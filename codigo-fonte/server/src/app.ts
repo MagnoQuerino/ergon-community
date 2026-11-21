@@ -97,9 +97,10 @@ import { autoSector, createSector, ensureSectors, listSectors, sectorByKey, setS
 import { importBoards } from './services/mirror.ts';
 import { RunExecutor, almaDoAgente, draftPrompt, instructionsFor, isCoordinator, parseDraft, type RunRow } from './services/runs.ts';
 import { Navegador } from './services/navegador.ts';
+import { Computador, MODOS, type Escolha, type Modo } from './services/computador.ts';
 import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
 import { ReviewService } from './services/review.ts';
-import { GUARDED_TOOLSETS, TOOLS, ferramentasDesligadas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
+import { GUARDED_TOOLSETS, TOOLS, ferramentasDesligadas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, setDiscordLigado, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PASSOS_SETTING, compactacaoDaEquipe, medirExecucao, passosDaEquipe, resumoComposicao } from './services/custo.ts';
@@ -173,6 +174,8 @@ export interface ErgonApp {
   stopBackground(): Promise<void>;
   /** navegador ao vivo (rc.41) */
   navegador: Navegador;
+  /** controle do computador (rc.42) */
+  computador: Computador;
 }
 
 // volta do login com a conta (Microsoft, Google): o navegador chega sem o cookie (SameSite=Strict); o "state" de uso único autentica
@@ -257,6 +260,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   }
   // as Conexões de um agente ficam "atualizando" (não "desligadas") quando há conta ligada e o motor ainda não as tem
   setContasConectadas((ws) => !!db.get("SELECT 1 AS x FROM integrations WHERE workspace_id = ? AND state = 'connected' LIMIT 1", ws));
+  // administrar o Discord (rc.42) usa o bot da conversa pelo Discord, guardado no motor de quem é deste workspace
+  setDiscordLigado((ws) => !!db.get("SELECT 1 AS x FROM canais_bots b JOIN memberships m ON m.user_id = b.user_id WHERE m.workspace_id = ? AND b.canal = 'discord' LIMIT 1", ws));
   const reviews = new ReviewService(db, bus, executor, cfg);
   // núcleo operacional: análise determinística de arquivos e conclusão de cards só com evidência
   const opsCfg = { filesDir: cfg.filesDir, maxUploadBytes: cfg.maxUploadBytes, storageQuota: cfg.mode === 'cloud' ? cfg.maxStorageBytes : 0 };
@@ -2674,11 +2679,51 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     podeVer: (a, r) => { if (r.conversation_id) getConversation(db, a.workspaceId, a.userId, r.conversation_id); else if (!r.task_id) throw notFound('execução'); },
   });
   executor.onFinish((r) => navegador.execucaoTerminou(r.id));
+  // Controle do computador (rc.42, services/computador.ts): o Ergon Desktop liga daqui com a sessão da pessoa; o motor pede
+  // cada ação pela ponte (/internal/bridge/v1/computador)
+  const computador = new Computador({
+    db, bus, origens: cfg.allowedOrigins, sessao: sessaoDoCookie, nuvem: cfg.mode === 'cloud',
+    // o mesmo interruptor de "Liberar tudo" das Conexões (com a rc.42 "mãos na massa": o do workspace ou o da pessoa)
+    liberarTudo: (ws) => conexoes.liberarTudo(ws),
+    donoDe: (r) => (r.conversation_id ? db.get<{ owner_user_id: string }>('SELECT owner_user_id FROM conversations WHERE id = ?', r.conversation_id)?.owner_user_id ?? null : null),
+    membro: (ws, userId) => !!db.get('SELECT 1 AS x FROM memberships WHERE workspace_id = ? AND user_id = ?', ws, userId),
+    nomeDoAgente: (r) => db.get<{ name: string }>('SELECT name FROM agents WHERE id = ?', r.agent_id)?.name ?? 'O agente',
+  });
+  executor.onFinish((r) => computador.execucaoTerminou(r.id));
+  aoAtivarAcessoTotal.push((a) => computador.aoAtivarAcessoTotal(a));
   app.server.on('upgrade', (rq, socket, head) => {
     if (Navegador.caminho(rq.url)) navegador.upgrade(rq, socket, head);
+    else if (Computador.caminho(rq.url)) computador.upgrade(rq, socket, head);
     else socket.destroy();
   });
-  app.addHook('onClose', async () => navegador.fechar());
+  app.addHook('onClose', async () => { navegador.fechar(); computador.fechar(); });
+  app.get('/api/computador', async (req) => computador.estado(auth(req)));
+  app.put('/api/computador/modo', { schema: { body: { type: 'object', additionalProperties: false, required: ['modo'], properties: { modo: { enum: [...MODOS] }, naoPerguntar: { type: 'boolean' } } } } }, async (req) => {
+    const a = auth(req);
+    const b = req.body as { modo: Modo; naoPerguntar?: boolean };
+    computador.definirModo(a, b.modo, b.naoPerguntar);
+    return computador.estado(a);
+  });
+  app.put('/api/computador/bloqueio', { schema: { body: { type: 'object', additionalProperties: false, required: ['bloqueado'], properties: { bloqueado: { type: 'boolean' } } } } }, async (req) => {
+    const a = auth(req);
+    computador.definirBloqueio(a, (req.body as { bloqueado: boolean }).bloqueado);
+    return computador.estado(a);
+  });
+  app.post('/api/computador/pedidos/:id', {
+    schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^cmp_[a-f0-9]{32}$' } } },
+      body: { type: 'object', additionalProperties: false, required: ['escolha'], properties: { escolha: { enum: ['ativar', 'uma_vez', 'agora_nao', 'permitir', 'recusar'] }, naoPerguntar: { type: 'boolean' } } } },
+  }, async (req) => {
+    const a = auth(req);
+    const b = req.body as { escolha: Escolha; naoPerguntar?: boolean };
+    computador.responder(a, (req.params as { id: string }).id, b.escolha, b.naoPerguntar === true);
+    return computador.estado(a);
+  });
+  // "Assumir o controle" / "Conceder o controle" (também pelo selo da área de trabalho e pela tecla de pânico, no aparelho)
+  app.post('/api/computador/controle', { schema: { body: { type: 'object', additionalProperties: false, required: ['pessoa'], properties: { pessoa: { type: 'boolean' } } } } }, async (req) => {
+    const a = auth(req);
+    if ((req.body as { pessoa: boolean }).pessoa) computador.assumir(a.userId, 'botao'); else computador.conceder(a.userId);
+    return computador.estado(a);
+  });
   const runDoNavegador = (req: FastifyRequest) => {
     const a = auth(req);
     const r = executor.get(a.workspaceId, (req.params as { id: string }).id);
@@ -3268,6 +3313,19 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     return { ok: true };
   });
 
+  // Controle do computador (rc.42): cada ação da ferramenta do motor passa por aqui (decisão, cartão, registro) até o aparelho.
+  // A resposta pode esperar a pessoa decidir no cartão (até 240 s); a captura de tela volta inteira, só para o agente.
+  app.post('/internal/bridge/v1/computador', {
+    bodyLimit: 64 * 1024,
+    schema: { body: { type: 'object', required: ['acao'], properties: { acao: S.str(30, 1), args: { type: 'object' }, session_id: S.str(200), task_id: S.str(200) } } },
+  }, async (req) => {
+    const motor = bridgeMotor(req);
+    const b = req.body as { acao: string; args?: Record<string, unknown>; session_id?: string; task_id?: string };
+    const found = await executor.runForSession(String(b.session_id ?? ''), String(b.task_id ?? ''));
+    if (!found || !motors.allows(motor, found.workspace_id)) return { ok: false, code: 'sem_trabalho', error: 'Esta conversa não é de um trabalho do Ergon: o controle do computador só vale para os agentes do Ergon.' };
+    return computador.doMotor(found, b.acao, b.args ?? {});
+  });
+
   // Ajudantes temporários (subagentes do motor): o plugin avisa o começo e o fim (com o resultado). A execução do Ergon
   // espera os que faltam e continua com o resultado antes de entregar (RunExecutor.continuarComAjudantes).
   app.post('/internal/bridge/v1/ajudante', {
@@ -3570,6 +3628,6 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     });
   }
 
-  return { app, navegador, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
+  return { app, navegador, computador, executor, cartoes, aprovacoes, appsProprios, rotinasMotor, comandos, reviews, teamwork, operations, results, routines, trainings, ai, integrations, conexoes, espelhoEscrita, perfis, whatsapp, initiative, bus, db, vault, hermesVault, motors, teamsApp, canais, startBackground, stopBackground };
 }
 

@@ -3477,3 +3477,44 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
 .acesso { display: flex; flex-direction: column; gap: 10px; }
 .acesso__agentes { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; max-height: 180px; overflow: auto; }
 .acesso__agentes legend { padding: 0 4px; color: var(--muted); }
+/* rc.42: controle do computador — o selo da barra brilha enquanto um agente usa o computador (verde com você no
+   controle); o cartão "Ativar acesso total?" e o passo da permissão. Movimento só sem prefers-reduced-motion. */
+.tb-computador { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 4px 0 10px; border-radius: 10px; color: var(--texto-inverso);
+  border: 1px solid var(--dourado-cheio); background: var(--inversa-ativo); box-shadow: 0 0 0 2px rgba(184, 139, 91, .22), 0 0 14px rgba(226, 183, 127, .45); animation: pc-pulso 2.4s ease-in-out infinite; }
+.tb-computador__luz { width: 8px; height: 8px; border-radius: 50%; background: var(--dourado-vivo); }
+.tb-computador__txt { font-size: 13px; font-weight: 600; white-space: nowrap; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+.tb-computador__btn { height: 26px; padding: 0 10px; border-radius: 7px; border: 0; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; background: var(--dourado-cheio); color: var(--dourado-sobre); }
+.tb-computador__btn:hover { background: var(--dourado-cheio-hover); }
+.tb-computador--pessoa { border-color: var(--sucesso-borda); box-shadow: 0 0 0 2px rgba(95, 183, 132, .2); animation: none; }
+.tb-computador--pessoa .tb-computador__luz { background: var(--sucesso-ponto); }
+.tb-computador--pessoa .tb-computador__btn { background: var(--sucesso-cheio); color: var(--sucesso-sobre); }
+@keyframes pc-pulso { 50% { box-shadow: 0 0 0 3px rgba(184, 139, 91, .32), 0 0 22px rgba(226, 183, 127, .75); } }
+@media (max-width: 700px) { .tb-computador__txt { display: none; } }
+.pc-cartao { width: min(460px, 100%); text-align: center; align-items: center; }
+.pc-cartao h3 { margin: 0; font-size: 20px; }
+.pc-cartao p { margin: 0; }
+.pc-cartao .check { justify-content: center; }
+.pc-cartao__arte { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%; background: var(--dourado-suave); }
+.pc-cartao__tela { display: grid; place-items: center; width: 60px; height: 60px; border-radius: 14px; color: var(--dourado-texto); border: 2px solid var(--dourado-cheio);
+  box-shadow: 0 0 0 4px rgba(184, 139, 91, .15), 0 0 20px rgba(226, 183, 127, .55); animation: pc-pulso 2.4s ease-in-out infinite; }
+.pc-cartao__garantia { color: var(--muted); font-size: 13px; display: inline-flex; gap: 6px; align-items: flex-start; text-align: left; }
+.pc-cartao__acoes { width: 100%; flex-wrap: wrap; }
+.pc-cartao__ativar { min-width: 120px; }
+.pc-cartao--acao { text-align: left; align-items: stretch; }
+.pc-cartao--acao h3 { display: flex; gap: 8px; align-items: center; font-size: 17px; }
+.pc-cartao__resumo { font-size: 16px; font-weight: 600; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); }
+.pc-cartao--protegida { border-color: var(--atencao-borda); box-shadow: 0 0 0 3px rgba(138, 90, 0, .18), 0 24px 60px rgba(0, 0, 0, .28); }
+.pc-passo { display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; border-radius: 10px; background: var(--atencao-suave); color: var(--atencao-texto); font-size: 13px; }
+.pc-passo-flutuante { position: fixed; right: 16px; bottom: 16px; z-index: 24; max-width: min(420px, calc(100vw - 32px)); box-shadow: 0 10px 30px rgba(0, 0, 0, .18); border-radius: 10px; }
+.pc-erro { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 26; }
+.pc-ajustes h3 { display: flex; align-items: center; gap: 8px; }
+.pc-ajustes--total { border-color: var(--dourado-cheio); box-shadow: 0 0 0 2px rgba(184, 139, 91, .18); }
+.pc-aparelho { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; color: var(--muted); }
+.pc-aparelho__luz { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+.pc-aparelho--on { color: var(--ink); }
+.pc-aparelho--on .pc-aparelho__luz { background: var(--sucesso-ponto); }
+.pc-modos { margin: 4px 0 8px; flex-wrap: wrap; }
+.pc-modos button { padding: 7px 12px; }
+.pc-modos .pc-modos__total.is-on { background: var(--dourado-cheio); color: var(--dourado-sobre); }
+.pc-bloqueio { margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) { .tb-computador, .pc-cartao__tela { animation: none; } }

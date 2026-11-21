@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "computador",
+  "description": "O selo do controle do computador (conteúdo empacotado no aplicativo): Assumir e Conceder o controle. A interface do Ergon, carregada de localhost, continua sem permissão nativa.",
+  "windows": ["computador-selo"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-computador-assumir",
+    "allow-computador-conceder",
+    "allow-computador-estado"
+  ]
+}

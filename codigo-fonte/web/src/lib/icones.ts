@@ -79,6 +79,8 @@ export const PATHS: Record<string, string> = {
   // modo da cidade (traço e tamanho dos demais): boneco andando = cidade viva; boneco parado = modo calmo
   walk: 'M13.5 6.2a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12.6 8.4L11 14.6M12.3 9.6l3.4 2.4M12.3 9.6L8.9 12M11 14.6l3 2.6.9 3.8M11 14.6l-1.7 3.2L6.6 20',
   stand: 'M12 6.2a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 8.4v6.2M12 9.6l-3 3.4M12 9.6l3 3.4M12 14.6l-1.8 6.4M12 14.6l1.8 6.4',
+  // rc.42: o controle do computador (selo da barra, cartão "Ativar acesso total?")
+  monitor: 'M3 4h18v12H3z M8 20h8 M12 16v4',
   pause: 'M9 5v14M15 5v14',
   next: 'M6 5v14l9-7-9-7zM18 5v14',
   // "Mais": três pontos cheios (os do dots somem em 16 px)

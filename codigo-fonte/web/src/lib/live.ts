@@ -9,7 +9,8 @@ const statusListeners = new Set<(s: LiveStatus, at: Date | null) => void>();
 let source: EventSource | null = null;
 let lastEventAt: Date | null = null;
 
-const TYPES = ['tasks.changed', 'runs.changed', 'messages.changed', 'agents.changed', 'events.changed', 'audit.created', 'rules.changed', 'artifacts.changed', 'city.changed', 'proposals.changed', 'integrations.changed', 'routines.changed', 'runs.live', 'conversations.changed', 'teams.changed', 'sync.changed', 'resync'];
+// computador.changed (rc.42): o controle do computador (selo, cartões) muda
+const TYPES = ['tasks.changed', 'runs.changed', 'messages.changed', 'agents.changed', 'events.changed', 'audit.created', 'rules.changed', 'artifacts.changed', 'city.changed', 'proposals.changed', 'integrations.changed', 'routines.changed', 'runs.live', 'conversations.changed', 'teams.changed', 'sync.changed', 'computador.changed', 'resync'];
 
 // o estado só vai para a tela quando muda (ou, ao vivo, no máximo a cada 5 s): uma rajada de eventos não redesenha o app
 let lastStatus: LiveStatus | null = null; let lastEmit = 0;

@@ -262,6 +262,9 @@ CONFIG_VERSION = MIGRACOES[-1][0]
 # pessoa, como as ferramentas ligadas). Treinar: toda escrita de skill fica em espera até a aprovação no Ergon.
 ENFORCED_STEPS = [
     ["config", "set", "skills.write_approval", "true"],
+    # rc.42: o controle do computador é sempre o da pessoa, pelo Ergon Desktop (provedor "ergon": cada ação vai ao Ergon, que
+    # decide e pergunta). O cua-driver do Hermes controlaria a tela do próprio contêiner, que não existe.
+    ["config", "set", "computer_use.backend", "ergon"],
     # Conexões: a ferramenta precisa estar à vista do modelo, sem passar pela busca de ferramentas (modelo mais simples não
     # a chama). Com a busca ligada, o Hermes esconde atrás dela TODA ferramenta de plugin (tools/tool_search.py,
     # is_deferrable_tool_name), e as do plugin são as Conexões; o que ela pouparia nos agentes do Ergon é pouco
