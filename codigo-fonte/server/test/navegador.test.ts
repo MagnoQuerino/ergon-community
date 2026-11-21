@@ -9,7 +9,7 @@ import http from 'node:http';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import WebSocket, { WebSocketServer } from 'ws';
 import type { HermesClient, HermesControlClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
-import { Balde, OCIOSO_MS, Posse, QUEDA_MS, TETO_MS, enderecoParaTela, entradaDaPessoa, lerDoMotor, tamanhoDoJpeg } from '../src/services/navegador.ts';
+import { BILHETES_POR_PESSOA, Balde, OCIOSO_MS, Posse, QUEDA_MS, TETO_MS, enderecoParaTela, entradaDaPessoa, lerDoMotor, tamanhoDoJpeg } from '../src/services/navegador.ts';
 import { ORIGIN, addPerson, harness, req, setupOwner, type Harness, type Session } from './helpers.ts';
 
 const TOKEN = 'token-da-ponte-de-teste-navegador-0123456789';
@@ -33,7 +33,7 @@ describe('navegador: protocolo', () => {
     assert.equal(tamanhoDoJpeg(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 1, 2, 9, 9, 9, 9, 9, 9, 9, 9])), null);
     assert.equal(lerDoMotor(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720, engine: 'chrome' })), null);
     assert.deepEqual(lerDoMotor(JSON.stringify({ type: 'tabs', tabs: [{ active: false, url: 'https://a.example/', title: 'A' }, { active: true, url: 'https://ana:segredo@loja.example/conta?x=1#topo', title: 'Minha\u0000conta' }] })),
-      { tipo: 'pagina', url: 'https://loja.example/conta?x=1', titulo: 'Minha conta' });
+      { tipo: 'pagina', url: 'https://loja.example/conta', titulo: 'Minha conta' });
     // o que o agente faz e lê também passa pela transmissão do agent-browser: não segue
     for (const m of [{ type: 'command', action: 'fill', params: { selector: '#p', value: 'x' } }, { type: 'result', action: 'evaluate', data: { result: 'texto da página' } }, { type: 'console', text: 'x' }, { type: 'error' }, 'lixo', null, 7]) {
       assert.equal(lerDoMotor(typeof m === 'string' ? m : JSON.stringify(m)), null);
@@ -45,7 +45,9 @@ describe('navegador: protocolo', () => {
   });
 
   test('o endereço mostrado: sem usuário e senha, sem o trecho depois de #, só http(s)', () => {
-    assert.equal(enderecoParaTela('https://u:p@banco.example:8443/a/b?c=d#e'), 'https://banco.example:8443/a/b?c=d');
+    assert.equal(enderecoParaTela('https://u:p@banco.example:8443/a/b?c=d#e'), 'https://banco.example:8443/a/b');
+    // a volta de um login OAuth: o código e o token não aparecem para quem assiste
+    assert.equal(enderecoParaTela('https://app.example/oauth/callback?code=4%2F0AbCdEf&state=xyz#access_token=ya29.segredo'), 'https://app.example/oauth/callback');
     assert.equal(enderecoParaTela('about:blank'), 'about:blank');
     assert.equal(enderecoParaTela('javascript:alert(1)'), 'javascript:');
     assert.equal(enderecoParaTela('data:text/html,<script>x</script>'), 'data:');
@@ -467,6 +469,18 @@ describe('navegador: rotas', () => {
     assert.equal((await req(h, 'GET', `/api/navegador?conversa=${conv}`, s)).json.ativo, false);
     assert.equal((await req(h, 'POST', `/api/runs/${run}/navegador/bilhete`, s)).status, 409);
     assert.equal(JSON.parse(h.db.get<{ evidence: string }>("SELECT evidence FROM audit_events WHERE action = 'navegador.devolveu'")!.evidence).motivo, 'fim');
+  });
+
+  test('bilhetes: o limite é por pessoa (uma pessoa enchendo não bloqueia as outras)', async () => {
+    const bia = await addPerson(h, 'beatriz', 'senha-da-bia-456', 'Beatriz');
+    h.db.run("INSERT INTO memberships (workspace_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)", s.workspaceId, bia.userId, new Date().toISOString());
+    h.db.run('UPDATE sessions SET workspace_id = ? WHERE user_id = ?', s.workspaceId, bia.userId);
+    const { run } = await cardComNavegador();
+    const pede = (quem: Session) => req(h, 'POST', `/api/runs/${run}/navegador/bilhete`, quem);
+    for (let i = 0; i < BILHETES_POR_PESSOA; i++) assert.equal((await pede(s)).status, 200, `bilhete ${i + 1}`);
+    const r = await pede(s);
+    assert.deepEqual([r.status, r.json.error], [429, 'muitos_pedidos'], 'o Alexandre chegou ao limite dele');
+    assert.equal((await pede(bia)).status, 200, 'a Bia continua pedindo');
   });
 
   test('outra pessoa: não vê a conversa alheia; no card do workspace vê, mas sem a tela enquanto alguém controla', async () => {

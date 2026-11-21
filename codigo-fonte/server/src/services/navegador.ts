@@ -65,13 +65,16 @@ export function tamanhoDoJpeg(b: Buffer): Tela | null {
   return null;
 }
 
-/** O endereço que a barra mostra (só leitura): sem usuário e senha embutidos, sem o trecho depois de "#", curto. */
+/**
+ * O endereço que a barra mostra (só leitura): só a origem e o caminho — sem usuário e senha embutidos, sem a consulta
+ * ("?…": pode levar o código ou o token de um login OAuth, e quem assiste não precisa ver) e sem o trecho depois de "#".
+ */
 export function enderecoParaTela(raw: unknown): string {
   if (typeof raw !== 'string' || !raw) return '';
   try {
     const u = new URL(raw);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return u.protocol === 'about:' ? clip(raw, 60) : u.protocol;
-    return clip(`${u.protocol}//${u.host}${u.pathname}${u.search}`, 300);
+    return clip(`${u.protocol}//${u.host}${u.pathname}`, 300);
   } catch { return ''; }
 }
 
@@ -283,6 +286,8 @@ interface Sala {
   renovadoEm: number;
 }
 interface Bilhete { runId: string; userId: string; tokenHash: string; vence: number }
+/** bilhetes ainda não usados (cada um vale BILHETE_MS): por pessoa e no total */
+export const BILHETES_POR_PESSOA = 30; export const BILHETES_MAX = 5000;
 
 export interface DepsNavegador {
   db: Db;
@@ -381,7 +386,9 @@ export class Navegador {
     if (!s?.ativo) throw new HttpError(409, 'navegador_fechado', 'O navegador deste trabalho não está aberto agora.');
     const agora = Date.now();
     for (const [k, b] of this.bilhetes) if (b.vence <= agora) this.bilhetes.delete(k);
-    if (this.bilhetes.size > 500) throw new HttpError(429, 'muitos_pedidos', 'Muitos pedidos de uma vez. Tente de novo em instantes.');
+    // por pessoa (uma pessoa enchendo não tira a vez das outras) e um teto geral bem maior
+    let daPessoa = 0; for (const b of this.bilhetes.values()) if (b.userId === a.userId) daPessoa++;
+    if (daPessoa >= BILHETES_POR_PESSOA || this.bilhetes.size >= BILHETES_MAX) throw new HttpError(429, 'muitos_pedidos', 'Muitos pedidos de uma vez. Tente de novo em instantes.');
     const valor = crypto.randomBytes(32).toString('base64url');
     this.bilhetes.set(valor, { runId: run.id, userId: a.userId, tokenHash: a.tokenHash, vence: agora + BILHETE_MS });
     return valor;
