@@ -96,7 +96,11 @@ function Painel({ runId, est, setEst, agente, rebuscar }: { runId: string; est: 
           const antes = estRef.current;
           const novo: Estado = { runId, ativo: m.ativo !== false, controle: m.controle === 'voce' || m.controle === 'outra' ? m.controle : 'agente', quem: typeof m.quem === 'string' ? m.quem : null,
             ate: typeof m.ate === 'string' ? m.ate : null, motivo: typeof m.motivo === 'string' ? m.motivo : null };
-          if (antes.controle === 'voce' && novo.controle === 'agente' && novo.motivo && (MOTIVOS as readonly string[]).includes(novo.motivo)) setNota(t(`conversas.navegador.voltou.${novo.motivo as (typeof MOTIVOS)[number]}`));
+          if (antes.controle === 'voce' && novo.controle === 'agente' && novo.motivo && (MOTIVOS as readonly string[]).includes(novo.motivo)) {
+            setNota(t(`conversas.navegador.voltou.${novo.motivo as (typeof MOTIVOS)[number]}`));
+            // viu na hora: o aviso da próxima abertura (AvisoDevolvido) não repete
+            void api.post('/api/controle/devolvido/visto').catch(() => undefined);
+          }
           setEst(novo);
         } else if (m.t === 'tela') { const nova = { largura: Number(m.largura), altura: Number(m.altura) }; telaRef.current = nova; setTela(nova); }
         else if (m.t === 'pagina') setPagina({ url: String(m.url ?? ''), titulo: String(m.titulo ?? '') });

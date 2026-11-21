@@ -448,6 +448,17 @@ const conversas: Traducao<typeof pt> = {
   'navegador.voltou.sessao': 'Control went back to the agent: session locked.',
   'navegador.voltou.prazo': 'Control went back to the agent: time’s up.',
   'navegador.voltou.navegador': 'Control went back to the agent: browser closed.',
+  // ——— rc.43: next time you open, a note that control went back to the agent on its own
+  'navegador.aviso.navegador': '{nome} took the browser back',
+  'navegador.aviso.computador': '{nome} took the computer back',
+  'navegador.aviso.agente': 'The agent',
+  'navegador.aviso.motivo.ocioso': '10 min idle, at {hora}.',
+  'navegador.aviso.motivo.teto': 'Time ran out, at {hora}.',
+  'navegador.aviso.motivo.queda': 'The tab was closed, at {hora}.',
+  'navegador.aviso.motivo.sessao': 'The session was locked, at {hora}.',
+  'navegador.aviso.motivo.prazo': 'Time ran out, at {hora}.',
+  'navegador.aviso.ver': 'View',
+  'navegador.aviso.ok': 'OK',
 
   'sala.secao': 'Rooms',
   'sala.nova': 'New room',

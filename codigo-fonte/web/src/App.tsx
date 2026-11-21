@@ -1,4 +1,5 @@
 import { AceiteDosTermos } from './components/TermosDeUso.tsx';
+import { AvisoDevolvido } from './components/AvisoDevolvido.tsx';
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { api, setCsrf, setGuard } from './lib/api.ts';
 import { startActivity } from './lib/activity.ts';
@@ -364,6 +365,7 @@ function Shell({ me, onLogout, onIdle, onMeChanged, onOverlay }: { me: Me; onLog
     <div className={`shell ${focus ? 'shell--focus' : ''} ${navCompact ? 'shell--compact' : ''}`}>
       {/* teclado: o primeiro Tab oferece pular o cabeçalho e o menu (WCAG 2.4.1) */}
       <button className="skip" onClick={() => document.querySelector<HTMLElement>('main.main')?.focus()}>{t('geral.barra.pularConteudo')}</button>
+      <AvisoDevolvido />
       <header className="topbar">
         <button className="tb-icon topbar__menu" data-keep-surface onClick={() => setNavOpen((v) => !v)} aria-label={[t('geral.barra.menu'), alerts.length ? t('geral.barra.menuAvisos', { n: alerts.length }) : '', upd ? t('geral.barra.menuAtualizacao') : ''].filter(Boolean).join(' · ')} title={t('geral.barra.menu')} aria-expanded={navOpen} aria-controls="nav-drawer">
           <Icon name="menu" size={20} />

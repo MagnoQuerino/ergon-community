@@ -44,6 +44,7 @@ import { RevisaoDocumento } from './services/revisao-documento.ts';
 import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
 import { registerVisuaisRoutes } from './routes/visuais.ts';
 import { coresDaEquipe } from './services/cores-agentes.ts';
+import { avisosDevolvidos, marcarDevolvidoVisto } from './services/controle-devolvido.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
@@ -2772,6 +2773,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     const r = navegador.ativas(a.workspaceId).filter((x) => (q.conversa ? x.conversation_id === q.conversa : x.task_id === q.tarefa)).pop();
     return r ? navegador.estadoPara(r, a.userId) : { runId: null, ativo: false, controle: 'agente', quem: null, ate: null, motivo: null };
   });
+  // o aviso de "controle devolvido" (rc.43): o navegador ou o computador voltou sozinho ao agente enquanto a pessoa não via
+  app.get('/api/controle/devolvido', async (req) => { const a = auth(req); return { avisos: avisosDevolvidos(db, a.workspaceId, a.userId) }; });
+  app.post('/api/controle/devolvido/visto', async (req) => { const a = auth(req); marcarDevolvidoVisto(db, a.workspaceId, a.userId); return { ok: true }; });
   app.post('/api/runs/:id/navegador/bilhete', { schema: { params: idParams('run') } }, async (req) => {
     const { a, r } = runDoNavegador(req);
     return { bilhete: navegador.bilhete(a, r) };
