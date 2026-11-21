@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { daSemente } from '../i18n/sementes.ts';
 import { api } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
 import { getRecents, type Recent } from '../lib/recents.ts';
@@ -80,7 +81,7 @@ export function CommandPalette({ base, onAgent, onCard, onRoutine, onRecent, onC
     const rotinas: PaletteItem[] = (found?.routines ?? []).map((r) => ({
       key: `rot-${r.id}`, label: r.name, sub: r.status === 'active' ? t('geral.busca.rotinaLigada') : t('geral.busca.rotinaPausada'), icon: 'repeat', run: () => onRoutine(r.id, r.name),
     }));
-    const agentes: PaletteItem[] = (found?.agents ?? []).map((a) => ({ key: `ag-${a.id}`, label: a.name, sub: a.role, icon: 'users', run: () => onAgent(a) }));
+    const agentes: PaletteItem[] = (found?.agents ?? []).map((a) => ({ key: `ag-${a.id}`, label: a.name, sub: daSemente(a.role), icon: 'users', run: () => onAgent(a) }));
     return [[t('geral.busca.cards'), cards], [t('geral.busca.agentes'), agentes], [t('geral.busca.rotinas'), rotinas], [t('geral.busca.acoes'), pick(base.acoes, 5)], [t('geral.busca.irPara'), pick(base.areas, 6)]] as Array<[string, PaletteItem[]]>;
   }, [q, found, recents, base, idioma]); // eslint-disable-line react-hooks/exhaustive-deps
   const flat = groups.flatMap(([, items]) => items);

@@ -1,4 +1,5 @@
 import { Documento } from './Documento.tsx';
+import { daSemente } from '../i18n/sementes.ts';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { fmtDataHora, fmtHora, tn, useT } from '../i18n/index.ts';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
@@ -555,7 +556,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
         <AgentAvatar agent={agent} size={34} />
         <div className="chat__who">
           <strong>{agent.name}</strong>
-          <span>{busy ? <span className="chat__status">{t('conversas.conversa.trabalhando')}</span> : `${agent.role} · ${agent.sector_name}`}</span>
+          <span>{busy ? <span className="chat__status">{t('conversas.conversa.trabalhando')}</span> : `${daSemente(agent.role)} · ${daSemente(agent.sector_name)}`}</span>
         </div>
         {onClose && <button className="icon-btn" onClick={onClose} aria-label={t('conversas.conversa.fechar')}><Icon name="x" /></button>}
       </header>}

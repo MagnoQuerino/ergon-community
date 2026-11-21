@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { daSemente } from '../i18n/sementes.ts';
 import { fmtNumero, useT } from '../i18n/index.ts';
 import { api, errMsg, type ApiError } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
@@ -248,17 +249,17 @@ function SectorGroups({ scope, card, onOpenGroup }: { scope: string; card: (a: T
     <>
       <div className="groups">
         {g.data.items.map((s) => (
-          <section key={s.key} className="group" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name} aria-label={t('equipe.setorAria', { nome: s.name })}>
+          <section key={s.key} className="group" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name} aria-label={t('equipe.setorAria', { nome: daSemente(s.name) })}>
             {/* o cabeçalho do setor abre o setor inteiro (antes, só o "Ver todos" pequeno, e só quando não cabia todo mundo) */}
             <header className="group__head card-click" onClick={cardClick(() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name }))}>
-              <h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })} aria-label={t('equipe.abrirSetor', { nome: s.name })}>{s.name}</button></h3><span className="muted">{fmtNumero(s.count)}</span>
+              <h3><button type="button" className="card-open" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })} aria-label={t('equipe.abrirSetor', { nome: daSemente(s.name) })}>{daSemente(s.name)}</button></h3><span className="muted">{fmtNumero(s.count)}</span>
             </header>
             <div className="group__cards">
               {s.sample.map(card)}
               {!s.count && <p className="group__empty hint">{t('equipe.vazioGrupo')}</p>}
             </div>
             {s.count > s.sample.length && <button className="linkish group__all" onClick={() => onOpenGroup({ kind: 'sector', key: s.key, name: s.name })}>{t('equipe.verTodos', { n: s.count })}</button>}
-            {s.description && <p className="group__desc muted small">{s.description}</p>}
+            {s.description && <p className="group__desc muted small">{daSemente(s.description)}</p>}
           </section>
         ))}
       </div>
@@ -322,8 +323,8 @@ function AgentCard({ a, pending, onOpen, onDrag, onMove, extra }: {
       <FiguraDoCard agent={a} />
       <div className="tcard__body">
         <button className="tcard__name" onClick={open} aria-label={t('equipe.card.abrirPerfilDe', { nome: a.name })}>{a.name}</button>
-        <span className="tcard__role">{a.role}</span>
-        <span className="tcard__sector">{a.sector_name}</span>
+        <span className="tcard__role">{daSemente(a.role)}</span>
+        <span className="tcard__sector">{daSemente(a.sector_name)}</span>
         {a.coordinator && <span className="tcard__meta"><Icon name="lock" size={12} /> {t('equipe.card.cargoFixo')}</span>}
         <span className="tcard__meta"><Icon name="pin" size={12} /> {a.building_name ?? '—'}</span>
         {pending ? <span className="badge">{t('equipe.card.movendo')}</span> : a.run_status ? <span className="badge badge--warn">{t(RUN_LABEL[a.run_status])}</span> : null}
@@ -376,7 +377,7 @@ function DragLayer({ sectors }: { sectors: Array<{ key: string; name: string }> 
         <span className="drag-tray__hint"><Icon name="search" size={15} /> {t('equipe.arraste.bandeja')}</span>
         {sectors.length > 0 && (
           <span className="drag-tray__chips">
-            {sectors.map((s) => <span key={s.key} className="drag-tray__chip" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name}>{s.name}</span>)}
+            {sectors.map((s) => <span key={s.key} className="drag-tray__chip" data-drop-kind="sector" data-drop-id={s.key} data-drop-name={s.name}>{daSemente(s.name)}</span>)}
           </span>
         )}
       </div>

@@ -245,7 +245,11 @@ test('chinês e hindi: o que falta cai no inglês, nunca na chave crua; en-IN é
   }
   await I.setIdioma('zh-CN', { guardar: false });
   assert.equal(I.t('geral.nav.tarefas'), '任务', 'traduzido');
-  assert.equal(I.t('rotinas.titulo' as never), (en.rotinas as Record<string, string>).titulo, 'a área sem tradução: o inglês');
+  assert.equal(I.t('rotinas.titulo' as never), '例行任务', 'rc.45: as rotinas em chinês');
+  // uma chave que o chinês ainda não tem (ajuda, conta e servidor são parciais): o inglês
+  const { zhCN } = await import('./zh-CN/index.ts');
+  const falta = Object.keys(en.servidor).find((k) => !(k in (zhCN.servidor ?? {})) && typeof (en.servidor as Record<string, unknown>)[k] === 'string')!;
+  assert.equal(I.t(`servidor.${falta}` as never), (en.servidor as Record<string, string>)[falta], 'a chave sem tradução: o inglês');
   assert.equal(I.fmtNumero(1234567), '1,234,567');
   await I.setIdioma('hi', { guardar: false });
   assert.equal(I.t('geral.nav.tarefas'), 'कार्य');

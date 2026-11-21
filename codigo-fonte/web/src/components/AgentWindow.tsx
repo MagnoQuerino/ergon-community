@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { daSemente } from '../i18n/sementes.ts';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { cachedResource, useLiveEvent, useResource } from '../lib/live.ts';
 import { pushRecent } from '../lib/recents.ts';
@@ -109,7 +110,7 @@ export function AgentWindow({ agentId, initial, coordName, sectors, initialTab =
               <AgentAvatar agent={head} size={38} />
               <div className="awin__who">
                 <strong id={`awin-${agentId}`}>{head.name}</strong>
-                <span className="muted">{head.role} · {head.sector_name}{place ? ` · ${place}` : ''}</span>
+                <span className="muted">{daSemente(head.role)} · {daSemente(head.sector_name)}{place ? ` · ${place}` : ''}</span>
               </div>
               {a && <span className="chip" title={t('agente.janela.modeloDica')}>{modelName(a.model)}</span>}
               {status !== 'active' && <span className="badge badge--warn">{t('agente.janela.desativado')}</span>}
@@ -278,9 +279,9 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
         <label className="field">{t(fixed ? 'agente.perfil.papelFixo' : 'agente.perfil.papel')}<input value={f.role} maxLength={80} disabled={fixed} onChange={(e) => setF({ ...f, role: e.target.value })} /></label>
         <label className="field">{t('agente.perfil.setor')}
           <select value={f.sectorKey} disabled={fixed} onChange={(e) => setF({ ...f, sectorKey: e.target.value })}>
-            {sectors.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
+            {sectors.map((s) => <option key={s.key} value={s.key}>{daSemente(s.name)}</option>)}
           </select>
-          {sector?.description && <span className="hint">{sector.description} {t(sector.creates_tasks === 'demands' ? 'agente.perfil.criaCards' : 'agente.perfil.soCardPedido')}</span>}
+          {sector?.description && <span className="hint">{daSemente(sector.description)} {t(sector.creates_tasks === 'demands' ? 'agente.perfil.criaCards' : 'agente.perfil.soCardPedido')}</span>}
         </label>
         {/* a cidade pode ter milhares de construções: escolher é pelo "Mover para…" (com busca e por partes), não num select */}
         <div className="field">{t('agente.perfil.construcao')}

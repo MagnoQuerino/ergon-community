@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { daSemente } from '../i18n/sementes.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
 import type { Agent, AppState, CityAgent, CityAgentsPage, Structure, View } from '../lib/types.ts';
@@ -319,7 +320,7 @@ function Finder({ structures, value, onPick, onAgent }: { structures: Structure[
       {!!agents.data?.items.length && <div className="picker__group">{agents.data.total > agents.data.items.length ? t('cidade.localizar.agentesTotal', { n: agents.data.total }) : t('cidade.localizar.agentes')}</div>}
       {agents.data?.items.map((a) => (
         <button key={a.id} role="option" aria-selected={false} className="picker__item" onClick={() => onAgent(a)}>
-          <span>{a.name}</span><span className="muted">{a.role}{a.building_name ? ` · ${nomeDaConstrucao(a.building_name)}` : ''}</span>
+          <span>{a.name}</span><span className="muted">{daSemente(a.role)}{a.building_name ? ` · ${nomeDaConstrucao(a.building_name)}` : ''}</span>
         </button>
       ))}
       {!!builds.data?.items.length && <div className="picker__group">{builds.data.total > builds.data.items.length ? t('cidade.localizar.prediosTotal', { n: builds.data.total }) : t('cidade.localizar.predios')}</div>}
