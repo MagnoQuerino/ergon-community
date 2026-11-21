@@ -1,9 +1,5 @@
 // Área "configuracoes" em hindi (hi): PARCIAL (a chave que falta vem do inglês). Tipada pelo português.
-<<<<<<< HEAD
 // REVISÃO POR NATIVO PENDENTE: tradução gerada (rc.44 e rc.45) a partir do inglês, com o glossário de ../GLOSSARIO.md;
-=======
-// REVISÃO POR NATIVO PENDENTE: tradução gerada na rc.44 a partir do inglês, com o glossário de ../GLOSSARIO.md;
->>>>>>> origin/main
 // precisa da revisão de um falante nativo antes da versão final (COMO-TRADUZIR.md, "Chinês e hindi").
 import type pt from '../pt/configuracoes.ts';
 import type { TraducaoParcial } from '../tipos.ts';
@@ -28,10 +24,6 @@ const configuracoes: TraducaoParcial<typeof pt> = {
   'abas.contaErgon': 'Ergon World',
   'abas.atualizacoes': 'अपडेट',
   'abas.saude': 'स्थिति',
-<<<<<<< HEAD
-=======
-  'abas.documentos': 'दस्तावेज़',
->>>>>>> origin/main
   'rodape.versao': 'Ergon {versao} · {onde}',
   'rodape.versaoBuild': 'Ergon {versao} ({build}) · {onde}',
   'rodape.nuvem': 'क्लाउड',
@@ -113,7 +105,6 @@ const configuracoes: TraducaoParcial<typeof pt> = {
   'byok.china.glmDica': 'open.bigmodel.cn (चीन) और z.ai दोनों पर चलती है: टीम कुंजी से सही पता ढूँढ़ लेती है।',
   'byok.china.seguro': 'कुंजी सिर्फ़ इसी कार्ड से डाली जाती है: प्रदाता से जाँची जाती है और टीम की तिजोरी में एन्क्रिप्ट होकर रखी जाती है। कोई एजेंट बातचीत में कुंजी नहीं माँगता; अगर ऐसा अनुरोध दिखे, तो पेस्ट न करें।',
   'byok.china.indisponivel': 'इस कंप्यूटर की AI टीम अभी ये प्रदाता नहीं देती। सेटिंग्स › अपडेट में अपडेट करें।',
-<<<<<<< HEAD
   'abas.documentos': 'दस्तावेज़',
   'ferramenta.quadro.nome': 'टीम बोर्ड',
   'ferramenta.quadro.nota': 'सेक्टर के अनुसार कार्ड बनाता और खिसकाता है; अनुमतियाँ सिस्टम लागू करता है',
@@ -177,8 +168,6 @@ const configuracoes: TraducaoParcial<typeof pt> = {
   'ferramenta.sufixo.foraAteAProxima': 'इस कंप्यूटर पर टीम का अपडेट सफल नहीं हुआ: कनेक्शन Ergon के अगले संस्करण के साथ लौटेंगे',
   'ferramenta.sufixo.atualizando': 'इस कंप्यूटर पर अपडेट हो रहे हैं: टीम का अपडेट पूरा होने पर अपने-आप लौट आएँगे',
   'ferramenta.sufixo.desligada': 'टीम के लिए बंद: सेटिंग्स › टूल में चालू करें',
-=======
->>>>>>> origin/main
 };
 
 export default configuracoes;

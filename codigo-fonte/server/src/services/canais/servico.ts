@@ -32,11 +32,7 @@ import { blocosDe } from '../../../../shared/visuais/cercas.ts';
 import { visualParaPng } from '../visuais/png.ts';
 import { resumoVisivelDaAprovacao } from '../aprovacao-cartao.ts';
 import { avisoDoCard } from '../resumo-tarefa.ts';
-<<<<<<< HEAD
 import { fmtData, msg } from '../../lib/i18n.ts';
-=======
-import { msg } from '../../lib/i18n.ts';
->>>>>>> origin/main
 import { readLang } from '../prefs.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 

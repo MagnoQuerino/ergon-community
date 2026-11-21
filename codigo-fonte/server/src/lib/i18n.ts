@@ -85,7 +85,6 @@ export const MENSAGENS = {
   'canal.ligarCards': { 'pt-BR': 'Ligar o card #{a} ao #{b}?', en: 'Link card #{a} to #{b}?', 'zh-CN': '将卡片 #{a} 关联到 #{b}？', hi: 'कार्ड #{a} को #{b} से जोड़ें?' },
   'canal.regraSugerida': { 'pt-BR': 'Regra sugerida: {texto}', en: 'Suggested rule: {texto}', 'zh-CN': '建议的规则：{texto}', hi: 'सुझाया गया नियम: {texto}' },
   // ——— PDF (lib/pdf-documento.ts): a numeração das páginas ———
-<<<<<<< HEAD
   // rc.45: a nota da primeira mensagem pela conta ligada (fica na conversa do canal, no idioma de quem ligou)
   'canal.primeiraMensagem': {
     'pt-BR': 'Sistema — primeira mensagem pela conta do {canal} "{nome}", ligada em {quando}. Se não foi você que ligou esta conta, desligue em Conexões › {canal}.',
@@ -105,8 +104,6 @@ export const MENSAGENS = {
     'zh-CN': '如需批准或拒绝，请打开 Ergon：在此渠道中需在应用内做决定。',
     hi: 'मंज़ूर या अस्वीकार करने के लिए Ergon खोलें: इस चैनल पर फ़ैसला ऐप में होता है।',
   },
-=======
->>>>>>> origin/main
   'pdf.pagina': { 'pt-BR': '{pagina} / {total}', en: '{pagina} / {total}', 'zh-CN': '第 {pagina} / {total} 页', hi: '{pagina} / {total}' },
 } as const satisfies Record<string, Texto4>;
 
@@ -138,12 +135,9 @@ const espaco = (s: string) => s.replace(/[  ]/g, ' ');
 /** Número: 1.250,5 (pt-BR) · 1,250.5 (en) · 12,34,567 (en-IN, hi). */
 export const fmtNumero = (l: Idioma | null | undefined, n: number, o: Intl.NumberFormatOptions = {}): string => espaco(nf(l, o).format(n));
 
-<<<<<<< HEAD
 /** Os centavos só quando há (R$ 1.250 · R$ 1.250,5): o jeito dos resumos de lançamentos, que o agente cita e a conferência confere. */
 export const MOEDA_COMO_ANTES: Intl.NumberFormatOptions = { minimumFractionDigits: 0, maximumFractionDigits: 2 };
 
-=======
->>>>>>> origin/main
 /** Dinheiro: R$ 1.250,00 · $1,250.00 · ¥1,250.00 · ₹12,34,567.00. */
 export const fmtMoeda = (l: Idioma | null | undefined, v: number, moeda: Moeda, o: Intl.NumberFormatOptions = {}): string =>
   espaco(nf(l, { style: 'currency', currency: moeda, ...o }).format(v));

@@ -6,7 +6,6 @@
 import type { Db } from '../db/db.ts';
 import { readLang, type Idioma } from './prefs.ts';
 
-<<<<<<< HEAD
 /** O idioma como o motor guarda (display.language e a língua da voz): pt, en, zh ou hi (rc.45). */
 export type IdiomaMotor = 'pt' | 'en' | 'zh' | 'hi';
 /** A capacidade do plugin que aceita zh e hi (rc.45); motor de antes só aceita pt e en e recusaria o pedido inteiro. */
@@ -25,17 +24,6 @@ export function motorDoIdioma(lang: Idioma | undefined): IdiomaMotor | undefined
 export function idiomaDoMotor(db: Db, userId: string | null | undefined): IdiomaMotor | undefined {
   if (!userId || userId === '_') return undefined;
   return motorDoIdioma(readLang(db, userId));
-=======
-/**
- * 'pt' ou 'en' para o motor da pessoa; undefined = ela nunca escolheu idioma (o motor fica como está). Chinês, hindi e o
- * inglês da Índia (rc.44) vão como 'en': a ponte do motor só aceita pt e en nesta versão (o Hermes tem zh, mas não hi;
- * display.language=zh fica para a rc.45, com a tradução completa).
- */
-export function idiomaDoMotor(db: Db, userId: string | null | undefined): 'pt' | 'en' | undefined {
-  if (!userId || userId === '_') return undefined;
-  const lang = readLang(db, userId);
-  return lang === 'pt-BR' ? 'pt' : lang ? 'en' : undefined;
->>>>>>> origin/main
 }
 
 /** Um motor só para a instalação (escopo "_"): vale o idioma de quem é dono do workspace mais antigo. */
