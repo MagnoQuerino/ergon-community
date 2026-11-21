@@ -17,7 +17,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
     'world/areas.ts', 'world/buildings.ts', 'world/pack.ts',
   ],
   // os quadros (Tarefas e Fluxos da equipe), as colunas e mover cards
-  quadro: ['components/Board.tsx', 'views/TarefasView.tsx', 'views/EquipeView.tsx', 'components/MoveTray.tsx', 'lib/dragMove.ts', 'lib/work.ts'],
+  quadro: ['components/Board.tsx', 'components/GerirQuadro.tsx', 'views/TarefasView.tsx', 'views/EquipeView.tsx', 'components/MoveTray.tsx', 'lib/dragMove.ts', 'lib/work.ts'],
   // o card aberto
   tarefa: ['components/TaskDetail.tsx', 'components/TaskWork.tsx', 'lib/tarefa-tela.ts'],
   // as conversas
