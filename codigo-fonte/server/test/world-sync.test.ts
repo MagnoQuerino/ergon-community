@@ -259,6 +259,23 @@ describe('World Sync entre dois computadores da mesma pessoa', () => {
     assert.deepEqual([nadaPendente(pc1, a1), nadaPendente(pc2, a2)], [0, 0], 'assentou: nenhum dos dois tem mais o que mandar');
   });
 
+  test('chegando só quadro ou só item de cartão (sem tarefa), a tela de Tarefas é avisada (tasks.changed)', async () => {
+    const avisos: string[] = [];
+    const sai = pc1.bus.subscribe(a1.workspaceId, (e) => { if (e.type === 'tasks.changed') avisos.push(e.type); });
+    try {
+      // só o quadro: uma coluna nova
+      await req(pc2, 'POST', `/api/boards/${obra}/columns`, a2, { name: 'Conferir' });
+      let { recebido } = await levar([pc2, a2], [pc1, a1]);
+      assert.equal(recebido.incoming.tasks, 0, 'nenhuma tarefa veio: só o quadro');
+      assert.equal(avisos.length, 1, 'a tela soube da coluna nova');
+      // só um item de cartão: um comentário no cartão
+      assert.equal((await req(pc2, 'POST', `/api/tasks/${tijolo}/comments`, a2, { body: 'Chegou o orçamento' })).status, 201);
+      ({ recebido } = await levar([pc2, a2], [pc1, a1]));
+      assert.equal(recebido.incoming.tasks, 0, 'nenhuma tarefa veio: só o item do cartão');
+      assert.equal(avisos.length, 2, 'a tela soube do comentário');
+    } finally { sai(); }
+  });
+
   test('apagar coluna e quadro num lado reflete no outro sem perder cards (nem o card que só existia lá)', async () => {
     const comprar = colsObra[1].id; const instalar = colsObra[2].id;
     // um card que só o PC 2 tem, na coluna que o PC 1 vai apagar

@@ -430,7 +430,8 @@ export class LocalSync {
       });
     }
     this.db.run('UPDATE world_sync SET last_version = ?, updated_at = ? WHERE workspace_id = ?', head, now(), ws);
-    if (incoming.tasks) this.bus.publish(ws, 'tasks.changed', {});
+    // quadros e itens de cartão (sync-quadros.ts) também mudam a tela de Tarefas: chegando só eles, o aviso vai igual
+    if (incoming.tasks || contents.some((b) => b.boards?.length || b.cards?.length)) this.bus.publish(ws, 'tasks.changed', {});
     if (incoming.messages || incoming.conversations) this.bus.publish(ws, 'messages.changed', {});
     return { head, preview: plan, incoming, applied: true, result: total, conflicts: this.content.openConflicts(ws) };
   }
