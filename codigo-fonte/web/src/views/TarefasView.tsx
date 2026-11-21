@@ -110,9 +110,9 @@ export function TarefasView({ onGo }: { onGo: (v: 'conexoes') => void }) {
         </select>
         {current && (
           <span className="topbar__statuswrap">
-            {/* quadro do Ergon: nome, colunas e campos; quadro espelhado: só os campos (que ficam no Ergon) */}
-            <button className={`btn btn--sm ${gerir ? 'is-on' : ''}`} data-keep-surface onClick={() => setGerir((v) => !v)} aria-expanded={gerir} title={mirror ? t('quadro.gerir.botaoDicaEspelho') : t('quadro.gerir.botaoDica')}>
-              <Icon name="gear" size={14} /> {mirror ? t('quadro.gerir.botaoEspelho') : t('quadro.gerir.botao')}
+            {/* quadro do Ergon: nome, colunas e campos; quadro ligado a um aplicativo: só os campos (que ficam no Ergon) */}
+            <button className={`btn btn--sm ${gerir ? 'is-on' : ''}`} data-keep-surface onClick={() => setGerir((v) => !v)} aria-expanded={gerir} title={mirror ? t('quadro.gerir.botaoDicaLigado') : t('quadro.gerir.botaoDica')}>
+              <Icon name="gear" size={14} /> {mirror ? t('quadro.gerir.botaoLigado') : t('quadro.gerir.botao')}
             </button>
             {gerir && view.data && (
               <GerirQuadro key={current.id} quadro={current} entrada={current.id === mine.find((b) => b.origin === 'native')?.id} columns={view.data.columns} campos={view.data.fields ?? []}

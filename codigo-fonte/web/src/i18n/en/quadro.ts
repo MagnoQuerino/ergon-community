@@ -140,8 +140,8 @@ const quadro: Traducao<typeof pt> = {
   'gerir.cancelar': 'Cancel',
   'gerir.fechar': 'Close',
   // rc.41: the board's own fields (components/CamposDoQuadro.tsx) and what shows on the card
-  'gerir.botaoEspelho': 'Fields',
-  'gerir.botaoDicaEspelho': 'Custom fields for the cards on this board (kept in Ergon only)',
+  'gerir.botaoLigado': 'Fields',
+  'gerir.botaoDicaLigado': 'Custom fields for the cards on this board (kept in Ergon only)',
   'campos.titulo': 'Card fields',
   'campos.dica': 'Extra information each card on this board can hold: text, number, date, option list, labels or person.',
   'campos.soNoErgon': 'Kept in Ergon only: none of this goes to {app}.',

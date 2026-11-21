@@ -149,8 +149,8 @@ const quadro = {
   'gerir.cancelar': 'Cancelar',
   'gerir.fechar': 'Fechar',
   // rc.41: campos próprios do quadro (components/CamposDoQuadro.tsx) e o que aparece no card
-  'gerir.botaoEspelho': 'Campos',
-  'gerir.botaoDicaEspelho': 'Campos próprios dos cartões deste quadro (ficam só no Ergon)',
+  'gerir.botaoLigado': 'Campos',
+  'gerir.botaoDicaLigado': 'Campos próprios dos cartões deste quadro (ficam só no Ergon)',
   'campos.titulo': 'Campos dos cartões',
   'campos.dica': 'Informações a mais que cada cartão deste quadro pode ter: texto, número, data, lista de opções, etiquetas ou pessoa.',
   'campos.soNoErgon': 'Ficam só no Ergon: nada disto vai para {app}.',
