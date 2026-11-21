@@ -224,6 +224,9 @@ export class ConexoesNuvem {
     const destino = w.cloudDevice ?? null;
     if (!destino) { this.erro(ws, 'sem_aparelho_nuvem'); return; }
     if (e.nuvem_aparelho !== destino.deviceId) this.marcar(ws, { nuvem_aparelho: destino.deviceId });
+    // uma credencial escolhida que não se lê agora (Ergon trancado, arquivo sumido): o retrato sairia menor e a nuvem
+    // apagaria a conta. Espera dar para ler
+    if (e.aceite_em && this.contas(ws).some((r) => this.usar(ws, r.id) && this.motivo(ws, r) === 'sem_credencial')) { this.erro(ws, 'sem_credencial'); return; }
     const itens = this.itens(ws);
     const estrutura = this.resumo(ws, itens.map((i) => ({ ...i, cred: Object.fromEntries(Object.entries(i.cred).filter(([k]) => !ACESSO.has(k))) })));
     const acessos = this.resumo(ws, itens.map((i) => (isSso(i.kind as IntegrationKind) ? [i.kind, i.conta, i.cred.refresh_token ?? null, i.cred.granted ?? null] : null)));

@@ -141,6 +141,12 @@ test('posse: com o computador aberto a nuvem não renova; fechado, renova e o ac
 });
 
 test('desligar o interruptor, desconectar e tirar o aceite no computador tiram da nuvem, com a credencial', async () => {
+  // a credencial que não se lê agora (Ergon trancado, arquivo sumido) não tira a conta da nuvem: o retrato espera
+  const cred = pc.integrations.secrets.readOwn(dono.workspaceId, 'notion')!;
+  pc.integrations.secrets.remove(dono.workspaceId, 'notion');
+  await pausa(800);
+  assert.equal(naNuvem('notion')?.token, 'secret_notion_da_ana_0123456789abcdef', 'credencial ilegível no computador não apaga na nuvem');
+  pc.integrations.secrets.writeOwn(dono.workspaceId, 'notion', cred);
   const t = await tela();
   const mid = t.contas.find((c) => c.kind === 'microsoft')!.id;
   assert.equal((await req(pc, 'PUT', `/api/world/nuvem/conexoes/${mid}`, dono, { usar: false })).status, 200);
