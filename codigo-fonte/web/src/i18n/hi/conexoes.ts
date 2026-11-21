@@ -40,6 +40,7 @@ const conexoes: TraducaoParcial<typeof pt> = {
   'busca.aria': 'ऐप खोजें',
   'busca.todos': 'सभी ({n})',
   'busca.conectados': 'जुड़े हुए ({n})',
+<<<<<<< HEAD
   // rc.45: Feishu/Lark e DingTalk (o aplicativo interno da empresa)
   'canal.grupoTexto': 'Teams, Telegram, Discord, Feishu/Lark या DingTalk पर टीम से बात करें।',
   'canal.titulo.feishu': 'Feishu या Lark पर टीम से बात करें',
@@ -74,6 +75,8 @@ const conexoes: TraducaoParcial<typeof pt> = {
   'canal.app.soDireta': 'सिर्फ़ रोबोट से सीधी बातचीत काम करती है (समूह नहीं), और अभी केवल टेक्स्ट। मंज़ूर या अस्वीकार करने के लिए Ergon खोलें।',
   'canal.app.pronto': 'हो गया: रोबोट को लिखें, और अनुरोध आपकी टीम तक पहुँचेगा।',
   'canal.erro.formato_app': 'App ID या App Secret का स्वरूप सही नहीं है। दोबारा पूरा कॉपी करें।',
+=======
+>>>>>>> origin/main
 };
 
 export default conexoes;

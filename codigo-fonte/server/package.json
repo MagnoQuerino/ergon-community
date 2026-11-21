@@ -1,6 +1,10 @@
 {
   "name": "@ergon/server",
+<<<<<<< HEAD
   "version": "1.1.0-rc.45",
+=======
+  "version": "1.1.0-rc.44",
+>>>>>>> origin/main
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
