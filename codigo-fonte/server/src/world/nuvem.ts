@@ -16,9 +16,10 @@
  *      o computador).
  *   7. Ergon AI como modelo da equipe (o uso segue em Dracmas).
  *
- * No COMPUTADOR (ERGON_MODE=local), com a nuvem ativa no workspace: a sincronia vira automática (entrega a chave ao
- * aparelho-nuvem, recebe e envia a cada minuto) e o Ergon avisa o World que está aberto (posse: com um computador
- * aberto, a nuvem não executa); ao fechar, envia o que falta e avisa que saiu.
+ * No COMPUTADOR (ERGON_MODE=local) a sincronia é automática em todo workspace ligado ao World com ela ligada: a cada
+ * minuto entrega a chave a quem ainda não tem, recebe e envia. Com a nuvem ativa no workspace, o Ergon também avisa o
+ * World que está aberto (posse: com um computador aberto, a nuvem não executa) e entrega a chave ao aparelho-nuvem em
+ * segundos quando ele está esperando (o World diz: keyWanted); ao fechar, envia o que falta e avisa que saiu.
  */
 import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -130,11 +131,20 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
         throw e;
       }
       d.log({}, 'nuvem: chave da sincronia recebida');
+      // a chave chegou: o estado deixa de dizer "aguardando a chave" antes de receber os dados (a primeira vez demora)
+      await contar('preparando', 'recebendo a equipe e as conversas do computador');
     }
     // 6. dados: recebe (equipe e conteúdo) e envia o conteúdo daqui
-    const recebido = await d.sync.pull(userId, ws, true) as { preview?: { skipped?: string[] } | null };
+    let recebido: { preview?: { skipped?: string[] } | null };
+    try { recebido = await d.sync.pull(userId, ws, true) as { preview?: { skipped?: string[] } | null }; }
+    catch (e) {
+      // a chave girou (alguém saiu do workspace): a nova chega do mesmo jeito que a primeira, por um computador da pessoa
+      if ((e as { code?: string }).code === 'key_pending') { await contar('aguardando_chave', 'A chave da sincronia foi trocada: abra o Ergon no seu computador uma vez para ele entregar a nova à nuvem.'); return false; }
+      throw e;
+    }
     if (recebido.preview?.skipped?.length) d.log({ ficouDeFora: recebido.preview.skipped.slice(0, 10) }, 'nuvem: parte da equipe não coube aqui');
-    await d.sync.push(userId, ws, { contentOnly: true }).catch((e) => { if (!['version_conflict', 'key_version'].includes(String((e as { code?: string }).code))) throw e; });
+    // quem troca a chave é um computador de quem administra: até lá a nuvem segue atendendo (o que fez aqui vai depois)
+    await d.sync.push(userId, ws, { contentOnly: true }).catch((e) => { if (!['version_conflict', 'key_version', 'rotation_required'].includes(String((e as { code?: string }).code))) throw e; });
     // 7. o Ergon AI como modelo da equipe (o motor pode estar acordando: tenta de novo no próximo passo)
     // Ligado numa partida anterior e com a credencial longe de vencer (ela fica no disco do motor): nada a refazer ao
     // acordar, e os canais atendem já (o pedido espera o motor terminar de subir). Perto de vencer: liga de novo.
@@ -192,71 +202,220 @@ export function iniciarNuvem(d: NuvemDeps): { parar: () => Promise<void>; estado
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// No computador: sincronia automática e posse, só para o workspace com a nuvem ativa
+// No computador: sincronia automática de todo workspace ligado ao World; posse e entrega da chave onde há a nuvem
 
-export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; sync: LocalSync; canais?: CanaisNuvemHost; log: Log; ajustes?: { cicloMs?: number; estadoMs?: number } }
+export interface AutoSyncDeps { db: Db; client: WorldClient; links: WorldLinks; sync: LocalSync; canais?: CanaisNuvemHost; log: Log;
+  ajustes?: { cicloMs?: number; estadoMs?: number; /** de quanto em quanto tempo confere a nuvem que está em preparo ou esperando a chave */ entregaMs?: number; /** por quanto tempo seguido confere nesse ritmo */ entregaMaxMs?: number } }
+
+/** O que a tela mostra da sincronia automática de um workspace (nada daqui é segredo). */
+export interface EstadoAuto {
+  /** a sincronia automática cuida deste workspace neste computador */
+  auto: boolean;
+  /** o último ciclo que terminou sem nada pendente, e a última tentativa */
+  ultimaOk: string | null; ultimaTentativa: string | null;
+  /** por que o último ciclo não terminou (código do erro), desde quando e quantas vezes seguidas */
+  pendencia: { codigo: string; passo: Passo; desde: string; vezes: number } | null;
+  /** equipe nova enviada por outro computador, esperando a pessoa ver (enquanto isso nada vem nem vai) */
+  equipeRetida: boolean;
+  /** a nuvem deste workspace: ativa, e se está parada esperando a chave que este computador entrega */
+  nuvem: { ativa: boolean; esperandoChave: boolean; appState: string | null } | null;
+}
+type Passo = 'presenca' | 'chave' | 'giro' | 'receber' | 'enviar';
+interface Alvo { user_id: string; workspace_id: string; sws: string }
+interface Nuvem { at: number; on: boolean; rele: string | null; ticket: { exp: number; mac: string } | null; appState: string | null; runtime: string | null; keyWanted: boolean | null }
+interface Marca { ultimaOk: number | null; ultimaTentativa: number | null; pendencia: { codigo: string; passo: Passo; desde: number; vezes: number; logAt: number } | null; equipeRetida: boolean; giroAt: number; semSyncAt: number }
+export interface AutoSync { agora: () => Promise<void>; parar: () => Promise<void>; estado: (ws: string) => EstadoAuto; sincronizar: (userId: string, ws: string) => Promise<EstadoAuto>; observar: (sws: string, estado: unknown) => void }
+
+const codigo = (e: unknown): string => String((e as { code?: unknown }).code ?? ((e as { status?: unknown }).status ? `http_${(e as { status?: unknown }).status}` : 'erro'));
+/** passageiros: resolvem sozinhos no ciclo seguinte (não viram aviso na tela antes de se repetirem) */
+export const PASSAGEIROS = ['version_conflict', 'world_offline', 'rate_limited', 'key_version'];
+/** o World não atende agora (sem rede, ou pediu uma pausa): não adianta tentar os passos seguintes desta volta */
+const SEM_WORLD = ['world_offline', 'rate_limited'];
+/** a nuvem está de pé sem a chave? (World novo diz com todas as letras; no antigo, pelo estado que o contêiner conta) */
+const querChave = (n: Pick<Nuvem, 'on' | 'keyWanted' | 'appState'>): boolean => n.on && (n.keyWanted ?? (n.appState ?? '').startsWith('aguardando_chave'));
+/** em preparo: vale conferir de perto (segundos) até ficar pronta, parar ou dar erro */
+const emPreparo = (n: Nuvem): boolean => n.on && (querChave(n) || (n.runtime === 'rodando' && !/^(pronto|erro)/.test(n.appState ?? '')));
 
 /**
- * A cada minuto, para cada workspace ligado ao World com a nuvem ATIVA: avisa que este computador está com ele aberto
- * (a nuvem para de executar), entrega a chave da sincronia a quem ainda não tem (o aparelho-nuvem), recebe e envia.
+ * A cada minuto, para cada workspace ligado ao World: com a nuvem ATIVA, avisa que este computador está com ele aberto
+ * (a nuvem para de executar) e a declara reserva dos canais; com a sincronia ligada, entrega a chave a quem ainda não
+ * tem (a nuvem primeiro), recebe e envia. Cada passo é independente: a falha de um não tira a vez do seguinte, e todo
+ * erro fica no registro do servidor (uma vez, e de novo a cada 10 min enquanto durar) e no estado que a tela mostra.
  * Esqueleto novo vindo de outro computador não é aplicado sozinho (fica para a pessoa ver, como sempre).
+ * Entre um ciclo e outro, a nuvem em preparo é conferida de perto: esperando a chave, recebe em segundos.
  */
-export function iniciarAutoSync(d: AutoSyncDeps): { agora: () => Promise<void>; parar: () => Promise<void> } {
-  const ativa = new Map<string, { at: number; on: boolean; rele: string | null; ticket: { exp: number; mac: string } | null }>();
-  let parado = false; let rodando: Promise<void> | null = null;
-  const alvos = () => d.db.all<{ user_id: string; workspace_id: string; sws: string }>(`SELECT b.user_id, b.workspace_id, i.sync_workspace_id AS sws FROM world_bound b
-    JOIN world_links l ON l.user_id = b.user_id AND l.status = 'active' JOIN world_workspace_ids i ON i.workspace_id = b.workspace_id`);
-  const temNuvem = async (sws: string, s: string): Promise<boolean> => {
+export function iniciarAutoSync(d: AutoSyncDeps): AutoSync {
+  const ativa = new Map<string, Nuvem>();
+  const marcas = new Map<string, Marca>();
+  /** workspaces World com a nuvem em preparo (desde quando são conferidos de perto) */
+  const preparo = new Map<string, number>();
+  /** conferida de perto por tempo demais sem sair do lugar: até quando fica só no ritmo do ciclo */
+  const folga = new Map<string, number>();
+  const filas = new Map<string, Promise<unknown>>();
+  let parado = false; let rodando: Promise<void> | null = null; let perto: Promise<void> | null = null;
+  const cicloMs = d.ajustes?.cicloMs ?? 60_000;
+  const entregaMs = d.ajustes?.entregaMs ?? Math.min(5_000, Math.max(20, Math.floor(cicloMs / 4)));
+  const entregaMaxMs = d.ajustes?.entregaMaxMs ?? 15 * 60_000;
+  // o id do workspace World vem da sincronia (world_sync) ou, sem ela, da ligação (world_workspace_ids): instalações
+  // antigas ligaram a sincronia antes de a segunda tabela existir e só têm a primeira
+  const alvos = () => d.db.all<Alvo>(`SELECT b.user_id, b.workspace_id, COALESCE(s.sync_workspace_id, i.sync_workspace_id) AS sws FROM world_bound b
+    JOIN world_links l ON l.user_id = b.user_id AND l.status = 'active' JOIN workspaces w ON w.id = b.workspace_id
+    LEFT JOIN world_sync s ON s.workspace_id = b.workspace_id LEFT JOIN world_workspace_ids i ON i.workspace_id = b.workspace_id
+    WHERE COALESCE(s.sync_workspace_id, i.sync_workspace_id) IS NOT NULL ORDER BY b.created_at, b.workspace_id`);
+  const marca = (ws: string): Marca => { let m = marcas.get(ws); if (!m) { m = { ultimaOk: null, ultimaTentativa: null, pendencia: null, equipeRetida: false, giroAt: 0, semSyncAt: 0 }; marcas.set(ws, m); } return m; };
+  /** um de cada vez por workspace (o ciclo, a entrega rápida e o "sincronizar agora" não se atropelam) */
+  const naVez = <T>(ws: string, fn: () => Promise<T>): Promise<T> => {
+    const p = (filas.get(ws) ?? Promise.resolve()).catch(() => undefined).then(fn);
+    const fim = p.catch(() => undefined).finally(() => { if (filas.get(ws) === fim) filas.delete(ws); });
+    filas.set(ws, fim);
+    return p;
+  };
+  const falhou = (a: Alvo, passo: Passo, e: unknown): string => {
+    const c = codigo(e); const m = marca(a.workspace_id); const t = Date.now();
+    const igual = m.pendencia?.codigo === c && m.pendencia.passo === passo;
+    const p = igual ? m.pendencia! : { codigo: c, passo, desde: t, vezes: 0, logAt: 0 };
+    p.vezes++;
+    // no registro: na primeira vez e de novo a cada 10 min enquanto durar (com quantas vezes já foi)
+    if (t - p.logAt >= 10 * 60_000) { p.logAt = t; d.log({ ws: a.workspace_id, passo, erro: c, vezes: p.vezes, detalhe: String((e as Error)?.message ?? e).slice(0, 200) }, 'sincronia automática: um passo falhou (tenta de novo no próximo ciclo)'); }
+    m.pendencia = p;
+    return c;
+  };
+  const guardar = (sws: string, r: Record<string, unknown>, antes?: Nuvem): Nuvem => {
+    const on = r.active === true;
+    const n: Nuvem = { at: Date.now(), on, rele: on && typeof r.relayStandby === 'string' ? r.relayStandby : null,
+      ticket: on && r.relayTicket && typeof (r.relayTicket as { mac?: unknown }).mac === 'string' ? r.relayTicket as Nuvem['ticket'] : null,
+      appState: on && typeof r.appState === 'string' ? r.appState : null, runtime: on && typeof r.runtime === 'string' ? r.runtime : null,
+      keyWanted: on && typeof r.keyWanted === 'boolean' ? r.keyWanted : null };
+    ativa.set(sws, n);
+    const pediuAgora = querChave(n) && !(antes && querChave(antes));
+    if (pediuAgora) { folga.delete(sws); d.log({ sws, estado: (n.appState ?? '').slice(0, 80) }, 'nuvem: está esperando a chave da sincronia; este computador entrega agora'); }
+    if (emPreparo(n)) { if (!preparo.has(sws) && (folga.get(sws) ?? 0) < Date.now()) preparo.set(sws, Date.now()); }
+    else preparo.delete(sws);
+    return n;
+  };
+  const lerNuvem = async (sws: string, s: string, fresco = false): Promise<Nuvem | null> => {
     const c = ativa.get(sws);
     // "tem" vale por 5 min; "não tem" só por 1 (quem acabou de contratar não espera). O comprovante da reserva vale 15
-    if (c && Date.now() - c.at < (c.on && c.rele ? d.ajustes?.estadoMs ?? 5 * 60_000 : Math.min(60_000, d.ajustes?.cicloMs ?? 60_000))) return c.on;
+    if (!fresco && c && Date.now() - c.at < (c.on && c.rele ? d.ajustes?.estadoMs ?? 5 * 60_000 : Math.min(60_000, cicloMs))) return c;
+    try { return guardar(sws, await d.client.call<Record<string, unknown>>('GET', `/v1/cloud?workspace=${sws}`, undefined, s), c); }
+    catch { return c ?? null; }
+  };
+  /** Entrega a chave (a nuvem primeiro). Não depende da pausa: não mexe nos dados do workspace. */
+  const entregar = async (a: Alvo, motivo: string): Promise<true | string> => {
     try {
-      const r = await d.client.call<{ active?: boolean; relayStandby?: string | null; relayTicket?: { exp: number; mac: string } | null }>('GET', `/v1/cloud?workspace=${sws}`, undefined, s);
-      const on = r.active === true;
-      ativa.set(sws, { at: Date.now(), on, rele: on && typeof r.relayStandby === 'string' ? r.relayStandby : null, ticket: on && r.relayTicket && typeof r.relayTicket.mac === 'string' ? r.relayTicket : null });
-      return on;
+      const r = await d.sync.share(a.user_id, a.workspace_id, { motivo });
+      const n = ativa.get(a.sws);
+      if (r.cloud === 'entregue' && n) { n.keyWanted = false; if ((n.appState ?? '').startsWith('aguardando_chave')) n.appState = 'preparando'; }
+      if (r.failed) return falhou(a, 'chave', Object.assign(new Error(`${r.failed} de ${r.needed} aparelhos sem a chave`), { code: r.falhas[0]?.code ?? 'erro' }));
+      return true;
+    } catch (e) { return falhou(a, 'chave', e); }
+  };
+  const um = async (a: Alvo, open: boolean, opts: { forcar?: boolean } = {}): Promise<void> => {
+    const s = d.links.session(a.user_id);
+    if (!s) return; // a parte da pessoa está fechada (ela ainda não entrou desde que o Ergon abriu): nada a fazer sem a sessão
+    const m = marca(a.workspace_id); m.ultimaTentativa = Date.now();
+    let limpo = true;
+    // o aplicativo pediu a pausa ao fechar (sync-atividade.ts): nenhum envio ou recebimento novo até a página abrir de
+    // novo (ou a pausa vencer). O sinal de "computador aberto" e a entrega da chave seguem: o servidor continua ligado
+    const pausada = () => open && !opts.forcar && d.sync.atividade.pausada();
+    // 1. a nuvem: posse (este computador está aberto) e a reserva dos canais
+    const n = await lerNuvem(a.sws, s);
+    if (n?.on) {
+      // os canais: com este computador fechado, a nuvem responde pelas contas ligadas (declarado ao serviço dos canais)
+      if (n.rele) try { d.canais?.reserva(a.workspace_id, { installationId: n.rele, syncWorkspaceId: a.sws, ticket: n.ticket }); } catch { /* segue */ }
+      try {
+        const r = await d.client.call<{ keyWanted?: unknown }>('POST', '/v1/cloud/presence', { workspaceId: a.sws, open }, s);
+        // o World diz na resposta se a nuvem está esperando a chave (aditivo); World antigo: lê o estado dela a cada ciclo
+        if (typeof r.keyWanted === 'boolean') { if (r.keyWanted !== n.keyWanted) guardar(a.sws, { active: true, relayStandby: n.rele, relayTicket: n.ticket, appState: n.appState, runtime: n.runtime, keyWanted: r.keyWanted }, n); }
+        else if (open) await lerNuvem(a.sws, s, true);
+      } catch (e) { limpo = false; if (SEM_WORLD.includes(falhou(a, 'presenca', e))) return; }
+    } else if (n && ativa.has(a.sws)) {
+      // a nuvem acabou (ou nunca houve): se era ela a reserva dos canais deste workspace, deixa de ser
+      try { d.canais?.reserva(a.workspace_id, null); } catch { /* segue */ }
     }
-    catch { return c?.on ?? false; }
+    if (!d.sync.status(a.workspace_id).enabled) {
+      // sem a sincronia ligada aqui, este computador não tem a chave para entregar: dito no registro (uma vez por hora)
+      const agora = ativa.get(a.sws);
+      if (agora && querChave(agora) && Date.now() - m.semSyncAt > 3_600_000) { m.semSyncAt = Date.now(); d.log({ ws: a.workspace_id }, 'nuvem: espera a chave, mas a sincronia está desligada neste workspace aqui (ligue em Configurações › Ergon World)'); }
+      return;
+    }
+    if (open) {
+      // 2. a chave para quem ainda não tem (a nuvem primeiro)
+      const chave = await entregar(a, 'ciclo');
+      if (chave !== true) { limpo = false; if (SEM_WORLD.includes(chave)) return; } // sem o World agora: os passos seguintes falhariam igual
+      if (pausada()) return;
+      // 3. alguém saiu do workspace e a chave ainda não foi trocada: quem administra troca daqui, sem ninguém clicar
+      if (d.sync.status(a.workspace_id).rotationPending && Date.now() - m.giroAt > 10 * 60_000) {
+        m.giroAt = Date.now();
+        try { const g = await d.sync.rotate(a.user_id, a.workspace_id); d.log({ ws: a.workspace_id, versao: g.keyVersion, entregues: g.shared }, 'sincronia: chave do workspace trocada (alguém tinha saído)'); }
+        catch (e) { limpo = false; falhou(a, 'giro', e); }
+      }
+      // 4. recebe
+      try {
+        const p = await d.sync.pull(a.user_id, a.workspace_id, true, { holdOnBlueprint: true }) as { held?: boolean };
+        m.equipeRetida = !!p.held;
+        if (p.held) return; // equipe nova de outro computador: a pessoa recebe pela tela antes de enviar
+      } catch (e) { falhou(a, 'receber', e); return; } // sem receber não envia (o World recusaria: outro aparelho mudou antes)
+      if (pausada()) return;
+    }
+    // 5. envia
+    try { await d.sync.push(a.user_id, a.workspace_id); }
+    catch (e) {
+      const c = falhou(a, 'enviar', e);
+      // a chave girou agora (o World pediu o giro neste envio): troca já, sem esperar o próximo ciclo
+      if (open && c === 'rotation_required') m.giroAt = 0;
+      return;
+    }
+    if (limpo) { m.ultimaOk = Date.now(); m.pendencia = null; }
   };
   const uma = async (open: boolean) => {
-    // o aplicativo pediu a pausa ao fechar (sync-atividade.ts): nenhum envio ou recebimento novo até a página abrir de
-    // novo (ou a pausa vencer). O sinal de "computador aberto" segue: o servidor continua ligado e atende os canais
-    const pausada = () => open && d.sync.atividade.pausada();
     for (const a of alvos()) {
+      if (parado && open) return;
+      await naVez(a.workspace_id, () => um(a, open)).catch((e) => { d.log({ ws: a.workspace_id, erro: codigo(e), detalhe: String((e as Error)?.message ?? e).slice(0, 200) }, 'sincronia automática: o ciclo falhou'); });
+    }
+  };
+  /** Entre os ciclos: a nuvem em preparo é lida de novo e, se espera a chave, recebe já. */
+  const dePerto = async () => {
+    if (!preparo.size) return;
+    for (const a of alvos()) {
+      const desde = preparo.get(a.sws);
+      if (desde === undefined || parado) continue;
+      if (Date.now() - desde > entregaMaxMs) { preparo.delete(a.sws); folga.set(a.sws, Date.now() + entregaMaxMs); continue; } // presa há muito tempo: volta ao ritmo do ciclo
       const s = d.links.session(a.user_id);
       if (!s) continue;
-      if (!(await temNuvem(a.sws, s))) {
-        // a nuvem acabou (ou nunca houve): se era ela a reserva dos canais deste workspace, deixa de ser
-        if (ativa.has(a.sws)) try { d.canais?.reserva(a.workspace_id, null); } catch { /* segue */ }
-        continue;
-      }
-      // os canais: com este computador fechado, a nuvem responde pelas contas ligadas (declarado ao serviço dos canais)
-      const at = ativa.get(a.sws);
-      if (at?.rele) try { d.canais?.reserva(a.workspace_id, { installationId: at.rele, syncWorkspaceId: a.sws, ticket: at.ticket }); } catch { /* segue */ }
-      try {
-        await d.client.call('POST', '/v1/cloud/presence', { workspaceId: a.sws, open }, s);
-        // conferida antes de cada passo: a pausa pedida no meio do ciclo vale já para o passo seguinte
-        if (pausada() || !d.sync.status(a.workspace_id).enabled) continue;
-        if (open) {
-          await d.sync.share(a.user_id, a.workspace_id);
-          if (pausada()) continue;
-          const p = await d.sync.pull(a.user_id, a.workspace_id, true, { holdOnBlueprint: true }) as { held?: boolean };
-          if (p.held) continue; // equipe nova de outro computador: a pessoa recebe pela tela antes de enviar
-          if (pausada()) continue;
-        }
-        await d.sync.push(a.user_id, a.workspace_id);
-      } catch (e) {
-        const code = String((e as { code?: string }).code ?? '');
-        if (!['version_conflict', 'world_offline', 'rate_limited', 'key_version', 'rotation_required', 'key_pending'].includes(code)) d.log({ err: String((e as Error).message).slice(0, 200), ws: a.workspace_id }, 'sincronia automática falhou');
-      }
+      const n = await lerNuvem(a.sws, s, true);
+      if (n && querChave(n) && d.sync.status(a.workspace_id).enabled) await naVez(a.workspace_id, () => entregar(a, 'nuvem esperando a chave')).catch(() => undefined);
     }
   };
   const agora = () => (rodando ??= uma(true).finally(() => { rodando = null; }));
-  const timer = setInterval(() => { if (!parado) void agora(); }, d.ajustes?.cicloMs ?? 60_000);
+  const timer = setInterval(() => { if (!parado) void agora(); }, cicloMs);
   timer.unref();
+  const rapido = setInterval(() => { if (!parado && preparo.size) perto ??= dePerto().catch(() => undefined).finally(() => { perto = null; }); }, entregaMs);
+  rapido.unref();
   const primeiro = setTimeout(() => { if (!parado) void agora(); }, Math.min(5_000, d.ajustes?.cicloMs ?? 5_000)); primeiro.unref();
+  const estado = (ws: string): EstadoAuto => {
+    const m = marcas.get(ws); const sws = d.sync.worldId(ws); const n = sws ? ativa.get(sws) : undefined;
+    const iso = (t: number | null | undefined) => (t ? new Date(t).toISOString() : null);
+    return { auto: !parado, ultimaOk: iso(m?.ultimaOk), ultimaTentativa: iso(m?.ultimaTentativa),
+      pendencia: m?.pendencia ? { codigo: m.pendencia.codigo, passo: m.pendencia.passo, desde: iso(m.pendencia.desde)!, vezes: m.pendencia.vezes } : null,
+      equipeRetida: !!m?.equipeRetida, nuvem: n ? { ativa: n.on, esperandoChave: querChave(n), appState: n.appState } : null };
+  };
   return {
-    agora,
-    async parar() { parado = true; clearInterval(timer); clearTimeout(primeiro); await rodando?.catch(() => undefined); await uma(false).catch(() => undefined); },
+    agora, estado,
+    /** "Sincronizar agora" (a saída de emergência da tela): o ciclo deste workspace, já, mesmo com a pausa pedida. */
+    async sincronizar(userId: string, ws: string) {
+      const a = alvos().find((x) => x.workspace_id === ws && x.user_id === userId);
+      if (a) await naVez(ws, () => um(a, true, { forcar: true }));
+      return estado(ws);
+    },
+    /** A tela leu o estado da nuvem (GET /v1/cloud): se ela espera a chave, a entrega começa já, sem esperar o ciclo. */
+    observar(sws: string, r: unknown) {
+      if (parado || !r || typeof r !== 'object') return;
+      const antes = ativa.get(sws); const n = guardar(sws, r as Record<string, unknown>, antes);
+      if (!querChave(n)) return;
+      const a = alvos().find((x) => x.sws === sws && d.sync.status(x.workspace_id).enabled && d.links.session(x.user_id));
+      if (a) void naVez(a.workspace_id, () => entregar(a, 'nuvem esperando a chave')).catch(() => undefined);
+    },
+    async parar() { parado = true; clearInterval(timer); clearInterval(rapido); clearTimeout(primeiro); await rodando?.catch(() => undefined); await perto?.catch(() => undefined); await uma(false).catch(() => undefined); },
   };
 }

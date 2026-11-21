@@ -81,6 +81,9 @@ test('o contêiner sobe sem ninguém, recebe a chave do computador, os dados e f
   assert.ok(nuvem.db.get("SELECT 1 AS x FROM agents WHERE workspace_id = ? AND name = 'Frodo' AND status = 'active'", wsNuvem), 'a equipe chegou');
   assert.equal(nuvem.db.get<{ content: string }>("SELECT content FROM messages WHERE id = 'msg_pcaaaaaaaaaaaaaaa'")?.content, 'Qual o caminho mais seguro?', 'a conversa chegou');
   assert.equal(motor.conexoes, 1, 'o Ergon AI foi ligado no motor uma vez');
+  // com a chave na mão, o estado deixa de dizer "aguardando a chave" ANTES de receber os dados (a primeira vez demora)
+  const recebendo = cl.states.findIndex((x) => x.startsWith('preparando: recebendo a equipe'));
+  assert.ok(recebendo >= 0 && !cl.states.slice(recebendo).some((x) => x.startsWith('aguardando_chave')), JSON.stringify(cl.states));
   // canais: "pronto" só veio depois de o contêiner entrar no serviço; o World sabe a instalação e o computador a declara
   assert.match(cl.relay ?? '', /^ins_/);
   assert.equal(cl.relay, nuvem.teamsApp.instalacaoNoRele());
