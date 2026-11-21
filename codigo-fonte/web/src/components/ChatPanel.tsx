@@ -23,7 +23,7 @@ import { Markdown } from './Markdown.tsx';
 import { RECURSOS, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
 import { ConversaPorVoz } from './ConversaPorVoz.tsx';
 import { GravadorDeVoz } from './GravadorDeVoz.tsx';
-import { letterStyle } from '../lib/contraste.ts';
+import { AgentAvatar } from './AgentAvatar.tsx';
 import { CenaVazio } from '../arte/Cena.tsx';
 import { useVisuaisDaConversa } from '../visuais/conversa.ts';
 import { ContextoVisuais } from '../visuais/contexto.ts';
@@ -550,7 +550,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
       onDragLeave={() => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDrag(false); }}
       onDrop={(e) => { if (!dragHasFiles(e)) return; e.preventDefault(); dragDepth.current = 0; setDrag(false); void addFiles(e.dataTransfer.files); }}>
       {!embedded && <header className="chat__head">
-        <span className="avatar" style={letterStyle(agent.color)} aria-hidden="true">{agent.name[0]}</span>
+        <AgentAvatar agent={agent} size={34} />
         <div className="chat__who">
           <strong>{agent.name}</strong>
           <span>{busy ? <span className="chat__status">{t('conversas.conversa.trabalhando')}</span> : `${agent.role} · ${agent.sector_name}`}</span>

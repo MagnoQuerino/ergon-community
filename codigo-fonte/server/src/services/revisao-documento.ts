@@ -15,7 +15,8 @@
 import type { Db } from '../db/db.ts';
 import { clip, HttpError, id, notFound, now, sha256 } from '../lib/util.ts';
 import { juntarTrechos, liberadosAPartir, MARCA_FIM, MARCA_INICIO, planejar, textoDaResposta, trechosDe, type Acao } from '../../../shared/revisao.ts';
-import { corDoAgente } from '../../../shared/revisao.ts';
+import { coresDaEquipe } from './cores-agentes.ts';
+import { corPeloId } from '../../../shared/cor-agente.ts';
 import { gravarConteudo, lerConteudo, openArtifact } from './artifacts.ts';
 import { audit, type Bus } from './bus.ts';
 import { ehMarkdown } from './entregaveis.ts';
@@ -333,6 +334,7 @@ export class RevisaoDocumento {
     let ativa = null;
     if (r) {
       const fs = this.frentes(r.id);
+      const cores = coresDaEquipe(this.db, ws);
       ativa = {
         id: r.id, pedido: r.pedido, trechos: this.trechos(r),
         frentes: fs.map((f) => {
@@ -340,7 +342,7 @@ export class RevisaoDocumento {
           const aoVivo = f.estado === 'trabalhando' && run ? textoDaResposta(run.text, true) : null;
           const a = agentes.get(f.agent_id);
           return {
-            id: f.id, acao: f.acao, especialidade: f.especialidade, estado: f.estado, cor: corDoAgente(f.agent_id),
+            id: f.id, acao: f.acao, especialidade: f.especialidade, estado: f.estado, cor: (cores.get(f.agent_id) ?? corPeloId(f.agent_id)).claro, corEscuro: (cores.get(f.agent_id) ?? corPeloId(f.agent_id)).escuro,
             blocos: f.acao === 'conferir' ? (f.passada ? JSON.parse(f.passada) as number[] : []) : JSON.parse(f.blocos) as number[],
             conferidoAte: f.conferido_ate, aoVivo,
             agente: a ? { id: a.id, name: a.name, role: a.role, color: a.color, char_key: a.char_key, look_seed: a.look_seed } : { id: f.agent_id, name: '', role: '', color: '#888888', char_key: null, look_seed: null },

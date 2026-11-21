@@ -7,6 +7,7 @@ import { DISPLAY_BADGE, WORK_LABEL, displayOf, haQuantoTempo, situacaoDe, type W
 import { fmtData, fmtLista, fmtNumero, idiomaAtual, t as tx, useT } from '../i18n/index.ts';
 import { nomeDaColuna } from '../lib/colunas.ts';
 import { letterStyle } from '../lib/contraste.ts';
+import { useCorDoAgente, varsDaCor } from '../lib/cores-agentes.ts';
 
 const RUN_LABEL = { running: 'quadro.execucao.trabalhando', queued: 'quadro.execucao.naFila', waiting_user: 'quadro.execucao.aguardaVoce' } as const;
 const runLabel = (s: string) => (s in RUN_LABEL ? tx(RUN_LABEL[s as keyof typeof RUN_LABEL]) : s);
@@ -78,7 +79,7 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
   };
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'numero', dir: 1 });
   // nome e cor do responsável (e de quem recebeu o card enviado à equipe) vêm no próprio card, desativados incluídos
-  const agentOf = (id: string | null, name: string | null | undefined, color: string | null | undefined) => (id && name ? { name, color: color ?? undefined } : null);
+  const agentOf = (id: string | null, name: string | null | undefined, color: string | null | undefined) => (id && name ? { id, name, color: color ?? undefined } : null);
 
   /** O andamento real do card (o mesmo no kanban e na lista). */
   const badges = (t: TaskCard) => {
@@ -138,7 +139,7 @@ export function Board({ columns, tasks, view, editable, openId, onOpen, onMove, 
       </>
     );
   };
-  const chipOf = (ag: { name: string; color?: string }, title?: string) => <span className="who" title={title}><span className="avatar avatar--xs" style={letterStyle(ag.color)}>{ag.name[0]}</span>{ag.name}</span>;
+  const chipOf = (ag: { id?: string; name: string; color?: string }, title?: string) => <ChipDoAgente ag={ag} title={title} />;
   /** Com quem está: o agente (equipe), quem o aplicativo diz (espelho), o agente que recebeu (enviada à equipe) ou você. */
   const who = (t: TaskCard, inList = false) => {
     const ag = agentOf(t.agent_id, t.agent_name, t.agent_color);
@@ -368,4 +369,10 @@ export function ViewToggle({ view, onChange }: { view: 'kanban' | 'lista'; onCha
       <button className={`seg__btn ${view === 'lista' ? 'seg__btn--on' : ''}`} aria-pressed={view === 'lista'} onClick={() => onChange('lista')}>{t('quadro.visao.lista')}</button>
     </span>
   );
+}
+
+/** O agente no card: a inicial com a borda na cor dele (a mesma das outras telas) e o nome. */
+function ChipDoAgente({ ag, title }: { ag: { id?: string; name: string; color?: string }; title?: string }) {
+  const cor = useCorDoAgente(ag.id, ag.name);
+  return <span className="who" title={title ?? ag.name}><span className={`avatar avatar--xs${cor ? ' cor-agente avatar--anel' : ''}`} style={{ ...letterStyle(ag.color), ...varsDaCor(cor) }}>{ag.name[0]}</span>{ag.name}</span>;
 }

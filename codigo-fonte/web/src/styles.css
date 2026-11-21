@@ -3930,3 +3930,10 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
   .doc-impressao tr, .doc-impressao .doc__codigo, .doc-impressao blockquote { break-inside: avoid; }
   .doc-impressao a { color: inherit; }
 }
+
+/* a cor de cada agente (rc.43, lib/cores-agentes.ts): o par claro/escuro em variáveis, o tema escolhe; a borda do avatar */
+.cor-agente { --agente: var(--agente-c, var(--accent)); }
+:root[data-theme="dark"] .cor-agente { --agente: var(--agente-e, var(--accent)); }
+.avatar--anel { box-sizing: border-box; border: 2px solid var(--agente); }
+.pxavatar.avatar--anel { background: var(--panel); }
+.tcard__fig--cor { box-sizing: border-box; border: 2px solid var(--agente); border-radius: 12px; background: color-mix(in srgb, var(--agente) 7%, transparent); padding-top: 4px; }

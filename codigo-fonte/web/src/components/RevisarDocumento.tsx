@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, errMsg } from '../lib/api.ts';
 import type { EstadoRevisao } from '../lib/documento.ts';
 import { AgentAvatar } from './AgentAvatar.tsx';
+import { varsDaCor } from '../lib/cores-agentes.ts';
 import { Icon } from './Icon.tsx';
 import { useT } from '../i18n/index.ts';
 
@@ -52,8 +53,8 @@ export function RevisarDocumento({ artId, estado, trecho, onTrecho, onClose }: {
             {p.estado === 'editando' && frentes.length > 0 && (
               <ul className="rdoc__equipe">
                 {frentes.map((f) => (
-                  <li key={f.id} className={`rdoc__frente rdoc__frente--${f.estado}`} style={{ ['--agente' as string]: f.cor }} title={f.agente.name}>
-                    <span className="rdoc__av"><AgentAvatar agent={f.agente} size={22} /></span>
+                  <li key={f.id} className={`rdoc__frente rdoc__frente--${f.estado} cor-agente`} style={varsDaCor({ claro: f.cor, escuro: f.corEscuro ?? f.cor })} title={f.agente.name}>
+                    <span className="rdoc__av"><AgentAvatar agent={f.agente} size={22} anel={false} /></span>
                     <span className="rdoc__nome">{f.agente.name}</span>
                     <small>{f.estado === 'trabalhando' ? t(`documentos.doc.acao.${f.acao}`) : f.estado === 'espera' ? t('documentos.doc.acao.espera') : t(`documentos.doc.estado.${f.estado === 'feito' ? 'feito' : 'falhou'}`)}</small>
                   </li>

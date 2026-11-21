@@ -13,6 +13,7 @@ import { IDENTIDADE_PADRAO, MODELOS_ORIGINAIS, REFERENCIAS, numeracao, preencher
 import { trechosDe } from '../../../shared/revisao.ts';
 import { ErgonMarca } from '../brand/Brand.tsx';
 import { AgentAvatar } from './AgentAvatar.tsx';
+import { varsDaCor } from '../lib/cores-agentes.ts';
 import { Icon } from './Icon.tsx';
 import { inl } from './Markdown.tsx';
 import { RevisarDocumento } from './RevisarDocumento.tsx';
@@ -226,11 +227,11 @@ function Papel({ trechos, modelo, identidade, titulo, semLogo, impressao, presen
         if (!x.texto.trim() && !quem) return null;
         return (
           <div key={i} data-trecho={i}
-            className={`doc__trecho ${quem ? 'doc__trecho--ocupado' : ''} ${x.escrevendo ? 'doc__trecho--escrevendo' : ''} ${novos.has(i) ? 'doc__trecho--novo' : ''}`}
-            style={quem ? ({ '--agente': quem.cor } as CSSProperties) : undefined} title={quem ? quem.agente.name : undefined}>
+            className={`doc__trecho ${quem ? 'doc__trecho--ocupado cor-agente' : ''} ${x.escrevendo ? 'doc__trecho--escrevendo' : ''} ${novos.has(i) ? 'doc__trecho--novo' : ''}`}
+            style={quem ? varsDaCor({ claro: quem.cor, escuro: quem.corEscuro ?? quem.cor }) : undefined} title={quem ? quem.agente.name : undefined}>
             {quem && primeiro && (
               <>
-                <span className="doc__quem" title={quem.agente.name} aria-label={quem.agente.name}><AgentAvatar agent={quem.agente} size={28} /></span>
+                <span className="doc__quem" title={quem.agente.name} aria-label={quem.agente.name}><AgentAvatar agent={quem.agente} size={28} anel={false} /></span>
                 <span className="doc__acao" aria-live="polite">{t(`documentos.doc.acao.${quem.acao}`)}</span>
               </>
             )}

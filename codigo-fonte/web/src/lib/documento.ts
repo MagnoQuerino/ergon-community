@@ -78,7 +78,8 @@ export function blocoVisual(lang: string): { tipo: string; Componente: Component
 export interface AgenteNaFrente { id: string; name: string; role: string; color: string; char_key: string | null; look_seed: number | null }
 export interface FrenteAoVivo {
   id: string; acao: 'revisar' | 'reescrever' | 'conferir'; especialidade: string; estado: 'espera' | 'trabalhando' | 'feito' | 'falhou';
-  cor: string; blocos: number[]; conferidoAte: number; aoVivo: string | null; agente: AgenteNaFrente;
+  /** a cor do agente no tema claro e no escuro (shared/cor-agente.ts) */
+  cor: string; corEscuro?: string; blocos: number[]; conferidoAte: number; aoVivo: string | null; agente: AgenteNaFrente;
 }
 export interface EstadoRevisao {
   versao: number;

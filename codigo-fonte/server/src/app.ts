@@ -43,6 +43,7 @@ import { registerEntregaveisRoutes } from './routes/entregaveis.ts';
 import { RevisaoDocumento } from './services/revisao-documento.ts';
 import { registerMcpProprioRoutes } from './routes/mcp-proprio.ts';
 import { registerVisuaisRoutes } from './routes/visuais.ts';
+import { coresDaEquipe } from './services/cores-agentes.ts';
 import { registerRelatosRoutes } from './services/relatos.ts';
 import { McpProprios } from './services/mcp-proprio.ts';
 import { Recursos } from './services/recursos.ts';
@@ -1358,6 +1359,12 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     q: searchQ, sector: sectorKey, structure: S.id('bld'), status: { enum: ['active', 'archived', 'all'] }, cursor: cursorQ, limit: limitQ } } } }, async (req) => {
     const q = req.query as { q?: string; sector?: string; structure?: string; status?: 'active' | 'archived' | 'all'; cursor?: string; limit?: string };
     return listTeamAgents(db, auth(req).workspaceId, { ...q, limit: q.limit ? Number(q.limit) : undefined });
+  });
+  // a cor de cada agente (borda do avatar em todas as telas, realce na revisão): distinta dentro da equipe
+  app.get('/api/team/cores', async (req) => {
+    const ws = auth(req).workspaceId;
+    const nomes = new Map(db.all<{ id: string; name: string }>('SELECT id, name FROM agents WHERE workspace_id = ?', ws).map((a) => [a.id, a.name]));
+    return { cores: [...coresDaEquipe(db, ws)].map(([id, c]) => ({ id, nome: nomes.get(id) ?? '', claro: c.claro, escuro: c.escuro })) };
   });
   app.get('/api/team/agents/:id', { schema: { params: idParams('agt') } }, async (req) => {
     const r = teamAgent(db, auth(req).workspaceId, (req.params as { id: string }).id);
