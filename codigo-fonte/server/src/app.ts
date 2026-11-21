@@ -32,6 +32,7 @@ import { PersonKeySource, Vault } from './security/keys.ts';
 import { WorkspaceOwners, isAdmin, openPersonWithPassword, signupPolicy } from './services/people.ts';
 import { registerPeopleRoutes } from './routes/pessoas.ts';
 import { registerAjustesRoutes } from './routes/equipe-ajustes.ts';
+import { registerQuadrosRoutes } from './routes/quadros.ts';
 import { AJUSTES_RECONFERE_MS, ajustesDaEquipe, ajustesNoMotor, pausaDaEquipe } from './services/ajustes-motor.ts';
 import { idiomaDaInstalacao, idiomaDoMotor } from './services/idioma-motor.ts';
 import { registerRecursosRoutes } from './routes/recursos.ts';
@@ -2033,6 +2034,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       WHERE b.workspace_id = ? ORDER BY b.audience = 'user', b.origin, b.created_at`, auth(req).workspaceId));
 
   app.get('/api/boards/:id', { schema: { params: idParams('brd') } }, async (req) => boardView(db, auth(req).workspaceId, (req.params as { id: string }).id));
+  // os quadros da pessoa: criar, renomear e apagar quadros e colunas (routes/quadros.ts)
+  registerQuadrosRoutes(app, { db, bus, auth });
 
   // Busca rápida (Ctrl+K): cards de todos os quadros, pelo número ou por palavras do título, e rotinas pelo nome.
   // Os títulos são cifrados no banco: a busca abre os mais recentes e filtra aqui, no servidor local.
