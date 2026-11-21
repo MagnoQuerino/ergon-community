@@ -1,10 +1,11 @@
 // A cor de cada agente (shared/cor-agente.ts), a mesma em todas as telas: uma busca leve da equipe inteira por aba
 // (/api/team/cores), atualizada quando a equipe muda. Enquanto não chegou (ou fora do Ergon, na galeria), a do sorteio
-// pelo id. O par claro/escuro vai em variáveis; o CSS (.cor-agente) escolhe pelo tema.
+// pelo id. O par claro/escuro vira uma cor só conforme o tema da tela (o alto contraste usa a do claro).
 import { useSyncExternalStore, type CSSProperties } from 'react';
 import { corPeloId, type CorDoAgente } from '../../../shared/cor-agente.ts';
 import { api } from './api.ts';
 import { ouvirEventos } from './live.ts';
+import { useTheme } from './theme.ts';
 
 interface Linha { id: string; nome: string; claro: string; escuro: string }
 let porId = new Map<string, CorDoAgente>();
@@ -31,17 +32,21 @@ function assinar(f: () => void): () => void {
   return () => { ouvintes.delete(f); };
 }
 
-/** A cor do agente pelo id (ou, sem id, pelo nome na equipe). */
-export function useCorDoAgente(id?: string | null, nome?: string | null): CorDoAgente | null {
+/** A tela está no tema escuro? (o alto contraste é claro) */
+export function useEscuro(): boolean { const th = useTheme(); return th.theme === 'noite' && !th.contraste; }
+/** O par na cor do tema. */
+export const corDoTema = (c: CorDoAgente | null, escuro: boolean): string | null => (c ? (escuro ? c.escuro : c.claro) : null);
+
+/** A cor do agente pelo id (ou, sem id, pelo nome na equipe), já no tema da tela. */
+export function useCorDoAgente(id?: string | null, nome?: string | null): string | null {
   useSyncExternalStore(assinar, () => versao, () => versao);
-  return corDoAgente(id, nome);
+  return corDoTema(parDoAgente(id, nome), useEscuro());
 }
-export function corDoAgente(id?: string | null, nome?: string | null): CorDoAgente | null {
+export function parDoAgente(id?: string | null, nome?: string | null): CorDoAgente | null {
   if (id) return porId.get(id) ?? corPeloId(id);
   if (nome) return porNome.get(nome) ?? null;
   return null;
 }
 
-/** As variáveis da cor (com a classe .cor-agente: --agente fica a do tema). */
-export const varsDaCor = (c: CorDoAgente | null): CSSProperties | undefined =>
-  c ? ({ '--agente-c': c.claro, '--agente-e': c.escuro } as CSSProperties) : undefined;
+/** A variável --agente (borda, realce e cursor usam var(--agente)). */
+export const varsDaCor = (cor: string | null): CSSProperties | undefined => (cor ? ({ '--agente': cor } as CSSProperties) : undefined);

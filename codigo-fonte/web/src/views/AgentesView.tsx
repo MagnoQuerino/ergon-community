@@ -387,5 +387,5 @@ function DragLayer({ sectors }: { sectors: Array<{ key: string; name: string }> 
 /** O boneco no card da equipe, na moldura com a cor do agente (a mesma borda do avatar nas outras telas). */
 function FiguraDoCard({ agent }: { agent: TeamAgent }) {
   const cor = useCorDoAgente(agent.id, agent.name);
-  return <span className={`tcard__fig${cor ? ' cor-agente tcard__fig--cor' : ''}`} style={varsDaCor(cor)} title={agent.name}><AgentFigure agent={agent} /></span>;
+  return <span className={`tcard__fig${cor ? ' tcard__fig--cor' : ''}`} style={varsDaCor(cor)} title={agent.name}><AgentFigure agent={agent} /></span>;
 }

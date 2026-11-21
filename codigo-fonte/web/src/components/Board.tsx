@@ -374,5 +374,5 @@ export function ViewToggle({ view, onChange }: { view: 'kanban' | 'lista'; onCha
 /** O agente no card: a inicial com a borda na cor dele (a mesma das outras telas) e o nome. */
 function ChipDoAgente({ ag, title }: { ag: { id?: string; name: string; color?: string }; title?: string }) {
   const cor = useCorDoAgente(ag.id, ag.name);
-  return <span className="who" title={title ?? ag.name}><span className={`avatar avatar--xs${cor ? ' cor-agente avatar--anel' : ''}`} style={{ ...letterStyle(ag.color), ...varsDaCor(cor) }}>{ag.name[0]}</span>{ag.name}</span>;
+  return <span className="who" title={title ?? ag.name}><span className={`avatar avatar--xs${cor ? ' avatar--anel' : ''}`} style={{ ...letterStyle(ag.color), ...varsDaCor(cor) }}>{ag.name[0]}</span>{ag.name}</span>;
 }

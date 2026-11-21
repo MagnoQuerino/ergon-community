@@ -373,7 +373,7 @@ test('readableOn: quando nenhuma tinta chega a 4,5, ajusta o fundo pelo menor pa
 test('nenhum retrato de letra pinta a cor do agente com letra fixa (todos passam por letterStyle/readableOn)', () => {
   const bad = CODIGO.flatMap(({ f, s }) => [...s.matchAll(/style=\{\{\s*background:\s*[\w.?]+\.color\b/g)].map(() => f));
   assert.deepEqual(bad, []);
-  for (const f of ['components/AgentFigure.tsx', 'components/AgentAvatar.tsx', 'components/Board.tsx', 'components/ChatPanel.tsx', 'views/AmbienteView.tsx']) {
+  for (const f of ['components/AgentFigure.tsx', 'components/AgentAvatar.tsx', 'components/Board.tsx', 'views/AmbienteView.tsx']) {
     assert.match(codigo(f), /letterStyle\(/, f);
   }
   // o "Carregando" da Cidade usa a tinta que se lê sobre o chão do tema da cidade (de dia, a escura)

@@ -17,7 +17,7 @@ export function AgentAvatar({ agent, size = 40, round = true, className = '', an
   const comAnel = anel && !!cor;
   const url = useMemo(() => { try { return portraitUrl(agent, 4, skin); } catch { return ''; } }, [agent.id, agent.name, agent.color, agent.role, agent.char_key, agent.look_seed, skin]); // eslint-disable-line react-hooks/exhaustive-deps
   const h = round ? size : Math.round((size * 4) / 3);
-  const anelCls = comAnel ? ' cor-agente avatar--anel' : '';
+  const anelCls = comAnel ? ' avatar--anel' : ''; // i18n-ok: nome de classe do estilo
   if (!url) return <span className={`avatar${anelCls} ${className}`} style={{ ...letterStyle(agent.color), ...(comAnel ? varsDaCor(cor) : {}), width: size, height: size }} title={agent.name} aria-hidden="true">{agent.name[0]}</span>;
   return <img className={`pxavatar ${round ? 'pxavatar--round' : ''}${anelCls} ${className}`} style={comAnel ? varsDaCor(cor) : undefined} src={url} width={size} height={h} alt="" title={agent.name} aria-hidden="true" draggable={false} />;
 }
