@@ -3147,3 +3147,25 @@ small { font-size: max(12px, .83em); }
 .gerir-quadro__cols .row { gap: 4px; align-items: center; }
 .gerir-quadro__confirma { padding: 8px 10px; border: 1px solid var(--perigo-borda); border-radius: 10px; background: var(--perigo-suave-3); }
 .gerir-quadro__perigo { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+
+/* Sincronizar aparelhos (rc.41): o estado da sincronia automática numa linha, com a saída de emergência ao lado */
+.sinc { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin: 8px 0; border: 1px solid var(--neutro-borda); border-left-width: 4px; border-radius: 10px; background: var(--neutro-suave); }
+.sinc--ok { border-color: var(--sucesso-borda); border-left-color: var(--ok); background: var(--ok-bg); }
+.sinc--info { border-color: var(--info-borda); border-left-color: var(--info-cheio); background: var(--info-suave); }
+.sinc--warn { border-color: var(--atencao-borda); border-left-color: var(--warn); background: var(--warn-bg); }
+.sinc__icone { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; }
+.sinc--ok .sinc__icone { color: var(--ok); } .sinc--info .sinc__icone { color: var(--info-texto); } .sinc--warn .sinc__icone { color: var(--warn); }
+@media (prefers-reduced-motion: no-preference) { .sinc__icone--giro { animation: spin 1.4s linear infinite; } }
+.sinc__texto { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sinc__texto > b { overflow-wrap: anywhere; }
+.sinc__agora { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.sinc__detalhes { margin-top: 8px; }
+.sinc__detalhes > summary { cursor: pointer; }
+.sinc__detalhes code { overflow-wrap: anywhere; }
+@media (max-width: 520px) { .sinc { flex-wrap: wrap; } .sinc__texto { flex-basis: calc(100% - 32px); } .sinc__agora { margin-left: 32px; } }
+/* Subir o WS para o World: o estado de verdade da nuvem */
+.ws-estado { display: flex; align-items: flex-start; gap: 8px; }
+.ws-estado__ponto { flex: none; width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--info-cheio); }
+.ws-estado--ok .ws-estado__ponto { background: var(--ok); }
+.ws-estado--warn .ws-estado__ponto { background: var(--warn); }
+@media (prefers-reduced-motion: no-preference) { .ws-estado__ponto--vivo { animation: pulse 1.6s ease-in-out infinite; } }

@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, errMsg, requestId } from '../../lib/api.ts';
 import { useResource } from '../../lib/live.ts';
 import { fmtData, fmtMoeda } from '../../i18n/index.ts';
 import { useTw } from './textos.ts';
+import { linhaDaNuvem } from './sinc-estado.ts';
 
 interface Nuvem {
   offered: boolean; comboPercent?: number; active: boolean; forSale?: boolean; planActive?: boolean; owner?: boolean; source?: 'stripe' | 'cortesia' | 'teste' | null;
-  until?: string | null; runtime?: 'parado' | 'dormindo' | 'rodando' | 'fila' | 'pausado' | null; diskUsedBytes?: string; diskQuotaBytes?: string;
+  until?: string | null; runtime?: 'parado' | 'dormindo' | 'rodando' | 'fila' | 'pausado' | 'erro' | 'desconhecido' | null; runtimeError?: string | null; diskUsedBytes?: string; diskQuotaBytes?: string;
+  /** o que o contêiner conta ("preparando: <passo>", "aguardando_chave", "pronto", "erro: <motivo>") e se espera a chave da sincronia */
+  appState?: string | null; keyWanted?: boolean | null;
   trialAvailable?: boolean; waitlisted?: boolean;
 }
 interface Preview { upgrade: boolean; prorationDate: number; amountDueCents: string }
@@ -26,6 +29,17 @@ export default function NuvemWs({ semTitulo = false }: { semTitulo?: boolean }) 
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [pv, setPv] = useState<Preview | null>(null);
   const d = r.data;
+  // este computador tem a sincronia ligada neste workspace? (é ele quem entrega a chave à nuvem)
+  const sync = useResource<{ enabled: boolean }>(d?.active ? '/api/world/sync' : null, ['sync.changed']);
+  const linha = d ? linhaDaNuvem(d, t, { syncLigada: sync.data ? sync.data.enabled : undefined }) : null;
+  // o estado de verdade, sem recarregar a página: de perto (4 s) enquanto a nuvem se prepara, de longe (30 s) depois.
+  // Ler o estado também faz o servidor daqui entregar a chave na hora, se a nuvem estiver esperando por ela
+  const ativa = !!d?.active; const perto = !!linha?.preparando; const reload = r.reload;
+  useEffect(() => {
+    if (!ativa) return undefined;
+    const i = window.setInterval(() => { if (!document.hidden) reload(); }, perto ? 4_000 : 30_000);
+    return () => window.clearInterval(i);
+  }, [ativa, perto, reload]);
   if (!d || (!d.offered && !d.active)) return null;
   const go = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true); setMsg(null);
@@ -46,7 +60,12 @@ export default function NuvemWs({ semTitulo = false }: { semTitulo?: boolean }) 
       {d.active ? (
         <>
           <p><b>{t('ws.ativo')}</b>{d.source ? ` · ${t(`ws.origem.${d.source}`)}` : ''}{d.until ? ` · ${t('ws.ate', { data: fmtData(d.until) })}` : ''}</p>
-          {d.runtime && <p>{t(`ws.estado.${d.runtime}`)}</p>}
+          {linha && (
+            <p className={`ws-estado ws-estado--${linha.tom}`} role="status" aria-live="polite">
+              <span className={`ws-estado__ponto${linha.preparando ? ' ws-estado__ponto--vivo' : ''}`} aria-hidden="true" />
+              <span>{linha.texto}</span>
+            </p>
+          )}
           <p className="muted small">{t('ws.disco', { usado: gb(d.diskUsedBytes), total: gb(d.diskQuotaBytes) })}</p>
         </>
       ) : (
