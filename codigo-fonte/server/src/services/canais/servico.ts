@@ -217,7 +217,7 @@ export class Canais {
     if (v.conversation_id) {
       const c = this.d.db.get<{ id: string; n: number }>(
         `SELECT c.id, (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS n FROM conversations c JOIN agents a ON a.id = c.agent_id
-          WHERE c.id = ? AND c.workspace_id = ? AND c.owner_user_id = ? AND c.archived_at IS NULL AND a.status = 'active'`, v.conversation_id, v.workspace_id, v.user_id);
+          WHERE c.id = ? AND c.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0 AND c.archived_at IS NULL AND a.status = 'active'`, v.conversation_id, v.workspace_id, v.user_id);
       if (c && Number(c.n) < this.d.cfg.maxConversationMessages - 4) return c.id;
     }
     const agente = coordinatorFor(this.d.db, v.workspace_id) ?? this.d.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at LIMIT 1", v.workspace_id)?.id;

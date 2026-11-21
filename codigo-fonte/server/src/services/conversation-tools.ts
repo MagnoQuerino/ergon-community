@@ -124,7 +124,7 @@ export function searchAll(db: Db, workspaceId: string, userId: string, q: string
   const has = (s: string | null | undefined) => !!s && fold(s).includes(term);
   const convs = db.all<{ id: string; agent_id: string; title: string; archived_at: string | null; agent: string }>(
     `SELECT c.id, c.agent_id, c.title, c.archived_at, a.name AS agent FROM conversations c JOIN agents a ON a.id = c.agent_id
-      WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL`, workspaceId, userId);
+      WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND c.sala = 0`, workspaceId, userId);
   const byConv = new Map(convs.map((c) => [c.id, c]));
   // contatos: procurados no banco (sem carregar a equipe), já com o retrato (agente leve)
   const pat = `%${term.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
@@ -138,7 +138,7 @@ export function searchAll(db: Db, workspaceId: string, userId: string, q: string
   if (want('mensagens') || want('links')) {
     const rows = db.all<{ id: string; conversation_id: string; role: string; content: string; created_at: string }>(
       `SELECT m.id, m.conversation_id, m.role, m.content, m.created_at FROM messages m JOIN conversations c ON c.id = m.conversation_id
-        WHERE m.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND m.role != 'system' ORDER BY m.created_at DESC LIMIT ?`, workspaceId, userId, MAX_SCAN);
+        WHERE m.workspace_id = ? AND c.owner_user_id = ? AND c.purpose IS NULL AND c.sala = 0 AND m.role != 'system' ORDER BY m.created_at DESC LIMIT ?`, workspaceId, userId, MAX_SCAN);
     for (const m of rows) {
       const c = byConv.get(m.conversation_id);
       if (!c) continue;

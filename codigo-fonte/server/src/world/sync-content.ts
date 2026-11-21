@@ -20,6 +20,7 @@ import { HttpError, id, now } from '../lib/util.ts';
 import { defaultBoard, userBoard } from '../services/tasks.ts';
 import { chavePeloNome } from '../services/colunas.ts';
 import { chaveBoard, checkBoard, checkCard, QuadrosSync, type PBoard, type PCard } from './sync-quadros.ts';
+import { checarExtra, type ExtraSalas } from './sync-salas.ts';
 
 export interface PTask {
   id: string; number: number; audience: 'team' | 'user'; column: string; agent: string | null; title: string; description: string;
@@ -35,7 +36,7 @@ export interface PTask {
 export interface PConversation { id: string; agent: string; title: string; purpose: string | null; createdAt: string }
 export interface PMessage { id: string; conversationId: string; role: 'user' | 'agent' | 'system'; content: string; mode: string; createdAt: string }
 /** boards e cards: só quando há (aparelho na versão anterior ignora o que não conhece e continua aceitando o resto) */
-export interface ContentBody { type: 'content'; tasks: PTask[]; conversations: PConversation[]; messages: PMessage[]; boards?: PBoard[]; cards?: PCard[] }
+export interface ContentBody extends ExtraSalas { type: 'content'; tasks: PTask[]; conversations: PConversation[]; messages: PMessage[]; boards?: PBoard[]; cards?: PCard[] }
 type Kind = 'task' | 'conversation' | 'message' | 'board' | 'card';
 type Rec = PTask | PConversation | PMessage | PBoard | PCard;
 interface Pending { kind: Kind; rec: Rec; hash: string }
@@ -76,7 +77,7 @@ const toTask = (r: TaskRow, lugar?: { boardId: string | null; columnId: string }
   workState: r.work_state, conversationId: r.conversation_id, createdAt: r.created_at, updatedAt: r.updated_at, ...(lugar ?? {}),
 });
 const CONV_SQL = `SELECT c.id, a.name AS agent, c.title, c.purpose, c.created_at AS createdAt FROM conversations c JOIN agents a ON a.id = c.agent_id
-  WHERE c.workspace_id = ? AND c.owner_user_id = ?`;
+  WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0`;
 const toConv = (r: PConversation): PConversation => ({ id: r.id, agent: r.agent, title: r.title, purpose: r.purpose ?? null, createdAt: r.createdAt });
 
 // ---------------------------------------------------------------- conferência do que chega decifrado
@@ -118,8 +119,11 @@ export function parseContent(body: unknown): ContentBody | null {
   const boards = ((b.boards as unknown[] | undefined) ?? []).map((x) => checkBoard(x as Record<string, unknown>));
   const cards = ((b.cards as unknown[] | undefined) ?? []).map((x) => checkCard(x as Record<string, unknown>));
   if (boards.includes(null) || cards.includes(null)) return null;
+  // as salas (rc.42, sync-salas.ts): o anúncio da chave do aparelho, os pacotes selados para cada aparelho e a governança
+  const salas = checarExtra(b);
+  if (!salas) return null;
   return { type: 'content', tasks: tasks as PTask[], conversations: conversations as PConversation[], messages: messages as PMessage[],
-    ...(boards.length ? { boards: boards as PBoard[] } : {}), ...(cards.length ? { cards: cards as PCard[] } : {}) };
+    ...(boards.length ? { boards: boards as PBoard[] } : {}), ...(cards.length ? { cards: cards as PCard[] } : {}), ...salas };
 }
 
 export class ContentSync {
@@ -154,7 +158,7 @@ export class ContentSync {
     for (const c of this.db.all<PConversation>(CONV_SQL, ws, userId)) add('conversation', toConv(c));
     for (const r of this.db.all<{ id: string; conversationId: string; role: PMessage['role']; content: string; mode: string; createdAt: string }>(
       `SELECT m.id, m.conversation_id AS conversationId, m.role, m.content, m.mode, m.created_at AS createdAt FROM messages m JOIN conversations c ON c.id = m.conversation_id
-        WHERE m.workspace_id = ? AND c.owner_user_id = ? AND m.queued = 0
+        WHERE m.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0 AND m.queued = 0
           AND NOT EXISTS (SELECT 1 FROM world_sync_records s WHERE s.workspace_id = m.workspace_id AND s.kind = 'message' AND s.record_id = m.id)
         ORDER BY m.created_at`, ws, userId)) {
       const rec: PMessage = { id: r.id, conversationId: r.conversationId, role: r.role, content: r.content, mode: r.mode, createdAt: r.createdAt };

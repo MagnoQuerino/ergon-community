@@ -530,7 +530,7 @@ export class TeamsApp {
     if (p.conversation_id && p.workspace_id === ws) {
       const c = this.d.db.get<{ id: string; n: number }>(
         `SELECT c.id, (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS n FROM conversations c JOIN agents a ON a.id = c.agent_id
-          WHERE c.id = ? AND c.workspace_id = ? AND c.owner_user_id = ? AND c.archived_at IS NULL AND a.status = 'active'`, p.conversation_id, ws, userId);
+          WHERE c.id = ? AND c.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0 AND c.archived_at IS NULL AND a.status = 'active'`, p.conversation_id, ws, userId);
       if (c && Number(c.n) < this.d.cfg.maxConversationMessages - 4) return c.id;
     }
     const agente = coordinatorFor(this.d.db, ws) ?? this.d.db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND status = 'active' ORDER BY created_at LIMIT 1", ws)?.id;
@@ -1247,13 +1247,13 @@ export class TeamsApp {
    */
   private adotarConversa(userId: string, ws: string, plat: Plataforma): void {
     const p = this.garantirPessoa(userId, ws, plat);
-    const viva = (id: string) => !!this.d.db.get('SELECT 1 AS x FROM conversations WHERE id = ? AND workspace_id = ? AND owner_user_id = ? AND archived_at IS NULL', id, ws, userId);
+    const viva = (id: string) => !!this.d.db.get('SELECT 1 AS x FROM conversations WHERE id = ? AND workspace_id = ? AND owner_user_id = ? AND sala = 0 AND archived_at IS NULL', id, ws, userId);
     if (p.conversation_id && p.workspace_id === ws && viva(p.conversation_id)) return;
     const titulo = plat === 'teams' ? TITULO_CONVERSA : NOME_PLAT[plat];
     const coord = coordinatorFor(this.d.db, ws);
     const achada = this.d.db.all<{ id: string; title: string; agent_id: string }>(
       `SELECT c.id, c.title, c.agent_id FROM conversations c JOIN agents a ON a.id = c.agent_id AND a.status = 'active'
-        WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.archived_at IS NULL
+        WHERE c.workspace_id = ? AND c.owner_user_id = ? AND c.sala = 0 AND c.archived_at IS NULL
         ORDER BY (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) DESC, c.created_at DESC LIMIT 200`, ws, userId)
       .find((c) => c.title === titulo && (!coord || c.agent_id === coord));
     if (!achada) return; // nenhuma ainda: a primeira mensagem cria (e ela vai ao computador pela sincronia)

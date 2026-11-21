@@ -960,7 +960,7 @@ export class Routines {
   /** Conversa da rotina com quem executa (nova se o agente mudou ou se a conversa ficou longa). */
   private conversation(r: RoutineRow, agentId: string): string {
     if (r.conversation_id) {
-      const c = this.db.get<{ agent_id: string; n: number }>('SELECT c.agent_id, (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS n FROM conversations c WHERE c.id = ?', r.conversation_id);
+      const c = this.db.get<{ agent_id: string; n: number }>('SELECT c.agent_id, (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS n FROM conversations c WHERE c.id = ? AND c.sala = 0', r.conversation_id);
       if (c && c.agent_id === agentId && Number(c.n) < 160) return r.conversation_id;
     }
     const cid = id('cnv');
