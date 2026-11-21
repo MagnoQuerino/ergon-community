@@ -199,6 +199,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
   // a sala aberta (rc.42): no lugar da conversa com um agente
   const [sala, setSala] = useState<string | null>(initial.salaId ?? null);
   const [focoSala, setFocoSala] = useState<string | null>(initial.foco ?? null);
+  const [topicoSala, setTopicoSala] = useState<string | null>(null);
   useEffect(() => { if (initial.salaId) { setSala(initial.salaId); setFocoSala(initial.foco ?? null); } }, [initial.salaId, initial.foco]);
   const contacts = useMemo(() => contactsOf(list), [list]);
   // sem escolha: quem tem algo para você, ou a última conversa; sem nenhuma, o Coordenador (como o atalho do canto)
@@ -276,7 +277,7 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
             </div>
           ) : (
             <>
-              <SalasSecao atual={sala} onAbrir={(id) => { setSala(id); setFocoSala(null); setQ(''); }} />
+              <SalasSecao atual={sala} onAbrir={(id) => { setSala(id); setFocoSala(null); setTopicoSala(null); setQ(''); }} />
               {sections.map(({ s, items }) => (
                 <div key={s} className="convs__section">
                   <span className="convs__section-name">{t(SECTION_LABEL[s])}</span>
@@ -332,7 +333,8 @@ export function ConversationsDialog({ coordinator, scope, initial, onClose, onOp
           )}
         </aside>
         <div className="convs__chat">
-          {sala ? <SalaPanel key={sala} salaId={sala} foco={focoSala} onSaiu={() => setSala(null)} /> : agent ? (
+          {sala ? <SalaPanel key={sala} salaId={sala} foco={focoSala} topicoInicial={topicoSala} onSaiu={() => setSala(null)}
+            onIrPara={(pai, topico, foco) => { setSala(pai); setTopicoSala(topico); setFocoSala(foco ?? null); }} /> : agent ? (
             <>
               <header className="foco__chat-head">
                 <AgentAvatar agent={agent} size={36} />

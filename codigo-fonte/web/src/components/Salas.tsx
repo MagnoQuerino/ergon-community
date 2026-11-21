@@ -23,11 +23,14 @@ const PRAZOS: Prazo[] = ['vez', '24h', '7d', '30d', 'sempre']; // i18n-ok: os c�
 interface SalaLinha { id: string; nome: string; arquivada: boolean; ultimaEm: string | null; naoLidas: number; mencao: boolean; cessao: boolean; ultima: { nome: string | null; texto: string } | null }
 interface ListaSalas { salas: SalaLinha[]; podeCriar: boolean; avisos: number }
 interface Membro { tipo: 'pessoa' | 'agente'; chave: string; nome: string; admin: boolean }
-interface Detalhe { id: string; nome: string; arquivada: boolean; eu: string; admin: boolean; papel: string | null; membros: Membro[] }
+interface Detalhe { id: string; nome: string; arquivada: boolean; eu: string; admin: boolean; papel: string | null; membros: Membro[];
+  /** é um tópico: a sala-mãe e a visibilidade */ topico?: { pai: string; paiNome: string; visibilidade: 'privado' | 'compartilhado'; origem: string | null } }
+interface TopicoLinha { id: string; nome: string; arquivado: boolean; privado: boolean; origem: string | null; respostas: number; ultimaEm: string | null; naoLidas: number }
 interface AgenteDisp { chave: string; nome: string; id: string; role: string; color: string; char_key: string | null }
 interface Disponiveis { pessoas: Array<{ chave: string; nome: string; papel: string; eu: boolean }>; agentes: AgenteDisp[] }
 interface Evento { evento: string; nome?: string; alvo?: string; prazo?: Prazo; agente?: string }
 interface Msg { id: string; role: 'user' | 'agent' | 'system'; content: string; created_at: string; autor: { chave: string | null; nome: string | null }; marcas: unknown; pedinte: string | null; attachments?: Attachment[];
+  /** o tópico que nasceu desta mensagem (só se a pessoa o vê) */ topico?: { id: string; nome: string; respostas: number; arquivado: boolean; privado: boolean };
   /** anexos que nasceram em outro computador: a ficha, até alguém baixar */ remotos?: Array<{ ref: string; filename: string; mime: string; size: number; estado: 'remoto' | 'baixando' | 'grande' }> }
 interface Mensagens { mensagens: Msg[]; respondendo: Array<{ agentId: string; nome: string; status: string }> }
 export interface AvisoSala { id: string; conversation_id: string; message_id: string; tipo: 'mencao' | 'cessao'; de_nome: string; agente: string | null; created_at: string; sala: string; texto: string | null }
@@ -274,13 +277,21 @@ function textoDoEvento(t: ReturnType<typeof useT>, e: Evento, fallback: string):
     case 'recusou': return t('conversas.sala.evento.recusou', v);
     case 'falta': return t('conversas.sala.evento.falta', v);
     case 'sem_acesso': return t('conversas.sala.evento.sem_acesso', v);
+    case 'topico': return t('conversas.sala.evento.topico', v);
+    case 'arquivou': return t('conversas.sala.evento.arquivou', v);
+    case 'reabriu': return t('conversas.sala.evento.reabriu', v);
     default: return fallback;
   }
 }
 
 interface Pendente { key: string; nome: string; art: Attachment | null; erro: boolean }
 
-export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: () => void; /** o pedido de cessão (sav_) ou a mensagem (msg_) em destaque */ foco?: string | null }) {
+/**
+ * A sala aberta e, ao lado, o tópico aberto (no celular, o tópico ocupa a tela). `painelTopico`: este painel é o tópico ao
+ * lado da sala (fecha com `onFechar`). Um tópico aberto direto (pelo sino) vira a sala-mãe com o tópico ao lado.
+ */
+export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topicoInicial, onIrPara }: { salaId: string; onSaiu: () => void; /** o pedido de cessão (sav_) ou a mensagem (msg_) em destaque */ foco?: string | null;
+  painelTopico?: boolean; onFechar?: () => void; topicoInicial?: string | null; /** abrir outra sala (a sala-mãe de um tópico) com este tópico ao lado */ onIrPara?: (salaId: string, topico: string, foco?: string | null) => void }) {
   const t = useT();
   const det = useResource<Detalhe>(`/api/salas/${salaId}`, ['salas.changed']);
   const msgs = useResource<Mensagens>(`/api/salas/${salaId}/mensagens`, EVENTOS);
@@ -296,6 +307,12 @@ export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: ()
   const rec = useResource<RecursosEstado>(RECURSOS, []);
   const [voz, setVoz] = useState<AgenteDisp | null>(null);
   const [escolhendoVoz, setEscolhendoVoz] = useState(false);
+  // tópicos: o aberto ao lado, a lista e o diálogo de abrir um (do zero ou de uma mensagem)
+  const [topico, setTopico] = useState<string | null>(topicoInicial ?? null);
+  useEffect(() => { if (topicoInicial) setTopico(topicoInicial); }, [topicoInicial]);
+  const [listaTopicos, setListaTopicos] = useState(false);
+  const [novoTopico, setNovoTopico] = useState<{ origem: Msg | null } | null>(null);
+  const topicos = useResource<TopicoLinha[]>(painelTopico ? null : `/api/salas/${salaId}/topicos`, EVENTOS);
   const fim = useRef<HTMLDivElement>(null);
   const arquivo = useRef<HTMLInputElement>(null);
   const lista = msgs.data?.mensagens ?? [];
@@ -311,6 +328,7 @@ export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: ()
   const candidatos: Candidato[] = useMemo(() => (s?.membros ?? []).filter((m) => m.chave !== s?.eu).map((m) => ({ tipo: m.tipo, chave: m.chave, nome: m.nome })), [s]);
   const agenteDe = (nome: string | null) => disp.data?.agentes.find((a) => a.nome === nome);
   const meusPedidos = (avisos.data ?? []).filter((a) => a.conversation_id === salaId && a.tipo === 'cessao');
+  useEffect(() => { if (s?.topico && !painelTopico) onIrPara?.(s.topico.pai, s.id, foco ?? null); }, [s?.topico?.pai, painelTopico]); // eslint-disable-line react-hooks/exhaustive-deps
   if (det.error) return <p className="muted center">{det.error}</p>;
   if (!s) return <p className="muted center">{t('conversas.sala.carregando')}</p>;
   const pronto = anexos.filter((a) => a.art).map((a) => a.art!.id);
@@ -334,10 +352,10 @@ export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: ()
   const pessoasNaSala = s.membros.filter((m) => m.tipo === 'pessoa');
   const vez = msgs.data?.respondendo ?? [];
   const leitura = s.papel === 'viewer';
-  return (
-    <div className="sala">
+  const corpo = (
+    <div className={`sala ${painelTopico ? 'sala--topico' : ''}`}>
       <header className="foco__chat-head sala__head">
-        <span className="sala-item__icone sala__icone" aria-hidden="true"><Icon name="users" size={18} /></span>
+        <span className="sala-item__icone sala__icone" aria-hidden="true"><Icon name={s.topico ? (s.topico.visibilidade === 'privado' ? 'lock' : 'chat') : 'users'} size={18} /></span>
         <div className="foco__chat-who">
           {renomeando !== null ? (
             <form onSubmit={(e) => { e.preventDefault(); const n = renomeando.trim(); setRenomeando(null); if (n && n !== s.nome) void patch({ nome: n }); }}>
@@ -345,8 +363,24 @@ export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: ()
                 onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenomeando(null); } }} />
             </form>
           ) : <b>{s.nome}</b>}
-          <small>{t('conversas.sala.membrosN', { n: s.membros.length })}</small>
+          <small>{s.topico ? `${s.topico.visibilidade === 'privado' ? t('conversas.sala.topico.privado') : t('conversas.sala.topico.compartilhado')} · ${t('conversas.sala.topico.de', { sala: s.topico.paiNome })}` : t('conversas.sala.membrosN', { n: s.membros.length })}</small>
         </div>
+        {!painelTopico && (
+          <span className="sala-topicos">
+            <button type="button" className={`btn btn--sm btn--ghost sala-topicos__botao ${(topicos.data ?? []).some((x) => x.naoLidas) ? 'is-unread' : ''}`} aria-expanded={listaTopicos} onClick={() => setListaTopicos((x) => !x)}>
+              <Icon name="chat" size={14} /> <span className="sala-topicos__rotulo">{t('conversas.sala.topico.titulo')}</span>{!!topicos.data?.filter((x) => !x.arquivado).length && <span className="sala-topicos__n">{topicos.data.filter((x) => !x.arquivado).length}</span>}
+            </button>
+            {listaTopicos && (
+              <div className="scampo__sugestoes sala-topicos__lista" role="menu" aria-label={t('conversas.sala.topico.titulo')}>
+                {!s.arquivada && <button type="button" role="menuitem" className="sala-topicos__novo" onClick={() => { setListaTopicos(false); setNovoTopico({ origem: null }); }}><Icon name="plus" size={13} /><b>{t('conversas.sala.topico.novo')}</b></button>}
+                {!topicos.data?.length && <span className="muted small sala-topicos__vazio">{t('conversas.sala.topico.vazio')}</span>}
+                {(topicos.data ?? []).filter((x) => !x.arquivado).map((x) => <LinhaTopico key={x.id} x={x} on={x.id === topico} onAbrir={() => { setListaTopicos(false); setTopico(x.id); }} />)}
+                {(topicos.data ?? []).some((x) => x.arquivado) && <span className="sala-topicos__sep small muted">{t('conversas.sala.topico.arquivados')}</span>}
+                {(topicos.data ?? []).filter((x) => x.arquivado).map((x) => <LinhaTopico key={x.id} x={x} on={x.id === topico} onAbrir={() => { setListaTopicos(false); setTopico(x.id); }} />)}
+              </div>
+            )}
+          </span>
+        )}
         <button type="button" className="sala__rostos" onClick={() => setMembros(true)} aria-label={t('conversas.sala.membros')} title={t('conversas.sala.membros')}>
           {agentesNaSala.slice(0, 3).map((m) => { const a = agenteDe(m.nome); return a ? <AgentAvatar key={m.chave} agent={{ ...a, name: a.nome, look_seed: null }} size={26} /> : null; })}
           {pessoasNaSala.slice(0, 3).map((m) => <Rosto key={m.chave} nome={m.nome} size={26} />)}
@@ -358,11 +392,12 @@ export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: ()
             <div className="convs__menu-list" role="menu">
               {s.admin && <button role="menuitem" onClick={() => { setMenu(false); setRenomeando(s.nome); }}><Icon name="pen" size={13} /> {t('conversas.sala.menu.renomear')}</button>}
               <button role="menuitem" onClick={() => { setMenu(false); setMembros(true); }}><Icon name="users" size={13} /> {t('conversas.sala.membros')}</button>
-              {s.admin && <button role="menuitem" onClick={() => void patch({ arquivada: !s.arquivada })}><Icon name="folder" size={13} /> {s.arquivada ? t('conversas.sala.menu.desarquivar') : t('conversas.sala.menu.arquivar')}</button>}
-              <button role="menuitem" onClick={async () => { setMenu(false); try { await api.post(`/api/salas/${salaId}/sair`); onSaiu(); } catch (e) { setErr(errMsg(e)); } }}><Icon name="logout" size={13} /> {t('conversas.sala.menu.sair')}</button>
+              {s.admin && <button role="menuitem" onClick={() => void patch({ arquivada: !s.arquivada })}><Icon name="folder" size={13} /> {s.topico ? (s.arquivada ? t('conversas.sala.topico.reabrir') : t('conversas.sala.topico.arquivar')) : s.arquivada ? t('conversas.sala.menu.desarquivar') : t('conversas.sala.menu.arquivar')}</button>}
+              {s.topico?.visibilidade !== 'compartilhado' && <button role="menuitem" onClick={async () => { setMenu(false); try { await api.post(`/api/salas/${salaId}/sair`); onSaiu(); } catch (e) { setErr(errMsg(e)); } }}><Icon name="logout" size={13} /> {t('conversas.sala.menu.sair')}</button>}
             </div>
           )}
         </div>
+        {painelTopico && onFechar && <button type="button" className="icon-btn" onClick={onFechar} aria-label={t('conversas.sala.topico.fechar')} title={t('conversas.sala.topico.fechar')}><Icon name="x" /></button>}
       </header>
       <div className="chat__msgs sala__msgs" aria-live="polite">
         {!lista.some((m) => m.role !== 'system') && <p className="muted center sala__vazia">{t('conversas.sala.vazia')}</p>}
@@ -389,7 +424,11 @@ export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: ()
                     <Icon name={f.estado === 'remoto' ? 'download' : f.estado === 'baixando' ? 'clock' : 'file'} size={14} />{f.filename}{f.estado !== 'remoto' && <small className="muted">{f.estado === 'grande' ? t('conversas.sala.anexo.grande') : t('conversas.sala.anexo.baixando')}</small>}
                   </button>))}</div>}
                 {!!m.attachments?.length && <div className="smsg__anexos">{m.attachments.map((f) => <a key={f.id} className="fchip" href={`/api/artifacts/${f.id}/download`} target="_blank" rel="noreferrer"><Icon name="file" size={14} />{f.filename}</a>)}</div>}
-                {!leitura && <button type="button" className="smsg__acao linkish small" onClick={() => void tarefa(m)} title={t('conversas.sala.tarefa')}><Icon name="tasks" size={12} /> {t('conversas.sala.tarefa')}</button>}
+                {m.topico && <button type="button" className={`sala-topico-chip ${m.topico.arquivado ? 'is-arquivado' : ''}`} onClick={() => setTopico(m.topico!.id)}><Icon name={m.topico.privado ? 'lock' : 'chat'} size={13} />{t('conversas.sala.topico.chip', { nome: m.topico.nome, n: m.topico.respostas })}</button>}
+                <span className="smsg__acoes">
+                  {!painelTopico && !s.topico && !m.topico && !s.arquivada && <button type="button" className="linkish small" onClick={() => setNovoTopico({ origem: m })}><Icon name="chat" size={12} /> {t('conversas.sala.topico.deMensagem')}</button>}
+                  {!leitura && <button type="button" className="linkish small" onClick={() => void tarefa(m)} title={t('conversas.sala.tarefa')}><Icon name="tasks" size={12} /> {t('conversas.sala.tarefa')}</button>}
+                </span>
               </div>
             </article>
           );
@@ -430,6 +469,69 @@ export function SalaPanel({ salaId, onSaiu, foco }: { salaId: string; onSaiu: ()
         </div>
       )}
       {membros && <Membros sala={s} onClose={() => { setMembros(false); det.reload(); }} />}
+      {novoTopico && <NovoTopico sala={s} origem={novoTopico.origem} onClose={() => setNovoTopico(null)} onCriado={(id) => { setNovoTopico(null); topicos.reload(); msgs.reload(); setTopico(id); }} />}
+    </div>
+  );
+  if (painelTopico || !topico) return corpo;
+  return (
+    <div className="sala-dupla">
+      {corpo}
+      <aside className="sala-dupla__topico" aria-label={t('conversas.sala.topico.titulo')}>
+        <SalaPanel key={topico} salaId={topico} painelTopico foco={foco} onFechar={() => setTopico(null)} onSaiu={() => setTopico(null)} />
+      </aside>
+    </div>
+  );
+}
+
+function LinhaTopico({ x, on, onAbrir }: { x: TopicoLinha; on: boolean; onAbrir: () => void }) {
+  const t = useT();
+  return (
+    <button type="button" role="menuitem" className={`${on ? 'is-on' : ''} ${x.arquivado ? 'is-arquivado' : ''}`} onClick={onAbrir}>
+      <Icon name={x.privado ? 'lock' : 'chat'} size={13} /><b>{x.nome}</b>
+      <small className="muted">{t('conversas.sala.topico.respostas', { n: x.respostas })}</small>
+      {x.naoLidas > 0 && <span className="unread">{x.naoLidas > 9 ? '9+' : x.naoLidas}</span>}
+    </button>
+  );
+}
+
+/** Abrir um tópico: o nome (da mensagem, se veio dela), compartilhado ou privado, e quem entra no privado. */
+function NovoTopico({ sala, origem, onClose, onCriado }: { sala: Detalhe; origem: Msg | null; onClose: () => void; onCriado: (id: string) => void }) {
+  const t = useT();
+  const ref = useRef<HTMLFormElement>(null);
+  useSurface(ref, { onClose, modal: true, outside: true });
+  const [nome, setNome] = useState(() => (origem ? origem.content.replace(/\s+/g, ' ').trim().slice(0, 60) : ''));
+  const [vis, setVis] = useState<'compartilhado' | 'privado'>('compartilhado');
+  const [quem, setQuem] = useState<Set<string>>(new Set());
+  const [err, setErr] = useState<string | null>(null);
+  const [indo, setIndo] = useState(false);
+  const outros = sala.membros.filter((m) => m.chave !== sala.eu);
+  return (
+    <div className="awin-back">
+      <form ref={ref} className="awin sala-dialogo" role="dialog" aria-modal="true" aria-label={t('conversas.sala.topico.novo')}
+        onSubmit={async (e) => { e.preventDefault(); if (indo || !nome.trim()) return; setIndo(true); setErr(null);
+          const sel = outros.filter((m) => quem.has(`${m.tipo}:${m.chave}`));
+          try { const r = await api.post<{ id: string }>(`/api/salas/${sala.id}/topicos`, { nome: nome.trim(), visibilidade: vis, ...(origem ? { origem: origem.id } : {}),
+            ...(vis === 'privado' ? { pessoas: sel.filter((m) => m.tipo === 'pessoa').map((m) => m.chave), agentes: sel.filter((m) => m.tipo === 'agente').map((m) => m.chave) } : {}) }); onCriado(r.id); }
+          catch (x) { setErr(errMsg(x)); setIndo(false); } }}>
+        <header className="sala-dialogo__head"><b>{t('conversas.sala.topico.novo')}</b><button type="button" className="icon-btn" onClick={onClose} aria-label={t('conversas.sala.criar.cancelar')}><Icon name="x" /></button></header>
+        {origem && <blockquote className="sala-topico__origem"><b>{origem.autor.nome}</b> {origem.content.replace(/\s+/g, ' ').slice(0, 160)}</blockquote>}
+        <label className="field"><span>{t('conversas.sala.topico.nome')}</span><input autoFocus value={nome} maxLength={80} onChange={(e) => setNome(e.target.value)} /></label>
+        <div className="sala-gov__opcoes" role="radiogroup" aria-label={t('conversas.sala.topico.titulo')}>
+          {(['compartilhado', 'privado'] as const).map((k) => <button key={k} type="button" role="radio" aria-checked={vis === k} className={`chip ${vis === k ? 'chip--on' : ''}`} onClick={() => setVis(k)}><Icon name={k === 'privado' ? 'lock' : 'users'} size={13} />{k === 'privado' ? t('conversas.sala.topico.privado') : t('conversas.sala.topico.compartilhado')}</button>)}
+        </div>
+        {vis === 'privado' && (
+          <fieldset className="sala-escolha"><legend>{t('conversas.sala.topico.quem')}</legend>
+            {outros.map((m) => { const k = `${m.tipo}:${m.chave}`; return (
+              <button key={k} type="button" className={`chip ${quem.has(k) ? 'chip--on' : ''}`} aria-pressed={quem.has(k)} onClick={() => setQuem((x) => { const n = new Set(x); if (n.has(k)) n.delete(k); else n.add(k); return n; })}>
+                {m.tipo === 'agente' ? <Icon name="chat" size={12} /> : <Rosto nome={m.nome} size={18} />}{m.nome}</button>); })}
+          </fieldset>
+        )}
+        {err && <p className="error small" role="alert">{err}</p>}
+        <footer className="sala-dialogo__acoes">
+          <button type="button" className="btn btn--ghost" onClick={onClose}>{t('conversas.sala.criar.cancelar')}</button>
+          <button type="submit" className="btn btn--primary" disabled={!nome.trim() || indo}>{t('conversas.sala.topico.criar')}</button>
+        </footer>
+      </form>
     </div>
   );
 }

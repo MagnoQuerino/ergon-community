@@ -3498,3 +3498,32 @@ details.cx[open] > summary { color: var(--ink); }
 .sala-remoto:disabled { cursor: default; }
 .sala-remoto small { margin-left: 4px; }
 @media (prefers-reduced-motion: no-preference) { .sala-remoto--baixando svg { animation: pulse 1.6s ease-in-out infinite; } }
+
+/* ——— Tópicos (rc.42): conversa paralela dentro da sala; abre ao lado (no celular, na tela inteira) ——— */
+.sala-dupla { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 44%); }
+.sala-dupla > .sala { min-width: 0; }
+.sala-dupla__topico { min-width: 0; min-height: 0; display: flex; border-left: 1px solid var(--line); background: var(--panel); }
+.sala--topico { background: var(--panel-2); }
+.sala--topico .sala__icone { background: var(--marca-suave); color: var(--marca-texto); border-color: var(--marca-borda); }
+.sala-topicos { position: relative; display: inline-flex; }
+.sala-topicos__botao { display: inline-flex; align-items: center; gap: 4px; }
+.sala-topicos__botao.is-unread { box-shadow: inset 0 0 0 1.5px var(--agua-borda-forte); }
+.sala-topicos__n { min-width: 18px; height: 18px; border-radius: 999px; display: inline-grid; place-items: center; background: var(--marca-suave); color: var(--marca-texto); font-size: 12px; padding: 0 5px; }
+.sala-topicos__lista { top: calc(100% + 6px); bottom: auto; right: 0; left: auto; width: min(320px, calc(100vw - 32px)); max-width: none; min-width: 0; display: flex; flex-direction: column; max-height: 60vh; overflow: auto; }
+.sala-topicos__lista button.is-arquivado b { font-weight: 500; color: var(--muted); }
+.sala-topicos__lista button small { margin-left: auto; white-space: nowrap; }
+.sala-topicos__sep, .sala-topicos__vazio { padding: 6px 8px 2px; }
+.sala-topico-chip { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--marca-borda); background: var(--marca-suave-2); color: var(--marca-texto); cursor: pointer; font: inherit; font-size: 13px; }
+.sala-topico-chip:hover { border-color: var(--marca-borda-forte); }
+.sala-topico-chip.is-arquivado { border-style: dashed; }
+.smsg__acoes { position: absolute; top: 4px; right: 8px; visibility: hidden; display: inline-flex; gap: 8px; }
+.smsg:hover .smsg__acoes, .smsg:focus-within .smsg__acoes { visibility: visible; }
+@media (hover: none) { .smsg__acoes { visibility: visible; position: static; margin-top: 4px; } }
+.smsg__acoes .linkish { display: inline-flex; align-items: center; gap: 4px; }
+.sala-topico__origem { margin: 0; padding: 8px 10px; border-left: 3px solid var(--marca-borda-forte); background: var(--panel-2); border-radius: 6px; font-size: 13px; color: var(--muted); }
+@media (max-width: 1100px) { .sala-topicos__rotulo { display: none; } }
+@media (max-width: 760px) {
+  .sala-dupla { display: flex; }
+  .sala-dupla__topico { position: fixed; inset: 0; z-index: 30; border-left: 0; }
+}
+@media (max-width: 760px) { .sala-topicos__lista { position: fixed; top: 96px; left: 16px; right: 16px; width: auto; } }

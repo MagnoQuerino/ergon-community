@@ -385,7 +385,7 @@ export class Salas {
         convId, ws, sala.agent_id, userId, this.db.seal(ws, nome), `ergon:${ws}:sala:${convId}`, at, at, at, salaId, b.visibilidade, origem?.id ?? null);
       this.db.run("INSERT INTO salas_membros (conversation_id, workspace_id, tipo, chave, nome, admin, added_at) VALUES (?, ?, 'pessoa', ?, ?, 1, ?)", convId, ws, eu, this.nomeDaChave(ws, salaId, eu), at);
       for (const m of [...pessoas, ...agentes]) this.db.run('INSERT INTO salas_membros (conversation_id, workspace_id, tipo, chave, nome, admin, added_at) VALUES (?, ?, ?, ?, ?, 0, ?)', convId, ws, m.tipo, m.chave, m.nome, at);
-      this.evento(ws, convId, { evento: 'criou', nome: this.nomeDaChave(ws, salaId, eu) });
+      this.evento(ws, convId, { evento: 'topico', nome: this.nomeDaChave(ws, salaId, eu), alvo: nome });
       if (b.visibilidade === 'compartilhado') { this.evento(ws, salaId, { evento: 'topico', nome: this.nomeDaChave(ws, salaId, eu), alvo: nome }); this.tocar(salaId); }
     });
     audit(this.db, this.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'sala.topico.criado', targetType: 'conversation', targetId: convId,
