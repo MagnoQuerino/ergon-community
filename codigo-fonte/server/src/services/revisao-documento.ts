@@ -215,15 +215,18 @@ export class RevisaoDocumento {
   private lancar(ws: string, r: RevRow): void {
     const fs = this.frentes(r.id);
     const trechos = this.trechos(r);
+    // um agente, um trecho por vez: as outras frentes dele esperam (o avatar muda de trecho quando ele termina)
+    const ocupados = new Set(fs.filter((f) => f.estado === 'trabalhando').map((f) => f.agent_id));
     for (const f of fs) {
-      if (f.estado !== 'espera') continue;
-      if (f.acao !== 'conferir') { this.delegar(ws, r, f, JSON.parse(f.blocos) as number[], trechos); continue; }
+      if (f.estado !== 'espera' || ocupados.has(f.agent_id)) continue;
+      if (f.acao !== 'conferir') { ocupados.add(f.agent_id); this.delegar(ws, r, f, JSON.parse(f.blocos) as number[], trechos); continue; }
       const outras = fs.filter((x) => x.id !== f.id);
       const livres = liberadosAPartir(trechos.length, f.conferido_ate, this.reservados(outras), undefined, (i) => trechos[i]?.length ?? 0);
       const comTexto = livres.filter((i) => trechos[i]?.trim());
       if (!livres.length) continue;
       if (!comTexto.length) { this.db.run('UPDATE doc_revisao_frentes SET conferido_ate = ?, updated_at = ? WHERE id = ?', livres[livres.length - 1] + 1, now(), f.id); continue; }
       this.db.run('UPDATE doc_revisao_frentes SET passada = ? WHERE id = ?', JSON.stringify(livres), f.id);
+      ocupados.add(f.agent_id);
       this.delegar(ws, r, f, livres, trechos);
     }
     this.fecharSePronto(ws, r.id);

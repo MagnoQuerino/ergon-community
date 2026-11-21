@@ -173,16 +173,24 @@ describe('entregáveis: documento, PDF, identidade, modelos e revisão ao vivo',
     // o revisor espera: os trechos de cima estão reservados
     const conf = st.ativa.frentes.find((f: { acao: string }) => f.acao === 'conferir');
     if (conf) assert.equal(conf.estado, 'espera');
-    // terminam em ordem inversa: cada uma troca só os seus trechos
+    // terminam em ordem inversa: cada uma troca só os seus trechos; as frentes seguintes do mesmo agente começam depois
     const marcas: string[] = [];
-    for (const p of [...rodando].reverse()) {
-      const f = frenteDoRun(p.runId);
-      if (!f || f.acao === 'conferir') continue;
-      const marca = `EDITADO-${f.id.slice(-6)}`;
-      marcas.push(marca);
-      motor.finish(p.runId, resposta(`Trecho revisado ${marca}.`));
-      await drain(h, 3);
+    const vistos = new Set<string>();
+    for (let volta = 0; volta < 10; volta++) {
+      const abertos = motor.started.slice(antes).filter((p) => motor.runs.get(p.runId)?.status === 'running' && frenteDoRun(p.runId) && frenteDoRun(p.runId)!.acao !== 'conferir');
+      if (!abertos.length) break;
+      const porAgente = new Set(abertos.map((p) => frenteDoRun(p.runId)!.agent_id));
+      assert.equal(porAgente.size, abertos.length, 'um agente, um trecho por vez');
+      for (const p of [...abertos].reverse()) {
+        const f = frenteDoRun(p.runId)!;
+        vistos.add(f.id);
+        const marca = `EDITADO-${f.id.slice(-6)}`;
+        marcas.push(marca);
+        motor.finish(p.runId, resposta(`Trecho revisado ${marca}.`));
+        await drain(h, 3);
+      }
     }
+    assert.ok(vistos.size >= 2);
     st = (await req(h, 'GET', `/api/artifacts/${art}/revisao`, s)).json;
     let doc = (await req(h, 'GET', `/api/artifacts/${art}/documento`, s)).json.texto as string;
     for (const m of marcas) assert.ok(doc.includes(m), `a edição ${m} ficou`);

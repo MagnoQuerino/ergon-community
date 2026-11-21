@@ -45,7 +45,7 @@ const perfil = (c: Colega) => fold(`${c.role} ${c.skey ?? ''} ${(c.skills ?? [])
 const QUEM: Record<Especialidade | 'revisor', RegExp> = {
   codigo: /(desenvolv|program|codigo|software|engenh|devops|\bti\b|tecnolog|dados)/,
   juridico: /(jurid|advog|legal|contrat|compliance|direito)/,
-  texto: /(reda|escrit|conteud|comunica|texto|copy|marketing|jornal)/,
+  texto: /(reda|escrit|conteud|texto|copy|jornal|editoria)/,
   revisor: /(revis|qualidade|confer|editor|auditor)/,
 };
 
@@ -64,7 +64,9 @@ export function planejar(trechos: readonly string[], pedido: string, equipe: rea
   const time = equipe.filter((c) => !c.coordinator);
   if (!time.length || !trechos.length) return [];
   const acao = acaoDoPedido(pedido);
-  const achar = (k: keyof typeof QUEM, exceto: string[] = []) => time.find((c) => !exceto.includes(c.id) && QUEM[k].test(perfil(c)));
+  // o cargo vale antes das competências (quem é "Produção de texto" ganha de quem só cita texto nas competências)
+  const achar = (k: keyof typeof QUEM, exceto: string[] = []) => time.find((c) => !exceto.includes(c.id) && QUEM[k].test(fold(c.role)))
+    ?? time.find((c) => !exceto.includes(c.id) && QUEM[k].test(perfil(c)));
   const redator = time.find((c) => c.id === opts.autorId) ?? achar('texto') ?? time[0];
   if (opts.selecionados?.length) {
     const sel = [...new Set(opts.selecionados)].filter((i) => i >= 0 && i < trechos.length).sort((a, b) => a - b);

@@ -63,11 +63,11 @@ export function registerEntregaveisRoutes(app: FastifyInstance, d: Deps): void {
 
   // PDF com o modelo do documento (ou ?modelo= para a prévia de outro); ?inline=1 abre no navegador
   app.get('/api/artifacts/:id/pdf', {
-    schema: { params: idParams('art'), querystring: { type: 'object', properties: { modelo: MODELO_ID, inline: { type: 'string', enum: ['1'] } } } },
+    schema: { params: idParams('art'), querystring: { type: 'object', properties: { modelo: MODELO_ID, inline: { type: 'string', enum: ['1'] }, semLogo: { type: 'string', enum: ['1'] } } } },
   }, async (req, reply) => {
     const a = auth(req);
-    const q = req.query as { modelo?: string; inline?: string };
-    const out = pdfDoArquivo(db, cfg.filesDir, a.workspaceId, artId(req), q.modelo ?? null);
+    const q = req.query as { modelo?: string; inline?: string; semLogo?: string };
+    const out = pdfDoArquivo(db, cfg.filesDir, a.workspaceId, artId(req), q.modelo ?? null, q.semLogo === '1');
     return pdfReply(reply, out.data, out.filename, q.inline === '1');
   });
 

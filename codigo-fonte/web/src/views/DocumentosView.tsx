@@ -6,6 +6,8 @@ import { useHashParam } from '../lib/route.ts';
 import { cardClick } from '../lib/cardClick.ts';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { Icon } from '../components/Icon.tsx';
+import { Markdown } from '../components/Markdown.tsx';
+import { Documento } from '../components/Documento.tsx';
 import { fmtData, useIdioma, useT } from '../i18n/index.ts';
 import { CenaVazio } from '../arte/Cena.tsx';
 
@@ -75,6 +77,8 @@ function PreviewPane({ f, onClose, onRename, onMove, onTrash, folders }: {
   const t = useT();
   const pv = useResource<Preview>(inlinePreview(f.mime) ? null : `/api/artifacts/${f.id}/preview`, []);
   const [name, setName] = useState<string | null>(null);
+  const [aberto, setAberto] = useState(false);
+  const md = f.mime === 'text/markdown' || /\.(md|markdown)$/i.test(f.filename);
   const url = `/api/artifacts/${f.id}/download`;
   return (
     <aside className="dpreview" aria-label={t('documentos.previa.de', { nome: f.filename })}>
@@ -96,11 +100,14 @@ function PreviewPane({ f, onClose, onRename, onMove, onTrash, folders }: {
             <div key={s.name} className="md__table"><b className="small">{s.name}</b>
               <table><tbody>{s.rows.map((r, i) => <tr key={i}>{r.map((c, j) => (i === 0 ? <th key={j}>{c}</th> : <td key={j}>{c}</td>))}</tr>)}</tbody></table>
             </div>))
+          : pv.data.kind === 'text' && md ? <button type="button" className="dpreview__doc" onClick={() => setAberto(true)} aria-label={t('documentos.abrir')}><Markdown text={pv.data.text ?? ''} className="dpreview__md" /></button>
           : pv.data.kind === 'text' ? <pre className="dpreview__text">{pv.data.text}</pre>
           : <p className="muted">{pv.data.detail ? t('documentos.previa.semPreviaDetalhe', { detalhe: pv.data.detail }) : t('documentos.previa.semPrevia')}</p>}
       </div>
       <div className="dpreview__acts">
-        <a className="btn btn--sm btn--primary" href={url} download={f.filename}><Icon name="download" size={13} /> {t('documentos.previa.baixar')}</a>
+        {md && <button type="button" className="btn btn--sm btn--primary" onClick={() => setAberto(true)}><Icon name="eye" size={13} /> {t('documentos.abrir')}</button>}
+        {aberto && <Documento fonte={{ artifactId: f.id, tamanho: f.size }} onClose={() => setAberto(false)} />}
+        <a className={`btn btn--sm ${md ? '' : 'btn--primary'}`} href={url} download={f.filename}><Icon name="download" size={13} /> {t('documentos.previa.baixar')}</a>
         <button type="button" className="btn btn--sm" onClick={() => setName(f.filename.replace(/\.[^.]+$/, ''))}><Icon name="pen" size={13} /> {t('documentos.renomear')}</button>
         <select className="dpreview__move" value="" onChange={(e) => e.target.value && onMove(e.target.value)} aria-label={t('documentos.moverPara')}>
           <option value="">{t('documentos.moverParaOpcao')}</option>

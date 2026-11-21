@@ -51,8 +51,10 @@ function segs(c: Inline[], b = false, i = false, link?: string): Seg[] {
       case 'img': break;
     }
   }
-  return out.map((s) => ({ ...s, text: pdfSafe(s.text.replace(/\t/g, '    ')) })).filter((s) => s.text);
+  return out.map((s) => ({ ...s, text: seguro(s.text) })).filter((s) => s.text);
 }
+/** pdfSafe linha a linha: a quebra de linha fica (pdfSafe tira os controles, e a quebra é um deles) */
+const seguro = (t: string) => t.split('\n').map((l) => pdfSafe(l.replace(/\t/g, '    '))).join('\n');
 const plain = (c: Inline[]) => segs(c).map((s) => s.text).join('');
 
 /** O emblema do Ergon em vetor (a mesma geometria da tela), com `h` pontos de altura. */
@@ -119,6 +121,8 @@ export function documentoPdf(e: EntradaPdf): Buffer {
       const lead = todos[k].text.match(/^ +/)?.[0];
       if (lead && !todos[k - 1].text.endsWith('\n')) { todos[k].text = todos[k].text.slice(lead.length); todos[k - 1].text += ' '; }
     }
+    // a quebra de linha sozinha num pedaço some no PDFKit: vai no começo do pedaço seguinte
+    for (let k = 0; k < todos.length - 1; k++) if (todos[k].text === '\n') { todos[k + 1].text = `\n${todos[k + 1].text}`; todos[k].text = ''; }
     const list = todos.filter((s) => s.text);
     if (!list.length) return;
     const sz = o.sz ?? size;
@@ -189,7 +193,7 @@ export function documentoPdf(e: EntradaPdf): Buffer {
   };
 
   const code = (b: Extract<Block, { t: 'code' }>) => {
-    const txt = pdfSafe(b.v.replace(/\t/g, '    '));
+    const txt = seguro(b.v);
     doc.font('Courier').fontSize(size * 0.82);
     for (const parte of txt.split('\n').reduce<string[][]>((acc, l) => { const cur = acc[acc.length - 1]; if (cur.length >= 40) acc.push([l]); else cur.push(l); return acc; }, [[]])) {
       const t = parte.join('\n') || ' ';

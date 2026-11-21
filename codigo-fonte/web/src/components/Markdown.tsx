@@ -4,7 +4,7 @@ import { t, useIdioma } from '../i18n/index.ts';
 import { Icon } from './Icon.tsx';
 
 /** Inline → elementos (o texto sempre como texto: o React escapa). */
-function inl(c: Inline[], key = ''): ReactNode[] {
+export function inl(c: Inline[], key = ''): ReactNode[] {
   return c.map((x, i) => {
     const k = `${key}${i}`;
     switch (x.t) {

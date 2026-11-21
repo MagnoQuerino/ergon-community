@@ -181,18 +181,21 @@ function imagemDoWorkspace(db: Db, filesDir: string | null, ws: string) {
 }
 
 /** PDF de um texto Markdown com a identidade do workspace e o modelo pedido (ou o padrão). */
-export function pdfDeTexto(db: Db, ws: string, md: string, titulo: string, modelo: ModeloDoc | null, filesDir: string | null = null): Buffer {
-  const m = modelo ?? modelos(db, ws).modelos.find((x) => x.id === modelos(db, ws).padrao) ?? MODELOS_ORIGINAIS[0];
-  return documentoPdf({ markdown: md, titulo: tituloDoDocumento(md, titulo), identidade: identidade(db, ws), modelo: m, logo: logoDe(db, ws)?.data ?? null, imagem: imagemDoWorkspace(db, filesDir, ws) });
+export function pdfDeTexto(db: Db, ws: string, md: string, titulo: string, modelo: ModeloDoc | null, filesDir: string | null = null, semLogo = false): Buffer {
+  const todos = modelos(db, ws);
+  const m = modelo ?? todos.modelos.find((x) => x.id === todos.padrao) ?? MODELOS_ORIGINAIS[0];
+  const id = identidade(db, ws);
+  return documentoPdf({ markdown: md, titulo: tituloDoDocumento(md, titulo), identidade: semLogo ? { ...id, mostrarErgon: false } : id, modelo: m,
+    logo: semLogo ? null : logoDe(db, ws)?.data ?? null, imagem: imagemDoWorkspace(db, filesDir, ws) });
 }
 
 /** PDF de um .md de Documentos: o modelo dele (ou outro, para a prévia). */
-export function pdfDoArquivo(db: Db, filesDir: string, ws: string, artifactId: string, modeloRef?: string | null): { data: Buffer; filename: string } {
+export function pdfDoArquivo(db: Db, filesDir: string, ws: string, artifactId: string, modeloRef?: string | null, semLogo = false): { data: Buffer; filename: string } {
   const f = openArtifact(db, filesDir, ws, artifactId);
   if (!ehMarkdown(f.filename, f.mime)) throw new HttpError(415, 'nao_markdown', 'Só documentos .md viram PDF por aqui.');
   const m = (modeloRef ? acharModelo(db, ws, modeloRef) : null) ?? modeloDoArquivo(db, ws, artifactId);
   const md = f.data.toString('utf8');
-  return { data: pdfDeTexto(db, ws, md, f.filename, m, filesDir), filename: f.filename.replace(/\.(md|markdown)$/i, '') + '.pdf' };
+  return { data: pdfDeTexto(db, ws, md, f.filename, m, filesDir, semLogo), filename: f.filename.replace(/\.(md|markdown)$/i, '') + '.pdf' };
 }
 
 export const ehMarkdown = (filename: string, mime: string): boolean => mime === 'text/markdown' || /\.(md|markdown)$/i.test(filename);

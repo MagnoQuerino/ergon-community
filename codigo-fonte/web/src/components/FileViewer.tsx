@@ -5,13 +5,13 @@ import { useSurface } from '../lib/surface.ts';
 import { size } from '../lib/files.ts';
 import { previaDe } from '../lib/tarefa-tela.ts';
 import { Icon } from './Icon.tsx';
-import { Markdown } from './Markdown.tsx';
+import { Documento } from './Documento.tsx';
 import { useT } from '../i18n/index.ts';
 
 interface Preview { kind: 'text' | 'sheet' | 'inline' | 'none'; text?: string; detail?: string | null; sheets?: Array<{ name: string; rows: string[][] }> }
 
 /**
- * "Ver" um arquivo sem sair da tarefa: um diálogo por cima. O .md aparece formatado (Markdown seguro, sem HTML), o texto
+ * "Ver" um arquivo sem sair da tarefa: um diálogo por cima. O .md abre como documento (components/Documento.tsx), o texto
  * como texto, o .csv como tabela, a imagem e o PDF como o navegador mostra. O conteúdo vem da rota de arquivos, com o seu
  * acesso; Word, Excel e o resto só baixam (a tarefa não abre esses aqui).
  *
@@ -19,6 +19,12 @@ interface Preview { kind: 'text' | 'sheet' | 'inline' | 'none'; text?: string; d
  * ficava preso a ele, e a barra do topo e o botão da conversa apareciam por cima do diálogo.
  */
 export function FileViewer({ file, onClose }: { file: { id: string; filename: string; mime: string; size: number }; onClose: () => void }) {
+  // .md: o documento formatado, com modelo, PDF, versões e revisão (rc.42)
+  if (previaDe(file.filename, file.mime) === 'markdown') return <Documento fonte={{ artifactId: file.id, tamanho: file.size }} onClose={onClose} />;
+  return <Visualizador file={file} onClose={onClose} />;
+}
+
+function Visualizador({ file, onClose }: { file: { id: string; filename: string; mime: string; size: number }; onClose: () => void }) {
   const t = useT();
   const ref = useRef<HTMLElement>(null);
   useSurface(ref, { onClose, modal: true, outside: true });
@@ -41,7 +47,7 @@ export function FileViewer({ file, onClose }: { file: { id: string; filename: st
         </div>
       ));
     }
-    if (pv.data.kind === 'text' && pv.data.text) return tipo === 'markdown' ? <Markdown text={pv.data.text} className="fview__md" /> : <pre className="fview__text">{pv.data.text}</pre>;
+    if (pv.data.kind === 'text' && pv.data.text) return <pre className="fview__text">{pv.data.text}</pre>;
     return <p className="muted">{pv.data.detail ? t('geral.arquivo.semPreviaDetalhe', { detalhe: pv.data.detail }) : t('geral.arquivo.semPrevia')}</p>;
   };
   return createPortal(
