@@ -71,6 +71,8 @@ const servidor: TraducaoParcial<typeof pt> = {
   'consumo.nota.credits': 'क्रेडिट वाला खाता: प्रदाता के बताए शुल्क पर लागत दिखती है; शेष राशि खाते के पोर्टल में है।',
   'consumo.nota.api': 'API कुंजी: प्रदाता हर रन का शुल्क बताता है तब लागत दिखती है।',
   'consumo.nota.none': 'कोई AI खाता कनेक्ट नहीं: टीम अनुरोधों पर काम नहीं करती, कोई खपत नहीं।',
+  'tela.volta.canceladoZoho': "Zoho साइन-इन रद्द हुआ।",
+  'tela.volta.naoConcluiuZoho': "Zoho साइन-इन पूरा नहीं हो सका। फिर से कोशिश करें।",
 };
 
 export default servidor;

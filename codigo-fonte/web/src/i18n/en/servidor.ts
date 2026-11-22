@@ -172,6 +172,8 @@ const servidor: Traducao<typeof pt> = {
   'tela.volta.canceladoGoogle': 'Google sign-in canceled.',
   'tela.volta.naoConcluiuMicrosoft': 'Couldn\'t finish the Microsoft sign-in. Please try again.',
   'tela.volta.naoConcluiuGoogle': 'Couldn\'t finish the Google sign-in. Please try again.',
+  'tela.volta.canceladoZoho': "Zoho sign-in canceled.",
+  'tela.volta.naoConcluiuZoho': "Couldn't finish the Zoho sign-in. Please try again.",
   'tela.admin.canais': 'read messages in Teams channels',
   'tela.admin.base': 'send and read email, see the calendar, create and read files, organize tasks, and send and read messages in Teams',
   'tela.admin.trabalho': 'see chats and send messages in Teams, and read email, calendar, files, tasks and Teams chats',

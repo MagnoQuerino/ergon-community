@@ -28,6 +28,11 @@ const MONOGRAM: Record<string, { hex: string; letter: string }> = {
   // rc.46: WeCom e WeChat, também sem logo aberto aqui: a inicial na cor da marca
   wecom: { hex: '#0082EF', letter: 'W' },
   weixin: { hex: '#07C160', letter: 'W' },
+  // rc.48: a Índia; os logos abertos da Zoho e do Razorpay ficam para quando o Simple Icons entrar aqui, a inicial por ora
+  zoho: { hex: '#E42527', letter: 'Z' },
+  razorpay: { hex: '#0C2451', letter: 'R' },
+  freshsales: { hex: '#2C5CC5', letter: 'F' },
+  tally: { hex: '#1A5293', letter: 'T' },
 };
 
 export function BrandLogo({ kind, name, size = 40 }: { kind: string; name: string; size?: number }) {

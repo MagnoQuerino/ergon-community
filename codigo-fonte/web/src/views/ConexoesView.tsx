@@ -74,15 +74,15 @@ export function ConexoesView() {
   // já buscado por baixo ao abrir o app (App.tsx): as seções que dependem dele abrem prontas
   const cx = useResource<EstadoConexoes>('/api/conexoes', ['integrations.changed']);
   // a volta do login: o aviso depende de a conta já estar conectada (o botão que ele cita é outro), por isso sai na hora de mostrar
-  const [volta, setVolta] = useState<{ kind: 'microsoft' | 'google'; status: string } | null>(null);
+  const [volta, setVolta] = useState<{ kind: 'microsoft' | 'google' | 'zoho'; status: string } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [onlyOn, setOnlyOn] = useState(false);
   const [risks, setRisks] = useState(false);
   useEffect(() => {
-    const m = location.hash.match(/(microsoft|google)=([a-z-]+)/);
+    const m = location.hash.match(/(microsoft|google|zoho)=([a-z-]+)/);
     if (m) {
-      setVolta({ kind: m[1] === 'google' ? 'google' : 'microsoft', status: m[2] });
+      setVolta({ kind: m[1] === 'google' ? 'google' : m[1] === 'zoho' ? 'zoho' : 'microsoft', status: m[2] });
       setOpen(m[1]);
       history.replaceState(null, '', '#conexoes');
     }

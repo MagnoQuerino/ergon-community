@@ -102,7 +102,8 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
   });
   app.get('/api/integrations/:kind/callback', { schema: { params: ssoParam } }, async (req, reply) => {
     const kind = (req.params as { kind: SsoKind }).kind;
-    const q = req.query as { state?: string; code?: string; error?: string; error_description?: string; admin_consent?: string };
+    // rc.48: a Zoho diz na volta o data center da conta (accounts-server; sso.ts só aceita os da lista)
+    const q = req.query as { state?: string; code?: string; error?: string; error_description?: string; admin_consent?: string; 'accounts-server'?: string };
     const back = (status: string) => reply.redirect(`/#conexoes?${kind}=${encodeURIComponent(status)}`);
     // o que a tela mostra (marcas das etapas, last_error) é o motivo em português; o erro cru vai só para a evidência da auditoria
     const motivoDe = () => motivoDoProvedor(kind, q.error, q.error_description);
@@ -173,7 +174,7 @@ export function registerIntegrationRoutes(app: FastifyInstance, d: IntegrationRo
     try {
       // a conta de antes deste workspace: se entrar outra, as marcas das etapas dela (aprovado, bloqueado…) não valem mais
       const contaAntes = quem && kind === 'microsoft' ? integrations.secrets.read<{ account?: string }>(quem, kind, conta)?.account ?? null : null;
-      const r = await integrations.sso.finish(kind, String(q.state).slice(0, 200), String(q.code).slice(0, 4000));
+      const r = await integrations.sso.finish(kind, String(q.state).slice(0, 200), String(q.code).slice(0, 4000), kind === 'zoho' ? { accountsServer: q['accounts-server'] ? String(q['accounts-server']).slice(0, 200) : null } : {});
       // "Adicionar outra conta" entrou numa conta que já está aqui: a nova sai, e a de antes continua como estava
       if (r.conta && integrations.repetidaNoLogin(kind, r.workspaceId, r.conta, r.account)) {
         integrations.secrets.remove(r.workspaceId, kind, r.conta);

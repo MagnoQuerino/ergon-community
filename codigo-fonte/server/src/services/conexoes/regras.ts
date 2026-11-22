@@ -236,7 +236,7 @@ export function regraDaFrase(texto: string, ligadas: readonly string[]): RegraSe
   for (const [alias, k] of Object.entries(ALIAS)) if (new RegExp(`\\b${alias}\\b`).test(t)) nomeadas.add(k);
   for (const d of INTEGRATIONS) if (d.kind !== 'microsoft' && d.kind !== 'google' && new RegExp(`\\b${fold(d.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(t)) nomeadas.add(d.kind);
   if (!nomeadas.size && !CANAL.test(t)) return null;
-  const doEmail = ligadas.filter((k) => k === 'microsoft' || k === 'google');
+  const doEmail = ligadas.filter((k) => k === 'microsoft' || k === 'google' || k === 'zoho');
   const conexoes = nomeadas.size ? [...nomeadas] : so === 'email' ? (doEmail.length ? doEmail : ['microsoft', 'google']) : ['*'];
   const alcance: Alcance = /\b(?:sempre|a partir de agora|de agora em diante|daqui (?:pra|para) frente|daqui em diante|permanente\w*|always|from now on|going forward|from here on|permanently|forever)\b/.test(t) ? 'sempre'
     : /\b(?:hoje|24 ?h|24 horas|por um dia|ate amanha|today|for 24 ?hours|for a day|for the day|until tomorrow)\b/.test(t) ? '24h' : 'pedido';

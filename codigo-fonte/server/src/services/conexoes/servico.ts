@@ -14,7 +14,8 @@ import { recordProposals } from '../proposals.ts';
 import { workspaceTz } from '../routine-proposals.ts';
 import { sessionKeyFor, type RunDaSessao, type RunRow } from '../runs.ts';
 import { getSetting, setSetting } from '../sectors.ts';
-import { ETAPAS, STATE_TTL, contaPessoalMicrosoft, isSso, listaDeEscopos, proprioDaEtapa, type Etapa, type SsoKind } from '../sso.ts';
+import { ETAPAS, STATE_TTL, contaPessoalMicrosoft, ehZohoDc, isSso, listaDeEscopos, proprioDaEtapa, type Etapa, type SsoKind, type ZohoDc } from '../sso.ts';
+import { httpZoho } from './acoes/zoho.ts';
 import { pipefyAntigo, request } from '../task-providers.ts';
 import { transporteBytes } from './acoes/google.ts';
 import type { CtxMicrosoft } from './acoes/microsoft.ts';
@@ -438,6 +439,8 @@ export class Conexoes {
     }
     if (!isSso(kind)) return () => { throw new ErroAcao('esta conexão não usa login com a conta'); };
     const sso = this.d.integrations.sso;
+    // rc.48: a Zoho, no data center da conta (sso.ts guarda qual); o caminho relativo escolhe CRM, Books ou Mail
+    if (kind === 'zoho') return httpZoho(this.zohoDc(ws, conta), (renovar) => sso.accessToken(ws, kind, { force: renovar, conta }));
     const http: Http = async (url, init = {}) => {
       const call = (t: string) => request(url, { ...init, headers: { Authorization: `Bearer ${t}`, ...init.headers } });
       try { return await call(await sso.accessToken(ws, kind, { conta })); } catch (e) {
@@ -447,6 +450,11 @@ export class Conexoes {
     };
     // arquivos do Google trafegam em bytes, não em JSON
     return kind === 'google' ? Object.assign(http, { bytes: transporteBytes((renovar) => sso.accessToken(ws, kind, { force: renovar, conta })) }) : http;
+  }
+
+  private zohoDc(ws: string, conta = ''): ZohoDc {
+    const dc = this.d.integrations.secrets.read<{ dc?: string }>(ws, 'zoho', conta)?.dc;
+    return ehZohoDc(dc) ? dc : 'com';
   }
 
   /** Quem escreve neste aplicativo (também usado pelo espelho). O ajuste de cada ação, cada uma confere o seu (e o espelho, por operação). */
@@ -465,7 +473,7 @@ export class Conexoes {
     // código (rc.42): a concessão de git vale para este trabalho e esta conta, só no GitHub e no GitLab
     const git = (kind === 'github' || kind === 'gitlab') && run && this.d.git ? this.d.git.ponte(ws, run.id, run.agent_id, kind, conta) : undefined;
     const base: CtxMicrosoft = { workspaceId: ws, conta, tz: workspaceTz(this.db, ws), http: this.http(ws, kind, conta), ...(conectorDe(kind) ? { creds: this.d.integrations.secrets.read<Record<string, string>>(ws, kind, conta) ?? {} } : {}),
-      ...(tem ? { temEscopo: (e: string) => coberto(tem, e, true) } : {}), runId: run?.id ?? null, ...(git ? { git } : {}) };
+      ...(tem ? { temEscopo: (e: string) => coberto(tem, e, true) } : {}), ...(kind === 'zoho' ? { dc: this.zohoDc(ws, conta) } : {}), runId: run?.id ?? null, ...(git ? { git } : {}) };
     if (!integrationDef(kind)?.tasks) return base;
     const provedor = this.d.integrations.provider(ws, kind, conta);
     return {
