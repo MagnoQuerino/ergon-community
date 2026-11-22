@@ -232,10 +232,24 @@ export class Recursos {
     }
     return { ok: false, motivo: 'tempo' };
   }
-  async falar(ws: string, texto: string) { return this.ponte(ws, 'POST', 'voz/falar', { texto }); }
+  /** `perfil`: a voz do agente que fala (perfilDeVoz); sem ele, a voz escolhida em Configurações */
+  async falar(ws: string, texto: string, perfil?: number | null) { return this.ponte(ws, 'POST', 'voz/falar', { texto, ...(typeof perfil === 'number' ? { perfil } : {}) }); }
 }
 
 /** Revisão em conselho: o pedido que vai ao conselho de modelos (na conversa, como mensagem da pessoa). */
 export const PEDIDO_CONSELHO = 'Revisão em conselho: revise criticamente a sua última resposta nesta conversa. Aponte erros, lacunas e premissas não declaradas, diga o que mudaria e entregue a versão revisada.';
 /** Um áudio que dá para transcrever (o tipo do arquivo anexado). */
 export { ehAudio } from './transcricoes.ts';
+
+/**
+ * A voz de cada agente (rc.49): um número fixo por agente — a posição dele na equipe, pela ordem de chegada —, que a ponte
+ * transforma em voz, ritmo e tom (hermes/plugins/ergon_bridge, VOZES_PIPER e VOZES_EDGE). Os doze da equipe padrão saem
+ * todos diferentes; quem chega depois ganha o próximo.
+ */
+export function perfilDeVoz(db: Pick<Db, 'get'>, ws: string, agentId: string | null | undefined): number | null {
+  if (!agentId) return null;
+  const a = db.get<{ created_at: string }>('SELECT created_at FROM agents WHERE id = ? AND workspace_id = ?', agentId, ws);
+  if (!a) return null;
+  const antes = db.get<{ n: number }>('SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))', ws, a.created_at, a.created_at, agentId);
+  return Number(antes?.n ?? 0) % 1000;
+}

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { startTheme } from './lib/theme.ts';
 import { App } from './App.tsx';
 import './styles.css';
+import './conversa-barra.css';
 import './visuais/visuais.css';
 import { installElastic } from './lib/elastic.ts';
 import { rememberDesktopApp } from './lib/desktop.ts';

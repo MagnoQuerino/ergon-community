@@ -6,6 +6,7 @@ import { RECURSOS, type Conselho, type PontoDeVolta, type RecursosEstado, type V
 import { Icon } from './Icon.tsx';
 import { useAjustes } from './AjustesEquipe.tsx';
 import { fmtDataHora, useT } from '../i18n/index.ts';
+import { Bloco, Sobre } from './Bloco.tsx';
 
 /**
  * Configurações › Capacidades da equipe: tudo o que a equipe de IA sabe fazer além das ferramentas, num lugar só. O que é
@@ -23,6 +24,7 @@ export function CapacidadesPanel({ dono }: { dono: boolean }) {
       e.reload();
     } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); }
   };
+  const aj = useAjustes((x) => setMsg({ kind: 'error', text: x }));
   // motor fechado ou de antes: a seção diz por quê, sem botão esperando
   if (!e.data) return (
     <section className="card" id="capacidades">
@@ -31,14 +33,18 @@ export function CapacidadesPanel({ dono }: { dono: boolean }) {
     </section>
   );
   const s = e.data;
+  const nProt = [s.checkpoints, s.codigoInseguro, s.limpeza].filter(Boolean).length;
+  // a voz escolhida e o modelo da transcrição (servidor de antes: o que está pronto)
+  const vozResumo = aj.a?.vozFalar
+    ? t('configuracoes.cap.resumo.voz', { voz: aj.a.vozFalar === 'edge' ? 'edge-tts' : 'Piper', modelo: aj.a.vozModelo ?? 'base' }) // i18n-ok: nomes dos programas de voz
+    : s.voz.transcrever || s.voz.falar ? t('configuracoes.cap.resumo.pronto') : t('configuracoes.cap.resumo.aCaminho');
   return (
-    <>
-      <section className="card" id="capacidades">
-        <h3>{t('configuracoes.cap.titulo')}</h3>
-        <p className="muted small">{t('configuracoes.cap.texto')}</p>
-        {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
+    <section className="card cap-painel" id="capacidades">
+      <h3>{t('configuracoes.cap.titulo')}</h3>
+      <Sobre>{t('configuracoes.cap.texto')}</Sobre>
+      {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
 
-        <h4><Icon name="shield" size={14} /> {t('configuracoes.cap.protecoes.titulo')}</h4>
+      <Bloco id="cap-protecoes" icone="shield" titulo={t('configuracoes.cap.protecoes.titulo')} resumo={t('configuracoes.cap.resumo.protecoes', { n: nProt, total: 3 })}>
         <p className="muted small">{t('configuracoes.cap.protecoes.texto')}</p>
         <label className="check"><input type="checkbox" checked={s.checkpoints} disabled={!dono} onChange={(x) => void salvar({ checkpoints: x.target.checked })} />
           <span><b>{t('configuracoes.cap.protecoes.checkpoints')}</b> <small className="muted">{t('configuracoes.cap.protecoes.checkpointsDica')}</small></span></label>
@@ -46,34 +52,38 @@ export function CapacidadesPanel({ dono }: { dono: boolean }) {
           <span><b>{t('configuracoes.cap.protecoes.inseguro')}</b> <small className="muted">{t('configuracoes.cap.protecoes.inseguroDica')}</small></span></label>
         <label className="check"><input type="checkbox" checked={s.limpeza} disabled={!dono} onChange={(x) => void salvar({ limpeza: x.target.checked })} />
           <span><b>{t('configuracoes.cap.protecoes.limpeza')}</b> <small className="muted">{t('configuracoes.cap.protecoes.limpezaDica')}</small></span></label>
-        <p className="hint">{t('configuracoes.cap.protecoes.rede')}</p>
+        <Sobre className="hint">{t('configuracoes.cap.protecoes.rede')}</Sobre>
         {dono && s.checkpoints && <Voltar />}
+      </Bloco>
 
-        <h4><Icon name="compass" size={14} /> {t('configuracoes.cap.navegador.titulo')}</h4>
+      <Bloco id="cap-navegador" icone="compass" titulo={t('configuracoes.cap.navegador.titulo')} resumo={s.navegador.pronto ? t('configuracoes.cap.resumo.pronto') : t('configuracoes.cap.resumo.aCaminho')}>
         <p className="muted small">{s.navegador.pronto ? t('configuracoes.cap.navegador.pronto') : s.navegador.chromium ? t('configuracoes.cap.navegador.semPrograma') : t('configuracoes.cap.navegador.semChromium')}</p>
         <p className="hint warn"><Icon name="alert" size={12} /> {t('configuracoes.cap.navegador.risco')}</p>
         <p className="muted small">{t('configuracoes.cap.navegador.cofre')}</p>
+      </Bloco>
 
-        <h4 id="voz"><Icon name="mic" size={14} /> {t('configuracoes.cap.voz.titulo')}</h4>
+      <Bloco id="cap-voz" icone="mic" titulo={t('configuracoes.cap.voz.titulo')} resumo={vozResumo}>
         <ul className="plain small">
           <li>{s.voz.transcrever ? t('configuracoes.cap.voz.transcreverPronto') : t('configuracoes.cap.voz.transcreverFalta')}</li>
           <li>{s.voz.falar ? t('configuracoes.cap.voz.falarPronto') : t('configuracoes.cap.voz.falarFalta')}</li>
         </ul>
         <VozEscolhas dono={dono} onErro={(x) => setMsg({ kind: 'error', text: x })} />
+      </Bloco>
 
-        <h4><Icon name="plug" size={14} /> {t('configuracoes.cap.conectores.titulo')}</h4>
+      <Bloco id="cap-conectores" icone="plug" titulo={t('configuracoes.cap.conectores.titulo')} resumo={s.conectores.length ? t('configuracoes.cap.resumo.conectores', { n: s.conectores.length }) : t('configuracoes.cap.resumo.semConectores')}>
         <p className="muted small">{s.conectores.length ? t('configuracoes.cap.conectores.ligados', { n: s.conectores.length }) : t('configuracoes.cap.conectores.nenhum')}{' '}
           <a href="#conexoes">{t('configuracoes.cap.conectores.ir')}</a></p>
         {s.conectores.length > 0 && <p className="hint">{t('configuracoes.cap.conectores.busca')}</p>}
+      </Bloco>
 
-        <h4><Icon name="book" size={14} /> {t('configuracoes.cap.competencias.titulo')}</h4>
+      <Bloco id="cap-competencias" icone="book" titulo={t('configuracoes.cap.competencias.titulo')}>
         <p className="muted small">{t('configuracoes.cap.competencias.texto')}</p>
+      </Bloco>
 
-        <h4><Icon name="layers" size={14} /> {t('configuracoes.cap.lote.titulo')}</h4>
+      <Bloco id="cap-lote" icone="layers" titulo={t('configuracoes.cap.lote.titulo')}>
         <p className="muted small">{t('configuracoes.cap.lote.texto')}</p>
-      </section>
-      <ConselhoCard dono={dono} />
-    </>
+      </Bloco>
+    </section>
   );
 }
 
@@ -144,7 +154,8 @@ function Voltar() {
   );
 }
 
-function ConselhoCard({ dono }: { dono: boolean }) {
+/** Conselho de modelos: recolhe; o cabeçalho diz quantos modelos opinam. Mora na sub-aba Modelos. */
+export function ConselhoCard({ dono }: { dono: boolean }) {
   const t = useT();
   const c = useResource<Conselho>(`${RECURSOS}/conselho`, []);
   const catalog = useResource<ModelCatalog>('/api/ai/models', ['ai.changed']);
@@ -161,9 +172,8 @@ function ConselhoCard({ dono }: { dono: boolean }) {
   };
   const escolher = (valor: string) => opcoes.find((o) => o.chave === valor)?.vaga;
   return (
-    <section className="card">
-      <h3>{t('configuracoes.cap.conselho.titulo')}</h3>
-      <p className="muted small">{t('configuracoes.cap.conselho.texto')}</p>
+    <Bloco id="cfg-conselho" cartao titulo={t('configuracoes.cap.conselho.titulo')} resumo={atual ? t('configuracoes.cap.conselho.resumoCurto', { n: atual.opinam.length }) : null}>
+      <Sobre>{t('configuracoes.cap.conselho.texto')}</Sobre>
       <p className="hint warn"><Icon name="coins" size={12} /> {t('configuracoes.cap.conselho.custo')}</p>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       {!atual ? <p className="muted small">{c.error ?? t('configuracoes.cap.lendo')}</p> : !dono || !opcoes.length ? (
@@ -192,6 +202,6 @@ function ConselhoCard({ dono }: { dono: boolean }) {
         </div>
       )}
       <p className="hint">{t('configuracoes.cap.conselho.como')}</p>
-    </section>
+    </Bloco>
   );
 }

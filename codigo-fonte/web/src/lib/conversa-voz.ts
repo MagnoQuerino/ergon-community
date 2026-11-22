@@ -131,8 +131,8 @@ export type FaseVoz =
   | 'fechado';
 export type ErroVoz = 'negado' | 'sem_microfone' | 'sem_suporte' | 'falhou' | 'sem_transcricao' | 'sem_motor';
 export type AvisoVoz =
-  /** não há voz para falar: as respostas aparecem escritas */
-  | 'sem_voz'
+  /** na sala, a fala não chamou ninguém pelo nome */
+  | 'ninguem'
   /** a voz falhou nesta resposta: ela está escrita */
   | 'voz_falhou'
   | 'envio_falhou'
@@ -170,8 +170,10 @@ export type EventoVoz =
   | { tipo: 'transcricao_falhou' }
   /** a resposta chegou: `falar` = há voz e o texto vai ser lido em voz alta */
   | { tipo: 'resposta'; falar: boolean }
-  | { tipo: 'sem_resposta'; motivo: 'falhou' | 'parada' | 'vazia' | 'espera' }
+  | { tipo: 'sem_resposta'; motivo: 'falhou' | 'parada' | 'vazia' | 'espera' | 'ninguem' }
   | { tipo: 'tocando' }
+  /** a sala: um agente falou e outro ainda vai responder a este turno (volta a esperar) */
+  | { tipo: 'aguardar' }
   | { tipo: 'fala_agente_fim' }
   | { tipo: 'voz_indisponivel' }
   | { tipo: 'voz_falhou' }
@@ -180,11 +182,11 @@ export type EventoVoz =
   | { tipo: 'retomar' }
   | { tipo: 'fechar' };
 
-export const voz0 = (semVoz: boolean): EstadoVoz => ({ fase: 'abrindo', mudo: false, semVoz, erro: null, aviso: semVoz ? 'sem_voz' : null, turnos: 0 }); // i18n-ok: código interno do estado
+export const voz0 = (semVoz: boolean): EstadoVoz => ({ fase: 'abrindo', mudo: false, semVoz, erro: null, aviso: null, turnos: 0 }); // i18n-ok: código interno do estado
 
 /** de volta à escuta (ou pausado, se a pessoa fechou o microfone no meio) */
 const escuta = (e: EstadoVoz, aviso: AvisoVoz | null = e.aviso): EstadoVoz => ({ ...e, fase: e.mudo ? 'pausado' : 'ouvindo', aviso }); // i18n-ok: código interno do estado
-const AVISO_SEM_RESPOSTA = { falhou: 'resposta_falhou', parada: 'resposta_parada', vazia: null, espera: 'espera_voce' } as const;
+const AVISO_SEM_RESPOSTA = { falhou: 'resposta_falhou', parada: 'resposta_parada', vazia: null, espera: 'espera_voce', ninguem: 'ninguem' } as const;
 
 /** O próximo estado. Evento fora de hora não muda nada (uma resposta atrasada depois de encerrar, dois toques no botão). */
 export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
@@ -200,7 +202,7 @@ export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
     case 'fala_inicio':
       // falar por cima da resposta (ou enquanto a voz é preparada) interrompe e já é o próximo trecho; falar enquanto o
       // agente pensa também vale (comentar o texto que acabou de mandar): o trecho novo entra na fila da conversa
-      return e.fase === 'ouvindo' || e.fase === 'pensando' || e.fase === 'falando' || e.fase === 'preparando' ? { ...e, fase: 'captando', aviso: e.semVoz ? 'sem_voz' : null } : e;
+      return e.fase === 'ouvindo' || e.fase === 'pensando' || e.fase === 'falando' || e.fase === 'preparando' ? { ...e, fase: 'captando', aviso: null } : e;
     case 'texto':
       return e.fase === 'ouvindo' ? { ...e, fase: 'pensando' } : e;
     case 'fala_fim':
@@ -218,7 +220,8 @@ export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
       return e.fase === 'transcrevendo' ? { ...e, fase: 'pensando', aviso: 'transcricao_falhou' } : e;
     case 'resposta':
       if (e.fase !== 'transcrevendo' && e.fase !== 'pensando') return e;
-      return ev.falar && !e.semVoz ? { ...e, fase: 'preparando', turnos: e.turnos + 1 } : escuta({ ...e, turnos: e.turnos + 1 }, 'sem_voz');
+      // sem voz nenhuma neste computador, a resposta fica escrita e a escuta volta na hora (o estado mostra; sem aviso)
+      return ev.falar && !e.semVoz ? { ...e, fase: 'preparando', turnos: e.turnos + 1 } : escuta({ ...e, turnos: e.turnos + 1 }, null);
     case 'sem_resposta': {
       if (e.fase !== 'transcrevendo' && e.fase !== 'pensando') return e;
       // o colega espera uma decisão na conversa escrita: a escuta segue (a barra de texto está ali, ao lado), com o aviso
@@ -226,10 +229,12 @@ export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
     }
     case 'tocando':
       return e.fase === 'preparando' ? { ...e, fase: 'falando' } : e;
+    case 'aguardar':
+      return e.fase === 'ouvindo' ? { ...e, fase: 'pensando' } : e;
     case 'fala_agente_fim':
       return e.fase === 'falando' || e.fase === 'preparando' ? escuta(e) : e;
     case 'voz_indisponivel':
-      return e.fase === 'preparando' || e.fase === 'falando' ? escuta({ ...e, semVoz: true }, 'sem_voz') : { ...e, semVoz: true };
+      return e.fase === 'preparando' || e.fase === 'falando' ? escuta({ ...e, semVoz: true }, null) : { ...e, semVoz: true };
     case 'voz_falhou':
       return e.fase === 'preparando' || e.fase === 'falando' ? escuta(e, 'voz_falhou') : e;
     case 'interromper':
@@ -240,7 +245,7 @@ export function conversaVoz(e: EstadoVoz, ev: EventoVoz): EstadoVoz {
       return e.fase === 'ouvindo' || e.fase === 'captando' || e.fase === 'abrindo' ? { ...e, fase: 'pausado', mudo: true } : { ...e, mudo: true }; // i18n-ok: código interno do estado
     case 'retomar':
       if (!e.mudo) return e;
-      return e.fase === 'pausado' ? { ...e, fase: 'abrindo', mudo: false, aviso: e.semVoz ? 'sem_voz' : null } : { ...e, mudo: false };
+      return e.fase === 'pausado' ? { ...e, fase: 'abrindo', mudo: false, aviso: null } : { ...e, mudo: false };
   }
 }
 
@@ -279,6 +284,10 @@ export interface Turno<M extends MensagemDoTurno = MensagemDoTurno> {
   transcricaoFalhou: string | null;
   /** as respostas do agente a este pedido, na ordem */
   respostas: M[];
+  /** a sala: outro agente ainda vai responder a este turno */
+  maisVindo?: boolean;
+  /** a sala: a fala não chamou ninguém */
+  ninguem?: boolean;
 }
 
 /** O estado do turno da mensagem `id` (a que o modo voz enviou), lido da lista de mensagens da conversa. */
@@ -311,4 +320,30 @@ export function textoFalado(md: string): string {
     .replace(/^[ \t]{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, '')
     .replace(/(\*\*|__|\*|~~|`)/g, '')
     .replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** o que a sala manda a mais em cada mensagem da pessoa (services/salas: as execuções pedidas e quantas faltam) */
+export interface MensagemDaSala extends MensagemDoTurno { turno?: { runs: string[]; faltam: number; roteando: boolean } }
+
+/**
+ * O turno numa sala (rc.49): a fala pode chamar vários agentes, um depois do outro. Cada resposta que chega já vale (o canal
+ * de voz fala uma e volta a esperar a próxima: `maisVindo`); a fala que não chamou ninguém termina sem resposta (`ninguem`).
+ */
+export function turnoDaSala<M extends MensagemDaSala>(msgs: readonly M[], id: string): Turno<M> {
+  const i = msgs.findIndex((m) => m.id === id);
+  if (i < 0) return { fase: 'enviando', dito: null, transcricaoFalhou: null, respostas: [] }; // i18n-ok: código interno do estado
+  const m = msgs[i];
+  const tr = m.attachments?.find((a) => a.transcricao)?.transcricao ?? null;
+  const dito = tr?.estado === 'pronta' ? (tr.texto ?? '').trim() : null;
+  const transcricaoFalhou = tr?.estado === 'falhou' ? tr.motivo ?? 'falhou' : null; // i18n-ok: código interno do estado
+  const t = m.turno ?? { runs: m.run_id ? [m.run_id] : [], faltam: 0, roteando: false };
+  const runs = new Set(t.runs);
+  const respostas = msgs.slice(i + 1).filter((x) => x.role === 'agent' && !!x.run_id && runs.has(x.run_id) && textoFalado(x.content));
+  const base = { dito, transcricaoFalhou, respostas };
+  const transcrevendo = !!m.attachments?.length && (!tr || tr.estado === 'transcrevendo' || tr.estado === 'preparando');
+  if (transcrevendo || t.roteando) return { ...base, fase: 'transcrevendo' };
+  if (t.faltam > 0) return respostas.length ? { ...base, fase: 'pronta', maisVindo: true } : { ...base, fase: 'pensando' }; // i18n-ok: código interno do estado
+  if (respostas.length) return { ...base, fase: 'pronta' }; // i18n-ok: código interno do estado
+  if (!t.runs.length) return { ...base, fase: 'vazia', ninguem: true };
+  return { ...base, fase: m.run_status === 'failed' ? 'falhou' : 'vazia' }; // i18n-ok: código interno do estado
 }

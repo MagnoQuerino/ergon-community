@@ -291,7 +291,7 @@ const tarefa: TraducaoParcial<typeof pt> = {
   'arquivos.anexar': '附加文件（智能体会用它工作）',
   'acoesDoCard': '卡片操作',
   'conferido.titulo': '如何核对的',
-  'conferido.ainda': '暂时没有可核对的内容：工作交付时才会核对。',
+  'conferido.ainda': '工作交付时会进行核对。',
   'conferido.decididoPorVoce': '由你在 {quando} 决定',
   'conferido.peloSistema': '由系统在 {quando} 核对',
   'conferido.deOndeVeio': '来源：{plataforma} · {quando}',

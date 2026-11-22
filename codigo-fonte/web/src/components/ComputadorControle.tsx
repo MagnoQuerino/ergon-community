@@ -3,6 +3,7 @@ import { useT } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { useSurface } from '../lib/surface.ts';
+import { AtivarAcessoTotal } from './AcessoTotal.tsx';
 import { Icon } from './Icon.tsx';
 
 /**
@@ -120,6 +121,8 @@ export function PassoDaPermissao({ passo }: { passo: string }) {
 export function CartoesComputador({ e, onMudou }: { e: EstadoComputador | null; onMudou: () => void }) {
   const [ocupado, setOcupado] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // "Ativar" pede a senha e o prazo (o mesmo cartão do acesso total) antes de responder ao agente
+  const [senha, setSenha] = useState<string | null>(null);
   if (!e?.disponivel) return null;
   const p = e.pedidos[0];
   const responder = async (escolha: string, naoPerguntar = false) => {
@@ -130,7 +133,8 @@ export function CartoesComputador({ e, onMudou }: { e: EstadoComputador | null; 
   const passo = e.aparelho.conectado ? e.aparelho.permissoes?.passo : null;
   return (
     <>
-      {p?.tipo === 'ativar' && <CartaoAcessoTotal agente={p.agente} ocupado={ocupado} onEscolha={(x, n) => void responder(x === 'cada_acao' ? 'uma_vez' : x, n)} />}
+      {p?.tipo === 'ativar' && senha !== p.id && <CartaoAcessoTotal agente={p.agente} ocupado={ocupado} onEscolha={(x, n) => (x === 'ativar' ? setSenha(p.id) : void responder(x === 'cada_acao' ? 'uma_vez' : x, n))} />}
+      {p?.tipo === 'ativar' && senha === p.id && <AtivarAcessoTotal agente={p.agente} administra={!!e.administra} onCancelar={() => setSenha(null)} onFeito={() => { setSenha(null); void responder('ativar'); }} />}
       {p?.tipo === 'confirmar' && <ConfirmarAcao p={p} ocupado={ocupado} onEscolha={(ok) => void responder(ok ? 'permitir' : 'recusar')} />}
       {passo && (e.emUso || e.pedidos.length > 0 || e.modo !== 'desligado') && <div className="pc-passo-flutuante"><PassoDaPermissao passo={passo} /></div>}
       {err && <p className="error pc-erro" role="alert">{err}</p>}

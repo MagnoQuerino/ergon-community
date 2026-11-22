@@ -64,7 +64,7 @@ const conta = {
 
   // ——— conta nova neste computador ———
   'registro.titulo': 'Criar conta neste computador',
-  'registro.sub': 'Cada pessoa tem a própria conta: os seus dados ficam cifrados com a sua senha, e quem mais usa este computador não vê nada do que é seu (nem você o deles).',
+  'registro.sub': 'Cada pessoa tem a própria conta: os seus dados ficam cifrados com a sua senha, visíveis só para você.',
   'registro.convite': 'Código do convite',
   'registro.conviteDica': 'Neste computador, conta nova precisa de um convite de quem administra o Ergon (Configurações › Pessoas).',
   'registro.jaTenho': 'Já tenho conta',
@@ -174,7 +174,7 @@ const conta = {
   'seg.confirmada': 'confirmada',
   'seg.comFrase': 'A frase de 24 palavras abre os dados se a senha for esquecida.',
   'seg.semFrase': 'sem frase',
-  'seg.semFraseTexto': 'Ainda não há uma frase confirmada: se a senha for esquecida, os dados não abrem.',
+  'seg.semFraseTexto': 'Confirme uma frase de recuperação: é ela que abre os dados se a senha for esquecida.',
   'seg.gerarNova': 'Gerar frase nova',
   'seg.gerar': 'Gerar a frase',
   'seg.gerarDica': 'Gerar uma nova invalida a anterior assim que você confirmar 3 palavras dela.',
@@ -208,7 +208,7 @@ const conta = {
   'seg.autoLigandoAjudante': 'Ligando… o ajudante deste computador está guardando a chave.',
   'seg.autoLigandoEsperando': 'Ligando… esperando o ajudante deste computador (ele começa ao entrar no computador).',
   'seg.autoDesligadoTexto': 'Desligado: depois de reiniciar, o Ergon pede a senha, e os agentes esperam até você digitar.',
-  'seg.semAjudante': 'Esta instalação ainda não tem o ajudante do computador (ele vem com o instalador do Ergon), então o botão fica indisponível.',
+  'seg.semAjudante': 'Disponível com o instalador do Ergon, que traz o ajudante do computador.',
   'seg.cofreDica': 'A chave fica no cofre do próprio sistema (proteção de dados do Windows, Chaves do macOS ou o chaveiro do Linux), presa à sua conta do computador: quem entrar nela abre o Ergon sem a senha. Recomendado se o computador é só seu e tem senha, PIN ou biometria.',
   'seg.variasPessoas': 'Várias pessoas usam este computador: ligue só se a sua conta do Windows (ou do macOS/Linux) é só sua. Se todos entram na mesma conta do computador, quem usar essa conta abre os seus dados sem a sua senha.',
   'seg.excluirTitulo': 'Excluir a minha conta',
@@ -237,7 +237,7 @@ const conta = {
   'trava.min': '{min} min',
   'trava.limites': 'De 1 minuto a 24 horas.',
   'trava.desligadaTexto': 'Desligada: a tela não tranca sozinha. Se o computador fica em lugar com outras pessoas, ligue e escolha depois de quanto tempo sem usar.',
-  'trava.dica': 'Só mouse e teclado contam. Com a tela trancada, os agentes continuam trabalhando; nada fica visível até destrancar com a senha.',
+  'trava.dica': 'Só mouse e teclado contam. Com a tela trancada, os agentes continuam trabalhando, e tudo volta à vista com a sua senha.',
 
   // ——— Minha conta ———
   'minha.titulo': 'Minha conta',
@@ -256,7 +256,7 @@ const conta = {
 
   // ——— o personagem que passeia pela cidade (o nome vem do componente: não se traduz) ———
   'npc.exibir': 'Exibir {nome}',
-  'npc.texto': '{nome} passeia pela cidade, já aposentado das conquistas. Não é agente, não trabalha e não ocupa vaga. Desligar só o esconde neste workspace.',
+  'npc.texto': '{nome} passeia pela cidade, já aposentado das conquistas: é um morador de enfeite. Desligar o esconde neste workspace.',
   'npc.aria': 'Exibir {nome} na cidade',
 
   // ——— o workspace atual ———
@@ -281,12 +281,12 @@ const conta = {
   'ws.semVolta': 'Não tem volta.',
   'ws.excluirDigite': 'Para confirmar, digite o nome do workspace: {nome}',
   'ws.renomearPergunta': 'Renomear o workspace?',
-  'ws.renomearTexto': 'O workspace {antes} passa a se chamar {depois}. Nada mais muda: equipe, tarefas e conversas continuam como estão.',
+  'ws.renomearTexto': 'O workspace {antes} passa a se chamar {depois}. Equipe, tarefas e conversas continuam como estão.',
 
   // ——— Configurações › Pessoas ———
   'pessoas.titulo': 'Pessoas neste computador',
-  'pessoas.explica': 'Cada pessoa tem a própria conta e a própria equipe de IA. Os dados de cada uma ficam cifrados com a chave dela: você administra o Ergon, mas não vê nada do que é dos outros.',
-  'pessoas.explicaAntes': 'Cada pessoa tem a própria conta e a própria equipe de IA. Os dados de cada uma ficam cifrados com a chave dela: você administra o Ergon, mas não vê nada do que é dos outros (o isolamento começa quando a segunda pessoa criar a conta).',
+  'pessoas.explica': 'Cada pessoa tem a própria conta e a própria equipe de IA. Os dados de cada uma ficam cifrados com a chave dela e só ela os vê, mesmo com você administrando o Ergon.',
+  'pessoas.explicaAntes': 'Cada pessoa tem a própria conta e a própria equipe de IA. Os dados de cada uma ficam cifrados com a chave dela e só ela os vê, mesmo com você administrando o Ergon (o isolamento começa quando a segunda pessoa criar a conta).',
   'pessoas.linha': '{usuario} · desde {desde} · último uso {uso}',
   'pessoas.linhaAdmin': '{usuario} · administra · desde {desde} · último uso {uso}',
   'pessoas.semFraseDica': 'Sem a frase pessoal confirmada, uma senha esquecida trava os dados dessa pessoa para sempre.',

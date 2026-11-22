@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useT } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
-import { CartaoAcessoTotal, PassoDaPermissao, useComputador, type ModoComputador } from './ComputadorControle.tsx';
+import { AtivarAcessoTotal } from './AcessoTotal.tsx';
+import { PassoDaPermissao, useComputador, type ModoComputador } from './ComputadorControle.tsx';
 import { Icon } from './Icon.tsx';
 
 const MODOS: ModoComputador[] = ['desligado', 'cada_acao', 'total'];
@@ -51,11 +52,8 @@ export function ComputadorAjustes() {
         {e.bloqueado && !e.administra && <p className="muted small">{t('configuracoes.computador.bloqueado')}</p>}
       </>)}
       {err && <p className="error" role="alert">{err}</p>}
-      {perguntar && <CartaoAcessoTotal ajuste ocupado={ocupado} onEscolha={async (x, naoPerguntar) => {
-        setPerguntar(false);
-        if (x === 'ativar') await enviar('/api/computador/modo', { modo: 'total', naoPerguntar });
-        else if (x === 'cada_acao') await enviar('/api/computador/modo', { modo: 'cada_acao' });
-      }} />}
+      {/* o acesso total passa pela senha e pelo prazo (o mesmo cartão em todo lugar): libera também as ferramentas da equipe */}
+      {perguntar && <AtivarAcessoTotal administra={!!e.administra} onCancelar={() => setPerguntar(false)} onFeito={() => { setPerguntar(false); pc.reload(); }} />}
     </section>
   );
 }

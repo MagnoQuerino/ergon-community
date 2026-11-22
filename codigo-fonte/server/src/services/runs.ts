@@ -1314,6 +1314,24 @@ export function toolHolders(db: Db, workspaceId: string): Map<string, string[]> 
  */
 const CONEXOES_UPDATING = 'As Conexões (as contas e os aplicativos que a pessoa conectou) estão sendo atualizadas neste computador e voltam sozinhas quando a atualização da equipe terminar. Até lá, não use outro caminho para as contas: nada de skills de e-mail (como himalaya), terminal ou programas, e não diga que enviou ou leu. Diga à pessoa, em uma frase, que a parte do pedido que precisa das contas segue quando a atualização terminar, e faça agora o resto.';
 
+/**
+ * Navegar a pedido (rc.49): "abre o navegador e pesquisa no Google" é um pedido comum, e o agente dizia que não podia. Com
+ * o navegador da equipe, ele abre na hora e a pessoa acompanha ao vivo na conversa (e assume quando quiser); com o
+ * controle do computador, usa o navegador do próprio computador da pessoa quando ela pede isso; sem nenhum dos dois, a
+ * pesquisa na web responde e o agente diz em uma frase como ligar o navegador.
+ */
+export function navegarComo(ids: readonly string[]): string {
+  const nav = ids.includes('navegador'); const pc = ids.includes('computador'); const web = ids.includes('web');
+  if (nav || pc) {
+    return [
+      'Navegar: quando a pessoa pedir para abrir o navegador, entrar num site ou pesquisar no Google, faça na hora, sem perguntar e sem dizer que não pode.',
+      nav ? 'Use o seu navegador (as ferramentas browser_*): para pesquisar no Google, abra https://www.google.com/search?q= seguido dos termos, leia os resultados e abra os que importam. A pessoa vê esse navegador ao vivo aqui na conversa e pode assumir o controle (login, captcha) e devolver.' : '',
+      pc ? `${nav ? 'Se a pessoa pedir o navegador do computador dela (o Chrome ou o Edge que ela usa), use o controle do computador.' : 'Use o controle do computador: abra o navegador do computador da pessoa e faça a pesquisa lá; ela acompanha na tela.'}` : '',
+    ].filter(Boolean).join(' ');
+  }
+  return web ? 'Navegar: quando pedirem para abrir o navegador ou pesquisar no Google, faça a pesquisa na web (web_search) e entregue os resultados; diga em uma frase que o navegador ao vivo liga em Configurações › Ferramentas (Navegador automático).' : '';
+}
+
 /** O motivo verdadeiro de uma ferramenta que o agente tem, mas ainda não pode usar. */
 function whyMissing(t: ToolDef): string {
   if (t.status === 'bloqueada') return t.guarded ? 'executa programas: precisa da autorização da pessoa, com a senha' : t.id === 'contas' ? CONEXOES_FORA_ATE_A_PROXIMA : 'bloqueada neste computador';
@@ -1442,6 +1460,7 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     // a identidade do agente (o SOUL do perfil dele no motor, rc.27): sempre o começo das instruções, igual em todo pedido
     almaDe(a),
     usable.length ? `Ferramentas que você tem: ${usable.join('; ')}.` : 'Você trabalha só com texto nesta conversa.',
+    navegarComo(tools.filter((t) => ok(t.status)).map((t) => t.id)),
     missing.length ? `Ferramentas que você ainda não pode usar, e por quê: ${missing.join('; ')}. Não diga que usou nenhuma delas e não dê outro motivo.` : '',
     updating.some((t) => t.id === 'contas') ? CONEXOES_UPDATING : '',
     skills.length ? (canSkills

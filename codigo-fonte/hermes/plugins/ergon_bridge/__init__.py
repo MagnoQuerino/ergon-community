@@ -2123,6 +2123,15 @@ PIPER_PROVEDOR = "ergon-piper"
 # a reserva online do edge-tts (zh-CN-XiaoxiaoNeural, hi-IN-SwaraNeural) é a mesma do resto.
 VOZ_PIPER = {"pt": "pt_BR-cadu-medium", "en": "en_US-ljspeech-medium", "zh": "zh_CN-huayan-medium", "hi": "hi_IN-pratham-medium"}
 VOZ_EDGE = {"pt": "pt-BR-FranciscaNeural", "en": "en-US-AriaNeural", "zh": "zh-CN-XiaoxiaoNeural", "hi": "hi-IN-SwaraNeural"}
+# rc.49: uma voz para cada agente. O Ergon manda um número fixo por agente (perfil); a voz e o ritmo saem daqui, sempre
+# os mesmos para o mesmo agente. Piper: as vozes do idioma (cada uma baixada no 1º uso dela) e o ritmo (length_scale).
+# edge-tts: as vozes do idioma, com tom e ritmo próprios.
+VOZES_PIPER = {"pt": ("pt_BR-cadu-medium", "pt_BR-faber-medium"), "en": ("en_US-ljspeech-medium", "en_US-ryan-medium", "en_US-amy-medium", "en_US-joe-medium"),
+               "zh": ("zh_CN-huayan-medium",), "hi": ("hi_IN-pratham-medium",)}
+VOZES_EDGE = {"pt": ("pt-BR-FranciscaNeural", "pt-BR-AntonioNeural"), "en": ("en-US-AriaNeural", "en-US-GuyNeural", "en-US-JennyNeural", "en-US-ChristopherNeural"),
+              "zh": ("zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural"), "hi": ("hi-IN-SwaraNeural", "hi-IN-MadhurNeural")}
+RITMOS_PIPER = (1.0, 0.9, 1.1, 0.95, 1.05, 0.85)
+TONS_EDGE = (("+0%", "+0Hz"), ("+6%", "-8Hz"), ("-4%", "+8Hz"), ("+3%", "-14Hz"), ("-6%", "+14Hz"), ("+8%", "+4Hz"))
 _IDIOMAS_MOTOR = ("pt", "en", "zh", "hi")
 # o que a tela oferece (VALID_REASONING_EFFORTS do Hermes tem mais níveis; os extremos ficam fora) e o padrão do Ergon
 RACIOCINIO_NIVEIS = ("", "low", "medium", "high")
@@ -5134,10 +5143,48 @@ def voz_transcrever(audio: bytes, nome: str) -> dict[str, Any]:
     return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "")[:300] if isinstance(r, dict) else ""}
 
 
-def _falar_edge(texto: str, saida: str) -> bool:
-    """A voz online (edge-tts), como reserva quando o Piper falha: o mesmo gerador do Hermes, com a voz do idioma."""
+def _lingua_da_voz(voz: str) -> str:
+    """pt_BR-cadu-medium / pt-BR-FranciscaNeural → pt (o idioma das tabelas de vozes)."""
+    l = re.split(r"[_-]", voz or "pt")[0].lower()
+    return l if l in VOZES_PIPER else "pt"
+
+
+def _perfil_piper(voz: str, perfil: int | None) -> tuple[str, float]:
+    """A voz do Piper e o ritmo de um agente (perfil); sem perfil, a voz escolhida e o ritmo normal."""
+    if perfil is None:
+        return voz, 1.0
+    vozes = VOZES_PIPER[_lingua_da_voz(voz)]
+    return vozes[perfil % len(vozes)], RITMOS_PIPER[(perfil // len(vozes)) % len(RITMOS_PIPER)]
+
+
+def _perfil_edge(perfil: int | None, lingua: str) -> tuple[str, str, str] | None:
+    """A voz do edge-tts, o ritmo e o tom de um agente (perfil)."""
+    if perfil is None:
+        return None
+    vozes = VOZES_EDGE.get(lingua, VOZES_EDGE["pt"])
+    ritmo, tom = TONS_EDGE[(perfil // len(vozes)) % len(TONS_EDGE)]
+    return vozes[perfil % len(vozes)], ritmo, tom
+
+
+def _falar_edge_perfil(texto: str, saida: str, voz: str, ritmo: str, tom: str) -> bool:
+    """O edge-tts direto, com a voz, o ritmo e o tom do agente."""
+    try:
+        import asyncio
+        import edge_tts  # type: ignore[import-not-found]
+        asyncio.run(edge_tts.Communicate(texto, voz, rate=ritmo, pitch=tom).save(saida))
+        return os.path.isfile(saida) and os.path.getsize(saida) > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _falar_edge(texto: str, saida: str, perfil: int | None = None, lingua: str = "pt") -> bool:
+    """A voz online (edge-tts), como reserva quando o Piper falha: o mesmo gerador do Hermes, com a voz do idioma (e,
+    com o perfil de um agente, a voz, o ritmo e o tom dele)."""
     if not _edge_instalado():
         return False
+    p = _perfil_edge(perfil, lingua)
+    if p and _falar_edge_perfil(texto, saida, *p):
+        return True
     try:
         from tools.tts_tool import _load_tts_config, _run_edge_tts  # módulos do Hermes
         _run_edge_tts(texto, saida, _load_tts_config())
@@ -5146,7 +5193,7 @@ def _falar_edge(texto: str, saida: str) -> bool:
         return False
 
 
-def _falar_piper(texto: str, saida: str, tts_cfg: dict[str, Any]) -> tuple[bool, str]:
+def _falar_piper(texto: str, saida: str, tts_cfg: dict[str, Any], perfil: int | None = None) -> tuple[bool, str]:
     """O Piper num processo próprio (piper_processo.py chama a linha de comando do Piper): nada do pacote, que é GPL,
     entra no processo do motor. A voz é baixada no 1º uso."""
     helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "piper_processo.py")
@@ -5154,7 +5201,11 @@ def _falar_piper(texto: str, saida: str, tts_cfg: dict[str, Any]) -> tuple[bool,
         f.write(texto)
         entrada = f.name
     try:
-        r = subprocess.run([sys.executable, helper, "--voz", _piper_voz(tts_cfg), "--pasta", _piper_pasta(), "--texto", entrada, "--saida", saida],
+        voz, ritmo = _perfil_piper(_piper_voz(tts_cfg), perfil)
+        cmd = [sys.executable, helper, "--voz", voz, "--pasta", _piper_pasta(), "--texto", entrada, "--saida", saida]
+        if ritmo != 1.0:
+            cmd += ["--ritmo", f"{ritmo:.2f}"]
+        r = subprocess.run(cmd,
                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=620, check=False)
         if r.returncode == 0 and os.path.isfile(saida) and os.path.getsize(saida) > 0:
             return True, ""
@@ -5179,7 +5230,7 @@ def _tipo_do_audio(dados: bytes, caminho: str) -> str:
     return {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav"}.get(os.path.splitext(caminho)[1].lower(), "audio/mpeg")
 
 
-def voz_falar(texto: str) -> dict[str, Any]:
+def voz_falar(texto: str, perfil: int | None = None) -> dict[str, Any]:
     """Um texto vira áudio. A voz do Ergon é o Piper, no próprio computador e sem internet (a voz é baixada no 1º uso),
     sempre num processo próprio; se ele falhar, a resposta sai pela voz online (edge-tts) e a resposta diz que foi a
     reserva. Outros provedores (edge, um com chave): pelo Hermes, como antes."""
@@ -5188,7 +5239,7 @@ def voz_falar(texto: str) -> dict[str, Any]:
         return {"ok": False, "motivo": "componente"}
     import base64
     pasta = os.path.realpath(_voz_pasta())
-    saida = os.path.join(pasta, f"f-{hashlib.sha256(texto.encode('utf-8', 'replace')).hexdigest()[:24]}.mp3")
+    saida = os.path.join(pasta, f"f-{hashlib.sha256(f'{perfil}|{texto}'.encode('utf-8', 'replace')).hexdigest()[:24]}.mp3")
     feitos = [saida]
     reserva = False
     detalhe = ""
@@ -5202,12 +5253,14 @@ def voz_falar(texto: str) -> dict[str, Any]:
         piper = configurado in ("piper", PIPER_PROVEDOR)
         real = saida
         if piper and estado["falar"] == "piper":
-            ok, detalhe = _falar_piper(texto, saida, cfg)
+            ok, detalhe = _falar_piper(texto, saida, cfg, perfil)
             if not ok:
                 logger.warning("ergon_bridge: a voz local (Piper) falhou (%s); a resposta vai pela voz online", detalhe[:120])
                 reserva = True
         elif piper:
             reserva = True  # o Piper não está na imagem: direto para a voz online
+        elif configurado == "edge" and perfil is not None and _falar_edge(texto, saida, perfil, _lingua_da_voz(str((cfg.get("edge") or {}).get("voice") or "pt"))):
+            pass  # a voz do agente pelo edge-tts
         else:
             from tools.tts_tool import text_to_speech_tool  # módulo do Hermes
             r = json.loads(text_to_speech_tool(texto, output_path=saida))
@@ -5218,7 +5271,7 @@ def voz_falar(texto: str) -> dict[str, Any]:
                 return {"ok": False, "motivo": "falhou", "detalhe": str(r.get("error") or "")[:300]}
         if reserva:
             real = saida
-            if not _falar_edge(texto, saida):
+            if not _falar_edge(texto, saida, perfil, _lingua_da_voz(_piper_voz(cfg))):
                 return {"ok": False, "motivo": "falhou", "detalhe": (detalhe or "a voz local falhou e a online não respondeu")[:300]}
         if not 0 < os.path.getsize(real) <= _VOZ_MAX:
             return {"ok": False, "motivo": "falhou", "detalhe": "áudio vazio ou grande demais"}
@@ -5695,7 +5748,9 @@ class _ControlHandler(BaseHTTPRequestHandler):
             texto = str(body.get("texto") or "").strip()
             if not texto or len(texto) > 12000:
                 raise ValueError("texto vazio ou longo demais")
-            return self._json(200, voz_falar(texto))
+            perfil = body.get("perfil")
+            perfil = perfil if isinstance(perfil, int) and not isinstance(perfil, bool) and 0 <= perfil < 1000 else None
+            return self._json(200, voz_falar(texto, perfil))
         return self._json(404, {"error": "rota não liberada pela ponte do Ergon"})
 
     def _byok(self, method: str, path: str, body: dict[str, Any]) -> None:

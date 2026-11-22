@@ -56,6 +56,8 @@ export class Transcricoes {
   private readonly d: Deps;
   /** as que estão andando agora (uma por arquivo) */
   private readonly andando = new Map<string, Promise<void>>();
+  /** quem quer saber quando uma transcrição termina (a voz nas salas: services/salas, rotearVoz) */
+  readonly aoTerminar: Array<(ws: string, artId: string) => void> = [];
   constructor(d: Deps) { this.d = d; }
 
   private linha(ws: string, artId: string): Linha | undefined {
@@ -131,6 +133,7 @@ export class Transcricoes {
     this.d.db.run('UPDATE audio_transcricoes SET estado = ?, texto = ?, motivo = ?, provedor = ?, fim = ?, updated_at = ? WHERE artifact_id = ? AND workspace_id = ?',
       f.estado, f.texto ? this.d.db.seal(ws, f.texto) : f.texto === '' ? '' : null, f.motivo ?? null, f.provedor ?? null, t, t, artId, ws);
     this.avisar(ws, artId);
+    for (const fn of this.aoTerminar) { try { fn(ws, artId); } catch (err) { log.warn({ artifactId: artId, err: err instanceof Error ? err.message.slice(0, 200) : 'erro' }, 'transcrição: aviso de fim falhou'); } }
   }
 
   /** A conversa em que o áudio está (ou vai estar) mostra o estado novo. */

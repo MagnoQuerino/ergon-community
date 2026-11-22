@@ -68,7 +68,7 @@ export function registerSalasRoutes(app: FastifyInstance, d: Deps): void {
     // o corpo inteiro tem teto (o texto, até 40 marcas e 20 anexos)
     bodyLimit: Math.max(64 * 1024, d.maxChars * 4 + 16 * 1024),
     schema: { params: idParams('cnv'), body: { type: 'object', additionalProperties: false, required: ['texto', 'clientRequestId'], properties: {
-      texto: S.str(d.maxChars), clientRequestId: S.str(64, 8), replyTo: S.id('msg'), attachments: { type: 'array', maxItems: 20, items: S.id('art') }, vozAgente: CHAVE,
+      texto: S.str(d.maxChars), clientRequestId: S.str(64, 8), replyTo: S.id('msg'), attachments: { type: 'array', maxItems: 20, items: S.id('art') }, vozAgente: { type: 'string', minLength: 1, maxLength: 200 },
       marcas: { type: 'array', maxItems: MAX_MARCAS, items: { type: 'object', additionalProperties: false, required: ['tipo', 'chave', 'inicio', 'fim'], properties: {
         tipo: { enum: ['pessoa', 'agente', 'cessao'] }, chave: CHAVE, inicio: { type: 'integer', minimum: 0, maximum: d.maxChars }, fim: { type: 'integer', minimum: 1, maximum: d.maxChars } } } } } } },
   }, async (req, reply) => {

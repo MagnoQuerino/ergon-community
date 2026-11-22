@@ -106,7 +106,7 @@ import { Navegador } from './services/navegador.ts';
 import { Computador, MODOS, type Escolha, type Modo } from './services/computador.ts';
 import { AJUDANTES_MAX, AJUDANTES_MIN, PERFIL_ESPERA_MS, Perfis, ajudantesDo, extrasDoPerfil, gravarAjudantes } from './services/perfis.ts';
 import { ReviewService } from './services/review.ts';
-import { COM_CUSTO, GUARDED_TOOLSETS, PROTEGIDAS, TOOLS, abrirFerramentas, acessoTotalDaEquipe, ferramentasDesligadas, ferramentasEfetivas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, setDiscordLigado, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
+import { COM_CUSTO, GUARDED_TOOLSETS, PRAZOS_ACESSO, PROTEGIDAS, TOOLS, type PrazoAcesso, abrirFerramentas, acessoTotalDaEquipe, ferramentasDesligadas, ferramentasEfetivas, grantBenefitTools, grantConnectionsTool, grantDataTool, motorScope, motorSemConjunto, platformToolsets, setContasConectadas, setDiscordLigado, toolStatus, toolsetsFor, upgradeDemoTeam } from './services/characters.ts';
 import { addStructureFloor, createStructure, createStructureAuto, ensureCity, listStructures, moveStructure, removeStructure, renameStructure } from './services/structures.ts';
 import { usageSummary } from './services/usage.ts';
 import { COMPACTACAO_RECONFERE_MS, COMPACTAR_SETTING, PASSOS_MAX, PASSOS_MIN, PASSOS_SETTING, compactacaoDaEquipe, medirExecucao, passosDaEquipe, resumoComposicao } from './services/custo.ts';
@@ -2774,6 +2774,8 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   app.put('/api/computador/modo', { schema: { body: { type: 'object', additionalProperties: false, required: ['modo'], properties: { modo: { enum: [...MODOS] }, naoPerguntar: { type: 'boolean' } } } } }, async (req) => {
     const a = auth(req);
     const b = req.body as { modo: Modo; naoPerguntar?: boolean };
+    // o acesso total do computador passa pela senha (o mesmo cartão do acesso total da equipe)
+    if (b.modo === 'total' && computador.modo(a.workspaceId, a.userId) !== 'total') requireRecentAuth(a);
     computador.definirModo(a, b.modo, b.naoPerguntar);
     return computador.estado(a);
   });
@@ -2887,10 +2889,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   // computador: aoAtivarAcessoTotal recebe a mesma ativação para pôr o computador em "total".
   app.get('/api/acesso-total', async (req) => {
     const a = auth(req);
-    return { ativo: acessoTotalDaEquipe(db, a.workspaceId), proibido: conexoes.liberarTudoProibido(a.workspaceId), administra: a.role === 'owner' };
+    const ativo = acessoTotalDaEquipe(db, a.workspaceId);
+    return { ativo, ate: ativo ? getSetting(db, a.workspaceId, 'acesso_total.ate') : null, proibido: conexoes.liberarTudoProibido(a.workspaceId), administra: a.role === 'owner' };
   });
-  app.post('/api/acesso-total', { schema: { body: { type: 'object', additionalProperties: false, properties: { semAviso: { type: 'boolean' } } } } }, async (req) => {
-    const a = owner(req); const b = (req.body ?? {}) as { semAviso?: boolean };
+  app.post('/api/acesso-total', { schema: { body: { type: 'object', additionalProperties: false, properties: { semAviso: { type: 'boolean' }, prazo: { enum: Object.keys(PRAZOS_ACESSO) } } } } }, async (req) => {
+    const a = owner(req); const b = (req.body ?? {}) as { semAviso?: boolean; prazo?: PrazoAcesso };
     requireRecentAuth(a); // a senha veio no mesmo cartão, um instante antes
     if (conexoes.liberarTudoProibido(a.workspaceId)) throw new HttpError(409, 'proibido', 'quem administra o workspace desligou o "Liberar tudo"');
     // as protegidas ligadas na equipe (o motor pode estar desligado agora: a escolha fica gravada)
@@ -2899,6 +2902,11 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     await aiOf(a.workspaceId).setPlatformTools(wanted).catch((e) => { if ((e as HttpError).status !== 503) throw e; });
     for (const t of PROTEGIDAS) setSetting(db, a.workspaceId, `ferramentas.${t}`, 'ligado');
     setSetting(db, a.workspaceId, 'acesso_total', new Date().toISOString());
+    // o prazo (24 horas, 7 dias ou sempre): vale para as ferramentas protegidas e para o computador de quem ativou
+    const ms = PRAZOS_ACESSO[b.prazo ?? 'sempre'];
+    const ate = ms ? new Date(Date.now() + ms).toISOString() : null;
+    if (ate) setSetting(db, a.workspaceId, 'acesso_total.ate', ate); else db.run("DELETE FROM workspace_settings WHERE workspace_id = ? AND key = 'acesso_total.ate'", a.workspaceId);
+    if (ate) setSetting(db, a.workspaceId, `computador.total_ate:${a.userId}`, ate); else db.run('DELETE FROM workspace_settings WHERE workspace_id = ? AND key = ?', a.workspaceId, `computador.total_ate:${a.userId}`);
     conexoes.setLiberarTudo(a.workspaceId, a.userId, true, { pessoa: true, semAviso: b.semAviso });
     const n = Number(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents WHERE workspace_id = ? AND status = 'active'", a.workspaceId)?.n ?? 0);
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { equipe: true, agentes: n },
@@ -2909,7 +2917,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   });
   app.delete('/api/acesso-total', async (req) => {
     const a = owner(req);
-    db.run("DELETE FROM workspace_settings WHERE workspace_id = ? AND key = 'acesso_total'", a.workspaceId);
+    db.run("DELETE FROM workspace_settings WHERE workspace_id = ? AND key IN ('acesso_total', 'acesso_total.ate')", a.workspaceId);
+    // o computador de quem desligou sai do acesso total junto
+    if (computador.modo(a.workspaceId, a.userId) === 'total') computador.definirModo(a, 'cada_acao');
     audit(db, bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'acesso_total', evidence: { equipe: true, on: false }, result: 'acesso total desligado para a equipe' });
     bus.publish(a.workspaceId, 'agents.changed', {}); bus.publish(a.workspaceId, 'integrations.changed', {});
     return { ok: true };
@@ -3058,6 +3068,15 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
   const audiosDaExecucao = (r: { workspace_id: string; id: string }) => attachmentsOfRun(db, r.workspace_id, r.id).filter((f) => ehAudio(f.mime, f.filename)).map((f) => f.id);
   executor.anexosPendentes = (r) => { const ids = audiosDaExecucao(r); return ids.length > 0 && transcricoes.pendentes(r.workspace_id, ids); };
   executor.esperaAnexos = (r) => (r.kind === 'chat' ? transcricoes.esperaMs(r.workspace_id, audiosDaExecucao(r), r.started_at) : 0);
+  // voz nas salas (rc.49): a fala sem agente escolhido segue para quem ela chama pelo nome quando a transcrição termina; as
+  // que esperavam quando o servidor parou retomam aqui
+  transcricoes.aoTerminar.push((ws, art) => salas.aoTranscrever(ws, art));
+  for (const p of db.all<{ workspace_id: string; message_id: string }>('SELECT workspace_id, message_id FROM salas_rota_voz')) {
+    const ids = db.all<{ artifact_id: string }>('SELECT artifact_id FROM message_attachments WHERE message_id = ?', p.message_id).map((x) => x.artifact_id).filter((x) => {
+      const a = db.get<{ mime: string; filename: string }>('SELECT mime, filename FROM artifacts WHERE id = ?', x); return !!a && ehAudio(a.mime, a.filename);
+    });
+    if (!transcricoes.pendentes(p.workspace_id, ids)) salas.rotearVoz(p.workspace_id, p.message_id);
+  }
   registerRecursosRoutes(app, { db, bus, recursos, transcricoes, executor, cfg, auth, owner });
   // entregáveis (rc.42): documento formatado, PDF com modelo, identidade, modelos e revisão com o coordenador
   registerEntregaveisRoutes(app, { db, bus, revisao: revisaoDoc, cfg, auth, owner });

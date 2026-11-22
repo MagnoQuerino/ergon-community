@@ -65,7 +65,7 @@ const conta: Traducao<typeof pt> = {
 
   // ——— conta nova neste computador ———
   'registro.titulo': 'Create an account on this computer',
-  'registro.sub': "Everyone has their own account: your data is encrypted with your password, and others who use this computer can't see anything of yours (nor you theirs).",
+  'registro.sub': 'Everyone has their own account: your data is encrypted with your password and visible only to you.',
   'registro.convite': 'Invite code',
   'registro.conviteDica': 'On this computer, a new account needs an invite from whoever manages Ergon (Settings › People).',
   'registro.jaTenho': 'I already have an account',
@@ -175,7 +175,7 @@ const conta: Traducao<typeof pt> = {
   'seg.confirmada': 'confirmed',
   'seg.comFrase': 'The 24-word phrase opens your data if you forget the password.',
   'seg.semFrase': 'no phrase',
-  'seg.semFraseTexto': "There's no confirmed phrase yet: if you forget the password, the data won't open.",
+  'seg.semFraseTexto': 'Confirm a recovery phrase: it is what opens your data if you forget the password.',
   'seg.gerarNova': 'Generate a new phrase',
   'seg.gerar': 'Generate the phrase',
   'seg.gerarDica': 'A new phrase replaces the previous one as soon as you confirm 3 of its words.',
@@ -209,7 +209,7 @@ const conta: Traducao<typeof pt> = {
   'seg.autoLigandoAjudante': 'Turning on… the helper on this computer is storing the key.',
   'seg.autoLigandoEsperando': 'Turning on… waiting for the helper on this computer (it starts when you sign in to the computer).',
   'seg.autoDesligadoTexto': 'Off: after a restart, Ergon asks for your password, and the agents wait until you enter it.',
-  'seg.semAjudante': "This installation doesn't have the computer helper yet (it comes with the Ergon installer), so this switch is unavailable.",
+  'seg.semAjudante': 'Available with the Ergon installer, which brings the computer helper.',
   'seg.cofreDica': "The key stays in the system's own vault (Windows Data Protection, macOS Keychain or the Linux keyring), tied to your computer account: anyone who signs in to it opens Ergon without the password. Recommended if the computer is yours alone and has a password, PIN or biometrics.",
   'seg.variasPessoas': 'Several people use this computer: only turn this on if your Windows (or macOS/Linux) account is yours alone. If everyone signs in to the same computer account, anyone using it can open your data without your password.',
   'seg.excluirTitulo': 'Delete my account',
@@ -238,7 +238,7 @@ const conta: Traducao<typeof pt> = {
   'trava.min': '{min} min',
   'trava.limites': 'From 1 minute to 24 hours.',
   'trava.desligadaTexto': "Off: the screen doesn't lock on its own. If the computer is somewhere with other people, turn this on and choose how long it can go unused.",
-  'trava.dica': 'Only mouse and keyboard count. While the screen is locked, the agents keep working; nothing is visible until you unlock with your password.',
+  'trava.dica': 'Only mouse and keyboard count. While the screen is locked, the agents keep working, and everything comes back into view with your password.',
 
   // ——— Minha conta ———
   'minha.titulo': 'My account',
@@ -257,7 +257,7 @@ const conta: Traducao<typeof pt> = {
 
   // ——— o personagem que passeia pela cidade (o nome vem do componente: não se traduz) ———
   'npc.exibir': 'Show {nome}',
-  'npc.texto': "{nome} strolls around the city, long retired from conquest. He isn't an agent, doesn't work and doesn't take up a spot. Turning this off only hides him in this workspace.",
+  'npc.texto': '{nome} strolls around the city, long retired from conquest: he is there for decoration. Turning this off hides him in this workspace.',
   'npc.aria': 'Show {nome} in the city',
 
   // ——— o workspace atual ———
@@ -282,12 +282,12 @@ const conta: Traducao<typeof pt> = {
   'ws.semVolta': "There's no undo.",
   'ws.excluirDigite': 'To confirm, type the workspace name: {nome}',
   'ws.renomearPergunta': 'Rename the workspace?',
-  'ws.renomearTexto': 'The workspace {antes} will be called {depois}. Nothing else changes: team, tasks and conversations stay as they are.',
+  'ws.renomearTexto': 'The workspace {antes} will be called {depois}. Team, tasks and conversations stay as they are.',
 
   // ——— Configurações › Pessoas ———
   'pessoas.titulo': 'People on this computer',
-  'pessoas.explica': "Everyone has their own account and their own AI team. Each person's data is encrypted with their own key: you manage Ergon, but you can't see anything that belongs to others.",
-  'pessoas.explicaAntes': "Everyone has their own account and their own AI team. Each person's data is encrypted with their own key: you manage Ergon, but you can't see anything that belongs to others (the separation starts when a second person creates an account).",
+  'pessoas.explica': "Everyone has their own account and their own AI team. Each person's data is encrypted with their own key and only they can see it, even while you manage Ergon.",
+  'pessoas.explicaAntes': "Everyone has their own account and their own AI team. Each person's data is encrypted with their own key and only they can see it, even while you manage Ergon (the separation starts when a second person creates an account).",
   'pessoas.linha': '{usuario} · since {desde} · last used {uso}',
   'pessoas.linhaAdmin': '{usuario} · admin · since {desde} · last used {uso}',
   'pessoas.semFraseDica': "Without a confirmed personal phrase, a forgotten password locks this person's data forever.",

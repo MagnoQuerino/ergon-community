@@ -1,7 +1,10 @@
 import { Documento } from './Documento.tsx';
 import { daSemente } from '../i18n/sementes.ts';
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
-import { fmtDataHora, fmtHora, tn, useT } from '../i18n/index.ts';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { fmtDataHora, fmtHora, idiomaAtual, tn, useT } from '../i18n/index.ts';
+import { falarMensagem, idiomaDaFala, temFalaDoSistema, type Fala } from '../lib/fala.ts';
+import { textoFalado } from '../lib/conversa-voz.ts';
+import { AudioDaMensagem } from './AudioDaMensagem.tsx';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
 import { dragHasFiles, inlinePreview, isImage, kindOf, size } from '../lib/files.ts';
 import { useLiveEvent, useResource } from '../lib/live.ts';
@@ -106,43 +109,6 @@ function FileChip({ f, progress, error, onRemove }: { f: { filename: string; mim
       {doc && f.id && <Documento fonte={{ artifactId: f.id, tamanho: f.size }} onClose={() => setDoc(false)} />}
       {onRemove && <button type="button" className="fchip__x" onClick={onRemove} aria-label={t('conversas.arquivo.tirar', { nome: f.filename })}><Icon name="x" size={12} /></button>}
     </span>
-  );
-}
-
-/**
- * Áudio da mensagem (rc.33): o player (pela rota de sempre do arquivo) e, embaixo, a transcrição gravada no servidor —
- * "transcrevendo…", "preparando (primeira vez)…", o texto recolhido, ou a falha com "tentar de novo".
- */
-function AudioDaMensagem({ f, onTentar, podeTranscrever }: { f: Attachment; onTentar: (f: Attachment) => void; /** áudio de antes, sem transcrição: o botão */ podeTranscrever: boolean }) {
-  const t = useT();
-  const tr = f.transcricao;
-  // o WebM do gravador não traz a duração no cabeçalho: o navegador só sabe depois de ir até o fim (sem isso, a barra
-  // do player fica sem tamanho)
-  const duracao = (ev: SyntheticEvent<HTMLAudioElement>) => {
-    const a = ev.currentTarget;
-    if (a.duration !== Infinity) return;
-    const volta = () => { a.removeEventListener('timeupdate', volta); a.currentTime = 0; };
-    a.addEventListener('timeupdate', volta);
-    a.currentTime = 1e7;
-  };
-  return (
-    <div className="msg__audio">
-      <audio controls preload="metadata" src={`/api/artifacts/${f.id}/download?inline=1`} onLoadedMetadata={duracao} aria-label={t('conversas.audio.player', { nome: f.filename })} />
-      {!tr ? (podeTranscrever ? <button type="button" className="linkish small" onClick={() => onTentar(f)}><Icon name="file" size={12} /> {t('conversas.audio.transcrever')}</button> : null)
-        : tr.estado === 'transcrevendo' ? <span className="muted small msg__transcricao">{t('conversas.audio.transcrevendo')}</span>
-        : tr.estado === 'preparando' ? <span className="muted small msg__transcricao">{t('conversas.audio.preparando')}</span>
-        : tr.estado === 'falhou' ? (
-          <span className="small msg__transcricao msg__transcricao--falhou">
-            {tr.motivo === 'longo' ? t('conversas.audio.falhouLongo') : tr.motivo === 'componente' ? t('conversas.audio.falhouComponente') : tr.motivo === 'sem_motor' ? t('conversas.audio.falhouSemMotor') : t('conversas.audio.falhou')}
-            {tr.motivo !== 'longo' && <> <button type="button" className="linkish" onClick={() => onTentar(f)}><Icon name="repeat" size={12} /> {t('conversas.audio.tentar')}</button></>}
-          </span>
-        ) : (
-          <details className="msg__transcricao">
-            <summary>{t('conversas.audio.transcricao')}</summary>
-            <p>{tr.texto?.trim() ? tr.texto : <span className="muted">{t('conversas.recursos.semFala')}</span>}</p>
-          </details>
-        )}
-    </div>
   );
 }
 
@@ -436,23 +402,40 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
   const rec = useResource<RecursosEstado>(RECURSOS, []);
   const [tocando, setTocando] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const falaAtual = useRef<Fala | null>(null);
+  // "Ouvir" (rc.49): a voz da equipe, com a voz de cada agente; sem ela, a voz do sistema
+  const podeOuvir = !!rec.data?.voz.falar || temFalaDoSistema();
   const ouvir = async (m: Message) => {
-    if (tocando === m.id) { audioRef.current?.pause(); setTocando(null); return; }
+    if (tocando === m.id) { falaAtual.current?.parar(); audioRef.current?.pause(); setTocando(null); return; }
+    falaAtual.current?.parar();
     setTocando(m.id);
     // 1º uso do Piper: a voz é baixada agora (uns 60 MB); a pessoa sabe por que demora
     if (rec.data?.voz.preparar?.falar) setHint(t('conversas.recursos.preparandoVoz'));
     try {
-      let reserva = false;
-      const blob = await api.postBlob(`${RECURSOS}/voz/falar`, { mensagem: m.id }, (h) => { reserva = h.get('X-Ergon-Voz') === 'reserva'; });
-      setHint(reserva ? t('conversas.recursos.vozReserva') : null);
+      const a = audioRef.current ?? (audioRef.current = new Audio());
+      const f = await falarMensagem({ id: m.id, content: m.content, autor: agent.name }, { podeEquipe: !!rec.data?.voz.falar, idioma: idiomaDaFala(idiomaAtual()), audio: a });
+      setHint(null);
       if (rec.data?.voz.preparar?.falar) rec.reload();
-      audioRef.current?.pause();
-      const a = new Audio(URL.createObjectURL(blob));
-      audioRef.current = a;
-      a.onended = () => { setTocando(null); URL.revokeObjectURL(a.src); };
-      await a.play();
+      if (!f) { setTocando(null); return; }
+      falaAtual.current = f;
+      void f.fim.then(() => { if (falaAtual.current === f) { falaAtual.current = null; setTocando((x) => (x === m.id ? null : x)); } });
     } catch (e) { setTocando(null); setHint(null); setErr(errMsg(e)); }
   };
+  useEffect(() => () => { falaAtual.current?.parar(); }, []);
+  // falou, ouve (rc.49): a resposta a um áudio que a pessoa mandou é lida em voz alta sozinha, assim que chega
+  const vistas = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!msgs.data) return;
+    if (vistas.current === null) { vistas.current = new Set(list.map((m) => m.id)); return; }
+    const k = vistas.current;
+    for (const m of list) {
+      if (k.has(m.id) || m.role !== 'agent') continue;
+      if (m.run_status !== 'succeeded' && m.run_status !== 'failed' && m.run_status !== 'cancelled') continue;
+      k.add(m.id);
+      const pedido = list.find((x) => x.role === 'user' && x.run_id && x.run_id === m.run_id);
+      if (!vozAberta && podeOuvir && pedido?.attachments?.some((f) => ehAudio(f)) && textoFalado(m.content)) void ouvir(m);
+    }
+  }, [list]); // eslint-disable-line react-hooks/exhaustive-deps
   // a transcrição é do servidor (gravada ligada ao áudio, e vai ao agente); aqui só o "tentar de novo"
   // o pedido responde quando a transcrição termina (pode levar minutos); a mensagem já mostra "transcrevendo…" pelo aviso ao vivo
   const tentarTranscrever = (f: Attachment) => {
@@ -667,7 +650,7 @@ export function ChatPanel({ agent, onClose, compact, draft, embedded, conversati
                       <button type="button" className={`linkish ${m.marked ? 'is-on' : ''}`} onClick={() => void toggleMark(m)} title={m.marked ? t('conversas.acao.tirarMarca') : t('conversas.acao.marcarDica')}><Icon name="pin" size={12} /> {m.marked ? t('conversas.acao.marcada') : t('conversas.acao.marcar')}</button>
                       <button type="button" className="linkish" onClick={() => void fork(m)} title={t('conversas.acao.novoAssuntoDica')}><Icon name="plus" size={12} /> {t('conversas.acao.novoAssunto')}</button>
                       {m.role === 'agent' && body.length > 1200 && <button type="button" className="linkish" onClick={() => saveDoc(m)} title={t('conversas.acao.documentoDica')}><Icon name="download" size={12} /> {t('conversas.acao.documento')}</button>}
-                      {m.role === 'agent' && body && rec.data?.voz.falar && <button type="button" className={`linkish ${tocando === m.id ? 'is-on' : ''}`} onClick={() => void ouvir(m)} title={t('conversas.recursos.ouvirDica')}><Icon name={tocando === m.id ? 'stop' : 'play'} size={12} /> {tocando === m.id ? t('conversas.recursos.parar') : t('conversas.recursos.ouvir')}</button>}
+                      {m.role === 'agent' && body && podeOuvir && <button type="button" className={`linkish ${tocando === m.id ? 'is-on' : ''}`} onClick={() => void ouvir(m)} title={t('conversas.recursos.ouvirDica')}><Icon name={tocando === m.id ? 'stop' : 'play'} size={12} /> {tocando === m.id ? t('conversas.recursos.parar') : t('conversas.recursos.ouvir')}</button>}
                       {m.role === 'agent' && body && rec.data && m.id === lastAgentId && !busy && <button type="button" className="linkish" onClick={() => setConselho(true)} title={t('conversas.recursos.conselhoDica')}><Icon name="users" size={12} /> {t('conversas.recursos.conselho')}</button>}
                     </span>
                   ) : null}

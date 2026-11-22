@@ -44,7 +44,7 @@ const geral = {
   'alerta.recuperacaoMudou': 'Recuperação a refazer',
   'alerta.recuperacaoMudouDica': 'A senha do Ergon World mudou. Escolha de novo como recuperar.',
   'alerta.semIa': 'SEM CONTA DE IA',
-  'alerta.semIaDica': 'A equipe só trabalha nos pedidos com uma conta de IA conectada — a melhor escolha é o Ergon AI, IA sem assinatura. Veja Conexões.',
+  'alerta.semIaDica': 'Conecte uma conta de IA em Conexões para a equipe trabalhar nos pedidos. A melhor escolha é o Ergon AI, IA sem assinatura.',
   'alerta.novaVersao': 'NOVA VERSÃO · RECARREGAR',
   'alerta.novaVersaoDica': 'O Ergon foi atualizado para a versão {nova}. Esta aba ainda está com a {atual}.',
 
@@ -155,7 +155,7 @@ const geral = {
   'tour.fluxos': 'O quadro onde os agentes trabalham: cada card tem responsável e o histórico do que foi feito.',
   'tour.tarefas': 'As suas tarefas. Quando quiser ajuda, envie qualquer uma para a equipe.',
   'tour.aguardando': 'Aguardando você',
-  'tour.aguardandoTexto': 'Tudo que precisa da sua decisão: propostas da equipe, perguntas e sugestões. Nada importante muda sem o seu clique.',
+  'tour.aguardandoTexto': 'Tudo que precisa da sua decisão: propostas da equipe, perguntas e sugestões. O que é importante espera o seu clique.',
   'tour.conexoes': 'Conecte a sua conta de IA (é ela que põe a equipe para trabalhar), e-mail, WhatsApp e quadros de tarefas.',
   'tour.ajuda': 'Manuais, dicas e contornos para quando algo não sair como esperado. E {coord} sempre pode ajudar na conversa.',
   'tour.pronto': 'Pronto!',
@@ -244,11 +244,8 @@ const geral = {
   'consumo.notaCreditos': 'Conta com créditos: o custo aparece quando o provedor informa o valor cobrado; o saldo fica no portal da conta.',
   'consumo.notaApi': 'Chave de API: o custo aparece quando o provedor informa o valor cobrado de cada execução.',
   'consumo.notaSem': 'Sem conta de IA conectada: a equipe não trabalha nos pedidos, sem consumo.',
-  'consumo.semCusto': 'A conta não informou custo neste {periodo}. Nada é estimado.',
-  'consumo.custoDica': {
-    one: 'Custo cobrado informado pela conta em {n} execução deste {periodo}. Sem estimativas.',
-    other: 'Custo cobrado informado pela conta em {n} execuções deste {periodo}. Sem estimativas.',
-  },
+  'consumo.semCusto': 'Sem custo informado pela conta neste {periodo}.',
+  'consumo.custoDica': { one: 'Custo cobrado informado pela conta em {n} execução deste {periodo}.', other: 'Custo cobrado informado pela conta em {n} execuções deste {periodo}.' },
   'consumo.custoVazio': 'US$ —',
   'consumo.limite': '{provedor}: limite {janela}',
   'consumo.limiteRenova': '{provedor}: limite {janela} · renova {quando}',
@@ -290,6 +287,7 @@ const geral = {
 
   // ——— o texto longo (recolhido) ———
   'texto.recolher': 'Recolher o texto',
+  'bloco.verMais': 'Ver mais',
   // rc.42: controle do computador (selo da barra, cartão "Ativar acesso total?", confirmação de uma ação)
   'computador.usando': '{nome} usando este computador',
   'computador.voceNoControle': 'Você está no controle',

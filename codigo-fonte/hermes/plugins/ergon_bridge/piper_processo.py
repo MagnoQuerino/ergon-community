@@ -43,7 +43,11 @@ def principal(argv: list[str] | None = None) -> int:
     p.add_argument("--texto", required=True, help="arquivo com o texto (UTF-8)")
     p.add_argument("--saida", required=True)
     p.add_argument("--python", default=sys.executable, help="o Python que tem o pacote piper-tts")
+    p.add_argument("--ritmo", type=float, default=1.0, help="length_scale do Piper (a voz de cada agente: mais lenta ou mais rápida)")
     a = p.parse_args(argv)
+    if not 0.5 <= a.ritmo <= 2.0:
+        print(f"ritmo inválido: {a.ritmo}", file=sys.stderr)
+        return 2
     if not VOZ.fullmatch(a.voz):
         print(f"voz inválida: {a.voz[:60]}", file=sys.stderr)
         return 2
@@ -62,7 +66,10 @@ def principal(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="ergon-piper-") as tmp:
         wav = os.path.join(tmp, "fala.wav")
         # o texto vai pela entrada padrão; cada linha vira um trecho do mesmo WAV
-        r = rodar([a.python, "-m", "piper", "-m", a.voz, "--data-dir", a.pasta, "-f", wav], texto.encode("utf-8"), FALAR_S)
+        cmd = [a.python, "-m", "piper", "-m", a.voz, "--data-dir", a.pasta, "-f", wav]
+        if a.ritmo != 1.0:
+            cmd += ["--length-scale", f"{a.ritmo:.2f}"]
+        r = rodar(cmd, texto.encode("utf-8"), FALAR_S)
         if r.returncode != 0 or not os.path.isfile(wav) or os.path.getsize(wav) <= 44:
             print(f"o Piper não gerou o áudio: {r.stderr.decode('utf-8', 'replace')[-300:]}", file=sys.stderr)
             return 4

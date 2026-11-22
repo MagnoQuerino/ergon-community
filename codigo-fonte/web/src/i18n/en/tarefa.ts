@@ -318,7 +318,7 @@ const tarefa: Traducao<typeof pt> = {
 
   // ——— how it was checked ———
   'conferido.titulo': 'How it was checked',
-  'conferido.ainda': 'Nothing to check yet: the check happens when the work is delivered.',
+  'conferido.ainda': 'The check happens when the work is delivered.',
   'conferido.decididoPorVoce': 'Decided by you on {quando}',
   'conferido.peloSistema': 'Checked by the system on {quando}',
   'conferido.deOndeVeio': 'Where it came from: {plataforma} · {quando}',

@@ -11,6 +11,7 @@ import type { Agent, AgentLite, AgentTool, ModelCatalog, RecentConversation, Sec
 import { Loading } from '../brand/Brand.tsx';
 import { ChatPanel } from './ChatPanel.tsx';
 import { Icon } from './Icon.tsx';
+import { BotaoAcessoTotal } from './AcessoTotal.tsx';
 import { ModelSelect, TOOL_BADGE, modelName } from './AgentProfile.tsx';
 import { ModelosPorTarefa } from './ModelosPorTarefa.tsx';
 import { TrainTab } from './TrainTab.tsx';
@@ -349,7 +350,7 @@ function ProfileEditor({ agent, row, sectors, coordName, reload, onClose, onDirt
         </div>
         {/* regra do dono (rc.42): o que custa é um interruptor da equipe, e as protegidas vêm com o acesso total da equipe —
             nenhuma das duas se escolhe por agente; aqui só aparece o estado */}
-        <h5 className="tools-equipe__t">{t('agente.perfil.daEquipe')}</h5>
+        <div className="row tools-equipe__cab"><h5 className="tools-equipe__t">{t('agente.perfil.daEquipe')}</h5><BotaoAcessoTotal /></div>
         <div className="tools-grid tools-grid--equipe">
           {(tools.data ?? []).filter((tool) => tool.escopo === 'equipe').map((tool) => {
             const plena = tool.status === 'disponível'; // i18n-ok: o estado que o servidor manda, não texto de tela

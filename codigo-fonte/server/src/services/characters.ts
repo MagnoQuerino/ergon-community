@@ -33,14 +33,14 @@ export const TOOLS: Record<string, ToolDef> = {
   // não pode dizer "fica na Saída" para um e-mail redigido na conversa: não fica)
   saida: { id: 'saida', label: 'Rascunhos de resposta', kind: 'ergon', status: 'disponível', note: 'respostas a mensagens que chegam pelos canais (WhatsApp, Teams) ficam na Saída; numa conversa, o rascunho vai na própria resposta. Para deixar na caixa de Rascunhos ou enviar de verdade, use as Conexões' },
   arquivos: { id: 'arquivos', label: 'Arquivos', kind: 'ergon', status: 'parcial', note: 'vê a lista dos Arquivos do Ergon (nome, tipo, data), lê o texto dos documentos anexados ao card (PDF, Word, PowerPoint, Excel, Markdown) e entrega documentos no card; planilhas CSV são calculadas pela Análise de dados' },
-  dados: { id: 'dados', label: 'Análise de dados', kind: 'ergon', status: 'disponível', note: 'o sistema calcula indicadores a partir da planilha (CSV) anexada ao card e entrega relatório e indicadores; nenhum número estimado' },
+  dados: { id: 'dados', label: 'Análise de dados', kind: 'ergon', status: 'disponível', note: 'o sistema calcula indicadores a partir da planilha (CSV) anexada ao card e entrega relatório e indicadores; todo número vem da planilha' },
   conexoes: { id: 'conexoes', label: 'Mensagens dos canais', kind: 'ergon', status: 'preparado', note: 'resumo do que chegou nas últimas 48 h pelos canais conectados, quando você pergunta; para consultar qualquer período ou agir nas contas, use as Conexões' },
   contas: { id: 'contas', label: 'Conexões', kind: 'ia', toolset: 'ergon_conexoes', status: 'desligada', note: 'usa de verdade as contas e aplicativos conectados: consulta qualquer período, cria e conclui tarefas, deixa rascunhos, responde pessoas; o que precisar de confirmação vira um cartão para você', safe: true },
   passos: { id: 'passos', label: 'Lista de passos', kind: 'ia', toolset: 'todo', status: 'desligada', note: 'organiza o trabalho em passos durante a execução', safe: true },
   web: { id: 'web', label: 'Pesquisa na web', kind: 'ia', toolset: 'web', status: 'desligada', note: 'pesquisa e lê páginas públicas', safe: true },
   imagens: { id: 'imagens', label: 'Criar imagens', kind: 'ia', toolset: 'image_gen', status: 'desligada', aviso: 'custo', note: 'gera imagens a partir de uma descrição. Custo: cada imagem consome créditos da conta de IA', safe: true },
   visao: { id: 'visao', label: 'Ler imagens', kind: 'ia', toolset: 'vision', status: 'desligada', note: 'analisa imagens enviadas na conversa', safe: true },
-  habilidades: { id: 'habilidades', label: 'Competências da biblioteca', kind: 'ia', toolset: 'skills', status: 'desligada', note: 'consulta as competências atribuídas ao agente (sem criar nem editar competências)', safe: true },
+  habilidades: { id: 'habilidades', label: 'Competências da biblioteca', kind: 'ia', toolset: 'skills', status: 'desligada', note: 'consulta as competências atribuídas ao agente', safe: true },
   calculo: { id: 'calculo', label: 'Executar código', kind: 'ia', toolset: 'code_execution', status: 'bloqueada', note: 'roda programas em Python: cálculos, planilhas, gráficos e análise de dados', guarded: true },
   terminal: { id: 'terminal', label: 'Terminal', kind: 'ia', toolset: 'terminal', status: 'bloqueada', note: 'executa comandos (scripts, pacotes, arquivos) no ambiente isolado da equipe', guarded: true },
   // do próprio Ergon (antes, o agendador do motor: o lembrete disparava fora da vista, então ficava bloqueado): o agente
@@ -50,7 +50,7 @@ export const TOOLS: Record<string, ToolDef> = {
   // e em cada agente, BENEFICIOS), mesmo quando custa; o aviso diz o custo ou o risco, e a pessoa tira para economizar. As
   // travas continuam: gravar arquivo só com Terminal ou Executar código; com a proteção de Conexões ligada pela pessoa
   // (conexoes.aprovar_depois_de_ler, desligada por padrão: decisão de 08/11), abrir sites depois de ler as contas pede aprovação.
-  leitura: { id: 'leitura', label: 'Ler e procurar arquivos', kind: 'ia', toolset: 'file', status: 'desligada', aviso: 'risco', note: 'lê e procura arquivos no ambiente isolado da equipe (PDF, planilhas, textos), ao lado da leitura dos documentos do Ergon; só lê: gravar e alterar arquivos fica para quem também tem Terminal ou Executar código', safe: true },
+  leitura: { id: 'leitura', label: 'Ler e procurar arquivos', kind: 'ia', toolset: 'file', status: 'desligada', aviso: 'risco', note: 'lê e procura arquivos no ambiente isolado da equipe (PDF, planilhas, textos), ao lado da leitura dos documentos do Ergon', safe: true },
   navegador: { id: 'navegador', label: 'Navegador automático', kind: 'ia', toolset: 'browser', status: 'desligada', aviso: 'risco', note: 'abre sites, clica, preenche e lê páginas num navegador de verdade, para portais sem integração. Risco: uma página pode trazer instruções escondidas tentando manipular o agente; o que ela diz é dado, não instrução. Para aprovar antes de o agente abrir sites depois de ler as suas contas, ligue a proteção em Conexões. Cada página lida também consome mais da conta de IA', safe: true },
   video: { id: 'video', label: 'Ver vídeos', kind: 'ia', toolset: 'video', status: 'desligada', aviso: 'custo', note: 'assiste a um vídeo e descreve ou resume. Custo: um vídeo consome bem mais da conta de IA que um texto', safe: true },
   videogen: { id: 'videogen', label: 'Criar vídeos', kind: 'ia', toolset: 'video_gen', status: 'desligada', aviso: 'custo', note: 'gera vídeos curtos a partir de uma descrição ou de uma imagem. Precisa de uma conta de vídeo ligada (chave própria, em Conexões › Chave própria); cada vídeo é cobrado por ela', safe: true },
@@ -108,9 +108,15 @@ export const ferramentasAbertas = (coordinator = false): string[] =>
 /** O que o agente tem de fato: a lista dele, os recursos com custo (interruptor da equipe) e, com o acesso total, as protegidas. */
 export const ferramentasEfetivas = (tools: readonly string[], opts: { acessoTotal?: boolean } = {}): string[] =>
   [...new Set([...tools, ...COM_CUSTO, ...(opts.acessoTotal ? PROTEGIDAS : [])])].filter((t) => TOOLS[t]);
+/** Os prazos do acesso total (rc.49). */
+export const PRAZOS_ACESSO = { '24h': 24 * 3600_000, '7d': 7 * 24 * 3600_000, sempre: 0 } as const;
+export type PrazoAcesso = keyof typeof PRAZOS_ACESSO;
 /** O acesso total da equipe está ligado ("Ativar acesso total?", app.ts) e quem administra não proibiu. */
 export function acessoTotalDaEquipe(db: Db, workspaceId: string): boolean {
   const get = (k: string) => db.get<{ value: string }>('SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ?', workspaceId, k)?.value;
+  // rc.49: o acesso total vale pelo prazo escolhido no cartão (24 horas, 7 dias ou sempre)
+  const ate = get('acesso_total.ate');
+  if (ate && Date.parse(ate) <= Date.now()) return false;
   return !!get('acesso_total') && get('conexoes.liberar_tudo_proibido') !== '1';
 }
 

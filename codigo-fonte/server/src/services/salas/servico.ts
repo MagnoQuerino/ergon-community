@@ -28,6 +28,8 @@ import { getSetting, setSetting } from '../sectors.ts';
 import { VOZ_NOTE, titleFrom } from '../chat.ts';
 import { visuaisComoTexto } from '../../../../shared/visuais/texto.ts';
 import { votoDe } from '../../../../shared/visuais/cercas.ts';
+import { chamaTodos, mencionados } from '../../../../shared/nomes-falados.ts';
+import { ehAudio } from '../transcricoes.ts';
 import { chamadaDoAgente, cessaoVale, conferirMarcas, expiraEm, permissaoEfetiva, podeChamarAgente, semControle, type Cessao, type Marca, type Membro, type Papel, type Prazo } from './marcas.ts';
 
 export interface PessoaDoWorkspace { chave: string; nome: string; papel: Papel; eu: boolean }
@@ -453,13 +455,26 @@ export class Salas {
     const topicos = new Map<string, { id: string; nome: string; respostas: number; arquivado: boolean; privado: boolean }>();
     for (const t of this.topicosVisiveis(ws, userId, convId)) if (t.origem) topicos.set(t.origem, { id: t.id, nome: t.nome, respostas: t.respostas, arquivado: t.arquivado, privado: t.privado });
     const fila = this.db.all<{ agent_id: string; status: string; nome: string }>("SELECT f.agent_id, f.status, a.name AS nome FROM salas_fila f JOIN agents a ON a.id = f.agent_id WHERE f.conversation_id = ? AND f.status IN ('esperando', 'rodando') ORDER BY f.created_at", convId);
+    // o turno de cada mensagem da pessoa (o canal de voz fala cada resposta assim que chega): as execuções que ela pediu,
+    // quantas ainda faltam e se ainda espera a transcrição para saber quem chamou
+    const turnos = new Map<string, { runs: string[]; faltam: number; roteando: boolean }>();
+    const minhas = rows.filter((r) => r.role === 'user').map((r) => r.id);
+    for (const f of this.db.all<{ origem_id: string; run_id: string | null; status: string }>(`SELECT origem_id, run_id, status FROM salas_fila WHERE conversation_id = ? AND origem_id IN (${minhas.map(() => '?').join(',') || "''"}) ORDER BY created_at, rowid`, convId, ...minhas)) {
+      const t = turnos.get(f.origem_id) ?? { runs: [], faltam: 0, roteando: false }; turnos.set(f.origem_id, t);
+      if (f.run_id) t.runs.push(f.run_id);
+      if (f.status !== 'feito') t.faltam++;
+    }
+    for (const x of this.db.all<{ message_id: string }>('SELECT message_id FROM salas_rota_voz WHERE conversation_id = ?', convId)) {
+      const t = turnos.get(x.message_id) ?? { runs: [], faltam: 0, roteando: false }; turnos.set(x.message_id, t); t.roteando = true;
+    }
     return {
       mensagens: rows.map((r) => {
         let marcas: unknown = null;
         try { marcas = r.marcas ? JSON.parse(r.marcas) : null; } catch { marcas = null; }
         return { id: r.id, role: r.role, content: r.role === 'agent' ? semControle(r.content) : r.content, created_at: r.created_at, autor: { chave: r.autor_chave, nome: r.autor_nome },
           marcas, pedinte: r.pedinte_chave, reply_to: r.reply_to, run_id: r.run_id, run_status: r.run_status, ...(files.has(r.id) ? { attachments: files.get(r.id) } : {}),
-          ...(remotos.has(r.id) ? { remotos: remotos.get(r.id) } : {}), ...(topicos.has(r.id) ? { topico: topicos.get(r.id) } : {}) };
+          ...(remotos.has(r.id) ? { remotos: remotos.get(r.id) } : {}), ...(topicos.has(r.id) ? { topico: topicos.get(r.id) } : {}),
+          ...(r.role === 'user' ? { turno: turnos.get(r.id) ?? { runs: [], faltam: 0, roteando: false } } : {}) };
       }),
       // quem está respondendo agora e quem vem depois (a tela mostra "Pensando…" no rosto de quem é a vez)
       respondendo: fila.map((f) => ({ agentId: f.agent_id, nome: f.nome, status: f.status })),
@@ -517,12 +532,22 @@ export class Salas {
       if (b.replyTo && this.db.get('SELECT 1 AS x FROM messages WHERE id = ? AND conversation_id = ?', b.replyTo, convId)) this.db.run('UPDATE messages SET reply_to = ? WHERE id = ?', b.replyTo, messageId);
       this.db.run('INSERT INTO salas_leitura (conversation_id, chave, read_at) VALUES (?, ?, ?) ON CONFLICT (conversation_id, chave) DO UPDATE SET read_at = excluded.read_at', convId, eu, now());
       // canal de voz: o agente com quem a pessoa fala (escolha explícita da tela, como uma marca), antes dos mencionados
-      const voz = b.vozAgente && this.membroAtivo(convId, 'agente', [b.vozAgente]) ? b.vozAgente : null;
-      for (const nome of voz ? [voz, ...m.agentes.filter((x) => x !== voz)] : m.agentes) {
-        const a = this.agenteAtivo(ws, nome);
-        if (a) fila.push(this.enfileirar(ws, convId, { origem: messageId, agentId: a.id, pedinte: eu, pedinteNome: meuNome, pedido: texto, profundidade: 0, cedida: false, voz: nome === voz }));
+      const voz = b.vozAgente && b.vozAgente !== '*' && this.membroAtivo(convId, 'agente', [b.vozAgente]) ? b.vozAgente : null;
+      // fala sem agente escolhido (canal de voz em "Todos", ou o áudio do gravador sem menção): vai a quem a fala chama
+      // pelo nome, quando a transcrição chegar (rotearVoz)
+      const porVoz = !voz && !m.agentes.length && (b.vozAgente === '*' || this.temAudio(b.attachments ?? []));
+      if (porVoz) {
+        this.db.run('INSERT OR IGNORE INTO salas_rota_voz (message_id, workspace_id, conversation_id, pedinte_chave, pedinte_nome, canal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          messageId, ws, convId, eu, meuNome, b.vozAgente === '*' ? 1 : 0, now());
+      }
+      const nomes = voz ? [voz, ...m.agentes.filter((x) => x !== voz)] : m.agentes;
+      const ativos = nomes.map((nome) => ({ nome, a: this.agenteAtivo(ws, nome) })).filter((x): x is { nome: string; a: { id: string; name: string } } => !!x.a);
+      for (const { nome, a } of ativos) {
+        fila.push(this.enfileirar(ws, convId, { origem: messageId, agentId: a.id, pedinte: eu, pedinteNome: meuNome, pedido: texto, profundidade: 0, cedida: false, voz: nome === voz,
+          juntos: ativos.length > 1 ? ativos.map((x) => x.nome) : undefined }));
       }
     });
+    if (fila.length === 0 && this.db.get('SELECT 1 AS x FROM salas_rota_voz WHERE message_id = ?', messageId)) this.rotearVoz(ws, messageId);
     if (m.agentes.length || m.pessoas.length || m.cessoes.length) audit(this.db, this.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'sala.mensagem', targetType: 'conversation', targetId: convId,
       evidence: { agentes: m.agentes.length, pessoas: m.pessoas.length, cessoes: m.cessoes.length }, result: 'mensagem com menções na sala' });
     this.despachar(ws, convId);
@@ -530,11 +555,66 @@ export class Salas {
     return { messageId, agentes: m.agentes, replayed: false };
   }
 
-  private enfileirar(ws: string, convId: string, x: { origem: string; agentId: string; pedinte: string; pedinteNome: string; pedido: string; profundidade: number; cedida: boolean; voz?: boolean }): string {
+  private enfileirar(ws: string, convId: string, x: { origem: string; agentId: string; pedinte: string; pedinteNome: string; pedido: string; profundidade: number; cedida: boolean; voz?: boolean;
+    /** os agentes chamados juntos nesta mensagem, na ordem em que respondem (cada um fala a sua parte) */ juntos?: string[] }): string {
     const fid = id('sfl');
-    this.db.run('INSERT INTO salas_fila (id, workspace_id, conversation_id, origem_id, agent_id, pedinte_chave, pedinte_nome, pedido, profundidade, cedida, voz, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      fid, ws, convId, x.origem, x.agentId, x.pedinte, x.pedinteNome, this.db.seal(ws, clip(x.pedido, 20_000)), x.profundidade, x.cedida ? 1 : 0, x.voz ? 1 : 0, now());
+    this.db.run('INSERT INTO salas_fila (id, workspace_id, conversation_id, origem_id, agent_id, pedinte_chave, pedinte_nome, pedido, profundidade, cedida, voz, juntos, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      fid, ws, convId, x.origem, x.agentId, x.pedinte, x.pedinteNome, this.db.seal(ws, clip(x.pedido, 20_000)), x.profundidade, x.cedida ? 1 : 0, x.voz ? 1 : 0,
+      x.juntos && x.juntos.length > 1 ? JSON.stringify(x.juntos.slice(0, 12)) : null, now());
     return fid;
+  }
+
+  /** a mensagem traz um áudio */
+  private temAudio(ids: string[]): boolean {
+    if (!ids.length) return false;
+    return this.db.all<{ mime: string; filename: string }>(`SELECT mime, filename FROM artifacts WHERE id IN (${ids.map(() => '?').join(',')})`, ...ids).some((a) => ehAudio(a.mime, a.filename));
+  }
+
+  /**
+   * Voz na sala (rc.49): a fala sem agente escolhido vai a quem ela chama pelo nome (shared/nomes-falados.ts: fonético, sem
+   * IA, montado na hora com os nomes dos agentes da sala). "Pessoal…" chama todos. Sem nome: no canal de voz, segue com quem
+   * respondeu por último (a conversa flui sem repetir o nome); numa sala de um agente só, ele; senão, ninguém (como um
+   * texto sem menção). Vários chamados: um de cada vez, cada um sabendo quem mais responde, para dividir a resposta.
+   * Chamado quando a mensagem chega e quando cada transcrição termina; espera até todos os áudios dela terminarem.
+   */
+  rotearVoz(ws: string, messageId: string): void {
+    const r = this.db.get<{ conversation_id: string; pedinte_chave: string; pedinte_nome: string; canal: number }>(
+      'SELECT conversation_id, pedinte_chave, pedinte_nome, canal FROM salas_rota_voz WHERE message_id = ? AND workspace_id = ?', messageId, ws);
+    if (!r) return;
+    const audios = this.db.all<{ estado: string | null; texto: string | null }>(
+      `SELECT t.estado, t.texto FROM message_attachments ma JOIN artifacts a ON a.id = ma.artifact_id LEFT JOIN audio_transcricoes t ON t.artifact_id = a.id
+        WHERE ma.message_id = ? AND (a.mime LIKE 'audio/%' OR a.filename LIKE '%.webm' OR a.filename LIKE '%.ogg' OR a.filename LIKE '%.mp3' OR a.filename LIKE '%.m4a' OR a.filename LIKE '%.wav')`, messageId);
+    if (audios.some((x) => !x.estado || x.estado === 'transcrevendo' || x.estado === 'preparando')) return;
+    const convId = r.conversation_id;
+    const escrito = this.db.get<{ content: string }>('SELECT content FROM messages WHERE id = ?', messageId)?.content ?? '';
+    const fala = [escrito, ...audios.filter((x) => x.estado === 'pronta' && x.texto).map((x) => x.texto as string)].join(' \n').trim();
+    const agentes = this.membros(convId).filter((x) => x.tipo === 'agente' && this.agenteAtivo(ws, x.nome));
+    const nomes = agentes.map((x) => x.nome);
+    let chamados = chamaTodos(fala) ? nomes : mencionados(fala, nomes).map((x) => x.nome);
+    if (!chamados.length && Number(r.canal)) {
+      const ultimo = this.db.get<{ name: string }>(`SELECT a.name FROM salas_fila f JOIN agents a ON a.id = f.agent_id
+        WHERE f.conversation_id = ? AND f.voz = 1 AND f.profundidade = 0 ORDER BY f.created_at DESC, f.rowid DESC LIMIT 1`, convId)?.name;
+      chamados = ultimo && nomes.includes(ultimo) ? [ultimo] : nomes.slice(0, 1);
+    }
+    if (!chamados.length && nomes.length === 1) chamados = nomes;
+    const ativos = chamados.map((nome) => ({ nome, a: this.agenteAtivo(ws, nome) })).filter((x): x is { nome: string; a: { id: string; name: string } } => !!x.a);
+    this.db.tx(() => {
+      this.db.run('DELETE FROM salas_rota_voz WHERE message_id = ?', messageId);
+      for (const { a } of ativos) {
+        this.enfileirar(ws, convId, { origem: messageId, agentId: a.id, pedinte: r.pedinte_chave, pedinteNome: r.pedinte_nome, pedido: escrito.trim() || '(fala em áudio)', profundidade: 0, cedida: false,
+          voz: true, juntos: ativos.length > 1 ? ativos.map((x) => x.nome) : undefined });
+      }
+    });
+    if (ativos.length) audit(this.db, this.bus, { workspaceId: ws, actorType: 'system', actorId: 'salas', action: 'sala.voz_rota', targetType: 'conversation', targetId: convId,
+      evidence: { agentes: ativos.length }, result: `fala na sala para ${ativos.map((x) => x.nome).join(', ')}` });
+    this.despachar(ws, convId);
+    this.mudou(ws, convId, true);
+  }
+  /** Uma transcrição terminou: as falas da sala que esperavam por ela seguem. */
+  aoTranscrever(ws: string, artifactId: string): void {
+    for (const x of this.db.all<{ message_id: string }>('SELECT rv.message_id FROM salas_rota_voz rv JOIN message_attachments ma ON ma.message_id = rv.message_id WHERE ma.artifact_id = ? AND rv.workspace_id = ?', artifactId, ws)) {
+      this.rotearVoz(ws, x.message_id);
+    }
   }
 
   /** O histórico recente da sala, com os autores, para o agente (o pedido vai à parte). */
@@ -554,8 +634,8 @@ export class Salas {
   despachar(ws: string, convId: string): void {
     if (this.db.get("SELECT 1 AS x FROM runs WHERE conversation_id = ? AND status IN ('queued', 'running', 'waiting_user') LIMIT 1", convId)) return;
     if (this.db.get("SELECT 1 AS x FROM salas_fila WHERE conversation_id = ? AND status = 'rodando' LIMIT 1", convId)) return;
-    const f = this.db.get<{ id: string; origem_id: string; agent_id: string; pedinte_chave: string; pedinte_nome: string; pedido: string; profundidade: number; cedida: number; voz: number }>(
-      "SELECT id, origem_id, agent_id, pedinte_chave, pedinte_nome, pedido, profundidade, cedida, voz FROM salas_fila WHERE conversation_id = ? AND status = 'esperando' ORDER BY created_at, rowid LIMIT 1", convId);
+    const f = this.db.get<{ id: string; origem_id: string; agent_id: string; pedinte_chave: string; pedinte_nome: string; pedido: string; profundidade: number; cedida: number; voz: number; juntos: string | null }>(
+      "SELECT id, origem_id, agent_id, pedinte_chave, pedinte_nome, pedido, profundidade, cedida, voz, juntos FROM salas_fila WHERE conversation_id = ? AND status = 'esperando' ORDER BY created_at, rowid LIMIT 1", convId);
     if (!f) return;
     const sala = this.row(ws, convId);
     const agente = this.db.get<{ id: string; name: string; status: string }>('SELECT id, name, status FROM agents WHERE id = ?', f.agent_id);
@@ -579,6 +659,7 @@ export class Salas {
       conexoes,
       faltam.length && !f.cedida ? `${f.pedinte_nome} pediu também as conexões de ${faltam.map(nomeDe).join(' e ')}; ainda não cederam. Faça agora o que dá e diga, em uma frase curta, o que falta de quem.` : '',
       Number(f.voz) ? VOZ_NOTE : '',
+      juntosNota(f.juntos, agente.name),
       f.profundidade === 0 ? 'Se precisar de um colega agente desta sala, escreva uma linha [[chamar agente="Nome" pedido="o que precisa"]] (uma vez; ele responde aqui depois de você).' : 'Você foi chamado por um colega agente: responda só o que ele pediu e não chame outros.',
     ].filter(Boolean).join('\n');
     const pedido = `${f.pedinte_nome} pediu: ${f.pedido}`;
@@ -1029,4 +1110,22 @@ export class Salas {
     const u = this.pessoaLocal(ws);
     if (u && !this.membroAtivo(s.id, 'pessoa', this.chavesDe(ws, u))) this.db.run('UPDATE salas_cessoes SET revogada_em = ? WHERE conversation_id = ? AND revogada_em IS NULL', agora, s.id);
   }
+}
+
+/**
+ * Vários agentes chamados na mesma mensagem (rc.49): uma resposta só, dividida. Cada um sabe quem mais responde e em que
+ * ordem; o primeiro abre com a parte da área dele, os seguintes leem o que veio antes (no histórico) e completam, sem
+ * repetir. Sem IA para coordenar: a ordem é a da fala.
+ */
+export function juntosNota(juntos: string | null, eu: string): string {
+  let lista: string[] = [];
+  try { lista = juntos ? (JSON.parse(juntos) as unknown[]).filter((x): x is string => typeof x === 'string') : []; } catch { lista = []; }
+  if (lista.length < 2 || !lista.includes(eu)) return '';
+  const i = lista.indexOf(eu);
+  const antes = lista.slice(0, i); const depois = lista.slice(i + 1);
+  return [
+    `A pessoa chamou ${lista.join(', ')} juntos: vocês respondem um depois do outro, nesta ordem, e a resposta é uma só, dividida.`,
+    antes.length ? `${antes.join(' e ')} já ${antes.length > 1 ? 'responderam' : 'respondeu'} (está no histórico): leia, não repita, e fale só a sua parte, o que é da sua área ou o que ficou faltando.` : 'Você abre: fale só a parte da sua área, curto.',
+    depois.length ? `Depois de você vem ${depois.join(' e ')}: deixe a parte da área de ${depois.length > 1 ? 'cada um' : depois[0]} para quem vem depois.` : 'Você fecha: complete o que faltou e, se couber, amarre a resposta em uma frase.',
+  ].join(' ');
 }

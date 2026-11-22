@@ -3,7 +3,10 @@
 // agentes, o cartão de cessão de quem foi marcado), membros, e os pedaços que outras telas usam (o sino, Conexões e a
 // Governança). Tela limpa: o visual guia (borda que pulsa, brilho), os textos são curtos.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { fmtData, fmtHora, useT } from '../i18n/index.ts';
+import { fmtData, fmtHora, idiomaAtual, useT } from '../i18n/index.ts';
+import { turnoDaSala, textoFalado, type MensagemDoTurno } from '../lib/conversa-voz.ts';
+import { falarMensagem, idiomaDaFala, temFalaDoSistema, type Fala } from '../lib/fala.ts';
+import { AudioDaMensagem } from './AudioDaMensagem.tsx';
 import { api, errMsg, requestId, uploadFile } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { openSala } from '../lib/open.ts';
@@ -13,7 +16,7 @@ import type { Attachment, Message } from '../lib/types.ts';
 import { AgentAvatar } from './AgentAvatar.tsx';
 import { GravadorDeVoz } from './GravadorDeVoz.tsx';
 import { ConversaPorVoz } from './ConversaPorVoz.tsx';
-import { RECURSOS, type RecursosEstado } from '../lib/recursos.ts';
+import { RECURSOS, ehAudio, type RecursosEstado } from '../lib/recursos.ts';
 import { Icon } from './Icon.tsx';
 import { Markdown } from './Markdown.tsx';
 import { NavegadorAoVivo } from './NavegadorAoVivo.tsx';
@@ -34,6 +37,7 @@ interface AgenteDisp { chave: string; nome: string; id: string; role: string; co
 interface Disponiveis { pessoas: Array<{ chave: string; nome: string; papel: string; eu: boolean }>; agentes: AgenteDisp[] }
 interface Evento { evento: string; nome?: string; alvo?: string; prazo?: Prazo; agente?: string }
 interface Msg { id: string; role: 'user' | 'agent' | 'system'; content: string; created_at: string; autor: { chave: string | null; nome: string | null }; marcas: unknown; pedinte: string | null; attachments?: Attachment[];
+  /** a execução da resposta e, na mensagem da pessoa, o turno (as execuções pedidas: o canal de voz e o "ouvir" sozinho) */ run_id?: string | null; turno?: { runs: string[]; faltam: number; roteando: boolean };
   /** o tópico que nasceu desta mensagem (só se a pessoa o vê) */ topico?: { id: string; nome: string; respostas: number; arquivado: boolean; privado: boolean };
   /** anexos que nasceram em outro computador: a ficha, até alguém baixar */ remotos?: Array<{ ref: string; filename: string; mime: string; size: number; estado: 'remoto' | 'baixando' | 'grande' }> }
 interface Mensagens { mensagens: Msg[]; respondendo: Array<{ agentId: string; nome: string; status: string }> }
@@ -311,7 +315,8 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
   const [anexos, setAnexos] = useState<Pendente[]>([]);
   // o canal de voz (rc.41) na sala: fala com um agente da sala, escolhido aqui; manda e recebe pela própria sala
   const rec = useResource<RecursosEstado>(RECURSOS, []);
-  const [voz, setVoz] = useState<AgenteDisp | null>(null);
+  // null: desligado; 'todos': responde quem a fala chamar pelo nome (rc.49)
+  const [voz, setVoz] = useState<AgenteDisp | 'todos' | null>(null);
   const [escolhendoVoz, setEscolhendoVoz] = useState(false);
   const [campoVazio, setCampoVazio] = useState(true);
   // tópicos: o aberto ao lado, a lista e o diálogo de abrir um (do zero ou de uma mensagem)
@@ -330,6 +335,47 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
   const fim = useRef<HTMLDivElement>(null);
   const arquivo = useRef<HTMLInputElement>(null);
   const todas = msgs.data?.mensagens ?? [];
+  // ouvir (rc.49): cada agente com a sua voz; a resposta a um áudio seu é lida sozinha, assim que chega
+  const podeOuvir = !!rec.data?.voz.falar || temFalaDoSistema();
+  const [tocando, setTocando] = useState<string | null>(null);
+  const falaAtual = useRef<Fala | null>(null);
+  const audioSala = useRef<HTMLAudioElement | null>(null);
+  const fila = useRef<Msg[]>([]);
+  const ouvir = async (m: Msg, daFila = false) => {
+    if (!daFila && tocando === m.id) { falaAtual.current?.parar(); fila.current = []; setTocando(null); return; }
+    if (!daFila) { fila.current = []; falaAtual.current?.parar(); }
+    setTocando(m.id);
+    try {
+      const f = await falarMensagem({ id: m.id, content: m.content, autor: m.autor.nome }, { podeEquipe: !!rec.data?.voz.falar, idioma: idiomaDaFala(idiomaAtual()), audio: audioSala.current ?? (audioSala.current = new Audio()) });
+      if (!f) { setTocando(null); return; }
+      falaAtual.current = f;
+      await f.fim;
+      if (falaAtual.current !== f) return;
+      falaAtual.current = null;
+      const proxima = fila.current.shift();
+      if (proxima) void ouvir(proxima, true); else setTocando(null);
+    } catch (e) { setTocando(null); setErr(errMsg(e)); }
+  };
+  useEffect(() => () => { falaAtual.current?.parar(); }, []);
+  const vistas = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!msgs.data) return;
+    if (vistas.current === null) { vistas.current = new Set(todas.map((m) => m.id)); return; }
+    const k = vistas.current;
+    for (const m of todas) {
+      if (k.has(m.id) || m.role !== 'agent') continue;
+      k.add(m.id);
+      if (voz || !podeOuvir || !textoFalado(m.content)) continue;
+      // a resposta a um áudio meu (pelo turno que a sala manda em cada mensagem minha)
+      const pedido = todas.find((x) => x.role === 'user' && x.autor.chave === det.data?.eu && !!m.run_id && !!x.turno?.runs.includes(m.run_id));
+      if (!pedido?.attachments?.some((f) => ehAudio(f))) continue;
+      if (falaAtual.current) fila.current.push(m); else void ouvir(m);
+    }
+  }, [todas]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tentarTranscrever = (f: Attachment) => {
+    void api.post(`${RECURSOS}/voz/transcrever`, { arquivo: f.id }).catch((e) => setErr(errMsg(e))).finally(() => msgs.reload());
+    window.setTimeout(() => msgs.reload(), 400);
+  };
   // blocos visuais: as mensagens que são só o voto de uma enquete ficam fora da lista (contam na enquete)
   const lista = useMemo(() => todas.filter((m) => !(m.role === 'user' && votoDe(m.content))), [todas]);
   const visuais = useMemo<VisuaisContexto>(() => ({
@@ -369,6 +415,16 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
     const key = requestId();
     setAnexos((l) => [...l, { key, nome: f.name, art: null, erro: false }]);
     uploadFile<Attachment>(f, { conversationId: salaId }).then((art) => setAnexos((l) => l.map((x) => (x.key === key ? { ...x, art } : x)))).catch((e) => { setErr(errMsg(e)); setAnexos((l) => l.map((x) => (x.key === key ? { ...x, erro: true } : x))); });
+  };
+  // o áudio gravado (rc.49) sai na hora, como na conversa: responde quem a fala chamar pelo nome
+  const gravado = async (f: File, motivo: 'enviar' | 'limite') => {
+    if (motivo === 'limite') { subir(f); return; }
+    setErr(null);
+    try {
+      const art = await uploadFile<Attachment>(f, { conversationId: salaId });
+      await api.post(`/api/salas/${salaId}/mensagens`, { texto: '', clientRequestId: requestId(), attachments: [art.id] });
+      msgs.reload();
+    } catch (e) { setErr(errMsg(e)); }
   };
   const patch = async (body: Record<string, unknown>) => { setErr(null); setMenu(false); try { await api.patch(`/api/salas/${salaId}`, body); det.reload(); } catch (e) { setErr(errMsg(e)); } };
   const baixar = async (ref: string) => { setErr(null); try { await api.post(`/api/salas/${salaId}/anexos/${ref}/baixar`); msgs.reload(); } catch (e) { setErr(errMsg(e)); } };
@@ -450,9 +506,13 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
                     aria-label={t('conversas.sala.anexo.baixar', { nome: f.filename })} title={f.estado === 'grande' ? t('conversas.sala.anexo.grande') : f.estado === 'baixando' ? t('conversas.sala.anexo.baixando') : t('conversas.sala.anexo.baixar', { nome: f.filename })}>
                     <Icon name={f.estado === 'remoto' ? 'download' : f.estado === 'baixando' ? 'clock' : 'file'} size={14} />{f.filename}{f.estado !== 'remoto' && <small className="muted">{f.estado === 'grande' ? t('conversas.sala.anexo.grande') : t('conversas.sala.anexo.baixando')}</small>}
                   </button>))}</div>}
-                {!!m.attachments?.length && <div className="smsg__anexos">{m.attachments.map((f) => <a key={f.id} className="fchip" href={`/api/artifacts/${f.id}/download`} target="_blank" rel="noreferrer"><Icon name="file" size={14} />{f.filename}</a>)}</div>}
+                {!!m.attachments?.length && <div className="smsg__anexos">{m.attachments.map((f) => (ehAudio(f)
+                  ? <AudioDaMensagem key={f.id} f={f} onTentar={tentarTranscrever} podeTranscrever={!!rec.data?.voz.transcrever} />
+                  : <a key={f.id} className="fchip" href={`/api/artifacts/${f.id}/download`} target="_blank" rel="noreferrer"><Icon name="file" size={14} />{f.filename}</a>))}</div>}
                 {m.topico && <button type="button" className={`sala-topico-chip ${m.topico.arquivado ? 'is-arquivado' : ''}`} onClick={() => setTopico(m.topico!.id)}><Icon name={m.topico.privado ? 'lock' : 'chat'} size={13} />{t('conversas.sala.topico.chip', { nome: m.topico.nome, n: m.topico.respostas })}</button>}
                 <span className="smsg__acoes">
+                  {m.role === 'agent' && podeOuvir && textoFalado(m.content) && <button type="button" className={`linkish small smsg__ouvir ${tocando === m.id ? 'is-on' : ''}`} onClick={() => void ouvir(m)} title={t('conversas.recursos.ouvirDica')}>
+                    <Icon name={tocando === m.id ? 'stop' : 'play'} size={12} /> {tocando === m.id ? t('conversas.recursos.parar') : t('conversas.recursos.ouvir')}</button>}
                   {!painelTopico && !s.topico && !m.topico && !s.arquivada && <button type="button" className="linkish small" onClick={() => setNovoTopico({ origem: m })}><Icon name="chat" size={12} /> {t('conversas.sala.topico.deMensagem')}</button>}
                   {!leitura && <button type="button" className="linkish small" onClick={() => void tarefa(m)} title={t('conversas.sala.tarefa')}><Icon name="tasks" size={12} /> {t('conversas.sala.tarefa')}</button>}
                 </span>
@@ -477,15 +537,16 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
           {/* no celular (rc.43): anexar e a voz no "+", o microfone no lugar do enviar com o campo vazio */}
           {!voz && <MaisDoCampo itens={[
             { rotulo: t('conversas.sala.anexar'), icone: 'clip', fazer: () => arquivo.current?.click() },
+            ...(agentesDaSala.length > 1 ? [{ rotulo: `${t('conversas.voz.todos')} · ${t('conversas.voz.todosDica')}`, icone: 'voz', fazer: () => setVoz('todos') }] : []),
             ...agentesDaSala.map((a) => ({ rotulo: t('conversas.voz.abrirDica', { nome: a.nome }), icone: 'voz', fazer: () => setVoz(a) })),
           ]} />}
           <button type="button" className="icon-btn chat__extra" onClick={() => arquivo.current?.click()} aria-label={t('conversas.sala.anexar')} title={t('conversas.sala.anexar')}><Icon name="clip" size={17} /></button>
           <input ref={arquivo} type="file" hidden multiple onChange={(e) => { for (const f of e.target.files ?? []) subir(f); e.target.value = ''; }} />
-          {!voz && <GravadorDeVoz onGravado={(f) => subir(f)} />}
+          {!voz && <GravadorDeVoz onGravado={(f, motivo) => void gravado(f, motivo)} />}
           {voz ? (
-            <ConversaPorVoz agente={{ id: voz.id, name: voz.nome }} mensagens={lista as unknown as Message[]} podeFalar={!!rec.data?.voz.falar} preparaVoz={!!rec.data?.voz.preparar?.falar}
-              garantirConversa={async () => salaId} recarregar={() => msgs.reload()} onFechar={() => setVoz(null)}
-              enviarFala={async (arq) => (await api.post<{ messageId: string }>(`/api/salas/${salaId}/mensagens`, { texto: '', clientRequestId: requestId(), attachments: [arq], vozAgente: voz.nome })).messageId} />
+            <ConversaPorVoz agente={voz === 'todos' ? { id: '*', name: t('conversas.voz.todos') } : { id: voz.id, name: voz.nome }} mensagens={lista as unknown as Message[]} podeFalar={!!rec.data?.voz.falar} preparaVoz={!!rec.data?.voz.preparar?.falar}
+              garantirConversa={async () => salaId} recarregar={() => msgs.reload()} onFechar={() => setVoz(null)} turnoDe={turnoDaSala as (m: readonly MensagemDoTurno[], id: string) => ReturnType<typeof turnoDaSala>}
+              enviarFala={async (arq) => (await api.post<{ messageId: string }>(`/api/salas/${salaId}/mensagens`, { texto: '', clientRequestId: requestId(), attachments: [arq], vozAgente: voz === 'todos' ? '*' : voz.nome })).messageId} />
           ) : agentesDaSala.length > 0 && (
             <span className="sala-voz chat__extra">
               <button type="button" className="icon-btn chat__mic chat__voz" aria-pressed="false" aria-expanded={agentesDaSala.length > 1 ? escolhendoVoz : undefined}
@@ -493,6 +554,9 @@ export function SalaPanel({ salaId, onSaiu, foco, painelTopico, onFechar, topico
                 aria-label={t('conversas.voz.abrir')} title={agentesDaSala.length === 1 ? t('conversas.voz.abrirDica', { nome: agentesDaSala[0].nome }) : t('conversas.voz.abrir')}><Icon name="voz" /></button>
               {escolhendoVoz && (
                 <span className="scampo__sugestoes sala-voz__lista" role="menu">
+                  <button type="button" role="menuitem" className="sala-voz__todos" onClick={() => { setEscolhendoVoz(false); setVoz('todos'); }}>
+                    <span className="sala-voz__todos-icone" aria-hidden="true"><Icon name="users" size={13} /></span><span><b>{t('conversas.voz.todos')}</b><small>{t('conversas.voz.todosDica')}</small></span>
+                  </button>
                   {agentesDaSala.map((a) => <button key={a.chave} type="button" role="menuitem" onClick={() => { setEscolhendoVoz(false); setVoz(a); }}><AgentAvatar agent={{ ...a, name: a.nome, look_seed: null }} size={20} /><b>{a.nome}</b></button>)}
                 </span>
               )}

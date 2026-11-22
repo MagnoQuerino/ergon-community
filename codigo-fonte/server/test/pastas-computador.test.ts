@@ -127,6 +127,20 @@ describe('pastas e acesso total pelas rotas', () => {
       assert.equal((await req(h, 'POST', '/api/acesso-total', s, {})).status, 200);
       assert.equal((await req(h, 'DELETE', '/api/acesso-total', s)).status, 200);
       assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.ativo, false);
+      // rc.49: com prazo (24 horas ou 7 dias), o acesso total e o computador de quem ativou voltam sozinhos quando passa
+      const p = await req(h, 'POST', '/api/acesso-total', s, { prazo: '24h' });
+      assert.equal(p.status, 200, JSON.stringify(p.json));
+      const g = (await req(h, 'GET', '/api/acesso-total', s)).json;
+      assert.equal(g.ativo, true);
+      assert.ok(Math.abs(Date.parse(g.ate) - Date.now() - 24 * 3600_000) < 60_000, 'vale por 24 horas');
+      assert.equal((await req(h, 'POST', '/api/acesso-total', s, { prazo: '1ano' })).status, 400);
+      h.db.run("UPDATE workspace_settings SET value = '2000-01-01T00:00:00.000Z' WHERE key = 'acesso_total.ate' OR key LIKE 'computador.total_ate:%'");
+      assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.ativo, false, 'o prazo passou');
+      for (const id of ativos()) assert.ok(!PROTEGIDAS.some((t) => efetivas(id).includes(t)));
+      assert.notEqual((await req(h, 'GET', '/api/computador', s)).json.modo, 'total');
+      // "sempre": sem prazo
+      await req(h, 'POST', '/api/acesso-total', s, { prazo: 'sempre' });
+      assert.equal((await req(h, 'GET', '/api/acesso-total', s)).json.ate, null);
     } finally { await h.close(); }
   });
 });

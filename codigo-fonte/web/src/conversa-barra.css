@@ -1,0 +1,35 @@
+/* rc.49: a barra de digitação (conversa e sala) com os botões na mesma linha: anexar, gravar, voz e enviar ficam todos
+   centrados na altura de uma linha do campo, e descem junto com o fim do campo quando ele cresce. */
+.chat__row, .sala__barra { --barra-alto: 40px; align-items: flex-end; }
+.chat__row > .icon-btn, .sala__barra > .icon-btn, .sala__barra > .sala-voz > .icon-btn, .chat__row > .vozc, .sala__barra > .vozc,
+.chat__row > .chat__mais-caixa, .sala__barra > .chat__mais-caixa {
+  align-self: flex-end; min-height: var(--barra-alto); align-items: center; justify-content: center;
+}
+.sala__barra > .sala-voz:not(.chat__extra), .sala__barra > .sala-voz { align-self: flex-end; min-height: var(--barra-alto); align-items: center; }
+.chat__row > .icon-btn, .sala__barra > .icon-btn, .sala__barra > .sala-voz > .icon-btn { min-width: 34px; padding-block: 0; }
+.vozc { margin-block: 0; }
+.sala__barra .scampo { align-self: stretch; align-items: flex-end; }
+.sala__barra .scampo__enviar { min-height: var(--barra-alto); }
+
+/* o microfone mudo no computador: borda vermelha e um traço cortando o ícone (sem aviso por cima da barra) */
+.vozc--sem-som { --tom: var(--err); }
+.vozc--sem-som .vozc-anel__fig { border-style: solid; opacity: 1; transform: none; animation: none; }
+.vozc__corte { position: absolute; z-index: 2; left: 50%; top: 50%; width: 22px; height: 2px; border-radius: 2px; background: var(--err);
+  box-shadow: 0 0 0 1.5px var(--panel); transform: translate(-50%, -50%) rotate(-45deg); pointer-events: none; }
+.vozc--sem-som .vozc__rec { display: none; }
+
+/* a escolha de com quem falar na sala: "Todos" no topo */
+.sala-voz__lista .sala-voz__todos { border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; margin-bottom: 2px; }
+.sala-voz__lista .sala-voz__todos small { display: block; color: var(--muted); font-weight: 400; }
+.sala-voz__todos-icone { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--info-suave-2); color: var(--navy); }
+
+/* o áudio na sala: o mesmo player da conversa */
+.smsg .msg__audio { margin-top: 4px; }
+.smsg__ouvir { margin-left: 2px; }
+
+/* o cartão do acesso total (rc.49): o prazo em três botões */
+.acesso__prazo { border: 0; padding: 0; margin: 0; display: grid; gap: 6px; }
+.acesso__prazo legend { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.acesso__prazo .seg { display: grid; grid-template-columns: repeat(3, 1fr); }
+.acesso-selo { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ok, var(--teal)); }
+.tools-equipe__cab { justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }

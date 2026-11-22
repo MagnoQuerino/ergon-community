@@ -178,14 +178,14 @@ test('canal ao lado da barra: um texto mandado com a voz ligada vira a vez do ag
   assert.deepEqual(conversaVoz(captando, { tipo: 'texto' }), captando);
 });
 
-test('sem voz para falar: cai para só texto, avisando, e segue ouvindo', () => {
+test('sem voz para falar: a resposta fica escrita, sem aviso, e segue ouvindo', () => {
   const sem = voz0(true);
-  assert.equal(sem.aviso, 'sem_voz');
+  assert.equal(sem.aviso, null);
   const e = rodar([{ tipo: 'microfone' }, ...TURNO.slice(0, 5)], sem);
-  assert.deepEqual([e.fase, e.aviso, e.turnos], ['ouvindo', 'sem_voz', 1], 'a resposta fica escrita e a escuta volta na hora');
+  assert.deepEqual([e.fase, e.aviso, e.turnos], ['ouvindo', null, 1], 'a resposta fica escrita e a escuta volta na hora');
   // a voz existia e deixou de responder (componente ausente): daí em diante, só texto
   const caiu = rodar([{ tipo: 'microfone' }, ...TURNO.slice(0, 5), { tipo: 'voz_indisponivel' }]);
-  assert.deepEqual([caiu.fase, caiu.semVoz, caiu.aviso], ['ouvindo', true, 'sem_voz']);
+  assert.deepEqual([caiu.fase, caiu.semVoz, caiu.aviso], ['ouvindo', true, null]);
   assert.equal(rodar([...TURNO.slice(0, 5)], caiu).fase, 'ouvindo');
   // falha passageira: só esta resposta fica sem voz
   const passou = rodar([{ tipo: 'microfone' }, ...TURNO.slice(0, 5), { tipo: 'voz_falhou' }]);
@@ -261,4 +261,21 @@ test('o texto falado e da legenda: sem marcas internas nem formatação', () => 
   assert.equal(textoFalado('## Resumo\n\n- **Reunião** às `15h` com a [Ana](https://x.y/z)\n- nome_do_arquivo.txt [[card 3]]'), 'Resumo\n\nReunião às 15h com a Ana\nnome_do_arquivo.txt');
   assert.equal(textoFalado('[[silencio]]'), '');
   assert.equal(textoFalado('antes\n```js\nx()\n```\ndepois'), 'antes\n\ndepois');
+});
+
+test('turno na sala (rc.49): cada resposta já vale, com mais vindo; a fala sem nome termina sem resposta', async () => {
+  const { turnoDaSala } = await import('./conversa-voz.ts');
+  const eu = (turno: { runs: string[]; faltam: number; roteando: boolean }, tr = 'pronta') => ({ id: 'm1', role: 'user', content: '', run_id: null, run_status: null, attachments: [{ transcricao: { estado: tr, texto: 'Sócrates e Hipátia', motivo: null } }], turno });
+  const resp = (id: string, run: string) => ({ id, role: 'agent', content: `resposta ${id}`, run_id: run, run_status: 'succeeded' });
+  assert.equal(turnoDaSala([eu({ runs: [], faltam: 0, roteando: true }, 'transcrevendo')], 'm1').fase, 'transcrevendo');
+  assert.equal(turnoDaSala([eu({ runs: ['r1'], faltam: 2, roteando: false })], 'm1').fase, 'pensando');
+  const parcial = turnoDaSala([eu({ runs: ['r1', 'r2'], faltam: 1, roteando: false }), resp('a1', 'r1')], 'm1');
+  assert.deepEqual([parcial.fase, parcial.maisVindo, parcial.respostas.map((x) => x.id)], ['pronta', true, ['a1']]);
+  const fim = turnoDaSala([eu({ runs: ['r1', 'r2'], faltam: 0, roteando: false }), resp('a1', 'r1'), resp('a2', 'r2')], 'm1');
+  assert.deepEqual([fim.fase, !!fim.maisVindo, fim.respostas.length], ['pronta', false, 2]);
+  const ninguem = turnoDaSala([eu({ runs: [], faltam: 0, roteando: false })], 'm1');
+  assert.deepEqual([ninguem.fase, ninguem.ninguem], ['vazia', true]);
+  // depois de falar uma resposta, com outra a caminho, o modo volta a esperar
+  const e = conversaVoz({ ...voz0(false), fase: 'ouvindo' }, { tipo: 'aguardar' });
+  assert.equal(e.fase, 'pensando');
 });
