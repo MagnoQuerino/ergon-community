@@ -17,11 +17,10 @@ test('seletor no menu do avatar e em Minha conta, cada idioma escrito nele mesmo
   assert.equal('IDIOMA_INGLES_LIBERADO' in idiomas, false);
   const seletor = ler('../components/SeletorIdioma.tsx');
   assert.doesNotMatch(seletor, /return null;/);
-  assert.match(seletor, /onClick=\{\(\) => escolherIdioma\(l\)\}/);
-  // dentro do menu do avatar (role=menu) os filhos têm de ser itens do menu: grupo + menuitemradio; em Minha conta, radiogroup
-  assert.match(seletor, /role=\{compacto \? 'group' : 'radiogroup'\}/);
-  assert.match(seletor, /const papel = compacto \? 'menuitemradio' : 'radio';/);
-  assert.match(seletor, /role=\{papel\} aria-checked=\{atual === l\}/);
+  // rc.49: um dropdown (select nativo), com cada idioma escrito nele mesmo
+  assert.match(seletor, /<select /);
+  assert.match(seletor, /onChange=\{\(e\) => escolherIdioma\(e\.target\.value as Idioma\)\}/);
+  assert.match(seletor, /<option key=\{l\} value=\{l\} lang=\{l\}>\{NOME_DO_IDIOMA\[l\]\}<\/option>/);
   assert.match(ler('../components/AccountMenu.tsx'), /role="menu"/);
   assert.doesNotMatch(seletor, /disabled/, 'nada de botão desabilitado esperando');
   assert.match(ler('../components/AccountMenu.tsx'), /<SeletorIdioma compacto \/>/);
