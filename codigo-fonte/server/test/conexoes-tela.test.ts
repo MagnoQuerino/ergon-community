@@ -278,8 +278,8 @@ describe('textos de tela que prometiam o que o sistema não faz', { skip: !COM_G
     // conversar pelo Teams deixou de ser "em breve" (rc.26: o app público, ligado por código), e segue separado da conta
     assert.match(tela, /Conversar com a equipe pelo Teams: é outra coisa\./);
     assert.doesNotMatch(tela, /pelo Teams: em breve/);
-    // sem o serviço do Teams no ar: só o selo neutro "ainda não disponível", sem o aviso de "em breve"
-    assert.ok(tela.includes('function TeamsConversa') && tela.includes("'estado.indisponivel': 'ainda não disponível'"));
+    // sem o serviço do Teams no ar: só o selo curto "em breve" (rc.49: o estado de agora, dito no positivo)
+    assert.ok(tela.includes('function TeamsConversa') && tela.includes("'estado.indisponivel': 'em breve'"));
     assert.ok(!tela.includes('Em breve: conversar com a equipe pelo Teams'));
     for (const t of ['Liberar leitura', 'Pedir ao administrador', 'Já aprovaram? Conectar de novo', 'Autorizar agora', 'é esperado']) assert.ok(tela.includes(t), t);
     const etapas = tela.slice(tela.indexOf('function EtapasMicrosoft'), tela.indexOf('interface WaState'));

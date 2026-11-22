@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useT } from '../i18n/index.ts';
 import { api, errMsg } from '../lib/api.ts';
 import { useSurface } from '../lib/surface.ts';
+import { AtivarAcessoTotal } from './AcessoTotal.tsx';
 
 /** GET /api/conexoes (o que esta peça usa) */
 export interface EstadoLiberar { liberarTudo: boolean; liberarTudoMeu?: boolean; liberarTudoProibido?: boolean; liberarTudoSemAviso?: boolean; administra?: boolean }
@@ -75,49 +76,6 @@ function ConfirmarLiberar({ ocupado, onCancelar, onLigar }: { ocupado: boolean; 
           <button type="button" className="btn btn--ghost" onClick={onCancelar}>{t('conexoes.acao.cancelar')}</button>
           <button type="button" className="btn btn--danger" data-autofocus autoFocus aria-busy={ocupado} disabled={ocupado} onClick={() => onLigar(semAviso)}>{t('conexoes.liberar.confirmar')}</button>
         </footer>
-      </section>
-    </div>
-  );
-}
-
-/**
- * "Ativar acesso total?" (rc.42): um cartão só, para a equipe inteira (regra do dono: recursos livres, não separados por
- * agente). A senha de administrador é pedida aqui, uma vez, e libera Terminal, código, computador e Discord a todos os
- * agentes, com o "Liberar tudo" de quem ativou. Depois, nada mais pergunta, exceto as ações protegidas.
- */
-function AtivarAcessoTotal({ semAviso: jaSemAviso, onCancelar, onFeito }: { semAviso: boolean; onCancelar: () => void; onFeito: () => void }) {
-  const t = useT();
-  const ref = useRef<HTMLElement>(null);
-  useSurface(ref, { onClose: onCancelar, modal: true, outside: true });
-  const [senha, setSenha] = useState('');
-  const [semAviso, setSemAviso] = useState(jaSemAviso);
-  const [ocupado, setOcupado] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const ativar = async () => {
-    if (ocupado || !senha) return;
-    setOcupado(true); setErr(null);
-    try {
-      await api.post('/api/session/unlock', { password: senha });
-      await api.post('/api/acesso-total', semAviso ? { semAviso: true } : {});
-      onFeito();
-    } catch (x) { setErr(errMsg(x)); setOcupado(false); }
-  };
-  return (
-    <div className="dlg-back">
-      <section ref={ref} className="dlg liberar-dlg" role="alertdialog" aria-modal="true" aria-labelledby="acesso-t" aria-describedby="acesso-d">
-        <header className="dlg__head"><h3 id="acesso-t">{t('conexoes.acesso.titulo')}</h3></header>
-        <form className="acesso" onSubmit={(x) => { x.preventDefault(); void ativar(); }}>
-          <p id="acesso-d">{t('conexoes.acesso.equipe')}</p>
-          <p className="muted small">{t('conexoes.liberar.sempre')}</p>
-          <label className="field"><span>{t('conexoes.acesso.senha')}</span>
-            <input type="password" autoComplete="current-password" data-autofocus autoFocus value={senha} onChange={(x) => setSenha(x.target.value)} /></label>
-          <label className="check"><input type="checkbox" checked={semAviso} onChange={(x) => setSemAviso(x.target.checked)} /> {t('conexoes.liberar.naoPerguntar')}</label>
-          {err && <p className="error" role="alert">{err}</p>}
-          <footer className="dlg__foot">
-            <button type="button" className="btn btn--ghost" onClick={onCancelar}>{t('conexoes.acao.cancelar')}</button>
-            <button type="submit" className="btn btn--danger" aria-busy={ocupado} disabled={ocupado || !senha}>{t('conexoes.acesso.ativar')}</button>
-          </footer>
-        </form>
       </section>
     </div>
   );

@@ -15,7 +15,8 @@ import type { Me, VersionInfo } from '../lib/types.ts';
 /** GET /api/ai/tools: cada ferramenta com quem a tem (contagem e até 3 nomes, o Coordenador primeiro). */
 type ToolWithHolders = AgentTool & { holders?: { count: number; sample: string[] } };
 import { SaudePanel } from './SaudePanel.tsx';
-import { CapacidadesPanel } from '../components/CapacidadesPanel.tsx';
+import { CapacidadesPanel, ConselhoCard } from '../components/CapacidadesPanel.tsx';
+import { Bloco, Mosaico, Sobre, SubAbas } from '../components/Bloco.tsx';
 import { ModelosEntrega } from '../components/ModelosEntrega.tsx';
 import { SegurancaPanel } from './SegurancaPanel.tsx';
 import { PessoasPanel } from './PessoasPanel.tsx';
@@ -49,7 +50,7 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
       <header className="page__head cena-cab">
         <h2>{t('configuracoes.titulo')}</h2>
         <CenaCabecalho tema="configuracoes" />
-        <div className="tabs" role="tablist">
+        <div className="tabs cfg-abas" role="tablist">
           <button role="tab" aria-selected={tab === 'ia'} className={`tab ${tab === 'ia' ? 'tab--on' : ''}`} onClick={() => setTab('ia')}>{t('configuracoes.abas.ferramentas')}</button>
           <button role="tab" aria-selected={tab === 'conta'} className={`tab ${tab === 'conta' ? 'tab--on' : ''}`} onClick={() => setTab('conta')}>{t('configuracoes.abas.conta')}</button>
           <button role="tab" aria-selected={tab === 'workspace'} className={`tab ${tab === 'workspace' ? 'tab--on' : ''}`} onClick={() => setTab('workspace')}>{t('configuracoes.abas.workspace')}</button>
@@ -61,10 +62,10 @@ export function ConfiguracaoView({ state, me, onMeChanged, reload }: { state: Ap
           {admin && <button role="tab" aria-selected={tab === 'saude'} className={`tab ${tab === 'saude' ? 'tab--on' : ''}`} onClick={() => setTab('saude')}>{t('configuracoes.abas.saude')}</button>}
         </div>
       </header>
-      {/* em tela larga, os cartões em duas colunas (cada um com a largura de ler; os botões perto do que fazem) */}
-      <div className={`cfg-corpo cfg-corpo--${tab}`}>
+      {/* os cartões em mosaico: colunas sem buracos (cada cartão com a largura de ler; os botões perto do que fazem) */}
+      <Mosaico className={`cfg-corpo cfg-corpo--${tab}`}>
   {tab === 'conta' ? <MinhaContaPanel me={me} onChanged={onMeChanged} /> : tab === 'workspace' ? <WorkspaceConfigPanel state={state} me={me} /> : tab === 'documentos' ? <IdentidadeDocumentos dono={me.role === 'owner'} /> : tab === 'ia' ? <IaPanel state={state} reload={reload} dono={me.role === 'owner'} /> :tab === 'world' && WorldPanel ? <Suspense fallback={null}><WorldPanel /></Suspense> : tab === 'saude' ? <SaudePanel /> : tab === 'atualizacoes' ? <AtualizacoesPanel admin={admin} /> : tab === 'pessoas' ? <PessoasPanel me={me} /> : <SegurancaGate><SegurancaPanel me={me} onChanged={onMeChanged} /></SegurancaGate>}
-      </div>
+      </Mosaico>
       <VersionCard onOpen={() => setTab('atualizacoes')} />
       <MusicCreditsBlock />
     </div>
@@ -120,6 +121,20 @@ function VersionCard({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+type SubAba = 'ferramentas' | 'modelos' | 'capacidades' | 'consumo';
+const SUBABAS: readonly SubAba[] = ['ferramentas', 'modelos', 'capacidades', 'consumo'];
+/** a sub-aba que abre: a do endereço (#configuracao?capacidades), senão a última vista neste navegador */
+function subAbaInicial(): SubAba {
+  const doEndereco = SUBABAS.find((k) => location.hash.includes(`?${k}`));
+  if (doEndereco) return doEndereco;
+  try { const v = localStorage.getItem('ergon.cfg.subaba') as SubAba | null; if (v && SUBABAS.includes(v)) return v; } catch { /* sem armazenamento */ }
+  return 'ferramentas';
+}
+
+/**
+ * Ferramentas da equipe em quatro sub-abas (Ferramentas · Modelos · Capacidades · Consumo), cada uma com os cartões em
+ * mosaico; os cartões grandes recolhem (Bloco) com o resumo do estado no cabeçalho.
+ */
 function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void; dono: boolean }) {
   const t = useT();
   const status = useResource<AiStatus>('/api/ai/status', ['ai.changed']);
@@ -127,6 +142,13 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
   const usage = useResource<Usage>(`/api/usage?tz=${new Date().getTimezoneOffset()}`, ['runs.changed']);
   const composicao = useResource<ComposicaoResumo>('/api/usage/composicao?dias=30', ['usage.changed']);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [sub, setSub] = useState<SubAba>(subAbaInicial);
+  const trocar = (k: SubAba) => { setSub(k); try { localStorage.setItem('ergon.cfg.subaba', k); } catch { /* sem armazenamento */ } };
+  useEffect(() => {
+    const ver = () => { const k = SUBABAS.find((x) => location.hash.includes(`?${x}`)); if (k) setSub(k); };
+    window.addEventListener('hashchange', ver);
+    return () => window.removeEventListener('hashchange', ver);
+  }, []);
   // rc.27: plano B (modelos reserva), arrumar competências sem uso e a pausa da equipe
   const ajustes = useAjustes((text) => setMsg({ kind: 'error', text }));
   const atualizarCota = async () => { try { await api.get(`/api/usage?tz=${new Date().getTimezoneOffset()}&atualizar=1`); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } usage.reload(); };
@@ -137,87 +159,106 @@ function IaPanel({ state, reload, dono }: { state: AppState; reload: () => void;
     try { await api.put('/api/ai/tools', { enabled: on ? [...enabled, id] : enabled }); tools.reload(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
   };
   const s = status.data;
+  const pausada = (ajustes.a?.pausa ?? state.teamPausa)?.pausada === true;
+  const abas: ReadonlyArray<{ id: SubAba; rotulo: string; icone: string }> = [
+    { id: 'ferramentas', rotulo: t('configuracoes.sub.ferramentas'), icone: 'gear' },
+    { id: 'modelos', rotulo: t('configuracoes.sub.modelos'), icone: 'layers' },
+    { id: 'capacidades', rotulo: t('configuracoes.sub.capacidades'), icone: 'shield' },
+    { id: 'consumo', rotulo: t('configuracoes.sub.consumo'), icone: 'coins' },
+  ];
+
+  const ferramentas = (() => {
+    const lista = (tools.data ?? []).filter((f) => (f.kind === 'ia' && f.id !== 'conectores') || f.id === 'agenda');
+    const fora = (f: (typeof lista)[number]) => f.kind === 'ia' && !f.safe && !f.guarded;
+    // a nota inteira fica no title (passar o mouse) e no leitor de tela; à vista, duas linhas
+    const opcao = (f: (typeof lista)[number]) => {
+      const nota = f.kind === 'ergon' ? notaDaFerramenta(f.id, f.note) : `${notaDaFerramenta(f.id, f.note.replace(/ — (desligada|bloqueada):.*$/, ''))}${f.guarded && !f.platform ? ` · ${t('configuracoes.ferr.pedeSenha')}` : ''}`;
+      return f.kind === 'ergon' ? (
+        // do próprio Ergon: sempre ligada (vale para quem a tem no perfil)
+        <label key={f.id} className="tool-opt tool-opt--on" title={nota}>
+          <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title={t('configuracoes.ferr.sempreLigadaDica')} />
+          <span className="tool-opt__txt"><b>{nomeDaFerramenta(f.id, f.label)}</b><small>{nota}</small></span>
+          <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{t('configuracoes.ferr.ligada')}</span>
+            <span className="muted small tool-opt__quem">{holdersText(f.holders)}</span></span>
+        </label>
+      ) : (
+        <label key={f.id} title={nota} className={`tool-opt ${f.platform ? 'tool-opt--on' : ''} ${!f.safe && !f.guarded ? 'tool-opt--off' : ''}`}>
+          <input type="checkbox" checked={!!f.platform} disabled={(!f.safe && !f.guarded) || !s?.available || f.id === 'passos'} onChange={(e) => void toggleTool(f.id, e.target.checked)} />
+          <span className="tool-opt__txt"><b>{f.guarded && <Icon name="lock" size={12} />} {nomeDaFerramenta(f.id, f.label)}</b><small>{nota}</small></span>
+          <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{f.safe || f.guarded ? (f.platform ? t('configuracoes.ferr.ligada') : f.guarded ? t('configuracoes.ferr.protegida') : t('configuracoes.ferr.desligada')) : t('configuracoes.ferr.bloqueada')}</span>
+            {f.aviso && <span className="badge badge--warn" title={f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custoDica') : t('configuracoes.ferr.aviso.riscoDica')}>{f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custo') : t('configuracoes.ferr.aviso.risco')}</span>}
+            <span className="muted small tool-opt__quem">{holdersText(f.holders)}</span></span>
+        </label>
+      );
+    };
+    const presas = lista.filter(fora);
+    const ligadas = lista.filter((f) => f.kind === 'ergon' || f.platform).length;
+    return (
+      <Bloco id="cfg-ferramentas" cartao largo abertoPadrao titulo={t('configuracoes.abas.ferramentas')} resumo={tools.data ? t('configuracoes.ferr.resumo', { n: ligadas }) : null}>
+        <Sobre>{t('configuracoes.ferr.texto')} {t('configuracoes.ferr.protegidas')}</Sobre>
+        {/* rc.33: as que não dá para ligar aqui ficam recolhidas: o cartão não passa da altura da tela */}
+        <div className="tools-grid">{lista.filter((f) => !fora(f)).map(opcao)}</div>
+        {presas.length > 0 && <details className="secao-recolhida tools-fora"><summary>{t('configuracoes.ferr.foraDaqui', { n: presas.length })}</summary><div className="tools-grid">{presas.map(opcao)}</div></details>}
+      </Bloco>
+    );
+  })();
 
   return (
     <>
       <p className="muted">{tn('configuracoes.ia.intro', { conexoes: <a href="#conexoes">{t('configuracoes.ia.introConexoes')}</a> })}</p>
       {msg && <p className={msg.kind === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
+      <SubAbas abas={abas} atual={sub} onTroca={trocar} rotulo={t('configuracoes.sub.rotulo')} prefixo="cfg-ia" />
 
-      <section className="card">
-        <h3>{t('configuracoes.abas.ferramentas')}</h3>
-        <p className="muted small">{t('configuracoes.ferr.texto')}</p>
-        <p className="hint"><Icon name="lock" size={12} /> {t('configuracoes.ferr.protegidas')}</p>
-        {/* rc.33: as que não dá para ligar aqui ficam recolhidas: o cartão não passa da altura da tela */}
-        {(() => {
-          const lista = (tools.data ?? []).filter((f) => (f.kind === 'ia' && f.id !== 'conectores') || f.id === 'agenda');
-          const fora = (f: (typeof lista)[number]) => f.kind === 'ia' && !f.safe && !f.guarded;
-          const opcao = (f: (typeof lista)[number]) => f.kind === 'ergon' ? (
-            // do próprio Ergon: sempre ligada (vale para quem a tem no perfil)
-            <label key={f.id} className="tool-opt tool-opt--on">
-              <input type="checkbox" checked onChange={() => {}} aria-readonly="true" title={t('configuracoes.ferr.sempreLigadaDica')} />
-              <span className="tool-opt__txt"><b>{nomeDaFerramenta(f.id, f.label)}</b><small>{notaDaFerramenta(f.id, f.note)}</small></span>
-              <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{t('configuracoes.ferr.ligada')}</span>
-                <span className="muted small">{holdersText(f.holders)}</span></span>
-            </label>
-          ) : (
-            <label key={f.id} className={`tool-opt ${f.platform ? 'tool-opt--on' : ''} ${!f.safe && !f.guarded ? 'tool-opt--off' : ''}`}>
-              <input type="checkbox" checked={!!f.platform} disabled={(!f.safe && !f.guarded) || !s?.available || f.id === 'passos'} onChange={(e) => void toggleTool(f.id, e.target.checked)} />
-              <span className="tool-opt__txt"><b>{f.guarded && <Icon name="lock" size={12} />} {nomeDaFerramenta(f.id, f.label)}</b><small>{notaDaFerramenta(f.id, f.note.replace(/ — (desligada|bloqueada):.*$/, ''))}{f.guarded && !f.platform ? ` · ${t('configuracoes.ferr.pedeSenha')}` : ''}</small></span>
-              <span className="tool-opt__tags"><span className={`badge ${TOOL_BADGE[f.status]}`}>{f.safe || f.guarded ? (f.platform ? t('configuracoes.ferr.ligada') : f.guarded ? t('configuracoes.ferr.protegida') : t('configuracoes.ferr.desligada')) : t('configuracoes.ferr.bloqueada')}</span>
-                {f.aviso && <span className="badge badge--warn" title={f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custoDica') : t('configuracoes.ferr.aviso.riscoDica')}>{f.aviso === 'custo' ? t('configuracoes.ferr.aviso.custo') : t('configuracoes.ferr.aviso.risco')}</span>}
-                <span className="muted small">{holdersText(f.holders)}</span></span>
-            </label>
-          );
-          const presas = lista.filter(fora);
-          return (<>
-            <div className="tools-grid">{lista.filter((f) => !fora(f)).map(opcao)}</div>
-            {presas.length > 0 && <details className="secao-recolhida tools-fora"><summary>{t('configuracoes.ferr.foraDaqui', { n: presas.length })}</summary><div className="tools-grid">{presas.map(opcao)}</div></details>}
-          </>);
-        })()}
-      </section>
+      <Mosaico role="tabpanel" id="cfg-ia-painel" aria-labelledby={`cfg-ia-aba-${sub}`} className="cfg-subpainel">
+        {sub === 'ferramentas' && <>
+          {ferramentas}
+          <Bloco id="cfg-andamento" cartao abertoPadrao titulo={t('configuracoes.andamento.titulo')} resumo={pausada ? t('configuracoes.ajustes.pausa.emPausa') : t('configuracoes.ajustes.pausa.trabalhando')}
+            topo={<PausaControle pausa={ajustes.a?.pausa ?? state.teamPausa} onMudou={reload} onError={(text) => setMsg({ kind: 'error', text })} />}>
+            <label className="check"><input type="checkbox" checked={state.teamAutorun} onChange={async (e) => { try { await api.put('/api/team/autorun', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
+              {t('configuracoes.andamento.autorun')}</label>
+            <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
+              {t('configuracoes.andamento.iniciativa')}</label>
+            <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+            {state.runs.daily && <DailyLimitField daily={state.runs.daily} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />}
+            {/* rc.33: o dia a dia à vista; o fino (passos, raciocínio, ajudantes, compactação, memória) recolhido */}
+            <details className="secao-recolhida">
+              <summary>{t('configuracoes.andamento.avancado')}</summary>
+              <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+              <RaciocinioField a={ajustes.a} salvar={ajustes.salvar} />
+              <AjudantesField valor={state.teamAjudantes ?? { ligado: true, max: AJUDANTES_MAX }} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+              <CompactacaoField ligada={state.teamCompactacao !== false} pendente={state.teamCompactacaoPendente === true} atualizacao={state.teamCompactacaoAtualizacao === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
+              <MemoriaField a={ajustes.a} salvar={ajustes.salvar} />
+              <ArrumarField a={ajustes.a} salvar={ajustes.salvar} />
+            </details>
+            <Sobre className="hint">{t('configuracoes.andamento.dica')}</Sobre>
+          </Bloco>
+        </>}
 
-      <ComputadorAjustes />
+        {sub === 'modelos' && <>
+          <ReservaCard a={ajustes.a} salvar={ajustes.salvar} aviso={ajustes.aviso} />
+          <ConselhoCard dono={dono} />
+          <ModelosEntrega dono={dono} />
+        </>}
 
-      <ReservaCard a={ajustes.a} salvar={ajustes.salvar} aviso={ajustes.aviso} />
+        {sub === 'capacidades' && <>
+          <CapacidadesPanel dono={dono} />
+          <ComputadorAjustes />
+        </>}
 
-      <CapacidadesPanel dono={dono} />
-
-      <ModelosEntrega dono={dono} />
-
-      <section className="card">
-        <h3>{t('configuracoes.andamento.titulo')}</h3>
-        <PausaControle pausa={ajustes.a?.pausa ?? state.teamPausa} onMudou={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-        <label className="check"><input type="checkbox" checked={state.teamAutorun} onChange={async (e) => { try { await api.put('/api/team/autorun', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
-          {t('configuracoes.andamento.autorun')}</label>
-        <label className="check"><input type="checkbox" checked={state.teamInitiative !== false} onChange={async (e) => { try { await api.put('/api/team/initiative', { enabled: e.target.checked }); reload(); } catch (x) { setMsg({ kind: 'error', text: errMsg(x) }); } }} />
-          {t('configuracoes.andamento.iniciativa')}</label>
-        <ProcessLimitField limit={state.runs.limit} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-        {state.runs.daily && <DailyLimitField daily={state.runs.daily} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />}
-        {/* rc.33: o dia a dia à vista; o fino (passos, raciocínio, ajudantes, compactação, memória) recolhido */}
-        <details className="secao-recolhida">
-          <summary>{t('configuracoes.andamento.avancado')}</summary>
-          <PassosField value={state.teamMaxTurns ?? PASSOS_PADRAO} pendente={state.teamMaxTurnsPendente === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-          <RaciocinioField a={ajustes.a} salvar={ajustes.salvar} />
-          <AjudantesField valor={state.teamAjudantes ?? { ligado: true, max: AJUDANTES_MAX }} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-          <CompactacaoField ligada={state.teamCompactacao !== false} pendente={state.teamCompactacaoPendente === true} atualizacao={state.teamCompactacaoAtualizacao === true} outros={state.teamMaxTurnsOutros ?? 0} onSaved={reload} onError={(text) => setMsg({ kind: 'error', text })} />
-          <MemoriaField a={ajustes.a} salvar={ajustes.salvar} />
-          <ArrumarField a={ajustes.a} salvar={ajustes.salvar} />
-        </details>
-        <p className="hint">{t('configuracoes.andamento.dica')}</p>
-      </section>
-
-      {usage.data && (
-        <section className="card">
-          <h3>{t('configuracoes.consumo.titulo')}</h3>
-          <p>{usage.data.costVisible && usage.data.month.costUsd !== null
-            ? tn('configuracoes.consumo.mesComCusto', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong>, custo: <strong>{fmtMoeda(usage.data.month.costUsd, 'USD', { maximumFractionDigits: 4 })}</strong> })
-            : tn('configuracoes.consumo.mes', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong> })}</p>
-          <p className="hint">{usage.data.note}</p>
-          <CotaLinhas contas={usage.data.accounts} onAtualizar={atualizarCota} />
-        </section>
-      )}
-
-      {composicao.data && <ComposicaoCard data={composicao.data} />}
+        {sub === 'consumo' && <>
+          {usage.data && (
+            <section className="card">
+              <h3>{t('configuracoes.consumo.titulo')}</h3>
+              <p>{usage.data.costVisible && usage.data.month.costUsd !== null
+                ? tn('configuracoes.consumo.mesComCusto', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong>, custo: <strong>{fmtMoeda(usage.data.month.costUsd, 'USD', { maximumFractionDigits: 4 })}</strong> })
+                : tn('configuracoes.consumo.mes', { n: usage.data.month.runs, tokens: <strong>{fmtNumero(usage.data.month.tokensIn + usage.data.month.tokensOut)}</strong> })}</p>
+              <p className="hint">{usage.data.note}</p>
+              <CotaLinhas contas={usage.data.accounts} onAtualizar={atualizarCota} />
+            </section>
+          )}
+          {composicao.data && <ComposicaoCard data={composicao.data} />}
+        </>}
+      </Mosaico>
     </>
   );
 }
@@ -322,16 +363,15 @@ function ComposicaoCard({ data }: { data: ComposicaoResumo }) {
   const t = useT();
   const linhas = data.geral ? [data.geral, ...data.agentes.slice(0, 8)] : [];
   return (
-    <section className="card">
-      <h3>{t('configuracoes.custo.composicaoTitulo')}</h3>
-      <p className="muted small">{composicaoIntro()}</p>
+    <Bloco id="cfg-composicao" cartao abertoPadrao titulo={t('configuracoes.custo.composicaoTitulo')} resumo={data.geral ? chamadasTexto(data.geral.chamadas) : null}>
+      <Sobre>{composicaoIntro()}</Sobre>
       {!linhas.length ? <p className="hint">{composicaoVazia()}</p> : (
         <div className="custo-lista">
           {linhas.map((a, i) => <ComposicaoLinha key={a.agentId || 'geral'} a={a} geral={i === 0} />)}
         </div>
       )}
       {!!linhas.length && <p className="hint">{composicaoNota()}{linhas.some((a) => a.estimado) ? ` ${composicaoEstimada()}` : ''}</p>}
-    </section>
+    </Bloco>
   );
 }
 

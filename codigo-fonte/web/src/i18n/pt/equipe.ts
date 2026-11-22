@@ -154,7 +154,7 @@ const equipe = {
   // ——— Sugerir distribuição (components/DistributionDialog.tsx) ———
   'distrib.titulo': 'Sugerir distribuição',
   'distrib.mudou': 'A equipe mudou enquanto você olhava: esta é a sugestão atualizada.',
-  'distrib.intro': 'Junta colegas do mesmo setor na construção onde o setor já é maioria, só com lugares livres. Só o endereço muda: setor, função e trabalhos ficam. Nada muda até você aplicar.',
+  'distrib.intro': 'Junta colegas do mesmo setor na construção onde o setor já é maioria, só com lugares livres. Muda só o endereço; vale quando você aplicar.',
   'distrib.calculando': 'Calculando…',
   'distrib.semLugar': 'Agora não há lugar livre para juntar ninguém. Veja abaixo onde falta espaço.',
   'distrib.jaDistribuida': 'A equipe já está distribuída assim. Nada a mudar.',
@@ -201,7 +201,7 @@ const equipe = {
   'faixa.ponta': 'ponta',
 
   // ——— efeitos dos Pacotes (components/EffectPicker.tsx) ———
-  'efeitos.nenhum': 'Nenhum efeito instalado. Efeitos vêm da Loja; o agente funciona igual sem eles.',
+  'efeitos.nenhum': 'Nenhum efeito instalado. Efeitos vêm da Loja e são opcionais.',
   'efeitos.grupo': 'Efeitos dos seus Pacotes',
   'efeitos.padrao': 'Padrão da cidade',
   'efeitos.padraoDica': 'O que os pacotes instalados já aplicam a ele',

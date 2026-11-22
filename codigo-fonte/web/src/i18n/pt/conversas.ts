@@ -226,7 +226,7 @@ const conversas = {
   'ferramentas.midiaDica': 'Arquivos e links desta conversa',
   'ferramentas.midia': 'Arquivos e links',
   'ferramentas.nenhumaMarcada': 'Nenhuma mensagem marcada. Use “Marcar” numa mensagem para achar depois.',
-  'ferramentas.semMidia': 'Ainda não há arquivos nem links nesta conversa.',
+  'ferramentas.semMidia': 'Os arquivos e links desta conversa aparecem aqui.',
 
   // ——— as ações de uma mensagem ———
   'acao.tentarDeNovo': 'Tentar de novo',
@@ -280,7 +280,7 @@ const conversas = {
   // ——— sem conta de IA ———
   'semIa.titulo': 'Conecte um provedor de IA',
   'semIa.conectar': 'Conectar agora',
-  'semIa.corpo': 'Você ainda não conectou um provedor de IA ao Ergon, então não é possível conversar com os agentes ainda. Leva um minuto: a sua mensagem fica guardada aqui.',
+  'semIa.corpo': 'Conecte uma conta de IA para conversar com os agentes. Leva um minuto, e a sua mensagem fica guardada aqui.',
 
   // ——— o campo de escrever ———
   'campo.aguardandoArquivos': 'Mando assim que os arquivos terminarem de subir.',
@@ -303,8 +303,8 @@ const conversas = {
   'pergunta.recomendada': "sugerida",
   'segredo.titulo': "{nome} pede a chave {chave}",
   'segredo.tituloSudo': "{nome} pede a senha de administrador",
-  'segredo.como': "O que você digitar vai direto para o cofre da equipe: não aparece na conversa, no histórico nem nos registros. O agente recebe só o nome {nome} e usa sem ver o valor. Você pode apagar depois em Configurações › Segurança.",
-  'segredo.comoSudo': "A senha vai direto para o Terminal da equipe, só para este trabalho: não aparece na conversa, no histórico nem nos registros, e o agente nunca a vê.",
+  'segredo.como': 'O que você digitar vai direto para o cofre da equipe e fica fora da conversa, do histórico e dos registros. O agente recebe só o nome {nome} e usa sem ver o valor. Você pode apagar depois em Configurações › Segurança.',
+  'segredo.comoSudo': 'A senha vai direto para o Terminal da equipe, só para este trabalho, e fica fora da conversa, do histórico e dos registros; o agente nunca a vê.',
   'segredo.riscoSudo': "Com a senha de administrador, os comandos do Terminal podem instalar programas e mudar o ambiente isolado da equipe. Informe só se o pedido foi seu e você reconhece o motivo.",
   'segredo.campo': "Cole a chave aqui",
   'segredo.campoSudo': "Senha de administrador",
@@ -330,7 +330,7 @@ const conversas = {
   'comando.linha.repetir': "O mesmo pedido volta ao agente a cada intervalo, até o critério ser cumprido ou as rodadas acabarem.",
   'comando.linha.checagem': "Um pedido que volta a cada intervalo enquanto o trabalho está parado (por exemplo: veja se o site está no ar).",
   'comando.linha.comentar': "Seu comentário entra no trabalho em andamento, sem parar o que o agente está fazendo.",
-  'comando.linha.revisao': "Um colega que não fez o trabalho revisa do zero e diz o que está certo, o que falta e o que corrigir.",
+  'comando.linha.revisao': 'Um colega de fora do trabalho revisa do zero e diz o que está certo, o que falta e o que corrigir.',
   'comando.custo.meta': "Custa mais: cada volta usa o juiz e uma nova rodada do agente (até o limite de rodadas).",
   'comando.custo.repetir': "Custa uma rodada do agente a cada intervalo (e o juiz, se houver critério), até o limite de rodadas.",
   'comando.custo.checagem': "Custa uma rodada do agente a cada intervalo, até o limite de rodadas.",
@@ -432,7 +432,10 @@ const conversas = {
   'voz.erro.semTranscricao': 'Esta equipe ainda não transcreve áudio.',
   'voz.erro.semMotor': 'A equipe de IA está desligada.',
   'voz.erro.falhou': 'O microfone falhou.',
-  'voz.aviso.semVoz': 'Sem voz neste computador: respostas só em texto.',
+  'voz.aviso.ninguem': 'Diga o nome de quem você quer ouvir.',
+  'voz.semSom': 'Microfone mudo no computador',
+  'voz.todos': 'Todos',
+  'voz.todosDica': 'Responde quem você chamar pelo nome',
   'voz.aviso.vozFalhou': 'Não deu para falar esta resposta.',
   'voz.aviso.envioFalhou': 'Não foi enviado ({motivo}). Fale de novo.',
   'voz.aviso.semDetalhe': 'áudio vazio',

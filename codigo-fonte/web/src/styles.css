@@ -3012,10 +3012,6 @@ body:has(.ent-dlg) .cdock { display: none; }
    os botões perto do que fazem). Mensagens, avisos e o que não é cartão ocupam a linha inteira. */
 @media (min-width: 1500px) {
   .page--larga { max-width: 1680px; }
-  .cfg-corpo, .cfg-corpo > :only-child:not(.card):not(section) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; align-items: start; }
-  .cfg-corpo > *, .cfg-corpo > :only-child:not(.card):not(section) > * { grid-column: 1 / -1; min-width: 0; }
-  .cfg-corpo > .card, .cfg-corpo > :only-child:not(.card):not(section) > .card { grid-column: auto; }
-  .cfg-corpo > :only-child:not(.card):not(section) { grid-column: 1 / -1; }
   /* Conexões › IA: o Ergon AI e as outras contas lado a lado */
   .conn-group--feature { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; align-items: start; }
   .conn-group--feature > * { grid-column: 1 / -1; min-width: 0; }
@@ -3305,6 +3301,13 @@ small { font-size: max(12px, .83em); }
 .conn-detail .conn-passos, .conn-detail ol.small { padding-left: 20px; display: grid; gap: 4px; }
 .conn-secoes + .conn-secao--detalhes { border-top: 0; margin-top: 0; }
 .tools-fora { margin-top: 10px; } .tools-fora > .tools-grid { margin-top: 6px; }
+/* as opções de ferramenta com a mesma altura: a nota em duas linhas (inteira no title), quem tem numa linha só */
+.tools-grid { grid-auto-rows: 1fr; }
+.tool-opt { align-content: start; }
+.tool-opt__txt small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tool-opt__tags { flex-wrap: nowrap; min-width: 0; }
+.tool-opt__tags > .badge { flex: none; }
+.tool-opt__quem { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* celular: a lista das ferramentas (15 opções com explicação) rola por dentro, último recurso; o cartão cabe na tela */
 @media (max-width: 600px) { .tools-grid { max-height: 70vh; overflow-y: auto; padding-right: 2px; } }
 
@@ -4011,3 +4014,48 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
 .aviso-dpdp__acoes { margin-top: 12px; gap: 8px; }
 .conta__dpdp h4 { margin-top: 12px; }
 .dpdp-cfg h4 { margin: 12px 0 4px; }
+
+/* ---------- Mosaico, blocos recolhíveis e sub-abas (components/Bloco.tsx) ----------
+   Mosaico: os cartões em colunas sem buracos. Cada filho ocupa as linhas (4 px) da sua altura e o próximo cai na coluna
+   mais curta; o que não é cartão (avisos, abas) ocupa a largura toda. Sem o script (data-mosaico ausente), uma coluna. */
+:root { --mosaico-col: 400px; --mosaico-vao: 14px; }
+.mosaico { display: flex; flex-direction: column; gap: var(--mosaico-vao); }
+.mosaico > * { margin: 0; min-width: 0; }
+.mosaico[data-mosaico="on"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(var(--mosaico-col), 100%), 1fr)); grid-auto-rows: 4px; row-gap: 0; column-gap: var(--mosaico-vao); align-items: start; }
+.mosaico[data-mosaico="on"] > :not(.card), .mosaico[data-mosaico="on"] > .mosaico__largo { grid-column: 1 / -1; }
+.cfg-corpo { margin-top: 4px; }
+/* Bloco: o cabeçalho (título e o resumo do estado) sempre à vista; o corpo desliza (a altura vai de 0 ao conteúdo) */
+.bloco__cab, .card > .bloco__cab { margin: 0; font-size: 13.5px; }
+.bloco--cartao > .bloco__cab { font-size: 15px; }
+.bloco__botao { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 2px 0; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.bloco__botao > svg { flex: none; color: var(--muted); }
+.bloco__titulo { min-width: 0; }
+.bloco__seta { flex: none; width: 7px; height: 7px; margin: 0 3px 0 2px; border: solid var(--muted); border-width: 0 1.8px 1.8px 0; transform: rotate(-45deg); transition: transform .2s ease; }
+.bloco--aberto > .bloco__cab .bloco__seta { transform: rotate(45deg); }
+.bloco__resumo { margin-left: auto; flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; }
+.bloco__topo { margin-top: 6px; }
+.bloco__corpo { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .26s ease; }
+.bloco--aberto > .bloco__corpo { grid-template-rows: 1fr; }
+.bloco__dentro { min-height: 0; overflow: hidden; }
+.bloco__corpo--solto > .bloco__dentro { overflow: visible; }
+.bloco__dentro::before { content: ''; display: block; height: 6px; }
+.bloco--secao { border-top: 1px solid var(--line); padding: 2px 0; }
+.bloco--secao > .bloco__corpo > .bloco__dentro::after { content: ''; display: block; height: 8px; }
+.bloco--secao:last-child { border-bottom: 1px solid var(--line); }
+.cap-painel > .sobre-caixa { margin-bottom: 10px; }
+@media (prefers-reduced-motion: reduce) { .bloco__corpo, .bloco__seta { transition: none; } }
+/* explicação longa: duas linhas à vista, "Ver mais" abre o resto */
+.sobre-caixa { margin: 0 0 8px; }
+.sobre { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sobre--aberto { display: block; overflow: visible; }
+.sobre-caixa > .linkish { padding: 0; margin-top: 2px; font-size: 12.5px; }
+.bloco .check { display: flex; align-items: flex-start; margin: 4px 0; }
+.bloco .check > input { flex: none; margin-top: 3px; }
+/* sub-abas: controle segmentado */
+.subabas { display: inline-flex; justify-self: start; flex-wrap: wrap; gap: 4px; max-width: 100%; padding: 4px; margin: 2px 0 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.subabas__aba { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-weight: 500; cursor: pointer; }
+.subabas__aba:hover { background: var(--realce); }
+.subabas__aba--on, .subabas__aba--on:hover { background: var(--marca-cheio); color: var(--marca-sobre); font-weight: 600; }
+@media (max-width: 560px) { .subabas { display: grid; grid-template-columns: 1fr 1fr; width: 100%; } }
+/* celular: as abas de Configurações numa faixa só, que corre de lado (no lugar de quatro linhas de abas) */
+@media (max-width: 600px) { .cfg-abas { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; } .cfg-abas > .tab { flex: none; } }

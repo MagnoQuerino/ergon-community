@@ -100,7 +100,7 @@ PACOTES = {"piper": True, "edge": True}
 CHAMADAS_PIPER = []
 
 
-def falar_piper_falso(texto, saida, cfg):
+def falar_piper_falso(texto, saida, cfg, perfil=None):
     CHAMADAS_PIPER.append((texto, bridge._piper_voz(cfg)))
     if ST["falhar_piper"]:
         return False, "não consegui baixar a voz"
@@ -304,6 +304,14 @@ r = subprocess.run([sys.executable, "-I", HELPER, "--voz", "../../etc/passwd", "
 check("processo próprio: voz com nome estranho, recusada", r.returncode == 2)
 src = open(os.path.join(PLUGINS, "ergon_bridge", "__init__.py"), encoding="utf-8").read() + open(HELPER, encoding="utf-8").read()
 check("nada do pacote piper é importado no processo do plugin", "piper" not in sys.modules and not re.search(r"^\s*(from piper|import piper)", src, re.M))
+
+# rc.49: uma voz para cada agente — o mesmo perfil dá sempre a mesma voz; perfis vizinhos soam diferentes
+check("perfil do agente: voz e ritmo fixos por perfil", bridge._perfil_piper("pt_BR-cadu-medium", 3) == bridge._perfil_piper("pt_BR-cadu-medium", 3))
+check("perfis vizinhos: vozes ou ritmos diferentes", len({bridge._perfil_piper("pt_BR-cadu-medium", i) for i in range(6)}) == 6)
+check("sem perfil: a voz escolhida, ritmo normal", bridge._perfil_piper("pt_BR-cadu-medium", None) == ("pt_BR-cadu-medium", 1.0))
+check("edge-tts: voz do idioma com tom", bridge._perfil_edge(1, "pt")[0].startswith("pt-BR-"))
+r = subprocess.run([sys.executable, "-I", HELPER, "--voz", "pt_BR-cadu-medium", "--pasta", pasta, "--texto", entrada, "--saida", saida, "--python", FALSO, "--ritmo", "9"], capture_output=True, timeout=60)
+check("processo próprio: ritmo fora da faixa, recusado", r.returncode == 2)
 
 shutil.rmtree(HOME, ignore_errors=True)
 print("TUDO OK" if ok else "HÁ FALHAS")

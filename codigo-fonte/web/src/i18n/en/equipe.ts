@@ -149,7 +149,7 @@ const equipe: Traducao<typeof pt> = {
   // ——— Suggest an arrangement ———
   'distrib.titulo': 'Suggest an arrangement',
   'distrib.mudou': 'The team changed while you were looking: this is the updated suggestion.',
-  'distrib.intro': 'Brings teammates from the same sector together in the building where that sector is already the majority, using only open spots. Only the address changes: sector, role and work stay. Nothing changes until you apply.',
+  'distrib.intro': 'Brings teammates from the same sector together in the building where that sector is already the majority, using only open spots. Only the address changes; it takes effect when you apply.',
   'distrib.calculando': 'Working it out…',
   'distrib.semLugar': 'There’s no open spot to bring anyone together right now. See below where space is short.',
   'distrib.jaDistribuida': 'The team is already arranged this way. Nothing to change.',
@@ -196,7 +196,7 @@ const equipe: Traducao<typeof pt> = {
   'faixa.ponta': 'premium',
 
   // ——— effects from Packages ———
-  'efeitos.nenhum': 'No effects installed. Effects come from the Store; the agent works the same without them.',
+  'efeitos.nenhum': 'No effects installed. Effects come from the Store and are optional.',
   'efeitos.grupo': 'Effects from your Packages',
   'efeitos.padrao': 'City default',
   'efeitos.padraoDica': 'What your installed packages already apply to this agent',

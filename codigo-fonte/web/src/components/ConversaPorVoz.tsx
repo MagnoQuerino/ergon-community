@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '../i18n/index.ts';
+import { idiomaAtual } from '../i18n/index.ts';
 import { ApiError, api, errMsg, requestId, uploadFile } from '../lib/api.ts';
+import { falarMensagem, idiomaDaFala, temFalaDoSistema, type Fala } from '../lib/fala.ts';
 import {
   VAD_ESCUTA, VAD_INTERRUPCAO, VAD_PARADO, conversaVoz, microfoneLigado, modoDoVad, nivelNoMedidor, nivelRms, turnoDaMensagem, vad, vadDeNovo, voz0,
-  type EstadoVad, type EstadoVoz, type EventoVoz,
+  type EstadoVad, type EstadoVoz, type EventoVoz, type MensagemDoTurno, type Turno,
 } from '../lib/conversa-voz.ts';
 import { GRAVACAO_BITS, formatoDeGravacao, motivoDoErro, nomeDaGravacao } from '../lib/gravador.ts';
-import { RECURSOS } from '../lib/recursos.ts';
 import type { Agent, Attachment, Message } from '../lib/types.ts';
 import { Icon } from './Icon.tsx';
 
@@ -35,7 +36,7 @@ interface Gravando { r: MediaRecorder; partes: Blob[]; inicio: number; descartar
  * O microfone só fica aberto com o modo aberto e sem pausa (o indicador no topo diz), e é solto em toda saída: encerrar,
  * erro, pausa e ao desmontar. Sem voz para falar, as respostas aparecem escritas e a escuta segue.
  */
-export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garantirConversa, recarregar, onFechar, enviarFala }: {
+export function ConversaPorVoz({ agente, mensagens, podeFalar: vozDaEquipe, preparaVoz, garantirConversa, recarregar, onFechar, enviarFala, turnoDe = turnoDaMensagem }: {
   agente: Pick<Agent, 'id' | 'name'>;
   /** as mensagens da conversa (a lista de sempre do ChatPanel): é por elas que o modo sabe da transcrição e da resposta */
   mensagens: Message[];
@@ -48,8 +49,12 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   onFechar: () => void;
   /** sala (rc.42): a fala vai pela rota da sala, para o agente escolhido; devolve o id da mensagem */
   enviarFala?: (arquivoId: string) => Promise<string>;
+  /** sala (rc.49): o turno lido pela sala (vários agentes podem responder à mesma fala) */
+  turnoDe?: (msgs: readonly MensagemDoTurno[], id: string) => Turno<MensagemDoTurno>;
 }) {
   const t = useT();
+  // a voz da equipe, ou a do próprio sistema: toda resposta é falada onde houver uma das duas
+  const podeFalar = vozDaEquipe || temFalaDoSistema();
   const [e, setE] = useState<EstadoVoz>(() => voz0(!podeFalar));
   const estado = useRef(e);
   const vivo = useRef(true);
@@ -78,6 +83,12 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   const gravando = useRef<Gravando | null>(null);
   const formato = useRef<{ mime: string; ext: string; tipo: string } | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
+  const fala = useRef<Fala | null>(null);
+  /** as respostas já faladas neste turno (na sala, cada uma é falada assim que chega) */
+  const faladas = useRef(new Set<string>());
+  /** o microfone está mudo no sistema (o botão mostra; nenhum aviso cobre a barra) */
+  const [semSom, setSemSom] = useState(false);
+  const zeroDesde = useRef<number | null>(null);
   /** muda a cada fala do agente começada ou interrompida: o que chega de uma fala antiga é ignorado */
   const ficha = useRef(0);
   const turno = useRef<string | null>(null);
@@ -109,6 +120,7 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   // ——— o alto-falante ———
   const pararFala = () => {
     ficha.current++;
+    fala.current?.parar(); fala.current = null;
     const a = audio.current;
     if (!a) return;
     try { a.pause(); } catch { /* nada tocando */ }
@@ -120,22 +132,21 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
     const a = audio.current ?? (audio.current = new Audio());
     try {
       for (const m of respostas) {
-        const blob = await api.postBlob(`${RECURSOS}/voz/falar`, { mensagem: m.id });
-        if (ficha.current !== minha) return;
-        const url = URL.createObjectURL(blob);
-        a.src = url;
-        const fim = new Promise<void>((ok) => { a.onended = () => ok(); a.onerror = () => ok(); a.onpause = () => ok(); });
-        await a.play();
-        if (ficha.current !== minha) return;
+        const autor = (m as Message & { autor?: { nome: string | null } }).autor?.nome ?? agente.name;
+        const f = await falarMensagem({ id: m.id, content: m.content, autor }, { podeEquipe: vozDaEquipe && !estado.current.semVoz, idioma: idiomaDaFala(idiomaAtual()), audio: a });
+        if (ficha.current !== minha) { f?.parar(); return; }
+        if (!f) { despachar({ tipo: 'voz_indisponivel' }); return; }
+        fala.current = f;
         despachar({ tipo: 'tocando' });
-        await fim;
-        URL.revokeObjectURL(url);
+        await f.fim;
         if (ficha.current !== minha) return;
       }
+      fala.current = null;
       despachar({ tipo: 'fala_agente_fim' });
+      // a sala: outro agente ainda vai responder a esta fala
+      if (turno.current) despachar({ tipo: 'aguardar' });
     } catch (err) {
       if (ficha.current !== minha) return;
-      // sem o componente da voz: daqui em diante só texto; outra falha (rede, a voz não gerou, o navegador não tocou): só esta
       despachar({ tipo: err instanceof ApiError && err.code === 'voz_componente' ? 'voz_indisponivel' : 'voz_falhou' });
     }
   };
@@ -158,6 +169,7 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
       const r = de.current.enviarFala ? { messageId: await de.current.enviarFala(arq.id) }
         : await mandar(false).catch((err) => { if (err instanceof ApiError && err.code === 'busy') return mandar(true); throw err; });
       turno.current = r.messageId;
+      faladas.current.clear();
       conhecidas.current?.add(r.messageId);
       despachar({ tipo: 'enviado' }); // i18n-ok: código interno do estado
       de.current.recarregar();
@@ -199,6 +211,10 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
     an.getFloatTimeDomainData(buf);
     const nivel = nivelRms(buf);
     desenhar(nivel);
+    // microfone mudo no sistema (tecla de mudo, chave do fone): o sinal fica em zero absoluto; o botão mostra
+    const agoraMs = performance.now();
+    if (nivel < 1e-6 || fluxo.current?.getAudioTracks().some((x) => x.muted)) { zeroDesde.current ??= agoraMs; if (agoraMs - zeroDesde.current > 1200) setSemSom(true); }
+    else if (zeroDesde.current !== null) { zeroDesde.current = null; setSemSom(false); }
     const modo = modoDoVad(estado.current);
     // a vez é do agente (ou o modo está pausado): nada é escutado nem gravado
     if (!modo) { if (gravando.current) soltarGravador(); detector.current = vadDeNovo(detector.current); return; }
@@ -272,7 +288,7 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   useEffect(() => {
     const id = turno.current;
     if (!id || !esperando) return;
-    const tu = turnoDaMensagem(mensagens, id);
+    const tu = turnoDe(mensagens, id);
     // a equipe não transcreve (falta o componente, ou o motor está desligado): sem isso não há conversa por voz
     if (tu.transcricaoFalhou === 'componente' || tu.transcricaoFalhou === 'sem_motor') {
       turno.current = null;
@@ -280,11 +296,18 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
       return;
     }
     if (tu.fase === 'enviando' || tu.fase === 'transcrevendo') return;
-    if (tu.fase === 'pensando') { despachar({ tipo: tu.transcricaoFalhou ? 'transcricao_falhou' : 'transcrito' }); return; }
-    turno.current = null;
-    if (tu.fase !== 'pronta') { despachar({ tipo: 'sem_resposta', motivo: tu.fase }); return; }
+    const novas = tu.respostas.filter((m) => !faladas.current.has(m.id));
+    if (tu.fase === 'pensando' || (tu.maisVindo && !novas.length)) { if (e.fase === 'transcrevendo') despachar({ tipo: tu.transcricaoFalhou ? 'transcricao_falhou' : 'transcrito' }); return; }
+    if (!tu.maisVindo) turno.current = null;
+    if (tu.fase !== 'pronta' || !novas.length) {
+      if (e.fase === 'transcrevendo') despachar({ tipo: 'transcrito' });
+      despachar({ tipo: 'sem_resposta', motivo: tu.ninguem ? 'ninguem' : tu.fase === 'pronta' ? 'vazia' : tu.fase });
+      return;
+    }
+    for (const m of novas) faladas.current.add(m.id);
     const n = despachar({ tipo: 'resposta', falar: podeFalar });
-    if (n.fase === 'preparando') void falar(tu.respostas);
+    if (n.fase === 'preparando') void falar(novas as Message[]);
+    else if (turno.current) despachar({ tipo: 'aguardar' });
   }, [mensagens, esperando]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ——— um texto mandado pela barra com a voz ligada: a resposta dele também é falada ———
@@ -293,11 +316,12 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
     if (e.fase !== 'ouvindo' || turno.current) return;
     for (const m of mensagens) {
       if (k.has(m.id) || m.role !== 'user') continue;
-      const tu = turnoDaMensagem(mensagens, m.id);
+      const tu = turnoDe(mensagens, m.id);
       k.add(m.id);
       // já respondido (chegou enquanto o agente falava outra coisa): fica só escrito
       if (tu.fase !== 'pensando' && tu.fase !== 'transcrevendo') continue;
       turno.current = m.id;
+      faladas.current.clear();
       despachar({ tipo: 'texto' });
       return;
     }
@@ -318,7 +342,7 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
       : e.erro === 'sem_transcricao' ? 'conversas.voz.erro.semTranscricao' : e.erro === 'sem_motor' ? 'conversas.voz.erro.semMotor' : 'conversas.voz.erro.falhou')
     : e.fase === 'preparando' && preparaVoz ? t('conversas.voz.dica.preparandoPrimeira')
     : !e.aviso ? null
-    : e.aviso === 'sem_voz' ? t('conversas.voz.aviso.semVoz')
+    : e.aviso === 'ninguem' ? t('conversas.voz.aviso.ninguem')
     : e.aviso === 'voz_falhou' ? t('conversas.voz.aviso.vozFalhou')
     : e.aviso === 'envio_falhou' ? t('conversas.voz.aviso.envioFalhou', { motivo: detalhe ?? t('conversas.voz.aviso.semDetalhe') })
     : e.aviso === 'transcricao_falhou' ? t('conversas.voz.aviso.transcricaoFalhou', { nome })
@@ -336,9 +360,11 @@ export function ConversaPorVoz({ agente, mensagens, podeFalar, preparaVoz, garan
   }, [linha, e.fase]);
 
   return (
-    <span ref={raiz} className={`vozc vozc--${e.fase} ${esperando || e.fase === 'enviando' ? 'vozc--espera' : ''}`} data-fase={e.fase} data-microfone={microfone ? 'aberto' : 'fechado'}>
+    <span ref={raiz} className={`vozc vozc--${e.fase} ${esperando || e.fase === 'enviando' ? 'vozc--espera' : ''} ${semSom && microfone ? 'vozc--sem-som' : ''}`} data-fase={e.fase} data-microfone={microfone ? 'aberto' : 'fechado'}>
       <button type="button" className="icon-btn vozc__botao" onClick={encerrar} aria-pressed="true"
-        aria-label={t('conversas.voz.encerrarDica')} title={t('conversas.voz.encerrarDica')}>
+        aria-label={semSom && microfone ? `${t('conversas.voz.semSom')} · ${t('conversas.voz.encerrarDica')}` : t('conversas.voz.encerrarDica')}
+        title={semSom && microfone ? t('conversas.voz.semSom') : t('conversas.voz.encerrarDica')}>
+        {semSom && microfone && <i className="vozc__corte" aria-hidden="true" />}
         <i className="vozc-anel__fig" aria-hidden="true" /><i className="vozc-onda__fig" aria-hidden="true" />
         <Icon name="voz" />
         <span className="vozc__pontos" aria-hidden="true"><i /><i /><i /></span>

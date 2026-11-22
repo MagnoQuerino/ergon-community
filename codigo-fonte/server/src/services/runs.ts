@@ -1314,6 +1314,22 @@ export function toolHolders(db: Db, workspaceId: string): Map<string, string[]> 
  */
 const CONEXOES_UPDATING = 'As Conexões (as contas e os aplicativos que a pessoa conectou) estão sendo atualizadas neste computador e voltam sozinhas quando a atualização da equipe terminar. Até lá, não use outro caminho para as contas: nada de skills de e-mail (como himalaya), terminal ou programas, e não diga que enviou ou leu. Diga à pessoa, em uma frase, que a parte do pedido que precisa das contas segue quando a atualização terminar, e faça agora o resto.';
 
+/**
+ * Navegar a pedido (rc.49): a pessoa pede para abrir o navegador e conduz — o site, o que procurar, o que clicar, o que
+ * preencher. Com o navegador da equipe, o agente abre na hora e a pessoa acompanha ao vivo na conversa (e assume quando
+ * quiser); com o controle do computador, usa o navegador do próprio computador quando ela pede isso. Nada de site ou
+ * provedor fixo: quem escolhe é a pessoa.
+ */
+export function navegarComo(ids: readonly string[]): string {
+  const nav = ids.includes('navegador'); const pc = ids.includes('computador');
+  if (!nav && !pc) return '';
+  return [
+    'Navegar: quando a pessoa pedir para abrir o navegador, abra na hora, sem perguntar e sem dizer que não pode. Ela conduz: vá aonde ela disser, faça o que ela pedir em cada passo e conte em poucas palavras o que está na tela; sem destino dito, abra e pergunte para onde ir.',
+    nav ? 'Use o seu navegador (as ferramentas browser_*). A pessoa vê esse navegador ao vivo aqui na conversa e pode assumir o controle (login, captcha) e devolver.' : '',
+    pc ? (nav ? 'Se ela pedir o navegador do computador dela, use o controle do computador.' : 'Use o controle do computador: abra o navegador do computador da pessoa; ela acompanha na tela.') : '',
+  ].filter(Boolean).join(' ');
+}
+
 /** O motivo verdadeiro de uma ferramenta que o agente tem, mas ainda não pode usar. */
 function whyMissing(t: ToolDef): string {
   if (t.status === 'bloqueada') return t.guarded ? 'executa programas: precisa da autorização da pessoa, com a senha' : t.id === 'contas' ? CONEXOES_FORA_ATE_A_PROXIMA : 'bloqueada neste computador';
@@ -1442,6 +1458,7 @@ export function instructionsFor(db: Db, workspaceId: string, agentId: string, ch
     // a identidade do agente (o SOUL do perfil dele no motor, rc.27): sempre o começo das instruções, igual em todo pedido
     almaDe(a),
     usable.length ? `Ferramentas que você tem: ${usable.join('; ')}.` : 'Você trabalha só com texto nesta conversa.',
+    navegarComo(tools.filter((t) => ok(t.status)).map((t) => t.id)),
     missing.length ? `Ferramentas que você ainda não pode usar, e por quê: ${missing.join('; ')}. Não diga que usou nenhuma delas e não dê outro motivo.` : '',
     updating.some((t) => t.id === 'contas') ? CONEXOES_UPDATING : '',
     skills.length ? (canSkills

@@ -291,7 +291,7 @@ const tarefa: TraducaoParcial<typeof pt> = {
   'arquivos.anexar': 'फ़ाइल संलग्न करें (एजेंट इसके साथ काम करते हैं)',
   'acoesDoCard': 'कार्ड की कार्रवाइयाँ',
   'conferido.titulo': 'कैसे जाँचा गया',
-  'conferido.ainda': 'अभी जाँचने को कुछ नहीं: जाँच काम डिलीवर होने पर होती है।',
+  'conferido.ainda': 'जाँच काम डिलीवर होने पर होती है।',
   'conferido.decididoPorVoce': 'आपने {quando} को तय किया',
   'conferido.peloSistema': 'सिस्टम ने {quando} को जाँचा',
   'conferido.deOndeVeio': 'कहाँ से आया: {plataforma} · {quando}',

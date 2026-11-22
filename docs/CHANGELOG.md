@@ -1,5 +1,15 @@
 # Novidades
 
+## 1.1.0-rc.49 (pré-versão de teste)
+
+- **Conversa por voz de mãos livres:** com a voz ligada, toda resposta é falada, inclusive quando a equipe ainda não tem a voz instalada: aí fala a voz do próprio sistema (no Windows, as vozes do Windows). Cada agente tem a sua voz e o seu tom. Mandou um áudio pelo microfone? A resposta toca sozinha.
+- **Voz nas salas:** o áudio gravado no grupo sai na hora, com o player e a transcrição, como nas conversas privadas. No canal de voz, além de um agente, há **Todos**: responde quem você chamar pelo nome na fala ("Sócrates, …"), e "Pessoal, …" chama todo mundo. O reconhecimento dos nomes é feito no seu computador, sem IA: entende "Socratis", "ocrates", "Arqui medes" e afins, e vale na hora para agentes renomeados ou novos. Chamou dois ou mais? Eles respondem um depois do outro, cada um com a sua parte, sem repetir.
+- **Microfone mudo:** o botão da voz ganha borda vermelha e um traço quando o microfone do computador está mudo. O aviso "Sem voz neste computador" saiu.
+- **Acesso total de verdade:** um cartão só, em todo lugar (Controle do computador, Liberar tudo, o pedido de um agente e o perfil do agente), com a sua senha e o prazo: 24 horas, 7 dias ou sempre. Ele libera para a equipe toda o Terminal, Executar código, Diagnóstico, o controle do computador e o Discord, e põe o seu computador em acesso total pelo mesmo prazo. Senhas, pagamentos e apagar de vez continuam pedindo você.
+- **Navegar a pedido:** peça para abrir o navegador e conduza: o agente abre na hora e segue o que você disser, passo a passo, no navegador da equipe (você acompanha ao vivo na conversa e assume quando quiser) ou no navegador do seu computador, com o acesso total.
+- **Configurações mais enxutas:** os cartões se encaixam sem buracos, os blocos grandes recolhem com um resumo no título e abrem empurrando os outros com suavidade, e Ferramentas da equipe ganhou sub-abas (Ferramentas, Modelos, Capacidades, Consumo).
+- **Também:** os botões da barra da conversa e da sala ficam alinhados; textos das telas mais diretos, dizendo o que cada coisa é e faz.
+
 ## 1.1.0-rc.48 (pré-versão de teste)
 
 - **Zoho:** em Conexões, entre com a conta Zoho de qualquer data center (zoho.in, zoho.com, zoho.eu e os outros). Os agentes consultam e atualizam leads, contatos e negócios do CRM, leem faturas, clientes e pagamentos do Books e criam faturas em rascunho, e leem e enviam e-mails pelo Zoho Mail, com o link de cada registro na resposta. Enviar fatura e registrar pagamento sempre pedem a sua aprovação. Quem instala registra o app OAuth na Zoho (veja `docs/INDIA.md`).

@@ -317,7 +317,7 @@ const tarefa = {
 
   // ——— como foi conferido ———
   'conferido.titulo': 'Como foi conferido',
-  'conferido.ainda': 'Ainda nada para conferir: a conferência acontece quando o trabalho é entregue.',
+  'conferido.ainda': 'A conferência acontece quando o trabalho é entregue.',
   'conferido.decididoPorVoce': 'Decidido por você em {quando}',
   'conferido.peloSistema': 'Conferido pelo sistema em {quando}',
   'conferido.deOndeVeio': 'De onde veio: {plataforma} · {quando}',

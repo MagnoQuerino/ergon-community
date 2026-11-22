@@ -8,7 +8,7 @@ export const PARTICAO: { readonly [A in NomeDaArea]: readonly string[] } = {
   geral: [
     'App.tsx', 'components/CommandPalette.tsx', 'components/WsCard.tsx', 'components/MusicButton.tsx', 'components/AccountMenu.tsx', 'components/Workspaces.tsx',
     'components/SeletorIdioma.tsx', 'components/ConfirmPopup.tsx', 'components/VirtualGrid.tsx', 'components/TextoLongo.tsx', 'components/Markdown.tsx',
-    'components/FileViewer.tsx', 'components/ComputadorControle.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
+    'components/FileViewer.tsx', 'components/ComputadorControle.tsx', 'components/Bloco.tsx', 'lib/theme.ts', 'lib/music.ts', 'lib/api.ts', 'lib/files.ts', 'lib/surface.ts', 'brand/Brand.tsx', 'brand/logo.ts',
   ],
   // a Cidade, o Modo Foco, a Central de Trabalho e os rótulos desenhados na cidade
   cidade: [

@@ -12,7 +12,7 @@ import { marcarDeTerceiros, NOME_COMPETENCIA, pacoteDoPedido } from '../services
 import type { AuthContext } from '../services/auth.ts';
 import type { Bus } from '../services/bus.ts';
 import { getConversation, sendMessage } from '../services/chat.ts';
-import { PEDIDO_CONSELHO, ehAudio, type Recursos } from '../services/recursos.ts';
+import { PEDIDO_CONSELHO, ehAudio, perfilDeVoz, type Recursos } from '../services/recursos.ts';
 import type { RunExecutor } from '../services/runs.ts';
 import type { Transcricoes } from '../services/transcricoes.ts';
 
@@ -215,12 +215,14 @@ export function registerRecursosRoutes(app: FastifyInstance, d: RecursosRoutesDe
   });
   app.post('/api/recursos/voz/falar', { schema: { body: { type: 'object', additionalProperties: false, required: ['mensagem'], properties: { mensagem: S.id('msg') } } } }, async (req, reply) => {
     const a = auth(req);
-    const m = db.get<{ conversation_id: string; content: string; role: string }>('SELECT conversation_id, content, role FROM messages WHERE id = ? AND workspace_id = ?', (req.body as { mensagem: string }).mensagem, a.workspaceId);
+    const m = db.get<{ conversation_id: string; content: string; role: string; agente: string | null }>(`SELECT m.conversation_id, m.content, m.role, COALESCE(r.agent_id, c.agent_id) AS agente
+      FROM messages m LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN conversations c ON c.id = m.conversation_id WHERE m.id = ? AND m.workspace_id = ?`, (req.body as { mensagem: string }).mensagem, a.workspaceId);
     if (!m) throw notFound('mensagem');
     getConversation(db, a.workspaceId, a.userId, m.conversation_id); // só quem vê a conversa ouve
     const texto = String(m.content ?? '').replace(/\[\[[^\]]*\]\]/g, '').trim().slice(0, 12000);
     if (!texto) throw new HttpError(400, 'vazio', 'nada para ouvir nesta mensagem');
-    const r = await recursos.falar(a.workspaceId, texto);
+    // cada agente com a sua voz (a resposta da pessoa, se pedida, vai na voz de sempre)
+    const r = await recursos.falar(a.workspaceId, texto, m.role === 'agent' ? perfilDeVoz(db, a.workspaceId, m.agente) : null);
     if (r.ok !== true) {
       if (r.motivo === 'componente') throw new HttpError(409, 'voz_componente', 'responder em áudio precisa de um componente adicional na equipe de IA (a voz) ou de uma conta de voz ligada');
       throw new HttpError(502, 'voz_falhou', 'não consegui gerar o áudio agora');

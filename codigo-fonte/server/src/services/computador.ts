@@ -308,13 +308,21 @@ export class Computador {
   constructor(d: DepsComputador) { this.d = d; }
 
   // ---------- ajustes (por pessoa no workspace; o bloqueio é do workspace)
-  modo(ws: string, userId: string): Modo { const m = getSetting(this.d.db, ws, `computador.modo:${userId}`) as Modo | null; return m && MODOS.includes(m) ? m : 'desligado'; }
+  modo(ws: string, userId: string): Modo {
+    const m = getSetting(this.d.db, ws, `computador.modo:${userId}`) as Modo | null;
+    // rc.49: o acesso total com prazo (24 horas ou 7 dias) volta a "confirmar cada ação" quando o prazo passa
+    const ate = m === 'total' ? getSetting(this.d.db, ws, `computador.total_ate:${userId}`) : null;
+    if (ate && Date.parse(ate) <= Date.now()) return 'cada_acao';
+    return m && MODOS.includes(m) ? m : 'desligado';
+  }
   naoPerguntar(ws: string, userId: string): boolean { return getSetting(this.d.db, ws, `computador.nao_perguntar:${userId}`) === '1'; }
   bloqueado(ws: string): boolean { return getSetting(this.d.db, ws, 'computador.bloqueado') === '1'; }
 
   definirModo(a: AuthContext, modo: Modo, naoPerguntar?: boolean): void {
     if (this.bloqueado(a.workspaceId) && modo !== 'desligado') throw new HttpError(409, 'bloqueado', 'Quem administra bloqueou o controle do computador neste workspace.');
     setSetting(this.d.db, a.workspaceId, `computador.modo:${a.userId}`, modo);
+    // escolher outro modo (ou o total direto, sem prazo) apaga o prazo de antes; o cartão do acesso total grava o novo depois
+    if (modo !== 'total') this.d.db.run('DELETE FROM workspace_settings WHERE workspace_id = ? AND key = ?', a.workspaceId, `computador.total_ate:${a.userId}`);
     if (naoPerguntar !== undefined) setSetting(this.d.db, a.workspaceId, `computador.nao_perguntar:${a.userId}`, naoPerguntar ? '1' : '0');
     audit(this.d.db, this.d.bus, { workspaceId: a.workspaceId, actorType: 'user', actorId: a.userId, action: 'computador.modo', evidence: { modo }, result: { desligado: 'controle do computador desligado', cada_acao: 'controle do computador: confirmar cada ação', total: 'controle do computador: acesso total' }[modo] });
     if (modo === 'desligado') this.assumir(a.userId, 'desligou');
