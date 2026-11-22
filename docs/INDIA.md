@@ -49,3 +49,41 @@ O canal oficial da Meta (Cloud API), ao lado do número pareado por QR. O que o 
 chega estão em [WHATSAPP.md](WHATSAPP.md#whatsapp-business-oficial-cloud-api-desde-a-110-rc47): conta Meta Business,
 um número só para a plataforma, um app Business com o produto WhatsApp, a chave de acesso permanente e o App Secret;
 o verify token o Ergon gera.
+
+## Conectores (desde a 1.1.0-rc.48)
+
+Em Conexões: **Zoho** (CRM, Books e Mail), **Razorpay**, **Freshsales** e **Tally**. As credenciais ficam só no computador do
+Ergon, cifradas; os agentes nunca as veem.
+
+**Zoho, o que o dono providencia (uma vez, para a instalação).** Um app OAuth "Server-based Application" no
+[API Console da Zoho](https://api-console.zoho.com), com:
+- *Redirect URI:* `http://localhost:8787/api/integrations/zoho/callback` (ou o endereço de `ERGON_OAUTH_REDIRECT_BASE`, se o
+  Ergon abre por outro endereço);
+- *Multi-DC* ligado em Settings, com os data centers que as empresas usam (Índia, EUA, Europa, Austrália, Japão, Canadá,
+  Arábia Saudita, Reino Unido; a China é separada). A Zoho dá um client id para todos e, se pedir, um segredo por data center;
+- no `ergon.env`: `ERGON_ZOHO_CLIENT_ID` e `ERGON_ZOHO_CLIENT_SECRET` e, quando o console der um segredo diferente para um
+  data center, `ERGON_ZOHO_CLIENT_SECRET_IN` (e `_EU`, `_AU`, `_JP`, `_CA`, `_SA`, `_UK`, `_CN`). `ERGON_ZOHO_DC` muda
+  onde o login começa (padrão `COM`; o accounts.zoho.com leva cada conta ao data center dela).
+
+O login volta dizendo o data center da conta (`accounts-server`); o Ergon só aceita os da lista e guarda qual é, e as chamadas e
+a renovação vão aos endereços dele (`www.zohoapis.in`, `mail.zoho.in`, `crm.zoho.in`...). Escopos pedidos: perfil, CRM (leads,
+contatos e negócios), Books (faturas, clientes, pagamentos, configurações) e Mail (contas, pastas, mensagens). Sem o app, o
+botão "Entrar com Zoho" diz o que falta.
+
+**Razorpay.** A pessoa gera a chave em Account & Settings › API Keys (Test Mode para experimentar) e cola Key Id e Key Secret.
+Leitura livre (pagamentos com UPI, pedidos, links, reembolsos, liquidações com taxas, GST e UTR); criar link de pagamento sempre
+pede confirmação; reembolsar e capturar pedem a aprovação toda vez, mesmo com "Liberar tudo".
+
+**Freshsales.** Domínio (`suaempresa`, de `suaempresa.myfreshworks.com`, ou o endereço antigo `.freshsales.io`) e a chave de API
+de um usuário: contatos, contas e negócios, ler, buscar, criar e atualizar.
+
+**Tally (TallyPrime), só no Community local.** No TallyPrime: F1 › Settings › Connectivity, "TallyPrime acts as" Server (ou
+Both), porta 9000 por padrão, com a empresa aberta. Em Conexões, o nome ou o IP do computador do Tally (127.0.0.1 no mesmo
+computador; `host.docker.internal` com o Ergon no Docker e o Tally no mesmo computador). Por segurança do servidor do Ergon, todo
+endereço do nome tem de ser desta máquina ou da rede local: IP público, de enlace (169.254, o metadado das nuvens) e as portas do
+Ergon e do motor são recusados. Leitura: empresas, razões, balancete e vouchers; criar voucher pede a aprovação toda vez. Na nuvem
+do Ergon o cartão aparece indisponível, com o motivo, e a conexão não vai à nuvem.
+
+**Conferir na primeira conta de verdade.** Os formatos foram escritos a partir da documentação pública da Zoho (CRM API v8, Books
+API v3, Mail API), do Razorpay (API v1), da Freshworks e do XML do Tally, sem uma conta real nesta versão: os testes usam APIs
+falsas.

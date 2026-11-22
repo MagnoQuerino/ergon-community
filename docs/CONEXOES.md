@@ -157,13 +157,14 @@ da mesma pessoa (`integrations.origem_workspace_id`).
 
 | Grupo | Aplicativos | Como conecta |
 |---|---|---|
-| Contas | Microsoft 365 (tarefas, e-mail, agenda, arquivos, pessoas, Teams), Google (tarefas, Gmail, Agenda, Drive, pessoas) | Login com a conta |
+| Contas | Microsoft 365 (tarefas, e-mail, agenda, arquivos, pessoas, Teams), Google (tarefas, Gmail, Agenda, Drive, pessoas), Zoho (CRM, Books, Mail; qualquer data center) | Login com a conta |
 | Tarefas | Asana, Trello, Notion, monday.com, ClickUp, Jira, Pipefy, Todoist, Airtable, GitHub Projects, Smartsheet, Linear | Token (Pipefy: conta de serviço) |
 | Conversas | WhatsApp (QR), Slack, Discord, Telegram, Mattermost, Rocket.Chat | Token |
-| Vendas | HubSpot, RD Station CRM, Pipedrive, Kommo | Token |
+| Vendas | HubSpot, RD Station CRM, Pipedrive, Kommo, GoHighLevel, Freshsales | Token |
 | Atendimento | Zendesk, Freshdesk, Intercom | Token ou credencial de aplicativo |
 | Documentos, código, agenda | Confluence, GitLab, Calendly; ações extras em GitHub e Notion | Token |
 | Financeiro | Asaas (cadastrar cliente, criar cobrança, criar link de pagamento), Omie (incluir cliente, incluir conta a receber): **nada move dinheiro**, nenhuma ação paga, transfere, estorna, cancela ou dá baixa | Token |
+| Financeiro (Índia) | Razorpay (pagamentos, pedidos, links, reembolsos, liquidações), Tally (só na rede local) | Chave (Razorpay); endereço na rede local (Tally) |
 | Em preparo | Zoom, Google Chat, Salesforce, Dropbox, Bitrix24 | Pedem registro de aplicativo no fornecedor |
 
 **Financeiro, o que escreve e o risco de cada um.** Asaas: cadastrar cliente e criar link de pagamento organizam (o link só chega a
@@ -175,6 +176,14 @@ Omie); o da conta a receber é novo a cada inclusão, então duas vendas iguais 
 dinheiro para outra conta (split do Asaas) e as chamadas de baixa, recebimento, cancelamento e exclusão ficam fora, e
 `test/conexoes-escrita-financeiro.test.ts` confere. RD Station CRM: além de contatos, negociações, tarefas e anotações, cria
 empresa.
+
+**Índia (rc.48): o que pede a pessoa.** Razorpay: ler é livre; criar link de pagamento sempre pede a confirmação
+(`sempreConfirma`); reembolsar e capturar um pagamento movem dinheiro e são **sempre-protegidas** (`protegida`: pedem o cartão
+toda vez, acima de "Liberar tudo" e de qualquer regra aprovada). Zoho Books: criar fatura é rascunho (organiza); enviar a
+fatura ao cliente e registrar pagamento são sempre-protegidas. Zoho Mail: `email.enviar`, com a política dos outros e-mails
+(a regra "podem mandar os e-mails" vale também para a Zoho). Tally: criar voucher é sempre-protegida; o endereço do Tally tem
+de ser desta máquina ou da rede local (IP público, de enlace e as portas do Ergon e do motor são recusados) e, na nuvem, o
+cartão aparece indisponível. Detalhes e o que o dono providencia em [INDIA.md](INDIA.md#conectores-desde-a-110-rc48).
 
 **Pipefy: conta de serviço.** O Pipefy marcou o token de acesso pessoal como obsoleto e recomenda conta de serviço (OAuth2 client
 credentials). Conectar pede Client ID e Client Secret (e, só se o Pipefy mostrar outro, o endereço do "Token endpoint"; o padrão é

@@ -1,5 +1,13 @@
 # Novidades
 
+## 1.1.0-rc.48 (pré-versão de teste)
+
+- **Zoho:** em Conexões, entre com a conta Zoho de qualquer data center (zoho.in, zoho.com, zoho.eu e os outros). Os agentes consultam e atualizam leads, contatos e negócios do CRM, leem faturas, clientes e pagamentos do Books e criam faturas em rascunho, e leem e enviam e-mails pelo Zoho Mail, com o link de cada registro na resposta. Enviar fatura e registrar pagamento sempre pedem a sua aprovação. Quem instala registra o app OAuth na Zoho (veja `docs/INDIA.md`).
+- **Razorpay:** pagamentos (com UPI), pedidos, links de pagamento, reembolsos e liquidações, com a chave no cartão seguro. Criar link de pagamento sempre pede confirmação; reembolsar ou capturar um pagamento pede a sua aprovação toda vez, mesmo com "Liberar tudo".
+- **Freshsales:** contatos, contas e negócios do Freshworks CRM, com a chave e o domínio.
+- **Tally (TallyPrime):** no Ergon instalado no computador ou na rede da empresa, os agentes leem razões, o balancete e os vouchers do Tally da rede local; criar voucher sempre pede a sua aprovação. Endereço público não é aceito, e na nuvem do Ergon o Tally aparece indisponível.
+- **Também:** os textos dos novos conectores em português, inglês, inglês da Índia, hindi e chinês (hindi e chinês ainda passam por revisão de falante nativo).
+
 ## 1.1.0-rc.47 (pré-versão de teste)
 
 - **हिन्दी completo:** cidade, equipe, perfil do agente, rotinas, documentos, Conexões, Configurações e Ajuda, como o chinês. As equipes de nicho do primeiro acesso e a ficha da biblioteca de rotinas também saem em chinês, hindi e inglês da Índia. As traduções ainda passam por revisão de falante nativo.
