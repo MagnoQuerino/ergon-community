@@ -4,15 +4,15 @@ labels: [sugestao]
 body:
   - type: textarea
     id: problema
-    attributes: { label: Qual problema isso resolve?, description: "O problema antes da solução." }
+    attributes: { label: "Qual problema isso resolve?", description: "O problema antes da solução." }
     validations: { required: true }
   - type: textarea
     id: ideia
-    attributes: { label: Como você imagina que funcione? }
+    attributes: { label: "Como você imagina que funcione?" }
     validations: { required: true }
   - type: textarea
     id: quem
-    attributes: { label: Quem mais teria esse problema? }
+    attributes: { label: "Quem mais teria esse problema?" }
   - type: checkboxes
     id: ajudar
     attributes:
