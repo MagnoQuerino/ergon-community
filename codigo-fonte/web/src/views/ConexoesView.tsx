@@ -1210,7 +1210,7 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
   );
   return (
     <article id={`conn-equipe-${canal}`} className={`card conn conn-detail ${e.ligado ? 'feature--on' : ''}`}>
-      <header className="row"><BrandLogo kind={canal} name={nome} size={32} /><strong>{titulo}</strong>
+      <header className="row"><BrandLogo kind={canal === 'whatsapp_cloud' ? 'whatsapp' : canal} name={nome} size={32} /><strong>{titulo}</strong>
         {e.experimental && <span className="badge badge--exp">{t('conexoes.wa.experimental')}</span>}
         {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}</header>
       {!deApp && <BotOficial canal={canal as CanalDeBot} />}
