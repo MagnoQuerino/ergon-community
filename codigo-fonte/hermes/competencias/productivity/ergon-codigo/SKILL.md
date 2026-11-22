@@ -1,7 +1,7 @@
 ---
 name: ergon-codigo
 description: "Use quando a pessoa pede para mexer em código num repositório do GitHub ou do GitLab conectado no Ergon: corrigir, implementar, atualizar dependência, escrever teste, abrir pull request ou merge request. Fluxo completo e seguro: preparar o acesso de curta duração, clonar no Terminal, criar um ramo, editar, rodar os testes, fazer commit, enviar o ramo e abrir o PR, devolvendo os links. Nunca pede nem escreve token ou senha."
-license: Apache-2.0
+license: PolyForm-Noncommercial-1.0.0
 metadata:
   author: Ergon
   tags: [codigo, git, github, gitlab, pull-request]

@@ -17,7 +17,8 @@ Obrigado pelo interesse no Ergon Community.
 5. Nunca inclua segredos, tokens ou dados pessoais em código, testes ou capturas. `node scripts/scan-segredos.mjs`
    confere os arquivos versionados.
 
-Ao enviar uma contribuição, você concorda que ela seja distribuída sob a [licença Apache-2.0](../LICENSE).
+Ao enviar uma contribuição, você concorda que ela seja distribuída sob a [PolyForm Noncommercial 1.0.0](../LICENSE) e
+autoriza os autores do Ergon a licenciá-la também em licenças comerciais.
 
 ## Segurança
 
