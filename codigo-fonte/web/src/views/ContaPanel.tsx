@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { Avatar } from '../components/AccountMenu.tsx';
 import { BaixarMeusDados } from '../components/BaixarMeusDados.tsx';
+import { PrivacidadeDpdp } from '../components/AvisoDpdp.tsx';
 import { PastaDeDownloads } from '../components/AvisoDeDownload.tsx';
 import { SeletorIdioma } from '../components/SeletorIdioma.tsx';
 import { t as tr, tn, useT } from '../i18n/index.ts';
@@ -69,6 +70,8 @@ export function MinhaContaPanel({ me, onChanged }: { me: Me; onChanged: () => vo
         <h4>{t('conta.minha.baixarTitulo')}</h4>
         <BaixarMeusDados />
       </div>
+      {/* rc.47: a Lei DPDP (Índia): o consentimento e o representante, quando o dono liga o aviso */}
+      {me.dpdp?.ligado && <PrivacidadeDpdp estado={me.dpdp} onChanged={onChanged} />}
       <PastaDeDownloads />
     </section>
   );

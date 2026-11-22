@@ -44,3 +44,15 @@ test('World: os termos conferidos do glossário e a moeda, que nunca se traduz',
   }
   for (const [k, e] of Object.entries(EN)) for (const s of formas(e)) assert.doesNotMatch(s, /drachm/i, `${k}: a moeda do World não se traduz`);
 });
+
+test('inglês da Índia (rc.47): o que muda tem as mesmas marcas do inglês, fala em GST na cobrança e não mexe em preço', async () => {
+  const { TEXTOS_EN_IN, TEXTOS_WORLD } = await import('./textos.ts') as unknown as { TEXTOS_EN_IN: Record<string, string>; TEXTOS_WORLD: Record<string, Record<string, string>> };
+  const marcas = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join();
+  for (const [k, v] of Object.entries(TEXTOS_EN_IN)) {
+    const en = TEXTOS_WORLD.en[k];
+    assert.ok(en, `en-IN troca uma chave que não existe: ${k}`);
+    assert.equal(marcas(v), marcas(en), `${k}: marcas`);
+    assert.doesNotMatch(v, /[0-9]+([.,][0-9]+)?\s*(₹|INR|US\$)/, `${k}: nenhum preço escrito`);
+  }
+  assert.match(TEXTOS_EN_IN['carrinho.catalogoNota'], /GST/);
+});

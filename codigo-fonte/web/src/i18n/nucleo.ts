@@ -58,7 +58,18 @@ export function fmtBytes(idioma: Idioma, bytes: number): string {
 }
 
 /** Data (curta por padrão): 09/11/2026 / 11/9/2026. Data inválida: texto vazio (nunca "Invalid Date"). */
-export function fmtData(idioma: Idioma, d: Data, opcoes: Intl.DateTimeFormatOptions = { dateStyle: 'short' }): string {
+/**
+ * rc.47: na Índia (en-IN e hi), a data curta é dd/mm/aaaa, com o ano inteiro (21/11/2026), como nos documentos e nas
+ * faturas de lá; o "short" do Intl daria 21/11/26.
+ */
+const DA_INDIA = new Set<Idioma>(['en-IN', 'hi']);
+function dataDaIndia(idioma: Idioma, o: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+  if (!DA_INDIA.has(idioma) || o.dateStyle !== 'short') return o;
+  const { dateStyle: _d, timeStyle, ...resto } = o;
+  return { ...resto, day: '2-digit', month: '2-digit', year: 'numeric', ...(timeStyle === 'short' ? { hour: 'numeric', minute: '2-digit' } : {}) };
+}
+export function fmtData(idioma: Idioma, d: Data, opcoesPedidas: Intl.DateTimeFormatOptions = { dateStyle: 'short' }): string {
+  const opcoes = dataDaIndia(idioma, opcoesPedidas);
   const v = comoData(d);
   return v ? intl('d', idioma, opcoes, () => new Intl.DateTimeFormat(loc(idioma), opcoes)).format(v) : '';
 }

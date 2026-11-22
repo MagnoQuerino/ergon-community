@@ -13,6 +13,7 @@
  * `receberLocal` e a fila de saída é entregue aqui mesmo, pelo `entregadorLocal` (a sessão do Baileys do próprio app), em
  * vez de ir ao plugin.
  */
+import crypto from 'node:crypto';
 import type { Config } from '../../config.ts';
 import type { Db } from '../../db/db.ts';
 import { HttpError, id as novoId, now } from '../../lib/util.ts';
@@ -20,7 +21,7 @@ import { log } from '../../lib/log.ts';
 import { CLOSED_VALUE } from '../../security/fields.ts';
 import { audit, type Bus, type BusEvent } from '../bus.ts';
 import { createConversation, sendMessage } from '../chat.ts';
-import { CANAIS_DE_APP, CANAIS_RC46, CanalErro, NOMES_CANAL, type CanalNoMotor, type CredencialCanal, type HermesControlClient, type LoginQrMotor, type NomeCanal } from '../hermes.ts';
+import { CANAIS_DE_APP, CANAIS_RC46, CANAIS_RC47, CanalErro, NOMES_CANAL, type CanalNoMotor, type CredencialCanal, type HermesControlClient, type LoginQrMotor, type NomeCanal } from '../hermes.ts';
 import type { WorkspaceOwners } from '../people.ts';
 import { pendingDecisions } from '../proposals.ts';
 import { workspaceTz } from '../routine-proposals.ts';
@@ -37,7 +38,7 @@ import { readLang } from '../prefs.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
 const CANAIS: readonly NomeCanal[] = NOMES_CANAL;
-const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk', wecom: 'WeCom', weixin: 'WeChat' };
+const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk', wecom: 'WeCom', weixin: 'WeChat', whatsapp_cloud: 'WhatsApp' };
 /**
  * rc.45: o Feishu/Lark e o DingTalk entram pelo mesmo caminho, com o aplicativo próprio da pessoa (App ID e App Secret no
  * cofre do motor). Sem botões de verdade pelo gateway: os cartões vão como texto e a decisão é no app do Ergon (como o
@@ -50,25 +51,39 @@ const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: '
  * login por QR na tela; experimental, com o consentimento da pessoa). Nos dois, sem botões nem edição; a imagem dos
  * visuais vai só no WeCom (no WeChat pessoal, menos envio é menos risco para a conta).
  */
-const SEM_BOTOES: ReadonlySet<CanalId> = new Set<CanalId>([...CANAIS_DE_APP, 'weixin']);
+/**
+ * rc.47: o WhatsApp oficial (Cloud API) entra pelo mesmo caminho, com a conta Meta Business e o app da própria pessoa. O
+ * cartão vai como texto (a decisão é no app, como no número pareado) e a imagem dos visuais vai. A Meta só deixa
+ * responder em até 24 h da última mensagem da pessoa (fora disso, só modelo aprovado): aviso fora da janela não sai.
+ */
+const SEM_BOTOES: ReadonlySet<CanalId> = new Set<CanalId>([...CANAIS_DE_APP, 'weixin', 'whatsapp_cloud']);
 const SEM_IMAGEM: ReadonlySet<CanalId> = new Set<CanalId>(['dingtalk', 'weixin']);
 /** O id da conta e da conversa no canal: número (Telegram, Discord) ou texto do Feishu (ou_…, oc_…) e do DingTalk ($:LWCP…, cid…). */
 const FORMATO_ID: Record<NomeCanal, RegExp> = {
   telegram: /^[0-9]{3,30}$/, discord: /^[0-9]{3,30}$/,
   feishu: /^[A-Za-z0-9_-]{3,100}$/, dingtalk: /^[A-Za-z0-9_$:+/=.-]{3,120}$/,
   wecom: /^[A-Za-z0-9_@.-]{1,64}$/, weixin: /^[A-Za-z0-9_@.:-]{3,120}$/,
+  // o wa_id da Meta: o número, só dígitos, com o código do país
+  whatsapp_cloud: /^[0-9]{6,20}$/,
 };
 const FORMATO_CHAT: Record<NomeCanal, RegExp> = {
   telegram: /^-?[0-9]{3,30}$/, discord: /^-?[0-9]{3,30}$/,
   feishu: /^[A-Za-z0-9_-]{3,100}$/, dingtalk: /^[A-Za-z0-9_$:+/=.-]{3,120}$/,
   wecom: /^[A-Za-z0-9_@.-]{1,64}$/, weixin: /^[A-Za-z0-9_@.:-]{3,120}$/,
+  whatsapp_cloud: /^[0-9]{6,20}$/,
 };
 /** A capacidade do plugin que fala com o Feishu e o DingTalk (rc.45). */
 const CAPACIDADE_CANAIS_APP = 'canais_feishu_dingtalk';
 /** A do WeCom e do WeChat pessoal (rc.46). */
 const CAPACIDADE_CANAIS_RC46 = 'canais_wecom_weixin';
 /** O canal pede uma versão do plugin mais nova que a dos canais de sempre? */
-const capacidadeDoCanal = (canal: NomeCanal): string | null => (CANAIS_RC46.includes(canal) ? CAPACIDADE_CANAIS_RC46 : CANAIS_DE_APP.includes(canal) ? CAPACIDADE_CANAIS_APP : null);
+/** A do WhatsApp oficial (rc.47). */
+const CAPACIDADE_CANAIS_RC47 = 'canais_whatsapp_cloud';
+const capacidadeDoCanal = (canal: NomeCanal): string | null => (CANAIS_RC47.includes(canal) ? CAPACIDADE_CANAIS_RC47 : CANAIS_RC46.includes(canal) ? CAPACIDADE_CANAIS_RC46 : CANAIS_DE_APP.includes(canal) ? CAPACIDADE_CANAIS_APP : null);
+/** Os formatos do WhatsApp oficial (os mesmos do plugin): Phone Number ID e WABA ID (números), token de acesso e App Secret. */
+const FORMATO_WA = { numero: /^[0-9]{8,20}$/, token: /^[A-Za-z0-9_-]{40,600}$/, segredo: /^[0-9a-fA-F]{32}$/ };
+/** As notificações da Meta guardadas até o motor conferir e receber (o serviço entrega pelo menos uma vez). */
+const WEBHOOK_VALE_MS = 7 * 86_400_000;
 /** A versão do texto do risco do WeChat pessoal (web: Conexões › WeChat): mudou o texto, pede o consentimento de novo. */
 export const WEIXIN_RISCO_VERSAO = 1;
 /** O App ID e o App Secret de cada aplicativo (os mesmos formatos do plugin). */
@@ -119,7 +134,7 @@ interface VinculoRow {
   conversation_id: string | null; cursor_rowid: number; aviso_janela: string | null; primeira_em: string | null; created_at: string;
 }
 interface SaidaRow { id: string; user_id: string; canal: CanalId; workspace_id: string; tipo: 'texto' | 'cartao' | 'editar' | 'imagem'; payload: string; status: string; tentativas: number; proximo_em: string; message_id: string | null; created_at: string }
-interface ItemSaida { id: string; canal: NomeCanal; tipo: 'texto' | 'cartao' | 'editar' | 'digitando' | 'imagem'; chat_id: string; user_id: string; texto?: string; botoes?: Array<[string, string]>; message_id?: string; png?: string; bloco?: unknown }
+interface ItemSaida { id: string; canal: NomeCanal; tipo: 'texto' | 'cartao' | 'editar' | 'digitando' | 'imagem' | 'webhook'; chat_id: string; user_id: string; texto?: string; botoes?: Array<[string, string]>; message_id?: string; png?: string; bloco?: unknown; corpo?: string; assinatura?: string }
 /** rc.42: os blocos visuais que também vão como imagem (o Telegram e o Discord mostram o PNG; o texto vai antes) */
 const VAI_COMO_IMAGEM = new Set(['kpi', 'kpis', 'nota', 'barras', 'linhas', 'pizza', 'tabela', 'comparativo', 'versus', 'placar', 'linha_do_tempo', 'progresso', 'status', 'semaforo', 'ficha', 'medidor', 'sparkline', 'icones', 'funil', 'calor', 'matriz', 'enquete', 'decisao', 'checklist']);
 
@@ -143,6 +158,14 @@ const MIGRACOES: Array<[string, string]> = [
     CREATE TABLE IF NOT EXISTS canais_avisados (user_id TEXT NOT NULL, canal TEXT NOT NULL, item TEXT NOT NULL, at TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (user_id, canal, item));
   `],
+  // rc.47: o WhatsApp oficial. O endereço do webhook (no serviço) e o verify token de cada pessoa; e as notificações da
+  // Meta que chegaram pelo serviço e esperam o motor (o corpo cru e a assinatura, cifrados como o resto do workspace)
+  ['c0002_whatsapp_cloud', `
+    CREATE TABLE IF NOT EXISTS canais_whatsapp_cloud (user_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, rota TEXT NOT NULL, url TEXT NOT NULL,
+      verify_token TEXT NOT NULL, phone_number_id TEXT NOT NULL, created_at TEXT NOT NULL, ultima_em TEXT);
+    CREATE TABLE IF NOT EXISTS canais_webhooks (id TEXT PRIMARY KEY, canal TEXT NOT NULL, workspace_id TEXT NOT NULL, corpo TEXT NOT NULL,
+      assinatura TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', tentativas INTEGER NOT NULL DEFAULT 0, recebida_em TEXT NOT NULL, created_at TEXT NOT NULL);
+  `],
 ];
 function migrarCanais(db: Db): void {
   db.raw.exec('CREATE TABLE IF NOT EXISTS canais_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
@@ -165,6 +188,17 @@ interface CanaisDeps {
   decidir: (ws: string, userId: string, proposalId: string, decisao: 'apply' | 'reject') => Promise<{ status: string; result: string }>;
   /** o papel do membro no Ergon World (admin, editor, viewer), quando o workspace é sincronizado; sem ele, 'member' é leitura */
   papelWorld?: (userId: string, ws: string) => string | null;
+  /**
+   * rc.47: o serviço de canais (o relé do Teams) como endereço público do webhook do WhatsApp oficial. Sem ele (ou fora
+   * do ar), o WhatsApp oficial não liga: a Meta precisa de um endereço https que responda.
+   */
+  rele?: RelePublico | null;
+}
+/** O que o WhatsApp oficial usa do serviço de canais (teams-app/servico.ts). */
+export interface RelePublico {
+  disponivel(): boolean | null;
+  rota(verifyToken: string, renovar?: boolean): Promise<{ routeId: string; url: string }>;
+  apagar(): Promise<void>;
 }
 
 /** Ajustes de tempo (os testes encurtam). */
@@ -640,6 +674,7 @@ export class Canais {
   }
   /** `motor` null: a entrega local (o WhatsApp pareado), aqui mesmo; o plugin nunca confirma um item local. */
   private confirmar(motor: string | null, a: { id?: string; ok?: boolean; message_id?: string; erro?: string; passageiro?: boolean }): void {
+    if (typeof a.id === 'string' && a.id.startsWith('whk_')) { this.confirmarWebhook(motor, a); return; }
     const row = typeof a.id === 'string' ? this.d.db.get<SaidaRow>('SELECT * FROM canais_saida WHERE id = ?', a.id) : null;
     if (!row || (motor !== null ? !this.d.permite(motor, row.workspace_id) || ehCanalLocal(row.canal) : !ehCanalLocal(row.canal)) || row.status === 'sent' || row.status === 'failed') return;
     if (a.ok) {
@@ -655,10 +690,35 @@ export class Canais {
     this.d.db.run("UPDATE canais_saida SET status = 'failed', tentativas = tentativas + 1, erro = ? WHERE id = ?", String(a.erro ?? 'falhou').slice(0, 80), row.id);
     log.warn({ canal: row.canal, erro: String(a.erro ?? '').slice(0, 80) }, 'canais: uma mensagem não saiu');
   }
+  /**
+   * rc.47: o motor conferiu a notificação do WhatsApp oficial. Recebida (ok) ou recusada de vez (assinatura que não
+   * confere com o App Secret: não veio da Meta), sai daqui; problema passageiro (o gateway reiniciando), vai de novo.
+   */
+  private confirmarWebhook(motor: string | null, a: { id?: string; ok?: boolean; erro?: string; passageiro?: boolean }): void {
+    const row = this.d.db.get<{ id: string; workspace_id: string; tentativas: number }>('SELECT id, workspace_id, tentativas FROM canais_webhooks WHERE id = ?', a.id!);
+    if (!row || motor === null || !this.d.permite(motor, row.workspace_id)) return;
+    if (a.ok || !a.passageiro || row.tentativas >= 20) {
+      this.d.db.run('DELETE FROM canais_webhooks WHERE id = ?', row.id);
+      if (!a.ok) {
+        log.warn({ canal: 'whatsapp_cloud', erro: String(a.erro ?? '').slice(0, 60) }, 'canais: notificação do WhatsApp recusada pelo motor');
+        if (a.erro === 'assinatura') audit(this.d.db, this.d.bus, { workspaceId: row.workspace_id, actorType: 'system', actorId: 'canais', action: 'canal.whatsapp_cloud.assinatura', result: 'notificação recusada: a assinatura não confere com o App Secret (não veio da Meta, ou o App Secret mudou)' });
+      }
+      return;
+    }
+    this.d.db.run("UPDATE canais_webhooks SET status = 'pending', tentativas = tentativas + 1 WHERE id = ?", row.id);
+  }
   private pendentes(motor: string, canaisVivos: NomeCanal[]): ItemSaida[] {
     const vivos = new Set(canaisVivos.filter((c) => CANAIS.includes(c)));
     const out: ItemSaida[] = [];
     const agoraIso = new Date(this.agora()).toISOString();
+    // rc.47: as notificações do WhatsApp oficial vão antes (o motor confere a assinatura e só então a mensagem existe)
+    if (vivos.has('whatsapp_cloud')) {
+      for (const w of this.d.db.all<{ id: string; workspace_id: string; corpo: string; assinatura: string }>("SELECT id, workspace_id, corpo, assinatura FROM canais_webhooks WHERE canal = 'whatsapp_cloud' AND status = 'pending' ORDER BY created_at, rowid LIMIT 10")) {
+        if (!this.d.permite(motor, w.workspace_id) || !this.d.db.workspaceOpen(w.workspace_id) || w.corpo === CLOSED_VALUE) continue;
+        this.d.db.run("UPDATE canais_webhooks SET status = 'em_voo' WHERE id = ?", w.id);
+        out.push({ id: w.id, canal: 'whatsapp_cloud', tipo: 'webhook', chat_id: '', user_id: '', corpo: w.corpo, assinatura: w.assinatura });
+      }
+    }
     // "digitando": enquanto a equipe trabalha na conversa do canal (não fica gravado)
     for (const k of [...this.digitar]) {
       const [u, c] = k.split('|') as [string, NomeCanal];
@@ -771,6 +831,9 @@ export class Canais {
     this.d.db.run('DELETE FROM canais_cartoes WHERE saida_id IS NOT NULL AND saida_id NOT IN (SELECT id FROM canais_saida)');
     this.d.db.run('DELETE FROM canais_entrada WHERE recebida_em < ?', ago(ENTRADA_VALE_MS));
     this.d.db.run('DELETE FROM canais_avisados WHERE sent <> 0 AND at < ?', ago(30 * DIA));
+    // a notificação do WhatsApp que o motor não buscou em 7 dias (motor desligado) sai; a que ficou "em voo" sem resposta volta
+    this.d.db.run('DELETE FROM canais_webhooks WHERE created_at < ?', ago(WEBHOOK_VALE_MS));
+    this.d.db.run("UPDATE canais_webhooks SET status = 'pending', tentativas = tentativas + 1 WHERE status = 'em_voo' AND created_at < ?", ago(60_000));
   }
 
   // ------------------------------------------------------------------------------------------------ tela (rotas)
@@ -807,17 +870,28 @@ export class Canais {
         ligado: v ? { nome: v.nome && v.nome !== CLOSED_VALUE ? v.nome : null, desde: v.created_at, avisos: Number(v.avisos) === 1 } : null,
         // o WeChat pessoal é experimental: a tela mostra o risco e pede o consentimento antes do QR
         ...(canal === 'weixin' ? { experimental: true, riscoVersao: WEIXIN_RISCO_VERSAO } : {}),
+        // o WhatsApp oficial: o endereço do webhook e o verify token para colar na Meta, e a última notificação recebida
+        ...(canal === 'whatsapp_cloud' ? this.estadoWhatsAppCloud(userId) : {}),
       };
     }
     return out;
+  }
+  private estadoWhatsAppCloud(userId: string): Record<string, unknown> {
+    const w = this.d.db.get<{ url: string; verify_token: string; phone_number_id: string; ultima_em: string | null }>('SELECT url, verify_token, phone_number_id, ultima_em FROM canais_whatsapp_cloud WHERE user_id = ?', userId);
+    const rele = this.d.rele?.disponivel() ?? false;
+    return {
+      oficial: true, rele: rele === null ? 'conferindo' : rele ? 'ok' : 'indisponivel',
+      webhook: w ? { url: w.url, verifyToken: w.verify_token === CLOSED_VALUE ? null : w.verify_token, phoneNumberId: w.phone_number_id, ultimaEm: w.ultima_em } : null,
+    };
   }
   /**
    * Guarda a credencial no motor (o gateway reinicia): o código do bot (Telegram, Discord) ou o App ID e o App Secret do
    * aplicativo (Feishu/Lark, DingTalk; rc.45). Bot ou aplicativo novo: a ligação de antes não vale mais.
    */
-  async guardarBot(userId: string, ws: string, canal: NomeCanal, b: { token?: string; appId?: string; appSecret?: string; dominio?: 'feishu' | 'lark' }): Promise<void> {
+  async guardarBot(userId: string, ws: string, canal: NomeCanal, b: { token?: string; appId?: string; appSecret?: string; dominio?: 'feishu' | 'lark'; phoneNumberId?: string; accessToken?: string; wabaId?: string }): Promise<void> {
     let cred: CredencialCanal;
     if (canal === 'weixin') throw new HttpError(400, 'qr', 'O WeChat pessoal liga pelo QR, não por um código colado.');
+    if (canal === 'whatsapp_cloud') return this.guardarWhatsAppCloud(userId, ws, b);
     const app = FORMATO_APP[canal];
     if (app) {
       const id = String(b.appId ?? '').trim(); const segredo = String(b.appSecret ?? '').trim();
@@ -839,6 +913,55 @@ export class Canais {
       this.esquecer(userId, canal);
     });
     this.avisarTela(userId);
+  }
+  /**
+   * rc.47: o WhatsApp oficial. Confere os formatos, pede ao serviço o endereço público do webhook (com um verify token
+   * gerado aqui), guarda as credenciais no cofre do motor (o App Secret confere a assinatura de cada notificação lá; não
+   * volta à tela nem ao banco) e mostra à pessoa o endereço e o verify token para colar na Meta.
+   */
+  private async guardarWhatsAppCloud(userId: string, ws: string, b: { phoneNumberId?: string; accessToken?: string; appSecret?: string; wabaId?: string }): Promise<void> {
+    const numero = String(b.phoneNumberId ?? '').trim(); const token = String(b.accessToken ?? '').trim();
+    const segredo = String(b.appSecret ?? '').trim(); const waba = String(b.wabaId ?? '').trim();
+    if (!FORMATO_WA.numero.test(numero) || !FORMATO_WA.token.test(token) || !FORMATO_WA.segredo.test(segredo) || (waba && !FORMATO_WA.numero.test(waba))) {
+      throw new HttpError(400, 'formato_wa', 'Algum campo não tem o formato esperado. Copie de novo, inteiro, do painel da Meta.');
+    }
+    const c = this.exigirControle(ws);
+    if (!(await this.d.capacidades(ws).catch(() => null))?.includes(CAPACIDADE_CANAIS_RC47)) throw new HttpError(409, 'motor', 'A equipe precisa estar ligada (e atualizada) para isso.');
+    const rele = this.d.rele;
+    if (!rele || rele.disponivel() === false) throw new HttpError(409, 'rele', 'O serviço de canais do Ergon não está disponível agora; ele é o endereço público que a Meta chama.');
+    const antes = this.d.db.get<{ verify_token: string; rota: string }>('SELECT verify_token, rota FROM canais_whatsapp_cloud WHERE user_id = ?', userId);
+    const verifyToken = antes && antes.verify_token !== CLOSED_VALUE ? antes.verify_token : crypto.randomBytes(24).toString('base64url');
+    let rota: { routeId: string; url: string };
+    try { rota = await rele.rota(verifyToken); } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(503, 'rele', 'O serviço de canais do Ergon não respondeu. Tente de novo em instantes.');
+    }
+    try { await c.setCanal!('whatsapp_cloud', { phoneNumberId: numero, accessToken: token, appSecret: segredo, verifyToken, ...(waba ? { wabaId: waba } : {}) }); } catch (e) { this.erroDaTela(e); }
+    this.d.db.tx(() => {
+      this.d.db.run('INSERT INTO canais_bots (user_id, canal, workspace_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, canal) DO UPDATE SET workspace_id = excluded.workspace_id, created_at = excluded.created_at', userId, 'whatsapp_cloud', ws, now());
+      this.d.db.run(`INSERT INTO canais_whatsapp_cloud (user_id, workspace_id, rota, url, verify_token, phone_number_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (user_id) DO UPDATE SET workspace_id = excluded.workspace_id, rota = excluded.rota, url = excluded.url, verify_token = excluded.verify_token, phone_number_id = excluded.phone_number_id`,
+      userId, ws, rota.routeId, rota.url, this.d.db.seal(ws, verifyToken), numero, now());
+      this.esquecer(userId, 'whatsapp_cloud');
+    });
+    audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'canal.whatsapp_cloud.ligar', targetType: 'user', targetId: userId,
+      evidence: { canal: 'whatsapp_cloud', phoneNumberId: numero, waba: !!waba }, result: 'WhatsApp oficial (Cloud API) configurado; o webhook passa pelo serviço de canais' });
+    this.avisarTela(userId);
+  }
+  /**
+   * rc.47: a notificação da Meta que o serviço entregou. Fica guardada (cifrada) até o motor do workspace buscar pela
+   * saída dos canais e conferir a assinatura com o App Secret; aceita só se alguém deste Ergon tem o WhatsApp oficial.
+   */
+  receberWebhookWhatsApp(w: { id: string; corpo: Buffer; assinatura: string; recebidaEm: string }): 'aceita' | 'sem_canal' | 'invalida' {
+    const dono = this.d.db.get<{ workspace_id: string }>("SELECT workspace_id FROM canais_bots WHERE canal = 'whatsapp_cloud' ORDER BY created_at DESC LIMIT 1");
+    if (!dono) return 'sem_canal';
+    if (!/^sha256=[0-9a-f]{64}$/.test(w.assinatura) || !w.corpo.length || w.corpo.length > 64 * 1024) return 'invalida';
+    const id = `whk_${w.id.slice(4, 44)}`;
+    this.d.db.run('INSERT INTO canais_webhooks (id, canal, workspace_id, corpo, assinatura, recebida_em, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
+      id, 'whatsapp_cloud', dono.workspace_id, this.d.db.seal(dono.workspace_id, w.corpo.toString('base64')), w.assinatura, w.recebidaEm.slice(0, 40), now());
+    this.d.db.run("UPDATE canais_whatsapp_cloud SET ultima_em = ? WHERE workspace_id = ?", now(), dono.workspace_id);
+    this.acordar();
+    return 'aceita';
   }
   /**
    * rc.46: o login do WeChat pessoal pelo QR. Começar pede o consentimento explícito (a Tencent pode limitar ou bloquear
@@ -904,7 +1027,13 @@ export class Canais {
     this.d.db.tx(() => {
       this.esquecer(userId, canal);
       this.d.db.run('DELETE FROM canais_bots WHERE user_id = ? AND canal = ?', userId, canal);
+      if (canal === 'whatsapp_cloud') {
+        this.d.db.run('DELETE FROM canais_whatsapp_cloud WHERE user_id = ?', userId);
+        this.d.db.run("DELETE FROM canais_webhooks WHERE workspace_id = ? AND canal = 'whatsapp_cloud'", ws);
+      }
     });
+    // o endereço público some no serviço quando ninguém mais neste Ergon usa o WhatsApp oficial
+    if (canal === 'whatsapp_cloud' && !this.d.db.get("SELECT 1 AS x FROM canais_bots WHERE canal = 'whatsapp_cloud'")) await this.d.rele?.apagar().catch(() => undefined);
     this.avisarTela(userId);
   }
   private esquecer(userId: string, canal: CanalId): void {

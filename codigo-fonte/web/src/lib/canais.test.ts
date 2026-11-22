@@ -10,8 +10,9 @@ const chaves = (o: Record<string, unknown>) => Object.keys(o).filter((k) => k.st
 test('Telegram e Discord: os textos da tela nas duas línguas, sem jargão nem o nome do motor', () => {
   assert.deepEqual(chaves(en).sort(), chaves(pt).sort());
   const tudo = [...chaves(pt).map((k) => String((pt as Record<string, unknown>)[k])), ...chaves(en).map((k) => String((en as Record<string, unknown>)[k]))].join(' ');
-  // "Reset Token" é o nome do botão no portal do Discord, que a pessoa precisa achar: o único lugar com a palavra
-  assert.doesNotMatch(tudo.replaceAll('Reset Token', ''), /Hermes|\btoken\b|\bAPI\b|motor|contêiner|container|gateway/i);
+  // "Reset Token" é o nome do botão no portal do Discord, e "Verify token" o do campo do webhook no painel da Meta (rc.47),
+  // que a pessoa precisa achar: os únicos lugares com a palavra
+  assert.doesNotMatch(tudo.replaceAll('Reset Token', '').replaceAll('Verify token', '').replaceAll('verify token', ''), /Hermes|\btoken\b|\bAPI\b|motor|contêiner|container|gateway/i);
   // a diferença para as conexões de conta que agem em nome da pessoa fica clara
   assert.match(pt['canal.secaoTexto'], /diferente das conexões Telegram e Discord/);
   // com o Ergon fechado: o que cada um faz, dito na tela

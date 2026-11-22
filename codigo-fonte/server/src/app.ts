@@ -62,6 +62,7 @@ import { CITY_LIMITS, cityAgents, cityOverview, idList } from './services/city.t
 import { cityActivity } from './services/city-activity.ts';
 import { getSetting } from './services/sectors.ts';
 import { executavel, sha256 } from './lib/executavel.ts';
+import { consentir, estadoDpdp, gravarConfigDpdp, lerConfigDpdp, lerRepresentante, nomearRepresentante, removerRepresentante, retirarConsentimento, type ConfigDpdp } from './services/dpdp.ts';
 import { TERMOS_VERSAO, aceitarTermos, codigoPorPadrao, estadoDosTermos, sincronizarCodigoDaEquipe } from './services/termos.ts';
 import { applyDistribution, suggestDistribution, undoDistribution } from './services/team-distribution.ts';
 import { agentFxChoice, fxOptions, setAgentFx, type FxChoice } from './services/agent-fx.ts';
@@ -560,7 +561,14 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       capsCache.set(ws, { at: Date.now(), caps });
       return caps;
     },
-    decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao) });
+    decidir: (ws, userId, pid, decisao) => decidirProposta(ws, userId, pid, decisao),
+    // rc.47: o WhatsApp oficial usa o serviço de canais (o mesmo relé do Teams) como endereço público do webhook da Meta
+    rele: {
+      disponivel: () => (!teamsApp.disponivel() ? false : teamsApp.conectadoAoServico() ? teamsApp.whatsappNoServico() : null),
+      rota: (vt, renovar) => teamsApp.rotaWhatsApp(vt, renovar),
+      apagar: () => teamsApp.apagarRotaWhatsApp(),
+    } });
+  teamsApp.aoWhatsApp = (w) => canais.receberWebhookWhatsApp(w);
   // o número da equipe no WhatsApp: um número pareado por QR vira canal, pelo mesmo caminho (entregue pela sessão do app)
   const whatsappEquipe = new WhatsAppEquipe({ db, bus, canais, whatsapp });
   // pedido por canal externo (canais/externo.ts): escrita numa conta sempre confirma; papel de leitura não escreve
@@ -1098,7 +1106,9 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
       recoveryWorldStale: !!personKeys() && !!vault.personWorld(a.userId)?.stale,
       admin: cfg.mode === 'local' ? isAdmin(db, a.userId) : a.role === 'owner', personSealed: personSealed(a), people: vault.peopleInfo().length,
       autoUnlockPrompt: isAdmin(db, a.userId) && secApi.autoUnlockPrompt(),
-      onboarding: onboardingState(db, a.workspaceId), prefs: readPrefs(db, a.workspaceId, a.userId), termos: estadoDosTermos(db, a.userId) };
+      onboarding: onboardingState(db, a.workspaceId), prefs: readPrefs(db, a.workspaceId, a.userId), termos: estadoDosTermos(db, a.userId),
+      // rc.47: o aviso de consentimento da Lei DPDP (Índia), quando o dono do workspace liga
+      dpdp: estadoDpdp(db, a.workspaceId, a.userId) };
   });
 
   // Termos de uso: aceitar a versão atual (a conta nova aceita na criação; quem já usava, no aviso depois da atualização).
@@ -1117,6 +1127,35 @@ export async function buildApp(deps: AppDeps): Promise<ErgonApp> {
     try { await aiOf(a.workspaceId).ensureBeneficios(ferramentasDesligadas(db, [a.workspaceId]), undefined, { codigo: true }); await aiOf(a.workspaceId).refreshToolsets(); } catch { /* motor fora: liga na próxima abertura */ }
     return estadoDosTermos(db, a.userId);
   });
+
+  // rc.47: a Lei DPDP da Índia (services/dpdp.ts). A configuração é do dono do workspace (o Data Fiduciary); o aviso, o
+  // consentimento (dar e retirar) e o representante são de cada pessoa.
+  const dpdpCorpo = { type: 'object', additionalProperties: false, properties: {
+    ligado: { type: 'boolean' }, responsavel: S.str(160), prazoDias: { type: 'integer', minimum: 1, maximum: 90 },
+    grievance: { type: 'object', additionalProperties: false, properties: { nome: S.str(120), email: S.str(200), telefone: S.str(40), endereco: S.str(300) } },
+    consentManager: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, properties: { nome: S.str(120), registro: S.str(80), url: S.str(300) } }] },
+  } };
+  app.get('/api/privacidade/dpdp', async (req) => { const a = owner(req); return lerConfigDpdp(db, a.workspaceId); });
+  app.put('/api/privacidade/dpdp', { schema: { body: dpdpCorpo } }, async (req) => {
+    const a = owner(req);
+    const c = gravarConfigDpdp(db, bus, a.workspaceId, a.userId, req.body as Partial<ConfigDpdp>);
+    bus.publish(a.workspaceId, 'me.changed', {});
+    return c;
+  });
+  app.post('/api/me/consentimento', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['versao'], properties: { versao: S.str(20, 1), idioma: S.str(10) } } },
+  }, async (req) => {
+    const a = auth(req);
+    const b = req.body as { versao: string; idioma?: string };
+    consentir(db, bus, a.workspaceId, a.userId, b.versao, b.idioma ?? readPrefs(db, a.workspaceId, a.userId).lang ?? 'en');
+    return estadoDpdp(db, a.workspaceId, a.userId);
+  });
+  app.delete('/api/me/consentimento', async (req) => { const a = auth(req); retirarConsentimento(db, bus, a.workspaceId, a.userId); return estadoDpdp(db, a.workspaceId, a.userId); });
+  app.get('/api/me/representante', async (req) => { const a = auth(req); return { representante: lerRepresentante(db, a.userId) }; });
+  app.put('/api/me/representante', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['nome', 'contato'], properties: { nome: S.str(120, 2), contato: S.str(200, 5), relacao: S.str(80) } } },
+  }, async (req) => { const a = auth(req); return { representante: nomearRepresentante(db, bus, a.workspaceId, a.userId, req.body as { nome: string; contato: string; relacao?: string }) }; });
+  app.delete('/api/me/representante', async (req) => { const a = auth(req); removerRepresentante(db, bus, a.workspaceId, a.userId); return { representante: null }; });
 
   // Minha conta: nome de exibição e foto de perfil (imagem pequena, só PNG/JPEG/WebP)
   app.patch('/api/me', {

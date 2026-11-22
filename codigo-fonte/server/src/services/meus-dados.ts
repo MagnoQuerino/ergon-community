@@ -30,6 +30,7 @@ import { workspaceTz } from './routine-proposals.ts';
 import { DEFAULT_TZ } from './routine-time.ts';
 import type { Routines } from './routines.ts';
 import { fmtNumero } from '../lib/i18n.ts';
+import { historicoDeConsentimentos, lerRepresentante } from './dpdp.ts';
 
 /** documentos e entregas: até 200 MB por arquivo baixado */
 const MEUS_DADOS_MAX_BYTES = 200 * 1024 * 1024;
@@ -449,6 +450,8 @@ export async function exportarMeusDados(d: MeusDadosDeps, user: { id: string; us
   await zip.add({ name: caminhos.fixo('minha-conta.json'), mtime: agora, tz: tzPessoa, data: json({
     usuario: u?.username ?? user.username, nome: aberto(u?.display_name) ?? user.displayName, contaCriadaEm: u?.created_at ?? null, autenticadorLigado: !!Number(u?.totp_enabled ?? 0),
     workspaces: memberships.map((m) => ({ nome: aberto(m.name), papel: donos.has(m.workspace_id) ? 'dona' : 'participa' })),
+    // rc.47 (Lei DPDP): os consentimentos dados e retirados e o representante nomeado
+    consentimentos: historicoDeConsentimentos(db, user.id), representante: lerRepresentante(db, user.id),
   }) });
   const foto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(aberto(u?.avatar) ?? '');
   if (foto) await zip.add({ name: caminhos.fixo(`foto-de-perfil.${foto[1] === 'jpeg' ? 'jpg' : foto[1]}`), data: Buffer.from(foto[2], 'base64'), store: true, mtime: agora, tz: tzPessoa });

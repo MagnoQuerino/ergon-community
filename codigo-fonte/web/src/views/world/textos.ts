@@ -1498,8 +1498,19 @@ type Valores<K extends ChaveWorld, V> = Msg<K> extends Plural
   : { readonly [P in Nomes<Msg<K>>]: V };
 type Args<K extends ChaveWorld> = [Nomes<Msg<K>>] extends [never] ? [] : [valores: Valores<K, string | number>];
 
-// o World só tem português e inglês: chinês, hindi e o inglês da Índia leem o inglês (textoEm)
-const buscar = (k: ChaveWorld): Mensagem => (TEXTOS_WORLD[textoEm(idiomaAtual())] ?? pt)[k] ?? pt[k];
+/**
+ * rc.47: o inglês da Índia muda só o que a cobrança pede lá: o valor cobrado mostra o GST quando couber (quem calcula o
+ * imposto e o valor final é o Ergon World, na hora de pagar; nenhum preço muda aqui).
+ */
+const enIN: Partial<Record<ChaveWorld, Mensagem>> = {
+  'carrinho.catalogoNota': 'Sum of catalogue prices. The amount charged, with GST where applicable, comes from Ergon World before you confirm.',
+  'plano.cobrancaAgora': 'Charged now: {valor} (pro rata for the rest of the period), plus GST where applicable. Takes effect {quando}.',
+  'plano.periodo': 'Billing cycle',
+};
+// o World só tem português e inglês: chinês e hindi leem o inglês (textoEm); o inglês da Índia, com o que muda lá (enIN)
+const buscar = (k: ChaveWorld): Mensagem => (idiomaAtual() === 'en-IN' ? enIN[k] : undefined) ?? (TEXTOS_WORLD[textoEm(idiomaAtual())] ?? pt)[k] ?? pt[k];
+/** Para o teste: o que o inglês da Índia troca. */
+export const TEXTOS_EN_IN: Readonly<Partial<Record<ChaveWorld, Mensagem>>> = enIN;
 
 /** O texto do World no idioma atual da tela (como o t() de i18n/index.ts). */
 export function tw<K extends ChaveWorld>(chave: K, ...valores: Args<K>): string {

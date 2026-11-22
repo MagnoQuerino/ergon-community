@@ -137,7 +137,15 @@ export interface Me {
   prefs: Prefs;
   /** termos de uso: a versão atual e se a pessoa já aceitou (sem aceite, o aviso aparece uma vez) */
   termos?: { versao: string; aceitos: boolean; aceitosEm: string | null };
+  /** rc.47: o aviso de consentimento da Lei DPDP (Índia), quando o dono do workspace liga; config só com ele ligado */
+  dpdp?: EstadoDpdp;
 }
+export interface ConfigDpdp {
+  responsavel: string; prazoDias: number;
+  grievance: { nome: string; email: string; telefone: string; endereco: string };
+  consentManager: { nome: string; registro: string; url: string } | null;
+}
+export interface EstadoDpdp { ligado: boolean; versao: string; aceito: boolean; aceitoEm: string | null; retiradoEm: string | null; config: ConfigDpdp | null }
 /** Preferências da pessoa: dicas ligadas, dicas dispensadas e tour inicial feito. */
 /** updateNotice: procurar versão nova ao abrir e mostrar "Atualização disponível" (ligado por padrão) */
 /** lang: o idioma escolhido pela pessoa (sem escolha: o do navegador) */

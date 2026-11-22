@@ -161,6 +161,11 @@ export function ConexoesView() {
     ...(['feishu', 'dingtalk', 'wecom', 'weixin'] as const).map((c): Bloco => ({ kind: `equipe-${c}`, logo: c, name: NOME_DO_CANAL[c],
       selo: seloCanal(canais.data?.[c]), soon: !!canais.data?.[c] && !canais.data[c].disponivel,
       corpo: () => (canais.data?.[c] ? <ConversaPorCanal canal={c} estado={canais.data[c]} reload={canais.reload} onClose={fechar} /> : null) })),
+    // rc.47: o WhatsApp pela API oficial da Meta (a conta Meta Business e o número da própria empresa), ao lado do pareado por QR
+    // i18n-ok: nome de marca
+    ...(canais.data?.whatsapp_cloud ? [{ kind: 'equipe-whatsapp_cloud', logo: 'whatsapp', name: 'WhatsApp Business',
+      selo: seloCanal(canais.data.whatsapp_cloud), soon: !canais.data.whatsapp_cloud.disponivel,
+      corpo: () => (canais.data?.whatsapp_cloud ? <ConversaPorCanal canal="whatsapp_cloud" estado={canais.data.whatsapp_cloud} reload={canais.reload} onClose={fechar} /> : null) } as Bloco] : []),
   ];
   return (
     <div className="page" onKeyDown={(e) => { if (e.key === 'Escape' && open && !e.defaultPrevented) { e.preventDefault(); fechar(); } }}>
@@ -1087,17 +1092,21 @@ function ListEditor({ label, values, suggestions, onChange, placeholder }: { lab
 }
 
 /** GET /api/canais: conversar com a equipe pelo Telegram e pelo Discord (o bot da própria pessoa) e, na rc.45, pelo Feishu/Lark e pelo DingTalk (o aplicativo da empresa). */
-type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk' | 'wecom' | 'weixin';
+type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk' | 'wecom' | 'weixin' | 'whatsapp_cloud';
 // i18n-ok: nomes de marca
-const NOME_DO_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk', wecom: 'WeCom', weixin: 'WeChat' };
+const NOME_DO_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk', wecom: 'WeCom', weixin: 'WeChat', whatsapp_cloud: 'WhatsApp' };
 type CanalDeBot = 'telegram' | 'discord';
 interface EstadoCanal {
   disponivel: boolean; motivo?: 'motor' | 'versao'; bot: boolean; conexao: 'conectado' | 'conectando' | 'sem_conexao' | null; codigoRecusado?: boolean;
   ligado: { nome: string | null; desde: string; avisos: boolean } | null;
   /** rc.46: o WeChat pessoal (experimental) e a versão do texto do risco que o consentimento confirma */
   experimental?: boolean; riscoVersao?: number;
+  /** rc.47: o WhatsApp oficial: o serviço de canais (o endereço público do webhook) e o que colar no painel da Meta */
+  oficial?: boolean; rele?: 'ok' | 'indisponivel' | 'conferindo';
+  webhook?: { url: string; verifyToken: string | null; phoneNumberId: string; ultimaEm: string | null } | null;
 }
-const ERRO_CANAL: Record<string, `conexoes.canal.erro.${'formato' | 'formato_app' | 'codigo' | 'tentativas' | 'motor'}`> = {
+const ERRO_CANAL: Record<string, `conexoes.canal.erro.${'formato' | 'formato_app' | 'formato_wa' | 'rele' | 'codigo' | 'tentativas' | 'motor'}`> = {
+  formato_wa: 'conexoes.canal.erro.formato_wa', rele: 'conexoes.canal.erro.rele',
   formato: 'conexoes.canal.erro.formato', formato_app: 'conexoes.canal.erro.formato_app', codigo: 'conexoes.canal.erro.codigo', tentativas: 'conexoes.canal.erro.tentativas', motor: 'conexoes.canal.erro.motor',
 };
 /** O console de desenvolvedores de cada aplicativo (o Lark internacional tem o próprio). */
@@ -1114,7 +1123,8 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
   const t = useT();
   // rc.45: o Feishu/Lark e o DingTalk usam o aplicativo interno da empresa (App ID e App Secret), não um bot com código
   // rc.46: o WeCom também (Bot ID e Secret do robô inteligente); o WeChat pessoal liga pelo QR (LoginWeChat)
-  const deApp = canal === 'feishu' || canal === 'dingtalk' || canal === 'wecom' || canal === 'weixin';
+  // rc.47: o WhatsApp oficial também (Phone Number ID, token de acesso e App Secret do app da Meta: FormWhatsAppOficial)
+  const deApp = canal === 'feishu' || canal === 'dingtalk' || canal === 'wecom' || canal === 'weixin' || canal === 'whatsapp_cloud';
   const [appId, setAppId] = useState('');
   const [dominio, setDominio] = useState<'feishu' | 'lark'>('feishu');
   const [token, setToken] = useState('');
@@ -1139,7 +1149,7 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
   const conexao = e.conexao === 'conectado' ? t('conexoes.canal.conexao.conectado') : e.conexao === 'sem_conexao' ? t(deApp ? 'conexoes.canal.app.semConexao' : 'conexoes.canal.conexao.semConexao')
     : e.conexao === 'conectando' ? t(deApp ? 'conexoes.canal.app.conectando' : 'conexoes.canal.conexao.conectando') : null;
   const consoleDoApp = (url: string) => <a href={url} target="_blank" rel="noreferrer noopener">{t('conexoes.canal.app.console')}</a>;
-  const passos = canal === 'weixin' ? null
+  const passos = canal === 'weixin' || canal === 'whatsapp_cloud' ? null
     : canal === 'wecom'
     ? <ol className="small conn-passos">
         <li>{tn('conexoes.canal.wc.passo1', { console: <a href={CONSOLE_DO_APP.wecom} target="_blank" rel="noreferrer noopener">{t('conexoes.canal.wc.console')}</a> })}</li>
@@ -1189,7 +1199,9 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
       <p className="hint ai-byok__seguro"><Icon name="lock" size={12} /> {t(canal === 'wecom' ? 'conexoes.canal.wc.guardado' : 'conexoes.canal.app.guardado')}</p>
     </form>
   );
-  const formBot = canal === 'weixin' ? <LoginWeChat estado={e} reload={reload} /> : deApp ? formApp : (
+  const formBot = canal === 'weixin' ? <LoginWeChat estado={e} reload={reload} />
+    : canal === 'whatsapp_cloud' ? <FormWhatsAppOficial busy={busy} trocar={trocar} cancelar={() => setTrocar(false)} guardar={(b) => void agir(() => api.put('/api/canais/whatsapp_cloud/bot', b), () => setTrocar(false))} />
+    : deApp ? formApp : (
     <form className="row row--wrap" onSubmit={(ev) => { ev.preventDefault(); void agir(() => api.put(`/api/canais/${canal}/bot`, { token: token.trim() }), () => { setToken(''); setTrocar(false); }); }}>
       <label className="field">{t('conexoes.canal.codigoDoBot')}<input type="password" value={token} onChange={(ev) => setToken(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={200} /></label>
       <button className="btn btn--sm btn--primary" disabled={busy || token.trim().length < 20}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.canal.guardar')}</button>
@@ -1198,13 +1210,14 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
   );
   return (
     <article id={`conn-equipe-${canal}`} className={`card conn conn-detail ${e.ligado ? 'feature--on' : ''}`}>
-      <header className="row"><BrandLogo kind={canal} name={nome} size={32} /><strong>{titulo}</strong>
+      <header className="row"><BrandLogo kind={canal === 'whatsapp_cloud' ? 'whatsapp' : canal} name={nome} size={32} /><strong>{titulo}</strong>
         {e.experimental && <span className="badge badge--exp">{t('conexoes.wa.experimental')}</span>}
         {onClose && <button className="icon-btn conn-detail__x" onClick={onClose} aria-label={t('conexoes.acao.fechar')} title={t('conexoes.acao.fechar')}><Icon name="x" size={16} /></button>}</header>
       {!deApp && <BotOficial canal={canal as CanalDeBot} />}
       {/* o bot próprio (privacidade máxima): para quem prefere, atrás do "Avançado"; o Feishu e o DingTalk só têm este caminho */}
       <EnvoltorioDoCanal deApp={deApp} aberto={!!e.ligado} resumo={t('conexoes.bot.avancado')}>
-      <p className="muted">{canal === 'weixin' ? t('conexoes.canal.wx.intro') : deApp ? t('conexoes.canal.app.intro') : t('conexoes.canal.intro')}</p>
+      <p className="muted">{canal === 'weixin' ? t('conexoes.canal.wx.intro') : canal === 'whatsapp_cloud' ? t('conexoes.canal.wac.intro') : deApp ? t('conexoes.canal.app.intro') : t('conexoes.canal.intro')}</p>
+      {canal === 'whatsapp_cloud' && e.rele === 'indisponivel' && <p className="warn">{t('conexoes.canal.wac.releFora')}</p>}
       {!e.disponivel ? <p className="hint">{e.motivo === 'versao' ? t('conexoes.canal.indisponivel.versao') : t('conexoes.canal.indisponivel.motor')}</p> : <>
         {e.ligado ? <>
           <p>{tn('conexoes.canal.ligadoComo', { nome: <b>{e.ligado.nome || t('conexoes.canal.contaSemNome')}</b>, data: fmtData(e.ligado.desde) })}</p>
@@ -1212,14 +1225,16 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
           {e.codigoRecusado && <p className="warn">{t(deApp ? 'conexoes.canal.app.codigoRecusado' : 'conexoes.canal.codigoRecusado', { canal: nome })}</p>}
           <label className="check"><input type="checkbox" checked={e.ligado.avisos} disabled={busy} onChange={(ev) => void agir(() => api.patch(`/api/canais/${canal}`, { avisos: ev.target.checked }))} /> {t('conexoes.canal.avisar')}</label>
           {pronto && <p className="ok" role="status">{t(deApp ? 'conexoes.canal.app.pronto' : 'conexoes.canal.pronto')}</p>}
+          {canal === 'whatsapp_cloud' && e.webhook && <WebhookWhatsApp w={e.webhook} />}
         </> : !e.bot || trocar ? <>
           {passos}
           {formBot}
         </> : <>
           {conexao && <p className="small" role="status">{conexao}</p>}
           {e.codigoRecusado && <p className="warn">{t(deApp ? 'conexoes.canal.app.codigoRecusado' : 'conexoes.canal.codigoRecusado', { canal: nome })}</p>}
+          {canal === 'whatsapp_cloud' && e.webhook && <WebhookWhatsApp w={e.webhook} aberto />}
           {(canal === 'feishu' || canal === 'dingtalk') && <ol className="small conn-passos" start={3}>{canal === 'feishu' ? <><li>{t('conexoes.canal.fs.passo3')}</li><li>{t('conexoes.canal.fs.passo4')}</li></> : <li>{t('conexoes.canal.dt.passo4')}</li>}</ol>}
-          <p>{t(canal === 'weixin' ? 'conexoes.canal.wx.parear' : canal === 'wecom' ? 'conexoes.canal.wc.parear' : deApp ? 'conexoes.canal.app.parear.passo' : 'conexoes.canal.parear.passo')}</p>
+          <p>{t(canal === 'weixin' ? 'conexoes.canal.wx.parear' : canal === 'wecom' ? 'conexoes.canal.wc.parear' : canal === 'whatsapp_cloud' ? 'conexoes.canal.wac.parear' : deApp ? 'conexoes.canal.app.parear.passo' : 'conexoes.canal.parear.passo')}</p>
           <form className="row row--wrap" onSubmit={(ev) => { ev.preventDefault(); void agir(() => api.post(`/api/canais/${canal}/parear`, { codigo, password: senha }), () => { setCodigo(''); setSenha(''); setPronto(true); }); }}>
             <label className="field">{t(deApp ? 'conexoes.canal.app.parear.codigo' : 'conexoes.canal.parear.codigo')}<input value={codigo} onChange={(ev) => setCodigo(ev.target.value)} placeholder="ABCD2345" autoComplete="off" spellCheck={false} maxLength={20} /></label>
             <input type="password" autoComplete="current-password" placeholder={t('conexoes.canal.suaSenha')} aria-label={t('conexoes.canal.suaSenha')} value={senha} onChange={(ev) => setSenha(ev.target.value)} />
@@ -1247,6 +1262,62 @@ function ConversaPorCanal({ canal, estado, reload, onClose }: { canal: NomeCanal
         </ul>
       </details>
     </article>
+  );
+}
+
+/**
+ * rc.47: o cartão seguro do WhatsApp oficial (Cloud API): o Phone Number ID e o WABA ID (números, à vista) e o token de
+ * acesso e o App Secret (campos de senha), que vão direto ao cofre da equipe e não voltam a esta tela.
+ */
+const CONSOLE_DA_META = 'https://developers.facebook.com/apps/';
+const PAINEL_DA_META = 'https://business.facebook.com/settings/system-users';
+function FormWhatsAppOficial({ busy, trocar, cancelar, guardar }: { busy: boolean; trocar: boolean; cancelar: () => void; guardar: (b: Record<string, string>) => void }) {
+  const t = useT();
+  const [numero, setNumero] = useState(''); const [waba, setWaba] = useState('');
+  const [acesso, setAcesso] = useState(''); const [segredo, setSegredo] = useState('');
+  const ok = /^\d{8,20}$/.test(numero.trim()) && acesso.trim().length >= 40 && /^[0-9a-f]{32}$/i.test(segredo.trim()) && (!waba.trim() || /^\d{8,20}$/.test(waba.trim()));
+  const link = (href: string, texto: string) => <a href={href} target="_blank" rel="noreferrer noopener">{texto}</a>;
+  return (
+    <form className="conn-app conn-wac" onSubmit={(ev) => { ev.preventDefault(); if (ok) guardar({ phoneNumberId: numero.trim(), accessToken: acesso.trim(), appSecret: segredo.trim(), ...(waba.trim() ? { wabaId: waba.trim() } : {}) }); }}>
+      <ol className="small conn-passos">
+        <li>{tn('conexoes.canal.wac.passo1', { console: link(CONSOLE_DA_META, t('conexoes.canal.wac.console')) })}</li>
+        <li>{t('conexoes.canal.wac.passo2')}</li>
+        <li>{tn('conexoes.canal.wac.passo3', { painel: link(PAINEL_DA_META, t('conexoes.canal.wac.painel')) })}</li>
+        <li>{t('conexoes.canal.wac.passo4')}</li>
+      </ol>
+      <div className="conn-wac__campos">
+        <label className="field">{t('conexoes.canal.wac.numero')}<input value={numero} onChange={(ev) => setNumero(ev.target.value)} inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={20} placeholder="109876543210987" /></label>
+        <label className="field">{t('conexoes.canal.wac.waba')}<input value={waba} onChange={(ev) => setWaba(ev.target.value)} inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={20} placeholder={t('conexoes.canal.wac.opcional')} /></label>
+        <label className="field">{t('conexoes.canal.wac.token')}<input type="password" value={acesso} onChange={(ev) => setAcesso(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={600} /></label>
+        <label className="field">{t('conexoes.canal.wac.segredo')}<input type="password" value={segredo} onChange={(ev) => setSegredo(ev.target.value)} autoComplete="off" spellCheck={false} maxLength={64} /></label>
+      </div>
+      <div className="row row--wrap">
+        <button className="btn btn--sm btn--primary" disabled={busy || !ok}>{busy ? t('conexoes.acao.conferindo') : t('conexoes.canal.guardar')}</button>
+        {trocar && <button type="button" className="btn btn--sm btn--ghost" onClick={cancelar}>{t('conexoes.canal.cancelar')}</button>}
+      </div>
+      <p className="hint ai-byok__seguro"><Icon name="lock" size={12} /> {t('conexoes.canal.wac.guardado')}</p>
+    </form>
+  );
+}
+
+/** rc.47: o que colar no painel da Meta (WhatsApp › Configuração › Webhook): o endereço do serviço de canais e o verify token. */
+function WebhookWhatsApp({ w, aberto }: { w: NonNullable<EstadoCanal['webhook']>; aberto?: boolean }) {
+  const t = useT();
+  const [copiado, setCopiado] = useState<string | null>(null);
+  const copiar = (k: string, v: string) => { void navigator.clipboard?.writeText(v).then(() => { setCopiado(k); setTimeout(() => setCopiado(null), 1500); }).catch(() => undefined); };
+  const linha = (k: string, rotulo: string, v: string) => (
+    <div className="conn-wac__linha"><span className="small muted">{rotulo}</span><code className="conn-wac__valor">{v}</code>
+      <button type="button" className="btn btn--sm btn--ghost" onClick={() => copiar(k, v)}>{copiado === k ? t('conexoes.canal.wac.copiado') : t('conexoes.canal.wac.copiar')}</button></div>
+  );
+  return (
+    <details className="conn-secao conn-wac__webhook" open={aberto}>
+      <summary>{t('conexoes.canal.wac.webhookTitulo')}</summary>
+      <p className="small">{t('conexoes.canal.wac.webhookPasso')}</p>
+      {linha('url', t('conexoes.canal.wac.url'), w.url)}
+      {w.verifyToken && linha('vt', t('conexoes.canal.wac.verify'), w.verifyToken)}
+      <p className="small muted">{t('conexoes.canal.wac.campo')}</p>
+      <p className="small" role="status">{w.ultimaEm ? t('conexoes.canal.wac.ultima', { data: fmtDataHora(w.ultimaEm) }) : t('conexoes.canal.wac.nenhuma')}</p>
+    </details>
   );
 }
 

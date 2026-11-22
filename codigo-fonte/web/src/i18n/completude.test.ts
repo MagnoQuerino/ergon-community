@@ -173,3 +173,11 @@ test('chinês e hindi: cada arquivo marcado para revisão por nativo, e as área
   }
   assert.deepEqual(erros, []);
 });
+
+// rc.47: o hindi tem a mesma cobertura do chinês (todas as áreas; conta, ajuda e servidor parciais nos dois): uma chave
+// traduzida para o chinês e não para o hindi é tradução esquecida
+test('hindi: cada chave traduzida para o chinês também está em hindi', () => {
+  const faltam: string[] = [];
+  for (const [a, area] of Object.entries(PARCIAIS['zh-CN'])) for (const k of Object.keys(area)) if (!(k in (PARCIAIS.hi[a] ?? {}))) faltam.push(`${a}.${k}`);
+  assert.deepEqual(faltam, []);
+});

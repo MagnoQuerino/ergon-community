@@ -60,8 +60,13 @@ interface InfoDoRele {
   /** o bot do Ergon no Discord: o link de adicionar é montado aqui pelo id; `linkStart` = o serviço faz o "Adicionar ao Discord" com state */
   discord: { applicationId: string; installUrl: string; botName: string; linkStart: boolean } | null;
   telegram: { botUsername: string | null } | null;
+  /** rc.47: o serviço é o endereço público do webhook do WhatsApp oficial (Cloud API) de cada instalação */
+  whatsappCloud?: boolean;
   at: number;
 }
+/** rc.47: a notificação da Meta como o serviço entregou: o corpo cru e a assinatura (quem confere é o motor, com o App Secret). */
+export interface WebhookWhatsApp { id: string; corpo: Buffer; assinatura: string; recebidaEm: string }
+const ID_ROTA_WA = /^wac_[A-Za-z0-9_-]{22}$/;
 /** O que só se aprova dentro do app: decisão nascida de um pedido de risco vindo de fora. */
 const SO_NO_APP = 'Por segurança, isto só se decide dentro do app do Ergon: abra o Ergon para aprovar ou recusar.';
 
@@ -454,6 +459,7 @@ export class TeamsApp {
         base, teams: typeof j.teams === 'boolean' ? j.teams : true, teamsAppId,
         discord: app ? { applicationId: app, installUrl: `https://discord.com/oauth2/authorize?client_id=${app}`, botName: nome || 'Ergon', linkStart: j.discord?.linkStart === true } : null,
         telegram: tg ? { botUsername: typeof tg.botUsername === 'string' && /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(tg.botUsername) ? tg.botUsername : null } : null,
+        whatsappCloud: (j as { whatsappCloud?: unknown }).whatsappCloud === true,
         at: this.agora(),
       };
       const mudou = JSON.stringify({ ...this.info, at: 0 }) !== JSON.stringify({ ...info, at: 0 });
@@ -599,6 +605,30 @@ export class TeamsApp {
     this.d.db.run('DELETE FROM teams_noticed WHERE user_id = ?', userId);
   }
 
+  // ------------------------------------------------------------------------------------------------ WhatsApp oficial (rc.47)
+  /** Quem recebe as notificações do WhatsApp oficial (canais/servico.ts): grava e devolve se aceitou. */
+  aoWhatsApp: ((w: WebhookWhatsApp) => 'aceita' | 'sem_canal' | 'invalida') | null = null;
+  /** O serviço oferece o endereço do webhook? (null: ainda não se sabe) */
+  whatsappNoServico(): boolean | null { const i = this.infoAtual(); return i ? i.whatsappCloud === true : null; }
+  /** A conexão com o serviço está de pé agora? */
+  conectadoAoServico(): boolean { return this.cliente?.estado === 'connected'; }
+  /**
+   * O endereço público do webhook desta instalação, com o verify token que o Ergon gerou (o serviço guarda só o HMAC
+   * dele). Pedir de novo mantém o endereço; `renovar` troca (o antigo para de valer).
+   */
+  async rotaWhatsApp(verifyToken: string, renovar = false): Promise<{ routeId: string; url: string }> {
+    const ack = await this.pedir({ type: 'whatsapp.route.set', id: novoId('req'), verifyToken, ...(renovar ? { renew: true } : {}) });
+    const routeId = String(ack.routeId ?? ''); const url = String(ack.url ?? '');
+    const base = this.base() ?? '';
+    // só um endereço https do próprio serviço configurado, com a rota que ele disse
+    if (!ID_ROTA_WA.test(routeId) || !/^https:\/\//.test(url) || !url.endsWith(`/whatsapp/${routeId}`) || (base && new URL(url).host !== new URL(base).host)) throw new HttpError(502, 'teams_relay', 'O serviço respondeu um endereço inesperado.');
+    return { routeId, url };
+  }
+  /** Desliga o webhook no serviço (a rota e o que esperava somem). Sem conexão agora: o serviço apaga sozinho com a instalação. */
+  async apagarRotaWhatsApp(): Promise<void> {
+    await this.cliente?.pedir({ type: 'whatsapp.route.delete', id: novoId('req') }, 15_000).catch(() => undefined);
+  }
+
   // ------------------------------------------------------------------------------------------------ o que chega
   private receber(f: Quadro): void {
     this.fila = this.fila.then(() => this.tratar(f)).catch((err: unknown) => { log.warn({ tipo: f.type, erro: (err as Error).message.slice(0, 120) }, 'teams: entrega não tratada'); });
@@ -625,6 +655,25 @@ export class TeamsApp {
         c.enviar({ type: 'ack', id: f.id, ...ack });
         const depois = this.depoisDoAck; this.depoisDoAck = [];
         if (ack.status === 'accepted') for (const fn of depois) { try { fn(); } catch (err) { log.warn({ erro: (err as Error).message.slice(0, 120) }, 'teams: depois do ack'); } }
+        return;
+      }
+      case 'whatsapp.webhook': {
+        // rc.47: a notificação do WhatsApp oficial (o serviço é só o endereço público do webhook)
+        if (typeof f.id !== 'string' || !/^dlv_[A-Za-z0-9_-]{8,40}$/.test(f.id)) return;
+        let ack: Record<string, unknown> = { ok: false, status: 'rejected', error: { code: 'invalid' } };
+        type Aberto = { v?: unknown; body?: unknown; signature?: unknown };
+        let v: Aberto | null;
+        try { v = abrirSelado(this.chaves()!, f.sealed as Selado, aadDoSelo(f.id, this.instalacao() ?? '', f.type)) as Aberto; } catch { v = null; }
+        const corpo = typeof v?.body === 'string' ? Buffer.from(v.body, 'base64') : null;
+        const assinatura = typeof v?.signature === 'string' && /^sha256=[0-9a-f]{64}$/.test(v.signature) ? v.signature : null;
+        if (v?.v === 1 && corpo && corpo.length > 0 && corpo.length <= 64 * 1024 && assinatura) {
+          let r: 'aceita' | 'sem_canal' | 'invalida' = 'sem_canal';
+          // a base ocupada (ou o cofre trancando no meio): sem ack, o serviço entrega de novo
+          try { if (this.aoWhatsApp) r = this.aoWhatsApp({ id: f.id, corpo, assinatura, recebidaEm: typeof f.receivedAt === 'string' ? f.receivedAt : new Date(this.agora()).toISOString() }); }
+          catch (err) { log.warn({ erro: (err as Error).message.slice(0, 120) }, 'whatsapp: notificação não gravada; o serviço entrega de novo'); return; }
+          ack = r === 'aceita' ? { ok: true, status: 'accepted' } : { ok: false, status: 'rejected', error: { code: r === 'sem_canal' ? 'disabled' : 'invalid' } };
+        }
+        c.enviar({ type: 'ack', id: f.id, ...ack });
         return;
       }
       case 'standby.bindings': this.importarReserva(f.standbyBindings); return; // a reserva mudou com esta instalação conectada

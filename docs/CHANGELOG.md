@@ -1,5 +1,12 @@
 # Novidades
 
+## 1.1.0-rc.47 (pré-versão de teste)
+
+- **हिन्दी completo:** cidade, equipe, perfil do agente, rotinas, documentos, Conexões, Configurações e Ajuda, como o chinês. As equipes de nicho do primeiro acesso e a ficha da biblioteca de rotinas também saem em chinês, hindi e inglês da Índia. As traduções ainda passam por revisão de falante nativo.
+- **English (India) revisado:** datas dd/mm/aaaa, lakh e crore, exemplos em ₹ e telefone +91; o GST aparece nos textos de cobrança onde se aplica. Preços e vendas não mudaram.
+- **Lei DPDP da Índia:** em Segurança, o dono liga o aviso de privacidade em linguagem simples (português, inglês, hindi e chinês) e preenche quem responde pelos dados, o Grievance Officer, o prazo de resposta (até 90 dias) e, se houver, o Consent Manager. Cada pessoa consente e retira o consentimento em Minha conta, com registro, e pode nomear um representante. Os termos de uso não mudaram. Veja `docs/INDIA.md`.
+- **WhatsApp Business oficial:** em Conexões › Conversar com a equipe, ligue o número da empresa pela plataforma oficial da Meta (Cloud API), ao lado do número pareado por QR. As chaves entram pelo cartão seguro; o Ergon gera o verify token e mostra a URL do webhook. As mensagens chegam pelo serviço de canais do Ergon, seladas para o seu computador, e a assinatura da Meta é conferida aqui. Veja `docs/WHATSAPP.md`.
+
 ## 1.1.0-rc.46 (pré-versão de teste)
 
 - **WeCom (企业微信):** em Conexões › Conversar com a equipe, ligue o robô inteligente da sua empresa (Bot ID e Secret, guardados com a equipe) e converse com ela por mensagem direta. A conexão sai do seu computador, sem endereço público.

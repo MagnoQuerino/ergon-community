@@ -7,6 +7,7 @@ import { RecoveryReveal } from '../components/AuthFlow.tsx';
 import { Loading } from '../brand/Brand.tsx';
 import { BaixarMeusDados } from '../components/BaixarMeusDados.tsx';
 import { PrivacidadeCard } from '../components/AjustesEquipe.tsx';
+import { DpdpConfigCard } from '../components/AvisoDpdp.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { ConfirmPopup } from '../components/ConfirmPopup.tsx';
 import { TEXTO_ANTES_DE_EXCLUIR, TEXTO_EXCLUIR_CONTA } from '../lib/textos-tela.ts';
@@ -152,6 +153,8 @@ export function SegurancaPanel({ me, onChanged }: { me: Me; onChanged: () => voi
 
       {/* rc.27: o que a equipe de IA faz com os seus dados (não treinar; busca privada) */}
       <PrivacidadeCard />
+      {/* rc.47: a Lei DPDP da Índia (o dono do workspace responde pelos dados de quem usa) */}
+      {me.role === 'owner' && <DpdpConfigCard onChanged={onChanged} />}
 
       <section className="card">
         <h3>{t('conta.senha.rotulo')}</h3>
