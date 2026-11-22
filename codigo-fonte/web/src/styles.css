@@ -4006,3 +4006,8 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
 .conn-wac__linha { display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 6px 0; }
 .conn-wac__valor { overflow-wrap: anywhere; word-break: break-all; padding: 4px 6px; border-radius: 6px; background: var(--panel-2); font-size: 12px; }
 @media (max-width: 520px) { .conn-wac__linha { grid-template-columns: 1fr auto; } .conn-wac__linha > span { grid-column: 1 / -1; } }
+/* rc.47: o aviso da Lei DPDP (Índia) e a configuração dele */
+.aviso-dpdp ul { margin: 4px 0 8px; padding-left: 20px; }
+.aviso-dpdp__acoes { margin-top: 12px; gap: 8px; }
+.conta__dpdp h4 { margin-top: 12px; }
+.dpdp-cfg h4 { margin: 12px 0 4px; }

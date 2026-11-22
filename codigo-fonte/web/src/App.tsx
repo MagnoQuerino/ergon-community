@@ -1,3 +1,4 @@
+import { AceiteDpdp } from './components/AvisoDpdp.tsx';
 import { AceiteDosTermos } from './components/TermosDeUso.tsx';
 import { AvisoDevolvido } from './components/AvisoDevolvido.tsx';
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
@@ -149,6 +150,8 @@ export function App() {
       {locked && <LockOverlay name={me.user.displayName} factors={me.factors} rpId={me.rpId} onLogout={logout} onUnlocked={() => { setLocked(false); release(lockWaiters, true); }} />}
       {me.autoUnlockPrompt && !locked && !reauth && !overlay && me.onboarding !== 'pending' && !(me.termos && !me.termos.aceitos) && <AutoUnlockPrompt onDone={check} />}
       {me.termos && !me.termos.aceitos && !locked && !reauth && <AceiteDosTermos versao={me.termos.versao} onDone={check} />}
+      {/* rc.47: o aviso de consentimento da Lei DPDP (Índia), depois dos termos, quando o dono liga */}
+      {me.dpdp?.ligado && !me.dpdp.aceito && !(me.termos && !me.termos.aceitos) && !locked && !reauth && me.onboarding !== 'pending' && <AceiteDpdp estado={me.dpdp} onDone={check} />}
       {worldLink && !locked && WorldLinkDialog && <Suspense fallback={null}><WorldLinkDialog onClose={() => setWorldLink(false)} /></Suspense>}
       {reauth && !locked && <ReauthDialog factors={me.factors} rpId={me.rpId} onDone={() => { setReauth(false); release(reauthWaiters, true); }} onCancel={() => { setReauth(false); release(reauthWaiters, false); }} />}
     </>
