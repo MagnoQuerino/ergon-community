@@ -35,7 +35,7 @@ const conexoes: Traducao<typeof pt> = {
   'secao.documentos.titulo': 'Documents, code and calendar',
   'secao.documentos.texto': 'Pages, repositories and calendars the credential can reach.',
   'secao.financeiro.titulo': 'Finance',
-  'secao.financeiro.texto': 'Lookups, customers and charges when you ask. Nothing is paid or transferred from here.',
+  'secao.financeiro.texto': 'Lookups, customers and charges when you ask. Refunds, captures and entries only with your approval, every time.',
 
   // ——— os destaques do topo ———
   'ia.titulo': 'AI accounts',
@@ -46,7 +46,7 @@ const conexoes: Traducao<typeof pt> = {
   'contas.titulo': 'Microsoft 365 and Google',
   'contas.texto': 'Sign in with your account, without typing a password into Ergon. Microsoft: Planner, To Do, Teams, email, calendar and files. Google: Tasks, Calendar, Gmail and Drive. The agents look things up and act for you, following the confirmation rule below.',
   'contas.tituloGrupo': 'Your accounts',
-  'contas.curto': 'Microsoft 365, Google and WhatsApp: the agents act in them for you, under your confirmation rule.',
+  'contas.curto': 'Microsoft 365, Google, Zoho and WhatsApp: the agents act in them for you, under your confirmation rule.',
   'contas.m365Titulo': 'Microsoft 365: the team acts in your account.',
   'contas.m365Texto': 'With your sign-in, the agents read and reply for you in email, calendar, files, tasks and Teams, when you ask or in a routine. Nobody watches the account all the time.',
   'contas.teamsTitulo': 'Chatting with the team on Teams: a different thing.',

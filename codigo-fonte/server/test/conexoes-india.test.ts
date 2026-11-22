@@ -21,6 +21,7 @@ import { ACOES_ZOHO, ESCOPOS_ZOHO, httpZoho, linkCrm } from '../src/services/con
 import { SsoAuth, zohoDcDoServidor } from '../src/services/sso.ts';
 import { Integrations, INTEGRATIONS, SecretStore, setIntegration } from '../src/services/integrations.ts';
 import type { HermesClient, ModelOptions, RemoteRun, StartRun } from '../src/services/hermes.ts';
+import { DOMINIOS_REF, urlSegura } from '../../shared/visuais/esquema.ts';
 import { harness, req, setupOwner, testConfig, tmpDir, type Harness, type Session } from './helpers.ts';
 
 type Call = { method: string; url: URL; headers: Record<string, string>; body: any; raw: string };
@@ -168,6 +169,9 @@ describe('Zoho: CRM, Books e Mail', () => {
     assert.deepEqual(calls[0].body, { data: [{ Stage: 'Closed Won' }], trigger: [] });
     assert.match(r.texto, /Negócio atualizado no Zoho CRM \(id: 77\): https:\/\/crm\.zoho\.in\/crm\/tab\/Deals\/77/);
     assert.equal(linkCrm('com', 'contatos', '1'), 'https://crm.zoho.com/crm/tab/Contacts/1');
+    // os links que os conectores devolvem viram chip de referência nos blocos visuais
+    for (const u of ['https://crm.zoho.in/crm/tab/Deals/77', 'https://books.zoho.eu/app/1#/invoices/2', 'https://dashboard.razorpay.com/app/payments/pay_1', 'https://rzp.io/i/abc', 'https://sharma.myfreshworks.com/crm/sales/deals/7']) assert.ok(urlSegura(u, DOMINIOS_REF), u);
+    assert.ok(!urlSegura('https://zoho.in.atacante.com/x', DOMINIOS_REF));
   });
   test('Books: a organização padrão entra em toda chamada; faturas com o link do Books', async () => {
     answer = (c) => (c.url.pathname.endsWith('/organizations') ? ORG : { invoices: [{ invoice_id: '9001', invoice_number: 'INV-000123', customer_name: 'Kumar Exports', status: 'overdue', total: 118000, balance: 118000, currency_code: 'INR', due_date: '2026-11-10' }], page_context: { has_more_page: false } });
@@ -240,7 +244,7 @@ describe('Razorpay', () => {
   test('a definição: financeiro, chave em Basic, Key Id conferido, segredo secreto', async () => {
     assert.equal(RAZORPAY.grupo, 'financeiro');
     assert.deepEqual(RAZORPAY.campos.map((c) => [c.name, !!c.secret]), [['key_id', false], ['key_secret', true]]);
-    assert.ok(RAZORPAY.campos[0].pattern!.test('rzp_live_AbCdEf1234567')); assert.ok(!RAZORPAY.campos[0].pattern!.test('sk_live_x'));
+    assert.ok(RAZORPAY.campos[0].pattern!.test('rzp_live_AbCdEf1234567')); assert.ok(!RAZORPAY.campos[0].pattern!.test('pk_live_AbCdEf1234567'));
     answer = () => ({ entity: 'collection', count: 0, items: [] });
     assert.equal(await conferirConector(RAZORPAY, creds), 'Razorpay');
     assert.equal(calls[0].url.href, 'https://api.razorpay.com/v1/payments?count=1');

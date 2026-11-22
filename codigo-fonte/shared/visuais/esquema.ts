@@ -128,6 +128,9 @@ export const DOMINIOS_REF = [
   'github.com', 'gitlab.com', 'bitbucket.org', 'app.asana.com', 'trello.com', 'notion.so', 'app.clickup.com', 'monday.com', 'atlassian.net', 'linear.app', 'app.pipefy.com',
   'slack.com', 'discord.com', 'web.whatsapp.com', 'wa.me', 't.me', 'app.hubspot.com', 'asaas.com', 'app.omie.com.br', 'app.smartsheet.com', 'figma.com', 'dropbox.com',
   'zendesk.com', 'freshdesk.com', 'app.intercom.com', 'app.gohighlevel.com', 'pipedrive.com', 'app.rdstation.com',
+  // rc.48: a Índia (Zoho em cada data center; Razorpay e os links curtos dele; Freshsales)
+  'zoho.com', 'zoho.in', 'zoho.eu', 'zoho.com.au', 'zoho.jp', 'zohocloud.ca', 'zoho.sa', 'zoho.uk', 'zoho.com.cn',
+  'dashboard.razorpay.com', 'rzp.io', 'myfreshworks.com', 'freshsales.io',
 ];
 /** http(s), sem usuário:senha; `dominios` restringe o host (as referências) */
 export function urlSegura(u: string, dominios?: readonly string[]): boolean {

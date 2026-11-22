@@ -61,8 +61,8 @@ export const CONTA_ID = 'conta_id';
  * Catálogo de conexões. Escolha dos aplicativos de tarefas (pesquisa de out/2026): os líderes de mercado com API
  * própria e os mais conhecidos no Brasil. A ordem da lista é a de fama no Brasil (estimativa, sem dado auditado):
  * Trello, Notion, Asana, monday.com, ClickUp, Jira, Pipefy, Todoist, Bitrix24, Airtable, GitHub Projects,
- * Smartsheet, Linear. Fora: os pouco conhecidos aqui (TickTick, Wrike, Basecamp, Zoho, Runrun.it) e os sem API
- * pública (Things, Any.do).
+ * Smartsheet, Linear. Fora: os pouco conhecidos aqui (TickTick, Wrike, Basecamp, Runrun.it) e os sem API
+ * pública (Things, Any.do). A Zoho entrou na rc.48 pela Índia (CRM, Books e Mail, não como quadro de tarefas).
  */
 export const INTEGRATIONS: IntegrationDef[] = [
   { kind: 'microsoft', name: 'Microsoft 365', auth: 'oauth', group: 'contas', tasks: true, site: 'microsoft.com',

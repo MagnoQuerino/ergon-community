@@ -34,7 +34,7 @@ const conexoes = {
   'secao.documentos.titulo': 'Documentos, código e agenda',
   'secao.documentos.texto': 'Páginas, repositórios e agenda que a credencial alcança.',
   'secao.financeiro.titulo': 'Financeiro',
-  'secao.financeiro.texto': 'Consultas, clientes e cobranças quando você pede. Nada é pago nem transferido por aqui.',
+  'secao.financeiro.texto': 'Consultas, clientes e cobranças quando você pede. Reembolso, captura e lançamento só com a sua aprovação, a cada vez.',
 
   // ——— os destaques do topo ———
   'ia.titulo': 'Contas de IA',
@@ -45,7 +45,7 @@ const conexoes = {
   'contas.titulo': 'Microsoft 365 e Google',
   'contas.texto': 'Entre com a conta, sem digitar senha no Ergon. Microsoft: Planner, To Do, Teams, e-mail, agenda e arquivos. Google: Tasks, Agenda, Gmail e Drive. Os agentes consultam e agem por você, com a regra de confirmação abaixo.',
   'contas.tituloGrupo': 'Suas contas',
-  'contas.curto': 'Microsoft 365, Google e WhatsApp: os agentes agem nelas por você, com a sua regra de confirmação.',
+  'contas.curto': 'Microsoft 365, Google, Zoho e WhatsApp: os agentes agem nelas por você, com a sua regra de confirmação.',
   'contas.m365Titulo': 'Microsoft 365: a equipe age na sua conta.',
   'contas.m365Texto': 'Com o seu login, os agentes leem e respondem por você no e-mail, na agenda, nos arquivos, nas tarefas e no Teams, quando você pede ou numa rotina. Ninguém fica olhando a conta o tempo todo.',
   'contas.teamsTitulo': 'Conversar com a equipe pelo Teams: é outra coisa.',

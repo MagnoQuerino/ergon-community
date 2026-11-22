@@ -338,7 +338,9 @@ describe('Conexões: catálogo, credenciais com vários campos e "em breve" hone
     for (const k of ['trello', 'jira', 'asana', 'monday', 'clickup', 'notion', 'todoist', 'airtable', 'smartsheet', 'linear', 'github', 'pipefy']) assert.ok(kinds.includes(k), k);
     assert.deepEqual(list.find((i) => i.kind === 'jira')!.fields.map((f) => f.name), ['site', 'email', 'token']);
     assert.equal(list.find((i) => i.kind === 'bitrix')!.auth, 'soon');
-    for (const gone of ['ticktick', 'wrike', 'basecamp', 'zoho', 'runrunit']) assert.ok(!kinds.includes(gone), gone);
+    for (const gone of ['ticktick', 'wrike', 'basecamp', 'runrunit']) assert.ok(!kinds.includes(gone), gone);
+    // rc.48: a Zoho entrou (CRM, Books e Mail, pelo login da conta), não como quadro de tarefas
+    assert.deepEqual([list.find((i) => i.kind === 'zoho')!.auth, list.find((i) => i.kind === 'zoho')!.group], ['oauth', 'contas']);
     assert.equal((await req(h, 'POST', '/api/integrations/bitrix/token', s, { token: 'x'.repeat(20) })).status, 400);
     assert.equal(h.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM integrations WHERE kind = 'bitrix'")!.n, 0, '"em breve" não vai para o banco');
   });
