@@ -2,6 +2,7 @@
 
 ## 1.1.0-rc.49 (pré-versão de teste)
 
+- **Nova licença:** a partir desta versão, o Ergon Community é distribuído sob a PolyForm Noncommercial 1.0.0. Uso pessoal, estudo, pesquisa e entidades sem fins lucrativos seguem livres; uso comercial (numa empresa, para vender, redistribuir ou oferecer como serviço) depende de autorização. As versões até a rc.48 seguem sob a Apache-2.0.
 - **Conversa por voz de mãos livres:** com a voz ligada, toda resposta é falada, inclusive quando a equipe ainda não tem a voz instalada: aí fala a voz do próprio sistema (no Windows, as vozes do Windows). Cada agente tem a sua voz e o seu tom. Mandou um áudio pelo microfone? A resposta toca sozinha.
 - **Voz nas salas:** o áudio gravado no grupo sai na hora, com o player e a transcrição, como nas conversas privadas. No canal de voz, além de um agente, há **Todos**: responde quem você chamar pelo nome na fala ("Sócrates, …"), e "Pessoal, …" chama todo mundo. O reconhecimento dos nomes é feito no seu computador, sem IA: entende "Socratis", "ocrates", "Arqui medes" e afins, e vale na hora para agentes renomeados ou novos. Chamou dois ou mais? Eles respondem um depois do outro, cada um com a sua parte, sem repetir.
 - **Microfone mudo:** o botão da voz ganha borda vermelha e um traço quando o microfone do computador está mudo. O aviso "Sem voz neste computador" saiu.

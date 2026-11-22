@@ -1,7 +1,7 @@
 ---
 name: ergon-escritorio
 description: "Use quando a pessoa pede para organizar ou editar arquivos do Google Drive ou do OneDrive conectados no Ergon: achar, mover, renomear, criar pastas, copiar, editar Documentos/Word e Planilhas/Excel que já existem, comentar, compartilhar, mandar para a lixeira. Fluxo: localizar, ler, mexer com a ação certa, ler de novo para conferir e devolver o link de cada arquivo."
-license: Apache-2.0
+license: PolyForm-Noncommercial-1.0.0
 metadata:
   author: Ergon
   tags: [escritorio, drive, onedrive, planilha, documento]

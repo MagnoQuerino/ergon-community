@@ -155,5 +155,8 @@ que você escreve.
 
 ## Licença
 
-Código aberto, [Apache-2.0](LICENSE). Componentes de terceiros e as licenças deles: [NOTICE](NOTICE).
+Código-fonte disponível sob a [PolyForm Noncommercial 1.0.0](LICENSE): uso pessoal, estudo, pesquisa e entidades sem fins
+lucrativos usam livremente. Uso comercial (numa empresa, para vender, redistribuir ou oferecer como serviço) depende
+de autorização: abra uma [issue](https://github.com/MagnoQuerino/ergon-community/issues) pedindo a licença comercial.
+As versões até a 1.1.0-rc.48 seguem sob a Apache-2.0. Componentes de terceiros e as licenças deles: [NOTICE](NOTICE).
 Encontrou uma falha de segurança? Veja [.github/SECURITY.md](.github/SECURITY.md).

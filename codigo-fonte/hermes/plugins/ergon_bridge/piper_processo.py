@@ -1,7 +1,7 @@
 """A voz local do Ergon (Piper) num processo próprio (rc.33).
 
 O Piper (piper-tts 1.8.0, projeto piper1-gpl) é GPL-3.0-or-later e traz o espeak-ng (GPL-3.0) compilado dentro. Para
-que nada dele rode dentro do processo do motor (onde também roda o plugin do Ergon, Apache-2.0), o motor não usa o
+que nada dele rode dentro do processo do motor (onde também roda o plugin do Ergon, sob a licença do Ergon), o motor não usa o
 provedor "piper" do Hermes, que importa o pacote no próprio processo: usa um provedor de comando (tts.providers.ergon-piper,
 type: command) que chama este arquivo. Ele também não importa o Piper: só chama a linha de comando dele
 (`python -m piper.download_voices` e `python -m piper`) em processos filhos, manda o texto pela entrada padrão e recebe
