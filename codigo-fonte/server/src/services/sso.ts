@@ -20,7 +20,7 @@ import { fetchWithPolicy, retryHint } from '../lib/http.ts';
 import { ProviderError } from './mirror.ts';
 import type { SecretStore } from './integrations.ts';
 
-export type SsoKind = 'microsoft' | 'google';
+export type SsoKind = 'microsoft' | 'google' | 'zoho';
 
 interface SsoProvider {
   kind: SsoKind;
@@ -42,13 +42,13 @@ interface SsoProvider {
   needs: string;
   /** onde quem instala vê o passo a passo: o texto que a tela mostra ("veja o guia de instalação") */
   doc: string;
-  /** nome da conta (e-mail) a partir do acesso recém-obtido */
-  account: (accessToken: string) => Promise<string>;
+  /** nome da conta (e-mail) a partir do acesso recém-obtido (`dc`: o data center da Zoho onde a conta mora) */
+  account: (accessToken: string, dc?: ZohoDc) => Promise<string>;
 }
 
-async function getJson(url: string, token: string): Promise<any> {
+async function getJson(url: string, token: string, esquema = 'Bearer'): Promise<any> {
   let res: Response;
-  try { res = await fetchWithPolicy(() => fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15000) })); }
+  try { res = await fetchWithPolicy(() => fetch(url, { headers: { Authorization: `${esquema} ${token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15000) })); }
   catch { throw new ProviderError('unavailable', 'o serviço não respondeu'); }
   if (!res.ok) throw new ProviderError(res.status === 401 || res.status === 403 ? 'forbidden' : 'unavailable', `o serviço respondeu ${res.status}`);
   return res.json();
@@ -89,11 +89,36 @@ export const SSO: Record<SsoKind, SsoProvider> = {
       return String(me.email ?? me.name ?? 'conta Google');
     },
   },
+  zoho: {
+    kind: 'zoho', label: 'a Zoho', place: 'na Zoho (API Console)',
+    // o login começa no data center escolhido por quem instala (padrão .com): com o Multi-DC ligado no app, a Zoho leva cada
+    // conta ao data center dela e diz qual na volta (accounts-server); a troca do código e a renovação vão a esse (zohoDe)
+    get authorizeUrl() { return `https://${ZOHO_DCS.com.accounts}/oauth/v2/auth`; },
+    tokenUrl: `https://${ZOHO_DCS.com.accounts}/oauth/v2/token`,
+    // a Zoho separa os escopos por vírgula
+    get scopes() { return ESCOPOS_ZOHO.join(','); },
+    // offline + consent: só assim a Zoho devolve o refresh token
+    extra: { access_type: 'offline', prompt: 'consent' }, scopeOnToken: false,
+    clientId: (c) => c.zohoClientId ?? null, clientSecret: (c) => c.zohoClientSecret ?? null,
+    needs: 'ERGON_ZOHO_CLIENT_ID e ERGON_ZOHO_CLIENT_SECRET', doc: 'o guia da Índia (docs/INDIA.md)',
+    account: async (t, dc = 'com') => {
+      const me = await getJson(`https://${ZOHO_DCS[dc].accounts}/oauth/user/info`, t, 'Zoho-oauthtoken');
+      const quem = String(me.Email ?? me.Display_Name ?? 'conta Zoho');
+      // o data center fica no nome: a mesma pessoa pode ter conta em dois (zoho.in e zoho.com), e são contas diferentes
+      return dc === 'com' ? quem : `${quem} (zoho.${dc})`;
+    },
+  },
 };
 export const SSO_KINDS = Object.keys(SSO) as SsoKind[];
+
+import { ZOHO_DCS, ehZohoDc, zohoDcDoServidor, type ZohoDc } from './conexoes/acoes/zoho-dc.ts';
+export { ZOHO_DCS, ehZohoDc, zohoDcDoServidor, type ZohoDc };
+/** O segredo do app no data center (o console da Zoho pode dar um por DC; sem ele, o geral). */
+const segredoZoho = (cfg: Config, dc: ZohoDc): string | null => cfg.zohoSecretsPorDc?.[dc] ?? cfg.zohoClientSecret ?? null;
 export const isSso = (k: string): k is SsoKind => (SSO_KINDS as string[]).includes(k);
 
 import { ESCOPOS_GOOGLE } from './conexoes/acoes/google.ts';
+import { ESCOPOS_ZOHO } from './conexoes/acoes/zoho.ts';
 import { ESCOPOS_MICROSOFT } from './conexoes/acoes/microsoft.ts';
 
 // ------------------------------------------------------------------------------------------------- etapas da Microsoft
@@ -157,6 +182,7 @@ export interface Tokens {
   /** conta pessoal da Microsoft (sem Teams) */ pessoal?: boolean;
   /** locatário da conta (do id_token): o link do pedido ao administrador vai para ele */ tid?: string;
   /** a conta no Entra (oid do id_token): confere se a conta do Teams que se liga ao Ergon é a mesma (services/teams-app) */ oid?: string;
+  /** Zoho: o data center da conta (a renovação e as chamadas vão aos endereços dele) */ dc?: ZohoDc;
   access_token: string; refresh_token: string; expires_at: number; account: string;
   /** permissões pedidas no último login */ scopes?: string;
   /** as que a conta deu (a pessoa pode ter dado só parte); na Microsoft, a soma das etapas: é o que a renovação pede */ granted?: string;
@@ -231,6 +257,7 @@ export class SsoAuth {
   /** O botão só funciona com o app registrado no provedor (identificador e, no Google, o segredo). */
   configured(kind: SsoKind): boolean {
     const p = SSO[kind];
+    if (kind === 'zoho') return !!p.clientId(this.cfg) && (!!this.cfg.zohoClientSecret || Object.keys(this.cfg.zohoSecretsPorDc ?? {}).length > 0);
     return !!p.clientId(this.cfg) && (kind !== 'google' || !!p.clientSecret(this.cfg));
   }
 
@@ -271,7 +298,8 @@ export class SsoAuth {
       client_id: p.clientId(this.cfg)!, response_type: 'code', redirect_uri: this.redirectUri(kind), scope: scopes,
       state, code_challenge: challenge, code_challenge_method: 'S256', ...extra,
     });
-    return `${p.authorizeUrl}?${q}`;
+    const inicio = kind === 'zoho' ? `https://${ZOHO_DCS[ehZohoDc(this.cfg.zohoDcInicial) ? this.cfg.zohoDcInicial : 'com'].accounts}/oauth/v2/auth` : p.authorizeUrl;
+    return `${inicio}?${q}`;
   }
 
   /**
@@ -292,12 +320,21 @@ export class SsoAuth {
   }
 
   /** Volta do login: o `state` (aleatório, uso único) é a prova de quem começou o fluxo — e de qual provedor. */
-  async finish(kind: SsoKind, state: string, code: string): Promise<FimDoLogin> {
+  /** `volta.accountsServer`: na Zoho, o data center da conta (o parâmetro `accounts-server` da volta do login). */
+  async finish(kind: SsoKind, state: string, code: string, volta: { accountsServer?: string | null } = {}): Promise<FimDoLogin> {
     const s = this.pending.get(state);
     this.pending.delete(state);
     if (!s || s.kind !== kind || Date.now() - s.at > STATE_TTL) throw new HttpError(400, 'sso_state', 'login expirado ou inválido; comece de novo em Conexões');
-    const tok = await this.token(kind, { grant_type: 'authorization_code', code, redirect_uri: this.redirectUri(kind), code_verifier: s.verifier }, s.scopes);
-    const account = await SSO[kind].account(tok.access_token);
+    let dc: ZohoDc | undefined;
+    if (kind === 'zoho') {
+      // sem o parâmetro, a conta é do data center onde o login começou; com um que não é da Zoho, nada é trocado
+      const inicial: ZohoDc = ehZohoDc(this.cfg.zohoDcInicial) ? this.cfg.zohoDcInicial : 'com';
+      const doServidor = volta.accountsServer ? zohoDcDoServidor(volta.accountsServer) : inicial;
+      if (!doServidor) throw new HttpError(400, 'sso_dc', 'a volta do login da Zoho apontou um endereço que não é de um data center da Zoho; comece de novo em Conexões');
+      dc = doServidor;
+    }
+    const tok = await this.token(kind, { grant_type: 'authorization_code', code, redirect_uri: this.redirectUri(kind), code_verifier: s.verifier }, s.scopes, dc);
+    const account = await SSO[kind].account(tok.access_token, dc);
     const { id_token: idToken, ...keep } = tok;
     // autorizar de novo sem vir renovação nova não pode derrubar a conexão: fica a anterior
     // (só a credencial deste workspace: a de outro, emprestada, é de outra conta e não se mistura)
@@ -322,7 +359,7 @@ export class SsoAuth {
     this.secrets.writeOwn(s.workspaceId, kind, {
       ...keep, ...(granted !== undefined ? { granted } : {}), refresh_token: keep.refresh_token || (antes?.account === account ? antes?.refresh_token : '') || '', account, scopes: s.scopes,
       ...(kind === 'microsoft' && pessoal !== undefined ? { pessoal } : {}), ...(kind === 'microsoft' && typeof tid === 'string' ? { tid } : {}),
-      ...(kind === 'microsoft' && typeof oid === 'string' ? { oid } : {}),
+      ...(kind === 'microsoft' && typeof oid === 'string' ? { oid } : {}), ...(dc ? { dc } : {}),
     } satisfies Tokens, s.conta);
     const conta = s.conta;
     // já conectada; segue para o que falta (Teams, a leitura e, em conta de trabalho, os canais). Sem o locatário, não dá para saber
@@ -352,17 +389,18 @@ export class SsoAuth {
   }
 
   /** `scopes`: o que pedir na troca; null = sem `scope` (a renovação vale para o que foi pedido no login). */
-  private async token(kind: SsoKind, params: Record<string, string>, scopes?: string | null): Promise<Omit<Tokens, 'account' | 'scopes'> & { id_token?: string }> {
+  private async token(kind: SsoKind, params: Record<string, string>, scopes?: string | null, dc: ZohoDc = 'com'): Promise<Omit<Tokens, 'account' | 'scopes'> & { id_token?: string }> {
     const p = SSO[kind];
     const body: Record<string, string> = { client_id: p.clientId(this.cfg) ?? '', ...params };
-    const secret = p.clientSecret(this.cfg);
+    const secret = kind === 'zoho' ? segredoZoho(this.cfg, dc) : p.clientSecret(this.cfg);
+    const tokenUrl = kind === 'zoho' ? `https://${ZOHO_DCS[dc].accounts}/oauth/v2/token` : p.tokenUrl;
     if (secret) body.client_secret = secret;
     if (p.scopeOnToken && scopes !== null) body.scope = scopes ?? p.scopes;
     let res: Response;
     // renovar pode repetir (o refresh token continua valendo); trocar o código de login, não (ele só vale uma vez)
     const httpKind = params.grant_type === 'refresh_token' ? 'read' : 'write';
     try {
-      res = await fetchWithPolicy(() => fetch(p.tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body), signal: AbortSignal.timeout(15000) }), { kind: httpKind });
+      res = await fetchWithPolicy(() => fetch(tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body), signal: AbortSignal.timeout(15000) }), { kind: httpKind });
     } catch { throw new ProviderError('unavailable', `${p.label} não respondeu; a conexão continua, tente daqui a pouco`); }
     const j = await res.json().catch(() => ({})) as Record<string, unknown>;
     if (res.ok && typeof j.access_token === 'string') return this.parse(j, params);
@@ -405,7 +443,7 @@ export class SsoAuth {
   async accessToken(workspaceId: string, kind: SsoKind, opts: { force?: boolean; conta?: string } = {}): Promise<string> {
     const conta = opts.conta ?? '';
     const t = this.secrets.read<Tokens>(workspaceId, kind, conta);
-    if (!t) throw new ProviderError('forbidden', `conta ${kind === 'google' ? 'Google' : 'Microsoft'} não conectada`);
+    if (!t) throw new ProviderError('forbidden', `conta ${kind === 'google' ? 'Google' : kind === 'zoho' ? 'Zoho' : 'Microsoft'} não conectada`);
     if (!opts.force && t.expires_at - Date.now() > 120_000) return t.access_token;
     if (!t.refresh_token) throw new ProviderError('forbidden', 'o acesso venceu e não há renovação: conecte de novo em Conexões', { reauth: true });
     const semPosse = this.podeRenovar(workspaceId, kind, conta);
@@ -416,7 +454,7 @@ export class SsoAuth {
     const running = this.refreshing.get(key);
     if (running) return running;
     const p: Promise<string> = (async () => {
-      const { id_token: idToken, ...n } = await this.token(kind, { grant_type: 'refresh_token', refresh_token: t.refresh_token }, this.escoposDaRenovacao(kind, t));
+      const { id_token: idToken, ...n } = await this.token(kind, { grant_type: 'refresh_token', refresh_token: t.refresh_token }, this.escoposDaRenovacao(kind, t), ehZohoDc(t.dc) ? t.dc : 'com');
       // desconectou ou entrou com outra conta enquanto a renovação andava: gravar agora desfaria isso (e a conta antiga
       // voltaria com o nome da nova)
       const atual = this.secrets.read<Tokens>(workspaceId, kind, conta);
@@ -428,7 +466,7 @@ export class SsoAuth {
       const granted = n.granted !== undefined ? (kind === 'microsoft' ? listaDeEscopos(n.granted).join(' ') : n.granted) : t.granted;
       const pessoal = t.pessoal ?? (tid ? tid === MSA_TENANT : undefined);
       this.secrets.write(workspaceId, kind, { ...n, ...(granted !== undefined ? { granted } : {}), account: t.account, ...(t.scopes ? { scopes: t.scopes } : {}),
-        ...(pessoal !== undefined ? { pessoal } : {}), ...(tid ? { tid } : {}), ...(oid ? { oid } : {}) }, conta);
+        ...(pessoal !== undefined ? { pessoal } : {}), ...(tid ? { tid } : {}), ...(oid ? { oid } : {}), ...(t.dc ? { dc: t.dc } : {}) }, conta);
       try { this.aoRenovar(workspaceId, kind, conta); } catch { /* devolver ao computador não segura o acesso daqui */ }
       return n.access_token;
     })().finally(() => { if (this.refreshing.get(key) === p) this.refreshing.delete(key); });

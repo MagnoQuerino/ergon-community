@@ -7,6 +7,7 @@ import { contasLigadas, integrationDef, nomeDaConta, settingsOf, type Integratio
 import { ACOES_GOOGLE } from './acoes/google.ts';
 import { ACOES_MICROSOFT } from './acoes/microsoft.ts';
 import { acoesWhatsApp } from './acoes/whatsapp.ts';
+import { ACOES_ZOHO } from './acoes/zoho.ts';
 import { escritorAirtable } from './escrita/airtable.ts';
 import { escritorAsana } from './escrita/asana.ts';
 import { escritorClickUp } from './escrita/clickup.ts';
@@ -40,6 +41,8 @@ export function acoesDe(kind: IntegrationKind, wa: WaAcoes = WA_MUDO): Acao[] {
   if (kind === 'microsoft') return [...comEscopo('Tasks.ReadWrite'), ...ACOES_MICROSOFT];
   if (kind === 'google') return [...comEscopo('https://www.googleapis.com/auth/tasks'), ...ACOES_GOOGLE];
   if (kind === 'whatsapp') return acoesWhatsApp(wa);
+  // rc.48: Zoho (CRM, Books, Mail), com o login da conta
+  if (kind === 'zoho') return ACOES_ZOHO;
   // Notion: quem marcou "Notify me" recebe aviso ao criar ou mudar uma página, e concluir ou mover também mudam a página
   if (kind === 'notion') return [...tarefas.map((a) => (['tarefa.criar', 'tarefa.editar', 'tarefa.concluir', 'tarefa.mover'].includes(a.id) ? { ...a, risco: 'enviar' as const } : a)), ...acoesDoConector(kind)];
   // GitHub: editar e reabrir issue ou pull request de verdade publica no repositório, que pode ser público

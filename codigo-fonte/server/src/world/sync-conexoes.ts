@@ -72,8 +72,9 @@ const SETTINGS_FORA = ['pendenteDesde', 'antesDeConectar'];
 const MAX_ITENS = 200; const MAX_ITEM = 64_000;
 
 /** O app oficial do Ergon no Google e na Microsoft: o único com que a nuvem renova o acesso. */
-const APP_OFICIAL: Record<'google' | 'microsoft', string> = { google: ERGON_GOOGLE_APP, microsoft: ERGON_MS_APP };
-const appDaInstalacao = (cfg: Config, kind: 'google' | 'microsoft') => (kind === 'google' ? cfg.googleClientId : cfg.msClientId);
+// rc.48: a Zoho não tem app embutido (quem instala registra o dele): vale o da instalação, e a nuvem confere se é o mesmo dela
+const APP_OFICIAL: Record<'google' | 'microsoft' | 'zoho', string | null> = { google: ERGON_GOOGLE_APP, microsoft: ERGON_MS_APP, zoho: null };
+const appDaInstalacao = (cfg: Config, kind: 'google' | 'microsoft' | 'zoho') => (kind === 'google' ? cfg.googleClientId : kind === 'zoho' ? cfg.zohoClientId ?? null : cfg.msClientId);
 
 /**
  * O endereço é da rede local (a nuvem não alcança): localhost, nome sem domínio, .local/.lan/.internal/.home, IPv4 das
@@ -97,7 +98,8 @@ export function enderecoLocal(v: string): boolean {
 // ---------------------------------------------------------------- conferência do que chega decifrado
 const str = (v: unknown, max: number) => typeof v === 'string' && v.length <= max;
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const KINDS_NUVEM = new Set(INTEGRATIONS.filter((d) => (d.auth === 'token' || d.auth === 'oauth') && d.kind !== 'whatsapp').map((d) => d.kind as string));
+// rc.48: o que só funciona na rede local (Tally) não vai à nuvem
+const KINDS_NUVEM = new Set(INTEGRATIONS.filter((d) => (d.auth === 'token' || d.auth === 'oauth') && d.kind !== 'whatsapp' && !d.soLocal).map((d) => d.kind as string));
 /** Credencial: só texto, número e sim/não (nada de objeto que o SecretStore gravaria sem saber o que é). */
 const credOk = (c: unknown) => obj(c) && Object.keys(c).length <= 40 && Object.entries(c).every(([k, v]) => /^[a-z_][a-z0-9_]{0,40}$/i.test(k) && (str(v, 20_000) || typeof v === 'number' || typeof v === 'boolean'));
 /** O carimbo de hora do pacote: data ISO legível (é com ele que um pacote antigo reenviado é recusado). */
@@ -184,7 +186,7 @@ export class ConexoesNuvem {
     if (r.state !== 'connected') return 'nao_conectada';
     const def = integrationDef(r.kind);
     if (!def || !KINDS_NUVEM.has(r.kind)) return 'nao_conectada';
-    if (isSso(r.kind) && appDaInstalacao(this.d.cfg, r.kind) !== APP_OFICIAL[r.kind]) return 'app_proprio';
+    if (isSso(r.kind) && APP_OFICIAL[r.kind] !== null && appDaInstalacao(this.d.cfg, r.kind) !== APP_OFICIAL[r.kind]) return 'app_proprio';
     let cred: Record<string, unknown> | null = null;
     try { cred = this.d.integrations.secrets.read<Record<string, unknown>>(ws, r.kind, r.conta); } catch { cred = null; }
     if (!cred) return 'sem_credencial';

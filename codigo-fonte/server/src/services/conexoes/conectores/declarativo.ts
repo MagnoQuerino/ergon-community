@@ -37,6 +37,8 @@ export interface AcaoDecl {
   risco: Risco | ((a: Args) => Risco);
   /** ver Acao.sempreConfirma */
   sempreConfirma?: string;
+  /** ver Acao.protegida (rc.48: reembolso e movimento de dinheiro, pagamento registrado, voucher no Tally) */
+  protegida?: string;
   params: Record<string, Param>;
   /** o que vai acontecer, por extenso, com destinatário e texto inteiro: é o que a pessoa lê no cartão de confirmação */
   resumo: string | ((a: Args) => string);
@@ -68,7 +70,7 @@ export interface AcaoDecl {
   proximo?: (j: any, a: Args) => string | null | undefined;
   /** nome do parâmetro de consulta que recebe o cursor */
   paramCursor?: string;
-  url?: (j: any) => string | null | undefined;
+  url?: (j: any, a: Args) => string | null | undefined;
 }
 
 export interface ConectorDef {
@@ -93,6 +95,8 @@ export interface ConectorDef {
   transporte?: (c: Credenciais) => Http;
   /** a conexão nova começa em "Só leitura": os agentes só consultam até a pessoa liberar a escrita em Conexões (pedido do dono, GoHighLevel) */
   comecaSoLeitura?: boolean;
+  /** rc.48: só funciona com o Ergon na rede local (Community local; ex.: Tally): na nuvem o cartão fica indisponível com este motivo */
+  soLocal?: string;
   quemSou: { caminho: string | ((c: Credenciais) => string); metodo?: 'GET' | 'POST'; corpo?: unknown | ((c: Credenciais) => unknown); semRepetir?: boolean; nome: (j: any) => string; id?: (j: any) => unknown };
   acoes: AcaoDecl[];
 }
@@ -256,7 +260,7 @@ export function acaoDe(d: AcaoDecl): Acao {
     ? async (ctx, bruto) => { const p = d.preparar ? await d.preparar(ctx, bruto) : {}; normalizar(d.params, p.args ?? bruto, true); return p; }
     : d.preparar;
   return {
-    id: d.id, descricao: d.descricao, ...(d.rotulo ? { rotulo: d.rotulo } : {}), risco: d.risco, ...(d.sempreConfirma ? { sempreConfirma: d.sempreConfirma } : {}),
+    id: d.id, descricao: d.descricao, ...(d.rotulo ? { rotulo: d.rotulo } : {}), risco: d.risco, ...(d.sempreConfirma ? { sempreConfirma: d.sempreConfirma } : {}), ...(d.protegida ? { protegida: d.protegida } : {}),
     params: d.proximo ? { ...d.params, cursor: P_CURSOR } : d.params,
     resumo: (a) => (typeof d.resumo === 'function' ? d.resumo(a) : String(molde(d.resumo, a) ?? d.id)),
     ...(preparar ? { preparar } : {}),
@@ -293,7 +297,7 @@ export function acaoDe(d: AcaoDecl): Acao {
       else if (d.texto) texto = linhaDe(d.texto, { ...a, ...(j && typeof j === 'object' ? j : {}) }, 2000);
       else texto = 'feito';
       if (prox) texto += `\ncursor: ${String(prox)}`;
-      return { texto, url: d.url?.(j) ?? null, ...(le ? { deFora: true, privado: true } : {}) };
+      return { texto, url: d.url?.(j, a) ?? null, ...(le ? { deFora: true, privado: true } : {}) };
     },
   };
 }

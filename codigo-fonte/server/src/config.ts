@@ -79,6 +79,17 @@ export interface Config {
   googleClientSecret: string | null;
   /** app do Google em modo de teste (o normal numa instalação própria): a autorização vale 7 dias */
   googleTesting: boolean;
+  /**
+   * rc.48: Zoho (CRM, Books, Mail). O app "Server-based" do Ergon no console da Zoho (api-console.zoho.com), com o Multi-DC
+   * ligado: um client id para todos os data centers; o segredo é um só ou, se o console der um por data center, um por DC
+   * (ERGON_ZOHO_CLIENT_SECRET_IN, _EU, _AU...). Sem client id, o botão "Entrar com Zoho" diz o que falta.
+   */
+  zohoClientId?: string | null;
+  zohoClientSecret?: string | null;
+  /** segredo por data center ('in', 'eu', 'com.au'...), quando o console da Zoho deu um diferente para ele */
+  zohoSecretsPorDc?: Record<string, string>;
+  /** onde o login começa ('com' padrão: o accounts.zoho.com leva cada conta ao data center dela) */
+  zohoDcInicial?: string;
   /** endereço base de volta do login (padrão http://localhost:<porta>), se o Ergon for aberto por outro endereço */
   oauthRedirectBase: string | null;
   bridgeToken: string | null;
@@ -146,6 +157,21 @@ function secret(v: string | undefined, minLen: number, name: string): string | n
   return v;
 }
 
+/** Zoho: ERGON_ZOHO_CLIENT_ID, ERGON_ZOHO_CLIENT_SECRET e, por data center, ERGON_ZOHO_CLIENT_SECRET_<DC> (IN, EU, AU, JP, CA, SA, UK, CN). */
+const ZOHO_ENV_DC: Record<string, string> = { COM: 'com', US: 'com', IN: 'in', EU: 'eu', AU: 'com.au', JP: 'jp', CA: 'ca', SA: 'sa', UK: 'uk', CN: 'com.cn' };
+function zoho(env: NodeJS.ProcessEnv): Pick<Config, 'zohoClientId' | 'zohoClientSecret' | 'zohoSecretsPorDc' | 'zohoDcInicial'> {
+  const id = env.ERGON_ZOHO_CLIENT_ID?.trim();
+  if (!id || id === 'off') return { zohoClientId: null, zohoClientSecret: null, zohoSecretsPorDc: {}, zohoDcInicial: 'com' };
+  if (!/^1000\.[A-Z0-9]{10,64}$/i.test(id)) throw new Error('ERGON_ZOHO_CLIENT_ID inválido (o client id da Zoho começa com 1000.)');
+  const porDc: Record<string, string> = {};
+  for (const [sufixo, dc] of Object.entries(ZOHO_ENV_DC)) {
+    const v = secret(env[`ERGON_ZOHO_CLIENT_SECRET_${sufixo}`], 16, `ERGON_ZOHO_CLIENT_SECRET_${sufixo}`);
+    if (v) porDc[dc] = v;
+  }
+  const inicial = ZOHO_ENV_DC[(env.ERGON_ZOHO_DC ?? 'COM').toUpperCase()] ?? 'com';
+  return { zohoClientId: id, zohoClientSecret: secret(env.ERGON_ZOHO_CLIENT_SECRET, 16, 'ERGON_ZOHO_CLIENT_SECRET'), zohoSecretsPorDc: porDc, zohoDcInicial: inicial };
+}
+
 function segredoEmbutido(arquivo: string): string | null {
   try { const v = readFileSync(arquivo, 'utf8').trim(); return v.length >= 16 ? v : null; } catch { return null; }
 }
@@ -207,6 +233,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     // de app público não é segredo (PKCE, sem senha). Outro app: ERGON_MS_CLIENT_ID=<id>; desligar: ERGON_MS_CLIENT_ID=off
     msClientId: env.ERGON_MS_CLIENT_ID === 'off' ? null : env.ERGON_MS_CLIENT_ID && /^[0-9a-f-]{36}$/i.test(env.ERGON_MS_CLIENT_ID) ? env.ERGON_MS_CLIENT_ID : ERGON_MS_APP,
     ...google(env),
+    ...zoho(env),
     oauthRedirectBase: env.ERGON_OAUTH_REDIRECT_BASE && /^https?:\/\/[\w.:-]+$/.test(env.ERGON_OAUTH_REDIRECT_BASE) ? env.ERGON_OAUTH_REDIRECT_BASE : null,
     bridgeToken: secret(env.ERGON_BRIDGE_TOKEN, 24, 'ERGON_BRIDGE_TOKEN'),
     agentToken: secret(env.ERGON_AGENT_TOKEN, 24, 'ERGON_AGENT_TOKEN'),

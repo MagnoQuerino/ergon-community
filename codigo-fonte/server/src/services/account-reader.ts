@@ -35,7 +35,7 @@ export interface AccountFacts {
   reads: SourceRead[]; warnings: string[];
 }
 
-const ACCOUNT_LABEL: Record<SsoKind, string> = { microsoft: 'Microsoft', google: 'Google' };
+const ACCOUNT_LABEL: Record<SsoKind, string> = { microsoft: 'Microsoft', google: 'Google', zoho: 'Zoho' };
 const MAX_EVENTS = 40;
 /**
  * Limites de leitura (páginas). Acima deles a leitura é marcada como parcial, nunca tratada como completa:

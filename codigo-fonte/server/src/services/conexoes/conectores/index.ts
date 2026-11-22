@@ -10,6 +10,7 @@ import { DISCORD } from './discord.ts';
 import { GITHUB_EXTRAS } from './extras-github.ts';
 import { NOTION_EXTRAS } from './extras-notion.ts';
 import { FRESHDESK } from './freshdesk.ts';
+import { FRESHSALES } from './freshsales.ts';
 import { GITLAB } from './gitlab.ts';
 import { GOHIGHLEVEL } from './gohighlevel.ts';
 import { HUBSPOT } from './hubspot.ts';
@@ -18,9 +19,11 @@ import { KOMMO } from './kommo.ts';
 import { MATTERMOST } from './mattermost.ts';
 import { OMIE } from './omie.ts';
 import { PIPEDRIVE } from './pipedrive.ts';
+import { RAZORPAY } from './razorpay.ts';
 import { RDSTATION } from './rdstation.ts';
 import { ROCKETCHAT } from './rocketchat.ts';
 import { SLACK } from './slack.ts';
+import { TALLY } from './tally.ts';
 import { TELEGRAM } from './telegram.ts';
 import { ZENDESK } from './zendesk.ts';
 import { acaoDe, contaDoConector, httpDoConector, type ConectorDef, type Credenciais } from './declarativo.ts';
@@ -30,9 +33,10 @@ import type { ContaConferida } from '../../task-providers.ts';
 // a ordem é a da tela, dentro de cada grupo: os mais conhecidos no Brasil primeiro
 export const CONECTORES: ConectorDef[] = [
   SLACK, DISCORD, TELEGRAM, MATTERMOST, ROCKETCHAT,
-  HUBSPOT, RDSTATION, PIPEDRIVE, KOMMO, GOHIGHLEVEL, ZENDESK, FRESHDESK, INTERCOM,
+  HUBSPOT, RDSTATION, PIPEDRIVE, KOMMO, GOHIGHLEVEL, FRESHSALES, ZENDESK, FRESHDESK, INTERCOM,
   CONFLUENCE, GITLAB, CALENDLY,
-  OMIE, ASAAS,
+  // rc.48: Razorpay e Tally, os da Índia, depois dos do Brasil
+  OMIE, ASAAS, RAZORPAY, TALLY,
 ];
 const EXTRAS: ConectorDef[] = [GITHUB_EXTRAS, NOTION_EXTRAS];
 

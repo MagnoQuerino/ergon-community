@@ -31,7 +31,8 @@ export interface CtxAcao { workspaceId: string; tz: string; http: Http;
   /** o trabalho que pediu (rc.42: a concessão de git vale só para ele); ausente no teste da conexão pela pessoa */
   runId?: string | null;
   /** a ponte de código (conexoes/codigo.ts): concessões de git de curta duração, só para GitHub e GitLab */
-  git?: import('./codigo.ts').PonteGit; /** qual das contas do aplicativo ('' = a principal) */ conta?: string; /** conector que manda a credencial no corpo (Omie): nunca vai ao modelo */ creds?: Record<string, string> }
+  git?: import('./codigo.ts').PonteGit; /** qual das contas do aplicativo ('' = a principal) */ conta?: string; /** conector que manda a credencial no corpo (Omie): nunca vai ao modelo */ creds?: Record<string, string>;
+  /** rc.48: o data center da conta Zoho ('in', 'com', 'eu'...), para os links de cada registro */ dc?: string }
 
 export interface Acao {
   /** ex.: 'email.buscar' */

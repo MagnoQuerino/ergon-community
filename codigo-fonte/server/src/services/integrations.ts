@@ -33,7 +33,9 @@ export type IntegrationKind =
   | 'airtable' | 'smartsheet' | 'pipefy' | 'github' | 'bitrix'
   // conectores por dados (conexoes/conectores) e os ainda em preparo
   | 'slack' | 'discord' | 'telegram' | 'mattermost' | 'rocketchat' | 'hubspot' | 'pipedrive' | 'rdstation' | 'kommo' | 'gohighlevel' | 'zendesk' | 'freshdesk' | 'intercom'
-  | 'confluence' | 'gitlab' | 'calendly' | 'asaas' | 'omie' | 'zoom' | 'googlechat' | 'salesforce' | 'dropbox';
+  | 'confluence' | 'gitlab' | 'calendly' | 'asaas' | 'omie' | 'zoom' | 'googlechat' | 'salesforce' | 'dropbox'
+  // rc.48: Índia (Zoho por login; Razorpay, Freshsales e Tally por credencial)
+  | 'zoho' | 'razorpay' | 'freshsales' | 'tally';
 /** Campo de credencial pedido na tela (o valor nunca volta ao navegador). */
 export interface CredentialField { name: string; label: string; secret?: boolean; placeholder?: string; pattern?: RegExp; patternHelp?: string; opcional?: boolean }
 export interface IntegrationDef {
@@ -47,6 +49,8 @@ export interface IntegrationDef {
   credencialAntiga?: { antiga: (c: Record<string, string>) => boolean; aviso: string };
   /** a conexão nova começa em "Só leitura" (ConectorDef.comecaSoLeitura): os agentes só consultam até a pessoa liberar a escrita */
   comecaSoLeitura?: boolean;
+  /** rc.48: só no Community local (ConectorDef.soLocal): na nuvem o cartão aparece indisponível, com este motivo */
+  soLocal?: string;
 }
 
 const TOKEN: CredentialField[] = [{ name: 'token', label: 'Token', secret: true, placeholder: 'Cole o token aqui' }];
@@ -65,6 +69,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
     about: 'Entre com a sua conta Microsoft (trabalho ou pessoal). Os agentes consultam e agem em tarefas (Planner e To Do), e-mail, agenda, arquivos e, em conta de trabalho, Teams.' },
   { kind: 'google', name: 'Google', auth: 'oauth', group: 'contas', tasks: true, site: 'google.com',
     about: 'Entre com a sua conta Google (Gmail ou Workspace). Os agentes consultam e agem em tarefas (Google Tasks), Gmail, Agenda e Drive.' },
+  // rc.48: a Zoho em qualquer data center (zoho.in, .com, .eu, .com.au...): o login leva cada conta ao dela (sso.ts)
+  { kind: 'zoho', name: 'Zoho', auth: 'oauth', group: 'contas', tasks: false, site: 'zoho.com',
+    about: 'Entre com a sua conta Zoho, de qualquer data center (zoho.in, zoho.com, zoho.eu e outros). Os agentes consultam e atualizam leads, contatos e negócios do Zoho CRM, leem faturas, clientes e pagamentos do Zoho Books e criam faturas em rascunho, e leem e enviam e-mails pelo Zoho Mail. Enviar fatura e registrar pagamento sempre pedem a sua aprovação.' },
   { kind: 'whatsapp', name: 'WhatsApp', auth: 'qr', group: 'conversas', tasks: false, site: 'whatsapp.com',
     about: 'Leia o QR code com o WhatsApp do celular (Aparelhos conectados). Só as conversas que você permitir são lidas; mensagem só sai quando você pede ou confirma, a menos que você ligue "Liberar tudo".' },
   { kind: 'trello', name: 'Trello', auth: 'token', group: 'tarefas', tasks: true, site: 'trello.com',
@@ -129,7 +136,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
 ];
 /** Os aplicativos que entram por dados (leitura e escrita parametrizadas em conexoes/conectores) e os ainda em preparo. */
 INTEGRATIONS.push(
-  ...CONECTORES.map((c): IntegrationDef => ({ kind: c.kind as IntegrationKind, name: c.nome, auth: 'token', group: c.grupo, tasks: false, site: c.site, about: c.sobre, fields: c.campos, help: { url: c.ajuda.url, steps: c.ajuda.passos, ...(c.ajuda.extras ? { extras: c.ajuda.extras } : {}) }, ...(c.comecaSoLeitura ? { comecaSoLeitura: true } : {}) })),
+  ...CONECTORES.map((c): IntegrationDef => ({ kind: c.kind as IntegrationKind, name: c.nome, auth: 'token', group: c.grupo, tasks: false, site: c.site, about: c.sobre, fields: c.campos, help: { url: c.ajuda.url, steps: c.ajuda.passos, ...(c.ajuda.extras ? { extras: c.ajuda.extras } : {}) }, ...(c.comecaSoLeitura ? { comecaSoLeitura: true } : {}), ...(c.soLocal ? { soLocal: c.soLocal } : {}) })),
   { kind: 'zoom', name: 'Zoom', auth: 'soon', group: 'conversas', tasks: false, site: 'zoom.us', about: 'Reuniões e gravações do Zoom.', soon: 'Em preparo: pede o registro de um aplicativo no Zoom.' },
   { kind: 'googlechat', name: 'Google Chat', auth: 'soon', group: 'conversas', tasks: false, site: 'chat.google.com', about: 'Espaços e mensagens do Google Chat.', soon: 'Em preparo: junto com a verificação do Google.' },
   { kind: 'salesforce', name: 'Salesforce', auth: 'soon', group: 'vendas', tasks: false, site: 'salesforce.com', about: 'Contas, contatos e oportunidades do Salesforce.', soon: 'Em preparo: pede o registro de um aplicativo no Salesforce.' },
@@ -302,9 +309,9 @@ export function exigeAdministrador(error: string | null | undefined, descricao?:
  * nunca o erro cru da Microsoft ou do Google (inglês e código). Um código que não diz nada à pessoa fica só como
  * referência para o suporte; o erro cru inteiro vai para a evidência da auditoria.
  */
-export function motivoDoProvedor(kind: 'microsoft' | 'google', error: string | null | undefined, descricao?: string | null): string {
+export function motivoDoProvedor(kind: SsoKind, error: string | null | undefined, descricao?: string | null): string {
   const tudo = `${error ?? ''} ${descricao ?? ''}`;
-  const quem = kind === 'google' ? 'O Google' : 'A Microsoft';
+  const quem = kind === 'google' ? 'O Google' : kind === 'zoho' ? 'A Zoho' : 'A Microsoft';
   if (exigeAdministrador(error, descricao)) return 'A empresa exige a aprovação do administrador.';
   if (/AADSTS65004\b/.test(tudo) || error === 'access_denied') return 'A autorização foi recusada na página da conta.';
   if (!error && !descricao) return `${quem} não mandou resposta ao login. Tente de novo.`;
@@ -662,7 +669,9 @@ export class Integrations {
   antesDeTrocar: (workspaceId: string, kind: IntegrationKind) => Promise<void> = async () => undefined;
   depoisDeTrocar: (workspaceId: string, kind: IntegrationKind) => void = () => undefined;
   private readonly googleTesting: boolean;
-  constructor(db: Db, bus: Bus, cfg: Config) { this.db = db; this.bus = bus; this.secrets = new SecretStore(cfg.dataDir, () => db.fieldCipher);
+  /** rc.48: o Ergon roda na nuvem (o que só funciona na rede local, como o Tally, fica indisponível) */
+  private readonly nuvem: boolean;
+  constructor(db: Db, bus: Bus, cfg: Config) { this.nuvem = cfg.mode === 'cloud'; this.db = db; this.bus = bus; this.secrets = new SecretStore(cfg.dataDir, () => db.fieldCipher);
     this.secrets.origem = (ws, kind, conta) => {
       const r = db.get<{ o: string | null; oc: string | null }>('SELECT origem_workspace_id AS o, origem_conta AS oc FROM integrations WHERE workspace_id = ? AND kind = ? AND conta = ?', ws, kind, conta);
       return r?.o ? { ws: r.o, conta: r.oc ?? '' } : { ws, conta };
@@ -702,8 +711,14 @@ export class Integrations {
   }
 
   /** userId: o dono do workspace, que pode usar aqui uma conta dos outros workspaces dele (só ele vê as opções). */
+  /** O cartão como vale aqui: na nuvem, o que é só do Community local aparece "indisponível", com o motivo (rc.48: Tally). */
+  private defAqui(d: IntegrationDef): IntegrationDef {
+    return this.nuvem && d.soLocal ? { ...d, auth: 'soon', soon: d.soLocal } : d;
+  }
+
   list(workspaceId: string, userId: string | null = null) {
-    return INTEGRATIONS.map((d) => {
+    return INTEGRATIONS.map((d0) => {
+      const d = this.defAqui(d0);
       // "em breve": nada no banco, só o cartão honesto
       if (d.auth !== 'soon') this.limparAbandonadas(workspaceId, d.kind);
       const r = d.auth === 'soon' ? null : isSso(d.kind) ? this.vencerConectando(workspaceId, d.kind) : integrationRow(this.db, workspaceId, d.kind);
@@ -847,6 +862,7 @@ export class Integrations {
   async connectToken(workspaceId: string, userId: string, kind: IntegrationKind, input: Record<string, string>, contaPedida = ''): Promise<string> {
     const d = integrationDef(kind);
     if (!d || d.auth !== 'token') throw new HttpError(400, 'kind', 'esta conexão não usa token');
+    if (this.nuvem && d.soLocal) throw new HttpError(409, 'so_local', d.soLocal);
     const creds: Record<string, string> = {};
     for (const f of d.fields ?? TOKEN) {
       const v = String(input[f.name] ?? '').trim();
