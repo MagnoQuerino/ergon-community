@@ -165,8 +165,8 @@ onIdioma(() => {
 
 // ---------------------------------------------------------------- login da Microsoft e do Google
 
-type Provedor = 'microsoft' | 'google';
-const NOME: Record<Provedor, string> = { microsoft: 'Microsoft', google: 'Google' };
+type Provedor = 'microsoft' | 'google' | 'zoho';
+const NOME: Record<Provedor, string> = { microsoft: 'Microsoft', google: 'Google', zoho: 'Zoho' }; // i18n-ok: nomes de marca
 
 /** primeira letra maiúscula e ponto final */
 const frase = (s0: string) => comPonto(maiusc(s0.trim()));
@@ -232,8 +232,8 @@ export function textoDaVolta(kind: Provedor, status: string, conectada: boolean)
     case 'admin-base': return t('servidor.tela.volta.adminBase');
     // "Adicionar outra conta" entrou numa conta que já estava aqui: nada mudou
     case 'ja-conectada': return t('servidor.tela.volta.jaConectada', { nome });
-    case 'recusado': return kind === 'google' ? t('servidor.tela.volta.canceladoGoogle') : t('servidor.tela.volta.canceladoMicrosoft');
-    default: return kind === 'google' ? t('servidor.tela.volta.naoConcluiuGoogle') : t('servidor.tela.volta.naoConcluiuMicrosoft');
+    case 'recusado': return kind === 'google' ? t('servidor.tela.volta.canceladoGoogle') : kind === 'zoho' ? t('servidor.tela.volta.canceladoZoho') : t('servidor.tela.volta.canceladoMicrosoft');
+    default: return kind === 'google' ? t('servidor.tela.volta.naoConcluiuGoogle') : kind === 'zoho' ? t('servidor.tela.volta.naoConcluiuZoho') : t('servidor.tela.volta.naoConcluiuMicrosoft');
   }
 }
 

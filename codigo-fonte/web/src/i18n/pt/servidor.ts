@@ -176,6 +176,8 @@ const servidor = {
   'tela.volta.canceladoGoogle': 'Login do Google cancelado.',
   'tela.volta.naoConcluiuMicrosoft': 'Não deu para concluir o login da Microsoft. Tente de novo.',
   'tela.volta.naoConcluiuGoogle': 'Não deu para concluir o login do Google. Tente de novo.',
+  'tela.volta.canceladoZoho': "Login da Zoho cancelado.",
+  'tela.volta.naoConcluiuZoho': "Não deu para concluir o login da Zoho. Tente de novo.",
   'tela.admin.canais': 'ler as mensagens dos canais do Teams',
   'tela.admin.base': 'enviar e ler e-mail, ver a agenda, criar e ler arquivos, organizar tarefas e mandar e ler mensagens no Teams',
   'tela.admin.trabalho': 'ver as conversas e mandar mensagens no Teams e ler e-mail, agenda, arquivos, tarefas e conversas do Teams',

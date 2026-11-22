@@ -14,6 +14,8 @@ interface TextosDoApp {
   campos?: Record<string, { rotulo: Chave; exemplo?: Chave }>;
   /** os rótulos dos links da ajuda, na ordem em que o servidor manda */
   extras?: Chave[];
+  /** o motivo de estar indisponível aqui (rc.48: o Tally na nuvem) */
+  soon?: Chave;
 }
 
 export const TEXTOS_DE_APP: Readonly<Record<string, TextosDoApp>> = {
@@ -25,6 +27,30 @@ export const TEXTOS_DE_APP: Readonly<Record<string, TextosDoApp>> = {
     },
     extras: ['conexoes.app.gohighlevel.ajuda'],
   },
+  // rc.48: os conectores da Índia
+  zoho: { sobre: 'conexoes.app.zoho.sobre' },
+  razorpay: {
+    sobre: 'conexoes.app.razorpay.sobre', passos: 'conexoes.app.razorpay.passos',
+    campos: {
+      key_id: { rotulo: 'conexoes.app.razorpay.campo.keyId', exemplo: 'conexoes.app.razorpay.campo.keyIdExemplo' },
+      key_secret: { rotulo: 'conexoes.app.razorpay.campo.keySecret', exemplo: 'conexoes.app.razorpay.campo.keySecretExemplo' },
+    },
+  },
+  freshsales: {
+    sobre: 'conexoes.app.freshsales.sobre', passos: 'conexoes.app.freshsales.passos',
+    campos: {
+      dominio: { rotulo: 'conexoes.app.freshsales.campo.dominio', exemplo: 'conexoes.app.freshsales.campo.dominioExemplo' },
+      chave: { rotulo: 'conexoes.app.freshsales.campo.chave', exemplo: 'conexoes.app.freshsales.campo.chaveExemplo' },
+    },
+  },
+  tally: {
+    sobre: 'conexoes.app.tally.sobre', passos: 'conexoes.app.tally.passos', soon: 'conexoes.app.tally.soNuvem',
+    campos: {
+      host: { rotulo: 'conexoes.app.tally.campo.host', exemplo: 'conexoes.app.tally.campo.hostExemplo' },
+      porta: { rotulo: 'conexoes.app.tally.campo.porta', exemplo: 'conexoes.app.tally.campo.portaExemplo' },
+      empresa: { rotulo: 'conexoes.app.tally.campo.empresa', exemplo: 'conexoes.app.tally.campo.empresaExemplo' },
+    },
+  },
 };
 
 /** O aplicativo com os textos no idioma da tela (o mesmo objeto, quando não há tradução para ele). */
@@ -34,6 +60,7 @@ export function noIdioma(i: Integration, t: (k: Chave) => string): Integration {
   return {
     ...i,
     about: t(x.sobre),
+    ...(x.soon && i.soon ? { soon: t(x.soon) } : {}),
     help: i.help ? {
       ...i.help,
       steps: x.passos ? t(x.passos) : i.help.steps,

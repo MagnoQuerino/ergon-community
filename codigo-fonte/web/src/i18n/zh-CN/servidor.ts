@@ -71,6 +71,8 @@ const servidor: TraducaoParcial<typeof pt> = {
   'consumo.nota.credits': '有额度的账户：服务商报告扣费金额时会显示费用；余额在账户门户中查看。',
   'consumo.nota.api': 'API 密钥：服务商报告每次运行的扣费金额时会显示费用。',
   'consumo.nota.none': '没有连接 AI 账户：团队不会处理请求，也没有用量。',
+  'tela.volta.canceladoZoho': "Zoho 登录已取消。",
+  'tela.volta.naoConcluiuZoho': "无法完成 Zoho 登录。请重试。",
 };
 
 export default servidor;
