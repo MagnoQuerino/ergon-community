@@ -22,6 +22,10 @@ serveManager({
   selfIds: selfContainerIds(),
   // rc.42: as casas das pessoas neste computador (ERGON_HOST_HOME, separadas por ";"): nunca montadas inteiras
   casas: (env.ERGON_HOST_HOME ?? '').split(';').map((x) => x.trim()).filter(Boolean),
+  // rc.46: um registro alternativo (ERGON_REGISTRY, escolhido pela pessoa) e o espelho publicado com a versão (o pacote
+  // local grava em ERGON_REGISTRY_ESPELHO; usado quando o ghcr.io não responde, como na China)
+  registro: env.ERGON_REGISTRY?.trim() || undefined,
+  espelho: env.ERGON_REGISTRY_ESPELHO?.trim() || undefined,
 }, dockerOver(env.ERGON_DOCKER_URL ? null : (env.ERGON_DOCKER_SOCKET ?? '/var/run/docker.sock'), env.ERGON_DOCKER_URL ?? null), port, '0.0.0.0', (uids) => {
   if (uids.length) console.log(JSON.stringify({ level: 'info', msg: `motores parados renovados para a imagem configurada (sem ligar): ${uids.length}` }));
 });

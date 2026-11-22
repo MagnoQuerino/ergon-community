@@ -119,10 +119,15 @@ export class CanalErro extends Error {
 /** Um canal no motor: o código do bot guardado (nunca o valor), a situação da conexão e quem está ligado. */
 export interface CanalNoMotor { configurado: boolean; estado: string | null; erro: string | null; ligados: Array<{ user_id: string; user_name: string }> }
 /** rc.45: Feishu (ou Lark, o internacional) e DingTalk, ao lado do Telegram e do Discord. */
-export type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk';
-export const NOMES_CANAL: readonly NomeCanal[] = ['telegram', 'discord', 'feishu', 'dingtalk'];
+/** rc.46: WeCom (企业微信, o robô inteligente) e WeChat pessoal (微信, iLink, experimental: login por QR). */
+export type NomeCanal = 'telegram' | 'discord' | 'feishu' | 'dingtalk' | 'wecom' | 'weixin';
+export const NOMES_CANAL: readonly NomeCanal[] = ['telegram', 'discord', 'feishu', 'dingtalk', 'wecom', 'weixin'];
 /** Os canais de aplicativo próprio (App ID e App Secret, não o código de um bot): Feishu/Lark e DingTalk. */
-export const CANAIS_DE_APP: readonly NomeCanal[] = ['feishu', 'dingtalk'];
+export const CANAIS_DE_APP: readonly NomeCanal[] = ['feishu', 'dingtalk', 'wecom'];
+/** Os canais da rc.46 (pedem o plugin com a capacidade canais_wecom_weixin). */
+export const CANAIS_RC46: readonly NomeCanal[] = ['wecom', 'weixin'];
+/** O login do WeChat pessoal pelo QR, como a ponte conta: o endereço do QR (para desenhar) só enquanto vale; o token nunca. */
+export interface LoginQrMotor { estado: 'parado' | 'aguardando' | 'escaneado' | 'confirmado' | 'expirado' | 'erro'; qr: string; erro: string | null; expiraEm: number }
 /**
  * A credencial que vai ao motor: o código do bot (Telegram, Discord) ou o App ID e o App Secret do aplicativo (Feishu,
  * DingTalk). No Feishu, `dominio` diz se é o Feishu da China (open.feishu.cn) ou o Lark internacional (open.larksuite.com).
@@ -522,6 +527,8 @@ export interface HermesControlClient {
   setCanal?(canal: NomeCanal, cred: CredencialCanal): Promise<void>;
   parearCanal?(canal: NomeCanal, codigo: string): Promise<{ userId: string; userName: string; chatId: string }>;
   removerCanal?(canal: NomeCanal): Promise<void>;
+  /** rc.46: o login do WeChat pessoal pelo QR (pedir um novo, ver em que pé está, cancelar). */
+  weixinQr?(acao: 'iniciar' | 'estado' | 'cancelar'): Promise<LoginQrMotor>;
 }
 
 /**
@@ -975,7 +982,8 @@ export class HttpHermesControl implements HermesControlClient {
       ligados: Array.isArray(x?.ligados) ? x.ligados.map((l: any) => ({ user_id: String(l?.user_id ?? ''), user_name: String(l?.user_name ?? '') })) : [],
     });
     // motor de antes da rc.45 não fala do Feishu nem do DingTalk: ficam como não configurados
-    return { telegram: um(j?.canais?.telegram), discord: um(j?.canais?.discord), feishu: um(j?.canais?.feishu), dingtalk: um(j?.canais?.dingtalk) };
+    return { telegram: um(j?.canais?.telegram), discord: um(j?.canais?.discord), feishu: um(j?.canais?.feishu), dingtalk: um(j?.canais?.dingtalk),
+      wecom: um(j?.canais?.wecom), weixin: um(j?.canais?.weixin) };
   }
   async setCanal(canal: NomeCanal, cred: CredencialCanal) {
     await this.canal('PUT', `/ergon/v1/canais/${canal}`, 'token' in cred ? { token: cred.token }
@@ -986,6 +994,13 @@ export class HttpHermesControl implements HermesControlClient {
     return { userId: String(j.user_id ?? ''), userName: String(j.user_name ?? ''), chatId: String(j.chat_id ?? j.user_id ?? '') };
   }
   async removerCanal(canal: NomeCanal) { await this.canal('DELETE', `/ergon/v1/canais/${canal}`); }
+  async weixinQr(acao: 'iniciar' | 'estado' | 'cancelar'): Promise<LoginQrMotor> {
+    const j = await this.canal(acao === 'iniciar' ? 'POST' : acao === 'cancelar' ? 'DELETE' : 'GET', '/ergon/v1/canais/weixin/qr', acao === 'iniciar' ? {} : undefined);
+    const estados = ['parado', 'aguardando', 'escaneado', 'confirmado', 'expirado', 'erro'] as const;
+    const estado = (estados as readonly string[]).includes(j?.estado) ? j.estado as LoginQrMotor['estado'] : 'erro';
+    const qr = typeof j?.qr === 'string' && /^https:\/\/[A-Za-z0-9.-]+\.qq\.com\/[\x21-\x7e]{1,600}$/.test(j.qr) ? j.qr : '';
+    return { estado, qr, erro: typeof j?.erro === 'string' ? j.erro.slice(0, 120) : null, expiraEm: Math.max(0, Math.min(600, Number(j?.expira_em) || 0)) };
+  }
 
   async media(path: string, perfil?: string | null): Promise<{ data: Buffer; mime: string }> {
     if (!this.token) throw new HermesError(503, 'a configuração da equipe de IA não está disponível nesta instalação');

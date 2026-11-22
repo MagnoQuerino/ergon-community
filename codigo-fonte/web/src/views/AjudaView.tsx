@@ -23,6 +23,9 @@ const Go = ({ c, v, hash, children }: { c: Ctx; v: View; hash?: string; children
 /** o comando do chat: o mesmo nas duas línguas */
 const CMD_PENDENCIAS = '/pendencias';
 const HASH_SEGURANCA = 'configuracao?seguranca';
+/** rc.46: as linhas do .env para instalar e atualizar da China (o endereço é um exemplo; o registro de verdade vem no guia) */
+const LINHA_REGISTRO = 'ERGON_REGISTRY=registry.cn-hangzhou.aliyuncs.com/…';
+const LINHA_MANIFESTO = 'ERGON_MANIFESTO_URL=https://…/latest.json';
 
 const ARTICLES: Article[] = [
   { id: 'inicio', title: () => t('ajuda.inicio.titulo'), icon: 'compass', keywords: () => t('ajuda.inicio.palavras'),
@@ -134,6 +137,31 @@ const ARTICLES: Article[] = [
         <li>{t('ajuda.seguranca.i7')}</li>
         <li>{t('ajuda.seguranca.i8')}</li>
       </ul>
+    </> },
+  // rc.46: na China, só o Community local com IA chinesa (sem nuvem nem cobrança); o guia completo em docs/CHINA.md
+  { id: 'china', title: () => t('ajuda.china.titulo'), icon: 'globe', keywords: () => t('ajuda.china.palavras'),
+    body: (c) => <>
+      <p>{t('ajuda.china.p1')}</p>
+      <h4>{t('ajuda.china.h1')}</h4>
+      <ul>
+        <li>{tn('ajuda.china.i1', { linha: <code>{LINHA_REGISTRO}</code> })}</li>
+        <li>{t('ajuda.china.i2')}</li>
+        <li>{tn('ajuda.china.i3', { linha: <code>{LINHA_MANIFESTO}</code> })}</li>
+      </ul>
+      <h4>{t('ajuda.china.h2')}</h4>
+      <p>{tn('ajuda.china.i4', { link: <Go c={c} v="conexoes">{t('ajuda.lugar.conexoesContasIa')}</Go>, cartao: <b>{t('configuracoes.byok.china.rotulo')}</b> })}</p>
+      <h4>{t('ajuda.china.h3')}</h4>
+      <ul>
+        <li>{tn('ajuda.china.i5', { link: <Go c={c} v="conexoes">{t('ajuda.lugar.conexoes')}</Go> })}</li>
+        <li>{t('ajuda.china.i6')}</li>
+      </ul>
+      <h4>{t('ajuda.china.h4')}</h4>
+      <ul>
+        <li>{t('ajuda.china.i7')}</li>
+        <li>{t('ajuda.china.i8')}</li>
+      </ul>
+      <h4>{t('ajuda.china.h5')}</h4>
+      <p className="muted">{t('ajuda.china.i9')}</p>
     </> },
   { id: 'temas', title: () => t('ajuda.temas.titulo'), icon: 'palette', keywords: () => t('ajuda.temas.palavras'),
     body: (c) => <>

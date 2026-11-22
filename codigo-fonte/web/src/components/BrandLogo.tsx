@@ -25,6 +25,9 @@ const MONOGRAM: Record<string, { hex: string; letter: string }> = {
   // rc.45: sem logo aberto (Simple Icons não tem): a inicial na cor da marca
   feishu: { hex: '#3370FF', letter: 'F' },
   dingtalk: { hex: '#0089FF', letter: 'D' },
+  // rc.46: WeCom e WeChat, também sem logo aberto aqui: a inicial na cor da marca
+  wecom: { hex: '#0082EF', letter: 'W' },
+  weixin: { hex: '#07C160', letter: 'W' },
 };
 
 export function BrandLogo({ kind, name, size = 40 }: { kind: string; name: string; size?: number }) {

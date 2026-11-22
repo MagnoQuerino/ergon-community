@@ -589,6 +589,9 @@ ul.plain { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap:
 .qr img { image-rendering: pixelated; border-radius: 6px; }
 .qr ol { margin: 0; padding-left: 18px; }
 .qr .btn { grid-column: 1 / -1; justify-self: start; }
+/* rc.46: o QR do WeChat pessoal, com o aviso do risco à conta em cima (a linha toda) e a situação embaixo dos passos */
+.conn-qr .conn-wx__risco { grid-column: 1 / -1; margin: 0; }
+.conn-qr__estado { margin: 10px 0 0; }
 .wa-filters { display: grid; gap: 6px; }
 .wa-filters h4 { margin: 8px 0 0; font-size: 13px; }
 .device { margin-top: 10px; border: 1px dashed var(--borda-forte); border-radius: 12px; padding: 10px 12px; background: var(--dourado-suave-2); }
@@ -3991,3 +3994,7 @@ details.sinc__rec summary { display: inline-flex; align-items: center; gap: 6px;
   .sala__barra--vazia .scampo__enviar { display: none; }
   .sala__barra .chat__mais-caixa { align-self: flex-end; margin-bottom: 4px; }
 }
+
+/* rc.46: as linhas de configuração da Ajuda (ERGON_REGISTRY=…) quebram no celular em vez de passar da borda */
+.help__body code { overflow-wrap: anywhere; }
+.help__body { min-width: 0; }

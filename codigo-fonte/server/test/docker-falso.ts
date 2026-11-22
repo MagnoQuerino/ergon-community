@@ -33,7 +33,7 @@ interface Ctr { id: string; name: string; spec: any; running: boolean; image: st
  * (diferente de 0), Images[].Id só com o hex e RepoTags ['<none>']; no /images/json, RepoTags com os digests quando não
  * há tag; cofre sem rótulo com Labels {} (e Warnings []); 404 com {cause, message, response}.
  */
-export function fakeDocker(o: { bareIds?: boolean; bareImageIds?: boolean; stuckStop?: boolean; layersSize?: boolean; podman?: boolean } = {}) {
+export function fakeDocker(o: { bareIds?: boolean; bareImageIds?: boolean; stuckStop?: boolean; layersSize?: boolean; podman?: boolean; /** rc.46: registros que não respondem (ex.: o ghcr.io na China) */ foraDoAr?: string[] } = {}) {
   const images = new Map<string, Img>();
   const registry = new Map<string, Img>();
   const containers = new Map<string, Ctr>();
@@ -112,10 +112,18 @@ export function fakeDocker(o: { bareIds?: boolean; bareImageIds?: boolean; stuck
     if (p === '/images/create' && method === 'POST') {
       const from = qs.get('fromImage') ?? ''; const tag = qs.get('tag');
       const ref = tag ? (tag.startsWith('sha256:') ? `${from}@${tag}` : `${from}:${tag}`) : from;
+      if (o.foraDoAr?.some((host) => ref.startsWith(`${host}/`))) return { status: 500, json: { message: `Get "https://${ref.split('/')[0]}/v2/": dial tcp: i/o timeout` } };
       const r = registry.get(ref);
       if (!r) return { status: 404, json: { message: 'manifest unknown' } };
       addImage(structuredClone(r));
       return { status: 200, json: { message: '{"status":"Download complete"}' } };
+    }
+    if ((m = /^\/images\/(.+)\/tag$/.exec(p)) && method === 'POST') {
+      const i = resolve(m[1]);
+      if (!i) return nf('No such image');
+      const novo = `${qs.get('repo')}:${qs.get('tag') ?? 'latest'}`;
+      if (!i.tags.includes(novo)) i.tags.push(novo);
+      return { status: 201, json: null };
     }
     if (p === '/images/json' && method === 'GET') {
       return { status: 200, json: [...images.values()].map((i) => ({ Id: `sha256:${i.id}`, RepoTags: i.tags.length ? i.tags : o.podman ? i.digests : null, RepoDigests: i.digests, Created: i.created, Size: i.size, SharedSize: -1 })) };

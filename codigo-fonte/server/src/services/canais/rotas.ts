@@ -17,7 +17,7 @@ interface CanaisRoutesDeps {
   bridgeMotor: (req: FastifyRequest) => string;
 }
 
-const canalParams = { type: 'object', required: ['canal'], properties: { canal: { enum: ['telegram', 'discord', 'feishu', 'dingtalk'] } } };
+const canalParams = { type: 'object', required: ['canal'], properties: { canal: { enum: ['telegram', 'discord', 'feishu', 'dingtalk', 'wecom', 'weixin'] } } };
 
 export function registerCanaisRoutes(app: FastifyInstance, d: CanaisRoutesDeps): void {
   const { canais: c, owner, verify, bridgeMotor } = d;
@@ -32,6 +32,16 @@ export function registerCanaisRoutes(app: FastifyInstance, d: CanaisRoutesDeps):
     await c.guardarBot(a.userId, a.workspaceId, canalDe(req), req.body as { token?: string; appId?: string; appSecret?: string; dominio?: 'feishu' | 'lark' });
     return c.estado(a.userId, a.workspaceId);
   });
+  // rc.46: o WeChat pessoal (experimental) liga pelo QR, com o consentimento explícito da pessoa (o risco para a conta)
+  app.post('/api/canais/weixin/qr', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['consentimento'], properties: {
+      consentimento: { type: 'object', additionalProperties: false, required: ['aceito', 'versao'], properties: { aceito: { type: 'boolean' }, versao: { type: 'integer', minimum: 1, maximum: 100 } } } } } },
+  }, async (req) => {
+    const a = owner(req);
+    return c.weixinQr(a.userId, a.workspaceId, 'iniciar', (req.body as { consentimento: { aceito: boolean; versao: number } }).consentimento);
+  });
+  app.get('/api/canais/weixin/qr', async (req) => { const a = owner(req); return c.weixinQr(a.userId, a.workspaceId, 'estado'); });
+  app.delete('/api/canais/weixin/qr', async (req) => { const a = owner(req); return c.weixinQr(a.userId, a.workspaceId, 'cancelar'); });
   app.post('/api/canais/:canal/parear', {
     schema: { params: canalParams, body: { type: 'object', additionalProperties: false, required: ['codigo'], properties: {
       codigo: S.str(20, 6), password: S.str(200, 1), code: S.str(10, 6), key: S.str(80, 6), response: { type: 'object' } } } },
@@ -59,14 +69,14 @@ export function registerCanaisRoutes(app: FastifyInstance, d: CanaisRoutesDeps):
   app.post('/internal/bridge/v1/canais/entrada', {
     bodyLimit: 64 * 1024,
     schema: { body: { type: 'object', required: ['schema', 'tipo', 'canal', 'user_id'], properties: {
-      schema: { const: 'ergon.canais.v1' }, tipo: { enum: ['mensagem', 'clique'] }, canal: { enum: ['telegram', 'discord', 'feishu', 'dingtalk'] },
+      schema: { const: 'ergon.canais.v1' }, tipo: { enum: ['mensagem', 'clique'] }, canal: { enum: ['telegram', 'discord', 'feishu', 'dingtalk', 'wecom', 'weixin'] },
       user_id: S.str(128, 1), chat_id: S.str(128), user_name: S.str(200), message_id: S.str(200), text: S.str(8000), sent_at: S.str(60),
       anexos: { type: 'integer', minimum: 0, maximum: 100 }, dado: S.str(80), evento: S.str(200) } } },
   }, async (req) => c.entrada(bridgeMotor(req), req.body as Parameters<Canais['entrada']>[1]));
   app.post('/internal/bridge/v1/canais/saida', {
     bodyLimit: 64 * 1024,
     schema: { body: { type: 'object', required: ['schema'], properties: {
-      schema: { const: 'ergon.canais.v1' }, canais: { type: 'array', maxItems: 4, items: { type: 'string', maxLength: 20 } },
+      schema: { const: 'ergon.canais.v1' }, canais: { type: 'array', maxItems: 6, items: { type: 'string', maxLength: 20 } },
       espera: { type: 'integer', minimum: 0, maximum: 30 },
       acks: { type: 'array', maxItems: 50, items: { type: 'object', properties: { id: S.str(80), ok: { type: 'boolean' }, message_id: S.str(128), erro: S.str(200), passageiro: { type: 'boolean' } } } } } } },
   }, async (req) => {

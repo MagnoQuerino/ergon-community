@@ -26,7 +26,7 @@ jobs:
           V=$(curl -fsSL "https://github.com/${{ github.repository }}/releases/latest/download/latest.json" | jq -r .version)
           DONO=$(echo '${{ github.repository_owner }}' | tr 'A-Z' 'a-z')
           mkdir -p pacote
-          sed -e "s/__VERSAO__/$V/g" -e "s/__DONO__/$DONO/g" -e "s#__REPO__#${{ github.repository }}#g" deploy/local/docker-compose.yml > pacote/docker-compose.yml
+          sed -e "s/__VERSAO__/$V/g" -e "s/__DONO__/$DONO/g" -e "s#__ESPELHO__#${ERGON_ESPELHO:-}#g" -e "s#__REPO__#${{ github.repository }}#g" deploy/local/docker-compose.yml > pacote/docker-compose.yml
           cp ergon.ps1 ergon.cmd ergon.sh pacote/ && chmod +x pacote/ergon.sh
           cp ../docs/INSTALAR.md pacote/LEIA-ME.md
           echo "$V" > pacote/VERSAO

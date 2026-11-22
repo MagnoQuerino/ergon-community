@@ -8,6 +8,9 @@
 O Ergon roda em contêineres (o Ergon, o gerente dos motores e um motor de IA por pessoa), no Podman, e só aparece para
 este computador (`http://localhost:8787`). Tudo o que ele guarda fica cifrado com a sua senha.
 
+> **Na China:** o GitHub e o `ghcr.io` costumam falhar. Veja [Ergon na China](CHINA.md) ([中文](CHINA.zh-CN.md)): a linha
+> `ERGON_REGISTRY` no `.env` faz as imagens virem do espelho.
+
 ## Antes
 
 - **Podman** e **podman-compose** instalados ([podman.io](https://podman.io)); no macOS, com a máquina do Podman ligada.

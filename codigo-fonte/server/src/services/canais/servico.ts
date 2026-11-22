@@ -20,7 +20,7 @@ import { log } from '../../lib/log.ts';
 import { CLOSED_VALUE } from '../../security/fields.ts';
 import { audit, type Bus, type BusEvent } from '../bus.ts';
 import { createConversation, sendMessage } from '../chat.ts';
-import { CANAIS_DE_APP, CanalErro, NOMES_CANAL, type CanalNoMotor, type CredencialCanal, type HermesControlClient, type NomeCanal } from '../hermes.ts';
+import { CANAIS_DE_APP, CANAIS_RC46, CanalErro, NOMES_CANAL, type CanalNoMotor, type CredencialCanal, type HermesControlClient, type LoginQrMotor, type NomeCanal } from '../hermes.ts';
 import type { WorkspaceOwners } from '../people.ts';
 import { pendingDecisions } from '../proposals.ts';
 import { workspaceTz } from '../routine-proposals.ts';
@@ -37,7 +37,7 @@ import { readLang } from '../prefs.ts';
 import { ABRIR_LONGO, LIMITE_CANAL, cabeNoCanal, dataHora, linhaFinal, partesDoResumo, textoParaTeams } from '../teams-app/cartoes.ts';
 
 const CANAIS: readonly NomeCanal[] = NOMES_CANAL;
-const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk' };
+const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu/Lark', dingtalk: 'DingTalk', wecom: 'WeCom', weixin: 'WeChat' };
 /**
  * rc.45: o Feishu/Lark e o DingTalk entram pelo mesmo caminho, com o aplicativo próprio da pessoa (App ID e App Secret no
  * cofre do motor). Sem botões de verdade pelo gateway: os cartões vão como texto e a decisão é no app do Ergon (como o
@@ -45,23 +45,38 @@ const NOME_CANAL: Record<NomeCanal, string> = { telegram: 'Telegram', discord: '
  * uma hora e meia): aviso mais tarde, sem mensagem nova da pessoa, não sai, e a imagem dos visuais não vai (o texto já leva
  * os números). O Feishu manda a imagem e edita o cartão.
  */
-const SEM_BOTOES: ReadonlySet<CanalId> = new Set<CanalId>(CANAIS_DE_APP);
-const SEM_IMAGEM: ReadonlySet<CanalId> = new Set<CanalId>(['dingtalk']);
+/**
+ * rc.46: o WeCom (企业微信) pelo robô inteligente (Bot ID e Secret, WebSocket de saída) e o WeChat pessoal (微信, iLink,
+ * login por QR na tela; experimental, com o consentimento da pessoa). Nos dois, sem botões nem edição; a imagem dos
+ * visuais vai só no WeCom (no WeChat pessoal, menos envio é menos risco para a conta).
+ */
+const SEM_BOTOES: ReadonlySet<CanalId> = new Set<CanalId>([...CANAIS_DE_APP, 'weixin']);
+const SEM_IMAGEM: ReadonlySet<CanalId> = new Set<CanalId>(['dingtalk', 'weixin']);
 /** O id da conta e da conversa no canal: número (Telegram, Discord) ou texto do Feishu (ou_…, oc_…) e do DingTalk ($:LWCP…, cid…). */
 const FORMATO_ID: Record<NomeCanal, RegExp> = {
   telegram: /^[0-9]{3,30}$/, discord: /^[0-9]{3,30}$/,
   feishu: /^[A-Za-z0-9_-]{3,100}$/, dingtalk: /^[A-Za-z0-9_$:+/=.-]{3,120}$/,
+  wecom: /^[A-Za-z0-9_@.-]{1,64}$/, weixin: /^[A-Za-z0-9_@.:-]{3,120}$/,
 };
 const FORMATO_CHAT: Record<NomeCanal, RegExp> = {
   telegram: /^-?[0-9]{3,30}$/, discord: /^-?[0-9]{3,30}$/,
   feishu: /^[A-Za-z0-9_-]{3,100}$/, dingtalk: /^[A-Za-z0-9_$:+/=.-]{3,120}$/,
+  wecom: /^[A-Za-z0-9_@.-]{1,64}$/, weixin: /^[A-Za-z0-9_@.:-]{3,120}$/,
 };
 /** A capacidade do plugin que fala com o Feishu e o DingTalk (rc.45). */
 const CAPACIDADE_CANAIS_APP = 'canais_feishu_dingtalk';
+/** A do WeCom e do WeChat pessoal (rc.46). */
+const CAPACIDADE_CANAIS_RC46 = 'canais_wecom_weixin';
+/** O canal pede uma versão do plugin mais nova que a dos canais de sempre? */
+const capacidadeDoCanal = (canal: NomeCanal): string | null => (CANAIS_RC46.includes(canal) ? CAPACIDADE_CANAIS_RC46 : CANAIS_DE_APP.includes(canal) ? CAPACIDADE_CANAIS_APP : null);
+/** A versão do texto do risco do WeChat pessoal (web: Conexões › WeChat): mudou o texto, pede o consentimento de novo. */
+export const WEIXIN_RISCO_VERSAO = 1;
 /** O App ID e o App Secret de cada aplicativo (os mesmos formatos do plugin). */
 const FORMATO_APP: Partial<Record<NomeCanal, { id: RegExp; segredo: RegExp }>> = {
   feishu: { id: /^cli_[A-Za-z0-9]{8,40}$/, segredo: /^[A-Za-z0-9]{16,64}$/ },
   dingtalk: { id: /^[A-Za-z0-9_-]{8,64}$/, segredo: /^[A-Za-z0-9_-]{16,128}$/ },
+  // o Bot ID e o Secret do robô inteligente do WeCom (os mesmos formatos do plugin)
+  wecom: { id: /^[A-Za-z0-9_-]{8,64}$/, segredo: /^[A-Za-z0-9_-]{16,128}$/ },
 };
 /** Canal local (sem motor): um remetente liberado do número da equipe, `whatsapp:<workspace>:<conta>:<telefone>`. */
 export type CanalLocal = `whatsapp:${string}`;
@@ -777,8 +792,9 @@ export class Canais {
     if (comCanais) { try { doMotor = await c!.canais!(); } catch { doMotor = null; } }
     const out = {} as Record<NomeCanal, Record<string, unknown>>;
     for (const canal of CANAIS) {
-      // o Feishu e o DingTalk pedem o plugin da rc.45 (com os pacotes deles na imagem)
-      const disponivel = comCanais && (!CANAIS_DE_APP.includes(canal) || !!caps?.includes(CAPACIDADE_CANAIS_APP));
+      // o Feishu e o DingTalk pedem o plugin da rc.45 (com os pacotes deles na imagem); o WeCom e o WeChat, o da rc.46
+      const precisa = capacidadeDoCanal(canal);
+      const disponivel = comCanais && (!precisa || !!caps?.includes(precisa));
       const v = this.vinculo(userId, canal);
       const bot = !!this.d.db.get('SELECT 1 AS x FROM canais_bots WHERE user_id = ? AND canal = ?', userId, canal);
       const m = doMotor?.[canal];
@@ -789,6 +805,8 @@ export class Canais {
         disponivel, ...(disponivel ? {} : { motivo: caps ? 'versao' : 'motor' }), bot: configurado, conexao,
         ...(m?.erro === 'telegram_token_invalid' || /unauthorized|invalid_token|login|credential|app_secret|auth/i.test(m?.erro ?? '') ? { codigoRecusado: true } : {}),
         ligado: v ? { nome: v.nome && v.nome !== CLOSED_VALUE ? v.nome : null, desde: v.created_at, avisos: Number(v.avisos) === 1 } : null,
+        // o WeChat pessoal é experimental: a tela mostra o risco e pede o consentimento antes do QR
+        ...(canal === 'weixin' ? { experimental: true, riscoVersao: WEIXIN_RISCO_VERSAO } : {}),
       };
     }
     return out;
@@ -799,6 +817,7 @@ export class Canais {
    */
   async guardarBot(userId: string, ws: string, canal: NomeCanal, b: { token?: string; appId?: string; appSecret?: string; dominio?: 'feishu' | 'lark' }): Promise<void> {
     let cred: CredencialCanal;
+    if (canal === 'weixin') throw new HttpError(400, 'qr', 'O WeChat pessoal liga pelo QR, não por um código colado.');
     const app = FORMATO_APP[canal];
     if (app) {
       const id = String(b.appId ?? '').trim(); const segredo = String(b.appSecret ?? '').trim();
@@ -810,7 +829,8 @@ export class Canais {
       cred = { token: t };
     }
     const c = this.exigirControle(ws);
-    if (CANAIS_DE_APP.includes(canal) && !(await this.d.capacidades(ws).catch(() => null))?.includes(CAPACIDADE_CANAIS_APP)) {
+    const precisa = capacidadeDoCanal(canal);
+    if (precisa && !(await this.d.capacidades(ws).catch(() => null))?.includes(precisa)) {
       throw new HttpError(409, 'motor', 'A equipe precisa estar ligada (e atualizada) para isso.');
     }
     try { await c.setCanal!(canal, cred); } catch (e) { this.erroDaTela(e); }
@@ -819,6 +839,37 @@ export class Canais {
       this.esquecer(userId, canal);
     });
     this.avisarTela(userId);
+  }
+  /**
+   * rc.46: o login do WeChat pessoal pelo QR. Começar pede o consentimento explícito (a Tencent pode limitar ou bloquear
+   * a conta; a tela mostra o aviso) e fica na auditoria; a ponte pede o QR ao iLink e acompanha. Aqui o endereço do QR
+   * vira a imagem (o navegador não fala com a Tencent) e o token da conta nunca passa: fica no cofre do motor.
+   */
+  async weixinQr(userId: string, ws: string, acao: 'iniciar' | 'estado' | 'cancelar', consentimento?: { aceito: boolean; versao: number }): Promise<{ estado: LoginQrMotor['estado']; qr: string | null; expiraEm: number; erro: string | null }> {
+    const c = this.exigirControle(ws);
+    if (!c.weixinQr || !(await this.d.capacidades(ws).catch(() => null))?.includes(CAPACIDADE_CANAIS_RC46)) {
+      throw new HttpError(409, 'motor', 'A equipe precisa estar ligada (e atualizada) para isso.');
+    }
+    if (acao === 'iniciar') {
+      if (consentimento?.aceito !== true || consentimento.versao !== WEIXIN_RISCO_VERSAO) {
+        throw new HttpError(400, 'consentimento', 'Para ligar o WeChat pessoal, confirme que entendeu o risco para a conta.');
+      }
+      audit(this.d.db, this.d.bus, { workspaceId: ws, actorType: 'user', actorId: userId, action: 'canal.weixin.consentimento', targetType: 'user', targetId: userId,
+        evidence: { canal: 'weixin', versao: WEIXIN_RISCO_VERSAO, risco: 'a Tencent pode limitar ou bloquear a conta' }, result: 'consentimento para ligar o WeChat pessoal (experimental)' });
+    }
+    let r: LoginQrMotor;
+    try { r = await c.weixinQr(acao); } catch (e) { this.erroDaTela(e); }
+    if (r.estado === 'confirmado') {
+      this.d.db.run('INSERT INTO canais_bots (user_id, canal, workspace_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, canal) DO NOTHING', userId, 'weixin', ws, now());
+    }
+    let qr: string | null = null;
+    // só o endereço do QR da própria Tencent (liteapp.weixin.qq.com/…) vira imagem: outro texto não chega à tela
+    if (r.qr && (r.estado === 'aguardando' || r.estado === 'escaneado') && /^https:\/\/[A-Za-z0-9.-]+\.qq\.com\/[\x21-\x7e]{1,600}$/.test(r.qr)) {
+      const mod: any = await import('qrcode');
+      const toDataURL = mod.toDataURL ?? mod.default?.toDataURL;
+      try { qr = await toDataURL(r.qr, { margin: 1, width: 280, errorCorrectionLevel: 'M' }); } catch { qr = null; }
+    }
+    return { estado: r.estado, qr, expiraEm: r.expiraEm, erro: r.erro };
   }
   /** Confirma o código que o bot mandou à pessoa (o pareamento do próprio gateway): a conversa fica ligada a ela. */
   async parear(userId: string, ws: string, canal: NomeCanal, codigo: string): Promise<void> {
