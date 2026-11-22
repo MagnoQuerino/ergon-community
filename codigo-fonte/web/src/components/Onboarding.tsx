@@ -6,6 +6,7 @@ import type { AiStatus, OnboardingOptions, OnboardingResult } from '../lib/types
 import { ErgonLogo, Loading, PhraseLoader } from '../brand/Brand.tsx';
 import { AcordandoIa, AiAccounts, sortear } from './AiAccounts.tsx';
 import { Icon } from './Icon.tsx';
+import { daSemente, textoDoPrimeiroAcesso } from '../i18n/sementes.ts';
 // o Ergon AI, a melhor escolha (módulo do Ergon World, se estiver nesta instalação)
 const eaiMod = Object.values(import.meta.glob<{ default: ComponentType }>('../views/world/ErgonAiConexoes.tsx'))[0];
 const ErgonAi = eaiMod ? lazy(eaiMod) : null;
@@ -140,7 +141,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
               {opts.uses.map((u) => (
                 <button key={u.key} className={`onb__opt ${f.use === u.key ? 'is-on' : ''}`} onClick={() => pickUse(u.key)} aria-pressed={f.use === u.key}>
                   <span className="onb__ico"><Icon name={USE_ICON[u.key] ?? 'plus'} size={20} /></span>
-                  <span className="onb__opt-txt"><b>{u.label}</b><small>{u.hint}</small></span>
+                  <span className="onb__opt-txt"><b>{textoDoPrimeiroAcesso(`uso.${u.key}.rotulo`, u.label)}</b><small>{textoDoPrimeiroAcesso(`uso.${u.key}.dica`, u.hint)}</small></span>
                 </button>
               ))}
             </div>
@@ -153,7 +154,7 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
             <p className="muted">{personal ? t('ajuda.onb.nichoPessoalIntro') : t('ajuda.onb.nichoIntro')}</p>
             <div className="onb__chips" role="radiogroup" aria-label={t('ajuda.onb.nichoAria')}>
               {opts.niches.map((n) => (
-                <button key={n.key} role="radio" aria-checked={f.niche === n.key} className={`onb__chip ${f.niche === n.key ? 'is-on' : ''}`} onClick={() => { setF({ ...f, niche: n.key }); setErr(null); }}>{n.label}</button>
+                <button key={n.key} role="radio" aria-checked={f.niche === n.key} className={`onb__chip ${f.niche === n.key ? 'is-on' : ''}`} onClick={() => { setF({ ...f, niche: n.key }); setErr(null); }}>{textoDoPrimeiroAcesso(`nicho.${n.key}`, n.label)}</button>
               ))}
             </div>
             {f.niche === 'outro' && (
@@ -202,12 +203,12 @@ export function Onboarding({ displayName, workspaceName, redo, onFinish, onCance
         ) : result && (
           <section>
             <h2 id="onb-title" className="onb__title">{t('ajuda.onb.prontaTitulo')}</h2>
-            <p className="onb__preset"><b>{result.preset.title}</b> · {result.preset.summary}</p>
+            <p className="onb__preset"><b>{textoDoPrimeiroAcesso(`preset.${result.preset.key}.titulo`, result.preset.title)}</b> · {textoDoPrimeiroAcesso(`preset.${result.preset.key}.resumo`, result.preset.summary)}</p>
             <div className="onb__team">
               {bySector.map((s) => (
                 <div key={s.name} className="onb__sector">
-                  <h4>{s.name}</h4>
-                  <ul>{s.members.map((m) => <li key={m.id}><b>{m.name}</b> <span className="muted">{m.role}</span></li>)}</ul>
+                  <h4>{daSemente(s.name)}</h4>
+                  <ul>{s.members.map((m) => <li key={m.id}><b>{m.name}</b> <span className="muted">{daSemente(m.role)}</span></li>)}</ul>
                 </div>
               ))}
             </div>

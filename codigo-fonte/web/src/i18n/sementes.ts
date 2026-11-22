@@ -47,16 +47,35 @@ const SEMENTES: Readonly<Record<string, Chave>> = {
 const BIOS: ReadonlyMap<string, string> = new Map(Object.entries(PT_DIC.equipe as Record<string, unknown>)
   .filter(([k, v]) => k.startsWith('semente.bio.') && typeof v === 'string').map(([k, v]) => [v as string, `equipe.${k}`]));
 
+/**
+ * rc.47: as equipes de nicho (team-presets.ts): os setores (nome e descrição), as funções de cada personagem e o primeiro
+ * passo, que o servidor grava em português ao montar a equipe; e as perguntas do primeiro acesso (uso e área). O
+ * português está no dicionário (equipe.preset.*, equipe.uso.*, equipe.nicho.*); o mesmo texto em dois presets cai na
+ * mesma tradução.
+ */
+const PRESETS: ReadonlyMap<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const [k, v] of Object.entries(PT_DIC.equipe as Record<string, unknown>)) {
+    if (typeof v === 'string' && /^(preset|uso|nicho)\./.test(k) && !m.has(v)) m.set(v, `equipe.${k}`);
+  }
+  return m;
+})();
+/** A pergunta do primeiro acesso no idioma da tela (o rótulo que o servidor manda, em português, como reserva). */
+export function textoDoPrimeiroAcesso(chave: `uso.${string}.rotulo` | `uso.${string}.dica` | `nicho.${string}` | `preset.${string}.titulo` | `preset.${string}.resumo`, reserva: string): string {
+  return (PT_DIC.equipe as Record<string, unknown>)[chave] === reserva ? tt(`equipe.${chave}`) : reserva;
+}
+
 /** O texto no idioma da tela, se for o de fábrica; senão, como está (o que a pessoa escreveu nunca é trocado). */
 export function daSemente(texto: string): string;
 export function daSemente(texto: string | null | undefined): string | null | undefined;
 export function daSemente(texto: string | null | undefined): string | null | undefined {
   if (!texto) return texto;
-  const k = SEMENTES[texto] ?? BIOS.get(texto);
+  const k = SEMENTES[texto] ?? BIOS.get(texto) ?? PRESETS.get(texto);
   return k ? t(k as never) : texto;
 }
 
 /** Para o teste: o português de fábrica que esta tabela reconhece. */
+export const TEXTOS_DOS_PRESETS: readonly string[] = [...PRESETS.keys()];
 export const TEXTOS_DE_FABRICA: readonly string[] = Object.keys(SEMENTES);
 
 // ——— rc.45: a biblioteca de rotinas (server/src/services/routine-catalog.ts) e o horário delas fora do português ———

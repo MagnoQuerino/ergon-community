@@ -57,3 +57,24 @@ test('a história (bio) dos personagens de fábrica é a mesma do servidor, com 
     assert.ok(E[`semente.bio.${c.key}`] && Z[`semente.bio.${c.key}`], c.key);
   }
 });
+
+test('rc.47: as equipes de nicho e as perguntas do primeiro acesso são as do servidor, com tradução em en, zh-CN e hi', async () => {
+  const { PRESETS, USES, NICHES } = await import('../../../server/src/services/team-presets.ts');
+  const { pt } = await import('./pt/index.ts');
+  const P = pt.equipe as Record<string, unknown>;
+  const esperado: Record<string, string> = {};
+  for (const u of USES) { esperado[`uso.${u.key}.rotulo`] = u.label; esperado[`uso.${u.key}.dica`] = u.hint; }
+  for (const n of NICHES) esperado[`nicho.${n.key}`] = n.label;
+  for (const p of PRESETS) {
+    esperado[`preset.${p.key}.titulo`] = p.title; esperado[`preset.${p.key}.resumo`] = p.summary; esperado[`preset.${p.key}.passo`] = p.firstStep;
+    for (const [sk, [nome, desc]] of Object.entries(p.sectors) as Array<[string, [string, string]]>) { esperado[`preset.${p.key}.setor.${sk}`] = nome; esperado[`preset.${p.key}.setorDesc.${sk}`] = desc; }
+    for (const a of p.agents) esperado[`preset.${p.key}.papel.${a.char}`] = a.role;
+  }
+  for (const [k, v] of Object.entries(esperado)) assert.equal(P[k], v, `o português de equipe.${k} não é mais o do servidor`);
+  const doDicionario = Object.keys(P).filter((k) => /^(preset|uso|nicho)\./.test(k) && k !== 'preset.geral.titulo' && k !== 'preset.geral.resumo');
+  assert.deepEqual(doDicionario.sort(), Object.keys(esperado).sort(), 'chave de preset sem texto no servidor');
+  for (const [nome, d] of [['en', en], ['zh-CN', zhCN], ['hi', hi]] as const) {
+    const area = (d.equipe ?? {}) as Record<string, unknown>;
+    for (const k of Object.keys(esperado)) assert.ok(typeof area[k] === 'string' && (area[k] as string).trim(), `falta em ${nome}: equipe.${k}`);
+  }
+});
