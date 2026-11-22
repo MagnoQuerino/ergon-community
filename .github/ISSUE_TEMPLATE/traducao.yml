@@ -1,0 +1,21 @@
+name: Tradução
+description: Novo idioma ou revisão de uma tradução.
+labels: [traducao]
+body:
+  - type: input
+    id: idioma
+    attributes: { label: Idioma, placeholder: "ex.: español (es), français (fr)" }
+    validations: { required: true }
+  - type: dropdown
+    id: tipo
+    attributes: { label: O que é, options: ["Idioma novo", "Revisão de idioma existente", "Erro pontual de tradução"] }
+    validations: { required: true }
+  - type: textarea
+    id: escopo
+    attributes: { label: Quais áreas ou telas, description: "Para idioma novo: quais áreas você pretende pegar primeiro." }
+  - type: checkboxes
+    id: nativo
+    attributes:
+      label: Fluência
+      options:
+        - label: Sou falante nativo ou fluente neste idioma

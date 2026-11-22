@@ -1,25 +1,16 @@
 # Contribuir
 
-Obrigado pelo interesse no Ergon Community.
+Obrigado pelo interesse no Ergon Community. O manual completo está em **[docs/COLABORAR.md](../docs/COLABORAR.md)**:
+bugs, sugestões, traduções, pacotes, código, pontes e integrações, o que acontece depois da aprovação e o termo de
+contribuição.
 
-## Modelos da comunidade (temas, efeitos, pets, equipes)
+Resumo:
 
-É o jeito mais simples de contribuir e não exige programar: veja [docs/LOJA.md](../docs/LOJA.md).
-
-## Código
-
-1. Abra uma issue descrevendo o problema ou a ideia antes de um pull request grande.
-2. Prepare o ambiente: Node.js 24, Podman e `npm ci` na pasta `codigo-fonte/` (os comandos abaixo rodam nela).
-3. Antes de enviar: `npm run typecheck`, `npm test` e, se mexeu no motor ou no Dockerfile, `podman build --target test .`.
-4. Mantenha o estilo do código ao redor: TypeScript sem dependências novas sem necessidade, todo texto de tela em
-   português e em inglês, nos arquivos de idioma (web/src/i18n), sem chamadas de rede escondidas (nada sai do
-   computador sem a pessoa pedir).
-5. Nunca inclua segredos, tokens ou dados pessoais em código, testes ou capturas. `node scripts/scan-segredos.mjs`
-   confere os arquivos versionados.
+- **Bug ou sugestão:** pelo app (Ajuda › Relatar um problema) ou uma issue com o modelo certo.
+- **Modelos da comunidade (temas, efeitos, pets, equipes):** sem programar, veja [docs/LOJA.md](../docs/LOJA.md).
+- **Código:** issue antes de mudança grande; em `codigo-fonte/`, `npm ci`, depois `npm run typecheck`, `npm test` e
+  `node scripts/scan-segredos.mjs`; commits com `git commit -s`.
+- **Segurança:** nunca por issue pública, veja [SECURITY.md](SECURITY.md).
 
 Ao enviar uma contribuição, você concorda que ela seja distribuída sob a [PolyForm Noncommercial 1.0.0](../LICENSE) e
 autoriza os autores do Ergon a licenciá-la também em licenças comerciais.
-
-## Segurança
-
-Achou uma falha de segurança? Não abra issue pública: veja [SECURITY.md](SECURITY.md).

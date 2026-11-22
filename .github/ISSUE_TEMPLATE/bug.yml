@@ -1,0 +1,33 @@
+name: Bug
+description: Algo não funciona como deveria.
+labels: [bug, triagem]
+body:
+  - type: markdown
+    attributes:
+      value: "Não cole conversas, e-mails, chaves, tokens nem dados pessoais. Pelo app (Ajuda › Relatar um problema) o relato já sai limpo."
+  - type: input
+    id: versao
+    attributes: { label: Versão, description: "Ajuda › Sobre (ex.: 1.1.0-rc.49)" }
+    validations: { required: true }
+  - type: dropdown
+    id: sistema
+    attributes: { label: Sistema, options: [Windows, Linux, macOS, Outro] }
+    validations: { required: true }
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      description: Mexeu no código, instalou pontes ou pacotes não verificados?
+      options: ["Oficial, sem modificações", "Modificada, mas o problema se repete com tudo desligado", "Modificada"]
+    validations: { required: true }
+  - type: textarea
+    id: passos
+    attributes: { label: Passos para reproduzir, placeholder: "1. Abri…\n2. Cliquei em…" }
+    validations: { required: true }
+  - type: textarea
+    id: esperado
+    attributes: { label: O que você esperava e o que aconteceu }
+    validations: { required: true }
+  - type: textarea
+    id: erro
+    attributes: { label: Mensagem de erro (sem segredos), render: text }
