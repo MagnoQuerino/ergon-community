@@ -106,9 +106,8 @@ Mexeu no motor ou no Dockerfile: `podman build --target test .` também.
 
 ### O que acontece depois da aprovação
 
-O código em `codigo-fonte/` é publicado a partir do repositório de desenvolvimento do Ergon. Por isso a equipe
-**incorpora** a sua mudança lá (com o seu nome como coautor, `Co-authored-by`) e ela volta para cá na versão seguinte.
-O seu PR é fechado com a mensagem "incorporado na versão X", e o seu nome aparece nas Novidades dela.
+A equipe mescla o PR no `main` e a mudança sai na versão seguinte (as versões de teste saem com frequência). O seu
+nome aparece nas Novidades dela. Se o PR for recusado, a resposta diz o porquê e, quando der, o que mudaria a decisão.
 
 ## Pontes e integrações
 
