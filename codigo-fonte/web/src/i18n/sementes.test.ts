@@ -78,3 +78,33 @@ test('rc.47: as equipes de nicho e as perguntas do primeiro acesso são as do se
     for (const k of Object.keys(esperado)) assert.ok(typeof area[k] === 'string' && (area[k] as string).trim(), `falta em ${nome}: equipe.${k}`);
   }
 });
+
+test('rc.47: a ficha da biblioteca (entrega, exame, aprovação, exemplo, entrada, campos, fontes, o que precisa) é a do servidor, com tradução em en, zh-CN e hi', async () => {
+  const { CATALOG, SOURCES, NEED_LABEL } = await import('../../../server/src/services/routine-catalog.ts');
+  const { pt } = await import('./pt/index.ts');
+  const { setIdioma } = await import('./index.ts');
+  const { fichaDaRotina } = await import('./sementes.ts');
+  const P = pt.rotinas as Record<string, unknown>;
+  const dics = [en, zhCN, hi].map((d) => (d.rotinas ?? {}) as Record<string, unknown>);
+  const confere = (k: string, v: string | undefined) => {
+    if (v === undefined) return;
+    assert.equal(P[k], v, k);
+    for (const d of dics) assert.ok(typeof d[k] === 'string' && d[k] !== v, `sem tradução: ${k}`);
+  };
+  for (const r of CATALOG) {
+    const c = `catalogo.${r.key}.`;
+    confere(c + 'entrega', r.produces); confere(c + 'examina', r.examines); confere(c + 'aprovacao', r.approvals); confere(c + 'exemplo', r.sample);
+    confere(c + 'entradaTexto', r.input?.text?.label); confere(c + 'entradaTextoEx', r.input?.text?.placeholder); confere(c + 'entradaArquivos', r.input?.files?.label);
+    for (const p of r.params ?? []) { confere(`${c}param.${p.key}`, p.label); if (p.placeholder && !/^https?:/.test(p.placeholder)) confere(`${c}param.${p.key}.ex`, p.placeholder); confere(`${c}param.${p.key}.dica`, p.hint); }
+  }
+  for (const [k, v] of Object.entries(SOURCES)) confere(`fonte.${k}`, v as string);
+  for (const [k, v] of Object.entries(NEED_LABEL)) if (!['microsoft', 'google', 'whatsapp'].includes(k)) confere(`precisa.${k}`, v as string);
+  // e a tela usa: em hindi, a ficha de fábrica sai inteira em hindi; um texto mudado pela pessoa fica como está
+  const r = CATALOG.find((x: { key: string }) => x.key === 'analista-planilhas')!;
+  await setIdioma('hi');
+  try {
+    const f = fichaDaRotina({ key: r.key, produces: r.produces, examines: r.examines, approvals: 'outro texto', sample: r.sample, sources: [SOURCES.planilhas as string], needs: [{ id: 'planilhas', label: NEED_LABEL.planilhas as string }], input: r.input, params: r.params });
+    assert.match(f.produces, /[ऀ-ॿ]/); assert.match(f.sample!, /₹/); assert.equal(f.approvals, 'outro texto');
+    assert.match(f.sources[0], /[ऀ-ॿ]/); assert.match(f.needs![0].label, /[ऀ-ॿ]/); assert.match(f.input!.text!.label, /[ऀ-ॿ]/);
+  } finally { await setIdioma('pt-BR'); }
+});

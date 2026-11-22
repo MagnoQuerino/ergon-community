@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { beneficioDaRotina, categoriaDaRotina, horarioDaRotina, nomeDaRotina } from '../i18n/sementes.ts';
+import { beneficioDaRotina, categoriaDaRotina, fichaDaRotina, horarioDaRotina, nomeDaRotina, rotinaNaTela } from '../i18n/sementes.ts';
 import { api, errMsg, requestId } from '../lib/api.ts';
 import { useResource } from '../lib/live.ts';
 import { keepTyped, useSurface } from '../lib/surface.ts';
@@ -86,9 +86,9 @@ export function RotinasView({ coord, onOpenAgent, onGo }: { coord: { id: string;
           </button>
         ))}
       </div>
-      {shown === 'biblioteca' && (lib.data ? <Library lib={lib.data} coordName={coordName} onGo={onGo} onInstalled={(id) => openSetup(id, true)} /> : <Loading error={lib.error} />)}
-      {shown === 'minhas' && (mine.data ? <Mine list={mine.data} focusId={focusId} coord={coord ?? null} onOpenAgent={onOpenAgent} onSetup={(id) => openSetup(id)} reload={mine.reload} onLibrary={() => setTab('biblioteca')} /> : <Loading error={mine.error} />)}
-      {shown === 'historico' && <History routines={mine.data ?? []} onOpenAgent={onOpenAgent} />}
+      {shown === 'biblioteca' && (lib.data ? <Library lib={{ ...lib.data, routines: lib.data.routines.map((m) => fichaDaRotina(m)) }} coordName={coordName} onGo={onGo} onInstalled={(id) => openSetup(id, true)} /> : <Loading error={lib.error} />)}
+      {shown === 'minhas' && (mine.data ? <Mine list={mine.data.map(rotinaNaTela)} focusId={focusId} coord={coord ?? null} onOpenAgent={onOpenAgent} onSetup={(id) => openSetup(id)} reload={mine.reload} onLibrary={() => setTab('biblioteca')} /> : <Loading error={mine.error} />)}
+      {shown === 'historico' && <History routines={(mine.data ?? []).map(rotinaNaTela)} onOpenAgent={onOpenAgent} />}
     </div>
   );
 }
@@ -757,7 +757,9 @@ function RoutineSetup({ id, fresh, onBack, onGo }: { id: string; fresh: boolean;
   const [dialog, setDialog] = useState(false);
   // todos os hooks acima: abaixo daqui pode haver retorno antecipado
   if (!st.data) return <div className="page"><Loading error={st.error} /></div>;
-  const { routine: r, template: tpl, setup: s, firstRun } = st.data;
+  const { setup: s, firstRun } = st.data;
+  const r = rotinaNaTela(st.data.routine);
+  const tpl = st.data.template ? fichaDaRotina(st.data.template, st.data.routine.template) : st.data.template;
   const agent = s?.agent ?? null;
   const preparing = !s || s.status === 'studying' || s.status === 'adapting' || !minDone;
   const asking = s?.status === 'asking' && minDone;

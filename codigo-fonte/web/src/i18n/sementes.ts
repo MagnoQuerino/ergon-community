@@ -98,6 +98,67 @@ export function categoriaDaRotina(chave: string, rotulo: string): string {
   const k = `catalogo.categoria.${chave}`;
   return ROT[k] === rotulo ? tt(`rotinas.${k}`) : rotulo;
 }
+/** rc.47: um texto da ficha da rotina (catalogo.<modelo>.<campo>, fonte.<id>, precisa.<id>) traduzido, se for o de fábrica. */
+function daFicha(k: string, texto: string): string;
+function daFicha(k: string, texto: string | undefined): string | undefined;
+function daFicha(k: string, texto: string | undefined): string | undefined {
+  return texto !== undefined && ROT[k] === texto ? tt(`rotinas.${k}`) : texto;
+}
+const FONTE_POR_TEXTO = new Map(Object.keys(ROT).filter((k) => k.startsWith('fonte.')).map((k) => [ROT[k] as string, k]));
+/** Uma fonte da rotina ("Tarefas em andamento e em revisão", que o servidor escreve em português) no idioma da tela. */
+export function fonteDaRotina(texto: string): string {
+  const k = FONTE_POR_TEXTO.get(texto);
+  return k ? tt(`rotinas.${k}`) : texto;
+}
+/** O que a rotina pede ao executar (os rótulos de fábrica traduzidos). */
+export function entradaDaRotina<T extends { text?: { label: string; placeholder: string }; files?: { label: string } }>(modelo: string | null | undefined, e: T): T {
+  if (!modelo) return e;
+  const c = `catalogo.${modelo}.`;
+  return {
+    ...e,
+    ...(e.text ? { text: { ...e.text, label: daFicha(c + 'entradaTexto', e.text.label), placeholder: daFicha(c + 'entradaTextoEx', e.text.placeholder) } } : {}),
+    ...(e.files ? { files: { ...e.files, label: daFicha(c + 'entradaArquivos', e.files.label) } } : {}),
+  };
+}
+/** Os campos que a rotina acompanha (rótulo, exemplo e dica de fábrica traduzidos). */
+export function parametrosDaRotina<T extends { key: string; label: string; placeholder?: string; hint?: string }>(modelo: string | null | undefined, ps: T[]): T[] {
+  if (!modelo) return ps;
+  return ps.map((p) => {
+    const c = `catalogo.${modelo}.param.${p.key}`;
+    return { ...p, label: daFicha(c, p.label), placeholder: daFicha(c + '.ex', p.placeholder), hint: daFicha(c + '.dica', p.hint) };
+  });
+}
+/** A ficha de uma rotina da biblioteca no idioma da tela: entrega, o que examina, aprovação, exemplo, fontes, o que precisa. */
+export function fichaDaRotina<T extends {
+  key?: string; produces: string; examines?: string; approvals: string; sample?: string | null; sources: string[];
+  needs?: Array<{ id: string; label: string }>; input?: Parameters<typeof entradaDaRotina>[1]; params?: Array<{ key: string; label: string; placeholder?: string; hint?: string }>;
+}>(m: T, modelo: string | null | undefined = m.key): T {
+  if (idiomaAtual() === IDIOMA_PADRAO || !modelo) return m;
+  const c = `catalogo.${modelo}.`;
+  return {
+    ...m,
+    produces: daFicha(c + 'entrega', m.produces), approvals: daFicha(c + 'aprovacao', m.approvals),
+    ...(m.examines !== undefined ? { examines: daFicha(c + 'examina', m.examines) } : {}),
+    ...(m.sample ? { sample: daFicha(c + 'exemplo', m.sample) } : {}),
+    sources: m.sources.map(fonteDaRotina),
+    ...(m.needs ? { needs: m.needs.map((n) => ({ ...n, label: daFicha(`precisa.${n.id}`, n.label) })) } : {}),
+    ...(m.input ? { input: entradaDaRotina(modelo, m.input) } : {}),
+    ...(m.params ? { params: parametrosDaRotina(modelo, m.params) } : {}),
+  };
+}
+/** Uma rotina instalada no idioma da tela: o que pede ao executar, o que acompanha e as fontes. */
+export function rotinaNaTela<T extends {
+  template: string | null; input: Parameters<typeof entradaDaRotina>[1] | null;
+  paramSpecs: Array<{ key: string; label: string; placeholder?: string; hint?: string }>; config: { sourceLabels: string[] };
+}>(r: T): T {
+  if (idiomaAtual() === IDIOMA_PADRAO) return r;
+  return {
+    ...r,
+    input: r.input ? entradaDaRotina(r.template, r.input) : r.input,
+    paramSpecs: parametrosDaRotina(r.template, r.paramSpecs),
+    config: { ...r.config, sourceLabels: r.config.sourceLabels.map(fonteDaRotina) },
+  };
+}
 const LOCAL: Record<string, string> = { en: 'en-US', 'en-IN': 'en-IN', 'zh-CN': 'zh-CN', hi: 'hi-IN', 'pt-BR': 'pt-BR' };
 /**
  * O horário de uma rotina ("Seg a sex às 17:30", que o servidor escreve em português) no idioma da tela, a partir do
