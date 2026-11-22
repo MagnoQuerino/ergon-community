@@ -8,6 +8,7 @@ import type { Agent, AgentLite, AppState, BoardSummary, BoardView, RecentConvers
 import { contactsOf } from '../lib/conversations.ts';
 import { Marks } from '../components/ConversationDock.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
+import { SalaPanel, SalasSecao } from '../components/Salas.tsx';
 import { DecisionsPanel } from '../components/DecisionsPanel.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { TaskDetail } from '../components/TaskDetail.tsx';
@@ -53,6 +54,9 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
   useEffect(() => { setSector(null); setQ(''); }, [scope]);
   const [tab, setTab] = useState<'decisoes' | 'quadro'>(() => (state.decisionsPending ? 'decisoes' : 'quadro'));
   const [openTask, setOpenTask] = useState<string | null>(null);
+  // a sala aberta (rc.49): as conversas em grupo também no modo foco, no lugar da conversa com um agente
+  const [sala, setSala] = useState<{ id: string; topico: string | null; foco: string | null } | null>(null);
+  useEffect(() => { setSala(null); }, [scope]);
   // ponto de não lida e marca de prioridade de cada colega (as mesmas da lista de Conversas), com o colega embutido
   const recent = useResource<RecentConversation[]>('/api/conversations/recent', ['messages.changed', 'conversations.changed', 'proposals.changed', 'agents.changed']);
   const contacts = useMemo(() => contactsOf(recent.data ?? []), [recent.data]);
@@ -108,7 +112,7 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
   const chip = (a: Who, fixed = false) => {
     const m = marks.get(a.id); const run = runOf(a);
     return (
-      <button key={a.id} className={`foco-agent ${agent?.id === a.id ? 'is-on' : ''}`} onClick={() => { onSelect(a.id); if (size === 'narrow') setPane('conversa'); }} aria-current={agent?.id === a.id ? 'true' : undefined}>
+      <button key={a.id} className={`foco-agent ${!sala && agent?.id === a.id ? 'is-on' : ''}`} onClick={() => { setSala(null); onSelect(a.id); if (size === 'narrow') setPane('conversa'); }} aria-current={!sala && agent?.id === a.id ? 'true' : undefined}>
         <AgentAvatar agent={a} size={28} />
         <span className="foco-agent__txt"><b>{a.name}{fixed && <Icon name="lock" size={11} />}</b><small>{daSemente(a.role)}</small></span>
         {m && <Marks unread={a.id === agent?.id ? 0 : m.unread} priority={m.priority ?? (m.waiting ? 'alta' : null)} reason={m.priorityReason ?? (m.waiting ? t('cidade.foco.pedidosEsperando', { n: m.waiting }) : null)} />}
@@ -124,7 +128,7 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
         <div className="foco__switch">
           <div className="foco__tabs" role="tablist" aria-label={t('cidade.foco.areas')}>
             {size === 'narrow' && tabBtn(pane === 'equipe', <><Icon name="users" size={14} /> {t('cidade.foco.equipe')}</>, () => setPane('equipe'), 'eq')}
-            {tabBtn(pane !== 'lado' && (size === 'mid' || pane === 'conversa'), <><Icon name="chat" size={14} /> {agent?.name ?? t('cidade.foco.conversa')}</>, () => setPane('conversa'), 'cv')}
+            {tabBtn(pane !== 'lado' && (size === 'mid' || pane === 'conversa'), <><Icon name={sala ? 'users' : 'chat'} size={14} /> {sala ? t('cidade.foco.conversa') : agent?.name ?? t('cidade.foco.conversa')}</>, () => setPane('conversa'), 'cv')}
             {tabBtn(pane === 'lado' && tab === 'decisoes', <><Icon name="bell" size={14} /> {t('cidade.foco.aguardando')}{pending ? <span className="foco__count">{pending}</span> : null}</>, () => pickSide('decisoes'), 'dc')}
             {tabBtn(pane === 'lado' && tab === 'quadro', <><Icon name="layers" size={14} /> {t('cidade.foco.quadro')}</>, () => pickSide('quadro'), 'qd')}
           </div>
@@ -151,6 +155,7 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
         ) : (
           <>
             {coord && <div className="foco__group"><span className="foco__group-name">{t('cidade.foco.coordenador')}</span>{chip(coord, true)}</div>}
+            <div className="foco__group foco__salas"><SalasSecao atual={sala?.id ?? null} onAbrir={(id) => { setSala({ id, topico: null, foco: null }); if (size === 'narrow') setPane('conversa'); }} /></div>
             {talked.length > 0 && <div className="foco__group"><span className="foco__group-name">{t('cidade.foco.conversas')}</span>{talked.map((a) => chip(a))}</div>}
             {sectors.data?.items.map((s) => {
               const shown = s.sample.filter((a) => a.id !== coord?.id);
@@ -177,7 +182,10 @@ export function FocoView({ state, selectedId, onSelect, onOpenAgent, onAskCoordi
       </aside>}
 
       {show.chat && <section className="foco__chat" aria-label={t('cidade.foco.conversa')}>
-        {agent ? (
+        {sala ? (
+          <SalaPanel key={sala.id} salaId={sala.id} foco={sala.foco} topicoInicial={sala.topico} onSaiu={() => setSala(null)}
+            onIrPara={(pai, topico, foco) => setSala({ id: pai, topico, foco: foco ?? null })} />
+        ) : agent ? (
           <>
             <header className="foco__chat-head">
               <AgentAvatar agent={agent} size={36} />

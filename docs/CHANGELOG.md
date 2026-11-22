@@ -8,6 +8,8 @@
 - **Acesso total de verdade:** um cartão só, em todo lugar (Controle do computador, Liberar tudo, o pedido de um agente e o perfil do agente), com a sua senha e o prazo: 24 horas, 7 dias ou sempre. Ele libera para a equipe toda o Terminal, Executar código, Diagnóstico, o controle do computador e o Discord, e põe o seu computador em acesso total pelo mesmo prazo. Senhas, pagamentos e apagar de vez continuam pedindo você.
 - **Navegar a pedido:** peça para abrir o navegador e conduza: o agente abre na hora e segue o que você disser, passo a passo, no navegador da equipe (você acompanha ao vivo na conversa e assume quando quiser) ou no navegador do seu computador, com o acesso total.
 - **Configurações mais enxutas:** os cartões se encaixam sem buracos, os blocos grandes recolhem com um resumo no título e abrem empurrando os outros com suavidade, e Ferramentas da equipe ganhou sub-abas (Ferramentas, Modelos, Capacidades, Consumo).
+- **Salas no Modo foco:** as conversas em grupo aparecem na coluna da equipe e abrem no lugar da conversa, com tópicos e voz.
+- **Idioma num dropdown:** no menu do avatar e em Minha conta.
 - **Também:** os botões da barra da conversa e da sala ficam alinhados; textos das telas mais diretos, dizendo o que cada coisa é e faz.
 
 ## 1.1.0-rc.48 (pré-versão de teste)

@@ -33,3 +33,13 @@
 .acesso__prazo .seg { display: grid; grid-template-columns: repeat(3, 1fr); }
 .acesso-selo { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ok, var(--teal)); }
 .tools-equipe__cab { justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* rc.49: as salas também no modo foco (coluna da equipe e, aberta, no lugar da conversa) */
+.foco__salas .sala-secao { gap: 2px; }
+.foco__salas .convs__section-name { padding-inline: 0; }
+.foco__salas ul { list-style: none; margin: 0; padding: 0; }
+.foco__chat > .sala, .foco__chat > .sala-dupla { flex: 1; min-height: 0; }
+
+/* rc.49: o idioma num dropdown */
+.idioma__select { min-width: 160px; padding: 6px 28px 6px 10px; border-radius: 8px; border: 1px solid var(--line); background-color: var(--campo, var(--panel)); color: var(--ink); font: inherit; font-size: 14px; }
+.idioma--compacto .idioma__select { min-width: 0; padding-block: 4px; font-size: 13px; }
